@@ -224,6 +224,27 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _validate_explicit_broll_input(
+    source: Path, *, expected_sha256: str
+) -> tuple[Path, str]:
+    if (
+        not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in expected_sha256)
+    ):
+        raise RuntimeError("explicit_broll_sha_invalid")
+    try:
+        resolved = Path(source).resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError("explicit_broll_missing") from exc
+    if resolved.is_symlink() or not resolved.is_file():
+        raise RuntimeError("explicit_broll_invalid")
+    actual_sha = _sha256(resolved)
+    if actual_sha != expected_sha256:
+        raise RuntimeError("explicit_broll_sha_mismatch")
+    return resolved, actual_sha
+
+
 def _write_stable_json(destination: Path, payload: dict[str, Any]) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(f"{destination.suffix}.tmp")
@@ -508,6 +529,8 @@ def run_smoke(
     ffprobe_binary: str,
     fixture_name: str = "loop",
     project_name: str | None = None,
+    broll_source: Path | None = None,
+    expected_broll_sha256: str | None = None,
 ) -> dict[str, object]:
     fixture = get_long_form_fixture(fixture_name)
     narration = narration.resolve()
@@ -518,12 +541,22 @@ def run_smoke(
         expected_sec=SMOKE_DURATION_SEC,
         tolerance_sec=0.1,
     )
+    if (broll_source is None) != (expected_broll_sha256 is None):
+        raise RuntimeError("explicit_broll_contract_invalid")
+    explicit_broll_enabled = broll_source is not None
+    explicit_broll_sha: str | None = None
+    if broll_source is not None and expected_broll_sha256 is not None:
+        broll_path, explicit_broll_sha = _validate_explicit_broll_input(
+            broll_source, expected_sha256=expected_broll_sha256
+        )
     work_root.mkdir(parents=True, exist_ok=True)
     projects_root = _prepare_projects_root(work_root)
     script_path = work_root / "smoke-script.txt"
     script_path.write_text("\n".join(SOURCE_CAPTIONS), encoding="utf-8")
-    broll_path = work_root / "short-broll.mp4"
-    _create_short_broll(broll_path, ffmpeg_binary=ffmpeg_binary)
+    if not explicit_broll_enabled:
+        broll_path = work_root / "short-broll.mp4"
+        _create_short_broll(broll_path, ffmpeg_binary=ffmpeg_binary)
+    broll_source_sha = explicit_broll_sha or _sha256(broll_path)
     sfx_path = work_root / "smoke-impact.wav"
     _create_sfx(sfx_path, ffmpeg_binary=ffmpeg_binary)
     bgm_path = work_root / "smoke-bgm.wav"
@@ -577,6 +610,19 @@ def run_smoke(
             f"/api/projects/{project_id}/assets/broll-video",
             json={"source_path": str(broll_path), "title": "3 second looping smoke broll", "tags": ["smoke"]},
         ), 201)
+        broll_edit_copy = store.resolve_storage_uri(
+            project_id=project_id, storage_uri=broll_asset["storage_uri"]
+        )
+        broll_edit_copy_sha = _sha256(broll_edit_copy)
+        if broll_edit_copy_sha != broll_source_sha:
+            raise RuntimeError("explicit_broll_edit_copy_sha_mismatch")
+        narration_edit_copy = store.resolve_storage_uri(
+            project_id=project_id, storage_uri=narration_asset["storage_uri"]
+        )
+        narration_source_sha = _sha256(narration)
+        narration_edit_copy_sha = _sha256(narration_edit_copy)
+        if narration_source_sha != narration_edit_copy_sha:
+            raise RuntimeError("narration_edit_copy_sha_mismatch")
         sfx_asset = _assert_status(client.post(
             f"/api/projects/{project_id}/assets/sfx", json={"source_path": str(sfx_path)}), 201)
         bgm_asset = None
@@ -795,6 +841,10 @@ def run_smoke(
             and all(controls.get(key) == value for key, value in fixture["broll_controls"].items())
             for controls in broll_controls
         )
+        checks["broll_asset_identity_in_timeline_session"] = (
+            broll_asset["asset_id"] in json.dumps(candidate_timeline, ensure_ascii=False)
+            and broll_asset["asset_id"] in json.dumps(current_session, ensure_ascii=False)
+        )
         if bgm_asset is not None:
             audio_controls = [
                 clip.get("media_controls")
@@ -836,7 +886,7 @@ def run_smoke(
         before_overlay = _extract_frame(final_path, second=10, output_path=work_root / "before-overlay.png", ffmpeg_binary=ffmpeg_binary)
         during_overlay = _extract_frame(final_path, second=310, output_path=work_root / "during-overlay.png", ffmpeg_binary=ffmpeg_binary)
         checks["overlay_changes_frame"] = before_overlay != during_overlay
-        checks["short_broll_loops"] = (
+        checks["short_broll_loops"] = explicit_broll_enabled or (
             not fixture["broll_controls"]["loop"]
             or _short_broll_is_observably_looped(
                 final_path=final_path,
@@ -873,7 +923,7 @@ def run_smoke(
         checks["approved_sfx_in_final_and_capcut"] = (
             checks["approved_sfx_in_final_and_capcut"] and "smoke-impact.wav" in draft_content
         )
-        checks["broll_controls_in_capcut_draft"] = "short-broll.mp4" in draft_content
+        checks["broll_controls_in_capcut_draft"] = broll_path.name in draft_content
         if bgm_asset is not None:
             checks["audio_controls_in_capcut_draft"] = "smoke-bgm.wav" in draft_content
             checks["capcut_ducking_warning_preserved"] = any(
@@ -922,6 +972,22 @@ def run_smoke(
         "capcut_draft": {
             **artifact_evidence["capcut_draft"],
             "warnings": list(capcut["export"].get("notes") or []),
+        },
+        "edit_input_evidence": {
+            "explicit_broll_enabled": explicit_broll_enabled,
+            "edit_project_ref": f"projects/{project_id}",
+            "broll_asset_ref": f"assets/{broll_asset['asset_id']}",
+            "broll_storage_ref": broll_asset["storage_uri"],
+            "broll_source_name": broll_path.name,
+            "broll_source_sha256": broll_source_sha,
+            "broll_copy_sha256": broll_edit_copy_sha,
+            "narration_asset_ref": f"assets/{narration_asset['asset_id']}",
+            "narration_storage_ref": narration_asset["storage_uri"],
+            "narration_source_sha256": narration_source_sha,
+            "narration_copy_sha256": narration_edit_copy_sha,
+            "session_ref": f"editing-sessions/{session_id}",
+            "timeline_ref": f"timelines/{candidate_timeline['timeline_id']}",
+            "session_revision": current_session["session_revision"],
         },
     }
 

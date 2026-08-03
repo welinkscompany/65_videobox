@@ -601,3 +601,38 @@ def test_smoke_review_evidence_rejects_unplayable_summary_before_json_publish(tm
         )
 
     assert not (tmp_path / "review" / "ffprobe-summary.json").exists()
+
+
+def test_smoke_explicit_owner_broll_is_hash_fenced_without_absolute_evidence(
+    tmp_path: Path,
+) -> None:
+    smoke = _load_smoke_module()
+    source = tmp_path / "owner-h264.mp4"
+    source.write_bytes(b"owner h264 fixture")
+    expected_sha = smoke._sha256(source)
+
+    resolved, actual_sha = smoke._validate_explicit_broll_input(
+        source, expected_sha256=expected_sha
+    )
+
+    assert resolved == source.resolve()
+    assert actual_sha == expected_sha
+    with pytest.raises(RuntimeError, match="explicit_broll_sha_mismatch"):
+        smoke._validate_explicit_broll_input(source, expected_sha256="0" * 64)
+
+
+def test_smoke_run_contract_keeps_synthetic_default_and_accepts_explicit_owner_broll() -> None:
+    import inspect
+
+    smoke = _load_smoke_module()
+    parameters = inspect.signature(smoke.run_smoke).parameters
+
+    assert parameters["broll_source"].default is None
+    assert parameters["expected_broll_sha256"].default is None
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    assert 'json={"source_path": str(broll_path)' in source
+    assert 'checks["short_broll_loops"]' in source
+    assert "explicit_broll_enabled" in source
+    assert '"edit_input_evidence"' in source
+    assert '"timeline_ref": f"timelines/{candidate_timeline[\'timeline_id\']}"' in source
+    assert '"timeline_ref": f"timelines/{candidate_timeline_job_id}"' not in source

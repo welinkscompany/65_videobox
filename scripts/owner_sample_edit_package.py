@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import re
 import subprocess
@@ -49,8 +50,10 @@ PACKAGE_SCHEMA_VERSION = "videobox.owner-sample-edit-package.v1"
 DEFAULT_NARRATION_PATH = REPOSITORY_ROOT / "artifacts" / "task5-korean-600.wav"
 MAX_MANIFEST_ARTIFACTS = 16
 MAX_REVERSE_TRACE_NODES = 64
-MAX_REVERSE_UPSTREAM = 8
+MAX_REVERSE_UPSTREAM = 16
 MAX_MANIFEST_PATH_LENGTH = 240
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024
 REVIEW_ARTIFACT_KEYS = (
     "exact_preview",
     "final_mp4",
@@ -73,6 +76,7 @@ CONTROL_CHECKS = {
     "explanation_overlay": "image_overlay_in_final_and_capcut",
 }
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+REVISED_CAPTION = "수정된 최종 자막: 열 분 한국어 제작 흐름이 실제 출력까지 유지됩니다."
 
 
 class OwnerSamplePackageError(RuntimeError):
@@ -92,10 +96,20 @@ class SampleRecord:
 
 
 def _sha256(path: Path) -> str:
+    try:
+        before = path.stat()
+    except OSError as exc:
+        raise OwnerSamplePackageError("file_hash_failed") from exc
     digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        after = path.stat()
+    except OSError as exc:
+        raise OwnerSamplePackageError("file_hash_failed") from exc
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise OwnerSamplePackageError("file_changed_during_hash")
     return digest.hexdigest()
 
 
@@ -347,6 +361,33 @@ def _probe_api_content(
         return video_codec, pixel_format, _sha256(materialized)
 
 
+def _preserve_preview_content(
+    client: TestClient, *, content_url: str, destination: Path, expected_sha256: str
+) -> None:
+    temporary = destination.with_suffix(f"{destination.suffix}.tmp")
+    total_bytes = 0
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with client.stream("GET", content_url) as response:
+            if response.status_code != 200:
+                raise OwnerSamplePackageError("preview_content_failed")
+            with temporary.open("xb") as target:
+                for chunk in response.iter_bytes(chunk_size=1024 * 1024):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_SAMPLE_BYTES:
+                        raise OwnerSamplePackageError("preview_content_size_exceeded")
+                    target.write(chunk)
+        if total_bytes <= 0 or _sha256(temporary) != expected_sha256:
+            raise OwnerSamplePackageError("preview_content_hash_mismatch")
+        temporary.replace(destination)
+    except OwnerSamplePackageError:
+        raise
+    except OSError as exc:
+        raise OwnerSamplePackageError("preview_content_failed") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def build_preview_proofs(
     *,
     sample_dir: Path,
@@ -473,7 +514,17 @@ def _build_preview_proofs_unfenced(
                 raise OwnerSamplePackageError("preview_content_hash_mismatch")
             if output_codec != "h264" or output_pixel_format != "yuv420p":
                 raise OwnerSamplePackageError("preview_output_invalid")
+            proxy_artifact_ref = None
+            if codec == "hevc":
+                proxy_artifact_ref = "review/hevc-browser-preview.mp4"
+                _preserve_preview_content(
+                    client,
+                    content_url=expected_content_url,
+                    destination=projects_root / proxy_artifact_ref,
+                    expected_sha256=content_sha,
+                )
             previews[codec] = {
+                "asset_ref": f"assets/{asset_id}",
                 "source_name": record.name,
                 "source_sha256": record.sha256,
                 "preview_source_sha256": str(state["source_sha256"]),
@@ -481,6 +532,7 @@ def _build_preview_proofs_unfenced(
                 "project_copy_ref": storage_uri,
                 "project_copy_sha256": copy_sha,
                 "content_sha256": content_sha,
+                "proxy_artifact_ref": proxy_artifact_ref,
                 "preview_kind": "original" if codec == "h264" else "proxy",
                 "content_url": expected_content_url,
                 "range_status": ranged.status_code,
@@ -755,6 +807,191 @@ def _validate_edit_result(result: dict[str, Any]) -> dict[str, bool]:
     return controls
 
 
+def _normalized_media_probe(path: Path, *, ffprobe_binary: str) -> dict[str, Any]:
+    payload = _probe_sample(path, ffprobe_binary=ffprobe_binary)
+    streams = payload["streams"]
+    video = next((row for row in streams if row.get("codec_type") == "video"), None)
+    audio = next((row for row in streams if row.get("codec_type") == "audio"), None)
+    media_format = payload.get("format") if isinstance(payload.get("format"), dict) else {}
+    if not isinstance(video, dict):
+        raise OwnerSamplePackageError("edit_media_invalid")
+    try:
+        return {
+            "duration_sec": float(media_format.get("duration") or video.get("duration")),
+            "format": str(media_format["format_name"]).lower(),
+            "video_codec": str(video["codec_name"]).lower(),
+            "pixel_format": str(video["pix_fmt"]).lower(),
+            "audio_codec": str(audio["codec_name"]).lower() if audio else None,
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OwnerSamplePackageError("edit_media_invalid") from exc
+
+
+def _read_bounded_json(path: Path) -> dict[str, Any]:
+    try:
+        if path.stat().st_size > 4 * 1024 * 1024:
+            raise OwnerSamplePackageError("edit_structure_invalid")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except OwnerSamplePackageError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise OwnerSamplePackageError("edit_structure_invalid") from exc
+    if not isinstance(payload, dict):
+        raise OwnerSamplePackageError("edit_structure_invalid")
+    return payload
+
+
+def _require_media_contract(
+    summary: dict[str, Any], *, expected_duration: float, tolerance: float
+) -> None:
+    duration = summary.get("duration_sec")
+    if (
+        isinstance(duration, bool)
+        or not isinstance(duration, (int, float))
+        or not math.isfinite(float(duration))
+        or abs(float(duration) - expected_duration) > tolerance
+        or summary.get("video_codec") != "h264"
+        or summary.get("pixel_format") != "yuv420p"
+        or summary.get("audio_codec") != "aac"
+        or not isinstance(summary.get("format"), str)
+        or "mp4" not in summary["format"].split(",")
+    ):
+        raise OwnerSamplePackageError("edit_media_invalid")
+
+
+def _validate_structured_edit_evidence(
+    *,
+    package_root: Path,
+    edit_result: dict[str, Any],
+    artifacts: dict[str, dict[str, str]],
+    narration: dict[str, Any],
+    selected_h264: SampleRecord,
+    media_probe: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
+    evidence = edit_result.get("edit_input_evidence")
+    required_fields = {
+        "explicit_broll_enabled",
+        "edit_project_ref",
+        "broll_asset_ref",
+        "broll_storage_ref",
+        "broll_source_name",
+        "broll_source_sha256",
+        "broll_copy_sha256",
+        "narration_asset_ref",
+        "narration_storage_ref",
+        "narration_source_sha256",
+        "narration_copy_sha256",
+        "session_ref",
+        "timeline_ref",
+        "session_revision",
+    }
+    if not isinstance(evidence, dict) or set(evidence) != required_fields:
+        raise OwnerSamplePackageError("edit_input_evidence_invalid")
+    if (
+        evidence.get("explicit_broll_enabled") is not True
+        or evidence.get("broll_source_name") != selected_h264.name
+        or evidence.get("broll_source_sha256") != selected_h264.sha256
+        or evidence.get("broll_copy_sha256") != selected_h264.sha256
+        or evidence.get("narration_source_sha256") != narration["copy_sha256"]
+        or evidence.get("narration_copy_sha256") != narration["copy_sha256"]
+        or isinstance(evidence.get("session_revision"), bool)
+        or not isinstance(evidence.get("session_revision"), int)
+        or not 0 < evidence["session_revision"] < 1_000_000
+    ):
+        raise OwnerSamplePackageError("edit_input_evidence_invalid")
+    for key, prefix in (
+        ("edit_project_ref", "projects/"),
+        ("broll_asset_ref", "assets/"),
+        ("narration_asset_ref", "assets/"),
+        ("session_ref", "editing-sessions/"),
+        ("timeline_ref", "timelines/"),
+    ):
+        value = evidence.get(key)
+        if not isinstance(value, str) or len(value) > 256 or not value.startswith(prefix):
+            raise OwnerSamplePackageError("edit_input_evidence_invalid")
+    timeline_path = package_root / artifacts["timeline_snapshot"]["path"]
+    session_path = package_root / artifacts["editing_session_snapshot"]["path"]
+    timeline = _read_bounded_json(timeline_path)
+    session = _read_bounded_json(session_path)
+    timeline_id = evidence["timeline_ref"].removeprefix("timelines/")
+    session_id = evidence["session_ref"].removeprefix("editing-sessions/")
+    if (
+        timeline.get("timeline_id") != timeline_id
+        or session.get("session_id") != session_id
+        or session.get("session_revision") != evidence["session_revision"]
+        or session.get("timeline_id") != timeline_id
+    ):
+        raise OwnerSamplePackageError("edit_structure_invalid")
+    serialized_timeline = json.dumps(timeline, ensure_ascii=False, sort_keys=True)
+    serialized_session = json.dumps(session, ensure_ascii=False, sort_keys=True)
+    broll_asset_id = evidence["broll_asset_ref"].removeprefix("assets/")
+    broll_clips = [
+        clip
+        for track in timeline.get("tracks", [])
+        if isinstance(track, dict) and track.get("track_type") == "broll"
+        for clip in track.get("clips", [])
+        if isinstance(clip, dict)
+    ]
+    required_tokens = (
+        "tts_replacement",
+        "sfx",
+        "music",
+        "explanation_card",
+    )
+    combined = serialized_timeline + serialized_session
+    if (
+        not any(
+            clip.get("asset_id") == broll_asset_id
+            and clip.get("asset_uri") == evidence["broll_storage_ref"]
+            for clip in broll_clips
+        )
+        or broll_asset_id not in serialized_session
+        or evidence["broll_storage_ref"] not in serialized_timeline
+        or any(token not in combined for token in required_tokens)
+        or REVISED_CAPTION not in combined
+    ):
+        raise OwnerSamplePackageError("edit_structure_invalid")
+    broll_controls = {"fit": "fit", "loop": True, "pad": False, "trim_start_sec": 0.0}
+    audio_controls = {
+        "gain_db": -6.0,
+        "fade_in_sec": 0.5,
+        "fade_out_sec": 0.5,
+        "ducking": True,
+    }
+    if json.dumps(broll_controls, sort_keys=True) not in json.dumps(
+        timeline, sort_keys=True
+    ) + json.dumps(session, sort_keys=True):
+        raise OwnerSamplePackageError("edit_controls_invalid")
+    if json.dumps(audio_controls, sort_keys=True) not in json.dumps(
+        timeline, sort_keys=True
+    ) + json.dumps(session, sort_keys=True):
+        raise OwnerSamplePackageError("edit_controls_invalid")
+    srt_text = (package_root / artifacts["srt"]["path"]).read_text(encoding="utf-8")
+    if REVISED_CAPTION not in srt_text:
+        raise OwnerSamplePackageError("edit_srt_invalid")
+    capcut = _read_bounded_json(package_root / artifacts["capcut_draft"]["path"])
+    capcut_text = json.dumps(capcut, ensure_ascii=False)
+    for token in (
+        selected_h264.name,
+        "tts_candidate.wav",
+        "smoke-impact.wav",
+        "smoke-bgm.wav",
+        "SMOKE OVERLAY",
+    ):
+        if token not in capcut_text:
+            raise OwnerSamplePackageError("edit_capcut_invalid")
+    summary = _read_bounded_json(package_root / artifacts["ffprobe_summary"]["path"])
+    exact_path = package_root / artifacts["exact_preview"]["path"]
+    final_path = package_root / artifacts["final_mp4"]["path"]
+    actual_exact = media_probe(exact_path)
+    actual_final = media_probe(final_path)
+    if summary != {"exact_preview": actual_exact, "final_mp4": actual_final}:
+        raise OwnerSamplePackageError("edit_media_invalid")
+    _require_media_contract(actual_exact, expected_duration=5.0, tolerance=0.25)
+    _require_media_contract(actual_final, expected_duration=600.0, tolerance=0.5)
+    return dict(evidence)
+
+
 def _path_has_link_or_reparse(root: Path, relative: PurePosixPath) -> bool:
     current = root
     for part in relative.parts:
@@ -794,6 +1031,8 @@ def _safe_manifest_artifact_path(package_root: Path, value: Any) -> Path:
         resolved = path.resolve(strict=True)
         if not resolved.is_relative_to(package_root) or not resolved.is_file():
             raise OwnerSamplePackageError("manifest_artifact_missing")
+        if resolved.stat().st_size > MAX_ARTIFACT_BYTES:
+            raise OwnerSamplePackageError("manifest_artifact_size_exceeded")
     except OwnerSamplePackageError:
         raise
     except OSError as exc:
@@ -840,6 +1079,7 @@ def _build_reverse_trace(
     narration: dict[str, Any],
     previews: dict[str, Any],
     controls: dict[str, bool],
+    edit_input_evidence: dict[str, Any],
 ) -> dict[str, Any]:
     nodes: dict[str, dict[str, Any]] = {
         f"artifact:{name}": {
@@ -852,8 +1092,18 @@ def _build_reverse_trace(
     }
     nodes.update(
         {
+            "package_root:owner_review": {
+                "kind": "package_root",
+                "upstream": [
+                    *[f"artifact:{name}" for name in sorted(artifacts)],
+                    "preview:hevc",
+                ],
+            },
             "editing_session:current": {
                 "kind": "editing_session",
+                "session_ref": edit_input_evidence["session_ref"],
+                "timeline_ref": edit_input_evidence["timeline_ref"],
+                "session_revision": edit_input_evidence["session_revision"],
                 "editing_session_sha256": artifacts["editing_session_snapshot"]["sha256"],
                 "timeline_sha256": artifacts["timeline_snapshot"]["sha256"],
                 "upstream": ["typed_controls:applied"],
@@ -862,7 +1112,21 @@ def _build_reverse_trace(
                 "kind": "typed_controls",
                 "controls": controls,
                 "qa_fixture_only": True,
-                "upstream": ["copied_asset:narration", "preview:h264", "preview:hevc"],
+                "upstream": ["copied_asset:edit_h264", "copied_asset:edit_narration"],
+            },
+            "copied_asset:edit_h264": {
+                "kind": "copied_asset",
+                "asset_ref": edit_input_evidence["broll_asset_ref"],
+                "ref": edit_input_evidence["broll_storage_ref"],
+                "sha256": edit_input_evidence["broll_copy_sha256"],
+                "upstream": ["preview:h264"],
+            },
+            "copied_asset:edit_narration": {
+                "kind": "copied_asset",
+                "asset_ref": edit_input_evidence["narration_asset_ref"],
+                "ref": edit_input_evidence["narration_storage_ref"],
+                "sha256": edit_input_evidence["narration_copy_sha256"],
+                "upstream": ["copied_asset:narration"],
             },
             "copied_asset:narration": {
                 "kind": "copied_asset",
@@ -882,11 +1146,14 @@ def _build_reverse_trace(
         proof = previews[codec]
         nodes[f"preview:{codec}"] = {
             "kind": "preview_proof",
+            "asset_ref": proof["asset_ref"],
             "source_name": proof["source_name"],
             "source_sha256": proof["source_sha256"],
             "preview_source_sha256": proof["preview_source_sha256"],
             "profile": proof["profile"],
             "content_sha256": proof["content_sha256"],
+            "content_url": proof["content_url"],
+            "proxy_artifact_ref": proof["proxy_artifact_ref"],
             "preview_kind": proof["preview_kind"],
             "upstream": [f"copied_asset:{codec}"],
         }
@@ -929,8 +1196,23 @@ def _validate_source_inventory(manifest: dict[str, Any]) -> None:
             or "/" in name
             or "\\" in name
             or not SHA256_PATTERN.fullmatch(str(row.get("sha256") or ""))
+            or isinstance(row.get("size_bytes"), bool)
+            or not isinstance(row.get("size_bytes"), int)
+            or not 0 < row["size_bytes"] <= MAX_SAMPLE_BYTES
+            or isinstance(row.get("duration_sec"), bool)
+            or not isinstance(row.get("duration_sec"), (int, float))
+            or not math.isfinite(float(row["duration_sec"]))
+            or not 0 < float(row["duration_sec"]) <= 86_400
         ):
             raise OwnerSamplePackageError("manifest_source_inventory_invalid")
+        for key in ("container", "video_codec"):
+            value = row.get(key)
+            if not isinstance(value, str) or not 0 < len(value) <= 128:
+                raise OwnerSamplePackageError("manifest_source_inventory_invalid")
+        for key in ("audio_codec", "pixel_format"):
+            value = row.get(key)
+            if value is not None and (not isinstance(value, str) or not 0 < len(value) <= 128):
+                raise OwnerSamplePackageError("manifest_source_inventory_invalid")
 
     selected = manifest.get("selected_sources")
     if not isinstance(selected, dict) or set(selected) != {"h264", "hevc"}:
@@ -991,6 +1273,7 @@ def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
         narration=manifest["narration"],
         previews=previews,
         controls=manifest["controls"],
+        edit_input_evidence=manifest["edit_input_evidence"],
     )["nodes"]
     if set(nodes) != set(expected_nodes):
         raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
@@ -1028,7 +1311,17 @@ def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
     for node_id in sorted(nodes):
         visit(node_id)
     artifact_node_ids = {f"artifact:{name}" for name in manifest["artifacts"]}
-    required_shared_nodes = set(nodes) - artifact_node_ids
+    required_edit_nodes = {
+        "editing_session:current",
+        "typed_controls:applied",
+        "copied_asset:edit_h264",
+        "preview:h264",
+        "copied_asset:h264",
+        "source_sha:h264",
+        "copied_asset:edit_narration",
+        "copied_asset:narration",
+        "source_sha:narration",
+    }
     for artifact_node_id in artifact_node_ids:
         reachable: set[str] = set()
 
@@ -1040,8 +1333,20 @@ def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
                 collect(parent)
 
         collect(artifact_node_id)
-        if not required_shared_nodes.issubset(reachable):
+        if not required_edit_nodes.issubset(reachable) or "preview:hevc" in reachable:
             raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
+    package_reachable: set[str] = set()
+
+    def collect_package(node_id: str) -> None:
+        if node_id in package_reachable:
+            return
+        package_reachable.add(node_id)
+        for parent in nodes[node_id]["upstream"]:
+            collect_package(parent)
+
+    collect_package("package_root:owner_review")
+    if package_reachable != set(nodes):
+        raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
 
 
 def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> None:
@@ -1068,6 +1373,7 @@ def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> N
         "qa_fixture",
         "source_inventory",
         "selected_sources",
+        "edit_input_evidence",
         "narration",
         "preview_proofs",
         "controls",
@@ -1083,6 +1389,8 @@ def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> N
         or manifest.get("qa_fixture") != "audio_ducking"
     ):
         raise OwnerSamplePackageError("manifest_schema_invalid")
+    if len(json.dumps(manifest, ensure_ascii=False).encode("utf-8")) > MAX_MANIFEST_BYTES:
+        raise OwnerSamplePackageError("manifest_size_limit_exceeded")
     _validate_source_inventory(manifest)
     _validate_narration_evidence(root, manifest)
     _validate_manifest_preview_proofs(root, manifest)
@@ -1128,7 +1436,8 @@ def _publish_manifest_atomic(package_root: Path, manifest: dict[str, Any]) -> Pa
             target.write("\n")
             target.flush()
             os.fsync(target.fileno())
-        temporary.replace(final)
+        os.link(temporary, final)
+        temporary.unlink()
         return final
     except OwnerSamplePackageError:
         raise
@@ -1138,6 +1447,25 @@ def _publish_manifest_atomic(package_root: Path, manifest: dict[str, Any]) -> Pa
         except OSError:
             pass
         raise OwnerSamplePackageError("manifest_publish_failed") from exc
+
+
+def _remove_generated_manifest_after_fence_failure(
+    package_root: Path, manifest: dict[str, Any]
+) -> None:
+    final = package_root / MANIFEST_FILENAME
+    temporary = package_root / MANIFEST_TEMP_FILENAME
+    expected = (
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    try:
+        if final.is_file() and final.read_bytes() == expected:
+            final.unlink()
+    except OSError:
+        pass
+    try:
+        temporary.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _validate_preview_proofs(
@@ -1231,17 +1559,12 @@ def _validate_manifest_preview_proofs(package_root: Path, manifest: dict[str, An
     ):
         raise OwnerSamplePackageError("manifest_preview_proof_invalid")
     project_id = project_parts[1]
-    allowed_import_paths = {
-        "/api/projects",
-        "/api/projects/{project_id}/assets/broll-video",
-    }
-    if any(
-        not isinstance(row, dict)
-        or set(row) != {"method", "path"}
-        or row.get("method") != "POST"
-        or row.get("path") not in allowed_import_paths
-        for row in proofs["api_import_log"]
-    ):
+    expected_import_log = [
+        {"method": "POST", "path": "/api/projects"},
+        {"method": "POST", "path": "/api/projects/{project_id}/assets/broll-video"},
+        {"method": "POST", "path": "/api/projects/{project_id}/assets/broll-video"},
+    ]
+    if proofs["api_import_log"] != expected_import_log:
         raise OwnerSamplePackageError("manifest_preview_proof_invalid")
     previews = proofs.get("previews")
     selected = manifest.get("selected_sources")
@@ -1252,6 +1575,7 @@ def _validate_manifest_preview_proofs(package_root: Path, manifest: dict[str, An
         if isinstance(row, dict) and isinstance(row.get("name"), str)
     }
     allowed = {
+        "asset_ref",
         "source_name",
         "source_sha256",
         "preview_source_sha256",
@@ -1264,6 +1588,7 @@ def _validate_manifest_preview_proofs(package_root: Path, manifest: dict[str, An
         "range_status",
         "output_video_codec",
         "output_pixel_format",
+        "proxy_artifact_ref",
     }
     if not isinstance(previews, dict) or set(previews) != {"h264", "hevc"}:
         raise OwnerSamplePackageError("manifest_preview_proof_invalid")
@@ -1294,6 +1619,8 @@ def _validate_manifest_preview_proofs(package_root: Path, manifest: dict[str, An
             or proof.get("output_video_codec") != "h264"
             or proof.get("output_pixel_format") != "yuv420p"
             or proof.get("preview_kind") != ("original" if codec == "h264" else "proxy")
+            or not isinstance(proof.get("asset_ref"), str)
+            or not re.fullmatch(r"assets/[A-Za-z0-9_-]{1,128}", proof["asset_ref"])
             or not isinstance(selected_row, dict)
             or name != selected_row.get("name")
             or proof.get("source_sha256") != selected_row.get("sha256")
@@ -1307,6 +1634,28 @@ def _validate_manifest_preview_proofs(package_root: Path, manifest: dict[str, An
             )
         ):
             raise OwnerSamplePackageError("manifest_preview_proof_invalid")
+        asset_id = proof["asset_ref"].removeprefix("assets/")
+        expected_content_url = (
+            f"/api/projects/{project_id}/assets/{asset_id}/content"
+            if codec == "h264"
+            else f"/api/projects/{project_id}/assets/{asset_id}/browser-preview/content"
+        )
+        proxy_ref = proof.get("proxy_artifact_ref")
+        if content_url != expected_content_url or (
+            codec == "h264" and proxy_ref is not None
+        ):
+            raise OwnerSamplePackageError("manifest_preview_proof_invalid")
+        if codec == "hevc":
+            if not isinstance(proxy_ref, str):
+                raise OwnerSamplePackageError("manifest_preview_proof_invalid")
+            try:
+                proxy_path = _safe_manifest_artifact_path(
+                    package_root, f"projects/{proxy_ref}"
+                )
+            except OwnerSamplePackageError as exc:
+                raise OwnerSamplePackageError("manifest_preview_proxy_invalid") from exc
+            if _sha256(proxy_path) != proof["content_sha256"]:
+                raise OwnerSamplePackageError("manifest_preview_proxy_invalid")
         project_copy = _resolve_manifest_project_copy(
             package_root=package_root,
             project_id=project_id,
@@ -1324,6 +1673,7 @@ def build_owner_sample_package(
     ffmpeg_binary: str,
     ffprobe_binary: str,
     edit_flow_runner: Callable[..., dict[str, Any]] | None = None,
+    media_probe: Callable[[Path], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Inventory -> public API preview proof -> deterministic edit flow -> atomic manifest."""
 
@@ -1365,6 +1715,14 @@ def build_owner_sample_package(
             ffprobe_binary=ffprobe_binary,
         )
         previews = _validate_preview_proofs(selected=selected, proofs=preview_proofs)
+        preview_project_ref = PurePosixPath(str(preview_proofs.get("project_ref") or ""))
+        if len(preview_project_ref.parts) != 2 or preview_project_ref.parts[0] != "projects":
+            raise OwnerSamplePackageError("preview_proof_invalid")
+        owner_h264_copy = _resolve_manifest_project_copy(
+            package_root=package_root,
+            project_id=preview_project_ref.parts[1],
+            storage_uri=previews["h264"]["project_copy_ref"],
+        )
         runner = edit_flow_runner or _load_default_edit_flow_runner()
         edit_result = runner(
             narration=package_root / narration_row["copy_path"],
@@ -1372,6 +1730,8 @@ def build_owner_sample_package(
             ffmpeg_binary=ffmpeg_binary,
             ffprobe_binary=ffprobe_binary,
             fixture_name="audio_ducking",
+            broll_source=owner_h264_copy,
+            expected_broll_sha256=selected["h264"].sha256,
         )
         controls = _validate_edit_result(edit_result)
         checklist = write_review_checklist(package_root)
@@ -1379,6 +1739,17 @@ def build_owner_sample_package(
             package_root=package_root,
             edit_result=edit_result,
             checklist_path=checklist,
+        )
+        probe = media_probe or (
+            lambda path: _normalized_media_probe(path, ffprobe_binary=ffprobe_binary)
+        )
+        edit_input_evidence = _validate_structured_edit_evidence(
+            package_root=package_root,
+            edit_result=edit_result,
+            artifacts=artifacts,
+            narration=narration_row,
+            selected_h264=selected["h264"],
+            media_probe=probe,
         )
         manifest: dict[str, Any] = {
             "schema_version": PACKAGE_SCHEMA_VERSION,
@@ -1389,6 +1760,7 @@ def build_owner_sample_package(
                 codec: {"name": selected[codec].name, "sha256": selected[codec].sha256}
                 for codec in ("h264", "hevc")
             },
+            "edit_input_evidence": edit_input_evidence,
             "narration": narration_row,
             "preview_proofs": preview_proofs,
             "controls": controls,
@@ -1408,12 +1780,19 @@ def build_owner_sample_package(
             narration=narration_row,
             previews=previews,
             controls=controls,
+            edit_input_evidence=edit_input_evidence,
         )
         _assert_final_source_fence(selected_sources, selected_fingerprints)
         _assert_narration_source_fence(narration_source_fence)
         final_fences_verified = True
         validate_reverse_manifest(package_root, manifest)
         _publish_manifest_atomic(package_root, manifest)
+        try:
+            _assert_final_source_fence(selected_sources, selected_fingerprints)
+            _assert_narration_source_fence(narration_source_fence)
+        except OwnerSamplePackageError:
+            _remove_generated_manifest_after_fence_failure(package_root, manifest)
+            raise
         return manifest
     finally:
         if selected_sources and not final_fences_verified:

@@ -354,10 +354,17 @@ def test_preview_proofs_use_public_api_and_preserve_source_and_copy_hashes(
         assert proof["output_pixel_format"] == "yuv420p"
         assert proof["content_url"].startswith("/api/projects/")
         assert "://" not in proof["content_url"]
+        assert proof["asset_ref"].startswith("assets/")
     assert proofs["previews"]["h264"]["preview_kind"] == "original"
+    assert proofs["previews"]["h264"]["proxy_artifact_ref"] is None
     assert proofs["previews"]["h264"]["content_url"].endswith("/content")
     assert "/browser-preview/content" not in proofs["previews"]["h264"]["content_url"]
     assert proofs["previews"]["hevc"]["preview_kind"] == "proxy"
+    proxy_ref = proofs["previews"]["hevc"]["proxy_artifact_ref"]
+    assert isinstance(proxy_ref, str) and not Path(proxy_ref).is_absolute()
+    proxy_path = tmp_path / "runtime" / proxy_ref
+    assert proxy_path.is_file()
+    assert _sha256(proxy_path) == proofs["previews"]["hevc"]["content_sha256"]
     assert proofs["previews"]["hevc"]["content_url"].endswith("/browser-preview/content")
     assert probed_content_urls == [
         proofs["previews"]["h264"]["content_url"],
@@ -622,27 +629,51 @@ def _package_fixture(
     def preview_builder(**kwargs):
         projects_root = Path(kwargs["projects_root"])
         project_root = projects_root / "projects" / "qa-preview"
-        for codec, source in (("h264", h264_path), ("hevc", hevc_path)):
-            copy = project_root / "assets" / f"{codec}.mp4"
+        source_paths = {"h264": h264_path, "hevc": hevc_path}
+        for codec, source in source_paths.items():
+            copy = project_root / "assets" / source.name
             copy.parent.mkdir(parents=True, exist_ok=True)
             copy.write_bytes(source.read_bytes())
+        proxy = projects_root / "review" / "hevc-browser-preview.mp4"
+        proxy.parent.mkdir(parents=True, exist_ok=True)
+        proxy.write_bytes(b"bounded h264 proxy evidence")
         return {
             "project_ref": "projects/qa-preview",
-            "api_import_log": [],
+            "api_import_log": [
+                {"method": "POST", "path": "/api/projects"},
+                {
+                    "method": "POST",
+                    "path": "/api/projects/{project_id}/assets/broll-video",
+                },
+                {
+                    "method": "POST",
+                    "path": "/api/projects/{project_id}/assets/broll-video",
+                },
+            ],
             "previews": {
                 codec: {
+                    "asset_ref": f"assets/{codec}-asset",
                     "source_name": record.name,
                     "source_sha256": record.sha256,
-                    "project_copy_ref": f"local://projects/qa-preview/assets/{codec}.mp4",
+                    "project_copy_ref": (
+                        f"local://projects/qa-preview/assets/{source_paths[codec].name}"
+                    ),
                     "project_copy_sha256": record.sha256,
                     "preview_source_sha256": record.sha256,
                     "profile": "h264-yuv420p-aac-1280-v1",
                     "preview_kind": "original" if codec == "h264" else "proxy",
-                    "content_url": f"/api/projects/qa-preview/{codec}/content",
+                    "content_url": (
+                        f"/api/projects/qa-preview/assets/{codec}-asset/content"
+                        if codec == "h264"
+                        else f"/api/projects/qa-preview/assets/{codec}-asset/browser-preview/content"
+                    ),
                     "range_status": 206,
                     "output_video_codec": "h264",
                     "output_pixel_format": "yuv420p",
-                    "content_sha256": record.sha256 if codec == "h264" else "f" * 64,
+                    "content_sha256": record.sha256 if codec == "h264" else _sha256(proxy),
+                    "proxy_artifact_ref": (
+                        None if codec == "h264" else "review/hevc-browser-preview.mp4"
+                    ),
                 }
                 for codec, record in zip(("h264", "hevc"), records, strict=True)
             },
@@ -657,6 +688,60 @@ def _package_fixture(
     def edit_runner(**kwargs):
         calls.update(kwargs)
         work_root = Path(kwargs["work_root"])
+        broll_source = Path(kwargs["broll_source"])
+        broll_sha = _sha256(broll_source)
+        broll_asset_id = "owner-broll-asset"
+        broll_storage_ref = "local://projects/edit-owner/assets/owner-h264.mp4"
+        controls = {"fit": "fit", "loop": True, "pad": False, "trim_start_sec": 0.0}
+        audio_controls = {
+            "gain_db": -6.0,
+            "fade_in_sec": 0.5,
+            "fade_out_sec": 0.5,
+            "ducking": True,
+        }
+        timeline = {
+            "timeline_id": "timeline-owner",
+            "tracks": [
+                {
+                    "track_type": "broll",
+                    "clips": [
+                        {
+                            "asset_id": broll_asset_id,
+                            "asset_uri": broll_storage_ref,
+                            "media_controls": controls,
+                        }
+                    ],
+                },
+                {"track_type": "bgm", "clips": [{"media_controls": audio_controls}]},
+                {"track_type": "sfx", "clips": [{"media_controls": audio_controls}]},
+            ],
+            "applied_recommendations": [
+                {"recommendation_type": "broll", "selected_asset_id": broll_asset_id},
+                {
+                    "recommendation_type": "tts_replacement",
+                    "payload": {"selected_asset_uri": "local://projects/edit-owner/tts_candidate.wav"},
+                },
+                {"recommendation_type": "sfx", "selected_asset_id": "sfx-asset"},
+                {"recommendation_type": "image_overlay", "selected_asset_id": "overlay-asset"},
+            ],
+        }
+        session = {
+            "session_id": "session-owner",
+            "session_revision": 7,
+            "timeline_id": "timeline-owner",
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "broll_override": {"asset_id": broll_asset_id, "media_controls": controls},
+                    "music_override": {"asset_id": "bgm-asset", "media_controls": audio_controls},
+                    "sfx_override": {"asset_id": "sfx-asset", "media_controls": audio_controls},
+                    "tts_replacement": {"asset_id": "tts-asset"},
+                    "caption_override": package.REVISED_CAPTION,
+                    "image_overlay": {"asset_id": "overlay-asset"},
+                    "explanation_card": {"text": "SMOKE OVERLAY"},
+                }
+            ],
+        }
         artifacts = {
             "srt": work_root / "review" / "captions.srt",
             "exact_preview": work_root / "review" / "exact-preview.mp4",
@@ -666,9 +751,48 @@ def _package_fixture(
             "final_mp4": work_root / "review" / "final.mp4",
             "capcut_draft": work_root / "review" / "draft_content.json",
         }
-        for name, path in artifacts.items():
+        for path in artifacts.values():
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"{name}\n", encoding="utf-8")
+        artifacts["srt"].write_text(
+            f"1\n00:00:00,000 --> 00:00:05,000\n{package.REVISED_CAPTION}\n",
+            encoding="utf-8",
+        )
+        artifacts["exact_preview"].write_bytes(b"injected-valid-exact-media")
+        artifacts["timeline_snapshot"].write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
+        artifacts["editing_session_snapshot"].write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
+        media_summary = {
+            "exact_preview": {
+                "duration_sec": 5.0,
+                "format": "mov,mp4",
+                "video_codec": "h264",
+                "pixel_format": "yuv420p",
+                "audio_codec": "aac",
+            },
+            "final_mp4": {
+                "duration_sec": 600.0,
+                "format": "mov,mp4",
+                "video_codec": "h264",
+                "pixel_format": "yuv420p",
+                "audio_codec": "aac",
+            },
+        }
+        artifacts["ffprobe_summary"].write_text(json.dumps(media_summary), encoding="utf-8")
+        artifacts["final_mp4"].write_bytes(b"injected-valid-final-media")
+        artifacts["capcut_draft"].write_text(
+            json.dumps(
+                {
+                    "assets": [
+                        broll_source.name,
+                        "tts_candidate.wav",
+                        "smoke-impact.wav",
+                        "smoke-bgm.wav",
+                        "smoke-overlay.png",
+                        "SMOKE OVERLAY",
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
         checks = {
             "broll_controls_in_timeline": True,
             "audio_controls_in_timeline": True,
@@ -681,6 +805,22 @@ def _package_fixture(
             "fixture_name": kwargs["fixture_name"],
             "desktop_capcut_opened": False,
             "checks": checks,
+            "edit_input_evidence": {
+                "explicit_broll_enabled": True,
+                "edit_project_ref": "projects/edit-owner",
+                "broll_asset_ref": f"assets/{broll_asset_id}",
+                "broll_storage_ref": broll_storage_ref,
+                "broll_source_name": broll_source.name,
+                "broll_source_sha256": broll_sha,
+                "broll_copy_sha256": broll_sha,
+                "narration_asset_ref": "assets/narration-asset",
+                "narration_storage_ref": "local://projects/edit-owner/assets/qa-narration.wav",
+                "narration_source_sha256": _sha256(Path(kwargs["narration"])),
+                "narration_copy_sha256": _sha256(Path(kwargs["narration"])),
+                "session_ref": "editing-sessions/session-owner",
+                "timeline_ref": "timelines/timeline-owner",
+                "session_revision": 7,
+            },
             **{
                 name: {"path": str(path), "sha256": _sha256(path)}
                 for name, path in artifacts.items()
@@ -688,6 +828,16 @@ def _package_fixture(
         }
 
     output_root = tmp_path / "owner-package"
+    def media_probe(path: Path) -> dict[str, object]:
+        duration = 5.0 if path.name == "exact-preview.mp4" else 600.0
+        return {
+            "duration_sec": duration,
+            "format": "mov,mp4",
+            "video_codec": "h264",
+            "pixel_format": "yuv420p",
+            "audio_codec": "aac",
+        }
+
     result = package.build_owner_sample_package(
         sample_dir=sample_dir,
         output_root=output_root,
@@ -695,6 +845,7 @@ def _package_fixture(
         ffmpeg_binary="ffmpeg-local",
         ffprobe_binary="ffprobe-local",
         edit_flow_runner=edit_runner,
+        media_probe=media_probe,
     )
     return output_root, narration, {"result": result, "calls": calls}
 
@@ -731,6 +882,9 @@ def test_package_uses_audio_ducking_and_records_all_controls_and_false_authoriti
 
     assert calls["fixture_name"] == "audio_ducking"
     assert Path(calls["narration"]) == package_root / "inputs" / "qa-narration.wav"
+    assert Path(calls["broll_source"]).is_file()
+    assert Path(calls["broll_source"]).is_relative_to(package_root / "projects")
+    assert calls["expected_broll_sha256"] == manifest["selected_sources"]["h264"]["sha256"]
     assert manifest["controls"] == {
         "broll": True,
         "bgm": True,
@@ -855,6 +1009,27 @@ def test_reverse_manifest_rejects_reparse_project_copy_root(
         package.validate_reverse_manifest(package_root, manifest)
 
 
+def test_reverse_manifest_rejects_other_project_url_and_proxy_file_tamper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    other_project = json.loads(json.dumps(manifest))
+    other_project["preview_proofs"]["previews"]["h264"]["content_url"] = (
+        "/api/projects/other/assets/h264-asset/content"
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_preview_proof_invalid$"):
+        package.validate_reverse_manifest(package_root, other_project)
+
+    proxy_ref = manifest["preview_proofs"]["previews"]["hevc"]["proxy_artifact_ref"]
+    proxy = package_root / "projects" / proxy_ref
+    proxy.write_bytes(proxy.read_bytes() + b"tampered")
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_preview_proxy_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
 def test_reverse_manifest_rejects_disconnected_typed_control_or_preview_branch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -866,7 +1041,7 @@ def test_reverse_manifest_rejects_disconnected_typed_control_or_preview_branch(
 
     disconnected = json.loads(json.dumps(manifest))
     disconnected["reverse_trace"]["nodes"]["typed_controls:applied"]["upstream"].remove(
-        "preview:hevc"
+        "copied_asset:edit_h264"
     )
     with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
         package.validate_reverse_manifest(package_root, disconnected)
@@ -877,6 +1052,107 @@ def test_reverse_manifest_rejects_disconnected_typed_control_or_preview_branch(
     ]
     with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
         package.validate_reverse_manifest(package_root, detached)
+
+
+def test_structured_edit_validation_rejects_timeline_identity_srt_capcut_and_media_mutations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    inventory = {row["name"]: row for row in manifest["source_inventory"]}
+    h264_row = inventory[manifest["selected_sources"]["h264"]["name"]]
+    selected = package.SampleRecord(**h264_row)
+    edit_result = {"edit_input_evidence": manifest["edit_input_evidence"]}
+    artifacts = manifest["artifacts"]
+
+    def probe(path: Path) -> dict[str, object]:
+        return {
+            "duration_sec": 5.0 if "exact" in path.name else 600.0,
+            "format": "mov,mp4",
+            "video_codec": "h264",
+            "pixel_format": "yuv420p",
+            "audio_codec": "aac",
+        }
+
+    def validate() -> None:
+        package._validate_structured_edit_evidence(
+            package_root=package_root,
+            edit_result=edit_result,
+            artifacts=artifacts,
+            narration=manifest["narration"],
+            selected_h264=selected,
+            media_probe=probe,
+        )
+
+    timeline_path = package_root / artifacts["timeline_snapshot"]["path"]
+    original_timeline = timeline_path.read_text(encoding="utf-8")
+    timeline = json.loads(original_timeline)
+    timeline["tracks"][0]["clips"][0]["asset_id"] = "wrong-owner-asset"
+    timeline_path.write_text(json.dumps(timeline), encoding="utf-8")
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_structure_invalid$"):
+        validate()
+    timeline_path.write_text(original_timeline, encoding="utf-8")
+
+    srt_path = package_root / artifacts["srt"]["path"]
+    original_srt = srt_path.read_text(encoding="utf-8")
+    srt_path.write_text("wrong caption", encoding="utf-8")
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_srt_invalid$"):
+        validate()
+    srt_path.write_text(original_srt, encoding="utf-8")
+
+    capcut_path = package_root / artifacts["capcut_draft"]["path"]
+    original_capcut = capcut_path.read_text(encoding="utf-8")
+    capcut_path.write_text("{}", encoding="utf-8")
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_capcut_invalid$"):
+        validate()
+    capcut_path.write_text(original_capcut, encoding="utf-8")
+
+    summary_path = package_root / artifacts["ffprobe_summary"]["path"]
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["exact_preview"]["duration_sec"] = 1.0
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_media_invalid$"):
+        validate()
+
+
+def test_manifest_rejects_sparse_oversize_bool_nan_and_serialized_size_before_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    bool_size = json.loads(json.dumps(manifest))
+    bool_size["source_inventory"][0]["size_bytes"] = True
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_source_inventory_invalid$"):
+        package.validate_reverse_manifest(package_root, bool_size)
+
+    nan_duration = json.loads(json.dumps(manifest))
+    nan_duration["source_inventory"][0]["duration_sec"] = float("nan")
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_source_inventory_invalid$"):
+        package.validate_reverse_manifest(package_root, nan_duration)
+
+    huge_manifest = json.loads(json.dumps(manifest))
+    huge_manifest["preview_proofs"]["previews"]["h264"]["content_url"] = (
+        "/api/projects/qa-preview/assets/h264-asset/" + "x" * (1024 * 1024)
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_size_limit_exceeded$"):
+        package.validate_reverse_manifest(package_root, huge_manifest)
+
+    sparse = package_root / manifest["artifacts"]["final_mp4"]["path"]
+    with sparse.open("wb") as target:
+        target.truncate(package.MAX_ARTIFACT_BYTES + 1)
+    original_hash = package._sha256
+    monkeypatch.setattr(
+        package,
+        "_sha256",
+        lambda path: (_ for _ in ()).throw(AssertionError("oversize artifact must not hash"))
+        if path == sparse.resolve()
+        else original_hash(path),
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_artifact_size_exceeded$"):
+        package.validate_reverse_manifest(package_root, manifest)
 
 
 @pytest.mark.parametrize(
@@ -1140,14 +1416,13 @@ def test_manifest_publish_failure_exposes_no_final_or_partial_manifest_but_keeps
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = _load_module()
-    original_replace = Path.replace
-
-    def fail_manifest_replace(path: Path, target: Path):
-        if path.name == ".owner-sample-edit-package.json.tmp":
-            raise OSError("simulated publish failure")
-        return original_replace(path, target)
-
-    monkeypatch.setattr(Path, "replace", fail_manifest_replace)
+    monkeypatch.setattr(
+        package.os,
+        "link",
+        lambda source, destination: (_ for _ in ()).throw(
+            OSError("simulated publish failure")
+        ),
+    )
     with pytest.raises(package.OwnerSamplePackageError, match="^manifest_publish_failed$"):
         _package_fixture(package, tmp_path, monkeypatch)
 
@@ -1155,6 +1430,26 @@ def test_manifest_publish_failure_exposes_no_final_or_partial_manifest_but_keeps
     assert (package_root / "edit" / "review" / "final.mp4").is_file()
     assert not (package_root / "owner-sample-edit-package.json").exists()
     assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
+
+
+def test_manifest_publish_never_overwrites_concurrent_final(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    concurrent_bytes = b"concurrent owner receipt"
+
+    def inject_concurrent_final(source: Path, destination: Path) -> None:
+        Path(destination).write_bytes(concurrent_bytes)
+        raise FileExistsError("simulated concurrent publisher")
+
+    monkeypatch.setattr(package.os, "link", inject_concurrent_final)
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_publish_failed$"):
+        _package_fixture(package, tmp_path, monkeypatch)
+
+    package_root = tmp_path / "owner-package"
+    assert (package_root / "owner-sample-edit-package.json").read_bytes() == concurrent_bytes
+    assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
+    assert (package_root / "edit" / "review" / "final.mp4").is_file()
 
 
 def test_final_source_fence_failure_occurs_before_manifest_publish(
@@ -1176,3 +1471,28 @@ def test_final_source_fence_failure_occurs_before_manifest_publish(
     assert (package_root / "edit" / "review" / "final.mp4").is_file()
     assert not (package_root / "owner-sample-edit-package.json").exists()
     assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
+
+
+def test_post_publish_source_fence_removes_only_generated_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    original = package._assert_final_source_fence
+    calls = 0
+
+    def fail_second_check(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise package.OwnerSamplePackageError("source_changed_during_package")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(package, "_assert_final_source_fence", fail_second_check)
+    with pytest.raises(package.OwnerSamplePackageError, match="^source_changed_during_package$"):
+        _package_fixture(package, tmp_path, monkeypatch)
+
+    package_root = tmp_path / "owner-package"
+    assert calls == 2
+    assert not (package_root / "owner-sample-edit-package.json").exists()
+    assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
+    assert (package_root / "edit" / "review" / "final.mp4").is_file()
