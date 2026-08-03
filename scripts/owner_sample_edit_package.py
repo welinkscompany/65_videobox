@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -2174,10 +2175,26 @@ def build_owner_sample_package(
             _assert_narration_source_fence(narration_source_fence)
 
 
+def _write_stdout_utf8(text: str) -> None:
+    framed = text.rstrip("\r\n") + "\n"
+    binary = getattr(sys.stdout, "buffer", None)
+    if binary is not None:
+        binary.write(framed.encode("utf-8"))
+        binary.flush()
+        return
+    sys.stdout.write(framed)
+    sys.stdout.flush()
+
+
 class _BoundedArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         del message
         raise OwnerSamplePackageError("cli_arguments_invalid")
+
+    def _print_message(self, message: str | None, file: Any = None) -> None:
+        del file
+        if message:
+            _write_stdout_utf8(message)
 
 
 def _has_existing_project_argument(arguments: Sequence[str]) -> bool:
@@ -2194,11 +2211,41 @@ def _has_existing_project_argument(arguments: Sequence[str]) -> bool:
 
 
 def _local_cli_path(value: str) -> Path:
+    windows = PureWindowsPath(value)
+    raw_parts = windows.parts
+    parts = tuple(part.casefold().rstrip(" .") for part in raw_parts)
+    explicit_drive = bool(re.match(r"^[A-Za-z]:\\", value))
+    reserved_parts = {"??", "?", ".", "device", "globalroot", "unc"}
+    relative_device_names = {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+    }
+    non_anchor_parts = parts[1:] if windows.anchor else parts
+    non_anchor_raw_parts = raw_parts[1:] if windows.anchor else raw_parts
     if (
         not value
         or "\x00" in value
-        or value.startswith(("\\\\", "//"))
+        or any(
+            unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}
+            for character in value
+        )
         or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value)
+        or (windows.anchor and not explicit_drive)
+        or (windows.drive and not explicit_drive)
+        or (explicit_drive and (windows.root != "\\" or "/" in value))
+        or (explicit_drive and ":" in value[2:])
+        or (not explicit_drive and (":" in value or value.startswith(("\\", "/"))))
+        or any(part in {"", ".."} for part in non_anchor_parts)
+        or any(part != part.rstrip(" .") for part in non_anchor_raw_parts)
+        or any(part in reserved_parts for part in non_anchor_parts)
+        or any(
+            part.split(".", 1)[0] in relative_device_names
+            for part in non_anchor_parts
+        )
     ):
         raise OwnerSamplePackageError("local_path_required")
     return Path(value)
@@ -2209,6 +2256,13 @@ def _safe_cli_error_code(error: OwnerSamplePackageError) -> str:
     if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
         return code
     return "owner_sample_package_failed"
+
+
+def _has_unsafe_cli_text(value: str) -> bool:
+    return any(
+        unicodedata.category(character) in {"Cc", "Cf", "Zl", "Zp"}
+        for character in value
+    )
 
 
 def _safe_cli_summary(manifest: dict[str, Any], package_root: Path) -> dict[str, Any]:
@@ -2256,7 +2310,7 @@ def _safe_cli_summary(manifest: dict[str, Any], package_root: Path) -> dict[str,
             or Path(name).name != name
             or "/" in name
             or "\\" in name
-            or any(ord(character) < 32 for character in name)
+            or _has_unsafe_cli_text(name)
             or not isinstance(source_sha256, str)
             or not SHA256_PATTERN.fullmatch(source_sha256)
         ):
@@ -2275,7 +2329,7 @@ def _safe_cli_summary(manifest: dict[str, Any], package_root: Path) -> dict[str,
     if (
         not directory_name
         or len(directory_name) > 128
-        or any(ord(character) < 32 for character in directory_name)
+        or _has_unsafe_cli_text(directory_name)
     ):
         raise OwnerSamplePackageError("cli_result_invalid")
     return {
@@ -2289,17 +2343,19 @@ def _safe_cli_summary(manifest: dict[str, Any], package_root: Path) -> dict[str,
 
 def _write_cli_result(payload: dict[str, Any], *, json_mode: bool) -> None:
     if json_mode:
-        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        _write_stdout_utf8(
+            json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+        )
         return
     if payload.get("status") == "ok":
         filenames = payload["selected_filenames"]
-        print(
+        _write_stdout_utf8(
             "검토 패키지 준비 완료: "
             f"{payload['package_directory']} "
             f"(선택 영상 {len(filenames)}개, 검토 파일 {payload['artifact_count']}개)"
         )
         return
-    print(f"실행 중단: {payload['error_code']}")
+    _write_stdout_utf8(f"실행 중단: {payload['error_code']}")
 
 
 def _parse_cli_arguments(arguments: Sequence[str]) -> argparse.Namespace:
@@ -2313,9 +2369,6 @@ def _parse_cli_arguments(arguments: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--project-id")
-    parser.add_argument("--session-id")
-    parser.add_argument("--confirm-existing-project-mutation", action="store_true")
     parsed = parser.parse_args(list(arguments))
     if not parsed.sample_dir:
         raise OwnerSamplePackageError("sample_directory_required")

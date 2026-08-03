@@ -2087,6 +2087,21 @@ def test_cli_does_not_accept_abbreviated_existing_project_arguments(
     }
 
 
+def test_cli_help_does_not_advertise_disabled_existing_project_mode(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    package = _load_module()
+
+    with pytest.raises(SystemExit) as raised:
+        package.main(["--help"])
+
+    assert raised.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "--project-id" not in help_text
+    assert "--session-id" not in help_text
+    assert "--confirm-existing-project-mutation" not in help_text
+
+
 def test_cli_json_and_human_output_never_disclose_paths_commands_or_secrets(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -2240,6 +2255,123 @@ def test_cli_unexpected_exception_is_sanitized_without_traceback_or_secret(
         }
     else:
         assert captured.out == "실행 중단: internal_error\n"
+
+
+@pytest.mark.parametrize(
+    "unsafe_name",
+    [
+        "owner\u0085next.mp4",
+        "owner\u200bhidden.mp4",
+        "owner\u2028next.mp4",
+        "owner\u2029next.mp4",
+    ],
+)
+def test_cli_summary_rejects_unicode_control_and_line_separator_names(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    unsafe_name: str,
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    manifest = _minimal_cli_manifest()
+    manifest["selected_sources"]["h264"]["name"] = unsafe_name
+
+    exit_code = package.main(
+        ["--sample-dir", str(sample_dir), "--json"],
+        package_builder=lambda **kwargs: manifest,
+        utc_now=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert captured.err == ""
+    assert len(captured.out.splitlines()) == 1
+    assert json.loads(captured.out) == {
+        "status": "error",
+        "error_code": "cli_result_invalid",
+    }
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        r"\??\C:\private\owner.mp4",
+        r"\\?\C:\private\owner.mp4",
+        r"\\.\PhysicalDrive0",
+        r"\Device\HarddiskVolume1\private\owner.mp4",
+        r"GLOBALROOT\Device\HarddiskVolume1\private\owner.mp4",
+        r"\??\UNC\server\share\owner.mp4",
+        r"\\?\UNC\server\share\owner.mp4",
+        r"UNC\server\share\owner.mp4",
+        r"\current-drive\owner.mp4",
+        r"/current-drive/owner.mp4",
+        r"C:drive-relative\owner.mp4",
+        r"C:/forward-slash/owner.mp4",
+        r"C:\private\owner.mp4:alternate-stream",
+        r"C:\private. \owner.mp4",
+    ],
+)
+def test_local_cli_path_rejects_windows_namespace_and_anchored_aliases_before_path_access(
+    monkeypatch: pytest.MonkeyPatch, unsafe_path: str
+) -> None:
+    package = _load_module()
+    monkeypatch.setattr(
+        package,
+        "Path",
+        lambda value: (_ for _ in ()).throw(
+            AssertionError("invalid lexical path must not construct or inspect Path")
+        ),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^local_path_required$"):
+        package._local_cli_path(unsafe_path)
+
+
+@pytest.mark.parametrize(
+    "safe_path",
+    [
+        r"C:\owner\samples\video.mp4",
+        r"artifacts\owner-sample-edit-20260803",
+        r"ffmpeg.exe",
+    ],
+)
+def test_local_cli_path_accepts_normal_drive_or_safe_relative_paths(safe_path: str) -> None:
+    package = _load_module()
+
+    assert package._local_cli_path(safe_path) == Path(safe_path)
+
+
+@pytest.mark.parametrize("json_mode", [True, False])
+def test_cli_subprocess_writes_strict_utf8_even_when_text_encoding_is_cp949(
+    json_mode: bool,
+) -> None:
+    arguments = [sys.executable, str(SCRIPT), "--project-id", "기존-프로젝트"]
+    if json_mode:
+        arguments.append("--json")
+    environment = dict(os.environ)
+    environment["PYTHONIOENCODING"] = "cp949"
+    environment["PYTHONUTF8"] = "0"
+
+    completed = subprocess.run(
+        arguments,
+        capture_output=True,
+        timeout=30,
+        check=False,
+        env=environment,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stderr == b""
+    decoded = completed.stdout.decode("utf-8", errors="strict")
+    assert len(decoded.splitlines()) == 1
+    if json_mode:
+        assert json.loads(decoded) == {
+            "status": "error",
+            "error_code": "existing_project_mode_disabled",
+        }
+    else:
+        assert decoded == "실행 중단: existing_project_mode_disabled\n"
 
 
 @pytest.mark.parametrize(
