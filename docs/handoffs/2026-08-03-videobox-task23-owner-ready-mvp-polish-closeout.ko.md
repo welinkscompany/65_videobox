@@ -89,4 +89,4 @@ status `§322`, implementation plan, 23D plan, 두 closeout handoff는 `4/4`, `0
 
 ## 다음 handoff
 
-최종 independent spec/plan/gap, code-quality, reverse-runtime review와 발견 Minor 보완은 완료했다. review metadata와 보완을 commit/push한 뒤 Task 23 자동화 closeout을 종료한다. 이후 실제 credential이나 사람 acceptance를 진행하려면 각각 별도 명시 권한이 필요하다.
+최종 independent spec/plan/gap, code-quality, reverse-runtime review와 발견 Minor 보완을 완료하고 review hardening commit `24a8e24184109250050e9190020ff126d7619290`까지 upstream에 push했다. Task 23 자동화 closeout은 종료한다. 이후 실제 credential이나 사람 acceptance를 진행하려면 각각 별도 명시 권한이 필요하다.

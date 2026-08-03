@@ -126,7 +126,8 @@ Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_ready_script.py -q`
 - [x] quality review의 receipt concurrency/full-SHA/Unicode control/partial-temp cleanup Minor를 TDD로 보완하고 owner-ready **112 passed**, 전체 Python **2960 passed, 48 skipped**를 재확인했다.
 - [x] `git diff --check`, status, branch/HEAD/upstream divergence, worktree list, 보호 residue를 확인했다. 최종 문서 diff와 commit 후 상태는 재확인한다.
 - [x] SSOT/handoff에 실제 결과와 미실행 경계, Task 23 누적 `4/4 (100.0%)`, 잔여 `0.0%`를 기록했다. 이는 Task 9 사람 acceptance나 live provider 완료를 뜻하지 않는다.
-- [x] 계획 체크박스를 실제 수행 결과로 갱신하고 Task 4를 docs-only local commit으로 닫는다. 이번 위임에서는 push하지 않으며 root 최종 리뷰 뒤 별도 판단한다.
+- [x] 계획 체크박스를 실제 수행 결과로 갱신하고 Task 4를 docs-only local commit으로 닫아 root 최종 리뷰·push 단계로 handoff했다.
+- [x] root 최종 review hardening commit `24a8e24184109250050e9190020ff126d7619290`까지 upstream에 push하고 divergence `0/0`을 확인했다.
 
 ## Acceptance matrix
 
