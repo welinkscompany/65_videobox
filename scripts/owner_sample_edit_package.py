@@ -238,6 +238,21 @@ def _selected_source(sample_dir: Path, record: SampleRecord) -> Path:
     return source
 
 
+def _assert_final_source_fence(
+    sources: dict[str, Path], initial: dict[str, tuple[int, int, str]]
+) -> None:
+    for codec in ("h264", "hevc"):
+        source = sources[codec]
+        try:
+            if source.is_symlink() or _is_reparse_point(source) or not source.is_file():
+                raise OwnerSamplePackageError("source_changed_during_package")
+            current = _source_fingerprint(source)
+        except (OSError, OwnerSamplePackageError):
+            raise OwnerSamplePackageError("source_changed_during_package") from None
+        if current != initial[codec]:
+            raise OwnerSamplePackageError("source_changed_during_package")
+
+
 def _poll_preview(client: TestClient, endpoint: str, state: dict[str, Any]) -> dict[str, Any]:
     deadline = time.monotonic() + PREVIEW_TIMEOUT_SECONDS
     while state.get("status") in {"pending", "running"}:
@@ -318,11 +333,7 @@ def build_preview_proofs(
             ffprobe_binary=ffprobe_binary,
         )
     finally:
-        if any(
-            _source_fingerprint(sources[codec]) != initial[codec]
-            for codec in ("h264", "hevc")
-        ):
-            raise OwnerSamplePackageError("source_changed_during_package")
+        _assert_final_source_fence(sources, initial)
 
 
 def _build_preview_proofs_unfenced(

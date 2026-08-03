@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -300,6 +301,68 @@ def test_preview_proofs_fail_closed_when_source_changes(
             ffmpeg_binary="ffmpeg",
             ffprobe_binary="ffprobe",
         )
+
+
+@pytest.mark.parametrize("replacement_kind", ["deleted", "unreadable", "reparse"])
+def test_preview_source_fence_normalizes_inability_and_replacement_over_preview_error(
+    real_samples: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    replacement_kind: str,
+) -> None:
+    package = _load_module()
+    selected = package.select_preview_inputs(
+        package.inventory_samples(real_samples, ffprobe_binary="ffprobe")
+    )
+    source = real_samples / selected["h264"].name
+    changed = False
+    original_reparse_check = package._is_reparse_point
+
+    def mutate_then_fail(*args, **kwargs):
+        nonlocal changed
+        if not changed:
+            stat = source.stat()
+            contents = source.read_bytes()
+            source.unlink()
+            if replacement_kind == "unreadable":
+                source.mkdir()
+            elif replacement_kind == "reparse":
+                outside = tmp_path / "same-content-replacement.mp4"
+                outside.write_bytes(contents)
+                os.utime(outside, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+                try:
+                    source.symlink_to(outside)
+                except OSError:
+                    os.replace(outside, source)
+                    monkeypatch.setattr(
+                        package,
+                        "_is_reparse_point",
+                        lambda path: path == source or original_reparse_check(path),
+                    )
+            changed = True
+        raise package.OwnerSamplePackageError("preview_not_ready")
+
+    monkeypatch.setattr(package, "_poll_preview", mutate_then_fail)
+    with pytest.raises(package.OwnerSamplePackageError) as captured:
+        package.build_preview_proofs(
+            sample_dir=real_samples,
+            selected=selected,
+            projects_root=tmp_path / f"runtime-{replacement_kind}",
+            ffmpeg_binary="ffmpeg",
+            ffprobe_binary="ffprobe",
+        )
+
+    assert str(captured.value) == "source_changed_during_package"
+    assert str(real_samples.resolve()) not in str(captured.value)
+
+
+def test_initial_fingerprint_read_error_keeps_inventory_error_semantics(tmp_path: Path) -> None:
+    package = _load_module()
+
+    with pytest.raises(package.OwnerSamplePackageError) as captured:
+        package._source_fingerprint(tmp_path / "missing.mp4")
+
+    assert str(captured.value) == "sample_read_failed"
 
 
 def test_runner_source_has_no_direct_sample_copy_or_asset_registration() -> None:
