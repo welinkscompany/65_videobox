@@ -1135,6 +1135,201 @@ def test_reverse_manifest_rejects_disconnected_typed_control_or_preview_branch(
         package.validate_reverse_manifest(package_root, detached)
 
 
+def _validate_fixture_structured_edit_evidence(package, package_root: Path, manifest) -> None:
+    inventory = {row["name"]: row for row in manifest["source_inventory"]}
+    selected = package.SampleRecord(
+        **inventory[manifest["selected_sources"]["h264"]["name"]]
+    )
+
+    def probe(path: Path) -> dict[str, object]:
+        return {
+            "duration_sec": 5.0 if "exact" in path.name else 600.0,
+            "format": "mov,mp4",
+            "video_codec": "h264",
+            "pixel_format": "yuv420p",
+            "audio_codec": "aac",
+        }
+
+    package._validate_structured_edit_evidence(
+        package_root=package_root,
+        edit_result={"edit_input_evidence": manifest["edit_input_evidence"]},
+        artifacts=manifest["artifacts"],
+        narration=manifest["narration"],
+        selected_h264=selected,
+        media_probe=probe,
+    )
+
+
+@pytest.mark.parametrize(
+    ("key", "actual", "expected"),
+    (
+        ("loop", 1, True),
+        ("pad", 0, False),
+        ("trim_start_sec", False, 0.0),
+        ("ducking", 1, True),
+        ("gain_db", False, -6.0),
+    ),
+)
+def test_media_controls_subset_rejects_bool_number_confusion(
+    key: str, actual: object, expected: object
+) -> None:
+    package = _load_module()
+
+    assert package._media_controls_include({key: actual}, {key: expected}) is False
+
+
+def test_structured_edit_controls_allow_canonical_broll_extras(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    for artifact_key in ("timeline_snapshot", "editing_session_snapshot"):
+        path = package_root / manifest["artifacts"][artifact_key]["path"]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+
+        def add_canonical_extra(value) -> None:
+            if isinstance(value, dict):
+                controls = value.get("media_controls")
+                if isinstance(controls, dict) and controls.get("fit") == "fit":
+                    controls["preserve_source_audio"] = False
+                for child in value.values():
+                    add_canonical_extra(child)
+            elif isinstance(value, list):
+                for child in value:
+                    add_canonical_extra(child)
+
+        add_canonical_extra(payload)
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    _validate_fixture_structured_edit_evidence(package, package_root, manifest)
+
+
+def test_structured_edit_controls_reject_decoy_outside_media_control_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    for artifact_key in ("timeline_snapshot", "editing_session_snapshot"):
+        path = package_root / manifest["artifacts"][artifact_key]["path"]
+        payload = json.loads(path.read_text(encoding="utf-8"))
+
+        def remove_broll_controls(value) -> None:
+            if isinstance(value, dict):
+                controls = value.get("media_controls")
+                if isinstance(controls, dict) and controls.get("fit") == "fit":
+                    value.pop("media_controls")
+                for child in value.values():
+                    remove_broll_controls(child)
+            elif isinstance(value, list):
+                for child in value:
+                    remove_broll_controls(child)
+
+        remove_broll_controls(payload)
+        if artifact_key == "timeline_snapshot":
+            payload["unrelated_metadata"] = {
+                "media_controls": {
+                    "fit": "fit",
+                    "loop": True,
+                    "pad": False,
+                    "trim_start_sec": 0.0,
+                }
+            }
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_controls_invalid$"):
+        _validate_fixture_structured_edit_evidence(package, package_root, manifest)
+
+
+def test_structured_edit_controls_reject_broll_controls_on_audio_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    broll_controls = {
+        "fit": "fit",
+        "loop": True,
+        "pad": False,
+        "trim_start_sec": 0.0,
+    }
+
+    timeline_path = package_root / manifest["artifacts"]["timeline_snapshot"]["path"]
+    timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    tracks_by_type = {track["track_type"]: track for track in timeline["tracks"]}
+    tracks_by_type["broll"]["clips"][0].pop("media_controls")
+    tracks_by_type["bgm"]["clips"][0]["media_controls"] = broll_controls
+    timeline_path.write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
+
+    session_path = package_root / manifest["artifacts"]["editing_session_snapshot"]["path"]
+    session = json.loads(session_path.read_text(encoding="utf-8"))
+    segment = session["segments"][0]
+    segment["broll_override"].pop("media_controls")
+    segment["music_override"]["media_controls"] = broll_controls
+    session_path.write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_controls_invalid$"):
+        _validate_fixture_structured_edit_evidence(package, package_root, manifest)
+
+
+def test_structured_edit_controls_reject_same_kind_broll_decoy_clip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    timeline_path = package_root / manifest["artifacts"]["timeline_snapshot"]["path"]
+    timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    broll_track = next(
+        track for track in timeline["tracks"] if track["track_type"] == "broll"
+    )
+    broll_track["clips"][0].pop("media_controls")
+    broll_track["clips"].append(
+        {
+            "asset_id": "decoy-broll-asset",
+            "asset_uri": "local://projects/edit-owner/assets/decoy.mp4",
+            "media_controls": {
+                "fit": "fit",
+                "loop": True,
+                "pad": False,
+                "trim_start_sec": 0.0,
+            },
+        }
+    )
+    timeline_path.write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_controls_invalid$"):
+        _validate_fixture_structured_edit_evidence(package, package_root, manifest)
+
+
+def test_structured_edit_controls_reject_sfx_only_audio_ducking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    timeline_path = package_root / manifest["artifacts"]["timeline_snapshot"]["path"]
+    timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    bgm_track = next(
+        track for track in timeline["tracks"] if track["track_type"] == "bgm"
+    )
+    bgm_track["clips"][0].pop("media_controls")
+    timeline_path.write_text(json.dumps(timeline, ensure_ascii=False), encoding="utf-8")
+
+    session_path = package_root / manifest["artifacts"]["editing_session_snapshot"]["path"]
+    session = json.loads(session_path.read_text(encoding="utf-8"))
+    session["segments"][0]["music_override"].pop("media_controls")
+    session_path.write_text(json.dumps(session, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_controls_invalid$"):
+        _validate_fixture_structured_edit_evidence(package, package_root, manifest)
+
+
 def test_structured_edit_validation_rejects_timeline_identity_srt_capcut_and_media_mutations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

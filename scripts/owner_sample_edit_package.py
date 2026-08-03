@@ -945,6 +945,53 @@ def _validate_edit_document_shapes(
             raise OwnerSamplePackageError(error_code)
 
 
+def _semantic_edit_media_controls(
+    timeline: dict[str, Any], session: dict[str, Any]
+) -> list[tuple[str, dict[str, Any]]]:
+    controls: list[tuple[str, dict[str, Any]]] = []
+
+    def append_from(kind: Any, owner: Any) -> None:
+        if not isinstance(kind, str) or not isinstance(owner, dict):
+            return
+        value = owner.get("media_controls")
+        if isinstance(value, dict):
+            controls.append(("bgm" if kind == "music" else kind, value))
+
+    for track in timeline.get("tracks", []):
+        for clip in track.get("clips", []):
+            append_from(track.get("track_type"), clip)
+    for recommendation in timeline.get("applied_recommendations") or []:
+        kind = recommendation.get("recommendation_type")
+        append_from(kind, recommendation)
+        append_from(kind, recommendation.get("payload"))
+    for segment in session.get("segments", []):
+        for key, kind in (
+            ("broll_override", "broll"),
+            ("music_override", "bgm"),
+            ("sfx_override", "sfx"),
+        ):
+            append_from(kind, segment.get(key))
+    return controls
+
+
+def _media_controls_include(
+    actual: dict[str, Any], expected: dict[str, Any]
+) -> bool:
+    for key, expected_value in expected.items():
+        if key not in actual:
+            return False
+        actual_value = actual[key]
+        if isinstance(expected_value, bool):
+            if actual_value is not expected_value:
+                return False
+        elif isinstance(expected_value, (int, float)):
+            if isinstance(actual_value, bool) or actual_value != expected_value:
+                return False
+        elif actual_value != expected_value:
+            return False
+    return True
+
+
 def _read_required_srt(path: Path) -> str:
     try:
         if not 0 < path.stat().st_size <= 4 * 1024 * 1024:
@@ -1033,6 +1080,12 @@ def _validate_structured_edit_evidence(
         for clip in track.get("clips", [])
         if isinstance(clip, dict)
     ]
+    selected_broll_clips = [
+        clip
+        for clip in broll_clips
+        if clip.get("asset_id") == broll_asset_id
+        and clip.get("asset_uri") == evidence["broll_storage_ref"]
+    ]
     required_tokens = (
         "tts_replacement",
         "sfx",
@@ -1041,11 +1094,7 @@ def _validate_structured_edit_evidence(
     )
     combined = serialized_timeline + serialized_session
     if (
-        not any(
-            clip.get("asset_id") == broll_asset_id
-            and clip.get("asset_uri") == evidence["broll_storage_ref"]
-            for clip in broll_clips
-        )
+        not selected_broll_clips
         or broll_asset_id not in serialized_session
         or evidence["broll_storage_ref"] not in serialized_timeline
         or any(token not in combined for token in required_tokens)
@@ -1059,13 +1108,18 @@ def _validate_structured_edit_evidence(
         "fade_out_sec": 0.5,
         "ducking": True,
     }
-    if json.dumps(broll_controls, sort_keys=True) not in json.dumps(
-        timeline, sort_keys=True
-    ) + json.dumps(session, sort_keys=True):
+    semantic_controls = _semantic_edit_media_controls(timeline, session)
+    if not any(
+        isinstance(clip.get("media_controls"), dict)
+        and _media_controls_include(clip["media_controls"], broll_controls)
+        for clip in selected_broll_clips
+    ):
         raise OwnerSamplePackageError("edit_controls_invalid")
-    if json.dumps(audio_controls, sort_keys=True) not in json.dumps(
-        timeline, sort_keys=True
-    ) + json.dumps(session, sort_keys=True):
+    if not any(
+        _media_controls_include(controls, audio_controls)
+        for kind, controls in semantic_controls
+        if kind == "bgm"
+    ):
         raise OwnerSamplePackageError("edit_controls_invalid")
     _read_required_srt(package_root / artifacts["srt"]["path"])
     capcut = _read_bounded_json(package_root / artifacts["capcut_draft"]["path"])
