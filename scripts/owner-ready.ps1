@@ -293,6 +293,115 @@ function Get-ScriptSha256 {
     return "unavailable"
 }
 
+function Get-HermesCredentialStatus {
+    param([string]$LiteralPath)
+    if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+        return "missing"
+    }
+
+    $requiredKeys = @(
+        "HERMES_YUJIN_GATEWAY_USERNAME",
+        "HERMES_YUJIN_GATEWAY_PASSWORD",
+        "HERMES_YUJIN_GATEWAY_PASSWORD_HASH",
+        "VIDEOBOX_AGENT_GATEWAY_SERVICE_TOKEN",
+        "VIDEOBOX_HERMES_CAPABILITY_PRIVATE_KEY_B64",
+        "VIDEOBOX_HERMES_CAPABILITY_PUBLIC_KEY_B64",
+        "VIDEOBOX_HERMES_CAPABILITY_KEY_ID",
+        "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
+    )
+    $placeholderSentinels = @(
+        "replace-before-starting",
+        "replace_me",
+        "placeholder",
+        "change-me",
+        "changeme",
+        "sentinel"
+    )
+    $counts = @{}
+    foreach ($requiredKey in $requiredKeys) {
+        $counts[$requiredKey] = 0
+    }
+
+    $stream = $null
+    $reader = $null
+    $invalid = $false
+    try {
+        $stream = [IO.File]::Open(
+            $LiteralPath,
+            [IO.FileMode]::Open,
+            [IO.FileAccess]::Read,
+            [IO.FileShare]::Read
+        )
+        if ($stream.Length -gt 65536) {
+            return "invalid"
+        }
+        $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        $reader = New-Object System.IO.StreamReader($stream, $strictUtf8, $true, 1024, $false)
+        $charactersRead = 0
+        while ($null -ne ($line = $reader.ReadLine())) {
+            $charactersRead += $line.Length + 1
+            if ($charactersRead -gt 65536) {
+                return "invalid"
+            }
+            if ($line -cnotmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') {
+                continue
+            }
+            $key = [string]$Matches[1]
+            if ($requiredKeys -cnotcontains $key) {
+                continue
+            }
+            $counts[$key] = [int]$counts[$key] + 1
+            if ([int]$counts[$key] -ne 1) {
+                $invalid = $true
+                continue
+            }
+
+            $value = ([string]$Matches[2]).Trim()
+            if ($value.Length -gt 0) {
+                $first = $value.Substring(0, 1)
+                $last = $value.Substring($value.Length - 1, 1)
+                if (
+                    $value.Length -ge 2 -and
+                    (($first -ceq '"' -and $last -ceq '"') -or ($first -ceq "'" -and $last -ceq "'"))
+                ) {
+                    $value = $value.Substring(1, $value.Length - 2).Trim()
+                }
+                elseif ($first -in @('"', "'") -or $last -in @('"', "'")) {
+                    $invalid = $true
+                    continue
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($value) -or $value -match '\$\{[^}]*\}') {
+                $invalid = $true
+                continue
+            }
+            foreach ($sentinel in $placeholderSentinels) {
+                if ($value.IndexOf($sentinel, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                    $invalid = $true
+                    break
+                }
+            }
+        }
+    }
+    catch {
+        return "invalid"
+    }
+    finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        elseif ($null -ne $stream) { $stream.Dispose() }
+    }
+
+    foreach ($requiredKey in $requiredKeys) {
+        if ([int]$counts[$requiredKey] -ne 1) {
+            return "invalid"
+        }
+    }
+    if ($invalid) {
+        return "invalid"
+    }
+    return "present_unverified"
+}
+
 function Get-WorkspaceChecks {
     $rootResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "--show-toplevel")
     $branchResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("branch", "--show-current")
@@ -514,14 +623,9 @@ function Test-ConnectionUnavailableException {
     $current = $Exception
     while ($null -ne $current) {
         if ($current -is [System.Net.Sockets.SocketException]) {
-            return $current.SocketErrorCode -in @(
-                [System.Net.Sockets.SocketError]::ConnectionRefused,
-                [System.Net.Sockets.SocketError]::ConnectionReset,
-                [System.Net.Sockets.SocketError]::HostDown,
-                [System.Net.Sockets.SocketError]::HostNotFound,
-                [System.Net.Sockets.SocketError]::NetworkDown,
-                [System.Net.Sockets.SocketError]::NetworkUnreachable,
-                [System.Net.Sockets.SocketError]::TimedOut
+            return (
+                $current.SocketErrorCode -eq [System.Net.Sockets.SocketError]::ConnectionRefused -or
+                $current.NativeErrorCode -eq 10061
             )
         }
         $current = $current.InnerException
@@ -604,8 +708,9 @@ function Invoke-LoopbackProbe {
         return [pscustomobject]@{ State = "blocked"; StatusCode = 0 }
     }
     catch {
+        $connectionUnavailable = Test-ConnectionUnavailableException -Exception $_.Exception
         return [pscustomobject]@{
-            State = $(if (Test-ConnectionUnavailableException -Exception $_.Exception) { "blocked" } else { "fail" })
+            State = $(if ($connectionUnavailable) { "blocked" } else { "fail" })
             StatusCode = 0
         }
     }
@@ -918,7 +1023,7 @@ if ($Mode -ceq "Smoke") {
     else {
         "invalid"
     }
-    $credentialStatus = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) { "present_unverified" } else { "missing" }
+    $credentialStatus = Get-HermesCredentialStatus -LiteralPath $EnvFile
     $finalHeadResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "HEAD")
     $finalHead = $finalHeadResult.StdOut.Trim().ToLowerInvariant()
     $headStable = (
@@ -960,7 +1065,7 @@ if ($Mode -ceq "Smoke") {
     elseif ($dashboardStatus -ceq "invalid") {
         "not_ready"
     }
-    elseif ($credentialStatus -ceq "missing") {
+    elseif ($credentialStatus -in @("missing", "invalid")) {
         "credential_blocked"
     }
     elseif ($dashboardStatus -cne "ready") {

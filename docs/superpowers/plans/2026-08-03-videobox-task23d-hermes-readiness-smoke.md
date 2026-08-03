@@ -13,7 +13,7 @@
 ## 실행 상태
 
 - [x] Task 1 readiness schema·상태 우선순위·six-gate marker TDD
-- [ ] Task 2 dashboard/credential boundary와 sanitized receipt 구현
+- [x] Task 2 dashboard/credential boundary와 sanitized receipt 구현
 - [ ] Task 3 manual fallback·reverse trace·실제 non-live 검증
 - [ ] Task 4 Task 23 통합 회귀·독립 리뷰·SSOT·commit/push
 
@@ -83,12 +83,12 @@ Expected: readiness schema, marker parsing, credential/dashboard state mapping �
 - Modify: `tests/test_owner_ready_script.py`
 - Modify: `scripts/owner-ready.ps1`
 
-- [ ] Hermes dashboard exact loopback 200 또는 same-loopback `/login` 302는 pass, connection refused는 `not_running`, 외부 redirect/malformed/oversize는 fail인 RED test를 작성한다. 외부 URL 요청 수는 0이어야 한다.
-- [ ] `.env.container`가 없으면 key value를 읽지 않고 `missing`; required key 누락·중복·blank·placeholder면 path/value를 노출하지 않는 `invalid`; exact required key metadata는 `present_unverified`인 RED test를 작성한다.
-- [ ] required key 목록은 Hermes gateway username/password/hash, gateway service token, capability private/public key/key ID, memory-adapter token만 포함하고 `MEM0_API_KEY`는 제외하는 테스트를 작성한다.
-- [ ] credential 분류는 `start-hermes-yujin.ps1 -ValidateOnly`, Docker run/pull, compose up, live status API를 호출하지 않는 fake command-log test를 작성한다.
-- [ ] receipt가 `static_non_live_checks_passed`, `dashboard_status`, `credential_status`, `live_canary_status=not_run`, `external_provider_calls=0`, `external_network_calls=0`, commit/timestamp를 기록하고 raw env/key value는 기록하지 않는 RED test를 작성한다.
-- [ ] RED를 실행한 뒤 loopback probe와 metadata-only env classifier를 최소 구현하고 GREEN을 실행한다.
+- [x] Hermes dashboard exact loopback 200 또는 same-loopback `/login` 302는 pass, connection refused는 `not_running`, 외부 redirect/malformed/oversize는 fail인 RED test를 작성한다. 외부 URL 요청 수는 0이어야 한다.
+- [x] `.env.container`가 없으면 key value를 읽지 않고 `missing`; required key 누락·중복·blank·placeholder면 path/value를 노출하지 않는 `invalid`; exact required key metadata는 `present_unverified`인 RED test를 작성한다.
+- [x] required key 목록은 Hermes gateway username/password/hash, gateway service token, capability private/public key/key ID, memory-adapter token만 포함하고 `MEM0_API_KEY`는 제외하는 테스트를 작성한다.
+- [x] credential 분류는 `start-hermes-yujin.ps1 -ValidateOnly`, Docker run/pull, compose up, live status API를 호출하지 않는 fake command-log test를 작성한다.
+- [x] receipt가 `static_non_live_checks_passed`, `dashboard_status`, `credential_status`, `live_canary_status=not_run`, `external_provider_calls=0`, `external_network_calls=0`, commit/timestamp를 기록하고 raw env/key value는 기록하지 않는 RED test를 작성한다.
+- [x] RED를 실행한 뒤 loopback probe와 metadata-only env classifier를 최소 구현하고 GREEN을 실행한다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_ready_script.py -q`
 
