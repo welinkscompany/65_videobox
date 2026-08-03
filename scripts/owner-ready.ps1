@@ -182,8 +182,19 @@ function Get-OverallStatus {
 }
 
 function Write-OwnerReadyPayload {
-    param([object[]]$Checks, [string]$PayloadMode = $Mode, [hashtable]$Extra = @{})
-    $overall = Get-OverallStatus -Checks $Checks
+    param(
+        [object[]]$Checks,
+        [string]$PayloadMode = $Mode,
+        [hashtable]$Extra = @{},
+        [ValidateSet("", "pass", "blocked", "fail")]
+        [string]$OverallStatusOverride = ""
+    )
+    $overall = if ([string]::IsNullOrEmpty($OverallStatusOverride)) {
+        Get-OverallStatus -Checks $Checks
+    }
+    else {
+        $OverallStatusOverride
+    }
     $payload = [ordered]@{
         schema_version = "videobox-owner-ready-v1"
         mode = $PayloadMode
@@ -212,6 +223,50 @@ function Write-OwnerReadyPayload {
     if ($overall -ceq "pass") { exit 0 }
     if ($overall -ceq "blocked") { exit 2 }
     exit 1
+}
+
+function Test-SmokeSuccessMarker {
+    param([object]$Definition, [string]$StdOut)
+    $lines = @(
+        $StdOut -split "`r?`n" |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if (-not [string]::IsNullOrEmpty($Definition.ExactLine)) {
+        return @($lines | Where-Object { $_ -ceq $Definition.ExactLine }).Count -eq 1
+    }
+
+    $prefix = [string]$Definition.MarkerPrefix
+    $markerLines = @(
+        $lines | Where-Object {
+            $_.StartsWith("$prefix ", [StringComparison]::Ordinal)
+        }
+    )
+    if ($markerLines.Count -ne 1) {
+        return $false
+    }
+    $fieldText = $markerLines[0].Substring($prefix.Length + 1)
+    $tokens = @($fieldText -split " ")
+    $fields = @{}
+    foreach ($token in $tokens) {
+        if ($token -notmatch '^([a-z][a-z0-9_]*)=([a-z0-9_-]+)$') {
+            return $false
+        }
+        $name = [string]$Matches[1]
+        if ($fields.ContainsKey($name)) {
+            return $false
+        }
+        $fields[$name] = [string]$Matches[2]
+    }
+    $expected = $Definition.ExpectedFields
+    if ($fields.Count -ne $expected.Count) {
+        return $false
+    }
+    foreach ($name in $expected.Keys) {
+        if (-not $fields.ContainsKey($name) -or $fields[$name] -cne [string]$expected[$name]) {
+            return $false
+        }
+    }
+    return $true
 }
 
 function Get-WorkspaceChecks {
@@ -680,47 +735,184 @@ if ($Mode -ceq "Start") {
 if ($Mode -ceq "Smoke") {
     $powerShellExecutable = (Get-Process -Id $PID).Path
     $definitions = @(
-        [pscustomobject]@{ Id = "creator_flow_non_live"; File = "smoke-hermes-yujin-creator-flow.ps1"; Arguments = @() },
-        [pscustomobject]@{ Id = "chat_non_live"; File = "smoke-hermes-yujin-chat.ps1"; Arguments = @() },
-        [pscustomobject]@{ Id = "mem0_non_live"; File = "smoke-hermes-yujin-mem0.ps1"; Arguments = @() },
-        [pscustomobject]@{ Id = "plan_state"; File = "verify-hermes-yujin-plan-state.ps1"; Arguments = @() },
-        [pscustomobject]@{ Id = "profile_static"; File = "verify-hermes-yujin-profile.ps1"; Arguments = @("-StaticOnly") },
-        [pscustomobject]@{ Id = "runtime_static"; File = "verify-hermes-yujin-runtime.ps1"; Arguments = @("-StaticOnly") }
+        [pscustomobject]@{
+            Id = "creator_flow_non_live"
+            File = "smoke-hermes-yujin-creator-flow.ps1"
+            Arguments = @()
+            ReceiptMode = "non_live"
+            PublicMarker = "creator_non_live_pass"
+            MarkerPrefix = "HERMES_YUJIN_CREATOR_NON_LIVE_PASS"
+            ExactLine = ""
+            ExpectedFields = [ordered]@{
+                sse_completed = "true"
+                proposal_ready = "true"
+                session_file_bound = "true"
+                mutation_before_apply = "0"
+                session_revision_delta = "1"
+                caption_changes = "1"
+                playback_manifest_checked = "true"
+                output_readiness_checked = "true"
+                output_jobs = "0"
+                external_provider_calls = "0"
+            }
+        },
+        [pscustomobject]@{
+            Id = "chat_non_live"
+            File = "smoke-hermes-yujin-chat.ps1"
+            Arguments = @()
+            ReceiptMode = "non_live"
+            PublicMarker = "chat_non_live_zero_calls"
+            MarkerPrefix = "HERMES_YUJIN_CANARY_NON_LIVE"
+            ExactLine = ""
+            ExpectedFields = [ordered]@{
+                network_calls = "0"
+                proposal_calls = "0"
+                provider_body_recorded = "false"
+            }
+        },
+        [pscustomobject]@{
+            Id = "mem0_non_live"
+            File = "smoke-hermes-yujin-mem0.ps1"
+            Arguments = @()
+            ReceiptMode = "non_live"
+            PublicMarker = "mem0_non_live_zero_calls"
+            MarkerPrefix = "HERMES_YUJIN_MEM0_NON_LIVE"
+            ExactLine = ""
+            ExpectedFields = [ordered]@{
+                network_calls = "0"
+                provider_calls = "0"
+                credentials_printed = "false"
+            }
+        },
+        [pscustomobject]@{
+            Id = "plan_state"
+            File = "verify-hermes-yujin-plan-state.ps1"
+            Arguments = @()
+            ReceiptMode = "non_live"
+            PublicMarker = "plan_state_verified"
+            MarkerPrefix = ""
+            ExactLine = "Hermes Yujin plan state verified: 20 unique master task IDs; all 20 occur exactly once across four children; statuses and progress agree."
+            ExpectedFields = [ordered]@{}
+        },
+        [pscustomobject]@{
+            Id = "profile_static"
+            File = "verify-hermes-yujin-profile.ps1"
+            Arguments = @("-StaticOnly")
+            ReceiptMode = "static_only"
+            PublicMarker = "profile_static_verified"
+            MarkerPrefix = ""
+            ExactLine = "Hermes Yujin profile ownership and secret-free contents verified."
+            ExpectedFields = [ordered]@{}
+        },
+        [pscustomobject]@{
+            Id = "runtime_static"
+            File = "verify-hermes-yujin-runtime.ps1"
+            Arguments = @("-StaticOnly")
+            ReceiptMode = "static_only"
+            PublicMarker = "runtime_static_verified"
+            MarkerPrefix = ""
+            ExactLine = "Hermes Yujin D2 static topology verified: exact chat, gateway, and optional memory adapter boundaries."
+            ExpectedFields = [ordered]@{}
+        }
     )
     $checks = @()
+    $receiptChecks = @()
     foreach ($definition in $definitions) {
         $scriptPath = Join-Path $PSScriptRoot $definition.File
         $exitCode = 127
+        $stdout = ""
+        $scriptSha256 = "unavailable"
+        $hashStream = $null
+        $sha256 = $null
+        try {
+            if (Test-Path -LiteralPath $scriptPath -PathType Leaf) {
+                $hashStream = [IO.File]::OpenRead($scriptPath)
+                $sha256 = [Security.Cryptography.SHA256]::Create()
+                $hashBytes = $sha256.ComputeHash($hashStream)
+                $hash = [BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
+                if ($hash -match '^[0-9a-f]{64}$') {
+                    $scriptSha256 = $hash
+                }
+            }
+        }
+        catch { }
+        finally {
+            if ($null -ne $sha256) { $sha256.Dispose() }
+            if ($null -ne $hashStream) { $hashStream.Dispose() }
+        }
         if (Test-Path -LiteralPath $scriptPath -PathType Leaf) {
             $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath)
             $arguments += @($definition.Arguments)
             $child = Invoke-CapturedProcess -FilePath $powerShellExecutable -Arguments $arguments -CommandTimeoutSec $TimeoutSec
             $exitCode = $child.ExitCode
+            $stdout = $child.StdOut
         }
-        $status = if ($exitCode -eq 0) { "pass" } else { "fail" }
+        $markerValid = Test-SmokeSuccessMarker -Definition $definition -StdOut $stdout
+        $status = if ($exitCode -eq 0 -and $markerValid -and $scriptSha256 -ne "unavailable") { "pass" } else { "fail" }
+        $action = if ($status -ceq "pass") { "추가 조치가 없습니다." } else { "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요." }
         $checks += New-OwnerReadyResult -Id $definition.Id -Status $status `
             -Summary $(if ($status -ceq "pass") { "로컬 검증 항목을 확인했습니다." } else { "로컬 검증 항목을 확인하지 못했습니다." }) `
-            -Action $(if ($status -ceq "pass") { "추가 조치가 없습니다." } else { "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요." }) `
+            -Action $action `
             -Evidence @{ live = $false; static_only = ($definition.Arguments -contains "-StaticOnly"); raw_output_recorded = $false }
+        $receiptChecks += [ordered]@{
+            id = $definition.Id
+            mode = $definition.ReceiptMode
+            status = $status
+            marker = $(if ($status -ceq "pass") { $definition.PublicMarker } else { "invalid" })
+            script_sha256 = $scriptSha256
+            action = $action
+        }
+    }
+    $staticNonLiveChecksPassed = @($checks | Where-Object { $_.status -cne "pass" }).Count -eq 0
+    $dashboardProbe = Invoke-LoopbackProbe -Uri $HermesDashboardUri -AcceptLoginRedirectAsReachable
+    $dashboardStatus = if ($dashboardProbe.State -ceq "pass") {
+        "ready"
+    }
+    elseif ($dashboardProbe.State -ceq "blocked") {
+        "not_running"
+    }
+    else {
+        "invalid"
+    }
+    $credentialStatus = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) { "present_unverified" } else { "missing" }
+    $readinessStatus = if (-not $staticNonLiveChecksPassed) {
+        "not_ready"
+    }
+    elseif ($credentialStatus -ceq "missing") {
+        "credential_blocked"
+    }
+    elseif ($dashboardStatus -cne "ready") {
+        "not_ready"
+    }
+    else {
+        "local_ready"
+    }
+    $overallStatus = if ($readinessStatus -ceq "local_ready") {
+        "pass"
+    }
+    elseif ($readinessStatus -ceq "credential_blocked") {
+        "blocked"
+    }
+    else {
+        "fail"
     }
     $commitResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "--short", "HEAD")
     $commit = $commitResult.StdOut.Trim().ToLowerInvariant()
     if ($commitResult.ExitCode -ne 0 -or $commit -notmatch '^[0-9a-f]{7,12}$') {
         $commit = "unknown"
     }
-    $receiptOverall = Get-OverallStatus -Checks $checks
-    $receiptChecks = @(
-        $checks | ForEach-Object {
-            [ordered]@{ id = $_.id; status = $_.status; action = $_.action }
-        }
-    )
     $receiptPayload = [ordered]@{
-        schema_version = "videobox-owner-ready-v1"
+        schema_version = "videobox-hermes-readiness-v1"
         mode = "Smoke"
-        overall_status = $receiptOverall
+        readiness_status = $readinessStatus
+        static_non_live_checks_passed = $staticNonLiveChecksPassed
+        dashboard_status = $dashboardStatus
+        credential_status = $credentialStatus
+        live_canary_status = "not_run"
         generated_at = [DateTimeOffset]::UtcNow.ToString("o")
         commit = $commit
         external_provider_calls = 0
+        external_network_calls = 0
         checks = $receiptChecks
     }
     $timestamp = [DateTimeOffset]::UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'")
@@ -745,7 +937,17 @@ if ($Mode -ceq "Smoke") {
             -Action "artifacts 폴더의 디스크 공간과 권한을 확인하세요." `
             -Evidence @{ written = $false }
     }
-    Write-OwnerReadyPayload -Checks $checks -Extra @{
+    if (-not $receiptWritten) {
+        $readinessStatus = "not_ready"
+        $overallStatus = "fail"
+    }
+    Write-OwnerReadyPayload -Checks $checks -OverallStatusOverride $overallStatus -Extra @{
+        readiness_status = $readinessStatus
+        static_non_live_checks_passed = $staticNonLiveChecksPassed
+        dashboard_status = $dashboardStatus
+        credential_status = $credentialStatus
+        live_canary_status = "not_run"
+        external_network_calls = 0
         receipt = @{ written = $receiptWritten; file_name = $(if ($receiptWritten) { $fileName } else { $null }) }
     }
 }

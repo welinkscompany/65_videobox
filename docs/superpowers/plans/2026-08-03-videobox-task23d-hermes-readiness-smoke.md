@@ -12,7 +12,7 @@
 
 ## 실행 상태
 
-- [ ] Task 1 readiness schema·상태 우선순위·six-gate marker TDD
+- [x] Task 1 readiness schema·상태 우선순위·six-gate marker TDD
 - [ ] Task 2 dashboard/credential boundary와 sanitized receipt 구현
 - [ ] Task 3 manual fallback·reverse trace·실제 non-live 검증
 - [ ] Task 4 Task 23 통합 회귀·독립 리뷰·SSOT·commit/push
@@ -59,23 +59,23 @@ Receipt는 local 검증과 live 경계를 분리해 다음 필드를 갖는다.
 - Modify: `tests/test_owner_ready_script.py`
 - Modify: `scripts/owner-ready.ps1`
 
-- [ ] fake six scripts가 실제 script별 exact success marker와 의도적 secret noise를 출력하게 fixture를 확장한다.
-- [ ] Smoke가 exact six relative script를 한 번씩, exact 허용 인자로만 실행하고 `-Live`, approval, project/session/conversation ID, credential argument가 0개인 RED test를 작성한다.
-- [ ] exit 0이어도 marker가 없거나 malformed/duplicate/unknown key/zero-call 값이 아닌 child는 fail closed하고 나머지 gate는 계속 실행하는 RED test를 작성한다.
-- [ ] receipt check가 exact `{id, mode, status, marker, script_sha256, action}`만 가지며 script SHA가 현재 checked-in child로 역추적되는 RED test를 작성한다.
-- [ ] child raw stdout/stderr, secret, repository/receipt/env absolute path가 console JSON과 receipt 어디에도 없는 RED test를 작성한다.
-- [ ] timeout이면 child tree를 종료하고 marker를 성공으로 추정하지 않는 기존 회귀를 새 schema에 맞춰 유지한다.
-- [ ] missing credential, failed gate, dashboard off, fully local-ready 조합의 상태 우선순위를 RED test로 고정하고 정적 입력만으로 `live_ready`가 나올 수 없음을 source/output 양쪽에서 검사한다.
-- [ ] RED를 실행한다.
+- [x] fake six scripts가 실제 script별 exact success marker와 의도적 secret noise를 출력하게 fixture를 확장한다.
+- [x] Smoke가 exact six relative script를 한 번씩, exact 허용 인자로만 실행하고 `-Live`, approval, project/session/conversation ID, credential argument가 0개인 RED test를 작성한다.
+- [x] exit 0이어도 marker가 없거나 malformed/duplicate/unknown key/zero-call 값이 아닌 child는 fail closed하고 나머지 gate는 계속 실행하는 RED test를 작성한다.
+- [x] receipt check가 exact `{id, mode, status, marker, script_sha256, action}`만 가지며 script SHA가 현재 checked-in child로 역추적되는 RED test를 작성한다.
+- [x] child raw stdout/stderr, secret, repository/receipt/env absolute path가 console JSON과 receipt 어디에도 없는 RED test를 작성한다.
+- [x] timeout이면 child tree를 종료하고 marker를 성공으로 추정하지 않는 기존 회귀를 새 schema에 맞춰 유지한다.
+- [x] missing credential, failed gate, dashboard off, fully local-ready 조합의 상태 우선순위를 RED test로 고정하고 정적 입력만으로 `live_ready`가 나올 수 없음을 source/output 양쪽에서 검사한다.
+- [x] RED를 실행한다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_ready_script.py -q`
 
 Expected: readiness schema, marker parsing, credential/dashboard state mapping 부재로 FAIL.
 
-- [ ] `owner-ready.ps1`에 script별 exact marker parser와 bounded public marker ID를 구현한다. raw line은 저장하지 않는다.
-- [ ] child exit, exact marker, checked-in SHA가 모두 맞아야 pass가 되게 하고 receipt에 static/non-live mode를 명시한다.
-- [ ] `videobox-hermes-readiness-v1` atomic receipt를 구현하고 기존 temp cleanup/timeout/continue-after-failure를 보존한다.
-- [ ] GREEN을 실행한다.
+- [x] `owner-ready.ps1`에 script별 exact marker parser와 bounded public marker ID를 구현한다. raw line은 저장하지 않는다.
+- [x] child exit, exact marker, checked-in SHA가 모두 맞아야 pass가 되게 하고 receipt에 static/non-live mode를 명시한다.
+- [x] `videobox-hermes-readiness-v1` atomic receipt를 구현하고 기존 temp cleanup/timeout/continue-after-failure를 보존한다.
+- [x] GREEN을 실행한다.
 
 ### Task 2: dashboard/credential boundary와 sanitized receipt 구현
 

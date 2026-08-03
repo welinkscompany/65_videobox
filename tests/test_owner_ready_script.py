@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -24,6 +25,44 @@ SMOKE_SCRIPTS = (
     "verify-hermes-yujin-plan-state.ps1",
     "verify-hermes-yujin-profile.ps1",
     "verify-hermes-yujin-runtime.ps1",
+)
+
+SMOKE_MARKERS = {
+    "smoke-hermes-yujin-creator-flow.ps1": (
+        "HERMES_YUJIN_CREATOR_NON_LIVE_PASS "
+        "sse_completed=true proposal_ready=true session_file_bound=true "
+        "mutation_before_apply=0 session_revision_delta=1 caption_changes=1 "
+        "playback_manifest_checked=true output_readiness_checked=true "
+        "output_jobs=0 external_provider_calls=0"
+    ),
+    "smoke-hermes-yujin-chat.ps1": (
+        "HERMES_YUJIN_CANARY_NON_LIVE network_calls=0 proposal_calls=0 "
+        "provider_body_recorded=false"
+    ),
+    "smoke-hermes-yujin-mem0.ps1": (
+        "HERMES_YUJIN_MEM0_NON_LIVE network_calls=0 provider_calls=0 "
+        "credentials_printed=false"
+    ),
+    "verify-hermes-yujin-plan-state.ps1": (
+        "Hermes Yujin plan state verified: 20 unique master task IDs; "
+        "all 20 occur exactly once across four children; statuses and progress agree."
+    ),
+    "verify-hermes-yujin-profile.ps1": (
+        "Hermes Yujin profile ownership and secret-free contents verified."
+    ),
+    "verify-hermes-yujin-runtime.ps1": (
+        "Hermes Yujin D2 static topology verified: exact chat, gateway, and "
+        "optional memory adapter boundaries."
+    ),
+}
+
+PUBLIC_MARKERS = (
+    "creator_non_live_pass",
+    "chat_non_live_zero_calls",
+    "mem0_non_live_zero_calls",
+    "plan_state_verified",
+    "profile_static_verified",
+    "runtime_static_verified",
 )
 
 
@@ -71,6 +110,7 @@ def _fixture_repository(tmp_path: Path) -> dict[str, Path]:
     if SCRIPT.is_file():
         shutil.copy2(SCRIPT, scripts / SCRIPT.name)
     for name in SMOKE_SCRIPTS:
+        marker = SMOKE_MARKERS[name].replace("'", "''")
         (scripts / name).write_text(
             "param([switch]$StaticOnly)\n"
             "$line = $MyInvocation.MyCommand.Name + "
@@ -80,6 +120,17 @@ def _fixture_repository(tmp_path: Path) -> dict[str, Path]:
             "Write-Output 'password=leak-from-child token=leak-from-child'\n"
             "[Console]::Error.WriteLine('secret stderr from child')\n"
             "if ($env:FAKE_SMOKE_FAIL -ceq $MyInvocation.MyCommand.Name) { exit 1 }\n"
+            f"$marker = '{marker}'\n"
+            "if ($env:FAKE_SMOKE_TARGET -ceq $MyInvocation.MyCommand.Name) {\n"
+            "    switch ($env:FAKE_SMOKE_MUTATION) {\n"
+            "        'missing' { $marker = '' }\n"
+            "        'malformed' { $marker += ' malformed-token' }\n"
+            "        'duplicate' { $marker += ' network_calls=0' }\n"
+            "        'unknown' { $marker += ' unknown_field=true' }\n"
+            "        'nonzero_zero_call' { $marker = $marker.Replace('network_calls=0', 'network_calls=1') }\n"
+            "    }\n"
+            "}\n"
+            "if (-not [string]::IsNullOrEmpty($marker)) { Write-Output $marker }\n"
             "exit 0\n",
             encoding="utf-8-sig",
         )
@@ -261,6 +312,8 @@ def _run(
         "FAKE_FAIL_ACTUAL_CONFIG": "0",
         "FAKE_SMOKE_LOG": str(fixture["smoke_log"]),
         "FAKE_SMOKE_FAIL": "",
+        "FAKE_SMOKE_TARGET": "",
+        "FAKE_SMOKE_MUTATION": "",
         **(environment_patch or {}),
     }
     return subprocess.run(
@@ -587,13 +640,20 @@ def test_start_whatif_reports_intent_without_running_compose_up(tmp_path: Path) 
 
 def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
-    result = _run(fixture, mode="Smoke")
+    with _health_server() as hermes_uri:
+        result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
     assert result.returncode == 0, result.stderr
     assert payload["mode"] == "Smoke"
     assert payload["overall_status"] == "pass"
+    assert payload["readiness_status"] == "local_ready"
+    assert payload["static_non_live_checks_passed"] is True
+    assert payload["dashboard_status"] == "ready"
+    assert payload["credential_status"] == "present_unverified"
+    assert payload["live_canary_status"] == "not_run"
     assert payload["external_provider_calls"] == 0
+    assert payload["external_network_calls"] == 0
     assert [row["id"] for row in payload["checks"]] == [
         "creator_flow_non_live",
         "chat_non_live",
@@ -609,6 +669,23 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
     assert all("static=true" in line for line in calls[-2:])
     assert all("static=false" in line for line in calls[:4])
     assert all(line.endswith(" args=") for line in calls)
+    serialized_calls = "\n".join(calls).lower()
+    for forbidden in (
+        "-live",
+        "approve",
+        "projectid",
+        "sessionid",
+        "conversationid",
+        "credential",
+        "password",
+        "token",
+    ):
+        assert forbidden not in serialized_calls
+    tool_calls = fixture["command_log"].read_text(encoding="utf-8").lower()
+    assert "docker " not in tool_calls
+    assert "start-hermes-yujin" not in tool_calls
+    assert "get-hermes-yujin-status" not in tool_calls
+    assert "verify-hermes-yujin-zero-tools" not in tool_calls
     receipts = list(fixture["receipt_root"].glob("owner-ready-smoke-*.json"))
     assert len(receipts) == 1
     assert list(fixture["receipt_root"].glob("*.tmp")) == []
@@ -616,22 +693,151 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
     assert set(receipt) == {
         "schema_version",
         "mode",
-        "overall_status",
+        "readiness_status",
+        "static_non_live_checks_passed",
+        "dashboard_status",
+        "credential_status",
+        "live_canary_status",
         "generated_at",
         "commit",
         "external_provider_calls",
+        "external_network_calls",
         "checks",
     }
+    assert receipt["schema_version"] == "videobox-hermes-readiness-v1"
     assert receipt["mode"] == "Smoke"
-    assert receipt["overall_status"] == "pass"
+    assert receipt["readiness_status"] == "local_ready"
+    assert receipt["static_non_live_checks_passed"] is True
+    assert receipt["dashboard_status"] == "ready"
+    assert receipt["credential_status"] == "present_unverified"
+    assert receipt["live_canary_status"] == "not_run"
     assert receipt["commit"] == "deadbeef"
     assert receipt["external_provider_calls"] == 0
-    assert all(set(row) == {"id", "status", "action"} for row in receipt["checks"])
+    assert receipt["external_network_calls"] == 0
+    assert all(
+        set(row) == {"id", "mode", "status", "marker", "script_sha256", "action"}
+        for row in receipt["checks"]
+    )
+    assert [row["marker"] for row in receipt["checks"]] == list(PUBLIC_MARKERS)
+    assert [row["mode"] for row in receipt["checks"]] == [
+        "non_live",
+        "non_live",
+        "non_live",
+        "non_live",
+        "static_only",
+        "static_only",
+    ]
+    assert [row["script_sha256"] for row in receipt["checks"]] == [
+        hashlib.sha256((fixture["repository"] / "scripts" / name).read_bytes()).hexdigest()
+        for name in SMOKE_SCRIPTS
+    ]
     serialized = json.dumps(payload) + receipts[0].read_text(encoding="utf-8")
     assert "leak-from-child" not in serialized
     assert "secret stderr" not in serialized
     assert str(fixture["repository"]) not in serialized
     assert str(fixture["receipt_root"]) not in serialized
+    assert str(fixture["env_file"]) not in serialized
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing", "malformed", "duplicate", "unknown", "nonzero_zero_call"],
+)
+def test_smoke_fails_closed_on_invalid_exact_marker_and_continues_all_gates(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as hermes_uri:
+        result = _run(
+            fixture,
+            mode="Smoke",
+            hermes_uri=hermes_uri,
+            environment_patch={
+                "FAKE_SMOKE_TARGET": "smoke-hermes-yujin-chat.ps1",
+                "FAKE_SMOKE_MUTATION": mutation,
+            },
+        )
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["readiness_status"] == "not_ready"
+    assert payload["static_non_live_checks_passed"] is False
+    assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
+        "chat_non_live"
+    ]
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
+    failed = [row for row in receipt["checks"] if row["status"] == "fail"]
+    assert len(failed) == 1
+    assert failed[0]["marker"] == "invalid"
+
+
+def test_smoke_readiness_priority_is_fail_closed_and_never_live_ready(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+
+    fixture["env_file"].unlink()
+    with _health_server() as hermes_uri:
+        missing_env = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
+    missing_payload = _payload(missing_env)
+    assert missing_env.returncode == 2
+    assert missing_payload["readiness_status"] == "credential_blocked"
+    assert missing_payload["credential_status"] == "missing"
+    assert missing_payload["dashboard_status"] == "ready"
+
+    failed_gate = _run(
+        fixture,
+        mode="Smoke",
+        environment_patch={"FAKE_SMOKE_FAIL": "smoke-hermes-yujin-chat.ps1"},
+    )
+    failed_payload = _payload(failed_gate)
+    assert failed_gate.returncode == 1
+    assert failed_payload["readiness_status"] == "not_ready"
+
+    fixture["env_file"].write_text("fixture-present=true\n", encoding="utf-8")
+    dashboard_off = _run(fixture, mode="Smoke")
+    dashboard_payload = _payload(dashboard_off)
+    assert dashboard_off.returncode == 1
+    assert dashboard_payload["readiness_status"] == "not_ready"
+    assert dashboard_payload["dashboard_status"] == "not_running"
+
+    source = fixture["script"].read_text(encoding="utf-8-sig")
+    all_output = json.dumps(missing_payload) + json.dumps(failed_payload) + json.dumps(dashboard_payload)
+    assert 'readiness_status = "live_ready"' not in source
+    assert '"readiness_status": "live_ready"' not in all_output
+
+
+def test_smoke_missing_child_has_no_sha_and_remaining_gates_continue(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    (fixture["repository"] / "scripts" / SMOKE_SCRIPTS[0]).unlink()
+    with _health_server() as hermes_uri:
+        result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["readiness_status"] == "not_ready"
+    assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
+        "creator_flow_non_live"
+    ]
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 5
+    receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
+    assert receipt["checks"][0]["script_sha256"] == "unavailable"
+    assert all(row["status"] == "pass" for row in receipt["checks"][1:])
+
+
+def test_smoke_receipt_write_failure_is_not_reported_as_ready(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    fixture["receipt_root"].write_text("not-a-directory", encoding="utf-8")
+    with _health_server() as hermes_uri:
+        result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["overall_status"] == "fail"
+    assert payload["readiness_status"] == "not_ready"
+    receipt_check = next(row for row in payload["checks"] if row["id"] == "receipt")
+    assert receipt_check["status"] == "fail"
+    assert payload["receipt"] == {"written": False, "file_name": None}
 
 
 def test_smoke_timeout_kills_the_child_tree_and_returns_bounded_failure(tmp_path: Path) -> None:
@@ -661,6 +867,10 @@ def test_smoke_timeout_kills_the_child_tree_and_returns_bounded_failure(tmp_path
     assert elapsed < 8
     assert payload["checks"][0]["id"] == "creator_flow_non_live"
     assert payload["checks"][0]["status"] == "fail"
+    receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
+    assert receipt["schema_version"] == "videobox-hermes-readiness-v1"
+    assert receipt["readiness_status"] == "not_ready"
+    assert receipt["checks"][0]["marker"] == "invalid"
     child_pid = int(child_pid_path.read_text(encoding="utf-8"))
     child_probe = subprocess.run(
         [
@@ -692,7 +902,7 @@ def test_smoke_continues_after_one_failure_and_records_only_bounded_results(tmp_
     assert [row["id"] for row in failed] == ["chat_non_live"]
     assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
     receipt = json.loads(next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8"))
-    assert receipt["overall_status"] == "fail"
+    assert receipt["readiness_status"] == "not_ready"
     assert len(receipt["checks"]) == 6
     assert "leak-from-child" not in json.dumps(receipt)
 
