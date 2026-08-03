@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 317. 2026-07-31 owner dogfood 자동 검증 및 release completion protocol`을 우선 적용한다. Hermes Yujin 최종 기술 closeout 근거는 `## 316`, D4 closeout 근거는 `## 315`, Task 22 기술 closeout 근거는 `## 300`, Phase B 근거는 `## 307`, Phase C 근거는 `## 308`–`## 311`, D1–D3 근거는 `## 312`–`## 314`를 유지하며, 그 외 날짜 기반 상태 섹션은 당시 시점 기록을 보존한 historical log다.
+> 현재 authoritative 상태/next slice 판단은 `## 318. 2026-08-03 Task 23 owner-ready MVP polish planning`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+
+## 318. 2026-08-03 Task 23 owner-ready MVP polish planning
+
+- `[x] goal 승인`: 사용자는 기존 `9/22 (40.9%)`, 잔여 `59.1%` 고정 누적을 폐기하고 **Task 23 owner-ready MVP polish**를 새 active goal로 즉시 진행하도록 승인했다.
+- `[x] 범위 분해`: Task 23은 `23A HEVC 로컬 browser-preview proxy`, `23B owner one-click 실행·진단`, `23C 사용자 샘플 repeatable edit package`, `23D Hermes readiness smoke`의 네 순차 slice로 고정한다. 각 slice는 독립 TDD·검증·체크박스를 갖고 이전 slice가 닫힌 뒤 다음 slice로 진행한다.
+- `[x] 접근 결정`: ingest 시 모든 영상을 선변환하면 500MB급 원본 가져오기가 느려지고 사용하지 않는 파일까지 중복하므로 제외한다. 기존처럼 exact 편집본만 사용하면 원본 audition이 막힌다. 선택한 방식은 preview 클릭 시에만 project-local H264/AAC proxy를 비동기로 만들고 source SHA/profile로 재사용하는 lazy cache다.
+- `[x] written design 작성`: `docs/superpowers/specs/2026-08-03-videobox-task23-owner-ready-mvp-polish-design.md`에 API/DTO, source-mutation fence, one-player/route-epoch, operator script, dogfood artifact, Hermes zero-external-call 경계, TDD matrix와 reverse trace를 고정했다.
+- `보존 경계`: 사용자 샘플 원본은 read-only다. `.tmp-final-fence-debug/`, `.tmp-real-video-dogfood/`, `apps/web/.tmp-real-video-dogfood/`는 stage/remove/delete하지 않는다. provider/API 실호출, credential 생성·출력, live Mem0, SaaS, 게시, 자동 apply는 Task 23 범위 밖이다.
+- `새 진행률`: 기존 22-Task 기술 baseline은 historical closeout으로 보존하고 더 이상 공식 분모로 사용하지 않는다. 새 active 공식 지표는 Task 23 production slice **0/4 (0.0%)**, 잔여 **100.0%**다. 설계·계획 문서 작성은 production 완료로 세지 않는다.
+- `다음 gate`: written spec 사용자 검토 뒤 detailed implementation plan을 작성하고 23A부터 TDD로 구현한다. spec 승인 전 production code는 바꾸지 않는다.
 
 ## 317. 2026-07-31 owner dogfood 자동 검증 및 release completion protocol
 
