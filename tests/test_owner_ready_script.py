@@ -237,6 +237,7 @@ def _health_server(
     body: bytes = b'{"status":"ok"}',
     omit_content_length: bool = False,
     request_log: list[str] | None = None,
+    delay_seconds: float = 0,
 ) -> Iterator[str]:
     calls = request_log if request_log is not None else []
 
@@ -246,6 +247,8 @@ def _health_server(
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib callback
             calls.append(self.path)
+            if delay_seconds:
+                time.sleep(delay_seconds)
             if redirect:
                 self.send_response(302)
                 self.send_header("Location", redirect_location.format(port=self.server.server_port))
@@ -555,6 +558,25 @@ def test_check_treats_the_unfollowed_hermes_login_redirect_as_reachable(tmp_path
     assert hermes["status"] == "pass"
     assert hermes["evidence"]["status_code"] == 302
     assert hermes["evidence"]["redirects_followed"] == 0
+
+
+def test_check_keeps_stalled_loopback_as_blocked_with_bounded_timeout_reason(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as video_uri, _health_server(delay_seconds=2) as hermes_uri:
+        result = _run(
+            fixture,
+            video_uri=video_uri,
+            hermes_uri=hermes_uri,
+            timeout_sec=1,
+        )
+
+    payload = _payload(result)
+    hermes = next(row for row in payload["checks"] if row["id"] == "hermes_dashboard")
+    assert result.returncode == 2
+    assert payload["overall_status"] == "blocked"
+    assert hermes["status"] == "blocked"
+    assert hermes["evidence"]["probe_reason"] == "timeout"
+    assert str(fixture["repository"]) not in json.dumps(payload)
 
 
 def test_check_rejects_an_external_hermes_redirect_without_following_it(tmp_path: Path) -> None:
@@ -939,6 +961,28 @@ def test_smoke_dashboard_connection_refused_is_not_running(tmp_path: Path) -> No
     assert payload["readiness_status"] == "not_ready"
 
 
+def test_smoke_stalled_dashboard_precedes_missing_credentials_as_invalid(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    fixture["env_file"].unlink()
+    with _health_server(delay_seconds=2) as hermes_uri:
+        result = _run(
+            fixture,
+            mode="Smoke",
+            hermes_uri=hermes_uri,
+            timeout_sec=1,
+        )
+
+    payload = _payload(result)
+    receipt = json.loads(_smoke_receipt_text(fixture))
+    assert result.returncode == 1
+    assert payload["dashboard_status"] == "invalid"
+    assert payload["credential_status"] == "missing"
+    assert payload["readiness_status"] == "not_ready"
+    assert payload["external_network_calls"] == 0
+    assert receipt["dashboard_status"] == "invalid"
+    assert receipt["readiness_status"] == "not_ready"
+
+
 def test_smoke_rejects_external_dashboard_url_before_any_child_or_request(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
     result = _run(fixture, mode="Smoke", hermes_uri="https://example.com/")
@@ -987,6 +1031,13 @@ def test_smoke_credential_classifier_rejects_each_missing_required_key(
         "HERMES_YUJIN_GATEWAY_PASSWORD=",
         "HERMES_YUJIN_GATEWAY_PASSWORD=\"   \"",
         "HERMES_YUJIN_GATEWAY_PASSWORD=\"",
+        'HERMES_YUJIN_GATEWAY_PASSWORD=abc"def',
+        'HERMES_YUJIN_GATEWAY_PASSWORD="abc"def"',
+        "HERMES_YUJIN_GATEWAY_PASSWORD=abc'def",
+        "HERMES_YUJIN_GATEWAY_PASSWORD='abc'def'",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=\"abc'def\"",
+        "HERMES_YUJIN_GATEWAY_PASSWORD='abc\"def'",
+        "HERMES_YUJIN_GATEWAY_PASSWORD= # resolves empty",
         "HERMES_YUJIN_GATEWAY_PASSWORD=${UNRESOLVED_SECRET}",
         "HERMES_YUJIN_GATEWAY_PASSWORD=REPLACE-BEFORE-STARTING",
         "HERMES_YUJIN_GATEWAY_PASSWORD=prefix_replace_me_suffix",
@@ -1000,6 +1051,13 @@ def test_smoke_credential_classifier_rejects_each_missing_required_key(
         "blank",
         "quoted_blank",
         "unmatched_quote",
+        "embedded_double_unquoted",
+        "embedded_double_wrapped",
+        "embedded_single_unquoted",
+        "embedded_single_wrapped",
+        "mixed_single_inside_double",
+        "mixed_double_inside_single",
+        "inline_comment_empty",
         "unresolved",
         "replace_before_starting",
         "replace_me",
@@ -1027,6 +1085,40 @@ def test_smoke_credential_classifier_fails_closed_without_value_disclosure(
     assert str(fixture["env_file"]) not in serialized
     for fragment in replacement.splitlines():
         assert fragment not in serialized
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        'HERMES_YUJIN_GATEWAY_PASSWORD="ordinary-quoted"',
+        "HERMES_YUJIN_GATEWAY_PASSWORD='ordinary-quoted'",
+        'HERMES_YUJIN_GATEWAY_PASSWORD="hash#inside" # outside comment',
+        "HERMES_YUJIN_GATEWAY_PASSWORD=plain#literal",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=ordinary-literal # placeholder",
+    ],
+    ids=[
+        "double_quoted",
+        "single_quoted",
+        "quoted_hash_with_comment",
+        "unquoted_hash_literal",
+        "unquoted_comment_stripped",
+    ],
+)
+def test_smoke_credential_classifier_accepts_safe_literal_and_comment_forms(
+    tmp_path: Path,
+    replacement: str,
+) -> None:
+    fixture = _fixture_repository(tmp_path)
+    _replace_env_value(fixture, "HERMES_YUJIN_GATEWAY_PASSWORD", replacement)
+    with _health_server() as hermes_uri:
+        result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
+
+    payload = _payload(result)
+    serialized = result.stdout + result.stderr + _smoke_receipt_text(fixture)
+    assert result.returncode == 0, result.stderr
+    assert payload["credential_status"] == "present_unverified"
+    assert payload["readiness_status"] == "local_ready"
+    assert replacement not in serialized
 
 
 def test_smoke_credential_classifier_ignores_optional_mem0_key(tmp_path: Path) -> None:

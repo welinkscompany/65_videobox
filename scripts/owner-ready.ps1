@@ -356,20 +356,41 @@ function Get-HermesCredentialStatus {
                 continue
             }
 
-            $value = ([string]$Matches[2]).Trim()
-            if ($value.Length -gt 0) {
-                $first = $value.Substring(0, 1)
-                $last = $value.Substring($value.Length - 1, 1)
-                if (
-                    $value.Length -ge 2 -and
-                    (($first -ceq '"' -and $last -ceq '"') -or ($first -ceq "'" -and $last -ceq "'"))
-                ) {
-                    $value = $value.Substring(1, $value.Length - 2).Trim()
-                }
-                elseif ($first -in @('"', "'") -or $last -in @('"', "'")) {
+            $rawValue = [string]$Matches[2]
+            $trimmedStart = $rawValue.TrimStart()
+            $value = ""
+            if ($trimmedStart.Length -gt 0 -and $trimmedStart.Substring(0, 1) -in @('"', "'")) {
+                $quote = $trimmedStart.Substring(0, 1)
+                $closingIndex = $trimmedStart.IndexOf($quote, 1, [StringComparison]::Ordinal)
+                if ($closingIndex -lt 1) {
                     $invalid = $true
                     continue
                 }
+                $innerValue = $trimmedStart.Substring(1, $closingIndex - 1)
+                $tail = $trimmedStart.Substring($closingIndex + 1)
+                if (
+                    $innerValue.IndexOf('"', [StringComparison]::Ordinal) -ge 0 -or
+                    $innerValue.IndexOf("'", [StringComparison]::Ordinal) -ge 0 -or
+                    $tail -notmatch '^\s*(?:#.*)?$'
+                ) {
+                    $invalid = $true
+                    continue
+                }
+                $value = $innerValue.Trim()
+            }
+            else {
+                if (
+                    $rawValue.IndexOf('"', [StringComparison]::Ordinal) -ge 0 -or
+                    $rawValue.IndexOf("'", [StringComparison]::Ordinal) -ge 0
+                ) {
+                    $invalid = $true
+                    continue
+                }
+                $comment = [regex]::Match($rawValue, '\s+#.*$')
+                if ($comment.Success) {
+                    $rawValue = $rawValue.Substring(0, $comment.Index)
+                }
+                $value = $rawValue.Trim()
             }
             if ([string]::IsNullOrWhiteSpace($value) -or $value -match '\$\{[^}]*\}') {
                 $invalid = $true
@@ -654,16 +675,18 @@ function Invoke-LoopbackProbe {
         $statusCode = [int]$response.StatusCode
         $length = $response.Content.Headers.ContentLength
         if ($statusCode -ge 300 -and $statusCode -lt 400) {
+            $allowedRedirect = $AcceptLoginRedirectAsReachable -and (Test-AllowedLoopbackLoginRedirect -SourceUri $Uri -Response $response)
             return [pscustomobject]@{
-                State = $(if ($AcceptLoginRedirectAsReachable -and (Test-AllowedLoopbackLoginRedirect -SourceUri $Uri -Response $response)) { "pass" } else { "fail" })
+                State = $(if ($allowedRedirect) { "pass" } else { "fail" })
                 StatusCode = $statusCode
+                Reason = $(if ($allowedRedirect) { "login_redirect" } else { "redirect_rejected" })
             }
         }
         if ($null -ne $length -and [long]$length -gt 65536) {
-            return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode }
+            return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode; Reason = "response_oversize" }
         }
         if ($statusCode -ne 200) {
-            return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode }
+            return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode; Reason = "status_rejected" }
         }
         $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
         $buffer = New-Object byte[] 4096
@@ -675,7 +698,7 @@ function Invoke-LoopbackProbe {
                 if ($read -eq 0) { break }
                 $totalBytes += $read
                 if ($totalBytes -gt 65536) {
-                    return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode }
+                    return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode; Reason = "response_oversize" }
                 }
                 if ($RequireHealthJson) {
                     $body.Write($buffer, 0, $read)
@@ -687,11 +710,11 @@ function Invoke-LoopbackProbe {
                     $bodyText = $strictUtf8.GetString($body.ToArray())
                     $health = $bodyText | ConvertFrom-Json -ErrorAction Stop
                     if ($null -eq $health -or [string]$health.status -cne "ok") {
-                        return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode }
+                        return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode; Reason = "body_invalid" }
                     }
                 }
                 catch {
-                    return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode }
+                    return [pscustomobject]@{ State = "fail"; StatusCode = $statusCode; Reason = "body_invalid" }
                 }
             }
         }
@@ -699,19 +722,20 @@ function Invoke-LoopbackProbe {
             $body.Dispose()
             $stream.Dispose()
         }
-        return [pscustomobject]@{ State = "pass"; StatusCode = $statusCode }
+        return [pscustomobject]@{ State = "pass"; StatusCode = $statusCode; Reason = "http_200" }
     }
     catch [System.Threading.Tasks.TaskCanceledException] {
-        return [pscustomobject]@{ State = "blocked"; StatusCode = 0 }
+        return [pscustomobject]@{ State = "blocked"; StatusCode = 0; Reason = "timeout" }
     }
     catch [System.OperationCanceledException] {
-        return [pscustomobject]@{ State = "blocked"; StatusCode = 0 }
+        return [pscustomobject]@{ State = "blocked"; StatusCode = 0; Reason = "timeout" }
     }
     catch {
         $connectionUnavailable = Test-ConnectionUnavailableException -Exception $_.Exception
         return [pscustomobject]@{
             State = $(if ($connectionUnavailable) { "blocked" } else { "fail" })
             StatusCode = 0
+            Reason = $(if ($connectionUnavailable) { "connection_refused" } else { "request_invalid" })
         }
     }
     finally {
@@ -729,7 +753,7 @@ function Get-LoopbackCheck {
     return New-OwnerReadyResult -Id $Id -Status $probe.State `
         -Summary $(if ($probe.State -ceq "pass") { "$DisplayName 주소에 연결할 수 있습니다." } elseif ($probe.State -ceq "blocked") { "$DisplayName 서비스가 아직 꺼져 있습니다." } else { "$DisplayName 응답을 안전하게 확인할 수 없습니다." }) `
         -Action $(if ($probe.State -ceq "pass") { "추가 조치가 없습니다." } elseif ($probe.State -ceq "blocked") { "필요하면 명시적으로 Start 모드를 실행한 뒤 다시 확인하세요." } else { "로컬 서비스 주소와 응답 상태를 확인하세요." }) `
-        -Evidence @{ reachable = ($probe.State -ceq "pass"); status_code = $probe.StatusCode; redirects_followed = 0; external_request_count = 0 }
+        -Evidence @{ reachable = ($probe.State -ceq "pass"); status_code = $probe.StatusCode; probe_reason = $probe.Reason; redirects_followed = 0; external_request_count = 0 }
 }
 
 function Get-CapCutCheck {
@@ -1017,7 +1041,7 @@ if ($Mode -ceq "Smoke") {
     $dashboardStatus = if ($dashboardProbe.State -ceq "pass") {
         "ready"
     }
-    elseif ($dashboardProbe.State -ceq "blocked") {
+    elseif ($dashboardProbe.State -ceq "blocked" -and $dashboardProbe.Reason -ceq "connection_refused") {
         "not_running"
     }
     else {
