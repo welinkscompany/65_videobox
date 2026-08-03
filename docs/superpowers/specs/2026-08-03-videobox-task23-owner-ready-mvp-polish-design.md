@@ -49,15 +49,19 @@ A single opaque command would mix environment mutation, project edits, media gen
 
 ### Backend ownership
 
-Add a small `AssetBrowserPreviewService` owned by the API/orchestration boundary and a pure FFmpeg renderer under core-engine. The service accepts only a project-local registered video asset. It resolves the canonical source through `LocalProjectStore`, probes codec metadata with `FFmpegMediaProbe`, and reads or computes the authoritative source SHA-256.
+Add a small `AssetBrowserPreviewService` owned by the API/orchestration boundary and focused `FFprobeBrowserPreviewProbe`/FFmpeg renderer primitives under core-engine. The service accepts only a project-local registered video asset. It resolves the canonical source through `LocalProjectStore`, reads only format/video/audio stream metadata with one on-demand ffprobe call, and reads or computes the authoritative source SHA-256. It must not reuse `FFmpegMediaProbe.probe()`, because that media-analysis path also extracts six representative frames and would add unnecessary preview-click latency.
 
 The browser-ready profile is versioned and fixed to MP4, H264, `yuv420p`, AAC when audio exists, `faststart`, and a maximum 1280-pixel long edge. A source that is already MP4/H264 with AAC-or-no-audio returns the existing asset content URL without creating a proxy.
 
-For an incompatible source, the service creates one durable `ASSET_PREVIEW_PROXY` job keyed by `project_id + asset_id + source_sha256 + profile`. A repeated start returns the existing pending/running/ready job. A failed job may be retried explicitly and creates a new attempt without deleting the previous evidence.
+For an incompatible source, the service creates one durable `ASSET_PREVIEW_PROXY` job keyed by `project_id + asset_id + asset created_at media revision + source size/mtime + source_sha256 + profile`. `LocalProjectStore.create_or_reuse_active_asset_preview_job()` performs the claim in one transaction using the same SQLite `BEGIN IMMEDIATE` and PostgreSQL jobs-table lock semantics as current final-render/CapCut active-job claims. A repeated or concurrent start returns the existing pending/running/ready job. A failed job may be retried explicitly and creates a new attempt without deleting the previous evidence. SQLite and PostgreSQL run the same contract tests.
 
 The generic job UI labels this job `원본 미리보기 준비`. Retry remains owned by the asset-preview UI and endpoint because the generic job retry router does not carry the required asset/source identity.
 
 The renderer writes to a project-local temporary file, verifies the generated stream with ffprobe, rechecks the source SHA and current asset registration, and only then atomically publishes the MP4. Source change, asset replacement, route mismatch, corrupt output, or FFmpeg failure never publishes a proxy. The original file is never modified, renamed, deleted, or used as a destination.
+
+Source identity lookup uses a process-local hash cache keyed only by resolved project path, size, and nanosecond mtime. The first request after a new source signature or process restart computes SHA-256; repeated status/content Range requests reuse it while the stat signature remains exact. Publish still performs a fresh source stat+SHA check. The cache is an optimization, not authority, and is never persisted as user memory or returned through the API.
+
+API startup calls `recover_orphaned_asset_preview_jobs()` for every project. It changes only pending/running `ASSET_PREVIEW_PROXY` rows to failed with a bounded restart error and never deletes a ready artifact. Therefore a process restart cannot leave the UI permanently preparing, and explicit retry creates a new attempt.
 
 ### API contract
 
@@ -67,16 +71,16 @@ Three project-scoped endpoints are added under the existing asset router:
 - `GET /api/projects/{project_id}/assets/{asset_id}/browser-preview` returns the current typed state without starting work.
 - `GET /api/projects/{project_id}/assets/{asset_id}/browser-preview/content` serves only a current ready proxy through existing Range delivery. Already-compatible assets use their existing `/content` URL and never duplicate bytes.
 
-The response is a strict DTO with `status`, `job_id`, `content_url`, `source_sha256`, `profile`, and `error_code`. It never returns a filesystem path, FFmpeg command, credential, raw stderr, or external URL.
+The response is a strict DTO with `status`, `job_id`, `content_url`, `source_sha256`, `profile`, and `error_code`. It never returns a filesystem path, FFmpeg command, credential, raw stderr, or external URL. `create_app()` exposes injectable preview-probe/renderer seams for tests, while production defaults construct only lightweight objects and execute no ffprobe/FFmpeg subprocess until preview is requested.
 
 ### Frontend flow and state
 
-`EditorWorkbenchRoute` owns the prepare/poll lifecycle because it already owns project/session route epoch and network calls. `EditorWorkbench` continues to own the audition request, and `PreviewStage` continues to own the only native media element.
+`EditorWorkbenchRoute` owns an async `prepareAssetBrowserPreview(assetId)` callback because it already owns project/session route epoch and network calls. The callback performs start/poll and rejects a result after its captured epoch is obsolete. `EditorWorkbench` owns a monotonically increasing preview-request sequence and the visible per-card preparing/error state; a newer request supersedes an older result in the same route. `PreviewStage` continues to own the only native media element.
 
 When a creator requests a video audition, the route prepares the browser preview before emitting the `AuditionSource`:
 
 1. ready: emit the local returned URL to the existing stage;
-2. pending/running: show “원본 미리보기를 준비하고 있어요”, poll with bounded backoff, and keep exact preview/manual editing usable;
+2. pending/running: `EditorAssetBrowser` shows “원본 미리보기를 준비하고 있어요” for that card, poll with bounded backoff, and keep exact preview/manual editing usable;
 3. failed: show retry plus “편집본 미리보기에서 확인” fallback;
 4. route change or newer request: ignore the obsolete completion and make zero current-route player or mutation changes.
 
@@ -134,10 +138,10 @@ Task 23 does not create credentials, choose a provider, call an external provide
 | Slice | RED/GREEN acceptance |
 | --- | --- |
 | 23A identity/probe | compatible H264/AAC uses original URL; HEVC and incompatible audio select the versioned proxy profile; non-video/project mismatch is rejected |
-| 23A job/cache | first request creates one job; concurrent/repeated requests reuse it; source/profile change misses cache; explicit retry follows failure; no partial output is served |
+| 23A job/cache | SQLite/PostgreSQL first request creates one active job; concurrent/repeated requests reuse it; source/media-revision/profile change misses cache; restart recovers orphaned active rows; explicit retry follows failure; no partial output is served |
 | 23A publish fence | generated H264/AAC/yuv420p output passes ffprobe; changed SHA/asset registration rejects atomic publish and leaves source untouched |
 | 23A API/Range | typed 200/202/failed states; current content supports 200/206/416; filesystem/raw stderr never appears |
-| 23A UI | prepare before mount, visible pending/retry/fallback, route-epoch cancellation, one native player maximum, zero editor-command calls |
+| 23A UI | prepare before mount, per-card pending/retry/fallback, same-route newer-request supersession, route-epoch cancellation, one native player maximum, zero editor-command calls |
 | 23B Check | read-only success and precise blocked states for missing Docker/FFmpeg/CapCut/env; no secret output and no process start in default mode |
 | 23B Start/Smoke | only allowed local services start; bounded health; existing harness results aggregate into a sanitized receipt; external calls remain zero |
 | 23C package | read-only source hashes equal recorded inputs; disposable project receives copies; all supported media controls reach final/SRT/CapCut outputs; reverse manifest resolves every artifact |
@@ -174,6 +178,6 @@ Each slice requires focused RED/GREEN evidence, affected backend/frontend tests,
 ## Spec self-review record
 
 - Placeholder scan: no unfinished marker or deferred implementation placeholder remains.
-- Consistency: all four slices preserve project-local storage, source SHA, route epoch, current revision, explicit apply, one-player, and zero-external-call boundaries.
+- Consistency: all four slices preserve project-local storage, source SHA/stat/media-revision identity, route epoch, same-route request supersession, current revision, explicit apply, one-player, and zero-external-call boundaries. SQLite and PostgreSQL share the durable job claim/recovery contract.
 - Scope: the umbrella is decomposed into four sequential, independently testable slices; detailed implementation plans must preserve that order rather than implement all subsystems in one patch.
 - Ambiguity: `ready`, `blocked`, human approval, live readiness, existing-project mutation, retry, and progress counting have explicit definitions above.
