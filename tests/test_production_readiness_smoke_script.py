@@ -23,23 +23,48 @@ def _load_smoke_module():
 
 
 class _SequenceResponse:
-    status_code = 200
-
-    def __init__(self, payload: dict[str, object]) -> None:
+    def __init__(self, payload: dict[str, object], *, status_code: int = 200) -> None:
         self._payload = payload
+        self.status_code = status_code
 
     def json(self) -> dict[str, object]:
         return self._payload
 
 
 class _SequenceClient:
-    def __init__(self, payloads: list[dict[str, object]]) -> None:
+    def __init__(self, payloads: list[dict[str, object] | _SequenceResponse]) -> None:
         self._payloads = iter(payloads)
         self.paths: list[str] = []
+        self.headers: list[dict[str, str] | None] = []
 
-    def get(self, path: str) -> _SequenceResponse:
+    def get(self, path: str, headers: dict[str, str] | None = None) -> _SequenceResponse:
         self.paths.append(path)
-        return _SequenceResponse(next(self._payloads))
+        self.headers.append(headers)
+        payload = next(self._payloads)
+        return payload if isinstance(payload, _SequenceResponse) else _SequenceResponse(payload)
+
+
+def _exact_preview_payload(*, status: str) -> dict[str, object]:
+    return {
+        "status": status,
+        "generation_id": "generation",
+        "artifact_revision": 7,
+        "timeline_start_sec": 0.0,
+        "timeline_end_sec": 5.0,
+        "content_url": "/api/projects/project/exact-previews/generation/content",
+    }
+
+
+def _poll_review_exact_preview(smoke, client, *, generation_id: str = "generation"):
+    return smoke._poll_exact_preview(
+        client,
+        project_id="project",
+        generation_id=generation_id,
+        expected_revision=7,
+        expected_start_sec=0.0,
+        expected_end_sec=5.0,
+        timeout_sec=1,
+    )
 
 
 def test_smoke_harness_exposes_a_600_second_korean_stt_contract(tmp_path: Path) -> None:
@@ -174,36 +199,108 @@ def test_smoke_exact_preview_poll_requires_ready_state(monkeypatch: pytest.Monke
     monkeypatch.setattr(smoke.time, "sleep", lambda _: None)
     client = _SequenceClient([
         {"status": "running"},
-        {"status": "ready", "content_url": "/content"},
+        _exact_preview_payload(status="ready"),
+        _SequenceResponse({}, status_code=206),
     ])
 
-    result = smoke._poll_exact_preview(
-        client,
-        project_id="project",
-        generation_id="generation",
-        timeout_sec=1,
-    )
+    result = _poll_review_exact_preview(smoke, client)
 
     assert result["status"] == "ready"
-    assert result["content_url"] == "/content"
+    assert result["range_status"] == 206
+    assert result["content_url"] == "/api/projects/project/exact-previews/generation/content"
     assert client.paths == [
         "/api/projects/project/exact-previews/generation",
         "/api/projects/project/exact-previews/generation",
+        "/api/projects/project/exact-previews/generation/content",
     ]
+    assert client.headers == [None, None, {"Range": "bytes=0-0"}]
 
 
 def test_smoke_exact_preview_poll_normalizes_public_succeeded_state_to_ready() -> None:
     smoke = _load_smoke_module()
-    client = _SequenceClient([{"status": "succeeded", "content_url": "/content"}])
+    client = _SequenceClient([
+        _exact_preview_payload(status="succeeded"),
+        _SequenceResponse({}, status_code=206),
+    ])
 
-    result = smoke._poll_exact_preview(
-        client,
-        project_id="project",
-        generation_id="generation",
-        timeout_sec=1,
-    )
+    result = _poll_review_exact_preview(smoke, client)
 
-    assert result == {"status": "ready", "content_url": "/content"}
+    assert result["status"] == "ready"
+    assert result["generation_id"] == "generation"
+    assert result["artifact_revision"] == 7
+    assert result["range_status"] == 206
+
+
+_MISSING = object()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("generation_id", _MISSING),
+        ("generation_id", "foreign-generation"),
+        ("artifact_revision", _MISSING),
+        ("artifact_revision", 8),
+        ("timeline_start_sec", _MISSING),
+        ("timeline_start_sec", 0.01),
+        ("timeline_start_sec", float("nan")),
+        ("timeline_end_sec", _MISSING),
+        ("timeline_end_sec", 4.9),
+        ("timeline_end_sec", float("inf")),
+        ("content_url", _MISSING),
+        ("content_url", "https://example.com/preview.mp4"),
+        ("content_url", "C:/preview.mp4"),
+        ("content_url", "/api/projects/project/exact-previews/foreign/content"),
+        ("content_url", "/api/projects/foreign/exact-previews/generation/content"),
+    ],
+)
+@pytest.mark.parametrize("status", ["succeeded", "ready"])
+def test_smoke_exact_preview_poll_rejects_mismatched_success_identity(
+    field: str,
+    value: object,
+    status: str,
+) -> None:
+    smoke = _load_smoke_module()
+    payload = _exact_preview_payload(status=status)
+    if value is _MISSING:
+        payload.pop(field)
+    else:
+        payload[field] = value
+    client = _SequenceClient([payload])
+
+    with pytest.raises(RuntimeError, match="exact_preview_identity_mismatch") as raised:
+        _poll_review_exact_preview(smoke, client)
+
+    assert len(str(raised.value)) < 128
+    assert client.paths == ["/api/projects/project/exact-previews/generation"]
+
+
+def test_smoke_exact_preview_poll_accepts_only_bounded_range_equality() -> None:
+    smoke = _load_smoke_module()
+    payload = _exact_preview_payload(status="ready")
+    payload["timeline_start_sec"] = 0.0000005
+    payload["timeline_end_sec"] = 4.9999995
+    client = _SequenceClient([payload, _SequenceResponse({}, status_code=206)])
+
+    result = _poll_review_exact_preview(smoke, client)
+
+    assert result["status"] == "ready"
+    assert result["range_status"] == 206
+
+
+def test_smoke_exact_preview_poll_rejects_non_206_canonical_range_with_bounded_error() -> None:
+    smoke = _load_smoke_module()
+    client = _SequenceClient([
+        _exact_preview_payload(status="succeeded"),
+        _SequenceResponse({}, status_code=200),
+    ])
+
+    with pytest.raises(RuntimeError, match="exact_preview_range_failed") as raised:
+        _poll_review_exact_preview(smoke, client)
+
+    assert len(str(raised.value)) < 128
+    assert client.paths[-1] == "/api/projects/project/exact-previews/generation/content"
+    assert client.headers[-1] == {"Range": "bytes=0-0"}
 
 
 @pytest.mark.parametrize("status", ["failed", "stale", "obsolete", "unavailable", "unexpected"])
@@ -212,12 +309,7 @@ def test_smoke_exact_preview_poll_rejects_terminal_non_ready_states(status: str)
     client = _SequenceClient([{"status": status, "error_message": "x" * 4_096}])
 
     with pytest.raises(RuntimeError, match=rf"Exact preview .* {status}") as raised:
-        smoke._poll_exact_preview(
-            client,
-            project_id="project",
-            generation_id="generation",
-            timeout_sec=1,
-        )
+        _poll_review_exact_preview(smoke, client)
 
     assert len(str(raised.value)) < 256
 
@@ -230,6 +322,9 @@ def test_smoke_exact_preview_poll_rejects_timeout_without_unbounded_payload() ->
             _SequenceClient([]),
             project_id="project",
             generation_id="generation",
+            expected_revision=7,
+            expected_start_sec=0.0,
+            expected_end_sec=5.0,
             timeout_sec=0,
         )
 
@@ -245,12 +340,15 @@ def test_smoke_exact_preview_poll_bounds_identifier_and_http_error_details() -> 
             _SequenceClient([]),
             project_id="project",
             generation_id=oversized_generation_id,
+            expected_revision=7,
+            expected_start_sec=0.0,
+            expected_end_sec=5.0,
             timeout_sec=0,
         )
 
     class _HttpErrorClient:
         @staticmethod
-        def get(path: str) -> SimpleNamespace:
+        def get(path: str, headers: dict[str, str] | None = None) -> SimpleNamespace:
             return SimpleNamespace(status_code=503, text="x" * 4_096)
 
     with pytest.raises(RuntimeError, match="HTTP 503") as http_error:
@@ -258,6 +356,9 @@ def test_smoke_exact_preview_poll_bounds_identifier_and_http_error_details() -> 
             _HttpErrorClient(),
             project_id="project",
             generation_id=oversized_generation_id,
+            expected_revision=7,
+            expected_start_sec=0.0,
+            expected_end_sec=5.0,
             timeout_sec=1,
         )
 
@@ -369,6 +470,52 @@ def test_smoke_probe_media_summary_rejects_malformed_output_with_bounded_domain_
     assert len(str(raised.value)) < 128
 
 
+def _playable_summary(duration_sec: object, *, audio_codec: object = "aac") -> dict[str, object]:
+    return {
+        "duration_sec": duration_sec,
+        "format": "mov,mp4",
+        "video_codec": "h264",
+        "pixel_format": "yuv420p",
+        "audio_codec": audio_codec,
+    }
+
+
+@pytest.mark.parametrize("duration_sec", [4.75, 5.0, 5.25])
+def test_smoke_playable_media_gate_accepts_exact_preview_tolerance_edges(duration_sec: float) -> None:
+    smoke = _load_smoke_module()
+
+    smoke._require_playable_media_summary(
+        _playable_summary(duration_sec),
+        expected_duration_sec=5.0,
+        tolerance_sec=0.25,
+    )
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        _playable_summary(0.0),
+        _playable_summary(5.251),
+        _playable_summary("5.0"),
+        _playable_summary(5.0, audio_codec=None),
+        _playable_summary(5.0, audio_codec=""),
+    ],
+)
+def test_smoke_playable_media_gate_rejects_zero_wrong_duration_or_missing_audio(
+    summary: dict[str, object],
+) -> None:
+    smoke = _load_smoke_module()
+
+    with pytest.raises(RuntimeError, match="media_evidence_invalid") as raised:
+        smoke._require_playable_media_summary(
+            summary,
+            expected_duration_sec=5.0,
+            tolerance_sec=0.25,
+        )
+
+    assert len(str(raised.value)) < 128
+
+
 def test_smoke_builds_hash_linked_review_artifact_evidence(tmp_path: Path) -> None:
     smoke = _load_smoke_module()
     snapshot_paths = smoke._write_review_snapshots(
@@ -385,8 +532,8 @@ def test_smoke_builds_hash_linked_review_artifact_evidence(tmp_path: Path) -> No
     for name, path in artifact_paths.items():
         path.write_bytes(f"artifact:{name}".encode("utf-8"))
     media_summary = {
-        "exact_preview": {"duration_sec": 5.0, "video_codec": "h264"},
-        "final_mp4": {"duration_sec": 600.0, "video_codec": "h264"},
+        "exact_preview": _playable_summary(5.25),
+        "final_mp4": _playable_summary(599.5),
     }
 
     evidence = smoke._build_review_artifact_evidence(
@@ -422,16 +569,35 @@ def test_smoke_builds_hash_linked_review_artifact_evidence(tmp_path: Path) -> No
     assert list((tmp_path / "review").glob("*.tmp")) == []
 
 
-def test_smoke_run_wires_exact_preview_before_regeneration() -> None:
-    source = SCRIPT_PATH.read_text(encoding="utf-8")
+def test_smoke_review_evidence_rejects_unplayable_summary_before_json_publish(tmp_path: Path) -> None:
+    smoke = _load_smoke_module()
+    snapshot_paths = smoke._write_review_snapshots(
+        tmp_path,
+        timeline={"timeline_id": "timeline"},
+        session={"session_id": "session"},
+    )
+    artifact_paths = {
+        "srt": tmp_path / "captions.srt",
+        "exact_preview": tmp_path / "exact-preview.mp4",
+        "final_mp4": tmp_path / "final.mp4",
+        "capcut_draft": tmp_path / "draft_content.json",
+    }
+    for path in artifact_paths.values():
+        path.write_bytes(b"artifact")
 
-    exact_preview_start = source.index('/exact-preview"')
-    partial_regeneration_start = source.index('/partial-regeneration"')
+    with pytest.raises(RuntimeError, match="media_evidence_invalid"):
+        smoke._build_review_artifact_evidence(
+            tmp_path,
+            srt_path=artifact_paths["srt"],
+            exact_preview_path=artifact_paths["exact_preview"],
+            timeline_snapshot_path=snapshot_paths["timeline"],
+            editing_session_snapshot_path=snapshot_paths["editing_session"],
+            final_mp4_path=artifact_paths["final_mp4"],
+            capcut_draft_path=artifact_paths["capcut_draft"],
+            ffprobe_summary={
+                "exact_preview": _playable_summary(0.0),
+                "final_mp4": _playable_summary(600.0),
+            },
+        )
 
-    assert exact_preview_start < partial_regeneration_start
-    assert '"start_sec": 0.0' in source
-    assert '"end_sec": 5.0' in source
-    assert 'headers={"Range": "bytes=0-0"}' in source
-    assert "store.get_exact_preview(" in source
-    assert "_write_review_snapshots(" in source
-    assert "_build_review_artifact_evidence(" in source
+    assert not (tmp_path / "review" / "ffprobe-summary.json").exists()

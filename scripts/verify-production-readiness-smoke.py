@@ -42,6 +42,10 @@ from videobox_storage.local_project_store import LocalProjectStore
 
 
 SMOKE_DURATION_SEC = 600.0
+EXACT_PREVIEW_DURATION_SEC = 5.0
+EXACT_PREVIEW_DURATION_TOLERANCE_SEC = 0.25
+FINAL_MEDIA_DURATION_TOLERANCE_SEC = 0.5
+EXACT_PREVIEW_RANGE_EQUALITY_TOLERANCE_SEC = 0.000001
 REVISED_CAPTION = "수정된 최종 자막: 열 분 한국어 제작 흐름이 실제 출력까지 유지됩니다."
 SOURCE_CAPTIONS = [
     "첫 번째 한국어 제작 구간입니다.",
@@ -188,6 +192,34 @@ def _probe_media_summary(path: Path, *, ffprobe_binary: str) -> dict[str, Any]:
         raise RuntimeError("media_probe_failed") from None
 
 
+def _require_playable_media_summary(
+    summary: dict[str, Any],
+    *,
+    expected_duration_sec: float,
+    tolerance_sec: float,
+) -> None:
+    try:
+        duration = summary.get("duration_sec")
+        audio_codec = summary.get("audio_codec")
+        if (
+            isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+            or not math.isfinite(float(duration))
+            or float(duration) <= 0
+            or not math.isfinite(expected_duration_sec)
+            or expected_duration_sec <= 0
+            or not math.isfinite(tolerance_sec)
+            or tolerance_sec < 0
+            or abs(float(duration) - expected_duration_sec) > tolerance_sec
+            or not isinstance(audio_codec, str)
+            or not audio_codec
+            or len(audio_codec) > 128
+        ):
+            raise ValueError("unplayable media summary")
+    except Exception:
+        raise RuntimeError("media_evidence_invalid") from None
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -239,6 +271,16 @@ def _build_review_artifact_evidence(
     capcut_draft_path: Path,
     ffprobe_summary: dict[str, Any],
 ) -> dict[str, dict[str, Any]]:
+    _require_playable_media_summary(
+        ffprobe_summary.get("exact_preview", {}),
+        expected_duration_sec=EXACT_PREVIEW_DURATION_SEC,
+        tolerance_sec=EXACT_PREVIEW_DURATION_TOLERANCE_SEC,
+    )
+    _require_playable_media_summary(
+        ffprobe_summary.get("final_mp4", {}),
+        expected_duration_sec=SMOKE_DURATION_SEC,
+        tolerance_sec=FINAL_MEDIA_DURATION_TOLERANCE_SEC,
+    )
     ffprobe_summary_path = work_root / "review" / "ffprobe-summary.json"
     _write_stable_json(ffprobe_summary_path, ffprobe_summary)
     evidence: dict[str, dict[str, Any]] = {
@@ -326,10 +368,14 @@ def _poll_exact_preview(
     *,
     project_id: str,
     generation_id: str,
+    expected_revision: int,
+    expected_start_sec: float,
+    expected_end_sec: float,
     timeout_sec: int,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_sec
     generation_label = generation_id[:80]
+    canonical_content_url = f"/api/projects/{project_id}/exact-previews/{generation_id}/content"
     while time.monotonic() < deadline:
         response = client.get(f"/api/projects/{project_id}/exact-previews/{generation_id}")
         if response.status_code != 200:
@@ -343,11 +389,42 @@ def _poll_exact_preview(
             )
         status = str(payload.get("status") or "unavailable")
         if status in {"ready", "succeeded"}:
-            if not payload.get("content_url"):
-                raise RuntimeError(
-                    f"Exact preview generation '{generation_label}' reached {status} without content URL."
+            start_sec = payload.get("timeline_start_sec")
+            end_sec = payload.get("timeline_end_sec")
+            identity_matches = (
+                payload.get("generation_id") == generation_id
+                and isinstance(payload.get("artifact_revision"), int)
+                and not isinstance(payload.get("artifact_revision"), bool)
+                and payload.get("artifact_revision") == expected_revision
+                and isinstance(start_sec, (int, float))
+                and not isinstance(start_sec, bool)
+                and math.isfinite(float(start_sec))
+                and math.isclose(
+                    float(start_sec),
+                    expected_start_sec,
+                    rel_tol=0.0,
+                    abs_tol=EXACT_PREVIEW_RANGE_EQUALITY_TOLERANCE_SEC,
                 )
-            return {**payload, "status": "ready"}
+                and isinstance(end_sec, (int, float))
+                and not isinstance(end_sec, bool)
+                and math.isfinite(float(end_sec))
+                and math.isclose(
+                    float(end_sec),
+                    expected_end_sec,
+                    rel_tol=0.0,
+                    abs_tol=EXACT_PREVIEW_RANGE_EQUALITY_TOLERANCE_SEC,
+                )
+                and payload.get("content_url") == canonical_content_url
+            )
+            if not identity_matches:
+                raise RuntimeError("exact_preview_identity_mismatch")
+            range_response = client.get(
+                canonical_content_url,
+                headers={"Range": "bytes=0-0"},
+            )
+            if range_response.status_code != 206:
+                raise RuntimeError("exact_preview_range_failed")
+            return {**payload, "status": "ready", "range_status": 206}
         if status not in {"pending", "running"}:
             raise RuntimeError(
                 f"Exact preview generation '{generation_label}' entered terminal state {status[:80]}."
@@ -616,23 +693,18 @@ def run_smoke(
             json={
                 "expected_revision": session["session_revision"],
                 "start_sec": 0.0,
-                "end_sec": 5.0,
+                "end_sec": EXACT_PREVIEW_DURATION_SEC,
             },
         ), 202)
         exact_preview_status = _poll_exact_preview(
             client,
             project_id=project_id,
             generation_id=exact_preview_started["generation_id"],
+            expected_revision=session["session_revision"],
+            expected_start_sec=0.0,
+            expected_end_sec=EXACT_PREVIEW_DURATION_SEC,
             timeout_sec=300,
         )
-        exact_preview_content = client.get(
-            exact_preview_status["content_url"],
-            headers={"Range": "bytes=0-0"},
-        )
-        if exact_preview_content.status_code != 206:
-            raise RuntimeError(
-                f"Exact preview range request returned {exact_preview_content.status_code}, expected 206."
-            )
         exact_preview_record = store.get_exact_preview(
             project_id=project_id,
             generation_id=exact_preview_started["generation_id"],
@@ -654,7 +726,7 @@ def run_smoke(
                 f"Exact preview generation '{exact_preview_started['generation_id']}' has no current artifact file."
             )
         checks["exact_preview_ready"] = True
-        checks["exact_preview_range_206"] = True
+        checks["exact_preview_range_206"] = exact_preview_status["range_status"] == 206
         regenerated = _assert_status(client.post(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
             json={
