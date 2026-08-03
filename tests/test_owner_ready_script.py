@@ -89,15 +89,23 @@ def _write_fake_tool(path: Path) -> None:
         ":git\r\n"
         'if "%~1 %~2"=="rev-parse --show-toplevel" (echo %FAKE_REPO_ROOT%& exit /b 0)\r\n'
         'if "%~1 %~2"=="branch --show-current" (echo %FAKE_BRANCH%& exit /b 0)\r\n'
-        'if "%~1 %~2 %~3"=="rev-parse --short HEAD" (echo deadbeef& exit /b 0)\r\n'
+        'if "%~1 %~2"=="rev-parse HEAD" goto git_head\r\n'
+        'if "%~1 %~2 %~3"=="rev-parse --short HEAD" (set /p FAKE_HEAD_VALUE=<"%FAKE_HEAD_PATH%"& echo !FAKE_HEAD_VALUE:~0,8!& exit /b 0)\r\n'
         'if "%~1 %~2 %~3"=="rev-parse --abbrev-ref --symbolic-full-name" (echo origin/%FAKE_BRANCH%& exit /b 0)\r\n'
         'if "%~1 %~2 %~3"=="rev-list --left-right --count" (echo %FAKE_DIVERGENCE%& exit /b 0)\r\n'
         'if "%~1 %~2"=="status --short" (type "%FAKE_GIT_STATUS%"& exit /b 0)\r\n'
         'if "%~1 %~2 %~3"=="ls-files --error-unmatch --" if /i "%~4"=="%FAKE_UNTRACKED_CHILD%" exit /b 1\r\n'
         'if "%~1 %~2 %~3"=="ls-files --error-unmatch --" exit /b 0\r\n'
-        'if "%~1 %~2 %~3 %~4"=="diff --quiet HEAD --" if /i "%~5"=="%FAKE_DIRTY_CHILD%" exit /b 1\r\n'
-        'if "%~1 %~2 %~3 %~4"=="diff --quiet HEAD --" exit /b 0\r\n'
+        'if "%~1 %~2"=="diff --quiet" if "%~4"=="--" if /i "%~5"=="%FAKE_DIRTY_CHILD%" exit /b 1\r\n'
+        'if "%~1 %~2"=="diff --quiet" if "%~4"=="--" exit /b 0\r\n'
         "exit /b 1\r\n"
+        ":git_head\r\n"
+        'set /p FAKE_HEAD_READ_COUNT=<"%FAKE_HEAD_READ_COUNT_PATH%"\r\n'
+        "set /a FAKE_HEAD_READ_COUNT=!FAKE_HEAD_READ_COUNT!+1 >nul\r\n"
+        '>"%FAKE_HEAD_READ_COUNT_PATH%" echo !FAKE_HEAD_READ_COUNT!\r\n'
+        'type "%FAKE_HEAD_PATH%"\r\n'
+        'if "!FAKE_HEAD_READ_COUNT!"=="2" if "%FAKE_HEAD_MUTATE_AFTER_FINAL%"=="1" >"%FAKE_HEAD_PATH%" echo feedface11111111111111111111111111111111\r\n'
+        "exit /b 0\r\n"
         ":docker\r\n"
         'if /i "%~1"=="version" (echo 27.5.1& exit /b %FAKE_DOCKER_EXIT%)\r\n'
         'if /i "%~1"=="compose" if /i "%~6"=="config" if /i "%~nx5"==".env.container" if "%FAKE_FAIL_ACTUAL_CONFIG%"=="1" exit /b 1\r\n'
@@ -135,6 +143,12 @@ def _fixture_repository(tmp_path: Path) -> dict[str, Path]:
             "    }\n"
             "}\n"
             "if (-not [string]::IsNullOrEmpty($marker)) { Write-Output $marker }\n"
+            "if ($env:FAKE_SMOKE_SELF_MUTATE -ceq $MyInvocation.MyCommand.Name) {\n"
+            "    Add-Content -LiteralPath $MyInvocation.MyCommand.Path -Value '# execution-time mutation' -Encoding UTF8\n"
+            "}\n"
+            "if ($env:FAKE_SMOKE_HEAD_MUTATE -ceq $MyInvocation.MyCommand.Name) {\n"
+            "    [IO.File]::WriteAllText($env:FAKE_HEAD_PATH, 'feedface11111111111111111111111111111111')\n"
+            "}\n"
             "exit 0\n",
             encoding="utf-8-sig",
         )
@@ -173,6 +187,10 @@ def _fixture_repository(tmp_path: Path) -> dict[str, Path]:
         "?? apps/web/.tmp-real-video-dogfood/\n",
         encoding="utf-8",
     )
+    fake_head = tmp_path / "fake-head.txt"
+    fake_head.write_text("deadbeef00000000000000000000000000000000", encoding="ascii")
+    fake_head_read_count = tmp_path / "fake-head-read-count.txt"
+    fake_head_read_count.write_text("0", encoding="ascii")
     return {
         **paths,
         "repository": repository,
@@ -183,6 +201,8 @@ def _fixture_repository(tmp_path: Path) -> dict[str, Path]:
         "status": status,
         "command_log": tmp_path / "commands.log",
         "smoke_log": tmp_path / "smoke.log",
+        "fake_head": fake_head,
+        "fake_head_read_count": fake_head_read_count,
         "receipt_root": tmp_path / "receipts",
     }
 
@@ -312,6 +332,9 @@ def _run(
         "FAKE_BRANCH": "codex/videobox-container-compatibility",
         "FAKE_DIVERGENCE": "0 0",
         "FAKE_GIT_STATUS": str(fixture["status"]),
+        "FAKE_HEAD_PATH": str(fixture["fake_head"]),
+        "FAKE_HEAD_READ_COUNT_PATH": str(fixture["fake_head_read_count"]),
+        "FAKE_HEAD_MUTATE_AFTER_FINAL": "0",
         "FAKE_DOCKER_EXIT": "0",
         "FAKE_FAIL_ACTUAL_CONFIG": "0",
         "FAKE_SMOKE_LOG": str(fixture["smoke_log"]),
@@ -320,6 +343,8 @@ def _run(
         "FAKE_SMOKE_MUTATION": "",
         "FAKE_UNTRACKED_CHILD": "",
         "FAKE_DIRTY_CHILD": "",
+        "FAKE_SMOKE_SELF_MUTATE": "",
+        "FAKE_SMOKE_HEAD_MUTATE": "",
         **(environment_patch or {}),
     }
     return subprocess.run(
@@ -883,7 +908,85 @@ def test_smoke_rejects_a_child_not_unchanged_from_head_and_continues_all_gates(
     assert str(child_path) not in serialized
     tool_calls = fixture["command_log"].read_text(encoding="utf-8").replace('"', "")
     assert f"git ls-files --error-unmatch -- {relative_child}" in tool_calls
-    assert f"git diff --quiet HEAD -- {relative_child}" in tool_calls
+    start_commit = "deadbeef00000000000000000000000000000000"
+    assert f"git diff --quiet {start_commit} -- {relative_child}" in tool_calls
+
+
+def test_smoke_rejects_a_child_that_mutates_itself_during_execution(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    child_name = "smoke-hermes-yujin-chat.ps1"
+    child_path = fixture["repository"] / "scripts" / child_name
+    start_sha = hashlib.sha256(child_path.read_bytes()).hexdigest()
+    with _health_server() as hermes_uri:
+        result = _run(
+            fixture,
+            mode="Smoke",
+            hermes_uri=hermes_uri,
+            environment_patch={"FAKE_SMOKE_SELF_MUTATE": child_name},
+        )
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["readiness_status"] == "not_ready"
+    assert [row["id"] for row in payload["checks"] if row["status"] == "fail"] == [
+        "chat_non_live"
+    ]
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    assert hashlib.sha256(child_path.read_bytes()).hexdigest() != start_sha
+    receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
+    receipt = json.loads(receipt_text)
+    assert receipt["commit"] == "deadbeef"
+    assert receipt["checks"][1]["status"] == "fail"
+    assert receipt["checks"][1]["script_sha256"] == start_sha
+    serialized = json.dumps(payload) + receipt_text
+    assert str(child_path) not in serialized
+
+
+def test_smoke_rejects_head_change_during_execution_and_keeps_start_commit(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    target = SMOKE_SCRIPTS[0]
+    with _health_server() as hermes_uri:
+        result = _run(
+            fixture,
+            mode="Smoke",
+            hermes_uri=hermes_uri,
+            environment_patch={"FAKE_SMOKE_HEAD_MUTATE": target},
+        )
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["readiness_status"] == "not_ready"
+    assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
+    receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
+    receipt = json.loads(receipt_text)
+    assert receipt["commit"] == "deadbeef"
+    assert all(row["status"] == "fail" for row in receipt["checks"])
+    serialized = json.dumps(payload) + receipt_text
+    assert str(fixture["fake_head"]) not in serialized
+
+
+def test_smoke_rechecks_provenance_after_temp_receipt_before_publish(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as hermes_uri:
+        result = _run(
+            fixture,
+            mode="Smoke",
+            hermes_uri=hermes_uri,
+            environment_patch={"FAKE_HEAD_MUTATE_AFTER_FINAL": "1"},
+        )
+
+    payload = _payload(result)
+    assert result.returncode == 1
+    assert payload["readiness_status"] == "not_ready"
+    assert int(fixture["fake_head_read_count"].read_text(encoding="ascii")) >= 3
+    receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
+    receipt = json.loads(receipt_text)
+    assert receipt["commit"] == "deadbeef"
+    assert receipt["readiness_status"] == "not_ready"
+    assert all(row["status"] == "fail" for row in receipt["checks"])
+    serialized = json.dumps(payload) + receipt_text
+    assert str(fixture["fake_head"]) not in serialized
+    assert str(fixture["fake_head_read_count"]) not in serialized
 
 
 def test_smoke_receipt_write_failure_is_not_reported_as_ready(tmp_path: Path) -> None:

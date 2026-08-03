@@ -269,6 +269,30 @@ function Test-SmokeSuccessMarker {
     return $true
 }
 
+function Get-ScriptSha256 {
+    param([string]$LiteralPath)
+    $hashStream = $null
+    $sha256 = $null
+    try {
+        if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
+            return "unavailable"
+        }
+        $hashStream = [IO.File]::OpenRead($LiteralPath)
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        $hashBytes = $sha256.ComputeHash($hashStream)
+        $hash = [BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
+        if ($hash -match '^[0-9a-f]{64}$') {
+            return $hash
+        }
+    }
+    catch { }
+    finally {
+        if ($null -ne $sha256) { $sha256.Dispose() }
+        if ($null -ne $hashStream) { $hashStream.Dispose() }
+    }
+    return "unavailable"
+}
+
 function Get-WorkspaceChecks {
     $rootResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "--show-toplevel")
     $branchResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("branch", "--show-current")
@@ -734,6 +758,14 @@ if ($Mode -ceq "Start") {
 
 if ($Mode -ceq "Smoke") {
     $powerShellExecutable = (Get-Process -Id $PID).Path
+    $startHeadResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "HEAD")
+    $startCommit = $startHeadResult.StdOut.Trim().ToLowerInvariant()
+    $startCommitValid = (
+        $startHeadResult.ExitCode -eq 0 -and
+        $startCommit -match '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'
+    )
+    $baselineCommit = if ($startCommitValid) { $startCommit } else { "0000000000000000000000000000000000000000" }
+    $commit = if ($startCommitValid) { $startCommit.Substring(0, 8) } else { "unknown" }
     $definitions = @(
         [pscustomobject]@{
             Id = "creator_flow_non_live"
@@ -822,32 +854,18 @@ if ($Mode -ceq "Smoke") {
         $relativeScriptPath = "scripts/$($definition.File)"
         $exitCode = 127
         $stdout = ""
-        $scriptSha256 = "unavailable"
-        $trackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+        $preScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
+        $preTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
             "ls-files", "--error-unmatch", "--", $relativeScriptPath
         )
-        $unchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-            "diff", "--quiet", "HEAD", "--", $relativeScriptPath
+        $preUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+            "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
         )
-        $trackedAndUnchanged = $trackedResult.ExitCode -eq 0 -and $unchangedResult.ExitCode -eq 0
-        $hashStream = $null
-        $sha256 = $null
-        try {
-            if (Test-Path -LiteralPath $scriptPath -PathType Leaf) {
-                $hashStream = [IO.File]::OpenRead($scriptPath)
-                $sha256 = [Security.Cryptography.SHA256]::Create()
-                $hashBytes = $sha256.ComputeHash($hashStream)
-                $hash = [BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
-                if ($hash -match '^[0-9a-f]{64}$') {
-                    $scriptSha256 = $hash
-                }
-            }
-        }
-        catch { }
-        finally {
-            if ($null -ne $sha256) { $sha256.Dispose() }
-            if ($null -ne $hashStream) { $hashStream.Dispose() }
-        }
+        $preTrackedAndUnchanged = (
+            $startCommitValid -and
+            $preTrackedResult.ExitCode -eq 0 -and
+            $preUnchangedResult.ExitCode -eq 0
+        )
         if (Test-Path -LiteralPath $scriptPath -PathType Leaf) {
             $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $scriptPath)
             $arguments += @($definition.Arguments)
@@ -855,12 +873,26 @@ if ($Mode -ceq "Smoke") {
             $exitCode = $child.ExitCode
             $stdout = $child.StdOut
         }
+        $postScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
+        $postTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+            "ls-files", "--error-unmatch", "--", $relativeScriptPath
+        )
+        $postUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+            "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
+        )
+        $postTrackedAndUnchanged = (
+            $startCommitValid -and
+            $postTrackedResult.ExitCode -eq 0 -and
+            $postUnchangedResult.ExitCode -eq 0
+        )
         $markerValid = Test-SmokeSuccessMarker -Definition $definition -StdOut $stdout
         $status = if (
             $exitCode -eq 0 -and
             $markerValid -and
-            $scriptSha256 -ne "unavailable" -and
-            $trackedAndUnchanged
+            $preScriptSha256 -ne "unavailable" -and
+            $preScriptSha256 -ceq $postScriptSha256 -and
+            $preTrackedAndUnchanged -and
+            $postTrackedAndUnchanged
         ) { "pass" } else { "fail" }
         $action = if ($status -ceq "pass") { "추가 조치가 없습니다." } else { "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요." }
         $checks += New-OwnerReadyResult -Id $definition.Id -Status $status `
@@ -872,11 +904,10 @@ if ($Mode -ceq "Smoke") {
             mode = $definition.ReceiptMode
             status = $status
             marker = $(if ($status -ceq "pass") { $definition.PublicMarker } else { "invalid" })
-            script_sha256 = $scriptSha256
+            script_sha256 = $preScriptSha256
             action = $action
         }
     }
-    $staticNonLiveChecksPassed = @($checks | Where-Object { $_.status -cne "pass" }).Count -eq 0
     $dashboardProbe = Invoke-LoopbackProbe -Uri $HermesDashboardUri -AcceptLoginRedirectAsReachable
     $dashboardStatus = if ($dashboardProbe.State -ceq "pass") {
         "ready"
@@ -888,6 +919,41 @@ if ($Mode -ceq "Smoke") {
         "invalid"
     }
     $credentialStatus = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) { "present_unverified" } else { "missing" }
+    $finalHeadResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "HEAD")
+    $finalHead = $finalHeadResult.StdOut.Trim().ToLowerInvariant()
+    $headStable = (
+        $startCommitValid -and
+        $finalHeadResult.ExitCode -eq 0 -and
+        $finalHead -ceq $startCommit
+    )
+    for ($index = 0; $index -lt $definitions.Count; $index++) {
+        $definition = $definitions[$index]
+        $scriptPath = Join-Path $PSScriptRoot $definition.File
+        $relativeScriptPath = "scripts/$($definition.File)"
+        $currentScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
+        $currentTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+            "ls-files", "--error-unmatch", "--", $relativeScriptPath
+        )
+        $currentUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+            "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
+        )
+        $currentEvidenceValid = (
+            $headStable -and
+            $currentTrackedResult.ExitCode -eq 0 -and
+            $currentUnchangedResult.ExitCode -eq 0 -and
+            $currentScriptSha256 -ne "unavailable" -and
+            $currentScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
+        )
+        if (-not $currentEvidenceValid) {
+            $checks[$index].status = "fail"
+            $checks[$index].summary = "로컬 검증 항목을 확인하지 못했습니다."
+            $checks[$index].action = "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요."
+            $receiptChecks[$index]["status"] = "fail"
+            $receiptChecks[$index]["marker"] = "invalid"
+            $receiptChecks[$index]["action"] = "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요."
+        }
+    }
+    $staticNonLiveChecksPassed = @($checks | Where-Object { $_.status -cne "pass" }).Count -eq 0
     $readinessStatus = if (-not $staticNonLiveChecksPassed) {
         "not_ready"
     }
@@ -911,11 +977,6 @@ if ($Mode -ceq "Smoke") {
     }
     else {
         "fail"
-    }
-    $commitResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "--short", "HEAD")
-    $commit = $commitResult.StdOut.Trim().ToLowerInvariant()
-    if ($commitResult.ExitCode -ne 0 -or $commit -notmatch '^[0-9a-f]{7,12}$') {
-        $commit = "unknown"
     }
     $receiptPayload = [ordered]@{
         schema_version = "videobox-hermes-readiness-v1"
@@ -941,6 +1002,50 @@ if ($Mode -ceq "Smoke") {
         $temporaryPath = "$finalPath.tmp"
         $receiptText = $receiptPayload | ConvertTo-Json -Depth 8 -Compress
         [IO.File]::WriteAllText($temporaryPath, $receiptText, (New-Object System.Text.UTF8Encoding($false)))
+        $publishHeadResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "HEAD")
+        $publishHead = $publishHeadResult.StdOut.Trim().ToLowerInvariant()
+        $publishHeadStable = (
+            $startCommitValid -and
+            $publishHeadResult.ExitCode -eq 0 -and
+            $publishHead -ceq $startCommit
+        )
+        for ($index = 0; $index -lt $definitions.Count; $index++) {
+            $definition = $definitions[$index]
+            $scriptPath = Join-Path $PSScriptRoot $definition.File
+            $relativeScriptPath = "scripts/$($definition.File)"
+            $publishScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
+            $publishTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                "ls-files", "--error-unmatch", "--", $relativeScriptPath
+            )
+            $publishUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
+            )
+            $publishEvidenceValid = (
+                $publishHeadStable -and
+                $publishTrackedResult.ExitCode -eq 0 -and
+                $publishUnchangedResult.ExitCode -eq 0 -and
+                $publishScriptSha256 -ne "unavailable" -and
+                $publishScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
+            )
+            if (-not $publishEvidenceValid) {
+                $checks[$index].status = "fail"
+                $checks[$index].summary = "로컬 검증 항목을 확인하지 못했습니다."
+                $checks[$index].action = "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요."
+                $receiptChecks[$index]["status"] = "fail"
+                $receiptChecks[$index]["marker"] = "invalid"
+                $receiptChecks[$index]["action"] = "해당 검증기를 따로 실행해 고정 오류 코드를 확인하세요."
+            }
+        }
+        if (-not $publishHeadStable -or @($checks | Where-Object { $_.status -cne "pass" }).Count -gt 0) {
+            $staticNonLiveChecksPassed = $false
+            $readinessStatus = "not_ready"
+            $overallStatus = "fail"
+            $receiptPayload["readiness_status"] = $readinessStatus
+            $receiptPayload["static_non_live_checks_passed"] = $staticNonLiveChecksPassed
+            $receiptPayload["checks"] = $receiptChecks
+            $receiptText = $receiptPayload | ConvertTo-Json -Depth 8 -Compress
+            [IO.File]::WriteAllText($temporaryPath, $receiptText, (New-Object System.Text.UTF8Encoding($false)))
+        }
         [IO.File]::Move($temporaryPath, $finalPath)
         $receiptWritten = $true
     }
