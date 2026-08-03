@@ -115,6 +115,74 @@ def test_incompatible_video_reuses_active_job_then_serves_range_content(tmp_path
     assert client.get(ready["content_url"], headers={"Range": "bytes=99-100"}).status_code == 416
 
 
+def test_published_output_is_not_ready_until_matching_job_is_terminal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    published_before_success = threading.Event()
+    release_success = threading.Event()
+    original_update_job = LocalProjectStore.update_job
+
+    def gated_update_job(self, *, project_id, job_id, status, **kwargs):
+        if status == JobStatus.SUCCEEDED:
+            published_before_success.set()
+            if not release_success.wait(timeout=5):
+                raise AssertionError("test did not release succeeded update")
+        return original_update_job(
+            self,
+            project_id=project_id,
+            job_id=job_id,
+            status=status,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(LocalProjectStore, "update_job", gated_update_job)
+    renderer = FakeRenderer()
+    client = TestClient(
+        create_app(
+            projects_root=tmp_path,
+            asset_browser_preview_probe=FakeProbe(),
+            asset_browser_preview_renderer=renderer,
+        )
+    )
+    project_id, asset_id, _stored = _asset(tmp_path, client)
+    endpoint = f"/api/projects/{project_id}/assets/{asset_id}/browser-preview"
+    started = client.post(endpoint)
+    job_id = started.json()["job_id"]
+    assert started.status_code == 202
+    assert published_before_success.wait(timeout=5), "worker did not publish output"
+    client.app.state.asset_browser_preview_service.probe.source_compatible = True
+
+    try:
+        during_status = client.get(endpoint)
+        during_prepare = client.post(endpoint)
+        assert during_status.status_code == 200
+        assert during_prepare.status_code == 202
+        for response in (during_status, during_prepare):
+            assert response.json()["status"] in {"pending", "running"}
+            assert response.json()["job_id"] == job_id
+            assert response.json()["content_url"] is None
+    finally:
+        release_success.set()
+
+    ready = _wait(client, endpoint)
+    assert ready["status"] == "ready"
+    assert ready["job_id"] == job_id
+    assert ready["content_url"] == f"{endpoint}/content"
+    assert len(renderer.calls) == 1
+    assert len(LocalProjectStore(tmp_path).list_jobs(project_id=project_id)) == 1
+
+    output = client.app.state.asset_browser_preview_service.content_path(
+        project_id=project_id, asset_id=asset_id
+    )
+    output.unlink()
+    missing = client.get(endpoint)
+    assert missing.status_code == 200
+    assert missing.json()["status"] == "failed"
+    assert missing.json()["job_id"] == job_id
+    assert missing.json()["error_code"] == "PREVIEW_CACHE_MISSING"
+    assert missing.json()["content_url"] is None
+
+
 def test_non_video_asset_is_rejected_without_probe(tmp_path: Path) -> None:
     probe = FakeProbe()
     client = TestClient(create_app(projects_root=tmp_path, asset_browser_preview_probe=probe, asset_browser_preview_renderer=FakeRenderer()))
@@ -144,6 +212,40 @@ def test_render_failure_and_source_revision_change_are_bounded(tmp_path: Path) -
         retry = client.post(endpoint)
         assert retry.status_code == 202
         assert retry.json()["job_id"] != failed["job_id"]
+
+
+def test_failed_job_is_not_masked_by_cache_and_prepare_retries(tmp_path: Path) -> None:
+    failed_renderer = FakeRenderer(fail=True)
+    app = create_app(
+        projects_root=tmp_path,
+        asset_browser_preview_probe=FakeProbe(),
+        asset_browser_preview_renderer=failed_renderer,
+    )
+    client = TestClient(app)
+    project_id, asset_id, _stored = _asset(tmp_path, client)
+    endpoint = f"/api/projects/{project_id}/assets/{asset_id}/browser-preview"
+    started = client.post(endpoint)
+    failed = _wait(client, endpoint)
+    assert failed["status"] == "failed"
+
+    identity = app.state.asset_browser_preview_service._asset_identity(
+        project_id=project_id, asset_id=asset_id
+    )
+    identity.output.parent.mkdir(parents=True, exist_ok=True)
+    identity.output.write_bytes(b"orphaned-cache")
+    still_failed = client.get(endpoint).json()
+    assert still_failed["status"] == "failed"
+    assert still_failed["job_id"] == started.json()["job_id"]
+    assert still_failed["content_url"] is None
+
+    retry_renderer = FakeRenderer()
+    app.state.asset_browser_preview_service.renderer = retry_renderer
+    retry = client.post(endpoint)
+    assert retry.status_code == 202
+    assert retry.json()["job_id"] != failed["job_id"]
+    assert _wait(client, endpoint)["status"] == "ready"
+    assert len(retry_renderer.calls) == 1
+    assert len(LocalProjectStore(tmp_path).list_jobs(project_id=project_id)) == 2
 
 
 def test_completed_proxy_is_not_reused_after_the_registered_source_changes(tmp_path: Path) -> None:

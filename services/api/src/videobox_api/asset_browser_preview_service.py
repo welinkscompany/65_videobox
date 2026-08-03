@@ -48,26 +48,55 @@ class AssetBrowserPreviewService:
 
     def prepare(self, *, project_id: str, asset_id: str) -> tuple[dict, bool, str | None]:
         identity = self._asset_identity(project_id=project_id, asset_id=asset_id)
-        if self.probe.probe(identity.source).browser_compatible:
-            return self._ready_original(project_id, asset_id, identity.source_sha256), False, None
-        if identity.output.is_file() and identity.output.stat().st_size > 0:
-            return self._ready_proxy(project_id, asset_id, identity.source_sha256, None), False, identity.input_ref
+        job = self.store.get_latest_asset_preview_job(
+            project_id=project_id, input_ref=identity.input_ref
+        )
+        if job is not None and job["status"] in {
+            JobStatus.PENDING.value,
+            JobStatus.RUNNING.value,
+        }:
+            return self._job_payload(project_id, asset_id, identity.source_sha256, job), False, identity.input_ref
+        if (
+            job is not None
+            and job["status"] == JobStatus.SUCCEEDED.value
+            and self._output_ready(identity)
+        ):
+            return self._ready_proxy(
+                project_id, asset_id, identity.source_sha256, str(job["job_id"])
+            ), False, identity.input_ref
+        if job is None:
+            if self.probe.probe(identity.source).browser_compatible:
+                return self._ready_original(
+                    project_id, asset_id, identity.source_sha256
+                ), False, None
+            if self._output_ready(identity):
+                return self._ready_proxy(
+                    project_id, asset_id, identity.source_sha256, None
+                ), False, identity.input_ref
         job, created = self.store.create_or_reuse_active_asset_preview_job(project_id=project_id, input_ref=identity.input_ref)
         return self._job_payload(project_id, asset_id, identity.source_sha256, job), created, identity.input_ref
 
     def status(self, *, project_id: str, asset_id: str) -> dict:
         identity = self._asset_identity(project_id=project_id, asset_id=asset_id)
-        if identity.output.is_file() and identity.output.stat().st_size > 0:
-            return self._ready_proxy(project_id, asset_id, identity.source_sha256, None)
         job = self.store.get_latest_asset_preview_job(project_id=project_id, input_ref=identity.input_ref)
-        if job is not None and job["status"] == JobStatus.SUCCEEDED.value:
-            return self._failed(identity.source_sha256, str(job["job_id"]), "PREVIEW_CACHE_MISSING")
+        if job is not None:
+            if job["status"] == JobStatus.SUCCEEDED.value:
+                if self._output_ready(identity):
+                    return self._ready_proxy(
+                        project_id, asset_id, identity.source_sha256, str(job["job_id"])
+                    )
+                return self._failed(
+                    identity.source_sha256, str(job["job_id"]), "PREVIEW_CACHE_MISSING"
+                )
+            return self._job_payload(project_id, asset_id, identity.source_sha256, job)
         if job is None:
             job = self._latest_asset_job(project_id=project_id, asset_id=asset_id)
             if job is not None and job["status"] == JobStatus.SUCCEEDED.value:
                 return self._failed(identity.source_sha256, str(job["job_id"]), "PREVIEW_SOURCE_CHANGED")
-        if job is not None:
-            return self._job_payload(project_id, asset_id, identity.source_sha256, job)
+            if job is not None:
+                return self._job_payload(project_id, asset_id, identity.source_sha256, job)
+        if self._output_ready(identity):
+            return self._ready_proxy(project_id, asset_id, identity.source_sha256, None)
         if self.probe.probe(identity.source).browser_compatible:
             return self._ready_original(project_id, asset_id, identity.source_sha256)
         return self._failed(identity.source_sha256, None, "PREVIEW_NOT_PREPARED")
@@ -141,6 +170,10 @@ class AssetBrowserPreviewService:
         prefix = f"{project_id}:{asset_id}:"
         jobs = [job for job in self.store.list_jobs(project_id=project_id) if job["job_type"] == JobType.ASSET_PREVIEW_PROXY.value and str(job.get("input_ref") or "").startswith(prefix)]
         return jobs[-1] if jobs else None
+
+    @staticmethod
+    def _output_ready(identity: _SourceIdentity) -> bool:
+        return identity.output.is_file() and identity.output.stat().st_size > 0
 
     @staticmethod
     def _ready_original(project_id: str, asset_id: str, source_sha256: str) -> dict:
