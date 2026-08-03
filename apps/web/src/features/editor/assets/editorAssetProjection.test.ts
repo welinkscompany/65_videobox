@@ -49,6 +49,7 @@ describe("editor asset projection", () => {
     });
 
     expect(cards.map((card) => card.previewKind)).toEqual(["image", "audio", "video", "video", "audio"]);
+    expect(cards.map((card) => card.requiresBrowserPreviewPreparation)).toEqual([false, false, true, false, false]);
   });
 
   it("keeps unknown B-roll metadata honest and marks review explicitly", () => {

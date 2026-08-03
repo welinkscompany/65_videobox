@@ -33,6 +33,7 @@ const jobTypeCopy: Record<string, string> = {
   partial_regeneration: "선택 구간 다시 만들기",
   subtitle_render: "자막 만들기",
   preview_render: "이전 미리보기",
+  asset_preview_proxy: "원본 미리보기 준비",
   capcut_export: "이전 CapCut 내보내기",
   final_render: "완성본 만들기",
   capcut_draft_export: "CapCut 초안 만들기",

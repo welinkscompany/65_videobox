@@ -117,6 +117,24 @@ describe("EditorAssetBrowser", () => {
     expect(screen.getAllByRole("article")[2]).toHaveTextContent("오디오 있음");
   });
 
+  it("shows bounded preparation and failure recovery without blocking manual apply", () => {
+    const video = { ...cards[0], id: "broll:video-1", assetId: "video-1", title: "HEVC 영상", previewKind: "video" as const, requiresBrowserPreviewPreparation: true };
+    const onPreview = vi.fn();
+    const onRefreshExactPreview = vi.fn();
+    const { rerender } = render(<EditorAssetBrowser cards={[video]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={onPreview} onApply={vi.fn()} previewStates={{ [video.id]: { status: "preparing" } }} onRefreshExactPreview={onRefreshExactPreview} />);
+
+    expect(screen.getByText("원본 미리보기를 준비하고 있어요")).toBeVisible();
+    expect(screen.getByRole("button", { name: "HEVC 영상 원본 미리보기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "HEVC 영상 적용" })).toBeEnabled();
+
+    rerender(<EditorAssetBrowser cards={[video]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={onPreview} onApply={vi.fn()} previewStates={{ [video.id]: { status: "failed" } }} onRefreshExactPreview={onRefreshExactPreview} />);
+    fireEvent.click(screen.getByRole("button", { name: "HEVC 영상 다시 준비" }));
+    fireEvent.click(screen.getByRole("button", { name: "정확한 미리보기 새로고침" }));
+    expect(onPreview).toHaveBeenCalledWith(video);
+    expect(onRefreshExactPreview).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "HEVC 영상 적용" })).toBeEnabled();
+  });
+
   it("keeps long card fields wrap-safe in a 390px narrow drawer fixture", () => {
     const originalWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });

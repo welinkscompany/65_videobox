@@ -58,6 +58,15 @@ export type JobRecord = {
 
 export type JobRecordWithProject = JobRecord & { project_name: string };
 
+export type AssetBrowserPreview = {
+  status: "pending" | "running" | "ready" | "failed";
+  job_id: string | null;
+  content_url: string | null;
+  source_sha256: string;
+  profile: string;
+  error_code: string | null;
+};
+
 export type BrollAsset = {
   asset_id: string;
   asset_type: string;
@@ -2029,6 +2038,12 @@ export const api = {
     ),
   assetContentUrl: (projectId: string, assetId: string) =>
     `/api/projects/${projectId}/assets/${assetId}/content`,
+  prepareAssetBrowserPreview: (projectId: string, assetId: string, signal?: AbortSignal) =>
+    request<AssetBrowserPreview>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview`, { method: "POST", credentials: "same-origin", redirect: "error", signal }),
+  getAssetBrowserPreview: (projectId: string, assetId: string, signal?: AbortSignal) =>
+    request<AssetBrowserPreview>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview`, { credentials: "same-origin", redirect: "error", signal }),
+  assetBrowserPreviewContentUrl: (projectId: string, assetId: string) =>
+    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview/content`,
   assetThumbnailUrl: (projectId: string, assetId: string) =>
     `/api/projects/${projectId}/assets/${assetId}/thumbnail`,
   startFinalRender: (projectId: string, payload: OutputJobRequest) =>

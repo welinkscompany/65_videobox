@@ -21,6 +21,7 @@ from videobox_api.orchestration import (
     LocalOnlyRuntimeService,
     build_local_only_runtime_service,
 )
+from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService
 from videobox_api.provider_factories import _build_pycapcut_exporter, _build_stt_provider, _build_tts_provider
 from videobox_api.response_normalizers import (
     _build_preflight_review_prediction,
@@ -47,6 +48,7 @@ from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
+from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.media_analysis import MediaAnalysisService
@@ -269,6 +271,11 @@ async def _media_analysis_lifespan(app: FastAPI):
         # An unavailable ledger cannot be claimed as durably reconciled.
         # The single bounded worker retries after recovery without dispatching.
         pass
+    try:
+        await asyncio.to_thread(app.state.asset_browser_preview_service.recover_orphans)
+    except Exception:
+        # Preview recovery is retriable and never starts a renderer.
+        pass
 
     async def worker() -> None:
         first = True
@@ -354,6 +361,8 @@ def create_app(
     vision_provider=None,
     embedding_provider=None,
     media_probe=None,
+    asset_browser_preview_probe=None,
+    asset_browser_preview_renderer=None,
     analysis_dispatcher=None,
     analysis_clock=None,
     media_analysis_poll_interval_seconds: float = 0.05,
@@ -516,6 +525,11 @@ def create_app(
         orchestrator.media_analysis_dispatcher = None
     app.state.local_runtime_config = resolved_local_runtime_config
     app.state.store = store
+    app.state.asset_browser_preview_service = AssetBrowserPreviewService(
+        store=store,
+        probe=asset_browser_preview_probe or FFprobeBrowserPreviewProbe(),
+        renderer=asset_browser_preview_renderer or FFmpegBrowserPreviewRenderer(),
+    )
     app.state.media_analysis_vision_provider = resolved_vision_provider
     app.state.media_analysis_embedding_provider = embedding_provider
     app.state.media_analysis_service = orchestrator.media_analysis_service
@@ -597,7 +611,7 @@ def create_app(
     app.include_router(build_creation_briefs_router(orchestrator))
     app.include_router(build_draft_readiness_router(orchestrator))
     app.include_router(build_atomic_draft_bundles_router(orchestrator))
-    app.include_router(build_assets_router(orchestrator, store))
+    app.include_router(build_assets_router(orchestrator, store, app.state.asset_browser_preview_service))
     app.include_router(build_media_analysis_router(store, orchestrator.media_analysis_service, orchestrator.media_analysis_dispatcher))
     app.include_router(build_jobs_router(orchestrator))
     app.include_router(build_timeline_router(orchestrator))

@@ -70,6 +70,35 @@ const yujinUnavailableMessage = "유진의 답을 받지 못했어요.";
 const hermesUnavailableTechnicalText = "Hermes is temporarily unavailable. Manual Director remains available.";
 const maxDirectorMessages = 200;
 
+function waitForAssetBrowserPreview(delayMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
+    const timeout = window.setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, delayMs);
+    const abort = () => { window.clearTimeout(timeout); reject(new DOMException("Aborted", "AbortError")); };
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+export async function prepareProjectAssetBrowserPreview(
+  projectId: string,
+  assetId: string,
+  signal: AbortSignal,
+  options: { sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>; maxPolls?: number } = {},
+): Promise<string> {
+  const sleep = options.sleep ?? waitForAssetBrowserPreview;
+  const maxPolls = options.maxPolls ?? 76;
+  let state = await api.prepareAssetBrowserPreview(projectId, assetId, signal);
+  for (let poll = 0; poll <= maxPolls; poll += 1) {
+    if (state.status === "ready" && state.content_url) return state.content_url;
+    if (state.status === "failed") throw new Error(state.error_code ?? "PREVIEW_RENDER_FAILED");
+    if (poll === maxPolls) break;
+    const delay = [100, 200, 400, 800][Math.min(poll, 3)];
+    await sleep(delay, signal);
+    state = await api.getAssetBrowserPreview(projectId, assetId, signal);
+  }
+  throw new Error("PREVIEW_PREPARATION_TIMEOUT");
+}
+
 function directorDraftStorageKey(requestKey: string) {
   return `videobox.editor-workbench.eugene-draft:${encodeURIComponent(requestKey)}`;
 }
@@ -136,6 +165,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const memoryMutationInFlight = useRef(false);
   const hermesRunInFlight = useRef(false);
   const hermesAbort = useRef<AbortController | null>(null);
+  const assetPreviewAbort = useRef<AbortController | null>(null);
   const activeHermesRouteRun = useRef<ActiveHermesRouteRun | null>(null);
   const hermesOperationId = useRef(0);
   const currentDirectorConversationId = useRef<string | null>(null);
@@ -162,6 +192,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     hermesRunInFlight.current = false;
     hermesAbort.current?.abort();
     hermesAbort.current = null;
+    assetPreviewAbort.current?.abort();
+    assetPreviewAbort.current = null;
     routeEpoch.current = { key: requestKey, value: routeEpoch.current.value + 1 };
     mutationOperationId.current += 1;
     directorOperationId.current += 1;
@@ -185,6 +217,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     hermesRunInFlight.current = false;
     hermesAbort.current?.abort();
     hermesAbort.current = null;
+    assetPreviewAbort.current?.abort();
+    assetPreviewAbort.current = null;
   }, []);
   useEffect(() => {
     if (director.key !== requestKey) return;
@@ -670,6 +704,22 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const assetCards = assets.key === requestKey
     ? projectEditorAssets({ projectId, brollAssets: assets.brollAssets, libraryAssets: assets.libraryAssets })
     : [];
+  const prepareAssetPreview = async (card: EditorAssetCard) => {
+    assetPreviewAbort.current?.abort();
+    const controller = new AbortController();
+    assetPreviewAbort.current = controller;
+    const epoch = routeEpoch.current.value;
+    const routeKey = requestKey;
+    try {
+      const previewUrl = await prepareProjectAssetBrowserPreview(projectId, card.assetId, controller.signal);
+      if (controller !== assetPreviewAbort.current || routeEpoch.current.value !== epoch || routeEpoch.current.key !== routeKey) {
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return previewUrl;
+    } finally {
+      if (assetPreviewAbort.current === controller) assetPreviewAbort.current = null;
+    }
+  };
   const partialTicketIsCurrent = activePartial.ticket !== null && canRunPartialRegeneration(activePartial.ticket, {
     projectId,
     sessionId: sessionId ?? "",
@@ -1697,6 +1747,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     isSavingTimeline={mutation.isSaving}
     loadApprovedTtsCandidates={loadApprovedTtsCandidates}
     onApplyAssetCard={applyAssetCard}
+    onPrepareAssetPreview={prepareAssetPreview}
     onInspectorAction={handleInspectorAction}
     onPreviewRefresh={refreshPreview}
     onReorderNarration={(input) => commitTimelineMutation((port) => port.reorderNarration(input))}

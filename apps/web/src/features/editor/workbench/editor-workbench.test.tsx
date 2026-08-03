@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { EditorWorkbench, persistedPanelPixels } from "./EditorWorkbench";
 import * as previewStageModule from "../preview/preview-stage";
@@ -76,6 +76,37 @@ describe("EditorWorkbench", () => {
     fireEvent.click(screen.getByRole("button", { name: "BGM 1 원본 미리보기" }));
     expect(screen.getByLabelText("BGM 1 소스 미리보기").tagName).toBe("AUDIO");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+  });
+
+  it("prepares project video before handing its URL to the single PreviewStage player", async () => {
+    let resolvePreview!: (url: string) => void;
+    const prepared = new Promise<string>((resolve) => { resolvePreview = resolve; });
+    const video = { ...assetCards[0], id: "broll:video-1", assetId: "video-1", title: "HEVC 영상", label: "영상 B-roll", previewKind: "video" as const, requiresBrowserPreviewPreparation: true };
+    const onPrepareAssetPreview = vi.fn(() => prepared);
+    const { container } = render(<EditorWorkbench view={view} assetCards={[video]} onPrepareAssetPreview={onPrepareAssetPreview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "HEVC 영상 원본 미리보기" }));
+    expect(screen.getByText("원본 미리보기를 준비하고 있어요")).toBeVisible();
+    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
+    await act(async () => resolvePreview("/api/proxy/video-1"));
+
+    expect(await screen.findByLabelText("HEVC 영상 소스 미리보기")).toHaveAttribute("src", "/api/proxy/video-1");
+    expect(container.querySelectorAll("audio, video")).toHaveLength(1);
+  });
+
+  it("ignores an older video preparation result after a newer card click", async () => {
+    const resolvers: Array<(url: string) => void> = [];
+    const first = { ...assetCards[0], id: "broll:video-1", assetId: "video-1", title: "첫 영상", previewKind: "video" as const, requiresBrowserPreviewPreparation: true };
+    const second = { ...first, id: "broll:video-2", assetId: "video-2", title: "둘째 영상" };
+    const onPrepareAssetPreview = vi.fn(() => new Promise<string>((resolve) => resolvers.push(resolve)));
+    render(<EditorWorkbench view={view} assetCards={[first, second]} onPrepareAssetPreview={onPrepareAssetPreview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "첫 영상 원본 미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "둘째 영상 원본 미리보기" }));
+    await act(async () => resolvers[0]("/api/proxy/old"));
+    expect(screen.queryByLabelText("첫 영상 소스 미리보기")).toBeNull();
+    await act(async () => resolvers[1]("/api/proxy/new"));
+    expect(await screen.findByLabelText("둘째 영상 소스 미리보기")).toHaveAttribute("src", "/api/proxy/new");
   });
 
   it("uses only a selected narration clip as the asset apply target and forwards it upward", () => {

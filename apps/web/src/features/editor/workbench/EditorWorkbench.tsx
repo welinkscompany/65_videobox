@@ -6,6 +6,7 @@ import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import type { EditorViewModel } from "../editorViewModel";
 import type { EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorAssetCard } from "../assets/editorAssetProjection";
+import type { EditorAssetPreviewState } from "../assets/EditorAssetBrowser";
 import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls } from "../inspector/InspectorControls";
 import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
 import { TimelineDock } from "../timeline/TimelineDock";
@@ -45,6 +46,7 @@ type EditorWorkbenchProps = Readonly<{
   partialRegeneration?: PartialRegenerationControls;
   assetCards?: readonly EditorAssetCard[];
   onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>;
+  onPrepareAssetPreview?: (card: EditorAssetCard) => Promise<string>;
   isSavingTimeline?: boolean;
   timelineMutationMessage?: string;
   director?: RightDockDirector;
@@ -72,6 +74,7 @@ function EditorWorkbenchInstance({
   partialRegeneration,
   assetCards = [],
   onApplyAssetCard,
+  onPrepareAssetPreview,
   isSavingTimeline = false,
   timelineMutationMessage,
   director,
@@ -88,6 +91,8 @@ function EditorWorkbenchInstance({
     routeKey: string;
     request: AuditionRequest | null;
   }>>({ routeKey: viewRouteKey, request: null });
+  const [assetPreviewStates, setAssetPreviewStates] = useState<Readonly<Record<string, EditorAssetPreviewState>>>({});
+  const assetPreviewRequestId = useRef(0);
   const auditionRequest = auditionState.routeKey === viewRouteKey
     ? auditionState.request
     : null;
@@ -130,6 +135,8 @@ function EditorWorkbenchInstance({
       setSelectedSegmentId(view.local.selectedSegmentId);
       setPlaybackSec(clampPlaybackSeconds(view.local.seekSec, view.output.durationSec));
       setAuditionState({ routeKey: viewRouteKey, request: null });
+      assetPreviewRequestId.current += 1;
+      setAssetPreviewStates({});
       return;
     }
     const segmentIds = new Set([
@@ -185,7 +192,7 @@ function EditorWorkbenchInstance({
     ?? view.captions.find((caption) => caption.segmentId === selectedSegmentId)
     ?? null;
   const assetTarget = selectedNarration === null ? null : { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec };
-  const previewAssetCard = (card: EditorAssetCard) => {
+  const playAssetCard = (card: EditorAssetCard, previewUrl: string) => {
     const mediaKind = card.previewKind ?? (card.kind === "broll" ? "video" : "audio");
     setAuditionState((current) => {
       const currentRequest = current.routeKey === viewRouteKey ? current.request : null;
@@ -193,9 +200,27 @@ function EditorWorkbenchInstance({
         routeKey: viewRouteKey,
         request: {
           requestId: (currentRequest?.requestId ?? 0) + 1,
-          source: { id: card.id, label: card.title, url: card.previewUrl, mediaKind, timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
+          source: { id: card.id, label: card.title, url: previewUrl, mediaKind, timelineRange: assetTarget ?? { startSec: 0, endSec: view.output.durationSec } },
         },
       };
+    });
+  };
+  const previewAssetCard = (card: EditorAssetCard) => {
+    const requestId = assetPreviewRequestId.current + 1;
+    assetPreviewRequestId.current = requestId;
+    if (!card.requiresBrowserPreviewPreparation || !onPrepareAssetPreview) {
+      setAssetPreviewStates({});
+      playAssetCard(card, card.previewUrl);
+      return;
+    }
+    setAssetPreviewStates({ [card.id]: { status: "preparing" } });
+    void onPrepareAssetPreview(card).then((previewUrl) => {
+      if (assetPreviewRequestId.current !== requestId || viewRouteKeyRef.current !== viewRouteKey) return;
+      setAssetPreviewStates({});
+      playAssetCard(card, previewUrl);
+    }).catch(() => {
+      if (assetPreviewRequestId.current !== requestId || viewRouteKeyRef.current !== viewRouteKey) return;
+      setAssetPreviewStates({ [card.id]: { status: "failed" } });
     });
   };
   const previewDirectorCandidate = (candidate: RightDockCandidate) => {
@@ -214,7 +239,7 @@ function EditorWorkbenchInstance({
   };
   const openManualEditing = () => setUi((current) => layout.mode === "drawer" ? { ...current, activeDrawer: "left" } : { ...current, leftOpen: true });
   const rightDirector = director ? { ...director, onManualEdit: () => { director.onManualEdit(); openManualEditing(); }, onPreviewCandidate: previewDirectorCandidate } : undefined;
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };

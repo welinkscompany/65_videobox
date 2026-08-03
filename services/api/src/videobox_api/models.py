@@ -391,6 +391,15 @@ class AssetResponse(BaseModel):
     storage_uri: str
 
 
+class BrowserPreviewResponse(BaseModel):
+    status: Literal["pending", "running", "ready", "failed"]
+    job_id: str | None = None
+    content_url: str | None = None
+    source_sha256: str
+    profile: str
+    error_code: str | None = None
+
+
 class TTSCandidateResponse(AssetResponse):
     candidate_id: str | None = None
     segment_id: str | None = None

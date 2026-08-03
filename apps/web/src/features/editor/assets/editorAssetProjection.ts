@@ -28,6 +28,7 @@ export type EditorAssetCard = Readonly<{
   canApply: boolean;
   previewUrl: string;
   previewKind?: EditorAssetPreviewKind;
+  requiresBrowserPreviewPreparation?: boolean;
   sourceMetadata: EditorAssetSourceMetadata;
 }>;
 
@@ -116,6 +117,7 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     canApply: true,
     previewUrl: api.assetContentUrl(projectId, asset.asset_id),
     previewKind: brollPreviewKind(asset.asset_type),
+    requiresBrowserPreviewPreparation: asset.asset_type === "broll_video",
     sourceMetadata: {
       tags: Array.isArray(metadata.tags) ? metadata.tags.filter((tag): tag is string => typeof tag === "string") : [],
       source: "프로젝트 로컬 B-roll",
@@ -146,6 +148,7 @@ function projectLibrary(asset: MediaLibraryAsset, index: number): EditorAssetCar
     canApply: availableForUse,
     previewUrl: api.mediaLibraryPreviewUrl(asset.library_asset_id),
     previewKind: "audio",
+    requiresBrowserPreviewPreparation: false,
     sourceMetadata: {
       tags: asset.tags,
       source: asset.source,

@@ -1233,6 +1233,23 @@ def test_postgres_store_bootstraps_and_lists_a_project(tmp_path: Path, postgres_
     }
 
 
+def test_postgres_asset_preview_job_claim_is_atomic(tmp_path: Path, postgres_url: str) -> None:
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Asset preview claim {uuid4().hex}")
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        claims = list(executor.map(
+            lambda _index: store.create_or_reuse_active_asset_preview_job(
+                project_id=project.project_id,
+                input_ref="asset-1:fingerprint-a",
+            ),
+            range(16),
+        ))
+
+    assert len({job["job_id"] for job, _created in claims}) == 1
+    assert sum(1 for _job, created in claims if created) == 1
+
+
 def test_postgres_legacy_jti_only_hermes_capability_methods_never_create_authority(
     tmp_path: Path, postgres_url: str
 ) -> None:

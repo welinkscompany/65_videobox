@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 318. 2026-08-03 Task 23 owner-ready MVP polish planning`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+> 현재 authoritative 상태/next slice 판단은 `## 319. 2026-08-03 Task 23A HEVC browser-preview proxy closeout`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23 master planning은 `## 318`, owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+
+## 319. 2026-08-03 Task 23A HEVC browser-preview proxy closeout
+
+- `[x] 23A 완료`: 프로젝트 `raw_video`/`broll_video`를 클릭할 때만 경량 ffprobe로 브라우저 호환성을 확인한다. MP4/H264/yuv420p/AAC-or-none은 기존 content URL을 그대로 사용하고, HEVC 등 비호환 영상은 project-local `cache/browser`에 H264/yuv420p/AAC/faststart·긴 변 1280 프록시를 원자 게시한다. 원본과 등록 자산은 수정·rename·delete하지 않는다.
+- `[x] durable/cache/fence`: `ASSET_PREVIEW_PROXY` job은 source created_at/size/mtime_ns/SHA/profile 지문당 SQLite/PostgreSQL 공통 active claim 하나를 사용한다. publish 전 출력 codec/크기와 fresh source SHA를 다시 확인하고, restart orphan은 bounded failed로 복구한다. 완료 뒤 source revision이 바뀌면 이전 프록시를 current ready로 노출하지 않는다.
+- `[x] editor 연결`: Route가 same-origin/redirect-error start·bounded poll·AbortSignal·route epoch를 소유하고, Workbench가 최신 요청 sequence와 카드별 준비/실패 상태를 소유한다. 성공 URL만 기존 단일 `PreviewStage`에 전달한다. audio/image/library direct preview, manual apply, exact-preview refresh fallback은 유지하며 자동 apply/session revision 변경은 없다.
+- `[x] 실제 owner sample`: read-only `C:\Users\atgro\OneDrive\바탕 화면\영상샘플\20260612_091959.mp4`(HEVC/AAC, 10.33초)를 실제로 H264/yuv420p 프록시 변환하고 Range `206`, source size/mtime/SHA 불변, external provider call 0을 확인했다. 합성 HEVC verifier도 같은 계약을 자동 검증한다. 한글 경로의 ffprobe UTF-8 디코딩과 Windows 260자 임시 경로 문제를 실제 샘플/테스트에서 발견해 bounded UTF-8 처리와 짧은 SHA cache 경로로 보완했다.
+- `[x] 검증`: TDD RED→GREEN 뒤 관련 backend **81 passed, warning 1**, frontend focused **7 files / 231 passed**, frontend full **52 files / 733 passed**, production build, Editor UI OSS provenance verifier, `git diff --check`가 통과했다. warning은 기존 Starlette multipart PendingDeprecationWarning이며 frontend의 기존 React act/jsdom navigation/intentional ErrorBoundary stderr와 build 500kB 안내는 비실패 출력이다. PostgreSQL 실DB claim test는 `VIDEOBOX_TEST_POSTGRES_URL`이 없어 **1 skipped**이며 전체 Python regression은 실행하지 않았고 통과로 주장하지 않는다.
+- `[x] 최종 리뷰`: 승인 spec 대조, 코드품질, gap, source→UI 역방향 추적에서 API status를 durable `pending/running`과 맞추고 redirect 외부 이탈을 차단했다. 성공 job 뒤 cache 파일이 사라진 경우에도 거짓 `ready`를 반환하지 않고 bounded `PREVIEW_CACHE_MISSING` 실패로 재시도하게 보완했다. 보완 뒤 open Critical/Important는 0이다. source copy, OpenCut runtime, provider/API 확장, Hermes/Mem0, SaaS, 게시, 자동 apply는 추가하지 않았다.
+- `진행률·다음`: Task 23 production slice는 **1/4 (25.0%)**, 잔여 **75.0%**다. 다음 goal은 **23B owner one-click 실행·진단**이며 기본 `Check`는 read-only, `Start/Smoke/Open/OpenCapCut`은 명시적 모드로 분리한다.
 
 ## 318. 2026-08-03 Task 23 owner-ready MVP polish planning
 

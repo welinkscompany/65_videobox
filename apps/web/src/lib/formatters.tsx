@@ -54,6 +54,7 @@ export function prettifyJobType(jobType: string) {
     timeline_build: "타임라인",
     subtitle_render: "자막",
     preview_render: "미리보기",
+    asset_preview_proxy: "원본 미리보기 준비",
     capcut_export: "캡컷",
     broll: "B롤",
     music: "음악",

@@ -11,6 +11,21 @@ import {
   type TimelinePayload,
 } from "./api";
 
+describe("asset browser preview API", () => {
+  it("starts and polls with encoded identity and AbortSignal", async () => {
+    const signal = new AbortController().signal;
+    const payload = { status: "running", job_id: "job-1", content_url: null, source_sha256: "sha", profile: "profile", error_code: null };
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...payload, status: "ready", content_url: "/content" }), { status: 200, headers: { "Content-Type": "application/json" } }));
+
+    await expect(api.prepareAssetBrowserPreview("project/1", "asset 1", signal)).resolves.toEqual(payload);
+    await expect(api.getAssetBrowserPreview("project/1", "asset 1", signal)).resolves.toMatchObject({ status: "ready", content_url: "/content" });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/project%2F1/assets/asset%201/browser-preview", { method: "POST", credentials: "same-origin", redirect: "error", signal });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/project%2F1/assets/asset%201/browser-preview", { credentials: "same-origin", redirect: "error", signal });
+  });
+});
+
 describe("caption style API conflicts", () => {
   const memoryCandidate = {
     candidate_id: "memory-candidate-1",

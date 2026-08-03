@@ -10,12 +10,16 @@ type EditorAssetTarget = Readonly<{
   endSec: number;
 }>;
 
+export type EditorAssetPreviewState = Readonly<{ status: "preparing" | "failed" }>;
+
 type Props = Readonly<{
   cards: readonly EditorAssetCard[];
   target: EditorAssetTarget | null;
   isSaving: boolean;
   onPreview: (card: EditorAssetCard) => void;
   onApply: (card: EditorAssetCard, segmentId: string) => void;
+  previewStates?: Readonly<Record<string, EditorAssetPreviewState>>;
+  onRefreshExactPreview?: () => void;
 }>;
 
 const filters: readonly Readonly<{ type: "all" | EditorAssetKind; label: string }>[] = [
@@ -31,7 +35,7 @@ function targetLabel(target: EditorAssetTarget | null): string {
     : "적용할 나레이션 구간을 먼저 선택하세요.";
 }
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, previewStates = {}, onRefreshExactPreview }: Props) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
   const visibleCards = filterEditorAssets(cards, { type, query });
@@ -50,6 +54,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     <div className="vb-editor-assets__cards">
       {visibleCards.map((card) => {
         const applyDisabled = target === null || isSaving || !card.canApply;
+        const previewState = previewStates[card.id];
         return <article key={card.id} className="vb-editor-assets__card">
           <h3 className="vb-editor-assets__title">{card.title}</h3>
           <p className="vb-editor-assets__summary">{card.label} · {card.durationLabel}</p>
@@ -57,9 +62,12 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <p className="vb-editor-assets__detail">{card.audioPresence}</p>
           <p className="vb-editor-assets__detail">{card.license}</p>
           <p className="vb-editor-assets__reason">직접 선택한 자산</p>
+          {previewState?.status === "preparing" ? <p role="status">원본 미리보기를 준비하고 있어요</p> : null}
+          {previewState?.status === "failed" ? <p role="alert">원본 미리보기를 준비하지 못했어요. 편집과 적용은 계속할 수 있어요.</p> : null}
           <p className="vb-editor-assets__card-target">{targetLabel(target)}</p>
           <div className="vb-editor-assets__actions">
-            <Button type="button" aria-label={`${card.title} 원본 미리보기`} disabled={!card.previewUrl} onClick={() => onPreview(card)}>원본 미리보기</Button>
+            <Button type="button" aria-label={`${card.title} ${previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}`} disabled={!card.previewUrl || previewState?.status === "preparing"} onClick={() => onPreview(card)}>{previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}</Button>
+            {previewState?.status === "failed" && onRefreshExactPreview ? <Button type="button" variant="outline" onClick={onRefreshExactPreview}>정확한 미리보기 새로고침</Button> : null}
             <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>
           </div>
         </article>;

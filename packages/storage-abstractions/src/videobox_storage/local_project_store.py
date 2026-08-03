@@ -8719,6 +8719,19 @@ class LocalProjectStore:
             job_type=JobType.CAPCUT_DRAFT_EXPORT,
         )
 
+    def create_or_reuse_active_asset_preview_job(
+        self,
+        *,
+        project_id: str,
+        input_ref: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically claim the one active browser proxy for a source identity."""
+        return self._create_or_reuse_active_output_job(
+            project_id=project_id,
+            timeline_job_id=input_ref,
+            job_type=JobType.ASSET_PREVIEW_PROXY,
+        )
+
     def _create_or_reuse_active_output_job(
         self,
         *,
@@ -8872,6 +8885,53 @@ class LocalProjectStore:
         if row is None:
             raise KeyError(f"Job not found: {job_id}")
         return dict(row)
+
+    def get_latest_asset_preview_job(
+        self,
+        *,
+        project_id: str,
+        input_ref: str,
+    ) -> dict[str, Any] | None:
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT
+                job_id, project_id, job_type, status, input_ref, output_ref,
+                error_message, started_at, finished_at, progress_percent
+            FROM jobs
+            WHERE project_id = ? AND job_type = ? AND input_ref = ?
+            ORDER BY COALESCE(started_at, '') DESC, job_id DESC
+            LIMIT 1
+            """,
+            (project_id, JobType.ASSET_PREVIEW_PROXY.value, input_ref),
+        )
+        return dict(row) if row is not None else None
+
+    def recover_orphaned_asset_preview_jobs(self, *, project_id: str) -> int:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute(
+                """
+                UPDATE jobs
+                SET status = ?, error_message = ?, finished_at = ?
+                WHERE project_id = ?
+                  AND job_type = ?
+                  AND status IN (?, ?)
+                """,
+                (
+                    JobStatus.FAILED.value,
+                    "PREVIEW_WORKER_RESTARTED",
+                    self._now_iso(),
+                    project_id,
+                    JobType.ASSET_PREVIEW_PROXY.value,
+                    JobStatus.PENDING.value,
+                    JobStatus.RUNNING.value,
+                ),
+            )
+            connection.commit()
+            return int(cursor.rowcount)
+        finally:
+            connection.close()
 
     def list_jobs(self, *, project_id: str) -> list[dict[str, Any]]:
         connection = self._connection(project_id)

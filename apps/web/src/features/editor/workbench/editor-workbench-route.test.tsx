@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
 import { ApiConflictError, api } from "../../../api";
-import { EditorWorkbenchRoute, findHermesRunProposalId } from "./EditorWorkbenchRoute";
+import { EditorWorkbenchRoute, findHermesRunProposalId, prepareProjectAssetBrowserPreview } from "./EditorWorkbenchRoute";
 import * as hermesSseClient from "./hermesSseClient";
 import type { HermesSseEvent } from "./hermesSseClient";
 
@@ -18,6 +18,26 @@ it("links a terminal proposal only to the exact Hermes run assistant", () => {
   expect(findHermesRunProposalId(messages, "run-current")).toBeNull();
   expect(findHermesRunProposalId(messages, "run-missing")).toBeNull();
   expect(findHermesRunProposalId(messages, "run-old")).toBe("proposal-old");
+});
+
+it("polls a browser preview until a bounded ready URL is available", async () => {
+  const preparing = { status: "running", job_id: "job-1", content_url: null, source_sha256: "sha", profile: "profile", error_code: null } as const;
+  vi.spyOn(api, "prepareAssetBrowserPreview").mockResolvedValue(preparing);
+  vi.spyOn(api, "getAssetBrowserPreview")
+    .mockResolvedValueOnce(preparing)
+    .mockResolvedValueOnce({ ...preparing, status: "ready", content_url: "/api/proxy/video-1" });
+  const sleep = vi.fn().mockResolvedValue(undefined);
+
+  await expect(prepareProjectAssetBrowserPreview("project-a", "video-1", new AbortController().signal, { sleep, maxPolls: 3 })).resolves.toBe("/api/proxy/video-1");
+  expect(sleep).toHaveBeenNthCalledWith(1, 100, expect.any(AbortSignal));
+  expect(sleep).toHaveBeenNthCalledWith(2, 200, expect.any(AbortSignal));
+});
+
+it("stops browser preview polling on a bounded failed response", async () => {
+  vi.spyOn(api, "prepareAssetBrowserPreview").mockResolvedValue({ status: "failed", job_id: "job-1", content_url: null, source_sha256: "sha", profile: "profile", error_code: "PREVIEW_RENDER_FAILED" });
+  const getPreview = vi.spyOn(api, "getAssetBrowserPreview");
+  await expect(prepareProjectAssetBrowserPreview("project-a", "video-1", new AbortController().signal)).rejects.toThrow("PREVIEW_RENDER_FAILED");
+  expect(getPreview).not.toHaveBeenCalled();
 });
 
 const manifest = (projectId: string, sessionId: string) => ({ project_id: projectId, session_id: sessionId, timeline_id: `timeline-${sessionId}`, session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: sessionId, source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 1 } });

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
+from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService, AssetBrowserPreviewUnsupported
 from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -18,6 +20,7 @@ from videobox_api.models import (
     AutoCutPlanResponse,
     BrollAssetRegistrationRequest,
     BrollBatchAssetRegistrationRequest,
+    BrowserPreviewResponse,
     TTSCandidateListResponse,
     TTSCandidateResponse,
     TTSCandidateRecordResponse,
@@ -25,13 +28,18 @@ from videobox_api.models import (
     TTSListeningReviewRequest,
 )
 from videobox_api.orchestration import ApiOrchestrator
+from videobox_core_engine.asset_browser_preview import BrowserPreviewError
 from videobox_storage.local_project_store import LocalProjectStore
 
 MAX_VOICE_SAMPLE_UPLOAD_BYTES = 128 * 1024 * 1024
 VOICE_SAMPLE_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
-def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore) -> APIRouter:
+def build_assets_router(
+    orchestrator: ApiOrchestrator,
+    store: LocalProjectStore,
+    browser_preview_service: AssetBrowserPreviewService | None = None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.post("/api/projects/{project_id}/assets/narration-audio", status_code=status.HTTP_201_CREATED)
@@ -265,6 +273,61 @@ def build_assets_router(orchestrator: ApiOrchestrator, store: LocalProjectStore)
         if not resolved_path.exists():
             raise _http_error(FileNotFoundError(f"Asset file not found: '{resolved_path}'."))
         return deliver_file(request=request, path=resolved_path, media_type=asset.get("mime_type"))
+
+    @router.post("/api/projects/{project_id}/assets/{asset_id}/browser-preview")
+    def prepare_browser_preview(project_id: str, asset_id: str):
+        if browser_preview_service is None:
+            return JSONResponse(status_code=503, content={"detail": "browser_preview_unavailable"})
+        try:
+            payload, created, input_ref = browser_preview_service.prepare(
+                project_id=project_id,
+                asset_id=asset_id,
+            )
+        except AssetBrowserPreviewUnsupported as exc:
+            return JSONResponse(status_code=409, content={"detail": str(exc)})
+        except BrowserPreviewError as exc:
+            return JSONResponse(status_code=422, content={"detail": exc.code})
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        if created and input_ref and payload["job_id"]:
+            threading.Thread(
+                target=browser_preview_service.run,
+                kwargs={
+                    "project_id": project_id,
+                    "asset_id": asset_id,
+                    "input_ref": input_ref,
+                    "job_id": payload["job_id"],
+                },
+                name=f"asset-browser-preview-{payload['job_id']}",
+                daemon=True,
+            ).start()
+        body = BrowserPreviewResponse(**payload).model_dump()
+        return JSONResponse(status_code=202 if payload["status"] in {"pending", "running"} else 200, content=body)
+
+    @router.get("/api/projects/{project_id}/assets/{asset_id}/browser-preview")
+    def get_browser_preview(project_id: str, asset_id: str):
+        if browser_preview_service is None:
+            return JSONResponse(status_code=503, content={"detail": "browser_preview_unavailable"})
+        try:
+            return BrowserPreviewResponse(
+                **browser_preview_service.status(project_id=project_id, asset_id=asset_id)
+            )
+        except AssetBrowserPreviewUnsupported as exc:
+            return JSONResponse(status_code=409, content={"detail": str(exc)})
+        except BrowserPreviewError as exc:
+            return JSONResponse(status_code=422, content={"detail": exc.code})
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
+    @router.get("/api/projects/{project_id}/assets/{asset_id}/browser-preview/content")
+    def get_browser_preview_content(project_id: str, asset_id: str, request: Request):
+        if browser_preview_service is None:
+            return JSONResponse(status_code=503, content={"detail": "browser_preview_unavailable"})
+        try:
+            path = browser_preview_service.content_path(project_id=project_id, asset_id=asset_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return deliver_file(request=request, path=path, media_type="video/mp4")
 
     @router.get("/api/projects/{project_id}/assets/{asset_id}/thumbnail")
     def get_asset_thumbnail(project_id: str, asset_id: str) -> FileResponse:

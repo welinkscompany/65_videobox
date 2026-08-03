@@ -12,6 +12,7 @@ def _utc_now() -> datetime:
 
 class JobType(StrEnum):
     MEDIA_ANALYSIS = "media_analysis"
+    ASSET_PREVIEW_PROXY = "asset_preview_proxy"
     INGEST = "ingest"
     TRANSCRIPTION = "transcription"
     SEGMENT_ANALYSIS = "segment_analysis"

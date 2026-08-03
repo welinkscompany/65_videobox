@@ -121,6 +121,7 @@ describe("JobRecovery", () => {
       job({ job_id: "supported-blocked", job_type: "music_recommendation", status: "blocked" }),
       job({ job_id: "no-input", job_type: "subtitle_render", input_ref: null }),
       job({ job_id: "preview", job_type: "preview_render" }),
+      job({ job_id: "asset-preview", job_type: "asset_preview_proxy" }),
       job({ job_id: "capcut", job_type: "capcut_export" }),
       job({ job_id: "timeline", job_type: "timeline_build" }),
       job({ job_id: "analysis", job_type: "segment_analysis" }),
@@ -132,6 +133,7 @@ describe("JobRecovery", () => {
     expect(await screen.findAllByRole("button", { name: "다시 실행" })).toHaveLength(1);
     expect(screen.getByText("장면 추천")).toBeVisible();
     expect(screen.getByText("음악 추천")).toBeVisible();
+    expect(screen.getByText("원본 미리보기 준비")).toBeVisible();
     expect(screen.getByText("자동 재시도 대신 원래 화면에서 직접 다시 실행해 주세요.")).toBeVisible();
     expect(document.body.textContent).not.toMatch(/preview_render|capcut_export|timeline_build|segment_analysis|partial_regeneration|unknown_type/);
   });
