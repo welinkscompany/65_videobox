@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -1601,6 +1602,32 @@ def test_package_rejects_existing_nonempty_root_before_running_edit_flow(
     assert marker.read_text(encoding="utf-8") == "preserve"
 
 
+def test_package_rejects_existing_empty_root_before_inventory_or_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    output_root = tmp_path / "empty-owner-package"
+    output_root.mkdir()
+    monkeypatch.setattr(
+        package,
+        "inventory_samples",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not scan")),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^package_root_exists$"):
+        package.build_owner_sample_package(
+            sample_dir=sample_dir,
+            output_root=output_root,
+            narration=tmp_path / "missing.wav",
+            ffmpeg_binary="ffmpeg",
+            ffprobe_binary="ffprobe",
+            edit_flow_runner=lambda **kwargs: {},
+        )
+    assert list(output_root.iterdir()) == []
+
+
 def test_package_rejects_output_inside_sample_directory_without_creating_it(
     tmp_path: Path,
 ) -> None:
@@ -1861,3 +1888,280 @@ def test_post_publish_cleanup_reports_namespace_failure(
     monkeypatch.setattr(package, "_assert_final_source_fence", fail_second_check)
     with pytest.raises(package.OwnerSamplePackageError, match="^manifest_cleanup_failed$"):
         _package_fixture(package, tmp_path, monkeypatch)
+
+
+def _minimal_cli_manifest() -> dict[str, object]:
+    return {
+        "selected_sources": {
+            "h264": {"name": "owner-h264.mp4", "sha256": "a" * 64},
+            "hevc": {"name": "owner-hevc.mp4", "sha256": "b" * 64},
+        },
+        "artifacts": {
+            "final_mp4": {"path": "edit/review/final.mp4", "sha256": "c" * 64},
+            "srt": {"path": "edit/review/final.srt", "sha256": "d" * 64},
+        },
+        "internal_secret": "never-print-me",
+    }
+
+
+def test_cli_default_output_is_repo_local_utc_timestamp_and_summary_is_bounded(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "owner samples"
+    sample_dir.mkdir()
+    calls: list[dict[str, object]] = []
+
+    def build(**kwargs):
+        calls.append(kwargs)
+        return _minimal_cli_manifest()
+
+    exit_code = package.main(
+        ["--sample-dir", str(sample_dir), "--json"],
+        package_builder=build,
+        utc_now=lambda: datetime(2026, 8, 3, 4, 5, 6, tzinfo=timezone.utc),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert len(captured.out.splitlines()) == 1
+    assert json.loads(captured.out) == {
+        "status": "ok",
+        "package_directory": "owner-sample-edit-20260803T040506Z",
+        "selected_filenames": {
+            "h264": "owner-h264.mp4",
+            "hevc": "owner-hevc.mp4",
+        },
+        "artifact_count": 2,
+        "external_provider_calls": 0,
+    }
+    assert calls[0]["sample_dir"] == sample_dir
+    assert calls[0]["output_root"] == (
+        package.REPOSITORY_ROOT
+        / "artifacts"
+        / "owner-sample-edit-20260803T040506Z"
+    )
+    assert calls[0]["narration"] == package.DEFAULT_NARRATION_PATH
+
+
+@pytest.mark.parametrize("existing_kind", ["empty_directory", "file", "reparse"])
+def test_cli_rejects_existing_or_reparse_output_before_build_or_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    existing_kind: str,
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    output_root = tmp_path / "existing-output"
+    if existing_kind == "file":
+        output_root.write_text("preserve", encoding="utf-8")
+    else:
+        output_root.mkdir()
+    if existing_kind == "reparse":
+        monkeypatch.setattr(package, "_is_reparse_point", lambda path: path == output_root)
+
+    exit_code = package.main(
+        [
+            "--sample-dir",
+            str(sample_dir),
+            "--output-root",
+            str(output_root),
+            "--json",
+        ],
+        package_builder=lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("build must not run")
+        ),
+    )
+
+    assert exit_code != 0
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "error",
+        "error_code": "package_root_exists",
+    }
+    assert output_root.exists()
+
+
+@pytest.mark.parametrize(
+    "disabled_argument",
+    [
+        "--project-id",
+        "--session-id=existing-session",
+        "--confirm-existing-project-mutation",
+    ],
+)
+def test_cli_existing_project_mode_is_disabled_before_parse_scan_build_write_or_network(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    disabled_argument: str,
+) -> None:
+    package = _load_module()
+    output_root = tmp_path / "must-not-exist"
+    monkeypatch.setattr(
+        package,
+        "inventory_samples",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not scan")),
+    )
+    monkeypatch.setattr(
+        package,
+        "TestClient",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not network")),
+    )
+
+    exit_code = package.main(
+        [
+            disabled_argument,
+            "--ffmpeg",
+            "--unknown-malformed-argument",
+            "--output-root",
+            str(output_root),
+            "--json",
+        ],
+        package_builder=lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("must not build")
+        ),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "status": "error",
+        "error_code": "existing_project_mode_disabled",
+    }
+    assert not output_root.exists()
+
+
+def test_cli_does_not_accept_abbreviated_existing_project_arguments(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+
+    exit_code = package.main(
+        [
+            "--sample-dir",
+            str(sample_dir),
+            "--project-i",
+            "existing-project",
+            "--json",
+        ],
+        package_builder=lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("abbreviated mutation option must not build")
+        ),
+    )
+
+    assert exit_code != 0
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "error",
+        "error_code": "cli_arguments_invalid",
+    }
+
+
+def test_cli_json_and_human_output_never_disclose_paths_commands_or_secrets(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "private" / "owner-samples"
+    sample_dir.mkdir(parents=True)
+    output_root = tmp_path / "private" / "owner-output"
+    narration = tmp_path / "private" / "owner-narration.wav"
+    forbidden = [
+        str(sample_dir),
+        str(output_root),
+        str(narration),
+        "never-print-me",
+        "SECRET_TOKEN",
+        "ffmpeg -i private.mp4",
+        "memory_payload",
+    ]
+
+    common_args = [
+        "--sample-dir",
+        str(sample_dir),
+        "--output-root",
+        str(output_root),
+        "--narration",
+        str(narration),
+        "--ffmpeg",
+        "ffmpeg-local",
+        "--ffprobe",
+        "ffprobe-local",
+    ]
+    assert package.main(
+        [*common_args, "--json"], package_builder=lambda **kwargs: _minimal_cli_manifest()
+    ) == 0
+    json_output = capsys.readouterr().out
+    assert json.loads(json_output)["package_directory"] == output_root.name
+    assert all(value not in json_output for value in forbidden)
+
+    assert package.main(
+        common_args, package_builder=lambda **kwargs: _minimal_cli_manifest()
+    ) == 0
+    human_output = capsys.readouterr().out
+    assert "owner-output" in human_output
+    assert all(value not in human_output for value in forbidden)
+
+
+def test_cli_errors_are_single_bounded_json_without_traceback_or_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "private" / "samples"
+    sample_dir.mkdir(parents=True)
+
+    exit_code = package.main(
+        ["--sample-dir", str(sample_dir), "--json"],
+        package_builder=lambda **kwargs: (_ for _ in ()).throw(
+            package.OwnerSamplePackageError("unsafe code " + str(sample_dir))
+        ),
+        utc_now=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert captured.err == ""
+    assert len(captured.out.splitlines()) == 1
+    assert json.loads(captured.out) == {
+        "status": "error",
+        "error_code": "owner_sample_package_failed",
+    }
+    assert str(sample_dir) not in captured.out
+    assert "Traceback" not in captured.out
+
+
+@pytest.mark.parametrize(
+    "flag,value",
+    [
+        ("--sample-dir", "https://example.invalid/private.mp4"),
+        ("--output-root", r"\\server\share\owner-output"),
+        ("--narration", "file:///private/voice.wav"),
+    ],
+)
+def test_cli_rejects_nonlocal_path_arguments_before_build(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    flag: str,
+    value: str,
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    arguments = ["--sample-dir", str(sample_dir), flag, value, "--json"]
+
+    exit_code = package.main(
+        arguments,
+        package_builder=lambda **kwargs: (_ for _ in ()).throw(
+            AssertionError("build must not run")
+        ),
+    )
+
+    assert exit_code != 0
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "error",
+        "error_code": "local_path_required",
+    }

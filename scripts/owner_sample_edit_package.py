@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -13,6 +14,7 @@ import tempfile
 import time
 import uuid
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Sequence
 
@@ -613,14 +615,19 @@ def _prepare_package_root(*, sample_dir: Path, output_root: Path) -> Path:
     ):
         raise OwnerSamplePackageError("package_root_overlaps_samples")
     try:
-        if candidate.exists():
+        if os.path.lexists(candidate):
             if candidate.is_symlink() or _is_reparse_point(candidate) or not candidate.is_dir():
                 raise OwnerSamplePackageError("package_root_invalid")
             package_root = candidate.resolve(strict=True)
-        else:
-            candidate.parent.mkdir(parents=True, exist_ok=True)
+            if next(package_root.iterdir(), None) is not None:
+                raise OwnerSamplePackageError("package_root_not_empty")
+            raise OwnerSamplePackageError("package_root_exists")
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        try:
             candidate.mkdir()
-            package_root = candidate.resolve(strict=True)
+        except FileExistsError as exc:
+            raise OwnerSamplePackageError("package_root_exists") from exc
+        package_root = candidate.resolve(strict=True)
     except OwnerSamplePackageError:
         raise
     except OSError as exc:
@@ -632,13 +639,6 @@ def _prepare_package_root(*, sample_dir: Path, output_root: Path) -> Path:
         or sample_root.is_relative_to(package_root)
     ):
         raise OwnerSamplePackageError("package_root_overlaps_samples")
-    try:
-        if next(package_root.iterdir(), None) is not None:
-            raise OwnerSamplePackageError("package_root_not_empty")
-    except OwnerSamplePackageError:
-        raise
-    except OSError as exc:
-        raise OwnerSamplePackageError("package_root_invalid") from exc
     return package_root
 
 
@@ -2172,3 +2172,168 @@ def build_owner_sample_package(
             _assert_final_source_fence(selected_sources, selected_fingerprints)
         if not final_fences_verified:
             _assert_narration_source_fence(narration_source_fence)
+
+
+class _BoundedArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        del message
+        raise OwnerSamplePackageError("cli_arguments_invalid")
+
+
+def _has_existing_project_argument(arguments: Sequence[str]) -> bool:
+    disabled = (
+        "--project-id",
+        "--session-id",
+        "--confirm-existing-project-mutation",
+    )
+    return any(
+        argument == option or argument.startswith(f"{option}=")
+        for argument in arguments
+        for option in disabled
+    )
+
+
+def _local_cli_path(value: str) -> Path:
+    if (
+        not value
+        or "\x00" in value
+        or value.startswith(("\\\\", "//"))
+        or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value)
+    ):
+        raise OwnerSamplePackageError("local_path_required")
+    return Path(value)
+
+
+def _safe_cli_error_code(error: OwnerSamplePackageError) -> str:
+    code = str(error)
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
+        return code
+    return "owner_sample_package_failed"
+
+
+def _safe_cli_summary(manifest: dict[str, Any], package_root: Path) -> dict[str, Any]:
+    selected = manifest.get("selected_sources")
+    artifacts = manifest.get("artifacts")
+    if not isinstance(selected, dict) or not isinstance(artifacts, dict):
+        raise OwnerSamplePackageError("package_summary_invalid")
+    filenames: dict[str, str] = {}
+    for codec in ("h264", "hevc"):
+        row = selected.get(codec)
+        name = row.get("name") if isinstance(row, dict) else None
+        if (
+            not isinstance(name, str)
+            or not name
+            or len(name) > 255
+            or Path(name).name != name
+            or "/" in name
+            or "\\" in name
+            or any(ord(character) < 32 for character in name)
+        ):
+            raise OwnerSamplePackageError("package_summary_invalid")
+        filenames[codec] = name
+    if len(artifacts) > MAX_MANIFEST_ARTIFACTS:
+        raise OwnerSamplePackageError("package_summary_invalid")
+    directory_name = package_root.name
+    if (
+        not directory_name
+        or len(directory_name) > 128
+        or any(ord(character) < 32 for character in directory_name)
+    ):
+        raise OwnerSamplePackageError("package_summary_invalid")
+    return {
+        "status": "ok",
+        "package_directory": directory_name,
+        "selected_filenames": filenames,
+        "artifact_count": len(artifacts),
+        "external_provider_calls": 0,
+    }
+
+
+def _write_cli_result(payload: dict[str, Any], *, json_mode: bool) -> None:
+    if json_mode:
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        return
+    if payload.get("status") == "ok":
+        filenames = payload["selected_filenames"]
+        print(
+            "검토 패키지 준비 완료: "
+            f"{payload['package_directory']} "
+            f"(선택 영상 {len(filenames)}개, 검토 파일 {payload['artifact_count']}개)"
+        )
+        return
+    print(f"실행 중단: {payload['error_code']}")
+
+
+def _parse_cli_arguments(arguments: Sequence[str]) -> argparse.Namespace:
+    parser = _BoundedArgumentParser(
+        description="읽기 전용 영상 샘플로 격리된 VideoBox 검토 패키지를 만듭니다.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("--sample-dir")
+    parser.add_argument("--output-root")
+    parser.add_argument("--narration")
+    parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument("--ffprobe", default="ffprobe")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--project-id")
+    parser.add_argument("--session-id")
+    parser.add_argument("--confirm-existing-project-mutation", action="store_true")
+    parsed = parser.parse_args(list(arguments))
+    if not parsed.sample_dir:
+        raise OwnerSamplePackageError("sample_directory_required")
+    return parsed
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    package_builder: Callable[..., dict[str, Any]] = build_owner_sample_package,
+    utc_now: Callable[[], datetime] | None = None,
+) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    json_mode = "--json" in arguments
+    try:
+        if _has_existing_project_argument(arguments):
+            raise OwnerSamplePackageError("existing_project_mode_disabled")
+        parsed = _parse_cli_arguments(arguments)
+        json_mode = bool(parsed.json)
+        sample_dir = _local_cli_path(parsed.sample_dir)
+        narration = (
+            _local_cli_path(parsed.narration)
+            if parsed.narration is not None
+            else DEFAULT_NARRATION_PATH
+        )
+        ffmpeg_binary = str(_local_cli_path(parsed.ffmpeg))
+        ffprobe_binary = str(_local_cli_path(parsed.ffprobe))
+        if parsed.output_root is None:
+            current = (utc_now or (lambda: datetime.now(timezone.utc)))()
+            if current.tzinfo is None:
+                current = current.replace(tzinfo=timezone.utc)
+            timestamp = current.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            output_root = (
+                REPOSITORY_ROOT / "artifacts" / f"owner-sample-edit-{timestamp}"
+            )
+        else:
+            output_root = _local_cli_path(parsed.output_root)
+        if os.path.lexists(output_root):
+            raise OwnerSamplePackageError("package_root_exists")
+        manifest = package_builder(
+            sample_dir=sample_dir,
+            output_root=output_root,
+            narration=narration,
+            ffmpeg_binary=ffmpeg_binary,
+            ffprobe_binary=ffprobe_binary,
+        )
+        summary = _safe_cli_summary(manifest, output_root)
+        _write_cli_result(summary, json_mode=json_mode)
+        return 0
+    except OwnerSamplePackageError as exc:
+        _write_cli_result(
+            {"status": "error", "error_code": _safe_cli_error_code(exc)},
+            json_mode=json_mode,
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
