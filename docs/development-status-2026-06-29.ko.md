@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 319. 2026-08-03 Task 23A HEVC browser-preview proxy closeout`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23 master planning은 `## 318`, owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+> 현재 authoritative 상태/next slice 판단은 `## 320. 2026-08-03 Task 23B owner one-click 실행·진단 closeout`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23A 근거는 `## 319`, master planning은 `## 318`, owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+
+## 320. 2026-08-03 Task 23B owner one-click 실행·진단 closeout
+
+- `[x] 하나의 안전한 진입점`: `scripts/owner-ready.ps1`을 추가했다. 인자 없는 기본값은 완전한 read-only `Check`이고, 상태를 `pass|blocked|fail`과 쉬운 복구 행동으로만 출력한다. `Start`, `Smoke`, `Open`, `OpenCapCut`은 각각 별도 명시 모드다.
+- `[x] 실행·네트워크 경계`: `Start`는 실제 `.env.container`를 raw 출력 없이 다시 parse한 뒤 `videobox-postgres`, `videobox-workspace` 두 서비스만 시작하고 loopback `/health`를 bounded poll한다. 모든 URL은 exact loopback root만 허용하고 proxy와 redirect follow를 끈다. Hermes 로그인 `302`는 연결 가능으로만 인정하며 VideoBox health redirect는 실패다. 실제 서비스 시작·브라우저 열기·CapCut 열기는 이번 closeout에서 실행하지 않았다.
+- `[x] 진단·비밀정보 경계`: Git root/branch/upstream divergence, Python/Node/npm/FFmpeg/ffprobe/Docker/Compose, `.env.container`의 exact data-root key, Windows path headroom, VideoBox/Hermes loopback, CapCut 설치와 project root를 확인한다. env 값, 절대 경로, 전체 command, stderr, credential, container ID는 출력하지 않으며 Check의 write probe와 외부 provider call은 0이다.
+- `[x] 실제 환경 결과`: 실제 `Check -Json`은 workspace·도구·Compose·VideoBox health `200`·Hermes same-loopback login `302`·CapCut `9.1.0.3879`를 확인했다. 현재 `.env.container`와 data root가 없어 overall은 의도대로 `blocked`다. closeout 중 이번 범위 변경 6개와 보호 residue 3개는 경로 대신 count만 기록했다.
+- `[x] 정적 smoke receipt`: 기존 non-live creator/chat/mem0 smoke와 plan-state, profile/runtime `-StaticOnly` 검증기 exact 여섯 개를 raw child output 없이 실행했다. 실제 결과는 **6/6 pass**, `external_provider_calls=0`이며 sanitized receipt는 ignored `artifacts/owner-ready`에 원자 게시됐다.
+- `[x] TDD·회귀 검증`: 전용 PowerShell subprocess 계약 **25 passed**, 관련 Hermes/Compose 계약 **142 passed, 1 skipped**다. skip은 환경 의존 기존 조건부 항목이며 기존 Starlette multipart PendingDeprecationWarning 1건은 비실패 출력이다. 실제 전체 Python regression, frontend 전체 suite/build/provenance, live Hermes/Mem0 provider, 사람의 브라우저·CapCut 조작은 이번 slice에서 실행하지 않았고 통과로 주장하지 않는다.
+- `[x] 리뷰·보존`: 독립 code quality와 reverse-gap 리뷰에서 child process tree timeout, chunked/invalid health body, 과도한 Hermes redirect 허용, HTTP 예외 오분류를 Important로 발견했다. process tree kill+bounded return, 64KiB body+exact health JSON, same-loopback `/login` 302만 허용, connection-unavailable와 invalid response 분리로 RED→GREEN 보완했다. 재리뷰는 **Critical 0, Important 0, ready**였고 child PID 종료까지 테스트해 남은 Minor도 닫았다. 사용자 샘플과 `.tmp-final-fence-debug/`, `.tmp-real-video-dogfood/`, `apps/web/.tmp-real-video-dogfood/`는 열거나 stage/remove/delete하지 않았다. 자동 apply, source copy, SaaS, 게시, credential 생성은 추가하지 않았다.
+- `진행률·다음`: Task 23 production slice는 **2/4 (50.0%)**, 잔여 **50.0%**다. 다음 goal은 **23C 사용자 샘플 repeatable edit package**다.
 
 ## 319. 2026-08-03 Task 23A HEVC browser-preview proxy closeout
 
