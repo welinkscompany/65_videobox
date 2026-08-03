@@ -621,6 +621,72 @@ def test_smoke_explicit_owner_broll_is_hash_fenced_without_absolute_evidence(
         smoke._validate_explicit_broll_input(source, expected_sha256="0" * 64)
 
 
+def test_smoke_sha256_streams_without_read_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    smoke = _load_smoke_module()
+    source = tmp_path / "large-owner-source.mp4"
+    source.write_bytes(b"streamed owner bytes")
+    expected = __import__("hashlib").sha256(b"streamed owner bytes").hexdigest()
+    original_read_bytes = Path.read_bytes
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        lambda self: (
+            (_ for _ in ()).throw(AssertionError("smoke hash must stream"))
+            if self == source
+            else original_read_bytes(self)
+        ),
+    )
+
+    assert smoke._sha256(source) == expected
+
+
+def test_smoke_sha256_rejects_change_and_oversize_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    smoke = _load_smoke_module()
+    source = tmp_path / "changing.mp4"
+    source.write_bytes(b"changing bytes")
+    original_stat = Path.stat
+    calls = 0
+
+    def changing_stat(self, *args, **kwargs):
+        nonlocal calls
+        value = original_stat(self, *args, **kwargs)
+        if self != source:
+            return value
+        calls += 1
+        if calls < 3:
+            return value
+        return SimpleNamespace(
+            st_mode=value.st_mode,
+            st_dev=value.st_dev,
+            st_ino=value.st_ino,
+            st_size=value.st_size,
+            st_mtime_ns=value.st_mtime_ns + 1,
+        )
+
+    monkeypatch.setattr(Path, "stat", changing_stat)
+    with pytest.raises(RuntimeError, match="^file_changed_during_hash$"):
+        smoke._sha256(source)
+
+    monkeypatch.setattr(Path, "stat", original_stat)
+    oversize = tmp_path / "oversize.mp4"
+    with oversize.open("wb") as target:
+        target.truncate(smoke.MAX_HASH_BYTES + 1)
+    original_open = Path.open
+    monkeypatch.setattr(
+        Path,
+        "open",
+        lambda self, *args, **kwargs: (
+            (_ for _ in ()).throw(AssertionError("oversize hash input must not open"))
+            if self == oversize
+            else original_open(self, *args, **kwargs)
+        ),
+    )
+    with pytest.raises(RuntimeError, match="^file_hash_invalid$"):
+        smoke._sha256(oversize)
+
+
 def test_smoke_run_contract_keeps_synthetic_default_and_accepts_explicit_owner_broll() -> None:
     import inspect
 

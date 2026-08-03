@@ -459,6 +459,53 @@ def test_h264_public_content_hash_must_match_project_copy(
         )
 
 
+def test_preview_proxy_temp_unlink_failure_preserves_main_error_and_clears_standard_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    destination = tmp_path / "review" / "hevc-browser-preview.mp4"
+    temporary = destination.with_suffix(".mp4.tmp")
+    original_unlink = Path.unlink
+
+    class Response:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def iter_bytes(self, *, chunk_size: int):
+            del chunk_size
+            yield b"proxy bytes"
+
+    class Client:
+        def stream(self, method: str, url: str):
+            assert method == "GET"
+            assert url == "/preview"
+            return Response()
+
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda self, *args, **kwargs: (
+            (_ for _ in ()).throw(OSError("simulated standard temp unlink failure"))
+            if self == temporary
+            else original_unlink(self, *args, **kwargs)
+        ),
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^preview_content_hash_mismatch$"):
+        package._preserve_preview_content(
+            Client(),
+            content_url="/preview",
+            destination=destination,
+            expected_sha256="0" * 64,
+        )
+
+    assert not temporary.exists()
+
+
 def test_preview_poll_waits_for_terminal_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     package = _load_module()
 
@@ -960,6 +1007,12 @@ def test_reverse_manifest_binds_artifact_hashes_to_editing_state_and_typed_contr
     ]["sha256"]
     for artifact, row in manifest["artifacts"].items():
         assert nodes[f"artifact:{artifact}"]["sha256"] == row["sha256"]
+    assert nodes["artifact:review_checklist"]["upstream"] == [
+        "human_review_contract:checklist"
+    ]
+    assert nodes["human_review_contract:checklist"]["upstream"] == []
+    for artifact in set(manifest["artifacts"]) - {"review_checklist"}:
+        assert nodes[f"artifact:{artifact}"]["upstream"] == ["editing_session:current"]
 
     final_path = package_root / manifest["artifacts"]["final_mp4"]["path"]
     final_path.write_bytes(b"unrelated replacement artifact")
@@ -1120,6 +1173,125 @@ def test_structured_edit_validation_rejects_timeline_identity_srt_capcut_and_med
     summary_path.write_text(json.dumps(summary), encoding="utf-8")
     with pytest.raises(package.OwnerSamplePackageError, match="^edit_media_invalid$"):
         validate()
+
+
+@pytest.mark.parametrize("mutation", ["tracks_none", "clips_none", "segments_none"])
+def test_edit_structure_shapes_are_bounded_in_build_and_stored_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    inventory = {row["name"]: row for row in manifest["source_inventory"]}
+    selected = package.SampleRecord(
+        **inventory[manifest["selected_sources"]["h264"]["name"]]
+    )
+    artifact_key = "editing_session_snapshot" if mutation == "segments_none" else "timeline_snapshot"
+    target = package_root / manifest["artifacts"][artifact_key]["path"]
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    if mutation == "tracks_none":
+        payload["tracks"] = None
+    elif mutation == "clips_none":
+        payload["tracks"][0]["clips"] = None
+    else:
+        payload["segments"] = None
+    target.write_text(json.dumps(payload), encoding="utf-8")
+
+    def probe(path: Path) -> dict[str, object]:
+        return {
+            "duration_sec": 5.0 if "exact" in path.name else 600.0,
+            "format": "mov,mp4",
+            "video_codec": "h264",
+            "pixel_format": "yuv420p",
+            "audio_codec": "aac",
+        }
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_structure_invalid$"):
+        package._validate_structured_edit_evidence(
+            package_root=package_root,
+            edit_result={"edit_input_evidence": manifest["edit_input_evidence"]},
+            artifacts=manifest["artifacts"],
+            narration=manifest["narration"],
+            selected_h264=selected,
+            media_probe=probe,
+        )
+
+    changed_sha = _sha256(target)
+    manifest["artifacts"][artifact_key]["sha256"] = changed_sha
+    manifest["reverse_trace"]["nodes"][f"artifact:{artifact_key}"]["sha256"] = changed_sha
+    graph_key = (
+        "editing_session_sha256"
+        if artifact_key == "editing_session_snapshot"
+        else "timeline_sha256"
+    )
+    manifest["reverse_trace"]["nodes"]["editing_session:current"][graph_key] = changed_sha
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_edit_input_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
+def test_invalid_utf8_srt_is_bounded_in_build_and_stored_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    inventory = {row["name"]: row for row in manifest["source_inventory"]}
+    selected = package.SampleRecord(
+        **inventory[manifest["selected_sources"]["h264"]["name"]]
+    )
+    srt = package_root / manifest["artifacts"]["srt"]["path"]
+    srt.write_bytes(b"\xff\xfe\xfa")
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_srt_invalid$"):
+        package._validate_structured_edit_evidence(
+            package_root=package_root,
+            edit_result={"edit_input_evidence": manifest["edit_input_evidence"]},
+            artifacts=manifest["artifacts"],
+            narration=manifest["narration"],
+            selected_h264=selected,
+            media_probe=lambda path: {},
+        )
+
+    changed_sha = _sha256(srt)
+    manifest["artifacts"]["srt"]["sha256"] = changed_sha
+    manifest["reverse_trace"]["nodes"]["artifact:srt"]["sha256"] = changed_sha
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_srt_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
+def test_edit_artifact_oversize_is_rejected_before_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    target = package_root / manifest["artifacts"]["final_mp4"]["path"]
+    with target.open("r+b") as stream:
+        stream.truncate(package.MAX_ARTIFACT_BYTES + 1)
+    edit_result = {
+        key: {
+            "path": str(package_root / manifest["artifacts"][key]["path"]),
+            "sha256": manifest["artifacts"][key]["sha256"],
+        }
+        for key in package.EDIT_RESULT_ARTIFACT_KEYS
+    }
+    original_hash = package._sha256
+    monkeypatch.setattr(
+        package,
+        "_sha256",
+        lambda path: (
+            (_ for _ in ()).throw(AssertionError("oversize artifact must not hash"))
+            if path == target.resolve()
+            else original_hash(path)
+        ),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^edit_artifact_size_exceeded$"):
+        package._artifact_evidence_from_edit(
+            package_root=package_root,
+            edit_result=edit_result,
+            checklist_path=package_root / manifest["artifacts"]["review_checklist"]["path"],
+        )
 
 
 def test_stored_manifest_rejects_forged_edit_input_even_when_graph_is_mirrored(

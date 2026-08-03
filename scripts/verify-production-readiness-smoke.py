@@ -52,6 +52,7 @@ SOURCE_CAPTIONS = [
     "편집기에서 장면 전환과 음량을 차례로 확인합니다.",
 ]
 LONG_FORM_PROFILE_NAMES = ("loop", "crop_pad_overlay", "audio_ducking")
+MAX_HASH_BYTES = 2 * 1024 * 1024 * 1024
 _LONG_FORM_FIXTURES: dict[str, dict[str, Any]] = {
     "loop": {
         "broll_controls": {"fit": "fit", "loop": True, "pad": False, "trim_start_sec": 0.0},
@@ -221,7 +222,32 @@ def _require_playable_media_summary(
 
 
 def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    try:
+        before = path.stat()
+        if not path.is_file() or not 0 < before.st_size <= MAX_HASH_BYTES:
+            raise RuntimeError("file_hash_invalid")
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        after = path.stat()
+    except RuntimeError:
+        raise
+    except OSError as exc:
+        raise RuntimeError("file_hash_failed") from exc
+    if (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ):
+        raise RuntimeError("file_changed_during_hash")
+    return digest.hexdigest()
 
 
 def _validate_explicit_broll_input(

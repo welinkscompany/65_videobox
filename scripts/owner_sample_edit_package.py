@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -109,7 +110,17 @@ def _sha256(path: Path) -> str:
         after = path.stat()
     except OSError as exc:
         raise OwnerSamplePackageError("file_hash_failed") from exc
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+    if (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    ) != (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    ):
         raise OwnerSamplePackageError("file_changed_during_hash")
     return digest.hexdigest()
 
@@ -386,7 +397,28 @@ def _preserve_preview_content(
     except OSError as exc:
         raise OwnerSamplePackageError("preview_content_failed") from exc
     finally:
+        _cleanup_preview_temporary(temporary)
+
+
+def _cleanup_preview_temporary(temporary: Path) -> None:
+    try:
         temporary.unlink(missing_ok=True)
+        return
+    except OSError:
+        pass
+    quarantine = temporary.with_name(
+        f"{temporary.name}.cleanup-{uuid.uuid4().hex}"
+    )
+    try:
+        os.rename(temporary, quarantine)
+    except OSError:
+        # Cleanup must never replace the bounded preview failure that explains
+        # why the proxy was not published.
+        return
+    try:
+        quarantine.unlink()
+    except OSError:
+        pass
 
 
 def build_preview_proofs(
@@ -860,6 +892,71 @@ def _require_media_contract(
         raise OwnerSamplePackageError("edit_media_invalid")
 
 
+def _validate_edit_document_shapes(
+    timeline: dict[str, Any], session: dict[str, Any], *, error_code: str
+) -> None:
+    tracks = timeline.get("tracks")
+    segments = session.get("segments")
+    if (
+        not isinstance(tracks, list)
+        or len(tracks) > 256
+        or not isinstance(segments, list)
+        or len(segments) > 100_000
+    ):
+        raise OwnerSamplePackageError(error_code)
+    for track in tracks:
+        if not isinstance(track, dict):
+            raise OwnerSamplePackageError(error_code)
+        clips = track.get("clips")
+        if not isinstance(clips, list) or len(clips) > 100_000 or any(
+            not isinstance(clip, dict) for clip in clips
+        ):
+            raise OwnerSamplePackageError(error_code)
+    for segment in segments:
+        if not isinstance(segment, dict):
+            raise OwnerSamplePackageError(error_code)
+        for key in (
+            "broll_override",
+            "music_override",
+            "sfx_override",
+            "tts_replacement",
+            "explanation_card",
+            "image_overlay",
+        ):
+            value = segment.get(key)
+            if value is not None and not isinstance(value, dict):
+                raise OwnerSamplePackageError(error_code)
+        overlays = segment.get("visual_overlays")
+        if overlays is not None and (
+            not isinstance(overlays, list)
+            or len(overlays) > 10_000
+            or any(not isinstance(item, dict) for item in overlays)
+        ):
+            raise OwnerSamplePackageError(error_code)
+    for key in ("applied_recommendations", "export_overlays"):
+        value = timeline.get(key)
+        if value is not None and (
+            not isinstance(value, list)
+            or len(value) > 100_000
+            or any(not isinstance(item, dict) for item in value)
+        ):
+            raise OwnerSamplePackageError(error_code)
+
+
+def _read_required_srt(path: Path) -> str:
+    try:
+        if not 0 < path.stat().st_size <= 4 * 1024 * 1024:
+            raise OwnerSamplePackageError("edit_srt_invalid")
+        text = path.read_text(encoding="utf-8")
+    except OwnerSamplePackageError:
+        raise
+    except (OSError, UnicodeError) as exc:
+        raise OwnerSamplePackageError("edit_srt_invalid") from exc
+    if REVISED_CAPTION not in text:
+        raise OwnerSamplePackageError("edit_srt_invalid")
+    return text
+
+
 def _validate_structured_edit_evidence(
     *,
     package_root: Path,
@@ -914,6 +1011,7 @@ def _validate_structured_edit_evidence(
     session_path = package_root / artifacts["editing_session_snapshot"]["path"]
     timeline = _read_bounded_json(timeline_path)
     session = _read_bounded_json(session_path)
+    _validate_edit_document_shapes(timeline, session, error_code="edit_structure_invalid")
     timeline_id = evidence["timeline_ref"].removeprefix("timelines/")
     session_id = evidence["session_ref"].removeprefix("editing-sessions/")
     if (
@@ -967,10 +1065,10 @@ def _validate_structured_edit_evidence(
         timeline, sort_keys=True
     ) + json.dumps(session, sort_keys=True):
         raise OwnerSamplePackageError("edit_controls_invalid")
-    srt_text = (package_root / artifacts["srt"]["path"]).read_text(encoding="utf-8")
-    if REVISED_CAPTION not in srt_text:
-        raise OwnerSamplePackageError("edit_srt_invalid")
+    _read_required_srt(package_root / artifacts["srt"]["path"])
     capcut = _read_bounded_json(package_root / artifacts["capcut_draft"]["path"])
+    if not capcut:
+        raise OwnerSamplePackageError("edit_capcut_invalid")
     capcut_text = json.dumps(capcut, ensure_ascii=False)
     for token in (
         selected_h264.name,
@@ -982,6 +1080,8 @@ def _validate_structured_edit_evidence(
         if token not in capcut_text:
             raise OwnerSamplePackageError("edit_capcut_invalid")
     summary = _read_bounded_json(package_root / artifacts["ffprobe_summary"]["path"])
+    if set(summary) != {"exact_preview", "final_mp4"}:
+        raise OwnerSamplePackageError("edit_media_invalid")
     exact_path = package_root / artifacts["exact_preview"]["path"]
     final_path = package_root / artifacts["final_mp4"]["path"]
     actual_exact = media_probe(exact_path)
@@ -1044,34 +1144,49 @@ def _safe_manifest_artifact_path(package_root: Path, value: Any) -> Path:
 def _artifact_evidence_from_edit(
     *, package_root: Path, edit_result: dict[str, Any], checklist_path: Path
 ) -> dict[str, dict[str, str]]:
-    paths: dict[str, Path] = {"review_checklist": checklist_path}
+    candidates: dict[str, tuple[Path, str | None]] = {
+        "review_checklist": (checklist_path, None)
+    }
     for key in EDIT_RESULT_ARTIFACT_KEYS:
         row = edit_result.get(key)
-        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("path"), str)
+            or not isinstance(row.get("sha256"), str)
+        ):
             raise OwnerSamplePackageError("edit_artifact_missing")
-        path = Path(row["path"])
+        candidates[key] = (Path(row["path"]), row["sha256"])
+    evidence: dict[str, dict[str, str]] = {}
+    for key, (path, claimed_sha) in candidates.items():
         try:
+            if not path.is_absolute() or not path.is_relative_to(package_root):
+                raise OwnerSamplePackageError("edit_artifact_path_invalid")
+            relative = PurePosixPath(*path.relative_to(package_root).parts)
+            if _path_has_link_or_reparse(package_root, relative):
+                raise OwnerSamplePackageError("edit_artifact_path_invalid")
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_ARTIFACT_BYTES:
+                if metadata.st_size > MAX_ARTIFACT_BYTES:
+                    raise OwnerSamplePackageError("edit_artifact_size_exceeded")
+                raise OwnerSamplePackageError("edit_artifact_path_invalid")
             resolved = path.resolve(strict=True)
         except OSError as exc:
             raise OwnerSamplePackageError("edit_artifact_missing") from exc
         if (
             not resolved.is_relative_to(package_root)
-            or resolved.is_symlink()
+            or path.is_symlink()
             or _is_reparse_point(resolved)
             or not resolved.is_file()
         ):
             raise OwnerSamplePackageError("edit_artifact_path_invalid")
         actual_sha = _sha256(resolved)
-        if row.get("sha256") != actual_sha:
+        if claimed_sha is not None and claimed_sha != actual_sha:
             raise OwnerSamplePackageError("edit_artifact_sha_mismatch")
-        paths[key] = resolved
-    return {
-        key: {
+        evidence[key] = {
             "path": path.relative_to(package_root).as_posix(),
-            "sha256": _sha256(path),
+            "sha256": actual_sha,
         }
-        for key, path in paths.items()
-    }
+    return evidence
 
 
 def _build_reverse_trace(
@@ -1087,7 +1202,11 @@ def _build_reverse_trace(
             "kind": "artifact",
             "artifact": name,
             "sha256": artifacts[name]["sha256"],
-            "upstream": ["editing_session:current"],
+            "upstream": (
+                ["human_review_contract:checklist"]
+                if name == "review_checklist"
+                else ["editing_session:current"]
+            ),
         }
         for name in sorted(artifacts)
     }
@@ -1108,6 +1227,12 @@ def _build_reverse_trace(
                 "editing_session_sha256": artifacts["editing_session_snapshot"]["sha256"],
                 "timeline_sha256": artifacts["timeline_snapshot"]["sha256"],
                 "upstream": ["typed_controls:applied"],
+            },
+            "human_review_contract:checklist": {
+                "kind": "human_review_contract",
+                "owner_approval": False,
+                "rights_approval": False,
+                "upstream": [],
             },
             "typed_controls:applied": {
                 "kind": "typed_controls",
@@ -1374,6 +1499,9 @@ def _validate_manifest_edit_input_evidence(
         )
     except (KeyError, TypeError, OwnerSamplePackageError) as exc:
         raise OwnerSamplePackageError("manifest_edit_input_invalid") from exc
+    _validate_edit_document_shapes(
+        timeline, session, error_code="manifest_edit_input_invalid"
+    )
     broll_clips = [
         clip
         for track in timeline.get("tracks", [])
@@ -1452,7 +1580,11 @@ def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
 
     for node_id in sorted(nodes):
         visit(node_id)
-    artifact_node_ids = {f"artifact:{name}" for name in manifest["artifacts"]}
+    artifact_node_ids = {
+        f"artifact:{name}"
+        for name in manifest["artifacts"]
+        if name != "review_checklist"
+    }
     required_edit_nodes = {
         "editing_session:current",
         "typed_controls:applied",
@@ -1477,6 +1609,21 @@ def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
         collect(artifact_node_id)
         if not required_edit_nodes.issubset(reachable) or "preview:hevc" in reachable:
             raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
+    checklist_reachable: set[str] = set()
+
+    def collect_checklist(node_id: str) -> None:
+        if node_id in checklist_reachable:
+            return
+        checklist_reachable.add(node_id)
+        for parent in nodes[node_id]["upstream"]:
+            collect_checklist(parent)
+
+    collect_checklist("artifact:review_checklist")
+    if checklist_reachable != {
+        "artifact:review_checklist",
+        "human_review_contract:checklist",
+    }:
+        raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
     package_reachable: set[str] = set()
 
     def collect_package(node_id: str) -> None:
@@ -1552,6 +1699,9 @@ def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> N
             raise OwnerSamplePackageError("manifest_artifact_sha_mismatch")
         if _sha256(artifact) != claimed_sha:
             raise OwnerSamplePackageError("manifest_artifact_sha_mismatch")
+    _read_required_srt(
+        _safe_manifest_artifact_path(root, artifacts["srt"]["path"])
+    )
     _validate_manifest_edit_input_evidence(root, manifest)
     expected_controls = {key: True for key in CONTROL_CHECKS}
     expected_authorities = {
