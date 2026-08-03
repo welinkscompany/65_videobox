@@ -136,8 +136,71 @@ def _probe_duration(path: Path, *, ffprobe_binary: str) -> float:
     return float(json.loads(result.stdout)["format"]["duration"])
 
 
+def _probe_media_summary(path: Path, *, ffprobe_binary: str) -> dict[str, Any]:
+    result = _run(
+        [
+            ffprobe_binary,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration,format_name:stream=codec_type,codec_name,pix_fmt",
+            "-of",
+            "json",
+            str(path),
+        ],
+        timeout=60,
+    )
+    payload = json.loads(result.stdout)
+    format_payload = payload.get("format") if isinstance(payload, dict) else None
+    format_payload = format_payload if isinstance(format_payload, dict) else {}
+    streams = payload.get("streams") if isinstance(payload, dict) else None
+    streams = streams if isinstance(streams, list) else []
+    video = next(
+        (stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "video"),
+        {},
+    )
+    audio = next(
+        (stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "audio"),
+        {},
+    )
+    duration = format_payload.get("duration")
+    return {
+        "duration_sec": float(duration) if duration is not None else None,
+        "format": format_payload.get("format_name"),
+        "video_codec": video.get("codec_name"),
+        "pixel_format": video.get("pix_fmt"),
+        "audio_codec": audio.get("codec_name"),
+    }
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_review_snapshots(
+    work_root: Path,
+    *,
+    timeline: dict[str, Any],
+    session: dict[str, Any],
+) -> dict[str, Path]:
+    review_root = work_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    destinations = {
+        "timeline": review_root / "timeline.json",
+        "editing_session": review_root / "editing-session.json",
+    }
+    for name, payload in (("timeline", timeline), ("editing_session", session)):
+        destination = destinations[name]
+        temporary = destination.with_suffix(f"{destination.suffix}.tmp")
+        try:
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return destinations
 
 
 def _create_short_broll(path: Path, *, ffmpeg_binary: str) -> None:
@@ -205,6 +268,41 @@ def _poll_final_render(client: TestClient, *, project_id: str, job_id: str, time
             return payload
         time.sleep(0.5)
     raise TimeoutError(f"Timed out waiting for final render job '{job_id}'.")
+
+
+def _poll_exact_preview(
+    client: TestClient,
+    *,
+    project_id: str,
+    generation_id: str,
+    timeout_sec: int,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_sec
+    generation_label = generation_id[:80]
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/projects/{project_id}/exact-previews/{generation_id}")
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"Exact preview generation '{generation_label}' status request failed with HTTP {response.status_code}."
+            )
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError(
+                f"Exact preview generation '{generation_label}' returned an invalid status payload."
+            )
+        status = str(payload.get("status") or "unavailable")
+        if status in {"ready", "succeeded"}:
+            if not payload.get("content_url"):
+                raise RuntimeError(
+                    f"Exact preview generation '{generation_label}' reached {status} without content URL."
+                )
+            return {**payload, "status": "ready"}
+        if status not in {"pending", "running"}:
+            raise RuntimeError(
+                f"Exact preview generation '{generation_label}' entered terminal state {status[:80]}."
+            )
+        time.sleep(0.25)
+    raise TimeoutError(f"Timed out waiting for exact preview generation '{generation_label}'.")
 
 
 def _poll_capcut_draft_export(client: TestClient, *, project_id: str, job_id: str, timeout_sec: int) -> dict[str, Any]:
@@ -462,6 +560,50 @@ def run_smoke(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{revised_segment_id}/explanation-card",
             json={"title": "Smoke overlay", "body": "Final output contract", "text": "SMOKE OVERLAY", "expected_revision": session["session_revision"]},
         ), 200)
+        exact_preview_started = _assert_status(client.post(
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/exact-preview",
+            json={
+                "expected_revision": session["session_revision"],
+                "start_sec": 0.0,
+                "end_sec": 5.0,
+            },
+        ), 202)
+        exact_preview_status = _poll_exact_preview(
+            client,
+            project_id=project_id,
+            generation_id=exact_preview_started["generation_id"],
+            timeout_sec=300,
+        )
+        exact_preview_content = client.get(
+            exact_preview_status["content_url"],
+            headers={"Range": "bytes=0-0"},
+        )
+        if exact_preview_content.status_code != 206:
+            raise RuntimeError(
+                f"Exact preview range request returned {exact_preview_content.status_code}, expected 206."
+            )
+        exact_preview_record = store.get_exact_preview(
+            project_id=project_id,
+            generation_id=exact_preview_started["generation_id"],
+        )
+        if (
+            exact_preview_record.get("state") != "succeeded"
+            or int(exact_preview_record.get("expected_revision") or 0) != int(session["session_revision"])
+            or not exact_preview_record.get("artifact_uri")
+        ):
+            raise RuntimeError(
+                f"Exact preview generation '{exact_preview_started['generation_id']}' is not the current session artifact."
+            )
+        exact_preview_path = store.resolve_storage_uri(
+            project_id=project_id,
+            storage_uri=str(exact_preview_record["artifact_uri"]),
+        )
+        if not exact_preview_path.is_file():
+            raise RuntimeError(
+                f"Exact preview generation '{exact_preview_started['generation_id']}' has no current artifact file."
+            )
+        checks["exact_preview_ready"] = True
+        checks["exact_preview_range_206"] = True
         regenerated = _assert_status(client.post(
             f"/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
             json={
@@ -495,6 +637,14 @@ def run_smoke(
         candidate_timeline = _assert_status(
             client.get(f"/api/projects/{project_id}/timelines/{candidate_timeline_job_id}"), 200
         )["timeline"]
+        current_session = _assert_status(
+            client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}"), 200
+        )
+        snapshot_paths = _write_review_snapshots(
+            work_root,
+            timeline=candidate_timeline,
+            session=current_session,
+        )
         checks["approved_tts_in_final_and_capcut"] = any(
             item.get("recommendation_type") == "tts_replacement"
             and item.get("payload", {}).get("selected_asset_uri")
@@ -620,6 +770,28 @@ def run_smoke(
         "checks": checks,
         "narration": {"path": str(narration), "sha256": _sha256(narration)},
         "srt": {"path": str(subtitle_path)},
+        "exact_preview": {
+            "status": exact_preview_status["status"],
+            "generation_id": exact_preview_started["generation_id"],
+            "session_revision": exact_preview_status["artifact_revision"],
+            "timeline_start_sec": exact_preview_status["timeline_start_sec"],
+            "timeline_end_sec": exact_preview_status["timeline_end_sec"],
+            "range_status": 206,
+            "path": str(exact_preview_path),
+            "sha256": _sha256(exact_preview_path),
+        },
+        "timeline_snapshot": {
+            "path": str(snapshot_paths["timeline"]),
+            "sha256": _sha256(snapshot_paths["timeline"]),
+        },
+        "editing_session_snapshot": {
+            "path": str(snapshot_paths["editing_session"]),
+            "sha256": _sha256(snapshot_paths["editing_session"]),
+        },
+        "ffprobe_summary": {
+            "exact_preview": _probe_media_summary(exact_preview_path, ffprobe_binary=ffprobe_binary),
+            "final_mp4": _probe_media_summary(final_path, ffprobe_binary=ffprobe_binary),
+        },
         "final_mp4": {"path": str(final_path), "sha256": _sha256(final_path)},
         "capcut_draft": {
             "path": str(draft_path / "draft_content.json"),

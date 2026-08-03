@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +19,26 @@ def _load_smoke_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+class _SequenceResponse:
+    status_code = 200
+
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class _SequenceClient:
+    def __init__(self, payloads: list[dict[str, object]]) -> None:
+        self._payloads = iter(payloads)
+        self.paths: list[str] = []
+
+    def get(self, path: str) -> _SequenceResponse:
+        self.paths.append(path)
+        return _SequenceResponse(next(self._payloads))
 
 
 def test_smoke_harness_exposes_a_600_second_korean_stt_contract(tmp_path: Path) -> None:
@@ -144,3 +166,171 @@ def test_long_form_fixture_profiles_define_real_media_controls_and_desktop_scope
     audio = smoke.get_long_form_fixture("audio_ducking")
     assert audio["audio_controls"] == {"gain_db": -6.0, "fade_in_sec": 0.5, "fade_out_sec": 0.5, "ducking": True}
     assert audio["desktop_capcut_opened"] is False
+
+
+def test_smoke_exact_preview_poll_requires_ready_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    smoke = _load_smoke_module()
+    monkeypatch.setattr(smoke.time, "sleep", lambda _: None)
+    client = _SequenceClient([
+        {"status": "running"},
+        {"status": "ready", "content_url": "/content"},
+    ])
+
+    result = smoke._poll_exact_preview(
+        client,
+        project_id="project",
+        generation_id="generation",
+        timeout_sec=1,
+    )
+
+    assert result["status"] == "ready"
+    assert result["content_url"] == "/content"
+    assert client.paths == [
+        "/api/projects/project/exact-previews/generation",
+        "/api/projects/project/exact-previews/generation",
+    ]
+
+
+def test_smoke_exact_preview_poll_normalizes_public_succeeded_state_to_ready() -> None:
+    smoke = _load_smoke_module()
+    client = _SequenceClient([{"status": "succeeded", "content_url": "/content"}])
+
+    result = smoke._poll_exact_preview(
+        client,
+        project_id="project",
+        generation_id="generation",
+        timeout_sec=1,
+    )
+
+    assert result == {"status": "ready", "content_url": "/content"}
+
+
+@pytest.mark.parametrize("status", ["failed", "stale", "obsolete", "unavailable", "unexpected"])
+def test_smoke_exact_preview_poll_rejects_terminal_non_ready_states(status: str) -> None:
+    smoke = _load_smoke_module()
+    client = _SequenceClient([{"status": status, "error_message": "x" * 4_096}])
+
+    with pytest.raises(RuntimeError, match=rf"Exact preview .* {status}") as raised:
+        smoke._poll_exact_preview(
+            client,
+            project_id="project",
+            generation_id="generation",
+            timeout_sec=1,
+        )
+
+    assert len(str(raised.value)) < 256
+
+
+def test_smoke_exact_preview_poll_rejects_timeout_without_unbounded_payload() -> None:
+    smoke = _load_smoke_module()
+
+    with pytest.raises(TimeoutError, match="generation") as raised:
+        smoke._poll_exact_preview(
+            _SequenceClient([]),
+            project_id="project",
+            generation_id="generation",
+            timeout_sec=0,
+        )
+
+    assert len(str(raised.value)) < 256
+
+
+def test_smoke_exact_preview_poll_bounds_identifier_and_http_error_details() -> None:
+    smoke = _load_smoke_module()
+    oversized_generation_id = "generation-" + ("x" * 4_096)
+
+    with pytest.raises(TimeoutError) as timeout:
+        smoke._poll_exact_preview(
+            _SequenceClient([]),
+            project_id="project",
+            generation_id=oversized_generation_id,
+            timeout_sec=0,
+        )
+
+    class _HttpErrorClient:
+        @staticmethod
+        def get(path: str) -> SimpleNamespace:
+            return SimpleNamespace(status_code=503, text="x" * 4_096)
+
+    with pytest.raises(RuntimeError, match="HTTP 503") as http_error:
+        smoke._poll_exact_preview(
+            _HttpErrorClient(),
+            project_id="project",
+            generation_id=oversized_generation_id,
+            timeout_sec=1,
+        )
+
+    assert len(str(timeout.value)) < 256
+    assert len(str(http_error.value)) < 256
+
+
+def test_smoke_writes_timeline_and_session_snapshots_atomically_with_stable_utf8_json(
+    tmp_path: Path,
+) -> None:
+    smoke = _load_smoke_module()
+    timeline = {"z_key": 2, "a_key": "검토 타임라인"}
+    session = {"session_id": "session", "segments": [{"caption_text": "수정 자막"}]}
+
+    paths = smoke._write_review_snapshots(
+        tmp_path,
+        timeline=timeline,
+        session=session,
+    )
+
+    assert paths == {
+        "timeline": tmp_path / "review" / "timeline.json",
+        "editing_session": tmp_path / "review" / "editing-session.json",
+    }
+    assert json.loads(paths["timeline"].read_text(encoding="utf-8")) == timeline
+    assert json.loads(paths["editing_session"].read_text(encoding="utf-8")) == session
+    assert paths["timeline"].read_text(encoding="utf-8").index('"a_key"') < paths["timeline"].read_text(encoding="utf-8").index('"z_key"')
+    assert "검토 타임라인" in paths["timeline"].read_text(encoding="utf-8")
+    assert str(tmp_path.resolve()) not in paths["timeline"].read_text(encoding="utf-8")
+    assert list((tmp_path / "review").glob("*.tmp")) == []
+
+
+def test_smoke_probe_media_summary_returns_only_bounded_review_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    smoke = _load_smoke_module()
+    probe_payload = {
+        "format": {"duration": "5.125000", "format_name": "mov,mp4", "tags": {"secret": "ignored"}},
+        "streams": [
+            {"codec_type": "video", "codec_name": "h264", "pix_fmt": "yuv420p", "extradata": "ignored"},
+            {"codec_type": "audio", "codec_name": "aac", "channels": 2},
+        ],
+    }
+    monkeypatch.setattr(
+        smoke,
+        "_run",
+        lambda command, timeout: SimpleNamespace(stdout=json.dumps(probe_payload)),
+    )
+
+    summary = smoke._probe_media_summary(tmp_path / "preview.mp4", ffprobe_binary="ffprobe")
+
+    assert summary == {
+        "duration_sec": 5.125,
+        "format": "mov,mp4",
+        "video_codec": "h264",
+        "pixel_format": "yuv420p",
+        "audio_codec": "aac",
+    }
+
+
+def test_smoke_run_wires_exact_preview_before_regeneration_and_returns_review_evidence() -> None:
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+
+    exact_preview_start = source.index('/exact-preview"')
+    partial_regeneration_start = source.index('/partial-regeneration"')
+
+    assert exact_preview_start < partial_regeneration_start
+    assert '"start_sec": 0.0' in source
+    assert '"end_sec": 5.0' in source
+    assert 'headers={"Range": "bytes=0-0"}' in source
+    assert "store.get_exact_preview(" in source
+    assert "_write_review_snapshots(" in source
+    assert '"exact_preview"' in source
+    assert '"timeline_snapshot"' in source
+    assert '"editing_session_snapshot"' in source
+    assert '"ffprobe_summary"' in source
