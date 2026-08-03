@@ -14,7 +14,7 @@
 
 - [x] Task 1 기존 편집 smoke의 exact preview·snapshot evidence 확장
 - [x] Task 2 사용자 샘플 read-only inventory·공개 API ingest·H264/HEVC preview proof
-- [ ] Task 3 bounded package·reverse manifest·한국어 review checklist
+- [x] Task 3 bounded package·reverse manifest·한국어 review checklist
 - [ ] Task 4 CLI·mutation guard·실제 사용자 샘플 검증
 - [ ] Task 5 독립 review·관련 회귀·SSOT·commit/push
 
@@ -149,18 +149,18 @@ Expected: PASS.
 - Modify: `scripts/owner_sample_edit_package.py`
 - Modify: `tests/test_owner_sample_edit_package.py`
 
-- [ ] `write_review_checklist()`가 영상, 자막, 목소리, 음악, 효과음, 장면 전환, 권리, 최종 export의 unchecked 사람 항목과 `자동 통과 아님` 경고를 정확히 포함하는 실패 테스트를 작성한다.
-- [ ] artifact path가 package root 밖이거나 없거나 SHA가 다르면 `validate_reverse_manifest()`가 거부하는 path traversal/tamper 실패 테스트를 작성한다.
-- [ ] package manifest가 exact preview, final MP4, SRT, timeline, editing-session, CapCut draft, ffprobe summary, checklist를 모두 상대경로+SHA로 연결하고 각 upstream이 `editing_session → copied asset → source SHA`로 끝나는 실패 테스트를 작성한다.
-- [ ] deterministic edit flow 호출이 exact `fixture_name="audio_ducking"`이고 결과 controls에 B-roll/BGM/SFX/caption/TTS/explanation overlay가 모두 true인 실패 테스트를 작성한다.
-- [ ] owner approval, rights approval, desktop edit/export, auto apply, memory write, external provider call이 모두 false/0인 schema 실패 테스트를 작성한다.
-- [ ] RED를 실행한다.
+- [x] `write_review_checklist()`가 영상, 자막, 목소리, 음악, 효과음, 장면 전환, 권리, 최종 export의 unchecked 사람 항목과 `자동 통과 아님` 경고를 정확히 포함하는 실패 테스트를 작성한다.
+- [x] artifact path가 package root 밖이거나 없거나 SHA가 다르면 `validate_reverse_manifest()`가 거부하는 path traversal/tamper 실패 테스트를 작성한다.
+- [x] package manifest가 exact preview, final MP4, SRT, timeline, editing-session, CapCut draft, ffprobe summary, checklist를 모두 상대경로+SHA로 연결하고 각 upstream이 `editing_session → copied asset → source SHA`로 끝나는 실패 테스트를 작성한다.
+- [x] deterministic edit flow 호출이 exact `fixture_name="audio_ducking"`이고 결과 controls에 B-roll/BGM/SFX/caption/TTS/explanation overlay가 모두 true인 실패 테스트를 작성한다.
+- [x] owner approval, rights approval, desktop edit/export, auto apply, memory write, external provider call이 모두 false/0인 schema 실패 테스트를 작성한다.
+- [x] RED를 실행한다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_sample_edit_package.py -q`
 
 Expected: package/checklist/reverse helper 부재로 FAIL.
 
-- [ ] 아래 package builder를 구현한다.
+- [x] 아래 package builder를 구현한다.
 
 ```python
 def build_owner_sample_package(*, sample_dir: Path, output_root: Path, narration: Path,
@@ -172,9 +172,11 @@ def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> N
 def write_review_checklist(package_root: Path) -> Path: ...
 ```
 
-- [ ] narration은 먼저 package-local `inputs/qa-narration.wav`로 복사하고 source/copy SHA를 비교한다. 기본 narration artifact가 없을 때만 checked-in `New-ProductionReadinessKoreanSample.ps1`을 package root 대상으로 실행한다.
-- [ ] manifest는 `.owner-sample-edit-package.json.tmp`에 쓴 뒤 same-directory replace로 게시한다. 실패 시 partial manifest를 노출하지 않으며 이미 생성한 project evidence는 삭제하지 않는다.
-- [ ] GREEN을 실행한다.
+- [x] narration은 먼저 package-local `inputs/qa-narration.wav`로 복사하고 source/copy SHA를 비교한다. 기본 narration artifact가 없을 때만 checked-in `New-ProductionReadinessKoreanSample.ps1`을 package root 대상으로 실행한다.
+- [x] manifest는 `.owner-sample-edit-package.json.tmp`에 쓴 뒤 same-directory no-overwrite atomic rename으로 게시한다. 실패 시 partial manifest를 노출하지 않으며 이미 생성한 project evidence는 삭제하지 않는다.
+- [x] GREEN을 실행한다.
+
+완료 증거: owner package/smoke `131 passed`, preview/API broader 회귀 `116 passed`, 최종 spec/quality review `Critical 0 / Important 0 / Minor 0`. 실제 H264 owner copy를 편집 B-roll로 사용하고, HEVC는 별도 browser-preview 증거로 유지한다. Checklist는 승인 주장이 없는 독립 human-review branch다. 실제 사용자 샘플 600초 실행은 Task 4 gate로 남긴다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_sample_edit_package.py tests/test_production_readiness_smoke_script.py -q`
 
