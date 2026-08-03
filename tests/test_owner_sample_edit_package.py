@@ -579,3 +579,491 @@ def test_runner_source_has_no_direct_sample_copy_or_asset_registration() -> None
     assert ".register_asset(" not in source
     assert ".content_path(" not in source
     assert ".rglob(" not in source
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _package_fixture(
+    package, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path, dict[str, object]]:
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    h264_path = sample_dir / "owner-h264.mp4"
+    hevc_path = sample_dir / "owner-hevc.mp4"
+    h264_path.write_bytes(b"owner-h264")
+    hevc_path.write_bytes(b"owner-hevc")
+    records = [
+        package.SampleRecord(
+            h264_path.name,
+            h264_path.stat().st_size,
+            1.0,
+            "mov,mp4",
+            "h264",
+            "aac",
+            "yuv420p",
+            _sha256(h264_path),
+        ),
+        package.SampleRecord(
+            hevc_path.name,
+            hevc_path.stat().st_size,
+            2.0,
+            "mov,mp4",
+            "hevc",
+            "aac",
+            "yuv420p",
+            _sha256(hevc_path),
+        ),
+    ]
+    monkeypatch.setattr(package, "inventory_samples", lambda *args, **kwargs: records)
+    monkeypatch.setattr(
+        package,
+        "build_preview_proofs",
+        lambda **kwargs: {
+            "project_ref": "projects/qa-preview",
+            "api_import_log": [],
+            "previews": {
+                codec: {
+                    "source_name": record.name,
+                    "source_sha256": record.sha256,
+                    "project_copy_ref": f"local://projects/qa-preview/{codec}.mp4",
+                    "project_copy_sha256": record.sha256,
+                    "preview_source_sha256": record.sha256,
+                    "profile": "h264-yuv420p-aac-1280-v1",
+                    "preview_kind": "original" if codec == "h264" else "proxy",
+                    "content_url": f"/api/projects/qa-preview/{codec}/content",
+                    "range_status": 206,
+                    "output_video_codec": "h264",
+                    "output_pixel_format": "yuv420p",
+                    "content_sha256": record.sha256,
+                }
+                for codec, record in zip(("h264", "hevc"), records, strict=True)
+            },
+            "external_provider_calls": 0,
+        },
+    )
+    narration = tmp_path / "narration.wav"
+    narration.write_bytes(b"bounded narration")
+    calls: dict[str, object] = {}
+
+    def edit_runner(**kwargs):
+        calls.update(kwargs)
+        work_root = Path(kwargs["work_root"])
+        artifacts = {
+            "srt": work_root / "review" / "captions.srt",
+            "exact_preview": work_root / "review" / "exact-preview.mp4",
+            "timeline_snapshot": work_root / "review" / "timeline.json",
+            "editing_session_snapshot": work_root / "review" / "editing-session.json",
+            "ffprobe_summary": work_root / "review" / "ffprobe-summary.json",
+            "final_mp4": work_root / "review" / "final.mp4",
+            "capcut_draft": work_root / "review" / "draft_content.json",
+        }
+        for name, path in artifacts.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"{name}\n", encoding="utf-8")
+        checks = {
+            "broll_controls_in_timeline": True,
+            "audio_controls_in_timeline": True,
+            "approved_sfx_in_final_and_capcut": True,
+            "revised_caption_in_srt": True,
+            "approved_tts_in_final_and_capcut": True,
+            "image_overlay_in_final_and_capcut": True,
+        }
+        return {
+            "fixture_name": kwargs["fixture_name"],
+            "desktop_capcut_opened": False,
+            "checks": checks,
+            **{
+                name: {"path": str(path), "sha256": _sha256(path)}
+                for name, path in artifacts.items()
+            },
+        }
+
+    output_root = tmp_path / "owner-package"
+    result = package.build_owner_sample_package(
+        sample_dir=sample_dir,
+        output_root=output_root,
+        narration=narration,
+        ffmpeg_binary="ffmpeg-local",
+        ffprobe_binary="ffprobe-local",
+        edit_flow_runner=edit_runner,
+    )
+    return output_root, narration, {"result": result, "calls": calls}
+
+
+def test_review_checklist_is_unchecked_and_never_claims_automatic_approval(
+    tmp_path: Path,
+) -> None:
+    package = _load_module()
+    checklist = package.write_review_checklist(tmp_path)
+    text = checklist.read_text(encoding="utf-8")
+
+    assert "자동 통과 아님" in text
+    assert [line.split(":", 1)[0] for line in text.splitlines() if line.startswith("- [ ] ")] == [
+        "- [ ] 영상",
+        "- [ ] 자막",
+        "- [ ] 목소리",
+        "- [ ] 음악",
+        "- [ ] 효과음",
+        "- [ ] 장면 전환",
+        "- [ ] 권리",
+        "- [ ] 최종 export",
+    ]
+    assert "- [x]" not in text.lower()
+    assert "승인 완료" not in text
+
+
+def test_package_uses_audio_ducking_and_records_all_controls_and_false_authorities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    calls = context["calls"]
+
+    assert calls["fixture_name"] == "audio_ducking"
+    assert Path(calls["narration"]) == package_root / "inputs" / "qa-narration.wav"
+    assert manifest["controls"] == {
+        "broll": True,
+        "bgm": True,
+        "sfx": True,
+        "caption": True,
+        "tts": True,
+        "explanation_overlay": True,
+    }
+    assert manifest["authorities"] == {
+        "owner_approval": False,
+        "rights_approval": False,
+        "desktop_edit": False,
+        "desktop_export": False,
+        "automatic_apply": False,
+        "memory_write": False,
+        "external_provider_calls": 0,
+    }
+    assert manifest["narration"]["source_sha256"] == _sha256(narration)
+    assert manifest["narration"]["copy_sha256"] == _sha256(Path(calls["narration"]))
+    assert manifest["narration"]["source_sha256"] == manifest["narration"]["copy_sha256"]
+
+
+def test_package_manifest_links_all_review_artifacts_to_source_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    assert set(manifest["artifacts"]) == {
+        "exact_preview",
+        "final_mp4",
+        "srt",
+        "timeline_snapshot",
+        "editing_session_snapshot",
+        "capcut_draft",
+        "ffprobe_summary",
+        "review_checklist",
+    }
+    for evidence in manifest["artifacts"].values():
+        assert not Path(evidence["path"]).is_absolute()
+        assert ".." not in Path(evidence["path"]).parts
+        assert _sha256(package_root / evidence["path"]) == evidence["sha256"]
+    assert package.validate_reverse_manifest(package_root, manifest) is None
+    serialized = json.dumps(manifest, ensure_ascii=False)
+    assert str((tmp_path / "samples").resolve()) not in serialized
+    assert str(package_root.resolve()) not in serialized
+    assert (package_root / "owner-sample-edit-package.json").is_file()
+    assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    [
+        "../outside.mp4",
+        "C:/outside.mp4",
+        r"C:\outside.mp4",
+        r"\\server\share\outside.mp4",
+        "/outside.mp4",
+    ],
+)
+def test_reverse_manifest_rejects_absolute_drive_unc_and_traversal_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe_path: str
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    manifest["artifacts"]["final_mp4"]["path"] = unsafe_path
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_artifact_path_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
+def test_reverse_manifest_rejects_missing_non_file_symlink_escape_and_sha_tamper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    missing = json.loads(json.dumps(manifest))
+    missing["artifacts"]["final_mp4"]["path"] = "review/missing.mp4"
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_artifact_missing$"):
+        package.validate_reverse_manifest(package_root, missing)
+
+    directory = package_root / "review" / "directory"
+    directory.mkdir(parents=True)
+    non_file = json.loads(json.dumps(manifest))
+    non_file["artifacts"]["final_mp4"]["path"] = "review/directory"
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_artifact_missing$"):
+        package.validate_reverse_manifest(package_root, non_file)
+
+    tampered = json.loads(json.dumps(manifest))
+    tampered["artifacts"]["final_mp4"]["sha256"] = "0" * 64
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_artifact_sha_mismatch$"):
+        package.validate_reverse_manifest(package_root, tampered)
+
+    outside = tmp_path / "outside.mp4"
+    outside.write_bytes(b"outside")
+    link = package_root / "review" / "linked.mp4"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        original = package._is_reparse_point
+        link.write_bytes(b"reparse")
+        monkeypatch.setattr(
+            package,
+            "_is_reparse_point",
+            lambda path: path == link or original(path),
+        )
+    escaped = json.loads(json.dumps(manifest))
+    escaped["artifacts"]["final_mp4"] = {
+        "path": "review/linked.mp4",
+        "sha256": _sha256(outside if link.is_symlink() else link),
+    }
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_artifact_path_invalid$"):
+        package.validate_reverse_manifest(package_root, escaped)
+
+
+def test_reverse_manifest_rejects_malformed_unbounded_or_non_resolving_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    cycle = json.loads(json.dumps(manifest))
+    cycle["reverse_trace"]["nodes"]["source_sha:h264"]["upstream"] = [
+        "artifact:final_mp4"
+    ]
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
+        package.validate_reverse_manifest(package_root, cycle)
+
+    disconnected = json.loads(json.dumps(manifest))
+    disconnected["reverse_trace"]["nodes"]["artifact:final_mp4"]["upstream"] = []
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
+        package.validate_reverse_manifest(package_root, disconnected)
+
+    unbounded = json.loads(json.dumps(manifest))
+    for index in range(package.MAX_REVERSE_TRACE_NODES + 1):
+        unbounded["reverse_trace"]["nodes"][f"extra:{index}"] = {
+            "kind": "source_sha",
+            "sha256": "a" * 64,
+            "upstream": [],
+        }
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
+        package.validate_reverse_manifest(package_root, unbounded)
+
+    too_many_artifacts = json.loads(json.dumps(manifest))
+    template = too_many_artifacts["artifacts"]["final_mp4"]
+    for index in range(package.MAX_MANIFEST_ARTIFACTS + 1):
+        too_many_artifacts["artifacts"][f"extra_{index}"] = dict(template)
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_artifacts_invalid$"):
+        package.validate_reverse_manifest(package_root, too_many_artifacts)
+
+    leaked = json.loads(json.dumps(manifest))
+    leaked["source_inventory"][0]["source_path"] = str(
+        (tmp_path / "secret" / "owner.mp4").resolve()
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_source_inventory_invalid$"):
+        package.validate_reverse_manifest(package_root, leaked)
+
+    leaked_preview = json.loads(json.dumps(manifest))
+    leaked_preview["preview_proofs"]["previews"]["h264"]["source_path"] = str(
+        (tmp_path / "secret" / "owner-h264.mp4").resolve()
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_preview_proof_invalid$"):
+        package.validate_reverse_manifest(package_root, leaked_preview)
+
+    leaked_top_level = json.loads(json.dumps(manifest))
+    leaked_top_level["source_path"] = str((tmp_path / "secret" / "owner.mp4").resolve())
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_schema_invalid$"):
+        package.validate_reverse_manifest(package_root, leaked_top_level)
+
+    invalid_narration = json.loads(json.dumps(manifest))
+    invalid_narration["narration"]["copy_sha256"] = "0" * 64
+    invalid_narration["reverse_trace"]["nodes"]["copied_asset:narration"]["sha256"] = (
+        "0" * 64
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_narration_invalid$"):
+        package.validate_reverse_manifest(package_root, invalid_narration)
+
+    leaked_trace = json.loads(json.dumps(manifest))
+    leaked_trace["reverse_trace"]["nodes"]["source_sha:h264"]["source_path"] = str(
+        (tmp_path / "secret" / "owner-h264.mp4").resolve()
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
+        package.validate_reverse_manifest(package_root, leaked_trace)
+
+
+def test_package_rejects_existing_nonempty_root_before_running_edit_flow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    output_root = tmp_path / "owner-package"
+    output_root.mkdir()
+    marker = output_root / "owner-evidence.txt"
+    marker.write_text("preserve", encoding="utf-8")
+    monkeypatch.setattr(
+        package,
+        "inventory_samples",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must fail before inventory")),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^package_root_not_empty$"):
+        package.build_owner_sample_package(
+            sample_dir=sample_dir,
+            output_root=output_root,
+            narration=tmp_path / "missing.wav",
+            ffmpeg_binary="ffmpeg",
+            ffprobe_binary="ffprobe",
+            edit_flow_runner=lambda **kwargs: {},
+        )
+    assert marker.read_text(encoding="utf-8") == "preserve"
+
+
+def test_package_rejects_output_inside_sample_directory_without_creating_it(
+    tmp_path: Path,
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    output_root = sample_dir / "must-not-be-created"
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^package_root_overlaps_samples$"):
+        package.build_owner_sample_package(
+            sample_dir=sample_dir,
+            output_root=output_root,
+            narration=tmp_path / "missing.wav",
+            ffmpeg_binary="ffmpeg",
+            ffprobe_binary="ffprobe",
+            edit_flow_runner=lambda **kwargs: {},
+        )
+    assert not output_root.exists()
+
+
+def test_package_rejects_missing_sample_root_before_creating_output(tmp_path: Path) -> None:
+    package = _load_module()
+    output_root = tmp_path / "must-not-be-created"
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^sample_directory_invalid$"):
+        package.build_owner_sample_package(
+            sample_dir=tmp_path / "missing-samples",
+            output_root=output_root,
+            narration=tmp_path / "missing.wav",
+            ffmpeg_binary="ffmpeg",
+            ffprobe_binary="ffprobe",
+            edit_flow_runner=lambda **kwargs: {},
+        )
+    assert not output_root.exists()
+
+
+def test_missing_default_narration_uses_checked_in_local_generator_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    missing_default = tmp_path / "artifacts" / "task5-korean-600.wav"
+    monkeypatch.setattr(package, "DEFAULT_NARRATION_PATH", missing_default)
+    generated: list[dict[str, object]] = []
+
+    def generate(target: Path, *, ffmpeg_binary: str, ffprobe_binary: str) -> None:
+        generated.append(
+            {
+                "target": target,
+                "ffmpeg_binary": ffmpeg_binary,
+                "ffprobe_binary": ffprobe_binary,
+            }
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"generated local narration")
+
+    monkeypatch.setattr(package, "_run_narration_generator", generate, raising=False)
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    monkeypatch.setattr(package, "inventory_samples", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        package,
+        "select_preview_inputs",
+        lambda records: (_ for _ in ()).throw(package.OwnerSamplePackageError("stop_after_narration")),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^stop_after_narration$"):
+        package.build_owner_sample_package(
+            sample_dir=sample_dir,
+            output_root=tmp_path / "owner-package",
+            narration=missing_default,
+            ffmpeg_binary="ffmpeg-local",
+            ffprobe_binary="ffprobe-local",
+            edit_flow_runner=lambda **kwargs: {},
+        )
+    assert generated == [
+        {
+            "target": tmp_path / "owner-package" / "inputs" / "qa-narration.wav",
+            "ffmpeg_binary": "ffmpeg-local",
+            "ffprobe_binary": "ffprobe-local",
+        }
+    ]
+
+
+def test_manifest_publish_failure_exposes_no_final_or_partial_manifest_but_keeps_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    original_replace = Path.replace
+
+    def fail_manifest_replace(path: Path, target: Path):
+        if path.name == ".owner-sample-edit-package.json.tmp":
+            raise OSError("simulated publish failure")
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_manifest_replace)
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_publish_failed$"):
+        _package_fixture(package, tmp_path, monkeypatch)
+
+    package_root = tmp_path / "owner-package"
+    assert (package_root / "edit" / "review" / "final.mp4").is_file()
+    assert not (package_root / "owner-sample-edit-package.json").exists()
+    assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
+
+
+def test_final_source_fence_failure_occurs_before_manifest_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    monkeypatch.setattr(
+        package,
+        "_assert_final_source_fence",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            package.OwnerSamplePackageError("source_changed_during_package")
+        ),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^source_changed_during_package$"):
+        _package_fixture(package, tmp_path, monkeypatch)
+
+    package_root = tmp_path / "owner-package"
+    assert (package_root / "edit" / "review" / "final.mp4").is_file()
+    assert not (package_root / "owner-sample-edit-package.json").exists()
+    assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
