@@ -692,6 +692,12 @@ def _package_fixture(
         broll_sha = _sha256(broll_source)
         broll_asset_id = "owner-broll-asset"
         broll_storage_ref = "local://projects/edit-owner/assets/owner-h264.mp4"
+        edit_assets = work_root / "projects" / "projects" / "edit-owner" / "assets"
+        edit_assets.mkdir(parents=True, exist_ok=True)
+        (edit_assets / "owner-h264.mp4").write_bytes(broll_source.read_bytes())
+        (edit_assets / "qa-narration.wav").write_bytes(
+            Path(kwargs["narration"]).read_bytes()
+        )
         controls = {"fit": "fit", "loop": True, "pad": False, "trim_start_sec": 0.0}
         audio_controls = {
             "gain_db": -6.0,
@@ -1116,6 +1122,100 @@ def test_structured_edit_validation_rejects_timeline_identity_srt_capcut_and_med
         validate()
 
 
+def test_stored_manifest_rejects_forged_edit_input_even_when_graph_is_mirrored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    forged = json.loads(json.dumps(manifest))
+    forged["edit_input_evidence"]["broll_source_sha256"] = "0" * 64
+    forged["edit_input_evidence"]["broll_copy_sha256"] = "0" * 64
+    forged["edit_input_evidence"]["narration_source_sha256"] = "1" * 64
+    forged["edit_input_evidence"]["narration_copy_sha256"] = "1" * 64
+    forged["reverse_trace"]["nodes"]["copied_asset:edit_h264"]["sha256"] = "0" * 64
+    forged["reverse_trace"]["nodes"]["copied_asset:edit_narration"]["sha256"] = "1" * 64
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_edit_input_invalid$"):
+        package.validate_reverse_manifest(package_root, forged)
+
+
+def test_stored_manifest_rejects_edit_input_path_leak_copy_tamper_and_cross_project_uri(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    leaked = json.loads(json.dumps(manifest))
+    leaked["edit_input_evidence"]["source_path"] = r"C:\secret\owner.mp4"
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_edit_input_invalid$"):
+        package.validate_reverse_manifest(package_root, leaked)
+
+    invalid_type = json.loads(json.dumps(manifest))
+    invalid_type["edit_input_evidence"]["broll_storage_ref"] = None
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_edit_input_invalid$"):
+        package.validate_reverse_manifest(package_root, invalid_type)
+
+    broll_copy = (
+        package_root
+        / "edit"
+        / "projects"
+        / "projects"
+        / "edit-owner"
+        / "assets"
+        / "owner-h264.mp4"
+    )
+    original = broll_copy.read_bytes()
+    broll_copy.write_bytes(b"tampered edit copy")
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_edit_input_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+    broll_copy.write_bytes(original)
+
+    crossed = json.loads(json.dumps(manifest))
+    crossed["edit_input_evidence"]["narration_storage_ref"] = (
+        "local://projects/other-project/assets/qa-narration.wav"
+    )
+    crossed["reverse_trace"]["nodes"]["copied_asset:edit_narration"]["ref"] = (
+        crossed["edit_input_evidence"]["narration_storage_ref"]
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_edit_input_invalid$"):
+        package.validate_reverse_manifest(package_root, crossed)
+
+
+def test_stored_manifest_rejects_oversize_edit_copy_before_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    broll_copy = (
+        package_root
+        / "edit"
+        / "projects"
+        / "projects"
+        / "edit-owner"
+        / "assets"
+        / "owner-h264.mp4"
+    )
+    with broll_copy.open("r+b") as target:
+        target.truncate(package.MAX_ARTIFACT_BYTES + 1)
+    original_hash = package._sha256
+    monkeypatch.setattr(
+        package,
+        "_sha256",
+        lambda path: (
+            (_ for _ in ()).throw(AssertionError("oversize edit copy must not be hashed"))
+            if path == broll_copy.resolve()
+            else original_hash(path)
+        ),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_edit_input_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
 def test_manifest_rejects_sparse_oversize_bool_nan_and_serialized_size_before_hash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1418,7 +1518,7 @@ def test_manifest_publish_failure_exposes_no_final_or_partial_manifest_but_keeps
     package = _load_module()
     monkeypatch.setattr(
         package.os,
-        "link",
+        "rename",
         lambda source, destination: (_ for _ in ()).throw(
             OSError("simulated publish failure")
         ),
@@ -1442,7 +1542,7 @@ def test_manifest_publish_never_overwrites_concurrent_final(
         Path(destination).write_bytes(concurrent_bytes)
         raise FileExistsError("simulated concurrent publisher")
 
-    monkeypatch.setattr(package.os, "link", inject_concurrent_final)
+    monkeypatch.setattr(package.os, "rename", inject_concurrent_final)
     with pytest.raises(package.OwnerSamplePackageError, match="^manifest_publish_failed$"):
         _package_fixture(package, tmp_path, monkeypatch)
 
@@ -1450,6 +1550,36 @@ def test_manifest_publish_never_overwrites_concurrent_final(
     assert (package_root / "owner-sample-edit-package.json").read_bytes() == concurrent_bytes
     assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
     assert (package_root / "edit" / "review" / "final.mp4").is_file()
+
+
+def test_failed_publish_temp_uses_quarantine_when_unlink_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    original_unlink = Path.unlink
+    monkeypatch.setattr(
+        package,
+        "_publish_no_overwrite",
+        lambda source, destination: (_ for _ in ()).throw(
+            OSError("simulated no-overwrite rename failure")
+        ),
+    )
+    monkeypatch.setattr(
+        Path,
+        "unlink",
+        lambda self, *args, **kwargs: (
+            (_ for _ in ()).throw(OSError("simulated standard temp unlink failure"))
+            if self.name == ".owner-sample-edit-package.json.tmp"
+            else original_unlink(self, *args, **kwargs)
+        ),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_publish_failed$"):
+        _package_fixture(package, tmp_path, monkeypatch)
+
+    package_root = tmp_path / "owner-package"
+    assert not (package_root / "owner-sample-edit-package.json").exists()
+    assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
 
 
 def test_final_source_fence_failure_occurs_before_manifest_publish(
@@ -1496,3 +1626,66 @@ def test_post_publish_source_fence_removes_only_generated_manifest(
     assert not (package_root / "owner-sample-edit-package.json").exists()
     assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
     assert (package_root / "edit" / "review" / "final.mp4").is_file()
+
+
+def test_post_publish_cleanup_quarantines_owned_manifest_when_unlink_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    original_fence = package._assert_final_source_fence
+    original_unlink = Path.unlink
+    calls = 0
+
+    def fail_second_check(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            monkeypatch.setattr(
+                Path,
+                "unlink",
+                lambda self, *a, **kw: (
+                    (_ for _ in ()).throw(OSError("simulated quarantine delete failure"))
+                    if ".cleanup-" in self.name
+                    else original_unlink(self, *a, **kw)
+                ),
+            )
+            raise package.OwnerSamplePackageError("source_changed_during_package")
+        return original_fence(*args, **kwargs)
+
+    monkeypatch.setattr(package, "_assert_final_source_fence", fail_second_check)
+    with pytest.raises(package.OwnerSamplePackageError, match="^source_changed_during_package$"):
+        _package_fixture(package, tmp_path, monkeypatch)
+
+    package_root = tmp_path / "owner-package"
+    assert not (package_root / "owner-sample-edit-package.json").exists()
+    assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
+    assert list(package_root.glob("owner-sample-edit-package.json.cleanup-*"))
+
+
+def test_post_publish_cleanup_reports_namespace_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    original_fence = package._assert_final_source_fence
+    original_rename = package.os.rename
+    calls = 0
+
+    def fail_second_check(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            monkeypatch.setattr(
+                package.os,
+                "rename",
+                lambda source, destination: (
+                    (_ for _ in ()).throw(OSError("simulated cleanup rename failure"))
+                    if Path(source).name == "owner-sample-edit-package.json"
+                    else original_rename(source, destination)
+                ),
+            )
+            raise package.OwnerSamplePackageError("source_changed_during_package")
+        return original_fence(*args, **kwargs)
+
+    monkeypatch.setattr(package, "_assert_final_source_fence", fail_second_check)
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_cleanup_failed$"):
+        _package_fixture(package, tmp_path, monkeypatch)

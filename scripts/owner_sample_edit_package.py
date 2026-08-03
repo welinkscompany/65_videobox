@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Sequence
@@ -1259,6 +1260,147 @@ def _validate_narration_evidence(package_root: Path, manifest: dict[str, Any]) -
         raise OwnerSamplePackageError("manifest_narration_invalid")
 
 
+def _manifest_prefixed_id(value: Any, *, prefix: str) -> str:
+    if not isinstance(value, str) or len(value) > 256 or not value.startswith(prefix):
+        raise OwnerSamplePackageError("manifest_edit_input_invalid")
+    identifier = value.removeprefix(prefix)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identifier):
+        raise OwnerSamplePackageError("manifest_edit_input_invalid")
+    return identifier
+
+
+def _validate_manifest_edit_input_evidence(
+    package_root: Path, manifest: dict[str, Any]
+) -> None:
+    evidence = manifest.get("edit_input_evidence")
+    required_fields = {
+        "explicit_broll_enabled",
+        "edit_project_ref",
+        "broll_asset_ref",
+        "broll_storage_ref",
+        "broll_source_name",
+        "broll_source_sha256",
+        "broll_copy_sha256",
+        "narration_asset_ref",
+        "narration_storage_ref",
+        "narration_source_sha256",
+        "narration_copy_sha256",
+        "session_ref",
+        "timeline_ref",
+        "session_revision",
+    }
+    if not isinstance(evidence, dict) or set(evidence) != required_fields:
+        raise OwnerSamplePackageError("manifest_edit_input_invalid")
+    selected = manifest["selected_sources"]["h264"]
+    narration = manifest["narration"]
+    source_name = evidence.get("broll_source_name")
+    hashes = (
+        evidence.get("broll_source_sha256"),
+        evidence.get("broll_copy_sha256"),
+        evidence.get("narration_source_sha256"),
+        evidence.get("narration_copy_sha256"),
+    )
+    if (
+        evidence.get("explicit_broll_enabled") is not True
+        or not isinstance(source_name, str)
+        or not 0 < len(source_name) <= 255
+        or Path(source_name).name != source_name
+        or "/" in source_name
+        or "\\" in source_name
+        or source_name != selected["name"]
+        or evidence.get("broll_source_sha256") != selected["sha256"]
+        or evidence.get("broll_copy_sha256") != selected["sha256"]
+        or evidence.get("narration_source_sha256") != narration["source_sha256"]
+        or evidence.get("narration_copy_sha256") != narration["copy_sha256"]
+        or any(not isinstance(value, str) or not SHA256_PATTERN.fullmatch(value) for value in hashes)
+        or isinstance(evidence.get("session_revision"), bool)
+        or not isinstance(evidence.get("session_revision"), int)
+        or not 0 < evidence["session_revision"] < 1_000_000
+    ):
+        raise OwnerSamplePackageError("manifest_edit_input_invalid")
+
+    project_id = _manifest_prefixed_id(evidence.get("edit_project_ref"), prefix="projects/")
+    broll_asset_id = _manifest_prefixed_id(evidence.get("broll_asset_ref"), prefix="assets/")
+    _manifest_prefixed_id(evidence.get("narration_asset_ref"), prefix="assets/")
+    session_id = _manifest_prefixed_id(evidence.get("session_ref"), prefix="editing-sessions/")
+    timeline_id = _manifest_prefixed_id(evidence.get("timeline_ref"), prefix="timelines/")
+    for key in ("broll_storage_ref", "narration_storage_ref"):
+        value = evidence.get(key)
+        if (
+            not isinstance(value, str)
+            or not 0 < len(value) <= 512
+            or "\\" in value
+            or "\x00" in value
+        ):
+            raise OwnerSamplePackageError("manifest_edit_input_invalid")
+    edit_root = package_root / "edit"
+    try:
+        broll_copy = _resolve_manifest_project_copy(
+            package_root=edit_root,
+            project_id=project_id,
+            storage_uri=evidence["broll_storage_ref"],
+        )
+        narration_copy = _resolve_manifest_project_copy(
+            package_root=edit_root,
+            project_id=project_id,
+            storage_uri=evidence["narration_storage_ref"],
+        )
+    except (KeyError, TypeError, OwnerSamplePackageError) as exc:
+        raise OwnerSamplePackageError("manifest_edit_input_invalid") from exc
+    try:
+        if (
+            not 0 < broll_copy.stat().st_size <= MAX_ARTIFACT_BYTES
+            or not 0 < narration_copy.stat().st_size <= MAX_ARTIFACT_BYTES
+        ):
+            raise OwnerSamplePackageError("manifest_edit_input_invalid")
+    except OSError as exc:
+        raise OwnerSamplePackageError("manifest_edit_input_invalid") from exc
+    if (
+        _sha256(broll_copy) != evidence["broll_copy_sha256"]
+        or _sha256(narration_copy) != evidence["narration_copy_sha256"]
+    ):
+        raise OwnerSamplePackageError("manifest_edit_input_invalid")
+
+    try:
+        timeline = _read_bounded_json(
+            _safe_manifest_artifact_path(
+                package_root, manifest["artifacts"]["timeline_snapshot"]["path"]
+            )
+        )
+        session = _read_bounded_json(
+            _safe_manifest_artifact_path(
+                package_root, manifest["artifacts"]["editing_session_snapshot"]["path"]
+            )
+        )
+    except (KeyError, TypeError, OwnerSamplePackageError) as exc:
+        raise OwnerSamplePackageError("manifest_edit_input_invalid") from exc
+    broll_clips = [
+        clip
+        for track in timeline.get("tracks", [])
+        if isinstance(track, dict) and track.get("track_type") == "broll"
+        for clip in track.get("clips", [])
+        if isinstance(clip, dict)
+    ]
+    session_brolls = [
+        segment.get("broll_override")
+        for segment in session.get("segments", [])
+        if isinstance(segment, dict) and isinstance(segment.get("broll_override"), dict)
+    ]
+    if (
+        timeline.get("timeline_id") != timeline_id
+        or session.get("session_id") != session_id
+        or session.get("timeline_id") != timeline_id
+        or session.get("session_revision") != evidence["session_revision"]
+        or not any(
+            clip.get("asset_id") == broll_asset_id
+            and clip.get("asset_uri") == evidence["broll_storage_ref"]
+            for clip in broll_clips
+        )
+        or not any(item.get("asset_id") == broll_asset_id for item in session_brolls)
+    ):
+        raise OwnerSamplePackageError("manifest_edit_input_invalid")
+
+
 def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
     trace = manifest.get("reverse_trace")
     nodes = trace.get("nodes") if isinstance(trace, dict) else None
@@ -1410,6 +1552,7 @@ def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> N
             raise OwnerSamplePackageError("manifest_artifact_sha_mismatch")
         if _sha256(artifact) != claimed_sha:
             raise OwnerSamplePackageError("manifest_artifact_sha_mismatch")
+    _validate_manifest_edit_input_evidence(root, manifest)
     expected_controls = {key: True for key in CONTROL_CHECKS}
     expected_authorities = {
         "owner_approval": False,
@@ -1425,27 +1568,116 @@ def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> N
     _validate_reverse_graph(manifest)
 
 
+def _serialized_manifest_bytes(manifest: dict[str, Any]) -> bytes:
+    return (
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
+def _publish_no_overwrite(temporary: Path, final: Path) -> None:
+    if os.name == "nt":
+        # Windows rename is a single same-volume operation and fails when the
+        # destination already exists.  A successful publication therefore has
+        # no second, required temporary-name cleanup step.
+        os.rename(temporary, final)
+        return
+    # Portable no-clobber fallback: link creation fails if final already exists.
+    os.link(temporary, final)
+    try:
+        temporary.unlink()
+    except OSError:
+        quarantine = temporary.with_name(
+            f"{temporary.name}.cleanup-{uuid.uuid4().hex}"
+        )
+        os.rename(temporary, quarantine)
+        try:
+            quarantine.unlink()
+        except OSError:
+            pass
+
+
+def _cleanup_failed_publish_temp(temporary: Path, expected: bytes) -> None:
+    if not temporary.exists():
+        return
+    try:
+        if not temporary.is_file() or temporary.read_bytes() != expected:
+            raise OwnerSamplePackageError("manifest_cleanup_failed")
+        temporary.unlink()
+        return
+    except OwnerSamplePackageError:
+        raise
+    except OSError:
+        pass
+    quarantine = temporary.with_name(
+        f"{temporary.name}.cleanup-{uuid.uuid4().hex}"
+    )
+    try:
+        os.rename(temporary, quarantine)
+    except OSError as exc:
+        raise OwnerSamplePackageError("manifest_cleanup_failed") from exc
+    try:
+        quarantine.unlink()
+    except OSError:
+        pass
+    if temporary.exists():
+        raise OwnerSamplePackageError("manifest_cleanup_failed")
+
+
+def _quarantine_owned_manifest_path(path: Path, expected: bytes) -> None:
+    if not path.exists():
+        return
+    try:
+        if not path.is_file() or path.read_bytes() != expected:
+            # A concurrent foreign file is never removed merely to make the
+            # package namespace look clean.
+            raise OwnerSamplePackageError("manifest_cleanup_failed")
+    except OwnerSamplePackageError:
+        raise
+    except OSError as exc:
+        raise OwnerSamplePackageError("manifest_cleanup_failed") from exc
+    quarantine = path.with_name(f"{path.name}.cleanup-{uuid.uuid4().hex}")
+    try:
+        os.rename(path, quarantine)
+        if quarantine.read_bytes() != expected:
+            try:
+                _publish_no_overwrite(quarantine, path)
+            except OSError:
+                pass
+            raise OwnerSamplePackageError("manifest_cleanup_failed")
+    except OwnerSamplePackageError:
+        raise
+    except OSError as exc:
+        raise OwnerSamplePackageError("manifest_cleanup_failed") from exc
+    try:
+        quarantine.unlink()
+    except OSError:
+        # The public final/temp names are already absent.  A bounded quarantine
+        # is safer than recreating an invalid public manifest after fence failure.
+        pass
+    if path.exists():
+        raise OwnerSamplePackageError("manifest_cleanup_failed")
+
+
 def _publish_manifest_atomic(package_root: Path, manifest: dict[str, Any]) -> Path:
     temporary = package_root / MANIFEST_TEMP_FILENAME
     final = package_root / MANIFEST_FILENAME
+    serialized = _serialized_manifest_bytes(manifest)
     try:
         if temporary.exists() or final.exists():
             raise OwnerSamplePackageError("manifest_already_exists")
-        with temporary.open("x", encoding="utf-8", newline="\n") as target:
-            json.dump(manifest, target, ensure_ascii=False, indent=2, sort_keys=True)
-            target.write("\n")
+        with temporary.open("xb") as target:
+            target.write(serialized)
             target.flush()
             os.fsync(target.fileno())
-        os.link(temporary, final)
-        temporary.unlink()
+        _publish_no_overwrite(temporary, final)
         return final
     except OwnerSamplePackageError:
         raise
     except (OSError, TypeError, ValueError) as exc:
         try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+            _cleanup_failed_publish_temp(temporary, serialized)
+        except OwnerSamplePackageError as cleanup_exc:
+            raise cleanup_exc from exc
         raise OwnerSamplePackageError("manifest_publish_failed") from exc
 
 
@@ -1454,18 +1686,9 @@ def _remove_generated_manifest_after_fence_failure(
 ) -> None:
     final = package_root / MANIFEST_FILENAME
     temporary = package_root / MANIFEST_TEMP_FILENAME
-    expected = (
-        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode("utf-8")
-    try:
-        if final.is_file() and final.read_bytes() == expected:
-            final.unlink()
-    except OSError:
-        pass
-    try:
-        temporary.unlink(missing_ok=True)
-    except OSError:
-        pass
+    expected = _serialized_manifest_bytes(manifest)
+    _quarantine_owned_manifest_path(final, expected)
+    _quarantine_owned_manifest_path(temporary, expected)
 
 
 def _validate_preview_proofs(
