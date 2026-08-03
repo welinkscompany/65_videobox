@@ -1,6 +1,18 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 321. 2026-08-03 Task 23C 사용자 샘플 repeatable edit package closeout`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23B 근거는 `## 320`, Task 23A 근거는 `## 319`, master planning은 `## 318`, owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+> 현재 authoritative 상태는 `## 322. 2026-08-04 Task 23D 및 Task 23 최종 자동화 closeout`을 우선 적용한다. Task 23 production slice는 **4/4 (100.0%)**, 잔여 **0.0%**다. 이는 Task 9 사람 acceptance, 인증된 Hermes/Mem0 live, 저작권·게시 승인, 현재 CapCut Desktop 편집·export 완료를 뜻하지 않는다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23C 근거는 `## 321`, Task 23B는 `## 320`, Task 23A는 `## 319`, master planning은 `## 318`을 유지한다.
+
+## 322. 2026-08-04 Task 23D 및 Task 23 최종 자동화 closeout
+
+- `[x] Task 23D readiness`: 실제 `owner-ready.ps1 -Mode Smoke -Json -TimeoutSec 180`은 six-gate **6/6 pass** 뒤 예상 exit `2`로 `credential_blocked`를 반환했다. dashboard는 local `ready`, credential은 `missing`, live canary는 `not_run`, external provider/network call은 각각 `0`이다. 생성 receipt는 `videobox-hermes-readiness-v1`, exact marker/mode/current script SHA 6개, bounded field와 민감값·절대경로 비포함을 재검증했다. `live_ready`는 주장하지 않는다.
+- `[x] Gate 1 코드 품질`: Task 23A–C의 독립 리뷰와 보완 이력을 유지했고, Task 23D Task 1–3의 code-quality/plan-gap/reverse/redaction review 완료 근거를 통합 확인했다. 이번 Task 4는 production code를 바꾸지 않은 docs-only closeout이다. Task 4 최종 독립 reviewer 결과는 root 후속 검토 전이므로 `pending`이며 Critical/Important 0을 미리 주장하지 않는다.
+- `[x] Gate 2 spec/plan gap`: 23A HEVC lazy proxy, 23B owner 진입점, 23C r4 package, 23D sanitized readiness를 승인 순서와 acceptance matrix에 대조했다. 자동화 범위의 누락은 발견되지 않았다. 사람의 시각·청취·취향, 권리·최종 게시, Task 9 acceptance, 인증된 provider/live Mem0, 현재 CapCut Desktop edit/export는 의도적으로 별도 gate다.
+- `[x] Gate 3 역방향 runtime/output`: receipt→six exact marker/SHA→plan/profile/runtime static topology→local dashboard→non-live creator/chat/Mem0 zero-call 및 manual fallback을 역추적했다. r4는 checked-in validator로 artifact **8**, control **6/6 true**, H264/HEVC Range `206`, HEVC H264/yuv420p proxy, provider `0`, authority bool **6/6 false**를 확인했다. 사용자 sample direct child **5/5**의 현재 name+size+SHA가 manifest와 일치했으며 원본은 read-only였다.
+- `[x] Gate 4 전체 검증`: 전체 Python **2957 passed, 48 skipped, warning 1** (`1600.87s`), 전체 frontend **52 files / 733 passed**, production build **1850 modules**, full isolated Chromium E2E **35/35**, snapshot manifest, provenance/UI-system, external-runtime/network focused **2 files / 6 passed**, six static/non-live scripts를 fresh 통과했다. Compose/profile/runtime/network focused 4개 파일은 같은 HEAD의 전체 Python에 포함되어 있어 별도 109개 중복 실행은 생략했다.
+- `[x] Gate 5 문서 일관성`: implementation plan 상단을 Task 23 final closeout으로 갱신하고 23D 계획의 실제 수행 체크와 Task 23D/Task 23 closeout handoff 두 개를 연결했다. 과거 `9/22`는 historical/deprecated일 뿐 current가 아니다. Mem0는 Hermes 보조 memory이며 VideoBox SSOT가 아니다.
+- `[x] Gate 6 residue/Git`: 감사 시작 HEAD/upstream은 `409b32b3033fa62cf7e3ebe0c938f56f8de19582`, divergence `0/0`이었다. `git diff --check`는 문서 수정 전 통과했다. 보호 미추적 `.tmp-final-fence-debug/`, `.tmp-real-video-dogfood/`, `apps/web/.tmp-real-video-dogfood/`는 top-level 상태 분류만 했고 열거나 stage/remove/delete하지 않았다. owner sample r1–r4와 owner-ready receipt를 포함한 artifact도 보존했다. safe-to-delete로 승인된 residue는 `0`이다.
+- `비실패 출력`: Starlette `python_multipart` warning 1건, frontend React `act(...)`/jsdom navigation/의도적 ErrorBoundary stderr, E2E `NO_COLOR` 경고, build 500 kB chunk 경고를 숨기지 않는다.
+- `진행률·경계`: Task 23 production slice는 **4/4 (100.0%)**, 잔여 **0.0%**다. Task 9 사람 acceptance와 live/provider/rights/publish/현재 CapCut Desktop edit-export는 계속 별도다. manual fallback은 유지된다. 최종 독립 리뷰 metadata와 push는 root 후속 closeout에서만 추가한다.
 
 ## 321. 2026-08-03 Task 23C 사용자 샘플 repeatable edit package closeout
 

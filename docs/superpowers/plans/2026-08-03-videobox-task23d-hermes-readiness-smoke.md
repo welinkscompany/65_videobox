@@ -15,7 +15,7 @@
 - [x] Task 1 readiness schema·상태 우선순위·six-gate marker TDD
 - [x] Task 2 dashboard/credential boundary와 sanitized receipt 구현
 - [x] Task 3 manual fallback·reverse trace·실제 non-live 검증
-- [ ] Task 4 Task 23 통합 회귀·독립 리뷰·SSOT·commit/push
+- [x] Task 4 Task 23 통합 회귀·SSOT·local commit (root 최종 독립 리뷰·push 별도)
 
 ## 고정 경계
 
@@ -109,7 +109,7 @@ Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_ready_script.py -q`
 - [x] receipt→script SHA/marker→profile/runtime static verifier→pinned read-only profile/SOUL mount→dashboard exact-loopback boundary→creator zero-external-call run 순서로 reverse trace한다.
 - [x] code quality, plan-gap, reverse-runtime, receipt redaction review를 독립 관점으로 수행하고 Critical/Important finding을 수정·재검증한다.
 
-### Task 4: Task 23 통합 회귀·독립 리뷰·SSOT·commit/push
+### Task 4: Task 23 통합 회귀·SSOT·local commit
 
 **Files:**
 - Modify: `docs/development-status-2026-06-29.ko.md`
@@ -118,14 +118,14 @@ Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_ready_script.py -q`
 - Create: `docs/handoffs/2026-08-03-videobox-task23d-hermes-readiness-smoke-closeout.ko.md`
 - Create: `docs/handoffs/2026-08-03-videobox-task23-owner-ready-mvp-polish-closeout.ko.md`
 
-- [ ] Task 23D focused PowerShell/Python/Hermes/API/frontend tests와 실제 sanitized receipt 검증을 통과시킨다.
-- [ ] Task 23 final gate로 전체 Python, 전체 frontend, production build, full editor E2E, provenance/UI-system, Compose/profile/runtime/network guard를 fresh 실행한다.
-- [ ] 23C r4 package의 manifest/artifact/source hash reverse 검증을 다시 실행하되 사용자 sample source는 read-only로만 비교한다.
-- [ ] six-gate release audit에서 automation, human visual/listening/taste, rights, CapCut Desktop, authenticated Hermes provider/live Mem0를 별도 표시한다. 실행하지 않은 사람/live gate는 통과로 주장하지 않는다.
-- [ ] independent spec, code quality, gap, reverse-runtime review에서 Critical/Important 0을 확인한다.
-- [ ] `git diff --check`, status, branch/HEAD/upstream divergence, worktree list, 보호 residue를 확인한다.
-- [ ] SSOT/handoff에 실제 결과와 미실행 경계, Task 23 누적 `4/4 (100.0%)`, 잔여 `0.0%`를 기록한다. 이는 Task 9 사람 acceptance나 live provider 완료를 뜻하지 않는다.
-- [ ] 계획 체크박스를 실제 완료 시점마다 갱신하고 논리적 변경을 커밋한 뒤 `origin/codex/videobox-container-compatibility`에 push한다.
+- [x] Task 23D focused PowerShell/Hermes/frontend tests와 실제 sanitized receipt를 검증했다. 실제 Smoke는 six-gate 6/6 pass, 예상 exit 2 `credential_blocked`, provider/network call 0이었다.
+- [x] Task 23 final gate로 전체 Python, 전체 frontend, production build, full isolated editor E2E, provenance/UI-system, Compose/profile/runtime/network guard를 fresh 검증했다. Compose focused 4개 파일은 동일 HEAD 전체 Python에 포함돼 별도 109개 중복 실행은 생략했다.
+- [x] 23C r4 package의 manifest/artifact/source hash reverse 검증을 다시 실행했고 사용자 sample source는 direct child 5개를 read-only hash 비교만 했다.
+- [x] six-gate release audit에서 automation, human visual/listening/taste, rights, CapCut Desktop, authenticated Hermes provider/live Mem0를 별도 표시했다. 실행하지 않은 사람/live gate는 통과로 주장하지 않는다.
+- [ ] root 최종 independent spec/code-quality/gap/reverse-runtime review에서 Critical/Important 0을 확인하고 review metadata를 추가한다. Task 4 문서 커밋 시점에는 pending이며 선취 주장하지 않는다.
+- [x] `git diff --check`, status, branch/HEAD/upstream divergence, worktree list, 보호 residue를 확인했다. 최종 문서 diff와 commit 후 상태는 재확인한다.
+- [x] SSOT/handoff에 실제 결과와 미실행 경계, Task 23 누적 `4/4 (100.0%)`, 잔여 `0.0%`를 기록했다. 이는 Task 9 사람 acceptance나 live provider 완료를 뜻하지 않는다.
+- [x] 계획 체크박스를 실제 수행 결과로 갱신하고 Task 4를 docs-only local commit으로 닫는다. 이번 위임에서는 push하지 않으며 root 최종 리뷰 뒤 별도 판단한다.
 
 ## Acceptance matrix
 
