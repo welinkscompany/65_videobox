@@ -293,6 +293,27 @@ function Get-ScriptSha256 {
     return "unavailable"
 }
 
+function Test-UnescapedEnvInterpolation {
+    param([string]$Value)
+    for ($index = 0; $index -lt $Value.Length; $index++) {
+        if ($Value.Substring($index, 1) -cne '$') {
+            continue
+        }
+        if ($index + 1 -ge $Value.Length) {
+            continue
+        }
+        $next = $Value.Substring($index + 1, 1)
+        if ($next -ceq '$') {
+            $index += 1
+            continue
+        }
+        if ($next -ceq '{' -or $next -cmatch '^[A-Za-z_]$') {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-HermesCredentialStatus {
     param([string]$LiteralPath)
     if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
@@ -311,9 +332,11 @@ function Get-HermesCredentialStatus {
     )
     $placeholderSentinels = @(
         "replace-before-starting",
+        "replace_before_starting",
         "replace_me",
         "placeholder",
         "change-me",
+        "change_me",
         "changeme",
         "sentinel"
     )
@@ -336,13 +359,18 @@ function Get-HermesCredentialStatus {
             return "invalid"
         }
         $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
-        $reader = New-Object System.IO.StreamReader($stream, $strictUtf8, $true, 1024, $false)
+        $reader = New-Object System.IO.StreamReader($stream, $strictUtf8, $false, 1024, $false)
         $charactersRead = 0
+        $lineNumber = 0
         while ($null -ne ($line = $reader.ReadLine())) {
             $charactersRead += $line.Length + 1
             if ($charactersRead -gt 65536) {
                 return "invalid"
             }
+            if ($lineNumber -eq 0 -and $line.Length -gt 0 -and [int]$line[0] -eq 0xFEFF) {
+                $line = $line.Substring(1)
+            }
+            $lineNumber += 1
             if ($line -cnotmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$') {
                 continue
             }
@@ -357,10 +385,16 @@ function Get-HermesCredentialStatus {
             }
 
             $rawValue = [string]$Matches[2]
+            if ($rawValue -match '[\x00-\x1F\x7F]') {
+                $invalid = $true
+                continue
+            }
             $trimmedStart = $rawValue.TrimStart()
             $value = ""
+            $quoteMode = "unquoted"
             if ($trimmedStart.Length -gt 0 -and $trimmedStart.Substring(0, 1) -in @('"', "'")) {
                 $quote = $trimmedStart.Substring(0, 1)
+                $quoteMode = if ($quote -ceq "'") { "single" } else { "double" }
                 $closingIndex = $trimmedStart.IndexOf($quote, 1, [StringComparison]::Ordinal)
                 if ($closingIndex -lt 1) {
                     $invalid = $true
@@ -392,7 +426,10 @@ function Get-HermesCredentialStatus {
                 }
                 $value = $rawValue.Trim()
             }
-            if ([string]::IsNullOrWhiteSpace($value) -or $value -match '\$\{[^}]*\}') {
+            if (
+                [string]::IsNullOrWhiteSpace($value) -or
+                ($quoteMode -cne "single" -and (Test-UnescapedEnvInterpolation -Value $value))
+            ) {
                 $invalid = $true
                 continue
             }
@@ -639,19 +676,38 @@ function Test-AllowedLoopbackLoginRedirect {
     }
 }
 
-function Test-ConnectionUnavailableException {
+function Get-ConnectionUnavailableReason {
     param([Exception]$Exception)
     $current = $Exception
     while ($null -ne $current) {
         if ($current -is [System.Net.Sockets.SocketException]) {
-            return (
+            if (
                 $current.SocketErrorCode -eq [System.Net.Sockets.SocketError]::ConnectionRefused -or
                 $current.NativeErrorCode -eq 10061
-            )
+            ) {
+                return "connection_refused"
+            }
+            if ($current.SocketErrorCode -in @(
+                [System.Net.Sockets.SocketError]::ConnectionReset,
+                [System.Net.Sockets.SocketError]::HostDown,
+                [System.Net.Sockets.SocketError]::HostNotFound,
+                [System.Net.Sockets.SocketError]::NetworkDown,
+                [System.Net.Sockets.SocketError]::NetworkUnreachable,
+                [System.Net.Sockets.SocketError]::TimedOut
+            )) {
+                return "connection_unavailable"
+            }
         }
         $current = $current.InnerException
     }
-    return $false
+    return "request_invalid"
+}
+
+function Get-ConnectionProbeFailure {
+    param([Exception]$Exception)
+    $reason = Get-ConnectionUnavailableReason -Exception $Exception
+    $state = if ($reason -in @("connection_refused", "connection_unavailable")) { "blocked" } else { "fail" }
+    return [pscustomobject]@{ State = $state; Reason = $reason }
 }
 
 function Invoke-LoopbackProbe {
@@ -731,11 +787,11 @@ function Invoke-LoopbackProbe {
         return [pscustomobject]@{ State = "blocked"; StatusCode = 0; Reason = "timeout" }
     }
     catch {
-        $connectionUnavailable = Test-ConnectionUnavailableException -Exception $_.Exception
+        $failure = Get-ConnectionProbeFailure -Exception $_.Exception
         return [pscustomobject]@{
-            State = $(if ($connectionUnavailable) { "blocked" } else { "fail" })
+            State = $failure.State
             StatusCode = 0
-            Reason = $(if ($connectionUnavailable) { "connection_refused" } else { "request_invalid" })
+            Reason = $failure.Reason
         }
     }
     finally {

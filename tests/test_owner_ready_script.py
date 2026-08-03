@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import hashlib
 import json
 import os
@@ -435,6 +436,45 @@ def _smoke_receipt_text(fixture: dict[str, Path]) -> str:
     return receipts[0].read_text(encoding="utf-8")
 
 
+def _connection_classification_map(script: Path, names: tuple[str, ...]) -> dict[str, str]:
+    command = (
+        "$tokens=$null;$parseErrors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        "$env:OWNER_READY_SCRIPT,[ref]$tokens,[ref]$parseErrors);"
+        "if($parseErrors.Count -ne 0){exit 10};"
+        "$reasonFunction=$ast.Find({param($node) "
+        "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -ceq 'Get-ConnectionUnavailableReason'},$true);"
+        "$classificationFunction=$ast.Find({param($node) "
+        "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -ceq 'Get-ConnectionProbeFailure'},$true);"
+        "if($null -eq $reasonFunction -or $null -eq $classificationFunction){exit 11};"
+        "Invoke-Expression $reasonFunction.Extent.Text;"
+        "Invoke-Expression $classificationFunction.Extent.Text;"
+        "foreach($name in $env:SOCKET_ERROR_NAMES.Split(',')){"
+        "$code=[Enum]::Parse([System.Net.Sockets.SocketError],$name);"
+        "$exception=[System.Net.Sockets.SocketException]::new([int]$code);"
+        "$classification=Get-ConnectionProbeFailure -Exception $exception;"
+        "Write-Output ($name+'='+$classification.State+','+$classification.Reason)}"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        env={
+            **os.environ,
+            "OWNER_READY_SCRIPT": str(script),
+            "SOCKET_ERROR_NAMES": ",".join(names),
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return dict(line.split("=", 1) for line in result.stdout.splitlines())
+
+
 def test_default_check_is_read_only_sanitized_and_classifies_protected_residue(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
     before_data = sorted(path.relative_to(fixture["data_root"]) for path in fixture["data_root"].rglob("*"))
@@ -577,6 +617,28 @@ def test_check_keeps_stalled_loopback_as_blocked_with_bounded_timeout_reason(tmp
     assert hermes["status"] == "blocked"
     assert hermes["evidence"]["probe_reason"] == "timeout"
     assert str(fixture["repository"]) not in json.dumps(payload)
+
+
+def test_connection_reason_classifier_preserves_broad_unavailable_socket_errors(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    broad_names = (
+        "ConnectionReset",
+        "HostDown",
+        "HostNotFound",
+        "NetworkDown",
+        "NetworkUnreachable",
+        "TimedOut",
+    )
+
+    classifications = _connection_classification_map(
+        fixture["script"],
+        ("ConnectionRefused", *broad_names),
+    )
+
+    assert classifications["ConnectionRefused"] == "blocked,connection_refused"
+    assert {classifications[name] for name in broad_names} == {
+        "blocked,connection_unavailable"
+    }
 
 
 def test_check_rejects_an_external_hermes_redirect_without_following_it(tmp_path: Path) -> None:
@@ -1038,11 +1100,21 @@ def test_smoke_credential_classifier_rejects_each_missing_required_key(
         "HERMES_YUJIN_GATEWAY_PASSWORD=\"abc'def\"",
         "HERMES_YUJIN_GATEWAY_PASSWORD='abc\"def'",
         "HERMES_YUJIN_GATEWAY_PASSWORD= # resolves empty",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=$NAME",
+        'HERMES_YUJIN_GATEWAY_PASSWORD="$NAME"',
+        "HERMES_YUJIN_GATEWAY_PASSWORD=${NAME}",
+        'HERMES_YUJIN_GATEWAY_PASSWORD="${NAME}"',
+        "HERMES_YUJIN_GATEWAY_PASSWORD=${UNFINISHED",
+        'HERMES_YUJIN_GATEWAY_PASSWORD="${UNFINISHED"',
+        "HERMES_YUJIN_GATEWAY_PASSWORD=abc\x00def",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=abc\tdef",
         "HERMES_YUJIN_GATEWAY_PASSWORD=${UNRESOLVED_SECRET}",
         "HERMES_YUJIN_GATEWAY_PASSWORD=REPLACE-BEFORE-STARTING",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=replace_before_starting",
         "HERMES_YUJIN_GATEWAY_PASSWORD=prefix_replace_me_suffix",
         "HERMES_YUJIN_GATEWAY_PASSWORD=Placeholder",
         "HERMES_YUJIN_GATEWAY_PASSWORD=change-me",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=change_me",
         "HERMES_YUJIN_GATEWAY_PASSWORD=ChangeMe",
         "HERMES_YUJIN_GATEWAY_PASSWORD=sentinel",
     ],
@@ -1058,11 +1130,21 @@ def test_smoke_credential_classifier_rejects_each_missing_required_key(
         "mixed_single_inside_double",
         "mixed_double_inside_single",
         "inline_comment_empty",
+        "unquoted_dollar_name",
+        "double_quoted_dollar_name",
+        "unquoted_closed_brace_interpolation",
+        "double_quoted_closed_brace_interpolation",
+        "unquoted_unfinished_brace_interpolation",
+        "double_quoted_unfinished_brace_interpolation",
+        "nul_control",
+        "tab_control",
         "unresolved",
         "replace_before_starting",
+        "replace_before_starting_underscore",
         "replace_me",
         "placeholder",
         "change_me_hyphen",
+        "change_me_underscore",
         "changeme",
         "sentinel",
     ],
@@ -1095,6 +1177,12 @@ def test_smoke_credential_classifier_fails_closed_without_value_disclosure(
         'HERMES_YUJIN_GATEWAY_PASSWORD="hash#inside" # outside comment',
         "HERMES_YUJIN_GATEWAY_PASSWORD=plain#literal",
         "HERMES_YUJIN_GATEWAY_PASSWORD=ordinary-literal # placeholder",
+        "HERMES_YUJIN_GATEWAY_PASSWORD='$NAME'",
+        "HERMES_YUJIN_GATEWAY_PASSWORD='${NAME}'",
+        "HERMES_YUJIN_GATEWAY_PASSWORD='${UNFINISHED'",
+        "HERMES_YUJIN_GATEWAY_PASSWORD='bcrypt-$2b$12$abcdefghijklmnopqrstuv'",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=$$NAME",
+        'HERMES_YUJIN_GATEWAY_PASSWORD="$$NAME"',
     ],
     ids=[
         "double_quoted",
@@ -1102,6 +1190,12 @@ def test_smoke_credential_classifier_fails_closed_without_value_disclosure(
         "quoted_hash_with_comment",
         "unquoted_hash_literal",
         "unquoted_comment_stripped",
+        "single_quoted_dollar_name",
+        "single_quoted_closed_brace_literal",
+        "single_quoted_unfinished_brace_literal",
+        "single_quoted_bcrypt_literal",
+        "unquoted_escaped_dollar",
+        "double_quoted_escaped_dollar",
     ],
 )
 def test_smoke_credential_classifier_accepts_safe_literal_and_comment_forms(
@@ -1119,6 +1213,48 @@ def test_smoke_credential_classifier_accepts_safe_literal_and_comment_forms(
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
     assert replacement not in serialized
+
+
+@pytest.mark.parametrize(
+    "bom,encoding",
+    [
+        (codecs.BOM_UTF16_LE, "utf-16-le"),
+        (codecs.BOM_UTF16_BE, "utf-16-be"),
+        (codecs.BOM_UTF32_LE, "utf-32-le"),
+        (codecs.BOM_UTF32_BE, "utf-32-be"),
+    ],
+    ids=["utf16_le", "utf16_be", "utf32_le", "utf32_be"],
+)
+def test_smoke_credential_classifier_rejects_non_utf8_bom_encodings(
+    tmp_path: Path,
+    bom: bytes,
+    encoding: str,
+) -> None:
+    fixture = _fixture_repository(tmp_path)
+    env_text = _valid_env_text(fixture["data_root"])
+    fixture["env_file"].write_bytes(bom + env_text.encode(encoding))
+    with _health_server() as hermes_uri:
+        result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
+
+    payload = _payload(result)
+    serialized = result.stdout + result.stderr + _smoke_receipt_text(fixture)
+    assert result.returncode == 2
+    assert payload["credential_status"] == "invalid"
+    assert payload["readiness_status"] == "credential_blocked"
+    assert str(fixture["env_file"]) not in serialized
+
+
+def test_smoke_credential_classifier_accepts_strict_utf8_bom(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    env_text = _valid_env_text(fixture["data_root"])
+    fixture["env_file"].write_bytes(codecs.BOM_UTF8 + env_text.encode("utf-8"))
+    with _health_server() as hermes_uri:
+        result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
+
+    payload = _payload(result)
+    assert result.returncode == 0, result.stderr
+    assert payload["credential_status"] == "present_unverified"
+    assert payload["readiness_status"] == "local_ready"
 
 
 def test_smoke_credential_classifier_ignores_optional_mem0_key(tmp_path: Path) -> None:
