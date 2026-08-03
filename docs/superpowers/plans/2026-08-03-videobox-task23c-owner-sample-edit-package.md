@@ -15,8 +15,8 @@
 - [x] Task 1 기존 편집 smoke의 exact preview·snapshot evidence 확장
 - [x] Task 2 사용자 샘플 read-only inventory·공개 API ingest·H264/HEVC preview proof
 - [x] Task 3 bounded package·reverse manifest·한국어 review checklist
-- [ ] Task 4 CLI·mutation guard·실제 사용자 샘플 검증
-- [ ] Task 5 독립 review·관련 회귀·SSOT·commit/push
+- [x] Task 4 CLI·mutation guard·실제 사용자 샘플 검증
+- [ ] Task 5 독립 review·관련 회귀·SSOT 완료, commit/push 대기
 
 ## 설계 결정
 
@@ -188,17 +188,17 @@ Expected: PASS.
 - Modify: `scripts/owner_sample_edit_package.py`
 - Modify: `tests/test_owner_sample_edit_package.py`
 
-- [ ] CLI default output이 repo-local ignored `artifacts/owner-sample-edit-<UTC timestamp>`이고 existing destination을 덮어쓰지 않는 테스트를 작성한다.
-- [ ] `--project-id`, `--session-id`, `--confirm-existing-project-mutation` 중 하나라도 주어지면 sample scan/API/file write 전에 `existing_project_mode_disabled`로 종료하는 테스트를 작성한다.
-- [ ] CLI JSON/stdout과 manifest에 sample directory absolute path, credential, raw ffmpeg stderr, full command, `provider`, memory payload가 없는 테스트를 작성한다.
-- [ ] `--sample-dir`, `--output-root`, `--narration`, `--ffmpeg`, `--ffprobe`, `--json` CLI를 구현한다. 성공 JSON은 `status`, package directory name, selected filenames, artifact count, `external_provider_calls=0`만 출력한다.
-- [ ] focused GREEN을 실행한다.
+- [x] CLI default output이 repo-local ignored `artifacts/owner-sample-edit-<UTC timestamp>`이고 existing destination을 덮어쓰지 않는 테스트를 작성한다.
+- [x] `--project-id`, `--session-id`, `--confirm-existing-project-mutation` 중 하나라도 주어지면 sample scan/API/file write 전에 `existing_project_mode_disabled`로 종료하는 테스트를 작성한다.
+- [x] CLI JSON/stdout과 manifest에 sample directory absolute path, credential, raw ffmpeg stderr, full command, `provider`, memory payload가 없는 테스트를 작성한다.
+- [x] `--sample-dir`, `--output-root`, `--narration`, `--ffmpeg`, `--ffprobe`, `--json` CLI를 구현한다. 성공 JSON은 `status`, package directory name, selected filenames, artifact count, `external_provider_calls=0`만 출력한다.
+- [x] focused GREEN을 실행한다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_sample_edit_package.py -q`
 
 Expected: PASS.
 
-- [ ] 실제 사용자 샘플을 read-only로 실행한다.
+- [x] 실제 사용자 샘플을 read-only로 실행한다.
 
 Run:
 
@@ -212,6 +212,8 @@ Run:
 
 Expected: H264 1개+HEVC 1개 source/copy SHA match, both Range 206, HEVC proxy H264/yuv420p, edit controls 6종, exact/final/SRT/CapCut/reverse manifest present, original stat/SHA unchanged, provider call 0.
 
+완료 증거: commit `5b144df36`은 Windows short-root·UTF-8 runtime 경계를, `1ac2af072`는 overlay evidence를, `5b1e0454f`는 typed media control의 asset/kind 결속을 보완했다. 실제 성공 package `artifacts/owner-sample-edit-20260803-r4`의 CLI 결과는 `status=ok`, 선택 H264 `20250827_유튜브영상.mp4`, 선택 HEVC `20260612_091959.mp4`, artifact **8개**, `external_provider_calls=0`이었다. 두 preview는 모두 Range `206`이고 HEVC는 H264/yuv420p proxy다. 첫 실패 시도 `artifacts/owner-sample-edit-20260803`(r1 별칭)과 실패한 `artifacts/owner-sample-edit-20260803-r2`, `artifacts/owner-sample-edit-20260803-r3`도 원인 추적 증거로 보존하며 성공 package로 취급하지 않는다.
+
 ### Task 5: 독립 review·관련 회귀·SSOT·commit/push
 
 **Files:**
@@ -220,10 +222,10 @@ Expected: H264 1개+HEVC 1개 source/copy SHA match, both Range 206, HEVC proxy 
 - Modify: `docs/superpowers/plans/2026-08-03-videobox-task23c-owner-sample-edit-package.md`
 - Create: `docs/handoffs/2026-08-03-videobox-task23c-owner-sample-edit-package-closeout.ko.md`
 
-- [ ] 독립 spec review에서 master spec의 inventory/copy hash/H264+HEVC preview/6 controls/exact+final+SRT+timeline+session+CapCut/checklist/mutation guard를 line-by-line 확인한다.
-- [ ] code quality review에서 bounded subprocess, source read-only, path containment, atomic manifest, safe JSON, no external call을 확인한다.
-- [ ] gap/reverse review에서 `manifest artifact → output → timeline/session → typed controls → project copy → source SHA`를 실제 package로 역추적한다. Critical/Important finding은 RED→GREEN 뒤 재리뷰한다.
-- [ ] focused backend를 실행한다.
+- [x] 독립 spec review에서 master spec의 inventory/copy hash/H264+HEVC preview/6 controls/exact+final+SRT+timeline+session+CapCut/checklist/mutation guard를 line-by-line 확인한다.
+- [x] code quality review에서 bounded subprocess, source read-only, path containment, atomic manifest, safe JSON, no external call을 확인한다.
+- [x] gap/reverse review에서 `manifest artifact → output → timeline/session → typed controls → project copy → source SHA`를 실제 package로 역추적한다. r4 manifest 독립 audit는 통과했고, 원본 inventory 5개의 현재 hash+size가 모두 manifest와 일치했다. 최종 review는 **Critical 0 / Important 0 / Minor 0**이다.
+- [x] focused backend를 실행한다.
 
 Run:
 
@@ -238,13 +240,16 @@ Run:
   tests/test_api_exact_preview.py `
   tests/test_preview_export.py `
   tests/test_local_pipeline_capcut_draft_export.py `
-  tests/test_pycapcut_adapter.py -q
+  tests/test_pycapcut_adapter.py `
+  tests/test_thumbnail_generator.py -q
 ```
 
 - [ ] Task 23 final full Python/frontend/build/E2E/provenance는 23D 뒤 final audit로 남기며 이번 slice에서 실행하지 않은 항목은 통과로 주장하지 않는다.
-- [ ] `git diff --check`, branch/HEAD/upstream `0/0`, `git worktree list`, protected residue 3개, package artifact ignore를 확인한다.
-- [ ] SSOT/handoff를 Task 23 **3/4 (75.0%)**, 잔여 **25.0%**, 다음 goal **23D Hermes readiness**로 갱신한다.
+- [x] `git diff --check`, branch/HEAD/upstream, `git worktree list`, protected residue 3개, package artifact ignore를 확인한다. 문서 closeout 시작 HEAD는 `5b1e0454f`, branch는 upstream보다 22 commit ahead이며 push 전이므로 `0/0`은 commit/push 뒤 root가 다시 확인한다.
+- [x] SSOT/handoff를 Task 23 **3/4 (75.0%)**, 잔여 **25.0%**, 다음 goal **23D Hermes readiness**로 갱신한다.
 - [ ] 이번 범위만 commit하고 `origin/codex/videobox-container-compatibility`에 push한다.
+
+Task 5 closeout evidence: 실제 r4는 artifact 8개를 모두 SHA로 역검증했고, H264/HEVC source→project copy, narration source→copy, 선택 H264→편집 asset의 hash 결속을 포함한 source/copy 5쌍이 일치했다. B-roll/BGM/SFX/caption/TTS/explanation overlay는 모두 `true`이며 `owner_approval`, `rights_approval`, `desktop_edit`, `desktop_export`, `automatic_apply`, `memory_write`는 모두 `false`, provider call은 `0`이다. 계획의 10개 focused backend 파일과 `tests/test_thumbnail_generator.py`를 fresh 실행한 결과는 **326 passed, warning 1, no skips/failures**이며 warning은 기존 Starlette `python_multipart` PendingDeprecationWarning이다. Task 23 final full Python/frontend/build/E2E/provenance와 사람/CapCut Desktop acceptance는 실행하지 않았고, commit/push 및 upstream `0/0` 확인은 root의 다음 단계로 남긴다.
 
 ## Acceptance matrix
 

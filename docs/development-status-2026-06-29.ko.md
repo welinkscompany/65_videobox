@@ -1,6 +1,17 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태/next slice 판단은 `## 320. 2026-08-03 Task 23B owner one-click 실행·진단 closeout`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23A 근거는 `## 319`, master planning은 `## 318`, owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+> 현재 authoritative 상태/next slice 판단은 `## 321. 2026-08-03 Task 23C 사용자 샘플 repeatable edit package closeout`을 우선 적용한다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23B 근거는 `## 320`, Task 23A 근거는 `## 319`, master planning은 `## 318`, owner dogfood 근거는 `## 317`, Hermes Yujin 최종 기술 closeout 근거는 `## 316`, Task 22 기술 closeout 근거는 `## 300`을 유지한다.
+
+## 321. 2026-08-03 Task 23C 사용자 샘플 repeatable edit package closeout
+
+- `[x] 반복 가능한 격리 package`: `scripts/owner_sample_edit_package.py`가 사용자 sample direct child를 bounded inventory하고 H264/HEVC를 결정적으로 선택한다. 공개 local API로만 preview project에 복사하며 실제 편집은 별도 `owner-qa` project에서 기존 `audio_ducking` production-readiness flow를 재사용한다. 기존 project/session mutation 인자는 scan/write 전에 fail closed하고 원본 create/write/rename/delete/touch, 자동 apply, memory write, 외부 provider call은 모두 0이다.
+- `[x] 실제 r4 성공`: `artifacts/owner-sample-edit-20260803-r4`는 `status=ok`로 완료됐다. 선택 H264는 `20250827_유튜브영상.mp4`, 선택 HEVC는 `20260612_091959.mp4`이며 project copy SHA가 각각 source SHA와 일치한다. 둘 다 Range `206`, H264는 original, HEVC는 H264/yuv420p proxy이고 `external_provider_calls=0`이다. 첫 실패 시도 `artifacts/owner-sample-edit-20260803`(r1 별칭)과 실패한 `artifacts/owner-sample-edit-20260803-r2`, `artifacts/owner-sample-edit-20260803-r3`은 원인 추적 증거로 그대로 보존하며 성공으로 세지 않는다.
+- `[x] 편집·산출물 증거`: B-roll/BGM/SFX/caption/TTS/explanation overlay control은 모두 `true`다. exact preview, final MP4, SRT, timeline snapshot, editing-session snapshot, CapCut draft, ffprobe summary, 한국어 checklist의 artifact **8개**가 package-relative path와 SHA로 연결된다. `owner_approval`, `rights_approval`, `desktop_edit`, `desktop_export`, `automatic_apply`, `memory_write`는 모두 `false`다.
+- `[x] 실제 역방향 감사`: 독립 audit가 manifest artifact→editing session/timeline→typed controls→편집 H264/narration copy→preview copy→source SHA를 역추적해 통과했다. 사용자 원본 inventory 5개의 현재 hash+size도 r4 manifest와 모두 일치했다. 최종 독립 spec/code-quality/gap/reverse review는 **Critical 0 / Important 0 / Minor 0**이다.
+- `[x] TDD·관련 회귀`: Windows short-root/UTF-8 runtime은 commit `5b144df36`, overlay evidence는 `1ac2af072`, typed controls의 선택 asset·kind 결속은 `5b1e0454f`에 반영됐다. 계획의 10개 focused backend 파일과 `tests/test_thumbnail_generator.py`까지 fresh 실행해 **326 passed, warning 1, no skips/failures**였다. warning은 기존 Starlette `python_multipart` PendingDeprecationWarning이다.
+- `검증 경계`: Task 23 final full Python regression, frontend 전체 suite, production build, 자동 E2E, provenance/UI-system은 23D 뒤 final audit로 남겨 이번에 실행하거나 통과로 주장하지 않는다. 사용자의 영상·음악·효과음 취향·청취, 저작권/게시 승인, 실제 CapCut Desktop 편집·export acceptance도 별도 사람 gate다.
+- `Git·보존`: 문서 closeout 시작 HEAD는 `5b1e0454f`이고 branch는 upstream보다 22 commit ahead였다. `.tmp-final-fence-debug/`, `.tmp-real-video-dogfood/`, `apps/web/.tmp-real-video-dogfood/`, 첫 실패 시도 `artifacts/owner-sample-edit-20260803`(r1 별칭), 실패한 `artifacts/owner-sample-edit-20260803-r2`, `artifacts/owner-sample-edit-20260803-r3`, 성공 `artifacts/owner-sample-edit-20260803-r4`를 stage/remove/delete하지 않았다. `artifacts/` ignore를 확인했다. closeout 문서 commit/push와 최종 upstream `0/0` 확인은 아직 남아 있다.
+- `진행률·다음`: Task 23 production slice는 **3/4 (75.0%)**, 잔여 **25.0%**다. 다음 goal은 **23D Hermes readiness smoke**다.
 
 ## 320. 2026-08-03 Task 23B owner one-click 실행·진단 closeout
 
