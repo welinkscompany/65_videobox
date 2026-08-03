@@ -835,12 +835,17 @@ def _artifact_evidence_from_edit(
 
 
 def _build_reverse_trace(
-    *, artifacts: dict[str, dict[str, str]], narration: dict[str, Any], previews: dict[str, Any]
+    *,
+    artifacts: dict[str, dict[str, str]],
+    narration: dict[str, Any],
+    previews: dict[str, Any],
+    controls: dict[str, bool],
 ) -> dict[str, Any]:
     nodes: dict[str, dict[str, Any]] = {
         f"artifact:{name}": {
             "kind": "artifact",
             "artifact": name,
+            "sha256": artifacts[name]["sha256"],
             "upstream": ["editing_session:current"],
         }
         for name in sorted(artifacts)
@@ -849,12 +854,19 @@ def _build_reverse_trace(
         {
             "editing_session:current": {
                 "kind": "editing_session",
-                "artifact": "editing_session_snapshot",
-                "upstream": ["copied_asset:narration"],
+                "editing_session_sha256": artifacts["editing_session_snapshot"]["sha256"],
+                "timeline_sha256": artifacts["timeline_snapshot"]["sha256"],
+                "upstream": ["typed_controls:applied"],
+            },
+            "typed_controls:applied": {
+                "kind": "typed_controls",
+                "controls": controls,
+                "qa_fixture_only": True,
+                "upstream": ["copied_asset:narration", "preview:h264", "preview:hevc"],
             },
             "copied_asset:narration": {
                 "kind": "copied_asset",
-                "path": narration["copy_path"],
+                "ref": narration["copy_path"],
                 "sha256": narration["copy_sha256"],
                 "upstream": ["source_sha:narration"],
             },
@@ -870,10 +882,17 @@ def _build_reverse_trace(
         proof = previews[codec]
         nodes[f"preview:{codec}"] = {
             "kind": "preview_proof",
+            "source_name": proof["source_name"],
+            "source_sha256": proof["source_sha256"],
+            "preview_source_sha256": proof["preview_source_sha256"],
+            "profile": proof["profile"],
+            "content_sha256": proof["content_sha256"],
+            "preview_kind": proof["preview_kind"],
             "upstream": [f"copied_asset:{codec}"],
         }
         nodes[f"copied_asset:{codec}"] = {
             "kind": "copied_asset",
+            "ref": proof["project_copy_ref"],
             "sha256": proof["project_copy_sha256"],
             "upstream": [f"source_sha:{codec}"],
         }
@@ -963,22 +982,25 @@ def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
     nodes = trace.get("nodes") if isinstance(trace, dict) else None
     if not isinstance(nodes, dict) or not nodes or len(nodes) > MAX_REVERSE_TRACE_NODES:
         raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
+    preview_proofs = manifest.get("preview_proofs")
+    previews = preview_proofs.get("previews") if isinstance(preview_proofs, dict) else None
+    if not isinstance(previews, dict):
+        raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
+    expected_nodes = _build_reverse_trace(
+        artifacts=manifest["artifacts"],
+        narration=manifest["narration"],
+        previews=previews,
+        controls=manifest["controls"],
+    )["nodes"]
+    if set(nodes) != set(expected_nodes):
+        raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
     for node_id, node in nodes.items():
-        if not isinstance(node_id, str) or len(node_id) > 128 or not isinstance(node, dict):
-            raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
-        kind = node.get("kind")
-        expected_fields = {
-            "artifact": {"kind", "artifact", "upstream"},
-            "editing_session": {"kind", "artifact", "upstream"},
-            "copied_asset": (
-                {"kind", "path", "sha256", "upstream"}
-                if node_id == "copied_asset:narration"
-                else {"kind", "sha256", "upstream"}
-            ),
-            "source_sha": {"kind", "source_name", "sha256", "upstream"},
-            "preview_proof": {"kind", "upstream"},
-        }.get(kind)
-        if expected_fields is None or set(node) != expected_fields:
+        if (
+            not isinstance(node_id, str)
+            or len(node_id) > 128
+            or not isinstance(node, dict)
+            or node != expected_nodes[node_id]
+        ):
             raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
         upstream = node.get("upstream")
         if (
@@ -1005,64 +1027,30 @@ def _validate_reverse_graph(manifest: dict[str, Any]) -> None:
 
     for node_id in sorted(nodes):
         visit(node_id)
+    artifact_node_ids = {f"artifact:{name}" for name in manifest["artifacts"]}
+    required_shared_nodes = set(nodes) - artifact_node_ids
+    for artifact_node_id in artifact_node_ids:
+        reachable: set[str] = set()
 
-    artifacts = manifest["artifacts"]
-    for artifact in artifacts:
-        node = nodes.get(f"artifact:{artifact}")
-        if (
-            not isinstance(node, dict)
-            or node.get("kind") != "artifact"
-            or node.get("artifact") != artifact
-            or node.get("upstream") != ["editing_session:current"]
-        ):
-            raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
-    session = nodes.get("editing_session:current")
-    copied = nodes.get("copied_asset:narration")
-    source = nodes.get("source_sha:narration")
-    narration = manifest.get("narration")
-    if (
-        not isinstance(narration, dict)
-        or not isinstance(session, dict)
-        or session.get("kind") != "editing_session"
-        or session.get("artifact") != "editing_session_snapshot"
-        or session.get("upstream") != ["copied_asset:narration"]
-        or not isinstance(copied, dict)
-        or copied.get("kind") != "copied_asset"
-        or copied.get("sha256") != narration.get("copy_sha256")
-        or copied.get("upstream") != ["source_sha:narration"]
-        or not isinstance(source, dict)
-        or source.get("kind") != "source_sha"
-        or source.get("sha256") != narration.get("source_sha256")
-        or source.get("upstream") != []
-    ):
-        raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
-    preview_proofs = manifest.get("preview_proofs")
-    previews = preview_proofs.get("previews") if isinstance(preview_proofs, dict) else None
-    if not isinstance(previews, dict) or set(previews) != {"h264", "hevc"}:
-        raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
-    for codec in ("h264", "hevc"):
-        proof = previews[codec]
-        preview = nodes.get(f"preview:{codec}")
-        copied_sample = nodes.get(f"copied_asset:{codec}")
-        source_sample = nodes.get(f"source_sha:{codec}")
-        if (
-            not isinstance(proof, dict)
-            or not isinstance(preview, dict)
-            or preview.get("kind") != "preview_proof"
-            or preview.get("upstream") != [f"copied_asset:{codec}"]
-            or not isinstance(copied_sample, dict)
-            or copied_sample.get("kind") != "copied_asset"
-            or copied_sample.get("sha256") != proof.get("project_copy_sha256")
-            or copied_sample.get("upstream") != [f"source_sha:{codec}"]
-            or not isinstance(source_sample, dict)
-            or source_sample.get("kind") != "source_sha"
-            or source_sample.get("sha256") != proof.get("source_sha256")
-            or source_sample.get("upstream") != []
-        ):
+        def collect(node_id: str) -> None:
+            if node_id in reachable:
+                return
+            reachable.add(node_id)
+            for parent in nodes[node_id]["upstream"]:
+                collect(parent)
+
+        collect(artifact_node_id)
+        if not required_shared_nodes.issubset(reachable):
             raise OwnerSamplePackageError("manifest_reverse_trace_invalid")
 
 
 def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> None:
+    """Validate internal provenance consistency, not cryptographic authenticity.
+
+    A coordinated rewrite of every unsigned field is outside this package's trust
+    model and would require a separately authorized signed receipt.
+    """
+
     try:
         root = Path(package_root)
         if root.is_symlink() or _is_reparse_point(root):
@@ -1097,7 +1085,7 @@ def validate_reverse_manifest(package_root: Path, manifest: dict[str, Any]) -> N
         raise OwnerSamplePackageError("manifest_schema_invalid")
     _validate_source_inventory(manifest)
     _validate_narration_evidence(root, manifest)
-    _validate_manifest_preview_proofs(manifest)
+    _validate_manifest_preview_proofs(root, manifest)
     artifacts = manifest.get("artifacts")
     if (
         not isinstance(artifacts, dict)
@@ -1176,8 +1164,56 @@ def _validate_preview_proofs(
     return previews
 
 
-def _validate_manifest_preview_proofs(manifest: dict[str, Any]) -> None:
+def _resolve_manifest_project_copy(
+    *, package_root: Path, project_id: str, storage_uri: str
+) -> Path:
+    prefix = f"local://projects/{project_id}/"
+    if not storage_uri.startswith(prefix):
+        raise OwnerSamplePackageError("manifest_project_copy_invalid")
+    relative_text = storage_uri.removeprefix(prefix)
+    relative = PurePosixPath(relative_text)
+    windows = PureWindowsPath(relative_text)
+    if (
+        not relative_text
+        or "\\" in relative_text
+        or windows.drive
+        or windows.root
+        or relative.is_absolute()
+        or relative.as_posix() != relative_text
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        raise OwnerSamplePackageError("manifest_project_copy_invalid")
+    projects_root = package_root / "projects"
+    try:
+        if (
+            not projects_root.is_dir()
+            or projects_root.is_symlink()
+            or _is_reparse_point(projects_root)
+        ):
+            raise OwnerSamplePackageError("manifest_project_copy_invalid")
+    except OwnerSamplePackageError:
+        raise
+    except OSError as exc:
+        raise OwnerSamplePackageError("manifest_project_copy_invalid") from exc
+    project_relative = PurePosixPath("projects", project_id, *relative.parts)
+    if _path_has_link_or_reparse(projects_root, project_relative):
+        raise OwnerSamplePackageError("manifest_project_copy_invalid")
+    try:
+        projects_root = projects_root.resolve(strict=True)
+        resolved = projects_root.joinpath(*project_relative.parts).resolve(strict=True)
+        if not resolved.is_relative_to(projects_root) or not resolved.is_file():
+            raise OwnerSamplePackageError("manifest_project_copy_invalid")
+    except OwnerSamplePackageError:
+        raise
+    except OSError as exc:
+        raise OwnerSamplePackageError("manifest_project_copy_invalid") from exc
+    return resolved
+
+
+def _validate_manifest_preview_proofs(package_root: Path, manifest: dict[str, Any]) -> None:
     proofs = manifest.get("preview_proofs")
+    project_ref = proofs.get("project_ref") if isinstance(proofs, dict) else None
+    project_parts = PurePosixPath(project_ref).parts if isinstance(project_ref, str) else ()
     if (
         not isinstance(proofs, dict)
         or set(proofs) != {
@@ -1187,11 +1223,34 @@ def _validate_manifest_preview_proofs(manifest: dict[str, Any]) -> None:
             "external_provider_calls",
         }
         or proofs.get("external_provider_calls") != 0
-        or not isinstance(proofs.get("project_ref"), str)
-        or not proofs["project_ref"].startswith("projects/")
+        or len(project_parts) != 2
+        or project_parts[0] != "projects"
+        or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", project_parts[1])
+        or not isinstance(proofs.get("api_import_log"), list)
+        or len(proofs["api_import_log"]) > 8
+    ):
+        raise OwnerSamplePackageError("manifest_preview_proof_invalid")
+    project_id = project_parts[1]
+    allowed_import_paths = {
+        "/api/projects",
+        "/api/projects/{project_id}/assets/broll-video",
+    }
+    if any(
+        not isinstance(row, dict)
+        or set(row) != {"method", "path"}
+        or row.get("method") != "POST"
+        or row.get("path") not in allowed_import_paths
+        for row in proofs["api_import_log"]
     ):
         raise OwnerSamplePackageError("manifest_preview_proof_invalid")
     previews = proofs.get("previews")
+    selected = manifest.get("selected_sources")
+    inventory_rows = manifest.get("source_inventory")
+    inventory = {
+        row["name"]: row["sha256"]
+        for row in inventory_rows
+        if isinstance(row, dict) and isinstance(row.get("name"), str)
+    }
     allowed = {
         "source_name",
         "source_sha256",
@@ -1219,6 +1278,7 @@ def _validate_manifest_preview_proofs(manifest: dict[str, Any]) -> None:
             proof.get("content_sha256"),
         )
         content_url = proof.get("content_url")
+        selected_row = selected.get(codec) if isinstance(selected, dict) else None
         if (
             not isinstance(name, str)
             or Path(name).name != name
@@ -1234,8 +1294,26 @@ def _validate_manifest_preview_proofs(manifest: dict[str, Any]) -> None:
             or proof.get("output_video_codec") != "h264"
             or proof.get("output_pixel_format") != "yuv420p"
             or proof.get("preview_kind") != ("original" if codec == "h264" else "proxy")
+            or not isinstance(selected_row, dict)
+            or name != selected_row.get("name")
+            or proof.get("source_sha256") != selected_row.get("sha256")
+            or inventory.get(name) != proof.get("source_sha256")
+            or proof.get("preview_source_sha256") != proof.get("source_sha256")
+            or proof.get("project_copy_sha256") != proof.get("source_sha256")
+            or proof.get("profile") != BROWSER_PREVIEW_PROFILE
+            or (
+                codec == "h264"
+                and proof.get("content_sha256") != proof.get("source_sha256")
+            )
         ):
             raise OwnerSamplePackageError("manifest_preview_proof_invalid")
+        project_copy = _resolve_manifest_project_copy(
+            package_root=package_root,
+            project_id=project_id,
+            storage_uri=proof["project_copy_ref"],
+        )
+        if _sha256(project_copy) != proof["project_copy_sha256"]:
+            raise OwnerSamplePackageError("manifest_project_copy_invalid")
 
 
 def build_owner_sample_package(
@@ -1329,6 +1407,7 @@ def build_owner_sample_package(
             artifacts=artifacts,
             narration=narration_row,
             previews=previews,
+            controls=controls,
         )
         _assert_final_source_fence(selected_sources, selected_fingerprints)
         _assert_narration_source_fence(narration_source_fence)

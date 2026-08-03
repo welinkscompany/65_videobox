@@ -619,17 +619,21 @@ def _package_fixture(
         ),
     ]
     monkeypatch.setattr(package, "inventory_samples", lambda *args, **kwargs: records)
-    monkeypatch.setattr(
-        package,
-        "build_preview_proofs",
-        lambda **kwargs: {
+    def preview_builder(**kwargs):
+        projects_root = Path(kwargs["projects_root"])
+        project_root = projects_root / "projects" / "qa-preview"
+        for codec, source in (("h264", h264_path), ("hevc", hevc_path)):
+            copy = project_root / "assets" / f"{codec}.mp4"
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            copy.write_bytes(source.read_bytes())
+        return {
             "project_ref": "projects/qa-preview",
             "api_import_log": [],
             "previews": {
                 codec: {
                     "source_name": record.name,
                     "source_sha256": record.sha256,
-                    "project_copy_ref": f"local://projects/qa-preview/{codec}.mp4",
+                    "project_copy_ref": f"local://projects/qa-preview/assets/{codec}.mp4",
                     "project_copy_sha256": record.sha256,
                     "preview_source_sha256": record.sha256,
                     "profile": "h264-yuv420p-aac-1280-v1",
@@ -638,13 +642,14 @@ def _package_fixture(
                     "range_status": 206,
                     "output_video_codec": "h264",
                     "output_pixel_format": "yuv420p",
-                    "content_sha256": record.sha256,
+                    "content_sha256": record.sha256 if codec == "h264" else "f" * 64,
                 }
                 for codec, record in zip(("h264", "hevc"), records, strict=True)
             },
             "external_provider_calls": 0,
-        },
-    )
+        }
+
+    monkeypatch.setattr(package, "build_preview_proofs", preview_builder)
     narration = tmp_path / "narration.wav"
     narration.write_bytes(b"bounded narration")
     calls: dict[str, object] = {}
@@ -777,6 +782,103 @@ def test_package_manifest_links_all_review_artifacts_to_source_hashes(
     assert not (package_root / ".owner-sample-edit-package.json.tmp").exists()
 
 
+def test_reverse_manifest_binds_artifact_hashes_to_editing_state_and_typed_controls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    nodes = manifest["reverse_trace"]["nodes"]
+
+    assert "typed_controls:applied" in nodes
+    assert nodes["typed_controls:applied"]["controls"] == manifest["controls"]
+    assert nodes["editing_session:current"]["editing_session_sha256"] == manifest[
+        "artifacts"
+    ]["editing_session_snapshot"]["sha256"]
+    assert nodes["editing_session:current"]["timeline_sha256"] == manifest["artifacts"][
+        "timeline_snapshot"
+    ]["sha256"]
+    for artifact, row in manifest["artifacts"].items():
+        assert nodes[f"artifact:{artifact}"]["sha256"] == row["sha256"]
+
+    final_path = package_root / manifest["artifacts"]["final_mp4"]["path"]
+    final_path.write_bytes(b"unrelated replacement artifact")
+    manifest["artifacts"]["final_mp4"]["sha256"] = _sha256(final_path)
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
+def test_reverse_manifest_cross_binds_preview_inventory_graph_and_actual_project_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+
+    rewritten = json.loads(json.dumps(manifest))
+    replacement_sha = "0" * 64
+    proof = rewritten["preview_proofs"]["previews"]["h264"]
+    proof["source_sha256"] = replacement_sha
+    proof["preview_source_sha256"] = replacement_sha
+    proof["project_copy_sha256"] = replacement_sha
+    proof["content_sha256"] = replacement_sha
+    rewritten["reverse_trace"]["nodes"]["copied_asset:h264"]["sha256"] = replacement_sha
+    rewritten["reverse_trace"]["nodes"]["source_sha:h264"]["sha256"] = replacement_sha
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_preview_proof_invalid$"):
+        package.validate_reverse_manifest(package_root, rewritten)
+
+    store = package.LocalProjectStore(package_root / "projects")
+    project_copy = store.resolve_storage_uri(
+        project_id="qa-preview",
+        storage_uri=manifest["preview_proofs"]["previews"]["hevc"]["project_copy_ref"],
+    )
+    project_copy.write_bytes(project_copy.read_bytes() + b"tampered")
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_project_copy_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
+def test_reverse_manifest_rejects_reparse_project_copy_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    projects_root = package_root / "projects"
+    original = package._is_reparse_point
+    monkeypatch.setattr(
+        package,
+        "_is_reparse_point",
+        lambda path: path == projects_root or original(path),
+    )
+
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_project_copy_invalid$"):
+        package.validate_reverse_manifest(package_root, manifest)
+
+
+def test_reverse_manifest_rejects_disconnected_typed_control_or_preview_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _load_module()
+    package_root, _narration, context = _package_fixture(package, tmp_path, monkeypatch)
+    manifest = context["result"]
+    nodes = manifest["reverse_trace"]["nodes"]
+    assert "typed_controls:applied" in nodes
+
+    disconnected = json.loads(json.dumps(manifest))
+    disconnected["reverse_trace"]["nodes"]["typed_controls:applied"]["upstream"].remove(
+        "preview:hevc"
+    )
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
+        package.validate_reverse_manifest(package_root, disconnected)
+
+    detached = json.loads(json.dumps(manifest))
+    detached["reverse_trace"]["nodes"]["preview:h264"]["upstream"] = [
+        "source_sha:h264"
+    ]
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_reverse_trace_invalid$"):
+        package.validate_reverse_manifest(package_root, detached)
+
+
 @pytest.mark.parametrize(
     "unsafe_path",
     [
@@ -894,6 +996,13 @@ def test_reverse_manifest_rejects_malformed_unbounded_or_non_resolving_graph(
     )
     with pytest.raises(package.OwnerSamplePackageError, match="^manifest_preview_proof_invalid$"):
         package.validate_reverse_manifest(package_root, leaked_preview)
+
+    leaked_import_log = json.loads(json.dumps(manifest))
+    leaked_import_log["preview_proofs"]["api_import_log"] = [
+        {"method": "POST", "path": str((tmp_path / "secret" / "owner.mp4").resolve())}
+    ]
+    with pytest.raises(package.OwnerSamplePackageError, match="^manifest_preview_proof_invalid$"):
+        package.validate_reverse_manifest(package_root, leaked_import_log)
 
     leaked_top_level = json.loads(json.dumps(manifest))
     leaked_top_level["source_path"] = str((tmp_path / "secret" / "owner.mp4").resolve())
