@@ -31,7 +31,14 @@ def generate_video_thumbnail(
         str(output_path),
     ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds)
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+        )
     except FileNotFoundError as exc:
         raise ThumbnailGenerationError(f"'{ffmpeg_binary}' binary was not found.") from exc
     except subprocess.TimeoutExpired as exc:

@@ -936,6 +936,7 @@ def test_package_uses_audio_ducking_and_records_all_controls_and_false_authoriti
 
     assert calls["fixture_name"] == "audio_ducking"
     assert calls["project_name"] == "owner-qa"
+    assert calls["require_image_overlay"] is True
     assert Path(calls["narration"]) == package_root / "inputs" / "qa-narration.wav"
     assert Path(calls["broll_source"]).is_file()
     assert Path(calls["broll_source"]).is_relative_to(package_root / "projects")

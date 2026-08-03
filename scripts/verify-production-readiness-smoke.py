@@ -82,6 +82,12 @@ def get_long_form_fixture(name: str) -> dict[str, Any]:
         raise ValueError(f"Unknown long-form QA fixture: {name}") from exc
 
 
+def _effective_image_overlay(
+    fixture: dict[str, Any], *, require_image_overlay: bool
+) -> bool:
+    return bool(fixture["include_image_overlay"]) or require_image_overlay
+
+
 class DeterministicOfflineRuntime:
     """Forces the production local-first components to use heuristic fallbacks."""
 
@@ -563,10 +569,14 @@ def run_smoke(
     ffprobe_binary: str,
     fixture_name: str = "loop",
     project_name: str | None = None,
+    require_image_overlay: bool = False,
     broll_source: Path | None = None,
     expected_broll_sha256: str | None = None,
 ) -> dict[str, object]:
     fixture = get_long_form_fixture(fixture_name)
+    include_image_overlay = _effective_image_overlay(
+        fixture, require_image_overlay=require_image_overlay
+    )
     narration = narration.resolve()
     if not narration.is_file():
         raise FileNotFoundError(f"Narration source does not exist: {narration}")
@@ -597,7 +607,7 @@ def run_smoke(
     if fixture["audio_controls"] is not None:
         _create_bgm(bgm_path, ffmpeg_binary=ffmpeg_binary)
     overlay_image_path = work_root / "smoke-overlay.png"
-    if fixture["include_image_overlay"]:
+    if include_image_overlay:
         _create_overlay_image(overlay_image_path, ffmpeg_binary=ffmpeg_binary)
 
     store = LocalProjectStore(projects_root)
@@ -666,7 +676,7 @@ def run_smoke(
             )
             bgm_asset = {"asset_id": registered_bgm.asset_id, "storage_uri": registered_bgm.storage_uri}
         image_asset = None
-        if fixture["include_image_overlay"]:
+        if include_image_overlay:
             registered_image = store.register_asset(
                 project_id=project_id, asset_type=AssetType.IMAGE, source_path=overlay_image_path
             )

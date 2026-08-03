@@ -2106,6 +2106,7 @@ def build_owner_sample_package(
             ffprobe_binary=ffprobe_binary,
             fixture_name="audio_ducking",
             project_name=OWNER_EDIT_PROJECT_NAME,
+            require_image_overlay=True,
             broll_source=owner_h264_copy,
             expected_broll_sha256=selected["h264"].sha256,
         )

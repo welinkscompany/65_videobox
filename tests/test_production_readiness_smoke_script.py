@@ -220,6 +220,17 @@ def test_long_form_fixture_profiles_define_real_media_controls_and_desktop_scope
     assert audio["desktop_capcut_opened"] is False
 
 
+def test_required_image_overlay_monotonically_extends_audio_fixture() -> None:
+    smoke = _load_smoke_module()
+    audio = smoke.get_long_form_fixture("audio_ducking")
+    crop = smoke.get_long_form_fixture("crop_pad_overlay")
+
+    assert smoke._effective_image_overlay(audio, require_image_overlay=False) is False
+    assert smoke._effective_image_overlay(audio, require_image_overlay=True) is True
+    assert smoke._effective_image_overlay(crop, require_image_overlay=False) is True
+    assert smoke._effective_image_overlay(crop, require_image_overlay=True) is True
+
+
 def test_smoke_exact_preview_poll_requires_ready_state(monkeypatch: pytest.MonkeyPatch) -> None:
     smoke = _load_smoke_module()
     monkeypatch.setattr(smoke.time, "sleep", lambda _: None)
