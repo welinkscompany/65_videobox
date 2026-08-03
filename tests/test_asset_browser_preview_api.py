@@ -161,6 +161,7 @@ def test_published_output_is_not_ready_until_matching_job_is_terminal(
             assert response.json()["status"] in {"pending", "running"}
             assert response.json()["job_id"] == job_id
             assert response.json()["content_url"] is None
+        assert client.get(f"{endpoint}/content", headers={"Range": "bytes=0-3"}).status_code == 404
     finally:
         release_success.set()
 
@@ -168,6 +169,7 @@ def test_published_output_is_not_ready_until_matching_job_is_terminal(
     assert ready["status"] == "ready"
     assert ready["job_id"] == job_id
     assert ready["content_url"] == f"{endpoint}/content"
+    assert client.get(ready["content_url"], headers={"Range": "bytes=0-3"}).status_code == 206
     assert len(renderer.calls) == 1
     assert len(LocalProjectStore(tmp_path).list_jobs(project_id=project_id)) == 1
 
@@ -181,6 +183,7 @@ def test_published_output_is_not_ready_until_matching_job_is_terminal(
     assert missing.json()["job_id"] == job_id
     assert missing.json()["error_code"] == "PREVIEW_CACHE_MISSING"
     assert missing.json()["content_url"] is None
+    assert client.get(f"{endpoint}/content").status_code == 404
 
 
 def test_non_video_asset_is_rejected_without_probe(tmp_path: Path) -> None:
@@ -237,6 +240,7 @@ def test_failed_job_is_not_masked_by_cache_and_prepare_retries(tmp_path: Path) -
     assert still_failed["status"] == "failed"
     assert still_failed["job_id"] == started.json()["job_id"]
     assert still_failed["content_url"] is None
+    assert client.get(f"{endpoint}/content").status_code == 404
 
     retry_renderer = FakeRenderer()
     app.state.asset_browser_preview_service.renderer = retry_renderer
@@ -246,6 +250,37 @@ def test_failed_job_is_not_masked_by_cache_and_prepare_retries(tmp_path: Path) -
     assert _wait(client, endpoint)["status"] == "ready"
     assert len(retry_renderer.calls) == 1
     assert len(LocalProjectStore(tmp_path).list_jobs(project_id=project_id)) == 2
+
+
+def test_no_job_orphan_cache_is_not_ready_and_prepare_creates_one_job(tmp_path: Path) -> None:
+    renderer = FakeRenderer()
+    app = create_app(
+        projects_root=tmp_path,
+        asset_browser_preview_probe=FakeProbe(),
+        asset_browser_preview_renderer=renderer,
+    )
+    client = TestClient(app)
+    project_id, asset_id, _stored = _asset(tmp_path, client)
+    endpoint = f"/api/projects/{project_id}/assets/{asset_id}/browser-preview"
+    identity = app.state.asset_browser_preview_service._asset_identity(
+        project_id=project_id, asset_id=asset_id
+    )
+    identity.output.parent.mkdir(parents=True, exist_ok=True)
+    identity.output.write_bytes(b"unowned-orphan-cache")
+
+    orphan = client.get(endpoint)
+    assert orphan.status_code == 200
+    assert orphan.json()["status"] == "failed"
+    assert orphan.json()["error_code"] == "PREVIEW_NOT_PREPARED"
+    assert orphan.json()["content_url"] is None
+    assert client.get(f"{endpoint}/content").status_code == 404
+
+    started = client.post(endpoint)
+    assert started.status_code == 202
+    assert started.json()["status"] in {"pending", "running"}
+    assert _wait(client, endpoint)["status"] == "ready"
+    assert len(renderer.calls) == 1
+    assert len(LocalProjectStore(tmp_path).list_jobs(project_id=project_id)) == 1
 
 
 def test_completed_proxy_is_not_reused_after_the_registered_source_changes(tmp_path: Path) -> None:

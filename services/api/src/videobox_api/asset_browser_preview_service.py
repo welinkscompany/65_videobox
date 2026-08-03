@@ -69,10 +69,6 @@ class AssetBrowserPreviewService:
                 return self._ready_original(
                     project_id, asset_id, identity.source_sha256
                 ), False, None
-            if self._output_ready(identity):
-                return self._ready_proxy(
-                    project_id, asset_id, identity.source_sha256, None
-                ), False, identity.input_ref
         job, created = self.store.create_or_reuse_active_asset_preview_job(project_id=project_id, input_ref=identity.input_ref)
         return self._job_payload(project_id, asset_id, identity.source_sha256, job), created, identity.input_ref
 
@@ -95,8 +91,6 @@ class AssetBrowserPreviewService:
                 return self._failed(identity.source_sha256, str(job["job_id"]), "PREVIEW_SOURCE_CHANGED")
             if job is not None:
                 return self._job_payload(project_id, asset_id, identity.source_sha256, job)
-        if self._output_ready(identity):
-            return self._ready_proxy(project_id, asset_id, identity.source_sha256, None)
         if self.probe.probe(identity.source).browser_compatible:
             return self._ready_original(project_id, asset_id, identity.source_sha256)
         return self._failed(identity.source_sha256, None, "PREVIEW_NOT_PREPARED")
@@ -128,7 +122,14 @@ class AssetBrowserPreviewService:
 
     def content_path(self, *, project_id: str, asset_id: str) -> Path:
         identity = self._asset_identity(project_id=project_id, asset_id=asset_id)
-        if not identity.output.is_file() or identity.output.stat().st_size <= 0:
+        job = self.store.get_latest_asset_preview_job(
+            project_id=project_id, input_ref=identity.input_ref
+        )
+        if (
+            job is None
+            or job["status"] != JobStatus.SUCCEEDED.value
+            or not self._output_ready(identity)
+        ):
             raise FileNotFoundError("browser_preview_not_ready")
         return identity.output
 
