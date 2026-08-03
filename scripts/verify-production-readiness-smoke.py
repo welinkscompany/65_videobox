@@ -10,6 +10,7 @@ a localhost LLM or an external provider.
 import argparse
 import hashlib
 import json
+import math
 import shutil
 import subprocess
 import sys
@@ -137,44 +138,71 @@ def _probe_duration(path: Path, *, ffprobe_binary: str) -> float:
 
 
 def _probe_media_summary(path: Path, *, ffprobe_binary: str) -> dict[str, Any]:
-    result = _run(
-        [
-            ffprobe_binary,
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration,format_name:stream=codec_type,codec_name,pix_fmt",
-            "-of",
-            "json",
-            str(path),
-        ],
-        timeout=60,
-    )
-    payload = json.loads(result.stdout)
-    format_payload = payload.get("format") if isinstance(payload, dict) else None
-    format_payload = format_payload if isinstance(format_payload, dict) else {}
-    streams = payload.get("streams") if isinstance(payload, dict) else None
-    streams = streams if isinstance(streams, list) else []
-    video = next(
-        (stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "video"),
-        {},
-    )
-    audio = next(
-        (stream for stream in streams if isinstance(stream, dict) and stream.get("codec_type") == "audio"),
-        {},
-    )
-    duration = format_payload.get("duration")
-    return {
-        "duration_sec": float(duration) if duration is not None else None,
-        "format": format_payload.get("format_name"),
-        "video_codec": video.get("codec_name"),
-        "pixel_format": video.get("pix_fmt"),
-        "audio_codec": audio.get("codec_name"),
-    }
+    try:
+        result = _run(
+            [
+                ffprobe_binary,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration,format_name:stream=codec_type,codec_name,pix_fmt",
+                "-of",
+                "json",
+                str(path),
+            ],
+            timeout=60,
+        )
+        payload = json.loads(result.stdout)
+        if not isinstance(payload, dict):
+            raise ValueError("invalid ffprobe payload")
+        format_payload = payload.get("format")
+        streams = payload.get("streams")
+        if not isinstance(format_payload, dict) or not isinstance(streams, list) or len(streams) > 32:
+            raise ValueError("invalid ffprobe schema")
+        if not all(isinstance(stream, dict) for stream in streams):
+            raise ValueError("invalid ffprobe stream")
+        duration = float(format_payload["duration"])
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError("invalid ffprobe duration")
+        format_name = format_payload.get("format_name")
+        video = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
+        audio = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
+        if video is None:
+            raise ValueError("missing ffprobe video stream")
+        video_codec = video.get("codec_name")
+        pixel_format = video.get("pix_fmt")
+        audio_codec = audio.get("codec_name") if audio is not None else None
+        bounded_text = (format_name, video_codec, pixel_format, audio_codec)
+        if any(value is not None and (not isinstance(value, str) or not value or len(value) > 128) for value in bounded_text):
+            raise ValueError("invalid ffprobe field")
+        if format_name is None or video_codec is None or pixel_format is None:
+            raise ValueError("missing ffprobe field")
+        return {
+            "duration_sec": duration,
+            "format": format_name,
+            "video_codec": video_codec,
+            "pixel_format": pixel_format,
+            "audio_codec": audio_codec,
+        }
+    except Exception:
+        raise RuntimeError("media_probe_failed") from None
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _write_stable_json(destination: Path, payload: dict[str, Any]) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_suffix(f"{destination.suffix}.tmp")
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _write_review_snapshots(
@@ -190,17 +218,40 @@ def _write_review_snapshots(
         "editing_session": review_root / "editing-session.json",
     }
     for name, payload in (("timeline", timeline), ("editing_session", session)):
-        destination = destinations[name]
-        temporary = destination.with_suffix(f"{destination.suffix}.tmp")
-        try:
-            temporary.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
-            temporary.replace(destination)
-        finally:
-            temporary.unlink(missing_ok=True)
+        _write_stable_json(destinations[name], payload)
     return destinations
+
+
+def _artifact_evidence(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        raise FileNotFoundError("review_artifact_missing")
+    return {"path": str(path), "sha256": _sha256(path)}
+
+
+def _build_review_artifact_evidence(
+    work_root: Path,
+    *,
+    srt_path: Path,
+    exact_preview_path: Path,
+    timeline_snapshot_path: Path,
+    editing_session_snapshot_path: Path,
+    final_mp4_path: Path,
+    capcut_draft_path: Path,
+    ffprobe_summary: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    ffprobe_summary_path = work_root / "review" / "ffprobe-summary.json"
+    _write_stable_json(ffprobe_summary_path, ffprobe_summary)
+    evidence: dict[str, dict[str, Any]] = {
+        "srt": _artifact_evidence(srt_path),
+        "exact_preview": _artifact_evidence(exact_preview_path),
+        "timeline_snapshot": _artifact_evidence(timeline_snapshot_path),
+        "editing_session_snapshot": _artifact_evidence(editing_session_snapshot_path),
+        "ffprobe_summary": _artifact_evidence(ffprobe_summary_path),
+        "final_mp4": _artifact_evidence(final_mp4_path),
+        "capcut_draft": _artifact_evidence(capcut_draft_path),
+    }
+    evidence["ffprobe_summary"].update(ffprobe_summary)
+    return evidence
 
 
 def _create_short_broll(path: Path, *, ffmpeg_binary: str) -> None:
@@ -764,12 +815,25 @@ def run_smoke(
 
     if not all(checks.values()):
         raise AssertionError(f"Smoke checks failed: {checks}")
+    artifact_evidence = _build_review_artifact_evidence(
+        work_root,
+        srt_path=subtitle_path,
+        exact_preview_path=exact_preview_path,
+        timeline_snapshot_path=snapshot_paths["timeline"],
+        editing_session_snapshot_path=snapshot_paths["editing_session"],
+        final_mp4_path=final_path,
+        capcut_draft_path=draft_path / "draft_content.json",
+        ffprobe_summary={
+            "exact_preview": _probe_media_summary(exact_preview_path, ffprobe_binary=ffprobe_binary),
+            "final_mp4": _probe_media_summary(final_path, ffprobe_binary=ffprobe_binary),
+        },
+    )
     return {
         "fixture_name": fixture_name,
         "desktop_capcut_opened": fixture["desktop_capcut_opened"],
         "checks": checks,
         "narration": {"path": str(narration), "sha256": _sha256(narration)},
-        "srt": {"path": str(subtitle_path)},
+        "srt": artifact_evidence["srt"],
         "exact_preview": {
             "status": exact_preview_status["status"],
             "generation_id": exact_preview_started["generation_id"],
@@ -777,24 +841,14 @@ def run_smoke(
             "timeline_start_sec": exact_preview_status["timeline_start_sec"],
             "timeline_end_sec": exact_preview_status["timeline_end_sec"],
             "range_status": 206,
-            "path": str(exact_preview_path),
-            "sha256": _sha256(exact_preview_path),
+            **artifact_evidence["exact_preview"],
         },
-        "timeline_snapshot": {
-            "path": str(snapshot_paths["timeline"]),
-            "sha256": _sha256(snapshot_paths["timeline"]),
-        },
-        "editing_session_snapshot": {
-            "path": str(snapshot_paths["editing_session"]),
-            "sha256": _sha256(snapshot_paths["editing_session"]),
-        },
-        "ffprobe_summary": {
-            "exact_preview": _probe_media_summary(exact_preview_path, ffprobe_binary=ffprobe_binary),
-            "final_mp4": _probe_media_summary(final_path, ffprobe_binary=ffprobe_binary),
-        },
-        "final_mp4": {"path": str(final_path), "sha256": _sha256(final_path)},
+        "timeline_snapshot": artifact_evidence["timeline_snapshot"],
+        "editing_session_snapshot": artifact_evidence["editing_session_snapshot"],
+        "ffprobe_summary": artifact_evidence["ffprobe_summary"],
+        "final_mp4": artifact_evidence["final_mp4"],
         "capcut_draft": {
-            "path": str(draft_path / "draft_content.json"),
+            **artifact_evidence["capcut_draft"],
             "warnings": list(capcut["export"].get("notes") or []),
         },
     }

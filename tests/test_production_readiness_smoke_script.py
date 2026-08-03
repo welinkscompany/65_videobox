@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -318,7 +319,110 @@ def test_smoke_probe_media_summary_returns_only_bounded_review_fields(
     }
 
 
-def test_smoke_run_wires_exact_preview_before_regeneration_and_returns_review_evidence() -> None:
+def test_smoke_probe_media_summary_bounds_subprocess_failure_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    smoke = _load_smoke_module()
+    oversized_path = Path("x" * 4_096)
+
+    def fail_probe(command: list[str], *, timeout: int) -> SimpleNamespace:
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=command,
+            stderr="private ffprobe detail " * 1_024,
+        )
+
+    monkeypatch.setattr(smoke, "_run", fail_probe)
+
+    with pytest.raises(RuntimeError, match="media_probe_failed") as raised:
+        smoke._probe_media_summary(oversized_path, ffprobe_binary="ffprobe")
+
+    message = str(raised.value)
+    assert len(message) < 128
+    assert str(oversized_path) not in message
+    assert "private ffprobe detail" not in message
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "not-json",
+        "[]",
+        json.dumps({"format": {"duration": "not-duration", "format_name": "mp4"}, "streams": []}),
+        json.dumps({"format": {"duration": "1", "format_name": "mp4"}, "streams": "not-a-list"}),
+    ],
+)
+def test_smoke_probe_media_summary_rejects_malformed_output_with_bounded_domain_error(
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+) -> None:
+    smoke = _load_smoke_module()
+    monkeypatch.setattr(
+        smoke,
+        "_run",
+        lambda command, timeout: SimpleNamespace(stdout=stdout),
+    )
+
+    with pytest.raises(RuntimeError, match="media_probe_failed") as raised:
+        smoke._probe_media_summary(Path("preview.mp4"), ffprobe_binary="ffprobe")
+
+    assert len(str(raised.value)) < 128
+
+
+def test_smoke_builds_hash_linked_review_artifact_evidence(tmp_path: Path) -> None:
+    smoke = _load_smoke_module()
+    snapshot_paths = smoke._write_review_snapshots(
+        tmp_path,
+        timeline={"timeline_id": "timeline"},
+        session={"session_id": "session"},
+    )
+    artifact_paths = {
+        "srt": tmp_path / "captions.srt",
+        "exact_preview": tmp_path / "exact-preview.mp4",
+        "final_mp4": tmp_path / "final.mp4",
+        "capcut_draft": tmp_path / "draft_content.json",
+    }
+    for name, path in artifact_paths.items():
+        path.write_bytes(f"artifact:{name}".encode("utf-8"))
+    media_summary = {
+        "exact_preview": {"duration_sec": 5.0, "video_codec": "h264"},
+        "final_mp4": {"duration_sec": 600.0, "video_codec": "h264"},
+    }
+
+    evidence = smoke._build_review_artifact_evidence(
+        tmp_path,
+        srt_path=artifact_paths["srt"],
+        exact_preview_path=artifact_paths["exact_preview"],
+        timeline_snapshot_path=snapshot_paths["timeline"],
+        editing_session_snapshot_path=snapshot_paths["editing_session"],
+        final_mp4_path=artifact_paths["final_mp4"],
+        capcut_draft_path=artifact_paths["capcut_draft"],
+        ffprobe_summary=media_summary,
+    )
+
+    assert set(evidence) == {
+        "srt",
+        "exact_preview",
+        "timeline_snapshot",
+        "editing_session_snapshot",
+        "ffprobe_summary",
+        "final_mp4",
+        "capcut_draft",
+    }
+    for row in evidence.values():
+        artifact_path = Path(row["path"])
+        assert artifact_path.is_file()
+        assert row["sha256"] == smoke._sha256(artifact_path)
+    ffprobe_path = tmp_path / "review" / "ffprobe-summary.json"
+    assert Path(evidence["ffprobe_summary"]["path"]) == ffprobe_path
+    assert json.loads(ffprobe_path.read_text(encoding="utf-8")) == media_summary
+    assert evidence["ffprobe_summary"]["exact_preview"] == media_summary["exact_preview"]
+    assert evidence["ffprobe_summary"]["final_mp4"] == media_summary["final_mp4"]
+    assert "media" not in evidence["ffprobe_summary"]
+    assert list((tmp_path / "review").glob("*.tmp")) == []
+
+
+def test_smoke_run_wires_exact_preview_before_regeneration() -> None:
     source = SCRIPT_PATH.read_text(encoding="utf-8")
 
     exact_preview_start = source.index('/exact-preview"')
@@ -330,7 +434,4 @@ def test_smoke_run_wires_exact_preview_before_regeneration_and_returns_review_ev
     assert 'headers={"Range": "bytes=0-0"}' in source
     assert "store.get_exact_preview(" in source
     assert "_write_review_snapshots(" in source
-    assert '"exact_preview"' in source
-    assert '"timeline_snapshot"' in source
-    assert '"editing_session_snapshot"' in source
-    assert '"ffprobe_summary"' in source
+    assert "_build_review_artifact_evidence(" in source
