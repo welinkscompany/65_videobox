@@ -14,7 +14,7 @@
 
 - [x] Task 1 readiness schema·상태 우선순위·six-gate marker TDD
 - [x] Task 2 dashboard/credential boundary와 sanitized receipt 구현
-- [ ] Task 3 manual fallback·reverse trace·실제 non-live 검증
+- [x] Task 3 manual fallback·reverse trace·실제 non-live 검증
 - [ ] Task 4 Task 23 통합 회귀·독립 리뷰·SSOT·commit/push
 
 ## 고정 경계
@@ -96,18 +96,18 @@ Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_ready_script.py -q`
 
 **Files:**
 - Modify: `tests/test_owner_ready_script.py`
-- Test: `tests/test_hermes_yujin_creator_flow_smoke.py`
-- Test: `tests/test_hermes_conversation.py`
-- Test: `apps/web/src/features/editor/workbench/RightDock.test.tsx`
+- Test: `tests/test_smoke_hermes_yujin_creator_flow_script.py`
+- Test: `tests/test_api_hermes_conversation.py`
+- Test: `apps/web/src/features/editor/workbench/right-dock.test.tsx`
 - Test: `apps/web/src/features/jobs/HermesYujinStatus.test.tsx`
 
-- [ ] creator non-live가 in-process VideoBox→gateway→fake Hermes conversation/SSE를 통과하고 apply 전 mutation 0, current revision, output job 0, external provider 0인 focused test를 실행한다.
-- [ ] chat/Mem0 non-live marker가 exact zero-call/credential-redaction contract를 유지하는 owner-ready subprocess test를 실행한다. hardcoded marker는 live/provider 성공 증거로 승격하지 않는다.
-- [ ] API gateway unavailable은 redacted 503/blocked terminal로 닫히고 credential/path/provider body를 노출하지 않는 focused test를 실행한다.
-- [ ] Inspector/RightDock와 status UI가 Eugene 실패 시 수동 편집 CTA를 유지하고 editor command/automatic apply/memory write를 만들지 않는 focused frontend test를 실행한다.
-- [ ] 실제 worktree에서 `owner-ready.ps1 -Mode Smoke -Json`을 실행한다. 현재 `.env.container` 부재와 dashboard 상태는 사실대로 기록하고 서비스를 시작하거나 credential을 만들지 않는다.
-- [ ] receipt→script SHA/marker→profile/runtime static verifier→pinned read-only profile/SOUL mount→dashboard exact-loopback boundary→creator zero-external-call run 순서로 reverse trace한다.
-- [ ] code quality, plan-gap, reverse-runtime, receipt redaction review를 독립 관점으로 수행하고 Critical/Important finding을 수정·재검증한다.
+- [x] creator non-live가 in-process VideoBox→gateway→fake Hermes conversation/SSE를 통과하고 apply 전 mutation 0, current revision, output job 0, external provider 0인 focused test를 실행한다.
+- [x] chat/Mem0 non-live marker가 exact zero-call/credential-redaction contract를 유지하는 owner-ready subprocess test를 실행한다. hardcoded marker는 live/provider 성공 증거로 승격하지 않는다.
+- [x] API gateway unavailable은 redacted 503/blocked terminal로 닫히고 credential/path/provider body를 노출하지 않는 focused test를 실행한다.
+- [x] Inspector/RightDock와 status UI가 Eugene 실패 시 수동 편집 CTA를 유지하고 editor command/automatic apply/memory write를 만들지 않는 focused frontend test를 실행한다.
+- [x] 실제 worktree에서 `owner-ready.ps1 -Mode Smoke -Json`을 실행한다. 현재 `.env.container` 부재와 dashboard 상태는 사실대로 기록하고 서비스를 시작하거나 credential을 만들지 않는다.
+- [x] receipt→script SHA/marker→profile/runtime static verifier→pinned read-only profile/SOUL mount→dashboard exact-loopback boundary→creator zero-external-call run 순서로 reverse trace한다.
+- [x] code quality, plan-gap, reverse-runtime, receipt redaction review를 독립 관점으로 수행하고 Critical/Important finding을 수정·재검증한다.
 
 ### Task 4: Task 23 통합 회귀·독립 리뷰·SSOT·commit/push
 
