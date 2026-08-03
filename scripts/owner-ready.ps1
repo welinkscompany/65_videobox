@@ -314,6 +314,52 @@ function Test-UnescapedEnvInterpolation {
     return $false
 }
 
+function Write-ExclusiveReceiptTempFile {
+    param(
+        [string]$FinalPath,
+        [string]$Content
+    )
+
+    $directory = [IO.Path]::GetDirectoryName($FinalPath)
+    $leafName = [IO.Path]::GetFileName($FinalPath)
+    for ($attempt = 0; $attempt -lt 4; $attempt++) {
+        $candidate = Join-Path $directory "$leafName.$([Guid]::NewGuid().ToString('N')).tmp"
+        $stream = $null
+        try {
+            $stream = [IO.File]::Open(
+                $candidate,
+                [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write,
+                [IO.FileShare]::None
+            )
+        }
+        catch [IO.IOException] {
+            if ($attempt -eq 3) {
+                throw
+            }
+            continue
+        }
+
+        $writeSucceeded = $false
+        try {
+            $encoding = New-Object System.Text.UTF8Encoding($false)
+            $bytes = $encoding.GetBytes($Content)
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush($true)
+            $writeSucceeded = $true
+        }
+        finally {
+            if ($null -ne $stream) {
+                $stream.Dispose()
+            }
+            if (-not $writeSucceeded) {
+                Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+            }
+        }
+        return $candidate
+    }
+}
+
 function Get-HermesCredentialStatus {
     param([string]$LiteralPath)
     if (-not (Test-Path -LiteralPath $LiteralPath -PathType Leaf)) {
@@ -385,7 +431,7 @@ function Get-HermesCredentialStatus {
             }
 
             $rawValue = [string]$Matches[2]
-            if ($rawValue -match '[\x00-\x1F\x7F]') {
+            if ($rawValue -match '[\p{Cc}]') {
                 $invalid = $true
                 continue
             }
@@ -950,7 +996,8 @@ if ($Mode -ceq "Smoke") {
         $startCommit -match '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'
     )
     $baselineCommit = if ($startCommitValid) { $startCommit } else { "0000000000000000000000000000000000000000" }
-    $commit = if ($startCommitValid) { $startCommit.Substring(0, 8) } else { "unknown" }
+    $commit = if ($startCommitValid) { $startCommit } else { "unknown" }
+    $shortCommit = if ($startCommitValid) { $startCommit.Substring(0, 8) } else { "unknown" }
     $definitions = @(
         [pscustomobject]@{
             Id = "creator_flow_non_live"
@@ -1178,15 +1225,14 @@ if ($Mode -ceq "Smoke") {
         checks = $receiptChecks
     }
     $timestamp = [DateTimeOffset]::UtcNow.ToString("yyyyMMdd'T'HHmmssfff'Z'")
-    $fileName = "owner-ready-smoke-$timestamp-$commit.json"
+    $fileName = "owner-ready-smoke-$timestamp-$shortCommit.json"
     $temporaryPath = $null
     $receiptWritten = $false
     try {
         [IO.Directory]::CreateDirectory($ReceiptRoot) | Out-Null
         $finalPath = Join-Path $ReceiptRoot $fileName
-        $temporaryPath = "$finalPath.tmp"
         $receiptText = $receiptPayload | ConvertTo-Json -Depth 8 -Compress
-        [IO.File]::WriteAllText($temporaryPath, $receiptText, (New-Object System.Text.UTF8Encoding($false)))
+        $temporaryPath = Write-ExclusiveReceiptTempFile -FinalPath $finalPath -Content $receiptText
         $publishHeadResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @("rev-parse", "HEAD")
         $publishHead = $publishHeadResult.StdOut.Trim().ToLowerInvariant()
         $publishHeadStable = (

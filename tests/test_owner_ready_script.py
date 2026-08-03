@@ -893,7 +893,7 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
     assert receipt["dashboard_status"] == "ready"
     assert receipt["credential_status"] == "present_unverified"
     assert receipt["live_canary_status"] == "not_run"
-    assert receipt["commit"] == "deadbeef"
+    assert receipt["commit"] == "deadbeef00000000000000000000000000000000"
     assert receipt["external_provider_calls"] == 0
     assert receipt["external_network_calls"] == 0
     assert all(
@@ -919,6 +919,87 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
     assert str(fixture["repository"]) not in serialized
     assert str(fixture["receipt_root"]) not in serialized
     assert str(fixture["env_file"]) not in serialized
+
+
+def test_receipt_temp_writer_creates_exclusive_unique_files(tmp_path: Path) -> None:
+    final_path = tmp_path / "owner-ready-smoke-fixed.json"
+    command = (
+        "$tokens=$null;$parseErrors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        "$env:OWNER_READY_SCRIPT,[ref]$tokens,[ref]$parseErrors);"
+        "if($parseErrors.Count -ne 0){exit 10};"
+        "$writer=$ast.Find({param($node) "
+        "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -ceq 'Write-ExclusiveReceiptTempFile'},$true);"
+        "if($null -eq $writer){exit 11};"
+        "Invoke-Expression $writer.Extent.Text;"
+        "$first=Write-ExclusiveReceiptTempFile -FinalPath $env:OWNER_READY_FINAL_PATH -Content 'first';"
+        "$second=Write-ExclusiveReceiptTempFile -FinalPath $env:OWNER_READY_FINAL_PATH -Content 'second';"
+        "[pscustomobject]@{first=$first;second=$second;"
+        "first_text=[IO.File]::ReadAllText($first);second_text=[IO.File]::ReadAllText($second)}"
+        "|ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            "OWNER_READY_SCRIPT": str(SCRIPT),
+            "OWNER_READY_FINAL_PATH": str(final_path),
+        },
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["first"] != payload["second"]
+    assert payload["first_text"] == "first"
+    assert payload["second_text"] == "second"
+    assert Path(payload["first"]).name.endswith(".tmp")
+    assert Path(payload["second"]).name.endswith(".tmp")
+
+
+def test_receipt_temp_writer_removes_partial_file_after_write_failure(tmp_path: Path) -> None:
+    final_path = tmp_path / "owner-ready-smoke-fixed.json"
+    command = (
+        "$tokens=$null;$parseErrors=$null;"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile("
+        "$env:OWNER_READY_SCRIPT,[ref]$tokens,[ref]$parseErrors);"
+        "if($parseErrors.Count -ne 0){exit 10};"
+        "$writer=$ast.Find({param($node) "
+        "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -ceq 'Write-ExclusiveReceiptTempFile'},$true);"
+        "if($null -eq $writer){exit 11};"
+        "$instrumented=$writer.Extent.Text.Replace("
+        "'$stream.Flush($true)',"
+        "\"throw [IO.IOException]::new('fixture write failure')\");"
+        "if($instrumented -ceq $writer.Extent.Text){exit 12};"
+        "Invoke-Expression $instrumented;"
+        "try { Write-ExclusiveReceiptTempFile "
+        "-FinalPath $env:OWNER_READY_FINAL_PATH -Content 'partial' | Out-Null } catch {};"
+        "@([IO.Directory]::GetFiles([IO.Path]::GetDirectoryName($env:OWNER_READY_FINAL_PATH),'*.tmp')).Count"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={
+            **os.environ,
+            "OWNER_READY_SCRIPT": str(SCRIPT),
+            "OWNER_READY_FINAL_PATH": str(final_path),
+        },
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0"
 
 
 def test_smoke_dashboard_accepts_only_an_unfollowed_same_loopback_login_redirect(tmp_path: Path) -> None:
@@ -1108,6 +1189,7 @@ def test_smoke_credential_classifier_rejects_each_missing_required_key(
         'HERMES_YUJIN_GATEWAY_PASSWORD="${UNFINISHED"',
         "HERMES_YUJIN_GATEWAY_PASSWORD=abc\x00def",
         "HERMES_YUJIN_GATEWAY_PASSWORD=abc\tdef",
+        "HERMES_YUJIN_GATEWAY_PASSWORD=abc\u0085def",
         "HERMES_YUJIN_GATEWAY_PASSWORD=${UNRESOLVED_SECRET}",
         "HERMES_YUJIN_GATEWAY_PASSWORD=REPLACE-BEFORE-STARTING",
         "HERMES_YUJIN_GATEWAY_PASSWORD=replace_before_starting",
@@ -1138,6 +1220,7 @@ def test_smoke_credential_classifier_rejects_each_missing_required_key(
         "double_quoted_unfinished_brace_interpolation",
         "nul_control",
         "tab_control",
+        "c1_control",
         "unresolved",
         "replace_before_starting",
         "replace_before_starting_underscore",
@@ -1528,7 +1611,7 @@ def test_smoke_rejects_a_child_that_mutates_itself_during_execution(tmp_path: Pa
     assert hashlib.sha256(child_path.read_bytes()).hexdigest() != start_sha
     receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
     receipt = json.loads(receipt_text)
-    assert receipt["commit"] == "deadbeef"
+    assert receipt["commit"] == "deadbeef00000000000000000000000000000000"
     assert receipt["checks"][1]["status"] == "fail"
     assert receipt["checks"][1]["script_sha256"] == start_sha
     serialized = json.dumps(payload) + receipt_text
@@ -1552,7 +1635,7 @@ def test_smoke_rejects_head_change_during_execution_and_keeps_start_commit(tmp_p
     assert len(fixture["smoke_log"].read_text(encoding="utf-8-sig").splitlines()) == 6
     receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
     receipt = json.loads(receipt_text)
-    assert receipt["commit"] == "deadbeef"
+    assert receipt["commit"] == "deadbeef00000000000000000000000000000000"
     assert all(row["status"] == "fail" for row in receipt["checks"])
     serialized = json.dumps(payload) + receipt_text
     assert str(fixture["fake_head"]) not in serialized
@@ -1574,7 +1657,7 @@ def test_smoke_rechecks_provenance_after_temp_receipt_before_publish(tmp_path: P
     assert int(fixture["fake_head_read_count"].read_text(encoding="ascii")) >= 3
     receipt_text = next(fixture["receipt_root"].glob("*.json")).read_text(encoding="utf-8")
     receipt = json.loads(receipt_text)
-    assert receipt["commit"] == "deadbeef"
+    assert receipt["commit"] == "deadbeef00000000000000000000000000000000"
     assert receipt["readiness_status"] == "not_ready"
     assert all(row["status"] == "fail" for row in receipt["checks"])
     serialized = json.dumps(payload) + receipt_text
