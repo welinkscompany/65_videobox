@@ -13,7 +13,7 @@
 ## 실행 상태
 
 - [x] Task 1 기존 편집 smoke의 exact preview·snapshot evidence 확장
-- [ ] Task 2 사용자 샘플 read-only inventory·공개 API ingest·H264/HEVC preview proof
+- [x] Task 2 사용자 샘플 read-only inventory·공개 API ingest·H264/HEVC preview proof
 - [ ] Task 3 bounded package·reverse manifest·한국어 review checklist
 - [ ] Task 4 CLI·mutation guard·실제 사용자 샘플 검증
 - [ ] Task 5 독립 review·관련 회귀·SSOT·commit/push
@@ -102,18 +102,18 @@ Expected: PASS.
 - Create: `scripts/owner_sample_edit_package.py`
 - Create: `tests/test_owner_sample_edit_package.py`
 
-- [ ] 실제 1초 H264/AAC와 HEVC/AAC fixture를 FFmpeg로 만들고, inventory가 파일명/size/duration/container/codec/pix_fmt/SHA만 반환하며 source stat/hash가 실행 전후 같은 실패 테스트를 작성한다.
-- [ ] sample direct child가 아니거나 symlink/reparse로 directory 밖을 가리키는 파일, 100개 초과, 2GiB 초과 파일, video stream 없는 media를 복사 전에 거부하는 테스트를 작성한다.
-- [ ] H264/HEVC 각각 duration→size→filename 순으로 한 개만 고르고 필수 codec이 없으면 `required_preview_codec_missing`인 실패 테스트를 작성한다.
-- [ ] public API import log가 project create 1회와 `/assets/broll-video` 2회만 포함하고, runner source에 사용자 샘플용 `shutil.copy`, `store.register_asset` 직접 호출이 없는 실패 테스트를 작성한다.
-- [ ] H264는 existing asset content URL, HEVC는 browser-preview proxy URL을 사용하며 둘 다 Range `206`, H264/yuv420p output, external provider call 0인 실패 테스트를 작성한다.
-- [ ] RED를 실행한다.
+- [x] 실제 1초 H264/AAC와 HEVC/AAC fixture를 FFmpeg로 만들고, inventory가 파일명/size/duration/container/codec/pix_fmt/SHA만 반환하며 source stat/hash가 실행 전후 같은 실패 테스트를 작성한다.
+- [x] sample direct child가 아니거나 symlink/reparse로 directory 밖을 가리키는 파일, 100개 초과, 2GiB 초과 파일, video stream 없는 media를 복사 전에 거부하는 테스트를 작성한다.
+- [x] H264/HEVC 각각 duration→size→filename 순으로 한 개만 고르고 필수 codec이 없으면 `required_preview_codec_missing`인 실패 테스트를 작성한다.
+- [x] public API import log가 project create 1회와 `/assets/broll-video` 2회만 포함하고, runner source에 사용자 샘플용 `shutil.copy`, `store.register_asset` 직접 호출이 없는 실패 테스트를 작성한다.
+- [x] H264는 existing asset content URL, HEVC는 browser-preview proxy URL을 사용하며 둘 다 Range `206`, H264/yuv420p output, external provider call 0인 실패 테스트를 작성한다.
+- [x] RED를 실행한다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_sample_edit_package.py -q`
 
 Expected: module/file 부재로 FAIL.
 
-- [ ] 아래 typed core를 최소 구현한다.
+- [x] 아래 typed core를 최소 구현한다.
 
 ```python
 @dataclass(frozen=True)
@@ -133,9 +133,11 @@ def build_preview_proofs(*, sample_dir: Path, selected: dict[str, SampleRecord],
                          ffmpeg_binary: str, ffprobe_binary: str) -> dict[str, Any]: ...
 ```
 
-- [ ] `build_preview_proofs()`는 `create_app(projects_root=...)`의 TestClient와 public API만 사용한다. project copy의 SHA는 returned `storage_uri`를 read-only resolve해 source SHA와 비교하고 manifest에는 상대 logical ref만 기록한다.
-- [ ] source stat tuple `(size, mtime_ns, SHA)`를 preview 완료 뒤 다시 계산하고 하나라도 다르면 `source_changed_during_package`로 fail closed한다.
-- [ ] GREEN을 실행한다.
+- [x] `build_preview_proofs()`는 `create_app(projects_root=...)`의 TestClient와 public API만 사용한다. project copy의 SHA는 returned `storage_uri`를 read-only resolve해 source SHA와 비교하고 manifest에는 상대 logical ref만 기록한다.
+- [x] source stat tuple `(size, mtime_ns, SHA)`를 preview 완료 뒤 다시 계산하고 하나라도 다르면 `source_changed_during_package`로 fail closed한다.
+- [x] GREEN을 실행한다.
+
+완료 증거: required focused `32 passed`, Task 23A verifier/API race 반복 `110/110 passed`, spec/quality review `Critical 0 / Important 0 / Minor 0`. Review gap으로 terminal job 상태와 proxy content를 결속하는 API fence도 함께 닫았다.
 
 Run: `.\.venv\Scripts\python.exe -m pytest tests/test_owner_sample_edit_package.py tests/test_task23a_browser_preview_verifier.py tests/test_asset_browser_preview_api.py -q`
 
