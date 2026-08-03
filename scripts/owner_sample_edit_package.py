@@ -2212,40 +2212,78 @@ def _safe_cli_error_code(error: OwnerSamplePackageError) -> str:
 
 
 def _safe_cli_summary(manifest: dict[str, Any], package_root: Path) -> dict[str, Any]:
+    if not isinstance(manifest, dict):
+        raise OwnerSamplePackageError("cli_result_invalid")
     selected = manifest.get("selected_sources")
     artifacts = manifest.get("artifacts")
-    if not isinstance(selected, dict) or not isinstance(artifacts, dict):
-        raise OwnerSamplePackageError("package_summary_invalid")
+    authorities = manifest.get("authorities")
+    preview_proofs = manifest.get("preview_proofs")
+    expected_false_authorities = {
+        "owner_approval",
+        "rights_approval",
+        "desktop_edit",
+        "desktop_export",
+        "automatic_apply",
+        "memory_write",
+    }
+    if (
+        not isinstance(selected, dict)
+        or set(selected) != {"h264", "hevc"}
+        or not isinstance(artifacts, dict)
+        or set(artifacts) != set(REVIEW_ARTIFACT_KEYS)
+        or not isinstance(authorities, dict)
+        or set(authorities)
+        != {*expected_false_authorities, "external_provider_calls"}
+        or any(authorities.get(key) is not False for key in expected_false_authorities)
+        or type(authorities.get("external_provider_calls")) is not int
+        or authorities["external_provider_calls"] != 0
+        or not isinstance(preview_proofs, dict)
+        or type(preview_proofs.get("external_provider_calls")) is not int
+        or preview_proofs["external_provider_calls"] != 0
+    ):
+        raise OwnerSamplePackageError("cli_result_invalid")
     filenames: dict[str, str] = {}
     for codec in ("h264", "hevc"):
         row = selected.get(codec)
         name = row.get("name") if isinstance(row, dict) else None
+        source_sha256 = row.get("sha256") if isinstance(row, dict) else None
         if (
-            not isinstance(name, str)
+            not isinstance(row, dict)
+            or set(row) != {"name", "sha256"}
+            or not isinstance(name, str)
             or not name
             or len(name) > 255
             or Path(name).name != name
             or "/" in name
             or "\\" in name
             or any(ord(character) < 32 for character in name)
+            or not isinstance(source_sha256, str)
+            or not SHA256_PATTERN.fullmatch(source_sha256)
         ):
-            raise OwnerSamplePackageError("package_summary_invalid")
+            raise OwnerSamplePackageError("cli_result_invalid")
         filenames[codec] = name
-    if len(artifacts) > MAX_MANIFEST_ARTIFACTS:
-        raise OwnerSamplePackageError("package_summary_invalid")
+    for row in artifacts.values():
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"path", "sha256"}
+            or not isinstance(row.get("path"), str)
+            or not isinstance(row.get("sha256"), str)
+            or not SHA256_PATTERN.fullmatch(row["sha256"])
+        ):
+            raise OwnerSamplePackageError("cli_result_invalid")
     directory_name = package_root.name
     if (
         not directory_name
         or len(directory_name) > 128
         or any(ord(character) < 32 for character in directory_name)
     ):
-        raise OwnerSamplePackageError("package_summary_invalid")
+        raise OwnerSamplePackageError("cli_result_invalid")
     return {
         "status": "ok",
         "package_directory": directory_name,
         "selected_filenames": filenames,
         "artifact_count": len(artifacts),
-        "external_provider_calls": 0,
+        "external_provider_calls": authorities["external_provider_calls"],
     }
 
 
@@ -2333,6 +2371,12 @@ def main(
             json_mode=json_mode,
         )
         return 2
+    except Exception:
+        _write_cli_result(
+            {"status": "error", "error_code": "internal_error"},
+            json_mode=json_mode,
+        )
+        return 3
 
 
 if __name__ == "__main__":

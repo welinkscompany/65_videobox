@@ -1897,9 +1897,34 @@ def _minimal_cli_manifest() -> dict[str, object]:
             "hevc": {"name": "owner-hevc.mp4", "sha256": "b" * 64},
         },
         "artifacts": {
-            "final_mp4": {"path": "edit/review/final.mp4", "sha256": "c" * 64},
-            "srt": {"path": "edit/review/final.srt", "sha256": "d" * 64},
+            key: {
+                "path": f"edit/review/{key}.evidence",
+                "sha256": f"{index:x}" * 64,
+            }
+            for index, key in enumerate(
+                (
+                    "exact_preview",
+                    "final_mp4",
+                    "srt",
+                    "timeline_snapshot",
+                    "editing_session_snapshot",
+                    "capcut_draft",
+                    "ffprobe_summary",
+                    "review_checklist",
+                ),
+                start=1,
+            )
         },
+        "authorities": {
+            "owner_approval": False,
+            "rights_approval": False,
+            "desktop_edit": False,
+            "desktop_export": False,
+            "automatic_apply": False,
+            "memory_write": False,
+            "external_provider_calls": 0,
+        },
+        "preview_proofs": {"external_provider_calls": 0},
         "internal_secret": "never-print-me",
     }
 
@@ -1933,7 +1958,7 @@ def test_cli_default_output_is_repo_local_utc_timestamp_and_summary_is_bounded(
             "h264": "owner-h264.mp4",
             "hevc": "owner-hevc.mp4",
         },
-        "artifact_count": 2,
+        "artifact_count": 8,
         "external_provider_calls": 0,
     }
     assert calls[0]["sample_dir"] == sample_dir
@@ -2132,6 +2157,89 @@ def test_cli_errors_are_single_bounded_json_without_traceback_or_path(
     }
     assert str(sample_dir) not in captured.out
     assert "Traceback" not in captured.out
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda manifest: manifest.pop("authorities"),
+        lambda manifest: manifest["authorities"].__setitem__(
+            "external_provider_calls", 9
+        ),
+        lambda manifest: manifest["authorities"].__setitem__(
+            "external_provider_calls", False
+        ),
+        lambda manifest: manifest["preview_proofs"].__setitem__(
+            "external_provider_calls", 9
+        ),
+        lambda manifest: manifest["preview_proofs"].__setitem__(
+            "external_provider_calls", False
+        ),
+        lambda manifest: manifest["selected_sources"].pop("hevc"),
+        lambda manifest: manifest["selected_sources"]["h264"].pop("sha256"),
+        lambda manifest: manifest["artifacts"].pop("review_checklist"),
+    ],
+)
+def test_cli_rejects_untrusted_result_schema_instead_of_claiming_zero_external_calls(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mutate,
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "samples"
+    sample_dir.mkdir()
+    manifest = _minimal_cli_manifest()
+    mutate(manifest)
+
+    exit_code = package.main(
+        ["--sample-dir", str(sample_dir), "--json"],
+        package_builder=lambda **kwargs: manifest,
+        utc_now=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "status": "error",
+        "error_code": "cli_result_invalid",
+    }
+
+
+@pytest.mark.parametrize("json_mode", [True, False])
+def test_cli_unexpected_exception_is_sanitized_without_traceback_or_secret(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    json_mode: bool,
+) -> None:
+    package = _load_module()
+    sample_dir = tmp_path / "private" / "samples"
+    sample_dir.mkdir(parents=True)
+    arguments = ["--sample-dir", str(sample_dir)]
+    if json_mode:
+        arguments.append("--json")
+    secret = f"SECRET_TOKEN at {sample_dir}"
+
+    exit_code = package.main(
+        arguments,
+        package_builder=lambda **kwargs: (_ for _ in ()).throw(RuntimeError(secret)),
+        utc_now=lambda: datetime(2026, 8, 3, tzinfo=timezone.utc),
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert captured.err == ""
+    assert "Traceback" not in captured.out
+    assert secret not in captured.out
+    assert str(sample_dir) not in captured.out
+    if json_mode:
+        assert len(captured.out.splitlines()) == 1
+        assert json.loads(captured.out) == {
+            "status": "error",
+            "error_code": "internal_error",
+        }
+    else:
+        assert captured.out == "실행 중단: internal_error\n"
 
 
 @pytest.mark.parametrize(
