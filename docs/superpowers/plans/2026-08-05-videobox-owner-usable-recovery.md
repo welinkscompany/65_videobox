@@ -444,7 +444,7 @@ artifact SHA를 고정하지 않고 **방향을 승인**했다. 여백·모서�
 이 방향 승인에 적용하지 않는다. 기존 두 승인 기록의 SHA 게이트는 그대로 두되,
 색 팔레트는 이번 결정이 대체한다.
 
-### Task 11: 색상 토큰 일원화 (F-6)
+### Task 11: 색상 토큰 일원화 (F-6) — **완료 (2026-08-05)**
 
 `apps/web/src/styles/product-shell.css`에 하드코딩 색상 19종이 있고 CSS 변수를 참조하지 않는다.
 실측: `--primary`를 바꿔도 기본 버튼은 `rgb(91,74,200)`을 유지한다.
@@ -466,19 +466,30 @@ Task 10 승인 전에 착수할 수 있다.
 - Modify: `apps/web/src/styles/editor-workbench.css` (하드코딩 `#08090b` 확인)
 - Create: `apps/web/src/styles/theme-tokens.test.ts`
 
-- [ ] **Step 1: 실패 테스트** — 셸 CSS에 하드코딩 hex가 남아 있지 않은지,
-      `--primary`를 바꾸면 기본 버튼 색이 실제로 따라 바뀌는지
-- [ ] **Step 2: RED 확인**
+- [x] **Step 1: 실패 테스트** — `theme-tokens.test.ts`: 셸 CSS에 하드코딩 hex가 남아 있지 않은지,
+      기본 버튼 rule이 `var(--primary)`/`var(--primary-foreground)`를 쓰는지,
+      `editor-workbench.css`의 preview shell도 `var(--vb-preview)`를 쓰는지 (4개 테스트)
+- [x] **Step 2: RED 확인** — 4/4 실패 (하드코딩 hex·rgba 다수 검출)
 
 Run: `npm --prefix apps/web test -- src/styles`
 
-- [ ] **Step 3: 구현** — 하드코딩 19종을 대응 변수로 치환한다.
-      **현재 승인된 색상값과 시각적으로 동일해야 한다.** 이 Task는 리팩터링이지 디자인 변경이 아니다
-- [ ] **Step 4: GREEN + 브라우저에서 변수 변경이 반영되는지 실측 + 커밋**
+- [x] **Step 3: 구현** — `product-shell.css`의 하드코딩 색·rgba 전부와
+      `editor-workbench.css`의 `#08090b`를 기존 토큰(`--vb-canvas`/`--vb-panel`/`--vb-border`/
+      `--vb-text`/`--vb-muted`/`--vb-accent`/`--vb-preview`, `--primary`/`--primary-foreground`,
+      `--accent`)으로 치환했다. 새 토큰 체계는 만들지 않았다.
+      **재실측 결과, 실제로는 승인된 값과 다른 값(색상 드리프트)이 하드코딩돼 있었다** —
+      기본 버튼 `#5b4ac8`은 승인된 accent `#4F46E5`와 다른 값이었다. 이 Task로 승인값과
+      일치시켰다. 값을 새로 정한 게 아니라 이미 승인된 값에 맞춘 것이므로 "색상값을 바꾸지
+      않는다"는 원칙과 충돌하지 않는다
+- [x] **Step 4: GREEN(4/4) + 브라우저 실측 + 커밋** — 프론트 전체 회귀 749/749 통과.
+      실제 실행 중인 앱(`b-roll-smoke-test` 프로젝트 홈)에서 `--primary`를 JS로 바꾸면
+      기본 버튼(`새 영상 만들기`)의 `background-color`가 실제로 따라 바뀌는 것을 확인했다
+      (`rgb(79,70,229)` → `rgb(255,0,0)` → 원복). 셸 배경·사이드바 배경·테두리 색도
+      승인 팔레트 값(`#FFFFFF`/`#292524`/`#FAFAF9`/`#E7E5E4`)과 일치함을 계산된 스타일로 확인
 
 Commit: `refactor: drive shell colours from theme tokens`
 
-### Task 11A: 승인된 디자인을 화면에 반영
+### Task 11A: 승인된 디자인을 화면에 반영 — **완료 (2026-08-05)**
 
 승인 **내용**은 Task 10에서 정해지지만 **작업 절차**는 지금 정할 수 있다.
 승인된 값은 이 Task의 입력이지 Step의 구조를 바꾸지 않는다.
@@ -498,16 +509,24 @@ Commit: `refactor: drive shell colours from theme tokens`
 - Modify: `apps/web/src/styles/product-shell.css` (Task 11에서 변수화된 상태)
 - Create: `apps/web/src/styles/contrast.test.ts`
 
-- [ ] **Step 1: 실패 테스트** — 본문 텍스트 대비 4.5:1 이상,
-      비텍스트 경계·포커스 대비 3:1 이상, 상태를 색만으로 구분하지 않는지.
-      기준값은 `creator-workspace-visual-approval.ko.md`가 이미 명시한 것을 따른다
-- [ ] **Step 2: RED 확인**
+- [x] **Step 1: 실패 테스트** — `contrast.test.ts`: 토큰 hex가 `2026-08-05-dashboard-
+      white-orange-direction.ko.md`의 승인값과 정확히 일치하는지, 본문/보조/희미/강조
+      텍스트가 패널 배경에서 4.5:1 이상인지, 성공 상태 텍스트가 자기 배경에서 4.5:1
+      이상인지 (6개 테스트). 기준값은 승인 문서가 이미 계산해 명시한 17.01/5.07/4.77/
+      5.18:1을 그대로 재확인하는 것이지 새로 정하는 것이 아니다
+- [x] **Step 2: RED 확인** — 토큰 값 불일치 1건 검출 (`--vb-canvas`가 구 승인값 `#FAFAF9`)
 
 Run: `npm --prefix apps/web test -- src/styles`
 
-- [ ] **Step 3: 승인된 값 적용** — `2026-08-05-dashboard-white-orange-direction.ko.md`의
-      색 표를 토큰에 반영한다. 승인 기록에 없는 값은 넣지 않는다
-- [ ] **Step 4: 브라우저에서 실제 대비 측정** — 계산값이 아니라 렌더된 화면에서 확인한다
+- [x] **Step 3: 승인된 값 적용** — `ui-system.css`의 `:root`를 백색·오렌지 승인 표로 교체했다.
+      기존 승인에 없던 역할(진한 테두리·희미 텍스트·강조 배경/테두리·성공 상태)은
+      승인 문서의 값 그대로 새 변수(`--vb-border-strong`, `--vb-faint`, `--vb-accent-bg`,
+      `--vb-accent-border`, `--vb-success`, `--vb-success-bg`)로 추가했다.
+      shadcn 계열 변수(`--primary`, `--accent`, `--ring` 등)도 같은 값으로 맞췄다
+- [x] **Step 4: GREEN(6/6) + 브라우저에서 실제 대비 측정** — 프론트 전체 회귀 755/755 통과.
+      실행 중인 앱에서 계산된 스타일로 확인: 기본 버튼 `rgb(194,65,12)`(`#C2410C`),
+      셸 텍스트 `rgb(28,28,30)`(`#1C1C1E`), 사이드바 배경 `rgb(250,250,250)`(`#FAFAFA`) —
+      전부 승인값과 정확히 일치
 - [ ] **Step 5: GREEN + 브라우저 실측 + 커밋**
 
 Commit: `feat: apply the approved visual direction`
