@@ -1242,6 +1242,12 @@ Agent Gateway는 run ownership, context filtering, tool allowlist, idempotency, 
 
 ### 23.3A [~] 진행 중 (in progress) — GPT-5.4 mini profile·로컬 Qwen qualification·안전한 성장
 
+> **2026-08-05 owner 개정.** owner가 "유진을 로컬 LLM으로 먼저 동작시키고, 어댑터로
+> GPT-5.4 / 5.4-mini 전환을 쉽게" 하도록 방향을 확정했다. 아래 4항의
+> "유진의 자유 대화를 Qwen으로 대체하지 않는다"는 제약을 **로컬 우선 방침으로 대체한다.**
+> 개정 범위와 유지 경계는 `23.3B`에 적는다. 4항의 나머지 제약(대본·썸네일·추천 영상 생성
+> `disabled`, compression 결과 비신뢰, SSOT 불변)은 그대로 유지한다.
+
 유진의 주 대화/창작 route와 로컬 보조 route는 같은 agent로 위장하거나 자동 fallback하지 않는다. profile·모델·prompt·skill·route 결정은 모두 run ledger에 남기고, provider 변경은 별도 gate로 처리한다.
 
 1. `[x] 완료 (done)`: Hermes 공식 `openai-codex` ChatGPT OAuth route가 curated Codex model 목록에서 `gpt-5.4-mini`를 선택할 수 있음을 공식 provider 문서·모델 코드·release로 다시 확인했다. OpenAI API model page도 GPT-5.4 mini의 tool calling/structured output/400K context를 확인한다. 근거: <https://hermes-agent.nousresearch.com/docs/integrations/providers/>, <https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/models.py>, <https://developers.openai.com/api/docs/models/gpt-5.4-mini>.
@@ -1251,6 +1257,46 @@ Agent Gateway는 run ownership, context filtering, tool allowlist, idempotency, 
 5. `[ ] 미완료 (pending)`: Qwen task state(`disabled`, `shadow_only`, `needs_human_review`, `qualified`, `revoked`)는 각 task별로 독립 관리하며, 화살표 순서가 모든 task의 필수 순차 진행을 뜻하지 않는다. qualification 전에는 해당 task를 `shadow_only` 또는 `needs_human_review`로 유지한다. 한 task의 qualification은 다른 Qwen task, timeline/output, render/export, CapCut 또는 memory 권한으로 확대되지 않는다. 모든 state에서 Qwen은 DB/filesystem/shell/renderer/credential/direct mutation 권한이 없고, Hermes 실패 시 유진으로 위장하지 않는다. routing ledger에는 provider/runtime/model/profile/route reason, context category digest, schema/validator outcome, latency와 token/VRAM budget만 남긴다.
 6. `[ ] 미완료 (pending)`: 유진은 반복된 근거를 `skill candidate`로 제안할 수 있으나, 자기 prompt·권한·실행 코드를 자동 활성화/수정하지 않는다. candidate는 fixture replay, injection/security test, quality benchmark, deterministic policy check, 사람 review, immutable version activation을 모두 거쳐야 한다. activation 뒤에도 rollback/revoke owner와 manifest SHA를 ledger에 기록하며, candidate/failed skill은 production route에 영향을 주지 않는다.
 7. `[~] 진행 중 (in progress)`: `[x] 완료 (done)`: provider-neutral frozen evaluation core는 corpus/prompt-schema/renderer identity를 case에 고정하고, deep immutable sanitized fixture·strict object/schema allowlist·grounded claim·credential/path/tool/approval data rejection을 검사한다. 어떤 provider도 호출하거나 routing을 mutate하지 않으며, 통과해도 `shadow_only`이고 나머지는 `needs_human_review`다. `[x] 완료 (done, 2026-07-19)`: checked-in Korean shadow corpus는 external SHA-256 pin과 tamper 검증을 거치며, corpus/case/캡처 candidate를 재검증해 schema-valid·grounded·critical policy defect·사람 점수·correction time·95% CI report를 offline으로 기록한다. thresholds 통과도 항상 `needs_human_review`라 route activation 근거가 될 수 없다. `[x] 완료 (done, 2026-07-19)`: synthetic provider capture는 pinned corpus SHA·case/provider/runtime/model·candidate payload digest·opaque 사람 attestation을 함께 묶어 import하고, app-level append-only/tamper-evident hash-chain ledger와 write-once snapshot audit artifact로 보관한다. raw media/path·credential·tool·approval 데이터, capture/attestation replay, record/report 변조·순서 변경은 fail-closed하며, artifact는 이후 정상 append 뒤에도 당시 record snapshot으로 재검증된다. signing key나 external anchor는 아직 없으므로 OS/adversary-proof immutable이라고 주장하지 않으며, 어떤 report도 항상 `needs_human_review`이고 route activation 근거가 될 수 없다. `[ ] 미완료 (pending)`: frozen quality harness는 동일 prompt schema·fixed Korean corpus·sanitized VideoBox fixture·renderer version에서 GPT와 Qwen을 task별 실제 captured output으로 비교한다. schema-valid 98% 이상, grounded claim 95% 이상, critical policy defect 0, 사람 점수 Hermes 대비 -0.5/5 이내, correction time +10% 이내와 95% CI를 기록한다. 통과 전 Qwen은 shadow-only 또는 사람 review이며, 원본 raw media·경로·credential·mem0 원문을 cloud·local prompt에 넣지 않는다. 파생 frame 또는 sanitised approved tag는 해당 task policy와 benchmark가 적절한 gate를 통과한 경우에만 허용할 수 있으며, 일반 허용이 아니다.
+
+### 23.3B [ ] 미완료 (pending) — 로컬 우선 유진과 provider 어댑터 (2026-08-05 owner 개정)
+
+owner 결정으로 유진의 1차 대화 route를 **로컬 LLM**으로 바꾼다.
+외부 provider는 어댑터 뒤에서 선택 가능한 대안이 되며, 기본값이 아니다.
+
+**개정 근거:** 기존 23.3A.4는 로컬 Qwen을 conversation compression으로만 제한했다.
+그 제약은 외부 provider를 주 route로 전제한 설계였고, 그 전제는 아래 이유로 성립하지 않는다.
+
+1. §23.1 egress allowlist gateway가 아직 없어 외부 route 자체를 실행할 수 없다
+2. §23.2.6 capability signer도 배포되지 않았다
+3. 결과적으로 유진은 어느 경로로도 실제 대화를 해본 적이 없다
+4. 로컬 route는 외부 전송이 없어 egress·consent·budget gate 대상이 아니므로
+   가장 먼저 실제 동작을 확인할 수 있는 경로다
+
+**유지하는 경계 — 개정으로 완화하지 않는다:**
+
+- 유진은 DB, filesystem, shell, renderer, CapCut, raw HTTP, credential에 접근하지 않는다
+- 편집 mutation은 계속 사람 승인 게이트를 거친다. 대화의 "네"는 승인이 아니다
+- 대본·제목·썸네일·추천 영상 생성은 계속 제품 범위 밖이다 (`S-3` 별도 결정 전까지)
+- 모델 출력은 untrusted proposal이며 policy middleware가 매 tool call마다 권한을 재검사한다
+- VideoBox project·editing·asset·conversation DB가 계속 SSOT다. 모델 출력은 SSOT가 아니다
+- provider 전환은 항상 명시적이고 ledger에 기록한다. 조용한 대체나 자동 fallback은 금지다
+
+**로컬 route 경계:**
+
+- 모델은 호스트 LM Studio(`127.0.0.1:1234`)에 두고 컨테이너는 호출만 한다.
+  `architecture-plan.ko.md` §11이 GPU 의존 로컬 모델의 컨테이너화를 비권장하므로 이를 따른다
+- 로컬 호출은 외부 egress가 아니므로 §23.1 allowlist gate 대상이 아니다.
+  다만 컨테이너→호스트 경로를 여는 것은 네트워크 경계 변경이므로 `§10.14`에 따라 별도로 기록한다
+
+**provider 어댑터:**
+
+- 로컬 / `gpt-5.4` / `gpt-5.4-mini`를 같은 인터페이스 뒤에 둔다
+- 외부 provider 실제 사용은 §23.1 egress gate와 OAuth 로그인이 여전히 선행이다.
+  어댑터 구현과 외부 호출 활성화는 별개이며, 어댑터만으로 외부 호출이 열리지 않는다
+- §23.3A.3의 "조용히 대체하지 않는다"는 그대로 유효하다
+
+이 절의 구현 계획은 `docs/superpowers/plans/2026-08-05-videobox-owner-usable-recovery.md`
+Slice 5(Task 12–14)에 있다.
 
 ### 23.4 [ ] 미완료 (pending) — read-only workflow와 승인 경계
 
