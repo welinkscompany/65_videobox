@@ -250,27 +250,124 @@ Commit: `docs: reconcile the plan with measured runtime state`
 
 ## Slice 3 — 잔여 결함
 
-> **이 Slice의 Task 6–9는 의도적으로 개요만 적었다.**
-> Task 2 런타임 기준선이 각 항목의 실제 상태를 확정한 뒤 Step을 채운다.
-> 지금 상세 Step을 쓰면 실측 전 추측을 계획으로 굳히게 된다.
-> 착수 직전에 `§8.1` 재사용 게이트와 RED/GREEN Step을 추가한다.
+Task 2 실측이 세부를 조정할 수 있으나, 각 항목의 결함 자체는 이미 화면에서 직접 관측했으므로
+Step을 지금 확정한다. 실측으로 전제가 바뀌면 갱신 규칙에 따라 해당 Task를 수정한다.
 
 ### Task 6: 미리보기 자동 갱신 (F-4)
 
-편집 후 `미리보기 새로 만들기`를 수동으로 눌러야 하고 `stale` 상태가 그대로 노출된다.
-자동 갱신 정책과 §10.13 문구를 함께 정한다.
+편집 후 `미리보기 새로 만들기`를 수동으로 눌러야 한다. `stale` 상태가 화면에 그대로 노출된다.
+편집 → 확인 왕복이 끊겨 체감 속도를 떨어뜨린다.
 
-### Task 7: 타임라인 내부 식별자를 사람이 읽는 라벨로 (F-3)
+**재사용 게이트 (§8.1):**
 
-`broll:session-broll-segment_draft_1726b9574a-0` 형태의 접근성 이름을 교체한다.
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `exact-preview-state.ts` | `adopt as-is` | freshness 판정 로직이 이미 있다. 상태 계산을 새로 만들지 않는다 |
+| `EditorWorkbenchRoute.tsx`의 기존 polling | `partial port` | 이미 pending preview를 polling한다. 트리거 조건만 확장한다 |
+| 새 상태 머신 | `exclude` | 기존 revision·freshness 계약으로 충분하다 |
+
+**Files:**
+- Modify: `apps/web/src/features/editor/preview/exact-preview-state.ts`
+- Modify: `apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx`
+- Modify: `apps/web/src/features/editor/preview/preview-stage.tsx`
+- Modify: 각 대응 테스트 파일
+
+- [ ] **Step 1: 실패 테스트** — 편집 mutation 뒤 미리보기가 자동으로 갱신 요청되는지,
+      갱신 중 상태 문구가 `§10.13` 창작자 언어인지(`stale` 같은 내부 용어 금지),
+      연속 편집 시 요청이 중복되지 않는지
+- [ ] **Step 2: RED 확인**
+
+Run: `npm --prefix apps/web test -- src/features/editor/preview`
+
+- [ ] **Step 3: 구현** — mutation 성공 후 현재 revision 기준으로 갱신을 트리거한다.
+      진행 중 재편집이 오면 최신 요청만 유효하게 유지한다(기존 latest-request 규칙 재사용).
+      자동 갱신 실패 시 기존 수동 버튼을 폴백으로 남긴다
+- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+
+Commit: `feat: refresh the preview after an edit`
+
+### Task 7: 타임라인 클립 이름을 사람이 읽는 말로 (F-3)
+
+클립 접근성 이름이 `broll:session-broll-segment_draft_1726b9574a-0 클립 선택` 형태다.
+근거: `apps/web/src/features/editor/timeline/TimelineDock.tsx:536`의
+`aria-label={`${rect.clipId} 클립 선택`}`이 내부 ID를 그대로 쓴다.
+`§10.13.3`의 내부 용어 노출 금지 취지에 어긋난다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| 기존 트랙 이름(`내레이션`, `B-roll`, `BGM`, `효과음`, `오버레이`, `자막`) | `adopt as-is` | 이미 창작자 언어다. 라벨 구성에 재사용한다 |
+| 새 명명 체계 | `rewrite` | 트랙 이름 + 순번 + 시간으로 조합하는 최소 포맷터 |
+
+**Files:**
+- Modify: `apps/web/src/features/editor/timeline/TimelineDock.tsx`
+- Modify: `apps/web/src/features/editor/timeline/TimelineDock.test.tsx`
+
+- [ ] **Step 1: 실패 테스트** — 클립 접근성 이름에 내부 ID가 없고
+      트랙 이름과 순번으로 사람이 읽을 수 있는지 (예: `B-roll 2번째 장면, 3초부터`)
+- [ ] **Step 2: RED 확인**
+
+Run: `npm --prefix apps/web test -- src/features/editor/timeline`
+
+- [ ] **Step 3: 구현** — 라벨 포맷터를 추가한다. 선택·조작 로직은 계속 `clipId`를 쓰고
+      **표시용 이름만** 바꾼다. 식별자와 표시명을 섞지 않는다
+- [ ] **Step 4: GREEN + 커밋**
+
+Commit: `feat: name timeline clips in plain language`
 
 ### Task 8: 프로젝트 삭제 경로 (F-5)
 
-API와 UI 모두 없다. 데이터 보존 정책과 확인 절차를 함께 설계한다.
+API와 UI 모두 없다. `local_project_store.py`에 삭제·보관 함수 자체가 없다.
+이번 세션에서 만든 `my-project`가 목록에 영구 잔존 중이다.
 
-### Task 9: 중복 액션 정리 (F-7)
+**선행 결정 — owner 확인 필요:** 삭제 방식을 먼저 정해야 한다.
 
-`새 영상 만들기`가 3곳에 있다. 주 진입점을 하나로 정한다.
+| 방식 | 결과 |
+|---|---|
+| 완전 삭제 | 프로젝트 폴더와 DB 레코드를 지운다. 되돌릴 수 없다 |
+| 보관 처리 | 목록에서 숨기고 데이터는 남긴다. 되돌릴 수 있고 용량은 그대로 |
+
+`§10.12.3`이 QA 증거에 `preserve-evidence`를 요구하는 취지를 고려하면 **보관 처리가 기본값**으로 적절하고,
+완전 삭제는 별도 확인 절차를 두는 것이 안전하다.
+
+**Files:**
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Modify: `services/api/src/videobox_api/routers/projects.py`
+- Modify: `apps/web/src/app/AppRouter.tsx`, `apps/web/src/api.ts`
+- Create: `tests/test_project_archive.py`
+
+- [ ] **Step 1: 실패 테스트** — 보관 처리 후 목록에서 빠지는지, 데이터가 남는지,
+      존재하지 않는 프로젝트 요청이 안전하게 실패하는지, 되돌리기가 되는지
+- [ ] **Step 2: RED 확인**
+
+Run: `.venv\Scripts\python.exe -m pytest tests/test_project_archive.py -q`
+
+- [ ] **Step 3: 구현** — store에 보관 상태를 추가하고 라우터와 UI를 연결한다.
+      UI는 확인 단계를 거치며 `§10.13` 창작자 언어를 쓴다
+- [ ] **Step 4: GREEN + 전체 회귀 + 커밋**
+
+Commit: `feat: let the owner put a project away`
+
+### Task 9: 중복 진입점 정리 (F-7)
+
+`새 영상 만들기`가 사이드바(`ProductShell.tsx:41`), 헤더 버튼(`ProductShell.tsx:56`),
+그리고 홈 화면 카드에 동시에 있다. 같은 동작이 세 번 보인다.
+
+**Files:**
+- Modify: `apps/web/src/app/ProductShell.tsx`
+- Modify: `apps/web/src/app/ProductShell.test.tsx`
+
+- [ ] **Step 1: 실패 테스트** — 같은 화면에서 동일 동작 진입점이 중복 노출되지 않는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — 사이드바 항목을 주 진입점으로 두고, 헤더 버튼은
+      해당 화면이 아닐 때만 보이게 하거나 제거한다. 홈 카드는 맥락 안내로 유지한다
+- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+
+Commit: `refactor: keep one way into video creation`
+
+**이 Task는 Slice 4 디자인 재승인과 겹칠 수 있다.** Task 10 승인 내용에 진입점 구조가 포함되면
+이 Task를 Slice 4로 흡수하고 여기서는 제외한다.
 
 ---
 
@@ -296,17 +393,46 @@ owner 요구: "어설픈 기능 말고 깔끔한 디자인으로 직관적이고
 - [ ] **Step 3:** owner 검토와 명시 승인을 `docs/decisions/`에 기록한다
 - [ ] **Step 4:** `--require-approved` 검증 통과 확인
 
-### Task 11: 승인된 방향을 구현에 반영
+### Task 11: 색상 토큰 일원화 (F-6) — Task 10과 병행 가능
+
+`apps/web/src/styles/product-shell.css`에 하드코딩 색상 19종이 있고 CSS 변수를 참조하지 않는다.
+실측: `--primary`를 바꿔도 기본 버튼은 `rgb(91,74,200)`을 유지한다.
+**이걸 먼저 고쳐야 어떤 디자인 승인도 실제 화면에 반영된다.**
+
+이 Task는 승인 내용과 무관하다. 색을 바꾸는 것이 아니라 **색을 바꿀 수 있게** 만드는 작업이므로
+Task 10 승인 전에 착수할 수 있다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `ui-system.css`의 기존 변수 세트 | `adopt as-is` | 이미 승인된 팔레트 값이 변수로 정의돼 있다 |
+| `product-shell.css` 하드코딩 19종 | `rewrite` | 같은 값을 변수 참조로 바꾼다. **색상값 자체는 바꾸지 않는다** |
+| 새 디자인 토큰 체계 | `exclude` | 기존 변수 이름을 그대로 쓴다 |
+
+**Files:**
+- Modify: `apps/web/src/styles/product-shell.css`
+- Modify: `apps/web/src/styles/editor-workbench.css` (하드코딩 `#08090b` 확인)
+- Create: `apps/web/src/styles/theme-tokens.test.ts`
+
+- [ ] **Step 1: 실패 테스트** — 셸 CSS에 하드코딩 hex가 남아 있지 않은지,
+      `--primary`를 바꾸면 기본 버튼 색이 실제로 따라 바뀌는지
+- [ ] **Step 2: RED 확인**
+
+Run: `npm --prefix apps/web test -- src/styles`
+
+- [ ] **Step 3: 구현** — 하드코딩 19종을 대응 변수로 치환한다.
+      **현재 승인된 색상값과 시각적으로 동일해야 한다.** 이 Task는 리팩터링이지 디자인 변경이 아니다
+- [ ] **Step 4: GREEN + 브라우저에서 변수 변경이 반영되는지 실측 + 커밋**
+
+Commit: `refactor: drive shell colours from theme tokens`
+
+### Task 11A: 승인된 디자인을 화면에 반영
 
 > **Step은 Task 10 승인 결과가 나온 뒤 채운다.** 무엇을 승인받는지 정해지기 전에는
-> 구현 Step을 쓸 수 없다. 아래는 승인 내용과 무관하게 확정된 작업 범위다.
+> 구현 Step을 쓸 수 없다. Task 11이 선행이다.
 
-- 범위 1: `F-6` 하드코딩 색상 19종을 CSS 변수로 일원화한다.
-  이걸 해야 테마 변경이 실제로 화면에 반영된다. 현재는 변수를 바꿔도 셸 색이 그대로다
-- 범위 2: 승인된 팔레트를 변수에 반영하고 대비(4.5:1) 회귀 테스트를 추가한다
-- 범위 3: `F-7` 중복 진입점을 정리한다
-
-`F-6`은 승인 내용과 무관하게 필요하므로 Task 10과 병행 착수할 수 있다.
+확정된 범위: 승인된 팔레트를 변수에 반영하고 대비(4.5:1) 회귀 테스트를 추가한다.
 
 ---
 
@@ -388,15 +514,18 @@ Task 14개 중 상세 Step까지 완성된 것과 개요만 있는 것을 구분
 
 | Task | 상태 |
 |---|---|
-| 1, 2, 3, 4, 10, 13, 14 | 상세 Step·Files·재사용 게이트 완성 |
+| 1–4, 6–11, 13, 14 | 상세 Step·Files·재사용 게이트 완성 |
 | 5 | 간략하지만 실행 가능 |
 | 12 | **완료** (2026-08-05, 커밋 `d503ce2`) |
-| 6, 7, 8, 9 | **개요만.** Task 2 실측 후 Step을 채운다 |
-| 11 | **개요만.** Task 10 승인 결과 후 Step을 채운다 |
+| 11A | **개요만.** Task 10 승인 결과가 나와야 쓸 수 있다 |
 
-Task 6–9와 11을 지금 채우지 않는 이유는 게으름이 아니라,
-실측·승인 전에 상세 Step을 쓰면 추측을 계획으로 굳히기 때문이다.
-이 계획서에서 이미 다섯 건의 판단이 실측으로 뒤집혔다.
+Task 11A만 비워둔다. 무엇을 승인받는지 정해지기 전에 구현 Step을 쓰면 순서가 뒤바뀐다.
+
+처음에는 Task 6–9도 "실측 전이라 못 쓴다"고 미뤄뒀으나, 각 결함을 이미 화면에서
+직접 관측했으므로 그 판단은 틀렸다. owner 지적으로 바로잡고 Step을 채웠다.
+실측이 전제를 바꾸면 갱신 규칙에 따라 수정한다.
+
+**owner 결정이 필요한 항목:** Task 8의 삭제 방식(완전 삭제 vs 보관 처리).
 
 ## 이 계획서의 갱신 규칙
 
