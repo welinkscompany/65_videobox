@@ -144,6 +144,18 @@ describe("product shell", () => {
     expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
   });
 
+  it("keeps a single '새 영상 만들기' entry point outside the home screen (F-7)", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
+    vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [] });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/media"] }));
+    render(<AppRouter router={router} />);
+
+    await screen.findByTestId("media-workspace-page");
+
+    expect(screen.getAllByRole("button", { name: "새 영상 만들기" })).toHaveLength(1);
+  });
+
   it("shows creator navigation, a project switcher, and an action-only home", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
