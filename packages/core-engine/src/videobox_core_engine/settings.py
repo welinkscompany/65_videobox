@@ -22,6 +22,35 @@ def resolve_user_library_root() -> Path:
     return DEFAULT_PROJECTS_ROOT.parent / "videobox-user-library"
 
 
+DEFAULT_MEDIA_INBOX_WATCH_PATH = Path(r"G:\내 드라이브\100_videobox")
+
+
+def resolve_media_inbox_watch_path() -> Path | None:
+    """Resolve the folder VideoBox watches for footage moved in from outside.
+
+    Owner decision (2026-08-05): the watched folder is whatever a Google
+    Drive desktop client happens to sync to disk. VideoBox has no Drive API
+    dependency and does not know it is watching a cloud-synced folder --
+    that ignorance is what keeps this off implementation-plan.ko.md's
+    "no Google Sheets/Drive coupling" ban. Returns None (watching disabled)
+    if explicitly cleared via VIDEOBOX_MEDIA_INBOX_WATCH_PATH="".
+    """
+    if "VIDEOBOX_MEDIA_INBOX_WATCH_PATH" in os.environ:
+        configured = os.environ["VIDEOBOX_MEDIA_INBOX_WATCH_PATH"].strip()
+        return Path(configured) if configured else None
+    return DEFAULT_MEDIA_INBOX_WATCH_PATH
+
+
+def resolve_media_inbox_library_root() -> Path:
+    """Resolve where verified inbox footage lands. This is a plain local
+    folder outside any single project -- the same B-roll should be usable
+    from more than one project, matching the existing
+    MediaLibraryStore/ProjectAssetMaterializer split (a project only ever
+    gets a copy)."""
+    configured = os.environ.get("VIDEOBOX_MEDIA_INBOX_LIBRARY_ROOT", "").strip()
+    return Path(configured) if configured else resolve_user_library_root() / "media-inbox"
+
+
 def resolve_database_url() -> str | None:
     configured = os.environ.get("VIDEOBOX_DATABASE_URL", "").strip()
     return configured or None

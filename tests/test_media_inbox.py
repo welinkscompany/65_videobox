@@ -1,0 +1,158 @@
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+from videobox_core_engine.media_inbox import (
+    MediaInboxConfig,
+    is_file_settled,
+    run_inbox_cycle,
+    scan_inbox_candidates,
+)
+
+
+def test_scan_finds_video_files_recursively_and_ignores_noise(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive-folder"
+    (watch_root / "가로" / "FHD").mkdir(parents=True)
+    top_video = watch_root / "clip.mp4"
+    top_video.write_bytes(b"top")
+    nested_video = watch_root / "가로" / "FHD" / "nested.mov"
+    nested_video.write_bytes(b"nested")
+    (watch_root / "desktop.ini").write_text("[.ShellClassInfo]")
+    (watch_root / ".hidden_video.mp4").write_bytes(b"hidden")
+    (watch_root / "notes.txt").write_text("not a video")
+    (watch_root / "thumbnails").mkdir()
+    (watch_root / "thumbnails" / "cover.jpg").write_bytes(b"jpg")
+
+    found = scan_inbox_candidates(watch_root)
+
+    assert sorted(path.relative_to(watch_root).as_posix() for path in found) == [
+        "clip.mp4",
+        "가로/FHD/nested.mov",
+    ]
+
+
+def test_scan_returns_empty_for_a_missing_or_nonexistent_watch_root(tmp_path: Path) -> None:
+    assert scan_inbox_candidates(tmp_path / "does-not-exist") == []
+
+
+def test_is_file_settled_requires_two_stable_stat_reads(tmp_path: Path) -> None:
+    path = tmp_path / "growing.mp4"
+    path.write_bytes(b"partial")
+    sizes = iter([7, 20])  # size changes between reads -> still downloading
+
+    def fake_stat_size(candidate: Path) -> int:
+        del candidate
+        return next(sizes)
+
+    waited: list[float] = []
+    assert is_file_settled(path, stat_size=fake_stat_size, wait=waited.append, wait_seconds=0.5) is False
+    assert waited == [0.5]
+
+
+def test_is_file_settled_is_true_when_size_does_not_change(tmp_path: Path) -> None:
+    path = tmp_path / "done.mp4"
+    path.write_bytes(b"complete file")
+    assert is_file_settled(path, wait=lambda _seconds: None, wait_seconds=0.01) is True
+
+
+def test_verify_and_move_moves_only_after_hash_matches_and_original_disappears(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    source = watch_root / "clip.mp4"
+    source.write_bytes(b"real footage bytes")
+
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    report = run_inbox_cycle(config)
+
+    assert report.moved == ["clip.mp4"]
+    assert report.failed == []
+    assert not source.exists()
+    moved_path = library_root / "clip.mp4"
+    assert moved_path.read_bytes() == b"real footage bytes"
+
+
+def test_run_inbox_cycle_skips_unsettled_files_and_leaves_them_for_the_next_pass(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    source = watch_root / "still-syncing.mp4"
+    source.write_bytes(b"partial")
+
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    report = run_inbox_cycle(config, is_settled=lambda _path: False)
+
+    assert report.moved == []
+    assert report.skipped == ["still-syncing.mp4"]
+    assert source.exists()
+    assert not (library_root / "still-syncing.mp4").exists()
+
+
+def test_run_inbox_cycle_deduplicates_by_content_hash_against_an_existing_library_file(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    (library_root / "already-here.mp4").write_bytes(b"same bytes")
+    duplicate_source = watch_root / "duplicate.mp4"
+    duplicate_source.write_bytes(b"same bytes")
+
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    report = run_inbox_cycle(config)
+
+    assert report.duplicates == ["duplicate.mp4"]
+    assert report.moved == []
+    # Duplicate handling still removes the redundant source (matches the
+    # decision doc: Drive's own trash is the 30-day safety net, VideoBox
+    # does not need to keep redundant copies around forever).
+    assert not duplicate_source.exists()
+
+
+def test_run_inbox_cycle_never_deletes_the_source_when_the_move_itself_fails(tmp_path: Path, monkeypatch) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    source = watch_root / "clip.mp4"
+    source.write_bytes(b"real footage bytes")
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+
+    import videobox_core_engine.media_inbox as media_inbox_module
+
+    def broken_move(_src, _dst):
+        raise OSError("simulated disk failure")
+
+    monkeypatch.setattr(media_inbox_module.shutil, "move", broken_move)
+    report = run_inbox_cycle(config)
+
+    assert report.failed == ["clip.mp4"]
+    assert report.moved == []
+    assert source.exists()
+    assert source.read_bytes() == b"real footage bytes"
+
+
+def test_run_inbox_cycle_continues_past_one_failure_to_process_the_rest(tmp_path: Path, monkeypatch) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    bad = watch_root / "bad.mp4"
+    bad.write_bytes(b"bad bytes")
+    good = watch_root / "good.mp4"
+    good.write_bytes(b"good bytes")
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+
+    import videobox_core_engine.media_inbox as media_inbox_module
+    real_move = media_inbox_module.shutil.move
+
+    def flaky_move(src, dst):
+        if Path(src).name == "bad.mp4":
+            raise OSError("simulated disk failure")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(media_inbox_module.shutil, "move", flaky_move)
+    report = run_inbox_cycle(config)
+
+    assert sorted(report.failed) == ["bad.mp4"]
+    assert sorted(report.moved) == ["good.mp4"]
+    assert bad.exists()
+    assert not good.exists()
