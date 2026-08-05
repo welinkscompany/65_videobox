@@ -167,8 +167,25 @@ describe("product shell", () => {
     expect(screen.getByText("최근 완성본")).toBeTruthy();
     expect(screen.queryByText(/provider|job metric/i)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /두 번째 영상/ }));
+    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/second/home"));
+  });
+
+  it("archives a project from the switcher after a confirm step, and it drops off the list (F-5)", async () => {
+    vi.spyOn(api, "listProjects")
+      .mockResolvedValueOnce(projects)
+      .mockResolvedValueOnce([projects[0]]);
+    const archiveProject = vi.spyOn(api, "archiveProject").mockResolvedValue({ ...projects[1], status: "archived" });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("navigation", { name: "영상 제작" });
+
+    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관하기" }));
+    expect(archiveProject).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관 확인" }));
+
+    await waitFor(() => expect(archiveProject).toHaveBeenCalledWith("second"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
   });
 
   it("persists a working appearance setting and only exposes local privacy choices", async () => {
