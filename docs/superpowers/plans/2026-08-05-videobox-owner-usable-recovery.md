@@ -929,7 +929,7 @@ Commit: `feat: find b-roll by meaning`
 
 **이 Task는 owner 판단이 최종 기준이다.** 추천이 실제로 쓸 만한지는 사람이 봐야 안다.
 
-### Task 21: 자동 배치 정책 확정 (S-2)
+### Task 21: 자동 배치 정책 확정 (S-2) — **완료 (2026-08-05)**
 
 owner 결정: **완전 자동 배치 후 검토.**
 
@@ -957,14 +957,28 @@ end-to-end 실행 시 **세그먼트 14개 전부가 `segment_review_required`�
       owner 실제 영상 재검증에서 14개 중 3개가 review 대상에서 빠졌다(0.19→0.873).
       남은 11개는 0.816~0.821로 근소 미달 — 여기부터가 진짜 정책 질문이다.
       커밋: `fix: score STT confidence from decode quality, not speech presence`
-- [ ] **Step 1: 실패 테스트** — 점수 임계값 이상이면 `auto_apply_allowed`가 참이고 review가 걸리지 않는지,
-      미만이면 검수 대상으로 남는지. 권리 경고가 있으면 점수와 무관하게 자동 적용되지 않는지
-- [ ] **Step 2: RED 확인**
-- [ ] **Step 3: 구현** — 자산 종류별 임계값을 설정 가능하게 둔다.
-      B-roll·BGM은 자동, 권리 확인이 필요한 것은 검수 유지
-- [ ] **Step 4: GREEN + `verify_owner_path.py`로 timeline_build 이후 단계까지 실제 통과 확인 + 커밋**
+- [x] **Step 1: 실패 테스트** — `tests/test_auto_apply_policy.py`. 기본값(false)은 기존처럼
+      막고, `auto_approve_segment_review=true`면 review가 있어도 승인되며 플래그 자체는
+      timeline에 그대로 남아 나중에 볼 수 있는지
+- [x] **Step 2: RED 확인** — `resolve_auto_approve_segment_review` 없어 import 실패
+- [x] **Step 3: 구현** — owner가 Option A를 선택했다. 자산 종류별 임계값이 아니라
+      **세그먼트 review 자체를 승인 차단에서 제외**하는 정책 스위치로 구현했다.
+      `resolve_auto_approve_segment_review()`(환경변수 `VIDEOBOX_AUTO_APPROVE_SEGMENT_REVIEW`,
+      컨테이너 기본값 `1`) → `LocalPipelineRunner(auto_approve_segment_review=...)` →
+      `_normalized_timeline_blockers`에서 `segment_review_required`만 차단 목록에서 제외.
+      플래그 데이터 자체는 지우지 않는다 — owner가 나중에 결과를 보고 판단한다
+- [x] **Step 4: GREEN(3/3) + `verify_owner_path.py --auto-approve-segment-review`로
+      owner 실제 영상 최종 확인 — **9단계 전부 통과**(ingest→...→capcut_draft_export
+      실제 draft 폴더 생성까지). 커밋 3건**
 
-Commit: `feat: place confident recommendations automatically`
+과정에서 발견·수정한 파생 버그 2건은 `S-4`(findings backlog)에 기록했다:
+CapCut 임시 폴더 정리 시 Windows 파일 잠금으로 성공한 job이 실패로 찍히던 문제
+(`ignore_cleanup_errors=True`), 그리고 `verify_owner_path.py` 자체가
+draft export 결과를 잘못된 API로 읽던 버그.
+
+Commit: `feat: place confident recommendations automatically`,
+`fix: let capcut draft export survive an unremovable temp directory`,
+`fix: read capcut draft export results with the right getter`
 
 ---
 

@@ -300,7 +300,25 @@ owner는 세션 중 "캡컷처럼 인터페이스를 만들어야 한다"고 말
 - 재현: `verify_owner_path.py`를 아무 실제 나레이션+B-roll로 돌리면 재현된다
 - 영향: 버그 수정으로 완전히 막히던 상태에서 "근소 미달"로 바뀌었다.
   Task 21의 임계값 조정 또는 owner의 "완전 자동 배치" 결정 적용만으로 해소 가능
-- 상태: **버그 수정 완료.** 남은 건 Task 21의 임계값/정책 결정
+- 상태: **완전히 해소함 (2026-08-05).** owner가 Option A(완전 자동 배치 후 검토)를 확정했고
+  `auto_approve_segment_review` 정책으로 구현했다. `verify_owner_path.py`로
+  owner 실제 영상 재검증 — **9단계 전부 통과**: ingest→transcription(실제
+  faster_whisper)→segment_analysis→broll_recommendation→timeline_build(승인
+  성공)→preview_render→subtitle_render→final_render(실제 mp4 74.6MB)→
+  capcut_draft_export(실제 draft 폴더). 스텁 없이 전체 파이프라인이 처음부터
+  끝까지 도는 것을 이 프로젝트에서 처음으로 확인했다.
+
+과정에서 파생 버그 2건을 추가로 찾아 고쳤다.
+
+- **CapCut 임시 폴더 정리 실패**: pycapcut이 열어둔 파일 핸들 때문에 Windows에서
+  `tempfile.TemporaryDirectory` 정리가 `PermissionError`로 실패해, 실제로는 export가
+  성공했는데도 job이 실패로 찍혔다. `ignore_cleanup_errors=True`로 수정.
+  `packages/core-engine/src/videobox_core_engine/local_pipeline.py`
+- **`verify_owner_path.py` 자체의 버그**: draft export(폴더)의 결과를
+  `get_capcut_export_result`(구버전 단일 파일용)로 읽으려 해서 디렉터리를
+  텍스트 파일처럼 열려다 실패했다. `get_capcut_draft_export_result`로 수정.
+  이게 "CapCut 버그"처럼 보였던 진짜 원인이었다 — 제품 코드가 아니라 검증
+  스크립트가 API를 잘못 추측해서 부른 것
 
 ### S-3. 대본 생성이 계획서에서 명시적으로 차단됨
 
