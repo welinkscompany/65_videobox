@@ -382,7 +382,26 @@ Run: `npm --prefix apps/web test -- src/features/editor/timeline`
 
 Commit: `feat: name timeline clips in plain language`
 
-### Task 8: 프로젝트 삭제 경로 (F-5) — **보관 API·화면 진입점 완료, 복원 화면·완전 삭제는 범위 밖 (2026-08-06)**
+### Task 8: 프로젝트 삭제 경로 (F-5) — **완료 (2026-08-06). 보관 + 완전 삭제(이중 확인) 모두 구현·검증됨**
+
+owner 결정(2026-08-06): "정말 지울지 알림은 있어야되. 이중알림으로 해줘" — 완전 삭제를
+이중 확인(3단계: 완전 삭제 → 1차 확인 → 영구 삭제) UI로 구현. 서버도 `?confirm=true`를
+항상 요구해 UI 우회 시도를 한 번 더 막는다.
+
+- `LocalProjectStore`/`PostgresProjectStore.delete_project_permanently`: 프로젝트 디렉터리
+  (Postgres는 공유 `projects` 행도 함께) 제거. 실제 Postgres 16 컨테이너로 라이브 검증함.
+- `DELETE /api/projects/{id}?confirm=true` — `confirm` 없으면 400.
+- `ProductShell.tsx`의 3단계 확인 UI, `AppRouter.tsx`의 모든 진입점에 핸들러 연결.
+- 브라우저 실런타임으로 실제 프로젝트 생성 → 3단계 클릭 → API 목록에서 실제 사라짐까지 확인함
+  (테스트 통과만이 아니라 살아있는 API·UI로 재검증).
+- 이 검증 과정에서 발견한 별개 이슈: 세션 중 떠 있던 API 서버 프로세스가 시스템 python으로
+  기동돼 있어 새 DELETE 라우트가 없는 옛 코드를 서빙 중이었다(405). `.venv` 프로세스로
+  교체 재기동 후 정상 동작 확인 — 저장소 코드 결함이 아니라 뜬 프로세스 문제였다.
+
+Commit: `fix: default unspecified render orientation to landscape (F-9)`,
+`feat: add permanent project deletion with double confirmation (Task 8)`
+
+<details><summary>이전 경과 기록 (2026-08-06 이전, 보관 API만 있던 시점)</summary>
 
 API와 UI 모두 없다. `local_project_store.py`에 삭제·보관 함수 자체가 없다.
 이번 세션에서 만든 `my-project`가 목록에 영구 잔존 중이다.
@@ -440,6 +459,11 @@ Commit: `feat: let the owner put a project away`
 프로젝트가 어디에도 나열되지 않아 되돌릴 곳이 없다), 완전 삭제(범위 밖 유지).
 
 Commit: `feat: wire project archiving into the project switcher`
+
+**완전 삭제(2026-08-06 최종): 위 상단 요약 참고.** 복원 화면은 여전히 없음(보관된
+프로젝트를 되돌릴 UI 진입점 부재) — owner가 별도로 요청하면 후속 Task로 다룬다.
+
+</details>
 
 ### Task 9: 중복 진입점 정리 (F-7) — **완료 (2026-08-06)**
 
@@ -820,7 +844,7 @@ owner의 실제 사용 방식("평소에 다양한 B-roll을 녹화해서 저장
 
 Commit: `feat: add media from the asset screen`
 
-### Task 17: 숏폼 편집 — 세로 캔버스로 기존 편집기 재사용 — **백엔드 완료, 놀라운 사실 발견 (2026-08-06)**
+### Task 17: 숏폼 편집 — 세로 캔버스로 기존 편집기 재사용 — **완료, F-9 owner 결정까지 반영 (2026-08-06)**
 
 **실측으로 계획서 전제 자체가 틀렸다는 걸 알았다.** 이 Task는 "지금은 가로만 되니
 세로를 추가해야 한다"는 전제였는데, 실제로 확인해보니 **정반대였다.**
@@ -898,6 +922,17 @@ Commit: `feat: add media from the asset screen`
 전부 세로였다는 사실 자체가 owner에게 먼저 확인받아야 할 사안이라고 판단했다.
 
 Commit: `feat: let projects choose a vertical or landscape canvas`
+
+**F-9 owner 결정 및 반영 (2026-08-06):** "가로로 기본값으로 해야지. 다른 일반 캡컷이나
+프리미어 프로도 모두 기본이 가로야" — 명시 안 하면 **가로(1920×1080)**를 기본값으로
+확정. `build_timeline`의 `resolved_orientation = orientation or "landscape"`로
+`timeline["output"]`을 항상 명시적으로 채우도록 고쳐, `CompositionPlan`의 세로 기본
+상수(`DEFAULT_OUTPUT_WIDTH/HEIGHT`)에 암묵적으로 기대는 경로 자체를 없앴다.
+`test_vertical_composition.py`의 미지정-오리엔테이션 테스트를 GREEN으로 재작성해 확인.
+`docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md`의 S-5/F-9
+항목도 이 결정으로 종결 처리했다.
+
+Commit: `fix: default unspecified render orientation to landscape (F-9)`
 
 **owner 결정 (2026-08-05):** "지금 편집기를 세로화면으로 쓰면 되."
 
