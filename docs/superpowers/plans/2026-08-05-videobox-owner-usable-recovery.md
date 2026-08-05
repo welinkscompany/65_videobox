@@ -553,9 +553,26 @@ B-roll 오디오를 건너뛴다. 즉 **B-roll은 기본 무음이고 명시적�
 - Modify: `apps/web/src/features/editor/assets/editorAssetProjection.ts`
 - Create: `tests/test_asset_intake_metadata.py`
 
+**저장 위치 — 태그가 아니라 별도 필드다.**
+
+가로/세로는 사용자가 정하는 값이 아니라 영상 파일에서 계산되는 사실이므로
+`tags` 배열이 아니라 독립 metadata 필드에 넣는다.
+
+| 구분 | 저장 위치 | 예 |
+|---|---|---|
+| 기계가 계산한 사실 | metadata 필드 | `orientation`, `duration_sec`, `width`, `height`, `has_audio` |
+| 사용자가 붙인 의미 | `tags` 배열 | `카페`, `야외`, `타이핑` |
+
+`tags`에 넣으면 사용자가 태그를 정리하다 지우거나 오타를 내면 분류가 깨진다.
+`tags`는 사용자의 의미 태그 전용으로 비워둔다.
+
+화면에서는 편집기 자산 목록의 기존 필터(`전체`/`B-roll`/`BGM`/`SFX`) 옆에
+`가로`/`세로` 필터를 추가해 노출한다. 숏폼 작업 시 세로 소재만 걸러 보기 위한 것이다.
+
 - [ ] **Step 1: 실패 테스트** — 등록된 B-roll의 metadata에
       `duration_sec`, `width`, `height`, `orientation`, `has_audio`가 있는지.
-      `orientation`은 `가로`/`세로`/`정사각`으로 분류되는지
+      `orientation`은 `가로`/`세로`/`정사각`으로 분류되는지.
+      `tags` 배열이 이 값들로 오염되지 않는지
 - [ ] **Step 2: RED 확인**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_asset_intake_metadata.py -q`
@@ -563,8 +580,8 @@ Run: `.venv\Scripts\python.exe -m pytest tests/test_asset_intake_metadata.py -q`
 - [ ] **Step 3: 구현** — 등록 시 probe 결과를 metadata에 저장한다.
       `orientation`은 width/height 비교로 판정한다. probe 실패는 등록을 막지 않고
       해당 필드만 비운다(기존 썸네일 실패 처리와 동일한 폴백)
-- [ ] **Step 4: 프론트 표시 연결** — 자산 카드에 길이와 오디오 유무를 실제 값으로 표시한다.
-      `§10.13` 창작자 언어를 쓴다
+- [ ] **Step 4: 프론트 표시 연결** — 자산 카드에 길이와 오디오 유무를 실제 값으로 표시하고,
+      자산 목록에 `가로`/`세로` 필터를 추가한다. `§10.13` 창작자 언어를 쓴다
 - [ ] **Step 5: GREEN + 브라우저 실측 + 커밋**
 
 Commit: `feat: keep size, length, and audio when media is added`
@@ -658,9 +675,16 @@ VideoBox가 그 폴더를 감시하다가 파일을 라이브러리로 **이동*
 
 **확인이 필요한 전제:**
 
-1. 이 PC에 Drive 데스크톱 앱이 설치되어 있지 않다. 설치가 선행이다
+1. ~~이 PC에 Drive 데스크톱 앱이 설치되어 있지 않다~~ → **owner가 설치하기로 함 (2026-08-05).**
+   설치 후 동기화 폴더 경로를 확인해 감시 대상으로 설정한다
 2. 동기화 폴더에서 파일을 옮겼을 때 Drive에서 실제로 지워지는지는
    앱 동작 모드(미러/스트림)에 따라 다를 수 있다. **실제로 확인해야 한다**
+
+**owner 결정 (2026-08-05): 로컬 동기화 폴더 감시 방식으로 진행한다.**
+Drive API를 쓰지 않으므로 `implementation-plan.ko.md` §8·§8.1과
+`architecture-plan.ko.md` §12의 Drive 결합 금지 조항을 개정할 필요가 없다.
+감시 대상은 설정 가능한 로컬 경로이며, VideoBox는 그것이 어떤 클라우드의
+동기화 폴더인지 알지 못한다. 이 무지가 조항 준수의 근거다.
 
 **안전 요건 — 데이터 손실 방지:**
 
