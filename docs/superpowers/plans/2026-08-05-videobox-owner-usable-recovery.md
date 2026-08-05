@@ -507,6 +507,120 @@ GPT 경로 실제 사용은 §23.1 egress gate와 OAuth 로그인이 선행이�
 
 ---
 
+## Slice 6 — 영상 반입과 숏폼 (2026-08-05 owner 추가 요구)
+
+owner 추가 요구 4건을 조사한 결과다.
+
+| 요구 | 현재 상태 |
+|---|---|
+| 업로드 영역 | **부분만 존재** |
+| B-roll 자동 무음 | **이미 구현됨** |
+| 가로/세로 판별 | **미구현** |
+| 숏폼 편집기 | **미구현** |
+
+### B-roll 자동 무음은 이미 동작한다 — 새 작업 없음
+
+`media_controls.py:50`의 `preserve_source_audio` 기본값이 `False`이고,
+`ffmpeg_final_renderer.py:222`가 `if not controls["preserve_source_audio"]: continue`로
+B-roll 오디오를 건너뛴다. 즉 **B-roll은 기본 무음이고 명시적으로 켤 때만 소리가 살아난다.**
+나레이션·원본 영상은 B-roll 트랙이 아니므로 영향받지 않는다.
+
+요구사항이 이미 충족되므로 구현 Task를 만들지 않는다.
+다만 **사용자가 이 상태를 화면에서 볼 수 없다.** 자산 카드가 오디오 유무를 표시하지 않는다.
+이 노출은 Task 15에서 함께 처리한다.
+
+### Task 15: 자산 반입 시 실제 정보 저장 (F-2와 같은 뿌리)
+
+현재 B-roll 등록은 `metadata={"title", "tags"}`만 저장한다(`local_pipeline.py:494`).
+실제 API 응답에서도 `title`, `tags`, `thumbnail_uri` 세 키뿐이다.
+
+**크기·길이·오디오 유무를 버리고 있다.** `media_probe.probe()`가 이미
+`duration_sec`, `width`, `height`, 코덱, 대표 프레임을 반환하는데 저장하지 않는다.
+자산 카드의 `길이 정보 없음`, `오디오 정보 확인 중`이 여기서 나온다.
+
+이 Task 하나로 owner 요구 3번(가로/세로)과 `F-2`의 나머지 절반이 함께 해결된다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `media_probe.MediaProbe.probe()` | `adopt as-is` | 필요한 값을 이미 전부 반환한다 |
+| `_try_generate_broll_thumbnail` | `partial port` | 같은 등록 시점에 probe 결과도 함께 저장하도록 확장한다 |
+| 새 probe 구현 | `exclude` | 기존 ffprobe 경로로 충분하다 |
+
+**Files:**
+- Modify: `packages/core-engine/src/videobox_core_engine/local_pipeline.py`
+- Modify: `apps/web/src/features/editor/assets/editorAssetProjection.ts`
+- Create: `tests/test_asset_intake_metadata.py`
+
+- [ ] **Step 1: 실패 테스트** — 등록된 B-roll의 metadata에
+      `duration_sec`, `width`, `height`, `orientation`, `has_audio`가 있는지.
+      `orientation`은 `가로`/`세로`/`정사각`으로 분류되는지
+- [ ] **Step 2: RED 확인**
+
+Run: `.venv\Scripts\python.exe -m pytest tests/test_asset_intake_metadata.py -q`
+
+- [ ] **Step 3: 구현** — 등록 시 probe 결과를 metadata에 저장한다.
+      `orientation`은 width/height 비교로 판정한다. probe 실패는 등록을 막지 않고
+      해당 필드만 비운다(기존 썸네일 실패 처리와 동일한 폴백)
+- [ ] **Step 4: 프론트 표시 연결** — 자산 카드에 길이와 오디오 유무를 실제 값으로 표시한다.
+      `§10.13` 창작자 언어를 쓴다
+- [ ] **Step 5: GREEN + 브라우저 실측 + 커밋**
+
+Commit: `feat: keep size, length, and audio when media is added`
+
+### Task 16: 자산 업로드 영역
+
+현재 파일 업로드는 `DraftGapMedia.tsx`에만 있고, "초안 준비 중 자산 부족" 경로에서
+`return_to` 파라미터를 달고 들어갈 때만 열린다. 자산 화면(`MediaWorkspacePage`)에는 파일 입력이 없다.
+즉 **평소에 B-roll을 쌓아두는 경로가 UI에 없다.**
+
+owner의 실제 사용 방식("평소에 다양한 B-roll을 녹화해서 저장")에 이 경로가 필요하다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `api.uploadDraftBroll` | `adopt as-is` | 업로드 엔드포인트가 이미 있다 |
+| `DraftGapMedia`의 업로드 UI | `partial port` | 파일 선택·상태 표시 패턴을 재사용한다 |
+| `MediaWorkspacePage` | `partial port` | 기존 자산 화면에 업로드 영역을 추가한다. 새 화면을 만들지 않는다 |
+
+**Files:**
+- Modify: `apps/web/src/features/media/MediaWorkspacePage.tsx`
+- Modify: 대응 테스트 파일
+
+- [ ] **Step 1: 실패 테스트** — 자산 화면에서 파일을 여러 개 올릴 수 있고,
+      진행·성공·실패 상태가 창작자 언어로 보이는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — 자산 화면에 업로드 영역을 추가한다.
+      Task 15가 선행이면 업로드 직후 길이·방향·썸네일이 바로 보인다
+- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+
+Commit: `feat: add media from the asset screen`
+
+### Task 17: 숏폼 편집 — 범위 결정 필요
+
+**현재 미구현이다.** 코드에 숏폼 관련 구현이 없다.
+
+다만 문서에는 이미 자리가 있다.
+
+- `product-plan.ko.md` §9.3: "롱폼 초안 또는 전사 결과를 기반으로 shortform 후보를 추천한다"
+- `architecture-plan.ko.md` §2.2: `shortform extractor`가 timeline JSON 소비자로 명시
+- `architecture-plan.ko.md` §4.4: Recommendation Layer에 `shortform 후보 scoring` 포함
+
+**범위 충돌 확인 필요:** 문서가 규정한 것은 **후보 추출·추천**이고,
+owner가 요구한 것은 **편집기**다. `implementation-plan.ko.md` §4 제외 목록에
+`실시간 멀티트랙 편집 UI`와 `풀 자체 편집기`가 있으므로, 숏폼 편집기가
+기존 편집기 재사용인지 새 편집기인지에 따라 판정이 갈린다.
+
+- 세로 캔버스와 기존 14개 조작을 재사용하는 방식이면 **범위 안**이다
+- 숏폼 전용 새 편집 기능이 필요하면 **§4 개정이 선행**이다
+
+Step은 이 판정 뒤에 채운다. 판정에 필요한 입력은 owner의 숏폼 작업 방식이다.
+Task 15의 `orientation`이 선행 조건이므로 그 뒤에 다룬다.
+
+---
+
 ## 계획서 완성도
 
 Task 14개 중 상세 Step까지 완성된 것과 개요만 있는 것을 구분한다.
@@ -514,12 +628,13 @@ Task 14개 중 상세 Step까지 완성된 것과 개요만 있는 것을 구분
 
 | Task | 상태 |
 |---|---|
-| 1–4, 6–11, 13, 14 | 상세 Step·Files·재사용 게이트 완성 |
+| 1–4, 6–11, 13–16 | 상세 Step·Files·재사용 게이트 완성 |
 | 5 | 간략하지만 실행 가능 |
 | 12 | **완료** (2026-08-05, 커밋 `d503ce2`) |
 | 11A | **개요만.** Task 10 승인 결과가 나와야 쓸 수 있다 |
+| 17 | **개요만.** 숏폼 범위 판정이 선행 |
 
-Task 11A만 비워둔다. 무엇을 승인받는지 정해지기 전에 구현 Step을 쓰면 순서가 뒤바뀐다.
+Task 11A와 17만 비워둔다. 둘 다 선행 결정이 없으면 Step이 추측이 된다.
 
 처음에는 Task 6–9도 "실측 전이라 못 쓴다"고 미뤄뒀으나, 각 결함을 이미 화면에서
 직접 관측했으므로 그 판단은 틀렸다. owner 지적으로 바로잡고 Step을 채웠다.
