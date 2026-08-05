@@ -102,10 +102,9 @@ current 근거이며, 문서 본문 하단의 오래된 수치(예: `9/22`)는 h
 `§10.12.3–4`에 따라 분류한다. `artifacts/`는 기본 `preserve-evidence`이며,
 삭제는 문서·테스트·실행 경로 참조가 없고 재생성 가능한 미추적 파일에만 한정한다.
 
-### 격리 완료 (읽기 차단)
+### 보호 residue — 삭제 완료 (2026-08-05)
 
-보호 residue 3개는 그동안 handoff 문서의 관행으로만 보호됐다.
-`.claude/settings.json`에 `permissions.deny` 규칙을 추가해 하네스가 강제하도록 바꿨다.
+owner 승인으로 아래 3개를 삭제했다. 합계 약 133MB.
 
 | 경로 | 크기 |
 |---|---|
@@ -113,10 +112,14 @@ current 근거이며, 문서 본문 하단의 오래된 수치(예: `9/22`)는 h
 | `.tmp-real-video-dogfood/` | 132M |
 | `apps/web/.tmp-real-video-dogfood/` | 48K |
 
-`Read`와 `Edit`를 차단한다. **알려진 한계 2가지**를 숨기지 않는다.
+삭제 근거: 과거 디버그 잔여물이고, 격리만으로는 Bash 읽기 구멍이 남기 때문이다.
+삭제로 그 구멍까지 함께 닫혔다. 삭제 후 워킹트리는 완전히 깨끗해졌다.
 
-1. Bash를 통한 읽기(`cat` 등)는 이 규칙으로 막히지 않는다. 완전 차단은 삭제뿐이다.
-2. 세션 시작 시점에 `settings.json`이 없었으므로, 이 규칙은 다음 세션부터 적용될 가능성이 높다.
+`.claude/settings.json`의 `permissions.deny` 규칙은 그대로 유지한다.
+같은 경로가 다시 생기면 자동으로 차단된다.
+
+**규칙의 알려진 한계**: Bash를 통한 읽기(`cat` 등)는 `permissions.deny`로 막히지 않는다.
+또한 세션 시작 시점에 `settings.json`이 없었으므로 규칙 적용은 다음 세션부터일 수 있다.
 
 ### 삭제 판정 — 현재 `safe-to-delete` 없음
 
@@ -139,14 +142,29 @@ current 근거이며, 문서 본문 하단의 오래된 수치(예: `9/22`)는 h
 추가로 2026-08-04 handoff가 "owner sample r1–r4와 owner-ready receipt는 검증 증거로 보존한다"고
 명시한다. 따라서 규정만으로는 **삭제 가능 항목이 0건**이다.
 
-owner 결정이 필요한 후보는 아래다. owner는 승인권자이므로 규정 판정을 덮을 수 있다.
+owner가 아래 삭제를 승인했다. 합계 약 **5.6GB**.
 
-- `r1`, `r2`, `r3` (합계 **5.1GB**): `r4`가 최종본이며 앞선 3개는 중간 반복이다.
-  Task 23C는 이미 closeout됐고 최종 근거는 `r4`다.
-- `ra31`, `release-audit-20260731-smoke`, `task5-smoke` (합계 768M): 과거 감사 스모크 증거.
-- 보호 residue 3개 (133M): 과거 디버그 잔여물. 삭제하면 격리 한계도 함께 해소된다.
+| 대상 | 크기 | 삭제 근거 |
+|---|---|---|
+| `owner-sample-edit-20260803` (r1) | 1.4G | r4가 최종본. r1–r3은 같은 작업의 중간 반복 |
+| `owner-sample-edit-20260803-r2` | 2.0G | 위와 동일 |
+| `owner-sample-edit-20260803-r3` | 1.7G | 위와 동일 |
+| `ra31` | 256M | 스모크 3종 중 문서 참조만 있는 중복본 |
+| `release-audit-20260731-smoke` | 256M | 위와 동일 |
 
-상태: **owner 결정 대기**. 결정 없이 삭제하지 않는다.
+보존 대상과 이유:
+
+- `owner-sample-edit-20260803-r4` (1.7G): Task 23C closeout의 최종 근거
+- `task5-smoke` (256M): `scripts/dev-fast-path.ps1`이 `--work-root`로 쓰는 **실행 경로 참조**가 있다
+- `lfqa`, `long-form-capcut-qa` (1.5G): 서로 다른 기능 검증이며 문서 참조가 많다
+- `owner-ready` (108K): Task 23D 검증 receipt. 참조 12건으로 최다
+- `owner-dogfood-20260731` (48M): 이전 dogfood 데이터
+
+사용자 원본 영상 5개는 `OneDrive/바탕 화면/영상샘플`에 그대로 있다.
+artifacts에 있던 것은 전부 복사본과 처리 결과물이므로 원본 손실은 없다.
+
+**실행 상태**: 자동 모드 안전 분류기가 5.6GB 일괄 삭제를 차단했다.
+우회하지 않았고, owner가 직접 실행하거나 Bash 권한 규칙을 추가해야 한다.
 
 ---
 
