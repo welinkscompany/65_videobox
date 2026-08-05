@@ -302,7 +302,7 @@ Commit: `feat: refresh the preview after an edit`
 
 **Files:**
 - Modify: `apps/web/src/features/editor/timeline/TimelineDock.tsx`
-- Modify: `apps/web/src/features/editor/timeline/TimelineDock.test.tsx`
+- Modify: `apps/web/src/features/editor/timeline/timeline-dock.test.tsx`
 
 - [ ] **Step 1: 실패 테스트** — 클립 접근성 이름에 내부 ID가 없고
       트랙 이름과 순번으로 사람이 읽을 수 있는지 (예: `B-roll 2번째 장면, 3초부터`)
@@ -476,7 +476,7 @@ owner 요구: "로컬 LLM 물려서 동작하게, 어댑터로 GPT-5.4 / 5.4-min
 | 후보 | 분류 | 이유 |
 |---|---|---|
 | `LocalOpenAICompatibleRuntimeConfig` | `adopt as-is` | 이미 `enabled=True`이고 LM Studio 연동 코드가 있다 |
-| `packages/provider-interfaces/.../lm_studio.py` | `adopt as-is` | 기존 클라이언트를 쓴다 |
+| `packages/provider-interfaces/src/videobox_provider_interfaces/lm_studio.py` | `adopt as-is` | 기존 클라이언트를 쓴다 |
 | `yujin_profile_contract`, `agent_gateway_contract` | `adopt as-is` | 프로필·정책 계약을 유지한다 |
 | Hermes 컨테이너 OAuth 경로 | `exclude` | 이 Task는 로컬 전용이다. OAuth는 Task 14 |
 
@@ -716,6 +716,101 @@ Task 15의 `orientation`이 선행 조건이므로 그 뒤에 다룬다.
 
 ---
 
+## Slice 7 — B-roll 자동 분류와 의미 검색 (owner 핵심 요구)
+
+> **2026-08-05 갭 검증으로 추가.** 이 Slice는 원래 "계획에 넣지 않은 것"에 있었다.
+> owner가 가장 강조한 요구인데 계획서에서 빠져 있었다. 갭 검증이 잡았다.
+>
+> owner 발언: "내가 평소에 다양한 비롤을 녹화해서 내 컴퓨터에 저장할거야.
+> 이건 내가 직접 녹화해서 넣는거라 진짜 내 자산인거야."
+> "메타검색(의미 연관검색)이 필요했던 거야. 왜냐면 100% 똑같은 형태의 영상을 만들수가 없잖아."
+
+### Task 19: 미디어 분석 worker 연결 (D-2, A-1)
+
+현재 컨테이너는 `_UnavailableMediaAnalysisService` 스텁을 써서 모든 분석 요청을
+즉시 `MEDIA_ANALYSIS_WORKER_UNAVAILABLE`로 차단한다. 그 결과 태그·설명·임베딩이
+생성되지 않고, `media_ranking.py`의 1순위 점수인 `semantic_similarity`를 계산할 재료가 없다.
+
+`A-1`에서 확인했듯 **랭킹 구조는 이미 완성돼 있다.** 점수 항목에
+`semantic_similarity`, `lexical_fallback`, `structured_tag_match`, `repetition`, `diversity`가 있고,
+`MediaLibraryStore`는 `project_id`를 받지 않는 전역 저장소이며
+`ProjectAssetMaterializer`가 프로젝트로 복사한다. 여러 채널에서 같은 B-roll을 쓰는 경로가 이것이다.
+
+**즉 이 Task는 새 설계가 아니라 이미 설계된 자리를 채우는 일이다.**
+
+**선행:** Task 13(컨테이너→호스트 LM Studio 경로). 같은 경로를 vision 분석이 재사용한다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `media_ranking.rank_candidates` | `adopt as-is` | 점수 체계를 바꾸지 않는다 |
+| `EmbeddingProvider` 프로토콜 | `adopt as-is` | 인터페이스가 이미 있다 |
+| `lm_studio.py` 클라이언트 | `adopt as-is` | Task 13이 연 경로를 재사용한다 |
+| `_UnavailableMediaAnalysisService` | `rewrite` | 실제 worker로 교체한다. fail-closed 동작은 worker 부재 시 폴백으로 유지 |
+| `architecture-plan.ko.md` §7 Vision Provider | `adopt as-is` | 역할이 이미 규정돼 있다 |
+
+**Files:**
+- Modify: `services/api/src/videobox_api/main.py`
+- Modify: `packages/core-engine/src/videobox_core_engine/media_analysis.py`
+- Create: `tests/test_media_analysis_worker.py`
+
+- [ ] **Step 1: 실패 테스트** — worker가 구성되면 분석이 `blocked`가 아니라 실제 결과를 내는지,
+      태그 4축(찍힌 대상 / 장소·배경 / 분위기·톤 / 구도·움직임)이 채워지는지,
+      worker 부재 시 기존 fail-closed 동작이 유지되는지
+- [ ] **Step 2: RED 확인**
+
+Run: `.venv\Scripts\python.exe -m pytest tests/test_media_analysis_worker.py -q`
+
+- [ ] **Step 3: 구현** — vision 분석 결과를 자산 metadata에 저장하고 임베딩을 생성한다.
+      Task 15가 저장 구조를 이미 열어놨으므로 같은 자리에 넣는다.
+      분석 실패는 등록을 막지 않고 해당 필드만 비운다
+- [ ] **Step 4: GREEN + 실제 B-roll로 분류 확인 + 커밋**
+
+Commit: `feat: classify b-roll with the local vision model`
+
+### Task 20: 의미 검색 실제 동작 확인 (A-1)
+
+`A-1`은 근거 등급이 `코드`다. 설계는 확인했으나 **동작하는 것을 본 적이 없다.**
+Task 19로 재료가 생긴 뒤 실제로 검색이 되는지 확인한다.
+
+- [ ] **Step 1: 실패 테스트** — 대본 문장으로 검색했을 때 정확히 같은 단어가 없어도
+      의미가 가까운 B-roll이 상위에 오는지. 같은 영상에서 한 클립이 반복되면 감점되는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — 필요한 만큼만 보완한다. 랭킹 구조는 이미 있으므로
+      대부분 연결과 가중치 조정이다
+- [ ] **Step 4: GREEN + owner의 실제 B-roll 라이브러리로 확인 + 커밋**
+
+Commit: `feat: find b-roll by meaning`
+
+**이 Task는 owner 판단이 최종 기준이다.** 추천이 실제로 쓸 만한지는 사람이 봐야 안다.
+
+### Task 21: 자동 배치 정책 확정 (S-2)
+
+owner 결정: **완전 자동 배치 후 검토.**
+
+`architecture-plan.ko.md` §6.5의 Recommendation 모델에 `auto_apply_allowed` 필드가 이미 있다.
+구조 변경은 불필요하고 **정책만 정하면 된다.** 그러나 현재 이 정책을 설정하는 코드가 없다.
+
+`product-plan.ko.md` §6.4는 "초기에는 무조건 자동 적용하지 않는다"고 규정하지만,
+OSS 채택 계획이 이미 "`초안 만들기` 1회 승인 뒤 ranked placement bundle을 atomic하게 apply"로
+옮겨갔으므로 owner 결정과 충돌하지 않는다. 승인은 초안 생성 시점 1회로 유지한다.
+
+**Files:**
+- Modify: `packages/core-engine/src/videobox_core_engine/director_proposal_service.py`
+- Create: `tests/test_auto_apply_policy.py`
+
+- [ ] **Step 1: 실패 테스트** — 점수 임계값 이상이면 `auto_apply_allowed`가 참이고,
+      미만이면 검수 대상으로 남는지. 권리 경고가 있으면 점수와 무관하게 자동 적용되지 않는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — 자산 종류별 임계값을 설정 가능하게 둔다.
+      B-roll·BGM은 자동, 권리 확인이 필요한 것은 검수 유지
+- [ ] **Step 4: GREEN + 커밋**
+
+Commit: `feat: place confident recommendations automatically`
+
+---
+
 ## 계획서 완성도
 
 Task 14개 중 상세 Step까지 완성된 것과 개요만 있는 것을 구분한다.
@@ -723,13 +818,47 @@ Task 14개 중 상세 Step까지 완성된 것과 개요만 있는 것을 구분
 
 | Task | 상태 |
 |---|---|
-| 1–4, 6–11, 13–17 | 상세 Step·Files·재사용 게이트 완성 |
+| 1–4, 6–11, 13–17, 19–21 | 상세 Step·Files·재사용 게이트 완성 |
 | 5 | 간략하지만 실행 가능 |
 | 12 | **완료** (2026-08-05, 커밋 `d503ce2`) |
 | 11A | **개요만.** Task 10 승인 결과가 나와야 쓸 수 있다 |
-| 18 | **개요만.** Drive 반입 방식 결정과 전제 확인이 선행 |
+| 18 | **개요만.** Drive 동기화 폴더 경로 확인이 선행 |
 
 Task 11A와 18만 비워둔다. 둘 다 선행 결정이 없으면 Step이 추측이 된다.
+
+## 검증 이력
+
+### 2026-08-05 리뷰·갭 검증·역방향 검증
+
+**역방향 검증** — 계획서가 참조하는 파일 경로를 전수 대조했다. 오류 2건을 수정했다.
+
+| 오류 | 수정 |
+|---|---|
+| `TimelineDock.test.tsx` | 실제 파일명은 `timeline-dock.test.tsx` |
+| `packages/provider-interfaces/.../lm_studio.py` | 생략 경로를 정확한 경로로 교체 |
+
+이전 역방향 검증에서 `EditorAssets.tsx` → `EditorAssetBrowser.tsx` 오류도 잡았다.
+**세 번의 역방향 검증에서 매번 경로 오류가 나왔다.** 계획서 작성 시 파일명을 기억으로 쓰지 않는다.
+
+**갭 검증** — backlog 항목이 Task로 이어지는지 대조했다. **중대한 누락 2건을 찾았다.**
+
+| 누락 | 조치 |
+|---|---|
+| `D-2` 미디어 분석 worker가 "계획에 넣지 않은 것"에 있었다. **owner가 가장 강조한 요구**인데 빠졌다 | Slice 7 Task 19로 편입 |
+| `A-1` 의미 검색이 어느 Task에도 없었다. 근거 등급이 `코드`라 동작 확인이 필요한데 확인 계획이 없었다 | Task 20 신설 |
+| `S-2` 자동 배치 정책에 Task가 없었다. owner가 "완전 자동 배치"를 결정했는데 설정하는 작업이 없었다 | Task 21 신설 |
+
+`D-2` 누락이 가장 심각했다. owner의 핵심 가치("B-roll을 녹화해 두면 자동 분류되고
+의미로 검색된다")가 계획서에서 제외 항목으로 밀려 있었다.
+Task 13이 여는 컨테이너→호스트 경로를 재사용하면 되는데도 "함께 해결될 수 있다"는
+모호한 문장으로만 남겨뒀다.
+
+**리뷰** — 순서와 의존성을 점검했다.
+
+- Task 15(자산 정보 저장)가 Task 3(썸네일), Task 17(세로), Task 19(분석)의 선행이다
+- Task 13(호스트 LM Studio 경로)이 Task 19(vision 분석)의 선행이다
+- Task 11(색상 토큰)이 Task 11A(디자인 반영)의 선행이며 Task 10 승인과 무관하게 착수 가능하다
+- Task 1(provider 활성화)이 Task 2(기준선)의 선행이다. 꺼진 채로 기준선을 잡으면 의미가 없다
 
 처음에는 Task 6–9도 "실측 전이라 못 쓴다"고 미뤄뒀으나, 각 결함을 이미 화면에서
 직접 관측했으므로 그 판단은 틀렸다. owner 지적으로 바로잡고 Step을 채웠다.
@@ -767,7 +896,7 @@ Task 11A와 18만 비워둔다. 둘 다 선행 결정이 없으면 Step이 추�
 
 | 항목 | 필요한 선행 조건 |
 |---|---|
-| `D-2` 미디어 분석 worker | `§10.14` 네트워크 경계 결정. Task 13에서 컨테이너→호스트 LM Studio 경로를 열면 함께 해결될 수 있다 |
+| ~~`D-2` 미디어 분석 worker~~ | **Slice 7 Task 19로 편입 (2026-08-05 갭 검증).** owner 핵심 요구이므로 제외 대상이 아니다 |
 | `S-3` 대본 생성 | `implementation-plan` §23.3이 제품 범위 밖으로 차단 중. 조항 개정이 선행 |
 | TTS 활성화 | owner가 2026-08-05에 보류 결정. 음성 인식 확인 후 재논의 |
 
