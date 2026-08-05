@@ -40,6 +40,32 @@ def _environment_text(name: str, fallback: str) -> str:
     return os.environ.get(name, "").strip() or fallback
 
 
+def _environment_positive_int(name: str, fallback: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return fallback
+    try:
+        value = int(raw)
+    except ValueError:
+        return fallback
+    return value if value > 0 else fallback
+
+
+def resolve_capcut_draft_export_config() -> "CapCutDraftExportConfig":
+    """Resolve CapCut draft export for callers that pass no config.
+
+    Output size is configurable because the owner shoots 1920x1080 and also
+    needs a vertical canvas for shortform, so landscape must not be assumed.
+    """
+    defaults = CapCutDraftExportConfig()
+    return CapCutDraftExportConfig(
+        enabled=_environment_flag("VIDEOBOX_CAPCUT_ENABLED"),
+        video_width=_environment_positive_int("VIDEOBOX_CAPCUT_WIDTH", defaults.video_width),
+        video_height=_environment_positive_int("VIDEOBOX_CAPCUT_HEIGHT", defaults.video_height),
+        video_fps=_environment_positive_int("VIDEOBOX_CAPCUT_FPS", defaults.video_fps),
+    )
+
+
 def resolve_whisper_stt_config() -> "WhisperSTTConfig":
     """Resolve speech-to-text settings for callers that pass no config.
 

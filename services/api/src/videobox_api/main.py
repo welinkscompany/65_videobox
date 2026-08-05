@@ -66,6 +66,7 @@ from videobox_core_engine.settings import (
     LocalOpenAICompatibleRuntimeConfig,
     TTSEngineConfig,
     WhisperSTTConfig,
+    resolve_capcut_draft_export_config,
     resolve_database_url,
     resolve_container_snapshot_root,
     resolve_projects_root,
@@ -461,7 +462,9 @@ def create_app(
         )
     resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
     resolved_whisper_stt_config = whisper_stt_config or resolve_whisper_stt_config()
-    resolved_capcut_draft_export_config = capcut_draft_export_config or CapCutDraftExportConfig()
+    resolved_capcut_draft_export_config = (
+        capcut_draft_export_config or resolve_capcut_draft_export_config()
+    )
     resolved_tts_engine_config = tts_engine_config or TTSEngineConfig()
     pipeline = LocalPipelineRunner(
         store,

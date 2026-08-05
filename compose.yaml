@@ -64,6 +64,12 @@ services:
       # keeps weights out of the owner's project data.
       HF_HOME: /opt/models
       XDG_CACHE_HOME: /opt/models
+      # Draft export for CapCut.  Size is configurable because the owner shoots
+      # 1920x1080 and also needs a vertical canvas for shortform.
+      VIDEOBOX_CAPCUT_ENABLED: ${VIDEOBOX_CAPCUT_ENABLED:-1}
+      VIDEOBOX_CAPCUT_WIDTH: ${VIDEOBOX_CAPCUT_WIDTH:-1920}
+      VIDEOBOX_CAPCUT_HEIGHT: ${VIDEOBOX_CAPCUT_HEIGHT:-1080}
+      VIDEOBOX_CAPCUT_FPS: ${VIDEOBOX_CAPCUT_FPS:-30}
       VIDEOBOX_DATABASE_URL: postgresql://${POSTGRES_USER:-videobox}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.container}@videobox-postgres:5432/${POSTGRES_DB:-videobox}
     volumes:
       - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data
