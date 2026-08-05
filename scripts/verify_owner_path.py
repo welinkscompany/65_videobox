@@ -107,6 +107,7 @@ def run_owner_path(
     stt_provider: STTProvider,
     ffmpeg_binary: str = "ffmpeg",
     ffprobe_binary: str = "ffprobe",
+    auto_approve_segment_review: bool = False,
 ) -> dict[str, Any]:
     if stt_provider.provider_name in STUB_PROVIDER_NAMES:
         # Fail closed at the transcription stage specifically, rather than
@@ -132,7 +133,12 @@ def run_owner_path(
         CapCutDraftExportConfig(enabled=True, video_width=1920, video_height=1080, video_fps=30),
         store=store,
     )
-    runner = LocalPipelineRunner(store=store, stt_provider=stt_provider, pycapcut_exporter=pycapcut_exporter)
+    runner = LocalPipelineRunner(
+        store=store,
+        stt_provider=stt_provider,
+        pycapcut_exporter=pycapcut_exporter,
+        auto_approve_segment_review=auto_approve_segment_review,
+    )
     recorder = _StageRecorder()
 
     project = store.bootstrap_project(name="owner-path-verify")
@@ -198,18 +204,36 @@ def run_owner_path(
     def final_render() -> dict[str, Any]:
         job = runner.start_final_render(project_id=project_id, timeline_job_id=timeline_build.job_id)  # type: ignore[attr-defined]
         result = runner.get_final_render_result(project_id=project_id, job_id=job["job_id"])
-        output_ref = result.get("output_ref") or result.get("output_uri")
-        output_path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(output_ref)) if output_ref else None
+        render = result.get("render")
+        if not render:
+            raise RuntimeError(f"final render job succeeded but produced no export record: {result}")
+        file_uri = render["file_uri"]
+        output_path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(file_uri))
+        # get_final_render_export already raises if the artifact is missing on
+        # disk, but re-check here so the evidence in the report is self-contained
+        # rather than relying on that internal invariant silently.
         return {
-            "output_ref": output_ref,
-            "output_exists": bool(output_path and output_path.exists()),
-            "output_size_bytes": output_path.stat().st_size if output_path and output_path.exists() else 0,
+            "file_uri": file_uri,
+            "output_exists": output_path.exists(),
+            "output_size_bytes": output_path.stat().st_size if output_path.exists() else 0,
         }
 
     def capcut_draft_export() -> dict[str, Any]:
         job = runner.start_capcut_draft_export(project_id=project_id, timeline_job_id=timeline_build.job_id)  # type: ignore[attr-defined]
-        result = runner.get_capcut_export_result(project_id=project_id, job_id=job["job_id"])
-        return {"status": result.get("status")}
+        # Not get_capcut_export_result: that reads the older single-file
+        # CapCut export type. A draft export's file_uri is a directory tree,
+        # and calling the wrong getter tries to read that directory as text,
+        # which raises PermissionError on Windows -- indistinguishable at
+        # first glance from an actual locked-file problem.
+        result = runner.get_capcut_draft_export_result(project_id=project_id, job_id=job["job_id"])
+        export = result.get("export") or {}
+        file_uri = export.get("file_uri")
+        draft_dir = store.resolve_storage_uri(project_id=project_id, storage_uri=str(file_uri)) if file_uri else None
+        return {
+            "file_uri": file_uri,
+            "draft_dir_exists": bool(draft_dir and draft_dir.is_dir()),
+            "draft_file_count": sum(1 for _ in draft_dir.rglob("*")) if draft_dir and draft_dir.is_dir() else 0,
+        }
 
     recorder.run("ingest", ingest)
     recorder.run("transcription", transcription)
@@ -241,6 +265,10 @@ def main() -> None:
     parser.add_argument("--stt-device", default="cpu")
     parser.add_argument("--stt-compute-type", default="int8")
     parser.add_argument("--stt-language", default="ko")
+    parser.add_argument(
+        "--auto-approve-segment-review", action="store_true",
+        help="Owner decision (2026-08-05, Task 21, Option A): place everything automatically.",
+    )
     args = parser.parse_args()
 
     if not args.broll:
@@ -256,6 +284,7 @@ def main() -> None:
         broll_paths=args.broll,
         work_root=args.work_root,
         stt_provider=stt_provider,
+        auto_approve_segment_review=args.auto_approve_segment_review,
     )
 
     for stage in report["stages"]:
