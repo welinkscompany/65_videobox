@@ -26,6 +26,22 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); 
 
 const view = { projectId: "project-a", sessionId: "session-a", timelineId: "timeline-a", timelineVersion: "v1", expectedRevision: 1, timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sampleAspectRatio: "1:1", rotation: 0, durationSec: 1 }, tracks: [], captions: [], gaps: [], source: { status: "current" }, playback: { auditionUrls: {}, exactPreview: { status: "unavailable" } }, local: { selectedSegmentId: null, seekSec: 0 } } as const;
 
+// TimelineDock's clip selection button no longer shows the raw clip ID as
+// its accessible name (F-3/Task 7) -- it shows a human-readable name like
+// "내레이션 1번째 장면, 0초부터". Locating the button by data-clip-id keeps
+// these fixtures decoupled from that display-only formatting.
+function clipSelectionButton(clipId: string): HTMLElement {
+  const clip = screen.getAllByTestId("timeline-clip").find((item) => item.getAttribute("data-clip-id") === clipId);
+  if (!clip) throw new Error(`Missing timeline clip ${clipId}`);
+  const button = clip.querySelector('[data-native-control="timeline-clip-select"]');
+  if (!button) throw new Error(`Missing selection control for ${clipId}`);
+  return button as HTMLElement;
+}
+
+async function findClipSelectionButton(clipId: string): Promise<HTMLElement> {
+  return waitFor(() => clipSelectionButton(clipId));
+}
+
 describe("EditorWorkbench", () => {
   it("uses the measured workbench width rather than viewport width", async () => {
     render(<EditorWorkbench view={view} />);
@@ -119,7 +135,7 @@ describe("EditorWorkbench", () => {
     render(<EditorWorkbench view={narrationView} assetCards={assetCards} onApplyAssetCard={onApplyAssetCard} />);
 
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     expect(screen.getAllByText("적용 구간: 1.00–3.00초").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 적용" }));
     expect(onApplyAssetCard).toHaveBeenCalledWith(assetCards[0], "segment-1");
@@ -140,7 +156,7 @@ describe("EditorWorkbench", () => {
     } as const;
     render(<EditorWorkbench view={sessionSegmentView} assetCards={assetCards} onApplyAssetCard={onApplyAssetCard} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "caption:visible-2 클립 선택" }));
+    fireEvent.click(clipSelectionButton("caption:visible-2"));
     expect(screen.getAllByText("적용 구간: 5.00–10.00초").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 적용" }));
     expect(onApplyAssetCard).toHaveBeenCalledWith(assetCards[0], "visible-2");
@@ -233,15 +249,15 @@ describe("EditorWorkbench", () => {
     const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
 
-    fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-2"));
     expect(screen.getByRole("button", { name: "둘째 자막 대본 선택" })).toHaveAttribute("aria-current", "true");
     fireEvent.click(screen.getByRole("button", { name: "첫 자막 대본 선택" }));
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(clipSelectionButton("n-1")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
     fireEvent.click(screen.getByRole("button", { name: "둘째 자막 대본 선택" }));
     expect(player.currentTime).toBe(1);
     fireEvent.click(screen.getByRole("button", { name: "첫 자막 대본 선택" }));
-    fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-2"));
     rendered.rerender(<EditorWorkbench view={{ ...transcriptView, expectedRevision: 2, tracks: [{ ...transcriptView.tracks[0], clips: [transcriptView.tracks[0].clips[0]] }], captions: [transcriptView.captions[0]] }} />);
     expect(screen.getByRole("button", { name: "첫 자막 대본 선택" })).not.toHaveAttribute("aria-current");
   });
@@ -295,7 +311,7 @@ describe("EditorWorkbench", () => {
     const rendered = render(<EditorWorkbench view={routeA as never} />);
     fireEvent.click(screen.getByRole("button", { name: "NARRATION · segment-shared 원본 열기" }));
     expect(screen.getByLabelText("NARRATION · segment-shared 소스 미리보기")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "clip-a 클립 선택" }));
+    fireEvent.click(clipSelectionButton("clip-a"));
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "1");
 
     rendered.rerender(<EditorWorkbench view={{
@@ -308,7 +324,7 @@ describe("EditorWorkbench", () => {
     } as never} />);
 
     expect(screen.queryByLabelText("NARRATION · segment-shared 소스 미리보기")).toBeNull();
-    expect(screen.getByRole("button", { name: "clip-b 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(clipSelectionButton("clip-b")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
 

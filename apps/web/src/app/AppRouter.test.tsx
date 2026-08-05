@@ -9,6 +9,22 @@ import { parseWorkspaceLocation, resolveWorkspaceLocation } from "./routeManifes
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+// TimelineDock's clip selection button no longer shows the raw clip ID as
+// its accessible name (F-3/Task 7) -- it shows a human-readable name like
+// "내레이션 1번째 장면, 0초부터". Locating the button by data-clip-id keeps
+// these fixtures decoupled from that display-only formatting.
+function clipSelectionButton(clipId: string): HTMLElement {
+  const clip = screen.getAllByTestId("timeline-clip").find((item) => item.getAttribute("data-clip-id") === clipId);
+  if (!clip) throw new Error(`Missing timeline clip ${clipId}`);
+  const button = clip.querySelector('[data-native-control="timeline-clip-select"]');
+  if (!button) throw new Error(`Missing selection control for ${clipId}`);
+  return button as HTMLElement;
+}
+
+async function findClipSelectionButton(clipId: string): Promise<HTMLElement> {
+  return waitFor(() => clipSelectionButton(clipId));
+}
+
 describe("ProjectCatalog", () => {
   it("shares one catalog request across simultaneous route loaders and refreshes only after creation", async () => {
     const listProjects = vi.spyOn(api, "listProjects")
@@ -114,7 +130,7 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
-    const requestedClip = await screen.findByRole("button", { name: "clip-1 클립 선택" });
+    const requestedClip = await findClipSelectionButton("clip-1");
     await waitFor(() => expect(requestedClip).toHaveAttribute("aria-pressed", "true"));
     expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=session-a&segment_id=segment-1");
     expect(latest).not.toHaveBeenCalled();
@@ -156,7 +172,7 @@ describe("AppRouter URL ownership", () => {
     const rightDock = screen.getByRole("complementary", { name: "유진과 편집 항목" });
     expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
     fireEvent.change(screen.getByLabelText("유진에게 요청하기"), { target: { value: "보존할 요청" } });
-    fireEvent.click(screen.getByRole("button", { name: "clip-2 클립 선택" }));
+    fireEvent.click(clipSelectionButton("clip-2"));
     timeline.scrollLeft = 47;
 
     await act(async () => { await router.navigate({ to: "/projects/$projectId/$section", params: { projectId: "project_a", section: "editor" }, search: { session_id: "session-a", segment_id: "segment-2" } as never }); });
@@ -170,8 +186,8 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("complementary", { name: "유진과 편집 항목" })).toBe(rightDock);
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존할 요청");
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(47);
-    expect(screen.getByRole("button", { name: "clip-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "clip-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(clipSelectionButton("clip-1")).toHaveAttribute("aria-pressed", "true");
+    expect(clipSelectionButton("clip-2")).toHaveAttribute("aria-pressed", "false");
     expect(manifest).toHaveBeenCalledTimes(1);
     expect(director).toHaveBeenCalledTimes(1);
   });

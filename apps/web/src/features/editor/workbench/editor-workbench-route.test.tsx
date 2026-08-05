@@ -41,6 +41,22 @@ it("stops browser preview polling on a bounded failed response", async () => {
 });
 
 const manifest = (projectId: string, sessionId: string) => ({ project_id: projectId, session_id: sessionId, timeline_id: `timeline-${sessionId}`, session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: sessionId, source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 1 } });
+
+// TimelineDock's clip selection button no longer shows the raw clip ID as
+// its accessible name (F-3/Task 7) -- it shows a human-readable name like
+// "내레이션 1번째 장면, 0초부터". Locating the button by data-clip-id keeps
+// these fixtures decoupled from that display-only formatting.
+function clipSelectionButton(clipId: string): HTMLElement {
+  const clip = screen.getAllByTestId("timeline-clip").find((item) => item.getAttribute("data-clip-id") === clipId);
+  if (!clip) throw new Error(`Missing timeline clip ${clipId}`);
+  const button = clip.querySelector('[data-native-control="timeline-clip-select"]');
+  if (!button) throw new Error(`Missing selection control for ${clipId}`);
+  return button as HTMLElement;
+}
+
+async function findClipSelectionButton(clipId: string): Promise<HTMLElement> {
+  return waitFor(() => clipSelectionButton(clipId));
+}
 const editingSession = (projectId: string, sessionId: string, revision = 1) => ({
   project_id: projectId,
   session_id: sessionId,
@@ -377,7 +393,7 @@ async function openAssetBrowser() {
 }
 
 async function openInspector() {
-  fireEvent.click(await screen.findByRole("button", { name: "n-1 클립 선택" }));
+  fireEvent.click(await findClipSelectionButton("n-1"));
   fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
   await screen.findByRole("dialog", { name: "유진과 편집 항목" });
   fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
@@ -904,7 +920,7 @@ describe("EditorWorkbenchRoute", () => {
     )).toBeEnabled();
     expect(store).toHaveBeenCalledTimes(1);
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" }))
+    expect(clipSelectionButton("n-1"))
       .toBeEnabled();
 
     fireEvent.click(within(panel).getByRole(
@@ -1581,15 +1597,15 @@ describe("EditorWorkbenchRoute", () => {
     const workbench = await screen.findByRole("region", { name: "편집 작업판" });
     const timeline = screen.getByTestId("timeline-track");
     const preview = screen.getByRole("region", { name: "미리보기" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true"));
+    await waitFor(() => expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true"));
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "작성 중인 요청" } });
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     timeline.scrollLeft = 31;
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-2" />);
 
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(clipSelectionButton("n-1")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(preview);
@@ -1600,12 +1616,12 @@ describe("EditorWorkbenchRoute", () => {
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-1" />);
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(clipSelectionButton("n-1")).toHaveAttribute("aria-pressed", "true");
+    expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "false");
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-2" />);
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(clipSelectionButton("n-1")).toHaveAttribute("aria-pressed", "false");
+    expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true");
     expect(load).toHaveBeenCalledTimes(1);
   });
 
@@ -1613,12 +1629,12 @@ describe("EditorWorkbenchRoute", () => {
     vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(twoNarrationManifest(1) as never);
     const blank = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId=" " />);
     await expectEditorRevision(1);
-    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "false");
     blank.unmount();
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-missing" />);
     await expectEditorRevision(1);
-    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+    expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "false");
     expect(api.getEditorPlaybackManifest).toHaveBeenLastCalledWith("project-a", "session-a");
   });
 
@@ -1631,20 +1647,20 @@ describe("EditorWorkbenchRoute", () => {
       );
       const workbench = await screen.findByRole("region", { name: "편집 작업판" });
       const timeline = screen.getByTestId("timeline-track");
-      await waitFor(() => expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true"));
+      await waitFor(() => expect(clipSelectionButton("n-1")).toHaveAttribute("aria-pressed", "true"));
 
       rendered.rerender(
         <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId={intermediateSegmentId} />,
       );
-      fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+      fireEvent.click(clipSelectionButton("n-2"));
       timeline.scrollLeft = 43;
 
       rendered.rerender(
         <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" requestedSegmentId="segment-1" />,
       );
 
-      await waitFor(() => expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toHaveAttribute("aria-pressed", "true"));
-      expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "false");
+      await waitFor(() => expect(clipSelectionButton("n-1")).toHaveAttribute("aria-pressed", "true"));
+      expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "false");
       expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
       expect(screen.getByTestId("timeline-track")).toBe(timeline);
       expect(screen.getByTestId("timeline-track").scrollLeft).toBe(43);
@@ -1664,7 +1680,7 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
     expect(await screen.findByRole("button", { name: "BGM 1 적용" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     const applyButton = screen.getByRole("button", { name: "BGM 1 적용" });
     fireEvent.click(applyButton);
 
@@ -1694,7 +1710,7 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
     await screen.findByRole("button", { name: "BGM 1 적용" });
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     fireEvent.click(screen.getByRole("button", { name: "BGM 1 적용" }));
 
     expect(await screen.findByText("변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
@@ -1712,7 +1728,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
     await screen.findByRole("button", { name: "B-roll 1 적용" });
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     fireEvent.click(screen.getByRole("button", { name: "B-roll 1 적용" }));
 
     await waitFor(() => expect(apply).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
@@ -1757,7 +1773,7 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
     await screen.findByRole("button", { name: "BGM 1 적용" });
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     fireEvent.click(screen.getByRole("button", { name: "BGM 1 적용" }));
     await waitFor(() => expect(materialize).toHaveBeenCalledWith("library-bgm-1", "project-a"));
 
@@ -1779,7 +1795,7 @@ describe("EditorWorkbenchRoute", () => {
 
     await expectEditorRevision(1);
     expect(await screen.findByText("일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
   it("never displays the old A session while B is loading", async () => {
@@ -1815,7 +1831,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
@@ -1892,7 +1908,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
@@ -1920,7 +1936,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(3);
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     const control = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
@@ -1951,7 +1967,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(5);
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
@@ -2786,7 +2802,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     let track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     let trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
@@ -2799,7 +2815,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(10);
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
@@ -2851,7 +2867,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<Harness />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "n-1 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-1"));
     const reorder = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
     fireEvent.keyDown(reorder, { key: "ArrowRight" });
     await waitFor(() => expect(screen.getByText("변경 내용을 저장하고 있어요.")).toBeVisible());
@@ -3116,7 +3132,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
     expect(await screen.findByRole("button", { name: "Yujin 없이 계속 편집" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     expect(apply).not.toHaveBeenCalled();
   });
 
@@ -3191,7 +3207,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     const composer = await screen.findByLabelText("유진에게 요청하기");
     fireEvent.change(composer, { target: { value: "작성 중인 요청" } });
-    fireEvent.click(screen.getByRole("button", { name: "n-2 클립 선택" }));
+    fireEvent.click(clipSelectionButton("n-2"));
     timeline.scrollLeft = 37;
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
@@ -3201,7 +3217,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(37);
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
-    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true");
     await expectEditorRevision(1);
 
     await act(async () => { resolveManifestRefresh(twoNarrationManifest(2)); });
@@ -3214,7 +3230,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(37);
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
-    expect(screen.getByRole("button", { name: "n-2 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+    expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("atomically refreshes the manifest and editing session after a Director batch apply failure", async () => {
@@ -3314,7 +3330,7 @@ describe("EditorWorkbenchRoute", () => {
     }, expect.any(AbortSignal));
     expect(composer).toHaveValue("");
     expect(composer).toBeDisabled();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     const streamSignal = openEvents.mock.calls[0][3];
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     expect(streamSignal.aborted).toBe(false);
@@ -3383,7 +3399,7 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(stream).toHaveBeenCalledOnce());
     expect(screen.getByRole("button", { name: "답변 중단" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "유진에게 추천받기" })).toBeNull();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     expect(cancel).not.toHaveBeenCalled();
@@ -3393,7 +3409,7 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(await screen.findByText("답변 중단 요청을 보내지 못했어요. 답변은 계속 진행 중이에요.")).toBeVisible();
     expect(stream.mock.calls[0][0].signal.aborted).toBe(false);
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "답변 중단" }));
 
     await waitFor(() => expect(cancel).toHaveBeenLastCalledWith(
@@ -3403,7 +3419,7 @@ describe("EditorWorkbenchRoute", () => {
       expect.any(AbortSignal),
     ));
     expect(cancel).toHaveBeenCalledTimes(2);
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     await act(async () => { finish(); });
   });
 
@@ -3532,7 +3548,7 @@ describe("EditorWorkbenchRoute", () => {
       name: "같은 요청 다시 보내기",
     });
     expect(retryButton).toBeEnabled();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     fireEvent.click(retryButton);
 
     await waitFor(() => expect(retry).toHaveBeenCalledWith(
@@ -3542,7 +3558,7 @@ describe("EditorWorkbenchRoute", () => {
       expect.any(AbortSignal),
     ));
     expect(await screen.findByText("다시 받은 답")).toBeVisible();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
   it("fences late run events after a same-route revision advance", async () => {
@@ -3608,7 +3624,7 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(screen.queryByText("오래된 답")).toBeNull();
     expect(durable).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     expect(screen.queryByRole("button", { name: "답변 중단" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "유진에게 추천받기" })).toBeEnabled();
@@ -3668,7 +3684,7 @@ describe("EditorWorkbenchRoute", () => {
     ).toHaveTextContent("대화 저장 상태를 확인하지 못했어요.");
     expect(screen.queryByText("유진의 답을 받지 못했어요.")).toBeNull();
     expect(screen.queryByText(/PRIVATE/)).toBeNull();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
   it("loads the terminal-linked candidate-only proposal without remounting route-owned UI", async () => {
@@ -3893,7 +3909,7 @@ describe("EditorWorkbenchRoute", () => {
     ));
     expect(history).not.toHaveTextContent(/Hermes|Manual Director|PRIVATE/);
     expect(screen.getByRole("button", { name: "Yujin 없이 계속 편집" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
   it("preserves the draft and manual controls when run creation is unavailable", async () => {
@@ -3919,7 +3935,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByText("유진의 답을 받지 못했어요.")).toBeVisible();
     expect(composer).toHaveValue("보존할 요청");
     expect(screen.getByText("남아 있는 대화")).toBeVisible();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Yujin 없이 계속 편집" }));
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeVisible();
@@ -4165,7 +4181,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "같은 요청 다시 보내기" })).toBeNull();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     expect(api.createHermesRun).toHaveBeenCalledTimes(1);
 
@@ -4251,7 +4267,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.queryByRole("button", { name: "답변 중단" })).toBeNull();
     expect(screen.getByRole("button", { name: "유진에게 추천받기" })).toBeEnabled();
     expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "n-1 클립 선택" })).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
   it("retries the initial route SSE open at cursor zero and does not cancel a completed run", async () => {

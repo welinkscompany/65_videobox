@@ -105,7 +105,10 @@ function timelineClip(clipId: string): HTMLElement {
 }
 
 function timelineClipSelection(clipId: string): HTMLButtonElement {
-  return screen.getByRole("button", { name: `${clipId} 클립 선택` });
+  const clip = timelineClip(clipId);
+  const button = clip.querySelector('[data-native-control="timeline-clip-select"]');
+  if (!button) throw new Error(`Missing selection control for ${clipId}`);
+  return button as HTMLButtonElement;
 }
 
 function selectTimelineClip(clipId: string): void {
@@ -479,6 +482,40 @@ describe("TimelineDock", () => {
     expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (caption:segment-1:start, 0초)" )).toBeInTheDocument();
   });
 
+  it("names each clip in plain language instead of exposing its internal clip ID", () => {
+    const earlyBrollView: EditorViewModel = {
+      ...view,
+      tracks: [
+        ...view.tracks.filter((track) => track.role !== "broll"),
+        { trackId: "b", role: "broll", clips: [{ clipId: "b-1", segmentId: "segment-2", type: "broll", assetId: null, assetUri: null, startSec: 1, endSec: 3, controls: {} }] },
+      ],
+    };
+    render(<TimelineDock view={earlyBrollView} viewportWidthPx={400} />);
+
+    // n-1 is the 1st (and only) narration clip, starting at 0s.
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeInTheDocument();
+    // b-1 is the 1st (and only) broll clip, starting at 1s.
+    expect(screen.getByRole("button", { name: "B-roll 1번째 장면, 1초부터" })).toBeInTheDocument();
+    expect(screen.queryByText("n-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("b-1")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/segment_draft|session-broll/);
+  });
+
+  it("numbers clips by their position within their own lane, not across all lanes", () => {
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={400} />);
+
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 2번째 장면, 1초부터" })).toBeInTheDocument();
+  });
+
+  it("keeps the clip selection accessible name in sync with the button's visible text", () => {
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+
+    const selectionButton = timelineClipSelection("n-1");
+    expect(selectionButton).toHaveAccessibleName("내레이션 1번째 장면, 0초부터");
+    expect(selectionButton.textContent).toBe("내레이션 1번째 장면, 0초부터");
+  });
+
   it("shows a linked caption but never exposes independent caption timing controls", () => {
     const captionPlacementView: EditorViewModel = {
       ...view,
@@ -569,15 +606,13 @@ describe("TimelineDock", () => {
 
     expect(screen.getAllByTestId("timeline-clip")).toHaveLength(3);
     expect(screen.getAllByTestId("timeline-clip").map((clip) => clip.getAttribute("data-clip-id"))).toEqual(["bulk-0", "bulk-1", "bulk-2"]);
-    expect(screen.queryByText("bulk-3")).toBeNull();
+    expect(screen.getAllByTestId("timeline-clip").some((clip) => clip.getAttribute("data-clip-id") === "bulk-3")).toBe(false);
 
     fireEvent.wheel(screen.getByRole("region", { name: "타임라인" }), { deltaX: 36_000 });
 
     const laterClips = screen.getAllByTestId("timeline-clip");
     expect(laterClips.length).toBeLessThanOrEqual(300);
     expect(laterClips.map((clip) => clip.getAttribute("data-clip-id"))).toEqual(["bulk-100", "bulk-101", "bulk-102"]);
-    expect(screen.queryByText("bulk-99")).toBeNull();
-    expect(screen.getByText("bulk-100")).toBeInTheDocument();
-    expect(screen.getByText("bulk-102")).toBeInTheDocument();
+    expect(laterClips.some((clip) => clip.getAttribute("data-clip-id") === "bulk-99")).toBe(false);
   });
 });

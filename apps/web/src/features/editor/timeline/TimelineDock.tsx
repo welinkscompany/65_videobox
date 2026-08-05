@@ -73,6 +73,15 @@ function formatSeconds(seconds: number): string {
   return String(Number(seconds.toFixed(6)));
 }
 
+// Display-only name: selection/mutation logic keeps using rect.clipId
+// (data-clip-id, onClick handlers) unchanged. Never mix the identifier into
+// what the creator reads (F-3: internal IDs like
+// "broll:session-broll-segment_draft_1726b9574a-0" were leaking into the
+// clip selection button's accessible name and visible text).
+function formatClipDisplayName(lane: TimelineLane, ordinalInLane: number, startSec: number): string {
+  return `${laneLabel[lane]} ${ordinalInLane}번째 장면, ${Math.round(startSec)}초부터`;
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return target.isContentEditable || target.closest("input, textarea, select, [contenteditable='true']") !== null;
@@ -516,14 +525,19 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         </div>)}
       </div>
       <div aria-label="타임라인 클립" role="group" style={{ inset: 0, position: "absolute" }}>
-        {draftProjection.rects.map((rect) => {
+        {(() => {
+        const laneOrdinal: Partial<Record<TimelineLane, number>> = {};
+        return draftProjection.rects.map((rect) => {
+        laneOrdinal[rect.lane] = (laneOrdinal[rect.lane] ?? 0) + 1;
+        const ordinalInLane = laneOrdinal[rect.lane]!;
         const narrationClip = rect.lane === "narration" ? narrationByClipId.get(rect.clipId) : undefined;
         const placement = placementsByClipId.get(rect.clipId);
         const displayBounds = draftProjection.boundsByClipId.get(rect.clipId);
         const isTranscriptSelected = narrationClip?.segmentId === selectedSegmentId || captionsByPlacementId.get(rect.clipId)?.segmentId === selectedSegmentId;
         const isSelected = state.selectedClipId === rect.clipId;
+        const clipDisplayName = formatClipDisplayName(rect.lane, ordinalInLane, displayBounds?.startSec ?? 0);
         return <div
-        aria-label={`${laneLabel[rect.lane]} 클립 ${rect.clipId}`}
+        aria-label={`${clipDisplayName} 클립`}
         data-clip-id={rect.clipId}
         data-end-seconds={displayBounds ? formatSeconds(displayBounds.endSec) : undefined}
         data-selected={isSelected || isTranscriptSelected ? "true" : "false"}
@@ -533,7 +547,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         role="group"
         style={{ left: `${rect.x}px`, overflow: "hidden", position: "absolute", top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}
       ><button data-native-control="timeline-clip-select"
-        aria-label={`${rect.clipId} 클립 선택`}
+        aria-label={clipDisplayName}
         aria-pressed={isSelected || isTranscriptSelected}
         onClick={(event) => { event.stopPropagation(); selectClip(rect, event.shiftKey); }}
         onKeyDown={(event) => {
@@ -544,7 +558,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         }}
         style={{ height: "100%", width: "100%" }}
         type="button"
-      >{rect.clipId}</button>{narrationClip && isSelected ? <span data-mutation-controls="true" onClick={(event) => event.stopPropagation()} style={{ inset: 0, overflow: "hidden", pointerEvents: "none", position: "absolute" }}>
+      >{clipDisplayName}</button>{narrationClip && isSelected ? <span data-mutation-controls="true" onClick={(event) => event.stopPropagation()} style={{ inset: 0, overflow: "hidden", pointerEvents: "none", position: "absolute" }}>
         <button data-native-control="timeline-trim-start" aria-label={`${rect.clipId} 시작 자르기`} data-trim-edge="start" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "start")} onPointerDown={(event) => startTrim(event, narrationClip, "start")} style={{ bottom: 0, left: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
         <button data-native-control="timeline-trim-end" aria-label={`${rect.clipId} 끝 자르기`} data-trim-edge="end" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "end")} onPointerDown={(event) => startTrim(event, narrationClip, "end")} style={{ bottom: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", right: 0, top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
         <button data-native-control="timeline-reorder" aria-label={`${rect.clipId} 순서 바꾸기`} data-reorder-control="true" disabled={isSaving} onKeyDown={(event) => keyboardReorder(event, narrationClip)} onPointerDown={(event) => startReorder(event, narrationClip)} style={{ bottom: 0, left: "33.333%", maxWidth: "33.334%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.334%" }} title="왼쪽·오른쪽 화살표로 한 칸씩 이동" type="button">순서</button>
@@ -553,7 +567,8 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         <button data-native-control="placement-move" aria-label={`${rect.clipId} 이동`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementMove(event, placement)} onPointerDown={(event) => startPlacement(event, placement, "move")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 이동" type="button">이동</button>
         <button data-native-control="placement-trim-end" aria-label={`${rect.clipId} 끝 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "end")} onPointerDown={(event) => startPlacement(event, placement, "trim", "end")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
       </span> : null}</div>;
-        })}
+        });
+        })()}
       </div>
     </div>
     {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
