@@ -83,6 +83,21 @@
 - 브랜치: `codex/videobox-container-compatibility` (이름의 `codex/` 접두사는 과거 흔적이며 의미 없음)
 - main 브랜치는 컨테이너 마이그레이션 계획 문서만 있는 뒤처진 상태다. 실제 개발선은 위 worktree다.
 
+### 재사용 게이트 (모든 구현 goal에 적용)
+
+`docs/implementation-plan.ko.md` §8.1이 정한 상위 규칙이다. 특정 milestone 전용이 아니라
+**모든 구현 작업 시작 전에** 판단한다.
+
+1. 이번 작업과 관련된 기존 내부 소스나 외부 OSS가 이미 있는가
+2. 있으면 `adopt as-is` / `partial port` / `rewrite` / `exclude` 중 무엇인가
+3. 이번 범위에서 실제로 반영할 재사용 단위는 무엇인가
+4. 의도적으로 제외하는 후보와 그 이유는 무엇인가
+5. 현재 작업이 repo 경계를 오염시키지 않는가
+
+판단 기준: 소스 복제보다 경계 유지, 통째 복사보다 선별 이식.
+`UI 구조`, `Google Sheets/Drive 결합`, `provider 직접 호출 하드코딩`은 반입 금지다.
+재사용 판단은 기능 설명이 아니라 실제 코드 반영 단위까지 내려간다.
+
 ### 기본 구현 루프
 
 `docs/development-fast-path.ko.md` §1의 고정 순서다.

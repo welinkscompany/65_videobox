@@ -1,7 +1,7 @@
-# VideoBox 전수조사 기록 및 개발 backlog
+# VideoBox 조사 기록 및 개발 backlog
 
 작성 시작: 2026-08-05
-용도: 전수조사를 진행하며 발견한 결함·결정·범위 충돌을 누적 기록한다.
+용도: 조사하며 발견한 결함·결정·범위 충돌을 누적 기록한다.
 조사가 끝나면 이 문서를 근거로 순서가 있는 개발 계획을 한 번에 세운다.
 
 이 문서 자체는 공식 Task가 아니다. `§10.8.3`에 따라 조사 산출물이므로 공식 진행률에 포함하지 않는다.
@@ -31,9 +31,39 @@
 | 썸네일·미디어 probe 경로 | 완료 |
 | `oss-adoption-map.ko.md` | 완료 |
 | Hermes 대화 편집 경로 (API·SSE·어댑터·UI) | 완료 |
-| `docs/superpowers/plans` 43건 / `specs` 27건 | 목록 파악 완료. 개별 Task 착수 시 해당 문서만 열람 |
+| `implementation-plan.ko.md` §8~§8.2 재사용 게이트 | 완료 |
+| `implementation-plan.ko.md` §9~§11 리스크·기간·착수조건 | 완료 |
+| `implementation-plan.ko.md` §23 Hermes 현재 slice | 완료 |
+| `docs/superpowers/plans` 43건 / `specs` 27건 | 목록만 파악. 개별 Task 착수 시 해당 문서 열람 |
 
-**전수조사 완료 (2026-08-05).** 이후 개별 Task 착수 시 해당 plan/spec만 추가로 읽는다.
+### 커버리지 — 전수조사 아님
+
+2026-08-05 시점에 "전수조사 완료"라고 적었으나 **사실이 아니었다.** 실측 수치는 아래다.
+
+| 대상 | 전체 | 읽은 분량 |
+|---|---|---|
+| `docs/` 전체 | 450개 파일 / 41,107줄 | 약 1,700줄 (**약 4%**) |
+| `development-fast-path.ko.md` | 280줄 | 280줄 (100%) |
+| `product-plan.ko.md` | 223줄 | 100% |
+| `architecture-plan.ko.md` | 468줄 | 100% |
+| `implementation-plan.ko.md` | 1,283줄 | 약 630줄 (49%) |
+| `development-status-2026-06-29.ko.md` | 10,772줄 | 16줄 (0.15%) |
+| `handoffs/` | 76개 파일 | 1개 |
+| `superpowers/plans` + `specs` | 70개 파일 | 2개 |
+| `archive/` | 273개 파일 | 0개 |
+
+읽지 않은 주요 구간과 판단:
+
+- `implementation-plan` §12~§22 (약 650줄): 2026-07-01~07-16 시점의 closeout 기록.
+  현재 상태는 `development-status` §322가 authoritative하므로 우선순위가 낮다.
+- `development-status` 본문 10,756줄: append-only 이력 로그.
+  최신 authoritative 항목(§322)은 읽었고 나머지는 과거 기록이다.
+- `archive/` 273개: 명시적으로 보관 처리된 과거 문서.
+- `plans`/`specs` 70개: Task별 문서. 해당 Task 착수 시 읽는 것이 효율적이다.
+
+**남은 구간을 전부 읽을지 여부는 owner 결정 사항이다.**
+읽지 않고 진행하면 개별 Task의 세부 제약을 놓칠 위험이 있고,
+전부 읽으면 시간이 크게 든다. 현재는 후자를 선택하지 않았다.
 
 ---
 
@@ -189,6 +219,23 @@ owner는 세션 중 "캡컷처럼 인터페이스를 만들어야 한다"고 말
   `architecture-plan.ko.md` §14도 "VideoBox의 핵심은 편집기 UI가 아니라 편집 엔진이다"라고 못박는다.
 - owner 확인 필요: 캡컷에서 실제로 자주 쓰던 기능 중 현재 없는 것이 있는지.
 - 상태: **owner 확인 대기**
+
+### S-3. 대본 생성이 계획서에서 명시적으로 차단됨
+
+`implementation-plan.ko.md` §23.3은 유진의 업무 영역을 정하면서 이렇게 못박는다.
+
+> VideoBox는 영상 편집·검수·CapCut 인계에 집중하며,
+> **대본·제목·썸네일·추천 영상의 생성 또는 제안은 현재 제품 범위 밖으로 차단한다.**
+
+§23.3의 허용 산출물 표도 "대본·제목·썸네일·추천 영상 요청 → `blocked`와 짧은 이유"로 규정한다.
+§23.3A.4는 Qwen에 대해서도 "title generation과 대본·썸네일·추천 영상 생성은
+VideoBox의 현 영상 편집 전용 제품 범위 밖이므로 `disabled`"라고 반복한다.
+
+owner는 대본 생성을 "나중에 개발"하겠다고 했다(`D-3`). 즉 방향 자체는 유효하나,
+착수하려면 §23.3의 차단 규정을 공식적으로 바꾸는 결정이 선행되어야 한다.
+현재는 "후순위"가 아니라 **"계획서상 금지"** 상태다.
+
+- 상태: **결정 필요**. `D-3` 착수 전 §23.3 개정이 선행 조건이다.
 
 ### S-2. 자동 적용 정책: 계획서 "분리" vs owner "완전 자동 배치"
 
@@ -377,15 +424,33 @@ LM Studio에 닿기 어려운 상태다. `D-2`의 난이도는 우연이 아니�
 즉 owner가 원하는 "대화로 지시하면 추천이 뜨고 골라서 적용" 경험은 **이미 만들어져 있다.**
 `추천과 적용 분리`(`product-plan` §6.4) 원칙도 candidate-only 설계로 지켜져 있다.
 
-**실제로 막는 것은 코드가 아니라 provider 인증이다.**
+**그러나 "인증만 하면 동작한다"는 판정도 틀렸다 (2차 정정).**
 
-- Task 23D readiness smoke 결과가 `credential_blocked`, `live_canary_status=not_run`이었다.
-- `.env.container`의 `HERMES_YUJIN_GATEWAY_*`가 `replace-before-starting` 상태다.
-- Hermes provider OAuth 로그인은 owner가 직접 수행해야 하며,
-  `§10.14` 네트워크 경계와 승인 게이트가 걸려 있다.
+`implementation-plan.ko.md` §23을 읽고 나서 다시 정정한다. 계획서는 아래를 명시한다.
 
-- 재분류: 결함(F)이 아니라 **결정·인증 대기(D)**에 가깝다. `D-4`로 승격한다.
-- 상태: **owner의 Hermes 로그인 필요**. 코드 작업은 현재 불필요하다.
+- §23.0: "유진 profile, Hermes→VideoBox API 권한중개, egress allowlist gateway,
+  OAuth login, mem0, **편집 mutation은 아직 만들지 않았다**"
+- §23.1 `[~] 진행 중`: "egress allowlist gateway가 별도 gate를 통과하기 전에는
+  `hermes model`을 실행하지 않는다" → **OAuth 로그인 자체가 선행 게이트에 막혀 있다**
+- §23.2.6 `[ ] 미완료`: "signer는 아직 어떤 VideoBox API route나 Hermes container에도
+  배포하지 않는다"
+- §23.3 `[ ] 미완료`: 첫 slice의 유진은 "action 없는 approval request 제안만" 한다.
+  장면·자산·음향 제안에 대해 "Gateway가 허용하는 tool: 첫 slice에서는 없음"
+- §23.4 `[ ] 미완료`: "`applied`는 이 slice 범위 밖이며, 첫 slice에서 proposal은
+  durable하지만 **action 없는 기록**이다"
+
+**코드와 계획서가 불일치한다.** 코드에는 run/SSE/proposal adapter/composer/적용 버튼이
+존재하지만, 최상위 계획서는 gateway·signer·OAuth·편집 mutation을 미완료로 표기한다.
+계획서 §23은 2026-07-19/20 기준이고 코드는 이후 Task 23까지 진행됐으므로,
+계획서가 stale일 수도 있고 코드가 게이트 전에 앞서 만들어진 UI일 수도 있다.
+
+**어느 쪽인지 확정하려면 런타임 확인이 필요하며, 그 확인 자체가 인증을 요구한다.**
+현재 상태에서 "동작한다" 또는 "동작하지 않는다"를 단정하지 않는다.
+
+- 재분류: `D-4` **코드·계획서 불일치 해소 필요**
+- 선행 작업: §23의 각 `[ ]`/`[~]` 항목을 현재 코드 상태와 대조해 계획서를 갱신하거나,
+  코드가 게이트를 앞질렀다면 그 사실을 기록한다.
+- 상태: **확인 필요**. owner 로그인만으로 해결된다고 주장하지 않는다.
 
 ---
 
@@ -413,6 +478,18 @@ LM Studio에 닿기 어려운 상태다. `D-2`의 난이도는 우연이 아니�
 - 검증: RED→GREEN 1건, 프론트엔드 734 passed, `tsc --noEmit` 통과, 브라우저 실측
 - `§10.13.2` 승인 어휘만 사용, 금지 용어 없음
 - 공식 Task 귀속 없음. 진행률에 포함하지 않는다.
+
+**규정 위반 기록**: 이 작업은 `implementation-plan.ko.md` §8.1 재사용 게이트를 거치지 않았다.
+§8.1은 모든 구현 goal에 적용되는 상위 규칙인데 당시 해당 문서를 읽지 않아 몰랐다.
+사후 분류를 남긴다.
+
+| 재사용 후보 | 분류 | 이유 |
+|---|---|---|
+| `ProjectOnboarding` | `exclude` | 나레이션·스크립트 경로를 필수로 요구해 단순 생성에 맞지 않는다. 프로젝트 0개 경로에서는 기존대로 재사용을 유지했다 |
+| shadcn `Button`, `Input` | `adopt as-is` | pinned source component를 그대로 사용 |
+| 신규 인라인 폼 | `rewrite` | 이름 하나만 받는 최소 폼. 새 의존성·새 API 없음 |
+
+경계 보존: 새 API를 만들지 않고 기존 `POST /api/projects`만 호출했다. repo 경계 오염 없음.
 
 ### C-2. 최상위 지침을 CLAUDE.md로 전환 (커밋 `1eef5ca`, `f4c3b07`, `c4d5ac1`)
 
