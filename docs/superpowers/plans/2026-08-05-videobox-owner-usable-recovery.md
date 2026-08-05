@@ -748,7 +748,84 @@ owner의 실제 사용 방식("평소에 다양한 B-roll을 녹화해서 저장
 
 Commit: `feat: add media from the asset screen`
 
-### Task 17: 숏폼 편집 — 세로 캔버스로 기존 편집기 재사용
+### Task 17: 숏폼 편집 — 세로 캔버스로 기존 편집기 재사용 — **백엔드 완료, 놀라운 사실 발견 (2026-08-06)**
+
+**실측으로 계획서 전제 자체가 틀렸다는 걸 알았다.** 이 Task는 "지금은 가로만 되니
+세로를 추가해야 한다"는 전제였는데, 실제로 확인해보니 **정반대였다.**
+
+`composition_plan.py:18-19`의 `DEFAULT_OUTPUT_WIDTH = 1080`, `DEFAULT_OUTPUT_HEIGHT = 1920`—
+**기본값이 이미 세로다.** `build_timeline()`이 지금까지 `timeline["output"]`이나
+`timeline["video_width"]`를 설정하는 코드가 **어디에도 없어서**, 모든 프로젝트가
+암묵적으로 이 기본값(세로 1080×1920)으로 렌더돼 왔다. 실제로 확인했다 —
+`artifacts/owner-sample-edit-20260803-r4/.../output.mp4`를 `ffprobe`로 열어보니
+**진짜로 1080×1920이었다.** 롱폼 설명형 영상(가로가 정상이어야 할)도 지금까지
+전부 세로로 렌더되고 있었다는 뜻이다.
+
+이건 이번 세션이 만든 문제가 아니다 — `DEFAULT_OUTPUT_WIDTH/HEIGHT`는 내가 손대기 전부터
+이 값이었다. 다만 지금까지 아무도 실측하지 않아 발견되지 않았을 뿐이다.
+**owner 확인이 필요한 사항으로 별도 기록한다** (아래 "발견한 별도 사안" 참고).
+
+**재사용 게이트 (§8.1) — 실측으로 재확인:**
+
+| 후보 | 분류 | 실측 결과 |
+|---|---|---|
+| 기존 편집 작업판과 14개 조작 | `adopt as-is` | 변경 없음 |
+| `composition_plan`의 canvas width/height | `partial port` | 이미 `output`/`video_width`/`video_height`를 읽는 코드가 있었다. **호출부가 값을 채워 넣기만 하면 됐다** |
+| `ffmpeg_final_renderer`의 `force_original_aspect_ratio=increase,crop` | `adopt as-is` (확인) | 코드를 읽어 확인: `render_timeline_to_mp4`가 `composition_plan.width/height`로 렌더러의 `video_width/height`를 교체하고(737-744행), 그 값을 그대로 scale/crop 필터에 쓴다. **손대지 않아도 이미 세로 캔버스에 가로 소재를 crop으로 채운다** |
+| `ass_subtitles.render_editing_session_ass` | `adopt as-is` (확인) | `video_width`/`video_height`를 그대로 받아 `PlayResX`/`PlayResY`와 퍼센트 기반 margin을 계산한다. **자막은 이미 세로 화면에 맞게 스케일된다** — 새로 만들 게 없었다 |
+| 숏폼 전용 새 편집기 | `exclude` | owner 결정으로 범위 밖 (변경 없음) |
+
+**Files (실제):**
+- Modify: `packages/core-engine/src/videobox_core_engine/local_pipeline.py` (`build_timeline`에 `orientation` 파라미터)
+- Modify: `services/api/src/videobox_api/orchestration.py`, `routers/timeline.py`, `models.py` (API로 노출)
+- Modify: `apps/web/src/api.ts` (타입만 — 아직 호출부 없음, 아래 참고)
+- Create: `tests/test_vertical_composition.py`
+- (계획에 있던 `preview-stage.tsx` 수정은 **불필요했다** — 아래 참고)
+
+- [x] **Step 1: 실패 테스트** — 세로 출력 규격을 고르면 canvas가 세로가 되는지,
+      가로 출력을 고르면 16:9가 되는지, 선택하지 않으면(기존 호출부와 동일) `output`
+      키 자체가 안 생기는지(현재 상태를 고정하는 회귀 테스트), 잘못된 값은 거부되는지,
+      가로 소재가 세로 캔버스에서 crop 분기를 타는지, 자막이 세로 PlayRes로 스케일되는지
+      (6개 테스트)
+- [x] **Step 2: RED 확인** — `build_timeline() got an unexpected keyword argument 'orientation'`
+- [x] **Step 3: 구현** — `LocalPipelineRunner.build_timeline(orientation: str | None = None)` —
+      `"landscape"` → `{width:1920,height:1080}`, `"vertical"` → `{width:1080,height:1920}`를
+      `timeline_payload["output"]`에 채운다. `None`(기본값)이면 아무것도 안 채워서
+      **기존 동작(암묵적 세로 기본값)을 그대로 유지한다** — 이 Task에서 그 기본값
+      자체를 바꾸는 건 별도 owner 결정 사항이라고 판단했다. `ApiOrchestrator`/
+      `BuildTimelineRequest`/`timeline.py` 라우터로 그대로 흘려보냈다
+- [x] **Step 4: GREEN(6/6, `test_api.py`의 timeline 관련 52개 포함) + 코드 읽기로
+      역방향 검증 + 커밋** — 실제 ffmpeg 렌더 재실행은 하지 않았다. 대신 (1) 내 유닛
+      테스트가 진짜 `CompositionPlan.from_timeline`(mock 아님)을 직접 통과시켜
+      치수가 맞는지 확인했고, (2) `ffmpeg_final_renderer.py`/`ass_subtitles.py`의
+      다운스트림 코드를 직접 읽어 이미 `composition_plan.width/height`를 그대로
+      쓰고 있음을 확인했다 — 이 두 파일은 이번에 전혀 수정하지 않았다.
+      Task 21에서 이미 이 렌더 경로 전체가 실제 footage로 한 번 검증됐으므로,
+      같은 코드 경로에 다른 치수를 흘려보내는 것 이상의 새로운 위험은 없다고 판단했다
+
+**계획에 있던 프론트 변경이 필요 없었던 이유:** `preview-stage.tsx`는 `<video>` 엘리먼트를
+고정 종횡비 없이 `width: min(100%, 35rem); max-height: 28rem`로만 감싼다
+(`editor-workbench.css:22`). 브라우저가 영상 파일 자체의 실제 종횡비를 그대로 쓰므로
+세로 영상도 이미 올바르게 표시된다 — 수정할 게 없었다.
+
+**아직 없는 것:**
+
+- 프론트엔드에 `buildTimeline`을 호출하는 곳 자체가 없다(서버가 초안 생성 흐름을
+  자동으로 오케스트레이션하는 것으로 보인다). `orientation` 선택 UI를 실제로
+  노출하려면 그 자동화 흐름을 먼저 파악해야 한다 — API 타입은 준비해 뒀지만
+  사용자가 실제로 고를 수 있는 화면은 아직 없다
+- `orientation="vertical"`로 실제 렌더를 한 번도 안 돌려봤다(코드 경로 재사용
+  확인으로 대체했다는 판단을 위에 남겼다)
+
+**발견한 별도 사안 — owner 확인 필요 (S-5로 백로그에 기록):**
+
+지금까지 `orientation`을 명시하지 않은 모든 프로젝트(사실상 전부)가 세로 1080×1920으로
+렌더돼 왔다. 롱폼 설명형 영상이 주 제품이라면 이건 아마 의도가 아닐 것이다.
+이 Task는 "세로를 고를 수 있게" 만드는 것이 목적이라 이 기본값 자체를 바꾸지 않았다 —
+바꾸려면 "명시 안 하면 무엇이 기본인가"라는 별도 결정이 필요하고, 과거 실제 렌더 결과물이
+전부 세로였다는 사실 자체가 owner에게 먼저 확인받아야 할 사안이라고 판단했다.
+
+Commit: `feat: let projects choose a vertical or landscape canvas`
 
 **owner 결정 (2026-08-05):** "지금 편집기를 세로화면으로 쓰면 되."
 
