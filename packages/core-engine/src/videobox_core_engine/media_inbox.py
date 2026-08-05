@@ -126,6 +126,13 @@ def run_inbox_cycle(
                 report.duplicates.append(name)
                 continue
             destination = config.library_root / name
+            if destination.exists():
+                # A different file already occupies this filename (the
+                # content-hash duplicate check above only catches same
+                # *content*, not same *name*) -- shutil.move would silently
+                # overwrite it. Disambiguate with the source's own hash
+                # instead of ever clobbering an existing library file.
+                destination = config.library_root / f"{destination.stem}-{source_hash[:8]}{destination.suffix}"
             shutil.move(str(source), str(destination))
             moved_hash = _sha256_file(destination)
             if moved_hash != source_hash:

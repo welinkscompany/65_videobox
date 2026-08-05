@@ -131,6 +131,29 @@ def test_run_inbox_cycle_never_deletes_the_source_when_the_move_itself_fails(tmp
     assert source.read_bytes() == b"real footage bytes"
 
 
+def test_run_inbox_cycle_never_overwrites_a_different_file_with_the_same_name(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    existing = library_root / "clip.mp4"
+    existing.write_bytes(b"original library bytes -- must survive")
+    source = watch_root / "clip.mp4"
+    source.write_bytes(b"a completely different file that happens to share a name")
+
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    report = run_inbox_cycle(config)
+
+    assert report.moved == ["clip.mp4"]
+    assert report.failed == []
+    # The pre-existing library file must be untouched.
+    assert existing.read_bytes() == b"original library bytes -- must survive"
+    # The new file landed under a disambiguated name instead of overwriting it.
+    other_files = [p for p in library_root.iterdir() if p.name != "clip.mp4"]
+    assert len(other_files) == 1
+    assert other_files[0].read_bytes() == b"a completely different file that happens to share a name"
+
+
 def test_run_inbox_cycle_continues_past_one_failure_to_process_the_rest(tmp_path: Path, monkeypatch) -> None:
     watch_root = tmp_path / "drive"
     watch_root.mkdir()

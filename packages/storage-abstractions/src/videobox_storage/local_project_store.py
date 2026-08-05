@@ -593,7 +593,17 @@ class LocalProjectStore:
         return self._set_project_status(project_id=project_id, status=ProjectStatus.DRAFT)
 
     def _set_project_status(self, *, project_id: str, status: ProjectStatus) -> dict[str, Any]:
-        if not (self.project_root(project_id) / "db" / "project.sqlite").is_file():
+        # A filesystem existence check here would be wrong for
+        # PostgresProjectStore, which has no per-project sqlite file at all.
+        # SELECT-then-check works for both backends: sqlite3.connect() raises
+        # OperationalError for a truly nonexistent per-project directory
+        # (LocalProjectStore), while Postgres's single shared database simply
+        # returns no row for an unknown project_id.
+        try:
+            exists = self._fetchone(project_id, "SELECT 1 FROM projects WHERE project_id = ?", (project_id,))
+        except sqlite3.OperationalError:
+            raise KeyError(f"Project not found: {project_id}") from None
+        if exists is None:
             raise KeyError(f"Project not found: {project_id}")
         self._execute(
             project_id,

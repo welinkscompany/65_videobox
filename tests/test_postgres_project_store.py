@@ -1233,6 +1233,31 @@ def test_postgres_store_bootstraps_and_lists_a_project(tmp_path: Path, postgres_
     }
 
 
+def test_postgres_store_archives_and_restores_a_project(tmp_path: Path, postgres_url: str) -> None:
+    """Regression test: list_projects() used to be overridden on
+    PostgresProjectStore without the include_archived kwarg the base class
+    gained for F-5, so this raised TypeError against any Postgres-backed
+    deployment. archive_project/restore_project also used to check for a
+    per-project sqlite file that Postgres never creates, raising KeyError
+    even for a project that does exist."""
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Postgres archive {uuid4().hex}")
+
+    archived = store.archive_project(project_id=project.project_id)
+    assert archived["status"] == "archived"
+    assert project.project_id not in {item["project_id"] for item in store.list_projects()}
+    assert project.project_id in {
+        item["project_id"] for item in store.list_projects(include_archived=True)
+    }
+
+    restored = store.restore_project(project_id=project.project_id)
+    assert restored["status"] == "draft"
+    assert project.project_id in {item["project_id"] for item in store.list_projects()}
+
+    with pytest.raises(KeyError):
+        store.archive_project(project_id=f"does-not-exist-{uuid4().hex}")
+
+
 def test_postgres_asset_preview_job_claim_is_atomic(tmp_path: Path, postgres_url: str) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
     project = store.bootstrap_project(f"Asset preview claim {uuid4().hex}")

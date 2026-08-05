@@ -7,7 +7,7 @@ from typing import Any, Callable, Sequence
 
 import psycopg
 
-from videobox_domain_models.projects import ProjectRecord
+from videobox_domain_models.projects import ProjectRecord, ProjectStatus
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.postgres_compat import translate_sql
 from videobox_storage.postgres_schema import (
@@ -168,14 +168,13 @@ class PostgresProjectStore(LocalProjectStore):
         finally:
             connection.close()
 
-    def list_projects(self) -> list[dict[str, Any]]:
+    def list_projects(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         connection = self._connection("")
         try:
-            return [
-                dict(row)
-                for row in connection.execute(
-                    "SELECT project_id, name, status, root_storage_uri, created_at, updated_at FROM projects ORDER BY project_id"
-                ).fetchall()
-            ]
+            query = "SELECT project_id, name, status, root_storage_uri, created_at, updated_at FROM projects"
+            if not include_archived:
+                query += f" WHERE status != '{ProjectStatus.ARCHIVED.value}'"
+            query += " ORDER BY project_id"
+            return [dict(row) for row in connection.execute(query).fetchall()]
         finally:
             connection.close()

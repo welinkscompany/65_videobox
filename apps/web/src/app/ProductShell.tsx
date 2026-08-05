@@ -2,6 +2,11 @@
 // Structural reference: src/components/layout/authenticated-layout.tsx and app-sidebar.tsx
 // License: MIT (see THIRD_PARTY_NOTICES.md). VideoBox adapts the layout only;
 // upstream authentication, team, and administration behavior is intentionally excluded.
+// After any content change to this file, update its two normalized_sha256
+// entries in docs/oss/editor-ui-source-map.json (`hashlib.sha256(open(path,
+// "rb").read()).hexdigest()`) -- tests/test_editor_ui_source_provenance.py
+// enforces this and only runs in the full backend suite, not the frontend
+// one, so a frontend-only PR can pass CI locally and still break this pin.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Menu, PanelLeftClose, Settings, Video } from "lucide-react";
