@@ -429,10 +429,41 @@ Commit: `refactor: drive shell colours from theme tokens`
 
 ### Task 11A: 승인된 디자인을 화면에 반영
 
-> **Step은 Task 10 승인 결과가 나온 뒤 채운다.** 무엇을 승인받는지 정해지기 전에는
-> 구현 Step을 쓸 수 없다. Task 11이 선행이다.
+승인 **내용**은 Task 10에서 정해지지만 **작업 절차**는 지금 정할 수 있다.
+승인된 값은 이 Task의 입력이지 Step의 구조를 바꾸지 않는다.
 
-확정된 범위: 승인된 팔레트를 변수에 반영하고 대비(4.5:1) 회귀 테스트를 추가한다.
+**선행:** Task 11(색상 토큰 일원화). 토큰이 안 통하면 어떤 승인값도 화면에 안 나온다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| Task 11이 만든 변수 체계 | `adopt as-is` | 값만 교체한다 |
+| `scripts/build_ui_prototype_artifacts.py` | `adopt as-is` | 승인 SHA 검증에 기존 스크립트를 쓴다 |
+| 새 디자인 시스템 | `exclude` | 기존 토큰 이름을 유지한다 |
+
+**Files:**
+- Modify: `apps/web/src/ui-system.css` (승인된 값으로 토큰 교체)
+- Modify: `apps/web/src/styles/product-shell.css` (Task 11에서 변수화된 상태)
+- Create: `apps/web/src/styles/contrast.test.ts`
+
+- [ ] **Step 1: 실패 테스트** — 본문 텍스트 대비 4.5:1 이상,
+      비텍스트 경계·포커스 대비 3:1 이상, 상태를 색만으로 구분하지 않는지.
+      기준값은 `creator-workspace-visual-approval.ko.md`가 이미 명시한 것을 따른다
+- [ ] **Step 2: RED 확인**
+
+Run: `npm --prefix apps/web test -- src/styles`
+
+- [ ] **Step 3: 승인된 값 적용** — Task 10에서 승인된 팔레트를 토큰에 반영한다.
+      승인 기록에 없는 값은 넣지 않는다
+- [ ] **Step 4: 승인 게이트 재검증**
+
+Run: `.venv\Scripts\python.exe scripts/build_ui_prototype_artifacts.py --require-approved`
+승인 record와 artifact aggregate SHA가 일치해야 한다
+
+- [ ] **Step 5: GREEN + 브라우저 실측 + 커밋**
+
+Commit: `feat: apply the approved visual direction`
 
 ---
 
@@ -686,6 +717,34 @@ Drive API를 쓰지 않으므로 `implementation-plan.ko.md` §8·§8.1과
 감시 대상은 설정 가능한 로컬 경로이며, VideoBox는 그것이 어떤 클라우드의
 동기화 폴더인지 알지 못한다. 이 무지가 조항 준수의 근거다.
 
+**감시 경로 (2026-08-05 확인):** `G:\내 드라이브\100_videobox`
+
+실측한 현재 내용:
+
+| 항목 | 상태 |
+|---|---|
+| 최상위 mp4 | 8개. 전부 `1920×1080` 가로 |
+| `가로/FHD/` | mp4 1개 |
+| `thumbnails/` | jpg 1개 |
+| `voiceover/` | 비어 있음 |
+| `desktop.ini` | Windows 폴더 설정 파일. 반입 대상에서 제외한다 |
+
+**기존 폴더를 지우지 않는다.** owner가 방향별로 수동 정리하던 흔적(`가로`)이 있으나,
+Task 15가 `orientation`을 자동 판정하므로 **수동 분류 폴더는 앞으로 불필요하다.**
+반입 후 자연스럽게 비워진다. 강제로 정리하지 않는다.
+
+**감시 규칙:**
+
+- 최상위와 하위 폴더를 모두 훑되 `desktop.ini`와 숨김 파일은 무시한다
+- 동영상 확장자만 대상으로 한다
+- Drive가 아직 내려받는 중인 파일(스트림 모드 placeholder)은 건너뛰고 다음 주기에 다시 본다
+
+**Step은 아래 전제 확인 뒤 채운다:**
+
+1. 파일을 동기화 폴더 밖으로 옮겼을 때 Drive에서 실제로 지워지는지.
+   **owner 파일로 시험하지 않는다.** 더미 파일을 만들어 옮겨보고 Drive 웹에서 확인한다
+2. 스트림 모드인지 미러 모드인지에 따라 동작이 다를 수 있다
+
 **안전 요건 — 데이터 손실 방지:**
 
 - 원본을 옮기기 전에 해시로 무결성을 확인한다
@@ -821,10 +880,14 @@ Task 14개 중 상세 Step까지 완성된 것과 개요만 있는 것을 구분
 | 1–4, 6–11, 13–17, 19–21 | 상세 Step·Files·재사용 게이트 완성 |
 | 5 | 간략하지만 실행 가능 |
 | 12 | **완료** (2026-08-05, 커밋 `d503ce2`) |
-| 11A | **개요만.** Task 10 승인 결과가 나와야 쓸 수 있다 |
-| 18 | **개요만.** Drive 동기화 폴더 경로 확인이 선행 |
+| 11A | 상세 Step 완성. 승인된 **값**만 Task 10에서 들어온다 |
+| 18 | **개요만.** Drive 삭제 동작 실측이 선행 |
 
-Task 11A와 18만 비워둔다. 둘 다 선행 결정이 없으면 Step이 추측이 된다.
+Task 18만 비워둔다. 파일을 옮기면 Drive에서 지워지는지가 아직 확인되지 않았고,
+그 답에 따라 정리 방식이 달라진다.
+
+Task 11A는 처음에 "승인 전이라 못 쓴다"고 비워뒀으나 그 판단이 틀렸다.
+승인된 값은 이 Task의 **입력**이지 Step 구조를 바꾸지 않는다. owner 지적으로 바로잡았다.
 
 ## 검증 이력
 
