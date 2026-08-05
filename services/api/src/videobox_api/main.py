@@ -70,6 +70,7 @@ from videobox_core_engine.settings import (
     resolve_container_snapshot_root,
     resolve_projects_root,
     resolve_user_library_root,
+    resolve_whisper_stt_config,
 )
 from videobox_core_engine.container_snapshot import ContainerSnapshotError, verify_container_snapshot
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
@@ -459,7 +460,7 @@ def create_app(
             "Injected local-only runtime service exposes a retired external provider."
         )
     resolved_auto_cut_config = auto_cut_config or AutoCutConfig()
-    resolved_whisper_stt_config = whisper_stt_config or WhisperSTTConfig()
+    resolved_whisper_stt_config = whisper_stt_config or resolve_whisper_stt_config()
     resolved_capcut_draft_export_config = capcut_draft_export_config or CapCutDraftExportConfig()
     resolved_tts_engine_config = tts_engine_config or TTSEngineConfig()
     pipeline = LocalPipelineRunner(

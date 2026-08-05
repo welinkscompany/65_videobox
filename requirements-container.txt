@@ -3,3 +3,10 @@ uvicorn==0.30.6
 python-multipart==0.0.20
 psycopg[binary]==3.2.9
 cryptography==45.0.6
+
+# Real speech-to-text and CapCut draft export.  Without these the container
+# falls back to MockSTTProvider and a null exporter, so captions and segments
+# come from fixed placeholder text rather than the actual audio.
+# Versions match requirements-runtime.txt.
+faster-whisper==1.2.1
+pycapcut==0.0.3

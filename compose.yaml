@@ -51,10 +51,24 @@ services:
     environment:
       VIDEOBOX_DATA_ROOT: /videobox-data
       VIDEOBOX_SNAPSHOT_ROOT: /videobox-snapshot
+      # PID 1 runs `uvicorn ... create_app --factory`, so the factory gets no
+      # arguments and resolves these instead of defaulting to the mock
+      # transcriber.  Model weights download on first real use.
+      VIDEOBOX_STT_ENABLED: ${VIDEOBOX_STT_ENABLED:-1}
+      VIDEOBOX_STT_MODEL_SIZE: ${VIDEOBOX_STT_MODEL_SIZE:-small}
+      VIDEOBOX_STT_DEVICE: ${VIDEOBOX_STT_DEVICE:-cpu}
+      VIDEOBOX_STT_COMPUTE_TYPE: ${VIDEOBOX_STT_COMPUTE_TYPE:-int8}
+      VIDEOBOX_STT_LANGUAGE: ${VIDEOBOX_STT_LANGUAGE:-ko}
+      # The root filesystem stays read-only, so model weights need their own
+      # writable home.  Keeping it off /tmp avoids re-downloading on restart and
+      # keeps weights out of the owner's project data.
+      HF_HOME: /opt/models
+      XDG_CACHE_HOME: /opt/models
       VIDEOBOX_DATABASE_URL: postgresql://${POSTGRES_USER:-videobox}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.container}@videobox-postgres:5432/${POSTGRES_DB:-videobox}
     volumes:
       - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data
       - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro
+      - videobox_model_cache:/opt/models
     depends_on:
       videobox-postgres:
         condition: service_healthy
@@ -178,5 +192,8 @@ networks:
 
 volumes:
   videobox_postgres_data:
+  # Speech-to-text weights.  Separate from project data so model downloads never
+  # touch the owner's footage, and persistent so a restart does not refetch.
+  videobox_model_cache:
   videobox_hermes_preauth_state:
   videobox_hermes_oauth_state:

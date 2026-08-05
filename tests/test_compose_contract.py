@@ -26,10 +26,17 @@ def test_workspace_owns_api_and_web_mounts_without_host_or_docker_access() -> No
     assert workspace["build"] == {"context": ".", "dockerfile": "docker/workspace.Dockerfile"}
     assert workspace["environment"]["VIDEOBOX_DATA_ROOT"] == "/videobox-data"
     assert workspace["environment"]["VIDEOBOX_SNAPSHOT_ROOT"] == "/videobox-snapshot"
+    # Exactly two host bind mounts, both under the configured data root, plus a
+    # named volume for speech-to-text weights.  The named volume grants no host
+    # access; it exists because the root filesystem is read-only and model
+    # downloads must not land in the owner's project data.  Keep this list exact
+    # so any further mount has to be justified here.
     assert workspace["volumes"] == [
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro",
+        "videobox_model_cache:/opt/models",
     ]
+    assert workspace["environment"]["HF_HOME"] == "/opt/models"
     assert workspace["networks"] == ["videobox-edge", "videobox-internal"]
     assert "videobox-agent-gateway-network" not in workspace["networks"]
     assert "videobox-hermes-provider-egress" not in workspace["networks"]

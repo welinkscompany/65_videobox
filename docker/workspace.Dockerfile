@@ -10,8 +10,11 @@ FROM node:20-bookworm-slim AS node-runtime
 
 FROM python:3.12-slim
 
-RUN apt-get update \
-    && apt-get install --no-install-recommends -y ffmpeg nginx util-linux \
+# Individual deb.debian.org CDN nodes intermittently answer 400 for a single
+# package, which fails the whole install.  Retry the fetch rather than the build.
+RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update \
+    && apt-get install --no-install-recommends -y --fix-missing ffmpeg nginx util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Keep the Node 20 toolchain available inside the trusted local workspace.

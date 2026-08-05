@@ -32,6 +32,32 @@ def resolve_container_snapshot_root() -> Path | None:
     return Path(configured) if configured else None
 
 
+def _environment_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _environment_text(name: str, fallback: str) -> str:
+    return os.environ.get(name, "").strip() or fallback
+
+
+def resolve_whisper_stt_config() -> "WhisperSTTConfig":
+    """Resolve speech-to-text settings for callers that pass no config.
+
+    The container runs `uvicorn videobox_api.main:create_app --factory`, so the
+    factory receives no arguments and would otherwise always get the mock
+    transcriber.  Staying disabled by default keeps the existing suites, whose
+    fixtures feed fake bytes as audio, away from a real model.
+    """
+    defaults = WhisperSTTConfig()
+    return WhisperSTTConfig(
+        enabled=_environment_flag("VIDEOBOX_STT_ENABLED"),
+        model_size=_environment_text("VIDEOBOX_STT_MODEL_SIZE", defaults.model_size),
+        device=_environment_text("VIDEOBOX_STT_DEVICE", defaults.device),
+        compute_type=_environment_text("VIDEOBOX_STT_COMPUTE_TYPE", defaults.compute_type),
+        language=_environment_text("VIDEOBOX_STT_LANGUAGE", defaults.language or "") or None,
+    )
+
+
 @dataclass(slots=True, frozen=True)
 class LocalOpenAICompatibleRuntimeConfig:
     enabled: bool = True
