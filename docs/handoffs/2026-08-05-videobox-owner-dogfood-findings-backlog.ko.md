@@ -375,6 +375,42 @@ LM Studio에 닿기 어려운 상태다. `D-2`의 난이도는 우연이 아니�
 
 ## 5. 검증된 결함
 
+### F-0. 컨테이너에서 핵심 provider 셋이 비활성 (치명) — **최우선**
+
+근거 등급 `관측`. 컨테이너 런타임 안에서 직접 실행해 확인했다.
+
+| Provider | 컨테이너 기본값 | 실제 동작 |
+|---|---|---|
+| 음성 인식 (STT) | `enabled=False` | `MockSTTProvider` |
+| 본인 목소리 (TTS) | `enabled=False` | `None` |
+| CapCut 내보내기 | `enabled=False` | `None` |
+| 로컬 LLM | `enabled=True` | 활성 |
+
+확인한 체인:
+
+1. `docker/workspace-supervisor.py:48`이 `uvicorn videobox_api.main:create_app --factory`를
+   **인자 없이** 실행한다
+2. `services/api/src/videobox_api/main.py:462` `whisper_stt_config or WhisperSTTConfig()`
+   → 기본 `enabled=False`
+3. `provider_factories._build_stt_provider`가 `MockSTTProvider()`를 반환한다
+4. `MockSTTProvider.transcribe`는 오디오 내용과 무관하게
+   `"Line one."`과 `"Line two with restart from {파일명}."`을 반환한다
+5. 컨테이너 안에서 `_build_stt_provider(WhisperSTTConfig())` 실행 결과가
+   `MockSTTProvider / mock_stt`임을 직접 확인했다
+6. `_build_tts_provider`와 `_build_pycapcut_exporter`는 비활성 시 `None`을 반환한다
+7. 컨테이너와 venv 모두 `faster_whisper`가 설치되어 있지 않다
+
+`scripts/run_api.py:25`(개발 서버)는 STT만 `enabled=True`로 켠다. TTS·CapCut은 어느 경로에서도 꺼져 있다.
+
+**이것이 "테스트 2960개 통과"와 "실사용 불가"가 동시에 성립하는 이유로 보인다.**
+자막·세그먼트·B-roll 텍스트 매칭·타임라인이 모두 가짜 전사 위에 세워진다.
+`verify-production-readiness-smoke.py`의 docstring도
+"Only LLM/STT/TTS providers are deterministic"이라고 명시한다.
+즉 기존 검증은 의도적으로 실제 AI 경로를 우회한다.
+
+다만 이 인과는 **추정**이다. r4 결과물이 실제로 얼마나 쓸 만한지는
+사람이 보고 들어야 확정된다.
+
 ### F-1. 편집 화면 데드엔드 (높음)
 
 - 위치: `apps/web/src/app/AppRouter.tsx` `CanonicalEditorEntry`
