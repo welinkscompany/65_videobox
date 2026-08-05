@@ -713,7 +713,7 @@ Run: `.venv\Scripts\python.exe -m pytest tests/test_asset_intake_metadata.py -q`
 
 Commit: `feat: keep size, length, and audio when media is added`
 
-### Task 16: 자산 업로드 영역
+### Task 16: 자산 업로드 영역 — **완료 (2026-08-06)**
 
 현재 파일 업로드는 `DraftGapMedia.tsx`에만 있고, "초안 준비 중 자산 부족" 경로에서
 `return_to` 파라미터를 달고 들어갈 때만 열린다. 자산 화면(`MediaWorkspacePage`)에는 파일 입력이 없다.
@@ -733,12 +733,18 @@ owner의 실제 사용 방식("평소에 다양한 B-roll을 녹화해서 저장
 - Modify: `apps/web/src/features/media/MediaWorkspacePage.tsx`
 - Modify: 대응 테스트 파일
 
-- [ ] **Step 1: 실패 테스트** — 자산 화면에서 파일을 여러 개 올릴 수 있고,
-      진행·성공·실패 상태가 창작자 언어로 보이는지
-- [ ] **Step 2: RED 확인**
-- [ ] **Step 3: 구현** — 자산 화면에 업로드 영역을 추가한다.
-      Task 15가 선행이면 업로드 직후 길이·방향·썸네일이 바로 보인다
-- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+- [x] **Step 1: 실패 테스트** — `MediaWorkspacePage.test.tsx`에 3개 추가: 파일 여러 개를
+      순차 업로드하고 목록이 새로고침되는지, 일부 실패를 원본 에러 노출 없이 창작자
+      언어로 보여주는지, 업로드 중 다른 작업(input 포함)이 막히는지
+- [x] **Step 2: RED 확인** — 라벨 `장면 영상 파일 추가`를 찾지 못해 3개 실패
+- [x] **Step 3: 구현** — `api.uploadDraftBroll`를 그대로 재사용해 파일마다 순차 업로드하고,
+      기존 `busyKey` 단일 in-flight 패턴에 편승시켰다. 성공/실패 개수를 창작자 언어로
+      요약한다. 헤딩 문구는 `DraftGapMedia`의 `장면 영상 추가`와 **의도적으로 다르게**
+      (`영상 올리기`) 지었다 — `AppRouter.test.tsx`가 그 정확한 문자열로 두 화면이
+      다른 진입점임을 검증하고 있어서, 같은 문구를 쓰면 그 계약을 깨게 된다
+- [x] **Step 4: GREEN(9/9) + 프론트 전체 회귀(758/758) + 브라우저 실측 + 커밋** —
+      실제 실행 중인 앱의 `b-roll-smoke-test` 프로젝트 자산 화면에서
+      `장면 영상 파일 추가` 파일 입력과 `영상 올리기` 섹션이 실제 렌더되는 것을 확인했다
 
 Commit: `feat: add media from the asset screen`
 
