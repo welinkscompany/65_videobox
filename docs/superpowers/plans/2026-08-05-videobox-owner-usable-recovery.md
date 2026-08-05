@@ -784,7 +784,7 @@ Commit: `feat: compose vertical videos in the same editor`
 
 **선행:** Task 15(`orientation` 저장).
 
-### Task 18: 촬영본 반입 경로 — Drive 폴더 감시
+### Task 18: 촬영본 반입 경로 — Drive 폴더 감시 — **핵심 로직 완료, 실제 이동은 보류 (2026-08-06)**
 
 owner의 실제 작업 방식: 외부에서 촬영 → 폰에서 구글 드라이브로 전송 → PC에서 사용.
 요구: Drive 폴더에 올리면 자동으로 로컬로 옮기고, 태그를 붙이고, Drive에서는 정리되기.
@@ -867,18 +867,46 @@ VideoBox가 별도 유예 기간을 구현할 필요가 없다. Drive의 휴지�
 - Create: `tests/test_media_inbox.py`
 - Modify: `packages/core-engine/src/videobox_core_engine/settings.py` (감시 경로 설정)
 
-- [ ] **Step 1: 실패 테스트** — 감시 폴더의 동영상만 반입 대상으로 잡는지,
-      `desktop.ini`·숨김 파일·비동영상을 건너뛰는지,
-      해시가 일치할 때만 원본을 옮기는지, 불일치면 원본을 건드리지 않고 실패로 남기는지,
-      아직 내려받는 중인 파일을 건너뛰고 다음 주기에 다시 보는지
-- [ ] **Step 2: RED 확인**
+- [x] **Step 1: 실패 테스트** — `tests/test_media_inbox.py`: 감시 폴더의 동영상만 반입
+      대상으로 잡는지, `desktop.ini`·숨김 파일/폴더·비동영상을 건너뛰는지,
+      해시가 일치할 때만 원본을 옮기는지, 불일치·이동 실패 시 원본을 건드리지 않고
+      실패로 남기는지, 아직 크기가 변하는 중인 파일(다운로드 중)을 건너뛰고 다음
+      주기에 다시 보는지, 라이브러리에 같은 내용 파일이 이미 있으면 중복으로 처리하는지,
+      한 파일이 실패해도 나머지를 계속 처리하는지 (9개 테스트)
+- [x] **Step 2: RED 확인** — `ModuleNotFoundError: No module named 'videobox_core_engine.media_inbox'`
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_media_inbox.py -q`
 
-- [ ] **Step 3: 구현** — 감시 → 해시 검증 → 라이브러리로 이동 순서를 지킨다.
-      **복사 후 삭제가 아니라 검증 후 이동이다.** 검증 실패 시 원본은 그대로 둔다.
-      Task 15의 반입 metadata 저장과 같은 경로를 쓴다
-- [ ] **Step 4: GREEN + 실제 Drive 폴더로 확인 + 커밋**
+- [x] **Step 3: 구현** — `media_inbox.py` 신설: `scan_inbox_candidates`(재귀 스캔,
+      `desktop.ini`·숨김 항목·비동영상 제외) → `is_file_settled`(두 번의 stat 크기
+      비교로 다운로드 중 여부 판정 — Drive의 내부 placeholder 메커니즘에 의존하지
+      않는 OS-이식적인 방법) → `run_inbox_cycle`(해시 검증 후 `shutil.move`,
+      실패·해시불일치 시 원본 보존, 라이브러리 내 동일 해시는 중복 처리).
+      **감시 경로는 Task 15의 프로젝트별 `register_broll_asset`이 아니라 별도의
+      project-독립적 로컬 폴더(`resolve_media_inbox_library_root()`)로 옮긴다** —
+      A-1이 이미 짚었듯 `MediaLibraryStore`/`ProjectAssetMaterializer`가
+      "여러 프로젝트가 같은 B-roll을 공유"하는 구조이므로, 반입 시점에 특정
+      project로 확정하지 않는 것이 그 구조와 맞다. `settings.py`에
+      `resolve_media_inbox_watch_path()`(`VIDEOBOX_MEDIA_INBOX_WATCH_PATH`,
+      기본값 실측된 실제 경로 `G:\내 드라이브\100_videobox`)와
+      `resolve_media_inbox_library_root()` 추가
+- [x] **Step 4: GREEN(9/9) + 실제 Drive 폴더로 확인** — `scan_inbox_candidates`를
+      owner의 실제 `G:\내 드라이브\100_videobox`에 대해 읽기 전용으로 실행해
+      정확히 9개 파일(최상위 8개 + `가로/FHD/` 1개)을 찾는 것을 확인했다 —
+      이전 실측 인벤토리와 정확히 일치. **실제 이동은 이번 무인 세션에서
+      실행하지 않았다** — owner의 실제 촬영 원본을 사람 확인 없이 옮기는 것은
+      Drive 휴지통이라는 안전장치가 있어도 무인 상태에서 할 일이 아니라고 판단했다.
+      owner가 있을 때 `run_inbox_cycle()`을 한 번 실제로 돌려 결과를 직접 확인하는
+      절차가 남아 있다
+
+**아직 없는 것 — 후속 결정 필요:**
+
+- 주기적으로 도는 백그라운드 감시 루프(스케줄러/워커) 자체는 만들지 않았다.
+  `run_inbox_cycle()`은 한 번 호출하면 한 번 훑는 함수이고, 반복 실행은
+  API 라우터나 스크립트에서 아직 걸지 않았다
+- 반입된 파일이 라이브러리 폴더에만 있고 어느 project의 자산 목록에도 아직
+  나타나지 않는다 — Task 19/20이 여러 project가 공유하는 B-roll 구조를
+  전제하므로, 라이브러리 → project 복사(materialize) 경로는 별도로 설계해야 한다
 
 Commit: `feat: take in footage from the watched folder`
 
