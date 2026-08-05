@@ -544,6 +544,7 @@ def create_app(
     )
     app.state.media_analysis_vision_provider = resolved_vision_provider
     app.state.media_analysis_embedding_provider = embedding_provider
+    app.state.media_analysis_profile = resolved_profile
     app.state.media_analysis_service = orchestrator.media_analysis_service
     app.state.media_analysis_dispatcher = orchestrator.media_analysis_dispatcher
     app.state.media_analysis_poll_interval_seconds = media_analysis_poll_interval_seconds
@@ -628,7 +629,13 @@ def create_app(
     app.include_router(build_jobs_router(orchestrator))
     app.include_router(build_timeline_router(orchestrator))
     app.include_router(build_editing_session_router(orchestrator, store))
-    app.include_router(build_director_proposals_router(store))
+    app.include_router(
+        build_director_proposals_router(
+            store,
+            embedding_provider=app.state.media_analysis_embedding_provider,
+            embedding_model_name=(app.state.media_analysis_profile or {}).get("embedding_model_name"),
+        )
+    )
     app.include_router(
         build_yujin_memory_router(
             store, app.state.yujin_memory_service

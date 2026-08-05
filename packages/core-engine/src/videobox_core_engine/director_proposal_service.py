@@ -8,6 +8,7 @@ from videobox_storage.local_project_store import sha256_file
 from videobox_core_engine.director_proposals import create_and_save_proposal
 from videobox_core_engine.media_ranking import rank_candidates
 from videobox_domain_models.director_proposals import DirectorProposal
+from videobox_provider_interfaces.embeddings import EmbeddingRequest
 
 
 def is_actionable_yujin_media_candidate(candidate: object) -> bool:
@@ -38,8 +39,10 @@ class DirectorProposalBlockedError(Exception):
 class DirectorProposalService:
     """Read-only composition boundary for immutable director proposals."""
 
-    def __init__(self, store: object) -> None:
+    def __init__(self, store: object, *, embedding_provider: object = None, embedding_model_name: str | None = None) -> None:
         self.store = store
+        self.embedding_provider = embedding_provider
+        self.embedding_model_name = embedding_model_name
 
     def create(self, *, project_id: str, session_id: str, expires_at: str | None = None) -> DirectorProposal:
         snapshot = self.store.read_director_proposal_snapshot(project_id=project_id, session_id=session_id)
@@ -78,7 +81,9 @@ class DirectorProposalService:
                 continue
             source_ids.append(source_id)
             target_ids.append(str(segment.get("segment_id") or source_id))
-            ranked = rank_candidates({"text": segment.get("caption_text") or segment.get("text") or "", "duration_sec": float(segment.get("end_sec", 0) or 0) - float(segment.get("start_sec", 0) or 0)}, assets, preferences)
+            segment_text = segment.get("caption_text") or segment.get("text") or ""
+            scored_assets = self._apply_semantic_scores(project_id=project_id, segment_text=segment_text, assets=assets)
+            ranked = rank_candidates({"text": segment_text, "duration_sec": float(segment.get("end_sec", 0) or 0) - float(segment.get("start_sec", 0) or 0)}, scored_assets, preferences)
             for candidate in ranked:
                 scoped = replace(candidate, candidate_id=f"candidate:{source_id}:{candidate.asset_id}")
                 candidates.append(scoped)
@@ -180,6 +185,35 @@ class DirectorProposalService:
                 reasons.append("source_missing")
                 break
         return sorted(set(reasons))
+
+    def _apply_semantic_scores(self, *, project_id: str, segment_text: str, assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Look up semantic-similarity scores for `assets` against
+        `segment_text` (A-1/Task 20). Query-time cosine ranking already
+        existed in store.find_local_media_embedding_matches -- it was simply
+        never called from the recommendation path, so semantic_similarity
+        was always 0.0 and every candidate fell back to lexical tag
+        matching. Fails open to that same lexical fallback on any embedding
+        or lookup error; a slow/unreachable local model must not block
+        proposal creation."""
+        if self.embedding_provider is None or not self.embedding_model_name or not segment_text.strip():
+            return assets
+        try:
+            response = self.embedding_provider.embed(
+                EmbeddingRequest(model_name=self.embedding_model_name, inputs=(segment_text,))
+            )
+            query_vector = list(response.vectors[0])
+            matches = self.store.find_local_media_embedding_matches(
+                project_id=project_id, query_embedding=query_vector, limit=max(1, len(assets))
+            )
+        except Exception:
+            return assets
+        score_by_asset_id = {str(match["asset_id"]): float(match["score"]) for match in matches}
+        return [
+            {**asset, "semantic_score": score_by_asset_id[str(asset["asset_id"])]}
+            if str(asset.get("asset_id")) in score_by_asset_id
+            else asset
+            for asset in assets
+        ]
 
     def _rankable_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
         metadata = dict(asset.get("metadata") or {})

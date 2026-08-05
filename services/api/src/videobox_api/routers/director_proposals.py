@@ -59,9 +59,11 @@ class ProposalBatchApplyRequest(ProposalApplyRequest):
     """A single explicit user action; materialization happens only inside this endpoint."""
 
 
-def build_director_proposals_router(store: LocalProjectStore) -> APIRouter:
+def build_director_proposals_router(
+    store: LocalProjectStore, *, embedding_provider: object = None, embedding_model_name: str | None = None
+) -> APIRouter:
     router = APIRouter()
-    service = DirectorProposalService(store)
+    service = DirectorProposalService(store, embedding_provider=embedding_provider, embedding_model_name=embedding_model_name)
     materializer = ProjectAssetMaterializer(store)
 
     def payload(project_id, proposal):
