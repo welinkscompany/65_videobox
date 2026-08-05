@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -68,6 +68,18 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             status=project["status"],
             root_storage_uri=project["root_storage_uri"],
         )
+
+    @router.delete("/api/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+    def delete_project_permanently(project_id: str, confirm: bool = False) -> None:
+        # Confirmation is enforced here, not just in the UI's two-step
+        # dialog -- a client bug or a replayed request must not be able to
+        # delete a project without ever passing this gate.
+        if not confirm:
+            raise HTTPException(status_code=400, detail="permanent_delete_requires_confirm")
+        try:
+            store.delete_project_permanently(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
 
     @router.get("/api/projects/{project_id}")
     def get_project(project_id: str) -> ProjectResponse:

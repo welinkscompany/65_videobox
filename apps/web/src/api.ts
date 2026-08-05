@@ -1565,6 +1565,13 @@ export const api = {
   getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
   archiveProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/archive`, { method: "POST" }),
   restoreProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/restore`, { method: "POST" }),
+  deleteProjectPermanently: async (projectId: string): Promise<void> => {
+    // Not request<T>(): a successful delete returns 204 with no body, and
+    // request<T>() always calls response.json(), which throws on an empty
+    // body.
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}?confirm=true`, { method: "DELETE" });
+    if (!response.ok) throw new Error(`Request failed: /api/projects/${projectId} (${response.status})`);
+  },
   registerNarrationAudio: (projectId: string, payload: { source_path: string }) =>
     request<RegisteredAsset>(`/api/projects/${projectId}/assets/narration-audio`, {
       method: "POST",

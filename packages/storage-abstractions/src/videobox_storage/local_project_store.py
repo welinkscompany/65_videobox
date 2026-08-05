@@ -592,19 +592,20 @@ class LocalProjectStore:
     def restore_project(self, *, project_id: str) -> dict[str, Any]:
         return self._set_project_status(project_id=project_id, status=ProjectStatus.DRAFT)
 
-    def _set_project_status(self, *, project_id: str, status: ProjectStatus) -> dict[str, Any]:
-        # A filesystem existence check here would be wrong for
-        # PostgresProjectStore, which has no per-project sqlite file at all.
-        # SELECT-then-check works for both backends: sqlite3.connect() raises
-        # OperationalError for a truly nonexistent per-project directory
-        # (LocalProjectStore), while Postgres's single shared database simply
-        # returns no row for an unknown project_id.
-        try:
-            exists = self._fetchone(project_id, "SELECT 1 FROM projects WHERE project_id = ?", (project_id,))
-        except sqlite3.OperationalError:
-            raise KeyError(f"Project not found: {project_id}") from None
-        if exists is None:
+    def delete_project_permanently(self, *, project_id: str) -> None:
+        """Irreversibly remove a project's directory (its DB, assets,
+        exports -- everything). Owner decision (2026-08-06): archive alone
+        wasn't enough; a real delete path is needed, gated by explicit
+        confirmation at the API/UI layer (see routers/projects.py and
+        ProductShell.tsx's two-step confirm). Works on both active and
+        archived projects."""
+        project_dir = self.project_root(project_id)
+        if not project_dir.is_dir():
             raise KeyError(f"Project not found: {project_id}")
+        shutil.rmtree(project_dir)
+
+    def _set_project_status(self, *, project_id: str, status: ProjectStatus) -> dict[str, Any]:
+        self.get_project(project_id=project_id)  # raises KeyError if missing, on either backend
         self._execute(
             project_id,
             "UPDATE projects SET status = ?, updated_at = ? WHERE project_id = ?",
@@ -1123,15 +1124,23 @@ class LocalProjectStore:
         return self._path_to_uri(project_id, self.thumbnail_storage_path(project_id=project_id, asset_id=asset_id))
 
     def get_project(self, *, project_id: str) -> dict[str, Any]:
-        row = self._fetchone(
-            project_id,
-            """
-            SELECT project_id, name, status, root_storage_uri, created_at, updated_at
-            FROM projects
-            WHERE project_id = ?
-            """,
-            (project_id,),
-        )
+        # A deleted/never-existing project's per-project sqlite file has no
+        # parent directory, so sqlite3.connect() itself raises
+        # OperationalError here (LocalProjectStore only) rather than the
+        # query simply returning no row (which is all that happens on
+        # Postgres's single shared database). Normalize both to KeyError.
+        try:
+            row = self._fetchone(
+                project_id,
+                """
+                SELECT project_id, name, status, root_storage_uri, created_at, updated_at
+                FROM projects
+                WHERE project_id = ?
+                """,
+                (project_id,),
+            )
+        except sqlite3.OperationalError:
+            raise KeyError(f"Project not found: {project_id}") from None
         if row is None:
             raise KeyError(f"Project not found: {project_id}")
         return dict(row)

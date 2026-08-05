@@ -32,11 +32,17 @@ function readSettings(): SettingsState { try { const stored = JSON.parse(window.
 function saveSettings(next: SettingsState) { window.localStorage.setItem(settingsKey, JSON.stringify(next)); }
 export function opensLastProjectOnStart() { return readSettings().openLastProject; }
 
-export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, onArchiveProject, children, forceCollapsed = false }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; onArchiveProject?: (projectId: string) => void | Promise<void>; children: ReactNode; forceCollapsed?: boolean }) {
+export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, onArchiveProject, onDeleteProjectPermanently, children, forceCollapsed = false }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; onArchiveProject?: (projectId: string) => void | Promise<void>; onDeleteProjectPermanently?: (projectId: string) => void | Promise<void>; children: ReactNode; forceCollapsed?: boolean }) {
   const [collapsed, setCollapsed] = useState(forceCollapsed);
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
+  // Permanent delete needs two separate confirmations (owner decision,
+  // 2026-08-06) -- stage 1 warns it's irreversible, stage 2 asks once more
+  // before the actual call. Enforced again server-side (routers/projects.py
+  // requires ?confirm=true) so this UI gate isn't the only thing standing
+  // between a stray click and real data loss.
+  const [deleteConfirmStage, setDeleteConfirmStage] = useState<{ projectId: string; stage: 1 | 2 } | null>(null);
   const previousForceCollapsed = useRef(forceCollapsed);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
   if (forceCollapsed && !previousForceCollapsed.current) {
@@ -63,6 +69,21 @@ export function ProductShell({ projectId, projects, section, onNavigate, onOpenS
         ) : (
           <Button variant="ghost" aria-label={`${project.name} 보관하기`} onClick={() => setArchiveConfirmId(project.project_id)}>보관</Button>
         )) : null}
+        {onDeleteProjectPermanently ? (
+          deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 2 ? (
+            <span style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
+              <small>한 번 더 확인할게요. 정말 영구 삭제할까요?</small>
+              <Button variant="destructive" aria-label={`${project.name} 영구 삭제`} onClick={() => { setDeleteConfirmStage(null); void onDeleteProjectPermanently(project.project_id); }}>영구 삭제</Button>
+            </span>
+          ) : deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 1 ? (
+            <span style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
+              <small>되돌릴 수 없어요. 계속할까요?</small>
+              <Button variant="outline" aria-label={`${project.name} 삭제 1차 확인`} onClick={() => setDeleteConfirmStage({ projectId: project.project_id, stage: 2 })}>1차 확인</Button>
+            </span>
+          ) : (
+            <Button variant="ghost" aria-label={`${project.name} 완전 삭제`} onClick={() => setDeleteConfirmStage({ projectId: project.project_id, stage: 1 })}>완전 삭제</Button>
+          )
+        ) : null}
       </div>)}</div>
       </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target]) => <SidebarMenuItem key={target}><SidebarMenuButton isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}>{label}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span>설정</span></Button><small>{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail />
     </Sidebar>

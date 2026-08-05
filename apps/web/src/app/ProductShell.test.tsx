@@ -188,6 +188,29 @@ describe("product shell", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
   });
 
+  it("requires two separate confirmations before permanently deleting a project", async () => {
+    vi.spyOn(api, "listProjects")
+      .mockResolvedValueOnce(projects)
+      .mockResolvedValueOnce([projects[0]]);
+    const deleteProjectPermanently = vi.spyOn(api, "deleteProjectPermanently").mockResolvedValue(undefined);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("navigation", { name: "영상 제작" });
+
+    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 완전 삭제" }));
+    expect(deleteProjectPermanently).not.toHaveBeenCalled();
+    expect(screen.getByText(/되돌릴 수 없어요/)).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 삭제 1차 확인" }));
+    expect(deleteProjectPermanently).not.toHaveBeenCalled();
+    expect(screen.getByText(/한 번 더 확인/)).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 영구 삭제" }));
+
+    await waitFor(() => expect(deleteProjectPermanently).toHaveBeenCalledWith("second"));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
+  });
+
   it("persists a working appearance setting and only exposes local privacy choices", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/settings/appearance"] }));

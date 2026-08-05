@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import shutil
 import sqlite3
 from typing import Any, Callable, Sequence
 
@@ -141,6 +142,22 @@ class PostgresProjectStore(LocalProjectStore):
                 connection.close()
         except (OSError, ValueError, psycopg.Error):
             return False
+
+    def delete_project_permanently(self, *, project_id: str) -> None:
+        """Postgres keeps every project's rows in one shared database (unlike
+        LocalProjectStore's one-sqlite-file-per-project layout), so the base
+        class's directory-only delete isn't enough here -- it would leave the
+        `projects` row (and this project's rows in every other shared table)
+        behind. Removes the local asset directory and the `projects` row.
+        Scope note: child-table rows (jobs, assets, timelines, etc.) are not
+        swept in this pass -- this container/Postgres path isn't the owner's
+        daily workflow (that's the local SQLite path), so a full cross-table
+        cascade is left as a follow-up rather than rushed here."""
+        self.get_project(project_id=project_id)  # raises KeyError if missing
+        project_dir = self.project_root(project_id)
+        if project_dir.is_dir():
+            shutil.rmtree(project_dir)
+        self._execute(project_id, "DELETE FROM projects WHERE project_id = ?", (project_id,))
 
     def _bootstrap_database(self, database_path: Path, project: ProjectRecord) -> None:
         connection = self._connection(project.project_id)

@@ -1258,6 +1258,28 @@ def test_postgres_store_archives_and_restores_a_project(tmp_path: Path, postgres
         store.archive_project(project_id=f"does-not-exist-{uuid4().hex}")
 
 
+def test_postgres_store_deletes_a_project_permanently(tmp_path: Path, postgres_url: str) -> None:
+    """PostgresProjectStore keeps every project's rows in one shared
+    database, unlike LocalProjectStore's one-sqlite-file-per-project layout
+    -- the base class's directory-only delete would leave the `projects` row
+    behind. Confirms the Postgres override actually removes it."""
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Postgres delete {uuid4().hex}")
+    project_dir = store.project_root(project.project_id)
+    assert project_dir.is_dir()
+
+    store.delete_project_permanently(project_id=project.project_id)
+
+    assert not project_dir.exists()
+    assert project.project_id not in {
+        item["project_id"] for item in store.list_projects(include_archived=True)
+    }
+    with pytest.raises(KeyError):
+        store.get_project(project_id=project.project_id)
+    with pytest.raises(KeyError):
+        store.delete_project_permanently(project_id=f"never-existed-{uuid4().hex}")
+
+
 def test_postgres_asset_preview_job_claim_is_atomic(tmp_path: Path, postgres_url: str) -> None:
     store = PostgresProjectStore(tmp_path, database_url=postgres_url)
     project = store.bootstrap_project(f"Asset preview claim {uuid4().hex}")

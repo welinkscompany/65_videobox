@@ -92,3 +92,54 @@ def test_api_archiving_a_nonexistent_project_is_a_404(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     response = client.post("/api/projects/does-not-exist/archive")
     assert response.status_code == 404
+
+
+def test_delete_project_permanently_removes_the_project_directory(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    project = store.bootstrap_project("gone-forever")
+    project_dir = store.project_root(project.project_id)
+    assert project_dir.is_dir()
+
+    store.delete_project_permanently(project_id=project.project_id)
+
+    assert not project_dir.exists()
+    assert project.project_id not in {item["project_id"] for item in store.list_projects(include_archived=True)}
+    with pytest.raises(KeyError):
+        store.get_project(project_id=project.project_id)
+
+
+def test_delete_project_permanently_on_a_nonexistent_project_fails_safely(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    with pytest.raises(KeyError):
+        store.delete_project_permanently(project_id="does-not-exist")
+
+
+def test_delete_project_permanently_works_on_an_archived_project_too(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    project = store.bootstrap_project("archived-then-gone")
+    store.archive_project(project_id=project.project_id)
+
+    store.delete_project_permanently(project_id=project.project_id)
+
+    assert not store.project_root(project.project_id).exists()
+
+
+def test_api_permanent_delete_requires_explicit_confirmation(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "Needs Confirm"}).json()["project_id"]
+
+    unconfirmed = client.request("DELETE", f"/api/projects/{project_id}")
+    assert unconfirmed.status_code == 400
+    assert project_id in {item["project_id"] for item in client.get("/api/projects").json()["projects"]}
+
+    confirmed = client.request("DELETE", f"/api/projects/{project_id}", params={"confirm": "true"})
+    assert confirmed.status_code == 204
+    assert project_id not in {
+        item["project_id"] for item in client.get("/api/projects", params={"include_archived": True}).json()["projects"]
+    }
+
+
+def test_api_permanent_delete_of_a_nonexistent_project_is_a_404(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    response = client.request("DELETE", "/api/projects/does-not-exist", params={"confirm": "true"})
+    assert response.status_code == 404
