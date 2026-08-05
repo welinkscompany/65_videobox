@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 
 import { api, type Project } from "../api";
 import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
 import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
@@ -128,21 +129,67 @@ function ProjectsPage() {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
   const router = useRouter();
-  if (projects.length === 0) {
-    return <ProjectOnboarding onProjectCreated={async (project) => {
-      await router.options.context.catalog.refresh();
-      await router.invalidate();
-      await navigate({ to: resolveWorkspaceLocation(project.project_id, "create") });
-    }} />;
+  const [isCreating, setIsCreating] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  async function goToNewProject(project: Project) {
+    await router.options.context.catalog.refresh();
+    await router.invalidate();
+    await navigate({ to: resolveWorkspaceLocation(project.project_id, "create") });
   }
+
+  if (projects.length === 0) {
+    return <ProjectOnboarding onProjectCreated={goToNewProject} />;
+  }
+
+  async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newProjectName.trim()) {
+      setCreateError("프로젝트 이름을 입력하세요.");
+      return;
+    }
+    setIsSubmitting(true);
+    setCreateError(null);
+    try {
+      const created = await api.createProject({ name: newProjectName.trim() });
+      await goToNewProject(created);
+    } catch {
+      setCreateError("프로젝트를 만들지 못했습니다.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return (
-    <main data-testid="projects-catalog">
-      <h1>프로젝트</h1>
-      {projects.map((project) => (
-        <Button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
-          {project.name}
-        </Button>
-      ))}
+    <main data-testid="projects-catalog" className="grid gap-6 p-6">
+      <div className="grid gap-2">
+        <h1>프로젝트</h1>
+        <p className="text-sm text-muted-foreground">영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {projects.map((project) => (
+          <Button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
+            {project.name}
+          </Button>
+        ))}
+      </div>
+      {isCreating ? (
+        <form className="grid max-w-sm gap-3" onSubmit={(event) => void handleCreate(event)}>
+          <label className="grid gap-2 text-sm">
+            새 프로젝트 이름
+            <Input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} autoFocus />
+          </label>
+          <div className="flex gap-2">
+            <Button disabled={isSubmitting} type="submit">{isSubmitting ? "만드는 중" : "만들기"}</Button>
+            <Button variant="outline" type="button" onClick={() => { setIsCreating(false); setNewProjectName(""); setCreateError(null); }}>취소</Button>
+          </div>
+          {createError ? <p className="text-sm text-destructive" role="alert">{createError}</p> : null}
+        </form>
+      ) : (
+        <Button type="button" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
+      )}
     </main>
   );
 }

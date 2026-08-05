@@ -452,6 +452,25 @@ describe("AppRouter URL ownership", () => {
     expect(listProjects).toHaveBeenCalledTimes(1);
   });
 
+  it("lets the owner start a second project from a non-empty catalog", async () => {
+    const existing = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
+    const created = { project_id: "project_second", name: "Second", status: "active", root_storage_uri: "local://second" };
+    const listProjects = vi.spyOn(api, "listProjects")
+      .mockResolvedValueOnce([existing])
+      .mockResolvedValueOnce([existing, created]);
+    const createProject = vi.spyOn(api, "createProject").mockResolvedValue(created);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "새 프로젝트 만들기" }));
+    fireEvent.change(screen.getByLabelText("새 프로젝트 이름"), { target: { value: "Second" } });
+    fireEvent.click(screen.getByRole("button", { name: "만들기" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_second/create"));
+    expect(createProject).toHaveBeenCalledWith({ name: "Second" });
+    expect(listProjects).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves the create leaf when a project switch navigates to another project", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
