@@ -97,6 +97,59 @@ current 근거이며, 문서 본문 하단의 오래된 수치(예: `9/22`)는 h
 
 ---
 
+## 1.3 파일 정리 분류
+
+`§10.12.3–4`에 따라 분류한다. `artifacts/`는 기본 `preserve-evidence`이며,
+삭제는 문서·테스트·실행 경로 참조가 없고 재생성 가능한 미추적 파일에만 한정한다.
+
+### 격리 완료 (읽기 차단)
+
+보호 residue 3개는 그동안 handoff 문서의 관행으로만 보호됐다.
+`.claude/settings.json`에 `permissions.deny` 규칙을 추가해 하네스가 강제하도록 바꿨다.
+
+| 경로 | 크기 |
+|---|---|
+| `.tmp-final-fence-debug/` | 1.1M |
+| `.tmp-real-video-dogfood/` | 132M |
+| `apps/web/.tmp-real-video-dogfood/` | 48K |
+
+`Read`와 `Edit`를 차단한다. **알려진 한계 2가지**를 숨기지 않는다.
+
+1. Bash를 통한 읽기(`cat` 등)는 이 규칙으로 막히지 않는다. 완전 차단은 삭제뿐이다.
+2. 세션 시작 시점에 `settings.json`이 없었으므로, 이 규칙은 다음 세션부터 적용될 가능성이 높다.
+
+### 삭제 판정 — 현재 `safe-to-delete` 없음
+
+`artifacts/`는 총 **9.1GB**다. 전부 gitignore 대상이지만, **모든 항목이 문서에서 참조된다.**
+
+| 디렉터리 | 크기 | 문서 참조 |
+|---|---|---|
+| `owner-sample-edit-20260803-r2` | 2.0G | 3건 |
+| `owner-sample-edit-20260803-r4` | 1.7G | 3건 |
+| `owner-sample-edit-20260803-r3` | 1.7G | 3건 |
+| `owner-sample-edit-20260803` (r1) | 1.4G | 4건 |
+| `lfqa` | 1020M | 4건 |
+| `long-form-capcut-qa` | 476M | 8건 |
+| `task5-smoke` | 256M | 3건 |
+| `release-audit-20260731-smoke` | 256M | 2건 |
+| `ra31` | 256M | 2건 |
+| `owner-dogfood-20260731` | 48M | 2건 |
+| `owner-ready` | 108K | 12건 |
+
+추가로 2026-08-04 handoff가 "owner sample r1–r4와 owner-ready receipt는 검증 증거로 보존한다"고
+명시한다. 따라서 규정만으로는 **삭제 가능 항목이 0건**이다.
+
+owner 결정이 필요한 후보는 아래다. owner는 승인권자이므로 규정 판정을 덮을 수 있다.
+
+- `r1`, `r2`, `r3` (합계 **5.1GB**): `r4`가 최종본이며 앞선 3개는 중간 반복이다.
+  Task 23C는 이미 closeout됐고 최종 근거는 `r4`다.
+- `ra31`, `release-audit-20260731-smoke`, `task5-smoke` (합계 768M): 과거 감사 스모크 증거.
+- 보호 residue 3개 (133M): 과거 디버그 잔여물. 삭제하면 격리 한계도 함께 해소된다.
+
+상태: **owner 결정 대기**. 결정 없이 삭제하지 않는다.
+
+---
+
 ## 2. 범위 충돌 — 결정이 먼저 필요함
 
 ### S-1. 편집기 범위: 계획서 vs owner 기대

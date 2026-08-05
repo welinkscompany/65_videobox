@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.tmp-final-fence-debug/**)",
+      "Read(./.tmp-real-video-dogfood/**)",
+      "Read(./apps/web/.tmp-real-video-dogfood/**)",
+      "Edit(./.tmp-final-fence-debug/**)",
+      "Edit(./.tmp-real-video-dogfood/**)",
+      "Edit(./apps/web/.tmp-real-video-dogfood/**)"
+    ]
+  }
+}
