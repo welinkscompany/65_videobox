@@ -27,10 +27,16 @@ for src_path in SRC_PATHS:
 from videobox_provider_interfaces.llm import LLMProviderError
 
 
+_LIVE_LMSTUDIO_OPT_IN_ENV_VARS = (
+    "VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE",
+    "VIDEOBOX_RUN_YUJIN_LOCAL_CONVERSATION_SMOKE",
+)
+
+
 def _allow_live_lmstudio(request: pytest.FixtureRequest, address: object) -> bool:
     return (
         request.node.get_closest_marker("live_lmstudio") is not None
-        and os.environ.get("VIDEOBOX_RUN_LM_STUDIO_MEDIA_SMOKE") == "1"
+        and any(os.environ.get(var) == "1" for var in _LIVE_LMSTUDIO_OPT_IN_ENV_VARS)
         and isinstance(address, tuple)
         and len(address) >= 2
         and address[0] == "127.0.0.1"

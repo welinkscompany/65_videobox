@@ -12,6 +12,7 @@ class LLMTaskType(str, Enum):
     MUSIC_RECOMMENDATION = "music_recommendation"
     ALIGNMENT_REVIEW = "alignment_review"
     OPERATOR_COPY = "operator_copy"
+    YUJIN_CONVERSATION = "yujin_conversation"
 
 
 @dataclass(slots=True, frozen=True)
