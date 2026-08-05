@@ -566,25 +566,55 @@ owner 요구: "로컬 LLM 물려서 동작하게, 어댑터로 GPT-5.4 / 5.4-min
 
 커밋: `d503ce2`
 
-### Task 13: 로컬 LLM으로 유진 대화 실제 동작
+### Task 13: 로컬 LLM으로 유진 대화 실제 동작 — **부분 완료 (2026-08-05)**
 
-**재사용 게이트 (§8.1):**
+**실측으로 계획서 재사용 게이트를 두 군데 정정했다.**
 
-| 후보 | 분류 | 이유 |
-|---|---|---|
-| `LocalOpenAICompatibleRuntimeConfig` | `adopt as-is` | 이미 `enabled=True`이고 LM Studio 연동 코드가 있다 |
-| `packages/provider-interfaces/src/videobox_provider_interfaces/lm_studio.py` | `adopt as-is` | 기존 클라이언트를 쓴다 |
-| `yujin_profile_contract`, `agent_gateway_contract` | `adopt as-is` | 프로필·정책 계약을 유지한다 |
-| Hermes 컨테이너 OAuth 경로 | `exclude` | 이 Task는 로컬 전용이다. OAuth는 Task 14 |
+| 후보 | 원래 분류 | 정정 | 근거 |
+|---|---|---|---|
+| `lm_studio.py`가 대화 클라이언트 | `adopt as-is` | **오류.** `lm_studio.py`엔 vision·embedding provider만 있고 chat 클라이언트가 없다 | 실제 채택 대상은 `provider-interfaces/local_qwen.py`의 `LocalQwenHTTPTransport`/`LocalQwenStructuredProvider` — 이미 `services/api/orchestration.py`를 통해 `create_app`에 production 연결돼 있었다 |
+| `HermesRunService`/`AgentGatewayClient`가 대화 경로 | (암묵) | **실제 대화 UI는 이 경로에 물려 있지만, `videobox-agent-gateway` 서비스 자체가 배포돼 있지 않아 항상 "유진의 답을 받지 못했어요"로 종료된다** | `agent_gateway_client.py`가 `base_url`을 `http://videobox-agent-gateway:8081`로 엄격 고정하고, capability token·reservation·ledger 계약 전체가 실제 원격 게이트웨이를 전제로 설계돼 있다 |
 
-- [ ] **Step 1: 실패 테스트** — 유진 대화 요청이 로컬 LLM 응답으로 채워지는지, 정책 위반 요청은 `blocked`인지
-- [ ] **Step 2: RED 확인**
-- [ ] **Step 3: 구현** — 컨테이너에서 호스트 LM Studio(`127.0.0.1:1234`)로 가는 경로를 연다.
-      `architecture-plan` §11이 GPU 로컬 모델 컨테이너화를 비권장하므로,
-      모델은 호스트에 두고 컨테이너가 호출만 하는 구조를 유지한다
-- [ ] **Step 4: GREEN + 실제 대화 확인 + 커밋**
+**이번에 한 일 — 로컬 대화 능력 자체 (검증 완료):**
 
-Commit: `feat: run the assistant on the local model`
+- [x] **Step 1: 실패 테스트** — `tests/test_yujin_local_conversation.py`: 정책 위반 요청 10종이
+      모델을 부르지 않고 `blocked`로 끝나는지, 일반 대화는 로컬 runtime을 통해
+      실제 응답을 받는지, 빈 입력·빈 모델 응답을 거부하는지 (14개 테스트)
+- [x] **Step 2: RED 확인** — `ModuleNotFoundError`
+- [x] **Step 3: 구현** — `packages/core-engine/src/videobox_core_engine/yujin_local_conversation.py`
+      신설. `LLMTaskType.YUJIN_CONVERSATION` 추가. 정책 위반 의도는 모델 호출 전
+      결정적 패턴 매칭으로 차단한다 — 이 경계가 모델의 순응 여부에 의존하면 안 되기 때문이다.
+      일반 대화는 기존에 이미 프로덕션에 연결돼 있던 `LocalOnlyStructuredRuntime`/
+      `LocalQwenStructuredProvider`를 그대로 재사용한다(JSON Schema 응답 `{"reply": "..."}`).
+      capability token·publish 권한을 전혀 발급하지 않으므로 모델 출력은 순수 untrusted
+      텍스트다 — 편집 mutation 경로에 어떤 식으로도 닿지 않는다
+- [x] **Step 4: GREEN(14/14) + 실제 대화 확인** —
+      `tests/test_yujin_local_conversation_live_smoke.py`(`@pytest.mark.live_lmstudio`,
+      `VIDEOBOX_RUN_YUJIN_LOCAL_CONVERSATION_SMOKE=1`로만 실행)가 실제 실행 중인
+      LM Studio(`qwen/qwen3.6-35b-a3b`)에 실제로 요청해 실 응답을 받는 것과,
+      정책 위반 요청이 모델에 닿지 않고 차단되는 것을 둘 다 확인했다. 2/2 통과
+
+**아직 안 한 일 — 명시적으로 범위 밖으로 남긴다:**
+
+1. **UI 배선.** 편집기의 유진 채팅 UI(`EditorWorkbenchRoute.tsx`)는 이미 완성돼 있지만
+   `HermesRunService`→`AgentGatewayClient`→(배포 안 된) `videobox-agent-gateway` 경로에만
+   물려 있다. 이 서비스를 로컬 응답으로 실제로 채우려면 `HermesRunService`가 기대하는
+   capability token·reservation 계약(서명된 토큰 형식, 만료 검증, ledger)까지 로컬 경로가
+   흉내 내야 한다. 이건 §23.2.6이 아직 배포하지 않은 **capability signer의 보안 경계와
+   직접 맞닿는 부분**이라, 무인 세션 도중 서둘러 만들면 안전 경계를 잘못 재구현할 위험이
+   실제 이득보다 크다고 판단해 유보했다. 다음 세션에서 owner와 함께 다음 중 하나를 정해야 한다.
+   - (a) `HermesRunService`가 gateway 없을 때 이 로컬 서비스로 폴백하도록 확장
+   - (b) 로컬 전용 새 엔드포인트를 만들고 프론트를 그쪽으로 돌림
+2. **컨테이너→호스트 네트워크 경로.** `compose.yaml`에 `extra_hosts`/`host.docker.internal`
+   매핑이 없다. 다만 owner의 실제 검증 환경(`scripts/run_api.py` 호스트 네이티브 dev 서버)은
+   컨테이너를 거치지 않으므로 `127.0.0.1:1234`가 이미 바로 LM Studio에 닿는다 — 이번 실측도
+   그 경로로 했다. 컨테이너 스택 지원은 별도 §10.14 기록과 함께 후속 작업으로 남긴다.
+3. `LocalOpenAICompatibleRuntimeConfig.model_name` 기본값이 `qwen3-35b`인데 실제 로드된
+   모델 id는 `qwen/qwen3.6-35b-a3b`다. live smoke 테스트는 `LMStudioHTTPTransport.
+   capability_profile()`로 로드된 모델을 실측해 우회했지만, production 기본값은
+   여전히 불일치한다. 환경변수로 덮어쓰거나 기본값을 갱신해야 한다.
+
+Commit: `feat: answer Yujin's conversation with the local model`
 
 ### Task 14: provider 어댑터와 전환
 
