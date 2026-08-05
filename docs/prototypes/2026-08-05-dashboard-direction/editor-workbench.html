@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VideoBox 편집 작업판 시안</title>
+<style>
+:root{
+  --canvas:#FAFAFA;
+  --panel:#FFFFFF;
+  --border:#EAEAEC;
+  --border-strong:#DCDCE0;
+  --text:#1C1C1E;
+  --muted:#6E6E73;
+  --faint:#727279;
+  --accent:#C2410C;
+  --accent-soft:#FFF1E7;
+  --accent-line:#F5C9AC;
+  --stage:#18181B;
+  --ok:#15803D;
+  --ok-soft:#ECFDF3;
+  --radius:12px;
+  --font:"Pretendard","Noto Sans KR",-apple-system,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--canvas);color:var(--text);
+  -webkit-font-smoothing:antialiased;font-size:14px;line-height:1.5}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:216px 1fr;min-height:100vh}
+.side{background:#FFFFFF;border-right:1px solid var(--border);padding:18px 12px;display:flex;flex-direction:column;gap:22px}
+.brand{display:flex;align-items:center;gap:9px;padding:4px 8px;font-weight:750;font-size:16px;letter-spacing:-.02em}
+.brand .dot{width:22px;height:22px;border-radius:7px;background:var(--accent);display:grid;place-items:center;color:#fff;font-size:12px}
+.proj{border:1px solid var(--border);background:var(--panel);border-radius:10px;padding:8px}
+.proj label{display:block;font-size:11px;color:var(--faint);padding:2px 6px 6px;font-weight:600}
+.proj button{width:100%;text-align:left;border:0;background:transparent;padding:7px 8px;border-radius:7px;
+  font:inherit;font-size:13px;color:var(--text);cursor:pointer}
+.proj button[aria-current]{background:var(--accent-soft);color:var(--accent);font-weight:650}
+nav ul{list-style:none;display:flex;flex-direction:column;gap:2px}
+nav button{width:100%;display:flex;align-items:center;gap:10px;border:0;background:transparent;
+  padding:9px 10px;border-radius:8px;font:inherit;font-size:13.5px;color:var(--muted);cursor:pointer}
+nav button:hover{background:#F3F3F5;color:var(--text)}
+nav button[aria-current]{background:var(--accent);color:#fff;font-weight:650}
+nav .ic{width:16px;text-align:center;opacity:.9}
+.side-foot{margin-top:auto;font-size:11.5px;color:var(--faint);padding:0 8px;display:flex;align-items:center;gap:6px}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.top{height:58px;display:flex;align-items:center;gap:12px;padding:0 20px;
+  border-bottom:1px solid var(--border);background:rgba(255,255,255,.85);backdrop-filter:blur(8px)}
+.top .crumb{font-size:12px;color:var(--faint)}
+.top h1{font-size:15px;font-weight:700;letter-spacing:-.01em}
+.top .sp{flex:1}
+.btn{border:1px solid var(--border-strong);background:var(--panel);color:var(--text);
+  padding:7px 13px;border-radius:8px;font:inherit;font-size:13px;cursor:pointer;font-weight:550}
+.btn:hover{background:#F5F5F7}
+.btn-p{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:650}
+.btn-p:hover{background:#A93A0A}
+
+/* ---------- workbench ---------- */
+.wb{flex:1;display:grid;grid-template-columns:296px 1fr 300px;gap:14px;padding:14px 20px 0;min-height:0}
+.dock{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.dock-h{display:flex;gap:2px;padding:8px 8px 0;border-bottom:1px solid var(--border)}
+.tab{border:0;background:transparent;padding:8px 11px;font:inherit;font-size:13px;color:var(--muted);
+  cursor:pointer;border-radius:7px 7px 0 0;font-weight:550;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent);font-weight:680}
+.dock-b{padding:12px;overflow:auto;display:flex;flex-direction:column;gap:11px;flex:1}
+
+.search{width:100%;border:1px solid var(--border-strong);border-radius:9px;padding:8px 11px;
+  font:inherit;font-size:13px;background:#FCFCFD}
+.search::placeholder{color:var(--faint)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{border:1px solid var(--border-strong);background:var(--panel);border-radius:999px;
+  padding:4px 10px;font:inherit;font-size:12px;color:var(--muted);cursor:pointer}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.chip-div{width:1px;background:var(--border);margin:3px 3px}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.card{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel);cursor:pointer;transition:.12s}
+.card:hover{border-color:var(--accent-line);box-shadow:0 2px 8px rgba(194,65,12,.09);transform:translateY(-1px)}
+.thumb{position:relative;aspect-ratio:16/9;background:#EDEDEF;display:grid;place-items:center;overflow:hidden}
+.thumb.v{aspect-ratio:9/16}
+.thumb svg{width:100%;height:100%;display:block}
+.badge{position:absolute;bottom:5px;right:5px;background:rgba(24,24,27,.84);color:#fff;
+  font-size:10.5px;padding:2px 5px;border-radius:4px;font-weight:600;letter-spacing:.01em}
+.badge.l{left:5px;right:auto;background:rgba(255,255,255,.92);color:var(--text)}
+.card-b{padding:7px 8px 9px}
+.card-t{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-m{font-size:11px;color:var(--faint);margin-top:2px;display:flex;align-items:center;gap:5px}
+.mute{display:inline-flex;align-items:center;gap:2px}
+
+/* ---------- stage ---------- */
+.stage-wrap{display:flex;flex-direction:column;gap:10px;min-width:0}
+.stage-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
+.stage-top{display:flex;align-items:center;gap:9px}
+.stage-top h2{font-size:13.5px;font-weight:680}
+.fresh{font-size:11.5px;color:var(--ok);background:var(--ok-soft);border:1px solid #BBF7D0;
+  padding:2px 8px;border-radius:999px;font-weight:600}
+.stage{background:var(--stage);border-radius:10px;flex:1;min-height:300px;display:grid;place-items:center;
+  position:relative;overflow:hidden}
+.stage .cap{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.62);color:#fff;padding:6px 14px;border-radius:6px;font-size:14px;font-weight:600;
+  white-space:nowrap;letter-spacing:-.01em}
+.play{width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.14);
+  border:1.5px solid rgba(255,255,255,.5);display:grid;place-items:center;color:#fff;font-size:18px;
+  backdrop-filter:blur(4px);cursor:pointer}
+.scrub{display:flex;align-items:center;gap:11px;font-size:12px;color:var(--muted)}
+.bar{flex:1;height:5px;background:var(--border);border-radius:3px;position:relative}
+.bar i{position:absolute;inset:0 62% 0 0;background:var(--accent);border-radius:3px}
+.bar b{position:absolute;left:38%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;
+  background:#fff;border:2.5px solid var(--accent);border-radius:50%}
+
+/* ---------- eugene ---------- */
+.eu-b{padding:12px;overflow:auto;display:flex;flex-direction:column;gap:10px;flex:1}
+.msg{font-size:12.5px;line-height:1.55;padding:9px 11px;border-radius:10px;max-width:94%}
+.msg.a{background:#FFF6EF;border:1px solid var(--accent-line);align-self:flex-start;border-bottom-left-radius:3px}
+.msg.u{background:#F1F1F4;align-self:flex-end;border-bottom-right-radius:3px}
+.rec{border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.rec-h{padding:7px 10px;font-size:11.5px;color:var(--muted);background:#FAFAFB;
+  border-bottom:1px solid var(--border);font-weight:600}
+.rec-b{padding:9px 10px;display:flex;gap:9px;align-items:center}
+.rec-th{width:60px;height:34px;border-radius:5px;overflow:hidden;flex:none;background:#EDEDEF}
+.rec-th svg{width:100%;height:100%;display:block}
+.rec-t{font-size:12px;font-weight:600}
+.rec-r{font-size:11px;color:var(--faint);margin-top:1px}
+.rec-a{display:flex;gap:6px;padding:0 10px 10px}
+.mini{flex:1;border:1px solid var(--border-strong);background:var(--panel);border-radius:7px;
+  padding:5px;font:inherit;font-size:11.5px;cursor:pointer;font-weight:600}
+.mini.p{background:var(--accent);border-color:var(--accent);color:#fff}
+.composer{border-top:1px solid var(--border);padding:10px;display:flex;gap:7px}
+.composer input{flex:1;border:1px solid var(--border-strong);border-radius:9px;padding:8px 11px;
+  font:inherit;font-size:12.5px;background:#FCFCFD}
+
+/* ---------- timeline ---------- */
+.tl{background:var(--panel);border:1px solid var(--border);border-top-left-radius:var(--radius);
+  border-top-right-radius:var(--radius);border-bottom:0;margin:14px 20px 0;padding:11px 14px 16px}
+.tl-h{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.tl-h h2{font-size:13px;font-weight:680}
+.tl-h .meta{font-size:11.5px;color:var(--faint)}
+.ruler{display:grid;grid-template-columns:76px 1fr;gap:9px;font-size:10.5px;color:var(--faint);margin-bottom:5px}
+.ticks{display:flex;justify-content:space-between}
+.lane{display:grid;grid-template-columns:76px 1fr;gap:9px;align-items:center;margin-bottom:4px}
+.lname{font-size:11.5px;color:var(--muted);font-weight:600;text-align:right}
+.track{height:26px;background:#F6F6F8;border:1px solid var(--border);border-radius:6px;position:relative}
+.clip{position:absolute;top:2px;bottom:2px;border-radius:4px;display:flex;align-items:center;
+  padding:0 7px;font-size:11px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;cursor:pointer}
+.c-nar{background:#52525B}.c-broll{background:var(--accent)}.c-bgm{background:#71717A}
+.c-sfx{background:#A1A1AA}.c-cap{background:#475569}
+.clip.sel{outline:2px solid #1C1C1E;outline-offset:1px}
+.play-head{position:absolute;top:-4px;bottom:-4px;width:2px;background:#1C1C1E;left:38%;z-index:5}
+.play-head::before{content:"";position:absolute;top:-3px;left:-4px;width:10px;height:8px;
+  background:#1C1C1E;border-radius:2px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="side">
+    <div class="brand"><span class="dot">V</span>VideoBox</div>
+
+    <div class="proj">
+      <label>프로젝트</label>
+      <button aria-current="true">카페 창업 비용 편</button>
+      <button>제주 브이로그</button>
+      <button>장비 리뷰 3편</button>
+    </div>
+
+    <nav>
+      <ul>
+        <li><button><span class="ic">🏠</span>홈</button></li>
+        <li><button><span class="ic">✏️</span>새 영상 만들기</button></li>
+        <li><button aria-current="true"><span class="ic">🎬</span>편집</button></li>
+        <li><button><span class="ic">📁</span>자산</button></li>
+        <li><button><span class="ic">📤</span>출력</button></li>
+      </ul>
+    </nav>
+
+    <div class="side-foot"><span>●</span> 이 컴퓨터에서 작업 중</div>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div>
+        <div class="crumb">카페 창업 비용 편</div>
+        <h1>편집</h1>
+      </div>
+      <span class="sp"></span>
+      <button class="btn">되돌리기</button>
+      <button class="btn">다시 하기</button>
+      <button class="btn-p btn">내보내기</button>
+    </header>
+
+    <div class="wb">
+
+      <!-- 왼쪽: 자산 -->
+      <section class="dock">
+        <div class="dock-h">
+          <button class="tab" aria-selected="true">자산</button>
+          <button class="tab">대본</button>
+          <button class="tab">자막</button>
+        </div>
+        <div class="dock-b">
+          <input class="search" placeholder="어떤 장면을 찾으세요?">
+          <div class="chips">
+            <button class="chip" aria-pressed="true">전체</button>
+            <button class="chip">영상</button>
+            <button class="chip">음악</button>
+            <button class="chip">효과음</button>
+            <span class="chip-div"></span>
+            <button class="chip">가로</button>
+            <button class="chip">세로</button>
+          </div>
+
+          <div class="grid">
+            <article class="card">
+              <div class="thumb">
+                <svg viewBox="0 0 160 90"><rect width="160" height="90" fill="#C9A227"/><rect y="58" width="160" height="32" fill="#8A6D1F"/><circle cx="52" cy="38" r="15" fill="#F3E0A9"/><rect x="88" y="28" width="46" height="30" rx="3" fill="#F7EDD2"/></svg>
+                <span class="badge l">가로</span><span class="badge">0:12</span>
+              </div>
+              <div class="card-b"><div class="card-t">카페 외부 전경</div>
+                <div class="card-m"><span class="mute">🔇 무음</span></div></div>
+            </article>
+
+            <article class="card">
+              <div class="thumb">
+                <svg viewBox="0 0 160 90"><rect width="160" height="90" fill="#6B5B4E"/><rect x="18" y="22" width="124" height="52" rx="4" fill="#D8C9B8"/><rect x="30" y="34" width="60" height="7" rx="3" fill="#8A7663"/><rect x="30" y="48" width="88" height="7" rx="3" fill="#A8927C"/></svg>
+                <span class="badge l">가로</span><span class="badge">0:08</span>
+              </div>
+              <div class="card-b"><div class="card-t">계약서 작성 장면</div>
+                <div class="card-m"><span class="mute">🔇 무음</span></div></div>
+            </article>
+
+            <article class="card">
+              <div class="thumb v">
+                <svg viewBox="0 0 90 160"><rect width="90" height="160" fill="#2F6E5B"/><circle cx="45" cy="58" r="20" fill="#8FD4B4"/><rect x="16" y="96" width="58" height="46" rx="5" fill="#57A98A"/></svg>
+                <span class="badge l">세로</span><span class="badge">0:21</span>
+              </div>
+              <div class="card-b"><div class="card-t">원두 클로즈업</div>
+                <div class="card-m"><span class="mute">🔇 무음</span></div></div>
+            </article>
+
+            <article class="card">
+              <div class="thumb">
+                <svg viewBox="0 0 160 90"><rect width="160" height="90" fill="#8C4A2F"/><rect x="26" y="20" width="108" height="50" rx="6" fill="#E8B48C"/><circle cx="60" cy="45" r="12" fill="#C97B4E"/><circle cx="100" cy="45" r="12" fill="#C97B4E"/></svg>
+                <span class="badge l">가로</span><span class="badge">0:15</span>
+              </div>
+              <div class="card-b"><div class="card-t">커피머신 작동</div>
+                <div class="card-m"><span class="mute">🔇 무음</span></div></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- 가운데: 미리보기 -->
+      <section class="stage-wrap">
+        <div class="stage-card">
+          <div class="stage-top">
+            <h2>미리보기</h2>
+            <span class="fresh">최신 편집 반영됨</span>
+          </div>
+          <div class="stage">
+            <div class="play">▶</div>
+            <div class="cap">임대료가 전체 비용의 40%를 차지합니다</div>
+          </div>
+          <div class="scrub">
+            <span>3:12</span>
+            <div class="bar"><i></i><b></b></div>
+            <span>8:15</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 오른쪽: 유진 -->
+      <section class="dock">
+        <div class="dock-h"><button class="tab" aria-selected="true">유진</button><button class="tab">속성</button></div>
+        <div class="eu-b">
+          <div class="msg a">이 구간은 임대료 설명이라 매장 외부보다 <b>계약·서류 장면</b>이 더 어울려요.</div>
+          <div class="msg u">그럼 바꿔줘</div>
+
+          <div class="rec">
+            <div class="rec-h">추천 장면 · 3:08–3:20</div>
+            <div class="rec-b">
+              <div class="rec-th"><svg viewBox="0 0 60 34"><rect width="60" height="34" fill="#6B5B4E"/><rect x="8" y="8" width="44" height="19" rx="2" fill="#D8C9B8"/></svg></div>
+              <div><div class="rec-t">계약서 작성 장면</div><div class="rec-r">'임대' 와 의미가 가까워요</div></div>
+            </div>
+            <div class="rec-a"><button class="mini">먼저 보기</button><button class="mini p">적용</button></div>
+          </div>
+
+          <div class="msg a">적용 전에는 편집본이 바뀌지 않아요.</div>
+        </div>
+        <div class="composer"><input placeholder="유진에게 말하기"><button class="btn btn-p">보내기</button></div>
+      </section>
+    </div>
+
+    <!-- 타임라인 -->
+    <section class="tl">
+      <div class="tl-h"><h2>타임라인</h2><span class="meta">6개 트랙 · 12개 장면 · 빈 구간 없음</span></div>
+      <div class="ruler"><span></span><div class="ticks"><span>0:00</span><span>2:00</span><span>4:00</span><span>6:00</span><span>8:15</span></div></div>
+
+      <div class="lane"><span class="lname">내레이션</span><div class="track">
+        <div class="clip c-nar" style="left:0;width:46%">도입 · 창업 준비</div>
+        <div class="clip c-nar" style="left:47%;width:52%">임대료와 인테리어</div>
+        <div class="play-head"></div></div></div>
+
+      <div class="lane"><span class="lname">장면</span><div class="track">
+        <div class="clip c-broll" style="left:2%;width:20%">카페 외부 전경</div>
+        <div class="clip c-broll sel" style="left:24%;width:22%">계약서 작성</div>
+        <div class="clip c-broll" style="left:50%;width:26%">커피머신 작동</div>
+        <div class="clip c-broll" style="left:78%;width:20%">원두 클로즈업</div></div></div>
+
+      <div class="lane"><span class="lname">음악</span><div class="track">
+        <div class="clip c-bgm" style="left:0;width:98%">잔잔한 배경음악</div></div></div>
+
+      <div class="lane"><span class="lname">효과음</span><div class="track">
+        <div class="clip c-sfx" style="left:23%;width:6%">전환음</div>
+        <div class="clip c-sfx" style="left:49%;width:6%">전환음</div></div></div>
+
+      <div class="lane"><span class="lname">자막</span><div class="track">
+        <div class="clip c-cap" style="left:1%;width:44%">1번 자막 · 12줄</div>
+        <div class="clip c-cap" style="left:47%;width:51%">2번 자막 · 14줄</div></div></div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

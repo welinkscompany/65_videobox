@@ -399,12 +399,24 @@ owner 요구: "어설픈 기능 말고 깔끔한 디자인으로 직관적이고
 `scripts/build_ui_prototype_artifacts.py --require-approved`가 이를 검증한다.
 따라서 디자인을 바꾸려면 **프로토타입 재생성 → 새 SHA → owner 재승인 기록**이 선행이다.
 
-### Task 10: 시각 방향 재승인
+### Task 10: 시각 방향 재승인 — **완료 (2026-08-05)**
 
-- [ ] **Step 1:** 현재 화면의 실제 문제를 목록화한다. 취향이 아니라 사용성 근거로 적는다
-- [ ] **Step 2:** 새 방향 프로토타입을 5개 viewport로 생성한다
-- [ ] **Step 3:** owner 검토와 명시 승인을 `docs/decisions/`에 기록한다
-- [ ] **Step 4:** `--require-approved` 검증 통과 확인
+- [x] **Step 1:** 현재 화면의 실제 문제를 사용성 근거로 정리했다.
+      썸네일 없음, 데드엔드, 내부 ID 노출, 진입점 중복, 자산 세로 나열, 무음 상태 비노출
+- [x] **Step 2:** 시안을 만들어 owner에게 보여주고 화이트톤으로 한 차례 수정했다.
+      `docs/prototypes/2026-08-05-dashboard-direction/editor-workbench.html`
+- [x] **Step 3:** owner 승인을 기록했다.
+      `docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md`
+- [x] **Step 4:** 대비를 직접 계산해 확인했다.
+      본문 17.01:1, 보조 5.07:1, 희미 4.77:1, 강조 5.18:1 — 전부 4.5:1 이상
+
+**승인 방식이 이전과 다르다.** owner가 "나중에 개발하면서 조금씩 바뀔 것"이라고 명시했으므로
+artifact SHA를 고정하지 않고 **방향을 승인**했다. 여백·모서리·문구 조정은 재승인 없이 진행하고,
+색 값·"배경 흰색, 오렌지는 강조만" 원칙·3분할 구조·자산 그리드를 바꿀 때만 재승인한다.
+
+따라서 `scripts/build_ui_prototype_artifacts.py --require-approved`는
+이 방향 승인에 적용하지 않는다. 기존 두 승인 기록의 SHA 게이트는 그대로 두되,
+색 팔레트는 이번 결정이 대체한다.
 
 ### Task 11: 색상 토큰 일원화 (F-6) — Task 10과 병행 가능
 
@@ -467,13 +479,9 @@ Commit: `refactor: drive shell colours from theme tokens`
 
 Run: `npm --prefix apps/web test -- src/styles`
 
-- [ ] **Step 3: 승인된 값 적용** — Task 10에서 승인된 팔레트를 토큰에 반영한다.
-      승인 기록에 없는 값은 넣지 않는다
-- [ ] **Step 4: 승인 게이트 재검증**
-
-Run: `.venv\Scripts\python.exe scripts/build_ui_prototype_artifacts.py --require-approved`
-승인 record와 artifact aggregate SHA가 일치해야 한다
-
+- [ ] **Step 3: 승인된 값 적용** — `2026-08-05-dashboard-white-orange-direction.ko.md`의
+      색 표를 토큰에 반영한다. 승인 기록에 없는 값은 넣지 않는다
+- [ ] **Step 4: 브라우저에서 실제 대비 측정** — 계산값이 아니라 렌더된 화면에서 확인한다
 - [ ] **Step 5: GREEN + 브라우저 실측 + 커밋**
 
 Commit: `feat: apply the approved visual direction`
