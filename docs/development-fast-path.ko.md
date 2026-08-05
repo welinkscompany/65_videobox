@@ -153,7 +153,7 @@ review-action family의 maintenance나 rollback hardening만 다시 볼 때는 �
 ## 10. 고정 운영 규정
 
 아래 규정은 현재 브랜치의 개발 운영 기본값으로 고정한다.
-이 문서에 적힌 규정은 저장소 루트 `AGENTS.md`와 함께 이후 turn에서도 별도 재지시가 없는 한 계속 따른다.
+이 문서에 적힌 규정은 저장소 루트 `CLAUDE.md`와 함께 이후 turn에서도 별도 재지시가 없는 한 계속 따른다.
 사용자가 turn 중에 추가로 확정한 운영 선호도도 이 섹션에 흡수해 SSOT로 유지한다.
 
 ### 10.0 Local Media Director 출력 모드와 acceptance 경계
