@@ -382,7 +382,7 @@ Run: `npm --prefix apps/web test -- src/features/editor/timeline`
 
 Commit: `feat: name timeline clips in plain language`
 
-### Task 8: 프로젝트 삭제 경로 (F-5) — **보관 경로만 완료, 화면 연결은 보류 (2026-08-06)**
+### Task 8: 프로젝트 삭제 경로 (F-5) — **보관 API·화면 진입점 완료, 복원 화면·완전 삭제는 범위 밖 (2026-08-06)**
 
 API와 UI 모두 없다. `local_project_store.py`에 삭제·보관 함수 자체가 없다.
 이번 세션에서 만든 `my-project`가 목록에 영구 잔존 중이다.
@@ -430,6 +430,16 @@ API와 UI 모두 없다. `local_project_store.py`에 삭제·보관 함수 자�
       분리해서 별도로 할 만큼 크고 기계적인 작업이라 판단해 미뤘다
 
 Commit: `feat: let the owner put a project away`
+
+**후속 (2026-08-06): 화면 진입점 연결 완료.** `ProductShell`에 `onArchiveProject` prop과
+"보관"/"보관 확인" 2단계 인라인 컨트롤을 추가했다(native `confirm()` 없이 두 번째 클릭으로
+확인). `AppRouter.tsx`에 `archiveProjectAndRefresh(router, projectId)` 헬퍼 하나를 두고
+`WorkspacePage`의 9곳, `SettingsRoutePage`의 1곳 — 총 10개 `ProductShell` 호출부 전부에
+기계적으로 연결했다. 실제 `AppRouter`를 렌더하는 통합 테스트로 확인 절차·API 호출·목록에서
+사라짐을 검증했다(프론트 전체 765/765, tsc clean). **아직 없는 것:** 복원 화면(보관된
+프로젝트가 어디에도 나열되지 않아 되돌릴 곳이 없다), 완전 삭제(범위 밖 유지).
+
+Commit: `feat: wire project archiving into the project switcher`
 
 ### Task 9: 중복 진입점 정리 (F-7) — **완료 (2026-08-06)**
 
