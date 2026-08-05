@@ -148,6 +148,33 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     }
   }
 
+  async function uploadFiles(files: FileList) {
+    if (files.length === 0) return;
+    const token = beginAction("upload");
+    if (!token) return;
+    let succeeded = 0;
+    let failed = 0;
+    for (const file of Array.from(files)) {
+      try {
+        await api.uploadDraftBroll(token.projectId, file);
+        succeeded += 1;
+      } catch {
+        failed += 1;
+      }
+      if (!isCurrentAction(token)) return;
+    }
+    if (succeeded > 0) await load();
+    if (!isCurrentAction(token)) return;
+    if (succeeded > 0 && failed === 0) {
+      setMessage(`영상 ${succeeded}개를 추가했어요.`);
+    } else if (succeeded > 0 && failed > 0) {
+      setMessage(`영상 ${succeeded}개를 추가했어요. ${failed}개를 추가하지 못했어요. 파일을 확인한 뒤 다시 시도해 주세요.`);
+    } else {
+      setMessage("영상을 추가하지 못했어요. 파일을 확인한 뒤 다시 시도해 주세요.");
+    }
+    finishAction(token);
+  }
+
   async function showPreview(item: MediaAnalysis) {
     const key = `preview:${item.analysis_id}`;
     const token = beginAction(key);
@@ -188,6 +215,24 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       {loading && !currentState ? <p role="status">자산을 불러오고 있어요.</p> : null}
       {error ? <div role="alert"><p>{error}</p><Button type="button" onClick={() => void load()}>다시 불러오기</Button></div> : null}
       {message ? <p role="status">{message}</p> : null}
+
+      <section aria-labelledby="media-upload-heading">
+        <h2 id="media-upload-heading">영상 올리기</h2>
+        <p>평소에 찍어둔 장면 영상을 여러 개 한 번에 올려 보관함에 쌓아 둘 수 있어요.</p>
+        <label htmlFor="media-broll-upload">장면 영상 파일 추가</label>
+        <Input
+          id="media-broll-upload"
+          type="file"
+          accept="video/*,.mp4,.mov,.webm,.mkv"
+          multiple
+          disabled={busyKey !== null}
+          onChange={(event) => {
+            const files = event.target.files;
+            event.target.value = "";
+            if (files && files.length > 0) void uploadFiles(files);
+          }}
+        />
+      </section>
 
       {currentState ? (
         <div className="grid gap-4">

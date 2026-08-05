@@ -24,6 +24,10 @@ const analysis = (status: string, index: number): MediaAnalysis => ({
   created_at: "2026-07-23T00:00:00Z",
 });
 
+function makeFile(name: string) {
+  return new File(["clip-bytes"], name, { type: "video/mp4" });
+}
+
 beforeEach(() => {
   vi.spyOn(api, "listBrollAssets").mockResolvedValue([asset()]);
   vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [analysis("needs_review", 1)] });
@@ -34,6 +38,7 @@ beforeEach(() => {
   vi.spyOn(api, "cancelMediaAnalysis").mockResolvedValue(analysis("cancelled", 2));
   vi.spyOn(api, "retryMediaAnalysis").mockResolvedValue(analysis("queued", 3));
   vi.spyOn(api, "reviewMediaAnalysis").mockResolvedValue(analysis("succeeded", 1));
+  vi.spyOn(api, "uploadDraftBroll").mockResolvedValue({ asset_id: "asset-uploaded", asset_type: "broll_video", scan_status: "local_ready" });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -148,6 +153,51 @@ describe("MediaWorkspacePage", () => {
     await act(async () => resolveA([asset("project-a")]));
     expect(screen.queryByText("회의 장면")).not.toBeInTheDocument();
     expect(screen.getByTestId("media-workspace-page")).toHaveAttribute("data-project-id", "project-b");
+  });
+
+  it("uploads one or more files from the asset screen and refreshes the list", async () => {
+    render(<MediaWorkspacePage projectId="project-a" />);
+    await screen.findByRole("heading", { name: "자산 보관함" });
+    expect(api.listBrollAssets).toHaveBeenCalledTimes(1);
+
+    const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
+    const fileA = makeFile("clip-a.mp4");
+    const fileB = makeFile("clip-b.mp4");
+    fireEvent.change(input, { target: { files: [fileA, fileB] } });
+
+    await waitFor(() => expect(api.uploadDraftBroll).toHaveBeenCalledTimes(2));
+    expect(api.uploadDraftBroll).toHaveBeenNthCalledWith(1, "project-a", fileA);
+    expect(api.uploadDraftBroll).toHaveBeenNthCalledWith(2, "project-a", fileB);
+    await waitFor(() => expect(api.listBrollAssets).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/영상 2개를 추가했어요/)).toBeVisible();
+  });
+
+  it("keeps failed uploads visible in creator language instead of silently dropping them", async () => {
+    vi.mocked(api.uploadDraftBroll)
+      .mockResolvedValueOnce({ asset_id: "asset-uploaded", asset_type: "broll_video", scan_status: "local_ready" })
+      .mockRejectedValueOnce(new Error("raw provider failure"));
+    render(<MediaWorkspacePage projectId="project-a" />);
+    await screen.findByRole("heading", { name: "자산 보관함" });
+
+    const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile("good.mp4"), makeFile("bad.mp4")] } });
+
+    expect(await screen.findByText(/1개를 추가하지 못했어요/)).toBeVisible();
+    expect(document.body.textContent).not.toContain("raw provider failure");
+  });
+
+  it("blocks another upload while one is already in flight", async () => {
+    let release!: (value: { asset_id: string; asset_type: string; scan_status: string }) => void;
+    vi.mocked(api.uploadDraftBroll).mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    render(<MediaWorkspacePage projectId="project-a" />);
+    await screen.findByRole("heading", { name: "자산 보관함" });
+
+    const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [makeFile("one.mp4")] } });
+    expect(input).toBeDisabled();
+
+    await act(async () => release({ asset_id: "asset-uploaded", asset_type: "broll_video", scan_status: "local_ready" }));
+    await waitFor(() => expect(input).not.toBeDisabled());
   });
 
   it("keeps an old A preview from overwriting or unlocking a newer A preview after A-B-A", async () => {
