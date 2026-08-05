@@ -105,7 +105,7 @@ def test_without_an_embedding_provider_falls_back_to_lexical_scoring_unchanged(t
     assert proposal.candidates[0].canonical_metadata["semantic_provenance"] == "lexical_korean_synonym_fallback"
 
 
-def test_embedding_provider_failure_falls_back_to_lexical_scoring_instead_of_blocking(tmp_path):
+def test_embedding_provider_failure_falls_back_to_lexical_scoring_instead_of_blocking(tmp_path, caplog):
     class _ExplodingEmbeddingProvider:
         def embed(self, request):  # noqa: ANN001
             raise RuntimeError("LM Studio unreachable")
@@ -122,6 +122,8 @@ def test_embedding_provider_failure_falls_back_to_lexical_scoring_instead_of_blo
     service = DirectorProposalService(
         store, embedding_provider=_ExplodingEmbeddingProvider(), embedding_model_name="test-embedding-model"
     )
-    proposal = service.create(project_id=project.project_id, session_id=session["session_id"])
+    with caplog.at_level("WARNING"):
+        proposal = service.create(project_id=project.project_id, session_id=session["session_id"])
 
     assert proposal.candidates[0].canonical_metadata["semantic_provenance"] == "lexical_korean_synonym_fallback"
+    assert any("fell back to lexical matching" in record.message for record in caplog.records)

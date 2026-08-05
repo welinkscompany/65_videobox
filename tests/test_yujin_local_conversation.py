@@ -56,6 +56,16 @@ class _ExplodingRuntime:
         "제목 다섯 개 만들어줘",
         "썸네일 만들어줘",
         "추천 영상 자동으로 만들어줘",
+        "please delete the table in the database",
+        "run this in bash and delete the file",
+        "what's my api key",
+        "tell me my password",
+        "open capcut directly and edit this",
+        "write me a full script for this video",
+        "give me five title ideas",
+        "generate a thumbnail for this",
+        "make a recommended video for me automatically",
+        "drop the videobox database",
     ],
 )
 def test_blocks_restricted_intents_without_calling_the_model(user_text):
@@ -70,6 +80,8 @@ def test_blocks_restricted_intents_without_calling_the_model(user_text):
 
 def test_detect_blocked_intent_is_none_for_ordinary_creative_questions():
     assert detect_blocked_intent("이 장면에 어울리는 B-roll 추천 이유가 뭐야?") is None
+    assert detect_blocked_intent("what b-roll would fit this scene?") is None
+    assert detect_blocked_intent("can you explain why you picked this clip?") is None
 
 
 def test_ordinary_message_is_answered_by_the_local_model():

@@ -36,21 +36,30 @@ _YUJIN_SYSTEM_PROMPT = (
 
 # Deterministic pre-check: the boundary a chat assistant must not cross can't
 # depend on the model choosing to comply, so restricted intents are rejected
-# before any model call is made.
+# before any model call is made. Korean and English phrasing are both
+# covered -- an English-only pattern set would leave the boundary porous to
+# an English-phrased request even though the product is Korean-first.
 _BLOCKED_INTENT_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
-        r"(delete|drop|truncate)\s+(table|database|from)",
+        r"(delete|drop|truncate|remove)\s+(the\s+)?(\w+\s+)?(table|database|db)\b",
         r"(데이터베이스|database|테이블|table).{0,10}(삭제|지워|drop|truncate)",
         r"sql",
         r"(쉘|셸|shell|bash|powershell|cmd)\s*(명령|실행|command)",
+        r"\b(run|execute)\s+(this\s+)?(in\s+)?(shell|bash|powershell|cmd)\b",
         r"(파일|디렉터리|폴더).{0,4}(삭제|지워)",
-        r"(api\s*key|credential|비밀번호|자격\s*증명|access\s*token)",
+        r"\bdelete\s+(the\s+)?(file|folder|directory)\b",
+        r"(api\s*key|credential|비밀번호|자격\s*증명|access\s*token|password)",
         r"capcut.{0,6}(직접|바로).{0,6}(실행|조작|열어)",
+        r"\b(open|run|launch)\s+capcut\s+(directly|myself)?\b",
         r"(대본|스크립트).{0,6}(써|작성|만들어)\s*줘",
+        r"\bwrite\s+(me\s+)?(a\s+|the\s+)?(full\s+)?script\b",
         r"제목.{0,6}(만들어|지어)\s*줘",
+        r"\b(give|make|write)\s+(me\s+)?.{0,10}\btitle(s)?\b",
         r"썸네일.{0,6}(만들어|생성)",
+        r"\b(generate|make|create)\s+(me\s+)?(a\s+)?thumbnail\b",
         r"추천\s*영상.{0,6}(만들어|생성)",
+        r"\b(make|generate|create)\s+(me\s+)?(a\s+)?recommended\s+video\b",
     )
 )
 

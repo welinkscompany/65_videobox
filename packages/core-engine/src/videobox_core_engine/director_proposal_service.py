@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from dataclasses import replace
 from typing import Any
@@ -28,6 +29,9 @@ def is_actionable_yujin_media_candidate(candidate: object) -> bool:
         and source_kind_matches
         and metadata.get("target_segment_id")
     )
+
+
+_logger = logging.getLogger(__name__)
 
 
 class DirectorProposalBlockedError(Exception):
@@ -206,6 +210,11 @@ class DirectorProposalService:
                 project_id=project_id, query_embedding=query_vector, limit=max(1, len(assets))
             )
         except Exception:
+            _logger.warning(
+                "Semantic scoring fell back to lexical matching for project %s: embedding lookup failed.",
+                project_id,
+                exc_info=True,
+            )
             return assets
         score_by_asset_id = {str(match["asset_id"]): float(match["score"]) for match in matches}
         return [

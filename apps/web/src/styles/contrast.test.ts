@@ -52,6 +52,12 @@ describe("approved white-orange palette contrast", () => {
     expect(readToken("--vb-muted")).toBe(APPROVED.muted)
     expect(readToken("--vb-accent")).toBe(APPROVED.accent)
     expect(readToken("--vb-preview")).toBe(APPROVED.preview)
+    expect(readToken("--vb-border-strong")).toBe(APPROVED.borderStrong)
+    expect(readToken("--vb-faint")).toBe(APPROVED.faint)
+    expect(readToken("--vb-accent-bg")).toBe(APPROVED.accentBg)
+    expect(readToken("--vb-accent-border")).toBe(APPROVED.accentBorder)
+    expect(readToken("--vb-success")).toBe(APPROVED.success)
+    expect(readToken("--vb-success-bg")).toBe(APPROVED.successBg)
   })
 
   it("body text on panel clears 4.5:1", () => {
