@@ -48,6 +48,18 @@ class FFmpegMediaProbe:
         return (output.stdout or output.stderr).splitlines()[0].strip() or "unknown"
 
     def probe(self, path: Path) -> MediaProbeResult:
+        """Full probe including representative frames, for vision analysis."""
+        return self._probe(path, with_frames=True)
+
+    def probe_metadata(self, path: Path) -> MediaProbeResult:
+        """Metadata only -- one ffprobe call, no frame extraction.
+
+        Asset intake needs size, length, and audio presence but not the six
+        stills the vision path uses, so it must not pay for them.
+        """
+        return self._probe(path, with_frames=False)
+
+    def _probe(self, path: Path, *, with_frames: bool) -> MediaProbeResult:
         completed = subprocess.run(
             [self.ffprobe_binary, "-v", "error", "-show_entries", "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate", "-of", "json", str(path)],
             capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SECONDS, check=True,
@@ -74,7 +86,11 @@ class FFmpegMediaProbe:
         aspect = (width / height) if width and height else None
         fps = self._fps(stream.get("avg_frame_rate"))
         boundaries = (0.0, duration) if duration > 0 else (0.0,)
-        frames = self._extract_representative_frames(path, duration, max(width or 0, height or 0, 1))
+        frames = (
+            self._extract_representative_frames(path, duration, max(width or 0, height or 0, 1))
+            if with_frames
+            else ()
+        )
         return MediaProbeResult(duration, str(stream.get("codec_name") or "") or None, width, height, aspect, fps, str(audio_stream.get("codec_name") or "") or None, boundaries, frames)
 
     def _extract_representative_frames(self, path: Path, duration: float, long_edge_px: int) -> tuple[RepresentativeFrame, ...]:

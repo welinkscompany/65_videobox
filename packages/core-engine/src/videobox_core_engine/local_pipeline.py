@@ -49,7 +49,17 @@ from videobox_core_engine.output_source_verifier import (
     verify_output_source_snapshots,
 )
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
+from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
+
+
+def _orientation_of(width: int, height: int) -> str:
+    """Creator-facing wording, per the dashboard copy rules."""
+    if width > height:
+        return "가로"
+    if height > width:
+        return "세로"
+    return "정사각"
 from videobox_core_engine.tts_acceptance import assess_tts_audio
 from videobox_core_engine.editing_session import (
     build_editing_session,
@@ -493,8 +503,38 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             source_path=source_path,
             metadata={"title": title or source_path.stem, "tags": tags or []},
         )
+        self._try_record_media_facts(project_id=project_id, asset=asset)
         self._try_generate_broll_thumbnail(project_id=project_id, asset=asset)
         return self._asset_payload(asset)
+
+    def _try_record_media_facts(self, *, project_id: str, asset: Any) -> None:
+        """Keep what ffprobe already knows: size, length, orientation, audio.
+
+        These are derived facts, so they go in their own metadata fields rather
+        than the owner's ``tags`` list, where a later tag cleanup could drop or
+        misspell them.  Best-effort like the thumbnail: unreadable media still
+        registers, it just carries no facts.
+        """
+        try:
+            video_path = self.store.resolve_storage_uri(
+                project_id=project_id, storage_uri=asset.storage_uri
+            )
+            probed = FFmpegMediaProbe().probe_metadata(video_path)
+        except Exception:
+            return
+        if not probed.width or not probed.height:
+            return
+        self.store.update_asset_metadata(
+            project_id=project_id,
+            asset_id=asset.asset_id,
+            metadata_patch={
+                "duration_sec": round(probed.duration_sec, 3),
+                "width": probed.width,
+                "height": probed.height,
+                "orientation": _orientation_of(probed.width, probed.height),
+                "has_audio": probed.audio_codec is not None,
+            },
+        )
 
     def _try_generate_broll_thumbnail(self, *, project_id: str, asset: Any) -> None:
         # Best-effort: a fixture/test video that isn't real footage (or a

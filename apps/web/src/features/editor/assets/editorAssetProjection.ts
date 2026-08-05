@@ -3,6 +3,8 @@ import { api, type BrollAsset, type MediaLibraryAsset } from "../../../api";
 export type EditorAssetKind = "broll" | "bgm" | "sfx";
 export type EditorAssetPreviewKind = "audio" | "video" | "image";
 export type EditorAssetAudioPresence = "오디오 있음" | "오디오 없음" | "오디오 정보 확인 중";
+/** Derived from the media at intake, not a tag the owner writes. */
+export type EditorAssetOrientation = "가로" | "세로" | "정사각";
 
 export type EditorAssetSourceMetadata = Readonly<{
   tags: readonly string[];
@@ -24,6 +26,7 @@ export type EditorAssetCard = Readonly<{
   durationLabel: string;
   status: string;
   audioPresence: EditorAssetAudioPresence;
+  orientation?: EditorAssetOrientation;
   license: string;
   canApply: boolean;
   previewUrl: string;
@@ -35,6 +38,7 @@ export type EditorAssetCard = Readonly<{
 export type EditorAssetFilter = Readonly<{
   type: "all" | EditorAssetKind;
   query: string;
+  orientation?: "all" | EditorAssetOrientation;
 }>;
 
 export type ProjectEditorAssetsInput = Readonly<{
@@ -77,6 +81,19 @@ function brollStatus(metadata: Readonly<Record<string, unknown>>): string {
   return `${base} · ${reviewStatus}`;
 }
 
+function brollOrientation(
+  metadata: Readonly<Record<string, unknown>>,
+): EditorAssetOrientation | undefined {
+  const stored = metadata.orientation;
+  if (stored === "가로" || stored === "세로" || stored === "정사각") return stored;
+  const width = typeof metadata.width === "number" ? metadata.width : null;
+  const height = typeof metadata.height === "number" ? metadata.height : null;
+  if (width === null || height === null || width <= 0 || height <= 0) return undefined;
+  if (width > height) return "가로";
+  if (height > width) return "세로";
+  return "정사각";
+}
+
 function brollAudioPresence(metadata: Readonly<Record<string, unknown>>): EditorAssetAudioPresence {
   const values = [metadata.audio_present, metadata.has_audio].filter((value): value is boolean => typeof value === "boolean");
   if (values.length === 0 || new Set(values).size !== 1) return "오디오 정보 확인 중";
@@ -110,9 +127,13 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     assetId: asset.asset_id,
     label: brollLabels[asset.asset_type] ?? "기타 B-roll",
     title: metadataTitle || `B-roll ${index + 1}`,
-    durationLabel: durationLabel(metadata.duration_seconds),
+    // Intake writes `duration_sec`.  `duration_seconds` is the media-pack
+    // field and never appears on project b-roll, so reading it always
+    // produced "길이 정보 없음".
+    durationLabel: durationLabel(metadata.duration_sec ?? metadata.duration_seconds),
     status: brollStatus(metadata),
     audioPresence: brollAudioPresence(metadata),
+    orientation: brollOrientation(metadata),
     license: "프로젝트 로컬 B-roll",
     canApply: true,
     previewUrl: api.assetContentUrl(projectId, asset.asset_id),
@@ -175,6 +196,9 @@ export function filterEditorAssets(cards: readonly EditorAssetCard[], filter: Ed
   const term = filter.query.trim().toLocaleLowerCase();
   return cards.filter((card) => {
     if (filter.type !== "all" && card.kind !== filter.type) return false;
+    if (filter.orientation && filter.orientation !== "all" && card.orientation !== filter.orientation) {
+      return false;
+    }
     if (!term) return true;
     const searchable = [
       card.title,

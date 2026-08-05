@@ -130,3 +130,67 @@ describe("editor asset projection", () => {
     expect(cards[2].license).toContain("출처 표기 필요: Unverified Creator 표기");
   });
 });
+
+describe("intake facts on b-roll cards", () => {
+  const broll = (metadata: Record<string, unknown>) => ({
+    asset_id: "a1",
+    asset_type: "broll_video" as const,
+    storage_uri: "x",
+    created_at: "now",
+    metadata,
+  });
+
+  it("reads the length the intake actually stores", () => {
+    // Intake writes `duration_sec`; the card used to read `duration_seconds`,
+    // a media-pack field b-roll never carries, so length was always unknown.
+    const [card] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ title: "카페 외부", duration_sec: 12.4 })],
+      libraryAssets: [],
+    });
+
+    expect(card.durationLabel).not.toBe("길이 정보 없음");
+    expect(card.durationLabel).toContain("12");
+  });
+
+  it("surfaces orientation so vertical footage is pickable for shortform", () => {
+    const [landscape] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ orientation: "가로" })],
+      libraryAssets: [],
+    });
+    const [portrait] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ orientation: "세로" })],
+      libraryAssets: [],
+    });
+
+    expect(landscape.orientation).toBe("가로");
+    expect(portrait.orientation).toBe("세로");
+  });
+
+  it("reports audio presence from the stored flag", () => {
+    const [muted] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ has_audio: false })],
+      libraryAssets: [],
+    });
+
+    expect(muted.audioPresence).toBe("오디오 없음");
+  });
+
+  it("filters by orientation for shortform work", () => {
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [
+        { ...broll({ title: "가로 장면", orientation: "가로" }), asset_id: "wide" },
+        { ...broll({ title: "세로 장면", orientation: "세로" }), asset_id: "tall" },
+      ],
+      libraryAssets: [],
+    });
+
+    const vertical = filterEditorAssets(cards, { type: "all", query: "", orientation: "세로" });
+
+    expect(vertical.map((card) => card.title)).toEqual(["세로 장면"]);
+  });
+});
