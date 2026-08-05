@@ -1056,6 +1056,13 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             raise ValueError(
                 f"orientation must be one of {sorted(self._ORIENTATION_OUTPUT_SIZES)} or None, got {orientation!r}"
             )
+        # Owner decision (2026-08-06, F-9): default to landscape, matching
+        # CapCut/Premiere Pro. F-9 found every project had been rendering
+        # vertical because CompositionPlan's own fallback constant is
+        # vertical and nothing here ever set an explicit output. Resolving
+        # the default here keeps the timeline record self-describing instead
+        # of relying on that fallback silently kicking in.
+        resolved_orientation = orientation or "landscape"
         analysis = self._load_segment_analysis_from_job(
             project_id=project_id,
             segment_analysis_job_id=segment_analysis_job_id,
@@ -1143,8 +1150,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 "recommendation_job_ids": recommendation_job_ids,
             },
         }
-        if orientation is not None:
-            timeline_payload["output"] = dict(self._ORIENTATION_OUTPUT_SIZES[orientation])
+        timeline_payload["output"] = dict(self._ORIENTATION_OUTPUT_SIZES[resolved_orientation])
         persisted = self.store.save_timeline_run(
             project_id=project_id,
             output_mode=timeline.output_mode,

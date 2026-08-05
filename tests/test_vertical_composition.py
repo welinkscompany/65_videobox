@@ -47,13 +47,18 @@ def test_vertical_orientation_sets_a_9x16_output_on_the_timeline(tmp_path):
     assert (plan.width, plan.height) == (1080, 1920)
 
 
-def test_unspecified_orientation_leaves_the_timeline_output_unset(tmp_path):
-    """Locks in today's status quo: without an explicit choice, build_timeline
-    does not set an output size at all, so CompositionPlan.from_timeline falls
-    back to its own default. This test exists so that default is a deliberate,
-    visible fact rather than something that silently drifts."""
+def test_unspecified_orientation_defaults_to_landscape(tmp_path):
+    """Owner decision (2026-08-06, F-9): ordinary long-form projects should
+    default to landscape, matching CapCut/Premiere Pro. F-9 found that every
+    project rendered vertical (1080x1920) because nothing ever set an
+    explicit output and CompositionPlan's own fallback constant is vertical.
+    build_timeline now resolves an explicit landscape output whenever the
+    caller doesn't choose, instead of silently falling through to that
+    fallback -- the timeline record is self-describing either way."""
     timeline = _built_timeline(tmp_path, orientation=None)
-    assert "output" not in timeline
+    assert timeline["output"] == {"width": 1920, "height": 1080}
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+    assert (plan.width, plan.height) == (1920, 1080)
 
 
 def test_invalid_orientation_is_rejected(tmp_path):
