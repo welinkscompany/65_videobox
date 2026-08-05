@@ -471,6 +471,27 @@ describe("AppRouter URL ownership", () => {
     expect(listProjects).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the workspace shell when a project has no draft yet", async () => {
+    // CanonicalEditorEntry used to render a bare <main> with no sidebar, no
+    // header, and no way back -- a dead end for a project that has not made
+    // its first draft.
+    const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
+    vi.spyOn(api, "listProjects").mockResolvedValue([project]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editor"] }));
+
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByText("먼저 영상 초안을 만들어 주세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "홈" })).toBeVisible();
+    const createButtons = screen.getAllByRole("button", { name: "새 영상 만들기" });
+    expect(createButtons.length).toBeGreaterThan(0);
+
+    fireEvent.click(createButtons[0]);
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_a/create"));
+  });
+
   it("preserves the create leaf when a project switch navigates to another project", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },

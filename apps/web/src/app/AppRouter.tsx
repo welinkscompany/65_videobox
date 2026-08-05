@@ -261,7 +261,9 @@ function WorkspacePage() {
     </ProductShell>;
   }
   if (section === "editor" && !requestedEditingSessionId) {
-    return <CanonicalEditorEntry projectId={projectId} />;
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} forceCollapsed>
+      <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
+    </ProductShell>;
   }
   if (section === "editor") {
     return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} forceCollapsed>
@@ -283,15 +285,17 @@ function resolveSafeCreationReturn(projectId: string, requestedReturn: string | 
   }
 }
 
-function CanonicalEditorEntry({ projectId }: { projectId: string }) {
+function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; onNavigate: (projectId: string, section: WorkspaceSection) => void }) {
   const navigate = useNavigate();
   const [message, setMessage] = useState("편집할 초안을 불러오는 중이에요.");
+  const [hasNoDraft, setHasNoDraft] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void api.getLatestEditingSession(projectId).then((session) => {
       if (cancelled) return;
       if (!session) {
         setMessage("먼저 영상 초안을 만들어 주세요.");
+        setHasNoDraft(true);
         return;
       }
       void navigate({
@@ -305,7 +309,10 @@ function CanonicalEditorEntry({ projectId }: { projectId: string }) {
     });
     return () => { cancelled = true; };
   }, [navigate, projectId]);
-  return <main aria-live="polite"><p>{message}</p></main>;
+  return <div aria-live="polite">
+    <p>{message}</p>
+    {hasNoDraft ? <Button type="button" onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button> : null}
+  </div>;
 }
 
 function SettingsRoutePage() {
