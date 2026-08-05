@@ -5,8 +5,14 @@
 > 각 Task는 `implementation-plan.ko.md` §8.1 재사용 게이트를 먼저 통과하고,
 > §10.2 TDD를 기본으로 하며, §8.3 완료 보고 항목을 남긴다.
 
-**Goal:** 문서가 주장하는 "Task 23 4/4 100%"와 owner가 실제로 쓸 수 있는 상태 사이의 간극을 닫는다.
-새 기능을 늘리지 않고, 이미 만들어졌으나 연결되지 않았거나 가짜로 동작하는 경로를 실제 동작으로 바꾼다.
+**Goal:** owner가 실제로 쓸 수 있는 제품을 만든다. 최종 상태는 아래 셋을 모두 만족한다.
+
+1. 실제 음성·영상으로 자동 초안이 만들어지고, 사람이 보고 고칠 수 있다
+2. 대시보드가 깔끔하고 직관적이어서 설명 없이 쓸 수 있다
+3. 유진이 로컬 LLM으로 대화하며, provider 어댑터로 GPT-5.4 / 5.4-mini 전환이 쉽다
+
+1번은 이미 만들어졌으나 꺼져 있거나 가짜로 동작하는 경로를 실제 동작으로 바꾸는 일이다.
+2번과 3번은 현재 계획서 조항과 충돌하므로 **owner 승인으로 조항을 먼저 바꿔야** 착수할 수 있다.
 
 **Architecture:** 진실 확정 → 즉시 체감 개선 → 문서 정합 → 잔여 결함 순으로 진행한다.
 런타임 실측을 먼저 하는 이유는 코드와 최상위 계획서(`implementation-plan.ko.md` §23)가
@@ -127,6 +133,10 @@ Commit: `fix: enable the CapCut draft exporter in the container`
 | `local_xtts` | 모델 다운로드 약 2GB, Coqui 라이선스 동의 |
 | `elevenlabs` | API key와 owner 동의된 voice ID. 외부 전송 발생 |
 | `gtts` | 본인 목소리가 아님. 음성 클로닝 용도로 부적합 |
+
+**owner 결정 (2026-08-05): TTS는 보류한다.** 음성 인식과 CapCut 내보내기를 먼저 켜고
+실제 동작을 확인한 뒤 별도로 정한다. 한 번에 여러 개를 켜면 실패 원인 구분이 어렵다.
+따라서 Step 7은 이번 Slice에서 실행하지 않고 열어둔다.
 
 `product-plan.ko.md` §6.4와 `architecture-plan.ko.md` §13.7이
 "TTS는 자동 전면 대체가 아니라 review 기반으로만 적용"을 요구하므로 그 경계를 유지한다.
@@ -259,6 +269,97 @@ API와 UI 모두 없다. 데이터 보존 정책과 확인 절차를 함께 설�
 
 ---
 
+---
+
+## Slice 4 — 대시보드 완성도 (선행: 승인 조항 개정)
+
+owner 요구: "어설픈 기능 말고 깔끔한 디자인으로 직관적이고 쉽게".
+
+**선행 조건 — 승인 게이트:** 승인된 시각 결정이 두 건 있다.
+
+- `docs/decisions/creator-workspace-visual-approval.ko.md` (2026-07-17, 팔레트)
+- `docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md` (2026-07-22, 편집 작업판 5개 viewport)
+
+두 문서 모두 artifact aggregate SHA 변경 시 재승인을 요구하며
+`scripts/build_ui_prototype_artifacts.py --require-approved`가 이를 검증한다.
+따라서 디자인을 바꾸려면 **프로토타입 재생성 → 새 SHA → owner 재승인 기록**이 선행이다.
+
+### Task 10: 시각 방향 재승인
+
+- [ ] **Step 1:** 현재 화면의 실제 문제를 목록화한다. 취향이 아니라 사용성 근거로 적는다
+- [ ] **Step 2:** 새 방향 프로토타입을 5개 viewport로 생성한다
+- [ ] **Step 3:** owner 검토와 명시 승인을 `docs/decisions/`에 기록한다
+- [ ] **Step 4:** `--require-approved` 검증 통과 확인
+
+### Task 11: 승인된 방향을 구현에 반영
+
+- [ ] `F-6` 하드코딩 색상 19종을 CSS 변수로 일원화한다. 이걸 해야 테마 변경이 실제로 먹는다
+- [ ] 승인된 팔레트를 변수에 반영하고 대비(4.5:1) 회귀 테스트를 추가한다
+- [ ] `F-7` 중복 진입점을 정리한다
+
+---
+
+## Slice 5 — 유진 대화와 provider 전환 (선행: 조항 개정)
+
+owner 요구: "로컬 LLM 물려서 동작하게, 어댑터로 GPT-5.4 / 5.4-mini 전환 쉽게".
+
+**선행 조건 — 조항 충돌:** `implementation-plan.ko.md` §23.3A.4가 명시한다.
+
+> 유진의 자유 대화·콘셉트/대본 창작·권한/승인 판단·tool selection을 Qwen으로 대체하지 않는다.
+
+로컬 LLM의 허용 범위는 현재 "대화 압축·명시된 정형 요약"뿐이고,
+자유 대화는 `disabled`다. §23.3A.5는 qualification 전까지 `shadow_only` 유지를 요구한다.
+
+또한 §23.1은 egress allowlist gateway 통과 전 `hermes model` 실행을 금지하고,
+§23.2.6은 capability signer가 어떤 route에도 배포되지 않았다고 기록한다.
+
+**따라서 이 Slice는 §23 개정이 선행되어야 한다.** owner가 승인권자이므로 개정할 수 있으나,
+개정 없이 구현하면 최상위 계획서 위반이다.
+
+### Task 12: §23 조항 개정과 새 경계 확정
+
+- [ ] **Step 1:** 로컬 LLM 자유 대화를 허용하되 유지할 안전 경계를 정한다
+      (DB·파일시스템·shell·렌더러·credential 접근 금지, 편집 mutation은 승인 게이트 유지)
+- [ ] **Step 2:** §23.3A.4·§23.3A.5를 개정하고 개정 근거를 `docs/decisions/`에 기록한다
+- [ ] **Step 3:** 로컬 전용 경로이므로 §23.1 egress gate와의 관계를 명시한다.
+      로컬 LLM은 외부 전송이 없으므로 egress gate 대상이 아님을 문서로 고정한다
+
+### Task 13: 로컬 LLM으로 유진 대화 실제 동작
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `LocalOpenAICompatibleRuntimeConfig` | `adopt as-is` | 이미 `enabled=True`이고 LM Studio 연동 코드가 있다 |
+| `packages/provider-interfaces/.../lm_studio.py` | `adopt as-is` | 기존 클라이언트를 쓴다 |
+| `yujin_profile_contract`, `agent_gateway_contract` | `adopt as-is` | 프로필·정책 계약을 유지한다 |
+| Hermes 컨테이너 OAuth 경로 | `exclude` | 이 Task는 로컬 전용이다. OAuth는 Task 14 |
+
+- [ ] **Step 1: 실패 테스트** — 유진 대화 요청이 로컬 LLM 응답으로 채워지는지, 정책 위반 요청은 `blocked`인지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — 컨테이너에서 호스트 LM Studio(`127.0.0.1:1234`)로 가는 경로를 연다.
+      `architecture-plan` §11이 GPU 로컬 모델 컨테이너화를 비권장하므로,
+      모델은 호스트에 두고 컨테이너가 호출만 하는 구조를 유지한다
+- [ ] **Step 4: GREEN + 실제 대화 확인 + 커밋**
+
+Commit: `feat: run the assistant on the local model`
+
+### Task 14: provider 어댑터와 전환
+
+- [ ] **Step 1: 실패 테스트** — 설정으로 provider를 바꾸면 실제 호출 대상이 바뀌고,
+      전환 이력이 기록되며, 미설정 provider 선택은 `blocked`로 끝나는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — 로컬 / GPT-5.4 / GPT-5.4-mini를 같은 인터페이스 뒤에 둔다.
+      §23.3A.3의 "조용히 대체하지 않는다"를 지켜, 전환은 항상 명시적이고 기록된다
+- [ ] **Step 4: GREEN + 커밋**
+
+Commit: `feat: switch assistant providers through one adapter`
+
+GPT 경로 실제 사용은 §23.1 egress gate와 OAuth 로그인이 선행이다.
+어댑터 구현과 실제 GPT 호출은 별개이며, 이 Task는 어댑터까지만 닫는다.
+
+---
+
 ## 이 계획서의 갱신 규칙
 
 이 계획서는 확정본이 아니라 **실측에 따라 갱신되는 문서**다.
@@ -289,11 +390,12 @@ API와 UI 모두 없다. 데이터 보존 정책과 확인 절차를 함께 설�
 
 | 항목 | 필요한 선행 조건 |
 |---|---|
-| `D-1` 오렌지 팔레트 | 승인된 팔레트 2건이 있다. 프로토타입 재생성 → 새 SHA → owner 재승인 |
-| `D-2` 미디어 분석 worker | `§10.14` 네트워크 경계 결정. `architecture-plan` §11이 GPU 로컬 모델 컨테이너화를 비권장 |
-| `D-4` Hermes 대화 편집 | Task 2 실측으로 코드·계획서 불일치를 먼저 확정 |
+| `D-2` 미디어 분석 worker | `§10.14` 네트워크 경계 결정. Task 13에서 컨테이너→호스트 LM Studio 경로를 열면 함께 해결될 수 있다 |
 | `S-3` 대본 생성 | `implementation-plan` §23.3이 제품 범위 밖으로 차단 중. 조항 개정이 선행 |
-| `F-6` 테마 하드코딩 | `D-1`과 함께 처리 |
+| TTS 활성화 | owner가 2026-08-05에 보류 결정. 음성 인식 확인 후 재논의 |
+
+`D-1` 팔레트와 `F-6` 하드코딩은 Slice 4로, `D-4` Hermes는 Slice 5로 각각 편입했다.
+둘 다 owner 요구가 명확해졌으므로 "넣지 않은 것"에서 계획 본문으로 옮겼다.
 
 ## 완료 기준
 
@@ -304,7 +406,13 @@ API와 UI 모두 없다. 데이터 보존 정책과 확인 절차를 함께 설�
 3. 편집기에서 영상을 썸네일로 보고 고를 수 있다
 4. 초안 없는 프로젝트에서도 편집 진입이 막히지 않는다
 5. `implementation-plan` §23이 실측 상태와 일치한다
-6. 전체 Python·frontend 회귀와 production build가 통과한다
+6. 대시보드 시각 방향이 재승인되고 하드코딩 색상이 변수로 일원화됐다
+7. 유진이 로컬 LLM으로 실제 대화하고, provider 어댑터로 전환이 가능하다
+8. 전체 Python·frontend 회귀와 production build가 통과한다
+
+**최종 인수 기준:** owner가 설명 없이 대시보드를 열어 대본을 넣고,
+자동 초안을 받고, 썸네일로 자산을 고르고, 유진과 대화하며 고친 뒤 내보낼 수 있다.
+이 흐름 중 어디서도 막히지 않아야 한다.
 
 사람의 시각·청취·취향 판정, 저작권·게시 승인, CapCut Desktop 실제 편집·export는
 이 계획의 완료 기준에 포함하지 않는다. 계속 별도 human gate다.
