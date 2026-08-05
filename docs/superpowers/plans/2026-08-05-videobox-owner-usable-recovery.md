@@ -401,7 +401,7 @@ Run: `.venv\Scripts\python.exe -m pytest tests/test_project_archive.py -q`
 
 Commit: `feat: let the owner put a project away`
 
-### Task 9: 중복 진입점 정리 (F-7)
+### Task 9: 중복 진입점 정리 (F-7) — **완료 (2026-08-06)**
 
 `새 영상 만들기`가 사이드바(`ProductShell.tsx:41`), 헤더 버튼(`ProductShell.tsx:56`),
 그리고 홈 화면 카드에 동시에 있다. 같은 동작이 세 번 보인다.
@@ -410,11 +410,16 @@ Commit: `feat: let the owner put a project away`
 - Modify: `apps/web/src/app/ProductShell.tsx`
 - Modify: `apps/web/src/app/ProductShell.test.tsx`
 
-- [ ] **Step 1: 실패 테스트** — 같은 화면에서 동일 동작 진입점이 중복 노출되지 않는지
-- [ ] **Step 2: RED 확인**
-- [ ] **Step 3: 구현** — 사이드바 항목을 주 진입점으로 두고, 헤더 버튼은
-      해당 화면이 아닐 때만 보이게 하거나 제거한다. 홈 카드는 맥락 안내로 유지한다
-- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+- [x] **Step 1: 실패 테스트** — 홈이 아닌 화면(`/media`)에서 `새 영상 만들기` 버튼이
+      정확히 1개만 있는지
+- [x] **Step 2: RED 확인** — 2개 발견(사이드바 + 헤더)
+- [x] **Step 3: 구현** — 헤더의 `새 영상 만들기` 버튼을 제거했다. 사이드바 항목이
+      어느 화면에서나 보이는 유일한 주 진입점으로 남는다. 홈 화면 자체의
+      맥락 문구 + 버튼("다음 장면을 이어서 만들어 볼까요?")은 계획서가 명시한
+      예외라 그대로 유지했다
+- [x] **Step 4: GREEN(8/8, 프론트 전체 762/762, tsc clean) + 브라우저 실측 + 커밋** —
+      실제 실행 중인 앱에서 `document.querySelectorAll('button')`으로 직접 확인:
+      `/media` 화면에 `새 영상 만들기` 버튼이 정확히 1개(사이드바)만 남았다
 
 Commit: `refactor: keep one way into video creation`
 
