@@ -551,6 +551,7 @@ export type PartialRegenerationJob = {
 export type BuildTimelineRequest = {
   segment_analysis_job_id: string;
   recommendation_job_ids: string[];
+  orientation?: "landscape" | "vertical";
 };
 
 export type OutputJobRequest = {

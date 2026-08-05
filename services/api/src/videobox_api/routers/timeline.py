@@ -18,6 +18,7 @@ def build_timeline_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 project_id=project_id,
                 segment_analysis_job_id=payload.segment_analysis_job_id,
                 recommendation_job_ids=payload.recommendation_job_ids,
+                orientation=payload.orientation,
             )
         except Exception as exc:
             raise _http_error(exc) from exc

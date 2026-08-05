@@ -533,6 +533,7 @@ class StartRecommendationRequest(BaseModel):
 class BuildTimelineRequest(BaseModel):
     segment_analysis_job_id: str = Field(min_length=1)
     recommendation_job_ids: list[str] = Field(default_factory=list)
+    orientation: Literal["landscape", "vertical"] | None = None
 
 
 class OutputJobRequest(BaseModel):

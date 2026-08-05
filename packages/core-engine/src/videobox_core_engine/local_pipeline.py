@@ -1039,13 +1039,23 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         )
         return {"job_id": job["job_id"], "status": job["status"], "recommendations": run["recommendations"]}
 
+    _ORIENTATION_OUTPUT_SIZES = {
+        "landscape": {"width": 1920, "height": 1080},
+        "vertical": {"width": 1080, "height": 1920},
+    }
+
     def build_timeline(
         self,
         *,
         project_id: str,
         segment_analysis_job_id: str,
         recommendation_job_ids: list[str],
+        orientation: str | None = None,
     ) -> dict[str, Any]:
+        if orientation is not None and orientation not in self._ORIENTATION_OUTPUT_SIZES:
+            raise ValueError(
+                f"orientation must be one of {sorted(self._ORIENTATION_OUTPUT_SIZES)} or None, got {orientation!r}"
+            )
         analysis = self._load_segment_analysis_from_job(
             project_id=project_id,
             segment_analysis_job_id=segment_analysis_job_id,
@@ -1133,6 +1143,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 "recommendation_job_ids": recommendation_job_ids,
             },
         }
+        if orientation is not None:
+            timeline_payload["output"] = dict(self._ORIENTATION_OUTPUT_SIZES[orientation])
         persisted = self.store.save_timeline_run(
             project_id=project_id,
             output_mode=timeline.output_mode,

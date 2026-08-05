@@ -432,11 +432,13 @@ class ApiOrchestrator:
         project_id: str,
         segment_analysis_job_id: str,
         recommendation_job_ids: list[str],
+        orientation: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.build_timeline(
             project_id=project_id,
             segment_analysis_job_id=segment_analysis_job_id,
             recommendation_job_ids=recommendation_job_ids,
+            orientation=orientation,
         )
 
     def get_timeline_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
