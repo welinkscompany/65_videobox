@@ -39,6 +39,27 @@ class _FakePyCapCutExporter:
         return draft_path
 
 
+class _FakePyCapCutExporterThatLeaksAnOpenHandle:
+    """Reproduces the real bug found via verify_owner_path.py against the
+    owner's footage: pycapcut's own script.save() does not close a file it
+    opened inside drafts_root. On POSIX that is harmless -- you can delete an
+    open file. On Windows it is not: tempfile.TemporaryDirectory's cleanup on
+    `with` exit fails with PermissionError trying to remove a directory that
+    still contains an open handle, which used to mark an otherwise-successful
+    export job as FAILED."""
+
+    def __init__(self) -> None:
+        self._open_handles: list[Any] = []
+
+    def export_timeline(self, *, project_id: str, timeline: dict[str, Any], drafts_root: Path, draft_name: str, subtitle_file_path: Path | None = None, editing_session: dict[str, Any] | None = None) -> Path:
+        draft_path = drafts_root / draft_name
+        draft_path.mkdir(parents=True, exist_ok=True)
+        (draft_path / "draft_content.json").write_text("{}", encoding="utf-8")
+        # Deliberately leaked: no close(), matching the third-party behavior.
+        self._open_handles.append(open(draft_path / "still-open.tmp", "wb"))
+        return draft_path
+
+
 def _build_approved_timeline_job(
     store: LocalProjectStore,
     runner: LocalPipelineRunner,
@@ -133,6 +154,25 @@ def test_start_capcut_draft_export_persists_export_and_updates_job(tmp_path: Pat
     assert fetched["export"]["file_uri"].startswith(
         f"local://projects/{project.project_id}/exports/capcut_draft/"
     )
+
+
+def test_start_capcut_draft_export_succeeds_even_when_temp_cleanup_cannot_remove_a_locked_file(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Draft Export Locked Temp Project")
+    fake_exporter = _FakePyCapCutExporterThatLeaksAnOpenHandle()
+    runner = LocalPipelineRunner(store, pycapcut_exporter=fake_exporter)
+    timeline_job_id = _build_approved_timeline_job(store, runner, project.project_id)
+
+    try:
+        result = runner.start_capcut_draft_export(project_id=project.project_id, timeline_job_id=timeline_job_id)
+    finally:
+        for handle in fake_exporter._open_handles:
+            handle.close()
+
+    assert result["status"] == "succeeded"
+    fetched = runner.get_capcut_draft_export_result(project_id=project.project_id, job_id=result["job_id"])
+    assert fetched["status"] == "succeeded"
+    assert fetched["export"]["export_type"] == "capcut_draft_export"
 
 
 def test_capcut_entrypoint_blocks_stale_review_and_subtitle_until_regenerated(tmp_path: Path) -> None:
