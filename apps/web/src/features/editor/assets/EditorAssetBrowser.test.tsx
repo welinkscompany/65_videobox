@@ -149,3 +149,40 @@ describe("EditorAssetBrowser", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
   });
 });
+
+describe("orientation on the asset browser", () => {
+  const card = (id: string, title: string, orientation: "가로" | "세로") => ({
+    id,
+    kind: "broll" as const,
+    assetId: id,
+    label: "영상 B-roll",
+    title,
+    durationLabel: "12초",
+    status: "준비됨 · 검토 불필요",
+    audioPresence: "오디오 없음" as const,
+    orientation,
+    license: "프로젝트 로컬 B-roll",
+    canApply: true,
+    previewUrl: "/x",
+    sourceMetadata: { tags: [], source: "", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+  });
+
+  const cards = [card("wide", "가로 장면", "가로"), card("tall", "세로 장면", "세로")];
+
+  it("shows which way a clip was shot", () => {
+    render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={() => {}} onApply={() => {}} />);
+
+    expect(screen.getByText(/가로 장면/)).toBeVisible();
+    expect(screen.getAllByText("가로").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("세로").length).toBeGreaterThan(0);
+  });
+
+  it("narrows the list to vertical footage for shortform", () => {
+    render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={() => {}} onApply={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "세로 필터" }));
+
+    expect(screen.getByText("세로 장면")).toBeVisible();
+    expect(screen.queryByText("가로 장면")).toBeNull();
+  });
+});

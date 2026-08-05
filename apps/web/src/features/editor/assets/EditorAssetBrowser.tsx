@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
-import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind } from "./editorAssetProjection";
+import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind, type EditorAssetOrientation } from "./editorAssetProjection";
 
 type EditorAssetTarget = Readonly<{
   segmentId: string;
@@ -29,6 +29,12 @@ const filters: readonly Readonly<{ type: "all" | EditorAssetKind; label: string 
   { type: "sfx", label: "SFX" },
 ];
 
+const orientationFilters: readonly { value: "all" | EditorAssetOrientation; label: string }[] = [
+  { value: "all", label: "모든 방향" },
+  { value: "가로", label: "가로" },
+  { value: "세로", label: "세로" },
+];
+
 function targetLabel(target: EditorAssetTarget | null): string {
   return target
     ? `적용 구간: ${target.startSec.toFixed(2)}–${target.endSec.toFixed(2)}초`
@@ -38,7 +44,8 @@ function targetLabel(target: EditorAssetTarget | null): string {
 export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, previewStates = {}, onRefreshExactPreview }: Props) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
-  const visibleCards = filterEditorAssets(cards, { type, query });
+  const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
+  const visibleCards = filterEditorAssets(cards, { type, query, orientation });
 
   return <section className="vb-editor-assets" aria-label="편집기 자산">
     <div className="vb-editor-assets__controls">
@@ -49,6 +56,9 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
       <div className="vb-editor-assets__filters" role="group" aria-label="자산 유형 필터">
         {filters.map((filter) => <Button key={filter.type} className="vb-editor-assets__filter" type="button" aria-pressed={type === filter.type} onClick={() => setType(filter.type)}>{filter.label} 필터</Button>)}
       </div>
+      <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향 필터">
+        {orientationFilters.map((filter) => <Button key={filter.value} className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label} 필터</Button>)}
+      </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
     <div className="vb-editor-assets__cards">
@@ -57,7 +67,10 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         const previewState = previewStates[card.id];
         return <article key={card.id} className="vb-editor-assets__card">
           <h3 className="vb-editor-assets__title">{card.title}</h3>
-          <p className="vb-editor-assets__summary">{card.label} · {card.durationLabel}</p>
+          <p className="vb-editor-assets__summary">
+            {card.label} · {card.durationLabel}
+            {card.orientation ? <> · <span className="vb-editor-assets__orientation">{card.orientation}</span></> : null}
+          </p>
           <p className="vb-editor-assets__detail">{card.status}</p>
           <p className="vb-editor-assets__detail">{card.audioPresence}</p>
           <p className="vb-editor-assets__detail">{card.license}</p>
