@@ -24,10 +24,76 @@
 | `development-status-2026-06-29.ko.md` §322 | 완료 |
 | `product-plan.ko.md` | 완료 |
 | `architecture-plan.ko.md` | 완료 |
+| SSOT 소유권 구조 (`§1.1`) | 완료 |
+| 개발 환경 인벤토리 (`§1.2`) | 완료 |
+| 백엔드 API 라우터·엔드포인트 규모 | 완료 |
+| core-engine 도메인 모듈 목록 | 완료 |
+| 썸네일·미디어 probe 경로 | 완료 |
 | `oss-adoption-map.ko.md` | **미완료** |
 | `docs/superpowers/plans` 43건 / `specs` 27건 | **미완료** (필요 시 해당 Task만 열람) |
-| Hermes 관련 설계·계약 | **미완료** |
-| 백엔드 API 계약 전반 | **미완료** |
+| Hermes 관련 설계·계약 (`F-8` 선행) | **미완료** |
+
+---
+
+## 1.1 SSOT 구조 지도
+
+어떤 문서가 무엇의 authoritative 근거인지 정리한다. 충돌 시 아래 소유권을 기준으로 판단한다.
+
+| 소유 대상 | authoritative 근거 |
+|---|---|
+| 최상위 개발 지침 진입점 | `CLAUDE.md` |
+| 개발 운영 규정 본문 | `docs/development-fast-path.ko.md` `## 10` |
+| 제품 정체성·범위·하지 않을 것 | `docs/product-plan.ko.md` |
+| 기술 경계·계층·데이터 모델 | `docs/architecture-plan.ko.md` |
+| 구현 계획·마일스톤·Task 진행률 | `docs/implementation-plan.ko.md` (상단 블록이 최신 closeout) |
+| 현재 상태·검증 근거 | `docs/development-status-2026-06-29.ko.md` (현재 `§322`) |
+| 시각·디자인 승인 게이트 | `docs/decisions/` |
+| Task별 설계 | `docs/superpowers/specs/` (27건) |
+| Task별 구현 계획 | `docs/superpowers/plans/` (43건) |
+| 세션 인계·closeout | `docs/handoffs/` |
+| OSS 출처·라이선스 lock | `docs/oss/`, `THIRD_PARTY_NOTICES.md` |
+
+런타임 SSOT는 문서가 아니라 코드·데이터에 있다.
+
+- 편집 의사결정 기준: **timeline JSON** (`architecture-plan.ko.md` §2.2)
+- 편집 상태 권한: editing-session revision
+- 출력 권한: FFmpeg / PyCapCut output과 output-source verifier
+- CapCut은 내부 포맷이 아니라 **export 대상**이다 (§10)
+- Mem0는 Hermes 보조 기억일 뿐 VideoBox SSOT가 아니다
+
+주의: `implementation-plan.ko.md` 상단과 `development-status` 최신 섹션이 진행률·상태의
+current 근거이며, 문서 본문 하단의 오래된 수치(예: `9/22`)는 historical record다.
+
+---
+
+## 1.2 개발 환경 인벤토리
+
+| 항목 | 실측 |
+|---|---|
+| Python | 3.12.10 (`.venv/Scripts/python.exe`), 테스트 3008개 수집 |
+| Node / npm | v24.16.0 / 11.13.0 (pnpm은 전역 미설치, `node_modules/.pnpm` 사용) |
+| 백엔드 테스트 | `tests/` 144개 파일 |
+| 프론트엔드 테스트 | 52개 파일 / 734 passed |
+| E2E | `apps/web/e2e/` Playwright spec 7개 (`.mjs`), 격리 실행 러너 2개 |
+| 컨테이너 | `65_videobox-videobox-workspace-1` (127.0.0.1:5173), `-postgres-1`, Hermes dashboard (9119) |
+| 데이터 root | `D:/AI_Workspace_louis_office_50/20_project/65_videobox-container-data-v2` (`runtime/` + `snapshot/`) |
+| 전역 미디어 라이브러리 | `20_project/videobox-user-library/media_library.sqlite` |
+| 개발 서버 정의 | `.claude/launch.json` (web 5199, api 8000) |
+| owner 진입점 | `scripts/owner-ready.ps1` (Check/Start/Smoke/Open/OpenCapCut) |
+| 검증 스크립트 | `scripts/` 37개 (verifier·smoke·provenance 다수) |
+
+백엔드 API는 라우터 18개, 엔드포인트 약 170개다. 규모 상위는
+`editing_session` 38, `assets` 20, `outputs` 17, `director_proposals` 14,
+`draft_readiness` 11, `creation_briefs` 11, `media_library` 10이다.
+
+`packages/core-engine`에는 도메인 모듈 60여 개가 있다. 조사 중 확인한 주요 모듈은
+`media_ranking`(추천 점수), `media_probe`(길이·프레임), `thumbnail_generator`,
+`script_scene_planner`·`script_draft_session`(대본 분할), `timeline_builder`,
+`exact_preview`, `ffmpeg_final_renderer`, `capcut_handoff`,
+`project_asset_materializer`(라이브러리→프로젝트 복사)다.
+
+`script_draft_session`은 대본 **생성**이 아니라 문자 예산 기준 **분할**이다.
+대본 생성 기능은 여전히 코드에 존재하지 않는다 (`D-3` 참조).
 
 ---
 
@@ -162,12 +228,29 @@ LM Studio에 닿기 어려운 상태다. `D-2`의 난이도는 우연이 아니�
 - 근거: `<main aria-live="polite"><p>{message}</p></main>` 단독 렌더, ProductShell 미적용
 - 수정 방향: ProductShell 유지 + "초안 만들기"로 유도하는 액션 제공
 
-### F-2. 자산 카드에 썸네일·길이 없음 (높음) — **체감 개선 1순위**
+### F-2. 편집기 자산 카드가 썸네일을 렌더하지 않음 (높음) — **체감 개선 1순위, 난이도 낮음**
 
-- 편집기 좌측 자산 목록이 파일 이름만 보여준다. 썸네일도 길이도 없다.
-- 영상을 눈으로 보고 고를 수 없어서, 편집 도구로서 치명적이다.
-- 캡컷이 쉬운 이유는 기능 수가 아니라 시각적으로 고를 수 있기 때문이다.
-- `D-2` 해결 시 길이·대표 프레임을 함께 얻을 수 있으므로 연계 처리 검토.
+증상은 "편집기 좌측 자산 목록이 파일 이름만 보여준다"이다. 영상을 눈으로 고를 수 없다.
+
+조사 결과 **백엔드는 이미 완성돼 있다.** 빠진 것은 UI 연결 한 곳뿐이다.
+
+- `packages/core-engine/.../thumbnail_generator.py`의 `generate_video_thumbnail`이 존재한다.
+- `local_pipeline.py:496`이 B-roll 임포트 시 `_try_generate_broll_thumbnail`을 호출하고
+  `thumbnail_uri`를 metadata에 기록한다.
+- API 엔드포인트 `GET /api/projects/{project_id}/assets/{asset_id}/thumbnail`이 있다.
+- 프론트엔드 헬퍼 `api.assetThumbnailUrl`도 `apps/web/src/api.ts`에 있다.
+- 실제 썸네일 파일도 생성돼 있다.
+  `.../b-roll-smoke-test/derived/thumbnails/`에 jpg 4개 존재.
+
+**그런데 `api.assetThumbnailUrl`을 호출하는 프론트엔드 코드가 한 곳도 없다.**
+`apps/web/src/features/editor/assets/`에 `thumbnail` 문자열 자체가 없다.
+`local_pipeline.py:502` 주석도 "picker just falls back to a text label when no thumbnail exists"라고
+적혀 있어, 폴백만 살아 있고 정상 경로가 연결되지 않은 상태로 보인다.
+
+- 길이 역시 `media_probe.py`의 `probe()`가 `duration_sec`를 반환하므로 재료는 있다.
+  다만 자산 목록 응답에 실리는지는 별도 확인이 필요하다.
+- `D-2`(비전 분석)와 **무관하다.** 썸네일은 ffmpeg 프레임 추출이라 분석 worker 없이도 동작한다.
+- 수정 방향: 편집기 자산 카드에 `assetThumbnailUrl` 연결 + 썸네일 부재 시 기존 텍스트 폴백 유지.
 
 ### F-3. 타임라인에 내부 식별자 노출 (중간)
 
@@ -256,10 +339,16 @@ LM Studio에 닿기 어려운 상태다. `D-2`의 난이도는 우연이 아니�
 
 현재까지의 잠정 우선순위 판단은 아래와 같다. 조사 완료 후 확정한다.
 
-1. `D-2` 미디어 분석 worker — 하나로 자동 분류·의미 검색·재사용 분산이 동시 해결
-2. `F-2` 자산 썸네일·길이 — 체감 개선 최대, `D-2`와 연계 가능
-3. `F-1` 편집 데드엔드 — 사용 흐름을 막는 결함
-4. `F-4` 미리보기 자동 갱신
-5. `F-6` 테마 하드코딩 → `D-1` 팔레트 재승인
-6. `F-3`, `F-5`, `F-7`
-7. `F-8` 유진 대화 편집 — 별도 설계·승인
+| 순서 | 항목 | 근거 | 난이도 |
+|---|---|---|---|
+| 1 | `F-2` 자산 썸네일 연결 | 백엔드·API·헬퍼가 이미 완성. UI 연결만 빠짐. 체감 개선 최대 | 낮음 |
+| 2 | `F-1` 편집 데드엔드 | 사용 흐름 자체를 막는 결함 | 낮음 |
+| 3 | `D-2` 미디어 분석 worker | 자동 분류·의미 검색·재사용 분산이 한 번에 해결. `A-2` 때문에 설계 선행 | 높음 |
+| 4 | `F-4` 미리보기 자동 갱신 | 편집→확인 왕복 체감 | 중간 |
+| 5 | `F-6` 테마 하드코딩 → `D-1` 재승인 | `D-1`의 선행 조건 | 중간 |
+| 6 | `F-3`, `F-5`, `F-7` | 국소 결함 | 낮음 |
+| 7 | `F-8` 유진 대화 편집 | 별도 설계·승인 필요 | 높음 |
+
+`F-2`를 1순위로 올린 이유는 조사 중 난이도가 크게 낮아졌기 때문이다.
+초기에는 "썸네일 기능이 없다"고 봤으나, 실제로는 생성·저장·API·프론트 헬퍼가 모두 있고
+편집기 UI가 호출만 하지 않는 상태였다. 가장 적은 변경으로 가장 큰 체감 개선을 낸다.
