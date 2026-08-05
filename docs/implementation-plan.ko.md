@@ -1258,7 +1258,7 @@ Agent Gateway는 run ownership, context filtering, tool allowlist, idempotency, 
 6. `[ ] 미완료 (pending)`: 유진은 반복된 근거를 `skill candidate`로 제안할 수 있으나, 자기 prompt·권한·실행 코드를 자동 활성화/수정하지 않는다. candidate는 fixture replay, injection/security test, quality benchmark, deterministic policy check, 사람 review, immutable version activation을 모두 거쳐야 한다. activation 뒤에도 rollback/revoke owner와 manifest SHA를 ledger에 기록하며, candidate/failed skill은 production route에 영향을 주지 않는다.
 7. `[~] 진행 중 (in progress)`: `[x] 완료 (done)`: provider-neutral frozen evaluation core는 corpus/prompt-schema/renderer identity를 case에 고정하고, deep immutable sanitized fixture·strict object/schema allowlist·grounded claim·credential/path/tool/approval data rejection을 검사한다. 어떤 provider도 호출하거나 routing을 mutate하지 않으며, 통과해도 `shadow_only`이고 나머지는 `needs_human_review`다. `[x] 완료 (done, 2026-07-19)`: checked-in Korean shadow corpus는 external SHA-256 pin과 tamper 검증을 거치며, corpus/case/캡처 candidate를 재검증해 schema-valid·grounded·critical policy defect·사람 점수·correction time·95% CI report를 offline으로 기록한다. thresholds 통과도 항상 `needs_human_review`라 route activation 근거가 될 수 없다. `[x] 완료 (done, 2026-07-19)`: synthetic provider capture는 pinned corpus SHA·case/provider/runtime/model·candidate payload digest·opaque 사람 attestation을 함께 묶어 import하고, app-level append-only/tamper-evident hash-chain ledger와 write-once snapshot audit artifact로 보관한다. raw media/path·credential·tool·approval 데이터, capture/attestation replay, record/report 변조·순서 변경은 fail-closed하며, artifact는 이후 정상 append 뒤에도 당시 record snapshot으로 재검증된다. signing key나 external anchor는 아직 없으므로 OS/adversary-proof immutable이라고 주장하지 않으며, 어떤 report도 항상 `needs_human_review`이고 route activation 근거가 될 수 없다. `[ ] 미완료 (pending)`: frozen quality harness는 동일 prompt schema·fixed Korean corpus·sanitized VideoBox fixture·renderer version에서 GPT와 Qwen을 task별 실제 captured output으로 비교한다. schema-valid 98% 이상, grounded claim 95% 이상, critical policy defect 0, 사람 점수 Hermes 대비 -0.5/5 이내, correction time +10% 이내와 95% CI를 기록한다. 통과 전 Qwen은 shadow-only 또는 사람 review이며, 원본 raw media·경로·credential·mem0 원문을 cloud·local prompt에 넣지 않는다. 파생 frame 또는 sanitised approved tag는 해당 task policy와 benchmark가 적절한 gate를 통과한 경우에만 허용할 수 있으며, 일반 허용이 아니다.
 
-### 23.3B [ ] 미완료 (pending) — 로컬 우선 유진과 provider 어댑터 (2026-08-05 owner 개정)
+### 23.3B [~] 진행 중 (in progress) — 로컬 우선 유진과 provider 어댑터 (2026-08-05 owner 개정)
 
 owner 결정으로 유진의 1차 대화 route를 **로컬 LLM**으로 바꾼다.
 외부 provider는 어댑터 뒤에서 선택 가능한 대안이 되며, 기본값이 아니다.
@@ -1297,6 +1297,28 @@ owner 결정으로 유진의 1차 대화 route를 **로컬 LLM**으로 바꾼다
 
 이 절의 구현 계획은 `docs/superpowers/plans/2026-08-05-videobox-owner-usable-recovery.md`
 Slice 5(Task 12–14)에 있다.
+
+**실측 갱신 (2026-08-06, Task 5):** Task 13·14가 실제로 구현·검증됐다.
+
+- 로컬 대화 능력 자체는 완료했다. `yujin_local_conversation.py`가 정책 위반 의도(DB/파일/셸/
+  자격증명 접근, 대본·제목·썸네일·추천 영상 생성 요청)를 모델 호출 전에 결정적으로 차단하고,
+  일반 대화는 기존에 프로덕션에 이미 연결돼 있던 `LocalOnlyStructuredRuntime`/
+  `LocalQwenStructuredProvider`를 통해 실제 호스트 LM Studio에 요청한다. 실제 실행 중인
+  LM Studio로 실제 응답을 받는 것과 차단 동작 둘 다 확인했다
+- `yujin_provider_adapter.py`가 로컬/`gpt-5.4`/`gpt-5.4-mini`를 같은 인터페이스 뒤에 두고,
+  전환이 항상 명시적으로 기록되며(`switch_history`), 미구성 GPT provider는 로컬로 조용히
+  넘어가지 않고 `blocked`로 끝나는 것을 실제 LM Studio로 확인했다
+- **아직 안 된 것:** 이 로컬 경로가 실제 채팅 UI(`EditorWorkbenchRoute`의 유진 대화창)에는
+  연결되지 않았다. 그 UI는 지금 `HermesRunService`→`AgentGatewayClient`→(배포 안 된)
+  `videobox-agent-gateway`에만 물려 있어 실제로는 항상 "유진의 답을 받지 못했어요"로
+  끝난다. `HermesRunService`에 로컬 폴백을 추가할지, 별도 로컬 전용 엔드포인트를 만들지는
+  아직 결정하지 않았다 — capability-token/reservation 계약을 잘못 재구현할 위험 때문에
+  무인 세션 중 서둘러 정하지 않기로 했다
+- 컨테이너→호스트 네트워크 경로(`§10.14` 대상)도 아직 안 열었다. 지금 실제로 동작을
+  확인한 경로는 호스트 네이티브 dev 서버(`scripts/run_api.py`)뿐이다
+
+근거: `docs/superpowers/plans/2026-08-05-videobox-owner-usable-recovery.md` Task 13·14,
+커밋 `268f50f`(로컬 대화), `bdfc31f`(provider 어댑터).
 
 ### 23.4 [ ] 미완료 (pending) — read-only workflow와 승인 경계
 

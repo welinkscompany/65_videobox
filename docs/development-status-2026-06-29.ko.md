@@ -1,6 +1,16 @@
 # VideoBox 개발 상태 점검 2026-06-29
 
-> 현재 authoritative 상태는 `## 322. 2026-08-04 Task 23D 및 Task 23 최종 자동화 closeout`을 우선 적용한다. Task 23 production slice는 **4/4 (100.0%)**, 잔여 **0.0%**다. 이는 Task 9 사람 acceptance, 인증된 Hermes/Mem0 live, 저작권·게시 승인, 현재 CapCut Desktop 편집·export 완료를 뜻하지 않는다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23C 근거는 `## 321`, Task 23B는 `## 320`, Task 23A는 `## 319`, master planning은 `## 318`을 유지한다.
+> **2026-08-06부로 이 파일에 새 turn별 closeout 항목을 추가하지 않는다.** `CLAUDE.md`가
+> 최상위 지침이 되면서 `§10.9`가 turn 종료 보고를 "매 turn 고정 서식"에서 "내용 요건"으로
+> 바꿨고, 진행률도 매 turn 보고하지 않기로 했다(`§10.8`) — 이 파일의 322개 번호 매긴 항목은
+> 그 이전 Codex 세션 관례의 산물이다. **지금 authoritative한 진행 상태와 인계 기록은**
+> `docs/superpowers/plans/2026-08-05-videobox-owner-usable-recovery.md`(Task별 완료·검증 근거,
+> "진행 상태" 요약 섹션)와 `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md`
+> (결함·결정·아키텍처 발견 근거 등급)에 있다. 아래 322개 항목은 2026-08-04까지의 historical
+> record로만 유지한다 — 삭제하지 않지만 더 갱신하지도 않는다.
+>
+> 직전 authoritative 상태였던 `## 322. 2026-08-04 Task 23D 및 Task 23 최종 자동화 closeout`:
+> Task 23 production slice는 **4/4 (100.0%)**, 잔여 **0.0%**다. 이는 Task 9 사람 acceptance, 인증된 Hermes/Mem0 live, 저작권·게시 승인, 현재 CapCut Desktop 편집·export 완료를 뜻하지 않는다. 이전 `9/22 (40.9%)` 고정 누적은 2026-08-03 사용자 지시로 폐기했으며 과거 판단을 설명하는 historical record로만 남긴다. Task 23C 근거는 `## 321`, Task 23B는 `## 320`, Task 23A는 `## 319`, master planning은 `## 318`을 유지한다.
 
 ## 322. 2026-08-04 Task 23D 및 Task 23 최종 자동화 closeout
 
