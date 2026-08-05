@@ -186,3 +186,33 @@ describe("orientation on the asset browser", () => {
     expect(screen.queryByText("가로 장면")).toBeNull();
   });
 });
+
+describe("thumbnails in the asset browser", () => {
+  const base = {
+    kind: "broll" as const,
+    label: "영상 B-roll",
+    durationLabel: "12초",
+    status: "준비됨 · 검토 불필요",
+    audioPresence: "오디오 없음" as const,
+    license: "프로젝트 로컬 B-roll",
+    canApply: true,
+    previewUrl: "/x",
+    sourceMetadata: { tags: [], source: "", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+  };
+
+  it("shows the still so a clip can be picked by eye", () => {
+    const cards = [{ ...base, id: "a", assetId: "a", title: "카페 외부", thumbnailUrl: "/api/projects/p/assets/a/thumbnail" }];
+    render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={() => {}} onApply={() => {}} />);
+
+    const image = screen.getByRole("img", { name: "카페 외부 미리 이미지" });
+    expect(image).toHaveAttribute("src", "/api/projects/p/assets/a/thumbnail");
+  });
+
+  it("keeps the text label when a clip has no still", () => {
+    const cards = [{ ...base, id: "b", assetId: "b", title: "예전 자산" }];
+    render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={() => {}} onApply={() => {}} />);
+
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByText("예전 자산")).toBeVisible();
+  });
+});

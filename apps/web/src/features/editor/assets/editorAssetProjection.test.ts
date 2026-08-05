@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { api } from "../../../api";
 import { filterEditorAssets, projectEditorAssets } from "./editorAssetProjection";
 
 describe("editor asset projection", () => {
@@ -192,5 +193,37 @@ describe("intake facts on b-roll cards", () => {
     const vertical = filterEditorAssets(cards, { type: "all", query: "", orientation: "세로" });
 
     expect(vertical.map((card) => card.title)).toEqual(["세로 장면"]);
+  });
+});
+
+describe("thumbnails on b-roll cards", () => {
+  const broll = (metadata: Record<string, unknown>) => ({
+    asset_id: "thumb-1",
+    asset_type: "broll_video" as const,
+    storage_uri: "x",
+    created_at: "now",
+    metadata,
+  });
+
+  it("points the card at the stored thumbnail", () => {
+    const [card] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ title: "카페", thumbnail_uri: "local://projects/p/derived/thumbnails/thumb-1.jpg" })],
+      libraryAssets: [],
+    });
+
+    expect(card.thumbnailUrl).toBe(api.assetThumbnailUrl("p", "thumb-1"));
+  });
+
+  it("carries no thumbnail when intake produced none", () => {
+    // Older assets and unreadable media have no thumbnail; the card must fall
+    // back to its text label rather than request a 404.
+    const [card] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ title: "예전 자산" })],
+      libraryAssets: [],
+    });
+
+    expect(card.thumbnailUrl).toBeUndefined();
   });
 });

@@ -66,6 +66,14 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         const applyDisabled = target === null || isSaving || !card.canApply;
         const previewState = previewStates[card.id];
         return <article key={card.id} className="vb-editor-assets__card">
+          {card.thumbnailUrl ? (
+            <img
+              className="vb-editor-assets__thumb"
+              src={card.thumbnailUrl}
+              alt={`${card.title} 미리 이미지`}
+              loading="lazy"
+            />
+          ) : null}
           <h3 className="vb-editor-assets__title">{card.title}</h3>
           <p className="vb-editor-assets__summary">
             {card.label} · {card.durationLabel}

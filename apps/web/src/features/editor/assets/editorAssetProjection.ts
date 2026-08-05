@@ -27,6 +27,8 @@ export type EditorAssetCard = Readonly<{
   status: string;
   audioPresence: EditorAssetAudioPresence;
   orientation?: EditorAssetOrientation;
+  /** Absent when intake produced no still, so the card keeps its text fallback. */
+  thumbnailUrl?: string;
   license: string;
   canApply: boolean;
   previewUrl: string;
@@ -134,6 +136,9 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     status: brollStatus(metadata),
     audioPresence: brollAudioPresence(metadata),
     orientation: brollOrientation(metadata),
+    thumbnailUrl: typeof metadata.thumbnail_uri === "string" && metadata.thumbnail_uri.trim()
+      ? api.assetThumbnailUrl(projectId, asset.asset_id)
+      : undefined,
     license: "프로젝트 로컬 B-roll",
     canApply: true,
     previewUrl: api.assetContentUrl(projectId, asset.asset_id),

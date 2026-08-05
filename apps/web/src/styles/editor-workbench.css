@@ -45,3 +45,4 @@
 .vb-editor-assets__summary { font-size: 0.85rem; }
 .vb-editor-assets__actions { margin-top: 0.2rem; }
 @media (max-width: 480px) { .vb-editor-assets__actions > button { flex: 1 1 8rem; } }
+.vb-editor-assets__thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 0.45rem; background: var(--muted); display: block; margin-bottom: 0.35rem; }
