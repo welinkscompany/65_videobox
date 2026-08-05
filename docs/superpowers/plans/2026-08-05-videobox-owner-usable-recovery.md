@@ -376,7 +376,7 @@ Run: `npm --prefix apps/web test -- src/features/editor/timeline`
 
 Commit: `feat: name timeline clips in plain language`
 
-### Task 8: 프로젝트 삭제 경로 (F-5)
+### Task 8: 프로젝트 삭제 경로 (F-5) — **보관 경로만 완료, 화면 연결은 보류 (2026-08-06)**
 
 API와 UI 모두 없다. `local_project_store.py`에 삭제·보관 함수 자체가 없다.
 이번 세션에서 만든 `my-project`가 목록에 영구 잔존 중이다.
@@ -397,15 +397,31 @@ API와 UI 모두 없다. `local_project_store.py`에 삭제·보관 함수 자�
 - Modify: `apps/web/src/app/AppRouter.tsx`, `apps/web/src/api.ts`
 - Create: `tests/test_project_archive.py`
 
-- [ ] **Step 1: 실패 테스트** — 보관 처리 후 목록에서 빠지는지, 데이터가 남는지,
-      존재하지 않는 프로젝트 요청이 안전하게 실패하는지, 되돌리기가 되는지
-- [ ] **Step 2: RED 확인**
+**실측으로 알게 된 사실:** `ProjectStatus.ARCHIVED`는 `domain-models/projects.py`에 이미
+있었고 `projects` 테이블의 `status` 컬럼도 이미 그 값을 저장할 수 있었다. 다만 그 상태로
+바꾸는 코드도, 목록에서 걸러내는 코드도 어디에도 없었다 — 이번 세션에서 반복해서 나온
+"설계는 있는데 연결이 안 됨" 패턴과 똑같다.
 
-Run: `.venv\Scripts\python.exe -m pytest tests/test_project_archive.py -q`
-
-- [ ] **Step 3: 구현** — store에 보관 상태를 추가하고 라우터와 UI를 연결한다.
-      UI는 확인 단계를 거치며 `§10.13` 창작자 언어를 쓴다
-- [ ] **Step 4: GREEN + 전체 회귀 + 커밋**
+- [x] **Step 1: 실패 테스트** — `tests/test_project_archive.py`: 보관 처리 후 목록에서
+      빠지는지, `include_archived`로 보면 다시 보이는지, 데이터(DB 파일)가 그대로 남는지,
+      되돌리기가 되는지, 존재하지 않는 프로젝트 요청이 안전하게 실패하는지, 이미 보관된
+      프로젝트를 다시 보관해도 안전한지 — store 레벨 6개 + 실제 `create_app()` TestClient로
+      API 왕복 2개 (8개)
+- [x] **Step 2: RED 확인** — `AttributeError: 'LocalProjectStore' object has no attribute
+      'archive_project'`
+- [x] **Step 3: 구현** — `archive_project`/`restore_project`(상태 컬럼만 바꾼다.
+      프로젝트 폴더·DB는 절대 건드리지 않는다), `list_projects(include_archived=False)`.
+      `POST /api/projects/{id}/archive`·`.../restore`, `GET /api/projects?include_archived=`.
+      존재하지 않는 프로젝트는 `get_project`를 거치지 않고 DB 파일 존재 여부를 직접 확인해
+      `KeyError`(→404)로 안전하게 실패한다 — `get_project`로 확인하면 진짜 없는 프로젝트일 때
+      `sqlite3.OperationalError`가 그대로 새 나가는 것을 발견해 이 두 메서드에서만 고쳤다
+- [x] **Step 4: GREEN(8/8, 전체 회귀 3043 passed·0 failed) + 커밋** — **완전 삭제는
+      이번 범위에 넣지 않았다.** 계획서 권장(`§10.12.3` preserve-evidence 취지)대로
+      보관만 구현했다 — 되돌릴 수 있고 무인 세션에서도 안전한 기본값이다.
+      `api.ts`에 `archiveProject`/`restoreProject`를 추가했지만 **UI에는 아직 연결하지
+      않았다** — `ProductShell`(프로젝트 전환 UI)이 `AppRouter.tsx`의 10곳 이상에서
+      생성되는데, 여기에 새 콜백을 다 연결하고 카탈로그 새로고침까지 잇는 건 이 Task와
+      분리해서 별도로 할 만큼 크고 기계적인 작업이라 판단해 미뤘다
 
 Commit: `feat: let the owner put a project away`
 
