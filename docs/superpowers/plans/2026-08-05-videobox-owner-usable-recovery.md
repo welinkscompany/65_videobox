@@ -658,16 +658,30 @@ owner 요구: "로컬 LLM 물려서 동작하게, 어댑터로 GPT-5.4 / 5.4-min
 
 Commit: `feat: answer Yujin's conversation with the local model`
 
-### Task 14: provider 어댑터와 전환
+### Task 14: provider 어댑터와 전환 — **어댑터 완료, 화면 연결은 Task 13 결정에 종속 (2026-08-06)**
 
-- [ ] **Step 1: 실패 테스트** — 설정으로 provider를 바꾸면 실제 호출 대상이 바뀌고,
-      전환 이력이 기록되며, 미설정 provider 선택은 `blocked`로 끝나는지
-- [ ] **Step 2: RED 확인**
-- [ ] **Step 3: 구현** — 로컬 / GPT-5.4 / GPT-5.4-mini를 같은 인터페이스 뒤에 둔다.
-      §23.3A.3의 "조용히 대체하지 않는다"를 지켜, 전환은 항상 명시적이고 기록된다
-- [ ] **Step 4: GREEN + 커밋**
+- [x] **Step 1: 실패 테스트** — `tests/test_yujin_provider_adapter.py`: provider를 바꾸면
+      다음 응답이 실제로 그 provider로 가는지, 전환 이력이 매번 기록되는지, 미설정
+      provider(`gpt-5.4`/`gpt-5.4-mini`) 선택은 로컬로 조용히 안 넘어가고 `blocked`로
+      끝나는지, 알 수 없는 provider 이름은 거부되는지 (9개)
+- [x] **Step 2: RED 확인** — 모듈을 임시로 옮겨 `ModuleNotFoundError`를 확인한 뒤 복원했다
+- [x] **Step 3: 구현** — `YujinProviderAdapter`가 `local`/`gpt-5.4`/`gpt-5.4-mini`를
+      같은 인터페이스(`reply()`) 뒤에 둔다. `local`은 Task 13의
+      `YujinLocalConversationService`를 그대로 채택한다. GPT 두 provider는
+      **의도적으로 항상 `blocked`다** — §23.1 egress allowlist gate와 Hermes OAuth가
+      아직 없어서 실제로 나갈 수 있는 외부 HTTP 클라이언트 자체가 없다. "나중에 채울
+      플레이스홀더"가 아니라, 그 전제조건이 열리기 전에는 구조적으로 호출할 수 없게
+      만든 것이다. 전환(`switch_provider`)은 항상 명시적 호출로만 일어나고 매번
+      `switch_history`에 남는다 — §23.3A.3 "조용히 대체하지 않는다"
+- [x] **Step 4: GREEN(9/9, 전체 회귀 통과) + 실제 확인 + 커밋** — 실제 LM Studio로
+      구성한 `YujinLocalConversationService`를 어댑터에 연결해 확인했다: `local`에서
+      실제 응답을 받고, `gpt-5.4`로 전환하면 로컬 모델은 호출조차 되지 않고
+      `blocked`(`external_provider_egress_not_configured`)로 끝나며, 다시 `local`로
+      전환하면 실제 응답이 재개된다. 전환 이력도 정확히 기록됐다
 
-Commit: `feat: switch assistant providers through one adapter`
+**화면에는 아직 연결하지 않았다.** Task 13에서 이미 남긴 결정 — 기존 채팅 UI를
+`HermesRunService` 폴백으로 연결할지, 새 로컬 전용 엔드포인트를 만들지 — 이 먼저 정해져야
+이 어댑터를 실제 API 경로에 꽂을 자리가 생긴다. 지금은 라이브러리 수준의 검증된 능력이다.
 
 GPT 경로 실제 사용은 §23.1 egress gate와 OAuth 로그인이 선행이다.
 어댑터 구현과 실제 GPT 호출은 별개이며, 이 Task는 어댑터까지만 닫는다.
