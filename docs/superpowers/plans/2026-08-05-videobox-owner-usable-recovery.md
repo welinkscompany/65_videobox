@@ -325,7 +325,7 @@ Run: `npm --prefix apps/web test -- src/features/editor/preview`
 
 Commit: `feat: refresh the preview after an edit`
 
-### Task 7: 타임라인 클립 이름을 사람이 읽는 말로 (F-3)
+### Task 7: 타임라인 클립 이름을 사람이 읽는 말로 (F-3) — **완료 (2026-08-06)**
 
 클립 접근성 이름이 `broll:session-broll-segment_draft_1726b9574a-0 클립 선택` 형태다.
 근거: `apps/web/src/features/editor/timeline/TimelineDock.tsx:536`의
@@ -343,15 +343,28 @@ Commit: `feat: refresh the preview after an edit`
 - Modify: `apps/web/src/features/editor/timeline/TimelineDock.tsx`
 - Modify: `apps/web/src/features/editor/timeline/timeline-dock.test.tsx`
 
-- [ ] **Step 1: 실패 테스트** — 클립 접근성 이름에 내부 ID가 없고
-      트랙 이름과 순번으로 사람이 읽을 수 있는지 (예: `B-roll 2번째 장면, 3초부터`)
-- [ ] **Step 2: RED 확인**
+- [x] **Step 1: 실패 테스트** — 클립 접근성 이름에 내부 ID가 없고
+      트랙 이름과 (트랙 내) 순번·시작 시각으로 사람이 읽을 수 있는지 (3개 신설)
+- [x] **Step 2: RED 확인**
 
 Run: `npm --prefix apps/web test -- src/features/editor/timeline`
 
-- [ ] **Step 3: 구현** — 라벨 포맷터를 추가한다. 선택·조작 로직은 계속 `clipId`를 쓰고
-      **표시용 이름만** 바꾼다. 식별자와 표시명을 섞지 않는다
-- [ ] **Step 4: GREEN + 커밋**
+- [x] **Step 3: 구현** — `formatClipDisplayName(lane, ordinalInLane, startSec)` 포맷터를
+      추가했다(`B-roll 2번째 장면, 3초부터`). 선택·조작 로직(`data-clip-id`, `onClick`,
+      trim/reorder/placement 버튼 라벨)은 전부 `rect.clipId`를 그대로 쓴다 — 컨테이너
+      aria-label, 선택 버튼 aria-label, 버튼 표시 텍스트 **셋만** 바꿨다.
+      **파급 범위가 예상보다 컸다** — `AppRouter.test.tsx`, `editor-workbench.test.tsx`,
+      `editor-workbench-route.test.tsx` 3개 파일, 55곳 이상이 `"${clipId} 클립 선택"`을
+      accessible name으로 직접 하드코딩하고 있었다. 각 fixture의 lane·순번·startSec을
+      일일이 계산해 문자열을 갱신하는 대신, 각 파일에 `clipSelectionButton(clipId)`/
+      `findClipSelectionButton(clipId)` 로컬 헬퍼를 추가해 `data-clip-id`/
+      `data-native-control` 속성으로 버튼을 찾게 바꿨다 — 표시 문구가 나중에 또
+      바뀌어도 이 테스트들이 다시 깨지지 않는다
+- [x] **Step 4: GREEN(761/761, tsc clean) + 커밋** — 실제 프로젝트로 브라우저 확인은
+      실패했다: `b-roll-smoke-test` 등 지금 접근 가능한 프로젝트 중 실제 편집 세션
+      (timeline)이 있는 게 없어서 채워진 타임라인을 렌더해볼 수 없었다. 대신 유닛
+      테스트가 실제(mock 아닌) `TimelineDock` 컴포넌트를 그대로 렌더해 DOM의
+      aria-label·텍스트를 직접 검증하는 것으로 대체했다
 
 Commit: `feat: name timeline clips in plain language`
 
