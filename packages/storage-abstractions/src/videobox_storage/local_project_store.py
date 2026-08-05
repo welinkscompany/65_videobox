@@ -18,7 +18,7 @@ from typing import Any, Callable, Literal
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.media_analysis import MediaAnalysisStatus
-from videobox_domain_models.projects import ProjectRecord
+from videobox_domain_models.projects import ProjectRecord, ProjectStatus
 from videobox_domain_models.recommendations import RecommendationRecord, RecommendationType
 from videobox_domain_models.transcripts import TranscriptRecord
 from videobox_core_engine.provider_trace import build_provider_trace
@@ -546,7 +546,7 @@ class LocalProjectStore:
         self._bootstrap_database(project_root / "db" / "project.sqlite", project)
         return project
 
-    def list_projects(self) -> list[dict[str, Any]]:
+    def list_projects(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         projects_directory = self.projects_root / "projects"
         if not projects_directory.exists():
             return []
@@ -578,9 +578,29 @@ class LocalProjectStore:
                 ).fetchone()
             finally:
                 connection.close()
-            if row is not None:
+            if row is not None and (include_archived or str(row["status"]) != ProjectStatus.ARCHIVED.value):
                 items.append(dict(row))
         return items
+
+    def archive_project(self, *, project_id: str) -> dict[str, Any]:
+        """Hide a project from the default list without touching its data
+        (F-5). Reversible via restore_project -- §10.12.3's
+        preserve-evidence intent makes archive the safe default; permanent
+        deletion is a separate, not-yet-built decision."""
+        return self._set_project_status(project_id=project_id, status=ProjectStatus.ARCHIVED)
+
+    def restore_project(self, *, project_id: str) -> dict[str, Any]:
+        return self._set_project_status(project_id=project_id, status=ProjectStatus.DRAFT)
+
+    def _set_project_status(self, *, project_id: str, status: ProjectStatus) -> dict[str, Any]:
+        if not (self.project_root(project_id) / "db" / "project.sqlite").is_file():
+            raise KeyError(f"Project not found: {project_id}")
+        self._execute(
+            project_id,
+            "UPDATE projects SET status = ?, updated_at = ? WHERE project_id = ?",
+            (status.value, self._now_iso(), project_id),
+        )
+        return self.get_project(project_id=project_id)
 
     def list_all_jobs(self) -> list[dict[str, Any]]:
         # Jobs live in one SQLite file per project (see database_path) with no

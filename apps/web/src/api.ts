@@ -1563,6 +1563,8 @@ export const api = {
     return payload.projects;
   },
   getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
+  archiveProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/archive`, { method: "POST" }),
+  restoreProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/restore`, { method: "POST" }),
   registerNarrationAudio: (projectId: string, payload: { source_path: string }) =>
     request<RegisteredAsset>(`/api/projects/${projectId}/assets/narration-audio`, {
       method: "POST",

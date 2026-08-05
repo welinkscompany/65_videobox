@@ -29,8 +29,8 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
         )
 
     @router.get("/api/projects")
-    def list_projects() -> ProjectListResponse:
-        projects = store.list_projects()
+    def list_projects(include_archived: bool = False) -> ProjectListResponse:
+        projects = store.list_projects(include_archived=include_archived)
         return ProjectListResponse(
             projects=[
                 ProjectResponse(
@@ -41,6 +41,32 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
                 )
                 for project in projects
             ]
+        )
+
+    @router.post("/api/projects/{project_id}/archive")
+    def archive_project(project_id: str) -> ProjectResponse:
+        try:
+            project = store.archive_project(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ProjectResponse(
+            project_id=project["project_id"],
+            name=project["name"],
+            status=project["status"],
+            root_storage_uri=project["root_storage_uri"],
+        )
+
+    @router.post("/api/projects/{project_id}/restore")
+    def restore_project(project_id: str) -> ProjectResponse:
+        try:
+            project = store.restore_project(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ProjectResponse(
+            project_id=project["project_id"],
+            name=project["name"],
+            status=project["status"],
+            root_storage_uri=project["root_storage_uri"],
         )
 
     @router.get("/api/projects/{project_id}")
