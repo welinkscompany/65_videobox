@@ -982,17 +982,59 @@ Task 15의 `orientation`이 선행 조건이므로 그 뒤에 다룬다.
 
 Commit: `feat: turn on the local media analysis worker`
 
-### Task 20: 의미 검색 실제 동작 확인 (A-1)
+### Task 20: 의미 검색 실제 동작 확인 (A-1) — **완료 (2026-08-05)**
 
-`A-1`은 근거 등급이 `코드`다. 설계는 확인했으나 **동작하는 것을 본 적이 없다.**
-Task 19로 재료가 생긴 뒤 실제로 검색이 되는지 확인한다.
+`A-1`은 근거 등급이 `코드`였다. 설계는 확인했으나 **동작하는 것을 본 적이 없었다.**
 
-- [ ] **Step 1: 실패 테스트** — 대본 문장으로 검색했을 때 정확히 같은 단어가 없어도
-      의미가 가까운 B-roll이 상위에 오는지. 같은 영상에서 한 클립이 반복되면 감점되는지
-- [ ] **Step 2: RED 확인**
-- [ ] **Step 3: 구현** — 필요한 만큼만 보완한다. 랭킹 구조는 이미 있으므로
-      대부분 연결과 가중치 조정이다
-- [ ] **Step 4: GREEN + owner의 실제 B-roll 라이브러리로 확인 + 커밋**
+**실측 결과 — 진짜 빠진 연결 지점을 찾았다.** `media_ranking.rank_candidates`는
+`asset["semantic_score"]`가 이미 채워져 있다고 가정하지만, 실제로 그 값을 채우는
+코드가 **어디에도 없었다.** `store.find_local_media_embedding_matches`(코사인 유사도 랭킹)는
+이미 구현·테스트까지 돼 있었는데(`tests/test_media_analysis_store.py`) `director_proposal_service.py`
+어디서도 호출되지 않아, 지금까지 모든 B-roll 추천은 `semantic_similarity=0.0`으로 고정된 채
+태그 일치(lexical fallback)로만 동작하고 있었다. `A-1`이 지적한 "설계는 있는데 본 적이 없다"가
+정확히 이거였다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `media_ranking.rank_candidates` | `adopt as-is` | 점수 체계·가중치를 바꾸지 않는다 |
+| `store.find_local_media_embedding_matches` | `adopt as-is` | 코사인 랭킹이 이미 있고 이미 테스트됐다. 새로 안 만든다 |
+| `LMStudioEmbeddingProvider` | `adopt as-is` | Task 19가 이미 연결한 provider를 그대로 쓴다 |
+| 새 검색 인덱스/랭킹 알고리즘 | `exclude` | 있는 조각을 잇기만 하면 된다 |
+
+**Files:**
+- Modify: `packages/core-engine/src/videobox_core_engine/director_proposal_service.py`
+- Modify: `services/api/src/videobox_api/routers/director_proposals.py`
+- Modify: `services/api/src/videobox_api/main.py`
+- Create: `tests/test_media_semantic_search.py`
+
+- [x] **Step 1: 실패 테스트** — `tests/test_media_semantic_search.py`: 대본 문장이 두 자산의
+      태그와 전혀 겹치지 않아도, 저장된 임베딩이 더 가까운 자산이 상위에 오고
+      `semantic_provenance`가 `asset_semantic_score`로 찍히는지. embedding provider가 없거나
+      예외를 던지면 기존 lexical fallback으로 안전하게 내려가는지 (3개 테스트)
+- [x] **Step 2: RED 확인** — `DirectorProposalService.__init__()`가 `embedding_provider`를
+      모른다는 `TypeError`
+- [x] **Step 3: 구현** — `DirectorProposalService`에 `embedding_provider`/`embedding_model_name`을
+      주입받게 하고, 세그먼트마다 `_apply_semantic_scores()`로 대본 문장을 임베딩한 뒤
+      `store.find_local_media_embedding_matches()`로 자산별 코사인 점수를 받아
+      `semantic_score`로 주입한다. 임베딩·조회 어느 단계든 예외가 나면 기존 lexical
+      fallback으로 조용히 내려간다 — 로컬 모델이 느리거나 꺼져 있다고 추천 생성 자체가
+      막히면 안 되기 때문이다. `main.py`가 Task 19에서 만든
+      `app.state.media_analysis_embedding_provider`/`media_analysis_profile`을
+      그대로 라우터에 흘려보낸다
+- [x] **Step 4: GREEN(3/3, 기존 director proposal 테스트 78/78 포함) + 실제 확인** —
+      실제 LM Studio 임베딩 모델(`text-embedding-bge-m3`)로 두 개의 가짜 B-roll을 등록하고
+      "스타벅스에서 아메리카노" 대본 문장으로 검색했다. 태그가 전혀 겹치지 않는데도
+      카페 클립이 `semantic_similarity=0.666`, 바다/서핑 클립이 `0.365`로 정확히
+      의미가 가까운 쪽이 이겼다 — 실제 모델로 처음 증명된 결과다
+
+**"반복 감점" 항목은 이미 있다.** `_SCORE_NAMES`의 `repetition`은
+`-float(asset.get("repetition_count") or 0)`으로 이미 감점 로직이 있으나, 호출부가
+`repetition_count`를 채우는지는 이번 범위에서 확인하지 않았다 — 별도 확인이 필요하면
+후속 Task로 남긴다.
+
+Commit: `feat: find b-roll by meaning`
 
 Commit: `feat: find b-roll by meaning`
 
