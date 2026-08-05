@@ -598,7 +598,78 @@ owner의 실제 사용 방식("평소에 다양한 B-roll을 녹화해서 저장
 
 Commit: `feat: add media from the asset screen`
 
-### Task 17: 숏폼 편집 — 범위 결정 필요
+### Task 17: 숏폼 편집 — 세로 캔버스로 기존 편집기 재사용
+
+**owner 결정 (2026-08-05):** "지금 편집기를 세로화면으로 쓰면 되."
+
+따라서 숏폼 전용 편집기를 새로 만들지 않는다. 기존 편집 작업판을 세로 캔버스로 쓴다.
+`implementation-plan.ko.md` §4의 `풀 자체 편집기` 제외 조항에 걸리지 않으므로 **조항 개정이 불필요하다.**
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| 기존 편집 작업판과 14개 조작 | `adopt as-is` | 새 편집 기능을 만들지 않는다 |
+| `composition_plan`의 canvas width/height | `partial port` | 출력 규격만 세로로 바꾼다 |
+| `ffmpeg_final_renderer`의 `force_original_aspect_ratio=increase,crop` | `adopt as-is` | 가로 소재를 세로로 채우는 변환이 이미 있다 |
+| 숏폼 전용 새 편집기 | `exclude` | owner 결정으로 범위 밖 |
+
+**Files:**
+- Modify: `packages/core-engine/src/videobox_core_engine/composition_plan.py`
+- Modify: `apps/web/src/features/editor/preview/preview-stage.tsx`
+- Create: `tests/test_vertical_composition.py`
+
+- [ ] **Step 1: 실패 테스트** — 세로 출력 규격을 고르면 canvas가 세로가 되고,
+      가로 소재가 잘림 없이 채워지며, 자막이 세로 화면 안에 들어오는지
+- [ ] **Step 2: RED 확인**
+
+Run: `.venv\Scripts\python.exe -m pytest tests/test_vertical_composition.py -q`
+
+- [ ] **Step 3: 구현** — 프로젝트 또는 출력 단위로 세로 규격을 고를 수 있게 한다.
+      미리보기도 같은 비율로 보여준다. Task 15의 `orientation`을 써서
+      세로 소재를 우선 추천할 수 있으나, 그 랭킹 조정은 별도 Task로 둔다
+- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+
+Commit: `feat: compose vertical videos in the same editor`
+
+**선행:** Task 15(`orientation` 저장).
+
+### Task 18: 촬영본 반입 경로 — Drive 폴더 감시 (범위 결정 필요)
+
+owner의 실제 작업 방식: 외부에서 촬영 → 폰에서 구글 드라이브로 전송 → PC에서 사용.
+요구: Drive 폴더에 올리면 자동으로 로컬로 옮기고, 태그를 붙이고, Drive에서는 정리되기.
+
+**계획서 충돌:** 아래 세 조항이 Google Drive 결합을 금지한다.
+
+- `implementation-plan.ko.md:265` "Google Sheets/Drive 구조는 버림"
+- `implementation-plan.ko.md:286` "`Google Sheets/Drive 결합`은 반입 금지"
+- `architecture-plan.ko.md:446` "Google Sheets/Drive 의존은 제거"
+
+이 조항은 BrollBox가 Drive를 저장소 backend로 쓰던 결합을 버리기 위한 것이다.
+
+**API를 쓰지 않는 대안이 조항과 충돌하지 않는다.**
+
+Drive 데스크톱 앱이 폴더를 로컬로 동기화하면, VideoBox 입장에서는 그냥 로컬 폴더다.
+VideoBox가 그 폴더를 감시하다가 파일을 라이브러리로 **이동**하면 동기화 폴더에서 사라지고,
+결과적으로 Drive에서도 정리된다. OAuth·API key·외부 호출이 전혀 없다.
+
+- Drive API 직접 호출 방식: **조항 개정 선행 필요**
+- 로컬 동기화 폴더 감시 방식: **조항과 충돌 없음.** 권장
+
+**확인이 필요한 전제:**
+
+1. 이 PC에 Drive 데스크톱 앱이 설치되어 있지 않다. 설치가 선행이다
+2. 동기화 폴더에서 파일을 옮겼을 때 Drive에서 실제로 지워지는지는
+   앱 동작 모드(미러/스트림)에 따라 다를 수 있다. **실제로 확인해야 한다**
+
+**안전 요건 — 데이터 손실 방지:**
+
+- 원본을 옮기기 전에 해시로 무결성을 확인한다
+- 확인 실패 시 원본을 건드리지 않고 실패로 남긴다
+- 즉시 삭제하지 않는다. 로컬 반입이 검증된 뒤 일정 기간이 지난 것만 정리한다
+- 사용자 원본은 read-only로 취급한다는 기존 경계를 유지한다
+
+Step은 위 전제 확인과 방식 결정 뒤에 채운다.
 
 **현재 미구현이다.** 코드에 숏폼 관련 구현이 없다.
 
@@ -628,13 +699,13 @@ Task 14개 중 상세 Step까지 완성된 것과 개요만 있는 것을 구분
 
 | Task | 상태 |
 |---|---|
-| 1–4, 6–11, 13–16 | 상세 Step·Files·재사용 게이트 완성 |
+| 1–4, 6–11, 13–17 | 상세 Step·Files·재사용 게이트 완성 |
 | 5 | 간략하지만 실행 가능 |
 | 12 | **완료** (2026-08-05, 커밋 `d503ce2`) |
 | 11A | **개요만.** Task 10 승인 결과가 나와야 쓸 수 있다 |
-| 17 | **개요만.** 숏폼 범위 판정이 선행 |
+| 18 | **개요만.** Drive 반입 방식 결정과 전제 확인이 선행 |
 
-Task 11A와 17만 비워둔다. 둘 다 선행 결정이 없으면 Step이 추측이 된다.
+Task 11A와 18만 비워둔다. 둘 다 선행 결정이 없으면 Step이 추측이 된다.
 
 처음에는 Task 6–9도 "실측 전이라 못 쓴다"고 미뤄뒀으나, 각 결함을 이미 화면에서
 직접 관측했으므로 그 판단은 틀렸다. owner 지적으로 바로잡고 Step을 채웠다.
