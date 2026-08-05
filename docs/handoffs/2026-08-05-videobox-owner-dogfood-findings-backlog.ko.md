@@ -281,13 +281,26 @@ owner는 세션 중 "캡컷처럼 인터페이스를 만들어야 한다"고 말
 실측 증거**다. `architecture-plan` §6.5의 `auto_apply_allowed` 필드는 있지만
 세그먼트 review 요구를 끄거나 임계값으로 바꾸는 경로가 없다.
 
-- 재현: `verify_owner_path.py`를 아무 실제 나레이션+B-roll로 돌리면 항상 재현된다
-- 원인 후보(미확인): `HeuristicSegmentAnalyzer`가 review_required를 무조건 True로
-  설정하는지, 아니면 recommendation 미적용 상태라 그런지는 코드를 더 봐야 한다
-- 영향: **Task 21(자동 배치 정책)이 완료되기 전에는 owner가 어떤 실제 영상을 넣어도
-  최종 결과물까지 도달할 수 없다.** 이전에 F-0로 발견한 provider 문제보다 지금은
-  이게 더 앞을 막고 있다
-- 상태: **Task 21에서 원인 파악부터 시작**. 근거는 `verify_owner_path.py` 실행 결과
+**근본 원인 확정 (2026-08-05, Task 21 Step 0 선행 수행) — 버그 하나 + 정책 질문 하나였다.**
+
+`HeuristicSegmentAnalyzer`가 `low_confidence`(임계값 `< 0.85`)로 14/14를 막았다.
+원인을 추적하니 `FasterWhisperSTTProvider.transcribe()`가
+`confidence = 1 - no_speech_prob`를 쓰고 있었다. `no_speech_prob`은
+**"이 구간에 음성이 있는가"**를 나타내는 값이지 **"전사가 정확한가"**를 나타내는 값이
+아니다. faster-whisper가 실제로 제공하는 전사 품질 지표는 `avg_logprob`이다.
+
+- **버그로 확정하고 수정함**: `confidence = exp(avg_logprob)`로 교체.
+  `packages/provider-interfaces/src/videobox_provider_interfaces/faster_whisper_stt.py`
+- **owner 실제 영상으로 재검증**: 14개 중 3개는 confidence가 0.19→0.873으로 바뀌며
+  review 대상에서 완전히 빠졌다. 나머지 11개는 0.816~0.821로 **정상 범위이지만
+  0.85 임계값에 근소 미달**한다
+- **여기서부터는 버그가 아니라 정책이다.** `small` 모델·실제 배경음 섞인 한국어 나레이션
+  기준으로 0.85가 적정 임계값인지는 owner 결정 사항이다. Task 21이 이 정책을 다룬다
+
+- 재현: `verify_owner_path.py`를 아무 실제 나레이션+B-roll로 돌리면 재현된다
+- 영향: 버그 수정으로 완전히 막히던 상태에서 "근소 미달"로 바뀌었다.
+  Task 21의 임계값 조정 또는 owner의 "완전 자동 배치" 결정 적용만으로 해소 가능
+- 상태: **버그 수정 완료.** 남은 건 Task 21의 임계값/정책 결정
 
 ### S-3. 대본 생성이 계획서에서 명시적으로 차단됨
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import subprocess
 import tempfile
@@ -81,7 +82,15 @@ class FasterWhisperSTTProvider:
                     start_sec=float(segment.start),
                     end_sec=float(segment.end),
                     text=segment.text.strip(),
-                    confidence=round(min(1.0, max(0.0, 1.0 - float(segment.no_speech_prob))), 4),
+                    # avg_logprob is the decoder's confidence in the words it
+                    # produced. no_speech_prob answers a different question
+                    # (is this chunk speech at all?) and does not reflect
+                    # transcription accuracy -- using it here previously
+                    # flagged accurate real-world transcripts as low_confidence
+                    # whenever a noisy chunk boundary raised no_speech_prob,
+                    # which blocked every segment of real narration from
+                    # ever reaching timeline approval.
+                    confidence=round(min(1.0, max(0.0, math.exp(float(segment.avg_logprob)))), 4),
                 )
                 for segment in segment_iter
             ]

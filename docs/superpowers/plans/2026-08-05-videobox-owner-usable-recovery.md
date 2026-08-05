@@ -951,9 +951,12 @@ end-to-end 실행 시 **세그먼트 14개 전부가 `segment_review_required`�
 - Modify: `packages/core-engine/src/videobox_core_engine/director_proposal_service.py`
 - Create: `tests/test_auto_apply_policy.py`
 
-- [ ] **Step 0: 원인 규명 (선행)** — `HeuristicSegmentAnalyzer`와 review flag 생성 경로를 읽어
-      `segment_review_required`가 무조건 설정되는지, 조건부인지 확인한다.
-      `scripts/verify_owner_path.py`로 재현하며 확인한다
+- [x] **Step 0: 원인 규명 (선행) — 완료 (2026-08-05)** — 원인은 정책이 아니라 버그였다.
+      `FasterWhisperSTTProvider`가 `confidence = 1 - no_speech_prob`(음성 존재 여부)를
+      전사 품질처럼 썼다. `avg_logprob`(실제 디코드 신뢰도) 기반 `exp(avg_logprob)`로 교체했고,
+      owner 실제 영상 재검증에서 14개 중 3개가 review 대상에서 빠졌다(0.19→0.873).
+      남은 11개는 0.816~0.821로 근소 미달 — 여기부터가 진짜 정책 질문이다.
+      커밋: `fix: score STT confidence from decode quality, not speech presence`
 - [ ] **Step 1: 실패 테스트** — 점수 임계값 이상이면 `auto_apply_allowed`가 참이고 review가 걸리지 않는지,
       미만이면 검수 대상으로 남는지. 권리 경고가 있으면 점수와 무관하게 자동 적용되지 않는지
 - [ ] **Step 2: RED 확인**
