@@ -7,32 +7,40 @@
 }
 
 :root {
-  --vb-canvas: #FAFAF9;
+  /* docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md
+     replaces the earlier warm-white/charcoal/indigo approval. */
+  --vb-canvas: #FAFAFA;
   --vb-panel: #FFFFFF;
-  --vb-border: #E7E5E4;
-  --vb-text: #292524;
-  --vb-muted: #57534E;
-  --vb-accent: #4F46E5;
+  --vb-border: #EAEAEC;
+  --vb-border-strong: #DCDCE0;
+  --vb-text: #1C1C1E;
+  --vb-muted: #6E6E73;
+  --vb-faint: #727279;
+  --vb-accent: #C2410C;
+  --vb-accent-bg: #FFF1E7;
+  --vb-accent-border: #F5C9AC;
   --vb-preview: #18181B;
+  --vb-success: #15803D;
+  --vb-success-bg: #ECFDF3;
   --vb-font: "Pretendard", "Noto Sans KR", sans-serif;
-  --background: #FAFAF9;
-  --foreground: #292524;
+  --background: #FAFAFA;
+  --foreground: #1C1C1E;
   --card: #FFFFFF;
-  --card-foreground: #292524;
+  --card-foreground: #1C1C1E;
   --popover: #FFFFFF;
-  --popover-foreground: #292524;
-  --primary: #4F46E5;
+  --popover-foreground: #1C1C1E;
+  --primary: #C2410C;
   --primary-foreground: #FFFFFF;
-  --secondary: #F5F5F4;
-  --secondary-foreground: #292524;
-  --muted: #F5F5F4;
-  --muted-foreground: #57534E;
-  --accent: #EEF2FF;
-  --accent-foreground: #292524;
+  --secondary: #FFF1E7;
+  --secondary-foreground: #1C1C1E;
+  --muted: #F4F4F5;
+  --muted-foreground: #6E6E73;
+  --accent: #FFF1E7;
+  --accent-foreground: #1C1C1E;
   --destructive: #B91C1C;
-  --border: #E7E5E4;
-  --input: #E7E5E4;
-  --ring: #4F46E5;
+  --border: #EAEAEC;
+  --input: #EAEAEC;
+  --ring: #C2410C;
   --radius: .625rem;
 }
 
