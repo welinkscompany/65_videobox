@@ -292,7 +292,7 @@ Commit: `docs: reconcile the plan with measured runtime state`
 Task 2 실측이 세부를 조정할 수 있으나, 각 항목의 결함 자체는 이미 화면에서 직접 관측했으므로
 Step을 지금 확정한다. 실측으로 전제가 바뀌면 갱신 규칙에 따라 해당 Task를 수정한다.
 
-### Task 6: 미리보기 자동 갱신 (F-4)
+### Task 6: 미리보기 자동 갱신 (F-4) — **완료 (2026-08-06)**
 
 편집 후 `미리보기 새로 만들기`를 수동으로 눌러야 한다. `stale` 상태가 화면에 그대로 노출된다.
 편집 → 확인 왕복이 끊겨 체감 속도를 떨어뜨린다.
@@ -311,17 +311,25 @@ Step을 지금 확정한다. 실측으로 전제가 바뀌면 갱신 규칙에 �
 - Modify: `apps/web/src/features/editor/preview/preview-stage.tsx`
 - Modify: 각 대응 테스트 파일
 
-- [ ] **Step 1: 실패 테스트** — 편집 mutation 뒤 미리보기가 자동으로 갱신 요청되는지,
-      갱신 중 상태 문구가 `§10.13` 창작자 언어인지(`stale` 같은 내부 용어 금지),
-      연속 편집 시 요청이 중복되지 않는지
-- [ ] **Step 2: RED 확인**
-
-Run: `npm --prefix apps/web test -- src/features/editor/preview`
-
-- [ ] **Step 3: 구현** — mutation 성공 후 현재 revision 기준으로 갱신을 트리거한다.
-      진행 중 재편집이 오면 최신 요청만 유효하게 유지한다(기존 latest-request 규칙 재사용).
-      자동 갱신 실패 시 기존 수동 버튼을 폴백으로 남긴다
-- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+- [x] **Step 1: 실패 테스트** — 편집 mutation 성공 뒤 새 revision으로 미리보기 생성이
+      자동 호출되는지, 자동 갱신이 실패해도 수동 버튼이 계속 활성 상태인지 (2개 신설).
+      `stale` 내부 용어 노출은 실측해보니 **이미 해소돼 있었다** —
+      `exact-preview-state.ts`의 `kind: "stale"`는 이미 창작자 언어 문구
+      ("이전 편집본 미리보기는 재생하지 않아요")로만 표시되고 있었다
+- [x] **Step 2: RED 확인** — `git stash`로 구현을 잠시 되돌려 새 테스트 2개가
+      실제로 실패하는 것을 확인한 뒤 복원했다
+- [x] **Step 3: 구현** — 모든 편집(trim/reorder/자막/B-roll·BGM·SFX 적용/오버레이 등)이
+      이미 거쳐가는 단일 통로 `commitTimelineMutation`에 한 단계만 추가했다:
+      mutation 성공 후 방금 받아온 revision으로 `api.startExactPreview`를 호출하고
+      `refreshToken`을 올려, 기존 manifest 재조회 effect와 기존 pending/running
+      폴링 루프(둘 다 이미 있던 코드)가 자동으로 이어받게 했다. 새 상태 머신은
+      만들지 않았다 — 재사용 게이트 그대로. 자동 갱신 실패는 조용히 무시하고
+      기존 수동 버튼(`미리보기 새로 만들기`)이 폴백으로 계속 활성 상태로 남는다
+- [x] **Step 4: GREEN(121/121, 프론트 전체 764/764, tsc clean) + 커밋** —
+      브라우저 실측은 못 했다. 지금 실행 중인 앱에 실제 세그먼트가 있는 편집
+      세션을 가진 프로젝트가 없어서(둘 다 초안 없음) 실제 mutation을 걸어볼 수
+      없었다 — 대신 실제(mock 아닌) `EditorWorkbenchRoute` 컴포넌트를 그대로
+      렌더하는 유닛 테스트로 대체했다
 
 Commit: `feat: refresh the preview after an edit`
 
