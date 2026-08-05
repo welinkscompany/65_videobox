@@ -601,6 +601,20 @@ describe("TimelineDock", () => {
     expect(screen.getByText("표시할 타임라인 항목이 없습니다.")).toBeInTheDocument();
   });
 
+  it("keeps a clip's displayed ordinal stable across scrolling instead of renumbering the visible batch", () => {
+    render(<TimelineDock view={thousandClipHourView} viewportWidthPx={800} />);
+
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeInTheDocument();
+
+    fireEvent.wheel(screen.getByRole("region", { name: "타임라인" }), { deltaX: 36_000 });
+
+    // bulk-100 is the 101st narration clip overall -- it must read "101번째",
+    // not renumber back to "1번째" just because it's now the first one
+    // visible in the scrolled viewport.
+    expect(screen.getByRole("button", { name: "내레이션 101번째 장면, 360초부터" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^내레이션 1번째/ })).not.toBeInTheDocument();
+  });
+
   it("uses half-open filtering rather than a first-N cap for 1000 clips across a 60-minute fixture", () => {
     render(<TimelineDock view={thousandClipHourView} viewportWidthPx={800} />);
 

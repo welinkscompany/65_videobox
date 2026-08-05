@@ -265,6 +265,20 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     ...view.tracks.flatMap((track) => track.clips.flatMap((clip) => clip.placementId ? [[clip.placementId, { placementId: clip.placementId, kind: track.role as TimelinePlacementKind, startSec: clip.startSec, endSec: clip.endSec } as TimelinePlacement] as const] : [])),
   ]), [view]);
   const captionsByPlacementId = useMemo(() => new Map(view.captions.flatMap((caption) => caption.placementId ? [[caption.placementId, caption] as const] : [])), [view]);
+  // Computed over the full (unfiltered) clip list, not the viewport-visible
+  // subset draftProjection.rects renders -- otherwise scrolling or zooming
+  // the timeline would renumber/rename the same physical clip, undermining
+  // the whole point of a stable human-readable identity (F-3/Task 7).
+  const laneOrdinalByClipId = useMemo(() => {
+    const counters: Partial<Record<TimelineLane, number>> = {};
+    const map = new Map<string, number>();
+    for (const source of clipSources(view)) {
+      const lane = source.role as TimelineLane;
+      counters[lane] = (counters[lane] ?? 0) + 1;
+      map.set(source.id, counters[lane]!);
+    }
+    return map;
+  }, [view]);
   const draftProjection = useMemo(() => {
     const boundsByClipId = new Map<string, Readonly<{ startSec: number; endSec: number }>>();
     const sources = clipSources(view).map((source) => {
@@ -525,11 +539,8 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         </div>)}
       </div>
       <div aria-label="타임라인 클립" role="group" style={{ inset: 0, position: "absolute" }}>
-        {(() => {
-        const laneOrdinal: Partial<Record<TimelineLane, number>> = {};
-        return draftProjection.rects.map((rect) => {
-        laneOrdinal[rect.lane] = (laneOrdinal[rect.lane] ?? 0) + 1;
-        const ordinalInLane = laneOrdinal[rect.lane]!;
+        {draftProjection.rects.map((rect) => {
+        const ordinalInLane = laneOrdinalByClipId.get(rect.clipId) ?? 1;
         const narrationClip = rect.lane === "narration" ? narrationByClipId.get(rect.clipId) : undefined;
         const placement = placementsByClipId.get(rect.clipId);
         const displayBounds = draftProjection.boundsByClipId.get(rect.clipId);
@@ -567,8 +578,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         <button data-native-control="placement-move" aria-label={`${rect.clipId} 이동`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementMove(event, placement)} onPointerDown={(event) => startPlacement(event, placement, "move")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 이동" type="button">이동</button>
         <button data-native-control="placement-trim-end" aria-label={`${rect.clipId} 끝 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "end")} onPointerDown={(event) => startPlacement(event, placement, "trim", "end")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
       </span> : null}</div>;
-        });
-        })()}
+        })}
       </div>
     </div>
     {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
