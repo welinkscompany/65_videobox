@@ -34,6 +34,8 @@
 | `D-1` 팔레트 | `문서` | 승인 기록 2건 확인 |
 | `D-2` 분석 worker 차단 | `관측` | API가 `MEDIA_ANALYSIS_WORKER_UNAVAILABLE` 반환 |
 | `D-3` 대본 생성 부재 | `코드` | 코드 전역 검색 결과 없음 |
+| `F-0` STT/CapCut 비활성 | `관측`→**실사용 확인 (2026-08-05)** | Task 1로 수정, Task 2 `verify_owner_path.py`로 owner 실제 영상 60초 나레이션 전사 성공 확인 |
+| `S-4` 세그먼트 review 강제 차단 | **`관측` (2026-08-05 신규)** | `verify_owner_path.py` 실행 중 발견. 아래 항목 참조 |
 | `A-1` 의미검색 설계됨 | `코드` | 점수 항목·저장소 구조를 읽음. **동작은 본 적 없다** (`D-2`에 막힘) |
 | `A-2` 컨테이너 경고 | `문서` | `architecture-plan` §11 |
 | `S-1`~`S-3` 범위 충돌 | `문서` | 계획서 조항 직접 인용 |
@@ -254,6 +256,38 @@ owner는 세션 중 "캡컷처럼 인터페이스를 만들어야 한다"고 말
   `architecture-plan.ko.md` §14도 "VideoBox의 핵심은 편집기 UI가 아니라 편집 엔진이다"라고 못박는다.
 - owner 확인 필요: 캡컷에서 실제로 자주 쓰던 기능 중 현재 없는 것이 있는지.
 - 상태: **owner 확인 대기**
+
+### S-4. 세그먼트 review 강제 차단이 `S-2`(자동 배치) 결정을 막는다
+
+`scripts/verify_owner_path.py`로 owner의 실제 나레이션(60초)과 실제 B-roll 2개를
+**실제 provider**(faster_whisper, 스텁 없음)로 처음부터 끝까지 돌렸다. 결과:
+
+```
+[PASS] ingest
+[PASS] transcription   provider_name=faster_whisper, 14개 세그먼트, 전사 정확
+[PASS] segment_analysis
+[PASS] broll_recommendation   14개 후보
+[FAIL] timeline_build  Timeline still has review blockers.
+       review_flags=[segment_review_required@seg_001 ... seg_014]
+[SKIP] preview_render / subtitle_render / final_render / capcut_draft_export
+```
+
+**14개 세그먼트 전부가 무조건 `segment_review_required`로 막혀 있다.** 점수나 신뢰도
+기준이 아니라 **세그먼트 생성 자체에 review 플래그가 기본으로 붙는 것으로 보인다.**
+그 결과 `approve_timeline_review`가 항상 거부되고, preview·자막·최종 렌더·CapCut
+내보내기까지 전부 도달 불가능하다.
+
+이건 `S-2`(owner의 "완전 자동 배치 후 검토" 결정)가 **아직 코드로 구현되지 않았다는
+실측 증거**다. `architecture-plan` §6.5의 `auto_apply_allowed` 필드는 있지만
+세그먼트 review 요구를 끄거나 임계값으로 바꾸는 경로가 없다.
+
+- 재현: `verify_owner_path.py`를 아무 실제 나레이션+B-roll로 돌리면 항상 재현된다
+- 원인 후보(미확인): `HeuristicSegmentAnalyzer`가 review_required를 무조건 True로
+  설정하는지, 아니면 recommendation 미적용 상태라 그런지는 코드를 더 봐야 한다
+- 영향: **Task 21(자동 배치 정책)이 완료되기 전에는 owner가 어떤 실제 영상을 넣어도
+  최종 결과물까지 도달할 수 없다.** 이전에 F-0로 발견한 provider 문제보다 지금은
+  이게 더 앞을 막고 있다
+- 상태: **Task 21에서 원인 파악부터 시작**. 근거는 `verify_owner_path.py` 실행 결과
 
 ### S-3. 대본 생성이 계획서에서 명시적으로 차단됨
 

@@ -165,7 +165,7 @@ Commit: `feat: enable the chosen voice engine`
 **승인 필요:** STT 모델 다운로드, TTS 엔진 선택과 그에 따른 다운로드 또는 외부 전송은
 착수 전 owner 승인을 받는다. 크기·저장 위치·외부 전송 여부를 먼저 알린다.
 
-### Task 2: 런타임 진실 기준선 확보
+### Task 2: 런타임 진실 기준선 확보 — **완료 (2026-08-05)**
 
 backlog 각 항목을 실제 동작으로 확인해 근거 등급을 `관측`으로 승격하거나 반증한다.
 
@@ -200,15 +200,22 @@ Task 2 기준선을 만들 때 같은 길이대(8~10분) 실제 나레이션을 
 - Create: `tests/test_owner_path_verifier.py`
 - Modify: `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` (등급 갱신)
 
-- [ ] **Step 1: 실패 테스트 작성** — verifier가 각 단계의 pass/fail과 근거를 구조화해 남기는지 검사한다
-- [ ] **Step 2: RED 확인**
-- [ ] **Step 3: 구현** — 실제 나레이션과 실제 B-roll로 ingest → STT → 세그먼트 → 추천 → timeline
-      → preview → 자막 → export를 순서대로 실행하고 각 단계 결과를 JSON으로 기록한다.
-      provider를 대체하지 않는다. 실패해도 중단하지 않고 실패 지점을 기록한다.
-- [ ] **Step 4: GREEN 및 실제 실행**
-- [ ] **Step 5: backlog 등급 갱신 및 커밋**
+- [x] **Step 1: 실패 테스트 작성** — stub provider 거부, 실패해도 중단 없이 9단계 전부 기록되는지 검사
+- [x] **Step 2: RED 확인** — `ModuleNotFoundError: No module named 'scripts.verify_owner_path'`
+- [x] **Step 3: 구현** — `run_owner_path()`가 ingest→STT→세그먼트→추천→timeline→preview→
+      자막→최종렌더→CapCut을 순서대로 실행하고, 실패해도 나머지를 `skipped`로 계속 기록한다.
+      `STUB_PROVIDER_NAMES`에 `mock_stt`와 `deterministic_korean_smoke_stt`를 등록해 거부
+- [x] **Step 4: GREEN(4/4) 및 실제 실행** — owner의 실제 영상에서 나레이션 60초와 B-roll 2개를
+      뽑아 실제 provider(`faster_whisper`, 스텁 없음)로 end-to-end 실행.
+      전사 정확히 성공(14개 세그먼트). `timeline_build`에서 실패 — `S-4`로 별도 기록
+- [x] **Step 5: backlog 등급 갱신 및 커밋**
 
 Commit: `feat: verify the owner path end to end`
+
+**결과 요약:** `F-0`(provider 비활성)는 Task 1로 해소되어 실사용 확인까지 승격했다.
+그런데 실제로 돌려보니 **`S-4`라는 새 차단 지점**을 찾았다 — 세그먼트 14개 전부가
+review 필수로 자동 차단되어 timeline 승인이 거부되고 preview 이후 전 단계가 스킵됐다.
+이건 이번 실측이 아니었다면 몰랐을 문제다. Task 21이 이제 이 원인 규명부터 시작한다.
 
 ---
 
@@ -933,16 +940,26 @@ owner 결정: **완전 자동 배치 후 검토.**
 OSS 채택 계획이 이미 "`초안 만들기` 1회 승인 뒤 ranked placement bundle을 atomic하게 apply"로
 옮겨갔으므로 owner 결정과 충돌하지 않는다. 승인은 초안 생성 시점 1회로 유지한다.
 
+**실측 (2026-08-05, `verify_owner_path.py`, `S-4`):** owner 실제 나레이션 60초로
+end-to-end 실행 시 **세그먼트 14개 전부가 `segment_review_required`로 자동 차단**되어
+`approve_timeline_review`가 거부되고 preview/자막/렌더/CapCut까지 전부 도달 불가능했다.
+점수 임계값 문제가 아니라 review 요구 자체가 항상 켜져 있는 것으로 보인다.
+따라서 이 Task는 `auto_apply_allowed` 설정 이전에 **왜 review가 무조건 걸리는지 원인 규명**이
+선행되어야 한다.
+
 **Files:**
 - Modify: `packages/core-engine/src/videobox_core_engine/director_proposal_service.py`
 - Create: `tests/test_auto_apply_policy.py`
 
-- [ ] **Step 1: 실패 테스트** — 점수 임계값 이상이면 `auto_apply_allowed`가 참이고,
+- [ ] **Step 0: 원인 규명 (선행)** — `HeuristicSegmentAnalyzer`와 review flag 생성 경로를 읽어
+      `segment_review_required`가 무조건 설정되는지, 조건부인지 확인한다.
+      `scripts/verify_owner_path.py`로 재현하며 확인한다
+- [ ] **Step 1: 실패 테스트** — 점수 임계값 이상이면 `auto_apply_allowed`가 참이고 review가 걸리지 않는지,
       미만이면 검수 대상으로 남는지. 권리 경고가 있으면 점수와 무관하게 자동 적용되지 않는지
 - [ ] **Step 2: RED 확인**
 - [ ] **Step 3: 구현** — 자산 종류별 임계값을 설정 가능하게 둔다.
       B-roll·BGM은 자동, 권리 확인이 필요한 것은 검수 유지
-- [ ] **Step 4: GREEN + 커밋**
+- [ ] **Step 4: GREEN + `verify_owner_path.py`로 timeline_build 이후 단계까지 실제 통과 확인 + 커밋**
 
 Commit: `feat: place confident recommendations automatically`
 
