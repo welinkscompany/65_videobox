@@ -1218,7 +1218,43 @@ Slice 번호가 아니라 **의존성과 가치 순서**로 진행한다.
 | 16 | **Task 5** 문서 정합 | 마지막. 실측 결과를 문서에 반영 |
 
 Task 6–9는 서로 독립적이라 위 순서 사이 어디에나 끼울 수 있다.
-Task 10과 12는 이미 완료다.
+
+### 진행 상태 (2026-08-06 기준)
+
+**완료:** Task 1, 2, 3, 4, 10, 11, 11A, 12, 15, 16, 19, 20, 21.
+각 Task 섹션 본문에 실측·커밋 근거가 있다.
+
+**부분 완료 — 이어서 할 일이 명시돼 있다:** Task 13(로컬 LLM 유진 대화).
+로컬 대화 능력 자체는 실제 LM Studio로 검증됐으나, 아래는 **의도적으로 남겨뒀다**
+(무인 세션 중 capability-token 보안 경계를 서둘러 재구현하는 위험을 피하기 위해).
+
+- 기존 채팅 UI를 `HermesRunService`(현재 미배포 gateway에 물려 항상 실패) 대신
+  이 로컬 경로로 실제로 연결하는 작업 — owner와 방식(A: HermesRunService에 로컬
+  폴백 추가 / B: 새 로컬 전용 엔드포인트) 결정 필요
+- 컨테이너→호스트 LM Studio 네트워크 경로(`compose.yaml` `extra_hosts` 등) —
+  Task 19(미디어 분석 worker)도 컨테이너 스택에선 같은 이유로 아직 못 켰다
+- `LocalOpenAICompatibleRuntimeConfig.model_name` 기본값과 실제 로드 모델
+  (`qwen/qwen3.6-35b-a3b`) 불일치 — 환경변수화 필요
+
+**아직 시작 안 함 — 실행 순서대로 다음 차례:** Task 16 안의 Task 18(Drive 폴더 감시),
+Task 17(숏폼 세로 편집), Task 6–9(잔여 결함 4건, 서로 독립적), Task 14(provider 어댑터),
+Task 5(문서 정합, 마지막).
+
+**2026-08-06 코드리뷰로 고치고 넘어간 것 (Task 13/20 관련):**
+
+- `yujin_local_conversation.py`의 정책 차단 정규식이 한국어 표현에만 대응했다.
+  영어로 같은 요청("delete the database", "write me a script")을 하면 차단 없이
+  모델까지 그대로 갔다 — 실제 시스템 접근 권한은 애초에 이 경로에 전혀 없어서
+  데이터가 위험했던 건 아니지만, 의도한 차단 동작 자체가 뚫려 있었다.
+  영어 패턴을 추가하고 회귀 테스트 9건을 더했다(24/24 통과)
+- `director_proposal_service.py`의 semantic scoring fail-open 경로가 예외를
+  완전히 삼켜 로그가 전혀 안 남았다 — 임베딩 provider가 계속 죽어 있어도
+  운영자가 알 방법이 없었다. `logging.warning(exc_info=True)`를 추가했다
+- `contrast.test.ts`가 `borderStrong`/`accentBg`/`accentBorder`/`success`/
+  `successBg` 값을 선언만 하고 실제 CSS 파일과 대조하지 않아, 이 다섯 토큰의
+  드리프트를 못 잡는 상태였다 — 대조 assertion을 추가했다(이미 값은 정확했다)
+
+Task 10과 12도 이미 완료다(위 목록에 포함).
 
 ## 완료 기준
 
