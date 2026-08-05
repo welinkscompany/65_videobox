@@ -918,7 +918,7 @@ Task 15의 `orientation`이 선행 조건이므로 그 뒤에 다룬다.
 > 이건 내가 직접 녹화해서 넣는거라 진짜 내 자산인거야."
 > "메타검색(의미 연관검색)이 필요했던 거야. 왜냐면 100% 똑같은 형태의 영상을 만들수가 없잖아."
 
-### Task 19: 미디어 분석 worker 연결 (D-2, A-1)
+### Task 19: 미디어 분석 worker 연결 (D-2, A-1) — **활성화 완료 (2026-08-05)**
 
 현재 컨테이너는 `_UnavailableMediaAnalysisService` 스텁을 써서 모든 분석 요청을
 즉시 `MEDIA_ANALYSIS_WORKER_UNAVAILABLE`로 차단한다. 그 결과 태그·설명·임베딩이
@@ -948,19 +948,39 @@ Task 15의 `orientation`이 선행 조건이므로 그 뒤에 다룬다.
 - Modify: `packages/core-engine/src/videobox_core_engine/media_analysis.py`
 - Create: `tests/test_media_analysis_worker.py`
 
-- [ ] **Step 1: 실패 테스트** — worker가 구성되면 분석이 `blocked`가 아니라 실제 결과를 내는지,
-      태그 4축(찍힌 대상 / 장소·배경 / 분위기·톤 / 구도·움직임)이 채워지는지,
-      worker 부재 시 기존 fail-closed 동작이 유지되는지
-- [ ] **Step 2: RED 확인**
+**실측으로 계획서 전제를 정정했다.** `packages/core-engine/src/videobox_core_engine/media_analysis.py`의
+`MediaAnalysisService`는 이미 vision 분석 결과 저장·태그 4축·임베딩·재시작 후 영속까지
+**전부 완성돼 있었고 이미 테스트도 있었다**(`tests/test_api_media_analysis.py`의
+`test_explicit_local_profile_preflights_exact_loopback_and_wires_real_provider`,
+`test_analysis_persists_selected_profile_scene_windows_and_embeddings_across_restart` 등).
+`services/api/src/videobox_api/main.py:create_app`도 `enable_local_media_analysis=True`를
+받으면 실제 LM Studio provider를 완전히 연결하는 코드까지 이미 있었다.
+**막혀 있던 건 설계가 아니라 Task 1과 같은 종류의 활성화 누락이었다** —
+`scripts/run_api.py`와 컨테이너 factory 어느 경로도 이 플래그를 켜지 않아
+`_UnavailableMediaAnalysisService`가 항상 쓰였다.
 
-Run: `.venv\Scripts\python.exe -m pytest tests/test_media_analysis_worker.py -q`
+- [x] **Step 1: 실패 테스트** — `tests/test_media_analysis_worker.py`: 환경변수 해석 함수 기본값·on 값,
+      그리고 인자 없이 호출되는 factory 경로(컨테이너 패턴)가 플래그 on일 때 실제 worker를,
+      off일 때 여전히 `_UnavailableMediaAnalysisService`를 쓰는지 (4개 테스트)
+- [x] **Step 2: RED 확인** — `resolve_enable_local_media_analysis` 없어 import 실패,
+      factory 경로 테스트는 `media_analysis_vision_provider`가 여전히 `None`이라 실패
+- [x] **Step 3: 구현** — `settings.py`에 `resolve_enable_local_media_analysis()`
+      (`VIDEOBOX_MEDIA_ANALYSIS_ENABLED`, Task 1과 같은 패턴) 추가.
+      `create_app`의 `enable_local_media_analysis` 파라미터를 `bool | None = None`으로 바꿔
+      명시적으로 안 넘기면 이 환경변수로 해석하게 했다 — `scripts/run_api.py`는 코드 변경 없이
+      환경변수만 켜면 실제 worker를 쓴다. 태그·임베딩 저장 로직은 이미 있어 손대지 않았다
+- [x] **Step 4: GREEN(16/16, 기존 `test_api_media_analysis.py` 포함) + 실제 LM Studio로 확인** —
+      `create_app(enable_local_media_analysis=True)`를 실제 실행 중인 LM Studio에 대고 직접
+      호출해 `media_analysis_vision_provider`가 진짜 `LMStudioVisionProvider`로 채워지는 것을
+      확인했다(mock 아님, 실제 preflight 요청 3회 왕복)
 
-- [ ] **Step 3: 구현** — vision 분석 결과를 자산 metadata에 저장하고 임베딩을 생성한다.
-      Task 15가 저장 구조를 이미 열어놨으므로 같은 자리에 넣는다.
-      분석 실패는 등록을 막지 않고 해당 필드만 비운다
-- [ ] **Step 4: GREEN + 실제 B-roll로 분류 확인 + 커밋**
+**컨테이너 스택엔 아직 안 켰다.** `compose.yaml`에 이 플래그를 켜면 컨테이너가 시작 시점에
+`127.0.0.1:1234`로 동기 preflight를 시도하는데, Task 13에서 이미 확인했듯 컨테이너→호스트
+네트워크 경로가 아직 없어 **컨테이너 자체가 기동 실패한다.** 호스트 네이티브 dev 서버
+(`scripts/run_api.py`, 이번 실측 경로)는 환경변수만 켜면 바로 동작한다.
+컨테이너 지원은 Task 13의 네트워크 경로 후속 작업과 함께 처리한다.
 
-Commit: `feat: classify b-roll with the local vision model`
+Commit: `feat: turn on the local media analysis worker`
 
 ### Task 20: 의미 검색 실제 동작 확인 (A-1)
 
