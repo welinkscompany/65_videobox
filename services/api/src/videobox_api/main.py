@@ -69,6 +69,7 @@ from videobox_core_engine.settings import (
     resolve_auto_approve_segment_review,
     resolve_capcut_draft_export_config,
     resolve_database_url,
+    resolve_enable_local_media_analysis,
     resolve_container_snapshot_root,
     resolve_projects_root,
     resolve_user_library_root,
@@ -370,7 +371,7 @@ def create_app(
     analysis_clock=None,
     media_analysis_poll_interval_seconds: float = 0.05,
     media_analysis_profile: dict | None = None,
-    enable_local_media_analysis: bool = False,
+    enable_local_media_analysis: bool | None = None,
     media_analysis_http_client=None,
     allow_test_media_analysis_providers: bool = False,
     creation_interview_runtime: CreationInterviewRuntime | None = None,
@@ -490,15 +491,20 @@ def create_app(
     )
     # Analysis is opt-in by dependency injection in normal API tests and runtime wiring.
     # Enqueue remains durable even where a local vision profile is unavailable.
+    resolved_enable_local_media_analysis = (
+        enable_local_media_analysis
+        if enable_local_media_analysis is not None
+        else resolve_enable_local_media_analysis()
+    )
     resolved_vision_provider = vision_provider
     resolved_media_probe = media_probe
     resolved_profile = media_analysis_profile
-    if not enable_local_media_analysis and not allow_test_media_analysis_providers:
+    if not resolved_enable_local_media_analysis and not allow_test_media_analysis_providers:
         if resolved_vision_provider is not None:
             raise ValueError("Injected media analysis providers require allow_test_media_analysis_providers=True; production must use the explicit local LM Studio profile.")
         if embedding_provider is not None:
             raise ValueError("Injected media analysis providers require allow_test_media_analysis_providers=True; production must use the explicit local LM Studio profile.")
-    if enable_local_media_analysis:
+    if resolved_enable_local_media_analysis:
         # This explicit profile is the only production construction path.  The
         # transport validates the exact loopback endpoint before each request,
         # and we preflight loaded native capability before a worker is exposed.

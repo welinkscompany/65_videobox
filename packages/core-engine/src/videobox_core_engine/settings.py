@@ -73,6 +73,17 @@ def resolve_auto_approve_segment_review() -> bool:
     return _environment_flag("VIDEOBOX_AUTO_APPROVE_SEGMENT_REVIEW")
 
 
+def resolve_enable_local_media_analysis() -> bool:
+    """Resolve whether the container/dev-server factory path should wire the
+    real LM Studio vision+embedding worker instead of leaving B-roll analysis
+    on `_UnavailableMediaAnalysisService`. Mirrors the STT/CapCut activation
+    pattern (Task 1): the uvicorn factory receives no arguments, so this must
+    be read from the environment rather than assumed at the call site.
+    Defaults to False so existing tests that don't opt in keep the
+    fail-visibly-blocked behavior instead of requiring a live LM Studio."""
+    return _environment_flag("VIDEOBOX_MEDIA_ANALYSIS_ENABLED")
+
+
 def resolve_whisper_stt_config() -> "WhisperSTTConfig":
     """Resolve speech-to-text settings for callers that pass no config.
 
