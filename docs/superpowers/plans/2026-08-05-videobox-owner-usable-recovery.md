@@ -144,9 +144,14 @@ backlog 각 항목을 실제 동작으로 확인해 근거 등급을 `관측`으
 
 | 후보 | 분류 | 이유 |
 |---|---|---|
-| `scripts/verify-production-readiness-smoke.py` | `partial port` | work-root/artifact/ffprobe 구조는 재사용한다. 다만 이 스크립트는 LLM·STT·TTS를 deterministic으로 대체하므로 그 부분은 쓰지 않는다 |
-| `scripts/owner_sample_edit_package.py` | `partial port` | owner 실제 샘플로 edit package를 만드는 흐름을 재사용한다 |
+| `scripts/verify-production-readiness-smoke.py` | `partial port` | work-root/artifact/ffprobe 구조만 재사용한다. `DeterministicKoreanSTTProvider`와 `DeterministicWaveTTSProvider`는 **반입하지 않는다** |
+| `scripts/owner_sample_edit_package.py` | `partial port` | 실제 샘플 ingest와 package 조립 흐름만 재사용한다. **주의:** 이 스크립트의 `create_app` 호출(472행)에 provider 인자가 없어 기본 mock STT로 돌아간다. 재사용 시 실제 provider 설정을 반드시 주입한다 |
 | `scripts/owner-ready.ps1 -Mode Smoke` | `exclude` | static/non-live verifier라 실제 파이프라인을 돌리지 않는다 |
+| r4 산출물 재사용 | `exclude` | stub으로 만들어져 품질 판정 근거가 될 수 없다 |
+
+**이 Task의 핵심 제약:** 어떤 stub provider도 주입하지 않는다.
+기존 검증 스크립트가 실제 AI 경로를 우회한 것이 지금 문제의 원인이므로,
+같은 방식을 재사용하면 같은 결과가 나온다.
 
 **Files:**
 - Create: `scripts/verify_owner_path.py`
@@ -253,6 +258,30 @@ API와 UI 모두 없다. 데이터 보존 정책과 확인 절차를 함께 설�
 `새 영상 만들기`가 3곳에 있다. 주 진입점을 하나로 정한다.
 
 ---
+
+## 이 계획서의 갱신 규칙
+
+이 계획서는 확정본이 아니라 **실측에 따라 갱신되는 문서**다.
+작성 근거 중 일부는 이미 역방향 검증으로 뒤집혔다.
+
+- 실측이 계획서의 전제를 반증하면 **해당 Task를 즉시 수정한다.** 그대로 진행하지 않는다.
+- 정정할 때는 이전 내용을 조용히 덮어쓰지 않고 무엇이 왜 틀렸는지 남긴다.
+  근거 기록은 `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md`가 맡는다.
+- 정정이 다른 Task의 전제에 영향을 주는지 매번 확인한다.
+  실제로 `F-0` 정정이 Task 2의 재사용 분류를 바꿨다.
+
+**이미 발생한 정정 이력:**
+
+| 시점 | 최초 판단 | 정정 후 | 계기 |
+|---|---|---|---|
+| 초기 | 편집기 디자인이 엉망이다 | 2026-07-22 owner가 5개 viewport로 승인한 디자인이다 | `docs/decisions/` 확인 |
+| 초기 | 색상 시스템 충돌은 구조적 결함이다 | 변수만 오렌지로 바꾼 내 변경이 만든 충돌이다 | 승인 팔레트 확인 |
+| 초기 | B-roll 자동 분류 차단은 치명 버그다 | 의도적 fail-closed 설계이며 구성 공백이다 | 코드 확인 |
+| 중반 | Hermes는 로그인만 하면 동작한다 | §23이 gateway·signer·OAuth·mutation을 미완료로 표기한다 | 최상위 계획서 §23 |
+| 후반 | 모든 산출물이 `MockSTTProvider`의 가짜 두 줄 위에 있다 | r4는 `deterministic_korean_smoke_stt`로 만들어졌고 자막 텍스트는 대본에서 왔다 | **역방향 검증** |
+
+정정 다섯 건 중 네 건이 "확인 없이 단정"에서 나왔다.
+그래서 이 계획의 Task 2(런타임 기준선)를 다른 구현보다 앞에 둔다.
 
 ## 이 계획에 넣지 않은 것
 
