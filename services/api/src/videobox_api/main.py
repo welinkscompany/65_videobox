@@ -66,6 +66,7 @@ from videobox_core_engine.settings import (
     LocalOpenAICompatibleRuntimeConfig,
     TTSEngineConfig,
     WhisperSTTConfig,
+    resolve_auto_approve_segment_review,
     resolve_capcut_draft_export_config,
     resolve_database_url,
     resolve_container_snapshot_root,
@@ -481,6 +482,7 @@ def create_app(
         capcut_handoff_service=capcut_handoff_service,
         tts_provider=tts_provider or _build_tts_provider(resolved_tts_engine_config),
         final_renderer=final_renderer,
+        auto_approve_segment_review=resolve_auto_approve_segment_review(),
     )
     resolved_creation_interview_runtime = creation_interview_runtime or DeterministicCreationInterviewRuntime()
     orchestrator = ApiOrchestrator(

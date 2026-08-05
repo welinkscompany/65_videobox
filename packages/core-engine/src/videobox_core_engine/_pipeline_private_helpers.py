@@ -262,6 +262,11 @@ class _PipelinePrivateHelpersMixin:
             for flag in self._normalized_timeline_review_flags(timeline)
             if _canonical_runtime_review_flag_code(flag.get("code")) in VALID_RUNTIME_BLOCKING_REVIEW_FLAG_CODES
         ]
+        if getattr(self, "auto_approve_segment_review", False):
+            # The flag itself is left in timeline["review_flags"] untouched --
+            # the owner reviews the actual result later. Only its power to
+            # block approval is removed.
+            review_flags = [flag for flag in review_flags if _canonical_runtime_review_flag_code(flag.get("code")) != "segment_review_required"]
         recommendation_blocker_sources: list[Any] = []
         pending_recommendations = timeline.get("pending_recommendations", [])
         if isinstance(pending_recommendations, list):

@@ -66,6 +66,13 @@ def resolve_capcut_draft_export_config() -> "CapCutDraftExportConfig":
     )
 
 
+def resolve_auto_approve_segment_review() -> bool:
+    """Owner decision (2026-08-05, Task 21, Option A): place everything
+    automatically and review the actual result afterward. Defaults to False
+    so callers that do not opt in keep the existing blocking behavior."""
+    return _environment_flag("VIDEOBOX_AUTO_APPROVE_SEGMENT_REVIEW")
+
+
 def resolve_whisper_stt_config() -> "WhisperSTTConfig":
     """Resolve speech-to-text settings for callers that pass no config.
 

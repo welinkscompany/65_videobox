@@ -165,8 +165,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         capcut_handoff_service: CapCutHandoffService | None = None,
         tts_provider: Any | None = None,
         transcript_aligner: TranscriptAligner | None = None,
+        auto_approve_segment_review: bool = False,
     ) -> None:
         self.store = store
+        # Owner decision (2026-08-05, Task 21): defaults to False so existing
+        # blocking-behavior tests are unaffected unless a caller opts in.
+        self.auto_approve_segment_review = auto_approve_segment_review
         self.stt_provider = stt_provider or MockSTTProvider()
         self.segment_analyzer = segment_analyzer or HeuristicSegmentAnalyzer()
         self.broll_recommender = broll_recommender or KeywordBrollRecommender()
@@ -2009,7 +2013,17 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 timeline=materialized_timeline,
             )
-            with tempfile.TemporaryDirectory(prefix="videobox_capcut_draft_") as raw_drafts_root:
+            # ignore_cleanup_errors=True: pycapcut's export does not always
+            # close every file handle it opens inside the temp draft tree. On
+            # POSIX that is harmless -- unlinking an open file works. On
+            # Windows, cleanup on `with` exit raises PermissionError for a
+            # directory that still has an open handle in it, which used to
+            # mark an already-persisted, otherwise-successful export as
+            # FAILED. The persist step (save_capcut_draft_export, above) has
+            # already copied the draft out by the time cleanup runs, so a
+            # cleanup failure here does not lose anything real -- at worst it
+            # leaves a stray temp directory for the OS to reclaim later.
+            with tempfile.TemporaryDirectory(prefix="videobox_capcut_draft_", ignore_cleanup_errors=True) as raw_drafts_root:
                 draft_path = self.pycapcut_exporter.export_timeline(
                     project_id=project_id,
                     timeline=materialized_timeline,

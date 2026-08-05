@@ -70,6 +70,10 @@ services:
       VIDEOBOX_CAPCUT_WIDTH: ${VIDEOBOX_CAPCUT_WIDTH:-1920}
       VIDEOBOX_CAPCUT_HEIGHT: ${VIDEOBOX_CAPCUT_HEIGHT:-1080}
       VIDEOBOX_CAPCUT_FPS: ${VIDEOBOX_CAPCUT_FPS:-30}
+      # Owner decision (2026-08-05, Task 21, Option A): place everything
+      # automatically; review the actual result afterward rather than
+      # gating approval on a confidence heuristic before anything renders.
+      VIDEOBOX_AUTO_APPROVE_SEGMENT_REVIEW: ${VIDEOBOX_AUTO_APPROVE_SEGMENT_REVIEW:-1}
       VIDEOBOX_DATABASE_URL: postgresql://${POSTGRES_USER:-videobox}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.container}@videobox-postgres:5432/${POSTGRES_DB:-videobox}
     volumes:
       - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data
