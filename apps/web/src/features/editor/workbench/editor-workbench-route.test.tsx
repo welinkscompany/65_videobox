@@ -1854,6 +1854,62 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(2);
   });
 
+  it("automatically starts a new preview after a successful edit instead of waiting for a manual click (F-4)", async () => {
+    let resolveUpdate!: (value: unknown) => void;
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(2, 1) as never);
+    mockEditingSessionRevisions(1, 2);
+    vi.spyOn(api, "updateEditingSessionSegmentBounds")
+      .mockImplementation(() => new Promise((resolve) => { resolveUpdate = resolve; }) as never);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+    await waitFor(() => expect(resolveUpdate).toBeDefined());
+    expect(startPreview).not.toHaveBeenCalled();
+
+    resolveUpdate({});
+    await expectEditorRevision(2);
+
+    await waitFor(() => expect(startPreview).toHaveBeenCalledWith("project-a", "session-a", { expected_revision: 2 }));
+  });
+
+  it("keeps the manual preview button as a fallback when the automatic refresh fails", async () => {
+    let resolveUpdate!: (value: unknown) => void;
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(2, 1) as never);
+    mockEditingSessionRevisions(1, 2);
+    vi.spyOn(api, "updateEditingSessionSegmentBounds")
+      .mockImplementation(() => new Promise((resolve) => { resolveUpdate = resolve; }) as never);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockRejectedValue(new Error("network error"));
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+    resolveUpdate({});
+    await expectEditorRevision(2);
+
+    await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "미리보기 새로 만들기" })).toBeEnabled();
+  });
+
   it("saves linked caption text through the same revision fence and refreshes the manifest", async () => {
     const load = vi.spyOn(api, "getEditorPlaybackManifest")
       .mockResolvedValueOnce(captionManifest(4) as never)

@@ -495,12 +495,14 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       expectedRevision: currentView.expectedRevision,
     });
     let resultMessage = "변경 내용을 저장했어요.";
+    let mutationSucceeded = true;
     try {
       await run(port, isCurrent);
       if (isCurrent()) {
         setMutation({ isSaving: true, message: "변경 내용을 저장했어요. 최신 내용을 불러오고 있어요." });
       }
     } catch (error) {
+      mutationSucceeded = false;
       resultMessage = error instanceof ApiConflictError
         ? "다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요."
         : "변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.";
@@ -521,6 +523,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         resultMessage = "최신 편집 내용을 확인하지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
       } else {
         setState({ key: requestKey, view: next.view, session: next.session, error: null });
+        // Auto-refresh the preview after a successful edit instead of leaving
+        // the creator to notice it's stale and press the manual button
+        // themselves (F-4). A failure here is silent -- the manual refresh
+        // button in preview-stage.tsx stays as the fallback.
+        if (mutationSucceeded) {
+          void api.startExactPreview(projectId, sessionId, { expected_revision: next.view.expectedRevision })
+            .then(() => { if (isCurrentRefresh()) setRefreshToken((current) => current + 1); })
+            .catch(() => {});
+        }
       }
     } catch {
       if (isCurrent()) {
