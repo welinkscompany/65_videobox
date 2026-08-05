@@ -402,14 +402,45 @@ LM Studio에 닿기 어려운 상태다. `D-2`의 난이도는 우연이 아니�
 
 `scripts/run_api.py:25`(개발 서버)는 STT만 `enabled=True`로 켠다. TTS·CapCut은 어느 경로에서도 꺼져 있다.
 
-**이것이 "테스트 2960개 통과"와 "실사용 불가"가 동시에 성립하는 이유로 보인다.**
-자막·세그먼트·B-roll 텍스트 매칭·타임라인이 모두 가짜 전사 위에 세워진다.
+**역방향 검증 결과 (2026-08-05) — 최초 주장을 정정한다.**
+
+처음에는 "자막·세그먼트·B-roll 매칭이 모두 `MockSTTProvider`의 가짜 두 줄 위에 세워진다"고 적었다.
+실제 산출물에서 거꾸로 추적하니 **기전이 달랐다.** r4 자막은 실제 한국어였다.
+
+`artifacts/owner-sample-edit-20260803-r4`의 `analysis/transcripts/transcript_001.json`:
+
+```
+"provider_name": "deterministic_korean_smoke_stt"
+"segments": [ {0.0 → 300.0}, {300.0 → 600.0} ]
+```
+
+`scripts/verify-production-readiness-smoke.py:103` `DeterministicKoreanSTTProvider`:
+
+- `del request`로 **오디오를 통째로 버린다**
+- 고정 문장 `SOURCE_CAPTIONS`와 고정 경계 `0–300`, `300–600`을 반환한다
+
+같은 파일의 `DeterministicWaveTTSProvider`는 `b"\x10\x00"` 반복으로
+**일정한 톤**을 쓴다. 사람 목소리가 아니다.
+
+정정된 사실:
+
+1. 컨테이너 런타임은 `MockSTTProvider`를 쓴다 (별개 경로, 위 체인으로 확인)
+2. r4 증거물은 `deterministic_korean_smoke_stt`로 만들어졌다 (산출물에서 확인)
+3. 둘 다 실제 음성 인식이 아니다. **어느 경로에서도 실제 STT가 실행된 적이 없다**
+4. r4 자막 텍스트가 한국어인 이유는 stub이 대본 문장을 되돌려주기 때문이다.
+   실제 발화를 인식한 결과가 아니다
+5. r4 자막 타이밍은 10분을 정확히 반씩 나눈 고정값이다. 실제 음성 정렬이 아니다
+6. r4의 TTS 산출물은 목소리가 아니라 일정한 톤이다
+
+**따라서 r4는 "실제 편집 결과물"이 아니라 파이프라인 배관 검증물이다.**
+2026-08-04 handoff가 r4를 "검증 증거"로 보존하라고 한 것은 배관 검증 증거로는 맞지만,
+**사람이 r4를 보고 들어서 품질을 판정하는 용도로는 쓸 수 없다.**
+Task 9 acceptance를 r4로 수행하면 실제 품질에 대해 아무것도 알 수 없다.
+
 `verify-production-readiness-smoke.py`의 docstring도
 "Only LLM/STT/TTS providers are deterministic"이라고 명시한다.
-즉 기존 검증은 의도적으로 실제 AI 경로를 우회한다.
-
-다만 이 인과는 **추정**이다. r4 결과물이 실제로 얼마나 쓸 만한지는
-사람이 보고 들어야 확정된다.
+기존 검증은 의도적으로 실제 AI 경로를 우회하며, 그 사실을 숨기지 않았다.
+문제는 그 결과물이 이후 "owner sample 검증 증거"로 승격되어 인용된 것이다.
 
 ### F-1. 편집 화면 데드엔드 (높음)
 

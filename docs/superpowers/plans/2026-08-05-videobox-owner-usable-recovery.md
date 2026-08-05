@@ -15,7 +15,13 @@
 **Tech Stack:** Python 3.12 / FastAPI / pytest, React 19 / Vite / vitest, FFmpeg, Docker Compose.
 
 **근거 문서:** `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md`
-(결함 8건, 결정 4건, 아키텍처 발견 2건, 범위 충돌 3건, 각 항목 근거 등급 포함)
+(결함 9건, 결정 4건, 아키텍처 발견 2건, 범위 충돌 3건, 각 항목 근거 등급 포함)
+
+**역방향 검증으로 확인한 전제:** `artifacts/.../r4`의 `transcript_001.json`을 소스까지 역추적한 결과,
+r4는 `deterministic_korean_smoke_stt`로 만들어졌다. 이 stub은 오디오를 버리고 대본 문장과
+고정 시간(`0–300`, `300–600`)을 반환한다. TTS stub은 일정한 톤을 쓴다.
+**따라서 r4로는 사람이 품질을 판정할 수 없다.** Task 2의 기준선은 r4 재사용이 아니라
+실제 provider로 새로 만들어야 한다.
 
 ---
 
