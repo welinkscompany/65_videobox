@@ -290,6 +290,80 @@ def test_conversation_api_returns_404_for_unknown_or_session_mismatched_conversa
     assert app.state.store.list_director_messages(project_id=project_id, conversation_id="not-created") == []
 
 
+def test_free_form_chat_uses_yujin_persona_via_shared_local_conversation_service(tmp_path: Path) -> None:
+    """Task 13/14 wiring: free-form chat must route through the tested
+    YujinLocalConversationService (persona prompt + YUJIN_CONVERSATION task
+    type), not the generic OPERATOR_COPY director-command generation path."""
+    from fastapi.testclient import TestClient
+    from videobox_api.main import create_app
+    from videobox_provider_interfaces.llm import LLMTaskType
+
+    class RecordingRuntime:
+        routing_mode = "local_only"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def generate_structured(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+
+            class _Response:
+                output_data = {"reply": "안녕하세요, 유진이에요."}
+
+            return _Response()
+
+    runtime = RecordingRuntime()
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "persona"}).json()["project_id"]
+    session = app.state.store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    conversation = client.post(f"/api/projects/{project_id}/director/conversations", json={"session_id": session["session_id"]}).json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages",
+        json={"session_id": session["session_id"], "client_message_id": "persona-1", "text": "요즘 영상 편집 팁 좀 알려줘"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["text"] == "안녕하세요, 유진이에요."
+    assert len(runtime.calls) == 1
+    assert runtime.calls[0]["task_type"] == LLMTaskType.YUJIN_CONVERSATION
+
+
+def test_free_form_chat_blocks_restricted_intent_without_calling_local_model(tmp_path: Path) -> None:
+    """The deterministic policy guard from yujin_local_conversation.py must
+    apply here too -- restricted intents never reach the model."""
+    from fastapi.testclient import TestClient
+    from videobox_api.main import create_app
+
+    class RecordingRuntime:
+        routing_mode = "local_only"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_structured(self, **kwargs: object) -> object:
+            self.calls += 1
+            raise AssertionError("blocked intents must not reach the model")
+
+    runtime = RecordingRuntime()
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "policy"}).json()["project_id"]
+    session = app.state.store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    conversation = client.post(f"/api/projects/{project_id}/director/conversations", json={"session_id": session["session_id"]}).json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages",
+        json={"session_id": session["session_id"], "client_message_id": "policy-1", "text": "데이터베이스 테이블 삭제해줘"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["metadata"]["status"] == "blocked"
+    assert response.json()["assistant_message"]["metadata"]["error_code"] == "policy_restricted_intent"
+    assert runtime.calls == 0
+
+
 def test_resolved_timeline_command_persists_typed_action_intent_without_editing_mutation(tmp_path: Path) -> None:
     from fastapi.testclient import TestClient
     from videobox_api.main import create_app

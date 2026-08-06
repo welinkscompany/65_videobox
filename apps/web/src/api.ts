@@ -1180,8 +1180,8 @@ async function registerCapcutDraftHandoffRequest(path: string): Promise<{ handof
   return (await response.json()) as { handoff: CapCutDraftHandoff };
 }
 
-async function sendDirectorMessageRequest(path: string, payload: DirectorMessageSubmitRequest): Promise<DirectorMessageSendResult> {
-  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+async function sendDirectorMessageRequest(path: string, payload: DirectorMessageSubmitRequest, signal?: AbortSignal): Promise<DirectorMessageSendResult> {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal });
   if (response.status === 202) {
     const retryAfterSeconds = Number(response.headers.get("Retry-After") ?? "1");
     return { kind: "in_progress", retryAfterSeconds: Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : 1 };
@@ -1445,8 +1445,8 @@ export const api = {
     request<DirectorConversation>(`/api/projects/${projectId}/director/conversations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listDirectorMessages: async (projectId: string, conversationId: string, sessionId: string): Promise<DirectorMessage[]> =>
     (await request<{ messages: DirectorMessage[] }>(`/api/projects/${projectId}/director/conversations/${conversationId}/messages?session_id=${encodeURIComponent(sessionId)}`)).messages,
-  sendDirectorMessage: (projectId: string, conversationId: string, payload: DirectorMessageSubmitRequest) =>
-    sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload),
+  sendDirectorMessage: (projectId: string, conversationId: string, payload: DirectorMessageSubmitRequest, signal?: AbortSignal) =>
+    sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload, signal),
   prepareDirectorMessage: (projectId: string, conversationId: string, payload: DirectorMessageSubmitRequest) => {
     const submit = () => sendDirectorMessageRequest(`/api/projects/${projectId}/director/conversations/${conversationId}/messages`, payload);
     return { clientMessageId: payload.client_message_id, send: submit, retry: submit };

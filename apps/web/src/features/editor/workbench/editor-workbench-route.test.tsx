@@ -4,8 +4,6 @@ import { startTransition, StrictMode, Suspense, useState } from "react";
 
 import { ApiConflictError, api } from "../../../api";
 import { EditorWorkbenchRoute, findHermesRunProposalId, prepareProjectAssetBrowserPreview } from "./EditorWorkbenchRoute";
-import * as hermesSseClient from "./hermesSseClient";
-import type { HermesSseEvent } from "./hermesSseClient";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -3343,105 +3341,49 @@ describe("EditorWorkbenchRoute", () => {
     expect(rows).toEqual(["나 첫 요청", "나 동시 요청", "유진 첫 답", "유진 둘째 답"]);
   });
 
-  it("streams one temporary assistant bubble, disables only chat submit, then reconciles durable rows", async () => {
-    let emit!: (event: HermesSseEvent) => void;
-    let finish!: () => void;
+  it("sends a message and shows the persisted Yujin reply from the local endpoint", async () => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [], proposal: null, references: [],
     } as never);
-    const createRun = vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-1",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-1/events",
-    });
-    const response = new Response("", { headers: { "Content-Type": "text/event-stream" } });
-    const openEvents = vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(response);
-    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([
-      { message_id: "user-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "장면을 설명해 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000001", created_at: "1" },
-      { message_id: "assistant-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "차분한 장면이에요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
-    ] as never);
-    vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation(async (options) => {
-      await options.open(0);
-      emit = options.onEvent;
-      await new Promise<void>((resolve) => { finish = resolve; });
-    });
+    const send = vi.spyOn(api, "sendDirectorMessage").mockResolvedValue({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "장면을 설명해 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000001", created_at: "1" },
+        assistant_message: { message_id: "assistant-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "차분한 장면이에요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+      },
+    } as never);
 
     render(<StrictMode><EditorWorkbenchRoute projectId="project-a" sessionId="session-a" /></StrictMode>);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    let composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "장면을 설명해 줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
 
-    await waitFor(() => expect(openEvents).toHaveBeenCalledTimes(1));
-    expect(createRun).toHaveBeenCalledTimes(1);
-    expect(createRun).toHaveBeenCalledWith("project-a", "conversation-1", {
+    expect(await screen.findByText("차분한 장면이에요.")).toBeVisible();
+    expect(send).toHaveBeenCalledWith("project-a", "conversation-1", {
       session_id: "session-a",
       client_message_id: "00000000-0000-4000-8000-000000000001",
       text: "장면을 설명해 줘",
-      expected_session_revision: 1,
-      selected_segment_id: null,
     }, expect.any(AbortSignal));
     expect(composer).toHaveValue("");
-    expect(composer).toBeDisabled();
-    expect(clipSelectionButton("n-1")).toBeEnabled();
-    const streamSignal = openEvents.mock.calls[0][3];
-    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
-    expect(streamSignal.aborted).toBe(false);
-
-    act(() => {
-      emit({ event_id: 1, event_type: "run_started", text: "", retryable: false });
-      emit({ event_id: 2, event_type: "text_delta", text: "차분한 ", retryable: false });
-      emit({ event_id: 3, event_type: "text_delta", text: "장면이에요.", retryable: false });
-    });
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
-    expect(screen.getAllByText("차분한 장면이에요.")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    expect(createRun).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      emit({ event_id: 4, event_type: "run_completed", text: "차분한 장면이에요.", retryable: false });
-      finish();
-    });
-    expect(await screen.findByText("차분한 장면이에요.")).toBeVisible();
-    expect(api.listDirectorMessages).toHaveBeenCalledWith("project-a", "conversation-1", "session-a");
     expect(composer).toBeEnabled();
+    expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
-  it("keeps a route-owned stream alive across dock close and exposes explicit cancel without disabling manual editing", async () => {
-    let finish!: () => void;
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
-      "00000000-0000-4000-8000-000000000021",
-    );
+  it("aborts an in-flight local send on explicit cancel and keeps manual editing enabled", async () => {
+    let sendSignal!: AbortSignal;
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [], proposal: null, references: [],
     } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-cancel",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-cancel/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
-      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
-    );
-    const cancel = vi.spyOn(api, "cancelHermesRun")
-      .mockRejectedValueOnce(new Error("PRIVATE cancel failure"))
-      .mockResolvedValueOnce();
-    const stream = vi.spyOn(
-      hermesSseClient,
-      "streamHermesSseWithReconnect",
-    ).mockImplementation(async (options) => {
-      options.onEvent({
-        event_id: 1,
-        event_type: "run_started",
-        text: "",
-        retryable: false,
+    vi.spyOn(api, "sendDirectorMessage").mockImplementation((_projectId, _conversationId, _payload, signal) => {
+      sendSignal = signal!;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
       });
-      await new Promise<void>((resolve) => { finish = resolve; });
     });
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
@@ -3452,36 +3394,21 @@ describe("EditorWorkbenchRoute", () => {
       { target: { value: "취소할 요청" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await waitFor(() => expect(stream).toHaveBeenCalledOnce());
-    expect(screen.getByRole("button", { name: "답변 중단" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "유진에게 추천받기" })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "답변 중단" })).toBeEnabled());
     expect(clipSelectionButton("n-1")).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
-    expect(cancel).not.toHaveBeenCalled();
-    expect(stream.mock.calls[0][0].signal.aborted).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.click(screen.getByRole("button", { name: "답변 중단" }));
 
-    expect(await screen.findByText("답변 중단 요청을 보내지 못했어요. 답변은 계속 진행 중이에요.")).toBeVisible();
-    expect(stream.mock.calls[0][0].signal.aborted).toBe(false);
+    expect(sendSignal.aborted).toBe(true);
+    expect(await screen.findByText("유진의 답을 받지 못했어요.")).toBeVisible();
+    expect(screen.queryByText("나 취소할 요청")).toBeNull();
+    expect(screen.getByRole("button", { name: "유진에게 추천받기" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
     expect(clipSelectionButton("n-1")).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "답변 중단" }));
-
-    await waitFor(() => expect(cancel).toHaveBeenLastCalledWith(
-      "project-a",
-      "conversation-1",
-      "run-cancel",
-      expect.any(AbortSignal),
-    ));
-    expect(cancel).toHaveBeenCalledTimes(2);
-    expect(clipSelectionButton("n-1")).toBeEnabled();
-    await act(async () => { finish(); });
   });
 
-  it("fences late Hermes publication after a different Director operation starts on the same route", async () => {
-    let emit!: (event: HermesSseEvent) => void;
-    let finish!: () => void;
+  it("fences a late local reply after a different Director operation starts on the same route", async () => {
+    let releaseSend!: (value: unknown) => void;
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
       "00000000-0000-4000-8000-000000000024",
     );
@@ -3491,27 +3418,12 @@ describe("EditorWorkbenchRoute", () => {
       proposal: directorProposal("proposal-existing"),
       references: [],
     } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-stale-director-operation",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-stale-director-operation/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
-      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
+    vi.spyOn(api, "sendDirectorMessage").mockImplementation(
+      () => new Promise((resolve) => { releaseSend = resolve; }) as never,
     );
-    const durable = vi.spyOn(api, "listDirectorMessages");
-    const getProposal = vi.spyOn(api, "getDirectorProposal");
     const preflight = vi.spyOn(api, "preflightDirectorProposal").mockImplementation(
       () => new Promise(() => undefined) as never,
     );
-    vi.spyOn(api, "cancelHermesRun").mockResolvedValue();
-    vi.spyOn(
-      hermesSseClient,
-      "streamHermesSseWithReconnect",
-    ).mockImplementation(async (options) => {
-      emit = options.onEvent;
-      await new Promise<void>((resolve) => { finish = resolve; });
-    });
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
@@ -3521,28 +3433,28 @@ describe("EditorWorkbenchRoute", () => {
       { target: { value: "늦게 끝날 요청" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await waitFor(() => expect(emit).toBeTypeOf("function"));
+    await waitFor(() => expect(releaseSend).toBeTypeOf("function"));
 
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith(
       "project-a",
       "proposal-existing",
     ));
-    expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeDisabled();
 
-    act(() => {
-      emit({ event_id: 1, event_type: "run_started", text: "", retryable: false });
-      emit({ event_id: 2, event_type: "text_delta", text: "오래된 답", retryable: false });
-      emit({ event_id: 3, event_type: "run_completed", text: "오래된 답", retryable: false });
+    await act(async () => {
+      releaseSend({
+        kind: "exchange",
+        exchange: {
+          user_message: { message_id: "user-late", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "늦게 끝날 요청", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000024", created_at: "1" },
+          assistant_message: { message_id: "assistant-late", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "오래된 답", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+        },
+      });
     });
-    await act(async () => { finish(); });
 
     expect(screen.queryByText("오래된 답")).toBeNull();
-    expect(durable).not.toHaveBeenCalled();
-    expect(getProposal).not.toHaveBeenCalled();
   });
 
-  it("retries only an eligible terminal run and keeps manual editing enabled", async () => {
+  it("retries a failed send with the same client message id and keeps manual editing enabled", async () => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
       "00000000-0000-4000-8000-000000000022",
     );
@@ -3550,46 +3462,15 @@ describe("EditorWorkbenchRoute", () => {
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [], proposal: null, references: [],
     } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-blocked",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-blocked/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
-      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
-    );
-    const retry = vi.spyOn(api, "retryHermesRun").mockResolvedValue({
-      run_id: "run-retry",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-retry/events",
-    });
-    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([] as never);
-    let streamCall = 0;
-    vi.spyOn(
-      hermesSseClient,
-      "streamHermesSseWithReconnect",
-    ).mockImplementation(async (options) => {
-      streamCall += 1;
-      options.onEvent({
-        event_id: 1,
-        event_type: "run_started",
-        text: "",
-        retryable: false,
-      });
-      options.onEvent(streamCall === 1
-        ? {
-          event_id: 2,
-          event_type: "blocked",
-          text: "",
-          retryable: true,
-        }
-        : {
-          event_id: 2,
-          event_type: "run_completed",
-          text: "다시 받은 답",
-          retryable: false,
-        });
-    });
+    const send = vi.spyOn(api, "sendDirectorMessage")
+      .mockRejectedValueOnce(new Error("PRIVATE upstream failure"))
+      .mockResolvedValueOnce({
+        kind: "exchange",
+        exchange: {
+          user_message: { message_id: "user-retry", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "다시 시도할 요청", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000022", created_at: "1" },
+          assistant_message: { message_id: "assistant-retry", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "다시 받은 답", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+        },
+      } as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
@@ -3607,19 +3488,18 @@ describe("EditorWorkbenchRoute", () => {
     expect(clipSelectionButton("n-1")).toBeEnabled();
     fireEvent.click(retryButton);
 
-    await waitFor(() => expect(retry).toHaveBeenCalledWith(
-      "project-a",
-      "conversation-1",
-      "run-blocked",
-      expect.any(AbortSignal),
-    ));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send).toHaveBeenNthCalledWith(2, "project-a", "conversation-1", {
+      session_id: "session-a",
+      client_message_id: "00000000-0000-4000-8000-000000000022",
+      text: "다시 시도할 요청",
+    }, expect.any(AbortSignal));
     expect(await screen.findByText("다시 받은 답")).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
-  it("fences late run events after a same-route revision advance", async () => {
-    let emit!: (event: HermesSseEvent) => void;
-    let finish!: () => void;
+  it("fences a late local reply after a same-route revision advance", async () => {
+    let releaseSend!: (value: unknown) => void;
     vi.mocked(api.getEditorPlaybackManifest)
       .mockReset()
       .mockResolvedValueOnce(inspectorManifest(7) as never)
@@ -3633,22 +3513,9 @@ describe("EditorWorkbenchRoute", () => {
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [], proposal: null, references: [],
     } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-stale-revision",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-stale-revision/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
-      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
+    vi.spyOn(api, "sendDirectorMessage").mockImplementation(
+      () => new Promise((resolve) => { releaseSend = resolve; }) as never,
     );
-    const durable = vi.spyOn(api, "listDirectorMessages");
-    vi.spyOn(
-      hermesSseClient,
-      "streamHermesSseWithReconnect",
-    ).mockImplementation(async (options) => {
-      emit = options.onEvent;
-      await new Promise<void>((resolve) => { finish = resolve; });
-    });
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
@@ -3658,324 +3525,61 @@ describe("EditorWorkbenchRoute", () => {
       { target: { value: "곧 오래될 요청" } },
     );
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await waitFor(() => expect(emit).toBeTypeOf("function"));
+    await waitFor(() => expect(releaseSend).toBeTypeOf("function"));
 
     fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
     await expectEditorRevision(8);
-    act(() => {
-      emit({
-        event_id: 1,
-        event_type: "run_started",
-        text: "",
-        retryable: false,
-      });
-      emit({
-        event_id: 2,
-        event_type: "run_completed",
-        text: "오래된 답",
-        retryable: false,
+    await act(async () => {
+      releaseSend({
+        kind: "exchange",
+        exchange: {
+          user_message: { message_id: "user-stale-rev", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "곧 오래될 요청", proposal_id: null, metadata: {}, client_message_id: "client-stale-rev", created_at: "1" },
+          assistant_message: { message_id: "assistant-stale-rev", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "오래된 답", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+        },
       });
     });
-    await act(async () => { finish(); });
 
     expect(screen.queryByText("오래된 답")).toBeNull();
-    expect(durable).not.toHaveBeenCalled();
     expect(clipSelectionButton("n-1")).toBeEnabled();
     expect(screen.queryByRole("button", { name: "답변 중단" })).toBeNull();
     expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "유진에게 추천받기" })).toBeEnabled();
   });
 
-  it("keeps a completed assistant response when terminal durable reconciliation fails", async () => {
+  it("shows the local policy guard's own blocked reply without any technical fallback text", async () => {
+    // The backend's YujinLocalConversationService (Task 13/14) already returns a
+    // clean, human-facing Korean message for restricted requests -- there is no
+    // separate frontend localization/redaction step for the local send path.
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [], proposal: null, references: [],
     } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-1",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-1/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
-      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
-    );
-    vi.spyOn(api, "listDirectorMessages").mockRejectedValue(
-      new Error("PRIVATE durable storage detail"),
-    );
-    vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation(
-      async (options) => {
-        options.onEvent({
-          event_id: 1,
-          event_type: "run_started",
-          text: "",
-          retryable: false,
-        });
-        options.onEvent({
-          event_id: 2,
-          event_type: "text_delta",
-          text: "완료된 답",
-          retryable: false,
-        });
-        options.onEvent({
-          event_id: 3,
-          event_type: "run_completed",
-          text: "완료된 답",
-          retryable: false,
-        });
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValue({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-blocked", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "데이터베이스 삭제해줘", proposal_id: null, metadata: {}, client_message_id: "client-blocked", created_at: "1" },
+        assistant_message: { message_id: "assistant-blocked", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "이 요청은 유진이 직접 할 수 없어요.", proposal_id: null, metadata: { status: "blocked", error_code: "policy_restricted_intent" }, client_message_id: null, created_at: "2" },
       },
-    );
+    } as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "완료 요청" } },
-    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "데이터베이스 삭제해줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
 
-    expect(await screen.findByText("완료된 답")).toBeVisible();
-    expect(
-      screen.getByLabelText("대화 저장 상태"),
-    ).toHaveTextContent("대화 저장 상태를 확인하지 못했어요.");
-    expect(screen.queryByText("유진의 답을 받지 못했어요.")).toBeNull();
-    expect(screen.queryByText(/PRIVATE/)).toBeNull();
+    expect(await screen.findByText("이 요청은 유진이 직접 할 수 없어요.")).toBeVisible();
+    expect(screen.queryByText(/Hermes|local_only_blocked/)).toBeNull();
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
-  it("loads the terminal-linked candidate-only proposal without remounting route-owned UI", async () => {
-    const candidateOnly = {
-      ...directorProposal("proposal-from-hermes"),
-      status: "candidate_only",
-      candidates: [{
-        ...directorProposal().candidates[0],
-        candidate_id: "candidate-from-hermes",
-        visible_reference_code: "P01-B-09",
-        availability: "candidate_only",
-        review_status: "pending",
-        preview_uri: null,
-        canonical_metadata: {
-          schema_version: "videobox.yujin-response.v1",
-          yujin_actionable_media: false,
-        },
-      }],
-    };
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
-      "00000000-0000-4000-8000-000000000009",
-    );
-    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
-      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
-      messages: [],
-      proposal: null,
-      references: [],
-    } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-proposal",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-proposal/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
-      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
-    );
-    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([
-      { message_id: "user-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "추천해 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000009", created_at: "1" },
-      { message_id: "assistant-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "후보를 준비했어요.", proposal_id: "proposal-from-hermes", metadata: { hermes_run_id: "run-proposal" }, client_message_id: null, created_at: "2" },
-      { message_id: "assistant-old", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "예전 후보", proposal_id: "proposal-old", metadata: { hermes_run_id: "run-old" }, client_message_id: null, created_at: "1.5" },
-    ] as never);
-    const getProposal = vi.spyOn(api, "getDirectorProposal").mockResolvedValue(
-      candidateOnly as never,
-    );
-    vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation(
-      async (options) => {
-        options.onEvent({ event_id: 1, event_type: "run_started", text: "", retryable: false });
-        options.onEvent({ event_id: 2, event_type: "text_delta", text: "후보를 준비했어요.", retryable: false });
-        options.onEvent({ event_id: 3, event_type: "run_completed", text: "후보를 준비했어요.", retryable: false });
-      },
-    );
-
-    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    await expectEditorRevision(1);
-    const player = screen.getByRole("region", { name: "미리보기" });
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    const history = await screen.findByRole("log", { name: "유진 대화" });
-    Object.defineProperties(history, {
-      scrollHeight: { configurable: true, value: 200 },
-      clientHeight: { configurable: true, value: 80 },
-      scrollTop: {
-        configurable: true,
-        writable: true,
-        value: 41,
-      },
-    });
-    fireEvent.scroll(history);
-    fireEvent.change(
-      screen.getByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "추천해 줘" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-
-    expect(await screen.findByRole("radio", { name: "P01-B-09 선택" })).not.toBeChecked();
-    expect(getProposal).toHaveBeenCalledWith("project-a", "proposal-from-hermes");
-    expect(screen.queryByRole("button", { name: "추천 미리 듣기" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "선택한 추천 적용" })).toBeNull();
-    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(41);
-    expect(screen.getByRole("region", { name: "미리보기" })).toBe(player);
-  });
-
-  it("applies one terminal-linked persisted caption proposal only after explicit selection and refreshes the editor snapshot", async () => {
-    const proposal = yujinB4Proposal("caption-text");
-    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
-      "00000000-0000-4000-8000-000000000010",
-    );
-    vi.mocked(api.getEditorPlaybackManifest)
-      .mockReset()
-      .mockResolvedValueOnce(captionManifest(1) as never)
-      .mockResolvedValueOnce(captionManifest(2, "추천 자막") as never);
-    mockEditingSessionRevisions(1, 2);
-    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
-      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
-      messages: [],
-      proposal: null,
-      references: [],
-    } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-caption",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-caption/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(
-      new Response("", { headers: { "Content-Type": "text/event-stream" } }),
-    );
-    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([
-      { message_id: "user-caption", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "자막을 다듬어 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000010", created_at: "1" },
-      { message_id: "assistant-caption", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "자막 후보를 준비했어요.", proposal_id: proposal.proposal_id, metadata: { hermes_run_id: "run-caption" }, client_message_id: null, created_at: "2" },
-    ] as never);
-    vi.spyOn(api, "getDirectorProposal").mockResolvedValue(proposal as never);
-    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
-    const captionMutation = vi.spyOn(api, "updateEditingSessionCaption").mockResolvedValue(
-      editingSession("project-a", "session-a", 2) as never,
-    );
-    vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation(
-      async (options) => {
-        options.onEvent({ event_id: 1, event_type: "run_started", text: "", retryable: false });
-        options.onEvent({ event_id: 2, event_type: "text_delta", text: "자막 후보를 준비했어요.", retryable: false });
-        options.onEvent({ event_id: 3, event_type: "run_completed", text: "자막 후보를 준비했어요.", retryable: false });
-      },
-    );
-
-    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "자막을 다듬어 줘" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-
-    const candidate = await screen.findByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" });
-    expect(screen.getByText("자막 후보를 준비했어요.")).toBeVisible();
-    expect(candidate).not.toBeChecked();
-    expect(captionMutation).not.toHaveBeenCalled();
-
-    fireEvent.click(candidate);
-    expect(captionMutation).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
-
-    await waitFor(() => expect(captionMutation).toHaveBeenCalledTimes(1));
-    expect(captionMutation).toHaveBeenCalledWith(
-      "project-a",
-      "session-a",
-      "segment-1",
-      {
-        candidate_id: "candidate-caption-text",
-        caption_text: "추천 자막",
-        expected_revision: 1,
-        proposal_id: "yujin-caption-text",
-      },
-    );
-    await expectEditorRevision(2);
-    expect(api.getEditorPlaybackManifest).toHaveBeenCalledTimes(2);
-    expect(api.getEditingSession).toHaveBeenCalledTimes(2);
-  });
-
-  it("reloads a blocked terminal row and keeps its durable fallback copy redacted", async () => {
-    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
-      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
-      messages: [], proposal: null, references: [],
-    } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-1",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-1/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(new Response("", { headers: { "Content-Type": "text/event-stream" } }));
-    const list = vi.spyOn(api, "listDirectorMessages").mockResolvedValue([
-      { message_id: "user-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "요청", proposal_id: null, metadata: {}, client_message_id: "client-1", created_at: "1" },
-      { message_id: "assistant-1", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "Hermes is temporarily unavailable. Manual Director remains available.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
-    ] as never);
-    vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation(async (options) => {
-      options.onEvent({ event_id: 1, event_type: "run_started", text: "", retryable: false });
-      options.onEvent({ event_id: 2, event_type: "blocked", text: "PRIVATE provider detail", retryable: true });
-    });
-
-    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "요청" } });
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-
-    expect((await screen.findAllByText("유진의 답을 받지 못했어요.")).length).toBeGreaterThanOrEqual(1);
-    expect(list).toHaveBeenCalledWith("project-a", "conversation-1", "session-a");
-    expect(screen.queryByText(/PRIVATE|Hermes is temporarily/)).toBeNull();
-    expect(screen.getByRole("button", { name: "Yujin 없이 계속 편집" })).toBeEnabled();
-  });
-
-  it("preserves a partial durable draft while localizing its exact blocked suffix", async () => {
-    const technicalSuffix = "Hermes is temporarily unavailable. Manual Director remains available.";
-    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
-      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
-      messages: [], proposal: null, references: [],
-    } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-partial-blocked",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-partial-blocked/events",
-    });
-    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([
-      { message_id: "user-partial", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "부분 요청", proposal_id: null, metadata: {}, client_message_id: "client-partial", created_at: "1" },
-      { message_id: "assistant-partial", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: `여기까지 확인했어요.\n\n${technicalSuffix}`, proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
-    ] as never);
-    vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation(async (options) => {
-      options.onEvent({ event_id: 1, event_type: "run_started", text: "", retryable: false });
-      options.onEvent({ event_id: 2, event_type: "blocked", text: technicalSuffix, retryable: true });
-    });
-
-    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "부분 요청" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-
-    const history = await screen.findByRole("log", { name: "유진 대화" });
-    await waitFor(() => expect(history).toHaveTextContent(
-      "여기까지 확인했어요. 유진의 답을 받지 못했어요.",
-    ));
-    expect(history).not.toHaveTextContent(/Hermes|Manual Director|PRIVATE/);
-    expect(screen.getByRole("button", { name: "Yujin 없이 계속 편집" })).toBeEnabled();
-    expect(clipSelectionButton("n-1")).toBeEnabled();
-  });
-
-  it("preserves the draft and manual controls when run creation is unavailable", async () => {
+  it("preserves the draft and manual controls when the local send fails", async () => {
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [{ message_id: "user-old", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "남아 있는 대화", proposal_id: null, metadata: {}, client_message_id: "old", created_at: "1" }],
       proposal: null, references: [],
     } as never);
-    vi.spyOn(api, "createHermesRun").mockRejectedValue(new Error("PRIVATE upstream failure"));
-    const openEvents = vi.spyOn(api, "openHermesRunEvents");
+    vi.spyOn(api, "sendDirectorMessage").mockRejectedValue(new Error("PRIVATE upstream failure"));
     const createProposal = vi.spyOn(api, "createDirectorProposal");
     const captionMutation = vi.spyOn(api, "updateEditingSessionCaption");
     const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
@@ -3996,7 +3600,6 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeVisible();
     expect(screen.getByText("남아 있는 대화")).toBeVisible();
-    expect(openEvents).not.toHaveBeenCalled();
     expect(createProposal).not.toHaveBeenCalled();
     expect(captionMutation).not.toHaveBeenCalled();
     expect(batchApply).not.toHaveBeenCalled();
@@ -4068,67 +3671,54 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("A 초안");
   });
 
-  it("ignores a terminal durable reload that resolves after route navigation", async () => {
-    let resolveDurable!: (messages: unknown[]) => void;
+  it("ignores a late local reply that resolves after route navigation", async () => {
+    let releaseSend!: (value: unknown) => void;
     vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
     vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({
       conversation: { conversation_id: `conversation-${sessionId}`, project_id: String(projectId), session_id: String(sessionId) },
       messages: [], proposal: null, references: [],
     }) as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-a",
-      conversation_id: "conversation-session-a",
-      events_url: "/api/projects/project-a/director/conversations/conversation-session-a/hermes-runs/run-a/events",
-    });
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(new Response("", { headers: { "Content-Type": "text/event-stream" } }));
-    const durable = vi.spyOn(api, "listDirectorMessages").mockImplementation(
-      () => new Promise((resolve) => { resolveDurable = resolve as typeof resolveDurable; }) as never,
+    const send = vi.spyOn(api, "sendDirectorMessage").mockImplementation(
+      () => new Promise((resolve) => { releaseSend = resolve; }) as never,
     );
-    vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation(async (options) => {
-      options.onEvent({ event_id: 1, event_type: "run_started", text: "", retryable: false });
-      options.onEvent({ event_id: 2, event_type: "text_delta", text: "A 최종", retryable: false });
-      options.onEvent({ event_id: 3, event_type: "run_completed", text: "A 최종", retryable: false });
-    });
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await waitFor(() => expect(durable).toHaveBeenCalledOnce());
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
     await act(async () => {
-      resolveDurable([
-        { message_id: "assistant-a", conversation_id: "conversation-session-a", project_id: "project-a", session_id: "session-a", role: "assistant", text: "stale durable A", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
-      ]);
+      releaseSend({
+        kind: "exchange",
+        exchange: {
+          user_message: { message_id: "user-stale-route", conversation_id: "conversation-session-a", project_id: "project-a", session_id: "session-a", role: "user", text: "A 요청", proposal_id: null, metadata: {}, client_message_id: "client-stale-route", created_at: "1" },
+          assistant_message: { message_id: "assistant-stale-route", conversation_id: "conversation-session-a", project_id: "project-a", session_id: "session-a", role: "assistant", text: "A 최종", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+        },
+      });
     });
 
-    expect(screen.queryByText("stale durable A")).toBeNull();
+    expect(screen.queryByText("A 최종")).toBeNull();
     expect(screen.queryByText("유진의 답을 받지 못했어요.")).toBeNull();
   });
 
-  it("aborts on route change, ignores late callbacks and AbortError, and aborts again on unmount", async () => {
-    let lateEmit!: (event: HermesSseEvent) => void;
-    let streamSignal!: AbortSignal;
-    const cancel = vi.spyOn(api, "cancelHermesRun").mockResolvedValue();
+  it("aborts an in-flight local send on route change, ignores the late AbortError, and aborts again on unmount", async () => {
+    let sendSignalA!: AbortSignal;
+    let sendSignalB!: AbortSignal;
     vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
     vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({
       conversation: { conversation_id: `conversation-${sessionId}`, project_id: String(projectId), session_id: String(sessionId) },
       messages: [], proposal: null, references: [],
     }) as never);
-    vi.spyOn(api, "createHermesRun").mockImplementation(async (projectId, conversationId) => ({
-      run_id: projectId === "project-a" ? "run-a" : "run-b",
-      conversation_id: conversationId,
-      events_url: `/api/projects/${projectId}/director/conversations/${conversationId}/hermes-runs/${projectId === "project-a" ? "run-a" : "run-b"}/events`,
-    }));
-    vi.spyOn(api, "openHermesRunEvents").mockResolvedValue(new Response("", { headers: { "Content-Type": "text/event-stream" } }));
-    const stream = vi.spyOn(hermesSseClient, "streamHermesSseWithReconnect").mockImplementation((options) => {
-      lateEmit = options.onEvent;
-      streamSignal = options.signal;
-      return new Promise<void>((_resolve, reject) => {
-        options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    let call = 0;
+    vi.spyOn(api, "sendDirectorMessage").mockImplementation((_projectId, _conversationId, _payload, signal) => {
+      call += 1;
+      if (call === 1) sendSignalA = signal!; else sendSignalB = signal!;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
       });
     });
 
@@ -4137,229 +3727,22 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await waitFor(() => expect(stream).toHaveBeenCalledTimes(1));
-    const emitA = lateEmit;
+    await waitFor(() => expect(sendSignalA).not.toBeUndefined());
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
-    await waitFor(() => expect(cancel).toHaveBeenCalledWith(
-      "project-a",
-      "conversation-session-a",
-      "run-a",
-      expect.any(AbortSignal),
-    ));
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(streamSignal.aborted).toBe(true);
+    expect(sendSignalA.aborted).toBe(true);
+
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     fireEvent.change(screen.getByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "B 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await waitFor(() => expect(stream).toHaveBeenCalledTimes(2));
-    expect(streamSignal.aborted).toBe(false);
-    act(() => {
-      emitA({ event_id: 2, event_type: "text_delta", text: "stale A", retryable: false });
-      emitA({ event_id: 3, event_type: "run_completed", text: "stale A", retryable: false });
-    });
-    expect(screen.queryByText("stale A")).toBeNull();
+    await waitFor(() => expect(sendSignalB).not.toBeUndefined());
+    expect(sendSignalB.aborted).toBe(false);
     expect(screen.queryByText("유진의 답을 받지 못했어요.")).toBeNull();
     expect(screen.getByRole("button", { name: "답변 중단" })).toBeEnabled();
     expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeDisabled();
-    rendered.unmount();
-    expect(streamSignal.aborted).toBe(true);
-    await waitFor(() => expect(cancel).toHaveBeenCalledWith(
-      "project-b",
-      "conversation-session-b",
-      "run-b",
-      expect.any(AbortSignal),
-    ));
-    expect(cancel).toHaveBeenCalledTimes(2);
-  });
-
-  it("retains nonterminal run ownership after reconnect exhaustion until route navigation or unmount cancels it once", async () => {
-    const cancel = vi.spyOn(api, "cancelHermesRun").mockResolvedValue();
-    vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation(
-      (projectId, sessionId) => Promise.resolve({
-        ...narrationManifest(1),
-        project_id: projectId,
-        session_id: sessionId,
-        timeline_id: `timeline-${sessionId}`,
-        source_status: {
-          status: "current",
-          source_session_id: sessionId,
-          source_session_revision: 1,
-        },
-      }) as never,
-    );
-    vi.spyOn(api, "reloadDirectorSession").mockImplementation(
-      (projectId, sessionId) => Promise.resolve({
-        conversation: {
-          conversation_id: `conversation-${sessionId}`,
-          project_id: String(projectId),
-          session_id: String(sessionId),
-        },
-        messages: [],
-        proposal: null,
-        references: [],
-      }) as never,
-    );
-    vi.spyOn(api, "createHermesRun").mockImplementation(
-      async (projectId, conversationId) => ({
-        run_id: projectId === "project-a" ? "run-a-exhausted" : "run-b-exhausted",
-        conversation_id: conversationId,
-        events_url: `/api/projects/${projectId}/director/conversations/${conversationId}/events`,
-      }),
-    );
-    vi.spyOn(
-      hermesSseClient,
-      "streamHermesSseWithReconnect",
-    ).mockImplementation(async (options) => {
-      options.onEvent({
-        event_id: 1,
-        event_type: "run_started",
-        text: "",
-        retryable: false,
-      });
-      throw new Error("유진 응답을 이어받지 못했어요.");
-    });
-
-    const rendered = render(
-      <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />,
-    );
-    await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "A 연결 소진" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await screen.findByRole("button", { name: "Yujin 없이 계속 편집" });
-    expect(screen.queryByRole("button", { name: "유진에게 추천받기" })).toBeNull();
-    expect(screen.getByRole("button", { name: "답변 중단" })).toBeEnabled();
-    expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "같은 요청 다시 보내기" })).toBeNull();
-    expect(clipSelectionButton("n-1")).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    expect(api.createHermesRun).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
-    expect(cancel).not.toHaveBeenCalled();
-    rendered.rerender(
-      <EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />,
-    );
-    await expectEditorRevision(1);
-    await waitFor(() => expect(cancel).toHaveBeenCalledWith(
-      "project-a",
-      "conversation-session-a",
-      "run-a-exhausted",
-      expect.any(AbortSignal),
-    ));
-    expect(cancel).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    expect(await screen.findByRole("button", { name: "유진에게 추천받기" })).toBeEnabled();
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "B 연결 소진" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await waitFor(() => expect(
-      hermesSseClient.streamHermesSseWithReconnect,
-    ).toHaveBeenCalledTimes(2));
-    await screen.findByRole("button", { name: "Yujin 없이 계속 편집" });
-    expect(screen.queryByRole("button", { name: "유진에게 추천받기" })).toBeNull();
-    expect(screen.getByRole("button", { name: "답변 중단" })).toBeEnabled();
-    expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeDisabled();
 
     rendered.unmount();
-    await waitFor(() => expect(cancel).toHaveBeenCalledWith(
-      "project-b",
-      "conversation-session-b",
-      "run-b-exhausted",
-      expect.any(AbortSignal),
-    ));
-    expect(cancel).toHaveBeenCalledTimes(2);
-  });
-
-  it("releases exhausted run ownership only after explicit cancel succeeds", async () => {
-    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
-      conversation: {
-        conversation_id: "conversation-1",
-        project_id: "project-a",
-        session_id: "session-a",
-      },
-      messages: [],
-      proposal: null,
-      references: [],
-    } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-explicit-after-exhaustion",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/events",
-    });
-    vi.spyOn(
-      hermesSseClient,
-      "streamHermesSseWithReconnect",
-    ).mockRejectedValue(new Error("유진 응답을 이어받지 못했어요."));
-    const cancel = vi.spyOn(api, "cancelHermesRun").mockResolvedValue();
-
-    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "명시적으로 중단할 요청" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-    await screen.findByRole("button", { name: "Yujin 없이 계속 편집" });
-
-    fireEvent.click(screen.getByRole("button", { name: "답변 중단" }));
-    await waitFor(() => expect(cancel).toHaveBeenCalledWith(
-      "project-a",
-      "conversation-1",
-      "run-explicit-after-exhaustion",
-      expect.any(AbortSignal),
-    ));
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: "답변 중단" })).toBeNull();
-    expect(screen.getByRole("button", { name: "유진에게 추천받기" })).toBeEnabled();
-    expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
-    expect(clipSelectionButton("n-1")).toBeEnabled();
-  });
-
-  it("retries the initial route SSE open at cursor zero and does not cancel a completed run", async () => {
-    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
-      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
-      messages: [], proposal: null, references: [],
-    } as never);
-    vi.spyOn(api, "createHermesRun").mockResolvedValue({
-      run_id: "run-initial-reconnect",
-      conversation_id: "conversation-1",
-      events_url: "/api/projects/project-a/director/conversations/conversation-1/hermes-runs/run-initial-reconnect/events",
-    });
-    const response = new Response(
-      "id: 1\nevent: run_started\ndata: {\"event_id\":1,\"event_type\":\"run_started\",\"text\":\"\",\"retryable\":false}\n\n"
-      + "id: 2\nevent: run_completed\ndata: {\"event_id\":2,\"event_type\":\"run_completed\",\"text\":\"복구된 답\",\"retryable\":false}\n\n",
-      { headers: { "Content-Type": "text/event-stream" } },
-    );
-    const open = vi.spyOn(api, "openHermesRunEvents")
-      .mockRejectedValueOnce(new Error("temporary disconnect"))
-      .mockResolvedValueOnce(response);
-    vi.spyOn(api, "listDirectorMessages").mockResolvedValue([] as never);
-    const cancel = vi.spyOn(api, "cancelHermesRun").mockResolvedValue();
-
-    const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
-    await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.change(
-      await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
-      { target: { value: "초기 연결 복구" } },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
-
-    expect(await screen.findByText("복구된 답")).toBeVisible();
-    expect(open).toHaveBeenCalledTimes(2);
-    expect(open.mock.calls.map((call) => call[4] ?? 0)).toEqual([0, 0]);
-    rendered.unmount();
-    expect(cancel).not.toHaveBeenCalled();
+    expect(sendSignalB.aborted).toBe(true);
   });
 });

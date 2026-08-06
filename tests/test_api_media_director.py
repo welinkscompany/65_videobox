@@ -1280,18 +1280,21 @@ def test_director_reload_get_is_behavioral_read_only_and_never_calls_a_provider(
 
 
 def test_director_normal_message_uses_local_only_structured_runtime_contract(tmp_path: Path) -> None:
+    """Free-form chat now routes through YujinLocalConversationService (Task 13/14
+    wiring): task_type is YUJIN_CONVERSATION with the persona-wrapped prompt and a
+    {"reply": ...} response schema, not the generic OPERATOR_COPY contract."""
     class StrictLocalRuntime:
         external_calls = 0
         calls: list[dict] = []
 
         def generate_structured(self, *, project_id, task_type, prompt, response_schema, now=None):
             assert project_id == self.project_id
-            assert task_type.value == "operator_copy"
-            assert prompt == "로컬 응답을 생성해줘"
-            assert response_schema == {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
+            assert task_type.value == "yujin_conversation"
+            assert prompt.endswith("창작자: 로컬 응답을 생성해줘")
+            assert response_schema == {"type": "object", "properties": {"reply": {"type": "string"}}, "required": ["reply"]}
             assert now is None
             type(self).calls.append({"project_id": project_id, "task_type": task_type, "prompt": prompt})
-            return StructuredLLMResponse(provider_name="strict-local", model_name="fixture", output_data={"text": "로컬 응답입니다."}, raw_text='{"text":"로컬 응답입니다."}', metadata={"provider_trace": {"routing_mode": "local_only"}})
+            return StructuredLLMResponse(provider_name="strict-local", model_name="fixture", output_data={"reply": "로컬 응답입니다."}, raw_text='{"reply":"로컬 응답입니다."}', metadata={"provider_trace": {"routing_mode": "local_only"}})
 
     runtime = StrictLocalRuntime()
     app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)

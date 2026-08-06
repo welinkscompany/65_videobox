@@ -12,13 +12,13 @@ from videobox_core_engine.director_proposal_service import (
     DirectorProposalService,
     is_actionable_yujin_media_candidate,
 )
+from videobox_core_engine.yujin_local_conversation import YujinLocalConversationService
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.local_project_store import EditingSessionRevisionConflict, sha256_file
 from videobox_core_engine.editing_transactions import apply_user_transaction
 from videobox_core_engine.director_commands import director_timeline_references, resolve_director_command
-from videobox_provider_interfaces.llm import LLMTaskType
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_api.models import (
     DirectorConversationCreateRequest, DirectorConversationResponse,
@@ -178,6 +178,7 @@ def build_director_proposals_router(
             # fallback graph is present: only the app-injected local runtime is used.
             if not assistant_text:
                 runtime = request.app.state.local_only_runtime_service_factory(store)
+                conversation_service = YujinLocalConversationService(runtime=runtime)
                 stop_heartbeat = Event()
                 def heartbeat() -> None:
                     while not stop_heartbeat.wait(1.0):
@@ -185,32 +186,13 @@ def build_director_proposals_router(
                 heartbeat_thread = Thread(target=heartbeat, daemon=True)
                 heartbeat_thread.start()
                 try:
-                    if hasattr(runtime, "generate_structured"):
-                        generated = runtime.generate_structured(
-                            project_id=project_id,
-                            task_type=LLMTaskType.OPERATOR_COPY,
-                            prompt=body.text,
-                            response_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-                        )
-                        data = getattr(generated, "output_data", {})
-                        assistant_text = str(data.get("text", "")) if isinstance(data, dict) else ""
-                        if not assistant_text:
-                            assistant_text = str(getattr(generated, "raw_text", "local director response"))
-                        trace = getattr(generated, "metadata", {}).get("provider_trace")
-                        if isinstance(trace, dict):
-                            resolution_metadata["provider_trace"] = trace
-                    elif hasattr(runtime, "generate"):
-                        generated = runtime.generate(
-                            project_id=project_id, task_type=LLMTaskType.OPERATOR_COPY, prompt=body.text,
-                            response_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-                        )
-                        data = getattr(generated, "output_data", {})
-                        assistant_text = str(data.get("text", "local director response")) if isinstance(data, dict) else "local director response"
-                        trace = getattr(generated, "metadata", {}).get("provider_trace")
-                        if isinstance(trace, dict):
-                            resolution_metadata["provider_trace"] = trace
-                    else:
-                        raise RuntimeError("injected runtime does not support local structured generation")
+                    result = conversation_service.reply(project_id=project_id, user_text=body.text)
+                    assistant_text = result.reply
+                    if result.status == "blocked":
+                        resolution_metadata.update({
+                            "status": "blocked",
+                            "error_code": result.blocked_reason or "policy_restricted_intent",
+                        })
                 except Exception as exc:
                     assistant_text = f"local_only_blocked: {exc}"
                     trace = getattr(exc, "provider_trace", None)
