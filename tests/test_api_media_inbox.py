@@ -42,7 +42,10 @@ def test_lists_files_sitting_in_the_library_root(tmp_path: Path, monkeypatch) ->
     assert response.json() == {"assets": [{"filename": "clip.mp4", "size_bytes": 5}]}
 
 
-def test_imports_a_library_file_into_a_project_as_a_raw_video_asset(tmp_path: Path, monkeypatch) -> None:
+def test_imports_a_library_file_into_a_project_as_a_broll_asset(tmp_path: Path, monkeypatch) -> None:
+    """Task 22: collected footage is B-roll.  Registering it as `raw_video`
+    put it somewhere the b-roll listing never looked, so an import looked like
+    it had done nothing."""
     client, project_id = _make_app_and_project(tmp_path, monkeypatch)
     library_root = tmp_path / "library"
     library_root.mkdir()
@@ -53,9 +56,17 @@ def test_imports_a_library_file_into_a_project_as_a_raw_video_asset(tmp_path: Pa
     assert response.status_code == 201
     body = response.json()
     assert body["project_id"] == project_id
-    assert body["asset_type"] == "raw_video"
+    assert body["asset_type"] == "broll_video"
     # The library copy stays in place for reuse across projects.
     assert (library_root / "clip.mp4").exists()
+
+    # The point of the correction: the imported clip is now reachable from the
+    # listing the asset screen actually reads.
+    listed = client.get(f"/api/projects/{project_id}/assets/broll-video")
+    assert listed.status_code == 200
+    assets = listed.json()["assets"]
+    assert [asset["asset_id"] for asset in assets] == [body["asset_id"]]
+    assert assets[0]["metadata"]["title"] == "clip"
 
 
 def test_returns_404_for_a_missing_library_file(tmp_path: Path, monkeypatch) -> None:

@@ -10,7 +10,6 @@ type MediaState = {
   assets: BrollAsset[];
   analyses: MediaAnalysis[];
   collection: MediaInboxAsset[];
-  sourceVideoCount: number;
 };
 
 type MediaActionToken = {
@@ -71,11 +70,10 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const [assets, analysisResponse, collection, narrationOptions] = await Promise.all([
+      const [assets, analysisResponse, collection] = await Promise.all([
         api.listBrollAssets(loadProjectId),
         api.listMediaAnalysis(loadProjectId),
         api.listMediaInboxAssets(),
-        api.listDraftNarrationOptions(loadProjectId),
       ]);
       const current = currentContext.current;
       if (current.projectId !== loadProjectId || current.generation !== loadGeneration || loadEpoch.current !== epoch) return false;
@@ -84,7 +82,6 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
         assets: assets.filter((item) => item.asset_type === "broll_video"),
         analyses: analysisResponse.items,
         collection,
-        sourceVideoCount: narrationOptions.filter((item) => item.asset_type === "raw_video").length,
       });
       return true;
     } catch {
@@ -291,7 +288,6 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
                 ))}
               </div>
             )}
-            <p>이 프로젝트에 있는 원본 영상 {currentState.sourceVideoCount}개</p>
           </section>
 
           <section aria-labelledby="media-assets-heading">

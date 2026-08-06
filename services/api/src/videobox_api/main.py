@@ -685,7 +685,7 @@ def create_app(
         )
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
-    app.include_router(build_media_inbox_router(store, resolved_media_inbox_library_root))
+    app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
 

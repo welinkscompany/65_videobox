@@ -18,9 +18,7 @@ import hashlib
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Protocol
-
-from videobox_domain_models.assets import AssetRecord, AssetType
+from typing import Any, Callable, Protocol
 
 # Mirrors services/api/src/videobox_api/orchestration.py's
 # BROLL_VIDEO_EXTENSIONS. Duplicated rather than imported: core-engine must
@@ -154,17 +152,26 @@ def run_inbox_cycle(
 
 
 def import_media_inbox_asset_to_project(
-    store: object,
+    pipeline: object,
     *,
     project_id: str,
     library_root: Path,
     filename: str,
-) -> AssetRecord:
-    """Copy a verified media-inbox library file into a project as a raw
-    video asset (Task 18's library -> project step). The library copy stays
-    in place -- the same footage can be reused across more than one project,
-    matching the existing MediaLibraryStore/ProjectAssetMaterializer split
-    (a project only ever gets a copy)."""
+) -> dict[str, Any]:
+    """Copy a verified media-inbox library file into a project as B-roll
+    (Task 18's library -> project step, corrected by Task 22).
+
+    Owner decision (2026-08-07): footage collected from the watched folder is
+    B-roll -- material to cut into videos across several channels -- not the
+    narration source.  Registering it through ``register_broll_asset`` is what
+    makes it reach media facts, thumbnails, analysis and recommendation; the
+    earlier ``raw_video`` registration reached none of them.
+
+    The library copy stays in place -- the same footage can be reused across
+    more than one project, matching the existing
+    MediaLibraryStore/ProjectAssetMaterializer split (a project only ever gets
+    a copy).
+    """
     if "/" in filename or "\\" in filename or filename in {".", ".."}:
         # The library is always flat -- run_inbox_cycle writes with `.name`
         # only -- so any separator can only be a path-traversal attempt.
@@ -172,13 +179,20 @@ def import_media_inbox_asset_to_project(
     source_path = library_root / filename
     if not source_path.is_file():
         raise FileNotFoundError(f"media_inbox_asset_missing: {filename}")
-    return store.register_asset(  # type: ignore[attr-defined]
+    payload = pipeline.register_broll_asset(  # type: ignore[attr-defined]
         project_id=project_id,
-        asset_type=AssetType.RAW_VIDEO,
         source_path=source_path,
-        source_kind="media_inbox_library",
-        metadata={"media_inbox_filename": filename},
+        title=source_path.stem,
+        tags=[],
     )
+    # Keep the library filename so a later pass can tell collected footage from
+    # a manual upload without re-hashing the file.
+    pipeline.store.update_asset_metadata(  # type: ignore[attr-defined]
+        project_id=project_id,
+        asset_id=payload["asset_id"],
+        metadata_patch={"media_inbox_filename": filename},
+    )
+    return payload
 
 
 class _StopSignal(Protocol):

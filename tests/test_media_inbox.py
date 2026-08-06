@@ -251,6 +251,11 @@ def test_watcher_loop_actually_moves_files_across_cycles(tmp_path: Path) -> None
 
 
 def test_import_media_inbox_asset_copies_the_library_file_into_the_project(tmp_path: Path) -> None:
+    """Owner decision (2026-08-07, Task 22): footage collected from the watched
+    folder is B-roll, not the narration source.  It must register as
+    ``broll_video`` so it reaches analysis, tagging and recommendation the same
+    way an uploaded clip does."""
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
     from videobox_domain_models.assets import AssetType
     from videobox_storage.local_project_store import LocalProjectStore
 
@@ -258,38 +263,48 @@ def test_import_media_inbox_asset_copies_the_library_file_into_the_project(tmp_p
     library_root.mkdir()
     (library_root / "clip.mp4").write_bytes(b"library footage")
     store = LocalProjectStore(tmp_path / "projects")
+    pipeline = LocalPipelineRunner(store=store)
     project = store.bootstrap_project("import target")
 
     asset = import_media_inbox_asset_to_project(
-        store, project_id=project.project_id, library_root=library_root, filename="clip.mp4",
+        pipeline, project_id=project.project_id, library_root=library_root, filename="clip.mp4",
     )
 
-    assert asset.asset_type == AssetType.RAW_VIDEO
-    assert asset.project_id == project.project_id
-    source = store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri)
+    assert asset["asset_type"] == AssetType.BROLL_VIDEO.value
+    assert asset["project_id"] == project.project_id
+    source = store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset["storage_uri"])
     assert source.read_bytes() == b"library footage"
     # The library copy stays in place -- the same footage can be reused
     # across more than one project.
     assert (library_root / "clip.mp4").exists()
+    # Registered through the same path uploads use, so the picker has a name to
+    # show instead of an opaque asset id, and collected footage stays
+    # distinguishable from a manual upload.
+    stored = store.get_asset(project_id=project.project_id, asset_id=asset["asset_id"])
+    assert stored["metadata"]["title"] == "clip"
+    assert stored["metadata"]["media_inbox_filename"] == "clip.mp4"
 
 
 def test_import_media_inbox_asset_raises_for_a_missing_library_file(tmp_path: Path) -> None:
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
     from videobox_storage.local_project_store import LocalProjectStore
 
     library_root = tmp_path / "library"
     library_root.mkdir()
     store = LocalProjectStore(tmp_path / "projects")
+    pipeline = LocalPipelineRunner(store=store)
     project = store.bootstrap_project("import target")
 
     with pytest.raises(FileNotFoundError):
         import_media_inbox_asset_to_project(
-            store, project_id=project.project_id, library_root=library_root, filename="missing.mp4",
+            pipeline, project_id=project.project_id, library_root=library_root, filename="missing.mp4",
         )
 
 
 def test_import_media_inbox_asset_rejects_a_path_traversal_filename(tmp_path: Path) -> None:
     """filename must never escape library_root -- the library is always flat
     (run_inbox_cycle writes with `.name` only), so any separator is invalid."""
+    from videobox_core_engine.local_pipeline import LocalPipelineRunner
     from videobox_storage.local_project_store import LocalProjectStore
 
     library_root = tmp_path / "library"
@@ -297,10 +312,11 @@ def test_import_media_inbox_asset_rejects_a_path_traversal_filename(tmp_path: Pa
     secret = tmp_path / "secret.txt"
     secret.write_bytes(b"outside the library")
     store = LocalProjectStore(tmp_path / "projects")
+    pipeline = LocalPipelineRunner(store=store)
     project = store.bootstrap_project("import target")
 
     for traversal_filename in ("../secret.txt", "..\\secret.txt", "a/b.mp4", "a\\b.mp4"):
         with pytest.raises(ValueError, match="media_inbox_filename_invalid"):
             import_media_inbox_asset_to_project(
-                store, project_id=project.project_id, library_root=library_root, filename=traversal_filename,
+                pipeline, project_id=project.project_id, library_root=library_root, filename=traversal_filename,
             )

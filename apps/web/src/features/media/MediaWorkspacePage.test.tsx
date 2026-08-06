@@ -46,10 +46,9 @@ beforeEach(() => {
   vi.spyOn(api, "importMediaInboxAsset").mockResolvedValue({
     asset_id: "asset-imported",
     project_id: "project-a",
-    asset_type: "raw_video",
+    asset_type: "broll_video",
     storage_uri: "local://project-a/asset-imported",
   });
-  vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([]);
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -212,20 +211,24 @@ describe("MediaWorkspacePage", () => {
   });
 
   it("brings a chosen file from the shared collection into this project and reflects it on the page", async () => {
-    vi.mocked(api.listDraftNarrationOptions)
+    // Task 22: the import registers B-roll, so the imported clip has to turn
+    // up in the very list this screen already shows. A counter standing in for
+    // that would hide the case where the import lands somewhere unusable.
+    vi.mocked(api.listBrollAssets)
       .mockResolvedValueOnce([])
-      .mockResolvedValue([{ asset_id: "asset-imported", asset_type: "raw_video" }]);
+      .mockResolvedValue([{ ...asset(), asset_id: "asset-imported", metadata: { title: "촬영-01" } }]);
     render(<MediaWorkspacePage projectId="project-a" />);
 
     expect(await screen.findByText("촬영-01.mp4")).toBeVisible();
     expect(screen.getByText("120.0MB")).toBeVisible();
-    expect(screen.getByText("이 프로젝트에 있는 원본 영상 0개")).toBeVisible();
+    expect(screen.getByText("아직 준비한 자산이 없어요.")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "촬영-01.mp4 가져오기" }));
 
     await waitFor(() => expect(api.importMediaInboxAsset).toHaveBeenCalledWith("project-a", "촬영-01.mp4"));
     expect(await screen.findByText("「촬영-01.mp4」을 이 프로젝트로 가져왔어요.")).toBeVisible();
-    expect(await screen.findByText("이 프로젝트에 있는 원본 영상 1개")).toBeVisible();
+    expect(await screen.findByText("촬영-01")).toBeVisible();
+    expect(screen.queryByText("아직 준비한 자산이 없어요.")).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("asset-imported");
   });
 
@@ -260,7 +263,7 @@ describe("MediaWorkspacePage", () => {
     await act(async () => release({
       asset_id: "asset-imported",
       project_id: "project-a",
-      asset_type: "raw_video",
+      asset_type: "broll_video",
       storage_uri: "local://project-a/asset-imported",
     }));
     await waitFor(() => expect(screen.getByRole("button", { name: "촬영-02.mp4 가져오기" })).not.toBeDisabled());
