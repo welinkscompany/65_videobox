@@ -157,6 +157,13 @@ Commit: `fix: enable the CapCut draft exporter in the container`
 실제 동작을 확인한 뒤 별도로 정한다. 한 번에 여러 개를 켜면 실패 원인 구분이 어렵다.
 따라서 Step 7은 이번 Slice에서 실행하지 않고 열어둔다.
 
+**owner 결정 (2026-08-07): Voicebox(`github.com/jamiepine/voicebox`)로 간다.**
+보류를 풀었다. 상세 조사와 반입 단위는 **Task 25**에 적었다. 요약하면, Voicebox는
+엔진 7개를 감싼 로컬 데스크톱 스튜디오이고 **한국어는 그중 Chatterbox Multilingual이
+담당**한다. VideoBox는 파이프라인에서 프로그램으로 호출해야 하므로 GUI 앱을 상시
+띄우는 대신 **엔진(`chatterbox-tts`, MIT, pip)을 직접 반입**한다. 위 표의 `local_xtts`
+자리를 이것이 대체한다.
+
 `product-plan.ko.md` §6.4와 `architecture-plan.ko.md` §13.7이
 "TTS는 자동 전면 대체가 아니라 review 기반으로만 적용"을 요구하므로 그 경계를 유지한다.
 
@@ -1650,6 +1657,73 @@ Task 23의 추천을 받은 뒤, 마음에 들지 않을 때 사람이 조절하
 **범위 경계 확인.** 이 Task는 `implementation-plan.ko.md` §8.4가 고정한 편집기 14개
 조작 중 "컷 경계 조정"과 "B-roll 교체"에 해당한다. 풀 NLE 타임라인 편집으로 확장하지
 않는다.
+
+### Task 25: 내 목소리 TTS — Voicebox 계열 엔진 반입 — **미착수**
+
+Task 1 Step 7이 열어둔 TTS 엔진 선택을 owner가 2026-08-07에 결정했다.
+
+**조사 결과 (2026-08-07, 실제 저장소·모델 카드 확인).**
+
+| 항목 | 확인 내용 |
+|---|---|
+| Voicebox 라이선스 | MIT |
+| Voicebox 형태 | 엔진 7개를 감싼 로컬 데스크톱 스튜디오. REST(`POST /speak`)와 MCP 서버도 제공 |
+| 한국어 담당 엔진 | **Chatterbox Multilingual** (Voicebox의 7개 엔진 중 하나). `ko` 공식 지원 |
+| 엔진 라이선스 | MIT (`resemble-ai/chatterbox`) |
+| 반입 방식 | `pip install chatterbox-tts` — 파이썬 라이브러리로 직접 사용 가능 |
+| 모델 크기 | Multilingual V3 500M / Turbo 350M / Nano 110M 파라미터 |
+| 가중치 출처 | Hugging Face Hub (`ResembleAI`) — 최초 1회 다운로드 |
+| 외부 전송 | **없음.** 전부 로컬 추론 |
+| GPU | CUDA 지원. CPU도 가능(Nano는 8코어에서 실시간의 3배) |
+| 음성 복제 | 참조 음성 약 10초로 클로닝 |
+| **워터마크** | **생성 음성 전부에 Resemble Perth 신경 워터마크가 박힌다** |
+
+**반입 결정 — GUI 앱이 아니라 엔진을 반입한다.** Voicebox 자체는 데스크톱 앱이라,
+VideoBox가 쓰려면 그 앱이 항상 떠 있어야 하고 로컬 서비스가 하나 더 늘어난다
+(LM Studio에 이어 두 번째). VideoBox에 필요한 건 스튜디오가 아니라 **엔진**이고,
+한국어를 실제로 만드는 것은 Chatterbox이므로 파이썬 라이브러리로 직접 붙인다.
+owner가 목소리를 들어보고 고르는 GUI가 필요하면 Voicebox 앱은 **VideoBox와 무관하게
+따로 설치해 쓰면 된다.** 둘은 같은 엔진을 쓴다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `chatterbox-tts` (MIT, pip) | `adopt as-is` | 한국어·클로닝·로컬을 모두 만족하는 엔진 본체 |
+| 기존 `TTSEngineConfig` / `_build_tts_provider` | `adopt as-is` | provider 어댑터 자리가 이미 있다. 하드코딩 직접 호출은 §8.1 반입 금지 |
+| 기존 `voice-sample` 자산 경로 | `adopt as-is` | 참조 음성 업로드가 이미 구현돼 있다 |
+| Voicebox 데스크톱 앱을 런타임 의존으로 | `exclude` | GUI 앱 상시 실행을 제품 의존성으로 만들지 않는다 |
+| Voicebox의 UI 구조 | `exclude` | §8.1 `UI 구조` 반입 금지 |
+
+**Files:**
+- Modify: `requirements-runtime.txt` (또는 별도 extra)
+- Create: Chatterbox provider 어댑터 + 테스트
+
+- [ ] **Step 1: 격리 환경에서 한국어 품질 실측 (선행)** — 기존 venv를 건드리지 않는다.
+      `chatterbox-tts`가 torch 계열을 끌어와 `faster-whisper`가 쓰는 기존 환경을 깨뜨릴
+      수 있으므로 **별도 환경에서 먼저 확인**한다. 한국어 문장 + owner 참조 음성으로
+      샘플을 만들어 파일로 남긴다
+- [ ] **Step 2: owner 청취 판정** — 목소리 품질은 사람이 듣고 정한다. 이 계획의
+      "완료 기준"도 청취·취향 판정을 human gate로 남겨두고 있다. **owner가 듣기 전에는
+      파이프라인에 연결하지 않는다**
+- [ ] **Step 3: 실패 테스트** — provider 어댑터가 참조 음성으로 한국어 음성을 만드는지
+- [ ] **Step 4: RED 확인**
+- [ ] **Step 5: 구현** — `TTSEngineConfig`에 엔진 추가. 기존 provider 인터페이스를 지킨다
+- [ ] **Step 6: GREEN + 실제 파이프라인 검증 + 커밋**
+
+**owner에게 미리 알릴 것 (§Task 1의 승인 요건).**
+
+1. **워터마크.** 만들어지는 음성마다 Resemble의 신경 워터마크가 들어간다. 사람 귀에는
+   안 들리고 편집을 거쳐도 남는다. 유튜브 업로드 자체에 문제되는 건 아니지만,
+   "AI 생성 음성"임이 기술적으로 식별 가능하다는 뜻이다. **알고 쓰는 것과 모르고 쓰는
+   것은 다르므로 명시한다**
+2. **다운로드.** 최초 1회 Hugging Face에서 모델 가중치를 받는다(500M 파라미터급).
+   저장 위치와 실제 용량은 Step 1에서 실측해 보고한다
+3. **외부 전송 없음.** 추론은 전부 로컬이다
+
+**경계 유지.** `product-plan.ko.md` §6.4와 `architecture-plan.ko.md` §13.7의
+"TTS는 자동 전면 대체가 아니라 review 기반으로만 적용"은 그대로 지킨다. 엔진이
+바뀌어도 이 경계는 바뀌지 않는다.
 
 ---
 
