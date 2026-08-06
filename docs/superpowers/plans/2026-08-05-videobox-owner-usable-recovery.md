@@ -1447,12 +1447,16 @@ Task 8(프로젝트 완전 삭제, 이중 확인)과 F-9(렌더 기본 방향 �
   스캔해 확인했지만, 실제 파일 이동은 owner가 지켜볼 수 있을 때로 미뤘다.
   반복 실행되는 워처 루프와 라이브러리→project 복사 경로도 아직 없다
 - 컨테이너→호스트 LM Studio 네트워크 경로(`compose.yaml` `extra_hosts` 등) —
-  Task 19(미디어 분석 worker)도 컨테이너 스택에선 같은 이유로 아직 못 켰다
-- `LocalOpenAICompatibleRuntimeConfig.model_name` 기본값과 실제 로드 모델
-  (`qwen/qwen3.6-35b-a3b`) 불일치 — 환경변수화 필요
+  Task 19(미디어 분석 worker)도 컨테이너 스택에선 같은 이유로 아직 못 켰다.
+  `§5`(컨테이너 네트워크 경계 변경)에 따라 owner 승인 필요
 
-**남은 것:** owner 확인이 필요한 것(Task 18 실제 파일 이동 실행)과, 위에 열거한
-컨테이너 네트워크 경로·모델명 환경변수화 — 전부 이 문서와
+`LocalOpenAICompatibleRuntimeConfig.model_name` 기본값 불일치는 커밋 `a3a4c201f`로
+해결했다 — `resolve_local_runtime_config()`를 추가해 `VIDEOBOX_LOCAL_MODEL_NAME`
+환경변수로 오버라이드 가능하게 하고 `compose.yaml`에도 통과시켰다. 승인 경계를
+건드리지 않는 순수 설정 배선이라 owner 확인 없이 닫았다.
+
+**남은 것:** owner 확인이 필요한 것(Task 18 실제 파일 이동 실행, 컨테이너 네트워크
+경로 열기)뿐이다 — 전부 이 문서와
 `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md`에 근거와 함께
 기록돼 있다. 계획서 자체의 실행 순서(Task 1~21)는 전부 완료했다.
 
