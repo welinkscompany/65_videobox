@@ -7,6 +7,7 @@ import binascii
 import inspect
 import os
 import re
+import threading
 from math import isfinite
 from pathlib import Path
 from urllib.request import urlopen
@@ -38,6 +39,7 @@ from videobox_api.routers.director_proposals import build_director_proposals_rou
 from videobox_api.routers.editor_library import build_editor_library_router
 from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.live_smoke_attestation import build_live_smoke_attestation_router
+from videobox_api.routers.media_inbox import build_media_inbox_router
 from videobox_api.routers.media_library import build_media_library_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
@@ -51,6 +53,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_watcher_loop
 from videobox_core_engine.media_analysis import MediaAnalysisService
 from videobox_core_engine.media_analysis import AnalysisProfile
 from videobox_core_engine.media_probe import FFmpegMediaProbe
@@ -72,6 +75,10 @@ from videobox_core_engine.settings import (
     resolve_enable_local_media_analysis,
     resolve_container_snapshot_root,
     resolve_local_runtime_config,
+    resolve_media_inbox_library_root,
+    resolve_media_inbox_watch_enabled,
+    resolve_media_inbox_watch_interval_seconds,
+    resolve_media_inbox_watch_path,
     resolve_projects_root,
     resolve_user_library_root,
     resolve_whisper_stt_config,
@@ -300,6 +307,23 @@ async def _media_analysis_lifespan(app: FastAPI):
                 pass
 
     task = asyncio.create_task(worker(), name="videobox-media-analysis-poller")
+
+    media_inbox_stop_event = threading.Event()
+    media_inbox_thread: threading.Thread | None = None
+    media_inbox_watch_config = getattr(app.state, "media_inbox_watch_config", None)
+    if getattr(app.state, "media_inbox_watch_enabled", False) and media_inbox_watch_config is not None:
+        media_inbox_thread = threading.Thread(
+            target=run_inbox_watcher_loop,
+            kwargs={
+                "config": media_inbox_watch_config,
+                "stop_event": media_inbox_stop_event,
+                "interval_seconds": getattr(app.state, "media_inbox_watch_interval_seconds", 30.0),
+            },
+            daemon=True,
+            name="videobox-media-inbox-watcher",
+        )
+        media_inbox_thread.start()
+
     try:
         yield
     finally:
@@ -309,6 +333,9 @@ async def _media_analysis_lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+        media_inbox_stop_event.set()
+        if media_inbox_thread is not None:
+            await asyncio.to_thread(media_inbox_thread.join, 5.0)
         hermes_run_service = getattr(app.state, "hermes_run_service", None)
         if hermes_run_service is not None:
             await hermes_run_service.shutdown()
@@ -561,6 +588,16 @@ def create_app(
     app.state.final_renderer = pipeline.final_renderer
     app.state.user_library_store = user_library_store
     app.state.media_library_store = resolved_media_library_store
+    media_inbox_watch_path = resolve_media_inbox_watch_path()
+    resolved_media_inbox_library_root = resolve_media_inbox_library_root()
+    app.state.media_inbox_watch_enabled = resolve_media_inbox_watch_enabled()
+    app.state.media_inbox_watch_config = (
+        MediaInboxConfig(watch_path=media_inbox_watch_path, library_root=resolved_media_inbox_library_root)
+        if media_inbox_watch_path is not None
+        else None
+    )
+    app.state.media_inbox_watch_interval_seconds = resolve_media_inbox_watch_interval_seconds()
+    app.state.media_inbox_library_root = resolved_media_inbox_library_root
     resolved_agent_gateway_url = agent_gateway_url
     resolved_agent_gateway_token = agent_gateway_service_token
     if projects_root is None:
@@ -648,6 +685,7 @@ def create_app(
         )
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
+    app.include_router(build_media_inbox_router(store, resolved_media_inbox_library_root))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
 

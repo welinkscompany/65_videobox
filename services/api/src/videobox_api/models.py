@@ -853,6 +853,10 @@ class MaterializeLibraryAssetRequest(BaseModel):
     project_id: str
 
 
+class MediaInboxImportRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+
+
 class LibraryFavoriteRequest(BaseModel):
     enabled: bool
 

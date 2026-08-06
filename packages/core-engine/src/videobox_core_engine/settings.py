@@ -51,6 +51,25 @@ def resolve_media_inbox_library_root() -> Path:
     return Path(configured) if configured else resolve_user_library_root() / "media-inbox"
 
 
+def resolve_media_inbox_watch_enabled() -> bool:
+    """Whether the app should start the background media-inbox watcher
+    thread on startup. Defaults to False -- create_app() callers that don't
+    opt in (including the entire test suite) must never start a thread that
+    touches a real Drive-synced folder on disk."""
+    return _environment_flag("VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED")
+
+
+def resolve_media_inbox_watch_interval_seconds() -> float:
+    raw = os.environ.get("VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS", "").strip()
+    if not raw:
+        return 30.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 30.0
+    return value if value > 0 else 30.0
+
+
 def resolve_database_url() -> str | None:
     configured = os.environ.get("VIDEOBOX_DATABASE_URL", "").strip()
     return configured or None

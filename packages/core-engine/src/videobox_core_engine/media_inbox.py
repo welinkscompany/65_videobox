@@ -18,7 +18,9 @@ import hashlib
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
+
+from videobox_domain_models.assets import AssetRecord, AssetType
 
 # Mirrors services/api/src/videobox_api/orchestration.py's
 # BROLL_VIDEO_EXTENSIONS. Duplicated rather than imported: core-engine must
@@ -149,3 +151,58 @@ def run_inbox_cycle(
         except OSError:
             report.failed.append(name)
     return report
+
+
+def import_media_inbox_asset_to_project(
+    store: object,
+    *,
+    project_id: str,
+    library_root: Path,
+    filename: str,
+) -> AssetRecord:
+    """Copy a verified media-inbox library file into a project as a raw
+    video asset (Task 18's library -> project step). The library copy stays
+    in place -- the same footage can be reused across more than one project,
+    matching the existing MediaLibraryStore/ProjectAssetMaterializer split
+    (a project only ever gets a copy)."""
+    if "/" in filename or "\\" in filename or filename in {".", ".."}:
+        # The library is always flat -- run_inbox_cycle writes with `.name`
+        # only -- so any separator can only be a path-traversal attempt.
+        raise ValueError("media_inbox_filename_invalid")
+    source_path = library_root / filename
+    if not source_path.is_file():
+        raise FileNotFoundError(f"media_inbox_asset_missing: {filename}")
+    return store.register_asset(  # type: ignore[attr-defined]
+        project_id=project_id,
+        asset_type=AssetType.RAW_VIDEO,
+        source_path=source_path,
+        source_kind="media_inbox_library",
+        metadata={"media_inbox_filename": filename},
+    )
+
+
+class _StopSignal(Protocol):
+    def is_set(self) -> bool: ...
+    def wait(self, timeout: float) -> bool: ...
+
+
+def run_inbox_watcher_loop(
+    config: MediaInboxConfig,
+    *,
+    stop_event: _StopSignal,
+    interval_seconds: float = 30.0,
+    is_settled: Callable[[Path], bool] = lambda path: is_file_settled(path),
+    on_cycle: Callable[[MediaInboxCycleReport], None] | None = None,
+) -> None:
+    """Repeatedly run a watch pass until `stop_event` is set.
+
+    `stop_event` is any object duck-typing threading.Event's is_set()/wait()
+    (a real Event in production, a fake in tests) so a caller can stop the
+    loop promptly instead of waiting out a full sleep."""
+    while not stop_event.is_set():
+        report = run_inbox_cycle(config, is_settled=is_settled)
+        if on_cycle is not None:
+            on_cycle(report)
+        if stop_event.is_set():
+            return
+        stop_event.wait(interval_seconds)

@@ -648,7 +648,7 @@ owner 요구: "로컬 LLM 물려서 동작하게, 어댑터로 GPT-5.4 / 5.4-min
 
 커밋: `d503ce2`
 
-### Task 13: 로컬 LLM으로 유진 대화 실제 동작 — **부분 완료 (2026-08-05)**
+### Task 13: 로컬 LLM으로 유진 대화 실제 동작 — **완료 (화면 연결까지, 2026-08-06)**
 
 **실측으로 계획서 재사용 게이트를 두 군데 정정했다.**
 
@@ -698,7 +698,7 @@ owner 요구: "로컬 LLM 물려서 동작하게, 어댑터로 GPT-5.4 / 5.4-min
 
 Commit: `feat: answer Yujin's conversation with the local model`
 
-### Task 14: provider 어댑터와 전환 — **어댑터 완료, 화면 연결은 Task 13 결정에 종속 (2026-08-06)**
+### Task 14: provider 어댑터와 전환 — **완료 (2026-08-06)**
 
 - [x] **Step 1: 실패 테스트** — `tests/test_yujin_provider_adapter.py`: provider를 바꾸면
       다음 응답이 실제로 그 provider로 가는지, 전환 이력이 매번 기록되는지, 미설정
@@ -719,9 +719,11 @@ Commit: `feat: answer Yujin's conversation with the local model`
       `blocked`(`external_provider_egress_not_configured`)로 끝나며, 다시 `local`로
       전환하면 실제 응답이 재개된다. 전환 이력도 정확히 기록됐다
 
-**화면에는 아직 연결하지 않았다.** Task 13에서 이미 남긴 결정 — 기존 채팅 UI를
-`HermesRunService` 폴백으로 연결할지, 새 로컬 전용 엔드포인트를 만들지 — 이 먼저 정해져야
-이 어댑터를 실제 API 경로에 꽂을 자리가 생긴다. 지금은 라이브러리 수준의 검증된 능력이다.
+**화면 연결 완료 (2026-08-06, 커밋 `f26d88bf5`).** owner가 방식 B(새 로컬 전용
+엔드포인트 재사용)를 선택해, 기존에 만들어져 있었으나 프론트에 연결되지 않았던 동기
+`POST .../director/conversations/{id}/messages`의 자유 대화 생성 로직을
+`YujinLocalConversationService`로 교체하고 `EditorWorkbenchRoute.tsx`를 그 경로로
+재배선했다. `HermesRunService`/`AgentGatewayClient`/capability-token 코드는 건드리지 않았다.
 
 GPT 경로 실제 사용은 §23.1 egress gate와 OAuth 로그인이 선행이다.
 어댑터 구현과 실제 GPT 호출은 별개이며, 이 Task는 어댑터까지만 닫는다.
@@ -1431,9 +1433,9 @@ Slice 번호가 아니라 **의존성과 가치 순서**로 진행한다.
 
 Task 6–9는 서로 독립적이라 위 순서 사이 어디에나 끼울 수 있다.
 
-### 진행 상태 (2026-08-06 기준 — 계획서 Task 1~21 전부 착수 완료)
+### 진행 상태 (2026-08-06 기준 — 계획서 Task 1~21 전부 완료)
 
-**완료:** Task 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11A, 12, 13, 14, 15, 16, 17, 19, 20, 21.
+**완료:** Task 1~21 전부.
 Task 8(프로젝트 완전 삭제, 이중 확인)과 F-9(렌더 기본 방향 가로)는 같은 세션에서 owner 결정을
 받아 닫았다. Task 13(로컬 LLM 유진 대화)·Task 14(provider 어댑터)의 화면 연결은 owner가
 방식 B(새 로컬 전용 엔드포인트 재사용 — 실제로는 이미 만들어져 있었으나 프론트에 연결되지
@@ -1441,13 +1443,29 @@ Task 8(프로젝트 완전 삭제, 이중 확인)과 F-9(렌더 기본 방향 �
 `f26d88bf5`로 닫았다. `HermesRunService`/`AgentGatewayClient`/capability-token 코드는
 건드리지 않았다.
 
-**부분 완료 — Task 18의 나머지 조각만 남았다.**
+Task 18(구글 드라이브 반입)도 완료했다. 감시·해시검증·이동 로직은 이미 있었고,
+2026-08-06에 owner가 지켜보는 중에 실제 Drive 폴더(`G:\내 드라이브\100_videobox`)에서
+첫 실제 이동을 실행했다(커밋 `295ebe721`, `scripts/run_media_inbox_cycle.py` 신설,
+영상 9개 전부 해시 검증까지 통과해 이동, 중복·스킵·실패 0건). 이어서 반복 워처 루프와
+라이브러리→project 복사 경로도 마저 구현했다: `run_inbox_watcher_loop()`가
+`VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED=1`일 때 앱 시작 시 백그라운드 스레드로 돈다(기본은
+꺼짐 — 감시 경로가 실제 owner Drive 폴더라 opt-in 없이 테스트가 건드리면 안 된다).
+`import_media_inbox_asset_to_project()` + `POST /api/projects/{id}/media-inbox/import`,
+`GET /api/media-inbox/assets`로 라이브러리 파일을 프로젝트 자산(raw_video)으로 복사할 수
+있다. 프론트 UI(라이브러리 파일을 고르는 화면)는 아직 없다 — 백엔드 API까지만 이번
+범위다.
 
-- Task 18: 감시·해시검증·이동 로직은 이미 완료돼 있었고, 2026-08-06에 owner가 지켜보는
-  중에 실제 Drive 폴더(`G:\내 드라이브\100_videobox`)에서 첫 실제 이동을 실행했다
-  (커밋 `295ebe721`, `scripts/run_media_inbox_cycle.py` 신설). 영상 9개 전부 해시
-  검증까지 통과해 이동, 중복·스킵·실패 0건. 아직 없는 것: 반복 실행되는 워처 루프,
-  라이브러리→project 복사 경로(지금은 project 밖 공용 라이브러리에만 쌓인다)
+**검증.** 코드리뷰에서 실제 결함 1건을 잡았다 — `filename`에 경로 탐색(`../`) 방어가
+없어 library_root 밖 임의 파일을 프로젝트로 복사할 수 있었다. 파일명에 구분자가 오면
+거부하도록 고치고 회귀 테스트를 추가했다(라이브러리는 항상 flat이라 정당한 파일명에
+구분자가 올 일이 없다). 실제 dev 서버로 역방향 검증도 했다 — 미리보기 도구가 worktree가
+아니라 main 브랜치 경로에서 서버를 띄우는 걸 발견해(구버전 코드가 서빙되고 있었다)
+`scripts/run_api.py`를 worktree에서 직접 띄워 재확인: `GET /api/media-inbox/assets`가
+이전에 이동시킨 실제 파일 9개를 정확히 나열했고, 실제 프로젝트를 만들어
+`POST .../media-inbox/import`로 실제 파일을 복사한 뒤 디스크에서 확인, traversal 거부까지
+전부 실제 서버로 확인했다. 백엔드 전체 회귀 3076 passed, 52 skipped, 0 failed(수정 전
+1차 실행에서 lifespan 테스트 3건이 `app.state`를 SimpleNamespace로 모킹하는 곳에서
+`AttributeError`로 깨진 걸 잡아 `getattr` 기본값 패턴으로 고쳤다).
 
 **owner 결정으로 닫은 것 (2026-08-06):**
 
@@ -1461,8 +1479,8 @@ Task 8(프로젝트 완전 삭제, 이중 확인)과 F-9(렌더 기본 방향 �
   해결했다 — `resolve_local_runtime_config()`를 추가해 `VIDEOBOX_LOCAL_MODEL_NAME`
   환경변수로 오버라이드 가능하게 하고 `compose.yaml`에도 통과시켰다
 
-**남은 것:** Task 18의 반복 워처 루프와 라이브러리→project 복사 경로뿐이다 — 이건
-owner 승인이 필요한 게 아니라 순수 구현 작업이다. 나머지는 전부 이 문서와
+**남은 것:** 계획서(Task 1~21) 자체에는 더 없다. 라이브러리 파일을 프로젝트에
+가져오는 프론트 UI(지금은 API만 있다)가 자연스러운 다음 후보다. 그 외 근거는 이 문서와
 `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md`에 근거와 함께
 기록돼 있다. 계획서 자체의 실행 순서(Task 1~21)는 전부 완료했다.
 

@@ -3,12 +3,35 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+import pytest
+
 from videobox_core_engine.media_inbox import (
     MediaInboxConfig,
+    import_media_inbox_asset_to_project,
     is_file_settled,
     run_inbox_cycle,
+    run_inbox_watcher_loop,
     scan_inbox_candidates,
 )
+
+
+class _FakeStopEvent:
+    """Duck-types threading.Event's is_set()/wait() without a real clock."""
+
+    def __init__(self, stop_after_waits: int) -> None:
+        self._waits = 0
+        self._stop_after_waits = stop_after_waits
+        self._set = False
+
+    def is_set(self) -> bool:
+        return self._set
+
+    def wait(self, timeout: float) -> bool:
+        self.last_timeout = timeout
+        self._waits += 1
+        if self._waits >= self._stop_after_waits:
+            self._set = True
+        return self._set
 
 
 def test_scan_finds_video_files_recursively_and_ignores_noise(tmp_path: Path) -> None:
@@ -179,3 +202,105 @@ def test_run_inbox_cycle_continues_past_one_failure_to_process_the_rest(tmp_path
     assert sorted(report.moved) == ["good.mp4"]
     assert bad.exists()
     assert not good.exists()
+
+
+def test_watcher_loop_runs_cycles_until_stop_event_is_set(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    stop_event = _FakeStopEvent(stop_after_waits=3)
+    reports: list = []
+
+    run_inbox_watcher_loop(
+        config,
+        stop_event=stop_event,
+        interval_seconds=5.0,
+        on_cycle=reports.append,
+    )
+
+    assert len(reports) == 3
+    assert stop_event.last_timeout == 5.0
+
+
+def test_watcher_loop_runs_zero_cycles_when_already_stopped(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive"
+    library_root = tmp_path / "library"
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    stop_event = _FakeStopEvent(stop_after_waits=0)
+    stop_event._set = True
+    reports: list = []
+
+    run_inbox_watcher_loop(config, stop_event=stop_event, interval_seconds=1.0, on_cycle=reports.append)
+
+    assert reports == []
+
+
+def test_watcher_loop_actually_moves_files_across_cycles(tmp_path: Path) -> None:
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    config = MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    stop_event = _FakeStopEvent(stop_after_waits=1)
+    (watch_root / "clip.mp4").write_bytes(b"footage")
+
+    run_inbox_watcher_loop(config, stop_event=stop_event, interval_seconds=0.01)
+
+    assert (library_root / "clip.mp4").exists()
+    assert not (watch_root / "clip.mp4").exists()
+
+
+def test_import_media_inbox_asset_copies_the_library_file_into_the_project(tmp_path: Path) -> None:
+    from videobox_domain_models.assets import AssetType
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    (library_root / "clip.mp4").write_bytes(b"library footage")
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("import target")
+
+    asset = import_media_inbox_asset_to_project(
+        store, project_id=project.project_id, library_root=library_root, filename="clip.mp4",
+    )
+
+    assert asset.asset_type == AssetType.RAW_VIDEO
+    assert asset.project_id == project.project_id
+    source = store.resolve_storage_uri(project_id=project.project_id, storage_uri=asset.storage_uri)
+    assert source.read_bytes() == b"library footage"
+    # The library copy stays in place -- the same footage can be reused
+    # across more than one project.
+    assert (library_root / "clip.mp4").exists()
+
+
+def test_import_media_inbox_asset_raises_for_a_missing_library_file(tmp_path: Path) -> None:
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("import target")
+
+    with pytest.raises(FileNotFoundError):
+        import_media_inbox_asset_to_project(
+            store, project_id=project.project_id, library_root=library_root, filename="missing.mp4",
+        )
+
+
+def test_import_media_inbox_asset_rejects_a_path_traversal_filename(tmp_path: Path) -> None:
+    """filename must never escape library_root -- the library is always flat
+    (run_inbox_cycle writes with `.name` only), so any separator is invalid."""
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"outside the library")
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("import target")
+
+    for traversal_filename in ("../secret.txt", "..\\secret.txt", "a/b.mp4", "a\\b.mp4"):
+        with pytest.raises(ValueError, match="media_inbox_filename_invalid"):
+            import_media_inbox_asset_to_project(
+                store, project_id=project.project_id, library_root=library_root, filename=traversal_filename,
+            )
