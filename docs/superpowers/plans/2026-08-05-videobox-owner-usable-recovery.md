@@ -1441,22 +1441,28 @@ Task 8(프로젝트 완전 삭제, 이중 확인)과 F-9(렌더 기본 방향 �
 `f26d88bf5`로 닫았다. `HermesRunService`/`AgentGatewayClient`/capability-token 코드는
 건드리지 않았다.
 
-**부분 완료 — 아직 화면/컨테이너 연결이 남아 있다:** Task 18(Drive 반입)만 남았다.
+**부분 완료 — Task 18의 나머지 조각만 남았다.**
 
-- Task 18: 감시·해시검증·이동 로직은 완료하고 owner의 실제 Drive 폴더를 읽기 전용으로
-  스캔해 확인했지만, 실제 파일 이동은 owner가 지켜볼 수 있을 때로 미뤘다.
-  반복 실행되는 워처 루프와 라이브러리→project 복사 경로도 아직 없다
-- 컨테이너→호스트 LM Studio 네트워크 경로(`compose.yaml` `extra_hosts` 등) —
-  Task 19(미디어 분석 worker)도 컨테이너 스택에선 같은 이유로 아직 못 켰다.
-  `§5`(컨테이너 네트워크 경계 변경)에 따라 owner 승인 필요
+- Task 18: 감시·해시검증·이동 로직은 이미 완료돼 있었고, 2026-08-06에 owner가 지켜보는
+  중에 실제 Drive 폴더(`G:\내 드라이브\100_videobox`)에서 첫 실제 이동을 실행했다
+  (커밋 `295ebe721`, `scripts/run_media_inbox_cycle.py` 신설). 영상 9개 전부 해시
+  검증까지 통과해 이동, 중복·스킵·실패 0건. 아직 없는 것: 반복 실행되는 워처 루프,
+  라이브러리→project 복사 경로(지금은 project 밖 공용 라이브러리에만 쌓인다)
 
-`LocalOpenAICompatibleRuntimeConfig.model_name` 기본값 불일치는 커밋 `a3a4c201f`로
-해결했다 — `resolve_local_runtime_config()`를 추가해 `VIDEOBOX_LOCAL_MODEL_NAME`
-환경변수로 오버라이드 가능하게 하고 `compose.yaml`에도 통과시켰다. 승인 경계를
-건드리지 않는 순수 설정 배선이라 owner 확인 없이 닫았다.
+**owner 결정으로 닫은 것 (2026-08-06):**
 
-**남은 것:** owner 확인이 필요한 것(Task 18 실제 파일 이동 실행, 컨테이너 네트워크
-경로 열기)뿐이다 — 전부 이 문서와
+- 컨테이너→호스트 LM Studio 네트워크 경로 — owner가 옵션 2(분석 worker는 계속
+  호스트 네이티브로만 실행, 컨테이너→호스트 경계는 열지 않음)를 선택해 코드 변경 없이
+  닫았다. `architecture-plan.ko.md` §11의 "GPU 의존 로컬 모델은 컨테이너화하지 말라"
+  권고와 일치한다. 컨테이너 배포/패키징이 실제로 필요해지면 그때 재논의한다
+- F-7(중복 액션 노출) — 재확인해보니 이전 세션에서 이미 해결·테스트로 고정돼 있었다.
+  홈 화면 밖은 진입점 1개, 홈 화면은 의도적 "action-only" 설계. 추가 변경 없음
+- `LocalOpenAICompatibleRuntimeConfig.model_name` 기본값 불일치는 커밋 `a3a4c201f`로
+  해결했다 — `resolve_local_runtime_config()`를 추가해 `VIDEOBOX_LOCAL_MODEL_NAME`
+  환경변수로 오버라이드 가능하게 하고 `compose.yaml`에도 통과시켰다
+
+**남은 것:** Task 18의 반복 워처 루프와 라이브러리→project 복사 경로뿐이다 — 이건
+owner 승인이 필요한 게 아니라 순수 구현 작업이다. 나머지는 전부 이 문서와
 `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md`에 근거와 함께
 기록돼 있다. 계획서 자체의 실행 순서(Task 1~21)는 전부 완료했다.
 
