@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from videobox_domain_models.assets import AssetRecord, AssetType
+from videobox_storage.broll_source_window import choose_broll_source_window
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_domain_models.projects import ProjectRecord, ProjectStatus
@@ -2267,6 +2268,26 @@ class LocalProjectStore:
         result["source_snapshot"] = planned["source_snapshot"]
         return result
 
+    def _scene_windows_for_asset(self, *, project_id: str, asset_id: str) -> list[dict[str, Any]]:
+        """Scene windows from this asset's most recent analysis that has any.
+
+        Re-analysis writes a fresh set, so the newest non-empty run wins; an
+        asset that was never analyzed simply yields none and the caller falls
+        back to the head of the clip.
+        """
+        analyses = [
+            analysis
+            for analysis in self.list_media_analysis(project_id=project_id)
+            if str(analysis["asset_id"]) == asset_id
+        ]
+        for analysis in reversed(analyses):
+            windows = self.list_media_scene_windows(
+                project_id=project_id, analysis_id=str(analysis["analysis_id"])
+            )
+            if windows:
+                return windows
+        return []
+
     def _draft_readiness_plan(self, *, project_id: str, brief: dict[str, Any], narration: dict[str, Any]) -> dict[str, Any]:
         sentences = [value.strip() for value in re.split(r"[.!?\n]+", str(brief["script_text"])) if value.strip()]
         segments = [{"segment_id": f"script-{index + 1}", "text": text, "start_sec": index * 5, "end_sec": (index + 1) * 5} for index, text in enumerate(sentences or [str(brief["script_text"]).strip()])]
@@ -2275,7 +2296,15 @@ class LocalProjectStore:
         playable_broll = [(item, duration_sec) for item, duration_sec in playable_broll if duration_sec is not None]
         broll = []
         for index, (segment, (item, duration_sec)) in enumerate(zip(segments, playable_broll)):
-            broll.append({"asset_id": item["asset_id"], "rank": index + 1, "label": item["metadata"].get("title") or f"장면 영상 {index + 1}", "segment_id": segment["segment_id"], "target_range": {"start_sec": 0, "end_sec": min(5.0, duration_sec)}, "media_duration_sec": duration_sec, "media_type": "broll_video", "selection": item["asset_id"], "skipped": False})
+            # Task 23: a ten-minute take is not usable from its first five
+            # seconds, so pick a settled scene window when analysis found one.
+            # Falls back to the head of the clip for unanalyzed footage.
+            target_range = choose_broll_source_window(
+                duration_sec=duration_sec,
+                needed_sec=float(segment["end_sec"]) - float(segment["start_sec"]),
+                scene_windows=self._scene_windows_for_asset(project_id=project_id, asset_id=str(item["asset_id"])),
+            )
+            broll.append({"asset_id": item["asset_id"], "rank": index + 1, "label": item["metadata"].get("title") or f"장면 영상 {index + 1}", "segment_id": segment["segment_id"], "target_range": target_range, "media_duration_sec": duration_sec, "media_type": "broll_video", "selection": item["asset_id"], "skipped": False})
         def choice(asset_type: AssetType, label: str) -> dict[str, Any]:
             item = next((asset for asset in assets if asset["asset_type"] == asset_type.value), None)
             return {"selection": item["asset_id"], "reason": "프로젝트 자산에서 골랐어요."} if item else {"selection": None, "reason": f"프로젝트에 사용할 {label}이 없어요."}
