@@ -562,9 +562,16 @@ Task 9 acceptance를 r4로 수행하면 실제 품질에 대해 아무것도 알
 - 토큰을 바꿔도 셸 전체 색이 바뀌지 않는다. `D-1`의 선행 조건이다.
 - 실측: `--primary`를 바꿔도 기본 버튼은 `rgb(91,74,200)` 유지
 
-### F-7. 중복 액션 노출 (낮음)
+### F-7. 중복 액션 노출 (낮음) — **해결됨 (이전 세션)**
 
 - `새 영상 만들기`가 사이드바·헤더·본문 카드 3곳에 동시 존재한다.
+- 2026-08-06 재확인: 이미 고쳐져 있었다. `ProductShell.test.tsx`의
+  `"keeps a single '새 영상 만들기' entry point outside the home screen (F-7)"`가
+  홈 화면 밖에서는 진입점 1개만 남긴다. 홈 화면은 의도적으로 "action-only" 설계라
+  사이드바 nav + 히어로 버튼이 함께 있는 게 정상이며, 별도 테스트가 그 의도를 고정한다
+  (`"shows creator navigation, a project switcher, and an action-only home"`).
+  더 손댈 게 없다 — owner 승인 워크스페이스 구조(`docs/decisions/
+  creator-workspace-visual-approval.ko.md`)를 건드릴 이유가 없었다.
 
 ### F-8. 유진 대화 편집 — **구현 완료. 인증만 남음** (판정 정정)
 
