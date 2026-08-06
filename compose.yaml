@@ -59,6 +59,11 @@ services:
       VIDEOBOX_STT_DEVICE: ${VIDEOBOX_STT_DEVICE:-cpu}
       VIDEOBOX_STT_COMPUTE_TYPE: ${VIDEOBOX_STT_COMPUTE_TYPE:-int8}
       VIDEOBOX_STT_LANGUAGE: ${VIDEOBOX_STT_LANGUAGE:-ko}
+      # Must match whatever model is actually loaded in LM Studio -- the
+      # hardcoded default ("qwen3-35b") drifted from the real loaded model
+      # name (qwen/qwen3.6-35b-a3b) and this override closes that gap
+      # without a code change.
+      VIDEOBOX_LOCAL_MODEL_NAME: ${VIDEOBOX_LOCAL_MODEL_NAME:-qwen3-35b}
       # The root filesystem stays read-only, so model weights need their own
       # writable home.  Keeping it off /tmp avoids re-downloading on restart and
       # keeps weights out of the owner's project data.

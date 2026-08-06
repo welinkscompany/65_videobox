@@ -71,6 +71,7 @@ from videobox_core_engine.settings import (
     resolve_database_url,
     resolve_enable_local_media_analysis,
     resolve_container_snapshot_root,
+    resolve_local_runtime_config,
     resolve_projects_root,
     resolve_user_library_root,
     resolve_whisper_stt_config,
@@ -444,7 +445,7 @@ def create_app(
     resolved_media_library_store = media_library_store or MediaLibraryStore(
         user_library_root
     )
-    resolved_local_runtime_config = local_runtime_config or LocalOpenAICompatibleRuntimeConfig()
+    resolved_local_runtime_config = local_runtime_config or resolve_local_runtime_config()
     if local_only_runtime_service_factory is not None:
         runtime_service_factory = local_only_runtime_service_factory
     else:

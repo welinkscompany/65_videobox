@@ -131,6 +131,25 @@ def resolve_whisper_stt_config() -> "WhisperSTTConfig":
     )
 
 
+def resolve_local_runtime_config() -> "LocalOpenAICompatibleRuntimeConfig":
+    """Resolve the local LM Studio runtime config for callers that pass none.
+
+    The container/dev-server factory (`uvicorn ... --factory`, scripts/run_api.py)
+    receives no arguments, so this must be read from the environment rather
+    than assumed at the call site -- mirrors resolve_whisper_stt_config().
+    model_name defaults to a hardcoded value that has drifted from whatever
+    model is actually loaded in LM Studio; env override lets the two match
+    without a code change.
+    """
+    defaults = LocalOpenAICompatibleRuntimeConfig()
+    return LocalOpenAICompatibleRuntimeConfig(
+        model_name=_environment_text("VIDEOBOX_LOCAL_MODEL_NAME", defaults.model_name),
+        timeout_seconds=_environment_positive_int(
+            "VIDEOBOX_LOCAL_RUNTIME_TIMEOUT_SECONDS", defaults.timeout_seconds
+        ),
+    )
+
+
 @dataclass(slots=True, frozen=True)
 class LocalOpenAICompatibleRuntimeConfig:
     enabled: bool = True
