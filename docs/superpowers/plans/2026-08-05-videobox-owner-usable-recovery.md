@@ -1500,6 +1500,159 @@ Task 18(구글 드라이브 반입)도 완료했다. 감시·해시검증·이�
 
 Task 10과 12도 이미 완료다(위 목록에 포함).
 
+### 진행 상태 (2026-08-07 갱신 — 코드 실측으로 재확인)
+
+2026-08-07 세션에서 "계획서가 정말 다 구현됐는가"를 문서 표기가 아니라 **코드로 직접
+대조**했다. 체크박스가 비어 있는 Task 4개(1·3·4·15)를 하나씩 확인한 결과, **체크만
+누락됐을 뿐 구현은 되어 있었다.** 근거를 남긴다. 이 표가 완료 표기의 SSOT다.
+
+| Task | 표기 상태 | 코드 실측 결과 | 근거 |
+|---|---|---|---|
+| 1 | 체크 없음 | **STT·CapCut 완료 / TTS만 열림** | `compose.yaml:57,74` 기본값 `1` |
+| 3 | 체크 없음 | **완료** | `editorAssetProjection.ts:140`이 `api.assetThumbnailUrl` 호출 |
+| 4 | 체크 없음 | **완료** | `AppRouter.tsx`가 `ProductShell`로 감쌈 |
+| 15 | 체크 없음 | **완료** | `local_pipeline.py:515~535`가 길이·해상도·방향·오디오 저장 |
+| 2·5~14·16~21 | 완료 표기 | **완료** | 각 Task 본문의 closeout 기록 |
+
+**따라서 계획서 Task 1~21 중 미완은 정확히 하나다 — Task 1 Step 7 (TTS 엔진).**
+이것도 누락이 아니라 owner가 2026-08-05에 "보류"로 직접 결정한 항목이다(엔진 선택과
+그에 따른 다운로드·외부 전송이 owner 승인 사항이라서다). **owner 결정 전에는 착수하지
+않는다.**
+
+**2026-08-07에 한 일:** 라이브러리→project 가져오기 **프론트 UI를 만들었다**(커밋
+`9c8c203c2`). 위 "남은 것"에서 다음 후보로 지목했던 화면이다. 실제 API 서버를 worktree에서
+직접 띄워 브라우저로 역방향 검증까지 마쳤다(가져오기 클릭 → 201 → 목록 갱신 → 디스크 확인).
+
+**다만 이 UI는 Task 22에서 정정이 필요하다.** 아래 참조.
+
+---
+
+## 2026-08-07 추가 계획 — 긴 촬영본을 B-roll로 쓰기 (Task 22~24)
+
+**추가 이유.** owner의 실제 작업 방식이 2026-08-07에 처음 명확해졌다.
+
+> 폰으로 찍어 Google Drive에 올리는 영상은 **그 자체가 B-roll**이다. 여러 채널의
+> 유튜브 영상을 만들 때 가져다 쓴다. B-roll이니 **무음이 맞다**. 다만 10분짜리 산책
+> 영상을 올리면 **10분을 다 쓰지 않으므로, 쓸 구간을 잘라내는 편집이 필요하다.**
+
+계획서 Task 1~21은 이 작업 방식을 전제하지 않았다. Task 21은 "추천을 자동 적용할지"를
+정한 것이지 "긴 영상 중 **어디를** 쓸지"는 다룬 적이 없다. 따라서 아래는 기존 Task의
+미완이 아니라 **새로 추가되는 범위**다. 계획서 밖 작업을 계획서 없이 시작하지 않기 위해
+정식 Task로 등록한다.
+
+**owner 결정 (2026-08-07):** 구간은 **에이전트가 먼저 추천**한다. 사람이 손댈 때는
+**편집 화면에서** 조절한다. 따라서 Task 23(추천)이 Task 24(수동 조절)보다 앞선다.
+
+### Task 22: 라이브러리 가져오기를 B-roll로 정정 — **미착수**
+
+`import_media_inbox_asset_to_project()`가 `AssetType.RAW_VIDEO`로 등록한다. owner
+요구에 따르면 **B-roll이어야 한다.** 단순 분류 문제가 아니다 — B-roll로 등록돼야
+분석이 걸려 태그와 장면 구간이 생기고, 그래야 Task 23의 재료가 만들어진다. 지금
+경로로는 그 흐름을 아예 타지 못한다. 2026-08-07 프론트 UI도 이 위에 서 있다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `pipeline.register_broll_asset` | `adopt as-is` | 업로드 경로가 이미 쓰는 canonical 등록 경로. 분석 큐잉과 probe 메타데이터 저장이 딸려 온다 |
+| 파일명 전용 API + traversal 방어 | `adopt as-is` | 절대경로를 브라우저에 노출하지 않는 기존 경계를 유지한다 |
+| `broll-video/batch` 엔드포인트로 대체 | `exclude` | 클라이언트가 절대경로를 알아야 해서 위 경계가 깨진다 |
+| 새 등록 경로 신설 | `exclude` | 기존 경로로 충분하다 |
+
+**Files:**
+- Modify: `packages/core-engine/src/videobox_core_engine/media_inbox.py`
+- Modify: `apps/web/src/features/media/MediaWorkspacePage.tsx`
+- Modify: 해당 테스트
+
+- [ ] **Step 1: 실패 테스트** — 가져온 자산이 `broll_video`이고 분석이 큐잉되는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — `register_broll_asset` 경로로 교체. traversal 방어 유지
+- [ ] **Step 4: 프론트 정정** — 가져온 영상이 "준비한 자산"과 "분석 상태"에 실제로
+      나타나므로, 임시로 넣었던 "원본 영상 N개" 카운터는 제거한다
+- [ ] **Step 5: GREEN + 실제 서버 역방향 검증 + 커밋**
+
+### Task 23: 긴 촬영본에서 쓸 구간 추천 — **미착수**
+
+**현재 결함.** B-roll 후보의 기본 구간이 하드코딩돼 있다.
+
+`local_project_store.py:2278` — `"target_range": {"start_sec": 0, "end_sec": min(5.0, duration_sec)}`
+
+10분 영상이든 10초 영상이든 **무조건 맨 앞 5초**다. 산책 영상의 앞 5초는 보통 카메라를
+켜고 자세를 잡는 구간이라 가장 쓸 수 없는 부분이다. 추천이 없는 게 아니라 **추천인 척하는
+고정값**이 들어가 있다.
+
+**이미 있는 재료 (중요).** 분석이 이미 장면 구간을 계산해 저장하고 있다.
+
+- `media_analysis.py:102` — `probe.scene_boundaries`로 장면 구간 계산
+- `media_analysis.py:103` — `media_scene_windows` 테이블에 저장
+- `local_project_store.py:8285` — `list_media_scene_windows()`로 읽기 가능
+- `routers/media_analysis.py:45` — provenance API로 노출
+
+**그런데 이 값을 읽어서 배치에 쓰는 코드가 없다.** 저장까지 해놓고 안 쓰는,
+이 프로젝트가 고치려는 "만들어놓고 연결 안 함" 패턴이다.
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `media_scene_windows` + `list_media_scene_windows()` | `adopt as-is` | 이미 계산·저장되고 있다. 읽기만 하면 된다 |
+| `media_controls`의 `in_sec`/`out_sec` | `adopt as-is` | 원본 구간 지정이 이미 정규화·검증된다 |
+| 새 장면 감지 구현 | `exclude` | 기존 ffprobe 경로로 충분하다 |
+| 외부 하이라이트 검출 모델 | `exclude` | 로컬 우선 경계를 넘고, 실측 전에는 필요 근거가 없다 |
+
+**Files:**
+- Modify: `packages/storage-abstractions/src/videobox_storage/local_project_store.py`
+- Create: `tests/test_broll_range_recommendation.py`
+
+- [ ] **Step 1: 실패 테스트** — 장면 구간이 있는 긴 자산은 앞 5초가 아니라 장면 경계에
+      맞춘 구간을 추천하는지. 장면 구간이 없으면 기존 동작으로 안전하게 되돌아가는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — 필요한 길이에 맞는 장면 구간을 고른다. 맨 앞 구간은 카메라
+      세팅일 확률이 높으므로 우선순위를 낮춘다
+- [ ] **Step 4: owner 실제 영상으로 실측** — 반드시 실제 촬영본으로 확인한다
+- [ ] **Step 5: 전체 회귀 + 커밋**
+
+**리스크 (미리 밝힌다).** 장면 경계는 **화면이 바뀌는 지점**을 잡는 것이지 "좋은
+장면"을 알아보는 게 아니다. 산책처럼 화면이 완만하게 변하는 영상은 구간이 거의 안 잡힐
+수 있다. 그 경우 분석의 태그·요약을 함께 쓰는 보완이 필요한데, **실제 영상으로 재보기
+전에는 어느 정도인지 알 수 없다.** Step 4의 실측 결과를 owner에게 보고한 뒤 판단한다.
+
+### Task 24: 편집 화면에서 B-roll 구간 손보기
+
+Task 23의 추천을 받은 뒤, 마음에 들지 않을 때 사람이 조절하는 경로다.
+
+**현재 상태.** 엔진은 지원하는데 화면이 없다.
+
+- `media_controls.py:55~64` — `in_sec`/`out_sec` 정규화·검증 있음
+- `editorViewModel.ts:50~51` — 프론트까지 값이 흘러옴
+- `inspectorRegistry.ts:52,55` — **B-roll은 `fields: []`, `clearOnly: true`.
+  즉 편집 화면에서 B-roll은 "빼기"만 되고 구간 조절 칸이 없다**
+
+**재사용 게이트 (§8.1):**
+
+| 후보 | 분류 | 이유 |
+|---|---|---|
+| `inspectorRegistry` 필드 정의 | `partial port` | B-roll에만 구간 필드를 추가한다 |
+| `applyMedia(controls)` 명령 경로 | `adopt as-is` | 이미 controls를 전달할 수 있다 |
+| `AssetPreviewPlayer` | `adopt as-is` | 이미 in/out 구간만 재생한다 |
+| 새 타임라인 트리밍 UI | `exclude` | §2.1 MVP 제외(자유 키프레임·풀 NLE) 경계를 넘는다 |
+
+**Files:**
+- Modify: `apps/web/src/features/editor/inspector/inspectorRegistry.ts`
+- Modify: `apps/web/src/features/editor/inspector/InspectorControls.tsx`
+- Modify: 해당 테스트
+
+- [ ] **Step 1: 실패 테스트** — B-roll 선택 시 시작/끝 조절이 보이고 저장되는지
+- [ ] **Step 2: RED 확인**
+- [ ] **Step 3: 구현** — §10.13 creator 어휘를 따른다(`in_sec` 같은 내부 용어 금지)
+- [ ] **Step 4: GREEN + 브라우저 실측 + 커밋**
+
+**범위 경계 확인.** 이 Task는 `implementation-plan.ko.md` §8.4가 고정한 편집기 14개
+조작 중 "컷 경계 조정"과 "B-roll 교체"에 해당한다. 풀 NLE 타임라인 편집으로 확장하지
+않는다.
+
+---
+
 ## 완료 기준
 
 이 계획은 아래가 모두 성립할 때 닫는다.
