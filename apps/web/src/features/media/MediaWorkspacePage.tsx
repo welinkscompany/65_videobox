@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api, type BrollAsset, type MediaAnalysis } from "../../api";
+import { api, type BrollAsset, type MediaAnalysis, type MediaInboxAsset } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
@@ -9,6 +9,8 @@ type MediaState = {
   projectId: string;
   assets: BrollAsset[];
   analyses: MediaAnalysis[];
+  collection: MediaInboxAsset[];
+  sourceVideoCount: number;
 };
 
 type MediaActionToken = {
@@ -27,6 +29,14 @@ const analysisStatusCopy: Record<string, string> = {
   blocked: "분석을 진행할 수 없어요",
   cancelled: "분석을 멈췄어요",
 };
+
+function fileSizeLabel(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)}GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${bytes}B`;
+}
 
 function assetTitle(asset: BrollAsset | undefined, index: number) {
   const title = asset?.metadata?.title;
@@ -61,9 +71,11 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const [assets, analysisResponse] = await Promise.all([
+      const [assets, analysisResponse, collection, narrationOptions] = await Promise.all([
         api.listBrollAssets(loadProjectId),
         api.listMediaAnalysis(loadProjectId),
+        api.listMediaInboxAssets(),
+        api.listDraftNarrationOptions(loadProjectId),
       ]);
       const current = currentContext.current;
       if (current.projectId !== loadProjectId || current.generation !== loadGeneration || loadEpoch.current !== epoch) return false;
@@ -71,6 +83,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
         projectId: loadProjectId,
         assets: assets.filter((item) => item.asset_type === "broll_video"),
         analyses: analysisResponse.items,
+        collection,
+        sourceVideoCount: narrationOptions.filter((item) => item.asset_type === "raw_video").length,
       });
       return true;
     } catch {
@@ -175,6 +189,21 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     finishAction(token);
   }
 
+  async function importFromCollection(filename: string) {
+    const token = beginAction(`import:${filename}`);
+    if (!token) return;
+    try {
+      await api.importMediaInboxAsset(token.projectId, filename);
+      if (!isCurrentAction(token)) return;
+      await load();
+      if (isCurrentAction(token)) setMessage(`「${filename}」을 이 프로젝트로 가져왔어요.`);
+    } catch {
+      if (isCurrentAction(token)) setMessage("이 영상을 가져오지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      finishAction(token);
+    }
+  }
+
   async function showPreview(item: MediaAnalysis) {
     const key = `preview:${item.analysis_id}`;
     const token = beginAction(key);
@@ -236,6 +265,35 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
 
       {currentState ? (
         <div className="grid gap-4">
+          <section aria-labelledby="media-collection-heading">
+            <h2 id="media-collection-heading">따로 모아둔 영상 가져오기</h2>
+            <p>미리 옮겨둔 영상이 여기에 쌓여요. 이 프로젝트에서 쓸 영상을 골라 가져오세요.</p>
+            {currentState.collection.length === 0 ? <p>아직 따로 모아둔 영상이 없어요.</p> : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {currentState.collection.map((item) => (
+                  <Card key={item.filename}>
+                    <CardHeader>
+                      <CardTitle>{item.filename}</CardTitle>
+                      <CardDescription>{fileSizeLabel(item.size_bytes)}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        aria-label={`${item.filename} 가져오기`}
+                        disabled={busyKey !== null}
+                        onClick={() => void importFromCollection(item.filename)}
+                      >
+                        가져오기
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+            <p>이 프로젝트에 있는 원본 영상 {currentState.sourceVideoCount}개</p>
+          </section>
+
           <section aria-labelledby="media-assets-heading">
             <h2 id="media-assets-heading">준비한 자산</h2>
             {currentState.assets.length === 0 ? <p>아직 준비한 자산이 없어요.</p> : (

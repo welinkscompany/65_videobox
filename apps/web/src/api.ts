@@ -40,6 +40,8 @@ export type CreateCreationBriefRequest = {
 export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { gap_slots?: { gap_slot_id: string; reason: string }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
 export type DraftReadinessRequest = { brief_id: string; narration_choice: { kind: "silent" | "existing" | "source_video"; asset_id?: string }; idempotency_key: string; expected_brief_revision: number; capability?: Record<string, unknown> };
 export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio" };
+export type MediaInboxAsset = { filename: string; size_bytes: number };
+export type MediaInboxImport = { asset_id: string; project_id: string; asset_type: string; storage_uri: string };
 export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
 export type AtomicDraftBundleRequest = { brief_id: string; readiness_id: string; expected_brief_revision: number; expected_readiness_revision: number; idempotency_key: string; allow_placeholder?: boolean };
 
@@ -1584,6 +1586,17 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
+  listMediaInboxAssets: async (): Promise<MediaInboxAsset[]> =>
+    (await request<{ assets: MediaInboxAsset[] }>("/api/media-inbox/assets")).assets,
+  importMediaInboxAsset: (projectId: string, filename: string) =>
+    request<MediaInboxImport>(
+      `/api/projects/${encodeURIComponent(projectId)}/media-inbox/import`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename }),
+      },
+    ),
   listBrollAssets: async (projectId: string): Promise<BrollAsset[]> => {
     const payload = await request<{ assets: BrollAsset[] }>(
       `/api/projects/${projectId}/assets/broll-video`,
