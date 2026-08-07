@@ -106,11 +106,39 @@ describe("TimelineReviewPage", () => {
       sessionId: "session-project-a",
       segmentId: "segment-2",
     });
-    expect(screen.getByText("안전한 승인 계약이 준비될 때까지 승인과 추천 변경은 사용할 수 없어요. 장면 편집과 다시 확인은 계속할 수 있어요.")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /검토 승인|검토 다시 열기|이 추천 승인|거절|다시 만들기/ })).toBeNull();
-    expect(approveTimeline).not.toHaveBeenCalled();
-    expect(reopenTimeline).not.toHaveBeenCalled();
+    // Task 31: approval is what unlocks export. It used to be withheld here,
+    // which left every output button permanently disabled in the browser.
+    expect(screen.queryByText(/안전한 승인 계약이 준비될 때까지/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "검토 승인" }));
+    await waitFor(() => expect(approveTimeline).toHaveBeenCalledWith("project-a", "job-project-a"));
+    // Recommendation approve/reject stays out of scope for now.
     expect(approveRecommendation).not.toHaveBeenCalled();
+    expect(reopenTimeline).not.toHaveBeenCalled();
+  });
+
+  it("blocks approval while items still need checking, and says why", async () => {
+    // The server refuses an approval that still has blockers, so the screen
+    // must not offer an action that cannot succeed.
+    vi.mocked(api.getTimeline).mockResolvedValue(timeline("project-a", "timeline-a", [recommendation] as never));
+    vi.mocked(api.getReviewSnapshot).mockResolvedValue(review("project-a", "timeline-a", [recommendation] as never));
+    const approveTimeline = vi.spyOn(api, "approveTimeline");
+    render(<TimelineReviewPage projectId="project-a" />);
+    await screen.findByRole("heading", { name: "영상 검토" });
+
+    expect(screen.getByRole("button", { name: "검토 승인" })).toBeDisabled();
+    expect(screen.getByText("확인할 항목을 모두 마치면 승인할 수 있어요.")).toBeVisible();
+    expect(approveTimeline).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a failed approval in creator language without leaking the raw error", async () => {
+    vi.spyOn(api, "approveTimeline").mockRejectedValue(new Error("timeline_has_blockers"));
+    render(<TimelineReviewPage projectId="project-a" />);
+    await screen.findByRole("heading", { name: "영상 검토" });
+
+    fireEvent.click(screen.getByRole("button", { name: "검토 승인" }));
+
+    expect(await screen.findByText("검토를 승인하지 못했어요. 확인할 항목을 살펴본 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(document.body.textContent).not.toContain("timeline_has_blockers");
   });
 
   it("shows no-session, no-exact-match, load error, and an explicit successful refresh", async () => {
@@ -168,7 +196,9 @@ describe("TimelineReviewPage", () => {
     expect(screen.getByText("대상: 1번째 장면 · 첫 장면")).toBeVisible();
     expect(screen.getAllByText("편집본·검토 화면에서 확인")).toHaveLength(2);
     expect(screen.queryByText(/segment-[12]|종류: broll/)).toBeNull();
-    expect(screen.queryByRole("button", { name: /검토 승인|검토 다시 열기|이 추천 승인/ })).toBeNull();
+    // Blockers are present, so approval is offered but held shut.
+    expect(screen.getByRole("button", { name: "검토 승인" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /검토 다시 열기|이 추천 승인/ })).toBeNull();
     expect(approveRecommendation).not.toHaveBeenCalled();
   });
 
@@ -180,9 +210,12 @@ describe("TimelineReviewPage", () => {
     render(<TimelineReviewPage projectId="project-a" />);
 
     expect(await screen.findByText("현재 편집본의 검토가 승인되었어요.")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /검토 승인|검토 다시 열기|이 추천 승인/ })).toBeNull();
+    // Already approved: re-approving is meaningless, and reopening is how the
+    // owner gets back to editing without losing the approval record.
+    expect(screen.queryByRole("button", { name: "검토 승인" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "검토 다시 열기" }));
+    await waitFor(() => expect(reopenTimeline).toHaveBeenCalledWith("project-a", "job-project-a"));
     expect(approveTimeline).not.toHaveBeenCalled();
-    expect(reopenTimeline).not.toHaveBeenCalled();
     expect(approveRecommendation).not.toHaveBeenCalled();
   });
 

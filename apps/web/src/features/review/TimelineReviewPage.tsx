@@ -44,6 +44,8 @@ export function TimelineReviewPage({
   onOpenSegment?: (input: OpenSegmentInput) => void;
 }) {
   const [state, setState] = useState<ReviewState>({ kind: "loading", projectId });
+  const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState(false);
   const requestEpoch = useRef(0);
   const currentProjectId = useRef(projectId);
   currentProjectId.current = projectId;
@@ -122,6 +124,33 @@ export function TimelineReviewPage({
     };
   }, [refresh]);
 
+  // Task 31: approving is what unlocks subtitles, the final render and the
+  // CapCut hand-off. The server refuses an approval that still has blockers
+  // and invalidates it again once the session moves on, so the screen only has
+  // to keep the owner from asking for something that cannot succeed.
+  const decide = useCallback(async (
+    kind: "approve" | "reopen",
+    jobId: string,
+    onDone: () => Promise<void>,
+  ) => {
+    const decideProjectId = projectId;
+    setDeciding(true);
+    setDecisionMessage(null);
+    try {
+      if (kind === "approve") await api.approveTimeline(decideProjectId, jobId);
+      else await api.reopenTimeline(decideProjectId, jobId);
+      if (currentProjectId.current !== decideProjectId) return;
+      await onDone();
+    } catch {
+      if (currentProjectId.current !== decideProjectId) return;
+      setDecisionMessage(kind === "approve"
+        ? "검토를 승인하지 못했어요. 확인할 항목을 살펴본 뒤 다시 시도해 주세요."
+        : "검토를 다시 열지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      if (currentProjectId.current === decideProjectId) setDeciding(false);
+    }
+  }, [projectId]);
+
   if (state.projectId !== projectId || state.kind === "loading") {
     return <section aria-live="polite"><p>검토 내용을 불러오는 중이에요.</p></section>;
   }
@@ -137,7 +166,24 @@ export function TimelineReviewPage({
       <h1>영상 검토</h1>
       <p>장면과 추천 상태를 확인해 주세요.</p>
       <p>{approved ? "현재 편집본의 검토가 승인되었어요." : "현재 편집본을 검토하고 있어요."}</p>
-      <p>안전한 승인 계약이 준비될 때까지 승인과 추천 변경은 사용할 수 없어요. 장면 편집과 다시 확인은 계속할 수 있어요.</p>
+      {approved ? (
+        <>
+          <p>이제 내보내기 화면에서 자막과 완성본을 만들 수 있어요.</p>
+          <Button variant="outline" disabled={deciding} onClick={() => void decide("reopen", state.job.job_id, refresh)}>
+            검토 다시 열기
+          </Button>
+        </>
+      ) : (
+        <>
+          <p>{state.blockers.length === 0
+            ? "승인하면 내보내기 화면에서 자막과 완성본을 만들 수 있어요."
+            : "확인할 항목을 모두 마치면 승인할 수 있어요."}</p>
+          <Button disabled={deciding || state.blockers.length > 0} onClick={() => void decide("approve", state.job.job_id, refresh)}>
+            검토 승인
+          </Button>
+        </>
+      )}
+      {decisionMessage ? <p role="alert">{decisionMessage}</p> : null}
 
       <section aria-labelledby="review-blockers-title">
         <h2 id="review-blockers-title">확인할 항목</h2>
