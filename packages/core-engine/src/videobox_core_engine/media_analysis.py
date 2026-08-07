@@ -91,6 +91,22 @@ class MediaAnalysisService:
             probe: MediaProbeResult = self.media_probe.probe(source)
             if self._cancelled(project_id, analysis_id):
                 return None
+            source_sha = str(claimed["idempotency_key"]).split(":", 1)[0]
+            # Scene windows come out of ffmpeg alone and are already computed by
+            # now.  Store them before the vision call so a provider failure
+            # cannot discard them -- b-roll range recommendation is their only
+            # consumer and it does not use the vision model at all.  The store's
+            # own guard still refuses to write for a cancelled run.
+            self.store.record_media_scene_windows(
+                project_id=project_id,
+                analysis_id=analysis_id,
+                source_sha256=source_sha,
+                profile_hash=str(claimed["cache_key"]),
+                windows=[
+                    {"start_sec": start, "end_sec": end}
+                    for start, end in zip(probe.scene_boundaries, probe.scene_boundaries[1:])
+                ],
+            )
             images = tuple(frame.data for frame in probe.frames)
             profile = self.store.get_media_analysis_profile(project_id=project_id, analysis_id=analysis_id)
             response = self.vision_provider.analyze_images(VisionAnalysisRequest(model_name=str(profile["vision_model_name"]), prompt="Analyze local media", images=images, response_schema=FIXED_VISION_RESPONSE_SCHEMA))
@@ -98,9 +114,6 @@ class MediaAnalysisService:
                 return None
             output = dict(response.output_data)
             result = {"probe": self._probe_payload(probe), "tags": output, "cache_key": claimed["cache_key"]}
-            source_sha = str(claimed["idempotency_key"]).split(":", 1)[0]
-            windows = [{"start_sec": start, "end_sec": end} for start, end in zip(probe.scene_boundaries, probe.scene_boundaries[1:])]
-            self.store.record_media_scene_windows(project_id=project_id, analysis_id=analysis_id, source_sha256=source_sha, profile_hash=str(claimed["cache_key"]), windows=windows)
             embedding_model = profile.get("embedding_model_name")
             if self.embedding_provider is not None and embedding_model:
                 embedded = self.embedding_provider.embed(EmbeddingRequest(model_name=str(embedding_model), inputs=(str(output["summary"]),)))

@@ -8674,7 +8674,12 @@ class LocalProjectStore:
                 ),
             )
             if cursor.rowcount == 1:
-                connection.execute("DELETE FROM media_scene_windows WHERE analysis_id = ?", (analysis_id,))
+                # Embeddings only mean anything next to the vision summary they
+                # were built from, so a failed run must not leave them behind.
+                # Scene windows are not like that (Task 28): ffmpeg derives them
+                # before the vision call and they stay correct however that call
+                # ends. Deleting them here was silently disabling b-roll range
+                # recommendation for every analysis that did not fully succeed.
                 connection.execute("DELETE FROM media_embeddings WHERE analysis_id = ?", (analysis_id,))
                 self._increment_asset_index_revision_with_connection(connection, project_id)
             connection.commit()

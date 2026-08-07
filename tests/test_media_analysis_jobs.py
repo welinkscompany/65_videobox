@@ -319,3 +319,47 @@ def test_canonical_cache_sha_changes_for_each_contract_constituent(tmp_path: Pat
     monkeypatch.setattr(media_analysis, "TAG_PROMPT_VERSION", "v1")
     monkeypatch.setattr(media_analysis, "TAG_SCHEMA_VERSION", "changed")
     assert base != service.cache_key(source_sha256="source", profile=AnalysisProfile())
+
+
+def test_scene_windows_survive_a_failed_vision_call(tmp_path: Path) -> None:
+    """Task 28: scene windows are derived from ffmpeg alone and are already
+    computed by the time the vision call runs. A vision failure must not throw
+    them away -- b-roll range recommendation is the only consumer, and it does
+    not need the vision model at all.
+
+    Reproduced live on 2026-08-07: a blocked analysis left scene_windows empty,
+    so the recommendation silently fell back to the head of every clip.
+    """
+    vision = _Vision(error=LMStudioProviderError("LM Studio local resource is unavailable.", "blocked"))
+    service, store, project_id, _ = _service(tmp_path, vision)
+    asset_id = store.list_assets(project_id=project_id)[0]["asset_id"]
+    job = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+
+    service.dispatch_once(project_id=project_id, analysis_id=job["analysis_id"])
+
+    persisted = service.get_analysis(project_id, job["analysis_id"])
+    assert (persisted["status"], persisted["error_code"]) == (MediaAnalysisStatus.BLOCKED.value, "LM_STUDIO_BLOCKED")
+    windows = store.list_media_scene_windows(project_id=project_id, analysis_id=job["analysis_id"])
+    assert [(window["start_sec"], window["end_sec"]) for window in windows] == [(0.0, 6.0), (6.0, 12.0)]
+
+
+def test_scene_windows_are_not_written_for_a_cancelled_analysis(tmp_path: Path) -> None:
+    """Moving the write earlier must not resurrect a cancelled run -- the
+    existing guard in record_media_scene_windows still has to hold."""
+    entered, release = Event(), Event()
+
+    class BlockingVision(_Vision):
+        def analyze_images(self, request):
+            entered.set(); release.wait(2); return super().analyze_images(request)
+
+    service, store, project_id, _ = _service(tmp_path, BlockingVision())
+    asset_id = store.list_assets(project_id=project_id)[0]["asset_id"]
+    job = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+    worker = Thread(target=lambda: service.dispatch_once(project_id=project_id, analysis_id=job["analysis_id"]))
+    worker.start()
+    assert entered.wait(1)
+    service.cancel_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    release.set()
+    worker.join(2)
+
+    assert service.get_analysis(project_id, job["analysis_id"])["result"] is None
