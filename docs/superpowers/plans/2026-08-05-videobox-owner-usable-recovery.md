@@ -52,7 +52,10 @@ r4는 `deterministic_korean_smoke_stt`로 만들어졌다. 이 stub은 오디오
 
 ## Slice 0 — 진실 확정
 
-### Task 1: 컨테이너 provider 활성화 — 음성 인식·목소리·CapCut
+### Task 1: 컨테이너 provider 활성화 — 음성 인식·목소리·CapCut — **음성 인식·CapCut 완료 / TTS는 Task 25로 이관**
+
+> 아래 Step 체크박스는 당시 찍지 않았다. 2026-08-07 코드 실측으로 결과를 확인했다
+> (`compose.yaml:57,74` 기본값 `1`). 근거는 "진행 상태 (2026-08-07 갱신)" 표에 있다.
 
 owner가 쓰는 컨테이너에서 제품 핵심 기능 셋이 비활성이다. 컨테이너 런타임에서 직접 확인했다.
 
@@ -228,7 +231,10 @@ review 필수로 자동 차단되어 timeline 승인이 거부되고 preview 이
 
 ## Slice 1 — 즉시 체감 개선
 
-### Task 3: 편집기 자산 카드에 썸네일 연결 (F-2)
+### Task 3: 편집기 자산 카드에 썸네일 연결 (F-2) — **완료 (체크박스만 누락됐던 건)**
+
+> 2026-08-07 코드 실측으로 확인했다: `editorAssetProjection.ts:140`이
+> `api.assetThumbnailUrl`을 실제로 호출한다.
 
 생성·저장·API·프론트 헬퍼가 모두 존재하지만 편집기 UI가 호출하지 않는다.
 `api.assetThumbnailUrl`을 호출하는 코드가 프론트엔드 전체에 없다.
@@ -255,7 +261,9 @@ review 필수로 자동 차단되어 timeline 승인이 거부되고 preview 이
 Run: `npm --prefix apps/web test -- src/features/editor/assets`
 Commit: `feat: show thumbnails in the editor asset list`
 
-### Task 4: 편집 화면 데드엔드 제거 (F-1)
+### Task 4: 편집 화면 데드엔드 제거 (F-1) — **완료 (체크박스만 누락됐던 건)**
+
+> 2026-08-07 코드 실측으로 확인했다: `AppRouter.tsx`가 `ProductShell`로 감싼다.
 
 초안이 없는 프로젝트에서 `/projects/{id}/editor` 진입 시
 사이드바·헤더 없는 흰 화면에 문장 한 줄만 나오고 돌아갈 수단이 없다.
@@ -761,7 +769,10 @@ B-roll 오디오를 건너뛴다. 즉 **B-roll은 기본 무음이고 명시적�
 다만 **사용자가 이 상태를 화면에서 볼 수 없다.** 자산 카드가 오디오 유무를 표시하지 않는다.
 이 노출은 Task 15에서 함께 처리한다.
 
-### Task 15: 자산 반입 시 실제 정보 저장 (F-2와 같은 뿌리)
+### Task 15: 자산 반입 시 실제 정보 저장 (F-2와 같은 뿌리) — **완료 (체크박스만 누락됐던 건)**
+
+> 2026-08-07 코드 실측으로 확인했다: `local_pipeline.py:515~535`가 길이·해상도·방향·
+> 오디오 유무를 저장한다.
 
 현재 B-roll 등록은 `metadata={"title", "tags"}`만 저장한다(`local_pipeline.py:494`).
 실제 API 응답에서도 `title`, `tags`, `thumbnail_uri` 세 키뿐이다.
