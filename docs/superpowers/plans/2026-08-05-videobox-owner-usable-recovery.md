@@ -2068,13 +2068,43 @@ owner가 목소리를 들어보고 고르는 GUI가 필요하면 Voicebox 앱은
 - Modify: `requirements-runtime.txt` (또는 별도 extra)
 - Create: Chatterbox provider 어댑터 + 테스트
 
-- [ ] **Step 1: 격리 환경에서 한국어 품질 실측 (선행)** — 기존 venv를 건드리지 않는다.
-      `chatterbox-tts`가 torch 계열을 끌어와 `faster-whisper`가 쓰는 기존 환경을 깨뜨릴
-      수 있으므로 **별도 환경에서 먼저 확인**한다. 한국어 문장 + owner 참조 음성으로
-      샘플을 만들어 파일로 남긴다
-- [ ] **Step 2: owner 청취 판정** — 목소리 품질은 사람이 듣고 정한다. 이 계획의
-      "완료 기준"도 청취·취향 판정을 human gate로 남겨두고 있다. **owner가 듣기 전에는
-      파이프라인에 연결하지 않는다**
+- [x] **Step 1: 격리 환경에서 한국어 품질 실측 — 완료 (2026-08-07)**
+
+**결과: 한국어 음성 생성이 실제로 된다.** 기존 venv는 건드리지 않았다.
+
+| 항목 | 실측값 |
+|---|---|
+| 설치 용량 | **2.2GB** (격리 venv 전체, torch 포함) |
+| 모델 가중치 | Hugging Face에서 최초 1회 자동 다운로드 |
+| 모델 로드 | 6.4초 |
+| 생성 시간 | **26.9초** (문장 3개, CPU) |
+| 결과 | 7.2초 분량, 24kHz WAV, 676KB |
+| 실행 장치 | **CPU** (`torch 2.6.0+cpu` — 이 격리 환경에 CUDA 빌드가 안 깔렸다) |
+
+**들어보실 파일:** `D:\AI_Workspace_louis_office_50\20_project\65_videobox-project\tts-sample\chatterbox-korean-sample.wav`
+
+문장: "안녕하세요. 오늘은 산책하면서 찍은 영상으로 브이로그를 만들어 볼게요.
+편집은 비디오박스가 도와줍니다."
+
+**막혔던 것 하나 — 반입할 때 반드시 걸린다.** `chatterbox-tts`의 워터마커 의존성
+`resemble-perth`가 최신 setuptools에서 **제거된 `pkg_resources`를 쓴다.** 기본 설치로는
+`PerthImplicitWatermarker`가 `None`이 되어 모델 초기화 자체가 실패한다.
+**`setuptools<81` 고정이 필요하다.** 실제 반입 시 requirements에 반영해야 한다.
+
+**Windows 긴 경로 제한.** 세션 스크래치패드 경로가 깊어 `pip install`이
+`numpy.libs` DLL에서 실패했다. 짧은 경로에서 설치해야 한다.
+
+**속도에 대한 정직한 평가.** CPU에서 7초 음성에 27초가 걸렸다. 실시간의 약 4배다.
+나레이션 전체를 이걸로 만들면 5분짜리 영상에 20분 가까이 걸린다는 뜻이다.
+**owner가 초반에 직접 녹음을 주로 쓰기로 한 이상 당장 문제는 아니지만**, 나중에
+본격적으로 쓰려면 CUDA 빌드(`torch` GPU 버전) 설치가 사실상 필수다. 이 PC에는 LM Studio가
+GPU를 쓰고 있으므로 **동시 사용 시 VRAM 경합도 따져야 한다.**
+
+- [ ] **Step 2: owner 청취 판정 — 여기서 멈춰 있다.** 목소리 품질은 사람이 듣고 정한다.
+      이 계획의 "완료 기준"도 청취·취향 판정을 human gate로 남겨두고 있다.
+      **owner가 듣기 전에는 파이프라인에 연결하지 않는다.**
+      참고로 위 샘플은 **참조 음성 없이** 기본 목소리로 만든 것이다. owner 목소리 복제는
+      10초짜리 참조 음성이 필요한데, 그건 owner가 직접 녹음해 주셔야 한다
 - [ ] **Step 3: 실패 테스트** — provider 어댑터가 참조 음성으로 한국어 음성을 만드는지
 - [ ] **Step 4: RED 확인**
 - [ ] **Step 5: 구현** — `TTSEngineConfig`에 엔진 추가. 기존 provider 인터페이스를 지킨다
