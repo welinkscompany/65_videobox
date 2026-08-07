@@ -5,6 +5,7 @@ import sqlite3
 import json
 import shutil
 import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,24 @@ from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_domain_models.assets import AssetType
+
+
+class _SteppingClock:
+    """Task 30: these tests used `older_than_seconds=0` and assumed the claim
+    timestamp is strictly earlier than a later clock read. On Windows the system
+    clock can be coarse enough that both reads land on the same value, so the
+    staleness comparison found nothing and the suite failed intermittently --
+    which made every regression run untrustworthy. An injected clock the test
+    advances itself removes the race entirely."""
+
+    def __init__(self) -> None:
+        self.now = datetime(2026, 8, 7, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, seconds: int) -> None:
+        self.now += timedelta(seconds=seconds)
 
 
 def _timeline() -> dict[str, object]:
@@ -647,7 +666,8 @@ def test_exact_preview_renderer_text_subprocesses_decode_utf8_with_replacement(
 
 
 def test_exact_preview_retry_creates_a_new_generation_after_failure(tmp_path: Path) -> None:
-    store = LocalProjectStore(tmp_path)
+    clock = _SteppingClock()
+    store = LocalProjectStore(tmp_path, now=clock)
     project = store.bootstrap_project(name="preview retry")
     session = _session(store, project.project_id)
     first = store.begin_exact_preview(
@@ -656,9 +676,8 @@ def test_exact_preview_retry_creates_a_new_generation_after_failure(tmp_path: Pa
         fingerprint="sha256:retry",
     )
     assert store.claim_exact_preview(project_id=project.project_id, generation_id=first["generation_id"], owner_token="worker")
-    # A zero age threshold is deterministic here because the claim timestamp
-    # is strictly earlier than a later clock read in the store operation.
-    assert store.recover_stale_exact_preview_claims(project_id=project.project_id, older_than_seconds=0) == 1
+    clock.advance(60)
+    assert store.recover_stale_exact_preview_claims(project_id=project.project_id, older_than_seconds=30) == 1
     retried = store.retry_exact_preview(project_id=project.project_id, generation_id=first["generation_id"])
     assert retried["generation_id"] != first["generation_id"]
     assert retried["state"] == "pending"
@@ -976,7 +995,8 @@ def test_exact_preview_retry_rejects_pending_running_and_succeeded_records(tmp_p
 
 
 def test_exact_preview_retry_preserves_validated_ranged_duration_and_rejects_corruption(tmp_path: Path) -> None:
-    store = LocalProjectStore(tmp_path)
+    clock = _SteppingClock()
+    store = LocalProjectStore(tmp_path, now=clock)
     project = store.bootstrap_project(name="preview ranged retry")
     session = _session(store, project.project_id)
     record = store.begin_exact_preview(
@@ -987,13 +1007,15 @@ def test_exact_preview_retry_preserves_validated_ranged_duration_and_rejects_cor
     )
     assert record["duration_sec"] == 2.0
     assert store.claim_exact_preview(project_id=project.project_id, generation_id=record["generation_id"], owner_token="worker")
-    assert store.recover_stale_exact_preview_claims(project_id=project.project_id, older_than_seconds=0) == 1
+    clock.advance(60)
+    assert store.recover_stale_exact_preview_claims(project_id=project.project_id, older_than_seconds=30) == 1
     retried = store.retry_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
     assert retried["state"] == "pending"
     assert retried["start_sec"] == 0.0 and retried["end_sec"] == 2.0 and retried["duration_sec"] == 2.0
 
     assert store.claim_exact_preview(project_id=project.project_id, generation_id=retried["generation_id"], owner_token="worker-2")
-    assert store.recover_stale_exact_preview_claims(project_id=project.project_id, older_than_seconds=0) == 1
+    clock.advance(60)
+    assert store.recover_stale_exact_preview_claims(project_id=project.project_id, older_than_seconds=30) == 1
     connection = sqlite3.connect(store.database_path(project.project_id))
     try:
         connection.execute("UPDATE exact_preview_renders SET duration_sec = 1 WHERE generation_id = ?", (retried["generation_id"],))

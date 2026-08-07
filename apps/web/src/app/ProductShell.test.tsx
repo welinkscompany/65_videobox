@@ -4,7 +4,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
-import { ProductShell, SettingsPage } from "./ProductShell";
+import { HomePage, ProductShell, SettingsPage } from "./ProductShell";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("PointerEvent", MouseEvent); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
@@ -318,5 +318,21 @@ describe("archived projects", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
     expect(await screen.findByText("보관한 프로젝트가 없어요.")).toBeVisible();
+  });
+});
+
+
+describe("home dashboard", () => {
+  it("stops claiming there are no finished videos, and does not poll jobs to say so", async () => {
+    // Task 35: the card asserted "완성된 영상이 아직 없어요" unconditionally, so it
+    // was false the moment the owner finished one. Home deliberately does not
+    // fetch the job list -- the recovery surface test above pins that -- so the
+    // fix is to stop asserting a state home cannot know, not to add a fetch.
+    const listJobs = vi.spyOn(api, "listJobs");
+    render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
+
+    expect(screen.getByText("출력 화면에서 완성한 영상을 확인할 수 있어요.")).toBeVisible();
+    expect(screen.queryByText("완성된 영상이 아직 없어요.")).toBeNull();
+    expect(listJobs).not.toHaveBeenCalled();
   });
 });
