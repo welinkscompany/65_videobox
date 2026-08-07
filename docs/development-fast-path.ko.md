@@ -275,6 +275,30 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
 ### 10.14 VideoBox Hermes local-MVP 네트워크 규정
 
 1. `videobox-hermes-provider-egress`의 직접 egress는 VideoBox 개인 로컬 MVP에서 owner-operated `openai-codex` OAuth provider 연결을 위한 임시 한계다. production gateway allowlist가 아니며, provider host·redirect·IP 범위를 제한하거나 감사하는 보안 gateway로 주장하지 않는다.
-2. Hermes dashboard는 VideoBox data, media mount, PostgreSQL, `videobox-internal`, `videobox-edge`에 연결하지 않는다. 보조 기억은 대시보드의 Mem0 Platform provider 설정으로만 연결하며, 전용 `/opt/data`에는 인증 상태만 둔다.
+2. Hermes dashboard는 VideoBox data, media mount, PostgreSQL, `videobox-internal`, `videobox-edge`에 연결하지 않는다. 대시보드의 보조 기억은 그 provider 설정으로만 연결하며, 전용 `/opt/data`에는 인증 상태만 둔다.
+
+2-A. **유진 기억용 Mem0 경로 — owner 승인 (2026-08-08).** 대시보드 경로와 별개로,
+   VideoBox 유진의 기억은 `videobox-hermes-memory-adapter`가
+   `videobox-hermes-provider-egress`를 통해 Mem0에 연결한다. 승인 배경은
+   유진의 로컬 기억이 한 번에 5개·각 280자로 제한돼 실제 사용에 부족했기 때문이다.
+   **이 경로로 owner의 영상 기획과 대화 내용이 외부로 나간다.** 이 사실을 문서에서
+   숨기지 않는다. 아래 경계는 조항 1의 "보안 gateway가 아니다"라는 전제 위에서 읽는다.
+
+   - 어댑터는 `videobox-hermes-memory-network`와 `videobox-hermes-provider-egress`에만
+     붙는다. VideoBox data, media mount, PostgreSQL, `videobox-internal`,
+     `videobox-edge`에 **연결하지 않는다.** 조항 2의 제한이 어댑터에도 그대로 적용된다.
+   - 어댑터에 나가는 것은 **승인된 기억 텍스트와 검색 질의뿐**이다. 원본 영상, 자산 파일,
+     대본 파일, 프로젝트 경로는 나가지 않는다.
+   - 기억 저장은 **owner가 승인한 항목만** 나간다(`ApprovedMemoryStoreRequest`).
+     대화 전체를 자동으로 올리지 않는다.
+   - `MEM0_API_KEY`가 비어 있으면 어댑터는 뜨더라도 Mem0로 나가지 않는다.
+   - **주의 — 폴백이 없다.** 게이트웨이가 없으면
+     `YujinMemoryService.retrieve_approved_memories()`가 빈 결과를 돌려준다
+     (`yujin_memory_service.py:127`). 로컬 기억으로 되돌아가지 않는다.
+     **즉 Mem0를 켜는 순간 유진의 기억은 외부 의존이 되고, 외부가 죽으면 기억도 없다.**
+     대화 자체는 로컬 모델로 계속되지만 과거 기억을 못 꺼낸다.
+     이 성질을 감수하고 켜는 것이며, 폴백을 넣는 것은 별도 작업이다.
+   - 이 승인은 **Mem0 기억 경로 하나에만** 적용된다. 다른 외부 전송, Telegram intake,
+     host bridge, CapCut bridge의 근거가 아니다(조항 4 유지).
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.
