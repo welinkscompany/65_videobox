@@ -246,12 +246,25 @@ function EditorWorkbenchInstance({
   const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "자산과 대본" : "유진과 편집 항목"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
   const leftVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.leftOpen);
   const rightVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.rightOpen);
+  // §10.13: this label is read aloud by screen readers and shown on screen, so
+  // it must not carry a raw role name or an internal segment id. Scene numbers
+  // follow timeline order, matching how the review screen counts them.
+  const sceneNumbers = new Map<string, number>();
+  view.tracks
+    .flatMap((track) => track.clips)
+    .slice()
+    .sort((left, right) => left.startSec - right.startSec)
+    .forEach((clip) => {
+      if (clip.segmentId && !sceneNumbers.has(clip.segmentId)) sceneNumbers.set(clip.segmentId, sceneNumbers.size + 1);
+    });
   const sources: AuditionSource[] = view.tracks.flatMap((track) => track.clips.flatMap((clip) => {
     if (!clip.assetId) return [];
     const url = view.playback.auditionUrls[clip.assetId];
     if (!url) return [];
     const mediaKind = auditionMediaKind(track.role, clip.overlayType);
-    return mediaKind ? [{ id: clip.clipId, label: `${track.role === "broll" ? "B-roll" : track.role.toUpperCase()} · ${clip.segmentId}`, url, mediaKind, timelineRange: { startSec: clip.startSec, endSec: clip.endSec } }] : [];
+    const scene = sceneNumbers.get(clip.segmentId);
+    const label = `${auditionRoleLabel(track.role)} · ${scene ? `${scene}번째 장면` : "선택한 장면"}`;
+    return mediaKind ? [{ id: clip.clipId, label, url, mediaKind, timelineRange: { startSec: clip.startSec, endSec: clip.endSec } }] : [];
   }));
   const stage = <PreviewStage key={`${view.projectId}:${view.sessionId}`} auditionRequest={auditionRequest} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
@@ -278,6 +291,17 @@ function EditorWorkbenchInstance({
       viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))}
     />
   </section>;
+}
+
+function auditionRoleLabel(role: EditorViewModel["tracks"][number]["role"]): string {
+  const labels: Record<string, string> = {
+    narration: "내레이션",
+    broll: "B-roll",
+    bgm: "배경 음악",
+    sfx: "효과음",
+    overlay: "화면 표시",
+  };
+  return labels[role] ?? "미디어";
 }
 
 function auditionMediaKind(role: EditorViewModel["tracks"][number]["role"], overlayType: EditorViewModel["tracks"][number]["clips"][number]["overlayType"]): AuditionSource["mediaKind"] | null {

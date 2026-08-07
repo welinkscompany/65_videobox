@@ -479,7 +479,7 @@ describe("TimelineDock", () => {
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
     expect(screen.getByText("자산 공백: asset_required")).toBeInTheDocument();
     expect(screen.getByText("현재 자막: 첫 자막")).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (caption:segment-1:start, 0초)" )).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (0초)" )).toBeInTheDocument();
   });
 
   it("names each clip in plain language instead of exposing its internal clip ID", () => {

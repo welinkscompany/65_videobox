@@ -584,7 +584,10 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
     {caption ? <p>현재 자막: {caption.text}</p> : <p>현재 자막 없음</p>}
     {selectedPlacementIds.length > 1 ? <p>선택한 독립 항목: {selectedPlacementIds.length}개</p> : null}
-    {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({snap.id}, {formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
+    {/* §10.13: the snap target id is an internal key (caption:<segment>:start)
+        and meant nothing to the owner. The kind and the time are the parts that
+        actually tell them where the playhead landed. */}
+    {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
     {mutationMessage ? <p role="status">{mutationMessage}</p> : null}
     <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
     {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>표시할 타임라인 항목이 없습니다.</p> : null}

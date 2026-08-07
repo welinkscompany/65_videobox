@@ -1054,9 +1054,12 @@ class SegmentAnalysisRecord(BaseModel):
     text: str
     start_sec: float
     end_sec: float
-    confidence: float
+    # Task 37: a silent draft is never transcribed, so its segments have no
+    # confidence score and no cleanup decision. Requiring them made the review
+    # screen fail to load for every draft the owner creates.
+    confidence: float | None = None
     review_required: bool
-    cleanup_decision: str
+    cleanup_decision: str | None = None
     review_reasons: list[str] = Field(default_factory=list)
     provider_trace: "ProviderTraceResponse"
 
@@ -1094,7 +1097,10 @@ class RecommendationJobResponse(StartJobResponse):
 class TimelineClipResponse(BaseModel):
     clip_id: str
     segment_id: str
-    asset_uri: str
+    # Task 36: caption clips are rendered from text and have no source file, so
+    # requiring an asset_uri made every draft timeline unreadable. Clips that do
+    # have one still carry it.
+    asset_uri: str | None = None
     start_sec: float
     end_sec: float
     clip_type: str
@@ -1124,6 +1130,9 @@ class TimelinePayloadResponse(BaseModel):
     version: str
     output_mode: str
     review_status: str = "draft"
+    # Task 33/36: the canvas the draft renders to. Absent on older timelines
+    # that never set one, which then fall back to CompositionPlan's default.
+    output: dict[str, int] | None = None
     tracks: list[TimelineTrackResponse]
     review_flags: list[ReviewFlagResponse]
     applied_recommendations: list[RecommendationItemResponse] = Field(default_factory=list)

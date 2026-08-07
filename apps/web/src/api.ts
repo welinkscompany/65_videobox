@@ -218,7 +218,8 @@ export type ArtifactFreshness = { source_session_revision: number; is_current?: 
 export type TimelineClip = {
   clip_id: string;
   segment_id: string;
-  asset_uri: string;
+  // Task 36: caption clips are rendered from text and carry no source file.
+  asset_uri: string | null;
   start_sec: number;
   end_sec: number;
   clip_type: string;
@@ -256,6 +257,9 @@ export type TimelinePayload = {
   version: string;
   output_mode: string;
   review_status: string;
+  // Task 33/36: the canvas this draft renders to. Absent on timelines built
+  // before drafts set one explicitly.
+  output?: { width: number; height: number } | null;
   created_at?: string | null;
   tracks: TimelineTrack[];
   review_flags: ReviewFlag[];
@@ -276,9 +280,10 @@ export type SegmentRecord = {
   text: string;
   start_sec: number;
   end_sec: number;
-  confidence: number;
+  // Task 37: a silent draft is never transcribed, so these are absent on it.
+  confidence: number | null;
   review_required: boolean;
-  cleanup_decision: string;
+  cleanup_decision: string | null;
   review_reasons?: string[];
 };
 

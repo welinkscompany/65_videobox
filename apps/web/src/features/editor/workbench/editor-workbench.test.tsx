@@ -294,9 +294,9 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "narration", role: "narration", clips: [{ clipId: "clip-n", segmentId: "segment-n", type: "narration", assetId: "asset-n", assetUri: null, startSec: 0, endSec: 1, controls: {} }] }],
     } as const;
     const { container } = render(<EditorWorkbench view={narrationView} />);
-    fireEvent.click(screen.getByRole("button", { name: "NARRATION · segment-n 원본 열기" }));
-    expect(screen.getByLabelText("NARRATION · segment-n 소스 미리보기").tagName).toBe("AUDIO");
-    expect(screen.getByLabelText("NARRATION · segment-n 소스 미리보기")).not.toHaveAttribute("autoplay");
+    fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기").tagName).toBe("AUDIO");
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기")).not.toHaveAttribute("autoplay");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
   });
 
@@ -309,8 +309,8 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "narration", role: "narration" as const, clips: [{ clipId: "clip-a", segmentId: "segment-shared", type: "narration", assetId: "asset-shared", assetUri: null, startSec: 1, endSec: 2, controls: {} }] }],
     };
     const rendered = render(<EditorWorkbench view={routeA as never} />);
-    fireEvent.click(screen.getByRole("button", { name: "NARRATION · segment-shared 원본 열기" }));
-    expect(screen.getByLabelText("NARRATION · segment-shared 소스 미리보기")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기")).toBeInTheDocument();
     fireEvent.click(clipSelectionButton("clip-a"));
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "1");
 
@@ -323,7 +323,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ ...routeA.tracks[0], clips: [{ ...routeA.tracks[0].clips[0], clipId: "clip-b" }] }],
     } as never} />);
 
-    expect(screen.queryByLabelText("NARRATION · segment-shared 소스 미리보기")).toBeNull();
+    expect(screen.queryByLabelText("내레이션 · 1번째 장면 소스 미리보기")).toBeNull();
     expect(clipSelectionButton("clip-b")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
@@ -459,8 +459,8 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "overlay", role: "overlay", clips: [{ clipId: "clip-o", segmentId: "segment-o", type: "overlay", assetId: "asset-o", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: null, overlayPayload: {} }] }],
     } as const;
     render(<EditorWorkbench view={overlayView} />);
-    fireEvent.click(screen.getByRole("button", { name: "OVERLAY · segment-o 원본 열기" }));
-    expect(screen.getByLabelText("OVERLAY · segment-o 소스 미리보기").tagName).toBe("VIDEO");
+    fireEvent.click(screen.getByRole("button", { name: "화면 표시 · 1번째 장면 원본 열기" }));
+    expect(screen.getByLabelText("화면 표시 · 1번째 장면 소스 미리보기").tagName).toBe("VIDEO");
   });
 
   it("excludes an image overlay from the video or audio audition player", () => {
@@ -470,7 +470,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "overlay", role: "overlay", clips: [{ clipId: "clip-image", segmentId: "segment-image", type: "overlay", assetId: "asset-image", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: {} }] }],
     } as const;
     const { container } = render(<EditorWorkbench view={imageOverlayView} />);
-    expect(screen.queryByRole("button", { name: "OVERLAY · segment-image 원본 열기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "화면 표시 · 1번째 장면 원본 열기" })).toBeNull();
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
     expect(screen.getByLabelText("편집본 미리보기")).toBeInTheDocument();
   });

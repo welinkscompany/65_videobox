@@ -53,3 +53,52 @@ def test_final_render_content_is_project_scoped_playable_mp4(tmp_path):
     job = store.create_job(project_id=project, job_type=JobType.FINAL_RENDER, status=JobStatus.SUCCEEDED); store.update_job(project_id=project, job_id=job["job_id"], status=JobStatus.SUCCEEDED, output_ref=exported["export_id"])
     response = client.get(f"/api/projects/{project}/final-renders/{job['job_id']}/content")
     assert response.status_code == 200 and response.headers["content-type"].startswith("video/mp4") and response.content == b"fake-mp4"
+
+
+def test_review_screen_can_read_a_bundle_timeline_and_approve_it(tmp_path):
+    """Task 36: the review screen loads GET /timelines/{job_id}. That endpoint
+    rejected every bundle-built timeline with validation errors, so the screen
+    never rendered for a real draft and the approve button added in Task 31 was
+    unreachable. No test read a bundle timeline through this endpoint, which is
+    why the contract mismatch survived.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    project = client.post("/api/projects", json={"name": "Review"}).json()["project_id"]
+    base = f"/api/projects/{project}"
+    brief = client.post(f"{base}/creation-briefs", json={"script_filename": "a.txt", "script_text": "소개", "idempotency_key": "brief", "capability_profile": {}}).json()
+    brief = client.post(f"{base}/creation-briefs/{brief['brief_id']}/bypass", json={"expected_revision": brief["revision"]}).json()
+    brief = client.patch(f"{base}/creation-briefs/{brief['brief_id']}", json={"summary": "소개", "expected_revision": brief["revision"]}).json()
+    brief = client.post(f"{base}/creation-briefs/{brief['brief_id']}/approve", json={"expected_revision": brief["revision"]}).json()
+    assert client.post(f"{base}/draft-readiness/broll/upload", files={"file": ("scene.mp4", b"local-scene", "video/mp4")}).status_code == 201
+    run = client.post(f"{base}/draft-readiness", json={"brief_id": brief["brief_id"], "narration_choice": {"kind": "silent"}, "idempotency_key": "ready", "expected_brief_revision": brief["revision"]}).json()
+    planning = client.post(f"{base}/draft-readiness/{run['readiness_id']}/retry", json={"expected_revision": run["revision"]}).json()
+    run = client.post(f"{base}/draft-readiness/{run['readiness_id']}/complete", json={"expected_revision": planning["revision"]}).json()
+    bundle = client.post(f"{base}/draft-bundles", json={
+        "brief_id": brief["brief_id"], "readiness_id": run["readiness_id"],
+        "expected_brief_revision": brief["revision"], "expected_readiness_revision": run["revision"],
+        "idempotency_key": "once", "allow_placeholder": True,
+    }).json()
+
+    timeline = client.get(f"{base}/timelines/{bundle['timeline_job_id']}")
+    assert timeline.status_code == 200, timeline.text
+    payload = timeline.json()["timeline"]
+    # Task 33: the draft carries an explicit landscape canvas.
+    assert payload["output"] == {"width": 1920, "height": 1080}
+    caption_track = next(track for track in payload["tracks"] if track["track_type"] == "caption")
+    # Captions have no asset file; they must still declare what they are.
+    assert {clip["clip_type"] for clip in caption_track["clips"]} == {"caption"}
+    assert all(clip.get("asset_uri") in (None, "") for clip in caption_track["clips"])
+
+    # The review screen loads all three of these together; any one failing
+    # leaves the owner on the error state with no approve button.
+    snapshot = client.get(f"{base}/review-snapshots/{bundle['timeline_job_id']}")
+    assert snapshot.status_code == 200, snapshot.text
+    # A silent draft has no transcription, so segments carry no confidence
+    # score and no cleanup decision. That is normal, not missing data.
+    assert snapshot.json()["segments"]
+    approval = client.get(f"{base}/review-approvals/timelines/{bundle['timeline_id']}")
+    assert approval.status_code == 200, approval.text
+
+    approved = client.post(f"{base}/review-approvals/{bundle['timeline_job_id']}/approve")
+    assert approved.status_code == 202, approved.text
+    assert approved.json()["review_status"] == "approved"

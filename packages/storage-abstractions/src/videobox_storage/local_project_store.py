@@ -2556,7 +2556,10 @@ class LocalProjectStore:
                 for index, item in enumerate(segments):
                     source_segment_id = str(item.get("segment_id") or f"script-{index + 1}")
                     segment_id = f"segment_draft_{uuid.uuid4().hex[:10]}"
-                    caption_clip = {"clip_id": f"clip_caption_{uuid.uuid4().hex[:10]}", "segment_id": segment_id, "source_segment_id": source_segment_id, "text": item.get("text", ""), "start_sec": item.get("start_sec", index * 5), "end_sec": item.get("end_sec", (index + 1) * 5)}
+                    # Task 36: clip_type is what the read contract identifies a
+                    # clip by, exactly as broll clips already declare theirs.
+                    # Captions carry no asset file, so asset_uri stays absent.
+                    caption_clip = {"clip_id": f"clip_caption_{uuid.uuid4().hex[:10]}", "segment_id": segment_id, "source_segment_id": source_segment_id, "clip_type": "caption", "text": item.get("text", ""), "start_sec": item.get("start_sec", index * 5), "end_sec": item.get("end_sec", (index + 1) * 5)}
                     clips.append(caption_clip)
                     visible_segment_by_source_id[source_segment_id] = caption_clip
                     connection.execute("INSERT INTO segments (segment_id,project_id,start_sec,end_sec,text,source_asset_id,metadata_json) VALUES (?,?,?,?,?,?,?)", (segment_id, project_id, clips[-1]["start_sec"], clips[-1]["end_sec"], clips[-1]["text"], brief.get("script_asset_id"), json.dumps({"draft_bundle_id": bundle_id})))
@@ -2597,7 +2600,7 @@ class LocalProjectStore:
                 broll_clips = [{**c, "asset_uri": asset_uris.get(str(c.get("asset_id")), "")} for c in clips if "asset_id" in c and c.get("asset_id") != narration_asset_id]
                 tracks = [{"track_id": f"track_narration_{uuid.uuid4().hex[:8]}", "track_type": "narration", "clips": [narration_clip]}, {"track_id": f"track_caption_{uuid.uuid4().hex[:8]}", "track_type": "caption", "clips": [c for c in clips if "text" in c]}, {"track_id": f"track_broll_{uuid.uuid4().hex[:8]}", "track_type": "broll", "clips": broll_clips}]
                 review_flags = [{"code": "draft_gap_placeholder", "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"), "message": "자산이 필요한 임시 장면입니다."} for gap in aligned_gaps]
-                timeline = {"timeline_id": timeline_id, "project_id": project_id, "version": "draft-v1", "source_session_id": session_id, "source_session_revision": 1, "tracks": tracks, "gap_slots": aligned_gaps, "review_flags": review_flags, "pending_recommendations": [], "applied_recommendations": [], "bgm_policy": current_result.get("bgm"), "sfx_policy": current_result.get("sfx"), "placeholder_policy": "in_app_only" if current_gaps else None, "output": dict(self._ORIENTATION_OUTPUT_SIZES[resolved_orientation])}
+                timeline = {"timeline_id": timeline_id, "project_id": project_id, "version": "draft-v1", "source_session_id": session_id, "source_session_revision": 1, "tracks": tracks, "gap_slots": aligned_gaps, "review_flags": review_flags, "pending_recommendations": [], "applied_recommendations": [], "bgm_policy": current_result.get("bgm"), "sfx_policy": current_result.get("sfx"), "placeholder_policy": "in_app_only" if current_gaps else None, "output": dict(self._ORIENTATION_OUTPUT_SIZES[resolved_orientation]), "output_mode": "review"}
                 session_segments = [
                     {
                         "segment_id": clip["segment_id"],
