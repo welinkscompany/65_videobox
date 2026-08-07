@@ -2249,3 +2249,25 @@ owner가 2026-08-07에 "롱폼 숏폼 다 만든다"고 확인했으므로 실�
 
 **전체 규모:** `api.ts`의 144개 메서드 중 **37개가 화면에서 호출되지 않는다**는 보고다.
 상당수는 대체·폐기로 설명되지만, 위 목록은 그렇게 설명되지 않는 것들이다.
+
+### Task 34: 저장만 하고 읽지 않는 데이터 정리 — **미착수 · 낮음 (부채)**
+
+세 번째 서브에이전트 조사 결과다. **사용자를 막는 항목은 없다** — 전부 내부 부채이므로
+Task 31~33 뒤로 둔다. 아래 두 건은 내가 직접 grep으로 재확인했다.
+
+- **`voice_samples` 테이블이 완전히 죽어 있다.** `sqlite_schema.py:517`에 정의돼 있으나
+  INSERT도 SELECT도 0건이다. 실제 보이스 샘플은 `assets` 테이블에
+  `asset_type='voice_sample_audio'`로 들어간다. 스키마만 남은 잔재다
+- **`media_analysis_cache`의 stale 플래그를 계산·저장하는데 읽는 프로덕션 코드가 없다.**
+  `list_media_analysis_cache`(`:8641`)와 `prune_stale_media_analysis_cache`(`:8649`)
+  둘 다 호출처가 테스트뿐이다. **`media_scene_windows`와 같은 패턴**이며, 캐시 무효화가
+  실제로는 동작하지 않는다는 뜻일 수 있다 — 착수 시 그 영향부터 확인할 것
+
+**재확인하지 않은 나머지 보고** (착수 전 검증 필요): `hermes_capability_audit`가 쓰기
+전용이고 인덱스 2개가 존재하지 않는 조회를 위한 것, `provider_trace_failed_runs`가
+API까지는 나오지만 UI가 안 읽음, `director_proposal_lifecycle_events`가 모든 proposal
+응답에 실리지만 UI가 안 읽음, asset metadata 5개 필드(`source_pack_id`,
+`source_pack_version`, `in_app_only`, `label`, `provenance`)가 저장만 됨.
+
+- [ ] **Step 1: 각 항목이 정말 미사용인지 재확인** (동적 SQL·다른 클라이언트 포함)
+- [ ] **Step 2~: 제거하거나 연결한다. 판단 근거를 남긴다**
