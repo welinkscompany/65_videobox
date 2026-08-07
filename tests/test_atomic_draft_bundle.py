@@ -389,3 +389,68 @@ def test_bundle_derived_pycapcut_draft_registers_in_writable_local_capcut_smoke_
     registered = Path(handoff["registered_project_path"])
     assert handoff["status"] == "ready" and registered.parent == project_root
     assert (registered / "draft_content.json").is_file()
+
+
+def test_draft_bundle_renders_landscape_by_default_and_honours_a_vertical_choice(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Task 33 / F-9 follow-up: F-9 made build_timeline default to landscape,
+    but the owner never goes through build_timeline -- every draft comes from
+    materialize_atomic_draft_bundle, which set no output at all and so fell
+    back to CompositionPlan's vertical default. Long-form videos were still
+    being rendered 1080x1920.
+    """
+    from videobox_core_engine.composition_plan import CompositionPlan
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("orientation")
+    source = tmp_path / "scene.mp4"
+    source.write_bytes(b"scene")
+    store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+    )
+    monkeypatch.setattr(store, "_probe_playable_broll_duration", lambda **_kwargs: 6.0)
+
+    brief, readiness = _ready(store, project.project_id, "한 장면입니다.")
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"],
+        expected_readiness_revision=readiness["revision"],
+        idempotency_key="orientation-default",
+    )
+    timeline = store.get_timeline_run(
+        project_id=project.project_id,
+        timeline_id=bundle["timeline_id"],
+    )
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+    assert (plan.width, plan.height) == (1920, 1080)
+
+    shortform = store.bootstrap_project("shortform")
+    shortform_source = tmp_path / "shortform.mp4"
+    shortform_source.write_bytes(b"shortform")
+    store.register_asset(
+        project_id=shortform.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=shortform_source,
+    )
+    brief2, readiness2 = _ready(store, shortform.project_id, "세로 장면입니다.")
+    vertical = store.materialize_atomic_draft_bundle(
+        project_id=shortform.project_id,
+        brief_id=brief2["brief_id"],
+        expected_brief_revision=brief2["revision"],
+        readiness_id=readiness2["readiness_id"],
+        expected_readiness_revision=readiness2["revision"],
+        idempotency_key="orientation-vertical",
+        orientation="vertical",
+    )
+    vertical_timeline = store.get_timeline_run(
+        project_id=shortform.project_id,
+        timeline_id=vertical["timeline_id"],
+    )
+    vertical_plan = CompositionPlan.from_timeline(timeline=vertical_timeline)
+    assert (vertical_plan.width, vertical_plan.height) == (1080, 1920)

@@ -238,6 +238,29 @@ describe("CreationInterview", () => {
     }));
   });
 
+  it("lets the creator pick shortform, and defaults to long-form", async () => {
+    // Task 33: the owner makes both. Vertical output existed in the engine but
+    // the draft path never carried a choice, so shortform was unreachable.
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_ready");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const ready = { readiness_id: "readiness_ready", brief_id: "brief_1", status: "ready", revision: 3, result: {} } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved as never);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(ready);
+    const create = vi.spyOn(api, "createAtomicDraftBundle").mockResolvedValue({ session_id: "editing_1" } as never);
+    render(<CreationInterview projectId="project_1" />);
+
+    await screen.findByRole("button", { name: "초안 만들기" });
+    fireEvent.click(screen.getByLabelText("숏폼(세로)으로 만들기"));
+    fireEvent.click(screen.getByRole("button", { name: "초안 만들기" }));
+
+    await waitFor(() => expect(create).toHaveBeenCalledWith("project_1", {
+      brief_id: "brief_1", readiness_id: "readiness_ready", expected_brief_revision: 5,
+      expected_readiness_revision: 3, idempotency_key: "draft-bundle-readiness_ready-3",
+      orientation: "vertical",
+    }));
+  });
+
   it("keeps the placeholder confirmation when the same readiness effect flushes after the creator checks it", async () => {
     window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
     window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_gap");

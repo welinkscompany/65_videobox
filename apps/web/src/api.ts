@@ -43,7 +43,7 @@ export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "nar
 export type MediaInboxAsset = { filename: string; size_bytes: number };
 export type MediaInboxImport = { asset_id: string; project_id: string; asset_type: string; storage_uri: string };
 export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
-export type AtomicDraftBundleRequest = { brief_id: string; readiness_id: string; expected_brief_revision: number; expected_readiness_revision: number; idempotency_key: string; allow_placeholder?: boolean };
+export type AtomicDraftBundleRequest = { brief_id: string; readiness_id: string; expected_brief_revision: number; expected_readiness_revision: number; idempotency_key: string; allow_placeholder?: boolean; orientation?: "landscape" | "vertical" };
 
 export type JobRecord = {
   job_id: string;

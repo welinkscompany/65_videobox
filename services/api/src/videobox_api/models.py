@@ -67,6 +67,8 @@ class AtomicDraftBundleCreateRequest(BaseModel):
     expected_readiness_revision: int = Field(ge=1)
     idempotency_key: str = Field(min_length=1)
     allow_placeholder: bool = False
+    # Task 33: long-form is the default; shortform asks for vertical here.
+    orientation: Literal["landscape", "vertical"] | None = None
 
 
 class ProjectResponse(BaseModel):

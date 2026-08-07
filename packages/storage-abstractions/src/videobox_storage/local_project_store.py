@@ -2394,10 +2394,20 @@ class LocalProjectStore:
         try: return [dict(row) for row in connection.execute("SELECT * FROM editing_sessions WHERE project_id = ?", (project_id,)).fetchall()]
         finally: connection.close()
 
+    # Task 33 / F-9 follow-up. F-9 decided landscape is the default and fixed
+    # build_timeline, but the owner's drafts never pass through build_timeline
+    # -- they come from here, which set no output and so fell back to
+    # CompositionPlan's vertical default. Long-form was still rendering
+    # 1080x1920. Setting it explicitly is what makes the F-9 decision real.
+    _ORIENTATION_OUTPUT_SIZES = {
+        "landscape": {"width": 1920, "height": 1080},
+        "vertical": {"width": 1080, "height": 1920},
+    }
+
     def materialize_atomic_draft_bundle(
         self, *, project_id: str, brief_id: str, expected_brief_revision: int,
         readiness_id: str, expected_readiness_revision: int, idempotency_key: str,
-        allow_placeholder: bool = False,
+        allow_placeholder: bool = False, orientation: str | None = None,
     ) -> dict[str, Any]:
         """Create the first editable draft as one durable operation.
 
@@ -2406,6 +2416,11 @@ class LocalProjectStore:
         become visible, or neither does.  A readiness snapshot is rechecked
         under the writer lock so a later script/media change cannot be applied.
         """
+        resolved_orientation = "landscape" if orientation is None else orientation
+        if resolved_orientation not in self._ORIENTATION_OUTPUT_SIZES:
+            raise ValueError(
+                f"orientation must be one of {sorted(self._ORIENTATION_OUTPUT_SIZES)}, got {orientation!r}"
+            )
         if not idempotency_key.strip():
             raise ValueError("atomic_draft_bundle_idempotency_required")
         brief = self.get_creation_brief(project_id=project_id, brief_id=brief_id)
@@ -2582,7 +2597,7 @@ class LocalProjectStore:
                 broll_clips = [{**c, "asset_uri": asset_uris.get(str(c.get("asset_id")), "")} for c in clips if "asset_id" in c and c.get("asset_id") != narration_asset_id]
                 tracks = [{"track_id": f"track_narration_{uuid.uuid4().hex[:8]}", "track_type": "narration", "clips": [narration_clip]}, {"track_id": f"track_caption_{uuid.uuid4().hex[:8]}", "track_type": "caption", "clips": [c for c in clips if "text" in c]}, {"track_id": f"track_broll_{uuid.uuid4().hex[:8]}", "track_type": "broll", "clips": broll_clips}]
                 review_flags = [{"code": "draft_gap_placeholder", "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"), "message": "자산이 필요한 임시 장면입니다."} for gap in aligned_gaps]
-                timeline = {"timeline_id": timeline_id, "project_id": project_id, "version": "draft-v1", "source_session_id": session_id, "source_session_revision": 1, "tracks": tracks, "gap_slots": aligned_gaps, "review_flags": review_flags, "pending_recommendations": [], "applied_recommendations": [], "bgm_policy": current_result.get("bgm"), "sfx_policy": current_result.get("sfx"), "placeholder_policy": "in_app_only" if current_gaps else None}
+                timeline = {"timeline_id": timeline_id, "project_id": project_id, "version": "draft-v1", "source_session_id": session_id, "source_session_revision": 1, "tracks": tracks, "gap_slots": aligned_gaps, "review_flags": review_flags, "pending_recommendations": [], "applied_recommendations": [], "bgm_policy": current_result.get("bgm"), "sfx_policy": current_result.get("sfx"), "placeholder_policy": "in_app_only" if current_gaps else None, "output": dict(self._ORIENTATION_OUTPUT_SIZES[resolved_orientation])}
                 session_segments = [
                     {
                         "segment_id": clip["segment_id"],
