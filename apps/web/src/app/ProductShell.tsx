@@ -24,6 +24,14 @@ import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { VoiceTtsSettings } from "../features/settings/VoiceTtsSettings";
 
 type ShellSection = WorkspaceSection | "media" | "outputs";
+/** Task 32: archiving used to be a one-way door -- the project left the sidebar
+ * and nothing called the restore endpoint. Grouped so the shell's call sites
+ * stay readable. */
+export type ProjectArchiveControls = Readonly<{
+  archivedProjects: Project[];
+  load: () => void | Promise<void>;
+  restore: (projectId: string) => void | Promise<void>;
+}>;
 type SettingsSection = "general" | "appearance" | "ai-privacy" | "voice" | "storage" | "output";
 type SettingsState = { compact: boolean; reducedMotion: boolean; aiEnabled: boolean; openLastProject: boolean; storageAlert: boolean; exportFormat: "mp4" | "mov" };
 const settingsKey = "videobox.settings";
@@ -32,7 +40,10 @@ function readSettings(): SettingsState { try { const stored = JSON.parse(window.
 function saveSettings(next: SettingsState) { window.localStorage.setItem(settingsKey, JSON.stringify(next)); }
 export function opensLastProjectOnStart() { return readSettings().openLastProject; }
 
-export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, onArchiveProject, onDeleteProjectPermanently, children, forceCollapsed = false }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; onArchiveProject?: (projectId: string) => void | Promise<void>; onDeleteProjectPermanently?: (projectId: string) => void | Promise<void>; children: ReactNode; forceCollapsed?: boolean }) {
+export function ProductShell({ projectId, projects, archive, section, onNavigate, onOpenSettings, onArchiveProject, onDeleteProjectPermanently, children, forceCollapsed = false }: { projectId: string; projects: Project[]; archive?: ProjectArchiveControls; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; onArchiveProject?: (projectId: string) => void | Promise<void>; onDeleteProjectPermanently?: (projectId: string) => void | Promise<void>; children: ReactNode; forceCollapsed?: boolean }) {
+  // Task 32: archived projects are loaded only when the owner opens the
+  // archive, so the common path keeps its single project request.
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(forceCollapsed);
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
@@ -84,7 +95,21 @@ export function ProductShell({ projectId, projects, section, onNavigate, onOpenS
             <Button variant="ghost" aria-label={`${project.name} 완전 삭제`} onClick={() => setDeleteConfirmStage({ projectId: project.project_id, stage: 1 })}>완전 삭제</Button>
           )
         ) : null}
-      </div>)}</div>
+      </div>)}
+      {archive ? (archiveOpen ? (
+        <div className="vb-project-archive">
+          <p>보관함</p>
+          {archive.archivedProjects.length === 0 ? <p>보관한 프로젝트가 없어요.</p> : archive.archivedProjects.map((project) => (
+            <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
+              <span>{project.name}</span>
+              <Button variant="outline" aria-label={`${project.name} 되돌리기`} onClick={() => void archive.restore(project.project_id)}>되돌리기</Button>
+            </div>
+          ))}
+          <Button variant="ghost" onClick={() => setArchiveOpen(false)}>보관함 닫기</Button>
+        </div>
+      ) : (
+        <Button variant="ghost" onClick={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</Button>
+      )) : null}</div>
       </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target]) => <SidebarMenuItem key={target}><SidebarMenuButton isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}>{label}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span>설정</span></Button><small>{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail />
     </Sidebar>
     <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label="사이드바 접기" onClick={() => setCollapsed((value) => !value)} className="vb-collapse"><PanelLeftClose /></Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog></header><div className="vb-product-content">{children}</div></SidebarInset>

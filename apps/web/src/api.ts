@@ -1560,8 +1560,12 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
-  listProjects: async (): Promise<Project[]> => {
-    const payload = await request<{ projects: Project[] }>("/api/projects");
+  listProjects: async (includeArchived = false): Promise<Project[]> => {
+    // Task 32: the server hides archived projects unless asked. Without this
+    // the sidebar could never show one, so archiving was a one-way door.
+    const payload = await request<{ projects: Project[] }>(
+      includeArchived ? "/api/projects?include_archived=true" : "/api/projects",
+    );
     return payload.projects;
   },
   getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),

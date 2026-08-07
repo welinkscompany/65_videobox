@@ -206,6 +206,31 @@ async function deleteProjectPermanentlyAndRefresh(router: ReturnType<typeof crea
   await router.invalidate();
 }
 
+async function restoreProjectAndRefresh(router: ReturnType<typeof createAppRouter>, projectId: string) {
+  await api.restoreProject(projectId);
+  await router.options.context.catalog.refresh();
+  await router.invalidate();
+}
+
+/** Task 32: the archive is loaded only when opened, so the ordinary path keeps
+ * its single project request. Shared by both places that render the sidebar. */
+function useArchivedProjects(router: ReturnType<typeof useRouter>) {
+  const [archivedProjects, setArchivedProjects] = useState<Project[]>([]);
+  const load = async () => {
+    try {
+      const all = await api.listProjects(true);
+      setArchivedProjects(all.filter((project) => project.status === "archived"));
+    } catch {
+      setArchivedProjects([]);
+    }
+  };
+  const restore = async (projectId: string) => {
+    await restoreProjectAndRefresh(router as ReturnType<typeof createAppRouter>, projectId);
+    await load();
+  };
+  return { archivedProjects, load, restore };
+}
+
 function WorkspacePage() {
   const { projectId, section } = workspaceRoute.useParams();
   const projects = rootRoute.useLoaderData() as Project[];
@@ -213,6 +238,7 @@ function WorkspacePage() {
   const router = useRouter();
   const handleArchiveProject = (id: string) => archiveProjectAndRefresh(router, id);
   const handleDeleteProjectPermanently = (id: string) => deleteProjectPermanentlyAndRefresh(router, id);
+  const archive = useArchivedProjects(router);
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     session_id?: unknown;
     segment_id?: unknown;
@@ -234,12 +260,12 @@ function WorkspacePage() {
     void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) });
   };
   if (normalizedSection === "home") {
-    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently}>
+    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
   if (normalizedSection === "create") {
-    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently}>
+    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
@@ -248,18 +274,18 @@ function WorkspacePage() {
       ? (routeSearch as { return_to: string }).return_to
       : null;
     const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
-    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently}>
+    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <MediaWorkspacePage projectId={projectId} />
     </ProductShell>;
   }
   if (normalizedSection === "outputs") {
-    return <ProductShell projectId={projectId} projects={projects} section="outputs" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently}>
+    return <ProductShell projectId={projectId} projects={projects} section="outputs" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <OutputsPage projectId={projectId} onOpenEditor={() => navigateTo(projectId, "editing")} />
     </ProductShell>;
   }
   if (normalizedSection === "timeline" || normalizedSection === "review") {
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently}>
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <TimelineReviewPage
         projectId={projectId}
         onOpenSegment={({ projectId: targetProjectId, sessionId, segmentId }) => void navigate({
@@ -271,17 +297,17 @@ function WorkspacePage() {
     </ProductShell>;
   }
   if (section === "editor" && rawEditingSessionId !== null && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
   if (section === "editor" && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
   if (section === "editor") {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
@@ -337,6 +363,7 @@ function SettingsRoutePage() {
   const router = useRouter();
   const handleArchiveProject = (id: string) => archiveProjectAndRefresh(router, id);
   const handleDeleteProjectPermanently = (id: string) => deleteProjectPermanentlyAndRefresh(router, id);
+  const archive = useArchivedProjects(router);
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     project_id?: unknown;
   };
@@ -347,7 +374,7 @@ function SettingsRoutePage() {
   const projectId = requestedProjectId || resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) || projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;
   const settingsLocation = (nextSection: typeof validSections[number]) => `/settings/${nextSection}?project_id=${encodeURIComponent(projectId)}`;
-  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently}>
+  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
     <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: settingsLocation(nextSection) })} />
   </ProductShell>;
 }

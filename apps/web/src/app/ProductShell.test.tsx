@@ -4,7 +4,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
-import { SettingsPage } from "./ProductShell";
+import { ProductShell, SettingsPage } from "./ProductShell";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("PointerEvent", MouseEvent); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
@@ -268,5 +268,55 @@ describe("product shell", () => {
     expect(pathB).toBeDisabled();
     expect(screen.queryByText("A 프로젝트 문장")).not.toBeInTheDocument();
     expect(screen.queryByText("저장한 내 목소리 1개")).not.toBeInTheDocument();
+  });
+});
+
+describe("archived projects", () => {
+  it("lets the owner see archived projects and put one back", async () => {
+    // Task 32: archiving removed a project from the sidebar with no way back.
+    // The restore endpoint existed the whole time; nothing called it.
+    const onRestoreProject = vi.fn();
+    const onLoadArchivedProjects = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProductShell
+        projectId="project-a"
+        projects={[{ project_id: "project-a", name: "살아있는 프로젝트", status: "draft" } as never]}
+        archive={{
+          archivedProjects: [{ project_id: "project-b", name: "보관한 프로젝트", status: "archived" } as never],
+          load: onLoadArchivedProjects,
+          restore: onRestoreProject,
+        }}
+        section="home"
+        onNavigate={vi.fn()}
+        onOpenSettings={vi.fn()}
+      >
+        <p>본문</p>
+      </ProductShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    expect(onLoadArchivedProjects).toHaveBeenCalled();
+    expect(await screen.findByText("보관한 프로젝트")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "보관한 프로젝트 되돌리기" }));
+    expect(onRestoreProject).toHaveBeenCalledWith("project-b");
+  });
+
+  it("says so when the archive is empty instead of showing nothing", async () => {
+    render(
+      <ProductShell
+        projectId="project-a"
+        projects={[{ project_id: "project-a", name: "살아있는 프로젝트", status: "draft" } as never]}
+        archive={{ archivedProjects: [], load: vi.fn().mockResolvedValue(undefined), restore: vi.fn() }}
+        section="home"
+        onNavigate={vi.fn()}
+        onOpenSettings={vi.fn()}
+      >
+        <p>본문</p>
+      </ProductShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    expect(await screen.findByText("보관한 프로젝트가 없어요.")).toBeVisible();
   });
 });
