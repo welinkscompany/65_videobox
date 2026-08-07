@@ -363,3 +363,38 @@ def test_scene_windows_are_not_written_for_a_cancelled_analysis(tmp_path: Path) 
     worker.join(2)
 
     assert service.get_analysis(project_id, job["analysis_id"])["result"] is None
+
+
+def test_a_transient_vision_timeout_is_retried_not_permanently_blocked(tmp_path: Path) -> None:
+    """Task 29: LM Studio serves one request at a time, and a request the client
+    gave up on keeps occupying it -- so the next one times out too, and so on.
+
+    Measured on 2026-08-07: the identical call that timed out at 120s succeeded
+    in 4s once LM Studio was free. Treating that as a terminal block strands
+    footage that would analyse fine moments later, so a timeout has to go down
+    the existing retry path instead.
+    """
+    clock = _Clock()
+    vision = _Vision(error=LMStudioProviderError("LM Studio timed out.", "timeout"))
+    service, store, project_id, _ = _service(tmp_path, vision, clock)
+    asset_id = store.list_assets(project_id=project_id)[0]["asset_id"]
+    job = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+
+    service.dispatch_once(project_id=project_id, analysis_id=job["analysis_id"])
+
+    persisted = service.get_analysis(project_id, job["analysis_id"])
+    assert persisted["status"] != MediaAnalysisStatus.BLOCKED.value
+    assert persisted["next_retry_at"] == (clock.now + timedelta(seconds=5)).isoformat()
+
+
+def test_a_genuine_lm_studio_block_still_terminates(tmp_path: Path) -> None:
+    """The retry path must not swallow a real 'it is not there' signal."""
+    vision = _Vision(error=LMStudioProviderError("LM Studio local resource is unavailable.", "blocked"))
+    service, store, project_id, _ = _service(tmp_path, vision)
+    asset_id = store.list_assets(project_id=project_id)[0]["asset_id"]
+    job = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+
+    service.dispatch_once(project_id=project_id, analysis_id=job["analysis_id"])
+
+    persisted = service.get_analysis(project_id, job["analysis_id"])
+    assert (persisted["status"], persisted["error_code"]) == (MediaAnalysisStatus.BLOCKED.value, "LM_STUDIO_BLOCKED")

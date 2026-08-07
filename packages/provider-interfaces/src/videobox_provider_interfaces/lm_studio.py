@@ -29,6 +29,18 @@ class LMStudioProviderError(Exception):
         return self.message
 
 
+def _is_timeout(exc: BaseException) -> bool:
+    """Whether a transport failure was a timeout rather than an absent server.
+
+    urllib surfaces a read timeout either directly or wrapped in URLError
+    depending on where it happens, so both shapes have to be recognised.
+    """
+    if isinstance(exc, TimeoutError):
+        return True
+    reason = getattr(exc, "reason", None)
+    return isinstance(reason, TimeoutError)
+
+
 @dataclass(slots=True, frozen=True)
 class LMStudioCapabilityProfile:
     vision_model_name: str | None
@@ -200,6 +212,15 @@ class LMStudioHTTPTransport:
         except LMStudioProviderError:
             raise
         except (HTTPError, URLError, TimeoutError, OSError) as exc:
+            # Task 29: a timeout means LM Studio was busy, not absent. It serves
+            # one request at a time and keeps working on a request the client
+            # already abandoned, so the next caller waits behind it and times
+            # out too. Measured: the identical call that timed out at 120s
+            # succeeded in 4s once the queue drained. Reporting that as
+            # "blocked" made it terminal and stranded footage that would have
+            # analysed fine on a retry, so it is classified apart.
+            if _is_timeout(exc):
+                raise LMStudioProviderError("LM Studio timed out.", "timeout") from exc
             raise LMStudioProviderError("LM Studio local resource is unavailable.", "blocked") from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise LMStudioProviderError("LM Studio returned malformed JSON.", "failed") from exc
