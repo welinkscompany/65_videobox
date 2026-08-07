@@ -18,6 +18,11 @@ from typing import Any, Iterable
 
 __all__ = ["choose_broll_source_window"]
 
+# How much of a continuous take to treat as the camera being raised and
+# settled.  Only applied when the clip has no cuts at all and can spare it --
+# inside a genuinely detected scene the boundary is already the right start.
+SETTLE_HEAD_SEC = 2.0
+
 
 def choose_broll_source_window(
     *,
@@ -34,10 +39,9 @@ def choose_broll_source_window(
     if not needed_sec > 0:
         raise ValueError("broll_source_window_needed_sec_invalid")
 
+    windows = list(scene_windows)
     head = {"start_sec": 0.0, "end_sec": float(min(needed_sec, duration_sec))}
-    qualifying = _qualifying_windows(
-        scene_windows, needed_sec=needed_sec, duration_sec=duration_sec
-    )
+    qualifying = _qualifying_windows(windows, needed_sec=needed_sec, duration_sec=duration_sec)
     if not qualifying:
         return head
 
@@ -46,8 +50,27 @@ def choose_broll_source_window(
     preferred = [window for window in qualifying if window[2] > 0] or qualifying
     # Longest first: a longer scene is more likely to be a steady take. Ties go
     # to the earlier window so the choice stays deterministic.
-    start_sec = min(preferred, key=lambda window: (-(window[1] - window[0]), window[0]))[0]
+    start_sec, window_end_sec, _index = min(
+        preferred, key=lambda window: (-(window[1] - window[0]), window[0])
+    )
+    if start_sec <= 0.0 and _is_single_take(windows, duration_sec=duration_sec):
+        # Footage with no cuts at all: there is no boundary to start from, so
+        # skip the settling head when the clip has room to give it up.
+        if window_end_sec - needed_sec >= SETTLE_HEAD_SEC:
+            start_sec = SETTLE_HEAD_SEC
     return {"start_sec": float(start_sec), "end_sec": float(start_sec + needed_sec)}
+
+
+def _is_single_take(windows: list[dict[str, Any]], *, duration_sec: float) -> bool:
+    """One window spanning the whole clip -- i.e. detection found no cuts."""
+    if len(windows) != 1:
+        return False
+    try:
+        start_sec = float(windows[0]["start_sec"])
+        end_sec = float(windows[0]["end_sec"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return start_sec <= 0.0 and end_sec >= duration_sec - 0.5
 
 
 def _qualifying_windows(

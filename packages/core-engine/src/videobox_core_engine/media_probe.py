@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,16 @@ MAX_FRAMES = 6
 MAX_LONG_EDGE_PX = 768
 MAX_FRAME_BYTES = 1_500_000
 SUBPROCESS_TIMEOUT_SECONDS = 60
+# Task 27. ffmpeg's own scene score: how different a frame is from the one
+# before it. 0.3 is the usual working value -- low enough to catch a real cut,
+# high enough to ignore a pan or a lighting shift. Measured on the owner's
+# footage: an eight-minute edited video yields 11 cuts, and continuous phone
+# takes correctly yield none.
+SCENE_CHANGE_THRESHOLD = 0.3
+# Scene detection decodes the whole file. Measured at ~7s for a 521MB
+# eight-minute clip, so it is affordable on the analysis path -- but a stuck
+# decode must not hang analysis, hence its own wider ceiling.
+SCENE_DETECT_TIMEOUT_SECONDS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,13 +96,46 @@ class FFmpegMediaProbe:
             raise ValueError("ffprobe returned unusable media metadata")
         aspect = (width / height) if width and height else None
         fps = self._fps(stream.get("avg_frame_rate"))
-        boundaries = (0.0, duration) if duration > 0 else (0.0,)
+        if duration <= 0:
+            boundaries: tuple[float, ...] = (0.0,)
+        elif with_frames:
+            # Only the analysis path pays for a full decode. `probe_metadata`
+            # runs on every asset registration and must stay one ffprobe call.
+            boundaries = self._detect_scene_boundaries(path, duration)
+        else:
+            boundaries = (0.0, duration)
         frames = (
             self._extract_representative_frames(path, duration, max(width or 0, height or 0, 1))
             if with_frames
             else ()
         )
         return MediaProbeResult(duration, str(stream.get("codec_name") or "") or None, width, height, aspect, fps, str(audio_stream.get("codec_name") or "") or None, boundaries, frames)
+
+    def _detect_scene_boundaries(self, path: Path, duration: float) -> tuple[float, ...]:
+        """Cut points inside the clip, as `(0.0, ...cuts..., duration)`.
+
+        Best-effort: footage that cannot be decoded still analyzes, it just
+        reports one whole-clip window the way it did before detection existed.
+        A continuous take genuinely has no cuts, so one window is the correct
+        answer for it -- not a failure.
+        """
+        try:
+            completed = subprocess.run(
+                [self.ffmpeg_binary, "-i", str(path), "-filter:v",
+                 f"select='gt(scene,{SCENE_CHANGE_THRESHOLD})',showinfo", "-f", "null", "-"],
+                capture_output=True, text=True, errors="replace",
+                timeout=SCENE_DETECT_TIMEOUT_SECONDS, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return (0.0, duration)
+        cuts = sorted(
+            {
+                rounded
+                for value in re.findall(r"pts_time:([0-9]+\.?[0-9]*)", completed.stderr or "")
+                if 0.0 < (rounded := round(float(value), 3)) < duration
+            }
+        )
+        return (0.0, *cuts, duration)
 
     def _extract_representative_frames(self, path: Path, duration: float, long_edge_px: int) -> tuple[RepresentativeFrame, ...]:
         if duration <= 0:

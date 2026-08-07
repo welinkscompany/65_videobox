@@ -103,7 +103,15 @@ def test_ffprobe_reads_video_and_audio_metadata_and_uses_60_second_timeout(monke
     monkeypatch.setattr(subprocess, "run", run)
     result = FFmpegMediaProbe().probe(Path("video.mp4"))
     assert (result.duration_sec, result.codec, result.width, result.height, result.fps, result.audio_codec) == (12.5, "h264", 1920, 1080, 30000 / 1001, "aac")
-    assert all(timeout == 60 for _, timeout in calls)
+    # Metadata and frame extraction stay on the 60s ceiling. Scene detection
+    # (Task 27) decodes the whole file, so it carries its own wider ceiling --
+    # measured at ~7s for a 521MB clip, but a stuck decode must not be capped
+    # at the same value as a single seek.
+    scene_calls = [(command, timeout) for command, timeout in calls if "showinfo" in " ".join(command)]
+    other_calls = [(command, timeout) for command, timeout in calls if "showinfo" not in " ".join(command)]
+    assert all(timeout == 60 for _, timeout in other_calls)
+    assert len(scene_calls) == 1
+    assert scene_calls[0][1] == 300
 
 
 def test_ffprobe_rejects_corrupt_media(monkeypatch) -> None:

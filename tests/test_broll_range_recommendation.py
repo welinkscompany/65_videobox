@@ -185,3 +185,51 @@ def test_draft_readiness_keeps_the_old_head_range_for_unanalyzed_footage(tmp_pat
     )
 
     assert plan["broll_candidates"][0]["target_range"] == {"start_sec": 0.0, "end_sec": 5.0}
+
+
+# --- Task 27: single-take clips (no cuts) --------------------------------
+# The owner shoots both long edited pieces and short continuous phone clips.
+# A continuous take has no scene change to pick, but its opening is still the
+# camera being raised and settled, so the head is skipped when the clip can
+# spare it.
+
+
+def test_skips_the_settling_head_of_a_single_take() -> None:
+    chosen = choose_broll_source_window(
+        duration_sec=30.0, needed_sec=5.0, scene_windows=[_window(0.0, 30.0)]
+    )
+
+    assert chosen["start_sec"] > 0.0
+    assert chosen["end_sec"] - chosen["start_sec"] == pytest.approx(5.0)
+    assert chosen["end_sec"] <= 30.0
+
+
+def test_keeps_the_whole_clip_when_a_single_take_is_barely_long_enough() -> None:
+    """A 6s clip filling a 5s gap has no room to skip anything."""
+    chosen = choose_broll_source_window(
+        duration_sec=6.0, needed_sec=5.0, scene_windows=[_window(0.0, 6.0)]
+    )
+
+    assert chosen == {"start_sec": 0.0, "end_sec": 5.0}
+
+
+def test_single_take_skip_never_runs_past_the_clip() -> None:
+    for duration_sec in (5.0, 7.5, 10.0, 12.0, 18.4, 29.0, 60.0):
+        chosen = choose_broll_source_window(
+            duration_sec=duration_sec, needed_sec=5.0,
+            scene_windows=[_window(0.0, duration_sec)],
+        )
+        assert chosen["start_sec"] >= 0.0
+        assert chosen["end_sec"] <= duration_sec + 1e-9, (duration_sec, chosen)
+        assert chosen["end_sec"] - chosen["start_sec"] == pytest.approx(5.0)
+
+
+def test_a_real_cut_still_wins_over_the_head_skip() -> None:
+    """When the clip does have cuts, the scene window decides -- the head-skip
+    is only the fallback for footage with none."""
+    chosen = choose_broll_source_window(
+        duration_sec=600.0, needed_sec=5.0,
+        scene_windows=[_window(0.0, 40.0), _window(40.0, 300.0)],
+    )
+
+    assert chosen["start_sec"] == 40.0
