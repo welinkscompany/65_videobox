@@ -14,7 +14,7 @@ export type InspectorAction =
   | Readonly<{ kind: "split-narration"; segmentId: string; splitSec: number }>
   | Readonly<{ kind: "merge-narration"; leftSegmentId: string; rightSegmentId: string }>
   | Readonly<{ kind: "set-cut-action"; segmentId: string; cutAction: CutAction }>
-  | Readonly<{ kind: "save-media"; mediaKind: "bgm" | "sfx"; segmentId: string; assetId: string; controls: EditorControls }>
+  | Readonly<{ kind: "save-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string; assetId: string; controls: EditorControls }>
   | Readonly<{ kind: "clear-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string }>
   | Readonly<{ kind: "save-caption-style"; segmentIds: string[]; scope: CaptionStyleScope; style: EditorCaptionStyle }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
@@ -113,6 +113,8 @@ export function InspectorControls({
   const [cutAction, setCutAction] = useState<CutAction>(() => asCutAction(selectedSegment?.cutAction ?? "keep"));
   const [fadeInSec, setFadeInSec] = useState(0);
   const [fadeOutSec, setFadeOutSec] = useState(0);
+  const [inSec, setInSec] = useState(0);
+  const [outSec, setOutSec] = useState(0);
   const [captionStyle, setCaptionStyle] = useState<EditorCaptionStyle>(defaultStyle);
   const [overlayTitle, setOverlayTitle] = useState("");
   const [overlayBody, setOverlayBody] = useState("");
@@ -141,6 +143,8 @@ export function InspectorControls({
     if (target?.kind === "media") {
       setFadeInSec(target.controls.fadeInSec ?? 0);
       setFadeOutSec(target.controls.fadeOutSec ?? 0);
+      setInSec(target.controls.inSec ?? 0);
+      setOutSec(target.controls.outSec ?? 0);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
     if (target?.kind === "overlay") {
@@ -294,25 +298,41 @@ export function InspectorControls({
           <p>현재 자산이 연결되어 있어요.</p>
           {!target.clearOnly ? (
             <>
-              <label>
-                {`${target.label} 페이드 인`}
-                <Input disabled={disabled} min="0" onChange={(event) => setFadeInSec(numberValue(event.target.value, fadeInSec))} step="0.05" type="number" value={fadeInSec} />
-              </label>
-              <label>
-                {`${target.label} 페이드 아웃`}
-                <Input disabled={disabled} min="0" onChange={(event) => setFadeOutSec(numberValue(event.target.value, fadeOutSec))} step="0.05" type="number" value={fadeOutSec} />
-              </label>
+              {target.fields.includes("fadeInSec") ? (
+                <>
+                  <label>
+                    {`${target.label} 페이드 인`}
+                    <Input disabled={disabled} min="0" onChange={(event) => setFadeInSec(numberValue(event.target.value, fadeInSec))} step="0.05" type="number" value={fadeInSec} />
+                  </label>
+                  <label>
+                    {`${target.label} 페이드 아웃`}
+                    <Input disabled={disabled} min="0" onChange={(event) => setFadeOutSec(numberValue(event.target.value, fadeOutSec))} step="0.05" type="number" value={fadeOutSec} />
+                  </label>
+                </>
+              ) : null}
+              {target.fields.includes("inSec") ? (
+                <>
+                  <label>
+                    {`${target.label} 쓸 구간 시작`}
+                    <Input disabled={disabled} min="0" onChange={(event) => setInSec(numberValue(event.target.value, inSec))} step="0.1" type="number" value={inSec} />
+                  </label>
+                  <label>
+                    {`${target.label} 쓸 구간 끝`}
+                    <Input disabled={disabled} min="0" onChange={(event) => setOutSec(numberValue(event.target.value, outSec))} step="0.1" type="number" value={outSec} />
+                  </label>
+                </>
+              ) : null}
               <Button
-                disabled={disabled}
-                onClick={() => {
-                  if (target.mediaKind !== "broll") emit({
-                    kind: "save-media",
-                    mediaKind: target.mediaKind,
-                    segmentId: target.segmentId,
-                    assetId: target.assetId,
-                    controls: { ...target.controls, fadeInSec, fadeOutSec },
-                  });
-                }}
+                disabled={disabled || (target.fields.includes("inSec") && outSec <= inSec)}
+                onClick={() => emit({
+                  kind: "save-media",
+                  mediaKind: target.mediaKind,
+                  segmentId: target.segmentId,
+                  assetId: target.assetId,
+                  controls: target.fields.includes("inSec")
+                    ? { ...target.controls, inSec, outSec }
+                    : { ...target.controls, fadeInSec, fadeOutSec },
+                })}
                 type="button"
               >
                 {`${target.label} 설정 저장`}

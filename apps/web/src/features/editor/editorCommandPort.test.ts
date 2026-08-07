@@ -59,10 +59,13 @@ describe("EditorCommandPort", () => {
 
   it("keeps B-roll, BGM, and SFX separate when applying, clearing, and updating controls", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
-    await port.applyMedia({ kind: "broll", segmentId: "seg", assetId: "asset-b", controls: { volume: 0.6, fit: "crop" } });
+    // Task 24: the source window has to reach the request. It was defined in
+    // EditorControls and read back from the server, but never sent, so an edit
+    // in the inspector would have been silently dropped here.
+    await port.applyMedia({ kind: "broll", segmentId: "seg", assetId: "asset-b", controls: { volume: 0.6, fit: "crop", inSec: 8, outSec: 13 } });
     await port.updateMediaControls({ kind: "bgm", segmentId: "seg", assetId: "asset-m", controls: { fadeInSec: 1 } });
     await port.clearMedia({ kind: "sfx", segmentId: "seg" });
-    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-b", media_controls: { volume: 0.6, fit: "crop" }, expected_revision: 7 });
+    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-b", media_controls: { volume: 0.6, fit: "crop", in_sec: 8, out_sec: 13 }, expected_revision: 7 });
     expect(api.updateEditingSessionMusicOverride).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-m", media_controls: { fade_in_sec: 1 }, expected_revision: 7 });
     expect(api.clearEditingSessionSfxOverride).toHaveBeenCalledWith("p", "s", "seg", 7);
   });

@@ -52,6 +52,10 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     fade_out_sec: value.fadeOutSec,
     ducking: value.ducking,
     fit: value.fit,
+    // Task 24: the source window. Read back from the server since Task 18 but
+    // never sent, so an inspector edit had nowhere to go.
+    in_sec: value.inSec,
+    out_sec: value.outSec,
   }).filter(([, item]) => item !== undefined));
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {

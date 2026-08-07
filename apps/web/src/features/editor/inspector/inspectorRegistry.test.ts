@@ -50,10 +50,13 @@ describe("projectInspectorTargets", () => {
       label: "B-roll",
       segmentId: "segment-1",
       mediaKind: "broll",
-      fields: [],
+      // Task 24: B-roll gets the source window, not the audio fades. Which
+      // part of a ten-minute take to use is the one thing the owner adjusts by
+      // hand after the recommendation picks a scene.
+      fields: ["inSec", "outSec"],
       assetId: "asset-broll",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
-      clearOnly: true,
+      clearOnly: false,
     });
     expect(targets).toContainEqual({
       id: "clip:bgm-1",

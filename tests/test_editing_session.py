@@ -2756,3 +2756,39 @@ def test_partial_regeneration_store_update_returns_and_persists_updated_payload(
         project_id=project.project_id,
         partial_regeneration_id=saved["partial_regeneration_id"],
     ) == updated
+
+
+def test_broll_override_keeps_the_source_window_the_inspector_sends() -> None:
+    """Task 24: the editor now lets the owner correct which slice of a long take
+    is used. That value has to survive the override, or the inspector edit is
+    cosmetic -- which is what it would have been: EditorControls carried in_sec
+    and out_sec and read them back, but the request never sent them.
+    """
+    from videobox_core_engine.editing_session import build_editing_session, update_segment_broll_override
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 5.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_broll_override(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_manual_001",
+        media_controls={"in_sec": 20.0, "out_sec": 26.5},
+    )
+
+    controls = updated["segments"][0]["broll_override"]["media_controls"]
+    assert (controls["in_sec"], controls["out_sec"]) == (20.0, 26.5)
+    # B-roll stays silent unless the owner opts in, so the default must not flip.
+    assert controls["preserve_source_audio"] is False

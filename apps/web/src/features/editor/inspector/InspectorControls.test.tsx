@@ -123,13 +123,13 @@ describe("InspectorControls", () => {
     });
   });
 
-  it("keeps B-roll clear-only and preserves hidden BGM controls while saving fade values", () => {
+  it("lets the owner adjust which part of the B-roll take is used, and preserves hidden BGM controls while saving fade values", () => {
     const onAction = vi.fn();
     const broll: InspectorTarget = {
       assetId: "asset-internal-broll",
-      clearOnly: true,
-      controls: { crop: "center", speed: 1.2 },
-      fields: [],
+      clearOnly: false,
+      controls: { crop: "center", speed: 1.2, inSec: 8, outSec: 13 },
+      fields: ["inSec", "outSec"],
       id: "clip:broll",
       kind: "media",
       label: "B-roll",
@@ -144,8 +144,25 @@ describe("InspectorControls", () => {
       />,
     );
 
+    // B-roll is silent by default, so the audio fades stay hidden.
     expect(screen.queryByLabelText("B-roll 페이드 인")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "B-roll 설정 저장" })).not.toBeInTheDocument();
+    // Task 24: the recommendation puts a window here; this is where it is corrected.
+    const start = screen.getByLabelText("B-roll 쓸 구간 시작") as HTMLInputElement;
+    const end = screen.getByLabelText("B-roll 쓸 구간 끝") as HTMLInputElement;
+    expect([start.value, end.value]).toEqual(["8", "13"]);
+
+    fireEvent.change(start, { target: { value: "20" } });
+    fireEvent.change(end, { target: { value: "26.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith({
+      kind: "save-media",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+      assetId: "asset-internal-broll",
+      // Unrelated controls must survive the round trip untouched.
+      controls: { crop: "center", speed: 1.2, inSec: 20, outSec: 26.5 },
+    });
+
     fireEvent.click(screen.getByRole("button", { name: "B-roll 지우기" }));
     expect(onAction).toHaveBeenLastCalledWith({
       kind: "clear-media",
@@ -185,14 +202,15 @@ describe("InspectorControls", () => {
     fireEvent.click(screen.getByRole("button", { name: "배경 음악 설정 저장" }));
     fireEvent.click(screen.getByRole("button", { name: "배경 음악 지우기" }));
 
-    expect(onAction).toHaveBeenNthCalledWith(2, {
+    // Calls 1 and 2 are the B-roll save and clear above.
+    expect(onAction).toHaveBeenNthCalledWith(3, {
       assetId: "asset-internal-bgm",
       controls: { ducking: true, fadeInSec: 1.25, fadeOutSec: 0.75, gainDb: -8 },
       kind: "save-media",
       mediaKind: "bgm",
       segmentId: "segment-internal-current",
     });
-    expect(onAction).toHaveBeenNthCalledWith(3, {
+    expect(onAction).toHaveBeenNthCalledWith(4, {
       kind: "clear-media",
       mediaKind: "bgm",
       segmentId: "segment-internal-current",
