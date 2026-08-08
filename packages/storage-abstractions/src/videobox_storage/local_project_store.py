@@ -2285,6 +2285,46 @@ class LocalProjectStore:
         result["source_snapshot"] = planned["source_snapshot"]
         return result
 
+    def script_segments_for_narration(
+        self,
+        *,
+        project_id: str,
+        narration_asset_id: str | None,
+        sentences: list[str],
+    ) -> list[dict[str, Any]]:
+        """Time each script sentence, following the recording when there is one.
+
+        Every sentence used to get exactly five seconds whether or not the
+        owner had recorded anything, so the captions in a narrated draft never
+        landed where the words did. When a transcript exists for the chosen
+        narration, its spoken stretches supply the bounds; a sentence the
+        recording does not reach keeps its place on the provisional grid.
+        """
+        spoken: list[dict[str, Any]] = []
+        if narration_asset_id:
+            row = self._fetchone(
+                project_id,
+                "SELECT segments_json FROM transcripts WHERE project_id = ? AND source_asset_id = ? "
+                "ORDER BY created_at DESC, transcript_id DESC LIMIT 1",
+                (project_id, narration_asset_id),
+            )
+            if row is not None:
+                try:
+                    parsed = json.loads(str(row["segments_json"]))
+                except (TypeError, ValueError):
+                    parsed = []
+                spoken = [item for item in parsed if isinstance(item, dict)]
+        segments: list[dict[str, Any]] = []
+        for index, text in enumerate(sentences):
+            if index < len(spoken):
+                start = float(spoken[index].get("start_sec") or 0.0)
+                end = float(spoken[index].get("end_sec") or 0.0)
+                if end > start:
+                    segments.append({"segment_id": f"script-{index + 1}", "text": text, "start_sec": start, "end_sec": end})
+                    continue
+            segments.append({"segment_id": f"script-{index + 1}", "text": text, "start_sec": index * 5, "end_sec": (index + 1) * 5})
+        return segments
+
     def _scene_windows_for_asset(self, *, project_id: str, asset_id: str) -> list[dict[str, Any]]:
         """Scene windows from this asset's most recent analysis that has any.
 
@@ -2307,7 +2347,11 @@ class LocalProjectStore:
 
     def _draft_readiness_plan(self, *, project_id: str, brief: dict[str, Any], narration: dict[str, Any]) -> dict[str, Any]:
         sentences = [value.strip() for value in re.split(r"[.!?\n]+", str(brief["script_text"])) if value.strip()]
-        segments = [{"segment_id": f"script-{index + 1}", "text": text, "start_sec": index * 5, "end_sec": (index + 1) * 5} for index, text in enumerate(sentences or [str(brief["script_text"]).strip()])]
+        segments = self.script_segments_for_narration(
+            project_id=project_id,
+            narration_asset_id=str(narration.get("asset_id") or "") or None,
+            sentences=sentences or [str(brief["script_text"]).strip()],
+        )
         assets = self.list_assets(project_id=project_id)
         playable_broll = [(item, self._probe_playable_broll_duration(project_id=project_id, asset=item)) for item in assets if item["asset_type"] == AssetType.BROLL_VIDEO.value]
         playable_broll = [(item, duration_sec) for item, duration_sec in playable_broll if duration_sec is not None]

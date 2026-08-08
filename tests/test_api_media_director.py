@@ -2401,6 +2401,100 @@ def test_failed_apply_preserves_independent_materialized_asset_and_rolls_back_se
     assert asset_path.is_file() and sha256(asset_path.read_bytes()).hexdigest() == candidate["expected_content_sha256"]
 
 
+def test_narration_recording_syncs_the_captions_without_hand_typed_timings(tmp_path: Path) -> None:
+    """The owner records narration; the captions should follow the voice.
+
+    The aligner and speech recognition both existed, but the only way to move a
+    script draft off provisional timings was to hand the server a list of
+    start/end numbers -- which no screen ever did, so a recording could not
+    tighten a single caption.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "voice sync"}).json()["project_id"]
+
+    script = tmp_path / "script.txt"
+    script.write_text("\uccab \ubb38\uc7a5\uc785\ub2c8\ub2e4\n\n\ub458\uc9f8 \ubb38\uc7a5\uc785\ub2c8\ub2e4\n", encoding="utf-8")
+    script_asset = store.register_asset(
+        project_id=project_id, asset_type=AssetType.SCRIPT_DOCUMENT, source_path=script
+    )
+    narration = tmp_path / "narration.wav"
+    narration.write_bytes(b"narration bytes")
+    narration_asset = store.register_asset(
+        project_id=project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration
+    )
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions/from-script",
+        json={"script_asset_id": script_asset.asset_id},
+    ).json()
+    assert session["timing_source"] == "provisional_script", session
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+        "/narration-alignment/from-recording",
+        json={
+            "narration_asset_id": narration_asset.asset_id,
+            "expected_revision": session["session_revision"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    synced = response.json()
+    assert synced["timing_source"] == "narration_alignment", synced
+    assert synced["narration_alignment_required"] is False
+
+
+def test_captions_follow_the_recorded_voice_not_a_flat_five_seconds(tmp_path: Path) -> None:
+    """Every script sentence was given exactly five seconds, recording or not.
+
+    The owner picks "준비한 나레이션으로 초안 준비" precisely so the captions
+    land where the words land. Ignoring the recording made every draft need
+    hand-nudging before it was watchable.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    store = app.state.store
+    project = store.bootstrap_project("caption timing")
+    project_id = project.project_id
+
+    narration = tmp_path / "narration.wav"
+    narration.write_bytes(b"spoken words")
+    narration_asset = store.register_asset(
+        project_id=project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration
+    )
+    store.save_transcript(
+        project_id=project_id,
+        source_asset_id=narration_asset.asset_id,
+        transcript_text="\uccab \ubb38\uc7a5. \ub458\uc9f8 \ubb38\uc7a5.",
+        provider_name="test",
+        segments=[
+            {"start_sec": 0.0, "end_sec": 2.4, "text": "\uccab \ubb38\uc7a5"},
+            {"start_sec": 2.4, "end_sec": 9.1, "text": "\ub458\uc9f8 \ubb38\uc7a5"},
+        ],
+    )
+
+    timed = store.script_segments_for_narration(
+        project_id=project_id,
+        narration_asset_id=narration_asset.asset_id,
+        sentences=["\uccab \ubb38\uc7a5", "\ub458\uc9f8 \ubb38\uc7a5"],
+    )
+
+    assert [(item["start_sec"], item["end_sec"]) for item in timed] == [(0.0, 2.4), (2.4, 9.1)]
+
+
+def test_without_a_recording_the_even_spacing_still_applies(tmp_path: Path) -> None:
+    """A silent draft has nothing to follow, so the provisional grid stands."""
+    app = create_app(projects_root=tmp_path / "projects")
+    store = app.state.store
+    project_id = store.bootstrap_project("no recording").project_id
+
+    timed = store.script_segments_for_narration(
+        project_id=project_id, narration_asset_id=None, sentences=["\ud558\ub098", "\ub458"]
+    )
+
+    assert [(item["start_sec"], item["end_sec"]) for item in timed] == [(0, 5), (5, 10)]
+
+
 def test_screen_chat_route_carries_owner_approved_memory_into_the_prompt(tmp_path: Path) -> None:
     """The editor screen posts here, not to the Hermes run route.
 

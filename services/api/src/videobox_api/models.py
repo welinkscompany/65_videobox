@@ -564,6 +564,13 @@ class NarrationAlignmentSegmentRequest(BaseModel):
     end_sec: float
 
 
+class NarrationRecordingSyncRequest(BaseModel):
+    """Sync a script draft to a recording the owner actually made."""
+
+    narration_asset_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=1)
+
+
 class NarrationAlignmentRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     aligned_segments: list[NarrationAlignmentSegmentRequest] = Field(min_length=1)

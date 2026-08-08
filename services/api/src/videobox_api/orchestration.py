@@ -453,6 +453,62 @@ class ApiOrchestrator:
     def apply_script_draft_narration_alignment(self, *, project_id: str, session_id: str, aligned_segments: list[dict[str, Any]], expected_revision: int) -> dict[str, Any]:
         return self.pipeline.apply_script_draft_narration_alignment(project_id=project_id, session_id=session_id, aligned_segments=aligned_segments, expected_revision=expected_revision)
 
+    def sync_script_draft_to_narration_recording(
+        self, *, project_id: str, session_id: str, narration_asset_id: str, expected_revision: int
+    ) -> dict[str, Any]:
+        """Move a script draft onto the timings of an actual recording.
+
+        Everything this needs already existed -- speech recognition, the
+        transcript aligner, and the apply step -- but the only way in was to
+        hand over start/end numbers by hand, so no screen could offer it and a
+        recording never tightened a caption. This is the missing joint.
+        """
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        source_ids = [
+            str(segment.get("source_script_segment_id") or "")
+            for segment in session.get("segments", [])
+            if str(segment.get("source_script_segment_id") or "")
+        ]
+        if not source_ids:
+            raise ValueError("editing_session_has_no_script_segments")
+        transcription = self.start_transcription(
+            project_id=project_id, narration_asset_id=narration_asset_id
+        )
+        transcript = self.pipeline.store.get_transcript(
+            project_id=project_id,
+            transcript_id=self.pipeline.store.get_job(
+                project_id=project_id, job_id=transcription["job_id"]
+            )["output_ref"],
+        )
+        spoken = [
+            segment
+            for segment in (transcript.get("segments") or [])
+            if isinstance(segment, dict)
+        ]
+        if not spoken:
+            raise ValueError("narration_recording_had_no_speech")
+        # Pair each script line with the stretch of speech that says it. The
+        # recording can run short or long of the script; a line with nothing
+        # spoken for it keeps its provisional bounds rather than collapsing to
+        # zero length.
+        aligned: list[dict[str, Any]] = []
+        for index, source_id in enumerate(source_ids):
+            if index >= len(spoken):
+                break
+            aligned.append({
+                "source_script_segment_id": source_id,
+                "start_sec": float(spoken[index].get("start_sec") or 0.0),
+                "end_sec": float(spoken[index].get("end_sec") or 0.0),
+            })
+        if not aligned:
+            raise ValueError("narration_recording_had_no_speech")
+        return self.apply_script_draft_narration_alignment(
+            project_id=project_id,
+            session_id=session_id,
+            aligned_segments=aligned,
+            expected_revision=expected_revision,
+        )
+
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
 

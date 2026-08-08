@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
+    NarrationRecordingSyncRequest,
     BrollOverrideRequest,
     CaptionOverrideRequest,
     CaptionStyleMutationRequest,
@@ -79,6 +80,23 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 project_id=project_id,
                 session_id=session_id,
                 aligned_segments=[item.model_dump() for item in payload.aligned_segments],
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/narration-alignment/from-recording")
+    def sync_script_draft_to_narration_recording(project_id: str, session_id: str, payload: NarrationRecordingSyncRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.sync_script_draft_to_narration_recording(
+                project_id=project_id,
+                session_id=session_id,
+                narration_asset_id=payload.narration_asset_id,
                 expected_revision=payload.expected_revision,
             )
         except EditingSessionConflict as exc:
