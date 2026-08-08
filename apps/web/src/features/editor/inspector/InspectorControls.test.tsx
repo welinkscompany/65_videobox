@@ -394,4 +394,43 @@ describe("InspectorControls", () => {
     });
     expect(document.body).not.toHaveTextContent(/asset-internal|segment-internal/);
   });
+
+  it("lets the owner set playback speed and loudness on a clip", async () => {
+    // Both rode in the command port from the start and no screen ever offered
+    // them, so a clip could not be sped up or quietened without leaving
+    // VideoBox. B-roll from a phone is often too long and too loud.
+    const onAction = vi.fn();
+    const broll = {
+      assetId: "asset-broll",
+      clearOnly: false,
+      controls: { crop: "center", speed: 1, volume: 1, inSec: 0, outSec: 4 },
+      fields: ["inSec", "outSec", "speed", "volume"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    } as const;
+
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll as never}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("B-roll 재생 속도"), { target: { value: "1.5" } });
+    fireEvent.change(screen.getByLabelText("B-roll 소리 크기"), { target: { value: "0.3" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+
+    expect(onAction).toHaveBeenCalledTimes(1);
+    const sent = onAction.mock.calls[0][0];
+    expect(sent.kind).toBe("save-media");
+    expect(sent.controls.speed).toBe(1.5);
+    expect(sent.controls.volume).toBe(0.3);
+    // The range the owner already chose must survive the same save.
+    expect(sent.controls.inSec).toBe(0);
+    expect(sent.controls.outSec).toBe(4);
+  });
 });

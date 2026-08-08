@@ -1,7 +1,7 @@
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec";
+type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
@@ -14,11 +14,16 @@ export type InspectorTarget =
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }> }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }> }>;
 
+// Music and effects keep fades only. They already carry gain and ducking,
+// and offering a second loudness control here would write a value the
+// owner never set onto every save.
 const mediaFields = ["fadeInSec", "fadeOutSec"] as const;
 // Task 24: B-roll carries no audio by default, so fades are meaningless for it.
 // What the owner actually corrects is which slice of a long take gets used --
 // the recommendation picks a scene window, this is where that is overridden.
-const brollFields = ["inSec", "outSec"] as const;
+// Phone B-roll is routinely too long and too loud, so the clip carries a
+// source window, a rate, and its own loudness.
+const brollFields = ["inSec", "outSec", "speed", "volume"] as const;
 const mediaLabels = { broll: "B-roll", bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {

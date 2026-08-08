@@ -115,6 +115,10 @@ export function InspectorControls({
   const [fadeOutSec, setFadeOutSec] = useState(0);
   const [inSec, setInSec] = useState(0);
   const [outSec, setOutSec] = useState(0);
+  // Both rode in the command port from the start with no screen offering
+  // them. Phone B-roll is routinely too long and too loud.
+  const [speed, setSpeed] = useState(1);
+  const [volume, setVolume] = useState(1);
   const [captionStyle, setCaptionStyle] = useState<EditorCaptionStyle>(defaultStyle);
   const [overlayTitle, setOverlayTitle] = useState("");
   const [overlayBody, setOverlayBody] = useState("");
@@ -145,6 +149,8 @@ export function InspectorControls({
       setFadeOutSec(target.controls.fadeOutSec ?? 0);
       setInSec(target.controls.inSec ?? 0);
       setOutSec(target.controls.outSec ?? 0);
+      setSpeed(target.controls.speed ?? 1);
+      setVolume(target.controls.volume ?? 1);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
     if (target?.kind === "overlay") {
@@ -322,6 +328,18 @@ export function InspectorControls({
                   </label>
                 </>
               ) : null}
+              {target.fields.includes("speed") ? (
+                <label>
+                  {`${target.label} 재생 속도`}
+                  <Input disabled={disabled} max="4" min="0.25" onChange={(event) => setSpeed(numberValue(event.target.value, speed))} step="0.05" type="number" value={speed} />
+                </label>
+              ) : null}
+              {target.fields.includes("volume") ? (
+                <label>
+                  {`${target.label} 소리 크기`}
+                  <Input disabled={disabled} max="2" min="0" onChange={(event) => setVolume(numberValue(event.target.value, volume))} step="0.05" type="number" value={volume} />
+                </label>
+              ) : null}
               <Button
                 disabled={disabled || (target.fields.includes("inSec") && outSec <= inSec)}
                 onClick={() => emit({
@@ -329,9 +347,12 @@ export function InspectorControls({
                   mediaKind: target.mediaKind,
                   segmentId: target.segmentId,
                   assetId: target.assetId,
-                  controls: target.fields.includes("inSec")
-                    ? { ...target.controls, inSec, outSec }
-                    : { ...target.controls, fadeInSec, fadeOutSec },
+                  controls: {
+                    ...target.controls,
+                    ...(target.fields.includes("inSec") ? { inSec, outSec } : { fadeInSec, fadeOutSec }),
+                    ...(target.fields.includes("speed") ? { speed } : {}),
+                    ...(target.fields.includes("volume") ? { volume } : {}),
+                  },
                 })}
                 type="button"
               >

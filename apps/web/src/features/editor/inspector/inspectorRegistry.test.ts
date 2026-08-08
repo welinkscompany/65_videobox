@@ -53,7 +53,7 @@ describe("projectInspectorTargets", () => {
       // Task 24: B-roll gets the source window, not the audio fades. Which
       // part of a ten-minute take to use is the one thing the owner adjusts by
       // hand after the recommendation picks a scene.
-      fields: ["inSec", "outSec"],
+      fields: ["inSec", "outSec", "speed", "volume"],
       assetId: "asset-broll",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,
