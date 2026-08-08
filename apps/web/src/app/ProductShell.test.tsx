@@ -329,10 +329,53 @@ describe("home dashboard", () => {
     // fetch the job list -- the recovery surface test above pins that -- so the
     // fix is to stop asserting a state home cannot know, not to add a fetch.
     const listJobs = vi.spyOn(api, "listJobs");
+    vi.spyOn(api, "getHomeSummary").mockResolvedValue({
+      finished_video_count: 0, has_draft: false, asset_gap_count: 0,
+    } as never);
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(screen.getByText("출력 화면에서 완성한 영상을 확인할 수 있어요.")).toBeVisible();
     expect(screen.queryByText("완성된 영상이 아직 없어요.")).toBeNull();
     expect(listJobs).not.toHaveBeenCalled();
+  });
+
+  it("tells the owner what is actually there, in one request", async () => {
+    // The owner asked twice whether the dashboard was done. It was a menu:
+    // all three cards stated their text unconditionally, so each could be
+    // false. Home still must not poll the job list, so this is one call.
+    const listJobs = vi.spyOn(api, "listJobs");
+    const summary = vi.spyOn(api, "getHomeSummary").mockResolvedValue({
+      finished_video_count: 3, has_draft: true, asset_gap_count: 2,
+    } as never);
+
+    render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
+
+    expect(await screen.findByText("완성한 영상이 3개 있어요.")).toBeVisible();
+    expect(screen.getByText("이어서 편집할 작업이 있어요.")).toBeVisible();
+    expect(screen.getByText("채울 자리가 2곳 남았어요.")).toBeVisible();
+    expect(summary).toHaveBeenCalledTimes(1);
+    expect(listJobs).not.toHaveBeenCalled();
+  });
+
+  it("says so plainly when the project is still empty", async () => {
+    vi.spyOn(api, "getHomeSummary").mockResolvedValue({
+      finished_video_count: 0, has_draft: false, asset_gap_count: 0,
+    } as never);
+
+    render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
+
+    expect(await screen.findByText("아직 완성한 영상이 없어요.")).toBeVisible();
+    expect(screen.getByText("아직 시작한 작업이 없어요.")).toBeVisible();
+    expect(screen.getByText("필요한 자산이 모두 준비됐어요.")).toBeVisible();
+  });
+
+  it("keeps the cards usable when the summary cannot be read", async () => {
+    // A home that cannot count must not block the owner from navigating, and
+    // must not go back to asserting a state it does not know.
+    vi.spyOn(api, "getHomeSummary").mockRejectedValue(new Error("offline"));
+
+    render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "출력 확인" })).toBeVisible();
+    expect(screen.queryByText("아직 완성한 영상이 없어요.")).toBeNull();
   });
 });

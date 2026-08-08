@@ -6,12 +6,14 @@ from videobox_api.errors import _http_error
 from videobox_api.models import (
     AllJobsResponse,
     CreateProjectRequest,
+    HomeSummaryResponse,
     JobListResponse,
     JobRecordResponse,
     JobRecordWithProjectResponse,
     ProjectListResponse,
     ProjectResponse,
 )
+from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -92,6 +94,38 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             name=project["name"],
             status=project["status"],
             root_storage_uri=project["root_storage_uri"],
+        )
+
+    @router.get("/api/projects/{project_id}/home-summary")
+    def get_home_summary(project_id: str) -> HomeSummaryResponse:
+        """Everything the three home cards claim, in one request.
+
+        The cards used to state all three unconditionally, so each one could be
+        false -- "no finished videos" stayed on screen after a render finished.
+        Home must not poll the job list (ProductShell pins that the list is
+        fetched only when the owner opens the job dialog), so the counting
+        happens here and the screen makes exactly one call.
+        """
+        try:
+            jobs = store.list_jobs(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        finished = sum(
+            1
+            for job in jobs
+            if str(job.get("job_type")) == JobType.FINAL_RENDER
+            and str(job.get("status")) == JobStatus.SUCCEEDED
+        )
+        try:
+            session = store.get_latest_editing_session(project_id=project_id)
+        except Exception:
+            # No draft yet is an ordinary state, not an error.
+            session = None
+        gaps = session.get("gap_slots") if isinstance(session, dict) else None
+        return HomeSummaryResponse(
+            finished_video_count=finished,
+            has_draft=session is not None,
+            asset_gap_count=len(gaps) if isinstance(gaps, list) else 0,
         )
 
     @router.get("/api/projects/{project_id}/jobs")

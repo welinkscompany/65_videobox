@@ -4647,6 +4647,54 @@ def test_create_app_exposes_local_runtime_builder_on_app_state(tmp_path: Path) -
     assert app.state.local_runtime_config.model_name == "Qwen3-32B"
 
 
+def test_home_summary_reports_what_the_home_cards_claim(tmp_path: Path) -> None:
+    """Home stated three things it never checked, so all three could be false.
+
+    The owner asked twice whether the dashboard was finished.  It was a menu:
+    the cards' text was hardcoded, so "no finished videos" stayed on screen
+    after a render succeeded.  One request per home visit, not a job poll --
+    ProductShell pins that the job list is fetched only when the owner opens
+    the job dialog.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "home"}).json()["project_id"]
+
+    empty = client.get(f"/api/projects/{project_id}/home-summary")
+
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == {
+        "finished_video_count": 0,
+        "has_draft": False,
+        "asset_gap_count": 0,
+    }
+
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    # One still running and one finished: only the finished one counts.
+    store.create_job(
+        project_id=project_id,
+        job_type=JobType.FINAL_RENDER,
+        input_ref="timeline",
+        status=JobStatus.RUNNING,
+    )
+    store.create_job(
+        project_id=project_id,
+        job_type=JobType.FINAL_RENDER,
+        input_ref="timeline",
+        status=JobStatus.SUCCEEDED,
+    )
+
+    filled = client.get(f"/api/projects/{project_id}/home-summary").json()
+
+    assert filled["finished_video_count"] == 1, filled
+    assert filled["has_draft"] is True, filled
+
+
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:
     app = create_app(
         projects_root=tmp_path,

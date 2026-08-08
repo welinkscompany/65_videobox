@@ -45,6 +45,11 @@ export type MediaInboxImport = { asset_id: string; project_id: string; asset_typ
 export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
 export type AtomicDraftBundleRequest = { brief_id: string; readiness_id: string; expected_brief_revision: number; expected_readiness_revision: number; idempotency_key: string; allow_placeholder?: boolean; orientation?: "landscape" | "vertical" };
 
+export type HomeSummary = {
+  finished_video_count: number;
+  has_draft: boolean;
+  asset_gap_count: number;
+};
 export type JobRecord = {
   job_id: string;
   project_id: string;
@@ -1631,6 +1636,10 @@ export const api = {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);
     return payload.jobs;
   },
+  // Home asks this once instead of polling the job list, which ProductShell
+  // pins to the job dialog. One call keeps the home visit cheap.
+  getHomeSummary: (projectId: string): Promise<HomeSummary> =>
+    request<HomeSummary>(`/api/projects/${encodeURIComponent(projectId)}/home-summary`),
   listAllJobs: async (): Promise<JobRecordWithProject[]> => {
     const payload = await request<{ jobs: JobRecordWithProject[] }>("/api/jobs");
     return payload.jobs;

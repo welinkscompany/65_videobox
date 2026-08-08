@@ -11,7 +11,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Menu, PanelLeftClose, Settings, Video } from "lucide-react";
 
-import { type Project } from "../api";
+import { api, type HomeSummary, type Project } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
@@ -118,13 +118,28 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
 }
 
 export function HomePage({ projectId, onNavigate }: { projectId: string; onNavigate: (projectId: string, section: WorkspaceSection) => void }) {
-  // Task 35: this card used to state "완성된 영상이 아직 없어요" unconditionally,
-  // which is false as soon as the owner finishes one. Home deliberately does not
-  // poll jobs -- ProductShell.test pins that the job list is fetched only when
-  // the owner opens 작업 상태 -- so the card stops asserting a state it cannot
-  // know rather than gaining an eager fetch. Showing the real count needs a
-  // decision about loading on home; recorded in the plan.
-  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 장면을 이어서 만들어 볼까요?</h1><p>대본과 자산을 준비하면, 필요한 순서대로 바로 시작할 수 있어요.</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><div className="vb-home-grid"><HomeCard title="작업 중인 초안 계속하기" description="이어 할 작업을 선택해 편집을 계속하세요." action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="최근 완성본" description="출력 화면에서 완성한 영상을 확인할 수 있어요." action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /><HomeCard title="자산 준비가 필요한 프로젝트" description="대본에 맞는 사진·영상·소리를 추가해 주세요." action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /></div></section>;
+  // Task 35: all three cards used to state their text unconditionally, so each
+  // one could be false -- "완성된 영상이 아직 없어요" stayed on screen after the
+  // owner finished a render. Home still must not poll the job list
+  // (ProductShell.test pins that to the job dialog), so it asks one dedicated
+  // endpoint that counts server-side. If that call fails the cards fall back to
+  // saying nothing about state rather than guessing, and stay clickable.
+  const [summary, setSummary] = useState<HomeSummary | null>(null);
+  useEffect(() => {
+    let active = true;
+    setSummary(null);
+    void api.getHomeSummary(projectId)
+      .then((next) => { if (active) setSummary(next); })
+      .catch(() => { /* a home that cannot count still navigates */ });
+    return () => { active = false; };
+  }, [projectId]);
+  const draftText = summary === null ? "이어 할 작업을 선택해 편집을 계속하세요."
+    : summary.has_draft ? "이어서 편집할 작업이 있어요." : "아직 시작한 작업이 없어요.";
+  const finishedText = summary === null ? "출력 화면에서 완성한 영상을 확인할 수 있어요."
+    : summary.finished_video_count > 0 ? `완성한 영상이 ${summary.finished_video_count}개 있어요.` : "아직 완성한 영상이 없어요.";
+  const assetText = summary === null ? "대본에 맞는 사진·영상·소리를 추가해 주세요."
+    : summary.asset_gap_count > 0 ? `채울 자리가 ${summary.asset_gap_count}곳 남았어요.` : "필요한 자산이 모두 준비됐어요.";
+  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 장면을 이어서 만들어 볼까요?</h1><p>대본과 자산을 준비하면, 필요한 순서대로 바로 시작할 수 있어요.</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><div className="vb-home-grid"><HomeCard title="작업 중인 초안 계속하기" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="최근 완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /><HomeCard title="자산 준비가 필요한 프로젝트" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /></div></section>;
 }
 function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
 

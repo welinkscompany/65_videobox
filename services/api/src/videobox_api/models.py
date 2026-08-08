@@ -511,6 +511,14 @@ class JobListResponse(BaseModel):
     jobs: list[JobRecordResponse]
 
 
+class HomeSummaryResponse(BaseModel):
+    """What the three home cards need, so none of them has to guess."""
+
+    finished_video_count: int
+    has_draft: bool
+    asset_gap_count: int
+
+
 class JobRecordWithProjectResponse(JobRecordResponse):
     project_name: str
 
