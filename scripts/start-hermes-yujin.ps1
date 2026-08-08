@@ -228,10 +228,16 @@ if (($gatewayEnvironmentNames -join "|") -cne ($expectedGatewayEnvironmentNames 
     throw "Agent gateway environment contract is invalid."
 }
 $hermesEnvironmentNames = @($hermes.environment.PSObject.Properties.Name | Sort-Object)
+# 이 목록은 유진 컨테이너가 받을 수 있는 환경변수 전부다. 자격 증명이 흘러들지
+# 않게 막는 장치이므로 넓힐 때는 이유를 남긴다. LM_* 두 개는 이 컴퓨터의
+# LM Studio 를 가리키는 값이고, LM Studio 는 열쇠를 확인하지 않으므로
+# LM_API_KEY 는 비밀이 아니라 자리를 채우는 값이다.
 $expectedHermesEnvironmentNames = @(
     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH"
     "HERMES_DASHBOARD_BASIC_AUTH_USERNAME"
     "HERMES_TUI_TOOLSETS"
+    "LM_API_KEY"
+    "LM_BASE_URL"
 )
 if (($hermesEnvironmentNames -join "|") -cne ($expectedHermesEnvironmentNames -join "|")) {
     throw "Hermes environment contract is invalid."

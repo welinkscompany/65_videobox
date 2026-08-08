@@ -156,6 +156,10 @@ def _rendered_model(
                     "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH": password_hash,
                     "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": gateway_username,
                     "HERMES_TUI_TOOLSETS": "context_engine",
+                    # 유진의 두뇌인 로컬 LM Studio 를 가리킨다. LM Studio 는
+                    # 열쇠를 확인하지 않으므로 LM_API_KEY 는 비밀이 아니다.
+                    "LM_API_KEY": "lm-studio",
+                    "LM_BASE_URL": "http://host.docker.internal:1234/v1",
                 }
             },
             "videobox-workspace": {

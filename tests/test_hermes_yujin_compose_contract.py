@@ -423,6 +423,9 @@ def test_hermes_runtime_is_pinned_to_the_zero_schema_context_engine() -> None:
         "agent": {"disabled_toolsets": ["kanban"]},
         "context": {"engine": "compressor"},
         "mcp_servers": {},
+        # 두뇌는 이 컴퓨터의 LM Studio 다. provider 키를 함께 적지 않으면 Hermes 가
+        # 로그인된 OAuth 제공자로 조용히 넘어간다.
+        "model": {"provider": "lmstudio", "name": "qwen/qwen3.6-35b-a3b"},
     }
 
 
