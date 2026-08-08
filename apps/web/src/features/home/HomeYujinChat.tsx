@@ -22,9 +22,14 @@ export function HomeYujinChat({ projectId }: { projectId: string }) {
   const [turns, setTurns] = useState<readonly Turn[]>([]);
   const [sending, setSending] = useState(false);
   const conversationId = useRef<string | null>(null);
+  // Switching project while Yujin is still answering must not drop that answer
+  // into the new project -- the owner would read it as advice about footage it
+  // never saw. Every send captures the epoch it started in.
+  const epoch = useRef(0);
 
   useEffect(() => {
     let active = true;
+    epoch.current += 1;
     conversationId.current = null;
     setReady(false);
     setSessionId(null);
@@ -43,12 +48,15 @@ export function HomeYujinChat({ projectId }: { projectId: string }) {
     const text = draft.trim();
     if (!text || !sessionId || sending) return;
     setSending(true);
+    const startedIn = epoch.current;
+    const isCurrent = () => epoch.current === startedIn;
     const clientMessageId = crypto.randomUUID();
     setTurns((current) => [...current, { id: `u:${clientMessageId}`, role: "user", text }]);
     setDraft("");
     try {
       if (!conversationId.current) {
         const conversation = await api.createDirectorConversation(projectId, { session_id: sessionId });
+        if (!isCurrent()) return;
         conversationId.current = conversation.conversation_id;
       }
       const result = await api.sendDirectorMessage(projectId, conversationId.current, {
@@ -64,15 +72,17 @@ export function HomeYujinChat({ projectId }: { projectId: string }) {
           ?.status === "blocked"
           ? cannotAnswer
           : result.exchange.assistant_message.text;
+      if (!isCurrent()) return;
       setTurns((current) => [...current, {
         id: `a:${clientMessageId}`,
         role: "assistant",
         text: answer,
       }]);
     } catch {
+      if (!isCurrent()) return;
       setTurns((current) => [...current, { id: `e:${clientMessageId}`, role: "assistant", text: cannotAnswer }]);
     } finally {
-      setSending(false);
+      if (isCurrent()) setSending(false);
     }
   };
 

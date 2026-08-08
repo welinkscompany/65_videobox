@@ -122,4 +122,29 @@ describe("HomeYujinChat", () => {
 
     expect(send).not.toHaveBeenCalled();
   });
+
+  it("does not drop a late reply into a different project", async () => {
+    // Switching project while Yujin is still answering must not show that
+    // answer under the new project -- the owner would read it as advice about
+    // footage it never saw.
+    vi.spyOn(api.api, "getLatestEditingSession").mockResolvedValue(session);
+    vi.spyOn(api.api, "createDirectorConversation").mockResolvedValue({
+      conversation_id: "c-1", project_id: "project-a", session_id: "session-a",
+    } as never);
+    let release: (value: unknown) => void = () => {};
+    vi.spyOn(api.api, "sendDirectorMessage").mockReturnValue(
+      new Promise((resolve) => { release = resolve; }) as never,
+    );
+
+    const view = render(<HomeYujinChat projectId="project-a" />);
+    const input = await screen.findByLabelText("유진에게 물어보기");
+    fireEvent.change(input, { target: { value: "가" } });
+    fireEvent.click(screen.getByRole("button", { name: "보내기" }));
+
+    view.rerender(<HomeYujinChat projectId="project-b" />);
+    release(exchange("가", "프로젝트 가에 대한 답"));
+    await waitFor(() => expect(screen.getByLabelText("유진에게 물어보기")).toBeVisible());
+
+    expect(screen.queryByText("프로젝트 가에 대한 답")).toBeNull();
+  });
 });

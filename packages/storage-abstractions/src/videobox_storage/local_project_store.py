@@ -4198,7 +4198,7 @@ class LocalProjectStore:
             connection.close()
 
     @staticmethod
-    def _completed_yujin_memory_source_rows(  # noqa: C901 - one guarded query
+    def _completed_yujin_memory_source_rows(
         connection: Any,
         *,
         project_id: str,
@@ -4209,8 +4209,13 @@ class LocalProjectStore:
         rows = connection.execute(
             """
             SELECT message.message_id, message.text, message.message_order,
+                   -- "Is this message owned by a completed run", not "what is
+                   -- the status of whichever owning row we read first".  With
+                   -- LIMIT 1 an unrelated non-completed row could veto a
+                   -- message its own completed run already earned, and which
+                   -- row won would depend on storage order.
                    (
-                     SELECT run.status
+                     SELECT MAX(CASE WHEN run.status = 'completed' THEN 1 ELSE 0 END)
                      FROM director_hermes_runs AS run
                      WHERE run.project_id = message.project_id
                        AND run.conversation_id = message.conversation_id
@@ -4218,8 +4223,7 @@ class LocalProjectStore:
                          run.user_message_id = message.message_id
                          OR run.assistant_message_id = message.message_id
                        )
-                     LIMIT 1
-                   ) AS owning_run_status,
+                   ) AS has_completed_run,
                    (
                      SELECT reply.metadata_json
                      FROM director_messages AS reply
@@ -4304,7 +4308,7 @@ class LocalProjectStore:
         rows = [
             row
             for row in rows
-            if row["owning_run_status"] == "completed"
+            if int(row["has_completed_run"] or 0) == 1
             or not _director_exchange_was_blocked(row["exchange_metadata_json"])
         ]
         if len(rows) != len(source_message_ids):

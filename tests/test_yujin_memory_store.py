@@ -932,3 +932,58 @@ def test_a_blocked_local_exchange_is_not_a_memory_source(tmp_path: Path) -> None
                 category="caption",
                 proposed_text="자막은 두 줄 이내를 선호합니다.",
             )
+
+
+def test_a_completed_run_still_qualifies_when_another_run_row_shares_the_message(
+    tmp_path: Path,
+) -> None:
+    """The gate asks "is this message owned by a completed run", not "what is
+    the status of whichever owning row we happen to read first".
+
+    Reading an arbitrary owning row would let an unrelated non-completed row
+    veto a message its own completed run already earned.
+    """
+    store = LocalProjectStore(tmp_path)
+    project_id, session, conversation_id, completed_user, completed_assistant = _seed(
+        store
+    )
+    # A second run row pointing at the same completed message, not completed.
+    store._execute(
+        project_id,
+        """
+        INSERT INTO director_hermes_runs
+            (run_id, project_id, conversation_id, session_id, client_message_id,
+             expected_session_revision, expected_asset_index_revision,
+             user_text, user_message_id, assistant_message_id,
+             status, owner_token, heartbeat_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'interrupted', ?, ?, ?, ?)
+        """,
+        (
+            "hermes-run-shadow",
+            project_id,
+            conversation_id,
+            session["session_id"],
+            "shadow-client-message",
+            int(session["session_revision"]),
+            0,
+            "그림자 run",
+            completed_user["message_id"],
+            completed_assistant["message_id"],
+            "shadow-owner-token",
+            store._now_iso(),
+            store._now_iso(),
+            store._now_iso(),
+        ),
+    )
+
+    created = store.create_yujin_memory_candidate(
+        project_id=project_id,
+        conversation_id=conversation_id,
+        client_request_id="shadowed-completed-run",
+        source_message_ids=(completed_assistant["message_id"],),
+        memory_scope="creator",
+        category="pacing",
+        proposed_text="빠른 컷 편집을 선호합니다.",
+    )
+
+    assert created["source_message_ids"] == (completed_assistant["message_id"],)
