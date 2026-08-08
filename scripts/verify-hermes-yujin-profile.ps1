@@ -48,7 +48,7 @@ if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
 }
 $expectedManifest = @'
 name: videobox-yujin
-version: 1.2.0
+version: 1.3.0
 hermes_requires: ">=0.18.0"
 distribution_owned:
   - SOUL.md

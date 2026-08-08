@@ -29,7 +29,7 @@ OVERLAY_PATH = ROOT / "compose.hermes-yujin.yaml"
 
 EXPECTED_MANIFEST = {
     "name": "videobox-yujin",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "hermes_requires": ">=0.18.0",
     "distribution_owned": ["SOUL.md", "config.yaml", "skills/"],
 }
@@ -773,3 +773,21 @@ def test_start_treats_memory_adapter_as_best_effort_after_chat() -> None:
         '"stop"\n'
         '        "videobox-hermes-memory-adapter"'
     ) not in source
+
+
+def test_distributed_profile_pins_the_local_model() -> None:
+    """유진의 두뇌는 배포본이 정해야 한다.
+
+    config.yaml 은 distribution_owned 라서 프로필을 다시 설치할 때마다
+    덮어써진다. 실행 중인 컨테이너에만 모델을 설정하면 다음 기동 때 사라지고,
+    유진은 "No inference provider configured" 로 되돌아간다. 2026-08-08 확인.
+    """
+    config = yaml.safe_load(
+        (PROFILE_ROOT / "config.yaml").read_text(encoding="utf-8")
+    )
+
+    # provider 키가 없으면 Hermes 가 로그인된 OAuth 제공자로 조용히 넘어간다.
+    assert config["model"] == {
+        "provider": "lmstudio",
+        "name": "qwen/qwen3.6-35b-a3b",
+    }
