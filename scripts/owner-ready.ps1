@@ -3,6 +3,10 @@ param(
     [ValidateSet("Check", "Start", "Smoke", "Open", "OpenCapCut")]
     [string]$Mode = "Check",
     [switch]$Json,
+    # 유진 기억을 Mem0에 연결한다 (owner 승인 2026-08-08, `§10.14` 조항 2-A).
+    # 기본은 꺼짐 -- 켜면 대화 기억이 외부로 나가고, 게이트웨이가 죽으면
+    # 폴백이 없어 과거 기억을 못 꺼낸다. 켤 때만 명시적으로 지정한다.
+    [switch]$WithYujinMemory,
     [Uri]$VideoBoxUri = "http://127.0.0.1:5173/",
     [Uri]$HermesDashboardUri = "http://127.0.0.1:9119/",
     [ValidateRange(1, 180)]
@@ -24,6 +28,14 @@ $ErrorActionPreference = "Stop"
 $OutputEncoding = [Console]::OutputEncoding
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $repositoryRoot "compose.yaml"
+$yujinMemoryComposeFile = Join-Path $repositoryRoot "compose.hermes-yujin.yaml"
+# 기본 스택은 compose.yaml 하나다. -WithYujinMemory 를 줬을 때만 Mem0 경로를 얹는다.
+$composeFileArguments = @("-f", $composeFile)
+$composeProfileArguments = @()
+if ($WithYujinMemory) {
+    $composeFileArguments += @("-f", $yujinMemoryComposeFile)
+    $composeProfileArguments = @("--profile", "hermes-yujin")
+}
 $exampleEnvFile = Join-Path $repositoryRoot ".env.container.example"
 if ([string]::IsNullOrWhiteSpace($EnvFile)) {
     $EnvFile = Join-Path $repositoryRoot ".env.container"
@@ -603,7 +615,7 @@ function Get-ComposeChecks {
     $composeStatus = "blocked"
     if ($docker.status -ceq "pass" -and (Test-Path -LiteralPath $composeFile -PathType Leaf) -and (Test-Path -LiteralPath $exampleEnvFile -PathType Leaf)) {
         $composeResult = Invoke-CapturedProcess -FilePath $DockerExecutable -Arguments @(
-            "compose", "-f", $composeFile, "--env-file", $exampleEnvFile, "config", "--quiet"
+            @("compose") + $composeFileArguments + @("--env-file", $exampleEnvFile) + $composeProfileArguments + @("config", "--quiet")
         )
         $composeStatus = if ($composeResult.ExitCode -eq 0) { "pass" } else { "fail" }
     }
@@ -928,7 +940,7 @@ if ($Mode -ceq "Start") {
         Write-OwnerReadyPayload -Checks $checks
     }
     $actualComposeResult = Invoke-CapturedProcess -FilePath $DockerExecutable -Arguments @(
-        "compose", "-f", $composeFile, "--env-file", $EnvFile, "config", "--quiet"
+        @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("config", "--quiet")
     )
     $actualComposeStatus = if ($actualComposeResult.ExitCode -eq 0) { "pass" } else { "fail" }
     $checks += New-OwnerReadyResult -Id "start_compose" -Status $actualComposeStatus `
@@ -939,6 +951,10 @@ if ($Mode -ceq "Start") {
         Write-OwnerReadyPayload -Checks $checks
     }
     $serviceNames = @("videobox-postgres", "videobox-workspace")
+    if ($WithYujinMemory) {
+        # 게이트웨이가 유진 에이전트와 메모리 어댑터에 의존한다.
+        $serviceNames += @("videobox-hermes-yujin", "videobox-hermes-memory-adapter", "videobox-agent-gateway")
+    }
     if ($PSBoundParameters.ContainsKey("WhatIf")) {
         $checks += New-OwnerReadyResult -Id "start" -Status "pass" `
             -Summary "VideoBox 시작 대상을 안전하게 확인했습니다." `
@@ -954,8 +970,7 @@ if ($Mode -ceq "Start") {
         Write-OwnerReadyPayload -Checks $checks
     }
     $upResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec $TimeoutSec -Arguments @(
-        "compose", "-f", $composeFile, "--env-file", $EnvFile,
-        "up", "-d", "videobox-postgres", "videobox-workspace"
+        @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("up", "-d") + $serviceNames
     )
     if ($upResult.ExitCode -ne 0) {
         $checks += New-OwnerReadyResult -Id "start" -Status "fail" `

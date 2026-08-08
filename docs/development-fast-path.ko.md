@@ -287,17 +287,27 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
    - 어댑터는 `videobox-hermes-memory-network`와 `videobox-hermes-provider-egress`에만
      붙는다. VideoBox data, media mount, PostgreSQL, `videobox-internal`,
      `videobox-edge`에 **연결하지 않는다.** 조항 2의 제한이 어댑터에도 그대로 적용된다.
-   - 어댑터에 나가는 것은 **승인된 기억 텍스트와 검색 질의뿐**이다. 원본 영상, 자산 파일,
-     대본 파일, 프로젝트 경로는 나가지 않는다.
-   - 기억 저장은 **owner가 승인한 항목만** 나간다(`ApprovedMemoryStoreRequest`).
-     대화 전체를 자동으로 올리지 않는다.
+   - 나가는 것은 **정확히 두 가지뿐**이다. 스키마가 `extra="forbid"`로 고정돼 있어
+     그 밖의 필드는 실을 수 없다.
+     - 저장(`ApprovedMemoryStoreRequest`): `text`(280자 이내), `category`
+       (`pacing|caption|audio|tone|workflow` 5종), `external_ref`, `operation_id`.
+       **owner가 승인한 항목만** 나가며, 대화 전체를 자동으로 올리지 않는다.
+     - 검색(`GatewayMemorySearchRequest`): `query`(280자 이내)와 `limit`(최대 5).
+   - 원본 영상, 자산 파일, 대본 파일, 프로젝트 경로, 프로젝트 식별자는 나가지 않는다.
+   - **로컬이 기억의 원본이고 Mem0는 검색·순위만 맡는다.** 조회 시 로컬 기록을 먼저 읽고,
+     게이트웨이가 돌려준 항목 중 **로컬과 정확히 일치하는 것만** 채택한다
+     (`yujin_memory_service.py:181` `if exact not in local: continue`).
+     따라서 외부가 기억을 **주입할 수 없다.** 이 대조를 제거하지 않는다.
    - `MEM0_API_KEY`가 비어 있으면 어댑터는 뜨더라도 Mem0로 나가지 않는다.
-   - **주의 — 폴백이 없다.** 게이트웨이가 없으면
-     `YujinMemoryService.retrieve_approved_memories()`가 빈 결과를 돌려준다
-     (`yujin_memory_service.py:127`). 로컬 기억으로 되돌아가지 않는다.
-     **즉 Mem0를 켜는 순간 유진의 기억은 외부 의존이 되고, 외부가 죽으면 기억도 없다.**
-     대화 자체는 로컬 모델로 계속되지만 과거 기억을 못 꺼낸다.
-     이 성질을 감수하고 켜는 것이며, 폴백을 넣는 것은 별도 작업이다.
+   - **주의 — 조회 폴백이 없다.** 게이트웨이가 없으면
+     `retrieve_approved_memories()`가 빈 결과를 돌려준다(`yujin_memory_service.py:127`).
+     **기억이 사라지는 것은 아니다** — 로컬 기록은 그대로 있고, 그것을 순위 매겨
+     꺼내 줄 검색이 없을 뿐이다. 결과적으로 유진은 과거 기억을 참조하지 못한다
+     (대화 자체는 로컬 모델로 계속된다).
+     즉 **Mem0를 켜면 기억 조회가 외부 가용성에 묶인다.** 이 성질을 감수하고 켜는 것이며,
+     게이트웨이가 없을 때 로컬 기록을 그대로 돌려주는 폴백을 넣는 것은 별도 작업이다.
+     그 폴백은 의미 검색 없이 최근/전체를 돌려주게 되므로 **품질 판단이 따로 필요하다** —
+     지금 없는 것이 실수인지 의도인지 확인되지 않았다.
    - 이 승인은 **Mem0 기억 경로 하나에만** 적용된다. 다른 외부 전송, Telegram intake,
      host bridge, CapCut bridge의 근거가 아니다(조항 4 유지).
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
