@@ -99,7 +99,7 @@
       "upstream_path": "src/components/layout/authenticated-layout.tsx",
       "upstream_sha256": "e3ab0837b3bd3e39153aad8b7b3c07c8fe6768f23bb0dc362ab4a41a5ee6e1ff",
       "path": "apps/web/src/app/ProductShell.tsx",
-      "normalized_sha256": "182485f5411403c85319f0767aff477bd62d156828875bc50f33557ef003551e",
+      "normalized_sha256": "52452dcda1e400be1aae5ab99da3e5a36ba61300b63c5004370896f6e76456f4",
       "test_path": "apps/web/src/app/ProductShell.test.tsx"
     },
     {
@@ -107,7 +107,7 @@
       "upstream_path": "src/components/layout/app-sidebar.tsx",
       "upstream_sha256": "cd363c86fe2e6ad838c013075c51f2c5e7cb61e08082020351c48896c882bc87",
       "path": "apps/web/src/app/ProductShell.tsx",
-      "normalized_sha256": "182485f5411403c85319f0767aff477bd62d156828875bc50f33557ef003551e",
+      "normalized_sha256": "52452dcda1e400be1aae5ab99da3e5a36ba61300b63c5004370896f6e76456f4",
       "test_path": "apps/web/src/app/ProductShell.test.tsx"
     }
   ],

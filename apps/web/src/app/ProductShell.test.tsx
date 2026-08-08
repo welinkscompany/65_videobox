@@ -421,3 +421,14 @@ describe("settings that claim to change the screen", () => {
     expect(root).toHaveAttribute("data-reduced-motion", "false");
   });
 });
+
+describe("output format setting", () => {
+  it("states the format instead of offering a choice that does not exist", () => {
+    // The renderer always writes output.mp4 (h264) and the output request
+    // carries no format field, so picking MOV changed nothing at all.
+    render(<SettingsPage section="output" onNavigate={vi.fn()} projectId="project-a" />);
+
+    expect(screen.getByText("완성본은 MP4(H.264)로 만듭니다.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "MOV" })).toBeNull();
+  });
+});
