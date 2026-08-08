@@ -22,6 +22,7 @@ import { resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest
 import { JobRecovery } from "../features/jobs/JobRecovery";
 import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { VoiceTtsSettings } from "../features/settings/VoiceTtsSettings";
+import { HomeYujinChat } from "../features/home/HomeYujinChat";
 
 type ShellSection = WorkspaceSection | "media" | "outputs";
 /** Task 32: archiving used to be a one-way door -- the project left the sidebar
@@ -139,7 +140,10 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
     : summary.finished_video_count > 0 ? `완성한 영상이 ${summary.finished_video_count}개 있어요.` : "아직 완성한 영상이 없어요.";
   const assetText = summary === null ? "대본에 맞는 사진·영상·소리를 추가해 주세요."
     : summary.asset_gap_count > 0 ? `채울 자리가 ${summary.asset_gap_count}곳 남았어요.` : "필요한 자산이 모두 준비됐어요.";
-  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 장면을 이어서 만들어 볼까요?</h1><p>대본과 자산을 준비하면, 필요한 순서대로 바로 시작할 수 있어요.</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><div className="vb-home-grid"><HomeCard title="작업 중인 초안 계속하기" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="최근 완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /><HomeCard title="자산 준비가 필요한 프로젝트" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /></div></section>;
+  // The cards are ordered the way the work actually runs: bring footage in,
+  // edit it, then take it out. The old order opened with editing, which is
+  // the middle of the job.
+  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 장면을 이어서 만들어 볼까요?</h1><p>대본과 자산을 준비하면, 필요한 순서대로 바로 시작할 수 있어요.</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><div className="vb-home-grid"><HomeCard title="촬영본 가져오기" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="작업 중인 초안 계속하기" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="최근 완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
 }
 function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
 
