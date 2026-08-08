@@ -16,7 +16,11 @@ from videobox_core_engine.settings import (
 
 
 def _clear_local_runtime_environment(monkeypatch) -> None:
-    for name in ("VIDEOBOX_LOCAL_MODEL_NAME", "VIDEOBOX_LOCAL_RUNTIME_TIMEOUT_SECONDS"):
+    for name in (
+        "VIDEOBOX_LOCAL_MODEL_NAME",
+        "VIDEOBOX_LOCAL_RUNTIME_TIMEOUT_SECONDS",
+        "VIDEOBOX_LOCAL_RUNTIME_BASE_URL",
+    ):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -72,3 +76,38 @@ def test_factory_with_explicit_config_is_not_overridden_by_the_environment(
     app = create_app(local_runtime_config=explicit)
 
     assert app.state.local_runtime_config.model_name == "explicit-override"
+
+
+def test_local_runtime_reaches_lm_studio_from_inside_a_container(monkeypatch) -> None:
+    """Inside the container `127.0.0.1` is the container, not the machine.
+
+    LM Studio runs on the host, so a pin to loopback makes the owner's on-screen
+    chat structurally impossible in container mode.  Owner approved opening this
+    one host path on 2026-08-08 (`docs/development-fast-path.ko.md` §10.14 조항 2-B).
+    """
+    _clear_local_runtime_environment(monkeypatch)
+    monkeypatch.setenv(
+        "VIDEOBOX_LOCAL_RUNTIME_BASE_URL",
+        "http://host.docker.internal:1234/v1",
+    )
+
+    assert resolve_local_runtime_config().base_url == (
+        "http://host.docker.internal:1234/v1"
+    )
+
+
+def test_local_runtime_still_refuses_to_leave_this_machine() -> None:
+    """The pin exists so a local call never reaches the network.  Widening it to
+    the Docker host must not widen it to anything else."""
+    for rejected in (
+        "http://example.com:1234/v1",
+        "https://host.docker.internal:1234/v1",
+        "http://host.docker.internal:8080/v1",
+        "http://host.docker.internal:1234/v2",
+        "http://user:pw@host.docker.internal:1234/v1",
+    ):
+        try:
+            LocalOpenAICompatibleRuntimeConfig(base_url=rejected)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted a non-local base_url: {rejected}")

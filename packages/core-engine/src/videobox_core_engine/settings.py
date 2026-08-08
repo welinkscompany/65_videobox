@@ -162,6 +162,9 @@ def resolve_local_runtime_config() -> "LocalOpenAICompatibleRuntimeConfig":
     """
     defaults = LocalOpenAICompatibleRuntimeConfig()
     return LocalOpenAICompatibleRuntimeConfig(
+        base_url=_environment_text(
+            "VIDEOBOX_LOCAL_RUNTIME_BASE_URL", defaults.base_url
+        ),
         model_name=_environment_text("VIDEOBOX_LOCAL_MODEL_NAME", defaults.model_name),
         timeout_seconds=_environment_positive_int(
             "VIDEOBOX_LOCAL_RUNTIME_TIMEOUT_SECONDS", defaults.timeout_seconds
@@ -176,11 +179,21 @@ class LocalOpenAICompatibleRuntimeConfig:
     model_name: str = "qwen3-35b"
     timeout_seconds: int = 30
 
+    # The pin below exists so a "local" model call can never reach the network.
+    # `host.docker.internal` is the one addition: inside the container 127.0.0.1
+    # is the container itself, so loopback alone makes the owner's on-screen chat
+    # impossible in container mode.  That name resolves to this same machine, so
+    # the guarantee is unchanged.  Owner approved 2026-08-08
+    # (`docs/development-fast-path.ko.md` §10.14 조항 2-B).
+    _CONTAINER_BASE_URL = "http://host.docker.internal:1234/v1"
+
     def __post_init__(self) -> None:
         base_url = self.base_url
-        if base_url != "http://127.0.0.1:1234/v1":
+        if base_url not in ("http://127.0.0.1:1234/v1", self._CONTAINER_BASE_URL):
             raise ValueError(
-                "local_runtime_config.base_url must be exactly http://127.0.0.1:1234/v1."
+                "local_runtime_config.base_url must be exactly "
+                "http://127.0.0.1:1234/v1, or "
+                f"{self._CONTAINER_BASE_URL} when running in the container."
             )
 
         model_name = self.model_name.strip()

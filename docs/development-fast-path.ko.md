@@ -319,6 +319,20 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      지금 없는 것이 실수인지 의도인지 확인되지 않았다.
    - 이 승인은 **Mem0 기억 경로 하나에만** 적용된다. 다른 외부 전송, Telegram intake,
      host bridge, CapCut bridge의 근거가 아니다(조항 4 유지).
+2-B. **유진 로컬 두뇌 경로 — owner 승인 (2026-08-08).** workspace 컨테이너가
+   호스트의 LM Studio(`host.docker.internal:1234`)에 연결한다. 승인 배경은
+   `base_url`이 `http://127.0.0.1:1234/v1`로 못박혀 있어 **컨테이너 안에서는 두뇌에
+   닿을 수가 없었고**, 화면의 유진 대화가 `LOCAL_NETWORK_ERROR`로 전부 실패했기 때문이다.
+
+   - **이 경로로 나가는 것은 이 컴퓨터 밖으로 나가지 않는다.** `host.docker.internal`은
+     도커 호스트, 즉 같은 기계다. 조항 1의 provider egress와 성격이 다르다.
+   - 허용 값은 **두 개뿐**이다: `http://127.0.0.1:1234/v1`(로컬 실행)과
+     `http://host.docker.internal:1234/v1`(컨테이너). `settings.py`의
+     `LocalOpenAICompatibleRuntimeConfig.__post_init__`이 그 밖의 값을 거부한다.
+     scheme·port·path를 바꾼 값, 자격 증명이 붙은 값은 전부 거부된다.
+   - 이 승인은 **로컬 모델 호출 하나에만** 적용된다. 다른 host bridge의 근거가
+     아니다(조항 4 유지).
+
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.
 

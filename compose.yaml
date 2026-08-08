@@ -64,6 +64,11 @@ services:
       # name (qwen/qwen3.6-35b-a3b) and this override closes that gap
       # without a code change.
       VIDEOBOX_LOCAL_MODEL_NAME: ${VIDEOBOX_LOCAL_MODEL_NAME:-qwen3-35b}
+      # LM Studio runs on the host.  Inside the container 127.0.0.1 is the
+      # container, so the on-screen Yujin chat could not reach a brain at all
+      # and failed as "a transient network error".  Owner approved this one
+      # host path on 2026-08-08 (`docs/development-fast-path.ko.md` §10.14 2-B).
+      VIDEOBOX_LOCAL_RUNTIME_BASE_URL: ${VIDEOBOX_LOCAL_RUNTIME_BASE_URL:-http://host.docker.internal:1234/v1}
       # The root filesystem stays read-only, so model weights need their own
       # writable home.  Keeping it off /tmp avoids re-downloading on restart and
       # keeps weights out of the owner's project data.
