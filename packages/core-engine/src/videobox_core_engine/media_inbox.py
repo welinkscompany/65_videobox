@@ -123,11 +123,18 @@ def run_inbox_cycle(
     scripts (verify_owner_path.py's _StageRecorder does the same)."""
     report = MediaInboxCycleReport()
     config.library_root.mkdir(parents=True, exist_ok=True)
+    # The scan recurses, so an archive folder placed inside the watched folder
+    # would feed itself: every pass would re-file what it filed last time,
+    # multiplying the owner's footage under hash-suffixed names instead of
+    # tidying it.
+    archive_root = config.archive_root.resolve() if config.archive_root is not None else None
     existing_library_hashes = {
         _sha256_file(existing) for existing in config.library_root.iterdir() if existing.is_file()
     }
     for source in scan_inbox_candidates(config.watch_path):
         name = source.name
+        if archive_root is not None and archive_root in source.resolve().parents:
+            continue
         try:
             if not is_settled(source):
                 report.skipped.append(name)

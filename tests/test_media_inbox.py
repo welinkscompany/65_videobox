@@ -383,3 +383,29 @@ def test_without_an_archive_folder_the_old_behaviour_is_unchanged(tmp_path: Path
 
     assert report.moved == ["clip.mp4"]
     assert not (watch_root / "clip.mp4").exists()
+
+
+def test_an_archive_inside_the_watched_folder_is_not_re_scanned(tmp_path: Path) -> None:
+    """The scan recurses, so a nested archive would feed itself forever.
+
+    Each pass would see an already-filed original, call it a duplicate, and
+    file it again under a new hash-suffixed name -- multiplying the owner's
+    footage instead of tidying it.
+    """
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    archive_root = watch_root / "가져옴"
+    library_root = tmp_path / "library"
+    (watch_root / "clip.mp4").write_bytes(b"real footage bytes")
+
+    config = MediaInboxConfig(
+        watch_path=watch_root, library_root=library_root, archive_root=archive_root
+    )
+    first = run_inbox_cycle(config)
+    second = run_inbox_cycle(config)
+    third = run_inbox_cycle(config)
+
+    assert first.moved == ["clip.mp4"]
+    assert second.moved == [] and second.duplicates == []
+    assert third.moved == [] and third.duplicates == []
+    assert [path.name for path in sorted(archive_root.iterdir())] == ["clip.mp4"]

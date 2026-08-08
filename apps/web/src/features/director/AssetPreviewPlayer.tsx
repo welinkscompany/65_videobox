@@ -18,7 +18,10 @@ export function AssetPreviewPlayer({ proposalId: _proposalId, candidates, previe
   const [narrationMuted, setNarrationMuted] = useState(false); const [narrationSolo, setNarrationSolo] = useState(false);
   useEffect(() => { if (narrationContext.current) { narrationContext.current.muted = narrationMuted; narrationContext.current.volume = narrationSolo ? 1 : 0.65; } }, [narrationMuted, narrationSolo]);
   const activeCandidate = candidates.find((candidate) => candidate.candidateId === active);
-  return <section aria-label="추천 미리보기" aria-live="polite"><div><button data-native-control="narration-mute" type="button" aria-pressed={narrationMuted} onClick={() => setNarrationMuted((value) => !value)}>나레이션 미리듣기 음소거</button><button data-native-control="narration-solo" type="button" aria-pressed={narrationSolo} onClick={() => setNarrationSolo((value) => !value)}>나레이션만 듣기</button><span>미리듣기 설정은 편집본의 음량을 바꾸지 않아요.</span></div>
+  return <section aria-label="추천 미리보기" aria-live="polite">
+    {/* Only when there is narration playing alongside. Without it these
+        toggled aria-pressed against an <audio> that never rendered. */}
+    <div>{narrationPreviewUrl ? <><button data-native-control="narration-mute" type="button" aria-pressed={narrationMuted} onClick={() => setNarrationMuted((value) => !value)}>나레이션 미리듣기 음소거</button><button data-native-control="narration-solo" type="button" aria-pressed={narrationSolo} onClick={() => setNarrationSolo((value) => !value)}>나레이션만 듣기</button></> : null}<span>미리듣기 설정은 편집본의 음량을 바꾸지 않아요.</span></div>
     {narrationPreviewUrl ? <audio ref={narrationContext} data-testid="director-narration-context-preview" preload="metadata" src={narrationPreviewUrl} /> : null}
     {candidates.map((candidate) => {
       const audio = candidate.mediaType === "bgm" || candidate.mediaType === "music" || candidate.mediaType === "sfx";

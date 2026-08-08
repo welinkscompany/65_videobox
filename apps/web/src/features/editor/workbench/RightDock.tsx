@@ -174,7 +174,7 @@ export function RightDock({
       {runState.kind === "unavailable" && runState.retryable && onRetryRun
         ? <Button type="button" onClick={() => void onRetryRun()}>같은 요청 다시 보내기</Button>
         : null}
-      {onRetryMessage ? <Button type="button" disabled={retryRemaining > 0} onClick={() => void onRetryMessage()}>{retryRemaining > 0 ? `같은 요청 다시 보내기 (${retryRemaining}초)` : "같은 요청 다시 보내기"}</Button> : null}
+
     </section>
 
     <section aria-label="추천" className="vb-editor-workbench__summary">

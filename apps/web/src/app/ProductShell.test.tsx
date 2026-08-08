@@ -379,3 +379,45 @@ describe("home dashboard", () => {
     expect(screen.queryByText("아직 완성한 영상이 없어요.")).toBeNull();
   });
 });
+
+describe("settings that claim to change the screen", () => {
+  const shell = () => render(
+    <ProductShell
+      projectId="project-a"
+      projects={[{ project_id: "project-a", name: "프로젝트", status: "draft" } as never]}
+      section="home"
+      onNavigate={vi.fn()}
+      onOpenSettings={vi.fn()}
+    >
+      <p>본문</p>
+    </ProductShell>,
+  );
+
+  it("actually makes the shell compact and calms motion when asked", () => {
+    // These wrote to localStorage and flipped their own label; nothing read
+    // them back, so the screen never changed and the toggle was a decoration.
+    window.localStorage.setItem(
+      "videobox.settings",
+      JSON.stringify({ compact: true, reducedMotion: true }),
+    );
+
+    const { container } = shell();
+
+    const root = container.querySelector(".vb-product-shell");
+    expect(root).toHaveAttribute("data-compact", "true");
+    expect(root).toHaveAttribute("data-reduced-motion", "true");
+  });
+
+  it("leaves the shell alone when they are off", () => {
+    window.localStorage.setItem(
+      "videobox.settings",
+      JSON.stringify({ compact: false, reducedMotion: false }),
+    );
+
+    const { container } = shell();
+
+    const root = container.querySelector(".vb-product-shell");
+    expect(root).toHaveAttribute("data-compact", "false");
+    expect(root).toHaveAttribute("data-reduced-motion", "false");
+  });
+});

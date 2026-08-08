@@ -73,4 +73,26 @@ describe("AssetPreviewPlayer", () => {
     expect(screen.getByText("유진 추천 12의 비롤 3번 미리보기 중")).toBeVisible();
     expect(screen.queryByText(/candidate_003|P12-B-03/)).not.toBeInTheDocument();
   });
+
+  it("hides the narration volume controls when there is no narration to hear", () => {
+    // The only real caller never passes a narration preview, so these two
+    // buttons toggled aria-pressed against an <audio> that was never rendered.
+    render(<AssetPreviewPlayer proposalId="p-1" candidates={[]} previewUrl={() => ""} />);
+
+    expect(screen.queryByRole("button", { name: "나레이션 미리듣기 음소거" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "나레이션만 듣기" })).toBeNull();
+  });
+
+  it("still offers them when narration is actually playing alongside", () => {
+    render(
+      <AssetPreviewPlayer
+        proposalId="p-1"
+        candidates={[]}
+        previewUrl={() => ""}
+        narrationPreviewUrl="/assets/narration/content"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "나레이션 미리듣기 음소거" })).toBeVisible();
+  });
 });

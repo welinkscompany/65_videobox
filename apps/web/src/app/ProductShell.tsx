@@ -69,8 +69,16 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
     setJobDialogOpen(open);
   };
   useEffect(() => { const restoreMobileTrigger = (event: KeyboardEvent) => { if (event.key === "Escape" && window.innerWidth < 768) queueMicrotask(() => mobileTriggerRef.current?.focus()); }; document.addEventListener("keydown", restoreMobileTrigger); return () => document.removeEventListener("keydown", restoreMobileTrigger); }, []);
+  // These two settings used to write to localStorage and change nothing else,
+  // so the toggle flipped its own label while the screen stayed identical.
+  // The shell now carries them and the stylesheet reads them.
+  const display = readSettings();
   return <SidebarProvider open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
-    <div className="vb-product-shell">
+    <div
+      className="vb-product-shell"
+      data-compact={String(display.compact)}
+      data-reduced-motion={String(display.reducedMotion)}
+    >
     <Sidebar collapsible="icon" className="vb-product-sidebar" aria-label="프로젝트와 화면">
       <SidebarHeader>
       <div className="vb-shell-brand"><Video aria-hidden="true" /><span>VideoBox</span></div>
