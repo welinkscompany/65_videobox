@@ -73,6 +73,16 @@ services:
       # compose, so the container fell back to the unavailable worker and every
       # analysis came back blocked.  Uses the same LM Studio as the line above.
       VIDEOBOX_MEDIA_ANALYSIS_ENABLED: ${VIDEOBOX_MEDIA_ANALYSIS_ENABLED:-1}
+      # Drop-folder import. The watcher was written for "whatever a Drive
+      # desktop client syncs to disk" (settings.py), and Google Drive's
+      # streaming drive (G:) cannot be bind-mounted -- Docker mounts it and
+      # sees an empty directory. So the watched folder is a real host folder
+      # the owner can point Drive's mirror at, or drop files into by hand.
+      VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED: ${VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED:-1}
+      # A subfolder, so the archive folder VideoBox files originals into lands
+      # beside it inside the same mount: .../새 영상 -> .../가져옴.
+      VIDEOBOX_MEDIA_INBOX_WATCH_PATH: /videobox-drive-sync/새 영상
+      VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS: ${VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS:-30}
       # The root filesystem stays read-only, so model weights need their own
       # writable home.  Keeping it off /tmp avoids re-downloading on restart and
       # keeps weights out of the owner's project data.
@@ -92,6 +102,10 @@ services:
     volumes:
       - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data
       - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro
+      # The watcher moves settled files out of here into the library, so it
+      # needs write access -- read-only would leave every file re-imported
+      # on every pass.
+      - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync:/videobox-drive-sync
       - videobox_model_cache:/opt/models
     depends_on:
       videobox-postgres:

@@ -598,7 +598,14 @@ def create_app(
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()
     app.state.media_inbox_watch_enabled = resolve_media_inbox_watch_enabled()
     app.state.media_inbox_watch_config = (
-        MediaInboxConfig(watch_path=media_inbox_watch_path, library_root=resolved_media_inbox_library_root)
+        MediaInboxConfig(
+            watch_path=media_inbox_watch_path,
+            library_root=resolved_media_inbox_library_root,
+            # A sibling of the watched folder, so when that folder is a
+            # mirrored Drive folder the owner sees imported footage move from
+            # one Drive subfolder to another instead of vanishing.
+            archive_root=media_inbox_watch_path.parent / "가져옴",
+        )
         if media_inbox_watch_path is not None
         else None
     )

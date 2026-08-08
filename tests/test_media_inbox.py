@@ -320,3 +320,66 @@ def test_import_media_inbox_asset_rejects_a_path_traversal_filename(tmp_path: Pa
             import_media_inbox_asset_to_project(
                 pipeline, project_id=project.project_id, library_root=library_root, filename=traversal_filename,
             )
+
+
+def test_imported_originals_are_filed_not_deleted(tmp_path: Path) -> None:
+    """The owner needs to see in Drive which footage VideoBox already took.
+
+    Deleting the source told them nothing and, once the watched folder is a
+    mirrored Drive folder, deleted the cloud original too. With an archive
+    folder configured the original is filed there instead, so the watched
+    folder holds exactly what is still waiting.
+    """
+    watch_root = tmp_path / "drive" / "새 영상"
+    watch_root.mkdir(parents=True)
+    archive_root = tmp_path / "drive" / "가져옴"
+    library_root = tmp_path / "library"
+    source = watch_root / "clip.mp4"
+    source.write_bytes(b"real footage bytes")
+
+    config = MediaInboxConfig(
+        watch_path=watch_root, library_root=library_root, archive_root=archive_root
+    )
+    report = run_inbox_cycle(config)
+
+    assert report.moved == ["clip.mp4"]
+    assert (library_root / "clip.mp4").read_bytes() == b"real footage bytes"
+    assert not source.exists(), "watched folder must hold only what is still waiting"
+    assert (archive_root / "clip.mp4").read_bytes() == b"real footage bytes"
+
+
+def test_a_duplicate_is_filed_too_rather_than_deleted(tmp_path: Path) -> None:
+    """A duplicate is still the owner's footage; filing it says "already have
+    this" without destroying anything."""
+    watch_root = tmp_path / "drive" / "새 영상"
+    watch_root.mkdir(parents=True)
+    archive_root = tmp_path / "drive" / "가져옴"
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    (library_root / "already-here.mp4").write_bytes(b"same bytes")
+    duplicate = watch_root / "duplicate.mp4"
+    duplicate.write_bytes(b"same bytes")
+
+    config = MediaInboxConfig(
+        watch_path=watch_root, library_root=library_root, archive_root=archive_root
+    )
+    report = run_inbox_cycle(config)
+
+    assert report.duplicates == ["duplicate.mp4"]
+    assert not duplicate.exists()
+    assert (archive_root / "duplicate.mp4").read_bytes() == b"same bytes"
+
+
+def test_without_an_archive_folder_the_old_behaviour_is_unchanged(tmp_path: Path) -> None:
+    """Callers that never configured an archive keep moving into the library."""
+    watch_root = tmp_path / "drive"
+    watch_root.mkdir()
+    library_root = tmp_path / "library"
+    (watch_root / "clip.mp4").write_bytes(b"real footage bytes")
+
+    report = run_inbox_cycle(
+        MediaInboxConfig(watch_path=watch_root, library_root=library_root)
+    )
+
+    assert report.moved == ["clip.mp4"]
+    assert not (watch_root / "clip.mp4").exists()

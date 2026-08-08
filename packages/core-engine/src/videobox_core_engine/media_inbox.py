@@ -86,6 +86,12 @@ def is_file_settled(
 class MediaInboxConfig:
     watch_path: Path
     library_root: Path
+    # Where an original goes once VideoBox has taken a copy. Without it the
+    # source is deleted, which tells the owner nothing about what was already
+    # imported -- and if the watched folder is a mirrored Drive folder, that
+    # delete removes their cloud original too. With it, the watched folder
+    # holds exactly what is still waiting.
+    archive_root: Path | None = None
 
 
 @dataclass(slots=True)
@@ -94,6 +100,15 @@ class MediaInboxCycleReport:
     duplicates: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failed: list[str] = field(default_factory=list)
+
+
+def _archive_original(source: Path, archive_root: Path, source_hash: str) -> None:
+    """File an original the owner already gave us, never overwriting."""
+    archive_root.mkdir(parents=True, exist_ok=True)
+    filed = archive_root / source.name
+    if filed.exists():
+        filed = archive_root / f"{filed.stem}-{source_hash[:8]}{filed.suffix}"
+    shutil.move(str(source), str(filed))
 
 
 def run_inbox_cycle(
@@ -119,10 +134,15 @@ def run_inbox_cycle(
                 continue
             source_hash = _sha256_file(source)
             if source_hash in existing_library_hashes:
-                # Redundant footage already in the library. Removing the
-                # source is still safe: Drive's own trash (not VideoBox) is
-                # the recovery window per the owner decision.
-                source.unlink()
+                # Redundant footage already in the library. File it if there is
+                # somewhere to file it -- it is still the owner's footage, and
+                # "already have this" is worth seeing. Without an archive the
+                # source is removed as before: Drive's own trash (not VideoBox)
+                # is the recovery window per the owner decision.
+                if config.archive_root is None:
+                    source.unlink()
+                else:
+                    _archive_original(source, config.archive_root, source_hash)
                 report.duplicates.append(name)
                 continue
             destination = config.library_root / name
@@ -133,7 +153,13 @@ def run_inbox_cycle(
                 # overwrite it. Disambiguate with the source's own hash
                 # instead of ever clobbering an existing library file.
                 destination = config.library_root / f"{destination.stem}-{source_hash[:8]}{destination.suffix}"
-            shutil.move(str(source), str(destination))
+            if config.archive_root is None:
+                shutil.move(str(source), str(destination))
+            else:
+                # Copy first, then file the original. The library copy is
+                # hash-checked below, so a half-written copy never costs the
+                # owner the original.
+                shutil.copy2(str(source), str(destination))
             moved_hash = _sha256_file(destination)
             if moved_hash != source_hash:
                 # The move produced corrupt bytes at the destination. Do not
@@ -144,6 +170,9 @@ def run_inbox_cycle(
                 destination.unlink(missing_ok=True)
                 report.failed.append(name)
                 continue
+            if config.archive_root is not None:
+                # Only now that the library copy is verified byte-for-byte.
+                _archive_original(source, config.archive_root, source_hash)
             existing_library_hashes.add(moved_hash)
             report.moved.append(name)
         except OSError:
