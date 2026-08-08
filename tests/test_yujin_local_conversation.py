@@ -7,6 +7,7 @@ from videobox_core_engine.yujin_local_conversation import (
     YUJIN_CONVERSATION_RESPONSE_SCHEMA,
     detect_blocked_intent,
 )
+from videobox_domain_models.yujin_creator_context import UserApprovedPreference
 from videobox_provider_interfaces.llm import LLMTaskType, StructuredLLMResponse
 
 
@@ -113,3 +114,41 @@ def test_empty_model_reply_raises_instead_of_returning_a_blank_message():
 
     with pytest.raises(ValueError):
         service.reply(project_id="proj-1", user_text="안녕 유진")
+
+
+def test_reply_carries_owner_approved_memories_into_the_prompt() -> None:
+    """The screen's chat runs on this path, so memory must reach it here.
+
+    Retrieval used to be wired only into the Hermes run route, which no screen
+    calls.  An owner who approved a memory saw it ignored in every real
+    conversation.
+    """
+    runtime = _RecordingRuntime()
+    service = YujinLocalConversationService(runtime=runtime)
+
+    result = service.reply(
+        project_id="project-a",
+        user_text="내 자막 취향이 어떻게 되지?",
+        memories=(
+            UserApprovedPreference(
+                kind="user_approved_preference",
+                category="caption",
+                text="자막은 두 줄 이내를 선호합니다.",
+            ),
+        ),
+    )
+
+    assert result.status == "ok"
+    prompt = runtime.calls[0]["prompt"]
+    assert "자막은 두 줄 이내를 선호합니다." in prompt
+    assert "내 자막 취향이 어떻게 되지?" in prompt
+
+
+def test_reply_without_memories_keeps_the_prompt_unchanged() -> None:
+    """No approved memory must not add an empty, confusing memory section."""
+    with_none = _RecordingRuntime()
+    YujinLocalConversationService(runtime=with_none).reply(
+        project_id="project-a", user_text="안녕하세요"
+    )
+
+    assert "기억" not in with_none.calls[0]["prompt"]

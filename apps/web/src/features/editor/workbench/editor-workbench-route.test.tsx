@@ -411,6 +411,78 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
   });
 
+  it("accepts a local-first exchange as a memory source", async () => {
+    // The editor screen chats through the local route, which produces no
+    // hermes_run_id.  Requiring one left the owner unable to save a memory
+    // from any conversation they actually had on screen.
+    const localMessages = [
+      {
+        message_id: "local-user-1",
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+        role: "user",
+        text: "자막은 어떻게 두는 게 좋을까?",
+        proposal_id: null,
+        metadata: {},
+        client_message_id: "client-local-1",
+        created_at: "2026-08-08T12:00:00Z",
+      },
+      {
+        message_id: "local-assistant-1",
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+        role: "assistant",
+        text: "두 줄 이내를 권합니다.",
+        proposal_id: null,
+        metadata: {},
+        client_message_id: null,
+        created_at: "2026-08-08T12:00:01Z",
+      },
+    ];
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: {
+        conversation_id: "conversation-1",
+        project_id: "project-a",
+        session_id: "session-a",
+      },
+      messages: localMessages,
+      proposal: null,
+      references: [],
+    } as never);
+    const create = vi.spyOn(api, "createYujinMemoryCandidate")
+      .mockResolvedValue(memoryCandidate({
+        source_message_ids: ["local-user-1", "local-assistant-1"],
+        category: "caption",
+        proposed_text: "자막은 두 줄 이내를 선호합니다.",
+      }) as never);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "00000000-0000-4000-8000-000000000099",
+    );
+
+    render(
+      <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />,
+    );
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    const panel = await screen.findByRole("region", { name: "유진 기억" });
+    fireEvent.change(within(panel).getByLabelText("기억 종류"), {
+      target: { value: "caption" },
+    });
+    fireEvent.change(within(panel).getByLabelText("기억 후보"), {
+      target: { value: "자막은 두 줄 이내를 선호합니다." },
+    });
+    fireEvent.click(within(panel).getByRole(
+      "button", { name: "기억 후보 만들기" },
+    ));
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(create.mock.calls[0][1].source_message_ids).toEqual([
+      "local-user-1", "local-assistant-1",
+    ]);
+  });
+
   it("creates one typed candidate only on explicit click from completed durable current messages", async () => {
     const durableMessages = Array.from({ length: 10 }, (_, index) => ({
       message_id: `message-${index + 1}`,

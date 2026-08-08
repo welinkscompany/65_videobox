@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
+import asyncio
 import os
 import json
 from threading import Event, Thread
@@ -24,6 +25,31 @@ from videobox_api.models import (
     DirectorConversationCreateRequest, DirectorConversationResponse,
     DirectorMessageExchangeResponse, DirectorMessageListResponse, DirectorMessageSubmitRequest,
 )
+
+
+def _approved_memories(
+    request: Request, *, project_id: str, conversation_id: str, query: str
+) -> tuple:
+    """Look up the memories the owner approved for this conversation.
+
+    The local-first chat is the route the editor screen actually calls, so
+    without this an approved memory never reaches a real conversation.  The
+    service already bounds itself (0.75s, 5 items) and answers empty on any
+    failure, so a missing or slow memory store never blocks a reply.
+    """
+    service = getattr(request.app.state, "yujin_memory_service", None)
+    if service is None:
+        return ()
+    try:
+        return asyncio.run(
+            service.retrieve_approved_memories(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                query=query,
+            )
+        )
+    except Exception:
+        return ()
 
 
 class ProposalCreateRequest(BaseModel):
@@ -186,7 +212,16 @@ def build_director_proposals_router(
                 heartbeat_thread = Thread(target=heartbeat, daemon=True)
                 heartbeat_thread.start()
                 try:
-                    result = conversation_service.reply(project_id=project_id, user_text=body.text)
+                    result = conversation_service.reply(
+                        project_id=project_id,
+                        user_text=body.text,
+                        memories=_approved_memories(
+                            request,
+                            project_id=project_id,
+                            conversation_id=conversation_id,
+                            query=body.text,
+                        ),
+                    )
                     assistant_text = result.reply
                     if result.status == "blocked":
                         resolution_metadata.update({

@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
+from videobox_domain_models.yujin_creator_context import UserApprovedPreference
 from videobox_provider_interfaces.llm import LLMTaskType, StructuredLLMResponse
 
 YUJIN_CONVERSATION_RESPONSE_SCHEMA = {
@@ -92,11 +93,44 @@ class _StructuredGenerator(Protocol):
     ) -> StructuredLLMResponse: ...
 
 
+_MEMORY_CATEGORY_LABELS = {
+    "pacing": "편집 템포",
+    "caption": "자막",
+    "audio": "음악과 소리",
+    "tone": "영상 분위기",
+    "workflow": "작업 방식",
+}
+
+
+def _memory_section(memories: tuple[UserApprovedPreference, ...]) -> str:
+    """Render the memories the owner explicitly approved, or nothing at all.
+
+    An empty section would still cost prompt room and invite the model to
+    invent preferences, so no memory means no heading.
+    """
+    if not memories:
+        return ""
+    lines = "\n".join(
+        f"- [{_MEMORY_CATEGORY_LABELS.get(item.category, item.category)}] {item.text}"
+        for item in memories
+    )
+    return (
+        "\n\n창작자가 직접 승인해 저장해 둔 편집 취향이다. 관련이 있을 때만 참고하고, "
+        "여기 없는 취향은 지어내지 않는다.\n" + lines
+    )
+
+
 @dataclass(slots=True)
 class YujinLocalConversationService:
     runtime: _StructuredGenerator
 
-    def reply(self, *, project_id: str, user_text: str) -> YujinLocalConversationResult:
+    def reply(
+        self,
+        *,
+        project_id: str,
+        user_text: str,
+        memories: tuple[UserApprovedPreference, ...] = (),
+    ) -> YujinLocalConversationResult:
         if not user_text.strip():
             raise ValueError("user_text must not be blank")
 
@@ -114,7 +148,11 @@ class YujinLocalConversationService:
         response = self.runtime.generate_structured(
             project_id=project_id,
             task_type=LLMTaskType.YUJIN_CONVERSATION,
-            prompt=f"{_YUJIN_SYSTEM_PROMPT}\n\n창작자: {user_text}",
+            prompt=(
+                f"{_YUJIN_SYSTEM_PROMPT}"
+                f"{_memory_section(memories)}"
+                f"\n\n창작자: {user_text}"
+            ),
             response_schema=YUJIN_CONVERSATION_RESPONSE_SCHEMA,
         )
         reply_text = str(response.output_data.get("reply") or "").strip()

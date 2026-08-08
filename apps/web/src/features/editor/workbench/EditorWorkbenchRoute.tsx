@@ -1816,11 +1816,19 @@ function completedDurableMemoryMessageIds(
       pendingUserIds = [message.message_id];
       return;
     }
-    if (
-      message.role === "assistant"
-      && message.metadata.hermes_status === "completed"
-      && typeof message.metadata.hermes_run_id === "string"
-    ) {
+    // A Hermes run says "completed" explicitly.  The local-first route -- the
+    // one this screen actually chats through -- has no run object at all, so
+    // its completed turn is simply a reply that was not blocked.  Requiring a
+    // run id here left the owner unable to save a memory from any conversation
+    // they really had. Mirrors the server rule in
+    // `local_project_store._completed_yujin_memory_source_rows`.
+    const fromCompletedRun = message.metadata.hermes_status === "completed"
+      && typeof message.metadata.hermes_run_id === "string";
+    const fromLocalExchange = message.metadata.hermes_status === undefined
+      && message.metadata.hermes_run_id === undefined
+      && message.metadata.status !== "blocked"
+      && pendingUserIds.length > 0;
+    if (message.role === "assistant" && (fromCompletedRun || fromLocalExchange)) {
       completed.push(...pendingUserIds, message.message_id);
     }
     if (message.role === "assistant") pendingUserIds = [];

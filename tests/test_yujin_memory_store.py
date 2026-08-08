@@ -873,3 +873,62 @@ def test_deleted_storage_state_rejects_new_claim_without_audit(
         project_id=project_id,
         candidate_id=candidate_id,
     )["storage_status"] == "deleted"
+
+
+def test_local_first_exchange_is_a_valid_memory_source(tmp_path: Path) -> None:
+    """The editor screen chats through the local route, which has no run object.
+
+    Requiring a completed Hermes run meant the owner could never save a memory
+    from a conversation they actually had on screen.
+    """
+    store = LocalProjectStore(tmp_path)
+    project_id, session, conversation_id, _user, _assistant = _seed(store)
+
+    exchange = store.append_director_exchange(
+        project_id=project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id="local-turn-1",
+        user_text="자막은 어떻게 두는 게 좋을까?",
+        assistant_text="두 줄 이내를 권합니다.",
+    )
+
+    for source in (exchange["user_message"], exchange["assistant_message"]):
+        created = store.create_yujin_memory_candidate(
+            project_id=project_id,
+            conversation_id=conversation_id,
+            client_request_id=f"local-source-{source['message_id']}",
+            source_message_ids=(source["message_id"],),
+            memory_scope="creator",
+            category="caption",
+            proposed_text="자막은 두 줄 이내를 선호합니다.",
+        )
+        assert created["source_message_ids"] == (source["message_id"],)
+
+
+def test_a_blocked_local_exchange_is_not_a_memory_source(tmp_path: Path) -> None:
+    """A reply that failed is not a turn the owner had; it must not seed memory."""
+    store = LocalProjectStore(tmp_path)
+    project_id, session, conversation_id, _user, _assistant = _seed(store)
+
+    exchange = store.append_director_exchange(
+        project_id=project_id,
+        session_id=session["session_id"],
+        conversation_id=conversation_id,
+        client_message_id="local-blocked-1",
+        user_text="자막은 어떻게 두는 게 좋을까?",
+        assistant_text="local_only_blocked: local model unavailable",
+        assistant_metadata={"status": "blocked", "error_code": "LOCAL_UNAVAILABLE"},
+    )
+
+    for source in (exchange["user_message"], exchange["assistant_message"]):
+        with pytest.raises(KeyError, match="yujin_memory_source_missing"):
+            store.create_yujin_memory_candidate(
+                project_id=project_id,
+                conversation_id=conversation_id,
+                client_request_id=f"blocked-source-{source['message_id']}",
+                source_message_ids=(source["message_id"],),
+                memory_scope="creator",
+                category="caption",
+                proposed_text="자막은 두 줄 이내를 선호합니다.",
+            )

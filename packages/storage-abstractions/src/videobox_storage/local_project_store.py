@@ -97,6 +97,23 @@ def _normalize_boolish(value: object) -> bool:
     return bool(value)
 
 
+def _director_exchange_was_blocked(metadata_json: object) -> bool:
+    """Did this local turn fail?  Unreadable metadata counts as blocked.
+
+    A reply the owner never actually received must not become the source of a
+    saved memory, so anything we cannot confirm as good is treated as bad.
+    """
+    if metadata_json is None:
+        return True
+    if isinstance(metadata_json, dict):
+        return str(metadata_json.get("status") or "") == "blocked"
+    try:
+        parsed = json.loads(metadata_json)
+    except (TypeError, ValueError):
+        return True
+    return isinstance(parsed, dict) and str(parsed.get("status") or "") == "blocked"
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -4181,7 +4198,7 @@ class LocalProjectStore:
             connection.close()
 
     @staticmethod
-    def _completed_yujin_memory_source_rows(
+    def _completed_yujin_memory_source_rows(  # noqa: C901 - one guarded query
         connection: Any,
         *,
         project_id: str,
@@ -4191,28 +4208,105 @@ class LocalProjectStore:
         placeholders = ",".join("?" for _ in source_message_ids)
         rows = connection.execute(
             """
-            SELECT message.message_id, message.text, message.message_order
+            SELECT message.message_id, message.text, message.message_order,
+                   (
+                     SELECT run.status
+                     FROM director_hermes_runs AS run
+                     WHERE run.project_id = message.project_id
+                       AND run.conversation_id = message.conversation_id
+                       AND (
+                         run.user_message_id = message.message_id
+                         OR run.assistant_message_id = message.message_id
+                       )
+                     LIMIT 1
+                   ) AS owning_run_status,
+                   (
+                     SELECT reply.metadata_json
+                     FROM director_messages AS reply
+                     WHERE reply.project_id = message.project_id
+                       AND reply.conversation_id = message.conversation_id
+                       AND reply.role = 'assistant'
+                       AND reply.message_order = (
+                         CASE WHEN message.role = 'user'
+                              THEN message.message_order + 1
+                              ELSE message.message_order END
+                       )
+                     LIMIT 1
+                   ) AS exchange_metadata_json
             FROM director_messages AS message
             WHERE message.project_id = ?
               AND message.conversation_id = ?
               AND message.message_id IN ("""
             + placeholders
             + """)
-              AND EXISTS (
-                SELECT 1
-                FROM director_hermes_runs AS run
-                WHERE run.project_id = message.project_id
-                  AND run.conversation_id = message.conversation_id
-                  AND run.status = 'completed'
-                  AND (
-                    run.user_message_id = message.message_id
-                    OR run.assistant_message_id = message.message_id
-                  )
+              AND (
+                EXISTS (
+                  SELECT 1
+                  FROM director_hermes_runs AS run
+                  WHERE run.project_id = message.project_id
+                    AND run.conversation_id = message.conversation_id
+                    AND run.status = 'completed'
+                    AND (
+                      run.user_message_id = message.message_id
+                      OR run.assistant_message_id = message.message_id
+                    )
+                )
+                -- The local-first route (the one the editor screen calls) has
+                -- no run object at all, so a run-only rule locked the owner
+                -- out of saving a memory from a conversation they actually
+                -- had.  A completed local turn is the request/response pair
+                -- written by append_director_exchange: the user row carries a
+                -- client_message_id and its assistant row is not blocked.
+                -- A bare append_director_message stays excluded -- it has no
+                -- client_message_id and belongs to no turn.
+                OR EXISTS (
+                  SELECT 1
+                  FROM director_messages AS pair
+                  WHERE pair.conversation_id = message.conversation_id
+                    AND pair.project_id = message.project_id
+                    -- A message any run owns is judged by that run's status
+                    -- above, never by this branch.  Otherwise a pending,
+                    -- blocked or interrupted run would qualify here purely
+                    -- because its two rows sit next to each other.
+                    AND NOT EXISTS (
+                      SELECT 1
+                      FROM director_hermes_runs AS owning
+                      WHERE owning.conversation_id = message.conversation_id
+                        AND owning.project_id = message.project_id
+                        AND (
+                          owning.user_message_id IN (message.message_id, pair.message_id)
+                          OR owning.assistant_message_id IN (message.message_id, pair.message_id)
+                        )
+                    )
+                    AND (
+                      (
+                        message.role = 'user'
+                        AND message.client_message_id IS NOT NULL
+                        AND pair.role = 'assistant'
+                        AND pair.message_order = message.message_order + 1
+                      )
+                      OR (
+                        message.role = 'assistant'
+                        AND pair.role = 'user'
+                        AND pair.client_message_id IS NOT NULL
+                        AND pair.message_order = message.message_order - 1
+                      )
+                    )
+                )
               )
             ORDER BY message.message_order, message.message_id
             """,
             (project_id, conversation_id, *source_message_ids),
         ).fetchall()
+        # The "was this turn blocked?" test reads JSON, and the two backends
+        # spell that differently (SQLite json_extract vs PostgreSQL ->>).  The
+        # SQL stays dialect-free and Python decides.
+        rows = [
+            row
+            for row in rows
+            if row["owning_run_status"] == "completed"
+            or not _director_exchange_was_blocked(row["exchange_metadata_json"])
+        ]
         if len(rows) != len(source_message_ids):
             raise KeyError("yujin_memory_source_missing")
         return rows

@@ -15,6 +15,7 @@ from videobox_storage.local_project_store import LocalProjectStore
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.yujin_creator_context import UserApprovedPreference
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_provider_interfaces.llm import StructuredLLMResponse
@@ -2398,3 +2399,64 @@ def test_failed_apply_preserves_independent_materialized_asset_and_rolls_back_se
     assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
     assert store.get_director_proposal(project_id, proposal["proposal_id"]).status == "ready"
     assert asset_path.is_file() and sha256(asset_path.read_bytes()).hexdigest() == candidate["expected_content_sha256"]
+
+
+def test_screen_chat_route_carries_owner_approved_memory_into_the_prompt(tmp_path: Path) -> None:
+    """The editor screen posts here, not to the Hermes run route.
+
+    Memory retrieval used to be wired only into `hermes-runs`, which no screen
+    calls, so an owner who approved a memory never saw Yujin use it.
+    """
+    class CapturingRuntime:
+        routing_mode = "local_only"
+        prompts: list[str] = []
+
+        def generate_structured(self, *, project_id, task_type, prompt, response_schema, now=None):
+            del project_id, task_type, response_schema, now
+            type(self).prompts.append(prompt)
+            return StructuredLLMResponse(
+                provider_name="strict-local",
+                model_name="fixture",
+                output_data={"reply": "확인했어요."},
+                raw_text='{"reply":"확인했어요."}',
+                metadata={"provider_trace": {"routing_mode": "local_only"}},
+            )
+
+    class StubMemoryService:
+        async def retrieve_approved_memories(self, *, project_id, conversation_id, query):
+            del project_id, conversation_id, query
+            return (
+                UserApprovedPreference(
+                    kind="user_approved_preference",
+                    category="caption",
+                    text="자막은 두 줄 이내를 선호합니다.",
+                ),
+            )
+
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=lambda _: CapturingRuntime(),
+    )
+    app.state.yujin_memory_service = StubMemoryService()
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "memory on screen"}).json()["project_id"]
+    session = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id="timeline", session_payload={"segments": [], "history": []}
+    )
+    conversation = client.post(
+        f"/api/projects/{project_id}/director/conversations",
+        json={"session_id": session["session_id"]},
+    ).json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages",
+        json={
+            "session_id": session["session_id"],
+            "client_message_id": "message-1",
+            "text": "내 자막 취향이 어떻게 되지?",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert CapturingRuntime.prompts, "the local runtime was never called"
+    assert "자막은 두 줄 이내를 선호합니다." in CapturingRuntime.prompts[0]
