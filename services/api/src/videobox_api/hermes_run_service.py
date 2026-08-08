@@ -36,6 +36,19 @@ _BLOCKED_TEXT = "Hermes is temporarily unavailable. Manual Director remains avai
 _GATEWAY_RELEASE_TIMEOUT_SECONDS = 1.0
 _MIN_LIVE_DRAFT_CHARS = 16
 _LOGGER = logging.getLogger(__name__)
+# uvicorn 이 설정한 로거만 컨테이너 로그에 나온다. 모듈 로거는 묻힌다.
+_BLOCK_LOGGER = logging.getLogger("uvicorn.error")
+
+
+def _log_block(reason: str) -> None:
+    """차단 사유를 남긴다.
+
+    화면 문구는 어느 경우든 똑같아서, 사유를 남기지 않으면 서로 다른 원인이
+    전부 같은 증상으로 보인다. 2026-08-08 에 이것 때문에 오래 헤맸다.
+    사유는 코드 문자열만 쓴다 -- 대화 내용이 로그로 새면 안 된다.
+    """
+
+    _BLOCK_LOGGER.warning("hermes run blocked: %s", reason)
 
 
 class HermesCapacityUnavailable(RuntimeError):
@@ -885,16 +898,19 @@ class HermesRunService:
                             else:
                                 run.assembled += upstream.text
                         if overflow:
+                            _log_block("assembled_text_over_limit")
                             await self._terminal(
                                 run, "blocked", _BLOCKED_TEXT, retryable=True
                             )
                             return
                         if not await self._persist_visible_draft(run):
+                            _log_block("visible_draft_not_monotonic")
                             await self._terminal(
                                 run, "blocked", _BLOCKED_TEXT, retryable=True
                             )
                             return
                     elif upstream.event_type == "blocked":
+                        _log_block("gateway_sent_blocked")
                         await self._terminal(
                             run, "blocked", _BLOCKED_TEXT, retryable=True
                         )
@@ -906,6 +922,7 @@ class HermesRunService:
                             > self.max_text_bytes
                             or not completed_text.strip()
                         ):
+                            _log_block("completed_text_rejected")
                             await self._terminal(
                                 run, "blocked", _BLOCKED_TEXT, retryable=True
                             )
@@ -921,15 +938,19 @@ class HermesRunService:
                             )
                         return
                     else:
+                        _log_block("unknown_upstream_event")
                         await self._terminal(
                             run, "blocked", _BLOCKED_TEXT, retryable=True
                         )
                         return
+            _log_block("stream_ended_without_completion")
             await self._terminal(run, "blocked", _BLOCKED_TEXT, retryable=True)
         except asyncio.CancelledError:
+            _log_block("cancelled")
             await self._terminal(run, "blocked", _BLOCKED_TEXT, retryable=True)
             raise
-        except Exception:
+        except Exception as error:
+            _log_block("unexpected:" + type(error).__name__)
             await self._terminal(run, "blocked", _BLOCKED_TEXT, retryable=True)
 
     async def _persist_visible_draft(self, run: _Run) -> bool:

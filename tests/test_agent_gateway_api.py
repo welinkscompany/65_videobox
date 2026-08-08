@@ -1176,3 +1176,41 @@ def test_public_event_cap_fits_a_token_streaming_local_model() -> None:
 
     assert _MAX_PUBLIC_EVENTS >= 8_192
     assert _MAX_PUBLIC_TEXT_BYTES == 200_000
+
+
+def test_completion_that_only_collapsed_blank_lines_is_published() -> None:
+    """Hermes 는 최종 텍스트에서 빈 줄 묶음을 하나로 합쳐 돌려준다.
+
+    2026-08-08 실기: 델타 합계 2443자 / 최종 2441자, 차이는 `\n\n\n` 대 `\n`
+    뿐이었는데 엄격한 startswith 가 깨져 gateway_output_unsafe 로 막혔다.
+    보이는 글자는 하나도 바뀌지 않았으므로 게시해야 한다.
+    """
+    body = "가나다라마바사아자차카타파하" * 30
+    chunks = (body, "\n\n\n", body, "\n\n", "마지막 문장입니다.")
+    collapsed = "\n".join((body, body, "마지막 문장입니다."))
+
+    events = _stream_events_for_chunks(chunks, collapsed)
+
+    assert events[-1]["event_type"] == "run_completed"
+    # 아래층(작업 서비스)은 최종 텍스트가 받은 델타의 합과 **정확히 같기**를
+    # 요구한다. 그래서 게이트웨이는 Hermes 가 합쳐 준 텍스트가 아니라
+    # 자기가 실제로 흘려보낸 것을 최종으로 내보내야 한다.
+    assert events[-1]["text"] == _published_text(events)
+
+
+def test_completion_that_rewrites_published_words_is_still_blocked() -> None:
+    """공백만 봐주는 것이지, 이미 내보낸 글자가 바뀌면 막아야 한다.
+
+    끝부분은 아직 검역 중이라 바뀔 수 있으므로, 확실히 내보낸 앞부분을 바꾼다.
+    """
+    body = "가나다라마바사아자차카타파하" * 30
+    chunks = (body, "\n\n\n", body, "\n\n", "마지막 문장입니다.")
+    rewritten = "\n".join(("바뀐글자" + body[4:], body, "마지막 문장입니다."))
+
+    events = _stream_events_for_chunks(chunks, rewritten)
+
+    assert events[-1] == {
+        "event_type": "blocked",
+        "text": "",
+        "retryable": True,
+    }

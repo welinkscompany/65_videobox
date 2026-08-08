@@ -123,6 +123,32 @@ _LOGGABLE_BLOCK_REASONS = frozenset(
 _logger = logging.getLogger("uvicorn.error")
 
 
+def _completion_suffix(final_text: str, emitted: str) -> str | None:
+    """이미 내보낸 부분을 뺀 나머지. 되돌릴 수 없으면 None.
+
+    Hermes 는 최종 텍스트에서 빈 줄 묶음을 합쳐 돌려주므로 글자가 하나도
+    바뀌지 않아도 문자열 그대로의 startswith 는 깨진다. 그래서 공백 차이만
+    눈감아 준다. **공백이 아닌 글자는 이미 내보낸 순서 그대로여야 하므로,
+    없던 내용을 최종에 끼워 넣는 것은 여전히 막힌다.**
+    """
+
+    read = 0
+    for character in emitted:
+        if character.isspace():
+            continue
+        while read < len(final_text) and final_text[read].isspace():
+            read += 1
+        if read >= len(final_text) or final_text[read] != character:
+            return None
+        read += 1
+    if emitted[-1:].isspace():
+        # 이미 내보낸 끝의 공백까지 소비한다. 남겨 두면 그 공백이 나머지 앞에
+        # 다시 붙어 화면에 두 번 나온다.
+        while read < len(final_text) and final_text[read].isspace():
+            read += 1
+    return final_text[read:]
+
+
 def safe_block_reason(error: BaseException) -> str:
     """차단 사유를 로그에 남겨도 되는 형태로 줄인다."""
 
@@ -387,13 +413,13 @@ async def _stream_public_lines(
                 continue
 
             final_text = event.text
+            final_suffix = _completion_suffix(final_text, emitted)
             if (
                 not final_text.strip()
                 or _UNSAFE_OUTPUT.search(final_text)
-                or not final_text.startswith(emitted)
+                or final_suffix is None
             ):
                 raise ValueError("gateway_output_unsafe")
-            final_suffix = final_text[len(emitted):]
             if final_suffix:
                 if run_observation is not None:
                     run_observation.public_delta()
@@ -403,9 +429,13 @@ async def _stream_public_lines(
                     yield _encode_public("text_delta", public_chunk)
             if run_observation is not None:
                 run_observation.public_completion()
+            # Hermes 가 합쳐 준 텍스트가 아니라 **이 게이트웨이가 실제로
+            # 흘려보낸 것**을 최종으로 내보낸다. 아래층은 최종 텍스트가 받은
+            # 델타의 합과 정확히 같기를 요구하므로, 여기서 공백이 다른 판본을
+            # 내보내면 그 층에서 다시 막힌다.
             yield _encode_public(
                 "run_completed",
-                final_text,
+                emitted + final_suffix,
                 publish_capability_token=publish_capability_token,
             )
             return
