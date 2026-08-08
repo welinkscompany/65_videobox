@@ -266,7 +266,9 @@ def test_profile_is_mounted_read_only_only_in_the_opt_in_overlay() -> None:
     mount = "./config/hermes/yujin:/opt/videobox-yujin-profile:ro"
 
     assert hermes["container_name"] == "videobox-hermes-yujin"
+    # s6-overlay 가 command 를 그대로 실행하므로 "hermes" 가 맨 앞에 있어야 한다.
     assert hermes["command"] == [
+        "hermes",
         "-p",
         "videobox-yujin",
         "serve",

@@ -1781,3 +1781,22 @@ def test_open_modes_report_exact_targets_under_whatif_without_launching(
     assert "Start-Process -FilePath $VideoBoxUri.AbsoluteUri" in source
     assert "Start-Process -FilePath $script:capCutExecutable" in source
     assert "-ArgumentList" not in source
+
+
+def test_yujin_memory_start_installs_profile_before_compose_up() -> None:
+    """-WithYujinMemory 로 켜면 유진 프로필을 먼저 설치해야 한다.
+
+    프로필이 없으면 컨테이너가 "Profile 'videobox-yujin' does not exist" 로
+    즉시 종료하고, 게이트웨이까지 연쇄로 못 뜬다. 2026-08-08 실제로 재현했다.
+    """
+    source = SCRIPT.read_text(encoding="utf-8-sig")
+
+    installer = source.find("install-hermes-yujin-profile.ps1")
+    assert installer != -1, "owner-ready 가 유진 프로필 설치를 호출하지 않는다"
+
+    compose_up = source.find('@("up", "-d")')
+    assert compose_up != -1
+    assert installer < compose_up, "프로필 설치는 compose up 보다 먼저여야 한다"
+
+    guard = source.rfind("if ($WithYujinMemory)", 0, installer)
+    assert guard != -1, "프로필 설치는 -WithYujinMemory 일 때만 실행해야 한다"

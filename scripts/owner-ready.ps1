@@ -969,6 +969,23 @@ if ($Mode -ceq "Start") {
             -Evidence @{ started = $false; services = $serviceNames }
         Write-OwnerReadyPayload -Checks $checks
     }
+    if ($WithYujinMemory) {
+        # 프로필이 이미지 안에 없다. 설치를 건너뛰면 유진 컨테이너가
+        # "Profile 'videobox-yujin' does not exist" 로 즉시 종료하고
+        # 게이트웨이까지 연쇄로 못 뜬다. 설치는 여러 번 실행해도 안전하다.
+        & (Join-Path $PSScriptRoot "install-hermes-yujin-profile.ps1") `
+            -EnvFile $EnvFile `
+            -ComposeFile $composeFile `
+            -OverlayFile $yujinMemoryComposeFile `
+            -DockerExecutable $DockerExecutable
+        if ($LASTEXITCODE -ne 0) {
+            $checks += New-OwnerReadyResult -Id "start" -Status "fail" `
+                -Summary "유진 기억 프로필을 설치하지 못했습니다." `
+                -Action "Docker Desktop 상태를 확인한 뒤 다시 실행하세요." `
+                -Evidence @{ started = $false; services = $serviceNames; profile_installed = $false }
+            Write-OwnerReadyPayload -Checks $checks
+        }
+    }
     $upResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec $TimeoutSec -Arguments @(
         @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("up", "-d") + $serviceNames
     )

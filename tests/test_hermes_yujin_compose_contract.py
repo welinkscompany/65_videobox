@@ -163,7 +163,12 @@ def test_hermes_yujin_uses_the_pinned_serve_contract_and_isolated_oauth_state() 
     hermes = compose["services"]["videobox-hermes-yujin"]
 
     assert hermes["image"] == PINNED_HERMES_IMAGE
+    # The command must name the executable. s6-overlay execs the container CMD
+    # directly, so a bare "-p" was handed to s6-applyuidgid and the container
+    # died with exit 127 before Hermes ever started -- reproduced 2026-08-08 on
+    # both the pinned digest and :latest.
     assert hermes["command"] == [
+        "hermes",
         "-p",
         "videobox-yujin",
         "serve",

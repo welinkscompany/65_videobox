@@ -102,7 +102,10 @@ services:
     profiles: [hermes-yujin]
     container_name: videobox-hermes-yujin
     image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
-    command: ["-p", "videobox-yujin", "serve", "--host", "0.0.0.0", "--port", "9120"]
+    # `hermes` must lead: s6-overlay execs the container CMD directly, so a bare
+    # "-p" was passed to s6-applyuidgid and the container exited 127 before
+    # Hermes started. Verified 2026-08-08 against the pinned digest.
+    command: ["hermes", "-p", "videobox-yujin", "serve", "--host", "0.0.0.0", "--port", "9120"]
     environment:
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}

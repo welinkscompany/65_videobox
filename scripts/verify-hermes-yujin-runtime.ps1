@@ -178,8 +178,11 @@ Assert-True (($memoryAdapter.profiles -join "|") -ceq "hermes-yujin") "Memory ad
 
 Assert-True ($hermes.image -ceq $expectedImage) "Hermes image digest does not match the pin."
 Assert-True ($hermes.container_name -ceq "videobox-hermes-yujin") "Hermes container name must match the container-only installer target."
+# The command must name `hermes` first. s6-overlay execs the container CMD
+# directly, so a bare "-p" reached s6-applyuidgid and the container exited 127
+# before Hermes started (reproduced 2026-08-08 on the pinned digest).
 Assert-True (
-    (($hermes.command -join "|") -ceq "-p|videobox-yujin|serve|--host|0.0.0.0|--port|9120")
+    (($hermes.command -join "|") -ceq "hermes|-p|videobox-yujin|serve|--host|0.0.0.0|--port|9120")
 ) "Hermes serve command does not match the pinned CLI contract."
 Assert-True (
     $hermes.environment.HERMES_TUI_TOOLSETS -ceq "context_engine"
