@@ -52,7 +52,23 @@ r4는 `deterministic_korean_smoke_stt`로 만들어졌다. 이 stub은 오디오
 
 ## Slice 0 — 진실 확정
 
-### Task 1: 컨테이너 provider 활성화 — 음성 인식·목소리·CapCut — **음성 인식·CapCut 완료 / TTS는 Task 25로 이관**
+### Task 1: 컨테이너 provider 활성화 — 음성 인식·목소리·CapCut — **음성 인식·CapCut 완료 (2026-08-08 런타임 확인) / TTS는 Task 25로 이관**
+
+**2026-08-08 역방향 검증.** 체크박스가 비어 있어 실제로 도는지 런타임에서 확인했다.
+
+- 컨테이너 환경에 `VIDEOBOX_STT_ENABLED=1`, `VIDEOBOX_CAPCUT_ENABLED=1`이 있고
+  `provider_factories.py`가 그 값으로 **가짜가 아닌 실물**을 만든다
+  (`FasterWhisperSTTProvider`, `PyCapCutRealExportAdapter`)
+- **실제 한국어 전사를 돌렸다.** `chatterbox-korean-sample.wav`를 나레이션으로 올려
+  `POST .../jobs/transcription` → `succeeded`, 구간 2개:
+  `안녕하세요 오늘은 산책하는 서 찍은 영상으로 브이로그를 만들어 볼게요.` /
+  `편집은 비디오 박스가 도와줍니다.`
+  이 저장소가 "테스트 2,960개 통과 중 한 번도 실행되지 않았다"고 기록한 그 기능이다
+- **주의 — 기존 나레이션 픽스처는 가짜 wav다.** `inputs/narration/smoke-narration.wav`는
+  내용이 `fake wav data`라 ffmpeg가 거부하고 전사가 500으로 실패한다. 제품 결함이
+  아니라 픽스처 문제다. 실제 전사를 확인할 때 이 파일을 쓰면 안 된다
+
+아래 Step 체크박스는 착수 시점 기록이라 그대로 둔다. 위 확인이 현재 기준이다.
 
 > 아래 Step 체크박스는 당시 찍지 않았다. 2026-08-07 코드 실측으로 결과를 확인했다
 > (`compose.yaml:57,74` 기본값 `1`). 근거는 "진행 상태 (2026-08-07 갱신)" 표에 있다.
