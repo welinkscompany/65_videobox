@@ -398,3 +398,38 @@ def test_a_genuine_lm_studio_block_still_terminates(tmp_path: Path) -> None:
 
     persisted = service.get_analysis(project_id, job["analysis_id"])
     assert (persisted["status"], persisted["error_code"]) == (MediaAnalysisStatus.BLOCKED.value, "LM_STUDIO_BLOCKED")
+
+
+def test_retry_of_an_analysis_with_no_recorded_profile_still_runs(tmp_path: Path) -> None:
+    """A run enqueued before its profile was written must not be a dead end.
+
+    Records made while the worker was unavailable have no profile row. Once the
+    worker is switched on, the owner sees "다시 분석하기", clicks it, and it
+    failed every time with an internal "profile not found". The retry now falls
+    back to the profile a fresh enqueue would use.
+    """
+    vision = _Vision()
+    service, store, project_id, _source = _service(tmp_path, vision)
+    asset_id = store.list_assets(project_id=project_id)[0]["asset_id"]
+    analysis = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+    # Reproduce the old record: the run exists, the profile never got written.
+    store._execute(
+        project_id,
+        "DELETE FROM media_analysis_profiles WHERE project_id = ? AND analysis_id = ?",
+        (project_id, analysis["analysis_id"]),
+    )
+
+    service.dispatch_once(project_id=project_id, analysis_id=analysis["analysis_id"])
+
+    settled = service.get_analysis(project_id, analysis["analysis_id"])
+    # Whichever terminal state the model's confidence earns is fine; what must
+    # not happen is failing before the model is ever asked.
+    assert settled["status"] in {
+        MediaAnalysisStatus.SUCCEEDED.value,
+        MediaAnalysisStatus.NEEDS_REVIEW.value,
+    }, settled
+    assert vision.calls == 1
+    # The gap is repaired, so a later attempt does not depend on the fallback.
+    assert store.get_media_analysis_profile(
+        project_id=project_id, analysis_id=analysis["analysis_id"],
+    )["vision_model_name"] == service.profile.vision_model_name

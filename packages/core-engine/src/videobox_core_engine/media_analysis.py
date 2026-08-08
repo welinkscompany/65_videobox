@@ -63,6 +63,25 @@ class MediaAnalysisService:
         self.store.record_media_analysis_profile(project_id=project_id, analysis_id=analysis["analysis_id"], profile={"vision_model_name": profile.vision_model_name, "embedding_model_name": profile.embedding_model_name})
         return analysis
 
+    def _profile_for_dispatch(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
+        """The profile this run was enqueued with, or the current one.
+
+        Runs created while no worker was configured have no profile row, so a
+        strict lookup made them permanently un-retryable: the owner pressed
+        "다시 분석하기" and got an internal "profile not found" every time.
+        Falling back to the profile a fresh enqueue would use is the same
+        answer, and recording it closes the gap for later attempts.
+        """
+        try:
+            return self.store.get_media_analysis_profile(project_id=project_id, analysis_id=analysis_id)
+        except KeyError:
+            profile = {
+                "vision_model_name": self.profile.vision_model_name,
+                "embedding_model_name": self.profile.embedding_model_name,
+            }
+            self.store.record_media_analysis_profile(project_id=project_id, analysis_id=analysis_id, profile=profile)
+            return profile
+
     def get_analysis(self, project_id: str, analysis_id: str) -> dict[str, Any]:
         return self.store.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
 
@@ -108,7 +127,7 @@ class MediaAnalysisService:
                 ],
             )
             images = tuple(frame.data for frame in probe.frames)
-            profile = self.store.get_media_analysis_profile(project_id=project_id, analysis_id=analysis_id)
+            profile = self._profile_for_dispatch(project_id=project_id, analysis_id=analysis_id)
             response = self.vision_provider.analyze_images(VisionAnalysisRequest(model_name=str(profile["vision_model_name"]), prompt="Analyze local media", images=images, response_schema=FIXED_VISION_RESPONSE_SCHEMA))
             if self._cancelled(project_id, analysis_id):
                 return None
