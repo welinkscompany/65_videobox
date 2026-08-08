@@ -10780,3 +10780,26 @@ historical 문서와 찌꺼기 파일 판단은 아래 기본값을 유지한다
 - stale-shape helper 중복과 dead helper 후보 중 다음 최소 정리 대상 1개를 다시 좁힌다
 - 역할이 끝난 중복 메모 문서는 삭제보다 역할 명시가 맞는지 먼저 판단한다
 - 최종 closeout 직전 broad 재검증이 정말 필요한지 마지막으로 판단한다
+
+## 2026-08-08 closeout — 유진 런타임 기동 + 자체 호스팅 기억
+
+인계 문서: `docs/handoffs/2026-08-08-videobox-yujin-runtime-and-local-memory-handoff.ko.md`
+
+- 유진 헤르메스 컨테이너가 **처음으로 실제 기동**했다. 기동 3겹(실행 파일명 누락,
+  프로필 미설치, 비밀값 전부 자리표시자)과 대화 7겹을 전부 풀었다
+- 두뇌를 로컬 LM Studio(`qwen/qwen3.6-35b-a3b`)에 연결했다. 배포 프로필 v1.3.0에
+  `model.provider`/`model.name`으로 고정 — `provider` 키가 없으면 Hermes가 로그인된
+  OAuth 제공자로 조용히 넘어간다
+- Mem0를 **호스팅 키 없이** 이 컴퓨터 안에서만 도는 자체 호스팅으로 전환했다.
+  새 컨테이너도 postgres 변경도 없었다
+- broader verification: **full backend regression 3,131 passed / 0 failed**
+- 실측 확인: 컨테이너 5개 healthy, 앱 경로 대화가 `run_completed`로 완주,
+  게이트웨이 `chat_ready: true`, 자체 호스팅 기억 저장·검색 왕복
+
+남은 핵심 일은 아래로 정리된다.
+
+- 유진이 **과거 기억을 실제로 참조하는 전 구간**은 아직 미검증이다. 조회가
+  `yujin_memory_service.py`의 로컬 대조를 통과해야 하므로 owner가 화면에서 기억을
+  승인하는 흐름이 먼저 필요하다
+- 기억 후보 제안 UI가 실제로 뜨는지 확인이 안 됐다
+- Task 25/26/29/34/35 잔여분은 이전 인계 문서 기준 그대로다

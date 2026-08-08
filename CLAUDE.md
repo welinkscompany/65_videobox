@@ -55,6 +55,7 @@
 | 상태/closeout 로그 | `docs/development-status-2026-06-29.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
 | 미해결 수정 backlog | `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-08-08-videobox-yujin-runtime-and-local-memory-handoff.ko.md` |
 
 승인된 시각 결정은 현재 두 건이다. 둘 다 사용자가 명시 승인했고 재승인 없이 바꾸지 않는다.
 
