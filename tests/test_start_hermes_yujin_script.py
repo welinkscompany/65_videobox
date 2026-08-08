@@ -149,6 +149,17 @@ def _rendered_model(
                     "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
                         memory_adapter_token
                     ),
+                    # 자체 호스팅 기억 설정. 전부 이 컴퓨터를 가리킨다.
+                    "VIDEOBOX_MEM0_MODE": "local",
+                    "VIDEOBOX_MEM0_LOCAL_BASE_URL": (
+                        "http://host.docker.internal:1234/v1"
+                    ),
+                    "VIDEOBOX_MEM0_LLM_MODEL": "qwen/qwen3.6-35b-a3b",
+                    "VIDEOBOX_MEM0_EMBEDDER_MODEL": "text-embedding-bge-m3",
+                    "VIDEOBOX_MEM0_EMBEDDING_DIMS": "1024",
+                    "VIDEOBOX_MEM0_STORE_PATH": (
+                        "/var/lib/videobox-mem0/qdrant"
+                    ),
                 }
             },
             "videobox-hermes-yujin": {

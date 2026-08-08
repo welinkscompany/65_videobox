@@ -596,3 +596,215 @@ def test_pinned_provider_polls_event_with_bounded_exact_http_contract() -> None:
         ),
         ("get", "/v1/event/event-123/"),
     ]
+
+
+_VALID_TOKEN = "adapter-service-token-with-enough-entropy-456"
+
+
+def test_local_mode_needs_no_api_key_and_stays_on_this_computer() -> None:
+    """MEM0_API_KEY 없이 이 컴퓨터 안에서만 기억을 돌리는 길.
+
+    Hermes 의 OSS 백엔드를 쓰면 기억 생성·검색을 로컬 모델과 파일 기반
+    벡터 저장소가 처리한다. 밖으로 나가는 것이 하나도 없다.
+    """
+    captured = {}
+
+    def local_factory(config):
+        captured.update(config)
+        return object()
+
+    app = build_memory_adapter_from_environment(
+        environ={
+            "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": _VALID_TOKEN,
+            "MEM0_API_KEY": "",
+            "VIDEOBOX_MEM0_MODE": "local",
+        },
+        local_provider_factory=local_factory,
+    )
+
+    with TestClient(app) as client:
+        assert client.get("/health").json() == {
+            "status": "ready",
+            "configured": True,
+        }
+    # 지연 생성이므로 기동만으로는 아무것도 만들지 않는다.
+    assert captured == {}
+
+
+def test_local_mode_defaults_point_at_this_computer_only() -> None:
+    """기본값은 전부 이 컴퓨터를 가리켜야 한다. 외부 주소가 새면 안 된다."""
+    from videobox_agent_gateway.hermes_memory_adapter import (
+        local_mem0_config_from_environment,
+    )
+
+    config = local_mem0_config_from_environment(
+        {"VIDEOBOX_MEM0_MODE": "local"}
+    )
+
+    assert config["llm"]["provider"] == "openai"
+    assert config["embedder"]["provider"] == "openai"
+    assert config["vector_store"]["provider"] == "qdrant"
+    # 파일 경로 방식이라 벡터 저장소 서버가 필요 없다.
+    assert config["vector_store"]["config"]["path"]
+    assert "host" not in config["vector_store"]["config"]
+
+    for block in (config["llm"], config["embedder"]):
+        base_url = block["config"]["openai_base_url"]
+        assert base_url.startswith("http://host.docker.internal:")
+
+    # 임베딩 차원이 틀리면 저장소가 조용히 어긋난다.
+    assert config["embedder"]["config"]["embedding_dims"] == 1024
+
+
+def test_api_key_still_wins_so_an_existing_setup_does_not_change() -> None:
+    """호스팅 키가 들어 있으면 그대로 호스팅 경로를 쓴다."""
+    picked = []
+
+    app = build_memory_adapter_from_environment(
+        environ={
+            "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": _VALID_TOKEN,
+            "MEM0_API_KEY": "private-key",
+            "VIDEOBOX_MEM0_MODE": "local",
+        },
+        provider_factory=lambda _key: picked.append("platform"),
+        local_provider_factory=lambda _config: picked.append("local"),
+    )
+
+    with TestClient(app) as client:
+        assert client.get("/health").json()["configured"] is True
+    assert picked == []
+
+
+class _FakeOssBackend:
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+
+    def search(self, query, *, filters, top_k=10, rerank=False):
+        self.calls.append(dict(filters=filters, top_k=top_k))
+        if not ({"user_id", "agent_id", "run_id"} & set(filters)):
+            raise ValueError(
+                "filters must contain at least one of: user_id, agent_id, run_id"
+            )
+        return list(self.rows)
+
+
+def _local_provider_with(rows):
+    from videobox_agent_gateway.hermes_memory_adapter import _LocalMem0Provider
+
+    provider = _LocalMem0Provider.__new__(_LocalMem0Provider)
+    backend = _FakeOssBackend(rows)
+    provider._backend = backend
+    return provider, backend
+
+
+def test_local_search_translates_the_hosted_filter_shape() -> None:
+    """자체 호스팅 Mem0 는 호스팅 쪽 필터 문법을 모른다.
+
+    2026-08-08 실기: {"AND": [...]} 를 그대로 넘기면
+    "filters must contain at least one of: user_id, agent_id, run_id" 로
+    거절당해 검색이 전부 503 이 됐다.
+    """
+    approved = {
+        "id": "m-1",
+        "memory": "저는 빠른 컷 편집을 선호합니다.",
+        "metadata": {
+            "source": "videobox_yujin_approved_v1",
+            "category": "pacing",
+            "external_ref": "ext-" + "a" * 64,
+        },
+    }
+    provider, backend = _local_provider_with([approved])
+
+    rows = provider.search(
+        "편집 속도",
+        filters={
+            "AND": [
+                {"user_id": "videobox-owner-v1"},
+                {"metadata": {"source": "videobox_yujin_approved_v1"}},
+            ]
+        },
+        top_k=5,
+        rerank=False,
+    )
+
+    assert backend.calls[0]["filters"] == {"user_id": "videobox-owner-v1"}
+    assert rows == [approved]
+
+
+def test_local_search_still_applies_the_metadata_constraint() -> None:
+    """소유자 필터만 남기면 승인하지 않은 기억까지 돌아온다.
+
+    벡터 저장소는 소유자 단위로만 걸러 주므로, metadata 조건은 여기서
+    다시 적용해야 한다.
+    """
+    approved = {
+        "id": "m-1",
+        "memory": "승인된 기억",
+        "metadata": {
+            "source": "videobox_yujin_approved_v1",
+            "category": "pacing",
+            "external_ref": "ext-" + "a" * 64,
+        },
+    }
+    other = {
+        "id": "m-2",
+        "memory": "다른 경로로 들어온 기억",
+        "metadata": {"source": "somewhere_else"},
+    }
+    provider, _ = _local_provider_with([other, approved])
+
+    rows = provider.search(
+        "편집 속도",
+        filters={
+            "AND": [
+                {"user_id": "videobox-owner-v1"},
+                {"metadata": {"source": "videobox_yujin_approved_v1"}},
+            ]
+        },
+        top_k=5,
+        rerank=False,
+    )
+
+    assert rows == [approved]
+
+
+def test_local_search_keeps_the_external_ref_constraint_for_reconcile() -> None:
+    """되맞춤은 external_ref 로 정확히 한 건을 찾아야 한다.
+
+    이 조건을 흘리면 엉뚱한 기억을 "이미 저장됨"으로 판정한다.
+    """
+    wanted_ref = "ext-" + "b" * 64
+    wanted = {
+        "id": "m-1",
+        "memory": "찾는 기억",
+        "metadata": {
+            "source": "videobox_yujin_approved_v1",
+            "category": "pacing",
+            "external_ref": wanted_ref,
+        },
+    }
+    sibling = {
+        "id": "m-2",
+        "memory": "다른 기억",
+        "metadata": {
+            "source": "videobox_yujin_approved_v1",
+            "category": "pacing",
+            "external_ref": "ext-" + "c" * 64,
+        },
+    }
+    provider, _ = _local_provider_with([sibling, wanted])
+
+    rows = provider.search(
+        "찾는 기억",
+        filters={
+            "AND": [
+                {"user_id": "videobox-owner-v1"},
+                {"metadata": {"external_ref": wanted_ref}},
+            ]
+        },
+        top_k=2,
+        rerank=False,
+    )
+
+    assert rows == [wanted]

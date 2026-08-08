@@ -444,6 +444,139 @@ def _default_provider_factory(api_key: str):
     return _PinnedHermesMem0Provider(api_key)
 
 
+# 이 컴퓨터에서만 도는 기억 저장소의 기본값. 전부 로컬을 가리킨다.
+_LOCAL_MEM0_BASE_URL = "http://host.docker.internal:1234/v1"
+_LOCAL_MEM0_LLM_MODEL = "qwen/qwen3.6-35b-a3b"
+_LOCAL_MEM0_EMBEDDER_MODEL = "text-embedding-bge-m3"
+_LOCAL_MEM0_EMBEDDING_DIMS = 1024
+_LOCAL_MEM0_STORE_PATH = "/var/lib/videobox-mem0/qdrant"
+
+
+def local_mem0_config_from_environment(values) -> dict:
+    """이 컴퓨터 안에서만 도는 Mem0 설정을 만든다.
+
+    기억 생성과 검색을 로컬 모델이 처리하고, 벡터 저장소는 파일 경로 방식이라
+    서버가 따로 필요 없다. 열쇠 값은 LM Studio 가 확인하지 않으므로 비밀이
+    아니라 자리를 채우는 값이다.
+    """
+
+    base_url = (
+        values.get("VIDEOBOX_MEM0_LOCAL_BASE_URL") or _LOCAL_MEM0_BASE_URL
+    )
+    api_key = values.get("VIDEOBOX_MEM0_LOCAL_API_KEY") or "lm-studio"
+    dims_text = values.get("VIDEOBOX_MEM0_EMBEDDING_DIMS") or ""
+    try:
+        dims = int(dims_text)
+    except ValueError:
+        dims = _LOCAL_MEM0_EMBEDDING_DIMS
+    return {
+        "llm": {
+            "provider": "openai",
+            "config": {
+                "model": (
+                    values.get("VIDEOBOX_MEM0_LLM_MODEL")
+                    or _LOCAL_MEM0_LLM_MODEL
+                ),
+                "openai_base_url": base_url,
+                "api_key": api_key,
+            },
+        },
+        "embedder": {
+            "provider": "openai",
+            "config": {
+                "model": (
+                    values.get("VIDEOBOX_MEM0_EMBEDDER_MODEL")
+                    or _LOCAL_MEM0_EMBEDDER_MODEL
+                ),
+                "openai_base_url": base_url,
+                "api_key": api_key,
+                "embedding_dims": dims,
+            },
+        },
+        "vector_store": {
+            "provider": "qdrant",
+            "config": {
+                "path": (
+                    values.get("VIDEOBOX_MEM0_STORE_PATH")
+                    or _LOCAL_MEM0_STORE_PATH
+                ),
+            },
+        },
+    }
+
+
+class _LocalMem0Provider:
+    """Hermes 의 OSS 백엔드를 어댑터가 기대하는 모양으로 감싼다."""
+
+    def __init__(self, oss_config: dict) -> None:
+        from plugins.memory.mem0._backend import OSSBackend
+
+        self._backend = OSSBackend(oss_config)
+
+    def add(self, **kwargs):
+        return self._backend.add(**kwargs)
+
+    _OWNER_KEYS = ("user_id", "agent_id", "run_id")
+
+    @classmethod
+    def _split_filters(cls, filters) -> tuple[dict, dict]:
+        """호스팅 문법의 필터를 소유자 조건과 metadata 조건으로 가른다.
+
+        자체 호스팅 Mem0 는 {"AND": [...]} 를 모르고, 소유자 키 중 최소 하나를
+        평평한 형태로 요구한다. metadata 조건은 받아 주지 않으므로 따로 떼어
+        두었다가 결과에 직접 적용한다.
+        """
+
+        owner: dict = {}
+        metadata: dict = {}
+
+        def absorb(block) -> None:
+            if type(block) is not dict:
+                return
+            for key, value in block.items():
+                if key in cls._OWNER_KEYS:
+                    owner[key] = value
+                elif key == "metadata" and type(value) is dict:
+                    metadata.update(value)
+                elif key in {"AND", "OR"} and type(value) is list:
+                    for item in value:
+                        absorb(item)
+
+        absorb(filters)
+        return owner, metadata
+
+    def search(self, query, *, filters, top_k=10, rerank=False):
+        owner, metadata = self._split_filters(filters)
+        rows = self._backend.search(
+            query, filters=owner, top_k=top_k, rerank=rerank
+        )
+        if not metadata:
+            return rows
+        # 저장소는 소유자 단위로만 걸러 준다. 승인 표시와 external_ref 는
+        # 여기서 다시 확인하지 않으면 엉뚱한 기억이 섞여 나온다.
+        kept = []
+        for row in rows:
+            found = row.get("metadata") if type(row) is dict else None
+            if type(found) is not dict:
+                continue
+            if all(found.get(key) == value for key, value in metadata.items()):
+                kept.append(row)
+        return kept
+
+    def delete(self, memory_id: str):
+        return self._backend.delete(memory_id)
+
+    def get_event(self, *, event_id: str):
+        # 호스팅 Mem0 의 비동기 이벤트 조회 API 다. 자체 호스팅에는 없고,
+        # 저장이 즉시 끝나므로 필요하지도 않다.
+        raise RuntimeError("memory_event_unsupported_in_local_mode")
+
+
+def _default_local_provider_factory(oss_config: dict):
+    os.environ["MEM0_TELEMETRY"] = "false"
+    return _LocalMem0Provider(oss_config)
+
+
 class _LazyProvider:
     def __init__(self, factory) -> None:
         self._factory = factory
@@ -474,6 +607,7 @@ def build_memory_adapter_from_environment(
     *,
     environ=None,
     provider_factory=_default_provider_factory,
+    local_provider_factory=_default_local_provider_factory,
 ) -> FastAPI:
     values = os.environ if environ is None else environ
     token = values.get("VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN", "")
@@ -483,11 +617,16 @@ def build_memory_adapter_from_environment(
             provider=None,
             service_token=secrets.token_urlsafe(32),
         )
-    provider = (
-        _LazyProvider(lambda: provider_factory(api_key))
-        if api_key
-        else None
-    )
+    if api_key:
+        # 호스팅 열쇠가 들어 있으면 기존 설정을 그대로 존중한다.
+        provider = _LazyProvider(lambda: provider_factory(api_key))
+    elif (values.get("VIDEOBOX_MEM0_MODE") or "").strip().lower() == "local":
+        oss_config = local_mem0_config_from_environment(values)
+        provider = _LazyProvider(
+            lambda: local_provider_factory(oss_config)
+        )
+    else:
+        provider = None
     return create_memory_adapter_app(
         provider=provider,
         service_token=token,

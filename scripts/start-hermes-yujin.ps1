@@ -245,9 +245,17 @@ if (($hermesEnvironmentNames -join "|") -cne ($expectedHermesEnvironmentNames -j
 $memoryAdapterEnvironmentNames = @(
     $memoryAdapter.environment.PSObject.Properties.Name | Sort-Object
 )
+# VIDEOBOX_MEM0_* 는 자체 호스팅 기억 설정이다. 전부 이 컴퓨터를 가리키는
+# 값이고 비밀이 아니다. 정렬된 이름 목록이라 알파벳 순서를 지킨다.
 $expectedMemoryAdapterEnvironmentNames = @(
     "MEM0_API_KEY"
     "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
+    "VIDEOBOX_MEM0_EMBEDDER_MODEL"
+    "VIDEOBOX_MEM0_EMBEDDING_DIMS"
+    "VIDEOBOX_MEM0_LLM_MODEL"
+    "VIDEOBOX_MEM0_LOCAL_BASE_URL"
+    "VIDEOBOX_MEM0_MODE"
+    "VIDEOBOX_MEM0_STORE_PATH"
 )
 if (
     ($memoryAdapterEnvironmentNames -join "|") -cne

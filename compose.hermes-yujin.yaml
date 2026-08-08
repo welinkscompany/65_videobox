@@ -78,6 +78,19 @@ services:
     environment:
       MEM0_API_KEY: ${MEM0_API_KEY:-}
       VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN: ${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}
+      # 기억을 이 컴퓨터 안에서만 돌린다. 기억 생성·검색을 로컬 모델이 맡고
+      # 벡터 저장소는 파일 경로 방식이라 서버가 따로 없다. MEM0_API_KEY 가
+      # 채워져 있으면 그쪽(호스팅)이 우선한다.
+      VIDEOBOX_MEM0_MODE: ${VIDEOBOX_MEM0_MODE:-local}
+      VIDEOBOX_MEM0_LOCAL_BASE_URL: ${VIDEOBOX_MEM0_LOCAL_BASE_URL:-http://host.docker.internal:1234/v1}
+      VIDEOBOX_MEM0_LLM_MODEL: ${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.6-35b-a3b}
+      VIDEOBOX_MEM0_EMBEDDER_MODEL: ${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}
+      # 차원이 틀리면 저장소가 조용히 어긋난다. bge-m3 는 1024다.
+      VIDEOBOX_MEM0_EMBEDDING_DIMS: ${VIDEOBOX_MEM0_EMBEDDING_DIMS:-1024}
+      VIDEOBOX_MEM0_STORE_PATH: ${VIDEOBOX_MEM0_STORE_PATH:-/var/lib/videobox-mem0/qdrant}
+    volumes:
+      # 기억이 재시작을 넘겨 살아남아야 한다. tmpfs 면 매번 사라진다.
+      - videobox_mem0_store:/var/lib/videobox-mem0
     networks: [videobox-hermes-memory-network, videobox-hermes-provider-egress]
     user: "10000:10000"
     read_only: true
@@ -146,6 +159,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  # 자체 호스팅 Mem0 의 벡터 저장소. 이 컴퓨터 안에만 있다.
+  videobox_mem0_store:
 
 networks:
   videobox-agent-gateway-api-network:

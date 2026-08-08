@@ -200,7 +200,19 @@ Assert-NoProperty $gateway "ports" "Agent gateway must not publish a host port."
 Assert-NoProperty $memoryAdapter "ports" "Memory adapter must not publish a host port."
 Assert-NoProperty $memoryAdapter "expose" "Memory adapter must not expose a host port."
 Assert-NoProperty $gateway "volumes" "Agent gateway must not have mounts."
-Assert-NoProperty $memoryAdapter "volumes" "Memory adapter must not have mounts."
+# 자체 호스팅 기억은 벡터 저장소가 재시작을 넘겨 살아남아야 하므로 마운트가
+# 하나 필요하다. 규칙의 본뜻은 이 서비스가 소유자의 영상·프로젝트 데이터에
+# 닿지 않는 것이므로, 이름 있는 전용 볼륨 하나만 허용한다.
+# compose config 는 마운트를 객체로 펼친다. 호스트 경로 바인드가 아니라
+# 이름 있는 전용 볼륨 하나여야 한다.
+$memoryAdapterMounts = @($memoryAdapter.volumes)
+Assert-True ($memoryAdapterMounts.Count -eq 1) `
+    "Memory adapter may mount only its own memory store."
+Assert-True (
+    ($memoryAdapterMounts[0].type -ceq "volume") -and
+    ($memoryAdapterMounts[0].source -ceq "videobox_mem0_store") -and
+    ($memoryAdapterMounts[0].target -ceq "/var/lib/videobox-mem0")
+) "Memory adapter mount must be the named memory store only."
 Assert-NoProperty $memoryAdapter "depends_on" "Memory adapter must not depend on chat services."
 Assert-True (
     $null -eq $gateway.depends_on.PSObject.Properties[$memoryAdapterService]
@@ -242,8 +254,16 @@ $memoryAdapterEnvironmentNames = @(
 Assert-True (
     ($memoryAdapterEnvironmentNames -join "|") -ceq (
         @(
+            # VIDEOBOX_MEM0_* 는 자체 호스팅 기억 설정이다. 전부 이 컴퓨터를
+            # 가리키는 값이고 비밀이 아니다. 정렬된 이름 목록이다.
             "MEM0_API_KEY"
             "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN"
+            "VIDEOBOX_MEM0_EMBEDDER_MODEL"
+            "VIDEOBOX_MEM0_EMBEDDING_DIMS"
+            "VIDEOBOX_MEM0_LLM_MODEL"
+            "VIDEOBOX_MEM0_LOCAL_BASE_URL"
+            "VIDEOBOX_MEM0_MODE"
+            "VIDEOBOX_MEM0_STORE_PATH"
         ) -join "|"
     )
 ) "Memory adapter environment contract is invalid."

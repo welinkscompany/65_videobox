@@ -355,10 +355,35 @@ def test_memory_adapter_is_the_only_mem0_provider_boundary() -> None:
         "VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN": (
             "${VIDEOBOX_HERMES_MEMORY_ADAPTER_TOKEN:?set in .env.container}"
         ),
+        # 자체 호스팅 기억 설정. 값은 전부 이 컴퓨터를 가리키고, 어느 것도
+        # 비밀이 아니다. 자세한 계약은 아래 별도 테스트가 고정한다.
+        "VIDEOBOX_MEM0_MODE": "${VIDEOBOX_MEM0_MODE:-local}",
+        "VIDEOBOX_MEM0_LOCAL_BASE_URL": (
+            "${VIDEOBOX_MEM0_LOCAL_BASE_URL:-"
+            "http://host.docker.internal:1234/v1}"
+        ),
+        "VIDEOBOX_MEM0_LLM_MODEL": (
+            "${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.6-35b-a3b}"
+        ),
+        "VIDEOBOX_MEM0_EMBEDDER_MODEL": (
+            "${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}"
+        ),
+        "VIDEOBOX_MEM0_EMBEDDING_DIMS": (
+            "${VIDEOBOX_MEM0_EMBEDDING_DIMS:-1024}"
+        ),
+        "VIDEOBOX_MEM0_STORE_PATH": (
+            "${VIDEOBOX_MEM0_STORE_PATH:-/var/lib/videobox-mem0/qdrant}"
+        ),
     }
     assert "ports" not in adapter
     assert "expose" not in adapter
-    assert "volumes" not in adapter
+    # 자체 호스팅 기억은 벡터 저장소가 재시작을 넘겨 살아남아야 하므로 마운트가
+    # 하나 필요하다. 규칙의 본뜻은 "마운트 금지"가 아니라 **이 서비스가 소유자의
+    # 영상·프로젝트 데이터에 닿지 않는다**이므로, 전용 볼륨 하나만 허용하고
+    # 나머지 경로는 계속 막는다.
+    assert adapter["volumes"] == [
+        "videobox_mem0_store:/var/lib/videobox-mem0"
+    ]
     assert "depends_on" not in adapter
     assert adapter["read_only"] is True
     assert adapter["tmpfs"] == ["/tmp"]
@@ -875,3 +900,77 @@ def test_env_example_distinguishes_plaintext_and_hash_without_usable_credentials
     assert (
         "VIDEOBOX_HERMES_CAPABILITY_KEY_ID=replace-before-starting"
     ) in example
+
+
+def test_memory_adapter_runs_mem0_on_this_computer_without_a_hosted_key() -> None:
+    """자체 호스팅 Mem0 는 이 컴퓨터 밖으로 나가지 않아야 한다.
+
+    owner 가 2026-08-08 에 자체 호스팅을 선택했다. 기억 생성과 검색을 로컬
+    모델이 처리하고, 벡터 저장소는 파일 경로 방식이라 서버가 필요 없다.
+    """
+    adapter = _overlay()["services"][MEMORY_ADAPTER_SERVICE]
+    environment = adapter["environment"]
+
+    assert environment["VIDEOBOX_MEM0_MODE"] == (
+        "${VIDEOBOX_MEM0_MODE:-local}"
+    )
+    for name in (
+        "VIDEOBOX_MEM0_LOCAL_BASE_URL",
+        "VIDEOBOX_MEM0_LLM_MODEL",
+        "VIDEOBOX_MEM0_EMBEDDER_MODEL",
+        "VIDEOBOX_MEM0_EMBEDDING_DIMS",
+        "VIDEOBOX_MEM0_STORE_PATH",
+    ):
+        assert name in environment, name
+    # 기본 끝점은 이 컴퓨터여야 한다. 외부 주소가 기본값이면 안 된다.
+    assert "host.docker.internal" in environment[
+        "VIDEOBOX_MEM0_LOCAL_BASE_URL"
+    ]
+
+    # 기억이 재시작을 넘겨 살아남아야 한다. tmpfs 에 두면 매번 사라진다.
+    volumes = adapter.get("volumes", [])
+    assert any(
+        volume.startswith("videobox_mem0_store:") for volume in volumes
+    ), volumes
+    assert adapter["read_only"] is True
+
+
+def test_memory_adapter_never_reaches_the_owners_footage_or_project_data() -> None:
+    """마운트를 하나 허용했으므로, 무엇을 계속 막는지 따로 못박는다.
+
+    기억 어댑터는 외부 제공자와 이야기할 수 있는 유일한 서비스다. 그래서
+    소유자의 영상과 프로젝트 데이터에는 어떤 경로로도 닿으면 안 된다.
+    """
+    adapter = _overlay()["services"][MEMORY_ADAPTER_SERVICE]
+
+    for volume in adapter["volumes"]:
+        source = volume.split(":", 1)[0]
+        # 호스트 경로 바인드는 통째로 금지한다. 이름 있는 볼륨만 허용한다.
+        assert not source.startswith((".", "/", "~")), volume
+        assert source == "videobox_mem0_store", volume
+
+    rendered = str(adapter)
+    for forbidden in (
+        "/videobox-data",
+        "/videobox-snapshot",
+        "videobox_postgres_data",
+        "videobox_model_cache",
+        "videobox_hermes_oauth_state",
+        "docker.sock",
+    ):
+        assert forbidden not in rendered, forbidden
+
+
+def test_memory_adapter_image_prepares_the_store_directory_for_its_user() -> None:
+    """볼륨은 이미지의 디렉터리 소유권을 물려받는다.
+
+    어댑터는 uid 10000 으로 돌고 루트 파일시스템이 읽기 전용이라, 기동한 뒤에
+    소유권을 고칠 방법이 없다. 이미지에서 미리 만들어 두지 않으면 첫 저장이
+    PermissionError 로 죽는다. 2026-08-08 실제로 겪었다.
+    """
+    dockerfile = (
+        ROOT / "docker" / "hermes-memory-adapter.Dockerfile"
+    ).read_text(encoding="utf-8")
+
+    assert "/var/lib/videobox-mem0" in dockerfile
+    assert "10000:10000" in dockerfile
