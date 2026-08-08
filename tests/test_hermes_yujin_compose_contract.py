@@ -172,6 +172,9 @@ def test_hermes_yujin_uses_the_pinned_serve_contract_and_isolated_oauth_state() 
         "-p",
         "videobox-yujin",
         "serve",
+        # --isolated 가 없으면 유진이 기계 전체 대시보드로 붙어
+        # default 프로필의 모델을 쓴다. 2026-08-08 확인.
+        "--isolated",
         "--host",
         "0.0.0.0",
         "--port",

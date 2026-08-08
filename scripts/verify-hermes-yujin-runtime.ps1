@@ -182,7 +182,7 @@ Assert-True ($hermes.container_name -ceq "videobox-hermes-yujin") "Hermes contai
 # directly, so a bare "-p" reached s6-applyuidgid and the container exited 127
 # before Hermes started (reproduced 2026-08-08 on the pinned digest).
 Assert-True (
-    (($hermes.command -join "|") -ceq "hermes|-p|videobox-yujin|serve|--host|0.0.0.0|--port|9120")
+    (($hermes.command -join "|") -ceq "hermes|-p|videobox-yujin|serve|--isolated|--host|0.0.0.0|--port|9120")
 ) "Hermes serve command does not match the pinned CLI contract."
 Assert-True (
     $hermes.environment.HERMES_TUI_TOOLSETS -ceq "context_engine"

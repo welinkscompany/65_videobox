@@ -137,7 +137,8 @@ def looks_real(name, value):
         stripped = value == value.strip()
         return stripped and len(value.encode("utf-8")) >= 32 and len(set(value)) >= 8
     if name == GATEWAY_PASSWORD_HASH:
-        return value.startswith("scrypt$") and len(value.split("$")) == 6
+        unescaped = value.replace("$$", "$")
+        return unescaped.startswith("scrypt$") and len(unescaped.split("$")) == 6
     if name == KEY_ID:
         return KEY_ID_PATTERN.fullmatch(value) is not None
     return True
@@ -189,7 +190,11 @@ if stage == "hash":
     if not looks_real(GATEWAY_PASSWORD_HASH, password_hash):
         print("password_hash_invalid=true")
         raise SystemExit(5)
-    write_env(env_path, lines, {GATEWAY_PASSWORD_HASH: password_hash})
+    # scrypt 해시는 `scrypt$n$r$p$salt$dk` 라 `$1` 같은 조각이 들어 있다.
+    # docker compose 는 env 파일 값의 `$` 를 변수로 보고 지워 버리므로,
+    # 이스케이프하지 않으면 유진이 5칸짜리 망가진 해시를 받는다.
+    escaped = password_hash.replace("$", "$$")  # GATEWAY_PASSWORD_HASH 전용
+    write_env(env_path, lines, {GATEWAY_PASSWORD_HASH: escaped})
     print("hashed=true")
     raise SystemExit(0)
 

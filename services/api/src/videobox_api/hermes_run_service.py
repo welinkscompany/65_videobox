@@ -114,10 +114,14 @@ class HermesRunService:
         max_active: int = 2,
         max_queue: int = 8,
         max_total: int = 64,
-        max_events: int = 256,
+        # 유진의 두뇌는 이 컴퓨터의 로컬 모델이라 글자 단위로 흘려보낸다.
+        # 256 이면 답 하나가 몇백 글자에서 잘린다(2026-08-08 실기 확인).
+        # 실제 분량은 아래 max_text_bytes 가 막으므로 개수만 넉넉히 둔다.
+        max_events: int = 4_096,
         max_event_bytes: int = 256_000,
         max_text_bytes: int = 200_000,
-        timeout_seconds: float = 35.0,
+        # 게이트웨이가 한 대화에 쓰는 시간과 맞춘다. 이쪽이 짧으면 먼저 끊는다.
+        timeout_seconds: float = 300.0,
         terminal_ttl_seconds: float = 300.0,
         monotonic: Callable[[], float] = time.monotonic,
         context_builder: Callable | None = None,

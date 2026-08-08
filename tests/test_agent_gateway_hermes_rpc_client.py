@@ -193,12 +193,52 @@ def test_login_unauthorized_is_unavailable_without_ticket_retry() -> None:
     assert "PRIVATE" not in str(exc.value)
 
 
-def test_prompt_acceptance_must_be_exact_before_events() -> None:
+def test_streaming_acceptance_is_the_real_hermes_reply() -> None:
+    """Hermes 0.18.2 는 prompt.submit 에 "streaming" 으로 답한다.
+
+    게이트웨이가 "accepted" 만 인정해서 실제 유진 대화가 전부
+    hermes_invalid_response 로 죽었다. 2026-08-08 실기 확인.
+    """
     http = _Http()
     websocket = _WebSocket(
         [
             {"jsonrpc": "2.0", "id": 1, "result": {"session_id": "sid-1"}},
             {"jsonrpc": "2.0", "id": 2, "result": {"status": "streaming"}},
+            {
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": {
+                    "type": "message.complete",
+                    "session_id": "sid-1",
+                    "payload": {"status": "complete", "text": "answer"},
+                },
+            },
+        ]
+    )
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+        http_client_factory=lambda **_: http,
+        websocket_factory=lambda *_args, **_kwargs: websocket,
+    )
+
+    async def collect():
+        return [event async for event in client.stream_prompt(text="x")]
+
+    events = asyncio.run(collect())
+    assert [(event.event_type, event.text) for event in events] == [
+        ("message.complete", "answer")
+    ]
+
+
+def test_prompt_acceptance_must_be_exact_before_events() -> None:
+    http = _Http()
+    websocket = _WebSocket(
+        [
+            {"jsonrpc": "2.0", "id": 1, "result": {"session_id": "sid-1"}},
+            # 알려진 두 값이 아니면 여전히 거절해야 한다.
+            {"jsonrpc": "2.0", "id": 2, "result": {"status": "queued"}},
         ]
     )
     client = HermesRpcClient(
@@ -901,3 +941,19 @@ def test_unsafe_or_non_success_prompt_events_fail_closed_and_redacted(event: dic
         asyncio.run(collect())
     assert "secret" not in str(exc.value)
     assert "C:/private" not in str(exc.value)
+
+
+def test_default_timeout_fits_a_local_model_answer() -> None:
+    """로컬 qwen 은 30초 안에 한 답변을 끝내지 못한다.
+
+    2026-08-08 실기: VideoBox 문맥을 실은 실제 대화가 255조각까지 흐르다
+    30초에서 잘려 "Hermes is temporarily unavailable" 로 끝났다. 문맥 없는
+    짧은 프롬프트만 재면 1.6초라 문제가 안 보인다.
+    """
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+    )
+
+    assert client._timeout >= 180.0

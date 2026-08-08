@@ -272,6 +272,7 @@ def test_profile_is_mounted_read_only_only_in_the_opt_in_overlay() -> None:
         "-p",
         "videobox-yujin",
         "serve",
+        "--isolated",
         "--host",
         "0.0.0.0",
         "--port",

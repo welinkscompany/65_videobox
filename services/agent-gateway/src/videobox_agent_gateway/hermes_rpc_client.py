@@ -52,7 +52,10 @@ class HermesRpcClient:
         password: str,
         http_client_factory: Callable = _default_http_client_factory,
         websocket_factory: Callable = _default_websocket_factory,
-        timeout_seconds: float = 30.0,
+        # 이 값은 한 대화 전체(로그인·티켓·세션·프롬프트·스트리밍)를 덮는다.
+        # 유진의 두뇌는 이 컴퓨터의 로컬 모델이라 답 하나가 30초를 넘긴다.
+        # 2026-08-08 실기: 실제 대화가 255조각까지 흐르다 30초에서 잘렸다.
+        timeout_seconds: float = 300.0,
     ) -> None:
         parsed = urlsplit(base_url)
         if (
@@ -296,7 +299,14 @@ class HermesRpcClient:
                 ):
                     raise HermesTransportError("hermes_ticket_expired")
                 raise HermesTransportError("hermes_unavailable")
-            if message.get("result") != {"status": "accepted"}:
+            # Hermes 0.18.2 answers prompt.submit with "streaming"; older
+            # builds answered "accepted". Both mean the prompt was taken.
+            # Anything else stays a hard failure -- this guard exists so an
+            # unexpected reply never gets read as a running conversation.
+            if message.get("result") not in (
+                {"status": "accepted"},
+                {"status": "streaming"},
+            ):
                 raise HermesTransportError("hermes_invalid_response")
             return
 

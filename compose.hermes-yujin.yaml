@@ -105,7 +105,11 @@ services:
     # `hermes` must lead: s6-overlay execs the container CMD directly, so a bare
     # "-p" was passed to s6-applyuidgid and the container exited 127 before
     # Hermes started. Verified 2026-08-08 against the pinned digest.
-    command: ["hermes", "-p", "videobox-yujin", "serve", "--host", "0.0.0.0", "--port", "9120"]
+    # `--isolated` 없이는 프로필 실행이 기계 전체 대시보드에 붙고 유진은 그저
+    # "미리 선택"될 뿐이다. 그러면 웹소켓 세션이 default 프로필의 모델
+    # (anthropic/claude-opus-4.6)로 열려 "No inference provider configured" 로
+    # 죽는다. 2026-08-08 확인.
+    command: ["hermes", "-p", "videobox-yujin", "serve", "--isolated", "--host", "0.0.0.0", "--port", "9120"]
     environment:
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}
