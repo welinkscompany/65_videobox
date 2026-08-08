@@ -14,7 +14,14 @@ $uiCss = Join-Path $web 'src/ui-system.css'
 if (-not (Test-Path $uiCss)) { $errors.Add('ui-system.css is absent') }
 else {
   $css = Get-Content -Raw $uiCss
-  foreach ($token in @('--vb-canvas: #FAFAF9', '--vb-accent: #4F46E5', '--vb-preview: #18181B', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
+  # These pin the palette the owner approved most recently
+  # (docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md), which
+  # superseded the warm-white/indigo direction. This list still named the old
+  # #FAFAF9/#4F46E5 values, so the verifier failed on correct code -- and a
+  # check that cries wolf is a check nobody runs. contrast.test.ts locks the
+  # same hexes from the JS side; both must move together, and only with a new
+  # approval record (CLAUDE.md §6).
+  foreach ($token in @('--vb-canvas: #FAFAFA', '--vb-accent: #C2410C', '--vb-preview: #18181B', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
   if ($css -match '@import\s+["'']tailwindcss["'']') { $errors.Add('Tailwind preflight import is forbidden') }
 }
 $indexHtml = Join-Path $web 'index.html'
