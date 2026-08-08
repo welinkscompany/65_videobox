@@ -214,8 +214,19 @@ def test_hermes_yujin_receives_only_hashed_auth_and_has_honest_http_health() -> 
             "${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}"
         ),
         "HERMES_TUI_TOOLSETS": "context_engine",
+        # 유진의 두뇌는 이 컴퓨터의 LM Studio다. Hermes 에 내장된 lmstudio
+        # 제공자가 이 두 값을 읽는다. 나중에 외부 모델로 바꾸는 것은
+        # Hermes 대시보드의 제공자 선택으로 하고, 여기는 로컬 기본값만 둔다.
+        "LM_BASE_URL": (
+            "${HERMES_YUJIN_LOCAL_MODEL_BASE_URL:-"
+            "http://host.docker.internal:1234/v1}"
+        ),
+        "LM_API_KEY": "${HERMES_YUJIN_LOCAL_MODEL_API_KEY:-lm-studio}",
     }
     assert "HERMES_YUJIN_GATEWAY_PASSWORD" not in hermes["environment"]
+    # host.docker.internal 은 Docker Desktop 이 자동으로 넣어 준다. extra_hosts 는
+    # 이름을 임의 주소로 돌릴 수 있어 A1 규칙이 금지하므로 직접 넣지 않는다.
+    assert "extra_hosts" not in hermes
     health_command = " ".join(hermes["healthcheck"]["test"])
     assert "http://127.0.0.1:9120/api/status" in health_command
     assert "provider" not in health_command.lower()

@@ -110,6 +110,14 @@ services:
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_YUJIN_GATEWAY_USERNAME:?set in .env.container}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH: ${HERMES_YUJIN_GATEWAY_PASSWORD_HASH:?set in .env.container}
       HERMES_TUI_TOOLSETS: context_engine
+      # 유진의 두뇌는 이 컴퓨터에서 도는 LM Studio 다. Hermes 에 내장된 lmstudio
+      # 제공자가 이 두 값을 읽는다. LM Studio 는 열쇠를 확인하지 않으므로
+      # LM_API_KEY 는 비밀이 아니라 자리를 채우는 값이다. 나중에 외부 모델로
+      # 바꾸는 것은 Hermes 대시보드의 제공자 선택으로 한다.
+      LM_BASE_URL: ${HERMES_YUJIN_LOCAL_MODEL_BASE_URL:-http://host.docker.internal:1234/v1}
+      LM_API_KEY: ${HERMES_YUJIN_LOCAL_MODEL_API_KEY:-lm-studio}
+    # host.docker.internal 은 Docker Desktop 이 자동으로 넣어 준다. extra_hosts 로
+    # 직접 넣지 않는다 — 이름을 임의 주소로 돌릴 수 있어 A1 규칙이 금지한다.
     volumes:
       - videobox_hermes_oauth_state:/opt/data
       - ./config/hermes/yujin:/opt/videobox-yujin-profile:ro
