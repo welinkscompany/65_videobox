@@ -34,6 +34,19 @@
   어댑터 health가 `configured: true`. 저장한 기억이 검색으로 그대로 돌아온다
 - 씽킹 모드는 owner가 LM Studio에서 껐다. 답변이 첫 글자부터 한국어다
 
+## 알아둘 것: 부하 중 흔들리는 테스트가 몇 개 있다
+
+28분짜리 전체 회귀에서 **시간 의존 테스트 세 개가 각각 한 번씩 실패**했다가 단독
+실행에서는 전부 통과했다. 오늘 하루에만 세 번이다.
+
+- `test_api_capcut_draft_export_endpoint.py::test_capcut_draft_handoff_renews_its_durable_lease_during_a_slow_registration`
+- `test_api_yujin_memory.py::test_create_rejects_noncompleted_run_sources_before_candidate_or_provider`
+- `test_api_yujin_memory.py::test_delete_retries_after_local_finalize_failure`
+
+셋 다 lease·retry 같은 **실시간 타이밍**에 걸려 있다. 전체 회귀에서 이 셋 중 하나가
+빨간불이면 **먼저 단독으로 다시 돌려 본다.** 단독에서 통과하면 회귀가 아니다.
+정리 대상이지만 이번 세션 범위 밖이라 남겨 둔다.
+
 ## 다음 세션에서 바로 할 일
 
 ### 1. 유진 기억 전 구간 검증 (미완, 가장 우선)
@@ -63,6 +76,23 @@
 - **Task 34**: 저장하지만 읽지 않는 데이터 정리 (`voice_samples` 죽은 테이블 등)
 - **Task 35 Step 3**: 홈 대시보드 실데이터 (홈에서 fetch 허용 여부는 owner 결정 대기)
 - **Task 29 남은 절반**: 버려진 요청이 LM Studio를 계속 점유하는 문제
+
+## 진입점 문서 정리 (같은 세션, 나중에 한 것)
+
+`CLAUDE.md`가 269줄이었고 그중 **§3 하나가 45%** 였다. 길이 자체(약 4,000 토큰)는
+문제가 아니지만, 이 저장소가 가장 비싸게 배운 규칙 — **완료의 정의**와 **화면 검증** —
+이 "개발 환경"이라는 제목 아래 묻혀 있었다. 훑는 사람도 훑는 도구도 건너뛴다.
+
+- 그 규칙들을 **`## 4. 완료의 정의`** 로 끌어올려 자기 제목을 줬다
+- 명령·주소·스크립트 목록은 `docs/development-fast-path.ko.md` `## 11`로 내렸다.
+  `CLAUDE.md`에는 판단에 필요한 세 줄만 남겼다(venv 강제, owner-ready 강제, env 비밀)
+- 219줄 / 6,960자로 줄었다. 절 번호가 밀려 §4~§8이 하나씩 이동했다
+- `tests/test_handoff_entry_point.py`가 **크기 상한(260줄 / 8,000자)** 과
+  **그 규칙들이 최상위 절에 있는지**를 고정한다
+
+**알려진 낡은 참조 하나:** `docs/handoffs/2026-08-06-videobox-loop-session-handoff.ko.md:50`이
+`CLAUDE.md §5`(승인 필요 항목)를 가리키는데 지금은 `§6`이다. 옛 인계 문서는 작성 시점의
+기록이라 고치지 않았다. 현재 기준은 언제나 `CLAUDE.md` 본문이다.
 
 ## 이번 세션에서 실제로 고친 것 (원인별)
 

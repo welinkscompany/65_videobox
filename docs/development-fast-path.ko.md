@@ -321,3 +321,81 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      host bridge, CapCut bridge의 근거가 아니다(조항 4 유지).
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.
+
+## 11. 명령·주소·스크립트
+
+`CLAUDE.md`에서 내려온 목록이다. 진입점 문서는 판단에 필요한 것만 담고,
+외워 쓰는 목록은 여기에 둔다.
+
+### 검증 명령
+
+backend 검증은 반드시 프로젝트 루트의 venv를 쓴다. bare `pytest`나 시스템 Python은
+근거로 쓰지 않는다. Windows에서 `python`은 Microsoft Store 별칭으로 잡혀 실패한다.
+
+```bash
+.venv/Scripts/python.exe -m pytest -q
+```
+
+```bash
+npm --prefix apps/web test
+```
+
+```bash
+npm --prefix apps/web run build
+```
+
+프론트엔드 타입 검사:
+
+```bash
+npm --prefix apps/web exec tsc -- --noEmit
+```
+
+### 로컬 실행
+
+컨테이너 스택은 `scripts/owner-ready.ps1`로 조작한다. 직접 `docker compose`를 치지 않는다.
+
+```powershell
+.\scripts\owner-ready.ps1 -Mode Check
+```
+
+```powershell
+.\scripts\owner-ready.ps1 -Mode Start
+```
+
+유진 기억 스택까지 켜려면 `-WithYujinMemory`를 붙인다. 이 스위치는 유진 프로필 설치를
+포함한다 — 설치를 건너뛰면 컨테이너가 `Profile 'videobox-yujin' does not exist`로 죽는다.
+
+```powershell
+.\scripts\owner-ready.ps1 -Mode Start -WithYujinMemory
+```
+
+유진 비밀값이 자리표시자면 한 번만 생성한다. 값은 화면에 표시되지 않는다.
+
+```powershell
+.\scripts\new-hermes-yujin-secrets.ps1
+```
+
+- VideoBox: `http://127.0.0.1:5173/`
+- Hermes 대시보드: `http://127.0.0.1:9119/`
+- 개발 서버는 `.claude/launch.json`에 정의돼 있다 (web 5199, api 8000)
+- `.env.container`는 gitignore 대상이다. 실제 credential을 커밋하지 않는다
+
+### 검증 스크립트
+
+`scripts/` 아래에 verifier가 다수 있다. 새 검증 흐름을 만들기 전에 기존 것을 먼저 찾는다.
+예: `verify-editor-ui-system.ps1`, `verify_container_stack.ps1`,
+`verify-editor-ui-source-provenance.ps1`, `verify-hermes-yujin-runtime.ps1`
+
+### 유진 대화가 안 될 때
+
+먼저 두 로그의 차단 사유부터 본다. 화면 문구는 어느 원인이든 똑같아서 구분이 안 된다.
+
+```bash
+docker logs --tail 50 65_videobox-videobox-agent-gateway-1
+```
+
+```bash
+docker logs --tail 50 65_videobox-videobox-workspace-1
+```
+
+`hermes stream blocked: <사유>` 와 `hermes run blocked: <사유>` 를 찾는다.

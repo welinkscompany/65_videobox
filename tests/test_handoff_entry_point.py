@@ -51,3 +51,43 @@ def test_the_rule_says_the_pointer_must_move_with_the_handoff() -> None:
 
     assert "최신 세션 인계" in fast_path
     assert "CLAUDE.md" in fast_path
+
+
+# 진입점 문서가 커지면 정말 중요한 규칙이 덜 중요한 것들 사이에 묻힌다.
+# 이 선을 넘으면 세부는 `docs/development-fast-path.ko.md` `## 11`로 내리고
+# 여기에는 판단에 필요한 것만 남긴다.
+#
+# 여유를 둔 값이다. 잡으려는 것은 "조금씩 불어나는 표류"이지 정상적인 한 줄 추가가
+# 아니다. 2026-08-08 정리 직후 기준은 219줄 / 6,960자였다.
+_CLAUDE_MD_MAX_LINES = 260
+_CLAUDE_MD_MAX_CHARS = 8_000
+
+
+def test_entry_point_stays_short_enough_to_actually_carry_weight() -> None:
+    text = CLAUDE_MD.read_text(encoding="utf-8")
+
+    assert len(text.splitlines()) <= _CLAUDE_MD_MAX_LINES, (
+        f"CLAUDE.md 가 {len(text.splitlines())}줄이다. "
+        "세부 운영 규정은 development-fast-path 로 내린다."
+    )
+    assert len(text) <= _CLAUDE_MD_MAX_CHARS, (
+        f"CLAUDE.md 가 {len(text)}자다. "
+        "세부 운영 규정은 development-fast-path 로 내린다."
+    )
+
+
+def test_the_hardest_earned_rules_are_not_buried_in_an_environment_section() -> None:
+    """"완료의 정의"와 "화면 검증" 은 이 저장소가 가장 비싸게 배운 규칙이다.
+
+    "개발 환경" 같은 제목 아래 있으면 훑는 사람도 훑는 도구도 건너뛴다.
+    자기 제목을 가진 최상위 절이어야 한다.
+    """
+    lines = CLAUDE_MD.read_text(encoding="utf-8").splitlines()
+    tops = [line for line in lines if line.startswith("## ")]
+
+    assert any("완료" in line for line in tops), tops
+    for required in (
+        "owner가 화면에서 그 기능을 실제로 쓸 수 있는가",
+        "API 단건 확인은 화면 확인을 대체하지 못한다",
+    ):
+        assert any(required in line for line in lines), required
