@@ -337,8 +337,9 @@ def test_internal_url_and_service_credential_only() -> None:
     assert events[0].publish_capability_token is None
     assert events[1].publish_capability_token == PUBLISH_TOKEN
     assert PUBLISH_TOKEN not in repr(events[1])
+    # 로컬 모델 대화가 35초를 넘긴다. 기본값을 그대로 쓰는지 확인한다.
     assert factory_calls == [
-        {"base_url": "http://videobox-agent-gateway:8081", "timeout": 35.0}
+        {"base_url": "http://videobox-agent-gateway:8081", "timeout": 300.0}
     ]
     assert http.calls[0][2]["headers"] == {
         "Authorization": f"Bearer {SERVICE_TOKEN}"
