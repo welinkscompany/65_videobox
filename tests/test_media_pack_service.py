@@ -345,3 +345,36 @@ def test_verifier_does_not_leave_verification_library_or_index(tmp_path: Path) -
     assert result.returncode == 1
     assert not (source.parent / ".verification-library").exists()
     assert not (source.parent / ".verification-index").exists()
+
+
+def test_a_probe_version_difference_does_not_block_an_identical_pack(tmp_path: Path) -> None:
+    """The checksum already proves the file is byte-identical, so a small
+    duration difference can only be the probe disagreeing with itself.
+
+    The real CC0 starter pack was built on the host and installed in the
+    container, where ffprobe 7.1.5 reads MP3 durations ~0.05s longer. Two of
+    130 assets tripped a 0.05s tolerance, failing an install of files whose
+    hashes matched exactly.
+    """
+    source = _write_pack(tmp_path / "source")
+    service = MediaPackService(
+        user_library_root=tmp_path / "user-library",
+        library_store=MediaLibraryStore(tmp_path / "global-library"),
+        duration_probe=lambda _path: 12.06,
+        media_probe=_media_probe,
+    )
+
+    assert service.install(source).status == "installed"
+
+
+def test_a_duration_that_could_not_be_probe_drift_is_still_rejected(tmp_path: Path) -> None:
+    """Widening the tolerance must not turn the check off."""
+    source = _write_pack(tmp_path / "source")
+    service = MediaPackService(
+        user_library_root=tmp_path / "user-library",
+        library_store=MediaLibraryStore(tmp_path / "global-library"),
+        duration_probe=lambda _path: 14.0,
+        media_probe=_media_probe,
+    )
+
+    assert service.install(source).error_code == "duration_mismatch"

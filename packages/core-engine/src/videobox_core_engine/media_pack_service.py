@@ -134,7 +134,16 @@ class MediaPackService:
             if digest != asset.sha256:
                 raise MediaPackValidationError("checksum_mismatch", f"checksum mismatch: {asset.asset_id}")
             duration = float(self.duration_probe(path))
-            if not math.isfinite(duration) or duration <= 0 or abs(duration - asset.duration_seconds) > 0.05:
+            # The checksum above already proves this file is byte-identical to
+            # the one the manifest describes, so a small duration difference
+            # cannot mean "wrong file" -- only that a different ffprobe build
+            # reads the same bytes slightly differently. The real CC0 starter
+            # pack hit exactly that: built on the host, installed in the
+            # container, where ffprobe 7.1.5 reports MP3 durations up to ~0.05s
+            # longer. Two of 130 assets failed a 0.05s tolerance. The check
+            # stays, to catch a manifest that disagrees with reality, but it is
+            # no longer tighter than the probes agree with each other.
+            if not math.isfinite(duration) or duration <= 0 or abs(duration - asset.duration_seconds) > 0.5:
                 raise MediaPackValidationError("duration_mismatch", f"duration mismatch: {asset.asset_id}")
             indexed.append({
                 "library_asset_id": asset.library_asset_id, "asset_id": asset.asset_id,
