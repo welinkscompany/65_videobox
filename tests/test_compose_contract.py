@@ -26,14 +26,21 @@ def test_workspace_owns_api_and_web_mounts_without_host_or_docker_access() -> No
     assert workspace["build"] == {"context": ".", "dockerfile": "docker/workspace.Dockerfile"}
     assert workspace["environment"]["VIDEOBOX_DATA_ROOT"] == "/videobox-data"
     assert workspace["environment"]["VIDEOBOX_SNAPSHOT_ROOT"] == "/videobox-snapshot"
-    # Exactly two host bind mounts, both under the configured data root, plus a
+    # Exactly three host bind mounts, all under the configured data root, plus a
     # named volume for speech-to-text weights.  The named volume grants no host
     # access; it exists because the root filesystem is read-only and model
     # downloads must not land in the owner's project data.  Keep this list exact
     # so any further mount has to be justified here.
+    #
+    # drive-sync is the drop folder the owner (or a Drive mirror) puts footage
+    # in. It stays under the same data root as everything else -- this is not a
+    # widening to arbitrary host paths -- and it is writable because the watcher
+    # files each original into a sibling folder once it has been imported, which
+    # is how the owner can see what was already taken.
     assert workspace["volumes"] == [
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro",
+        "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync:/videobox-drive-sync",
         "videobox_model_cache:/opt/models",
     ]
     assert workspace["environment"]["HF_HOME"] == "/opt/models"
