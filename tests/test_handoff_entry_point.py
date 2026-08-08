@@ -91,3 +91,18 @@ def test_the_hardest_earned_rules_are_not_buried_in_an_environment_section() -> 
         "API 단건 확인은 화면 확인을 대체하지 못한다",
     ):
         assert any(required in line for line in lines), required
+
+
+def test_the_two_data_roots_hazard_is_written_down() -> None:
+    """컨테이너와 로컬은 서로 다른 데이터 폴더를 본다.
+
+    2026-08-08 확인: 두 곳 모두에 `b-roll-smoke-test` 가 있었고 크기가
+    달랐다(92MB 대 123MB). 어느 쪽으로 띄웠는지 모르면 "어제 만든 프로젝트가
+    사라졌다"로 보인다. 이 위험이 문서에 적혀 있지 않으면 다음 사람이 똑같이 겪는다.
+    """
+    fast_path = FAST_PATH.read_text(encoding="utf-8")
+
+    assert "65_videobox-container-data-v2" in fast_path
+    assert "65_videobox-project" in fast_path
+    # 어느 쪽을 보고 있는지 확인하는 방법도 함께 적혀 있어야 한다.
+    assert "projects_root" in fast_path

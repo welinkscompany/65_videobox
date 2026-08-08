@@ -49,7 +49,62 @@
 
 ## 다음 세션에서 바로 할 일
 
-### 1. 유진 기억 전 구간 검증 (미완, 가장 우선)
+### 0. 전체 시스템 경로 전수조사 (owner 지시, 최우선)
+
+**데이터 폴더가 두 벌로 갈라져 있다.** 2026-08-08에 발견했다.
+
+| 실행 | 저장소 | 프로젝트 데이터 |
+|---|---|---|
+| 컨테이너 | Postgres | `20_project\65_videobox-container-data-v2\runtime\projects` |
+| 로컬 | 파일 | `20_project\65_videobox-project\projects` |
+
+양쪽에 **같은 이름의 프로젝트가 각각** 있고 크기가 다르다
+(`b-roll-smoke-test` 92MB 대 123MB, `progress-bar-live-test` 2.8MB 대 2.7MB).
+화면만 봐서는 구분되지 않아 "어제 만든 프로젝트가 사라졌다"로 보인다.
+
+**이번 세션에서 한 것:** `/health`가 `store`와 `projects_root`를 함께 알리도록
+고쳤고(`main.py`), 함정을 `development-fast-path.ko.md`에 적고 테스트로 고정했다.
+
+**아직 안 한 것 — 다음 세션 작업:**
+
+1. **경로 전수조사.** 데이터를 쓰는 모든 경로를 한 번에 훑는다. 후보:
+   `VIDEOBOX_DATA_ROOT`, `resolve_projects_root()`, `resolve_user_library_root()`,
+   `DEFAULT_MEDIA_INBOX_WATCH_PATH`(`G:\내 드라이브\100_videobox`),
+   `VIDEOBOX_CONTAINER_DATA_ROOT`, exports/previews/캐시 경로, TTS 샘플,
+   `비롤_라이브러리`, `videobox-user-library`, whisper 모델 캐시
+2. **두 폴더를 어떻게 할지 owner 결정.** 합칠지, 한쪽을 버릴지. 영상 데이터라
+   내가 임의로 옮기거나 지우지 않았다
+3. **한 겹 더 들어간 잔재 정리.**
+   `runtime\projects\projects\b-roll-smoke-test\assets\imported\_intake_probe.mp4`
+   (31MB, 2026-08-05). 코드에도 git 이력에도 이 이름이 없어 과거 수동 시험의
+   잔재로 보이지만 **확정하지 못했다.** 지우기 전에 출처를 먼저 밝힌다
+4. **로컬 실행 경로를 계속 유지할지 판단.** 지금은 컨테이너가 실제 작업선이다.
+   로컬 경로를 남긴다면 두 벌 데이터를 계속 안고 가는 것이고, 접는다면
+   `.claude/launch.json`과 `DEFAULT_PROJECTS_ROOT`의 역할을 다시 정의해야 한다
+
+**왜 갈라졌는지 (조사 결과, 예상보다 단순했다):**
+
+경로 정의는 8개 파일에 있지만 흩어진 게 아니다. `settings.py`의
+`resolve_projects_root()`가 **`VIDEOBOX_DATA_ROOT`가 있으면 그걸, 없으면
+`DEFAULT_PROJECTS_ROOT`를** 쓴다. compose가 이 변수를 `/videobox-data`로 덮어쓰고
+호스트의 `65_videobox-container-data-v2/runtime`을 거기 붙인다. 로컬 실행은 이 변수를
+안 주므로 `DEFAULT_PROJECTS_ROOT`(`65_videobox-project`)로 간다. **구조는 정상이고,
+로컬 쪽에 변수를 안 준 것이 전부다.**
+
+**그래서 "로컬에도 같은 변수를 주면 끝"이 아니다.** 컨테이너는 Postgres 저장소,
+로컬은 파일 저장소다. 루트를 같게 맞추면 **미디어 파일은 같은 자리를 보지만
+프로젝트 기록은 여전히 갈라진다**(Postgres 대 파일). 반쪽 합치기가 오히려 더 헷갈릴 수
+있으니, 합치기 전에 저장소를 하나로 정하는 판단이 먼저다.
+
+**같이 보면 좋을 것 (내 제안):**
+- **쓰기 경로에 "여기가 맞나" 검사를 붙인다.** `projects/projects` 같은 중첩은
+  경로를 조립할 때 한 번만 확인하면 애초에 안 생긴다
+- **고아 파일 스캐너.** 어느 프로젝트에도 속하지 않는 파일을 찾아 보고만 하는
+  읽기 전용 스크립트. 지우지 않고 목록만 낸다
+- **용량 보고.** 두 폴더가 각각 얼마를 쓰는지 정기적으로 본다. 오늘 기준
+  컨테이너 쪽에만 150MB 넘는 영상이 있고, 그중 31MB가 잘못된 자리에 있었다
+
+### 1. 유진 기억 전 구간 검증 (미완)
 
 저장과 검색은 되지만 **유진이 과거 기억을 실제로 참조하는 것은 아직 확인 못 했다.**
 

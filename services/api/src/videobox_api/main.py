@@ -646,7 +646,14 @@ def create_app(
     )
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"status": "ok"}
+        # 어느 데이터 폴더를 보고 있는지 함께 알린다. VideoBox 는 컨테이너와
+        # 로컬 두 가지로 뜰 수 있고 서로 다른 폴더를 보므로, 이걸 알려주지
+        # 않으면 같은 이름의 다른 프로젝트를 보고도 구분할 수 없다.
+        return {
+            "status": "ok",
+            "store": "postgres" if database_url is not None else "local",
+            "projects_root": str(resolved_projects_root.resolve()),
+        }
 
     app.include_router(build_projects_router(store))
     app.include_router(

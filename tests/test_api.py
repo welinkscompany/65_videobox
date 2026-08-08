@@ -4607,6 +4607,23 @@ def test_health_endpoint_reports_ok() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_health_says_which_project_data_it_is_serving(tmp_path: Path) -> None:
+    """어느 데이터 폴더를 보고 있는지 앱이 스스로 말해야 한다.
+
+    VideoBox 는 컨테이너와 로컬 두 가지로 뜰 수 있고 **서로 다른 데이터
+    폴더**를 본다. 2026-08-08에 확인해 보니 같은 이름의 프로젝트가 양쪽에
+    따로 있었고 크기까지 달랐다. 화면만 봐서는 구분할 수 없어서,
+    "어제 만든 프로젝트가 사라졌다"로 보이기 쉽다.
+    """
+    response = TestClient(create_app(projects_root=tmp_path)).get("/health")
+
+    payload = response.json()
+    assert payload["status"] == "ok"
+    # 파일 저장소인지 Postgres 인지도 함께 알려야 한다. 둘은 별도 데이터다.
+    assert payload["store"] == "local"
+    assert payload["projects_root"] == str(tmp_path.resolve())
+
+
 def test_create_app_has_no_provider_credential_management_routes(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
 

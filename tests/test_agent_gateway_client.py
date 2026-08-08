@@ -10,6 +10,7 @@ from videobox_api.agent_gateway_client import AgentGatewayReservation
 from videobox_api.agent_gateway_client import AgentGatewayUnavailable
 from videobox_api.yujin_memory_service import ApprovedMemoryStoreRequest
 from videobox_api.yujin_memory_service import GatewayMemoryDeleteRequest
+from videobox_api.yujin_memory_service import GatewayMemorySearchRequest
 
 
 SERVICE_TOKEN = "workspace-service-token-that-is-at-least-32"
@@ -683,3 +684,50 @@ def test_memory_delete_uses_authenticated_private_gateway_contract() -> None:
             },
         )
     ]
+
+
+def test_search_memory_decodes_a_real_json_gateway_body() -> None:
+    """The gateway answers over HTTP, so `memories` arrives as a JSON array."""
+
+    body = (
+        '{"memories":[{"memory_ref":"memory-private",'
+        '"text":"빠른 컷을 선호합니다.",'
+        '"category":"pacing","external_ref":"ext-' + "a" * 64 + '"}]}'
+    ).encode("utf-8")
+
+    class Response:
+        status_code = 200
+        is_redirect = False
+        content = body
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            import json
+
+            return json.loads(body)
+
+    class Http:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return Response()
+
+    client = AgentGatewayClient(
+        base_url="http://videobox-agent-gateway:8081",
+        service_token=SERVICE_TOKEN,
+        http_client_factory=lambda **_: Http(),
+    )
+    result = asyncio.run(
+        client.search_memory(
+            GatewayMemorySearchRequest(query="편집 템포", limit=5)
+        )
+    )
+
+    assert result.memories[0].text == "빠른 컷을 선호합니다."
+    assert result.memories[0].category == "pacing"

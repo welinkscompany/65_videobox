@@ -399,3 +399,38 @@ docker logs --tail 50 65_videobox-videobox-workspace-1
 ```
 
 `hermes stream blocked: <사유>` 와 `hermes run blocked: <사유>` 를 찾는다.
+
+### 데이터 폴더가 두 벌이다 — 먼저 알아야 할 함정
+
+VideoBox는 두 가지로 뜰 수 있고 **서로 다른 데이터 폴더**를 본다.
+
+| 실행 | 주소 | 저장소 | 프로젝트 데이터 |
+|---|---|---|---|
+| 컨테이너 | `127.0.0.1:5173` | Postgres | `20_project\65_videobox-container-data-v2\runtime\projects` |
+| 로컬 | web `5199` / api `8000` | 파일 | `20_project\65_videobox-project\projects` |
+
+2026-08-08 확인 결과 **양쪽 모두에 `b-roll-smoke-test`가 있었고 크기가 달랐다**
+(92MB 대 123MB). 화면만 봐서는 구분할 수 없어 "어제 만든 프로젝트가 사라졌다"로
+보이기 쉽다. **한쪽을 정해서 계속 쓴다.** 지금 owner의 실제 작업 데이터는 컨테이너 쪽이다.
+
+어느 쪽을 보고 있는지는 `/health`가 알려준다.
+
+```bash
+curl -s http://127.0.0.1:5173/health
+```
+
+`store`(`postgres`/`local`)와 `projects_root`가 함께 나온다. 작업 전에 이걸 먼저 본다.
+
+**어느 쪽인지 가르는 것은 `store`다.** 컨테이너로 뜨면 `projects_root`가
+`/videobox-data`(컨테이너 안에서 본 경로)로 나오므로, 호스트의 실제 폴더는 위 표에서
+읽는다. 로컬로 뜨면 호스트 경로가 그대로 나온다.
+
+```
+컨테이너: {"status":"ok","store":"postgres","projects_root":"/videobox-data"}
+로컬:     {"status":"ok","store":"local","projects_root":"D:\\...\\65_videobox-project"}
+```
+
+**아직 정리되지 않은 것:** 두 폴더를 합칠지, 한쪽을 버릴지는 owner의 영상 데이터에
+대한 결정이라 미뤄 두었다. `runtime\projects\projects\`처럼 한 겹 더 들어간 잔재도
+남아 있다(2026-08-05자 `_intake_probe.mp4` 31MB). 코드에도 이력에도 이 이름이 없어
+과거 수동 시험의 잔재로 보이지만, 확정하지 않았다.

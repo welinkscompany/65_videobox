@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from videobox_agent_gateway.main import create_app
 from videobox_agent_gateway.memory_gateway import MemoryWriteOutcome
 from videobox_agent_gateway.memory_gateway import (
+    AdapterMemorySearch,
     AdapterMemoryWrite,
     HermesMemoryAdapterClient,
     MemoryDeleteResult,
@@ -268,3 +269,56 @@ def test_gateway_search_and_delete_are_narrow_authenticated_routes() -> None:
     }
     assert deleted.json() == {"deleted": True}
     assert all(not hasattr(request, "project_id") for request in adapter.requests)
+
+
+def test_adapter_client_decodes_a_real_json_search_body() -> None:
+    """The adapter answers over HTTP, so `memories` arrives as a JSON array."""
+
+    body = (
+        '{"memories":[{"memory_ref":"memory-private",'
+        '"text":"\ube60\ub978 \ucef7\uc744 \uc120\ud638\ud569\ub2c8\ub2e4.",'
+        '"category":"pacing","external_ref":"ext-' + "a" * 64 + '"}]}'
+    ).encode("utf-8")
+
+    class Response:
+        status_code = 200
+        is_redirect = False
+        content = body
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            import json
+
+            return json.loads(body)
+
+    class Http:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return Response()
+
+    client = HermesMemoryAdapterClient(
+        base_url="http://videobox-hermes-memory-adapter:8082",
+        service_token="adapter-service-token-with-enough-entropy-456",
+        http_client_factory=lambda **_kwargs: Http(),
+    )
+    result = asyncio.run(
+        client.search(AdapterMemorySearch(query="편집 템포", limit=5))
+    )
+
+    assert result == MemorySearchResult(
+        memories=(
+            RetrievedMemory(
+                memory_ref="memory-private",
+                text="빠른 컷을 선호합니다.",
+                category="pacing",
+                external_ref="ext-" + "a" * 64,
+            ),
+        )
+    )

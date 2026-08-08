@@ -402,9 +402,10 @@ class AgentGatewayClient:
                 content = getattr(response, "content", b"")
                 if isinstance(content, (bytes, bytearray)) and len(content) > 16_384:
                     raise ValueError("agent_gateway_memory_invalid")
-                return GatewayMemorySearchResult.model_validate(
-                    response.json()
-                )
+                # Decode the wire bytes, not `.json()`.  The model is strict
+                # and `memories` is a tuple, and strict Python-mode validation
+                # rejects the list every JSON decoder produces.
+                return GatewayMemorySearchResult.model_validate_json(content)
         except asyncio.CancelledError:
             raise
         except Exception as error:
