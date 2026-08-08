@@ -330,8 +330,11 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      `http://host.docker.internal:1234/v1`(컨테이너). `settings.py`의
      `LocalOpenAICompatibleRuntimeConfig.__post_init__`이 그 밖의 값을 거부한다.
      scheme·port·path를 바꾼 값, 자격 증명이 붙은 값은 전부 거부된다.
-   - 이 승인은 **로컬 모델 호출 하나에만** 적용된다. 다른 host bridge의 근거가
-     아니다(조항 4 유지).
+   - 이 승인은 **호스트의 LM Studio를 부르는 경로에만** 적용된다. 대화 경로
+     (`settings.py`의 `LocalOpenAICompatibleRuntimeConfig`)와 B-roll 분석의
+     비전·임베딩 경로(`lm_studio.py`의 `LMStudioHTTPTransport`) **둘 다 같은
+     주소·같은 기계**이며, 두 곳이 각각 못박고 있어 따로 열어야 했다.
+     다른 host bridge의 근거가 아니다(조항 4 유지).
 
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.

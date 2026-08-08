@@ -304,7 +304,9 @@ def test_transport_revalidates_endpoint_and_disallows_redirects_per_request() ->
     transport.preflight(model_name="local-media", capability="embedding")
     transport.base_url = "http://127.0.0.1:9999/v1"
 
-    with pytest.raises(LMStudioProviderError, match="loopback"):
+    # Matches the allowed endpoint, not the old "loopback" wording -- the
+    # container host was added to that list on 2026-08-08.
+    with pytest.raises(LMStudioProviderError, match=r"1234/v1"):
         transport.preflight(model_name="local-media", capability="embedding")
 
 

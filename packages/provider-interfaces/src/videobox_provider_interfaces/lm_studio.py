@@ -15,6 +15,12 @@ from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, FIXED_VISIO
 
 _LM_STUDIO_URL = "http://127.0.0.1:1234/v1"
 _LM_STUDIO_NATIVE_MODELS_URL = "http://127.0.0.1:1234/api/v1/models"
+# Inside the container 127.0.0.1 is the container, so B-roll analysis could
+# never reach a model there.  `host.docker.internal` is the Docker host --
+# this same machine -- so the reason for the pin, a local call never leaving
+# the machine, is unchanged.  Owner approved 2026-08-08
+# (`docs/development-fast-path.ko.md` §10.14 clause 2-B).
+_ALLOWED_LM_STUDIO_HOSTS = frozenset({"127.0.0.1", "host.docker.internal"})
 _MAX_IMAGES = 6
 _MAX_ENCODED_IMAGE_BYTES = int(1.5 * 1024 * 1024)
 _VISION_SCHEMA_KEYS = frozenset({"layers", "summary", "confidence", "review_reasons"})
@@ -72,20 +78,27 @@ class LMStudioHTTPTransport:
         parsed = urlparse(self.base_url)
         if (
             parsed.scheme != "http"
-            or parsed.hostname != "127.0.0.1"
+            or parsed.hostname not in _ALLOWED_LM_STUDIO_HOSTS
             or parsed.port != 1234
             or parsed.path != "/v1"
             or parsed.params
             or parsed.query
             or parsed.fragment
         ):
-            raise LMStudioProviderError("LM Studio endpoint must be exact loopback http://127.0.0.1:1234/v1.", "blocked")
+            raise LMStudioProviderError(
+                "LM Studio endpoint must be http://127.0.0.1:1234/v1, or "
+                "http://host.docker.internal:1234/v1 in the container.",
+                "blocked",
+            )
 
     def _native_models_endpoint(self) -> str:
         self._validate_endpoint()
         # The native model inventory carries loaded-instance and vision metadata
         # that the OpenAI-compatible /v1/models response does not guarantee.
-        return _LM_STUDIO_NATIVE_MODELS_URL
+        # It must follow the same host -- pointing it at loopback from inside a
+        # container would quietly talk to nothing.
+        host = urlparse(self.base_url).hostname
+        return f"http://{host}:1234/api/v1/models"
 
     def _native_loaded_models(self, *, timeout_seconds: int) -> list[tuple[str, str, dict[str, Any]]]:
         payload = self.request_native_models(timeout_seconds=timeout_seconds)
@@ -184,7 +197,8 @@ class LMStudioHTTPTransport:
         parsed = urlparse(endpoint)
         if (
             parsed.scheme != "http"
-            or parsed.hostname != "127.0.0.1"
+            or parsed.hostname not in _ALLOWED_LM_STUDIO_HOSTS
+            or parsed.hostname != urlparse(self.base_url).hostname
             or parsed.port != 1234
             or parsed.params
             or parsed.query
@@ -194,7 +208,7 @@ class LMStudioHTTPTransport:
                 and not (parsed.path.startswith("/v1/") and len(parsed.path) > len("/v1/"))
             )
         ):
-            raise LMStudioProviderError("LM Studio request must be exact loopback endpoint.", "blocked")
+            raise LMStudioProviderError("LM Studio request must stay on this machine.", "blocked")
         self.requested_endpoints.append(endpoint)
         request = Request(
             endpoint,

@@ -536,7 +536,13 @@ def create_app(
         # This explicit profile is the only production construction path.  The
         # transport validates the exact loopback endpoint before each request,
         # and we preflight loaded native capability before a worker is exposed.
-        transport = LMStudioHTTPTransport(http_client=media_analysis_http_client)
+        # Same LM Studio the chat route talks to, so it must resolve the same
+        # host: inside the container 127.0.0.1 is the container, and analysis
+        # would silently have nothing to reach.
+        transport = LMStudioHTTPTransport(
+            base_url=resolved_local_runtime_config.base_url,
+            http_client=media_analysis_http_client,
+        )
         capability = transport.capability_profile()
         if capability.vision_model_name is None:
             raise ValueError("A loaded LM Studio vision + structured_json model is required.")
