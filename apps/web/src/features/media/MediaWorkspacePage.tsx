@@ -4,6 +4,7 @@ import { api, type BrollAsset, type MediaAnalysis, type MediaInboxAsset } from "
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { MediaLibraryBrowser } from "./MediaLibraryBrowser";
 
 type MediaState = {
   projectId: string;
@@ -289,6 +290,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
               </div>
             )}
           </section>
+
+          <MediaLibraryBrowser projectId={projectId} />
 
           <section aria-labelledby="media-assets-heading">
             <h2 id="media-assets-heading">준비한 자산</h2>
