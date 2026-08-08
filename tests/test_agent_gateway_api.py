@@ -659,9 +659,12 @@ def test_unsafe_output_split_across_events_is_quarantined() -> None:
 
 
 def test_excessive_empty_event_stream_is_bounded() -> None:
+    from videobox_agent_gateway.main import _MAX_PUBLIC_EVENTS
+
     class NoisyHermes:
         async def stream_prompt(self, *, text: str, run_id: str | None = None):
-            for _ in range(513):
+            # 상한을 바꿔도 "상한을 넘으면 막는다"는 계약은 그대로여야 한다.
+            for _ in range(_MAX_PUBLIC_EVENTS + 1):
                 yield HermesRpcEvent("message.delta", "")
             yield HermesRpcEvent("message.complete", "answer")
 
@@ -1135,3 +1138,41 @@ def test_weak_or_placeholder_service_tokens_are_rejected(token: str) -> None:
             service_token=token,
             capability_issuer=_capability_issuer(),
         )
+
+
+def test_blocked_runs_report_a_safe_reason_code_for_logs() -> None:
+    """게이트웨이가 실패 사유를 통째로 삼키면 원인을 못 찾는다.
+
+    2026-08-08: 유진 대화가 매번 blocked 로 끝났는데 로그에 아무것도 남지
+    않아, 원인을 찾는 데만 여러 시간이 걸렸다. 다만 사유에 사용자 내용이나
+    자격 증명이 섞이면 안 되므로 알려진 코드만 통과시킨다.
+    """
+    from videobox_agent_gateway.main import safe_block_reason
+
+    assert safe_block_reason(ValueError("gateway_output_unsafe")) == (
+        "gateway_output_unsafe"
+    )
+    assert safe_block_reason(ValueError("gateway_completion_missing")) == (
+        "gateway_completion_missing"
+    )
+    # 모르는 예외는 내용을 흘리지 않고 종류만 남긴다.
+    leaked = safe_block_reason(RuntimeError("PRIVATE token abc123"))
+    assert "PRIVATE" not in leaked
+    assert "abc123" not in leaked
+    assert leaked == "unexpected:RuntimeError"
+
+
+def test_public_event_cap_fits_a_token_streaming_local_model() -> None:
+    """게이트웨이의 512개 상한이 로컬 모델 대화를 매번 잘랐다.
+
+    2026-08-08 실기: Hermes 가 한 답변에 976~1070개의 델타를 보내는데
+    512에서 gateway_event_limit 이 터졌다. 실제 분량은
+    _MAX_PUBLIC_TEXT_BYTES 가 따로 막으므로 개수만 넉넉히 둔다.
+    """
+    from videobox_agent_gateway.main import (
+        _MAX_PUBLIC_EVENTS,
+        _MAX_PUBLIC_TEXT_BYTES,
+    )
+
+    assert _MAX_PUBLIC_EVENTS >= 8_192
+    assert _MAX_PUBLIC_TEXT_BYTES == 200_000

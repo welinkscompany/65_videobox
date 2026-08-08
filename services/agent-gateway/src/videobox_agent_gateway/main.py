@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 import hmac
 import json
+import logging
 import os
 import re
 import threading
@@ -81,7 +82,10 @@ _SENSITIVE_START = re.compile(
     r"(?![a-z0-9_])"
 )
 _MAX_PUBLIC_TEXT_BYTES = 200_000
-_MAX_PUBLIC_EVENTS = 512
+# 로컬 모델은 글자 단위로 흘려보내 한 답변에 1000개 넘는 이벤트를 만든다.
+# 512 는 빠른 외부 모델 기준이었고, 로컬 두뇌에서는 매 대화가 여기서 잘렸다.
+# 실제 분량은 _MAX_PUBLIC_TEXT_BYTES 가 막으므로 개수만 넉넉히 둔다.
+_MAX_PUBLIC_EVENTS = 8_192
 _QUARANTINE_CHARS = 256
 _MAX_UNRESOLVED_QUARANTINE_BYTES = 4_096
 _MAX_PUBLIC_DELTA_BYTES = 32_000
@@ -103,6 +107,29 @@ _DEGRADING_FAILURE_CODES = frozenset(
         "hermes_ticket_expired",
     }
 )
+
+# 로그로 내보내도 되는 실패 사유. 이 목록에 없는 예외는 메시지를 버리고
+# 종류만 남긴다 -- 예외 문구에 대화 내용이나 자격 증명이 섞일 수 있다.
+_LOGGABLE_BLOCK_REASONS = frozenset(
+    {
+        "gateway_output_unsafe",
+        "gateway_completion_missing",
+        "gateway_memory_unavailable",
+        *_DEGRADING_FAILURE_CODES,
+    }
+)
+
+# uvicorn 이 설정한 로거를 쓴다. 모듈 로거는 컨테이너 로그에 나오지 않는다.
+_logger = logging.getLogger("uvicorn.error")
+
+
+def safe_block_reason(error: BaseException) -> str:
+    """차단 사유를 로그에 남겨도 되는 형태로 줄인다."""
+
+    text = str(error)
+    if text in _LOGGABLE_BLOCK_REASONS:
+        return text
+    return "unexpected:" + type(error).__name__
 
 
 def _strict_utc_now(clock: Callable[[], datetime]) -> datetime:
@@ -385,8 +412,12 @@ async def _stream_public_lines(
         else:
             raise ValueError("gateway_completion_missing")
     except Exception as error:
+        # 사유를 남기지 않으면 화면에는 "일시적으로 사용할 수 없습니다" 만 뜨고
+        # 원인을 찾을 단서가 아무 데도 남지 않는다. 2026-08-08 실기 교훈.
+        reason = safe_block_reason(error)
+        _logger.warning("hermes stream blocked: %s", reason)
         if run_observation is not None:
-            run_observation.final_failure(str(error))
+            run_observation.final_failure(reason)
         yield b'{"event_type":"blocked","text":"","retryable":true}\n'
     finally:
         if stream is not None:

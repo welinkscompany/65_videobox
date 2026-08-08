@@ -270,7 +270,10 @@ class AgentGatewayClient:
         base_url: str,
         service_token: str,
         http_client_factory: Callable = _default_http_client_factory,
-        timeout_seconds: float = 35.0,
+        # 유진의 두뇌가 이 컴퓨터의 로컬 모델이라 한 대화가 35초를 넘긴다.
+        # 이 값은 게이트웨이로 가는 스트림 전체를 덮으므로, 게이트웨이 쪽
+        # 제한과 같이 올려야 한다. 둘 중 짧은 쪽이 실제 한계다.
+        timeout_seconds: float = 300.0,
         status_timeout_seconds: float = 3.0,
         epoch_seconds: Callable[[], int] | None = None,
     ) -> None:
