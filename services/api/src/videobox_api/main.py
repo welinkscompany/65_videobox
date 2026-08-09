@@ -369,7 +369,7 @@ async def _recover_hermes_store_runs(
 
 
 async def _prune_hermes_run_events(app: FastAPI) -> None:
-    """Bound durable event payloads without re-running orphan recovery."""
+    """오래된 기록을 쳐낸다. 재시도나 재실행은 하지 않는다."""
     store: LocalProjectStore = app.state.store
     projects = await asyncio.to_thread(store.list_projects)
     for project in projects:
@@ -379,6 +379,14 @@ async def _prune_hermes_run_events(app: FastAPI) -> None:
             project_id=project_id,
             retention_days=30,
             keep_terminal_streams=128,
+        )
+        # 이 정리는 정의와 테스트만 있고 부르는 곳이 없었다. 그래서
+        # `media_analysis_cache`와 `media_embeddings`가 계속 늘기만 했다 --
+        # 아무도 돌리지 않는 보관 정책은 정책이 아니다.
+        await asyncio.to_thread(
+            store.prune_stale_media_analysis_cache,
+            project_id=project_id,
+            retention_days=30,
         )
 
 

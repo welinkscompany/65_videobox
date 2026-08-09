@@ -64,3 +64,30 @@ def test_a_failing_prune_does_not_fall_back_to_running_every_second(
         time.sleep(0.6)
 
     assert calls == 1, f"a failing prune ran {calls} times instead of keeping its schedule"
+
+
+def test_the_analysis_cache_is_actually_pruned(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`prune_stale_media_analysis_cache` had tests but no caller, so
+    `media_analysis_cache` and `media_embeddings` grew forever. A retention
+    policy nobody runs is not a retention policy."""
+    pruned: list[str] = []
+
+    def fake_prune(self, *, project_id: str, retention_days: int = 30) -> int:
+        pruned.append(project_id)
+        return 0
+
+    monkeypatch.setattr(
+        "videobox_storage.local_project_store.LocalProjectStore.prune_stale_media_analysis_cache",
+        fake_prune,
+    )
+    monkeypatch.setattr(api_main, "HERMES_EVENT_PRUNE_INTERVAL_SECONDS", 0.05)
+
+    app = api_main.create_app(
+        projects_root=tmp_path / "projects",
+        media_analysis_poll_interval_seconds=0.01,
+    )
+    app.state.store.bootstrap_project("보관 정리")
+    with TestClient(app):
+        time.sleep(0.4)
+
+    assert pruned, "analysis cache retention never ran"
