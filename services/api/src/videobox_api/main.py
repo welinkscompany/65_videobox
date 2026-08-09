@@ -57,7 +57,7 @@ from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.library_footage_indexer import index_pending_library_footage
 from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_watcher_loop
-from videobox_core_engine.media_analysis import MediaAnalysisService
+from videobox_core_engine.media_analysis import MediaAnalysisService, assets_needing_reanalysis
 from videobox_core_engine.media_analysis import AnalysisProfile
 from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
@@ -224,6 +224,9 @@ HERMES_EVENT_PRUNE_INTERVAL_SECONDS = 3600.0
 LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS = 60.0
 LIBRARY_AUDIO_INDEX_BATCH = 8
 
+# 낡은 분석을 한꺼번에 다 걸면 로컬 모델이 동시에 받고 전부 타임아웃한다.
+REANALYSIS_BATCH = 1
+
 
 def _build_music_library_hooks(
     *, library_store: MediaLibraryStore, project_store: LocalProjectStore, app: FastAPI
@@ -319,6 +322,40 @@ async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
         recovered = store.recover_orphaned_media_analysis_jobs(project_id=project_id) if recover_running else []
         if dispatcher is None:
             continue
+        # 분석 문구가 바뀌면 저장된 결과는 낡은 언어로 남는다. 라이브러리
+        # 색인과 같은 방식으로 저절로 다시 걸어 준다.
+        service = getattr(app.state, "media_analysis_service", None)
+        stale: list[str] = []
+        if service is not None and recover_running:
+            try:
+                current_keys = {}
+                for asset in store.list_assets(project_id=project_id):
+                    asset_id = str(asset["asset_id"])
+                    try:
+                        current_keys[asset_id] = service.cache_key(
+                            source_sha256=sha256_file(
+                                store.resolve_storage_uri(
+                                    project_id=project_id, storage_uri=str(asset["storage_uri"])
+                                )
+                            ),
+                            profile=service.profile,
+                        )
+                    except Exception:
+                        continue
+                stale = assets_needing_reanalysis(
+                    store=store,
+                    project_id=project_id,
+                    current_cache_keys=current_keys,
+                    limit=REANALYSIS_BATCH,
+                )
+                for asset_id in stale:
+                    service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+            except Exception:
+                _LOGGER.warning(
+                    "낡은 분석을 다시 걸지 못했습니다 (project=%s). 태그가 옛 언어로 남습니다.",
+                    project_id,
+                    exc_info=True,
+                )
         pending_ids = {
             *recovered,
             *(str(item["analysis_id"]) for item in store.list_media_analysis(project_id=project_id) if item["status"] in {"queued", "failed"}),

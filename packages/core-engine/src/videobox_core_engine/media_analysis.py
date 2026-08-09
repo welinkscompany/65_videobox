@@ -18,7 +18,10 @@ from videobox_core_engine.media_probe import MediaProbeResult
 from videobox_storage.local_project_store import sha256_file
 
 
-TAG_PROMPT_VERSION = "v1"
+# v2: 분석 문구를 우리말로 바꿨다. 캐시 열쇠에 들어가므로 이 값을 올리면
+# 저장된 영어 결과가 저절로 다시 분석된다 -- 안 올리면 편집기에서 같은 영상이
+# 두 언어로 보인다.
+TAG_PROMPT_VERSION = "v2"
 TAG_SCHEMA_VERSION = "v1"
 RETRY_BACKOFF_SECONDS = (5, 30)
 
@@ -31,6 +34,39 @@ VISION_ANALYSIS_PROMPT = (
     "이 영상 장면을 분석해라. 모든 값과 요약을 한국어로만 써라. "
     "영어 단어를 쓰지 마라."
 )
+
+
+
+def assets_needing_reanalysis(
+    *, store: Any, project_id: str, current_cache_keys: dict[str, str], limit: int | None = None
+) -> list[str]:
+    """분석 문구가 바뀐 뒤 낡은 결과를 들고 있는 자산.
+
+    버전만 올리면 새 분석은 우리말로 나오지만 이미 저장된 것은 영어인 채로
+    남는다. 편집기에서 같은 영상이 두 언어로 보이고, 대본 문장과 맞추는
+    의미검색도 언어가 어긋난 채로 돈다.
+
+    끝난 것만 본다 -- 아직 도는 것을 다시 걸면 같은 일을 두 번 시킨다. 한 번도
+    분석하지 않은 자산은 기존 예약 경로가 맡으므로 여기서 다루지 않는다.
+
+    `limit`은 필수다시피 하다. 한꺼번에 다 걸었더니 로컬 모델이 동시에 네 건을
+    받고 전부 타임아웃했다 -- 라이브러리 색인이 8개·2개씩 끊어 도는 것과 같은
+    이유다.
+    """
+    stale: list[str] = []
+    for analysis in store.list_media_analysis(project_id=project_id):
+        if str(analysis.get("status")) not in {"succeeded", "needs_review"}:
+            continue
+        asset_id = str(analysis.get("asset_id") or "")
+        expected = current_cache_keys.get(asset_id)
+        if expected is None:
+            continue
+        stored = str((analysis.get("result") or {}).get("cache_key") or "")
+        if stored and stored != expected and asset_id not in stale:
+            stale.append(asset_id)
+            if limit is not None and len(stale) >= limit:
+                break
+    return stale
 
 
 @dataclass(frozen=True, slots=True)
