@@ -131,3 +131,27 @@ def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch, request: pytest.F
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
     monkeypatch.setattr(socket.socket, "bind", guarded_bind)
     monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
+
+
+# Drawing a text overlay needs a real font file on disk. These tests used to
+# rely on the renderer's own default, which was a `C:\Windows\Fonts` path --
+# so they only ever proved anything on a Windows dev machine and would have
+# failed in the Linux container the product ships in. The test environment
+# now names the font it has, instead of the product carrying a default that
+# happens to suit one developer's machine.
+_OVERLAY_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    r"C:\Windows\Fonts\malgun.ttf",
+    r"C:\Windows\Fonts\arial.ttf",
+)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _overlay_font_for_tests() -> None:
+    if os.environ.get("VIDEOBOX_OVERLAY_FONT"):
+        return
+    for candidate in _OVERLAY_FONT_CANDIDATES:
+        if Path(candidate).is_file():
+            os.environ["VIDEOBOX_OVERLAY_FONT"] = candidate
+            return

@@ -169,6 +169,19 @@ def _json_safe_validation_value(value):
 
 _MISSING_RUNTIME_ATTRIBUTE = object()
 
+# The loop below runs recovery, analysis dispatch and event pruning together.
+# At the old 50 ms cadence that meant listing every project and querying each
+# of them twenty times a second: an idle stack held the workspace container at
+# ~33% CPU, Postgres at ~41%, and ~180 database transactions per second with
+# nobody using the app. A second is still well inside "it started while I was
+# looking at it" for the owner.
+_MAINTENANCE_INTERVAL_SECONDS = 1.0
+
+# Pruning drops events older than 30 days. Running that DELETE on the dispatch
+# cadence cannot find anything the previous pass missed -- it only spends the
+# database's time.
+HERMES_EVENT_PRUNE_INTERVAL_SECONDS = 3600.0
+
 
 def _recover_in_process_jobs(app: FastAPI) -> None:
     """A restart kills the daemon threads these jobs run on, but leaves their
@@ -306,11 +319,15 @@ async def _media_analysis_lifespan(app: FastAPI):
 
     async def worker() -> None:
         first = True
+        loop_clock = asyncio.get_running_loop()
+        next_prune_at = 0.0
         while not stop_event.is_set():
             try:
                 await _recover_hermes_runs(app)
                 await _poll_media_analysis(app, recover_running=first)
-                await _prune_hermes_run_events(app)
+                if loop_clock.time() >= next_prune_at:
+                    await _prune_hermes_run_events(app)
+                    next_prune_at = loop_clock.time() + HERMES_EVENT_PRUNE_INTERVAL_SECONDS
                 first = False
             except Exception:
                 # One bounded owner survives database outages and retries the
@@ -412,7 +429,7 @@ def create_app(
     asset_browser_preview_renderer=None,
     analysis_dispatcher=None,
     analysis_clock=None,
-    media_analysis_poll_interval_seconds: float = 0.05,
+    media_analysis_poll_interval_seconds: float = _MAINTENANCE_INTERVAL_SECONDS,
     media_analysis_profile: dict | None = None,
     enable_local_media_analysis: bool | None = None,
     media_analysis_http_client=None,
