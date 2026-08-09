@@ -23,6 +23,16 @@ import { describe, expect, it } from "vitest";
 // 화면을 그리는 파일을 직접 찾아서, 새로 만든 화면이 기본으로 검사되게 한다.
 // 예외는 둘뿐이다: 테스트 파일과 shadcn 원본(`components/ui`) --
 // 후자는 우리가 쓴 문구가 아니라 가져온 부품이라 별도로 다룬다.
+// Skip the vendored shadcn tree by its path from the source root, not by
+// folder name. Matching on the name alone would also silently drop a future
+// `features/editor/components/` -- the same quiet gap this discovery exists
+// to close.
+const VENDORED_DIRECTORY = "components";
+
+export function shouldSkipDirectory(name: string, relativePath: string): boolean {
+  return relativePath === VENDORED_DIRECTORY && name === VENDORED_DIRECTORY;
+}
+
 function discoverUiFiles(): string[] {
   const root = import.meta.dirname;
   const found: string[] = [];
@@ -30,7 +40,7 @@ function discoverUiFiles(): string[] {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const full = resolve(directory, entry.name);
       if (entry.isDirectory()) {
-        if (entry.name === "components") continue;
+        if (shouldSkipDirectory(entry.name, relative(root, full).split("\\").join("/"))) continue;
         walk(full);
         continue;
       }
@@ -246,4 +256,16 @@ describe("user-facing dashboard copy", () => {
       expect(containsForbiddenDashboardCopy(dashboardCopy(), forbiddenTerm)).toBe(false);
     });
   }
+});
+
+describe("문구 게이트의 발견 범위", () => {
+  it("가져온 부품 한 곳만 빼고, 이름이 겹치는 폴더는 빼지 않는다", () => {
+    // `components`라는 이름을 어디서든 건너뛰면, 나중에
+    // `features/editor/components/`를 만드는 순간 그 화면이 조용히
+    // 검사 밖으로 빠진다 -- 이 함수가 없애려던 바로 그 고장이다.
+    expect(discoverUiFiles).toBeTypeOf("function");
+    expect(shouldSkipDirectory("components", "components")).toBe(true);
+    expect(shouldSkipDirectory("components", "features/editor/components")).toBe(false);
+    expect(shouldSkipDirectory("features", "features")).toBe(false);
+  });
 });

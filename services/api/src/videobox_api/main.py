@@ -326,8 +326,12 @@ async def _media_analysis_lifespan(app: FastAPI):
                 await _recover_hermes_runs(app)
                 await _poll_media_analysis(app, recover_running=first)
                 if loop_clock.time() >= next_prune_at:
-                    await _prune_hermes_run_events(app)
+                    # Book the next run before the prune can raise. Otherwise a
+                    # failing prune keeps the old deadline and retries on every
+                    # pass -- hammering the database exactly when it is already
+                    # unhealthy, which is what the hourly schedule exists to stop.
                     next_prune_at = loop_clock.time() + HERMES_EVENT_PRUNE_INTERVAL_SECONDS
+                    await _prune_hermes_run_events(app)
                 first = False
             except Exception:
                 # One bounded owner survives database outages and retries the

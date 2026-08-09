@@ -15,6 +15,10 @@ missed.
 from __future__ import annotations
 
 import inspect
+import time
+
+import pytest
+from fastapi.testclient import TestClient
 
 from videobox_api import main as api_main
 
@@ -33,3 +37,30 @@ def test_pruning_thirty_day_old_events_runs_far_less_often_than_dispatch() -> No
     # to the dispatch interval is what made an idle stack run DELETEs
     # continuously.
     assert api_main.HERMES_EVENT_PRUNE_INTERVAL_SECONDS >= 300
+
+
+def test_a_failing_prune_does_not_fall_back_to_running_every_second(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The point of the hourly schedule is that an unhealthy database stops
+    being hammered. If a raising prune left the next-run time unset, the loop
+    would retry it on every pass -- reintroducing the load exactly when the
+    database can least afford it."""
+    calls = 0
+
+    async def failing_prune(_app) -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(api_main, "_prune_hermes_run_events", failing_prune)
+
+    app = api_main.create_app(
+        projects_root=tmp_path / "projects",
+        media_analysis_poll_interval_seconds=0.01,
+    )
+    with TestClient(app):
+        # Long enough for many passes at a 10 ms cadence.
+        time.sleep(0.6)
+
+    assert calls == 1, f"a failing prune ran {calls} times instead of keeping its schedule"

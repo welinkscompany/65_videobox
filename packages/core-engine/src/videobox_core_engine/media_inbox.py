@@ -128,7 +128,14 @@ def run_inbox_cycle(
     # multiplying the owner's footage under hash-suffixed names instead of
     # tidying it.
     archive_root = config.archive_root.resolve() if config.archive_root is not None else None
-    candidates = scan_inbox_candidates(config.watch_path)
+    candidates = [
+        source
+        for source in scan_inbox_candidates(config.watch_path)
+        # Drop what the archive already holds before deciding the pass is
+        # busy: with the archive inside the watched folder every pass would
+        # otherwise look like it had work and read the library for nothing.
+        if archive_root is None or archive_root not in source.resolve().parents
+    ]
     if not candidates:
         # Almost every pass lands here. Hashing the whole library first cost a
         # full read of it every 30 seconds -- 760 MB at the time this was
@@ -141,8 +148,6 @@ def run_inbox_cycle(
     }
     for source in candidates:
         name = source.name
-        if archive_root is not None and archive_root in source.resolve().parents:
-            continue
         try:
             if not is_settled(source):
                 report.skipped.append(name)

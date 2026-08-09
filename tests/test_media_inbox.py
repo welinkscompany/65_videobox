@@ -457,3 +457,35 @@ def test_a_pass_with_a_new_file_still_catches_a_duplicate(tmp_path: Path) -> Non
 
     assert report.duplicates == ["dropped.mp4"]
     assert report.moved == []
+
+
+def test_an_archive_inside_the_watched_folder_still_counts_as_an_idle_pass(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The scan recurses, so an archive placed inside the watched folder makes
+    every pass look busy even though each file is skipped as already-filed.
+    The library read has to be skipped on what is left after that guard, not
+    on the raw scan."""
+    watch = tmp_path / "watch"
+    archive = watch / "가져옴"
+    library = tmp_path / "library"
+    archive.mkdir(parents=True)
+    library.mkdir()
+    (library / "already-here.mp4").write_bytes(b"kept" * 4096)
+    (archive / "filed-last-time.mp4").write_bytes(b"filed")
+
+    read_paths: list[Path] = []
+    original = media_inbox._sha256_file
+    monkeypatch.setattr(
+        media_inbox,
+        "_sha256_file",
+        lambda path: (read_paths.append(path), original(path))[1],
+    )
+
+    report = media_inbox.run_inbox_cycle(
+        media_inbox.MediaInboxConfig(watch_path=watch, library_root=library, archive_root=archive),
+        is_settled=lambda _path: True,
+    )
+
+    assert report.moved == [] and report.duplicates == []
+    assert read_paths == []
