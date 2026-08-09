@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from videobox_api.models import LibraryFavoriteRequest, MaterializeLibraryAssetRequest
+from videobox_api.models import (
+    LibraryAudioSearchRequest,
+    LibraryFavoriteRequest,
+    MaterializeLibraryAssetRequest,
+)
+from videobox_provider_interfaces.embeddings import EmbeddingRequest
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
@@ -24,6 +29,39 @@ def build_media_library_router(
             return library_store.install_state()
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+
+    @router.post("/api/media-library/search")
+    def search_library_assets(payload: LibraryAudioSearchRequest, request: Request) -> dict[str, object]:
+        """Find assets that suit a scene, by meaning rather than by filename.
+
+        The library's own descriptions are written in creator language, so a
+        query like "차분한 배경 음악" lands near the right tracks. Without the
+        local model there is no query vector, and answering with an arbitrary
+        list would be worse than saying so.
+        """
+        query = payload.query.strip()
+        if not query:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="query_required")
+        provider = getattr(request.app.state, "media_analysis_embedding_provider", None)
+        model_name = (getattr(request.app.state, "media_analysis_profile", None) or {}).get(
+            "embedding_model_name"
+        )
+        if provider is None or not model_name:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_search_unavailable"
+            )
+        try:
+            response = provider.embed(EmbeddingRequest(model_name=model_name, inputs=(query,)))
+            matches = library_store.find_audio_matches(
+                query_embedding=[float(value) for value in response.vectors[0]],
+                media_type=payload.media_type,
+                limit=payload.limit,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_search_unavailable"
+            ) from exc
+        return {"matches": matches}
 
     @router.get("/api/media-library/assets")
     def list_library_assets() -> dict[str, object]:

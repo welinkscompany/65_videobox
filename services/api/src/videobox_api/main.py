@@ -53,6 +53,7 @@ from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_watcher_loop
 from videobox_core_engine.media_analysis import MediaAnalysisService
 from videobox_core_engine.media_analysis import AnalysisProfile
@@ -181,6 +182,27 @@ _MAINTENANCE_INTERVAL_SECONDS = 1.0
 # cadence cannot find anything the previous pass missed -- it only spends the
 # database's time.
 HERMES_EVENT_PRUNE_INTERVAL_SECONDS = 3600.0
+
+# The owner adds music and effects over time, and each new file has to become
+# searchable without them running anything. A bounded pass keeps a first
+# install of 130 files -- or a big drop of new ones -- from turning startup
+# into a long analysis run; what is left is picked up next minute.
+LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS = 60.0
+LIBRARY_AUDIO_INDEX_BATCH = 8
+
+
+def _index_library_audio(app: FastAPI) -> None:
+    store = getattr(app.state, "media_library_store", None)
+    if store is None:
+        return
+    index_pending_library_audio(
+        store=store,
+        embedding_provider=getattr(app.state, "media_analysis_embedding_provider", None),
+        embedding_model_name=(getattr(app.state, "media_analysis_profile", None) or {}).get(
+            "embedding_model_name"
+        ),
+        max_assets=LIBRARY_AUDIO_INDEX_BATCH,
+    )
 
 
 def _recover_in_process_jobs(app: FastAPI) -> None:
@@ -321,10 +343,16 @@ async def _media_analysis_lifespan(app: FastAPI):
         first = True
         loop_clock = asyncio.get_running_loop()
         next_prune_at = 0.0
+        next_index_at = 0.0
         while not stop_event.is_set():
             try:
                 await _recover_hermes_runs(app)
                 await _poll_media_analysis(app, recover_running=first)
+                if loop_clock.time() >= next_index_at:
+                    # Booked before the call, same as the prune below: a
+                    # failing pass must not turn into a per-second retry.
+                    next_index_at = loop_clock.time() + LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS
+                    await asyncio.to_thread(_index_library_audio, app)
                 if loop_clock.time() >= next_prune_at:
                     # Book the next run before the prune can raise. Otherwise a
                     # failing prune keeps the old deadline and retries on every

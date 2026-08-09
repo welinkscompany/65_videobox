@@ -878,6 +878,16 @@ class LibraryFavoriteRequest(BaseModel):
     enabled: bool
 
 
+class LibraryAudioSearchRequest(BaseModel):
+    """Ask the music and effects library what suits a scene."""
+
+    query: str = Field(min_length=1)
+    # A scene needs music or an effect, never whichever of the two happens to
+    # score highest, so the kind is required rather than optional.
+    media_type: Literal["music", "sfx"]
+    limit: int = Field(default=5, ge=1, le=50)
+
+
 class EditingSessionHistoryEntryResponse(BaseModel):
     mutation_type: str
     segment_id: str

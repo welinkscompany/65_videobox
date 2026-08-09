@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import hashlib
 import json
+import math
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -204,6 +205,156 @@ class MediaLibraryStore:
             assets.append(item)
         return assets
 
+    def list_assets_needing_audio_analysis(
+        self, *, description_version: int = 1
+    ) -> list[dict[str, Any]]:
+        """Active assets that have never been measured, whose bytes changed, or
+        whose embedding is still missing.
+
+        The last case matters: measuring needs only ffmpeg, embedding needs the
+        local model. When the model is away the measurements are still worth
+        keeping, and the asset has to come back for its vector later rather
+        than being quietly treated as done.
+        """
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """SELECT a.library_asset_id, a.asset_id, a.media_type, a.sha256, a.path
+                    FROM media_assets a
+                    JOIN media_packs p ON p.pack_id = a.pack_id AND p.version = a.version
+                    LEFT JOIN library_audio_descriptors d ON d.library_asset_id = a.library_asset_id
+                    WHERE p.active = 1 AND p.verified = 1
+                      AND (d.library_asset_id IS NULL OR d.sha256 <> a.sha256
+                           OR d.embedding_json IS NULL OR d.description_version < ?)
+                    ORDER BY a.library_asset_id""",
+                (int(description_version),),
+            ).fetchall()
+        finally:
+            connection.close()
+        return [dict(row) for row in rows]
+
+    def save_audio_descriptor(
+        self,
+        *,
+        library_asset_id: str,
+        sha256: str,
+        measurements: dict[str, float],
+        words: dict[str, str],
+        description: str,
+        embedding: list[float] | None,
+        description_version: int = 1,
+    ) -> None:
+        connection = self._connection()
+        try:
+            connection.execute(
+                """
+                INSERT INTO library_audio_descriptors (
+                    library_asset_id, sha256, duration_seconds, loudness_rms, brightness_hz,
+                    onset_rate_per_second, words_json, description, embedding_json,
+                    description_version, analyzed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(library_asset_id) DO UPDATE SET
+                    sha256 = excluded.sha256, duration_seconds = excluded.duration_seconds,
+                    loudness_rms = excluded.loudness_rms, brightness_hz = excluded.brightness_hz,
+                    onset_rate_per_second = excluded.onset_rate_per_second,
+                    words_json = excluded.words_json, description = excluded.description,
+                    embedding_json = excluded.embedding_json,
+                    description_version = excluded.description_version,
+                    analyzed_at = excluded.analyzed_at
+                """,
+                (
+                    library_asset_id,
+                    sha256,
+                    float(measurements["duration_seconds"]),
+                    float(measurements["loudness_rms"]),
+                    float(measurements["brightness_hz"]),
+                    float(measurements["onset_rate_per_second"]),
+                    json.dumps(words, ensure_ascii=False),
+                    description,
+                    json.dumps(embedding) if embedding is not None else None,
+                    int(description_version),
+                    self._now(),
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def get_audio_descriptor(self, *, library_asset_id: str) -> dict[str, Any] | None:
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT * FROM library_audio_descriptors WHERE library_asset_id = ?",
+                (library_asset_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        return self._normalize_descriptor_row(row) if row is not None else None
+
+    @staticmethod
+    def _normalize_descriptor_row(row: sqlite3.Row) -> dict[str, Any]:
+        item = dict(row)
+        item["words"] = json.loads(str(item.pop("words_json")))
+        raw_embedding = item.pop("embedding_json", None)
+        item["embedding"] = json.loads(str(raw_embedding)) if raw_embedding else None
+        return item
+
+    def find_audio_matches(
+        self, *, query_embedding: list[float], media_type: str, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Rank one kind of library asset against a query by cosine similarity.
+
+        Restricted to a single media_type on purpose: a scene needs music or an
+        effect, never whichever of the two happens to score highest.
+        """
+        query = tuple(float(value) for value in query_embedding)
+        if not query or not all(math.isfinite(value) for value in query):
+            raise ValueError("query_embedding must contain finite values")
+        query_norm = math.sqrt(sum(value * value for value in query))
+        if query_norm == 0:
+            raise ValueError("query_embedding must not be all zeros")
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """SELECT d.library_asset_id, d.description, d.words_json, d.embedding_json,
+                          d.duration_seconds, a.asset_id, a.media_type
+                    FROM library_audio_descriptors d
+                    JOIN media_assets a ON a.library_asset_id = d.library_asset_id
+                    JOIN media_packs p ON p.pack_id = a.pack_id AND p.version = a.version
+                    WHERE p.active = 1 AND p.verified = 1 AND a.media_type = ?
+                      AND d.embedding_json IS NOT NULL""",
+                (media_type,),
+            ).fetchall()
+        finally:
+            connection.close()
+
+        matches: list[dict[str, Any]] = []
+        for row in rows:
+            vector = json.loads(str(row["embedding_json"]))
+            if len(vector) != len(query):
+                # A model change leaves old vectors incomparable. Skip them
+                # rather than ranking on a truncated dot product; they come
+                # back as pending once their embedding is cleared.
+                continue
+            norm = math.sqrt(sum(value * value for value in vector))
+            if norm == 0:
+                continue
+            score = sum(a * b for a, b in zip(query, vector, strict=True)) / (query_norm * norm)
+            matches.append({
+                "library_asset_id": str(row["library_asset_id"]),
+                "asset_id": str(row["asset_id"]),
+                "media_type": str(row["media_type"]),
+                "description": str(row["description"]),
+                "words": json.loads(str(row["words_json"])),
+                "duration_seconds": float(row["duration_seconds"]),
+                "score": round(score, 6),
+            })
+        matches.sort(key=lambda match: (-match["score"], match["library_asset_id"]))
+        return matches[:limit]
+
     def install_state(self) -> dict[str, object]:
         assets = self.inspect_active_assets()
         if not assets:
@@ -346,6 +497,18 @@ class MediaLibraryStore:
             CREATE TABLE IF NOT EXISTS recent_library_usage (
                 library_asset_id TEXT PRIMARY KEY, used_at TEXT NOT NULL
             );
+            -- What each asset actually sounds like, plus the vector that makes
+            -- it findable. Keyed on the checksum that was analysed, so a
+            -- replaced or newly added file comes back as pending on its own --
+            -- nobody has to remember to re-run anything after adding music.
+            CREATE TABLE IF NOT EXISTS library_audio_descriptors (
+                library_asset_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL,
+                duration_seconds REAL NOT NULL, loudness_rms REAL NOT NULL,
+                brightness_hz REAL NOT NULL, onset_rate_per_second REAL NOT NULL,
+                words_json TEXT NOT NULL, description TEXT NOT NULL,
+                embedding_json TEXT, description_version INTEGER NOT NULL DEFAULT 1,
+                analyzed_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS license_evidence (
                 pack_id TEXT NOT NULL, version TEXT NOT NULL, library_asset_id TEXT NOT NULL,
                 official_url TEXT NOT NULL, evidence_timestamp TEXT NOT NULL, evidence_sha256 TEXT NOT NULL,
@@ -357,6 +520,7 @@ class MediaLibraryStore:
             "ALTER TABLE media_assets ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'",
             "ALTER TABLE media_assets ADD COLUMN attribution_required INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE media_assets ADD COLUMN attribution_text TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE library_audio_descriptors ADD COLUMN description_version INTEGER NOT NULL DEFAULT 1",
         ):
             try:
                 connection.execute(statement)
