@@ -32,6 +32,15 @@ export function fromSnapshot(style: CaptionStyleSnapshot): Partial<Record<string
   return mapped;
 }
 
+/** 즐겨찾기가 되는 모양인지.
+ *
+ * 저장소는 `project:` 또는 `pack:` 으로 시작하는 것만 받는다. 내장 모양에
+ * 버튼을 띄우면 눌러도 422로 실패한다 -- 화면이 못 하는 일을 권하는 셈이다.
+ */
+export function canFavourite(presetId: string, projectId: string): boolean {
+  return presetId.startsWith(`project:${projectId}:`) || presetId.startsWith("pack:");
+}
+
 /** 저장된 자막 모양을 고르고, 자주 쓰는 것은 위에 둔다.
  *
  * 프리셋과 즐겨찾기 계약은 백엔드에 다 있었는데 부르는 화면이 없었다 --
@@ -106,13 +115,15 @@ export function CaptionPresetPicker({
             <Button type="button" variant="outline" onClick={() => void apply(preset)}>
               {`${preset.name} 적용`}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void toggle(preset.preset_id, !loved)}
-            >
-              {loved ? `${preset.name} 즐겨찾기 해제` : `${preset.name} 즐겨찾기`}
-            </Button>
+            {canFavourite(preset.preset_id, projectId) ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void toggle(preset.preset_id, !loved)}
+              >
+                {loved ? `${preset.name} 즐겨찾기 해제` : `${preset.name} 즐겨찾기`}
+              </Button>
+            ) : null}
           </article>
         );
       }) : <p>아직 저장된 자막 모양이 없어요.</p>}
