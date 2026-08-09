@@ -228,7 +228,7 @@ describe("product shell", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/settings/ai-privacy"] }));
     render(<AppRouter router={router} />);
 
-    expect(await screen.findByRole("button", { name: "이 기기에서만 처리: 켜짐" })).toBeTruthy();
+    expect(await screen.findByText("모든 처리는 이 기기 안에서만 이뤄집니다.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "내 목소리 준비 상태" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "내 목소리" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings/voice"));
@@ -430,5 +430,23 @@ describe("output format setting", () => {
 
     expect(screen.getByText("완성본은 MP4(H.264)로 만듭니다.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "MOV" })).toBeNull();
+  });
+});
+
+describe("settings that cannot do what they offered", () => {
+  it("states the local-only fact instead of a switch that cannot be turned off", () => {
+    // VideoBox processes everything on this machine regardless, so the toggle
+    // could never be false. A fact is useful; a dead switch is not.
+    render(<SettingsPage section="ai-privacy" onNavigate={vi.fn()} projectId="project-a" />);
+
+    expect(screen.getByText("모든 처리는 이 기기 안에서만 이뤄집니다.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /이 기기에서만 처리/ })).toBeNull();
+  });
+
+  it("drops the storage alert entirely, since nothing ever alerts", () => {
+    render(<SettingsPage section="general" onNavigate={vi.fn()} projectId="project-a" />);
+
+    expect(screen.queryByRole("button", { name: "저장공간" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /저장 공간 알림/ })).toBeNull();
   });
 });

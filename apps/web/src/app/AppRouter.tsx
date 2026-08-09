@@ -367,7 +367,7 @@ function SettingsRoutePage() {
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     project_id?: unknown;
   };
-  const validSections = ["general", "appearance", "ai-privacy", "voice", "storage", "output"] as const;
+  const validSections = ["general", "appearance", "ai-privacy", "voice", "output"] as const;
   if (!validSections.includes(section as typeof validSections[number])) return <RecoveryPage />;
   const requestedProjectId = typeof routeSearch.project_id === "string" ? routeSearch.project_id.trim() : "";
   if (requestedProjectId && !projects.some((project) => project.project_id === requestedProjectId)) return <RecoveryPage />;
