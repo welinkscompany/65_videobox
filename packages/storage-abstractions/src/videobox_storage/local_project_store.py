@@ -9166,6 +9166,57 @@ class LocalProjectStore:
         finally:
             connection.close()
 
+    # Everything except the two types that own a recovery path of their own:
+    # media analysis re-queues through the dispatcher, asset previews through
+    # recover_orphaned_asset_preview_jobs. The rest run on a daemon thread in
+    # the API process, so a restart leaves the row claiming `running` with no
+    # thread behind it -- and retry_job only accepts `failed`.
+    _IN_PROCESS_JOB_TYPES: tuple[str, ...] = tuple(
+        job_type.value
+        for job_type in JobType
+        if job_type not in {JobType.MEDIA_ANALYSIS, JobType.ASSET_PREVIEW_PROXY}
+    )
+
+    def recover_orphaned_in_process_jobs(self, *, project_id: str) -> list[str]:
+        """Fail jobs a restart stranded, so the owner's retry button works."""
+        connection = self._connection(project_id)
+        try:
+            placeholders = ", ".join("?" for _ in self._IN_PROCESS_JOB_TYPES)
+            select_sql = f"""
+                SELECT job_id FROM jobs
+                WHERE project_id = ?
+                  AND job_type IN ({placeholders})
+                  AND status IN (?, ?)
+                """
+            parameters = (
+                project_id,
+                *self._IN_PROCESS_JOB_TYPES,
+                JobStatus.PENDING.value,
+                JobStatus.RUNNING.value,
+            )
+            stranded = [str(row["job_id"]) for row in connection.execute(select_sql, parameters).fetchall()]
+            if not stranded:
+                return []
+            connection.execute(
+                f"""
+                    UPDATE jobs
+                    SET status = ?, error_message = ?, finished_at = ?
+                    WHERE project_id = ?
+                      AND job_type IN ({placeholders})
+                      AND status IN (?, ?)
+                    """,
+                (
+                    JobStatus.FAILED.value,
+                    "WORKER_RESTARTED",
+                    self._now_iso(),
+                    *parameters,
+                ),
+            )
+            connection.commit()
+            return stranded
+        finally:
+            connection.close()
+
     def list_jobs(self, *, project_id: str) -> list[dict[str, Any]]:
         connection = self._connection(project_id)
         try:

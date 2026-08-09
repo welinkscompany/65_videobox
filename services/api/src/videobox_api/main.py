@@ -170,6 +170,16 @@ def _json_safe_validation_value(value):
 _MISSING_RUNTIME_ATTRIBUTE = object()
 
 
+def _recover_in_process_jobs(app: FastAPI) -> None:
+    """A restart kills the daemon threads these jobs run on, but leaves their
+    rows saying `running`. The owner sees a spinner that never stops, and
+    `retry_job` refuses anything that is not `failed` -- so without this the
+    job is stuck for good."""
+    store: LocalProjectStore = app.state.store
+    for project in store.list_projects():
+        store.recover_orphaned_in_process_jobs(project_id=str(project["project_id"]))
+
+
 async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
     store: LocalProjectStore = app.state.store
     dispatcher = app.state.media_analysis_dispatcher
@@ -287,6 +297,11 @@ async def _media_analysis_lifespan(app: FastAPI):
         await asyncio.to_thread(app.state.asset_browser_preview_service.recover_orphans)
     except Exception:
         # Preview recovery is retriable and never starts a renderer.
+        pass
+    try:
+        await asyncio.to_thread(_recover_in_process_jobs, app)
+    except Exception:
+        # Marking a dead job dead is retriable and starts no work.
         pass
 
     async def worker() -> None:
