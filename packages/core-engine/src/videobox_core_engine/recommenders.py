@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from videobox_core_engine.provider_trace import build_provider_trace, response_provider_trace, with_final_provider
 from videobox_provider_interfaces.llm import LLMProviderError, LLMTaskType
@@ -179,23 +179,25 @@ class RuleBasedMusicRecommender(RecommendationProvider):
         results: list[RecommendationCandidate] = []
         for segment in request.segments:
             text = str(segment.get("text", "")).lower()
-            mood = "focused corporate"
+            # 영어 단어를 한국어 내레이션에서 찾던 규칙이라 사실상 모든 장면이
+            # 같은 기본값으로 떨어졌다. 우리말 단서를 함께 본다.
+            mood = "차분하게 깔리는 분위기"
             score = 0.66
-            if "team" in text or "meeting" in text:
-                mood = "collaborative upbeat"
+            if any(marker in text for marker in ("team", "meeting", "함께", "회의", "우리")):
+                mood = "함께하는 밝은 분위기"
                 score = 0.79
-            elif "office" in text or "overview" in text:
-                mood = "clean documentary pulse"
+            elif any(marker in text for marker in ("office", "overview", "소개", "정리", "살펴")):
+                mood = "담담하게 설명하는 분위기"
                 score = 0.74
-            elif "restart" in text or _normalize_boolish(segment.get("review_required")):
-                mood = "light neutral bed"
+            elif "restart" in text or "다시" in text or _normalize_boolish(segment.get("review_required")):
+                mood = "가볍게 받쳐 주는 분위기"
                 score = 0.61
             results.append(
                 RecommendationCandidate(
                     target_segment_id=str(segment["segment_id"]),
                     selected_asset_id=None,
                     score=score,
-                    reason=f"Suggested music mood for this segment: {mood}.",
+                    reason=f"이 장면에 어울리는 음악 분위기: {mood}.",
                     auto_apply_allowed=guardrail.auto_apply_allowed,
                     review_required=guardrail.review_required,
                     payload={"music_mood": mood},
@@ -209,6 +211,11 @@ class LocalOnlyMusicRecommender(RecommendationProvider):
     runtime_service: StructuredRecommendationRuntime
     fallback_recommender: RecommendationProvider = field(default_factory=RuleBasedMusicRecommender)
     provider_name: str = "local-only-music"
+    # 장면에 맞는 곡을 실제로 고르기 위한 두 갈고리. 저장소와 임베딩 공급자를
+    # core-engine이 직접 알 필요는 없어서 호출 가능한 것만 받는다.
+    # 없으면 예전처럼 분위기만 말한다 -- 아무 곡이나 고르는 것보다 낫다.
+    library_search: Callable[[str, int], list[dict[str, Any]]] | None = None
+    resolve_project_asset: Callable[[str, str], str | None] | None = None
 
     def recommend(self, request: RecommendationRequest) -> list[RecommendationCandidate]:
         fallback_candidates = self.fallback_recommender.recommend(request)
@@ -261,21 +268,64 @@ class LocalOnlyMusicRecommender(RecommendationProvider):
                 )
                 continue
 
+            mood = music_mood.strip()
+            payload: dict[str, Any] = {
+                "music_mood": mood,
+                "provider_trace": response_provider_trace(response),
+            }
+            selected_asset_id = fallback_candidate.selected_asset_id
+            reason = f"이 장면에 어울리는 음악 분위기: {mood}."
+
+            track = self._pick_track(segment=segment, mood=mood)
+            if track is not None:
+                words = track.get("words") or {}
+                payload["library_asset_id"] = str(track.get("library_asset_id", ""))
+                payload["words"] = words
+                payload["duration_seconds"] = track.get("duration_seconds")
+                project_asset_id = (
+                    self.resolve_project_asset(request.project_id, payload["library_asset_id"])
+                    if self.resolve_project_asset is not None
+                    else None
+                )
+                selected_asset_id = project_asset_id
+                # 아직 프로젝트에 없으면 화면이 가져오기부터 해야 한다.
+                payload["needs_import"] = project_asset_id is None
+                described = ", ".join(
+                    f"{axis} {value}" for axis, value in words.items()
+                )
+                reason = f"{mood}에 맞춰 고른 음악입니다. {described}."
+
             candidates.append(
                 RecommendationCandidate(
                     target_segment_id=fallback_candidate.target_segment_id,
-                    selected_asset_id=fallback_candidate.selected_asset_id,
+                    selected_asset_id=selected_asset_id,
                     score=round(float(score), 2),
-                    reason=f"Suggested music mood for this segment: {music_mood.strip()}.",
+                    reason=reason,
                     auto_apply_allowed=fallback_candidate.auto_apply_allowed,
                     review_required=fallback_candidate.review_required,
-                    payload={
-                        "music_mood": music_mood.strip(),
-                        "provider_trace": response_provider_trace(response),
-                    },
+                    payload=payload,
                 )
             )
         return candidates
+
+    def _pick_track(self, *, segment: dict[str, Any], mood: str) -> dict[str, Any] | None:
+        """장면과 모델이 말한 분위기를 함께 물어 실제 곡을 고른다.
+
+        검색이 없거나 답이 비면 곡을 고르지 않는다. 라이브러리에서 아무거나
+        집어 주는 것은 owner에게 도움이 되지 않는다.
+        """
+        if self.library_search is None:
+            return None
+        query = f"{mood} {str(segment.get('text', '')).strip()}".strip()
+        if not query:
+            return None
+        try:
+            matches = self.library_search(query, 1)
+        except Exception:
+            # 로컬 모델이나 라이브러리가 잠깐 없는 것뿐이다. 추천 자체를
+            # 막지 않고 분위기만 말하는 예전 경로로 돌아간다.
+            return None
+        return matches[0] if matches else None
 
     def _fallback_candidate(
         self,
@@ -303,8 +353,12 @@ class LocalOnlyMusicRecommender(RecommendationProvider):
 
     def _build_prompt(self, *, segment: dict[str, Any]) -> str:
         return (
-            "Suggest a concise background music mood for this video segment.\n"
-            f"Segment: {segment.get('text', '')}\n"
-            f"Review required: {bool(segment.get('review_required'))}\n"
-            "Return music_mood as a short phrase and score as a 0-1 confidence value."
+            # 이 문구는 이유 문장에 그대로 들어가 화면에 보인다. 실제 응답이
+            # "corporate upbeat", "focused and professional"로 나와서 영어가
+            # 화면까지 새어 나왔다.
+            "이 장면에 어울리는 배경 음악 분위기를 짧게 제안해라.\n"
+            f"장면: {segment.get('text', '')}\n"
+            f"검토 필요: {bool(segment.get('review_required'))}\n"
+            "music_mood는 한국어 짧은 구절로만 쓰고, 영어 단어를 쓰지 마라. "
+            "score는 0에서 1 사이 확신도로 쓴다."
         )

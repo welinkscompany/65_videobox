@@ -59,6 +59,7 @@ from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_watcher
 from videobox_core_engine.media_analysis import MediaAnalysisService
 from videobox_core_engine.media_analysis import AnalysisProfile
 from videobox_core_engine.media_probe import FFmpegMediaProbe
+from videobox_provider_interfaces.embeddings import EmbeddingRequest
 from videobox_provider_interfaces.lm_studio import LMStudioEmbeddingProvider, LMStudioHTTPTransport, LMStudioVisionProvider
 from videobox_core_engine.output_operator_copy import LocalFirstOutputOperatorCopyBuilder
 from videobox_core_engine.recommenders import LocalOnlyKeywordBrollRecommender, LocalOnlyMusicRecommender
@@ -190,6 +191,45 @@ HERMES_EVENT_PRUNE_INTERVAL_SECONDS = 3600.0
 # into a long analysis run; what is left is picked up next minute.
 LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS = 60.0
 LIBRARY_AUDIO_INDEX_BATCH = 8
+
+
+def _build_music_library_hooks(
+    *, library_store: MediaLibraryStore, project_store: LocalProjectStore, app: FastAPI
+):
+    """음악 추천이 실제 곡을 고를 수 있게 해 주는 두 갈고리.
+
+    추천기는 저장소도 임베딩 공급자도 모르게 두고 호출 가능한 것만 넘긴다.
+    모델이 없으면 검색이 None을 돌려주고, 추천은 예전처럼 분위기만 말한다 --
+    라이브러리에서 아무거나 집어 주는 것보다 낫다.
+    """
+
+    def search(query: str, limit: int) -> list[dict[str, object]]:
+        provider = getattr(app.state, "media_analysis_embedding_provider", None)
+        model_name = (getattr(app.state, "media_analysis_profile", None) or {}).get(
+            "embedding_model_name"
+        )
+        if provider is None or not model_name:
+            return []
+        response = provider.embed(EmbeddingRequest(model_name=model_name, inputs=(query,)))
+        return library_store.find_audio_matches(
+            query_embedding=[float(value) for value in response.vectors[0]],
+            media_type="music",
+            limit=limit,
+        )
+
+    def resolve(project_id: str, library_asset_id: str) -> str | None:
+        # 이미 가져온 곡이면 화면이 바로 적용할 수 있다. materializer가 남기는
+        # `source_library_asset_id`가 그 표식이다.
+        try:
+            for asset in project_store.list_assets(project_id=project_id):
+                metadata = dict(asset.get("metadata") or {})
+                if metadata.get("source_library_asset_id") == library_asset_id:
+                    return str(asset["asset_id"])
+        except Exception:
+            return None
+        return None
+
+    return search, resolve
 
 
 def _index_library_footage(app: FastAPI) -> None:
@@ -585,11 +625,18 @@ def create_app(
         capcut_draft_export_config or resolve_capcut_draft_export_config()
     )
     resolved_tts_engine_config = tts_engine_config or TTSEngineConfig()
+    _music_library_search, _music_project_asset = _build_music_library_hooks(
+        library_store=resolved_media_library_store, project_store=store, app=app
+    )
     pipeline = LocalPipelineRunner(
         store,
         segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
         broll_recommender=LocalOnlyKeywordBrollRecommender(runtime_service=runtime_service),
-        music_recommender=LocalOnlyMusicRecommender(runtime_service=runtime_service),
+        music_recommender=LocalOnlyMusicRecommender(
+            runtime_service=runtime_service,
+            library_search=_music_library_search,
+            resolve_project_asset=_music_project_asset,
+        ),
         review_guidance_builder=LocalFirstReviewGuidanceBuilder(runtime_service=runtime_service),
         output_operator_copy_builder=LocalFirstOutputOperatorCopyBuilder(runtime_service=runtime_service),
         auto_cut_planner=AutoCutPlanner(config=resolved_auto_cut_config),

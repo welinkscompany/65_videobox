@@ -5767,7 +5767,7 @@ def test_music_recommendation_endpoint_uses_local_only_runtime(
     assert result.status_code == 200
     recommendation = result.json()["recommendations"][0]
     assert recommendation["payload"]["music_mood"] == "cinematic pulse"
-    assert recommendation["reason"] == "Suggested music mood for this segment: cinematic pulse."
+    assert recommendation["reason"] == "이 장면에 어울리는 음악 분위기: cinematic pulse."
     assert recommendation["score"] == 0.91
     assert recommendation["provider_trace"] == {
             "routing_mode": "local_only",
@@ -5819,8 +5819,8 @@ def test_music_recommendation_endpoint_preserves_rule_based_fallback_when_local_
     result = client.get(f"/api/projects/{project_id}/jobs/music-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     recommendation = result.json()["recommendations"][0]
-    assert recommendation["payload"]["music_mood"] == "clean documentary pulse"
-    assert recommendation["reason"] == "Suggested music mood for this segment: clean documentary pulse."
+    assert recommendation["payload"]["music_mood"] == "담담하게 설명하는 분위기"
+    assert recommendation["reason"] == "이 장면에 어울리는 음악 분위기: 담담하게 설명하는 분위기."
     assert recommendation["provider_trace"] == {
         "routing_mode": "local_only",
         "final_provider": "rule_based_fallback",
@@ -5871,8 +5871,8 @@ def test_music_recommendation_endpoint_preserves_rule_based_path_after_runtime_f
     result = client.get(f"/api/projects/{project_id}/jobs/music-recommendation/{response.json()['job_id']}")
     assert result.status_code == 200
     recommendation = result.json()["recommendations"][0]
-    assert recommendation["payload"]["music_mood"] == "clean documentary pulse"
-    assert recommendation["reason"] == "Suggested music mood for this segment: clean documentary pulse."
+    assert recommendation["payload"]["music_mood"] == "담담하게 설명하는 분위기"
+    assert recommendation["reason"] == "이 장면에 어울리는 음악 분위기: 담담하게 설명하는 분위기."
 
 
 def test_music_recommendation_local_only_path_preserves_downstream_timeline_behavior(

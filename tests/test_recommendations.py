@@ -109,7 +109,7 @@ def test_rule_based_music_recommender_ignores_string_false_segment_review_requir
         )
     )
 
-    assert candidates[0].reason == "Suggested music mood for this segment: focused corporate."
+    assert candidates[0].reason == "이 장면에 어울리는 음악 분위기: 차분하게 깔리는 분위기."
     assert candidates[0].score == 0.66
 
 
