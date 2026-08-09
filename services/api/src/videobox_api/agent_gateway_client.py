@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field as dataclass_field
@@ -193,10 +195,21 @@ class _GatewayFrame(BaseModel):
         return self
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 def _parse_gateway_frame(line: str) -> _GatewayFrame | None:
     try:
         return _GatewayFrame.model_validate_json(line)
     except Exception:
+        # 읽지 못한 줄은 버린다 -- 한 줄 때문에 대화 전체를 끊지 않는다. 다만
+        # 유진 답변이 중간에 비거나 끊겨 보이는 원인이 여기라, 남기지 않으면
+        # 화면만 보고는 알 수 없다.
+        _LOGGER.warning(
+            "게이트웨이가 보낸 줄을 읽지 못해 건너뜁니다 (%d바이트).",
+            len(line),
+            exc_info=True,
+        )
         return None
 
 

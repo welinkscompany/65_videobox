@@ -5,6 +5,7 @@ import asyncio
 import base64
 import binascii
 import inspect
+import logging
 import os
 import re
 import threading
@@ -109,6 +110,37 @@ __all__ = [
     "_build_targeted_segments",
     "_build_stt_provider",
 ]
+
+# 호출부에 로거를 다는 것만으로는 부족하다. 설정이 없으면 파이썬의 최후 수단
+# 핸들러가 메시지만 찍어서, 어느 모듈에서 언제 났는지가 사라진다. 컨테이너에서
+# 확인한 실제 상태가 그랬다 -- `root handlers: []`.
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def configure_logging() -> None:
+    """VideoBox 로그가 컨테이너 출력에 추적 가능한 형태로 나가게 한다.
+
+    uvicorn은 자기 로거만 설정하고 루트는 건드리지 않는다. 이미 핸들러가
+    붙어 있으면 그대로 둔다 -- 테스트나 상위 프로세스가 정해 둔 것을 빼앗지
+    않는다.
+    """
+    root = logging.getLogger()
+    if root.handlers:
+        # 누군가 이미 정해 뒀다 -- pytest, 상위 프로세스, 배포 설정. 형식도
+        # 수준도 빼앗지 않는다. 수준을 덮어쓰면 DEBUG를 보려던 쪽이 조용히
+        # 아무것도 못 보게 된다.
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    root.addHandler(handler)
+    # `getattr(logging, name)`은 `FileHandler` 같은 것도 돌려준다. 그것을
+    # setLevel에 넘기면 오타 하나로 앱이 안 뜬다.
+    level_name = os.environ.get("VIDEOBOX_LOG_LEVEL", "INFO").upper()
+    level = logging.getLevelNamesMapping().get(level_name, logging.INFO)
+    root.setLevel(level)
+
 
 _HERMES_CAPABILITY_KEY_ID = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\Z",
@@ -545,6 +577,10 @@ def create_app(
     agent_gateway_http_client_factory=None,
     live_smoke_root_attestation_secret: str | None = None,
 ) -> FastAPI:
+    configure_logging()
+    # 설정이 살아 있다는 것을 로그만 보고 알 수 있게 한다. 실패 경로를
+    # 일부러 터뜨리지 않고도 형식과 핸들러가 붙었는지 확인된다.
+    _LOGGER.info("VideoBox 시작 -- 기록 설정 완료")
     app = FastAPI(title="VideoBox API", version="0.1.0", lifespan=_media_analysis_lifespan)
 
     @app.exception_handler(RequestValidationError)

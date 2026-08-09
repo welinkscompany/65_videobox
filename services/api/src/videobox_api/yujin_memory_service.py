@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import asyncio
 import hashlib
 import uuid
@@ -168,6 +170,14 @@ class YujinMemoryService:
         except asyncio.CancelledError:
             raise
         except Exception:
+            # 조회 실패와 "기억이 원래 없음"이 화면에서 똑같이 보인다. 빈 결과를
+            # 돌려주는 동작은 그대로 두되, 왜 비었는지는 남긴다.
+            _LOGGER.warning(
+                "유진 기억 조회가 실패해 빈 결과를 돌려줍니다 (project=%s, conversation=%s).",
+                project_id,
+                conversation_id,
+                exc_info=True,
+            )
             return ()
 
         matched: dict[tuple[str, str], UserApprovedPreference] = {}
@@ -388,6 +398,8 @@ class YujinMemoryService:
                 "memory_delete_unavailable"
             ) from error
 
+
+_LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "ApprovedMemoryStoreRequest",

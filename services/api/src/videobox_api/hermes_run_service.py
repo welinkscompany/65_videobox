@@ -1020,6 +1020,8 @@ class HermesRunService:
                 cancelled = True
                 stored = await asyncio.shield(append_task)
         except Exception:
+            # 초안이 남지 않는다. owner에게는 그냥 아무 일도 없던 것처럼 보인다.
+            _LOGGER.warning("유진 초안을 저장하지 못했습니다.", exc_info=True)
             return False
         if stored is not True:
             return False
@@ -1273,6 +1275,12 @@ class HermesRunService:
                         **completion_kwargs,
                     )
                 except Exception:
+                    # 유진과 나눈 대화가 사라진다. 실행 자체는 계속 진행하되
+                    # 무엇을 못 남겼는지는 기록한다.
+                    _LOGGER.warning(
+                        "유진 실행 결과를 저장하지 못했습니다. 대화가 남지 않습니다.",
+                        exc_info=True,
+                    )
                     stored = False
         persist_succeeded = stored is True
         if projection is not None:

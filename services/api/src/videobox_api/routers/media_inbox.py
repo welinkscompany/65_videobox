@@ -9,12 +9,17 @@ list and become recommendable."""
 
 from __future__ import annotations
 
+import logging
+
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 
 from videobox_api.models import MediaInboxImportRequest
 from videobox_core_engine.media_inbox import import_media_inbox_asset_to_project
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def build_media_inbox_router(orchestrator: object, library_root: Path) -> APIRouter:
@@ -73,6 +78,15 @@ def build_media_inbox_router(orchestrator: object, library_root: Path) -> APIRou
                 )
             return service.get_analysis(project_id, analysis["analysis_id"])
         except Exception:
+            # 영상은 durable하게 들어왔는데 태그가 영원히 안 붙는다. 매일 쓰는
+            # 경로라 조용히 넘어가면 owner는 왜 분석이 없는지 알 수 없다.
+            _LOGGER.warning(
+                "가져온 영상의 분석 예약이 실패했습니다 (project=%s, asset=%s). "
+                "영상은 그대로 있고 분석만 빠집니다.",
+                project_id,
+                asset_id,
+                exc_info=True,
+            )
             return None
 
     return router
