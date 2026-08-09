@@ -479,24 +479,41 @@ describe("EditorWorkbench", () => {
 describe("EditorWorkbench 되돌리기 단축키", () => {
   const session = { undoCount: 2, redoCount: 1 } as never;
 
-  it("Alt+Z 와 Ctrl+Z 로 한 단계씩 되돌린다", () => {
+  it("Ctrl+Z 로 한 단계씩 되돌린다", () => {
     const onUndo = vi.fn();
     render(<EditorWorkbench view={view} session={session} onUndo={onUndo} />);
 
-    fireEvent.keyDown(window, { key: "z", altKey: true });
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
     expect(onUndo).toHaveBeenCalledTimes(1);
 
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "z", metaKey: true });
     expect(onUndo).toHaveBeenCalledTimes(2);
   });
 
-  it("Ctrl+Shift+Z 로 다시 실행한다", () => {
+  it("다시 실행은 두 관습을 모두 받는다", () => {
+    // Creative apps use Ctrl+Shift+Z; Office-style apps use Ctrl+Y. Accepting
+    // only one leaves the other silently doing nothing.
     const onRedo = vi.fn();
     render(<EditorWorkbench view={view} session={session} onRedo={onRedo} />);
 
     fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
-
     expect(onRedo).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(window, { key: "y", ctrlKey: true });
+    expect(onRedo).toHaveBeenCalledTimes(2);
+  });
+
+  it("표준이 아닌 Alt+Z 로는 아무 일도 하지 않는다", () => {
+    // Alt+Z means undo nowhere. Binding it would invite pressing it for redo
+    // and getting a second undo instead.
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    render(<EditorWorkbench view={view} session={session} onUndo={onUndo} onRedo={onRedo} />);
+
+    fireEvent.keyDown(window, { key: "z", altKey: true });
+
+    expect(onUndo).not.toHaveBeenCalled();
+    expect(onRedo).not.toHaveBeenCalled();
   });
 
   it("글자를 치는 중에는 편집을 되돌리지 않는다", () => {
@@ -518,7 +535,7 @@ describe("EditorWorkbench 되돌리기 단축키", () => {
     const onUndo = vi.fn();
     render(<EditorWorkbench view={view} session={{ undoCount: 0, redoCount: 0 } as never} onUndo={onUndo} />);
 
-    fireEvent.keyDown(window, { key: "z", altKey: true });
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
 
     expect(onUndo).not.toHaveBeenCalled();
   });
