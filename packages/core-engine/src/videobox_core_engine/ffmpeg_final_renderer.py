@@ -5,7 +5,7 @@ import tempfile
 import os
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from math import ceil
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,16 @@ class FinalRenderError(RuntimeError):
     pass
 
 
+
+def _default_overlay_font() -> str:
+    """The name here must match the one the failure message tells the owner to
+    set. It read `VIDEBOX_OVERLAY_FONT` -- an `O` short -- so following the
+    instruction changed nothing. The default is a font that exists in the
+    container and has Korean glyphs; the old `C:\Windows\Fonts` default
+    could never resolve there."""
+    return os.environ.get("VIDEOBOX_OVERLAY_FONT", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf")
+
+
 @dataclass(frozen=True, slots=True)
 class CompositionRenderInputs:
     """The one immutable composition/caption input accepted by every renderer."""
@@ -47,7 +57,10 @@ class FfmpegFinalRenderer:
     video_fps: int | str = 30
     video_sar: str = "1:1"
     bgm_volume: float = 0.25
-    overlay_font_file: str = os.environ.get("VIDEBOX_OVERLAY_FONT", r"C:\Windows\Fonts\malgun.ttf")
+    # Read when a renderer is built, not when this module is imported --
+    # otherwise setting the variable after import silently does nothing,
+    # which is the same trap the misspelled name set.
+    overlay_font_file: str = field(default_factory=_default_overlay_font)
     ffprobe_binary: str = "ffprobe"
 
     def extract_composition_plan(

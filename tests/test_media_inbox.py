@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from videobox_core_engine import media_inbox
 from videobox_core_engine.media_inbox import (
     MediaInboxConfig,
     import_media_inbox_asset_to_project,
@@ -409,3 +410,50 @@ def test_an_archive_inside_the_watched_folder_is_not_re_scanned(tmp_path: Path) 
     assert second.moved == [] and second.duplicates == []
     assert third.moved == [] and third.duplicates == []
     assert [path.name for path in sorted(archive_root.iterdir())] == ["clip.mp4"]
+
+
+def test_an_idle_pass_does_not_read_the_library(tmp_path: Path, monkeypatch) -> None:
+    """The watched folder is empty almost every pass. Hashing the whole
+    library anyway cost 760 MB of reads every 30 seconds -- roughly 2 TB a
+    day -- and gets worse as the owner shoots more, because the library only
+    ever grows. Nothing on screen shows it; it just makes rendering slower."""
+    watch = tmp_path / "watch"
+    library = tmp_path / "library"
+    watch.mkdir()
+    library.mkdir()
+    (library / "already-here.mp4").write_bytes(b"kept" * 4096)
+
+    read_paths: list[Path] = []
+    original = media_inbox._sha256_file
+
+    def counted(path: Path) -> str:
+        read_paths.append(path)
+        return original(path)
+
+    monkeypatch.setattr(media_inbox, "_sha256_file", counted)
+
+    report = media_inbox.run_inbox_cycle(
+        media_inbox.MediaInboxConfig(watch_path=watch, library_root=library),
+        is_settled=lambda _path: True,
+    )
+
+    assert report.moved == [] and report.duplicates == [] and report.failed == []
+    assert read_paths == []
+
+
+def test_a_pass_with_a_new_file_still_catches_a_duplicate(tmp_path: Path) -> None:
+    # The saving above must not cost the duplicate check its evidence.
+    watch = tmp_path / "watch"
+    library = tmp_path / "library"
+    watch.mkdir()
+    library.mkdir()
+    (library / "already-here.mp4").write_bytes(b"same bytes")
+    (watch / "dropped.mp4").write_bytes(b"same bytes")
+
+    report = media_inbox.run_inbox_cycle(
+        media_inbox.MediaInboxConfig(watch_path=watch, library_root=library),
+        is_settled=lambda _path: True,
+    )
+
+    assert report.duplicates == ["dropped.mp4"]
+    assert report.moved == []

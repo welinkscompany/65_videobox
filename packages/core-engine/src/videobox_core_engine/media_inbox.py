@@ -128,10 +128,18 @@ def run_inbox_cycle(
     # multiplying the owner's footage under hash-suffixed names instead of
     # tidying it.
     archive_root = config.archive_root.resolve() if config.archive_root is not None else None
+    candidates = scan_inbox_candidates(config.watch_path)
+    if not candidates:
+        # Almost every pass lands here. Hashing the whole library first cost a
+        # full read of it every 30 seconds -- 760 MB at the time this was
+        # found, and the library only ever grows -- for a pass with nothing to
+        # compare against. The reads are invisible on screen; they just take
+        # CPU and disk away from rendering.
+        return report
     existing_library_hashes = {
         _sha256_file(existing) for existing in config.library_root.iterdir() if existing.is_file()
     }
-    for source in scan_inbox_candidates(config.watch_path):
+    for source in candidates:
         name = source.name
         if archive_root is not None and archive_root in source.resolve().parents:
             continue

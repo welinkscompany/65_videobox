@@ -18,6 +18,17 @@ from videobox_core_engine.output_source_verifier import OutputSourceStaleError
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
+# A text overlay needs a real font file. This test used to lean on the
+# renderer's old default -- a Windows path -- so it only ever proved anything
+# on Windows and would have failed in the container it ships to. Name the
+# font the test actually uses instead.
+_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    r"C:\Windows\Fonts\malgun.ttf",
+)
+OVERLAY_FONT = next((path for path in _FONT_CANDIDATES if Path(path).is_file()), None)
+
 
 def test_final_renderer_rejects_post_materialization_content_mutation_before_ffmpeg(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -239,6 +250,7 @@ def test_resolve_broll_clip_source_resolves_asset_style_uri_via_store(tmp_path: 
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.skipif(OVERLAY_FONT is None, reason="no font available to draw a text overlay")
 def test_render_timeline_loops_short_broll_and_pads_short_tts_to_the_timeline_window(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Render Short Source Duration Project")
@@ -257,7 +269,7 @@ def test_render_timeline_loops_short_broll_and_pads_short_tts_to_the_timeline_wi
         ],
     }
     output_path = tmp_path / "duration_safe.mp4"
-    FfmpegFinalRenderer(store=store).render_timeline_to_mp4(project_id=project.project_id, timeline=timeline, output_path=output_path)
+    FfmpegFinalRenderer(store=store, overlay_font_file=OVERLAY_FONT).render_timeline_to_mp4(project_id=project.project_id, timeline=timeline, output_path=output_path)
     probe = subprocess.run(["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(output_path)], capture_output=True, text=True, timeout=30)
     assert float(probe.stdout.strip()) == pytest.approx(4.0, abs=0.6)
 

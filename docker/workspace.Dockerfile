@@ -14,7 +14,7 @@ FROM python:3.12-slim
 # package, which fails the whole install.  Retry the fetch rather than the build.
 RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-retries \
     && apt-get update \
-    && apt-get install --no-install-recommends -y --fix-missing ffmpeg nginx util-linux \
+    && apt-get install --no-install-recommends -y --fix-missing ffmpeg nginx util-linux fonts-nanum \
     && rm -rf /var/lib/apt/lists/*
 
 # Keep the Node 20 toolchain available inside the trusted local workspace.
