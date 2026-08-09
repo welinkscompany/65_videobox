@@ -19,6 +19,9 @@ export type RightDockProposal = Readonly<{
   status: string;
   baseSessionRevision: number;
   currentRevision: number;
+  /** 뜻으로 찾았는지 단어로만 찾았는지. 임베딩 조회가 실패하면 조용히 단어
+   *  매칭으로 떨어져서, 추천이 갑자기 나빠져도 owner가 원인을 알 수 없었다. */
+  matchMode?: string;
   candidates: readonly RightDockCandidate[];
 }>;
 

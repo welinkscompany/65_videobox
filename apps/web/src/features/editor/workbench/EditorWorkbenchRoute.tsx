@@ -1537,6 +1537,8 @@ function projectDirectorProposal(proposal: DirectorProposal | null, currentRevis
     status: proposal.status,
     baseSessionRevision: proposal.base_session_revision,
     currentRevision,
+    // 뜻으로 찾았는지 단어로만 찾았는지. 없으면 화면이 아무 말도 하지 않는다.
+    matchMode: typeof proposal.diff?.match_mode === "string" ? proposal.diff.match_mode : undefined,
     candidates: proposal.candidates.map((candidate) => {
       const metadata = candidate.canonical_metadata ?? {};
       const actionable = isYujin

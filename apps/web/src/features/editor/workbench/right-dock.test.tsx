@@ -354,3 +354,39 @@ describe("RightDock", () => {
     expect(onApplyProposal).not.toHaveBeenCalled();
   });
 });
+
+describe("찾은 방식 표시", () => {
+  function renderWithMode(matchMode: string | undefined) {
+    return render(<RightDock
+      draft=""
+      onDraftChange={() => {}}
+      proposal={{ ...proposal, matchMode } as never}
+      messages={[]}
+      selectedCandidateIds={[]}
+      onSelectedCandidateIdsChange={() => {}}
+      conversationScroll={{ key: "k", top: 0, pinnedToBottom: true }}
+      onConversationScrollChange={() => {}}
+      inspectorTargets={[]}
+    />);
+  }
+
+  it("단어로만 찾았으면 그 사실을 말한다", () => {
+    // 임베딩 조회가 실패하면 조용히 단어 매칭으로 떨어졌다. 추천이 갑자기
+    // 나빠져도 owner는 원인을 알 수 없었다.
+    renderWithMode("word");
+
+    expect(screen.getByText("단어로만 찾음")).toBeVisible();
+  });
+
+  it("뜻으로 찾았으면 그렇게 말한다", () => {
+    renderWithMode("semantic");
+
+    expect(screen.getByText("뜻으로 찾음")).toBeVisible();
+  });
+
+  it("모르면 지어내지 않는다", () => {
+    renderWithMode(undefined);
+
+    expect(screen.queryByText(/찾음/)).toBeNull();
+  });
+});

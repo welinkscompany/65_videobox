@@ -182,6 +182,7 @@ export function RightDock({
       {proposal ? <div aria-label="제안 편집본">
         <p>{`제안 기준 편집본 ${proposal.baseSessionRevision}`}</p>
         <p>{`현재 편집본 ${proposal.currentRevision}`}</p>
+        {matchModeLabel(proposal.matchMode) ? <p>{matchModeLabel(proposal.matchMode)}</p> : null}
       </div> : null}
       {recommendationCandidates.length ? <div role="radiogroup" aria-label="추천 후보">
         {recommendationCandidates.map((candidate) => {
@@ -250,6 +251,18 @@ export function RightDock({
       </div> : null}
     </section>
   </div>;
+}
+
+
+// 백엔드가 내는 값은 `semantic` / `word` 원값이다. 모르는 값이면 아무 말도
+// 하지 않는다 -- 지어내는 것보다 침묵이 낫다.
+const matchModeWords: Readonly<Record<string, string>> = {
+  semantic: "뜻으로 찾음",
+  word: "단어로만 찾음",
+};
+
+function matchModeLabel(mode: string | undefined): string | null {
+  return mode ? matchModeWords[mode] ?? null : null;
 }
 
 function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {

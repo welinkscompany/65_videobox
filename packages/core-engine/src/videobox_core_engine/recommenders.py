@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
@@ -11,6 +12,8 @@ from videobox_provider_interfaces.recommenders import (
     RecommendationProvider,
     RecommendationRequest,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def _tokenize(text: str) -> set[str]:
@@ -274,9 +277,12 @@ class LocalOnlyMusicRecommender(RecommendationProvider):
                 "provider_trace": response_provider_trace(response),
             }
             selected_asset_id = fallback_candidate.selected_asset_id
-            reason = f"이 장면에 어울리는 음악 분위기: {mood}."
+            reason = (
+                f"이 장면에 어울리는 음악 분위기: {mood}. "
+                "지금은 곡을 고르지 못했어요 -- 분위기만 참고해 주세요."
+            )
 
-            track = self._pick_track(segment=segment, mood=mood)
+            track = self._pick_track(project_id=request.project_id, segment=segment, mood=mood)
             if track is not None:
                 words = track.get("words") or {}
                 payload["library_asset_id"] = str(track.get("library_asset_id", ""))
@@ -308,7 +314,7 @@ class LocalOnlyMusicRecommender(RecommendationProvider):
             )
         return candidates
 
-    def _pick_track(self, *, segment: dict[str, Any], mood: str) -> dict[str, Any] | None:
+    def _pick_track(self, *, project_id: str, segment: dict[str, Any], mood: str) -> dict[str, Any] | None:
         """장면과 모델이 말한 분위기를 함께 물어 실제 곡을 고른다.
 
         검색이 없거나 답이 비면 곡을 고르지 않는다. 라이브러리에서 아무거나
@@ -323,7 +329,13 @@ class LocalOnlyMusicRecommender(RecommendationProvider):
             matches = self.library_search(query, 1)
         except Exception:
             # 로컬 모델이나 라이브러리가 잠깐 없는 것뿐이다. 추천 자체를
-            # 막지 않고 분위기만 말하는 예전 경로로 돌아간다.
+            # 막지 않고 분위기만 말하는 예전 경로로 돌아간다. 다만 그 사실을
+            # 말하지 않으면 owner는 왜 추천이 밋밋해졌는지 알 수 없다.
+            _logger.warning(
+                "음악 라이브러리를 검색하지 못해 분위기만 제안합니다 (project=%s).",
+                project_id,
+                exc_info=True,
+            )
             return None
         return matches[0] if matches else None
 

@@ -137,3 +137,25 @@ def test_the_model_is_asked_for_a_korean_mood() -> None:
     LocalOnlyMusicRecommender(runtime_service=runtime, library_search=_search).recommend(_request())
 
     assert runtime.prompts and "한국어" in runtime.prompts[0]
+
+
+def test_when_the_library_cannot_be_searched_the_reason_says_so() -> None:
+    """검색이 없으면 분위기만 말하고 곡을 못 고른다. 그 사실을 말하지 않으면
+    owner는 왜 추천이 갑자기 밋밋해졌는지 알 수 없다."""
+    def failing_search(_query: str, _limit: int) -> list[dict]:
+        raise RuntimeError("embedding model unreachable")
+
+    [candidate] = LocalOnlyMusicRecommender(
+        runtime_service=_Runtime(), library_search=failing_search
+    ).recommend(_request())
+
+    assert candidate.payload.get("library_asset_id") is None
+    assert "지금은 곡을 고르지 못했어요" in candidate.reason
+
+
+def test_a_chosen_track_does_not_carry_the_apology() -> None:
+    [candidate] = LocalOnlyMusicRecommender(
+        runtime_service=_Runtime(), library_search=_search
+    ).recommend(_request())
+
+    assert "지금은 곡을 고르지 못했어요" not in candidate.reason

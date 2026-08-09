@@ -33,6 +33,21 @@ def is_actionable_yujin_media_candidate(candidate: object) -> bool:
 
 _logger = logging.getLogger(__name__)
 
+# 임베딩 조회가 실패하면 단어 매칭으로 떨어지는데, 결과만 보고는 어느 쪽이
+# 돌았는지 알 수 없었다. 추천이 갑자기 나빠져도 owner는 원인을 모른다.
+SEMANTIC_MATCH = "semantic"
+WORD_MATCH = "word"
+
+_MATCH_MODE_WORDS = {
+    SEMANTIC_MATCH: "뜻으로 찾음",
+    WORD_MATCH: "단어로만 찾음",
+}
+
+
+def describe_match_mode(mode: str) -> str:
+    """화면에 그대로 보일 수 있는 우리말로 옮긴다."""
+    return _MATCH_MODE_WORDS.get(mode, "찾은 방식 확인 중")
+
 
 class DirectorProposalBlockedError(Exception):
     def __init__(self, lifecycle: dict[str, object]) -> None:
@@ -77,6 +92,7 @@ class DirectorProposalService:
         placement_targets: dict[str, str] = {}
         source_ids: list[str] = []
         target_ids: list[str] = []
+        match_modes: set[str] = set()
         for segment in session.get("segments", []):
             if not isinstance(segment, dict):
                 continue
@@ -86,7 +102,8 @@ class DirectorProposalService:
             source_ids.append(source_id)
             target_ids.append(str(segment.get("segment_id") or source_id))
             segment_text = segment.get("caption_text") or segment.get("text") or ""
-            scored_assets = self._apply_semantic_scores(project_id=project_id, segment_text=segment_text, assets=assets)
+            scored_assets, match_mode = self._apply_semantic_scores(project_id=project_id, segment_text=segment_text, assets=assets)
+            match_modes.add(match_mode)
             ranked = rank_candidates({"text": segment_text, "duration_sec": float(segment.get("end_sec", 0) or 0) - float(segment.get("start_sec", 0) or 0)}, scored_assets, preferences)
             for candidate in ranked:
                 scoped = replace(candidate, candidate_id=f"candidate:{source_id}:{candidate.asset_id}")
@@ -96,6 +113,11 @@ class DirectorProposalService:
         # The proposal is descriptive only: each bucket is an explicit future
         # edit, never an editing-session mutation.
         diff = {
+            # 뜻으로 찾았는지 단어로만 찾았는지. 이것이 실려야 화면이 말할 수
+            # 있다 -- 서비스 안에서만 알면 owner에게는 여전히 조용히 나빠지는
+            # 것으로 보인다. 장면마다 다를 수 있으므로 하나라도 떨어졌으면
+            # 떨어진 것으로 본다.
+            "match_mode": WORD_MATCH if WORD_MATCH in match_modes else SEMANTIC_MATCH,
             "kind": "director_proposal", "candidate_count": len(candidates), "selection_scope": target_ids,
             "placements": {"add": placements, "replace": placements, "remove": [{"target_segment_id": target} for target in target_ids]},
             "scene_controls": [{"candidate_id": c.candidate_id, "controls": dict(c.controls)} for c in candidates],
@@ -190,7 +212,7 @@ class DirectorProposalService:
                 break
         return sorted(set(reasons))
 
-    def _apply_semantic_scores(self, *, project_id: str, segment_text: str, assets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _apply_semantic_scores(self, *, project_id: str, segment_text: str, assets: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
         """Look up semantic-similarity scores for `assets` against
         `segment_text` (A-1/Task 20). Query-time cosine ranking already
         existed in store.find_local_media_embedding_matches -- it was simply
@@ -200,7 +222,7 @@ class DirectorProposalService:
         or lookup error; a slow/unreachable local model must not block
         proposal creation."""
         if self.embedding_provider is None or not self.embedding_model_name or not segment_text.strip():
-            return assets
+            return assets, WORD_MATCH
         try:
             response = self.embedding_provider.embed(
                 EmbeddingRequest(model_name=self.embedding_model_name, inputs=(segment_text,))
@@ -215,14 +237,14 @@ class DirectorProposalService:
                 project_id,
                 exc_info=True,
             )
-            return assets
+            return assets, WORD_MATCH
         score_by_asset_id = {str(match["asset_id"]): float(match["score"]) for match in matches}
         return [
             {**asset, "semantic_score": score_by_asset_id[str(asset["asset_id"])]}
             if str(asset.get("asset_id")) in score_by_asset_id
             else asset
             for asset in assets
-        ]
+        ], SEMANTIC_MATCH
 
     def _rankable_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
         metadata = dict(asset.get("metadata") or {})

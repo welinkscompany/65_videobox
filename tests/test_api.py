@@ -5767,7 +5767,12 @@ def test_music_recommendation_endpoint_uses_local_only_runtime(
     assert result.status_code == 200
     recommendation = result.json()["recommendations"][0]
     assert recommendation["payload"]["music_mood"] == "cinematic pulse"
-    assert recommendation["reason"] == "이 장면에 어울리는 음악 분위기: cinematic pulse."
+    # 이 시험용 앱에는 라이브러리 검색이 없어서 곡을 고르지 못한다. 이유가
+    # 그 사실을 말해야 owner가 왜 분위기만 나왔는지 안다.
+    assert recommendation["reason"] == (
+        "이 장면에 어울리는 음악 분위기: cinematic pulse. "
+        "지금은 곡을 고르지 못했어요 -- 분위기만 참고해 주세요."
+    )
     assert recommendation["score"] == 0.91
     assert recommendation["provider_trace"] == {
             "routing_mode": "local_only",
