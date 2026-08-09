@@ -440,8 +440,8 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
     fireEvent.change(await screen.findByLabelText("프로젝트 이름"), { target: { value: "New" } });
-    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "local://narration" } });
-    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "local://script" } });
+    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "local://narration" } });
+    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "local://script" } });
     fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_new/create"));
@@ -459,11 +459,11 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={router} />);
     fireEvent.change(await screen.findByLabelText("프로젝트 이름"), { target: { value: "Retry" } });
-    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "local://missing" } });
-    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "local://script" } });
+    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "local://missing" } });
+    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "local://script" } });
     fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
 
-    await screen.findByRole("button", { name: "나레이션 다시 등록" });
+    await screen.findByRole("button", { name: "내레이션 다시 등록" });
     expect(router.state.location.pathname).toBe("/projects");
     expect(listProjects).toHaveBeenCalledTimes(1);
   });

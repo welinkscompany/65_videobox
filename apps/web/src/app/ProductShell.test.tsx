@@ -256,12 +256,12 @@ describe("product shell", () => {
     ));
     const view = render(<SettingsPage projectId="first" section="voice" onNavigate={vi.fn()} />);
     await screen.findByText("저장한 내 목소리 1개");
-    const pathA = screen.getByLabelText("음성 파일의 로컬 경로");
+    const pathA = screen.getByLabelText("음성 파일이 있는 곳");
     fireEvent.change(pathA, { target: { value: "D:\\voices\\project-a.wav" } });
 
     view.rerender(<SettingsPage projectId="second" section="voice" onNavigate={vi.fn()} />);
 
-    const pathB = screen.getByLabelText("음성 파일의 로컬 경로");
+    const pathB = screen.getByLabelText("음성 파일이 있는 곳");
     expect(pathA).not.toBeInTheDocument();
     expect(pathB).not.toBe(pathA);
     expect(pathB).toHaveValue("");

@@ -81,8 +81,8 @@ describe("EditorAssetBrowser", () => {
     const onApply = vi.fn();
     const { rerender } = render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={onApply} />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("적용할 나레이션 구간을 먼저 선택하세요.");
-    screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용할 나레이션 구간을 먼저 선택하세요."));
+    expect(screen.getByRole("status")).toHaveTextContent("적용할 내레이션 구간을 먼저 선택하세요.");
+    screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용할 내레이션 구간을 먼저 선택하세요."));
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "효과음 1 적용" })).toBeDisabled();
 

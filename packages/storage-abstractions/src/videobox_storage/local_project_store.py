@@ -5265,6 +5265,48 @@ class LocalProjectStore:
             raise KeyError("director_conversation_missing")
         return dict(row)
 
+    def list_director_conversations(self, *, project_id: str) -> list[dict[str, Any]]:
+        """지울 수 있으려면 무엇이 있는지부터 보여야 한다."""
+        connection = self._connection(project_id)
+        try:
+            rows = connection.execute(
+                """
+                SELECT c.conversation_id, c.session_id, c.created_at, c.updated_at,
+                       (SELECT COUNT(*) FROM director_messages m
+                         WHERE m.conversation_id = c.conversation_id
+                           AND m.project_id = c.project_id) AS message_count
+                FROM director_conversations c
+                WHERE c.project_id = ?
+                ORDER BY c.updated_at DESC, c.conversation_id
+                """,
+                (project_id,),
+            ).fetchall()
+        finally:
+            connection.close()
+        return [dict(row) for row in rows]
+
+    def delete_director_conversation(self, *, project_id: str, conversation_id: str) -> bool:
+        """대화와 그 메시지를 함께 지운다.
+
+        대화만 지우고 메시지를 남기면 주인 없는 기록이 남는다. 지울 것이
+        없으면 지웠다고 하지 않는다 -- 화면이 지운 척하면 owner는 목록이
+        왜 그대로인지 알 수 없다.
+        """
+        connection = self._connection(project_id)
+        try:
+            connection.execute(
+                "DELETE FROM director_messages WHERE conversation_id = ? AND project_id = ?",
+                (conversation_id, project_id),
+            )
+            cursor = connection.execute(
+                "DELETE FROM director_conversations WHERE conversation_id = ? AND project_id = ?",
+                (conversation_id, project_id),
+            )
+            connection.commit()
+            return int(cursor.rowcount) > 0
+        finally:
+            connection.close()
+
     def latest_director_conversation(self, *, project_id: str, session_id: str) -> dict[str, Any] | None:
         row = self._fetchone(
             project_id,

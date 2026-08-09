@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
 import { ApiConflictError, api } from "../../../api";
-import { EditorWorkbenchRoute, findHermesRunProposalId, prepareProjectAssetBrowserPreview } from "./EditorWorkbenchRoute";
+import { EditorWorkbenchRoute, affectedAreaLabel, findHermesRunProposalId, partialStatusLabel, prepareProjectAssetBrowserPreview } from "./EditorWorkbenchRoute";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -2479,8 +2479,8 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(resume.mock.calls.length).toBeGreaterThan(readsBeforeOpen));
     expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
     const result = screen.getByText("다시 만든 항목").closest("dl");
-    expect(result).toHaveTextContent("succeeded");
-    expect(result).toHaveTextContent("caption, music");
+    expect(result).toHaveTextContent("완료");
+    expect(result).toHaveTextContent("자막, 배경 음악");
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -2515,7 +2515,7 @@ describe("EditorWorkbenchRoute", () => {
 
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
-    expect(screen.getByText("다시 만든 항목").closest("dl")).toHaveTextContent("caption, music");
+    expect(screen.getByText("다시 만든 항목").closest("dl")).toHaveTextContent("자막, 배경 음악");
 
     fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
     await expectEditorRevision(8);
@@ -3816,5 +3816,18 @@ describe("EditorWorkbenchRoute", () => {
 
     rendered.unmount();
     expect(sendSignalB.aborted).toBe(true);
+  });
+});
+
+describe("부분 재생성 표시", () => {
+  it("영향 범위와 결과를 내부 값이 아니라 창작자 언어로 말한다", () => {
+    expect(affectedAreaLabel("subtitle render")).toBe("자막 입히기");
+    expect(affectedAreaLabel("capcut export")).toBe("CapCut 내보내기");
+    expect(affectedAreaLabel("segment copy")).toBe("장면 대본");
+    // 모르는 값이 와도 영어 원값을 그대로 내보내지 않는다.
+    expect(affectedAreaLabel("something_new")).toBe("영상 일부");
+
+    expect(partialStatusLabel("succeeded")).toBe("완료");
+    expect(partialStatusLabel("failed")).toBe("실패");
   });
 });

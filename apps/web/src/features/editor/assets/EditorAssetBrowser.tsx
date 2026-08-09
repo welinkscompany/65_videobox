@@ -38,7 +38,7 @@ const orientationFilters: readonly { value: "all" | EditorAssetOrientation; labe
 function targetLabel(target: EditorAssetTarget | null): string {
   return target
     ? `적용 구간: ${target.startSec.toFixed(2)}–${target.endSec.toFixed(2)}초`
-    : "적용할 나레이션 구간을 먼저 선택하세요.";
+    : "적용할 내레이션 구간을 먼저 선택하세요.";
 }
 
 export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, previewStates = {}, onRefreshExactPreview }: Props) {

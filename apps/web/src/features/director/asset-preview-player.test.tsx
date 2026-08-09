@@ -30,9 +30,9 @@ describe("AssetPreviewPlayer", () => {
     expect(video.currentTime).toBe(2);
   });
 
-  it("나레이션 미리듣기 설정은 미리듣기 소리에만 반영하고 편집본 음량을 바꾸지 않는다", () => {
+  it("내레이션 미리듣기 설정은 미리듣기 소리에만 반영하고 편집본 음량을 바꾸지 않는다", () => {
     const { container } = render(<AssetPreviewPlayer proposalId="p-1" candidates={[]} previewUrl={() => ""} narrationPreviewUrl="/assets/narration/content" />);
-    const mute = screen.getByRole("button", { name: "나레이션 미리듣기 음소거" }); const solo = screen.getByRole("button", { name: "나레이션만 듣기" });
+    const mute = screen.getByRole("button", { name: "내레이션 미리듣기 음소거" }); const solo = screen.getByRole("button", { name: "내레이션만 듣기" });
     const narration = container.querySelector('[data-testid="director-narration-context-preview"]') as HTMLAudioElement;
     expect(narration).toHaveAttribute("src", "/assets/narration/content");
     fireEvent.click(mute);
@@ -79,8 +79,8 @@ describe("AssetPreviewPlayer", () => {
     // buttons toggled aria-pressed against an <audio> that was never rendered.
     render(<AssetPreviewPlayer proposalId="p-1" candidates={[]} previewUrl={() => ""} />);
 
-    expect(screen.queryByRole("button", { name: "나레이션 미리듣기 음소거" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "나레이션만 듣기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "내레이션 미리듣기 음소거" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "내레이션만 듣기" })).toBeNull();
   });
 
   it("still offers them when narration is actually playing alongside", () => {
@@ -93,6 +93,6 @@ describe("AssetPreviewPlayer", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "나레이션 미리듣기 음소거" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "내레이션 미리듣기 음소거" })).toBeVisible();
   });
 });

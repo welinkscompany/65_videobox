@@ -293,7 +293,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       setMessage(
         decision === "approved"
           ? "청취 승인을 저장했어요. 편집본 적용은 편집 화면에서 따로 진행해 주세요."
-          : "청취 거부를 저장했어요. 현재 나레이션은 바뀌지 않아요.",
+          : "청취 거부를 저장했어요. 현재 내레이션은 바뀌지 않아요.",
       );
     } catch {
       if (isCurrent(token.epoch, expectedProjectId)) {
@@ -345,9 +345,9 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       ) : null}
       <div>
         <label className="grid gap-2 text-sm">
-          <span>음성 파일의 로컬 경로</span>
+          <span>음성 파일이 있는 곳</span>
           <Input
-            aria-label="음성 파일의 로컬 경로"
+            aria-label="음성 파일이 있는 곳"
             className="rounded-md border bg-background px-3 py-2"
             disabled={isBusy || loadState !== "ready"}
             onChange={(event) => setLocalPath(event.target.value)}
@@ -356,7 +356,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
           />
         </label>
         <Button disabled={isBusy || loadState !== "ready" || !localPath.trim()} onClick={() => void registerLocalPath()} type="button">
-          {actionName === "register" ? "추가하는 중" : "로컬 경로로 추가"}
+          {actionName === "register" ? "추가하는 중" : "이 위치로 추가"}
         </Button>
       </div>
       <div>

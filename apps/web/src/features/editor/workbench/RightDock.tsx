@@ -206,12 +206,11 @@ export function RightDock({
               onChange={() => {
                 if (candidateIsActionable) onSelectedCandidateIdsChange?.([candidate.candidateId]);
               }}
-            />{candidate.visibleReferenceCode} · {candidate.mediaType}</label>
+            />{candidate.visibleReferenceCode} · {mediaKindLabel(candidate.sourceMediaKind)}</label>
             <p>{candidate.previewSummary}</p>
             <p>{`후보 상태: ${candidateDeclaresActionable ? "적용 가능" : "수동 적용"}`}</p>
             <dl>
               <dt>미디어</dt><dd>{mediaKindLabel(candidate.sourceMediaKind)}</dd>
-              <dt>대상 장면</dt><dd>{candidate.targetSegmentId}</dd>
               <dt>적용 설정</dt><dd>{controlSummary(candidate.supportedControls ?? {})}</dd>
             </dl>
             {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" onClick={() => onPreviewCandidate(candidate)}>추천 미리 듣기</Button> : null}
@@ -256,7 +255,7 @@ export function RightDock({
 function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
   return {
     raw_video: "원본 영상",
-    broll_video: "B-roll 영상",
+    broll_video: "영상",
     image: "이미지",
     bgm: "배경 음악",
     sfx: "효과음",

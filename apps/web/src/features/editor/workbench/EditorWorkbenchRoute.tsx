@@ -69,6 +69,49 @@ const yujinUnavailableMessage = "유진의 답을 받지 못했어요.";
 const hermesUnavailableTechnicalText = "Hermes is temporarily unavailable. Manual Director remains available.";
 const maxDirectorMessages = 200;
 
+// 백엔드가 내는 값은 내부 이름이다(`segment copy`, `subtitle render`,
+// `capcut export`). 그대로 화면에 찍혀서 owner가 영어 개발 용어를 읽고 있었다.
+// 값 자체는 그대로 두고 보여줄 때만 옮긴다 -- 저장된 기록을 다시 쓰지 않는다.
+const affectedAreaLabels: Readonly<Record<string, string>> = {
+  "segment copy": "장면 대본",
+  "b-roll track": "영상 트랙",
+  "music bed": "배경 음악",
+  "visual overlays": "화면 요소",
+  "narration track": "내레이션",
+  "timeline preview": "미리보기",
+  "subtitle render": "자막 입히기",
+  "capcut export": "CapCut 내보내기",
+};
+
+export function affectedAreaLabel(area: string): string {
+  return affectedAreaLabels[area] ?? "영상 일부";
+}
+
+const partialStatusLabels: Readonly<Record<string, string>> = {
+  succeeded: "완료",
+  failed: "실패",
+  running: "만드는 중",
+  queued: "차례 기다리는 중",
+};
+
+export function partialStatusLabel(status: string): string {
+  return partialStatusLabels[status] ?? "상태 확인 중";
+}
+
+const partialFieldLabels: Readonly<Record<string, string>> = {
+  caption: "자막",
+  cut_action: "컷 판단",
+  broll: "영상",
+  visual_overlay: "화면 요소",
+  music: "배경 음악",
+  sfx: "효과음",
+  tts_replacement: "내레이션 음성",
+};
+
+export function partialFieldLabel(field: string): string {
+  return partialFieldLabels[field] ?? "일부 항목";
+}
+
 function waitForAssetBrowserPreview(delayMs: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
@@ -1448,11 +1491,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     {assets.key === requestKey && assets.error ? <p role="status">{assets.error}</p> : null}
     {activePartial.message ? <p role="status">{activePartial.message}</p> : null}
     {partialRecoveryError ? <Button onClick={() => setPartialRecoveryRetryToken((current) => current + 1)} type="button">이전 결과 다시 찾기</Button> : null}
-    {activePartial.preflight?.affected_output_areas.length ? <ul aria-label="부분 재생성 영향 범위">{activePartial.preflight.affected_output_areas.map((area) => <li key={area}>{area}</li>)}</ul> : null}
+    {activePartial.preflight?.affected_output_areas.length ? <ul aria-label="부분 재생성 영향 범위">{activePartial.preflight.affected_output_areas.map((area) => <li key={area}>{affectedAreaLabel(area)}</li>)}</ul> : null}
     {activePartial.isResultOpen && activePartial.result && partialResultIsCurrent ? <dl aria-label="부분 재생성 결과">
-      <dt>상태</dt><dd>{activePartial.result.status}</dd>
+      <dt>상태</dt><dd>{partialStatusLabel(activePartial.result.status)}</dd>
       <dt>대상 구간 수</dt><dd>{activePartial.result.segment_ids.length}</dd>
-      <dt>다시 만든 항목</dt><dd>{activePartial.result.fields.join(", ")}</dd>
+      <dt>다시 만든 항목</dt><dd>{activePartial.result.fields.map(partialFieldLabel).join(", ")}</dd>
     </dl> : null}
     <EditorWorkbench
     assetCards={assetCards}

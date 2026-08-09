@@ -47,7 +47,7 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
       return true;
     } catch (caught) {
       setNarrationStatus("failed");
-      setNarrationError(errorMessage(caught, "나레이션을 등록하지 못했습니다."));
+      setNarrationError(errorMessage(caught, "내레이션을 등록하지 못했습니다."));
       return false;
     }
   }
@@ -61,7 +61,7 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
       return true;
     } catch (caught) {
       setScriptStatus("failed");
-      setScriptError(errorMessage(caught, "스크립트를 등록하지 못했습니다."));
+      setScriptError(errorMessage(caught, "대본를 등록하지 못했습니다."));
       return false;
     }
   }
@@ -69,7 +69,7 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!name.trim() || !narrationPath.trim() || !scriptPath.trim()) {
-      setCreationError("프로젝트 이름, 나레이션 경로, 스크립트 경로를 모두 입력하세요.");
+      setCreationError("프로젝트 이름, 내레이션 파일 위치, 대본 파일 위치를 모두 입력하세요.");
       return;
     }
     setIsSubmitting(true);
@@ -101,43 +101,43 @@ export function ProjectOnboarding({ onProjectCreated, onIngestComplete, existing
     <section className="grid gap-4 rounded-xl border bg-card p-6 text-card-foreground shadow-sm" aria-labelledby="project-onboarding-heading">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">새 작업</p>
       <h2 id="project-onboarding-heading">영상 만들기 시작</h2>
-      <p className="text-sm text-muted-foreground">이 컴퓨터에 저장한 나레이션과 대본 파일의 위치를 입력해 주세요.</p>
+      <p className="text-sm text-muted-foreground">이 컴퓨터에 저장한 내레이션과 대본 파일의 위치를 입력해 주세요.</p>
       <form className="grid gap-4" onSubmit={(event) => void handleSubmit(event)}>
         <label className="grid gap-2 text-sm">
           프로젝트 이름
           <Input value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         <label className="grid gap-2 text-sm">
-          나레이션 로컬 경로
+          내레이션 파일이 있는 곳
           <Input value={narrationPath} onChange={(event) => setNarrationPath(event.target.value)} />
         </label>
         <label className="grid gap-2 text-sm">
-          스크립트 로컬 경로
+          대본 파일이 있는 곳
           <Input value={scriptPath} onChange={(event) => setScriptPath(event.target.value)} />
         </label>
         <Button disabled={isSubmitting} type="submit">
           {isSubmitting ? "프로젝트 준비 중" : project ? "소스 등록" : "프로젝트 만들고 소스 등록"}
         </Button>
       </form>
-      {narrationStatus === "succeeded" ? <p>나레이션 등록 완료</p> : null}
+      {narrationStatus === "succeeded" ? <p>내레이션 등록 완료</p> : null}
       {narrationStatus === "failed" && project ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-          <p>{narrationError ?? "나레이션을 등록하지 못했습니다."}</p>
+          <p>{narrationError ?? "내레이션을 등록하지 못했습니다."}</p>
           <Button variant="outline" onClick={() => void registerNarration(project.project_id).then(async (ok) => {
             if (ok && scriptStatus === "succeeded") await onProjectCreated(project);
           }).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))} type="button">
-            나레이션 다시 등록
+            내레이션 다시 등록
           </Button>
         </div>
       ) : null}
-      {scriptStatus === "succeeded" ? <p>스크립트 등록 완료</p> : null}
+      {scriptStatus === "succeeded" ? <p>대본 등록 완료</p> : null}
       {scriptStatus === "failed" && project ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-          <p>{scriptError ?? "스크립트를 등록하지 못했습니다."}</p>
+          <p>{scriptError ?? "대본를 등록하지 못했습니다."}</p>
           <Button variant="outline" onClick={() => void registerScript(project.project_id).then(async (ok) => {
             if (ok && narrationStatus === "succeeded") await onProjectCreated(project);
           }).catch(() => setCreationError("프로젝트를 시작하지 못했습니다."))} type="button">
-            스크립트 다시 등록
+            대본 다시 등록
           </Button>
         </div>
       ) : null}

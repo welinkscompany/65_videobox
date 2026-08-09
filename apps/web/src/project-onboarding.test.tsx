@@ -34,8 +34,8 @@ describe("ProjectOnboarding", () => {
     expect(screen.queryByText(/세션|파이프라인|job/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("프로젝트 이름"), { target: { value: "신규 유튜브 영상" } });
-    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "D:\\input\\narration.wav" } });
-    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "D:\\input\\script.txt" } });
+    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "D:\\input\\narration.wav" } });
+    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "D:\\input\\script.txt" } });
     fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
 
     await waitFor(() => expect(onProjectCreated).toHaveBeenCalledWith(expect.objectContaining({ project_id: "project_new" })));
@@ -48,8 +48,8 @@ describe("ProjectOnboarding", () => {
       "/api/projects/project_new/assets/script-document",
       expect.objectContaining({ method: "POST" }),
     );
-    expect(screen.getByText("나레이션 등록 완료")).toBeInTheDocument();
-    expect(screen.getByText("스크립트 등록 완료")).toBeInTheDocument();
+    expect(screen.getByText("내레이션 등록 완료")).toBeInTheDocument();
+    expect(screen.getByText("대본 등록 완료")).toBeInTheDocument();
   });
 
   it("keeps the created project and retries only the failed narration ingest", async () => {
@@ -68,7 +68,7 @@ describe("ProjectOnboarding", () => {
       if (url.endsWith("/assets/narration-audio")) {
         narrationAttempts += 1;
         if (narrationAttempts === 1) {
-          return new Response(JSON.stringify({ detail: "나레이션 파일을 찾을 수 없습니다." }), { status: 422 });
+          return new Response(JSON.stringify({ detail: "내레이션 파일을 찾을 수 없습니다." }), { status: 422 });
         }
         return new Response(JSON.stringify({ asset_id: "narration_ok" }), { status: 201 });
       }
@@ -82,17 +82,17 @@ describe("ProjectOnboarding", () => {
     render(<ProjectOnboarding onProjectCreated={onProjectCreated} />);
 
     fireEvent.change(screen.getByLabelText("프로젝트 이름"), { target: { value: "복구 가능한 첫 영상" } });
-    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "D:\\missing.wav" } });
-    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "D:\\script.txt" } });
+    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "D:\\missing.wav" } });
+    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "D:\\script.txt" } });
     fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
 
-    expect(await screen.findByText("스크립트 등록 완료")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "나레이션 다시 등록" })).toBeInTheDocument();
+    expect(await screen.findByText("대본 등록 완료")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 다시 등록" })).toBeInTheDocument();
     expect(onProjectCreated).toHaveBeenCalledTimes(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "나레이션 다시 등록" }));
+    fireEvent.click(screen.getByRole("button", { name: "내레이션 다시 등록" }));
 
-    expect(await screen.findByText("나레이션 등록 완료")).toBeInTheDocument();
+    expect(await screen.findByText("내레이션 등록 완료")).toBeInTheDocument();
     expect(narrationAttempts).toBe(2);
     await waitFor(() => expect(onProjectCreated).toHaveBeenCalledTimes(1));
   });
@@ -113,8 +113,8 @@ describe("ProjectOnboarding", () => {
 
     render(<ProjectOnboarding onProjectCreated={onProjectCreated} />);
     fireEvent.change(screen.getByLabelText("프로젝트 이름"), { target: { value: "새 영상" } });
-    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "D:\\narration.wav" } });
-    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "D:\\script.txt" } });
+    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "D:\\narration.wav" } });
+    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "D:\\script.txt" } });
     fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
 
     expect(await screen.findByText("프로젝트를 시작하지 못했습니다.")).toBeInTheDocument();
@@ -133,8 +133,8 @@ describe("ProjectOnboarding", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<ProjectOnboarding onProjectCreated={onProjectCreated} />);
     fireEvent.change(screen.getByLabelText("프로젝트 이름"), { target: { value: "계속" } });
-    fireEvent.change(screen.getByLabelText("나레이션 로컬 경로"), { target: { value: "D:\\n.wav" } });
-    fireEvent.change(screen.getByLabelText("스크립트 로컬 경로"), { target: { value: "D:\\s.txt" } });
+    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "D:\\n.wav" } });
+    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "D:\\s.txt" } });
     fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
     expect(await screen.findByText("프로젝트를 시작하지 못했습니다.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "계속하기" }));

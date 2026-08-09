@@ -9,10 +9,26 @@ import { projectInspectorTargets } from "../inspector/inspectorRegistry";
 import { RightDock } from "./RightDock";
 import type { RightDockDirector } from "./rightDockTypes";
 
+
+// `role`은 `narration | broll | bgm | sfx | overlay` 원값이다. 타임라인이 쓰는
+// 어휘와 같아야 owner가 같은 것을 두 이름으로 보지 않는다.
+const trackRoleLabels: Readonly<Record<string, string>> = {
+  narration: "내레이션",
+  broll: "영상",
+  bgm: "배경 음악",
+  sfx: "효과음",
+  overlay: "오버레이",
+  caption: "자막",
+};
+
+function trackRoleLabel(role: string): string {
+  return trackRoleLabels[role] ?? "트랙";
+}
+
 export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director, eugeneDraft, onEugeneDraftChange, selectedSegmentId, playbackSec, onSelectSegment, onSeek, onSaveCaption, isSavingCaption = false, assetCards = [], assetPreviewStates = {}, assetTarget, onPreviewAsset, onRefreshExactPreview, onApplyAssetCard, onInspectorAction, partialRegeneration, loadApprovedTtsCandidates, ttsCandidateScopeKey }: { view: EditorViewModel; session?: EditorSessionSnapshot | null; dock: "left" | "right"; director?: RightDockDirector; eugeneDraft: string; onEugeneDraftChange: (value: string) => void; selectedSegmentId: string | null; playbackSec: number; onSelectSegment: (segmentId: string) => void; onSeek: (seconds: number) => void; onSaveCaption?: (input: { segmentId: string; text: string }) => void | Promise<void>; isSavingCaption?: boolean; assetCards?: readonly EditorAssetCard[]; assetPreviewStates?: Readonly<Record<string, EditorAssetPreviewState>>; assetTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null; onPreviewAsset: (card: EditorAssetCard) => void; onRefreshExactPreview?: () => void; onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onInspectorAction?: (action: InspectorAction) => void | Promise<void>; partialRegeneration?: PartialRegenerationControls; loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>; ttsCandidateScopeKey?: string }) {
   if (dock === "left") return <>
     <EditorAssetBrowser cards={assetCards} target={assetTarget} isSaving={isSavingCaption} onPreview={onPreviewAsset} onApply={(card, segmentId) => void onApplyAssetCard?.(card, segmentId)} previewStates={assetPreviewStates} onRefreshExactPreview={onRefreshExactPreview} />
-    <section aria-label="자산" className="vb-editor-workbench__summary"><h2>자산</h2>{view.tracks.map((track) => <p key={track.trackId}>{track.role}: {track.clips.length}개 클립</p>)}</section>
+    <section aria-label="자산" className="vb-editor-workbench__summary"><h2>자산</h2>{view.tracks.map((track) => <p key={track.trackId}>{trackRoleLabel(track.role)}: {track.clips.length}개 클립</p>)}</section>
     <TranscriptPanel entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} />
   </>;
   const narrationClips = view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips);

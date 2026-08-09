@@ -132,6 +132,24 @@ def build_director_proposals_router(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="editing_session_missing") from exc
 
+    @router.get("/api/projects/{project_id}/director/conversations")
+    def list_conversations(project_id: str) -> dict:
+        """대화가 쌓이기만 하고 지울 방법이 없었다 -- 점검 시점에 28건이었다.
+        지우려면 무엇이 있는지부터 보여야 한다."""
+        return {"conversations": store.list_director_conversations(project_id=project_id)}
+
+    @router.delete(
+        "/api/projects/{project_id}/director/conversations/{conversation_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def delete_conversation(project_id: str, conversation_id: str) -> None:
+        # 지울 것이 없으면 지웠다고 하지 않는다. 목록이 그대로인 이유를
+        # owner가 알 수 있어야 한다.
+        if not store.delete_director_conversation(
+            project_id=project_id, conversation_id=conversation_id
+        ):
+            raise HTTPException(status_code=404, detail="director_conversation_missing")
+
     @router.get("/api/projects/{project_id}/director/conversations/{conversation_id}/messages", response_model=DirectorMessageListResponse)
     def list_conversation_messages(project_id: str, conversation_id: str, session_id: str) -> dict:
         try:

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-from videobox_core_engine.media_analysis import FIXED_VISION_RESPONSE_SCHEMA
+from videobox_core_engine.media_analysis import FIXED_VISION_RESPONSE_SCHEMA, VISION_ANALYSIS_PROMPT
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
 from videobox_provider_interfaces.vision import VisionAnalysisRequest
 
@@ -27,11 +27,9 @@ FOOTAGE_DESCRIPTION_VERSION = 2
 # 실제로 색인해 보니 요약과 태그가 전부 영어로 나왔다. owner는 우리말로 찾고,
 # 이 문장은 화면에 그대로 보일 수 있다. 같은 언어끼리 맞출 때 점수도 높다 --
 # 영어 요약으로 검색했을 때 0.52~0.59, 우리말 오디오 쪽은 0.68~0.70이었다.
-# 프로젝트 쪽 분석은 건드리지 않는다. 그쪽은 별개 경로이고 고정된 테스트가 있다.
-_VISION_PROMPT = (
-    "이 영상 장면을 분석해라. 모든 값과 요약을 한국어로만 써라. "
-    "영어 단어를 쓰지 마라."
-)
+# 프로젝트 쪽 분석도 같은 문구를 쓴다 -- 두 경로가 다르게 물으면 같은 영상이
+# 서로 다른 언어로 설명된다.
+_VISION_PROMPT = VISION_ANALYSIS_PROMPT
 
 # 화면 분석은 오디오 측정보다 훨씬 무겁다. 한 번에 처리하는 수를 작게 둬서
 # 영상을 한꺼번에 넣어도 렌더링이 느려지지 않게 한다.

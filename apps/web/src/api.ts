@@ -806,6 +806,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(`Request failed: ${path} (${response.status})`);
   }
+  // 204에는 본문이 없다. 읽으려 들면 성공한 요청이 실패로 보인다 -- 대화
+  // 삭제가 실제로는 지워졌는데 화면은 "지우지 못했어요"를 띄웠다.
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -1356,6 +1359,14 @@ async function createHermesRunRequest(
   return run as HermesRunCreateResponse;
 }
 
+export type DirectorConversationSummary = {
+  conversation_id: string;
+  session_id: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+};
+
 export const api = {
   getHermesYujinStatus: (signal?: AbortSignal) =>
     getHermesYujinStatusRequest(signal),
@@ -1453,6 +1464,10 @@ export const api = {
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
   reloadDirectorSession: (projectId: string, sessionId: string) =>
     request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),
+  listDirectorConversations: (projectId: string) =>
+    request<{ conversations: DirectorConversationSummary[] }>(`/api/projects/${projectId}/director/conversations`),
+  deleteDirectorConversation: (projectId: string, conversationId: string) =>
+    request<void>(`/api/projects/${projectId}/director/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" }),
   createDirectorConversation: (projectId: string, payload: { session_id: string }) =>
     request<DirectorConversation>(`/api/projects/${projectId}/director/conversations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listDirectorMessages: async (projectId: string, conversationId: string, sessionId: string): Promise<DirectorMessage[]> =>

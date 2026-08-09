@@ -129,9 +129,9 @@ describe("VoiceTtsSettings", () => {
     render(<VoiceTtsSettings projectId="project-a" />);
 
     expect(screen.getByText("음성 설정을 불러오는 중이에요.")).toBeVisible();
-    expect(screen.getByLabelText("음성 파일의 로컬 경로")).toBeDisabled();
+    expect(screen.getByLabelText("음성 파일이 있는 곳")).toBeDisabled();
     expect(screen.getByLabelText("음성 파일 업로드")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "로컬 경로로 추가" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "이 위치로 추가" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "파일 업로드" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "목록 새로고침" })).not.toBeInTheDocument();
     expect(listSamples).toHaveBeenCalledTimes(1);
@@ -144,7 +144,7 @@ describe("VoiceTtsSettings", () => {
     });
 
     expect(await screen.findByText("저장한 내 목소리 0개")).toBeVisible();
-    expect(screen.getByLabelText("음성 파일의 로컬 경로")).toBeEnabled();
+    expect(screen.getByLabelText("음성 파일이 있는 곳")).toBeEnabled();
     expect(screen.getByLabelText("음성 파일 업로드")).toBeEnabled();
   });
 
@@ -178,10 +178,10 @@ describe("VoiceTtsSettings", () => {
     render(<VoiceTtsSettings projectId="project-a" />);
 
     expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
-    fireEvent.change(screen.getByLabelText("음성 파일의 로컬 경로"), {
+    fireEvent.change(screen.getByLabelText("음성 파일이 있는 곳"), {
       target: { value: "  D:\\voices\\mine.wav  " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "로컬 경로로 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "이 위치로 추가" }));
     await waitFor(() => expect(register).toHaveBeenCalledWith("project-a", { source_path: "D:\\voices\\mine.wav" }));
     expect(await screen.findByText("저장한 내 목소리 2개")).toBeVisible();
 
@@ -286,13 +286,13 @@ describe("VoiceTtsSettings", () => {
 
     render(<VoiceTtsSettings projectId="project-a" />);
     await screen.findByText("저장한 내 목소리 0개");
-    const path = screen.getByLabelText("음성 파일의 로컬 경로");
+    const path = screen.getByLabelText("음성 파일이 있는 곳");
     fireEvent.change(path, { target: { value: "  D:\\voices\\retry.wav  " } });
-    fireEvent.click(screen.getByRole("button", { name: "로컬 경로로 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "이 위치로 추가" }));
 
     expect(await screen.findByText("내 목소리를 추가하지 못했어요. 다시 시도해 주세요.")).toBeVisible();
     expect(path).toHaveValue("  D:\\voices\\retry.wav  ");
-    fireEvent.click(screen.getByRole("button", { name: "로컬 경로로 추가" }));
+    fireEvent.click(screen.getByRole("button", { name: "이 위치로 추가" }));
     await waitFor(() => expect(register).toHaveBeenCalledTimes(2));
     expect(register).toHaveBeenNthCalledWith(1, "project-a", { source_path: "D:\\voices\\retry.wav" });
     expect(register).toHaveBeenNthCalledWith(2, "project-a", { source_path: "D:\\voices\\retry.wav" });
@@ -351,9 +351,9 @@ describe("VoiceTtsSettings", () => {
 
     render(<VoiceTtsSettings projectId="project-a" />);
     await screen.findByText("저장한 내 목소리 0개");
-    const path = screen.getByLabelText("음성 파일의 로컬 경로");
+    const path = screen.getByLabelText("음성 파일이 있는 곳");
     fireEvent.change(path, { target: { value: "D:\\voices\\saved.wav" } });
-    const add = screen.getByRole("button", { name: "로컬 경로로 추가" });
+    const add = screen.getByRole("button", { name: "이 위치로 추가" });
     fireEvent.click(add);
 
     expect(await screen.findByText("내 목소리는 저장됐지만 목록을 새로 불러오지 못했어요. 목록 새로고침으로 확인해 주세요.")).toBeVisible();

@@ -23,6 +23,16 @@ TAG_SCHEMA_VERSION = "v1"
 RETRY_BACKOFF_SECONDS = (5, 30)
 
 
+# 모델은 시키지 않으면 영어로 답한다. 실제로 색인된 촬영본의 요약과 태그가
+# 전부 영어로 나왔고, owner는 우리말로 찾는다 -- 언어가 어긋나면 검색 점수가
+# 0.52~0.59로 떨어졌다(우리말끼리는 0.63~0.70). 이 문구는 화면에도 그대로
+# 보일 수 있다.
+VISION_ANALYSIS_PROMPT = (
+    "이 영상 장면을 분석해라. 모든 값과 요약을 한국어로만 써라. "
+    "영어 단어를 쓰지 마라."
+)
+
+
 @dataclass(frozen=True, slots=True)
 class AnalysisProfile:
     model_key: str = "local-vision"
@@ -128,7 +138,7 @@ class MediaAnalysisService:
             )
             images = tuple(frame.data for frame in probe.frames)
             profile = self._profile_for_dispatch(project_id=project_id, analysis_id=analysis_id)
-            response = self.vision_provider.analyze_images(VisionAnalysisRequest(model_name=str(profile["vision_model_name"]), prompt="Analyze local media", images=images, response_schema=FIXED_VISION_RESPONSE_SCHEMA))
+            response = self.vision_provider.analyze_images(VisionAnalysisRequest(model_name=str(profile["vision_model_name"]), prompt=VISION_ANALYSIS_PROMPT, images=images, response_schema=FIXED_VISION_RESPONSE_SCHEMA))
             if self._cancelled(project_id, analysis_id):
                 return None
             output = dict(response.output_data)
