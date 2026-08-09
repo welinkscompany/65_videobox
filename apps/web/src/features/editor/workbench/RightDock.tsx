@@ -22,6 +22,8 @@ type SelectedSegment = Readonly<{
 }>;
 
 export type RightDockProps = Readonly<{
+  /** 저장된 자막 모양을 읽으려면 필요하다. 없으면 그 절만 빠진다. */
+  projectId?: string;
   state?: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
   draft: string;
   onDraftChange: (draft: string) => void;
@@ -53,6 +55,7 @@ export type RightDockProps = Readonly<{
 }>;
 
 export function RightDock({
+  projectId,
   state = "idle",
   draft,
   onDraftChange,
@@ -244,6 +247,7 @@ export function RightDock({
           loadApprovedTtsCandidates={loadApprovedTtsCandidates}
           onAction={onInspectorAction}
           partialRegeneration={partialRegeneration}
+          projectId={projectId}
           selectedSegment={selectedSegment ?? null}
           target={selectedInspectorTarget}
           ttsCandidateScopeKey={ttsCandidateScopeKey}

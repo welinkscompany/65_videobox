@@ -40,6 +40,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
   const selectedSessionSegmentIndex = selectedSegmentId === null ? -1 : session?.segments.findIndex((segment) => segment.segmentId === selectedSegmentId) ?? -1;
   const selectedSessionSegment = selectedSessionSegmentIndex >= 0 ? session?.segments[selectedSessionSegmentIndex] ?? null : null;
   return <RightDock
+    projectId={view.projectId}
     draft={eugeneDraft}
     composerDisabled={director?.composerDisabled ?? true}
     conversationScroll={director?.conversationScroll}

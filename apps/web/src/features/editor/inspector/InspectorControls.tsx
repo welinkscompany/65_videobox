@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { CaptionStyleScope } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { CaptionPresetPicker, fromSnapshot } from "./CaptionPresetPicker";
 import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
@@ -52,6 +53,8 @@ export type PartialRegenerationControls = Readonly<{
 }>;
 
 type Props = Readonly<{
+  /** 저장된 자막 모양을 읽으려면 필요하다. 없으면 그 절만 빠진다. */
+  projectId?: string;
   target: InspectorTarget | null;
   selectedSegment: SelectedSegment | null;
   partialRegeneration?: PartialRegenerationControls;
@@ -102,6 +105,7 @@ function parseRows(value: string): string[][] {
 }
 
 export function InspectorControls({
+  projectId,
   target,
   selectedSegment,
   partialRegeneration,
@@ -369,6 +373,7 @@ export function InspectorControls({
       {target?.kind === "caption" ? (
         <fieldset>
           <legend>자막 스타일</legend>
+          {projectId ? <CaptionPresetPicker projectId={projectId} onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))} /> : null}
           <label>글꼴<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, fontFamily: event.target.value }))} value={captionStyle.fontFamily} /></label>
           <label>글자 크기<Input disabled={disabled} min="1" onChange={(event) => setCaptionStyle((current) => ({ ...current, fontSizePx: numberValue(event.target.value, current.fontSizePx) }))} type="number" value={captionStyle.fontSizePx} /></label>
           <label>글자 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, textColor: event.target.value }))} value={captionStyle.textColor} /></label>
