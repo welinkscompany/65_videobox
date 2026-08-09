@@ -111,7 +111,7 @@ describe("RightDock", () => {
 
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeInTheDocument();
     expect(screen.getByText("요청 내용")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Yujin 없이 계속 편집" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진 없이 계속 편집" }));
     expect(onManualEdit).toHaveBeenCalledOnce();
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeInTheDocument();
     expect(screen.getByText("요청 내용")).toBeInTheDocument();

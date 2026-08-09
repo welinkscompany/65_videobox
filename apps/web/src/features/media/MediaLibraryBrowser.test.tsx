@@ -37,7 +37,7 @@ describe("MediaLibraryBrowser", () => {
 
     render(<MediaLibraryBrowser projectId="project-a" />);
 
-    const player = await screen.findByLabelText("music-intro 미리 듣기");
+    const player = await screen.findByLabelText("음악 1 미리 듣기");
     expect(player).toHaveAttribute(
       "src",
       "/api/media-library/assets/pack%3Astarter-v1%3Amusic-intro/preview",
@@ -55,7 +55,7 @@ describe("MediaLibraryBrowser", () => {
     render(<MediaLibraryBrowser projectId="project-a" />);
 
     const items = await screen.findAllByRole("article");
-    expect(within(items[0]).getByText("music-loved")).toBeVisible();
+    expect(within(items[0]).getByText("음악 1")).toBeVisible();
   });
 
   it("saves a new favourite the owner marks", async () => {
@@ -66,10 +66,10 @@ describe("MediaLibraryBrowser", () => {
     } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
-    fireEvent.click(await screen.findByRole("button", { name: "music-intro 즐겨찾기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "음악 1 즐겨찾기" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith("pack:starter-v1:music-intro", true));
-    expect(await screen.findByRole("button", { name: "music-intro 즐겨찾기 해제" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "음악 1 즐겨찾기 해제" })).toBeVisible();
   });
 
   it("separates music from effects so a search is not one long list", async () => {
@@ -81,12 +81,12 @@ describe("MediaLibraryBrowser", () => {
     vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
-    await screen.findByText("music-intro");
+    await screen.findByText("음악 1");
 
     fireEvent.click(screen.getByRole("button", { name: "효과음만 보기" }));
 
-    expect(screen.getByText("sfx-pop")).toBeVisible();
-    expect(screen.queryByText("music-intro")).toBeNull();
+    expect(screen.getByText("효과음 1")).toBeVisible();
+    expect(screen.queryByText("음악 1")).toBeNull();
   });
 
   it("says so plainly when the library has not been installed", async () => {
@@ -96,5 +96,30 @@ describe("MediaLibraryBrowser", () => {
     render(<MediaLibraryBrowser projectId="project-a" />);
 
     expect(await screen.findByText("아직 준비된 음악과 효과음이 없어요.")).toBeVisible();
+  });
+});
+
+describe("항목 이름", () => {
+  it("팩 내부 슬러그 대신 제품 언어로 항목을 부른다", async () => {
+    // 음악 이름이 `music-005` 하나뿐이면 owner는 영어 슬러그를 읽어야 한다.
+    const first = asset({ library_asset_id: "pack:starter-v1:music-005", asset_id: "music-005" });
+    const second = asset({ library_asset_id: "pack:starter-v1:music-zeta", asset_id: "music-zeta" });
+    const effect = asset({
+      library_asset_id: "pack:starter-v1:sfx-pop",
+      asset_id: "sfx-pop",
+      media_type: "sfx",
+    });
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({
+      assets: [second, effect, first],
+    } as never);
+    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+
+    // 번호는 표시 순서가 아니라 종류별 고정 순서에서 나온다.
+    expect(await screen.findByLabelText("음악 1 미리 듣기")).toBeInTheDocument();
+    expect(screen.getByLabelText("음악 2 미리 듣기")).toBeInTheDocument();
+    expect(screen.getByLabelText("효과음 1 미리 듣기")).toBeInTheDocument();
+    expect(screen.queryByText(/music-005|sfx-pop/)).toBeNull();
   });
 });

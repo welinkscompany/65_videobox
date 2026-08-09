@@ -139,14 +139,14 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     thumbnailUrl: typeof metadata.thumbnail_uri === "string" && metadata.thumbnail_uri.trim()
       ? api.assetThumbnailUrl(projectId, asset.asset_id)
       : undefined,
-    license: "프로젝트 로컬 B-roll",
+    license: "내 영상",
     canApply: true,
     previewUrl: api.assetContentUrl(projectId, asset.asset_id),
     previewKind: brollPreviewKind(asset.asset_type),
     requiresBrowserPreviewPreparation: asset.asset_type === "broll_video",
     sourceMetadata: {
       tags: Array.isArray(metadata.tags) ? metadata.tags.filter((tag): tag is string => typeof tag === "string") : [],
-      source: "프로젝트 로컬 B-roll",
+      source: "내 영상",
       creator: "",
       officialLicenseUrl: "",
       attributionRequired: false,
@@ -158,7 +158,7 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
 
 function projectLibrary(asset: MediaLibraryAsset, index: number): EditorAssetCard {
   const kind = asset.media_type === "music" ? "bgm" : "sfx";
-  const prefix = kind === "bgm" ? "BGM" : "SFX";
+  const prefix = kind === "bgm" ? "배경 음악" : "효과음";
   const availableForUse = asset.available && asset.verified;
   return {
     id: `library:${asset.library_asset_id}`,

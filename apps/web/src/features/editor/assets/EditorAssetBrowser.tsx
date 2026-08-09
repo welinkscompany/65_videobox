@@ -24,9 +24,9 @@ type Props = Readonly<{
 
 const filters: readonly Readonly<{ type: "all" | EditorAssetKind; label: string }>[] = [
   { type: "all", label: "전체" },
-  { type: "broll", label: "B-roll" },
-  { type: "bgm", label: "BGM" },
-  { type: "sfx", label: "SFX" },
+  { type: "broll", label: "영상" },
+  { type: "bgm", label: "음악" },
+  { type: "sfx", label: "효과음" },
 ];
 
 const orientationFilters: readonly { value: "all" | EditorAssetOrientation; label: string }[] = [

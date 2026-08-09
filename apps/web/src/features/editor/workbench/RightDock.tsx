@@ -145,7 +145,7 @@ export function RightDock({
       {(runState.kind === "streaming" || runState.kind === "unavailable") && runState.cancelWarning
         ? <p role="status" className="vb-editor-right-dock__sync-warning">{runState.cancelWarning}</p>
         : null}
-      {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : "유진의 답을 받지 못했어요."}</p>{onManualEdit ? <Button type="button" onClick={onManualEdit}>Yujin 없이 계속 편집</Button> : null}</div> : null}
+      {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : "유진의 답을 받지 못했어요."}</p>{onManualEdit ? <Button type="button" onClick={onManualEdit}>유진 없이 계속 편집</Button> : null}</div> : null}
       {state === "idle" && !proposal && onStart ? <Button type="button" onClick={() => void onStart()}>유진에게 추천받기</Button> : null}
       <div
         ref={historyRef}

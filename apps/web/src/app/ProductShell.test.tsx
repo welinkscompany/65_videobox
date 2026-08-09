@@ -450,3 +450,24 @@ describe("settings that cannot do what they offered", () => {
     expect(screen.queryByRole("button", { name: /저장 공간 알림/ })).toBeNull();
   });
 });
+
+describe("사이드바 손잡이", () => {
+  it("가져온 부품의 영어 문구 대신 우리 문구를 쓴다", () => {
+    // shadcn 원본은 "Toggle Sidebar"를 넣는다. 원본 파일은 출처 핀이 걸려
+    // 있어 고칠 수 없으므로, 호출부에서 덮어쓴 것이 유지되는지 잠근다.
+    render(
+      <ProductShell
+        projectId="project-a"
+        projects={[{ project_id: "project-a", name: "프로젝트", status: "draft" } as never]}
+        section="home"
+        onNavigate={vi.fn()}
+        onOpenSettings={vi.fn()}
+      >
+        <p>본문</p>
+      </ProductShell>,
+    );
+
+    expect(screen.getByRole("button", { name: "화면 목록 접기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Toggle Sidebar/i })).toBeNull();
+  });
+});

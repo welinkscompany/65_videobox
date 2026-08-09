@@ -52,6 +52,19 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
     }
   };
 
+  // 팩이 주는 `asset_id`는 내부 슬러그다(`music-005`). owner에게 보일 이름은
+  // 종류별 고정 순서로 매긴 번호로 만든다 -- 즐겨찾기가 위로 올라가도 같은
+  // 곡이 같은 번호를 유지해야 한다.
+  const displayNames = new Map<string, string>();
+  for (const kind of ["music", "sfx"] as const) {
+    const label = kind === "music" ? "음악" : "효과음";
+    assets
+      .filter((item) => item.media_type === kind)
+      .slice()
+      .sort((left, right) => left.asset_id.localeCompare(right.asset_id))
+      .forEach((item, index) => displayNames.set(item.library_asset_id, `${label} ${index + 1}`));
+  }
+
   const visible = assets
     .filter((item) => filter === "all" || item.media_type === filter)
     // Favourites first: the point of marking one is not to hunt for it again.
@@ -82,10 +95,11 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
       </div>
       {visible.length ? visible.map((item) => {
         const loved = favourites.includes(item.library_asset_id);
+        const name = displayNames.get(item.library_asset_id) ?? item.asset_id;
         return (
-          <article key={item.library_asset_id} aria-label={`${item.asset_id} 항목`}>
+          <article key={item.library_asset_id} aria-label={`${name} 항목`}>
             <p>
-              <strong>{item.asset_id}</strong>
+              <strong>{name}</strong>
               {" · "}
               {item.media_type === "music" ? "음악" : "효과음"}
               {" · "}
@@ -94,13 +108,13 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
             <audio
               controls
               preload="none"
-              aria-label={`${item.asset_id} 미리 듣기`}
+              aria-label={`${name} 미리 듣기`}
               src={api.mediaLibraryPreviewUrl(item.library_asset_id)}
             />
             <Button
               type="button"
               variant="outline"
-              aria-label={`${item.asset_id} 즐겨찾기${loved ? " 해제" : ""}`}
+              aria-label={`${name} 즐겨찾기${loved ? " 해제" : ""}`}
               onClick={() => void toggle(item.library_asset_id, !loved)}
             >
               {loved ? "즐겨찾기 해제" : "즐겨찾기"}

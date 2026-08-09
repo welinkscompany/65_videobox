@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import {
   ScriptKind,
   ScriptTarget,
@@ -18,7 +18,35 @@ import {
 } from "typescript";
 import { describe, expect, it } from "vitest";
 
-const uiFiles = [
+// 손으로 적은 목록은 새 화면이 생길 때마다 조용히 뒤처진다 -- 유진 대화창,
+// 음악·효과음 라이브러리, 기억 패널이 전부 이 목록 밖에서 문구를 그렸다.
+// 화면을 그리는 파일을 직접 찾아서, 새로 만든 화면이 기본으로 검사되게 한다.
+// 예외는 둘뿐이다: 테스트 파일과 shadcn 원본(`components/ui`) --
+// 후자는 우리가 쓴 문구가 아니라 가져온 부품이라 별도로 다룬다.
+function discoverUiFiles(): string[] {
+  const root = import.meta.dirname;
+  const found: string[] = [];
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const full = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === "components") continue;
+        walk(full);
+        continue;
+      }
+      if (!entry.name.endsWith(".tsx")) continue;
+      if (entry.name.endsWith(".test.tsx")) continue;
+      if (entry.name === "main.tsx") continue;
+      found.push(relative(root, full).split("\\").join("/"));
+    }
+  };
+  walk(root);
+  return found.sort();
+}
+
+const uiFiles = discoverUiFiles();
+
+const previouslyCoveredUiFiles = [
   "ErrorBoundary.tsx",
   "ProjectOnboarding.tsx",
   "app/AppRouter.tsx",
@@ -116,10 +144,7 @@ function containsForbiddenDashboardCopy(copy: string, forbiddenTerm: string): bo
 
 describe("user-facing dashboard copy", () => {
   it("includes the retained media-reference copy while ignoring implementation props", () => {
-    expect(uiFiles).toEqual(expect.arrayContaining([
-      "features/director/MediaReferenceBadge.tsx",
-      "features/editor/workbench/RightDock.tsx",
-    ]));
+    expect(uiFiles).toEqual(expect.arrayContaining(previouslyCoveredUiFiles));
 
     const copy = renderedCopy('<section data-state="Local Media Director">revision</section>');
 

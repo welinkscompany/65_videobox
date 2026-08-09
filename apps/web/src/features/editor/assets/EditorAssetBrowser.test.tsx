@@ -28,8 +28,8 @@ const cards: readonly EditorAssetCard[] = [
     kind: "bgm",
     assetId: "starter-bgm",
     libraryAssetId: "bgm-1",
-    label: "BGM",
-    title: "BGM 1",
+    label: "배경 음악",
+    title: "배경 음악 1",
     durationLabel: "12초",
     status: "검증됨 · 이용 가능",
     audioPresence: "오디오 있음",
@@ -43,8 +43,8 @@ const cards: readonly EditorAssetCard[] = [
     kind: "sfx",
     assetId: "starter-sfx",
     libraryAssetId: "sfx-1",
-    label: "SFX",
-    title: "SFX 1",
+    label: "효과음",
+    title: "효과음 1",
     durationLabel: "2초",
     status: "이용 불가 · 검증됨",
     audioPresence: "오디오 있음",
@@ -61,9 +61,9 @@ describe("EditorAssetBrowser", () => {
     const { container } = render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={onPreview} onApply={vi.fn()} />);
 
     screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용 구간: 3.00–7.00초"));
-    fireEvent.click(screen.getByRole("button", { name: "BGM 필터" }));
-    expect(screen.getByRole("button", { name: "BGM 필터" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("heading", { name: "BGM 1" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "음악 필터" }));
+    expect(screen.getByRole("button", { name: "음악 필터" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "배경 음악 1" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "제품 사진" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "전체 필터" }));
@@ -84,7 +84,7 @@ describe("EditorAssetBrowser", () => {
     expect(screen.getByRole("status")).toHaveTextContent("적용할 나레이션 구간을 먼저 선택하세요.");
     screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용할 나레이션 구간을 먼저 선택하세요."));
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "SFX 1 적용" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "효과음 1 적용" })).toBeDisabled();
 
     rerender(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving onPreview={vi.fn()} onApply={onApply} />);
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
@@ -92,7 +92,7 @@ describe("EditorAssetBrowser", () => {
     rerender(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={onApply} />);
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 적용" }));
     expect(onApply).toHaveBeenCalledWith(cards[0], "seg-1");
-    expect(screen.getByRole("button", { name: "SFX 1 적용" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "효과음 1 적용" })).toBeDisabled();
   });
 
   it("explains when no card matches the active filters", () => {

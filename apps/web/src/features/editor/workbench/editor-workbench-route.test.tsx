@@ -1749,9 +1749,9 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
-    expect(await screen.findByRole("button", { name: "BGM 1 적용" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "배경 음악 1 적용" })).toBeEnabled();
     fireEvent.click(clipSelectionButton("n-1"));
-    const applyButton = screen.getByRole("button", { name: "BGM 1 적용" });
+    const applyButton = screen.getByRole("button", { name: "배경 음악 1 적용" });
     fireEvent.click(applyButton);
 
     await waitFor(() => expect(materialize).toHaveBeenCalledWith("library-bgm-1", "project-a"));
@@ -1779,9 +1779,9 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
-    await screen.findByRole("button", { name: "BGM 1 적용" });
+    await screen.findByRole("button", { name: "배경 음악 1 적용" });
     fireEvent.click(clipSelectionButton("n-1"));
-    fireEvent.click(screen.getByRole("button", { name: "BGM 1 적용" }));
+    fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 적용" }));
 
     expect(await screen.findByText("변경 내용을 저장하지 못했어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(updateMusic).not.toHaveBeenCalled();
@@ -1842,9 +1842,9 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
-    await screen.findByRole("button", { name: "BGM 1 적용" });
+    await screen.findByRole("button", { name: "배경 음악 1 적용" });
     fireEvent.click(clipSelectionButton("n-1"));
-    fireEvent.click(screen.getByRole("button", { name: "BGM 1 적용" }));
+    fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 적용" }));
     await waitFor(() => expect(materialize).toHaveBeenCalledWith("library-bgm-1", "project-a"));
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
@@ -3098,7 +3098,7 @@ describe("EditorWorkbenchRoute", () => {
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Yujin 없이 계속 편집" }));
+    fireEvent.click(await screen.findByRole("button", { name: "유진 없이 계속 편집" }));
     expect(await screen.findByRole("button", { name: "자산과 대본" })).toBeVisible();
   });
 
@@ -3257,7 +3257,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(await screen.findByRole("radio", { name: "P01-BROLL-01 선택" }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
-    expect(await screen.findByRole("button", { name: "Yujin 없이 계속 편집" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "유진 없이 계속 편집" })).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
     expect(apply).not.toHaveBeenCalled();
   });
@@ -3385,7 +3385,7 @@ describe("EditorWorkbenchRoute", () => {
 
     await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
     expect(sessionLoad).toHaveBeenCalledTimes(2);
-    expect(await screen.findByRole("button", { name: "Yujin 없이 계속 편집" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "유진 없이 계속 편집" })).toBeVisible();
     expect(screen.getByText("최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
     await expectEditorRevision(1);
@@ -3668,7 +3668,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(composer).toHaveValue("보존할 요청");
     expect(screen.getByText("남아 있는 대화")).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Yujin 없이 계속 편집" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진 없이 계속 편집" }));
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeVisible();
     expect(screen.getByText("남아 있는 대화")).toBeVisible();

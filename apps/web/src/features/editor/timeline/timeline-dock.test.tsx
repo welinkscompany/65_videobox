@@ -469,8 +469,8 @@ describe("TimelineDock", () => {
     const timeline = screen.getByRole("region", { name: "타임라인" });
     expect(timeline).toHaveAttribute("tabindex", "0");
     expect(screen.getAllByRole("listitem", { name: /내레이션/ })).toHaveLength(1);
-    expect(screen.getAllByRole("listitem", { name: /B-roll/ })).toHaveLength(1);
-    expect(screen.getAllByRole("listitem", { name: /BGM/ })).toHaveLength(1);
+    expect(screen.getAllByRole("listitem", { name: /영상/ })).toHaveLength(1);
+    expect(screen.getAllByRole("listitem", { name: /배경 음악/ })).toHaveLength(1);
     expect(screen.getAllByRole("listitem", { name: /효과음/ })).toHaveLength(1);
     expect(screen.getAllByRole("listitem", { name: /오버레이/ })).toHaveLength(1);
     expect(screen.getByTestId("timeline-clip")).toHaveAttribute("data-clip-id", "n-1");
@@ -495,7 +495,7 @@ describe("TimelineDock", () => {
     // n-1 is the 1st (and only) narration clip, starting at 0s.
     expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeInTheDocument();
     // b-1 is the 1st (and only) broll clip, starting at 1s.
-    expect(screen.getByRole("button", { name: "B-roll 1번째 장면, 1초부터" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "영상 1번째 장면, 1초부터" })).toBeInTheDocument();
     expect(screen.queryByText("n-1")).not.toBeInTheDocument();
     expect(screen.queryByText("b-1")).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/segment_draft|session-broll/);
@@ -628,5 +628,20 @@ describe("TimelineDock", () => {
     expect(laterClips.length).toBeLessThanOrEqual(300);
     expect(laterClips.map((clip) => clip.getAttribute("data-clip-id"))).toEqual(["bulk-100", "bulk-101", "bulk-102"]);
     expect(laterClips.some((clip) => clip.getAttribute("data-clip-id") === "bulk-99")).toBe(false);
+  });
+});
+
+describe("타임라인 상태 문구", () => {
+  it("영어 원값 대신 창작자 언어로 최신 여부를 말한다", () => {
+    // 2026-08-05 승인 문서가 못박은 문구다: `stale` 대신 `최신 편집 반영됨`.
+    render(<TimelineDock view={{ ...view, source: { status: "current" } } as never} viewportWidthPx={400} />);
+    expect(screen.getByText(/최신 편집 반영됨/)).toBeInTheDocument();
+    expect(screen.queryByText(/current/)).toBeNull();
+
+    cleanup();
+
+    render(<TimelineDock view={{ ...view, source: { status: "stale" } } as never} viewportWidthPx={400} />);
+    expect(screen.getByText(/편집 반영 전/)).toBeInTheDocument();
+    expect(screen.queryByText(/stale/)).toBeNull();
   });
 });

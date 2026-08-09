@@ -10,7 +10,7 @@ describe("editor asset projection", () => {
       libraryAssets: [{ library_asset_id: "bgm-1", asset_id: "starter-bgm", media_type: "music", duration_seconds: 12, version: "v1", verified: true, available: true, tags: [], source: "Starter", creator: "Creator", official_license_url: "https://license.invalid", attribution_required: false, attribution_text: "" }],
     });
 
-    expect(cards.map((card) => [card.kind, card.label, card.canApply])).toEqual([["broll", "이미지 B-roll", true], ["bgm", "BGM", true]]);
+    expect(cards.map((card) => [card.kind, card.label, card.canApply])).toEqual([["broll", "이미지 B-roll", true], ["bgm", "배경 음악", true]]);
     expect(cards[0].status).toBe("준비됨 · 검토 불필요");
   });
 
@@ -111,7 +111,7 @@ describe("editor asset projection", () => {
       ],
     });
 
-    expect(cards[0]).toMatchObject({ license: "프로젝트 로컬 B-roll", sourceMetadata: expect.objectContaining({ source: "프로젝트 로컬 B-roll" }) });
+    expect(cards[0]).toMatchObject({ license: "내 영상", sourceMetadata: expect.objectContaining({ source: "내 영상" }) });
     expect(`${cards[0].license} ${cards[0].sourceMetadata.source}`).not.toContain("manual source");
     expect(cards.slice(1)).toEqual([
       expect.objectContaining({

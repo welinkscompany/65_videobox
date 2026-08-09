@@ -82,15 +82,15 @@ describe("EditorWorkbench", () => {
   it("uses audio elements for both B-roll audio and library audio cards", async () => {
     const audioCards = [
       { ...assetCards[0], id: "broll:audio-1", assetId: "audio-1", title: "현장 오디오", label: "오디오 B-roll", previewUrl: "/api/projects/project-a/assets/audio-1/content", previewKind: "audio" as const },
-      { ...assetCards[0], id: "library:bgm-1", assetId: "starter-bgm", libraryAssetId: "bgm-1", title: "BGM 1", label: "BGM", previewUrl: "/api/media-library/assets/bgm-1/preview", previewKind: "audio" as const },
+      { ...assetCards[0], id: "library:bgm-1", assetId: "starter-bgm", libraryAssetId: "bgm-1", title: "배경 음악 1", label: "배경 음악", previewUrl: "/api/media-library/assets/bgm-1/preview", previewKind: "audio" as const },
     ];
     const { container } = render(<EditorWorkbench view={view} assetCards={audioCards} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "현장 오디오 원본 미리보기" }));
     expect(screen.getByLabelText("현장 오디오 소스 미리보기").tagName).toBe("AUDIO");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "BGM 1 원본 미리보기" }));
-    expect(screen.getByLabelText("BGM 1 소스 미리보기").tagName).toBe("AUDIO");
+    fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 원본 미리보기" }));
+    expect(screen.getByLabelText("배경 음악 1 소스 미리보기").tagName).toBe("AUDIO");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
   });
 
@@ -227,7 +227,7 @@ describe("EditorWorkbench", () => {
 
     expect(screen.getByText("남아 있는 요청")).toBeVisible();
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존된 초안");
-    fireEvent.click(screen.getByRole("button", { name: "Yujin 없이 계속 편집" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진 없이 계속 편집" }));
     expect(onManualEdit).toHaveBeenCalledOnce();
   });
 

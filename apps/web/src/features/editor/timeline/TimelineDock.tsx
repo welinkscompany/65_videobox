@@ -19,10 +19,16 @@ import {
 const LANE_HEIGHT_PX = 32;
 const SNAP_THRESHOLD_PX = 8;
 
+// 2026-08-05 승인: 상태 문구는 창작자 언어로 쓴다 -- `stale`을 그대로 내보내지 않는다.
+const sourceStatusLabel: Readonly<Record<string, string>> = {
+  current: "최신 편집 반영됨",
+  stale: "편집 반영 전",
+};
+
 const laneLabel: Readonly<Record<TimelineLane, string>> = {
   narration: "내레이션",
-  broll: "B-roll",
-  bgm: "BGM",
+  broll: "영상",
+  bgm: "배경 음악",
   sfx: "효과음",
   overlay: "오버레이",
   caption: "자막",
@@ -527,7 +533,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     tabIndex={0}
   >
     <h2>타임라인</h2>
-    <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {view.source.status}</p>
+    <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
     <p>클릭으로 재생 위치를 보고, 화살표·Home·End·+·- 키로 탐색합니다.</p>
     <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "1.5rem", overflow: "hidden" }}>
       {rulerMarks.map((seconds) => <span key={seconds} aria-label={`눈금 ${seconds}초`} role="listitem" style={{ minWidth: `${state.pixelsPerSecond}px` }}>{seconds}s</span>)}
