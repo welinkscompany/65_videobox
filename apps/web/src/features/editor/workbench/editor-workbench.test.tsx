@@ -475,3 +475,51 @@ describe("EditorWorkbench", () => {
     expect(screen.getByLabelText("편집본 미리보기")).toBeInTheDocument();
   });
 });
+
+describe("EditorWorkbench 되돌리기 단축키", () => {
+  const session = { undoCount: 2, redoCount: 1 } as never;
+
+  it("Alt+Z 와 Ctrl+Z 로 한 단계씩 되돌린다", () => {
+    const onUndo = vi.fn();
+    render(<EditorWorkbench view={view} session={session} onUndo={onUndo} />);
+
+    fireEvent.keyDown(window, { key: "z", altKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(2);
+  });
+
+  it("Ctrl+Shift+Z 로 다시 실행한다", () => {
+    const onRedo = vi.fn();
+    render(<EditorWorkbench view={view} session={session} onRedo={onRedo} />);
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, shiftKey: true });
+
+    expect(onRedo).toHaveBeenCalledTimes(1);
+  });
+
+  it("글자를 치는 중에는 편집을 되돌리지 않는다", () => {
+    // Undoing the whole edit while the owner is fixing a caption would throw
+    // away their typing and a real edit at once.
+    const onUndo = vi.fn();
+    render(<EditorWorkbench view={view} session={session} onUndo={onUndo} />);
+    const field = document.createElement("textarea");
+    document.body.appendChild(field);
+    field.focus();
+
+    fireEvent.keyDown(field, { key: "z", ctrlKey: true });
+
+    expect(onUndo).not.toHaveBeenCalled();
+    field.remove();
+  });
+
+  it("되돌릴 것이 없으면 아무 일도 하지 않는다", () => {
+    const onUndo = vi.fn();
+    render(<EditorWorkbench view={view} session={{ undoCount: 0, redoCount: 0 } as never} onUndo={onUndo} />);
+
+    fireEvent.keyDown(window, { key: "z", altKey: true });
+
+    expect(onUndo).not.toHaveBeenCalled();
+  });
+});
