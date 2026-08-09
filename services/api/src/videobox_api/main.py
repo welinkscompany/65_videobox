@@ -54,6 +54,7 @@ from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRende
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
+from videobox_core_engine.library_footage_indexer import index_pending_library_footage
 from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_watcher_loop
 from videobox_core_engine.media_analysis import MediaAnalysisService
 from videobox_core_engine.media_analysis import AnalysisProfile
@@ -189,6 +190,29 @@ HERMES_EVENT_PRUNE_INTERVAL_SECONDS = 3600.0
 # into a long analysis run; what is left is picked up next minute.
 LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS = 60.0
 LIBRARY_AUDIO_INDEX_BATCH = 8
+
+
+def _index_library_footage(app: FastAPI) -> None:
+    """드롭 폴더에 쌓인 촬영본을 찾을 수 있는 자산으로 만든다.
+
+    b-roll 분석은 프로젝트에 묶여 있어서, 라이브러리에 있는 영상은 가져오기
+    전까지 유진에게 보이지 않았다. 화면 분석은 무거우므로 한 번에 몇 개만
+    처리하고 나머지는 다음 차례로 둔다.
+    """
+    store = getattr(app.state, "media_library_store", None)
+    library_root = getattr(app.state, "media_inbox_library_root", None)
+    if store is None or library_root is None or not Path(library_root).is_dir():
+        return
+    profile = getattr(app.state, "media_analysis_profile", None) or {}
+    index_pending_library_footage(
+        store=store,
+        paths=[path for path in Path(library_root).iterdir() if path.is_file()],
+        media_probe=getattr(app.state, "media_analysis_probe", None),
+        vision_provider=getattr(app.state, "media_analysis_vision_provider", None),
+        vision_model_name=profile.get("vision_model_name"),
+        embedding_provider=getattr(app.state, "media_analysis_embedding_provider", None),
+        embedding_model_name=profile.get("embedding_model_name"),
+    )
 
 
 def _index_library_audio(app: FastAPI) -> None:
@@ -353,6 +377,7 @@ async def _media_analysis_lifespan(app: FastAPI):
                     # failing pass must not turn into a per-second retry.
                     next_index_at = loop_clock.time() + LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS
                     await asyncio.to_thread(_index_library_audio, app)
+                    await asyncio.to_thread(_index_library_footage, app)
                 if loop_clock.time() >= next_prune_at:
                     # Book the next run before the prune can raise. Otherwise a
                     # failing prune keeps the old deadline and retries on every
@@ -640,6 +665,7 @@ def create_app(
         probe=asset_browser_preview_probe or FFprobeBrowserPreviewProbe(),
         renderer=asset_browser_preview_renderer or FFmpegBrowserPreviewRenderer(),
     )
+    app.state.media_analysis_probe = resolved_media_probe
     app.state.media_analysis_vision_provider = resolved_vision_provider
     app.state.media_analysis_embedding_provider = embedding_provider
     app.state.media_analysis_profile = resolved_profile

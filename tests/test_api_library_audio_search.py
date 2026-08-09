@@ -140,3 +140,65 @@ def test_an_empty_query_is_rejected_rather_than_ranked(tmp_path: Path) -> None:
         )
 
     assert response.status_code == 422
+
+
+def _with_footage(tmp_path: Path):
+    store = _library_with_two_tracks(tmp_path)
+    store.save_footage_descriptor(
+        content_sha256="a" * 64, filename="수영장.mp4", duration_seconds=29.0,
+        width=1920, height=1080,
+        tags={"layers": {"place": ["실내 수영장"]}},
+        description="가로 영상. 아이가 물놀이하는 차분한 장면.",
+        embedding=[1.0, 0.0],
+    )
+    store.save_footage_descriptor(
+        content_sha256="b" * 64, filename="달리기.mp4", duration_seconds=12.0,
+        width=1080, height=1920,
+        tags={"layers": {"action": ["달리기"]}},
+        description="세로 영상. 신나게 달리는 장면.",
+        embedding=[0.0, 1.0],
+    )
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        media_library_store=store,
+        media_analysis_poll_interval_seconds=3600,
+    )
+    app.state.media_analysis_embedding_provider = _Embeddings()
+    app.state.media_analysis_profile = {"embedding_model_name": "test-embed"}
+    return TestClient(app)
+
+
+def test_footage_can_be_found_before_it_is_ever_imported(tmp_path: Path) -> None:
+    # 지금까지는 프로젝트로 가져와야만 분석돼서, 드롭 폴더에 있는 영상은
+    # 유진에게 보이지 않았다.
+    with _with_footage(tmp_path) as client:
+        response = client.post(
+            "/api/media-library/search", json={"query": "차분한 장면", "media_type": "broll"}
+        )
+
+    assert response.status_code == 200
+    matches = response.json()["matches"]
+    assert matches[0]["filename"] == "수영장.mp4"
+    assert matches[0]["orientation"] == "가로"
+
+
+def test_a_short_form_search_can_ask_for_vertical_only(tmp_path: Path) -> None:
+    with _with_footage(tmp_path) as client:
+        response = client.post(
+            "/api/media-library/search",
+            json={"query": "신나는 장면", "media_type": "broll", "orientation": "세로"},
+        )
+
+    assert [match["filename"] for match in response.json()["matches"]] == ["달리기.mp4"]
+
+
+def test_orientation_is_only_meaningful_for_footage(tmp_path: Path) -> None:
+    # 음악에 방향을 물어보는 것은 뜻이 없다. 조용히 무시하면 owner가 걸러진
+    # 줄 알게 되므로 거절한다.
+    with _with_footage(tmp_path) as client:
+        response = client.post(
+            "/api/media-library/search",
+            json={"query": "차분한 음악", "media_type": "music", "orientation": "세로"},
+        )
+
+    assert response.status_code == 422

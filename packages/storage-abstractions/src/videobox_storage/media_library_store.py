@@ -355,6 +355,145 @@ class MediaLibraryStore:
         matches.sort(key=lambda match: (-match["score"], match["library_asset_id"]))
         return matches[:limit]
 
+    # ------------------------------------------------------------------
+    # The owner's own footage
+    # ------------------------------------------------------------------
+
+    def list_footage_needing_analysis(
+        self, *, paths: Iterable[Path], description_version: int = 1
+    ) -> list[dict[str, Any]]:
+        """Of the files present, the ones not yet described at this version.
+
+        Hashing is the price of knowing, and it is what makes re-adding or
+        renaming the same clip free rather than a second analysis.
+        """
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """SELECT content_sha256 FROM footage_index
+                    WHERE embedding_json IS NOT NULL AND description_version >= ?""",
+                (int(description_version),),
+            ).fetchall()
+        finally:
+            connection.close()
+        done = {str(row["content_sha256"]) for row in rows}
+
+        pending: list[dict[str, Any]] = []
+        for path in paths:
+            file_path = Path(path)
+            if not file_path.is_file():
+                continue
+            digest = _sha256_file(file_path)
+            if digest in done:
+                continue
+            pending.append({"content_sha256": digest, "filename": file_path.name, "path": str(file_path)})
+        return pending
+
+    def save_footage_descriptor(
+        self,
+        *,
+        content_sha256: str,
+        filename: str,
+        duration_seconds: float,
+        width: int,
+        height: int,
+        tags: dict[str, Any],
+        description: str,
+        embedding: list[float] | None,
+        description_version: int = 1,
+    ) -> None:
+        # Orientation comes from the real frame size, never from a tag a model
+        # guessed: choosing footage for a short is a yes/no question.
+        orientation = "가로" if int(width) >= int(height) else "세로"
+        connection = self._connection()
+        try:
+            connection.execute(
+                """
+                INSERT INTO footage_index (
+                    content_sha256, filename, duration_seconds, width, height, orientation,
+                    tags_json, description, embedding_json, description_version, analyzed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(content_sha256) DO UPDATE SET
+                    filename = excluded.filename, duration_seconds = excluded.duration_seconds,
+                    width = excluded.width, height = excluded.height, orientation = excluded.orientation,
+                    tags_json = excluded.tags_json, description = excluded.description,
+                    embedding_json = excluded.embedding_json,
+                    description_version = excluded.description_version,
+                    analyzed_at = excluded.analyzed_at
+                """,
+                (
+                    content_sha256, filename, float(duration_seconds), int(width), int(height),
+                    orientation, json.dumps(tags, ensure_ascii=False), description,
+                    json.dumps(embedding) if embedding is not None else None,
+                    int(description_version), self._now(),
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+    def get_footage_descriptor(self, *, content_sha256: str) -> dict[str, Any] | None:
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT * FROM footage_index WHERE content_sha256 = ?", (content_sha256,)
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            return None
+        item = dict(row)
+        item["tags"] = json.loads(str(item.pop("tags_json")))
+        raw = item.pop("embedding_json", None)
+        item["embedding"] = json.loads(str(raw)) if raw else None
+        return item
+
+    def find_footage_matches(
+        self, *, query_embedding: list[float], orientation: str | None = None, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        query = tuple(float(value) for value in query_embedding)
+        if not query or not all(math.isfinite(value) for value in query):
+            raise ValueError("query_embedding must contain finite values")
+        query_norm = math.sqrt(sum(value * value for value in query))
+        if query_norm == 0:
+            raise ValueError("query_embedding must not be all zeros")
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+
+        sql = """SELECT content_sha256, filename, duration_seconds, orientation, tags_json,
+                        description, embedding_json
+                 FROM footage_index WHERE embedding_json IS NOT NULL"""
+        parameters: tuple[Any, ...] = ()
+        if orientation is not None:
+            sql += " AND orientation = ?"
+            parameters = (orientation,)
+        connection = self._connection()
+        try:
+            rows = connection.execute(sql, parameters).fetchall()
+        finally:
+            connection.close()
+
+        matches: list[dict[str, Any]] = []
+        for row in rows:
+            vector = json.loads(str(row["embedding_json"]))
+            if len(vector) != len(query):
+                continue
+            norm = math.sqrt(sum(value * value for value in vector))
+            if norm == 0:
+                continue
+            score = sum(a * b for a, b in zip(query, vector, strict=True)) / (query_norm * norm)
+            matches.append({
+                "content_sha256": str(row["content_sha256"]),
+                "filename": str(row["filename"]),
+                "duration_seconds": float(row["duration_seconds"]),
+                "orientation": str(row["orientation"]),
+                "tags": json.loads(str(row["tags_json"])),
+                "description": str(row["description"]),
+                "score": round(score, 6),
+            })
+        matches.sort(key=lambda match: (-match["score"], match["filename"]))
+        return matches[:limit]
+
     def install_state(self) -> dict[str, object]:
         assets = self.inspect_active_assets()
         if not assets:
@@ -506,6 +645,18 @@ class MediaLibraryStore:
                 duration_seconds REAL NOT NULL, loudness_rms REAL NOT NULL,
                 brightness_hz REAL NOT NULL, onset_rate_per_second REAL NOT NULL,
                 words_json TEXT NOT NULL, description TEXT NOT NULL,
+                embedding_json TEXT, description_version INTEGER NOT NULL DEFAULT 1,
+                analyzed_at TEXT NOT NULL
+            );
+            -- The owner's own footage, indexed by what is in the file rather
+            -- than by which project happens to hold a copy. Analysis used to
+            -- live per project, so footage sitting in the library was invisible
+            -- until imported, and the same clip was analysed once per project
+            -- that used it.
+            CREATE TABLE IF NOT EXISTS footage_index (
+                content_sha256 TEXT PRIMARY KEY, filename TEXT NOT NULL,
+                duration_seconds REAL NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+                orientation TEXT NOT NULL, tags_json TEXT NOT NULL, description TEXT NOT NULL,
                 embedding_json TEXT, description_version INTEGER NOT NULL DEFAULT 1,
                 analyzed_at TEXT NOT NULL
             );

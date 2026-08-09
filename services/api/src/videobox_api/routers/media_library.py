@@ -52,11 +52,15 @@ def build_media_library_router(
             )
         try:
             response = provider.embed(EmbeddingRequest(model_name=model_name, inputs=(query,)))
-            matches = library_store.find_audio_matches(
-                query_embedding=[float(value) for value in response.vectors[0]],
-                media_type=payload.media_type,
-                limit=payload.limit,
-            )
+            vector = [float(value) for value in response.vectors[0]]
+            if payload.media_type == "broll":
+                matches = library_store.find_footage_matches(
+                    query_embedding=vector, orientation=payload.orientation, limit=payload.limit
+                )
+            else:
+                matches = library_store.find_audio_matches(
+                    query_embedding=vector, media_type=payload.media_type, limit=payload.limit
+                )
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_search_unavailable"

@@ -882,10 +882,19 @@ class LibraryAudioSearchRequest(BaseModel):
     """Ask the music and effects library what suits a scene."""
 
     query: str = Field(min_length=1)
-    # A scene needs music or an effect, never whichever of the two happens to
-    # score highest, so the kind is required rather than optional.
-    media_type: Literal["music", "sfx"]
+    # A scene needs music, an effect, or footage -- never whichever kind
+    # happens to score highest -- so the kind is required rather than optional.
+    media_type: Literal["music", "sfx", "broll"]
+    # Only footage has an orientation. Silently ignoring it elsewhere would let
+    # the owner believe a filter was applied.
+    orientation: Literal["가로", "세로"] | None = None
     limit: int = Field(default=5, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def _orientation_only_for_footage(self) -> "LibraryAudioSearchRequest":
+        if self.orientation is not None and self.media_type != "broll":
+            raise ValueError("orientation_only_applies_to_broll")
+        return self
 
 
 class EditingSessionHistoryEntryResponse(BaseModel):
