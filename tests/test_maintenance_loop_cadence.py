@@ -66,6 +66,44 @@ def test_a_failing_prune_does_not_fall_back_to_running_every_second(
     assert calls == 1, f"a failing prune ran {calls} times instead of keeping its schedule"
 
 
+def test_a_failing_maintenance_pass_says_why_and_keeps_running(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """뒤에서 도는 정비 한 바퀴가 통째로 `except Exception: pass`에 감싸여
+    있었다. 분석 폴링, 라이브러리 색인, 기동 복구, 이벤트 정리가 전부 그
+    안에 있으니 무엇이 계속 터져도 화면은 정상이고 로그는 비어 있었다.
+
+    이유는 남기되 동작은 그대로다 -- 한 바퀴가 터져도 작업자는 계속 돌아야
+    한다."""
+    import logging
+
+    calls = 0
+
+    async def failing_poll(_app, *, recover_running: bool) -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("데이터베이스에 닿지 못했습니다")
+
+    monkeypatch.setattr(api_main, "_poll_media_analysis", failing_poll)
+
+    with caplog.at_level(logging.WARNING, logger="videobox_api.main"):
+        app = api_main.create_app(
+            projects_root=tmp_path / "projects",
+            media_analysis_poll_interval_seconds=0.01,
+        )
+        with TestClient(app):
+            time.sleep(0.3)
+
+    assert calls > 1, f"작업자가 첫 실패에서 멈췄습니다 (calls={calls})"
+
+    records = [record for record in caplog.records if record.name == "videobox_api.main"]
+    assert any(
+        "데이터베이스에 닿지 못했습니다" in (record.exc_text or "")
+        or "데이터베이스에 닿지 못했습니다" in str(record.exc_info)
+        for record in records
+    ), [record.getMessage() for record in records]
+
+
 def test_the_analysis_cache_is_actually_pruned(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`prune_stale_media_analysis_cache` had tests but no caller, so
     `media_analysis_cache` and `media_embeddings` grew forever. A retention

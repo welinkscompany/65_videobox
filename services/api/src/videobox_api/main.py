@@ -285,7 +285,7 @@ def _index_library_footage(app: FastAPI) -> None:
     if store is None or library_root is None or not Path(library_root).is_dir():
         return
     profile = getattr(app.state, "media_analysis_profile", None) or {}
-    index_pending_library_footage(
+    report = index_pending_library_footage(
         store=store,
         paths=[path for path in Path(library_root).iterdir() if path.is_file()],
         media_probe=getattr(app.state, "media_analysis_probe", None),
@@ -294,13 +294,21 @@ def _index_library_footage(app: FastAPI) -> None:
         embedding_provider=getattr(app.state, "media_analysis_embedding_provider", None),
         embedding_model_name=profile.get("embedding_model_name"),
     )
+    # 색인기는 실패한 파일을 성실히 모아 돌려주는데 부르는 쪽이 그 보고서를
+    # 버리고 있었다. 색인되지 못한 촬영본은 검색에서 그냥 없는 것이 된다.
+    if report.failed:
+        _LOGGER.warning(
+            "촬영본 %d개를 색인하지 못했습니다. 검색에 나오지 않습니다: %s",
+            len(report.failed),
+            ", ".join(report.failed[:10]),
+        )
 
 
 def _index_library_audio(app: FastAPI) -> None:
     store = getattr(app.state, "media_library_store", None)
     if store is None:
         return
-    index_pending_library_audio(
+    report = index_pending_library_audio(
         store=store,
         embedding_provider=getattr(app.state, "media_analysis_embedding_provider", None),
         embedding_model_name=(getattr(app.state, "media_analysis_profile", None) or {}).get(
@@ -308,6 +316,14 @@ def _index_library_audio(app: FastAPI) -> None:
         ),
         max_assets=LIBRARY_AUDIO_INDEX_BATCH,
     )
+    # 촬영본 쪽과 같다. 옮겨졌거나 읽지 못한 음원은 보고서에만 남고
+    # 어디에도 나타나지 않았다.
+    if report.failed:
+        _LOGGER.warning(
+            "음원 %d개를 색인하지 못했습니다. 검색에 나오지 않습니다: %s",
+            len(report.failed),
+            ", ".join(report.failed[:10]),
+        )
 
 
 def _recover_in_process_jobs(app: FastAPI) -> None:
@@ -478,17 +494,26 @@ async def _media_analysis_lifespan(app: FastAPI):
     except Exception:
         # An unavailable ledger cannot be claimed as durably reconciled.
         # The single bounded worker retries after recovery without dispatching.
-        pass
+        _LOGGER.warning(
+            "기동 복구에서 유진 실행 기록을 정리하지 못했습니다. 아래 작업자가 다시 시도합니다.",
+            exc_info=True,
+        )
     try:
         await asyncio.to_thread(app.state.asset_browser_preview_service.recover_orphans)
     except Exception:
         # Preview recovery is retriable and never starts a renderer.
-        pass
+        _LOGGER.warning(
+            "기동 복구에서 미리보기를 정리하지 못했습니다. 만들다 만 미리보기가 남아 있을 수 있습니다.",
+            exc_info=True,
+        )
     try:
         await asyncio.to_thread(_recover_in_process_jobs, app)
     except Exception:
         # Marking a dead job dead is retriable and starts no work.
-        pass
+        _LOGGER.warning(
+            "기동 복구에서 끊긴 작업을 정리하지 못했습니다. 화면에 멈춘 진행 표시가 남을 수 있습니다.",
+            exc_info=True,
+        )
 
     async def worker() -> None:
         first = True
@@ -516,7 +541,15 @@ async def _media_analysis_lifespan(app: FastAPI):
             except Exception:
                 # One bounded owner survives database outages and retries the
                 # durable maintenance iteration. CancelledError is not caught.
-                pass
+                #
+                # 살아남는 것과 침묵하는 것은 다르다. 여기 한 바퀴에는 분석
+                # 폴링과 배차, 라이브러리 색인, 유진 실행 복구, 이벤트 정리가
+                # 전부 들어 있다. 이유를 남기지 않으면 무엇이 계속 터져도
+                # 화면은 정상으로 보이고 owner는 물어볼 근거조차 없다.
+                _LOGGER.warning(
+                    "뒤에서 도는 정비 한 바퀴가 실패했습니다. 다음 차례에 다시 시도합니다.",
+                    exc_info=True,
+                )
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=app.state.media_analysis_poll_interval_seconds)
             except TimeoutError:
