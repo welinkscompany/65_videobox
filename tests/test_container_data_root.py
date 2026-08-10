@@ -108,6 +108,22 @@ def test_create_app_refuses_database_mode_without_a_verified_snapshot(monkeypatc
         create_app()
 
 
+def test_create_app_refuses_container_mode_without_a_database_url(monkeypatch, tmp_path: Path) -> None:
+    """컨테이너 모드인데 주소가 없으면 뜨지 않아야 한다.
+
+    폴백이 남아 있으면 프로그램은 멀쩡히 뜨고 빈 파일 저장소를 연다. 화면에서
+    그것은 "프로젝트가 전부 사라짐"과 구분되지 않는다. 판별 기준은 "주소가
+    없는가"가 아니라 "컨테이너 모드인가"다 -- 손으로 돌리는 개발 실행은
+    여전히 파일 저장소를 쓸 수 있어야 한다.
+    """
+    monkeypatch.setenv("VIDEOBOX_DATA_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("VIDEOBOX_SNAPSHOT_ROOT", str(tmp_path / "snapshot"))
+    monkeypatch.delenv("VIDEOBOX_DATABASE_URL", raising=False)
+
+    with pytest.raises(ValueError, match="VIDEOBOX_DATABASE_URL"):
+        create_app()
+
+
 def test_create_app_keeps_host_sqlite_mode_without_container_environment(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("VIDEOBOX_DATABASE_URL", raising=False)
     monkeypatch.delenv("VIDEOBOX_SNAPSHOT_ROOT", raising=False)

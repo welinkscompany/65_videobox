@@ -673,6 +673,18 @@ def create_app(
         )
     database_url = resolve_database_url()
     snapshot_root = resolve_container_snapshot_root()
+    if snapshot_root is not None and database_url is None:
+        # 이 프로젝트는 데이터베이스로만 돈다(owner 지시). 컨테이너 모드에서
+        # 주소가 빠지면 예전에는 조용히 빈 파일 저장소를 열었고, 화면에서는
+        # 그것이 "프로젝트가 전부 사라짐"과 구분되지 않았다. 뜨지 않는 편이
+        # 낫다. 손으로 돌리는 개발 실행은 `VIDEOBOX_SNAPSHOT_ROOT`가 없으므로
+        # 여기 걸리지 않고 계속 파일 저장소를 쓴다.
+        #
+        # 스냅샷 검증보다 먼저 본다. 뒤에 두면 스냅샷 오류가 이 오류를 가려서
+        # 정작 빠진 변수 이름이 로그에 뜨지 않는다.
+        raise ValueError(
+            "container mode requires VIDEOBOX_DATABASE_URL; refusing to fall back to the local file store"
+        )
     if snapshot_root is not None:
         try:
             verify_container_snapshot(snapshot_root)
