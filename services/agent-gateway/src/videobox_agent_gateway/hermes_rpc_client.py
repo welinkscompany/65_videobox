@@ -6,8 +6,13 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 import json
+import logging
 from urllib.parse import quote
 from urllib.parse import urlsplit
+
+from videobox_agent_gateway.fault_reporting import FaultReporter
+
+_LOGGER = logging.getLogger("uvicorn.error")
 
 
 class HermesTransportError(RuntimeError):
@@ -79,6 +84,7 @@ class HermesRpcClient:
         self._timeout = timeout_seconds
         self._active_runs: dict[str, tuple[object, str]] = {}
         self._active_lock = asyncio.Lock()
+        self._probe_faults = FaultReporter(_LOGGER)
 
     async def stream_prompt(
         self, *, text: str, run_id: str | None = None
@@ -236,11 +242,21 @@ class HermesRpcClient:
                         "GET",
                         "/api/status",
                     ) as response:
-                        return response.status_code == 200
+                        ready = response.status_code == 200
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - 준비 확인은 실패해도 계속 돈다
+            # 이 False가 위로 올라가면서 유진이 "안 떴다"가 된다. 이유가 여기
+            # 말고는 어디에도 남지 않는다. 화면이 계속 되묻는 경로라 사유가
+            # 달라질 때만 남긴다.
+            self._probe_faults.report_once(
+                exc,
+                "헤르메스 준비 확인이 실패했습니다. 유진이 안 뜬 것으로 보입니다 (%s).",
+                self._base_url,
+            )
             return False
+        self._probe_faults.clear()
+        return ready
 
     async def interrupt(self, *, run_id: str) -> bool:
         async with self._active_lock:

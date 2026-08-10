@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from typing import Callable, Literal, Protocol
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from videobox_agent_gateway.fault_reporting import FaultReporter
+
+# uvicorn 이 설정한 로거를 쓴다. 모듈 로거는 컨테이너 로그에 나오지 않는다.
+_LOGGER = logging.getLogger("uvicorn.error")
 
 
 MemoryCategory = Literal["pacing", "caption", "audio", "tone", "workflow"]
@@ -227,6 +233,7 @@ class HermesMemoryAdapterClient:
         self._token = service_token
         self._factory = http_client_factory
         self._timeout = timeout_seconds
+        self._post_faults = FaultReporter(_LOGGER)
 
     async def _post(self, path: str, payload: dict) -> MemoryWriteOutcome:
         try:
@@ -246,11 +253,21 @@ class HermesMemoryAdapterClient:
                 content = getattr(response, "content", b"")
                 if isinstance(content, (bytes, bytearray)) and len(content) > 16_384:
                     return MemoryWriteOutcome(status="ambiguous")
-                return MemoryWriteOutcome.model_validate(response.json())
+                outcome = MemoryWriteOutcome.model_validate(response.json())
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - 저장 판정은 유보로 떨어진다
+            # `ambiguous` 는 "저장됐는지 모르겠다"는 뜻인데, 연결이 끊긴
+            # 것인지 응답이 이상한 것인지가 여기서 사라진다. 유보로 떨어지는
+            # 동작은 그대로 두고 사유만 남긴다.
+            self._post_faults.report_once(
+                exc,
+                "기억 저장 결과를 확인하지 못했습니다 (%s).",
+                path,
+            )
             return MemoryWriteOutcome(status="ambiguous")
+        self._post_faults.clear()
+        return outcome
 
     async def add_approved(
         self, request: AdapterMemoryWrite

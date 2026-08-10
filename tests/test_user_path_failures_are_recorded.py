@@ -448,6 +448,119 @@ def test_the_audit_screen_says_what_it_could_not_read(
     assert "missing-analysis" in reported[0].getMessage()
 
 
+def test_a_gateway_that_will_not_answer_says_why_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """유진이 "멈춤"으로 보일 때 어느 층에서 왜 막혔는지가 어디에도 없었다.
+
+    이 경로는 화면이 계속 되물으므로, 같은 사유는 한 번만 남겨야 한다.
+    """
+    import asyncio
+
+    from videobox_api.hermes_operational_status import (
+        HermesOperationalStatusService,
+    )
+
+    class _Client:
+        async def get_health(self):
+            raise RuntimeError("gateway refused the connection")
+
+    service = HermesOperationalStatusService(_Client())
+
+    with caplog.at_level(logging.WARNING):
+        first = asyncio.run(service.get_status())
+        second = asyncio.run(service.get_status())
+
+    # 동작은 그대로다 -- 상태는 계속 "멈춤"으로 떨어진다.
+    assert first.state == "stopped" and second.state == "stopped"
+    reported = [
+        record
+        for record in caplog.records
+        if "gateway refused the connection" in str(record.exc_info)
+    ]
+    assert len(reported) == 1, "게이트웨이 조회 실패가 한 번만 기록되지 않았다"
+
+
+def test_a_recovered_gateway_reports_the_next_outage_again(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """한 번 찍고 영원히 입을 다물면, 다음 장애는 다시 조용해진다."""
+    import asyncio
+    from datetime import UTC, datetime
+
+    from videobox_api.agent_gateway_client import AgentGatewayHealth
+    from videobox_api.hermes_operational_status import (
+        HermesOperationalStatusService,
+    )
+
+    healthy = AgentGatewayHealth(
+        status="ready",
+        scope="gateway_http_process",
+        gateway_configured=True,
+        capability_routes_ready=True,
+        hermes_http_ready=False,
+        provider_ready=False,
+        chat_ready=False,
+        degraded=False,
+        observation_epoch="epoch-1",
+        process_started_at=datetime(2026, 8, 10, tzinfo=UTC),
+        status_basis="gateway_observation",
+    )
+    outcomes = [RuntimeError("gateway is down"), healthy, RuntimeError("gateway is down")]
+
+    class _Client:
+        async def get_health(self):
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    service = HermesOperationalStatusService(_Client())
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            asyncio.run(service.get_status())
+
+    reported = [
+        record
+        for record in caplog.records
+        if "gateway is down" in str(record.exc_info)
+    ]
+    assert len(reported) == 2, "회복 뒤의 재장애가 다시 기록되지 않았다"
+
+
+def test_the_readiness_probe_says_why_it_answered_no(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """가장 아래 층이 False 하나만 올려 보내면 위의 두 층도 이유를 모른다."""
+    import asyncio
+
+    from videobox_agent_gateway.hermes_rpc_client import HermesRpcClient
+
+    def _factory(*, base_url: str, timeout: float):
+        raise RuntimeError("hermes is not listening")
+
+    client = HermesRpcClient(
+        base_url="http://videobox-hermes-yujin:9120",
+        username="u",
+        password="p",
+        http_client_factory=_factory,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        # 화면이 30초마다 되묻는 경로다.
+        assert asyncio.run(client.probe_http_ready()) is False
+        assert asyncio.run(client.probe_http_ready()) is False
+        assert asyncio.run(client.probe_http_ready()) is False
+
+    reported = [
+        record
+        for record in caplog.records
+        if "hermes is not listening" in str(record.exc_info)
+    ]
+    assert len(reported) == 1, "준비 확인 실패가 매번 찍히거나 아예 안 찍혔다"
+
+
 def test_every_user_path_swallow_point_carries_a_logger() -> None:
     """네 지점이 로거를 갖고 있는지 파일 단위로 잠근다. 하나가 조용히 빠지면
     다시 "왜 안 되는지 모르겠다"로 돌아간다."""
@@ -456,6 +569,12 @@ def test_every_user_path_swallow_point_carries_a_logger() -> None:
         "services/api/src/videobox_api/yujin_memory_service.py",
         "services/api/src/videobox_api/routers/media_inbox.py",
         "services/api/src/videobox_api/agent_gateway_client.py",
+        "services/api/src/videobox_api/routers/projects.py",
+        "services/api/src/videobox_api/routers/assets.py",
+        "services/api/src/videobox_api/hermes_operational_status.py",
+        "services/agent-gateway/src/videobox_agent_gateway/hermes_rpc_client.py",
+        "services/agent-gateway/src/videobox_agent_gateway/memory_gateway.py",
+        "services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py",
     ):
         source = (root / relative).read_text(encoding="utf-8")
         assert "logging.getLogger" in source, f"{relative} 에 로거가 없다"

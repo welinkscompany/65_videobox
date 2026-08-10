@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from videobox_agent_gateway.context_capabilities import YujinCapabilityIssuer
+from videobox_agent_gateway.fault_reporting import FaultReporter
 from videobox_agent_gateway.creator_context import (
     CreatorContextLedger,
     GatewayContextAttachRequest,
@@ -645,6 +646,8 @@ def create_app(
         openapi_url=None,
     )
     gateway_configured = hermes_client is not None and bool(service_token)
+    # `/health` 는 화면이 계속 되묻는다. 같은 사유를 매 주기 찍지 않는다.
+    _health_probe_faults = FaultReporter(_logger)
     observer = _GatewayOperationalObserver(
         clock=operational_clock,
         observation_epoch=observation_epoch,
@@ -686,8 +689,17 @@ def create_app(
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - /health 는 항상 답해야 한다
+                # 확인이 통째로 못 돌아도(대개 시간 초과) 결과는 "안 떴다"와
+                # 똑같아진다. 아래 층이 남기는 사유로는 이 경우가 안 보인다.
+                # 계속 되묻는 경로라 사유가 달라질 때만 남긴다.
+                _health_probe_faults.report_once(
+                    exc,
+                    "헤르메스 준비 확인을 마치지 못했습니다. 안 뜬 것으로 처리합니다.",
+                )
                 hermes_http_ready = False
+            else:
+                _health_probe_faults.clear()
         observation = observer.snapshot()
         if (
             not hermes_http_ready

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 
 from videobox_api.agent_gateway_client import AgentGatewayHealth
 from videobox_api.models import HermesYujinStatusResponse
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class HermesOperationalStatusService:
@@ -25,6 +28,7 @@ class HermesOperationalStatusService:
         self._last_chat_verified_at: datetime | None = None
         self._evidence_valid_until: datetime | None = None
         self._failure_valid_until: datetime | None = None
+        self._reported_health_fault: str | None = None
 
     @staticmethod
     def _aware(value: datetime) -> bool:
@@ -130,7 +134,18 @@ class HermesOperationalStatusService:
                 health = await self._gateway_client.get_health()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - 상태 화면은 계속 떠야 한다
+                # 화면은 "멈춤"이라고만 말하고, 어느 층에서 왜 막혔는지는
+                # 어디에도 남지 않았다. 상태를 떨어뜨리는 동작은 그대로 두고
+                # 이유만 남긴다. 화면이 계속 되묻는 경로라 같은 사유는 한 번만
+                # 찍고, 한 번 응답을 받으면 잊어서 다음 장애를 다시 남긴다.
+                fault = f"{type(exc).__name__}|{exc}"
+                if fault != self._reported_health_fault:
+                    self._reported_health_fault = fault
+                    _LOGGER.warning(
+                        "유진 상태를 확인하지 못했습니다. 화면에는 멈춘 것으로 보입니다.",
+                        exc_info=True,
+                    )
                 return self._response(
                     state=(
                         "degraded"
@@ -139,6 +154,7 @@ class HermesOperationalStatusService:
                     ),
                     checked_at=checked_at,
                 )
+            self._reported_health_fault = None
 
             if health.observation_epoch != self._observation_epoch:
                 self._observation_epoch = health.observation_epoch
