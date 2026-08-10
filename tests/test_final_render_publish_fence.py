@@ -612,3 +612,71 @@ def test_exact_preview_stages_large_artifact_before_writer_lock_does_not_starve_
 
     assert not worker.is_alive() and not mutation_worker.is_alive()
     assert store.get_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])["state"] == "obsolete"
+
+
+def test_exact_preview_publish_separates_a_broken_fence_from_a_changed_source(
+    tmp_path: Path, caplog
+) -> None:
+    """울타리가 "소스가 바뀌었다"고 답한 것과 울타리 자체가 터진 것은 다르다.
+
+    둘 다 발행하지 않는 것은 같다 -- 확인하지 못한 것을 현재라고 내보낼 수는 없다.
+    다른 것은 남기는 기록이다. 예전에는 터진 경우에도 `publish_source_fence_failed`를
+    적어서, 소스는 멀쩡한데 "소스가 바뀌었다"는 기록만 남고 진짜 원인은 어디에도
+    없었다. 만들어 둔 mp4를 지우는 자리라 원인을 모르면 다시 만들 판단도 못 한다.
+    """
+    import logging
+
+    def _explode(_connection: Any) -> bool:
+        raise RuntimeError("소스 울타리가 터졌다")
+
+    class _BrokenFenceStore(LocalProjectStore):
+        def finish_exact_preview(self, **kwargs: Any) -> bool:  # type: ignore[no-untyped-def]
+            kwargs["source_fence"] = _explode
+            return super().finish_exact_preview(**kwargs)
+
+    class _OutputOnlyRenderer(FfmpegFinalRenderer):
+        def render_exact_preview_to_mp4(self, *, output_path: Path, **_kwargs: Any) -> Path:
+            output_path.write_bytes(b"rendered-before-publish")
+            return output_path
+
+    store = _BrokenFenceStore(tmp_path)
+    project = store.bootstrap_project(name="exact preview broken fence")
+    source = tmp_path / "broken-fence-source.mp4"
+    source.write_bytes(b"unchanged")
+    asset = store.register_asset(
+        project_id=project.project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+    )
+    timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload={
+            "output": {"duration_sec": 1},
+            "tracks": [{"track_type": "broll", "clips": [{
+                "clip_id": "b", "asset_id": asset.asset_id,
+                "asset_uri": f"local://projects/{project.project_id}/assets/{asset.asset_id}",
+                "start_sec": 0, "end_sec": 1,
+            }]}],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={"segments": []},
+    )
+    runner = LocalPipelineRunner(store, final_renderer=_OutputOnlyRenderer(store=store))
+    record = runner.start_exact_preview(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        expected_revision=session["session_revision"],
+    )
+
+    with caplog.at_level(logging.WARNING, logger="videobox_storage.local_project_store"):
+        runner.run_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+
+    published = store.get_exact_preview(project_id=project.project_id, generation_id=record["generation_id"])
+    assert published["state"] == "obsolete"
+    assert published["invalidated_reason"] == "publish_source_fence_errored"
+    assert any("소스 확인이 실패" in record.getMessage() for record in caplog.records), caplog.records

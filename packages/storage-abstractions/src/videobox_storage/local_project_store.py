@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import math
 from copy import deepcopy
 from dataclasses import replace
@@ -45,6 +46,8 @@ from videobox_domain_models.yujin_creator_proposals import (
     VoiceParameters,
 )
 from videobox_core_engine.director_proposals import proposal_from_payload, proposal_to_payload
+
+_LOGGER = logging.getLogger(__name__)
 from videobox_core_engine.creation_interview import (
     CreationInterviewRuntime,
     DeterministicCreationInterviewRuntime,
@@ -911,6 +914,12 @@ class LocalProjectStore:
             # artifact is staged.  This closes the render->publish handoff:
             # a source changed after the pipeline's first check can never gain
             # an observable succeeded pointer.
+            # 울타리가 "소스가 바뀌었다"고 답한 것과 울타리 자체가 터진 것은 다르다.
+            # 둘 다 발행하지 않는 것은 같지만 -- 확인하지 못한 것을 현재라고 발행할
+            # 수는 없다 -- 남기는 이유는 달라야 한다. 예전에는 터진 경우에도
+            # `publish_source_fence_failed`를 적어서, 멀쩡한 소스를 두고 "소스가
+            # 바뀌었다"는 기록만 남았고 진짜 원인은 어디에도 없었다.
+            invalidated_reason = "publish_source_fence_failed"
             try:
                 source_is_current = (
                     (source_fence_result is None or bool(source_fence_result))
@@ -918,13 +927,21 @@ class LocalProjectStore:
                 )
             except Exception:
                 source_is_current = False
+                invalidated_reason = "publish_source_fence_errored"
+                _LOGGER.warning(
+                    "미리보기를 낼 때 소스 확인이 실패했습니다 (project=%s, generation=%s). "
+                    "만들어 둔 영상을 버리고 다시 만들어야 합니다.",
+                    project_id,
+                    generation_id,
+                    exc_info=True,
+                )
             if not source_is_current:
                 published.unlink(missing_ok=True)
                 connection.execute(
                     """UPDATE exact_preview_renders SET state = 'obsolete', invalidated_at = ?,
-                       invalidated_reason = 'publish_source_fence_failed', updated_at = ?
+                       invalidated_reason = ?, updated_at = ?
                        WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?""",
-                    (self._now_iso(), self._now_iso(), project_id, generation_id, owner_token),
+                    (self._now_iso(), invalidated_reason, self._now_iso(), project_id, generation_id, owner_token),
                 )
                 connection.commit()
                 return False
