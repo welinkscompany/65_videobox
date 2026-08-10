@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 from uuid import uuid4
@@ -30,6 +31,8 @@ from videobox_api.models import (
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_core_engine.asset_browser_preview import BrowserPreviewError
 from videobox_storage.local_project_store import LocalProjectStore
+
+_LOGGER = logging.getLogger(__name__)
 
 MAX_VOICE_SAMPLE_UPLOAD_BYTES = 128 * 1024 * 1024
 VOICE_SAMPLE_UPLOAD_CHUNK_BYTES = 1024 * 1024
@@ -116,6 +119,11 @@ def build_assets_router(
             raise _http_error(exc) from exc
         service = getattr(orchestrator, "media_analysis_service", None)
         analyses = []
+        # 예약이 실패한 파일은 `failures`에 들어가지 않는다 -- 자산은 실제로
+        # 등록됐으니 가져오기 실패로 보고하면 거짓말이 된다. 대신 태그가 안
+        # 붙어 검색에서 없는 것이 되므로, 어느 파일이 그렇게 됐는지는 남긴다.
+        unqueued: list[str] = []
+        first_error: Exception | None = None
         for asset in batch["assets"]:
             if service is None:
                 continue
@@ -125,9 +133,22 @@ def build_assets_router(
                 if dispatcher is not None:
                     background_tasks.add_task(dispatcher, project_id=project_id, analysis_id=analysis["analysis_id"])
                 analyses.append(service.get_analysis(project_id, analysis["analysis_id"]))
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - 한 파일이 나머지를 막지 않는다
                 # Asset registration is durable even if analysis cannot start.
+                unqueued.append(str(asset.get("asset_id") or "(이름 없음)"))
+                if first_error is None:
+                    first_error = exc
                 continue
+        if unqueued:
+            # 한 번에 수백 개를 넣을 수 있는 경로다. 파일마다 찍지 않고 모아 남긴다.
+            _LOGGER.warning(
+                "가져온 촬영본 %d개의 분석을 시작하지 못했습니다. 태그가 붙지 않아 "
+                "검색에 나오지 않습니다 (project=%s, 자산=%s).",
+                len(unqueued),
+                project_id,
+                ", ".join(unqueued[:10]),
+                exc_info=first_error,
+            )
         return {"assets": [AssetArchiveItemResponse(**asset).model_dump() for asset in batch["assets"]], "analysis_jobs": analyses, "failures": batch["failures"]}
 
     @router.post("/api/projects/{project_id}/assets/raw-video", status_code=status.HTTP_201_CREATED)

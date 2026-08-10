@@ -187,6 +187,60 @@ def test_a_dropped_clip_that_cannot_be_queued_is_recorded(
                for record in caplog.records), "분석 예약 실패가 기록되지 않았다"
 
 
+def test_a_batch_import_that_analyses_fewer_files_than_it_registered_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """한 번에 가져오기에서 분석 예약이 실패한 파일은 `failures`에도 안 들어가
+    화면상 성공과 구분되지 않았다. 태그가 안 붙은 촬영본은 검색에서 없는 것이 된다."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from videobox_api.routers.assets import build_assets_router
+
+    def _asset(asset_id: str) -> dict:
+        return {
+            "asset_id": asset_id,
+            "asset_type": "broll_video",
+            "storage_uri": f"local://projects/p1/assets/imported/{asset_id}.mp4",
+            "created_at": "2026-08-10T00:00:00Z",
+        }
+
+    class _ExplodingAnalysis:
+        def enqueue_analysis(self, **_kwargs):
+            raise RuntimeError("analysis store unavailable")
+
+    class _Orchestrator:
+        media_analysis_service = _ExplodingAnalysis()
+        media_analysis_dispatcher = None
+
+        def register_broll_assets_batch(self, **_kwargs):
+            return {"assets": [_asset("a1"), _asset("a2")], "failures": []}
+
+    app = FastAPI()
+    app.include_router(build_assets_router(_Orchestrator(), object()))
+
+    with caplog.at_level(logging.WARNING):
+        response = TestClient(app).post(
+            "/api/projects/p1/assets/broll-video/batch",
+            json={"source_paths": ["one.mp4", "two.mp4"]},
+        )
+
+    # 등록은 그대로 성공이고 `failures`도 늘어나지 않는다 -- 자산은 실제로 들어왔다.
+    assert response.status_code == 201
+    body = response.json()
+    assert [asset["asset_id"] for asset in body["assets"]] == ["a1", "a2"]
+    assert body["failures"] == []
+    assert body["analysis_jobs"] == []
+    queued = [
+        record
+        for record in caplog.records
+        if "analysis store unavailable" in str(record.exc_info)
+    ]
+    # 파일마다 한 줄이 아니라 한 번에 모아 남긴다.
+    assert len(queued) == 1, "분석 예약 실패가 한 줄로 기록되지 않았다"
+    assert "a1" in queued[0].getMessage() and "a2" in queued[0].getMessage()
+
+
 def _home_summary_client(store):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
