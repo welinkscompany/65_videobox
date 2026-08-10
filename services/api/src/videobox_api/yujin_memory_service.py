@@ -217,8 +217,23 @@ class YujinMemoryService:
         conversation_id: str,
     ) -> set[tuple[str, str, str, str]]:
         eligible: set[tuple[str, str, str, str]] = set()
+        # 읽지 못한 줄은 조회가 성공한 뒤에 빠지므로 위의 조회 실패 기록이
+        # 이 경우를 볼 수 없다. 스키마가 한 칸만 어긋나도 기억이 전부 사라지고
+        # 화면에는 "기억이 원래 없음"과 똑같이 보인다.
+        unreadable: list[str] = []
+        first_error: Exception | None = None
         for row in rows if isinstance(rows, (list, tuple)) else ():
             if not isinstance(row, dict):
+                continue
+            # 소속·승인 확인을 먼저 한다. 걸러 낼 줄까지 "읽지 못했다"고
+            # 세면 기록이 시끄러워진다. 두 조건을 모두 통과해야 채택되는
+            # 것은 그대로다.
+            if (
+                row.get("project_id") != project_id
+                or row.get("conversation_id") != conversation_id
+                or row.get("status") != "approved"
+                or row.get("storage_status") != "stored"
+            ):
                 continue
             try:
                 parsed = GatewayRetrievedMemory(
@@ -227,14 +242,10 @@ class YujinMemoryService:
                     text=row["text"],
                     category=row["category"],
                 )
-            except Exception:
-                continue
-            if (
-                row.get("project_id") != project_id
-                or row.get("conversation_id") != conversation_id
-                or row.get("status") != "approved"
-                or row.get("storage_status") != "stored"
-            ):
+            except Exception as exc:  # noqa: BLE001 - 한 줄이 나머지를 막지 않는다
+                unreadable.append(str(row.get("memory_ref") or "(이름 없음)"))
+                if first_error is None:
+                    first_error = exc
                 continue
             eligible.add(
                 (
@@ -243,6 +254,17 @@ class YujinMemoryService:
                     parsed.text,
                     parsed.category,
                 )
+            )
+        if unreadable:
+            # 대화마다 지나는 길이라 줄마다 찍지 않고 한 번에 모아 남긴다.
+            _LOGGER.warning(
+                "승인된 기억 %d개를 읽지 못해 후보에서 뺐습니다 "
+                "(project=%s, conversation=%s, 기억=%s).",
+                len(unreadable),
+                project_id,
+                conversation_id,
+                ", ".join(unreadable[:10]),
+                exc_info=first_error,
             )
         return eligible
 

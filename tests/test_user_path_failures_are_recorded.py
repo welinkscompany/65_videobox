@@ -44,6 +44,102 @@ def test_a_memory_lookup_failure_says_why_instead_of_looking_empty(
                for record in caplog.records), "기억 조회 실패가 기록되지 않았다"
 
 
+def test_a_memory_row_that_will_not_parse_says_so_instead_of_vanishing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """저장된 기억이 스키마와 어긋나면 조용히 후보에서 빠졌다.
+
+    조회 자체는 성공하므로 위의 `:172` 기록은 이 경우를 절대 볼 수 없다.
+    필드 하나만 어긋나도 기억 전부가 사라지고 화면에는 "기억이 없음"으로 보인다.
+    """
+    import asyncio
+
+    from videobox_api.yujin_memory_service import YujinMemoryService
+
+    good = {
+        "memory_ref": "m1",
+        "external_ref": "ext-" + "a" * 64,
+        "text": "컷을 짧게 가는 걸 좋아해요",
+        "category": "pacing",
+        "project_id": "p1",
+        "conversation_id": "c1",
+        "status": "approved",
+        "storage_status": "stored",
+    }
+    # 이 프로젝트·대화의 승인·저장된 기억인데 분류만 어긋난다.
+    drifted = {**good, "memory_ref": "m2", "category": "새로운분류"}
+
+    class _Store:
+        def list_yujin_memory_retrieval_rows(self, **_kwargs):
+            return [good, drifted]
+
+    class _Gateway:
+        async def search_memory(self, request):
+            return {
+                "memories": [
+                    {
+                        "memory_ref": good["memory_ref"],
+                        "text": good["text"],
+                        "category": good["category"],
+                        "external_ref": good["external_ref"],
+                    }
+                ]
+            }
+
+    service = YujinMemoryService(store=_Store(), gateway=_Gateway())
+
+    with caplog.at_level(logging.WARNING):
+        result = asyncio.run(
+            service.retrieve_approved_memories(
+                project_id="p1", conversation_id="c1", query="지난번 편집 어떻게 했지"
+            )
+        )
+
+    # 어긋난 줄을 빼는 동작은 그대로다 -- 멀쩡한 기억은 계속 나온다.
+    assert [item.text for item in result] == [good["text"]]
+    dropped = [
+        record
+        for record in caplog.records
+        if "기억" in record.getMessage() and "m2" in record.getMessage()
+    ]
+    assert dropped, "읽지 못한 기억 줄이 기록되지 않았다"
+
+
+def test_the_dropped_memory_report_does_not_repeat_per_row(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """대화마다 부르는 경로라 줄마다 한 줄씩 찍으면 로그가 못 쓰게 된다."""
+    import asyncio
+
+    from videobox_api.yujin_memory_service import YujinMemoryService
+
+    base = {
+        "external_ref": "ext-" + "b" * 64,
+        "text": "자막은 두 줄까지",
+        "category": "없는분류",
+        "project_id": "p1",
+        "conversation_id": "c1",
+        "status": "approved",
+        "storage_status": "stored",
+    }
+    rows = [{**base, "memory_ref": f"m{index}"} for index in range(7)]
+
+    class _Store:
+        def list_yujin_memory_retrieval_rows(self, **_kwargs):
+            return rows
+
+    service = YujinMemoryService(store=_Store(), gateway=object())
+
+    with caplog.at_level(logging.WARNING):
+        assert asyncio.run(
+            service.retrieve_approved_memories(
+                project_id="p1", conversation_id="c1", query="지난번에 뭐라고 했지"
+            )
+        ) == ()
+
+    assert len([r for r in caplog.records if "기억" in r.getMessage()]) == 1
+
+
 def test_a_dropped_clip_that_cannot_be_queued_is_recorded(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
