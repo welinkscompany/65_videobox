@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -31,6 +31,8 @@ type DirectorState = Readonly<{
   conversationScroll: RightDockDirector["conversationScroll"];
   memorySourceMessageIds: readonly string[];
   isSending?: boolean;
+  /** 추천 시작이 거절된 이유. 다시 누를 수 있어야 하므로 상태는 `idle`로 남긴다. */
+  startFailure: string | null;
 }>;
 type MemoryCandidateState = Readonly<{
   candidate: YujinMemoryCandidate;
@@ -161,7 +163,16 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
     selectedCandidateIds: [],
     conversationScroll: { key: requestKey, top: 0, pinnedToBottom: true },
     memorySourceMessageIds: [],
+    startFailure: null,
   };
+}
+
+/** 유진이 추천 시작을 거절한 이유를 창작자 말로 옮긴다. 이유를 모르면 그대로 말한다 --
+ *  "실패했다"만 남기는 것이 지금까지의 문제였다. */
+function directorStartFailureMessage(error: unknown) {
+  return error instanceof DirectorProposalBlockedError
+    ? "촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요."
+    : "유진에게 추천을 받지 못했어요. 잠시 뒤 다시 눌러 주세요.";
 }
 
 function createMemoryState(requestKey: string): MemoryState {
@@ -1334,7 +1345,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const operationId = directorOperationId.current + 1;
     directorOperationId.current = operationId;
     directorMutationInFlight.current = true;
-    setDirector({ ...activeDirector, state: "analysis_running" });
+    setDirector({ ...activeDirector, state: "analysis_running", startFailure: null });
     try {
       let conversationId = activeDirector.conversationId;
       if (!conversationId) {
@@ -1343,9 +1354,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         conversationId = conversation.conversation_id;
       }
       const proposal = await api.createDirectorProposal(projectId, { session_id: sessionId });
-      if (isCurrentDirector(epoch, operationId)) setDirector((current) => current.key === requestKey ? { ...current, state: "proposal_ready", conversationId, proposal, selectedCandidateIds: proposal.candidates[0]?.candidate_id ? [proposal.candidates[0].candidate_id] : [] } : current);
-    } catch {
-      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "idle" });
+      if (isCurrentDirector(epoch, operationId)) setDirector((current) => current.key === requestKey ? { ...current, state: "proposal_ready", conversationId, proposal, startFailure: null, selectedCandidateIds: proposal.candidates[0]?.candidate_id ? [proposal.candidates[0].candidate_id] : [] } : current);
+    } catch (error) {
+      // 상태를 `blocked`으로 떨어뜨리지 않는다. 그러면 이유는 보여도 다시 누를
+      // 자리가 사라져서, 말은 하되 나갈 길이 없는 화면이 된다.
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "idle", startFailure: directorStartFailureMessage(error) });
     } finally {
       if (isCurrentDirector(epoch, operationId)) directorMutationInFlight.current = false;
     }
@@ -1524,6 +1537,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       && !ownsActiveHermesRouteRun
       ? startDirector
       : undefined,
+    startFailure: activeDirector.startFailure,
   };
   return <>
     {state.error ? <p role="status">{state.error}</p> : null}

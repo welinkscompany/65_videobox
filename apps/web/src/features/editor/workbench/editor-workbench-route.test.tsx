@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
-import { ApiConflictError, api } from "../../../api";
+import { ApiConflictError, DirectorProposalBlockedError, api } from "../../../api";
 import { EditorWorkbenchRoute, affectedAreaLabel, findHermesRunProposalId, partialStatusLabel, prepareProjectAssetBrowserPreview } from "./EditorWorkbenchRoute";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -3362,6 +3362,31 @@ describe("EditorWorkbenchRoute", () => {
     expect(createProposal).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeEnabled();
+  });
+
+  // 서버가 "촬영본 분석이 안 끝나 추천을 만들 수 없다"고 409로 답해도 화면은
+  // "아직 추천이 없어요"에 머물렀다. 눌러도 아무 일이 없으니 owner는 고장인지
+  // 자기가 잘못 누른 것인지 알 수 없다. 이유를 말하고, 다시 누를 수 있게 남긴다.
+  it("says why Eugene refused to start, and keeps the request retryable", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    vi.spyOn(api, "createDirectorConversation").mockResolvedValue({ conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" } as never);
+    const createProposal = vi.spyOn(api, "createDirectorProposal")
+      .mockRejectedValueOnce(new DirectorProposalBlockedError("analyse_or_retry_assets"))
+      .mockResolvedValueOnce(directorProposal() as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
+
+    expect(await screen.findByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeVisible();
+
+    const retry = screen.getByRole("button", { name: "유진에게 추천받기" });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(createProposal).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeNull());
   });
 
   it("does not repeat an explicit apply while its preflight and batch apply are in flight", async () => {

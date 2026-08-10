@@ -51,6 +51,8 @@ export type RightDockProps = Readonly<{
   onManualEdit?: () => void;
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
+  /** 추천 시작이 거절된 이유. 다시 누를 수 있는 상태로 함께 보인다. */
+  startFailure?: string | null;
   onRetryMessage?: () => void | Promise<void>;
   onCancelRun?: () => void | Promise<void>;
   onRetryRun?: () => void | Promise<void>;
@@ -84,6 +86,7 @@ export function RightDock({
   onManualEdit,
   onPreviewCandidate,
   onStart,
+  startFailure = null,
   onRetryMessage,
   onCancelRun,
   onRetryRun,
@@ -158,6 +161,7 @@ export function RightDock({
         ? <p role="status" className="vb-editor-right-dock__sync-warning">{runState.cancelWarning}</p>
         : null}
       {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : proposalIsOutOfDate ? staleProposalMessage : "유진의 답을 받지 못했어요."}</p>{proposal && onRefreshProposal ? <Button type="button" onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}{onManualEdit ? <Button type="button" onClick={onManualEdit}>유진 없이 계속 편집</Button> : null}</div> : null}
+      {startFailure ? <p role="alert" className="vb-editor-right-dock__sync-warning">{startFailure}</p> : null}
       {state === "idle" && !proposal && onStart ? <Button type="button" onClick={() => void onStart()}>유진에게 추천받기</Button> : null}
       <div
         ref={historyRef}

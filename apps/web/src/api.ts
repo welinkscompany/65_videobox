@@ -786,6 +786,17 @@ export class ApiConflictError<T> extends Error {
   }
 }
 
+/** 추천을 만들 수 없는 이유. 서버는 409 본문에 이유를 실어 보내는데 공용
+ *  `request`가 그것을 버려서, 화면은 "실패했다"조차 말할 수 없었다. */
+export class DirectorProposalBlockedError extends Error {
+  readonly code = "director_analysis_blocked";
+
+  constructor(public readonly recoveryAction: string | null) {
+    super("Director proposal blocked");
+    this.name = "DirectorProposalBlockedError";
+  }
+}
+
 export class CapcutDraftHandoffInProgressError extends Error {
   readonly code = "capcut_draft_handoff_in_progress";
 
@@ -1213,6 +1224,17 @@ async function preflightDirectorProposalRequest(path: string): Promise<DirectorP
   return payload;
 }
 
+async function createDirectorProposalRequest(path: string, payload: DirectorProposalCreateRequest): Promise<DirectorProposal> {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  if (response.status === 409) {
+    const body = (await response.json()) as { code?: string; lifecycle?: { recovery_action?: string | null } };
+    if (body.code === "director_analysis_blocked") throw new DirectorProposalBlockedError(body.lifecycle?.recovery_action ?? null);
+    throw new Error(`Request failed: ${path} (${response.status})`);
+  }
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  return (await response.json()) as DirectorProposal;
+}
+
 async function openHermesRunEventsRequest(
   projectId: string,
   conversationId: string,
@@ -1524,7 +1546,7 @@ export const api = {
   directorCandidatePreviewUrl: (projectId: string, proposalId: string, candidateId: string) =>
     `/api/projects/${projectId}/director/proposals/${proposalId}/candidates/${encodeURIComponent(candidateId)}/preview`,
   createDirectorProposal: (projectId: string, payload: DirectorProposalCreateRequest) =>
-    request<DirectorProposal>(`/api/projects/${projectId}/director/proposals`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    createDirectorProposalRequest(`/api/projects/${projectId}/director/proposals`, payload),
   getDirectorProposal: (projectId: string, proposalId: string) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}`),
   preflightDirectorProposal: (projectId: string, proposalId: string) =>

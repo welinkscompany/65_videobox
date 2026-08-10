@@ -104,6 +104,8 @@ export type RightDockDirector = Readonly<{
   /** 편집 작업판이 미리 듣기 자리를 물려 준다. 경로 자체는 재생하지 않는다. */
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
+  /** 추천 시작이 거절된 이유. 다시 누를 수 있는 상태로 함께 보인다. */
+  startFailure?: string | null;
   onRetryMessage?: () => void | Promise<void>;
   onCancelRun?: () => void | Promise<void>;
   onRetryRun?: () => void | Promise<void>;
