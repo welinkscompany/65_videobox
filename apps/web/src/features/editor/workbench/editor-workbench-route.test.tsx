@@ -3364,6 +3364,27 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeEnabled();
   });
 
+  // 화면이 기본으로 쓰는 것은 유진 경로가 아니라 로컬 경로다. 그런데 미리보기
+  // 단추 조건이 유진 후보 전용이라, owner가 실제로 보는 추천에는 단추가 한 번도
+  // 뜨지 않았다. 서버는 그 후보의 원본을 그대로 내준다.
+  it("lets the creator look at a local-path recommendation before applying it", async () => {
+    const proposal = directorProposal();
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      // 실제 응답은 이 자리를 늘 비워서 보낸다. 시험 자료가 채워 두고 있어서
+      // 단추가 안 뜨는 것을 아무도 못 봤다.
+      proposal: { ...proposal, candidates: [{ ...proposal.candidates[0], preview_uri: null }] },
+      references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    expect(await screen.findByRole("button", { name: "P01-B-01 미리 보기" })).toBeVisible();
+  });
+
   // 서버가 "촬영본 분석이 안 끝나 추천을 만들 수 없다"고 409로 답해도 화면은
   // "아직 추천이 없어요"에 머물렀다. 눌러도 아무 일이 없으니 owner는 고장인지
   // 자기가 잘못 누른 것인지 알 수 없다. 이유를 말하고, 다시 누를 수 있게 남긴다.

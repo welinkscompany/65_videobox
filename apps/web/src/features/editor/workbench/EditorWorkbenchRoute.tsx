@@ -1603,9 +1603,8 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
         mediaType: candidate.media_type,
         // 후보의 `preview_uri`는 늘 비어 온다. 그것만 보고 있었기 때문에 "추천
         // 미리 보기" 단추가 한 번도 그려지지 않았다. 실제 파일을 흘려 주는
-        // 주소는 따로 있고, 그 주소는 유진이 바로 적용할 수 있는 후보에만
-        // 열린다 -- 그 밖의 후보에 단추를 띄우면 눌러도 열리지 않는다.
-        previewUrl: isActionableYujinMediaCandidate(candidate)
+        // 주소는 따로 있다.
+        previewUrl: isPreviewableMediaCandidate(candidate, isYujin, proposal.status === "ready")
           ? api.directorCandidatePreviewUrl(projectId, proposal.proposal_id, candidate.candidate_id)
           : candidate.preview_uri,
         kind: candidate.media_type,
@@ -1664,6 +1663,26 @@ function isActionableYujinMediaCandidate(candidate: DirectorCandidate) {
     && sourceKindMatches
     && typeof metadata.target_segment_id === "string"
     && metadata.target_segment_id.length > 0
+  );
+}
+
+/** 후보를 눌러 볼 수 있는가.
+ *
+ * 유진 경로는 "유진이 바로 적용할 수 있는 미디어 후보"만 연다 -- 그 밖의 후보는
+ * 서버가 내줄 원본이 없어서 단추를 띄워도 열리지 않는다.
+ *
+ * 그런데 화면이 기본으로 쓰는 것은 유진 경로가 아니라 로컬 경로다. 그 후보들은
+ * 위 조건을 하나도 만족하지 못해 **미리보기 단추가 한 번도 뜬 적이 없었다.**
+ * 서버에 직접 물어보니 로컬 경로 후보도 원본을 그대로 내준다(200, mp4). 즉 막고
+ * 있던 것은 서버가 아니라 이 조건이었다. 추천이 `ready`인 미디어 후보면 연다.
+ */
+function isPreviewableMediaCandidate(candidate: DirectorCandidate, isYujin: boolean, proposalIsReady: boolean) {
+  if (isYujin) return isActionableYujinMediaCandidate(candidate);
+  // 적용 가능 여부는 화면이 이미 따로 본다(`candidateIsActionable`). 여기서는
+  // "원본이 있는 미디어 후보인가"만 판단한다.
+  return (
+    proposalIsReady
+    && (candidate.media_type === "broll" || candidate.media_type === "bgm" || candidate.media_type === "sfx")
   );
 }
 
