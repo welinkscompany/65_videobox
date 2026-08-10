@@ -43,6 +43,14 @@ function assetTitle(asset: BrollAsset | undefined, index: number) {
   return typeof title === "string" && title.trim() ? title.trim() : `미디어 ${index + 1}`;
 }
 
+/** 반입이 쓰는 이름은 `duration_sec`이다. `duration_seconds`는 미디어 팩 쪽 이름이라
+ *  프로젝트 자산에는 붙지 않는다. 이 화면은 팩 이름만 읽고 있어서 길이를 아는 자산까지
+ *  전부 "확인하고 있어요"로 남았다. 편집기 카드에서 이미 고친 것과 같은 형태로 맞춘다. */
+function assetDurationSeconds(metadata: BrollAsset["metadata"] | undefined) {
+  const value = metadata?.duration_sec ?? metadata?.duration_seconds;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   const [state, setState] = useState<MediaState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -304,8 +312,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
                       <CardDescription>영상</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {typeof item.metadata?.duration_seconds === "number"
-                        ? <p>길이 {item.metadata.duration_seconds}초</p>
+                      {assetDurationSeconds(item.metadata) !== null
+                        ? <p>길이 {assetDurationSeconds(item.metadata)}초</p>
                         : <p>길이를 확인하고 있어요.</p>}
                     </CardContent>
                   </Card>

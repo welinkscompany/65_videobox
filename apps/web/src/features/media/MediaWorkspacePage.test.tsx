@@ -82,6 +82,22 @@ describe("MediaWorkspacePage", () => {
     expect(api.mediaAnalysisPreview).toHaveBeenCalledWith("project-a", "asset-project-a");
   });
 
+  // 반입은 `duration_sec`으로 쓴다. 화면이 `duration_seconds`만 읽어서 길이를 아는
+  // 자산까지 전부 "길이를 확인하고 있어요"로 굳어 있었다. 편집기 카드에서 같은 실수를
+  // 이미 한 번 고쳤는데(`editorAssetProjection.ts`) 이 화면이 남아 있었다.
+  it("shows the length the intake actually recorded", async () => {
+    vi.mocked(api.listBrollAssets).mockResolvedValue([
+      { ...asset(), metadata: { title: "회의 장면", duration_sec: 34 } },
+      { ...asset(), asset_id: "asset-pack", metadata: { title: "팩 장면", duration_seconds: 12 } },
+      { ...asset(), asset_id: "asset-unknown", metadata: { title: "아직 못 잰 장면" } },
+    ]);
+    render(<MediaWorkspacePage projectId="project-a" />);
+
+    expect(await screen.findByText("길이 34초")).toBeVisible();
+    expect(screen.getByText("길이 12초")).toBeVisible();
+    expect(screen.getAllByText("길이를 확인하고 있어요.")).toHaveLength(1);
+  });
+
   it("supports cancel, retry, and review with one in-flight action and an authoritative two-list refresh", async () => {
     let releaseCancel!: (value: MediaAnalysis) => void;
     vi.mocked(api.listMediaAnalysis).mockResolvedValue({
