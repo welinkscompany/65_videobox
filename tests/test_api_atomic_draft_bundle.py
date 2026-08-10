@@ -5,6 +5,45 @@ from videobox_storage.local_project_store import LocalProjectStore
 from videobox_domain_models.jobs import JobStatus, JobType
 
 
+# owner가 밟는 순서 그대로다. 초안을 만들고 -> 자막을 고치고 -> 검토를 열면 막힌다.
+# 그 자리에서 "검토 다시 받기"를 부르면 다시 열려야 한다. 이 경로가 없어서 편집을 한 번만
+# 해도 내보내기까지 갈 수 없었다.
+def test_refreshing_review_reopens_the_screen_a_single_edit_had_closed(tmp_path):
+    client = TestClient(create_app(projects_root=tmp_path))
+    project = client.post("/api/projects", json={"name": "Refresh"}).json()["project_id"]
+    base = f"/api/projects/{project}"
+    brief = client.post(f"{base}/creation-briefs", json={"script_filename": "a.txt", "script_text": "소개", "idempotency_key": "brief", "capability_profile": {}}).json()
+    brief = client.post(f"{base}/creation-briefs/{brief['brief_id']}/bypass", json={"expected_revision": brief["revision"]}).json()
+    brief = client.patch(f"{base}/creation-briefs/{brief['brief_id']}", json={"summary": "소개", "expected_revision": brief["revision"]}).json()
+    brief = client.post(f"{base}/creation-briefs/{brief['brief_id']}/approve", json={"expected_revision": brief["revision"]}).json()
+    client.post(f"{base}/draft-readiness/broll/upload", files={"file": ("scene.mp4", b"local-scene", "video/mp4")})
+    run = client.post(f"{base}/draft-readiness", json={"brief_id": brief["brief_id"], "narration_choice": {"kind": "silent"}, "idempotency_key": "ready", "expected_brief_revision": brief["revision"]}).json()
+    planning = client.post(f"{base}/draft-readiness/{run['readiness_id']}/retry", json={"expected_revision": run["revision"]}).json()
+    run = client.post(f"{base}/draft-readiness/{run['readiness_id']}/complete", json={"expected_revision": planning["revision"]}).json()
+    bundle = client.post(f"{base}/draft-bundles", json={"brief_id": brief["brief_id"], "readiness_id": run["readiness_id"], "expected_brief_revision": brief["revision"], "expected_readiness_revision": run["revision"], "idempotency_key": "once", "allow_placeholder": True}).json()
+    session_id, timeline_id = bundle["session_id"], bundle["timeline_id"]
+
+    session = client.get(f"{base}/editing-sessions/{session_id}").json()
+    edited = client.patch(
+        f"{base}/editing-sessions/{session_id}/segments/{session['segments'][0]['segment_id']}/caption",
+        json={"caption_text": "고친 자막", "expected_revision": session["session_revision"]},
+    )
+    assert edited.status_code == 200, edited.text
+
+    closed = client.get(f"{base}/review-approvals/timelines/{timeline_id}").json()
+    assert closed["is_current"] is False
+    assert closed["invalidated_reason"] == "editing_session_mutation"
+
+    refreshed = client.post(f"{base}/review-approvals/sessions/{session_id}/refresh")
+    assert refreshed.status_code == 202, refreshed.text
+
+    reopened = client.get(f"{base}/review-approvals/timelines/{timeline_id}").json()
+    assert reopened["is_current"] is True
+    assert reopened["source_session_revision"] == edited.json()["session_revision"]
+    # 승인까지 대신 해 주지 않는다. 그건 owner가 검토 화면에서 누를 일이다.
+    assert reopened["review_status"] != "approved"
+
+
 def test_approval_endpoint_creates_one_real_session_only_after_explicit_post(tmp_path):
     client = TestClient(create_app(projects_root=tmp_path)); project = client.post("/api/projects", json={"name": "Draft"}).json()["project_id"]
     base = f"/api/projects/{project}"; brief = client.post(f"{base}/creation-briefs", json={"script_filename":"a.txt", "script_text":"소개", "idempotency_key":"brief", "capability_profile":{}}).json()

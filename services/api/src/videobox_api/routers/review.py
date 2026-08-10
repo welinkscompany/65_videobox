@@ -120,6 +120,34 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
         )
 
+    @router.post(
+        "/api/projects/{project_id}/review-approvals/sessions/{session_id}/refresh",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def refresh_review_for_current_edit(project_id: str, session_id: str) -> ReviewApprovalResponse:
+        """검토본을 지금 편집본으로 다시 세운다.
+
+        편집은 승인 기록을 내린다. 그것을 다시 세우는 곳이 초안 생성 한 곳뿐이라
+        한 번 편집하면 내보내기까지 갈 길이 없었다. 승인까지 올리지는 않는다 --
+        승인은 owner가 검토 화면에서 누를 일이다.
+        """
+        try:
+            result = orchestrator.pipeline.store.refresh_review_for_current_edit(
+                project_id=project_id, session_id=session_id
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ReviewApprovalResponse(
+            timeline_id=result["timeline_id"],
+            project_id=result["project_id"],
+            review_status=result["status"],
+            approved_at=result.get("approved_at"),
+            updated_at=result["updated_at"],
+            source_session_id=result.get("source_session_id"),
+            source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
+            invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
+        )
+
     @router.post("/api/projects/{project_id}/review-approvals/{job_id}/reopen", status_code=status.HTTP_202_ACCEPTED)
     def reopen_review(project_id: str, job_id: str) -> ReviewApprovalResponse:
         try:

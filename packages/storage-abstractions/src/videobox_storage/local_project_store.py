@@ -28,6 +28,7 @@ from videobox_core_engine.exact_preview import ExactPreviewRequest
 from videobox_core_engine.yujin_memory_policy import (
     validate_yujin_memory_candidate,
 )
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
 from videobox_core_engine.editor_playback_manifest import (
     build_editor_playback_manifest,
 )
@@ -3035,6 +3036,63 @@ class LocalProjectStore(MediaAnalysisMixin, HermesCapabilityMixin):
                 if path.exists():
                     path.unlink()
             raise
+
+    def refresh_review_for_current_edit(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        """검토본과 승인 기록을 지금 편집본에 맞춰 다시 세운다.
+
+        편집이 승인 기록을 내리는 것 자체는 옳다 -- 옛 편집본을 검토한 결과로 새 편집본을
+        승인할 수는 없다. 문제는 **다시 세우는 곳이 초안 생성 한 곳뿐**이었다는 것이다.
+        그래서 한 번 편집하면 그 프로젝트는 내보내기까지 갈 길이 없었고, 빈 구간을
+        채우려면 편집해야 하는데 그 편집이 승인을 죽여서 빠져나갈 수도 없었다.
+
+        **합성을 다시 계산하지 않는다.** 출력 경로는 언제나 timeline과 session을 함께
+        materialize 하므로 timeline의 tracks는 손댈 것이 없다. 여기서 하는 일은
+        지금 편집본에서 **아직 비어 있는 장면만** 확인할 항목으로 남기고, 그 결과를
+        timeline과 승인 기록에 같은 revision으로 적는 것이다.
+
+        승인까지 하지는 않는다. 상태는 `blocked`(아직 빈 장면이 있음) 또는 `draft`이며,
+        `approved`로 올리는 것은 owner가 검토 화면에서 누를 일이다.
+        """
+        session = self.get_editing_session(project_id=project_id, session_id=session_id)
+        timeline_id = str(session.get("timeline_id") or "").strip()
+        if not timeline_id:
+            raise KeyError(f"Editing session has no timeline: {session_id}")
+        session_revision = int(session.get("session_revision") or 1)
+        file_path = self._timeline_file_path(project_id=project_id, timeline_id=timeline_id)
+        timeline = json.loads(file_path.read_text(encoding="utf-8"))
+        materialized = materialize_editing_session_timeline(
+            timeline=timeline, editing_session=session, project_id=project_id
+        )
+        # 자산을 채운 장면은 override가 임시 클립 구간을 덮으므로 materialize 결과에서
+        # 사라진다. 확인할 항목을 저장된 목록에서 베끼지 않고 여기서 다시 유도하는
+        # 이유다 -- 베끼면 owner가 채운 뒤에도 "자산이 필요하다"가 남는다.
+        remaining_gap_slot_ids = {
+            str(clip.get("gap_slot_id") or "")
+            for track in materialized.get("tracks", [])
+            if isinstance(track, dict)
+            for clip in track.get("clips", [])
+            if isinstance(clip, dict) and str(clip.get("gap_slot_id") or "").strip()
+        }
+        review_flags = [
+            {
+                "code": "draft_gap_placeholder",
+                "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"),
+                "message": "자산이 필요한 임시 장면입니다.",
+            }
+            for gap in timeline.get("gap_slots", [])
+            if isinstance(gap, dict) and str(gap.get("gap_slot_id") or "") in remaining_gap_slot_ids
+        ]
+        timeline["source_session_id"] = session_id
+        timeline["source_session_revision"] = session_revision
+        timeline["review_flags"] = review_flags
+        file_path.write_text(json.dumps(timeline, indent=2, ensure_ascii=True), encoding="utf-8")
+        return self.save_review_state(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            status="blocked" if review_flags else "draft",
+            source_session_id=session_id,
+            source_session_revision=session_revision,
+        )
 
     def save_review_state(
         self,

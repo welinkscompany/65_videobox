@@ -1693,6 +1693,12 @@ export const api = {
     request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/${jobId}/approve`, {
       method: "POST",
     }),
+  /** 검토본을 지금 편집본으로 다시 세운다. 승인까지 하지는 않는다. */
+  refreshReviewForCurrentEdit: (projectId: string, sessionId: string) =>
+    request<ReviewApproval>(
+      `/api/projects/${encodeURIComponent(projectId)}/review-approvals/sessions/${encodeURIComponent(sessionId)}/refresh`,
+      { method: "POST" },
+    ),
   reopenTimeline: (projectId: string, jobId: string) =>
     request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/${jobId}/reopen`, {
       method: "POST",

@@ -170,6 +170,32 @@ describe("TimelineReviewPage", () => {
     expect(screen.queryByRole("button", { name: "검토 승인" })).toBeNull();
   });
 
+  // 편집을 한 번이라도 하면 승인 기록이 내려간다. 그 자체는 옳지만 다시 세울 자리가
+  // 없어서, 이 화면이 "맞지 않아요"에서 영영 나가지 못했고 내보내기까지 막혔다.
+  // `다시 확인`은 같은 것을 다시 읽을 뿐이라 답이 바뀌지 않는다.
+  it("offers a way out of a review the owner's own edit invalidated", async () => {
+    vi.mocked(api.getReviewApproval).mockResolvedValueOnce({ ...approval(), is_current: false, invalidated_reason: "editing_session_mutation" });
+    const refreshReview = vi.spyOn(api, "refreshReviewForCurrentEdit").mockResolvedValue({ ...approval(), review_status: "draft" });
+    render(<TimelineReviewPage projectId="project-a" />);
+
+    expect(await screen.findByText("이 검토본은 현재 편집본과 맞지 않아요. 다시 확인해 주세요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "검토 다시 받기" }));
+
+    await waitFor(() => expect(refreshReview).toHaveBeenCalledWith("project-a", "session-project-a"));
+    expect(await screen.findByRole("heading", { name: "영상 검토" })).toBeVisible();
+    expect(screen.getByTestId("timeline-review-page")).toBeVisible();
+  });
+
+  it("says so when the review could not be rebuilt, instead of looking unchanged", async () => {
+    vi.mocked(api.getReviewApproval).mockResolvedValue({ ...approval(), is_current: false, invalidated_reason: "editing_session_mutation" });
+    vi.spyOn(api, "refreshReviewForCurrentEdit").mockRejectedValue(new Error("offline"));
+    render(<TimelineReviewPage projectId="project-a" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "검토 다시 받기" }));
+
+    expect(await screen.findByText("검토본을 다시 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.")).toBeVisible();
+  });
+
   it("shows one creator-facing row per matching blocker and exposes no mutation action", async () => {
     const timelineWithDuplicates = timeline("project-a", "timeline-a", [
       { ...recommendation, reason: "둘째 장면을 더 잘 보여줘요." },

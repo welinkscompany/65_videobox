@@ -31,6 +31,69 @@ def _ready(
     return brief, run
 
 
+# 편집이 검토 승인을 내리는 것은 옳다 -- 옛 편집본의 검토로 새 편집본을 승인할 수는
+# 없다. 그런데 다시 세우는 경로가 없어서, 한 번 편집하면 그 프로젝트는 내보내기까지
+# 갈 수 없었다. 빈 구간을 채우려면 편집해야 하는데 그 편집이 승인을 죽이므로 빠져나갈
+# 수도 없었다.
+def test_review_can_be_rebuilt_for_the_current_edit(tmp_path):
+    store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("Rebuild")
+    brief, readiness = _ready(store, project.project_id)
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id, brief_id=brief["brief_id"], expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"], expected_readiness_revision=readiness["revision"],
+        idempotency_key="rebuild", allow_placeholder=True,
+    )
+    session_id, timeline_id = bundle["session_id"], bundle["timeline_id"]
+    assert store.get_review_state(project_id=project.project_id, timeline_id=timeline_id)["is_current"] is True
+
+    session = store.get_editing_session(project_id=project.project_id, session_id=session_id)
+    session["segments"][0]["caption_text"] = "고친 자막"
+    store.update_editing_session(project_id=project.project_id, session_id=session_id, session_payload=session)
+
+    stale = store.get_review_state(project_id=project.project_id, timeline_id=timeline_id)
+    assert stale["is_current"] is False
+    assert stale["invalidated_reason"] == "editing_session_mutation"
+
+    store.refresh_review_for_current_edit(project_id=project.project_id, session_id=session_id)
+
+    current = store.get_editing_session(project_id=project.project_id, session_id=session_id)
+    after = store.get_review_state(project_id=project.project_id, timeline_id=timeline_id)
+    assert after["is_current"] is True
+    assert after["source_session_revision"] == current["session_revision"]
+    # 내보내기 관문은 승인만이 아니라 timeline이 실은 revision도 함께 본다.
+    timeline = store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)
+    assert timeline["source_session_revision"] == current["session_revision"]
+
+
+# 이게 실제로 막힘을 푸는 부분이다. 빈 장면을 채우려면 편집해야 하는데, 그 편집이
+# 승인을 죽였다. 채운 뒤 다시 세우면 `확인할 항목`이 사라져야 내보내기까지 갈 수 있다.
+def test_filling_an_empty_scene_clears_what_blocked_the_export(tmp_path):
+    store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("Fill")
+    video = tmp_path / "fill.mp4"; video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    brief, readiness = _ready(store, project.project_id)
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id, brief_id=brief["brief_id"], expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"], expected_readiness_revision=readiness["revision"],
+        idempotency_key="fill", allow_placeholder=True,
+    )
+    session_id, timeline_id = bundle["session_id"], bundle["timeline_id"]
+    assert bundle["gap_slots"], "이 시험은 빈 장면이 있는 초안을 전제로 한다"
+    before = store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)
+    assert before["review_flags"], "빈 장면이 있으면 확인할 항목이 있어야 한다"
+
+    session = store.get_editing_session(project_id=project.project_id, session_id=session_id)
+    for segment in session["segments"]:
+        segment["broll_override"] = {"asset_id": asset.asset_id, "in_sec": 0.0, "out_sec": 1.0}
+    store.update_editing_session(project_id=project.project_id, session_id=session_id, session_payload=session)
+
+    store.refresh_review_for_current_edit(project_id=project.project_id, session_id=session_id)
+
+    after = store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)
+    assert after["review_flags"] == []
+    assert store.get_review_state(project_id=project.project_id, timeline_id=timeline_id)["status"] == "draft"
+
+
 def test_materializes_one_real_draft_bundle_and_reuses_same_idempotency_result(tmp_path):
     store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("Atomic")
     brief, readiness = _ready(store, project.project_id)
