@@ -66,7 +66,13 @@ def _decode_to_mono_pcm(path: Path) -> np.ndarray:
     return np.frombuffer(result.stdout, dtype=np.int16).astype(np.float32) / 32768.0
 
 
-def _probe_duration_seconds(path: Path) -> float:
+def probe_duration_seconds(path: Path) -> float:
+    """How long a sound file is, without decoding it.
+
+    Public because registering a file in the library needs the length long
+    before anyone measures how it sounds -- the browser shows "N초" straight
+    from the library index.
+    """
     result = subprocess.run(
         [
             "ffprobe", "-v", "quiet",
@@ -132,7 +138,7 @@ def describe_audio_file(path: Path) -> AudioDescriptor:
     else:
         onset_rate = 0.0
 
-    duration = _probe_duration_seconds(path) or analysed_seconds
+    duration = probe_duration_seconds(path) or analysed_seconds
     return AudioDescriptor(
         duration_seconds=round(duration, 3),
         loudness_rms=round(loudness_rms, 6),

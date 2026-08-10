@@ -26,6 +26,12 @@ from typing import Any, Callable, Protocol
 # not depend on the services/api layer above it.
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".webm"})
 
+# 음악과 효과음. 어느 쪽인지는 **파일이 들어온 폴더**가 정한다 -- owner 결정
+# (2026-08-10). 내용을 듣고 프로그램이 음악인지 효과음인지 판단하는 방식은
+# 틀릴 수 있어 채택하지 않았다. 그래서 확장자 집합은 둘이 같고, 감시 설정마다
+# 어느 집합을 받을지만 다르다.
+AUDIO_EXTENSIONS = frozenset({".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac"})
+
 _IGNORED_FILENAMES = frozenset({"desktop.ini"})
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,10 +45,17 @@ def _is_hidden(path: Path, *, watch_root: Path) -> bool:
     return any(part.startswith(".") for part in path.relative_to(watch_root).parts)
 
 
-def scan_inbox_candidates(watch_root: Path) -> list[Path]:
-    """Find video files under `watch_root`, skipping hidden files/folders and
+def scan_inbox_candidates(
+    watch_root: Path, *, accepted_extensions: frozenset[str] = VIDEO_EXTENSIONS
+) -> list[Path]:
+    """Find the files this folder takes, skipping hidden files/folders and
     Windows' own desktop.ini. Returns an empty list if the folder doesn't
-    exist yet (e.g. Drive desktop isn't installed/synced)."""
+    exist yet (e.g. Drive desktop isn't installed/synced).
+
+    `accepted_extensions` differs per watched folder: one folder takes video,
+    another music, another sound effects. That is the whole of how VideoBox
+    knows which kind a file is -- it never inspects the contents to guess.
+    """
     if not watch_root.is_dir():
         return []
     candidates: list[Path] = []
@@ -53,8 +66,8 @@ def scan_inbox_candidates(watch_root: Path) -> list[Path]:
             continue
         if _is_hidden(path, watch_root=watch_root):
             continue
-        if path.suffix.lower() not in VIDEO_EXTENSIONS:
-            # owner가 넣은 것인데 우리가 받지 못하는 종류다. 예전에는 조용히
+        if path.suffix.lower() not in accepted_extensions:
+            # owner가 넣은 것인데 이 폴더가 받지 못하는 종류다. 예전에는 조용히
             # 넘어가서, 넣은 사람은 고장인지 기다려야 하는지 알 수가 없었다.
             # 숨김 파일과 desktop.ini는 owner가 넣은 것이 아니므로 위에서 먼저
             # 걸러 여기까지 오지 않는다.
@@ -62,9 +75,10 @@ def scan_inbox_candidates(watch_root: Path) -> list[Path]:
             if key not in _REPORTED_UNSUPPORTED:
                 _REPORTED_UNSUPPORTED.add(key)
                 _LOGGER.warning(
-                    "가져올 수 없는 종류라 그대로 둡니다: %s (받는 종류: %s)",
+                    "가져올 수 없는 종류라 그대로 둡니다: %s (%s 폴더가 받는 종류: %s)",
                     path.name,
-                    ", ".join(sorted(VIDEO_EXTENSIONS)),
+                    watch_root.name,
+                    ", ".join(sorted(accepted_extensions)),
                 )
             continue
         candidates.append(path)
@@ -111,6 +125,10 @@ class MediaInboxConfig:
     # delete removes their cloud original too. With it, the watched folder
     # holds exactly what is still waiting.
     archive_root: Path | None = None
+    # 이 폴더가 받는 종류. 종류를 폴더로 나눈다는 owner 결정이 코드에서 사는
+    # 자리가 여기다 -- `새 영상`은 영상만, `새 음악`과 `새 효과음`은 오디오만
+    # 받는다. 보관함은 셋이 함께 쓴다(`감시폴더.parent / "자산화_완료"`).
+    accepted_extensions: frozenset[str] = VIDEO_EXTENSIONS
 
 
 @dataclass(slots=True)
@@ -149,7 +167,9 @@ def run_inbox_cycle(
     archive_root = config.archive_root.resolve() if config.archive_root is not None else None
     candidates = [
         source
-        for source in scan_inbox_candidates(config.watch_path)
+        for source in scan_inbox_candidates(
+            config.watch_path, accepted_extensions=config.accepted_extensions
+        )
         # Drop what the archive already holds before deciding the pass is
         # busy: with the archive inside the watched folder every pass would
         # otherwise look like it had work and read the library for nothing.
