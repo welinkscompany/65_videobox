@@ -1,5 +1,23 @@
 # VideoBox 데이터 경로 전수조사 (2026-08-08)
 
+> **해결됨 (2026-08-10, owner 지시).** 데이터 폴더 세 벌을
+> **`20_project\65_videobox-project` 한 곳으로 합쳤다.** 아래 §5의 결정 1·2가 이걸로 닫혔다.
+>
+> - `65_videobox-container-data`(옛 이전 시도, 206MB) — **삭제.** 참조하는 코드가 0건이었다.
+> - `65_videobox-container-data-v2`(2.2GB) — `65_videobox-project` 아래로 **이동** 후 빈 폴더 삭제.
+>   지우지 않고 옮긴 이유는 그 안에 **색인까지 끝난 촬영본 라이브러리 1.2GB**가 있었기 때문이다.
+> - `videobox-user-library`(촬영본 726MB) — 같은 곳으로 이동.
+> - `.env.container`와 `.env.container.example`의 `VIDEOBOX_CONTAINER_DATA_ROOT`를 새 경로로 바꿨다.
+>
+> **촬영본 726MB를 감시 폴더(`drive-sync\새 영상`)에 넣지 않았다.** 이미 라이브러리에 들어간
+> 것들이라 거기 두면 감시 스레드가 전부 다시 가져와 중복이 생긴다. 앞으로 찍는 것을
+> `65_videobox-project\drive-sync\새 영상`에 넣으면 된다.
+>
+> **확인:** 컨테이너를 새 경로로 다시 올려 healthy, `/api/projects`가 프로젝트를 돌려주고,
+> 컨테이너 안에서 라이브러리 1.2GB가 그대로 보인다.
+>
+> §5의 3·4번(중첩 `_intake_probe.mp4` 30.4MB, `비롤_라이브러리`·`tts-sample`)은 아직 열려 있다.
+
 2026-08-08 핸드오프 `다음 세션에서 바로 할 일 §0`(owner 지시)의 1번 항목이다.
 계획서 `2026-08-05-videobox-owner-usable-recovery.md`의 공식 Task는 아니다.
 

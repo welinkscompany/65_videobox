@@ -445,7 +445,7 @@ VideoBox는 두 가지로 뜰 수 있고 **서로 다른 데이터 폴더**를 �
 
 | 실행 | 주소 | 저장소 | 프로젝트 데이터 |
 |---|---|---|---|
-| 컨테이너 | `127.0.0.1:5173` | Postgres | `20_project\65_videobox-container-data-v2\runtime\projects` |
+| 컨테이너 | `127.0.0.1:5173` | Postgres | `20_project\65_videobox-project\runtime\projects` |
 | 로컬 | web `5199` / api `8000` | 파일 | `20_project\65_videobox-project\projects` |
 
 2026-08-08 확인 결과 **양쪽 모두에 `b-roll-smoke-test`가 있었고 크기가 달랐다**
