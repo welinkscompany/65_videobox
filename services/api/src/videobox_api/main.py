@@ -60,7 +60,8 @@ from videobox_core_engine.local_pipeline import (
 )
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.library_footage_indexer import index_pending_library_footage
-from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_watcher_loop
+from videobox_core_engine.media_inbox import AUDIO_EXTENSIONS, MediaInboxConfig, run_inbox_watcher_loop
+from videobox_core_engine.owner_audio_library import register_owner_audio_library
 from videobox_core_engine.media_analysis import MediaAnalysisService, assets_needing_reanalysis
 from videobox_core_engine.media_analysis import AnalysisProfile
 from videobox_core_engine.media_probe import FFmpegMediaProbe
@@ -87,6 +88,8 @@ from videobox_core_engine.settings import (
     resolve_media_inbox_watch_enabled,
     resolve_media_inbox_watch_interval_seconds,
     resolve_media_inbox_watch_path,
+    resolve_owner_audio_library_root,
+    resolve_owner_audio_watch_paths,
     resolve_projects_root,
     resolve_user_library_root,
     resolve_whisper_stt_config,
@@ -308,6 +311,33 @@ def _index_library_footage(app: FastAPI) -> None:
     if report.failed:
         _LOGGER.warning(
             "촬영본 %d개를 색인하지 못했습니다. 검색에 나오지 않습니다: %s",
+            len(report.failed),
+            ", ".join(report.failed[:10]),
+        )
+
+
+def _register_owner_audio(app: FastAPI) -> None:
+    """owner가 직접 넣은 음악·효과음을 라이브러리 자산으로 올린다.
+
+    감시가 파일을 옮겨 놓는 것만으로는 검색에 절대 나오지 않는다. 바로 아래
+    `_index_library_audio`가 부르는 색인기는 폴더가 아니라 라이브러리 DB를
+    읽고, 그 질의는 활성·검증된 팩에 속한 자산만 돌려주기 때문이다. 그래서
+    이 한 걸음이 없으면 owner에게는 "넣었는데 아무 일도 안 일어난다"가 된다.
+
+    반드시 색인보다 **먼저** 돈다. 그래야 이번 한 바퀴에 등록과 색인이 같이
+    끝나고, owner가 다음 바퀴를 기다리지 않는다.
+    """
+    store = getattr(app.state, "media_library_store", None)
+    roots = getattr(app.state, "owner_audio_library_roots", None)
+    install_path = getattr(app.state, "owner_audio_library_root", None)
+    if store is None or not roots or install_path is None:
+        return
+    report = register_owner_audio_library(
+        store=store, roots=roots, install_path=Path(install_path)
+    )
+    if report.failed:
+        _LOGGER.warning(
+            "직접 넣은 소리 %d개를 라이브러리에 넣지 못했습니다. 검색에 나오지 않습니다: %s",
             len(report.failed),
             ", ".join(report.failed[:10]),
         )
@@ -571,6 +601,9 @@ async def _media_analysis_lifespan(app: FastAPI):
                     # Booked before the call, same as the prune below: a
                     # failing pass must not turn into a per-second retry.
                     next_index_at = loop_clock.time() + LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS
+                    # 등록이 먼저다. 그래야 방금 들어온 음악이 같은 바퀴에서
+                    # 색인까지 끝난다.
+                    await asyncio.to_thread(_register_owner_audio, app)
                     await asyncio.to_thread(_index_library_audio, app)
                     await asyncio.to_thread(_index_library_footage, app)
                     await asyncio.to_thread(_backfill_broll_media_facts, app)
@@ -602,20 +635,34 @@ async def _media_analysis_lifespan(app: FastAPI):
     task = asyncio.create_task(worker(), name="videobox-media-analysis-poller")
 
     media_inbox_stop_event = threading.Event()
-    media_inbox_thread: threading.Thread | None = None
-    media_inbox_watch_config = getattr(app.state, "media_inbox_watch_config", None)
-    if getattr(app.state, "media_inbox_watch_enabled", False) and media_inbox_watch_config is not None:
-        media_inbox_thread = threading.Thread(
-            target=run_inbox_watcher_loop,
-            kwargs={
-                "config": media_inbox_watch_config,
-                "stop_event": media_inbox_stop_event,
-                "interval_seconds": getattr(app.state, "media_inbox_watch_interval_seconds", 30.0),
-            },
-            daemon=True,
-            name="videobox-media-inbox-watcher",
-        )
-        media_inbox_thread.start()
+    media_inbox_threads: list[threading.Thread] = []
+    media_inbox_watch_configs = getattr(app.state, "media_inbox_watch_configs", []) or []
+    if getattr(app.state, "media_inbox_watch_enabled", False):
+        for watch_config in media_inbox_watch_configs:
+            # 폴더가 없으면 감시는 조용히 아무것도 하지 않는다
+            # (`scan_inbox_candidates`가 빈 목록을 돌려준다). owner가 이름을
+            # 정확히 맞춰 폴더를 만들어야만 동작한다는 뜻이라, 여기서 만들어
+            # 둔다. 이미 있으면 아무 일도 하지 않는다.
+            try:
+                watch_config.watch_path.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                _LOGGER.warning(
+                    "넣는 폴더를 만들지 못했습니다: %s. 직접 만들어 주셔야 합니다.",
+                    watch_config.watch_path,
+                    exc_info=True,
+                )
+            thread = threading.Thread(
+                target=run_inbox_watcher_loop,
+                kwargs={
+                    "config": watch_config,
+                    "stop_event": media_inbox_stop_event,
+                    "interval_seconds": getattr(app.state, "media_inbox_watch_interval_seconds", 30.0),
+                },
+                daemon=True,
+                name=f"videobox-media-inbox-watcher-{watch_config.watch_path.name}",
+            )
+            thread.start()
+            media_inbox_threads.append(thread)
 
     try:
         yield
@@ -627,8 +674,8 @@ async def _media_analysis_lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         media_inbox_stop_event.set()
-        if media_inbox_thread is not None:
-            await asyncio.to_thread(media_inbox_thread.join, 5.0)
+        for thread in media_inbox_threads:
+            await asyncio.to_thread(thread.join, 5.0)
         hermes_run_service = getattr(app.state, "hermes_run_service", None)
         if hermes_run_service is not None:
             await hermes_run_service.shutdown()
@@ -920,19 +967,50 @@ def create_app(
     app.state.media_library_store = resolved_media_library_store
     media_inbox_watch_path = resolve_media_inbox_watch_path()
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()
+    resolved_owner_audio_library_root = resolve_owner_audio_library_root()
     app.state.media_inbox_watch_enabled = resolve_media_inbox_watch_enabled()
+    # A sibling of the watched folder, so when that folder is a mirrored Drive
+    # folder the owner sees imported footage move from one Drive subfolder to
+    # another instead of vanishing.  All three watched folders share it,
+    # because all three are siblings.
+    media_inbox_archive_root = (
+        media_inbox_watch_path.parent / "자산화_완료"
+        if media_inbox_watch_path is not None
+        else None
+    )
     app.state.media_inbox_watch_config = (
         MediaInboxConfig(
             watch_path=media_inbox_watch_path,
             library_root=resolved_media_inbox_library_root,
-            # A sibling of the watched folder, so when that folder is a
-            # mirrored Drive folder the owner sees imported footage move from
-            # one Drive subfolder to another instead of vanishing.
-            archive_root=media_inbox_watch_path.parent / "자산화_완료",
+            archive_root=media_inbox_archive_root,
         )
         if media_inbox_watch_path is not None
         else None
     )
+    # 음악과 효과음은 각자의 폴더로 들어오고, 어느 폴더였는지가 곧 종류다
+    # (owner 결정 2026-08-10). 라이브러리 자리도 촬영본과 나눠 둔다 -- 한군데
+    # 섞이면 촬영본 색인이 음원을 영상으로 알고 화면 분석을 시도한다.
+    app.state.owner_audio_library_root = resolved_owner_audio_library_root
+    app.state.owner_audio_library_roots = {
+        media_type: resolved_owner_audio_library_root / media_type
+        for media_type in resolve_owner_audio_watch_paths(media_inbox_watch_path)
+    }
+    app.state.owner_audio_watch_configs = [
+        MediaInboxConfig(
+            watch_path=watch_path,
+            library_root=resolved_owner_audio_library_root / media_type,
+            archive_root=media_inbox_archive_root,
+            accepted_extensions=AUDIO_EXTENSIONS,
+        )
+        for media_type, watch_path in sorted(
+            resolve_owner_audio_watch_paths(media_inbox_watch_path).items()
+        )
+    ]
+    app.state.media_inbox_watch_configs = [
+        config
+        for config in [app.state.media_inbox_watch_config, *app.state.owner_audio_watch_configs]
+        if config is not None
+    ]
     app.state.media_inbox_watch_interval_seconds = resolve_media_inbox_watch_interval_seconds()
     app.state.media_inbox_library_root = resolved_media_inbox_library_root
     resolved_agent_gateway_url = agent_gateway_url

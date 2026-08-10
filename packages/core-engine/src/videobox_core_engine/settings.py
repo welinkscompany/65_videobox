@@ -51,6 +51,40 @@ def resolve_media_inbox_library_root() -> Path:
     return Path(configured) if configured else resolve_user_library_root() / "media-inbox"
 
 
+#: 음악과 효과음이 들어오는 폴더 이름. owner 결정 (2026-08-10): 종류는 폴더로
+#: 나눈다 -- 한 폴더에 다 넣고 프로그램이 내용을 보고 판단하는 방식은 틀릴 수
+#: 있어 채택하지 않았다.
+OWNER_AUDIO_WATCH_FOLDER_NAMES: dict[str, str] = {
+    "music": "새 음악",
+    "sfx": "새 효과음",
+}
+
+
+def resolve_owner_audio_watch_paths(video_watch_path: Path | None) -> dict[str, Path]:
+    """음악·효과음 폴더는 `새 영상`의 형제다.
+
+    보관함(`자산화_완료`)이 이미 `감시폴더.parent`로 정해져 있어(`main.py`),
+    셋을 같은 부모 아래 두면 보관함 하나를 저절로 함께 쓴다. owner가 만들
+    폴더도 이름 두 개로 끝난다.
+    """
+    if video_watch_path is None:
+        return {}
+    return {
+        media_type: video_watch_path.parent / folder_name
+        for media_type, folder_name in OWNER_AUDIO_WATCH_FOLDER_NAMES.items()
+    }
+
+
+def resolve_owner_audio_library_root() -> Path:
+    """owner가 직접 넣은 음악·효과음이 사는 곳.
+
+    촬영본 라이브러리와 반드시 다른 폴더다. 한 폴더에 섞으면 촬영본 색인이
+    (`_index_library_footage`) mp3를 영상으로 알고 화면 분석을 시도한다.
+    """
+    configured = os.environ.get("VIDEOBOX_OWNER_AUDIO_LIBRARY_ROOT", "").strip()
+    return Path(configured) if configured else resolve_user_library_root() / "owner-audio"
+
+
 def resolve_media_inbox_watch_enabled() -> bool:
     """Whether the app should start the background media-inbox watcher
     thread on startup. Defaults to False -- create_app() callers that don't

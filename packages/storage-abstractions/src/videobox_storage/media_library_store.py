@@ -89,6 +89,24 @@ class MediaLibraryStore:
         finally:
             connection.close()
 
+    def list_pack_asset_digests(self, *, pack_id: str, version: str) -> dict[str, str]:
+        """What one pack version already has indexed, without touching a file.
+
+        A caller that periodically reconciles a folder against the library
+        needs to know what is already registered.  Doing that through
+        ``search()`` or ``inspect_active_assets()`` would re-hash every file on
+        the disk on every pass; this is a plain read of the index.
+        """
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                "SELECT library_asset_id, sha256 FROM media_assets WHERE pack_id = ? AND version = ?",
+                (pack_id, version),
+            ).fetchall()
+        finally:
+            connection.close()
+        return {str(row["library_asset_id"]): str(row["sha256"]) for row in rows}
+
     def activate_pack(self, *, pack_id: str, version: str, install_path: Path) -> None:
         connection = self._connection()
         try:

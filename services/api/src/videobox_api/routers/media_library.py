@@ -199,7 +199,16 @@ def build_media_library_router(
 
 
 def _mime_type(path: Path) -> str | None:
-    return {".mp3": "audio/mpeg", ".wav": "audio/wav"}.get(path.suffix.lower())
+    # 팩은 mp3와 wav뿐이지만, owner가 직접 넣는 파일은 폰과 녹음기가 뱉는
+    # 무엇이든 될 수 있다. 여기 없으면 브라우저가 미리 듣기를 재생하지 못한다.
+    return {
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav",
+        ".m4a": "audio/mp4",
+        ".aac": "audio/aac",
+        ".flac": "audio/flac",
+        ".ogg": "audio/ogg",
+    }.get(path.suffix.lower())
 
 
 def _require_project(project_store: LocalProjectStore, project_id: str) -> None:

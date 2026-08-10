@@ -7,6 +7,7 @@ import pytest
 
 from videobox_core_engine import media_inbox
 from videobox_core_engine.media_inbox import (
+    AUDIO_EXTENSIONS,
     MediaInboxConfig,
     import_media_inbox_asset_to_project,
     is_file_settled,
@@ -520,3 +521,66 @@ def test_an_unsupported_file_says_why_once(tmp_path: Path, caplog) -> None:
     assert sum("배경음악.mp3" in message for message in said) == 1, said
     # 숨김 파일과 윈도우 찌꺼기는 owner가 넣은 것이 아니다. 말하지 않는다.
     assert not any("숨김" in message or "desktop.ini" in message for message in said), said
+
+
+def test_a_music_folder_takes_audio_and_leaves_video_where_it_is(tmp_path: Path) -> None:
+    """owner 결정 (2026-08-10): 종류를 폴더로 나눈다.
+
+    프로그램이 파일 내용을 보고 음악인지 효과음인지 알아서 판단하는 방식은
+    틀릴 수 있어 채택하지 않았다. 그래서 어느 폴더에 넣었는지가 곧 종류이고,
+    폴더마다 받는 확장자가 다르다.
+    """
+    watch = tmp_path / "drive-sync" / "새 음악"
+    watch.mkdir(parents=True)
+    archive = tmp_path / "drive-sync" / "자산화_완료"
+    library = tmp_path / "owner-audio" / "music"
+    (watch / "봄날의 아침.mp3").write_bytes(b"music bytes")
+    (watch / "잘못 넣은 영상.mp4").write_bytes(b"video bytes")
+
+    report = run_inbox_cycle(
+        MediaInboxConfig(
+            watch_path=watch,
+            library_root=library,
+            archive_root=archive,
+            accepted_extensions=AUDIO_EXTENSIONS,
+        )
+    )
+
+    assert report.moved == ["봄날의 아침.mp3"]
+    assert (library / "봄날의 아침.mp3").read_bytes() == b"music bytes"
+    # 원본은 셋이 함께 쓰는 보관함으로 간다.
+    assert (archive / "봄날의 아침.mp3").read_bytes() == b"music bytes"
+    # 음악 폴더에 들어온 영상은 가져가지 않는다. 있던 자리에 그대로 둔다.
+    assert (watch / "잘못 넣은 영상.mp4").exists()
+
+
+def test_the_video_folder_still_takes_only_video(tmp_path: Path) -> None:
+    """폴더를 나눈 뒤에도 `새 영상`의 기존 동작이 그대로여야 한다."""
+    watch = tmp_path / "drive-sync" / "새 영상"
+    watch.mkdir(parents=True)
+    library = tmp_path / "library"
+    (watch / "clip.mp4").write_bytes(b"video bytes")
+    (watch / "배경음악.mp3").write_bytes(b"music bytes")
+
+    report = run_inbox_cycle(MediaInboxConfig(watch_path=watch, library_root=library))
+
+    assert report.moved == ["clip.mp4"]
+    assert (watch / "배경음악.mp3").exists()
+
+
+def test_every_audio_kind_we_accept_is_actually_taken(tmp_path: Path) -> None:
+    """확장자 집합이 코드에만 있고 실제로는 안 걸러지는 일이 없도록 한 번 훑는다."""
+    watch = tmp_path / "새 효과음"
+    watch.mkdir()
+    library = tmp_path / "sfx"
+    for index, suffix in enumerate(sorted(AUDIO_EXTENSIONS)):
+        (watch / f"소리{index}{suffix}").write_bytes(f"bytes {index}".encode())
+
+    report = run_inbox_cycle(
+        MediaInboxConfig(
+            watch_path=watch, library_root=library, accepted_extensions=AUDIO_EXTENSIONS
+        )
+    )
+
+    assert len(report.moved) == len(AUDIO_EXTENSIONS)
+    assert sorted(path.suffix for path in library.iterdir()) == sorted(AUDIO_EXTENSIONS)
