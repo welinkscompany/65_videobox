@@ -14,6 +14,7 @@ original -- "복사 후 삭제가 아니라 검증 후 이동이다."
 
 from __future__ import annotations
 
+import logging
 import hashlib
 import shutil
 from dataclasses import dataclass, field
@@ -26,6 +27,12 @@ from typing import Any, Callable, Protocol
 VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".webm"})
 
 _IGNORED_FILENAMES = frozenset({"desktop.ini"})
+
+_LOGGER = logging.getLogger(__name__)
+
+# owner가 넣었는데 받지 못한 파일을 이미 말한 적 있는지. 감시가 30초마다 도니까
+# 이것이 없으면 같은 파일 하나가 로그를 통째로 채운다.
+_REPORTED_UNSUPPORTED: set[str] = set()
 
 
 def _is_hidden(path: Path, *, watch_root: Path) -> bool:
@@ -44,9 +51,21 @@ def scan_inbox_candidates(watch_root: Path) -> list[Path]:
             continue
         if path.name in _IGNORED_FILENAMES:
             continue
-        if path.suffix.lower() not in VIDEO_EXTENSIONS:
-            continue
         if _is_hidden(path, watch_root=watch_root):
+            continue
+        if path.suffix.lower() not in VIDEO_EXTENSIONS:
+            # owner가 넣은 것인데 우리가 받지 못하는 종류다. 예전에는 조용히
+            # 넘어가서, 넣은 사람은 고장인지 기다려야 하는지 알 수가 없었다.
+            # 숨김 파일과 desktop.ini는 owner가 넣은 것이 아니므로 위에서 먼저
+            # 걸러 여기까지 오지 않는다.
+            key = str(path)
+            if key not in _REPORTED_UNSUPPORTED:
+                _REPORTED_UNSUPPORTED.add(key)
+                _LOGGER.warning(
+                    "가져올 수 없는 종류라 그대로 둡니다: %s (받는 종류: %s)",
+                    path.name,
+                    ", ".join(sorted(VIDEO_EXTENSIONS)),
+                )
             continue
         candidates.append(path)
     return candidates

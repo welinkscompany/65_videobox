@@ -489,3 +489,34 @@ def test_an_archive_inside_the_watched_folder_still_counts_as_an_idle_pass(
 
     assert report.moved == [] and report.duplicates == []
     assert read_paths == []
+
+
+def test_an_unsupported_file_says_why_once(tmp_path: Path, caplog) -> None:
+    """mp3를 넣으면 지금은 아무 일도 안 일어나고 아무 말도 없다.
+
+    owner 입장에서 고장인지, 기다려야 하는지, 잘못 넣은 건지 알 방법이 없다.
+    감시는 30초마다 도니까 매번 찍으면 로그가 그것만으로 찬다 -- 파일 하나당
+    한 번만 남긴다.
+    """
+    import logging
+
+    from videobox_core_engine.media_inbox import scan_inbox_candidates
+
+    watch = tmp_path / "새 영상"
+    watch.mkdir()
+    (watch / "brought.mp4").write_bytes(b"video")
+    (watch / "배경음악.mp3").write_bytes(b"audio")
+    (watch / ".숨김.mp3").write_bytes(b"hidden")
+    (watch / "desktop.ini").write_bytes(b"junk")
+
+    with caplog.at_level(logging.WARNING, logger="videobox_core_engine.media_inbox"):
+        first = scan_inbox_candidates(watch)
+        second = scan_inbox_candidates(watch)
+
+    assert [path.name for path in first] == ["brought.mp4"]
+    assert [path.name for path in second] == ["brought.mp4"]
+
+    said = [record.getMessage() for record in caplog.records]
+    assert sum("배경음악.mp3" in message for message in said) == 1, said
+    # 숨김 파일과 윈도우 찌꺼기는 owner가 넣은 것이 아니다. 말하지 않는다.
+    assert not any("숨김" in message or "desktop.ini" in message for message in said), said
