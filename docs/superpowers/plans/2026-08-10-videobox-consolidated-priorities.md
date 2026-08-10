@@ -199,6 +199,15 @@ owner가 겪는 문제를 하나도 해결하지 않는다.
 **파일은 같은 `runtime/projects` 아래**에 둔다(`VIDEOBOX_DATA_ROOT`). 즉 이 폴더가
 Postgres 쪽 프로젝트의 파일일 가능성을 배제할 수 없다.
 
+**해결됨 (2026-08-10).** Postgres에 물어보니 `b-roll-smoke-test`는 **실제로 등록된
+프로젝트**였다 — 버려진 SQLite 잔재가 아니었다. 폴더만 지웠으면 가리킬 것이 없는 기록이
+남아 화면에 깨진 항목이 됐을 것이다. 그래서 **앱 자신의 삭제 경로**
+(`DELETE /api/projects/{id}?confirm=true`, 확인 플래그로 잠겨 있음)로 지웠다.
+파일과 기록이 함께 사라진다. **175MB 회수.**
+
+`progress-bar-live-test`(4MB)는 이름상 같은 종류이나 명시 승인이 `b-roll-smoke-test`
+하나였고 용량도 작아 남겼다.
+
 **Postgres를 띄워 프로젝트 목록을 확인한 뒤에 판단한다.** 확인 전에는 지우지 않는다.
 `CLAUDE.md` §5의 "경로로 참조되는 곳을 먼저 찾으라"가 여기에도 적용된다 —
 오늘 `task5-korean-600.wav`에서 같은 판단이 검증 두 개를 살렸다.
