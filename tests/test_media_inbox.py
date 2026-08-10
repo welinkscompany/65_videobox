@@ -333,7 +333,7 @@ def test_imported_originals_are_filed_not_deleted(tmp_path: Path) -> None:
     """
     watch_root = tmp_path / "drive" / "새 영상"
     watch_root.mkdir(parents=True)
-    archive_root = tmp_path / "drive" / "가져옴"
+    archive_root = tmp_path / "drive" / "자산화_완료"
     library_root = tmp_path / "library"
     source = watch_root / "clip.mp4"
     source.write_bytes(b"real footage bytes")
@@ -354,7 +354,7 @@ def test_a_duplicate_is_filed_too_rather_than_deleted(tmp_path: Path) -> None:
     this" without destroying anything."""
     watch_root = tmp_path / "drive" / "새 영상"
     watch_root.mkdir(parents=True)
-    archive_root = tmp_path / "drive" / "가져옴"
+    archive_root = tmp_path / "drive" / "자산화_완료"
     library_root = tmp_path / "library"
     library_root.mkdir()
     (library_root / "already-here.mp4").write_bytes(b"same bytes")
@@ -395,7 +395,7 @@ def test_an_archive_inside_the_watched_folder_is_not_re_scanned(tmp_path: Path) 
     """
     watch_root = tmp_path / "drive"
     watch_root.mkdir()
-    archive_root = watch_root / "가져옴"
+    archive_root = watch_root / "자산화_완료"
     library_root = tmp_path / "library"
     (watch_root / "clip.mp4").write_bytes(b"real footage bytes")
 
@@ -467,7 +467,7 @@ def test_an_archive_inside_the_watched_folder_still_counts_as_an_idle_pass(
     The library read has to be skipped on what is left after that guard, not
     on the raw scan."""
     watch = tmp_path / "watch"
-    archive = watch / "가져옴"
+    archive = watch / "자산화_완료"
     library = tmp_path / "library"
     archive.mkdir(parents=True)
     library.mkdir()

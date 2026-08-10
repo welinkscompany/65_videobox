@@ -928,7 +928,7 @@ def create_app(
             # A sibling of the watched folder, so when that folder is a
             # mirrored Drive folder the owner sees imported footage move from
             # one Drive subfolder to another instead of vanishing.
-            archive_root=media_inbox_watch_path.parent / "가져옴",
+            archive_root=media_inbox_watch_path.parent / "자산화_완료",
         )
         if media_inbox_watch_path is not None
         else None

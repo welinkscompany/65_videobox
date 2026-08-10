@@ -88,7 +88,7 @@ services:
       # the owner can point Drive's mirror at, or drop files into by hand.
       VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED: ${VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED:-1}
       # A subfolder, so the archive folder VideoBox files originals into lands
-      # beside it inside the same mount: .../새 영상 -> .../가져옴.
+      # beside it inside the same mount: .../새 영상 -> .../자산화_완료.
       VIDEOBOX_MEDIA_INBOX_WATCH_PATH: /videobox-drive-sync/새 영상
       VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS: ${VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS:-30}
       # The root filesystem stays read-only, so model weights need their own
