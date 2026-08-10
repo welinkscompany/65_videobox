@@ -217,7 +217,7 @@ export function RightDock({
               <dt>미디어</dt><dd>{mediaKindLabel(candidate.sourceMediaKind)}</dd>
               <dt>적용 설정</dt><dd>{controlSummary(candidate.supportedControls ?? {})}</dd>
             </dl>
-            {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" onClick={() => onPreviewCandidate(candidate)}>추천 미리 듣기</Button> : null}
+            {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" aria-label={`${candidate.visibleReferenceCode} ${previewVerb(candidate.sourceMediaKind)}`} onClick={() => onPreviewCandidate(candidate)}>{previewVerb(candidate.sourceMediaKind)}</Button> : null}
           </article>;
         })}
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
@@ -267,6 +267,12 @@ const matchModeWords: Readonly<Record<string, string>> = {
 
 function matchModeLabel(mode: string | undefined): string | null {
   return mode ? matchModeWords[mode] ?? null : null;
+}
+
+// 소리만 있는 추천은 듣는 것이고 영상·이미지는 보는 것이다. 하나로 뭉뚱그리면
+// owner는 영상 추천에 "미리 듣기"라고 적힌 단추를 누르게 된다.
+function previewVerb(kind: RightDockCandidate["sourceMediaKind"]): string {
+  return kind === "bgm" || kind === "sfx" ? "미리 듣기" : "미리 보기";
 }
 
 function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {

@@ -99,7 +99,8 @@ export type RightDockDirector = Readonly<{
   onSendMessage: (draft: string) => void | Promise<void>;
   onApplyProposal: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   onManualEdit: () => void;
-  onPreviewCandidate: (candidate: RightDockCandidate) => void;
+  /** 편집 작업판이 미리 듣기 자리를 물려 준다. 경로 자체는 재생하지 않는다. */
+  onPreviewCandidate?: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
   onRetryMessage?: () => void | Promise<void>;
   onCancelRun?: () => void | Promise<void>;

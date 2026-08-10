@@ -1420,7 +1420,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const rightDock: RightDockDirector = {
     state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
-    proposal: projectDirectorProposal(activeDirector.proposal, state.view.expectedRevision),
+    proposal: projectDirectorProposal(projectId, activeDirector.proposal, state.view.expectedRevision),
     draft: activeDirector.draft,
     runState: activeDirector.runState,
     selectedCandidateIds: activeDirector.selectedCandidateIds,
@@ -1478,7 +1478,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       : undefined,
     onApplyProposal: applyDirectorProposal,
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
-    onPreviewCandidate: () => undefined,
+    // 재생은 편집 작업판이 가진 미리 듣기 자리가 맡는다. 여기서 빈 함수를
+    // 넘기고 있었는데, 그 값은 작업판이 어차피 덮어쓴다 -- 남겨 두면 화면이
+    // 미리 보기를 안 한다는 잘못된 인상만 준다.
     onStart: activeDirector.state === "idle"
       && !activeDirector.proposal
       && activeDirector.runState.kind !== "streaming"
@@ -1529,7 +1531,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   </>;
 }
 
-function projectDirectorProposal(proposal: DirectorProposal | null, currentRevision: number): RightDockProposal | null {
+function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number): RightDockProposal | null {
   if (!proposal) return null;
   const isYujin = isYujinProposal(proposal);
   return {
@@ -1548,7 +1550,13 @@ function projectDirectorProposal(proposal: DirectorProposal | null, currentRevis
         candidateId: candidate.candidate_id,
         visibleReferenceCode: candidate.visible_reference_code,
         mediaType: candidate.media_type,
-        previewUrl: candidate.preview_uri,
+        // 후보의 `preview_uri`는 늘 비어 온다. 그것만 보고 있었기 때문에 "추천
+        // 미리 보기" 단추가 한 번도 그려지지 않았다. 실제 파일을 흘려 주는
+        // 주소는 따로 있고, 그 주소는 유진이 바로 적용할 수 있는 후보에만
+        // 열린다 -- 그 밖의 후보에 단추를 띄우면 눌러도 열리지 않는다.
+        previewUrl: isActionableYujinMediaCandidate(candidate)
+          ? api.directorCandidatePreviewUrl(projectId, proposal.proposal_id, candidate.candidate_id)
+          : candidate.preview_uri,
         kind: candidate.media_type,
         sourceMediaKind: String(metadata.source_media_kind ?? candidate.media_type),
         targetSegmentId: String(metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? ""),

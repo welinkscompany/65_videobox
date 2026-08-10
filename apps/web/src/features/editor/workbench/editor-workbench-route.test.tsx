@@ -3089,8 +3089,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(await screen.findByText("한 가지를 골랐어요.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "추천 미리 듣기" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "추천 미리 듣기" }));
+    expect(screen.getByRole("button", { name: "P01-B-01 미리 보기" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "P01-B-01 미리 보기" }));
     expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
     expect(document.querySelectorAll(".vb-editor-right-dock audio, .vb-editor-right-dock video")).toHaveLength(0);
 
@@ -3168,6 +3168,36 @@ describe("EditorWorkbenchRoute", () => {
     expect(materialize).toHaveBeenCalledTimes(1);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(batchApply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["broll", "미리 보기"],
+    ["bgm", "미리 듣기"],
+    ["sfx", "미리 듣기"],
+  ] as const)("lets the owner see or hear a Yujin %s recommendation before applying it", async (kind, verb) => {
+    // 유진이 만든 후보는 `preview_uri`가 늘 비어 온다. 화면이 그 값만 보고
+    // 있었기 때문에 단추가 한 번도 그려지지 않았고, 추천을 확인할 방법은
+    // 적용해 보는 것뿐이었다. 실제 파일을 흘려 주는 주소는 따로 있다.
+    const proposal = yujinMediaProposal(kind);
+    expect(proposal.candidates[0].preview_uri).toBeNull();
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    const reference = proposal.candidates[0].visible_reference_code;
+    fireEvent.click(screen.getByRole("button", { name: `${reference} ${verb}` }));
+
+    await waitFor(() => expect(
+      document.querySelector<HTMLMediaElement>(".vb-preview-stage audio, .vb-preview-stage video")?.getAttribute("src"),
+    ).toBe(
+      `/api/projects/project-a/director/proposals/${proposal.proposal_id}/candidates/candidate-${kind}/preview`,
+    ));
+    expect(document.querySelectorAll(".vb-editor-right-dock audio, .vb-editor-right-dock video")).toHaveLength(0);
   });
 
   it("disables stale Yujin Apply before materialize or edit mutation", async () => {
