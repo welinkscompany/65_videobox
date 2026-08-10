@@ -93,16 +93,23 @@ def test_the_hardest_earned_rules_are_not_buried_in_an_environment_section() -> 
         assert any(required in line for line in lines), required
 
 
-def test_the_two_data_roots_hazard_is_written_down() -> None:
-    """컨테이너와 로컬은 서로 다른 데이터 폴더를 본다.
+def test_the_data_root_hazard_is_written_down() -> None:
+    """데이터 폴더가 어디이고, 지금 어느 저장소를 보고 있는지 적혀 있어야 한다.
 
-    2026-08-08 확인: 두 곳 모두에 `b-roll-smoke-test` 가 있었고 크기가
-    달랐다(92MB 대 123MB). 어느 쪽으로 띄웠는지 모르면 "어제 만든 프로젝트가
-    사라졌다"로 보인다. 이 위험이 문서에 적혀 있지 않으면 다음 사람이 똑같이 겪는다.
+    2026-08-08에는 폴더가 세 벌이었고 두 곳 모두에 `b-roll-smoke-test`가 크기만
+    다르게 있었다(92MB 대 123MB). 2026-08-10에 owner 지시로 한 곳으로 합쳤으므로
+    **이 테스트가 지키는 대상도 바뀐다** -- 예전에는 "두 벌이라는 위험"을,
+    이제는 "한 곳이라는 사실과 저장소를 구분하는 방법"을 요구한다.
+
+    저장소는 여전히 갈린다(컨테이너=Postgres, 로컬=파일). 폴더를 합쳤다고 그것까지
+    같아지지는 않으므로, 어느 쪽을 보고 있는지 확인하는 방법이 계속 필요하다.
     """
     fast_path = FAST_PATH.read_text(encoding="utf-8")
 
-    assert "65_videobox-container-data-v2" in fast_path
     assert "65_videobox-project" in fast_path
-    # 어느 쪽을 보고 있는지 확인하는 방법도 함께 적혀 있어야 한다.
+    # 합치기 전의 폴더 이름이 현재 경로로 남아 있으면 안 된다.
+    assert "65_videobox-container-data-v2\\runtime" not in fast_path
+    # 어느 쪽을 보고 있는지 확인하는 방법이 적혀 있어야 한다.
     assert "projects_root" in fast_path
+    assert "데이터베이스 저장소를 씁니다" in fast_path
+    assert "파일 저장소를 씁니다" in fast_path
