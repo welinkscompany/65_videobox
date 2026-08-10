@@ -27,6 +27,20 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $repoRoot ".venv\Scripts\python.exe"
 
 if (-not (Test-Path $python)) {
+    # Agent worktrees are created without a .venv, so the repo-relative path
+    # does not resolve there and this script threw before it started -- an
+    # agent hit exactly that and had to run the steps by hand. Fall back to the
+    # long-lived development worktree's interpreter, which is the one CLAUDE.md
+    # names for backend verification.
+    $shared = Join-Path (Split-Path -Parent (Split-Path -Parent $repoRoot)) `
+        "65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe"
+    if (Test-Path $shared) {
+        Write-Host "Using the shared development virtualenv: $shared" -ForegroundColor Yellow
+        $python = $shared
+    }
+}
+
+if (-not (Test-Path $python)) {
     throw "Backend virtualenv not found at $python. CLAUDE.md requires .venv/Scripts/python.exe for backend verification."
 }
 

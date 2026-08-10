@@ -21,3 +21,10 @@ apps/web/src/components/ui/scroll-area.tsx text eol=lf
 apps/web/src/components/ui/separator.tsx text eol=lf
 apps/web/src/components/ui/sonner.tsx text eol=lf
 apps/web/src/components/ui/resizable.tsx text eol=lf
+
+# 컨테이너 안에서 실행되는 셸 스크립트. Windows에서 CRLF로 받으면 shebang이
+# 깨져 `exec /app/docker/workspace-entrypoint.sh: no such file or directory`로
+# 죽는다 -- 오래된 worktree는 이미 LF로 받아 둬서 보이지 않고, 새로 만든
+# worktree에서만 터진다. 실제로 2026-08-10에 그렇게 걸렸다.
+*.sh text eol=lf
+docker/workspace-supervisor.py text eol=lf
