@@ -97,9 +97,50 @@ def test_filling_an_empty_scene_clears_what_blocked_the_export(tmp_path):
     # 함께 다시 유도하지 않으면 owner가 다 채워도 완성본을 못 만든다.
     assert after["gap_slots"] == []
     assert after.get("placeholder_policy") is None
-    LocalPipelineRunner(store).assert_timeline_output_allowed(
+    pipeline = LocalPipelineRunner(store)
+    pipeline.assert_timeline_output_allowed(
         project_id=project.project_id, timeline_job_id=bundle["timeline_job_id"]
     )
+    # 채운 장면이 실제 파일을 가리켜야 한다. 여기가 비어 있으면 합성이 없는 파일을
+    # 열려다 프레임을 하나도 못 만들고, ffmpeg는 "streams received no packets"로만
+    # 끝난다 -- owner에게는 "완성본을 만들지 못했어요"로만 보인다.
+    current = store.get_editing_session(project_id=project.project_id, session_id=session_id)
+    plan = pipeline.build_composition_plan(
+        timeline=store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id),
+        editing_session=current,
+        project_id=project.project_id,
+    )
+    applied = [item for item in plan.items if item.asset_id == asset.asset_id and item.track_type == "broll"]
+    assert applied, "채운 장면이 합성에 들어가야 한다"
+    for item in applied:
+        assert item.asset_uri, f"{item.clip_id}에 원본 경로가 없다"
+        source = store.resolve_storage_uri(project_id=project.project_id, storage_uri=item.asset_uri)
+        assert source.exists(), f"{item.clip_id}이 없는 파일을 가리킨다: {item.asset_uri}"
+
+
+# 자산 기록이 사라져도 합성 만들기가 통째로 멈추면 안 된다. 대신 조용히 넘어가지도
+# 않는다 -- 그 장면이 완성본에서 비어 보이는 이유가 어디엔가는 남아야 한다.
+def test_a_missing_asset_record_is_logged_instead_of_stopping_the_whole_plan(tmp_path, caplog):
+    store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("Missing")
+    brief, readiness = _ready(store, project.project_id)
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id, brief_id=brief["brief_id"], expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"], expected_readiness_revision=readiness["revision"],
+        idempotency_key="missing", allow_placeholder=True,
+    )
+    session = store.get_editing_session(project_id=project.project_id, session_id=bundle["session_id"])
+    session["segments"][0]["broll_override"] = {"asset_id": "asset_does_not_exist", "in_sec": 0.0, "out_sec": 1.0}
+    store.update_editing_session(project_id=project.project_id, session_id=bundle["session_id"], session_payload=session)
+
+    with caplog.at_level("WARNING"):
+        plan = LocalPipelineRunner(store).build_composition_plan(
+            timeline=store.get_timeline_run(project_id=project.project_id, timeline_id=bundle["timeline_id"]),
+            editing_session=store.get_editing_session(project_id=project.project_id, session_id=bundle["session_id"]),
+            project_id=project.project_id,
+        )
+
+    assert plan.items, "자산 하나가 없다고 계획 전체가 사라지면 안 된다"
+    assert "asset_does_not_exist" in caplog.text
 
 
 def test_materializes_one_real_draft_bundle_and_reuses_same_idempotency_result(tmp_path):

@@ -299,6 +299,10 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline=timeline, editing_session=editing_session,
             project_id=project_id or str(timeline.get("project_id") or "") or None,
         )
+        self._resolve_session_clip_sources(
+            timeline=materialized_timeline,
+            project_id=project_id or str(timeline.get("project_id") or "") or "",
+        )
         captions = materialized_timeline.get("session_captions") if isinstance(materialized_timeline.get("session_captions"), list) else [
             segment for segment in (editing_session.get("segments", []) if isinstance(editing_session, dict) else [])
             if isinstance(segment, dict) and str(segment.get("cut_action") or "keep") != "remove"
@@ -310,6 +314,49 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         if callable(extractor):
             return extractor(timeline=materialized_timeline, captions=captions)
         return CompositionPlan.from_timeline(timeline=materialized_timeline, captions=captions)
+
+    def _resolve_session_clip_sources(self, *, timeline: dict[str, Any], project_id: str) -> None:
+        """owner가 적용한 자산이 실제 파일을 가리키게 한다.
+
+        합성 계획을 만드는 모듈은 저장소를 모른다. 그래서 세션 override에 경로가 없으면
+        `assets/{asset_id}`를 지어낸다(`composition_plan.py:468`). 그런데 자산은 종류별
+        폴더에 확장자를 달고 저장되므로 **그 경로는 언제나 존재하지 않는다.** ffmpeg는
+        없는 입력을 열려다 프레임을 하나도 못 만들고 "streams received no packets"로
+        끝나며, owner에게는 "완성본을 만들지 못했어요"로만 보인다.
+
+        여기서 저장소에 물어 채운다. 계획 모듈은 그대로 순수하게 두고, 이미 그렇게
+        저장된 편집본도 함께 복구된다.
+        """
+        if not project_id:
+            return
+        resolved: dict[str, str | None] = {}
+        for track in timeline.get("tracks", []):
+            if not isinstance(track, dict):
+                continue
+            for clip in track.get("clips", []):
+                if not isinstance(clip, dict):
+                    continue
+                asset_id = str(clip.get("asset_id") or "").strip()
+                if not asset_id:
+                    continue
+                uri = str(clip.get("asset_uri") or "").strip()
+                if uri and not uri.endswith(f"/assets/{asset_id}"):
+                    continue
+                if asset_id not in resolved:
+                    try:
+                        asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+                        resolved[asset_id] = str(asset.get("storage_uri") or "").strip() or None
+                    except Exception:  # noqa: BLE001 - 자산 하나가 나머지를 막지 않는다
+                        _logger.warning(
+                            "적용한 자산의 원본을 찾지 못했습니다 (project=%s, asset=%s). "
+                            "그 장면은 완성본에서 비어 보일 수 있습니다.",
+                            project_id,
+                            asset_id,
+                            exc_info=True,
+                        )
+                        resolved[asset_id] = None
+                if resolved[asset_id]:
+                    clip["asset_uri"] = resolved[asset_id]
 
     def _exact_preview_inputs(
         self, *, project_id: str, session_id: str, start_sec: float | None = None, end_sec: float | None = None
