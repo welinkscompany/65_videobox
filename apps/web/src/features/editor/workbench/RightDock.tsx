@@ -11,6 +11,8 @@ import { YujinMemoryPanel } from "./YujinMemoryPanel";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
 
+const staleProposalMessage = "편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.";
+
 type SelectedSegment = Readonly<{
   segmentId: string;
   startSec: number;
@@ -45,6 +47,7 @@ export type RightDockProps = Readonly<{
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
+  onRefreshProposal?: () => void | Promise<void>;
   onManualEdit?: () => void;
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
@@ -77,6 +80,7 @@ export function RightDock({
   composerDisabled = false,
   onSendMessage,
   onApplyProposal,
+  onRefreshProposal,
   onManualEdit,
   onPreviewCandidate,
   onStart,
@@ -115,6 +119,11 @@ export function RightDock({
   const proposalIsReady = proposal?.status === "ready";
   const proposalIsCurrent = proposalIsReady
     && proposal.baseSessionRevision === proposal.currentRevision;
+  // 편집본이 앞서 나가면 이 추천은 적용할 수 없다. 그 사실을 말하지 않으면
+  // 적용 단추가 이유 없이 꺼져 있는 것처럼만 보인다.
+  const proposalIsOutOfDate = Boolean(
+    proposal && proposal.baseSessionRevision !== proposal.currentRevision,
+  );
   const activeCandidateIds = selectedCandidateIds
     ?? (proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
   const selectedCandidatesAreActionable = Boolean(
@@ -148,7 +157,7 @@ export function RightDock({
       {(runState.kind === "streaming" || runState.kind === "unavailable") && runState.cancelWarning
         ? <p role="status" className="vb-editor-right-dock__sync-warning">{runState.cancelWarning}</p>
         : null}
-      {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : "유진의 답을 받지 못했어요."}</p>{onManualEdit ? <Button type="button" onClick={onManualEdit}>유진 없이 계속 편집</Button> : null}</div> : null}
+      {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : proposalIsOutOfDate ? staleProposalMessage : "유진의 답을 받지 못했어요."}</p>{proposal && onRefreshProposal ? <Button type="button" onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}{onManualEdit ? <Button type="button" onClick={onManualEdit}>유진 없이 계속 편집</Button> : null}</div> : null}
       {state === "idle" && !proposal && onStart ? <Button type="button" onClick={() => void onStart()}>유진에게 추천받기</Button> : null}
       <div
         ref={historyRef}
@@ -186,6 +195,10 @@ export function RightDock({
         <p>{`제안 기준 편집본 ${proposal.baseSessionRevision}`}</p>
         <p>{`현재 편집본 ${proposal.currentRevision}`}</p>
         {matchModeLabel(proposal.matchMode) ? <p>{matchModeLabel(proposal.matchMode)}</p> : null}
+        {proposalIsOutOfDate && state !== "blocked" && state !== "error" ? <>
+          <p role="status">{staleProposalMessage}</p>
+          {onRefreshProposal ? <Button type="button" disabled={state === "analysis_running" || state === "applying"} onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}
+        </> : null}
       </div> : null}
       {recommendationCandidates.length ? <div role="radiogroup" aria-label="추천 후보">
         {recommendationCandidates.map((candidate) => {

@@ -1350,6 +1350,42 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (isCurrentDirector(epoch, operationId)) directorMutationInFlight.current = false;
     }
   };
+  /** 낡은 추천에서 유진에게 돌아가는 유일한 길.
+   *
+   * 편집본이 바뀐 뒤 적용을 누르면 서버는 "다시 받으라"고 답하고 화면은 막힌
+   * 상태가 된다. 그런데 새 추천 받기는 이미 추천이 있으면 눌리지 않으므로,
+   * 이 자리가 없으면 owner는 유진에게 돌아갈 방법이 없었다.
+   */
+  const refreshDirectorProposal = async () => {
+    const proposal = activeDirector.proposal;
+    if (
+      !proposal
+      || directorMutationInFlight.current
+      || mutationInFlight.current
+      || activeDirector.state === "analysis_running"
+      || activeDirector.state === "applying"
+    ) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = directorOperationId.current + 1;
+    directorOperationId.current = operationId;
+    directorMutationInFlight.current = true;
+    setDirector({ ...activeDirector, state: "analysis_running" });
+    try {
+      const refreshed = await api.refreshDirectorProposal(projectId, proposal.proposal_id);
+      if (isCurrentDirector(epoch, operationId)) {
+        setDirector((current) => current.key === requestKey ? {
+          ...current,
+          state: "proposal_ready",
+          proposal: refreshed,
+          selectedCandidateIds: initialDirectorCandidateIds(refreshed),
+        } : current);
+      }
+    } catch {
+      if (isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
+    } finally {
+      if (isCurrentDirector(epoch, operationId)) directorMutationInFlight.current = false;
+    }
+  };
   const applyDirectorProposal = async (proposalId: string, candidateIds: readonly string[]) => {
     if (!sessionId || !state.view || activeDirector.proposal?.proposal_id !== proposalId || !candidateIds.length || directorMutationInFlight.current || mutationInFlight.current) return;
     const proposal = activeDirector.proposal;
@@ -1477,6 +1513,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       ? retryDirectorRun
       : undefined,
     onApplyProposal: applyDirectorProposal,
+    onRefreshProposal: activeDirector.proposal ? refreshDirectorProposal : undefined,
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
     // 재생은 편집 작업판이 가진 미리 듣기 자리가 맡는다. 여기서 빈 함수를
     // 넘기고 있었는데, 그 값은 작업판이 어차피 덮어쓴다 -- 남겨 두면 화면이

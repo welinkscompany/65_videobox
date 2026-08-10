@@ -98,6 +98,8 @@ export type RightDockDirector = Readonly<{
   onConversationScrollChange: (scroll: RightDockConversationScroll) => void;
   onSendMessage: (draft: string) => void | Promise<void>;
   onApplyProposal: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
+  /** 낡은 추천에서 유진에게 돌아가는 길. 추천이 있을 때만 있다. */
+  onRefreshProposal?: () => void | Promise<void>;
   onManualEdit: () => void;
   /** 편집 작업판이 미리 듣기 자리를 물려 준다. 경로 자체는 재생하지 않는다. */
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
