@@ -267,17 +267,37 @@ def _build_music_library_hooks(
             limit=limit,
         )
 
+    # 실패 사유가 같으면 다시 찍지 않는다. 추천 한 번에 장면 수만큼 불리는
+    # 갈고리라, 사유마다 한 줄이 아니면 로그가 못 쓰게 된다. 한 번 성공하면
+    # 잊어서, 나중에 다시 고장 나면 다시 남긴다.
+    reported_resolve_faults: set[str] = set()
+
     def resolve(project_id: str, library_asset_id: str) -> str | None:
         # 이미 가져온 곡이면 화면이 바로 적용할 수 있다. materializer가 남기는
         # `source_library_asset_id`가 그 표식이다.
         try:
+            resolved: str | None = None
             for asset in project_store.list_assets(project_id=project_id):
                 metadata = dict(asset.get("metadata") or {})
                 if metadata.get("source_library_asset_id") == library_asset_id:
-                    return str(asset["asset_id"])
-        except Exception:
+                    resolved = str(asset["asset_id"])
+                    break
+        except Exception as exc:  # noqa: BLE001 - 추천은 계속 나가야 한다
+            # 여기서 None을 돌려주면 추천기는 "아직 안 가져온 곡"으로 읽고
+            # 이미 갖고 있는 곡을 다시 가져오라고 안내한다. 안내가 정상으로
+            # 보이기 때문에 이유를 남기지 않으면 아무도 알아채지 못한다.
+            fault = f"{project_id}|{type(exc).__name__}|{exc}"
+            if fault not in reported_resolve_faults:
+                reported_resolve_faults.add(fault)
+                _LOGGER.warning(
+                    "프로젝트 자산을 읽지 못해 이미 가져온 곡을 못 알아봅니다. "
+                    "가져오기부터 하라고 안내될 수 있습니다 (project=%s).",
+                    project_id,
+                    exc_info=True,
+                )
             return None
-        return None
+        reported_resolve_faults.clear()
+        return resolved
 
     return search, resolve
 

@@ -241,6 +241,38 @@ def test_a_batch_import_that_analyses_fewer_files_than_it_registered_says_so(
     assert "a1" in queued[0].getMessage() and "a2" in queued[0].getMessage()
 
 
+def test_a_track_lookup_failure_is_not_reported_as_not_imported_yet(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """자산 목록을 못 읽으면 추천기가 "아직 안 가져왔다"로 읽어서, 이미 갖고
+    있는 곡을 다시 가져오라고 말한다. 화면에는 정상적인 안내로 보인다."""
+    from videobox_api.main import _build_music_library_hooks
+
+    class _ExplodingStore:
+        def list_assets(self, **_kwargs):
+            raise RuntimeError("asset table is unreadable")
+
+    class _App:
+        class state:
+            pass
+
+    _search, resolve = _build_music_library_hooks(
+        library_store=object(), project_store=_ExplodingStore(), app=_App()
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert resolve("p1", "lib-1") is None
+        # 한 번의 추천에 장면이 여러 개면 이 갈고리가 장면마다 불린다.
+        assert resolve("p1", "lib-2") is None
+
+    reported = [
+        record
+        for record in caplog.records
+        if "asset table is unreadable" in str(record.exc_info)
+    ]
+    assert len(reported) == 1, "곡 조회 실패가 한 번만 기록되지 않았다"
+
+
 def _home_summary_client(store):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
