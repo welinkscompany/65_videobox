@@ -53,7 +53,11 @@ from videobox_api.routers.yujin_memory import build_yujin_memory_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
-from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.local_pipeline import (
+    LocalPipelineRunner,
+    broll_assets_needing_media_facts,
+    record_broll_media_facts,
+)
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.library_footage_indexer import index_pending_library_footage
 from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_watcher_loop
@@ -233,6 +237,11 @@ LIBRARY_AUDIO_INDEX_BATCH = 8
 # 낡은 분석을 한꺼번에 다 걸면 로컬 모델이 동시에 받고 전부 타임아웃한다.
 REANALYSIS_BATCH = 1
 
+# ffprobe가 실패해 길이·크기·오디오 없이 등록된 b-roll을 다시 잰다. 화면 분석과
+# 달리 ffprobe 한 번은 싸지만, 촬영본이 쌓인 프로젝트에서 한 패스가 길어지지
+# 않게 색인·재분석과 같은 방식으로 끊는다.
+BROLL_MEDIA_FACTS_BACKFILL_BATCH = 4
+
 
 def _build_music_library_hooks(
     *, library_store: MediaLibraryStore, project_store: LocalProjectStore, app: FastAPI
@@ -324,6 +333,40 @@ def _index_library_audio(app: FastAPI) -> None:
             len(report.failed),
             ", ".join(report.failed[:10]),
         )
+
+
+def _backfill_broll_media_facts(app: FastAPI) -> None:
+    """등록 때 ffprobe가 실패한 b-roll의 길이·크기·오디오를 나중에 채운다.
+
+    등록 시점 1회 호출뿐이라, 한 번 실패하면 그 자산은 영구히 "길이 정보 없음"
+    으로 남고 편집기 세로/가로 필터에서 빠졌다. owner는 폰으로 찍어 롱폼과
+    숏폼을 같이 만들기 때문에 그 필터에서 빠지는 것이 실제 손실이다.
+
+    라이브러리 색인과 같은 자리에서 같은 방식으로 돈다.
+    """
+    store: LocalProjectStore = app.state.store
+    for project in store.list_projects():
+        project_id = str(project["project_id"])
+        try:
+            recovered = [
+                pending["asset_id"]
+                for pending in broll_assets_needing_media_facts(
+                    store=store, project_id=project_id, limit=BROLL_MEDIA_FACTS_BACKFILL_BATCH
+                )
+                if record_broll_media_facts(store=store, project_id=project_id, **pending)
+            ]
+        except Exception:
+            _LOGGER.warning(
+                "빠진 영상 정보를 다시 채우지 못했습니다 (project=%s). 해당 자산은 "
+                "세로/가로 필터에서 계속 빠집니다.",
+                project_id,
+                exc_info=True,
+            )
+            continue
+        if recovered:
+            _LOGGER.info(
+                "빠져 있던 영상 정보 %d건을 채웠습니다 (project=%s).", len(recovered), project_id
+            )
 
 
 def _recover_in_process_jobs(app: FastAPI) -> None:
@@ -530,6 +573,7 @@ async def _media_analysis_lifespan(app: FastAPI):
                     next_index_at = loop_clock.time() + LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS
                     await asyncio.to_thread(_index_library_audio, app)
                     await asyncio.to_thread(_index_library_footage, app)
+                    await asyncio.to_thread(_backfill_broll_media_facts, app)
                 if loop_clock.time() >= next_prune_at:
                     # Book the next run before the prune can raise. Otherwise a
                     # failing prune keeps the old deadline and retries on every

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import json
+import logging
 import tempfile
 import threading
 import uuid
@@ -53,6 +54,13 @@ from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 
 
+_logger = logging.getLogger(__name__)
+
+# 실패 이유를 자산에 붙여 둔다. 로그는 흘러가지만 이건 남아서, 어떤 자산이 왜
+# 정보 없이 등록됐는지 나중에 찾을 수 있다.
+MEDIA_FACTS_ERROR_KEY = "media_facts_error"
+
+
 def _orientation_of(width: int, height: int) -> str:
     """Creator-facing wording, per the dashboard copy rules."""
     if width > height:
@@ -60,6 +68,102 @@ def _orientation_of(width: int, height: int) -> str:
     if height > width:
         return "세로"
     return "정사각"
+
+
+def broll_assets_needing_media_facts(
+    *, store: Any, project_id: str, limit: int | None = None
+) -> list[dict[str, Any]]:
+    """길이·크기·오디오를 아직 못 받은 b-roll.
+
+    `list_footage_needing_analysis`와 같은 방식이다 -- "아직 안 된 것" 표시를
+    따로 만들지 않고 저장된 상태에서 유도한다. 그래서 이번 수정 전에 이미
+    정보 없이 등록된 자산도 표시 없이 그대로 걸린다.
+
+    크기를 기준으로 삼는 이유는, 그것이 `_record_media_facts`가 성공했을 때
+    반드시 쓰는 값이고 화면의 세로/가로 필터가 읽는 값이기 때문이다.
+
+    `limit`은 라이브러리 색인·재분석 패스와 같은 이유로 둔다. 한꺼번에 다 걸면
+    주기 패스 한 번이 길어진다.
+    """
+    pending: list[dict[str, Any]] = []
+    for asset in store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO):
+        metadata = dict(asset.get("metadata") or {})
+        if metadata.get("width") and metadata.get("height"):
+            continue
+        pending.append(
+            {
+                "asset_id": str(asset["asset_id"]),
+                "storage_uri": str(asset["storage_uri"]),
+                "previous_error": metadata.get(MEDIA_FACTS_ERROR_KEY),
+            }
+        )
+        if limit is not None and len(pending) >= limit:
+            break
+    return pending
+
+
+def record_broll_media_facts(
+    *,
+    store: Any,
+    project_id: str,
+    asset_id: str,
+    storage_uri: str,
+    previous_error: str | None = None,
+) -> bool:
+    """ffprobe가 아는 것을 자산에 적는다. 채웠으면 True.
+
+    실패해도 예외를 올리지 않는다 -- 등록을 막지 않는 것이 이 경로의 계약이다.
+    달라진 것은 **왜 실패했는지가 로그와 자산에 남고, 다음 차례에 다시 잰다**는
+    점이다. 컨테이너에 ffmpeg가 아직 없는 것처럼 고치면 풀리는 실패가 대부분이라,
+    한 번 실패한 자산을 영구히 제외하지 않는다.
+    """
+    try:
+        video_path = store.resolve_storage_uri(project_id=project_id, storage_uri=storage_uri)
+        probed = FFmpegMediaProbe().probe_metadata(video_path)
+        if not probed.width or not probed.height:
+            # 예전에는 조용히 return했다. 크기를 못 받으면 화면의 세로/가로
+            # 필터에서 자산이 통째로 빠지므로 이것도 실패로 다룬다.
+            raise ValueError("ffprobe가 영상의 가로·세로 크기를 돌려주지 않았습니다")
+    except Exception as exc:
+        _logger.warning(
+            "영상 정보를 읽지 못해 길이·크기·오디오 없이 등록됩니다 (project=%s, asset=%s). "
+            "다음 차례에 다시 잽니다.",
+            project_id,
+            asset_id,
+            exc_info=True,
+        )
+        reason = f"{type(exc).__name__}: {exc}"
+        # 이유가 그대로면 다시 쓰지 않는다. 주기 패스가 매번 쓰면 놀고 있는
+        # 스택이 계속 DB를 두드린다.
+        if reason != previous_error:
+            try:
+                store.update_asset_metadata(
+                    project_id=project_id,
+                    asset_id=asset_id,
+                    metadata_patch={MEDIA_FACTS_ERROR_KEY: reason},
+                )
+            except Exception:
+                _logger.warning(
+                    "영상 정보 실패 이유를 자산에 남기지 못했습니다 (project=%s, asset=%s).",
+                    project_id,
+                    asset_id,
+                    exc_info=True,
+                )
+        return False
+    store.update_asset_metadata(
+        project_id=project_id,
+        asset_id=asset_id,
+        metadata_patch={
+            "duration_sec": round(probed.duration_sec, 3),
+            "width": probed.width,
+            "height": probed.height,
+            "orientation": _orientation_of(probed.width, probed.height),
+            "has_audio": probed.audio_codec is not None,
+            # 채웠으면 흔적을 지운다. 남으면 화면이 계속 문제로 읽는다.
+            MEDIA_FACTS_ERROR_KEY: None,
+        },
+    )
+    return True
 from videobox_core_engine.tts_acceptance import assess_tts_audio
 from videobox_core_engine.editing_session import (
     build_editing_session,
@@ -518,27 +622,33 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         than the owner's ``tags`` list, where a later tag cleanup could drop or
         misspell them.  Best-effort like the thumbnail: unreadable media still
         registers, it just carries no facts.
+
+        실패해도 등록은 성공한다는 계약은 그대로다. 다만 그것으로 끝나지 않는다 --
+        이유는 남고, ``record_missing_broll_media_facts``가 다음 차례에 다시 잰다.
         """
-        try:
-            video_path = self.store.resolve_storage_uri(
-                project_id=project_id, storage_uri=asset.storage_uri
-            )
-            probed = FFmpegMediaProbe().probe_metadata(video_path)
-        except Exception:
-            return
-        if not probed.width or not probed.height:
-            return
-        self.store.update_asset_metadata(
+        record_broll_media_facts(
+            store=self.store,
             project_id=project_id,
             asset_id=asset.asset_id,
-            metadata_patch={
-                "duration_sec": round(probed.duration_sec, 3),
-                "width": probed.width,
-                "height": probed.height,
-                "orientation": _orientation_of(probed.width, probed.height),
-                "has_audio": probed.audio_codec is not None,
-            },
+            storage_uri=asset.storage_uri,
         )
+
+    def record_missing_broll_media_facts(
+        self, *, project_id: str, limit: int | None = None
+    ) -> list[str]:
+        """등록 때 못 받은 영상 정보를 나중 차례에 채운다. 채운 자산의 id.
+
+        등록 시점 1회 호출뿐이라 한 번 실패한 자산은 영구히 길이·크기·오디오
+        없이 남았고, 편집기 세로/가로 필터에서 통째로 빠졌다. 라이브러리 색인이
+        쓰는 것과 같은 방식으로 다시 걸어 준다.
+        """
+        recovered: list[str] = []
+        for pending in broll_assets_needing_media_facts(
+            store=self.store, project_id=project_id, limit=limit
+        ):
+            if record_broll_media_facts(store=self.store, project_id=project_id, **pending):
+                recovered.append(pending["asset_id"])
+        return recovered
 
     def _try_generate_broll_thumbnail(self, *, project_id: str, asset: Any) -> None:
         # Best-effort: a fixture/test video that isn't real footage (or a
