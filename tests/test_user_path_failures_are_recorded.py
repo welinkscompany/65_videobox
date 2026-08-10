@@ -187,6 +187,74 @@ def test_a_dropped_clip_that_cannot_be_queued_is_recorded(
                for record in caplog.records), "분석 예약 실패가 기록되지 않았다"
 
 
+def _home_summary_client(store):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from videobox_api.routers.projects import build_projects_router
+
+    app = FastAPI()
+    app.include_router(build_projects_router(store))
+    return TestClient(app)
+
+
+class _HomeStore:
+    """홈 카드가 부르는 두 가지만 흉내낸다."""
+
+    def __init__(self, session_error: Exception | None) -> None:
+        self._session_error = session_error
+
+    def list_jobs(self, *, project_id: str):
+        return []
+
+    def get_latest_editing_session(self, *, project_id: str):
+        raise self._session_error
+
+
+def test_a_home_summary_that_cannot_read_the_draft_says_why(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """데이터베이스 장애가 화면에서는 "아직 시작한 작업이 없어요"가 됐다."""
+    store = _HomeStore(RuntimeError("editing session table is locked"))
+
+    with caplog.at_level(logging.WARNING):
+        response = _home_summary_client(store).get("/api/projects/p1/home-summary")
+
+    # 홈이 열리는 동작은 그대로다 -- 초안을 못 읽어도 화면은 뜬다.
+    assert response.status_code == 200
+    assert response.json()["has_draft"] is False
+    assert any(
+        "editing session table is locked" in str(record.exc_info)
+        for record in caplog.records
+    ), "초안 조회 실패가 기록되지 않았다"
+
+
+def test_a_project_with_no_draft_yet_stays_quiet() -> None:
+    """초안이 아직 없는 것은 장애가 아니다. 새 프로젝트를 열 때마다
+    경고가 찍히면 진짜 장애가 묻힌다."""
+    store = _HomeStore(KeyError("Editing session not found for project: p1"))
+
+    import logging as _logging
+
+    records: list[_logging.LogRecord] = []
+
+    class _Collect(_logging.Handler):
+        def emit(self, record: _logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Collect(level=_logging.WARNING)
+    logger = _logging.getLogger("videobox_api.routers.projects")
+    logger.addHandler(handler)
+    try:
+        response = _home_summary_client(store).get("/api/projects/p1/home-summary")
+    finally:
+        logger.removeHandler(handler)
+
+    assert response.status_code == 200
+    assert response.json()["has_draft"] is False
+    assert records == []
+
+
 def test_every_user_path_swallow_point_carries_a_logger() -> None:
     """네 지점이 로거를 갖고 있는지 파일 단위로 잠근다. 하나가 조용히 빠지면
     다시 "왜 안 되는지 모르겠다"로 돌아간다."""
