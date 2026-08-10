@@ -216,7 +216,16 @@ class MediaAnalysisService:
             return False
         layers = output.get("layers")
         confidence = output.get("confidence")
-        expected_layers = set(FIXED_VISION_RESPONSE_SCHEMA["properties"]["layers"]["required"])
-        if not isinstance(layers, dict) or set(layers) != expected_layers or not all(isinstance(value, list) and all(isinstance(tag, str) for tag in value) for value in layers.values()):
+        # 필수는 다 있어야 하고, 선택 갈래는 있어도 없어도 된다. 정확히 일치를
+        # 요구하면 모델이 스키마가 허용하는 선택 갈래를 채웠다는 이유로 분석이
+        # needs_review로 떨어진다.
+        required_layers = set(FIXED_VISION_RESPONSE_SCHEMA["properties"]["layers"]["required"])
+        allowed_layers = set(FIXED_VISION_RESPONSE_SCHEMA["properties"]["layers"]["properties"])
+        if (
+            not isinstance(layers, dict)
+            or not required_layers <= set(layers)
+            or not set(layers) <= allowed_layers
+            or not all(isinstance(value, list) and all(isinstance(tag, str) for tag in value) for value in layers.values())
+        ):
             return False
         return sum(bool(value) for value in layers.values()) >= 3 and isinstance(confidence, (int, float)) and not isinstance(confidence, bool) and 0.5 <= confidence <= 1.0 and all(isinstance(reason, str) for reason in output["review_reasons"]) and all(0.0 <= value <= probe.duration_sec for value in probe.scene_boundaries)

@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Iterable
 
 
-MAX_FRAMES = 6
+# 재보고 정한 값이다. 이 기기에서 비전 호출은 이미지 한 장당 40~110초가 든다 --
+# 여섯 장이면 이미지만으로 300초를 넘어서, 거기에 13갈래 출력이 얹히면 어떤
+# 타임아웃으로도 끝나지 않았다. 장면 경계는 ffmpeg가 따로 계산하므로 프레임을
+# 줄여도 구간 추천은 그대로다.
+MAX_FRAMES = 3
 MAX_LONG_EDGE_PX = 768
 MAX_FRAME_BYTES = 1_500_000
 SUBPROCESS_TIMEOUT_SECONDS = 60

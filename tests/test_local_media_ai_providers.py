@@ -30,7 +30,7 @@ from videobox_provider_interfaces.lm_studio import (
     LMStudioProviderError,
     LMStudioVisionProvider,
 )
-from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, VisionAnalysisRequest
+from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, REQUIRED_VISION_LAYERS, VisionAnalysisRequest
 
 
 SCHEMA = {
@@ -252,7 +252,8 @@ def test_vision_provider_limits_prepared_images_and_requires_fixed_schema() -> N
     assert len(payload["messages"][0]["content"]) == 7  # text plus at most six images
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["schema"] != VISION_RESPONSE_SCHEMA
-    assert provider.timeout_seconds == 120
+    # 재보고 정한 값이다 -- 이 기기에서 성공한 호출이 252~300초였다.
+    assert provider.timeout_seconds == 360
 
 
 def test_vision_provider_rejects_arbitrary_or_malformed_structured_output() -> None:
@@ -411,7 +412,10 @@ def test_vision_uses_the_exact_fixed_layer_taxonomy_and_never_caller_schema() ->
     payload = __import__("json").loads(client.requests[1].data.decode("utf-8"))
     schema = payload["response_format"]["json_schema"]["schema"]
     assert "untrusted" not in schema["properties"]
-    assert schema["properties"]["layers"]["required"] == list(FIXED_VISION_LAYERS)
+    # 필수는 검색 문장이 쓰는 아홉이고, 나머지 넷은 받아들이되 강요하지
+    # 않는다 -- 열셋을 다 요구하니 생성이 끝나지 않았다.
+    assert schema["properties"]["layers"]["required"] == list(REQUIRED_VISION_LAYERS)
+    assert list(schema["properties"]["layers"]["properties"]) == list(FIXED_VISION_LAYERS)
 
 
 def test_vision_rejects_undecodable_image_bytes() -> None:

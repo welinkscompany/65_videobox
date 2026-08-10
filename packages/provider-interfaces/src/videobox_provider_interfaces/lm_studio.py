@@ -247,7 +247,10 @@ class LMStudioHTTPTransport:
 class LMStudioVisionProvider(VisionProvider):
     transport: LMStudioHTTPTransport
     provider_name: str = "lm_studio"
-    timeout_seconds: int = 120
+    # 재보고 정한 값이다. 이 기기에서 13갈래 구조화 출력이 180~300초 걸렸고
+    # 120초로는 애초에 끝날 수 없었다 -- 짐작으로 정해 둔 값이었다. 분석은
+    # 배경에서 1분에 하나씩 도는 작업이라 기다리는 사람이 없다.
+    timeout_seconds: int = 360
 
     def analyze_images(self, request: VisionAnalysisRequest) -> VisionAnalysisResponse:
         self.transport.preflight(model_name=request.model_name, capability="vision", timeout_seconds=self.timeout_seconds)
