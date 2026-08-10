@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import * as apiModule from "../../../api";
 import { EditorAssetBrowser } from "./EditorAssetBrowser";
 import type { EditorAssetCard } from "./editorAssetProjection";
 
@@ -214,5 +215,97 @@ describe("thumbnails in the asset browser", () => {
 
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.getByText("예전 자산")).toBeVisible();
+  });
+});
+
+describe("유진에게 알려 주는 자산 취향", () => {
+  // 백엔드는 이 네 목록을 이미 읽고 있었다 -- 뺀 자산은 후보에서 아예 빠지고
+  // 항상 쓰기로 둔 자산은 점수를 더 받는다. 저장하는 화면이 없어서 입력이
+  // 영원히 비어 있었고 두 항목은 늘 0이었다.
+  const saved = {
+    pin_asset: [] as string[],
+    exclude_asset: [] as string[],
+    exclude_creator: [] as string[],
+    exclude_tag: [] as string[],
+  };
+
+  it("프로젝트를 모르면 취향을 묻지도 보여주지도 않는다", () => {
+    const read = vi.spyOn(apiModule.api, "getDirectorPreferences");
+    render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+
+    expect(read).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "제품 사진 항상 쓰기" })).toBeNull();
+  });
+
+  it("항상 쓰기를 저장할 때 앞서 빼 둔 자산을 지우지 않는다", async () => {
+    vi.spyOn(apiModule.api, "getDirectorPreferences").mockResolvedValue({
+      ...saved, exclude_asset: ["starter-sfx"], exclude_creator: ["예전 만든이"],
+    } as never);
+    const write = vi.spyOn(apiModule.api, "updateDirectorPreferences")
+      .mockImplementation(async (_projectId, payload) => payload as never);
+
+    render(<EditorAssetBrowser cards={cards} projectId="project-a" target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "제품 사진 항상 쓰기" }));
+
+    await waitFor(() => expect(write).toHaveBeenCalledWith("project-a", {
+      pin_asset: ["image-1"],
+      exclude_asset: ["starter-sfx"],
+      exclude_creator: ["예전 만든이"],
+      exclude_tag: [],
+    }));
+    expect(await screen.findByRole("button", { name: "제품 사진 항상 쓰기" }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("쓰지 않기를 누르면 항상 쓰기가 함께 풀린다", async () => {
+    vi.spyOn(apiModule.api, "getDirectorPreferences")
+      .mockResolvedValue({ ...saved, pin_asset: ["image-1"] } as never);
+    const write = vi.spyOn(apiModule.api, "updateDirectorPreferences")
+      .mockImplementation(async (_projectId, payload) => payload as never);
+
+    render(<EditorAssetBrowser cards={cards} projectId="project-a" target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "제품 사진 쓰지 않기" }));
+
+    await waitFor(() => expect(write).toHaveBeenCalledWith("project-a", {
+      pin_asset: [], exclude_asset: ["image-1"], exclude_creator: [], exclude_tag: [],
+    }));
+  });
+
+  it("만든이와 분위기를 빼고 다시 되돌릴 수 있다", async () => {
+    vi.spyOn(apiModule.api, "getDirectorPreferences").mockResolvedValue(saved as never);
+    const write = vi.spyOn(apiModule.api, "updateDirectorPreferences")
+      .mockImplementation(async (_projectId, payload) => payload as never);
+
+    render(<EditorAssetBrowser cards={cards} projectId="project-a" target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "배경 음악 1의 만든이 Creator 빼기" }));
+
+    await waitFor(() => expect(write).toHaveBeenCalledWith("project-a", {
+      pin_asset: [], exclude_asset: [], exclude_creator: ["Creator"], exclude_tag: [],
+    }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "배경 음악 1의 분위기 음악 빼기" }));
+    await waitFor(() => expect(write).toHaveBeenLastCalledWith("project-a", {
+      pin_asset: [], exclude_asset: [], exclude_creator: ["Creator"], exclude_tag: ["음악"],
+    }));
+
+    // 뺀 뒤에도 되돌릴 자리가 있어야 한다 -- 카드가 걸러져 사라지면 취소할
+    // 방법이 없다.
+    fireEvent.click(await screen.findByRole("button", { name: "Creator 만든이 다시 쓰기" }));
+
+    await waitFor(() => expect(write).toHaveBeenLastCalledWith("project-a", {
+      pin_asset: [], exclude_asset: [], exclude_creator: [], exclude_tag: ["음악"],
+    }));
+  });
+
+  it("저장에 실패하면 눌린 상태를 되돌리고 그렇게 말한다", async () => {
+    vi.spyOn(apiModule.api, "getDirectorPreferences").mockResolvedValue(saved as never);
+    vi.spyOn(apiModule.api, "updateDirectorPreferences").mockRejectedValue(new Error("nope"));
+
+    render(<EditorAssetBrowser cards={cards} projectId="project-a" target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "제품 사진 항상 쓰기" }));
+
+    expect(await screen.findByText("추천 취향을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "제품 사진 항상 쓰기" }))
+      .toHaveAttribute("aria-pressed", "false");
   });
 });

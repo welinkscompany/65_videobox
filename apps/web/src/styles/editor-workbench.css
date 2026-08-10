@@ -34,7 +34,9 @@
 .vb-editor-assets__controls, .vb-editor-assets__cards { display: grid; gap: 0.6rem; }
 .vb-editor-assets__search-label { display: grid; gap: 0.3rem; font-size: 0.85rem; font-weight: 700; }
 .vb-editor-assets__search { min-width: 0; width: 100%; padding: 0.45rem 0.55rem; color: var(--foreground); border: 1px solid var(--border); border-radius: 0.45rem; background: var(--background); }
-.vb-editor-assets__filters, .vb-editor-assets__actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.vb-editor-assets__filters, .vb-editor-assets__actions, .vb-editor-assets__taste { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.vb-editor-assets__taste { align-items: center; }
+.vb-editor-assets__taste > p { flex: 1 1 100%; }
 .vb-editor-assets__filter { padding: 0.35rem 0.55rem; border: 1px solid var(--border); border-radius: 999px; color: var(--foreground); background: var(--background); }
 .vb-editor-assets__filter[aria-pressed="true"] { border-color: var(--ring); background: var(--vb-accent-bg); }
 .vb-editor-assets__target, .vb-editor-assets__card-target, .vb-editor-assets__detail, .vb-editor-assets__reason, .vb-editor-assets__empty { margin: 0; color: var(--muted-foreground); font-size: 0.85rem; }
