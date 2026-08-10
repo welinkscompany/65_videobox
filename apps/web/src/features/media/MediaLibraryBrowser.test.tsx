@@ -128,6 +128,28 @@ describe("MediaLibraryBrowser", () => {
       .toBeVisible();
   });
 
+  it("puts what the owner used most recently under the favourites", async () => {
+    // 프로젝트로 들여온 것은 이미 최근 목록에 쌓이고 있었는데 아무도 다시
+    // 읽지 않아서, 방금 쓴 곡을 다음에도 아래에서 찾아 내려가야 했다.
+    const plain = asset({ library_asset_id: "pack:starter-v1:music-a", asset_id: "music-a" });
+    const used = asset({ library_asset_id: "pack:starter-v1:music-b", asset_id: "music-b" });
+    const loved = asset({ library_asset_id: "pack:starter-v1:music-c", asset_id: "music-c" });
+    vi.spyOn(api.api, "listMediaLibraryAssets")
+      .mockResolvedValue({ assets: [plain, used, loved] } as never);
+    vi.spyOn(api.api, "listMediaLibraryFavorites")
+      .mockResolvedValue({ asset_ids: ["pack:starter-v1:music-c"] } as never);
+    vi.spyOn(api.api, "listRecentMediaLibraryAssetIds")
+      .mockResolvedValue({ asset_ids: ["pack:starter-v1:music-b"] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+
+    const items = await screen.findAllByRole("article");
+    expect(items[0]).toHaveTextContent("음악 3");
+    expect(items[1]).toHaveTextContent("음악 2");
+    expect(items[1]).toHaveTextContent("최근에 썼어요");
+    expect(items[2]).toHaveTextContent("음악 1");
+  });
+
   it("does not blame the pack when a filter is what emptied the list", async () => {
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
     vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);

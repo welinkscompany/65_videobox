@@ -71,6 +71,41 @@ describe("자막 모양 고르기", () => {
 
     expect(await screen.findByText("아직 저장된 자막 모양이 없어요.")).toBeVisible();
   });
+
+  it("최근에 쓴 모양을 즐겨찾기 바로 아래에 보여준다", async () => {
+    // 최근 목록은 적용할 때마다 기록되고 있었는데 아무도 다시 읽지 않아서,
+    // 방금 쓴 모양을 다음에도 아래에서 찾아 내려가야 했다.
+    vi.spyOn(api.api, "listEditorPresets").mockResolvedValue([
+      { preset_id: "builtin:clean", name: "Clean", scope: "built_in", style: {} },
+      { preset_id: "builtin:highlight", name: "Highlight", scope: "built_in", style: {} },
+      { preset_id: "builtin:bold", name: "Bold", scope: "built_in", style: {} },
+    ] as never);
+    vi.spyOn(api.api, "listEditorFavorites").mockResolvedValue(
+      [{ favorite_id: "builtin:bold", favorite_type: "preset" }] as never,
+    );
+    vi.spyOn(api.api, "listRecentEditorPresetIds")
+      .mockResolvedValue(["builtin:highlight"] as never);
+
+    render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} />);
+
+    const items = await screen.findAllByRole("article");
+    expect(items[0]).toHaveTextContent("Bold");
+    expect(items[1]).toHaveTextContent("Highlight");
+    expect(items[1]).toHaveTextContent("최근에 썼어요");
+    expect(items[2]).toHaveTextContent("Clean");
+  });
+
+  it("방금 쓴 모양을 다시 열지 않아도 최근으로 옮긴다", async () => {
+    vi.spyOn(api.api, "listEditorPresets").mockResolvedValue(presets);
+    vi.spyOn(api.api, "listEditorFavorites").mockResolvedValue([] as never);
+    vi.spyOn(api.api, "markRecentEditorPreset").mockResolvedValue(["builtin:highlight"] as never);
+
+    render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Highlight 적용" }));
+
+    await waitFor(() => expect(screen.getAllByRole("article")[0]).toHaveTextContent("Highlight"));
+    expect(screen.getAllByRole("article")[0]).toHaveTextContent("최근에 썼어요");
+  });
 });
 
 describe("저장된 모양을 화면 값으로 옮기기", () => {

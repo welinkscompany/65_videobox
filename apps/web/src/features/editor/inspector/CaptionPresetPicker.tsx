@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, type CaptionStyleSnapshot, type EditorPreset } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { orderByFavouriteThenRecent } from "../../../lib/pickerOrder";
 
 /** 저장된 모양을 화면 값으로 옮긴다.
  *
@@ -56,6 +57,7 @@ export function CaptionPresetPicker({
 }) {
   const [presets, setPresets] = useState<readonly EditorPreset[]>([]);
   const [favourites, setFavourites] = useState<readonly string[]>([]);
+  const [recents, setRecents] = useState<readonly string[]>([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +74,11 @@ export function CaptionPresetPicker({
       })
       .catch(() => { /* 모양을 못 읽어도 편집 자체를 막지 않는다 */ })
       .finally(() => { if (active) setReady(true); });
+    // 최근 쓴 모양은 이미 적용할 때마다 기록되고 있었는데 아무도 다시 읽지
+    // 않았다. 못 읽더라도 즐겨찾기 정렬은 그대로 돌아야 한다.
+    void api.listRecentEditorPresetIds(projectId)
+      .then((recent) => { if (active) setRecents(recent); })
+      .catch(() => { /* 순서만 덜 똑똑해질 뿐이다 */ });
     return () => { active = false; };
   }, [projectId]);
 
@@ -93,13 +100,17 @@ export function CaptionPresetPicker({
     await onApply(preset.style);
     // 최근 쓴 것을 남기는 것은 편집을 막을 이유가 없다.
     try {
-      await api.markRecentEditorPreset(projectId, preset.preset_id);
+      setRecents(await api.markRecentEditorPreset(projectId, preset.preset_id));
     } catch { /* 기록 실패가 적용을 되돌리지 않는다 */ }
   };
 
-  // 즐겨찾기가 위로. 자주 쓰는 모양을 매번 찾아 내려가지 않게 하는 것이 뜻이다.
-  const visible = presets.slice().sort((left, right) =>
-    Number(favourites.includes(right.preset_id)) - Number(favourites.includes(left.preset_id)),
+  // 즐겨찾기가 위로, 그다음이 최근에 쓴 것. 자주 쓰는 모양을 매번 찾아
+  // 내려가지 않게 하는 것이 뜻이다.
+  const visible = orderByFavouriteThenRecent(
+    presets,
+    (preset) => preset.preset_id,
+    favourites,
+    recents,
   );
 
   if (!ready) return null;
@@ -112,6 +123,7 @@ export function CaptionPresetPicker({
         return (
           <article key={preset.preset_id} aria-label={`${preset.name} 자막 모양`}>
             <strong>{preset.name}</strong>
+            {!loved && recents.includes(preset.preset_id) ? <span>최근에 썼어요</span> : null}
             <Button type="button" variant="outline" onClick={() => void apply(preset)}>
               {`${preset.name} 적용`}
             </Button>

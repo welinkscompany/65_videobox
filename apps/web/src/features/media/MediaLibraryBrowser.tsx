@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, type MediaLibraryAsset, type MediaLibraryInstallState } from "../../api";
 import { Button } from "../../components/ui/button";
+import { orderByFavouriteThenRecent } from "../../lib/pickerOrder";
 
 type Filter = "all" | "music" | "sfx";
 
@@ -43,6 +44,7 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
   const [ready, setReady] = useState(false);
   const [installState, setInstallState] = useState<MediaLibraryInstallState | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [recents, setRecents] = useState<readonly string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +56,12 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
     void api.getMediaLibraryInstallState()
       .then((state) => { if (active) setInstallState(state); })
       .catch(() => { /* 이유를 못 물었으면 못 읽었다고 말한다 */ });
+    setRecents([]);
+    // 프로젝트로 들여온 것은 이미 최근 목록에 쌓이고 있었는데 아무도 다시
+    // 읽지 않았다. 못 읽으면 순서만 덜 똑똑해진다.
+    void api.listRecentMediaLibraryAssetIds()
+      .then((recent) => { if (active) setRecents(recent.asset_ids); })
+      .catch(() => { /* 정렬만 예전대로 돌아간다 */ });
     void Promise.all([api.listMediaLibraryAssets(), api.listMediaLibraryFavorites()])
       .then(([library, favourite]) => {
         if (!active) return;
@@ -93,15 +101,15 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
       .forEach((item, index) => displayNames.set(item.library_asset_id, `${label} ${index + 1}`));
   }
 
-  const visible = assets
-    .filter((item) => filter === "all" || item.media_type === filter)
-    // Favourites first: the point of marking one is not to hunt for it again.
-    .slice()
-    .sort((left, right) => {
-      const loved = Number(favourites.includes(right.library_asset_id))
-        - Number(favourites.includes(left.library_asset_id));
-      return loved !== 0 ? loved : left.asset_id.localeCompare(right.asset_id);
-    });
+  // Favourites first, then whatever was used most recently: the point of
+  // marking one is not to hunt for it again, and neither is having just used it.
+  const visible = orderByFavouriteThenRecent(
+    assets.filter((item) => filter === "all" || item.media_type === filter),
+    (item) => item.library_asset_id,
+    favourites,
+    recents,
+    (left, right) => left.asset_id.localeCompare(right.asset_id),
+  );
 
   if (!ready) return null;
   return (
@@ -135,6 +143,7 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
               {item.media_type === "music" ? "음악" : "효과음"}
               {" · "}
               {`${Math.round(item.duration_seconds)}초`}
+              {!loved && recents.includes(item.library_asset_id) ? " · 최근에 썼어요" : ""}
             </p>
             <audio
               controls
