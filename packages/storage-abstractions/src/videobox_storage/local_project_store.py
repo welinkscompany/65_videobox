@@ -8560,7 +8560,11 @@ class LocalProjectStore:
                 FROM media_embeddings AS embeddings
                 INNER JOIN media_analysis_runs AS runs ON runs.analysis_id = embeddings.analysis_id
                 WHERE runs.project_id = ? AND runs.status = ? AND runs.cancel_requested = 0
-                ORDER BY embeddings.analysis_id ASC, embeddings.embedding_id ASC
+                -- 최신이 마지막에 오게 둔다. 아래에서 자산마다 마지막 것만
+                -- 남긴다 -- 분석 문구를 바꾸고 다시 돌리면 한 자산이 옛
+                -- 임베딩과 새 임베딩을 둘 다 갖게 되고, 그대로 두면 같은
+                -- 영상이 검색에 두 번 나오며 낡은 쪽이 이길 수도 있다.
+                ORDER BY runs.created_at ASC, embeddings.analysis_id ASC, embeddings.embedding_id ASC
                 """,
                 (project_id, MediaAnalysisStatus.SUCCEEDED.value),
             ).fetchall()
@@ -8587,7 +8591,13 @@ class LocalProjectStore:
                     "score": score,
                 }
             )
-        return sorted(matches, key=lambda item: (-float(item["score"]), str(item["analysis_id"])))[:limit]
+        newest_by_asset: dict[str, dict[str, Any]] = {}
+        for match in matches:
+            newest_by_asset[str(match["asset_id"])] = match
+        return sorted(
+            newest_by_asset.values(),
+            key=lambda item: (-float(item["score"]), str(item["analysis_id"])),
+        )[:limit]
 
     def list_media_analysis(self, *, project_id: str) -> list[dict[str, Any]]:
         connection = self._connection(project_id)

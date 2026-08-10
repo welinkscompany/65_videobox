@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from videobox_provider_interfaces.embeddings import EmbeddingRequest, EmbeddingResponse, EmbeddingProvider
-from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, FIXED_VISION_RESPONSE_SCHEMA, VisionAnalysisRequest, VisionAnalysisResponse, VisionProvider
+from videobox_provider_interfaces.vision import FIXED_VISION_LAYERS, REQUIRED_VISION_LAYERS, FIXED_VISION_RESPONSE_SCHEMA, VisionAnalysisRequest, VisionAnalysisResponse, VisionProvider
 
 
 _LM_STUDIO_URL = "http://127.0.0.1:1234/v1"
@@ -289,7 +289,24 @@ class LMStudioVisionProvider(VisionProvider):
             output = json.loads(raw)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise LMStudioProviderError("Vision response is malformed JSON.", "failed") from exc
-        if not isinstance(output, dict) or set(output) != _VISION_SCHEMA_KEYS or not isinstance(output["layers"], dict) or set(output["layers"]) != set(FIXED_VISION_LAYERS) or not all(isinstance(output["layers"][layer], list) and all(isinstance(item, str) for item in output["layers"][layer]) for layer in FIXED_VISION_LAYERS) or not isinstance(output["summary"], str) or not isinstance(output["confidence"], (int, float)) or isinstance(output["confidence"], bool) or not math.isfinite(output["confidence"]) or not isinstance(output["review_reasons"], list) or not all(isinstance(reason, str) for reason in output["review_reasons"]):
+        # 필수는 다 있어야 하고, 선택 갈래는 있어도 없어도 된다. 13개 전부를
+        # 요구하면 스키마가 시킨 대로 아홉만 채운 응답을 "규격 위반"으로
+        # 버린다 -- 실제로 그 오류를 봤다.
+        layers = output.get("layers") if isinstance(output, dict) else None
+        if (
+            not isinstance(output, dict)
+            or set(output) != _VISION_SCHEMA_KEYS
+            or not isinstance(layers, dict)
+            or not set(REQUIRED_VISION_LAYERS) <= set(layers)
+            or not set(layers) <= set(FIXED_VISION_LAYERS)
+            or not all(isinstance(value, list) and all(isinstance(item, str) for item in value) for value in layers.values())
+            or not isinstance(output["summary"], str)
+            or not isinstance(output["confidence"], (int, float))
+            or isinstance(output["confidence"], bool)
+            or not math.isfinite(output["confidence"])
+            or not isinstance(output["review_reasons"], list)
+            or not all(isinstance(reason, str) for reason in output["review_reasons"])
+        ):
             raise LMStudioProviderError("Vision response violates the fixed schema.", "failed")
         return output
 

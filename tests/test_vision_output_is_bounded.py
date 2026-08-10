@@ -110,3 +110,41 @@ def test_the_frame_count_matches_what_the_machine_can_finish() -> None:
     from videobox_core_engine.media_probe import MAX_FRAMES
 
     assert MAX_FRAMES <= 3
+
+
+def test_the_provider_accepts_a_response_that_omits_optional_layers() -> None:
+    """품질 판정에서 고친 것과 같은 갭이 공급자 쪽에도 있었다. 응답 검사가
+    13갈래 전부를 요구해서, 필수 9개만 채운 응답 -- 스키마가 정확히 그렇게
+    하라고 시킨 응답 -- 을 "규격 위반"으로 버렸다. 실제로 그 오류를 봤다."""
+    import json
+
+    from videobox_provider_interfaces.lm_studio import LMStudioVisionProvider
+    from videobox_provider_interfaces.vision import REQUIRED_VISION_LAYERS
+
+    provider = LMStudioVisionProvider.__new__(LMStudioVisionProvider)
+    payload = {"choices": [{"message": {"content": json.dumps({
+        "layers": {layer: ["값"] for layer in REQUIRED_VISION_LAYERS},
+        "summary": "요약", "confidence": 0.9, "review_reasons": ["이유"],
+    })}}]}
+
+    parsed = provider._parse_output(payload)
+
+    assert set(parsed["layers"]) == set(REQUIRED_VISION_LAYERS)
+
+
+def test_the_provider_still_rejects_a_layer_it_never_asked_for() -> None:
+    import json
+
+    import pytest
+
+    from videobox_provider_interfaces.lm_studio import LMStudioProviderError, LMStudioVisionProvider
+    from videobox_provider_interfaces.vision import REQUIRED_VISION_LAYERS
+
+    provider = LMStudioVisionProvider.__new__(LMStudioVisionProvider)
+    payload = {"choices": [{"message": {"content": json.dumps({
+        "layers": {**{layer: ["값"] for layer in REQUIRED_VISION_LAYERS}, "made_up": ["x"]},
+        "summary": "요약", "confidence": 0.9, "review_reasons": ["이유"],
+    })}}]}
+
+    with pytest.raises(LMStudioProviderError):
+        provider._parse_output(payload)
