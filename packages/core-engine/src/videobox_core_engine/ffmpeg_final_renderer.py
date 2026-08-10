@@ -63,6 +63,50 @@ class FfmpegFinalRenderer:
     overlay_font_file: str = field(default_factory=_default_overlay_font)
     ffprobe_binary: str = "ffprobe"
 
+    @staticmethod
+    def _cgroup_cpu_quota() -> int | None:
+        """컨테이너가 실제로 받은 CPU 몫. 한도가 없으면 None.
+
+        `nproc`은 호스트의 CPU를 그대로 보여 준다 -- `cpus: 2.0`으로 묶어도 16이라고
+        답한다. ffmpeg는 그 숫자를 믿고 스레드를 잡는다.
+        """
+        try:
+            raw = Path("/sys/fs/cgroup/cpu.max").read_text(encoding="utf-8").split()
+        except OSError:
+            return None
+        if len(raw) != 2 or raw[0] == "max":
+            return None
+        try:
+            quota, period = int(raw[0]), int(raw[1])
+        except ValueError:
+            return None
+        if quota <= 0 or period <= 0:
+            return None
+        return max(1, quota // period)
+
+    def encoder_thread_limit(self) -> int:
+        """ffmpeg가 잡을 스레드 수의 상한. 인코더와 필터 그래프 양쪽에 쓴다.
+
+        **컨테이너의 프로세스 상한이 128인데 ffmpeg는 호스트 CPU 수(16)를 보고
+        스레드를 잡는다.** 입력 5개짜리 필터 그래프에 x264와 aac까지 붙으면 그 상한을
+        넘고, 스레드 생성이 EAGAIN으로 실패한다. ffmpeg는 그것을 `Error reinitializing
+        filters!`와 `streams received no packets`로만 말하고, owner 화면에는
+        "완성본을 만들지 못했어요"로만 보인다 -- 어디에도 이유가 없다.
+
+        컨테이너에서 실측했다. 필터 스레드를 안 정하면(=기본 16) 실패하고, 2·4·8은
+        모두 성공한다. 인코더만 묶는 것으로는 부족했다 -- **막힌 것은 인코더가 아니라
+        필터 쪽 스레드였다.**
+
+        그래서 `nproc`이 아니라 **컨테이너가 실제로 받은 CPU 몫**을 기준으로 삼는다.
+        `compose.yaml`은 이 서비스를 `cpus: 2.0`으로 묶는데 `nproc`은 16이라고 답한다.
+        받은 것이 2개뿐인데 8개를 띄우는 것은 빨라지지도 않으면서 상한만 먹는다.
+
+        더 큰 해상도나 더 많은 입력에서는 이 상한으로도 모자랄 수 있다. 그때는 이
+        숫자가 아니라 컨테이너의 `pids_limit`과 `cpus`를 봐야 한다.
+        """
+        budget = self._cgroup_cpu_quota() or os.cpu_count() or 1
+        return max(1, min(budget, 8))
+
     def extract_composition_plan(
         self, *, timeline: dict[str, Any], captions: list[dict[str, Any]] | None = None
     ) -> CompositionPlan:
@@ -438,7 +482,11 @@ class FfmpegFinalRenderer:
         sar = composition_plan.sample_aspect_ratio.replace(":", "/")
         graph += f";[{video_label}]setsar={sar},setpts=PTS-STARTPTS[vfinal]"
         video_label = "vfinal"
-        command = [self.ffmpeg_binary, "-y"]
+        threads = str(self.encoder_thread_limit())
+        # 필터 스레드를 정하지 않으면 ffmpeg가 호스트 CPU 수만큼 잡고, 컨테이너의
+        # 프로세스 상한(128)에 걸려 스레드 생성이 실패한다. 자세한 이유는
+        # `encoder_thread_limit` 참고.
+        command = [self.ffmpeg_binary, "-y", "-filter_complex_threads", threads, "-filter_threads", threads]
         for path, is_image, should_loop in source_paths:
             if should_loop:
                 command += ["-stream_loop", "-1"]
@@ -447,7 +495,8 @@ class FfmpegFinalRenderer:
             command += ["-i", str(path)]
         command += [
             "-filter_complex", graph, "-map", f"[{video_label}]", "-map", "[aout]",
-            "-r", str(self.video_fps), "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p",
+            "-r", str(self.video_fps), "-c:v", "libx264", "-threads", str(self.encoder_thread_limit()),
+            "-bf", "0", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-ar", "48000", "-ac", "2", "-t", str(duration),
             "-movflags", "+faststart" if proxy_profile else "+faststart",
             "-avoid_negative_ts", "disabled", "-muxpreload", "0", "-muxdelay", "0",

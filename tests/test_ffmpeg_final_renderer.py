@@ -49,6 +49,77 @@ def test_final_renderer_rejects_post_materialization_content_mutation_before_ffm
         renderer.render_timeline_to_mp4(project_id=project.project_id, timeline=timeline, output_path=tmp_path / "out.mp4")
 
 
+# 컨테이너는 메모리 2GiB인데 CPU는 호스트의 16개가 그대로 보인다. x264는 그 수만큼
+# 스레드를 잡아 1080p에서 인코더를 아예 열지 못하고, ffmpeg는 "streams received no
+# packets"로만 끝난다 -- owner에게는 "완성본을 만들지 못했어요"로 보인다.
+# 컨테이너에서 실측: 스레드 1·4·8·12는 성공, 16(기본값)만 실패.
+def test_the_encoder_thread_count_is_capped_so_a_small_container_can_open_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.os.cpu_count", lambda: 64)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_cgroup_cpu_quota", staticmethod(lambda: None))
+
+    assert renderer.encoder_thread_limit() == 8
+
+    monkeypatch.setattr(FfmpegFinalRenderer, "_cgroup_cpu_quota", staticmethod(lambda: None))
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.os.cpu_count", lambda: None)
+    assert renderer.encoder_thread_limit() == 1
+
+    # 컨테이너가 받은 몫이 `nproc`보다 작으면 그쪽을 따른다. `cpus: 2.0`으로 묶여
+    # 있는데 16개를 띄우면 빨라지지도 않으면서 프로세스 상한만 먹는다.
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.os.cpu_count", lambda: 16)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_cgroup_cpu_quota", staticmethod(lambda: 2))
+    assert renderer.encoder_thread_limit() == 2
+
+
+# 인코더만 묶는 것으로는 부족했다 -- 실제로 막힌 것은 필터 쪽 스레드였다.
+# 컨테이너에서 실측: 필터 스레드를 안 정하면 실패하고 2·4·8은 모두 성공한다.
+def test_the_render_command_caps_filter_threads_not_just_the_encoder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Threads")
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+
+    timeline = {
+        "timeline_id": "timeline-threads", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 5.0,
+            "media_controls": {},
+        }]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    command = commands[0]
+    cap = renderer.encoder_thread_limit()
+    assert command[command.index("-filter_complex_threads") + 1] == str(cap)
+    assert command[command.index("-filter_threads") + 1] == str(cap)
+    assert command[command.index("-threads") + 1] == str(cap)
+
+
 def test_broll_extract_maps_trim_crop_loop_and_pad_into_one_ffmpeg_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
