@@ -241,6 +241,71 @@ def test_a_batch_import_that_analyses_fewer_files_than_it_registered_says_so(
     assert "a1" in queued[0].getMessage() and "a2" in queued[0].getMessage()
 
 
+def _yujin_projection(reply_text: str = "이렇게 바꿔 볼게요."):
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        YujinCreatorProjection,
+    )
+
+    return YujinCreatorProjection(
+        reply_text=reply_text,
+        proposal=None,
+        schema_version="1",
+        operation_count=1,
+        validation_outcome="ok",
+        manual_fallback=False,
+    )
+
+
+def _hermes_service(**overrides):
+    from videobox_api.hermes_run_service import HermesRunService
+
+    kwargs = {"store": object(), "gateway_client": object()}
+    kwargs.update(overrides)
+    return HermesRunService(**kwargs)
+
+
+def _hermes_run():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        project_id="p1",
+        conversation_id="c1",
+        run_id="r1",
+        session_id="s1",
+        expected_session_revision=1,
+        selected_segment_id=None,
+        creator_context=object(),
+        owner_token="owner",
+    )
+
+
+def test_a_recheck_that_fails_says_why_instead_of_only_manual_fallback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """되짚기가 실패하면 화면에는 "직접 해 주세요" 한 문장만 남고, 제안은
+    조용히 버려진다. 진짜 이유가 어디에도 없었다."""
+    import asyncio
+
+    def _explodes(**_kwargs):
+        raise RuntimeError("session revision table vanished")
+
+    service = _hermes_service(context_builder=_explodes)
+
+    with caplog.at_level(logging.WARNING):
+        projection = asyncio.run(
+            service._recheck_projection(_hermes_run(), _yujin_projection())
+        )
+
+    # 동작은 그대로다 -- 제안은 버려지고 수동 안내가 붙는다.
+    assert projection.proposal is None
+    assert projection.manual_fallback is True
+    assert projection.validation_outcome == "stale_context"
+    assert any(
+        "session revision table vanished" in str(record.exc_info)
+        for record in caplog.records
+    ), "되짚기 실패 사유가 기록되지 않았다"
+
+
 def test_a_track_lookup_failure_is_not_reported_as_not_imported_yet(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
