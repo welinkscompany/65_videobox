@@ -8761,6 +8761,28 @@ class LocalProjectStore:
     def recover_orphaned_media_analysis_jobs(self, *, project_id: str) -> list[str]:
         connection = self._connection(project_id)
         try:
+            # A spent retry budget leaves `failed` with no next_retry_at, and the
+            # claim query only takes `failed` when a retry is booked and due. Nothing
+            # else clears that, so the run stays frozen until the owner finds the
+            # manual retry -- while the poller re-dispatches it every pass for
+            # nothing. Grant one fresh attempt here, where a restart usually means
+            # the owner has just changed the setting that caused the failure.
+            #
+            # This runs before the sweep below so a run that exhausts its budget
+            # *during* this same sweep is not revived by it: that would be a loop,
+            # not a recovery. It waits for the next restart, like everything else.
+            revived = [
+                str(row["analysis_id"])
+                for row in connection.execute(
+                    """
+                    UPDATE media_analysis_runs
+                    SET status = ?, error_code = NULL, error_message = NULL, progress_percent = 0, updated_at = ?
+                    WHERE project_id = ? AND status = ? AND cancel_requested = 0 AND next_retry_at IS NULL
+                    RETURNING analysis_id
+                    """,
+                    (MediaAnalysisStatus.QUEUED.value, self._now_iso(), project_id, MediaAnalysisStatus.FAILED.value),
+                ).fetchall()
+            ]
             # Three attempts means the initial run plus the two permitted retries.
             connection.execute(
                 """
@@ -8782,7 +8804,7 @@ class LocalProjectStore:
             connection.commit()
         finally:
             connection.close()
-        return [str(row["analysis_id"]) for row in rows]
+        return [*revived, *(str(row["analysis_id"]) for row in rows)]
 
     def record_media_analysis_cache(self, *, project_id: str, asset_id: str, source_sha256: str, cache_key: str) -> None:
         """Keep immutable cache provenance; a new source makes prior derived data stale."""

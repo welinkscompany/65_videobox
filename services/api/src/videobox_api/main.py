@@ -320,6 +320,10 @@ async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
     for project in store.list_projects():
         project_id = str(project["project_id"])
         recovered = store.recover_orphaned_media_analysis_jobs(project_id=project_id) if recover_running else []
+        if recovered:
+            # 굳은 분석은 여기서만 풀린다. 몇 건을 다시 걸었는지 남기지 않으면
+            # 되살아난 것과 처음부터 없던 것을 구분할 수 없다.
+            _LOGGER.info("멈춰 있던 분석 %d건을 다시 걸었습니다 (project=%s).", len(recovered), project_id)
         if dispatcher is None:
             continue
         # 분석 문구가 바뀌면 저장된 결과는 낡은 언어로 남는다. 라이브러리

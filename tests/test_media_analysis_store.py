@@ -106,6 +106,95 @@ def test_orphan_recovery_does_not_requeue_exhausted_attempt(tmp_path: Path) -> N
     assert store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])["status"] == MediaAnalysisStatus.FAILED.value
 
 
+def _exhaust_retry_budget(store: LocalProjectStore, project_id: str, analysis_id: str) -> None:
+    """Burn the initial run plus both permitted retries, the way the worker does:
+    the last failure carries no next_retry_at because the backoff table is spent."""
+    for attempt in (1, 2, 3):
+        claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis_id)
+        assert claim is not None and claim["attempt"] == attempt
+        store.fail_media_analysis(
+            project_id=project_id,
+            analysis_id=analysis_id,
+            expected_attempt=attempt,
+            error_code="MEDIA_ANALYSIS_FAILED",
+            error_message="LM Studio timed out.",
+            next_retry_at="2000-01-01T00:00:00+00:00" if attempt < 3 else None,
+        )
+
+
+def test_recovery_revives_an_analysis_the_retry_budget_abandoned(tmp_path: Path) -> None:
+    """A spent budget leaves `failed` with no next_retry_at, which the claim query
+    can never take again. Without this the run is frozen until the owner finds the
+    manual retry, and the poller re-dispatches it forever with nothing happening."""
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset", idempotency_key="frozen", cache_key="cache")
+    _exhaust_retry_budget(store, project_id, job["analysis_id"])
+    frozen = store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert frozen["status"] == MediaAnalysisStatus.FAILED.value and frozen["next_retry_at"] is None
+    assert store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"]) is None
+
+    assert store.recover_orphaned_media_analysis_jobs(project_id=project_id) == [job["analysis_id"]]
+
+    revived = store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert revived["status"] == MediaAnalysisStatus.QUEUED.value
+    assert revived["error_code"] is None and revived["error_message"] is None
+    claimed = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert claimed is not None and claimed["attempt"] == 4
+
+
+def test_recovery_grants_one_fresh_attempt_per_sweep_not_a_loop(tmp_path: Path) -> None:
+    """The revival must not become its own retry loop: once requeued, a second
+    sweep has nothing left to do until the run fails again."""
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset", idempotency_key="once", cache_key="cache")
+    _exhaust_retry_budget(store, project_id, job["analysis_id"])
+
+    assert store.recover_orphaned_media_analysis_jobs(project_id=project_id) == [job["analysis_id"]]
+    assert store.recover_orphaned_media_analysis_jobs(project_id=project_id) == []
+
+
+def test_recovery_leaves_a_failed_run_whose_retry_is_still_pending(tmp_path: Path) -> None:
+    """A run with a due retry already belongs to the claim query. Requeuing it here
+    would reset the backoff the worker deliberately booked."""
+    store, project_id = _store(tmp_path)
+    job = store.create_media_analysis(project_id=project_id, asset_id="asset", idempotency_key="pending", cache_key="cache")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert claim is not None
+    store.fail_media_analysis(
+        project_id=project_id, analysis_id=job["analysis_id"], expected_attempt=claim["attempt"],
+        error_code="MEDIA_ANALYSIS_FAILED", error_message="Timed out.", next_retry_at="2999-01-01T00:00:00+00:00",
+    )
+
+    assert store.recover_orphaned_media_analysis_jobs(project_id=project_id) == []
+
+    still_failed = store.get_media_analysis(project_id=project_id, analysis_id=job["analysis_id"])
+    assert still_failed["status"] == MediaAnalysisStatus.FAILED.value
+    assert still_failed["next_retry_at"] == "2999-01-01T00:00:00+00:00"
+
+
+def test_recovery_leaves_blocked_and_cancelled_runs_alone(tmp_path: Path) -> None:
+    """Blocked means a human has to change something -- a missing source or an
+    unconfigured worker. Reviving those would just burn the provider on every restart."""
+    store, project_id = _store(tmp_path)
+    blocked = store.create_media_analysis(project_id=project_id, asset_id="asset_a", idempotency_key="blocked", cache_key="cache")
+    cancelled = store.create_media_analysis(project_id=project_id, asset_id="asset_b", idempotency_key="cancelled", cache_key="cache")
+    blocked_claim = store.claim_media_analysis(project_id=project_id, analysis_id=blocked["analysis_id"])
+    cancelled_claim = store.claim_media_analysis(project_id=project_id, analysis_id=cancelled["analysis_id"])
+    assert blocked_claim is not None and cancelled_claim is not None
+    store.mark_media_analysis_blocked(
+        project_id=project_id, analysis_id=blocked["analysis_id"], expected_attempt=blocked_claim["attempt"],
+        error_code="SOURCE_MISSING", error_message="gone",
+    )
+    store.request_media_analysis_cancel(
+        project_id=project_id, analysis_id=cancelled["analysis_id"], expected_attempt=cancelled_claim["attempt"],
+    )
+
+    assert store.recover_orphaned_media_analysis_jobs(project_id=project_id) == []
+
+    assert store.get_media_analysis(project_id=project_id, analysis_id=blocked["analysis_id"])["status"] == MediaAnalysisStatus.BLOCKED.value
+    assert store.get_media_analysis(project_id=project_id, analysis_id=cancelled["analysis_id"])["status"] == MediaAnalysisStatus.CANCELLED.value
+
+
 def test_media_analysis_claim_is_atomic_and_reports_the_loser(tmp_path: Path) -> None:
     store, project_id = _store(tmp_path)
     job = store.create_media_analysis(
