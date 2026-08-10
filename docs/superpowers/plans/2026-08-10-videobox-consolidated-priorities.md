@@ -38,6 +38,31 @@ owner 승인: 계획서를 하나로 모으고 우선순위를 다시 매긴다.
 
 마지막 두 줄이 이 계획서의 순서를 바꿨다. 자세한 것은 P0에 있다.
 
+## 고정 규칙 — 저장소는 Postgres 하나다 (owner 지시, 2026-08-10)
+
+> "이제 앞으로 이 프로젝트에서 sqlite 는 안쓰고 모두 Postgres 이걸로 작업하도록만 해줘.
+> db가 여러개면 관리가 안되잖아."
+
+**적용 범위를 층으로 나눈다. 층마다 뜻과 비용이 다르다.**
+
+| 층 | 지금 | 이 규칙이 요구하는 것 |
+|---|---|---|
+| 실행 중인 프로그램 | Postgres. 단 주소가 없으면 **조용히 SQLite로 떨어짐** | **폴백 제거.** 주소 없으면 뜨지 않는다 → P0-3 |
+| 디스크에 남은 파일 | 런타임 폴더에 안 쓰는 SQLite 2벌 | 정리 → P0-3 |
+| 테스트 | 73개 파일이 SQLite 임시 파일 사용 | **바꾸지 않는다** (아래 근거) |
+| 코드 구조 | `PostgresProjectStore`가 `LocalProjectStore`를 **상속** | **바꾸지 않는다** (아래 근거) |
+
+**테스트와 코드 구조를 바꾸지 않는 근거.** owner가 막으려는 위험은 "프로그램이 어느 DB를
+보는지 모르는 것"이고, 그것은 위 두 층에서만 발생한다. 테스트가 쓰는 SQLite는 `tmp_path`에
+만들었다 지우는 것이라 관리 대상 DB가 아니다. 그리고 **`LocalProjectStore`는 SQLite 구현이
+아니라 저장소의 기반 클래스다** — 11,495줄의 로직이 전부 거기 있고 `PostgresProjectStore`는
+연결과 메서드 6개만 갈아끼운다. 코드에서 SQLite를 들어내는 것은 저장소 전체 재작성이며,
+owner가 겪는 문제를 하나도 해결하지 않는다.
+
+**테스트가 SQLite만 본다는 위험은 별도로 이미 막았다** — `run-postgres-store-tests.ps1`.
+더 나아가려면 73개 파일을 바꾸는 것이 아니라 **전체 회귀를 Postgres로도 돌릴 수 있게**
+하는 쪽이 싸고 효과가 같다.
+
 ## P0 — 검증이 실제로 도는 것을 보게 하기
 
 ### P0-1. Postgres 경로를 회귀에 되살리기 — [ ] 미착수
@@ -71,6 +96,17 @@ owner 승인: 계획서를 하나로 모으고 우선순위를 다시 매긴다.
 
 **검증.** 주소를 빼고 띄워서 로그에 이유가 남는 것을 본다.
 
+### P0-3. SQLite 폴백 제거 — [ ] 미착수 (owner 지시)
+
+**하는 일.** 컨테이너 모드에서 `VIDEOBOX_DATABASE_URL`이 없으면 **뜨지 않게** 한다.
+조용히 다른 저장소를 여는 경로를 없앤다. 손으로 돌리는 개발 실행은 여전히 파일 저장소를
+쓸 수 있어야 하므로, 판별 기준은 "컨테이너 모드인가"(`VIDEOBOX_SNAPSHOT_ROOT` 유무)다.
+
+런타임 폴더에 남은 SQLite 2벌(`b-roll-smoke-test`, `progress-bar-live-test`)은
+컨테이너가 쓰지 않는다. 참조를 확인한 뒤 정리한다.
+
+**검증.** 주소를 빼고 컨테이너 모드로 띄워 기동이 실패하고 이유가 로그에 남는 것을 본다.
+
 ## P1 — 위험 없이 지금 바로 되는 것
 
 ### P1-1. artifacts 정리 — [x] 완료 2026-08-10
@@ -100,13 +136,39 @@ owner가 밟는 다섯 곳을 고쳤지만 **나머지 346곳은 그대로다.**
 (굳은 분석, 폴러가 헛도는 것)도 전부 로그가 아니라 소스를 읽어서 찾았다. owner는 그렇게
 할 수 없다.
 
-**하는 일.** 전부를 한 번에 하지 않는다. **실패가 조용히 기능을 죽이는 곳**부터 고른다.
-`except Exception`이 fail-open으로 이어지는 지점 — 즉 실패해도 화면이 정상처럼 보이는
-곳이 우선이다. 동작은 바꾸지 않고 이유만 남긴다.
+**조사 완료 (2026-08-10).** 349곳 중 **실제로 삼키는 것은 95곳**이다. 나머지는
+`rollback(); raise`거나 라우터의 `raise _http_error(...)`라 안전하다. 즉 문제 규모는
+알려진 것의 1/4이고, 그만큼 다룰 만하다.
+
+**가장 급한 3건 — 이 셋은 기록만 더할 것이 아니라 동작을 봐야 한다.**
+
+1. `services/api/src/videobox_api/main.py:516` — **백그라운드 작업 전체**(분석 폴링,
+   라이브러리 색인, 기동 복구, 이벤트 정리)가 `except Exception: pass` 하나에 감싸여 있다.
+   무엇이 계속 터져도 화면은 정상이고 로그는 없다.
+2. `packages/core-engine/src/videobox_core_engine/local_pipeline.py:527` — b-roll 등록 중
+   ffprobe가 실패하면 자산이 길이·해상도·오디오 유무 **없이 DB에 확정**된다.
+   **다시 채우는 경로가 없다.** 편집기에서 그 자산은 "길이 정보 없음"이 되고 세로/가로
+   필터에서 아예 빠진다.
+3. `packages/storage-abstractions/src/videobox_storage/local_project_store.py:919` —
+   미리보기 발행 중 펜스 평가가 실패하면 `source_is_current = False`로 떨어져
+   **렌더된 mp4를 지우고**(`:922`) `obsolete`로 기록한다. 파괴적이고 되돌릴 수 없다.
+
+**클러스터 — 실패를 기록하는 척하는 것.** `library_footage_indexer.py:120`과
+`library_audio_indexer.py:128`은 실패를 `report.failed`에 성실히 담는데, 호출하는 쪽
+(`main.py:288`, `main.py:303`)이 **반환값을 변수에 받지도 않는다.** 촬영본·음악이 색인되지
+않아도 아무 데도 안 남는다. 음악 추천이 늘 "분위기만" 모드인 원인일 수 있다.
+
+**따를 모범이 이미 저장소 안에 있다.** `recommenders.py:141`, `review_guidance.py:204`,
+`director_proposal_service.py:234`는 예외를 먹되 `provider_trace`에
+`final_provider="heuristic_fallback"`과 `additional_reason`을 남긴다. 위 항목들을 이 형태로
+맞춘다.
+
+**하는 일.** 위 3건을 먼저, 그다음 클러스터. 나머지는 이 형태를 따라 넓힌다.
 
 **검증.** 각 지점을 실제로 실패시켜 로그에 이유가 남는 것을 본다. 컨테이너 로그에서 확인.
 
-**중단 조건.** 동작이 바뀌면 되돌린다. 이것은 기록만 더하는 작업이다.
+**중단 조건.** 기록만 더하는 항목에서 동작이 바뀌면 되돌린다. 위 2·3번은 동작 변경이
+필요할 수 있으므로 **별도 판단**하고 한꺼번에 섞지 않는다.
 
 ## P3 — 만들어 놓고 못 쓰는 기능
 
@@ -118,9 +180,46 @@ owner가 밟는 다섯 곳을 고쳤지만 **나머지 346곳은 그대로다.**
 직접 확인한 것: `getExport`, `buildTimeline`, `createHermesRun`, `getProject`는 화면
 코드에 호출이 0건이다. 나머지는 목록으로만 확인했다.
 
-**하는 일.** 셋으로 가른다 — 붙일 것 / 지울 것 / 의도적으로 남길 것. 판단 근거를 남긴다.
-`VIDEOBOX_AUTO_APPROVE_SEGMENT_REVIEW=1`처럼 **설정 때문에 안 부르는 것**이 있으므로
-안 불린다는 사실만으로 결함이라고 단정하지 않는다.
+**분류 완료 (2026-08-10). WIRE 7 / DELETE 13 / KEEP 9.**
+
+**WIRE — owner가 못 쓰는 실제 기능 (아쉬움 순)**
+
+1. `getDirectorPreferences` · `updateDirectorPreferences` — "이 자산 꼭 써 / 이건 빼"를
+   저장하는 손잡이. 값이 유진의 자산 순위에 실제로 들어가는데(`media_ranking.py:32,44`),
+   **화면이 저장을 안 부르니 취향은 영원히 빈 값**이고 해당 점수는 항상 0이다.
+   유진 채팅으로도 못 바꾼다(`director_commands.py:50`은 참조 코드만 다룬다).
+   촬영본이 쌓일수록 유일한 통제 수단이다.
+2. `directorCandidatePreviewUrl` — 후보를 눌러 볼 수가 없다. **두 겹으로 막혀 있다:**
+   유진 후보 어댑터가 `preview_uri`를 `None`으로 넣고(`yujin_creator_proposal_adapter.py:796`)
+   버튼은 그 값이 있을 때만 뜨며(`RightDock.tsx:220`), 떠도 핸들러가 빈 함수다
+   (`EditorWorkbenchRoute.tsx:1481`). "썸네일 보고 고른다"가 막혀 있다.
+3. `refreshDirectorProposal` — 제안이 stale이 되면 화면이 `blocked`으로 바뀌고
+   (`EditorWorkbenchRoute.tsx:1381`), 새 제안 시작은 기존 제안이 남아 있어 비활성이다
+   (`:1482`). **한 번 stale이면 그 화면에서 유진으로 돌아갈 길이 없다.** 이게 복구 경로다.
+4. `getMediaLibraryInstallState` — 라이브러리가 비면 제목만 뜨고 이유를 알 수 없다
+   (`MediaLibraryBrowser.tsx:33,79`). 기능이 아니라 진단이다.
+5. `listRecentEditorPresetIds` · `listRecentMediaLibraryAssetIds` — **쓰기만 하고 읽지
+   않는다.** 최근 사용을 꼬박꼬박 기록하는데(`CaptionPresetPicker.tsx:96`,
+   `media_library.py:192`) 보여 주는 화면이 없다. 둘은 같은 성격이라 함께 붙인다.
+
+**DELETE 13 — 근거는 조사 보고에 있다.** 대체 경로가 이미 화면에서 도는 것들
+(`applyDirectorProposal`은 `batchApplyDirectorProposal`이, `buildTimeline`·
+`createEditingSession`은 `createAtomicDraftBundle`이 대신한다). `listProjectRecentMediaLibraryAssetIds`는
+**양쪽이 다 죽었다** — 기록 함수 `mark_project_media_library_recent`를 부르는 곳이 없어
+목록이 항상 빈 배열이다.
+
+**KEEP 9 — 지우면 안 된다.** 유진 Hermes 스트리밍 4개는 owner 결정으로 로컬 경로를 쓰는
+것이다(`docs/decisions/2026-08-05-local-first-assistant-decision.ko.md`). 레거시 4개는
+**테스트가 "부르지 않음"을 잠가 뒀다**(`task22-parity-owners.test.ts:200`,
+`AppRouter.test.tsx:253,405`) — 지우면 그 가드가 사라진다.
+
+**`approveReviewRecommendation`은 내 앞선 추측이 틀렸다.** `VIDEOBOX_AUTO_APPROVE_SEGMENT_REVIEW=1`
+때문이 아니다. 그 플래그는 검토 플래그만 무력화하고 보류 추천은 여전히 승인을 막는다
+(`_pipeline_private_helpers.py:265`). 실제 이유는 검토 화면이 **의도적으로 읽기 전용**이고
+(`TimelineReviewPage.test.tsx:201`이 버튼 없음을 못박음), 현행 초안 경로가 보류 추천을
+아예 만들지 않기 때문이다(`local_project_store.py:2664`).
+**남는 위험:** 어떤 경로로든 보류 추천이 생기면 화면에서 풀 방법이 없어 내보내기가 통째로
+막힌다. 지금은 "발생 경로가 없다"가 유일한 방어다.
 
 **검증.** 붙인 것은 브라우저에서 owner 경로로 밟는다.
 
@@ -133,11 +232,41 @@ owner가 밟는 다섯 곳을 고쳤지만 **나머지 346곳은 그대로다.**
 
 11,495줄, 파이썬 전체의 22%. **owner 화면에서 달라지는 것은 없다.**
 
-전제가 2026-08-10에 이미 한 번 뒤집혔다 — 갈래가 파일 안에 뭉쳐 있지 않고 흩어져 있다.
-가는 순서는 덩어리가 적은 쪽부터 **hermes(2덩어리) → media(3) → yujin(4)**이고,
-계획서가 처음 적은 director(10덩어리)는 최악의 출발점이다.
+**조사 완료 (2026-08-10). 방식이 정해졌다 — 믹스인이어야 한다.**
 
-`tests/test_store_split_preserves_the_surface.py`가 공개 메서드 317개를 잠가 뒀다.
+별도 모듈로 떼면 깨진다. **`_connection`(기반)이 `_ensure_hermes_capability_lifecycle_schema`
+(hermes)를 호출한다** — 기반이 갈래를 역참조하므로 모듈로 분리하면 실제 순환 import가 된다.
+게다가 인스턴스에 몽키패치를 거는 테스트 4개가 조용히 무력화되고,
+`PostgresProjectStore._connection` 오버라이드가 위임 객체에 전달되지 않아 **Postgres 경로가
+SQLite 커넥션을 쓸 수 있다.**
+
+믹스인이면 결합을 끊지 않고 **파일만** 나눈다. 이 파일의 결합은 전부 `self.` 조회라
+MRO가 그대로 흡수한다. 공개 표면(`dir()` 기반 스냅샷)도 유지되고,
+**`postgres_project_store.py`는 한 줄도 고치지 않는다.**
+
+```
+local_project_store.py        ← class LocalProjectStore(HermesCapabilityMixin, ...)
+_store_hermes_capability.py   ← class HermesCapabilityMixin  (18개 + 상수 3개)
+```
+
+**hermes가 첫 순서인 것이 측정으로 확인됐다.** 외부 의존이 `_connection`, `_now_iso`,
+`_fetchone` **3개뿐**이다(media 8개, yujin 7개). 조각 A(`1166–1866`, 17개)는 중간에 다른
+갈래가 하나도 안 끼어 있어 통째로 잘라내면 된다.
+
+**지뢰 하나.** `_validate_hermes_expected_scope:1844`가 `LocalProjectStore.`를 문자 그대로
+참조한다. 이 한 줄은 클래스명을 바꾸거나 그 메서드만 기반에 남겨야 한다. 계획에서 빠뜨리면
+순환 import로 막힌다.
+
+**`director_hermes` 계열 11개는 이번에 손대지 않는다.** 도메인상 Hermes지만 director·yujin과
+얽힌 210줄짜리 중간 지대를 함께 건드려야 한다. **"hermes = capability 원장만"**으로 못박아
+다음 세션이 두 번 옮기지 않게 한다.
+
+**계획서의 이전 숫자 두 개가 틀렸다.** director 44 → 실제 43(`_asset_directory`가
+"director"에 걸린 문자열 오탐), review 25 → 실제 4 수준(`preview`가 "review"에 걸림).
+director·review를 계획할 때 그 숫자를 그대로 믿으면 안 된다.
+
+`tests/test_store_split_preserves_the_surface.py`가 공개 메서드 **318개**를 잠가 뒀다
+(계획서가 적은 317은 오기이며, 현재 코드와 차이 0으로 동기화돼 있다).
 
 **선행 조건 (새로 추가).** P0-1을 먼저 끝낸다. `PostgresProjectStore`가 이 파일을
 상속하므로, **Postgres 경로가 검증되지 않은 상태에서 분할하면 깨져도 모른다.**
