@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, status
 
 from videobox_api.errors import _http_error
@@ -15,6 +17,8 @@ from videobox_api.models import (
 )
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def build_projects_router(store: LocalProjectStore) -> APIRouter:
@@ -118,8 +122,19 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
         )
         try:
             session = store.get_latest_editing_session(project_id=project_id)
-        except Exception:
+        except KeyError:
             # No draft yet is an ordinary state, not an error.
+            session = None
+        except Exception:
+            # 여기까지 오면 초안이 없는 게 아니라 못 읽은 것이다. 카드는
+            # 둘을 구분하지 않고 "아직 시작한 작업이 없어요"라고 말하므로,
+            # 기록이 없으면 owner는 초안이 사라졌다고 믿게 된다.
+            # 홈이 계속 열리는 동작은 그대로 둔다.
+            _LOGGER.warning(
+                "작업 중인 초안을 읽지 못해 없는 것으로 표시합니다 (project=%s).",
+                project_id,
+                exc_info=True,
+            )
             session = None
         gaps = session.get("gap_slots") if isinstance(session, dict) else None
         return HomeSummaryResponse(

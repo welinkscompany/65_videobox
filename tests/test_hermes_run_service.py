@@ -5346,3 +5346,136 @@ def test_reverse_exchange_uses_durable_message_links_not_adjacency(
     assert exchange is not None
     assert exchange["user_message"]["text"] == "question"
     assert exchange["assistant_message"]["text"] == "linked answer"
+
+
+def test_a_proposal_preflight_fault_says_why_instead_of_a_normal_looking_answer(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """중복 확인이 실패하면 제안이 통째로 저장되지 않는다. 화면에는 평범한
+    답변이 그대로 뜨고, 어디에도 이유가 없었다."""
+
+    class Store:
+        def __init__(self) -> None:
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "preflight-run",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def director_proposal_exists(self, **_):
+            raise RuntimeError("proposal index is offline")
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            return True
+
+    context = _proposal_context()
+    store = Store()
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [
+                AgentGatewayEvent(
+                    "run_completed",
+                    _proposal_output(context),
+                    publish_capability_token="header.publish.signature",
+                )
+            ]
+        ),
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=context.project_id,
+            session_id=context.session_id,
+            conversation_id="conversation",
+            client_message_id="preflight",
+            text="추천",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    with caplog.at_level(logging.WARNING):
+        events = asyncio.run(scenario())
+
+    # 동작은 그대로다 -- 저장을 아예 시도하지 않고 실행이 막힌 채 끝난다.
+    assert store.completions == []
+    assert events[-1].event_type == "blocked"
+    assert any(
+        "proposal index is offline" in str(record.exc_info)
+        for record in caplog.records
+    ), "제안 중복 확인 실패가 기록되지 않았다"
+
+
+def test_a_publish_transaction_fault_keeps_the_real_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """저장이 터지면 고정 코드 `publish_transaction_fault` 하나로 뭉개져
+    진짜 이유가 사라졌다."""
+
+    class Store:
+        def __init__(self) -> None:
+            self.completions: list[dict] = []
+
+        def begin_director_hermes_run(self, **_):
+            return {
+                "run_id": "publish-fault-run",
+                "status": "pending",
+                "owner_token": "owner",
+                "dispatch": True,
+            }
+
+        def director_proposal_exists(self, **_):
+            return False
+
+        def complete_director_hermes_run(self, **kwargs):
+            self.completions.append(kwargs)
+            if len(self.completions) == 1:
+                raise RuntimeError("publish transaction rolled back")
+            return True
+
+    context = _proposal_context()
+    store = Store()
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(
+            [
+                AgentGatewayEvent(
+                    "run_completed",
+                    _proposal_output(context),
+                    publish_capability_token="header.publish.signature",
+                )
+            ]
+        ),
+        context_builder=lambda **_: context,
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id=context.project_id,
+            session_id=context.session_id,
+            conversation_id="conversation",
+            client_message_id="publish-fault",
+            text="추천",
+        )
+        await run.task
+        return [event async for event in service.subscribe(run.run_id)]
+
+    with caplog.at_level(logging.WARNING):
+        events = asyncio.run(scenario())
+
+    # 동작은 그대로다 -- 제안 없이 한 번 더 저장하고 수동 안내가 붙는다.
+    assert len(store.completions) == 2
+    assert store.completions[0]["proposal"] is not None
+    assert store.completions[1]["proposal"] is None
+    assert MANUAL_FALLBACK in store.completions[1]["assistant_text"]
+    assert events[-1].event_type == "run_completed"
+    assert any(
+        "publish transaction rolled back" in str(record.exc_info)
+        for record in caplog.records
+    ), "저장 실패의 진짜 이유가 기록되지 않았다"

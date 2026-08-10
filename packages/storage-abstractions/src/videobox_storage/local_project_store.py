@@ -9221,6 +9221,17 @@ class LocalProjectStore(HermesCapabilityMixin):
     ) -> dict[str, Any]:
         jobs = self.list_jobs(project_id=project_id)
         entries: list[dict[str, Any]] = []
+        # 다른 조용한 실패를 진단하려고 여는 화면이다. 읽지 못한 산출물을
+        # 그냥 건너뛰고 완전한 목록인 것처럼 내놓으면, 여기서부터 근거가
+        # 없어진다. 빠뜨리는 동작은 그대로 두고 무엇을 못 읽었는지 남긴다.
+        unreadable: list[str] = []
+        first_error: list[Exception] = []
+
+        def _skipped(kind: str, ref: str, error: Exception) -> None:
+            unreadable.append(f"{kind}:{ref}")
+            if not first_error:
+                first_error.append(error)
+
         filter_timeline_id = self._normalized_provider_trace_filter_value(timeline_id)
         filter_job_type = self._normalized_provider_trace_filter_value(job_type)
         filter_artifact_type = self._normalized_provider_trace_filter_value(artifact_type)
@@ -9248,7 +9259,8 @@ class LocalProjectStore(HermesCapabilityMixin):
                     project_id=project_id,
                     partial_regeneration_id=str(job["output_ref"]),
                 )
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                _skipped("partial_regeneration", str(job["output_ref"]), exc)
                 continue
             timeline_payload = partial_regeneration.get("timeline")
             if not isinstance(timeline_payload, dict):
@@ -9265,7 +9277,8 @@ class LocalProjectStore(HermesCapabilityMixin):
                 segment_job_id = ""
             try:
                 timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=filter_timeline_id)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - 상류 계보 없이도 목록은 낸다
+                _skipped("timeline_lineage", str(filter_timeline_id), exc)
                 timeline_payload = {}
             lineage = timeline_payload.get("lineage")
             if isinstance(lineage, dict):
@@ -9289,7 +9302,8 @@ class LocalProjectStore(HermesCapabilityMixin):
                         project_id=project_id,
                         segment_analysis_id=str(job["output_ref"]),
                     )
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                    _skipped("segment_analysis", str(job["output_ref"]), exc)
                     continue
                 entries.append(
                     self._provider_trace_entry(
@@ -9309,7 +9323,8 @@ class LocalProjectStore(HermesCapabilityMixin):
                         recommendation_run_id=str(job["output_ref"]),
                         recommendation_type=RecommendationType.BROLL,
                     )
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                    _skipped("broll_recommendation", str(job["output_ref"]), exc)
                     continue
                 entries.append(
                     self._provider_trace_entry(
@@ -9329,7 +9344,8 @@ class LocalProjectStore(HermesCapabilityMixin):
                         recommendation_run_id=str(job["output_ref"]),
                         recommendation_type=RecommendationType.BGM,
                     )
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                    _skipped("music_recommendation", str(job["output_ref"]), exc)
                     continue
                 entries.append(
                     self._provider_trace_entry(
@@ -9345,7 +9361,8 @@ class LocalProjectStore(HermesCapabilityMixin):
             elif job_type == JobType.PREVIEW_RENDER.value and job.get("output_ref"):
                 try:
                     preview = self.get_preview_run(project_id=project_id, preview_id=str(job["output_ref"]))
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                    _skipped("preview_render", str(job["output_ref"]), exc)
                     continue
                 entries.append(
                     self._provider_trace_entry(
@@ -9362,7 +9379,8 @@ class LocalProjectStore(HermesCapabilityMixin):
             elif job_type == JobType.SUBTITLE_RENDER.value and job.get("output_ref"):
                 try:
                     subtitle = self.get_subtitle_run(project_id=project_id, subtitle_id=str(job["output_ref"]))
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                    _skipped("subtitle_render", str(job["output_ref"]), exc)
                     continue
                 entries.append(
                     self._provider_trace_entry(
@@ -9379,7 +9397,8 @@ class LocalProjectStore(HermesCapabilityMixin):
             elif job_type == JobType.CAPCUT_EXPORT.value and job.get("output_ref"):
                 try:
                     export = self.get_export_run(project_id=project_id, export_id=str(job["output_ref"]))
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                    _skipped("capcut_export", str(job["output_ref"]), exc)
                     continue
                 entries.append(
                     self._provider_trace_entry(
@@ -9522,7 +9541,8 @@ class LocalProjectStore(HermesCapabilityMixin):
                 continue
             try:
                 timeline_payload = self.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001 - 하나가 나머지를 막지 않는다
+                _skipped("review_guidance_timeline", str(timeline_id), exc)
                 continue
             legacy_history = timeline_payload.get("operator_guidance_history")
             legacy_entries: list[dict[str, Any]] = []
@@ -9588,6 +9608,16 @@ class LocalProjectStore(HermesCapabilityMixin):
             upstream_recommendation_job_ids=upstream_recommendation_job_ids,
             use_exact_recommendation_lineage=use_exact_recommendation_lineage,
         )
+        if unreadable:
+            # 목록에서 빼는 동작은 그대로다. 항목마다 찍지 않고 한 번에 모은다.
+            _LOGGER.warning(
+                "감사 목록에서 산출물 %d개를 읽지 못해 뺐습니다. 목록이 완전하지 "
+                "않습니다 (project=%s, 항목=%s).",
+                len(unreadable),
+                project_id,
+                ", ".join(unreadable[:10]),
+                exc_info=first_error[0] if first_error else None,
+            )
         return {
             "summary": self._provider_trace_summary(entries),
             "entries": entries,

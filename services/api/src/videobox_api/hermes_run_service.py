@@ -1136,6 +1136,18 @@ class HermesRunService:
                             proposal_id=projection.proposal.proposal_id,
                         )
                     except Exception:
+                        # 여기서 멈추면 제안이 통째로 저장되지 않는데, 화면에는
+                        # 평범한 답변이 그대로 뜬다. owner는 눌러도 아무 일이
+                        # 없는 이유를 알 방법이 없다. 저장을 건너뛰는 동작은
+                        # 그대로 두고 이유만 남긴다.
+                        _LOGGER.warning(
+                            "제안 중복 확인이 실패해 저장을 건너뜁니다. "
+                            "화면의 답변은 그대로 뜨지만 제안은 남지 않습니다 "
+                            "(project=%s, run=%s).",
+                            run.project_id,
+                            run.run_id,
+                            exc_info=True,
+                        )
                         preflight_failed = True
                     else:
                         if collision:
@@ -1210,6 +1222,16 @@ class HermesRunService:
                     **completion_kwargs,
                 )
             except Exception:
+                # 아래 고정 코드는 무엇이 터졌든 하나로 뭉갠다. 뒤이어 제안
+                # 없이 한 번 더 저장하므로 owner에게는 정상 답변으로 보이고,
+                # 진짜 이유는 여기서 남기지 않으면 사라진다.
+                _LOGGER.warning(
+                    "유진 실행 결과를 저장하지 못했습니다. "
+                    "제안이 남지 않습니다 (project=%s, run=%s).",
+                    run.project_id,
+                    run.run_id,
+                    exc_info=True,
+                )
                 stored = (
                     "publish_transaction_fault"
                     if proposal is not None
@@ -1389,6 +1411,14 @@ class HermesRunService:
         except HermesCapabilityError as error:
             reason = str(error)
         except Exception:
+            # 아래 사유는 고정 문자열이라 무엇이 터졌든 똑같이 기록된다.
+            # 제안이 저장되지 않는 결과는 같으므로 진짜 원인은 여기에만 남는다.
+            _LOGGER.warning(
+                "제안 권한을 확인하지 못했습니다 (project=%s, run=%s).",
+                run.project_id,
+                run.run_id,
+                exc_info=True,
+            )
             reason = "hermes_capability_unavailable"
         try:
             await asyncio.to_thread(
@@ -1400,7 +1430,15 @@ class HermesRunService:
                 reason=reason,
             )
         except Exception:
-            pass
+            # 거절 사유를 남기는 것마저 실패하면 감사 화면에도 흔적이 없다.
+            # 실행은 그대로 진행한다.
+            _LOGGER.warning(
+                "제안 권한 거절 사유를 남기지 못했습니다 (project=%s, run=%s, 사유=%s).",
+                run.project_id,
+                run.run_id,
+                reason,
+                exc_info=True,
+            )
         return None
 
     async def _recheck_projection(
@@ -1433,6 +1471,16 @@ class HermesRunService:
                 projection=projection,
             )
         except Exception:
+            # 화면에는 "직접 해 주세요" 한 문장만 남고 제안은 버려진다.
+            # 편집 중에 실제로 바뀐 것과 되짚기가 못 돈 것이 화면에서
+            # 구분되지 않으므로, 어느 쪽이었는지는 여기서만 알 수 있다.
+            _LOGGER.warning(
+                "제안 되짚기가 실패해 수동 안내로 넘어갑니다 "
+                "(project=%s, run=%s).",
+                run.project_id,
+                run.run_id,
+                exc_info=True,
+            )
             visible = projection.reply_text.strip()
             return YujinCreatorProjection(
                 reply_text=(

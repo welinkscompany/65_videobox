@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import secrets
 import threading
@@ -12,6 +13,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from videobox_agent_gateway.fault_reporting import FaultReporter
 from videobox_agent_gateway.memory_gateway import (
     AdapterMemoryReconcile,
     AdapterMemoryDelete,
@@ -22,6 +24,10 @@ from videobox_agent_gateway.memory_gateway import (
     MemoryWriteOutcome,
     RetrievedMemory,
 )
+
+
+# uvicorn 이 설정한 로거를 쓴다. 모듈 로거는 컨테이너 로그에 나오지 않는다.
+_LOGGER = logging.getLogger("uvicorn.error")
 
 
 def _valid_token(value: str) -> bool:
@@ -157,6 +163,10 @@ def create_memory_adapter_app(*, provider, service_token: str) -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+    # 위층이 유보를 나중에 다시 맞춰 보기 때문에 같은 고장이 반복해서
+    # 들어온다. 사유가 달라질 때만 남긴다.
+    _add_faults = FaultReporter(_LOGGER)
+    _reconcile_faults = FaultReporter(_LOGGER)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
@@ -200,8 +210,14 @@ def create_memory_adapter_app(*, provider, service_token: str) -> FastAPI:
                 infer=False,
                 metadata=body.metadata,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - 저장 판정은 유보로 떨어진다
+            # 유보로 떨어지면 위층은 나중에 다시 맞춰 보려 한다. 그 사이
+            # 원인이 무엇이었는지는 여기 말고 어디에도 없다.
+            _add_faults.report_once(
+                exc, "기억을 저장하지 못해 유보로 처리합니다."
+            )
             return MemoryWriteOutcome(status="ambiguous")
+        _add_faults.clear()
         return _outcome_from_add(result)
 
     @app.post(
@@ -240,10 +256,15 @@ def create_memory_adapter_app(*, provider, service_token: str) -> FastAPI:
                 top_k=2,
                 rerank=False,
             )
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 - 맞춰 보기는 유보로 떨어진다
+            # 맞춰 보기가 실패하면 저장이 됐는지 영영 확정되지 않는다.
+            _reconcile_faults.report_once(
+                exc, "기억을 맞춰 보지 못해 유보로 처리합니다."
+            )
             return MemoryWriteOutcome(
                 status="ambiguous", event_ref=body.event_ref
             )
+        _reconcile_faults.clear()
         return _outcome_from_search(result, body)
 
     @app.post(
