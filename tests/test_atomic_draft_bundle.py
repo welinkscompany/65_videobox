@@ -92,6 +92,14 @@ def test_filling_an_empty_scene_clears_what_blocked_the_export(tmp_path):
     after = store.get_timeline_run(project_id=project.project_id, timeline_id=timeline_id)
     assert after["review_flags"] == []
     assert store.get_review_state(project_id=project.project_id, timeline_id=timeline_id)["status"] == "draft"
+    # 내보내기 관문은 확인할 항목이 아니라 `gap_slots`와 `placeholder_policy`를 본다
+    # (`local_pipeline.assert_timeline_output_allowed`). 이것도 초안 때 적어 둔 값이라
+    # 함께 다시 유도하지 않으면 owner가 다 채워도 완성본을 못 만든다.
+    assert after["gap_slots"] == []
+    assert after.get("placeholder_policy") is None
+    LocalPipelineRunner(store).assert_timeline_output_allowed(
+        project_id=project.project_id, timeline_job_id=bundle["timeline_job_id"]
+    )
 
 
 def test_materializes_one_real_draft_bundle_and_reuses_same_idempotency_result(tmp_path):

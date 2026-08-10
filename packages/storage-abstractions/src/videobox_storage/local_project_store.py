@@ -3073,18 +3073,28 @@ class LocalProjectStore(MediaAnalysisMixin, HermesCapabilityMixin):
             for clip in track.get("clips", [])
             if isinstance(clip, dict) and str(clip.get("gap_slot_id") or "").strip()
         }
+        remaining_gaps = [
+            gap
+            for gap in timeline.get("gap_slots", [])
+            if isinstance(gap, dict) and str(gap.get("gap_slot_id") or "") in remaining_gap_slot_ids
+        ]
         review_flags = [
             {
                 "code": "draft_gap_placeholder",
                 "segment_id": gap.get("segment_id") or gap.get("gap_slot_id"),
                 "message": "자산이 필요한 임시 장면입니다.",
             }
-            for gap in timeline.get("gap_slots", [])
-            if isinstance(gap, dict) and str(gap.get("gap_slot_id") or "") in remaining_gap_slot_ids
+            for gap in remaining_gaps
         ]
         timeline["source_session_id"] = session_id
         timeline["source_session_revision"] = session_revision
         timeline["review_flags"] = review_flags
+        # 완성본·CapCut 관문은 확인할 항목이 아니라 이 둘을 본다
+        # (`local_pipeline.assert_timeline_output_allowed`). 초안 때 적어 둔 값을 그대로
+        # 두면 owner가 빈 장면을 다 채워도 완성본을 만들 수 없다. 임시 클립은 렌더에
+        # 들어가지도 않는다 -- 렌더도 session을 materialize 한 뒤 합성한다.
+        timeline["gap_slots"] = remaining_gaps
+        timeline["placeholder_policy"] = "in_app_only" if remaining_gaps else None
         file_path.write_text(json.dumps(timeline, indent=2, ensure_ascii=True), encoding="utf-8")
         return self.save_review_state(
             project_id=project_id,

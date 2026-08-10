@@ -90,6 +90,34 @@ owner가 검토 화면에서 누를 일이다.
 
 이 저장소에서 내보내기 관문이 열린 것은 이번이 처음이다.
 
+**관문이 둘이었다.** 확인할 항목만 풀었더니 완성본이 400으로 막혔다 —
+`assert_timeline_output_allowed`(`local_pipeline.py:2344`)는 확인할 항목이 아니라
+`gap_slots`와 `placeholder_policy`를 보는데, 그것도 초안 때 적어 둔 값이라 owner가 다
+채워도 그대로 남아 있었다. **같은 종류의 문제가 한 겹 아래 또 있었다.** 둘 다 materialize
+결과에서 다시 유도하도록 고쳤다. 임시 클립은 렌더에 들어가지도 않는다 — 렌더도 session을
+materialize 한 뒤 합성한다(`local_pipeline.py:1882`).
+
+### 남은 것 — 완성본이 ffmpeg에서 실패한다 (2026-08-11 확인)
+
+관문을 연 뒤 `완성본 만들기`가 **202로 접수되고 실제 렌더까지 갔다.** 거기서 실패했다.
+
+```
+ffmpeg failed rendering canonical composition:
+[vost#0:0/libx264] Could not open encoder before EOF
+[out#0/mp4] Nothing was written into output file, because at least one of its
+streams received no packets.
+```
+
+**확인한 것.** 관문 값은 정상으로 다시 유도됐다(`gap_slots: 0`, `placeholder_policy: None`,
+`source_session_revision: 7`). 장면 1의 원본 파일도 디스크에 있다(1.3MB).
+
+**의심 가는 곳.** 내레이션이 **1초짜리 무음 파일**인데 timeline의 내레이션 클립은
+`0–15초`다. 두 인코더가 모두 열리지 않고 "packets 없음"으로 끝난 것과 방향이 맞는다.
+다만 **확인하지 못했다** — 여기서부터는 렌더 엔진 조사다.
+
+**다음 세션이 여기서 시작하면 된다.** 프로젝트 `progress-bar-live-test`,
+작업 `final_render_job_008`에 위 오류가 그대로 남아 있다.
+
 ### (원본) 문제 설명
 
 **owner 여정에서 가장 크게 막힌 곳이다. 오늘 브라우저에서 처음부터 끝까지 밟다가 찾았다.**
