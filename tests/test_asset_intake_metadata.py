@@ -148,8 +148,12 @@ def test_a_probe_failure_at_intake_says_why(
         or "ffprobe binary is unavailable" in str(record.exc_info)
         for record in caplog.records
     ), "영상 정보 수집 실패가 기록되지 않았다"
-    # 로그는 흘러가지만 자산은 남는다. 이유가 자산에도 붙어 있어야 나중에 찾는다.
-    assert _stored_metadata(runner, project_id, asset_id).get("media_facts_error")
+    # 이유는 로그에만 둔다. 자산 메타데이터에 넣었더니 ffprobe 예외 문구에 담긴
+    # **호스트 전체 경로**가 자산 목록 응답으로 그대로 나갔다. 다시 재는 조회는
+    # 이 값을 보지 않고 크기 유무로 판단하므로 복구에 필요한 값도 아니다.
+    stored = _stored_metadata(runner, project_id, asset_id)
+    assert "media_facts_error" not in stored, stored
+    assert not any(str(tmp_path) in str(value) for value in stored.values()), stored
 
 
 def test_an_asset_without_media_facts_comes_back_for_another_pass() -> None:
@@ -169,7 +173,7 @@ def test_an_asset_without_media_facts_comes_back_for_another_pass() -> None:
                 {
                     "asset_id": "a-failed-before",
                     "storage_uri": "u3",
-                    "metadata": {"media_facts_error": "RuntimeError: 이전 실패"},
+                    "metadata": {"title": "지난번에 못 잰 것"},
                 },
             ]
 
@@ -178,7 +182,7 @@ def test_an_asset_without_media_facts_comes_back_for_another_pass() -> None:
     assert [item["asset_id"] for item in pending] == ["a-missing", "a-failed-before"]
     # 다시 잴 때 필요한 것을 함께 돌려준다. 자산을 한 건씩 또 읽지 않기 위해서다.
     assert pending[0]["storage_uri"] == "u2"
-    assert pending[1]["previous_error"] == "RuntimeError: 이전 실패"
+    assert pending[1]["asset_id"] == "a-failed-before"
 
 
 def test_the_backfill_pass_is_bounded_like_the_indexers() -> None:

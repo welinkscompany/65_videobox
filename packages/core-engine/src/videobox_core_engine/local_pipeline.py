@@ -58,7 +58,6 @@ _logger = logging.getLogger(__name__)
 
 # 실패 이유를 자산에 붙여 둔다. 로그는 흘러가지만 이건 남아서, 어떤 자산이 왜
 # 정보 없이 등록됐는지 나중에 찾을 수 있다.
-MEDIA_FACTS_ERROR_KEY = "media_facts_error"
 
 
 def _orientation_of(width: int, height: int) -> str:
@@ -94,7 +93,6 @@ def broll_assets_needing_media_facts(
             {
                 "asset_id": str(asset["asset_id"]),
                 "storage_uri": str(asset["storage_uri"]),
-                "previous_error": metadata.get(MEDIA_FACTS_ERROR_KEY),
             }
         )
         if limit is not None and len(pending) >= limit:
@@ -108,12 +106,11 @@ def record_broll_media_facts(
     project_id: str,
     asset_id: str,
     storage_uri: str,
-    previous_error: str | None = None,
 ) -> bool:
     """ffprobe가 아는 것을 자산에 적는다. 채웠으면 True.
 
     실패해도 예외를 올리지 않는다 -- 등록을 막지 않는 것이 이 경로의 계약이다.
-    달라진 것은 **왜 실패했는지가 로그와 자산에 남고, 다음 차례에 다시 잰다**는
+    달라진 것은 **왜 실패했는지가 로그에 남고, 다음 차례에 다시 잰다**는
     점이다. 컨테이너에 ffmpeg가 아직 없는 것처럼 고치면 풀리는 실패가 대부분이라,
     한 번 실패한 자산을 영구히 제외하지 않는다.
     """
@@ -132,23 +129,11 @@ def record_broll_media_facts(
             asset_id,
             exc_info=True,
         )
-        reason = f"{type(exc).__name__}: {exc}"
-        # 이유가 그대로면 다시 쓰지 않는다. 주기 패스가 매번 쓰면 놀고 있는
-        # 스택이 계속 DB를 두드린다.
-        if reason != previous_error:
-            try:
-                store.update_asset_metadata(
-                    project_id=project_id,
-                    asset_id=asset_id,
-                    metadata_patch={MEDIA_FACTS_ERROR_KEY: reason},
-                )
-            except Exception:
-                _logger.warning(
-                    "영상 정보 실패 이유를 자산에 남기지 못했습니다 (project=%s, asset=%s).",
-                    project_id,
-                    asset_id,
-                    exc_info=True,
-                )
+        # 이유는 로그에만 남긴다. 자산 메타데이터에 넣었더니 둘이 따라왔다:
+        # ffprobe 예외 문구에 **호스트의 전체 경로**가 들어 있어 그대로 화면
+        # 응답으로 나갔고, 자산 목록 계약 테스트가 깨졌다. 다시 재는 조회는 이
+        # 값을 보지 않고 `width`/`height` 유무로 판단하므로(위 함수) 복구에
+        # 필요한 값도 아니었다. 덤으로 실패해도 DB에 쓰지 않는다.
         return False
     store.update_asset_metadata(
         project_id=project_id,
@@ -159,8 +144,6 @@ def record_broll_media_facts(
             "height": probed.height,
             "orientation": _orientation_of(probed.width, probed.height),
             "has_audio": probed.audio_codec is not None,
-            # 채웠으면 흔적을 지운다. 남으면 화면이 계속 문제로 읽는다.
-            MEDIA_FACTS_ERROR_KEY: None,
         },
     )
     return True
