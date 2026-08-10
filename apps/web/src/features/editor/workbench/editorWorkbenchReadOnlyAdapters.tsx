@@ -27,7 +27,7 @@ function trackRoleLabel(role: string): string {
 
 export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director, eugeneDraft, onEugeneDraftChange, selectedSegmentId, playbackSec, onSelectSegment, onSeek, onSaveCaption, isSavingCaption = false, assetCards = [], assetPreviewStates = {}, assetTarget, onPreviewAsset, onRefreshExactPreview, onApplyAssetCard, onInspectorAction, partialRegeneration, loadApprovedTtsCandidates, ttsCandidateScopeKey }: { view: EditorViewModel; session?: EditorSessionSnapshot | null; dock: "left" | "right"; director?: RightDockDirector; eugeneDraft: string; onEugeneDraftChange: (value: string) => void; selectedSegmentId: string | null; playbackSec: number; onSelectSegment: (segmentId: string) => void; onSeek: (seconds: number) => void; onSaveCaption?: (input: { segmentId: string; text: string }) => void | Promise<void>; isSavingCaption?: boolean; assetCards?: readonly EditorAssetCard[]; assetPreviewStates?: Readonly<Record<string, EditorAssetPreviewState>>; assetTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null; onPreviewAsset: (card: EditorAssetCard) => void; onRefreshExactPreview?: () => void; onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onInspectorAction?: (action: InspectorAction) => void | Promise<void>; partialRegeneration?: PartialRegenerationControls; loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>; ttsCandidateScopeKey?: string }) {
   if (dock === "left") return <>
-    <EditorAssetBrowser cards={assetCards} target={assetTarget} isSaving={isSavingCaption} onPreview={onPreviewAsset} onApply={(card, segmentId) => void onApplyAssetCard?.(card, segmentId)} previewStates={assetPreviewStates} onRefreshExactPreview={onRefreshExactPreview} />
+    <EditorAssetBrowser cards={assetCards} target={assetTarget} isSaving={isSavingCaption} onPreview={onPreviewAsset} onApply={(card, segmentId) => void onApplyAssetCard?.(card, segmentId)} previewStates={assetPreviewStates} onRefreshExactPreview={onRefreshExactPreview} projectId={view.projectId} />
     <section aria-label="자산" className="vb-editor-workbench__summary"><h2>자산</h2>{view.tracks.map((track) => <p key={track.trackId}>{trackRoleLabel(track.role)}: {track.clips.length}개 클립</p>)}</section>
     <TranscriptPanel entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} />
   </>;
@@ -52,6 +52,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     onCancelRun={director?.onCancelRun}
     onManualEdit={director?.onManualEdit}
     onPreviewCandidate={director?.onPreviewCandidate}
+    onRefreshProposal={director?.onRefreshProposal}
     onRetryMessage={director?.onRetryMessage}
     onRetryRun={director?.onRetryRun}
     onSelectedCandidateIdsChange={director?.onSelectedCandidateIdsChange}

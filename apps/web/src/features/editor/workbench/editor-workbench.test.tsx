@@ -406,7 +406,7 @@ describe("EditorWorkbench", () => {
     } as const;
     const rendered = render(<EditorWorkbench director={director} view={routeA} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "추천 미리 듣기" }));
+    fireEvent.click(screen.getByRole("button", { name: "A-01 미리 보기" }));
     await waitFor(() => expect(
       observedPreview.at(-1)?.auditionRequest?.source.url,
     ).toContain("/project-a/"));

@@ -304,7 +304,7 @@ describe("RightDock", () => {
     />);
 
     expect(screen.getByRole("radio", { name: "P01-B-01 선택" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "추천 미리 듣기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "P01-B-01 미리 보기" })).toBeNull();
     expect(screen.queryByRole("button", { name: "선택한 추천 적용" })).toBeNull();
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
     expect(onPreviewCandidate).not.toHaveBeenCalled();

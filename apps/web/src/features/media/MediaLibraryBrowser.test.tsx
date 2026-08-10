@@ -27,6 +27,8 @@ describe("MediaLibraryBrowser", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(api.api, "listRecentMediaLibraryAssetIds").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "getMediaLibraryInstallState")
+      .mockResolvedValue({ status: "installed", installed_asset_count: 1 } as never);
   });
 
   it("lets the owner listen to a track before choosing it", async () => {
@@ -89,13 +91,73 @@ describe("MediaLibraryBrowser", () => {
     expect(screen.queryByText("음악 1")).toBeNull();
   });
 
-  it("says so plainly when the library has not been installed", async () => {
+  it("says the pack has not been brought in yet, rather than only a heading", async () => {
+    // 빈 화면은 세 가지 사정을 같은 얼굴로 보여 준다. 무엇을 해야 할지가
+    // 셋 다 다르므로 뭉뚱그리면 owner는 멈춘다.
+    vi.spyOn(api.api, "getMediaLibraryInstallState")
+      .mockResolvedValue({ status: "not_installed", installed_asset_count: 0 } as never);
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
     vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
 
-    expect(await screen.findByText("아직 준비된 음악과 효과음이 없어요.")).toBeVisible();
+    expect(await screen.findByText(
+      "음악과 효과음 꾸러미를 아직 들여놓지 않았어요. 꾸러미를 넣으면 여기에서 바로 들어볼 수 있어요.",
+    )).toBeVisible();
+  });
+
+  it("separates a library it could not read from a library that is empty", async () => {
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockRejectedValue(new Error("unreadable"));
+    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+
+    expect(await screen.findByText("음악과 효과음을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요."))
+      .toBeVisible();
+  });
+
+  it("says how many arrived when some of them are not usable yet", async () => {
+    vi.spyOn(api.api, "getMediaLibraryInstallState")
+      .mockResolvedValue({ status: "degraded", installed_asset_count: 130 } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
+    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+
+    expect(await screen.findByText("들여놓은 130개 가운데 일부는 확인이 끝나지 않아 아직 쓸 수 없어요."))
+      .toBeVisible();
+  });
+
+  it("puts what the owner used most recently under the favourites", async () => {
+    // 프로젝트로 들여온 것은 이미 최근 목록에 쌓이고 있었는데 아무도 다시
+    // 읽지 않아서, 방금 쓴 곡을 다음에도 아래에서 찾아 내려가야 했다.
+    const plain = asset({ library_asset_id: "pack:starter-v1:music-a", asset_id: "music-a" });
+    const used = asset({ library_asset_id: "pack:starter-v1:music-b", asset_id: "music-b" });
+    const loved = asset({ library_asset_id: "pack:starter-v1:music-c", asset_id: "music-c" });
+    vi.spyOn(api.api, "listMediaLibraryAssets")
+      .mockResolvedValue({ assets: [plain, used, loved] } as never);
+    vi.spyOn(api.api, "listMediaLibraryFavorites")
+      .mockResolvedValue({ asset_ids: ["pack:starter-v1:music-c"] } as never);
+    vi.spyOn(api.api, "listRecentMediaLibraryAssetIds")
+      .mockResolvedValue({ asset_ids: ["pack:starter-v1:music-b"] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+
+    const items = await screen.findAllByRole("article");
+    expect(items[0]).toHaveTextContent("음악 3");
+    expect(items[1]).toHaveTextContent("음악 2");
+    expect(items[1]).toHaveTextContent("최근에 썼어요");
+    expect(items[2]).toHaveTextContent("음악 1");
+  });
+
+  it("does not blame the pack when a filter is what emptied the list", async () => {
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
+    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+    fireEvent.click(await screen.findByRole("button", { name: "효과음만 보기" }));
+
+    expect(screen.getByText("고른 조건에 맞는 것이 없어요.")).toBeVisible();
   });
 });
 

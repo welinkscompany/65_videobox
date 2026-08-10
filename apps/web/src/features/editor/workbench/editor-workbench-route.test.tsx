@@ -3089,8 +3089,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(await screen.findByText("한 가지를 골랐어요.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "추천 미리 듣기" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "추천 미리 듣기" }));
+    expect(screen.getByRole("button", { name: "P01-B-01 미리 보기" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "P01-B-01 미리 보기" }));
     expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
     expect(document.querySelectorAll(".vb-editor-right-dock audio, .vb-editor-right-dock video")).toHaveLength(0);
 
@@ -3168,6 +3168,88 @@ describe("EditorWorkbenchRoute", () => {
     expect(materialize).toHaveBeenCalledTimes(1);
     expect(apply).toHaveBeenCalledTimes(1);
     expect(batchApply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["broll", "미리 보기"],
+    ["bgm", "미리 듣기"],
+    ["sfx", "미리 듣기"],
+  ] as const)("lets the owner see or hear a Yujin %s recommendation before applying it", async (kind, verb) => {
+    // 유진이 만든 후보는 `preview_uri`가 늘 비어 온다. 화면이 그 값만 보고
+    // 있었기 때문에 단추가 한 번도 그려지지 않았고, 추천을 확인할 방법은
+    // 적용해 보는 것뿐이었다. 실제 파일을 흘려 주는 주소는 따로 있다.
+    const proposal = yujinMediaProposal(kind);
+    expect(proposal.candidates[0].preview_uri).toBeNull();
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    const reference = proposal.candidates[0].visible_reference_code;
+    fireEvent.click(screen.getByRole("button", { name: `${reference} ${verb}` }));
+
+    await waitFor(() => expect(
+      document.querySelector<HTMLMediaElement>(".vb-preview-stage audio, .vb-preview-stage video")?.getAttribute("src"),
+    ).toBe(
+      `/api/projects/project-a/director/proposals/${proposal.proposal_id}/candidates/candidate-${kind}/preview`,
+    ));
+    expect(document.querySelectorAll(".vb-editor-right-dock audio, .vb-editor-right-dock video")).toHaveLength(0);
+  });
+
+  it("offers a way back to 유진 after the server rejects a stale recommendation", async () => {
+    // 낡은 추천으로 적용을 누르면 서버가 "다시 받으라"고 답하고 화면이 막힌다.
+    // 그런데 새 추천 받기는 이미 추천이 있으면 눌리지 않는다 -- 이 자리가
+    // 없으면 유진에게 돌아갈 길이 아예 없었다.
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: directorProposal(), references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal")
+      .mockResolvedValue({ status: "stale", code: "stale_proposal", action: "refresh" } as never);
+    const refresh = vi.spyOn(api, "refreshDirectorProposal")
+      .mockResolvedValue({ ...directorProposal("proposal-2"), base_session_revision: 1 } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
+
+    const again = await screen.findByRole("button", { name: "지금 편집본으로 다시 추천받기" });
+    fireEvent.click(again);
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledWith("project-a", "proposal-1"));
+    expect(await screen.findByRole("button", { name: "선택한 추천 적용" })).toBeVisible();
+    await waitFor(() => expect(
+      screen.queryByRole("button", { name: "지금 편집본으로 다시 추천받기" }),
+    ).toBeNull());
+  });
+
+  it("says why an out-of-date recommendation cannot be applied and offers a fresh one", async () => {
+    // 적용 단추가 이유 없이 꺼져 있는 것처럼 보이던 자리다.
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
+    vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: { ...directorProposal(), base_session_revision: 3 }, references: [],
+    } as never);
+    const refresh = vi.spyOn(api, "refreshDirectorProposal")
+      .mockResolvedValue({ ...directorProposal("proposal-2"), base_session_revision: 7 } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    expect(await screen.findByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "지금 편집본으로 다시 추천받기" }));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledWith("project-a", "proposal-1"));
+    await waitFor(() => expect(
+      screen.queryByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요."),
+    ).toBeNull());
   });
 
   it("disables stale Yujin Apply before materialize or edit mutation", async () => {
