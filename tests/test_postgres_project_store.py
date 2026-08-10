@@ -21,6 +21,7 @@ from videobox_api.main import create_app
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.director_proposals import DirectorCandidate, DirectorProposal
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.media_analysis import MediaAnalysisStatus
 from videobox_core_engine.editing_session import select_segment_tts_replacement
 from videobox_storage.postgres_project_store import PostgresProjectStore, _PostgresConnection
 from videobox_storage.postgres_compat import translate_sql
@@ -1256,6 +1257,49 @@ def test_postgres_store_archives_and_restores_a_project(tmp_path: Path, postgres
 
     with pytest.raises(KeyError):
         store.archive_project(project_id=f"does-not-exist-{uuid4().hex}")
+
+
+def test_postgres_recovery_revives_an_analysis_the_retry_budget_abandoned(
+    tmp_path: Path, postgres_url: str
+) -> None:
+    """The revival added for the frozen-analysis fix is written once on the base
+    class and inherited here, so it reaches Postgres through translate_sql --
+    including the `UPDATE ... RETURNING` the sweep relies on to name what it
+    requeued. The SQLite copy of this test passes without proving any of that,
+    and Postgres is what the container actually runs on."""
+    store = PostgresProjectStore(tmp_path, database_url=postgres_url)
+    project = store.bootstrap_project(f"Postgres frozen analysis {uuid4().hex}")
+    run = store.create_media_analysis(
+        project_id=project.project_id,
+        asset_id=f"asset_{uuid4().hex}",
+        idempotency_key=f"sha:{uuid4().hex}",
+        cache_key="cache-frozen",
+    )
+    analysis_id = run["analysis_id"]
+    for attempt in (1, 2, 3):
+        claim = store.claim_media_analysis(project_id=project.project_id, analysis_id=analysis_id)
+        assert claim is not None and claim["attempt"] == attempt
+        store.fail_media_analysis(
+            project_id=project.project_id,
+            analysis_id=analysis_id,
+            expected_attempt=attempt,
+            error_code="MEDIA_ANALYSIS_FAILED",
+            error_message="LM Studio timed out.",
+            next_retry_at="2000-01-01T00:00:00+00:00" if attempt < 3 else None,
+        )
+    frozen = store.get_media_analysis(project_id=project.project_id, analysis_id=analysis_id)
+    assert frozen["status"] == MediaAnalysisStatus.FAILED.value and frozen["next_retry_at"] is None
+    assert store.claim_media_analysis(project_id=project.project_id, analysis_id=analysis_id) is None
+
+    revived = store.recover_orphaned_media_analysis_jobs(project_id=project.project_id)
+
+    assert analysis_id in revived
+    state = store.get_media_analysis(project_id=project.project_id, analysis_id=analysis_id)
+    assert state["status"] == MediaAnalysisStatus.QUEUED.value
+    assert state["error_code"] is None
+    claimed = store.claim_media_analysis(project_id=project.project_id, analysis_id=analysis_id)
+    assert claimed is not None and claimed["attempt"] == 4
+    assert analysis_id not in store.recover_orphaned_media_analysis_jobs(project_id=project.project_id)
 
 
 def test_postgres_store_deletes_a_project_permanently(tmp_path: Path, postgres_url: str) -> None:

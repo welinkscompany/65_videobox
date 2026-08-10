@@ -119,6 +119,12 @@ _LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _LOGGER = logging.getLogger(__name__)
 
 
+def _redact_database_url(database_url: str) -> str:
+    """비밀번호를 빼고 어디에 붙었는지만 남긴다. 로그는 컨테이너 밖으로 나간다."""
+    without_scheme = database_url.split("://", 1)[-1]
+    return without_scheme.split("@", 1)[-1] if "@" in without_scheme else without_scheme
+
+
 def configure_logging() -> None:
     """VideoBox 로그가 컨테이너 출력에 추적 가능한 형태로 나가게 한다.
 
@@ -672,6 +678,13 @@ def create_app(
             verify_container_snapshot(snapshot_root)
         except ContainerSnapshotError as error:
             raise ValueError(f"container mode requires a verified container snapshot: {error}") from error
+    # 저장소는 실행할 때 갈린다. 주소 한 줄이 빠져도 실패하지 않고 조용히 다른
+    # 서랍을 여는데, 화면에서는 그것이 "프로젝트가 전부 사라짐"으로 보인다.
+    # 어느 쪽을 열었는지 남겨야 그 물음에 로그로 답할 수 있다.
+    if database_url is not None:
+        _LOGGER.info("데이터베이스 저장소를 씁니다 (%s).", _redact_database_url(database_url))
+    else:
+        _LOGGER.info("파일 저장소를 씁니다 (%s). 데이터베이스 주소가 설정되지 않았습니다.", resolved_projects_root)
     store = (
         PostgresProjectStore(resolved_projects_root, database_url=database_url, now=analysis_clock)
         if database_url is not None

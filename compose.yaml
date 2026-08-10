@@ -43,6 +43,14 @@ services:
       retries: 20
     networks: [videobox-internal]
     security_opt: [no-new-privileges:true]
+    # The only service that had no cap. A database writes its loudest logs
+    # exactly when it is already unhealthy, so an unbounded file here fills the
+    # disk at the worst possible moment.
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   videobox-workspace:
     build:

@@ -11,6 +11,38 @@ from videobox_storage.local_project_store import LocalProjectStore
 import pytest
 
 
+def test_startup_records_which_store_it_opened(monkeypatch, tmp_path: Path, caplog) -> None:
+    """The store is chosen at runtime: VIDEOBOX_DATABASE_URL means Postgres,
+    its absence means a local SQLite file. A missing line in the environment
+    therefore does not fail -- the API starts cleanly and reads an empty local
+    database instead of the owner's real one, which on screen looks exactly
+    like every project having vanished. Recording the choice at startup turns
+    that from a mystery into one line of the log."""
+    import logging
+
+    monkeypatch.delenv("VIDEOBOX_DATABASE_URL", raising=False)
+
+    with caplog.at_level(logging.INFO, logger="videobox_api.main"):
+        create_app(projects_root=tmp_path / "projects")
+
+    records = [record.getMessage() for record in caplog.records]
+    assert any("파일 저장소" in message for message in records), records
+
+
+def test_recorded_database_location_never_carries_the_password() -> None:
+    """The database URL carries POSTGRES_PASSWORD. Logs leave the container, so
+    the startup line keeps the host and database name and drops the rest."""
+    from videobox_api.main import _redact_database_url
+
+    redacted = _redact_database_url(
+        "postgresql://videobox:s3cr3t-pw@videobox-postgres:5432/videobox"
+    )
+
+    assert "s3cr3t-pw" not in redacted
+    assert "videobox" in redacted
+    assert redacted == "videobox-postgres:5432/videobox"
+
+
 def test_projects_root_uses_videobox_data_root_environment(monkeypatch, tmp_path: Path) -> None:
     configured = tmp_path / "managed-data"
     monkeypatch.setenv("VIDEOBOX_DATA_ROOT", str(configured))

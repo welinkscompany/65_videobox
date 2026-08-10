@@ -19,6 +19,23 @@ def test_compose_uses_exact_project_name_and_workspace_only_web_loopback_port() 
     ]
 
 
+def test_every_service_caps_its_logs_including_postgres() -> None:
+    """postgres was the one service with no cap, so its logs grew without bound
+    while the other four rotated at 10MB. An unbounded log on the database is
+    the worst place for one: it fills the disk quietly, and it does so fastest
+    exactly when the database is already unhealthy and printing errors."""
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+
+    uncapped = [
+        name
+        for name, service in compose["services"].items()
+        if service.get("logging")
+        != {"driver": "local", "options": {"max-size": "10m", "max-file": "3"}}
+    ]
+
+    assert uncapped == []
+
+
 def test_workspace_owns_api_and_web_mounts_without_host_or_docker_access() -> None:
     compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
     workspace = compose["services"]["videobox-workspace"]
