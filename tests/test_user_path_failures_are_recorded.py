@@ -406,6 +406,48 @@ def test_a_project_with_no_draft_yet_stays_quiet() -> None:
     assert records == []
 
 
+def test_the_audit_screen_says_what_it_could_not_read(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """다른 조용한 실패를 진단하려고 여는 화면이 똑같은 방식으로 거짓말했다.
+
+    읽지 못한 산출물은 목록에서 그냥 빠지고, 결과는 완전한 목록인 것처럼
+    제시된다. 여기가 새면 나머지를 진단할 근거가 없어진다.
+    """
+    from videobox_domain_models.jobs import JobType
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("audit")
+
+    store.list_jobs = lambda **_kwargs: [
+        {
+            "job_id": "job-1",
+            "job_type": JobType.SEGMENT_ANALYSIS.value,
+            "output_ref": "missing-analysis",
+            "input_ref": "",
+        }
+    ]
+
+    def _unreadable(**_kwargs):
+        raise RuntimeError("segment analysis file is corrupt")
+
+    store.get_segment_analysis = _unreadable
+
+    with caplog.at_level(logging.WARNING):
+        audit = store.get_provider_trace_audit(project_id=project.project_id)
+
+    # 동작은 그대로다 -- 읽지 못한 항목은 계속 빠지고 나머지는 나온다.
+    assert audit["entries"] == []
+    reported = [
+        record
+        for record in caplog.records
+        if "segment analysis file is corrupt" in str(record.exc_info)
+    ]
+    assert len(reported) == 1, "감사 화면이 못 읽은 항목을 말하지 않았다"
+    assert "missing-analysis" in reported[0].getMessage()
+
+
 def test_every_user_path_swallow_point_carries_a_logger() -> None:
     """네 지점이 로거를 갖고 있는지 파일 단위로 잠근다. 하나가 조용히 빠지면
     다시 "왜 안 되는지 모르겠다"로 돌아간다."""
