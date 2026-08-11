@@ -372,10 +372,6 @@ export type EditingSession = {
   updated_at?: string | null;
 };
 
-export type CreateEditingSessionRequest = {
-  timeline_job_id: string;
-};
-
 export type EditorPreset = {
   preset_id: string;
   name: string;
@@ -558,12 +554,6 @@ export type PartialRegenerationJob = {
   regenerated_segments: Record<string, unknown>[];
   timeline: TimelinePayload;
   created_at?: string | null;
-};
-
-export type BuildTimelineRequest = {
-  segment_analysis_job_id: string;
-  recommendation_job_ids: string[];
-  orientation?: "landscape" | "vertical";
 };
 
 export type OutputJobRequest = {
@@ -1681,14 +1671,6 @@ export const api = {
     const payload = await request<{ jobs: JobRecordWithProject[] }>("/api/jobs");
     return payload.jobs;
   },
-  buildTimeline: (projectId: string, payload: BuildTimelineRequest) =>
-    request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/build-timeline`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
   approveTimeline: (projectId: string, jobId: string) =>
     request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/${jobId}/approve`, {
       method: "POST",
@@ -1728,14 +1710,6 @@ export const api = {
         method: "POST",
       },
     ),
-  createEditingSession: (projectId: string, payload: CreateEditingSessionRequest) =>
-    request<EditingSession>(`/api/projects/${projectId}/editing-sessions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    }),
   getEditingSession: (projectId: string, sessionId: string) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
   getLatestEditingSession: async (projectId: string): Promise<EditingSession | null> => {
@@ -2126,8 +2100,6 @@ export const api = {
     request<AssetBrowserPreview>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview`, { method: "POST", credentials: "same-origin", redirect: "error", signal }),
   getAssetBrowserPreview: (projectId: string, assetId: string, signal?: AbortSignal) =>
     request<AssetBrowserPreview>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview`, { credentials: "same-origin", redirect: "error", signal }),
-  assetBrowserPreviewContentUrl: (projectId: string, assetId: string) =>
-    `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview/content`,
   assetThumbnailUrl: (projectId: string, assetId: string) =>
     `/api/projects/${projectId}/assets/${assetId}/thumbnail`,
   startFinalRender: (projectId: string, payload: OutputJobRequest) =>
