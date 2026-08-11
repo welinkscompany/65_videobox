@@ -525,6 +525,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
   return <section
     aria-label="타임라인"
     className="vb-editor-workbench__timeline"
+    data-scroll-owner="timeline"
     data-pixels-per-second={formatSeconds(state.pixelsPerSecond)}
     data-viewport-start-seconds={formatSeconds(state.viewportStartSec)}
     onClick={handleClick}
@@ -594,7 +595,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         and meant nothing to the owner. The kind and the time are the parts that
         actually tell them where the playhead landed. */}
     {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
-    {mutationMessage ? <p role="status">{mutationMessage}</p> : null}
+    {mutationMessage ? <p role="status" aria-label="편집 저장 상태">{mutationMessage}</p> : null}
     <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
     {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>표시할 타임라인 항목이 없습니다.</p> : null}
   </section>;

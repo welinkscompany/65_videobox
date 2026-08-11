@@ -44,6 +44,10 @@ body:has(.vb-product-shell) { margin:0; }
 .vb-outputs section, .vb-outputs article, .vb-creation-interview section, .vb-media-library article, .vb-project-archive article { border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); padding:1rem; display:grid; gap:.5rem; }
 .vb-media-library article strong { font-weight:650; }
 .vb-media-library audio { width:100%; max-width:28rem; }
+.vb-media-library__grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; min-width:0; }
+.vb-media-library__grid article { min-width:0; min-height:0; padding:.75rem; overflow:hidden; }
+.vb-media-library__grid audio { max-width:100%; }
+.vb-media-library__grid img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:.45rem; background:var(--vb-canvas); }
 .vb-media-library__filters { display:flex; flex-wrap:wrap; gap:.5rem; }
 .vb-settings-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1rem; }
 .vb-editor-assets__orientation { display:inline-flex; align-items:center; gap:.3rem; border:1px solid var(--vb-border); border-radius:999px; padding:.1rem .55rem; font-size:.75rem; color:var(--vb-muted); background:var(--vb-canvas); }
