@@ -1688,10 +1688,11 @@ describe("OutputsPage", () => {
   });
 
   it("constrains a playable final video to its output card", async () => {
-    stubReadOnlyOutputApi();
+    stubCanonicalSubtitleApi({ reviewStatus: "approved", jobs: [activeTimelineJob, { ...finalJob, input_ref: "timeline-current" }] as never });
     vi.spyOn(api, "getFinalRender").mockResolvedValue({
       job_id: finalJob.job_id, status: "succeeded", render: {
-        export_id: "final-current", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4", status: "succeeded", is_current: true,
+      export_id: "final-current", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4", status: "succeeded", is_current: true,
+      source_session_id: "session-a", source_session_revision: 7,
       },
     });
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
