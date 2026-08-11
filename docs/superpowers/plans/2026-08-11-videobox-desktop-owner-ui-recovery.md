@@ -190,15 +190,15 @@
 - [x] **Step 5: Run stale review recovery.** The edit invalidated the prior review (`editing_session_mutation`), refresh rebuilt it for revision 2, and approval succeeded with no blockers.
 - [x] **Step 6: Generate outputs.** Subtitle, final MP4, and CapCut draft jobs all succeeded against the approved timeline; no external publishing/upload was performed.
 - [x] **Step 7: Verify artifacts.** SRT, MP4, and CapCut draft files are nonzero; FFprobe confirms 1920×1080 H.264/AAC, 5.0 seconds, 48 kHz stereo audio. A representative MP4 frame was inspected.
-- [ ] **Step 8: Perform owner media acceptance.** MP4 frame/FFprobe evidence is recorded, but full owner watch/listen and caption-timing acceptance is still pending. CapCut handoff registration failed because installation was not detected; `owner-ready.ps1 -Mode OpenCapCut` only confirmed an open request, not Desktop import/open.
+- [ ] **Step 8: Perform owner media acceptance.** MP4 frame/FFprobe evidence is recorded, but full owner watch/listen and caption-timing acceptance is still pending. Container handoff registration could not detect CapCut while host `owner-ready -Mode Check` reports CapCut 9.1.0.3879; `OpenCapCut` only confirmed an open request, not Desktop import/open.
 - [x] **Step 9: Preserve evidence and stop before cleanup.** The dedicated QA project and all outputs remain in runtime storage; no cleanup or deletion was performed.
 
 ## Task 9: Handoff and completion decision
 
-- [ ] **Step 1: Pin final HEAD and verify clean status.** Run `git status --short`, `git diff --check`, `git log -1 --oneline`, and `git rev-list --left-right --count '@{upstream}...HEAD'`.
-- [ ] **Step 2: Separate gates in the handoff.** Record automated tests, browser visual proof, artifact/FFprobe proof, and owner media acceptance as separate rows. Never collapse them into one green test count.
-- [ ] **Step 3: Report unrun gates.** If CapCut Desktop, audio listening, or owner approval did not happen, state them as pending and do not call the product owner-ready.
-- [ ] **Step 4: Commit the handoff only after all required gates are honestly recorded.** Use a docs-only commit with the current branch and exact evidence paths.
+- [x] **Step 1: Pin final HEAD and verify clean status.** HEAD is `f092f343a`; `git status --short` is clean, `git diff --check` passes, and upstream count is `0 0`.
+- [x] **Step 2: Separate gates in the handoff.** Automated tests, browser visual proof, artifact/FFprobe proof, and owner media acceptance are recorded as separate gates in the handoff; they are not collapsed into one green test count.
+- [x] **Step 3: Report unrun gates.** CapCut Desktop import/open, full audio/video listening, caption-timing review, and owner approval remain explicitly pending; the product is not called owner-ready.
+- [x] **Step 4: Commit the handoff only after all required gates are honestly recorded.** Handoff updates were committed and pushed on the current branch with exact evidence paths.
 
 ## Verification command reference
 
