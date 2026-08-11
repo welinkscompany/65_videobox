@@ -4,7 +4,10 @@ import { api, type BrollAsset, type MediaAnalysis, type MediaInboxAsset } from "
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { projectEditorAssets } from "../editor/assets/editorAssetProjection";
 import { MediaLibraryBrowser } from "./MediaLibraryBrowser";
+
+type MediaTab = "videos" | "music" | "sfx" | "import";
 
 type MediaState = {
   projectId: string;
@@ -43,14 +46,6 @@ function assetTitle(asset: BrollAsset | undefined, index: number) {
   return typeof title === "string" && title.trim() ? title.trim() : `미디어 ${index + 1}`;
 }
 
-/** 반입이 쓰는 이름은 `duration_sec`이다. `duration_seconds`는 미디어 팩 쪽 이름이라
- *  프로젝트 자산에는 붙지 않는다. 이 화면은 팩 이름만 읽고 있어서 길이를 아는 자산까지
- *  전부 "확인하고 있어요"로 남았다. 편집기 카드에서 이미 고친 것과 같은 형태로 맞춘다. */
-function assetDurationSeconds(metadata: BrollAsset["metadata"] | undefined) {
-  const value = metadata?.duration_sec ?? metadata?.duration_seconds;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   const [state, setState] = useState<MediaState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +54,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   const [preview, setPreview] = useState<{ assetId: string; durationSec?: number } | null>(null);
   const [tags, setTags] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<MediaTab>("videos");
   const currentContext = useRef({ projectId, generation: 0 });
   const loadEpoch = useRef(0);
   const actionSequence = useRef(0);
@@ -113,6 +109,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     setTags({});
     setMessage(null);
     setBusyKey(null);
+    setActiveTab("videos");
     void load();
     return () => {
       loadEpoch.current += 1;
@@ -234,6 +231,16 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
 
   const currentState = state?.projectId === projectId ? state : null;
   const assetById = new Map(currentState?.assets.map((item) => [item.asset_id, item]) ?? []);
+  const projectCards = currentState
+    ? projectEditorAssets({ projectId, brollAssets: currentState.assets, libraryAssets: [] })
+    : [];
+
+  const tabs: readonly { value: MediaTab; label: string }[] = [
+    { value: "videos", label: "내 영상" },
+    { value: "music", label: "음악" },
+    { value: "sfx", label: "효과음" },
+    { value: "import", label: "가져오기" },
+  ];
 
   return (
     <main data-project-id={projectId} data-testid="media-workspace-page">
@@ -251,27 +258,41 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       {error ? <div role="alert"><p>{error}</p><Button type="button" onClick={() => void load()}>다시 불러오기</Button></div> : null}
       {message ? <p role="status">{message}</p> : null}
 
-      <section aria-labelledby="media-upload-heading">
-        <h2 id="media-upload-heading">영상 올리기</h2>
-        <p>평소에 찍어둔 장면 영상을 여러 개 한 번에 올려 보관함에 쌓아 둘 수 있어요.</p>
-        <label htmlFor="media-broll-upload">장면 영상 파일 추가</label>
-        <Input
-          id="media-broll-upload"
-          type="file"
-          accept="video/*,.mp4,.mov,.webm,.mkv"
-          multiple
-          disabled={busyKey !== null}
-          onChange={(event) => {
-            const files = event.target.files;
-            event.target.value = "";
-            if (files && files.length > 0) void uploadFiles(files);
-          }}
-        />
-      </section>
+      <div role="tablist" aria-label="자산 종류" className="vb-media-workspace__tabs">
+        {tabs.map((tab) => (
+          <Button
+            key={tab.value}
+            type="button"
+            variant={activeTab === tab.value ? "default" : "outline"}
+            role="tab"
+            aria-selected={activeTab === tab.value}
+            aria-controls={`media-panel-${tab.value}`}
+            onClick={() => setActiveTab(tab.value)}
+          >
+            {tab.label}
+          </Button>
+        ))}
+      </div>
 
-      {currentState ? (
-        <div className="grid gap-4">
-          <section aria-labelledby="media-collection-heading">
+      {activeTab === "import" ? <div id="media-panel-import" role="tabpanel" aria-label="가져오기" className="grid gap-4">
+        <section aria-labelledby="media-upload-heading">
+          <h2 id="media-upload-heading">영상 올리기</h2>
+          <p>평소에 찍어둔 장면 영상을 여러 개 한 번에 올려 보관함에 쌓아 둘 수 있어요.</p>
+          <label htmlFor="media-broll-upload">장면 영상 파일 추가</label>
+          <Input
+            id="media-broll-upload"
+            type="file"
+            accept="video/*,.mp4,.mov,.webm,.mkv"
+            multiple
+            disabled={busyKey !== null}
+            onChange={(event) => {
+              const files = event.target.files;
+              event.target.value = "";
+              if (files && files.length > 0) void uploadFiles(files);
+            }}
+          />
+        </section>
+        {currentState ? <section aria-labelledby="media-collection-heading">
             <h2 id="media-collection-heading">따로 모아둔 영상 가져오기</h2>
             <p>미리 옮겨둔 영상이 여기에 쌓여요. 이 프로젝트에서 쓸 영상을 골라 가져오세요.</p>
             {currentState.collection.length === 0 ? <p>아직 따로 모아둔 영상이 없어요.</p> : (
@@ -297,24 +318,29 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
                 ))}
               </div>
             )}
-          </section>
+        </section> : null}
+      </div> : null}
 
-          <MediaLibraryBrowser projectId={projectId} />
+      {activeTab === "music" ? <div id="media-panel-music" role="tabpanel" aria-label="음악"><MediaLibraryBrowser projectId={projectId} fixedFilter="music" /></div> : null}
+      {activeTab === "sfx" ? <div id="media-panel-sfx" role="tabpanel" aria-label="효과음"><MediaLibraryBrowser projectId={projectId} fixedFilter="sfx" /></div> : null}
 
+      {activeTab === "videos" && currentState ? (
+        <div id="media-panel-videos" role="tabpanel" aria-label="내 영상" className="grid gap-4">
           <section aria-labelledby="media-assets-heading">
-            <h2 id="media-assets-heading">준비한 자산</h2>
-            {currentState.assets.length === 0 ? <p>아직 준비한 자산이 없어요.</p> : (
+            <h2 id="media-assets-heading">내 영상</h2>
+            {projectCards.length === 0 ? <p>아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요.</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {currentState.assets.map((item, index) => (
-                  <Card key={item.asset_id}>
+                {projectCards.map((card) => (
+                  <Card key={card.id} aria-label={`${card.title} 자산`}>
+                    {card.thumbnailUrl ? <img className="vb-editor-assets__thumb" src={card.thumbnailUrl} alt={`${card.title} 미리보기`} loading="lazy" /> : null}
                     <CardHeader>
-                      <CardTitle>{assetTitle(item, index)}</CardTitle>
-                      <CardDescription>영상</CardDescription>
+                      <CardTitle title={card.title}>{card.title}</CardTitle>
+                      <CardDescription>{card.durationLabel === "길이 정보 없음" ? card.durationLabel : `길이 ${card.durationLabel}`}</CardDescription>
+                      <CardDescription>{card.orientation ?? "방향 확인 중"}</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {assetDurationSeconds(item.metadata) !== null
-                        ? <p>길이 {assetDurationSeconds(item.metadata)}초</p>
-                        : <p>길이를 확인하고 있어요.</p>}
+                      <p>{card.audioPresence}</p>
+                      <p>{card.status}</p>
                     </CardContent>
                   </Card>
                 ))}

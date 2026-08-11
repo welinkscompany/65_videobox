@@ -159,6 +159,24 @@ describe("MediaLibraryBrowser", () => {
 
     expect(screen.getByText("고른 조건에 맞는 것이 없어요.")).toBeVisible();
   });
+
+  it("renders at most 24 audio cards and pages the remainder", async () => {
+    const assets = Array.from({ length: 25 }, (_, index) => asset({
+      library_asset_id: `pack:starter-v1:music-${String(index + 1).padStart(3, "0")}`,
+      asset_id: `music-${String(index + 1).padStart(3, "0")}`,
+    }));
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets } as never);
+    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    const { container } = render(<MediaLibraryBrowser projectId="project-a" />);
+
+    await screen.findByText("음악 1");
+    expect(container.querySelectorAll("article")).toHaveLength(24);
+    expect(screen.getByText("1 / 2페이지")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
+    expect(await screen.findByText("음악 25")).toBeVisible();
+    expect(container.querySelectorAll("article")).toHaveLength(1);
+  });
 });
 
 describe("항목 이름", () => {

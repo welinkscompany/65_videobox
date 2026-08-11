@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/button";
 import { orderByFavouriteThenRecent } from "../../lib/pickerOrder";
 
 type Filter = "all" | "music" | "sfx";
+export const MEDIA_LIBRARY_PAGE_SIZE = 24;
 
 /** 비어 있는 목록에 이유를 붙인다.
  *
@@ -37,7 +38,7 @@ const filters: readonly { value: Filter; label: string }[] = [
  * screen used them. With 130 assets installed, choosing meant reading
  * filenames and guessing.
  */
-export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
+export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: string; fixedFilter?: Exclude<Filter, "all"> }) {
   const [assets, setAssets] = useState<readonly MediaLibraryAsset[]>([]);
   const [favourites, setFavourites] = useState<readonly string[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
@@ -45,6 +46,8 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
   const [installState, setInstallState] = useState<MediaLibraryInstallState | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [recents, setRecents] = useState<readonly string[]>([]);
+  const [page, setPage] = useState(1);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -70,8 +73,9 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
       })
       .catch(() => { if (active) setLoadFailed(true); })
       .finally(() => { if (active) setReady(true); });
+    setPage(1);
     return () => { active = false; };
-  }, [projectId]);
+  }, [loadAttempt, projectId]);
 
   const toggle = async (libraryAssetId: string, enabled: boolean) => {
     // Show the change now; the list re-sorts on the server's answer.
@@ -103,15 +107,24 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
 
   // Favourites first, then whatever was used most recently: the point of
   // marking one is not to hunt for it again, and neither is having just used it.
+  const selectedFilter = fixedFilter ?? filter;
   const visible = orderByFavouriteThenRecent(
-    assets.filter((item) => filter === "all" || item.media_type === filter),
+    assets.filter((item) => selectedFilter === "all" || item.media_type === selectedFilter),
     (item) => item.library_asset_id,
     favourites,
     recents,
     (left, right) => left.asset_id.localeCompare(right.asset_id),
   );
 
-  if (!ready) return null;
+  const pageCount = Math.max(1, Math.ceil(visible.length / MEDIA_LIBRARY_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageItems = visible.slice((safePage - 1) * MEDIA_LIBRARY_PAGE_SIZE, safePage * MEDIA_LIBRARY_PAGE_SIZE);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
+
+  if (!ready) return <section className="vb-media-library" aria-labelledby="media-library-heading"><h2 id="media-library-heading">음악과 효과음</h2><p role="status">음악과 효과음을 불러오고 있어요.</p></section>;
   return (
     <section className="vb-media-library" aria-labelledby="media-library-heading">
       <h2 id="media-library-heading">음악과 효과음</h2>
@@ -119,20 +132,23 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
       {installState?.status === "degraded" ? (
         <p role="status">{`들여놓은 ${installState.installed_asset_count}개 가운데 일부는 확인이 끝나지 않아 아직 쓸 수 없어요.`}</p>
       ) : null}
-      <div className="vb-media-library__filters">
+      {fixedFilter ? null : <div className="vb-media-library__filters">
         {filters.map((item) => (
           <Button
             key={item.value}
             type="button"
             variant="outline"
             aria-pressed={filter === item.value}
-            onClick={() => setFilter(item.value)}
+            onClick={() => { setFilter(item.value); setPage(1); }}
           >
             {item.label}
           </Button>
         ))}
-      </div>
-      {visible.length ? visible.map((item) => {
+      </div>}
+      {loadFailed ? <Button type="button" variant="outline" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>다시 불러오기</Button> : null}
+      {visible.length ? <>
+        <div className="vb-media-library__grid">
+        {pageItems.map((item) => {
         const loved = favourites.includes(item.library_asset_id);
         const name = displayNames.get(item.library_asset_id) ?? item.asset_id;
         return (
@@ -161,7 +177,14 @@ export function MediaLibraryBrowser({ projectId }: { projectId: string }) {
             </Button>
           </article>
         );
-      }) : <p>{assets.length ? "고른 조건에 맞는 것이 없어요." : libraryEmptyReason(installState, loadFailed)}</p>}
+      })}
+        </div>
+        {pageCount > 1 ? <nav aria-label="음악과 효과음 페이지 이동" className="vb-media-library__pagination">
+          <Button type="button" variant="outline" disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>이전 페이지</Button>
+          <span aria-live="polite">{safePage} / {pageCount}페이지</span>
+          <Button type="button" variant="outline" disabled={safePage >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>다음 페이지</Button>
+        </nav> : null}
+      </> : <p>{assets.length ? "고른 조건에 맞는 것이 없어요." : libraryEmptyReason(installState, loadFailed)}</p>}
     </section>
   );
 }

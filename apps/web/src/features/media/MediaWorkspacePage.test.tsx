@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type BrollAsset, type MediaAnalysis } from "../../api";
+import { api, type BrollAsset, type MediaAnalysis, type MediaLibraryAsset } from "../../api";
 import { MediaWorkspacePage } from "./MediaWorkspacePage";
 
 const asset = (projectId = "project-a"): BrollAsset => ({
@@ -24,8 +24,29 @@ const analysis = (status: string, index: number): MediaAnalysis => ({
   created_at: "2026-07-23T00:00:00Z",
 });
 
+const libraryAsset = (mediaType: "music" | "sfx"): MediaLibraryAsset => ({
+  library_asset_id: `pack:starter-v1:${mediaType}-1`,
+  asset_id: `${mediaType}-1`,
+  media_type: mediaType,
+  duration_seconds: mediaType === "music" ? 82 : 1,
+  version: "1.0.0",
+  verified: true,
+  available: true,
+  tags: [],
+  source: "local",
+  creator: "VideoBox",
+  official_license_url: "",
+  attribution_required: false,
+  attribution_text: "",
+});
+
 function makeFile(name: string) {
   return new File(["clip-bytes"], name, { type: "video/mp4" });
+}
+
+async function openImportTab() {
+  fireEvent.click(screen.getByRole("tab", { name: "가져오기" }));
+  await screen.findByText("영상 올리기");
 }
 
 beforeEach(() => {
@@ -49,11 +70,43 @@ beforeEach(() => {
     asset_type: "broll_video",
     storage_uri: "local://project-a/asset-imported",
   });
+  vi.spyOn(api, "getMediaLibraryInstallState").mockResolvedValue({ status: "installed", installed_asset_count: 2 });
+  vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [libraryAsset("music"), libraryAsset("sfx")] });
+  vi.spyOn(api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] });
+  vi.spyOn(api, "listRecentMediaLibraryAssetIds").mockResolvedValue({ asset_ids: [] });
 });
 
 afterEach(() => vi.restoreAllMocks());
 
 describe("MediaWorkspacePage", () => {
+  it("keeps the default 내 영상 tab focused and moves imports into 가져오기", async () => {
+    render(<MediaWorkspacePage projectId="project-a" />);
+
+    expect(await screen.findByRole("tab", { name: "내 영상" })).toHaveAttribute("aria-selected", "true");
+    expect((await screen.findAllByText("회의 장면"))[0]).toBeVisible();
+    expect(screen.queryByText("따로 모아둔 영상 가져오기")).not.toBeInTheDocument();
+    expect(screen.queryByText("음악과 효과음")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "가져오기" }));
+    expect(screen.getByText("따로 모아둔 영상 가져오기")).toBeVisible();
+    expect(screen.getByLabelText("장면 영상 파일 추가")).toBeVisible();
+    expect(screen.queryByText("음악과 효과음")).not.toBeInTheDocument();
+  });
+
+  it("renders only the selected library type and exposes bounded project pages", async () => {
+    render(<MediaWorkspacePage projectId="project-a" />);
+    await screen.findByRole("heading", { name: "내 영상" });
+
+    fireEvent.click(screen.getByRole("tab", { name: "음악" }));
+    expect(await screen.findByText("음악과 효과음")).toBeVisible();
+    expect(screen.getByText("음악 1")).toBeVisible();
+    expect(screen.queryByText("효과음 1")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "효과음" }));
+    expect(screen.getByText("음악과 효과음")).toBeVisible();
+    expect(screen.queryByText("음악 1")).not.toBeInTheDocument();
+  });
+
   it("loads local assets and analysis without mutating or exposing raw contracts", async () => {
     vi.mocked(api.listBrollAssets).mockResolvedValue([
       asset(),
@@ -95,7 +148,7 @@ describe("MediaWorkspacePage", () => {
 
     expect(await screen.findByText("길이 34초")).toBeVisible();
     expect(screen.getByText("길이 12초")).toBeVisible();
-    expect(screen.getAllByText("길이를 확인하고 있어요.")).toHaveLength(1);
+    expect(screen.getByText("길이 정보 없음")).toBeVisible();
   });
 
   it("supports cancel, retry, and review with one in-flight action and an authoritative two-list refresh", async () => {
@@ -148,7 +201,7 @@ describe("MediaWorkspacePage", () => {
     expect(document.body.textContent).not.toContain("raw provider failure");
 
     fireEvent.click(screen.getByRole("button", { name: "다시 불러오기" }));
-    expect(await screen.findByText("아직 준비한 자산이 없어요.")).toBeVisible();
+    expect(await screen.findByText("아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요.")).toBeVisible();
     expect(screen.getByText("확인할 분석이 없어요.")).toBeVisible();
   });
 
@@ -183,6 +236,7 @@ describe("MediaWorkspacePage", () => {
 
   it("uploads one or more files from the asset screen and refreshes the list", async () => {
     render(<MediaWorkspacePage projectId="project-a" />);
+    await openImportTab();
     await screen.findByRole("heading", { name: "자산 보관함" });
     expect(api.listBrollAssets).toHaveBeenCalledTimes(1);
 
@@ -203,6 +257,7 @@ describe("MediaWorkspacePage", () => {
       .mockResolvedValueOnce({ asset_id: "asset-uploaded", asset_type: "broll_video", scan_status: "local_ready" })
       .mockRejectedValueOnce(new Error("raw provider failure"));
     render(<MediaWorkspacePage projectId="project-a" />);
+    await openImportTab();
     await screen.findByRole("heading", { name: "자산 보관함" });
 
     const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
@@ -216,6 +271,7 @@ describe("MediaWorkspacePage", () => {
     let release!: (value: { asset_id: string; asset_type: string; scan_status: string }) => void;
     vi.mocked(api.uploadDraftBroll).mockImplementation(() => new Promise((resolve) => { release = resolve; }));
     render(<MediaWorkspacePage projectId="project-a" />);
+    await openImportTab();
     await screen.findByRole("heading", { name: "자산 보관함" });
 
     const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
@@ -234,15 +290,16 @@ describe("MediaWorkspacePage", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValue([{ ...asset(), asset_id: "asset-imported", metadata: { title: "촬영-01" } }]);
     render(<MediaWorkspacePage projectId="project-a" />);
+    await openImportTab();
 
     expect(await screen.findByText("촬영-01.mp4")).toBeVisible();
     expect(screen.getByText("120.0MB")).toBeVisible();
-    expect(screen.getByText("아직 준비한 자산이 없어요.")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "촬영-01.mp4 가져오기" }));
 
     await waitFor(() => expect(api.importMediaInboxAsset).toHaveBeenCalledWith("project-a", "촬영-01.mp4"));
     expect(await screen.findByText("「촬영-01.mp4」을 이 프로젝트로 가져왔어요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "내 영상" }));
     expect(await screen.findByText("촬영-01")).toBeVisible();
     expect(screen.queryByText("아직 준비한 자산이 없어요.")).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("asset-imported");
@@ -251,6 +308,7 @@ describe("MediaWorkspacePage", () => {
   it("shows an empty shared collection in creator language", async () => {
     vi.mocked(api.listMediaInboxAssets).mockResolvedValue([]);
     render(<MediaWorkspacePage projectId="project-a" />);
+    await openImportTab();
 
     expect(await screen.findByText("아직 따로 모아둔 영상이 없어요.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /가져오기$/ })).not.toBeInTheDocument();
@@ -259,6 +317,7 @@ describe("MediaWorkspacePage", () => {
   it("reports a failed import in creator language without leaking the raw failure", async () => {
     vi.mocked(api.importMediaInboxAsset).mockRejectedValue(new Error("media_inbox_asset_missing"));
     render(<MediaWorkspacePage projectId="project-a" />);
+    await openImportTab();
 
     fireEvent.click(await screen.findByRole("button", { name: "촬영-01.mp4 가져오기" }));
 
@@ -270,6 +329,7 @@ describe("MediaWorkspacePage", () => {
     let release!: (value: { asset_id: string; project_id: string; asset_type: string; storage_uri: string }) => void;
     vi.mocked(api.importMediaInboxAsset).mockImplementation(() => new Promise((resolve) => { release = resolve; }));
     render(<MediaWorkspacePage projectId="project-a" />);
+    await openImportTab();
 
     fireEvent.click(await screen.findByRole("button", { name: "촬영-01.mp4 가져오기" }));
     expect(screen.getByRole("button", { name: "촬영-02.mp4 가져오기" })).toBeDisabled();
