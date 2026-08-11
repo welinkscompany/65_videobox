@@ -459,7 +459,18 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     currentState.timeline.timeline.source_session_id === currentSession.session_id &&
     currentState.timeline.timeline.source_session_revision === currentSession.session_revision,
   );
+  const hasCurrentReviewIdentity = Boolean(
+    currentState?.review && currentState.approval && currentSession && timelineJob &&
+    currentSession.project_id === projectId &&
+    currentState.review.project_id === projectId &&
+    currentState.review.timeline_id === currentSession.timeline_id &&
+    currentState.approval.project_id === projectId &&
+    currentState.approval.timeline_id === currentSession.timeline_id &&
+    currentState.approval.source_session_id === currentSession.session_id &&
+    currentState.approval.source_session_revision === currentSession.session_revision,
+  );
   const reviewApproved = Boolean(
+    hasCurrentReviewIdentity &&
     currentState?.review?.review_status === "approved" &&
     currentState.approval?.review_status === "approved" &&
     currentState.approval.is_current === true,
@@ -673,7 +684,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         <li>
           <strong>{reviewApproved ? "완료" : "검토 승인 필요"}</strong>
           <span>{reviewApproved ? "현재 편집본 검토가 승인되었어요." : "검토에서 확인할 항목을 마치고 승인해 주세요."}</span>
-          {!reviewApproved && hasCurrentEditingDraft ? <a href={`/projects/${encodeURIComponent(projectId)}/review`}>검토 화면 열기</a> : null}
+          {!reviewApproved && hasCurrentEditingDraft ? <a className="vb-action-link" href={`/projects/${encodeURIComponent(projectId)}/review`}>검토 화면 열기</a> : null}
         </li>
         <li>
           <strong>{canRenderSubtitle ? "완료" : "출력 대기"}</strong>

@@ -189,12 +189,13 @@ function ProjectsPage() {
   );
 }
 
-type ProjectNextAction = { label: "계속 편집" | "자산 준비" | "새 영상 시작"; section: WorkspaceSection; status: string };
+type ProjectNextAction = { label: "계속 편집" | "자산 준비" | "새 영상 시작" | "프로젝트 열기"; section: WorkspaceSection; status: string };
 
 function projectNextAction(summary: HomeSummary | null): ProjectNextAction {
+  if (!summary) return { label: "프로젝트 열기", section: "home", status: "상태를 확인하지 못했어요" };
   if (summary?.has_draft) return { label: "계속 편집", section: "editing", status: "작업 중인 초안" };
   if ((summary?.asset_gap_count ?? 0) > 0) return { label: "자산 준비", section: "media", status: "자산 준비 필요" };
-  return { label: "새 영상 시작", section: "create", status: summary ? "새 영상 준비" : "상태 확인 중" };
+  return { label: "새 영상 시작", section: "create", status: "새 영상 준비" };
 }
 
 function ProjectCatalogCard({ project, onNavigate }: { project: Project; onNavigate: (section: WorkspaceSection) => void }) {
@@ -213,7 +214,8 @@ function ProjectCatalogCard({ project, onNavigate }: { project: Project; onNavig
   return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
     <h2>{project.name}</h2>
     <p>{next.status}</p>
-    <Button type="button" variant="outline" aria-label={summary ? next.label : project.name} onClick={() => onNavigate(summary ? next.section : "home")}>{next.label}</Button>
+    <p className="vb-catalog-card__finished">완성본 {summary?.finished_video_count ?? "확인 중"}개</p>
+    <Button type="button" variant="outline" aria-label={next.label} onClick={() => onNavigate(next.section)}>{next.label}</Button>
   </article>;
 }
 

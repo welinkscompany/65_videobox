@@ -345,7 +345,7 @@ function ReviewRecovery({ message, onRefresh, onRebuild, editorHref, rebuilding 
     <h1>영상 검토</h1>
     <p>{message}</p>
     {onRebuild ? <Button disabled={rebuilding} onClick={() => void onRebuild()}>{rebuilding ? "검토본을 다시 만드는 중" : "현재 편집본으로 검토본 다시 만들기"}</Button> : null}
-    {editorHref ? <a href={editorHref}>편집으로 돌아가기</a> : null}
+    {editorHref ? <a className="vb-action-link" href={editorHref}>편집으로 돌아가기</a> : null}
     <Button variant="outline" onClick={() => void onRefresh()}>다시 확인</Button>
     {rebuildMessage ? <p role="alert">{rebuildMessage}</p> : null}
   </section>;

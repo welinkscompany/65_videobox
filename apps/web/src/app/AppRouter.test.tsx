@@ -601,13 +601,13 @@ describe("AppRouter URL ownership", () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const catalogRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={catalogRouter} />);
-    fireEvent.click(await screen.findByRole("button", { name: "A" }));
+    fireEvent.click(await screen.findByRole("button", { name: "프로젝트 열기" }));
     await waitFor(() => expect(catalogRouter.state.location.pathname).toBe("/projects/project_a/home"));
     cleanup();
 
     const recoveryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/missing/editing"] }));
     render(<AppRouter router={recoveryRouter} />);
-    fireEvent.click(await screen.findByRole("button", { name: "A" }));
+    fireEvent.click(await screen.findByRole("button", { name: "프로젝트 열기" }));
     await waitFor(() => expect(recoveryRouter.state.location.pathname).toBe("/projects/project_a/home"));
   });
 

@@ -28,6 +28,25 @@ describe("CreationInterview", () => {
     expect(screen.getByLabelText("대본 파일 선택")).toBeVisible();
   });
 
+  it("clears the previous project's brief before loading a reused route", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    const getBrief = vi.spyOn(api, "getCreationBrief").mockImplementation(async (projectId) => (
+      projectId === "project_1"
+        ? firstBrief
+        : { ...firstBrief, brief_id: "brief_2", project_id: "project_2", script_text: "두 번째 프로젝트 대본" }
+    ));
+    const view = render(<CreationInterview projectId="project_1" />);
+    await screen.findByText("누구에게 보여줄까요?");
+
+    window.localStorage.setItem("videobox.creation-brief.project_2", "brief_2");
+    view.rerender(<CreationInterview projectId="project_2" />);
+    expect(screen.queryByText("누구에게 보여줄까요?")).not.toBeInTheDocument();
+    expect(screen.getByText("새 프로젝트의 기획을 불러오는 중이에요.")).toBeVisible();
+    expect(getBrief).toHaveBeenCalledWith("project_2", "brief_2");
+    await screen.findByText("누구에게 보여줄까요?");
+    expect(screen.queryByText("신제품을 소개합니다.")).not.toBeInTheDocument();
+  });
+
   it("starts a project-scoped Eugene interview from pasted script and saves the resulting brief id for refresh resume", async () => {
     const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue(firstBrief);
     render(<CreationInterview projectId="project_1" />);
