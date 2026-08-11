@@ -163,20 +163,19 @@ function ProjectsPage() {
   }
 
   return (
-    <main data-testid="projects-catalog" className="grid gap-6 p-6">
-      <div className="grid gap-2">
-        <h1>프로젝트</h1>
-        <p className="text-sm text-muted-foreground">영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
+    <main data-testid="projects-catalog" className="vb-catalog">
+      <p className="vb-eyebrow">VideoBox</p>
+      <h1>프로젝트</h1>
+      <p>영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
+      <div className="vb-catalog-grid">
         {projects.map((project) => (
-          <Button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
+          <Button key={project.project_id} type="button" variant="outline" className="vb-catalog-card" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
             {project.name}
           </Button>
         ))}
       </div>
       {isCreating ? (
-        <form className="grid max-w-sm gap-3" onSubmit={(event) => void handleCreate(event)}>
+        <form className="vb-catalog-form" onSubmit={(event) => void handleCreate(event)}>
           <label className="grid gap-2 text-sm">
             새 프로젝트 이름
             <Input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} autoFocus />
@@ -188,7 +187,7 @@ function ProjectsPage() {
           {createError ? <p className="text-sm text-destructive" role="alert">{createError}</p> : null}
         </form>
       ) : (
-        <Button type="button" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
+        <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
       )}
     </main>
   );
