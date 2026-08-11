@@ -34,7 +34,7 @@ type ReviewState =
   | Readonly<{ kind: "error"; projectId: string }>
   // 낡은 검토본을 지금 편집본으로 다시 세우려면 어느 편집본인지 알아야 한다.
   // 편집본 자체를 못 읽은 경우에는 없으므로 단추도 그때는 뜨지 않는다.
-  | Readonly<{ kind: "stale"; projectId: string; sessionId?: string }>;
+  | Readonly<{ kind: "stale"; projectId: string; sessionId?: string; reason?: string | null }>;
 
 type OpenSegmentInput = Readonly<{ projectId: string; sessionId: string; segmentId: string }>;
 
@@ -72,7 +72,7 @@ export function TimelineReviewPage({
       ]);
       if (!isCurrent()) return;
       if (!isCurrentTimelineReviewState({ projectId: loadProjectId, session, job, timeline, review, approval })) {
-        setState({ kind: "stale", projectId: loadProjectId, sessionId: session.session_id });
+        setState({ kind: "stale", projectId: loadProjectId, sessionId: session.session_id, reason: approval.invalidated_reason });
         return;
       }
       setState({
@@ -107,7 +107,7 @@ export function TimelineReviewPage({
         return;
       }
       if (session.project_id !== loadProjectId || !session.timeline_id) {
-        setState({ kind: "stale", projectId: loadProjectId });
+        setState({ kind: "stale", projectId: loadProjectId, reason: "session_mismatch" });
         return;
       }
       const job = selectCurrentTimelineJob(session, jobs);
@@ -187,9 +187,12 @@ export function TimelineReviewPage({
   if (state.kind === "error") return <ReviewRecovery message="검토 내용을 불러오지 못했어요." onRefresh={refresh} />;
   if (state.kind === "stale") {
     return <ReviewRecovery
-      message="이 검토본은 현재 편집본과 맞지 않아요. 다시 확인해 주세요."
+      message={state.reason === "editing_session_mutation"
+        ? "편집이 바뀌어서 이 검토본은 현재 편집본과 맞지 않아요."
+        : "이 검토본은 현재 편집본과 맞지 않아요. 현재 편집본으로 다시 만들어 주세요."}
       onRefresh={refresh}
       onRebuild={state.sessionId ? () => rebuild(state.sessionId as string) : undefined}
+      editorHref={state.sessionId ? editorSessionHref(state.projectId, state.sessionId) : `/projects/${encodeURIComponent(state.projectId)}/editor`}
       rebuilding={rebuilding}
       rebuildMessage={rebuildMessage}
     />;
@@ -285,6 +288,10 @@ function editorSegmentHref(projectId: string, sessionId: string, segmentId: stri
   return `/projects/${encodeURIComponent(projectId)}/editor?session_id=${encodeURIComponent(sessionId)}&segment_id=${encodeURIComponent(segmentId)}`;
 }
 
+function editorSessionHref(projectId: string, sessionId: string) {
+  return `/projects/${encodeURIComponent(projectId)}/editor?session_id=${encodeURIComponent(sessionId)}`;
+}
+
 function blockerSourceLabel(sources: readonly ("timeline" | "review")[]) {
   if (sources.includes("timeline") && sources.includes("review")) return "편집본·검토 화면에서 확인";
   return sources.includes("review") ? "검토 화면에서 확인" : "편집본에서 확인";
@@ -325,18 +332,20 @@ function segmentTargetLabel(review: ReviewSnapshot, segmentId: string) {
   return text ? `${index + 1}번째 장면 · ${text}` : `${index + 1}번째 장면`;
 }
 
-function ReviewRecovery({ message, onRefresh, onRebuild, rebuilding = false, rebuildMessage = null }: {
+function ReviewRecovery({ message, onRefresh, onRebuild, editorHref, rebuilding = false, rebuildMessage = null }: {
   message: string;
   onRefresh: () => Promise<void>;
   /** 낡은 검토본을 지금 편집본으로 다시 세운다. 다시 세울 편집본을 알 때만 있다. */
   onRebuild?: () => Promise<void>;
+  editorHref?: string;
   rebuilding?: boolean;
   rebuildMessage?: string | null;
 }) {
   return <section aria-live="polite">
     <h1>영상 검토</h1>
     <p>{message}</p>
-    {onRebuild ? <Button disabled={rebuilding} onClick={() => void onRebuild()}>{rebuilding ? "검토본을 다시 만드는 중" : "검토 다시 받기"}</Button> : null}
+    {onRebuild ? <Button disabled={rebuilding} onClick={() => void onRebuild()}>{rebuilding ? "검토본을 다시 만드는 중" : "현재 편집본으로 검토본 다시 만들기"}</Button> : null}
+    {editorHref ? <a href={editorHref}>편집으로 돌아가기</a> : null}
     <Button variant="outline" onClick={() => void onRefresh()}>다시 확인</Button>
     {rebuildMessage ? <p role="alert">{rebuildMessage}</p> : null}
   </section>;
