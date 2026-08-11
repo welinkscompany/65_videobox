@@ -276,6 +276,20 @@ def _health_server(
         server.server_close()
 
 
+@contextmanager
+def _local_model_server(*, model_key: str = "qwen3-35b") -> Iterator[str]:
+    # LM Studio의 실제 `/api/v1/models` 응답 모양을 그대로 흉내 낸다(2026-08-11 실측).
+    # `Get-LocalModelCheck`는 `type == "llm"`이고 `loaded_instances`가 비어 있지
+    # 않은 항목의 `key`만 후보로 본다.
+    body = json.dumps({
+        "models": [
+            {"type": "llm", "key": model_key, "loaded_instances": [{"id": model_key}]},
+        ]
+    }).encode("utf-8")
+    with _health_server(body=body) as uri:
+        yield uri
+
+
 def _unused_loopback_uri() -> str:
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
@@ -341,6 +355,7 @@ def _run(
     timeout_sec: int = 2,
     video_uri: str | None = None,
     hermes_uri: str | None = None,
+    local_model_uri: str | None = None,
     extra: list[str] | None = None,
     environment_patch: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
@@ -380,6 +395,8 @@ def _run(
         video_uri or _unused_loopback_uri(),
         "-HermesDashboardUri",
         hermes_uri or _unused_loopback_uri(),
+        "-LocalModelApiUri",
+        local_model_uri or _unused_loopback_uri(),
     ]
     command.extend(extra or [])
     environment = {
@@ -479,8 +496,8 @@ def test_default_check_is_read_only_sanitized_and_classifies_protected_residue(t
     fixture = _fixture_repository(tmp_path)
     before_data = sorted(path.relative_to(fixture["data_root"]) for path in fixture["data_root"].rglob("*"))
     before_capcut = sorted(path.relative_to(fixture["local_app_data"]) for path in fixture["local_app_data"].rglob("*"))
-    with _health_server() as video_uri, _health_server() as hermes_uri:
-        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri)
+    with _health_server() as video_uri, _health_server() as hermes_uri, _local_model_server() as model_uri:
+        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
 
     payload = _payload(result)
     assert result.returncode == 0, result.stderr
@@ -589,8 +606,12 @@ def test_check_reports_missing_env_and_tool_as_precise_blocks(tmp_path: Path) ->
 
 def test_check_treats_the_unfollowed_hermes_login_redirect_as_reachable(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
-    with _health_server() as video_uri, _health_server(redirect=True) as hermes_uri:
-        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri)
+    with (
+        _health_server() as video_uri,
+        _health_server(redirect=True) as hermes_uri,
+        _local_model_server() as model_uri,
+    ):
+        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
 
     payload = _payload(result)
     assert result.returncode == 0
@@ -598,6 +619,68 @@ def test_check_treats_the_unfollowed_hermes_login_redirect_as_reachable(tmp_path
     assert hermes["status"] == "pass"
     assert hermes["evidence"]["status_code"] == 302
     assert hermes["evidence"]["redirects_followed"] == 0
+
+
+def test_check_passes_when_the_configured_model_is_the_one_lm_studio_has_loaded(
+    tmp_path: Path,
+) -> None:
+    fixture = _fixture_repository(tmp_path)
+    with (
+        _health_server() as video_uri,
+        _health_server() as hermes_uri,
+        _local_model_server(model_key="qwen3-35b") as model_uri,
+    ):
+        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
+
+    payload = _payload(result)
+    row = next(item for item in payload["checks"] if item["id"] == "local_model")
+    assert row["status"] == "pass"
+    assert row["evidence"]["configured_model"] == "qwen3-35b"
+    assert row["evidence"]["loaded_llm_models"] == ["qwen3-35b"]
+
+
+def test_check_blocks_when_the_configured_model_name_does_not_match_what_is_loaded(
+    tmp_path: Path,
+) -> None:
+    # 이게 오늘 실제로 이 저장소에서 벌어지고 있던 어긋남이다(2026-08-11) --
+    # `.env.container`가 비어 있으면 기본값(`qwen3-35b`)을 쓰는데, LM Studio는
+    # `qwen/qwen3.6-35b-a3b`를 로드해 두고도 조용히 요청을 받아 준다. 이 확인이
+    # 없으면 owner는 다른 모델로 바꾼 뒤에도 그 사실을 알 길이 없다.
+    fixture = _fixture_repository(tmp_path)
+    with (
+        _health_server() as video_uri,
+        _health_server() as hermes_uri,
+        _local_model_server(model_key="gemma-3-27b") as model_uri,
+    ):
+        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
+
+    payload = _payload(result)
+    assert result.returncode == 2
+    assert payload["overall_status"] == "blocked"
+    row = next(item for item in payload["checks"] if item["id"] == "local_model")
+    assert row["status"] == "blocked"
+    assert row["evidence"]["configured_model"] == "qwen3-35b"
+    assert row["evidence"]["loaded_llm_models"] == ["gemma-3-27b"]
+    assert "qwen3-35b" in row["summary"]
+    assert "gemma-3-27b" in row["action"]
+
+
+def test_check_blocks_when_lm_studio_is_not_reachable(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as video_uri, _health_server() as hermes_uri:
+        result = _run(
+            fixture,
+            video_uri=video_uri,
+            hermes_uri=hermes_uri,
+            local_model_uri=_unused_loopback_uri(),
+        )
+
+    payload = _payload(result)
+    assert result.returncode == 2
+    row = next(item for item in payload["checks"] if item["id"] == "local_model")
+    assert row["status"] == "blocked"
+    assert row["evidence"]["reachable"] is False
+    assert "LM Studio" in row["summary"]
 
 
 def test_check_keeps_stalled_loopback_as_blocked_with_bounded_timeout_reason(tmp_path: Path) -> None:

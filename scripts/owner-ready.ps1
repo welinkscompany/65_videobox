@@ -9,6 +9,7 @@ param(
     [switch]$WithYujinMemory,
     [Uri]$VideoBoxUri = "http://127.0.0.1:5173/",
     [Uri]$HermesDashboardUri = "http://127.0.0.1:9119/",
+    [Uri]$LocalModelApiUri = "http://127.0.0.1:1234/api/v1/models",
     [ValidateRange(1, 180)]
     [int]$TimeoutSec = 30,
     [string]$EnvFile = "",
@@ -713,6 +714,52 @@ function Get-DataRootChecks {
     return @($envCheck, $data, $headroom)
 }
 
+function Get-LocalModelCheck {
+    # 유진이 쓰는 로컬 모델 이름은 `.env.container`의 VIDEOBOX_LOCAL_MODEL_NAME
+    # 한 줄로 바뀐다(코드 수정이 필요 없다) -- `compose.yaml`이 그대로 컨테이너에
+    # 넘긴다. 다만 LM Studio는 요청에 실린 model 필드가 실제로 로드된 것과 달라도
+    # 조용히 지금 켜진 모델로 응답한다(실측 확인, 2026-08-11). 그래서 대표님이
+    # 모델을 바꾸고 이 값을 갱신하는 걸 잊어도 겉으로는 아무 문제가 없어 보이다가,
+    # 나중에 두 개 이상을 동시에 켜는 순간에야 조용히 엉뚱한 모델이 응답할 수 있다.
+    # 이 확인은 그 어긋남을 미리 보여 준다.
+    $configuredModel = "qwen3-35b"
+    if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+        try {
+            foreach ($line in [IO.File]::ReadLines((Resolve-Path -LiteralPath $EnvFile).Path)) {
+                if ($line -match '^\s*VIDEOBOX_LOCAL_MODEL_NAME\s*=\s*(.+?)\s*$') {
+                    $configuredModel = ([string]$Matches[1]).Trim().Trim('"').Trim("'")
+                }
+            }
+        }
+        catch { }
+    }
+    try {
+        $response = Invoke-RestMethod -Uri $LocalModelApiUri -TimeoutSec 5 -ErrorAction Stop
+    }
+    catch {
+        return New-OwnerReadyResult -Id "local_model" -Status "blocked" `
+            -Summary "LM Studio가 꺼져 있거나 응답하지 않습니다." `
+            -Action "LM Studio를 켜고 모델을 최소 하나 불러온 뒤 다시 확인하세요." `
+            -Evidence @{ configured_model = $configuredModel; reachable = $false }
+    }
+    $loadedLlmKeys = @(
+        $response.models |
+            Where-Object { $_.type -eq "llm" -and $_.loaded_instances.Count -gt 0 } |
+            ForEach-Object { $_.key }
+    )
+    if ($loadedLlmKeys -contains $configuredModel) {
+        return New-OwnerReadyResult -Id "local_model" -Status "pass" `
+            -Summary "유진이 쓸 로컬 모델이 켜져 있고 설정과 일치합니다." `
+            -Action "추가 조치가 없습니다." `
+            -Evidence @{ configured_model = $configuredModel; reachable = $true; loaded_llm_models = $loadedLlmKeys }
+    }
+    $loadedSummary = if ($loadedLlmKeys.Count -gt 0) { $loadedLlmKeys -join ", " } else { "(없음)" }
+    return New-OwnerReadyResult -Id "local_model" -Status "blocked" `
+        -Summary "설정한 모델($configuredModel)이 지금 LM Studio에 로드된 모델과 다릅니다." `
+        -Action "LM Studio에서 '$configuredModel'을 불러오거나, .env.container의 VIDEOBOX_LOCAL_MODEL_NAME을 지금 켜진 모델(${loadedSummary}) 중 하나로 맞추세요." `
+        -Evidence @{ configured_model = $configuredModel; reachable = $true; loaded_llm_models = $loadedLlmKeys }
+}
+
 function Test-AllowedLoopbackLoginRedirect {
     param([Uri]$SourceUri, [System.Net.Http.HttpResponseMessage]$Response)
     if ([int]$Response.StatusCode -ne 302 -or $null -eq $Response.Headers.Location) {
@@ -924,6 +971,7 @@ if ($Mode -ceq "Check") {
     $checks += Get-ToolCheck -Id "ffprobe" -DisplayName "ffprobe" -Executable $FfprobeExecutable -Arguments @("-version") -VersionPattern 'ffprobe\s+version\s+[^\s]+'
     $checks += @(Get-ComposeChecks)
     $checks += @(Get-DataRootChecks)
+    $checks += Get-LocalModelCheck
     $videoHealthUri = [Uri]::new($VideoBoxUri, "/health")
     $checks += Get-LoopbackCheck -Id "videobox_health" -DisplayName "VideoBox" -Uri $videoHealthUri -RequireHealthJson
     $checks += Get-LoopbackCheck -Id "hermes_dashboard" -DisplayName "Hermes 대시보드" -Uri $HermesDashboardUri -AcceptLoginRedirectAsReachable
