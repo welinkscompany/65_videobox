@@ -153,6 +153,7 @@ describe("timeline review state", () => {
       project_id: "project-a",
       timeline_id: "timeline-current",
       review_status: "draft",
+      source_session_id: "session-current",
       source_session_revision: 7,
       is_current: true,
     };
@@ -161,6 +162,7 @@ describe("timeline review state", () => {
     expect(isCurrentTimelineReviewState(input)).toBe(true);
     expect(isCurrentTimelineReviewState({ ...input, approval: { ...approval, is_current: false } })).toBe(false);
     expect(isCurrentTimelineReviewState({ ...input, approval: { ...approval, source_session_revision: 6 } })).toBe(false);
+    expect(isCurrentTimelineReviewState({ ...input, approval: { ...approval, source_session_id: "session-old" } })).toBe(false);
     expect(isCurrentTimelineReviewState({ ...input, review: { ...review, timeline_id: "timeline-other" } })).toBe(false);
     expect(isCurrentTimelineReviewState({ ...input, timeline: { ...timeline, timeline: { ...timeline.timeline, timeline_id: "timeline-other" } } })).toBe(false);
   });

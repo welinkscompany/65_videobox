@@ -87,6 +87,16 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     setSummaryText("");
     setReadiness(null);
     setNarrationOptions([]);
+    setVertical(false);
+    setIsStarting(false);
+    setIsSaving(false);
+    setRecording(false);
+    setRecordingFile(null);
+    recordingDiscardRef.current = true;
+    recorderRef.current?.state === "recording" && recorderRef.current.stop();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recorderRef.current = null;
+    recordingStreamRef.current = null;
     setCandidateRanges({});
     setRangeRetry(null);
     setRetryAnswer(null);

@@ -414,6 +414,9 @@ describe("home dashboard", () => {
 
     expect(await screen.findByRole("button", { name: "출력 확인" })).toBeVisible();
     expect(screen.queryByText("아직 완성한 영상이 없어요.")).toBeNull();
+    expect(screen.getByRole("heading", { name: "상태 다시 확인" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
+    expect(api.getHomeSummary).toHaveBeenCalledTimes(2);
   });
 });
 

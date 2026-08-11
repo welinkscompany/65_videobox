@@ -267,6 +267,23 @@ def import_media_inbox_asset_to_project(
     source_path = library_root / filename
     if not source_path.is_file():
         raise FileNotFoundError(f"media_inbox_asset_missing: {filename}")
+    source_hash = _sha256_file(source_path)
+    # The browser retries after a response timeout. Reconcile by the watched
+    # filename and bytes before registering a second project asset.
+    for existing in pipeline.store.list_assets(project_id=project_id):  # type: ignore[attr-defined]
+        metadata = dict(existing.get("metadata") or {})
+        if metadata.get("media_inbox_filename") != filename:
+            continue
+        stored_path = pipeline.store.resolve_storage_uri(  # type: ignore[attr-defined]
+            project_id=project_id, storage_uri=str(existing["storage_uri"])
+        )
+        if stored_path.is_file() and _sha256_file(stored_path) == source_hash:
+            return {
+                "asset_id": str(existing["asset_id"]),
+                "project_id": project_id,
+                "asset_type": str(existing["asset_type"]),
+                "storage_uri": str(existing["storage_uri"]),
+            }
     payload = pipeline.register_broll_asset(  # type: ignore[attr-defined]
         project_id=project_id,
         source_path=source_path,
@@ -278,7 +295,7 @@ def import_media_inbox_asset_to_project(
     pipeline.store.update_asset_metadata(  # type: ignore[attr-defined]
         project_id=project_id,
         asset_id=payload["asset_id"],
-        metadata_patch={"media_inbox_filename": filename},
+        metadata_patch={"media_inbox_filename": filename, "media_inbox_sha256": source_hash},
     )
     return payload
 

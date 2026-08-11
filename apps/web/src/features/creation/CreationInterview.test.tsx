@@ -47,6 +47,25 @@ describe("CreationInterview", () => {
     expect(screen.queryByText("신제품을 소개합니다.")).not.toBeInTheDocument();
   });
 
+  it("resets the orientation choice when a reused creation route changes projects", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const ready = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: {} } as never;
+    vi.spyOn(api, "getCreationBrief").mockImplementation(async (projectId) => projectId === "project_1"
+      ? firstBrief
+      : { ...firstBrief, brief_id: "brief_2", project_id: "project_2" });
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(ready);
+    const view = render(<CreationInterview projectId="project_1" />);
+    const orientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
+    fireEvent.click(orientation);
+    expect(orientation).toBeChecked();
+
+    window.localStorage.setItem("videobox.creation-brief.project_2", "brief_2");
+    view.rerender(<CreationInterview projectId="project_2" />);
+    const nextOrientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
+    expect(nextOrientation).not.toBeChecked();
+  });
+
   it("starts a project-scoped Eugene interview from pasted script and saves the resulting brief id for refresh resume", async () => {
     const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue(firstBrief);
     render(<CreationInterview projectId="project_1" />);

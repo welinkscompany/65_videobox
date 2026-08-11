@@ -9,7 +9,7 @@
 // one, so a frontend-only PR can pass CI locally and still break this pin.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { ClipboardCheck, Download, FilePlus2, Home, Images, MoreHorizontal, PanelLeftClose, Scissors, Settings, Video } from "lucide-react";
+import { ClipboardCheck, Download, FilePlus2, Home, Images, MoreHorizontal, PanelLeft, PanelLeftClose, Scissors, Settings, Video } from "lucide-react";
 
 import { api, type HomeSummary, type Project } from "../api";
 import { Button } from "../components/ui/button";
@@ -122,9 +122,9 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
       ) : (
         <Button variant="ghost" onClick={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</Button>
       )) : null}</div>
-      </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span className="group-data-[collapsible=icon]:hidden">설정</span></Button><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label="화면 목록 접기" title="화면 목록 접기" />
+      </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span className="group-data-[collapsible=icon]:hidden">설정</span></Button><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"} title={collapsed ? "사이드바 펼치기" : "사이드바 접기"} />
     </Sidebar>
-    <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label="사이드바 접기" onClick={() => setCollapsed((value) => !value)} className="vb-collapse"><PanelLeftClose /></Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent className="vb-dialog-content" showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog></header><div className="vb-product-content">{children}</div></SidebarInset>
+    <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"} onClick={() => setCollapsed((value) => !value)} className="vb-collapse">{collapsed ? <PanelLeft /> : <PanelLeftClose />}</Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent className="vb-dialog-content" showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog></header><div className="vb-product-content">{children}</div></SidebarInset>
     </div>
   </SidebarProvider>;
 }
@@ -137,21 +137,26 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
   // endpoint that counts server-side. If that call fails the cards fall back to
   // saying nothing about state rather than guessing, and stay clickable.
   const [summary, setSummary] = useState<HomeSummary | null>(null);
+  const [summaryError, setSummaryError] = useState(false);
+  const [summaryRequest, setSummaryRequest] = useState(0);
   useEffect(() => {
     let active = true;
     setSummary(null);
+    setSummaryError(false);
     void api.getHomeSummary(projectId)
       .then((next) => { if (active) setSummary(next); })
-      .catch(() => { /* a home that cannot count still navigates */ });
+      .catch(() => { if (active) setSummaryError(true); });
     return () => { active = false; };
-  }, [projectId]);
-  const draftText = summary === null ? "상태 확인 중"
+  }, [projectId, summaryRequest]);
+  const draftText = summaryError ? "상태 확인 실패" : summary === null ? "상태 확인 중"
     : summary.has_draft ? "초안 있음" : "초안 없음";
-  const finishedText = summary === null ? "상태 확인 중"
+  const finishedText = summaryError ? "상태 확인 실패" : summary === null ? "상태 확인 중"
     : `${summary.finished_video_count}개`;
-  const assetText = summary === null ? "상태 확인 중"
+  const assetText = summaryError ? "상태 확인 실패" : summary === null ? "상태 확인 중"
     : summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료";
-  const nextTask = summary?.has_draft
+  const nextTask = summaryError
+    ? { label: "상태 다시 확인", section: "home" as WorkspaceSection, keyword: "상태 확인 실패" }
+    : summary?.has_draft
     ? { label: "편집 계속하기", section: "editing" as WorkspaceSection, keyword: "초안 있음" }
     : summary && summary.asset_gap_count > 0
       ? { label: "자산 준비하기", section: "media" as WorkspaceSection, keyword: `부족 ${summary.asset_gap_count}곳` }
@@ -159,7 +164,7 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
   // The cards are ordered the way the work actually runs: bring footage in,
   // edit it, then take it out. The old order opened with editing, which is
   // the middle of the job.
-  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 작업</h1><p>대본 · 자산 · 편집 · 출력</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><section className="vb-home-next" aria-labelledby="home-next-heading"><div><p className="vb-eyebrow">다음 할 일</p><h2 id="home-next-heading">{nextTask.label}</h2><p>{summary === null ? "상태 확인 중" : nextTask.keyword}</p></div><Button variant="outline" onClick={() => onNavigate(projectId, nextTask.section)}>{nextTask.label}</Button><ul aria-label="진행 상황"><li>{summary?.has_draft ? "초안 있음" : "초안 없음"}</li><li>{summary ? `자산 ${summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료"}` : "자산 상태 확인 중"}</li><li>{summary ? `완성본 ${summary.finished_video_count}개` : "완성본 확인 중"}</li></ul></section><div className="vb-home-grid"><HomeCard title="자산" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="편집" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
+  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 작업</h1><p>대본 · 자산 · 편집 · 출력</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><section className="vb-home-next" aria-labelledby="home-next-heading"><div><p className="vb-eyebrow">다음 할 일</p><h2 id="home-next-heading">{nextTask.label}</h2><p>{summaryError ? nextTask.keyword : summary === null ? "상태 확인 중" : nextTask.keyword}</p></div><Button variant="outline" onClick={() => summaryError ? setSummaryRequest((value) => value + 1) : onNavigate(projectId, nextTask.section)}>{nextTask.label}</Button><ul aria-label="진행 상황"><li>{summaryError ? "상태 확인 실패" : summary?.has_draft ? "초안 있음" : summary === null ? "상태 확인 중" : "초안 없음"}</li><li>{summaryError ? "상태 확인 실패" : summary ? `자산 ${summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료"}` : "자산 상태 확인 중"}</li><li>{summaryError ? "상태 확인 실패" : summary ? `완성본 ${summary.finished_video_count}개` : "완성본 확인 중"}</li></ul></section><div className="vb-home-grid"><HomeCard title="자산" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="편집" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
 }
 function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
 

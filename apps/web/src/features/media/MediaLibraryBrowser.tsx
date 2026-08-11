@@ -48,6 +48,7 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
   const [recents, setRecents] = useState<readonly string[]>([]);
   const [page, setPage] = useState(1);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [favouriteBusy, setFavouriteBusy] = useState<readonly string[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -60,6 +61,7 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
       .then((state) => { if (active) setInstallState(state); })
       .catch(() => { /* 이유를 못 물었으면 못 읽었다고 말한다 */ });
     setRecents([]);
+    setFavouriteBusy([]);
     // 프로젝트로 들여온 것은 이미 최근 목록에 쌓이고 있었는데 아무도 다시
     // 읽지 않았다. 못 읽으면 순서만 덜 똑똑해진다.
     void api.listProjectRecentMediaLibraryAssetIds(projectId)
@@ -78,6 +80,8 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
   }, [loadAttempt, projectId]);
 
   const toggle = async (libraryAssetId: string, enabled: boolean) => {
+    if (favouriteBusy.includes(libraryAssetId)) return;
+    setFavouriteBusy((current) => [...current, libraryAssetId]);
     // Show the change now; the list re-sorts on the server's answer.
     setFavourites((current) => enabled
       ? [...current, libraryAssetId]
@@ -89,6 +93,8 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
       setFavourites((current) => enabled
         ? current.filter((item) => item !== libraryAssetId)
         : [...current, libraryAssetId]);
+    } finally {
+      setFavouriteBusy((current) => current.filter((item) => item !== libraryAssetId));
     }
   };
 
@@ -137,7 +143,7 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
           <Button
             key={item.value}
             type="button"
-            variant="outline"
+            variant={filter === item.value ? "default" : "outline"}
             aria-pressed={filter === item.value}
             onClick={() => { setFilter(item.value); setPage(1); }}
           >
@@ -170,6 +176,7 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
             <Button
               type="button"
               variant="outline"
+              disabled={favouriteBusy.includes(item.library_asset_id)}
               aria-label={`${name} 즐겨찾기${loved ? " 해제" : ""}`}
               onClick={() => void toggle(item.library_asset_id, !loved)}
             >

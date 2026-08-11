@@ -45,6 +45,10 @@ body:has(.vb-product-shell) { margin:0; }
 /* 아래 일곱 화면은 클래스만 붙어 있고 규칙이 없어서 브라우저 기본 스타일로
    그려지고 있었다. 승인된 토큰만 쓰고 새 색을 만들지 않는다. */
 .vb-outputs, .vb-creation-interview, .vb-media-library, .vb-project-archive { display:grid; gap:1rem; max-width:52rem; }
+.vb-outputs { max-width:none; }
+.vb-outputs-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; }
+.vb-outputs-grid [data-slot=card] { min-width:0; min-height:0; }
+.vb-output-video { display:block; width:100%; max-width:100%; height:auto; max-height:18rem; object-fit:contain; border-radius:.5rem; background:var(--vb-canvas); }
 .vb-outputs h1, .vb-creation-interview h1, .vb-media-library h2, .vb-project-archive h2 { margin:0; font-size:clamp(1.25rem,2.4vw,1.65rem); letter-spacing:-.03em; }
 .vb-outputs p, .vb-creation-interview p, .vb-media-library > p, .vb-project-archive p { margin:0; color:var(--vb-muted); line-height:1.55; }
 .vb-outputs section, .vb-outputs article, .vb-creation-interview section, .vb-media-library article, .vb-project-archive article { border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); padding:1rem; display:grid; gap:.5rem; }
@@ -54,6 +58,7 @@ body:has(.vb-product-shell) { margin:0; }
 .vb-media-library__grid article { min-width:0; min-height:0; padding:.75rem; overflow:hidden; }
 .vb-media-library__grid audio { max-width:100%; }
 .vb-media-library__grid img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:.45rem; background:var(--vb-canvas); }
+.vb-media-library__filters [aria-pressed="true"] { background:var(--primary); color:var(--primary-foreground); border-color:var(--primary); }
 .vb-media-library__filters { display:flex; flex-wrap:wrap; gap:.5rem; }
 .vb-settings-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1rem; }
 .vb-editor-assets__orientation { display:inline-flex; align-items:center; gap:.3rem; border:1px solid var(--vb-border); border-radius:999px; padding:.1rem .55rem; font-size:.75rem; color:var(--vb-muted); background:var(--vb-canvas); }

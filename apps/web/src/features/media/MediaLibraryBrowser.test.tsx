@@ -115,6 +115,21 @@ describe("MediaLibraryBrowser", () => {
     expect(screen.queryByText("음악 1")).toBeNull();
   });
 
+  it("marks the active library filter with the primary button treatment", async () => {
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+
+    const all = await screen.findByRole("button", { name: "전체 보기" });
+    const music = screen.getByRole("button", { name: "음악만 보기" });
+    expect(all).toHaveAttribute("data-variant", "default");
+    expect(music).toHaveAttribute("data-variant", "outline");
+    fireEvent.click(music);
+    expect(music).toHaveAttribute("data-variant", "default");
+    expect(all).toHaveAttribute("data-variant", "outline");
+  });
+
   it("says the pack has not been brought in yet, rather than only a heading", async () => {
     // 빈 화면은 세 가지 사정을 같은 얼굴로 보여 준다. 무엇을 해야 할지가
     // 셋 다 다르므로 뭉뚱그리면 owner는 멈춘다.

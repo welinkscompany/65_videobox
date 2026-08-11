@@ -1687,6 +1687,17 @@ describe("OutputsPage", () => {
     expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
   });
 
+  it("constrains a playable final video to its output card", async () => {
+    stubReadOnlyOutputApi();
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: finalJob.job_id, status: "succeeded", render: {
+        export_id: "final-current", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4", status: "succeeded", is_current: true,
+      },
+    });
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    expect(await screen.findByLabelText("완성본 재생")).toHaveClass("vb-output-video");
+  });
+
   it("shows an ordered readiness checklist with a resolving action when output is blocked", async () => {
     stubReadOnlyOutputApi();
     const onOpenEditor = vi.fn();

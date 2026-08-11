@@ -140,6 +140,7 @@ export function isCurrentTimelineReviewState(input: Readonly<{
     approval.project_id === projectId &&
     approval.timeline_id === session.timeline_id &&
     approval.is_current === true &&
+    approval.source_session_id === session.session_id &&
     approval.source_session_revision === session.session_revision
   );
 }

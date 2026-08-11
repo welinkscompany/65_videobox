@@ -202,7 +202,10 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       await load();
       if (isCurrentAction(token)) setMessage(`「${filename}」을 이 프로젝트로 가져왔어요.`);
     } catch {
-      if (isCurrentAction(token)) setMessage("이 영상을 가져오지 못했어요. 다시 시도해 주세요.");
+      if (isCurrentAction(token)) {
+        await load();
+        if (isCurrentAction(token)) setMessage("이 영상을 가져오지 못했어요. 다시 시도해 주세요.");
+      }
     } finally {
       finishAction(token);
     }
