@@ -119,3 +119,16 @@ owner가 owner-ready 컨테이너를 직접 크롬으로 열어보고 화면이 
 - **Button의 `variant`는 그 자체로 배경/테두리 유틸리티 클래스를 갖고 있어서, 커스텀 CSS로
   같은 요소의 배경을 다르게 그리고 싶으면 `variant`가 그 배경 클래스를 아예 안 갖는 걸
   골라야 한다** (`ghost`가 그런 경우다. `outline`은 `bg-background`를 갖고 있어서 안 된다).
+
+## Codex 데스크톱 회복 검증 추가 기록 (2026-08-12)
+
+이번 세션에서 공식 `owner-ready.ps1`로 재빌드한 VideoBox 런타임에 대해 PC 뷰포트와 전용 QA 프로젝트 흐름을 별도 증거로 남겼다. 테스트 통과나 API 응답만으로 화면 완료를 주장하지 않으며, 브라우저 mutation과 owner 미디어 수락은 아직 별도 게이트다.
+
+- 공식 컨테이너 route matrix: 1920×1080, 1440×900, 1366×768, 1280×800에서 `home/media/editor/review/outputs`를 캡처했다. 편집 작업판은 내부 스크롤을 유지하고, 좌우 overflow는 뷰포트 안에 제한됐다. 증거는 저장소에 커밋하지 않고 `artifacts/qa/desktop-owner-ui-recovery/desktop-route-matrix.json`에 보관한다.
+- 전용 프로젝트: 표시명 `VideoBox PC QA 20260811153350`, ID `videobox-pc-qa-20260811153350`. 실제 runtime에 프로젝트·입력·timeline·editing session·출력물을 보존 중이며 삭제하지 않았다.
+- readiness/bundle: `readiness_f0af1c8fa712`가 `ready`, `draft_bundle_181a4cb8e136`가 `editing_session_draft_df9d45c44366` / `timeline_draft_af114f8dd7c1`을 생성했다.
+- 편집/재검토: caption mutation으로 revision 1→2가 됐고, 기존 승인이 `editing_session_mutation`으로 stale 처리됐다. refresh 후 revision 2 검토본이 current가 되었고 `timeline_build_job_draft_122874723df7` 승인이 성공했다.
+- 출력: `subtitle_render_job_002`, `final_render_job_003`, `capcut_draft_export_job_004`가 모두 succeeded. MP4는 5초, 1920×1080 H.264/AAC, 48kHz stereo이며 SRT와 대표 프레임을 확인했다. 상세 SHA-256/경로는 무시되는 `artifacts/qa/desktop-owner-ui-recovery/qa-mutation-manifest.json`에 있다.
+- CapCut: export artifact는 생성됐지만 handoff registration은 “CapCut 설치를 확인한 뒤 다시 시도하세요”로 실패했고 diagnostics에도 설치 경로/버전이 없다. `owner-ready.ps1 -Mode OpenCapCut`의 `opened=true`는 URI/앱 열기 요청만 뜻하므로 Desktop import/open 성공으로 해석하지 않는다.
+- 제한: 브라우저 파이프가 대용량 업로드 평가 중 끊겨 전용 프로젝트 생성·가져오기·편집·reload 클릭 자체의 live UI 증거는 남기지 못했다. API mutation은 공식 런타임 계약 검증으로 기록하되 UI 검증과 합치지 않는다. MP4 전체 시청/청취·자막 타이밍 및 owner 승인도 미완료다.
+- 운영 상태: `owner-ready -Mode Check -Json`에서 VideoBox/workspace/upstream/data/model/CapCut check는 통과했고 Hermes dashboard 연결 거부만 별도 blocked 상태다. Hermes를 통과로 꾸미거나 직접 compose를 실행하지 않는다.

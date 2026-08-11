@@ -144,7 +144,7 @@
 - [x] **Step 4: Implement desktop grid policy.**
 - [x] **Step 5: Move scroll ownership inward.**
 - [x] **Step 6: Implement card and state copy.**
-- [ ] **Step 7: Run tests and four viewport screenshots.** Focused editor tests/build and 1440×900/1280×800 proof are complete; 1920×1080 and 1366×768 captures remain.
+- [x] **Step 7: Run tests and four viewport screenshots.** Focused editor tests/build and official-container route captures are recorded for 1920×1080, 1440×900, 1366×768, and 1280×800 in `artifacts/qa/desktop-owner-ui-recovery/desktop-route-matrix.json` (ignored evidence).
 - [x] **Step 8: Commit.**
 
 ## Task 6: Review stale recovery and output readiness
@@ -171,10 +171,10 @@
 
 - [x] **Step 1: Build the exact source.** `npx tsc -b` and `npm run build` passed; local Node 24 asset names were recorded in the build output.
 - [x] **Step 2: Start/check through the approved wrapper.** `owner-ready.ps1 -Mode Start -Rebuild` rebuilt and started the workspace; VideoBox health passed. Full Check remains blocked only by Hermes dashboard availability.
-- [ ] **Step 3: Run frontend focused and full tests.** Changed-slice focused tests and build pass; the full `pnpm test`/isolated Chromium run remains.
-- [ ] **Step 4: Capture four desktop viewports.** Actual official-container screenshots/metrics cover 1440×900; 1920×1080, 1366×768, and 1280×800 full route capture remains.
+- [x] **Step 3: Run frontend focused and full tests.** Full frontend Vitest run passed 61 files/850 tests; typecheck/build and changed-slice tests also pass. Isolated Chromium remains a fake API harness and is not counted as owner proof.
+- [x] **Step 4: Capture four desktop viewports.** Official-container screenshots/metrics cover 1920×1080, 1440×900, 1366×768, and 1280×800 across home/media/editor/review/outputs; evidence is ignored under `artifacts/qa/desktop-owner-ui-recovery/`.
 - [x] **Step 5: Verify browser metrics.** Official container metrics passed for home/assets/editor/review/output at 1440×900; editor `scrollWidth=1425` against `innerWidth=1440`, workbench height 768, and audio library capped at 24 cards.
-- [ ] **Step 6: Commit verification evidence only if repository policy allows.** Keep screenshots and receipts ignored unless the existing handoff policy requires a checked-in manifest. Never stage protected residue or source media.
+- [x] **Step 6: Commit verification evidence only if repository policy allows.** Screenshots, generated media, and the mutation manifest remain ignored; only the handoff record is committed. Protected residue and source media were not staged.
 
 ## Task 8: Mutation E2E in a dedicated QA project
 
@@ -183,15 +183,15 @@
 - Evidence: ignored `artifacts/qa/desktop-owner-ui-recovery/`
 - Handoff: existing current VideoBox status/handoff document after owner review
 
-- [ ] **Step 1: Prepare isolated input.** Choose an owner-approved sample copy; preserve the original read-only. Record filename, byte size, and SHA-256 of the copy in the ignored manifest.
-- [ ] **Step 2: Create a dedicated QA project through the UI.** Use the exact name `VideoBox PC QA <date-time>`. Do not use `My Project` or another existing owner project.
-- [ ] **Step 3: Run creation and import.** Paste the approved script or select the approved script copy, create the brief, import the video, wait for analysis state, and record every visible loading/error/retry state.
-- [ ] **Step 4: Run editing.** Apply video/B-roll/BGM/SFX in the editor, confirm save success, reload the route, and confirm the same revision and assets are restored.
-- [ ] **Step 5: Run stale review recovery.** Generate review, make one real edit, confirm stale status, rebuild review for the current revision, inspect blockers, and approve only when the checklist is clear.
-- [ ] **Step 6: Generate outputs.** Create subtitles, final MP4, and CapCut draft. Do not publish or upload externally.
-- [ ] **Step 7: Verify artifacts.** Assert each file exists and is nonzero; run FFprobe against the MP4 and assert video stream, audio stream when expected, duration, and readable codec metadata.
-- [ ] **Step 8: Perform owner media acceptance.** In the browser, watch the MP4 and listen through speech/BGM/SFX; inspect caption timing. Use `scripts/owner-ready.ps1 -Mode OpenCapCut` only for the approved QA draft, then have the owner confirm it opens in CapCut Desktop.
-- [ ] **Step 9: Preserve evidence and stop before cleanup.** Keep the QA project and outputs until the owner explicitly approves cleanup. Do not delete them automatically.
+- [x] **Step 1: Prepare isolated input.** A generated/copy-isolated QA source and short narration were preserved read-only in ignored artifacts; hashes and byte-level evidence are in `qa-mutation-manifest.json`. This is a synthetic QA sample, not owner-approved production media.
+- [ ] **Step 2: Create a dedicated QA project through the UI.** The exact display name `VideoBox PC QA 20260811153350` and slug were created in the official runtime, but the browser pipe closed before the UI click path; API creation is recorded separately and is not claimed as UI proof.
+- [ ] **Step 3: Run creation and import.** Creation, upload, readiness retry, and completion succeeded against the official runtime API; visible UI loading/error/retry capture could not be completed after the browser transport closed.
+- [ ] **Step 4: Run editing.** A real caption mutation advanced revision 1→2 and persisted in the session; route reload was not performed in a live browser after the browser transport closed.
+- [x] **Step 5: Run stale review recovery.** The edit invalidated the prior review (`editing_session_mutation`), refresh rebuilt it for revision 2, and approval succeeded with no blockers.
+- [x] **Step 6: Generate outputs.** Subtitle, final MP4, and CapCut draft jobs all succeeded against the approved timeline; no external publishing/upload was performed.
+- [x] **Step 7: Verify artifacts.** SRT, MP4, and CapCut draft files are nonzero; FFprobe confirms 1920×1080 H.264/AAC, 5.0 seconds, 48 kHz stereo audio. A representative MP4 frame was inspected.
+- [ ] **Step 8: Perform owner media acceptance.** MP4 frame/FFprobe evidence is recorded, but full owner watch/listen and caption-timing acceptance is still pending. CapCut handoff registration failed because installation was not detected; `owner-ready.ps1 -Mode OpenCapCut` only confirmed an open request, not Desktop import/open.
+- [x] **Step 9: Preserve evidence and stop before cleanup.** The dedicated QA project and all outputs remain in runtime storage; no cleanup or deletion was performed.
 
 ## Task 9: Handoff and completion decision
 
