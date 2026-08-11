@@ -27,6 +27,7 @@
 - Modify `apps/web/src/styles/product-shell.css`: containment, collapsed rail, project row, dialog fallback, desktop breakpoints.
 - Modify `apps/web/src/app/ProductShell.tsx`: Lucide navigation icons, hideable labels/tooltips, compact project menu, job dialog class hooks.
 - Modify `apps/web/src/components/ui/dialog.tsx`: stable visual contract class hooks/fallback-friendly structure without changing Radix behavior.
+- Modify `docs/oss/editor-ui-source-map.json`: refresh the normalized `ProductShell.tsx` materialized-file hash after the source-preservation-required edit.
 - Modify `apps/web/src/app/ProductShell.test.tsx`: project row, collapsed rail, dialog structure and accessible names.
 - Add or modify `apps/web/src/styles/product-shell.visual.test.tsx`: rendered layout contract tests that assert class hooks and semantic regions.
 - Modify `apps/web/e2e/run-isolated.mjs` only if the existing isolated harness needs a new viewport route; do not create a second browser harness.
@@ -70,6 +71,7 @@
 - [ ] **Step 1: Add failing rendered contract tests.** Render the dialog and job recovery fixture at the existing Vitest DOM boundary and assert the dialog has `data-vb-dialog-content`, a bounded-content class, and a labelled close button; assert the shell has a `data-vb-desktop-shell` hook. The test must fail before the hooks exist.
 - [ ] **Step 2: Run the focused test and record the failure.** Run from `apps/web`: `pnpm exec vitest run src/styles/product-shell.visual.test.tsx --reporter=verbose`. Expected: FAIL because the new hooks are absent.
 - [ ] **Step 3: Add minimal hooks and CSS fallback.** Add stable `data-vb-*` hooks to the existing Radix dialog content and product shell. Add only the bounded fallback rules needed for `max-width: 35rem`, `max-height: 70vh`, `overflow-y: auto`, `padding: 1.5rem`, and centered positioning; keep Tailwind classes and Radix state behavior intact.
+- [ ] **Step 3a: Update source-preservation metadata when ProductShell changes.** Compute the normalized SHA-256 with the repository's existing provenance verifier rules and update both `ProductShell.tsx` entries in `docs/oss/editor-ui-source-map.json`; run the focused provenance verifier before committing.
 - [ ] **Step 4: Rebuild and compare assets.** Run `pnpm run build` from `apps/web`; capture the generated CSS/JS names. Start/check the local runtime only through `scripts/owner-ready.ps1`, then compare the served HTML asset names with this build. If they differ, stop the visual gate and rebuild through the approved owner-ready path.
 - [ ] **Step 5: Run focused tests and build.** Run `pnpm exec vitest run src/styles/product-shell.visual.test.tsx src/app/ProductShell.test.tsx --reporter=verbose` and `pnpm run build`. Expected: PASS and production build success.
 - [ ] **Step 6: Commit the slice.** Run `git diff --check`, stage only the touched files, and commit `fix: restore shared desktop visual contract`.
