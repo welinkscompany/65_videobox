@@ -76,10 +76,10 @@ export function CreationInterview({ projectId }: { projectId: string }) {
   // The router reuses this component while switching projects. Clear every
   // project-owned draft field before the new project's request resolves so a
   // previous project's brief can never flash or be mutated under the new id.
-  const renderedProjectId = useRef(projectId);
+  const [renderedProjectId, setRenderedProjectId] = useState(projectId);
+  const projectSwitchPending = renderedProjectId !== projectId;
   useEffect(() => {
-    if (renderedProjectId.current === projectId) return;
-    renderedProjectId.current = projectId;
+    if (!projectSwitchPending) return;
     setBrief(null);
     setStoredBriefId(window.localStorage.getItem(briefStorageKey(projectId)));
     setScriptText("");
@@ -92,20 +92,27 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     setRetryAnswer(null);
     setAnswerDraft("");
     setError(null);
-  }, [projectId]);
+  }, [projectId, projectSwitchPending]);
 
   useEffect(() => {
     const briefId = window.localStorage.getItem(briefStorageKey(projectId));
-    if (!briefId) return;
+    if (!briefId) {
+      setRenderedProjectId(projectId);
+      return;
+    }
     let active = true;
     void api.getCreationBrief(projectId, briefId).then((loaded) => {
       if (active) {
+        setRenderedProjectId(projectId);
         setStoredBriefId(loaded.brief_id);
         setBrief(loaded);
       }
     }).catch(() => {
       window.localStorage.removeItem(briefStorageKey(projectId));
-      if (active) setStoredBriefId(null);
+      if (active) {
+        setRenderedProjectId(projectId);
+        setStoredBriefId(null);
+      }
     });
     return () => { active = false; };
   }, [projectId]);
@@ -178,7 +185,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     setAnswerDraft(brief.answers[currentQuestion.field] ?? "");
   }, [brief, currentQuestion]);
 
-  if (renderedProjectId.current !== projectId) {
+  if (projectSwitchPending) {
     return <section className="vb-creation-interview" aria-live="polite"><p>새 프로젝트의 기획을 불러오는 중이에요.</p></section>;
   }
 

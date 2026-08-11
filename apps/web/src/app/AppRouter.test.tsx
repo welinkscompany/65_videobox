@@ -607,7 +607,7 @@ describe("AppRouter URL ownership", () => {
 
     const recoveryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/missing/editing"] }));
     render(<AppRouter router={recoveryRouter} />);
-    fireEvent.click(await screen.findByRole("button", { name: "프로젝트 열기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "A" }));
     await waitFor(() => expect(recoveryRouter.state.location.pathname).toBe("/projects/project_a/home"));
   });
 
