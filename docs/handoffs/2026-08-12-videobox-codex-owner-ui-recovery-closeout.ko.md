@@ -1,33 +1,40 @@
-# VideoBox Codex owner UI recovery closeout
+# VideoBox Codex 데스크톱 UI 복구 인계
 
-작성일: 2026-08-12
-브랜치: `codex/videobox-container-compatibility`
+작성일: 2026-08-12  
+브랜치: `codex/videobox-container-compatibility`  
+최신 소스: `7c0daad7f`
 
-## 현재 기준
+## 이번 검증에서 고정한 것
 
-- 최신 소스: `5cf1dc34b` (자산 탭 접근성 보강)
-- 공식 런타임은 `scripts/owner-ready.ps1`로 재빌드했다.
-- worktree clean, origin과 divergence `0 0`.
-- `owner-ready -Mode Check -Json`: VideoBox health·데이터·모델·CapCut은 pass. Hermes dashboard는 별도 서비스 미기동으로 blocked이며 VideoBox 런타임 상태와 분리한다.
+- 대시보드: 설명형 문장을 줄이고 `다음 작업`, `다음 할 일`, `초안 있음`, `자산 준비 완료`, `완성본 N개` 키워드 상태로 정리했다. 상태 API 실패 시 새 영상 생성을 유도하지 않고 `상태 확인 실패`와 재시도를 표시한다.
+- 사이드바: 아이콘·라벨을 정리하고 접기/펼치기 액션 이름과 아이콘을 상태에 맞게 반전했다. 프로젝트 보관·삭제·복구 실패는 busy와 `role=alert`로 남긴다.
+- 자산: 프로젝트 범위 즐겨찾기/최근 사용, 활성 필터 색상, 24개 페이지 제한, 가져오기 응답 유실 재시도 idempotency, 프로젝트 자산 카드 스타일을 고정했다.
+- 자체 편집기: 데스크톱 workbench의 미리보기·타임라인·자산 패널이 부모 화면을 밀어내지 않고 내부에 스크롤을 보유한다.
+- 검토/출력: `source_session_id`까지 포함한 lineage 검증, stale 검토 재생성 CTA, 출력 카드 4열과 영상 크기 제한, 제품 소유 링크 스타일을 반영했다.
 
-## 실제 브라우저 증거
+## 검증 증거
 
-- 전용 UI QA 프로젝트: 표시명 `VideoBox UI QA 20260812ㄱ`, ID `videobox-ui-qa-20260812`.
-- 브라우저에서 프로젝트 생성, 대본 승인, 파일 선택기 자산 가져오기(잘못된 경로 실패 후 올바른 경로 성공), readiness 재준비, 초안 생성, 편집 미리보기, 검토 승인, 자막·MP4·CapCut draft 출력을 순서대로 실행했다.
-- `home/media/editor/review/outputs` × `1920×1080`, `1440×900`, `1366×768`, `1280×800` 총 20개 조합을 재검증했다. 오류와 가로 overflow는 없었다.
-- 자체 편집기에서 원본 audition→복귀, 타임라인 선택, 캡션 저장·reload 보존, 미리보기 재생(`duration=5`, `muted=false`, `readyState=4`)을 확인했다.
-- 자산 탭은 활성 패널만 `aria-controls`를 갖고 Arrow/Home/End 키로 이동한다. 실제 브라우저에서 포커스와 패널 교체를 재확인했다.
+- 프론트: Vitest 63개 파일, 873개 통과.
+- 타입/빌드: `npx tsc -b --pretty false`, `npm run build` 통과.
+- provenance: `.venv\\Scripts\\python.exe -m pytest tests/test_editor_ui_source_provenance.py` 21개 통과.
+- 백엔드 전체 pytest는 현재 실행 중이며 완료 결과를 이 문서에 추가한다.
+- 공식 런타임은 `scripts/owner-ready.ps1 -Mode Start -Rebuild -Json` 후 `-Mode Check -Json`으로 갱신했다. VideoBox health 200, branch/upstream·worktree·도구·CapCut pass. Hermes dashboard만 별도 서비스 미기동으로 blocked.
 
-## 산출물·라인리지
+실제 브라우저에서 재빌드된 런타임을 다시 열어 확인한 스크린샷:
 
-- UI QA output MP4: 5초, 1920×1080 H.264/AAC, 48kHz stereo.
-- UI QA subtitle SHA-256: `7F00CA7D67B702CF4CEF62058248FF75AA9BC6B9E21E7A88D18869258D6CE546`.
-- UI QA final MP4 SHA-256: `EE2403E045431F1463A4A987069CBB4369484846179036E998FD1704A05AD977`.
-- CapCut draft content SHA-256: `CA4C15C670394B7088412D06830549492B3F9A9A783F38EF9AE5CDDD14FACC55`.
-- 별도 canonical QA lane `videobox-pc-qa-20260811153350`에서는 caption mutation으로 revision 1→2, stale review refresh·approve, subtitle/final/CapCut export까지 확인했고 CapCut Desktop import/open도 통과했다.
+`artifacts/qa/desktop-owner-ui-recovery/audit-2026-08-12/`
 
-## 남은 운영 게이트
+- `02-media-runtime-final.png`
+- `03-editor-runtime-final.png`
+- `04-review-runtime-final.png`
+- `05-outputs-runtime-final.png`
 
-자동·브라우저 검증으로 대체하지 않는 owner 작업은 최종 MP4 전체 시청·청취, 자막 타이밍 확인, owner 승인이다. CapCut 컨테이너 handoff registration은 설치 감지 한계로 실패하지만, 호스트 CapCut 9.1.0.3879에서 실제 MP4 import/open과 캡션 표시를 확인했다.
+브라우저 측정 결과: 검토 콘텐츠 폭 약 1009px, 자체 편집기 workbench 폭 약 1124px, 출력 페이지 scrollHeight 968px, 완성본 영상은 카드 안에서 약 182×102px로 제한됐다. 편집기에서 접힌 사이드바를 클릭하면 `data-state=expanded`, 라벨이 `사이드바 접기`로 바뀌는 역방향 동작도 확인했다.
 
-상세 mutation manifest와 이전 인계의 세부 경로·스크린샷은 `artifacts/qa/desktop-owner-ui-recovery/qa-mutation-manifest.json` 및 `docs/handoffs/2026-08-11-videobox-claude-to-codex-handover.ko.md`에 있다.
+## 아직 owner가 직접 해야 하는 게이트
+
+- QA mutation manifest는 과거 API lane과 UI lane이 섞여 있으므로 실제 브라우저에서 프로젝트 생성→자산 가져오기→분석→편집→검토 승인→SRT/MP4/CapCut 출력을 새로 수행한 증거로 간주하지 않는다.
+- 최종 MP4 전체 시청·청취, 자막 타이밍, CapCut Desktop import/open은 owner 확인이 필요하다.
+- Creation readiness의 건너뛰기/멈추기/다시 준비 실패 문구와 완료본 역사 개수 정책은 다음 보강 대상으로 남아 있다.
+
+보호해야 할 기존 runtime QA 프로젝트 `videobox-pc-qa-20260811153350`는 삭제·덮어쓰기하지 않는다.
