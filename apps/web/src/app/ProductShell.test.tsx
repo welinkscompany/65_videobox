@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
@@ -15,6 +15,40 @@ const projects = [
 ];
 
 describe("product shell", () => {
+  it("gives primary navigation icons and keeps project actions behind one more menu", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+
+    const navigation = await screen.findByRole("navigation", { name: "영상 제작" });
+    const navButtons = within(navigation).getAllByRole("button");
+    expect(navButtons).toHaveLength(6);
+    for (const label of ["홈", "새 영상 만들기", "편집", "검토", "자산", "출력"]) {
+      const button = within(navigation).getByRole("button", { name: label });
+      expect(button.querySelector("svg")).toBeTruthy();
+      expect(button.querySelector(".vb-nav-label")).toHaveTextContent(label);
+    }
+
+    const picker = screen.getByLabelText("프로젝트 전환");
+    const projectRow = picker.querySelector('[data-testid="project-row-first"]');
+    expect(projectRow).toBeTruthy();
+    expect(within(projectRow as HTMLElement).getAllByRole("button")).toHaveLength(2);
+    expect(within(projectRow as HTMLElement).getByRole("button", { name: "첫 번째 영상 더보기" })).toBeInTheDocument();
+    expect(within(projectRow as HTMLElement).queryByRole("button", { name: /보관|삭제/ })).not.toBeInTheDocument();
+  });
+
+  it("provides a readable icon-only name when the sidebar is collapsed", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("navigation", { name: "영상 제작" });
+    fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
+
+    const navigation = screen.getByRole("navigation", { name: "영상 제작" });
+    const home = within(navigation).getByRole("button", { name: "홈" });
+    expect(home).toHaveAttribute("aria-label", "홈");
+    expect(home.querySelector(".vb-nav-label")).toHaveClass("group-data-[collapsible=icon]:hidden");
+  });
   it("opens the current-project recovery surface only when the user asks for job status", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const getYujinStatus = vi.spyOn(api, "getHermesYujinStatus").mockResolvedValue({
@@ -180,9 +214,10 @@ describe("product shell", () => {
     render(<AppRouter router={router} />);
     await screen.findByRole("navigation", { name: "영상 제작" });
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관하기" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관하기" }));
     expect(archiveProject).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관 확인" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관 확인" }));
 
     await waitFor(() => expect(archiveProject).toHaveBeenCalledWith("second"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
@@ -197,15 +232,16 @@ describe("product shell", () => {
     render(<AppRouter router={router} />);
     await screen.findByRole("navigation", { name: "영상 제작" });
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 완전 삭제" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "완전 삭제" }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
     expect(screen.getByText(/되돌릴 수 없어요/)).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 삭제 1차 확인" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /삭제 1차 확인/ }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
     expect(screen.getByText(/한 번 더 확인/)).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 영구 삭제" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /영구 삭제/ }));
 
     await waitFor(() => expect(deleteProjectPermanently).toHaveBeenCalledWith("second"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
