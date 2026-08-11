@@ -460,6 +460,13 @@ async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
                             profile=service.profile,
                         )
                     except Exception:
+                        _LOGGER.warning(
+                            "자산의 현재 캐시 열쇠를 계산하지 못했습니다 (project=%s, asset=%s). "
+                            "이번 회차에는 낡음 여부를 판단할 수 없어 다시 걸리지 않습니다.",
+                            project_id,
+                            asset_id,
+                            exc_info=True,
+                        )
                         continue
                 stale = assets_needing_reanalysis(
                     store=store,

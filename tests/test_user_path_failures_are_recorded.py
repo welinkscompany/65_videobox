@@ -561,6 +561,66 @@ def test_the_readiness_probe_says_why_it_answered_no(
     assert len(reported) == 1, "준비 확인 실패가 매번 찍히거나 아예 안 찍혔다"
 
 
+def test_a_stale_check_that_cannot_read_one_asset_still_checks_the_rest(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """낡은 분석을 다시 걸기 전에 캐시 열쇠를 계산하는데, 자산 하나의 원본을
+    못 읽으면 그 자산만 조용히 건너뛰고 아무 기록도 남기지 않았다. 그 자산은
+    캐시 열쇠 없이 매번 이 자리를 지나가므로, 태그가 옛 언어로 남아도 이유를
+    알 방법이 없었다."""
+    import asyncio
+
+    from videobox_api.main import _poll_media_analysis
+
+    class _Service:
+        profile = None
+
+        @staticmethod
+        def cache_key(**_kwargs):
+            return "current-key"
+
+    class _Store:
+        @staticmethod
+        def list_projects():
+            return [{"project_id": "p1"}]
+
+        @staticmethod
+        def recover_orphaned_media_analysis_jobs(*, project_id: str):
+            return []
+
+        @staticmethod
+        def list_assets(*, project_id: str):
+            return [
+                {"asset_id": "asset-1", "storage_uri": "local://ok.mp4"},
+                {"asset_id": "asset-2", "storage_uri": "local://missing.mp4"},
+            ]
+
+        @staticmethod
+        def resolve_storage_uri(*, project_id: str, storage_uri: str):
+            if storage_uri == "local://missing.mp4":
+                raise RuntimeError("source file is gone")
+            return __file__
+
+        @staticmethod
+        def list_media_analysis(*, project_id: str):
+            return []
+
+    class _App:
+        class state:
+            store = _Store()
+            media_analysis_service = _Service()
+            media_analysis_dispatcher = staticmethod(lambda **_kwargs: None)
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(_poll_media_analysis(_App(), recover_running=True))
+
+    reported = [
+        record for record in caplog.records if "source file is gone" in str(record.exc_info)
+    ]
+    assert reported, "자산 하나의 캐시 열쇠 계산 실패가 기록되지 않았다"
+    assert "asset-2" in reported[0].getMessage()
+
+
 def test_every_user_path_swallow_point_carries_a_logger() -> None:
     """네 지점이 로거를 갖고 있는지 파일 단위로 잠근다. 하나가 조용히 빠지면
     다시 "왜 안 되는지 모르겠다"로 돌아간다."""
