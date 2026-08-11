@@ -3,12 +3,8 @@
 이 파일이 이 저장소의 **최상위 지침**이다. 어느 AI 코딩 도구를 쓰든(Claude Code, Codex 등)
 이 파일이 먼저다.
 
-2026-08-05부로 개발 주체를 Claude Code로 전환했었고, **2026-08-11 저녁부로 Codex로 다시
-전환한다** (Claude 토큰 소진). 아래 문장은 그 전환 당시 기록이며 지금은 개발 주체 설명으로
-유효하지 않다: "이 저장소에는 이제 `AGENTS.md`가 없다 — 아무 코드·문서·스크립트도 그 파일을
-참조하지 않는 것을 확인한 뒤 완전히 삭제했다." **이 문장 하나만 무시하고, §0~§8의 나머지
-모든 운영 규칙은 도구가 바뀌어도 그대로 유효하다.** 전환 배경과 최신 상태는
-`docs/handoffs/2026-08-11-videobox-claude-to-codex-handover.ko.md`를 먼저 읽을 것.
+과거 Claude/Codex 전환 기록은 현재 도구 설명으로 사용하지 않는다. **§0~§8의 운영 규칙은
+도구가 바뀌어도 그대로 유효하다.** 최신 상태와 남은 게이트는 최신 인계 문서를 먼저 읽을 것.
 
 동의가 목표가 아니다. 가장 논리적이고 현실적인 해결책을 찾는 것이 목표다.
 
@@ -61,7 +57,7 @@
 | 상태/closeout 로그 | `docs/development-status-2026-06-29.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
 | 미해결 수정 backlog | `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` |
-| **최신 세션 인계** | `docs/handoffs/2026-08-11-videobox-claude-to-codex-handover.ko.md` (개발 주체 전환 인계 — 먼저 읽을 것) |
+| **최신 세션 인계** | `docs/handoffs/2026-08-12-videobox-codex-owner-ui-recovery-closeout.ko.md` |
 
 승인된 시각 결정은 현재 세 건이다. 전부 사용자가 명시 승인했고 재승인 없이 바꾸지 않는다.
 **현재 화면에 적용된 팔레트는 가장 나중 것이다** — 앞의 둘을 읽고 색을 판단하면 틀린다.
