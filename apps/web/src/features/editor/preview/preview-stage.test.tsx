@@ -159,6 +159,14 @@ describe("PreviewStage", () => {
     expect(imageRule).toContain("object-fit: contain");
   });
 
+  it("keeps oversized preview content top-aligned so the preview scrolls inward", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const previewRule = css.match(/^\.vb-editor-workbench__preview\s*\{([^}]*)\}/m)?.[1] ?? "";
+
+    expect(previewRule).toContain("place-content: start");
+    expect(previewRule).not.toContain("place-content: center");
+  });
+
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
     const refresh = vi.fn();
     const stale = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);
