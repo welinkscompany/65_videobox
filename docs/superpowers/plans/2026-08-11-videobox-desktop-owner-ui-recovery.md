@@ -195,7 +195,7 @@
 
 ## Task 9: Handoff and completion decision
 
-- [x] **Step 1: Pin final HEAD and verify clean status.** Update this SHA after the dashboard copy and evidence changes are committed; the final check must still show clean status, `git diff --check`, and upstream count `0 0`.
+- [x] **Step 1: Pin final source commit and verify clean status.** Dashboard source and evidence are pinned at `36a080ff2`; the final check must still show clean status, `git diff --check`, and upstream count `0 0`.
 - [x] **Step 2: Separate gates in the handoff.** Automated tests, browser visual proof, artifact/FFprobe proof, and owner media acceptance are recorded as separate gates in the handoff; they are not collapsed into one green test count.
 - [x] **Step 3: Report unrun gates.** Full audio/video listening, caption-timing review, and owner approval remain explicitly pending; CapCut Desktop import/open is separately evidenced, and the product is not called owner-ready.
 - [x] **Step 4: Commit the handoff only after all required gates are honestly recorded.** Handoff updates were committed and pushed on the current branch with exact evidence paths.
