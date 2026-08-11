@@ -48,18 +48,18 @@ worktree는 깨끗하다.
    - **실제 켜져 있는 `.env.container`도 맞는 값으로 고치고 컨테이너를 재기동해 확인했다.**
      (이 파일은 gitignore 대상이라 git에는 안 남는다.)
 
-## owner가 할 일 — 자동으로 못 끝낸 것 하나
+## owner가 끝낸 것
 
-**`projects/` 폴더(95.3MB, `b-roll-smoke-test` 포함) 삭제가 안전 장치에 막혀 대기 중이다.**
-조사는 끝났다 — 컨테이너가 실제로 보는 `runtime/projects/`에는 이 프로젝트 자체가 없고,
-안에 든 진짜 촬영본은 이미 다른 곳(media-inbox)에 살아 있다. 아래를 실행하면 된다.
+**`projects/` 폴더(95.3MB) 삭제 — owner가 직접 실행, 완료 확인함(2026-08-11).**
+자동 모드 안전 장치가 repo 밖 데이터 폴더 삭제를 막아서 손으로 실행해야 했다.
 
-```powershell
-Remove-Item -Recurse -Force "D:\AI_Workspace_louis_office_50\20_project\65_videobox-project\projects"
-```
+**`main` 병합·배포도 owner 지시로 완료.** `codex/videobox-container-compatibility`를
+`main`으로 fast-forward, 양쪽 다 푸시했다(`a1394ad60`). 실행 중이던 컨테이너는 이번
+세션에서 이미 만든 이미지 그대로라 재기동 없이 healthy 상태를 유지했다.
 
 ## 다음 세션이 이어서 할 것
 
+0. **`projects/` 삭제와 `main` 배포는 이미 끝났다.** 아래 목록에서 지웠다.
 1. **owner가 자기 촬영본으로 직접 한 편 만들어 볼 것.** 막힌 곳은 다 뚫렸고 mp4도
    나온다. 이제부터는 실제로 쓰면서 남은 불편을 찾는 단계다. **여는 순서: LM Studio에
    모델을 올린 뒤 컨테이너를 띄운다.** `owner-ready.ps1 -Mode Check`로 먼저 확인하면
