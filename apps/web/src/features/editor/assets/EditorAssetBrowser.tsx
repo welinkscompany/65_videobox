@@ -61,10 +61,10 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         <Input className="vb-editor-assets__search" type="search" aria-label="자산 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
       <div className="vb-editor-assets__filters" role="group" aria-label="자산 유형 필터">
-        {filters.map((filter) => <Button key={filter.type} className="vb-editor-assets__filter" type="button" aria-pressed={type === filter.type} onClick={() => setType(filter.type)}>{filter.label} 필터</Button>)}
+        {filters.map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={type === filter.type} onClick={() => setType(filter.type)}>{filter.label} 필터</Button>)}
       </div>
       <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향 필터">
-        {orientationFilters.map((filter) => <Button key={filter.value} className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label} 필터</Button>)}
+        {orientationFilters.map((filter) => <Button key={filter.value} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label} 필터</Button>)}
       </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>

@@ -44,6 +44,19 @@
   --radius: .625rem;
 }
 
+/* @import "tailwindcss/utilities" alone carries no breakpoint tokens, so
+   every sm:/md:/lg:/xl: variant in the app silently generated nothing until
+   these were declared. Values match Tailwind's own defaults. Kept out of
+   the "inline" theme block below -- breakpoints are read at build time to
+   size variants, not resolved as runtime custom properties. */
+@theme {
+  --breakpoint-sm: 40rem;
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 80rem;
+  --breakpoint-2xl: 96rem;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
