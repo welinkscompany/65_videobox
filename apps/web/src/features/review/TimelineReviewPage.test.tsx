@@ -70,6 +70,7 @@ const approval = (projectId = "project-a", timelineId = "timeline-a", status = "
   review_status: status,
   approved_at: status === "approved" ? "2026-07-23T00:02:00Z" : null,
   updated_at: "2026-07-23T00:02:00Z",
+  source_session_id: `session-${projectId}`,
   source_session_revision: 4,
   is_current: true,
   invalidated_at: null,

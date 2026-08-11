@@ -51,6 +51,8 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
+  const [projectActionError, setProjectActionError] = useState<string | null>(null);
+  const [projectActionBusy, setProjectActionBusy] = useState<string | null>(null);
   // Permanent delete needs two separate confirmations (owner decision,
   // 2026-08-06) -- stage 1 warns it's irreversible, stage 2 asks once more
   // before the actual call. Enforced again server-side (routers/projects.py
@@ -69,6 +71,17 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   const setJobDialogOpenSafely = (open: boolean) => {
     if (!open && jobRecoveryBusy) return;
     setJobDialogOpen(open);
+  };
+  const runProjectAction = async (key: string, action: () => void | Promise<void>) => {
+    setProjectActionError(null);
+    setProjectActionBusy(key);
+    try {
+      await action();
+    } catch {
+      setProjectActionError("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
+    } finally {
+      setProjectActionBusy(null);
+    }
   };
   useEffect(() => { const restoreMobileTrigger = (event: KeyboardEvent) => { if (event.key === "Escape" && window.innerWidth < 768) queueMicrotask(() => mobileTriggerRef.current?.focus()); }; document.addEventListener("keydown", restoreMobileTrigger); return () => document.removeEventListener("keydown", restoreMobileTrigger); }, []);
   // These two settings used to write to localStorage and change nothing else,
@@ -91,14 +104,14 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
           <DropdownMenuTrigger asChild><Button className="vb-project-more" variant="ghost" size="icon" aria-label={`${project.name} 더보기`}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {onArchiveProject ? (archiveConfirmId === project.project_id ? (
-              <DropdownMenuItem onSelect={(event) => { event.preventDefault(); setArchiveConfirmId(null); void onArchiveProject(project.project_id); }}>보관 확인</DropdownMenuItem>
+              <DropdownMenuItem disabled={projectActionBusy === `archive:${project.project_id}`} onSelect={() => { setArchiveConfirmId(null); void runProjectAction(`archive:${project.project_id}`, () => onArchiveProject(project.project_id)); }}>보관 확인</DropdownMenuItem>
             ) : (
               <DropdownMenuItem onSelect={(event) => { event.preventDefault(); setArchiveConfirmId(project.project_id); }}>보관하기</DropdownMenuItem>
             )) : null}
             {onDeleteProjectPermanently ? <>
               <DropdownMenuSeparator />
               {deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 2 ? (
-                <DropdownMenuItem variant="destructive" onSelect={(event) => { event.preventDefault(); setDeleteConfirmStage(null); void onDeleteProjectPermanently(project.project_id); }}>영구 삭제 · 한 번 더 확인할게요</DropdownMenuItem>
+                <DropdownMenuItem disabled={projectActionBusy === `delete:${project.project_id}`} variant="destructive" onSelect={() => { setDeleteConfirmStage(null); void runProjectAction(`delete:${project.project_id}`, () => onDeleteProjectPermanently(project.project_id)); }}>영구 삭제 · 한 번 더 확인할게요</DropdownMenuItem>
               ) : deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 1 ? (
                 <DropdownMenuItem onSelect={(event) => { event.preventDefault(); setDeleteConfirmStage({ projectId: project.project_id, stage: 2 }); }}>삭제 1차 확인 · 되돌릴 수 없어요</DropdownMenuItem>
               ) : (
@@ -114,15 +127,15 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
           {archive.archivedProjects.length === 0 ? <p>보관한 프로젝트가 없어요.</p> : archive.archivedProjects.map((project) => (
             <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
               <span>{project.name}</span>
-              <Button variant="outline" aria-label={`${project.name} 되돌리기`} onClick={() => void archive.restore(project.project_id)}>되돌리기</Button>
+              <Button variant="outline" disabled={projectActionBusy === `restore:${project.project_id}`} aria-label={`${project.name} 되돌리기`} onClick={() => void runProjectAction(`restore:${project.project_id}`, () => archive.restore(project.project_id))}>되돌리기</Button>
             </div>
           ))}
           <Button variant="ghost" onClick={() => setArchiveOpen(false)}>보관함 닫기</Button>
         </div>
       ) : (
         <Button variant="ghost" onClick={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</Button>
-      )) : null}</div>
-      </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span className="group-data-[collapsible=icon]:hidden">설정</span></Button><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"} title={collapsed ? "사이드바 펼치기" : "사이드바 접기"} />
+      )) : null}{projectActionError ? <p className="vb-project-action-error" role="alert">{projectActionError}</p> : null}</div>
+      </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span className="group-data-[collapsible=icon]:hidden">설정</span></Button><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label={collapsed ? "화면 목록 펼치기" : "화면 목록 접기"} title={collapsed ? "화면 목록 펼치기" : "화면 목록 접기"} />
     </Sidebar>
     <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"} onClick={() => setCollapsed((value) => !value)} className="vb-collapse">{collapsed ? <PanelLeft /> : <PanelLeftClose />}</Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent className="vb-dialog-content" showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog></header><div className="vb-product-content">{children}</div></SidebarInset>
     </div>

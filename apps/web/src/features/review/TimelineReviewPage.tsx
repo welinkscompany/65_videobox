@@ -200,7 +200,7 @@ export function TimelineReviewPage({
 
   const approved = state.approval.review_status === "approved";
   return (
-    <section data-testid="timeline-review-page" data-project-id={state.projectId} aria-live="polite">
+    <section className="vb-review-page" data-testid="timeline-review-page" data-project-id={state.projectId} aria-live="polite">
       <p>검토</p>
       <h1>영상 검토</h1>
       <p>장면과 추천 상태를 확인해 주세요.</p>
@@ -254,6 +254,7 @@ export function TimelineReviewPage({
               <p>{segment.text}</p>
               <p>{`${segment.start_sec}초–${segment.end_sec}초`}</p>
               <a
+                className="vb-action-link"
                 href={editorSegmentHref(state.projectId, state.session.session_id, segment.segment_id)}
                 onClick={(event) => {
                   if (

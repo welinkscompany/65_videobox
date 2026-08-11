@@ -168,7 +168,7 @@ describe("product shell", () => {
     await screen.findByRole("region", { name: "편집 작업판" });
     const sidebar = document.querySelector('[data-slot="sidebar"]');
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
+    fireEvent.click(screen.getByRole("button", { name: "사이드바 펼치기" }));
     expect(sidebar).toHaveAttribute("data-state", "expanded");
 
     await router.navigate({ to: "/projects/first/home" });
@@ -246,6 +246,18 @@ describe("product shell", () => {
 
     await waitFor(() => expect(deleteProjectPermanently).toHaveBeenCalledWith("second"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
+  });
+
+  it("shows a retryable error when a project action fails", async () => {
+    const onArchiveProject = vi.fn().mockRejectedValue(new Error("network down"));
+    render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()} onArchiveProject={onArchiveProject}><p>본문</p></ProductShell>);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관하기" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관 확인" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
+    expect(onArchiveProject).toHaveBeenCalledWith("second");
   });
 
   it("persists a working appearance setting and only exposes local privacy choices", async () => {
@@ -337,6 +349,25 @@ describe("archived projects", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "보관한 프로젝트 되돌리기" }));
     expect(onRestoreProject).toHaveBeenCalledWith("project-b");
+  });
+
+  it("shows a retryable error when restoring an archived project fails", async () => {
+    const onRestoreProject = vi.fn().mockRejectedValue(new Error("network down"));
+    render(
+      <ProductShell
+        projectId="project-a"
+        projects={[{ project_id: "project-a", name: "살아있는 프로젝트", status: "draft" } as never]}
+        archive={{ archivedProjects: [{ project_id: "project-b", name: "보관한 프로젝트", status: "archived" } as never], load: vi.fn(), restore: onRestoreProject }}
+        section="home"
+        onNavigate={vi.fn()}
+        onOpenSettings={vi.fn()}
+      >
+        <p>본문</p>
+      </ProductShell>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "보관한 프로젝트 되돌리기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
   });
 
   it("says so when the archive is empty instead of showing nothing", async () => {
