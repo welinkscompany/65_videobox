@@ -59,6 +59,10 @@ body:has(.vb-product-shell) { margin:0; }
 .vb-media-library__grid audio { max-width:100%; }
 .vb-media-library__grid img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:.45rem; background:var(--vb-canvas); }
 .vb-media-library__filters [aria-pressed="true"] { background:var(--primary); color:var(--primary-foreground); border-color:var(--primary); }
+.vb-media-project-card { display:grid; gap:.5rem; min-width:0; padding:0; overflow:hidden; border:1px solid var(--vb-border); border-radius:.85rem; background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 5%, transparent); }
+.vb-media-project-card [data-slot=card-header] { display:grid; gap:.35rem; padding:.85rem 1rem .25rem; }
+.vb-media-project-card [data-slot=card-content] { display:grid; gap:.25rem; padding:0 1rem 1rem; }
+.vb-media-project-card [data-slot=card-description] { color:var(--vb-muted); }
 .vb-media-library__filters { display:flex; flex-wrap:wrap; gap:.5rem; }
 .vb-settings-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1rem; }
 .vb-editor-assets__orientation { display:inline-flex; align-items:center; gap:.3rem; border:1px solid var(--vb-border); border-radius:999px; padding:.1rem .55rem; font-size:.75rem; color:var(--vb-muted); background:var(--vb-canvas); }

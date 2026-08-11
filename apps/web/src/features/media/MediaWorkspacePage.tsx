@@ -354,7 +354,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
             {projectCards.length === 0 ? <p>아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요.</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {projectCards.map((card) => (
-                  <Card key={card.id} aria-label={`${card.title} 자산`}>
+                  <Card key={card.id} className="vb-media-project-card" aria-label={`${card.title} 자산`}>
                     {card.thumbnailUrl ? <img className="vb-editor-assets__thumb" src={card.thumbnailUrl} alt={`${card.title} 미리보기`} loading="lazy" /> : null}
                     <CardHeader>
                       <CardTitle title={card.title}>{card.title}</CardTitle>
