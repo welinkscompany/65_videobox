@@ -190,14 +190,14 @@
 - [x] **Step 5: Run stale review recovery.** The edit invalidated the prior review (`editing_session_mutation`), refresh rebuilt it for revision 2, and approval succeeded with no blockers.
 - [x] **Step 6: Generate outputs.** Subtitle, final MP4, and CapCut draft jobs all succeeded against the approved timeline; no external publishing/upload was performed.
 - [x] **Step 7: Verify artifacts.** SRT, MP4, and CapCut draft files are nonzero; FFprobe confirms 1920×1080 H.264/AAC, 5.0 seconds, 48 kHz stereo audio. A representative MP4 frame was inspected.
-- [ ] **Step 8: Perform owner media acceptance.** MP4 frame/FFprobe evidence is recorded, but full owner watch/listen and caption-timing acceptance is still pending. Container handoff registration could not detect CapCut while host `owner-ready -Mode Check` reports CapCut 9.1.0.3879; `OpenCapCut` only confirmed an open request, not Desktop import/open.
+- [ ] **Step 8: Perform owner media acceptance.** MP4 frame/FFprobe evidence is recorded and the host CapCut 9.1.0.3879 Desktop flow was manually opened: a new project imported `output.mp4` and displayed the 5-second preview with captions. Full owner watch/listen and caption-timing acceptance is still pending; container handoff registration remains unavailable.
 - [x] **Step 9: Preserve evidence and stop before cleanup.** The dedicated QA project and all outputs remain in runtime storage; no cleanup or deletion was performed.
 
 ## Task 9: Handoff and completion decision
 
-- [x] **Step 1: Pin final HEAD and verify clean status.** HEAD is `f092f343a`; `git status --short` is clean, `git diff --check` passes, and upstream count is `0 0`.
+- [x] **Step 1: Pin final HEAD and verify clean status.** HEAD is `2724a5f9e`; `git status --short` is clean, `git diff --check` passes, and upstream count is `0 0`.
 - [x] **Step 2: Separate gates in the handoff.** Automated tests, browser visual proof, artifact/FFprobe proof, and owner media acceptance are recorded as separate gates in the handoff; they are not collapsed into one green test count.
-- [x] **Step 3: Report unrun gates.** CapCut Desktop import/open, full audio/video listening, caption-timing review, and owner approval remain explicitly pending; the product is not called owner-ready.
+- [x] **Step 3: Report unrun gates.** Full audio/video listening, caption-timing review, and owner approval remain explicitly pending; CapCut Desktop import/open is separately evidenced, and the product is not called owner-ready.
 - [x] **Step 4: Commit the handoff only after all required gates are honestly recorded.** Handoff updates were committed and pushed on the current branch with exact evidence paths.
 
 ## Verification command reference
