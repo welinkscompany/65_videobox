@@ -12,6 +12,7 @@ b-roll 분석은 프로젝트에 묶여 있었다. 그래서 라이브러리에 
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -19,6 +20,8 @@ from typing import Any, Iterable
 from videobox_core_engine.media_analysis import FIXED_VISION_RESPONSE_SCHEMA, VISION_ANALYSIS_PROMPT
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
 from videobox_provider_interfaces.vision import VisionAnalysisRequest
+
+_logger = logging.getLogger(__name__)
 
 # 문장 형식을 바꾸면 올린다. 저장된 벡터는 그때의 문장을 가리키므로, 형식이
 # 바뀌면 전부 다시 색인해야 검색이 실제 문장과 맞는다.
@@ -141,6 +144,7 @@ def index_pending_library_footage(
                 description,
                 embedding_provider=embedding_provider,
                 embedding_model_name=embedding_model_name,
+                label=filename,
             ),
             description_version=FOOTAGE_DESCRIPTION_VERSION,
         )
@@ -150,7 +154,8 @@ def index_pending_library_footage(
 
 
 def _embed(
-    text: str, *, embedding_provider: Any | None, embedding_model_name: str | None
+    text: str, *, embedding_provider: Any | None, embedding_model_name: str | None,
+    label: str = "",
 ) -> list[float] | None:
     if embedding_provider is None or not embedding_model_name:
         return None
@@ -161,4 +166,15 @@ def _embed(
         return [float(value) for value in response.vectors[0]]
     except Exception:
         # 화면 분석 결과는 지킨다. 벡터가 없으면 저장소가 다시 대기로 돌린다.
+        #
+        # 동작은 그대로 두되 이유는 남긴다. 벡터가 없으면 그 촬영본은 뜻으로 찾을 수
+        # 없고 검색이 조용히 낱말 맞추기로 떨어진다 -- owner에게는 "찾아 주는 게 늘
+        # 비슷하다"로만 보이고, 왜 그런지는 어디에도 없었다.
+        _logger.warning(
+            "촬영본을 뜻으로 찾을 수 있게 만들지 못했습니다 (파일=%s, 모델=%s). "
+            "그 영상은 이름과 낱말로만 찾힙니다. 다음 색인에서 다시 시도합니다.",
+            label or "(이름 없음)",
+            embedding_model_name,
+            exc_info=True,
+        )
         return None

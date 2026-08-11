@@ -14,6 +14,7 @@ until its vector can be made.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -52,6 +53,7 @@ _PACE_PHRASES = {
     "보통": "일정하게 이어지는 느낌",
     "빠름": "빠르게 몰아치고 활기찬 신나는 느낌",
 }
+_logger = logging.getLogger(__name__)
 _LENGTH_PHRASES = (
     (2.0, "아주 짧게 한 번 스치는"),
     (15.0, "짧게 쓰는"),
@@ -139,6 +141,7 @@ def index_pending_library_audio(
             description,
             embedding_provider=embedding_provider,
             embedding_model_name=embedding_model_name,
+            label=library_asset_id,
         )
         store.save_audio_descriptor(
             library_asset_id=library_asset_id,
@@ -160,7 +163,8 @@ def index_pending_library_audio(
 
 
 def _embed(
-    text: str, *, embedding_provider: Any | None, embedding_model_name: str | None
+    text: str, *, embedding_provider: Any | None, embedding_model_name: str | None,
+    label: str = "",
 ) -> list[float] | None:
     if embedding_provider is None or not embedding_model_name:
         return None
@@ -172,4 +176,15 @@ def _embed(
     except Exception:
         # The measurements above are still worth saving; the store treats a
         # null vector as "come back for this one".
+        #
+        # 동작은 그대로 두되 이유는 남긴다. 벡터가 없으면 그 자산은 뜻으로 찾을 수 없고
+        # 검색이 조용히 단어 매칭으로 떨어진다 -- owner에게는 "추천이 늘 비슷하다"로만
+        # 보이고, 왜 그런지는 어디에도 없었다.
+        _logger.warning(
+            "음악·효과음을 뜻으로 찾을 수 있게 만들지 못했습니다 (자산=%s, 모델=%s). "
+            "그 자산은 이름과 낱말로만 찾힙니다. 다음 색인에서 다시 시도합니다.",
+            label or "(이름 없음)",
+            embedding_model_name,
+            exc_info=True,
+        )
         return None

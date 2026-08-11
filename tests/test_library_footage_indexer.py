@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+import pytest
 
 from videobox_core_engine.library_footage_indexer import (
     FOOTAGE_DESCRIPTION_VERSION,
@@ -139,14 +142,21 @@ def test_the_vision_model_being_away_leaves_the_clip_for_later(tmp_path: Path) -
     assert store.saved == []
 
 
-def test_losing_only_the_embedding_still_keeps_the_analysis(tmp_path: Path) -> None:
+def test_losing_only_the_embedding_still_keeps_the_analysis(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     store = _FakeStore(_pending(tmp_path))
 
-    report = _run(store, tmp_path, embedding_provider=_Embeddings(fail=True))
+    with caplog.at_level(logging.WARNING):
+        report = _run(store, tmp_path, embedding_provider=_Embeddings(fail=True))
 
     assert report.analyzed == ["a.mp4"]
     assert store.saved[0]["embedding"] is None
     assert store.saved[0]["tags"]["layers"]["place"] == ["실내 수영장"]
+    # 동작은 위 그대로다. 다만 벡터가 없으면 그 촬영본은 뜻으로 못 찾고 검색이 조용히
+    # 낱말 맞추기로 떨어진다. 어느 파일이 왜 빠졌는지는 남아 있어야 한다.
+    assert "a.mp4" in caplog.text
+    assert "bge-m3" in caplog.text
 
 
 def test_a_pass_is_bounded_so_a_big_drop_never_owns_the_machine(tmp_path: Path) -> None:

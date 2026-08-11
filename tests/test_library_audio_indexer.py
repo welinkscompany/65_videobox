@@ -9,7 +9,10 @@ thing anyone has to do.
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
+
+import pytest
 
 from videobox_core_engine.audio_descriptors import AudioDescriptor
 from videobox_core_engine.library_audio_indexer import (
@@ -101,7 +104,9 @@ def test_pending_assets_are_measured_described_embedded_and_saved(tmp_path: Path
     assert embeddings.seen == [saved["description"]]
 
 
-def test_measurements_are_kept_even_when_the_local_model_is_away(tmp_path: Path) -> None:
+def test_measurements_are_kept_even_when_the_local_model_is_away(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     # Losing the model must not lose the ffmpeg work. The asset stays pending
     # (the store decides that from the null embedding) and picks up its vector
     # on a later pass.
@@ -112,16 +117,22 @@ def test_measurements_are_kept_even_when_the_local_model_is_away(tmp_path: Path)
         "sha256": "abc", "path": str(audio),
     }])
 
-    report = index_pending_library_audio(
-        store=store,
-        embedding_provider=_FakeEmbeddings(fail=True),
-        embedding_model_name="bge-m3",
-        describe=lambda _path: _descriptor(),
-    )
+    with caplog.at_level(logging.WARNING):
+        report = index_pending_library_audio(
+            store=store,
+            embedding_provider=_FakeEmbeddings(fail=True),
+            embedding_model_name="bge-m3",
+            describe=lambda _path: _descriptor(),
+        )
 
     assert report.analyzed == ["pack:p:music-a"]
     assert store.saved[0]["embedding"] is None
     assert store.saved[0]["words"]["세기"] == "강함"
+    # 동작은 위 그대로다. 다만 벡터가 없으면 그 자산은 뜻으로 못 찾고 검색이 조용히
+    # 낱말 맞추기로 떨어진다. owner에게는 "추천이 늘 비슷하다"로만 보이므로, 어느
+    # 자산이 왜 빠졌는지는 남아 있어야 한다.
+    assert "pack:p:music-a" in caplog.text
+    assert "bge-m3" in caplog.text
 
 
 def test_one_bad_file_does_not_stop_the_rest(tmp_path: Path) -> None:
