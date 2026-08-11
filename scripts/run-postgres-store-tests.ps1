@@ -13,13 +13,22 @@
     VideoBox stack, points the tests at it, and removes it afterwards. The
     owner's stack, data, and network boundary are untouched.
 
+    `-Full` 을 주면 두 파일이 아니라 **회귀 전체**를 이 데이터베이스를 띄운 채로 돌린다.
+    평소 실행에서는 그 53개가 건너뛰어지고, 초록불이 "Postgres 경로는 한 번도 안 돌았다"는
+    사실을 덮는다. 나머지 3,300여 개는 그대로 tmp_path SQLite를 쓴다 -- 그것을 바꾸는 것은
+    73개 파일을 고치는 일이고 owner가 겪는 문제를 하나도 해결하지 않는다(계획서 고정 규칙).
+
 .EXAMPLE
     .\scripts\run-postgres-store-tests.ps1
+
+.EXAMPLE
+    .\scripts\run-postgres-store-tests.ps1 -Full
 #>
 [CmdletBinding()]
 param(
     [int] $Port = 55433,
-    [string] $ContainerName = "videobox-test-pg"
+    [string] $ContainerName = "videobox-test-pg",
+    [switch] $Full
 )
 
 $ErrorActionPreference = "Stop"
@@ -63,20 +72,29 @@ try {
     if (-not $ready) { throw "The test database never became ready." }
 
     $env:VIDEOBOX_TEST_POSTGRES_URL = "postgresql://videobox:testpw@127.0.0.1:$Port/videobox_test"
-    Write-Host "Running the PostgreSQL store tests ..." -ForegroundColor Cyan
 
-    & $python -m pytest `
-        (Join-Path $repoRoot "tests\test_postgres_project_store.py") `
-        (Join-Path $repoRoot "tests\test_postgres_snapshot_import.py") `
-        -q --no-header
+    if ($Full) {
+        Write-Host "Running the whole regression with PostgreSQL reachable (about 25 minutes) ..." -ForegroundColor Cyan
+        & $python -m pytest (Join-Path $repoRoot "tests") -q --no-header
+    } else {
+        Write-Host "Running the PostgreSQL store tests ..." -ForegroundColor Cyan
+        & $python -m pytest `
+            (Join-Path $repoRoot "tests\test_postgres_project_store.py") `
+            (Join-Path $repoRoot "tests\test_postgres_snapshot_import.py") `
+            -q --no-header
+    }
     $testExit = $LASTEXITCODE
 
     # A pass here is only meaningful if the tests actually ran. Skips are the
     # exact failure mode this script exists to end, so treat them as a failure.
     if ($testExit -eq 0) {
-        Write-Host "PostgreSQL store tests passed." -ForegroundColor Green
+        if ($Full) {
+            Write-Host "The whole regression passed with PostgreSQL reachable." -ForegroundColor Green
+        } else {
+            Write-Host "PostgreSQL store tests passed." -ForegroundColor Green
+        }
     } else {
-        Write-Host "PostgreSQL store tests failed (exit $testExit)." -ForegroundColor Red
+        Write-Host "Tests failed (exit $testExit)." -ForegroundColor Red
     }
     exit $testExit
 }

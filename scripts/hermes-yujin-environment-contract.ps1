@@ -7,10 +7,13 @@ function Get-HermesYujinEnvironmentScalarValues {
     if ($null -eq $Environment) {
         throw "Resolved Compose environment must be a scalar map."
     }
+    # `[pscustomobject]`는 타입 리터럴로 쓰면 `[psobject]`로 풀린다. 파이프라인을 지난
+    # 값은 무엇이든 psobject이므로 **문자열도 숫자도 배열도 전부 참**이었고, 이 가드는
+    # 스칼라를 한 번도 막지 못했다. 실제 타입 이름으로 판정해야 진짜 맵만 통과한다.
     if (
         -not (
             $Environment -is [System.Collections.IDictionary] -or
-            $Environment -is [pscustomobject]
+            $Environment -is [System.Management.Automation.PSCustomObject]
         )
     ) {
         throw "Resolved Compose environment must be a scalar map."

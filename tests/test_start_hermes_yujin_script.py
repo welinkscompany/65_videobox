@@ -1228,7 +1228,11 @@ def test_shared_environment_contract_rejects_non_scalar_maps(
         "-FailureMessage 'forbidden'"
     )
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command],
+        # 이 파일의 다른 실행은 전부 `-ExecutionPolicy Bypass`를 준다. 여기만 빠져
+        # 있었고, 그래서 이 기기에서는 PowerShell이 스크립트 로드 자체를 거부했다.
+        # 아래 단언이 `returncode != 0`만 보고 있었으므로 그 거부가 "가드가 막았다"로
+        # 계산됐다 -- **가드는 한 번도 돌지 않았다.**
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -1236,8 +1240,20 @@ def test_shared_environment_contract_rejects_non_scalar_maps(
         check=False,
     )
 
+    # `returncode != 0`만 보면 **명령이 실행조차 안 돼도 통과한다.** 실제로 그랬다 --
+    # Git Bash가 인자를 망가뜨려 PowerShell이 "명령을 찾을 수 없다"로 죽는 바람에
+    # 이 단언이 계속 초록불이었고, 그 뒤에서 가드는 스칼라를 한 번도 막지 않았다.
+    # 거절한 이유까지 확인해야 "거절했다"고 말할 수 있다.
     assert result.returncode != 0
-    assert "secret" not in f"{result.stdout}\n{result.stderr}"
+    output = f"{result.stdout}\n{result.stderr}"
+    if environment_json != "null":
+        # `null`은 우리 가드 본문에 닿기 전에 PowerShell 매개변수 바인딩이 막고, 그
+        # 메시지는 기기 언어를 탄다. 나머지는 전부 가드가 직접 막아야 하며, **그 이유를
+        # 확인해야** "막았다"고 말할 수 있다.
+        assert "Resolved Compose environment must be a scalar map." in output, (
+            f"가드가 막은 것이 아니라 다른 이유로 죽었다: {output}"
+        )
+    assert "secret" not in output
 
 
 def test_shared_environment_contract_accepts_an_idictionary_map(

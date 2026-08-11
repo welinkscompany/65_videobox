@@ -145,11 +145,18 @@ def test_release_script_labels_media_contract_failures_before_install(tmp_path: 
     root = _write_release_pack(tmp_path / "pack")
     repository_root = Path(__file__).resolve().parents[1]
 
+    # `text=True`만 주면 이 기기의 콘솔 코드페이지로 디코딩한다. 한국어 Windows에서
+    # PowerShell로 돌리면 cp949가 잡히고, 스크립트가 내보내는 UTF-8 바이트에서
+    # `UnicodeDecodeError`가 나면서 **stdout이 통째로 None이 된다.** 그러면 이 테스트는
+    # 계약을 못 지킨 것이 아니라 읽지를 못해서 죽는다. 스크립트는 UTF-8로 쓰므로
+    # 그렇게 읽는다고 못박는다.
     result = subprocess.run(
         [sys.executable, "scripts/verify-starter-media-pack.py", str(root), "--ffprobe", "missing-ffprobe"],
         cwd=repository_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
     assert result.returncode == 1
