@@ -107,6 +107,23 @@ describe("MediaWorkspacePage", () => {
     expect(screen.queryByText("음악 1")).not.toBeInTheDocument();
   });
 
+  it("keeps the active tab panel reference valid and supports arrow-key navigation", async () => {
+    render(<MediaWorkspacePage projectId="project-a" />);
+    const videosTab = await screen.findByRole("tab", { name: "내 영상" });
+    const musicTab = screen.getByRole("tab", { name: "음악" });
+
+    expect(videosTab).toHaveAttribute("aria-controls", "media-panel-videos");
+    expect(musicTab).not.toHaveAttribute("aria-controls");
+    expect(screen.getByRole("tabpanel", { name: "내 영상" })).toBeVisible();
+
+    videosTab.focus();
+    fireEvent.keyDown(videosTab, { key: "ArrowRight" });
+    await waitFor(() => expect(musicTab).toHaveAttribute("aria-selected", "true"));
+    expect(musicTab).toHaveAttribute("aria-controls", "media-panel-music");
+    expect(videosTab).not.toHaveAttribute("aria-controls");
+    expect(musicTab).toHaveFocus();
+  });
+
   it("loads local assets and analysis without mutating or exposing raw contracts", async () => {
     vi.mocked(api.listBrollAssets).mockResolvedValue([
       asset(),

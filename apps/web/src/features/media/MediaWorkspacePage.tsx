@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { api, type BrollAsset, type MediaAnalysis, type MediaInboxAsset } from "../../api";
 import { Button } from "../../components/ui/button";
@@ -55,6 +55,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   const [tags, setTags] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<MediaTab>("videos");
+  const tabRefs = useRef<Partial<Record<MediaTab, HTMLButtonElement>>>({});
   const currentContext = useRef({ projectId, generation: 0 });
   const loadEpoch = useRef(0);
   const actionSequence = useRef(0);
@@ -242,6 +243,20 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     { value: "import", label: "가져오기" },
   ];
 
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, value: MediaTab) {
+    const index = tabs.findIndex((tab) => tab.value === value);
+    if (index < 0 || !["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (index + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) + tabs.length) % tabs.length;
+    const next = tabs[nextIndex].value;
+    setActiveTab(next);
+    tabRefs.current[next]?.focus();
+  }
+
   return (
     <main data-project-id={projectId} data-testid="media-workspace-page">
       <div className="flex items-start justify-between gap-4">
@@ -266,7 +281,12 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
             variant={activeTab === tab.value ? "default" : "outline"}
             role="tab"
             aria-selected={activeTab === tab.value}
-            aria-controls={`media-panel-${tab.value}`}
+            aria-controls={activeTab === tab.value ? `media-panel-${tab.value}` : undefined}
+            tabIndex={activeTab === tab.value ? 0 : -1}
+            ref={(element) => {
+              tabRefs.current[tab.value] = element ?? undefined;
+            }}
+            onKeyDown={(event) => handleTabKeyDown(event, tab.value)}
             onClick={() => setActiveTab(tab.value)}
           >
             {tab.label}
