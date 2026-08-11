@@ -270,11 +270,17 @@ def import_media_inbox_asset_to_project(
     source_hash = _sha256_file(source_path)
     # The browser retries after a response timeout. Reconcile by the watched
     # filename and bytes before registering a second project asset.
-    for existing in pipeline.store.list_assets(project_id=project_id):  # type: ignore[attr-defined]
+    store = getattr(pipeline, "store", None)
+    list_assets = getattr(store, "list_assets", None)
+    existing_assets = list_assets(project_id=project_id) if callable(list_assets) else []
+    for existing in existing_assets:
         metadata = dict(existing.get("metadata") or {})
         if metadata.get("media_inbox_filename") != filename:
             continue
-        stored_path = pipeline.store.resolve_storage_uri(  # type: ignore[attr-defined]
+        resolve_storage_uri = getattr(store, "resolve_storage_uri", None)
+        if not callable(resolve_storage_uri):
+            continue
+        stored_path = resolve_storage_uri(
             project_id=project_id, storage_uri=str(existing["storage_uri"])
         )
         if stored_path.is_file() and _sha256_file(stored_path) == source_hash:
