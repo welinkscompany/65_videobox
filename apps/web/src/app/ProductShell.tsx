@@ -145,21 +145,21 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
       .catch(() => { /* a home that cannot count still navigates */ });
     return () => { active = false; };
   }, [projectId]);
-  const draftText = summary === null ? "이어 할 작업을 선택해 편집을 계속하세요."
-    : summary.has_draft ? "이어서 편집할 작업이 있어요." : "아직 시작한 작업이 없어요.";
-  const finishedText = summary === null ? "출력 화면에서 완성한 영상을 확인할 수 있어요."
-    : summary.finished_video_count > 0 ? `완성한 영상이 ${summary.finished_video_count}개 있어요.` : "아직 완성한 영상이 없어요.";
-  const assetText = summary === null ? "대본에 맞는 사진·영상·소리를 추가해 주세요."
-    : summary.asset_gap_count > 0 ? `채울 자리가 ${summary.asset_gap_count}곳 남았어요.` : "필요한 자산이 모두 준비됐어요.";
+  const draftText = summary === null ? "상태 확인 중"
+    : summary.has_draft ? "초안 있음" : "초안 없음";
+  const finishedText = summary === null ? "상태 확인 중"
+    : `${summary.finished_video_count}개`;
+  const assetText = summary === null ? "상태 확인 중"
+    : summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료";
   const nextTask = summary?.has_draft
-    ? { label: "편집 계속하기", section: "editing" as WorkspaceSection, description: "저장된 초안에서 다음 장면을 이어서 완성하세요." }
+    ? { label: "편집 계속하기", section: "editing" as WorkspaceSection, keyword: "초안 있음" }
     : summary && summary.asset_gap_count > 0
-      ? { label: "자산 준비하기", section: "media" as WorkspaceSection, description: `아직 채워야 할 자산이 ${summary.asset_gap_count}곳 있어요.` }
-      : { label: "새 영상 시작하기", section: "create" as WorkspaceSection, description: "대본을 넣고 첫 영상을 시작해 보세요." };
+      ? { label: "자산 준비하기", section: "media" as WorkspaceSection, keyword: `부족 ${summary.asset_gap_count}곳` }
+      : { label: "새 영상 시작하기", section: "create" as WorkspaceSection, keyword: "대본 준비" };
   // The cards are ordered the way the work actually runs: bring footage in,
   // edit it, then take it out. The old order opened with editing, which is
   // the middle of the job.
-  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 장면을 이어서 만들어 볼까요?</h1><p>대본과 자산을 준비하면, 필요한 순서대로 바로 시작할 수 있어요.</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><section className="vb-home-next" aria-labelledby="home-next-heading"><div><p className="vb-eyebrow">다음 할 일</p><h2 id="home-next-heading">{nextTask.label}</h2><p>{summary === null ? "현재 프로젝트 상태를 확인하는 중이에요." : nextTask.description}</p></div><Button variant="outline" onClick={() => onNavigate(projectId, nextTask.section)}>{nextTask.label}</Button><ul aria-label="진행 상황"><li>{summary?.has_draft ? "초안 있음" : "초안 없음"}</li><li>{summary ? `자산 ${summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비됨"}` : "자산 상태 확인 중"}</li><li>{summary ? `완성본 ${summary.finished_video_count}개` : "완성본 확인 중"}</li></ul></section><div className="vb-home-grid"><HomeCard title="촬영본 가져오기" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="작업 중인 초안 계속하기" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="최근 완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
+  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 작업</h1><p>대본 · 자산 · 편집 · 출력</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><section className="vb-home-next" aria-labelledby="home-next-heading"><div><p className="vb-eyebrow">다음 할 일</p><h2 id="home-next-heading">{nextTask.label}</h2><p>{summary === null ? "상태 확인 중" : nextTask.keyword}</p></div><Button variant="outline" onClick={() => onNavigate(projectId, nextTask.section)}>{nextTask.label}</Button><ul aria-label="진행 상황"><li>{summary?.has_draft ? "초안 있음" : "초안 없음"}</li><li>{summary ? `자산 ${summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료"}` : "자산 상태 확인 중"}</li><li>{summary ? `완성본 ${summary.finished_video_count}개` : "완성본 확인 중"}</li></ul></section><div className="vb-home-grid"><HomeCard title="자산" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="편집" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
 }
 function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
 

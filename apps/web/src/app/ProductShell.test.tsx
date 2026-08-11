@@ -197,8 +197,9 @@ describe("product shell", () => {
 
     await screen.findByRole("navigation", { name: "영상 제작" });
     expect(screen.getAllByRole("button", { name: "새 영상 만들기" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("작업 중인 초안 계속하기")).toBeTruthy();
-    expect(screen.getByText("최근 완성본")).toBeTruthy();
+    const home = screen.getByTestId("product-home");
+    expect(within(home).getByText("편집")).toBeTruthy();
+    expect(within(home).getByText("완성본")).toBeTruthy();
     expect(screen.queryByText(/provider|job metric/i)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "두 번째 영상" }));
@@ -385,9 +386,9 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByText("완성한 영상이 3개 있어요.")).toBeVisible();
-    expect(screen.getByText("이어서 편집할 작업이 있어요.")).toBeVisible();
-    expect(screen.getByText("채울 자리가 2곳 남았어요.")).toBeVisible();
+    expect(await screen.findByText("3개")).toBeVisible();
+    expect(screen.getAllByText("초안 있음").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("부족 2곳").length).toBeGreaterThan(0);
     expect(summary).toHaveBeenCalledTimes(1);
     expect(listJobs).not.toHaveBeenCalled();
   });
@@ -399,9 +400,9 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByText("아직 완성한 영상이 없어요.")).toBeVisible();
-    expect(screen.getByText("아직 시작한 작업이 없어요.")).toBeVisible();
-    expect(screen.getByText("필요한 자산이 모두 준비됐어요.")).toBeVisible();
+    expect(await screen.findByText("0개")).toBeVisible();
+    expect(screen.getAllByText("초안 없음").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("준비 완료").length).toBeGreaterThan(0);
   });
 
   it("keeps the cards usable when the summary cannot be read", async () => {

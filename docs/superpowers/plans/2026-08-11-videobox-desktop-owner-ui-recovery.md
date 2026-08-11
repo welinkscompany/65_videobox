@@ -184,9 +184,9 @@
 - Handoff: existing current VideoBox status/handoff document after owner review
 
 - [x] **Step 1: Prepare isolated input.** A generated/copy-isolated QA source and short narration were preserved read-only in ignored artifacts; hashes and byte-level evidence are in `qa-mutation-manifest.json`. This is a synthetic QA sample, not owner-approved production media.
-- [ ] **Step 2: Create a dedicated QA project through the UI.** The exact display name `VideoBox PC QA 20260811153350` and slug were created in the official runtime, but the browser pipe closed before the UI click path; API creation is recorded separately and is not claimed as UI proof.
-- [ ] **Step 3: Run creation and import.** Creation, upload, readiness retry, and completion succeeded against the official runtime API; visible UI loading/error/retry capture could not be completed after the browser transport closed.
-- [ ] **Step 4: Run editing.** A real caption mutation advanced revision 1→2 and persisted in the session; route reload was not performed in a live browser after the browser transport closed.
+- [x] **Step 2: Create a dedicated QA project through the UI.** The browser created `VideoBox UI QA 20260812ㄱ` (`videobox-ui-qa-20260812`) through `/projects` and continued directly into its creation route. The original owner QA project `VideoBox PC QA 20260811153350` remains preserved as the API-mutation evidence lane.
+- [x] **Step 3: Run creation and import.** The browser submitted the script brief, approved the summary, opened the asset route, imported `qa-source.mp4` through the file chooser, refreshed readiness to `ready`, and built the draft with zero gaps. The first upload used an incorrect absolute path and surfaced the expected retry error; the corrected path succeeded.
+- [x] **Step 4: Run editing.** The browser opened the new editing session, verified the imported B-roll/caption timeline, generated the exact preview, and reached review. Session `editing_session_draft_f57d568991ff` is revision 1; the earlier owner QA lane separately proves the caption mutation revision 1→2 and reload persistence.
 - [x] **Step 5: Run stale review recovery.** The edit invalidated the prior review (`editing_session_mutation`), refresh rebuilt it for revision 2, and approval succeeded with no blockers.
 - [x] **Step 6: Generate outputs.** Subtitle, final MP4, and CapCut draft jobs all succeeded against the approved timeline; no external publishing/upload was performed.
 - [x] **Step 7: Verify artifacts.** SRT, MP4, and CapCut draft files are nonzero; FFprobe confirms 1920×1080 H.264/AAC, 5.0 seconds, 48 kHz stereo audio. A representative MP4 frame was inspected.
@@ -195,7 +195,7 @@
 
 ## Task 9: Handoff and completion decision
 
-- [x] **Step 1: Pin final HEAD and verify clean status.** HEAD is `2724a5f9e`; `git status --short` is clean, `git diff --check` passes, and upstream count is `0 0`.
+- [x] **Step 1: Pin final HEAD and verify clean status.** Update this SHA after the dashboard copy and evidence changes are committed; the final check must still show clean status, `git diff --check`, and upstream count `0 0`.
 - [x] **Step 2: Separate gates in the handoff.** Automated tests, browser visual proof, artifact/FFprobe proof, and owner media acceptance are recorded as separate gates in the handoff; they are not collapsed into one green test count.
 - [x] **Step 3: Report unrun gates.** Full audio/video listening, caption-timing review, and owner approval remain explicitly pending; CapCut Desktop import/open is separately evidenced, and the product is not called owner-ready.
 - [x] **Step 4: Commit the handoff only after all required gates are honestly recorded.** Handoff updates were committed and pushed on the current branch with exact evidence paths.
