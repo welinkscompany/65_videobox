@@ -4,8 +4,8 @@ body:has(.vb-product-shell) { margin:0; }
    product-owned fallback so the port remains visible when Tailwind's scanner
    has not emitted the responsive utility in a Vite development build. */
 @media (min-width: 768px) {
-  [data-slot="sidebar-wrapper"] > [data-slot="sidebar"] { display:block !important; }
-  [data-slot="sidebar-wrapper"] > [data-slot="sidebar"] > [data-slot="sidebar-container"].vb-product-sidebar { display:flex !important; }
+  [data-slot="sidebar-wrapper"] [data-slot="sidebar"] { display:block !important; }
+  [data-slot="sidebar-wrapper"] [data-slot="sidebar"] [data-slot="sidebar-container"].vb-product-sidebar { display:flex !important; }
   .vb-product-shell > [data-slot="sidebar"][data-state="collapsed"] { flex:0 0 4rem !important; width:4rem !important; }
 }
 .vb-product-sidebar { width: 16rem; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--vb-border); background: var(--vb-canvas); padding: 1rem; transition: width .2s ease; }
