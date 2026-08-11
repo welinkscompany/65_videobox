@@ -11,7 +11,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { api, type Project } from "../api";
+import { api, type HomeSummary, type Project } from "../api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { ProjectOnboarding } from "../ProjectOnboarding";
@@ -168,11 +168,7 @@ function ProjectsPage() {
       <h1>프로젝트</h1>
       <p>영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
       <div className="vb-catalog-grid">
-        {projects.map((project) => (
-          <Button key={project.project_id} type="button" variant="outline" className="vb-catalog-card" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
-            {project.name}
-          </Button>
-        ))}
+        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigate={(section) => void navigate({ to: resolveWorkspaceLocation(project.project_id, section) })} />)}
       </div>
       {isCreating ? (
         <form className="vb-catalog-form" onSubmit={(event) => void handleCreate(event)}>
@@ -191,6 +187,34 @@ function ProjectsPage() {
       )}
     </main>
   );
+}
+
+type ProjectNextAction = { label: "계속 편집" | "자산 준비" | "새 영상 시작"; section: WorkspaceSection; status: string };
+
+function projectNextAction(summary: HomeSummary | null): ProjectNextAction {
+  if (summary?.has_draft) return { label: "계속 편집", section: "editing", status: "작업 중인 초안" };
+  if ((summary?.asset_gap_count ?? 0) > 0) return { label: "자산 준비", section: "media", status: "자산 준비 필요" };
+  return { label: "새 영상 시작", section: "create", status: summary ? "새 영상 준비" : "상태 확인 중" };
+}
+
+function ProjectCatalogCard({ project, onNavigate }: { project: Project; onNavigate: (section: WorkspaceSection) => void }) {
+  const [summary, setSummary] = useState<HomeSummary | null>(null);
+  useEffect(() => {
+    let active = true;
+    setSummary(null);
+    void api.getHomeSummary(project.project_id).then((next) => {
+      if (active) setSummary(next);
+    }).catch(() => {
+      if (active) setSummary(null);
+    });
+    return () => { active = false; };
+  }, [project.project_id]);
+  const next = projectNextAction(summary);
+  return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+    <h2>{project.name}</h2>
+    <p>{next.status}</p>
+    <Button type="button" variant="outline" aria-label={summary ? next.label : project.name} onClick={() => onNavigate(summary ? next.section : "home")}>{next.label}</Button>
+  </article>;
 }
 
 async function archiveProjectAndRefresh(router: ReturnType<typeof createAppRouter>, projectId: string) {

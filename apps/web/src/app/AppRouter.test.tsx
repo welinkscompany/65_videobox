@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
@@ -62,6 +62,36 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  it("summarizes each project and exposes exactly one next action", async () => {
+    const projects = [
+      { project_id: "project_draft", name: "초안 프로젝트", status: "active", root_storage_uri: "local://draft" },
+      { project_id: "project_assets", name: "자산 프로젝트", status: "active", root_storage_uri: "local://assets" },
+      { project_id: "project_new", name: "새 프로젝트", status: "active", root_storage_uri: "local://new" },
+    ];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getHomeSummary").mockImplementation(async (projectId) => ({
+      finished_video_count: 0,
+      has_draft: projectId === "project_draft",
+      asset_gap_count: projectId === "project_assets" ? 2 : 0,
+    }));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+
+    render(<AppRouter router={router} />);
+
+    const draftCard = await screen.findByRole("article", { name: "초안 프로젝트 프로젝트" });
+    const assetCard = await screen.findByRole("article", { name: "자산 프로젝트 프로젝트" });
+    const newCard = await screen.findByRole("article", { name: "새 프로젝트 프로젝트" });
+    expect(draftCard).toHaveTextContent("작업 중인 초안");
+    expect(assetCard).toHaveTextContent("자산 준비 필요");
+    expect(newCard).toHaveTextContent("새 영상 시작");
+    expect(within(draftCard).getAllByRole("button")).toHaveLength(1);
+    expect(within(assetCard).getAllByRole("button")).toHaveLength(1);
+    expect(within(newCard).getAllByRole("button")).toHaveLength(1);
+    expect(within(draftCard).getByRole("button", { name: "계속 편집" })).toBeVisible();
+    expect(within(assetCard).getByRole("button", { name: "자산 준비" })).toBeVisible();
+    expect(within(newCard).getByRole("button", { name: "새 영상 시작" })).toBeVisible();
+  });
+
   it("owns ordinary media with the canonical workspace and keeps the creation return adapter narrow", async () => {
     const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);

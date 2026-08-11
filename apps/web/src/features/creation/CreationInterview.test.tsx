@@ -15,6 +15,19 @@ const firstBrief = {
 };
 
 describe("CreationInterview", () => {
+  it("shows a saved draft resume action and supported file guidance before starting another brief", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(firstBrief);
+    render(<CreationInterview projectId="project_1" />);
+
+    expect(await screen.findByRole("button", { name: "초안 이어서 하기" })).toBeVisible();
+    cleanup();
+    window.localStorage.clear();
+    render(<CreationInterview projectId="project_1" />);
+    expect(screen.getByText(/TXT, MD, SRT/)).toBeVisible();
+    expect(screen.getByLabelText("대본 파일 선택")).toBeVisible();
+  });
+
   it("starts a project-scoped Eugene interview from pasted script and saves the resulting brief id for refresh resume", async () => {
     const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue(firstBrief);
     render(<CreationInterview projectId="project_1" />);
