@@ -72,8 +72,8 @@ beforeEach(() => {
   });
   vi.spyOn(api, "getMediaLibraryInstallState").mockResolvedValue({ status: "installed", installed_asset_count: 2 });
   vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [libraryAsset("music"), libraryAsset("sfx")] });
-  vi.spyOn(api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] });
-  vi.spyOn(api, "listRecentMediaLibraryAssetIds").mockResolvedValue({ asset_ids: [] });
+  vi.spyOn(api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] });
+  vi.spyOn(api, "listProjectRecentMediaLibraryAssetIds").mockResolvedValue({ asset_ids: [] });
 });
 
 afterEach(() => vi.restoreAllMocks());

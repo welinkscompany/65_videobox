@@ -62,10 +62,10 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
     setRecents([]);
     // 프로젝트로 들여온 것은 이미 최근 목록에 쌓이고 있었는데 아무도 다시
     // 읽지 않았다. 못 읽으면 순서만 덜 똑똑해진다.
-    void api.listRecentMediaLibraryAssetIds()
+    void api.listProjectRecentMediaLibraryAssetIds(projectId)
       .then((recent) => { if (active) setRecents(recent.asset_ids); })
       .catch(() => { /* 정렬만 예전대로 돌아간다 */ });
-    void Promise.all([api.listMediaLibraryAssets(), api.listMediaLibraryFavorites()])
+    void Promise.all([api.listMediaLibraryAssets(), api.listProjectMediaLibraryFavorites(projectId)])
       .then(([library, favourite]) => {
         if (!active) return;
         setAssets(library.assets);
@@ -83,7 +83,7 @@ export function MediaLibraryBrowser({ projectId, fixedFilter }: { projectId: str
       ? [...current, libraryAssetId]
       : current.filter((item) => item !== libraryAssetId));
     try {
-      const saved = await api.setMediaLibraryFavorite(libraryAssetId, enabled);
+      const saved = await api.setProjectMediaLibraryFavorite(projectId, libraryAssetId, enabled);
       setFavourites(saved.asset_ids);
     } catch {
       setFavourites((current) => enabled

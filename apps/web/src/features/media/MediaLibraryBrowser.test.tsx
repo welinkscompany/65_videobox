@@ -26,16 +26,40 @@ function asset(overrides: Partial<api.MediaLibraryAsset> = {}): api.MediaLibrary
 describe("MediaLibraryBrowser", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(api.api, "listRecentMediaLibraryAssetIds").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectRecentMediaLibraryAssetIds").mockResolvedValue({ asset_ids: [] } as never);
     vi.spyOn(api.api, "getMediaLibraryInstallState")
       .mockResolvedValue({ status: "installed", installed_asset_count: 1 } as never);
+  });
+
+  it("loads and saves favourites and recents for the active project", async () => {
+    const projectId = "project-scoped";
+    const listProjectFavorites = vi.spyOn(api.api, "listProjectMediaLibraryFavorites")
+      .mockResolvedValue({ asset_ids: [] } as never);
+    const listProjectRecents = vi.spyOn(api.api, "listProjectRecentMediaLibraryAssetIds")
+      .mockResolvedValue({ asset_ids: [] } as never);
+    const saveProjectFavorite = vi.spyOn(api.api, "setProjectMediaLibraryFavorite")
+      .mockResolvedValue({ asset_ids: [asset().library_asset_id] } as never);
+    const listGlobalFavorites = vi.spyOn(api.api, "listMediaLibraryFavorites")
+      .mockResolvedValue({ asset_ids: [] } as never);
+    const saveGlobalFavorite = vi.spyOn(api.api, "setMediaLibraryFavorite")
+      .mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
+
+    render(<MediaLibraryBrowser projectId={projectId} />);
+    fireEvent.click(await screen.findByRole("button", { name: "음악 1 즐겨찾기" }));
+
+    await waitFor(() => expect(saveProjectFavorite).toHaveBeenCalledWith(projectId, asset().library_asset_id, true));
+    expect(listProjectFavorites).toHaveBeenCalledWith(projectId);
+    expect(listProjectRecents).toHaveBeenCalledWith(projectId);
+    expect(listGlobalFavorites).not.toHaveBeenCalled();
+    expect(saveGlobalFavorite).not.toHaveBeenCalled();
   });
 
   it("lets the owner listen to a track before choosing it", async () => {
     // 130 assets arrived with no way to hear one, so picking meant reading
     // filenames and guessing.
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
 
@@ -50,7 +74,7 @@ describe("MediaLibraryBrowser", () => {
     const plain = asset({ library_asset_id: "pack:starter-v1:music-plain", asset_id: "music-plain" });
     const loved = asset({ library_asset_id: "pack:starter-v1:music-loved", asset_id: "music-loved" });
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [plain, loved] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({
       asset_ids: ["pack:starter-v1:music-loved"],
     } as never);
 
@@ -62,15 +86,15 @@ describe("MediaLibraryBrowser", () => {
 
   it("saves a new favourite the owner marks", async () => {
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
-    const save = vi.spyOn(api.api, "setMediaLibraryFavorite").mockResolvedValue({
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    const save = vi.spyOn(api.api, "setProjectMediaLibraryFavorite").mockResolvedValue({
       asset_ids: ["pack:starter-v1:music-intro"],
     } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
     fireEvent.click(await screen.findByRole("button", { name: "음악 1 즐겨찾기" }));
 
-    await waitFor(() => expect(save).toHaveBeenCalledWith("pack:starter-v1:music-intro", true));
+    await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "pack:starter-v1:music-intro", true));
     expect(await screen.findByRole("button", { name: "음악 1 즐겨찾기 해제" })).toBeVisible();
   });
 
@@ -80,7 +104,7 @@ describe("MediaLibraryBrowser", () => {
       library_asset_id: "pack:starter-v1:sfx-pop", asset_id: "sfx-pop", media_type: "sfx", duration_seconds: 1,
     });
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [music, effect] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
     await screen.findByText("음악 1");
@@ -97,7 +121,7 @@ describe("MediaLibraryBrowser", () => {
     vi.spyOn(api.api, "getMediaLibraryInstallState")
       .mockResolvedValue({ status: "not_installed", installed_asset_count: 0 } as never);
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
 
@@ -108,7 +132,7 @@ describe("MediaLibraryBrowser", () => {
 
   it("separates a library it could not read from a library that is empty", async () => {
     vi.spyOn(api.api, "listMediaLibraryAssets").mockRejectedValue(new Error("unreadable"));
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
 
@@ -120,7 +144,7 @@ describe("MediaLibraryBrowser", () => {
     vi.spyOn(api.api, "getMediaLibraryInstallState")
       .mockResolvedValue({ status: "degraded", installed_asset_count: 130 } as never);
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
 
@@ -136,9 +160,9 @@ describe("MediaLibraryBrowser", () => {
     const loved = asset({ library_asset_id: "pack:starter-v1:music-c", asset_id: "music-c" });
     vi.spyOn(api.api, "listMediaLibraryAssets")
       .mockResolvedValue({ assets: [plain, used, loved] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites")
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites")
       .mockResolvedValue({ asset_ids: ["pack:starter-v1:music-c"] } as never);
-    vi.spyOn(api.api, "listRecentMediaLibraryAssetIds")
+    vi.spyOn(api.api, "listProjectRecentMediaLibraryAssetIds")
       .mockResolvedValue({ asset_ids: ["pack:starter-v1:music-b"] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
@@ -152,7 +176,7 @@ describe("MediaLibraryBrowser", () => {
 
   it("does not blame the pack when a filter is what emptied the list", async () => {
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
     fireEvent.click(await screen.findByRole("button", { name: "효과음만 보기" }));
@@ -166,7 +190,7 @@ describe("MediaLibraryBrowser", () => {
       asset_id: `music-${String(index + 1).padStart(3, "0")}`,
     }));
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     const { container } = render(<MediaLibraryBrowser projectId="project-a" />);
 
@@ -192,7 +216,7 @@ describe("항목 이름", () => {
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({
       assets: [second, effect, first],
     } as never);
-    vi.spyOn(api.api, "listMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
 
     render(<MediaLibraryBrowser projectId="project-a" />);
 
