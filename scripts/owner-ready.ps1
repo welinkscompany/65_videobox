@@ -12,6 +12,10 @@ param(
     [Uri]$LocalModelApiUri = "http://127.0.0.1:1234/api/v1/models",
     [ValidateRange(1, 180)]
     [int]$TimeoutSec = 30,
+    # Rebuild the workspace image from this exact worktree before starting it.
+    # Container actions remain centralized here so the served frontend cannot
+    # silently drift from the source that was just verified.
+    [switch]$Rebuild,
     [string]$EnvFile = "",
     [string]$PythonExecutable = "",
     [string]$DockerExecutable = "docker",
@@ -997,6 +1001,19 @@ if ($Mode -ceq "Start") {
         -Evidence @{ parsed = ($actualComposeStatus -ceq "pass"); raw_config_recorded = $false }
     if ($actualComposeStatus -cne "pass") {
         Write-OwnerReadyPayload -Checks $checks
+    }
+    if ($Rebuild -and -not $PSBoundParameters.ContainsKey("WhatIf")) {
+        $rebuildResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 180)) -Arguments @(
+            @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("build", "--pull=false", "videobox-workspace")
+        )
+        $rebuildStatus = if ($rebuildResult.ExitCode -eq 0) { "pass" } else { "fail" }
+        $checks += New-OwnerReadyResult -Id "rebuild" -Status $rebuildStatus `
+            -Summary $(if ($rebuildStatus -ceq "pass") { "현재 소스에서 VideoBox 이미지를 다시 만들었습니다." } else { "현재 소스에서 VideoBox 이미지를 다시 만들지 못했습니다." }) `
+            -Action $(if ($rebuildStatus -ceq "pass") { "이 이미지로 VideoBox를 시작합니다." } else { "Docker 빌드 로그와 현재 소스 의존성을 확인하세요." }) `
+            -Evidence @{ rebuilt = ($rebuildStatus -ceq "pass"); source = "current_worktree" }
+        if ($rebuildStatus -cne "pass") {
+            Write-OwnerReadyPayload -Checks $checks
+        }
     }
     $serviceNames = @("videobox-postgres", "videobox-workspace")
     if ($WithYujinMemory) {
