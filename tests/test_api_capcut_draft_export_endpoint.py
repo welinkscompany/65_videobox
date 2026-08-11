@@ -261,7 +261,14 @@ def test_capcut_draft_handoff_renews_its_durable_lease_during_a_slow_registratio
     """A live owner must not be reclaimed merely because the copy outlives one lease."""
     import videobox_storage.local_project_store as local_project_store
 
-    monkeypatch.setattr(local_project_store, "CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS", 0.12)
+    # 하트비트 주기는 리스의 1/3이다. 리스가 0.12초면 주기가 0.04초라 여유가 세 틱뿐이고,
+    # 스케줄러가 한 번만 밀려도 리스가 먼저 만료돼 갱신이 계속 실패한다. 전체 회귀
+    # 안에서 네 번 중 두 번 깨졌고, CPU 부하를 걸면 단독으로도 여덟 번 중 한 번 깨졌다.
+    # 부하가 없으면 열 번 다 통과한다 -- 제품이 아니라 이 숫자가 문제였다.
+    #
+    # 0.6초면 주기가 0.2초다. 증명하는 것은 그대로다 -- 아래는 여전히 **실제로 성공한
+    # 갱신 두 번**을 기다리므로, 하트비트가 죽으면 리스가 만료돼 이 대기가 실패한다.
+    monkeypatch.setattr(local_project_store, "CAPCUT_DRAFT_HANDOFF_CLAIM_LEASE_SECONDS", 0.6)
     local_app_data = tmp_path / "LocalAppData"
     executable = local_app_data / "CapCut" / "Apps" / "8.7.0" / "CapCut.exe"
     executable.parent.mkdir(parents=True)
