@@ -50,17 +50,20 @@ describe("CreationInterview", () => {
   it("resets the orientation choice when a reused creation route changes projects", async () => {
     window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
     window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
     const ready = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: {} } as never;
+    const readyB = { readiness_id: "readiness_2", brief_id: "brief_2", status: "ready", revision: 1, result: {} } as never;
     vi.spyOn(api, "getCreationBrief").mockImplementation(async (projectId) => projectId === "project_1"
-      ? firstBrief
-      : { ...firstBrief, brief_id: "brief_2", project_id: "project_2" });
-    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(ready);
+      ? approved
+      : { ...approved, brief_id: "brief_2", project_id: "project_2" });
+    vi.spyOn(api, "getDraftReadiness").mockImplementation(async (projectId) => projectId === "project_1" ? ready : readyB);
     const view = render(<CreationInterview projectId="project_1" />);
     const orientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
     fireEvent.click(orientation);
     expect(orientation).toBeChecked();
 
     window.localStorage.setItem("videobox.creation-brief.project_2", "brief_2");
+    window.localStorage.setItem("videobox.draft-readiness.project_2", "readiness_2");
     view.rerender(<CreationInterview projectId="project_2" />);
     const nextOrientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
     expect(nextOrientation).not.toBeChecked();

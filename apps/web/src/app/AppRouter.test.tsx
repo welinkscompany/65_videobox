@@ -233,7 +233,7 @@ describe("AppRouter URL ownership", () => {
     }]);
     vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "job-a", status: "succeeded", timeline: { timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "review", review_status: "draft", tracks: [], review_flags: [], applied_recommendations: [], pending_recommendations: [] } });
     vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
-    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
+    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", approved_at: null, updated_at: "now", source_session_id: "session-a", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: [`/projects/project_a/${section}`] }));
 
     render(<AppRouter router={router} />);
@@ -583,7 +583,7 @@ describe("AppRouter URL ownership", () => {
     }] : []));
     vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "job-b", status: "succeeded", timeline: { timeline_id: "timeline-b", project_id: "project_b", version: "v1", output_mode: "review", review_status: "draft", tracks: [], review_flags: [], applied_recommendations: [], pending_recommendations: [] } });
     vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
-    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
+    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", approved_at: null, updated_at: "now", source_session_id: "session-b", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/timeline"] }));
     render(<AppRouter router={router} />);
     await waitFor(() => expect(getLatest).toHaveBeenCalledWith("project_a"));
