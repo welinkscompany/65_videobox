@@ -29,7 +29,6 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
 
     def _job_temporal_key(job: dict[str, object]) -> tuple[float, str]:
         """Order output jobs by recorded timestamps, never list position."""
-        timestamps: list[float] = []
         for field in ("updated_at", "finished_at", "started_at", "created_at"):
             value = job.get(field)
             if value is None:
@@ -38,10 +37,10 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
                 parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
                 if parsed.tzinfo is None:
                     parsed = parsed.replace(tzinfo=UTC)
-                timestamps.append(parsed.timestamp())
+                return (parsed.timestamp(), str(job.get("job_id") or ""))
             except (TypeError, ValueError, OverflowError):
                 continue
-        return (max(timestamps, default=float("-inf")), str(job.get("job_id") or ""))
+        return (float("-inf"), str(job.get("job_id") or ""))
 
     @router.post("/api/projects", status_code=status.HTTP_201_CREATED)
     def create_project(payload: CreateProjectRequest) -> ProjectResponse:
