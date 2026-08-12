@@ -9,6 +9,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from videobox_storage.library_user_asset_store import (
+    LibraryUserAssetStore,
+    ensure_library_user_asset_schema,
+)
+
 
 class MediaLibraryStore:
     """Global, optional index for verified installed media packs.
@@ -22,6 +27,16 @@ class MediaLibraryStore:
         self.root = Path(root)
         self.database_path = self.root / "media_library.sqlite"
         self._verification_cache: dict[tuple[str, int, int, str], bool] = {}
+        # User assets use an additive lifecycle schema in this same global DB.
+        # Keep this as a small facade so existing API/bootstrap callers do not
+        # need to know which part of the library owns a row.
+        self.user_asset_store = LibraryUserAssetStore(self.root)
+
+    def register_user_asset(self, **kwargs: Any):
+        return self.user_asset_store.register_asset(**kwargs)
+
+    def list_user_assets(self, **kwargs: Any):
+        return self.user_asset_store.list_assets(**kwargs)
 
     def index_verified_pack(
         self,
@@ -695,6 +710,7 @@ class MediaLibraryStore:
                 connection.execute(statement)
             except sqlite3.OperationalError:
                 pass
+        ensure_library_user_asset_schema(connection)
         return connection
 
     @staticmethod

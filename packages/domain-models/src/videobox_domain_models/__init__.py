@@ -1,6 +1,16 @@
 from videobox_domain_models.assets import AssetRecord, AssetType
 from videobox_domain_models.jobs import JobRecord, JobStatus, JobType
 from videobox_domain_models.media_analysis import MediaAnalysisStatus
+from videobox_domain_models.library_assets import (
+    LibraryAssetLifecycle,
+    LibraryAssetOrigin,
+    LibraryAssetState,
+    LibraryAssetStatus,
+    LibraryAssetType,
+    LibraryMediaType,
+    LibraryUserAsset,
+    LibraryUserAssetRecord,
+)
 from videobox_domain_models.projects import ProjectRecord, ProjectStatus
 from videobox_domain_models.recommendations import (
     RecommendationRecord,
@@ -16,6 +26,14 @@ __all__ = [
     "JobStatus",
     "JobType",
     "MediaAnalysisStatus",
+    "LibraryAssetLifecycle",
+    "LibraryAssetOrigin",
+    "LibraryAssetState",
+    "LibraryAssetStatus",
+    "LibraryAssetType",
+    "LibraryMediaType",
+    "LibraryUserAsset",
+    "LibraryUserAssetRecord",
     "ProjectRecord",
     "ProjectStatus",
     "RecommendationRecord",
