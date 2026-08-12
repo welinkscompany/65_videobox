@@ -22,6 +22,8 @@
   --vb-preview: #18181B;
   --vb-success: #15803D;
   --vb-success-bg: #ECFDF3;
+  --vb-surface-ring: color-mix(in srgb, var(--foreground) 5%, transparent);
+  --vb-control-ring: color-mix(in srgb, var(--foreground) 12%, transparent);
   --vb-font: "Pretendard", "Noto Sans KR", sans-serif;
   --background: #FAFAFA;
   --foreground: #1C1C1E;
