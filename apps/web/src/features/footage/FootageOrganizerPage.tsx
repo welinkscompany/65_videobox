@@ -53,7 +53,14 @@ export function FootageOrganizerPage() {
   async function editProposal(payload: Parameters<typeof api.editFootageProposal>[1]) {
     if (!proposal) return;
     setBusy("편집");
-    try { setProposal(await api.editFootageProposal(proposal.proposal_id, payload)); setProposalPreview(null); setPreviewUnavailable(false); setNotice("제안이 바뀌었어요. 다시 미리보기한 뒤 적용하세요."); } catch { setNotice("변경을 저장하지 못했습니다. 최신 제안을 다시 확인하세요."); } finally { setBusy(null); }
+    try {
+      const previous = proposal;
+      const next = await api.editFootageProposal(proposal.proposal_id, payload);
+      const selectedSources = selectedSegmentIds.map((id) => previous.segments.find((segment) => segment.segment_id === id)?.source_segment_id).filter(Boolean);
+      const remapped = next.segments.filter((segment) => selectedSources.includes(segment.source_segment_id)).map((segment) => segment.segment_id);
+      const fallback = remapped.length ? remapped : (next.segments[0]?.segment_id ? [next.segments[0].segment_id] : []);
+      setProposal(next); setSelectedSegmentIds(fallback); setSelectedSegmentId(fallback[0] ?? null); setProposalPreview(null); setPreviewUnavailable(false); setNotice("제안이 바뀌었어요. 다시 미리보기한 뒤 적용하세요.");
+    } catch { setNotice("변경을 저장하지 못했습니다. 최신 제안을 다시 확인하세요."); } finally { setBusy(null); }
   }
   function moveBoundary(segment: FootageSegment, edge: "start" | "end", delta: number) {
     const value = edge === "start" ? Math.max(0, segment.start_sec + delta) : Math.min(duration || segment.end_sec + delta, segment.end_sec + delta);
