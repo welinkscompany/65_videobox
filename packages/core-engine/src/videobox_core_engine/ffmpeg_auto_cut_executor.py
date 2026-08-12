@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,8 @@ from typing import Any
 from videobox_core_engine.auto_cut import AutoCutPlanner
 
 _YAVG_PATTERN = re.compile(r"YAVG[=:]([\d.]+)")
+_SILENCE_START_PATTERN = re.compile(r"silence_start:\s*([\d.]+)")
+_SILENCE_END_PATTERN = re.compile(r"silence_end:\s*([\d.]+)")
 
 
 class FfmpegExecutionError(RuntimeError):
@@ -163,6 +166,46 @@ class FfmpegAutoCutExecutor:
         result = self._run(command, timeout=self.detection_timeout_seconds, binary=self.ffmpeg_binary)
         return result.stderr.count("pts_time")
 
+    def detect_audio_windows(
+        self, video_path: Path, *, total_duration: float, timeout: int | None = None
+    ) -> list[dict[str, float]]:
+        """Return non-silent audio windows without changing the source file."""
+        if not math.isfinite(float(total_duration)) or float(total_duration) <= 0:
+            return []
+        command = [
+            self.ffmpeg_binary,
+            "-i",
+            str(video_path),
+            "-af",
+            "silencedetect=n=-35dB:d=0.2",
+            "-f",
+            "null",
+            "-",
+        ]
+        result = self._run(command, timeout=timeout or self._scaled_detection_timeout(total_duration), binary=self.ffmpeg_binary)
+        silence: list[tuple[float, float]] = []
+        open_start: float | None = None
+        for line in result.stderr.splitlines():
+            start_match = _SILENCE_START_PATTERN.search(line)
+            end_match = _SILENCE_END_PATTERN.search(line)
+            if start_match:
+                open_start = float(start_match.group(1))
+            if end_match and open_start is not None:
+                silence.append((open_start, float(end_match.group(1))))
+                open_start = None
+        if open_start is not None:
+            silence.append((open_start, float(total_duration)))
+        windows: list[dict[str, float]] = []
+        cursor = 0.0
+        for start, end in silence:
+            start, end = max(cursor, start), min(float(total_duration), end)
+            if start > cursor:
+                windows.append({"start_sec": cursor, "end_sec": start})
+            cursor = max(cursor, end)
+        if cursor < float(total_duration):
+            windows.append({"start_sec": cursor, "end_sec": float(total_duration)})
+        return windows or [{"start_sec": 0.0, "end_sec": float(total_duration)}]
+
     def run_full_detection(self, video_path: Path) -> dict[str, Any]:
         total_duration = self.get_duration(video_path)
         timeout = self._scaled_detection_timeout(total_duration)
@@ -189,11 +232,22 @@ class FfmpegAutoCutExecutor:
             }
             for segment in planned_segments
         ]
+        static_windows = [
+            {"start_sec": sample["start_sec"], "end_sec": sample["end_sec"]}
+            for sample in segment_samples
+            if sample.get("scene_change_count") == 0
+            and float(sample["end_sec"]) - float(sample["start_sec"]) > self.planner.config.static_duration
+        ]
         return {
             "total_duration": total_duration,
             "scene_timestamps": scene_timestamps,
             "black_regions": black_regions,
             "segment_samples": segment_samples,
+            "analysis_windows": segment_samples,
+            "static_windows": static_windows,
+            "audio_windows": self.detect_audio_windows(
+                video_path, total_duration=total_duration, timeout=timeout
+            ),
         }
 
 
