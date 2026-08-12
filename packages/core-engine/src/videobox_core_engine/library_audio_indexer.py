@@ -133,19 +133,43 @@ def index_pending_library_audio(
             # keeps it visible instead of silently absent from every search.
             report.failed.append(library_asset_id)
             continue
-        try:
-            descriptor = describe(path)
-        except Exception:
-            report.failed.append(library_asset_id)
-            continue
-
-        words = describe_in_creator_language(descriptor)
-        description = build_asset_description(
-            media_type=str(asset["media_type"]),
-            words=words,
-            duration_seconds=descriptor.duration_seconds,
-            user_metadata=dict(asset.get("user_metadata") or {}),
+        existing = None
+        getter = getattr(store, "get_audio_descriptor", None)
+        if callable(getter):
+            existing = getter(library_asset_id=library_asset_id)
+        reusable = bool(
+            existing
+            and str(existing.get("sha256")) == str(asset.get("sha256"))
+            and int(existing.get("description_version", 0)) >= DESCRIPTION_VERSION
         )
+        if reusable:
+            measurements = {
+                "duration_seconds": float(existing["duration_seconds"]),
+                "loudness_rms": float(existing["loudness_rms"]),
+                "brightness_hz": float(existing["brightness_hz"]),
+                "onset_rate_per_second": float(existing["onset_rate_per_second"]),
+            }
+            words = dict(existing["words"])
+            description = str(existing["description"])
+        else:
+            try:
+                descriptor = describe(path)
+            except Exception:
+                report.failed.append(library_asset_id)
+                continue
+            measurements = {
+                "duration_seconds": descriptor.duration_seconds,
+                "loudness_rms": descriptor.loudness_rms,
+                "brightness_hz": descriptor.brightness_hz,
+                "onset_rate_per_second": descriptor.onset_rate_per_second,
+            }
+            words = describe_in_creator_language(descriptor)
+            description = build_asset_description(
+                media_type=str(asset["media_type"]),
+                words=words,
+                duration_seconds=descriptor.duration_seconds,
+                user_metadata=dict(asset.get("user_metadata") or {}),
+            )
         embedding = _embed(
             description,
             embedding_provider=embedding_provider,
@@ -155,12 +179,7 @@ def index_pending_library_audio(
         store.save_audio_descriptor(
             library_asset_id=library_asset_id,
             sha256=str(asset["sha256"]),
-            measurements={
-                "duration_seconds": descriptor.duration_seconds,
-                "loudness_rms": descriptor.loudness_rms,
-                "brightness_hz": descriptor.brightness_hz,
-                "onset_rate_per_second": descriptor.onset_rate_per_second,
-            },
+            measurements=measurements,
             words=words,
             description=description,
             embedding=embedding,
