@@ -261,10 +261,10 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   }
 
   return (
-    <main data-project-id={projectId} data-testid="media-workspace-page">
+    <section data-project-id={projectId} data-testid="media-workspace-page" aria-labelledby="media-workspace-heading">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1>자산 보관함</h1>
+          <h1 id="media-workspace-heading">자산 보관함</h1>
           <p>이 프로젝트에 준비한 영상을 확인하고 분석 상태를 관리할 수 있어요.</p>
         </div>
         <Button type="button" variant="outline" disabled={loading || busyKey !== null} onClick={() => void load()}>
@@ -441,6 +441,6 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
           </section>
         </div>
       ) : null}
-    </main>
+    </section>
   );
 }

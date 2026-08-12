@@ -219,6 +219,7 @@ describe("product shell", () => {
     await screen.findByTestId("media-workspace-page");
 
     expect(screen.getByRole("button", { name: "자산" })).toBeInTheDocument();
+    expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 
   it("shows creator navigation, a project switcher, and an action-only home", async () => {
