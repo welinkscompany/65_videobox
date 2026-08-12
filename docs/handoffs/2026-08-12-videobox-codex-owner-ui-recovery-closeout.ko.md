@@ -2,7 +2,7 @@
 
 작성일: 2026-08-12  
 브랜치: `codex/videobox-container-compatibility`  
-최신 소스: `00847457f`
+최신 소스: `ba4688780`
 
 ## 이번 검증에서 고정한 것
 
@@ -14,11 +14,11 @@
 
 ## 검증 증거
 
-- 프론트: Vitest 63개 파일, 873개 통과.
+- 프론트: Vitest 63개 파일, 875개 통과. Creation readiness 실패 경로(건너뛰기·다시 준비·취소)는 오류를 `role=alert`로 표시하고 재시도 상태를 유지한다.
 - 타입/빌드: `npx tsc -b --pretty false`, `npm run build` 통과.
 - provenance: `.venv\\Scripts\\python.exe -m pytest tests/test_editor_ui_source_provenance.py` 21개 통과.
 - owner-ready 회귀: `.venv\\Scripts\\python.exe -m pytest -q tests/test_owner_ready_script.py` 116개 통과. Smoke timeout은 프로세스 트리 종료 후 후속 검증을 fail-closed로 기록해 bounded failure를 유지한다.
-- 백엔드 전체: `.venv\\Scripts\\python.exe -m pytest -q tests` 3321개 통과, 53개 skip, 1개 warning.
+- 백엔드 전체: `.venv\\Scripts\\python.exe -m pytest -q tests` 3321개 통과, 53개 skip, 1개 warning (`00847457f` 기준; 이후 `ba4688780`은 프론트 readiness만 변경).
 - 공식 런타임은 `scripts/owner-ready.ps1 -Mode Start -Rebuild -Json` 후 `-Mode Check -Json`으로 갱신했다. VideoBox health 200, branch/upstream·worktree·도구·CapCut pass. Hermes dashboard만 별도 서비스 미기동으로 blocked.
 
 실제 브라우저에서 재빌드된 런타임을 다시 열어 확인한 스크린샷:
@@ -36,6 +36,6 @@
 
 - QA mutation manifest는 과거 API lane과 UI lane이 섞여 있으므로 실제 브라우저에서 프로젝트 생성→자산 가져오기→분석→편집→검토 승인→SRT/MP4/CapCut 출력을 새로 수행한 증거로 간주하지 않는다.
 - 최종 MP4 전체 시청·청취, 자막 타이밍, CapCut Desktop import/open은 owner 확인이 필요하다.
-- Creation readiness의 건너뛰기/멈추기/다시 준비 실패 문구와 완료본 역사 개수 정책은 다음 보강 대상으로 남아 있다.
+- Home의 완성본 수는 lineage 정책에 따라 역사 개수와 현재 출력 대기 수를 별도 표기할지 다음 제품 결정에서 확정한다.
 
 보호해야 할 기존 runtime QA 프로젝트 `videobox-pc-qa-20260811153350`는 삭제·덮어쓰기하지 않는다.
