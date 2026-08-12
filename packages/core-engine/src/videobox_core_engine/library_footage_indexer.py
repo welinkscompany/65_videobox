@@ -12,6 +12,7 @@ b-roll 분석은 프로젝트에 묶여 있었다. 그래서 라이브러리에 
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -123,6 +124,27 @@ def index_pending_library_footage(
         # path (or require a fabricated frame); only ask the configured local
         # embedding provider for the missing vector.
         if clip.get("is_segment") or clip.get("source_segment_id"):
+            expected_source_sha = str(clip.get("source_sha256") or "").strip().lower()
+            if not expected_source_sha:
+                report.failed.append(filename)
+                continue
+            try:
+                actual_source_sha = _sha256_file(path)
+            except OSError:
+                report.failed.append(filename)
+                continue
+            if actual_source_sha != expected_source_sha:
+                # The managed path can be replaced after the queue row was
+                # created.  Never embed or acknowledge bytes that no longer
+                # match the immutable canonical source identity.
+                _logger.warning(
+                    "촬영본 원본 해시가 바뀌어 구간 색인을 건너뜁니다 (파일=%s, 기대=%s, 실제=%s).",
+                    filename,
+                    expected_source_sha,
+                    actual_source_sha,
+                )
+                report.failed.append(filename)
+                continue
             if not existing:
                 report.failed.append(filename)
                 continue
@@ -251,3 +273,11 @@ def _embed(
             exc_info=True,
         )
         return None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()

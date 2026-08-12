@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -26,6 +27,28 @@ class _FakeStore:
 
     def save_footage_descriptor(self, **kwargs) -> None:
         self.saved.append(kwargs)
+
+
+class _SegmentStore(_FakeStore):
+    def __init__(self, pending: list[dict]) -> None:
+        super().__init__(pending)
+        self.marked: list[str] = []
+
+    def get_footage_descriptor(self, *, content_sha256: str):
+        return {
+            "content_sha256": content_sha256,
+            "filename": "canonical.mp4",
+            "duration_seconds": 1.0,
+            "width": 1920,
+            "height": 1080,
+            "tags": {},
+            "description": "가로 영상. 저장된 장면.",
+            "embedding": None,
+            "description_version": FOOTAGE_DESCRIPTION_VERSION,
+        }
+
+    def mark_footage_segment_indexed(self, *, source_segment_id: str) -> None:
+        self.marked.append(source_segment_id)
 
 
 class _Frame:
@@ -226,3 +249,30 @@ def test_pending_embedding_reuses_saved_footage_analysis_without_vision(tmp_path
     assert report.analyzed == ["a.mp4"]
     assert report.failed == []
     assert store.saved[0]["description"] == "가로 영상. 저장된 장소."
+
+
+def test_replaced_segment_source_fails_closed_before_embedding_or_queue_ack(tmp_path: Path) -> None:
+    path = tmp_path / "a.mp4"
+    path.write_bytes(b"replacement bytes")
+    canonical_sha = hashlib.sha256(b"canonical bytes").hexdigest()
+    store = _SegmentStore([{
+        "content_sha256": "derived-index-key",
+        "source_sha256": canonical_sha,
+        "source_segment_id": "segment-1",
+        "is_segment": True,
+        "filename": path.name,
+        "path": str(path),
+    }])
+
+    report = _run(
+        store,
+        tmp_path,
+        vision_provider=None,
+        vision_model_name=None,
+        embedding_provider=_Embeddings(),
+    )
+
+    assert report.analyzed == []
+    assert report.failed == ["a.mp4"]
+    assert store.saved == []
+    assert store.marked == []

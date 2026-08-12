@@ -731,6 +731,20 @@ class MediaLibraryStore:
                         int(parent["description_version"]) if parent is not None else 1, self._now(),
                     ),
                 )
+                # A current parent description and embedding are inherited by
+                # the range immediately.  Reconcile the approval queue in the
+                # same transaction; otherwise the pending query excludes this
+                # fully indexed range and leaves an orphaned pending row.
+                if (
+                    parent is not None
+                    and embedding is not None
+                    and int(parent["description_version"] or 0) >= 2
+                ):
+                    connection.execute(
+                        "UPDATE footage_segment_index_queue SET state = 'indexed' "
+                        "WHERE source_segment_id = ? AND state = 'pending'",
+                        (segment_id,),
+                    )
                 registered += 1
             connection.commit()
             return registered

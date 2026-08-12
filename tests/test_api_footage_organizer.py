@@ -251,6 +251,7 @@ def test_approved_segments_are_registered_in_library_search_with_stable_identity
         duration_seconds=4.0, width=1920, height=1080,
         tags={"layers": {"place": ["실내"]}},
         description="가로 영상. 두 장면이 이어지는 촬영본.", embedding=[1.0, 0.0],
+        description_version=FOOTAGE_DESCRIPTION_VERSION,
     )
 
     original_register = library.register_approved_footage_segments
@@ -276,6 +277,11 @@ def test_approved_segments_are_registered_in_library_search_with_stable_identity
         json={"expected_revision": proposal.revision, "idempotency_key": "approve-search"},
     )
     assert approved.status_code == 200, approved.text
+
+    # The inherited parent embedding is already current, so approval must
+    # reconcile the durable segment queue instead of leaving stale pending
+    # work that the pending query can no longer discover.
+    assert FootageOrganizerStore(tmp_path / "library").list_segment_index_queue() == []
 
     matches = client.get(
         "/api/library/search",
