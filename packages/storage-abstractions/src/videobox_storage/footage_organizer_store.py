@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 import sqlite3
+import threading
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from videobox_domain_models.footage_organizer import (
     FootageSourceSegment,
     VirtualSequence,
     VirtualSequenceItem,
+    VirtualSequenceSource,
 )
 from videobox_storage.library_user_asset_store import ensure_library_user_asset_schema
 
@@ -98,8 +100,11 @@ CREATE TABLE IF NOT EXISTS library_virtual_sequence_items (
     source_segment_id TEXT NOT NULL,
     start_sec REAL,
     end_sec REAL,
+    source_id TEXT NOT NULL DEFAULT '',
+    source_sha256 TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (sequence_id) REFERENCES library_virtual_sequences(sequence_id) ON DELETE CASCADE,
     FOREIGN KEY (source_segment_id) REFERENCES library_source_segments(segment_id) ON DELETE RESTRICT,
+    FOREIGN KEY (source_id) REFERENCES library_footage_sources(source_id) ON DELETE RESTRICT,
     CHECK ((start_sec IS NULL AND end_sec IS NULL) OR (start_sec >= 0 AND end_sec > start_sec)),
     UNIQUE (sequence_id, item_order)
 );
@@ -250,14 +255,29 @@ WHEN NOT ((NEW.start_sec IS NULL AND NEW.end_sec IS NULL) OR (NEW.start_sec >= 0
   OR NOT EXISTS (
       SELECT 1 FROM library_virtual_sequences v
       JOIN library_source_segments s ON s.segment_id = NEW.source_segment_id
-      WHERE v.sequence_id = NEW.sequence_id AND v.source_id = s.source_id
-        AND v.source_sha256 = s.source_sha256
+      JOIN library_footage_sources src ON src.source_id = s.source_id
+      JOIN library_user_assets a ON a.library_asset_id = src.library_asset_id
+      WHERE v.sequence_id = NEW.sequence_id
+        AND NEW.source_id = s.source_id
+        AND NEW.source_sha256 = s.source_sha256
+        AND src.source_sha256 = s.source_sha256
+        AND lower(a.content_sha256) = lower(src.source_sha256)
   )
 BEGIN SELECT RAISE(ABORT, 'virtual sequence item boundaries must be finite'); END;
 CREATE TRIGGER IF NOT EXISTS virtual_sequence_items_integrity_update
-BEFORE UPDATE OF sequence_id, source_segment_id, start_sec, end_sec, item_order ON library_virtual_sequence_items
+BEFORE UPDATE OF sequence_id, source_segment_id, start_sec, end_sec, source_id, source_sha256, item_order ON library_virtual_sequence_items
 WHEN NEW.sequence_id <> OLD.sequence_id OR NEW.source_segment_id <> OLD.source_segment_id
+  OR NEW.source_id <> OLD.source_id OR NEW.source_sha256 <> OLD.source_sha256
   OR NOT ((NEW.start_sec IS NULL AND NEW.end_sec IS NULL) OR (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec AND NEW.start_sec < 1.7976931348623157e+308 AND NEW.end_sec < 1.7976931348623157e+308))
+  OR NOT EXISTS (
+      SELECT 1 FROM library_source_segments s
+      JOIN library_footage_sources src ON src.source_id = s.source_id
+      JOIN library_user_assets a ON a.library_asset_id = src.library_asset_id
+      WHERE s.segment_id = NEW.source_segment_id
+        AND NEW.source_id = s.source_id
+        AND NEW.source_sha256 = s.source_sha256
+        AND lower(a.content_sha256) = lower(src.source_sha256)
+  )
 BEGIN SELECT RAISE(ABORT, 'virtual sequence item identity or boundaries are immutable'); END;
 """
 
@@ -266,7 +286,21 @@ class OptimisticRevisionConflict(RuntimeError):
     """The caller attempted to update a proposal using an old revision."""
 
 
+_FOOTAGE_SCHEMA_READY: set[str] = set()
+_FOOTAGE_SCHEMA_LOCK = threading.Lock()
+
+
 def ensure_footage_organizer_schema(connection: sqlite3.Connection) -> None:
+    database_row = connection.execute("PRAGMA database_list").fetchone()
+    database_path = str(database_row[2]) if database_row is not None and database_row[2] else f":memory:{id(connection)}"
+    with _FOOTAGE_SCHEMA_LOCK:
+        if database_path in _FOOTAGE_SCHEMA_READY:
+            return
+        _install_footage_organizer_schema(connection)
+        _FOOTAGE_SCHEMA_READY.add(database_path)
+
+
+def _install_footage_organizer_schema(connection: sqlite3.Connection) -> None:
     """Install only additive tables; safe to run for every global DB connection."""
     # Trigger bodies are additive schema code, but ``IF NOT EXISTS`` would
     # leave an older body in a database migrated by a prior release. Replace
@@ -276,13 +310,40 @@ def ensure_footage_organizer_schema(connection: sqlite3.Connection) -> None:
         "source_segments_parent_hash_insert",
         "footage_proposal_segments_integrity_insert",
         "virtual_sequence_items_integrity_insert",
+        "virtual_sequence_items_integrity_update",
         "footage_proposals_parent_hash_insert",
         "footage_proposals_parent_hash_update",
         "virtual_sequences_parent_hash_insert",
         "virtual_sequences_parent_hash_update",
     ):
         connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+    existing_item_table = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'library_virtual_sequence_items'"
+    ).fetchone()
+    if existing_item_table is not None:
+        existing_item_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_virtual_sequence_items)")}
+        if "source_id" not in existing_item_columns:
+            connection.execute("ALTER TABLE library_virtual_sequence_items ADD COLUMN source_id TEXT NOT NULL DEFAULT ''")
+        if "source_sha256" not in existing_item_columns:
+            connection.execute("ALTER TABLE library_virtual_sequence_items ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''")
+        # Backfill legacy rows while the old integrity triggers are still
+        # absent. The replacement trigger intentionally treats source
+        # identity as immutable, so doing this after executescript would make
+        # the migration reject its own legacy repair.
+        connection.execute(
+            """
+            UPDATE library_virtual_sequence_items
+            SET source_id = (SELECT s.source_id FROM library_source_segments s WHERE s.segment_id = library_virtual_sequence_items.source_segment_id),
+                source_sha256 = (SELECT s.source_sha256 FROM library_source_segments s WHERE s.segment_id = library_virtual_sequence_items.source_segment_id)
+            WHERE COALESCE(source_id, '') = '' OR COALESCE(source_sha256, '') = ''
+            """
+        )
     connection.executescript(FOOTAGE_ORGANIZER_SCHEMA)
+    item_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_virtual_sequence_items)")}
+    if "source_id" not in item_columns:
+        connection.execute("ALTER TABLE library_virtual_sequence_items ADD COLUMN source_id TEXT NOT NULL DEFAULT ''")
+    if "source_sha256" not in item_columns:
+        connection.execute("ALTER TABLE library_virtual_sequence_items ADD COLUMN source_sha256 TEXT NOT NULL DEFAULT ''")
     columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_footage_sources)")}
     if "library_asset_id" not in columns:
         try:
@@ -293,6 +354,7 @@ def ensure_footage_organizer_schema(connection: sqlite3.Connection) -> None:
             # not be hidden by migration retries.
             if "duplicate column name" not in str(error).lower():
                 raise
+    connection.commit()
 
 
 def _now() -> str:
@@ -566,6 +628,27 @@ class FootageOrganizerStore:
         finally:
             connection.close()
 
+    def list_virtual_sequence_index_segments(self, sequence_id: str) -> list[dict[str, Any]]:
+        """Return sequence ranges with immutable source identity for semantic indexing."""
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                """
+                SELECT i.source_segment_id, i.source_sha256,
+                       COALESCE(i.start_sec, s.start_sec) AS start_sec,
+                       COALESCE(i.end_sec, s.end_sec) AS end_sec,
+                       s.label, s.machine_json
+                FROM library_virtual_sequence_items i
+                JOIN library_source_segments s ON s.segment_id = i.source_segment_id
+                WHERE i.sequence_id = ?
+                ORDER BY i.item_order
+                """,
+                (sequence_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            connection.close()
+
     def confirm_proposal_fields(
         self, *, proposal_id: str, expected_revision: int, fields: Mapping[str, Any]
     ) -> FootageProposal:
@@ -644,20 +727,54 @@ class FootageOrganizerStore:
                 raise KeyError(source_id)
             if source_row["library_asset_id"] is None or not str(source_row["library_asset_id"]).strip():
                 raise ValueError("source is quarantined: missing canonical library asset")
+            normalized_items: list[VirtualSequenceItem] = []
+            source_manifest: list[VirtualSequenceSource] = [
+                VirtualSequenceSource.create(source_id=source_id, source_sha256=str(source_row["source_sha256"]))
+            ]
+            seen_sources: set[str] = {source_id}
             connection.execute(
                 "INSERT INTO library_virtual_sequences (sequence_id, source_id, source_sha256, name, created_at) VALUES (?, ?, ?, ?, ?)",
                 (sequence_id, source_id, str(source_row["source_sha256"]), name, _now()),
             )
             for item in ordered:
-                segment = connection.execute("SELECT source_id FROM library_source_segments WHERE segment_id = ?", (item.source_segment_id,)).fetchone()
-                if segment is None or str(segment["source_id"]) != source_id:
+                item_source_id = item.source_id or source_id
+                item_source = connection.execute(
+                    "SELECT source_sha256, library_asset_id FROM library_footage_sources WHERE source_id = ?",
+                    (item_source_id,),
+                ).fetchone()
+                if item_source is None:
+                    raise KeyError(item_source_id)
+                if item_source["library_asset_id"] is None or not str(item_source["library_asset_id"]).strip():
+                    raise ValueError("source is quarantined: missing canonical library asset")
+                if not self._source_is_canonical(connection, item_source_id, str(item_source["source_sha256"])):
+                    raise ValueError("sequence source is stale")
+                segment = connection.execute(
+                    "SELECT source_id, source_sha256 FROM library_source_segments WHERE segment_id = ?",
+                    (item.source_segment_id,),
+                ).fetchone()
+                if segment is None or str(segment["source_id"]) != item_source_id:
                     raise ValueError("sequence item references a segment from another source")
-                connection.execute(
-                    "INSERT INTO library_virtual_sequence_items (item_id, sequence_id, item_order, source_segment_id, start_sec, end_sec) VALUES (?, ?, ?, ?, ?, ?)",
-                    (item.item_id, sequence_id, item.item_order, item.source_segment_id, item.start_sec, item.end_sec),
+                if str(segment["source_sha256"]) != str(item_source["source_sha256"]):
+                    raise ValueError("sequence item source hash does not match source")
+                normalized_item = VirtualSequenceItem.create(
+                    item_id=item.item_id,
+                    source_segment_id=item.source_segment_id,
+                    item_order=item.item_order,
+                    start_sec=item.start_sec,
+                    end_sec=item.end_sec,
+                    source_id=item_source_id,
+                    source_sha256=str(item_source["source_sha256"]),
                 )
+                connection.execute(
+                    "INSERT INTO library_virtual_sequence_items (item_id, sequence_id, item_order, source_segment_id, start_sec, end_sec, source_id, source_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (normalized_item.item_id, sequence_id, normalized_item.item_order, normalized_item.source_segment_id, normalized_item.start_sec, normalized_item.end_sec, normalized_item.source_id, normalized_item.source_sha256),
+                )
+                normalized_items.append(normalized_item)
+                if item_source_id not in seen_sources:
+                    seen_sources.add(item_source_id)
+                    source_manifest.append(VirtualSequenceSource.create(source_id=item_source_id, source_sha256=str(item_source["source_sha256"])))
             connection.commit()
-            return VirtualSequence(sequence_id, source_id, str(source_row["source_sha256"]), tuple(ordered), name, 1)
+            return VirtualSequence(sequence_id, source_id, str(source_row["source_sha256"]), tuple(normalized_items), name, 1, tuple(source_manifest))
         except Exception:
             connection.rollback()
             raise
@@ -678,6 +795,11 @@ class FootageOrganizerStore:
                 "SELECT * FROM library_virtual_sequence_items WHERE sequence_id = ? ORDER BY item_order",
                 (sequence_id,),
             ).fetchall()
+            if not item_rows or any(
+                not self._source_is_canonical(connection, str(item["source_id"]), str(item["source_sha256"]))
+                for item in item_rows
+            ):
+                return None
         finally:
             connection.close()
         items = tuple(
@@ -687,12 +809,22 @@ class FootageOrganizerStore:
                 item_order=int(item["item_order"]),
                 start_sec=float(item["start_sec"]) if item["start_sec"] is not None else None,
                 end_sec=float(item["end_sec"]) if item["end_sec"] is not None else None,
+                source_id=str(item["source_id"]),
+                source_sha256=str(item["source_sha256"]),
             )
             for item in item_rows
         )
+        sources: list[VirtualSequenceSource] = [
+            VirtualSequenceSource.create(source_id=str(row["source_id"]), source_sha256=str(row["source_sha256"]))
+        ]
+        seen_sources: set[str] = {str(row["source_id"])}
+        for item in items:
+            if item.source_id not in seen_sources:
+                seen_sources.add(item.source_id)
+                sources.append(VirtualSequenceSource.create(source_id=item.source_id, source_sha256=item.source_sha256))
         return VirtualSequence(
             str(row["sequence_id"]), str(row["source_id"]), str(row["source_sha256"]),
-            items, str(row["name"]), int(row["revision"]),
+            items, str(row["name"]), int(row["revision"]), tuple(sources),
         )
 
     def list_proposals(self, *, source_id: str | None = None) -> list[FootageProposal]:

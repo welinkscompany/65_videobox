@@ -275,6 +275,187 @@ def test_virtual_sequence_reorder_preview_cancel_and_approval(tmp_path: Path) ->
     assert approved.json() == replay.json()
 
 
+def test_multi_source_virtual_sequence_returns_item_previews_and_approves(tmp_path: Path) -> None:
+    client, library, _digest = _client(tmp_path)
+    second_path = tmp_path / "second.mp4"
+    second_path.write_bytes(b"second synthetic source")
+    second_digest = hashlib.sha256(second_path.read_bytes()).hexdigest()
+    library.register_user_asset(
+        library_asset_id="asset-second",
+        media_type="broll",
+        origin="user",
+        content_sha256=second_digest,
+        managed_relative_path="second.mp4",
+        byte_count=second_path.stat().st_size,
+        mime_type="video/mp4",
+        lifecycle="ready",
+    )
+    second_path.replace(tmp_path / "library" / "second.mp4")
+    third_path = tmp_path / "third.mp4"
+    third_path.write_bytes(b"third synthetic source")
+    third_digest = hashlib.sha256(third_path.read_bytes()).hexdigest()
+    library.register_user_asset(
+        library_asset_id="asset-third",
+        media_type="broll",
+        origin="user",
+        content_sha256=third_digest,
+        managed_relative_path="third.mp4",
+        byte_count=third_path.stat().st_size,
+        mime_type="video/mp4",
+        lifecycle="ready",
+    )
+    third_path.replace(tmp_path / "library" / "third.mp4")
+    client.app.state.media_analysis_embedding_provider = _SearchEmbeddings()
+    client.app.state.media_analysis_profile = {"embedding_model_name": "test-embed"}
+    library.save_footage_descriptor(
+        content_sha256=_digest, library_asset_id="asset-take", filename="take.mp4",
+        duration_seconds=4.0, width=1920, height=1080,
+        tags={}, description="first synthetic source", embedding=[1.0, 0.0],
+        description_version=FOOTAGE_DESCRIPTION_VERSION,
+    )
+    library.save_footage_descriptor(
+        content_sha256=second_digest, library_asset_id="asset-second", filename="second.mp4",
+        duration_seconds=4.0, width=1920, height=1080,
+        tags={}, description="second synthetic source", embedding=[1.0, 0.0],
+        description_version=FOOTAGE_DESCRIPTION_VERSION,
+    )
+    library.save_footage_descriptor(
+        content_sha256=third_digest, library_asset_id="asset-third", filename="third.mp4",
+        duration_seconds=4.0, width=1920, height=1080,
+        tags={}, description="third synthetic source", embedding=[1.0, 0.0],
+        description_version=FOOTAGE_DESCRIPTION_VERSION,
+    )
+    footage_store = FootageOrganizerStore(tmp_path / "library")
+    second_source = footage_store.register_source(
+        source_id="source:asset-second",
+        source_sha256=second_digest,
+        library_asset_id="asset-second",
+    )
+    third_source = footage_store.register_source(
+        source_id="source:asset-third",
+        source_sha256=third_digest,
+        library_asset_id="asset-third",
+    )
+    first_proposal = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "multi-first"},
+    ).json()
+    second_proposal = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-second", "idempotency_key": "multi-second"},
+    ).json()
+    third_proposal = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-third", "idempotency_key": "multi-third"},
+    ).json()
+    sequence = client.post(
+        "/api/footage/sequences",
+        json={
+            "source_id": first_proposal["source_id"],
+            "name": "three short clips",
+            "items": [
+                {"source_id": first_proposal["source_id"], "source_segment_id": first_proposal["segments"][0]["source_segment_id"], "item_order": 1, "start_sec": 0.0, "end_sec": 2.0},
+                {"source_id": second_source.source_id, "source_segment_id": second_proposal["segments"][0]["source_segment_id"], "item_order": 2, "start_sec": 0.0, "end_sec": 2.0},
+                {"source_id": third_source.source_id, "source_segment_id": third_proposal["segments"][0]["source_segment_id"], "item_order": 3, "start_sec": 0.0, "end_sec": 2.0},
+            ],
+            "idempotency_key": "multi-sequence",
+        },
+    )
+    assert sequence.status_code == 201, sequence.text
+    body = sequence.json()
+    assert [item["source_id"] for item in body["items"]] == [first_proposal["source_id"], second_source.source_id, third_source.source_id]
+    assert [source["source_id"] for source in body["sources"]] == [first_proposal["source_id"], second_source.source_id, third_source.source_id]
+
+    preview = client.post(f"/api/footage/sequences/{body['sequence_id']}/preview")
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["preview_url"] is None
+    assert [item["source_id"] for item in preview.json()["preview_items"]] == [first_proposal["source_id"], second_source.source_id, third_source.source_id]
+    approved = client.post(
+        f"/api/footage/sequences/{body['sequence_id']}/approve",
+        json={"idempotency_key": "multi-approve"},
+    )
+    replay = client.post(
+        f"/api/footage/sequences/{body['sequence_id']}/approve",
+        json={"idempotency_key": "multi-approve"},
+    )
+    assert approved.status_code == replay.status_code == 200
+    assert approved.json() == replay.json()
+    matches = client.get(
+        "/api/library/search",
+        params={"q": "second", "media_type": "broll", "limit": 20},
+    )
+    assert matches.status_code == 200, matches.text
+    indexed = {item.get("source_segment_id") for item in matches.json()["matches"]}
+    assert second_proposal["segments"][0]["source_segment_id"] in indexed
+    third_matches = client.get(
+        "/api/library/search",
+        params={"q": "third", "media_type": "broll", "limit": 20},
+    )
+    third_indexed = {item.get("source_segment_id") for item in third_matches.json()["matches"]}
+    assert third_proposal["segments"][0]["source_segment_id"] in third_indexed
+
+
+def test_multi_source_sequence_derivative_fails_closed_without_rendering_only_first_source(tmp_path: Path) -> None:
+    rendered = False
+
+    def renderer(_source: Path, _output: Path, _ranges: list[tuple[float, float]]) -> None:
+        nonlocal rendered
+        rendered = True
+
+    client, library, digest = _client(tmp_path, renderer=renderer)
+    second_path = tmp_path / "second.mp4"
+    second_path.write_bytes(b"second synthetic source")
+    second_digest = hashlib.sha256(second_path.read_bytes()).hexdigest()
+    library.register_user_asset(
+        library_asset_id="asset-second",
+        media_type="broll",
+        origin="user",
+        content_sha256=second_digest,
+        managed_relative_path="second.mp4",
+        byte_count=second_path.stat().st_size,
+        mime_type="video/mp4",
+        lifecycle="ready",
+    )
+    second_path.replace(tmp_path / "library" / "second.mp4")
+    footage_store = FootageOrganizerStore(tmp_path / "library")
+    second_source = footage_store.register_source(
+        source_id="source:asset-second",
+        source_sha256=second_digest,
+        library_asset_id="asset-second",
+    )
+    first = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "derivative-multi-first"},
+    ).json()
+    second = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-second", "idempotency_key": "derivative-multi-second"},
+    ).json()
+    sequence = client.post(
+        "/api/footage/sequences",
+        json={
+            "source_id": first["source_id"],
+            "items": [
+                {"source_id": first["source_id"], "source_segment_id": first["segments"][0]["source_segment_id"], "item_order": 1},
+                {"source_id": second_source.source_id, "source_segment_id": second["segments"][0]["source_segment_id"], "item_order": 2},
+            ],
+        },
+    ).json()
+    approved = client.post(
+        f"/api/footage/sequences/{sequence['sequence_id']}/approve",
+        json={"idempotency_key": "derivative-multi-approve"},
+    )
+    assert approved.status_code == 200
+    result = client.post(
+        "/api/footage/derivatives/render",
+        json={"source_kind": "sequence", "source_id": sequence["sequence_id"], "idempotency_key": "derivative-multi"},
+    )
+    assert result.status_code == 202
+    assert result.json()["status"] == "failed"
+    assert result.json()["error_message"] == "footage_multi_source_derivative_not_supported"
+    assert rendered is False
+
+
 def test_explicit_derivative_render_is_independent_and_idempotent(tmp_path: Path) -> None:
     seen_ranges: list[tuple[float, float]] = []
 

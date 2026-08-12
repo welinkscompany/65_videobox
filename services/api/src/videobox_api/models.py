@@ -1431,6 +1431,7 @@ class VirtualSequenceItemRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     source_segment_id: str = Field(min_length=1)
+    source_id: str | None = Field(default=None, min_length=1)
     item_order: int = Field(ge=1)
     start_sec: float | None = None
     end_sec: float | None = None

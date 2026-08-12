@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -395,3 +396,48 @@ def test_virtual_sequence_preserves_explicit_item_order_and_restricts_source_del
         "library_virtual_sequences",
         "library_virtual_sequence_items",
     } <= tables
+
+
+def test_virtual_sequence_keeps_each_item_source_identity(tmp_path: Path) -> None:
+    first = _source(tmp_path, source_id="source-first", digest="1" * 64)
+    second = _source(tmp_path, source_id="source-second", digest="2" * 64)
+    store = FootageOrganizerStore(tmp_path / "library")
+    first_segment = store.create_source_segment(source_id=first.source_id, start_sec=0.0, end_sec=1.0)
+    second_segment = store.create_source_segment(source_id=second.source_id, start_sec=2.0, end_sec=3.0)
+
+    sequence = store.create_virtual_sequence(
+        source_id=first.source_id,
+        items=[
+            VirtualSequenceItem.create(
+                source_id=second.source_id,
+                source_segment_id=second_segment.segment_id,
+                item_order=1,
+                start_sec=2.0,
+                end_sec=3.0,
+            ),
+            VirtualSequenceItem.create(
+                source_id=first.source_id,
+                source_segment_id=first_segment.segment_id,
+                item_order=2,
+                start_sec=0.0,
+                end_sec=1.0,
+            ),
+        ],
+    )
+
+    loaded = store.get_virtual_sequence(sequence.sequence_id)
+    assert loaded is not None
+    assert [item.source_id for item in loaded.items] == [second.source_id, first.source_id]
+    assert [source.source_id for source in loaded.sources] == [first.source_id, second.source_id]
+
+
+def test_concurrent_library_connections_do_not_rebuild_schema_each_time(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+
+    def open_and_list(_: int) -> list[object]:
+        return FootageOrganizerStore(root).list_sources()
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(open_and_list, range(8)))
+
+    assert results == [[] for _ in range(8)]

@@ -883,8 +883,9 @@ class MediaLibraryStore:
 
     def _connection(self) -> sqlite3.Connection:
         self.root.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(self.database_path, timeout=30.0)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(
             """

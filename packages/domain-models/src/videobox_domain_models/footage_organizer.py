@@ -205,6 +205,8 @@ class VirtualSequenceItem:
     item_order: int
     start_sec: float | None = None
     end_sec: float | None = None
+    source_id: str = ""
+    source_sha256: str = ""
 
     @classmethod
     def create(
@@ -215,6 +217,8 @@ class VirtualSequenceItem:
         start_sec: float | None = None,
         end_sec: float | None = None,
         item_id: str | None = None,
+        source_id: str | None = None,
+        source_sha256: str | None = None,
     ) -> "VirtualSequenceItem":
         if type(item_order) is not int or item_order < 1:
             raise ValueError("item_order must be a positive integer")
@@ -223,7 +227,24 @@ class VirtualSequenceItem:
         start = end = None
         if start_sec is not None and end_sec is not None:
             start, end = _boundary(start_sec, end_sec)
-        return cls(item_id or f"vitem_{uuid4().hex}", str(source_segment_id), item_order, start, end)
+        normalized_source_id = str(source_id or "").strip()
+        normalized_hash = _hash(source_sha256) if source_sha256 else ""
+        return cls(
+            item_id or f"vitem_{uuid4().hex}", str(source_segment_id), item_order,
+            start, end, normalized_source_id, normalized_hash,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VirtualSequenceSource:
+    source_id: str
+    source_sha256: str
+
+    @classmethod
+    def create(cls, *, source_id: str, source_sha256: str) -> "VirtualSequenceSource":
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise ValueError("sequence source_id is required")
+        return cls(source_id.strip(), _hash(source_sha256))
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,3 +255,4 @@ class VirtualSequence:
     items: tuple[VirtualSequenceItem, ...]
     name: str = ""
     revision: int = 1
+    sources: tuple[VirtualSequenceSource, ...] = ()

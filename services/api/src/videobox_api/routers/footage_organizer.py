@@ -243,6 +243,14 @@ def build_footage_organizer_router(
         proposal = footage_store.get_proposal(proposal_id)
         if proposal is None:
             raise HTTPException(status_code=404, detail="footage_proposal_missing")
+        # Validate the lineage advertised by a supplied structured response
+        # before instruction-policy classification. A stale candidate must
+        # never be allowed to look current merely because its natural-language
+        # wrapper is also unsafe or ambiguous.
+        if isinstance(payload.response, dict):
+            response_proposal = payload.response.get("proposal")
+            if isinstance(response_proposal, dict) and response_proposal.get("base_revision") != proposal.revision:
+                return {"status": "rejected", "rejection_reason": "proposal_revision_not_current"}
         if is_unsafe_yujin_footage_instruction(payload.instruction):
             return {"status": "rejected", "rejection_reason": "unsafe_instruction"}
         context = _yujin_context(proposal, footage_store, asset_adapter)
@@ -326,10 +334,23 @@ def build_footage_organizer_router(
         result = footage_store.get_virtual_sequence(sequence_id)
         if result is None:
             raise HTTPException(status_code=404, detail="footage_sequence_missing")
-        source = footage_store.get_source(result.source_id)
-        if source is None or asset_adapter.get_verified_asset(library_asset_id=source.library_asset_id) is None:
-            raise HTTPException(status_code=422, detail="footage_source_stale")
-        return {"status": "ready", "sequence_id": sequence_id, "revision": result.revision, "preview_url": _ranged_preview_url(source.source_id, result.items), "items": [_item_payload(item) for item in result.items]}
+        preview_items: list[dict[str, Any]] = []
+        for item in result.items:
+            source = footage_store.get_source(item.source_id)
+            if source is None or asset_adapter.get_verified_asset(library_asset_id=source.library_asset_id) is None:
+                raise HTTPException(status_code=422, detail="footage_source_stale")
+            if item.start_sec is not None and item.end_sec is not None:
+                preview_url = _ranged_preview_url(source.source_id, [item])
+            else:
+                preview_url = f"/api/footage/sources/{quote(source.source_id, safe='')}/preview"
+            preview_items.append({"item_id": item.item_id, "source_id": item.source_id, "source_sha256": item.source_sha256, "preview_url": preview_url})
+        preview_url = None
+        if len(result.sources) <= 1:
+            source = footage_store.get_source(result.source_id)
+            if source is None or asset_adapter.get_verified_asset(library_asset_id=source.library_asset_id) is None:
+                raise HTTPException(status_code=422, detail="footage_source_stale")
+            preview_url = _ranged_preview_url(source.source_id, result.items)
+        return {"status": "ready", "sequence_id": sequence_id, "revision": result.revision, "preview_url": preview_url, "preview_items": preview_items, "items": [_item_payload(item) for item in result.items]}
 
     @router.post("/api/footage/sequences/{sequence_id}/cancel")
     def cancel_sequence(sequence_id: str) -> dict[str, Any]:
@@ -345,6 +366,7 @@ def build_footage_organizer_router(
             raise HTTPException(status_code=404, detail="footage_sequence_missing")
         connection = sqlite3.connect(footage_store.database_path)
         try:
+            connection.execute("BEGIN IMMEDIATE")
             prior = connection.execute(
                 "SELECT idempotency_key FROM footage_sequence_approvals WHERE sequence_id = ?", (sequence_id,)
             ).fetchone()
@@ -355,8 +377,14 @@ def build_footage_organizer_router(
                 (sequence_id, payload.idempotency_key),
             )
             connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
+        media_library_store.register_approved_footage_segments(
+            segments=footage_store.list_virtual_sequence_index_segments(sequence_id)
+        )
         # Sequence rows are created atomically with their ordered items; this
         # small approval ledger makes the explicit transition durable/replayable.
         response = _sequence_payload(result)
@@ -482,11 +510,11 @@ def _segment_index_payload(value: Any) -> dict[str, Any]:
 
 
 def _item_payload(value: Any) -> dict[str, Any]:
-    return {"item_id": value.item_id, "source_segment_id": value.source_segment_id, "item_order": value.item_order, "start_sec": value.start_sec, "end_sec": value.end_sec}
+    return {"item_id": value.item_id, "source_segment_id": value.source_segment_id, "source_id": value.source_id, "source_sha256": value.source_sha256, "item_order": value.item_order, "start_sec": value.start_sec, "end_sec": value.end_sec}
 
 
 def _sequence_payload(value: Any) -> dict[str, Any]:
-    return {"sequence_id": value.sequence_id, "source_id": value.source_id, "source_sha256": value.source_sha256, "name": value.name, "revision": value.revision, "items": [_item_payload(item) for item in value.items]}
+    return {"sequence_id": value.sequence_id, "source_id": value.source_id, "source_sha256": value.source_sha256, "sources": [{"source_id": source.source_id, "source_sha256": source.source_sha256} for source in value.sources], "name": value.name, "revision": value.revision, "items": [_item_payload(item) for item in value.items]}
 
 
 def _ranged_preview_url(source_id: str, values: Any) -> str:
@@ -606,6 +634,8 @@ def _render_derivative(store: FootageOrganizerStore, library: MediaLibraryStore,
             approval.close()
         if approved is None:
             return _finish_job(store.database_path, job_id, "failed", error="footage_sequence_not_approved")
+        if len(source_record.sources) > 1:
+            return _finish_job(store.database_path, job_id, "failed", error="footage_multi_source_derivative_not_supported")
         source = store.get_source(source_record.source_id)
         ranges = [(item.start_sec or 0.0, item.end_sec or 0.0) for item in source_record.items]
     if source is None:

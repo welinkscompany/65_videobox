@@ -754,14 +754,18 @@ export type YujinFootageInterpretation =
 export type FootageSequenceItem = {
   item_id: string;
   source_segment_id: string;
+  source_id?: string;
+  source_sha256?: string;
   item_order: number;
   start_sec: number | null;
   end_sec: number | null;
 };
+export type FootageSequenceSource = { source_id: string; source_sha256: string };
 export type FootageSequence = {
   sequence_id: string;
   source_id: string;
   source_sha256: string;
+  sources?: FootageSequenceSource[];
   name: string;
   revision: number;
   items: FootageSequenceItem[];
@@ -770,7 +774,8 @@ export type FootageSequencePreview = {
   status: "ready";
   sequence_id: string;
   revision: number;
-  preview_url: string;
+  preview_url: string | null;
+  preview_items: Array<{ item_id: string; source_id: string; source_sha256: string; preview_url: string }>;
   items: FootageSequenceItem[];
 };
 export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string };
@@ -1715,7 +1720,7 @@ export const api = {
   cancelFootageProposal: (proposalId: string) => request<{ status: "cancelled"; proposal_id: string; revision: number }>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/cancel`, { method: "POST" }),
   approveFootageProposal: (proposalId: string, payload: { expected_revision: number; idempotency_key: string }) =>
     request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
-  createFootageSequence: (payload: { source_id: string; name?: string; items: Array<{ source_segment_id: string; item_order: number; start_sec?: number; end_sec?: number }>; idempotency_key?: string }) =>
+  createFootageSequence: (payload: { source_id: string; name?: string; items: Array<{ source_segment_id: string; source_id?: string; item_order: number; start_sec?: number; end_sec?: number }>; idempotency_key?: string }) =>
     request<FootageSequence>("/api/footage/sequences", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getFootageSequence: (sequenceId: string) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}`),
   reorderFootageSequence: (sequenceId: string, payload: { expected_revision: number; item_ids: string[] }) =>

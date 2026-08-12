@@ -77,3 +77,13 @@ body:has(.vb-product-shell) { margin:0; }
 .vb-conversation-cleanup > p { margin:0; color:var(--vb-muted); }
 .vb-conversation-cleanup article { display:flex; align-items:center; justify-content:space-between; gap:.75rem; border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); padding:.75rem 1rem; }
 .vb-conversation-cleanup article p { margin:0; }
+
+/* Intranet DS normalization for the product shell and catalog. */
+.vb-product-shell [data-slot=button] { min-height:32px; }
+.vb-product-shell [data-slot=button][data-variant="default"] { border-radius:var(--radius-2xl); }
+.vb-product-shell [data-slot=button][data-variant="outline"] { border:0; box-shadow:0 0 0 1px var(--vb-control-ring); border-radius:var(--radius-2xl); }
+.vb-product-shell :where(button,a,input,textarea,select):focus-visible { outline:0; box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 30%,transparent); }
+.vb-catalog { width:100%; max-width:1200px; box-sizing:border-box; min-width:0; overflow-x:hidden; }
+.vb-catalog-grid { min-width:0; }
+.vb-catalog-card { box-sizing:border-box; min-width:0; overflow-wrap:anywhere; border:0; border-radius:var(--radius-lg); box-shadow:0 0 0 1px var(--vb-surface-ring); }
+.vb-catalog-card:hover { border:0; box-shadow:0 0 0 1px var(--vb-accent); }
