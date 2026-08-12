@@ -17,10 +17,10 @@
 - Create: `packages/core-engine/src/videobox_core_engine/output_variants.py`
 - Test: `tests/test_output_variants.py`
 
-- [ ] Write failing pure tests for `horizontal`, `vertical_full`, `vertical_highlight`; lock inheritance; master conflict; allowed crop/focal/caption/safe-area/audio overrides; and forbidden delete/reorder/story changes in `vertical_full`.
-- [ ] Run RED using `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_output_variants.py -q`.
-- [ ] Implement strict `OutputVariant`, `VariantOverride`, `VariantLock`, `VariantConflict` models and pure `rebase_variant`, `apply_variant_patch`, `materialize_variant` functions. Only highlight can select/reorder master segment IDs.
-- [ ] Repeat the previous pytest command, run `git diff --check`, and commit `feat: define linked output variant invariants`.
+- [x] Write failing pure tests for `horizontal`, `vertical_full`, `vertical_highlight`; lock inheritance; master conflict; allowed crop/focal/caption/safe-area/audio overrides; and forbidden delete/reorder/story changes in `vertical_full`.
+- [x] Run RED using `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_output_variants.py -q`.
+- [x] Implement strict `OutputVariant`, `VariantOverride`, `VariantLock`, `VariantConflict` models and pure `rebase_variant`, `apply_variant_patch`, `materialize_variant` functions. Only highlight can select/reorder master segment IDs.
+- [x] Repeat the previous pytest command, run `git diff --check`, and commit `feat: define linked output variant invariants`.
 
 ### Task 2: Persist and lazily seed variants
 

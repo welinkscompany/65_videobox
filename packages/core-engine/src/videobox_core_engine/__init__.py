@@ -12,6 +12,11 @@ __all__ = [
     "RuleBasedMusicRecommender",
     "TimelineBuilder",
     "LibraryIngestService",
+    "MaterializedVariant",
+    "VariantInvariantError",
+    "apply_variant_patch",
+    "materialize_variant",
+    "rebase_variant",
 ]
 
 _LAZY_EXPORTS = {
@@ -35,6 +40,23 @@ _LAZY_EXPORTS = {
     ),
     "TimelineBuilder": ("videobox_core_engine.timeline_builder", "TimelineBuilder"),
     "LibraryIngestService": ("videobox_core_engine.library_ingest", "LibraryIngestService"),
+    "MaterializedVariant": (
+        "videobox_core_engine.output_variants",
+        "MaterializedVariant",
+    ),
+    "VariantInvariantError": (
+        "videobox_core_engine.output_variants",
+        "VariantInvariantError",
+    ),
+    "apply_variant_patch": (
+        "videobox_core_engine.output_variants",
+        "apply_variant_patch",
+    ),
+    "materialize_variant": (
+        "videobox_core_engine.output_variants",
+        "materialize_variant",
+    ),
+    "rebase_variant": ("videobox_core_engine.output_variants", "rebase_variant"),
 }
 
 

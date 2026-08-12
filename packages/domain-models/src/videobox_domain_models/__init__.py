@@ -27,6 +27,12 @@ from videobox_domain_models.footage_organizer import (
     VirtualSequence,
     VirtualSequenceItem,
 )
+from videobox_domain_models.output_variants import (
+    OutputVariant,
+    VariantConflict,
+    VariantLock,
+    VariantOverride,
+)
 
 __all__ = [
     "AssetRecord",
@@ -56,4 +62,8 @@ __all__ = [
     "FootageSourceSegment",
     "VirtualSequence",
     "VirtualSequenceItem",
+    "OutputVariant",
+    "VariantConflict",
+    "VariantLock",
+    "VariantOverride",
 ]
