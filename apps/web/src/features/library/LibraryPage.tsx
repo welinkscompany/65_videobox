@@ -30,6 +30,7 @@ export function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ingestItems, setIngestItems] = useState<LibraryIngestItem[]>([]);
+  const failedFiles = useRef(new Map<string, File>());
   const epoch = useRef(0);
 
   const load = useCallback(async () => {
@@ -59,7 +60,7 @@ export function LibraryPage() {
   async function ingest(files: File[]) {
     const groups = new Map<LibraryMediaType, File[]>();
     const rejected: LibraryIngestItem[] = [];
-    files.forEach((file) => { const type = fileType(file); if (!type) rejected.push({ filename: file.name, state: "needs_attention", error_code: "unsupported_media" }); else groups.set(type, [...(groups.get(type) ?? []), file]); });
+    files.forEach((file) => { const type = fileType(file); if (!type) rejected.push({ filename: file.name, state: "needs_attention", error_code: "unsupported_media" }); else { failedFiles.current.set(file.name, file); groups.set(type, [...(groups.get(type) ?? []), file]); } });
     setIngestItems(rejected);
     const results: LibraryIngestItem[] = [...rejected];
     await Promise.all([...groups.entries()].map(async ([type, grouped]) => {
@@ -70,6 +71,11 @@ export function LibraryPage() {
     await load();
   }
 
+  async function retry(filename: string) {
+    const file = failedFiles.current.get(filename);
+    if (file) await ingest([file]);
+  }
+
   function selectFilter(filter: LibraryFilter) { setActiveFilter(filter); if (filter === "trash") setSelected(null); }
-  return <main className="vb-library-page" data-testid="library-workspace" data-layout="three-pane"><span data-testid="global-library-page" className="sr-only">내 라이브러리</span><LibrarySidebar activeFilter={activeFilter} onFilter={selectFilter} counts={counts} status={assets.some((item) => item.lifecycle === "needs_attention") ? "needs_attention" : "all"} /><section className="vb-library-main"><AssetIngestDropzone onFiles={(files) => void ingest(files)} /><IngestJobTable items={ingestItems} /><LibraryResults assets={visible} activeFilter={activeFilter} search={search} onSearch={setSearch} onFilter={selectFilter} selectedId={selected?.library_asset_id} onSelect={setSelected} loading={loading} error={error} /></section><LibraryPreviewPane asset={selected} onChanged={() => void load()} /></main>;
+  return <main className="vb-library-page" data-testid="library-workspace" data-layout="three-pane"><span data-testid="global-library-page" className="sr-only">내 라이브러리</span><nav className="vb-library-global-nav" aria-label="전체 메뉴"><a href="/projects">프로젝트</a><a href="/library" aria-current="page">내 라이브러리</a><a href="/footage">촬영본 정리</a><a href="/settings/general">설정</a></nav><LibrarySidebar activeFilter={activeFilter} onFilter={selectFilter} counts={counts} status={assets.some((item) => item.lifecycle === "needs_attention") ? "needs_attention" : "all"} /><section className="vb-library-main"><AssetIngestDropzone onFiles={(files) => void ingest(files)} /><IngestJobTable items={ingestItems} onRetry={(filename) => void retry(filename)} /><LibraryResults assets={visible} activeFilter={activeFilter} search={search} onSearch={setSearch} onFilter={selectFilter} selectedId={selected?.library_asset_id} onSelect={setSelected} loading={loading} error={error} /></section><LibraryPreviewPane asset={selected} onChanged={() => void load()} /></main>;
 }
