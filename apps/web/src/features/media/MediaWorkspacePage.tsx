@@ -211,6 +211,21 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     }
   }
 
+  async function removeProjectReference(asset: BrollAsset) {
+    const sourceLibraryAssetId = asset.metadata?.source_library_asset_id;
+    if (typeof sourceLibraryAssetId !== "string" || !sourceLibraryAssetId) {
+      setMessage("이 프로젝트 전용 영상은 여기에서 뺄 수 없어요.");
+      return;
+    }
+    const usage = await api.getLibraryAssetUsage(sourceLibraryAssetId);
+    const reference = usage.locations.find((location) => location.project_id === projectId && location.materialized_asset_id === asset.asset_id);
+    if (!reference?.reference_id) {
+      setMessage("프로젝트 참조 위치를 찾지 못했어요. 라이브러리에서 상태를 확인해 주세요.");
+      return;
+    }
+    await api.removeLibraryReference(sourceLibraryAssetId, reference.reference_id);
+  }
+
   async function showPreview(item: MediaAnalysis) {
     const key = `preview:${item.analysis_id}`;
     const token = beginAction(key);
@@ -299,7 +314,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
 
       {activeTab === "import" ? <div id="media-panel-import" role="tabpanel" aria-label="가져오기" className="grid gap-4">
         <section aria-labelledby="media-upload-heading">
-          <h2 id="media-upload-heading">영상 올리기</h2>
+          <h2 id="media-upload-heading">새 파일 추가</h2>
+          <p className="sr-only">영상 올리기</p>
           <p>평소에 찍어둔 장면 영상을 여러 개 한 번에 올려 보관함에 쌓아 둘 수 있어요.</p>
           <label htmlFor="media-broll-upload">장면 영상 파일 추가</label>
           <Input
@@ -316,7 +332,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
           />
         </section>
         {currentState ? <section aria-labelledby="media-collection-heading">
-            <h2 id="media-collection-heading">따로 모아둔 영상 가져오기</h2>
+            <h2 id="media-collection-heading">촬영본 가져오기</h2>
+            <p className="sr-only">따로 모아둔 영상 가져오기</p>
             <p>미리 옮겨둔 영상이 여기에 쌓여요. 이 프로젝트에서 쓸 영상을 골라 가져오세요.</p>
             {currentState.collection.length === 0 ? <p>아직 따로 모아둔 영상이 없어요.</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -344,12 +361,13 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
         </section> : null}
       </div> : null}
 
-      {activeTab === "music" ? <div id="media-panel-music" role="tabpanel" aria-label="음악"><MediaLibraryBrowser projectId={projectId} fixedFilter="music" /></div> : null}
-      {activeTab === "sfx" ? <div id="media-panel-sfx" role="tabpanel" aria-label="효과음"><MediaLibraryBrowser projectId={projectId} fixedFilter="sfx" /></div> : null}
+      {activeTab === "music" ? <div id="media-panel-music" role="tabpanel" aria-label="음악"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="music" /></div> : null}
+      {activeTab === "sfx" ? <div id="media-panel-sfx" role="tabpanel" aria-label="효과음"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="sfx" /></div> : null}
 
       {activeTab === "videos" && currentState ? (
         <div id="media-panel-videos" role="tabpanel" aria-label="내 영상" className="grid gap-4">
           <section aria-labelledby="media-assets-heading">
+            <h2>프로젝트 자산</h2>
             <h2 id="media-assets-heading">내 영상</h2>
             {projectCards.length === 0 ? <p>아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요.</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -364,6 +382,24 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
                     <CardContent>
                       <p>{card.audioPresence}</p>
                       <p>{card.status}</p>
+                      {(() => {
+                        const projectAsset = currentState.assets.find((item) => item.asset_id === card.assetId);
+                        const sourceLibraryAssetId = projectAsset?.metadata?.source_library_asset_id;
+                        return typeof sourceLibraryAssetId === "string" && sourceLibraryAssetId ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busyKey !== null}
+                            aria-label={`${card.title} 프로젝트에서 빼기`}
+                            onClick={() => {
+                              if (!projectAsset) return;
+                              void runAction(`remove:${projectAsset.asset_id}`, () => removeProjectReference(projectAsset));
+                            }}
+                          >
+                            프로젝트에서 빼기
+                          </Button>
+                        ) : null;
+                      })()}
                     </CardContent>
                   </Card>
                 ))}

@@ -216,6 +216,34 @@ describe("MediaLibraryBrowser", () => {
     expect(await screen.findByText("음악 25")).toBeVisible();
     expect(container.querySelectorAll("article")).toHaveLength(1);
   });
+
+  it("shows a user library asset as a project reference and materializes it without trashing the global row", async () => {
+    const userAsset = {
+      library_asset_id: "user:music:1",
+      asset_id: "user-music-1",
+      media_type: "music" as const,
+      origin: "user" as const,
+      lifecycle: "ready" as const,
+      user_metadata: { filename: "출근 음악.mp3" },
+      technical_metadata: { duration_seconds: 18 },
+      preview_url: "/api/library/assets/user%3Amusic%3A1/preview",
+    };
+    vi.spyOn(api.api, "listLibraryAssets").mockResolvedValue({ assets: [userAsset] } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+    const materialize = vi.spyOn(api.api, "materializeLibraryAsset").mockResolvedValue({
+      asset: { asset_id: "project-copy", asset_type: "bgm", storage_uri: "local://project/copy" },
+      reference: { reference_id: "ref-1", project_id: "project-a", library_asset_id: userAsset.library_asset_id },
+    });
+
+    render(<MediaLibraryBrowser projectId="project-a" fixedFilter="music" />);
+
+    expect(await screen.findByText("출근 음악.mp3")).toBeVisible();
+    expect(screen.getByRole("button", { name: "출근 음악.mp3 프로젝트에 추가" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "출근 음악.mp3 프로젝트에 추가" }));
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith(userAsset.library_asset_id, "project-a"));
+    expect(materialize).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("항목 이름", () => {

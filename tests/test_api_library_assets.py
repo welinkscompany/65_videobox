@@ -92,6 +92,27 @@ def test_materialize_same_project_asset_is_sha_idempotent_and_keeps_one_referenc
     assert len(client.get(f"/api/library/assets/{item['library_asset_id']}/usage").json()["locations"]) == 1
 
 
+def test_remove_project_reference_deletes_only_project_copy_and_is_idempotent(tmp_path):
+    client = TestClient(app(tmp_path))
+    item = client.post(
+        "/api/library/ingest", data={"media_type": "sfx"},
+        files=[("files", ("remove.wav", b"remove me", "audio/wav"))],
+    ).json()["items"][0]
+    project = client.post("/api/projects", json={"name": "remove project ref"}).json()["project_id"]
+    materialized = client.post(f"/api/library/assets/{item['library_asset_id']}/materialize", json={"project_id": project}).json()
+    reference_id = materialized["reference"]["reference_id"]
+    materialized_id = materialized["asset"]["asset_id"]
+    assert client.app.state.store.get_asset(project_id=project, asset_id=materialized_id)
+
+    path = f"/api/library/assets/{item['library_asset_id']}/references/{reference_id}"
+    assert client.delete(path).status_code == 204
+    with pytest.raises(KeyError):
+        client.app.state.store.get_asset(project_id=project, asset_id=materialized_id)
+    assert client.get(f"/api/library/assets/{item['library_asset_id']}/usage").json()["locations"] == []
+    assert client.get(f"/api/library/assets/{item['library_asset_id']}/preview").status_code == 200
+    assert client.delete(path).status_code == 204
+
+
 def test_permanent_cleanup_can_remove_matching_asset_from_alternate_managed_root(tmp_path):
     relative = "assets/broll/clip.mp4"
     primary = tmp_path / "primary"

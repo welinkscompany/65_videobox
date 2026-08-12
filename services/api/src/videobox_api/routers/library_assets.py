@@ -430,9 +430,24 @@ def build_library_assets_router(
     @router.delete("/api/library/assets/{asset_id}/references/{reference_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
     def remove_library_reference(asset_id: str, reference_id: str) -> None:
         find_asset(asset_id)
-        if not any(str(item.get("reference_id")) == reference_id for item in user_asset_store.list_project_references(library_asset_id=asset_id)):
-            raise HTTPException(status_code=404, detail="reference_missing")
+        reference = next((item for item in user_asset_store.list_project_references(library_asset_id=asset_id) if str(item.get("reference_id")) == reference_id), None)
+        # Removing a project reference is deliberately idempotent.  The owner
+        # may retry after a lost response; the global library row must remain.
+        if reference is None:
+            return None
+        project_id = str(reference.get("project_id") or "")
+        materialized_asset_id = str(reference.get("materialized_asset_id") or "")
+        if project_id and materialized_asset_id:
+            try:
+                project_asset = project_store.get_asset(project_id=project_id, asset_id=materialized_asset_id)
+            except (KeyError, FileNotFoundError):
+                project_asset = None
+            if project_asset is not None:
+                metadata = dict(project_asset.get("metadata") or {})
+                if metadata.get("source_library_asset_id") == asset_id:
+                    project_store.delete_asset(project_id=project_id, asset_id=materialized_asset_id)
         user_asset_store.remove_project_reference(reference_id)
+        return None
 
     return router
 

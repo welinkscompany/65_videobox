@@ -79,6 +79,36 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("MediaWorkspacePage", () => {
+  it("separates project assets, library search, new files, and footage intake in the project flow", async () => {
+    render(<MediaWorkspacePage projectId="project-a" />);
+
+    expect(await screen.findByRole("heading", { name: "프로젝트 자산" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "음악" }));
+    expect(await screen.findByRole("heading", { name: "라이브러리에서 찾기" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "가져오기" }));
+    expect(await screen.findByRole("heading", { name: "새 파일 추가" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "촬영본 가져오기" })).toBeVisible();
+  });
+
+  it("removes a project copy through its reference without trashing the global library asset", async () => {
+    vi.mocked(api.listBrollAssets).mockResolvedValue([{
+      ...asset(),
+      metadata: { title: "공원 장면", source_library_asset_id: "user:broll:1" },
+    }]);
+    const usage = vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({
+      library_asset_id: "user:broll:1",
+      locations: [{ project_id: "project-a", materialized_asset_id: "asset-project-a", reference_id: "ref-1", location: { kind: "project_asset" } }],
+    });
+    const remove = vi.spyOn(api, "removeLibraryReference").mockResolvedValue(undefined);
+    const trash = vi.spyOn(api, "trashLibraryAsset");
+    render(<MediaWorkspacePage projectId="project-a" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "공원 장면 프로젝트에서 빼기" }));
+    await waitFor(() => expect(usage).toHaveBeenCalledWith("user:broll:1"));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("user:broll:1", "ref-1"));
+    expect(trash).not.toHaveBeenCalled();
+  });
+
   it("keeps the default 내 영상 tab focused and moves imports into 가져오기", async () => {
     render(<MediaWorkspacePage projectId="project-a" />);
 

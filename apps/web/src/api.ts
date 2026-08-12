@@ -716,6 +716,7 @@ export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: strin
 export type LibraryUsageLocation = {
   project_id?: string | null;
   materialized_asset_id?: string | null;
+  reference_id?: string | null;
   location: Record<string, unknown>;
 };
 export type LibraryUsage = { library_asset_id: string; locations: LibraryUsageLocation[] };
@@ -1623,6 +1624,13 @@ export const api = {
     request<AssetResponse>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
     }),
+  materializeLibraryAsset: (libraryAssetId: string, projectId: string) =>
+    request<{ asset: AssetResponse; reference: { reference_id: string; project_id: string; library_asset_id: string; materialized_asset_id?: string | null } }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
+      }),
+  removeLibraryReference: (libraryAssetId: string, referenceId: string) =>
+    request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/references/${encodeURIComponent(referenceId)}`, { method: "DELETE" }),
   mediaLibraryPreviewUrl: (libraryAssetId: string) =>
     `/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
   listLibraryAssets: (params: { mediaType?: LibraryMediaType; q?: string; includeTrashed?: boolean; limit?: number } = {}, signal?: AbortSignal) => {
