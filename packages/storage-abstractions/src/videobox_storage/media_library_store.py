@@ -19,6 +19,16 @@ from videobox_storage.footage_organizer_store import (
 )
 
 
+def footage_segment_index_identity(source_sha256: str, start_sec: float, end_sec: float) -> str:
+    """Return a stable content-addressed key for one immutable source range."""
+    start = float(start_sec)
+    end = float(end_sec)
+    if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+        raise ValueError("invalid footage segment range")
+    payload = f"videobox-footage-segment-v1\0{str(source_sha256).lower()}\0{start:.9f}\0{end:.9f}".encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
 class MediaLibraryStore:
     """Global, optional index for verified installed media packs.
 
@@ -560,8 +570,9 @@ class MediaLibraryStore:
         if limit < 1:
             raise ValueError("limit must be at least 1")
 
-        sql = """SELECT content_sha256, filename, duration_seconds, orientation, tags_json,
-                        description, embedding_json
+        sql = """SELECT content_sha256, library_asset_id, source_segment_id,
+                        source_sha256, start_sec, end_sec, filename, duration_seconds,
+                        orientation, tags_json, description, embedding_json
                  FROM footage_index WHERE embedding_json IS NOT NULL"""
         parameters: tuple[Any, ...] = ()
         if orientation is not None:
@@ -584,6 +595,15 @@ class MediaLibraryStore:
             score = sum(a * b for a, b in zip(query, vector, strict=True)) / (query_norm * norm)
             matches.append({
                 "content_sha256": str(row["content_sha256"]),
+                "library_asset_id": str(row["library_asset_id"]) if row["library_asset_id"] else None,
+                "preview_url": (
+                    f"/api/library/assets/{row['library_asset_id']}/preview"
+                    if row["library_asset_id"] else None
+                ),
+                "source_segment_id": str(row["source_segment_id"]) if row["source_segment_id"] else None,
+                "source_sha256": str(row["source_sha256"]) if row["source_sha256"] else None,
+                "start_sec": float(row["start_sec"]) if row["start_sec"] is not None else None,
+                "end_sec": float(row["end_sec"]) if row["end_sec"] is not None else None,
                 "filename": str(row["filename"]),
                 "duration_seconds": float(row["duration_seconds"]),
                 "orientation": str(row["orientation"]),
@@ -593,6 +613,91 @@ class MediaLibraryStore:
             })
         matches.sort(key=lambda match: (-match["score"], match["filename"]))
         return matches[:limit]
+
+    def register_approved_footage_segments(
+        self, *, segments: Iterable[dict[str, Any]]
+    ) -> int:
+        """Materialize approved source ranges in the durable semantic index.
+
+        The source file remains content-addressed by ``source_sha256``.  Each
+        range gets a deterministic derived index key, so response-loss retries
+        and duplicate approvals update the same row rather than appending a
+        second semantic result.  Existing full-file analysis is reused when it
+        is available; a maintenance indexer can fill an absent embedding later.
+        """
+        values = list(segments)
+        if not values:
+            return 0
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            registered = 0
+            for segment in values:
+                segment_id = str(segment["source_segment_id"])
+                source_sha = str(segment["source_sha256"]).lower()
+                start = float(segment["start_sec"])
+                end = float(segment["end_sec"])
+                if not segment_id or not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+                    raise ValueError("invalid footage segment identity")
+                parent = connection.execute(
+                    "SELECT * FROM footage_index WHERE content_sha256 = ? AND source_segment_id IS NULL",
+                    (source_sha,),
+                ).fetchone()
+                source = connection.execute(
+                    "SELECT filename, library_asset_id FROM library_footage_sources WHERE source_sha256 = ?",
+                    (source_sha,),
+                ).fetchone()
+                if source is None:
+                    raise KeyError(source_sha)
+                source_label = str(segment.get("label") or "").strip()
+                source_filename = str((parent or source)["filename"] or "촬영본.mp4")
+                description = str(parent["description"]) if parent is not None else source_filename
+                if source_label:
+                    description = f"{description} 구간: {source_label}."
+                tags = json.loads(str(parent["tags_json"])) if parent is not None else {}
+                if not isinstance(tags, dict):
+                    tags = {"source_segment_id": segment_id}
+                else:
+                    tags = {**tags, "source_segment_id": segment_id}
+                width = int(parent["width"]) if parent is not None else 1920
+                height = int(parent["height"]) if parent is not None else 1080
+                embedding = parent["embedding_json"] if parent is not None else None
+                index_key = footage_segment_index_identity(source_sha, start, end)
+                connection.execute(
+                    """
+                    INSERT INTO footage_index (
+                        content_sha256, library_asset_id, source_segment_id, source_sha256,
+                        start_sec, end_sec, filename, duration_seconds, width, height,
+                        orientation, tags_json, description, embedding_json,
+                        description_version, analyzed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(content_sha256) DO UPDATE SET
+                        library_asset_id = excluded.library_asset_id,
+                        source_segment_id = excluded.source_segment_id,
+                        source_sha256 = excluded.source_sha256,
+                        start_sec = excluded.start_sec, end_sec = excluded.end_sec,
+                        filename = excluded.filename, duration_seconds = excluded.duration_seconds,
+                        width = excluded.width, height = excluded.height,
+                        orientation = excluded.orientation, tags_json = excluded.tags_json,
+                        description = excluded.description, embedding_json = COALESCE(excluded.embedding_json, footage_index.embedding_json),
+                        description_version = excluded.description_version, analyzed_at = excluded.analyzed_at
+                    """,
+                    (
+                        index_key, str(source["library_asset_id"]), segment_id, source_sha,
+                        start, end, f"{source_filename} [{start:g}-{end:g}s]", end - start,
+                        width, height, "가로" if width >= height else "세로",
+                        json.dumps(tags, ensure_ascii=False), description, embedding,
+                        int(parent["description_version"]) if parent is not None else 1, self._now(),
+                    ),
+                )
+                registered += 1
+            connection.commit()
+            return registered
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def install_state(self) -> dict[str, object]:
         assets = self.inspect_active_assets()
@@ -755,6 +860,7 @@ class MediaLibraryStore:
             -- that used it.
             CREATE TABLE IF NOT EXISTS footage_index (
                 content_sha256 TEXT PRIMARY KEY, library_asset_id TEXT, filename TEXT NOT NULL,
+                source_segment_id TEXT, source_sha256 TEXT, start_sec REAL, end_sec REAL,
                 duration_seconds REAL NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
                 orientation TEXT NOT NULL, tags_json TEXT NOT NULL, description TEXT NOT NULL,
                 embedding_json TEXT, description_version INTEGER NOT NULL DEFAULT 1,
@@ -773,11 +879,19 @@ class MediaLibraryStore:
             "ALTER TABLE media_assets ADD COLUMN attribution_text TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE library_audio_descriptors ADD COLUMN description_version INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE footage_index ADD COLUMN library_asset_id TEXT",
+            "ALTER TABLE footage_index ADD COLUMN source_segment_id TEXT",
+            "ALTER TABLE footage_index ADD COLUMN source_sha256 TEXT",
+            "ALTER TABLE footage_index ADD COLUMN start_sec REAL",
+            "ALTER TABLE footage_index ADD COLUMN end_sec REAL",
         ):
             try:
                 connection.execute(statement)
             except sqlite3.OperationalError:
                 pass
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_footage_index_segment_id "
+            "ON footage_index(source_segment_id) WHERE source_segment_id IS NOT NULL"
+        )
         ensure_library_user_asset_schema(connection)
         ensure_footage_organizer_schema(connection)
         return connection

@@ -194,6 +194,12 @@ def build_footage_organizer_router(
         if current is None:
             raise HTTPException(status_code=404, detail="footage_proposal_missing")
         if current.status.value == "approved":
+            # A client may have lost the first response after the proposal
+            # transaction committed.  Reconcile the durable semantic rows on
+            # every replay; the content-addressed adapter is idempotent.
+            media_library_store.register_approved_footage_segments(
+                segments=[_segment_index_payload(segment) for segment in current.segments]
+            )
             return _proposal_payload(current)
         if current.status.value != "draft":
             raise HTTPException(status_code=409, detail="footage_proposal_not_approvable")
@@ -201,6 +207,9 @@ def build_footage_organizer_router(
             result = footage_store.approve_proposal_atomically(
                 proposal_id=proposal_id,
                 expected_revision=payload.expected_revision,
+            )
+            media_library_store.register_approved_footage_segments(
+                segments=[_segment_index_payload(segment) for segment in result.segments]
             )
         except Exception as exc:  # noqa: BLE001
             raise _footage_error(exc) from exc
@@ -319,6 +328,17 @@ def _proposal_payload(value: Any) -> dict[str, Any]:
 
 def _segment_payload(value: Any) -> dict[str, Any]:
     return {"segment_id": value.segment_id, "source_segment_id": value.source_segment_id, "source_sha256": value.source_sha256, "start_sec": value.start_sec, "end_sec": value.end_sec, "machine_fields": value.machine_fields, "confirmed_fields": value.confirmed_fields}
+
+
+def _segment_index_payload(value: Any) -> dict[str, Any]:
+    machine_fields = dict(getattr(value, "machine_fields", {}) or {})
+    return {
+        "source_segment_id": value.source_segment_id,
+        "source_sha256": value.source_sha256,
+        "start_sec": value.start_sec,
+        "end_sec": value.end_sec,
+        "label": str(machine_fields.get("label") or ""),
+    }
 
 
 def _item_payload(value: Any) -> dict[str, Any]:

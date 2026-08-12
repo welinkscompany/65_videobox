@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+import sqlite3
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -204,3 +207,96 @@ def test_source_preview_reuses_range_delivery_without_mutating_library(tmp_path:
     assert response.content == b"synt"
     assert response.headers["accept-ranges"] == "bytes"
     assert library.user_asset_store.get_asset("asset-take") == before
+
+
+class _SearchEmbeddings:
+    def embed(self, request):
+        class _Response:
+            vectors = tuple([1.0, 0.0] for _ in request.inputs)
+
+        return _Response()
+
+
+def test_approved_segments_are_registered_in_library_search_with_stable_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, library, digest = _client(tmp_path)
+    app = client.app
+    app.state.media_analysis_embedding_provider = _SearchEmbeddings()
+    app.state.media_analysis_profile = {"embedding_model_name": "test-embed"}
+
+    store = FootageOrganizerStore(tmp_path / "library")
+    source = store.register_source(
+        source_id="source:asset-take", source_sha256=digest,
+        library_asset_id="asset-take", filename="take.mp4",
+    )
+    first = store.create_source_segment(
+        source_id=source.source_id, start_sec=0.0, end_sec=1.25,
+        segment_id="fseg-first", label="첫 장면",
+    )
+    second = store.create_source_segment(
+        source_id=source.source_id, start_sec=2.0, end_sec=3.5,
+        segment_id="fseg-second", label="둘째 장면",
+    )
+    proposal = store.create_proposal(
+        source_id=source.source_id, source_sha256=digest,
+        segments=[first, second], proposal_id="fprop-search",
+    )
+    library.save_footage_descriptor(
+        content_sha256=digest, library_asset_id="asset-take", filename="take.mp4",
+        duration_seconds=4.0, width=1920, height=1080,
+        tags={"layers": {"place": ["실내"]}},
+        description="가로 영상. 두 장면이 이어지는 촬영본.", embedding=[1.0, 0.0],
+    )
+
+    original_register = library.register_approved_footage_segments
+    calls = 0
+
+    def lose_response(*, segments):
+        nonlocal calls
+        if calls == 0:
+            calls += 1
+            raise RuntimeError("simulated response loss after approval commit")
+        return original_register(segments=segments)
+
+    monkeypatch.setattr(library, "register_approved_footage_segments", lose_response)
+    lost = client.post(
+        f"/api/footage/proposals/{proposal.proposal_id}/approve",
+        json={"expected_revision": proposal.revision, "idempotency_key": "approve-search"},
+    )
+    assert lost.status_code == 500
+    monkeypatch.setattr(library, "register_approved_footage_segments", original_register)
+
+    approved = client.post(
+        f"/api/footage/proposals/{proposal.proposal_id}/approve",
+        json={"expected_revision": proposal.revision, "idempotency_key": "approve-search"},
+    )
+    assert approved.status_code == 200, approved.text
+
+    matches = client.get(
+        "/api/library/search",
+        params={"q": "장면", "media_type": "broll", "limit": 10},
+    ).json()["matches"]
+    found = {item.get("source_segment_id") for item in matches}
+    assert {"fseg-first", "fseg-second"} <= found
+    segment_matches = [item for item in matches if item.get("source_segment_id")]
+    assert all(item["library_asset_id"] == "asset-take" for item in segment_matches)
+    assert all(item["preview_url"] == "/api/library/assets/asset-take/preview" for item in segment_matches)
+    assert {(item["source_sha256"], item["start_sec"], item["end_sec"]) for item in segment_matches} >= {
+        (digest, 0.0, 1.25), (digest, 2.0, 3.5),
+    }
+    assert len([item for item in matches if item.get("source_segment_id") == "fseg-first"]) == 1
+
+    replay = client.post(
+        f"/api/footage/proposals/{proposal.proposal_id}/approve",
+        json={"expected_revision": proposal.revision, "idempotency_key": "approve-search"},
+    )
+    assert replay.status_code == 200
+    connection = sqlite3.connect(library.database_path)
+    try:
+        indexed = connection.execute(
+            "SELECT source_segment_id FROM footage_index WHERE source_segment_id IS NOT NULL ORDER BY source_segment_id"
+        ).fetchall()
+    finally:
+        connection.close()
+    assert [str(row[0]) for row in indexed] == ["fseg-first", "fseg-second"]
