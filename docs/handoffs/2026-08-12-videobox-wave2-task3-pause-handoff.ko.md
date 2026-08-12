@@ -4,7 +4,7 @@
 
 - 브랜치: `codex/videobox-container-compatibility`
 - 구현 기준 커밋: `41f89ce44` (촬영본 UI·preview/sequence·디자인 토큰 계약 포함)
-- 최신 핸드오프 커밋: `11f3750ed`
+- 최신 핸드오프 커밋: 이 문서 변경을 반영할 새 커밋으로 갱신한다.
 - 작업 디렉터리: clean
 - 다음 세션은 반드시 이 worktree와 브랜치에서 시작한다.
 
@@ -58,6 +58,12 @@
 - 임시 시각 산출물: `C:\Users\atgro\AppData\Local\Temp\videobox-live-library-stale.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-live-footage-stale.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-owner-footage.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-owner-footage-after-analysis.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-owner-footage-after-preview.png` (저장소에는 추가하지 않음).
 - 결론: 이번 게이트에서는 owner acceptance를 주장하지 않는다. 정확한 `41f89ce44`로 컨테이너 이미지를 rebuild/restart하고, Hermes dashboard가 loopback에서 reachable해진 뒤 같은 viewport/flow를 다시 실행해야 한다.
 
+## Wave2 Task5 owner-ready 재시도 (2026-08-12)
+
+- `scripts/owner-ready.ps1 -Mode Start -Json -TimeoutSec 8`: exit 0 / overall pass. `videobox-postgres`와 `videobox-workspace`를 기동했고 VideoBox health는 HTTP 200이었다.
+- 이어서 `scripts/owner-ready.ps1 -Mode Check -Json -TimeoutSec 8`: VideoBox, local model, Docker/compose, workspace, CapCut 검사는 통과했다. 유일한 blocker는 Hermes dashboard `127.0.0.1:9119`의 `connection_refused`였다.
+- 따라서 Start 성공을 owner acceptance로 해석하지 않는다. 다음 재시도 조건은 Hermes dashboard를 명시적으로 기동한 뒤 Check를 다시 실행하는 것이다. 동일한 9119 blocker를 의미 없이 반복하지 않는다.
+
 ## Wave2 Task5 owner 브라우저 gate 상태
 
 - source Vite + route-mocked Playwright에서는 `/footage` 1280×800 4-pane, 분석→2개 장면→range preview 흐름이 성공했다.
@@ -82,9 +88,9 @@ VideoBox Creator Workspace 작업을 이어간다. 반드시 canonical worktree
 D:\\AI_Workspace_louis_office_50\\10_workspace\\65_videobox\\.worktrees\\videobox-container-compatibility
 와 branch codex/videobox-container-compatibility에서 시작해라.
 
-먼저 git status -sb와 git rev-parse HEAD를 확인하고, 이 핸드오프 문서를 읽어라. 구현 기준은 41f89ce44이며 최신 핸드오프 커밋은 3cef42288 이후일 수 있다.
+먼저 git status -sb와 git rev-parse HEAD를 확인하고, 이 핸드오프 문서를 읽어라. 구현 기준은 41f89ce44이며, 최신 핸드오프 커밋은 이 문서의 현재 HEAD로 확인한다.
 
-Wave2 Task4/4A는 구현·리뷰·push까지 완료됐다. 첫 작업은 owner-ready Check를 재실행하고, 정확한 branch source로 runtime image를 rebuild/restart하는 것이다. Hermes dashboard 127.0.0.1:9119가 reachable해진 뒤 1280×800 이상에서 `/`, `/library`, `/footage`, project shell을 실제 브라우저로 검증해라. stale placeholder가 보이면 최신 source와 runtime image 불일치로 기록하고 owner 승인으로 표현하지 마라.
+Wave2 Task4/4A는 구현·리뷰·push까지 완료됐다. 첫 작업은 Hermes dashboard를 명시적으로 기동할 수 있는지 확인하고 owner-ready Check를 재실행하는 것이다. 9119가 reachable해지면 정확한 branch source로 runtime image를 rebuild/restart한 뒤 1280×800 이상에서 `/`, `/library`, `/footage`, project shell을 실제 브라우저로 검증해라. stale placeholder가 보이면 최신 source와 runtime image 불일치로 기록하고 owner 승인으로 표현하지 마라.
 
 절차는 runtime preflight → 실제 브라우저/ui-inspector 검증 → console/network/overflow/focus 확인 → owner acceptance 기록이다. 자동/fake E2E 통과를 실제 owner 승인으로 표현하지 마라. owner gate가 통과되면 다음은 Wave2 유진 제안 어댑터이며, 이후 Wave3 editor로 진행한다.
 ```
