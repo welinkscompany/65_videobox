@@ -214,18 +214,6 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             current_stage = "review"
             state = "blocked"
             action_label = "검토 문제 해결"
-        elif timeline_review_status in {"draft", "pending", "review"}:
-            current_stage = "review"
-            state = "ready"
-            action_label = "검토하기"
-        elif timeline_review_status in {"approved", "succeeded"}:
-            current_stage = "output"
-            state = "ready"
-            action_label = "완성본 만들기"
-        elif latest_final is not None and str(latest_final.get("status")) == JobStatus.SUCCEEDED:
-            current_stage = "output"
-            state = "ready"
-            action_label = "완성본 보기"
         elif latest_final is not None and str(latest_final.get("status")) == JobStatus.FAILED:
             current_stage = "output"
             state = "attention"
@@ -234,6 +222,18 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             current_stage = "output"
             state = "attention"
             action_label = "출력 상태 보기"
+        elif latest_final is not None and str(latest_final.get("status")) == JobStatus.SUCCEEDED:
+            current_stage = "output"
+            state = "ready"
+            action_label = "완성본 보기"
+        elif timeline_review_status in {"draft", "pending", "review"}:
+            current_stage = "review"
+            state = "ready"
+            action_label = "검토하기"
+        elif timeline_review_status in {"approved", "succeeded"}:
+            current_stage = "output"
+            state = "ready"
+            action_label = "완성본 만들기"
         else:
             current_stage = "edit"
             state = "ready"
