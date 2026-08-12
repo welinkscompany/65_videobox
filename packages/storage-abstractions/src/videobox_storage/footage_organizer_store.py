@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS footage_proposal_segments (
 );
 CREATE INDEX IF NOT EXISTS idx_footage_proposal_segments_source
     ON footage_proposal_segments (source_segment_id, proposal_id);
+CREATE TABLE IF NOT EXISTS footage_segment_index_queue (
+    source_segment_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (source_segment_id) REFERENCES library_source_segments(segment_id) ON DELETE RESTRICT
+);
 CREATE TABLE IF NOT EXISTS library_virtual_sequences (
     sequence_id TEXT PRIMARY KEY,
     source_id TEXT NOT NULL,
@@ -521,6 +529,42 @@ class FootageOrganizerStore:
             expected_revision=expected_revision,
             status=target,
         )
+
+    def approve_proposal_atomically(self, *, proposal_id: str, expected_revision: int) -> FootageProposal:
+        """Approve and enqueue every source segment in one durable transaction."""
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = self._claim_revision(connection, proposal_id, expected_revision)
+            if str(row["status"]) != FootageProposalStatus.DRAFT.value:
+                raise ValueError("footage proposal is not draft")
+            segments = self._load_proposal_segments(connection, proposal_id)
+            now = _now()
+            connection.execute(
+                "UPDATE footage_proposals SET status = 'approved', revision = revision + 1, updated_at = ? WHERE proposal_id = ?",
+                (now, proposal_id),
+            )
+            for segment in segments:
+                connection.execute(
+                    "INSERT OR IGNORE INTO footage_segment_index_queue (source_segment_id, source_id, source_sha256, state, created_at) VALUES (?, ?, ?, 'pending', ?)",
+                    (segment.source_segment_id, str(row["source_id"]), str(row["source_sha256"]), now),
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+        result = self.get_proposal(proposal_id)
+        assert result is not None
+        return result
+
+    def list_segment_index_queue(self, *, state: str = "pending") -> list[dict[str, Any]]:
+        connection = self._connection()
+        try:
+            return [dict(row) for row in connection.execute("SELECT * FROM footage_segment_index_queue WHERE state = ? ORDER BY created_at, source_segment_id", (state,)).fetchall()]
+        finally:
+            connection.close()
 
     def confirm_proposal_fields(
         self, *, proposal_id: str, expected_revision: int, fields: Mapping[str, Any]
