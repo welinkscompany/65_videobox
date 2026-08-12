@@ -26,7 +26,7 @@
 
 - 로컬 우선 구현
 - SaaS 확장 가능 구조
-- 직접 풀 편집기 대신 설명형 영상용 경량 후편집기 + CapCut handoff 중심
+- 설명형 영상 제작을 VideoBox 안에서 끝내는 creator-complete 경량 편집기 + 선택적 CapCut 호환 경로
 - 자동 최종본보다 자동 초안 생성 우선
 - 나레이션 + 참고 문서 + B-roll 추천 흐름을 첫 구현 대상으로 선택
 
@@ -52,7 +52,9 @@
 - timeline JSON
 - 1차 playable local preview artifact
 - 경량 후편집 가능한 draft state
-- CapCut export 결과
+- 컷·자막·B-roll·음악·효과음이 반영된 가로·세로 연결 변형
+- review 결과와 최종 MP4 출력
+- 선택적 CapCut 호환 결과
 
 ## 4. MVP 범위
 
@@ -70,22 +72,22 @@
 - 간단한 설명형 오버레이 계획
 - timeline JSON 생성
 - preview 렌더
-- 경량 후편집기
-- CapCut export
-- review용 기본 화면
+- creator-complete 경량 편집기
+- 컷·자막·B-roll·음악·효과음 편집
+- 가로·세로 연결 변형
+- review와 최종 MP4 출력
+- 선택적 CapCut 호환 결과
 
 ### 제외
 
-- 풀 자체 편집기
 - 실시간 멀티트랙 편집 UI
 - 결제/계정 체계 전체
 - 멀티유저 협업
 - 클라우드 렌더 팜
-- 고급 생성형 애니메이션
-- 고급 모션그래픽 편집
+- 고급 생성형 애니메이션과 고급 모션그래픽 편집
+- 전문 색보정(advanced grading)과 고급 마스크(advanced masks)
+- 임의 키프레임(arbitrary keyframes)과 멀티캠(multicam)
 - 복잡한 오디오 믹싱 콘솔
-- 색보정 툴 전체
-- 자유곡선 키프레임 시스템
 - 완전 자동 최종본 보장
 
 ## 5. 마일스톤
@@ -164,7 +166,8 @@
 
 - preview 렌더
 - 자막 파일 생성
-- CapCut export
+- 가로·세로 연결 변형의 최종 MP4 출력
+- 필요할 때만 선택적 CapCut 호환 결과 생성
 
 완료 기준:
 
@@ -186,11 +189,13 @@
 - 원본/자동/수정 결과 비교
 - 수정 이력 저장
 - 부분 재생성 실행
-- CapCut handoff 전 최종 정리
+- 가로·세로 연결 변형 검토와 최종 MP4 출력
+- 필요할 때만 선택적 CapCut 호환 결과 생성
 
 완료 기준:
 
-- 사용자가 VideoBox 안에서 초안을 직접 다듬고, 설명형 영상 후편집을 끝낸 뒤 export 또는 handoff 할 수 있음
+- 사용자가 VideoBox 안에서 컷·자막·B-roll·음악·효과음을 직접 다듬고, 연결된 가로·세로 변형을
+  검토한 뒤 최종 MP4까지 출력할 수 있음
 
 ## 6. 권장 개발 순서
 
@@ -310,31 +315,26 @@
 4. `execution/match_script.py`의 scene split 흐름
 5. `execution/search_broll.py`의 scoring 축
 
-## 8.4 경량 후편집기 반영 원칙
+## 8.4 creator-complete 경량 편집기 반영 원칙
 
-경량 후편집기는 이제 선택 사항이 아니라 설명형 영상용 핵심 범위로 본다.
-다만 다음 선은 계속 지킨다.
+creator-complete 경량 편집기는 설명형 영상의 컷, 자막, B-roll, 음악, 효과음, 연결된 가로·세로
+변형, 검토와 최종 MP4 출력까지 VideoBox 안에서 끝내는 핵심 범위다. CapCut은 필수 후편집
+단계가 아니라 선택적 호환·비상 경로로만 유지한다.
 
-- 풀 NLE를 직접 구현하지 않는다
-- 설명형 영상 초안을 빠르게 고치는 데 필요한 편집만 넣는다
-- 세그먼트, 자막, 추천 자산, 설명 자산 중심으로 편집 범위를 제한한다
-- 고급 모션그래픽, 색보정, 오디오 믹싱, 자유 키프레임은 현재 범위에서 제외한다
+다음은 명시적인 비목표다.
 
-편집기에 무언가를 넣을지는 **목록이 아니라 이 질문으로 판단한다.**
+- 전문 색보정(advanced grading)
+- 고급 마스크(advanced masks)
+- 임의 키프레임(arbitrary keyframes)
+- 멀티캠(multicam)
+- 고급 모션그래픽, 실시간 멀티트랙 합성, 복잡한 오디오 믹싱
 
-> **CapCut으로 넘겨도 되는 일인가?**
-> 넘겨도 되면 넣지 않는다. 넘기기 전에 초안이 말이 되게 만드는 데 필요한 것만 넣는다.
-
-내보내기가 CapCut으로 이어져 있으므로 정교한 작업은 그쪽에서 하면 된다. VideoBox가
-CapCut을 이기려 할 이유가 없고, 그 시간은 유진·자동 초안처럼 CapCut이 못 하는 것에
-쓰는 편이 낫다. 2026-08-08에 B-roll 재생 속도와 소리 크기를 추가한 것도 이 기준으로
-판단했다 — 폰 촬영본이 너무 길고 시끄러우면 **초안 자체가 말이 안 되기** 때문이다.
-
-**들이지 않는 것은 그대로다:** 색보정, 오디오 믹싱, 자유 키프레임, 고급 모션그래픽,
-멀티트랙 합성, 마스킹.
+이 선 안에서 세그먼트, 자막, 추천 자산과 설명 자산을 빠르게 고치고, 사용자가 미리보기와
+명시적 적용을 거쳐 검토한 뒤 MP4를 출력한다. CapCut 호환은 필요할 때만 별도로 생성하며
+VideoBox 내부 완성이나 MP4 출력을 막지 않는다.
 
 아래는 현재 들어와 있는 조작이다. **고정 목록이 아니라 현황이므로**, 늘릴 때는 이
-목록을 고치는 대신 위 질문에 답한다.
+목록을 고치는 대신 위 경계와 명시적 적용 승인 기준을 따른다.
 
 - 컷 유지/삭제
 - 컷 경계 미세 조정
@@ -464,15 +464,16 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 
 대응:
 
-- 첫 구현은 나레이션 기반 초안 생성기 + 설명형 영상용 경량 후편집기로 고정
+- 첫 구현은 나레이션 기반 초안 생성기 + creator-complete 경량 편집기로 고정한다. 전문 색보정,
+  고급 마스크, 임의 키프레임, 멀티캠과 고급 모션그래픽은 계속 제외한다.
 
 ## 10. 예상 개발 기간
 
 가정:
 
 - 1인 중심 개발
-- 직접 편집기 제외
-- CapCut export 중심
+- creator-complete 경량 편집기 중심
+- VideoBox 최종 MP4 출력 중심, CapCut 호환은 선택적
 - 첫 장르는 나레이션/설명형 영상
 
 ### 기술 검증 프로토타입
@@ -486,8 +487,8 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - 제한적 TTS 실험
 - B-roll 추천 기본형
 - timeline JSON
-- preview 또는 export 일부
-- 경량 후편집기 설계 일부
+- preview와 최종 MP4 출력 일부
+- creator-complete 경량 편집기 설계 일부
 
 ### MVP
 
@@ -499,8 +500,9 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - ingest
 - 추천
 - preview
-- CapCut export
-- 경량 후편집기 기본형
+- creator-complete 경량 편집기 기본형
+- 가로·세로 연결 변형과 최종 MP4 출력
+- 선택적 CapCut 호환 결과
 
 ### 실사용 v1
 
