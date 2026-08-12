@@ -93,6 +93,9 @@ def test_enabled_watcher_thread_copy_only_registers_a_real_file_end_to_end(tmp_p
         assert managed[0].read_bytes() == b"real footage bytes"
         assert source.read_bytes() == b"real footage bytes"
         assert app.state.media_inbox_watch_config.copy_only is True
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not app.state.media_library_store.user_asset_store.list_assets(media_type="broll"):
+            time.sleep(0.05)
         assert len(app.state.media_library_store.user_asset_store.list_assets(media_type="broll")) == 1
 
 
