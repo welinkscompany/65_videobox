@@ -2,7 +2,7 @@
 
 작성일: 2026-08-12  
 브랜치: `codex/videobox-container-compatibility`  
-최신 소스: `7c0daad7f`
+최신 소스: `00847457f`
 
 ## 이번 검증에서 고정한 것
 
@@ -17,7 +17,8 @@
 - 프론트: Vitest 63개 파일, 873개 통과.
 - 타입/빌드: `npx tsc -b --pretty false`, `npm run build` 통과.
 - provenance: `.venv\\Scripts\\python.exe -m pytest tests/test_editor_ui_source_provenance.py` 21개 통과.
-- 백엔드 전체 pytest는 현재 실행 중이며 완료 결과를 이 문서에 추가한다.
+- owner-ready 회귀: `.venv\\Scripts\\python.exe -m pytest -q tests/test_owner_ready_script.py` 116개 통과. Smoke timeout은 프로세스 트리 종료 후 후속 검증을 fail-closed로 기록해 bounded failure를 유지한다.
+- 백엔드 전체: `.venv\\Scripts\\python.exe -m pytest -q tests` 3321개 통과, 53개 skip, 1개 warning.
 - 공식 런타임은 `scripts/owner-ready.ps1 -Mode Start -Rebuild -Json` 후 `-Mode Check -Json`으로 갱신했다. VideoBox health 200, branch/upstream·worktree·도구·CapCut pass. Hermes dashboard만 별도 서비스 미기동으로 blocked.
 
 실제 브라우저에서 재빌드된 런타임을 다시 열어 확인한 스크린샷:
