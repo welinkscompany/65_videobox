@@ -132,6 +132,24 @@ def test_usage_scans_direct_editing_session_and_timeline_library_references(tmp_
     assert ("timeline", "timeline-direct") in kinds
 
 
+def test_usage_scans_nested_session_json_when_hydration_fails(tmp_path):
+    client = TestClient(app(tmp_path))
+    item = client.post(
+        "/api/library/ingest", data={"media_type": "sfx"},
+        files=[("files", ("nested.wav", b"nested ref", "audio/wav"))],
+    ).json()["items"][0]
+    client.post("/api/projects", json={"name": "nested usage"})
+    store = client.app.state.store
+    store.list_editing_sessions = lambda *, project_id: [{
+        "session_id": "session-json", "timeline_id": "", "session_json": __import__("json").dumps({"segments": [{"sfx_override": {"library_asset_id": item["library_asset_id"]}}]}),
+    }]
+    store.get_editing_session = lambda **_: (_ for _ in ()).throw(KeyError("session unavailable"))
+
+    usage = client.get(f"/api/library/assets/{item['library_asset_id']}/usage")
+    assert usage.status_code == 200
+    assert any(entry["location"]["kind"] == "editing_session" for entry in usage.json()["locations"])
+
+
 def test_retry_with_same_key_and_different_bytes_is_rejected(tmp_path):
     client = TestClient(app(tmp_path))
     first = client.post(

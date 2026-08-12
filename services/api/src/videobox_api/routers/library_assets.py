@@ -278,7 +278,14 @@ def build_library_assets_router(
                                 if isinstance(hydrated, dict):
                                     session = {**hydrated, "project_id": project_id}
                             except Exception:
-                                pass
+                                raw_json = session.get("session_json")
+                                if isinstance(raw_json, str):
+                                    try:
+                                        decoded = json.loads(raw_json)
+                                    except json.JSONDecodeError:
+                                        decoded = None
+                                    if isinstance(decoded, dict):
+                                        session = {**decoded, **session, "project_id": project_id}
                         sessions.append(session)
                         timeline_id = str(session.get("timeline_id") or "")
                         if timeline_id:
