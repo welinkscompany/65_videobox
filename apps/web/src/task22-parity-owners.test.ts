@@ -207,12 +207,12 @@ describe("Task 22 canonical production owners", () => {
   it("keeps every retained workspace section on its canonical component owner", () => {
     const router = readFileSync(resolve(sourceRoot, "app/AppRouter.tsx"), "utf8");
     const owners = [
-      [/normalizedSection === "home"/, /<HomePage\b/],
-      [/normalizedSection === "create"/, /<CreationInterview\b/],
-      [/normalizedSection === "media"/, /<MediaWorkspacePage\b/],
-      [/normalizedSection === "outputs"/, /<OutputsPage\b/],
-      [/normalizedSection === "timeline" \|\| normalizedSection === "review"/, /<TimelineReviewPage\b/],
-      [/section === "editor"/, /<EditorWorkbenchRoute\b/],
+      [/section === "home"/, /<HomePage\b/],
+      [/section === "create" \|\| section === "plan"/, /<CreationInterview\b/],
+      [/section === "media" \|\| section === "assets"/, /<MediaWorkspacePage\b/],
+      [/section === "outputs" \|\| section === "output"/, /<OutputsPage\b/],
+      [/section === "timeline" \|\| section === "review"/, /<TimelineReviewPage\b/],
+      [/(?:section === "editor" \|\| section === "edit")/, /<EditorWorkbenchRoute\b/],
     ] as const;
 
     for (const [routeGuard, owner] of owners) {
@@ -245,13 +245,13 @@ describe("Task 22 canonical production owners", () => {
     const rows = [
       {
         capability: "project create/select and source ingest",
-        ownerSource: router, owner: /normalizedSection === "create"[\s\S]{0,360}<CreationInterview\b/,
+        ownerSource: router, owner: /section === "create" \|\| section === "plan"[\s\S]{0,360}<CreationInterview\b/,
         componentEvidence: [["project-onboarding.test.tsx", "registers narration plus script from local paths"], ["features/creation/CreationInterview.test.tsx", "uploads a supported creator script"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "ready-assets approval uses returned IDs"],
       },
       {
         capability: "media list and recovery",
-        ownerSource: router, owner: /normalizedSection === "media"[\s\S]{0,1000}<MediaWorkspacePage\b/,
+        ownerSource: router, owner: /section === "media" \|\| section === "assets"[\s\S]{0,1000}<MediaWorkspacePage\b/,
         componentEvidence: [["features/media/MediaWorkspacePage.test.tsx", "supports cancel, retry, and review"]],
         e2eEvidence: ["media-recovery.spec.mjs", "recovers local analysis with authoritative refreshes"],
       },
@@ -263,19 +263,19 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         capability: "script draft and atomic creation",
-        ownerSource: router, owner: /normalizedSection === "create"[\s\S]{0,360}<CreationInterview\b/,
+        ownerSource: router, owner: /section === "create" \|\| section === "plan"[\s\S]{0,360}<CreationInterview\b/,
         componentEvidence: [["features/creation/CreationInterview.test.tsx", "requires an explicit creator confirmation"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "gap-only approval preserves returned gap IDs"],
       },
       {
         capability: "timeline and review",
-        ownerSource: router, owner: /normalizedSection === "timeline" \|\| normalizedSection === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        ownerSource: router, owner: /section === "timeline" \|\| section === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
         componentEvidence: [["features/review/TimelineReviewPage.test.tsx", "links an exact segment to the pinned editor"]],
         e2eEvidence: ["review-to-editor.spec.mjs", "opens the pinned editor"],
       },
       {
         capability: "editor workbench",
-        ownerSource: router, owner: /section === "editor"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
+        ownerSource: router, owner: /section === "editor" \|\| section === "edit"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
         componentEvidence: [["features/editor/workbench/editor-workbench-route.test.tsx", "publishes nothing until the matching manifest and session arrive together"]],
         e2eEvidence: ["exact-preview.spec.mjs", "current exact proxy plays a valid local MP4"],
       },
@@ -287,7 +287,7 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         capability: "canonical outputs",
-        ownerSource: router, owner: /normalizedSection === "outputs"[\s\S]{0,360}<OutputsPage\b/,
+        ownerSource: router, owner: /section === "outputs" \|\| section === "output"[\s\S]{0,360}<OutputsPage\b/,
         componentEvidence: [["app/OutputsPage.test.tsx", "owns the current exact-preview reference"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "current-revision playback and CapCut smoke"],
       },
@@ -310,7 +310,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "project create and source ingest",
         ownerSource: router,
-        owner: /normalizedSection === "create"[\s\S]{0,360}<CreationInterview\b/,
+        owner: /section === "create" \|\| section === "plan"[\s\S]{0,360}<CreationInterview\b/,
         componentEvidence: [
           ["project-onboarding.test.tsx", "keeps the created project and retries only the failed narration ingest"],
           ["features/creation/CreationInterview.test.tsx", "keeps a failed durable answer on the same question with an actionable retry"],
@@ -321,7 +321,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "media",
         ownerSource: router,
-        owner: /normalizedSection === "media"[\s\S]{0,1000}<MediaWorkspacePage\b/,
+        owner: /section === "media" \|\| section === "assets"[\s\S]{0,1000}<MediaWorkspacePage\b/,
         componentEvidence: [
           ["features/media/MediaWorkspacePage.test.tsx", "shows loading, empty, failure, and refresh recovery"],
           ["features/media/MediaWorkspacePage.test.tsx", "discards late project A results after switching to project B"],
@@ -341,7 +341,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "timeline and review",
         ownerSource: router,
-        owner: /normalizedSection === "timeline" \|\| normalizedSection === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        owner: /section === "timeline" \|\| section === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
         componentEvidence: [
           ["features/review/TimelineReviewPage.test.tsx", "shows no-session, no-exact-match, load error, and an explicit successful refresh"],
           ["features/review/TimelineReviewPage.test.tsx", "fences a late project A detail response after switching to B"],
@@ -351,7 +351,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "editor",
         ownerSource: router,
-        owner: /section === "editor"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
+        owner: /section === "editor" \|\| section === "edit"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
         componentEvidence: [
           ["features/editor/workbench/editor-workbench-route.test.tsx", "publishes nothing until the matching manifest and session arrive together"],
           ["features/editor/workbench/editor-workbench-route.test.tsx", "keeps the manifest editor usable when an asset list fails and gives contained retry-safe guidance"],
@@ -372,7 +372,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "outputs",
         ownerSource: router,
-        owner: /normalizedSection === "outputs"[\s\S]{0,360}<OutputsPage\b/,
+        owner: /section === "outputs" \|\| section === "output"[\s\S]{0,360}<OutputsPage\b/,
         componentEvidence: [
           ["app/OutputsPage.test.tsx", "keeps a failed status read recoverable without offering output mutations"],
           ["app/OutputsPage.test.tsx", "does not let a delayed project A status response replace project B"],
