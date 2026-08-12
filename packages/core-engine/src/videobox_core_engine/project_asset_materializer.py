@@ -286,7 +286,6 @@ class ProjectAssetMaterializer:
                 existing_metadata = dict(existing.get("metadata") or {})
                 existing_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(existing["storage_uri"]))  # type: ignore[attr-defined]
                 if (existing_metadata.get("source_library_asset_id") == library_asset_id
-                        and existing_metadata.get("source_library_content_sha256") == expected
                         and str(existing.get("asset_type")) == asset_type.value
                         and existing_path.is_file() and sha256_file(existing_path) == expected):
                     return existing
