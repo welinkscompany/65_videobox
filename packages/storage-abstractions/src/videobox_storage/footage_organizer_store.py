@@ -175,11 +175,23 @@ WHEN NEW.proposal_id <> OLD.proposal_id OR NEW.source_id <> OLD.source_id OR NEW
 BEGIN SELECT RAISE(ABORT, 'footage proposal identity is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS footage_proposals_parent_hash_insert
 BEFORE INSERT ON footage_proposals
-WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+WHEN NOT EXISTS (
+    SELECT 1 FROM library_footage_sources s
+    JOIN library_user_assets a ON a.library_asset_id = s.library_asset_id
+    WHERE s.source_id = NEW.source_id AND s.source_sha256 = NEW.source_sha256
+      AND trim(COALESCE(s.library_asset_id, '')) <> ''
+      AND lower(a.content_sha256) = lower(s.source_sha256)
+)
 BEGIN SELECT RAISE(ABORT, 'footage proposal source hash does not match source'); END;
 CREATE TRIGGER IF NOT EXISTS footage_proposals_parent_hash_update
 BEFORE UPDATE OF source_id, source_sha256 ON footage_proposals
-WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+WHEN NOT EXISTS (
+    SELECT 1 FROM library_footage_sources s
+    JOIN library_user_assets a ON a.library_asset_id = s.library_asset_id
+    WHERE s.source_id = NEW.source_id AND s.source_sha256 = NEW.source_sha256
+      AND trim(COALESCE(s.library_asset_id, '')) <> ''
+      AND lower(a.content_sha256) = lower(s.source_sha256)
+)
 BEGIN SELECT RAISE(ABORT, 'footage proposal source hash does not match source'); END;
 CREATE TRIGGER IF NOT EXISTS footage_proposal_segments_integrity_insert
 BEFORE INSERT ON footage_proposal_segments
@@ -206,11 +218,23 @@ WHEN NEW.sequence_id <> OLD.sequence_id OR NEW.source_id <> OLD.source_id OR NEW
 BEGIN SELECT RAISE(ABORT, 'virtual sequence identity is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS virtual_sequences_parent_hash_insert
 BEFORE INSERT ON library_virtual_sequences
-WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+WHEN NOT EXISTS (
+    SELECT 1 FROM library_footage_sources s
+    JOIN library_user_assets a ON a.library_asset_id = s.library_asset_id
+    WHERE s.source_id = NEW.source_id AND s.source_sha256 = NEW.source_sha256
+      AND trim(COALESCE(s.library_asset_id, '')) <> ''
+      AND lower(a.content_sha256) = lower(s.source_sha256)
+)
 BEGIN SELECT RAISE(ABORT, 'virtual sequence source hash does not match source'); END;
 CREATE TRIGGER IF NOT EXISTS virtual_sequences_parent_hash_update
 BEFORE UPDATE OF source_id, source_sha256 ON library_virtual_sequences
-WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+WHEN NOT EXISTS (
+    SELECT 1 FROM library_footage_sources s
+    JOIN library_user_assets a ON a.library_asset_id = s.library_asset_id
+    WHERE s.source_id = NEW.source_id AND s.source_sha256 = NEW.source_sha256
+      AND trim(COALESCE(s.library_asset_id, '')) <> ''
+      AND lower(a.content_sha256) = lower(s.source_sha256)
+)
 BEGIN SELECT RAISE(ABORT, 'virtual sequence source hash does not match source'); END;
 CREATE TRIGGER IF NOT EXISTS virtual_sequence_items_integrity_insert
 BEFORE INSERT ON library_virtual_sequence_items
@@ -244,6 +268,10 @@ def ensure_footage_organizer_schema(connection: sqlite3.Connection) -> None:
         "source_segments_parent_hash_insert",
         "footage_proposal_segments_integrity_insert",
         "virtual_sequence_items_integrity_insert",
+        "footage_proposals_parent_hash_insert",
+        "footage_proposals_parent_hash_update",
+        "virtual_sequences_parent_hash_insert",
+        "virtual_sequences_parent_hash_update",
     ):
         connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
     connection.executescript(FOOTAGE_ORGANIZER_SCHEMA)

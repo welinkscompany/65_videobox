@@ -226,6 +226,34 @@ def test_virtual_sequence_item_cannot_reference_segment_from_another_source(
         connection.close()
 
 
+def test_proposal_and_sequence_parent_triggers_require_canonical_asset_hash(
+    tmp_path: Path,
+) -> None:
+    source = _source(tmp_path, source_id="source-parent-canonical", digest="a" * 64)
+    store = FootageOrganizerStore(tmp_path / "library")
+    connection = sqlite3.connect(store.database_path)
+    try:
+        # Simulate a legacy/noncanonical parent: the source row still points at
+        # an asset ID, but that asset's content hash no longer matches.
+        connection.execute(
+            "UPDATE library_user_assets SET content_sha256 = ? WHERE library_asset_id = ?",
+            ("b" * 64, source.library_asset_id),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO footage_proposals (proposal_id, source_id, source_sha256, status, revision, confirmed_json, machine_json, created_at, updated_at) VALUES (?, ?, ?, 'draft', 1, '{}', '{}', ?, ?)",
+                ("noncanonical-proposal", source.source_id, source.source_sha256, "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO library_virtual_sequences (sequence_id, source_id, source_sha256, name, revision, created_at) VALUES (?, ?, ?, '', 1, ?)",
+                ("noncanonical-sequence", source.source_id, source.source_sha256, "2026-01-01T00:00:00+00:00"),
+            )
+    finally:
+        connection.rollback()
+        connection.close()
+
+
 def test_whitespace_legacy_source_is_quarantined_and_derived_reads_are_blocked(
     tmp_path: Path,
 ) -> None:
