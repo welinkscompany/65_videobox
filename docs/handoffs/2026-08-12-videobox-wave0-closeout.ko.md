@@ -1,6 +1,6 @@
 # VideoBox Wave 0 closeout
 
-작성일: 2026-08-12  
+작성일: 2026-08-12
 기준 브랜치: `codex/videobox-container-compatibility`
 
 Wave 0는 프로젝트 우선 진입, 전역 메뉴·프로젝트 단계 분리, truthful workspace summary,
