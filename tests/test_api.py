@@ -4712,7 +4712,7 @@ def test_workspace_summary_is_authoritative_for_an_empty_project(tmp_path: Path)
     assert payload["thumbnail_url"] is None
     assert payload["finished_video_count"] == 0
     assert payload["next_action"] == {
-        "label": "새 영상 시작",
+        "label": "계속 만들기",
         "href": f"/projects/{project_id}/plan",
     }
 

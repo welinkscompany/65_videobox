@@ -205,7 +205,7 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
         if session is None:
             current_stage = "plan"
             state = "ready"
-            action_label = "새 영상 시작"
+            action_label = "계속 만들기"
         elif isinstance(gaps, list) and gaps:
             current_stage = "assets"
             state = "attention"

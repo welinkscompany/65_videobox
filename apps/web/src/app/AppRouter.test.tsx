@@ -95,7 +95,7 @@ describe("AppRouter URL ownership", () => {
         ? { label: "계속 편집", href: "/projects/project_draft/edit" }
         : projectId === "project_assets"
           ? { label: "자산 준비", href: "/projects/project_assets/assets" }
-          : { label: "새 영상 시작", href: "/projects/project_new/plan" },
+        : { label: "계속 만들기", href: "/projects/project_new/plan" },
     }));
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
@@ -112,7 +112,7 @@ describe("AppRouter URL ownership", () => {
     expect(within(newCard).getAllByRole("link")).toHaveLength(1);
     expect(within(draftCard).getByRole("link", { name: "계속 편집" })).toHaveAttribute("href", "/projects/project_draft/edit");
     expect(within(assetCard).getByRole("link", { name: "자산 준비" })).toHaveAttribute("href", "/projects/project_assets/assets");
-    expect(within(newCard).getByRole("link", { name: "새 영상 시작" })).toHaveAttribute("href", "/projects/project_new/plan");
+    expect(within(newCard).getByRole("link", { name: "계속 만들기" })).toHaveAttribute("href", "/projects/project_new/plan");
   });
 
   it("keeps a failed workspace summary out of project creation", async () => {
