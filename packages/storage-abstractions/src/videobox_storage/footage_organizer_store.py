@@ -149,6 +149,8 @@ CREATE TRIGGER IF NOT EXISTS source_segments_finite_bounds_update
 BEFORE UPDATE OF source_id, source_sha256, start_sec, end_sec ON library_source_segments
 WHEN NEW.source_id <> OLD.source_id
   OR NEW.source_sha256 <> OLD.source_sha256
+  OR NEW.start_sec <> OLD.start_sec
+  OR NEW.end_sec <> OLD.end_sec
   OR NOT (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec
           AND NEW.start_sec < 1.7976931348623157e+308
           AND NEW.end_sec < 1.7976931348623157e+308)
@@ -158,8 +160,11 @@ END;
 CREATE TRIGGER IF NOT EXISTS source_segments_parent_hash_insert
 BEFORE INSERT ON library_source_segments
 WHEN NOT EXISTS (
-    SELECT 1 FROM library_footage_sources
-    WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256
+    SELECT 1 FROM library_footage_sources s
+    JOIN library_user_assets a ON a.library_asset_id = s.library_asset_id
+    WHERE s.source_id = NEW.source_id AND s.source_sha256 = NEW.source_sha256
+      AND trim(COALESCE(s.library_asset_id, '')) <> ''
+      AND lower(a.content_sha256) = lower(s.source_sha256)
 )
 BEGIN
     SELECT RAISE(ABORT, 'source segment hash does not match source');
@@ -179,7 +184,16 @@ BEGIN SELECT RAISE(ABORT, 'footage proposal source hash does not match source');
 CREATE TRIGGER IF NOT EXISTS footage_proposal_segments_integrity_insert
 BEFORE INSERT ON footage_proposal_segments
 WHEN NOT (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec AND NEW.start_sec < 1.7976931348623157e+308 AND NEW.end_sec < 1.7976931348623157e+308)
-  OR NOT EXISTS (SELECT 1 FROM footage_proposals p JOIN library_source_segments s ON s.segment_id = NEW.source_segment_id WHERE p.proposal_id = NEW.proposal_id AND p.source_id = s.source_id AND p.source_sha256 = NEW.source_sha256 AND s.source_sha256 = NEW.source_sha256)
+  OR NOT EXISTS (
+      SELECT 1 FROM footage_proposals p
+      JOIN library_source_segments s ON s.segment_id = NEW.source_segment_id
+      JOIN library_footage_sources src ON src.source_id = p.source_id
+      JOIN library_user_assets a ON a.library_asset_id = src.library_asset_id
+      WHERE p.proposal_id = NEW.proposal_id AND p.source_id = s.source_id
+        AND p.source_sha256 = NEW.source_sha256 AND s.source_sha256 = NEW.source_sha256
+        AND trim(COALESCE(src.library_asset_id, '')) <> ''
+        AND lower(a.content_sha256) = lower(src.source_sha256)
+  )
 BEGIN SELECT RAISE(ABORT, 'footage proposal segment integrity violation'); END;
 CREATE TRIGGER IF NOT EXISTS footage_proposal_segments_integrity_update
 BEFORE UPDATE OF proposal_id, source_segment_id, source_sha256, start_sec, end_sec ON footage_proposal_segments
@@ -201,6 +215,12 @@ BEGIN SELECT RAISE(ABORT, 'virtual sequence source hash does not match source');
 CREATE TRIGGER IF NOT EXISTS virtual_sequence_items_integrity_insert
 BEFORE INSERT ON library_virtual_sequence_items
 WHEN NOT ((NEW.start_sec IS NULL AND NEW.end_sec IS NULL) OR (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec AND NEW.start_sec < 1.7976931348623157e+308 AND NEW.end_sec < 1.7976931348623157e+308))
+  OR NOT EXISTS (
+      SELECT 1 FROM library_virtual_sequences v
+      JOIN library_source_segments s ON s.segment_id = NEW.source_segment_id
+      WHERE v.sequence_id = NEW.sequence_id AND v.source_id = s.source_id
+        AND v.source_sha256 = s.source_sha256
+  )
 BEGIN SELECT RAISE(ABORT, 'virtual sequence item boundaries must be finite'); END;
 CREATE TRIGGER IF NOT EXISTS virtual_sequence_items_integrity_update
 BEFORE UPDATE OF sequence_id, source_segment_id, start_sec, end_sec, item_order ON library_virtual_sequence_items
@@ -216,6 +236,16 @@ class OptimisticRevisionConflict(RuntimeError):
 
 def ensure_footage_organizer_schema(connection: sqlite3.Connection) -> None:
     """Install only additive tables; safe to run for every global DB connection."""
+    # Trigger bodies are additive schema code, but ``IF NOT EXISTS`` would
+    # leave an older body in a database migrated by a prior release. Replace
+    # only the hardened guards so existing global libraries receive them.
+    for trigger in (
+        "source_segments_finite_bounds_update",
+        "source_segments_parent_hash_insert",
+        "footage_proposal_segments_integrity_insert",
+        "virtual_sequence_items_integrity_insert",
+    ):
+        connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
     connection.executescript(FOOTAGE_ORGANIZER_SCHEMA)
     columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_footage_sources)")}
     if "library_asset_id" not in columns:

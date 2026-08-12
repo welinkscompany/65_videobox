@@ -147,6 +147,11 @@ def test_direct_sql_cannot_mutate_source_identity_or_segment_integrity(
             )
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(
+                "UPDATE library_source_segments SET start_sec = ? WHERE segment_id = ?",
+                (0.25, segment.segment_id),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
                 "INSERT INTO library_source_segments (segment_id, source_id, source_sha256, start_sec, end_sec, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 ("bad-segment", "source-sql", "9" * 64, 0.0, 1.0, "2026-01-01T00:00:00+00:00"),
             )
@@ -191,6 +196,30 @@ def test_direct_sql_rejects_invalid_proposal_and_virtual_sequence_rows(
             connection.execute(
                 "INSERT INTO library_virtual_sequence_items (item_id, sequence_id, item_order, source_segment_id, start_sec, end_sec) VALUES (?, ?, ?, ?, ?, ?)",
                 ("bad-item", sequence.sequence_id, 2, segment.segment_id, 0.0, float("inf")),
+            )
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def test_virtual_sequence_item_cannot_reference_segment_from_another_source(
+    tmp_path: Path,
+) -> None:
+    first = _source(tmp_path, source_id="source-seq-a", digest="8" * 64)
+    second = _source(tmp_path, source_id="source-seq-b", digest="9" * 64)
+    store = FootageOrganizerStore(tmp_path / "library")
+    first_segment = store.create_source_segment(source_id=first.source_id, start_sec=0, end_sec=1)
+    second_segment = store.create_source_segment(source_id=second.source_id, start_sec=0, end_sec=1)
+    sequence = store.create_virtual_sequence(
+        source_id=first.source_id,
+        items=[VirtualSequenceItem.create(source_segment_id=first_segment.segment_id, item_order=1)],
+    )
+    connection = sqlite3.connect(store.database_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO library_virtual_sequence_items (item_id, sequence_id, item_order, source_segment_id) VALUES (?, ?, ?, ?)",
+                ("cross-source-item", sequence.sequence_id, 2, second_segment.segment_id),
             )
     finally:
         connection.rollback()
