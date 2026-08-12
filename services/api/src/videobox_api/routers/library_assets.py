@@ -24,6 +24,7 @@ from videobox_core_engine.project_asset_materializer import ProjectAssetMaterial
 from videobox_domain_models.library_assets import LibraryAssetLifecycle, LibraryAssetOrigin, LibraryMediaType
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_provider_interfaces.embeddings import EmbeddingRequest
 
 
 DERIVATIVE_VERSION = "v1"
@@ -184,6 +185,7 @@ def build_library_assets_router(
         request: Request,
         q: str = Query(..., min_length=1),
         media_type: str = Query(...),
+        orientation: str | None = Query(None),
         limit: int = Query(20, ge=1, le=100),
     ) -> dict[str, Any]:
         try:
@@ -200,7 +202,29 @@ def build_library_assets_router(
                 result["reason"] = "파일명 또는 분석 메타데이터 일치"
                 matches.append(result)
         matches.sort(key=lambda value: (-float(value.get("score", 0)), value["library_asset_id"]))
-        return {"matches": matches[:limit], "semantic": bool(getattr(request.app.state, "media_analysis_embedding_provider", None))}
+        # Reuse the verified pack indexer's semantic contract whenever the
+        # local embedding model is available.  User assets are merged here as
+        # lexical fallbacks until Wave1 Task4 writes their descriptors.
+        provider = getattr(request.app.state, "media_analysis_embedding_provider", None)
+        model_name = (getattr(request.app.state, "media_analysis_profile", None) or {}).get("embedding_model_name")
+        semantic = False
+        if provider is not None and model_name:
+            try:
+                vector = [float(value) for value in provider.embed(EmbeddingRequest(model_name=model_name, inputs=(q.strip(),))).vectors[0]]
+                if kind is LibraryMediaType.BROLL:
+                    semantic_matches = media_library_store.find_footage_matches(query_embedding=vector, orientation=orientation, limit=limit)
+                else:
+                    semantic_matches = media_library_store.find_audio_matches(query_embedding=vector, media_type=kind.value, limit=limit)
+                for value in semantic_matches:
+                    value["reason"] = "의미 기반 색인 일치"
+                matches.extend(semantic_matches)
+                semantic = True
+            except Exception:
+                # Search remains useful with filename/metadata matches when
+                # LM Studio is unavailable; never fabricate semantic scores.
+                semantic = False
+        matches.sort(key=lambda value: (-float(value.get("score", 0)), str(value.get("library_asset_id", value.get("content_sha256", "")))))
+        return {"matches": matches[:limit], "semantic": semantic}
 
     @router.get("/api/library/assets/{asset_id}/usage")
     def get_library_asset_usage(asset_id: str) -> dict[str, Any]:
