@@ -11,6 +11,10 @@ from fastapi.testclient import TestClient
 from videobox_api.main import create_app
 from videobox_storage.footage_organizer_store import FootageOrganizerStore
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_core_engine.library_footage_indexer import (
+    FOOTAGE_DESCRIPTION_VERSION,
+    index_pending_library_footage,
+)
 
 
 def _client(tmp_path: Path, renderer=None) -> tuple[TestClient, MediaLibraryStore, str]:
@@ -300,3 +304,75 @@ def test_approved_segments_are_registered_in_library_search_with_stable_identity
     finally:
         connection.close()
     assert [str(row[0]) for row in indexed] == ["fseg-first", "fseg-second"]
+
+
+def test_approved_segments_without_parent_embedding_are_indexer_pending_and_searchable(
+    tmp_path: Path,
+) -> None:
+    client, library, digest = _client(tmp_path)
+    app = client.app
+    app.state.media_analysis_embedding_provider = _SearchEmbeddings()
+    app.state.media_analysis_profile = {"embedding_model_name": "test-embed"}
+
+    store = FootageOrganizerStore(tmp_path / "library")
+    source = store.register_source(
+        source_id="source:asset-take", source_sha256=digest,
+        library_asset_id="asset-take", filename="take.mp4",
+    )
+    first = store.create_source_segment(
+        source_id=source.source_id, start_sec=0.0, end_sec=1.25,
+        segment_id="fseg-first", label="첫 장면",
+    )
+    second = store.create_source_segment(
+        source_id=source.source_id, start_sec=2.0, end_sec=3.5,
+        segment_id="fseg-second", label="둘째 장면",
+    )
+    proposal = store.create_proposal(
+        source_id=source.source_id, source_sha256=digest,
+        segments=[first, second], proposal_id="fprop-pending-search",
+    )
+
+    approved = client.post(
+        f"/api/footage/proposals/{proposal.proposal_id}/approve",
+        json={"expected_revision": proposal.revision, "idempotency_key": "approve-pending-search"},
+    )
+    assert approved.status_code == 200, approved.text
+
+    queue = store.list_segment_index_queue()
+    assert {item["source_segment_id"] for item in queue if item["state"] == "pending"} == {
+        "fseg-first", "fseg-second",
+    }
+    pending = library.list_footage_needing_analysis(
+        paths=[tmp_path / "library" / "take.mp4"],
+        description_version=FOOTAGE_DESCRIPTION_VERSION,
+    )
+    assert {item["source_segment_id"] for item in pending if item.get("is_segment")} == {
+        "fseg-first", "fseg-second",
+    }
+    assert all(item["source_id"] == source.source_id for item in pending if item.get("is_segment"))
+    assert all(item["library_asset_id"] == "asset-take" for item in pending if item.get("is_segment"))
+
+    report = index_pending_library_footage(
+        store=library,
+        paths=[tmp_path / "library" / "take.mp4"],
+        media_probe=None,
+        vision_provider=None,
+        vision_model_name=None,
+        embedding_provider=_SearchEmbeddings(),
+        embedding_model_name="test-embed",
+        max_clips=2,
+    )
+    assert len(report.analyzed) == 2
+    assert store.list_segment_index_queue() == []
+
+    matches = client.get(
+        "/api/library/search",
+        params={"q": "장면", "media_type": "broll", "limit": 10},
+    ).json()["matches"]
+    segments = {item["source_segment_id"]: item for item in matches if item.get("source_segment_id")}
+    assert {"fseg-first", "fseg-second"} <= set(segments)
+    assert all(item["source_id"] == source.source_id for item in segments.values())
+    assert all(item["library_asset_id"] == "asset-take" for item in segments.values())
+    assert {(item["start_sec"], item["end_sec"]) for item in segments.values()} >= {
+        (0.0, 1.25), (2.0, 3.5),
+    }

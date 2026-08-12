@@ -118,6 +118,39 @@ def index_pending_library_footage(
         getter = getattr(store, "get_footage_descriptor", None)
         if callable(getter):
             existing = getter(content_sha256=str(clip["content_sha256"]))
+        # Approved ranges already have a durable, owner-visible description
+        # from the proposal.  They must not go through the expensive vision
+        # path (or require a fabricated frame); only ask the configured local
+        # embedding provider for the missing vector.
+        if clip.get("is_segment") or clip.get("source_segment_id"):
+            if not existing:
+                report.failed.append(filename)
+                continue
+            description = str(existing.get("description", ""))
+            embedding = _embed(
+                description,
+                embedding_provider=embedding_provider,
+                embedding_model_name=embedding_model_name,
+                label=filename,
+            )
+            store.save_footage_descriptor(
+                content_sha256=str(clip["content_sha256"]),
+                library_asset_id=clip.get("library_asset_id") or existing.get("library_asset_id"),
+                filename=str(existing.get("filename") or filename),
+                duration_seconds=float(existing["duration_seconds"]),
+                width=int(existing["width"]),
+                height=int(existing["height"]),
+                tags=dict(existing.get("tags") or {}),
+                description=description,
+                embedding=embedding,
+                description_version=FOOTAGE_DESCRIPTION_VERSION,
+            )
+            if embedding is not None:
+                marker = getattr(store, "mark_footage_segment_indexed", None)
+                if callable(marker):
+                    marker(source_segment_id=str(clip["source_segment_id"]))
+            report.analyzed.append(filename)
+            continue
         if (
             existing
             and int(existing.get("description_version", 0)) >= FOOTAGE_DESCRIPTION_VERSION
