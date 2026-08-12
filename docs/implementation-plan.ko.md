@@ -210,10 +210,10 @@
 9. timeline builder 구현
 10. TTS provider 연결
 11. preview renderer 구현
-12. CapCut export adapter 구현
+12. VideoBox 최종 MP4 renderer 구현
 13. 경량 후편집 데이터 모델/API 구현
 14. 경량 후편집 UI 구현
-15. 필요한 경우 CapCut handoff 보강
+15. 선택적 CapCut 호환 경로 보강
 
 ## 7. 기술 선택 초안
 
@@ -225,8 +225,8 @@
 - 비전/자산 분석: OpenCV + 자산 메타데이터 인덱싱
 - 데이터 저장: 로컬 DB 우선
 - UI: React + TypeScript 기반 로컬 우선 web review dashboard
-- 편집 셸: 오픈소스 편집기 구조를 선별 반입한 React + TypeScript 기반 경량 후편집기
-- export 대상: CapCut
+- 편집 셸: 오픈소스 편집기 구조를 선별 반입한 React + TypeScript 기반 creator-complete 경량 편집기
+- export 대상: VideoBox 최종 MP4; CapCut 호환은 선택적
 
 ### 7.1. 웹 대시보드 표시 언어 기준
 
@@ -257,7 +257,7 @@
 
 재사용 우선순위:
 
-1. CapCut export
+1. VideoBox 최종 MP4 출력
 2. auto cut
 3. transcribe/alignment 아이디어
 4. script matching 구조
