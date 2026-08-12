@@ -71,6 +71,9 @@ def test_proposal_edit_preview_cancel_and_double_approval_are_safe(tmp_path: Pat
     )
     cancel = client.post(f"/api/footage/proposals/{proposal_id}/cancel")
     assert preview.status_code == 200, preview.text
+    assert "ranges=" in preview.json()["preview_url"]
+    assert preview.json()["preview_url"].endswith("ranges=")
+    assert "source-segment" not in preview.json()["preview_url"]
     assert cancel.status_code == 200, cancel.text
     after = FootageOrganizerStore(tmp_path / "library").get_proposal(proposal_id)
     assert before == after
@@ -211,6 +214,43 @@ def test_source_preview_reuses_range_delivery_without_mutating_library(tmp_path:
     assert response.content == b"synt"
     assert response.headers["accept-ranges"] == "bytes"
     assert library.user_asset_store.get_asset("asset-take") == before
+
+    ranged = client.get(f"/api/footage/sources/{source_id}/preview?ranges=0.000-1.250,2.000-3.500")
+    assert ranged.status_code == 503
+    assert client.get(f"/api/footage/sources/{source_id}/preview?ranges=bad").status_code == 422
+
+
+def test_proposal_preview_materializes_only_current_ranges(tmp_path: Path) -> None:
+    seen: list[tuple[float, float]] = []
+
+    def renderer(source: Path, output: Path, ranges: list[tuple[float, float]]) -> None:
+        seen.extend(ranges)
+        output.write_bytes("|".join(f"{start:.1f}-{end:.1f}" for start, end in ranges).encode())
+
+    client, _library, _digest = _client(tmp_path, renderer=renderer)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-preview-ranges", "analysis": {"total_duration": 10.0, "analysis_windows": [{"start_sec": 1.0, "end_sec": 3.0}, {"start_sec": 6.0, "end_sec": 8.0}]}},
+    ).json()
+    preview = client.post(f"/api/footage/proposals/{proposed['proposal_id']}/preview", json={"expected_revision": proposed["revision"]})
+    assert preview.status_code == 200
+    response = client.get(preview.json()["preview_url"])
+    assert response.status_code == 200
+    expected_ranges = [(item["start_sec"], item["end_sec"]) for item in proposed["segments"]]
+    assert response.content == "|".join(f"{start:.1f}-{end:.1f}" for start, end in expected_ranges).encode()
+    assert seen == expected_ranges
+
+
+def test_proposal_preview_fails_closed_when_range_renderer_fails(tmp_path: Path) -> None:
+    def renderer(_source: Path, _output: Path, _ranges: list[tuple[float, float]]) -> None:
+        raise RuntimeError("renderer unavailable")
+
+    client, _library, _digest = _client(tmp_path, renderer=renderer)
+    proposed = client.post("/api/footage/proposals", json={"library_asset_id": "asset-take", "idempotency_key": "proposal-preview-fail"}).json()
+    preview = client.post(f"/api/footage/proposals/{proposed['proposal_id']}/preview", json={"expected_revision": proposed["revision"]})
+    response = client.get(preview.json()["preview_url"])
+    assert response.status_code == 503
+    assert response.json()["detail"] == "footage_preview_render_unavailable"
 
 
 class _SearchEmbeddings:

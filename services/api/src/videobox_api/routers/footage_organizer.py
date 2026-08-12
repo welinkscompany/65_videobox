@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
 import shutil
 import sqlite3
 import subprocess
 import tempfile
+from urllib.parse import quote
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
@@ -74,6 +76,7 @@ def build_footage_organizer_router(
     router = APIRouter()
     footage_store = media_library_store.footage_organizer_store
     asset_adapter = _LibraryAssetAdapter(media_library_store)
+    preview_artifacts: dict[str, Path] = {}
     _ensure_derivative_jobs_schema(footage_store.database_path)
 
     def service(analysis: Mapping[str, Any] | None = None) -> FootageOrganizerService:
@@ -174,7 +177,7 @@ def build_footage_organizer_router(
             "proposal_id": proposal_id,
             "revision": proposal.revision,
             "source_id": source.source_id,
-            "preview_url": f"/api/footage/sources/{source.source_id}/preview",
+            "preview_url": _ranged_preview_url(source.source_id, proposal.segments),
             "segments": [_segment_payload(segment) for segment in proposal.segments],
         }
 
@@ -264,7 +267,7 @@ def build_footage_organizer_router(
         source = footage_store.get_source(result.source_id)
         if source is None or asset_adapter.get_verified_asset(library_asset_id=source.library_asset_id) is None:
             raise HTTPException(status_code=422, detail="footage_source_stale")
-        return {"status": "ready", "sequence_id": sequence_id, "revision": result.revision, "preview_url": f"/api/footage/sources/{source.source_id}/preview", "items": [_item_payload(item) for item in result.items]}
+        return {"status": "ready", "sequence_id": sequence_id, "revision": result.revision, "preview_url": _ranged_preview_url(source.source_id, result.items), "items": [_item_payload(item) for item in result.items]}
 
     @router.post("/api/footage/sequences/{sequence_id}/cancel")
     def cancel_sequence(sequence_id: str) -> dict[str, Any]:
@@ -306,8 +309,39 @@ def build_footage_organizer_router(
         asset = asset_adapter.get_verified_asset(library_asset_id=source.library_asset_id)
         if asset is None:
             raise HTTPException(status_code=422, detail="footage_source_stale")
+        ranges = request.query_params.get("ranges")
+        if ranges is not None:
+            try:
+                parsed_ranges = _parse_preview_ranges(ranges)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="footage_preview_ranges_invalid") from exc
+        else:
+            parsed_ranges = []
         path = Path(str(asset["path"]))
-        return deliver_file(request=request, path=path, media_type="video/mp4")
+        if parsed_ranges:
+            cache_key = f"{source_id}|{ranges}"
+            artifact = preview_artifacts.get(cache_key)
+            if artifact is None or not artifact.is_file():
+                artifact = media_library_store.root / "derived" / "footage-previews" / f"{hashlib.sha256(cache_key.encode()).hexdigest()[:32]}.mp4"
+                artifact.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    if derivative_renderer is not None:
+                        derivative_renderer(path, artifact, parsed_ranges)
+                    else:
+                        _default_render(path, artifact, parsed_ranges)
+                except Exception as exc:
+                    artifact.unlink(missing_ok=True)
+                    raise HTTPException(status_code=503, detail="footage_preview_render_unavailable") from exc
+                if not artifact.is_file() or artifact.stat().st_size == 0:
+                    artifact.unlink(missing_ok=True)
+                    raise HTTPException(status_code=503, detail="footage_preview_render_unavailable")
+                preview_artifacts[cache_key] = artifact
+            path = artifact
+        response = deliver_file(request=request, path=path, media_type="video/mp4")
+        if parsed_ranges:
+            response.headers["X-VideoBox-Preview-Ranges"] = ",".join(f"{start:.3f}-{end:.3f}" for start, end in parsed_ranges)
+            response.headers["X-VideoBox-Preview-Mode"] = "ranged-source"
+        return response
 
     @router.post("/api/footage/derivatives/render", status_code=status.HTTP_202_ACCEPTED)
     def render_derivative(payload: FootageDerivativeRenderRequest) -> dict[str, Any]:
@@ -347,6 +381,36 @@ def _item_payload(value: Any) -> dict[str, Any]:
 
 def _sequence_payload(value: Any) -> dict[str, Any]:
     return {"sequence_id": value.sequence_id, "source_id": value.source_id, "source_sha256": value.source_sha256, "name": value.name, "revision": value.revision, "items": [_item_payload(item) for item in value.items]}
+
+
+def _ranged_preview_url(source_id: str, values: Any) -> str:
+    ranges = []
+    for value in values:
+        start = getattr(value, "start_sec", None)
+        end = getattr(value, "end_sec", None)
+        if start is None or end is None:
+            continue
+        ranges.append(f"{float(start):.3f}-{float(end):.3f}")
+    encoded = quote(",".join(ranges), safe="-,.")
+    return f"/api/footage/sources/{quote(source_id, safe='')}/preview?ranges={encoded}"
+
+
+def _parse_preview_ranges(value: str) -> list[tuple[float, float]]:
+    if not value or len(value) > 4096:
+        raise ValueError("preview ranges are required")
+    ranges: list[tuple[float, float]] = []
+    for raw in value.split(","):
+        start_text, separator, end_text = raw.partition("-")
+        if not separator:
+            raise ValueError("preview range separator is required")
+        try:
+            start, end = float(start_text), float(end_text)
+        except ValueError as exc:
+            raise ValueError("preview range must be numeric") from exc
+        if start < 0 or end <= start or not math.isfinite(start) or not math.isfinite(end):
+            raise ValueError("preview range must be increasing")
+        ranges.append((start, end))
+    return ranges
 
 
 def _ensure_derivative_jobs_schema(database_path: Path) -> None:

@@ -40,7 +40,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [asset], total: 1 });
   vi.spyOn(api, "proposeFootage").mockResolvedValue(proposal);
-  vi.spyOn(api, "previewFootageProposal").mockResolvedValue({ status: "ready", proposal_id: "proposal-1", revision: 1, source_id: "source-1", preview_url: "/api/footage/sources/source-1/preview", segments: proposal.segments });
+  vi.spyOn(api, "previewFootageProposal").mockResolvedValue({ status: "ready", proposal_id: "proposal-1", revision: 1, source_id: "source-1", preview_url: "/api/footage/sources/source-1/preview?ranges=0.000-8.000%2C8.000-20.000", segments: proposal.segments });
   vi.spyOn(api, "cancelFootageProposal").mockResolvedValue({ status: "cancelled", proposal_id: "proposal-1", revision: 1 });
   vi.spyOn(api, "approveFootageProposal").mockResolvedValue({ ...proposal, status: "approved", revision: 2 });
   vi.spyOn(api, "createFootageSequence").mockResolvedValue({ sequence_id: "sequence-1", source_id: "source-1", source_sha256: "a".repeat(64), name: "새 가상 묶음", revision: 1, items: [{ item_id: "item-1", source_segment_id: "source-seg-1", item_order: 1, start_sec: 0, end_sec: 8 }, { item_id: "item-2", source_segment_id: "source-seg-2", item_order: 2, start_sec: 8, end_sec: 20 }] });
@@ -70,7 +70,7 @@ describe("FootageOrganizerPage", () => {
     expect(screen.getByText(/0\.03초/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "제안 미리보기" }));
     await waitFor(() => expect(api.previewFootageProposal).toHaveBeenCalledWith("proposal-1", { expected_revision: 1 }));
-    expect(screen.getByTestId("footage-video")).toHaveAttribute("src", "/api/footage/sources/source-1/preview");
+    expect(screen.getByTestId("footage-video")).toHaveAttribute("src", "/api/footage/sources/source-1/preview?ranges=0.000-8.000%2C8.000-20.000");
     expect(api.approveFootageProposal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "제안 적용" }));
     await waitFor(() => expect(api.approveFootageProposal).toHaveBeenCalledWith("proposal-1", expect.objectContaining({ expected_revision: 1, idempotency_key: expect.any(String) })));
