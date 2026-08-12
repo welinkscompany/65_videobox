@@ -1,4 +1,19 @@
 import { expect, test } from "./support/test-fixtures.mjs";
+import { validLocalMp4Fixture } from "./support/valid-local-mp4-fixture.mjs";
+
+function validWavFixture() {
+  const sampleRate = 8_000;
+  const sampleCount = sampleRate;
+  const body = Buffer.alloc(44 + sampleCount * 2);
+  body.write("RIFF", 0); body.writeUInt32LE(body.length - 8, 4); body.write("WAVE", 8);
+  body.write("fmt ", 12); body.writeUInt32LE(16, 16); body.writeUInt16LE(1, 20); body.writeUInt16LE(1, 22);
+  body.writeUInt32LE(sampleRate, 24); body.writeUInt32LE(sampleRate * 2, 28); body.writeUInt16LE(2, 32); body.writeUInt16LE(16, 34);
+  body.write("data", 36); body.writeUInt32LE(sampleCount * 2, 40);
+  for (let index = 0; index < sampleCount; index += 1) body.writeInt16LE(Math.round(Math.sin(index / 8) * 1_500), 44 + index * 2);
+  return body;
+}
+
+const validAudioFixture = validWavFixture();
 
 const media = {
   broll: { id: "asset-broll", name: "commute.mp4", mime: "video/mp4", label: "도시 출근 장면" },
@@ -132,7 +147,8 @@ async function installLibraryApi(page) {
     }
     if (id && (action === "preview" || action === "thumbnail" || action === "waveform") && request.method() === "GET") {
       const contentType = action === "preview" ? (state.assets.find((item) => item.library_asset_id === id)?.media_type === "broll" ? "video/mp4" : "audio/mpeg") : "image/png";
-      return route.fulfill({ status: 200, contentType, body: Buffer.from(action === "preview" ? "preview-bytes" : "derivative-bytes") });
+      const body = action !== "preview" ? Buffer.from("derivative-bytes") : state.assets.find((item) => item.library_asset_id === id)?.media_type === "broll" ? validLocalMp4Fixture : validAudioFixture;
+      return route.fulfill({ status: 200, contentType: action === "preview" && state.assets.find((item) => item.library_asset_id === id)?.media_type !== "broll" ? "audio/wav" : contentType, headers: { "Accept-Ranges": "bytes", "Content-Length": String(body.length) }, body });
     }
     return json(route, { detail: "unsupported_library_e2e_request" }, 404);
   });
@@ -155,6 +171,16 @@ async function fetchStatus(page, path, options = {}) {
     try { body = await response.json(); } catch { /* 204 */ }
     return { status: response.status, body };
   }, { path, options });
+}
+
+async function waitForMediaMetadata(locator) {
+  await locator.evaluate((element) => {
+    if (element.readyState >= 1) return;
+    return new Promise((resolve, reject) => {
+      element.addEventListener("loadedmetadata", () => resolve(), { once: true });
+      element.addEventListener("error", () => reject(new Error("preview media failed to load")), { once: true });
+    });
+  });
 }
 
 test("library desktop keeps a bounded three-pane layout and reconciles mixed drop", async ({ page }) => {
@@ -183,13 +209,19 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   // Each media type has a real preview control in the right pane.
   await page.getByRole("tab", { name: "영상" }).click();
   await page.locator('[data-testid="library-asset-card"]').filter({ hasText: media.broll.name }).click();
-  await expect(page.locator(".vb-library-preview video")).toHaveAttribute("src", /asset-broll\/preview/);
+  const videoPreview = page.locator(".vb-library-preview video");
+  await expect(videoPreview).toHaveAttribute("src", /asset-broll\/preview/);
+  await waitForMediaMetadata(videoPreview);
   await page.getByRole("tab", { name: "음악" }).click();
   await page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.music.name }).click();
-  await expect(page.locator(".vb-library-preview audio")).toHaveAttribute("src", /asset-music\/preview/);
+  const musicPreview = page.locator(".vb-library-preview audio");
+  await expect(musicPreview).toHaveAttribute("src", /asset-music\/preview/);
+  await waitForMediaMetadata(musicPreview);
   await page.getByRole("tab", { name: "효과음" }).click();
   await page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.sfx.name }).click();
-  await expect(page.locator(".vb-library-preview audio")).toHaveAttribute("src", /asset-sfx\/preview/);
+  const sfxPreview = page.locator(".vb-library-preview audio");
+  await expect(sfxPreview).toHaveAttribute("src", /asset-sfx\/preview/);
+  await waitForMediaMetadata(sfxPreview);
 
   // The list endpoint is the semantic-search authority for the desktop page.
   await page.getByRole("tab", { name: "전체" }).click();
