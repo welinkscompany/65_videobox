@@ -102,6 +102,59 @@ def test_canonical_library_asset_cannot_be_deleted_while_source_is_derived(
         media_store.user_asset_store.permanently_delete_asset("asset-delete-guard")
 
 
+def test_legacy_orphan_source_is_quarantined_from_reads(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    database = root / "media_library.sqlite"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "CREATE TABLE library_footage_sources (source_id TEXT PRIMARY KEY, source_sha256 TEXT NOT NULL, filename TEXT NOT NULL, created_at TEXT NOT NULL, library_asset_id TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO library_footage_sources VALUES ('legacy-orphan', ?, 'old.mp4', '2026-01-01T00:00:00+00:00', NULL)",
+            ("2" * 64,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    store = FootageOrganizerStore(root)
+    assert store.get_source("legacy-orphan") is None
+    assert store.list_sources() == []
+    assert store.list_quarantined_sources() == ["legacy-orphan"]
+
+
+def test_direct_sql_cannot_mutate_source_identity_or_segment_integrity(
+    tmp_path: Path,
+) -> None:
+    _source(tmp_path, source_id="source-sql", digest="3" * 64)
+    store = FootageOrganizerStore(tmp_path / "library")
+    segment = store.create_source_segment(
+        source_id="source-sql", start_sec=0.0, end_sec=1.0
+    )
+    connection = sqlite3.connect(store.database_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE library_footage_sources SET source_sha256 = ? WHERE source_id = ?",
+                ("4" * 64, "source-sql"),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE library_source_segments SET start_sec = ?, end_sec = ? WHERE segment_id = ?",
+                (float("inf"), 2.0, segment.segment_id),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO library_source_segments (segment_id, source_id, source_sha256, start_sec, end_sec, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                ("bad-segment", "source-sql", "9" * 64, 0.0, 1.0, "2026-01-01T00:00:00+00:00"),
+            )
+    finally:
+        connection.rollback()
+        connection.close()
+
+
 def test_proposal_revision_is_optimistic_and_status_is_bounded(tmp_path: Path) -> None:
     store = FootageOrganizerStore(tmp_path / "library")
     source = _source(tmp_path, source_id="source-1", digest="b" * 64)

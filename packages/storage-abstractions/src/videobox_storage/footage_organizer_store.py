@@ -129,6 +129,41 @@ WHEN NOT EXISTS (
 BEGIN
     SELECT RAISE(ABORT, 'source must reference canonical library asset');
 END;
+CREATE TRIGGER IF NOT EXISTS footage_sources_identity_immutable
+BEFORE UPDATE OF source_id, source_sha256, library_asset_id ON library_footage_sources
+WHEN NEW.source_id <> OLD.source_id
+  OR NEW.source_sha256 <> OLD.source_sha256
+  OR COALESCE(NEW.library_asset_id, '') <> COALESCE(OLD.library_asset_id, '')
+BEGIN
+    SELECT RAISE(ABORT, 'footage source identity is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS source_segments_finite_bounds_insert
+BEFORE INSERT ON library_source_segments
+WHEN NOT (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec
+          AND NEW.start_sec < 1.7976931348623157e+308
+          AND NEW.end_sec < 1.7976931348623157e+308)
+BEGIN
+    SELECT RAISE(ABORT, 'source segment boundaries must be finite');
+END;
+CREATE TRIGGER IF NOT EXISTS source_segments_finite_bounds_update
+BEFORE UPDATE OF source_id, source_sha256, start_sec, end_sec ON library_source_segments
+WHEN NEW.source_id <> OLD.source_id
+  OR NEW.source_sha256 <> OLD.source_sha256
+  OR NOT (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec
+          AND NEW.start_sec < 1.7976931348623157e+308
+          AND NEW.end_sec < 1.7976931348623157e+308)
+BEGIN
+    SELECT RAISE(ABORT, 'source segment identity or boundaries are immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS source_segments_parent_hash_insert
+BEFORE INSERT ON library_source_segments
+WHEN NOT EXISTS (
+    SELECT 1 FROM library_footage_sources
+    WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256
+)
+BEGIN
+    SELECT RAISE(ABORT, 'source segment hash does not match source');
+END;
 """
 
 
@@ -224,6 +259,28 @@ class FootageOrganizerStore:
             connection.close()
         return self._source_row(row) if row is not None else None
 
+    def list_sources(self) -> list[FootageSource]:
+        """Return only canonical sources; legacy orphan rows are quarantined."""
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                "SELECT * FROM library_footage_sources ORDER BY created_at, source_id"
+            ).fetchall()
+        finally:
+            connection.close()
+        return [source for row in rows if (source := self._source_row(row)) is not None]
+
+    def list_quarantined_sources(self) -> list[str]:
+        """Report pre-canonical source rows without attempting to materialize them."""
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                "SELECT source_id FROM library_footage_sources WHERE library_asset_id IS NULL OR trim(library_asset_id) = '' ORDER BY source_id"
+            ).fetchall()
+        finally:
+            connection.close()
+        return [str(row["source_id"]) for row in rows]
+
     def delete_source(self, source_id: str) -> None:
         connection = self._connection()
         try:
@@ -250,10 +307,12 @@ class FootageOrganizerStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
             source_row = connection.execute(
-                "SELECT source_sha256 FROM library_footage_sources WHERE source_id = ?", (source_id,)
+                "SELECT source_sha256, library_asset_id FROM library_footage_sources WHERE source_id = ?", (source_id,)
             ).fetchone()
             if source_row is None:
                 raise KeyError(source_id)
+            if source_row["library_asset_id"] in (None, ""):
+                raise ValueError("source is quarantined: missing canonical library asset")
             segment = FootageSourceSegment.create(
                 source_id=source_id,
                 source_sha256=str(source_row["source_sha256"]),
@@ -296,10 +355,12 @@ class FootageOrganizerStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
             source_row = connection.execute(
-                "SELECT source_sha256 FROM library_footage_sources WHERE source_id = ?", (source_id,)
+                "SELECT source_sha256, library_asset_id FROM library_footage_sources WHERE source_id = ?", (source_id,)
             ).fetchone()
             if source_row is None:
                 raise KeyError(source_id)
+            if source_row["library_asset_id"] in (None, ""):
+                raise ValueError("source is quarantined: missing canonical library asset")
             actual_hash = str(source_row["source_sha256"])
             if actual_hash != source_sha256.lower():
                 raise ValueError("source hash does not match immutable source")
@@ -421,9 +482,11 @@ class FootageOrganizerStore:
         connection = self._connection()
         try:
             connection.execute("BEGIN IMMEDIATE")
-            source_row = connection.execute("SELECT source_sha256 FROM library_footage_sources WHERE source_id = ?", (source_id,)).fetchone()
+            source_row = connection.execute("SELECT source_sha256, library_asset_id FROM library_footage_sources WHERE source_id = ?", (source_id,)).fetchone()
             if source_row is None:
                 raise KeyError(source_id)
+            if source_row["library_asset_id"] in (None, ""):
+                raise ValueError("source is quarantined: missing canonical library asset")
             connection.execute(
                 "INSERT INTO library_virtual_sequences (sequence_id, source_id, source_sha256, name, created_at) VALUES (?, ?, ?, ?, ?)",
                 (sequence_id, source_id, str(source_row["source_sha256"]), name, _now()),
@@ -578,7 +641,9 @@ class FootageOrganizerStore:
         )
 
     @staticmethod
-    def _source_row(row: sqlite3.Row) -> FootageSource:
+    def _source_row(row: sqlite3.Row) -> FootageSource | None:
+        if row["library_asset_id"] in (None, ""):
+            return None
         return FootageSource.create(source_id=str(row["source_id"]), source_sha256=str(row["source_sha256"]), filename=str(row["filename"]), library_asset_id=row["library_asset_id"], created_at=_from_time(row["created_at"]))
 
     def _connection(self) -> sqlite3.Connection:
