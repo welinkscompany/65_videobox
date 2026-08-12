@@ -206,7 +206,10 @@ class FfmpegAutoCutExecutor:
             cursor = max(cursor, end)
         if cursor < float(total_duration):
             windows.append({"start_sec": cursor, "end_sec": float(total_duration)})
-        return windows or [{"start_sec": 0.0, "end_sec": float(total_duration)}]
+        # No silence markers means the stream stayed active for the whole
+        # measured duration.  When markers cover the whole stream, ``windows``
+        # is intentionally empty: that is full silence, not missing metadata.
+        return windows if silence else [{"start_sec": 0.0, "end_sec": float(total_duration)}]
 
     def run_full_detection(self, video_path: Path) -> dict[str, Any]:
         total_duration = self.get_duration(video_path)
