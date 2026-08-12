@@ -169,6 +169,8 @@ def build_footage_organizer_router(
             raise HTTPException(status_code=404, detail="footage_proposal_missing")
         if proposal.revision != payload.expected_revision:
             raise HTTPException(status_code=409, detail="footage_proposal_revision_conflict")
+        if not proposal.segments:
+            raise HTTPException(status_code=422, detail="footage_preview_empty")
         source = footage_store.get_source(proposal.source_id)
         if source is None or asset_adapter.get_verified_asset(library_asset_id=source.library_asset_id) is None:
             raise HTTPException(status_code=422, detail="footage_source_stale")

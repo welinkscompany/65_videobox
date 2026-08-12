@@ -70,10 +70,8 @@ def test_proposal_edit_preview_cancel_and_double_approval_are_safe(tmp_path: Pat
         json={"expected_revision": edited.json()["revision"]},
     )
     cancel = client.post(f"/api/footage/proposals/{proposal_id}/cancel")
-    assert preview.status_code == 200, preview.text
-    assert "ranges=" in preview.json()["preview_url"]
-    assert preview.json()["preview_url"].endswith("ranges=")
-    assert "source-segment" not in preview.json()["preview_url"]
+    assert preview.status_code == 422, preview.text
+    assert preview.json()["detail"] == "footage_preview_empty"
     assert cancel.status_code == 200, cancel.text
     after = FootageOrganizerStore(tmp_path / "library").get_proposal(proposal_id)
     assert before == after

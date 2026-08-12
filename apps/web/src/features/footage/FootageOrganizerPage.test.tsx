@@ -101,9 +101,9 @@ describe("FootageOrganizerPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
     fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
     await screen.findByTestId("scene-timeline");
-    fireEvent.click(screen.getByRole("button", { name: /거리/ }));
+    fireEvent.click(screen.getByRole("button", { name: /거리/ }), { shiftKey: true });
     fireEvent.click(screen.getByRole("button", { name: "선택 장면으로 가상 묶음 만들기" }));
-    await waitFor(() => expect(api.createFootageSequence).toHaveBeenCalledWith(expect.objectContaining({ items: [{ source_segment_id: "source-seg-2", item_order: 1, start_sec: 8, end_sec: 20 }] })));
+    await waitFor(() => expect(api.createFootageSequence).toHaveBeenCalledWith(expect.objectContaining({ items: [{ source_segment_id: "source-seg-1", item_order: 1, start_sec: 0, end_sec: 8 }, { source_segment_id: "source-seg-2", item_order: 2, start_sec: 8, end_sec: 20 }] })));
     fireEvent.click(screen.getByRole("button", { name: "묶음 항목 2" }));
     fireEvent.click(screen.getByRole("button", { name: "위로" }));
     await waitFor(() => expect(api.reorderFootageSequence).toHaveBeenCalledWith("sequence-1", { expected_revision: 1, item_ids: ["item-2", "item-1"] }));
