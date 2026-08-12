@@ -30,6 +30,8 @@ def test_library_ingest_list_preview_and_lifecycle(tmp_path):
     assert client.get(f"/api/library/assets/{asset_id}/thumbnail").status_code == 200
     assert client.post(f"/api/library/assets/{asset_id}/trash").status_code == 200
     assert client.post(f"/api/library/assets/{asset_id}/restore").status_code == 200
+    assert client.delete(f"/api/library/assets/{asset_id}/permanent").status_code == 409
+    assert client.post(f"/api/library/assets/{asset_id}/trash").status_code == 200
     assert client.delete(f"/api/library/assets/{asset_id}/permanent").status_code == 204
     assert not list((tmp_path / "library" / "assets").rglob("*song.mp3"))
 

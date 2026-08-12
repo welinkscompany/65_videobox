@@ -258,6 +258,8 @@ def build_library_assets_router(
         asset, builtin = find_asset(asset_id)
         if builtin is not None:
             raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
+        if asset.lifecycle is not LibraryAssetLifecycle.TRASHED:
+            raise HTTPException(status_code=409, detail={"code": "asset_must_be_trashed"})
         try:
             user_asset_store.permanently_delete_asset(asset_id)
         except ValueError as exc:
