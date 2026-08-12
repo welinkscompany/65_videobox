@@ -14,6 +14,7 @@ export function FootageOrganizerPage() {
   const [selectedAsset, setSelectedAsset] = useState<LibraryAsset | null>(null);
   const [proposal, setProposal] = useState<FootageProposal | null>(null);
   const [proposalPreview, setProposalPreview] = useState<FootageProposalPreview | null>(null);
+  const [previewUnavailable, setPreviewUnavailable] = useState(false);
   const [sequence, setSequence] = useState<FootageSequence | null>(null);
   const [selectedSequenceItemId, setSelectedSequenceItemId] = useState<string | null>(null);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
@@ -40,19 +41,19 @@ export function FootageOrganizerPage() {
     return (proposal?.segments.filter((segment) => selectedSegmentIds.includes(segment.segment_id)) ?? []).map((segment, index) => ({ source_segment_id: segment.source_segment_id, item_order: index + 1, start_sec: segment.start_sec, end_sec: segment.end_sec }));
   }, [proposal, selectedSegmentIds]);
 
-  function selectAsset(asset: LibraryAsset) { setSelectedAsset(asset); setProposal(null); setProposalPreview(null); setSequence(null); setSelectedSequenceItemId(null); setSelectedSegmentId(null); setSelectedSegmentIds([]); setPlayhead(0); setNotice(null); }
+  function selectAsset(asset: LibraryAsset) { setSelectedAsset(asset); setProposal(null); setProposalPreview(null); setPreviewUnavailable(false); setSequence(null); setSelectedSequenceItemId(null); setSelectedSegmentId(null); setSelectedSegmentIds([]); setPlayhead(0); setNotice(null); }
   async function startProposal() {
     if (!selectedAsset) return;
     setBusy("분석"); setNotice(null);
     try {
       const result = await api.proposeFootage({ library_asset_id: selectedAsset.library_asset_id, idempotency_key: `footage-ui-${selectedAsset.library_asset_id}-${Date.now()}`, analysis: request.trim() ? { instruction: request.trim() } : undefined });
-      setProposal(result); setProposalPreview(null); setSelectedSegmentId(result.segments[0]?.segment_id ?? null); setSelectedSegmentIds(result.segments[0]?.segment_id ? [result.segments[0].segment_id] : []); setNotice("제안이 준비됐어요. 타임라인을 확인하세요. Shift+클릭으로 여러 장면을 선택할 수 있어요.");
+      setProposal(result); setProposalPreview(null); setPreviewUnavailable(false); setSelectedSegmentId(result.segments[0]?.segment_id ?? null); setSelectedSegmentIds(result.segments[0]?.segment_id ? [result.segments[0].segment_id] : []); setNotice("제안이 준비됐어요. 타임라인을 확인하세요. Shift+클릭으로 여러 장면을 선택할 수 있어요.");
     } catch { setNotice("제안을 만들지 못했습니다. 다시 시도하세요."); } finally { setBusy(null); }
   }
   async function editProposal(payload: Parameters<typeof api.editFootageProposal>[1]) {
     if (!proposal) return;
     setBusy("편집");
-    try { setProposal(await api.editFootageProposal(proposal.proposal_id, payload)); setProposalPreview(null); setNotice("제안이 바뀌었어요. 다시 미리보기한 뒤 적용하세요."); } catch { setNotice("변경을 저장하지 못했습니다. 최신 제안을 다시 확인하세요."); } finally { setBusy(null); }
+    try { setProposal(await api.editFootageProposal(proposal.proposal_id, payload)); setProposalPreview(null); setPreviewUnavailable(false); setNotice("제안이 바뀌었어요. 다시 미리보기한 뒤 적용하세요."); } catch { setNotice("변경을 저장하지 못했습니다. 최신 제안을 다시 확인하세요."); } finally { setBusy(null); }
   }
   function moveBoundary(segment: FootageSegment, edge: "start" | "end", delta: number) {
     const value = edge === "start" ? Math.max(0, segment.start_sec + delta) : Math.min(duration || segment.end_sec + delta, segment.end_sec + delta);
@@ -61,7 +62,15 @@ export function FootageOrganizerPage() {
   function split() { if (!proposal || !selectedSegment) return; const splitSec = Math.min(selectedSegment.end_sec - FRAME_STEP, Math.max(selectedSegment.start_sec + FRAME_STEP, playhead)); void editProposal({ operation: "split", expected_revision: proposal.revision, segment_id: selectedSegment.segment_id, split_sec: splitSec }); }
   function merge() { if (!proposal || !selectedSegment) return; const index = proposal.segments.findIndex((segment) => segment.segment_id === selectedSegment.segment_id); const next = proposal.segments[index + 1]; if (next) void editProposal({ operation: "merge", expected_revision: proposal.revision, segment_ids: [selectedSegment.segment_id, next.segment_id] }); }
   function exclude() { if (proposal && selectedSegment) void editProposal({ operation: "exclude", expected_revision: proposal.revision, segment_id: selectedSegment.segment_id }); }
-  async function previewProposal() { if (!proposal) return; setBusy("미리보기"); try { const result = await api.previewFootageProposal(proposal.proposal_id, { expected_revision: proposal.revision }); setProposalPreview(result); setNotice("제안 미리보기를 준비했어요. 원본은 그대로예요."); } catch { setProposalPreview(null); setNotice("미리보기를 준비하지 못했습니다. 장면을 다시 확인하세요."); } finally { setBusy(null); } }
+  function selectSegment(segment: FootageSegment, extend: boolean) {
+    setSelectedSegmentIds((current) => {
+      const next = extend ? (current.includes(segment.segment_id) ? current.filter((id) => id !== segment.segment_id) : [...current, segment.segment_id]) : [segment.segment_id];
+      setSelectedSegmentId(next.includes(segment.segment_id) ? segment.segment_id : next[0] ?? null);
+      return next;
+    });
+    setPlayhead(segment.start_sec);
+  }
+  async function previewProposal() { if (!proposal) return; setBusy("미리보기"); try { const result = await api.previewFootageProposal(proposal.proposal_id, { expected_revision: proposal.revision }); setProposalPreview(result); setPreviewUnavailable(false); setNotice("제안 미리보기를 준비했어요. 원본은 그대로예요."); } catch { setProposalPreview(null); setPreviewUnavailable(true); setNotice("미리보기를 준비하지 못했습니다. 장면을 다시 확인하세요."); } finally { setBusy(null); } }
   async function cancelProposal() { if (!proposal) return; setBusy("취소"); try { await api.cancelFootageProposal(proposal.proposal_id); setProposal(null); setProposalPreview(null); setSequence(null); setNotice("제안을 취소했어요. 원본은 변경되지 않았어요."); } finally { setBusy(null); } }
   async function approveProposal() { if (!proposal) return; setBusy("적용"); try { const result = await api.approveFootageProposal(proposal.proposal_id, { expected_revision: proposal.revision, idempotency_key: `approve-${proposal.proposal_id}` }); setProposal(result); setNotice("제안을 적용했어요. 촬영본 원본은 보존돼요."); } catch { setNotice("제안을 적용하지 못했습니다. 최신 상태를 확인하세요."); } finally { setBusy(null); } }
   async function createSequence() { if (!proposal || sequenceItems.length === 0) return; setBusy("묶음"); try { const result = await api.createFootageSequence({ source_id: proposal.source_id, name: "새 가상 묶음", items: sequenceItems, idempotency_key: `sequence-${proposal.proposal_id}` }); setSequence(result); setSelectedSequenceItemId(result.items[0]?.item_id ?? null); setNotice("가상 묶음을 만들었어요. 순서를 바꾼 뒤 다시 저장하세요."); } catch { setNotice("가상 묶음을 만들지 못했습니다."); } finally { setBusy(null); } }
@@ -72,7 +81,7 @@ export function FootageOrganizerPage() {
     <header className="vb-footage-header"><div><p className="vb-eyebrow">VIDEObox / Wave-2</p><h1>촬영본 정리</h1><p>원본은 그대로 두고, 장면을 나누고 묶어 다음 단계에 보낼 수 있어요.</p></div><span className="vb-footage-status">{busy ? `${busy} 중…` : notice ?? "명시적으로 적용하기 전에는 저장되지 않아요."}</span></header>
     {loading ? <div className="vb-footage-state" role="status">촬영본을 불러오는 중…</div> : error ? <div className="vb-footage-state" role="alert"><p>{error}</p><Button type="button" variant="outline" onClick={() => void loadAssets()}>다시 시도</Button></div> : <div className="vb-footage-grid">
       <FootageSourceList assets={assets} selectedId={selectedAsset?.library_asset_id ?? null} onSelect={selectAsset} />
-      <div className="vb-footage-center"><FootagePreview asset={selectedAsset} previewUrl={proposalPreview?.preview_url} previewRanges={proposalPreview?.segments} currentTime={playhead} duration={duration} frameStep={FRAME_STEP} onTimeChange={setPlayhead} onPreviewError={() => { setProposalPreview(null); setNotice("미리보기를 재생하지 못했습니다. 다시 준비하세요."); }} onFrameStep={(delta) => setPlayhead((time) => Math.max(0, Math.min(duration || Infinity, time + delta * FRAME_STEP)))} /><SceneTimeline proposal={proposal} playhead={playhead} selectedSegmentId={selectedSegmentId} selectedSegmentIds={selectedSegmentIds} onSelectSegment={(segment, extend) => { setSelectedSegmentId(segment.segment_id); setSelectedSegmentIds((current) => extend ? (current.includes(segment.segment_id) ? current.filter((id) => id !== segment.segment_id) : [...current, segment.segment_id]) : [segment.segment_id]); setPlayhead(segment.start_sec); }} onSplit={split} onMerge={merge} onExclude={exclude} onBoundary={moveBoundary} /></div>
+      <div className="vb-footage-center"><FootagePreview asset={selectedAsset} previewUrl={proposalPreview?.preview_url} previewRanges={proposalPreview?.segments} previewUnavailable={previewUnavailable} currentTime={playhead} duration={duration} frameStep={FRAME_STEP} onTimeChange={setPlayhead} onPreviewError={() => { setProposalPreview(null); setPreviewUnavailable(true); setNotice("미리보기를 재생하지 못했습니다. 다시 준비하세요."); }} onFrameStep={(delta) => setPlayhead((time) => Math.max(0, Math.min(duration || Infinity, time + delta * FRAME_STEP)))} /><SceneTimeline proposal={proposal} playhead={playhead} selectedSegmentId={selectedSegmentId} selectedSegmentIds={selectedSegmentIds} onSelectSegment={selectSegment} onSplit={split} onMerge={merge} onExclude={exclude} onBoundary={moveBoundary} /></div>
       <FootageSuggestions value={request} onChange={setRequest} />
       <aside className="vb-footage-pane vb-footage-actions" data-testid="footage-actions"><div className="vb-footage-pane__heading"><div><p className="vb-eyebrow">ACTIONS</p><h2>검토와 적용</h2></div></div><Button className="vb-footage-primary" type="button" onClick={() => void startProposal()} disabled={!selectedAsset || Boolean(busy)}>분석 시작</Button><Button type="button" variant="outline" onClick={() => void previewProposal()} disabled={!proposal || Boolean(busy)}>제안 미리보기</Button><Button type="button" variant="outline" onClick={() => void cancelProposal()} disabled={!proposal || Boolean(busy)}>제안 취소</Button><Button className="vb-footage-apply" type="button" onClick={() => void approveProposal()} disabled={!proposal || proposal.status !== "draft" || Boolean(busy)}>제안 적용</Button><hr /><Button type="button" variant="outline" onClick={() => void createSequence()} disabled={!proposal || sequenceItems.length === 0 || Boolean(busy)}>선택 장면으로 가상 묶음 만들기</Button>{sequence ? <div className="vb-footage-sequence"><strong>{sequence.name}</strong><span>{sequence.items.length}개 장면</span><div className="vb-footage-sequence__items">{sequence.items.map((item) => <Button key={item.item_id} type="button" variant="ghost" aria-pressed={selectedSequenceItemId === item.item_id} onClick={() => setSelectedSequenceItemId(item.item_id)}>묶음 항목 {item.item_order}</Button>)}</div><div><Button type="button" variant="outline" onClick={() => void moveSequence(-1)} disabled={Boolean(busy) || !selectedSequenceItemId}>위로</Button><Button type="button" variant="outline" onClick={() => void moveSequence(1)} disabled={Boolean(busy) || !selectedSequenceItemId}>아래로</Button></div></div> : null}<p className="vb-footage-disclaimer">적용은 명시적인 승인 요청에서만 원본 인덱스에 반영돼요.</p></aside>
     </div>}
