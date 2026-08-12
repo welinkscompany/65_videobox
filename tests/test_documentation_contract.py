@@ -51,3 +51,35 @@ def test_implementation_plan_is_mp4_first_with_optional_capcut() -> None:
         "1. CapCut export",
     ):
         assert stale_primary_phrase not in text
+
+
+def test_implementation_plan_has_no_stale_current_scope_labels() -> None:
+    text = (ROOT / "docs/implementation-plan.ko.md").read_text(encoding="utf-8")
+
+    assert "과거 기록/역사적 진단이며 현재 목표가 아님" in text
+    for stale_scope_label in (
+        "CapCut export adapter",
+        "CapCut handoff",
+        "CapCut export 의존",
+        "CapCut export 흐름",
+        "CapCut export 중심",
+        "CapCut export",
+        "경량 후편집기",
+        "경량 후편집 데이터",
+        "경량 후편집 UI",
+    ):
+        assert stale_scope_label not in text
+
+
+def test_approved_scope_authorities_agree() -> None:
+    design = (ROOT / "docs/superpowers/specs/2026-08-12-videobox-creator-workspace-overhaul-design.ko.md").read_text(encoding="utf-8")
+    decision = (ROOT / "docs/decisions/2026-08-12-creator-workspace-overhaul-direction.ko.md").read_text(encoding="utf-8")
+
+    assert "상태: owner 최종 승인 완료" in design
+    assert "creator-complete" in design
+    assert "CapCut은 필수 후편집 단계가 아니라 선택적 호환·비상 경로다." in design
+    for excluded_scope in ("전문 색보정", "고급 마스크", "복잡한 키프레임", "다중 카메라"):
+        assert excluded_scope in design
+    assert "승인자: owner" in decision
+    assert "자체 편집기에서 컷, 자막, B-roll, 음악, 효과음, 화면 구성, 검토와 출력을 끝낸다." in decision
+    assert "CapCut은 필수 후편집 단계가 아니라 선택적 호환·비상 경로다." in decision
