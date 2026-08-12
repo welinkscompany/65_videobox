@@ -3541,6 +3541,34 @@ describe("EditorWorkbenchRoute", () => {
     expect(rows).toEqual(["나 첫 요청", "나 동시 요청", "유진 첫 답", "유진 둘째 답"]);
   });
 
+  it("fills a Yujin starter through the route without creating, sending, proposing, or applying", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: null,
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    const createConversation = vi.spyOn(api, "createDirectorConversation");
+    const send = vi.spyOn(api, "sendDirectorMessage");
+    const createProposal = vi.spyOn(api, "createDirectorProposal");
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    const starter = await screen.findByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" });
+    fireEvent.click(starter);
+
+    const composer = screen.getByRole("textbox", { name: "유진에게 요청하기" });
+    expect(composer).toHaveValue("이 장면에 어울리는 B-roll 추천해 줘");
+    expect(composer).toHaveFocus();
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(createProposal).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
+  });
+
   it("sends a message and shows the persisted Yujin reply from the local endpoint", async () => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000001");
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({

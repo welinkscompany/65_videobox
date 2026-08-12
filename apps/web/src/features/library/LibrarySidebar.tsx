@@ -20,7 +20,7 @@ export function LibrarySidebar({ activeFilter, onFilter, counts, status }: {
   return <aside className="vb-library-sidebar" data-testid="library-sidebar" aria-label="라이브러리 필터">
     <div className="vb-library-sidebar__heading"><p className="vb-eyebrow">내 라이브러리</p><h1>자산</h1></div>
     <nav aria-label="자산 종류"><ul className="vb-library-filter-list">{filters.map((item) => (
-      <li key={item.key}><button type="button" className={activeFilter === item.key ? "is-active" : ""} aria-pressed={activeFilter === item.key} onClick={() => onFilter(item.key)}>{item.label}<span>{counts?.[item.key] ?? ""}</span></button></li>
+      <li key={item.key}><button data-native-control="library-filter" type="button" className={activeFilter === item.key ? "is-active" : ""} aria-pressed={activeFilter === item.key} onClick={() => onFilter(item.key)}>{item.label}<span>{counts?.[item.key] ?? ""}</span></button></li>
     ))}</ul></nav>
     <div className="vb-library-sidebar__status" aria-label="분석 상태">
       <p>분석 상태</p>

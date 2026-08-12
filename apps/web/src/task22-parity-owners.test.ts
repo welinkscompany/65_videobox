@@ -101,6 +101,34 @@ const nativeControlAllowlist = {
     ],
     reason: "Timeline drag, trim, and keyboard interaction requires direct pointer and focus ownership.",
   },
+  "features/footage/SceneTimeline.tsx": {
+    controls: ["button:footage-playhead"],
+    reason: "The footage playhead is a keyboard-focusable native timeline control owned by the scene timeline.",
+  },
+  "features/library/LibrarySidebar.tsx": {
+    controls: ["button:library-filter"],
+    reason: "The library sidebar owns the six native filter controls used to switch the visible asset lifecycle and media type.",
+  },
+  "features/library/AssetIngestDropzone.tsx": {
+    controls: ["button:asset-file-add", "input:asset-file-input"],
+    reason: "The library ingest surface owns the hidden file input and its explicit file-picker trigger.",
+  },
+  "features/library/AudioAssetRows.tsx": {
+    controls: ["button:audio-favorite", "button:audio-play"],
+    reason: "Audio rows own the explicit audition and favorite controls for each library asset.",
+  },
+  "features/library/IngestJobTable.tsx": {
+    controls: ["button:ingest-retry"],
+    reason: "The ingest result table owns its explicit retry action for failed asset registration.",
+  },
+  "features/library/LibraryResults.tsx": {
+    controls: ["button:library-tab", "input:library-search"],
+    reason: "The library result pane owns its search field and media-type tab controls.",
+  },
+  "features/library/LibraryPreviewPane.tsx": {
+    controls: ["button:library-restore", "button:library-trash"],
+    reason: "The library preview pane owns the explicit restore and trash lifecycle actions.",
+  },
 } as const;
 
 describe("Task 22 canonical production owners", () => {
