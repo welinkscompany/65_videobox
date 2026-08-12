@@ -42,6 +42,23 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
                 continue
         return (float("-inf"), str(job.get("job_id") or ""))
 
+    def _latest_final_job(jobs: list[dict[str, object]]) -> dict[str, object] | None:
+        final_jobs = [job for job in jobs if str(job.get("job_type")) == JobType.FINAL_RENDER]
+        if not final_jobs:
+            return None
+        # A retry can be claimed before the worker has populated timestamps.
+        # Its active lifecycle state is stronger evidence than an older
+        # terminal result, so keep the card on the retry/status action.
+        untimestamped_active = [
+            job
+            for job in final_jobs
+            if str(job.get("status")) in {JobStatus.PENDING, JobStatus.RUNNING}
+            and _job_temporal_key(job)[0] == float("-inf")
+        ]
+        if untimestamped_active:
+            return max(untimestamped_active, key=lambda job: str(job.get("job_id") or ""))
+        return max(final_jobs, key=_job_temporal_key)
+
     @router.post("/api/projects", status_code=status.HTTP_201_CREATED)
     def create_project(payload: CreateProjectRequest) -> ProjectResponse:
         project = store.bootstrap_project(name=payload.name)
@@ -198,8 +215,7 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             if str(job.get("job_type")) == JobType.FINAL_RENDER
             and str(job.get("status")) == JobStatus.SUCCEEDED
         )
-        final_jobs = [job for job in jobs if str(job.get("job_type")) == JobType.FINAL_RENDER]
-        latest_final = max(final_jobs, key=_job_temporal_key) if final_jobs else None
+        latest_final = _latest_final_job(jobs)
         gaps = session.get("gap_slots") if isinstance(session, dict) else None
         timeline_review_status: str | None = None
         if isinstance(session, dict) and session.get("timeline_id"):

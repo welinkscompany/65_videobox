@@ -4837,6 +4837,58 @@ def test_workspace_summary_selects_latest_final_render_by_timestamp_not_job_id(
     assert payload["next_action"]["label"] == "완성본 보기"
 
 
+def test_workspace_summary_pending_retry_without_timestamps_supersedes_older_failed_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Pending retry"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-pending",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [
+            {
+                "job_id": "final-render-old",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.FAILED.value,
+                "started_at": "2026-08-12T01:00:00+00:00",
+                "finished_at": "2026-08-12T01:01:00+00:00",
+            },
+            {
+                "job_id": "final-render-retry",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.PENDING.value,
+                "started_at": None,
+                "finished_at": None,
+            },
+        ],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == "attention"
+    assert payload["next_action"] == {
+        "label": "출력 상태 보기",
+        "href": f"/projects/{project_id}/output",
+    }
+
+
 def test_workspace_summary_fails_closed_when_session_timeline_review_is_missing(
     tmp_path: Path,
 ) -> None:
