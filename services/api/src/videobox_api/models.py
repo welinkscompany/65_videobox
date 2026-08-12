@@ -519,6 +519,26 @@ class HomeSummaryResponse(BaseModel):
     asset_gap_count: int
 
 
+class WorkspaceNextActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    label: str = Field(min_length=1)
+    href: str = Field(min_length=1)
+
+
+class ProjectWorkspaceSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    project_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    updated_at: str = Field(min_length=1)
+    current_stage: Literal["plan", "assets", "edit", "review", "output"]
+    state: Literal["ready", "attention", "blocked"]
+    thumbnail_url: str | None = None
+    finished_video_count: int = Field(ge=0)
+    next_action: WorkspaceNextActionResponse
+
+
 class JobRecordWithProjectResponse(JobRecordResponse):
     project_name: str
 

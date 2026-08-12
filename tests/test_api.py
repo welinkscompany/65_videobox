@@ -4695,6 +4695,47 @@ def test_home_summary_reports_what_the_home_cards_claim(tmp_path: Path) -> None:
     assert filled["has_draft"] is True, filled
 
 
+def test_workspace_summary_is_authoritative_for_an_empty_project(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Workspace summary"}).json()["project_id"]
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["project_id"] == project_id
+    assert payload["display_name"] == "Workspace summary"
+    assert payload["updated_at"]
+    assert payload["current_stage"] == "plan"
+    assert payload["state"] == "ready"
+    assert payload["thumbnail_url"] is None
+    assert payload["finished_video_count"] == 0
+    assert payload["next_action"] == {
+        "label": "새 영상 시작",
+        "href": f"/projects/{project_id}/plan",
+    }
+
+
+def test_workspace_summary_fails_closed_when_latest_session_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Unreadable workspace"}).json()["project_id"]
+
+    def fail_latest(*, project_id: str) -> dict[str, object]:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(app.state.store, "get_latest_editing_session", fail_latest)
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "workspace_summary_unavailable"
+    assert "current_stage" not in response.json()
+
+
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:
     app = create_app(
         projects_root=tmp_path,

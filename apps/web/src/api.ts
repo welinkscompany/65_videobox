@@ -50,6 +50,16 @@ export type HomeSummary = {
   has_draft: boolean;
   asset_gap_count: number;
 };
+export type ProjectWorkspaceSummary = {
+  project_id: string;
+  display_name: string;
+  updated_at: string;
+  current_stage: "plan" | "assets" | "edit" | "review" | "output";
+  state: "ready" | "attention" | "blocked";
+  thumbnail_url: string | null;
+  finished_video_count: number;
+  next_action: { label: string; href: string };
+};
 export type JobRecord = {
   job_id: string;
   project_id: string;
@@ -1667,6 +1677,8 @@ export const api = {
   // pins to the job dialog. One call keeps the home visit cheap.
   getHomeSummary: (projectId: string): Promise<HomeSummary> =>
     request<HomeSummary>(`/api/projects/${encodeURIComponent(projectId)}/home-summary`),
+  getProjectWorkspaceSummary: (projectId: string): Promise<ProjectWorkspaceSummary> =>
+    request<ProjectWorkspaceSummary>(`/api/projects/${encodeURIComponent(projectId)}/workspace-summary`),
   listAllJobs: async (): Promise<JobRecordWithProject[]> => {
     const payload = await request<{ jobs: JobRecordWithProject[] }>("/api/jobs");
     return payload.jobs;

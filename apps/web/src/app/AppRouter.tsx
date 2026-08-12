@@ -11,7 +11,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { api, type HomeSummary, type Project } from "../api";
+import { api, type Project, type ProjectWorkspaceSummary } from "../api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { ProjectOnboarding } from "../ProjectOnboarding";
@@ -185,7 +185,7 @@ function ProjectsPage() {
       <h1>프로젝트</h1>
       <p>영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
       <div className="vb-catalog-grid">
-        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigate={(section) => void navigate({ to: resolveWorkspaceLocation(project.project_id, section) })} />)}
+        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} />)}
       </div>
       {isCreating ? (
         <form className="vb-catalog-form" onSubmit={(event) => void handleCreate(event)}>
@@ -233,33 +233,53 @@ function GlobalDestinationPage({ testId, title, description, readiness }: { test
   </main>;
 }
 
-type ProjectNextAction = { label: "계속 편집" | "자산 준비" | "새 영상 시작" | "프로젝트 열기"; section: WorkspaceSection; status: string };
+const workspaceStageLabels: Record<ProjectWorkspaceSummary["current_stage"], string> = {
+  plan: "기획",
+  assets: "자산",
+  edit: "편집",
+  review: "검토",
+  output: "출력",
+};
 
-function projectNextAction(summary: HomeSummary | null): ProjectNextAction {
-  if (!summary) return { label: "프로젝트 열기", section: "home", status: "상태를 확인하지 못했어요" };
-  if (summary?.has_draft) return { label: "계속 편집", section: "editing", status: "작업 중인 초안" };
-  if ((summary?.asset_gap_count ?? 0) > 0) return { label: "자산 준비", section: "media", status: "자산 준비 필요" };
-  return { label: "새 영상 시작", section: "create", status: "새 영상 준비" };
-}
-
-function ProjectCatalogCard({ project, onNavigate }: { project: Project; onNavigate: (section: WorkspaceSection) => void }) {
-  const [summary, setSummary] = useState<HomeSummary | null>(null);
+function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onNavigateHref?: (href: string) => void }) {
+  const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
+  const [summaryError, setSummaryError] = useState(false);
+  const [requestNumber, setRequestNumber] = useState(0);
   useEffect(() => {
     let active = true;
     setSummary(null);
-    void api.getHomeSummary(project.project_id).then((next) => {
+    setSummaryError(false);
+    void api.getProjectWorkspaceSummary(project.project_id).then((next) => {
       if (active) setSummary(next);
     }).catch(() => {
-      if (active) setSummary(null);
+      if (active) setSummaryError(true);
     });
     return () => { active = false; };
-  }, [project.project_id]);
-  const next = projectNextAction(summary);
+  }, [project.project_id, requestNumber]);
+  if (summaryError) {
+    return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+      <h2>{project.name}</h2>
+      <p>상태 확인 필요</p>
+      <Button type="button" variant="outline" onClick={() => setRequestNumber((value) => value + 1)}>다시 확인</Button>
+    </article>;
+  }
+  if (!summary) {
+    return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+      <h2>{project.name}</h2>
+      <p>상태 확인 중</p>
+    </article>;
+  }
   return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
-    <h2>{project.name}</h2>
-    <p>{next.status}</p>
-    <p className="vb-catalog-card__finished">완성본 {summary?.finished_video_count ?? "확인 중"}개</p>
-    <Button type="button" variant="outline" aria-label={next.label} onClick={() => onNavigate(next.section)}>{next.label}</Button>
+    {summary.thumbnail_url ? <img src={summary.thumbnail_url} alt={`${summary.display_name} 대표 이미지`} loading="lazy" /> : null}
+    <h2>{summary.display_name}</h2>
+    <p>{workspaceStageLabels[summary.current_stage]} · {summary.state === "blocked" ? "막힘" : summary.state === "attention" ? "확인 필요" : "준비됨"}</p>
+    <time dateTime={summary.updated_at}>최근 편집 {summary.updated_at}</time>
+    <p className="vb-catalog-card__finished">완성본 {summary.finished_video_count}개</p>
+    <Button asChild type="button" variant="outline" aria-label={summary.next_action.label}><a href={summary.next_action.href} onClick={(event) => {
+      if (!onNavigateHref) return;
+      event.preventDefault();
+      onNavigateHref(summary.next_action.href);
+    }}>{summary.next_action.label}</a></Button>
   </article>;
 }
 

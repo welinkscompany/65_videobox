@@ -14,6 +14,8 @@ from videobox_api.models import (
     JobRecordWithProjectResponse,
     ProjectListResponse,
     ProjectResponse,
+    ProjectWorkspaceSummaryResponse,
+    WorkspaceNextActionResponse,
 )
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -141,6 +143,138 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             finished_video_count=finished,
             has_draft=session is not None,
             asset_gap_count=len(gaps) if isinstance(gaps, list) else 0,
+        )
+
+    @router.get("/api/projects/{project_id}/workspace-summary")
+    def get_workspace_summary(project_id: str) -> ProjectWorkspaceSummaryResponse:
+        """Return the project card's single, store-backed source of truth.
+
+        A missing latest session is an ordinary first-visit state.  Any other
+        read failure is deliberately surfaced instead of becoming an empty
+        project that sends the creator back to project creation.
+        """
+        try:
+            project = store.get_project(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        try:
+            jobs = store.list_jobs(project_id=project_id)
+            try:
+                session = store.get_latest_editing_session(project_id=project_id)
+            except KeyError:
+                session = None
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="workspace_summary_unavailable",
+                ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="workspace_summary_unavailable",
+            ) from exc
+
+        finished = sum(
+            1
+            for job in jobs
+            if str(job.get("job_type")) == JobType.FINAL_RENDER
+            and str(job.get("status")) == JobStatus.SUCCEEDED
+        )
+        final_jobs = [job for job in jobs if str(job.get("job_type")) == JobType.FINAL_RENDER]
+        latest_final = final_jobs[-1] if final_jobs else None
+        gaps = session.get("gap_slots") if isinstance(session, dict) else None
+        timeline_review_status: str | None = None
+        if isinstance(session, dict) and session.get("timeline_id"):
+            try:
+                review = store.get_review_state(
+                    project_id=project_id,
+                    timeline_id=str(session["timeline_id"]),
+                )
+            except KeyError:
+                review = None
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="workspace_summary_unavailable",
+                ) from exc
+            if isinstance(review, dict):
+                timeline_review_status = str(review.get("status") or "").strip().lower() or None
+
+        if session is None:
+            current_stage = "plan"
+            state = "ready"
+            action_label = "새 영상 시작"
+        elif isinstance(gaps, list) and gaps:
+            current_stage = "assets"
+            state = "attention"
+            action_label = "자산 준비"
+        elif timeline_review_status == "blocked":
+            current_stage = "review"
+            state = "blocked"
+            action_label = "검토 문제 해결"
+        elif timeline_review_status in {"draft", "pending", "review"}:
+            current_stage = "review"
+            state = "ready"
+            action_label = "검토하기"
+        elif timeline_review_status in {"approved", "succeeded"}:
+            current_stage = "output"
+            state = "ready"
+            action_label = "완성본 만들기"
+        elif latest_final is not None and str(latest_final.get("status")) == JobStatus.SUCCEEDED:
+            current_stage = "output"
+            state = "ready"
+            action_label = "완성본 보기"
+        elif latest_final is not None and str(latest_final.get("status")) == JobStatus.FAILED:
+            current_stage = "output"
+            state = "attention"
+            action_label = "출력 다시 시도"
+        elif latest_final is not None and str(latest_final.get("status")) in {"pending", "running"}:
+            current_stage = "output"
+            state = "attention"
+            action_label = "출력 상태 보기"
+        else:
+            current_stage = "edit"
+            state = "ready"
+            action_label = "계속 편집"
+
+        thumbnail_url: str | None = None
+        try:
+            assets = store.list_assets(project_id=project_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="workspace_summary_unavailable",
+            ) from exc
+        for asset in assets:
+            metadata = asset.get("metadata") if isinstance(asset, dict) else None
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("thumbnail_uri") or metadata.get("thumbnail_url"):
+                thumbnail_url = (
+                    f"/api/projects/{project_id}/assets/{asset['asset_id']}/thumbnail"
+                )
+                break
+
+        timestamps = [str(project.get("updated_at") or "")]
+        if isinstance(session, dict) and session.get("updated_at"):
+            timestamps.append(str(session["updated_at"]))
+        if latest_final and latest_final.get("finished_at"):
+            timestamps.append(str(latest_final["finished_at"]))
+        updated_at = max(timestamps)
+        return ProjectWorkspaceSummaryResponse(
+            project_id=project_id,
+            display_name=str(project["name"]),
+            updated_at=updated_at,
+            current_stage=current_stage,
+            state=state,
+            thumbnail_url=thumbnail_url,
+            finished_video_count=finished,
+            next_action=WorkspaceNextActionResponse(
+                label=action_label,
+                href=f"/projects/{project_id}/{current_stage}",
+            ),
         )
 
     @router.get("/api/projects/{project_id}/jobs")
