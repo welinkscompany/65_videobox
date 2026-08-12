@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -25,6 +26,22 @@ _LOGGER = logging.getLogger(__name__)
 
 def build_projects_router(store: LocalProjectStore) -> APIRouter:
     router = APIRouter()
+
+    def _job_temporal_key(job: dict[str, object]) -> tuple[float, str]:
+        """Order output jobs by recorded timestamps, never list position."""
+        timestamps: list[float] = []
+        for field in ("updated_at", "finished_at", "started_at", "created_at"):
+            value = job.get(field)
+            if value is None:
+                continue
+            try:
+                parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=UTC)
+                timestamps.append(parsed.timestamp())
+            except (TypeError, ValueError, OverflowError):
+                continue
+        return (max(timestamps, default=float("-inf")), str(job.get("job_id") or ""))
 
     @router.post("/api/projects", status_code=status.HTTP_201_CREATED)
     def create_project(payload: CreateProjectRequest) -> ProjectResponse:
@@ -183,7 +200,7 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             and str(job.get("status")) == JobStatus.SUCCEEDED
         )
         final_jobs = [job for job in jobs if str(job.get("job_type")) == JobType.FINAL_RENDER]
-        latest_final = final_jobs[-1] if final_jobs else None
+        latest_final = max(final_jobs, key=_job_temporal_key) if final_jobs else None
         gaps = session.get("gap_slots") if isinstance(session, dict) else None
         timeline_review_status: str | None = None
         if isinstance(session, dict) and session.get("timeline_id"):
@@ -192,8 +209,11 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
                     project_id=project_id,
                     timeline_id=str(session["timeline_id"]),
                 )
-            except KeyError:
-                review = None
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="workspace_summary_unavailable",
+                ) from exc
             except Exception as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -206,10 +226,6 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             current_stage = "plan"
             state = "ready"
             action_label = "계속 만들기"
-        elif isinstance(gaps, list) and gaps:
-            current_stage = "assets"
-            state = "attention"
-            action_label = "자산 준비"
         elif timeline_review_status == "blocked":
             current_stage = "review"
             state = "blocked"
@@ -226,6 +242,10 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             current_stage = "output"
             state = "ready"
             action_label = "완성본 보기"
+        elif isinstance(gaps, list) and gaps:
+            current_stage = "assets"
+            state = "attention"
+            action_label = "자산 준비"
         elif timeline_review_status in {"draft", "pending", "review"}:
             current_stage = "review"
             state = "ready"

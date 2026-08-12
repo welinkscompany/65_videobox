@@ -4736,6 +4736,176 @@ def test_workspace_summary_fails_closed_when_latest_session_cannot_be_read(
     assert "current_stage" not in response.json()
 
 
+@pytest.mark.parametrize(
+    ("job_status", "expected_state", "expected_label"),
+    [
+        (JobStatus.FAILED.value, "attention", "출력 다시 시도"),
+        (JobStatus.RUNNING.value, "attention", "출력 상태 보기"),
+        (JobStatus.SUCCEEDED.value, "ready", "완성본 보기"),
+    ],
+)
+def test_workspace_summary_output_state_overrides_asset_gaps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    job_status: str,
+    expected_state: str,
+    expected_label: str,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Output state"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-output",
+        session_payload={"segments": [], "history": [], "gap_slots": [{"gap_slot_id": "gap-1"}]},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [{
+            "job_id": "final-render-new",
+            "project_id": project_id,
+            "job_type": JobType.FINAL_RENDER.value,
+            "status": job_status,
+            "started_at": "2026-08-12T01:00:00+00:00",
+            "finished_at": "2026-08-12T01:01:00+00:00" if job_status != JobStatus.RUNNING.value else None,
+        }],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == expected_state
+    assert payload["next_action"]["label"] == expected_label
+    assert payload["next_action"]["href"] == f"/projects/{project_id}/output"
+
+
+def test_workspace_summary_selects_latest_final_render_by_timestamp_not_job_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Latest output"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-latest",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [
+            {
+                "job_id": "final-render-a",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.SUCCEEDED.value,
+                "started_at": "2026-08-12T02:00:00+00:00",
+                "finished_at": "2026-08-12T02:01:00+00:00",
+            },
+            {
+                "job_id": "final-render-z",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.FAILED.value,
+                "started_at": "2026-08-12T01:00:00+00:00",
+                "finished_at": "2026-08-12T01:01:00+00:00",
+            },
+        ],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == "ready"
+    assert payload["next_action"]["label"] == "완성본 보기"
+
+
+def test_workspace_summary_fails_closed_when_session_timeline_review_is_missing(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Missing review"}).json()["project_id"]
+    app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-without-review",
+        session_payload={"segments": [], "history": []},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "workspace_summary_unavailable"
+
+
+def test_workspace_summary_surfaces_blocked_review_as_review_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Blocked review"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-blocked",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "blocked"},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "review"
+    assert payload["state"] == "blocked"
+    assert payload["next_action"] == {
+        "label": "검토 문제 해결",
+        "href": f"/projects/{project_id}/review",
+    }
+
+
+def test_workspace_summary_exposes_store_backed_thumbnail_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Thumbnail"}).json()["project_id"]
+    monkeypatch.setattr(
+        app.state.store,
+        "list_assets",
+        lambda *, project_id: [{
+            "asset_id": "broll-cover",
+            "metadata": {"thumbnail_uri": "local://projects/thumbnail/derived/thumbnails/broll-cover.jpg"},
+        }],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["thumbnail_url"] == f"/api/projects/{project_id}/assets/broll-cover/thumbnail"
+
+
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:
     app = create_app(
         projects_root=tmp_path,
