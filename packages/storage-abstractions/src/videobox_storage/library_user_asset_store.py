@@ -363,6 +363,56 @@ class LibraryUserAssetStore:
             connection.rollback(); raise
         finally: connection.close()
 
+    def get_ingest_item(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Return one durable ingest item for response-loss reconciliation."""
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT * FROM library_ingest_items WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        finally:
+            connection.close()
+        return self._ingest_item_row(dict(row)) if row is not None else None
+
+    def update_ingest_item(
+        self,
+        *,
+        idempotency_key: str,
+        library_asset_id: str | None = None,
+        state: str | None = None,
+        error_code: str | None = None,
+    ) -> dict[str, Any]:
+        """Advance an existing item without creating a second retry row."""
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM library_ingest_items WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(idempotency_key)
+            connection.execute(
+                """UPDATE library_ingest_items
+                   SET library_asset_id = COALESCE(?, library_asset_id),
+                       state = COALESCE(?, state), error_code = ?, updated_at = ?
+                   WHERE idempotency_key = ?""",
+                (library_asset_id, state, error_code, _now(), idempotency_key),
+            )
+            updated = connection.execute(
+                "SELECT * FROM library_ingest_items WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            connection.commit()
+            assert updated is not None
+            return self._ingest_item_row(dict(updated))
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def upsert_derivative(self, *, library_asset_id: str, kind: str, managed_relative_path: str, content_sha256: str, byte_count: int, mime_type: str, metadata: Mapping[str, Any] | None = None, derivative_id: str | None = None) -> dict[str, Any]:
         if self.get_asset(library_asset_id) is None: raise KeyError(library_asset_id)
         result = {"derivative_id": derivative_id or f"derivative_{uuid4().hex}", "library_asset_id": library_asset_id, "kind": kind, "managed_relative_path": _safe_relative_path(managed_relative_path), "content_sha256": content_sha256, "byte_count": byte_count, "mime_type": mime_type, "metadata": dict(metadata or {}), "created_at": _now()}

@@ -584,3 +584,52 @@ def test_every_audio_kind_we_accept_is_actually_taken(tmp_path: Path) -> None:
 
     assert len(report.moved) == len(AUDIO_EXTENSIONS)
     assert sorted(path.suffix for path in library.iterdir()) == sorted(AUDIO_EXTENSIONS)
+
+
+def test_copy_only_drive_ingest_keeps_source_and_registers_global_asset(tmp_path: Path) -> None:
+    watch = tmp_path / "drive" / "새 영상"
+    watch.mkdir(parents=True)
+    library = tmp_path / "library"
+    source = watch / "clip.mp4"
+    source.write_bytes(b"drive bytes")
+    from videobox_storage.library_user_asset_store import LibraryUserAssetStore
+
+    store = LibraryUserAssetStore(tmp_path / "state")
+    report = run_inbox_cycle(
+        MediaInboxConfig(
+            watch_path=watch,
+            library_root=library,
+            copy_only=True,
+            ingest_store=store,
+            media_type="broll",
+        )
+    )
+
+    assert report.moved == ["clip.mp4"]
+    assert source.read_bytes() == b"drive bytes"
+    assert len(store.list_assets(media_type="broll")) == 1
+
+
+def test_copy_only_archive_is_opt_in_and_keeps_default_source_policy_separate(tmp_path: Path) -> None:
+    watch = tmp_path / "drive" / "새 영상"
+    watch.mkdir(parents=True)
+    archive = tmp_path / "drive" / "자산화_완료"
+    library = tmp_path / "library"
+    source = watch / "clip.mp4"
+    source.write_bytes(b"drive bytes")
+    from videobox_storage.library_user_asset_store import LibraryUserAssetStore
+
+    report = run_inbox_cycle(
+        MediaInboxConfig(
+            watch_path=watch,
+            library_root=library,
+            archive_root=archive,
+            archive_source=True,
+            copy_only=True,
+            ingest_store=LibraryUserAssetStore(tmp_path / "state"),
+        )
+    )
+
+    assert report.moved == ["clip.mp4"]
+    assert not source.exists()
+    assert (archive / "clip.mp4").read_bytes() == b"drive bytes"

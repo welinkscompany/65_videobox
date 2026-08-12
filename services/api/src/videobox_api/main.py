@@ -1010,6 +1010,9 @@ def create_app(
             watch_path=media_inbox_watch_path,
             library_root=resolved_media_inbox_library_root,
             archive_root=media_inbox_archive_root,
+            copy_only=True,
+            ingest_store=resolved_media_library_store.user_asset_store,
+            media_type="broll",
         )
         if media_inbox_watch_path is not None
         else None
@@ -1028,6 +1031,9 @@ def create_app(
             library_root=resolved_owner_audio_library_root / media_type,
             archive_root=media_inbox_archive_root,
             accepted_extensions=AUDIO_EXTENSIONS,
+            copy_only=True,
+            ingest_store=resolved_media_library_store.user_asset_store,
+            media_type=media_type,
         )
         for media_type, watch_path in sorted(
             resolve_owner_audio_watch_paths(media_inbox_watch_path).items()

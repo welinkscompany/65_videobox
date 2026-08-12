@@ -11,6 +11,7 @@ __all__ = [
     "LocalPipelineRunner",
     "RuleBasedMusicRecommender",
     "TimelineBuilder",
+    "LibraryIngestService",
 ]
 
 _LAZY_EXPORTS = {
@@ -33,6 +34,7 @@ _LAZY_EXPORTS = {
         "RuleBasedMusicRecommender",
     ),
     "TimelineBuilder": ("videobox_core_engine.timeline_builder", "TimelineBuilder"),
+    "LibraryIngestService": ("videobox_core_engine.library_ingest", "LibraryIngestService"),
 }
 
 

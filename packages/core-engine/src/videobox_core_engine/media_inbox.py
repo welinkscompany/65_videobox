@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from videobox_core_engine.library_ingest import LibraryIngestService
+from videobox_storage.library_user_asset_store import LibraryUserAssetStore
+
 # Mirrors services/api/src/videobox_api/orchestration.py's
 # BROLL_VIDEO_EXTENSIONS. Duplicated rather than imported: core-engine must
 # not depend on the services/api layer above it.
@@ -129,6 +132,13 @@ class MediaInboxConfig:
     # 자리가 여기다 -- `새 영상`은 영상만, `새 음악`과 `새 효과음`은 오디오만
     # 받는다. 보관함은 셋이 함께 쓴다(`감시폴더.parent / "자산화_완료"`).
     accepted_extensions: frozenset[str] = VIDEO_EXTENSIONS
+    # New Drive-mirror callers opt into the shared copy-only ingest pipeline.
+    # ``False`` retains the historical local-watch move contract for callers
+    # that have not migrated yet; the API bootstrap sets this to ``True``.
+    copy_only: bool = False
+    archive_source: bool = False
+    media_type: str = "broll"
+    ingest_store: LibraryUserAssetStore | None = None
 
 
 @dataclass(slots=True)
@@ -192,6 +202,28 @@ def run_inbox_cycle(
                 report.skipped.append(name)
                 continue
             source_hash = _sha256_file(source)
+            if config.copy_only:
+                ingest_store = config.ingest_store or LibraryUserAssetStore(
+                    config.library_root.parent / ".videobox-library-state"
+                )
+                result = LibraryIngestService(
+                    store=ingest_store, managed_root=config.library_root
+                ).ingest(
+                    media_type=config.media_type,
+                    source=source,
+                    filename=name,
+                    idempotency_key=f"media-inbox:{source.resolve()}:{source_hash}",
+                    provenance={"source": "drive_mirror", "watch_path": str(config.watch_path)},
+                )
+                if result.get("duplicate"):
+                    report.duplicates.append(name)
+                else:
+                    report.moved.append(name)
+                # Archiving is a separate, explicit policy.  The normal Drive
+                # mirror path leaves its source untouched after copying.
+                if config.archive_source and config.archive_root is not None:
+                    _archive_original(source, config.archive_root, source_hash)
+                continue
             if source_hash in existing_library_hashes:
                 # Redundant footage already in the library. File it if there is
                 # somewhere to file it -- it is still the owner's footage, and
