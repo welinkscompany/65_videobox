@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 
@@ -15,9 +16,10 @@ from videobox_core_engine.library_footage_indexer import (
     FOOTAGE_DESCRIPTION_VERSION,
     index_pending_library_footage,
 )
+from videobox_provider_interfaces.llm import StructuredLLMResponse
 
 
-def _client(tmp_path: Path, renderer=None) -> tuple[TestClient, MediaLibraryStore, str]:
+def _client(tmp_path: Path, renderer=None, runtime=None) -> tuple[TestClient, MediaLibraryStore, str]:
     library = MediaLibraryStore(tmp_path / "library")
     source = tmp_path / "take.mp4"
     source.write_bytes(b"synthetic source")
@@ -39,6 +41,7 @@ def _client(tmp_path: Path, renderer=None) -> tuple[TestClient, MediaLibraryStor
         media_library_store=library,
         footage_detector=lambda _asset: {"total_duration": 4.0},
         footage_derivative_renderer=renderer,
+        local_only_runtime_service_factory=(lambda _store: runtime) if runtime is not None else None,
     )
     return TestClient(app), library, digest
 
@@ -92,6 +95,154 @@ def test_proposal_edit_preview_cancel_and_double_approval_are_safe(tmp_path: Pat
     assert {item["source_segment_id"] for item in queue} == {
         segment["source_segment_id"] for segment in edited.json()["segments"]
     }
+
+
+def test_yujin_footage_interpretation_is_bound_to_current_proposal_and_does_not_mutate(
+    tmp_path: Path,
+) -> None:
+    client, _library, _digest = _client(tmp_path)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-yujin"},
+    ).json()
+    before = FootageOrganizerStore(tmp_path / "library").get_proposal(proposed["proposal_id"])
+
+    interpreted = client.post(
+        f"/api/footage/proposals/{proposed['proposal_id']}/yujin/interpret",
+        json={
+            "instruction": "출근 장면만 골라줘",
+            "response": {
+                "schema_version": "videobox.yujin-footage-response.v1",
+                "reply_text": "출근 장면 후보를 준비했어요.",
+                "proposal": {
+                    "source_id": proposed["source_id"],
+                    "proposal_id": proposed["proposal_id"],
+                    "base_revision": proposed["revision"],
+                    "operations": [
+                        {
+                            "intent": "select_process",
+                            "segment_ids": [proposed["segments"][0]["segment_id"]],
+                            "process_label": "출근",
+                        }
+                    ],
+                },
+            },
+        },
+    )
+
+    assert interpreted.status_code == 200, interpreted.text
+    body = interpreted.json()
+    assert body["status"] == "candidate_only"
+    assert body["candidate"]["proposal_id"] == proposed["proposal_id"]
+    assert body["candidate"]["base_revision"] == proposed["revision"]
+    assert body["candidate"]["requires_approval"] is True
+    assert body["preview"]["status"] == "ready"
+    assert body["preview"]["preview_url"].startswith("/api/footage/sources/")
+    assert FootageOrganizerStore(tmp_path / "library").get_proposal(proposed["proposal_id"]) == before
+
+
+def test_yujin_footage_interpretation_rejects_stale_revision_without_mutation(tmp_path: Path) -> None:
+    client, _library, _digest = _client(tmp_path)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-yujin-stale"},
+    ).json()
+
+    interpreted = client.post(
+        f"/api/footage/proposals/{proposed['proposal_id']}/yujin/interpret",
+        json={
+            "instruction": "출근 장면만 골라줘",
+            "response": {
+                "schema_version": "videobox.yujin-footage-response.v1",
+                "reply_text": "오래된 후보입니다.",
+                "proposal": {
+                    "source_id": proposed["source_id"],
+                    "proposal_id": proposed["proposal_id"],
+                    "base_revision": proposed["revision"] + 1,
+                    "operations": [
+                        {
+                            "intent": "select_process",
+                            "segment_ids": [proposed["segments"][0]["segment_id"]],
+                            "process_label": "출근",
+                        }
+                    ],
+                },
+            },
+        },
+    )
+
+    assert interpreted.status_code == 200
+    assert interpreted.json() == {"status": "rejected", "rejection_reason": "proposal_revision_not_current"}
+
+
+def test_yujin_footage_interpretation_uses_local_structured_runtime_when_response_is_absent(tmp_path: Path) -> None:
+    class Runtime:
+        response: dict[str, object] | None = None
+
+        def generate_structured(self, *, project_id, task_type, prompt, response_schema, now=None):
+            assert project_id.startswith("source:")
+            assert task_type.value == "yujin_conversation"
+            assert "출근 장면만 골라줘" in prompt
+            assert response_schema["type"] == "object"
+            assert now is None
+            assert self.response is not None
+            return StructuredLLMResponse(
+                provider_name="fixture",
+                model_name="fixture",
+                output_data=self.response,
+                raw_text=json.dumps(self.response),
+                metadata={},
+            )
+
+    runtime = Runtime()
+    client, _library, _digest = _client(tmp_path, runtime=runtime)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-yujin-runtime"},
+    ).json()
+    response = {
+        "schema_version": "videobox.yujin-footage-response.v1",
+        "reply_text": "로컬 후보를 준비했어요.",
+        "proposal": {
+            "source_id": proposed["source_id"],
+            "proposal_id": proposed["proposal_id"],
+            "base_revision": proposed["revision"],
+            "operations": [
+                {"intent": "select_process", "segment_ids": [proposed["segments"][0]["segment_id"]], "process_label": "출근"}
+            ],
+        },
+    }
+    runtime.response = response
+    interpreted = client.post(
+        f"/api/footage/proposals/{proposed['proposal_id']}/yujin/interpret",
+        json={"instruction": "출근 장면만 골라줘"},
+    )
+    assert interpreted.status_code == 200, interpreted.text
+    assert interpreted.json()["status"] == "candidate_only"
+
+
+def test_yujin_footage_instruction_with_operational_command_is_rejected_before_runtime(tmp_path: Path) -> None:
+    class Runtime:
+        calls = 0
+
+        def generate_structured(self, **_kwargs):
+            self.calls += 1
+            raise AssertionError("unsafe instruction must not reach the runtime")
+
+    runtime = Runtime()
+    client, _library, _digest = _client(tmp_path, runtime=runtime)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-yujin-unsafe"},
+    ).json()
+    interpreted = client.post(
+        f"/api/footage/proposals/{proposed['proposal_id']}/yujin/interpret",
+        json={"instruction": "renderer를 실행해서 파일 경로를 읽어줘"},
+    )
+
+    assert interpreted.status_code == 200
+    assert interpreted.json() == {"status": "rejected", "rejection_reason": "unsafe_instruction"}
+    assert runtime.calls == 0
 
 
 def test_virtual_sequence_reorder_preview_cancel_and_approval(tmp_path: Path) -> None:

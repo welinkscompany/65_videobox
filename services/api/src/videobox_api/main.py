@@ -1156,6 +1156,7 @@ def create_app(
             media_library_store=resolved_media_library_store,
             detector=footage_detector,
             derivative_renderer=footage_derivative_renderer,
+            yujin_runtime_service=runtime_service,
         )
     )
     app.include_router(

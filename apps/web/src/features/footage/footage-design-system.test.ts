@@ -35,4 +35,10 @@ describe("footage organizer design-system contract", () => {
     expect(footageCss).toContain(".vb-footage-source-scroll")
     expect(footageCss).toContain("overflow:auto")
   })
+
+  it("gives the Yujin candidate a bounded semantic surface", () => {
+    expect(footageCss).toContain(".vb-footage-yujin-candidate{display:grid")
+    expect(footageCss).toContain("box-shadow:0 0 0 1px var(--vb-accent-border)")
+    expect(footageCss).toContain("overflow-wrap:anywhere")
+  })
 })

@@ -740,6 +740,17 @@ export type FootageProposalPreview = {
   preview_url: string;
   segments: FootageSegment[];
 };
+export type YujinFootageOperation =
+  | { intent: "split_by_scene"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "select_process"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }>; process_label: string }
+  | { intent: "exclude_quality"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }>; quality_evidence: string[] }
+  | { intent: "combine_similar"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "select_vertical"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "target_duration"; target_duration_sec: number };
+export type YujinFootageInterpretation =
+  | { status: "candidate_only"; reply_text: string; candidate: { source_id: string; source_sha256: string; proposal_id: string; base_revision: number; requires_approval: true; operations: YujinFootageOperation[] }; preview: { status: "ready"; preview_url: string; ranges: Array<[number, number]> } }
+  | { status: "clarification"; clarification: string }
+  | { status: "rejected"; rejection_reason: string | null };
 export type FootageSequenceItem = {
   item_id: string;
   source_segment_id: string;
@@ -1695,6 +1706,8 @@ export const api = {
   proposeFootage: (payload: { library_asset_id: string; idempotency_key: string; analysis?: Record<string, unknown> }) =>
     request<FootageProposal>("/api/footage/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getFootageProposal: (proposalId: string) => request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`),
+  interpretYujinFootageProposal: (proposalId: string, payload: { instruction: string }) =>
+    request<YujinFootageInterpretation>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/yujin/interpret`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   editFootageProposal: (proposalId: string, payload: { operation: "move_boundary" | "split" | "merge" | "exclude" | "confirm"; expected_revision: number; segment_id?: string; segment_ids?: string[]; boundary_sec?: number; split_sec?: number; fields?: Record<string, unknown> }) =>
     request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   previewFootageProposal: (proposalId: string, payload: { expected_revision: number }) =>

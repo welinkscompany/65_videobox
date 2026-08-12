@@ -1395,6 +1395,13 @@ class FootageProposalCreateRequest(BaseModel):
     analysis: dict[str, Any] | None = None
 
 
+class YujinFootageInterpretRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    instruction: str = Field(min_length=1, max_length=2_048)
+    response: dict[str, Any] | str | None = None
+
+
 class FootageProposalEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

@@ -43,6 +43,19 @@ beforeEach(() => {
   vi.spyOn(api, "previewFootageProposal").mockResolvedValue({ status: "ready", proposal_id: "proposal-1", revision: 1, source_id: "source-1", preview_url: "/api/footage/sources/source-1/preview?ranges=0.000-8.000%2C8.000-20.000", segments: proposal.segments });
   vi.spyOn(api, "cancelFootageProposal").mockResolvedValue({ status: "cancelled", proposal_id: "proposal-1", revision: 1 });
   vi.spyOn(api, "approveFootageProposal").mockResolvedValue({ ...proposal, status: "approved", revision: 2 });
+  vi.spyOn(api, "interpretYujinFootageProposal").mockResolvedValue({
+    status: "candidate_only",
+    reply_text: "출근 장면 후보를 준비했어요.",
+    candidate: {
+      source_id: "source-1",
+      source_sha256: "a".repeat(64),
+      proposal_id: "proposal-1",
+      base_revision: 1,
+      requires_approval: true,
+      operations: [{ intent: "select_process", segment_ids: ["seg-1"], process_label: "출근", ranges: [] }],
+    },
+    preview: { status: "ready", preview_url: "/api/footage/sources/source-1/preview?ranges=0.000-8.000", ranges: [[0, 8]] },
+  });
   vi.spyOn(api, "createFootageSequence").mockResolvedValue({ sequence_id: "sequence-1", source_id: "source-1", source_sha256: "a".repeat(64), name: "새 가상 묶음", revision: 1, items: [{ item_id: "item-1", source_segment_id: "source-seg-1", item_order: 1, start_sec: 0, end_sec: 8 }, { item_id: "item-2", source_segment_id: "source-seg-2", item_order: 2, start_sec: 8, end_sec: 20 }] });
   vi.spyOn(api, "reorderFootageSequence").mockResolvedValue({ sequence_id: "sequence-1", source_id: "source-1", source_sha256: "a".repeat(64), name: "새 가상 묶음", revision: 2, items: [{ item_id: "item-2", source_segment_id: "source-seg-2", item_order: 1, start_sec: 8, end_sec: 20 }, { item_id: "item-1", source_segment_id: "source-seg-1", item_order: 2, start_sec: 0, end_sec: 8 }] });
 });
@@ -74,6 +87,21 @@ describe("FootageOrganizerPage", () => {
     expect(api.approveFootageProposal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "제안 적용" }));
     await waitFor(() => expect(api.approveFootageProposal).toHaveBeenCalledWith("proposal-1", expect.objectContaining({ expected_revision: 1, idempotency_key: expect.any(String) })));
+  });
+
+  it("sends a non-mutating Yujin request and shows the candidate preview separately from approval", async () => {
+    render(<FootageOrganizerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
+    fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
+    await screen.findByTestId("scene-timeline");
+    fireEvent.change(screen.getByLabelText("정리 요청"), { target: { value: "출근 장면만 골라줘" } });
+    fireEvent.click(screen.getByRole("button", { name: "유진에게 제안 요청" }));
+
+    await waitFor(() => expect(api.interpretYujinFootageProposal).toHaveBeenCalledWith("proposal-1", { instruction: "출근 장면만 골라줘" }));
+    expect(await screen.findByText("출근 장면 후보를 준비했어요.")).toBeVisible();
+    expect(screen.getByTestId("yujin-candidate")).toHaveTextContent("select_process");
+    expect(screen.getByTestId("footage-video")).toHaveAttribute("src", "/api/footage/sources/source-1/preview?ranges=0.000-8.000");
+    expect(api.approveFootageProposal).not.toHaveBeenCalled();
   });
 
   it("shows retry state when the source list fails", async () => {

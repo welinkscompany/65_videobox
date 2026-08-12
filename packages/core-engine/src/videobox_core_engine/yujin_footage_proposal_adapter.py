@@ -17,6 +17,7 @@ from videobox_domain_models.yujin_footage_proposals import (
     SelectProcessOperation,
     SelectVerticalOperation,
     SplitBySceneOperation,
+    TargetDurationOperation,
     YujinFootageCandidateProposal,
     YujinFootageContext,
     YujinFootageOperation,
@@ -47,6 +48,7 @@ _UNSAFE_TEXT = re.compile(
 class YujinFootageResult:
     status: Literal["candidate_only", "clarification", "rejected"]
     proposal: YujinFootageCandidateProposal | None = None
+    reply_text: str | None = None
     clarification: str | None = None
     rejection_reason: str | None = None
 
@@ -91,7 +93,11 @@ def interpret_yujin_footage_request(
         requires_approval=True,
         operations=proposal.operations,
     )
-    return YujinFootageResult(status="candidate_only", proposal=candidate)
+    return YujinFootageResult(
+        status="candidate_only",
+        proposal=candidate,
+        reply_text=response.reply_text,
+    )
 
 
 def _decode_payload(payload: str | Mapping[str, object]) -> dict[str, object] | None:
@@ -220,6 +226,12 @@ def _contains_unsafe_instruction(value: object) -> bool:
     return False
 
 
+def is_unsafe_yujin_footage_instruction(value: object) -> bool:
+    """Expose the same fail-closed instruction scan for the API request boundary."""
+
+    return _contains_unsafe_instruction(value)
+
+
 def _clarification(raw: dict[str, object]) -> YujinFootageResult:
     allowed = {"schema_version", "reply_text", "proposal"}
     if set(raw) - allowed:
@@ -308,4 +320,58 @@ def _rejected(reason: str) -> YujinFootageResult:
     return YujinFootageResult(status="rejected", rejection_reason=reason)
 
 
-__all__ = ["YujinFootageResult", "interpret_yujin_footage_request"]
+def preview_ranges_for_yujin_candidate(
+    candidate: YujinFootageCandidateProposal,
+    context: YujinFootageContext,
+) -> tuple[tuple[float, float], ...]:
+    """Project a candidate to read-only source ranges for the existing preview path."""
+
+    segments = {segment.segment_id: segment for segment in context.segments}
+    ranges: list[tuple[float, float]] = []
+    for operation in candidate.operations:
+        if isinstance(operation, TargetDurationOperation):
+            remaining = operation.target_duration_sec
+            for segment in context.segments:
+                if remaining <= 0:
+                    break
+                end = min(segment.end_sec, segment.start_sec + remaining)
+                if end > segment.start_sec:
+                    ranges.append((segment.start_sec, end))
+                    remaining -= end - segment.start_sec
+            continue
+        if isinstance(operation, ExcludeQualityOperation):
+            excluded = set(operation.segment_ids)
+            ranges.extend(
+                (segment.start_sec, segment.end_sec)
+                for segment in context.segments
+                if segment.segment_id not in excluded
+            )
+            continue
+        selected = [segments[segment_id] for segment_id in operation.segment_ids]
+        if operation.ranges:
+            ranges.extend((item.start_sec, item.end_sec) for item in operation.ranges)
+        else:
+            ranges.extend((segment.start_sec, segment.end_sec) for segment in selected)
+
+    if not ranges:
+        ranges = [(segment.start_sec, segment.end_sec) for segment in context.segments]
+    return _merge_preview_ranges(ranges)
+
+
+def _merge_preview_ranges(ranges: list[tuple[float, float]]) -> tuple[tuple[float, float], ...]:
+    ordered = sorted(set(ranges))
+    merged: list[list[float]] = []
+    for start, end in ordered:
+        if not merged or start > merged[-1][1] + 1e-6:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+    return tuple((start, end) for start, end in merged)
+
+
+__all__ = [
+    "YujinFootageResult",
+    "interpret_yujin_footage_request",
+    "is_unsafe_yujin_footage_instruction",
+    "preview_ranges_for_yujin_candidate",
+]
