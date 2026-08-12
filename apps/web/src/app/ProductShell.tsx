@@ -67,7 +67,7 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   } else if (!forceCollapsed) previousForceCollapsed.current = false;
   const current = projects.find((project) => project.project_id === projectId);
   const hasProject = Boolean(projectId && current);
-  const globalNav = [["프로젝트", "/projects", Home], ["내 라이브러리", "/library", Images], ["촬영본 정리", "/footage", Video], ["설정", `/settings/general${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`, Settings]] as const;
+  const globalNav = [["프로젝트", "/projects", Home], ["내 라이브러리", "/library", Images], ["촬영본 정리", "/footage", Video], ["설정", "/settings/general", Settings]] as const;
   const stageNav = [["기획", "create", FilePlus2], ["자산", "media", Images], ["편집", "editing", Scissors], ["검토", "review", ClipboardCheck], ["출력", "outputs", Download]] as const;
   const go = (next: string) => { if (window.innerWidth < 768) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); onNavigate(projectId, next as WorkspaceSection); };
   const setJobDialogOpenSafely = (open: boolean) => {
@@ -100,7 +100,7 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
     <Sidebar collapsible="icon" className="vb-product-sidebar" aria-label="프로젝트와 화면">
       <SidebarHeader>
       <div className="vb-shell-brand"><Video aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">VideoBox</span></div>
-      <nav aria-label="전체 메뉴" className="vb-global-nav"><ul>{globalNav.map(([label, href, Icon]) => <li key={href}><a href={href} aria-label={label}><Icon aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">{label}</span></a></li>)}</ul></nav>
+      <nav aria-label="전체 메뉴" className="vb-global-nav"><ul>{globalNav.map(([label, href, Icon]) => <li key={href}><a href={href} aria-label={label} onClick={label === "설정" ? (event) => { event.preventDefault(); onOpenSettings(); } : undefined}><Icon aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">{label}</span></a></li>)}</ul></nav>
       {hasProject ? <div className="vb-project-switcher group-data-[collapsible=icon]:hidden" aria-label="프로젝트 전환"><p>현재 프로젝트</p>{projects.map((project) => <div key={project.project_id} className="vb-project-row" data-testid={`project-row-${project.project_id}`}>
         <Button className="vb-project-select" variant="ghost" aria-label={project.name} aria-pressed={project.project_id === projectId} onClick={() => onNavigate(project.project_id, "home")}>{project.name}</Button>
         <DropdownMenu>
