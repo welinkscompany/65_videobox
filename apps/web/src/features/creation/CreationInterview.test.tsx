@@ -360,6 +360,34 @@ describe("CreationInterview", () => {
     expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeDisabled();
   });
 
+  it("surfaces retry and cancel readiness failures instead of leaving an unhandled rejection", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const failed = { readiness_id: "readiness_1", brief_id: "brief_1", status: "failed", revision: 3, result: null } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(failed);
+    vi.spyOn(api, "retryDraftReadiness").mockRejectedValue(new Error("conflict"));
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "다시 준비" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("다시 준비하지 못했습니다");
+  });
+
+  it("surfaces candidate skip failures in the readiness workspace", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const ready = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: { broll_candidates: [{ asset_id: "asset_1", label: "제품 장면", target_range: { start_sec: 0, end_sec: 2 } }] } } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(ready);
+    vi.spyOn(api, "updateDraftReadinessCandidate").mockRejectedValue(new Error("conflict"));
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "제품 장면 건너뛰기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("장면을 건너뛰지 못했습니다");
+  });
+
   it("saves each B-roll candidate's chosen seconds with the current readiness revision", async () => {
     window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
     const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
