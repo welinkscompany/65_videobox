@@ -82,6 +82,9 @@ expect(parseWorkspaceLocation("/projects/p1/outputs")).toMatchObject({ projectId
 - Modify: `apps/web/src/app/ProductShell.tsx`
 - Modify: `apps/web/src/styles/product-shell.css`
 - Modify: `apps/web/src/app/ProductShell.test.tsx`
+- Modify: `apps/web/src/app/AppRouter.test.tsx`
+- Modify: `apps/web/src/features/media/MediaWorkspacePage.tsx`
+- Modify: `apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx`
 - Modify: `docs/oss/editor-ui-source-map.json`
 - Test: `tests/test_editor_ui_source_provenance.py`
 - Test: `apps/web/e2e/product-shell.spec.mjs`
@@ -92,7 +95,7 @@ expect(parseWorkspaceLocation("/projects/p1/outputs")).toMatchObject({ projectId
 - [ ] **Step 4: Refresh provenance.** Update both normalized `ProductShell.tsx` hashes in `docs/oss/editor-ui-source-map.json` using the repository verifier convention.
 - [ ] **Step 5: Run GREEN and provenance.** Run `npm --prefix apps/web test -- src/app/ProductShell.test.tsx` and `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_editor_ui_source_provenance.py -q`.
 - [ ] **Step 6: Verify real browser.** Rebuild with `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\owner-ready.ps1 -Mode Start -Rebuild -Json`, then Check. Open projects and one project at all four desktop viewports; capture sidebar, stage rail, button spacing and internal scroll. Prove collapsed → expanded reverse action.
-- [ ] **Step 7: Commit.** `git add apps/web/src/app/ProductShell.tsx apps/web/src/styles/product-shell.css apps/web/src/app/ProductShell.test.tsx apps/web/e2e/product-shell.spec.mjs docs/oss/editor-ui-source-map.json && git commit -m "feat: establish desktop creator workspace shell"`.
+- [ ] **Step 7: Commit.** `git add apps/web/src/app/ProductShell.tsx apps/web/src/styles/product-shell.css apps/web/src/app/ProductShell.test.tsx apps/web/src/app/AppRouter.test.tsx apps/web/src/features/media/MediaWorkspacePage.tsx apps/web/src/features/editor/workbench/EditorWorkbenchRoute.tsx apps/web/e2e/product-shell.spec.mjs docs/oss/editor-ui-source-map.json && git commit -m "feat: establish desktop creator workspace shell"`. The media/editor wrapper updates keep the shared shell at one `main`; the AppRouter assertion pins the canonical `기획` stage label.
 
 ### Task 4: Wave 0 regression and gate
 
