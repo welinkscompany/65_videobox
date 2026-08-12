@@ -203,3 +203,26 @@ def test_user_confirmed_footage_tags_are_added_to_machine_description(tmp_path: 
     saved = store.saved[0]
     assert "차량" in saved["description"] and "이동" in saved["description"]
     assert saved["tags"]["layers"]["place"] == ["실내 수영장"]
+
+
+def test_pending_embedding_reuses_saved_footage_analysis_without_vision(tmp_path: Path) -> None:
+    class _Store(_FakeStore):
+        def get_footage_descriptor(self, *, content_sha256: str):
+            assert content_sha256 == "abc"
+            return {
+                "content_sha256": "abc", "filename": "a.mp4", "duration_seconds": 29.1,
+                "width": 1920, "height": 1080,
+                "tags": {"layers": {"place": ["저장된 장소"]}},
+                "description": "가로 영상. 저장된 장소.",
+                "embedding": None, "description_version": FOOTAGE_DESCRIPTION_VERSION,
+            }
+
+    store = _Store(_pending(tmp_path))
+    report = _run(
+        store, tmp_path, vision_provider=_Vision(fail=True),
+        embedding_provider=_Embeddings(),
+    )
+
+    assert report.analyzed == ["a.mp4"]
+    assert report.failed == []
+    assert store.saved[0]["description"] == "가로 영상. 저장된 장소."

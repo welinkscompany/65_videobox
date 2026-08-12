@@ -102,10 +102,6 @@ def index_pending_library_footage(
     max_clips: int | None = _DEFAULT_MAX_CLIPS,
 ) -> LibraryFootageIndexReport:
     report = LibraryFootageIndexReport()
-    if vision_provider is None or not vision_model_name:
-        # 화면 분석 없이는 저장할 내용이 없다. 조용히 성공한 척하지 않는다.
-        return report
-
     pending = store.list_footage_needing_analysis(
         paths=list(paths), description_version=FOOTAGE_DESCRIPTION_VERSION
     )
@@ -116,6 +112,40 @@ def index_pending_library_footage(
         filename = str(clip["filename"])
         path = Path(str(clip["path"]))
         if not path.is_file():
+            report.failed.append(filename)
+            continue
+        existing = None
+        getter = getattr(store, "get_footage_descriptor", None)
+        if callable(getter):
+            existing = getter(content_sha256=str(clip["content_sha256"]))
+        if (
+            existing
+            and int(existing.get("description_version", 0)) >= FOOTAGE_DESCRIPTION_VERSION
+            and existing.get("embedding") is None
+        ):
+            description = str(existing.get("description", ""))
+            embedding = _embed(
+                description,
+                embedding_provider=embedding_provider,
+                embedding_model_name=embedding_model_name,
+                label=filename,
+            )
+            store.save_footage_descriptor(
+                content_sha256=str(clip["content_sha256"]),
+                library_asset_id=clip.get("library_asset_id") or existing.get("library_asset_id"),
+                filename=str(existing.get("filename") or filename),
+                duration_seconds=float(existing["duration_seconds"]),
+                width=int(existing["width"]),
+                height=int(existing["height"]),
+                tags=dict(existing.get("tags") or {}),
+                description=description,
+                embedding=embedding,
+                description_version=FOOTAGE_DESCRIPTION_VERSION,
+            )
+            report.analyzed.append(filename)
+            continue
+        if vision_provider is None or not vision_model_name:
+            # 화면 분석 없이는 새 설명을 만들 수 없다. 조용히 성공한 척하지 않는다.
             report.failed.append(filename)
             continue
         try:
