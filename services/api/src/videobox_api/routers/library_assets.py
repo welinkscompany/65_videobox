@@ -258,6 +258,9 @@ def build_library_assets_router(
         asset, builtin = find_asset(asset_id)
         if builtin is not None:
             raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
+        locations = user_asset_store.usage(asset_id)
+        if locations:
+            raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": locations})
         if asset.lifecycle is not LibraryAssetLifecycle.TRASHED:
             raise HTTPException(status_code=409, detail={"code": "asset_must_be_trashed"})
         try:
