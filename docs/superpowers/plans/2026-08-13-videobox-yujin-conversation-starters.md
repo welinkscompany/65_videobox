@@ -4,7 +4,7 @@
 
 **Goal:** Add an accessible, design-system-consistent starter-chip area to the editor Right Dock that fills the Yujin composer without sending or mutating anything.
 
-**Architecture:** Keep the feature local to \`RightDock\`. Define four immutable prompt records, render them only for the empty conversation/proposal state, and reuse the controlled \`draft\`/\`onDraftChange\` contract. A textarea ref receives focus after a chip click; existing Hermes, proposal, approval, and \`EditorCommandPort\` paths remain unchanged.
+**Architecture:** Keep the feature local to \`RightDock\`. Define four immutable prompt records, render them only for the empty conversation/proposal state, and reuse the controlled \`draft\`/\`onDraftChange\` contract. A Right Dock-local focus target receives focus after a chip click; existing Hermes, proposal, approval, and \`EditorCommandPort\` paths remain unchanged.
 
 **Tech Stack:** React 18, TypeScript, Vitest, Testing Library, existing VideoBox CSS variables and shadcn \`Button\`/\`Textarea\` primitives.
 
@@ -86,7 +86,7 @@ Expected: FAIL because \`RightDock\` does not yet render a \`대화 스타터\` 
 - Modify: \`apps/web/src/features/editor/workbench/RightDock.tsx\`
 - Modify: \`apps/web/src/styles/editor-workbench.css\`
 
-- [ ] **Step 1: Add the prompt records and composer ref**
+- [ ] **Step 1: Add the prompt records and scoped composer focus target**
 
 After \`staleProposalMessage\`, add:
 
@@ -99,7 +99,7 @@ const conversationStarters = [
 ] as const;
 ~~~
 
-Inside \`RightDock\`, alongside \`historyRef\`, add:
+Inside \`RightDock\`, alongside \`historyRef\`, add a ref to a wrapper around the existing composer. The wrapper keeps focus local to this Right Dock instance without changing the shared Textarea primitive.
 
 ~~~tsx
 const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -140,7 +140,7 @@ Replace the current empty-history branch with this structure:
     </>}
 ~~~
 
-Add \`ref={composerRef}\` to the existing \`Textarea\`. The click handler must only call \`onDraftChange\` and focus; it must not call \`onSendMessage\`, \`onStart\`, \`onApplyProposal\`, \`onManualEdit\`, or a backend client.
+Wrap the existing \`Textarea\` with the scoped ref and focus its descendant textarea after selection. The click handler must only call \`onDraftChange\` and focus; it must not call \`onSendMessage\`, \`onStart\`, \`onApplyProposal\`, \`onManualEdit\`, or a backend client.
 
 - [ ] **Step 3: Add compact chip styling using existing tokens**
 
@@ -222,4 +222,3 @@ git rev-parse HEAD
 ~~~
 
 Expected: implementation commit is at HEAD and the worktree contains no unintended tracked changes. Do not claim owner acceptance; live Hermes chat and real-browser owner verification remain separate gates.
-

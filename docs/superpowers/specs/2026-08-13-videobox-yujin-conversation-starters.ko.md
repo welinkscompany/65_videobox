@@ -47,7 +47,7 @@
 
 - `RightDock` 내부의 정적 starter 정의와 controlled draft 업데이트만 추가한다.
 - 기존 `draft`, `onDraftChange`, `onSendMessage` 계약을 재사용한다. 새 API prop이나 backend route는 추가하지 않는다.
-- 입력창 ref를 사용해 스타터 선택 후 입력창에 포커스를 준다.
+- Right Dock 내부의 입력창 focus target을 사용해 스타터 선택 후 해당 입력창에 포커스를 준다. 공유 Textarea primitive의 전역 ref 계약은 확장하지 않는다.
 - 스타터 클릭 시 `onSendMessage`, `onStart`, `onApplyProposal`, `onManualEdit`를 호출하지 않는다.
 - 기존 `EditorCommandPort`, proposal approval, Hermes SSE/run lifecycle에는 변경을 가하지 않는다.
 - 스타일은 `apps/web/src/styles/editor-workbench.css`의 기존 토큰과 Right Dock 구조를 사용한다. 새로운 색상 체계나 독립적인 디자인 언어를 만들지 않는다.
