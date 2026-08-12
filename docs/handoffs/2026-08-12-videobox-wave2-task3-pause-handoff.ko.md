@@ -4,7 +4,7 @@
 
 - 브랜치: `codex/videobox-container-compatibility`
 - 구현 기준 커밋: `41f89ce44` (촬영본 UI·preview/sequence·디자인 토큰 계약 포함)
-- 최신 핸드오프 커밋: `a58736ad1`
+- 최신 핸드오프 커밋: 이 문서가 포함된 현재 `HEAD`에서 확인한다.
 - 작업 디렉터리: clean
 - 다음 세션은 반드시 이 worktree와 브랜치에서 시작한다.
 
@@ -64,6 +64,12 @@
 - 이어서 `scripts/owner-ready.ps1 -Mode Check -Json -TimeoutSec 8`: VideoBox, local model, Docker/compose, workspace, CapCut 검사는 통과했다. 유일한 blocker는 Hermes dashboard `127.0.0.1:9119`의 `connection_refused`였다.
 - 따라서 Start 성공을 owner acceptance로 해석하지 않는다. 다음 재시도 조건은 Hermes dashboard를 명시적으로 기동한 뒤 Check를 다시 실행하는 것이다. 동일한 9119 blocker를 의미 없이 반복하지 않는다.
 
+### Hermes 포트 불일치 확인 (2026-08-12)
+
+- AK-System Hermes compose는 호스트 `127.0.0.1:9130`을 컨테이너 dashboard 포트 `9119`로 매핑한다. 실제 `http://127.0.0.1:9130/`는 login redirect(HTTP 302)로 응답했고, 공식 Hermes 컨테이너도 이미 실행 중이었다.
+- 따라서 VideoBox 기본값 `127.0.0.1:9119`의 connection refused는 Hermes 미기동이 아니라 host-port 계약 불일치다. `owner-ready.ps1 -Mode Check -HermesDashboardUri http://127.0.0.1:9130/ -Json -TimeoutSec 8`에서는 Hermes를 포함한 runtime checks가 pass했다.
+- 이후 공식 native launcher를 1회 기동해 `127.0.0.1:9119`를 열었고, 기본 URI로 다시 실행한 owner-ready Check에서 Hermes HTTP 200, VideoBox health HTTP 200, local model·CapCut·도구 검사가 모두 통과했다. 이 결과는 runtime preflight 통과 증거이며, 실제 최신 source가 제공되는 컨테이너 브라우저의 owner acceptance와는 구분한다.
+
 ## Wave2 Task5 owner 브라우저 gate 상태
 
 - source Vite + route-mocked Playwright에서는 `/footage` 1280×800 4-pane, 분석→2개 장면→range preview 흐름이 성공했다.
@@ -90,7 +96,7 @@ D:\\AI_Workspace_louis_office_50\\10_workspace\\65_videobox\\.worktrees\\videobo
 
 먼저 git status -sb와 git rev-parse HEAD를 확인하고, 이 핸드오프 문서를 읽어라. 구현 기준은 41f89ce44이며, 최신 핸드오프 커밋은 이 문서의 현재 HEAD로 확인한다.
 
-Wave2 Task4/4A는 구현·리뷰·push까지 완료됐다. 첫 작업은 Hermes dashboard를 명시적으로 기동할 수 있는지 확인하고 owner-ready Check를 재실행하는 것이다. 9119가 reachable해지면 정확한 branch source로 runtime image를 rebuild/restart한 뒤 1280×800 이상에서 `/`, `/library`, `/footage`, project shell을 실제 브라우저로 검증해라. stale placeholder가 보이면 최신 source와 runtime image 불일치로 기록하고 owner 승인으로 표현하지 마라.
+Wave2 Task4/4A는 구현·리뷰·push까지 완료됐다. 첫 작업은 `-HermesDashboardUri http://127.0.0.1:9130/`로 owner-ready Check를 재실행하는 것이다. 모든 checks가 통과하면 정확한 branch source로 runtime image를 rebuild/restart한 뒤 1280×800 이상에서 `/`, `/library`, `/footage`, project shell을 실제 브라우저로 검증해라. stale placeholder가 보이면 최신 source와 runtime image 불일치로 기록하고 owner 승인으로 표현하지 마라.
 
 절차는 runtime preflight → 실제 브라우저/ui-inspector 검증 → console/network/overflow/focus 확인 → owner acceptance 기록이다. 자동/fake E2E 통과를 실제 owner 승인으로 표현하지 마라. owner gate가 통과되면 다음은 Wave2 유진 제안 어댑터이며, 이후 Wave3 editor로 진행한다.
 ```
