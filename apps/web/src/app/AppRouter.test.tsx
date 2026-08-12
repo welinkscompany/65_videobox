@@ -565,7 +565,7 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     expect(await screen.findByText("먼저 영상 초안을 만들어 주세요.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "홈" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "기획" })).toBeVisible();
     const createButtons = screen.getAllByRole("button", { name: "새 영상 만들기" });
     expect(createButtons.length).toBeGreaterThan(0);
 
