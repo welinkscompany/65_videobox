@@ -57,7 +57,7 @@
 | 상태/closeout 로그 | `docs/development-status-2026-06-29.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
 | 미해결 수정 backlog | `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` |
-| **최신 세션 인계** | `docs/handoffs/2026-08-12-videobox-codex-owner-ui-recovery-closeout.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-08-12-videobox-wave2-task5-closeout-handoff.ko.md` |
 
 승인된 시각 결정은 현재 세 건이다. 전부 사용자가 명시 승인했고 재승인 없이 바꾸지 않는다.
 **현재 화면에 적용된 팔레트는 가장 나중 것이다** — 앞의 둘을 읽고 색을 판단하면 틀린다.
@@ -246,6 +246,6 @@
 ## 8. 사용자 커뮤니케이션
 
 - 기본적으로 존댓말을 유지한다.
-- 쉬운 말로 요약하되 기술적으로 중요한 경계와 리스크는 숨기지 않는다.
+- 쉬운 말로 요약하되 중요한 경계와 리스크는 숨기지 않는다.
 - dashboard에 노출되는 문구는 `§10.13` creator-language 규정을 따른다.
   개발·시스템 내부 용어(`provider`, `runtime`, `job`, `revision`, `pipeline` 등)를 사용자 화면에 쓰지 않는다.

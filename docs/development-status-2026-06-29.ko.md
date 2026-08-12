@@ -10803,3 +10803,13 @@ historical 문서와 찌꺼기 파일 판단은 아래 기본값을 유지한다
   승인하는 흐름이 먼저 필요하다
 - 기억 후보 제안 UI가 실제로 뜨는지 확인이 안 됐다
 - Task 25/26/29/34/35 잔여분은 이전 인계 문서 기준 그대로다
+
+## 2026-08-13 closeout — Creator Workspace Wave 5 QA 범위 고정
+
+인계 문서: `docs/handoffs/2026-08-13-videobox-creator-workspace-overhaul-closeout.ko.md`
+
+- frontend `66 files / 912 passed`, backend `3454 passed / 53 skipped`, production build, isolated Chromium `39 passed`, editor-workbench `9 passed`를 직렬·독립 조건에서 재확인했다.
+- official runtime은 현재 worktree source로 rebuild했고, `1280x800`에서 `/`, `/library`, `/footage`, project shell을 실제 Chromium으로 열었다. stale placeholder·console/page error·root horizontal overflow는 확인되지 않았다.
+- 기존 editor session의 exact-preview 404, Hermes gateway stopped, owner-approved 새 QA project와 human 전체 시청 미실행은 별도 blocker로 남겼다.
+- provenance hash drift와 최신 handoff pointer drift를 고치고 관련 26개 테스트를 통과시켰다.
+- 이 closeout은 자동·isolated·official runtime 증거를 정리한 것이며 owner acceptance 완료 보고가 아니다.
