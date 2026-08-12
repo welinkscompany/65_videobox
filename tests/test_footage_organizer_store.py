@@ -17,13 +17,28 @@ from videobox_storage.footage_organizer_store import (
 from videobox_storage.media_library_store import MediaLibraryStore
 
 
+def _source(tmp_path: Path, *, source_id: str, digest: str):
+    MediaLibraryStore(tmp_path / "library").register_user_asset(
+        library_asset_id=f"asset-{source_id}",
+        media_type="broll",
+        origin="user",
+        content_sha256=digest,
+        managed_relative_path=f"{source_id}.mp4",
+        byte_count=1,
+        mime_type="video/mp4",
+    )
+    return FootageOrganizerStore(tmp_path / "library").register_source(
+        source_id=source_id,
+        source_sha256=digest,
+        library_asset_id=f"asset-{source_id}",
+    )
+
+
 def test_source_segments_are_immutable_and_proposals_keep_boundaries(
     tmp_path: Path,
 ) -> None:
     store = FootageOrganizerStore(tmp_path / "library")
-    source = store.register_source(
-        source_id="source-1", source_sha256="a" * 64, filename="camera.mp4"
-    )
+    source = _source(tmp_path, source_id="source-1", digest="a" * 64)
     segment = store.create_source_segment(
         source_id=source.source_id, start_sec=1.5, end_sec=4.0, label="opening"
     )
@@ -45,9 +60,51 @@ def test_source_segments_are_immutable_and_proposals_keep_boundaries(
     assert loaded.source_sha256 == "a" * 64
 
 
+def test_source_requires_canonical_library_asset_and_finite_boundaries(
+    tmp_path: Path,
+) -> None:
+    store = FootageOrganizerStore(tmp_path / "library")
+    with pytest.raises(ValueError, match="library_asset_id"):
+        store.register_source(
+            source_id="orphan", source_sha256="e" * 64, library_asset_id=""
+        )
+    source = _source(tmp_path, source_id="source-finite", digest="f" * 64)
+    with pytest.raises(ValueError, match="boundaries"):
+        store.create_source_segment(
+            source_id=source.source_id, start_sec=float("nan"), end_sec=1.0
+        )
+    with pytest.raises(ValueError, match="boundaries"):
+        store.create_source_segment(
+            source_id=source.source_id, start_sec=0.0, end_sec=float("inf")
+        )
+
+
+def test_canonical_library_asset_cannot_be_deleted_while_source_is_derived(
+    tmp_path: Path,
+) -> None:
+    media_store = MediaLibraryStore(tmp_path / "library")
+    media_store.register_user_asset(
+        library_asset_id="asset-delete-guard",
+        media_type="broll",
+        origin="user",
+        content_sha256="1" * 64,
+        managed_relative_path="guard.mp4",
+        byte_count=1,
+        mime_type="video/mp4",
+    )
+    organizer = FootageOrganizerStore(tmp_path / "library")
+    organizer.register_source(
+        source_id="source-delete-guard",
+        source_sha256="1" * 64,
+        library_asset_id="asset-delete-guard",
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        media_store.user_asset_store.permanently_delete_asset("asset-delete-guard")
+
+
 def test_proposal_revision_is_optimistic_and_status_is_bounded(tmp_path: Path) -> None:
     store = FootageOrganizerStore(tmp_path / "library")
-    source = store.register_source(source_id="source-1", source_sha256="b" * 64)
+    source = _source(tmp_path, source_id="source-1", digest="b" * 64)
     segment = store.create_source_segment(
         source_id=source.source_id, start_sec=0.0, end_sec=2.0
     )
@@ -79,7 +136,7 @@ def test_proposal_revision_is_optimistic_and_status_is_bounded(tmp_path: Path) -
 
 def test_user_confirmed_fields_survive_reanalysis(tmp_path: Path) -> None:
     store = FootageOrganizerStore(tmp_path / "library")
-    source = store.register_source(source_id="source-1", source_sha256="c" * 64)
+    source = _source(tmp_path, source_id="source-1", digest="c" * 64)
     first = store.create_source_segment(
         source_id=source.source_id, start_sec=0.0, end_sec=2.0
     )
@@ -113,7 +170,7 @@ def test_virtual_sequence_preserves_explicit_item_order_and_restricts_source_del
     tmp_path: Path,
 ) -> None:
     store = FootageOrganizerStore(tmp_path / "library")
-    source = store.register_source(source_id="source-1", source_sha256="d" * 64)
+    source = _source(tmp_path, source_id="source-1", digest="d" * 64)
     first = store.create_source_segment(
         source_id=source.source_id, start_sec=0.0, end_sec=1.0
     )
@@ -154,4 +211,3 @@ def test_virtual_sequence_preserves_explicit_item_order_and_restricts_source_del
         "library_virtual_sequences",
         "library_virtual_sequence_items",
     } <= tables
-

@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS library_footage_sources (
     source_sha256 TEXT NOT NULL UNIQUE,
     filename TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
-    library_asset_id TEXT,
+    library_asset_id TEXT NOT NULL,
     FOREIGN KEY (library_asset_id) REFERENCES library_user_assets(library_asset_id) ON DELETE RESTRICT
 );
 CREATE TABLE IF NOT EXISTS library_source_segments (
@@ -97,6 +97,38 @@ CREATE TABLE IF NOT EXISTS library_virtual_sequence_items (
 );
 CREATE INDEX IF NOT EXISTS idx_library_virtual_sequence_items_order
     ON library_virtual_sequence_items (sequence_id, item_order);
+CREATE TRIGGER IF NOT EXISTS footage_sources_require_asset_insert
+BEFORE INSERT ON library_footage_sources
+WHEN NEW.library_asset_id IS NULL OR trim(NEW.library_asset_id) = ''
+BEGIN
+    SELECT RAISE(ABORT, 'library_asset_id is required');
+END;
+CREATE TRIGGER IF NOT EXISTS footage_sources_require_asset_update
+BEFORE UPDATE OF library_asset_id ON library_footage_sources
+WHEN NEW.library_asset_id IS NULL OR trim(NEW.library_asset_id) = ''
+BEGIN
+    SELECT RAISE(ABORT, 'library_asset_id is required');
+END;
+CREATE TRIGGER IF NOT EXISTS footage_sources_require_canonical_asset_insert
+BEFORE INSERT ON library_footage_sources
+WHEN NOT EXISTS (
+    SELECT 1 FROM library_user_assets
+    WHERE library_asset_id = NEW.library_asset_id
+      AND content_sha256 = NEW.source_sha256
+)
+BEGIN
+    SELECT RAISE(ABORT, 'source must reference canonical library asset');
+END;
+CREATE TRIGGER IF NOT EXISTS footage_sources_require_canonical_asset_update
+BEFORE UPDATE OF library_asset_id, source_sha256 ON library_footage_sources
+WHEN NOT EXISTS (
+    SELECT 1 FROM library_user_assets
+    WHERE library_asset_id = NEW.library_asset_id
+      AND content_sha256 = NEW.source_sha256
+)
+BEGIN
+    SELECT RAISE(ABORT, 'source must reference canonical library asset');
+END;
 """
 
 
@@ -141,8 +173,10 @@ class FootageOrganizerStore:
         self.database_path = self.root / "media_library.sqlite"
 
     def register_source(
-        self, *, source_id: str, source_sha256: str, filename: str = "", library_asset_id: str | None = None
+        self, *, source_id: str, source_sha256: str, library_asset_id: str, filename: str = ""
     ) -> FootageSource:
+        if not isinstance(library_asset_id, str) or not library_asset_id.strip():
+            raise ValueError("library_asset_id is required")
         source = FootageSource.create(
             source_id=source_id, source_sha256=source_sha256, filename=filename,
             library_asset_id=library_asset_id,
@@ -156,8 +190,18 @@ class FootageOrganizerStore:
             if existing is not None:
                 if str(existing["source_sha256"]) != source.source_sha256:
                     raise ValueError("source hash is immutable")
+                if str(existing["library_asset_id"]) != source.library_asset_id:
+                    raise ValueError("source identity is immutable")
                 connection.commit()
                 return self._source_row(existing)
+            asset_row = connection.execute(
+                "SELECT content_sha256 FROM library_user_assets WHERE library_asset_id = ?",
+                (source.library_asset_id,),
+            ).fetchone()
+            if asset_row is None:
+                raise KeyError(f"library asset not found: {source.library_asset_id}")
+            if str(asset_row["content_sha256"]).lower() != source.source_sha256:
+                raise ValueError("source hash does not match canonical library asset")
             connection.execute(
                 "INSERT INTO library_footage_sources (source_id, source_sha256, filename, created_at, library_asset_id) VALUES (?, ?, ?, ?, ?)",
                 (source.source_id, source.source_sha256, source.filename, source.created_at.isoformat(), source.library_asset_id),

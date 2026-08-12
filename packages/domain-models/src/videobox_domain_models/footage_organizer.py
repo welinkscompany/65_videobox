@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+import math
 import re
 from typing import Any, Mapping
 from uuid import uuid4
@@ -34,7 +35,7 @@ def _hash(value: str) -> str:
 
 def _boundary(start_sec: float, end_sec: float) -> tuple[float, float]:
     start, end = float(start_sec), float(end_sec)
-    if start < 0 or end <= start:
+    if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
         raise ValueError("source boundaries must satisfy 0 <= start_sec < end_sec")
     return start, end
 
@@ -50,8 +51,8 @@ class FootageProposalStatus(StrEnum):
 class FootageSource:
     source_id: str
     source_sha256: str
+    library_asset_id: str
     filename: str = ""
-    library_asset_id: str | None = None
     created_at: datetime = field(default_factory=_now)
 
     @classmethod
@@ -60,13 +61,15 @@ class FootageSource:
         *,
         source_id: str,
         source_sha256: str,
+        library_asset_id: str,
         filename: str = "",
-        library_asset_id: str | None = None,
         created_at: datetime | None = None,
     ) -> "FootageSource":
         if not isinstance(source_id, str) or not source_id.strip():
             raise ValueError("source_id is required")
-        return cls(source_id.strip(), _hash(source_sha256), str(filename), library_asset_id, created_at or _now())
+        if not isinstance(library_asset_id, str) or not library_asset_id.strip():
+            raise ValueError("library_asset_id is required")
+        return cls(source_id.strip(), _hash(source_sha256), library_asset_id.strip(), str(filename), created_at or _now())
 
 
 @dataclass(frozen=True, slots=True)
