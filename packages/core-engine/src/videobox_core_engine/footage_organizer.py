@@ -324,6 +324,8 @@ class FootageOrganizerService:
             raise OptimisticRevisionConflict(
                 f"proposal revision is {proposal.revision}, expected {expected_revision}"
             )
+        if proposal.status.value != "draft":
+            raise ValueError("only draft proposals can be edited")
         return proposal
 
     @staticmethod

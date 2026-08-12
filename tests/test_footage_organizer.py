@@ -125,3 +125,35 @@ def test_draft_operations_require_expected_revision_and_are_non_session_mutation
             segment_id=excluded.segments[0].segment_id,
             expected_revision=split.revision,
         )
+
+
+def test_approved_proposal_cannot_be_mutated_or_reanalyzed(tmp_path: Path) -> None:
+    source = _source(tmp_path, asset_id="asset-approved", digest="d" * 64)
+    store = FootageOrganizerStore(tmp_path / "library")
+    service = FootageOrganizerService(
+        store=store,
+        detector=lambda _asset: {"total_duration": 4.0},
+    )
+    proposal = service.propose_segments("asset-approved", "approved-key")
+    approved = store.set_proposal_status(
+        proposal_id=proposal.proposal_id,
+        status="approved",
+        expected_revision=proposal.revision,
+    )
+
+    with pytest.raises(ValueError, match="draft"):
+        service.exclude_draft(
+            proposal_id=approved.proposal_id,
+            segment_id=approved.segments[0].segment_id,
+            expected_revision=approved.revision,
+        )
+    with pytest.raises(ValueError, match="draft"):
+        store.reanalyze_proposal(
+            proposal_id=approved.proposal_id,
+            expected_revision=approved.revision,
+            segments=[],
+        )
+    current = store.get_proposal(approved.proposal_id)
+    assert current is not None
+    assert current.status.value == "approved"
+    assert current.revision == approved.revision

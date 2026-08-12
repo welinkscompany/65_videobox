@@ -183,6 +183,8 @@ class FfmpegAutoCutExecutor:
             "-",
         ]
         result = self._run(command, timeout=timeout or self._scaled_detection_timeout(total_duration), binary=self.ffmpeg_binary)
+        if result.returncode != 0:
+            return []
         silence: list[tuple[float, float]] = []
         open_start: float | None = None
         for line in result.stderr.splitlines():

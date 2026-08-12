@@ -558,6 +558,8 @@ class FootageOrganizerStore:
         try:
             connection.execute("BEGIN IMMEDIATE")
             row = self._claim_revision(connection, proposal_id, expected_revision)
+            if str(row["status"]) != FootageProposalStatus.DRAFT.value:
+                raise ValueError("only draft proposals can be reanalyzed")
             normalized = self._proposal_segments(
                 connection, str(row["source_id"]), str(row["source_sha256"]), segments,
                 old_segments=self._load_proposal_segments(connection, proposal_id),

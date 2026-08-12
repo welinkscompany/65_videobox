@@ -117,6 +117,18 @@ def test_detect_scene_and_black_regions_combines_both_parsers(
     assert any("split=2" in part for part in captured_commands[0])
 
 
+def test_detect_audio_windows_fails_closed_for_no_audio_or_ffmpeg_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    executor = FfmpegAutoCutExecutor(planner=AutoCutPlanner())
+    _patch_subprocess_run(
+        monkeypatch,
+        lambda command, **kwargs: _fake_result(returncode=1, stderr="Stream specifier ':a' matches no streams."),
+    )
+
+    assert executor.detect_audio_windows(tmp_path / "silent-video.mp4", total_duration=3.0) == []
+
+
 def test_scaled_detection_timeout_grows_with_duration(tmp_path: Path) -> None:
     executor = FfmpegAutoCutExecutor(planner=AutoCutPlanner(), detection_timeout_seconds=300)
 
