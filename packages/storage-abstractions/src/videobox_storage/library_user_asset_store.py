@@ -399,6 +399,11 @@ class LibraryUserAssetStore:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute("SELECT * FROM library_ingest_items WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
             if existing is not None:
+                existing_hash = str(existing["content_sha256"] or "")
+                existing_type = str(existing["media_type"] or "")
+                if (content_sha256 and existing_hash and content_sha256 != existing_hash) or (media_type and existing_type and media_type != existing_type):
+                    connection.rollback()
+                    raise ValueError("idempotency_key_conflict")
                 connection.commit(); return self._ingest_item_row(dict(existing))
             connection.execute("INSERT INTO library_ingest_items (ingest_item_id, ingest_batch_id, idempotency_key, library_asset_id, filename, state, error_code, content_sha256, media_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (item_id, batch_id, idempotency_key, library_asset_id, filename, state, error_code, content_sha256, media_type, now, now))
             connection.commit()

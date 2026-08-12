@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_api.routers.library_assets import _remove_managed_file
 from videobox_storage.media_library_store import MediaLibraryStore
 
 
@@ -89,6 +90,46 @@ def test_materialize_same_project_asset_is_sha_idempotent_and_keeps_one_referenc
     assert first.json()["asset"]["asset_id"] == second.json()["asset"]["asset_id"]
     assert first.json()["reference"]["reference_id"] == second.json()["reference"]["reference_id"]
     assert len(client.get(f"/api/library/assets/{item['library_asset_id']}/usage").json()["locations"]) == 1
+
+
+def test_permanent_cleanup_can_remove_matching_asset_from_alternate_managed_root(tmp_path):
+    relative = "assets/broll/clip.mp4"
+    primary = tmp_path / "primary"
+    alternate = tmp_path / "alternate"
+    (primary / relative).parent.mkdir(parents=True)
+    (alternate / relative).parent.mkdir(parents=True)
+    (primary / relative).write_bytes(b"owner clip")
+    (alternate / relative).write_bytes(b"unrelated clip")
+    expected = __import__("hashlib").sha256(b"owner clip").hexdigest()
+
+    _remove_managed_file(alternate, relative, expected_sha256=expected)
+    _remove_managed_file(primary, relative, expected_sha256=expected)
+
+    assert (alternate / relative).is_file()
+    assert not (primary / relative).exists()
+
+
+def test_usage_scans_direct_editing_session_and_timeline_library_references(tmp_path):
+    client = TestClient(app(tmp_path))
+    item = client.post(
+        "/api/library/ingest", data={"media_type": "sfx"},
+        files=[("files", ("click.wav", b"session ref", "audio/wav"))],
+    ).json()["items"][0]
+    project_id = client.post("/api/projects", json={"name": "usage scan"}).json()["project_id"]
+    store = client.app.state.store
+    store.list_editing_sessions = lambda *, project_id: [
+        {"session_id": "session-direct", "timeline_id": "timeline-direct", "library_asset_id": item["library_asset_id"]}
+    ]
+    store.get_timeline_run = lambda *, project_id, timeline_id: {
+        "timeline_id": timeline_id,
+        "tracks": [{"clips": [{"library_asset_id": item["library_asset_id"]}]}],
+    }
+
+    usage = client.get(f"/api/library/assets/{item['library_asset_id']}/usage")
+    assert usage.status_code == 200
+    kinds = {(entry["location"]["kind"], entry["location"].get("id")) for entry in usage.json()["locations"]}
+    assert ("editing_session", "session-direct") in kinds
+    assert ("timeline", "timeline-direct") in kinds
 
 
 def test_retry_with_same_key_and_different_bytes_is_rejected(tmp_path):

@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from io import BytesIO
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 from videobox_core_engine.library_ingest import LibraryIngestService
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
@@ -55,6 +57,21 @@ def test_same_hash_reuses_asset_and_same_name_different_hash_gets_distinct_path(
     assert len(store.list_assets()) == 2
 
 
+def test_same_hash_with_different_media_type_is_explicitly_rejected(tmp_path: Path) -> None:
+    service, store = _service(tmp_path)
+    source = tmp_path / "asset.bin"
+    source.write_bytes(b"same content")
+    service.ingest(media_type="music", source=source, filename="asset.mp3", idempotency_key="music")
+
+    try:
+        service.ingest(media_type="sfx", source=source, filename="asset.wav", idempotency_key="sfx")
+    except ValueError as error:
+        assert str(error) == "content_hash_media_type_conflict"
+    else:
+        raise AssertionError("same content under a different media type must not reuse silently")
+    assert len(store.list_assets()) == 1
+
+
 def test_response_loss_retry_is_idempotent(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
     source = tmp_path / "music.mp3"
@@ -94,4 +111,34 @@ def test_batch_keeps_partial_success_and_retries_failed_item(tmp_path: Path) -> 
     )
     assert report["succeeded"] == ["good.mp4"]
     assert report["failed"][0]["filename"] == "missing.mp4"
+    assert len(store.list_assets()) == 1
+
+
+def test_concurrent_same_idempotency_key_different_bytes_conflicts_atomically(tmp_path: Path, monkeypatch) -> None:
+    service, store = _service(tmp_path)
+    first = tmp_path / "first.wav"
+    second = tmp_path / "second.wav"
+    first.write_bytes(b"first bytes")
+    second.write_bytes(b"second bytes")
+    barrier = Barrier(2)
+    original_get = store.get_ingest_item
+
+    def synchronized_get(key: str):
+        result = original_get(key)
+        barrier.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(store, "get_ingest_item", synchronized_get)
+
+    def run(source: Path):
+        try:
+            return service.ingest(media_type="sfx", source=source, filename=source.name, idempotency_key="race")
+        except Exception as error:  # noqa: BLE001 - assert the durable conflict below
+            return error
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(run, (first, second)))
+
+    assert sum(isinstance(result, ValueError) and str(result) == "idempotency_key_conflict" for result in results) == 1
+    assert sum(isinstance(result, dict) for result in results) == 1
     assert len(store.list_assets()) == 1

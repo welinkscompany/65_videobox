@@ -22,6 +22,7 @@ from starlette.background import BackgroundTask
 
 from videobox_api.models import MaterializeLibraryAssetRequest
 from videobox_core_engine.library_ingest import LibraryIngestIdempotencyConflict, LibraryIngestService
+from videobox_core_engine.library_usage import scan_library_asset_usage
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_domain_models.library_assets import LibraryAssetLifecycle, LibraryAssetOrigin, LibraryMediaType
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
@@ -259,10 +260,56 @@ def build_library_assets_router(
         for project in getattr(project_store, "list_projects", lambda **_: [])(include_archived=True):
             project_id = str(project.get("project_id", ""))
             try:
-                for candidate in project_store.list_assets(project_id=project_id):
+                project_assets = project_store.list_assets(project_id=project_id)
+                for candidate in project_assets:
                     metadata = dict(candidate.get("metadata") or {})
                     if metadata.get("source_library_asset_id") == asset_id and not any(loc.get("materialized_asset_id") == candidate.get("asset_id") for loc in locations):
                         locations.append({"project_id": project_id, "materialized_asset_id": candidate.get("asset_id"), "location": {"kind": "project_asset"}})
+                sessions = []
+                timelines = []
+                for raw_session in getattr(project_store, "list_editing_sessions", lambda **_: [])(project_id=project_id):
+                    session = dict(raw_session) if isinstance(raw_session, dict) else raw_session
+                    if isinstance(session, dict):
+                        session.setdefault("project_id", project_id)
+                        session_id = str(session.get("session_id") or "")
+                        if session_id:
+                            try:
+                                hydrated = project_store.get_editing_session(project_id=project_id, session_id=session_id)
+                                if isinstance(hydrated, dict):
+                                    session = {**hydrated, "project_id": project_id}
+                            except Exception:
+                                pass
+                        sessions.append(session)
+                        timeline_id = str(session.get("timeline_id") or "")
+                        if timeline_id:
+                            try:
+                                timeline = project_store.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+                                if isinstance(timeline, dict):
+                                    timelines.append({**timeline, "project_id": project_id})
+                            except Exception:
+                                pass
+                scanned = scan_library_asset_usage(
+                    asset_id,
+                    projects=[{"project_id": project_id, "assets": project_assets}],
+                    editing_sessions=sessions,
+                    timelines=timelines,
+                )
+                existing_location_keys = {
+                    (str(item.get("project_id")), str(item.get("location", {}).get("kind")), str(item.get("location", {}).get("id") or item.get("materialized_asset_id") or ""))
+                    for item in locations
+                }
+                for match in scanned:
+                    if match.get("kind") == "project" and any(
+                        str(candidate.get("metadata", {}).get("source_library_asset_id")) == asset_id
+                        for candidate in project_assets
+                    ):
+                        continue
+                    location = {key: value for key, value in match.items() if key not in {"record_index"}}
+                    location.setdefault("id", location.get("session_id") or location.get("timeline_id") or location.get("variant_id") or location.get("sequence_id") or location.get("derived_sequence_id"))
+                    location_key = (project_id, str(location.get("kind")), str(location.get("id") or location.get("path") or ""))
+                    if location_key not in existing_location_keys:
+                        locations.append({"project_id": project_id, "location": location})
+                        existing_location_keys.add(location_key)
             except Exception:
                 continue
         return {"library_asset_id": asset_id, "locations": locations}
@@ -308,7 +355,8 @@ def build_library_assets_router(
         # harmless to the authority, while a path outside this root is never
         # touched.
         if asset is not None:
-            _remove_managed_file(managed_root, asset.managed_relative_path)
+            for root in roots:
+                _remove_managed_file(root, asset.managed_relative_path, expected_sha256=asset.content_sha256)
 
     @router.delete("/api/library/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
     def permanently_delete_library_asset_alias(asset_id: str, permanent: bool = Query(False)) -> None:
@@ -435,12 +483,14 @@ def _mime_type(path: Path) -> str:
     return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
-def _remove_managed_file(root: Path, relative: str) -> None:
+def _remove_managed_file(root: Path, relative: str, *, expected_sha256: str | None = None) -> None:
     base = root.resolve()
     candidate = (base / relative).resolve()
     try:
         candidate.relative_to(base)
     except ValueError:
+        return
+    if expected_sha256 is not None and (not candidate.is_file() or _sha256(candidate) != expected_sha256):
         return
     candidate.unlink(missing_ok=True)
 

@@ -94,17 +94,28 @@ class LibraryIngestService:
                     staging.unlink(missing_ok=True)
                     item = self.store.update_ingest_item(idempotency_key=idempotency_key, content_sha256=content_sha256, media_type=resolved_type.value)
                     return self._response(existing_asset, item, duplicate=True)
-            item = existing_item or self.store.record_ingest_item(
-                batch_id=str(batch["ingest_batch_id"]),
-                idempotency_key=idempotency_key,
-                library_asset_id=None,
-                filename=name,
-                state=LibraryAssetLifecycle.PROCESSING.value,
-                content_sha256=content_sha256,
-                media_type=resolved_type.value,
-            )
+            if existing_item is not None:
+                item = existing_item
+            else:
+                try:
+                    item = self.store.record_ingest_item(
+                        batch_id=str(batch["ingest_batch_id"]),
+                        idempotency_key=idempotency_key,
+                        library_asset_id=None,
+                        filename=name,
+                        state=LibraryAssetLifecycle.PROCESSING.value,
+                        content_sha256=content_sha256,
+                        media_type=resolved_type.value,
+                    )
+                except ValueError as error:
+                    if str(error) == "idempotency_key_conflict":
+                        raise LibraryIngestIdempotencyConflict("idempotency_key_conflict") from error
+                    raise
             existing_asset = self.store.find_by_content_sha256(content_sha256)
             if existing_asset is not None:
+                if existing_asset.media_type is not resolved_type:
+                    staging.unlink(missing_ok=True)
+                    raise LibraryIngestIdempotencyConflict("content_hash_media_type_conflict")
                 staging.unlink(missing_ok=True)
                 item = self.store.update_ingest_item(
                     idempotency_key=idempotency_key,
