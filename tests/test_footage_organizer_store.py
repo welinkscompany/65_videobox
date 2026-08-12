@@ -155,6 +155,80 @@ def test_direct_sql_cannot_mutate_source_identity_or_segment_integrity(
         connection.close()
 
 
+def test_direct_sql_rejects_invalid_proposal_and_virtual_sequence_rows(
+    tmp_path: Path,
+) -> None:
+    source = _source(tmp_path, source_id="source-sql-derived", digest="5" * 64)
+    store = FootageOrganizerStore(tmp_path / "library")
+    segment = store.create_source_segment(
+        source_id=source.source_id, start_sec=0.0, end_sec=1.0
+    )
+    proposal = store.create_proposal(
+        source_id=source.source_id, source_sha256=source.source_sha256, segments=[segment]
+    )
+    sequence = store.create_virtual_sequence(
+        source_id=source.source_id,
+        items=[VirtualSequenceItem.create(source_segment_id=segment.segment_id, item_order=1)],
+    )
+    connection = sqlite3.connect(store.database_path)
+    try:
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE footage_proposals SET source_sha256 = ? WHERE proposal_id = ?",
+                ("6" * 64, proposal.proposal_id),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE footage_proposal_segments SET start_sec = ? WHERE proposal_id = ?",
+                (float("inf"), proposal.proposal_id),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE library_virtual_sequences SET source_sha256 = ? WHERE sequence_id = ?",
+                ("6" * 64, sequence.sequence_id),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO library_virtual_sequence_items (item_id, sequence_id, item_order, source_segment_id, start_sec, end_sec) VALUES (?, ?, ?, ?, ?, ?)",
+                ("bad-item", sequence.sequence_id, 2, segment.segment_id, 0.0, float("inf")),
+            )
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+def test_whitespace_legacy_source_is_quarantined_and_derived_reads_are_blocked(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    connection = sqlite3.connect(root / "media_library.sqlite")
+    try:
+        connection.execute(
+            "CREATE TABLE library_footage_sources (source_id TEXT PRIMARY KEY, source_sha256 TEXT NOT NULL, filename TEXT NOT NULL, created_at TEXT NOT NULL, library_asset_id TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE footage_proposals (proposal_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, source_sha256 TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL, confirmed_json TEXT NOT NULL, machine_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO library_footage_sources VALUES ('source-whitespace', ?, 'old.mp4', '2026-01-01T00:00:00+00:00', '   ')",
+            ("7" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO footage_proposals VALUES ('legacy-proposal', 'source-whitespace', ?, 'draft', 1, '{}', '{}', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+            ("7" * 64,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    store = FootageOrganizerStore(root)
+    source_id = "source-whitespace"
+    assert store.get_source(source_id) is None
+    assert store.list_sources() == []
+    assert source_id in store.list_quarantined_sources()
+    assert store.get_proposal("legacy-proposal") is None
+
+
 def test_proposal_revision_is_optimistic_and_status_is_bounded(tmp_path: Path) -> None:
     store = FootageOrganizerStore(tmp_path / "library")
     source = _source(tmp_path, source_id="source-1", digest="b" * 64)

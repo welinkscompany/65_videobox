@@ -164,6 +164,49 @@ WHEN NOT EXISTS (
 BEGIN
     SELECT RAISE(ABORT, 'source segment hash does not match source');
 END;
+CREATE TRIGGER IF NOT EXISTS footage_proposals_identity_immutable
+BEFORE UPDATE OF proposal_id, source_id, source_sha256 ON footage_proposals
+WHEN NEW.proposal_id <> OLD.proposal_id OR NEW.source_id <> OLD.source_id OR NEW.source_sha256 <> OLD.source_sha256
+BEGIN SELECT RAISE(ABORT, 'footage proposal identity is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS footage_proposals_parent_hash_insert
+BEFORE INSERT ON footage_proposals
+WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+BEGIN SELECT RAISE(ABORT, 'footage proposal source hash does not match source'); END;
+CREATE TRIGGER IF NOT EXISTS footage_proposals_parent_hash_update
+BEFORE UPDATE OF source_id, source_sha256 ON footage_proposals
+WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+BEGIN SELECT RAISE(ABORT, 'footage proposal source hash does not match source'); END;
+CREATE TRIGGER IF NOT EXISTS footage_proposal_segments_integrity_insert
+BEFORE INSERT ON footage_proposal_segments
+WHEN NOT (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec AND NEW.start_sec < 1.7976931348623157e+308 AND NEW.end_sec < 1.7976931348623157e+308)
+  OR NOT EXISTS (SELECT 1 FROM footage_proposals p JOIN library_source_segments s ON s.segment_id = NEW.source_segment_id WHERE p.proposal_id = NEW.proposal_id AND p.source_id = s.source_id AND p.source_sha256 = NEW.source_sha256 AND s.source_sha256 = NEW.source_sha256)
+BEGIN SELECT RAISE(ABORT, 'footage proposal segment integrity violation'); END;
+CREATE TRIGGER IF NOT EXISTS footage_proposal_segments_integrity_update
+BEFORE UPDATE OF proposal_id, source_segment_id, source_sha256, start_sec, end_sec ON footage_proposal_segments
+WHEN NEW.proposal_id <> OLD.proposal_id OR NEW.source_segment_id <> OLD.source_segment_id OR NEW.source_sha256 <> OLD.source_sha256
+  OR NOT (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec AND NEW.start_sec < 1.7976931348623157e+308 AND NEW.end_sec < 1.7976931348623157e+308)
+BEGIN SELECT RAISE(ABORT, 'footage proposal segment identity or boundaries are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS virtual_sequences_identity_immutable
+BEFORE UPDATE OF sequence_id, source_id, source_sha256 ON library_virtual_sequences
+WHEN NEW.sequence_id <> OLD.sequence_id OR NEW.source_id <> OLD.source_id OR NEW.source_sha256 <> OLD.source_sha256
+BEGIN SELECT RAISE(ABORT, 'virtual sequence identity is immutable'); END;
+CREATE TRIGGER IF NOT EXISTS virtual_sequences_parent_hash_insert
+BEFORE INSERT ON library_virtual_sequences
+WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+BEGIN SELECT RAISE(ABORT, 'virtual sequence source hash does not match source'); END;
+CREATE TRIGGER IF NOT EXISTS virtual_sequences_parent_hash_update
+BEFORE UPDATE OF source_id, source_sha256 ON library_virtual_sequences
+WHEN NOT EXISTS (SELECT 1 FROM library_footage_sources WHERE source_id = NEW.source_id AND source_sha256 = NEW.source_sha256 AND trim(COALESCE(library_asset_id, '')) <> '')
+BEGIN SELECT RAISE(ABORT, 'virtual sequence source hash does not match source'); END;
+CREATE TRIGGER IF NOT EXISTS virtual_sequence_items_integrity_insert
+BEFORE INSERT ON library_virtual_sequence_items
+WHEN NOT ((NEW.start_sec IS NULL AND NEW.end_sec IS NULL) OR (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec AND NEW.start_sec < 1.7976931348623157e+308 AND NEW.end_sec < 1.7976931348623157e+308))
+BEGIN SELECT RAISE(ABORT, 'virtual sequence item boundaries must be finite'); END;
+CREATE TRIGGER IF NOT EXISTS virtual_sequence_items_integrity_update
+BEFORE UPDATE OF sequence_id, source_segment_id, start_sec, end_sec, item_order ON library_virtual_sequence_items
+WHEN NEW.sequence_id <> OLD.sequence_id OR NEW.source_segment_id <> OLD.source_segment_id
+  OR NOT ((NEW.start_sec IS NULL AND NEW.end_sec IS NULL) OR (NEW.start_sec >= 0 AND NEW.end_sec > NEW.start_sec AND NEW.start_sec < 1.7976931348623157e+308 AND NEW.end_sec < 1.7976931348623157e+308))
+BEGIN SELECT RAISE(ABORT, 'virtual sequence item identity or boundaries are immutable'); END;
 """
 
 
@@ -285,6 +328,14 @@ class FootageOrganizerStore:
         connection = self._connection()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT library_asset_id FROM library_footage_sources WHERE source_id = ?",
+                (source_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(source_id)
+            if row["library_asset_id"] is None or not str(row["library_asset_id"]).strip():
+                raise ValueError("source is quarantined: missing canonical library asset")
             connection.execute("DELETE FROM library_footage_sources WHERE source_id = ?", (source_id,))
             connection.commit()
         except Exception:
@@ -311,7 +362,7 @@ class FootageOrganizerStore:
             ).fetchone()
             if source_row is None:
                 raise KeyError(source_id)
-            if source_row["library_asset_id"] in (None, ""):
+            if source_row["library_asset_id"] is None or not str(source_row["library_asset_id"]).strip():
                 raise ValueError("source is quarantined: missing canonical library asset")
             segment = FootageSourceSegment.create(
                 source_id=source_id,
@@ -359,7 +410,7 @@ class FootageOrganizerStore:
             ).fetchone()
             if source_row is None:
                 raise KeyError(source_id)
-            if source_row["library_asset_id"] in (None, ""):
+            if source_row["library_asset_id"] is None or not str(source_row["library_asset_id"]).strip():
                 raise ValueError("source is quarantined: missing canonical library asset")
             actual_hash = str(source_row["source_sha256"])
             if actual_hash != source_sha256.lower():
@@ -392,6 +443,8 @@ class FootageOrganizerStore:
                 "SELECT * FROM footage_proposals WHERE proposal_id = ?", (proposal_id,)
             ).fetchone()
             if row is None:
+                return None
+            if not self._source_is_canonical(connection, str(row["source_id"]), str(row["source_sha256"])):
                 return None
             segments = self._load_proposal_segments(connection, proposal_id)
         finally:
@@ -485,7 +538,7 @@ class FootageOrganizerStore:
             source_row = connection.execute("SELECT source_sha256, library_asset_id FROM library_footage_sources WHERE source_id = ?", (source_id,)).fetchone()
             if source_row is None:
                 raise KeyError(source_id)
-            if source_row["library_asset_id"] in (None, ""):
+            if source_row["library_asset_id"] is None or not str(source_row["library_asset_id"]).strip():
                 raise ValueError("source is quarantined: missing canonical library asset")
             connection.execute(
                 "INSERT INTO library_virtual_sequences (sequence_id, source_id, source_sha256, name, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -514,6 +567,8 @@ class FootageOrganizerStore:
                 "SELECT * FROM library_virtual_sequences WHERE sequence_id = ?", (sequence_id,)
             ).fetchone()
             if row is None:
+                return None
+            if not self._source_is_canonical(connection, str(row["source_id"]), str(row["source_sha256"])):
                 return None
             item_rows = connection.execute(
                 "SELECT * FROM library_virtual_sequence_items WHERE sequence_id = ? ORDER BY item_order",
@@ -550,7 +605,8 @@ class FootageOrganizerStore:
                 ).fetchall()
             result = []
             for row in rows:
-                result.append(self._proposal_row(row, self._load_proposal_segments(connection, str(row["proposal_id"]))))
+                if self._source_is_canonical(connection, str(row["source_id"]), str(row["source_sha256"])):
+                    result.append(self._proposal_row(row, self._load_proposal_segments(connection, str(row["proposal_id"]))))
             return result
         finally:
             connection.close()
@@ -642,9 +698,21 @@ class FootageOrganizerStore:
 
     @staticmethod
     def _source_row(row: sqlite3.Row) -> FootageSource | None:
-        if row["library_asset_id"] in (None, ""):
+        if row["library_asset_id"] is None or not str(row["library_asset_id"]).strip():
             return None
         return FootageSource.create(source_id=str(row["source_id"]), source_sha256=str(row["source_sha256"]), filename=str(row["filename"]), library_asset_id=row["library_asset_id"], created_at=_from_time(row["created_at"]))
+
+    @staticmethod
+    def _source_is_canonical(connection: sqlite3.Connection, source_id: str, source_sha256: str) -> bool:
+        row = connection.execute(
+            """SELECT 1 FROM library_footage_sources s
+               JOIN library_user_assets a ON a.library_asset_id = s.library_asset_id
+               WHERE s.source_id = ? AND s.source_sha256 = ?
+                 AND trim(COALESCE(s.library_asset_id, '')) <> ''
+                 AND lower(a.content_sha256) = lower(s.source_sha256)""",
+            (source_id, source_sha256),
+        ).fetchone()
+        return row is not None
 
     def _connection(self) -> sqlite3.Connection:
         self.root.mkdir(parents=True, exist_ok=True)
