@@ -62,6 +62,20 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  it("keeps global library and footage destinations honest until their waves", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const libraryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/library"] }));
+    render(<AppRouter router={libraryRouter} />);
+    expect(await screen.findByTestId("global-library-page")).toHaveTextContent("내 라이브러리");
+    expect(screen.getByText(/Wave-1/)).toBeVisible();
+    cleanup();
+
+    const footageRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/footage"] }));
+    render(<AppRouter router={footageRouter} />);
+    expect(await screen.findByTestId("global-footage-page")).toHaveTextContent("촬영본 정리");
+    expect(screen.getByText(/Wave-2/)).toBeVisible();
+  });
+
   it("summarizes each project and exposes exactly one next action", async () => {
     const projects = [
       { project_id: "project_draft", name: "초안 프로젝트", status: "active", root_storage_uri: "local://draft" },
@@ -128,8 +142,8 @@ describe("AppRouter URL ownership", () => {
 
   it("uses /editor for new editing links while continuing to read the prior editing URL", () => {
     expect(resolveWorkspaceLocation("project_a", "editing")).toBe("/projects/project_a/editor");
-    expect(parseWorkspaceLocation("/projects/project_a/editor")).toEqual({ projectId: "project_a", section: "editing" });
-    expect(parseWorkspaceLocation("/projects/project_a/editing")).toEqual({ projectId: "project_a", section: "editing" });
+    expect(parseWorkspaceLocation("/projects/project_a/editor")).toEqual({ projectId: "project_a", stage: "edit", legacy: true });
+    expect(parseWorkspaceLocation("/projects/project_a/editing")).toEqual({ projectId: "project_a", stage: "edit", legacy: true });
   });
 
   it("pins the latest session before opening a canonical editor URL without a session", async () => {

@@ -23,7 +23,12 @@ import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkben
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
 import { OutputsPage } from "./OutputsPage";
 import { resolveLastValidProjectId } from "./projectSelection";
-import { isWorkspaceSection, resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
+import {
+  parseWorkspaceLocation,
+  resolveGlobalLocation,
+  resolveWorkspaceLocation,
+  type WorkspaceSection,
+} from "./routeManifest";
 
 const lastProjectKey = "videobox.last-valid-project";
 
@@ -78,6 +83,18 @@ const projectsRoute = createRoute({
   component: ProjectsPage,
 });
 
+const libraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/library",
+  component: LibraryPage,
+});
+
+const footageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/footage",
+  component: FootagePage,
+});
+
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/$section",
@@ -112,7 +129,7 @@ const settingsRoute = createRoute({
   component: SettingsRoutePage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, workspaceRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, libraryRoute, footageRoute, workspaceRoute, settingsRoute]);
 
 export function createAppRouter(
   catalog = new ProjectCatalog(),
@@ -187,6 +204,33 @@ function ProjectsPage() {
       )}
     </main>
   );
+}
+
+function LibraryPage() {
+  return <GlobalDestinationPage
+    testId="global-library-page"
+    title="내 라이브러리"
+    description="모든 프로젝트에서 함께 쓰는 영상·음악·효과음을 모아두는 공간이에요."
+    readiness="개인용 라이브러리는 Wave-1에서 준비할 예정이에요."
+  />;
+}
+
+function FootagePage() {
+  return <GlobalDestinationPage
+    testId="global-footage-page"
+    title="촬영본 정리"
+    description="긴 원본을 나누고 짧은 촬영본을 묶어 프로젝트에 등록하는 공간이에요."
+    readiness="촬영본 정리는 Wave-2에서 준비할 예정이에요."
+  />;
+}
+
+function GlobalDestinationPage({ testId, title, description, readiness }: { testId: string; title: string; description: string; readiness: string }) {
+  return <main data-testid={testId}>
+    <h1>{title}</h1>
+    <p>{description}</p>
+    <p>{readiness}</p>
+    <a href={resolveGlobalLocation("projects")}>프로젝트로 돌아가기</a>
+  </main>;
 }
 
 type ProjectNextAction = { label: "계속 편집" | "자산 준비" | "새 영상 시작" | "프로젝트 열기"; section: WorkspaceSection; status: string };
@@ -276,25 +320,36 @@ function WorkspacePage() {
     ? routeSearch.segment_id
     : null;
   const requestedSegmentId = rawRequestedSegmentId?.trim() || null;
-  const normalizedSection = section === "editor" ? "editing" : section;
-  if (!isWorkspaceSection(normalizedSection) || !projects.some((project) => project.project_id === projectId)) {
+  const parsedLocation = parseWorkspaceLocation(`/projects/${encodeURIComponent(projectId)}/${section}`);
+  if (!parsedLocation || !projects.some((project) => project.project_id === projectId)) {
     return <RecoveryPage />;
   }
+  const normalizedSection: WorkspaceSection = section === "editor" || parsedLocation.stage === "edit"
+    ? "editing"
+    : section === "media" || parsedLocation.stage === "assets"
+      ? "media"
+      : section === "outputs" || parsedLocation.stage === "output"
+        ? "outputs"
+        : section === "timeline" || parsedLocation.stage === "review"
+          ? "review"
+          : section === "create" || parsedLocation.stage === "plan"
+            ? "create"
+            : "home";
   window.localStorage.setItem(lastProjectKey, projectId);
   const navigateTo = (nextProjectId: string, nextSection: WorkspaceSection) => {
     void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) });
   };
-  if (normalizedSection === "home") {
+  if (section === "home") {
     return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
-  if (normalizedSection === "create") {
+  if (section === "create" || section === "plan") {
     return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
-  if (normalizedSection === "media") {
+  if (section === "media" || section === "assets") {
     const requestedReturn = typeof (routeSearch as { return_to?: unknown }).return_to === "string"
       ? (routeSearch as { return_to: string }).return_to
       : null;
@@ -304,12 +359,12 @@ function WorkspacePage() {
       <MediaWorkspacePage projectId={projectId} />
     </ProductShell>;
   }
-  if (normalizedSection === "outputs") {
+  if (section === "outputs" || section === "output") {
     return <ProductShell projectId={projectId} projects={projects} section="outputs" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <OutputsPage projectId={projectId} onOpenEditor={() => navigateTo(projectId, "editing")} />
     </ProductShell>;
   }
-  if (normalizedSection === "timeline" || normalizedSection === "review") {
+  if (section === "timeline" || section === "review") {
     return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <TimelineReviewPage
         projectId={projectId}
@@ -321,17 +376,17 @@ function WorkspacePage() {
       />
     </ProductShell>;
   }
-  if (section === "editor" && rawEditingSessionId !== null && !requestedEditingSessionId) {
+  if ((section === "editor" || section === "edit") && rawEditingSessionId !== null && !requestedEditingSessionId) {
     return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
-  if (section === "editor" && !requestedEditingSessionId) {
+  if ((section === "editor" || section === "edit") && !requestedEditingSessionId) {
     return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
-  if (section === "editor") {
+  if (section === "editor" || section === "edit") {
     return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
