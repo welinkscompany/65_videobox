@@ -43,6 +43,8 @@ beforeEach(() => {
   vi.spyOn(api, "previewFootageProposal").mockResolvedValue({ status: "ready", proposal_id: "proposal-1", revision: 1, source_id: "source-1", preview_url: "/api/footage/sources/source-1/preview", segments: proposal.segments });
   vi.spyOn(api, "cancelFootageProposal").mockResolvedValue({ status: "cancelled", proposal_id: "proposal-1", revision: 1 });
   vi.spyOn(api, "approveFootageProposal").mockResolvedValue({ ...proposal, status: "approved", revision: 2 });
+  vi.spyOn(api, "createFootageSequence").mockResolvedValue({ sequence_id: "sequence-1", source_id: "source-1", source_sha256: "a".repeat(64), name: "새 가상 묶음", revision: 1, items: [{ item_id: "item-1", source_segment_id: "source-seg-1", item_order: 1, start_sec: 0, end_sec: 8 }, { item_id: "item-2", source_segment_id: "source-seg-2", item_order: 2, start_sec: 8, end_sec: 20 }] });
+  vi.spyOn(api, "reorderFootageSequence").mockResolvedValue({ sequence_id: "sequence-1", source_id: "source-1", source_sha256: "a".repeat(64), name: "새 가상 묶음", revision: 2, items: [{ item_id: "item-2", source_segment_id: "source-seg-2", item_order: 1, start_sec: 8, end_sec: 20 }, { item_id: "item-1", source_segment_id: "source-seg-1", item_order: 2, start_sec: 0, end_sec: 8 }] });
 });
 
 describe("FootageOrganizerPage", () => {
@@ -68,6 +70,7 @@ describe("FootageOrganizerPage", () => {
     expect(screen.getByText(/0\.03초/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "제안 미리보기" }));
     await waitFor(() => expect(api.previewFootageProposal).toHaveBeenCalledWith("proposal-1", { expected_revision: 1 }));
+    expect(screen.getByTestId("footage-video")).toHaveAttribute("src", "/api/footage/sources/source-1/preview");
     expect(api.approveFootageProposal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "제안 적용" }));
     await waitFor(() => expect(api.approveFootageProposal).toHaveBeenCalledWith("proposal-1", expect.objectContaining({ expected_revision: 1, idempotency_key: expect.any(String) })));
@@ -78,5 +81,31 @@ describe("FootageOrganizerPage", () => {
     render(<FootageOrganizerPage />);
     expect(await screen.findByRole("alert")).toHaveTextContent("촬영본을 불러오지 못했습니다");
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeVisible();
+  });
+
+  it("keeps video timeupdate, playhead, and accessible announcement synchronized", async () => {
+    render(<FootageOrganizerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
+    fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
+    await screen.findByRole("button", { name: /출근/ });
+    const video = screen.getByTestId("footage-video");
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 4 });
+    fireEvent.timeUpdate(video);
+    expect(screen.getByText("0:04.0 / 0:20.0")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "재생 위치" })).toHaveTextContent("0:04.0");
+    expect(screen.getByTestId("scene-timeline").querySelector(".vb-footage-track")).toHaveAttribute("style", expect.stringContaining("--playhead: 20%"));
+  });
+
+  it("creates a sequence from the selected scene and reorders the selected sequence item", async () => {
+    render(<FootageOrganizerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
+    fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
+    await screen.findByTestId("scene-timeline");
+    fireEvent.click(screen.getByRole("button", { name: /거리/ }));
+    fireEvent.click(screen.getByRole("button", { name: "선택 장면으로 가상 묶음 만들기" }));
+    await waitFor(() => expect(api.createFootageSequence).toHaveBeenCalledWith(expect.objectContaining({ items: [{ source_segment_id: "source-seg-2", item_order: 1, start_sec: 8, end_sec: 20 }] })));
+    fireEvent.click(screen.getByRole("button", { name: "묶음 항목 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "위로" }));
+    await waitFor(() => expect(api.reorderFootageSequence).toHaveBeenCalledWith("sequence-1", { expected_revision: 1, item_ids: ["item-2", "item-1"] }));
   });
 });
