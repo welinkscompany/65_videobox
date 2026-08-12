@@ -374,6 +374,26 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
   });
 
+  it("keeps the open project when the shell settings link is activated", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([
+      { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
+      { project_id: "project_b", name: "B", status: "active", root_storage_uri: "local://b" },
+    ]);
+    const router = createAppRouter(
+      new ProjectCatalog(),
+      createMemoryHistory({ initialEntries: ["/projects/project_b/home"] }),
+    );
+
+    render(<AppRouter router={router} />);
+
+    const settingsLink = await screen.findByRole("link", { name: "설정" });
+    expect(settingsLink).toHaveAttribute("href", "/settings/general");
+    fireEvent.click(settingsLink);
+
+    await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
+    expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("does not redirect an unknown project-scoped settings URL into another project's settings", async () => {
     window.localStorage.setItem("videobox.last-valid-project", "project_a");
     vi.spyOn(api, "listProjects").mockResolvedValue([
