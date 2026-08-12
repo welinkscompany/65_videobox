@@ -681,6 +681,53 @@ export type MediaLibraryInstallState = {
   installed_asset_count: number;
 };
 
+export type LibraryMediaType = "broll" | "music" | "sfx";
+export type LibraryAssetLifecycle = "processing" | "ready" | "needs_attention" | "trashed";
+export type LibraryAssetOrigin = "builtin" | "user";
+
+/** Public, path-safe representation returned by the personal library API. */
+export type LibraryAsset = {
+  library_asset_id: string;
+  asset_id?: string | null;
+  media_type: LibraryMediaType;
+  origin: LibraryAssetOrigin;
+  lifecycle: LibraryAssetLifecycle;
+  content_sha256?: string | null;
+  byte_count?: number | null;
+  mime_type?: string | null;
+  managed_relative_path?: string | null;
+  technical_metadata?: Record<string, unknown>;
+  machine_metadata?: Record<string, unknown>;
+  user_metadata?: Record<string, unknown>;
+  duration_seconds?: number | null;
+  tags?: string[];
+  verified?: boolean;
+  available?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  trashed_at?: string | null;
+  preview_url?: string | null;
+  thumbnail_url?: string | null;
+  waveform_url?: string | null;
+};
+
+export type LibraryAssetListResponse = { assets: LibraryAsset[]; total: number };
+export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string };
+export type LibraryUsageLocation = {
+  project_id?: string | null;
+  materialized_asset_id?: string | null;
+  location: Record<string, unknown>;
+};
+export type LibraryUsage = { library_asset_id: string; locations: LibraryUsageLocation[] };
+export type LibraryIngestItem = {
+  filename?: string | null;
+  idempotency_key?: string;
+  library_asset_id?: string | null;
+  state: LibraryAssetLifecycle | "duplicate";
+  error_code?: string | null;
+};
+export type LibraryIngestBatch = { ingest_batch_id: string; items: LibraryIngestItem[]; partial: boolean };
+
 export type TtsCandidateResponse = AssetResponse & {
   candidate_id?: string | null;
   segment_id?: string | null;
@@ -1578,6 +1625,39 @@ export const api = {
     }),
   mediaLibraryPreviewUrl: (libraryAssetId: string) =>
     `/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
+  listLibraryAssets: (params: { mediaType?: LibraryMediaType; q?: string; includeTrashed?: boolean; limit?: number } = {}, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    if (params.mediaType) query.set("media_type", params.mediaType);
+    if (params.q?.trim()) query.set("q", params.q.trim());
+    if (params.includeTrashed) query.set("include_trashed", "true");
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return request<LibraryAssetListResponse>(`/api/library/assets${suffix}`, { signal });
+  },
+  searchLibraryAssets: (query: string, mediaType: LibraryMediaType, signal?: AbortSignal) =>
+    request<{ matches: LibrarySearchMatch[]; semantic: boolean }>(
+      `/api/library/search?q=${encodeURIComponent(query)}&media_type=${encodeURIComponent(mediaType)}`,
+      { signal },
+    ),
+  ingestLibraryAssets: (files: File[], mediaType: LibraryMediaType, idempotencyKey?: string, signal?: AbortSignal) => {
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file, file.name));
+    body.append("media_type", mediaType);
+    if (idempotencyKey) body.append("idempotency_key", idempotencyKey);
+    return request<LibraryIngestBatch>("/api/library/ingest", { method: "POST", body, signal });
+  },
+  getLibraryAsset: (libraryAssetId: string, signal?: AbortSignal) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}`, { signal }),
+  getLibraryAssetUsage: (libraryAssetId: string, signal?: AbortSignal) =>
+    request<LibraryUsage>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/usage`, { signal }),
+  trashLibraryAsset: (libraryAssetId: string) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/trash`, { method: "POST" }),
+  restoreLibraryAsset: (libraryAssetId: string) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/restore`, { method: "POST" }),
+  permanentDeleteLibraryAsset: (libraryAssetId: string) =>
+    request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/permanent`, { method: "DELETE" }),
+  libraryAssetPreviewUrl: (libraryAssetId: string) =>
+    `/api/library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
   listEditorPresets: (projectId: string) =>
     request<EditorPreset[]>(`/api/projects/${projectId}/editor-library/presets`),
   listEditorFavorites: (projectId: string) =>

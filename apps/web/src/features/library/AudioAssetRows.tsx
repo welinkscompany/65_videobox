@@ -1,0 +1,8 @@
+import type { LibraryAsset } from "../../api";
+
+function filename(asset: LibraryAsset) { return String(asset.user_metadata?.filename ?? asset.asset_id ?? asset.library_asset_id); }
+function duration(asset: LibraryAsset) { const value = asset.duration_seconds ?? asset.technical_metadata?.duration_seconds; return typeof value === "number" ? `${Math.round(value)}초` : "길이 확인 중"; }
+
+export function AudioAssetRows({ assets, selectedId, onSelect }: { assets: LibraryAsset[]; selectedId?: string | null; onSelect: (asset: LibraryAsset) => void }) {
+  return <div className="vb-library-audio-rows" data-testid="library-audio-rows">{assets.map((item) => <article key={item.library_asset_id} className="vb-library-audio-row" data-selected={selectedId === item.library_asset_id} onClick={() => onSelect(item)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(item); } }}><button type="button" className="vb-library-audio-play" aria-label={`${filename(item)} 미리 듣기`} onClick={(event) => { event.stopPropagation(); onSelect(item); }}>재생</button><div className="vb-library-waveform" aria-label="오디오 파형">{Array.from({ length: 24 }, (_, index) => <i key={index} style={{ height: `${24 + ((index * 17) % 48)}%` }} />)}</div><div className="vb-library-audio-copy"><strong title={filename(item)}>{filename(item)}</strong><span>{duration(item)} · {item.lifecycle === "trashed" ? "휴지통" : item.lifecycle === "needs_attention" ? "확인 필요" : "준비됨"}</span></div><button type="button" className="vb-library-favorite" aria-label={`${filename(item)} 즐겨찾기`} onClick={(event) => event.stopPropagation()}>☆</button></article>)}</div>;
+}

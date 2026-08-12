@@ -62,12 +62,12 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
-  it("keeps global library and footage destinations honest until their waves", async () => {
+  it("mounts the library workspace while keeping footage honest until its wave", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const libraryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/library"] }));
     render(<AppRouter router={libraryRouter} />);
     expect(await screen.findByTestId("global-library-page")).toHaveTextContent("내 라이브러리");
-    expect(screen.getByText(/Wave-1/)).toBeVisible();
+    expect(screen.getByTestId("library-results")).toBeVisible();
     cleanup();
 
     const footageRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/footage"] }));

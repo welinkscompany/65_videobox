@@ -18,6 +18,7 @@ import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
+import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
 import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
@@ -207,12 +208,7 @@ function ProjectsPage() {
 }
 
 function LibraryPage() {
-  return <GlobalDestinationPage
-    testId="global-library-page"
-    title="내 라이브러리"
-    description="모든 프로젝트에서 함께 쓰는 영상·음악·효과음을 모아두는 공간이에요."
-    readiness="개인용 라이브러리는 Wave-1에서 준비할 예정이에요."
-  />;
+  return <PersonalLibraryPage />;
 }
 
 function FootagePage() {
