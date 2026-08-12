@@ -1,9 +1,10 @@
-# VideoBox Wave2 Task3 중단 핸드오프
+# VideoBox Wave2 중단 핸드오프
 
 ## 중단 기준
 
 - 브랜치: `codex/videobox-container-compatibility`
-- 구현 기준 커밋: `41f89ce44` (촬영본 UI preview/sequence 보완 및 디자인 토큰 계약 포함)
+- 구현 기준 커밋: `41f89ce44` (촬영본 UI·preview/sequence·디자인 토큰 계약 포함)
+- 최신 핸드오프 커밋: `3cef42288`
 - 작업 디렉터리: clean
 - 다음 세션은 반드시 이 worktree와 브랜치에서 시작한다.
 
@@ -20,6 +21,15 @@
 - 부모 임베딩이 없을 때 segment 단위 pending indexer로 후속 임베딩
 - managed 파일 SHA 불일치 시 색인·ack를 수행하지 않는 fail-closed 보호
 
+## Wave2 Task4/4A 완료
+
+- 촬영본 정리 4-pane UI: source list, preview/파형, 장면 timeline, 유진 제안/actions
+- 실제 range-aware preview artifact 생성·serve, renderer 실패 시 503 fail-closed
+- Shift 다중 장면 선택, virtual sequence 생성·선택 항목 reorder
+- 편집 후 preview 무효화와 선택 segment remap, 재생 위치·timeline 동기화
+- 촬영본 CSS를 semantic color/ring/radius 토큰으로 정리하고 editor actions 40px 계약 고정
+- 관련 spec/quality review 승인: P1 없음
+
 ## 디자인 시스템 어댑터
 
 - 명세: `docs/superpowers/specs/2026-08-13-videobox-design-system-adapter.ko.md`
@@ -33,7 +43,8 @@
 - `tests/test_footage_organizer_store.py`
 - `tests/test_footage_organizer.py`
 - `tests/test_api_media_library.py`
-- 결과: 최신 integrity focused `37 passed`, 기존 Starlette multipart deprecation warning 1건
+- 결과: backend footage API `9 passed`, frontend footage/AppRouter `38 passed`, design contract `4 passed`
+- production build: 통과(기존 Vite chunk-size warning만)
 - `compileall`: 통과
 - `git diff --check`: 통과
 
@@ -47,19 +58,18 @@
 - 임시 시각 산출물: `C:\Users\atgro\AppData\Local\Temp\videobox-live-library-stale.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-live-footage-stale.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-owner-footage.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-owner-footage-after-analysis.png`, `C:\Users\atgro\AppData\Local\Temp\videobox-owner-footage-after-preview.png` (저장소에는 추가하지 않음).
 - 결론: 이번 게이트에서는 owner acceptance를 주장하지 않는다. 정확한 `41f89ce44`로 컨테이너 이미지를 rebuild/restart하고, Hermes dashboard가 loopback에서 reachable해진 뒤 같은 viewport/flow를 다시 실행해야 한다.
 
-## 다음 작업의 필수 확인
+## Wave2 Task5 owner 브라우저 gate 상태
 
-승인 시 queue row는 생성되지만, `/api/library/search`의 `footage_index` semantic 결과에 실제로 반영되는지까지는 아직 최종 증명하지 않았다. 다음 세션의 첫 작업은 아래 순서다.
-
-1. `footage_segment_index_queue`를 기존 footage indexer/search adapter와 연결한다.
-2. 승인된 두 segment가 semantic B-roll 검색 결과에 각각 나타나는 통합 테스트를 추가한다.
-3. queue 재시도·응답 손실·중복 승인에서 중복 index가 생기지 않는지 검증한다.
-4. Wave2 Task3은 c6932627e에서 spec·quality review를 통과했다. 다음은 Wave2 Task4 촬영본 작업공간 UI다.
+- source Vite + route-mocked Playwright에서는 `/footage` 1280×800 4-pane, 분석→2개 장면→range preview 흐름이 성공했다.
+- isolated Playwright library/shell suite는 `16 passed`였다. 이는 fake/isolated API 증거이며 owner acceptance가 아니다.
+- 실제 `127.0.0.1:5173`은 `/library`·`/footage`에 구형 placeholder를 제공해 최신 `41f89ce44` source와 runtime image가 불일치했다.
+- `scripts/owner-ready.ps1 -Mode Check -Json -TimeoutSec 8`: VideoBox health 200, worktree clean, Hermes dashboard `127.0.0.1:9119`는 `connection_refused`로 blocked.
+- 다음 gate는 정확한 branch 기준으로 컨테이너 image rebuild/restart 후 같은 viewport/flow를 재실행하고, Hermes dashboard가 reachable한 상태에서 owner acceptance를 확인하는 것이다.
 
 ## 아직 하지 않은 것
 
-- 실제 owner-ready 컨테이너 브라우저 검증 (runtime image stale 및 Hermes 9119 connection_refused로 미통과)
-- Wave2 촬영본 작업공간 UI
+- 실제 owner-ready 컨테이너 브라우저 승인 및 owner 시청 확인
+- `/footage` ProductShell 외부 라우팅 P2 drift의 최종 제품 결정
 - Wave2 유진 제안 어댑터
 - Wave3 편집기·가로/세로 변형
 - Wave4 검토·독립 출력
@@ -72,9 +82,9 @@ VideoBox Creator Workspace 작업을 이어간다. 반드시 canonical worktree
 D:\\AI_Workspace_louis_office_50\\10_workspace\\65_videobox\\.worktrees\\videobox-container-compatibility
 와 branch codex/videobox-container-compatibility에서 시작해라.
 
-먼저 git status -sb와 git rev-parse HEAD를 확인하고, docs/handoffs/2026-08-12-videobox-wave2-task3-pause-handoff.ko.md를 읽어라. 기준 커밋은 c6932627e이다.
+먼저 git status -sb와 git rev-parse HEAD를 확인하고, 이 핸드오프 문서를 읽어라. 구현 기준은 41f89ce44이며 최신 핸드오프 커밋은 3cef42288 이후일 수 있다.
 
-Wave2 Task3은 c6932627e에서 검토 승인됐다. 최신 focused 결과와 git 상태를 확인한 뒤, Wave2 Task4 촬영본 작업공간 UI를 TDD로 시작해라. 신규 화면은 docs/superpowers/specs/2026-08-13-videobox-design-system-adapter.ko.md의 VideoBox 디자인 규칙과 ui-inspector/browser QA 루프를 따라야 한다.
+Wave2 Task4/4A는 구현·리뷰·push까지 완료됐다. 첫 작업은 owner-ready Check를 재실행하고, 정확한 branch source로 runtime image를 rebuild/restart하는 것이다. Hermes dashboard 127.0.0.1:9119가 reachable해진 뒤 1280×800 이상에서 `/`, `/library`, `/footage`, project shell을 실제 브라우저로 검증해라. stale placeholder가 보이면 최신 source와 runtime image 불일치로 기록하고 owner 승인으로 표현하지 마라.
 
-절차는 RED → GREEN → spec compliance review → quality review → 정확한 SHA 커밋 → push다. 완료를 주장하기 전에 backend focused, 관련 frontend, build, diff-check를 실행하고 결과를 분리해서 보고해라. 그 다음 Wave2 Task4 촬영본 작업공간 UI로 진행해라. 실제 owner-ready 브라우저 증거가 없으면 자동/fake E2E 통과를 owner 승인으로 표현하지 마라.
+절차는 runtime preflight → 실제 브라우저/ui-inspector 검증 → console/network/overflow/focus 확인 → owner acceptance 기록이다. 자동/fake E2E 통과를 실제 owner 승인으로 표현하지 마라. owner gate가 통과되면 다음은 Wave2 유진 제안 어댑터이며, 이후 Wave3 editor로 진행한다.
 ```
