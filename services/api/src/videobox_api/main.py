@@ -1155,6 +1155,7 @@ def create_app(
             user_asset_store=resolved_media_library_store.user_asset_store,
             ingest_service=app.state.library_ingest_service,
             managed_root=user_library_root,
+            managed_roots=tuple(dict.fromkeys((user_library_root, resolved_media_inbox_library_root, resolved_owner_audio_library_root, *(resolved_owner_audio_library_root / media_type for media_type in resolve_owner_audio_watch_paths(media_inbox_watch_path))))),
         )
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))

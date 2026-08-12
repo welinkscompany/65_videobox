@@ -96,6 +96,33 @@ def test_enabled_watcher_thread_copy_only_registers_a_real_file_end_to_end(tmp_p
         assert len(app.state.media_library_store.user_asset_store.list_assets(media_type="broll")) == 1
 
 
+def test_watcher_asset_is_previewable_through_global_library_api(tmp_path: Path, monkeypatch) -> None:
+    _clear_media_inbox_watch_environment(monkeypatch)
+    watch_dir = tmp_path / "drive-folder"
+    watch_dir.mkdir()
+    library_dir = tmp_path / "library"
+    monkeypatch.setenv("VIDEOBOX_DATA_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED", "1")
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_PATH", str(watch_dir))
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_LIBRARY_ROOT", str(library_dir))
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS", "0.05")
+    source = watch_dir / "clip.mp4"
+    source.write_bytes(b"watcher bytes")
+
+    app = create_app()
+    with TestClient(app) as client:
+        deadline = time.monotonic() + 10.0
+        assets = []
+        while time.monotonic() < deadline and not assets:
+            assets = app.state.media_library_store.user_asset_store.list_assets(media_type="broll")
+            if not assets:
+                time.sleep(0.1)
+        assert assets
+        preview = client.get(f"/api/library/assets/{assets[0].library_asset_id}/preview")
+        assert preview.status_code == 200
+        assert preview.content == source.read_bytes()
+
+
 def test_music_and_effects_get_their_own_watched_folders(tmp_path: Path, monkeypatch) -> None:
     """owner 결정 (2026-08-10): 종류를 폴더로 나눈다.
 

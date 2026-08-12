@@ -12,14 +12,16 @@ import hashlib
 import json
 import mimetypes
 from pathlib import Path
+import subprocess
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
 from videobox_api.models import MaterializeLibraryAssetRequest
-from videobox_core_engine.library_ingest import LibraryIngestService
+from videobox_core_engine.library_ingest import LibraryIngestIdempotencyConflict, LibraryIngestService
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_domain_models.library_assets import LibraryAssetLifecycle, LibraryAssetOrigin, LibraryMediaType
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
@@ -27,7 +29,11 @@ from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
 
 
-DERIVATIVE_VERSION = "v1"
+DERIVATIVE_VERSION = "v2"
+
+
+class _DerivativeToolUnavailable(RuntimeError):
+    pass
 
 
 def build_library_assets_router(
@@ -37,6 +43,7 @@ def build_library_assets_router(
     user_asset_store: LibraryUserAssetStore,
     ingest_service: LibraryIngestService,
     managed_root: Path,
+    managed_roots: tuple[Path, ...] | None = None,
 ) -> APIRouter:
     router = APIRouter()
     materializer = ProjectAssetMaterializer(project_store)
@@ -93,19 +100,25 @@ def build_library_assets_router(
             return None, builtin
         raise HTTPException(status_code=404, detail="asset_missing")
 
+    roots = tuple(dict.fromkeys(Path(value).resolve() for value in (managed_roots or (managed_root,))))
+
     def source_for_user(asset: Any) -> Path:
-        root = managed_root.resolve()
-        source = (root / asset.managed_relative_path).resolve()
-        try:
-            source.relative_to(root)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="asset_path_invalid") from exc
-        if not source.is_file():
-            raise HTTPException(status_code=404, detail="asset_unavailable")
-        digest = _sha256(source)
-        if digest != asset.content_sha256:
-            raise HTTPException(status_code=422, detail="asset_checksum_mismatch")
-        return source
+        # Watcher imports may use a dedicated inbox/audio root while sharing
+        # the same user-asset DB. Resolve only within configured roots and
+        # require the content hash before serving bytes.
+        invalid = False
+        for root in roots:
+            source = (root / asset.managed_relative_path).resolve()
+            try:
+                source.relative_to(root)
+            except ValueError:
+                invalid = True
+                continue
+            if source.is_file() and _sha256(source) == asset.content_sha256:
+                return source
+        if invalid:
+            raise HTTPException(status_code=422, detail="asset_path_invalid")
+        raise HTTPException(status_code=404, detail="asset_unavailable")
 
     @router.post("/api/library/ingest", status_code=status.HTTP_201_CREATED)
     def ingest_library_assets(
@@ -118,7 +131,9 @@ def build_library_assets_router(
             resolved_type = LibraryMediaType(media_type)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="media_type_invalid") from exc
-        key = (idempotency_key or "batch").strip() or "batch"
+        # Missing keys must never collapse unrelated uploads into one durable
+        # retry row. Explicit keys remain the caller's retry contract.
+        key = (idempotency_key or "").strip() or f"upload_{uuid4().hex}"
         try:
             provenance_value = json.loads(provenance) if provenance else {}
             if not isinstance(provenance_value, dict):
@@ -138,6 +153,8 @@ def build_library_assets_router(
                     provenance=provenance_value,
                 )
                 items.append(result)
+            except LibraryIngestIdempotencyConflict as exc:
+                raise HTTPException(status_code=409, detail="idempotency_key_conflict") from exc
             except Exception as exc:  # one bad file does not hide a good drop
                 items.append({
                     "filename": upload.filename,
@@ -165,11 +182,16 @@ def build_library_assets_router(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="media_type_invalid") from exc
         needle = (q or "").strip().lower()
-        values = [public_user(asset) for asset in users]
-        if not needle:
-            values.extend(public_builtin(item) for item in media_library_store.inspect_active_assets())
-        else:
-            values.extend(public_builtin(item) for item in media_library_store.inspect_active_assets() if needle in json.dumps(item.get("tags", []), ensure_ascii=False).lower())
+        values = [public_user(asset) for asset in users if not needle or needle in json.dumps(asset.to_dict(), ensure_ascii=False).lower()]
+        builtin_values = []
+        for item in media_library_store.inspect_active_assets():
+            item_type = str(item.get("media_type") or "")
+            if media_type and item_type != media_type:
+                continue
+            public = public_builtin(item)
+            if not needle or needle in json.dumps(public, ensure_ascii=False).lower():
+                builtin_values.append(public)
+        values.extend(builtin_values)
         return {"assets": values[:limit], "total": len(values)}
 
     # Asset identities are opaque IDs (``user_<uuid>`` or ``pack:<...>``),
@@ -314,7 +336,11 @@ def build_library_assets_router(
         if builtin is not None:
             return {"library_asset_id": asset_id, "kind": derivative_kind, "source_hash": builtin.get("sha256"), "version": DERIVATIVE_VERSION}
         source = source_for_user(asset)
-        derivative = _ensure_derivative(user_asset_store, managed_root, asset, derivative_kind, source)
+        try:
+            derivative = _ensure_derivative(user_asset_store, managed_root, asset, derivative_kind, source)
+        except _DerivativeToolUnavailable as exc:
+            user_asset_store.update_lifecycle(asset.library_asset_id, LibraryAssetLifecycle.NEEDS_ATTENTION)
+            raise HTTPException(status_code=503, detail={"state": "needs_attention", "code": "MEDIA_DERIVATIVE_TOOL_UNAVAILABLE"}) from exc
         derivative_path = managed_root / str(derivative["managed_relative_path"])
         return FileResponse(derivative_path, media_type=str(derivative["mime_type"]))
 
@@ -357,20 +383,44 @@ def build_library_assets_router(
 
 
 def _ensure_derivative(store: LibraryUserAssetStore, root: Path, asset: Any, kind: str, source: Path) -> dict[str, Any]:
-    extension = ".svg" if kind in {"thumbnail", "waveform"} else ".json"
+    extension = ".png"
     relative = Path("derivatives") / asset.content_sha256 / f"{DERIVATIVE_VERSION}-{kind}{extension}"
     target = root / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
-        # A deterministic SVG is a real browser-renderable derivative even
-        # when FFmpeg is unavailable (for example, a newly dropped clip before
-        # the local worker is ready). It carries no absolute path and is keyed
-        # by source hash + derivative version.
-        label = "파형" if kind == "waveform" else "미리보기"
-        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="640" height="360" fill="#f5f5f5"/><text x="32" y="180" font-family="sans-serif" font-size="28" fill="#333">{label}</text><text x="32" y="220" font-family="monospace" font-size="14" fill="#777">{asset.content_sha256[:16]}</text></svg>'
-        target.write_text(svg, encoding="utf-8")
+        try:
+            rendered = _render_derivative(source=source, media_type=asset.media_type.value, kind=kind)
+        except FileNotFoundError as exc:
+            raise _DerivativeToolUnavailable("ffmpeg_unavailable") from exc
+        if rendered is None:
+            # A corrupt/unsupported file must remain inspectable, but never
+            # receive the old fixed-label SVG. The hash-derived bars make the
+            # fallback visibly tied to the uploaded bytes and are deterministic.
+            bars = "".join(
+                f'<rect x="{index * 20}" y="{20 + (int(char, 16) * 8)}" width="12" height="{180 - int(char, 16) * 6}" fill="#e85d04"/>'
+                for index, char in enumerate(asset.content_sha256[:32])
+            )
+            extension = ".svg"
+            relative = relative.with_suffix(extension)
+            target = root / relative
+            target.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="220" viewBox="0 0 640 220"><rect width="640" height="220" fill="#fff7ed"/>{bars}</svg>', encoding="utf-8")
+        else:
+            target.write_bytes(rendered)
+    mime_type = "image/svg+xml" if target.suffix == ".svg" else "image/png"
     digest = _sha256(target)
-    return store.upsert_derivative(library_asset_id=asset.library_asset_id, kind=kind, managed_relative_path=relative.as_posix(), content_sha256=digest, byte_count=target.stat().st_size, mime_type="image/svg+xml", metadata={"source_sha256": asset.content_sha256, "version": DERIVATIVE_VERSION})
+    return store.upsert_derivative(library_asset_id=asset.library_asset_id, kind=kind, managed_relative_path=relative.as_posix(), content_sha256=digest, byte_count=target.stat().st_size, mime_type=mime_type, metadata={"source_sha256": asset.content_sha256, "version": DERIVATIVE_VERSION, "generator": "ffmpeg" if target.suffix != ".svg" else "hash-fallback"})
+
+
+def _render_derivative(*, source: Path, media_type: str, kind: str) -> bytes | None:
+    if media_type == "broll":
+        command = ["ffmpeg", "-y", "-v", "error", "-ss", "0", "-i", str(source), "-frames:v", "1", "-vf", "scale=640:360:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
+    else:
+        height = "220" if kind == "waveform" else "360"
+        command = ["ffmpeg", "-y", "-v", "error", "-i", str(source), "-filter_complex", f"aformat=channel_layouts=mono,showwavespic=s=640x{height}:colors=orangered", "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
+    result = subprocess.run(command, capture_output=True, timeout=30, check=False)
+    if result.returncode != 0 or not result.stdout:
+        return None
+    return bytes(result.stdout)
 
 
 def _sha256(path: Path) -> str:

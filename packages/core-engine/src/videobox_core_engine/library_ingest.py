@@ -21,6 +21,10 @@ from videobox_domain_models.library_assets import LibraryAssetLifecycle, Library
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
 
 
+class LibraryIngestIdempotencyConflict(ValueError):
+    """The retry key was already committed for different media bytes/type."""
+
+
 def _hash_file(path: Path) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
@@ -70,23 +74,35 @@ class LibraryIngestService:
             provenance=provenance,
         )
         existing_item = self.store.get_ingest_item(idempotency_key)
-        if existing_item and existing_item.get("library_asset_id"):
-            asset = self.store.get_asset(str(existing_item["library_asset_id"]))
-            if asset is not None:
-                return self._response(asset, existing_item, duplicate=True)
-        item = existing_item or self.store.record_ingest_item(
-            batch_id=str(batch["ingest_batch_id"]),
-            idempotency_key=idempotency_key,
-            library_asset_id=None,
-            filename=name,
-            state=LibraryAssetLifecycle.PROCESSING.value,
-        )
         staging: Path | None = None
         destination: Path | None = None
         created_destination = False
         try:
             staging = self._stage(source, name)
             content_sha256, byte_count = _hash_file(staging)
+            if existing_item is not None:
+                existing_type = str(existing_item.get("media_type") or "")
+                existing_hash = str(existing_item.get("content_sha256") or "")
+                existing_asset = self.store.get_asset(str(existing_item["library_asset_id"])) if existing_item.get("library_asset_id") else None
+                # Old rows did not persist the fingerprint.  Their committed
+                # asset still gives us a safe one-time migration path.
+                existing_hash = existing_hash or (existing_asset.content_sha256 if existing_asset is not None else "")
+                existing_type = existing_type or (existing_asset.media_type.value if existing_asset is not None else "")
+                if (existing_hash and existing_hash != content_sha256) or (existing_type and existing_type != resolved_type.value):
+                    raise LibraryIngestIdempotencyConflict("idempotency_key_conflict")
+                if existing_asset is not None:
+                    staging.unlink(missing_ok=True)
+                    item = self.store.update_ingest_item(idempotency_key=idempotency_key, content_sha256=content_sha256, media_type=resolved_type.value)
+                    return self._response(existing_asset, item, duplicate=True)
+            item = existing_item or self.store.record_ingest_item(
+                batch_id=str(batch["ingest_batch_id"]),
+                idempotency_key=idempotency_key,
+                library_asset_id=None,
+                filename=name,
+                state=LibraryAssetLifecycle.PROCESSING.value,
+                content_sha256=content_sha256,
+                media_type=resolved_type.value,
+            )
             existing_asset = self.store.find_by_content_sha256(content_sha256)
             if existing_asset is not None:
                 staging.unlink(missing_ok=True)
@@ -95,6 +111,8 @@ class LibraryIngestService:
                     library_asset_id=existing_asset.library_asset_id,
                     state=existing_asset.lifecycle.value,
                     error_code=None,
+                    content_sha256=content_sha256,
+                    media_type=resolved_type.value,
                 )
                 return self._response(existing_asset, item, duplicate=True)
             relative = self._relative_destination(resolved_type, content_sha256, name)
@@ -127,6 +145,8 @@ class LibraryIngestService:
                 library_asset_id=asset.library_asset_id,
                 state=LibraryAssetLifecycle.READY.value,
                 error_code=None,
+                content_sha256=content_sha256,
+                media_type=resolved_type.value,
             )
             if self.enqueue is not None:
                 try:
@@ -140,6 +160,10 @@ class LibraryIngestService:
                         error_code="derivative_enqueue_failed",
                     )
             return self._response(asset, item, duplicate=False)
+        except LibraryIngestIdempotencyConflict:
+            if staging is not None:
+                staging.unlink(missing_ok=True)
+            raise
         except Exception as error:
             if staging is not None:
                 staging.unlink(missing_ok=True)
@@ -233,4 +257,4 @@ class LibraryIngestService:
         }
 
 
-__all__ = ["LibraryIngestService"]
+__all__ = ["LibraryIngestIdempotencyConflict", "LibraryIngestService"]
