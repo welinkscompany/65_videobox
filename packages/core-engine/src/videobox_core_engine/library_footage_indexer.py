@@ -61,7 +61,8 @@ class LibraryFootageIndexReport:
 
 
 def build_footage_description(
-    *, summary: str, layers: dict[str, Any], width: int, height: int
+    *, summary: str, layers: dict[str, Any], width: int, height: int,
+    user_metadata: dict[str, Any] | None = None,
 ) -> str:
     """검색되는 문장을 만든다.
 
@@ -79,7 +80,14 @@ def build_footage_description(
         if word not in unique:
             unique.append(word)
     tail = f" {', '.join(unique)}." if unique else ""
-    return f"{orientation} 영상. {summary.strip()}{tail}"
+    text = f"{orientation} 영상. {summary.strip()}{tail}"
+    metadata = user_metadata or {}
+    tags = metadata.get("tags") if isinstance(metadata, dict) else None
+    if isinstance(tags, list):
+        normalized = [str(tag).strip() for tag in tags if str(tag).strip()]
+        if normalized:
+            text += f" 사용자가 붙인 태그: {', '.join(dict.fromkeys(normalized))}."
+    return text
 
 
 def index_pending_library_footage(
@@ -131,9 +139,11 @@ def index_pending_library_footage(
             layers=layers if isinstance(layers, dict) else {},
             width=int(probe.width),
             height=int(probe.height),
+            user_metadata=dict(clip.get("user_metadata") or {}),
         )
         store.save_footage_descriptor(
             content_sha256=str(clip["content_sha256"]),
+            library_asset_id=clip.get("library_asset_id"),
             filename=filename,
             duration_seconds=float(probe.duration_sec),
             width=int(probe.width),

@@ -189,3 +189,17 @@ def test_the_model_is_asked_for_korean_so_search_and_screen_get_korean(tmp_path:
     _run(store, tmp_path, vision_provider=_RecordingVision())
 
     assert seen and "한국어" in seen[0]
+
+
+def test_user_confirmed_footage_tags_are_added_to_machine_description(tmp_path: Path) -> None:
+    store = _FakeStore([{
+        **_pending(tmp_path)[0],
+        "library_asset_id": "user:broll-a",
+        "user_metadata": {"title": "출근길", "tags": ["차량", "이동"]},
+    }])
+
+    _run(store, tmp_path)
+
+    saved = store.saved[0]
+    assert "차량" in saved["description"] and "이동" in saved["description"]
+    assert saved["tags"]["layers"]["place"] == ["실내 수영장"]

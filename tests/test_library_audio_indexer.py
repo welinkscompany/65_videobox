@@ -267,3 +267,23 @@ def test_a_description_format_change_makes_every_asset_pending_again() -> None:
     from videobox_core_engine.library_audio_indexer import DESCRIPTION_VERSION
 
     assert isinstance(DESCRIPTION_VERSION, int) and DESCRIPTION_VERSION >= 1
+
+
+def test_user_confirmed_tags_are_embedded_without_replacing_machine_words(tmp_path: Path) -> None:
+    audio = tmp_path / "music-a.wav"
+    audio.write_bytes(b"pretend audio")
+    store = _FakeStore([{
+        "library_asset_id": "user:music-a", "asset_id": "music-a", "media_type": "music",
+        "sha256": hashlib.sha256(b"pretend audio").hexdigest(), "path": str(audio),
+        "user_metadata": {"title": "출근 음악", "tags": ["출근", "차분"]},
+    }])
+    embeddings = _FakeEmbeddings()
+
+    index_pending_library_audio(
+        store=store, embedding_provider=embeddings, embedding_model_name="bge-m3",
+        describe=lambda _path: _descriptor(),
+    )
+
+    saved = store.saved[0]
+    assert "출근" in saved["description"] and "차분" in saved["description"]
+    assert saved["words"] == {"세기": "강함", "밝기": "밝음", "빠르기": "빠름"}

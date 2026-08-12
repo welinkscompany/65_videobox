@@ -77,7 +77,8 @@ class LibraryAudioIndexReport:
 
 
 def build_asset_description(
-    *, media_type: str, words: dict[str, str], duration_seconds: float
+    *, media_type: str, words: dict[str, str], duration_seconds: float,
+    user_metadata: dict[str, Any] | None = None,
 ) -> str:
     """Write the sentence that gets embedded and searched.
 
@@ -90,12 +91,19 @@ def build_asset_description(
     length_phrase = next(
         phrase for limit, phrase in _LENGTH_PHRASES if duration_seconds <= limit
     )
-    return (
+    text = (
         f"{length_phrase} {kind}. "
         f"{_STRENGTH_PHRASES[words['세기']]}, "
         f"{_BRIGHTNESS_PHRASES[words['밝기']]}, "
         f"{_PACE_PHRASES[words['빠르기']]}."
     )
+    metadata = user_metadata or {}
+    tags = metadata.get("tags") if isinstance(metadata, dict) else None
+    if isinstance(tags, list):
+        normalized = [str(tag).strip() for tag in tags if str(tag).strip()]
+        if normalized:
+            text += f" 사용자가 붙인 태그: {', '.join(dict.fromkeys(normalized))}."
+    return text
 
 
 def index_pending_library_audio(
@@ -136,6 +144,7 @@ def index_pending_library_audio(
             media_type=str(asset["media_type"]),
             words=words,
             duration_seconds=descriptor.duration_seconds,
+            user_metadata=dict(asset.get("user_metadata") or {}),
         )
         embedding = _embed(
             description,
