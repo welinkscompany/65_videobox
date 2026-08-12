@@ -26,8 +26,10 @@ def test_library_ingest_list_preview_and_lifecycle(tmp_path):
     item = next(value for value in listed if value["library_asset_id"] == asset_id)
     assert "managed_relative_path" in item and not Path(item["managed_relative_path"]).is_absolute()
     assert client.get(f"/api/library/assets/{asset_id}/preview").status_code == 200
-    assert client.get(f"/api/library/assets/{asset_id}/waveform").status_code == 200
-    assert client.get(f"/api/library/assets/{asset_id}/thumbnail").status_code == 200
+    waveform = client.get(f"/api/library/assets/{asset_id}/waveform")
+    thumbnail = client.get(f"/api/library/assets/{asset_id}/thumbnail")
+    assert waveform.status_code == 200 and waveform.headers["content-type"].startswith("image/svg+xml")
+    assert thumbnail.status_code == 200 and thumbnail.headers["content-type"].startswith("image/svg+xml")
     assert client.post(f"/api/library/assets/{asset_id}/trash").status_code == 200
     assert client.post(f"/api/library/assets/{asset_id}/restore").status_code == 200
     assert client.delete(f"/api/library/assets/{asset_id}/permanent").status_code == 409

@@ -231,13 +231,27 @@ def build_library_assets_router(
         asset, builtin = find_asset(asset_id)
         if builtin is not None:
             return {"library_asset_id": asset_id, "locations": []}
-        return {"library_asset_id": asset_id, "locations": user_asset_store.usage(asset_id)}
+        locations = user_asset_store.usage(asset_id)
+        # Defensive reverse scan catches older projects/timelines created
+        # before explicit global references were introduced.
+        for project in getattr(project_store, "list_projects", lambda **_: [])(include_archived=True):
+            project_id = str(project.get("project_id", ""))
+            try:
+                for candidate in project_store.list_assets(project_id=project_id):
+                    metadata = dict(candidate.get("metadata") or {})
+                    if metadata.get("source_library_asset_id") == asset_id and not any(loc.get("materialized_asset_id") == candidate.get("asset_id") for loc in locations):
+                        locations.append({"project_id": project_id, "materialized_asset_id": candidate.get("asset_id"), "location": {"kind": "project_asset"}})
+            except Exception:
+                continue
+        return {"library_asset_id": asset_id, "locations": locations}
 
     @router.post("/api/library/assets/{asset_id}/trash")
     def trash_library_asset(asset_id: str) -> dict[str, Any]:
         asset, builtin = find_asset(asset_id)
         if builtin is not None:
             raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable", "library_asset_id": asset_id})
+        if get_library_asset_usage(asset_id)["locations"]:
+            raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": get_library_asset_usage(asset_id)["locations"]})
         try:
             return {"asset": public_user(user_asset_store.trash_asset(asset_id))}
         except ValueError as exc:
@@ -258,7 +272,7 @@ def build_library_assets_router(
         asset, builtin = find_asset(asset_id)
         if builtin is not None:
             raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
-        locations = user_asset_store.usage(asset_id)
+        locations = get_library_asset_usage(asset_id)["locations"]
         if locations:
             raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": locations})
         if asset.lifecycle is not LibraryAssetLifecycle.TRASHED:
@@ -301,7 +315,8 @@ def build_library_assets_router(
             return {"library_asset_id": asset_id, "kind": derivative_kind, "source_hash": builtin.get("sha256"), "version": DERIVATIVE_VERSION}
         source = source_for_user(asset)
         derivative = _ensure_derivative(user_asset_store, managed_root, asset, derivative_kind, source)
-        return {"library_asset_id": asset_id, "kind": derivative_kind, "version": DERIVATIVE_VERSION, "source_hash": asset.content_sha256, "derivative": derivative}
+        derivative_path = managed_root / str(derivative["managed_relative_path"])
+        return FileResponse(derivative_path, media_type=str(derivative["mime_type"]))
 
     @router.post("/api/library/assets/{asset_id}/materialize", status_code=status.HTTP_201_CREATED)
     def materialize_library_asset(asset_id: str, payload: MaterializeLibraryAssetRequest) -> dict[str, Any]:
@@ -317,7 +332,14 @@ def build_library_assets_router(
                 source_path=source,
                 mime_type=asset.mime_type,
             )
-            reference = user_asset_store.add_project_reference(project_id=payload.project_id, library_asset_id=asset_id, materialized_asset_id=str(result.get("asset_id")), location={"project_id": payload.project_id})
+            try:
+                reference = user_asset_store.add_project_reference(project_id=payload.project_id, library_asset_id=asset_id, materialized_asset_id=str(result.get("asset_id")), location={"project_id": payload.project_id})
+            except Exception:
+                # Cross-database atomicity is impossible here; compensate the
+                # project copy immediately so a failed reference can never
+                # leave an unguarded materialized asset behind.
+                materializer._compensate_registered_asset(project_id=payload.project_id, asset_id=str(result.get("asset_id")))
+                raise
         except (KeyError, FileNotFoundError) as exc:
             raise HTTPException(status_code=404, detail="project_missing") from exc
         except ValueError as exc:
@@ -327,20 +349,28 @@ def build_library_assets_router(
     @router.delete("/api/library/assets/{asset_id}/references/{reference_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
     def remove_library_reference(asset_id: str, reference_id: str) -> None:
         find_asset(asset_id)
+        if not any(str(item.get("reference_id")) == reference_id for item in user_asset_store.list_project_references(library_asset_id=asset_id)):
+            raise HTTPException(status_code=404, detail="reference_missing")
         user_asset_store.remove_project_reference(reference_id)
 
     return router
 
 
 def _ensure_derivative(store: LibraryUserAssetStore, root: Path, asset: Any, kind: str, source: Path) -> dict[str, Any]:
-    relative = Path("derivatives") / asset.content_sha256 / f"{DERIVATIVE_VERSION}-{kind}.json"
+    extension = ".svg" if kind in {"thumbnail", "waveform"} else ".json"
+    relative = Path("derivatives") / asset.content_sha256 / f"{DERIVATIVE_VERSION}-{kind}{extension}"
     target = root / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
-        payload = {"source_sha256": asset.content_sha256, "version": DERIVATIVE_VERSION, "kind": kind, "mime_type": asset.mime_type, "source_name": asset.user_metadata.get("filename", source.name)}
-        target.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        # A deterministic SVG is a real browser-renderable derivative even
+        # when FFmpeg is unavailable (for example, a newly dropped clip before
+        # the local worker is ready). It carries no absolute path and is keyed
+        # by source hash + derivative version.
+        label = "파형" if kind == "waveform" else "미리보기"
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="640" height="360" fill="#f5f5f5"/><text x="32" y="180" font-family="sans-serif" font-size="28" fill="#333">{label}</text><text x="32" y="220" font-family="monospace" font-size="14" fill="#777">{asset.content_sha256[:16]}</text></svg>'
+        target.write_text(svg, encoding="utf-8")
     digest = _sha256(target)
-    return store.upsert_derivative(library_asset_id=asset.library_asset_id, kind=kind, managed_relative_path=relative.as_posix(), content_sha256=digest, byte_count=target.stat().st_size, mime_type="application/json", metadata={"source_sha256": asset.content_sha256, "version": DERIVATIVE_VERSION})
+    return store.upsert_derivative(library_asset_id=asset.library_asset_id, kind=kind, managed_relative_path=relative.as_posix(), content_sha256=digest, byte_count=target.stat().st_size, mime_type="image/svg+xml", metadata={"source_sha256": asset.content_sha256, "version": DERIVATIVE_VERSION})
 
 
 def _sha256(path: Path) -> str:

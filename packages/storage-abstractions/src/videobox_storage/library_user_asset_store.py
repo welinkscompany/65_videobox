@@ -240,8 +240,27 @@ class LibraryUserAssetStore:
             connection.close()
 
     def trash_asset(self, library_asset_id: str) -> LibraryUserAsset:
-        self._assert_no_references(library_asset_id)
-        return self.update_lifecycle(library_asset_id, LibraryAssetLifecycle.TRASHED)
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            refs = connection.execute("SELECT reference_id FROM library_project_references WHERE library_asset_id = ? LIMIT 1", (library_asset_id,)).fetchone()
+            if refs is not None:
+                raise ValueError(f"asset has project reference: {refs[0]}")
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin assets cannot be trashed")
+            now = _now()
+            connection.execute("UPDATE library_user_assets SET lifecycle = 'trashed', trashed_at = ?, updated_at = ? WHERE library_asset_id = ?", (now, now, library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
 
     trash = trash_asset
 
@@ -256,15 +275,17 @@ class LibraryUserAssetStore:
     restore = restore_asset
 
     def permanently_delete_asset(self, library_asset_id: str) -> None:
-        asset = self.get_asset(library_asset_id)
-        if asset is None:
-            raise KeyError(library_asset_id)
-        if asset.origin is LibraryAssetOrigin.BUILTIN:
-            raise ValueError("builtin assets cannot be permanently deleted")
-        self._assert_no_references(library_asset_id)
         connection = self._connection()
         try:
             connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT origin, lifecycle FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin assets cannot be permanently deleted")
+            refs = connection.execute("SELECT reference_id FROM library_project_references WHERE library_asset_id = ? LIMIT 1", (library_asset_id,)).fetchone()
+            if refs is not None:
+                raise ValueError(f"asset has project reference: {refs[0]}")
             connection.execute("DELETE FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,))
             connection.commit()
         except Exception:
