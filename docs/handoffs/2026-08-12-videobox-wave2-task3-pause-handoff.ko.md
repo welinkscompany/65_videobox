@@ -4,7 +4,7 @@
 
 - 브랜치: `codex/videobox-container-compatibility`
 - 구현 기준 커밋: `41f89ce44` (촬영본 UI·preview/sequence·디자인 토큰 계약 포함)
-- 최신 핸드오프 커밋: 이 문서 변경을 반영할 새 커밋으로 갱신한다.
+- 최신 핸드오프 커밋: `a58736ad1`
 - 작업 디렉터리: clean
 - 다음 세션은 반드시 이 worktree와 브랜치에서 시작한다.
 
