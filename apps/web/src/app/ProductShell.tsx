@@ -102,9 +102,9 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
       <div className="vb-shell-brand"><Video aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">VideoBox</span></div>
       <nav aria-label="전체 메뉴" className="vb-global-nav"><ul>{globalNav.map(([label, href, Icon]) => <li key={href}><a href={href} aria-label={label}><Icon aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">{label}</span></a></li>)}</ul></nav>
       {hasProject ? <div className="vb-project-switcher group-data-[collapsible=icon]:hidden" aria-label="프로젝트 전환"><p>현재 프로젝트</p>{projects.map((project) => <div key={project.project_id} className="vb-project-row" data-testid={`project-row-${project.project_id}`}>
-        <Button variant="ghost" aria-label={project.name} aria-pressed={project.project_id === projectId} onClick={() => onNavigate(project.project_id, "home")}>{project.name}</Button>
+        <Button className="vb-project-select" variant="ghost" aria-label={project.name} aria-pressed={project.project_id === projectId} onClick={() => onNavigate(project.project_id, "home")}>{project.name}</Button>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button className="vb-project-more" variant="ghost" size="icon" aria-label={`${project.name} 더보기`}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
+          <DropdownMenuTrigger asChild><Button className="vb-project-more" variant="ghost" size="icon" aria-label={`${project.name} 더보기`} title={`${project.name} 더보기`}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {onArchiveProject ? (archiveConfirmId === project.project_id ? (
               <DropdownMenuItem disabled={projectActionBusy === `archive:${project.project_id}`} onSelect={() => { setArchiveConfirmId(null); void runProjectAction(`archive:${project.project_id}`, () => onArchiveProject(project.project_id)); }}>보관 확인</DropdownMenuItem>
@@ -130,7 +130,7 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
       {archive && archiveOpen ? <div className="vb-project-archive">
         <p>보관함</p>
         {archive.archivedProjects.length === 0 ? <p>보관한 프로젝트가 없어요.</p> : archive.archivedProjects.map((project) => (
-          <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
+            <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".5rem" }}>
             <span>{project.name}</span>
             <Button variant="outline" disabled={projectActionBusy === `restore:${project.project_id}`} aria-label={`${project.name} 되돌리기`} onClick={() => void runProjectAction(`restore:${project.project_id}`, () => archive.restore(project.project_id))}>되돌리기</Button>
           </div>

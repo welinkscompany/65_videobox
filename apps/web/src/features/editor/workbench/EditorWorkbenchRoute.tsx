@@ -517,8 +517,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }, 1200);
     return () => window.clearTimeout(poll);
   }, [refreshToken, requestKey, state.view?.playback.exactPreview.status, state.view?.playback.exactPreview.generationId]);
-  if (state.key !== requestKey) return <main aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></main>;
-  if (!state.view) return <main aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></main>;
+  if (state.key !== requestKey) return <section aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></section>;
+  if (!state.view) return <section aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></section>;
   const refreshPreview = async () => {
     if (!sessionId || !state.view) return;
     const epoch = routeEpoch.current.value;
