@@ -60,6 +60,8 @@ beforeEach(() => {
   vi.spyOn(api, "retryMediaAnalysis").mockResolvedValue(analysis("queued", 3));
   vi.spyOn(api, "reviewMediaAnalysis").mockResolvedValue(analysis("succeeded", 1));
   vi.spyOn(api, "uploadDraftBroll").mockResolvedValue({ asset_id: "asset-uploaded", asset_type: "broll_video", scan_status: "local_ready" });
+  vi.spyOn(api, "ingestLibraryAssets").mockResolvedValue({ ingest_batch_id: "batch-project", partial: false, items: [] });
+  vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({ asset: { asset_id: "asset-uploaded", asset_type: "broll_video", storage_uri: "local://project-a/asset-uploaded" }, reference: { reference_id: "ref-project", project_id: "project-a", library_asset_id: "user:broll" } });
   vi.spyOn(api, "listMediaInboxAssets").mockResolvedValue([
     { filename: "촬영-01.mp4", size_bytes: 125829120 },
     { filename: "촬영-02.mp4", size_bytes: 2048 },
@@ -290,19 +292,23 @@ describe("MediaWorkspacePage", () => {
     const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
     const fileA = makeFile("clip-a.mp4");
     const fileB = makeFile("clip-b.mp4");
+    vi.mocked(api.ingestLibraryAssets).mockResolvedValueOnce({ ingest_batch_id: "batch-project", partial: false, items: [
+      { filename: "clip-a.mp4", state: "ready", library_asset_id: "user:clip-a" },
+      { filename: "clip-b.mp4", state: "ready", library_asset_id: "user:clip-b" },
+    ] });
     fireEvent.change(input, { target: { files: [fileA, fileB] } });
 
-    await waitFor(() => expect(api.uploadDraftBroll).toHaveBeenCalledTimes(2));
-    expect(api.uploadDraftBroll).toHaveBeenNthCalledWith(1, "project-a", fileA);
-    expect(api.uploadDraftBroll).toHaveBeenNthCalledWith(2, "project-a", fileB);
+    await waitFor(() => expect(api.ingestLibraryAssets).toHaveBeenCalledTimes(1));
+    expect(api.ingestLibraryAssets).toHaveBeenCalledWith([fileA, fileB], "broll", expect.any(String));
     await waitFor(() => expect(api.listBrollAssets).toHaveBeenCalledTimes(2));
     expect(await screen.findByText(/영상 2개를 추가했어요/)).toBeVisible();
   });
 
   it("keeps failed uploads visible in creator language instead of silently dropping them", async () => {
-    vi.mocked(api.uploadDraftBroll)
-      .mockResolvedValueOnce({ asset_id: "asset-uploaded", asset_type: "broll_video", scan_status: "local_ready" })
-      .mockRejectedValueOnce(new Error("raw provider failure"));
+    vi.mocked(api.ingestLibraryAssets).mockResolvedValue({ ingest_batch_id: "batch", partial: true, items: [
+      { filename: "good.mp4", state: "ready", library_asset_id: "user:good" },
+      { filename: "bad.mp4", state: "needs_attention", error_code: "invalid_media" },
+    ] });
     render(<MediaWorkspacePage projectId="project-a" />);
     await openImportTab();
     await screen.findByRole("heading", { name: "자산 보관함" });
@@ -315,8 +321,8 @@ describe("MediaWorkspacePage", () => {
   });
 
   it("blocks another upload while one is already in flight", async () => {
-    let release!: (value: { asset_id: string; asset_type: string; scan_status: string }) => void;
-    vi.mocked(api.uploadDraftBroll).mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+    let release!: () => void;
+    vi.mocked(api.ingestLibraryAssets).mockImplementation(() => new Promise((resolve) => { release = () => resolve({ ingest_batch_id: "batch", partial: false, items: [{ filename: "one.mp4", state: "ready", library_asset_id: "user:one" }] }); }));
     render(<MediaWorkspacePage projectId="project-a" />);
     await openImportTab();
     await screen.findByRole("heading", { name: "자산 보관함" });
@@ -325,7 +331,7 @@ describe("MediaWorkspacePage", () => {
     fireEvent.change(input, { target: { files: [makeFile("one.mp4")] } });
     expect(input).toBeDisabled();
 
-    await act(async () => release({ asset_id: "asset-uploaded", asset_type: "broll_video", scan_status: "local_ready" }));
+    await act(async () => release());
     await waitFor(() => expect(input).not.toBeDisabled());
   });
 

@@ -170,17 +170,17 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     if (files.length === 0) return;
     const token = beginAction("upload");
     if (!token) return;
-    let succeeded = 0;
-    let failed = 0;
-    for (const file of Array.from(files)) {
-      try {
-        await api.uploadDraftBroll(token.projectId, file);
-        succeeded += 1;
-      } catch {
-        failed += 1;
+    let succeeded = 0; let failed = 0;
+    try {
+      const batch = await api.ingestLibraryAssets(Array.from(files), "broll", `project-${token.projectId}-${token.id}`);
+      for (const item of batch.items) {
+        if (!item.library_asset_id || (item.state !== "ready" && item.state !== "duplicate")) { failed += 1; continue; }
+        try { await api.materializeLibraryAsset(item.library_asset_id, token.projectId); succeeded += 1; } catch { failed += 1; }
       }
-      if (!isCurrentAction(token)) return;
+    } catch {
+      failed = files.length;
     }
+    if (!isCurrentAction(token)) return;
     if (succeeded > 0) await load();
     if (!isCurrentAction(token)) return;
     if (succeeded > 0 && failed === 0) {
