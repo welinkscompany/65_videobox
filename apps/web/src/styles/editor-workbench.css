@@ -11,6 +11,11 @@
 .vb-editor-right-dock, .vb-editor-right-dock__history, .vb-editor-right-dock__fallback, .vb-editor-right-dock__inspector { display: grid; gap: 0.5rem; }
 .vb-editor-right-dock__history { max-height: 14rem; overflow: auto; padding: 0.5rem; border: 1px solid var(--border); border-radius: 0.5rem; }
 .vb-editor-right-dock__history article p { margin-block: 0.25rem; }
+.vb-editor-right-dock__starters { display: grid; gap: 0.3rem; padding: 0.2rem 0; }
+.vb-editor-right-dock__starters h3 { margin: 0; font-size: 0.85rem; }
+.vb-editor-right-dock__starters > span { color: var(--muted-foreground); font-size: 0.75rem; }
+.vb-editor-right-dock__starter-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.vb-editor-right-dock__starter-list > button { min-height: 2rem; height: auto; padding: 0.35rem 0.55rem; border-radius: 999px; color: var(--foreground); font-size: 0.75rem; line-height: 1.35; text-align: left; white-space: normal; }
 .vb-editor-workbench__preview { min-width: 0; min-height: 0; max-height:100%; overflow:auto; display: grid; place-content: start; text-align: center; gap: 0.5rem; background: var(--vb-preview); }
 .vb-editor-workbench__timeline { min-width:0; min-height:0; max-height:16rem; overflow:auto; padding: 0.75rem 1rem; }
 .vb-editor-workbench__timeline:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
