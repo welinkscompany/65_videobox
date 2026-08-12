@@ -51,6 +51,7 @@ from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
+from videobox_api.routers.footage_organizer import build_footage_organizer_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
@@ -759,6 +760,8 @@ def create_app(
     final_renderer=None,
     pycapcut_exporter=None,
     media_library_store: MediaLibraryStore | None = None,
+    footage_detector=None,
+    footage_derivative_renderer=None,
     vision_provider=None,
     embedding_provider=None,
     media_probe=None,
@@ -1148,6 +1151,13 @@ def create_app(
         )
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
+    app.include_router(
+        build_footage_organizer_router(
+            media_library_store=resolved_media_library_store,
+            detector=footage_detector,
+            derivative_renderer=footage_derivative_renderer,
+        )
+    )
     app.include_router(
         build_library_assets_router(
             project_store=store,

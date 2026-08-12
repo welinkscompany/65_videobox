@@ -1387,4 +1387,76 @@ class SubtitleJobResponse(StartJobResponse):
     subtitle: SubtitleArtifactResponse
 
 
+class FootageProposalCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    library_asset_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+    analysis: dict[str, Any] | None = None
+
+
+class FootageProposalEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: Literal["move_boundary", "split", "merge", "exclude", "confirm"]
+    expected_revision: int = Field(ge=1)
+    segment_id: str | None = Field(default=None, min_length=1)
+    segment_ids: list[str] = Field(default_factory=list)
+    boundary_sec: float | None = None
+    split_sec: float | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class FootageRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+
+
+class FootageApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class VirtualSequenceItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_segment_id: str = Field(min_length=1)
+    item_order: int = Field(ge=1)
+    start_sec: float | None = None
+    end_sec: float | None = None
+
+
+class VirtualSequenceCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_id: str = Field(min_length=1)
+    name: str = ""
+    items: list[VirtualSequenceItemRequest] = Field(min_length=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class VirtualSequenceReorderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+    item_ids: list[str] = Field(min_length=1)
+
+
+class VirtualSequenceApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class FootageDerivativeRenderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_kind: Literal["proposal", "sequence"]
+    source_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
 PartialRegenerationJobResponse.model_rebuild()
