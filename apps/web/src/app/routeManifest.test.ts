@@ -32,6 +32,12 @@ describe("workspace route manifest", () => {
     expect(parseWorkspaceLocation("/projects/project_a/unknown")).toBeNull();
   });
 
+  it("rejects inherited object keys instead of treating them as route aliases", () => {
+    for (const section of ["__proto__", "constructor", "toString"]) {
+      expect(parseWorkspaceLocation(`/projects/project_a/${section}`)).toBeNull();
+    }
+  });
+
   it("decodes direct project URLs without inventing selected state", () => {
     expect(parseWorkspaceLocation("/projects/project_a/review")).toEqual({
       projectId: "project_a",

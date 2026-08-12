@@ -61,7 +61,7 @@ export type ParsedWorkspaceLocation = {
 export function parseWorkspaceLocation(pathname: string): ParsedWorkspaceLocation | null {
   const match = /^\/projects\/([^/]+)\/([^/]+)$/.exec(pathname);
   if (!match) return null;
+  if (!Object.prototype.hasOwnProperty.call(legacyStageAliases, match[2])) return null;
   const resolved = legacyStageAliases[match[2]];
-  if (!resolved) return null;
   return { projectId: decodeURIComponent(match[1]), ...resolved };
 }
