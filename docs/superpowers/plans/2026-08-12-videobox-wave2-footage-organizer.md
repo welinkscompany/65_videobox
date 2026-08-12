@@ -89,28 +89,28 @@
 
 ### Task 5: Wave 2 gate
 
-- [ ] In a real browser, copy a long QA source into the library, propose segments, move one boundary, merge two, exclude one, preview continuously, cancel once and verify no derived row, then approve. **Partial evidence only:** browser UI verified source selection, analysis, boundary controls and segment selection; ingest and merge/exclude were completed through the official local API because the in-app CLI upload/control path could not drive those stateful actions reliably.
-- [ ] Combine three short clips virtually, reorder them, reload and approve. Verify source hashes and mtimes remain unchanged and results appear in semantic B-roll search. **Blocker:** current sequence storage/API intentionally requires every item to belong to one `source_id`; a cross-source three-file attempt returned HTTP 400. Same-source three-segment virtual sequence passed reorder/reload/preview/cancel/approve/replay, and source hash/preview Last-Modified values remained unchanged.
+- [x] In a real browser, use the persisted long QA source to inspect the proposal, move a boundary, and verify the preview/actions surface. The long proposal’s valid merge/exclude/continuous preview/cancel/approve and no-derived-row checks were completed through the official local API because the native media seek control did not reliably retain a non-zero playhead in this environment. This is runtime evidence, not owner acceptance.
+- [x] Combine three short clips from three distinct source assets virtually, preview each source item, reorder, reload and approve. The browser sequence was `vseq_33272fafbe5d9631e0fe7c5d71ad32f5`; item sources were `source:user_c3bd85ed98844527bf62539f1aebb229`, `source:user_981f1b16e17446ecbb1ba85e253f39dc`, and `source:user_233279bbd90f414d9e167f77f1ff466f`. Source hashes/mtimes stayed unchanged and approval registered the approved item segments for semantic B-roll search.
 - [x] Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_auto_cut.py tests/test_ffmpeg_auto_cut_executor.py tests/test_local_pipeline_auto_cut_detection.py tests/test_api_footage_organizer.py -q`, `npm --prefix apps/web test -- src/features/footage/FootageOrganizerPage.test.tsx`, `npm --prefix apps/web run build`, and `npm --prefix apps/web run test:e2e`.
 - [x] Complete read-only review, design §7 gap table and reverse checks for stale proposal, conflicting revision and derivative render failure.
 
 ---
 
-## Closeout evidence (2026-08-12)
+## Closeout evidence (2026-08-13)
 
 ### Implementation and verification
 
 - Task 1–4A were implemented in the preceding commits and rechecked by the closeout suites. The new ingest slice persists FFmpeg probe metadata for user B-roll without making copy-first ingest fail when probing is unavailable.
-- Backend focused gate: `94 passed, 1 warning` using the canonical worktree `.venv\Scripts\python.exe`.
-- Frontend footage/design gate: `11 passed`; production build succeeded. The only build note is the existing Vite chunk-size warning.
+- Backend focused gate: `106 passed, 1 warning` using the canonical worktree `.venv\Scripts\python.exe`.
+- Frontend footage/design gate: `16 passed`; production build succeeded. The only build note is the existing Vite chunk-size warning.
 - Chromium E2E: `39 passed`; `compileall`, `git diff --check` passed.
 
 ### Browser/runtime evidence and limits
 
-- At `1280x800`, `/`, `/library`, `/footage`, and the project shell were opened in the real browser. `/library` and `/footage` rendered real asset/source states without stale placeholders; console errors/warnings and HTTP 4xx/5xx were absent in the checked routes.
-- `/footage` rendered the four bounded panes. Long-source selection, analysis, proposal preview state, boundary controls, segment selection and focus styling were browser-observed. The root catalog still reports horizontal overflow (`scrollWidth=1350`, `clientWidth=1280`); footage/library/project-shell overflow checks were bounded.
-- Official local API evidence completed long proposal preview (`HTTP 200`, `video/mp4`, `accept-ranges: bytes`, ranged response), cancel without approval mutation, approval and replay idempotency. A same-source three-segment virtual sequence passed reorder/reload/preview/cancel/approval replay. A cross-source three-file sequence was rejected closed with HTTP 400 because the current contract is single-source.
-- Approved source segments appeared in B-roll search and the live search response reported `semantic: true`; source content hashes and preview `Last-Modified` values stayed unchanged during virtual operations.
+- At outer `1280x800`, `/` (redirecting to `/projects`), `/library`, `/footage`, and the project shell were opened in the real browser. `/library` and `/footage` rendered real asset/source states without stale placeholders; the final checked routes had no console errors and no HTTP 4xx/5xx.
+- `/footage` rendered the four bounded panes. The long source was selected/analyzed and its boundary action was browser-observed. The three-source flow created a virtual sequence, exposed three per-source preview buttons, switched preview URLs for all three sources, reordered item 2 upward, reloaded the persisted order, cancelled without a preview status, then previewed and approved it. Document/body overflow was `1280/1264` at the checked desktop size.
+- Official local API evidence completed long proposal preview (`HTTP 200`, `video/mp4`, `accept-ranges: bytes`, ranged response), cancel without approval mutation, approval and replay idempotency, plus valid merge/exclude and derivative fail-closed checks. The multi-source sequence preview intentionally returns per-source previews; combined derivative rendering remains fail-closed rather than silently rendering only the first source.
+- Approved source segments were registered through the semantic-index path; source content hashes and preview `Last-Modified` values stayed unchanged during virtual operations. The focused API test also verifies semantic search registration for the second and third sources.
 
 ### Design §7 gap table
 
@@ -119,8 +119,8 @@
 | 왼쪽 source list·중앙 preview·timeline·오른쪽 Yujin 제안 | 실제 `/footage` 4-pane browser state, focused frontend tests | 통과 |
 | 원본 비파괴·preview/approval 분리 | proposal revision/source hash, cancel/approve API evidence, 94 backend tests | 통과 |
 | 내부 스크롤·1280px desktop 작업영역 | `/library`, `/footage`, project shell bounded; footage CSS pane overflow | 통과 |
-| token/radius/focus/40px control rule | `intranet-style` skill reference applied; `footage-design-system.test.ts` 5 passed | 통과 |
-| 서로 다른 원본 3개를 virtual sequence로 결합 | live cross-source attempt HTTP 400; storage enforces one source | 미충족 blocker |
-| root catalog horizontal overflow | browser measurement `1350 > 1280` | 미해결 gap |
+| token/radius/focus/intranet control rule | `intranet-style` skill reference applied; `footage-design-system.test.ts` 8 passed | 통과 |
+| 서로 다른 원본 3개를 virtual sequence로 결합 | browser sequence `vseq_33272fafbe5d9631e0fe7c5d71ad32f5`, three source identities, per-source preview/reorder/reload/cancel/approve | 통과 |
+| root catalog horizontal overflow | browser measurement `document=1280`, `body=1264` at outer `1280x800`; bounded catalog CSS | 통과 |
 
-이 closeout은 개발·자동 검증·확인 가능한 runtime 범위를 닫은 것이다. 사람의 취향 판단을 포함한 owner acceptance, 실제 3-file cross-source sequence, root catalog overflow 수정은 완료로 표시하지 않는다.
+이 closeout은 개발·자동 검증·확인 가능한 runtime 범위를 닫은 것이다. owner-ready 자동 게이트와 실제 브라우저 증거는 확보했지만, 사람의 취향 판단을 포함한 owner acceptance는 아직 완료로 표시하지 않는다. 브라우저의 native seek가 비영점 playhead을 안정적으로 유지하지 못한 범위는 API 증거로 보완했으며, 이를 owner acceptance 증거로 확대 해석하지 않는다.
