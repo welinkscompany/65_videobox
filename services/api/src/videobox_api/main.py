@@ -1002,6 +1002,7 @@ def create_app(
     app.state.library_ingest_service = LibraryIngestService(
         store=resolved_media_library_store.user_asset_store,
         managed_root=user_library_root,
+        probe_metadata=FFmpegMediaProbe().probe_metadata,
     )
     media_inbox_watch_path = resolve_media_inbox_watch_path()
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()

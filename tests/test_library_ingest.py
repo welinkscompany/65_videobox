@@ -38,6 +38,39 @@ def test_ingest_copies_and_keeps_source_bytes(tmp_path: Path) -> None:
     assert not list((tmp_path / "managed" / ".staging").glob("*"))
 
 
+def test_broll_ingest_persists_probe_metadata_without_blocking_copy(tmp_path: Path) -> None:
+    class Probe:
+        duration_sec = 18.0
+        width = 640
+        height = 360
+        audio_codec = None
+
+    store = LibraryUserAssetStore(tmp_path / "db")
+    service = LibraryIngestService(
+        store=store,
+        managed_root=tmp_path / "managed",
+        probe_metadata=lambda _path: Probe(),
+    )
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"video bytes")
+
+    result = service.ingest(
+        media_type="broll",
+        source=source,
+        filename="clip.mp4",
+        idempotency_key="probe-1",
+    )
+
+    asset = store.get_asset(result["library_asset_id"])
+    assert asset is not None
+    assert asset.technical_metadata == {
+        "duration_seconds": 18.0,
+        "width": 640,
+        "height": 360,
+        "has_audio": False,
+    }
+
+
 def test_same_hash_reuses_asset_and_same_name_different_hash_gets_distinct_path(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
     first = tmp_path / "same.mp4"

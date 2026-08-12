@@ -48,6 +48,7 @@ class LibraryIngestService:
     store: LibraryUserAssetStore
     managed_root: Path
     enqueue: Callable[[str], None] | None = None
+    probe_metadata: Callable[[Path], Any] | None = None
 
     def ingest(
         self,
@@ -137,6 +138,20 @@ class LibraryIngestService:
             else:
                 self._atomic_publish(staging, destination)
                 created_destination = True
+            technical_metadata: dict[str, Any] = {}
+            if resolved_type is LibraryMediaType.BROLL and self.probe_metadata is not None:
+                try:
+                    probed = self.probe_metadata(destination)
+                    technical_metadata = {
+                        "duration_seconds": float(probed.duration_sec),
+                        "width": int(probed.width),
+                        "height": int(probed.height),
+                        "has_audio": probed.audio_codec is not None,
+                    }
+                except Exception:
+                    # Ingest remains copy-first. The next indexing pass can
+                    # retry metadata without losing the durable source bytes.
+                    technical_metadata = {}
             asset = self.store.register_asset(
                 library_asset_id=f"user_{uuid4().hex}",
                 media_type=resolved_type,
@@ -146,6 +161,7 @@ class LibraryIngestService:
                 managed_relative_path=relative.as_posix(),
                 byte_count=byte_count,
                 mime_type=mimetypes.guess_type(name)[0] or "application/octet-stream",
+                technical_metadata=technical_metadata,
                 provenance=dict(provenance or {}),
                 user_metadata={"filename": name},
             )
