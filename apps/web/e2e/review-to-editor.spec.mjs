@@ -68,5 +68,5 @@ test("a review segment opens the pinned editor and selects that exact narration 
     documentSentinel: document.documentElement.dataset.videoboxReviewSpaSentinel,
   }))).toEqual({ windowSentinel: "alive", documentSentinel: "alive" });
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "narration-e2e 클립 선택" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toHaveAttribute("aria-pressed", "true");
 });

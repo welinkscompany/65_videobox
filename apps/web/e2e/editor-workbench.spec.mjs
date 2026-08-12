@@ -88,7 +88,7 @@ for (const [width, height] of snapshots) test(`editor workbench snapshot ${width
   await expect(page.locator("audio, video")).toHaveCount(0);
   const expectedDensity = width >= 1600 ? "desktop-both" : width >= 1280 ? "desktop-single" : "drawer";
   await expect(workbench).toHaveAttribute("data-editor-density", expectedDensity);
-  await expect(page.getByRole("button", { name: "clip-1 클립 선택" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeVisible();
   const previewBox = await previewSlot.boundingBox();
   expect(previewBox?.width).toBeGreaterThanOrEqual(width >= 1600 ? 720 : width >= 1280 ? 640 : 0);
   await waitForStableCapture(page);

@@ -194,6 +194,7 @@ createServer(async (request, response) => {
   if (url.pathname === "/api/projects/local-draft/jobs" && request.method === "GET") return sendJson(response, 200, jobs);
   if (url.pathname === "/api/jobs" && request.method === "GET") { jobRecoveryState.global_list_count += 1; return sendJson(response, 200, { jobs: globalRecoveryJobs }); }
   if (url.pathname === "/api/projects/local-draft/assets/broll-video" && request.method === "GET") { mediaState.asset_list_count += 1; return sendJson(response, 200, { assets: mediaAssets }); }
+  if (url.pathname === "/api/media-inbox/assets" && request.method === "GET") return sendJson(response, 200, { assets: [] });
   if (url.pathname === "/api/projects/local-draft/media-analysis" && request.method === "GET") { mediaState.analysis_list_count += 1; return sendJson(response, 200, { items: mediaAnalyses }); }
   if (/^\/api\/projects\/local-draft\/assets\/[^/]+\/analysis-preview$/.test(url.pathname) && request.method === "GET") {
     mediaState.preview_count += 1;
