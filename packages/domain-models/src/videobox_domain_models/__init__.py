@@ -18,6 +18,15 @@ from videobox_domain_models.recommendations import (
 )
 from videobox_domain_models.segments import SegmentRecord
 from videobox_domain_models.transcripts import TranscriptRecord
+from videobox_domain_models.footage_organizer import (
+    FootageProposal,
+    FootageProposalSegment,
+    FootageProposalStatus,
+    FootageSource,
+    FootageSourceSegment,
+    VirtualSequence,
+    VirtualSequenceItem,
+)
 
 __all__ = [
     "AssetRecord",
@@ -40,4 +49,11 @@ __all__ = [
     "RecommendationType",
     "SegmentRecord",
     "TranscriptRecord",
+    "FootageProposal",
+    "FootageProposalSegment",
+    "FootageProposalStatus",
+    "FootageSource",
+    "FootageSourceSegment",
+    "VirtualSequence",
+    "VirtualSequenceItem",
 ]

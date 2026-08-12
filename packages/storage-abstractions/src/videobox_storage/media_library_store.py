@@ -13,6 +13,10 @@ from videobox_storage.library_user_asset_store import (
     LibraryUserAssetStore,
     ensure_library_user_asset_schema,
 )
+from videobox_storage.footage_organizer_store import (
+    FootageOrganizerStore,
+    ensure_footage_organizer_schema,
+)
 
 
 class MediaLibraryStore:
@@ -31,6 +35,9 @@ class MediaLibraryStore:
         # Keep this as a small facade so existing API/bootstrap callers do not
         # need to know which part of the library owns a row.
         self.user_asset_store = LibraryUserAssetStore(self.root)
+        self.footage_organizer_store = FootageOrganizerStore(self.root)
+        # Short facade name for callers that treat this as one global store.
+        self.footage_store = self.footage_organizer_store
 
     def register_user_asset(self, **kwargs: Any):
         return self.user_asset_store.register_asset(**kwargs)
@@ -772,6 +779,7 @@ class MediaLibraryStore:
             except sqlite3.OperationalError:
                 pass
         ensure_library_user_asset_schema(connection)
+        ensure_footage_organizer_schema(connection)
         return connection
 
     def _resolve_managed_path(self, relative: str) -> Path:
