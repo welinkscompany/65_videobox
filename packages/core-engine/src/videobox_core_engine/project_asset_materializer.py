@@ -249,6 +249,54 @@ class ProjectAssetMaterializer:
                     self._compensate_registered_asset(project_id=project_id, asset_id=registered.asset_id)
                 raise
 
+    def materialize_user_library_asset(
+        self,
+        *,
+        project_id: str,
+        library_asset_id: str,
+        library_asset: dict[str, Any],
+        source_path: Path,
+        mime_type: str | None,
+    ) -> dict[str, Any]:
+        """Copy a user-library asset into a project without moving its source.
+
+        The global row remains the deletion authority.  This method only
+        creates a normal project asset and verifies the content-addressed
+        bytes before returning; the API records the explicit library
+        reference after this succeeds.
+        """
+        expected = str(library_asset.get("content_sha256") or "")
+        if not expected or not source_path.is_file() or sha256_file(source_path) != expected:
+            raise ValueError("library_asset_changed")
+        media_type = str(library_asset.get("media_type") or "")
+        asset_type = {"broll": AssetType.BROLL_VIDEO, "music": AssetType.BGM, "sfx": AssetType.SFX}.get(media_type)
+        if asset_type is None:
+            raise ValueError("unsupported_media_type")
+        metadata = {
+            "source_library_asset_id": library_asset_id,
+            "source_library_content_sha256": expected,
+            "source_library_origin": str(library_asset.get("origin") or "user"),
+        }
+        registered = None
+        try:
+            registered = self.store.register_asset(
+                project_id=project_id,
+                asset_type=asset_type,
+                source_path=source_path,
+                source_kind="personal_library",
+                mime_type=mime_type,
+                metadata=metadata,
+            )
+            result = self.store.get_asset(project_id=project_id, asset_id=registered.asset_id)
+            project_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(result["storage_uri"]))
+            if sha256_file(source_path) != expected or not project_path.exists() or sha256_file(project_path) != expected:
+                raise ValueError("library_materialized_sha_mismatch")
+            return result
+        except Exception:
+            if registered is not None:
+                self._compensate_registered_asset(project_id=project_id, asset_id=registered.asset_id)
+            raise
+
     def _compensate_registered_asset(self, *, project_id: str, asset_id: str) -> None:
         """Leave neither asset row nor bytes when post-register verification fails.
 

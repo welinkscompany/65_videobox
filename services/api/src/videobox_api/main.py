@@ -42,6 +42,7 @@ from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.live_smoke_attestation import build_live_smoke_attestation_router
 from videobox_api.routers.media_inbox import build_media_inbox_router
 from videobox_api.routers.media_library import build_media_library_router
+from videobox_api.routers.library_assets import build_library_assets_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
 from videobox_api.routers.hermes_conversation import build_hermes_conversation_router
@@ -60,6 +61,7 @@ from videobox_core_engine.local_pipeline import (
 )
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.library_footage_indexer import index_pending_library_footage
+from videobox_core_engine.library_ingest import LibraryIngestService
 from videobox_core_engine.media_inbox import AUDIO_EXTENSIONS, MediaInboxConfig, run_inbox_watcher_loop
 from videobox_core_engine.owner_audio_library import register_owner_audio_library
 from videobox_core_engine.media_analysis import MediaAnalysisService, assets_needing_reanalysis
@@ -992,6 +994,12 @@ def create_app(
     app.state.final_renderer = pipeline.final_renderer
     app.state.user_library_store = user_library_store
     app.state.media_library_store = resolved_media_library_store
+    # User media is copied into the global library root and gets one durable
+    # ingest/idempotency authority shared by PC and Drive mirror imports.
+    app.state.library_ingest_service = LibraryIngestService(
+        store=resolved_media_library_store.user_asset_store,
+        managed_root=user_library_root,
+    )
     media_inbox_watch_path = resolve_media_inbox_watch_path()
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()
     resolved_owner_audio_library_root = resolve_owner_audio_library_root()
@@ -1140,6 +1148,15 @@ def create_app(
         )
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
+    app.include_router(
+        build_library_assets_router(
+            project_store=store,
+            media_library_store=resolved_media_library_store,
+            user_asset_store=resolved_media_library_store.user_asset_store,
+            ingest_service=app.state.library_ingest_service,
+            managed_root=user_library_root,
+        )
+    )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
