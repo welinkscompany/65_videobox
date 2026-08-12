@@ -15,15 +15,46 @@ const projects = [
 ];
 
 describe("product shell", () => {
+  it("separates the four global destinations from the five project stages", () => {
+    const view = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
+
+    const global = screen.getByRole("navigation", { name: "전체 메뉴" });
+    expect(within(global).getAllByRole("link")).toHaveLength(4);
+    for (const label of ["프로젝트", "내 라이브러리", "촬영본 정리", "설정"]) {
+      expect(within(global).getByRole("link", { name: label })).toBeInTheDocument();
+    }
+    const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
+    expect(within(stages).getAllByRole("button")).toHaveLength(5);
+    for (const label of ["기획", "자산", "편집", "검토", "출력"]) {
+      expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(view.container.querySelectorAll("main")).toHaveLength(1);
+  });
+
+  it("does not render project stages when no project is open", () => {
+    render(<ProductShell projectId="" projects={[]} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
+
+    expect(screen.getByRole("navigation", { name: "전체 메뉴" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "프로젝트 단계" })).not.toBeInTheDocument();
+  });
+
+  it("keeps dashboard copy in creator language", () => {
+    const { container } = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>영상</p></ProductShell>);
+    const copy = container.textContent ?? "";
+    for (const prohibited of ["provider", "runtime", "fallback", "loopback", "API key", "model", "context", "revision", "pipeline", "job"]) {
+      expect(copy.toLowerCase()).not.toContain(prohibited.toLowerCase());
+    }
+  });
+
   it("gives primary navigation icons and keeps project actions behind one more menu", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
 
-    const navigation = await screen.findByRole("navigation", { name: "영상 제작" });
+    const navigation = await screen.findByRole("navigation", { name: "프로젝트 단계" });
     const navButtons = within(navigation).getAllByRole("button");
-    expect(navButtons).toHaveLength(6);
-    for (const label of ["홈", "새 영상 만들기", "편집", "검토", "자산", "출력"]) {
+    expect(navButtons).toHaveLength(5);
+    for (const label of ["기획", "자산", "편집", "검토", "출력"]) {
       const button = within(navigation).getByRole("button", { name: label });
       expect(button.querySelector("svg")).toBeTruthy();
       expect(button.querySelector(".vb-nav-label")).toHaveTextContent(label);
@@ -41,13 +72,13 @@ describe("product shell", () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
-    await screen.findByRole("navigation", { name: "영상 제작" });
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
     fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
 
-    const navigation = screen.getByRole("navigation", { name: "영상 제작" });
-    const home = within(navigation).getByRole("button", { name: "홈" });
-    expect(home).toHaveAttribute("aria-label", "홈");
-    expect(home.querySelector(".vb-nav-label")).toHaveClass("group-data-[collapsible=icon]:hidden");
+    const navigation = screen.getByRole("navigation", { name: "프로젝트 단계" });
+    const plan = within(navigation).getByRole("button", { name: "기획" });
+    expect(plan).toHaveAttribute("aria-label", "기획");
+    expect(plan.querySelector(".vb-nav-label")).toHaveClass("group-data-[collapsible=icon]:hidden");
   });
   it("opens the current-project recovery surface only when the user asks for job status", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
@@ -187,7 +218,7 @@ describe("product shell", () => {
 
     await screen.findByTestId("media-workspace-page");
 
-    expect(screen.getAllByRole("button", { name: "새 영상 만들기" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "자산" })).toBeInTheDocument();
   });
 
   it("shows creator navigation, a project switcher, and an action-only home", async () => {
@@ -195,8 +226,8 @@ describe("product shell", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
 
-    await screen.findByRole("navigation", { name: "영상 제작" });
-    expect(screen.getAllByRole("button", { name: "새 영상 만들기" }).length).toBeGreaterThan(0);
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
+    expect(screen.getAllByRole("link", { name: "내 라이브러리" })).toHaveLength(1);
     const home = screen.getByTestId("product-home");
     expect(within(home).getByText("편집")).toBeTruthy();
     expect(within(home).getByText("완성본")).toBeTruthy();
@@ -213,7 +244,7 @@ describe("product shell", () => {
     const archiveProject = vi.spyOn(api, "archiveProject").mockResolvedValue({ ...projects[1], status: "archived" });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
-    await screen.findByRole("navigation", { name: "영상 제작" });
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
     fireEvent.click(screen.getByRole("menuitem", { name: "보관하기" }));
@@ -231,7 +262,7 @@ describe("product shell", () => {
     const deleteProjectPermanently = vi.spyOn(api, "deleteProjectPermanently").mockResolvedValue(undefined);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
-    await screen.findByRole("navigation", { name: "영상 제작" });
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
     fireEvent.click(screen.getByRole("menuitem", { name: "완전 삭제" }));
@@ -343,7 +374,8 @@ describe("archived projects", () => {
       </ProductShell>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "프로젝트 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관함 보기" }));
     expect(onLoadArchivedProjects).toHaveBeenCalled();
     expect(await screen.findByText("보관한 프로젝트")).toBeVisible();
 
@@ -365,7 +397,8 @@ describe("archived projects", () => {
         <p>본문</p>
       </ProductShell>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "프로젝트 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관함 보기" }));
     fireEvent.click(await screen.findByRole("button", { name: "보관한 프로젝트 되돌리기" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
   });
@@ -384,7 +417,8 @@ describe("archived projects", () => {
       </ProductShell>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "프로젝트 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관함 보기" }));
     expect(await screen.findByText("보관한 프로젝트가 없어요.")).toBeVisible();
   });
 });
@@ -538,7 +572,7 @@ describe("사이드바 손잡이", () => {
       </ProductShell>,
     );
 
-    expect(screen.getByRole("button", { name: "화면 목록 접기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "작업실 접기" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Toggle Sidebar/i })).toBeNull();
   });
 });

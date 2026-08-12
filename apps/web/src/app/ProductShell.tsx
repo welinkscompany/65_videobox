@@ -65,8 +65,10 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
     previousForceCollapsed.current = true;
     if (!collapsed) setCollapsed(true);
   } else if (!forceCollapsed) previousForceCollapsed.current = false;
-  const current = projects.find((project) => project.project_id === projectId) ?? projects[0];
-  const nav = [["홈", "home", Home], ["새 영상 만들기", "create", FilePlus2], ["편집", "editing", Scissors], ["검토", "review", ClipboardCheck], ["자산", "media", Images], ["출력", "outputs", Download]] as const;
+  const current = projects.find((project) => project.project_id === projectId);
+  const hasProject = Boolean(projectId && current);
+  const globalNav = [["프로젝트", "/projects", Home], ["내 라이브러리", "/library", Images], ["촬영본 정리", "/footage", Video], ["설정", `/settings/general${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`, Settings]] as const;
+  const stageNav = [["기획", "create", FilePlus2], ["자산", "media", Images], ["편집", "editing", Scissors], ["검토", "review", ClipboardCheck], ["출력", "outputs", Download]] as const;
   const go = (next: string) => { if (window.innerWidth < 768) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); onNavigate(projectId, next as WorkspaceSection); };
   const setJobDialogOpenSafely = (open: boolean) => {
     if (!open && jobRecoveryBusy) return;
@@ -98,7 +100,8 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
     <Sidebar collapsible="icon" className="vb-product-sidebar" aria-label="프로젝트와 화면">
       <SidebarHeader>
       <div className="vb-shell-brand"><Video aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">VideoBox</span></div>
-      <div className="vb-project-switcher group-data-[collapsible=icon]:hidden" aria-label="프로젝트 전환"><p>현재 프로젝트</p>{projects.map((project) => <div key={project.project_id} className="vb-project-row" data-testid={`project-row-${project.project_id}`}>
+      <nav aria-label="전체 메뉴" className="vb-global-nav"><ul>{globalNav.map(([label, href, Icon]) => <li key={href}><a href={href} aria-label={label}><Icon aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">{label}</span></a></li>)}</ul></nav>
+      {hasProject ? <div className="vb-project-switcher group-data-[collapsible=icon]:hidden" aria-label="프로젝트 전환"><p>현재 프로젝트</p>{projects.map((project) => <div key={project.project_id} className="vb-project-row" data-testid={`project-row-${project.project_id}`}>
         <Button variant="ghost" aria-label={project.name} aria-pressed={project.project_id === projectId} onClick={() => onNavigate(project.project_id, "home")}>{project.name}</Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button className="vb-project-more" variant="ghost" size="icon" aria-label={`${project.name} 더보기`}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
@@ -121,21 +124,21 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
           </DropdownMenuContent>
         </DropdownMenu>
       </div>)}
-      {archive ? (archiveOpen ? (
-        <div className="vb-project-archive">
-          <p>보관함</p>
-          {archive.archivedProjects.length === 0 ? <p>보관한 프로젝트가 없어요.</p> : archive.archivedProjects.map((project) => (
-            <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
-              <span>{project.name}</span>
-              <Button variant="outline" disabled={projectActionBusy === `restore:${project.project_id}`} aria-label={`${project.name} 되돌리기`} onClick={() => void runProjectAction(`restore:${project.project_id}`, () => archive.restore(project.project_id))}>되돌리기</Button>
-            </div>
-          ))}
-          <Button variant="ghost" onClick={() => setArchiveOpen(false)}>보관함 닫기</Button>
-        </div>
-      ) : (
-        <Button variant="ghost" onClick={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</Button>
-      )) : null}{projectActionError ? <p className="vb-project-action-error" role="alert">{projectActionError}</p> : null}</div>
-      </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span className="group-data-[collapsible=icon]:hidden">설정</span></Button><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label={collapsed ? "화면 목록 펼치기" : "화면 목록 접기"} title={collapsed ? "화면 목록 펼치기" : "화면 목록 접기"} />
+      {archive ? <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="vb-project-actions" aria-label="프로젝트 더보기"><MoreHorizontal aria-hidden="true" /><span>더보기</span></Button></DropdownMenuTrigger><DropdownMenuContent align="start">
+        {archiveOpen ? <DropdownMenuItem onSelect={() => setArchiveOpen(false)}>보관함 닫기</DropdownMenuItem> : <DropdownMenuItem onSelect={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</DropdownMenuItem>}
+      </DropdownMenuContent></DropdownMenu> : null}
+      {archive && archiveOpen ? <div className="vb-project-archive">
+        <p>보관함</p>
+        {archive.archivedProjects.length === 0 ? <p>보관한 프로젝트가 없어요.</p> : archive.archivedProjects.map((project) => (
+          <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
+            <span>{project.name}</span>
+            <Button variant="outline" disabled={projectActionBusy === `restore:${project.project_id}`} aria-label={`${project.name} 되돌리기`} onClick={() => void runProjectAction(`restore:${project.project_id}`, () => archive.restore(project.project_id))}>되돌리기</Button>
+          </div>
+        ))}
+      </div> : null}{projectActionError ? <p className="vb-project-action-error" role="alert">{projectActionError}</p> : null}</div> : null}
+      </SidebarHeader><SidebarContent>
+        {hasProject ? <nav aria-label="프로젝트 단계" className="vb-product-nav"><SidebarMenu>{stageNav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={target === "create" ? section === "create" || section === "home" : target === "media" ? section === "media" : target === "editing" ? section === "editing" : target === "outputs" ? section === "outputs" : section === "review" || section === "timeline"} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav> : null}
+      </SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label={collapsed ? "작업실 펼치기" : "작업실 접기"} title={collapsed ? "작업실 펼치기" : "작업실 접기"} />
     </Sidebar>
     <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"} onClick={() => setCollapsed((value) => !value)} className="vb-collapse">{collapsed ? <PanelLeft /> : <PanelLeftClose />}</Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent className="vb-dialog-content" showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog></header><div className="vb-product-content">{children}</div></SidebarInset>
     </div>
