@@ -438,7 +438,7 @@ def _ensure_derivative(store: LibraryUserAssetStore, root: Path, asset: Any, kin
     if not target.exists():
         try:
             rendered = _render_derivative(source=source, media_type=asset.media_type.value, kind=kind)
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired) as exc:
             raise _DerivativeToolUnavailable("ffmpeg_unavailable") from exc
         if rendered is None:
             # A corrupt/unsupported file must remain inspectable, but never

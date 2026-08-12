@@ -199,6 +199,18 @@ def test_derivative_tool_failure_is_visible_as_needs_attention(tmp_path, monkeyp
     assert next(value for value in listed if value["library_asset_id"] == item["library_asset_id"])["lifecycle"] == "needs_attention"
 
 
+def test_derivative_timeout_is_visible_as_needs_attention(tmp_path, monkeypatch):
+    client = TestClient(app(tmp_path))
+    item = client.post("/api/library/ingest", data={"media_type": "music"}, files=[("files", ("a.wav", b"timeout", "audio/wav"))]).json()["items"][0]
+    import videobox_api.routers.library_assets as module
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: (_ for _ in ()).throw(module.subprocess.TimeoutExpired("ffmpeg", 30)))
+
+    response = client.get(f"/api/library/assets/{item['library_asset_id']}/waveform")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["state"] == "needs_attention"
+
+
 def test_builtin_rejects_trash(tmp_path):
     client = TestClient(app(tmp_path))
     assert client.post("/api/library/assets/pack:missing/trash").status_code == 404
