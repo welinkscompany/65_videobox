@@ -103,4 +103,3 @@ def test_concurrent_constructors_share_additive_schema(tmp_path: Path) -> None:
         values = list(pool.map(open_and_register, range(8)))
     assert len(values) == 8
     assert len(LibraryUserAssetStore(root).list_assets()) == 8
-
