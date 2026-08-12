@@ -712,6 +712,56 @@ export type LibraryAsset = {
 };
 
 export type LibraryAssetListResponse = { assets: LibraryAsset[]; total: number };
+
+export type FootageSegment = {
+  segment_id: string;
+  source_segment_id: string;
+  source_sha256: string;
+  start_sec: number;
+  end_sec: number;
+  machine_fields: Record<string, unknown>;
+  confirmed_fields: Record<string, unknown>;
+};
+export type FootageProposal = {
+  proposal_id: string;
+  source_id: string;
+  source_sha256: string;
+  status: "draft" | "approved" | "rejected" | "stale";
+  revision: number;
+  confirmed_fields: Record<string, unknown>;
+  machine_fields: Record<string, unknown>;
+  segments: FootageSegment[];
+};
+export type FootageProposalPreview = {
+  status: "ready";
+  proposal_id: string;
+  revision: number;
+  source_id: string;
+  preview_url: string;
+  segments: FootageSegment[];
+};
+export type FootageSequenceItem = {
+  item_id: string;
+  source_segment_id: string;
+  item_order: number;
+  start_sec: number | null;
+  end_sec: number | null;
+};
+export type FootageSequence = {
+  sequence_id: string;
+  source_id: string;
+  source_sha256: string;
+  name: string;
+  revision: number;
+  items: FootageSequenceItem[];
+};
+export type FootageSequencePreview = {
+  status: "ready";
+  sequence_id: string;
+  revision: number;
+  preview_url: string;
+  items: FootageSequenceItem[];
+};
 export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string };
 export type LibraryUsageLocation = {
   project_id?: string | null;
@@ -1642,6 +1692,24 @@ export const api = {
     const suffix = query.size ? `?${query.toString()}` : "";
     return request<LibraryAssetListResponse>(`/api/library/assets${suffix}`, { signal });
   },
+  proposeFootage: (payload: { library_asset_id: string; idempotency_key: string; analysis?: Record<string, unknown> }) =>
+    request<FootageProposal>("/api/footage/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getFootageProposal: (proposalId: string) => request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`),
+  editFootageProposal: (proposalId: string, payload: { operation: "move_boundary" | "split" | "merge" | "exclude" | "confirm"; expected_revision: number; segment_id?: string; segment_ids?: string[]; boundary_sec?: number; split_sec?: number; fields?: Record<string, unknown> }) =>
+    request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  previewFootageProposal: (proposalId: string, payload: { expected_revision: number }) =>
+    request<FootageProposalPreview>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  cancelFootageProposal: (proposalId: string) => request<{ status: "cancelled"; proposal_id: string; revision: number }>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/cancel`, { method: "POST" }),
+  approveFootageProposal: (proposalId: string, payload: { expected_revision: number; idempotency_key: string }) =>
+    request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  createFootageSequence: (payload: { source_id: string; name?: string; items: Array<{ source_segment_id: string; item_order: number; start_sec?: number; end_sec?: number }>; idempotency_key?: string }) =>
+    request<FootageSequence>("/api/footage/sequences", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getFootageSequence: (sequenceId: string) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}`),
+  reorderFootageSequence: (sequenceId: string, payload: { expected_revision: number; item_ids: string[] }) =>
+    request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/reorder`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  previewFootageSequence: (sequenceId: string) => request<FootageSequencePreview>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/preview`, { method: "POST" }),
+  cancelFootageSequence: (sequenceId: string) => request<{ status: "cancelled"; sequence_id: string; revision: number }>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/cancel`, { method: "POST" }),
+  approveFootageSequence: (sequenceId: string, payload: { idempotency_key: string }) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   searchLibraryAssets: (query: string, mediaType: LibraryMediaType, signal?: AbortSignal) =>
     request<{ matches: LibrarySearchMatch[]; semantic: boolean }>(
       `/api/library/search?q=${encodeURIComponent(query)}&media_type=${encodeURIComponent(mediaType)}`,

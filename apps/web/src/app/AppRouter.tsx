@@ -19,6 +19,7 @@ import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
 import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
+import { FootageOrganizerPage } from "../features/footage/FootageOrganizerPage";
 import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
@@ -212,12 +213,7 @@ function LibraryPage() {
 }
 
 function FootagePage() {
-  return <GlobalDestinationPage
-    testId="global-footage-page"
-    title="촬영본 정리"
-    description="긴 원본을 나누고 짧은 촬영본을 묶어 프로젝트에 등록하는 공간이에요."
-    readiness="촬영본 정리는 Wave-2에서 준비할 예정이에요."
-  />;
+  return <FootageOrganizerPage />;
 }
 
 function GlobalDestinationPage({ testId, title, description, readiness }: { testId: string; title: string; description: string; readiness: string }) {
