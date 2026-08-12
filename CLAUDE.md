@@ -72,7 +72,7 @@
 
 `docs/implementation-plan.ko.md` §4와 §8.4가 고정한 경계다. 이걸 모르고 UI를 비판하거나 확장하지 않는다.
 
-- VideoBox는 **creator-complete 경량 편집기**다. 컷, 자막, B-roll, 음악, 효과음, 연결된 가로·세로 변형,
+- VideoBox는 **creator-complete MP4-first 경량 편집기**다. 컷, 자막, B-roll, 음악, 효과음, 연결된 가로·세로 변형,
   검토와 MP4 출력을 VideoBox 안에서 끝낸다. 풀 NLE의 모든 기능을 구현한다는 뜻은 아니다.
 - CapCut은 필수 후편집 단계가 아니라 선택적 호환·비상 경로다.
 - 전문 색보정(advanced grading), 고급 마스크(advanced masks), 임의 키프레임(arbitrary keyframes),

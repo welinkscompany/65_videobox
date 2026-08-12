@@ -6,6 +6,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.docs_only
 
 
 def _section(text: str, heading: str, next_heading: str) -> str:
@@ -28,6 +29,31 @@ def test_creator_complete_scope_is_authoritative(relative_path: str) -> None:
         assert finished_scope in text
     for excluded_scope in ("색보정", "마스크", "키프레임", "멀티캠"):
         assert excluded_scope in text
+
+
+def test_current_authoritative_sections_carry_the_scope_contract() -> None:
+    claude = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    plan = (ROOT / "docs/implementation-plan.ko.md").read_text(encoding="utf-8")
+    design = (ROOT / "docs/superpowers/specs/2026-08-12-videobox-creator-workspace-overhaul-design.ko.md").read_text(encoding="utf-8")
+    decision = (ROOT / "docs/decisions/2026-08-12-creator-workspace-overhaul-direction.ko.md").read_text(encoding="utf-8")
+
+    claude_scope = _section(claude, "## 2.1 제품 범위 경계", "## 2.2 자산 검색 체계")
+    plan_strategy = _section(plan, "## 2. 현재 구현 전략", "## 3. 첫 구현 대상")
+    plan_mvp = _section(plan, "## 4. MVP 범위", "## 5. 마일스톤")
+    plan_editor = _section(plan, "## 8.4 creator-complete MP4-first 경량 편집기 반영 원칙", "### 8.4.1")
+    design_summary = _section(design, "## 1. 결정 요약", "## 2. 기존 결정과의 관계")
+    design_non_goals = _section(design, "### 3.2 초기 개편의 비목표", "## 4. 정보 구조와 제작 흐름")
+    decision_scope = _section(decision, "## 승인된 제품 방향", "## 유지되는 기존 결정")
+
+    for section in (claude_scope, plan_strategy, plan_mvp, plan_editor, design_summary, decision_scope):
+        assert "creator-complete" in section
+        assert "MP4-first" in section
+        assert "CapCut" in section
+        assert "선택적" in section
+
+    for section in (claude_scope, plan_mvp, plan_editor, design_non_goals):
+        for excluded_scope_variants in (("색보정",), ("마스크",), ("키프레임",), ("멀티캠", "다중 카메라")):
+            assert any(scope in section for scope in excluded_scope_variants)
 
 
 def test_implementation_plan_is_mp4_first_with_optional_capcut() -> None:

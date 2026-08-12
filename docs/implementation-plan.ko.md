@@ -26,7 +26,7 @@
 
 - 로컬 우선 구현
 - SaaS 확장 가능 구조
-- 설명형 영상 제작을 VideoBox 안에서 끝내는 creator-complete 경량 편집기 + 선택적 CapCut 호환 경로
+- 설명형 영상 제작을 VideoBox 안에서 끝내는 creator-complete MP4-first 경량 편집기 + 선택적 CapCut 호환 경로
 - 자동 최종본보다 자동 초안 생성 우선
 - 나레이션 + 참고 문서 + B-roll 추천 흐름을 첫 구현 대상으로 선택
 
@@ -72,7 +72,7 @@
 - 간단한 설명형 오버레이 계획
 - timeline JSON 생성
 - preview 렌더
-- creator-complete 경량 편집기
+- creator-complete MP4-first 경량 편집기
 - 컷·자막·B-roll·음악·효과음 편집
 - 가로·세로 연결 변형
 - review와 최종 MP4 출력
@@ -315,9 +315,9 @@
 4. `execution/match_script.py`의 scene split 흐름
 5. `execution/search_broll.py`의 scoring 축
 
-## 8.4 creator-complete 경량 편집기 반영 원칙
+## 8.4 creator-complete MP4-first 경량 편집기 반영 원칙
 
-creator-complete 경량 편집기는 설명형 영상의 컷, 자막, B-roll, 음악, 효과음, 연결된 가로·세로
+creator-complete MP4-first 경량 편집기는 설명형 영상의 컷, 자막, B-roll, 음악, 효과음, 연결된 가로·세로
 변형, 검토와 최종 MP4 출력까지 VideoBox 안에서 끝내는 핵심 범위다. CapCut은 필수 후편집
 단계가 아니라 선택적 호환·비상 경로로만 유지한다.
 
