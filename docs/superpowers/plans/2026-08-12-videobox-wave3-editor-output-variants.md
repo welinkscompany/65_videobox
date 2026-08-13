@@ -90,10 +90,10 @@
 
 ### Task 6: Wave 3 gate
 
-> 2026-08-13 검증 메모: backend variant lifecycle와 editor UI/e2e는 통과했지만, 실제 browser에서 server-backed variant materialization·lock·master rebase conflict를 끝까지 수행하는 acceptance는 아직 미검증이다. 현재 workbench의 출력 변형 비교 UI는 순수 projection이며, owner acceptance와 동일하게 취급하지 않는다.
+> 2026-08-13 검증 메모: backend variant lifecycle, server-backed editor UI/e2e, 그리고 local owner-ready runtime의 실제 브라우저 검증을 완료했다. 아래 증거는 owner-ready Check와 실제 브라우저 동작을 분리해 기록하며, human owner acceptance로 간주하지 않는다.
 
-- [ ] Browser-edit a master, reload, prove same server revision/segment/playhead. Create horizontal/vertical materializations, change vertical crop/caption, lock it, edit master, prove lock survives and conflict appears.
-- [ ] Verify vertical-full rejects reorder/delete while optional highlight can be explicitly created and reordered.
+- [x] Browser-edit a master, reload, prove same server revision/segment/playhead. Create horizontal/vertical materializations, change vertical crop/caption, lock it, edit master, prove lock survives and conflict appears.
+- [x] Verify vertical-full rejects reorder/delete while optional highlight can be explicitly created and reordered.
 - [x] Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_editor_timeline_mutations.py tests/test_timeline_placements.py tests/test_output_variants.py tests/test_output_variant_store.py tests/test_output_source_verifier.py -q`, `npm --prefix apps/web test -- src/features/editor`, `npm --prefix apps/web run build`, `npm --prefix apps/web run test:e2e:editor-workbench`, and real owner-ready browser captures at all four desktop viewports.
 - [x] Read-only review must focus on route-epoch races, hook order, audio ownership, optimistic conflicts and old-project lazy seeding. Complete design §§8–9 gap/reverse table.
 
@@ -103,6 +103,15 @@
 | --- | --- | --- | --- |
 | route-epoch / hook order | `EditorWorkbenchRoute` route-key reset guards plus editor route/workbench tests and production build | 통과 | 없음 |
 | audio ownership | `VariantCompare` one-clock projection, master-only audio note, focused variant tests | 통과 | 실제 미디어 재생은 owner runtime에서 별도 확인 필요 |
-| optimistic conflict | expected revision API tests, stale variant/source fail-closed tests, conflict panel tests | 통과 | 브라우저에서 server response까지 연결한 acceptance 미검증 |
+| optimistic conflict | expected revision API tests, stale variant/source fail-closed tests, conflict panel tests, live master edit → conflict → `직접 조정 유지` PATCH 200 | 통과 | human owner acceptance 별도 |
 | old-project lazy seeding | output-variant API/store tests for idempotent horizontal/vertical seed and SQLite/Postgres parity | 통과 | 실제 기존 owner project의 재시드 acceptance 미검증 |
-| reverse failure paths | missing identity, stale source/variant revision, unresolved conflict, forbidden vertical mutation tests | 통과 | 서버-backed UI mutation path가 아직 projection-only |
+| reverse failure paths | missing identity, stale source/variant revision, unresolved conflict, forbidden vertical mutation tests, live vertical materialize 201 and highlight create/order PATCH 200 | 통과 | human owner acceptance 별도 |
+
+#### 실제 브라우저 증거 (2026-08-13)
+
+- Runtime: `http://127.0.0.1:5173`, owner-ready Check pass, Hermes dashboard는 재시작하지 않음.
+- Editor: 1280×800에서 vertical server variant revision 1 → crop PATCH 200 → lock PATCH 200 → revision 3을 확인했다.
+- Master caption 저장 PATCH 200 뒤 master revision 4, server conflict 1건, `master_changed_while_locked`를 표시했다. `직접 조정 유지` PATCH 200 후 variant revision 5와 conflict 해소를 확인했다.
+- Vertical materialize POST 201, optional highlight create POST 201, highlight order PATCH 200을 확인했다.
+- `/`, `/library`, `/footage`, project home, editor에서 화면 폭 초과 없음, console errors 0건. Tab 이동 시 `나란히` 탭의 `:focus-visible` 적용을 확인했다.
+- `owner-ready.ps1 -Mode Check -Json -TimeoutSec 8`: overall pass, VideoBox/Hermes HTTP 200, local model reachable, external provider calls 0, working tree/protected residue 0. 이는 human owner acceptance나 Hermes live chat 검증이 아니다.
