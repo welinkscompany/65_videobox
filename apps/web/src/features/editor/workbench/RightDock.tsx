@@ -323,6 +323,7 @@ function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
     image: "이미지",
     bgm: "배경 음악",
     sfx: "효과음",
+    output_variant: "출력 변형",
   }[kind] ?? "미디어";
 }
 

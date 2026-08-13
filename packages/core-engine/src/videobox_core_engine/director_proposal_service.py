@@ -165,6 +165,24 @@ class DirectorProposalService:
                 )
             )
         for candidate in candidates:
+            if candidate.media_type == "output_variant":
+                try:
+                    variant = self.store.get_output_variant(
+                        project_id=project_id,
+                        variant_id=str(candidate.canonical_metadata.get("variant_id") or ""),
+                    )
+                    if (
+                        int(variant.get("variant_revision") or 0)
+                        != int(proposal.diff.get("base_variant_revision") or 0)
+                        or str(variant.get("source_session_id") or "")
+                        != proposal.source_session_id
+                        or int(variant.get("source_session_revision") or 0)
+                        != proposal.base_session_revision
+                    ):
+                        reasons.append("variant_revision")
+                except (KeyError, TypeError, ValueError):
+                    reasons.append("variant_missing")
+                continue
             try:
                 asset = self.store.get_asset(project_id=project_id, asset_id=candidate.asset_id)
                 source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))

@@ -212,6 +212,84 @@ class OutputVariantMixin:
         finally:
             connection.close()
 
+    def apply_director_variant_proposal_transaction(
+        self,
+        *,
+        project_id: str,
+        proposal_id: str,
+        variant_id: str,
+        expected_variant_revision: int,
+        variant: OutputVariant,
+    ) -> dict[str, Any]:
+        """Atomically apply one render-only proposal and consume its lifecycle."""
+
+        from videobox_storage.local_project_store import EditingSessionRevisionConflict
+
+        if variant.variant_id != variant_id or variant.variant_revision != expected_variant_revision + 1:
+            raise ValueError("variant_apply_identity_or_revision_invalid")
+        connection = self._connection(project_id)
+        try:
+            self._begin_output_variant_write(connection)
+            proposal = connection.execute(
+                "SELECT status FROM director_proposals WHERE project_id = ? AND proposal_id = ?",
+                (project_id, proposal_id),
+            ).fetchone()
+            if proposal is None:
+                raise KeyError("director_proposal_missing")
+            if str(proposal["status"]) != "ready":
+                raise EditingSessionRevisionConflict("director_proposal_not_ready")
+            current = connection.execute(
+                "SELECT * FROM output_variants WHERE project_id = ? AND variant_id = ?",
+                (project_id, variant_id),
+            ).fetchone()
+            if current is None:
+                raise KeyError("output_variant_missing")
+            if int(current["variant_revision"]) != expected_variant_revision:
+                raise EditingSessionRevisionConflict("output_variant_revision_conflict")
+            if (
+                str(current["source_session_id"]) != variant.source_session_id
+                or int(current["source_session_revision"]) != variant.source_session_revision
+                or str(current["kind"]) != variant.kind
+            ):
+                raise ValueError("variant_source_identity_mismatch")
+            now = self._now_iso()
+            connection.execute(
+                "UPDATE output_variants SET source_session_revision = ?, variant_revision = ?, overrides_json = ?, locks_json = ?, "
+                "conflicts_json = ?, selected_segment_ids_json = ?, master_segment_ids_json = ?, updated_at = ? "
+                "WHERE project_id = ? AND variant_id = ? AND variant_revision = ?",
+                (
+                    variant.source_session_revision,
+                    variant.variant_revision,
+                    json.dumps(variant.overrides.model_dump(mode="json"), ensure_ascii=False),
+                    json.dumps([lock.model_dump(mode="json") for lock in variant.locks], ensure_ascii=False),
+                    json.dumps([conflict.model_dump(mode="json") for conflict in variant.conflicts], ensure_ascii=False),
+                    json.dumps(list(variant.selected_segment_ids), ensure_ascii=False) if variant.selected_segment_ids is not None else None,
+                    json.dumps(list(variant.master_segment_ids), ensure_ascii=False) if variant.master_segment_ids is not None else None,
+                    now,
+                    project_id,
+                    variant_id,
+                    expected_variant_revision,
+                ),
+            )
+            changed = connection.execute(
+                "UPDATE director_proposals SET status = ?, updated_at = ? WHERE project_id = ? AND proposal_id = ? AND status = 'ready'",
+                ("applied", now, project_id, proposal_id),
+            ).rowcount
+            if changed != 1:
+                raise EditingSessionRevisionConflict("director_proposal_already_applied")
+            connection.execute(
+                "INSERT INTO director_proposal_lifecycle_events (proposal_id, status, reason, changed_at) VALUES (?, ?, ?, ?)",
+                (proposal_id, "applied", "variant_transaction_apply", now),
+            )
+            connection.commit()
+            return self.get_output_variant(project_id=project_id, variant_id=variant_id)
+        except Exception:
+            if getattr(connection, "in_transaction", False):
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def save_variant_materialization(
         self,
         *,

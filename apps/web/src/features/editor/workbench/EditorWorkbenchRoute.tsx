@@ -1550,7 +1550,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
             setDirector({ ...activeDirector, state: "blocked" });
             throw new Error("stale director proposal");
           }
-          if (selectedYujinCandidate && isActionableYujinMediaCandidate(selectedYujinCandidate)) {
+           if (selectedYujinCandidate && isActionableYujinVariantCandidate(selectedYujinCandidate)) {
+             await api.batchApplyDirectorProposal(projectId, proposalId, {
+               candidate_ids: [...candidateIds],
+               expected_revision: currentRevision,
+             });
+           } else if (selectedYujinCandidate && isActionableYujinMediaCandidate(selectedYujinCandidate)) {
             const materialized = await api.materializeDirectorCandidate(
               projectId,
               proposalId,
@@ -1770,8 +1775,21 @@ function initialDirectorCandidateIds(proposal: DirectorProposal | null) {
 }
 
 function isActionableYujinCandidate(candidate: DirectorCandidate) {
-  return isActionableYujinMediaCandidate(candidate)
+  return isActionableYujinVariantCandidate(candidate)
+    || isActionableYujinMediaCandidate(candidate)
     || isActionableYujinB4Candidate(candidate);
+}
+
+function isActionableYujinVariantCandidate(candidate: DirectorCandidate) {
+  const metadata = candidate.canonical_metadata ?? {};
+  return (
+    candidate.availability === "actionable"
+    && candidate.review_status === "approved"
+    && candidate.media_type === "output_variant"
+    && metadata.yujin_actionable_variant === true
+    && typeof metadata.variant_id === "string"
+    && typeof metadata.base_variant_revision === "number"
+  );
 }
 
 function isActionableYujinMediaCandidate(candidate: DirectorCandidate) {
