@@ -63,10 +63,10 @@
 - Create: `apps/web/src/features/editor/workbench/editorUiState.ts`
 - Test: corresponding existing `.test.ts`/`.test.tsx` files
 
-- [ ] Add failing tests for add/remove/move/replace, trim/split/merge/reorder, B-roll/music/SFX placement, volume/fade/mute/solo, caption text/time/line breaks, undo/redo and project/session-keyed selected segment/playhead restore.
-- [ ] Run `npm --prefix apps/web test -- src/features/editor/editorCommandPort.test.ts src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/timeline/timeline-dock.test.tsx` and document which commands already pass versus missing UI wiring.
-- [ ] Wire existing API commands through `EditorCommandPort`; add only missing bounded audio/fade DTOs. Keep mutation single-flight, expected revision and authoritative reload after ambiguous failure.
-- [ ] Persist UI position by `{projectId, sessionId}` without treating localStorage as editing-data authority. Keep undo depth 10 for this wave; display it honestly and do not claim 100 undo levels.
+- [x] Add failing tests for add/remove/move/replace, trim/split/merge/reorder, B-roll/music/SFX placement, volume/fade/mute/solo, caption text/time/line breaks, undo/redo and project/session-keyed selected segment/playhead restore.
+- [x] Run `npm --prefix apps/web test -- src/features/editor/editorCommandPort.test.ts src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/timeline/timeline-dock.test.tsx` and document which commands already pass versus missing UI wiring.
+- [x] Wire existing API commands through `EditorCommandPort`; add only missing bounded audio/fade DTOs. Keep mutation single-flight, expected revision and authoritative reload after ambiguous failure.
+- [x] Persist UI position by `{projectId, sessionId}` without treating localStorage as editing-data authority. Keep undo depth 10 for this wave; display it honestly and do not claim 100 undo levels.
 - [ ] Repeat the previous Vitest command, run `npm --prefix apps/web run build`, and commit `feat: complete creator editing command surface`.
 
 ### Task 5: Add aspect compare and lock/conflict UI
@@ -82,13 +82,15 @@
 - Modify: `apps/web/src/styles/editor-workbench.css`
 - Test: new focused variant tests and existing preview/workbench tests
 
-- [ ] Write failing tests for `마스터/가로/세로/나란히`, synchronized playhead, safe areas, clip focal/crop, caption layout, user lock, master rebase and visible conflict resolution.
-- [ ] Run RED with `npm --prefix apps/web test -- src/features/editor/variants/VariantSelector.test.tsx src/features/editor/variants/VariantCompare.test.tsx src/features/editor/variants/VariantConflictPanel.test.tsx`.
-- [ ] Extract a focused variant controller before adding route state. Side-by-side uses one playback clock and two projections; it must not create two competing audio owners.
-- [ ] Implement creator-language conflicts: `직접 조정 유지`, `마스터 기준 다시 맞추기`. Never silently overwrite a lock.
-- [ ] Repeat the previous Vitest command, run `npm --prefix apps/web run build`, refresh provenance if required and commit `feat: add linked horizontal vertical editing`.
+- [x] Write failing tests for `마스터/가로/세로/나란히`, synchronized playhead, safe areas, clip focal/crop, caption layout, user lock, master rebase and visible conflict resolution.
+- [x] Run RED with `npm --prefix apps/web test -- src/features/editor/variants/VariantSelector.test.tsx src/features/editor/variants/VariantCompare.test.tsx src/features/editor/variants/VariantConflictPanel.test.tsx`.
+- [x] Extract a focused variant controller before adding route state. Side-by-side uses one playback clock and two projections; it must not create two competing audio owners.
+- [x] Implement creator-language conflicts: `직접 조정 유지`, `마스터 기준 다시 맞추기`. Never silently overwrite a lock.
+- [x] Repeat the previous Vitest command, run `npm --prefix apps/web run build`, refresh provenance if required and commit `feat: add linked horizontal vertical editing`.
 
 ### Task 6: Wave 3 gate
+
+> 2026-08-13 검증 메모: backend variant lifecycle와 editor UI/e2e는 통과했지만, 실제 browser에서 server-backed variant materialization·lock·master rebase conflict를 끝까지 수행하는 acceptance는 아직 미검증이다. 현재 workbench의 출력 변형 비교 UI는 순수 projection이며, owner acceptance와 동일하게 취급하지 않는다.
 
 - [ ] Browser-edit a master, reload, prove same server revision/segment/playhead. Create horizontal/vertical materializations, change vertical crop/caption, lock it, edit master, prove lock survives and conflict appears.
 - [ ] Verify vertical-full rejects reorder/delete while optional highlight can be explicitly created and reordered.
