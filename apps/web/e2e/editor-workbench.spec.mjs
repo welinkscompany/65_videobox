@@ -208,14 +208,14 @@ test("server-backed output variants keep revision lineage through materialize, l
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
   await page.getByRole("tab", { name: "세로" }).click();
-  await expect(page.getByText("서버 변형 revision 1")).toBeVisible();
+  await expect(page.getByText("서버 변형 버전 1")).toBeVisible();
   await page.getByRole("button", { name: "크롭 저장" }).click();
   await expect.poll(() => patchBodies.length).toBe(1);
-  await expect(page.getByText("서버 변형 revision 2")).toBeVisible();
+  await expect(page.getByText("서버 변형 버전 2")).toBeVisible();
   await page.getByRole("button", { name: "크롭·자막 잠금" }).click();
   await expect.poll(() => patchBodies.length).toBe(2);
   await expect(page.getByText("출력 변형을 저장했어요.")).toBeVisible();
-  await expect(page.getByText("서버 변형 revision 3")).toBeVisible();
+  await expect(page.getByText("서버 변형 버전 3")).toBeVisible();
   await page.getByRole("button", { name: "세로 변형 준비" }).click();
   await expect.poll(() => materializations.length).toBe(1);
   await page.getByRole("button", { name: "하이라이트 변형 만들기" }).click();

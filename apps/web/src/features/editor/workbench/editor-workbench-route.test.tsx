@@ -4016,7 +4016,7 @@ describe("서버 출력 변형 연결", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await screen.findByRole("region", { name: "편집 작업판" });
     fireEvent.click(screen.getByRole("tab", { name: "세로" }));
-    expect(await screen.findByText("서버 변형 revision 3")).toBeVisible();
+    expect(await screen.findByText("서버 변형 버전 3")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));
     await waitFor(() => expect(patch).toHaveBeenCalledWith("project-a", "vertical-full", expect.objectContaining({ expected_variant_revision: 3 })));
     fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));

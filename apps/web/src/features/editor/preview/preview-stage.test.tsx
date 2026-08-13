@@ -159,12 +159,21 @@ describe("PreviewStage", () => {
     expect(imageRule).toContain("object-fit: contain");
   });
 
-  it("keeps oversized preview content top-aligned so the preview scrolls inward", () => {
+  it("keeps the video visible in a fixed preview viewport and limits scrolling to source details", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
     const previewRule = css.match(/^\.vb-editor-workbench__preview\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const stageRule = css.match(/^\.vb-preview-stage\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const mediaRule = css.match(/^\.vb-preview-stage__media-shell\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const videoRule = css.match(/^\.vb-preview-stage__media-shell video\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const sourcesRule = css.match(/^\.vb-preview-stage__sources\s*\{([^}]*)\}/m)?.[1] ?? "";
 
-    expect(previewRule).toContain("place-content: start");
-    expect(previewRule).not.toContain("place-content: center");
+    expect(previewRule).toContain("overflow: hidden");
+    expect(stageRule).toContain("height: 100%");
+    expect(stageRule).toContain("grid-template-rows");
+    expect(mediaRule).toContain("min-height: 0");
+    expect(videoRule).toContain("max-height: 100%");
+    expect(videoRule).toContain("object-fit: contain");
+    expect(sourcesRule).toContain("overflow: auto");
   });
 
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {

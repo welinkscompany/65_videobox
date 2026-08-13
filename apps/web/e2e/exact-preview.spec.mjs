@@ -103,10 +103,48 @@ test("current exact proxy plays a valid local MP4, requests bytes, and maps a na
   await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
   await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)).toBe(true);
   await expect.poll(() => video.evaluate((node) => node.duration)).toBeGreaterThan(1);
+  const previewGeometry = await page.evaluate(() => {
+    const preview = document.querySelector(".vb-editor-workbench__preview");
+    const media = document.querySelector(".vb-preview-stage__media-shell");
+    const video = document.querySelector(".vb-preview-stage__media-shell video");
+    const box = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, height: rect.height, scrollHeight: node.scrollHeight };
+    };
+    if (!preview || !media || !video) throw new Error("preview geometry nodes are missing");
+    const mediaBox = media.getBoundingClientRect();
+    const videoBox = video.getBoundingClientRect();
+    return {
+      previewClientHeight: preview.clientHeight,
+      previewScrollHeight: preview.scrollHeight,
+      mediaClientHeight: media.clientHeight,
+      videoWidth: videoBox.width,
+      videoHeight: videoBox.height,
+      videoTop: videoBox.top,
+      videoBottom: videoBox.bottom,
+      mediaTop: mediaBox.top,
+      mediaBottom: mediaBox.bottom,
+      workbench: box(".vb-editor-workbench"),
+      toolbar: box(".vb-editor-workbench__toolbar"),
+      body: box(".vb-editor-workbench__body"),
+      variants: box(".vb-editor-variants"),
+      timeline: box(".vb-editor-workbench__timeline"),
+      panels: box(".vb-editor-workbench__panels"),
+      stagePanel: box(".vb-editor-workbench__stage-panel"),
+      stage: box(".vb-preview-stage"),
+    };
+  });
+  expect(previewGeometry.previewScrollHeight).toBeLessThanOrEqual(previewGeometry.previewClientHeight + 1);
+  expect(previewGeometry.mediaClientHeight).toBeGreaterThan(0);
+  expect(previewGeometry.videoWidth).toBeGreaterThan(0);
+  expect(previewGeometry.videoHeight).toBeGreaterThanOrEqual(120);
+  expect(previewGeometry.videoTop).toBeGreaterThanOrEqual(previewGeometry.mediaTop - 1);
+  expect(previewGeometry.videoBottom).toBeLessThanOrEqual(previewGeometry.mediaBottom + 1);
   // A real user gesture calls the component's native HTMLMediaElement.play()
   // path, avoiding an autoplay-policy bypass in the test harness.
   const playbackButton = page.getByRole("button", { name: "재생 또는 일시정지" });
-  await playbackButton.scrollIntoViewIfNeeded();
   await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY)));
   }))).toBeGreaterThanOrEqual(0);
