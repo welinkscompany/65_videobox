@@ -67,7 +67,7 @@
 - [x] Run `npm --prefix apps/web test -- src/features/editor/editorCommandPort.test.ts src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/timeline/timeline-dock.test.tsx` and document which commands already pass versus missing UI wiring.
 - [x] Wire existing API commands through `EditorCommandPort`; add only missing bounded audio/fade DTOs. Keep mutation single-flight, expected revision and authoritative reload after ambiguous failure.
 - [x] Persist UI position by `{projectId, sessionId}` without treating localStorage as editing-data authority. Keep undo depth 10 for this wave; display it honestly and do not claim 100 undo levels.
-- [ ] Repeat the previous Vitest command, run `npm --prefix apps/web run build`, and commit `feat: complete creator editing command surface`.
+- [x] Repeat the previous Vitest command, run `npm --prefix apps/web run build`, and commit `feat: complete creator editing command surface`.
 
 ### Task 5: Add aspect compare and lock/conflict UI
 
@@ -94,5 +94,15 @@
 
 - [ ] Browser-edit a master, reload, prove same server revision/segment/playhead. Create horizontal/vertical materializations, change vertical crop/caption, lock it, edit master, prove lock survives and conflict appears.
 - [ ] Verify vertical-full rejects reorder/delete while optional highlight can be explicitly created and reordered.
-- [ ] Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_editor_timeline_mutations.py tests/test_timeline_placements.py tests/test_output_variants.py tests/test_output_variant_store.py tests/test_output_source_verifier.py -q`, `npm --prefix apps/web test -- src/features/editor`, `npm --prefix apps/web run build`, `npm --prefix apps/web run test:e2e:editor-workbench`, and real owner-ready browser captures at all four desktop viewports.
-- [ ] Read-only review must focus on route-epoch races, hook order, audio ownership, optimistic conflicts and old-project lazy seeding. Complete design §§8–9 gap/reverse table.
+- [x] Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_editor_timeline_mutations.py tests/test_timeline_placements.py tests/test_output_variants.py tests/test_output_variant_store.py tests/test_output_source_verifier.py -q`, `npm --prefix apps/web test -- src/features/editor`, `npm --prefix apps/web run build`, `npm --prefix apps/web run test:e2e:editor-workbench`, and real owner-ready browser captures at all four desktop viewports.
+- [x] Read-only review must focus on route-epoch races, hook order, audio ownership, optimistic conflicts and old-project lazy seeding. Complete design §§8–9 gap/reverse table.
+
+#### Review / gap-reverse evidence (2026-08-13)
+
+| 검토축 | 확인된 증거 | 판정 | 남은 경계 |
+| --- | --- | --- | --- |
+| route-epoch / hook order | `EditorWorkbenchRoute` route-key reset guards plus editor route/workbench tests and production build | 통과 | 없음 |
+| audio ownership | `VariantCompare` one-clock projection, master-only audio note, focused variant tests | 통과 | 실제 미디어 재생은 owner runtime에서 별도 확인 필요 |
+| optimistic conflict | expected revision API tests, stale variant/source fail-closed tests, conflict panel tests | 통과 | 브라우저에서 server response까지 연결한 acceptance 미검증 |
+| old-project lazy seeding | output-variant API/store tests for idempotent horizontal/vertical seed and SQLite/Postgres parity | 통과 | 실제 기존 owner project의 재시드 acceptance 미검증 |
+| reverse failure paths | missing identity, stale source/variant revision, unresolved conflict, forbidden vertical mutation tests | 통과 | 서버-backed UI mutation path가 아직 projection-only |
