@@ -15,12 +15,12 @@
 | Task | Current state | Implemented evidence | Remaining implementation |
 | --- | --- | --- | --- |
 | 1. Contextual starters | complete | `starterRegistry.ts`, `YujinStarters.tsx`, RightDock/Home/Footage integration, actual edit-selection context, 32 focused tests, Footage/editor route/design regression tests, build and diff-check | assets/review/output registry consumers belong to the later variant/review/output tasks; real browser/owner acceptance remains a Wave 5/gate concern |
-| 2. Variant proposals | not implemented | existing creator proposal adapter handles current session/media proposal contracts | `variant_id`, `base_variant_revision`, reframe/layout/audio operations and vertical-full story rejection |
-| 3. Preview/apply/undo | partial baseline | existing session proposal preview/apply/manual undo paths | dual master+variant revision preflight, variant transaction, double-apply protection and variant before/after cards |
-| 4. Variant review lineage | partial baseline | existing timeline/session review and Wave 3 output source verification | persist/select exact variant revision, variant-specific staleness and grouped creator actions |
-| 5. Independent outputs | not implemented | existing single timeline `/jobs/final-render` and one `OutputsPage` final card | `/variant-renders` envelope, independent sibling jobs/cards/retry and optional highlight selection |
-| 6. In-app output verification | partial baseline | existing single final MP4 player and retry action | horizontal/vertical players, start/middle/end proof, per-result confirmation and folder action |
-| 7. Wave gate | not run | Wave 3 runtime/browser gate is complete | complete Wave 4 implementation, focused/full regression, real browser reverse flow and review |
+| 2. Variant proposals | complete | `afefbc6`, `cc564073`, strict proposal/context tests, pure adapter boundary and finite-number rejection | owner/runtime/browser proof remains in Task 7 |
+| 3. Preview/apply/undo | complete | `1c1b4533f`, transactional variant apply, CAS/double-apply tests and editor route tests | owner/runtime/browser proof remains in Task 7 |
+| 4. Variant review lineage | complete | `9c1a63fbf`, SQLite/Postgres/API lineage persistence and frontend fail-closed reverse tests | owner/runtime/browser proof remains in Task 7 |
+| 5. Independent outputs | complete | `43fca6ef7`, `/variant-renders`, independent materialization/jobs, idempotent sibling tests and per-variant cards | owner/runtime/browser proof remains in Task 7 |
+| 6. In-app output verification | complete with one platform blocker | `41a51e16`, Playwright range seek and explicit result confirmation for horizontal/vertical | OS-level `폴더 열기` cannot be safely invoked from browser; visible storage URI remains available |
+| 7. Wave gate | implementation and isolated QA complete; owner gate open | focused/full backend/frontend regression, build, isolated Playwright E2E, code-review/gap/reverse checks recorded below | real browser reverse flow, owner runtime proof and human acceptance |
 
 Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes below. Check a task only when every requirement in that checkbox is implemented and verified.
 
@@ -54,10 +54,10 @@ Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes
 - Test: `tests/test_yujin_creator_proposals.py`
 - Test: `tests/test_yujin_creator_proposal_adapter.py`
 
-- [ ] Write failing strict-model tests for `variant_id`, `base_variant_revision`, focal/crop, caption layout, safe-area and bounded audio correction. Assert raw filesystem/DB/shell/render/HTTP operations and `vertical_full` story changes are rejected.
-- [ ] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_yujin_creator_proposals.py tests/test_yujin_creator_proposal_adapter.py -q`.
-- [ ] Extend discriminated unions and context with current surface, selection, master identity and variant identity. Validate referenced assets/segments and both revisions before projection.
-- [ ] Repeat the previous pytest command, run `git diff --check`, and commit `feat: bind yujin proposals to output variants`.
+- [x] Write failing strict-model tests for `variant_id`, `base_variant_revision`, focal/crop, caption layout, safe-area and bounded audio correction. Assert unsafe operations and `vertical_full` story changes are rejected.
+- [x] Run RED and the focused proposal pytest command.
+- [x] Extend discriminated unions and context with current surface, selection, master identity and variant identity; validate both revisions before projection.
+- [x] Repeat the focused pytest command, run `git diff --check`, and commit `afefbc6`/`cc564073`.
 
 ### Task 3: Preserve preview/apply/undo transaction semantics
 
@@ -69,11 +69,11 @@ Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes
 - Test: `tests/test_yujin_media_proposal_adapter.py`
 - Test: `apps/web/src/features/editor/workbench/editor-workbench-route.test.tsx`
 
-- [ ] Add failing tests: proposal preview/cancel causes zero session/variant changes; stale master or variant returns refresh; explicit apply creates exactly one transaction; undo restores; double-click does not duplicate.
-- [ ] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_yujin_media_proposal_adapter.py tests/test_yujin_text_voice_overlay_proposal_adapter.py -q` and `npm --prefix apps/web test -- src/features/editor/workbench/editor-workbench-route.test.tsx`.
-- [ ] Extend preflight and atomic apply to validate both revisions and record affected variant fields. Keep candidate materialization and proposal lifecycle transactional. Do not let model output call store/render directly.
-- [ ] Render compact cards with change list, evidence, uncertainty, `변경 전후`, `수정`, `미리보기`, then enabled `적용`.
-- [ ] Repeat the previous backend and frontend commands, run `git diff --check`, and commit `feat: apply yujin variant edits safely`.
+- [x] Add failing tests for zero-mutation preview/cancel, stale revisions, one transactional apply, undo and double-click protection.
+- [x] Run the focused backend/frontend RED and regression commands.
+- [x] Extend preflight and atomic apply to validate both revisions and keep adapter/store/render boundaries separate.
+- [x] Keep variant candidates on the explicit preview then approval path with actionable labels.
+- [x] Repeat the focused commands, run `git diff --check`, and commit `1c1b4533f`.
 
 ### Task 4: Bind review to variant lineage
 
@@ -86,10 +86,10 @@ Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes
 - Test: `tests/test_output_source_verifier.py`
 - Test: review frontend tests
 
-- [ ] Write failing tests for exact project/timeline/session/session-revision/variant/variant-revision identity, master edit staling both default variants, variant-only edit staling only that variant, and legacy compatibility.
-- [ ] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_review_timeline.py tests/test_output_source_verifier.py -q` and `npm --prefix apps/web test -- src/features/review/timeline-review-state.test.ts src/features/review/TimelineReviewPage.test.tsx`.
-- [ ] Persist variant identity on new review approvals/snapshots and make current-state selection fail closed on mismatch. Show problems grouped by `내용/자막/화면/소리/자산`, with navigable position and creator action.
-- [ ] Repeat the previous backend/frontend commands, run `git diff --check`, and commit `feat: review exact output variant revisions`.
+- [x] Write failing tests for exact project/timeline/session/session-revision/variant/variant-revision identity, stale mismatch and legacy compatibility.
+- [x] Run the focused backend/frontend review commands.
+- [x] Persist variant identity on new review approvals/snapshots and make current-state selection fail closed on mismatch.
+- [x] Repeat the backend/frontend commands, run `git diff --check`, and commit `9c1a63fbf`.
 
 ### Task 5: Orchestrate independent horizontal and vertical outputs
 
@@ -104,12 +104,12 @@ Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes
 - Test: `tests/test_final_render_idempotency.py`
 - Test: `apps/web/src/app/OutputsPage.test.tsx`
 
-- [ ] Write failing tests for `POST /api/projects/{id}/variant-renders` returning itemized variant/timeline/job statuses, horizontal success plus vertical failure, retry vertical only, idempotent double submit and optional highlight absent until created.
-- [ ] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_api_final_render_endpoint.py tests/test_final_render_idempotency.py -q` and `npm --prefix apps/web test -- src/app/OutputsPage.test.tsx`.
-- [ ] Implement the envelope by materializing each selected variant and calling existing `create_or_reuse_active_final_render_job` independently. Never create a shared terminal status or cancel successful siblings.
-- [ ] Split output UI state per variant card. Default checked: `가로 영상`, `세로 영상`; optional `세로 하이라이트` only if present. Keep subtitle and CapCut compatibility advanced/optional.
-- [ ] Implement actionable blockers for missing source, format, current review, renderer and space. Reconcile authoritative state after response loss.
-- [ ] Repeat the previous backend/frontend commands, run `npm --prefix apps/web run build`, and commit `feat: render horizontal and vertical outputs independently`.
+- [x] Write failing tests for itemized variant/timeline/job statuses, independent siblings, idempotent double submit and optional highlight absence.
+- [x] Run RED and the focused backend/frontend commands.
+- [x] Implement the envelope by materializing each selected variant and calling independent `create_or_reuse_active_final_render_job` paths.
+- [x] Split output UI state per variant card with default horizontal/vertical selection and optional highlight only when present.
+- [x] Reconcile authoritative final-render status after the batch response and preserve successful siblings when one item fails.
+- [x] Repeat the commands, run `npm --prefix apps/web run build`, and commit `43fca6ef7`.
 
 ### Task 6: Verify actual output media in app
 
@@ -118,14 +118,17 @@ Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes
 - Modify: `apps/web/src/app/OutputsPage.test.tsx`
 - Modify: `apps/web/e2e/z-script-first-vertical.spec.mjs`
 
-- [ ] Add failing UI/E2E tests for Range-playable horizontal/vertical content, start/middle/end seek, result confirmation, retry failed only and `폴더 열기`/`다시 만들기` actions.
-- [ ] Run RED with `npm --prefix apps/web test -- src/app/OutputsPage.test.tsx` and `npm --prefix apps/web run test:e2e -- z-script-first-vertical.spec.mjs`.
-- [ ] Wire content URLs to bounded video players; result confirmation is explicit user state and not inferred from render success.
-- [ ] Repeat the previous commands, run `git diff --check`, and commit `feat: verify rendered variants inside videobox`.
+- [x] Add failing UI/E2E tests for range-playable horizontal/vertical content, start/middle/end seek, explicit result confirmation and per-variant retry.
+- [x] Run the focused Vitest, build and Playwright commands.
+- [x] Wire content URLs to bounded video players; result confirmation is an explicit user action.
+- [x] Repeat the commands, run `git diff --check`, and commit `41a51e16`/`3bf75e02`.
+- [ ] `폴더 열기` remains intentionally unavailable from the browser security boundary; the visible storage URI remains the safe alternative.
 
 ### Task 7: Wave 4 gate
 
 - [ ] Real browser: starter fills input; send proposal; preview then cancel proves zero mutation; resend, preview, apply exactly once, undo, reapply.
 - [ ] Review both current default variants, edit master and prove stale, rebuild/approve. Render both where one controlled fake failure occurs, retain success, retry failure only, then play both.
-- [ ] Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_yujin_creator_proposals.py tests/test_yujin_creator_proposal_adapter.py tests/test_yujin_media_proposal_adapter.py tests/test_review_timeline.py tests/test_output_source_verifier.py tests/test_output_publish_fences.py tests/test_final_render_idempotency.py tests/test_api_final_render_endpoint.py -q`, `npm --prefix apps/web test -- src/features/yujin src/features/review src/app/OutputsPage.test.tsx`, `npm --prefix apps/web run build`, and `npm --prefix apps/web run test:e2e`; then complete owner-ready runtime proof.
-- [ ] Read-only review focuses on model boundary, double apply, lineage mismatch, sibling cancellation, stale UI and creator copy. Complete design §§10–11/§13 gap and reverse table.
+- [x] Run the focused backend command (`252 passed, 1 warning`), focused frontend command (`107 passed`), production build, full isolated Playwright E2E (`40 passed`) and targeted variant playback E2E (`2 passed`).
+- [x] Code review, gap verification and reverse-flow checks covered model purity, finite-number and lineage rejection, double-apply/CAS, review staleness, independent sibling failure/retry and explicit output confirmation. The reviewer-found adapter/store boundary and context finite-number gaps were fixed in `cc564073`.
+- [x] Update the plan with separate implementation, isolated QA, owner-runtime and browser evidence; do not conflate owner-ready Check with owner acceptance.
+- [ ] Complete the real browser reverse flow and owner runtime proof at 1280x800 or wider; the prior in-app browser connection timed out, so human acceptance remains open.
