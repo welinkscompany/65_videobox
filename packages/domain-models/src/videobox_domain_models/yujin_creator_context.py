@@ -95,6 +95,7 @@ class SupportedControl(_StrictReadModel):
         "voice",
         "overlay",
         "output_check",
+        "output_variant",
     ]
     mode: Literal["recommendation_only", "read_only"]
 
@@ -133,7 +134,14 @@ class YujinCreatorContext(_StrictReadModel):
         max_length=5,
     )
     timeline_summary: TimelineSummary
-    supported_controls: tuple[SupportedControl, ...] = Field(max_length=7)
+    supported_controls: tuple[SupportedControl, ...] = Field(max_length=8)
+    current_surface: Literal["plan", "assets", "footage", "edit", "review", "output"] = "edit"
+    selection_kind: Literal["none", "segment", "asset", "proposal", "variant"] = "none"
+    master_session_id: str | None = Field(default=None, min_length=1, max_length=256)
+    master_session_revision: int | None = Field(default=None, ge=1)
+    variant_id: str | None = Field(default=None, min_length=1, max_length=256)
+    variant_kind: Literal["horizontal", "vertical_full", "vertical_highlight"] | None = None
+    variant_revision: int | None = Field(default=None, ge=1)
 
     @field_validator("memories")
     @classmethod

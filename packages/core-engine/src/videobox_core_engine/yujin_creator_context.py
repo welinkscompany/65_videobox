@@ -47,6 +47,7 @@ _CONTROLS = (
     SupportedControl(kind="broll", mode="recommendation_only"),
     SupportedControl(kind="caption", mode="recommendation_only"),
     SupportedControl(kind="output_check", mode="read_only"),
+    SupportedControl(kind="output_variant", mode="recommendation_only"),
     SupportedControl(kind="overlay", mode="recommendation_only"),
     SupportedControl(kind="sfx", mode="recommendation_only"),
     SupportedControl(kind="voice", mode="recommendation_only"),
@@ -218,6 +219,10 @@ def build_yujin_creator_context(
         approved_tts_candidates=approved_tts_before,
         timeline_summary=timeline_summary,
         supported_controls=_CONTROLS,
+        current_surface="edit",
+        selection_kind="segment" if normalized_selection is not None else "none",
+        master_session_id=session_id,
+        master_session_revision=session_revision,
     )
     return _fit_context(context)
 

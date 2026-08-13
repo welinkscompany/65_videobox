@@ -152,6 +152,165 @@ def _caption_style(**changes: object) -> dict[str, object]:
     return style
 
 
+def _variant_operation(
+    action: str = "set_crop", **parameters: object
+) -> dict[str, object]:
+    defaults: dict[str, object] = {
+        "set_crop": {
+            "x": 0.1,
+            "y": 0.0,
+            "width": 0.8,
+            "height": 1.0,
+        },
+        "set_focal": {"x": 0.5, "y": 0.4},
+        "set_caption_layout": {
+            "layout": "bottom",
+            "max_lines": 2,
+            "font_scale": 1.0,
+        },
+        "set_safe_area": {
+            "top_percent": 8,
+            "right_percent": 6,
+            "bottom_percent": 10,
+            "left_percent": 6,
+        },
+        "correct_audio": {
+            "gain_db": -3.0,
+            "fade_in_sec": 0.5,
+            "fade_out_sec": 0.5,
+        },
+    }[action]
+    defaults.update(parameters)
+    return {
+        "operation_id": f"variant-{action}",
+        "kind": "output_variant",
+        "target": {
+            "variant_id": "variant-vertical",
+            "track_id": "output-variant",
+        },
+        "parameters": {"action": action, **defaults},
+        "requires_materialization": False,
+        "preview_summary": f"변형 {action} 미리보기",
+    }
+
+
+def _variant_context(**changes: object) -> YujinCreatorContext:
+    controls = tuple(_context().supported_controls) + (
+        {"kind": "output_variant", "mode": "recommendation_only"},
+    )
+    defaults: dict[str, object] = {
+        "current_surface": "output",
+        "selection_kind": "variant",
+        "master_session_id": "session-1",
+        "master_session_revision": 7,
+        "variant_id": "variant-vertical",
+        "variant_kind": "vertical_highlight",
+        "variant_revision": 4,
+        "supported_controls": controls,
+    }
+    defaults.update(changes)
+    return _context(**defaults)
+
+
+def test_variant_proposal_binds_master_and_variant_revisions() -> None:
+    payload = _envelope()
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [_variant_operation("set_crop")],
+        }
+    )
+
+    response = _validate(payload, _variant_context())
+
+    assert response.proposal is not None
+    assert response.proposal.variant_id == "variant-vertical"
+    assert response.proposal.base_variant_revision == 4
+    assert response.proposal.operations[0].parameters.action == "set_crop"
+
+
+@pytest.mark.parametrize(
+    "action",
+    (
+        "set_crop",
+        "set_focal",
+        "set_caption_layout",
+        "set_safe_area",
+        "correct_audio",
+    ),
+)
+def test_variant_proposal_allows_only_bounded_render_overrides(action: str) -> None:
+    payload = _envelope()
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [_variant_operation(action)],
+        }
+    )
+
+    assert _validate(payload, _variant_context()).proposal is not None
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda operation: operation["parameters"].update(
+            {"action": "set_story", "story": "replace-master"}
+        ),
+        lambda operation: operation["parameters"].update(
+            {"shell": "ffmpeg", "action": "set_crop"}
+        ),
+        lambda operation: operation["parameters"].update(
+            {"path": "C:\\private\\output.mp4"}
+        ),
+        lambda operation: operation["parameters"].update(
+            {"url": "https://example.invalid/render"}
+        ),
+    ),
+    ids=("vertical-full-story", "shell", "filesystem", "http"),
+)
+def test_variant_proposal_rejects_story_and_external_effect_payloads(mutate) -> None:
+    payload = _envelope()
+    operation = _variant_operation("set_crop")
+    mutate(operation)
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [operation],
+        }
+    )
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(payload, _variant_context(variant_kind="vertical_full"))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("variant_id", "variant-other"),
+        ("base_variant_revision", 3),
+    ),
+)
+def test_variant_proposal_rejects_stale_or_unknown_variant_identity(
+    field: str, value: object
+) -> None:
+    payload = _envelope()
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [_variant_operation("set_focal")],
+        }
+    )
+    payload["proposal"][field] = value
+
+    with pytest.raises(ValueError, match="variant"):
+        _validate(payload, _variant_context())
+
+
 @pytest.mark.parametrize(
     ("safe_area_enabled", "position_y_percent", "expected_position_y_percent"),
     (

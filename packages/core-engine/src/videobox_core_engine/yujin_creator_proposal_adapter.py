@@ -797,10 +797,19 @@ def _project(
             controls=operation_data,
             expected_content_sha256=None,
             media_revision=source.base_revision,
-            canonical_metadata={
-                "schema_version": response.schema_version,
-                "proposal_kind": operation.kind,
-            },
+                canonical_metadata={
+                    "schema_version": response.schema_version,
+                    "proposal_kind": operation.kind,
+                    **(
+                        {
+                            "variant_id": source.variant_id,
+                            "base_variant_revision": source.base_variant_revision,
+                            "variant_kind": context.variant_kind,
+                        }
+                        if operation.kind == "output_variant"
+                        else {}
+                    ),
+                },
         )
         )
     target_segments = tuple(
@@ -824,6 +833,9 @@ def _project(
             "proposal_mode": "candidate_only",
             "title": source.title,
             "rationale": source.rationale,
+            "variant_id": source.variant_id,
+            "base_variant_revision": source.base_variant_revision,
+            "variant_kind": context.variant_kind,
             "operations": [
                 operation.model_dump(mode="json", exclude={"operation_id"})
                 for operation in source.operations
