@@ -10,6 +10,20 @@
 
 ---
 
+## Current gate audit (2026-08-13)
+
+| Task | Current state | Evidence / remaining boundary |
+| --- | --- | --- |
+| 1. Final-SHA regression | open | Earlier full regression exists, and current Wave 3 focused regression passed, but the full frontend/backend/E2E matrix has not run after the remaining Wave 4 implementation because Wave 4 is still open. |
+| 2. Official runtime | completed for current implementation HEAD | `70d5c09d9`: clean/synced Check, current-worktree rebuild, initial 502 settle, final VideoBox/Hermes HTTP 200, official `127.0.0.1:5173` browser. Rerun after any functional Wave 4 commit. |
+| 3. Dedicated owner QA project | open | Owner-approved copied inputs and a new preserved `VideoBox Creator QA <timestamp>` project do not exist for this gate. |
+| 4. Complete production flow | open | Wave 2 and Wave 3 slices were proven separately; they were not executed as one dedicated Wave 5 owner project. Contextual variant proposal/review/multi-output steps depend on open Wave 4 work. |
+| 5. Watch outputs | open | No paired horizontal/vertical artifacts with hashes/FFprobe and no complete owner watch/listen confirmation. |
+| 6. Final review/gap/reverse | partial | Wave 2/3 scoped review and reverse checks exist; final Wave 0–4 range review and Wave 4 sibling-render failure proof remain open. |
+| 7. Acceptance closeout | open | A QA closeout records automated/runtime limits, but human acceptance and the final post-Wave-4 SHA closeout are not complete. |
+
+Do not convert prior isolated/runtime evidence into completion of Tasks 3–7. Human owner acceptance remains a separate gate.
+
 ### Task 1: Pin exact source and run automated regression
 
 - [ ] Verify `git status --short` is clean, branch is `codex/videobox-container-compatibility`, upstream counts are `0 0`, and record `git rev-parse HEAD`.
@@ -20,10 +34,10 @@
 
 ### Task 2: Rebuild the official runtime
 
-- [ ] Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\owner-ready.ps1 -Mode Check -Json` and record branch/upstream/data preflight.
-- [ ] Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\owner-ready.ps1 -Mode Start -Rebuild -Json` only after Check confirms the exact source; then rerun Check.
-- [ ] A blocked unrelated Hermes dashboard is recorded separately and must not be described as a VideoBox failure or success.
-- [ ] Open the official runtime with the wrapper-supported route. Do not use direct Vite or fake API as real-runtime proof.
+- [x] Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\owner-ready.ps1 -Mode Check -Json` and record branch/upstream/data preflight.
+- [x] Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\owner-ready.ps1 -Mode Start -Rebuild -Json` only after Check confirms the exact source; then rerun Check.
+- [x] A blocked unrelated Hermes dashboard is recorded separately and must not be described as a VideoBox failure or success.
+- [x] Open the official runtime with the wrapper-supported route. Do not use direct Vite or fake API as real-runtime proof.
 
 ### Task 3: Prepare a dedicated owner QA project safely
 

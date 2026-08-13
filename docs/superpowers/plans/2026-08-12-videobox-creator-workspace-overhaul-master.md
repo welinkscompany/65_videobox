@@ -43,14 +43,16 @@ The approved 2026-08-12 decision replaces the older “CapCut is the normal fini
 
 ## Wave order and hard gates
 
-| Wave | Plan | Depends on | Gate before next wave |
-|---|---|---|---|
-| 0 | [Workspace and SSOT](2026-08-12-videobox-wave0-workspace-ssot.md) | none | Old routes work, new IA is browser-usable, docs no longer contradict. |
-| 1 | [Personal media library](2026-08-12-videobox-wave1-personal-media-library.md) | Wave 0 | B-roll/music/SFX drag/drop, copy, dedupe, search, preview, trash/restore and delete guard work in browser. |
-| 2 | [Footage organizer](2026-08-12-videobox-wave2-footage-organizer.md) | Wave 1 | Long footage proposal and virtual sequence approval create searchable derived B-roll without changing originals. |
-| 3 | [Creator editor and output variants](2026-08-12-videobox-wave3-editor-output-variants.md) | Waves 0–2 | Direct editor operations and linked horizontal/vertical variants persist and recover in browser. |
-| 4 | [Yujin, review and multi-output](2026-08-12-videobox-wave4-yujin-review-output.md) | Wave 3 | Proposal/cancel/apply/undo, current-variant review, independent horizontal/vertical outputs work. |
-| 5 | [Owner acceptance and closeout](2026-08-12-videobox-wave5-owner-acceptance.md) | Waves 0–4 | Owner can complete and watch a dedicated real project; evidence, review, gap and reverse checks are pinned. |
+| Wave | Plan | Depends on | Current status (2026-08-13) | Gate before next wave |
+|---|---|---|---|---|
+| 0 | [Workspace and SSOT](2026-08-12-videobox-wave0-workspace-ssot.md) | none | **core implemented, visual gate partial**; official `1280×800` pass exists, exact four-viewport official capture/reverse action remains | Old routes work, new IA is browser-usable, docs no longer contradict. |
+| 1 | [Personal media library](2026-08-12-videobox-wave1-personal-media-library.md) | Wave 0 | **core implemented, gate partial**; starter B-roll pack and dedicated destructive real-browser flow remain open | B-roll/music/SFX drag/drop, copy, dedupe, search, preview, trash/restore and delete guard work in browser. |
+| 2 | [Footage organizer](2026-08-12-videobox-wave2-footage-organizer.md) | Wave 1 | **implementation gate complete**; human owner acceptance separate | Long footage proposal and virtual sequence approval create searchable derived B-roll without changing originals. |
+| 3 | [Creator editor and output variants](2026-08-12-videobox-wave3-editor-output-variants.md) | Waves 0–2 | **implementation gate complete**; server variant runtime/browser evidence recorded, human acceptance separate | Direct editor operations and linked horizontal/vertical variants persist and recover in browser. |
+| 4 | [Yujin, review and multi-output](2026-08-12-videobox-wave4-yujin-review-output.md) | Wave 3 | **open**; fixed four-chip starter baseline only, variant proposal/review/multi-output implementation remains | Proposal/cancel/apply/undo, current-variant review, independent horizontal/vertical outputs work. |
+| 5 | [Owner acceptance and closeout](2026-08-12-videobox-wave5-owner-acceptance.md) | Waves 0–4 | **open**; current runtime preflight complete, dedicated project/full flow/artifact watch/human acceptance remain | Owner can complete and watch a dedicated real project; evidence, review, gap and reverse checks are pinned. |
+
+This table records current repository truth, including work that historically advanced before every earlier checklist was reconciled. Close the remaining Wave 0/1 gates and Wave 4 implementation before final Wave 5 acceptance; do not reinterpret completed Wave 2/3 slices as satisfying those residual gates.
 
 Do not start the next wave because unit tests pass. The wave’s 실제 브라우저 gate must be completed on the exact committed source. If a gate exposes a defect, fix it within the same wave and rerun the affected reverse/failure path.
 

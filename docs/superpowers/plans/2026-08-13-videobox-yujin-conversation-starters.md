@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the feature local to \`RightDock\`. Define four immutable prompt records, render them only for the empty conversation/proposal state, and reuse the controlled \`draft\`/\`onDraftChange\` contract. A Right Dock-local focus target receives focus after a chip click; existing Hermes, proposal, approval, and \`EditorCommandPort\` paths remain unchanged.
 
-**Tech Stack:** React 18, TypeScript, Vitest, Testing Library, existing VideoBox CSS variables and shadcn \`Button\`/\`Textarea\` primitives.
+**Tech Stack:** React 19, TypeScript, Vitest, Testing Library, existing VideoBox CSS variables and shadcn \`Button\`/\`Textarea\` primitives.
 
 ---
 
@@ -16,7 +16,7 @@
 - Modify: \`apps/web/src/features/editor/workbench/right-dock.test.tsx\`
 - Reference: \`apps/web/src/features/editor/workbench/RightDock.tsx\`
 
-- [ ] **Step 1: Add the empty-state interaction test**
+- [x] **Step 1: Add the empty-state interaction test**
 
 Add this test inside the existing \`describe("RightDock", ...)\` block:
 
@@ -44,7 +44,7 @@ it("shows conversation starters that fill and focus the composer without sending
 });
 ~~~
 
-- [ ] **Step 2: Add visibility and disabled-state tests**
+- [x] **Step 2: Add visibility and disabled-state tests**
 
 Add these tests after the previous test:
 
@@ -70,7 +70,7 @@ it("disables conversation starters when the composer is disabled", () => {
 });
 ~~~
 
-- [ ] **Step 3: Run the focused test file and verify RED**
+- [x] **Step 3: Run the focused test file and verify RED**
 
 Run:
 
@@ -86,7 +86,7 @@ Expected: FAIL because \`RightDock\` does not yet render a \`대화 스타터\` 
 - Modify: \`apps/web/src/features/editor/workbench/RightDock.tsx\`
 - Modify: \`apps/web/src/styles/editor-workbench.css\`
 
-- [ ] **Step 1: Add the prompt records and scoped composer focus target**
+- [x] **Step 1: Add the prompt records and scoped composer focus target**
 
 After \`staleProposalMessage\`, add:
 
@@ -115,7 +115,7 @@ const chooseConversationStarter = (starter: string) => {
 };
 ~~~
 
-- [ ] **Step 2: Render the accessible empty-state starter group**
+- [x] **Step 2: Render the accessible empty-state starter group**
 
 Replace the current empty-history branch with this structure:
 
@@ -142,7 +142,7 @@ Replace the current empty-history branch with this structure:
 
 Wrap the existing \`Textarea\` with the scoped ref and focus its descendant textarea after selection. The click handler must only call \`onDraftChange\` and focus; it must not call \`onSendMessage\`, \`onStart\`, \`onApplyProposal\`, \`onManualEdit\`, or a backend client.
 
-- [ ] **Step 3: Add compact chip styling using existing tokens**
+- [x] **Step 3: Add compact chip styling using existing tokens**
 
 Append to \`apps/web/src/styles/editor-workbench.css\`:
 
@@ -161,7 +161,7 @@ Append to \`apps/web/src/styles/editor-workbench.css\`:
 - Verify: \`apps/web/src/features/editor/workbench/RightDock.tsx\`
 - Verify: \`apps/web/src/styles/editor-workbench.css\`
 
-- [ ] **Step 1: Run the focused Right Dock tests**
+- [x] **Step 1: Run the focused Right Dock tests**
 
 ~~~powershell
 npm --prefix apps/web test -- src/features/editor/workbench/right-dock.test.tsx
@@ -169,7 +169,7 @@ npm --prefix apps/web test -- src/features/editor/workbench/right-dock.test.tsx
 
 Expected: the full Right Dock test file passes, including the new starter tests.
 
-- [ ] **Step 2: Run related editor tests**
+- [x] **Step 2: Run related editor tests**
 
 ~~~powershell
 npm --prefix apps/web test -- src/features/editor/workbench/editor-workbench-route.test.tsx src/features/editor/workbench/editor-workbench.test.tsx src/features/editor/workbench/yujin-memory-panel.test.tsx
@@ -177,7 +177,7 @@ npm --prefix apps/web test -- src/features/editor/workbench/editor-workbench-rou
 
 Expected: all listed files pass and existing \`유진에게 추천받기\` behavior remains covered.
 
-- [ ] **Step 3: Run build and whitespace checks**
+- [x] **Step 3: Run build and whitespace checks**
 
 ~~~powershell
 npm --prefix apps/web run build
@@ -186,7 +186,7 @@ git diff --check
 
 Expected: production build succeeds; any existing Vite chunk-size warning is non-failing; \`git diff --check\` emits no errors.
 
-- [ ] **Step 4: Review the diff for scope violations**
+- [x] **Step 4: Review the diff for scope violations**
 
 ~~~powershell
 git diff --stat
@@ -202,19 +202,19 @@ Confirm the diff contains only UI, styling, and tests; no Hermes route, gateway,
 - Commit: \`apps/web/src/features/editor/workbench/right-dock.test.tsx\`
 - Commit: \`apps/web/src/styles/editor-workbench.css\`
 
-- [ ] **Step 1: Stage only the implementation files**
+- [x] **Step 1: Stage only the implementation files**
 
 ~~~powershell
 git add -- apps/web/src/features/editor/workbench/RightDock.tsx apps/web/src/features/editor/workbench/right-dock.test.tsx apps/web/src/styles/editor-workbench.css
 ~~~
 
-- [ ] **Step 2: Create the implementation commit**
+- [x] **Step 2: Create the implementation commit**
 
 ~~~powershell
 git commit -m "feat: add Yujin conversation starters"
 ~~~
 
-- [ ] **Step 3: Verify the final worktree state**
+- [x] **Step 3: Verify the final worktree state**
 
 ~~~powershell
 git status -sb
@@ -222,3 +222,11 @@ git rev-parse HEAD
 ~~~
 
 Expected: implementation commit is at HEAD and the worktree contains no unintended tracked changes. Do not claim owner acceptance; live Hermes chat and real-browser owner verification remain separate gates.
+
+## Closeout evidence (status reconciled 2026-08-13)
+
+- Implementation commit: `2a4e28eb7` (`feat: add Yujin conversation starters`).
+- Current source renders four immutable starters only for the empty idle conversation/proposal state; click fills and focuses the composer without sending or mutating.
+- The implementation uses a Right Dock-local composer wrapper ref and stronger `state === "idle"` / `runState.kind === "idle"` visibility guards than the initial sketch above.
+- Fresh focused verification: `right-dock.test.tsx` **15 passed**. The broader editor suite and production build also passed on the current branch before this plan-status update.
+- This focused plan is complete. Wave 4 Task 1 remains separate because it additionally requires contextual registries, `다른 예시`, `전체 보기`, and usage-frequency promotion.

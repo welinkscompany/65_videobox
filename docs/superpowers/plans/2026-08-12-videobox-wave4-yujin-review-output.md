@@ -10,6 +10,20 @@
 
 ---
 
+## Current implementation audit (2026-08-13)
+
+| Task | Current state | Implemented evidence | Remaining implementation |
+| --- | --- | --- | --- |
+| 1. Contextual starters | partial | `RightDock` fixed four-chip empty-state baseline, zero-send/focus tests, commit `2a4e28eb7` | surface/selection/blocker registry, `다른 예시`, `전체 보기`, local usage-frequency promotion, Home integration |
+| 2. Variant proposals | not implemented | existing creator proposal adapter handles current session/media proposal contracts | `variant_id`, `base_variant_revision`, reframe/layout/audio operations and vertical-full story rejection |
+| 3. Preview/apply/undo | partial baseline | existing session proposal preview/apply/manual undo paths | dual master+variant revision preflight, variant transaction, double-apply protection and variant before/after cards |
+| 4. Variant review lineage | partial baseline | existing timeline/session review and Wave 3 output source verification | persist/select exact variant revision, variant-specific staleness and grouped creator actions |
+| 5. Independent outputs | not implemented | existing single timeline `/jobs/final-render` and one `OutputsPage` final card | `/variant-renders` envelope, independent sibling jobs/cards/retry and optional highlight selection |
+| 6. In-app output verification | partial baseline | existing single final MP4 player and retry action | horizontal/vertical players, start/middle/end proof, per-result confirmation and folder action |
+| 7. Wave gate | not run | Wave 3 runtime/browser gate is complete | complete Wave 4 implementation, focused/full regression, real browser reverse flow and review |
+
+Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes below. Check a task only when every requirement in that checkbox is implemented and verified.
+
 ### Task 1: Add contextual starter registry
 
 **Files:**
@@ -18,6 +32,8 @@
 - Modify: `apps/web/src/features/editor/workbench/RightDock.tsx`
 - Modify: `apps/web/src/features/home/HomeYujinChat.tsx`
 - Test: `apps/web/src/features/yujin/YujinStarters.test.tsx`
+
+- [x] Baseline completed in the focused conversation-starter plan: four immutable Right Dock chips fill/focus the composer with zero send/mutation (`2a4e28eb7`).
 
 - [ ] Write failing tests for 4–6 starters by plan/assets/footage/edit/review/output context, `다른 예시`, `전체 보기`, recent-frequency promotion, and click-fills-composer-with-zero-send/zero-mutation.
 - [ ] Run RED with `npm --prefix apps/web test -- src/features/yujin/YujinStarters.test.tsx`.

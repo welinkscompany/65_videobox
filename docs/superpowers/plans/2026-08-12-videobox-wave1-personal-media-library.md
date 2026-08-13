@@ -10,6 +10,12 @@
 
 ---
 
+## Current implementation audit (2026-08-13)
+
+- Tasks 1–5 and 6 are implemented and committed. The global user library store, copy-only ingest, lifecycle/usage APIs, semantic indexing, bounded desktop UI and project-reference adapter are present in the current source.
+- Task 5A remains unimplemented: the approved starter release set still contains `30 music / 100 SFX` and no distributable B-roll asset.
+- Task 7 is partial. The official runtime `/library` surface was opened at `1280×800`, but the complete dedicated-runtime duplicate/invalid upload plus reference-block/trash/restore/permanent-delete sequence has not been rerun as one acceptance flow.
+
 ### Task 1: Define user library domain and migrate global SQLite
 
 **Files:**
@@ -19,11 +25,11 @@
 - Test: `tests/test_library_user_asset_store.py`
 - Test: `tests/test_sqlite_migration_concurrency.py`
 
-- [ ] **Step 1: Write failing store tests.** Pin `LibraryMediaType = broll|music|sfx`, `LibraryAssetOrigin = builtin|user`, lifecycle `processing|ready|needs_attention|trashed`, unique `content_sha256`, user metadata separate from machine metadata, and idempotent concurrent schema creation.
-- [ ] **Step 2: Run RED.** `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_user_asset_store.py tests/test_sqlite_migration_concurrency.py -q`. Expected: import/table failures.
-- [ ] **Step 3: Add strict models and focused tables.** Create `library_user_assets`, `library_asset_derivatives`, `library_ingest_batches`, `library_ingest_items`, `library_project_references`. Store canonical managed relative path, hash, byte count, MIME, technical JSON, machine JSON, user JSON, lifecycle timestamps, provenance and idempotency key. Use `BEGIN IMMEDIATE`; never overload pack `media_assets`.
-- [ ] **Step 4: Add migration compatibility.** Existing pack/audio/footage tables remain readable. New schema creation is additive and repeatable; two store constructors must not race or erase rows.
-- [ ] **Step 5: Run GREEN and commit.** Repeat `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_user_asset_store.py tests/test_sqlite_migration_concurrency.py -q`, run `git diff --check`, then commit `feat: add global user media lifecycle store`.
+- [x] **Step 1: Write failing store tests.** Pin `LibraryMediaType = broll|music|sfx`, `LibraryAssetOrigin = builtin|user`, lifecycle `processing|ready|needs_attention|trashed`, unique `content_sha256`, user metadata separate from machine metadata, and idempotent concurrent schema creation.
+- [x] **Step 2: Run RED.** `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_user_asset_store.py tests/test_sqlite_migration_concurrency.py -q`. Expected: import/table failures.
+- [x] **Step 3: Add strict models and focused tables.** Create `library_user_assets`, `library_asset_derivatives`, `library_ingest_batches`, `library_ingest_items`, `library_project_references`. Store canonical managed relative path, hash, byte count, MIME, technical JSON, machine JSON, user JSON, lifecycle timestamps, provenance and idempotency key. Use `BEGIN IMMEDIATE`; never overload pack `media_assets`.
+- [x] **Step 4: Add migration compatibility.** Existing pack/audio/footage tables remain readable. New schema creation is additive and repeatable; two store constructors must not race or erase rows.
+- [x] **Step 5: Run GREEN and commit.** Repeat `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_user_asset_store.py tests/test_sqlite_migration_concurrency.py -q`, run `git diff --check`, then commit `feat: add global user media lifecycle store`.
 
 ### Task 2: Build copy-only idempotent ingest
 
@@ -34,11 +40,11 @@
 - Test: `tests/test_library_ingest.py`
 - Test: `tests/test_media_inbox.py`
 
-- [ ] **Step 1: Write failing ingest tests.** Verify temp-copy → fsync/close → SHA recheck → atomic rename, same hash reuse, same name/different hash disambiguation, response-loss retry, partial batch success and source bytes unchanged.
-- [ ] **Step 2: Run RED.** Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_ingest.py tests/test_media_inbox.py -q`; expected missing service/old move semantics failure.
-- [ ] **Step 3: Implement `LibraryIngestService.ingest`.** Accept `media_type`, source stream/path, filename, idempotency key and provenance. Copy to a staging file under the managed root, validate size/hash, rename to a content-addressed destination, persist item state, and enqueue derivative/index work. Roll back only staged bytes on failure.
-- [ ] **Step 4: Adapt Drive mirror.** Keep settled-file detection but call the ingest service in copy-only mode. Archive/move of the Drive mirror source is a separate explicit policy; default leaves the source unchanged.
-- [ ] **Step 5: Run GREEN and commit.** Repeat the Step 2 command, run `git diff --check`, then commit `feat: unify safe local media ingest`.
+- [x] **Step 1: Write failing ingest tests.** Verify temp-copy → fsync/close → SHA recheck → atomic rename, same hash reuse, same name/different hash disambiguation, response-loss retry, partial batch success and source bytes unchanged.
+- [x] **Step 2: Run RED.** Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_ingest.py tests/test_media_inbox.py -q`; expected missing service/old move semantics failure.
+- [x] **Step 3: Implement `LibraryIngestService.ingest`.** Accept `media_type`, source stream/path, filename, idempotency key and provenance. Copy to a staging file under the managed root, validate size/hash, rename to a content-addressed destination, persist item state, and enqueue derivative/index work. Roll back only staged bytes on failure.
+- [x] **Step 4: Adapt Drive mirror.** Keep settled-file detection but call the ingest service in copy-only mode. Archive/move of the Drive mirror source is a separate explicit policy; default leaves the source unchanged.
+- [x] **Step 5: Run GREEN and commit.** Repeat the Step 2 command, run `git diff --check`, then commit `feat: unify safe local media ingest`.
 
 ### Task 3: Add lifecycle, usage and preview APIs
 
@@ -50,11 +56,11 @@
 - Test: `tests/test_api_library_assets.py`
 - Test: `tests/test_api_media_library.py`
 
-- [ ] **Step 1: Write failing API tests.** Pin endpoints: `POST /api/library/ingest` multipart batch, `GET /api/library/assets`, `GET /api/library/assets/{id}`, preview/thumbnail/waveform, semantic search reuse, usage, trash, restore, permanent delete and project materialize. Assert starter assets reject trash, referenced assets return 409 with exact locations, and retries reuse the ingest item.
-- [ ] **Step 2: Run RED.** Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_api_library_assets.py tests/test_api_media_library.py -q`; expected 404.
-- [ ] **Step 3: Implement strict request/response DTOs.** Return creator-relevant state and stable internal codes; never expose absolute managed paths. Extend preview MIME to video and audio. Generate/cache thumbnail, proxy or waveform as derivatives keyed by source hash and derivative version.
-- [ ] **Step 4: Record explicit references.** On project materialization, transactionally create `library_project_references` with project/asset identity. Usage inspection also scans current editing session/variant and derived sequence references before deletion. Keep internal rollback cleanup separate from user deletion guard.
-- [ ] **Step 5: Run GREEN and commit.** Repeat the Step 2 command, run `git diff --check`, then commit `feat: expose safe personal library lifecycle`.
+- [x] **Step 1: Write failing API tests.** Pin endpoints: `POST /api/library/ingest` multipart batch, `GET /api/library/assets`, `GET /api/library/assets/{id}`, preview/thumbnail/waveform, semantic search reuse, usage, trash, restore, permanent delete and project materialize. Assert starter assets reject trash, referenced assets return 409 with exact locations, and retries reuse the ingest item.
+- [x] **Step 2: Run RED.** Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_api_library_assets.py tests/test_api_media_library.py -q`; expected 404.
+- [x] **Step 3: Implement strict request/response DTOs.** Return creator-relevant state and stable internal codes; never expose absolute managed paths. Extend preview MIME to video and audio. Generate/cache thumbnail, proxy or waveform as derivatives keyed by source hash and derivative version.
+- [x] **Step 4: Record explicit references.** On project materialization, transactionally create `library_project_references` with project/asset identity. Usage inspection also scans current editing session/variant and derived sequence references before deletion. Keep internal rollback cleanup separate from user deletion guard.
+- [x] **Step 5: Run GREEN and commit.** Repeat the Step 2 command, run `git diff --check`, then commit `feat: expose safe personal library lifecycle`.
 
 ### Task 4: Connect automatic semantic indexing
 
@@ -66,10 +72,10 @@
 - Test: `tests/test_library_footage_indexer.py`
 - Test: `tests/test_api_library_audio_search.py`
 
-- [ ] **Step 1: Add failing tests.** New ready user assets must appear in pending index queries, content-renamed duplicates must not reanalyse, unavailable LM Studio must preserve measurements and pending embedding, and user-confirmed tags must survive reindex.
-- [ ] **Step 2: Run RED.** Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_audio_indexer.py tests/test_library_footage_indexer.py tests/test_library_audio_index.py tests/test_api_library_audio_search.py -q`.
-- [ ] **Step 3: Extend indexers by asset identity.** Link descriptors to `library_asset_id` plus content hash; keep `DESCRIPTION_VERSION`/`FOOTAGE_DESCRIPTION_VERSION`. Write machine description separately from user metadata. Use the existing Korean vision prompt and bounded maintenance batches.
-- [ ] **Step 4: Run GREEN and commit.** Repeat the Step 2 command, run `git diff --check`, then commit `feat: index personal media for semantic search`.
+- [x] **Step 1: Add failing tests.** New ready user assets must appear in pending index queries, content-renamed duplicates must not reanalyse, unavailable LM Studio must preserve measurements and pending embedding, and user-confirmed tags must survive reindex.
+- [x] **Step 2: Run RED.** Run `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_library_audio_indexer.py tests/test_library_footage_indexer.py tests/test_library_audio_index.py tests/test_api_library_audio_search.py -q`.
+- [x] **Step 3: Extend indexers by asset identity.** Link descriptors to `library_asset_id` plus content hash; keep `DESCRIPTION_VERSION`/`FOOTAGE_DESCRIPTION_VERSION`. Write machine description separately from user metadata. Use the existing Korean vision prompt and bounded maintenance batches.
+- [x] **Step 4: Run GREEN and commit.** Repeat the Step 2 command, run `git diff --check`, then commit `feat: index personal media for semantic search`.
 
 ### Task 5: Build the bounded desktop library UI
 
@@ -87,12 +93,12 @@
 - Modify: `apps/web/src/app/AppRouter.tsx`
 - Test: `apps/web/src/features/library/LibraryPage.test.tsx`
 
-- [ ] **Step 1: Write failing UI tests.** Assert three-pane layout, video grid, music/SFX waveform rows, 24-row bounded page, keyboard tabs, drop of mixed files, partial failure reconciliation, search reason, preview, usage blocker, trash/restore and a single primary action.
-- [ ] **Step 2: Run RED.** `npm --prefix apps/web test -- src/features/library/LibraryPage.test.tsx`; expected missing components/client methods.
-- [ ] **Step 3: Add typed client contracts.** Define `LibraryAsset`, `LibraryIngestBatch`, `LibraryUsage`, `LibrarySearchMatch`, and API methods matching Task 3. Use AbortController/epoch fences so a stale request from a previous filter cannot overwrite current results.
-- [ ] **Step 4: Implement views.** Keep the shell fixed; only center results scroll. Video cards show thumbnail/duration/orientation/status. Audio rows show waveform, name, duration, play/favorite. Right pane owns full preview, metadata, provenance, usage and safe actions.
-- [ ] **Step 5: Implement drag/drop reconciliation.** Dropping never immediately claims success. Show item states, reload authoritative batch after network loss, retry failed items only, and display duplicates as existing assets.
-- [ ] **Step 6: Run GREEN/build and commit.** Run `npm --prefix apps/web test -- src/features/library/LibraryPage.test.tsx` and `npm --prefix apps/web run build`; commit `feat: add bounded personal media library workspace`.
+- [x] **Step 1: Write failing UI tests.** Assert three-pane layout, video grid, music/SFX waveform rows, 24-row bounded page, keyboard tabs, drop of mixed files, partial failure reconciliation, search reason, preview, usage blocker, trash/restore and a single primary action.
+- [x] **Step 2: Run RED.** `npm --prefix apps/web test -- src/features/library/LibraryPage.test.tsx`; expected missing components/client methods.
+- [x] **Step 3: Add typed client contracts.** Define `LibraryAsset`, `LibraryIngestBatch`, `LibraryUsage`, `LibrarySearchMatch`, and API methods matching Task 3. Use AbortController/epoch fences so a stale request from a previous filter cannot overwrite current results.
+- [x] **Step 4: Implement views.** Keep the shell fixed; only center results scroll. Video cards show thumbnail/duration/orientation/status. Audio rows show waveform, name, duration, play/favorite. Right pane owns full preview, metadata, provenance, usage and safe actions.
+- [x] **Step 5: Implement drag/drop reconciliation.** Dropping never immediately claims success. Show item states, reload authoritative batch after network loss, retry failed items only, and display duplicates as existing assets.
+- [x] **Step 6: Run GREEN/build and commit.** Run `npm --prefix apps/web test -- src/features/library/LibraryPage.test.tsx` and `npm --prefix apps/web run build`; commit `feat: add bounded personal media library workspace`.
 
 ### Task 5A: Extend the verified starter pack with usable B-roll
 
@@ -117,14 +123,14 @@
 - Modify: `apps/web/src/features/media/MediaWorkspacePage.test.tsx`
 - Modify: `apps/web/src/features/media/MediaLibraryBrowser.test.tsx`
 
-- [ ] **Step 1: Add failing tests.** Project screen must separate `프로젝트 자산`, `라이브러리에서 찾기`, `새 파일 추가`, `촬영본 가져오기`; `프로젝트에서 빼기` must not trash the global asset.
-- [ ] **Step 2: Run RED.** Run `npm --prefix apps/web test -- src/features/media/MediaWorkspacePage.test.tsx src/features/media/MediaLibraryBrowser.test.tsx`.
-- [ ] **Step 3: Convert old browsers to adapters.** Reuse the global library search/preview components and project materialize API. Preserve project-scoped favorite/recent behavior. Do not duplicate library state inside `MediaWorkspacePage`.
-- [ ] **Step 4: Run GREEN and commit.** Repeat the Step 2 command, run `npm --prefix apps/web run build`, then commit `feat: connect projects to personal media references`.
+- [x] **Step 1: Add failing tests.** Project screen must separate `프로젝트 자산`, `라이브러리에서 찾기`, `새 파일 추가`, `촬영본 가져오기`; `프로젝트에서 빼기` must not trash the global asset.
+- [x] **Step 2: Run RED.** Run `npm --prefix apps/web test -- src/features/media/MediaWorkspacePage.test.tsx src/features/media/MediaLibraryBrowser.test.tsx`.
+- [x] **Step 3: Convert old browsers to adapters.** Reuse the global library search/preview components and project materialize API. Preserve project-scoped favorite/recent behavior. Do not duplicate library state inside `MediaWorkspacePage`.
+- [x] **Step 4: Run GREEN and commit.** Repeat the Step 2 command, run `npm --prefix apps/web run build`, then commit `feat: connect projects to personal media references`.
 
 ### Task 7: Wave 1 browser and failure gate
 
-- [ ] Use owner-ready Start/Rebuild and Check; open `/library` in the real browser.
+- [x] Use owner-ready Start/Rebuild and Check; open `/library` in the real browser.
 - [ ] Drop one B-roll, one music and one SFX file plus one duplicate and one invalid file. Verify originals remain byte-identical, partial failure is visible, all valid assets preview, and semantic search finds each type.
 - [ ] Materialize one asset into a project, prove permanent delete is blocked with a navigable usage location, remove the project reference, trash, restore, then explicitly delete an unused QA asset.
 - [ ] Verify 1000 synthetic response rows remain within the center pane without page growth; do not persist synthetic data to owner runtime.
