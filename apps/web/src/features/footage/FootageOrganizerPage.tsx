@@ -57,7 +57,7 @@ export function FootageOrganizerPage() {
     if (!selectedAsset) return;
     setBusy("분석"); setNotice(null);
     try {
-      const result = await api.proposeFootage({ library_asset_id: selectedAsset.library_asset_id, idempotency_key: `footage-ui-${selectedAsset.library_asset_id}-${Date.now()}`, analysis: request.trim() ? { instruction: request.trim() } : undefined });
+      const result = await api.proposeFootage({ library_asset_id: selectedAsset.library_asset_id, idempotency_key: `footage-ui-${selectedAsset.library_asset_id}-${Date.now()}` });
       setProposal(result); setYujinCandidate(null); setProposalPreview(null); setPreviewUnavailable(false); setSelectedSegmentId(result.segments[0]?.segment_id ?? null); setSelectedSegmentIds(result.segments[0]?.segment_id ? [result.segments[0].segment_id] : []); setNotice("제안이 준비됐어요. 타임라인을 확인하세요. Shift+클릭으로 여러 장면을 선택할 수 있어요.");
     } catch { setNotice("제안을 만들지 못했습니다. 다시 시도하세요."); } finally { setBusy(null); }
   }

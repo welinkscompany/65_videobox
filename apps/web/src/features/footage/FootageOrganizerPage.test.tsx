@@ -80,8 +80,10 @@ describe("FootageOrganizerPage", () => {
   it("keeps proposal changes local until explicit preview/apply and exposes frame steps", async () => {
     render(<FootageOrganizerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
+    fireEvent.change(screen.getByLabelText("정리 요청"), { target: { value: "장면 변화로 나누기" } });
     fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
     await waitFor(() => expect(api.proposeFootage).toHaveBeenCalledWith(expect.objectContaining({ library_asset_id: "asset-1" })));
+    expect(api.proposeFootage).toHaveBeenCalledWith(expect.not.objectContaining({ analysis: expect.anything() }));
     expect(screen.getByTestId("scene-timeline")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "1프레임 앞으로" }));
     expect(screen.getByText(/0\.03초/)).toBeInTheDocument();
