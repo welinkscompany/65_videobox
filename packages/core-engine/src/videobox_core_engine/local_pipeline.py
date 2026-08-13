@@ -2233,13 +2233,28 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     )
                     return True
 
+                is_derived_variant_timeline = bool(timeline.get("source_variant_id"))
                 persisted = self.store.save_final_render(
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
                     source_output_path=render_output_path,
-                    source_session_id=str(editing_session["session_id"]) if editing_session is not None else None,
-                    source_session_revision=int(editing_session["session_revision"]) if editing_session is not None else None,
-                    source_session_absent=editing_session is None,
+                    # A derived variant deliberately has the master editing
+                    # session as its source lineage, but it is not itself the
+                    # session's timeline_id. The publish CAS therefore must
+                    # not compare the derived timeline to the master session
+                    # row; review/source fences above still bind the variant
+                    # to that exact session and revision.
+                    source_session_id=(
+                        None
+                        if is_derived_variant_timeline or editing_session is None
+                        else str(editing_session["session_id"])
+                    ),
+                    source_session_revision=(
+                        None
+                        if is_derived_variant_timeline or editing_session is None
+                        else int(editing_session["session_revision"])
+                    ),
+                    source_session_absent=is_derived_variant_timeline or editing_session is None,
                     source_fence=final_source_fence,
                 )
             self.store.update_job(

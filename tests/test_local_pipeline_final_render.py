@@ -148,6 +148,62 @@ def test_start_final_render_persists_export_and_updates_job(tmp_path: Path) -> N
     assert fetched["render"]["file_uri"].startswith(f"local://projects/{project.project_id}/exports/final_render/")
 
 
+def test_variant_final_render_publishes_without_treating_derived_timeline_as_master(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Variant final render project")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={"review_flags": [], "pending_recommendations": [], "tracks": [], "segments": []},
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [], "history": []},
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="draft",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+    variants = store.ensure_output_variants(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    )
+    renderer = _FakeFinalRenderer()
+    runner = LocalPipelineRunner(store, final_renderer=renderer)
+    materialized = runner._materialize_variant_for_output(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_id=variants[0]["variant_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="approved",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+    batch = runner.start_variant_renders(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_ids=[variants[0]["variant_id"]],
+    )
+    item = batch["items"][0]
+
+    runner.run_final_render_job(
+        project_id=project.project_id,
+        timeline_job_id=item["timeline_job_id"],
+        job={"job_id": item["job_id"]},
+    )
+
+    result = runner.get_final_render_result(project_id=project.project_id, job_id=item["job_id"])
+    assert result["status"] == "succeeded"
+    assert result["render"]["timeline_id"] == materialized["timeline_id"]
+
+
 def test_final_render_does_not_publish_when_session_changes_after_last_pipeline_check(tmp_path: Path) -> None:
     """The storage publish fence, not a timing assumption, owns the final CAS."""
     class _SessionMutatingPublishStore(LocalProjectStore):
