@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   projectVariant,
+  projectServerVariant,
   resolveVariantConflict,
   synchronizeVariantPlayhead,
   type VariantProjection,
@@ -58,5 +59,35 @@ describe("variantProjection", () => {
     expect(resolveVariantConflict(conflicted, "crop", "keep_local").lockedFields).toEqual(["crop"]);
     expect(resolveVariantConflict(conflicted, "crop", "rebase_master").lockedFields).toEqual([]);
     expect(resolveVariantConflict(conflicted, "crop", "rebase_master").conflicts).toEqual([]);
+  });
+
+  it("projects the authoritative server revision, overrides, locks, and conflicts", () => {
+    const projected = projectServerVariant({
+      variant: {
+        variant_id: "vertical-full",
+        kind: "vertical_full",
+        source_session_id: "session-1",
+        source_session_revision: 4,
+        variant_revision: 3,
+        overrides: {
+          crop: { mode: "creator_crop" },
+          focal: { x: 0.7, y: 0.3 },
+          caption: { layout: "two_line_bottom" },
+          safe_area: { mode: "title_safe" },
+          audio: null,
+        },
+        locks: [{ field: "crop", base_master_revision: 4 }],
+        conflicts: [{ field: "crop", reason: "master_changed_while_locked", base_master_revision: 4, current_master_revision: 5 }],
+      },
+      source: master,
+    });
+
+    expect(projected.variantId).toBe("vertical-full");
+    expect(projected.crop).toBe("creator_crop");
+    expect(projected.focalPoint).toEqual({ x: 0.7, y: 0.3 });
+    expect(projected.captionLayout).toBe("two_line_bottom");
+    expect(projected.safeArea).toBe("title_safe");
+    expect(projected.lockedFields).toEqual(["crop"]);
+    expect(projected.conflicts).toEqual([{ field: "crop", reason: "master_changed_while_locked" }]);
   });
 });

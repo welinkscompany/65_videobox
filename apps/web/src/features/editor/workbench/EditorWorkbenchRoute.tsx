@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -64,6 +64,12 @@ type ActiveHermesRouteRun = Readonly<{
   conversationId: string;
   runId: string;
   controller: AbortController;
+}>;
+type VariantState = Readonly<{
+  key: string;
+  items: readonly OutputVariant[];
+  message: string | null;
+  busy: boolean;
 }>;
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
@@ -196,6 +202,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
   const [refreshToken, setRefreshToken] = useState(0);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
+  const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
   const [director, setDirector] = useState<DirectorState>(() => createDirectorState(requestKey, sessionId));
@@ -213,6 +220,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const memoryListOperationId = useRef(0);
   const memoryMutationOperationId = useRef(0);
   const partialOperationId = useRef(0);
+  const variantOperationId = useRef(0);
+  const variantMutationInFlight = useRef(false);
   const partialRecoveryOperationId = useRef(0);
   const directorMutationInFlight = useRef(false);
   const memoryMutationInFlight = useRef(false);
@@ -249,10 +258,13 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     memoryListOperationId.current += 1;
     memoryMutationOperationId.current += 1;
     partialOperationId.current += 1;
+    variantOperationId.current += 1;
     directorMutationInFlight.current = false;
     memoryMutationInFlight.current = false;
     currentDirectorConversationId.current = null;
     partialInFlight.current = false;
+    variantMutationInFlight.current = false;
+    setVariants({ key: requestKey, items: [], message: null, busy: false });
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
     setDirector(createDirectorState(requestKey, sessionId));
@@ -329,6 +341,54 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     });
     return () => { active = false; };
   }, [projectId, requestKey, refreshToken, sessionId]);
+  useEffect(() => {
+    if (!sessionId) {
+      setVariants({ key: requestKey, items: [], message: null, busy: false });
+      return;
+    }
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    let active = true;
+    const isCurrent = () => active && variantOperationId.current === operationId && routeEpoch.current.key === requestKey;
+    void api.listOutputVariants(projectId, sessionId).then((result) => {
+      if (!isCurrent()) return;
+      setVariants({ key: requestKey, items: result.variants, message: null, busy: false });
+    }).catch(() => {
+      if (isCurrent()) setVariants({ key: requestKey, items: [], message: "출력 변형 서버 상태를 불러오지 못했어요.", busy: false });
+    });
+    return () => { active = false; };
+  }, [projectId, requestKey, sessionId, refreshToken]);
+  useEffect(() => {
+    const currentView = state.key === requestKey ? state.view : null;
+    const currentVariants = variants.key === requestKey ? variants.items : [];
+    if (!currentView || !sessionId || !currentVariants.length) return;
+    const stale = currentVariants.filter((variant) => variant.source_session_revision < currentView.expectedRevision);
+    if (!stale.length || variantMutationInFlight.current) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    let active = true;
+    const isCurrent = () => active && variantOperationId.current === operationId && routeEpoch.current.key === requestKey;
+    setVariants((current) => current.key === requestKey ? { ...current, busy: true } : current);
+    void Promise.all(stale.map((variant) => api.rebaseOutputVariant(projectId, variant.variant_id, {
+      new_master_revision: currentView.expectedRevision,
+      changed_fields: ["story"],
+    }))).then((updated) => {
+      if (!isCurrent()) return;
+      const byId = new Map(updated.map(({ variant }) => [variant.variant_id, variant]));
+      setVariants((current) => current.key !== requestKey ? current : {
+        ...current,
+        items: current.items.map((variant) => byId.get(variant.variant_id) ?? variant),
+        message: "마스터 변경을 확인했어요. 출력 변형 충돌을 검토해 주세요.",
+        busy: false,
+      });
+    }).catch(() => {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "마스터 변경 후 출력 변형을 다시 맞추지 못했어요.", busy: false } : current);
+    }).finally(() => {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    });
+    return () => { active = false; };
+  }, [projectId, requestKey, sessionId, state.key, state.view, variants.items, variants.key]);
   useEffect(() => {
     if (!sessionId || !state.session?.updatedAt) return;
     const epoch = routeEpoch.current.value;
@@ -802,6 +862,65 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       fields: activePartial.result.fields,
     }, activePartial.result),
   );
+  const activeVariants = variants.key === requestKey ? variants.items : [];
+  const patchOutputVariant = async (variant: OutputVariant, patch: OutputVariantPatch) => {
+    if (variantMutationInFlight.current || !sessionId || routeEpoch.current.key !== requestKey) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
+    setVariants((current) => current.key === requestKey ? { ...current, busy: true } : current);
+    setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 저장하는 중이에요.", busy: true } : current);
+    try {
+      const result = await api.patchOutputVariant(projectId, variant.variant_id, {
+        expected_variant_revision: variant.variant_revision,
+        patch,
+      });
+      if (!isCurrent()) return;
+      setVariants((current) => current.key !== requestKey ? current : {
+        ...current,
+        items: current.items.map((item) => item.variant_id === result.variant.variant_id ? result.variant : item),
+        message: "출력 변형을 저장했어요.",
+        busy: false,
+      });
+    } catch {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 저장하지 못했어요. 최신 상태를 다시 확인해 주세요.", busy: false } : current);
+    } finally {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    }
+  };
+  const materializeOutputVariant = async (variant: OutputVariant) => {
+    if (variantMutationInFlight.current || !sessionId || routeEpoch.current.key !== requestKey) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
+    setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하는 중이에요.", busy: true } : current);
+    try {
+      const result = await api.materializeOutputVariant(projectId, variant.variant_id, { expected_master_session_revision: variant.source_session_revision });
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: `출력 변형을 준비했어요. ${result.materialization.timeline_id}`, busy: false } : current);
+    } catch {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하지 못했어요. 충돌과 revision을 확인해 주세요.", busy: false } : current);
+    } finally {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    }
+  };
+  const createHighlightVariant = async () => {
+    if (variantMutationInFlight.current || !sessionId || activeVariants.some((variant) => variant.kind === "vertical_highlight")) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
+    setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만드는 중이에요.", busy: true } : current);
+    try {
+      const result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: "하이라이트 변형을 만들었어요. master 장면 순서를 저장할 수 있어요.", busy: false } : current);
+    } catch {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만들지 못했어요.", busy: false } : current);
+    } finally {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    }
+  };
   const activeDirector = director.key === requestKey ? director : createDirectorState(requestKey, sessionId);
   const activeMemory = memory.key === requestKey
     && memory.conversationId === activeDirector.conversationId
@@ -1550,6 +1669,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       <dt>대상 구간 수</dt><dd>{activePartial.result.segment_ids.length}</dd>
       <dt>다시 만든 항목</dt><dd>{activePartial.result.fields.map(partialFieldLabel).join(", ")}</dd>
     </dl> : null}
+    {variants.key === requestKey && variants.message ? <p role="status">{variants.message}</p> : null}
     <EditorWorkbench
     assetCards={assetCards}
     isSavingTimeline={mutation.isSaving}
@@ -1577,6 +1697,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     timelineMutationMessage={mutation.message}
     director={rightDock}
     requestedSegmentId={requestedSegmentId}
+    serverVariants={activeVariants}
+    onVariantMaterialize={materializeOutputVariant}
+    onVariantPatch={patchOutputVariant}
+    onVariantCreateHighlight={createHighlightVariant}
+    variantBusy={variants.key === requestKey && variants.busy}
     view={state.view}
     />
   </>;

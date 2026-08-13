@@ -404,6 +404,7 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "getEditingSession").mockImplementation(
       (projectId, sessionId) => Promise.resolve(editingSession(projectId, sessionId)) as never,
     );
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [] });
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
@@ -3985,5 +3986,40 @@ describe("부분 재생성 표시", () => {
 
     expect(partialStatusLabel("succeeded")).toBe("완료");
     expect(partialStatusLabel("failed")).toBe("실패");
+  });
+});
+
+describe("서버 출력 변형 연결", () => {
+  it("loads a server variant and sends explicit patch/materialize commands", async () => {
+    const variant = {
+      variant_id: "vertical-full",
+      kind: "vertical_full",
+      source_session_id: "session-a",
+      source_session_revision: 1,
+      variant_revision: 3,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [],
+      conflicts: [],
+    };
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [variant] } as never);
+    const patch = vi.spyOn(api, "patchOutputVariant").mockResolvedValue({ variant: { ...variant, variant_revision: 4, overrides: { ...variant.overrides, crop: { mode: "creator_adjusted" } } } } as never);
+    const materialize = vi.spyOn(api, "materializeOutputVariant").mockResolvedValue({ materialization: { timeline_id: "timeline-variant", source_session_id: "session-a", source_session_revision: 1, source_variant_id: "vertical-full", source_variant_revision: 4 } } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    fireEvent.click(screen.getByRole("tab", { name: "세로" }));
+    expect(await screen.findByText("서버 변형 revision 3")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("project-a", "vertical-full", expect.objectContaining({ expected_variant_revision: 3 })));
+    fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("project-a", "vertical-full", { expected_master_session_revision: 1 }));
   });
 });

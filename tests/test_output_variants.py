@@ -165,6 +165,39 @@ def test_rebase_rejects_non_forward_master_revision() -> None:
         rebase_variant(_variant(), new_master_revision=7, changed_fields=[])
 
 
+def test_conflict_resolution_is_explicit_and_preserves_or_releases_lock() -> None:
+    variant = rebase_variant(
+        apply_variant_patch(
+            _variant(),
+            {"overrides": {"crop": {"mode": "cover"}}, "lock_fields": ["crop"]},
+            expected_variant_revision=3,
+        ),
+        new_master_revision=8,
+        changed_fields=["crop"],
+    )
+
+    kept = apply_variant_patch(
+        variant,
+        {"resolve_conflicts": {"crop": "keep_local"}},
+        expected_variant_revision=variant.variant_revision,
+    )
+    assert kept.conflicts == ()
+    assert [lock.field for lock in kept.locks] == ["crop"]
+
+    rebased = apply_variant_patch(
+        variant,
+        {"resolve_conflicts": {"crop": "rebase_master"}},
+        expected_variant_revision=variant.variant_revision,
+    )
+    assert rebased.conflicts == ()
+    assert rebased.locks == ()
+
+    with pytest.raises(VariantInvariantError, match="unknown_variant_conflict"):
+        apply_variant_patch(variant, {"resolve_conflicts": {"caption": "keep_local"}}, expected_variant_revision=variant.variant_revision)
+    with pytest.raises(VariantInvariantError, match="invalid_conflict_resolution"):
+        apply_variant_patch(variant, {"resolve_conflicts": {"crop": "silent"}}, expected_variant_revision=variant.variant_revision)
+
+
 @pytest.mark.parametrize(
     "segments",
     [

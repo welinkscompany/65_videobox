@@ -82,6 +82,12 @@
 .vb-editor-variants__conflicts h3, .vb-editor-variants__conflicts p { margin: 0; }
 .vb-editor-variants__conflicts article { display: grid; gap: 0.45rem; }
 .vb-editor-variants__conflicts article > div { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.vb-editor-variants__server-controls { display: grid; gap: 0.65rem; padding: 0.75rem; border: 1px solid hsl(var(--border)); border-radius: 0.75rem; background: color-mix(in srgb, hsl(var(--card)) 94%, hsl(var(--muted))); }
+.vb-editor-variants__server-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; font-size: 0.8rem; }
+.vb-editor-variants__server-line span { color: hsl(var(--muted-foreground)); }
+.vb-editor-variants__server-line span[role="status"] { color: hsl(var(--destructive)); font-weight: 700; }
+.vb-editor-variants__server-warning { margin: 0; color: hsl(var(--destructive)); font-size: 0.8rem; }
+.vb-editor-variants__server-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 @media (max-width: 760px) {
   .vb-editor-variants__compare { grid-template-columns: 1fr; }
 }

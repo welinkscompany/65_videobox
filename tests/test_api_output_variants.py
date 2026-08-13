@@ -72,6 +72,17 @@ def test_patch_and_rebase_return_revisioned_variant_conflicts(tmp_path: Path) ->
     assert rebased.json()["variant"]["source_session_revision"] == 2
     assert rebased.json()["variant"]["conflicts"][0]["field"] == "crop"
 
+    resolved = client.patch(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}",
+        json={
+            "expected_variant_revision": rebased.json()["variant"]["variant_revision"],
+            "patch": {"resolve_conflicts": {"crop": "keep_local"}},
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["variant"]["conflicts"] == []
+    assert resolved.json()["variant"]["locks"][0]["field"] == "crop"
+
 
 def test_materialize_writes_derived_timeline_with_full_identity(tmp_path: Path) -> None:
     client, project_id, session = _client(tmp_path)

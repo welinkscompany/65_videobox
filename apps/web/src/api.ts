@@ -382,6 +382,33 @@ export type EditingSession = {
   updated_at?: string | null;
 };
 
+export type OutputVariant = {
+  variant_id: string;
+  kind: "horizontal" | "vertical_full" | "vertical_highlight";
+  source_session_id: string;
+  source_session_revision: number;
+  variant_revision: number;
+  overrides: {
+    crop: Record<string, unknown> | null;
+    focal: Record<string, unknown> | null;
+    caption: Record<string, unknown> | null;
+    safe_area: Record<string, unknown> | null;
+    audio: Record<string, unknown> | null;
+  };
+  locks: Array<{ field: string; base_master_revision: number }>;
+  conflicts: Array<{ field: string; reason: string; base_master_revision: number; current_master_revision: number }>;
+  selected_segment_ids?: string[] | null;
+  master_segment_ids?: string[] | null;
+};
+
+export type OutputVariantPatch = {
+  overrides?: Partial<OutputVariant["overrides"]>;
+  lock_fields?: string[];
+  unlock_fields?: string[];
+  selected_segment_ids?: string[];
+  resolve_conflicts?: Record<string, "keep_local" | "rebase_master">;
+};
+
 export type EditorPreset = {
   preset_id: string;
   name: string;
@@ -1898,6 +1925,30 @@ export const api = {
     ),
   getEditingSession: (projectId: string, sessionId: string) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
+  listOutputVariants: (projectId: string, sessionId: string) =>
+    request<{ variants: OutputVariant[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants?session_id=${encodeURIComponent(sessionId)}`,
+    ),
+  createOutputVariant: (projectId: string, payload: { source_session_id: string; kind: "vertical_highlight"; variant_id?: string }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  patchOutputVariant: (projectId: string, variantId: string, payload: { expected_variant_revision: number; patch: OutputVariantPatch }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  rebaseOutputVariant: (projectId: string, variantId: string, payload: { new_master_revision: number; changed_fields: string[] }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/rebase`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  materializeOutputVariant: (projectId: string, variantId: string, payload: { expected_master_session_revision?: number }) =>
+    request<{ materialization: { timeline_id: string; source_session_id: string; source_session_revision: number; source_variant_id: string; source_variant_revision: number } }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/materialize`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
   getLatestEditingSession: async (projectId: string): Promise<EditingSession | null> => {
     const response = await fetch(`/api/projects/${projectId}/editing-sessions/latest`, undefined);
     if (response.status === 404) {

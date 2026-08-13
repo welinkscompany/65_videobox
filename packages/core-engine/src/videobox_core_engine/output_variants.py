@@ -25,7 +25,7 @@ class VariantInvariantError(ValueError):
 _OVERRIDE_FIELDS = frozenset({"crop", "focal", "caption", "safe_area", "audio"})
 _STRUCTURAL_FIELDS = frozenset({"story", "segment_order"})
 _PATCH_FIELDS = frozenset(
-    {"overrides", "lock_fields", "unlock_fields", "selected_segment_ids"}
+    {"overrides", "lock_fields", "unlock_fields", "selected_segment_ids", "resolve_conflicts"}
 )
 
 
@@ -133,10 +133,24 @@ def apply_variant_patch(
         if len(set(selected)) != len(selected):
             raise VariantInvariantError("duplicate_selected_segment_ids")
 
+    conflicts_by_field = {conflict.field: conflict for conflict in variant.conflicts}
+    resolution = patch.get("resolve_conflicts", {})
+    if not isinstance(resolution, Mapping):
+        raise VariantInvariantError("resolve_conflicts_must_be_mapping")
+    for field, decision in resolution.items():
+        if field not in conflicts_by_field:
+            raise VariantInvariantError(f"unknown_variant_conflict:{field}")
+        if decision not in {"keep_local", "rebase_master"}:
+            raise VariantInvariantError("invalid_conflict_resolution")
+        conflicts_by_field.pop(field, None)
+        if decision == "rebase_master":
+            locks_by_field.pop(field, None)
+
     changed = (
         overrides != variant.overrides
         or tuple(locks_by_field.values()) != variant.locks
         or selected != variant.selected_segment_ids
+        or tuple(conflicts_by_field.values()) != variant.conflicts
     )
     if not changed:
         return variant
@@ -144,6 +158,7 @@ def apply_variant_patch(
         update={
             "overrides": overrides,
             "locks": tuple(locks_by_field.values()),
+            "conflicts": tuple(conflicts_by_field.values()),
             "selected_segment_ids": selected,
             "variant_revision": variant.variant_revision + 1,
         }
