@@ -17,7 +17,7 @@ import {
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { VariantOutputCard } from "../features/outputs/VariantOutputCard";
-import { variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
+import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
 
 type ExactPreviewState = "current" | "pending" | "running" | "failed" | "stale" | "unavailable" | "unknown";
 
@@ -463,7 +463,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setVariantError(false);
     try {
       const result = await api.startVariantRenders(projectId, { session_id: session.session_id, variant_ids: requestedVariantIds });
-      setVariantItems(result.items);
+      setVariantItems((current) => mergeVariantRenderItems(current, result.items, requestedVariantIds));
       setConfirmedVariantIds([]);
       const jobs = await api.listJobs(projectId);
       const reconciled = await Promise.all(result.items.map(async (item) => {
@@ -476,7 +476,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           return item;
         }
       }));
-      setVariantItems(reconciled);
+      setVariantItems((current) => mergeVariantRenderItems(current, reconciled, requestedVariantIds));
     } catch {
       setVariantError(true);
     } finally {

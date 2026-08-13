@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isVariantPlayable, variantContentUrl, variantLabel, variantRenderSummary } from "./variantOutputState";
+import { isVariantPlayable, mergeVariantRenderItems, variantContentUrl, variantLabel, variantRenderSummary } from "./variantOutputState";
 
 describe("variant output state", () => {
   it("labels and exposes only succeeded outputs as playable", () => {
@@ -16,5 +16,20 @@ describe("variant output state", () => {
       { variant_id: "horizontal", variant_kind: "horizontal", status: "succeeded" },
       { variant_id: "vertical", variant_kind: "vertical_full", status: "failed", error_code: "renderer_failed" },
     ])).toBe("1개 완료 · 1개 확인 필요");
+  });
+
+  it("keeps non-requested siblings when one failed variant is retried", () => {
+    const current = [
+      { variant_id: "horizontal", variant_kind: "horizontal", status: "failed", error_code: "renderer_failed" },
+      { variant_id: "vertical", variant_kind: "vertical_full", status: "failed", error_code: "renderer_failed" },
+    ];
+    const retried = [
+      { variant_id: "horizontal", variant_kind: "horizontal", status: "succeeded", job_id: "job-horizontal" },
+    ];
+
+    expect(mergeVariantRenderItems(current, retried, ["horizontal"])).toEqual([
+      retried[0],
+      current[1],
+    ]);
   });
 });

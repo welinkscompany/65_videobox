@@ -1,5 +1,20 @@
 import type { VariantRenderItem } from "../../api";
 
+export function mergeVariantRenderItems(
+  current: readonly VariantRenderItem[],
+  next: readonly VariantRenderItem[],
+  requestedVariantIds: readonly string[],
+): VariantRenderItem[] {
+  const requested = new Set(requestedVariantIds);
+  const replacementById = new Map(next.map((item) => [item.variant_id, item]));
+  const merged = current.map((item) => replacementById.get(item.variant_id) ?? item);
+  const known = new Set(current.map((item) => item.variant_id));
+  for (const item of next) {
+    if (!known.has(item.variant_id) && requested.has(item.variant_id)) merged.push(item);
+  }
+  return merged;
+}
+
 export function variantLabel(kind: string | null | undefined): string {
   if (kind === "vertical_full") return "세로 영상";
   if (kind === "vertical_highlight") return "세로 하이라이트";
