@@ -41,6 +41,8 @@ from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandof
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
+from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
 from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
 from videobox_core_engine.output_source_verifier import (
@@ -1903,6 +1905,162 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             if should_start:
                 self._final_render_worker_claims.add(worker_key)
         return {"job_id": job["job_id"], "status": job["status"], "should_start": should_start}
+
+    def _materialize_variant_for_output(
+        self, *, project_id: str, session_id: str, variant_id: str
+    ) -> dict[str, Any]:
+        variant = OutputVariant.model_validate(
+            {
+                key: value
+                for key, value in self.store.get_output_variant(project_id=project_id, variant_id=variant_id).items()
+                if key not in {"project_id", "created_at", "updated_at"}
+            }
+        )
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        if session_id != variant.source_session_id:
+            raise VariantInvariantError("variant_session_mismatch")
+        current_revision = int(session.get("session_revision") or 0)
+        if current_revision != variant.source_session_revision:
+            raise VariantInvariantError("stale_master_revision")
+        derived = materialize_variant(
+            variant,
+            session.get("segments", []),
+            master_session_revision=current_revision,
+        )
+        try:
+            existing = self.store.get_variant_materialization(
+                project_id=project_id,
+                variant_id=variant_id,
+                source_variant_revision=derived.source_variant_revision,
+            )
+            timeline_id = str(existing["timeline_id"])
+        except KeyError:
+            master_timeline = self.store.get_timeline_run(
+                project_id=project_id,
+                timeline_id=str(session.get("timeline_id") or ""),
+            )
+            timeline_payload = {
+                key: value
+                for key, value in master_timeline.items()
+                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary"}
+            }
+            timeline_payload.update(
+                {
+                    "source_variant_id": derived.source_variant_id,
+                    "source_variant_revision": derived.source_variant_revision,
+                    "source_session_id": derived.source_session_id,
+                    "source_session_revision": derived.source_session_revision,
+                    "segments": list(derived.segments),
+                    "tracks": list(master_timeline.get("tracks", [])),
+                }
+            )
+            timeline = self.store.save_timeline_run(
+                project_id=project_id,
+                output_mode=variant.kind,
+                source_session_id=derived.source_session_id,
+                source_session_revision=derived.source_session_revision,
+                timeline_payload=timeline_payload,
+            )
+            timeline_id = str(timeline["timeline_id"])
+            self.store.save_variant_materialization(
+                project_id=project_id,
+                variant_id=variant_id,
+                source_session_id=derived.source_session_id,
+                source_session_revision=derived.source_session_revision,
+                source_variant_revision=derived.source_variant_revision,
+                timeline_id=timeline_id,
+                segments=derived.segments,
+            )
+            try:
+                source_review = self.store.get_review_state(
+                    project_id=project_id,
+                    timeline_id=str(session.get("timeline_id") or ""),
+                )
+            except KeyError:
+                source_review = None
+            if source_review and str(source_review.get("status")) == "approved":
+                self.store.save_review_state(
+                    project_id=project_id,
+                    timeline_id=timeline_id,
+                    status="approved",
+                    source_session_id=derived.source_session_id,
+                    source_session_revision=derived.source_session_revision,
+                    source_variant_id=derived.source_variant_id,
+                    source_variant_revision=derived.source_variant_revision,
+                )
+        timeline_job_id = next(
+            (
+                str(job["job_id"])
+                for job in self.store.list_jobs(project_id=project_id)
+                if str(job.get("job_type")) == JobType.TIMELINE_BUILD.value
+                and str(job.get("output_ref") or "") == timeline_id
+                and str(job.get("status")) == JobStatus.SUCCEEDED.value
+            ),
+            None,
+        )
+        if timeline_job_id is None:
+            timeline_job = self.store.create_job(
+                project_id=project_id,
+                job_type=JobType.TIMELINE_BUILD,
+                input_ref=f"variant:{variant_id}:{derived.source_variant_revision}",
+                status=JobStatus.RUNNING,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=timeline_job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=timeline_id,
+            )
+            timeline_job_id = str(timeline_job["job_id"])
+        return {"timeline_id": timeline_id, "timeline_job_id": timeline_job_id, "variant": variant}
+
+    def start_variant_renders(
+        self, *, project_id: str, session_id: str, variant_ids: list[str]
+    ) -> dict[str, Any]:
+        selected_ids = list(variant_ids)
+        if not selected_ids:
+            selected_ids = [
+                str(item["variant_id"])
+                for item in self.store.ensure_output_variants(project_id=project_id, session_id=session_id)
+                if str(item.get("kind")) in {"horizontal", "vertical_full"}
+            ]
+        items: list[dict[str, Any]] = []
+        for variant_id in selected_ids:
+            try:
+                materialized = self._materialize_variant_for_output(
+                    project_id=project_id, session_id=session_id, variant_id=variant_id
+                )
+                render_job = self.start_final_render_job(
+                    project_id=project_id,
+                    timeline_job_id=materialized["timeline_job_id"],
+                )
+                items.append(
+                    {
+                        "variant_id": variant_id,
+                        "variant_kind": materialized["variant"].kind,
+                        "timeline_id": materialized["timeline_id"],
+                        "timeline_job_id": materialized["timeline_job_id"],
+                        "job_id": render_job["job_id"],
+                        "status": render_job["status"],
+                        "should_start": render_job["should_start"],
+                    }
+                )
+            except Exception as exc:
+                if variant_id.endswith("highlight") or variant_id == "vertical_highlight":
+                    continue
+                items.append(
+                    {
+                        "variant_id": variant_id,
+                        "status": "failed",
+                        "error_code": str(exc),
+                        "should_start": False,
+                    }
+                )
+        return {
+            "project_id": project_id,
+            "status": "accepted" if any(item["status"] != "failed" for item in items) else "failed",
+            "items": items,
+        }
 
     def release_final_render_worker(
         self,

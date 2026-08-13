@@ -4,7 +4,7 @@ from math import isfinite
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from videobox_domain_models.yujin_memory import YujinMemoryCandidate
 
 
@@ -596,6 +596,19 @@ class BuildTimelineRequest(BaseModel):
 
 class OutputJobRequest(BaseModel):
     timeline_job_id: str = Field(min_length=1)
+
+
+class VariantRenderRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    variant_ids: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("variant_ids")
+    @classmethod
+    def variant_ids_are_unique(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized) or len(set(normalized)) != len(normalized):
+            raise ValueError("variant_ids_must_be_unique")
+        return normalized
 
 
 class CreateEditingSessionRequest(BaseModel):
@@ -1326,6 +1339,23 @@ class FinalRenderArtifactResponse(BaseModel):
 
 class FinalRenderJobResponse(StartJobResponse):
     render: FinalRenderArtifactResponse | None = None
+
+
+class VariantRenderItemResponse(BaseModel):
+    variant_id: str
+    variant_kind: str | None = None
+    timeline_id: str | None = None
+    timeline_job_id: str | None = None
+    job_id: str | None = None
+    status: str
+    error_code: str | None = None
+    content_url: str | None = None
+
+
+class VariantRenderBatchResponse(BaseModel):
+    project_id: str
+    status: str
+    items: list[VariantRenderItemResponse]
 
 
 class CapCutDraftExportArtifactResponse(BaseModel):

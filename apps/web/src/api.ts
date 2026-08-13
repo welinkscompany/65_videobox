@@ -872,6 +872,23 @@ export type FinalRenderJob = {
   error_message?: string | null;
 };
 
+export type VariantRenderItem = {
+  variant_id: string;
+  variant_kind?: string | null;
+  timeline_id?: string | null;
+  timeline_job_id?: string | null;
+  job_id?: string | null;
+  status: string;
+  error_code?: string | null;
+  content_url?: string | null;
+};
+
+export type VariantRenderBatch = {
+  project_id: string;
+  status: string;
+  items: VariantRenderItem[];
+};
+
 export type RegisteredAsset = {
   asset_id: string;
   asset_type: string;
@@ -1953,6 +1970,11 @@ export const api = {
   materializeOutputVariant: (projectId: string, variantId: string, payload: { expected_master_session_revision?: number }) =>
     request<{ materialization: { timeline_id: string; source_session_id: string; source_session_revision: number; source_variant_id: string; source_variant_revision: number } }>(
       `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/materialize`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  startVariantRenders: (projectId: string, payload: { session_id: string; variant_ids?: string[] }) =>
+    request<VariantRenderBatch>(
+      `/api/projects/${encodeURIComponent(projectId)}/variant-renders`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   getLatestEditingSession: async (projectId: string): Promise<EditingSession | null> => {

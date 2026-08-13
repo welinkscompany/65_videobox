@@ -17,6 +17,9 @@ from videobox_api.models import (
     FinalRenderArtifactResponse,
     FinalRenderJobResponse,
     OutputJobRequest,
+    VariantRenderBatchResponse,
+    VariantRenderItemResponse,
+    VariantRenderRequest,
     ExactPreviewRequestBody,
     ExactPreviewResponse,
     PreviewArtifactResponse,
@@ -178,6 +181,43 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 )
                 raise
         return StartJobResponse(**result)
+
+    @router.post("/api/projects/{project_id}/variant-renders", status_code=status.HTTP_202_ACCEPTED)
+    def start_variant_renders(project_id: str, payload: VariantRenderRequest) -> VariantRenderBatchResponse:
+        try:
+            result = orchestrator.start_variant_renders(
+                project_id=project_id,
+                session_id=payload.session_id,
+                variant_ids=payload.variant_ids,
+            )
+            for item in result.get("items", []):
+                if item.get("status") not in {"running", "pending"} or not item.get("should_start"):
+                    continue
+                worker = threading.Thread(
+                    target=orchestrator.run_final_render_job,
+                    kwargs={
+                        "project_id": project_id,
+                        "timeline_job_id": item["timeline_job_id"],
+                        "job": {"job_id": item["job_id"]},
+                    },
+                    daemon=True,
+                )
+                try:
+                    worker.start()
+                except Exception:
+                    orchestrator.release_final_render_worker(
+                        project_id=project_id,
+                        job_id=str(item["job_id"]),
+                    )
+                    item["status"] = "failed"
+                    item["error_code"] = "worker_start_failed"
+            return VariantRenderBatchResponse(
+                project_id=project_id,
+                status=("failed" if result.get("items") and all(item.get("status") == "failed" for item in result["items"]) else "accepted"),
+                items=[VariantRenderItemResponse(**{key: value for key, value in item.items() if key != "should_start"}) for item in result.get("items", [])],
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}")
     def get_final_render_result(project_id: str, job_id: str) -> FinalRenderJobResponse:

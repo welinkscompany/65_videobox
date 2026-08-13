@@ -12,9 +12,12 @@ import {
   type ReviewSnapshot,
   type SubtitleJob,
   type TimelineJob,
+  type VariantRenderItem,
 } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { VariantOutputCard } from "../features/outputs/VariantOutputCard";
+import { variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
 
 type ExactPreviewState = "current" | "pending" | "running" | "failed" | "stale" | "unavailable" | "unknown";
 
@@ -290,6 +293,11 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
   const [capcutHandoffErrorProjectId, setCapcutHandoffErrorProjectId] = useState<string | null>(null);
+  const [variantOptions, setVariantOptions] = useState<{ variant_id: string; kind: string }[]>([]);
+  const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
+  const [variantItems, setVariantItems] = useState<VariantRenderItem[]>([]);
+  const [isRenderingVariants, setIsRenderingVariants] = useState(false);
+  const [variantError, setVariantError] = useState(false);
   const requestEpoch = useRef(0);
   const subtitleSubmissionEpoch = useRef(0);
   const finalSubmissionEpoch = useRef(0);
@@ -382,6 +390,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     }
   }, [projectId]);
 
+  const variantSession = state?.projectId === projectId ? state.session : null;
   useEffect(() => {
     subtitleSubmissionEpoch.current += 1;
     finalSubmissionEpoch.current += 1;
@@ -412,6 +421,29 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     };
   }, [refresh]);
 
+  useEffect(() => {
+    let active = true;
+    setVariantOptions([]);
+    setSelectedVariantIds([]);
+    setVariantItems([]);
+    setVariantError(false);
+    if (!variantSession) return () => { active = false; };
+    void api.listOutputVariants(projectId, variantSession.session_id).then((result) => {
+      if (!active) return;
+      try {
+        if (!active) return;
+        const options = result.variants
+          .filter((variant) => variant.kind === "horizontal" || variant.kind === "vertical_full" || variant.kind === "vertical_highlight")
+          .map((variant) => ({ variant_id: variant.variant_id, kind: variant.kind }));
+        setVariantOptions(options);
+        setSelectedVariantIds(options.filter((variant) => variant.kind !== "vertical_highlight").map((variant) => variant.variant_id));
+      } catch { if (active) setVariantError(true); }
+    }).catch(() => {
+      if (active) setVariantError(true);
+    });
+    return () => { active = false; };
+  }, [projectId, variantSession?.session_id]);
+
   const currentState = state?.projectId === projectId ? state : null;
   const hasError = errorProjectId === projectId;
   const isRenderingCurrentSubtitle = isRenderingSubtitle && subtitleRequestProjectId.current === projectId;
@@ -422,6 +454,47 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const capcutError = capcutErrorProjectId === projectId;
   const isRegisteringCurrentCapcutHandoff = isRegisteringCapcutHandoff && capcutHandoffRequestProjectId.current === projectId;
   const capcutHandoffError = capcutHandoffErrorProjectId === projectId;
+  const handleRenderVariants = async (requestedVariantIds = selectedVariantIds) => {
+    const session = currentState?.session;
+    if (!session || !requestedVariantIds.length || isRenderingVariants) return;
+    setIsRenderingVariants(true);
+    setVariantError(false);
+    try {
+      const result = await api.startVariantRenders(projectId, { session_id: session.session_id, variant_ids: requestedVariantIds });
+      setVariantItems(result.items);
+      const jobs = await api.listJobs(projectId);
+      const reconciled = await Promise.all(result.items.map(async (item) => {
+        const job = jobs.find((candidate) => candidate.job_id === item.job_id);
+        if (!job || !item.job_id) return item;
+        try {
+          const final = await api.getFinalRender(projectId, item.job_id);
+          return { ...item, status: final.status, error_code: final.status === "failed" ? "renderer_failed" : item.error_code };
+        } catch {
+          return item;
+        }
+      }));
+      setVariantItems(reconciled);
+    } catch {
+      setVariantError(true);
+    } finally {
+      setIsRenderingVariants(false);
+    }
+  };
+  const handleRefreshVariants = async () => {
+    const jobs = await api.listJobs(projectId).catch(() => [] as JobRecord[]);
+    const next = await Promise.all(variantItems.map(async (item) => {
+      if (!item.job_id) return item;
+      const job = jobs.find((candidate) => candidate.job_id === item.job_id);
+      if (!job) return item;
+      try {
+        const final = await api.getFinalRender(projectId, item.job_id);
+        return { ...item, status: final.status };
+      } catch {
+        return item;
+      }
+    }));
+    setVariantItems(next);
+  };
   if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live="polite"><p>출력 상태를 불러오는 중이에요.</p></section>;
   if (hasError) return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page"><h1>출력</h1><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
 
@@ -700,6 +773,32 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           <Button onClick={onOpenEditor}>편집에서 미리보기 열기</Button>
         </CardContent>
       </Card>
+      <Card>
+        <CardHeader><CardTitle>가로·세로 출력</CardTitle><CardDescription>{variantRenderSummary(variantItems)}</CardDescription></CardHeader>
+        <CardContent>
+          <p>성공한 출력은 서로 독립적으로 재생하고, 실패한 출력만 다시 만들 수 있어요.</p>
+          {variantError ? <p role="status">출력 변형 상태를 확인하지 못했어요.</p> : null}
+          {variantOptions.map((option) => (
+            <label key={option.variant_id}>
+              <input
+                type="checkbox"
+                checked={selectedVariantIds.includes(option.variant_id)}
+                onChange={() => setSelectedVariantIds((current) => current.includes(option.variant_id) ? current.filter((id) => id !== option.variant_id) : [...current, option.variant_id])}
+              /> {variantLabel(option.kind)}
+            </label>
+          ))}
+          <div className="vb-home-grid">
+            <Button disabled={!currentState?.session || !selectedVariantIds.length || isRenderingVariants} onClick={() => void handleRenderVariants()}>{isRenderingVariants ? "출력 만드는 중" : "가로·세로 출력 만들기"}</Button>
+            <Button variant="outline" disabled={!variantItems.length} onClick={() => void handleRefreshVariants()}>출력 상태 다시 확인</Button>
+          </div>
+        </CardContent>
+      </Card>
+      {variantItems.map((item) => (
+        <VariantOutputCard key={item.variant_id} projectId={projectId} item={item} onRetry={() => {
+          setSelectedVariantIds([item.variant_id]);
+          void handleRenderVariants([item.variant_id]);
+        }} />
+      ))}
       <Card>
         <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
