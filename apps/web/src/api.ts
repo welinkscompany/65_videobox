@@ -821,6 +821,9 @@ export type LibraryUsageLocation = {
 export type LibraryUsage = { library_asset_id: string; locations: LibraryUsageLocation[] };
 export type LibraryIngestItem = {
   filename?: string | null;
+  /** Client-only label/key used to preserve folder context and retry identity. */
+  display_filename?: string | null;
+  retry_key?: string | null;
   idempotency_key?: string;
   library_asset_id?: string | null;
   state: LibraryAssetLifecycle | "duplicate";

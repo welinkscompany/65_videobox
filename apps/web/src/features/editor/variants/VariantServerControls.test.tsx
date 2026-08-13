@@ -21,7 +21,7 @@ describe("VariantServerControls", () => {
     const onPatch = vi.fn();
     render(<VariantServerControls variant={variant} onMaterialize={onMaterialize} onPatch={onPatch} onCreateHighlight={vi.fn()} />);
 
-    expect(screen.getByText("서버 변형 revision 3")).toBeInTheDocument();
+    expect(screen.getByText("서버 변형 버전 3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));
     fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));
     fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));

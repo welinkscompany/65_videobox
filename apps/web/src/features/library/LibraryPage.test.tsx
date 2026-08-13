@@ -77,6 +77,48 @@ describe("LibraryPage", () => {
     expect(screen.getByText("clip.mp4")).toBeInTheDocument();
   });
 
+  it("offers folder addition and uploads the selected nested files", async () => {
+    render(<LibraryPage />);
+    const folderInput = screen.getByTestId("library-folder-input");
+    expect(screen.getByRole("button", { name: "폴더 추가" })).toBeVisible();
+    expect(folderInput).toHaveAttribute("webkitdirectory");
+    expect(folderInput).toHaveAttribute("multiple");
+
+    const first = new File(["video"], "clip.mp4", { type: "video/mp4" });
+    const second = new File(["audio"], "music.mp3", { type: "audio/mpeg" });
+    Object.defineProperty(first, "webkitRelativePath", { value: "촬영본/clip.mp4" });
+    Object.defineProperty(second, "webkitRelativePath", { value: "음악/music.mp3" });
+    await act(async () => {
+      fireEvent.change(folderInput, { target: { files: [first, second] } });
+    });
+
+    expect(api.ingestLibraryAssets).toHaveBeenCalledTimes(2);
+    expect(api.ingestLibraryAssets).toHaveBeenCalledWith([first], "broll", expect.any(String));
+    expect(api.ingestLibraryAssets).toHaveBeenCalledWith([second], "music", expect.any(String));
+  });
+
+  it("keeps same-named files from different folders independently retryable", async () => {
+    vi.mocked(api.ingestLibraryAssets)
+      .mockResolvedValueOnce({ ingest_batch_id: "batch", partial: true, items: [
+        { filename: "clip.mp4", state: "needs_attention", error_code: "network_error" },
+        { filename: "clip.mp4", state: "needs_attention", error_code: "network_error" },
+      ] })
+      .mockResolvedValue({ ingest_batch_id: "retry", partial: false, items: [{ filename: "clip.mp4", state: "ready", library_asset_id: "retry-asset" }] });
+    render(<LibraryPage />);
+    const first = new File(["first"], "clip.mp4", { type: "video/mp4" });
+    const second = new File(["second"], "clip.mp4", { type: "video/mp4" });
+    Object.defineProperty(first, "webkitRelativePath", { value: "첫번째/clip.mp4" });
+    Object.defineProperty(second, "webkitRelativePath", { value: "두번째/clip.mp4" });
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("library-folder-input"), { target: { files: [first, second] } });
+    });
+    const retryButtons = await screen.findAllByRole("button", { name: "다시 시도" });
+    fireEvent.click(retryButtons[0]);
+    await waitFor(() => expect(api.ingestLibraryAssets).toHaveBeenCalledTimes(2));
+    expect(api.ingestLibraryAssets).toHaveBeenNthCalledWith(2, [first], "broll", expect.any(String));
+  });
+
   it("previews an asset and blocks trash when the usage endpoint reports a location", async () => {
     vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
       library_asset_id: "user_asset_1",

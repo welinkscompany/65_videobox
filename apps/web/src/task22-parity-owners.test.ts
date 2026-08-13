@@ -110,8 +110,8 @@ const nativeControlAllowlist = {
     reason: "The library sidebar owns the six native filter controls used to switch the visible asset lifecycle and media type.",
   },
   "features/library/AssetIngestDropzone.tsx": {
-    controls: ["button:asset-file-add", "input:asset-file-input"],
-    reason: "The library ingest surface owns the hidden file input and its explicit file-picker trigger.",
+    controls: ["button:asset-file-add", "button:asset-folder-add", "input:asset-file-input", "input:asset-folder-input"],
+    reason: "The library ingest surface owns the hidden file and folder inputs and their explicit picker triggers.",
   },
   "features/library/AudioAssetRows.tsx": {
     controls: ["button:audio-favorite", "button:audio-play"],
@@ -124,6 +124,10 @@ const nativeControlAllowlist = {
   "features/library/LibraryResults.tsx": {
     controls: ["button:library-tab", "input:library-search"],
     reason: "The library result pane owns its search field and media-type tab controls.",
+  },
+  "app/OutputsPage.tsx": {
+    controls: ["input:output-variant-select"],
+    reason: "The outputs surface owns the explicit variant selection controls before a render request is submitted.",
   },
   "features/library/LibraryPreviewPane.tsx": {
     controls: ["button:library-restore", "button:library-trash"],

@@ -15,6 +15,11 @@ function fileType(file: File): LibraryMediaType | null {
   return null;
 }
 
+function fileDisplayName(file: File): string {
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath?.trim();
+  return relativePath || file.name;
+}
+
 function matchesFilter(asset: LibraryAsset, filter: LibraryFilter) {
   if (filter === "all") return asset.lifecycle !== "trashed";
   if (filter === "trash") return asset.lifecycle === "trashed";
@@ -59,20 +64,32 @@ export function LibraryPage() {
 
   async function ingest(files: File[]) {
     const groups = new Map<LibraryMediaType, File[]>();
+    const retryKeys = new Map<File, string>();
+    files.forEach((file, index) => retryKeys.set(file, `${fileDisplayName(file)}#${index}`));
     const rejected: LibraryIngestItem[] = [];
-    files.forEach((file) => { const type = fileType(file); if (!type) rejected.push({ filename: file.name, state: "needs_attention", error_code: "unsupported_media" }); else { failedFiles.current.set(file.name, file); groups.set(type, [...(groups.get(type) ?? []), file]); } });
+    files.forEach((file) => { const type = fileType(file); if (!type) { const retryKey = retryKeys.get(file)!; failedFiles.current.set(retryKey, file); rejected.push({ filename: file.name, display_filename: fileDisplayName(file), retry_key: retryKey, state: "needs_attention", error_code: "unsupported_media" }); } else groups.set(type, [...(groups.get(type) ?? []), file]); });
     setIngestItems(rejected);
     const results: LibraryIngestItem[] = [...rejected];
     await Promise.all([...groups.entries()].map(async ([type, grouped]) => {
-      try { const response = await api.ingestLibraryAssets(grouped, type, `drop-${Date.now()}-${type}`); results.push(...response.items); }
-      catch { results.push(...grouped.map((file) => ({ filename: file.name, state: "needs_attention" as const, error_code: "network_error" }))); }
+      const idempotencyKey = `drop-${Date.now()}-${type}`;
+      try {
+        const response = await api.ingestLibraryAssets(grouped, type, idempotencyKey);
+        results.push(...response.items.map((item, index) => {
+          const file = grouped[index];
+          const retryKey = file ? retryKeys.get(file)! : item.retry_key ?? item.filename ?? `${type}-${index}`;
+          if (item.state === "needs_attention" && file) failedFiles.current.set(retryKey, file);
+          return { ...item, display_filename: file ? fileDisplayName(file) : item.display_filename ?? item.filename, retry_key: retryKey };
+        }));
+      } catch {
+        results.push(...grouped.map((file) => { const retryKey = retryKeys.get(file)!; failedFiles.current.set(retryKey, file); return { filename: file.name, display_filename: fileDisplayName(file), retry_key: retryKey, state: "needs_attention" as const, error_code: "network_error" }; }));
+      }
     }));
     setIngestItems(results);
     await load();
   }
 
-  async function retry(filename: string) {
-    const file = failedFiles.current.get(filename);
+  async function retry(retryKey: string) {
+    const file = failedFiles.current.get(retryKey);
     if (file) await ingest([file]);
   }
 

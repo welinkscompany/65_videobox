@@ -236,6 +236,28 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   await page.getByPlaceholder("파일명·장면·분위기").fill("");
 });
 
+test("library uses the Full HD canvas for wider desktop panes without page overflow", async ({ page }) => {
+  await installLibraryApi(page);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto("/library");
+  await expect(page.getByTestId("library-workspace")).toBeVisible();
+  const metrics = await page.evaluate(() => {
+    const workspace = document.querySelector('[data-testid="library-workspace"]');
+    const columns = getComputedStyle(workspace).gridTemplateColumns.split(" ").map((value) => Number.parseFloat(value));
+    return {
+      viewportWidth: window.innerWidth,
+      workspaceWidth: workspace?.getBoundingClientRect().width ?? 0,
+      leftPaneWidth: columns[0] ?? 0,
+      previewPaneWidth: columns.at(-1) ?? 0,
+      bodyScrollWidth: document.body.scrollWidth,
+    };
+  });
+  expect(metrics.workspaceWidth).toBeGreaterThanOrEqual(metrics.viewportWidth - 16);
+  expect(metrics.leftPaneWidth).toBeGreaterThanOrEqual(256);
+  expect(metrics.previewPaneWidth).toBeGreaterThanOrEqual(384);
+  expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
+});
+
 test("library lifecycle blocks in-use delete, then allows remove, restore and explicit delete", async ({ page }) => {
   await installLibraryApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });

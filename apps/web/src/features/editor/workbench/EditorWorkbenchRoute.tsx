@@ -900,7 +900,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       const result = await api.materializeOutputVariant(projectId, variant.variant_id, { expected_master_session_revision: variant.source_session_revision });
       if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: `출력 변형을 준비했어요. ${result.materialization.timeline_id}`, busy: false } : current);
     } catch {
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하지 못했어요. 충돌과 revision을 확인해 주세요.", busy: false } : current);
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하지 못했어요. 충돌과 최신 상태를 확인해 주세요.", busy: false } : current);
     } finally {
       if (isCurrent()) variantMutationInFlight.current = false;
     }

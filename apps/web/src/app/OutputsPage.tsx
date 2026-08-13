@@ -782,8 +782,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           <p>성공한 출력은 서로 독립적으로 재생하고, 실패한 출력만 다시 만들 수 있어요.</p>
           {variantError ? <p role="status">출력 변형 상태를 확인하지 못했어요.</p> : null}
           {variantOptions.map((option) => (
-            <label key={option.variant_id}>
-              <input
+              <label key={option.variant_id}>
+                <input
+                  data-native-control="output-variant-select"
                 type="checkbox"
                 checked={selectedVariantIds.includes(option.variant_id)}
                 onChange={() => setSelectedVariantIds((current) => current.includes(option.variant_id) ? current.filter((id) => id !== option.variant_id) : [...current, option.variant_id])}
