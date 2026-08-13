@@ -66,13 +66,19 @@ test("ready-assets approval uses returned IDs and provides current-revision play
   await expect(page.getByLabel("완성본 재생")).toBeVisible();
   await expect(page.getByText("CapCut 초안이 준비되었어요.")).toBeVisible();
   await expect(page.getByText("실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.")).toBeVisible();
+  await expect(page.getByText("가로·세로 출력", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "가로·세로 출력 만들기" }).click();
+  await expect(page.getByLabel("가로 영상 재생")).toBeVisible();
+  await expect(page.getByLabel("세로 영상 재생")).toBeVisible();
+  await expect(page.getByLabel("가로 영상 재생")).toHaveAttribute("src", /variant-final-horizontal/);
+  await expect(page.getByLabel("세로 영상 재생")).toHaveAttribute("src", /variant-final-vertical/);
   await expect(page.locator("audio")).toHaveCount(0);
-  await expect(page.locator("video")).toHaveCount(1);
+  await expect(page.locator("video")).toHaveCount(3);
   await page.getByRole("button", { name: "CapCut에 등록" }).click();
   await expect(page.getByText("CapCut 등록 상태가 준비되었어요.")).toBeVisible();
 
   expect((await page.request.post(`${fakeApiBaseUrl}/__e2e/mark-outputs-stale`)).status()).toBe(200);
-  await page.getByRole("button", { name: "상태 다시 확인" }).click();
+  await page.getByRole("button", { name: "상태 다시 확인", exact: true }).click();
   await expect(page.getByText("미리보기가 최신 편집본과 달라요.")).toBeVisible();
   await expect(page.getByText("완성본이 최신 편집본과 달라요.")).toBeVisible();
   await expect(page.getByText("CapCut 초안이 최신 편집본과 달라요.")).toBeVisible();
@@ -84,7 +90,7 @@ test("ready-assets approval uses returned IDs and provides current-revision play
   await expect(page.getByText("미리보기가 최신 편집본과 달라요.")).toBeVisible();
   const recoveredOutputs = await (await page.request.post(`${fakeApiBaseUrl}/__e2e/mark-outputs-current`)).json();
   expect(recoveredOutputs.output_ids.final).toMatch(/-r2$/);
-  await page.getByRole("button", { name: "상태 다시 확인" }).click();
+  await page.getByRole("button", { name: "상태 다시 확인", exact: true }).click();
   await expect(page.getByText("현재 편집본 미리보기가 준비되었어요.")).toBeVisible();
   await expect(page.getByText("완성본을 확인할 수 있어요.")).toBeVisible();
   await expect(page.getByText("CapCut 초안이 준비되었어요.")).toBeVisible();
