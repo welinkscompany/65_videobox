@@ -169,6 +169,62 @@ def test_pipeline_materializes_default_variants_and_reuses_their_render_jobs(tmp
     ]) == 2
 
 
+def test_pipeline_reused_variant_materialization_inherits_newly_approved_master_review(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("variant review propagation")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload={"review_flags": [], "pending_recommendations": [], "tracks": [], "segments": []},
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [], "history": []},
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="draft",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+    variants = store.ensure_output_variants(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    )
+    pipeline = LocalPipelineRunner(store, final_renderer=object())
+
+    first = pipeline._materialize_variant_for_output(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_id=variants[0]["variant_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="approved",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+
+    batch = pipeline.start_variant_renders(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_ids=[variants[0]["variant_id"]],
+    )
+
+    assert batch["items"][0]["timeline_id"] == first["timeline_id"]
+    review = store.get_review_state(
+        project_id=project.project_id,
+        timeline_id=first["timeline_id"],
+    )
+    assert review["status"] == "approved"
+    assert review["source_variant_id"] == variants[0]["variant_id"]
+    assert review["source_variant_revision"] == 1
+
+
 def test_final_render_route_starts_one_worker_when_the_active_job_is_reused(monkeypatch) -> None:
     class ReusingOrchestrator:
         def __init__(self) -> None:

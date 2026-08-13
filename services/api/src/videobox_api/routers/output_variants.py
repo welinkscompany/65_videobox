@@ -50,6 +50,38 @@ def _raise_variant_error(error: Exception) -> None:
     raise error
 
 
+def _sync_approved_variant_review(
+    store: LocalProjectStore,
+    *,
+    project_id: str,
+    source_timeline_id: str,
+    timeline_id: str,
+    source_session_id: str,
+    source_session_revision: int,
+    source_variant_id: str,
+    source_variant_revision: int,
+) -> None:
+    """Carry an already-approved master decision onto a derived variant timeline."""
+    try:
+        source_review = store.get_review_state(
+            project_id=project_id,
+            timeline_id=source_timeline_id,
+        )
+    except KeyError:
+        return
+    if str(source_review.get("status")) != "approved":
+        return
+    store.save_review_state(
+        project_id=project_id,
+        timeline_id=timeline_id,
+        status="approved",
+        source_session_id=source_session_id,
+        source_session_revision=source_session_revision,
+        source_variant_id=source_variant_id,
+        source_variant_revision=source_variant_revision,
+    )
+
+
 def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
     router = APIRouter()
 
@@ -164,6 +196,16 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
             except KeyError:
                 existing = None
             if existing is not None:
+                _sync_approved_variant_review(
+                    store,
+                    project_id=project_id,
+                    source_timeline_id=str(session.get("timeline_id") or ""),
+                    timeline_id=str(existing["timeline_id"]),
+                    source_session_id=derived.source_session_id,
+                    source_session_revision=derived.source_session_revision,
+                    source_variant_id=derived.source_variant_id,
+                    source_variant_revision=derived.source_variant_revision,
+                )
                 return {"materialization": {
                     **existing,
                     "source_variant_id": derived.source_variant_id,
@@ -205,6 +247,16 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
                 source_variant_revision=derived.source_variant_revision,
                 timeline_id=timeline["timeline_id"],
                 segments=derived.segments,
+            )
+            _sync_approved_variant_review(
+                store,
+                project_id=project_id,
+                source_timeline_id=str(session.get("timeline_id") or ""),
+                timeline_id=str(timeline["timeline_id"]),
+                source_session_id=derived.source_session_id,
+                source_session_revision=derived.source_session_revision,
+                source_variant_id=derived.source_variant_id,
+                source_variant_revision=derived.source_variant_revision,
             )
             return {"materialization": {**materialization, **{
                 "timeline_id": timeline["timeline_id"],

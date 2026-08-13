@@ -1971,23 +1971,15 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 timeline_id=timeline_id,
                 segments=derived.segments,
             )
-            try:
-                source_review = self.store.get_review_state(
-                    project_id=project_id,
-                    timeline_id=str(session.get("timeline_id") or ""),
-                )
-            except KeyError:
-                source_review = None
-            if source_review and str(source_review.get("status")) == "approved":
-                self.store.save_review_state(
-                    project_id=project_id,
-                    timeline_id=timeline_id,
-                    status="approved",
-                    source_session_id=derived.source_session_id,
-                    source_session_revision=derived.source_session_revision,
-                    source_variant_id=derived.source_variant_id,
-                    source_variant_revision=derived.source_variant_revision,
-                )
+        self._sync_approved_variant_review(
+            project_id=project_id,
+            source_timeline_id=str(session.get("timeline_id") or ""),
+            timeline_id=timeline_id,
+            source_session_id=derived.source_session_id,
+            source_session_revision=derived.source_session_revision,
+            source_variant_id=derived.source_variant_id,
+            source_variant_revision=derived.source_variant_revision,
+        )
         timeline_job_id = next(
             (
                 str(job["job_id"])
@@ -2013,6 +2005,37 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             )
             timeline_job_id = str(timeline_job["job_id"])
         return {"timeline_id": timeline_id, "timeline_job_id": timeline_job_id, "variant": variant}
+
+    def _sync_approved_variant_review(
+        self,
+        *,
+        project_id: str,
+        source_timeline_id: str,
+        timeline_id: str,
+        source_session_id: str,
+        source_session_revision: int,
+        source_variant_id: str,
+        source_variant_revision: int,
+    ) -> None:
+        """Keep reused variant materializations aligned with an approved master."""
+        try:
+            source_review = self.store.get_review_state(
+                project_id=project_id,
+                timeline_id=source_timeline_id,
+            )
+        except KeyError:
+            return
+        if str(source_review.get("status")) != "approved":
+            return
+        self.store.save_review_state(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            status="approved",
+            source_session_id=source_session_id,
+            source_session_revision=source_session_revision,
+            source_variant_id=source_variant_id,
+            source_variant_revision=source_variant_revision,
+        )
 
     def start_variant_renders(
         self, *, project_id: str, session_id: str, variant_ids: list[str]
