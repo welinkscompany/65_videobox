@@ -12,6 +12,34 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(min_length=1)
 
 
+class OutputVariantCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_session_id: str = Field(min_length=1, max_length=256)
+    kind: Literal["vertical_highlight"]
+    variant_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class OutputVariantPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_variant_revision: int = Field(ge=0)
+    patch: dict[str, Any]
+
+
+class OutputVariantRebaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    new_master_revision: int = Field(ge=1)
+    changed_fields: list[str] = Field(default_factory=list, max_length=32)
+
+
+class OutputVariantMaterializeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_master_session_revision: int | None = Field(default=None, ge=1)
+
+
 class CreationBriefCreateRequest(BaseModel):
     script_filename: str = Field(min_length=1)
     script_text: str

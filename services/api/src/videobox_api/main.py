@@ -52,6 +52,7 @@ from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
 from videobox_api.routers.footage_organizer import build_footage_organizer_router
+from videobox_api.routers.output_variants import build_output_variants_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
@@ -1173,5 +1174,6 @@ def create_app(
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
+    app.include_router(build_output_variants_router(store))
 
     return app

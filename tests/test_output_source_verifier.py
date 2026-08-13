@@ -86,6 +86,46 @@ def test_output_verifier_rejects_same_revision_session_replacement() -> None:
         )
 
 
+def test_output_verifier_rejects_variant_lineage_mismatch() -> None:
+    timeline = {
+        "source_session_id": "session-1",
+        "source_session_revision": 3,
+        "source_variant_id": "variant-horizontal",
+        "source_variant_revision": 4,
+    }
+
+    with pytest.raises(OutputSourceStaleError, match="variant"):
+        verify_output_freshness(
+            editing_session={"session_id": "session-1", "session_revision": 3},
+            timeline=timeline,
+            variant={
+                "variant_id": "variant-horizontal",
+                "variant_revision": 5,
+                "source_session_id": "session-1",
+                "source_session_revision": 3,
+            },
+        )
+
+
+def test_output_verifier_rejects_variant_source_session_mismatch() -> None:
+    with pytest.raises(OutputSourceStaleError, match="variant source lineage changed"):
+        verify_output_freshness(
+            editing_session=None,
+            timeline={
+                "source_session_id": "session-1",
+                "source_session_revision": 3,
+                "source_variant_id": "variant-horizontal",
+                "source_variant_revision": 5,
+            },
+            variant={
+                "variant_id": "variant-horizontal",
+                "variant_revision": 5,
+                "source_session_id": "session-2",
+                "source_session_revision": 3,
+            },
+        )
+
+
 def test_output_verifier_rejects_asset_id_uri_identity_mismatch(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="identity")

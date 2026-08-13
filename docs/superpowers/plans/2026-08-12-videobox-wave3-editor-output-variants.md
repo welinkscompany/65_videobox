@@ -48,10 +48,10 @@
 - Test: `tests/test_api_output_variants.py`
 - Test: `tests/test_output_source_verifier.py`
 
-- [ ] Write failing tests for list/create-highlight/patch/rebase/materialize and identity `{source_session_id, source_session_revision, source_variant_id, source_variant_revision}`. Missing/mismatched identity for new variants must fail closed; legacy artifacts follow an explicit compatibility branch.
-- [ ] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_api_output_variants.py tests/test_output_source_verifier.py -q`.
-- [ ] Implement endpoints and derived timeline creation. Materialization reuses current timeline-build path but generates one timeline/job identity per variant.
-- [ ] Repeat the previous pytest command, run `git diff --check`, and commit `feat: materialize revisioned output variants`.
+- [x] Write failing tests for list/create-highlight/patch/rebase/materialize and identity `{source_session_id, source_session_revision, source_variant_id, source_variant_revision}`. Missing/mismatched identity for new variants must fail closed; legacy artifacts follow an explicit compatibility branch.
+- [x] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_api_output_variants.py tests/test_output_source_verifier.py -q`.
+- [x] Implement endpoints and derived timeline creation. Materialization reuses current timeline-build path but generates one timeline/job identity per variant.
+- [x] Repeat the previous pytest command, run `git diff --check`, and commit `feat: materialize revisioned output variants`.
 
 ### Task 4: Complete creator editing commands and persisted UI position
 
