@@ -166,4 +166,45 @@ describe("timeline review state", () => {
     expect(isCurrentTimelineReviewState({ ...input, review: { ...review, timeline_id: "timeline-other" } })).toBe(false);
     expect(isCurrentTimelineReviewState({ ...input, timeline: { ...timeline, timeline: { ...timeline.timeline, timeline_id: "timeline-other" } } })).toBe(false);
   });
+
+  it("fails closed when the review approval points at a different output variant revision", () => {
+    const selectedJob = job({ job_id: "job-variant" });
+    const timeline = {
+      job_id: "job-variant",
+      status: "succeeded",
+      timeline: {
+        timeline_id: "timeline-current",
+        project_id: "project-a",
+        source_variant_id: "vertical-full",
+        source_variant_revision: 7,
+      },
+    } as TimelineJob;
+    const review = {
+      project_id: "project-a",
+      timeline_id: "timeline-current",
+      source_variant_id: "vertical-full",
+      source_variant_revision: 7,
+    } as ReviewSnapshot;
+    const approval = {
+      project_id: "project-a",
+      timeline_id: "timeline-current",
+      review_status: "approved",
+      source_session_id: "session-current",
+      source_session_revision: 7,
+      source_variant_id: "vertical-full",
+      source_variant_revision: 7,
+      is_current: true,
+    };
+    const input = { projectId: "project-a", session, job: selectedJob, timeline, review, approval };
+
+    expect(isCurrentTimelineReviewState(input)).toBe(true);
+    expect(isCurrentTimelineReviewState({
+      ...input,
+      approval: { ...approval, source_variant_revision: 6 },
+    })).toBe(false);
+    expect(isCurrentTimelineReviewState({
+      ...input,
+      review: { ...review, source_variant_id: "vertical-highlight" },
+    })).toBe(false);
+  });
 });

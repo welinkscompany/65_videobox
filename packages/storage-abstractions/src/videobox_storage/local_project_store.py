@@ -3084,6 +3084,12 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
             status="blocked" if review_flags else "draft",
             source_session_id=session_id,
             source_session_revision=session_revision,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def save_review_state(
@@ -3094,6 +3100,8 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         status: str,
         source_session_id: str | None = None,
         source_session_revision: int | None = None,
+        source_variant_id: str | None = None,
+        source_variant_revision: int | None = None,
     ) -> dict[str, Any]:
         if status not in {"draft", "blocked", "approved"}:
             raise ValueError(f"Unsupported review status: {status}")
@@ -3135,14 +3143,18 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
                 approved_at,
                 updated_at,
                 source_session_id,
-                source_session_revision
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                source_session_revision,
+                source_variant_id,
+                source_variant_revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(timeline_id) DO UPDATE SET
                 status = excluded.status,
                 approved_at = excluded.approved_at,
                 updated_at = excluded.updated_at,
                 source_session_id = excluded.source_session_id,
                 source_session_revision = excluded.source_session_revision,
+                source_variant_id = excluded.source_variant_id,
+                source_variant_revision = excluded.source_variant_revision,
                 is_current = 1,
                 invalidated_at = NULL,
                 invalidated_reason = NULL
@@ -3155,6 +3167,8 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
                 updated_at,
                 source_session_id,
                 source_session_revision,
+                source_variant_id,
+                source_variant_revision,
             ),
         )
         self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
@@ -4130,7 +4144,7 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         row = self._fetchone(
             project_id,
             """
-            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_id, source_session_revision, source_variant_id, source_variant_revision, is_current, invalidated_at, invalidated_reason
             FROM review_approvals
             WHERE project_id = ? AND timeline_id = ?
             """,
@@ -7403,6 +7417,8 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         timeline_review_flags: list[dict[str, Any]],
         timeline_applied_recommendations: list[dict[str, Any]] | None = None,
         timeline_pending_recommendations: list[dict[str, Any]] | None = None,
+        source_variant_id: str | None = None,
+        source_variant_revision: int | None = None,
     ) -> dict[str, Any]:
         if timeline_applied_recommendations is not None or timeline_pending_recommendations is not None:
             applied_candidates: list[dict[str, Any]] = []
@@ -7498,6 +7514,8 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         return {
             "project_id": project_id,
             "timeline_id": timeline_id,
+            "source_variant_id": source_variant_id,
+            "source_variant_revision": source_variant_revision,
             "review_status": review_status,
             "segments": segments,
             "applied_recommendations": applied,
@@ -8407,6 +8425,12 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
                 ):
                     if column not in existing:
                         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            review_columns = {
+                str(row[1]) for row in connection.execute("PRAGMA table_info(review_approvals)").fetchall()
+            }
+            for column, declaration in (("source_variant_id", "TEXT"), ("source_variant_revision", "INTEGER")):
+                if column not in review_columns:
+                    connection.execute(f"ALTER TABLE review_approvals ADD COLUMN {column} {declaration}")
             for statement in ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS:
                 connection.execute(statement)
             if owns_transaction:

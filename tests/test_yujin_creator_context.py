@@ -452,3 +452,11 @@ def test_playback_identity_must_match_exact_session_and_revision() -> None:
             YujinCreatorContextError, match="^creator_context_playback_stale$"
         ):
             _build(playback=_Playback(manifest), selected_segment_id=None)
+
+
+@pytest.mark.parametrize("field", ["session_revision", "asset_index_revision"])
+def test_context_rejects_non_finite_revision(field: str) -> None:
+    payload = _build().model_dump(mode="python")
+    payload[field] = float("inf")
+    with pytest.raises(ValidationError):
+        YujinCreatorContext.model_validate(payload)

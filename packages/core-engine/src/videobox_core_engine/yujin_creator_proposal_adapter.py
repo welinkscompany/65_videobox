@@ -14,8 +14,6 @@ from videobox_domain_models.director_proposals import (
     DirectorProposal,
 )
 from videobox_domain_models.yujin_creator_context import YujinCreatorContext
-from videobox_domain_models.output_variants import OutputVariant
-from videobox_core_engine.output_variants import apply_variant_patch
 from videobox_domain_models.yujin_creator_proposals import (
     UNSAFE_CREDENTIAL_LABEL_PATTERN,
     UNSAFE_CREDENTIAL_LABELS,
@@ -226,13 +224,22 @@ def activate_yujin_media_projection(
                 segments_by_id=segments_by_id,
             )
         )
-        if candidate.media_type == "output_variant":
-            replacement = _attest_variant_candidate(
-                store=store,
-                project_id=project_id,
-                context=context,
-                candidate=candidate,
-                operation=operation,
+        if candidate.media_type == "output_variant" and _is_actionable_variant_operation(
+            operation=operation,
+            context=context,
+        ):
+            replacement = replace(
+                candidate,
+                availability="actionable",
+                review_status="approved",
+                canonical_metadata={
+                    **dict(candidate.canonical_metadata),
+                    "yujin_actionable_variant": True,
+                    "variant_id": context.variant_id,
+                    "base_variant_revision": context.variant_revision,
+                    "variant_kind": context.variant_kind,
+                    "requires_materialization": False,
+                },
             )
         activated.append(replacement)
         if replacement.availability == "actionable":
@@ -468,49 +475,19 @@ def _attest_b4_candidate(
     )
 
 
-def _attest_variant_candidate(
+def _is_actionable_variant_operation(
     *,
-    store: object,
-    project_id: str,
     context: YujinCreatorContext,
-    candidate: DirectorCandidate,
     operation: object,
-) -> DirectorCandidate:
+) -> bool:
     if not isinstance(operation, Mapping) or operation.get("kind") != "output_variant":
-        return candidate
+        return False
     target = operation.get("target")
     if not isinstance(target, Mapping) or target.get("variant_id") != context.variant_id:
-        return candidate
+        return False
     if context.variant_id is None or context.variant_revision is None:
-        return candidate
-    try:
-        current = OutputVariant.model_validate(
-            store.get_output_variant(project_id=project_id, variant_id=context.variant_id)  # type: ignore[attr-defined]
-        )
-        if (
-            current.source_session_id != context.session_id
-            or current.source_session_revision != context.session_revision
-            or current.variant_revision != context.variant_revision
-        ):
-            return candidate
-        patch = variant_patch_from_yujin_candidate(candidate)
-        apply_variant_patch(current, patch, expected_variant_revision=context.variant_revision)
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return candidate
-    return replace(
-        candidate,
-        availability="actionable",
-        review_status="approved",
-        controls=dict(candidate.controls),
-        canonical_metadata={
-            **dict(candidate.canonical_metadata),
-            "yujin_actionable_variant": True,
-            "variant_id": context.variant_id,
-            "base_variant_revision": context.variant_revision,
-            "variant_kind": context.variant_kind,
-            "requires_materialization": False,
-        },
-    )
+        return False
+    return True
 
 
 def _attest_media_candidate(

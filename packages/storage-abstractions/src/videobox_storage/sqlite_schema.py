@@ -466,7 +466,8 @@ PROJECT_SCHEMA_STATEMENTS = (
         status TEXT NOT NULL,
         approved_at TEXT,
         updated_at TEXT NOT NULL,
-        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        source_session_revision INTEGER, source_variant_id TEXT, source_variant_revision INTEGER,
+        is_current INTEGER NOT NULL DEFAULT 1,
         invalidated_at TEXT, invalidated_reason TEXT
     )
     """,

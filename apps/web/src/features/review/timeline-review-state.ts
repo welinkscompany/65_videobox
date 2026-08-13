@@ -141,6 +141,12 @@ export function isCurrentTimelineReviewState(input: Readonly<{
     approval.timeline_id === session.timeline_id &&
     approval.is_current === true &&
     approval.source_session_id === session.session_id &&
-    approval.source_session_revision === session.session_revision
+    approval.source_session_revision === session.session_revision &&
+    (timeline.timeline.source_variant_id == null ||
+      (approval.source_variant_id === timeline.timeline.source_variant_id &&
+        approval.source_variant_revision === timeline.timeline.source_variant_revision)) &&
+    (review.source_variant_id == null ||
+      (approval.source_variant_id === review.source_variant_id &&
+        approval.source_variant_revision === review.source_variant_revision))
   );
 }

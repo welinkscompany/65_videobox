@@ -1385,6 +1385,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline_applied_recommendations=deepcopy(timeline_applied_recommendations),
             timeline_pending_recommendations=deepcopy(timeline_pending_recommendations),
             timeline_review_flags=timeline_review_flags,
+            source_variant_id=(
+                str(timeline.get("source_variant_id"))
+                if timeline.get("source_variant_id")
+                else None
+            ),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
         snapshot["review_status"] = timeline["review_status"]
         current_review_status = _canonical_runtime_review_status(
@@ -1554,6 +1564,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 str(session["session_id"]) if session is not None else None
             ),
             source_session_revision=source_session_revision,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def reopen_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1564,6 +1580,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
             status=status,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def start_subtitle_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:

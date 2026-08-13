@@ -282,6 +282,8 @@ export type TimelinePayload = {
   pending_recommendations: RecommendationItem[];
   source_session_id?: string | null;
   source_session_revision?: number | null;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
 };
 
 export type TimelineJob = {
@@ -305,6 +307,8 @@ export type SegmentRecord = {
 export type ReviewSnapshot = {
   project_id: string;
   timeline_id: string;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
   review_status: string;
   segments: SegmentRecord[];
   applied_recommendations: RecommendationItem[];
@@ -664,6 +668,8 @@ export type ReviewApproval = {
   updated_at: string;
   source_session_id: string | null;
   source_session_revision: number | null;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
   is_current: boolean;
   invalidated_at: string | null;
   invalidated_reason: string | null;

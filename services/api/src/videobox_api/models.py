@@ -1233,6 +1233,8 @@ class TimelineJobResponse(StartJobResponse):
 class ReviewSnapshotResponse(BaseModel):
     project_id: str
     timeline_id: str
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
     review_status: str
     segments: list[SegmentAnalysisRecord]
     applied_recommendations: list[RecommendationItemResponse]
@@ -1255,6 +1257,8 @@ class ReviewApprovalResponse(BaseModel):
     updated_at: str
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
     invalidated_reason: str | None = None
