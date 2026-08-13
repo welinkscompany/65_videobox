@@ -32,6 +32,17 @@ describe("Yujin starter registry", () => {
     ]);
   });
 
+  it("keeps the baseline edit starters available before a segment is selected", () => {
+    const starters = getYujinStarters({ surface: "edit", selection: "none" });
+
+    expect(starters.map((starter) => starter.id)).toEqual(expect.arrayContaining([
+      "broll-recommendation",
+      "edit-flow-review",
+      "caption-tighten",
+      "vertical-cut",
+    ]));
+  });
+
   it("selects footage starters without mixing in editor-only prompts", () => {
     const starters = getYujinStarters({ surface: "footage", selection: "none" });
 
@@ -108,5 +119,13 @@ describe("YujinStarters", () => {
 
     expect(within(group).getByRole("button", { name: "검토할 위험 구간 알려 줘" })).toBeVisible();
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("disables navigation controls with the composer", () => {
+    render(<YujinStarters context={context} onSelect={vi.fn()} disabled />);
+    const group = screen.getByRole("group", { name: "대화 스타터" });
+
+    expect(within(group).getByRole("button", { name: "다른 예시" })).toBeDisabled();
+    expect(within(group).getByRole("button", { name: "전체 보기" })).toBeDisabled();
   });
 });

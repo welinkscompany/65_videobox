@@ -121,6 +121,18 @@ describe("HomeYujinChat", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("fills the home composer from a starter without sending", async () => {
+    vi.spyOn(api.api, "getLatestEditingSession").mockResolvedValue(session);
+    const send = vi.spyOn(api.api, "sendDirectorMessage");
+
+    render(<HomeYujinChat projectId="project-a" />);
+    const input = await screen.findByLabelText("유진에게 물어보기");
+    fireEvent.click(screen.getByRole("button", { name: "이번 촬영으로 만들 만한 영상 형식 추천해 줘" }));
+
+    expect(input).toHaveValue("이번 촬영으로 만들 만한 영상 형식 추천해 줘");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("does not drop a late reply into a different project", async () => {
     // Switching project while Yujin is still answering must not show that
     // answer under the new project -- the owner would read it as advice about

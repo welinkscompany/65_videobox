@@ -197,7 +197,7 @@ export function RightDock({
               // The original fixed starters were available before a segment
               // was selected; keep that entry point while the registry grows
               // context-aware alternatives.
-              context={{ surface: "edit", selection: "segment" }}
+              context={{ surface: "edit", selection: selectedSegment ? "segment" : "none" }}
               disabled={composerDisabled}
               onSelect={chooseConversationStarter}
             /> : null}
