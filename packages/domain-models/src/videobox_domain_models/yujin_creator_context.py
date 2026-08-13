@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class _StrictReadModel(BaseModel):
@@ -142,6 +142,25 @@ class YujinCreatorContext(_StrictReadModel):
     variant_id: str | None = Field(default=None, min_length=1, max_length=256)
     variant_kind: Literal["horizontal", "vertical_full", "vertical_highlight"] | None = None
     variant_revision: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def identity_fields_are_coherent(self):
+        if (self.master_session_id is None) != (self.master_session_revision is None):
+            raise ValueError("master_identity_incomplete")
+        variant_values = (self.variant_id, self.variant_kind, self.variant_revision)
+        if any(value is not None for value in variant_values) and any(
+            value is None for value in variant_values
+        ):
+            raise ValueError("variant_identity_incomplete")
+        if self.selection_kind == "variant" and any(
+            value is None for value in (*variant_values, self.master_session_id, self.master_session_revision)
+        ):
+            raise ValueError("variant_selection_identity_required")
+        if self.master_session_id is not None and self.master_session_id != self.session_id:
+            raise ValueError("master_session_identity_mismatch")
+        if self.master_session_revision is not None and self.master_session_revision != self.session_revision:
+            raise ValueError("master_session_revision_mismatch")
+        return self
 
     @field_validator("memories")
     @classmethod
