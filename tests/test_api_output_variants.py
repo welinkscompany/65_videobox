@@ -114,6 +114,46 @@ def test_patch_stale_variant_revision_does_not_mutate(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 409
+    assert response.json()["detail"] == "stale_variant_revision"
     current = client.get(f"/api/projects/{project_id}/output-variants").json()["variants"][0]
     assert current["variant_revision"] == 1
     assert current["overrides"]["audio"] is None
+
+
+def test_materialize_reuses_revision_identity_and_preserves_master_tracks(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "Materialization reuse"}).json()
+    store = app.state.store
+    source = store.save_timeline_run(
+        project_id=project["project_id"],
+        output_mode="horizontal",
+        source_session_id="pending-session",
+        source_session_revision=1,
+        timeline_payload={
+            "tracks": [{"track_type": "narration", "clips": [{"clip_id": "clip-1"}]}],
+            "segments": [{"segment_id": "seg-a", "text": "a"}],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project["project_id"],
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg-a", "text": "a"}], "history": []},
+    )
+    variants_url = f"/api/projects/{project['project_id']}/output-variants"
+    variant = client.get(variants_url, params={"session_id": session["session_id"]}).json()["variants"][0]
+    materialize_url = f"{variants_url}/{variant['variant_id']}/materialize"
+
+    first = client.post(materialize_url, json={"expected_master_session_revision": 1})
+    second = client.post(materialize_url, json={"expected_master_session_revision": 1})
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    first_materialization = first.json()["materialization"]
+    second_materialization = second.json()["materialization"]
+    assert second_materialization["timeline_id"] == first_materialization["timeline_id"]
+    derived = store.get_timeline_run(
+        project_id=project["project_id"],
+        timeline_id=first_materialization["timeline_id"],
+    )
+    assert derived["tracks"] == [{"track_type": "narration", "clips": [{"clip_id": "clip-1"}]}]

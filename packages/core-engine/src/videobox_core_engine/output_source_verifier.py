@@ -193,6 +193,12 @@ def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline:
             raise OutputSourceStaleError("editing session revision is unstamped")
         if int(expected_revision) != current_revision:
             raise OutputSourceStaleError("editing session revision changed")
+    timeline_has_variant_identity = bool(
+        timeline.get("source_variant_id")
+        or timeline.get("source_variant_revision") is not None
+    )
+    if timeline_has_variant_identity and variant is None:
+        raise OutputSourceStaleError("variant identity is unstamped")
     for name, artifact in (("review", review), ("subtitle", subtitle)):
         if artifact is not None:
             if not bool(artifact.get("is_current", True)):

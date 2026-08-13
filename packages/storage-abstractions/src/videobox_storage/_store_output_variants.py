@@ -180,16 +180,17 @@ class OutputVariantMixin:
                 raise ValueError("variant_revision_must_advance_by_one")
             if (
                 str(current["source_session_id"]) != variant.source_session_id
-                or int(current["source_session_revision"]) != variant.source_session_revision
+                or int(current["source_session_revision"]) > variant.source_session_revision
                 or str(current["kind"]) != variant.kind
             ):
                 raise ValueError("variant_source_identity_mismatch")
             now = self._now_iso()
             connection.execute(
-                "UPDATE output_variants SET variant_revision = ?, overrides_json = ?, locks_json = ?, "
+                "UPDATE output_variants SET source_session_revision = ?, variant_revision = ?, overrides_json = ?, locks_json = ?, "
                 "conflicts_json = ?, selected_segment_ids_json = ?, master_segment_ids_json = ?, updated_at = ? "
                 "WHERE project_id = ? AND variant_id = ? AND variant_revision = ?",
                 (
+                    variant.source_session_revision,
                     variant.variant_revision,
                     json.dumps(variant.overrides.model_dump(mode="json"), ensure_ascii=False),
                     json.dumps([lock.model_dump(mode="json") for lock in variant.locks], ensure_ascii=False),

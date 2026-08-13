@@ -1222,6 +1222,8 @@ class TimelinePayloadResponse(BaseModel):
     created_at: str | None = None
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
 
 
 class TimelineJobResponse(StartJobResponse):

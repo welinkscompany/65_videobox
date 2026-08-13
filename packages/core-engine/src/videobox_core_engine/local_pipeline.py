@@ -2338,6 +2338,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def _editing_session_for_output_timeline(
         self, *, project_id: str, timeline: dict[str, Any]
     ) -> dict[str, Any] | None:
+        source_variant_id = str(timeline.get("source_variant_id") or "")
+        source_session_id = str(timeline.get("source_session_id") or "")
+        if source_variant_id and source_session_id:
+            try:
+                return self.store.get_editing_session(
+                    project_id=project_id,
+                    session_id=source_session_id,
+                )
+            except KeyError:
+                return None
         try:
             session = self.store.get_latest_editing_session(project_id=project_id)
         except KeyError:
@@ -2351,12 +2361,30 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         timeline_id = str(timeline.get("timeline_id") or "")
         if not timeline_id:
             return
-        try:
-            active_session = self.store.get_latest_editing_session(project_id=project_id)
-        except KeyError:
-            active_session = None
-        if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
-            raise OutputSourceStaleError("timeline is not the active editing session output")
+        source_variant_id = str(timeline.get("source_variant_id") or "")
+        variant: dict[str, Any] | None = None
+        if source_variant_id:
+            source_session_id = str(timeline.get("source_session_id") or "")
+            if not source_session_id:
+                raise OutputSourceStaleError("variant source session is unstamped")
+            try:
+                active_session = self.store.get_editing_session(
+                    project_id=project_id,
+                    session_id=source_session_id,
+                )
+                variant = self.store.get_output_variant(
+                    project_id=project_id,
+                    variant_id=source_variant_id,
+                )
+            except KeyError as exc:
+                raise OutputSourceStaleError("variant identity is unavailable") from exc
+        else:
+            try:
+                active_session = self.store.get_latest_editing_session(project_id=project_id)
+            except KeyError:
+                active_session = None
+            if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
+                raise OutputSourceStaleError("timeline is not the active editing session output")
         try:
             review = self.store.get_review_state(project_id=project_id, timeline_id=timeline_id)
         except KeyError:
@@ -2369,6 +2397,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline=timeline,
             subtitle=subtitle,
             review=review,
+            variant=variant,
         )
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -2531,4 +2560,3 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             "recovery_message": diagnostics.recovery_message,
             "checked_at": diagnostics.checked_at,
         }
-

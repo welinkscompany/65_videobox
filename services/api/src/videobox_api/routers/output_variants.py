@@ -40,7 +40,10 @@ def _raise_variant_error(error: Exception) -> None:
         raise HTTPException(status_code=409, detail="output_variant_revision_conflict") from error
     if isinstance(error, (VariantInvariantError, ValueError)):
         detail = str(error)
-        if "stale_master_revision" in detail or "stale_variant_revision" in detail:
+        if "stale_variant_revision" in detail:
+            detail = "stale_variant_revision"
+            raise HTTPException(status_code=409, detail=detail) from error
+        if "stale_master_revision" in detail:
             detail = "stale_master_revision"
             raise HTTPException(status_code=409, detail=detail) from error
         raise HTTPException(status_code=422, detail=detail) from error
@@ -152,20 +155,47 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
                 session.get("segments", []),
                 master_session_revision=current_master_revision,
             )
+            try:
+                existing = store.get_variant_materialization(
+                    project_id=project_id,
+                    variant_id=variant_id,
+                    source_variant_revision=derived.source_variant_revision,
+                )
+            except KeyError:
+                existing = None
+            if existing is not None:
+                return {"materialization": {
+                    **existing,
+                    "source_variant_id": derived.source_variant_id,
+                    "source_variant_revision": derived.source_variant_revision,
+                }}
+            try:
+                master_timeline = store.get_timeline_run(
+                    project_id=project_id,
+                    timeline_id=str(session.get("timeline_id") or ""),
+                )
+            except KeyError:
+                master_timeline = {}
+            timeline_payload = {
+                key: value
+                for key, value in master_timeline.items()
+                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary"}
+            }
+            timeline_payload.update({
+                "source_variant_id": derived.source_variant_id,
+                "source_variant_revision": derived.source_variant_revision,
+                "segments": list(derived.segments),
+                "tracks": list(master_timeline.get("tracks", [])),
+                "review_flags": list(master_timeline.get("review_flags", [])),
+                "pending_recommendations": list(master_timeline.get("pending_recommendations", [])),
+                "applied_recommendations": list(master_timeline.get("applied_recommendations", [])),
+            })
             timeline = store.save_timeline_run(
                 project_id=project_id,
                 output_mode=variant.kind,
                 source_session_id=derived.source_session_id,
                 source_session_revision=derived.source_session_revision,
-                timeline_payload={
-                    "source_variant_id": derived.source_variant_id,
-                    "source_variant_revision": derived.source_variant_revision,
-                    "segments": list(derived.segments),
-                    "tracks": [],
-                    "review_flags": [],
-                    "pending_recommendations": [],
-                    "applied_recommendations": [],
-                },
+                timeline_payload=timeline_payload,
             )
             materialization = store.save_variant_materialization(
                 project_id=project_id,

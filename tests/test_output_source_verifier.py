@@ -126,6 +126,38 @@ def test_output_verifier_rejects_variant_source_session_mismatch() -> None:
         )
 
 
+def test_output_verifier_rejects_variant_with_missing_source_lineage() -> None:
+    with pytest.raises(OutputSourceStaleError, match="variant source lineage changed"):
+        verify_output_freshness(
+            editing_session={"session_id": "session-1", "session_revision": 3},
+            timeline={
+                "source_session_id": "session-1",
+                "source_session_revision": 3,
+                "source_variant_id": "variant-horizontal",
+                "source_variant_revision": 1,
+            },
+            variant={
+                "variant_id": "variant-horizontal",
+                "variant_revision": 1,
+                "source_session_id": None,
+                "source_session_revision": None,
+            },
+        )
+
+
+def test_output_verifier_rejects_variant_timeline_without_variant_payload() -> None:
+    with pytest.raises(OutputSourceStaleError, match="variant identity is unstamped"):
+        verify_output_freshness(
+            editing_session={"session_id": "session-1", "session_revision": 3},
+            timeline={
+                "source_session_id": "session-1",
+                "source_session_revision": 3,
+                "source_variant_id": "variant-horizontal",
+                "source_variant_revision": 1,
+            },
+        )
+
+
 def test_output_verifier_rejects_asset_id_uri_identity_mismatch(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="identity")
