@@ -252,6 +252,71 @@ class YujinFootageResponse(_StrictFrozenModel):
         return _bounded_text(value, label="reply_text", limit=16_384)
 
 
+# LM Studio's grammar compiler does not accept the recursive ``$defs`` /
+# ``$ref`` / discriminated-union shape emitted by Pydantic for
+# ``YujinFootageResponse``. Keep the provider wire contract flat and let the
+# strict model plus the pure adapter remain authoritative after generation.
+YUJIN_FOOTAGE_RESPONSE_PROVIDER_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "schema_version": {
+            "type": "string",
+            "enum": ["videobox.yujin-footage-response.v1"],
+        },
+        "reply_text": {"type": "string"},
+        "proposal": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "source_id": {"type": "string"},
+                "proposal_id": {"type": "string"},
+                "base_revision": {"type": "integer"},
+                "operations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "intent": {
+                                "type": "string",
+                                "enum": [
+                                    "split_by_scene",
+                                    "select_process",
+                                    "exclude_quality",
+                                    "combine_similar",
+                                    "select_vertical",
+                                    "target_duration",
+                                ],
+                            },
+                            "segment_ids": {"type": "array", "items": {"type": "string"}},
+                            "ranges": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "start_sec": {"type": "number"},
+                                        "end_sec": {"type": "number"},
+                                    },
+                                    "required": ["start_sec", "end_sec"],
+                                },
+                            },
+                            "process_label": {"type": "string"},
+                            "quality_evidence": {"type": "array", "items": {"type": "string"}},
+                            "target_duration_sec": {"type": "number"},
+                        },
+                        "required": ["intent"],
+                    },
+                },
+            },
+            "required": ["source_id", "proposal_id", "base_revision", "operations"],
+        },
+    },
+    "required": ["schema_version", "reply_text", "proposal"],
+}
+
+
 class YujinFootageCandidateProposal(_StrictFrozenModel):
     source_id: str = Field(min_length=1, max_length=256)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -277,4 +342,5 @@ __all__ = [
     "YujinFootageRange",
     "YujinFootageResponse",
     "YujinFootageSegment",
+    "YUJIN_FOOTAGE_RESPONSE_PROVIDER_SCHEMA",
 ]

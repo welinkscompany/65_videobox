@@ -178,12 +178,14 @@ def test_yujin_footage_interpretation_rejects_stale_revision_without_mutation(tm
 def test_yujin_footage_interpretation_uses_local_structured_runtime_when_response_is_absent(tmp_path: Path) -> None:
     class Runtime:
         response: dict[str, object] | None = None
+        response_schema: dict[str, object] | None = None
 
         def generate_structured(self, *, project_id, task_type, prompt, response_schema, now=None):
             assert project_id.startswith("source:")
             assert task_type.value == "yujin_conversation"
             assert "출근 장면만 골라줘" in prompt
             assert response_schema["type"] == "object"
+            self.response_schema = response_schema
             assert now is None
             assert self.response is not None
             return StructuredLLMResponse(
@@ -219,6 +221,24 @@ def test_yujin_footage_interpretation_uses_local_structured_runtime_when_respons
     )
     assert interpreted.status_code == 200, interpreted.text
     assert interpreted.json()["status"] == "candidate_only"
+    assert runtime.response_schema is not None
+    assert "$defs" not in runtime.response_schema
+    serialized_schema = json.dumps(runtime.response_schema, sort_keys=True)
+    assert "\"$ref\"" not in serialized_schema
+    assert "\"oneOf\"" not in serialized_schema
+    assert "\"discriminator\"" not in serialized_schema
+    intent_enum = (
+        runtime.response_schema["properties"]["proposal"]["properties"]["operations"]["items"]
+        ["properties"]["intent"]["enum"]
+    )
+    assert intent_enum == [
+        "split_by_scene",
+        "select_process",
+        "exclude_quality",
+        "combine_similar",
+        "select_vertical",
+        "target_duration",
+    ]
 
 
 def test_yujin_footage_instruction_with_operational_command_is_rejected_before_runtime(tmp_path: Path) -> None:

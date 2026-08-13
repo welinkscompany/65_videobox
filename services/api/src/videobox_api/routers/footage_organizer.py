@@ -41,8 +41,8 @@ from videobox_core_engine.yujin_footage_proposal_adapter import (
 )
 from videobox_domain_models.yujin_footage_proposals import (
     YujinFootageContext,
-    YujinFootageResponse,
     YujinFootageSegment,
+    YUJIN_FOOTAGE_RESPONSE_PROVIDER_SCHEMA,
 )
 from videobox_provider_interfaces.llm import LLMTaskType
 from videobox_domain_models.footage_organizer import VirtualSequenceItem
@@ -265,7 +265,7 @@ def build_footage_organizer_router(
                     project_id=proposal.source_id,
                     task_type=LLMTaskType.YUJIN_CONVERSATION,
                     prompt=_yujin_prompt(payload.instruction, context),
-                    response_schema=YujinFootageResponse.model_json_schema(),
+                    response_schema=YUJIN_FOOTAGE_RESPONSE_PROVIDER_SCHEMA,
                 )
                 raw_response = generated.output_data
             except Exception as exc:  # noqa: BLE001 - local runtime boundary
