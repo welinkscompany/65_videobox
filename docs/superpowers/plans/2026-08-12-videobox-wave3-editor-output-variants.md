@@ -32,10 +32,10 @@
 - Test: `tests/test_output_variant_store.py`
 - Test: `tests/test_postgres_project_store.py`
 
-- [ ] Write failing tests for two default variants per latest session, optional highlight absence, idempotent legacy seeding, revision conflict, locks/conflicts persistence and SQLite/Postgres parity.
-- [ ] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_output_variant_store.py tests/test_postgres_project_store.py -q`.
-- [ ] Add project-scoped `output_variants` and `variant_materializations`. Preserve historic session/timeline JSON; seed horizontal/vertical-full lazily and transactionally.
-- [ ] Run the previous command plus `tests/test_sqlite_migration_concurrency.py`, then commit `feat: persist linked output variants`.
+- [x] Write failing tests for two default variants per latest session, optional highlight absence, idempotent legacy seeding, revision conflict, locks/conflicts persistence and SQLite/Postgres parity.
+- [x] Run RED with `& 'D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility\.venv\Scripts\python.exe' -m pytest tests/test_output_variant_store.py tests/test_postgres_project_store.py -q`.
+- [x] Add project-scoped `output_variants` and `variant_materializations`. Preserve historic session/timeline JSON; seed horizontal/vertical-full lazily and transactionally.
+- [x] Run the previous command plus `tests/test_sqlite_migration_concurrency.py`, then commit `feat: persist linked output variants`.
 
 ### Task 3: Add variant API and derived timeline identity
 

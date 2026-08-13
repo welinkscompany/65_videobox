@@ -11,6 +11,8 @@ from videobox_storage.sqlite_schema import (
 _PROJECT_SCOPED_IDENTIFIERS = {
     "assets": "asset_id",
     "editing_sessions": "session_id",
+    "output_variants": "variant_id",
+    "variant_materializations": "materialization_id",
     "exports": "export_id",
     "jobs": "job_id",
     "preview_renders": "preview_id",
