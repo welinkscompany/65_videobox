@@ -72,6 +72,28 @@ test("ready-assets approval uses returned IDs and provides current-revision play
   await expect(page.getByLabel("세로 영상 재생")).toBeVisible();
   await expect(page.getByLabel("가로 영상 재생")).toHaveAttribute("src", /variant-final-horizontal/);
   await expect(page.getByLabel("세로 영상 재생")).toHaveAttribute("src", /variant-final-vertical/);
+  for (const label of ["가로 영상 재생", "세로 영상 재생"]) {
+    await page.getByLabel(label).evaluate((element) => new Promise((resolve, reject) => {
+      const video = element;
+      const check = () => {
+        if (!Number.isFinite(video.duration) || video.duration <= 0) return reject(new Error("variant video has no duration"));
+        const points = [0, video.duration / 2, Math.max(0, video.duration - 0.01)];
+        for (const point of points) {
+          video.currentTime = point;
+          if (Math.abs(video.currentTime - point) > 0.1) return reject(new Error("variant video seek mismatch"));
+        }
+        resolve();
+      };
+      if (video.readyState >= 1) check();
+      else {
+        video.addEventListener("loadedmetadata", check, { once: true });
+        video.addEventListener("error", () => reject(new Error("variant video failed to load")), { once: true });
+        video.load();
+      }
+    }));
+  }
+  await page.getByRole("button", { name: "결과 확인" }).first().click();
+  await expect(page.getByText("결과 확인됨 · 다시 재생할 수 있어요.")).toBeVisible();
   await expect(page.locator("audio")).toHaveCount(0);
   await expect(page.locator("video")).toHaveCount(3);
   await page.getByRole("button", { name: "CapCut에 등록" }).click();

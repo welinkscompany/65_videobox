@@ -296,6 +296,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const [variantOptions, setVariantOptions] = useState<{ variant_id: string; kind: string }[]>([]);
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
   const [variantItems, setVariantItems] = useState<VariantRenderItem[]>([]);
+  const [confirmedVariantIds, setConfirmedVariantIds] = useState<string[]>([]);
   const [isRenderingVariants, setIsRenderingVariants] = useState(false);
   const [variantError, setVariantError] = useState(false);
   const requestEpoch = useRef(0);
@@ -426,6 +427,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setVariantOptions([]);
     setSelectedVariantIds([]);
     setVariantItems([]);
+    setConfirmedVariantIds([]);
     setVariantError(false);
     if (!variantSession) return () => { active = false; };
     void api.listOutputVariants(projectId, variantSession.session_id).then((result) => {
@@ -462,6 +464,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     try {
       const result = await api.startVariantRenders(projectId, { session_id: session.session_id, variant_ids: requestedVariantIds });
       setVariantItems(result.items);
+      setConfirmedVariantIds([]);
       const jobs = await api.listJobs(projectId);
       const reconciled = await Promise.all(result.items.map(async (item) => {
         const job = jobs.find((candidate) => candidate.job_id === item.job_id);
@@ -794,8 +797,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         </CardContent>
       </Card>
       {variantItems.map((item) => (
-        <VariantOutputCard key={item.variant_id} projectId={projectId} item={item} onRetry={() => {
+        <VariantOutputCard key={item.variant_id} projectId={projectId} item={item} confirmed={confirmedVariantIds.includes(item.variant_id)} onConfirm={() => setConfirmedVariantIds((current) => current.includes(item.variant_id) ? current : [...current, item.variant_id])} onRetry={() => {
           setSelectedVariantIds([item.variant_id]);
+          setConfirmedVariantIds((current) => current.filter((id) => id !== item.variant_id));
           void handleRenderVariants([item.variant_id]);
         }} />
       ))}
