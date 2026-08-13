@@ -184,6 +184,7 @@ def test_yujin_footage_interpretation_uses_local_structured_runtime_when_respons
             assert project_id.startswith("source:")
             assert task_type.value == "yujin_conversation"
             assert "출근 장면만 골라줘" in prompt
+            assert "MUST contain at least one operation" in prompt
             assert response_schema["type"] == "object"
             self.response_schema = response_schema
             assert now is None
@@ -227,6 +228,7 @@ def test_yujin_footage_interpretation_uses_local_structured_runtime_when_respons
     assert "\"$ref\"" not in serialized_schema
     assert "\"oneOf\"" not in serialized_schema
     assert "\"discriminator\"" not in serialized_schema
+    assert runtime.response_schema["properties"]["proposal"]["properties"]["operations"]["minItems"] == 1
     intent_enum = (
         runtime.response_schema["properties"]["proposal"]["properties"]["operations"]["items"]
         ["properties"]["intent"]["enum"]

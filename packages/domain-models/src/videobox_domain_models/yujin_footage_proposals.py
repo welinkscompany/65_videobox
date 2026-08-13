@@ -274,6 +274,7 @@ YUJIN_FOOTAGE_RESPONSE_PROVIDER_SCHEMA: dict[str, object] = {
                 "base_revision": {"type": "integer"},
                 "operations": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {
                         "type": "object",
                         "additionalProperties": False,
