@@ -14,7 +14,7 @@
 
 | Task | Current state | Implemented evidence | Remaining implementation |
 | --- | --- | --- | --- |
-| 1. Contextual starters | partial | `RightDock` fixed four-chip empty-state baseline, zero-send/focus tests, commit `2a4e28eb7` | surface/selection/blocker registry, `다른 예시`, `전체 보기`, local usage-frequency promotion, Home integration |
+| 1. Contextual starters | complete | `starterRegistry.ts`, `YujinStarters.tsx`, RightDock/Home integration, 7 focused tests, RightDock/Home/route regression tests, build and diff-check | none for Task 1; real browser/owner acceptance remains a Wave 5/gate concern |
 | 2. Variant proposals | not implemented | existing creator proposal adapter handles current session/media proposal contracts | `variant_id`, `base_variant_revision`, reframe/layout/audio operations and vertical-full story rejection |
 | 3. Preview/apply/undo | partial baseline | existing session proposal preview/apply/manual undo paths | dual master+variant revision preflight, variant transaction, double-apply protection and variant before/after cards |
 | 4. Variant review lineage | partial baseline | existing timeline/session review and Wave 3 output source verification | persist/select exact variant revision, variant-specific staleness and grouped creator actions |
@@ -35,10 +35,10 @@ Existing baselines are reusable but do not satisfy the bundled Wave 4 checkboxes
 
 - [x] Baseline completed in the focused conversation-starter plan: four immutable Right Dock chips fill/focus the composer with zero send/mutation (`2a4e28eb7`).
 
-- [ ] Write failing tests for 4–6 starters by plan/assets/footage/edit/review/output context, `다른 예시`, `전체 보기`, recent-frequency promotion, and click-fills-composer-with-zero-send/zero-mutation.
-- [ ] Run RED with `npm --prefix apps/web test -- src/features/yujin/YujinStarters.test.tsx`.
-- [ ] Implement a pure registry keyed by surface, selection kind and blockers. Persist only starter usage counts locally; never edit project data from a starter click.
-- [ ] Repeat the previous Vitest command, run `git diff --check`, and commit `feat: add contextual yujin conversation starters`.
+- [x] Write failing tests for 4–6 starters by plan/assets/footage/edit/review/output context, `다른 예시`, `전체 보기`, recent-frequency promotion, and click-fills-composer-with-zero-send/zero-mutation.
+- [x] Run RED with `npm --prefix apps/web test -- src/features/yujin/YujinStarters.test.tsx` (expected module-missing failure before implementation).
+- [x] Implement a pure registry keyed by surface, selection kind and blockers. Persist only starter usage counts locally; never edit project data from a starter click.
+- [x] Repeat the previous Vitest command (7 passed), run `git diff --check`, and commit `feat: add contextual yujin conversation starters`.
 
 ### Task 2: Extend strict proposals for output variants
 

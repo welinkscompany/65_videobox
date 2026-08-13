@@ -6,19 +6,13 @@ import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
+import { YujinStarters } from "../../yujin/YujinStarters";
 import type { RightDockCandidate, RightDockConversationScroll, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
 
 const staleProposalMessage = "편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.";
-
-const conversationStarters = [
-  "이 장면에 어울리는 B-roll 추천해 줘",
-  "현재 편집 흐름 점검해 줘",
-  "자막을 더 간결하게 다듬어 줘",
-  "세로 영상용으로 바꿀 부분 찾아 줘",
-] as const;
 
 type SelectedSegment = Readonly<{
   segmentId: string;
@@ -153,8 +147,8 @@ export function RightDock({
     && !proposal
     && state === "idle"
     && runState.kind === "idle";
-  const chooseConversationStarter = (starter: string) => {
-    onDraftChange(starter);
+  const chooseConversationStarter = (starter: { label: string }) => {
+    onDraftChange(starter.label);
     composerContainerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
   };
   const submit = () => { if (canSend) void onSendMessage?.(draft.trim()); };
@@ -199,19 +193,14 @@ export function RightDock({
           ? messages.map((message) => <article key={message.id}><p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p></article>)
           : <>
             <p>유진 대화는 아직 시작하지 않았어요.</p>
-            {showConversationStarters ? <div role="group" aria-label="대화 스타터" className="vb-editor-right-dock__starters">
-              <h3>무엇을 도와드릴까요?</h3>
-              <span>스타터를 누르면 요청 문장이 입력창에 채워져요.</span>
-              <div className="vb-editor-right-dock__starter-list">
-                {conversationStarters.map((starter) => <Button
-                  key={starter}
-                  type="button"
-                  variant="outline"
-                  disabled={composerDisabled}
-                  onClick={() => chooseConversationStarter(starter)}
-                >{starter}</Button>)}
-              </div>
-            </div> : null}
+            {showConversationStarters ? <YujinStarters
+              // The original fixed starters were available before a segment
+              // was selected; keep that entry point while the registry grows
+              // context-aware alternatives.
+              context={{ surface: "edit", selection: "segment" }}
+              disabled={composerDisabled}
+              onSelect={chooseConversationStarter}
+            /> : null}
           </>}
       </div>
       <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
