@@ -55,3 +55,33 @@
 .vb-editor-assets__actions { margin-top: 0.2rem; }
 @media (max-width: 480px) { .vb-editor-assets__actions > button { flex: 1 1 8rem; } }
 .vb-editor-assets__thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 0.45rem; background: var(--muted); display: block; margin-bottom: 0.35rem; }
+.vb-editor-variants {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+.vb-editor-variants__header, .vb-editor-variants__pane header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.vb-editor-variants__header h2 { margin: 0.15rem 0 0; font-size: 1rem; }
+.vb-editor-variants__header > span, .vb-editor-variants__master-note { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+.vb-editor-variants__eyebrow { margin: 0; color: hsl(var(--muted-foreground)); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.vb-editor-variants__selector { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.vb-editor-variants__compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; position: relative; }
+.vb-editor-variants__audio-note { grid-column: 1 / -1; color: hsl(var(--muted-foreground)); font-size: 0.78rem; }
+.vb-editor-variants__pane { display: grid; gap: 0.6rem; min-width: 0; padding: 0.75rem; border: 1px solid hsl(var(--border)); border-radius: 0.75rem; background: hsl(var(--background)); }
+.vb-editor-variants__pane header span, .vb-editor-variants__pane output { color: hsl(var(--muted-foreground)); font-size: 0.78rem; }
+.vb-editor-variants__canvas { display: grid; place-items: center; gap: 0.25rem; min-height: 8rem; border: 1px dashed hsl(var(--border)); border-radius: 0.6rem; color: hsl(var(--muted-foreground)); font-size: 0.72rem; }
+.vb-editor-variants__canvas[data-aspect-ratio="9:16"] { min-height: 10rem; }
+.vb-editor-variants__conflicts { display: grid; gap: 0.75rem; padding: 0.75rem; border: 1px solid hsl(var(--destructive)); border-radius: 0.75rem; }
+.vb-editor-variants__conflicts h3, .vb-editor-variants__conflicts p { margin: 0; }
+.vb-editor-variants__conflicts article { display: grid; gap: 0.45rem; }
+.vb-editor-variants__conflicts article > div { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+@media (max-width: 760px) {
+  .vb-editor-variants__compare { grid-template-columns: 1fr; }
+}
