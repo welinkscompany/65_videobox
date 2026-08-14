@@ -188,6 +188,16 @@ describe("PreviewStage", () => {
     expect(mediumLayout).toContain(".vb-preview-stage__sources { max-height: 4rem; }");
   });
 
+  it("bounds output variants and timeline on Full HD so the preview remains visible", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const variantsRule = css.match(/^\.vb-editor-variants\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const timelineRule = css.match(/^\.vb-editor-workbench__timeline\s*\{([^}]*)\}/m)?.[1] ?? "";
+
+    expect(variantsRule).toContain("max-height: 10rem");
+    expect(variantsRule).toContain("overflow: auto");
+    expect(timelineRule).toMatch(/max-height:\s*12rem/);
+  });
+
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
     const refresh = vi.fn();
     const stale = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);
