@@ -182,7 +182,8 @@ describe("PreviewStage", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
     const mediumLayout = css.match(/@media \(min-width: 768px\) and \(max-width: 1499px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
 
-    expect(mediumLayout).toContain(".vb-editor-variants { max-height: 9rem; overflow: auto; min-height: 0; }");
+    expect(mediumLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
+    expect(mediumLayout).toContain(".vb-editor-workbench__timeline { max-height: 4rem; padding: 0.5rem 0.75rem; }");
   });
 
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {

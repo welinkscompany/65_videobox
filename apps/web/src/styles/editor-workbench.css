@@ -94,10 +94,10 @@
 }
 @media (min-width: 768px) and (max-width: 1499px) {
   .vb-editor-variants { gap: 0.5rem; padding: 0.6rem 0.85rem; }
-  .vb-editor-variants { max-height: 9rem; overflow: auto; min-height: 0; }
+  .vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }
   .vb-editor-variants__header > span { display: none; }
   .vb-editor-variants__header h2 { font-size: 0.9rem; }
-  .vb-editor-workbench__timeline { max-height: 6rem; padding: 0.5rem 0.75rem; }
+  .vb-editor-workbench__timeline { max-height: 4rem; padding: 0.5rem 0.75rem; }
   .vb-editor-workbench__timeline h2 { margin: 0.2rem 0; font-size: 0.9rem; }
   .vb-editor-workbench__timeline > p:nth-of-type(2) { display: none; }
   .vb-preview-stage { gap: 0.4rem; padding: 0.65rem; }
