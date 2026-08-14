@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -599,6 +600,31 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const currentView = state.view;
     mutationInFlight.current = true;
     setMutation({ isSaving: true, message: "변경 내용을 저장하고 있어요." });
+    // Any successful mutation invalidates the current exact-preview artifact
+    // in the same backend transaction. Unmount it before issuing the request
+    // so the browser cannot re-fetch a now-fenced URL and emit a transient 404.
+    flushSync(() => {
+      setState((current) => current.key === requestKey && current.view
+        ? {
+            ...current,
+            view: {
+              ...current.view,
+              playback: {
+                ...current.view.playback,
+                exactPreview: { ...current.view.playback.exactPreview, status: "stale", url: null },
+              },
+            },
+          }
+        : current);
+    });
+    // Let the committed removal reach the media element lifecycle before the
+    // backend can fence the artifact. This ordering prevents even a very fast
+    // mutation response from racing a final browser range request.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    if (!isCurrent()) {
+      mutationInFlight.current = false;
+      return;
+    }
     const port = createEditorCommandPort({
       projectId,
       sessionId,
@@ -630,7 +656,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (!isCurrentRefresh()) return;
       const next = joinEditorSnapshot(manifest, editingSession);
       if (next.view.projectId !== projectId || next.view.sessionId !== sessionId) {
-        resultMessage = "최신 편집 내용을 확인하지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
+        throw new Error("editor_snapshot_identity_mismatch");
       } else {
         setState({ key: requestKey, view: next.view, session: next.session, error: null });
         // Auto-refresh the preview after a successful edit instead of leaving
@@ -651,10 +677,13 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (isCurrent()) {
         if (error instanceof Error && error.message === "editor_snapshot_identity_mismatch") {
           resultMessage = "최신 편집 상태가 일치하지 않아요. 새로고침한 뒤 다시 시도해 주세요.";
-          setState({ key: requestKey, view: null, session: null, error: resultMessage });
         } else {
           resultMessage = "최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
         }
+        // A failed post-mutation refresh leaves server-application status
+        // ambiguous. Keep the editor fail-closed instead of restoring a view
+        // whose preview and revision may already be invalid.
+        setState({ key: requestKey, view: null, session: null, error: resultMessage });
       }
     } finally {
       if (isCurrent()) {
