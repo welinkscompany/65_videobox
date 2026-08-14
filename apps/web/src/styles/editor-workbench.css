@@ -101,6 +101,7 @@
   .vb-editor-workbench__timeline h2 { margin: 0.2rem 0; font-size: 0.9rem; }
   .vb-editor-workbench__timeline > p:nth-of-type(2) { display: none; }
   .vb-preview-stage { gap: 0.4rem; padding: 0.65rem; }
+  .vb-preview-stage__sources { max-height: 4rem; }
   .vb-preview-stage__header h2 { font-size: 0.9rem; }
   .vb-preview-stage__eyebrow { font-size: 0.7rem; }
   .vb-preview-stage__burned-caption { display: none; }

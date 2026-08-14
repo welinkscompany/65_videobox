@@ -184,6 +184,7 @@ describe("PreviewStage", () => {
 
     expect(mediumLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
     expect(mediumLayout).toContain(".vb-editor-workbench__timeline { max-height: 4rem; padding: 0.5rem 0.75rem; }");
+    expect(mediumLayout).toContain(".vb-preview-stage__sources { max-height: 4rem; }");
   });
 
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
