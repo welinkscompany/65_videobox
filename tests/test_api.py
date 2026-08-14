@@ -2732,6 +2732,8 @@ def test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case
             timeline_applied_recommendations: list[dict[str, object]],
             timeline_pending_recommendations: list[dict[str, object]],
             timeline_review_flags: list[dict[str, object]],
+            source_variant_id: str | None,
+            source_variant_revision: int | None,
         ) -> dict[str, object]:
             assert project_id == "project_001"
             assert timeline_id == "timeline_001"
@@ -2739,6 +2741,8 @@ def test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case
             assert timeline_applied_recommendations == []
             assert timeline_pending_recommendations == []
             assert timeline_review_flags == []
+            assert source_variant_id is None
+            assert source_variant_revision is None
             return {
                 "project_id": project_id,
                 "timeline_id": timeline_id,
