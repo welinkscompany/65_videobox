@@ -176,6 +176,13 @@ describe("PreviewStage", () => {
     expect(sourcesRule).toContain("overflow: auto");
   });
 
+  it("bounds the medium-width output variants panel so it cannot starve the preview", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const mediumLayout = css.match(/@media \(min-width: 768px\) and \(max-width: 1499px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+
+    expect(mediumLayout).toContain(".vb-editor-variants { max-height: 9rem; overflow: auto; min-height: 0; }");
+  });
+
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
     const refresh = vi.fn();
     const stale = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);

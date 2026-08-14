@@ -94,6 +94,7 @@
 }
 @media (min-width: 768px) and (max-width: 1499px) {
   .vb-editor-variants { gap: 0.5rem; padding: 0.6rem 0.85rem; }
+  .vb-editor-variants { max-height: 9rem; overflow: auto; min-height: 0; }
   .vb-editor-variants__header > span { display: none; }
   .vb-editor-variants__header h2 { font-size: 0.9rem; }
   .vb-editor-workbench__timeline { max-height: 6rem; padding: 0.5rem 0.75rem; }
