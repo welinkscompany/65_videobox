@@ -1,8 +1,8 @@
 # VideoBox Claude 재개 핸드오프
 
-작성일: 2026-08-14  
-canonical worktree: `D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility`  
-branch: `codex/videobox-container-compatibility`  
+작성일: 2026-08-14
+canonical worktree: `D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility`
+branch: `codex/videobox-container-compatibility`
 작업 시작 기준 HEAD: `92067f234a1abcf0038a5fed9575ef8babe899e3`
 
 ## 결론
