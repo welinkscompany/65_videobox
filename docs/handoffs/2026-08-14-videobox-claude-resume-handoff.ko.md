@@ -142,7 +142,7 @@ npm --prefix apps/web run test:e2e:editor-workbench
 - editor-workbench Chromium E2E: `10 passed`
 - production build와 `git diff --check`: 통과
 - 실제 1920×1080 브라우저 route/preview/playback/Range 점검: 통과
-- `owner-ready Check`: 브라우저 임시 파일 제거 후 최종 재실행 결과를 현재 Git 상태와 함께 확인한다. 이 Check는 owner acceptance가 아니다.
+- `owner-ready Check`: 브라우저 임시 파일 제거 후 `overall_status: pass`, working tree `other_change_count: 0`으로 통과했다. 이 Check는 owner acceptance가 아니다.
 
 ## Claude용 복사 프롬프트
 
