@@ -1954,6 +1954,69 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(startPreview).toHaveBeenCalledWith("project-a", "session-a", { expected_revision: 2 }));
   });
 
+  it("does not automatically queue a full exact render after editing a long project", async () => {
+    const longManifest = (revision: number) => ({
+      ...narrationManifest(revision),
+      output: { ...narrationManifest(revision).output, duration_sec: 494.8 },
+    });
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(longManifest(1) as never)
+      .mockResolvedValueOnce(longManifest(2) as never);
+    mockEditingSessionRevisions(1, 2);
+    vi.spyOn(api, "updateEditingSessionSegmentBounds").mockResolvedValue({} as never);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+
+    await expectEditorRevision(2);
+    expect(startPreview).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "미리보기 새로 만들기" })).toBeEnabled();
+  });
+
+  it("fails closed when mutation rehydration returns mismatched manifest and session revisions", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(2) as never);
+    mockEditingSessionRevisions(1, 3);
+    vi.spyOn(api, "updateEditingSessionSegmentBounds").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+
+    expect(await screen.findByText("최신 편집 상태가 일치하지 않아요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
+  });
+
+  it("fails closed when an ordinary preview refresh returns mismatched revisions", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(2) as never);
+    mockEditingSessionRevisions(1, 3);
+    vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
+
+    expect(await screen.findByText("편집 세션 정보가 일치하지 않아요. 다시 열어 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
+  });
+
   it("keeps the manual preview button as a fallback when the automatic refresh fails", async () => {
     let resolveUpdate!: (value: unknown) => void;
     vi.spyOn(api, "getEditorPlaybackManifest")

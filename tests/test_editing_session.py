@@ -409,6 +409,29 @@ def test_caption_style_scope_rules_resolve_snapshots_without_changing_default_fo
     assert changed["segments"][1]["caption_style"]["text_color"] == "#00FF00FF"
 
 
+def test_project_caption_style_undo_and_redo_restore_the_root_style_snapshot() -> None:
+    from videobox_core_engine.editing_session import redo, undo, update_caption_style
+
+    session = {
+        "caption_style": {"font_size_px": 48, "text_color": "#FFFFFFFF"},
+        "session_revision": 1,
+        "segments": [{"segment_id": "a"}],
+        "history": [],
+    }
+
+    changed = update_caption_style(
+        session=session,
+        style={"font_size_px": 64, "text_color": "#00FF00FF"},
+        scope="project_default",
+        segment_ids=[],
+    )
+    reverted = undo(session=changed)
+    restored = redo(session=reverted)
+
+    assert reverted["caption_style"] == session["caption_style"]
+    assert restored["caption_style"] == changed["caption_style"]
+
+
 def test_partial_regeneration_conflict_returns_latest_manual_caption_and_style_without_stale_timeline_save() -> None:
     from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
     from videobox_storage.local_project_store import EditingSessionRevisionConflict

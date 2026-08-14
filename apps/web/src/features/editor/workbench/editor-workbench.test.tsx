@@ -262,6 +262,28 @@ describe("EditorWorkbench", () => {
     expect(screen.getByRole("button", { name: "첫 자막 대본 선택" })).not.toHaveAttribute("aria-current");
   });
 
+  it("seeks the preview and selects the segment when an independent B-roll clip is clicked", () => {
+    const brollView = {
+      ...view,
+      output: { ...view.output, durationSec: 10 },
+      tracks: [{ trackId: "broll", role: "broll", clips: [{
+        clipId: "b-2", placementId: "broll:b-2", segmentId: "segment-2", type: "broll",
+        assetId: "asset-b", assetUri: null, startSec: 5, endSec: 10, controls: {},
+      }] }],
+      captions: [{ segmentId: "segment-2", text: "둘째 자막", startSec: 5, endSec: 10, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } }],
+      playback: { auditionUrls: {}, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-preview/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 10 } },
+    } as const;
+    render(<EditorWorkbench view={brollView} />);
+    const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
+
+    fireEvent.click(clipSelectionButton("broll:b-2"));
+
+    expect(player.currentTime).toBe(5);
+    expect(screen.getByRole("button", { name: "둘째 자막 대본 선택" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "5");
+  });
+
   it("replaces only the preview slot with the exact-preview stage while keeping read-only docks and timeline", () => {
     const currentView = {
       ...view,

@@ -538,17 +538,23 @@ def materialize_editing_session_timeline(
             duration = float(source_slice["duration_sec"])
             if duration <= 0:
                 continue
-            gap = deepcopy(raw_gap)
-            gap["segment_id"] = str(segment.get("segment_id") or source_id)
-            gap["target_range"] = {
-                "start_sec": placement,
-                "end_sec": placement + duration,
-            }
-            if "start_sec" in gap:
-                gap["start_sec"] = placement
-            if "end_sec" in gap:
-                gap["end_sec"] = placement + duration
-            materialized_gaps.append(gap)
+            covered = _session_override_windows(segment=segment, override_field="broll_override")
+            for gap_start, gap_end in _uncovered_intervals(
+                start=placement,
+                end=placement + duration,
+                covered=covered,
+            ):
+                gap = deepcopy(raw_gap)
+                gap["segment_id"] = str(segment.get("segment_id") or source_id)
+                gap["target_range"] = {
+                    "start_sec": gap_start,
+                    "end_sec": gap_end,
+                }
+                if "start_sec" in gap:
+                    gap["start_sec"] = gap_start
+                if "end_sec" in gap:
+                    gap["end_sec"] = gap_end
+                materialized_gaps.append(gap)
 
     def materialized_track_id(kind: str) -> str:
         existing = track_ids.get(kind)
@@ -676,6 +682,11 @@ class CompositionPlan:
     def from_timeline(cls, *, timeline: dict[str, Any], captions: Iterable[dict[str, Any] | CaptionCue] = ()) -> "CompositionPlan":
         output = timeline.get("output") if isinstance(timeline.get("output"), dict) else {}
         raw_items: list[CompositionItem] = []
+        gap_slot_ids = {
+            str(gap.get("gap_slot_id") or "").strip()
+            for gap in timeline.get("gap_slots", [])
+            if isinstance(gap, dict) and str(gap.get("gap_slot_id") or "").strip()
+        }
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
@@ -684,6 +695,13 @@ class CompositionPlan:
                 continue
             for index, raw in enumerate(track.get("clips", []) if isinstance(track.get("clips"), list) else []):
                 if not isinstance(raw, dict):
+                    continue
+                gap_slot_id = str(raw.get("gap_slot_id") or "").strip()
+                asset_id = str(raw.get("asset_id") or "").strip()
+                if track_type == "broll" and gap_slot_id in gap_slot_ids and asset_id.startswith("asset_gap_placeholder_"):
+                    # Draft gap placeholders are in-app guidance surfaces, not
+                    # video inputs.  Gap metadata remains authoritative while
+                    # exact previews render the available composition only.
                     continue
                 start, end = _number(raw.get("start_sec")), _number(raw.get("end_sec"))
                 if end <= start:

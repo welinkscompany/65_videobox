@@ -14587,6 +14587,44 @@ def test_caption_style_api_preflight_then_mutation_is_revisioned_and_persisted(t
     assert client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()["segments"][0]["caption_style"]["font_size_px"] == 64
 
 
+def test_project_caption_style_api_undo_redo_persists_and_rehydrates_manifest(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+    original_style = session["caption_style"]
+    changed = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style",
+        json={
+            "expected_revision": session["session_revision"],
+            "scope": "project_default",
+            "segment_ids": [],
+            "style": {"text_color": "#00FF00FF", "font_size_px": 64},
+        },
+    ).json()
+
+    undone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo",
+        json={"expected_revision": changed["session_revision"]},
+    ).json()
+    assert undone["caption_style"] == original_style
+    assert client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    ).json()["caption_style"] == original_style
+
+    redone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/redo",
+        json={"expected_revision": undone["session_revision"]},
+    ).json()
+    manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/playback-manifest"
+    ).json()
+    assert redone["caption_style"]["text_color"] == "#00FF00FF"
+    assert manifest["captions"][0]["style"]["text_color"] == "#00FF00FF"
+
+
 def test_caption_style_api_rejects_stale_revision_without_mutating_session(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)

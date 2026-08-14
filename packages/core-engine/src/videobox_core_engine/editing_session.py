@@ -640,6 +640,11 @@ def undo(*, session: dict[str, Any]) -> dict[str, Any]:
             updated.pop("timeline_placement_overrides", None)
         else:
             updated["timeline_placement_overrides"] = deepcopy(inverse["timeline_placement_overrides"])
+    if "caption_style" in inverse:
+        if inverse["caption_style"] is None:
+            updated.pop("caption_style", None)
+        else:
+            updated["caption_style"] = deepcopy(inverse["caption_style"])
     updated["undo_stack"] = undo_stack
     updated["redo_stack"] = list(deepcopy(session.get("redo_stack", []))) + [event]
     history = list(deepcopy(session.get("history", [])))
@@ -664,6 +669,11 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
             updated.pop("timeline_placement_overrides", None)
         else:
             updated["timeline_placement_overrides"] = deepcopy(forward["timeline_placement_overrides"])
+    if "caption_style" in forward:
+        if forward["caption_style"] is None:
+            updated.pop("caption_style", None)
+        else:
+            updated["caption_style"] = deepcopy(forward["caption_style"])
     updated["redo_stack"] = redo_stack
     updated["undo_stack"] = (list(deepcopy(session.get("undo_stack", []))) + [event])[-MAX_TIMELINE_UNDO_EVENTS:]
     history = list(deepcopy(session.get("history", [])))

@@ -335,7 +335,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       const message = error instanceof Error && error.message === "editor_snapshot_identity_mismatch"
           ? "편집 세션 정보가 일치하지 않아요. 다시 열어 주세요."
           : "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
-      setState((current) => current.key === requestKey && current.view && current.session
+      const identityMismatch = error instanceof Error && error.message === "editor_snapshot_identity_mismatch";
+      setState((current) => !identityMismatch && current.key === requestKey && current.view && current.session
         ? { ...current, error: message }
         : { key: requestKey, view: null, session: null, error: message });
     });
@@ -636,15 +637,24 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         // the creator to notice it's stale and press the manual button
         // themselves (F-4). A failure here is silent -- the manual refresh
         // button in preview-stage.tsx stays as the fallback.
-        if (mutationSucceeded) {
+        // A full exact render is cheap enough to keep automatic for short
+        // projects. Long-form sources stay explicit so a sequence of caption,
+        // undo, or placement edits cannot queue overlapping multi-minute
+        // FFmpeg jobs. The manual refresh control remains available.
+        if (mutationSucceeded && next.view.output.durationSec <= 120) {
           void api.startExactPreview(projectId, sessionId, { expected_revision: next.view.expectedRevision })
             .then(() => { if (isCurrentRefresh()) setRefreshToken((current) => current + 1); })
             .catch(() => {});
         }
       }
-    } catch {
+    } catch (error) {
       if (isCurrent()) {
-        resultMessage = "최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
+        if (error instanceof Error && error.message === "editor_snapshot_identity_mismatch") {
+          resultMessage = "최신 편집 상태가 일치하지 않아요. 새로고침한 뒤 다시 시도해 주세요.";
+          setState({ key: requestKey, view: null, session: null, error: resultMessage });
+        } else {
+          resultMessage = "최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
+        }
       }
     } finally {
       if (isCurrent()) {
