@@ -171,6 +171,7 @@ describe("PreviewStage", () => {
     expect(stageRule).toContain("height: 100%");
     expect(stageRule).toContain("grid-template-rows");
     expect(mediaRule).toContain("min-height: 0");
+    expect(videoRule).toContain("height: auto");
     expect(videoRule).toContain("max-height: 100%");
     expect(videoRule).toContain("object-fit: contain");
     expect(sourcesRule).toContain("overflow: auto");
