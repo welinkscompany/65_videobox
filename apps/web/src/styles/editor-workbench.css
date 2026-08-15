@@ -110,3 +110,12 @@
   .vb-preview-stage__burned-caption { display: none; }
   .vb-preview-stage__status { font-size: 0.75rem; }
 }
+/* Above 1499px the compact block stops applying, so the base rules (variants
+   10rem, timeline 12rem) took the surplus height and left Full HD with a
+   smaller preview than 1440x900. Bound the side panels here too and the extra
+   height goes to the preview instead. */
+@media (min-width: 1500px) {
+  .vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }
+  .vb-editor-workbench__timeline { max-height: 6rem; }
+  .vb-preview-stage__sources { max-height: 5rem; }
+}

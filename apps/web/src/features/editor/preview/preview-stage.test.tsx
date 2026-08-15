@@ -198,6 +198,18 @@ describe("PreviewStage", () => {
     expect(timelineRule).toMatch(/max-height:\s*12rem/);
   });
 
+  it("bounds the side panels above 1500px so a bigger screen never shrinks the preview", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const wideLayout = css.match(/@media \(min-width: 1500px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+
+    // Without this block a 1920x1080 screen falls back to the loose base rules
+    // (variants 10rem, timeline 12rem) and ends up with a smaller preview than
+    // a 1440x900 screen, which the 768-1499px block already compacts.
+    expect(wideLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
+    expect(wideLayout).toContain(".vb-editor-workbench__timeline { max-height: 6rem; }");
+    expect(wideLayout).toContain(".vb-preview-stage__sources { max-height: 5rem; }");
+  });
+
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
     const refresh = vi.fn();
     const stale = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);

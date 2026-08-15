@@ -91,6 +91,30 @@ async function openEditor(page, state) {
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
 }
 
+test("a Full HD screen gives the preview more height than a 1440x900 screen, not less", async ({ page }) => {
+  const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
+  const measure = () => page.evaluate(() => {
+    const video = document.querySelector(".vb-preview-stage__media-shell video");
+    if (!video) throw new Error("preview video is missing");
+    return { videoHeight: video.getBoundingClientRect().height };
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openEditor(page, state);
+  await expect.poll(() => page.locator(".vb-preview-stage__media-shell video").evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+  const medium = await measure();
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect.poll(async () => (await measure()).videoHeight).toBeGreaterThan(0);
+  const fullHd = await measure();
+
+  // The 768-1499px block compacts the side panels, so before this guard the
+  // larger screen fell back to the loose base rules and rendered a smaller
+  // preview than the smaller screen did.
+  expect(fullHd.videoHeight).toBeGreaterThanOrEqual(medium.videoHeight);
+  expect(fullHd.videoHeight).toBeGreaterThanOrEqual(260);
+});
+
 test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {
   const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
   await openEditor(page, state);
