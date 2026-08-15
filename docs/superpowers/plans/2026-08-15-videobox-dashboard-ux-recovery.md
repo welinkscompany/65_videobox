@@ -143,11 +143,11 @@ Full HD 역전(`5f968ee8f`), "길이 확인 중" 거짓 문구(`f3b93de22`), foo
 
 ### Task 7: 게이트 — 전체 회귀와 실행 기록
 
-- [ ] 단독으로 `.venv\Scripts\python.exe -m pytest -q` (다른 작업과 동시 금지).
-- [ ] `npm --prefix apps/web test` · `run build` · `run test:e2e` · `run test:e2e:editor-workbench` · `git diff --check`.
-- [ ] 실제 브라우저 1920×1080·1440×900에서 6개 경로 순회: console error 0, 4xx/5xx 0, 가로 overflow 0, 그림 크기 전후표 작성.
-- [ ] 스냅샷 5장 재생성 여부를 owner에게 물어 재승인 받는다(2026-08-15 재승인 절차와 동일).
-- [ ] 핸드오프 문서에 결과 추가. **owner acceptance는 별도다** — owner가 직접 화면을 쓰고 판단하기 전에는 완료라 말하지 않는다.
+- [x] 단독으로 `.venv\Scripts\python.exe -m pytest -q` (다른 작업과 동시 금지).
+- [x] `npm --prefix apps/web test` · `run build` · `run test:e2e` · `run test:e2e:editor-workbench` · `git diff --check`.
+- [x] 실제 브라우저 1920×1080·1440×900에서 6개 경로 순회: console error 0, 4xx/5xx 0, 가로 overflow 0, 그림 크기 전후표 작성.
+- [ ] 스냅샷 5장 재생성 여부를 owner에게 물어 재승인 받는다(2026-08-15 재승인 절차와 동일). **미해결 — 아래 참고.**
+- [x] 핸드오프 문서에 결과 추가. **owner acceptance는 별도다** — owner가 직접 화면을 쓰고 판단하기 전에는 완료라 말하지 않는다.
 
 ---
 
@@ -271,5 +271,47 @@ project_a/session-a를 쓰는 앞선 테스트가 새 기본값을 스코프 키
 
 전 구간 console error 0건, 가로 overflow 0건. 음악/효과음 자산에는 "구간 정리하기"
 링크가 뜨지 않음(단위 테스트로 고정, 실제 화면은 영상 자산으로만 확인).
+
+### Task 7 완료 (2026-08-15 야간, 게이트 커밋 `8e99a308e`까지)
+
+**자동 검증 — 전부 단독 실행, 결과:**
+
+| 검증 | 결과 |
+|---|---|
+| Python 전체 (`.venv` pytest, 단독) | `3522 passed, 53 skipped`, exit 0 |
+| frontend Vitest | `76 files / 973 passed` |
+| production build | 통과 |
+| Chromium E2E | `42 passed` |
+| editor-workbench E2E | `10 passed` |
+| `git diff --check` | 통과 |
+
+첫 pytest 전체 실행에서 5건 실패(`test_editor_ui_source_provenance.py`)가 나왔다.
+Task 4·5가 `ProductShell.tsx`를 두 번 고치면서 그 파일 헤더가 명시한
+`docs/oss/editor-ui-source-map.json`의 `normalized_sha256` 갱신을 빠뜨렸다 —
+이 검증은 프론트엔드 스위트가 아니라 전체 백엔드 스위트에서만 돌아서, 매 Task의
+frontend-only 검증에서는 잡히지 않았다. 실제 파일 내용으로 해시를 다시 계산해
+갱신했고(`8e99a308e`), 해당 테스트 파일 21개 격리 재실행과 이어진 전체 재실행 모두
+통과를 확인했다.
+
+**실제 브라우저 6개 경로 × 2 해상도(1920×1080, 1440×900), 컨테이너 배포본, localStorage
+초기화 상태 기준:**
+
+`/`(→`/home`) · `/library` · `/footage` · `/plan` · `/home` · `/editor?session_id=...`
+
+- 12회 순회 전부 console error 0건, `TODO`/`Coming soon`/`준비 중`/`placeholder` 잔여
+  문구 0건, 가로 overflow 0건(`document.scrollWidth === clientWidth` 전부 일치)
+- 편집기: `readyState 4`, 재생 명령 후 `currentTime` 실제 진행 확인
+- exact-preview content Range 요청에서 `net::ERR_ABORTED`가 여러 건 보였으나, 재생이
+  정상 완료(`readyState 4`, `duration` 정확)됨을 확인해 Chromium이 버퍼링 중 Range
+  요청을 교체하며 이전 요청을 취소하는 정상 패턴으로 판정했다 — 결함 아님
+
+**미해결 — owner 결정 필요:** 승인된 편집 작업판 스냅샷 5장은 2026-08-15 세션 초반에
+이미 코드보다 낡아 있었다(`docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md`
+2026-08-15 재승인 절 참고). 이후 Task 1~6에서 레이아웃이 여러 번 더 바뀌어서 지금은
+그때보다도 더 벌어져 있다. 재생성해 재승인받을지는 owner 판단이다.
+
+이 게이트는 자동 검증과 실제 브라우저 확인을 닫은 것이다. **owner acceptance는
+별도이며 아직 없다** — owner가 긴 원본으로 만든 완성본을 처음부터 끝까지 직접 보고
+들은 적이 없고, 자막 타이밍·음량·B-roll 밀도도 owner 승인이 없다.
 
 (각 Task 완료 시 여기에 실측값과 커밋 SHA를 추가한다.)
