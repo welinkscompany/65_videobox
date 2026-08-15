@@ -32,10 +32,19 @@ git diff --name-only main codex/videobox-container-compatibility | wc -l
 
 ## 이 worktree에서 조심할 것
 
-**미커밋 작업물이 있다. 지우지 마라.**
-`apps/web/src/app/OutputsPage.tsx`, `apps/web/src/features/review/TimelineReviewPage.tsx` 등
-여러 파일에 커밋되지 않은 변경이 남아 있고, **그 내용은 개발선 branch에도 없다.**
-정리 대상으로 추정하지 말고, `stash`·`reset`·`checkout`으로 되돌리지 마라. 필요하면 소유자에게 먼저 물어라.
+**미커밋 변경이 보이면 그게 고유한 작업물인지 먼저 확인하라.**
+2026-08-15에 여기 남아 있던 8개 파일의 미커밋 변경은 확인해 보니 **개발선 branch에 이미
+전부 들어가 있는 옛 초안**이었다. 처음에 blob 해시만 비교하고 "어디에도 없는 작업물"이라고
+잘못 판단했다 — 189 커밋 차이가 나면 같은 기능이 들어 있어도 해시는 당연히 다르다.
+
+**해시가 아니라 내용으로 확인하라.** 추가된 줄이 개발선 파일에 실제로 있는지 본다.
+
+```bash
+git diff -- <파일> | grep '^+' | grep -v '^+++' | sed 's/^+//' \
+  | while read -r l; do grep -qF -- "$l" .worktrees/videobox-container-compatibility/<파일> || echo "MISSING: $l"; done
+```
+
+없는 줄이 나오면 고유한 작업물이니 소유자에게 먼저 물어라. 전부 있으면 그냥 낡은 사본이다.
 
 **여기의 `.claude/launch.json`으로 개발 서버를 띄우지 마라.**
 이 낡은 체크아웃을 서빙한다. 실제 owner 런타임은 컨테이너이며 `http://127.0.0.1:5173`이고,
