@@ -5,8 +5,9 @@ canonical worktree: `D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.w
 branch: `codex/videobox-container-compatibility`
 작업 시작 기준 HEAD: `92067f234a1abcf0038a5fed9575ef8babe899e3`
 
-> **최신 상태는 이 문서 맨 아래 `## 2026-08-15 세션` 절이다.** 아래 2026-08-14 본문은
-> 그대로 두되, 수치와 HEAD가 다르면 2026-08-15 절이 우선한다.
+> **다음 세션은 이 문서 맨 아래 `## 다음 세션 시작점` 절만 읽으면 된다.** 그 위의
+> 본문(2026-08-14, 2026-08-15 세션 기록)은 어떻게 여기까지 왔는지의 근거이며,
+> 수치와 HEAD가 다르면 항상 가장 아래 절이 우선한다.
 
 ## 결론
 
@@ -410,3 +411,47 @@ sha256이 달랐다. Task 1~3이 편집기 레이아웃을 더 바꿨고, Task 4
 `-TimeoutSec 30` 이상으로 주고, 그래도 FAIL이면 그때 실제 문제로 조사한다.**
 컨테이너 4개 전부 healthy, workspace는 재시작 없이 계속 떠 있었다. 실제 브라우저로
 `/projects/my-project/home`을 열어 console error 0건, Task 4 결과 유지를 확인했다.
+
+---
+
+## 다음 세션 시작점 (2026-08-15 세션 종료 시점)
+
+**이 절만 읽으면 이어서 작업할 수 있다.** 위 본문은 어떻게 여기까지 왔는지의
+기록이고, 지금 당장 필요한 건 이 절이다.
+
+### 현재 사실
+
+- HEAD `382abe3b5`, `codex/videobox-container-compatibility`, 원격과 완전히 동기화(0/0)
+- working tree 깨끗. main worktree는 이번 세션 내내 건드리지 않았다(그대로 `main`)
+- `docs/superpowers/plans/2026-08-15-videobox-dashboard-ux-recovery.md`의 Task 1~7
+  전부 `[x]`, 각 Task 실행 기록에 실측값·커밋 SHA 있음
+- 편집 작업판·대시보드 스냅샷 10장 재생성·재승인 완료(owner 승인, `b4910f738`)
+- `owner-ready.ps1 -Mode Check`와 `-Mode Start` 둘 다 실제로 돌려서 통과 확인
+- 컨테이너는 현재 HEAD 소스로 떠 있다(workspace 포함 4개 전부 healthy)
+
+### 이번 세션에서 배운 것 중 다음 세션이 반드시 지켜야 할 것
+
+1. **전체 pytest는 절대 다른 무거운 작업과 동시에 돌리지 않는다.** 이번 세션에
+   두 번 겪었다 — 시간에 민감한 테스트가 부하로 오탐 실패한다. 실패가 나오면
+   그 테스트 파일만 격리 재실행해서 진짜 결함인지 먼저 확인한다.
+2. **`-Mode Start -Rebuild` 뒤 준비 확인은 `-TimeoutSec 30` 이상**으로 준다.
+   짧은 타임아웃의 FAIL을 실제 실패로 보고하지 않는다.
+3. **`apps/web/src/app/ProductShell.tsx`를 고칠 때는 파일 맨 위 헤더를 먼저 읽는다.**
+   내용을 바꾸면 `docs/oss/editor-ui-source-map.json`의 `normalized_sha256` 두 곳을
+   같이 갱신해야 하고, 그 검증은 전체 백엔드 pytest에서만 돈다 — frontend 테스트만
+   돌리면 놓친다.
+4. **스냅샷 재생성은 owner 승인 없이 하지 않는다.** 승인받으면
+   `VIDEOBOX_WRITE_PLAYWRIGHT_SNAPSHOTS=1`로 재생성하고, `apps/web/e2e/snapshots/`
+   전부(편집기 5장 + 대시보드 5장)를 한 번에 확인한다 — 한쪽만 바뀐 줄 알았다가
+   둘 다 바뀐 적이 있었다.
+
+### 다음에 할 만한 것 (아직 시작 안 함)
+
+1. **owner acceptance** — 대표님이 긴 원본으로 만든 완성본을 처음부터 끝까지
+   직접 시청·청취, 자막 타이밍·음량·B-roll 밀도 승인, Hermes 실제 provider
+   활성 상태에서 유진 라이브 대화 확인. 전부 사람만 할 수 있다.
+2. **대표님이 요청한 "전체 시스템 점검 계획서"** — 위 대화에서 건넨 복사용
+   프롬프트로 새 세션을 시작하면 된다. 코드를 고치는 작업이 아니라 점검 계획서를
+   만드는 작업이다.
+3. **UX 개편 계획서의 "하지 않을 것" 절** — 재료 전면 통합(라이브러리+촬영본+
+   프로젝트 자산), 5단계 단일 작업판. Task 1~6을 대표님이 써보신 뒤 별도 결정.
