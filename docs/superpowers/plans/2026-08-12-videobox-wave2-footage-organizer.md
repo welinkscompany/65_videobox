@@ -124,3 +124,18 @@
 | root catalog horizontal overflow | browser measurement `document=1280`, `body=1264` at outer `1280x800`; bounded catalog CSS | 통과 |
 
 이 closeout은 개발·자동 검증·확인 가능한 runtime 범위를 닫은 것이다. owner-ready 자동 게이트와 실제 브라우저 증거는 확보했지만, 사람의 취향 판단을 포함한 owner acceptance는 아직 완료로 표시하지 않는다. 브라우저의 native seek가 비영점 playhead을 안정적으로 유지하지 못한 범위는 API 증거로 보완했으며, 이를 owner acceptance 증거로 확대 해석하지 않는다.
+
+### 이후 확인된 사항 (2026-08-15)
+
+Task 1~5는 그대로 닫힌 상태다. 다만 위 §7 gap table의
+`token/radius/focus/intranet control rule` 줄은 **화면 문구 규정(`§10.13`)까지
+확인하지는 못했다.** 이후 점검에서 Task 4가 만든 `/footage` 머리말이
+`VIDEObox / Wave-2`로, 이 계획서의 wave 이름을 그대로 사용자 화면에 노출하고
+있었다. `65d38a8b5`에서 `VideoBox`로 고쳤다.
+
+교훈: 새 화면을 추가할 때 디자인 토큰 검증만으로는 부족하고, **계획서·내부 단계
+이름이 copy에 섞이지 않았는지**를 같이 본다. `§10.13.5`가 요구하는 copy audit이
+이 경우를 잡는 지점이다.
+
+`intranet-style` 스킬은 `~/.claude/skills/intranet-style`에 있고, 그 계약은
+`footage-design-system.test.ts`가 VideoBox CSS 변수로 번역해 강제하고 있다.
