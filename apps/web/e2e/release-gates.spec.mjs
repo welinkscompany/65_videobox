@@ -57,6 +57,7 @@ async function measureRightDockDrag(page, offset) {
 
 test("workbench dock drag has fixed warmup and five-sample local performance evidence", async ({ page, browser }) => {
   await openWorkbench(page);
+  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
   const warmupMs = await measureRightDockDrag(page, -18);
   const measurementsMs = [];
   for (const offset of [18, -18, 18, -18, 18]) measurementsMs.push(await measureRightDockDrag(page, offset));

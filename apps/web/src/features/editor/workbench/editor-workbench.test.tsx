@@ -70,7 +70,7 @@ describe("EditorWorkbench", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
     const { container } = render(<EditorWorkbench view={view} assetCards={assetCards} />);
 
-    if (width === 390) fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     fireEvent.click(await screen.findByRole("button", { name: "제품 사진 원본 미리보기" }));
 
     expect(screen.getByLabelText("제품 사진 소스 미리보기")).toBeInTheDocument();
@@ -86,6 +86,7 @@ describe("EditorWorkbench", () => {
     ];
     const { container } = render(<EditorWorkbench view={view} assetCards={audioCards} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     fireEvent.click(await screen.findByRole("button", { name: "현장 오디오 원본 미리보기" }));
     expect(screen.getByLabelText("현장 오디오 소스 미리보기").tagName).toBe("AUDIO");
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
@@ -101,6 +102,7 @@ describe("EditorWorkbench", () => {
     const onPrepareAssetPreview = vi.fn(() => prepared);
     const { container } = render(<EditorWorkbench view={view} assetCards={[video]} onPrepareAssetPreview={onPrepareAssetPreview} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     fireEvent.click(screen.getByRole("button", { name: "HEVC 영상 원본 미리보기" }));
     expect(screen.getByText("원본 미리보기를 준비하고 있어요")).toBeVisible();
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
@@ -117,6 +119,7 @@ describe("EditorWorkbench", () => {
     const onPrepareAssetPreview = vi.fn(() => new Promise<string>((resolve) => resolvers.push(resolve)));
     render(<EditorWorkbench view={view} assetCards={[first, second]} onPrepareAssetPreview={onPrepareAssetPreview} />);
 
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     fireEvent.click(screen.getByRole("button", { name: "첫 영상 원본 미리보기" }));
     fireEvent.click(screen.getByRole("button", { name: "둘째 영상 원본 미리보기" }));
     await act(async () => resolvers[0]("/api/proxy/old"));
@@ -133,6 +136,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "narration", role: "narration", clips: [{ clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 1, endSec: 3, controls: {} }] }],
     } as const;
     render(<EditorWorkbench view={narrationView} assetCards={assetCards} onApplyAssetCard={onApplyAssetCard} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
 
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
     fireEvent.click(clipSelectionButton("n-1"));
@@ -155,6 +159,7 @@ describe("EditorWorkbench", () => {
       ],
     } as const;
     render(<EditorWorkbench view={sessionSegmentView} assetCards={assetCards} onApplyAssetCard={onApplyAssetCard} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
 
     fireEvent.click(clipSelectionButton("caption:visible-2"));
     expect(screen.getAllByText("적용 구간: 5.00–10.00초").length).toBeGreaterThan(0);
@@ -224,6 +229,7 @@ describe("EditorWorkbench", () => {
     } as const;
 
     render(<EditorWorkbench director={director} view={view} />);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
 
     expect(screen.getByText("남아 있는 요청")).toBeVisible();
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존된 초안");
@@ -246,6 +252,7 @@ describe("EditorWorkbench", () => {
       playback: { auditionUrls: {}, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-preview/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 2 } },
     } as const;
     const rendered = render(<EditorWorkbench view={transcriptView} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
 
@@ -274,6 +281,7 @@ describe("EditorWorkbench", () => {
       playback: { auditionUrls: {}, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-preview/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 10 } },
     } as const;
     render(<EditorWorkbench view={brollView} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
 
@@ -316,6 +324,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "narration", role: "narration", clips: [{ clipId: "clip-n", segmentId: "segment-n", type: "narration", assetId: "asset-n", assetUri: null, startSec: 0, endSec: 1, controls: {} }] }],
     } as const;
     const { container } = render(<EditorWorkbench view={narrationView} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
     expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기").tagName).toBe("AUDIO");
     expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기")).not.toHaveAttribute("autoplay");
@@ -329,6 +338,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "narration", role: "narration", clips: [{ clipId: "clip-n", segmentId: "segment-n", type: "narration", assetId: "asset-n", assetUri: null, startSec: 0, endSec: 1, controls: {} }] }],
     } as const;
     render(<EditorWorkbench view={narrationView} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     const preview = screen.getByRole("region", { name: "미리보기" });
     const dock = screen.getByRole("complementary", { name: "자산과 대본" });
     const button = screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" });
@@ -353,6 +363,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "narration", role: "narration" as const, clips: [{ clipId: "clip-a", segmentId: "segment-shared", type: "narration", assetId: "asset-shared", assetUri: null, startSec: 1, endSec: 2, controls: {} }] }],
     };
     const rendered = render(<EditorWorkbench view={routeA as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
     expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기")).toBeInTheDocument();
     fireEvent.click(clipSelectionButton("clip-a"));
@@ -449,6 +460,7 @@ describe("EditorWorkbench", () => {
       onPreviewCandidate: vi.fn(),
     } as const;
     const rendered = render(<EditorWorkbench director={director} view={routeA} />);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
 
     fireEvent.click(screen.getByRole("button", { name: "A-01 미리 보기" }));
     await waitFor(() => expect(
@@ -503,6 +515,7 @@ describe("EditorWorkbench", () => {
       tracks: [{ trackId: "overlay", role: "overlay", clips: [{ clipId: "clip-o", segmentId: "segment-o", type: "overlay", assetId: "asset-o", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: null, overlayPayload: {} }] }],
     } as const;
     render(<EditorWorkbench view={overlayView} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
     fireEvent.click(screen.getByRole("button", { name: "화면 표시 · 1번째 장면 원본 열기" }));
     expect(screen.getByLabelText("화면 표시 · 1번째 장면 소스 미리보기").tagName).toBe("VIDEO");
   });

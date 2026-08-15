@@ -1,8 +1,10 @@
 import type { EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
 
+// The preview is what the creator is judging, so a session with no saved
+// choice opens with it alone. Both docks are one toolbar click away.
 export const defaultEditorUiState: EditorWorkbenchPersistedState = Object.freeze({
-  leftOpen: true,
-  rightOpen: true,
+  leftOpen: false,
+  rightOpen: false,
   activeDrawer: null,
   leftSize: 280,
   rightSize: 320,

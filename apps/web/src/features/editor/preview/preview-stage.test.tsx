@@ -16,8 +16,19 @@ describe("PreviewStage", () => {
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/exact.mp4");
     expect(screen.getByLabelText("편집본 미리보기")).not.toHaveAttribute("autoplay");
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
-    expect(screen.getByText("자막은 영상에 포함되어 재생됩니다.")).toBeInTheDocument();
+    expect(screen.getByText(/자막은 영상에 포함되어 재생됩니다/)).toBeInTheDocument();
     expect(container.querySelector(".vb-preview-stage__caption-overlay")).toBeNull();
+  });
+
+  it("puts the burned-caption note and the timeline status in one row, not two", () => {
+    // These were two separate <p> elements (16px + status row); merged into
+    // one so the stage recovers a line of vertical space.
+    const { container } = render(<PreviewStage {...current} />);
+    expect(container.querySelector(".vb-preview-stage__burned-caption")).toBeNull();
+    const status = container.querySelector(".vb-preview-stage__status");
+    expect(status).not.toBeNull();
+    expect(status).toHaveTextContent("자막은 영상에 포함되어 재생됩니다");
+    expect(status).toHaveTextContent("타임라인 0.0초");
   });
 
   it("announces the active burned caption from the actual player time without rendering a second visual caption", () => {

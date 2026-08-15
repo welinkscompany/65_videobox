@@ -5,6 +5,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
 import { parseWorkspaceLocation, resolveWorkspaceLocation } from "./routeManifest";
+import { editorUiStorageKey } from "../features/editor/workbench/editorUiState";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -206,7 +207,10 @@ describe("AppRouter URL ownership", () => {
 
   it("keeps one mounted editor while actual search transitions A to B to A refocus the active segment", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1920 });
-    window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: true, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
+    // Seed the project+session-scoped key directly: it takes priority over the
+    // legacy unscoped key, so an earlier test's default-closed state for the
+    // same project_a/session-a pair would otherwise shadow this seed.
+    window.localStorage.setItem(editorUiStorageKey("project_a", "session-a"), JSON.stringify({ leftOpen: true, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
     vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
     const manifest = vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({
       project_id: "project_a", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1, timeline_version: "v1",
@@ -477,10 +481,13 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(loadManifest).toHaveBeenCalledWith("project_a", "editing_session_draft_1"));
     expect(loadLatest).not.toHaveBeenCalled();
     const workbench = await screen.findByRole("region", { name: "편집 작업판" });
-    expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
-    expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "720");
+    // A fresh session opens with the preview alone -- the picture is what the
+    // creator is judging, not the docks. Both open with one toolbar click.
+    expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
+    expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "640");
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/projects/project_a/exact-previews/generation-1/content");
     expect(document.querySelectorAll("audio,video")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();

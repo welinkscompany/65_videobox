@@ -231,6 +231,7 @@ test("audition replaces the exact player without autoplay and can return to exac
   };
   await openEditor(page, state);
 
+  await page.getByRole("button", { name: "자산과 대본" }).click();
   await page.getByRole("button", { name: "B-roll · 1번째 장면 원본 열기" }).click();
   const audition = page.getByLabel("B-roll · 1번째 장면 소스 미리보기");
   await expect(audition).toHaveCount(1);

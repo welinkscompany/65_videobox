@@ -103,11 +103,13 @@ for (const [width, height] of snapshots) test(`editor workbench snapshot ${width
   const previewSlot = page.locator(".vb-editor-workbench__preview");
   await expect(preview).toBeVisible();
   await expect(page.locator("audio, video")).toHaveCount(0);
-  const expectedDensity = width >= 1600 ? "desktop-both" : width >= 1280 ? "desktop-single" : "drawer";
+  // A fresh session opens with the preview alone regardless of width, so the
+  // default never reaches desktop-both -- that needs both docks open first.
+  const expectedDensity = width >= 1280 ? "desktop-single" : "drawer";
   await expect(workbench).toHaveAttribute("data-editor-density", expectedDensity);
   await expect(page.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeVisible();
   const previewBox = await previewSlot.boundingBox();
-  expect(previewBox?.width).toBeGreaterThanOrEqual(width >= 1600 ? 720 : width >= 1280 ? 640 : 0);
+  expect(previewBox?.width).toBeGreaterThanOrEqual(width >= 1280 ? 640 : 0);
   await waitForStableCapture(page);
   await page.screenshot(playwrightSnapshotOptions(`e2e/snapshots/editor-workbench-${width}x${height}.png`));
 });
@@ -120,6 +122,11 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   await page.evaluate(() => localStorage.removeItem("videobox.editor-workbench.ui"));
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
   const workbench = page.getByRole("region", { name: "편집 작업판" });
+  // A fresh session opens preview-only now; open both docks to reach
+  // desktop-both, which this test's drag/reload assertions assume.
+  await page.getByRole("button", { name: "자산과 대본" }).click();
+  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
+  await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
   const rightDock = page.getByRole("complementary", { name: "유진과 편집 항목" });
   const before = await rightDock.boundingBox();
   const handle = await page.getByLabel("오른쪽 패널 크기 조절").boundingBox();

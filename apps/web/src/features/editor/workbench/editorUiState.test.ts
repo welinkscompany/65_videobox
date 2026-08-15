@@ -35,6 +35,21 @@ describe("editorUiState", () => {
     expect(localStorage.getItem(editorUiStorageKey("project-1", "session-1"))).not.toContain("segments");
   });
 
+  it("starts a fresh session with both docks closed so the preview owns the screen", () => {
+    // resolveEditorWorkbenchLayout's own fallback default was fixed to
+    // leftOpen:false/rightOpen:false earlier, but readEditorUiState always
+    // returns a complete, valid object -- so that fallback is never actually
+    // reached in the running app. This is the default that matters.
+    localStorage.clear();
+    expect(readEditorUiState("project-x", "session-x")).toEqual({
+      leftOpen: false,
+      rightOpen: false,
+      activeDrawer: null,
+      leftSize: 280,
+      rightSize: 320,
+    });
+  });
+
   it("does not leak state between sessions and rejects malformed state", () => {
     localStorage.clear();
     writeEditorUiState("project-1", "session-1", { ...defaultEditorUiState, leftOpen: false });
