@@ -65,11 +65,11 @@ Full HD 역전(`5f968ee8f`), "길이 확인 중" 거짓 문구(`f3b93de22`), foo
 - Test: `apps/web/src/features/editor/workbench/editor-workbench.test.tsx`
 - Test: `apps/web/e2e/exact-preview.spec.mjs` (Full HD 그림 크기 가드 상향)
 
-- [ ] RED: 기본 상태에서 출력 변형이 접혀 있고(헤더 ~40px), 토글로 펼치면 기존 내용 전부 접근 가능하며, 선택이 프로젝트별로 기억되는 것을 실패 테스트로 고정한다. 접힘 토글 버튼 문구는 창작자 언어("출력 변형 열기/닫기" 수준)로 §10.13 audit에 포함한다.
-- [ ] GREEN 최소 구현. 펼친 상태의 기존 기능(마스터/가로/세로/나란히, materialize/lock)은 그대로.
-- [ ] `exact-preview.spec.mjs`의 Full HD 가드를 상향한다: 접힘 기본에서 media shell ≥ 400px.
-- [ ] 실제 브라우저(1920×1080·1440×900): 그림 크기 재측정, 접기/펼치기 동작, 펼친 뒤 모든 버튼 접근, console error 0.
-- [ ] 커밋 `feat: collapse output variants until asked` → 배포 → 번들 해시 확인.
+- [x] RED: 기본 상태에서 출력 변형이 접혀 있고(헤더 ~40px), 토글로 펼치면 기존 내용 전부 접근 가능하며, 선택이 프로젝트별로 기억되는 것을 실패 테스트로 고정한다. 접힘 토글 버튼 문구는 창작자 언어("출력 변형 열기/닫기" 수준)로 §10.13 audit에 포함한다.
+- [x] GREEN 최소 구현. 펼친 상태의 기존 기능(마스터/가로/세로/나란히, materialize/lock)은 그대로.
+- [x] `exact-preview.spec.mjs`의 Full HD 가드를 상향한다: 접힘 기본에서 media shell ≥ 400px.
+- [x] 실제 브라우저(1920×1080·1440×900): 그림 크기 재측정, 접기/펼치기 동작, 펼친 뒤 모든 버튼 접근, console error 0.
+- [x] 커밋 `feat: collapse output variants until asked` → 배포 → 번들 해시 확인.
 
 **롤백:** 해당 커밋 revert. **예상 효과:** shell 316→약 400px (그림 약 +27%).
 
@@ -165,5 +165,26 @@ Full HD 역전(`5f968ee8f`), "길이 확인 중" 거짓 문구(`f3b93de22`), foo
 - 초안 A·B는 보류로 강등했다(위 "하지 않을 것" 1·2).
 
 ## 실행 기록
+
+### Task 1 완료 (2026-08-15 야간, `2bd820bf3`)
+
+실제 컨테이너 배포본에서 재측정.
+
+| viewport | 상태 | media shell | 그림 |
+|---|---|---|---|
+| 1920×1080 | 접힘(기본) | 393px | 696×314→391 (696×391) |
+| 1920×1080 | 펼침 | 316px (변형 128px) | 560×314 |
+| 1440×900 | 접힘 | 333px | 590×331 |
+
+접기↔펼치기 토글 정상, "세로" 탭까지 전체 기능 접근 가능, 프로젝트별 기억이 새로고침 뒤에도
+유지됨을 확인. console error 0건. 가로 overflow 0건.
+
+기존 테스트 2개가 변형 tab을 펼치기 없이 직접 클릭하고 있어 함께 고쳤다
+(`editor-workbench-route.test.tsx`의 서버 출력 변형 통합 테스트, `editor-workbench.spec.mjs`의
+동일 시나리오 E2E) — 새 토글 클릭 한 단계를 추가했을 뿐 검증 내용은 그대로다.
+
+발견: `565582c96`(Task 3 대상)이 fallback 기본값만 고쳐서 실제로는 적용되지 않는다.
+`editorUiState.ts`의 `defaultEditorUiState`가 항상 완전한 `{leftOpen:true,...}` 객체를
+채워 넘기므로 `resolveEditorWorkbenchLayout`의 fallback에 도달하지 않는다. Task 3에서 고친다.
 
 (각 Task 완료 시 여기에 실측값과 커밋 SHA를 추가한다.)
