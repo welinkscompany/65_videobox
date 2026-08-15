@@ -28,7 +28,27 @@ describe("resolveEditorWorkbenchLayout", () => {
     expect(layout.mode).toBe(viewportWidth === 1599 ? "desktop-single" : "drawer");
   });
 
+  it("opens with the preview alone so the edit is the largest thing on screen", () => {
+    // A creator judging a cut needs the picture, not two reference columns.
+    // Both docks are one toolbar click away.
+    const fresh = resolveEditorWorkbenchLayout({ viewportWidth: 1920, availableWorkbenchWidth: 1720, persisted: undefined });
+    expect(fresh).toMatchObject({ mode: "desktop-single", leftOpen: false, rightOpen: false });
+  });
+
+  it("keeps both docks shut when the creator shut them", () => {
+    const bothShut = { leftOpen: false, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320 };
+    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1920, availableWorkbenchWidth: 1720, persisted: bothShut }))
+      .toMatchObject({ mode: "desktop-single", leftOpen: false, rightOpen: false });
+  });
+
+  it("still honours a dock the creator pinned open", () => {
+    const leftOnly = { leftOpen: true, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320 };
+    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1920, availableWorkbenchWidth: 1720, persisted: leftOnly }))
+      .toMatchObject({ leftOpen: true, rightOpen: false });
+  });
+
   it("rejects stale persisted state that contains editor identity", () => {
-    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1440, availableWorkbenchWidth: 1130, persisted: { ...bothOpen, projectId: "wrong" } })).toMatchObject({ leftOpen: true, rightOpen: false, activeDrawer: null });
+    // Falls back to the default, which is now preview-only.
+    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1440, availableWorkbenchWidth: 1130, persisted: { ...bothOpen, projectId: "wrong" } })).toMatchObject({ leftOpen: false, rightOpen: false, activeDrawer: null });
   });
 });

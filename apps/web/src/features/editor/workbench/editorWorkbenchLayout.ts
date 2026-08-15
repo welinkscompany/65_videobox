@@ -17,7 +17,9 @@ export type EditorWorkbenchLayout = Readonly<{
 }>;
 
 export const editorWorkbenchPanelConstants = Object.freeze({ leftMinPx: 220, rightMinPx: 260, gutterPx: 12, bothPreviewMinPx: 720, singlePreviewMinPx: 640 });
-const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 };
+// The preview is what the creator is judging, so it starts alone. Both docks
+// are one toolbar click away and the choice is remembered per project.
+const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: false, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320 };
 
 function persistedState(value: unknown): EditorWorkbenchPersistedState {
   if (!value || typeof value !== "object") return defaultPersisted;
@@ -35,11 +37,14 @@ export function resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbench
   const bothPreview = available - leftMinPx - rightMinPx - gutterPx * 2;
   if (viewportWidth >= 1600 && state.leftOpen && state.rightOpen && bothPreview >= bothPreviewMinPx) return { ...state, mode: "desktop-both", activeDrawer: null, previewMinPx: bothPreviewMinPx };
 
-  const requestedLeft = state.leftOpen || !state.rightOpen;
-  const dockMin = requestedLeft ? leftMinPx : rightMinPx;
-  const singlePreview = available - dockMin - gutterPx;
+  // Shutting both docks is a real choice, not a state to correct: it gives the
+  // preview the whole width. Only pick a dock when the creator asked for one.
+  const noDock = !state.leftOpen && !state.rightOpen;
+  const requestedLeft = state.leftOpen;
+  const dockMin = noDock ? 0 : requestedLeft ? leftMinPx : rightMinPx;
+  const singlePreview = available - dockMin - (noDock ? 0 : gutterPx);
   const requiredSinglePreview = Math.max(singlePreviewMinPx, available / 2);
-  if (viewportWidth >= 1280 && singlePreview >= requiredSinglePreview) return { ...state, mode: "desktop-single", leftOpen: requestedLeft, rightOpen: !requestedLeft, activeDrawer: null, previewMinPx: singlePreviewMinPx };
+  if (viewportWidth >= 1280 && singlePreview >= requiredSinglePreview) return { ...state, mode: "desktop-single", leftOpen: !noDock && requestedLeft, rightOpen: !noDock && !requestedLeft, activeDrawer: null, previewMinPx: singlePreviewMinPx };
 
   return { ...state, mode: "drawer", leftOpen: false, rightOpen: false, activeDrawer: state.activeDrawer, previewMinPx: 0 };
 }
