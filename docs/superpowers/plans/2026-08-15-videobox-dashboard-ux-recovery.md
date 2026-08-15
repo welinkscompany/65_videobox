@@ -146,7 +146,7 @@ Full HD 역전(`5f968ee8f`), "길이 확인 중" 거짓 문구(`f3b93de22`), foo
 - [x] 단독으로 `.venv\Scripts\python.exe -m pytest -q` (다른 작업과 동시 금지).
 - [x] `npm --prefix apps/web test` · `run build` · `run test:e2e` · `run test:e2e:editor-workbench` · `git diff --check`.
 - [x] 실제 브라우저 1920×1080·1440×900에서 6개 경로 순회: console error 0, 4xx/5xx 0, 가로 overflow 0, 그림 크기 전후표 작성.
-- [ ] 스냅샷 5장 재생성 여부를 owner에게 물어 재승인 받는다(2026-08-15 재승인 절차와 동일). **미해결 — 아래 참고.**
+- [x] 스냅샷 재생성 여부를 owner에게 물어 재승인 받는다(2026-08-15 재승인 절차와 동일). 실제로는 10장(편집기 5+대시보드 5) 전부였다 — `b4910f738`로 재생성·재승인 완료(`docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md` "두 번째 재승인" 절). 2026-08-16 점검에서 재생성해 바이트 단위 일치까지 재확인했다.
 - [x] 핸드오프 문서에 결과 추가. **owner acceptance는 별도다** — owner가 직접 화면을 쓰고 판단하기 전에는 완료라 말하지 않는다.
 
 ---
