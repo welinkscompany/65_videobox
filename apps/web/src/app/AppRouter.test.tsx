@@ -62,7 +62,7 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
-  it("mounts the library workspace while keeping footage honest until its wave", async () => {
+  it("mounts the library workspace and keeps footage copy free of internal plan names", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const libraryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/library"] }));
     render(<AppRouter router={libraryRouter} />);
@@ -73,7 +73,9 @@ describe("AppRouter URL ownership", () => {
     const footageRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/footage"] }));
     render(<AppRouter router={footageRouter} />);
     expect(await screen.findByTestId("global-footage-page")).toHaveTextContent("촬영본 정리");
-    expect(screen.getByText(/Wave-2/)).toBeVisible();
+    // §10.13: dashboard copy names creator outcomes, never internal plan phases.
+    expect(screen.queryByText(/Wave-?\s?2/i)).toBeNull();
+    expect(screen.getByTestId("footage-workspace")).toHaveTextContent("VideoBox");
   });
 
   it("summarizes each project and exposes exactly one next action", async () => {
