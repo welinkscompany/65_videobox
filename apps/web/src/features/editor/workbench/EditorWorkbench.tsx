@@ -14,7 +14,7 @@ import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
-import { hasLegacyEditorUiState, readEditorUiState, writeEditorUiState } from "./editorUiState";
+import { hasLegacyEditorUiState, readEditorUiState, readVariantsCollapsed, writeEditorUiState, writeVariantsCollapsed } from "./editorUiState";
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
 import { VariantCompare } from "../variants/VariantCompare";
 import { VariantConflictPanel } from "../variants/VariantConflictPanel";
@@ -123,6 +123,7 @@ function EditorWorkbenchInstance({
     return { ...scoped, activeDrawer: useLegacy ? scoped.activeDrawer : (lastActiveDrawer ?? readActiveDrawer() ?? scoped.activeDrawer) };
   });
   const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
+  const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
   const [requestedSegmentFocusEpoch, setRequestedSegmentFocusEpoch] = useState(0);
@@ -195,6 +196,7 @@ function EditorWorkbenchInstance({
       const scoped = readEditorUiState(view.projectId, view.sessionId);
       const useLegacy = hasLegacyEditorUiState();
       setUi({ ...scoped, activeDrawer: useLegacy ? scoped.activeDrawer : (lastActiveDrawer ?? readActiveDrawer() ?? scoped.activeDrawer) });
+      setVariantsCollapsed(readVariantsCollapsed(view.projectId));
       setAuditionState({ routeKey: viewRouteKey, request: null });
       assetPreviewRequestId.current += 1;
       setAssetPreviewStates({});
@@ -304,6 +306,7 @@ function EditorWorkbenchInstance({
       };
     });
   };
+  const toggleVariantsCollapsed = () => setVariantsCollapsed((current) => { const next = !current; writeVariantsCollapsed(view.projectId, next); return next; });
   const openManualEditing = () => setUi((current) => layout.mode === "drawer" ? { ...current, activeDrawer: "left" } : { ...current, leftOpen: true });
   const rightDirector = director ? { ...director, onManualEdit: () => { director.onManualEdit(); openManualEditing(); }, onPreviewCandidate: previewDirectorCandidate } : undefined;
   const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
@@ -374,15 +377,16 @@ function EditorWorkbenchInstance({
         {rightVisible && <><ResizableHandle aria-label="오른쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "right")} /><ResizablePanel panelRef={rightPanelRef} defaultSize={`${ui.rightSize}px`} minSize="260px" onResize={(size) => setUi((current) => ({ ...current, rightSize: persistedPanelPixels(size, 260, current.rightSize) }))}>{dock("right")}</ResizablePanel></>}
       </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-scroll-owner="preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
     </div>
-    <section className="vb-editor-variants" aria-label="출력 변형">
-      <div className="vb-editor-variants__header"><div><p className="vb-editor-variants__eyebrow">연결된 출력</p><h2>가로·세로 결과를 한 박자에 비교</h2></div><span>마스터 편집은 하나, 출력은 안전하게 분기</span></div>
+    <section className="vb-editor-variants" aria-label="출력 변형" data-collapsed={variantsCollapsed}>
+      <div className="vb-editor-variants__header"><div><p className="vb-editor-variants__eyebrow">연결된 출력</p><h2>가로·세로 결과를 한 박자에 비교</h2></div><Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "출력 변형 펼치기" : "출력 변형 접기"}</Button></div>
+      {!variantsCollapsed ? <><span className="vb-editor-variants__hint">마스터 편집은 하나, 출력은 안전하게 분기</span>
       <VariantSelector selected={variantMode} onSelect={setVariantMode} />
       {variantMode === "master" ? <p className="vb-editor-variants__master-note">현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.</p> : <>
         <VariantCompare master={variantMaster} variant={variantPreview} onSeek={seekPlayback} />
         {serverVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={serverVariant} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onCreateHighlight={onVariantCreateHighlight} /> : null}
       </>}
       {showVariantCompare ? <VariantConflictPanel conflicts={variantPreview.conflicts} onKeep={(field) => resolveConflict(field, "keep_local")} onRebase={(field) => resolveConflict(field, "rebase_master")} /> : null}
-      {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} /> : null}
+      {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} /> : null}</> : null}
     </section>
     <TimelineDock
       isSaving={isSavingTimeline}

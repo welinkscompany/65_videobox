@@ -4162,6 +4162,7 @@ describe("서버 출력 변형 연결", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await screen.findByRole("region", { name: "편집 작업판" });
+    fireEvent.click(screen.getByRole("button", { name: "출력 변형 펼치기" }));
     fireEvent.click(screen.getByRole("tab", { name: "세로" }));
     expect(await screen.findByText("서버 변형 버전 3")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));

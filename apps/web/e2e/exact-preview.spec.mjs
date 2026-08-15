@@ -95,8 +95,9 @@ test("a Full HD screen gives the preview more height than a 1440x900 screen, not
   const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
   const measure = () => page.evaluate(() => {
     const video = document.querySelector(".vb-preview-stage__media-shell video");
-    if (!video) throw new Error("preview video is missing");
-    return { videoHeight: video.getBoundingClientRect().height };
+    const shell = document.querySelector(".vb-preview-stage__media-shell");
+    if (!video || !shell) throw new Error("preview video is missing");
+    return { videoHeight: video.getBoundingClientRect().height, shellHeight: shell.getBoundingClientRect().height };
   });
 
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -112,7 +113,9 @@ test("a Full HD screen gives the preview more height than a 1440x900 screen, not
   // larger screen fell back to the loose base rules and rendered a smaller
   // preview than the smaller screen did.
   expect(fullHd.videoHeight).toBeGreaterThanOrEqual(medium.videoHeight);
-  expect(fullHd.videoHeight).toBeGreaterThanOrEqual(260);
+  // Output variants collapse by default now (dashboard UX recovery Task 1),
+  // reclaiming vertical space for the preview shell.
+  expect(fullHd.shellHeight).toBeGreaterThanOrEqual(400);
 });
 
 test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {

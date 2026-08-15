@@ -66,6 +66,7 @@
   border-top: 1px solid hsl(var(--border));
   background: hsl(var(--card));
 }
+.vb-editor-variants[data-collapsed="true"] { max-height: none; padding: 0.5rem 1.25rem; }
 .vb-editor-variants__header, .vb-editor-variants__pane header {
   display: flex;
   align-items: center;
@@ -73,7 +74,7 @@
   gap: 1rem;
 }
 .vb-editor-variants__header h2 { margin: 0.15rem 0 0; font-size: 1rem; }
-.vb-editor-variants__header > span, .vb-editor-variants__master-note { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
+.vb-editor-variants__hint, .vb-editor-variants__master-note { color: hsl(var(--muted-foreground)); font-size: 0.8rem; }
 .vb-editor-variants__eyebrow { margin: 0; color: hsl(var(--muted-foreground)); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .vb-editor-variants__selector { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .vb-editor-variants__compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; position: relative; }

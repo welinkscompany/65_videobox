@@ -207,6 +207,7 @@ test("server-backed output variants keep revision lineage through materialize, l
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
+  await page.getByRole("button", { name: "출력 변형 펼치기" }).click();
   await page.getByRole("tab", { name: "세로" }).click();
   await expect(page.getByText("서버 변형 버전 1")).toBeVisible();
   await page.getByRole("button", { name: "크롭 저장" }).click();

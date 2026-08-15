@@ -82,3 +82,27 @@ export function writeEditorUiState(
     // UI persistence is best-effort and never editing-data authority.
   }
 }
+
+// Output variants are a comparison tool, not something judged on every visit,
+// so whether the creator has them open is remembered per project (not per
+// editing session -- opening it once for a project should stick).
+function variantsCollapsedStorageKey(projectId: string): string {
+  return `videobox.editor-workbench.variants-collapsed:${encodeURIComponent(projectId)}`;
+}
+
+export function readVariantsCollapsed(projectId: string): boolean {
+  try {
+    const raw = window.localStorage.getItem(variantsCollapsedStorageKey(projectId));
+    return raw === null ? true : raw === "true";
+  } catch {
+    return true;
+  }
+}
+
+export function writeVariantsCollapsed(projectId: string, collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(variantsCollapsedStorageKey(projectId), String(collapsed));
+  } catch {
+    // UI persistence is best-effort and never editing-data authority.
+  }
+}

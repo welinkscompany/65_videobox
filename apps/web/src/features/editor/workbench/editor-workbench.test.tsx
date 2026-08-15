@@ -485,6 +485,36 @@ describe("EditorWorkbench", () => {
     expect(screen.getByLabelText("화면 표시 · 1번째 장면 소스 미리보기").tagName).toBe("VIDEO");
   });
 
+  it("starts with output variants collapsed, expands on demand, and remembers the choice per project", async () => {
+    const { unmount } = render(<EditorWorkbench view={view} />);
+    const toggle = screen.getByRole("button", { name: "출력 변형 펼치기" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    // Collapsed: only the header/toggle are present, none of the expanded body.
+    expect(screen.queryByRole("tablist", { name: "출력 변형 보기" })).toBeNull();
+    expect(screen.queryByText("현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(await screen.findByRole("button", { name: "출력 변형 접기" })).toHaveAttribute("aria-expanded", "true");
+    // Expanded: everything that was there before this task is still reachable.
+    expect(screen.getByRole("tablist", { name: "출력 변형 보기" })).toBeInTheDocument();
+    expect(screen.getByText("현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.")).toBeInTheDocument();
+
+    unmount();
+    // Same project+session: remembers expanded.
+    render(<EditorWorkbench view={view} />);
+    expect(screen.getByRole("button", { name: "출력 변형 접기" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps a fresh project's output variants collapsed even after another project was expanded", async () => {
+    const { unmount } = render(<EditorWorkbench view={view} />);
+    fireEvent.click(screen.getByRole("button", { name: "출력 변형 펼치기" }));
+    expect(await screen.findByRole("button", { name: "출력 변형 접기" })).toBeInTheDocument();
+    unmount();
+
+    render(<EditorWorkbench view={{ ...view, projectId: "project-b", sessionId: "session-b" }} />);
+    expect(screen.getByRole("button", { name: "출력 변형 펼치기" })).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("excludes an image overlay from the video or audio audition player", () => {
     const imageOverlayView = {
       ...view,
