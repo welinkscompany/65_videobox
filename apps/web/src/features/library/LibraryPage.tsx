@@ -37,6 +37,10 @@ export function LibraryPage() {
   const [ingestItems, setIngestItems] = useState<LibraryIngestItem[]>([]);
   const failedFiles = useRef(new Map<string, File>());
   const epoch = useRef(0);
+  // A cross-entry link (e.g. from the footage organizer) names the asset it
+  // wants selected. Only the first successful load honors it, so a later
+  // reload never overrides a choice the owner made in the meantime.
+  const requestedAssetId = useRef<string | null>(new URLSearchParams(window.location.search).get("library_asset_id"));
 
   const load = useCallback(async () => {
     const currentEpoch = ++epoch.current;
@@ -45,7 +49,10 @@ export function LibraryPage() {
       const result = await api.listLibraryAssets({ includeTrashed: activeFilter === "trash", q: search || undefined, limit: 500 });
       if (currentEpoch !== epoch.current) return;
       setAssets(result.assets);
-      setSelected((previous) => previous ? result.assets.find((item) => item.library_asset_id === previous.library_asset_id) ?? null : result.assets[0] ?? null);
+      const requestedId = requestedAssetId.current;
+      requestedAssetId.current = null;
+      const requested = requestedId ? result.assets.find((item) => item.library_asset_id === requestedId) : null;
+      setSelected((previous) => requested ?? (previous ? result.assets.find((item) => item.library_asset_id === previous.library_asset_id) ?? null : result.assets[0] ?? null));
     } catch {
       if (currentEpoch === epoch.current) setError("라이브러리를 불러오지 못했어요.");
     } finally { if (currentEpoch === epoch.current) setLoading(false); }

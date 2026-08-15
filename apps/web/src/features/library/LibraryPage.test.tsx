@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type LibraryAsset } from "../../api";
@@ -143,5 +143,35 @@ describe("LibraryPage", () => {
     expect(screen.getAllByRole("button", { name: /파일 추가/ })).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "복원" }));
     await waitFor(() => expect(api.restoreLibraryAsset).toHaveBeenCalledWith("user_asset_1"));
+  });
+
+  it("offers a footage-organizer entry for the selected video, and none for audio", async () => {
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+
+    const entry = await screen.findByRole("link", { name: "구간 정리하기" });
+    expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
+    cleanup();
+
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [asset({ media_type: "music", user_metadata: { filename: "bgm.mp3" } })], total: 1 });
+    const audioView = render(<LibraryPage />);
+    await audioView.findAllByText("bgm.mp3");
+    fireEvent.click(audioView.getByRole("button", { name: "bgm.mp3 미리 듣기" }));
+    expect(await audioView.findByTestId("library-preview-player")).toBeInTheDocument();
+    expect(audioView.queryByRole("link", { name: "구간 정리하기" })).toBeNull();
+  });
+
+  it("preselects the video asset a footage-organizer link named in the URL", async () => {
+    window.history.replaceState({}, "", "/library?library_asset_id=user_asset_1");
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({
+      assets: [asset({ library_asset_id: "user_asset_0", user_metadata: { filename: "first.mp4" } }), asset()],
+      total: 2,
+    });
+
+    render(<LibraryPage />);
+
+    expect(await screen.findByTestId("library-preview-player")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
   });
 });

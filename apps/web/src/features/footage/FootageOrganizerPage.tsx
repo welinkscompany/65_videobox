@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type FootageProposal, type FootageProposalPreview, type FootageSegment, type FootageSequence, type FootageSequencePreview, type LibraryAsset, type YujinFootageInterpretation } from "../../api";
 import { Button } from "../../components/ui/button";
 import { FootagePreview } from "./FootagePreview";
@@ -29,12 +29,21 @@ export function FootageOrganizerPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [yujinCandidate, setYujinCandidate] = useState<YujinFootageInterpretation | null>(null);
+  // A cross-entry link (e.g. from the library) names the source it wants
+  // selected. Only the first successful load honors it, so a later "다시
+  // 시도" reload never overrides a choice the owner made in the meantime.
+  const requestedAssetId = useRef<string | null>(new URLSearchParams(window.location.search).get("library_asset_id"));
 
   const loadAssets = async () => {
     setLoading(true); setError(null);
     try {
       const result = await api.listLibraryAssets({ mediaType: "broll", limit: 100 });
-      setAssets(result.assets.filter((asset) => asset.lifecycle === "ready"));
+      const ready = result.assets.filter((asset) => asset.lifecycle === "ready");
+      setAssets(ready);
+      const requestedId = requestedAssetId.current;
+      requestedAssetId.current = null;
+      const requested = requestedId ? ready.find((asset) => asset.library_asset_id === requestedId) : null;
+      if (requested) selectAsset(requested);
     } catch { setError("촬영본을 불러오지 못했습니다."); } finally { setLoading(false); }
   };
   useEffect(() => { void loadAssets(); }, []);

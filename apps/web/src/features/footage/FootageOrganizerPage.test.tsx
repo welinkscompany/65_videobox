@@ -77,6 +77,25 @@ describe("FootageOrganizerPage", () => {
     expect(api.proposeFootage).not.toHaveBeenCalled();
   });
 
+  it("preselects the source a library entry named in the URL", async () => {
+    window.history.replaceState({}, "", "/footage?library_asset_id=asset-1");
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [{ ...asset, library_asset_id: "asset-0", user_metadata: { filename: "other.mp4" } }, asset], total: 2 });
+
+    render(<FootageOrganizerPage />);
+
+    expect(await screen.findByRole("heading", { name: "clip.mp4" })).toBeInTheDocument();
+    window.history.replaceState({}, "", "/footage");
+  });
+
+  it("links the selected source back to its library preview", async () => {
+    render(<FootageOrganizerPage />);
+    await screen.findByTestId("footage-workspace");
+    fireEvent.click(screen.getByRole("button", { name: /clip\.mp4/ }));
+
+    const entry = await screen.findByRole("link", { name: "라이브러리에서 보기" });
+    expect(entry).toHaveAttribute("href", "/library?library_asset_id=asset-1");
+  });
+
   it("keeps proposal changes local until explicit preview/apply and exposes frame steps", async () => {
     render(<FootageOrganizerPage />);
     fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
