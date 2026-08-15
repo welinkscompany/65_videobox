@@ -31,6 +31,25 @@ describe("product shell", () => {
     expect(view.container.querySelectorAll("main")).toHaveLength(1);
   });
 
+  it("labels each sidebar section for a sighted user, not only through aria-label", () => {
+    // The three sections (global destinations, project switcher, project
+    // stages) already had distinct landmarks for assistive tech, but nothing
+    // on screen told a sighted user where one section ended and the next
+    // began -- they all read as one continuous column of buttons.
+    render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
+
+    const global = screen.getByRole("navigation", { name: "전체 메뉴" });
+    expect(within(global).getByText("전체 메뉴")).toBeVisible();
+    const switcher = screen.getByLabelText("프로젝트 전환");
+    expect(within(switcher).getByText("현재 프로젝트")).toBeVisible();
+    const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
+    expect(within(stages).getByText("프로젝트 단계")).toBeVisible();
+
+    // Same four links, same five buttons, same targets -- labeling only.
+    expect(within(global).getAllByRole("link")).toHaveLength(4);
+    expect(within(stages).getAllByRole("button")).toHaveLength(5);
+  });
+
   it("does not render project stages when no project is open", () => {
     render(<ProductShell projectId="" projects={[]} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
 
