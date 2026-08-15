@@ -389,3 +389,24 @@ passed)과 실제 브라우저 6개 경로×2 해상도 순회(console error 0, 
 완성본을 처음부터 끝까지 직접 보고 들은 적이 없고, 자막 타이밍·음량·B-roll 밀도도
 owner 승인이 없다. 자동 검증과 실제 브라우저 확인은 owner acceptance를 대신하지
 않는다.
+
+### 2026-08-15 추가 — 스냅샷 두 번째 재승인, Start 모드 실검증 (HEAD `b4910f738`)
+
+**스냅샷 재승인 범위가 처음 생각보다 컸다.** owner 승인을 받고 재생성해 보니
+`editor-workbench-*.png` 5장뿐 아니라 `product-shell-*.png` 5장까지 **총 10장 전부**
+sha256이 달랐다. Task 1~3이 편집기 레이아웃을 더 바꿨고, Task 4~5가
+`ProductShell.tsx`를 두 번 바꿔서 그 스냅샷도 함께 낡아 있었다. 10장 전부
+재생성하고 manifest를 갱신했고(`b4910f738`), 새 스냅샷 2장(1920px 편집기·대시보드)을
+직접 열어 Task 4·5 결과(사이드바 세 구획 라벨, 홈 단일 문구)가 실제로 담겼는지
+육안 확인했다. `docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md`에
+"2026-08-15 두 번째 재승인" 절로 기록했다.
+
+**`owner-ready.ps1 -Mode Start`를 실제로 돌려서 확인했다.** 결과: "바로 사용할
+준비가 됐습니다", "VideoBox가 시작됐고 화면 연결 준비가 끝났습니다" — 깨끗하게
+통과했다. **이번 세션 내내 `-Mode Start -Rebuild` 뒤에 나왔던
+"[FAIL] 연결 준비를 확인하지 못했습니다"는 전부 타임아웃이 너무 짧았던 것이지
+실제 시작 실패가 아니었다.** `-TimeoutSec 8~20`으로는 FAIL이 났지만
+`-TimeoutSec 30`으로는 한 번에 통과했다. **다음 세션 참고: rebuild 뒤 준비 확인은
+`-TimeoutSec 30` 이상으로 주고, 그래도 FAIL이면 그때 실제 문제로 조사한다.**
+컨테이너 4개 전부 healthy, workspace는 재시작 없이 계속 떠 있었다. 실제 브라우저로
+`/projects/my-project/home`을 열어 console error 0건, Task 4 결과 유지를 확인했다.
