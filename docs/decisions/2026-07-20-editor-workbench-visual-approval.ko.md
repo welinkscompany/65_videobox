@@ -26,3 +26,24 @@ owner가 Playwright 스냅샷 5장의 재생성을 명시 승인했다.
 **이 재승인의 범위는 "기록을 현재 코드와 맞춘다"까지다.** 스냅샷은 E2E fixture 상태
 (미리보기 없음)를 담고 있어 실제 편집 결과물의 화질·타이밍 승인과는 다르다.
 owner의 실제 시청 승인은 여전히 남아 있다.
+
+## 2026-08-15 두 번째 재승인 — 대시보드 UX 개편 이후
+
+owner가 `docs/superpowers/plans/2026-08-15-videobox-dashboard-ux-recovery.md`
+Task 1~6 완료 뒤 스냅샷 재생성을 다시 명시 승인했다.
+
+배경: 위 첫 재승인 이후 같은 날 세션에서 편집 작업판 레이아웃이 여러 번 더
+바뀌었다(출력 변형 접기 기본값, 소스 확인을 dock으로 이동, 자막 안내 통합, 편집기
+기본 시작 상태). 그 결과 `editor-workbench-*.png` 5장이 다시 낡았고, 이번에는
+`ProductShell.tsx`도 두 번 바뀌어(홈 문구 중복 제거, 사이드바 구획 라벨)
+`product-shell-*.png` 5장도 함께 낡았다 — **총 10장 전부** sha256이 달랐다.
+
+- 갱신 대상: `editor-workbench-*.png` 5장 + `product-shell-*.png` 5장,
+  `playwright-snapshot-manifest.json`의 해당 `bytes`/`sha256` 10줄
+- `<!-- editor-workbench-approval -->` marker는 이번에도 건드리지 않았다(첫 재승인과
+  같은 이유 — 프로토타입 매니페스트 digest이고 무관).
+- 재생성 후 `npm --prefix apps/web run test:e2e` 42개 전부 통과, manifest 무결성
+  검증(`verify-snapshot-manifest.mjs`) 통과를 확인했다.
+
+이번에도 범위는 "기록을 현재 코드와 맞춘다"까지다. owner의 실제 시청·승인은
+여전히 별도이고 완료되지 않았다.

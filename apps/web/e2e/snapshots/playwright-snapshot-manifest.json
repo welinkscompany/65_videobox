@@ -18,15 +18,15 @@
     }
   },
   "snapshots": [
-    { "path": "editor-workbench-1280x800.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 78666, "sha256": "ca2310724eed1e7163b08a0fec69b8b8460ee50bba3001e61d6ed1066bc69230" },
-    { "path": "editor-workbench-1440x900.png", "viewport": { "width": 1440, "height": 900 }, "bytes": 88412, "sha256": "95161aa59b92376ab5e56478aeca5e605e2dea4dcdc8bbf9b8c96051ab611bbb" },
-    { "path": "editor-workbench-1920x1080.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 126009, "sha256": "b28c07d1a66ef26dea9717a0d848983293e189fce0bfc200f0697d6137336038" },
-    { "path": "editor-workbench-390x844.png", "viewport": { "width": 390, "height": 844 }, "bytes": 48134, "sha256": "39e380b7bacd299023544f8ccedf0a199acaf4175e228b6fa95a612fa298a9e3" },
-    { "path": "editor-workbench-768x1024.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 54424, "sha256": "3755742e75ae6672cd23d9a85f84afb81297af844366cf0a22c6c351b5a575a7" },
-    { "path": "product-shell-1280.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 53644, "sha256": "8b2c7a7ff650e2347d5b1c6a42f683faaeea2afc5286dce2f9293ac7ac580a42" },
-    { "path": "product-shell-1440.png", "viewport": { "width": 1440, "height": 960 }, "bytes": 55779, "sha256": "c9e6405e4b01b3dd82fe32fd60e9c98f7ff1458b0024931de86707a1fe5a8d8e" },
-    { "path": "product-shell-1920.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 59226, "sha256": "85d85ab4ee401b1fcf2c066a043e93752cacfab2efd89ee8f8901bd2f6a5c813" },
-    { "path": "product-shell-390.png", "viewport": { "width": 390, "height": 844 }, "bytes": 47112, "sha256": "21d3430b391abeca286c353c1b21f2ec1e7bec6e85fb30e37138b33053e9b8cb" },
-    { "path": "product-shell-768.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 49929, "sha256": "c9c2f630def83f5d2a4a577d2721c1ff47213d22cb6cdc66ef932c7858240ad9" }
+    { "path": "editor-workbench-1280x800.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 53293, "sha256": "f8a1e14321e927ad6f5947e84de9e111d6452395e6e3544db83608cd56687a35" },
+    { "path": "editor-workbench-1440x900.png", "viewport": { "width": 1440, "height": 900 }, "bytes": 55142, "sha256": "b7bfeaf4806c281a702e516375ac3ba8e3a5403074e708cafa94d3e772d0d33d" },
+    { "path": "editor-workbench-1920x1080.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 60467, "sha256": "3eac1674a54172c7209f0df2b5d9f176a6f2680cab3ccd8f19767ff48816305a" },
+    { "path": "editor-workbench-390x844.png", "viewport": { "width": 390, "height": 844 }, "bytes": 46552, "sha256": "fcd4ff9b509cdc48cb3cdc0b01462ca6096bf86d4dbc255d8e6dfd8738944013" },
+    { "path": "editor-workbench-768x1024.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 52203, "sha256": "75bfcfe5c4e5c1ec8851e0244adfea7e0d6ddb6916fc4d30aa7009d7dd53e913" },
+    { "path": "product-shell-1280.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 67583, "sha256": "e49c2f90bedc58a98eaa7528e03c9e5066909a768fd58815541f1d45feeccb16" },
+    { "path": "product-shell-1440.png", "viewport": { "width": 1440, "height": 960 }, "bytes": 84795, "sha256": "27c06bb2b0c3b63e63dc9b8793eb3bef580f6f120d94f11f80d70695864e8c25" },
+    { "path": "product-shell-1920.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 87009, "sha256": "d754702ccfc111a729560516bbc784b611aa7001c37e4adf55afffba7563e6b0" },
+    { "path": "product-shell-390.png", "viewport": { "width": 390, "height": 844 }, "bytes": 25185, "sha256": "824475c93e793589133c05dd60742a3a1ae0a68c15867be768eb5d8eed4c876a" },
+    { "path": "product-shell-768.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 80023, "sha256": "2f84ecf4374d1a57ba609a908a387cfb525db8169411411834e07653faa0fdb1" }
   ]
 }
