@@ -322,6 +322,28 @@ describe("EditorWorkbench", () => {
     expect(container.querySelectorAll("audio, video")).toHaveLength(1);
   });
 
+  it("keeps source review in the asset dock, not under the preview, and reaches it from a narrow drawer too", () => {
+    const narrationView = {
+      ...view,
+      playback: { auditionUrls: { "asset-n": "/api/projects/project-a/assets/asset-n/content" }, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-previews/g4/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 1 } },
+      tracks: [{ trackId: "narration", role: "narration", clips: [{ clipId: "clip-n", segmentId: "segment-n", type: "narration", assetId: "asset-n", assetUri: null, startSec: 0, endSec: 1, controls: {} }] }],
+    } as const;
+    render(<EditorWorkbench view={narrationView} />);
+    const preview = screen.getByRole("region", { name: "미리보기" });
+    const dock = screen.getByRole("complementary", { name: "자산과 대본" });
+    const button = screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" });
+    expect(preview.contains(button)).toBe(false);
+    expect(dock.contains(button)).toBe(true);
+    cleanup();
+
+    // Narrow drawer mode: the same button must still be reachable, not stranded.
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    render(<EditorWorkbench view={narrationView} />);
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    fireEvent.click(screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" }));
+    expect(screen.getByLabelText("내레이션 · 1번째 장면 소스 미리보기").tagName).toBe("AUDIO");
+  });
+
   it("resets selection, seek, and audition media when a different route reuses the same segment id", () => {
     const routeA = {
       ...view,

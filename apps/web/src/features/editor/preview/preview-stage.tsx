@@ -139,7 +139,6 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     {mode.kind === "exact" && <p className="vb-preview-stage__burned-caption">자막은 영상에 포함되어 재생됩니다.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
-    {localSources.length > 0 && <section aria-label="소스 미리보기 목록" className="vb-preview-stage__sources"><h3>소스 확인</h3><p>편집본에 적용하지 않고 원본만 확인합니다.</p><div>{localSources.map((source) => <button data-native-control="audition-source" key={source.id} type="button" onClick={() => showAudition(source)} aria-label={`${source.label} 원본 열기`}>{source.label}</button>)}</div></section>}
   </section>;
 }
 

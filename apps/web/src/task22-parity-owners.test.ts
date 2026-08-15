@@ -86,7 +86,7 @@ const nativeControlAllowlist = {
     reason: "Media audition transport directly coordinates the owned audio and video elements.",
   },
   "features/editor/preview/preview-stage.tsx": {
-    controls: ["button:audition-source", "button:refresh-exact", "button:return-exact", "button:toggle-playback"],
+    controls: ["button:refresh-exact", "button:return-exact", "button:toggle-playback"],
     reason: "The one-player preview transport directly owns playback and audition state.",
   },
   "features/editor/timeline/TimelineDock.tsx": {

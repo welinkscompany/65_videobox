@@ -74,16 +74,21 @@ describe("PreviewStage", () => {
   });
 
   it("refuses non-local exact and audition URLs before a browser can request them", () => {
-    const { container } = render(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "https://outside.invalid/exact.mp4", artifactRevision: 4 }} sources={[{ ...current.sources[0], url: "https://outside.invalid/source.mp4" }]} />);
+    // The source-review buttons that used to trigger this live in the asset
+    // dock now (Task 2), so the production path here is the auditionRequest
+    // prop -- the same one the dock uses.
+    const { container, rerender } = render(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "https://outside.invalid/exact.mp4", artifactRevision: 4 }} />);
     expect(container.querySelector("video, audio")).toBeNull();
-    expect(screen.queryByRole("button", { name: /원본 열기/ })).toBeNull();
+
+    rerender(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "https://outside.invalid/exact.mp4", artifactRevision: 4 }} auditionRequest={{ requestId: 1, source: { ...current.sources[0], url: "https://outside.invalid/source.mp4" } }} />);
+    expect(container.querySelector("video, audio")).toBeNull();
   });
 
   it("uses the same shell for a typed source audition, stops exact media, and restores exact mode", () => {
-    const { container } = render(<PreviewStage {...current} />);
+    const { container, rerender } = render(<PreviewStage {...current} />);
     const exact = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
     const pause = vi.spyOn(exact, "pause").mockImplementation(() => undefined);
-    fireEvent.click(screen.getByRole("button", { name: "B-roll A 원본 열기" }));
+    rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
     expect(pause).toHaveBeenCalled();
     expect(screen.getByLabelText("B-roll A 소스 미리보기")).toHaveAttribute("src", "/api/assets/a/content");
     expect(screen.getByLabelText("B-roll A 소스 미리보기")).not.toHaveAttribute("autoplay");
@@ -94,8 +99,8 @@ describe("PreviewStage", () => {
   });
 
   it("guides a browser-incompatible source back to the exact edited preview", () => {
-    render(<PreviewStage {...current} />);
-    fireEvent.click(screen.getByRole("button", { name: "B-roll A 원본 열기" }));
+    const { rerender } = render(<PreviewStage {...current} />);
+    rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
     const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
     Object.defineProperty(audition, "videoWidth", { configurable: true, value: 0 });
     Object.defineProperty(audition, "videoHeight", { configurable: true, value: 0 });
@@ -111,14 +116,14 @@ describe("PreviewStage", () => {
 
   it("replaces an audition compatibility notice with current exact-preview recovery", async () => {
     const rendered = render(<PreviewStage {...current} />);
-    fireEvent.click(screen.getByRole("button", { name: "B-roll A 원본 열기" }));
+    rendered.rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
     const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
     Object.defineProperty(audition, "videoWidth", { configurable: true, value: 0 });
     Object.defineProperty(audition, "videoHeight", { configurable: true, value: 0 });
     fireEvent.loadedMetadata(audition);
     expect(screen.getByRole("alert")).toBeInTheDocument();
 
-    rendered.rerender(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} />);
+    rendered.rerender(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
 
     await waitFor(() => expect(screen.queryByText("원본 화면을 열지 못했어요")).toBeNull());
     expect(screen.getByRole("button", { name: "미리보기 새로 만들기" })).toBeInTheDocument();
@@ -165,7 +170,10 @@ describe("PreviewStage", () => {
     const stageRule = css.match(/^\.vb-preview-stage\s*\{([^}]*)\}/m)?.[1] ?? "";
     const mediaRule = css.match(/^\.vb-preview-stage__media-shell\s*\{([^}]*)\}/m)?.[1] ?? "";
     const videoRule = css.match(/^\.vb-preview-stage__media-shell video\s*\{([^}]*)\}/m)?.[1] ?? "";
-    const sourcesRule = css.match(/^\.vb-preview-stage__sources\s*\{([^}]*)\}/m)?.[1] ?? "";
+    // Source review moved into the asset dock (Task 2), which already scrolls
+    // its own overflow, so the preview stage no longer needs a scrolling
+    // sources section of its own.
+    const dockRule = css.match(/^\.vb-editor-workbench__dock\s*\{([^}]*)\}/m)?.[1] ?? "";
 
     expect(previewRule).toContain("overflow: hidden");
     expect(stageRule).toContain("height: 100%");
@@ -176,7 +184,7 @@ describe("PreviewStage", () => {
     expect(videoRule).toContain("min-height: 0");
     expect(videoRule).toContain("max-height: 100%");
     expect(videoRule).toContain("object-fit: contain");
-    expect(sourcesRule).toContain("overflow: auto");
+    expect(dockRule).toContain("overflow: auto");
   });
 
   it("bounds the medium-width output variants panel so it cannot starve the preview", () => {
@@ -185,7 +193,6 @@ describe("PreviewStage", () => {
 
     expect(mediumLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
     expect(mediumLayout).toContain(".vb-editor-workbench__timeline { max-height: 4rem; padding: 0.5rem 0.75rem; }");
-    expect(mediumLayout).toContain(".vb-preview-stage__sources { max-height: 4rem; }");
   });
 
   it("bounds output variants and timeline on Full HD so the preview remains visible", () => {
@@ -207,7 +214,6 @@ describe("PreviewStage", () => {
     // a 1440x900 screen, which the 768-1499px block already compacts.
     expect(wideLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
     expect(wideLayout).toContain(".vb-editor-workbench__timeline { max-height: 6rem; }");
-    expect(wideLayout).toContain(".vb-preview-stage__sources { max-height: 5rem; }");
   });
 
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
@@ -229,7 +235,7 @@ describe("PreviewStage", () => {
     failed.unmount();
 
     const rendered = render(<PreviewStage {...current} />);
-    fireEvent.click(screen.getByRole("button", { name: "B-roll A 원본 열기" }));
+    rendered.rerender(<PreviewStage {...current} auditionRequest={{ requestId: 1, source: current.sources[0] }} />);
     const audition = screen.getByLabelText("B-roll A 소스 미리보기") as HTMLVideoElement;
     const play = vi.spyOn(audition, "play").mockResolvedValue(undefined);
     const returnButton = screen.getByRole("button", { name: "편집본으로 돌아가기" });
