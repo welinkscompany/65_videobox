@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
+from videobox_core_engine.library_ingest import LibraryIngestService
+from videobox_storage.library_user_asset_store import LibraryUserAssetStore
+
 # Mirrors services/api/src/videobox_api/orchestration.py's
 # BROLL_VIDEO_EXTENSIONS. Duplicated rather than imported: core-engine must
 # not depend on the services/api layer above it.
@@ -129,6 +132,13 @@ class MediaInboxConfig:
     # 자리가 여기다 -- `새 영상`은 영상만, `새 음악`과 `새 효과음`은 오디오만
     # 받는다. 보관함은 셋이 함께 쓴다(`감시폴더.parent / "자산화_완료"`).
     accepted_extensions: frozenset[str] = VIDEO_EXTENSIONS
+    # New Drive-mirror callers opt into the shared copy-only ingest pipeline.
+    # ``False`` retains the historical local-watch move contract for callers
+    # that have not migrated yet; the API bootstrap sets this to ``True``.
+    copy_only: bool = False
+    archive_source: bool = False
+    media_type: str = "broll"
+    ingest_store: LibraryUserAssetStore | None = None
 
 
 @dataclass(slots=True)
@@ -192,6 +202,28 @@ def run_inbox_cycle(
                 report.skipped.append(name)
                 continue
             source_hash = _sha256_file(source)
+            if config.copy_only:
+                ingest_store = config.ingest_store or LibraryUserAssetStore(
+                    config.library_root.parent / ".videobox-library-state"
+                )
+                result = LibraryIngestService(
+                    store=ingest_store, managed_root=config.library_root
+                ).ingest(
+                    media_type=config.media_type,
+                    source=source,
+                    filename=name,
+                    idempotency_key=f"media-inbox:{source.resolve()}:{source_hash}",
+                    provenance={"source": "drive_mirror", "watch_path": str(config.watch_path)},
+                )
+                if result.get("duplicate"):
+                    report.duplicates.append(name)
+                else:
+                    report.moved.append(name)
+                # Archiving is a separate, explicit policy.  The normal Drive
+                # mirror path leaves its source untouched after copying.
+                if config.archive_source and config.archive_root is not None:
+                    _archive_original(source, config.archive_root, source_hash)
+                continue
             if source_hash in existing_library_hashes:
                 # Redundant footage already in the library. File it if there is
                 # somewhere to file it -- it is still the owner's footage, and
@@ -267,6 +299,29 @@ def import_media_inbox_asset_to_project(
     source_path = library_root / filename
     if not source_path.is_file():
         raise FileNotFoundError(f"media_inbox_asset_missing: {filename}")
+    source_hash = _sha256_file(source_path)
+    # The browser retries after a response timeout. Reconcile by the watched
+    # filename and bytes before registering a second project asset.
+    store = getattr(pipeline, "store", None)
+    list_assets = getattr(store, "list_assets", None)
+    existing_assets = list_assets(project_id=project_id) if callable(list_assets) else []
+    for existing in existing_assets:
+        metadata = dict(existing.get("metadata") or {})
+        if metadata.get("media_inbox_filename") != filename:
+            continue
+        resolve_storage_uri = getattr(store, "resolve_storage_uri", None)
+        if not callable(resolve_storage_uri):
+            continue
+        stored_path = resolve_storage_uri(
+            project_id=project_id, storage_uri=str(existing["storage_uri"])
+        )
+        if stored_path.is_file() and _sha256_file(stored_path) == source_hash:
+            return {
+                "asset_id": str(existing["asset_id"]),
+                "project_id": project_id,
+                "asset_type": str(existing["asset_type"]),
+                "storage_uri": str(existing["storage_uri"]),
+            }
     payload = pipeline.register_broll_asset(  # type: ignore[attr-defined]
         project_id=project_id,
         source_path=source_path,
@@ -278,7 +333,7 @@ def import_media_inbox_asset_to_project(
     pipeline.store.update_asset_metadata(  # type: ignore[attr-defined]
         project_id=project_id,
         asset_id=payload["asset_id"],
-        metadata_patch={"media_inbox_filename": filename},
+        metadata_patch={"media_inbox_filename": filename, "media_inbox_sha256": source_hash},
     )
     return payload
 

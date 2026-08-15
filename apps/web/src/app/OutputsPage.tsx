@@ -12,9 +12,12 @@ import {
   type ReviewSnapshot,
   type SubtitleJob,
   type TimelineJob,
+  type VariantRenderItem,
 } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { VariantOutputCard } from "../features/outputs/VariantOutputCard";
+import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
 
 type ExactPreviewState = "current" | "pending" | "running" | "failed" | "stale" | "unavailable" | "unknown";
 
@@ -290,6 +293,12 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
   const [capcutHandoffErrorProjectId, setCapcutHandoffErrorProjectId] = useState<string | null>(null);
+  const [variantOptions, setVariantOptions] = useState<{ variant_id: string; kind: string }[]>([]);
+  const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
+  const [variantItems, setVariantItems] = useState<VariantRenderItem[]>([]);
+  const [confirmedVariantIds, setConfirmedVariantIds] = useState<string[]>([]);
+  const [isRenderingVariants, setIsRenderingVariants] = useState(false);
+  const [variantError, setVariantError] = useState(false);
   const requestEpoch = useRef(0);
   const subtitleSubmissionEpoch = useRef(0);
   const finalSubmissionEpoch = useRef(0);
@@ -382,6 +391,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     }
   }, [projectId]);
 
+  const variantSession = state?.projectId === projectId ? state.session : null;
   useEffect(() => {
     subtitleSubmissionEpoch.current += 1;
     finalSubmissionEpoch.current += 1;
@@ -412,6 +422,30 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     };
   }, [refresh]);
 
+  useEffect(() => {
+    let active = true;
+    setVariantOptions([]);
+    setSelectedVariantIds([]);
+    setVariantItems([]);
+    setConfirmedVariantIds([]);
+    setVariantError(false);
+    if (!variantSession) return () => { active = false; };
+    void api.listOutputVariants(projectId, variantSession.session_id).then((result) => {
+      if (!active) return;
+      try {
+        if (!active) return;
+        const options = result.variants
+          .filter((variant) => variant.kind === "horizontal" || variant.kind === "vertical_full" || variant.kind === "vertical_highlight")
+          .map((variant) => ({ variant_id: variant.variant_id, kind: variant.kind }));
+        setVariantOptions(options);
+        setSelectedVariantIds(options.filter((variant) => variant.kind !== "vertical_highlight").map((variant) => variant.variant_id));
+      } catch { if (active) setVariantError(true); }
+    }).catch(() => {
+      if (active) setVariantError(true);
+    });
+    return () => { active = false; };
+  }, [projectId, variantSession?.session_id]);
+
   const currentState = state?.projectId === projectId ? state : null;
   const hasError = errorProjectId === projectId;
   const isRenderingCurrentSubtitle = isRenderingSubtitle && subtitleRequestProjectId.current === projectId;
@@ -422,6 +456,48 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const capcutError = capcutErrorProjectId === projectId;
   const isRegisteringCurrentCapcutHandoff = isRegisteringCapcutHandoff && capcutHandoffRequestProjectId.current === projectId;
   const capcutHandoffError = capcutHandoffErrorProjectId === projectId;
+  const handleRenderVariants = async (requestedVariantIds = selectedVariantIds) => {
+    const session = currentState?.session;
+    if (!session || !requestedVariantIds.length || isRenderingVariants) return;
+    setIsRenderingVariants(true);
+    setVariantError(false);
+    try {
+      const result = await api.startVariantRenders(projectId, { session_id: session.session_id, variant_ids: requestedVariantIds });
+      setVariantItems((current) => mergeVariantRenderItems(current, result.items, requestedVariantIds));
+      setConfirmedVariantIds([]);
+      const jobs = await api.listJobs(projectId);
+      const reconciled = await Promise.all(result.items.map(async (item) => {
+        const job = jobs.find((candidate) => candidate.job_id === item.job_id);
+        if (!job || !item.job_id) return item;
+        try {
+          const final = await api.getFinalRender(projectId, item.job_id);
+          return { ...item, status: final.status, error_code: final.status === "failed" ? "renderer_failed" : item.error_code };
+        } catch {
+          return item;
+        }
+      }));
+      setVariantItems((current) => mergeVariantRenderItems(current, reconciled, requestedVariantIds));
+    } catch {
+      setVariantError(true);
+    } finally {
+      setIsRenderingVariants(false);
+    }
+  };
+  const handleRefreshVariants = async () => {
+    const jobs = await api.listJobs(projectId).catch(() => [] as JobRecord[]);
+    const next = await Promise.all(variantItems.map(async (item) => {
+      if (!item.job_id) return item;
+      const job = jobs.find((candidate) => candidate.job_id === item.job_id);
+      if (!job) return item;
+      try {
+        const final = await api.getFinalRender(projectId, item.job_id);
+        return { ...item, status: final.status };
+      } catch {
+        return item;
+      }
+    }));
+    setVariantItems(next);
+  };
   if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live="polite"><p>출력 상태를 불러오는 중이에요.</p></section>;
   if (hasError) return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page"><h1>출력</h1><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
 
@@ -451,6 +527,31 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const finalJob = currentState?.finalJob;
   const hasPendingFinal = currentState?.finalJobs.some((job) => job.status === "pending" || job.status === "running") === true;
   const canRenderFinal = canRenderSubtitle && !hasPendingFinal;
+  const hasCurrentEditingDraft = Boolean(
+    currentSession && timelineJob && currentState?.timeline &&
+    currentSession.project_id === projectId &&
+    currentState.timeline.timeline.project_id === projectId &&
+    currentState.timeline.timeline.timeline_id === currentSession.timeline_id &&
+    currentState.timeline.timeline.source_session_id === currentSession.session_id &&
+    currentState.timeline.timeline.source_session_revision === currentSession.session_revision,
+  );
+  const hasCurrentReviewIdentity = Boolean(
+    currentState?.review && currentState.approval && currentSession && timelineJob &&
+    currentSession.project_id === projectId &&
+    currentState.review.project_id === projectId &&
+    currentState.review.timeline_id === currentSession.timeline_id &&
+    currentState.approval.project_id === projectId &&
+    currentState.approval.timeline_id === currentSession.timeline_id &&
+    currentState.approval.source_session_id === currentSession.session_id &&
+    currentState.approval.source_session_revision === currentSession.session_revision,
+  );
+  const reviewApproved = Boolean(
+    hasCurrentReviewIdentity &&
+    currentState?.review?.review_status === "approved" &&
+    currentState.approval?.review_status === "approved" &&
+    currentState.approval.is_current === true,
+  );
+  const outputBlocked = !canRenderSubtitle;
   const subtitle = currentState?.subtitle;
   const currentSubtitle = subtitle?.status === "succeeded" && subtitle.subtitle?.status === "succeeded" && currentSession != null && (
     currentSession.project_id === projectId &&
@@ -648,7 +749,26 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
 
   return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page">
     <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>현재 승인된 편집본의 자막, 완성본, CapCut 초안을 여기에서 만들 수 있어요.</p></div>
-    <div className="vb-home-grid">
+    {outputBlocked ? <section aria-label="출력 준비 체크리스트" className="vb-output-readiness">
+      <h2>출력 준비 체크리스트</h2>
+      <ol aria-label="출력 준비 단계">
+        <li>
+          <strong>{hasCurrentEditingDraft ? "완료" : "편집본 준비 필요"}</strong>
+          <span>{hasCurrentEditingDraft ? "현재 편집본이 준비되었어요." : "편집본을 먼저 준비해 주세요."}</span>
+          {!hasCurrentEditingDraft ? <Button variant="outline" onClick={onOpenEditor}>편집 화면 열기</Button> : null}
+        </li>
+        <li>
+          <strong>{reviewApproved ? "완료" : "검토 승인 필요"}</strong>
+          <span>{reviewApproved ? "현재 편집본 검토가 승인되었어요." : "검토에서 확인할 항목을 마치고 승인해 주세요."}</span>
+          {!reviewApproved && hasCurrentEditingDraft ? <a className="vb-action-link" href={`/projects/${encodeURIComponent(projectId)}/review`}>검토 화면 열기</a> : null}
+        </li>
+        <li>
+          <strong>{canRenderSubtitle ? "완료" : "출력 대기"}</strong>
+          <span>{canRenderSubtitle ? "자막과 완성본을 만들 수 있어요." : "앞 단계가 끝나면 자막과 완성본을 만들 수 있어요."}</span>
+        </li>
+      </ol>
+    </section> : null}
+    <div className="vb-home-grid vb-outputs-grid">
       <Card>
         <CardHeader><CardTitle>편집본 미리보기</CardTitle><CardDescription>{exactPreviewDescription(currentState?.exactPreviewState)}</CardDescription></CardHeader>
         <CardContent>
@@ -656,6 +776,34 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           <Button onClick={onOpenEditor}>편집에서 미리보기 열기</Button>
         </CardContent>
       </Card>
+      <Card>
+        <CardHeader><CardTitle>가로·세로 출력</CardTitle><CardDescription>{variantRenderSummary(variantItems)}</CardDescription></CardHeader>
+        <CardContent>
+          <p>성공한 출력은 서로 독립적으로 재생하고, 실패한 출력만 다시 만들 수 있어요.</p>
+          {variantError ? <p role="status">출력 변형 상태를 확인하지 못했어요.</p> : null}
+          {variantOptions.map((option) => (
+              <label key={option.variant_id}>
+                <input
+                  data-native-control="output-variant-select"
+                type="checkbox"
+                checked={selectedVariantIds.includes(option.variant_id)}
+                onChange={() => setSelectedVariantIds((current) => current.includes(option.variant_id) ? current.filter((id) => id !== option.variant_id) : [...current, option.variant_id])}
+              /> {variantLabel(option.kind)}
+            </label>
+          ))}
+          <div className="vb-home-grid">
+            <Button disabled={!currentState?.session || !selectedVariantIds.length || isRenderingVariants} onClick={() => void handleRenderVariants()}>{isRenderingVariants ? "출력 만드는 중" : "가로·세로 출력 만들기"}</Button>
+            <Button variant="outline" disabled={!variantItems.length} onClick={() => void handleRefreshVariants()}>출력 상태 다시 확인</Button>
+          </div>
+        </CardContent>
+      </Card>
+      {variantItems.map((item) => (
+        <VariantOutputCard key={item.variant_id} projectId={projectId} item={item} confirmed={confirmedVariantIds.includes(item.variant_id)} onConfirm={() => setConfirmedVariantIds((current) => current.includes(item.variant_id) ? current : [...current, item.variant_id])} onRetry={() => {
+          setSelectedVariantIds([item.variant_id]);
+          setConfirmedVariantIds((current) => current.filter((id) => id !== item.variant_id));
+          void handleRenderVariants([item.variant_id]);
+        }} />
+      ))}
       <Card>
         <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
@@ -671,7 +819,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           {finalError ? <p>완성본을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
-          {currentFinal ? <video aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
+          {currentFinal ? <video className="vb-output-video" aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
           {staleFinal ? <p>편집에서 새 완성본 만들기를 실행해 주세요.</p> : null}
           {finalRender?.status === "failed" ? <p>완성본 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
           {hasPendingFinal ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}

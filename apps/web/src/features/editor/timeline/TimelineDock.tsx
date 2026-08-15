@@ -19,10 +19,11 @@ import {
 const LANE_HEIGHT_PX = 32;
 const SNAP_THRESHOLD_PX = 8;
 
-// 2026-08-05 승인: 상태 문구는 창작자 언어로 쓴다 -- `stale`을 그대로 내보내지 않는다.
+// Source status describes base-timeline provenance. Session edits are already
+// materialized in this view, so the label must not imply that they are absent.
 const sourceStatusLabel: Readonly<Record<string, string>> = {
-  current: "최신 편집 반영됨",
-  stale: "편집 반영 전",
+  current: "원본과 편집본 일치",
+  stale: "현재 편집본 기준",
 };
 
 const laneLabel: Readonly<Record<TimelineLane, string>> = {
@@ -97,11 +98,12 @@ function clipSources(view: EditorViewModel) {
   return [
     ...view.tracks.flatMap((track) => track.clips.map((clip) => ({
     id: clip.placementId ?? clip.clipId,
+    segmentId: clip.segmentId,
     role: track.role,
     startSec: clip.startSec,
     endSec: clip.endSec,
     }))),
-    ...view.captions.flatMap((caption) => caption.placementId ? [{ id: caption.placementId, role: "caption" as const, startSec: caption.startSec, endSec: caption.endSec }] : []),
+    ...view.captions.flatMap((caption) => caption.placementId ? [{ id: caption.placementId, segmentId: caption.segmentId, role: "caption" as const, startSec: caption.startSec, endSec: caption.endSec }] : []),
   ];
 }
 
@@ -252,9 +254,10 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
       dispatch({ type: "select", clipId: hit.clipId });
       const narrationClip = narrationByClipId.get(hit.clipId);
       const caption = captionsByPlacementId.get(hit.clipId);
-      const segmentId = narrationClip?.segmentId ?? caption?.segmentId;
+      const timelineClip = timelineClipById.get(hit.clipId);
+      const segmentId = narrationClip?.segmentId ?? caption?.segmentId ?? timelineClip?.segmentId;
       if (segmentId) onSelectSegment?.(segmentId);
-      const segmentStartSec = narrationClip?.startSec ?? caption?.startSec;
+      const segmentStartSec = narrationClip?.startSec ?? caption?.startSec ?? timelineClip?.startSec;
       if (segmentStartSec !== undefined) onPlaybackSeek?.(segmentStartSec);
       const placement = placementsByClipId.get(hit.clipId);
       if (placement) setSelectedPlacementIds((current) => additive ? (current.includes(placement.placementId) ? current.filter((id) => id !== placement.placementId) : [...current, placement.placementId]) : [placement.placementId]);
@@ -271,6 +274,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     ...view.tracks.flatMap((track) => track.clips.flatMap((clip) => clip.placementId ? [[clip.placementId, { placementId: clip.placementId, kind: track.role as TimelinePlacementKind, startSec: clip.startSec, endSec: clip.endSec } as TimelinePlacement] as const] : [])),
   ]), [view]);
   const captionsByPlacementId = useMemo(() => new Map(view.captions.flatMap((caption) => caption.placementId ? [[caption.placementId, caption] as const] : [])), [view]);
+  const timelineClipById = useMemo(() => new Map(clipSources(view).map((clip) => [clip.id, clip] as const)), [view]);
   // Computed over the full (unfiltered) clip list, not the viewport-visible
   // subset draftProjection.rects renders -- otherwise scrolling or zooming
   // the timeline would renumber/rename the same physical clip, undermining
@@ -525,6 +529,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
   return <section
     aria-label="타임라인"
     className="vb-editor-workbench__timeline"
+    data-scroll-owner="timeline"
     data-pixels-per-second={formatSeconds(state.pixelsPerSecond)}
     data-viewport-start-seconds={formatSeconds(state.viewportStartSec)}
     onClick={handleClick}
@@ -594,7 +599,7 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         and meant nothing to the owner. The kind and the time are the parts that
         actually tell them where the playhead landed. */}
     {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
-    {mutationMessage ? <p role="status">{mutationMessage}</p> : null}
+    {mutationMessage ? <p role="status" aria-label="편집 저장 상태">{mutationMessage}</p> : null}
     <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
     {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>표시할 타임라인 항목이 없습니다.</p> : null}
   </section>;

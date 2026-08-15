@@ -1,0 +1,329 @@
+# VideoBox Claude 재개 핸드오프
+
+작성일: 2026-08-14 (2026-08-15 세션 결과 추가)
+canonical worktree: `D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility`
+branch: `codex/videobox-container-compatibility`
+작업 시작 기준 HEAD: `92067f234a1abcf0038a5fed9575ef8babe899e3`
+
+> **최신 상태는 이 문서 맨 아래 `## 2026-08-15 세션` 절이다.** 아래 2026-08-14 본문은
+> 그대로 두되, 수치와 HEAD가 다르면 2026-08-15 절이 우선한다.
+
+## 결론
+
+Wave2 footage organizer 계획의 Task 1~5와 이후 creator workspace/editor 보강은 구현 상태다. 이번 세션은 남은 전체 회귀와 인계 진입점을 점검했고, Chromium E2E가 실제로 잡은 편집 미리보기 가시성 회귀를 수정했다.
+
+자동화와 실제 브라우저 증거는 owner acceptance와 구분한다. owner가 직접 전체 결과물을 시청·청취하고 취향과 업무 적합성을 승인한 상태는 아니다.
+
+## Claude가 반드시 시작할 순서
+
+1. 이 worktree에서 `git status -sb`와 `git rev-parse HEAD`를 실행한다.
+2. `CLAUDE.md` 전체와 `docs/development-fast-path.ko.md`의 `## 10. 고정 운영 규정`을 읽는다.
+3. 이 문서와 `docs/superpowers/plans/2026-08-12-videobox-wave2-footage-organizer.md`를 읽는다.
+4. `git rev-list --left-right --count HEAD...@{upstream}`과 원격 SHA를 확인한다.
+5. 9119를 무조건 재시작하지 말고 TCP/HTTP를 먼저 확인한다. 필요할 때만 compose 포트 9130을 확인한다.
+6. 제품 코드 변경 전 현재 컨테이너 image와 HEAD가 일치하는지 확인한다.
+
+다른 worktree, owner runtime 데이터, ignored QA 산출물은 정리 대상으로 추정하지 않는다. stage/삭제/stash/reset하지 않는다.
+
+## 이번 세션에서 발견하고 수정한 회귀
+
+`npm --prefix apps/web run test:e2e`의 exact-preview 테스트가 편집 영상 높이 120px 이상을 요구했지만 16px만 렌더링되어 RED가 됐다.
+
+원인은 preview shell 높이가 아니라 비디오 자체였다.
+
+- preview shell: 약 243px
+- 비디오: 16×16px
+- CSS가 `width:auto; height:auto`여서 작은 소스의 intrinsic 크기를 그대로 사용했다.
+- `max-width/max-height:100%`와 `object-fit:contain`만으로는 작은 영상을 작업 가능한 크기로 확대하지 못했다.
+
+수정 범위:
+
+- `apps/web/src/styles/editor-workbench.css`
+  - preview video를 `width:100%; height:100%; object-fit:contain`으로 제한한다.
+  - grid row가 작아질 때는 `min-width/min-height:0`과 max bounds로 shell을 넘지 않는다.
+- `apps/web/src/features/editor/preview/preview-stage.test.tsx`
+  - 고정 preview viewport가 가용 영역을 사용하는 계약을 확인한다.
+
+테스트의 120px 기준을 낮추거나 제거하지 않았다. 실제 사용자에게 영상이 한눈에 보여야 한다는 제품 요구를 유지했다.
+
+첫 수정본을 실제 1920×1080 owner runtime에서 확인하자 두 번째 레이아웃 회귀가 드러났다. 1500px 이상에서는 출력 변형과 타임라인의 높이 상한이 충분히 작지 않아 중앙 preview media row가 0px까지 줄었다. 출력 변형을 스크롤 가능한 `max-height: 10rem`, 타임라인을 `max-height: 12rem`으로 제한하고 Full HD 회귀 테스트를 추가했다. 최종 실제 브라우저에서 media shell 154px, video 154px를 확보했다.
+
+## 검증 증거
+
+### Python
+
+최초 전체 실행:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+- 제품/계약 테스트 `3521 passed`
+- `53 skipped`
+- `1 failed`
+- 실패는 제품 코드가 아니라 `CLAUDE.md`가 2026-08-12 핸드오프를 가리키던 진입점 불일치였다.
+- 이 문서를 추가하고 `CLAUDE.md` 최신 세션 인계 포인터를 함께 갱신했다.
+
+포인터 수정 후 최종 전체 재실행은 `3522 passed, 53 skipped, 1 warning`으로 통과했다. warning은 기존 Starlette `python_multipart` PendingDeprecationWarning이다.
+
+### Frontend 및 Chromium
+
+- PreviewStage focused Vitest: `19 passed`
+- frontend 전체 Vitest: `75 files / 953 passed`
+- production build: 성공
+- isolated Chromium E2E: `41 passed`, snapshot manifest verified
+- editor-workbench Chromium E2E: `10 passed`, snapshot manifest verified
+- `git diff --check`: 통과
+
+Vitest의 기존 React `act(...)` 경고, jsdom navigation 미구현 로그, 의도된 error-boundary 콘솔과 Vite 500kB chunk warning은 exit 0인 기존 test/build hygiene 항목이다.
+
+## 런타임과 브라우저 경계
+
+기준 owner runtime 주소는 `http://127.0.0.1:5173`이다. VideoBox workspace는 PostgreSQL store를 사용한다. Hermes dashboard 9119/9130의 HTTP reachability는 Hermes live provider/chat 성공 증거가 아니다.
+
+2026-08-14 실제 Chromium을 1920×1080으로 열어 확인한 결과:
+
+- `/`, `/library`, `/footage`, `/projects/my-project/plan`은 모두 HTTP 200이고 horizontal overflow가 없다.
+- 네 경로 순회 중 console error, request failure, HTTP 4xx/5xx와 `TODO`/`Coming soon`/`준비 중`/`placeholder` 표시는 0건이다.
+- `my-project` 편집기 session `editing_session_draft_5ee4d7c4b924`에서 document 1920/1920, video 1127×154px, readyState 4를 확인했다.
+- 실제 재생 버튼으로 currentTime이 0초에서 2.64초까지 진행했고 다시 일시정지했다. 해당 편집기 console error/warning은 0건이다.
+- playback manifest의 session/source/artifact revision은 모두 10이며 exact preview status는 `succeeded`다.
+- exact preview content의 `Range: bytes=0-1023` 요청은 `206`, `Accept-Ranges: bytes`, `Content-Range: bytes 0-1023/257944`로 응답했다.
+- workspace container는 이 수정 커밋으로 rebuild/restart했고 `/health`는 PostgreSQL store와 함께 HTTP 200이다. `/api/health`는 존재하지 않는 경로이므로 readiness 점검에 사용하지 않는다.
+- Hermes 9119와 compose 대체 포트 9130은 launcher 재실행 없이 TCP/HTTP 200을 확인했다.
+
+이번 세션의 실제 runtime 확인 결과는 아래 `최종 상태` 절을 우선한다. owner가 직접 시청하지 않은 범위를 owner acceptance로 표현하지 않는다.
+
+## 기존 계획서 상태
+
+`docs/superpowers/plans/2026-08-12-videobox-wave2-footage-organizer.md`의 Task 1~5는 모두 `[x]`다. 새 계획서를 만들지 않는다.
+
+현재 구현된 주요 경계:
+
+- folder picker와 drag-and-drop ingest
+- Full HD desktop library/editor layout
+- footage proposal과 virtual sequence
+- Yujin bounded proposal adapter와 explicit preview → approval
+- editor timeline, caption, B-roll, variants, undo/redo
+- exact preview revision/source identity fail-closed
+- stale preview를 mutation 전에 제거하는 frontend/backend 경계
+
+## 남은 실제 작업
+
+자동 테스트가 대신할 수 없는 항목만 남는다.
+
+1. owner가 실제 긴 원본으로 전체 편집·출력 결과를 처음부터 끝까지 시청·청취한다.
+2. 자막 타이밍, 음량, B-roll 선택과 화면 밀도를 owner가 승인한다.
+3. Hermes gateway/provider가 실제 활성 상태일 때 Yujin live chat을 다시 확인한다.
+4. 필요하면 owner 전용 새 QA 프로젝트에서 ingest → edit → review → output을 반복한다.
+
+이 항목이 없으면 제품 완료 또는 owner 승인으로 보고하지 않는다.
+
+## 최종 상태
+
+이 문서를 커밋하기 전에는 아래 명령으로 현재 사실을 다시 확인한다.
+
+```powershell
+git status -sb
+git rev-parse HEAD
+git rev-list --left-right --count HEAD...@{upstream}
+.\.venv\Scripts\python.exe -m pytest -q
+npm --prefix apps/web test
+npm --prefix apps/web run build
+npm --prefix apps/web run test:e2e
+npm --prefix apps/web run test:e2e:editor-workbench
+.\scripts\owner-ready.ps1 -Mode Check -Json -TimeoutSec 8
+```
+
+완료 시점의 authoritative SHA는 이 문서 내용에 하드코딩된 추정값이 아니라 `git rev-parse HEAD`와 원격 branch SHA다.
+
+이 문서를 작성한 상태의 최종 자동 검증은 다음과 같다.
+
+- Python 전체: `3522 passed, 53 skipped, 1 warning`
+- frontend 전체: `75 files / 953 passed`
+- Chromium E2E: `41 passed`
+- editor-workbench Chromium E2E: `10 passed`
+- production build와 `git diff --check`: 통과
+- 실제 1920×1080 브라우저 route/preview/playback/Range 점검: 통과
+- `owner-ready Check`: 브라우저 임시 파일 제거 후 `overall_status: pass`, working tree `other_change_count: 0`으로 통과했다. 이 Check는 owner acceptance가 아니다.
+
+## Claude용 복사 프롬프트
+
+```text
+VideoBox Creator Workspace 개발을 이어간다.
+
+canonical worktree:
+D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility
+
+branch:
+codex/videobox-container-compatibility
+
+먼저 반드시 실행:
+1. git status -sb
+2. git rev-parse HEAD
+3. git rev-list --left-right --count HEAD...@{upstream}
+4. CLAUDE.md 전체 읽기
+5. docs/handoffs/2026-08-14-videobox-claude-resume-handoff.ko.md 읽기
+6. docs/superpowers/plans/2026-08-12-videobox-wave2-footage-organizer.md 상태 확인
+
+다른 worktree나 owner runtime 데이터를 정리하지 마라. 9119 launcher를 무조건 재실행하지 말고 TCP/HTTP를 먼저 확인해라. owner-ready Check, 자동 E2E, 실제 브라우저 검증, owner acceptance를 서로 구분해라.
+
+계획 Task 1~5는 구현 완료 상태다. 새 계획서를 만들지 말고 현재 코드와 최신 핸드오프를 기준으로 진행해라. 남은 핵심은 owner의 전체 시청·청취 승인과 Hermes gateway/provider가 활성일 때의 live chat 증거다. 사람 검증이 없으면 owner acceptance 완료라고 표현하지 마라.
+```
+
+---
+
+## 2026-08-15 세션
+
+시작 HEAD `a861acd23` (원격과 일치, working tree 깨끗). 이 절이 현재 사실이다.
+
+### 이번 세션에서 고친 것 두 가지
+
+**1. 촬영본 화면에 개발 계획 이름이 노출되고 있었다 — `65d38a8b5`**
+
+`/footage` 머리말이 `VIDEObox / Wave-2`였다. `Wave-2`는 구현 계획서의 단계 이름이고,
+`§10.13.3`은 개발·시스템 내부 용어를 사용자 화면에 쓰지 못하게 한다. 제품 이름 표기도
+다른 화면(`VideoBox`)과 달랐다.
+
+- `apps/web/src/features/footage/FootageOrganizerPage.tsx:123` → `VideoBox`
+- `apps/web/src/app/AppRouter.test.tsx` — 이 테스트가 `getByText(/Wave-2/)`로 **위반을
+  고정하고 있었다.** 반대를 확인하도록 바꿨다.
+- 코드에 남은 `VIDEObox`/`Wave-2` 참조는 0건. `/footage`의 자산 파일명
+  (`wave2-long-qa.mp4` 등)은 owner 데이터라 건드리지 않았다.
+
+**2. 큰 화면일수록 미리보기가 작아지고 있었다 — `5f968ee8f`**
+
+측정으로 확인한 실제 결함이다. 화면이 **더 큰데 영상이 더 작게** 보였다.
+
+| viewport | media shell | 실제 보이는 그림 |
+|---|---|---|
+| 1440×900 | 269px | 476×267 |
+| 1920×1080 (수정 전) | 156px | 275×154 |
+| 1920×1080 (수정 후) | 316px | **560×314** |
+
+원인은 side panel 압축 규칙이 `@media (min-width: 768px) and (max-width: 1499px)`로
+묶여 있던 것이다. 1500px 이상에서는 그 블록이 빠지고 base 규칙(`variants 10rem`,
+`timeline 12rem`)으로 되돌아가, 남는 세로 공간을 미리보기가 아니라 옆 패널이 가져갔다.
+
+- `apps/web/src/styles/editor-workbench.css` — `@media (min-width: 1500px)` 블록 추가
+  (`variants 6rem`, `timeline 6rem`, `sources 5rem`)
+- `apps/web/src/features/editor/preview/preview-stage.test.tsx` — 그 블록 존재 확인
+- `apps/web/e2e/exact-preview.spec.mjs` — **1440×900과 1920×1080을 직접 비교**하는
+  E2E 가드. 절대값 하나가 아니라 순서를 고정하므로 다시 뒤집히면 잡힌다.
+  media query를 꺼서 **실제로 RED가 되는 것까지 확인**했다.
+
+1440×900은 수정 전후가 동일(476×267)하다. 1500px 미만은 영향받지 않는다.
+
+축소한 패널은 전부 안쪽 스크롤로 접근 가능하다: 타임라인 clip 9개(가시 105px/전체
+595px), 변형 tab 4개+버튼 9개, 소스 버튼 5개(스크롤 불필요). 타임라인 가시 높이가
+201px→105px로 줄어든 것은 이 교환의 대가다. 참고로 medium layout(1440×900)의
+타임라인은 82px이므로 여전히 그보다 넉넉하다.
+
+### 재생 버튼 — 결함이 아니었다
+
+브라우저 창이 화면에 표시되지 않은 상태(`visibilityState: hidden`)에서는 클릭으로
+재생이 시작되지 않았다. 원인을 끝까지 확인한 결과 **제품 결함이 아니다.**
+
+- 직접 `play()`는 정상 동작(2.14초 진행)
+- 재생 중에 버튼을 누르니 **정확히 멈췄다** → 핸들러는 정상 연결돼 있다
+- `preview-stage.tsx:101`이 `play()` 거부를 삼키므로 화면에는 아무 표시가 없다
+- **이미 자동 검증이 있다**: `exact-preview.spec.mjs:147-154`가 실제 user gesture로
+  버튼을 눌러 `!paused && currentTime > 0.05`를 확인하고, 다시 눌러 `paused`를 확인한다.
+  이 테스트는 통과한다.
+
+즉 hidden pane에서의 브라우저 autoplay 차단이었고, 손댈 것이 없다.
+
+### 검증 결과
+
+| 검증 | 결과 |
+|---|---|
+| Python 전체 | `3522 passed, 53 skipped` (아래 주의 참고) |
+| frontend Vitest | `75 files / 954 passed` |
+| production build | 통과 (기존 chunk-size 경고만) |
+| Chromium E2E | `42 passed` (신규 Full HD 가드 1개 포함) |
+| editor-workbench E2E | `10 passed` |
+| `git diff --check` | 통과 |
+| owner-ready Check | `overall_status: pass` |
+
+**Python 전체 실행 주의.** 앞선 두 번의 전체 실행에서 각각 다른 테스트 1개가 실패했다
+(`test_owner_ready_script.py::test_smoke_timeout_...`,
+`test_api_footage_organizer.py::test_yujin_footage_interpretation_...`).
+둘 다 **동시에 docker rebuild와 E2E를 돌리던 중**이었고, 각각 격리 재실행에서
+`116 passed`, `15 passed`로 통과했다. 시간에 민감한 테스트가 부하를 탄 것이지 제품
+결함이 아니다. **전체 실행은 다른 작업과 겹치지 않게 단독으로 돌릴 것.**
+
+### 실제 브라우저 확인 (1920×1080, 컨테이너 배포본)
+
+`/`(→`/projects`), `/library`, `/footage`, `/projects/my-project/plan`, 편집기
+(`editing_session_draft_5ee4d7c4b924`)를 전부 열었다.
+
+- 모든 요청 200, **console error 0건, 실패 요청 0건, 4xx/5xx 0건**
+- 가로 overflow 없음. 페이지 자체는 스크롤하지 않고 안쪽 판 5개가 스크롤을 소유한다
+- 자막 0/6/12/18초에서 각각 정확히 전환, 타임라인 표시와 일치
+- playback manifest: `session_revision 10`, exact preview `source_session_revision 10`,
+  `artifact_revision 10`, status `succeeded` — 일치
+- exact preview content `Range: bytes=0-1023` → **HTTP 206**,
+  `Content-Range: bytes 0-1023/257944`, `Accept-Ranges: bytes`
+- `TODO`/`Coming soon`/`준비 중`/`placeholder` 잔여 문구 0건 (위 `Wave-2` 수정 후)
+
+컨테이너는 이번 수정 커밋으로 rebuild/restart했고 `/health` 200이다. 배포 확인은
+시각만 비교하지 말고 **실제로 내려오는 번들 내용을 확인할 것** — 이번에도 브라우저가
+옛 번들을 캐시해 잠시 옛 화면을 보여줬다.
+
+### 다음 사람이 알아야 할 미해결 사항
+
+**1. 승인된 스냅샷 5장이 현재 코드와 어긋나 있다.**
+`VIDEOBOX_WRITE_PLAYWRIGHT_SNAPSHOTS=1`로 다시 만들어 보니 **5개 viewport 전부**
+sha256이 달랐다. 1920×1080만이 아니라 1440×900·1280×800·390×844·768×1024도 달랐고,
+이들은 이번 수정(`min-width:1500px`)이 닿지 않는 크기다. 즉 **이번 세션 이전부터
+스냅샷이 낡아 있었다.** 승인 기록(`docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md`)
+에 해당하므로 **임의로 갱신하지 않고 원복했다.** 다시 만드는 것은 owner 재승인 사항이다.
+참고로 스냅샷은 pixel 비교 게이트가 아니다(`fixed-clock.mjs:29`, 환경변수 있을 때만 기록).
+
+**2. 라이브러리의 옛 자산 4개가 영원히 "길이 확인 중"으로 보인다.**
+`wave2-long-qa.mp4`, `wave2-short-a/b/c.mp4`(2026-08-12 23:12 ingest)는 duration이 없다.
+같은 날 23:17에 넣은 `-v2` 4개는 24초/4초가 정상 표시되므로 **현재 ingest 경로는 정상**이고,
+probe slice 이전에 들어온 데이터만 남은 것이다. 음악 30·효과음 100은 전부 정상
+표시된다(builtin은 top-level `duration_seconds`를 쓴다).
+다만 `VideoAssetGrid.tsx:4`/`AudioAssetRows.tsx:4`는 duration이 없으면 무조건
+"길이 확인 중"이라 **아무것도 확인하고 있지 않은데 확인 중이라고 말한다.**
+`editorAssetProjection.ts:70-76`은 `analysis_status`를 보고 구분하므로, 맞추려면
+그쪽 방식을 따르는 것이 맞다. 화면 문구 결정이라 owner 판단이 필요하다.
+
+**3. `owner-ready.ps1 -Mode Start -Rebuild`의 준비 확인이 이르다.**
+`-TimeoutSec 20`과 `90` 모두에서 `[FAIL] 연결 준비를 확인하지 못했습니다`가 났지만,
+직후 컨테이너는 `healthy`였고 HTTP 200이었다. 이미지 빌드는 매번 성공했다.
+rebuild 뒤에는 Check를 한 번 더 돌려 판단할 것.
+
+### 남은 사람 검증 (그대로)
+
+1. owner가 실제 긴 원본으로 전체 결과를 처음부터 끝까지 시청·청취
+2. 자막 타이밍, 음량, B-roll 선택과 화면 밀도 승인
+3. Hermes gateway/provider가 실제 활성일 때 Yujin live chat 확인
+4. 위 미해결 1(스냅샷 재승인)·2(길이 문구) 결정
+
+**이번 세션 결과는 owner acceptance가 아니다.** owner가 완성 영상을 직접 보고 들은
+적이 없다. 자동 검증·owner-ready Check·실제 브라우저 확인은 서로 다른 것이며, 셋 다
+사람의 취향 판단을 대신하지 않는다.
+
+### 디자인 스킬 관련
+
+`intranet-style` 스킬은 **이 환경에 있다** (`~/.claude/skills/intranet-style`).
+세션 중반까지 스킬 목록에 안 보여 "없다"고 판단했으나 오판이었고, 확인 후 읽었다.
+저장소 안에는 `.claude/skills`가 없다 — 스킬은 사용자 홈에 있다.
+
+이 저장소는 그 계약을 **VideoBox CSS 변수로 번역해서 이미 강제하고 있다**
+(`apps/web/src/features/footage/footage-design-system.test.ts`):
+
+| intranet 정본 | 이 저장소의 표현 |
+|---|---|
+| 컨트롤 `h-8` | `min-height:32px` |
+| radius 스케일 | `var(--radius-2xl)` (px/rem 직접 지정 금지) |
+| 채워진 입력 `bg-input/50` | `color-mix(in srgb,var(--input) 50%,transparent)` |
+| 표면 경계 `ring-1 ring-foreground/5` | `var(--vb-surface-ring)` |
+| 하드코딩 색 금지 | 리터럴 색 정규식으로 0건 강제 |
+
+이번 변경은 이 계약을 건드리지 않는다. 추가한 것은 `max-height`/`overflow`/`min-height`
+뿐이고 **색·radius·컨트롤 높이를 새로 정하지 않았다.** `6rem`/`5rem`은 기존
+768–1499px 블록의 표기(`6rem`/`4rem`)와 같은 방식이다. 머리말 문구 수정도
+`vb-eyebrow` 규약(`AppRouter.tsx:186`)을 그대로 따랐다.

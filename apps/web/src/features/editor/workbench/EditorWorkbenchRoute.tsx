@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
-import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
@@ -64,6 +65,12 @@ type ActiveHermesRouteRun = Readonly<{
   conversationId: string;
   runId: string;
   controller: AbortController;
+}>;
+type VariantState = Readonly<{
+  key: string;
+  items: readonly OutputVariant[];
+  message: string | null;
+  busy: boolean;
 }>;
 
 const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
@@ -196,6 +203,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const requestKey = `${projectId}:${sessionId ?? "missing"}`;
   const [refreshToken, setRefreshToken] = useState(0);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
+  const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
   const [director, setDirector] = useState<DirectorState>(() => createDirectorState(requestKey, sessionId));
@@ -213,6 +221,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const memoryListOperationId = useRef(0);
   const memoryMutationOperationId = useRef(0);
   const partialOperationId = useRef(0);
+  const variantOperationId = useRef(0);
+  const variantMutationInFlight = useRef(false);
   const partialRecoveryOperationId = useRef(0);
   const directorMutationInFlight = useRef(false);
   const memoryMutationInFlight = useRef(false);
@@ -249,10 +259,13 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     memoryListOperationId.current += 1;
     memoryMutationOperationId.current += 1;
     partialOperationId.current += 1;
+    variantOperationId.current += 1;
     directorMutationInFlight.current = false;
     memoryMutationInFlight.current = false;
     currentDirectorConversationId.current = null;
     partialInFlight.current = false;
+    variantMutationInFlight.current = false;
+    setVariants({ key: requestKey, items: [], message: null, busy: false });
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
     setDirector(createDirectorState(requestKey, sessionId));
@@ -323,12 +336,61 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       const message = error instanceof Error && error.message === "editor_snapshot_identity_mismatch"
           ? "편집 세션 정보가 일치하지 않아요. 다시 열어 주세요."
           : "재생 내용을 불러오지 못했어요. 새로고침 후 다시 확인해 주세요.";
-      setState((current) => current.key === requestKey && current.view && current.session
+      const identityMismatch = error instanceof Error && error.message === "editor_snapshot_identity_mismatch";
+      setState((current) => !identityMismatch && current.key === requestKey && current.view && current.session
         ? { ...current, error: message }
         : { key: requestKey, view: null, session: null, error: message });
     });
     return () => { active = false; };
   }, [projectId, requestKey, refreshToken, sessionId]);
+  useEffect(() => {
+    if (!sessionId) {
+      setVariants({ key: requestKey, items: [], message: null, busy: false });
+      return;
+    }
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    let active = true;
+    const isCurrent = () => active && variantOperationId.current === operationId && routeEpoch.current.key === requestKey;
+    void api.listOutputVariants(projectId, sessionId).then((result) => {
+      if (!isCurrent()) return;
+      setVariants({ key: requestKey, items: result.variants, message: null, busy: false });
+    }).catch(() => {
+      if (isCurrent()) setVariants({ key: requestKey, items: [], message: "출력 변형 서버 상태를 불러오지 못했어요.", busy: false });
+    });
+    return () => { active = false; };
+  }, [projectId, requestKey, sessionId, refreshToken]);
+  useEffect(() => {
+    const currentView = state.key === requestKey ? state.view : null;
+    const currentVariants = variants.key === requestKey ? variants.items : [];
+    if (!currentView || !sessionId || !currentVariants.length) return;
+    const stale = currentVariants.filter((variant) => variant.source_session_revision < currentView.expectedRevision);
+    if (!stale.length || variantMutationInFlight.current) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    let active = true;
+    const isCurrent = () => active && variantOperationId.current === operationId && routeEpoch.current.key === requestKey;
+    setVariants((current) => current.key === requestKey ? { ...current, busy: true } : current);
+    void Promise.all(stale.map((variant) => api.rebaseOutputVariant(projectId, variant.variant_id, {
+      new_master_revision: currentView.expectedRevision,
+      changed_fields: ["story"],
+    }))).then((updated) => {
+      if (!isCurrent()) return;
+      const byId = new Map(updated.map(({ variant }) => [variant.variant_id, variant]));
+      setVariants((current) => current.key !== requestKey ? current : {
+        ...current,
+        items: current.items.map((variant) => byId.get(variant.variant_id) ?? variant),
+        message: "마스터 변경을 확인했어요. 출력 변형 충돌을 검토해 주세요.",
+        busy: false,
+      });
+    }).catch(() => {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "마스터 변경 후 출력 변형을 다시 맞추지 못했어요.", busy: false } : current);
+    }).finally(() => {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    });
+    return () => { active = false; };
+  }, [projectId, requestKey, sessionId, state.key, state.view, variants.items, variants.key]);
   useEffect(() => {
     if (!sessionId || !state.session?.updatedAt) return;
     const epoch = routeEpoch.current.value;
@@ -517,8 +579,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }, 1200);
     return () => window.clearTimeout(poll);
   }, [refreshToken, requestKey, state.view?.playback.exactPreview.status, state.view?.playback.exactPreview.generationId]);
-  if (state.key !== requestKey) return <main aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></main>;
-  if (!state.view) return <main aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></main>;
+  if (state.key !== requestKey) return <section aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></section>;
+  if (!state.view) return <section aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></section>;
   const refreshPreview = async () => {
     if (!sessionId || !state.view) return;
     const epoch = routeEpoch.current.value;
@@ -538,6 +600,31 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const currentView = state.view;
     mutationInFlight.current = true;
     setMutation({ isSaving: true, message: "변경 내용을 저장하고 있어요." });
+    // Any successful mutation invalidates the current exact-preview artifact
+    // in the same backend transaction. Unmount it before issuing the request
+    // so the browser cannot re-fetch a now-fenced URL and emit a transient 404.
+    flushSync(() => {
+      setState((current) => current.key === requestKey && current.view
+        ? {
+            ...current,
+            view: {
+              ...current.view,
+              playback: {
+                ...current.view.playback,
+                exactPreview: { ...current.view.playback.exactPreview, status: "stale", url: null },
+              },
+            },
+          }
+        : current);
+    });
+    // Let the committed removal reach the media element lifecycle before the
+    // backend can fence the artifact. This ordering prevents even a very fast
+    // mutation response from racing a final browser range request.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    if (!isCurrent()) {
+      mutationInFlight.current = false;
+      return;
+    }
     const port = createEditorCommandPort({
       projectId,
       sessionId,
@@ -569,22 +656,34 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (!isCurrentRefresh()) return;
       const next = joinEditorSnapshot(manifest, editingSession);
       if (next.view.projectId !== projectId || next.view.sessionId !== sessionId) {
-        resultMessage = "최신 편집 내용을 확인하지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
+        throw new Error("editor_snapshot_identity_mismatch");
       } else {
         setState({ key: requestKey, view: next.view, session: next.session, error: null });
         // Auto-refresh the preview after a successful edit instead of leaving
         // the creator to notice it's stale and press the manual button
         // themselves (F-4). A failure here is silent -- the manual refresh
         // button in preview-stage.tsx stays as the fallback.
-        if (mutationSucceeded) {
+        // A full exact render is cheap enough to keep automatic for short
+        // projects. Long-form sources stay explicit so a sequence of caption,
+        // undo, or placement edits cannot queue overlapping multi-minute
+        // FFmpeg jobs. The manual refresh control remains available.
+        if (mutationSucceeded && next.view.output.durationSec <= 120) {
           void api.startExactPreview(projectId, sessionId, { expected_revision: next.view.expectedRevision })
             .then(() => { if (isCurrentRefresh()) setRefreshToken((current) => current + 1); })
             .catch(() => {});
         }
       }
-    } catch {
+    } catch (error) {
       if (isCurrent()) {
-        resultMessage = "최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
+        if (error instanceof Error && error.message === "editor_snapshot_identity_mismatch") {
+          resultMessage = "최신 편집 상태가 일치하지 않아요. 새로고침한 뒤 다시 시도해 주세요.";
+        } else {
+          resultMessage = "최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.";
+        }
+        // A failed post-mutation refresh leaves server-application status
+        // ambiguous. Keep the editor fail-closed instead of restoring a view
+        // whose preview and revision may already be invalid.
+        setState({ key: requestKey, view: null, session: null, error: resultMessage });
       }
     } finally {
       if (isCurrent()) {
@@ -802,6 +901,65 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       fields: activePartial.result.fields,
     }, activePartial.result),
   );
+  const activeVariants = variants.key === requestKey ? variants.items : [];
+  const patchOutputVariant = async (variant: OutputVariant, patch: OutputVariantPatch) => {
+    if (variantMutationInFlight.current || !sessionId || routeEpoch.current.key !== requestKey) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
+    setVariants((current) => current.key === requestKey ? { ...current, busy: true } : current);
+    setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 저장하는 중이에요.", busy: true } : current);
+    try {
+      const result = await api.patchOutputVariant(projectId, variant.variant_id, {
+        expected_variant_revision: variant.variant_revision,
+        patch,
+      });
+      if (!isCurrent()) return;
+      setVariants((current) => current.key !== requestKey ? current : {
+        ...current,
+        items: current.items.map((item) => item.variant_id === result.variant.variant_id ? result.variant : item),
+        message: "출력 변형을 저장했어요.",
+        busy: false,
+      });
+    } catch {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 저장하지 못했어요. 최신 상태를 다시 확인해 주세요.", busy: false } : current);
+    } finally {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    }
+  };
+  const materializeOutputVariant = async (variant: OutputVariant) => {
+    if (variantMutationInFlight.current || !sessionId || routeEpoch.current.key !== requestKey) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
+    setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하는 중이에요.", busy: true } : current);
+    try {
+      const result = await api.materializeOutputVariant(projectId, variant.variant_id, { expected_master_session_revision: variant.source_session_revision });
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: `출력 변형을 준비했어요. ${result.materialization.timeline_id}`, busy: false } : current);
+    } catch {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하지 못했어요. 충돌과 최신 상태를 확인해 주세요.", busy: false } : current);
+    } finally {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    }
+  };
+  const createHighlightVariant = async () => {
+    if (variantMutationInFlight.current || !sessionId || activeVariants.some((variant) => variant.kind === "vertical_highlight")) return;
+    variantMutationInFlight.current = true;
+    const operationId = variantOperationId.current + 1;
+    variantOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
+    setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만드는 중이에요.", busy: true } : current);
+    try {
+      const result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: "하이라이트 변형을 만들었어요. master 장면 순서를 저장할 수 있어요.", busy: false } : current);
+    } catch {
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만들지 못했어요.", busy: false } : current);
+    } finally {
+      if (isCurrent()) variantMutationInFlight.current = false;
+    }
+  };
   const activeDirector = director.key === requestKey ? director : createDirectorState(requestKey, sessionId);
   const activeMemory = memory.key === requestKey
     && memory.conversationId === activeDirector.conversationId
@@ -1431,7 +1589,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
             setDirector({ ...activeDirector, state: "blocked" });
             throw new Error("stale director proposal");
           }
-          if (selectedYujinCandidate && isActionableYujinMediaCandidate(selectedYujinCandidate)) {
+           if (selectedYujinCandidate && isActionableYujinVariantCandidate(selectedYujinCandidate)) {
+             await api.batchApplyDirectorProposal(projectId, proposalId, {
+               candidate_ids: [...candidateIds],
+               expected_revision: currentRevision,
+             });
+           } else if (selectedYujinCandidate && isActionableYujinMediaCandidate(selectedYujinCandidate)) {
             const materialized = await api.materializeDirectorCandidate(
               projectId,
               proposalId,
@@ -1550,6 +1713,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       <dt>대상 구간 수</dt><dd>{activePartial.result.segment_ids.length}</dd>
       <dt>다시 만든 항목</dt><dd>{activePartial.result.fields.map(partialFieldLabel).join(", ")}</dd>
     </dl> : null}
+    {variants.key === requestKey && variants.message ? <p role="status">{variants.message}</p> : null}
     <EditorWorkbench
     assetCards={assetCards}
     isSavingTimeline={mutation.isSaving}
@@ -1577,6 +1741,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     timelineMutationMessage={mutation.message}
     director={rightDock}
     requestedSegmentId={requestedSegmentId}
+    serverVariants={activeVariants}
+    onVariantMaterialize={materializeOutputVariant}
+    onVariantPatch={patchOutputVariant}
+    onVariantCreateHighlight={createHighlightVariant}
+    variantBusy={variants.key === requestKey && variants.busy}
     view={state.view}
     />
   </>;
@@ -1645,8 +1814,21 @@ function initialDirectorCandidateIds(proposal: DirectorProposal | null) {
 }
 
 function isActionableYujinCandidate(candidate: DirectorCandidate) {
-  return isActionableYujinMediaCandidate(candidate)
+  return isActionableYujinVariantCandidate(candidate)
+    || isActionableYujinMediaCandidate(candidate)
     || isActionableYujinB4Candidate(candidate);
+}
+
+function isActionableYujinVariantCandidate(candidate: DirectorCandidate) {
+  const metadata = candidate.canonical_metadata ?? {};
+  return (
+    candidate.availability === "actionable"
+    && candidate.review_status === "approved"
+    && candidate.media_type === "output_variant"
+    && metadata.yujin_actionable_variant === true
+    && typeof metadata.variant_id === "string"
+    && typeof metadata.base_variant_revision === "number"
+  );
 }
 
 function isActionableYujinMediaCandidate(candidate: DirectorCandidate) {

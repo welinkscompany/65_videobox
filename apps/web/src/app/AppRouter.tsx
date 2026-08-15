@@ -11,19 +11,26 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
-import { api, type Project } from "../api";
+import { api, type Project, type ProjectWorkspaceSummary } from "../api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
+import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
+import { FootageOrganizerPage } from "../features/footage/FootageOrganizerPage";
 import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
 import { OutputsPage } from "./OutputsPage";
 import { resolveLastValidProjectId } from "./projectSelection";
-import { isWorkspaceSection, resolveWorkspaceLocation, type WorkspaceSection } from "./routeManifest";
+import {
+  parseWorkspaceLocation,
+  resolveGlobalLocation,
+  resolveWorkspaceLocation,
+  type WorkspaceSection,
+} from "./routeManifest";
 
 const lastProjectKey = "videobox.last-valid-project";
 
@@ -78,6 +85,18 @@ const projectsRoute = createRoute({
   component: ProjectsPage,
 });
 
+const libraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/library",
+  component: LibraryPage,
+});
+
+const footageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/footage",
+  component: FootagePage,
+});
+
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/$section",
@@ -112,7 +131,7 @@ const settingsRoute = createRoute({
   component: SettingsRoutePage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, workspaceRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, libraryRoute, footageRoute, workspaceRoute, settingsRoute]);
 
 export function createAppRouter(
   catalog = new ProjectCatalog(),
@@ -163,20 +182,15 @@ function ProjectsPage() {
   }
 
   return (
-    <main data-testid="projects-catalog" className="grid gap-6 p-6">
-      <div className="grid gap-2">
-        <h1>프로젝트</h1>
-        <p className="text-sm text-muted-foreground">영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {projects.map((project) => (
-          <Button key={project.project_id} type="button" onClick={() => void navigate({ to: resolveWorkspaceLocation(project.project_id, "home") })}>
-            {project.name}
-          </Button>
-        ))}
+    <main data-testid="projects-catalog" className="vb-catalog">
+      <p className="vb-eyebrow">VideoBox</p>
+      <h1>프로젝트</h1>
+      <p>영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
+      <div className="vb-catalog-grid">
+        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} />)}
       </div>
       {isCreating ? (
-        <form className="grid max-w-sm gap-3" onSubmit={(event) => void handleCreate(event)}>
+        <form className="vb-catalog-form" onSubmit={(event) => void handleCreate(event)}>
           <label className="grid gap-2 text-sm">
             새 프로젝트 이름
             <Input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} autoFocus />
@@ -188,10 +202,77 @@ function ProjectsPage() {
           {createError ? <p className="text-sm text-destructive" role="alert">{createError}</p> : null}
         </form>
       ) : (
-        <Button type="button" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
+        <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
       )}
     </main>
   );
+}
+
+function LibraryPage() {
+  return <PersonalLibraryPage />;
+}
+
+function FootagePage() {
+  return <FootageOrganizerPage />;
+}
+
+function GlobalDestinationPage({ testId, title, description, readiness }: { testId: string; title: string; description: string; readiness: string }) {
+  return <main data-testid={testId}>
+    <h1>{title}</h1>
+    <p>{description}</p>
+    <p>{readiness}</p>
+    <a href={resolveGlobalLocation("projects")}>프로젝트로 돌아가기</a>
+  </main>;
+}
+
+const workspaceStageLabels: Record<ProjectWorkspaceSummary["current_stage"], string> = {
+  plan: "기획",
+  assets: "자산",
+  edit: "편집",
+  review: "검토",
+  output: "출력",
+};
+
+function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onNavigateHref?: (href: string) => void }) {
+  const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
+  const [summaryError, setSummaryError] = useState(false);
+  const [requestNumber, setRequestNumber] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setSummary(null);
+    setSummaryError(false);
+    void api.getProjectWorkspaceSummary(project.project_id).then((next) => {
+      if (active) setSummary(next);
+    }).catch(() => {
+      if (active) setSummaryError(true);
+    });
+    return () => { active = false; };
+  }, [project.project_id, requestNumber]);
+  if (summaryError) {
+    return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+      <h2>{project.name}</h2>
+      <p>상태 확인 필요</p>
+      <Button type="button" variant="outline" onClick={() => setRequestNumber((value) => value + 1)}>다시 확인</Button>
+    </article>;
+  }
+  if (!summary) {
+    return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+      <h2>{project.name}</h2>
+      <p>상태 확인 중</p>
+    </article>;
+  }
+  return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+    {summary.thumbnail_url ? <img src={summary.thumbnail_url} alt={`${summary.display_name} 대표 이미지`} loading="lazy" /> : null}
+    <h2>{summary.display_name}</h2>
+    <p>{workspaceStageLabels[summary.current_stage]} · {summary.state === "blocked" ? "막힘" : summary.state === "attention" ? "확인 필요" : "준비됨"}</p>
+    <time dateTime={summary.updated_at}>최근 편집 {summary.updated_at}</time>
+    <p className="vb-catalog-card__finished">완성본 {summary.finished_video_count}개</p>
+    <Button asChild type="button" variant="outline" aria-label={summary.next_action.label}><a href={summary.next_action.href} onClick={(event) => {
+      if (!onNavigateHref) return;
+      event.preventDefault();
+      onNavigateHref(summary.next_action.href);
+    }}>{summary.next_action.label}</a></Button>
+  </article>;
 }
 
 async function archiveProjectAndRefresh(router: ReturnType<typeof createAppRouter>, projectId: string) {
@@ -251,41 +332,56 @@ function WorkspacePage() {
     ? routeSearch.segment_id
     : null;
   const requestedSegmentId = rawRequestedSegmentId?.trim() || null;
-  const normalizedSection = section === "editor" ? "editing" : section;
-  if (!isWorkspaceSection(normalizedSection) || !projects.some((project) => project.project_id === projectId)) {
+  const parsedLocation = parseWorkspaceLocation(`/projects/${encodeURIComponent(projectId)}/${section}`);
+  if (!parsedLocation || !projects.some((project) => project.project_id === projectId)) {
     return <RecoveryPage />;
   }
+  const normalizedSection: WorkspaceSection = section === "editor" || parsedLocation.stage === "edit"
+    ? "editing"
+    : section === "media" || parsedLocation.stage === "assets"
+      ? "media"
+      : section === "outputs" || parsedLocation.stage === "output"
+        ? "outputs"
+        : section === "timeline" || parsedLocation.stage === "review"
+          ? "review"
+          : section === "create" || parsedLocation.stage === "plan"
+            ? "create"
+            : "home";
   window.localStorage.setItem(lastProjectKey, projectId);
   const navigateTo = (nextProjectId: string, nextSection: WorkspaceSection) => {
     void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) });
   };
-  if (normalizedSection === "home") {
-    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+  const openSettings = () => void navigate({
+    to: "/settings/general",
+    search: { project_id: projectId } as never,
+  });
+  if (section === "home") {
+    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
-  if (normalizedSection === "create") {
-    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+  if (section === "create" || section === "plan") {
+    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
-  if (normalizedSection === "media") {
+  if (section === "media" || section === "assets") {
     const requestedReturn = typeof (routeSearch as { return_to?: unknown }).return_to === "string"
       ? (routeSearch as { return_to: string }).return_to
       : null;
     const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
-    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <MediaWorkspacePage projectId={projectId} />
     </ProductShell>;
   }
-  if (normalizedSection === "outputs") {
-    return <ProductShell projectId={projectId} projects={projects} section="outputs" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+  if (section === "outputs" || section === "output") {
+    return <ProductShell projectId={projectId} projects={projects} section="outputs" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <OutputsPage projectId={projectId} onOpenEditor={() => navigateTo(projectId, "editing")} />
     </ProductShell>;
   }
-  if (normalizedSection === "timeline" || normalizedSection === "review") {
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+  if (section === "timeline" || section === "review") {
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
       <TimelineReviewPage
         projectId={projectId}
         onOpenSegment={({ projectId: targetProjectId, sessionId, segmentId }) => void navigate({
@@ -296,18 +392,18 @@ function WorkspacePage() {
       />
     </ProductShell>;
   }
-  if (section === "editor" && rawEditingSessionId !== null && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
+  if ((section === "editor" || section === "edit") && rawEditingSessionId !== null && !requestedEditingSessionId) {
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
-  if (section === "editor" && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
+  if ((section === "editor" || section === "edit") && !requestedEditingSessionId) {
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
-  if (section === "editor") {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={() => void navigate({ to: "/settings/general" })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
+  if (section === "editor" || section === "edit") {
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }

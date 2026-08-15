@@ -41,6 +41,8 @@ from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandof
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
+from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
 from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
 from videobox_core_engine.output_source_verifier import (
@@ -1385,6 +1387,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline_applied_recommendations=deepcopy(timeline_applied_recommendations),
             timeline_pending_recommendations=deepcopy(timeline_pending_recommendations),
             timeline_review_flags=timeline_review_flags,
+            source_variant_id=(
+                str(timeline.get("source_variant_id"))
+                if timeline.get("source_variant_id")
+                else None
+            ),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
         snapshot["review_status"] = timeline["review_status"]
         current_review_status = _canonical_runtime_review_status(
@@ -1554,6 +1566,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 str(session["session_id"]) if session is not None else None
             ),
             source_session_revision=source_session_revision,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def reopen_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1564,6 +1582,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
             status=status,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def start_subtitle_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1882,6 +1906,185 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 self._final_render_worker_claims.add(worker_key)
         return {"job_id": job["job_id"], "status": job["status"], "should_start": should_start}
 
+    def _materialize_variant_for_output(
+        self, *, project_id: str, session_id: str, variant_id: str
+    ) -> dict[str, Any]:
+        variant = OutputVariant.model_validate(
+            {
+                key: value
+                for key, value in self.store.get_output_variant(project_id=project_id, variant_id=variant_id).items()
+                if key not in {"project_id", "created_at", "updated_at"}
+            }
+        )
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        if session_id != variant.source_session_id:
+            raise VariantInvariantError("variant_session_mismatch")
+        current_revision = int(session.get("session_revision") or 0)
+        if current_revision != variant.source_session_revision:
+            raise VariantInvariantError("stale_master_revision")
+        derived = materialize_variant(
+            variant,
+            session.get("segments", []),
+            master_session_revision=current_revision,
+        )
+        try:
+            existing = self.store.get_variant_materialization(
+                project_id=project_id,
+                variant_id=variant_id,
+                source_variant_revision=derived.source_variant_revision,
+            )
+            timeline_id = str(existing["timeline_id"])
+        except KeyError:
+            master_timeline = self.store.get_timeline_run(
+                project_id=project_id,
+                timeline_id=str(session.get("timeline_id") or ""),
+            )
+            timeline_payload = {
+                key: value
+                for key, value in master_timeline.items()
+                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary"}
+            }
+            timeline_payload.update(
+                {
+                    "source_variant_id": derived.source_variant_id,
+                    "source_variant_revision": derived.source_variant_revision,
+                    "source_session_id": derived.source_session_id,
+                    "source_session_revision": derived.source_session_revision,
+                    "segments": list(derived.segments),
+                    "tracks": list(master_timeline.get("tracks", [])),
+                }
+            )
+            timeline = self.store.save_timeline_run(
+                project_id=project_id,
+                output_mode=variant.kind,
+                source_session_id=derived.source_session_id,
+                source_session_revision=derived.source_session_revision,
+                timeline_payload=timeline_payload,
+            )
+            timeline_id = str(timeline["timeline_id"])
+            self.store.save_variant_materialization(
+                project_id=project_id,
+                variant_id=variant_id,
+                source_session_id=derived.source_session_id,
+                source_session_revision=derived.source_session_revision,
+                source_variant_revision=derived.source_variant_revision,
+                timeline_id=timeline_id,
+                segments=derived.segments,
+            )
+        self._sync_approved_variant_review(
+            project_id=project_id,
+            source_timeline_id=str(session.get("timeline_id") or ""),
+            timeline_id=timeline_id,
+            source_session_id=derived.source_session_id,
+            source_session_revision=derived.source_session_revision,
+            source_variant_id=derived.source_variant_id,
+            source_variant_revision=derived.source_variant_revision,
+        )
+        timeline_job_id = next(
+            (
+                str(job["job_id"])
+                for job in self.store.list_jobs(project_id=project_id)
+                if str(job.get("job_type")) == JobType.TIMELINE_BUILD.value
+                and str(job.get("output_ref") or "") == timeline_id
+                and str(job.get("status")) == JobStatus.SUCCEEDED.value
+            ),
+            None,
+        )
+        if timeline_job_id is None:
+            timeline_job = self.store.create_job(
+                project_id=project_id,
+                job_type=JobType.TIMELINE_BUILD,
+                input_ref=f"variant:{variant_id}:{derived.source_variant_revision}",
+                status=JobStatus.RUNNING,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=timeline_job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=timeline_id,
+            )
+            timeline_job_id = str(timeline_job["job_id"])
+        return {"timeline_id": timeline_id, "timeline_job_id": timeline_job_id, "variant": variant}
+
+    def _sync_approved_variant_review(
+        self,
+        *,
+        project_id: str,
+        source_timeline_id: str,
+        timeline_id: str,
+        source_session_id: str,
+        source_session_revision: int,
+        source_variant_id: str,
+        source_variant_revision: int,
+    ) -> None:
+        """Keep reused variant materializations aligned with an approved master."""
+        try:
+            source_review = self.store.get_review_state(
+                project_id=project_id,
+                timeline_id=source_timeline_id,
+            )
+        except KeyError:
+            return
+        if str(source_review.get("status")) != "approved":
+            return
+        self.store.save_review_state(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            status="approved",
+            source_session_id=source_session_id,
+            source_session_revision=source_session_revision,
+            source_variant_id=source_variant_id,
+            source_variant_revision=source_variant_revision,
+        )
+
+    def start_variant_renders(
+        self, *, project_id: str, session_id: str, variant_ids: list[str]
+    ) -> dict[str, Any]:
+        selected_ids = list(variant_ids)
+        if not selected_ids:
+            selected_ids = [
+                str(item["variant_id"])
+                for item in self.store.ensure_output_variants(project_id=project_id, session_id=session_id)
+                if str(item.get("kind")) in {"horizontal", "vertical_full"}
+            ]
+        items: list[dict[str, Any]] = []
+        for variant_id in selected_ids:
+            try:
+                materialized = self._materialize_variant_for_output(
+                    project_id=project_id, session_id=session_id, variant_id=variant_id
+                )
+                render_job = self.start_final_render_job(
+                    project_id=project_id,
+                    timeline_job_id=materialized["timeline_job_id"],
+                )
+                items.append(
+                    {
+                        "variant_id": variant_id,
+                        "variant_kind": materialized["variant"].kind,
+                        "timeline_id": materialized["timeline_id"],
+                        "timeline_job_id": materialized["timeline_job_id"],
+                        "job_id": render_job["job_id"],
+                        "status": render_job["status"],
+                        "should_start": render_job["should_start"],
+                    }
+                )
+            except Exception as exc:
+                if variant_id.endswith("highlight") or variant_id == "vertical_highlight":
+                    continue
+                items.append(
+                    {
+                        "variant_id": variant_id,
+                        "status": "failed",
+                        "error_code": str(exc),
+                        "should_start": False,
+                    }
+                )
+        return {
+            "project_id": project_id,
+            "status": "accepted" if any(item["status"] != "failed" for item in items) else "failed",
+            "items": items,
+        }
+
     def release_final_render_worker(
         self,
         *,
@@ -2030,13 +2233,28 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     )
                     return True
 
+                is_derived_variant_timeline = bool(timeline.get("source_variant_id"))
                 persisted = self.store.save_final_render(
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
                     source_output_path=render_output_path,
-                    source_session_id=str(editing_session["session_id"]) if editing_session is not None else None,
-                    source_session_revision=int(editing_session["session_revision"]) if editing_session is not None else None,
-                    source_session_absent=editing_session is None,
+                    # A derived variant deliberately has the master editing
+                    # session as its source lineage, but it is not itself the
+                    # session's timeline_id. The publish CAS therefore must
+                    # not compare the derived timeline to the master session
+                    # row; review/source fences above still bind the variant
+                    # to that exact session and revision.
+                    source_session_id=(
+                        None
+                        if is_derived_variant_timeline or editing_session is None
+                        else str(editing_session["session_id"])
+                    ),
+                    source_session_revision=(
+                        None
+                        if is_derived_variant_timeline or editing_session is None
+                        else int(editing_session["session_revision"])
+                    ),
+                    source_session_absent=is_derived_variant_timeline or editing_session is None,
                     source_fence=final_source_fence,
                 )
             self.store.update_job(
@@ -2338,6 +2556,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def _editing_session_for_output_timeline(
         self, *, project_id: str, timeline: dict[str, Any]
     ) -> dict[str, Any] | None:
+        source_variant_id = str(timeline.get("source_variant_id") or "")
+        source_session_id = str(timeline.get("source_session_id") or "")
+        if source_variant_id and source_session_id:
+            try:
+                return self.store.get_editing_session(
+                    project_id=project_id,
+                    session_id=source_session_id,
+                )
+            except KeyError:
+                return None
         try:
             session = self.store.get_latest_editing_session(project_id=project_id)
         except KeyError:
@@ -2351,12 +2579,30 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         timeline_id = str(timeline.get("timeline_id") or "")
         if not timeline_id:
             return
-        try:
-            active_session = self.store.get_latest_editing_session(project_id=project_id)
-        except KeyError:
-            active_session = None
-        if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
-            raise OutputSourceStaleError("timeline is not the active editing session output")
+        source_variant_id = str(timeline.get("source_variant_id") or "")
+        variant: dict[str, Any] | None = None
+        if source_variant_id:
+            source_session_id = str(timeline.get("source_session_id") or "")
+            if not source_session_id:
+                raise OutputSourceStaleError("variant source session is unstamped")
+            try:
+                active_session = self.store.get_editing_session(
+                    project_id=project_id,
+                    session_id=source_session_id,
+                )
+                variant = self.store.get_output_variant(
+                    project_id=project_id,
+                    variant_id=source_variant_id,
+                )
+            except KeyError as exc:
+                raise OutputSourceStaleError("variant identity is unavailable") from exc
+        else:
+            try:
+                active_session = self.store.get_latest_editing_session(project_id=project_id)
+            except KeyError:
+                active_session = None
+            if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
+                raise OutputSourceStaleError("timeline is not the active editing session output")
         try:
             review = self.store.get_review_state(project_id=project_id, timeline_id=timeline_id)
         except KeyError:
@@ -2369,6 +2615,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline=timeline,
             subtitle=subtitle,
             review=review,
+            variant=variant,
         )
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -2531,4 +2778,3 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             "recovery_message": diagnostics.recovery_message,
             "checked_at": diagnostics.checked_at,
         }
-

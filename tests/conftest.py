@@ -44,6 +44,13 @@ def _allow_live_lmstudio(request: pytest.FixtureRequest, address: object) -> boo
     )
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "docs_only: documentation contract tests that must not import or patch the API runtime",
+    )
+
+
 class _DeterministicOfflineRuntime:
     def generate_structured(self, **_: object) -> object:
         raise LLMProviderError(
@@ -56,6 +63,8 @@ class _DeterministicOfflineRuntime:
 
 @pytest.fixture(autouse=True)
 def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    if request.node.get_closest_marker("docs_only") is not None:
+        return
     import videobox_api.main as api_main
 
     def build_deterministic_runtime(**_: object) -> _DeterministicOfflineRuntime:

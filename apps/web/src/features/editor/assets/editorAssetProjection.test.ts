@@ -64,9 +64,9 @@ describe("editor asset projection", () => {
       kind: "broll",
       label: "기타 B-roll",
       title: "B-roll 1",
-      durationLabel: "길이 정보 없음",
+      durationLabel: "길이 확인 중",
       status: "확인 중 · 검토 필요",
-      canApply: true,
+      canApply: false,
       previewUrl: "/api/projects/p/assets/other-1/content",
     });
     expect(filterEditorAssets([card], { type: "broll", query: "현장" })).toEqual([card]);
@@ -152,6 +152,17 @@ describe("intake facts on b-roll cards", () => {
 
     expect(card.durationLabel).not.toBe("길이 정보 없음");
     expect(card.durationLabel).toContain("12");
+  });
+
+  it("keeps a pending length honest while intake metadata is incomplete", () => {
+    const [card] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ title: "분석 대기 영상", analysis_status: "pending" })],
+      libraryAssets: [],
+    });
+
+    expect(card.durationLabel).toBe("길이 확인 중");
+    expect(card.status).toContain("준비 중");
   });
 
   it("surfaces orientation so vertical footage is pickable for shortform", () => {

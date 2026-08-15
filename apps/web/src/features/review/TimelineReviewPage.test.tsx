@@ -70,6 +70,7 @@ const approval = (projectId = "project-a", timelineId = "timeline-a", status = "
   review_status: status,
   approved_at: status === "approved" ? "2026-07-23T00:02:00Z" : null,
   updated_at: "2026-07-23T00:02:00Z",
+  source_session_id: `session-${projectId}`,
   source_session_revision: 4,
   is_current: true,
   invalidated_at: null,
@@ -166,7 +167,9 @@ describe("TimelineReviewPage", () => {
     vi.mocked(api.getReviewApproval).mockResolvedValue({ ...approval(), is_current: false, invalidated_reason: "edited" });
     render(<TimelineReviewPage projectId="project-a" />);
 
-    expect(await screen.findByText("이 검토본은 현재 편집본과 맞지 않아요. 다시 확인해 주세요.")).toBeVisible();
+    expect(await screen.findByText("이 검토본은 현재 편집본과 맞지 않아요. 현재 편집본으로 다시 만들어 주세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "현재 편집본으로 검토본 다시 만들기" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "편집으로 돌아가기" })).toHaveAttribute("href", "/projects/project-a/editor?session_id=session-project-a");
     expect(screen.queryByRole("button", { name: "검토 승인" })).toBeNull();
   });
 
@@ -178,8 +181,8 @@ describe("TimelineReviewPage", () => {
     const refreshReview = vi.spyOn(api, "refreshReviewForCurrentEdit").mockResolvedValue({ ...approval(), review_status: "draft" });
     render(<TimelineReviewPage projectId="project-a" />);
 
-    expect(await screen.findByText("이 검토본은 현재 편집본과 맞지 않아요. 다시 확인해 주세요.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "검토 다시 받기" }));
+    expect(await screen.findByText("편집이 바뀌어서 이 검토본은 현재 편집본과 맞지 않아요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "현재 편집본으로 검토본 다시 만들기" }));
 
     await waitFor(() => expect(refreshReview).toHaveBeenCalledWith("project-a", "session-project-a"));
     expect(await screen.findByRole("heading", { name: "영상 검토" })).toBeVisible();
@@ -191,7 +194,7 @@ describe("TimelineReviewPage", () => {
     vi.spyOn(api, "refreshReviewForCurrentEdit").mockRejectedValue(new Error("offline"));
     render(<TimelineReviewPage projectId="project-a" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "검토 다시 받기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "현재 편집본으로 검토본 다시 만들기" }));
 
     expect(await screen.findByText("검토본을 다시 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.")).toBeVisible();
   });

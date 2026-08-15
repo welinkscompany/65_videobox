@@ -6,6 +6,7 @@ import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
+import { YujinStarters } from "../../yujin/YujinStarters";
 import type { RightDockCandidate, RightDockConversationScroll, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
 
@@ -97,6 +98,7 @@ export function RightDock({
   const inspectorTargetIdentity = inspectorTargets.map((target) => target.id).join("|");
   const [retryRemaining, setRetryRemaining] = useState(0);
   const historyRef = useRef<HTMLDivElement>(null);
+  const composerContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSelectedInspectorTargetId((current) => inspectorTargets.some((target) => target.id === current)
@@ -141,6 +143,14 @@ export function RightDock({
   );
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
   const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
+  const showConversationStarters = messages.length === 0
+    && !proposal
+    && state === "idle"
+    && runState.kind === "idle";
+  const chooseConversationStarter = (starter: { label: string }) => {
+    onDraftChange(starter.label);
+    composerContainerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+  };
   const submit = () => { if (canSend) void onSendMessage?.(draft.trim()); };
   const runStatusAnnouncement = runState.kind === "complete"
     ? "유진 답변을 받았어요."
@@ -179,10 +189,24 @@ export function RightDock({
           });
         }}
       >
-        {messages.length ? messages.map((message) => <article key={message.id}><p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p></article>) : <p>유진 대화는 아직 시작하지 않았어요.</p>}
+        {messages.length
+          ? messages.map((message) => <article key={message.id}><p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p></article>)
+          : <>
+            <p>유진 대화는 아직 시작하지 않았어요.</p>
+            {showConversationStarters ? <YujinStarters
+              // The original fixed starters were available before a segment
+              // was selected; keep that entry point while the registry grows
+              // context-aware alternatives.
+              context={{ surface: "edit", selection: selectedSegment ? "segment" : "none" }}
+              disabled={composerDisabled}
+              onSelect={chooseConversationStarter}
+            /> : null}
+          </>}
       </div>
       <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
-      <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
+      <div ref={composerContainerRef}>
+        <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
+      </div>
       <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
       {onCancelRun
         ? <Button type="button" onClick={() => void onCancelRun()}>답변 중단</Button>
@@ -299,6 +323,7 @@ function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
     image: "이미지",
     bgm: "배경 음악",
     sfx: "효과음",
+    output_variant: "출력 변형",
   }[kind] ?? "미디어";
 }
 

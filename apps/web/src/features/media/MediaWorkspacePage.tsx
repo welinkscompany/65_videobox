@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 
 import { api, type BrollAsset, type MediaAnalysis, type MediaInboxAsset } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { projectEditorAssets } from "../editor/assets/editorAssetProjection";
 import { MediaLibraryBrowser } from "./MediaLibraryBrowser";
+
+type MediaTab = "videos" | "music" | "sfx" | "import";
 
 type MediaState = {
   projectId: string;
@@ -43,14 +46,6 @@ function assetTitle(asset: BrollAsset | undefined, index: number) {
   return typeof title === "string" && title.trim() ? title.trim() : `미디어 ${index + 1}`;
 }
 
-/** 반입이 쓰는 이름은 `duration_sec`이다. `duration_seconds`는 미디어 팩 쪽 이름이라
- *  프로젝트 자산에는 붙지 않는다. 이 화면은 팩 이름만 읽고 있어서 길이를 아는 자산까지
- *  전부 "확인하고 있어요"로 남았다. 편집기 카드에서 이미 고친 것과 같은 형태로 맞춘다. */
-function assetDurationSeconds(metadata: BrollAsset["metadata"] | undefined) {
-  const value = metadata?.duration_sec ?? metadata?.duration_seconds;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   const [state, setState] = useState<MediaState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,6 +54,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   const [preview, setPreview] = useState<{ assetId: string; durationSec?: number } | null>(null);
   const [tags, setTags] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<MediaTab>("videos");
+  const tabRefs = useRef<Partial<Record<MediaTab, HTMLButtonElement>>>({});
   const currentContext = useRef({ projectId, generation: 0 });
   const loadEpoch = useRef(0);
   const actionSequence = useRef(0);
@@ -113,6 +110,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     setTags({});
     setMessage(null);
     setBusyKey(null);
+    setActiveTab("videos");
     void load();
     return () => {
       loadEpoch.current += 1;
@@ -172,17 +170,17 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     if (files.length === 0) return;
     const token = beginAction("upload");
     if (!token) return;
-    let succeeded = 0;
-    let failed = 0;
-    for (const file of Array.from(files)) {
-      try {
-        await api.uploadDraftBroll(token.projectId, file);
-        succeeded += 1;
-      } catch {
-        failed += 1;
+    let succeeded = 0; let failed = 0;
+    try {
+      const batch = await api.ingestLibraryAssets(Array.from(files), "broll", `project-${token.projectId}-${token.id}`);
+      for (const item of batch.items) {
+        if (!item.library_asset_id || (item.state !== "ready" && item.state !== "duplicate")) { failed += 1; continue; }
+        try { await api.materializeLibraryAsset(item.library_asset_id, token.projectId); succeeded += 1; } catch { failed += 1; }
       }
-      if (!isCurrentAction(token)) return;
+    } catch {
+      failed = files.length;
     }
+    if (!isCurrentAction(token)) return;
     if (succeeded > 0) await load();
     if (!isCurrentAction(token)) return;
     if (succeeded > 0 && failed === 0) {
@@ -204,10 +202,28 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       await load();
       if (isCurrentAction(token)) setMessage(`「${filename}」을 이 프로젝트로 가져왔어요.`);
     } catch {
-      if (isCurrentAction(token)) setMessage("이 영상을 가져오지 못했어요. 다시 시도해 주세요.");
+      if (isCurrentAction(token)) {
+        await load();
+        if (isCurrentAction(token)) setMessage("이 영상을 가져오지 못했어요. 다시 시도해 주세요.");
+      }
     } finally {
       finishAction(token);
     }
+  }
+
+  async function removeProjectReference(asset: BrollAsset) {
+    const sourceLibraryAssetId = asset.metadata?.source_library_asset_id;
+    if (typeof sourceLibraryAssetId !== "string" || !sourceLibraryAssetId) {
+      setMessage("이 프로젝트 전용 영상은 여기에서 뺄 수 없어요.");
+      return;
+    }
+    const usage = await api.getLibraryAssetUsage(sourceLibraryAssetId);
+    const reference = usage.locations.find((location) => location.project_id === projectId && location.materialized_asset_id === asset.asset_id);
+    if (!reference?.reference_id) {
+      setMessage("프로젝트 참조 위치를 찾지 못했어요. 라이브러리에서 상태를 확인해 주세요.");
+      return;
+    }
+    await api.removeLibraryReference(sourceLibraryAssetId, reference.reference_id);
   }
 
   async function showPreview(item: MediaAnalysis) {
@@ -234,12 +250,36 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
 
   const currentState = state?.projectId === projectId ? state : null;
   const assetById = new Map(currentState?.assets.map((item) => [item.asset_id, item]) ?? []);
+  const projectCards = currentState
+    ? projectEditorAssets({ projectId, brollAssets: currentState.assets, libraryAssets: [] })
+    : [];
+
+  const tabs: readonly { value: MediaTab; label: string }[] = [
+    { value: "videos", label: "내 영상" },
+    { value: "music", label: "음악" },
+    { value: "sfx", label: "효과음" },
+    { value: "import", label: "가져오기" },
+  ];
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, value: MediaTab) {
+    const index = tabs.findIndex((tab) => tab.value === value);
+    if (index < 0 || !["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? tabs.length - 1
+        : (index + (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) + tabs.length) % tabs.length;
+    const next = tabs[nextIndex].value;
+    setActiveTab(next);
+    tabRefs.current[next]?.focus();
+  }
 
   return (
-    <main data-project-id={projectId} data-testid="media-workspace-page">
+    <section data-project-id={projectId} data-testid="media-workspace-page" aria-labelledby="media-workspace-heading">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1>자산 보관함</h1>
+          <h1 id="media-workspace-heading">자산 보관함</h1>
           <p>이 프로젝트에 준비한 영상을 확인하고 분석 상태를 관리할 수 있어요.</p>
         </div>
         <Button type="button" variant="outline" disabled={loading || busyKey !== null} onClick={() => void load()}>
@@ -251,28 +291,49 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       {error ? <div role="alert"><p>{error}</p><Button type="button" onClick={() => void load()}>다시 불러오기</Button></div> : null}
       {message ? <p role="status">{message}</p> : null}
 
-      <section aria-labelledby="media-upload-heading">
-        <h2 id="media-upload-heading">영상 올리기</h2>
-        <p>평소에 찍어둔 장면 영상을 여러 개 한 번에 올려 보관함에 쌓아 둘 수 있어요.</p>
-        <label htmlFor="media-broll-upload">장면 영상 파일 추가</label>
-        <Input
-          id="media-broll-upload"
-          type="file"
-          accept="video/*,.mp4,.mov,.webm,.mkv"
-          multiple
-          disabled={busyKey !== null}
-          onChange={(event) => {
-            const files = event.target.files;
-            event.target.value = "";
-            if (files && files.length > 0) void uploadFiles(files);
-          }}
-        />
-      </section>
+      <div role="tablist" aria-label="자산 종류" className="vb-media-workspace__tabs">
+        {tabs.map((tab) => (
+          <Button
+            key={tab.value}
+            type="button"
+            variant={activeTab === tab.value ? "default" : "outline"}
+            role="tab"
+            aria-selected={activeTab === tab.value}
+            aria-controls={activeTab === tab.value ? `media-panel-${tab.value}` : undefined}
+            tabIndex={activeTab === tab.value ? 0 : -1}
+            ref={(element) => {
+              tabRefs.current[tab.value] = element ?? undefined;
+            }}
+            onKeyDown={(event) => handleTabKeyDown(event, tab.value)}
+            onClick={() => setActiveTab(tab.value)}
+          >
+            {tab.label}
+          </Button>
+        ))}
+      </div>
 
-      {currentState ? (
-        <div className="grid gap-4">
-          <section aria-labelledby="media-collection-heading">
-            <h2 id="media-collection-heading">따로 모아둔 영상 가져오기</h2>
+      {activeTab === "import" ? <div id="media-panel-import" role="tabpanel" aria-label="가져오기" className="grid gap-4">
+        <section aria-labelledby="media-upload-heading">
+          <h2 id="media-upload-heading">새 파일 추가</h2>
+          <p className="sr-only">영상 올리기</p>
+          <p>평소에 찍어둔 장면 영상을 여러 개 한 번에 올려 보관함에 쌓아 둘 수 있어요.</p>
+          <label htmlFor="media-broll-upload">장면 영상 파일 추가</label>
+          <Input
+            id="media-broll-upload"
+            type="file"
+            accept="video/*,.mp4,.mov,.webm,.mkv"
+            multiple
+            disabled={busyKey !== null}
+            onChange={(event) => {
+              const files = event.target.files;
+              event.target.value = "";
+              if (files && files.length > 0) void uploadFiles(files);
+            }}
+          />
+        </section>
+        {currentState ? <section aria-labelledby="media-collection-heading">
+            <h2 id="media-collection-heading">촬영본 가져오기</h2>
+            <p className="sr-only">따로 모아둔 영상 가져오기</p>
             <p>미리 옮겨둔 영상이 여기에 쌓여요. 이 프로젝트에서 쓸 영상을 골라 가져오세요.</p>
             {currentState.collection.length === 0 ? <p>아직 따로 모아둔 영상이 없어요.</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -297,24 +358,48 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
                 ))}
               </div>
             )}
-          </section>
+        </section> : null}
+      </div> : null}
 
-          <MediaLibraryBrowser projectId={projectId} />
+      {activeTab === "music" ? <div id="media-panel-music" role="tabpanel" aria-label="음악"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="music" /></div> : null}
+      {activeTab === "sfx" ? <div id="media-panel-sfx" role="tabpanel" aria-label="효과음"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="sfx" /></div> : null}
 
+      {activeTab === "videos" && currentState ? (
+        <div id="media-panel-videos" role="tabpanel" aria-label="내 영상" className="grid gap-4">
           <section aria-labelledby="media-assets-heading">
-            <h2 id="media-assets-heading">준비한 자산</h2>
-            {currentState.assets.length === 0 ? <p>아직 준비한 자산이 없어요.</p> : (
+            <h2>프로젝트 자산</h2>
+            <h2 id="media-assets-heading">내 영상</h2>
+            {projectCards.length === 0 ? <p>아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요.</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {currentState.assets.map((item, index) => (
-                  <Card key={item.asset_id}>
+                {projectCards.map((card) => (
+                  <Card key={card.id} className="vb-media-project-card" aria-label={`${card.title} 자산`}>
+                    {card.thumbnailUrl ? <img className="vb-editor-assets__thumb" src={card.thumbnailUrl} alt={`${card.title} 미리보기`} loading="lazy" /> : null}
                     <CardHeader>
-                      <CardTitle>{assetTitle(item, index)}</CardTitle>
-                      <CardDescription>영상</CardDescription>
+                      <CardTitle title={card.title}>{card.title}</CardTitle>
+                      <CardDescription>{card.durationLabel === "길이 정보 없음" ? card.durationLabel : `길이 ${card.durationLabel}`}</CardDescription>
+                      <CardDescription>{card.orientation ?? "방향 확인 중"}</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      {assetDurationSeconds(item.metadata) !== null
-                        ? <p>길이 {assetDurationSeconds(item.metadata)}초</p>
-                        : <p>길이를 확인하고 있어요.</p>}
+                      <p>{card.audioPresence}</p>
+                      <p>{card.status}</p>
+                      {(() => {
+                        const projectAsset = currentState.assets.find((item) => item.asset_id === card.assetId);
+                        const sourceLibraryAssetId = projectAsset?.metadata?.source_library_asset_id;
+                        return typeof sourceLibraryAssetId === "string" && sourceLibraryAssetId ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busyKey !== null}
+                            aria-label={`${card.title} 프로젝트에서 빼기`}
+                            onClick={() => {
+                              if (!projectAsset) return;
+                              void runAction(`remove:${projectAsset.asset_id}`, () => removeProjectReference(projectAsset));
+                            }}
+                          >
+                            프로젝트에서 빼기
+                          </Button>
+                        ) : null;
+                      })()}
                     </CardContent>
                   </Card>
                 ))}
@@ -392,6 +477,6 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
           </section>
         </div>
       ) : null}
-    </main>
+    </section>
   );
 }

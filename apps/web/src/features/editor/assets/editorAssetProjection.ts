@@ -66,6 +66,16 @@ function durationLabel(value: unknown): string {
   return `${Number.isInteger(value) ? value : value.toFixed(1)}초`;
 }
 
+function intakeDurationLabel(metadata: Readonly<Record<string, unknown>>): string {
+  const value = metadata.duration_sec ?? metadata.duration_seconds;
+  const analysis = metadata.analysis_status;
+  if ((analysis === "pending" || analysis === "processing" || metadata.review_required === true)
+    && (typeof value !== "number" || !Number.isFinite(value))) {
+    return "길이 확인 중";
+  }
+  return durationLabel(value);
+}
+
 function brollStatus(metadata: Readonly<Record<string, unknown>>): string {
   const analysis = metadata.analysis_status;
   const base = analysis === "succeeded"
@@ -132,7 +142,7 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     // Intake writes `duration_sec`.  `duration_seconds` is the media-pack
     // field and never appears on project b-roll, so reading it always
     // produced "길이 정보 없음".
-    durationLabel: durationLabel(metadata.duration_sec ?? metadata.duration_seconds),
+    durationLabel: intakeDurationLabel(metadata),
     status: brollStatus(metadata),
     audioPresence: brollAudioPresence(metadata),
     orientation: brollOrientation(metadata),
@@ -140,7 +150,7 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
       ? api.assetThumbnailUrl(projectId, asset.asset_id)
       : undefined,
     license: "내 영상",
-    canApply: true,
+    canApply: metadata.review_required !== true && metadata.analysis_status !== "pending" && metadata.analysis_status !== "processing",
     previewUrl: api.assetContentUrl(projectId, asset.asset_id),
     previewKind: brollPreviewKind(asset.asset_type),
     requiresBrowserPreviewPreparation: asset.asset_type === "broll_video",

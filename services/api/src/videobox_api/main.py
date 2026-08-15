@@ -42,6 +42,7 @@ from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.live_smoke_attestation import build_live_smoke_attestation_router
 from videobox_api.routers.media_inbox import build_media_inbox_router
 from videobox_api.routers.media_library import build_media_library_router
+from videobox_api.routers.library_assets import build_library_assets_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
 from videobox_api.routers.hermes_conversation import build_hermes_conversation_router
@@ -50,6 +51,8 @@ from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
+from videobox_api.routers.footage_organizer import build_footage_organizer_router
+from videobox_api.routers.output_variants import build_output_variants_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
@@ -60,6 +63,7 @@ from videobox_core_engine.local_pipeline import (
 )
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.library_footage_indexer import index_pending_library_footage
+from videobox_core_engine.library_ingest import LibraryIngestService
 from videobox_core_engine.media_inbox import AUDIO_EXTENSIONS, MediaInboxConfig, run_inbox_watcher_loop
 from videobox_core_engine.owner_audio_library import register_owner_audio_library
 from videobox_core_engine.media_analysis import MediaAnalysisService, assets_needing_reanalysis
@@ -460,6 +464,13 @@ async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
                             profile=service.profile,
                         )
                     except Exception:
+                        _LOGGER.warning(
+                            "자산의 현재 캐시 열쇠를 계산하지 못했습니다 (project=%s, asset=%s). "
+                            "이번 회차에는 낡음 여부를 판단할 수 없어 다시 걸리지 않습니다.",
+                            project_id,
+                            asset_id,
+                            exc_info=True,
+                        )
                         continue
                 stale = assets_needing_reanalysis(
                     store=store,
@@ -750,6 +761,8 @@ def create_app(
     final_renderer=None,
     pycapcut_exporter=None,
     media_library_store: MediaLibraryStore | None = None,
+    footage_detector=None,
+    footage_derivative_renderer=None,
     vision_provider=None,
     embedding_provider=None,
     media_probe=None,
@@ -985,6 +998,13 @@ def create_app(
     app.state.final_renderer = pipeline.final_renderer
     app.state.user_library_store = user_library_store
     app.state.media_library_store = resolved_media_library_store
+    # User media is copied into the global library root and gets one durable
+    # ingest/idempotency authority shared by PC and Drive mirror imports.
+    app.state.library_ingest_service = LibraryIngestService(
+        store=resolved_media_library_store.user_asset_store,
+        managed_root=user_library_root,
+        probe_metadata=FFmpegMediaProbe().probe_metadata,
+    )
     media_inbox_watch_path = resolve_media_inbox_watch_path()
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()
     resolved_owner_audio_library_root = resolve_owner_audio_library_root()
@@ -1003,6 +1023,9 @@ def create_app(
             watch_path=media_inbox_watch_path,
             library_root=resolved_media_inbox_library_root,
             archive_root=media_inbox_archive_root,
+            copy_only=True,
+            ingest_store=resolved_media_library_store.user_asset_store,
+            media_type="broll",
         )
         if media_inbox_watch_path is not None
         else None
@@ -1021,6 +1044,9 @@ def create_app(
             library_root=resolved_owner_audio_library_root / media_type,
             archive_root=media_inbox_archive_root,
             accepted_extensions=AUDIO_EXTENSIONS,
+            copy_only=True,
+            ingest_store=resolved_media_library_store.user_asset_store,
+            media_type=media_type,
         )
         for media_type, watch_path in sorted(
             resolve_owner_audio_watch_paths(media_inbox_watch_path).items()
@@ -1127,8 +1153,27 @@ def create_app(
         )
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
+    app.include_router(
+        build_footage_organizer_router(
+            media_library_store=resolved_media_library_store,
+            detector=footage_detector,
+            derivative_renderer=footage_derivative_renderer,
+            yujin_runtime_service=runtime_service,
+        )
+    )
+    app.include_router(
+        build_library_assets_router(
+            project_store=store,
+            media_library_store=resolved_media_library_store,
+            user_asset_store=resolved_media_library_store.user_asset_store,
+            ingest_service=app.state.library_ingest_service,
+            managed_root=user_library_root,
+            managed_roots=tuple(dict.fromkeys((user_library_root, resolved_media_inbox_library_root, resolved_owner_audio_library_root, *(resolved_owner_audio_library_root / media_type for media_type in resolve_owner_audio_watch_paths(media_inbox_watch_path))))),
+        )
+    )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
+    app.include_router(build_output_variants_router(store))
 
     return app

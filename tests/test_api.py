@@ -2732,6 +2732,8 @@ def test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case
             timeline_applied_recommendations: list[dict[str, object]],
             timeline_pending_recommendations: list[dict[str, object]],
             timeline_review_flags: list[dict[str, object]],
+            source_variant_id: str | None,
+            source_variant_revision: int | None,
         ) -> dict[str, object]:
             assert project_id == "project_001"
             assert timeline_id == "timeline_001"
@@ -2739,6 +2741,8 @@ def test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case
             assert timeline_applied_recommendations == []
             assert timeline_pending_recommendations == []
             assert timeline_review_flags == []
+            assert source_variant_id is None
+            assert source_variant_revision is None
             return {
                 "project_id": project_id,
                 "timeline_id": timeline_id,
@@ -4693,6 +4697,269 @@ def test_home_summary_reports_what_the_home_cards_claim(tmp_path: Path) -> None:
 
     assert filled["finished_video_count"] == 1, filled
     assert filled["has_draft"] is True, filled
+
+
+def test_workspace_summary_is_authoritative_for_an_empty_project(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Workspace summary"}).json()["project_id"]
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["project_id"] == project_id
+    assert payload["display_name"] == "Workspace summary"
+    assert payload["updated_at"]
+    assert payload["current_stage"] == "plan"
+    assert payload["state"] == "ready"
+    assert payload["thumbnail_url"] is None
+    assert payload["finished_video_count"] == 0
+    assert payload["next_action"] == {
+        "label": "계속 만들기",
+        "href": f"/projects/{project_id}/plan",
+    }
+
+
+def test_workspace_summary_fails_closed_when_latest_session_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Unreadable workspace"}).json()["project_id"]
+
+    def fail_latest(*, project_id: str) -> dict[str, object]:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(app.state.store, "get_latest_editing_session", fail_latest)
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "workspace_summary_unavailable"
+    assert "current_stage" not in response.json()
+
+
+@pytest.mark.parametrize(
+    ("job_status", "expected_state", "expected_label"),
+    [
+        (JobStatus.FAILED.value, "attention", "출력 다시 시도"),
+        (JobStatus.RUNNING.value, "attention", "출력 상태 보기"),
+        (JobStatus.SUCCEEDED.value, "ready", "완성본 보기"),
+    ],
+)
+def test_workspace_summary_output_state_overrides_asset_gaps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    job_status: str,
+    expected_state: str,
+    expected_label: str,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Output state"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-output",
+        session_payload={"segments": [], "history": [], "gap_slots": [{"gap_slot_id": "gap-1"}]},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [{
+            "job_id": "final-render-new",
+            "project_id": project_id,
+            "job_type": JobType.FINAL_RENDER.value,
+            "status": job_status,
+            "started_at": "2026-08-12T01:00:00+00:00",
+            "finished_at": "2026-08-12T01:01:00+00:00" if job_status != JobStatus.RUNNING.value else None,
+        }],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == expected_state
+    assert payload["next_action"]["label"] == expected_label
+    assert payload["next_action"]["href"] == f"/projects/{project_id}/output"
+
+
+def test_workspace_summary_selects_latest_final_render_by_timestamp_not_job_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Latest output"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-latest",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [
+            {
+                "job_id": "final-render-a",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.SUCCEEDED.value,
+                "started_at": "2026-08-12T02:00:00+00:00",
+                "finished_at": "2026-08-12T02:01:00+00:00",
+            },
+            {
+                "job_id": "final-render-z",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.FAILED.value,
+                "started_at": "2026-08-12T01:00:00+00:00",
+                "finished_at": "2026-08-12T01:01:00+00:00",
+            },
+        ],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == "ready"
+    assert payload["next_action"]["label"] == "완성본 보기"
+
+
+def test_workspace_summary_pending_retry_without_timestamps_supersedes_older_failed_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Pending retry"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-pending",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [
+            {
+                "job_id": "final-render-old",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.FAILED.value,
+                "started_at": "2026-08-12T01:00:00+00:00",
+                "finished_at": "2026-08-12T01:01:00+00:00",
+            },
+            {
+                "job_id": "final-render-retry",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.PENDING.value,
+                "started_at": None,
+                "finished_at": None,
+            },
+        ],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == "attention"
+    assert payload["next_action"] == {
+        "label": "출력 상태 보기",
+        "href": f"/projects/{project_id}/output",
+    }
+
+
+def test_workspace_summary_fails_closed_when_session_timeline_review_is_missing(
+    tmp_path: Path,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Missing review"}).json()["project_id"]
+    app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-without-review",
+        session_payload={"segments": [], "history": []},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "workspace_summary_unavailable"
+
+
+def test_workspace_summary_surfaces_blocked_review_as_review_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Blocked review"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-blocked",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state",
+        lambda *, project_id, timeline_id: {"status": "blocked"},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "review"
+    assert payload["state"] == "blocked"
+    assert payload["next_action"] == {
+        "label": "검토 문제 해결",
+        "href": f"/projects/{project_id}/review",
+    }
+
+
+def test_workspace_summary_exposes_store_backed_thumbnail_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Thumbnail"}).json()["project_id"]
+    monkeypatch.setattr(
+        app.state.store,
+        "list_assets",
+        lambda *, project_id: [{
+            "asset_id": "broll-cover",
+            "metadata": {"thumbnail_uri": "local://projects/thumbnail/derived/thumbnails/broll-cover.jpg"},
+        }],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["thumbnail_url"] == f"/api/projects/{project_id}/assets/broll-cover/thumbnail"
 
 
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:
@@ -14322,6 +14589,44 @@ def test_caption_style_api_preflight_then_mutation_is_revisioned_and_persisted(t
     assert response.json()["session_revision"] == session["session_revision"] + 1
     assert response.json()["segments"][0]["caption_style"]["text_color"] == "#00FF00FF"
     assert client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()["segments"][0]["caption_style"]["font_size_px"] == 64
+
+
+def test_project_caption_style_api_undo_redo_persists_and_rehydrates_manifest(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+    original_style = session["caption_style"]
+    changed = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style",
+        json={
+            "expected_revision": session["session_revision"],
+            "scope": "project_default",
+            "segment_ids": [],
+            "style": {"text_color": "#00FF00FF", "font_size_px": 64},
+        },
+    ).json()
+
+    undone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo",
+        json={"expected_revision": changed["session_revision"]},
+    ).json()
+    assert undone["caption_style"] == original_style
+    assert client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    ).json()["caption_style"] == original_style
+
+    redone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/redo",
+        json={"expected_revision": undone["session_revision"]},
+    ).json()
+    manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/playback-manifest"
+    ).json()
+    assert redone["caption_style"]["text_color"] == "#00FF00FF"
+    assert manifest["captions"][0]["style"]["text_color"] == "#00FF00FF"
 
 
 def test_caption_style_api_rejects_stale_revision_without_mutating_session(tmp_path: Path) -> None:

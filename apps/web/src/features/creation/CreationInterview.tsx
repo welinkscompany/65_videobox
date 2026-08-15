@@ -47,6 +47,7 @@ function newIdempotencyKey() {
 
 export function CreationInterview({ projectId }: { projectId: string }) {
   const [brief, setBrief] = useState<CreationBrief | null>(null);
+  const [storedBriefId, setStoredBriefId] = useState<string | null>(() => window.localStorage.getItem(briefStorageKey(projectId)));
   const [scriptText, setScriptText] = useState("");
   const [scriptFile, setScriptFile] = useState<File | null>(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -72,14 +73,56 @@ export function CreationInterview({ projectId }: { projectId: string }) {
   const recordingDiscardRef = useRef(false);
   const answerInputRef = useRef<HTMLInputElement>(null);
 
+  // The router reuses this component while switching projects. Clear every
+  // project-owned draft field before the new project's request resolves so a
+  // previous project's brief can never flash or be mutated under the new id.
+  const [renderedProjectId, setRenderedProjectId] = useState(projectId);
+  const projectSwitchPending = renderedProjectId !== projectId;
+  useEffect(() => {
+    if (!projectSwitchPending) return;
+    setBrief(null);
+    setStoredBriefId(window.localStorage.getItem(briefStorageKey(projectId)));
+    setScriptText("");
+    setScriptFile(null);
+    setSummaryText("");
+    setReadiness(null);
+    setNarrationOptions([]);
+    setVertical(false);
+    setIsStarting(false);
+    setIsSaving(false);
+    setRecording(false);
+    setRecordingFile(null);
+    recordingDiscardRef.current = true;
+    recorderRef.current?.state === "recording" && recorderRef.current.stop();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    recorderRef.current = null;
+    recordingStreamRef.current = null;
+    setCandidateRanges({});
+    setRangeRetry(null);
+    setRetryAnswer(null);
+    setAnswerDraft("");
+    setError(null);
+  }, [projectId, projectSwitchPending]);
+
   useEffect(() => {
     const briefId = window.localStorage.getItem(briefStorageKey(projectId));
-    if (!briefId) return;
+    if (!briefId) {
+      setRenderedProjectId(projectId);
+      return;
+    }
     let active = true;
     void api.getCreationBrief(projectId, briefId).then((loaded) => {
-      if (active) setBrief(loaded);
+      if (active) {
+        setRenderedProjectId(projectId);
+        setStoredBriefId(loaded.brief_id);
+        setBrief(loaded);
+      }
     }).catch(() => {
       window.localStorage.removeItem(briefStorageKey(projectId));
+      if (active) {
+        setRenderedProjectId(projectId);
+        setStoredBriefId(null);
+      }
     });
     return () => { active = false; };
   }, [projectId]);
@@ -123,6 +166,16 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     ? (summaryText || brief.summary?.trim() || generateSummary(brief))
     : summaryText;
 
+  function continueDraft() {
+    const targetId = currentQuestion ? "creation-answer" : brief ? "creation-summary" : "creation-script";
+    document.getElementById(targetId)?.focus();
+  }
+
+  const resumeBanner = storedBriefId ? <section data-testid="creation-draft-resume" aria-label="저장된 초안">
+    <p>작성 중인 기획 초안이 있어요. 이어서 작업하면 저장된 답변을 그대로 사용할 수 있습니다.</p>
+    <Button type="button" variant="outline" onClick={continueDraft}>초안 이어서 하기</Button>
+  </section> : null;
+
   function getPendingIdempotencyKey(source: "paste" | "upload") {
     const key = pendingKey(projectId, source);
     const existing = window.localStorage.getItem(key);
@@ -141,6 +194,10 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     if (!brief || !currentQuestion) return;
     setAnswerDraft(brief.answers[currentQuestion.field] ?? "");
   }, [brief, currentQuestion]);
+
+  if (projectSwitchPending) {
+    return <section className="vb-creation-interview" aria-live="polite"><p>새 프로젝트의 기획을 불러오는 중이에요.</p></section>;
+  }
 
   async function start() {
     const trimmed = scriptText.trim();
@@ -288,6 +345,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setSummaryText("");
       setRetryAnswer(null);
       setBrief(null);
+      setStoredBriefId(null);
     } catch {
       setError("대본과 기획을 삭제하지 못했습니다. 다시 시도해 주세요.");
     } finally {
@@ -321,6 +379,26 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setAdvanceRetry(true);
       setError("초안 준비를 이어가지 못했습니다. 다시 시도해 주세요.");
     }
+  }
+
+  async function runReadinessAction(action: () => Promise<DraftReadiness>, failureMessage: string) {
+    setError(null);
+    setIsSaving(true);
+    try {
+      setReadiness(await action());
+    } catch {
+      setError(failureMessage);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function skipCandidate(assetId: string) {
+    if (!readiness) return;
+    await runReadinessAction(
+      () => api.updateDraftReadinessCandidate(projectId, readiness.readiness_id, assetId, true, readiness.revision),
+      "장면을 건너뛰지 못했습니다. 다시 시도해 주세요.",
+    );
   }
 
   async function createDraftBundle(withPlaceholder = false) {
@@ -377,6 +455,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
 
   if (!brief) {
     return <section className="vb-creation-interview" aria-labelledby="creation-interview-heading">
+      {resumeBanner}
       <p className="vb-eyebrow">새 영상 만들기</p>
       <h1 id="creation-interview-heading">유진과 영상 기획을 시작해요</h1>
       <p>대본을 붙여넣으면, 이미 적힌 내용은 건너뛰고 필요한 것만 함께 정리해 드릴게요.</p>
@@ -384,6 +463,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       <Textarea id="creation-script" value={scriptText} onChange={(event) => { setScriptText(event.target.value); window.localStorage.removeItem(pendingKey(projectId, "paste")); }} placeholder="영상에서 전할 내용을 붙여넣어 주세요." rows={10} />
       <Button type="button" onClick={() => void start()} disabled={isStarting}>{isStarting ? "대본 준비 중" : "유진과 기획 시작"}</Button>
       <label htmlFor="creation-script-file">대본 파일 선택</label>
+      <p id="creation-script-file-help">지원 형식: TXT, MD, SRT 파일을 선택할 수 있어요.</p>
       <Input id="creation-script-file" type="file" accept=".txt,.md,.srt,text/plain,text/markdown,application/x-subrip" onChange={(event) => { setScriptFile(event.target.files?.[0] ?? null); window.localStorage.removeItem(pendingKey(projectId, "upload")); }} />
       <Button type="button" variant="outline" onClick={() => void startFromFile()} disabled={isStarting}>{isStarting ? "대본 준비 중" : "파일로 기획 시작"}</Button>
       {error ? <p role="alert">{error}</p> : null}
@@ -392,6 +472,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
 
   if (!currentQuestion) {
     return <section className="vb-creation-interview" aria-labelledby="creation-summary-heading">
+      {resumeBanner}
       <p className="vb-eyebrow">영상 기획</p>
       <h1 id="creation-summary-heading">{brief.status === "approved" ? "기획을 확인했어요" : "기획 요약을 확인해 주세요"}</h1>
       {brief.status === "approved" ? <><p>영상에 넣을 소리를 고르고 초안을 준비할 수 있어요.</p>
@@ -400,7 +481,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
           {narrationOptions.filter((item) => item.asset_type === "narration_audio").map((item) => <Button key={item.asset_id} type="button" variant="outline" onClick={() => void startDraft({ kind: "existing", asset_id: item.asset_id })}>준비한 내레이션으로 초안 준비</Button>)}
           <label htmlFor="draft-narration-file">내레이션 파일 추가</label><Input id="draft-narration-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" onChange={(event) => void uploadNarration(event.target.files?.[0] ?? null)} />
           <Button type="button" variant="outline" disabled={isSaving || recording} onClick={() => void startRecording()}>마이크로 녹음 시작</Button>{recording ? <Button type="button" onClick={stopRecording}>녹음 마치기</Button> : null}{recordingFile && error ? <Button type="button" variant="outline" onClick={() => void uploadNarration(recordingFile)}>녹음 다시 올리기</Button> : null}
-        </> : <section aria-label="초안 준비 상태"><label><Input type="checkbox" checked={vertical} onChange={(event) => setVertical(event.target.checked)} />숏폼(세로)으로 만들기</label><h2>{readiness.status === "ready" ? "초안이 준비됐어요" : readiness.status === "needs_assets" ? "추가 자산이 필요해요" : readiness.status === "cancelled" ? "초안 준비를 멈췄어요" : readiness.status === "failed" ? "초안을 준비하지 못했어요" : readiness.status === "asset_check" ? "자산을 확인하고 있어요" : "초안을 준비하고 있어요"}</h2>{readiness.status === "ready" ? <Button type="button" disabled={isSaving} onClick={() => void createDraftBundle()}>초안 만들기</Button> : null}{readiness.status === "needs_assets" ? <><p role="note">누락된 장면은 빈 구간으로 남습니다. 이 초안은 내보낼 수 없어요.</p><label><Input type="checkbox" checked={allowPlaceholder} onChange={(event) => setAllowPlaceholder(event.target.checked)} />빈 구간을 남긴 채 편집용 초안을 만들겠습니다</label><Button type="button" variant="outline" disabled={isSaving || !allowPlaceholder} onClick={() => void createDraftBundle(true)}>빈 구간 포함 초안 만들기</Button></> : null}{advanceRetry ? <Button type="button" onClick={() => void advanceDraftReadiness(readiness)}>준비 계속하기</Button> : null}{readiness.result?.gap_slots?.map((gap) => <p key={gap.gap_slot_id}>{gap.reason} <a href={`/projects/${encodeURIComponent(projectId)}/media?return_to=${encodeURIComponent(`/projects/${projectId}/create?brief_id=${brief.brief_id}&readiness_id=${readiness.readiness_id}`)}`}>자산 추가</a></p>)}{usableBrollCandidates.length ? <><AssetPreviewPlayer proposalId={readiness.readiness_id} candidates={usableBrollCandidates.map((item): PreviewCandidate => ({ candidateId: item.asset_id, referenceCode: item.label, mediaType: "broll", controls: { in_sec: item.target_range.start_sec, out_sec: item.target_range.end_sec } }))} previewUrl={(assetId) => `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`} />{usableBrollCandidates.map((item) => <div key={item.asset_id}><label htmlFor={`${item.asset_id}-start`}>{item.label} 시작</label><Input id={`${item.asset_id}-start`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.start ?? String(item.target_range.start_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: event.target.value, end: ranges[item.asset_id]?.end ?? String(item.target_range.end_sec) } }))} /><label htmlFor={`${item.asset_id}-end`}>{item.label} 끝</label><Input id={`${item.asset_id}-end`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.end ?? String(item.target_range.end_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: ranges[item.asset_id]?.start ?? String(item.target_range.end_sec), end: event.target.value } }))} /><Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(item.asset_id)}>구간 저장</Button><Button type="button" variant="ghost" disabled={isSaving} onClick={() => void api.updateDraftReadinessCandidate(projectId, readiness.readiness_id, item.asset_id, true, readiness.revision).then(setReadiness)}>{item.label} 건너뛰기</Button></div>)}</> : null}{rangeRetry ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(rangeRetry.assetId, rangeRetry)}>구간 다시 저장</Button> : null}{["planning", "asset_check"].includes(readiness.status) ? <Button type="button" variant="ghost" onClick={() => void api.cancelDraftReadiness(projectId, readiness.readiness_id, readiness.revision).then(setReadiness)}>준비 멈추기</Button> : null}{["failed", "cancelled", "needs_assets"].includes(readiness.status) ? <Button type="button" variant="outline" onClick={() => void api.retryDraftReadiness(projectId, readiness.readiness_id, readiness.revision).then(setReadiness)}>다시 준비</Button> : null}</section>}
+        </> : <section aria-label="초안 준비 상태"><label><Input type="checkbox" checked={vertical} onChange={(event) => setVertical(event.target.checked)} />숏폼(세로)으로 만들기</label><h2>{readiness.status === "ready" ? "초안이 준비됐어요" : readiness.status === "needs_assets" ? "추가 자산이 필요해요" : readiness.status === "cancelled" ? "초안 준비를 멈췄어요" : readiness.status === "failed" ? "초안을 준비하지 못했어요" : readiness.status === "asset_check" ? "자산을 확인하고 있어요" : "초안을 준비하고 있어요"}</h2>{readiness.status === "ready" ? <Button type="button" disabled={isSaving} onClick={() => void createDraftBundle()}>초안 만들기</Button> : null}{readiness.status === "needs_assets" ? <><p role="note">누락된 장면은 빈 구간으로 남습니다. 이 초안은 내보낼 수 없어요.</p><label><Input type="checkbox" checked={allowPlaceholder} onChange={(event) => setAllowPlaceholder(event.target.checked)} />빈 구간을 남긴 채 편집용 초안을 만들겠습니다</label><Button type="button" variant="outline" disabled={isSaving || !allowPlaceholder} onClick={() => void createDraftBundle(true)}>빈 구간 포함 초안 만들기</Button></> : null}{advanceRetry ? <Button type="button" onClick={() => void advanceDraftReadiness(readiness)}>준비 계속하기</Button> : null}{readiness.result?.gap_slots?.map((gap) => <p key={gap.gap_slot_id}>{gap.reason} <a href={`/projects/${encodeURIComponent(projectId)}/media?return_to=${encodeURIComponent(`/projects/${projectId}/create?brief_id=${brief.brief_id}&readiness_id=${readiness.readiness_id}`)}`}>자산 추가</a></p>)}{usableBrollCandidates.length ? <><AssetPreviewPlayer proposalId={readiness.readiness_id} candidates={usableBrollCandidates.map((item): PreviewCandidate => ({ candidateId: item.asset_id, referenceCode: item.label, mediaType: "broll", controls: { in_sec: item.target_range.start_sec, out_sec: item.target_range.end_sec } }))} previewUrl={(assetId) => `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`} />{usableBrollCandidates.map((item) => <div key={item.asset_id}><label htmlFor={`${item.asset_id}-start`}>{item.label} 시작</label><Input id={`${item.asset_id}-start`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.start ?? String(item.target_range.start_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: event.target.value, end: ranges[item.asset_id]?.end ?? String(item.target_range.end_sec) } }))} /><label htmlFor={`${item.asset_id}-end`}>{item.label} 끝</label><Input id={`${item.asset_id}-end`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.end ?? String(item.target_range.end_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: ranges[item.asset_id]?.start ?? String(item.target_range.end_sec), end: event.target.value } }))} /><Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(item.asset_id)}>구간 저장</Button><Button type="button" variant="ghost" disabled={isSaving} onClick={() => void skipCandidate(item.asset_id)}>{item.label} 건너뛰기</Button></div>)}</> : null}{rangeRetry ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(rangeRetry.assetId, rangeRetry)}>구간 다시 저장</Button> : null}{["planning", "asset_check"].includes(readiness.status) ? <Button type="button" variant="ghost" disabled={isSaving} onClick={() => void runReadinessAction(() => api.cancelDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "준비를 멈추지 못했습니다. 다시 시도해 주세요.")}>준비 멈추기</Button> : null}{["failed", "cancelled", "needs_assets"].includes(readiness.status) ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void runReadinessAction(() => api.retryDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "다시 준비하지 못했습니다. 다시 시도해 주세요.")}>다시 준비</Button> : null}</section>}
       </> : <>
         <p>유진이 정리한 내용을 고친 뒤, 마음에 들면 승인해 주세요.</p>
         <label htmlFor="creation-summary">기획 요약</label>
@@ -414,6 +495,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
   }
 
   return <section className="vb-creation-interview" aria-labelledby="creation-question-heading">
+    {resumeBanner}
     <p className="vb-eyebrow">유진 질문</p>
     <p aria-label="질문 진행">{brief.current_step + 1} / {brief.questions.length}</p>
     <h1 id="creation-question-heading">{currentQuestion.prompt}</h1>

@@ -218,7 +218,7 @@ class ProjectAssetMaterializer:
         expected = str(library_asset.get("sha256") or "")
         if not expected or not snapshot_path.exists() or sha256_file(snapshot_path) != expected:
             raise ValueError("library_snapshot_changed")
-        with self._lock_for(f"{project_id}:{expected}"):
+        with self._lock_for(f"{project_id}:{library_asset_id}:{expected}"):
             for asset in self.store.list_assets(project_id=project_id):  # type: ignore[attr-defined]
                 metadata = dict(asset.get("metadata") or {})
                 source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))  # type: ignore[attr-defined]
@@ -243,6 +243,67 @@ class ProjectAssetMaterializer:
                 project_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(result["storage_uri"]))  # type: ignore[attr-defined]
                 if sha256_file(snapshot_path) != expected or not project_path.exists() or sha256_file(project_path) != expected:
                     raise ValueError("materialized_sha_mismatch")
+                return result
+            except Exception:
+                if registered is not None:
+                    self._compensate_registered_asset(project_id=project_id, asset_id=registered.asset_id)
+                raise
+
+    def materialize_user_library_asset(
+        self,
+        *,
+        project_id: str,
+        library_asset_id: str,
+        library_asset: dict[str, Any],
+        source_path: Path,
+        mime_type: str | None,
+    ) -> dict[str, Any]:
+        """Copy a user-library asset into a project without moving its source.
+
+        The global row remains the deletion authority.  This method only
+        creates a normal project asset and verifies the content-addressed
+        bytes before returning; the API records the explicit library
+        reference after this succeeds.
+        """
+        expected = str(library_asset.get("content_sha256") or "")
+        if not expected:
+            raise ValueError("library_asset_changed")
+        media_type = str(library_asset.get("media_type") or "")
+        asset_type = {"broll": AssetType.BROLL_VIDEO, "music": AssetType.BGM, "sfx": AssetType.SFX}.get(media_type)
+        if asset_type is None:
+            raise ValueError("unsupported_media_type")
+        metadata = {
+            "source_library_asset_id": library_asset_id,
+            "source_library_content_sha256": expected,
+            "source_library_origin": str(library_asset.get("origin") or "user"),
+        }
+        with self._lock_for(f"{project_id}:{library_asset_id}:{expected}"):
+            # Re-check inside the lock: the ingest worker may replace/finish a
+            # file while the API is waiting.  Never register a stale snapshot.
+            if not source_path.is_file() or sha256_file(source_path) != expected:
+                raise ValueError("library_asset_changed")
+            for existing in self.store.list_assets(project_id=project_id):  # type: ignore[attr-defined]
+                existing_metadata = dict(existing.get("metadata") or {})
+                existing_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(existing["storage_uri"]))  # type: ignore[attr-defined]
+                if (existing_metadata.get("source_library_asset_id") == library_asset_id
+                        and str(existing.get("asset_type")) == asset_type.value
+                        and existing_path.is_file() and sha256_file(existing_path) == expected):
+                    return existing
+            metadata["source_library_content_sha256"] = expected
+            registered = None
+            try:
+                registered = self.store.register_asset(
+                    project_id=project_id,
+                    asset_type=asset_type,
+                    source_path=source_path,
+                    source_kind="personal_library",
+                    mime_type=mime_type,
+                    metadata=metadata,
+                )
+                result = self.store.get_asset(project_id=project_id, asset_id=registered.asset_id)
+                project_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(result["storage_uri"]))
+                if sha256_file(source_path) != expected or not project_path.exists() or sha256_file(project_path) != expected:
+                    raise ValueError("library_materialized_sha_mismatch")
                 return result
             except Exception:
                 if registered is not None:

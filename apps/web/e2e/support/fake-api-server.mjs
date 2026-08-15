@@ -192,8 +192,15 @@ createServer(async (request, response) => {
   if (url.pathname === "/api/projects" && request.method === "GET") return sendJson(response, 200, { projects: [project] });
   if (url.pathname === "/api/projects/local-draft" && request.method === "GET") return sendJson(response, 200, project);
   if (url.pathname === "/api/projects/local-draft/jobs" && request.method === "GET") return sendJson(response, 200, jobs);
+  if (url.pathname === "/api/projects/local-draft/output-variants" && request.method === "GET") return sendJson(response, 200, {
+    variants: [
+      { variant_id: "variant-e2e-horizontal", kind: "horizontal", source_session_id: atomicSession.session_id, source_session_revision: atomicSession.session_revision, variant_revision: 1, overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null }, locks: [], conflicts: [] },
+      { variant_id: "variant-e2e-vertical", kind: "vertical_full", source_session_id: atomicSession.session_id, source_session_revision: atomicSession.session_revision, variant_revision: 1, overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null }, locks: [], conflicts: [] },
+    ],
+  });
   if (url.pathname === "/api/jobs" && request.method === "GET") { jobRecoveryState.global_list_count += 1; return sendJson(response, 200, { jobs: globalRecoveryJobs }); }
   if (url.pathname === "/api/projects/local-draft/assets/broll-video" && request.method === "GET") { mediaState.asset_list_count += 1; return sendJson(response, 200, { assets: mediaAssets }); }
+  if (url.pathname === "/api/media-inbox/assets" && request.method === "GET") return sendJson(response, 200, { assets: [] });
   if (url.pathname === "/api/projects/local-draft/media-analysis" && request.method === "GET") { mediaState.analysis_list_count += 1; return sendJson(response, 200, { items: mediaAnalyses }); }
   if (/^\/api\/projects\/local-draft\/assets\/[^/]+\/analysis-preview$/.test(url.pathname) && request.method === "GET") {
     mediaState.preview_count += 1;
@@ -289,6 +296,17 @@ createServer(async (request, response) => {
   if (url.pathname === "/api/projects/local-draft/draft-readiness/readiness_e2e" && request.method === "GET") return sendJson(response, 200, readiness);
   if (url.pathname === "/api/projects/local-draft/draft-bundles" && request.method === "POST") return sendJson(response, 201, createBundle());
   if (url.pathname === "/api/projects/local-draft/jobs/final-render" && request.method === "POST") return sendJson(response, latestBundle?.output_blocked ? 400 : 201, latestBundle?.output_blocked ? { detail: "gap_blocks_final_output" } : { job_id: `final-e2e-${bundleSequence}`, status: "succeeded" });
+  if (url.pathname === "/api/projects/local-draft/variant-renders" && request.method === "POST") {
+    const payload = await readJson(request);
+    const requested = payload?.variant_ids?.length ? payload.variant_ids : ["variant-e2e-horizontal", "variant-e2e-vertical"];
+    const items = requested.map((variantId) => {
+      const vertical = variantId === "variant-e2e-vertical";
+      const jobId = `variant-final-${vertical ? "vertical" : "horizontal"}-${bundleSequence}`;
+      jobs.jobs.push({ job_id: jobId, project_id: "local-draft", job_type: "final_render", status: "succeeded", input_ref: `variant-timeline-${variantId}`, output_ref: `final-export-${jobId}`, error_message: null, started_at: "now", finished_at: "now" });
+      return { variant_id: variantId, variant_kind: vertical ? "vertical_full" : "horizontal", timeline_id: `variant-timeline-${variantId}`, timeline_job_id: `variant-timeline-job-${variantId}`, job_id: jobId, status: "succeeded" };
+    });
+    return sendJson(response, 202, { project_id: "local-draft", status: "accepted", items });
+  }
   if (url.pathname === "/api/projects/local-draft/jobs/capcut-draft-export" && request.method === "POST") return sendJson(response, latestBundle?.output_blocked ? 400 : 201, latestBundle?.output_blocked ? { detail: "gap_blocks_capcut_output" } : { job_id: `capcut-e2e-${bundleSequence}`, status: "succeeded" });
   if (/^\/api\/projects\/local-draft\/capcut-draft-exports\/[^/]+\/handoff$/.test(url.pathname) && request.method === "POST") {
     capcutHandoffStatus = "ready";

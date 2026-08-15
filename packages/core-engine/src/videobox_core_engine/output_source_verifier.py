@@ -176,7 +176,7 @@ def _sha256_streaming(path: Path, digests_by_path: dict[Path, str]) -> str:
     return value
 
 
-def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline: dict[str, Any], subtitle: dict[str, Any] | None = None, review: dict[str, Any] | None = None) -> None:
+def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline: dict[str, Any], subtitle: dict[str, Any] | None = None, review: dict[str, Any] | None = None, variant: dict[str, Any] | None = None) -> None:
     """Reject stale output dependencies before an artifact is reused/exported."""
     if editing_session is not None:
         current_session_id = str(editing_session.get("session_id") or "")
@@ -193,6 +193,12 @@ def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline:
             raise OutputSourceStaleError("editing session revision is unstamped")
         if int(expected_revision) != current_revision:
             raise OutputSourceStaleError("editing session revision changed")
+    timeline_has_variant_identity = bool(
+        timeline.get("source_variant_id")
+        or timeline.get("source_variant_revision") is not None
+    )
+    if timeline_has_variant_identity and variant is None:
+        raise OutputSourceStaleError("variant identity is unstamped")
     for name, artifact in (("review", review), ("subtitle", subtitle)):
         if artifact is not None:
             if not bool(artifact.get("is_current", True)):
@@ -208,6 +214,31 @@ def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline:
                 artifact_revision = artifact.get("source_session_revision")
                 if artifact_revision is None or int(artifact_revision) != current_revision:
                     raise OutputSourceStaleError(f"{name} session revision changed")
+    if variant is not None:
+        expected_variant_id = str(timeline.get("source_variant_id") or "")
+        expected_variant_revision = timeline.get("source_variant_revision")
+        current_variant_id = str(variant.get("variant_id") or "")
+        current_variant_revision = variant.get("variant_revision")
+        if not expected_variant_id or expected_variant_revision is None:
+            raise OutputSourceStaleError("variant identity is unstamped")
+        if expected_variant_id != current_variant_id:
+            raise OutputSourceStaleError("variant changed")
+        if int(expected_variant_revision) != int(current_variant_revision or 0):
+            raise OutputSourceStaleError("variant revision changed")
+        if (
+            str(variant.get("source_session_id") or "")
+            != str(timeline.get("source_session_id") or "")
+            or int(variant.get("source_session_revision") or 0)
+            != int(timeline.get("source_session_revision") or 0)
+        ):
+            raise OutputSourceStaleError("variant source lineage changed")
+        if editing_session is not None and (
+            str(variant.get("source_session_id") or "")
+            != str(editing_session.get("session_id") or "")
+            or int(variant.get("source_session_revision") or 0)
+            != int(editing_session.get("session_revision") or 0)
+        ):
+            raise OutputSourceStaleError("variant source session changed")
 
 
 __all__ = [

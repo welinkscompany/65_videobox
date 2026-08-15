@@ -217,6 +217,49 @@ def test_auto_cut_planner_parses_scene_and_black_detection_output() -> None:
     ]
 
 
+def test_auto_cut_planner_builds_bounded_explainable_footage_suggestions() -> None:
+    planner = AutoCutPlanner()
+
+    suggestions = planner.build_footage_suggestions(
+        total_duration=10.0,
+        scene_timestamps=[4.0],
+        black_regions=[{"start": 6.0, "end": 7.0}],
+        static_windows=[{"start_sec": 7.0, "end_sec": 10.0}],
+        audio_windows=[{"start_sec": 0.0, "end_sec": 3.0}],
+        analysis_windows=[{"start_sec": 3.0, "end_sec": 6.0}],
+    )
+
+    assert [(item["start_sec"], item["end_sec"]) for item in suggestions] == [
+        (0.0, 3.0),
+        (3.0, 4.0),
+        (4.0, 6.0),
+        (6.0, 7.0),
+        (7.0, 10.0),
+    ]
+    assert suggestions[0]["reason_codes"] == ["audio_activity"]
+    assert "scene_change" in suggestions[2]["reason_codes"]
+    assert suggestions[3]["reason_codes"] == ["black_screen"]
+    assert suggestions[4]["reason_codes"] == ["static_scene"]
+
+
+def test_auto_cut_planner_normalizes_nonfinite_or_out_of_range_windows() -> None:
+    planner = AutoCutPlanner()
+
+    suggestions = planner.build_footage_suggestions(
+        total_duration=5.0,
+        scene_timestamps=[float("nan"), 9.0, 2.0],
+        black_regions=[{"start": -1.0, "end": float("inf")}],
+        analysis_windows=[{"start_sec": 1.0, "end_sec": 3.0}],
+    )
+
+    assert [(item["start_sec"], item["end_sec"]) for item in suggestions] == [
+        (0.0, 1.0),
+        (1.0, 2.0),
+        (2.0, 3.0),
+        (3.0, 5.0),
+    ]
+
+
 def test_auto_cut_planner_uses_configured_cut_point_spacing() -> None:
     planner = AutoCutPlanner(
         config=AutoCutConfig(

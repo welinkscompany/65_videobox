@@ -9,6 +9,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from videobox_storage.library_user_asset_store import (
+    LibraryUserAssetStore,
+    ensure_library_user_asset_schema,
+)
+from videobox_storage.footage_organizer_store import (
+    FootageOrganizerStore,
+    ensure_footage_organizer_schema,
+)
+
+
+def footage_segment_index_identity(source_sha256: str, start_sec: float, end_sec: float) -> str:
+    """Return a stable content-addressed key for one immutable source range."""
+    start = float(start_sec)
+    end = float(end_sec)
+    if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+        raise ValueError("invalid footage segment range")
+    payload = f"videobox-footage-segment-v1\0{str(source_sha256).lower()}\0{start:.9f}\0{end:.9f}".encode()
+    return hashlib.sha256(payload).hexdigest()
+
 
 class MediaLibraryStore:
     """Global, optional index for verified installed media packs.
@@ -22,6 +41,19 @@ class MediaLibraryStore:
         self.root = Path(root)
         self.database_path = self.root / "media_library.sqlite"
         self._verification_cache: dict[tuple[str, int, int, str], bool] = {}
+        # User assets use an additive lifecycle schema in this same global DB.
+        # Keep this as a small facade so existing API/bootstrap callers do not
+        # need to know which part of the library owns a row.
+        self.user_asset_store = LibraryUserAssetStore(self.root)
+        self.footage_organizer_store = FootageOrganizerStore(self.root)
+        # Short facade name for callers that treat this as one global store.
+        self.footage_store = self.footage_organizer_store
+
+    def register_user_asset(self, **kwargs: Any):
+        return self.user_asset_store.register_asset(**kwargs)
+
+    def list_user_assets(self, **kwargs: Any):
+        return self.user_asset_store.list_assets(**kwargs)
 
     def index_verified_pack(
         self,
@@ -236,7 +268,7 @@ class MediaLibraryStore:
         """
         connection = self._connection()
         try:
-            rows = connection.execute(
+            pack_rows = connection.execute(
                 """SELECT a.library_asset_id, a.asset_id, a.media_type, a.sha256, a.path
                     FROM media_assets a
                     JOIN media_packs p ON p.pack_id = a.pack_id AND p.version = a.version
@@ -247,9 +279,33 @@ class MediaLibraryStore:
                     ORDER BY a.library_asset_id""",
                 (int(description_version),),
             ).fetchall()
+            user_rows = connection.execute(
+                """SELECT u.library_asset_id, u.media_type, u.content_sha256,
+                          u.managed_relative_path, u.user_json,
+                          d.library_asset_id AS descriptor_id
+                   FROM library_user_assets u
+                   LEFT JOIN library_audio_descriptors d
+                     ON d.library_asset_id = u.library_asset_id
+                   WHERE u.origin = 'user' AND u.lifecycle = 'ready'
+                     AND u.media_type IN ('music', 'sfx')
+                     AND (d.library_asset_id IS NULL OR d.sha256 <> u.content_sha256
+                          OR d.embedding_json IS NULL OR d.description_version < ?)
+                   ORDER BY u.library_asset_id""",
+                (int(description_version),),
+            ).fetchall()
         finally:
             connection.close()
-        return [dict(row) for row in rows]
+        pending = [dict(row) for row in pack_rows]
+        for row in user_rows:
+            item = dict(row)
+            item["asset_id"] = item["library_asset_id"]
+            item["sha256"] = item.pop("content_sha256")
+            item["path"] = str(self._resolve_managed_path(item.pop("managed_relative_path")))
+            item["user_metadata"] = json.loads(str(item.pop("user_json") or "{}"))
+            item.pop("descriptor_id", None)
+            pending.append(item)
+        pending.sort(key=lambda item: str(item["library_asset_id"]))
+        return pending
 
     def save_audio_descriptor(
         self,
@@ -338,13 +394,21 @@ class MediaLibraryStore:
         try:
             rows = connection.execute(
                 """SELECT d.library_asset_id, d.description, d.words_json, d.embedding_json,
-                          d.duration_seconds, a.asset_id, a.media_type
+                          d.duration_seconds, a.asset_id, a.media_type, '{}' AS user_json
                     FROM library_audio_descriptors d
                     JOIN media_assets a ON a.library_asset_id = d.library_asset_id
                     JOIN media_packs p ON p.pack_id = a.pack_id AND p.version = a.version
                     WHERE p.active = 1 AND p.verified = 1 AND a.media_type = ?
+                      AND d.embedding_json IS NOT NULL
+                    UNION ALL
+                    SELECT d.library_asset_id, d.description, d.words_json, d.embedding_json,
+                          d.duration_seconds, u.library_asset_id AS asset_id, u.media_type,
+                          u.user_json
+                    FROM library_audio_descriptors d
+                    JOIN library_user_assets u ON u.library_asset_id = d.library_asset_id
+                    WHERE u.origin = 'user' AND u.lifecycle = 'ready' AND u.media_type = ?
                       AND d.embedding_json IS NOT NULL""",
-                (media_type,),
+                (media_type, media_type),
             ).fetchall()
         finally:
             connection.close()
@@ -367,6 +431,7 @@ class MediaLibraryStore:
                 "media_type": str(row["media_type"]),
                 "description": str(row["description"]),
                 "words": json.loads(str(row["words_json"])),
+                "user_metadata": json.loads(str(row["user_json"] or "{}")),
                 "duration_seconds": float(row["duration_seconds"]),
                 "score": round(score, 6),
             })
@@ -387,30 +452,93 @@ class MediaLibraryStore:
         """
         connection = self._connection()
         try:
+            # Approved source ranges are durable work in their own right.  A
+            # range may have been registered before its parent file received
+            # an embedding, so it cannot be discovered by hashing the watched
+            # file alone.  Resolve the canonical source and managed path here
+            # while the queue is still pending; this also carries source_id
+            # through to the indexer without trusting caller-supplied paths.
+            segment_rows = connection.execute(
+                """SELECT f.*, q.source_id, q.created_at AS queue_created_at,
+                          s.filename AS source_filename, u.managed_relative_path,
+                          u.user_json
+                   FROM footage_index f
+                   JOIN footage_segment_index_queue q
+                     ON q.source_segment_id = f.source_segment_id
+                    AND q.state = 'pending'
+                   JOIN library_footage_sources s
+                     ON s.source_id = q.source_id
+                    AND s.source_sha256 = f.source_sha256
+                   JOIN library_user_assets u
+                     ON u.library_asset_id = f.library_asset_id
+                    AND u.content_sha256 = f.source_sha256
+                   WHERE f.source_segment_id IS NOT NULL
+                     AND u.origin = 'user' AND u.lifecycle = 'ready'
+                     AND (f.embedding_json IS NULL OR f.description_version < ?)
+                   ORDER BY q.created_at, f.source_segment_id""",
+                (int(description_version),),
+            ).fetchall()
             rows = connection.execute(
                 """SELECT content_sha256 FROM footage_index
                     WHERE embedding_json IS NOT NULL AND description_version >= ?""",
                 (int(description_version),),
             ).fetchall()
+            user_rows = connection.execute(
+                """SELECT library_asset_id, content_sha256, managed_relative_path, user_json
+                   FROM library_user_assets
+                   WHERE origin = 'user' AND lifecycle = 'ready' AND media_type = 'broll'"""
+            ).fetchall()
         finally:
             connection.close()
         done = {str(row["content_sha256"]) for row in rows}
+        segment_pending: list[dict[str, Any]] = []
+        for row in segment_rows:
+            item = dict(row)
+            item["path"] = str(self._resolve_managed_path(item.pop("managed_relative_path")))
+            item["user_metadata"] = json.loads(str(item.pop("user_json") or "{}"))
+            item["is_segment"] = True
+            item.pop("queue_created_at", None)
+            item.pop("source_filename", None)
+            segment_pending.append(item)
+        user_by_hash: dict[str, dict[str, Any]] = {}
+        for row in user_rows:
+            item = dict(row)
+            item["path"] = self._resolve_managed_path(item.pop("managed_relative_path"))
+            item["user_metadata"] = json.loads(str(item.pop("user_json") or "{}"))
+            user_by_hash[str(item["content_sha256"])] = item
 
-        pending: list[dict[str, Any]] = []
+        # Segment work is first so the bounded maintenance pass can complete
+        # approved ranges even when the parent file still needs vision work.
+        pending: list[dict[str, Any]] = segment_pending
+        queued: set[str] = set()
+
+        def add_path(file_path: Path, known: dict[str, Any] | None = None) -> None:
+            if not file_path.is_file():
+                return
+            digest = _sha256_file(file_path)
+            if digest in done or digest in queued:
+                return
+            queued.add(digest)
+            item: dict[str, Any] = {"content_sha256": digest, "filename": file_path.name, "path": str(file_path)}
+            if known is not None:
+                item["library_asset_id"] = known["library_asset_id"]
+                item["user_metadata"] = known["user_metadata"]
+            pending.append(item)
+
         for path in paths:
             file_path = Path(path)
-            if not file_path.is_file():
-                continue
-            digest = _sha256_file(file_path)
-            if digest in done:
-                continue
-            pending.append({"content_sha256": digest, "filename": file_path.name, "path": str(file_path)})
+            if file_path.is_file():
+                digest = _sha256_file(file_path)
+                add_path(file_path, user_by_hash.get(digest))
+        for known in user_by_hash.values():
+            add_path(Path(str(known["path"])), known)
         return pending
 
     def save_footage_descriptor(
         self,
         *,
         content_sha256: str,
+        library_asset_id: str | None = None,
         filename: str,
         duration_seconds: float,
         width: int,
@@ -428,10 +556,11 @@ class MediaLibraryStore:
             connection.execute(
                 """
                 INSERT INTO footage_index (
-                    content_sha256, filename, duration_seconds, width, height, orientation,
+                    content_sha256, library_asset_id, filename, duration_seconds, width, height, orientation,
                     tags_json, description, embedding_json, description_version, analyzed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(content_sha256) DO UPDATE SET
+                    library_asset_id = COALESCE(excluded.library_asset_id, footage_index.library_asset_id),
                     filename = excluded.filename, duration_seconds = excluded.duration_seconds,
                     width = excluded.width, height = excluded.height, orientation = excluded.orientation,
                     tags_json = excluded.tags_json, description = excluded.description,
@@ -440,7 +569,7 @@ class MediaLibraryStore:
                     analyzed_at = excluded.analyzed_at
                 """,
                 (
-                    content_sha256, filename, float(duration_seconds), int(width), int(height),
+                    content_sha256, library_asset_id, filename, float(duration_seconds), int(width), int(height),
                     orientation, json.dumps(tags, ensure_ascii=False), description,
                     json.dumps(embedding) if embedding is not None else None,
                     int(description_version), self._now(),
@@ -478,12 +607,16 @@ class MediaLibraryStore:
         if limit < 1:
             raise ValueError("limit must be at least 1")
 
-        sql = """SELECT content_sha256, filename, duration_seconds, orientation, tags_json,
-                        description, embedding_json
-                 FROM footage_index WHERE embedding_json IS NOT NULL"""
+        sql = """SELECT f.content_sha256, f.library_asset_id, f.source_segment_id,
+                        f.source_sha256, f.start_sec, f.end_sec, f.filename, f.duration_seconds,
+                        f.orientation, f.tags_json, f.description, f.embedding_json,
+                        s.source_id
+                 FROM footage_index f
+                 LEFT JOIN library_footage_sources s ON s.source_sha256 = f.source_sha256
+                 WHERE f.embedding_json IS NOT NULL"""
         parameters: tuple[Any, ...] = ()
         if orientation is not None:
-            sql += " AND orientation = ?"
+            sql += " AND f.orientation = ?"
             parameters = (orientation,)
         connection = self._connection()
         try:
@@ -502,6 +635,16 @@ class MediaLibraryStore:
             score = sum(a * b for a, b in zip(query, vector, strict=True)) / (query_norm * norm)
             matches.append({
                 "content_sha256": str(row["content_sha256"]),
+                "library_asset_id": str(row["library_asset_id"]) if row["library_asset_id"] else None,
+                "preview_url": (
+                    f"/api/library/assets/{row['library_asset_id']}/preview"
+                    if row["library_asset_id"] else None
+                ),
+                "source_segment_id": str(row["source_segment_id"]) if row["source_segment_id"] else None,
+                "source_id": str(row["source_id"]) if row["source_id"] else None,
+                "source_sha256": str(row["source_sha256"]) if row["source_sha256"] else None,
+                "start_sec": float(row["start_sec"]) if row["start_sec"] is not None else None,
+                "end_sec": float(row["end_sec"]) if row["end_sec"] is not None else None,
                 "filename": str(row["filename"]),
                 "duration_seconds": float(row["duration_seconds"]),
                 "orientation": str(row["orientation"]),
@@ -511,6 +654,117 @@ class MediaLibraryStore:
             })
         matches.sort(key=lambda match: (-match["score"], match["filename"]))
         return matches[:limit]
+
+    def register_approved_footage_segments(
+        self, *, segments: Iterable[dict[str, Any]]
+    ) -> int:
+        """Materialize approved source ranges in the durable semantic index.
+
+        The source file remains content-addressed by ``source_sha256``.  Each
+        range gets a deterministic derived index key, so response-loss retries
+        and duplicate approvals update the same row rather than appending a
+        second semantic result.  Existing full-file analysis is reused when it
+        is available; a maintenance indexer can fill an absent embedding later.
+        """
+        values = list(segments)
+        if not values:
+            return 0
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            registered = 0
+            for segment in values:
+                segment_id = str(segment["source_segment_id"])
+                source_sha = str(segment["source_sha256"]).lower()
+                start = float(segment["start_sec"])
+                end = float(segment["end_sec"])
+                if not segment_id or not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+                    raise ValueError("invalid footage segment identity")
+                parent = connection.execute(
+                    "SELECT * FROM footage_index WHERE content_sha256 = ? AND source_segment_id IS NULL",
+                    (source_sha,),
+                ).fetchone()
+                source = connection.execute(
+                    "SELECT filename, library_asset_id FROM library_footage_sources WHERE source_sha256 = ?",
+                    (source_sha,),
+                ).fetchone()
+                if source is None:
+                    raise KeyError(source_sha)
+                source_label = str(segment.get("label") or "").strip()
+                source_filename = str((parent or source)["filename"] or "촬영본.mp4")
+                description = str(parent["description"]) if parent is not None else source_filename
+                if source_label:
+                    description = f"{description} 구간: {source_label}."
+                tags = json.loads(str(parent["tags_json"])) if parent is not None else {}
+                if not isinstance(tags, dict):
+                    tags = {"source_segment_id": segment_id}
+                else:
+                    tags = {**tags, "source_segment_id": segment_id}
+                width = int(parent["width"]) if parent is not None else 1920
+                height = int(parent["height"]) if parent is not None else 1080
+                embedding = parent["embedding_json"] if parent is not None else None
+                index_key = footage_segment_index_identity(source_sha, start, end)
+                connection.execute(
+                    """
+                    INSERT INTO footage_index (
+                        content_sha256, library_asset_id, source_segment_id, source_sha256,
+                        start_sec, end_sec, filename, duration_seconds, width, height,
+                        orientation, tags_json, description, embedding_json,
+                        description_version, analyzed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(content_sha256) DO UPDATE SET
+                        library_asset_id = excluded.library_asset_id,
+                        source_segment_id = excluded.source_segment_id,
+                        source_sha256 = excluded.source_sha256,
+                        start_sec = excluded.start_sec, end_sec = excluded.end_sec,
+                        filename = excluded.filename, duration_seconds = excluded.duration_seconds,
+                        width = excluded.width, height = excluded.height,
+                        orientation = excluded.orientation, tags_json = excluded.tags_json,
+                        description = excluded.description, embedding_json = COALESCE(excluded.embedding_json, footage_index.embedding_json),
+                        description_version = excluded.description_version, analyzed_at = excluded.analyzed_at
+                    """,
+                    (
+                        index_key, str(source["library_asset_id"]), segment_id, source_sha,
+                        start, end, f"{source_filename} [{start:g}-{end:g}s]", end - start,
+                        width, height, "가로" if width >= height else "세로",
+                        json.dumps(tags, ensure_ascii=False), description, embedding,
+                        int(parent["description_version"]) if parent is not None else 1, self._now(),
+                    ),
+                )
+                # A current parent description and embedding are inherited by
+                # the range immediately.  Reconcile the approval queue in the
+                # same transaction; otherwise the pending query excludes this
+                # fully indexed range and leaves an orphaned pending row.
+                if (
+                    parent is not None
+                    and embedding is not None
+                    and int(parent["description_version"] or 0) >= 2
+                ):
+                    connection.execute(
+                        "UPDATE footage_segment_index_queue SET state = 'indexed' "
+                        "WHERE source_segment_id = ? AND state = 'pending'",
+                        (segment_id,),
+                    )
+                registered += 1
+            connection.commit()
+            return registered
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def mark_footage_segment_indexed(self, *, source_segment_id: str) -> None:
+        """Remove one successfully embedded range from the durable queue."""
+        connection = self._connection()
+        try:
+            connection.execute(
+                "UPDATE footage_segment_index_queue SET state = 'indexed' WHERE source_segment_id = ? AND state = 'pending'",
+                (str(source_segment_id),),
+            )
+            connection.commit()
+        finally:
+            connection.close()
 
     def install_state(self) -> dict[str, object]:
         assets = self.inspect_active_assets()
@@ -629,8 +883,9 @@ class MediaLibraryStore:
 
     def _connection(self) -> sqlite3.Connection:
         self.root.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.database_path)
+        connection = sqlite3.connect(self.database_path, timeout=30.0)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.executescript(
             """
@@ -672,7 +927,8 @@ class MediaLibraryStore:
             -- until imported, and the same clip was analysed once per project
             -- that used it.
             CREATE TABLE IF NOT EXISTS footage_index (
-                content_sha256 TEXT PRIMARY KEY, filename TEXT NOT NULL,
+                content_sha256 TEXT PRIMARY KEY, library_asset_id TEXT, filename TEXT NOT NULL,
+                source_segment_id TEXT, source_sha256 TEXT, start_sec REAL, end_sec REAL,
                 duration_seconds REAL NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
                 orientation TEXT NOT NULL, tags_json TEXT NOT NULL, description TEXT NOT NULL,
                 embedding_json TEXT, description_version INTEGER NOT NULL DEFAULT 1,
@@ -690,12 +946,33 @@ class MediaLibraryStore:
             "ALTER TABLE media_assets ADD COLUMN attribution_required INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE media_assets ADD COLUMN attribution_text TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE library_audio_descriptors ADD COLUMN description_version INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE footage_index ADD COLUMN library_asset_id TEXT",
+            "ALTER TABLE footage_index ADD COLUMN source_segment_id TEXT",
+            "ALTER TABLE footage_index ADD COLUMN source_sha256 TEXT",
+            "ALTER TABLE footage_index ADD COLUMN start_sec REAL",
+            "ALTER TABLE footage_index ADD COLUMN end_sec REAL",
         ):
             try:
                 connection.execute(statement)
             except sqlite3.OperationalError:
                 pass
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_footage_index_segment_id "
+            "ON footage_index(source_segment_id) WHERE source_segment_id IS NOT NULL"
+        )
+        ensure_library_user_asset_schema(connection)
+        ensure_footage_organizer_schema(connection)
         return connection
+
+    def _resolve_managed_path(self, relative: str) -> Path:
+        """Resolve a user asset path inside this store's managed root."""
+        base = self.root.resolve()
+        candidate = (base / str(relative)).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError as error:
+            raise ValueError("managed asset path escaped library root") from error
+        return candidate
 
     @staticmethod
     def _now() -> str:

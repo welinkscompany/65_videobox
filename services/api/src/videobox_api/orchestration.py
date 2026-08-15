@@ -1034,6 +1034,11 @@ class ApiOrchestrator:
     def start_final_render_job(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.start_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id)
 
+    def start_variant_renders(self, *, project_id: str, session_id: str, variant_ids: list[str]) -> dict[str, Any]:
+        return self.pipeline.start_variant_renders(
+            project_id=project_id, session_id=session_id, variant_ids=variant_ids
+        )
+
     def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         self.pipeline.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
 

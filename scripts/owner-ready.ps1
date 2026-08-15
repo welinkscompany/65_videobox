@@ -12,6 +12,10 @@ param(
     [Uri]$LocalModelApiUri = "http://127.0.0.1:1234/api/v1/models",
     [ValidateRange(1, 180)]
     [int]$TimeoutSec = 30,
+    # Rebuild the workspace image from this exact worktree before starting it.
+    # Container actions remain centralized here so the served frontend cannot
+    # silently drift from the source that was just verified.
+    [switch]$Rebuild,
     [string]$EnvFile = "",
     [string]$PythonExecutable = "",
     [string]$DockerExecutable = "docker",
@@ -124,23 +128,36 @@ function Invoke-CapturedProcess {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($CommandTimeoutSec * 1000)) {
+            $treeKillSucceeded = $false
+            # PowerShell 7/.NET exposes Kill(Boolean), which terminates the
+            # complete child tree without starting a second process.  Prefer it
+            # so timeout handling stays within the bounded smoke budget.
+            try {
+                $process.Kill($true)
+                $treeKillSucceeded = $true
+            }
+            catch { }
             if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
                 try {
-                    $taskKillInfo = New-Object System.Diagnostics.ProcessStartInfo
-                    $taskKillInfo.FileName = Join-Path $env:SystemRoot "System32\taskkill.exe"
-                    $taskKillInfo.Arguments = "/PID $($process.Id) /T /F"
-                    $taskKillInfo.UseShellExecute = $false
-                    $taskKillInfo.RedirectStandardOutput = $true
-                    $taskKillInfo.RedirectStandardError = $true
-                    $taskKillInfo.CreateNoWindow = $true
-                    $taskKill = New-Object System.Diagnostics.Process
-                    $taskKill.StartInfo = $taskKillInfo
-                    if ($taskKill.Start()) {
-                        if (-not $taskKill.WaitForExit(2000)) {
-                            try { $taskKill.Kill() } catch { }
+                    if (-not $treeKillSucceeded) {
+                        $taskKillInfo = New-Object System.Diagnostics.ProcessStartInfo
+                        $taskKillInfo.FileName = Join-Path $env:SystemRoot "System32\taskkill.exe"
+                        $taskKillInfo.Arguments = "/PID $($process.Id) /T /F"
+                        $taskKillInfo.UseShellExecute = $false
+                        $taskKillInfo.RedirectStandardOutput = $true
+                        $taskKillInfo.RedirectStandardError = $true
+                        $taskKillInfo.CreateNoWindow = $true
+                        $taskKill = New-Object System.Diagnostics.Process
+                        $taskKill.StartInfo = $taskKillInfo
+                        if ($taskKill.Start()) {
+                            # taskkill /T /F is already forceful; use a short
+                            # settle window to preserve the timeout contract.
+                            if (-not $taskKill.WaitForExit(250)) {
+                                try { $taskKill.Kill() } catch { }
+                            }
                         }
+                        $taskKill.Dispose()
                     }
-                    $taskKill.Dispose()
                 }
                 catch { }
             }
@@ -148,7 +165,7 @@ function Invoke-CapturedProcess {
                 if (-not $process.HasExited) { $process.Kill() }
             }
             catch { }
-            try { [void]$process.WaitForExit(2000) } catch { }
+            try { [void]$process.WaitForExit(250) } catch { }
             try { $process.StandardOutput.Dispose() } catch { }
             try { $process.StandardError.Dispose() } catch { }
             $process.Dispose()
@@ -998,6 +1015,19 @@ if ($Mode -ceq "Start") {
     if ($actualComposeStatus -cne "pass") {
         Write-OwnerReadyPayload -Checks $checks
     }
+    if ($Rebuild -and -not $PSBoundParameters.ContainsKey("WhatIf")) {
+        $rebuildResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 180)) -Arguments @(
+            @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("build", "--pull=false", "videobox-workspace")
+        )
+        $rebuildStatus = if ($rebuildResult.ExitCode -eq 0) { "pass" } else { "fail" }
+        $checks += New-OwnerReadyResult -Id "rebuild" -Status $rebuildStatus `
+            -Summary $(if ($rebuildStatus -ceq "pass") { "현재 소스에서 VideoBox 이미지를 다시 만들었습니다." } else { "현재 소스에서 VideoBox 이미지를 다시 만들지 못했습니다." }) `
+            -Action $(if ($rebuildStatus -ceq "pass") { "이 이미지로 VideoBox를 시작합니다." } else { "Docker 빌드 로그와 현재 소스 의존성을 확인하세요." }) `
+            -Evidence @{ rebuilt = ($rebuildStatus -ceq "pass"); source = "current_worktree" }
+        if ($rebuildStatus -cne "pass") {
+            Write-OwnerReadyPayload -Checks $checks
+        }
+    }
     $serviceNames = @("videobox-postgres", "videobox-workspace")
     if ($WithYujinMemory) {
         # 게이트웨이가 유진 에이전트와 메모리 어댑터에 의존한다.
@@ -1161,12 +1191,33 @@ if ($Mode -ceq "Smoke") {
     )
     $checks = @()
     $receiptChecks = @()
+    $smokeTimedOut = $false
     foreach ($definition in $definitions) {
         $scriptPath = Join-Path $PSScriptRoot $definition.File
         $relativeScriptPath = "scripts/$($definition.File)"
         $exitCode = 127
         $stdout = ""
         $preScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
+        if ($smokeTimedOut) {
+            # A timed-out verifier is a hard stop for the smoke lane.  Record
+            # the remaining checks as fail-closed without launching more child
+            # processes; this keeps the bounded-timeout contract meaningful.
+            $status = "fail"
+            $action = "이전 검증기 타임아웃으로 후속 검증을 건너뛰었습니다."
+            $checks += New-OwnerReadyResult -Id $definition.Id -Status $status `
+                -Summary "이전 검증기 타임아웃으로 후속 검증을 건너뛰었습니다." `
+                -Action $action `
+                -Evidence @{ live = $false; static_only = ($definition.Arguments -contains "-StaticOnly"); raw_output_recorded = $false }
+            $receiptChecks += [ordered]@{
+                id = $definition.Id
+                mode = $definition.ReceiptMode
+                status = $status
+                marker = "invalid"
+                script_sha256 = $preScriptSha256
+                action = $action
+            }
+            continue
+        }
         $preTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
             "ls-files", "--error-unmatch", "--", $relativeScriptPath
         )
@@ -1184,6 +1235,9 @@ if ($Mode -ceq "Smoke") {
             $child = Invoke-CapturedProcess -FilePath $powerShellExecutable -Arguments $arguments -CommandTimeoutSec $TimeoutSec
             $exitCode = $child.ExitCode
             $stdout = $child.StdOut
+        }
+        if ($exitCode -eq 124) {
+            $smokeTimedOut = $true
         }
         $postScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
         $postTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
@@ -1243,19 +1297,24 @@ if ($Mode -ceq "Smoke") {
         $scriptPath = Join-Path $PSScriptRoot $definition.File
         $relativeScriptPath = "scripts/$($definition.File)"
         $currentScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
-        $currentTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-            "ls-files", "--error-unmatch", "--", $relativeScriptPath
-        )
-        $currentUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-            "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
-        )
-        $currentEvidenceValid = (
-            $headStable -and
-            $currentTrackedResult.ExitCode -eq 0 -and
-            $currentUnchangedResult.ExitCode -eq 0 -and
-            $currentScriptSha256 -ne "unavailable" -and
-            $currentScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
-        )
+        if ($smokeTimedOut -and $index -gt 0) {
+            $currentEvidenceValid = $false
+        }
+        else {
+            $currentTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                "ls-files", "--error-unmatch", "--", $relativeScriptPath
+            )
+            $currentUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
+            )
+            $currentEvidenceValid = (
+                $headStable -and
+                $currentTrackedResult.ExitCode -eq 0 -and
+                $currentUnchangedResult.ExitCode -eq 0 -and
+                $currentScriptSha256 -ne "unavailable" -and
+                $currentScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
+            )
+        }
         if (-not $currentEvidenceValid) {
             $checks[$index].status = "fail"
             $checks[$index].summary = "로컬 검증 항목을 확인하지 못했습니다."
@@ -1325,19 +1384,24 @@ if ($Mode -ceq "Smoke") {
             $scriptPath = Join-Path $PSScriptRoot $definition.File
             $relativeScriptPath = "scripts/$($definition.File)"
             $publishScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
-            $publishTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-                "ls-files", "--error-unmatch", "--", $relativeScriptPath
-            )
-            $publishUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-                "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
-            )
-            $publishEvidenceValid = (
-                $publishHeadStable -and
-                $publishTrackedResult.ExitCode -eq 0 -and
-                $publishUnchangedResult.ExitCode -eq 0 -and
-                $publishScriptSha256 -ne "unavailable" -and
-                $publishScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
-            )
+            if ($smokeTimedOut -and $index -gt 0) {
+                $publishEvidenceValid = $false
+            }
+            else {
+                $publishTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                    "ls-files", "--error-unmatch", "--", $relativeScriptPath
+                )
+                $publishUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                    "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
+                )
+                $publishEvidenceValid = (
+                    $publishHeadStable -and
+                    $publishTrackedResult.ExitCode -eq 0 -and
+                    $publishUnchangedResult.ExitCode -eq 0 -and
+                    $publishScriptSha256 -ne "unavailable" -and
+                    $publishScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
+                )
+            }
             if (-not $publishEvidenceValid) {
                 $checks[$index].status = "fail"
                 $checks[$index].summary = "로컬 검증 항목을 확인하지 못했습니다."

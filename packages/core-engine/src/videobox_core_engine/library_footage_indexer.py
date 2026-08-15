@@ -12,6 +12,7 @@ b-roll 분석은 프로젝트에 묶여 있었다. 그래서 라이브러리에 
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,7 +62,8 @@ class LibraryFootageIndexReport:
 
 
 def build_footage_description(
-    *, summary: str, layers: dict[str, Any], width: int, height: int
+    *, summary: str, layers: dict[str, Any], width: int, height: int,
+    user_metadata: dict[str, Any] | None = None,
 ) -> str:
     """검색되는 문장을 만든다.
 
@@ -79,7 +81,14 @@ def build_footage_description(
         if word not in unique:
             unique.append(word)
     tail = f" {', '.join(unique)}." if unique else ""
-    return f"{orientation} 영상. {summary.strip()}{tail}"
+    text = f"{orientation} 영상. {summary.strip()}{tail}"
+    metadata = user_metadata or {}
+    tags = metadata.get("tags") if isinstance(metadata, dict) else None
+    if isinstance(tags, list):
+        normalized = [str(tag).strip() for tag in tags if str(tag).strip()]
+        if normalized:
+            text += f" 사용자가 붙인 태그: {', '.join(dict.fromkeys(normalized))}."
+    return text
 
 
 def index_pending_library_footage(
@@ -94,10 +103,6 @@ def index_pending_library_footage(
     max_clips: int | None = _DEFAULT_MAX_CLIPS,
 ) -> LibraryFootageIndexReport:
     report = LibraryFootageIndexReport()
-    if vision_provider is None or not vision_model_name:
-        # 화면 분석 없이는 저장할 내용이 없다. 조용히 성공한 척하지 않는다.
-        return report
-
     pending = store.list_footage_needing_analysis(
         paths=list(paths), description_version=FOOTAGE_DESCRIPTION_VERSION
     )
@@ -108,6 +113,94 @@ def index_pending_library_footage(
         filename = str(clip["filename"])
         path = Path(str(clip["path"]))
         if not path.is_file():
+            report.failed.append(filename)
+            continue
+        existing = None
+        getter = getattr(store, "get_footage_descriptor", None)
+        if callable(getter):
+            existing = getter(content_sha256=str(clip["content_sha256"]))
+        # Approved ranges already have a durable, owner-visible description
+        # from the proposal.  They must not go through the expensive vision
+        # path (or require a fabricated frame); only ask the configured local
+        # embedding provider for the missing vector.
+        if clip.get("is_segment") or clip.get("source_segment_id"):
+            expected_source_sha = str(clip.get("source_sha256") or "").strip().lower()
+            if not expected_source_sha:
+                report.failed.append(filename)
+                continue
+            try:
+                actual_source_sha = _sha256_file(path)
+            except OSError:
+                report.failed.append(filename)
+                continue
+            if actual_source_sha != expected_source_sha:
+                # The managed path can be replaced after the queue row was
+                # created.  Never embed or acknowledge bytes that no longer
+                # match the immutable canonical source identity.
+                _logger.warning(
+                    "촬영본 원본 해시가 바뀌어 구간 색인을 건너뜁니다 (파일=%s, 기대=%s, 실제=%s).",
+                    filename,
+                    expected_source_sha,
+                    actual_source_sha,
+                )
+                report.failed.append(filename)
+                continue
+            if not existing:
+                report.failed.append(filename)
+                continue
+            description = str(existing.get("description", ""))
+            embedding = _embed(
+                description,
+                embedding_provider=embedding_provider,
+                embedding_model_name=embedding_model_name,
+                label=filename,
+            )
+            store.save_footage_descriptor(
+                content_sha256=str(clip["content_sha256"]),
+                library_asset_id=clip.get("library_asset_id") or existing.get("library_asset_id"),
+                filename=str(existing.get("filename") or filename),
+                duration_seconds=float(existing["duration_seconds"]),
+                width=int(existing["width"]),
+                height=int(existing["height"]),
+                tags=dict(existing.get("tags") or {}),
+                description=description,
+                embedding=embedding,
+                description_version=FOOTAGE_DESCRIPTION_VERSION,
+            )
+            if embedding is not None:
+                marker = getattr(store, "mark_footage_segment_indexed", None)
+                if callable(marker):
+                    marker(source_segment_id=str(clip["source_segment_id"]))
+            report.analyzed.append(filename)
+            continue
+        if (
+            existing
+            and int(existing.get("description_version", 0)) >= FOOTAGE_DESCRIPTION_VERSION
+            and existing.get("embedding") is None
+        ):
+            description = str(existing.get("description", ""))
+            embedding = _embed(
+                description,
+                embedding_provider=embedding_provider,
+                embedding_model_name=embedding_model_name,
+                label=filename,
+            )
+            store.save_footage_descriptor(
+                content_sha256=str(clip["content_sha256"]),
+                library_asset_id=clip.get("library_asset_id") or existing.get("library_asset_id"),
+                filename=str(existing.get("filename") or filename),
+                duration_seconds=float(existing["duration_seconds"]),
+                width=int(existing["width"]),
+                height=int(existing["height"]),
+                tags=dict(existing.get("tags") or {}),
+                description=description,
+                embedding=embedding,
+                description_version=FOOTAGE_DESCRIPTION_VERSION,
+            )
+            report.analyzed.append(filename)
+            continue
+        if vision_provider is None or not vision_model_name:
+            # 화면 분석 없이는 새 설명을 만들 수 없다. 조용히 성공한 척하지 않는다.
             report.failed.append(filename)
             continue
         try:
@@ -131,9 +224,11 @@ def index_pending_library_footage(
             layers=layers if isinstance(layers, dict) else {},
             width=int(probe.width),
             height=int(probe.height),
+            user_metadata=dict(clip.get("user_metadata") or {}),
         )
         store.save_footage_descriptor(
             content_sha256=str(clip["content_sha256"]),
+            library_asset_id=clip.get("library_asset_id"),
             filename=filename,
             duration_seconds=float(probe.duration_sec),
             width=int(probe.width),
@@ -178,3 +273,11 @@ def _embed(
             exc_info=True,
         )
         return None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()

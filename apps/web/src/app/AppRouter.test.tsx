@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
@@ -62,6 +62,74 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  it("mounts the library workspace and keeps footage copy free of internal plan names", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const libraryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/library"] }));
+    render(<AppRouter router={libraryRouter} />);
+    expect(await screen.findByTestId("global-library-page")).toHaveTextContent("내 라이브러리");
+    expect(screen.getByTestId("library-results")).toBeVisible();
+    cleanup();
+
+    const footageRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/footage"] }));
+    render(<AppRouter router={footageRouter} />);
+    expect(await screen.findByTestId("global-footage-page")).toHaveTextContent("촬영본 정리");
+    // §10.13: dashboard copy names creator outcomes, never internal plan phases.
+    expect(screen.queryByText(/Wave-?\s?2/i)).toBeNull();
+    expect(screen.getByTestId("footage-workspace")).toHaveTextContent("VideoBox");
+  });
+
+  it("summarizes each project and exposes exactly one next action", async () => {
+    const projects = [
+      { project_id: "project_draft", name: "초안 프로젝트", status: "active", root_storage_uri: "local://draft" },
+      { project_id: "project_assets", name: "자산 프로젝트", status: "active", root_storage_uri: "local://assets" },
+      { project_id: "project_new", name: "새 프로젝트", status: "active", root_storage_uri: "local://new" },
+    ];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockImplementation(async (projectId) => ({
+      project_id: projectId,
+      display_name: projects.find((item) => item.project_id === projectId)?.name ?? projectId,
+      updated_at: "2026-08-12T00:00:00Z",
+      current_stage: projectId === "project_draft" ? "edit" : projectId === "project_assets" ? "assets" : "plan",
+      state: projectId === "project_assets" ? "attention" : "ready",
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: projectId === "project_draft"
+        ? { label: "계속 편집", href: "/projects/project_draft/edit" }
+        : projectId === "project_assets"
+          ? { label: "자산 준비", href: "/projects/project_assets/assets" }
+        : { label: "계속 만들기", href: "/projects/project_new/plan" },
+    }));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+
+    render(<AppRouter router={router} />);
+
+    const draftCard = await screen.findByRole("article", { name: "초안 프로젝트 프로젝트" });
+    const assetCard = await screen.findByRole("article", { name: "자산 프로젝트 프로젝트" });
+    const newCard = await screen.findByRole("article", { name: "새 프로젝트 프로젝트" });
+    expect(draftCard).toHaveTextContent("편집");
+    expect(assetCard).toHaveTextContent("자산");
+    expect(newCard).toHaveTextContent("기획");
+    expect(within(draftCard).getAllByRole("link")).toHaveLength(1);
+    expect(within(assetCard).getAllByRole("link")).toHaveLength(1);
+    expect(within(newCard).getAllByRole("link")).toHaveLength(1);
+    expect(within(draftCard).getByRole("link", { name: "계속 편집" })).toHaveAttribute("href", "/projects/project_draft/edit");
+    expect(within(assetCard).getByRole("link", { name: "자산 준비" })).toHaveAttribute("href", "/projects/project_assets/assets");
+    expect(within(newCard).getByRole("link", { name: "계속 만들기" })).toHaveAttribute("href", "/projects/project_new/plan");
+  });
+
+  it("keeps a failed workspace summary out of project creation", async () => {
+    const project = { project_id: "project_broken", name: "확인 필요", status: "active", root_storage_uri: "local://broken" };
+    vi.spyOn(api, "listProjects").mockResolvedValue([project]);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockRejectedValue(new Error("unavailable"));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    const card = await screen.findByRole("article", { name: "확인 필요 프로젝트" });
+    expect(card).toHaveTextContent("상태 확인 필요");
+    expect(within(card).getByRole("button", { name: "다시 확인" })).toBeVisible();
+    expect(within(card).queryByText("새 영상 시작")).not.toBeInTheDocument();
+  });
+
   it("owns ordinary media with the canonical workspace and keeps the creation return adapter narrow", async () => {
     const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);
@@ -98,8 +166,8 @@ describe("AppRouter URL ownership", () => {
 
   it("uses /editor for new editing links while continuing to read the prior editing URL", () => {
     expect(resolveWorkspaceLocation("project_a", "editing")).toBe("/projects/project_a/editor");
-    expect(parseWorkspaceLocation("/projects/project_a/editor")).toEqual({ projectId: "project_a", section: "editing" });
-    expect(parseWorkspaceLocation("/projects/project_a/editing")).toEqual({ projectId: "project_a", section: "editing" });
+    expect(parseWorkspaceLocation("/projects/project_a/editor")).toEqual({ projectId: "project_a", stage: "edit", legacy: true });
+    expect(parseWorkspaceLocation("/projects/project_a/editing")).toEqual({ projectId: "project_a", stage: "edit", legacy: true });
   });
 
   it("pins the latest session before opening a canonical editor URL without a session", async () => {
@@ -203,7 +271,7 @@ describe("AppRouter URL ownership", () => {
     }]);
     vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "job-a", status: "succeeded", timeline: { timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "review", review_status: "draft", tracks: [], review_flags: [], applied_recommendations: [], pending_recommendations: [] } });
     vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
-    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
+    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_a", timeline_id: "timeline-a", review_status: "draft", approved_at: null, updated_at: "now", source_session_id: "session-a", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: [`/projects/project_a/${section}`] }));
 
     render(<AppRouter router={router} />);
@@ -306,6 +374,26 @@ describe("AppRouter URL ownership", () => {
     expect(await screen.findByTestId("settings-page")).toBeVisible();
     expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
+  });
+
+  it("keeps the open project when the shell settings link is activated", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([
+      { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
+      { project_id: "project_b", name: "B", status: "active", root_storage_uri: "local://b" },
+    ]);
+    const router = createAppRouter(
+      new ProjectCatalog(),
+      createMemoryHistory({ initialEntries: ["/projects/project_b/home"] }),
+    );
+
+    render(<AppRouter router={router} />);
+
+    const settingsLink = await screen.findByRole("link", { name: "설정" });
+    expect(settingsLink).toHaveAttribute("href", "/settings/general");
+    fireEvent.click(settingsLink);
+
+    await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
+    expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("does not redirect an unknown project-scoped settings URL into another project's settings", async () => {
@@ -499,7 +587,7 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     expect(await screen.findByText("먼저 영상 초안을 만들어 주세요.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "홈" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "기획" })).toBeVisible();
     const createButtons = screen.getAllByRole("button", { name: "새 영상 만들기" });
     expect(createButtons.length).toBeGreaterThan(0);
 
@@ -553,7 +641,7 @@ describe("AppRouter URL ownership", () => {
     }] : []));
     vi.spyOn(api, "getTimeline").mockResolvedValue({ job_id: "job-b", status: "succeeded", timeline: { timeline_id: "timeline-b", project_id: "project_b", version: "v1", output_mode: "review", review_status: "draft", tracks: [], review_flags: [], applied_recommendations: [], pending_recommendations: [] } });
     vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [] });
-    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", approved_at: null, updated_at: "now", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
+    vi.spyOn(api, "getReviewApproval").mockResolvedValue({ project_id: "project_b", timeline_id: "timeline-b", review_status: "draft", approved_at: null, updated_at: "now", source_session_id: "session-b", source_session_revision: 1, is_current: true, invalidated_at: null, invalidated_reason: null });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/timeline"] }));
     render(<AppRouter router={router} />);
     await waitFor(() => expect(getLatest).toHaveBeenCalledWith("project_a"));
@@ -569,10 +657,15 @@ describe("AppRouter URL ownership", () => {
   it("navigates catalog and recovery choices to a real project home", async () => {
     const projects = [{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }];
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockResolvedValue({
+      project_id: "project_a", display_name: "A", updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan", state: "ready", thumbnail_url: null, finished_video_count: 0,
+      next_action: { label: "프로젝트 열기", href: "/projects/project_a/plan" },
+    });
     const catalogRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={catalogRouter} />);
-    fireEvent.click(await screen.findByRole("button", { name: "A" }));
-    await waitFor(() => expect(catalogRouter.state.location.pathname).toBe("/projects/project_a/home"));
+    fireEvent.click(await screen.findByRole("link", { name: "프로젝트 열기" }));
+    await waitFor(() => expect(catalogRouter.state.location.pathname).toBe("/projects/project_a/plan"));
     cleanup();
 
     const recoveryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/missing/editing"] }));

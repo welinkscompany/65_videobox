@@ -235,8 +235,8 @@ test("manages voice samples and TTS listening review at the canonical settings r
   await expect(page.getByRole("region", { name: "내 목소리와 읽어보기 후보" })).toBeVisible();
   await expect(page.getByText("저장한 내 목소리 1개")).toBeVisible();
 
-  await page.getByLabel("음성 파일의 로컬 경로").fill("  D:\\voices\\registered.wav  ");
-  await page.getByRole("button", { name: "로컬 경로로 추가" }).click();
+  await page.getByLabel("음성 파일이 있는 곳").fill("  D:\\voices\\registered.wav  ");
+  await page.getByRole("button", { name: "이 위치로 추가" }).click();
   await expect(page.getByText("저장한 내 목소리 2개")).toBeVisible();
 
   await page.getByLabel("음성 파일 업로드").setInputFiles({

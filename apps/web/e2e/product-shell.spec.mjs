@@ -28,8 +28,8 @@ test("local catalog renders the creator shell without an external request", asyn
   await page.goto("/projects/local-draft/home");
 
   await expect(page.getByRole("button", { name: "작업 상태" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "다음 장면을 이어서 만들어 볼까요?" })).toBeVisible();
-  await expect(page.getByText("작업 중인 초안 계속하기")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "다음 작업" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "전체 메뉴" })).toBeVisible();
   await expect(page.getByText(/provider|billing|account/i)).toHaveCount(0);
 });
 
@@ -41,6 +41,17 @@ test("an empty local catalog leads to the single project-start action", async ({
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "영상 만들기 시작" })).toBeVisible();
   await expect(page.getByRole("button", { name: "프로젝트 만들고 소스 등록" })).toBeVisible();
+});
+
+test("desktop shell keeps global destinations separate from the open project's five stages", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/projects/local-draft/home");
+  await expect(page.getByRole("navigation", { name: "전체 메뉴" }).getByRole("link")).toHaveCount(4);
+  await expect(page.getByRole("navigation", { name: "프로젝트 단계" }).getByRole("button")).toHaveCount(5);
+  await page.getByRole("button", { name: "사이드바 접기" }).click();
+  await expect(page.getByRole("button", { name: "사이드바 펼치기" })).toBeVisible();
+  await page.getByRole("button", { name: "사이드바 펼치기" }).click();
+  await expect(page.getByRole("button", { name: "사이드바 접기" })).toBeVisible();
 });
 
 test("unknown project route offers canonical recovery without a project-scoped request", async ({ page }) => {

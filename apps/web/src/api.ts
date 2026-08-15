@@ -50,6 +50,16 @@ export type HomeSummary = {
   has_draft: boolean;
   asset_gap_count: number;
 };
+export type ProjectWorkspaceSummary = {
+  project_id: string;
+  display_name: string;
+  updated_at: string;
+  current_stage: "plan" | "assets" | "edit" | "review" | "output";
+  state: "ready" | "attention" | "blocked";
+  thumbnail_url: string | null;
+  finished_video_count: number;
+  next_action: { label: string; href: string };
+};
 export type JobRecord = {
   job_id: string;
   project_id: string;
@@ -272,6 +282,8 @@ export type TimelinePayload = {
   pending_recommendations: RecommendationItem[];
   source_session_id?: string | null;
   source_session_revision?: number | null;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
 };
 
 export type TimelineJob = {
@@ -295,6 +307,8 @@ export type SegmentRecord = {
 export type ReviewSnapshot = {
   project_id: string;
   timeline_id: string;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
   review_status: string;
   segments: SegmentRecord[];
   applied_recommendations: RecommendationItem[];
@@ -370,6 +384,33 @@ export type EditingSession = {
   redo_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type OutputVariant = {
+  variant_id: string;
+  kind: "horizontal" | "vertical_full" | "vertical_highlight";
+  source_session_id: string;
+  source_session_revision: number;
+  variant_revision: number;
+  overrides: {
+    crop: Record<string, unknown> | null;
+    focal: Record<string, unknown> | null;
+    caption: Record<string, unknown> | null;
+    safe_area: Record<string, unknown> | null;
+    audio: Record<string, unknown> | null;
+  };
+  locks: Array<{ field: string; base_master_revision: number }>;
+  conflicts: Array<{ field: string; reason: string; base_master_revision: number; current_master_revision: number }>;
+  selected_segment_ids?: string[] | null;
+  master_segment_ids?: string[] | null;
+};
+
+export type OutputVariantPatch = {
+  overrides?: Partial<OutputVariant["overrides"]>;
+  lock_fields?: string[];
+  unlock_fields?: string[];
+  selected_segment_ids?: string[];
+  resolve_conflicts?: Record<string, "keep_local" | "rebase_master">;
 };
 
 export type EditorPreset = {
@@ -627,6 +668,8 @@ export type ReviewApproval = {
   updated_at: string;
   source_session_id: string | null;
   source_session_revision: number | null;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
   is_current: boolean;
   invalidated_at: string | null;
   invalidated_reason: string | null;
@@ -671,6 +714,123 @@ export type MediaLibraryInstallState = {
   installed_asset_count: number;
 };
 
+export type LibraryMediaType = "broll" | "music" | "sfx";
+export type LibraryAssetLifecycle = "processing" | "ready" | "needs_attention" | "trashed";
+export type LibraryAssetOrigin = "builtin" | "user";
+
+/** Public, path-safe representation returned by the personal library API. */
+export type LibraryAsset = {
+  library_asset_id: string;
+  asset_id?: string | null;
+  media_type: LibraryMediaType;
+  origin: LibraryAssetOrigin;
+  lifecycle: LibraryAssetLifecycle;
+  content_sha256?: string | null;
+  byte_count?: number | null;
+  mime_type?: string | null;
+  managed_relative_path?: string | null;
+  technical_metadata?: Record<string, unknown>;
+  machine_metadata?: Record<string, unknown>;
+  user_metadata?: Record<string, unknown>;
+  duration_seconds?: number | null;
+  tags?: string[];
+  verified?: boolean;
+  available?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  trashed_at?: string | null;
+  preview_url?: string | null;
+  thumbnail_url?: string | null;
+  waveform_url?: string | null;
+};
+
+export type LibraryAssetListResponse = { assets: LibraryAsset[]; total: number };
+
+export type FootageSegment = {
+  segment_id: string;
+  source_segment_id: string;
+  source_sha256: string;
+  start_sec: number;
+  end_sec: number;
+  machine_fields: Record<string, unknown>;
+  confirmed_fields: Record<string, unknown>;
+};
+export type FootageProposal = {
+  proposal_id: string;
+  source_id: string;
+  source_sha256: string;
+  status: "draft" | "approved" | "rejected" | "stale";
+  revision: number;
+  confirmed_fields: Record<string, unknown>;
+  machine_fields: Record<string, unknown>;
+  segments: FootageSegment[];
+};
+export type FootageProposalPreview = {
+  status: "ready";
+  proposal_id: string;
+  revision: number;
+  source_id: string;
+  preview_url: string;
+  segments: FootageSegment[];
+};
+export type YujinFootageOperation =
+  | { intent: "split_by_scene"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "select_process"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }>; process_label: string }
+  | { intent: "exclude_quality"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }>; quality_evidence: string[] }
+  | { intent: "combine_similar"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "select_vertical"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "target_duration"; target_duration_sec: number };
+export type YujinFootageInterpretation =
+  | { status: "candidate_only"; reply_text: string; candidate: { source_id: string; source_sha256: string; proposal_id: string; base_revision: number; requires_approval: true; operations: YujinFootageOperation[] }; preview: { status: "ready"; preview_url: string; ranges: Array<[number, number]> } }
+  | { status: "clarification"; clarification: string }
+  | { status: "rejected"; rejection_reason: string | null };
+export type FootageSequenceItem = {
+  item_id: string;
+  source_segment_id: string;
+  source_id?: string;
+  source_sha256?: string;
+  item_order: number;
+  start_sec: number | null;
+  end_sec: number | null;
+};
+export type FootageSequenceSource = { source_id: string; source_sha256: string };
+export type FootageSequence = {
+  sequence_id: string;
+  source_id: string;
+  source_sha256: string;
+  sources?: FootageSequenceSource[];
+  name: string;
+  revision: number;
+  items: FootageSequenceItem[];
+};
+export type FootageSequencePreview = {
+  status: "ready";
+  sequence_id: string;
+  revision: number;
+  preview_url: string | null;
+  preview_items: Array<{ item_id: string; source_id: string; source_sha256: string; preview_url: string }>;
+  items: FootageSequenceItem[];
+};
+export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string };
+export type LibraryUsageLocation = {
+  project_id?: string | null;
+  materialized_asset_id?: string | null;
+  reference_id?: string | null;
+  location: Record<string, unknown>;
+};
+export type LibraryUsage = { library_asset_id: string; locations: LibraryUsageLocation[] };
+export type LibraryIngestItem = {
+  filename?: string | null;
+  /** Client-only label/key used to preserve folder context and retry identity. */
+  display_filename?: string | null;
+  retry_key?: string | null;
+  idempotency_key?: string;
+  library_asset_id?: string | null;
+  state: LibraryAssetLifecycle | "duplicate";
+  error_code?: string | null;
+};
+export type LibraryIngestBatch = { ingest_batch_id: string; items: LibraryIngestItem[]; partial: boolean };
+
 export type TtsCandidateResponse = AssetResponse & {
   candidate_id?: string | null;
   segment_id?: string | null;
@@ -713,6 +873,23 @@ export type FinalRenderJob = {
   status: string;
   render: FinalRenderArtifact | null;
   error_message?: string | null;
+};
+
+export type VariantRenderItem = {
+  variant_id: string;
+  variant_kind?: string | null;
+  timeline_id?: string | null;
+  timeline_job_id?: string | null;
+  job_id?: string | null;
+  status: string;
+  error_code?: string | null;
+  content_url?: string | null;
+};
+
+export type VariantRenderBatch = {
+  project_id: string;
+  status: string;
+  items: VariantRenderItem[];
 };
 
 export type RegisteredAsset = {
@@ -1566,8 +1743,68 @@ export const api = {
     request<AssetResponse>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
     }),
+  materializeLibraryAsset: (libraryAssetId: string, projectId: string) =>
+    request<{ asset: AssetResponse; reference: { reference_id: string; project_id: string; library_asset_id: string; materialized_asset_id?: string | null } }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
+      }),
+  removeLibraryReference: (libraryAssetId: string, referenceId: string) =>
+    request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/references/${encodeURIComponent(referenceId)}`, { method: "DELETE" }),
   mediaLibraryPreviewUrl: (libraryAssetId: string) =>
     `/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
+  listLibraryAssets: (params: { mediaType?: LibraryMediaType; q?: string; includeTrashed?: boolean; limit?: number } = {}, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    if (params.mediaType) query.set("media_type", params.mediaType);
+    if (params.q?.trim()) query.set("q", params.q.trim());
+    if (params.includeTrashed) query.set("include_trashed", "true");
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return request<LibraryAssetListResponse>(`/api/library/assets${suffix}`, { signal });
+  },
+  proposeFootage: (payload: { library_asset_id: string; idempotency_key: string; analysis?: Record<string, unknown> }) =>
+    request<FootageProposal>("/api/footage/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getFootageProposal: (proposalId: string) => request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`),
+  interpretYujinFootageProposal: (proposalId: string, payload: { instruction: string }) =>
+    request<YujinFootageInterpretation>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/yujin/interpret`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  editFootageProposal: (proposalId: string, payload: { operation: "move_boundary" | "split" | "merge" | "exclude" | "confirm"; expected_revision: number; segment_id?: string; segment_ids?: string[]; boundary_sec?: number; split_sec?: number; fields?: Record<string, unknown> }) =>
+    request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  previewFootageProposal: (proposalId: string, payload: { expected_revision: number }) =>
+    request<FootageProposalPreview>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  cancelFootageProposal: (proposalId: string) => request<{ status: "cancelled"; proposal_id: string; revision: number }>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/cancel`, { method: "POST" }),
+  approveFootageProposal: (proposalId: string, payload: { expected_revision: number; idempotency_key: string }) =>
+    request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  createFootageSequence: (payload: { source_id: string; name?: string; items: Array<{ source_segment_id: string; source_id?: string; item_order: number; start_sec?: number; end_sec?: number }>; idempotency_key?: string }) =>
+    request<FootageSequence>("/api/footage/sequences", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getFootageSequence: (sequenceId: string) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}`),
+  reorderFootageSequence: (sequenceId: string, payload: { expected_revision: number; item_ids: string[] }) =>
+    request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/reorder`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  previewFootageSequence: (sequenceId: string) => request<FootageSequencePreview>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/preview`, { method: "POST" }),
+  cancelFootageSequence: (sequenceId: string) => request<{ status: "cancelled"; sequence_id: string; revision: number }>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/cancel`, { method: "POST" }),
+  approveFootageSequence: (sequenceId: string, payload: { idempotency_key: string }) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  searchLibraryAssets: (query: string, mediaType: LibraryMediaType, signal?: AbortSignal) =>
+    request<{ matches: LibrarySearchMatch[]; semantic: boolean }>(
+      `/api/library/search?q=${encodeURIComponent(query)}&media_type=${encodeURIComponent(mediaType)}`,
+      { signal },
+    ),
+  ingestLibraryAssets: (files: File[], mediaType: LibraryMediaType, idempotencyKey?: string, signal?: AbortSignal) => {
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file, file.name));
+    body.append("media_type", mediaType);
+    if (idempotencyKey) body.append("idempotency_key", idempotencyKey);
+    return request<LibraryIngestBatch>("/api/library/ingest", { method: "POST", body, signal });
+  },
+  getLibraryAsset: (libraryAssetId: string, signal?: AbortSignal) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}`, { signal }),
+  getLibraryAssetUsage: (libraryAssetId: string, signal?: AbortSignal) =>
+    request<LibraryUsage>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/usage`, { signal }),
+  trashLibraryAsset: (libraryAssetId: string) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/trash`, { method: "POST" }),
+  restoreLibraryAsset: (libraryAssetId: string) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/restore`, { method: "POST" }),
+  permanentDeleteLibraryAsset: (libraryAssetId: string) =>
+    request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/permanent`, { method: "DELETE" }),
+  libraryAssetPreviewUrl: (libraryAssetId: string) =>
+    `/api/library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
   listEditorPresets: (projectId: string) =>
     request<EditorPreset[]>(`/api/projects/${projectId}/editor-library/presets`),
   listEditorFavorites: (projectId: string) =>
@@ -1667,6 +1904,8 @@ export const api = {
   // pins to the job dialog. One call keeps the home visit cheap.
   getHomeSummary: (projectId: string): Promise<HomeSummary> =>
     request<HomeSummary>(`/api/projects/${encodeURIComponent(projectId)}/home-summary`),
+  getProjectWorkspaceSummary: (projectId: string): Promise<ProjectWorkspaceSummary> =>
+    request<ProjectWorkspaceSummary>(`/api/projects/${encodeURIComponent(projectId)}/workspace-summary`),
   listAllJobs: async (): Promise<JobRecordWithProject[]> => {
     const payload = await request<{ jobs: JobRecordWithProject[] }>("/api/jobs");
     return payload.jobs;
@@ -1712,6 +1951,35 @@ export const api = {
     ),
   getEditingSession: (projectId: string, sessionId: string) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
+  listOutputVariants: (projectId: string, sessionId: string) =>
+    request<{ variants: OutputVariant[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants?session_id=${encodeURIComponent(sessionId)}`,
+    ),
+  createOutputVariant: (projectId: string, payload: { source_session_id: string; kind: "vertical_highlight"; variant_id?: string }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  patchOutputVariant: (projectId: string, variantId: string, payload: { expected_variant_revision: number; patch: OutputVariantPatch }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  rebaseOutputVariant: (projectId: string, variantId: string, payload: { new_master_revision: number; changed_fields: string[] }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/rebase`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  materializeOutputVariant: (projectId: string, variantId: string, payload: { expected_master_session_revision?: number }) =>
+    request<{ materialization: { timeline_id: string; source_session_id: string; source_session_revision: number; source_variant_id: string; source_variant_revision: number } }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/materialize`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  startVariantRenders: (projectId: string, payload: { session_id: string; variant_ids?: string[] }) =>
+    request<VariantRenderBatch>(
+      `/api/projects/${encodeURIComponent(projectId)}/variant-renders`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
   getLatestEditingSession: async (projectId: string): Promise<EditingSession | null> => {
     const response = await fetch(`/api/projects/${projectId}/editing-sessions/latest`, undefined);
     if (response.status === 404) {
@@ -1729,8 +1997,6 @@ export const api = {
   retryMediaAnalysis: (projectId: string, analysisId: string) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/retry`, { method: "POST" }),
   reviewMediaAnalysis: (projectId: string, analysisId: string, tags: Record<string, string[]>) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }) }),
   mediaAnalysisPreview: (projectId: string, assetId: string) => request<{ analysis_id: string; preview: unknown }>(`/api/projects/${projectId}/assets/${assetId}/analysis-preview`),
-  getEditingSessionFixedTimeline: (projectId: string, sessionId: string) =>
-    request<FixedTimeline>(`/api/projects/${projectId}/editing-sessions/${sessionId}/fixed-timeline`),
   getEditorPlaybackManifest: (projectId: string, sessionId: string) =>
     request<EditorPlaybackManifest>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/playback-manifest`),
   startExactPreview: (projectId: string, sessionId: string, payload: { expected_revision: number; start_sec?: number; end_sec?: number }) =>

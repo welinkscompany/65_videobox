@@ -8,6 +8,7 @@ import pytest
 
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.sqlite_schema import PROJECT_SCHEMA_STATEMENTS
+from videobox_storage.library_user_asset_store import LibraryUserAssetStore
 
 
 def _write_pre_freshness_database(store: LocalProjectStore, project_id: str) -> None:
@@ -187,3 +188,32 @@ def test_duplicate_column_race_is_accepted_only_after_schema_recheck() -> None:
                 error_message="duplicate column name: external_ref ",
             )
         )
+
+
+def test_concurrent_global_library_schema_creation_is_additive(tmp_path: Path) -> None:
+    root = tmp_path / "global-library"
+
+    def open_store(_: int) -> int:
+        store = LibraryUserAssetStore(root)
+        return len(store.list_assets())
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(open_store, range(16)))
+
+    connection = sqlite3.connect(root / "media_library.sqlite")
+    try:
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+    assert {
+        "library_user_assets",
+        "library_asset_derivatives",
+        "library_ingest_batches",
+        "library_ingest_items",
+        "library_project_references",
+    } <= tables

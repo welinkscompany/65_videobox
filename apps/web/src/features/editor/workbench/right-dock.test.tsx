@@ -49,6 +49,73 @@ function PersistentDock() {
 }
 
 describe("RightDock", () => {
+  it("shows conversation starters that fill and focus the composer without sending", () => {
+    const onDraftChange = vi.fn();
+    const onSendMessage = vi.fn();
+    const onStart = vi.fn();
+    const onApplyProposal = vi.fn();
+    const onManualEdit = vi.fn();
+    render(<RightDock
+      draft=""
+      onDraftChange={onDraftChange}
+      onSendMessage={onSendMessage}
+      onStart={onStart}
+      onApplyProposal={onApplyProposal}
+      onManualEdit={onManualEdit}
+      state="idle"
+      runState={{ kind: "idle" }}
+    />);
+
+    expect(screen.getByRole("group", { name: "대화 스타터" })).toBeInTheDocument();
+    for (const label of [
+      "이 장면에 어울리는 B-roll 추천해 줘",
+      "현재 편집 흐름 점검해 줘",
+      "자막을 더 간결하게 다듬어 줘",
+      "세로 영상용으로 바꿀 부분 찾아 줘",
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeVisible();
+    }
+    const starter = screen.getByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" });
+    expect(starter).toBeVisible();
+
+    fireEvent.click(starter);
+
+    expect(onDraftChange).toHaveBeenCalledWith("이 장면에 어울리는 B-roll 추천해 줘");
+    expect(onSendMessage).not.toHaveBeenCalled();
+    expect(onStart).not.toHaveBeenCalled();
+    expect(onApplyProposal).not.toHaveBeenCalled();
+    expect(onManualEdit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveFocus();
+  });
+
+  it("hides conversation starters once a conversation or proposal exists", () => {
+    const { rerender } = render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "message-1", role: "user", text: "요청" }]}
+    />);
+
+    expect(screen.queryByRole("group", { name: "대화 스타터" })).not.toBeInTheDocument();
+
+    rerender(<RightDock draft="" onDraftChange={vi.fn()} proposal={proposal} />);
+
+    expect(screen.queryByRole("group", { name: "대화 스타터" })).not.toBeInTheDocument();
+
+    rerender(<RightDock draft="" onDraftChange={vi.fn()} state="error" runState={{ kind: "idle" }} />);
+
+    expect(screen.queryByRole("group", { name: "대화 스타터" })).not.toBeInTheDocument();
+
+    rerender(<RightDock draft="" onDraftChange={vi.fn()} runState={{ kind: "unavailable", message: "연결할 수 없어요." }} />);
+
+    expect(screen.queryByRole("group", { name: "대화 스타터" })).not.toBeInTheDocument();
+  });
+
+  it("disables conversation starters when the composer is disabled", () => {
+    render(<RightDock draft="" onDraftChange={vi.fn()} composerDisabled />);
+
+    expect(screen.getByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" })).toBeDisabled();
+  });
+
   it("preserves the composer, selected candidate, and conversation scroll while Inspector opens and closes", () => {
     render(<PersistentDock />);
     const composer = screen.getByLabelText("유진에게 요청하기");

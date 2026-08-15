@@ -466,7 +466,8 @@ PROJECT_SCHEMA_STATEMENTS = (
         status TEXT NOT NULL,
         approved_at TEXT,
         updated_at TEXT NOT NULL,
-        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        source_session_revision INTEGER, source_variant_id TEXT, source_variant_revision INTEGER,
+        is_current INTEGER NOT NULL DEFAULT 1,
         invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
@@ -568,6 +569,40 @@ PROJECT_SCHEMA_STATEMENTS = (
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         UNIQUE(conversation_id, client_message_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS output_variants (
+        variant_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('horizontal', 'vertical_full', 'vertical_highlight')),
+        source_session_id TEXT NOT NULL,
+        source_session_revision INTEGER NOT NULL,
+        variant_revision INTEGER NOT NULL DEFAULT 1,
+        overrides_json TEXT NOT NULL DEFAULT '{}',
+        locks_json TEXT NOT NULL DEFAULT '[]',
+        conflicts_json TEXT NOT NULL DEFAULT '[]',
+        selected_segment_ids_json TEXT,
+        master_segment_ids_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(project_id, variant_id),
+        UNIQUE(project_id, source_session_id, kind)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS variant_materializations (
+        materialization_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        variant_id TEXT NOT NULL,
+        source_session_id TEXT NOT NULL,
+        source_session_revision INTEGER NOT NULL,
+        source_variant_revision INTEGER NOT NULL,
+        timeline_id TEXT NOT NULL,
+        segments_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(project_id, variant_id, source_variant_revision)
     )
     """,
     """

@@ -17,7 +17,7 @@ export type EditorWorkbenchLayout = Readonly<{
 }>;
 
 export const editorWorkbenchPanelConstants = Object.freeze({ leftMinPx: 220, rightMinPx: 260, gutterPx: 12, bothPreviewMinPx: 720, singlePreviewMinPx: 640 });
-const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320 };
+const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 };
 
 function persistedState(value: unknown): EditorWorkbenchPersistedState {
   if (!value || typeof value !== "object") return defaultPersisted;

@@ -159,6 +159,57 @@ describe("PreviewStage", () => {
     expect(imageRule).toContain("object-fit: contain");
   });
 
+  it("keeps the video visible in a fixed preview viewport and limits scrolling to source details", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const previewRule = css.match(/^\.vb-editor-workbench__preview\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const stageRule = css.match(/^\.vb-preview-stage\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const mediaRule = css.match(/^\.vb-preview-stage__media-shell\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const videoRule = css.match(/^\.vb-preview-stage__media-shell video\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const sourcesRule = css.match(/^\.vb-preview-stage__sources\s*\{([^}]*)\}/m)?.[1] ?? "";
+
+    expect(previewRule).toContain("overflow: hidden");
+    expect(stageRule).toContain("height: 100%");
+    expect(stageRule).toContain("grid-template-rows");
+    expect(mediaRule).toContain("min-height: 0");
+    expect(videoRule).toContain("width: 100%");
+    expect(videoRule).toContain("height: 100%");
+    expect(videoRule).toContain("min-height: 0");
+    expect(videoRule).toContain("max-height: 100%");
+    expect(videoRule).toContain("object-fit: contain");
+    expect(sourcesRule).toContain("overflow: auto");
+  });
+
+  it("bounds the medium-width output variants panel so it cannot starve the preview", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const mediumLayout = css.match(/@media \(min-width: 768px\) and \(max-width: 1499px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+
+    expect(mediumLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
+    expect(mediumLayout).toContain(".vb-editor-workbench__timeline { max-height: 4rem; padding: 0.5rem 0.75rem; }");
+    expect(mediumLayout).toContain(".vb-preview-stage__sources { max-height: 4rem; }");
+  });
+
+  it("bounds output variants and timeline on Full HD so the preview remains visible", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const variantsRule = css.match(/^\.vb-editor-variants\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const timelineRule = css.match(/^\.vb-editor-workbench__timeline\s*\{([^}]*)\}/m)?.[1] ?? "";
+
+    expect(variantsRule).toContain("max-height: 10rem");
+    expect(variantsRule).toContain("overflow: auto");
+    expect(timelineRule).toMatch(/max-height:\s*12rem/);
+  });
+
+  it("bounds the side panels above 1500px so a bigger screen never shrinks the preview", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const wideLayout = css.match(/@media \(min-width: 1500px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+
+    // Without this block a 1920x1080 screen falls back to the loose base rules
+    // (variants 10rem, timeline 12rem) and ends up with a smaller preview than
+    // a 1440x900 screen, which the 768-1499px block already compacts.
+    expect(wideLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
+    expect(wideLayout).toContain(".vb-editor-workbench__timeline { max-height: 6rem; }");
+    expect(wideLayout).toContain(".vb-preview-stage__sources { max-height: 5rem; }");
+  });
+
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
     const refresh = vi.fn();
     const stale = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);

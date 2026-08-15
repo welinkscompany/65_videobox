@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_domain_models.library_assets import LibraryAssetLifecycle
 
 
 def _store(tmp_path: Path) -> MediaLibraryStore:
@@ -193,3 +194,68 @@ def test_a_newer_description_version_makes_everything_pending_again(tmp_path: Pa
     assert [item["library_asset_id"] for item in store.list_assets_needing_audio_analysis(description_version=2)] == [
         "pack:test-pack:music-a"
     ]
+
+
+def test_ready_user_audio_is_pending_and_keeps_user_tags_separate(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    payload = b"owner audio"
+    relative = Path("assets/music/owner.mp3")
+    path = tmp_path / "library" / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    asset = store.register_user_asset(
+        library_asset_id="user:music-owner",
+        media_type="music",
+        origin="user",
+        lifecycle=LibraryAssetLifecycle.READY,
+        content_sha256=hashlib.sha256(payload).hexdigest(),
+        managed_relative_path=relative.as_posix(),
+        byte_count=len(payload),
+        mime_type="audio/mpeg",
+        user_metadata={"title": "출근 음악", "tags": ["출근", "차분"]},
+    )
+
+    pending = store.list_assets_needing_audio_analysis()
+
+    assert [item["library_asset_id"] for item in pending] == [asset.library_asset_id]
+    assert pending[0]["path"] == str(path)
+    assert pending[0]["user_metadata"] == {"title": "출근 음악", "tags": ["출근", "차분"]}
+
+    store.save_audio_descriptor(
+        library_asset_id=asset.library_asset_id,
+        sha256=asset.content_sha256,
+        measurements={"duration_seconds": 3.0, "loudness_rms": 0.1, "brightness_hz": 900.0, "onset_rate_per_second": 1.0},
+        words={"세기": "보통", "밝기": "중간", "빠르기": "느림"},
+        description="짧게 쓰는 음악. 출근, 차분.",
+        embedding=[1.0, 0.0],
+    )
+
+    assert store.list_assets_needing_audio_analysis() == []
+    assert store.user_asset_store.get_asset(asset.library_asset_id).user_metadata == {
+        "title": "출근 음악", "tags": ["출근", "차분"]
+    }
+
+
+def test_same_user_audio_bytes_under_a_new_filename_is_not_reanalysed(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    payload = b"same owner audio"
+    digest = hashlib.sha256(payload).hexdigest()
+    first = store.register_user_asset(
+        library_asset_id="user:music-original", media_type="music", origin="user",
+        lifecycle=LibraryAssetLifecycle.READY, content_sha256=digest,
+        managed_relative_path="assets/music/original.mp3", byte_count=len(payload), mime_type="audio/mpeg",
+    )
+    store.save_audio_descriptor(
+        library_asset_id=first.library_asset_id, sha256=digest,
+        measurements={"duration_seconds": 1.0, "loudness_rms": 0.1, "brightness_hz": 900.0, "onset_rate_per_second": 0.2},
+        words={"세기": "보통", "밝기": "중간", "빠르기": "느림"}, description="설명", embedding=[1.0, 0.0],
+    )
+
+    duplicate = store.register_user_asset(
+        library_asset_id="user:music-renamed", media_type="music", origin="user",
+        lifecycle=LibraryAssetLifecycle.READY, content_sha256=digest,
+        managed_relative_path="assets/music/renamed.mp3", byte_count=len(payload), mime_type="audio/mpeg",
+    )
+
+    assert duplicate.library_asset_id == first.library_asset_id
+    assert store.list_assets_needing_audio_analysis() == []

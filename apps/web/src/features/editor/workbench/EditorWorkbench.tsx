@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import type { OutputVariant, OutputVariantPatch } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
@@ -13,15 +14,38 @@ import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
+import { hasLegacyEditorUiState, readEditorUiState, writeEditorUiState } from "./editorUiState";
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
+import { VariantCompare } from "../variants/VariantCompare";
+import { VariantConflictPanel } from "../variants/VariantConflictPanel";
+import { VariantSelector } from "../variants/VariantSelector";
+import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
+import { VariantServerControls } from "../variants/VariantServerControls";
 
-const storageKey = "videobox.editor-workbench.ui";
-const defaultUi: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 };
-function readUi(): EditorWorkbenchPersistedState { try { const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "null"); return typeof stored === "object" && stored ? { ...defaultUi, ...stored } : defaultUi; } catch { return defaultUi; } }
 export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: number) {
   const pixels = Number(size.inPixels);
   return Number.isFinite(pixels) ? Math.max(minPx, Math.round(pixels)) : fallback;
 }
+
+const activeDrawerStorageKey = "videobox.editor-workbench.active-drawer";
+type ActiveDrawer = "left" | "right" | null;
+function readActiveDrawer(): ActiveDrawer {
+  try {
+    const value = window.localStorage.getItem(activeDrawerStorageKey);
+    return value === "left" || value === "right" ? value : null;
+  } catch {
+    return null;
+  }
+}
+function writeActiveDrawer(value: ActiveDrawer): void {
+  try {
+    if (value) window.localStorage.setItem(activeDrawerStorageKey, value);
+    else window.localStorage.removeItem(activeDrawerStorageKey);
+  } catch {
+    // Drawer visibility is UI-only and best effort.
+  }
+}
+let lastActiveDrawer: ActiveDrawer = null;
 
 type NarrationTrim = Readonly<{ segmentId: string; startSec: number; endSec: number }>;
 type NarrationReorder = Readonly<{
@@ -51,6 +75,11 @@ type EditorWorkbenchProps = Readonly<{
   timelineMutationMessage?: string;
   director?: RightDockDirector;
   requestedSegmentId?: string | null;
+  serverVariants?: readonly OutputVariant[];
+  onVariantMaterialize?: (variant: OutputVariant) => void | Promise<void>;
+  onVariantPatch?: (variant: OutputVariant, patch: OutputVariantPatch) => void | Promise<void>;
+  onVariantCreateHighlight?: () => void | Promise<void>;
+  variantBusy?: boolean;
 }>;
 
 export function EditorWorkbench(props: EditorWorkbenchProps) {
@@ -79,11 +108,21 @@ function EditorWorkbenchInstance({
   timelineMutationMessage,
   director,
   requestedSegmentId = null,
+  serverVariants = [],
+  onVariantMaterialize,
+  onVariantPatch,
+  onVariantCreateHighlight,
+  variantBusy = false,
 }: EditorWorkbenchProps) {
   const viewRouteKey = `${view.projectId}:${view.sessionId}`;
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [availableWorkbenchWidth, setAvailableWorkbenchWidth] = useState(() => window.innerWidth);
-  const [ui, setUi] = useState<EditorWorkbenchPersistedState>(readUi);
+  const [ui, setUi] = useState<EditorWorkbenchPersistedState>(() => {
+    const scoped = readEditorUiState(view.projectId, view.sessionId);
+    const useLegacy = hasLegacyEditorUiState();
+    return { ...scoped, activeDrawer: useLegacy ? scoped.activeDrawer : (lastActiveDrawer ?? readActiveDrawer() ?? scoped.activeDrawer) };
+  });
+  const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
   const [requestedSegmentFocusEpoch, setRequestedSegmentFocusEpoch] = useState(0);
@@ -148,25 +187,14 @@ function EditorWorkbenchInstance({
     return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
   }, []);
   useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify({
-        leftOpen: ui.leftOpen,
-        rightOpen: ui.rightOpen,
-        activeDrawer: ui.activeDrawer,
-        leftSize: ui.leftSize,
-        rightSize: ui.rightSize,
-      }));
-    } catch {
-      // Panel persistence is best effort; storage denial must not block editing.
-    }
-  }, [ui]);
-  useEffect(() => { if (ui.activeDrawer) drawerRef.current?.focus(); }, [ui.activeDrawer]);
-  useEffect(() => {
     if (viewRouteKeyRef.current !== viewRouteKey) {
       viewRouteKeyRef.current = viewRouteKey;
       activeRequestedSegmentKey.current = null;
       setSelectedSegmentId(view.local.selectedSegmentId);
       setPlaybackSec(clampPlaybackSeconds(view.local.seekSec, view.output.durationSec));
+      const scoped = readEditorUiState(view.projectId, view.sessionId);
+      const useLegacy = hasLegacyEditorUiState();
+      setUi({ ...scoped, activeDrawer: useLegacy ? scoped.activeDrawer : (lastActiveDrawer ?? readActiveDrawer() ?? scoped.activeDrawer) });
       setAuditionState({ routeKey: viewRouteKey, request: null });
       assetPreviewRequestId.current += 1;
       setAssetPreviewStates({});
@@ -179,6 +207,12 @@ function EditorWorkbenchInstance({
     setSelectedSegmentId((current) => current && segmentIds.has(current) ? current : segmentIds.has(view.local.selectedSegmentId ?? "") ? view.local.selectedSegmentId : null);
     setPlaybackSec((current) => clampPlaybackSeconds(current, view.output.durationSec));
   }, [view.captions, view.expectedRevision, view.local.selectedSegmentId, view.output.durationSec, view.projectId, view.sessionId, view.tracks, viewRouteKey]);
+  useEffect(() => {
+    if (viewRouteKeyRef.current === viewRouteKey) {
+      writeEditorUiState(view.projectId, view.sessionId, ui);
+    }
+  }, [ui, view.projectId, view.sessionId, viewRouteKey]);
+  useEffect(() => { if (ui.activeDrawer) drawerRef.current?.focus(); }, [ui.activeDrawer]);
   useEffect(() => {
     const normalizedRequestedSegmentId = requestedSegmentId?.trim() || null;
     if (!normalizedRequestedSegmentId) {
@@ -203,8 +237,8 @@ function EditorWorkbenchInstance({
   }, [requestedSegmentId, view.captions, view.output.durationSec, view.sessionId, view.tracks]);
   useEffect(() => { const side = restoreFocusRef.current; if (!ui.activeDrawer && side) { restoreFocusRef.current = null; window.setTimeout(() => (side === "left" ? leftTriggerRef : rightTriggerRef).current?.focus(), 0); } }, [ui.activeDrawer]);
   const layout = resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbenchWidth, persisted: ui });
-  const openDrawer = (side: "left" | "right") => setUi((current) => ({ ...current, activeDrawer: side }));
-  const closeDrawer = () => setUi((current) => ({ ...current, activeDrawer: null }));
+  const openDrawer = (side: "left" | "right") => { lastActiveDrawer = side; writeActiveDrawer(side); setUi((current) => ({ ...current, activeDrawer: side })); };
+  const closeDrawer = () => { lastActiveDrawer = null; writeActiveDrawer(null); setUi((current) => ({ ...current, activeDrawer: null })); };
   const closeAndRestore = () => { restoreFocusRef.current = ui.activeDrawer; closeDrawer(); };
   const selectSegment = (segmentId: string) => setSelectedSegmentId(segmentId);
   const seekPlayback = (seconds: number) => {
@@ -300,15 +334,56 @@ function EditorWorkbenchInstance({
     return mediaKind ? [{ id: clip.clipId, label, url, mediaKind, timelineRange: { startSec: clip.startSec, endSec: clip.endSec } }] : [];
   }));
   const stage = <PreviewStage key={`${view.projectId}:${view.sessionId}`} auditionRequest={auditionRequest} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
-  return <section className="vb-editor-workbench" aria-label="편집 작업판" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
+  const variantMaster = {
+    variantId: "master",
+    label: "마스터" as const,
+    kind: "master" as const,
+    aspectRatio: "16:9" as const,
+    playheadSec: playbackSec,
+    durationSec: view.output.durationSec,
+    safeArea: "표시 안 함",
+    crop: "전체 화면",
+    focalPoint: { x: 0.5, y: 0.5 },
+    captionLayout: "마스터 자막",
+    lockedFields: [],
+    conflicts: [],
+    ownsAudio: true,
+  };
+  const serverVariant = serverVariants.find((variant) => variant.kind === (variantMode === "horizontal" ? "horizontal" : "vertical_full"));
+  const variantPreview = serverVariant
+    ? projectServerVariant({ variant: serverVariant, source: variantMaster })
+    : variantMode === "horizontal"
+      ? projectVariant({ variantId: "horizontal", kind: "horizontal", source: variantMaster })
+      : projectVariant({ variantId: "vertical-full", kind: "vertical_full", source: variantMaster });
+  const showVariantCompare = variantMode !== "master";
+  const masterSegmentIds = Array.from(new Set([
+    ...view.tracks.flatMap((track) => track.clips.map((clip) => clip.segmentId)),
+    ...view.captions.map((caption) => caption.segmentId),
+  ]));
+  const highlightVariant = serverVariants.find((variant) => variant.kind === "vertical_highlight");
+  const resolveConflict = (field: string, decision: "keep_local" | "rebase_master") => {
+    if (!serverVariant || !onVariantPatch) return;
+    void onVariantPatch(serverVariant, { resolve_conflicts: { [field]: decision } });
+  };
+  return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
     <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button><Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</Button></div></header>
-    <div ref={bodyRef} className="vb-editor-workbench__body">
+    <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}
-        <ResizablePanel minSize={layout.previewMinPx} className="vb-editor-workbench__stage-panel"><div className="vb-editor-workbench__preview" data-preview-min-width={layout.previewMinPx}>{stage}</div></ResizablePanel>
+        <ResizablePanel minSize={layout.previewMinPx} className="vb-editor-workbench__stage-panel"><div className="vb-editor-workbench__preview" data-scroll-owner="preview" data-preview-min-width={layout.previewMinPx}>{stage}</div></ResizablePanel>
         {rightVisible && <><ResizableHandle aria-label="오른쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "right")} /><ResizablePanel panelRef={rightPanelRef} defaultSize={`${ui.rightSize}px`} minSize="260px" onResize={(size) => setUi((current) => ({ ...current, rightSize: persistedPanelPixels(size, 260, current.rightSize) }))}>{dock("right")}</ResizablePanel></>}
-      </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
+      </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-scroll-owner="preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
     </div>
+    <section className="vb-editor-variants" aria-label="출력 변형">
+      <div className="vb-editor-variants__header"><div><p className="vb-editor-variants__eyebrow">연결된 출력</p><h2>가로·세로 결과를 한 박자에 비교</h2></div><span>마스터 편집은 하나, 출력은 안전하게 분기</span></div>
+      <VariantSelector selected={variantMode} onSelect={setVariantMode} />
+      {variantMode === "master" ? <p className="vb-editor-variants__master-note">현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.</p> : <>
+        <VariantCompare master={variantMaster} variant={variantPreview} onSeek={seekPlayback} />
+        {serverVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={serverVariant} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onCreateHighlight={onVariantCreateHighlight} /> : null}
+      </>}
+      {showVariantCompare ? <VariantConflictPanel conflicts={variantPreview.conflicts} onKeep={(field) => resolveConflict(field, "keep_local")} onRebase={(field) => resolveConflict(field, "rebase_master")} /> : null}
+      {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} /> : null}
+    </section>
     <TimelineDock
       isSaving={isSavingTimeline}
       mutationMessage={timelineMutationMessage}

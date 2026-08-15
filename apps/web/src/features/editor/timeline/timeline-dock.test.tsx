@@ -134,6 +134,23 @@ function pointer(target: Element, type: string, clientX = 0) {
 }
 
 describe("TimelineDock", () => {
+  it("selects and seeks an independent media placement through the same timeline click", () => {
+    const onSelectSegment = vi.fn();
+    const onPlaybackSeek = vi.fn();
+    const placed = {
+      ...view,
+      tracks: view.tracks.map((track) => track.role === "broll"
+        ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: "broll:b-1" })) }
+        : track),
+    };
+    render(<TimelineDock view={placed} viewportWidthPx={1000} onSelectSegment={onSelectSegment} onPlaybackSeek={onPlaybackSeek} />);
+
+    selectTimelineClip("broll:b-1");
+
+    expect(onSelectSegment).toHaveBeenCalledWith("segment-2");
+    expect(onPlaybackSeek).toHaveBeenCalledWith(5);
+  });
+
   it("commits one frame-snapped placement update for a selected independent lane", () => {
     const onUpdatePlacements = vi.fn();
     const mutable = { ...view, tracks: view.tracks.map((track) => track.role === "broll" ? { ...track, clips: track.clips.map((clip) => ({ ...clip, placementId: "broll:b-1" })) } : track) };
@@ -633,15 +650,15 @@ describe("TimelineDock", () => {
 
 describe("타임라인 상태 문구", () => {
   it("영어 원값 대신 창작자 언어로 최신 여부를 말한다", () => {
-    // 2026-08-05 승인 문서가 못박은 문구다: `stale` 대신 `최신 편집 반영됨`.
+    // `stale`은 원본 timeline provenance이며 현재 session 편집은 이미 반영돼 있다.
     render(<TimelineDock view={{ ...view, source: { status: "current" } } as never} viewportWidthPx={400} />);
-    expect(screen.getByText(/최신 편집 반영됨/)).toBeInTheDocument();
+    expect(screen.getByText(/원본과 편집본 일치/)).toBeInTheDocument();
     expect(screen.queryByText(/current/)).toBeNull();
 
     cleanup();
 
     render(<TimelineDock view={{ ...view, source: { status: "stale" } } as never} viewportWidthPx={400} />);
-    expect(screen.getByText(/편집 반영 전/)).toBeInTheDocument();
+    expect(screen.getByText(/현재 편집본 기준/)).toBeInTheDocument();
     expect(screen.queryByText(/stale/)).toBeNull();
   });
 });

@@ -15,6 +15,60 @@ const firstBrief = {
 };
 
 describe("CreationInterview", () => {
+  it("shows a saved draft resume action and supported file guidance before starting another brief", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(firstBrief);
+    render(<CreationInterview projectId="project_1" />);
+
+    expect(await screen.findByRole("button", { name: "초안 이어서 하기" })).toBeVisible();
+    cleanup();
+    window.localStorage.clear();
+    render(<CreationInterview projectId="project_1" />);
+    expect(screen.getByText(/TXT, MD, SRT/)).toBeVisible();
+    expect(screen.getByLabelText("대본 파일 선택")).toBeVisible();
+  });
+
+  it("clears the previous project's brief before loading a reused route", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    const getBrief = vi.spyOn(api, "getCreationBrief").mockImplementation(async (projectId) => (
+      projectId === "project_1"
+        ? firstBrief
+        : { ...firstBrief, brief_id: "brief_2", project_id: "project_2", script_text: "두 번째 프로젝트 대본" }
+    ));
+    const view = render(<CreationInterview projectId="project_1" />);
+    await screen.findByText("누구에게 보여줄까요?");
+
+    window.localStorage.setItem("videobox.creation-brief.project_2", "brief_2");
+    view.rerender(<CreationInterview projectId="project_2" />);
+    expect(screen.queryByText("누구에게 보여줄까요?")).not.toBeInTheDocument();
+    expect(screen.getByText("새 프로젝트의 기획을 불러오는 중이에요.")).toBeVisible();
+    expect(getBrief).toHaveBeenCalledWith("project_2", "brief_2");
+    await screen.findByText("누구에게 보여줄까요?");
+    expect(screen.queryByText("신제품을 소개합니다.")).not.toBeInTheDocument();
+  });
+
+  it("resets the orientation choice when a reused creation route changes projects", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const ready = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: {} } as never;
+    const readyB = { readiness_id: "readiness_2", brief_id: "brief_2", status: "ready", revision: 1, result: {} } as never;
+    vi.spyOn(api, "getCreationBrief").mockImplementation(async (projectId) => projectId === "project_1"
+      ? approved
+      : { ...approved, brief_id: "brief_2", project_id: "project_2" });
+    vi.spyOn(api, "getDraftReadiness").mockImplementation(async (projectId) => projectId === "project_1" ? ready : readyB);
+    const view = render(<CreationInterview projectId="project_1" />);
+    const orientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
+    fireEvent.click(orientation);
+    expect(orientation).toBeChecked();
+
+    window.localStorage.setItem("videobox.creation-brief.project_2", "brief_2");
+    window.localStorage.setItem("videobox.draft-readiness.project_2", "readiness_2");
+    view.rerender(<CreationInterview projectId="project_2" />);
+    const nextOrientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
+    expect(nextOrientation).not.toBeChecked();
+  });
+
   it("starts a project-scoped Eugene interview from pasted script and saves the resulting brief id for refresh resume", async () => {
     const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue(firstBrief);
     render(<CreationInterview projectId="project_1" />);
@@ -304,6 +358,34 @@ describe("CreationInterview", () => {
     await waitFor(() => expect(retry).toHaveBeenLastCalledWith("project_1", "readiness_b", 4));
     await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다")).not.toBeChecked());
     expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeDisabled();
+  });
+
+  it("surfaces retry and cancel readiness failures instead of leaving an unhandled rejection", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const failed = { readiness_id: "readiness_1", brief_id: "brief_1", status: "failed", revision: 3, result: null } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(failed);
+    vi.spyOn(api, "retryDraftReadiness").mockRejectedValue(new Error("conflict"));
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "다시 준비" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("다시 준비하지 못했습니다");
+  });
+
+  it("surfaces candidate skip failures in the readiness workspace", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const ready = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: { broll_candidates: [{ asset_id: "asset_1", label: "제품 장면", target_range: { start_sec: 0, end_sec: 2 } }] } } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(ready);
+    vi.spyOn(api, "updateDraftReadinessCandidate").mockRejectedValue(new Error("conflict"));
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "제품 장면 건너뛰기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("장면을 건너뛰지 못했습니다");
   });
 
   it("saves each B-roll candidate's chosen seconds with the current readiness revision", async () => {

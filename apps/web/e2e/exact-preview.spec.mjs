@@ -91,6 +91,30 @@ async function openEditor(page, state) {
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
 }
 
+test("a Full HD screen gives the preview more height than a 1440x900 screen, not less", async ({ page }) => {
+  const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
+  const measure = () => page.evaluate(() => {
+    const video = document.querySelector(".vb-preview-stage__media-shell video");
+    if (!video) throw new Error("preview video is missing");
+    return { videoHeight: video.getBoundingClientRect().height };
+  });
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openEditor(page, state);
+  await expect.poll(() => page.locator(".vb-preview-stage__media-shell video").evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+  const medium = await measure();
+
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect.poll(async () => (await measure()).videoHeight).toBeGreaterThan(0);
+  const fullHd = await measure();
+
+  // The 768-1499px block compacts the side panels, so before this guard the
+  // larger screen fell back to the loose base rules and rendered a smaller
+  // preview than the smaller screen did.
+  expect(fullHd.videoHeight).toBeGreaterThanOrEqual(medium.videoHeight);
+  expect(fullHd.videoHeight).toBeGreaterThanOrEqual(260);
+});
+
 test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {
   const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
   await openEditor(page, state);
@@ -103,10 +127,48 @@ test("current exact proxy plays a valid local MP4, requests bytes, and maps a na
   await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
   await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)).toBe(true);
   await expect.poll(() => video.evaluate((node) => node.duration)).toBeGreaterThan(1);
+  const previewGeometry = await page.evaluate(() => {
+    const preview = document.querySelector(".vb-editor-workbench__preview");
+    const media = document.querySelector(".vb-preview-stage__media-shell");
+    const video = document.querySelector(".vb-preview-stage__media-shell video");
+    const box = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, height: rect.height, scrollHeight: node.scrollHeight };
+    };
+    if (!preview || !media || !video) throw new Error("preview geometry nodes are missing");
+    const mediaBox = media.getBoundingClientRect();
+    const videoBox = video.getBoundingClientRect();
+    return {
+      previewClientHeight: preview.clientHeight,
+      previewScrollHeight: preview.scrollHeight,
+      mediaClientHeight: media.clientHeight,
+      videoWidth: videoBox.width,
+      videoHeight: videoBox.height,
+      videoTop: videoBox.top,
+      videoBottom: videoBox.bottom,
+      mediaTop: mediaBox.top,
+      mediaBottom: mediaBox.bottom,
+      workbench: box(".vb-editor-workbench"),
+      toolbar: box(".vb-editor-workbench__toolbar"),
+      body: box(".vb-editor-workbench__body"),
+      variants: box(".vb-editor-variants"),
+      timeline: box(".vb-editor-workbench__timeline"),
+      panels: box(".vb-editor-workbench__panels"),
+      stagePanel: box(".vb-editor-workbench__stage-panel"),
+      stage: box(".vb-preview-stage"),
+    };
+  });
+  expect(previewGeometry.previewScrollHeight).toBeLessThanOrEqual(previewGeometry.previewClientHeight + 1);
+  expect(previewGeometry.mediaClientHeight).toBeGreaterThan(0);
+  expect(previewGeometry.videoWidth).toBeGreaterThan(0);
+  expect(previewGeometry.videoHeight).toBeGreaterThanOrEqual(120);
+  expect(previewGeometry.videoTop).toBeGreaterThanOrEqual(previewGeometry.mediaTop - 1);
+  expect(previewGeometry.videoBottom).toBeLessThanOrEqual(previewGeometry.mediaBottom + 1);
   // A real user gesture calls the component's native HTMLMediaElement.play()
   // path, avoiding an autoplay-policy bypass in the test harness.
   const playbackButton = page.getByRole("button", { name: "재생 또는 일시정지" });
-  await playbackButton.scrollIntoViewIfNeeded();
   await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY)));
   }))).toBeGreaterThanOrEqual(0);
@@ -166,8 +228,8 @@ test("audition replaces the exact player without autoplay and can return to exac
   };
   await openEditor(page, state);
 
-  await page.getByRole("button", { name: "B-roll · segment-1 원본 열기" }).click();
-  const audition = page.getByLabel("B-roll · segment-1 소스 미리보기");
+  await page.getByRole("button", { name: "B-roll · 1번째 장면 원본 열기" }).click();
+  const audition = page.getByLabel("B-roll · 1번째 장면 소스 미리보기");
   await expect(audition).toHaveCount(1);
   await expect(audition).not.toHaveAttribute("autoplay");
   await expect(audition).toHaveJSProperty("autoplay", false);

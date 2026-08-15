@@ -66,11 +66,11 @@ def test_watcher_stays_off_when_the_watch_path_is_explicitly_cleared(tmp_path: P
     assert app.state.media_inbox_watch_config is None
 
 
-def test_enabled_watcher_thread_actually_moves_a_real_file_end_to_end(tmp_path: Path, monkeypatch) -> None:
+def test_enabled_watcher_thread_copy_only_registers_a_real_file_end_to_end(tmp_path: Path, monkeypatch) -> None:
     """Real-runtime check (not just plumbing): starts the app via its actual
     lifespan, drops a real file in the watched folder, and waits for the
-    background thread to move it -- mirrors this session's manual real-Drive
-    run (scripts/run_media_inbox_cycle.py) but through the app startup path."""
+    background thread to copy it through the global ingest service -- mirrors
+    the real Drive-mirror startup path without deleting the cloud source."""
     _clear_media_inbox_watch_environment(monkeypatch)
     watch_dir = tmp_path / "drive-folder"
     watch_dir.mkdir()
@@ -80,16 +80,50 @@ def test_enabled_watcher_thread_actually_moves_a_real_file_end_to_end(tmp_path: 
     monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_PATH", str(watch_dir))
     monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_LIBRARY_ROOT", str(library_dir))
     monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS", "0.05")
-    (watch_dir / "clip.mp4").write_bytes(b"real footage bytes")
+    source = watch_dir / "clip.mp4"
+    source.write_bytes(b"real footage bytes")
 
     app = create_app()
     with TestClient(app):
         deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline and not (library_dir / "clip.mp4").exists():
+        while time.monotonic() < deadline and not list(library_dir.rglob("*.mp4")):
             time.sleep(0.1)
-        assert (library_dir / "clip.mp4").exists()
-        assert (library_dir / "clip.mp4").read_bytes() == b"real footage bytes"
-        assert not (watch_dir / "clip.mp4").exists()
+        managed = list(library_dir.rglob("*.mp4"))
+        assert len(managed) == 1
+        assert managed[0].read_bytes() == b"real footage bytes"
+        assert source.read_bytes() == b"real footage bytes"
+        assert app.state.media_inbox_watch_config.copy_only is True
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not app.state.media_library_store.user_asset_store.list_assets(media_type="broll"):
+            time.sleep(0.05)
+        assert len(app.state.media_library_store.user_asset_store.list_assets(media_type="broll")) == 1
+
+
+def test_watcher_asset_is_previewable_through_global_library_api(tmp_path: Path, monkeypatch) -> None:
+    _clear_media_inbox_watch_environment(monkeypatch)
+    watch_dir = tmp_path / "drive-folder"
+    watch_dir.mkdir()
+    library_dir = tmp_path / "library"
+    monkeypatch.setenv("VIDEOBOX_DATA_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED", "1")
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_PATH", str(watch_dir))
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_LIBRARY_ROOT", str(library_dir))
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS", "0.05")
+    source = watch_dir / "clip.mp4"
+    source.write_bytes(b"watcher bytes")
+
+    app = create_app()
+    with TestClient(app) as client:
+        deadline = time.monotonic() + 10.0
+        assets = []
+        while time.monotonic() < deadline and not assets:
+            assets = app.state.media_library_store.user_asset_store.list_assets(media_type="broll")
+            if not assets:
+                time.sleep(0.1)
+        assert assets
+        preview = client.get(f"/api/library/assets/{assets[0].library_asset_id}/preview")
+        assert preview.status_code == 200
+        assert preview.content == source.read_bytes()
 
 
 def test_music_and_effects_get_their_own_watched_folders(tmp_path: Path, monkeypatch) -> None:
@@ -137,8 +171,6 @@ def test_a_dropped_track_ends_up_searchable_without_anyone_asking(tmp_path: Path
     import wave
 
     from videobox_api import main as api_main
-    from videobox_storage.media_library_store import MediaLibraryStore
-
     _clear_media_inbox_watch_environment(monkeypatch)
     drive_sync = tmp_path / "drive-sync"
     music_watch = drive_sync / "새 음악"
@@ -157,17 +189,18 @@ def test_a_dropped_track_ends_up_searchable_without_anyone_asking(tmp_path: Path
         handle.writeframes(b"\x00\x01" * 8000)
 
     app = api_main.create_app(media_analysis_poll_interval_seconds=0.01)
-    library_store: MediaLibraryStore = app.state.media_library_store
+    user_asset_store = app.state.media_library_store.user_asset_store
     with TestClient(app):
         deadline = time.monotonic() + 20.0
         registered: list = []
         while time.monotonic() < deadline and not registered:
-            registered = library_store.list_assets_needing_audio_analysis()
+            registered = user_asset_store.list_assets(media_type="music")
             if not registered:
                 time.sleep(0.1)
 
-    assert [str(item["library_asset_id"]) for item in registered] == ["owner:music:봄날의 아침.wav"]
-    assert str(registered[0]["media_type"]) == "music"
-    # 원본은 셋이 함께 쓰는 보관함으로 갔고, 감시 폴더에는 기다리는 것만 남는다.
-    assert not dropped.exists()
-    assert (drive_sync / "자산화_완료" / "봄날의 아침.wav").exists()
+    assert len(registered) == 1
+    assert registered[0].media_type.value == "music"
+    managed = app.state.owner_audio_library_root / "music" / registered[0].managed_relative_path
+    assert managed.read_bytes() == dropped.read_bytes()
+    # Copy-only Drive mirror policy keeps the cloud-synced source intact.
+    assert dropped.exists()

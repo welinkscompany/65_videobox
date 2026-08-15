@@ -9,7 +9,7 @@
 // one, so a frontend-only PR can pass CI locally and still break this pin.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Menu, PanelLeftClose, Settings, Video } from "lucide-react";
+import { ClipboardCheck, Download, FilePlus2, Home, Images, MoreHorizontal, PanelLeft, PanelLeftClose, Scissors, Settings, Video } from "lucide-react";
 
 import { api, type HomeSummary, type Project } from "../api";
 import { Button } from "../components/ui/button";
@@ -24,6 +24,7 @@ import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { ConversationCleanup } from "../features/settings/ConversationCleanup";
 import { VoiceTtsSettings } from "../features/settings/VoiceTtsSettings";
 import { HomeYujinChat } from "../features/home/HomeYujinChat";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 
 type ShellSection = WorkspaceSection | "media" | "outputs";
 /** Task 32: archiving used to be a one-way door -- the project left the sidebar
@@ -50,6 +51,8 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
+  const [projectActionError, setProjectActionError] = useState<string | null>(null);
+  const [projectActionBusy, setProjectActionBusy] = useState<string | null>(null);
   // Permanent delete needs two separate confirmations (owner decision,
   // 2026-08-06) -- stage 1 warns it's irreversible, stage 2 asks once more
   // before the actual call. Enforced again server-side (routers/projects.py
@@ -62,12 +65,25 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
     previousForceCollapsed.current = true;
     if (!collapsed) setCollapsed(true);
   } else if (!forceCollapsed) previousForceCollapsed.current = false;
-  const current = projects.find((project) => project.project_id === projectId) ?? projects[0];
-  const nav = [["홈", "home"], ["새 영상 만들기", "create"], ["편집", "editing"], ["검토", "review"], ["자산", "media"], ["출력", "outputs"]] as const;
+  const current = projects.find((project) => project.project_id === projectId);
+  const hasProject = Boolean(projectId && current);
+  const globalNav = [["프로젝트", "/projects", Home], ["내 라이브러리", "/library", Images], ["촬영본 정리", "/footage", Video], ["설정", "/settings/general", Settings]] as const;
+  const stageNav = [["기획", "create", FilePlus2], ["자산", "media", Images], ["편집", "editing", Scissors], ["검토", "review", ClipboardCheck], ["출력", "outputs", Download]] as const;
   const go = (next: string) => { if (window.innerWidth < 768) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); onNavigate(projectId, next as WorkspaceSection); };
   const setJobDialogOpenSafely = (open: boolean) => {
     if (!open && jobRecoveryBusy) return;
     setJobDialogOpen(open);
+  };
+  const runProjectAction = async (key: string, action: () => void | Promise<void>) => {
+    setProjectActionError(null);
+    setProjectActionBusy(key);
+    try {
+      await action();
+    } catch {
+      setProjectActionError("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
+    } finally {
+      setProjectActionBusy(null);
+    }
   };
   useEffect(() => { const restoreMobileTrigger = (event: KeyboardEvent) => { if (event.key === "Escape" && window.innerWidth < 768) queueMicrotask(() => mobileTriggerRef.current?.focus()); }; document.addEventListener("keydown", restoreMobileTrigger); return () => document.removeEventListener("keydown", restoreMobileTrigger); }, []);
   // These two settings used to write to localStorage and change nothing else,
@@ -77,52 +93,54 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   return <SidebarProvider open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
     <div
       className="vb-product-shell"
+      data-vb-desktop-shell
       data-compact={String(display.compact)}
       data-reduced-motion={String(display.reducedMotion)}
     >
     <Sidebar collapsible="icon" className="vb-product-sidebar" aria-label="프로젝트와 화면">
       <SidebarHeader>
-      <div className="vb-shell-brand"><Video aria-hidden="true" /><span>VideoBox</span></div>
-      <div className="vb-project-switcher" aria-label="프로젝트 전환"><p>현재 프로젝트</p>{projects.map((project) => <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
-        <Button variant="ghost" aria-label={project.name} aria-pressed={project.project_id === projectId} onClick={() => onNavigate(project.project_id, "home")}>{project.name}</Button>
-        {onArchiveProject ? (archiveConfirmId === project.project_id ? (
-          <Button variant="outline" aria-label={`${project.name} 보관 확인`} onClick={() => { setArchiveConfirmId(null); void onArchiveProject(project.project_id); }}>보관 확인</Button>
-        ) : (
-          <Button variant="ghost" aria-label={`${project.name} 보관하기`} onClick={() => setArchiveConfirmId(project.project_id)}>보관</Button>
-        )) : null}
-        {onDeleteProjectPermanently ? (
-          deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 2 ? (
-            <span style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
-              <small>한 번 더 확인할게요. 정말 영구 삭제할까요?</small>
-              <Button variant="destructive" aria-label={`${project.name} 영구 삭제`} onClick={() => { setDeleteConfirmStage(null); void onDeleteProjectPermanently(project.project_id); }}>영구 삭제</Button>
-            </span>
-          ) : deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 1 ? (
-            <span style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
-              <small>되돌릴 수 없어요. 계속할까요?</small>
-              <Button variant="outline" aria-label={`${project.name} 삭제 1차 확인`} onClick={() => setDeleteConfirmStage({ projectId: project.project_id, stage: 2 })}>1차 확인</Button>
-            </span>
-          ) : (
-            <Button variant="ghost" aria-label={`${project.name} 완전 삭제`} onClick={() => setDeleteConfirmStage({ projectId: project.project_id, stage: 1 })}>완전 삭제</Button>
-          )
-        ) : null}
+      <div className="vb-shell-brand"><Video aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">VideoBox</span></div>
+      <nav aria-label="전체 메뉴" className="vb-global-nav"><ul>{globalNav.map(([label, href, Icon]) => <li key={href}><a href={href} aria-label={label} onClick={label === "설정" ? (event) => { event.preventDefault(); onOpenSettings(); } : undefined}><Icon aria-hidden="true" /><span className="group-data-[collapsible=icon]:hidden">{label}</span></a></li>)}</ul></nav>
+      {hasProject ? <div className="vb-project-switcher group-data-[collapsible=icon]:hidden" aria-label="프로젝트 전환"><p>현재 프로젝트</p>{projects.map((project) => <div key={project.project_id} className="vb-project-row" data-testid={`project-row-${project.project_id}`}>
+        <Button className="vb-project-select" variant="ghost" aria-label={project.name} aria-pressed={project.project_id === projectId} onClick={() => onNavigate(project.project_id, "home")}>{project.name}</Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button className="vb-project-more" variant="ghost" size="icon" aria-label={`${project.name} 더보기`} title={`${project.name} 더보기`}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {onArchiveProject ? (archiveConfirmId === project.project_id ? (
+              <DropdownMenuItem disabled={projectActionBusy === `archive:${project.project_id}`} onSelect={() => { setArchiveConfirmId(null); void runProjectAction(`archive:${project.project_id}`, () => onArchiveProject(project.project_id)); }}>보관 확인</DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onSelect={(event) => { event.preventDefault(); setArchiveConfirmId(project.project_id); }}>보관하기</DropdownMenuItem>
+            )) : null}
+            {onDeleteProjectPermanently ? <>
+              <DropdownMenuSeparator />
+              {deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 2 ? (
+                <DropdownMenuItem disabled={projectActionBusy === `delete:${project.project_id}`} variant="destructive" onSelect={() => { setDeleteConfirmStage(null); void runProjectAction(`delete:${project.project_id}`, () => onDeleteProjectPermanently(project.project_id)); }}>영구 삭제 · 한 번 더 확인할게요</DropdownMenuItem>
+              ) : deleteConfirmStage?.projectId === project.project_id && deleteConfirmStage.stage === 1 ? (
+                <DropdownMenuItem onSelect={(event) => { event.preventDefault(); setDeleteConfirmStage({ projectId: project.project_id, stage: 2 }); }}>삭제 1차 확인 · 되돌릴 수 없어요</DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem variant="destructive" onSelect={(event) => { event.preventDefault(); setDeleteConfirmStage({ projectId: project.project_id, stage: 1 }); }}>완전 삭제</DropdownMenuItem>
+              )}
+            </> : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>)}
-      {archive ? (archiveOpen ? (
-        <div className="vb-project-archive">
-          <p>보관함</p>
-          {archive.archivedProjects.length === 0 ? <p>보관한 프로젝트가 없어요.</p> : archive.archivedProjects.map((project) => (
-            <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".25rem" }}>
-              <span>{project.name}</span>
-              <Button variant="outline" aria-label={`${project.name} 되돌리기`} onClick={() => void archive.restore(project.project_id)}>되돌리기</Button>
-            </div>
-          ))}
-          <Button variant="ghost" onClick={() => setArchiveOpen(false)}>보관함 닫기</Button>
-        </div>
-      ) : (
-        <Button variant="ghost" onClick={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</Button>
-      )) : null}</div>
-      </SidebarHeader><SidebarContent><nav aria-label="영상 제작" className="vb-product-nav"><SidebarMenu>{nav.map(([label, target]) => <SidebarMenuItem key={target}><SidebarMenuButton isActive={section === target || (target === "review" && section === "timeline")} tooltip={label} onClick={() => go(target)}>{label}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav></SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><Button variant="ghost" onClick={onOpenSettings}><Settings aria-hidden="true" /> <span>설정</span></Button><small>{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label="화면 목록 접기" title="화면 목록 접기" />
+      {archive ? <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" className="vb-project-actions" aria-label="프로젝트 더보기"><MoreHorizontal aria-hidden="true" /><span>더보기</span></Button></DropdownMenuTrigger><DropdownMenuContent align="start">
+        {archiveOpen ? <DropdownMenuItem onSelect={() => setArchiveOpen(false)}>보관함 닫기</DropdownMenuItem> : <DropdownMenuItem onSelect={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</DropdownMenuItem>}
+      </DropdownMenuContent></DropdownMenu> : null}
+      {archive && archiveOpen ? <div className="vb-project-archive">
+        <p>보관함</p>
+        {archive.archivedProjects.length === 0 ? <p>보관한 프로젝트가 없어요.</p> : archive.archivedProjects.map((project) => (
+            <div key={project.project_id} style={{ display: "flex", alignItems: "center", gap: ".5rem" }}>
+            <span>{project.name}</span>
+            <Button variant="outline" disabled={projectActionBusy === `restore:${project.project_id}`} aria-label={`${project.name} 되돌리기`} onClick={() => void runProjectAction(`restore:${project.project_id}`, () => archive.restore(project.project_id))}>되돌리기</Button>
+          </div>
+        ))}
+      </div> : null}{projectActionError ? <p className="vb-project-action-error" role="alert">{projectActionError}</p> : null}</div> : null}
+      </SidebarHeader><SidebarContent>
+        {hasProject ? <nav aria-label="프로젝트 단계" className="vb-product-nav"><SidebarMenu>{stageNav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={target === "create" ? section === "create" || section === "home" : target === "media" ? section === "media" : target === "editing" ? section === "editing" : target === "outputs" ? section === "outputs" : section === "review" || section === "timeline"} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav> : null}
+      </SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label={collapsed ? "작업실 펼치기" : "작업실 접기"} title={collapsed ? "작업실 펼치기" : "작업실 접기"} />
     </Sidebar>
-    <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label="사이드바 접기" onClick={() => setCollapsed((value) => !value)} className="vb-collapse"><PanelLeftClose /></Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog></header><div className="vb-product-content">{children}</div></SidebarInset>
+    <SidebarInset className="vb-product-main"><header className="vb-product-header"><SidebarTrigger ref={mobileTriggerRef} className="vb-mobile-menu" aria-label="메뉴 열기" /><Button variant="ghost" size="icon" aria-label={collapsed ? "사이드바 펼치기" : "사이드바 접기"} onClick={() => setCollapsed((value) => !value)} className="vb-collapse">{collapsed ? <PanelLeft /> : <PanelLeftClose />}</Button><div><p>{current?.name ?? "프로젝트"}</p><strong>{section === "home" ? "홈" : section === "create" ? "새 영상 만들기" : section === "media" ? "자산" : section === "outputs" ? "출력" : section === "settings" ? "설정" : section === "timeline" || section === "review" ? "검토" : "편집"}</strong></div><Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent className="vb-dialog-content" showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog></header><div className="vb-product-content">{children}</div></SidebarInset>
     </div>
   </SidebarProvider>;
 }
@@ -135,24 +153,34 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
   // endpoint that counts server-side. If that call fails the cards fall back to
   // saying nothing about state rather than guessing, and stay clickable.
   const [summary, setSummary] = useState<HomeSummary | null>(null);
+  const [summaryError, setSummaryError] = useState(false);
+  const [summaryRequest, setSummaryRequest] = useState(0);
   useEffect(() => {
     let active = true;
     setSummary(null);
+    setSummaryError(false);
     void api.getHomeSummary(projectId)
       .then((next) => { if (active) setSummary(next); })
-      .catch(() => { /* a home that cannot count still navigates */ });
+      .catch(() => { if (active) setSummaryError(true); });
     return () => { active = false; };
-  }, [projectId]);
-  const draftText = summary === null ? "이어 할 작업을 선택해 편집을 계속하세요."
-    : summary.has_draft ? "이어서 편집할 작업이 있어요." : "아직 시작한 작업이 없어요.";
-  const finishedText = summary === null ? "출력 화면에서 완성한 영상을 확인할 수 있어요."
-    : summary.finished_video_count > 0 ? `완성한 영상이 ${summary.finished_video_count}개 있어요.` : "아직 완성한 영상이 없어요.";
-  const assetText = summary === null ? "대본에 맞는 사진·영상·소리를 추가해 주세요."
-    : summary.asset_gap_count > 0 ? `채울 자리가 ${summary.asset_gap_count}곳 남았어요.` : "필요한 자산이 모두 준비됐어요.";
+  }, [projectId, summaryRequest]);
+  const draftText = summaryError ? "상태 확인 실패" : summary === null ? "상태 확인 중"
+    : summary.has_draft ? "초안 있음" : "초안 없음";
+  const finishedText = summaryError ? "상태 확인 실패" : summary === null ? "상태 확인 중"
+    : `${summary.finished_video_count}개`;
+  const assetText = summaryError ? "상태 확인 실패" : summary === null ? "상태 확인 중"
+    : summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료";
+  const nextTask = summaryError
+    ? { label: "상태 다시 확인", section: "home" as WorkspaceSection, keyword: "상태 확인 실패" }
+    : summary?.has_draft
+    ? { label: "편집 계속하기", section: "editing" as WorkspaceSection, keyword: "초안 있음" }
+    : summary && summary.asset_gap_count > 0
+      ? { label: "자산 준비하기", section: "media" as WorkspaceSection, keyword: `부족 ${summary.asset_gap_count}곳` }
+      : { label: "새 영상 시작하기", section: "create" as WorkspaceSection, keyword: "대본 준비" };
   // The cards are ordered the way the work actually runs: bring footage in,
   // edit it, then take it out. The old order opened with editing, which is
   // the middle of the job.
-  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 장면을 이어서 만들어 볼까요?</h1><p>대본과 자산을 준비하면, 필요한 순서대로 바로 시작할 수 있어요.</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><div className="vb-home-grid"><HomeCard title="촬영본 가져오기" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="작업 중인 초안 계속하기" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="최근 완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
+  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 작업</h1><p>대본 · 자산 · 편집 · 출력</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><section className="vb-home-next" aria-labelledby="home-next-heading"><div><p className="vb-eyebrow">다음 할 일</p><h2 id="home-next-heading">{nextTask.label}</h2><p>{summaryError ? nextTask.keyword : summary === null ? "상태 확인 중" : nextTask.keyword}</p></div><Button variant="outline" onClick={() => summaryError ? setSummaryRequest((value) => value + 1) : onNavigate(projectId, nextTask.section)}>{nextTask.label}</Button><ul aria-label="진행 상황"><li>{summaryError ? "상태 확인 실패" : summary?.has_draft ? "초안 있음" : summary === null ? "상태 확인 중" : "초안 없음"}</li><li>{summaryError ? "상태 확인 실패" : summary ? `자산 ${summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료"}` : "자산 상태 확인 중"}</li><li>{summaryError ? "상태 확인 실패" : summary ? `완성본 ${summary.finished_video_count}개` : "완성본 확인 중"}</li></ul></section><div className="vb-home-grid"><HomeCard title="자산" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="편집" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
 }
 function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
 

@@ -4,12 +4,40 @@ from math import isfinite
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from videobox_domain_models.yujin_memory import YujinMemoryCandidate
 
 
 class CreateProjectRequest(BaseModel):
     name: str = Field(min_length=1)
+
+
+class OutputVariantCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_session_id: str = Field(min_length=1, max_length=256)
+    kind: Literal["vertical_highlight"]
+    variant_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class OutputVariantPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_variant_revision: int = Field(ge=0)
+    patch: dict[str, Any]
+
+
+class OutputVariantRebaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    new_master_revision: int = Field(ge=1)
+    changed_fields: list[str] = Field(default_factory=list, max_length=32)
+
+
+class OutputVariantMaterializeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_master_session_revision: int | None = Field(default=None, ge=1)
 
 
 class CreationBriefCreateRequest(BaseModel):
@@ -519,6 +547,26 @@ class HomeSummaryResponse(BaseModel):
     asset_gap_count: int
 
 
+class WorkspaceNextActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    label: str = Field(min_length=1)
+    href: str = Field(min_length=1)
+
+
+class ProjectWorkspaceSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    project_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    updated_at: str = Field(min_length=1)
+    current_stage: Literal["plan", "assets", "edit", "review", "output"]
+    state: Literal["ready", "attention", "blocked"]
+    thumbnail_url: str | None = None
+    finished_video_count: int = Field(ge=0)
+    next_action: WorkspaceNextActionResponse
+
+
 class JobRecordWithProjectResponse(JobRecordResponse):
     project_name: str
 
@@ -548,6 +596,19 @@ class BuildTimelineRequest(BaseModel):
 
 class OutputJobRequest(BaseModel):
     timeline_job_id: str = Field(min_length=1)
+
+
+class VariantRenderRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    variant_ids: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("variant_ids")
+    @classmethod
+    def variant_ids_are_unique(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized) or len(set(normalized)) != len(normalized):
+            raise ValueError("variant_ids_must_be_unique")
+        return normalized
 
 
 class CreateEditingSessionRequest(BaseModel):
@@ -1174,6 +1235,8 @@ class TimelinePayloadResponse(BaseModel):
     created_at: str | None = None
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
 
 
 class TimelineJobResponse(StartJobResponse):
@@ -1183,6 +1246,8 @@ class TimelineJobResponse(StartJobResponse):
 class ReviewSnapshotResponse(BaseModel):
     project_id: str
     timeline_id: str
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
     review_status: str
     segments: list[SegmentAnalysisRecord]
     applied_recommendations: list[RecommendationItemResponse]
@@ -1205,6 +1270,8 @@ class ReviewApprovalResponse(BaseModel):
     updated_at: str
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
     invalidated_reason: str | None = None
@@ -1272,6 +1339,23 @@ class FinalRenderArtifactResponse(BaseModel):
 
 class FinalRenderJobResponse(StartJobResponse):
     render: FinalRenderArtifactResponse | None = None
+
+
+class VariantRenderItemResponse(BaseModel):
+    variant_id: str
+    variant_kind: str | None = None
+    timeline_id: str | None = None
+    timeline_job_id: str | None = None
+    job_id: str | None = None
+    status: str
+    error_code: str | None = None
+    content_url: str | None = None
+
+
+class VariantRenderBatchResponse(BaseModel):
+    project_id: str
+    status: str
+    items: list[VariantRenderItemResponse]
 
 
 class CapCutDraftExportArtifactResponse(BaseModel):
@@ -1365,6 +1449,86 @@ class SubtitleArtifactResponse(BaseModel):
 
 class SubtitleJobResponse(StartJobResponse):
     subtitle: SubtitleArtifactResponse
+
+
+class FootageProposalCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    library_asset_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+    analysis: dict[str, Any] | None = None
+
+
+class YujinFootageInterpretRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    instruction: str = Field(min_length=1, max_length=2_048)
+    response: dict[str, Any] | str | None = None
+
+
+class FootageProposalEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: Literal["move_boundary", "split", "merge", "exclude", "confirm"]
+    expected_revision: int = Field(ge=1)
+    segment_id: str | None = Field(default=None, min_length=1)
+    segment_ids: list[str] = Field(default_factory=list)
+    boundary_sec: float | None = None
+    split_sec: float | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class FootageRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+
+
+class FootageApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class VirtualSequenceItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_segment_id: str = Field(min_length=1)
+    source_id: str | None = Field(default=None, min_length=1)
+    item_order: int = Field(ge=1)
+    start_sec: float | None = None
+    end_sec: float | None = None
+
+
+class VirtualSequenceCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_id: str = Field(min_length=1)
+    name: str = ""
+    items: list[VirtualSequenceItemRequest] = Field(min_length=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class VirtualSequenceReorderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+    item_ids: list[str] = Field(min_length=1)
+
+
+class VirtualSequenceApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class FootageDerivativeRenderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_kind: Literal["proposal", "sequence"]
+    source_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
 
 
 PartialRegenerationJobResponse.model_rebuild()

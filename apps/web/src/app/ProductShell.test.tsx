@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
@@ -15,6 +15,71 @@ const projects = [
 ];
 
 describe("product shell", () => {
+  it("separates the four global destinations from the five project stages", () => {
+    const view = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
+
+    const global = screen.getByRole("navigation", { name: "전체 메뉴" });
+    expect(within(global).getAllByRole("link")).toHaveLength(4);
+    for (const label of ["프로젝트", "내 라이브러리", "촬영본 정리", "설정"]) {
+      expect(within(global).getByRole("link", { name: label })).toBeInTheDocument();
+    }
+    const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
+    expect(within(stages).getAllByRole("button")).toHaveLength(5);
+    for (const label of ["기획", "자산", "편집", "검토", "출력"]) {
+      expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(view.container.querySelectorAll("main")).toHaveLength(1);
+  });
+
+  it("does not render project stages when no project is open", () => {
+    render(<ProductShell projectId="" projects={[]} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
+
+    expect(screen.getByRole("navigation", { name: "전체 메뉴" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "프로젝트 단계" })).not.toBeInTheDocument();
+  });
+
+  it("keeps dashboard copy in creator language", () => {
+    const { container } = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>영상</p></ProductShell>);
+    const copy = container.textContent ?? "";
+    for (const prohibited of ["provider", "runtime", "fallback", "loopback", "API key", "model", "context", "revision", "pipeline", "job"]) {
+      expect(copy.toLowerCase()).not.toContain(prohibited.toLowerCase());
+    }
+  });
+
+  it("gives primary navigation icons and keeps project actions behind one more menu", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+
+    const navigation = await screen.findByRole("navigation", { name: "프로젝트 단계" });
+    const navButtons = within(navigation).getAllByRole("button");
+    expect(navButtons).toHaveLength(5);
+    for (const label of ["기획", "자산", "편집", "검토", "출력"]) {
+      const button = within(navigation).getByRole("button", { name: label });
+      expect(button.querySelector("svg")).toBeTruthy();
+      expect(button.querySelector(".vb-nav-label")).toHaveTextContent(label);
+    }
+
+    const picker = screen.getByLabelText("프로젝트 전환");
+    const projectRow = picker.querySelector('[data-testid="project-row-first"]');
+    expect(projectRow).toBeTruthy();
+    expect(within(projectRow as HTMLElement).getAllByRole("button")).toHaveLength(2);
+    expect(within(projectRow as HTMLElement).getByRole("button", { name: "첫 번째 영상 더보기" })).toBeInTheDocument();
+    expect(within(projectRow as HTMLElement).queryByRole("button", { name: /보관|삭제/ })).not.toBeInTheDocument();
+  });
+
+  it("provides a readable icon-only name when the sidebar is collapsed", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
+    fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
+
+    const navigation = screen.getByRole("navigation", { name: "프로젝트 단계" });
+    const plan = within(navigation).getByRole("button", { name: "기획" });
+    expect(plan).toHaveAttribute("aria-label", "기획");
+    expect(plan.querySelector(".vb-nav-label")).toHaveClass("group-data-[collapsible=icon]:hidden");
+  });
   it("opens the current-project recovery surface only when the user asks for job status", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const getYujinStatus = vi.spyOn(api, "getHermesYujinStatus").mockResolvedValue({
@@ -134,7 +199,7 @@ describe("product shell", () => {
     await screen.findByRole("region", { name: "편집 작업판" });
     const sidebar = document.querySelector('[data-slot="sidebar"]');
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
+    fireEvent.click(screen.getByRole("button", { name: "사이드바 펼치기" }));
     expect(sidebar).toHaveAttribute("data-state", "expanded");
 
     await router.navigate({ to: "/projects/first/home" });
@@ -153,7 +218,8 @@ describe("product shell", () => {
 
     await screen.findByTestId("media-workspace-page");
 
-    expect(screen.getAllByRole("button", { name: "새 영상 만들기" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "자산" })).toBeInTheDocument();
+    expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 
   it("shows creator navigation, a project switcher, and an action-only home", async () => {
@@ -161,10 +227,11 @@ describe("product shell", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
 
-    await screen.findByRole("navigation", { name: "영상 제작" });
-    expect(screen.getAllByRole("button", { name: "새 영상 만들기" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("작업 중인 초안 계속하기")).toBeTruthy();
-    expect(screen.getByText("최근 완성본")).toBeTruthy();
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
+    expect(screen.getAllByRole("link", { name: "내 라이브러리" })).toHaveLength(1);
+    const home = screen.getByTestId("product-home");
+    expect(within(home).getByText("편집")).toBeTruthy();
+    expect(within(home).getByText("완성본")).toBeTruthy();
     expect(screen.queryByText(/provider|job metric/i)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "두 번째 영상" }));
@@ -178,11 +245,12 @@ describe("product shell", () => {
     const archiveProject = vi.spyOn(api, "archiveProject").mockResolvedValue({ ...projects[1], status: "archived" });
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
-    await screen.findByRole("navigation", { name: "영상 제작" });
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관하기" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관하기" }));
     expect(archiveProject).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관 확인" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관 확인" }));
 
     await waitFor(() => expect(archiveProject).toHaveBeenCalledWith("second"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
@@ -195,20 +263,33 @@ describe("product shell", () => {
     const deleteProjectPermanently = vi.spyOn(api, "deleteProjectPermanently").mockResolvedValue(undefined);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
-    await screen.findByRole("navigation", { name: "영상 제작" });
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 완전 삭제" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "완전 삭제" }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
     expect(screen.getByText(/되돌릴 수 없어요/)).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 삭제 1차 확인" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /삭제 1차 확인/ }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
     expect(screen.getByText(/한 번 더 확인/)).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 영구 삭제" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /영구 삭제/ }));
 
     await waitFor(() => expect(deleteProjectPermanently).toHaveBeenCalledWith("second"));
     await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
+  });
+
+  it("shows a retryable error when a project action fails", async () => {
+    const onArchiveProject = vi.fn().mockRejectedValue(new Error("network down"));
+    render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()} onArchiveProject={onArchiveProject}><p>본문</p></ProductShell>);
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "두 번째 영상 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관하기" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관 확인" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
+    expect(onArchiveProject).toHaveBeenCalledWith("second");
   });
 
   it("persists a working appearance setting and only exposes local privacy choices", async () => {
@@ -294,12 +375,33 @@ describe("archived projects", () => {
       </ProductShell>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "프로젝트 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관함 보기" }));
     expect(onLoadArchivedProjects).toHaveBeenCalled();
     expect(await screen.findByText("보관한 프로젝트")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "보관한 프로젝트 되돌리기" }));
     expect(onRestoreProject).toHaveBeenCalledWith("project-b");
+  });
+
+  it("shows a retryable error when restoring an archived project fails", async () => {
+    const onRestoreProject = vi.fn().mockRejectedValue(new Error("network down"));
+    render(
+      <ProductShell
+        projectId="project-a"
+        projects={[{ project_id: "project-a", name: "살아있는 프로젝트", status: "draft" } as never]}
+        archive={{ archivedProjects: [{ project_id: "project-b", name: "보관한 프로젝트", status: "archived" } as never], load: vi.fn(), restore: onRestoreProject }}
+        section="home"
+        onNavigate={vi.fn()}
+        onOpenSettings={vi.fn()}
+      >
+        <p>본문</p>
+      </ProductShell>,
+    );
+    fireEvent.pointerDown(screen.getByRole("button", { name: "프로젝트 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관함 보기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "보관한 프로젝트 되돌리기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
   });
 
   it("says so when the archive is empty instead of showing nothing", async () => {
@@ -316,7 +418,8 @@ describe("archived projects", () => {
       </ProductShell>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "프로젝트 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "보관함 보기" }));
     expect(await screen.findByText("보관한 프로젝트가 없어요.")).toBeVisible();
   });
 });
@@ -349,9 +452,9 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByText("완성한 영상이 3개 있어요.")).toBeVisible();
-    expect(screen.getByText("이어서 편집할 작업이 있어요.")).toBeVisible();
-    expect(screen.getByText("채울 자리가 2곳 남았어요.")).toBeVisible();
+    expect(await screen.findByText("3개")).toBeVisible();
+    expect(screen.getAllByText("초안 있음").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("부족 2곳").length).toBeGreaterThan(0);
     expect(summary).toHaveBeenCalledTimes(1);
     expect(listJobs).not.toHaveBeenCalled();
   });
@@ -363,9 +466,9 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByText("아직 완성한 영상이 없어요.")).toBeVisible();
-    expect(screen.getByText("아직 시작한 작업이 없어요.")).toBeVisible();
-    expect(screen.getByText("필요한 자산이 모두 준비됐어요.")).toBeVisible();
+    expect(await screen.findByText("0개")).toBeVisible();
+    expect(screen.getAllByText("초안 없음").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("준비 완료").length).toBeGreaterThan(0);
   });
 
   it("keeps the cards usable when the summary cannot be read", async () => {
@@ -377,6 +480,9 @@ describe("home dashboard", () => {
 
     expect(await screen.findByRole("button", { name: "출력 확인" })).toBeVisible();
     expect(screen.queryByText("아직 완성한 영상이 없어요.")).toBeNull();
+    expect(screen.getByRole("heading", { name: "상태 다시 확인" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
+    expect(api.getHomeSummary).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -467,7 +573,7 @@ describe("사이드바 손잡이", () => {
       </ProductShell>,
     );
 
-    expect(screen.getByRole("button", { name: "화면 목록 접기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "작업실 접기" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Toggle Sidebar/i })).toBeNull();
   });
 });

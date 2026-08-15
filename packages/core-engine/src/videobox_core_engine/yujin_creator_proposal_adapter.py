@@ -69,6 +69,30 @@ _BROLL_SOURCE_KINDS = frozenset({"raw_video", "broll_video"})
 _ACTIONABLE_B4_KINDS = frozenset({"caption", "voice", "overlay"})
 
 
+def variant_patch_from_yujin_candidate(candidate: DirectorCandidate) -> dict[str, object]:
+    """Translate one validated Yujin render-only operation to a pure variant patch."""
+
+    operation = candidate.controls
+    if operation.get("kind") != "output_variant":
+        raise ValueError("candidate_is_not_output_variant")
+    parameters = operation.get("parameters")
+    if not isinstance(parameters, Mapping):
+        raise ValueError("variant_parameters_missing")
+    action = parameters.get("action")
+    field_by_action = {
+        "set_crop": "crop",
+        "set_focal": "focal",
+        "set_caption_layout": "caption",
+        "set_safe_area": "safe_area",
+        "correct_audio": "audio",
+    }
+    field = field_by_action.get(action)
+    if field is None:
+        raise ValueError("variant_action_forbidden")
+    values = {key: value for key, value in parameters.items() if key != "action"}
+    return {"overrides": {field: values}}
+
+
 def parse_and_project_yujin_creator_output(
     raw_text: str,
     context: YujinCreatorContext,
@@ -200,6 +224,23 @@ def activate_yujin_media_projection(
                 segments_by_id=segments_by_id,
             )
         )
+        if candidate.media_type == "output_variant" and _is_actionable_variant_operation(
+            operation=operation,
+            context=context,
+        ):
+            replacement = replace(
+                candidate,
+                availability="actionable",
+                review_status="approved",
+                canonical_metadata={
+                    **dict(candidate.canonical_metadata),
+                    "yujin_actionable_variant": True,
+                    "variant_id": context.variant_id,
+                    "base_variant_revision": context.variant_revision,
+                    "variant_kind": context.variant_kind,
+                    "requires_materialization": False,
+                },
+            )
         activated.append(replacement)
         if replacement.availability == "actionable":
             actionable_count += 1
@@ -432,6 +473,21 @@ def _attest_b4_candidate(
         media_revision=media_revision,
         canonical_metadata=metadata,
     )
+
+
+def _is_actionable_variant_operation(
+    *,
+    context: YujinCreatorContext,
+    operation: object,
+) -> bool:
+    if not isinstance(operation, Mapping) or operation.get("kind") != "output_variant":
+        return False
+    target = operation.get("target")
+    if not isinstance(target, Mapping) or target.get("variant_id") != context.variant_id:
+        return False
+    if context.variant_id is None or context.variant_revision is None:
+        return False
+    return True
 
 
 def _attest_media_candidate(
@@ -797,10 +853,19 @@ def _project(
             controls=operation_data,
             expected_content_sha256=None,
             media_revision=source.base_revision,
-            canonical_metadata={
-                "schema_version": response.schema_version,
-                "proposal_kind": operation.kind,
-            },
+                canonical_metadata={
+                    "schema_version": response.schema_version,
+                    "proposal_kind": operation.kind,
+                    **(
+                        {
+                            "variant_id": source.variant_id,
+                            "base_variant_revision": source.base_variant_revision,
+                            "variant_kind": context.variant_kind,
+                        }
+                        if operation.kind == "output_variant"
+                        else {}
+                    ),
+                },
         )
         )
     target_segments = tuple(
@@ -824,6 +889,9 @@ def _project(
             "proposal_mode": "candidate_only",
             "title": source.title,
             "rationale": source.rationale,
+            "variant_id": source.variant_id,
+            "base_variant_revision": source.base_variant_revision,
+            "variant_kind": context.variant_kind,
             "operations": [
                 operation.model_dump(mode="json", exclude={"operation_id"})
                 for operation in source.operations

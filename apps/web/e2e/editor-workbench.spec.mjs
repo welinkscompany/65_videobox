@@ -65,12 +65,29 @@ const yujinCaptionProposal = {
     warning_provenance: [],
   }],
 };
+const outputVariant = {
+  variant_id: "vertical-full",
+  kind: "vertical_full",
+  source_session_id: "editor-workbench-e2e",
+  source_session_revision: 7,
+  variant_revision: 1,
+  overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+  locks: [],
+  conflicts: [],
+  selected_segment_ids: null,
+  master_segment_ids: ["segment-1"],
+};
+const horizontalVariant = { ...outputVariant, variant_id: "horizontal", kind: "horizontal" };
 
 test.beforeEach(async ({ page }) => {
   await installFixedClock(page);
   await page.route(
     "**/api/projects/local-draft/editing-sessions/editor-workbench-e2e",
     (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(editingSession) }),
+  );
+  await page.route(
+    "**/api/projects/local-draft/output-variants?session_id=editor-workbench-e2e",
+    (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ variants: [horizontalVariant, outputVariant] }) }),
   );
 });
 
@@ -88,7 +105,7 @@ for (const [width, height] of snapshots) test(`editor workbench snapshot ${width
   await expect(page.locator("audio, video")).toHaveCount(0);
   const expectedDensity = width >= 1600 ? "desktop-both" : width >= 1280 ? "desktop-single" : "drawer";
   await expect(workbench).toHaveAttribute("data-editor-density", expectedDensity);
-  await expect(page.getByRole("button", { name: "clip-1 클립 선택" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeVisible();
   const previewBox = await previewSlot.boundingBox();
   expect(previewBox?.width).toBeGreaterThanOrEqual(width >= 1600 ? 720 : width >= 1280 ? 640 : 0);
   await waitForStableCapture(page);
@@ -151,6 +168,61 @@ test("narrow drawer traps focus and returns it to its trigger", async ({ page })
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
   await expect(trigger).toBeFocused();
+});
+
+test("server-backed output variants keep revision lineage through materialize, lock, and highlight order", async ({ page }) => {
+  let currentVariant = structuredClone(outputVariant);
+  let highlightVariant = null;
+  const patchBodies = [];
+  const materializations = [];
+  await page.route("**/api/projects/local-draft/output-variants", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      highlightVariant = { ...currentVariant, variant_id: "vertical-highlight", kind: "vertical_highlight", variant_revision: 1, selected_segment_ids: ["segment-1"] };
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ variant: highlightVariant }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ variants: highlightVariant ? [horizontalVariant, currentVariant, highlightVariant] : [horizontalVariant, currentVariant] }) });
+  });
+  await page.route("**/api/projects/local-draft/output-variants/**", async (route) => {
+    const request = route.request();
+    const url = request.url();
+    if (request.method() === "PATCH") {
+      const body = request.postDataJSON();
+      patchBodies.push(body);
+      currentVariant = { ...currentVariant, variant_revision: currentVariant.variant_revision + 1, overrides: { ...currentVariant.overrides, ...(body.patch.overrides ?? {}) }, locks: body.patch.lock_fields ? body.patch.lock_fields.map((field) => ({ field, base_master_revision: currentVariant.source_session_revision })) : currentVariant.locks, selected_segment_ids: body.patch.selected_segment_ids ?? currentVariant.selected_segment_ids };
+      if (highlightVariant && url.endsWith("vertical-highlight")) highlightVariant = { ...highlightVariant, variant_revision: highlightVariant.variant_revision + 1, selected_segment_ids: body.patch.selected_segment_ids ?? highlightVariant.selected_segment_ids };
+      const responseVariant = url.endsWith("vertical-highlight") ? highlightVariant : currentVariant;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ variant: responseVariant }) });
+      return;
+    }
+    if (request.method() === "POST" && url.endsWith("/materialize")) {
+      materializations.push(request.postDataJSON());
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ materialization: { timeline_id: "timeline-vertical-1", source_session_id: "editor-workbench-e2e", source_session_revision: currentVariant.source_session_revision, source_variant_id: currentVariant.variant_id, source_variant_revision: currentVariant.variant_revision } }) });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ variant: currentVariant }) });
+  });
+  await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: "local-draft", name: "편집 작업판", status: "active", root_storage_uri: "local://editor-workbench" }] }) }));
+  await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
+  await page.getByRole("tab", { name: "세로" }).click();
+  await expect(page.getByText("서버 변형 버전 1")).toBeVisible();
+  await page.getByRole("button", { name: "크롭 저장" }).click();
+  await expect.poll(() => patchBodies.length).toBe(1);
+  await expect(page.getByText("서버 변형 버전 2")).toBeVisible();
+  await page.getByRole("button", { name: "크롭·자막 잠금" }).click();
+  await expect.poll(() => patchBodies.length).toBe(2);
+  await expect(page.getByText("출력 변형을 저장했어요.")).toBeVisible();
+  await expect(page.getByText("서버 변형 버전 3")).toBeVisible();
+  await page.getByRole("button", { name: "세로 변형 준비" }).click();
+  await expect.poll(() => materializations.length).toBe(1);
+  await page.getByRole("button", { name: "하이라이트 변형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "하이라이트 순서 저장" })).toBeVisible();
+  await page.getByRole("button", { name: "하이라이트 순서 저장" }).click();
+  await expect.poll(() => patchBodies.length).toBe(3);
+  expect(materializations[0]).toEqual({ expected_master_session_revision: 7 });
 });
 
 test("Yujin applies one persisted caption only after explicit selection and preserves route state with output POST zero", async ({ page }) => {

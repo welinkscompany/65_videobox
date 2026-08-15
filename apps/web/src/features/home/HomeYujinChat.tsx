@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
+import { YujinStarters } from "../yujin/YujinStarters";
 
 type Turn = { id: string; role: "user" | "assistant"; text: string };
 
@@ -22,6 +23,7 @@ export function HomeYujinChat({ projectId }: { projectId: string }) {
   const [turns, setTurns] = useState<readonly Turn[]>([]);
   const [sending, setSending] = useState(false);
   const conversationId = useRef<string | null>(null);
+  const composerContainerRef = useRef<HTMLDivElement>(null);
   // Switching project while Yujin is still answering must not drop that answer
   // into the new project -- the owner would read it as advice about footage it
   // never saw. Every send captures the epoch it started in.
@@ -91,7 +93,7 @@ export function HomeYujinChat({ projectId }: { projectId: string }) {
     <section className="vb-home-chat" aria-label="유진과 이야기하기">
       <h2>유진에게 물어보기</h2>
       {sessionId === null ? (
-        <p>영상을 하나 만들면 유진과 이야기할 수 있어요.</p>
+        <p>유진 대화 · 편집 필요</p>
       ) : (
         <>
           <div className="vb-home-chat-history">
@@ -103,16 +105,26 @@ export function HomeYujinChat({ projectId }: { projectId: string }) {
                   <p><strong>{turn.role === "user" ? "나" : "유진"}</strong> {turn.text}</p>
                 </article>
               ))
-              : <p>편집을 시작하기 전에 무엇이든 물어보세요.</p>}
+              : <p>질문 입력</p>}
           </div>
-          <label htmlFor="vb-home-yujin">유진에게 물어보기</label>
-          <Textarea
-            id="vb-home-yujin"
-            value={draft}
+          {!turns.length ? <YujinStarters
+            context={{ surface: "plan", selection: "none" }}
             disabled={sending}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="예: 오늘 찍은 영상으로 뭘 만들면 좋을까?"
-          />
+            onSelect={(starter) => {
+              setDraft(starter.label);
+              composerContainerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+            }}
+          /> : null}
+          <label htmlFor="vb-home-yujin">유진에게 물어보기</label>
+          <div ref={composerContainerRef}>
+            <Textarea
+              id="vb-home-yujin"
+              value={draft}
+              disabled={sending}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="예: 오늘 찍은 영상으로 뭘 만들면 좋을까?"
+            />
+          </div>
           <Button type="button" disabled={sending} onClick={() => void send()}>
             {sending ? "답 기다리는 중" : "보내기"}
           </Button>

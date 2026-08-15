@@ -15,6 +15,9 @@ from videobox_core_engine.director_proposal_service import (
 )
 from videobox_core_engine.yujin_local_conversation import YujinLocalConversationService
 from videobox_core_engine.director_proposals import proposal_to_payload
+from videobox_core_engine.yujin_creator_proposal_adapter import variant_patch_from_yujin_candidate
+from videobox_core_engine.output_variants import apply_variant_patch
+from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.local_project_store import EditingSessionRevisionConflict, sha256_file
@@ -429,6 +432,37 @@ def build_director_proposals_router(
             selected = [candidates_by_id[item] for item in body.candidate_ids]
             for candidate in selected:
                 require_actionable_yujin_candidate(proposal, candidate)
+            if is_yujin_variant_proposal(proposal):
+                if len(selected) < 1:
+                    raise ValueError("variant_candidate_required")
+                variant_id = str(proposal.diff.get("variant_id") or "")
+                expected_variant_revision = int(proposal.diff.get("base_variant_revision") or 0)
+                current = OutputVariant.model_validate(
+                    store.get_output_variant(project_id=project_id, variant_id=variant_id)
+                )
+                if (
+                    current.source_session_id != proposal.source_session_id
+                    or current.source_session_revision != proposal.base_session_revision
+                    or current.variant_revision != expected_variant_revision
+                ):
+                    raise HTTPException(status_code=409, detail="stale_variant_proposal")
+                merged_overrides: dict[str, object] = {}
+                for candidate in selected:
+                    candidate_patch = variant_patch_from_yujin_candidate(candidate)
+                    merged_overrides.update(dict(candidate_patch["overrides"]))
+                updated = apply_variant_patch(
+                    current,
+                    {"overrides": merged_overrides},
+                    expected_variant_revision=expected_variant_revision,
+                )
+                variant = store.apply_director_variant_proposal_transaction(
+                    project_id=project_id,
+                    proposal_id=proposal_id,
+                    variant_id=variant_id,
+                    expected_variant_revision=expected_variant_revision,
+                    variant=updated,
+                )
+                return {"proposal_id": proposal_id, "status": "applied", "variant": variant}
             staged, materialized = materializer.stage_batch(project_id=project_id, candidates=selected)
             session = store.get_editing_session(project_id=project_id, session_id=proposal.source_session_id)
             if int(session.get("session_revision") or 1) != body.expected_revision:
@@ -481,10 +515,19 @@ def require_actionable_yujin_candidate(proposal, candidate) -> None:
     }:
         return
     if not is_actionable_yujin_media_candidate(candidate):
+        if is_yujin_variant_proposal(proposal) and (
+            candidate.media_type == "output_variant"
+            and candidate.availability == "actionable"
+            and candidate.review_status == "approved"
+            and candidate.canonical_metadata.get("yujin_actionable_variant") is True
+        ):
+            return
         raise HTTPException(status_code=422, detail="candidate_unavailable")
 
 
 def reject_yujin_direct_apply(proposal) -> None:
+    if is_yujin_variant_proposal(proposal):
+        return
     if proposal.diff.get("proposal_mode") in {
         "yujin_actionable_media_v1",
         "yujin_actionable_v1",
@@ -493,6 +536,14 @@ def reject_yujin_direct_apply(proposal) -> None:
             status_code=422,
             detail="yujin_direct_apply_forbidden",
         )
+
+
+def is_yujin_variant_proposal(proposal) -> bool:
+    return (
+        proposal.diff.get("proposal_mode") in {"yujin_actionable_v1", "yujin_actionable_media_v1"}
+        and proposal.diff.get("variant_id") is not None
+        and any(candidate.media_type == "output_variant" for candidate in proposal.candidates)
+    )
 
 
 def require_current_yujin_source(*, store, project_id, proposal, candidate) -> None:

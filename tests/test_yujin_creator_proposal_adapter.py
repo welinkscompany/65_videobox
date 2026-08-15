@@ -86,6 +86,81 @@ def _raw(*, reply_text: str = "산책 영상을 추천합니다.") -> str:
     )
 
 
+def _variant_raw() -> str:
+    machine_payload = _raw().split("```videobox-yujin-response\n", 1)[1]
+    payload = json.loads(machine_payload.rsplit("\n```", 1)[0])
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "title": "세로 변형 화면 보정",
+            "operations": [
+                {
+                    "operation_id": "variant-crop",
+                    "kind": "output_variant",
+                    "target": {
+                        "variant_id": "variant-vertical",
+                        "track_id": "output-variant",
+                    },
+                    "parameters": {
+                        "action": "set_crop",
+                        "x": 0.1,
+                        "y": 0.0,
+                        "width": 0.8,
+                        "height": 1.0,
+                    },
+                    "requires_materialization": False,
+                    "preview_summary": "세로 변형 crop 미리보기",
+                }
+            ],
+        }
+    )
+    payload["reply_text"] = "세로 변형을 제안합니다."
+    return (
+        "세로 변형을 제안합니다.\n"
+        "```videobox-yujin-response\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+
+
+def test_variant_projection_preserves_variant_lineage_in_candidate_dto() -> None:
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        parse_and_project_yujin_creator_output,
+    )
+
+    context = _context()
+    context = YujinCreatorContext.model_validate(
+        {
+            **context.model_dump(mode="python"),
+            "current_surface": "output",
+            "selection_kind": "variant",
+            "master_session_id": "session-1",
+            "master_session_revision": 7,
+            "variant_id": "variant-vertical",
+            "variant_kind": "vertical_highlight",
+            "variant_revision": 4,
+            "supported_controls": (
+                {"kind": "output_variant", "mode": "recommendation_only"},
+            ),
+        }
+    )
+
+    result = parse_and_project_yujin_creator_output(
+        _variant_raw(),
+        context,
+        revision=5,
+        trusted_project_id="project-1",
+        trusted_run_id="run-variant",
+    )
+
+    assert result.validation_outcome == "valid"
+    assert result.proposal is not None
+    assert result.proposal.diff["variant_id"] == "variant-vertical"
+    assert result.proposal.diff["base_variant_revision"] == 4
+    assert result.proposal.candidates[0].media_type == "output_variant"
+
+
 def test_exact_trailing_frame_projects_existing_candidate_only_dto() -> None:
     from videobox_core_engine.yujin_creator_proposal_adapter import (
         derive_yujin_persisted_proposal_id,

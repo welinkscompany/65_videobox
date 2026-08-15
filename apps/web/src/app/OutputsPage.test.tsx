@@ -1687,6 +1687,34 @@ describe("OutputsPage", () => {
     expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
   });
 
+  it("constrains a playable final video to its output card", async () => {
+    stubCanonicalSubtitleApi({ reviewStatus: "approved", jobs: [activeTimelineJob, { ...finalJob, input_ref: "timeline-current" }] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: finalJob.job_id, status: "succeeded", render: {
+      export_id: "final-current", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4", status: "succeeded", is_current: true,
+      source_session_id: "session-a", source_session_revision: 7,
+      },
+    });
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    expect(await screen.findByLabelText("완성본 재생")).toHaveClass("vb-output-video");
+  });
+
+  it("shows an ordered readiness checklist with a resolving action when output is blocked", async () => {
+    stubReadOnlyOutputApi();
+    const onOpenEditor = vi.fn();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={onOpenEditor} />);
+
+    const checklist = await screen.findByRole("region", { name: "출력 준비 체크리스트" });
+    expect(checklist).toBeVisible();
+    expect(screen.getByRole("list", { name: "출력 준비 단계" })).toBeVisible();
+    expect(screen.getByText("편집본을 먼저 준비해 주세요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "편집 화면 열기" }));
+    expect(onOpenEditor).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "자막 만들기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "완성본 만들기" })).toBeDisabled();
+  });
+
   it("fails closed when the active session lookup fails", async () => {
     stubReadOnlyOutputApi();
     vi.spyOn(api, "getLatestEditingSession").mockRejectedValue(new Error("offline"));
