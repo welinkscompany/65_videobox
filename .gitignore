@@ -36,3 +36,6 @@ cache/
 
 # Playwright is invoked from the repository root by the web package script.
 /test-results/
+# Browser tooling drops console logs here; owner-ready reads an untracked file
+# as an unexplained working-tree change and blocks on it.
+/.playwright-cli/
