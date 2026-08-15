@@ -120,9 +120,9 @@ Full HD 역전(`5f968ee8f`), "길이 확인 중" 거짓 문구(`f3b93de22`), foo
 - Modify: `apps/web/src/app/ProductShell.tsx`, `apps/web/src/styles/product-shell.css`
 - Test: 기존 ProductShell 테스트 + `footage-design-system.test.ts` 패턴의 CSS 계약 테스트
 
-- [ ] RED: 세 구획이 구분된 landmark/heading을 갖고, 링크 대상은 하나도 바뀌지 않음을 고정한다.
-- [ ] 실제 브라우저: 접힘(icon) 모드 포함 두 상태 확인, 키보드 순회.
-- [ ] 커밋 → 배포 → 확인.
+- [x] RED: 세 구획이 구분된 landmark/heading을 갖고, 링크 대상은 하나도 바뀌지 않음을 고정한다.
+- [x] 실제 브라우저: 접힘(icon) 모드 포함 두 상태 확인, 키보드 순회.
+- [x] 커밋 → 배포 → 확인.
 
 **롤백:** revert. 위험: 낮음.
 
@@ -250,5 +250,12 @@ project_a/session-a를 쓰는 앞선 테스트가 새 기본값을 스코프 키
 "편집 계속하기" 버튼 클릭 → `/projects/my-project/editor?session_id=...`로 정상 이동
 확인. console error 0건. 카드 3장(자산/편집/완성본)의 개별 이동 버튼은 그대로 남아
 있음.
+
+### Task 5 완료 (2026-08-15 야간, `d07c600e9`)
+
+실제 컨테이너 배포본 1920×1080에서 확인. 사이드바가 이제 "전체 메뉴 → 프로젝트
+목록(현재 프로젝트) → 프로젝트 단계"로 시각적으로 읽힌다(각 구획 앞에 작은 라벨).
+접힘(icon-only) 모드에서는 세 라벨 모두 기존 패턴대로 숨겨짐을 확인. console error
+0건. 경로·링크 대상은 변경 없음(기존 테스트가 4개 링크·5개 버튼 개수를 그대로 고정).
 
 (각 Task 완료 시 여기에 실측값과 커밋 SHA를 추가한다.)
