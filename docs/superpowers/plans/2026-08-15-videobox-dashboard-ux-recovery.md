@@ -83,10 +83,10 @@ Full HD 역전(`5f968ee8f`), "길이 확인 중" 거짓 문구(`f3b93de22`), foo
 - Test: `apps/web/src/features/editor/preview/preview-stage.test.tsx`
 - Test: `apps/web/src/features/editor/workbench/editor-workbench.test.tsx`
 
-- [ ] RED: 소스 확인 버튼들이 왼쪽 dock에 있고, 미리보기 아래에는 없으며, audition 동작(원본 열기 → 편집본 돌아가기)이 그대로임을 고정한다. drawer 모드에서도 접근 가능해야 한다.
-- [ ] GREEN. audition 경로(`showAudition`/`showExact`)는 옮기지 않고 그대로 부른다.
-- [ ] 실제 브라우저: 원본 열기 → 재생 → 편집본으로 돌아가기 전체 경로. 그림 크기 재측정.
-- [ ] 커밋 `feat: move source audition into the asset dock` → 배포 → 확인.
+- [x] RED: 소스 확인 버튼들이 왼쪽 dock에 있고, 미리보기 아래에는 없으며, audition 동작(원본 열기 → 편집본 돌아가기)이 그대로임을 고정한다. drawer 모드에서도 접근 가능해야 한다.
+- [x] GREEN. audition 경로(`showAudition`/`showExact`)는 옮기지 않고 그대로 부른다.
+- [x] 실제 브라우저: 원본 열기 → 재생 → 편집본으로 돌아가기 전체 경로. 그림 크기 재측정.
+- [x] 커밋 `feat: move source audition into the asset dock` → 배포 → 확인.
 
 **롤백:** revert. **예상 효과:** shell +85px. Task 1과 합치면 그림 약 500px 높이 = **화면의 약 20%** (현재의 2.4배).
 
@@ -186,5 +186,20 @@ Full HD 역전(`5f968ee8f`), "길이 확인 중" 거짓 문구(`f3b93de22`), foo
 발견: `565582c96`(Task 3 대상)이 fallback 기본값만 고쳐서 실제로는 적용되지 않는다.
 `editorUiState.ts`의 `defaultEditorUiState`가 항상 완전한 `{leftOpen:true,...}` 객체를
 채워 넘기므로 `resolveEditorWorkbenchLayout`의 fallback에 도달하지 않는다. Task 3에서 고친다.
+
+### Task 2 완료 (2026-08-15 야간, `5ad265607`)
+
+실제 컨테이너 배포본에서 재측정. Task 1 대비 media shell이 다시 커졌다 — "소스 확인"이
+빠지면서 stage 내부 세로 예산이 줄었기 때문이다.
+
+| viewport | media shell | 그림 |
+|---|---|---|
+| 1920×1080 | 478px | 848×476 (화면의 19.5%, 최초 8.5% 대비) |
+| 1440×900 | 409px | — |
+
+확인: 데스크톱에서 소스 목록이 미리보기 밖 왼쪽 dock(자산과 대본)에 있음, 미리보기
+안에는 없음, 클릭→audition 재생(AUDIO 태그)→"편집본으로 돌아가기"→exact 복귀 전체
+경로 정상. 좁은 화면(390×844) drawer 모드에서도 "자산과 대본" 열기→"소스 확인"→
+"원본 열기"까지 도달·재생 확인. console error 0건.
 
 (각 Task 완료 시 여기에 실측값과 커밋 SHA를 추가한다.)
