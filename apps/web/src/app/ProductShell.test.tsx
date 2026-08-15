@@ -459,6 +459,23 @@ describe("home dashboard", () => {
     expect(listJobs).not.toHaveBeenCalled();
   });
 
+  it("says the current status once per fact, not repeated across a keyword line, a checklist, and a card", async () => {
+    // Home used to say "초안 있음" up to three times (a keyword line under
+    // "다음 할 일", a checklist item, and the 편집 card) and put the same
+    // "편집 계속하기" text on both a heading and the button right under it.
+    vi.spyOn(api, "getHomeSummary").mockResolvedValue({
+      finished_video_count: 3, has_draft: true, asset_gap_count: 2,
+    } as never);
+
+    render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
+
+    await screen.findByText("3개");
+    expect(screen.getAllByText("초안 있음")).toHaveLength(1);
+    expect(screen.getAllByText("부족 2곳")).toHaveLength(1);
+    expect(screen.getAllByText("3개")).toHaveLength(1);
+    expect(screen.getAllByText("편집 계속하기")).toHaveLength(1);
+  });
+
   it("says so plainly when the project is still empty", async () => {
     vi.spyOn(api, "getHomeSummary").mockResolvedValue({
       finished_video_count: 0, has_draft: false, asset_gap_count: 0,
@@ -480,7 +497,6 @@ describe("home dashboard", () => {
 
     expect(await screen.findByRole("button", { name: "출력 확인" })).toBeVisible();
     expect(screen.queryByText("아직 완성한 영상이 없어요.")).toBeNull();
-    expect(screen.getByRole("heading", { name: "상태 다시 확인" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
     expect(api.getHomeSummary).toHaveBeenCalledTimes(2);
   });
