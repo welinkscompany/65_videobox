@@ -64,6 +64,7 @@ from videobox_core_engine.local_pipeline import (
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.library_footage_indexer import index_pending_library_footage
 from videobox_core_engine.library_ingest import LibraryIngestService
+from videobox_core_engine.library_media_facts import library_assets_needing_media_facts, record_library_media_facts
 from videobox_core_engine.media_inbox import AUDIO_EXTENSIONS, MediaInboxConfig, run_inbox_watcher_loop
 from videobox_core_engine.owner_audio_library import register_owner_audio_library
 from videobox_core_engine.media_analysis import MediaAnalysisService, assets_needing_reanalysis
@@ -249,6 +250,11 @@ REANALYSIS_BATCH = 1
 # 않게 색인·재분석과 같은 방식으로 끊는다.
 BROLL_MEDIA_FACTS_BACKFILL_BATCH = 4
 
+# 같은 이유로 개인 라이브러리 broll도 다시 잰다. library_ingest.py의 probe_metadata는
+# ingest 시점 1회뿐이라 실패하면 영구히 정보 없이 남는다(위 broll 백필과 달리 이
+# 대응물이 없었다 -- wave2-* 4개가 이 gap으로 계속 "길이 정보 없음"이었다).
+LIBRARY_MEDIA_FACTS_BACKFILL_BATCH = 4
+
 
 def _build_music_library_hooks(
     *, library_store: MediaLibraryStore, project_store: LocalProjectStore, app: FastAPI
@@ -421,6 +427,36 @@ def _backfill_broll_media_facts(app: FastAPI) -> None:
             _LOGGER.info(
                 "빠져 있던 영상 정보 %d건을 채웠습니다 (project=%s).", len(recovered), project_id
             )
+
+
+def _backfill_library_media_facts(app: FastAPI) -> None:
+    """등록 때 ffprobe가 실패한 개인 라이브러리 broll의 길이·크기·오디오를 나중에 채운다.
+
+    `_backfill_broll_media_facts`의 라이브러리 버전이다. 라이브러리는 프로젝트에
+    묶이지 않으므로(전역 1개) project 순회가 없다.
+    """
+    media_library_store = getattr(app.state, "media_library_store", None)
+    probe = getattr(app.state, "media_analysis_probe", None)
+    roots = getattr(app.state, "library_asset_managed_roots", None)
+    if media_library_store is None or probe is None or not roots:
+        return
+    user_asset_store = media_library_store.user_asset_store
+    try:
+        recovered = [
+            pending["library_asset_id"]
+            for pending in library_assets_needing_media_facts(
+                store=user_asset_store, limit=LIBRARY_MEDIA_FACTS_BACKFILL_BATCH
+            )
+            if record_library_media_facts(store=user_asset_store, roots=roots, probe=probe, **pending)
+        ]
+    except Exception:
+        _LOGGER.warning(
+            "빠진 라이브러리 영상 정보를 다시 채우지 못했습니다.",
+            exc_info=True,
+        )
+        return
+    if recovered:
+        _LOGGER.info("빠져 있던 라이브러리 영상 정보 %d건을 채웠습니다.", len(recovered))
 
 
 def _recover_in_process_jobs(app: FastAPI) -> None:
@@ -638,6 +674,7 @@ async def _media_analysis_lifespan(app: FastAPI):
                     await asyncio.to_thread(_index_library_audio, app)
                     await asyncio.to_thread(_index_library_footage, app)
                     await asyncio.to_thread(_backfill_broll_media_facts, app)
+                    await asyncio.to_thread(_backfill_library_media_facts, app)
                 if loop_clock.time() >= next_prune_at:
                     # Book the next run before the prune can raise. Otherwise a
                     # failing prune keeps the old deadline and retries on every
@@ -1161,6 +1198,8 @@ def create_app(
             yujin_runtime_service=runtime_service,
         )
     )
+    resolved_library_asset_managed_roots = tuple(dict.fromkeys((user_library_root, resolved_media_inbox_library_root, resolved_owner_audio_library_root, *(resolved_owner_audio_library_root / media_type for media_type in resolve_owner_audio_watch_paths(media_inbox_watch_path)))))
+    app.state.library_asset_managed_roots = resolved_library_asset_managed_roots
     app.include_router(
         build_library_assets_router(
             project_store=store,
@@ -1168,7 +1207,7 @@ def create_app(
             user_asset_store=resolved_media_library_store.user_asset_store,
             ingest_service=app.state.library_ingest_service,
             managed_root=user_library_root,
-            managed_roots=tuple(dict.fromkeys((user_library_root, resolved_media_inbox_library_root, resolved_owner_audio_library_root, *(resolved_owner_audio_library_root / media_type for media_type in resolve_owner_audio_watch_paths(media_inbox_watch_path))))),
+            managed_roots=resolved_library_asset_managed_roots,
         )
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))

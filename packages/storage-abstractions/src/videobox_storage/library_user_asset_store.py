@@ -248,6 +248,25 @@ class LibraryUserAssetStore:
         finally:
             connection.close()
 
+    def update_technical_metadata(self, library_asset_id: str, technical_metadata_patch: Mapping[str, Any]) -> LibraryUserAsset:
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            existing = LibraryUserAsset.from_row(dict(row))
+            merged = {**existing.technical_metadata, **technical_metadata_patch}
+            connection.execute("UPDATE library_user_assets SET technical_json = ?, updated_at = ? WHERE library_asset_id = ?", (_json(merged), _now(), library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
     def trash_asset(self, library_asset_id: str) -> LibraryUserAsset:
         connection = self._connection()
         try:
