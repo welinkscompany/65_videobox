@@ -18,11 +18,11 @@
     }
   },
   "snapshots": [
-    { "path": "editor-workbench-1280x800.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 55430, "sha256": "19d2022ef9fe6f6433f2954c42055723600e3d0458de4d2f9ad4e1fe2fa99491" },
-    { "path": "editor-workbench-1440x900.png", "viewport": { "width": 1440, "height": 900 }, "bytes": 64280, "sha256": "3a8be519404e32e6518e33a78586ee188e41aca5df782b361b5a66491908b43c" },
-    { "path": "editor-workbench-1920x1080.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 106393, "sha256": "2acd929d27da90aab496263368ff993e168c69c58242760b507946403390ac32" },
-    { "path": "editor-workbench-390x844.png", "viewport": { "width": 390, "height": 844 }, "bytes": 26418, "sha256": "6d3a16ba93954679fb5a4e2b3beb2c7ec4a661f3b9edbfef5280a7b00dd8102f" },
-    { "path": "editor-workbench-768x1024.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 52473, "sha256": "affc774b1b98264cfdfc76b6a00881d1596ea29c50a2fad2b1eb5dfe50775358" },
+    { "path": "editor-workbench-1280x800.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 78666, "sha256": "ca2310724eed1e7163b08a0fec69b8b8460ee50bba3001e61d6ed1066bc69230" },
+    { "path": "editor-workbench-1440x900.png", "viewport": { "width": 1440, "height": 900 }, "bytes": 88412, "sha256": "95161aa59b92376ab5e56478aeca5e605e2dea4dcdc8bbf9b8c96051ab611bbb" },
+    { "path": "editor-workbench-1920x1080.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 126009, "sha256": "b28c07d1a66ef26dea9717a0d848983293e189fce0bfc200f0697d6137336038" },
+    { "path": "editor-workbench-390x844.png", "viewport": { "width": 390, "height": 844 }, "bytes": 48134, "sha256": "39e380b7bacd299023544f8ccedf0a199acaf4175e228b6fa95a612fa298a9e3" },
+    { "path": "editor-workbench-768x1024.png", "viewport": { "width": 768, "height": 1024 }, "bytes": 54424, "sha256": "3755742e75ae6672cd23d9a85f84afb81297af844366cf0a22c6c351b5a575a7" },
     { "path": "product-shell-1280.png", "viewport": { "width": 1280, "height": 800 }, "bytes": 53644, "sha256": "8b2c7a7ff650e2347d5b1c6a42f683faaeea2afc5286dce2f9293ac7ac580a42" },
     { "path": "product-shell-1440.png", "viewport": { "width": 1440, "height": 960 }, "bytes": 55779, "sha256": "c9e6405e4b01b3dd82fe32fd60e9c98f7ff1458b0024931de86707a1fe5a8d8e" },
     { "path": "product-shell-1920.png", "viewport": { "width": 1920, "height": 1080 }, "bytes": 59226, "sha256": "85d85ab4ee401b1fcf2c066a043e93752cacfab2efd89ee8f8901bd2f6a5c813" },
