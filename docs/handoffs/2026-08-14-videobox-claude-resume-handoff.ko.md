@@ -640,3 +640,41 @@ P3의 "이 일은 어느 화면이지?"는 선택 전, 그리드를 보는 시�
 
 pytest 전체 단독 `3542 passed, 53 skipped`(오탐 없음), frontend `980 passed`,
 build 통과, E2E `46 passed`, `git diff --check` 통과, 실제 컨테이너 배포 후 브라우저 확인.
+
+### 2026-08-16 이어서 — 검토+출력 병합 완료 (`e4c18228e`)
+
+앞 절에서 되돌렸던 병합을 제대로 끝냈다. 되돌린 이유였던 중복 조회를 실제로 없앤 것이
+차이다.
+
+**한 번만 읽는다.** `useTimelineReviewState`가 판정(`state`)과 원본(`data`)을 나눠서
+내보내고, `refresh()`가 읽은 값을 **돌려준다**. 출력 화면은 `shared`/`onSharedRefresh`를
+**선택적 prop**으로 받아 -- 안 주면 지금까지처럼 스스로 읽으므로 그쪽 테스트 80개는
+한 줄도 안 바뀌었다. 합쳐진 화면에서만 공유 읽기를 쓴다.
+
+구현하며 두 번 걸렸고 둘 다 테스트가 잡았다.
+1. `shared` 객체를 `refresh`의 의존성에 뒀더니 새 값이 올 때마다 `refresh`가 다시
+   만들어지고 그 effect가 또 읽어서 **끝없이 돌았다**. ref로 끊었다.
+2. 처음 그릴 때도 공유 읽기를 불러서 여전히 두 번 읽혔다. 첫 렌더는 이미 온 값을
+   쓰도록(`reuseShared`) 고쳤다. `ReviewAndOutputPage.test.tsx`가 "화면당 한 번"을
+   고정한다.
+
+**판정은 합치지 않았다.** 검토 쪽은 변형 일치까지 보고, 출력 쪽은 거기에 더해
+"승인됨 + 확인할 항목 0건"을 요구한다. 비슷해 보이지만 다르고, 합치면 무엇을 언제
+내보낼 수 있는지가 조용히 바뀐다.
+
+**사이드바 5개 → 4개**(기획·자산·편집·검토와 출력). `docs/decisions/2026-08-16-review-and-output-single-stage.ko.md`에
+결정 기록(§6). `/review`와 `/output` 두 주소 모두 살아 있다 -- 한쪽을 리다이렉트로
+접으면 그 주소로 직접 들어오는 기존 E2E 세 개가 끊긴다.
+
+`ProductShell.tsx`를 고쳤으므로 `docs/oss/editor-ui-source-map.json`의
+`normalized_sha256` 두 곳도 함께 갱신했다(그 검증은 전체 백엔드 스위트에서만 돈다).
+
+**검증:** frontend `982 passed`, build 통과, E2E `46 passed`(중복 조회를 잡았던
+`review-to-editor` 포함), 전체 pytest 단독 `3537 passed / 5 failed` → 실패 5건 전부
+격리 재실행 `40 passed`로 부하 오탐 확인. 실제 컨테이너 배포 후 브라우저로
+`/review`·`/output` 양쪽 확인: 단계 단추 4개, 헤더 "검토와 출력", 두 영역 한 화면,
+다섯 호출이 화면당 한 번씩, console error 0, 가로 overflow 0.
+
+**남은 것 (그대로):** owner acceptance(완성본 시청·승인), Hermes egress provider 로그인.
+`product-shell-*.png` 스냅샷 5장은 사이드바가 바뀌어 낡았고, 재생성은 owner 승인 사항이라
+하지 않았다.
