@@ -31,9 +31,9 @@ function asset({ id, name, duration = 12 }) {
 const first = asset({ id: "asset-first", name: "commute.mp4", duration: 12 });
 const second = asset({ id: "asset-second", name: "walkthrough.mp4", duration: 8 });
 
-async function installApi(page) {
+async function installApi(page, { usageLocations = [] } = {}) {
   await page.route("**/api/library/assets/*/usage", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ library_asset_id: "ignored", locations: [] }) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ library_asset_id: "ignored", locations: usageLocations }) });
   });
   await page.route("**/api/library/assets?**", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ assets: [first, second], total: 2 }) });
@@ -82,4 +82,27 @@ test("the crosslink is available on every card without first selecting one", asy
   // not be a prerequisite for the second card's own crosslink to work.
   const links = page.locator('[data-testid="library-asset-card"]').getByRole("link", { name: "구간 정리하기" });
   await expect(links).toHaveCount(2);
+});
+
+test("a library asset's in-use location links to that project's assets screen", async ({ page }) => {
+  // 위치를 알려주면서 갈 길은 안 주면 owner가 다시 찾아 헤맨다. 이 링크가
+  // 라이브러리 -> 프로젝트 방향을 닫는다(반대 방향은 프로젝트 자산 화면의
+  // "라이브러리 영상" 고르기가 담당한다).
+  await installApi(page, {
+    usageLocations: [
+      { project_id: "my-project", materialized_asset_id: "asset-copy", reference_id: "ref-1", location: { kind: "project_asset", label: "프로젝트 편집본" } },
+      { location: { kind: "derived_sequence", label: "묶음" } },
+    ],
+  });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto("/library");
+  await page.locator('[data-testid="library-asset-card"]').filter({ hasText: first.user_metadata.filename }).click();
+
+  const usage = page.locator(".vb-library-usage");
+  await expect(usage).toBeVisible();
+  const entry = usage.getByRole("link", { name: "프로젝트 편집본 자산 화면 열기" });
+  await expect(entry).toHaveAttribute("href", "/projects/my-project/assets");
+  // 프로젝트를 특정할 수 없는 위치는 링크가 되지 않는다.
+  await expect(usage.getByText("묶음")).toBeVisible();
+  await expect(usage.getByRole("link", { name: /묶음/ })).toHaveCount(0);
 });
