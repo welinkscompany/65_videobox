@@ -1,8 +1,29 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type BrollAsset, type MediaAnalysis, type MediaLibraryAsset } from "../../api";
+import { api, type BrollAsset, type LibraryAsset, type MediaAnalysis, type MediaLibraryAsset } from "../../api";
 import { MediaWorkspacePage } from "./MediaWorkspacePage";
+
+/** 개인 라이브러리에 이미 있는 영상. 프로젝트로 가져오는 경로가 없던 대상이다. */
+const personalVideo = (): LibraryAsset => ({
+  library_asset_id: "user:broll:walk",
+  media_type: "broll",
+  origin: "user",
+  lifecycle: "ready",
+  content_sha256: "a".repeat(64),
+  byte_count: 2048,
+  mime_type: "video/mp4",
+  managed_relative_path: "assets/broll/walk.mp4",
+  technical_metadata: { duration_seconds: 12, width: 1920, height: 1080 },
+  machine_metadata: {},
+  user_metadata: { filename: "walk.mp4" },
+  created_at: "2026-08-12T00:00:00Z",
+  updated_at: "2026-08-12T00:00:00Z",
+  trashed_at: null,
+  preview_url: "/api/library/assets/user:broll:walk/preview",
+  thumbnail_url: "/api/library/assets/user:broll:walk/thumbnail",
+  waveform_url: null,
+});
 
 const asset = (projectId = "project-a"): BrollAsset => ({
   asset_id: `asset-${projectId}`,
@@ -76,6 +97,7 @@ beforeEach(() => {
   vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [libraryAsset("music"), libraryAsset("sfx")] });
   vi.spyOn(api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] });
   vi.spyOn(api, "listProjectRecentMediaLibraryAssetIds").mockResolvedValue({ asset_ids: [] });
+  vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [personalVideo()], total: 1 });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -90,6 +112,30 @@ describe("MediaWorkspacePage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "가져오기" }));
     expect(await screen.findByRole("heading", { name: "새 파일 추가" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "촬영본 가져오기" })).toBeVisible();
+  });
+
+  it("pulls a video that is already in the library into the project, without a re-upload", async () => {
+    // 이 경로가 없어서 owner는 라이브러리에 있는 영상을 프로젝트에 쓰려면 같은
+    // 파일을 다시 올려야 했다. 음악·효과음은 처음부터 이 경로가 있었다.
+    render(<MediaWorkspacePage projectId="project-a" />);
+
+    expect(await screen.findByRole("heading", { name: "라이브러리 영상" })).toBeVisible();
+    fireEvent.click(await screen.findByRole("button", { name: "walk.mp4 프로젝트에 추가" }));
+
+    await waitFor(() => expect(api.materializeLibraryAsset).toHaveBeenCalledWith("user:broll:walk", "project-a"));
+    // 추가 직후 위쪽 프로젝트 자산 목록이 스스로 갱신된다.
+    await waitFor(() => expect(api.listBrollAssets).toHaveBeenCalledTimes(2));
+  });
+
+  it("says 영상 on the video tab and keeps 음악과 효과음 wording on the audio tabs", async () => {
+    render(<MediaWorkspacePage projectId="project-a" />);
+
+    expect(await screen.findByRole("heading", { name: "라이브러리 영상" })).toBeVisible();
+    expect(screen.queryByText("음악과 효과음")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "음악" }));
+    expect(await screen.findByText("음악과 효과음")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "라이브러리 영상" })).not.toBeInTheDocument();
   });
 
   it("removes a project copy through its reference without trashing the global library asset", async () => {

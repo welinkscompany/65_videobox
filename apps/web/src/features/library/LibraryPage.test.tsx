@@ -119,6 +119,25 @@ describe("LibraryPage", () => {
     expect(api.ingestLibraryAssets).toHaveBeenNthCalledWith(2, [first], "broll", expect.any(String));
   });
 
+  it("takes the owner from a usage location straight to that project's assets", async () => {
+    vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
+      library_asset_id: "user_asset_1",
+      locations: [
+        { project_id: "project_1", location: { kind: "timeline", id: "timeline_1", label: "프로젝트 편집본" } },
+        // 프로젝트를 특정할 수 없는 위치는 지금처럼 글자로만 남는다.
+        { location: { kind: "derived_sequence", id: "seq_1", label: "묶음" } },
+      ],
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+
+    const entry = await screen.findByRole("link", { name: "프로젝트 편집본 자산 화면 열기" });
+    expect(entry).toHaveAttribute("href", "/projects/project_1/assets");
+    expect(screen.getByText("묶음")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "묶음 자산 화면 열기" })).toBeNull();
+  });
+
   it("previews an asset and blocks trash when the usage endpoint reports a location", async () => {
     vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
       library_asset_id: "user_asset_1",

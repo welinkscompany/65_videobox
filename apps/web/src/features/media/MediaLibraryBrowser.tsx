@@ -17,10 +17,33 @@ function displayFilename(item: BrowserAsset, fallback: string) {
   return fallback;
 }
 
-export function libraryEmptyReason(installState: MediaLibraryInstallState | null, loadFailed: boolean): string {
+export function libraryEmptyReason(installState: MediaLibraryInstallState | null, loadFailed: boolean, fixedFilter?: Exclude<Filter, "all">): string {
+  // 영상은 꾸러미로 들여놓는 것이 아니라 owner가 직접 넣은 것만 있다.
+  if (fixedFilter === "broll") {
+    if (loadFailed) return "라이브러리 영상을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.";
+    return "아직 라이브러리에 영상이 없어요. 내 라이브러리에서 영상을 먼저 추가해 주세요.";
+  }
   if (installState?.status === "not_installed") return "음악과 효과음 꾸러미를 아직 들여놓지 않았어요. 꾸러미를 넣으면 여기에서 바로 들어볼 수 있어요.";
   if (loadFailed || !installState) return "음악과 효과음을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.";
   return "아직 준비된 음악과 효과음이 없어요.";
+}
+
+/** 영상은 "들어보는" 것이 아니라 "보는" 것이라 안내 문구가 달라진다. */
+function browserCopy(fixedFilter?: Exclude<Filter, "all">) {
+  if (fixedFilter === "broll") {
+    return {
+      heading: "라이브러리 영상",
+      lead: "라이브러리에서 찾기 · 미리 보고 프로젝트에 추가하세요.",
+      loading: "라이브러리 영상을 불러오고 있어요.",
+      pagination: "라이브러리 영상 페이지 이동",
+    };
+  }
+  return {
+    heading: "음악과 효과음",
+    lead: "라이브러리에서 찾기 · 미리 듣고 프로젝트에 추가하세요.",
+    loading: "음악과 효과음을 불러오고 있어요.",
+    pagination: "음악과 효과음 페이지 이동",
+  };
 }
 
 const filters: readonly { value: Filter; label: string }[] = [
@@ -101,10 +124,11 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
   const pageItems = visible.slice((safePage - 1) * MEDIA_LIBRARY_PAGE_SIZE, safePage * MEDIA_LIBRARY_PAGE_SIZE);
   useEffect(() => { setPage((current) => Math.min(current, pageCount)); }, [pageCount]);
 
-  if (!ready) return <section className="vb-media-library" aria-labelledby="media-library-heading"><h2 id="media-library-heading">음악과 효과음</h2><p role="status">음악과 효과음을 불러오고 있어요.</p></section>;
+  const copy = browserCopy(fixedFilter);
+  if (!ready) return <section className="vb-media-library" aria-labelledby="media-library-heading"><h2 id="media-library-heading">{copy.heading}</h2><p role="status">{copy.loading}</p></section>;
   return <section className="vb-media-library" aria-labelledby="media-library-heading">
-    <h2 id="media-library-heading">음악과 효과음</h2>
-    <p>라이브러리에서 찾기 · 미리 듣고 프로젝트에 추가하세요.</p>
+    <h2 id="media-library-heading">{copy.heading}</h2>
+    <p>{copy.lead}</p>
     {message ? <p role="status">{message}</p> : null}
     {installState?.status === "degraded" ? <p role="status">{`들여놓은 ${installState.installed_asset_count}개 가운데 일부는 확인이 끝나지 않아 아직 쓸 수 없어요.`}</p> : null}
     {fixedFilter ? null : <div className="vb-media-library__filters">{filters.map((item) => <Button key={item.value} type="button" variant={filter === item.value ? "default" : "outline"} aria-pressed={filter === item.value} onClick={() => { setFilter(item.value); setPage(1); }}>{item.label}</Button>)}</div>}
@@ -119,7 +143,7 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
           <Button type="button" variant="outline" disabled={favouriteBusy.includes(item.library_asset_id)} aria-label={`${name} 즐겨찾기${loved ? " 해제" : ""}`} onClick={() => void toggle(item.library_asset_id, !loved)}>{loved ? "즐겨찾기 해제" : "즐겨찾기"}</Button>
         </article>;
       })}</div>
-      {pageCount > 1 ? <nav aria-label="음악과 효과음 페이지 이동" className="vb-media-library__pagination"><Button type="button" variant="outline" disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>이전 페이지</Button><span aria-live="polite">{safePage} / {pageCount}페이지</span><Button type="button" variant="outline" disabled={safePage >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>다음 페이지</Button></nav> : null}
-    </> : <p>{assets.length ? "고른 조건에 맞는 것이 없어요." : libraryEmptyReason(installState, loadFailed)}</p>}
+      {pageCount > 1 ? <nav aria-label={copy.pagination} className="vb-media-library__pagination"><Button type="button" variant="outline" disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>이전 페이지</Button><span aria-live="polite">{safePage} / {pageCount}페이지</span><Button type="button" variant="outline" disabled={safePage >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>다음 페이지</Button></nav> : null}
+    </> : <p>{assets.length ? "고른 조건에 맞는 것이 없어요." : libraryEmptyReason(installState, loadFailed, fixedFilter)}</p>}
   </section>;
 }

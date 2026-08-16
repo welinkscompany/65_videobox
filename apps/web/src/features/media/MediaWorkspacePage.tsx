@@ -407,6 +407,10 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
             )}
           </section>
 
+          <section aria-labelledby="media-library-heading">
+            <MediaLibraryBrowser projectId={projectId} fixedFilter="broll" onMaterialized={() => void load()} />
+          </section>
+
           <section aria-labelledby="media-analysis-heading">
             <h2 id="media-analysis-heading">분석 상태</h2>
             {currentState.analyses.length === 0 ? <p>확인할 분석이 없어요.</p> : (
