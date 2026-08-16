@@ -162,6 +162,26 @@ describe("LibraryPage", () => {
     expect(audioView.queryByRole("link", { name: "구간 정리하기" })).toBeNull();
   });
 
+  it("offers a footage-organizer entry directly on each video card, without changing the current selection", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({
+      assets: [asset(), asset({ library_asset_id: "user_asset_2", user_metadata: { filename: "second.mp4" } })],
+      total: 2,
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("second.mp4");
+    // 두 번째 자산을 먼저 선택해 둔다.
+    fireEvent.click(screen.getByRole("article", { name: "second.mp4" }));
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+
+    // 첫 번째 카드(선택되지 않은 카드)의 링크는 여전히 보이고, 클릭해도 선택은 안 바뀐다.
+    const firstCard = screen.getByRole("article", { name: "walk.mp4" });
+    const entry = within(firstCard).getByRole("link", { name: "구간 정리하기" });
+    expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
+
+    fireEvent.click(entry);
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+  });
+
   it("preselects the video asset a footage-organizer link named in the URL", async () => {
     window.history.replaceState({}, "", "/library?library_asset_id=user_asset_1");
     vi.mocked(api.listLibraryAssets).mockResolvedValue({

@@ -92,8 +92,27 @@ describe("FootageOrganizerPage", () => {
     await screen.findByTestId("footage-workspace");
     fireEvent.click(screen.getByRole("button", { name: /clip\.mp4/ }));
 
-    const entry = await screen.findByRole("link", { name: "라이브러리에서 보기" });
+    const entry = await screen.findByRole("link", { name: "clip.mp4 라이브러리에서 보기" });
     expect(entry).toHaveAttribute("href", "/library?library_asset_id=asset-1");
+  });
+
+  it("offers a library entry directly on the source-list item, without changing the current selection", async () => {
+    const assets = [
+      asset,
+      { ...asset, library_asset_id: "asset-2", content_sha256: "b".repeat(64), user_metadata: { filename: "short-b.mp4" } },
+    ];
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets, total: assets.length });
+    render(<FootageOrganizerPage />);
+    await screen.findByTestId("footage-workspace");
+    fireEvent.click(screen.getByRole("button", { name: /short-b\.mp4/ }));
+    expect(screen.getByRole("heading", { name: "short-b.mp4" })).toBeInTheDocument();
+
+    const sourceList = screen.getByTestId("footage-source-list");
+    const entry = within(sourceList).getByRole("link", { name: "clip.mp4 라이브러리에서 보기" });
+    expect(entry).toHaveAttribute("href", "/library?library_asset_id=asset-1");
+
+    fireEvent.click(entry);
+    expect(screen.getByRole("heading", { name: "short-b.mp4" })).toBeInTheDocument();
   });
 
   it("keeps proposal changes local until explicit preview/apply and exposes frame steps", async () => {
