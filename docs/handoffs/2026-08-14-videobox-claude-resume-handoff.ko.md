@@ -715,14 +715,19 @@ owner가 남은 두 항목을 모두 승인했다: ① 완성본을 Claude가 �
 또한 완성본 mp4의 format comment가 원본 자산에서 온 `vrew Enhanced Video Export`로
 남아 있다. §10.0의 권리 경고 metadata 기록과의 관계는 다음 세션에서 확인할 것.
 
-### ② Hermes provider — 로그인은 이미 있었고, 남은 건 Start 클릭 한 번
+### ② Hermes provider — 로그인은 이미 있었다
+
+> **⚠ 2026-08-16 정정: 아래 "Start를 누르면 닫힌다"는 틀렸다.**
+> 실측 결과 **화면의 유진이는 그 버튼 없이도 정상 동작한다.** 9119의 `Gateway`는
+> Telegram·Discord·WhatsApp용 **메시징** 게이트웨이라 VideoBox 화면과 다른 길이다.
+> 자세히는 `2026-08-16-videobox-real-use-defects-closed.ko.md`의 "정정" 절을 볼 것.
+> **owner 필수 항목이 아니다.**
 
 - `openai-codex`가 **이미 메인 모델(gpt-5.4)로 로그인·설정돼 있다**(173 세션,
   3일 전까지 사용). 새 로그인이 필요 없었다.
 - 막힌 것은 provider가 아니라 **게이트웨이 프로세스**다: `gateway_state: stopped`.
 - 대시보드 `/system`에 Start 버튼이 있으나 이 환경의 권한 분류기가 클릭을 차단했다.
-  **owner가 http://127.0.0.1:9119/system 에서 Start를 한 번 누르면** 게이트웨이가
-  올라오고, 그 상태에서 라이브 대화를 확인하면 이 항목이 닫힌다.
+  ~~owner가 누르면 이 항목이 닫힌다~~ → 위 정정 참고.
 
 ### 다음 세션(Sonnet)용 — 오픈 전 전체 점검 계획서 제작 프롬프트
 
