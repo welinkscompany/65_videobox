@@ -6,8 +6,9 @@
 `record_broll_media_facts`(local_pipeline.py)와 같은 방식을 라이브러리 자산에 적용한다.
 
 라이브러리 store에는 `resolve_storage_uri`가 없어서, 실제 파일 경로는 여러 root를
-순회하며 내용 해시를 대조해 찾는다(`routers/library_assets.py`의 `source_for_user`와
-같은 방식) -- 신뢰할 수 없는 경로로 ffprobe를 돌리지 않기 위해서다.
+순회하며 내용 해시를 대조해 찾는다 -- 신뢰할 수 없는 경로로 ffprobe를 돌리지 않기
+위해서다. 그 확인은 자산 다운로드 경로와 공용이며
+`videobox_storage.managed_path_resolution`에 있다.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from videobox_domain_models.library_assets import LibraryMediaType
-from videobox_storage.local_project_store import sha256_file
+from videobox_storage.managed_path_resolution import resolve_verified_path
 
 _logger = logging.getLogger(__name__)
 
@@ -46,24 +47,6 @@ def library_assets_needing_media_facts(*, store: Any, limit: int | None = None) 
     return pending
 
 
-def _resolve_verified_path(*, roots: Iterable[Path], managed_relative_path: str, content_sha256: str) -> Path | None:
-    # `source_for_user`(routers/library_assets.py)와 같은 검증이다 -- root도
-    # resolve해야 한다. 안 그러면 데이터 루트가 심볼릭 링크로 마운트된
-    # 배포본에서 candidate(resolve됨)와 root(안 됨)가 어긋나 relative_to가
-    # 매번 ValueError를 던지고, 실제로 존재하는 파일도 영원히 "못 찾음"으로
-    # 남는다.
-    for root in roots:
-        resolved_root = root.resolve()
-        candidate = (resolved_root / managed_relative_path).resolve()
-        try:
-            candidate.relative_to(resolved_root)
-        except ValueError:
-            continue
-        if candidate.is_file() and sha256_file(candidate) == content_sha256:
-            return candidate
-    return None
-
-
 def record_library_media_facts(
     *,
     store: Any,
@@ -80,7 +63,7 @@ def record_library_media_facts(
     경로가 API 응답으로 새어나가 계약 테스트를 깬 전례가 있다(local_pipeline.py의
     같은 주석 참고).
     """
-    path = _resolve_verified_path(roots=roots, managed_relative_path=managed_relative_path, content_sha256=content_sha256)
+    path = resolve_verified_path(roots=roots, relative_path=managed_relative_path, content_sha256=content_sha256)
     if path is None:
         _logger.warning(
             "라이브러리 자산의 원본 파일을 찾지 못해 길이 정보를 채우지 못했습니다 (library_asset_id=%s). "

@@ -8,7 +8,6 @@ actual preview always streams a re-checked source file.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import mimetypes
 from pathlib import Path
@@ -26,6 +25,7 @@ from videobox_core_engine.library_usage import scan_library_asset_usage
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_domain_models.library_assets import LibraryAssetLifecycle, LibraryAssetOrigin, LibraryMediaType
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
+from videobox_storage.managed_path_resolution import resolve_managed_path, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
 
@@ -106,18 +106,15 @@ def build_library_assets_router(
     def source_for_user(asset: Any) -> Path:
         # Watcher imports may use a dedicated inbox/audio root while sharing
         # the same user-asset DB. Resolve only within configured roots and
-        # require the content hash before serving bytes.
-        invalid = False
-        for root in roots:
-            source = (root / asset.managed_relative_path).resolve()
-            try:
-                source.relative_to(root)
-            except ValueError:
-                invalid = True
-                continue
-            if source.is_file() and _sha256(source) == asset.content_sha256:
-                return source
-        if invalid:
+        # require the content hash before serving bytes.  The walk itself is
+        # shared with the library backfill in core-engine; only the choice of
+        # status code lives here.
+        resolution = resolve_managed_path(
+            roots=roots, relative_path=asset.managed_relative_path, content_sha256=asset.content_sha256
+        )
+        if resolution.path is not None:
+            return resolution.path
+        if resolution.escaped:
             raise HTTPException(status_code=422, detail="asset_path_invalid")
         raise HTTPException(status_code=404, detail="asset_unavailable")
 
@@ -494,11 +491,8 @@ def _render_derivative(*, source: Path, media_type: str, kind: str) -> bytes | N
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+    # 해시 구현은 `videobox_storage`가 정본이다. 같은 루프를 또 두지 않는다.
+    return sha256_file(path)
 
 
 def _mime_type(path: Path) -> str:

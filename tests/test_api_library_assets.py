@@ -264,3 +264,59 @@ def test_search_user_asset(tmp_path):
     asset_id = response.json()["items"][0]["library_asset_id"]
     matches = client.get("/api/library/search", params={"q": "calm", "media_type": "music"}).json()["matches"]
     assert matches[0]["library_asset_id"] == asset_id
+
+
+# ---------------------------------------------------------------------------
+# `source_for_user`의 실패 분기 두 개. 이 라우터가 파일 바이트를 내주기 전에
+# "설정된 root 안에 있는가 + 내용 해시가 맞는가"를 확인하는데, 그 **실패** 경로에는
+# 지금까지 테스트가 하나도 없었다(성공 200만 검증돼 있었다). 이 검사를 공용
+# 헬퍼로 추출하기 전에 현재 상태코드 계약부터 고정한다.
+# ---------------------------------------------------------------------------
+
+
+def _register_user_asset(library_root: Path, *, asset_id: str, relative_path: str, content_sha256: str):
+    from videobox_domain_models.library_assets import LibraryAssetOrigin, LibraryMediaType
+
+    store = MediaLibraryStore(library_root).user_asset_store
+    return store.register_asset(
+        library_asset_id=asset_id,
+        media_type=LibraryMediaType.MUSIC,
+        origin=LibraryAssetOrigin.USER,
+        content_sha256=content_sha256,
+        managed_relative_path=relative_path,
+        byte_count=4,
+        mime_type="audio/mpeg",
+        technical_metadata={},
+        machine_metadata={},
+        user_metadata={"filename": "pinned.mp3"},
+        provenance={},
+    )
+
+
+def test_an_escaping_managed_path_is_refused_before_it_can_ever_be_stored(tmp_path):
+    """root를 벗어나는 경로는 **저장 단계에서** 막힌다 -- 1차 방어선.
+
+    라우터에도 경로 이탈을 422로 거절하는 분기가 있지만(`source_for_user`),
+    이 검증 때문에 정상 등록 경로로는 그 분기에 도달할 수 없다. 라우터 쪽은
+    심볼릭 링크나 이 검증이 생기기 전의 옛 행을 위한 2차 방어선으로 남는다.
+    경로 검증을 공용 헬퍼로 옮길 때 이 1차 방어선이 먼저 깨지지 않는지 지킨다.
+    """
+    library_root = tmp_path / "library"
+
+    for escaping in ("../escaped.mp3", "assets/../../escaped.mp3", "/absolute.mp3"):
+        with pytest.raises(ValueError, match="safe relative path"):
+            _register_user_asset(
+                library_root, asset_id=f"user:{escaping}", relative_path=escaping, content_sha256="c" * 64
+            )
+
+
+def test_a_managed_path_inside_the_root_with_no_file_is_unavailable(tmp_path):
+    """root 안이지만 파일이 없거나 해시가 다르면 404다. 위 422와 갈라진다."""
+    library_root = tmp_path / "library"
+    _register_user_asset(library_root, asset_id="user:absent", relative_path="assets/music/absent.mp3", content_sha256="d" * 64)
+    client = TestClient(app(tmp_path))
+
+    response = client.get("/api/library/assets/user:absent/preview")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "asset_unavailable"

@@ -46,6 +46,7 @@ from videobox_domain_models.yujin_footage_proposals import (
 )
 from videobox_provider_interfaces.llm import LLMTaskType
 from videobox_domain_models.footage_organizer import VirtualSequenceItem
+from videobox_storage.managed_path_resolution import resolve_verified_path, sha256_file
 from videobox_storage.footage_organizer_store import (
     FootageOrganizerStore,
     OptimisticRevisionConflict,
@@ -63,12 +64,12 @@ class _LibraryAssetAdapter:
         asset = self.store.user_asset_store.get_asset(library_asset_id)
         if asset is None or asset.lifecycle.value != "ready":
             return None
-        path = (self.store.root / asset.managed_relative_path).resolve()
-        try:
-            path.relative_to(self.store.root.resolve())
-        except ValueError:
-            return None
-        if not path.is_file() or _sha256(path) != asset.content_sha256:
+        path = resolve_verified_path(
+            roots=(self.store.root,),
+            relative_path=asset.managed_relative_path,
+            content_sha256=asset.content_sha256,
+        )
+        if path is None:
             return None
         return {
             "library_asset_id": asset.library_asset_id,
@@ -721,11 +722,8 @@ def _default_render(source: Path, output: Path, ranges: list[tuple[float, float]
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
+    # 해시 구현은 `videobox_storage`가 정본이다. 같은 루프를 또 두지 않는다.
+    return sha256_file(path)
 
 
 def _footage_error(exc: Exception) -> HTTPException:
