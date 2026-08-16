@@ -8103,6 +8103,40 @@ def test_output_jobs_ignore_stale_truthy_blocker_shapes_on_approved_timeline(tmp
     assert export_result.status_code == 200
 
 
+def test_capcut_export_result_rejects_a_job_that_is_not_a_capcut_export(tmp_path: Path) -> None:
+    # 이 경로는 CapCut 초안 결과만 돌려준다. 다른 종류의 job_id를 주면 예전에는
+    # 그 산출물을 JSON 매니페스트로 읽으려 들었고, 완성본(mp4)을 주면
+    # "'utf-8' codec can't decode byte" 오류가 그대로 사용자에게 나갔다.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_payload = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}").json()["timeline"]
+    timeline_path = tmp_path / "projects" / project_id / "timelines" / f'{timeline_payload["timeline_id"]}.json'
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["review_flags"] = []
+    persisted_timeline["pending_recommendations"] = []
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+    LocalProjectStore(tmp_path).save_review_state(
+        project_id=project_id,
+        timeline_id=str(timeline_payload["timeline_id"]),
+        status="approved",
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    assert subtitle_response.status_code == 202
+    subtitle_job_id = subtitle_response.json()["job_id"]
+    assert client.get(f"/api/projects/{project_id}/subtitles/{subtitle_job_id}").status_code == 200
+
+    result = client.get(f"/api/projects/{project_id}/exports/{subtitle_job_id}")
+
+    assert result.status_code == 404
+    detail = str(result.json()["detail"])
+    assert "codec" not in detail and "JSON" not in detail
+
+
 def test_reopening_approved_review_ignores_stale_truthy_blocker_shapes_and_returns_draft(
     tmp_path: Path,
 ) -> None:

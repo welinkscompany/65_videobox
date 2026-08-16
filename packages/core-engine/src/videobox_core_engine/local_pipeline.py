@@ -1867,6 +1867,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
 
     def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        # 다른 종류의 job_id가 들어오면 여기서 멈춘다. 완성본 job_id를 주면 그
+        # mp4를 CapCut 매니페스트로 읽으려 들었고, 사용자는 무슨 일인지 알 수 없는
+        # 디코딩 오류를 받았다. 완성본은 `get_final_render_result`가 읽는다.
+        if str(job.get("job_type")) != JobType.CAPCUT_EXPORT.value:
+            raise KeyError(f"CapCut draft export not found: {job_id}")
         export = self.store.get_export_run(project_id=project_id, export_id=job["output_ref"])
         return {"job_id": job["job_id"], "status": job["status"], "export": export}
 

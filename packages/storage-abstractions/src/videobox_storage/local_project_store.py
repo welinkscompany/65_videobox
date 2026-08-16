@@ -7344,7 +7344,13 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
-        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        # 이 함수는 CapCut 초안처럼 JSON 매니페스트를 담은 출력만 읽는다. 완성본은
+        # mp4라 텍스트로 읽으면 디코딩이 깨지고, 그 오류가 그대로 사용자에게
+        # 나갔다. 완성본 행은 `get_final_render_export`가 따로 읽는다.
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise KeyError(f"Export is not a readable manifest: {export_id}") from exc
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         payload["created_at"] = row["created_at"]

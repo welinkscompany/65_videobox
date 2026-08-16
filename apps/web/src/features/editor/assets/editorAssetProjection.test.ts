@@ -237,4 +237,35 @@ describe("thumbnails on b-roll cards", () => {
 
     expect(card.thumbnailUrl).toBeUndefined();
   });
+
+  it("keeps in-app gap placeholders out of the pickable materials", () => {
+    // 초안이 빈 자리를 표시하려고 넣는 자산이다. 저장소가 `in_app_only`로
+    // 표시하고 렌더 입력에서도 빼는데, 목록에만 남아 "B-roll 1" 같은 이름과
+    // 0초로 보였다. 고를 수 있는 재료처럼 보이면 owner가 그걸 고르게 된다.
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [
+        { asset_id: "asset_gap_placeholder_1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: { gap_slot_id: "gap-broll-1", label: "자산이 필요한 임시 장면", in_app_only: true, duration_sec: 0 } },
+        { asset_id: "real-1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: { title: "카페", duration_sec: 4 } },
+      ],
+      libraryAssets: [],
+    });
+
+    expect(cards.map((card) => card.assetId)).toEqual(["real-1"]);
+  });
+
+  it("numbers the remaining materials without counting the hidden placeholders", () => {
+    // 자리표시를 빼기만 하고 번호를 원래 순번으로 두면 "B-roll 2"로 시작해
+    // owner가 앞의 하나를 잃어버렸다고 읽는다.
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [
+        { asset_id: "asset_gap_placeholder_1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: { in_app_only: true } },
+        { asset_id: "real-1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: {} },
+      ],
+      libraryAssets: [],
+    });
+
+    expect(cards.map((card) => card.title)).toEqual(["B-roll 1"]);
+  });
 });

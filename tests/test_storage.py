@@ -298,6 +298,29 @@ def test_save_capcut_export_metadata_ignores_unknown_track_count(tmp_path: Path)
     assert fetched["metadata"]["track_count"] == 1
 
 
+def test_reading_an_export_run_refuses_a_media_artifact_instead_of_leaking_a_decode_error(
+    tmp_path: Path,
+) -> None:
+    # `get_export_run`은 CapCut 초안처럼 JSON 매니페스트를 담은 출력만 읽는다.
+    # 완성본(mp4)의 export_id가 들어오면 예전에는 그 mp4를 utf-8 텍스트로 읽으려다
+    # "'utf-8' codec can't decode byte" 오류가 그대로 사용자 화면까지 나갔다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Final Render Export Read")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"\x00\x00\x00\x20ftypisom\xd5\xd5\xd5")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+    )
+
+    with pytest.raises(KeyError) as caught:
+        store.get_export_run(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert "codec" not in str(caught.value)
+
+
 def test_save_preview_run_summary_ignores_unknown_track_clip_group_count(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Preview Summary Count Project")

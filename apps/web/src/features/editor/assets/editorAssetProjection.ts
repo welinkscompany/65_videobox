@@ -196,8 +196,21 @@ function projectLibrary(asset: MediaLibraryAsset, index: number): EditorAssetCar
   };
 }
 
+/**
+ * 초안이 빈 자리를 표시하려고 넣는 자산은 고를 수 있는 재료가 아니다.
+ * 저장소가 `in_app_only`로 표시하고 합성 계획도 렌더 입력에서 빼는데, 이
+ * 목록에만 남아 "B-roll 1"·0초짜리 재료처럼 보였다.
+ */
+function isInAppPlaceholder(asset: BrollAsset): boolean {
+  return (asset.metadata ?? {}).in_app_only === true;
+}
+
 export function projectEditorAssets({ projectId, brollAssets, libraryAssets }: ProjectEditorAssetsInput): EditorAssetCard[] {
-  const brollCards = brollAssets.map((asset, index) => projectBroll(projectId, asset, index));
+  // 번호는 걸러낸 뒤에 매긴다. 앞의 것을 숨긴 채 원래 순번을 쓰면 "B-roll 2"로
+  // 시작해 owner가 하나를 잃어버렸다고 읽는다.
+  const brollCards = brollAssets
+    .filter((asset) => !isInAppPlaceholder(asset))
+    .map((asset, index) => projectBroll(projectId, asset, index));
   const libraryIndexes = { music: 0, sfx: 0 };
   const libraryCards = libraryAssets.map((asset) => {
     const index = libraryIndexes[asset.media_type];
