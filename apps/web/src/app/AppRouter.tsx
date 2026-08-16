@@ -20,10 +20,9 @@ import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
 import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
 import { FootageOrganizerPage } from "../features/footage/FootageOrganizerPage";
-import { TimelineReviewPage } from "../features/review/TimelineReviewPage";
+import { ReviewAndOutputPage } from "../features/review/ReviewAndOutputPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
-import { OutputsPage } from "./OutputsPage";
 import { resolveLastValidProjectId } from "./projectSelection";
 import {
   parseWorkspaceLocation,
@@ -375,15 +374,13 @@ function WorkspacePage() {
       <MediaWorkspacePage projectId={projectId} />
     </ProductShell>;
   }
-  if (section === "outputs" || section === "output") {
-    return <ProductShell projectId={projectId} projects={projects} section="outputs" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
-      <OutputsPage projectId={projectId} onOpenEditor={() => navigateTo(projectId, "editing")} />
-    </ProductShell>;
-  }
-  if (section === "timeline" || section === "review") {
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
-      <TimelineReviewPage
+  // 검토와 출력은 한 단계다. 두 주소를 모두 살려 둔 채 같은 화면을 그린다 --
+  // 한쪽을 리다이렉트로 접으면 그 주소로 바로 들어오던 경로가 끊긴다.
+  if (section === "outputs" || section === "output" || section === "timeline" || section === "review") {
+    return <ProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+      <ReviewAndOutputPage
         projectId={projectId}
+        onOpenEditor={() => navigateTo(projectId, "editing")}
         onOpenSegment={({ projectId: targetProjectId, sessionId, segmentId }) => void navigate({
           to: "/projects/$projectId/$section",
           params: { projectId: targetProjectId, section: "editor" },

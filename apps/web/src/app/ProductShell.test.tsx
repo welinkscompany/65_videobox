@@ -15,7 +15,7 @@ const projects = [
 ];
 
 describe("product shell", () => {
-  it("separates the four global destinations from the five project stages", () => {
+  it("separates the four global destinations from the four project stages", () => {
     const view = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
 
     const global = screen.getByRole("navigation", { name: "전체 메뉴" });
@@ -24,8 +24,8 @@ describe("product shell", () => {
       expect(within(global).getByRole("link", { name: label })).toBeInTheDocument();
     }
     const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
-    expect(within(stages).getAllByRole("button")).toHaveLength(5);
-    for (const label of ["기획", "자산", "편집", "검토", "출력"]) {
+    expect(within(stages).getAllByRole("button")).toHaveLength(4);
+    for (const label of ["기획", "자산", "편집", "검토와 출력"]) {
       expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(view.container.querySelectorAll("main")).toHaveLength(1);
@@ -45,9 +45,9 @@ describe("product shell", () => {
     const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
     expect(within(stages).getByText("프로젝트 단계")).toBeVisible();
 
-    // Same four links, same five buttons, same targets -- labeling only.
+    // Same four links, same four buttons, same targets -- labeling only.
     expect(within(global).getAllByRole("link")).toHaveLength(4);
-    expect(within(stages).getAllByRole("button")).toHaveLength(5);
+    expect(within(stages).getAllByRole("button")).toHaveLength(4);
   });
 
   it("does not render project stages when no project is open", () => {
@@ -72,8 +72,8 @@ describe("product shell", () => {
 
     const navigation = await screen.findByRole("navigation", { name: "프로젝트 단계" });
     const navButtons = within(navigation).getAllByRole("button");
-    expect(navButtons).toHaveLength(5);
-    for (const label of ["기획", "자산", "편집", "검토", "출력"]) {
+    expect(navButtons).toHaveLength(4);
+    for (const label of ["기획", "자산", "편집", "검토와 출력"]) {
       const button = within(navigation).getByRole("button", { name: label });
       expect(button.querySelector("svg")).toBeTruthy();
       expect(button.querySelector(".vb-nav-label")).toHaveTextContent(label);

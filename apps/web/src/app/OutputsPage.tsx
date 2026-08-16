@@ -281,7 +281,27 @@ function needsCapcutHandoffFailureFallback(
   return !hasDurableProgress;
 }
 
-export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; onOpenEditor: () => void }) {
+/** 검토 화면과 한 단계로 합쳐질 때, 그쪽이 이미 읽은 값을 받아 쓰기 위한 창구.
+ *
+ * 주지 않으면(단독으로 쓸 때) 지금까지처럼 이 화면이 직접 읽는다. 주면 편집본·
+ * 작업 목록·타임라인·검토본·승인 기록을 다시 묻지 않는다 -- 한 화면에서 같은 것을
+ * 두 번 물으면 요청이 두 배가 될 뿐 아니라 두 영역이 서로 다른 사실을 볼 수 있다.
+ */
+export type SharedTimelineRead = Readonly<{
+  session: EditingSession | null;
+  jobs: readonly JobRecord[];
+  job: JobRecord | null;
+  timeline: TimelineJob | null;
+  review: ReviewSnapshot | null;
+  approval: ReviewApproval | null;
+}>;
+
+export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }: {
+  projectId: string;
+  onOpenEditor: () => void;
+  shared?: SharedTimelineRead;
+  onSharedRefresh?: () => Promise<SharedTimelineRead>;
+}) {
   const [state, setState] = useState<OutputState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorProjectId, setErrorProjectId] = useState<string | null>(null);
@@ -313,8 +333,13 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const capcutInFlightTimelineKey = useRef<string | null>(null);
   const capcutHandoffInFlightJobKey = useRef<string | null>(null);
   currentProjectId.current = projectId;
+  // `shared`는 읽을 때마다 새 객체다. 이걸 `refresh`의 의존성에 두면 새 값이
+  // 올 때마다 `refresh`가 다시 만들어지고, 그 effect가 또 읽어서 끝없이 돈다.
+  // 읽기는 `onSharedRefresh`(안정적)로만 걸고 값 자체는 ref로 본다.
+  const sharedRef = useRef(shared);
+  sharedRef.current = shared;
 
-  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null }) => {
+  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null; reuseShared?: boolean }) => {
     const refreshProjectId = projectId;
     const epoch = requestEpoch.current + 1;
     requestEpoch.current = epoch;
@@ -323,14 +348,26 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setIsLoading(true);
     setErrorProjectId(null);
     try {
-      const [session, jobs] = await Promise.all([
-        api.getLatestEditingSession(refreshProjectId),
-        options?.jobs ? Promise.resolve(options.jobs) : api.listJobs(refreshProjectId),
-      ]);
+      // 합쳐진 화면에서는 검토 쪽이 이미 읽은 값을 그대로 쓴다. 그쪽 refresh가
+      // 읽은 값을 돌려주므로, prop이 다시 내려오길 기다리지 않고 바로 이어서
+      // 판단할 수 있다.
+      // 처음 그릴 때는 검토 쪽이 이미 읽은 값을 그대로 쓴다(`reuseShared`).
+      // 다시 읽는 것은 이 화면이 무언가를 바꾼 뒤뿐이고, 그때만 공유 읽기를 부른다.
+      const sharedRead = onSharedRefresh && !options?.reuseShared
+        ? await onSharedRefresh()
+        : sharedRef.current ?? null;
+      const [session, jobs] = sharedRead
+        ? [sharedRead.session, options?.jobs ?? [...sharedRead.jobs]]
+        : await Promise.all([
+          api.getLatestEditingSession(refreshProjectId),
+          options?.jobs ? Promise.resolve(options.jobs) : api.listJobs(refreshProjectId),
+        ]);
       if (!isCurrentRequest()) return;
-      const timelineJob = session
-        ? mostRecentJob(jobs.filter((job) => job.status === "succeeded" && job.output_ref === session.timeline_id), "timeline_build")
-        : null;
+      const timelineJob = sharedRead
+        ? sharedRead.job
+        : session
+          ? mostRecentJob(jobs.filter((job) => job.status === "succeeded" && job.output_ref === session.timeline_id), "timeline_build")
+          : null;
       const subtitleRecord = timelineJob ? mostRecentJob(jobs, "subtitle_render", timelineJob.job_id) : null;
       const finalJobs = timelineJob ? jobs.filter((job) => job.job_type === "final_render" && job.input_ref === timelineJob.job_id) : [];
       const finalJob = timelineJob ? mostRecentJob(finalJobs, "final_render") : mostRecentJob(jobs, "final_render");
@@ -338,9 +375,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       const capcutJob = timelineJob ? mostRecentJob(capcutJobs, "capcut_draft_export") : null;
       let exactPreviewReadFailed = false;
       const [timeline, review, approval, subtitle, finalRender, capcutDraft, diagnostics, playbackManifest] = await Promise.all([
-        timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
-        timelineJob ? api.getReviewSnapshot(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
-        timelineJob && session ? api.getReviewApproval(refreshProjectId, session.timeline_id) : Promise.resolve(null),
+        sharedRead ? Promise.resolve(sharedRead.timeline) : timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
+        sharedRead ? Promise.resolve(sharedRead.review) : timelineJob ? api.getReviewSnapshot(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
+        sharedRead ? Promise.resolve(sharedRead.approval) : timelineJob && session ? api.getReviewApproval(refreshProjectId, session.timeline_id) : Promise.resolve(null),
         options?.subtitle && session && options.subtitle.subtitle.timeline_id === session.timeline_id
           ? Promise.resolve(options.subtitle)
           : subtitleRecord ? api.getSubtitle(refreshProjectId, subtitleRecord.job_id) : Promise.resolve(null),
@@ -389,7 +426,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     } finally {
       if (isCurrentRequest()) setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, onSharedRefresh]);
 
   const variantSession = state?.projectId === projectId ? state.session : null;
   useEffect(() => {
@@ -412,7 +449,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setCapcutErrorProjectId(null);
     setIsRegisteringCapcutHandoff(false);
     setCapcutHandoffErrorProjectId(null);
-    void refresh();
+    void refresh({ reuseShared: true });
     return () => {
       requestEpoch.current += 1;
       subtitleSubmissionEpoch.current += 1;
@@ -420,7 +457,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       capcutSubmissionEpoch.current += 1;
       capcutHandoffSubmissionEpoch.current += 1;
     };
-  }, [refresh]);
+    // 합쳐진 화면에서는 검토 쪽 읽기가 끝나 `shared`가 채워질 때 다시 그린다.
+    // 그 값 없이 먼저 그리면 아직 아무것도 없는 상태만 보인다.
+  }, [refresh, shared]);
 
   useEffect(() => {
     let active = true;

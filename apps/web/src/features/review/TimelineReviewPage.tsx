@@ -2,10 +2,11 @@ import { useCallback, useRef, useState } from "react";
 
 import { api, type ReviewSnapshot } from "../../api";
 import { Button } from "../../components/ui/button";
-import { useTimelineReviewState } from "./useTimelineReviewState";
+import { useTimelineReviewState, type TimelineReviewData, type TimelineReviewState } from "./useTimelineReviewState";
 
 type OpenSegmentInput = Readonly<{ projectId: string; sessionId: string; segmentId: string }>;
 
+/** 검토 화면을 단독으로 쓸 때. 자기 몫의 읽기를 스스로 한다. */
 export function TimelineReviewPage({
   projectId,
   onOpenSegment,
@@ -14,6 +15,22 @@ export function TimelineReviewPage({
   onOpenSegment?: (input: OpenSegmentInput) => void;
 }) {
   const { state, refresh } = useTimelineReviewState(projectId);
+  return <TimelineReviewSections projectId={projectId} state={state} refresh={refresh} onOpenSegment={onOpenSegment} />;
+}
+
+/** 읽기를 바깥에서 받아 그리는 형태. 출력과 한 화면으로 합쳐질 때 쓴다 --
+ * 그래야 같은 것을 두 번 묻지 않는다. */
+export function TimelineReviewSections({
+  projectId,
+  state,
+  refresh,
+  onOpenSegment,
+}: {
+  projectId: string;
+  state: TimelineReviewState;
+  refresh: () => Promise<TimelineReviewData>;
+  onOpenSegment?: (input: OpenSegmentInput) => void;
+}) {
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [deciding, setDeciding] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
@@ -54,7 +71,7 @@ export function TimelineReviewPage({
   const decide = useCallback(async (
     kind: "approve" | "reopen",
     jobId: string,
-    onDone: () => Promise<void>,
+    onDone: () => Promise<unknown>,
   ) => {
     const decideProjectId = projectId;
     setDeciding(true);
@@ -230,7 +247,7 @@ function segmentTargetLabel(review: ReviewSnapshot, segmentId: string) {
 
 function ReviewRecovery({ message, onRefresh, onRebuild, editorHref, rebuilding = false, rebuildMessage = null }: {
   message: string;
-  onRefresh: () => Promise<void>;
+  onRefresh: () => Promise<unknown>;
   /** 낡은 검토본을 지금 편집본으로 다시 세운다. 다시 세울 편집본을 알 때만 있다. */
   onRebuild?: () => Promise<void>;
   editorHref?: string;

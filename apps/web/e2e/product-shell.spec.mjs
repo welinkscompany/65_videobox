@@ -43,11 +43,11 @@ test("an empty local catalog leads to the single project-start action", async ({
   await expect(page.getByRole("button", { name: "프로젝트 만들고 소스 등록" })).toBeVisible();
 });
 
-test("desktop shell keeps global destinations separate from the open project's five stages", async ({ page }) => {
+test("desktop shell keeps global destinations separate from the open project's four stages", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/projects/local-draft/home");
   await expect(page.getByRole("navigation", { name: "전체 메뉴" }).getByRole("link")).toHaveCount(4);
-  await expect(page.getByRole("navigation", { name: "프로젝트 단계" }).getByRole("button")).toHaveCount(5);
+  await expect(page.getByRole("navigation", { name: "프로젝트 단계" }).getByRole("button")).toHaveCount(4);
   await page.getByRole("button", { name: "사이드바 접기" }).click();
   await expect(page.getByRole("button", { name: "사이드바 펼치기" })).toBeVisible();
   await page.getByRole("button", { name: "사이드바 펼치기" }).click();

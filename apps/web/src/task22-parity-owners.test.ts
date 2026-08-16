@@ -242,8 +242,9 @@ describe("Task 22 canonical production owners", () => {
       [/section === "home"/, /<HomePage\b/],
       [/section === "create" \|\| section === "plan"/, /<CreationInterview\b/],
       [/section === "media" \|\| section === "assets"/, /<MediaWorkspacePage\b/],
-      [/section === "outputs" \|\| section === "output"/, /<OutputsPage\b/],
-      [/section === "timeline" \|\| section === "review"/, /<TimelineReviewPage\b/],
+      // 검토와 출력은 한 단계로 합쳐졌다. 라우터가 가리키는 소유자는 둘을 담는
+      // 화면 하나이고, 두 주소 모두 그 화면을 그린다.
+      [/section === "outputs" \|\| section === "output" \|\| section === "timeline" \|\| section === "review"/, /<ReviewAndOutputPage\b/],
       [/(?:section === "editor" \|\| section === "edit")/, /<EditorWorkbenchRoute\b/],
     ] as const;
 
@@ -301,7 +302,7 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         capability: "timeline and review",
-        ownerSource: router, owner: /section === "timeline" \|\| section === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        ownerSource: router, owner: /section === "timeline" \|\| section === "review"[\s\S]{0,500}<ReviewAndOutputPage\b/,
         componentEvidence: [["features/review/TimelineReviewPage.test.tsx", "links an exact segment to the pinned editor"]],
         e2eEvidence: ["review-to-editor.spec.mjs", "opens the pinned editor"],
       },
@@ -319,7 +320,7 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         capability: "canonical outputs",
-        ownerSource: router, owner: /section === "outputs" \|\| section === "output"[\s\S]{0,360}<OutputsPage\b/,
+        ownerSource: router, owner: /section === "outputs" \|\| section === "output"[\s\S]{0,360}<ReviewAndOutputPage\b/,
         componentEvidence: [["app/OutputsPage.test.tsx", "owns the current exact-preview reference"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "current-revision playback and CapCut smoke"],
       },
@@ -373,7 +374,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "timeline and review",
         ownerSource: router,
-        owner: /section === "timeline" \|\| section === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        owner: /section === "timeline" \|\| section === "review"[\s\S]{0,500}<ReviewAndOutputPage\b/,
         componentEvidence: [
           ["features/review/TimelineReviewPage.test.tsx", "shows no-session, no-exact-match, load error, and an explicit successful refresh"],
           ["features/review/TimelineReviewPage.test.tsx", "fences a late project A detail response after switching to B"],
@@ -404,7 +405,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "outputs",
         ownerSource: router,
-        owner: /section === "outputs" \|\| section === "output"[\s\S]{0,360}<OutputsPage\b/,
+        owner: /section === "outputs" \|\| section === "output"[\s\S]{0,360}<ReviewAndOutputPage\b/,
         componentEvidence: [
           ["app/OutputsPage.test.tsx", "keeps a failed status read recoverable without offering output mutations"],
           ["app/OutputsPage.test.tsx", "does not let a delayed project A status response replace project B"],

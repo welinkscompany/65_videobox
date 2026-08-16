@@ -21,7 +21,9 @@ test("review route recovers an initial load error with an explicit authoritative
   await page.goto("/projects/local-draft/review");
 
   await expect(page.getByText("검토 내용을 불러오지 못했어요.")).toBeVisible();
-  await page.getByRole("button", { name: "다시 확인" }).click();
+  // 검토와 출력이 한 화면이 된 뒤로 "…다시 확인"으로 끝나는 단추가 여럿이다
+  // (출력 쪽 "상태 다시 확인"/"출력 상태 다시 확인"). 검토 쪽 것만 정확히 고른다.
+  await page.getByRole("button", { name: "다시 확인", exact: true }).click();
   await expect(page.getByRole("heading", { name: "영상 검토" })).toBeVisible();
   expect(jobsReadCount).toBe(2);
 });
