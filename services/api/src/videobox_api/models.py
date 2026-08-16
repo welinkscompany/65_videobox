@@ -1338,6 +1338,17 @@ class FinalRenderArtifactResponse(BaseModel):
     # 렌더가 실제로 잰 결과. 재지 못했거나 옛 완성본이면 None이고, 그때 화면은
     # 소리에 대해 아무 말도 하지 않는다.
     has_sound: bool | None = None
+    # 기계가 잰 것(quality_facts)과 사람이 정한 것(owner_verdict)을 갈라서 싣는다.
+    # 나중에 무엇을 근거로 배웠는지 구분할 수 있어야 한다.
+    quality_facts: dict[str, Any] = Field(default_factory=dict)
+    owner_verdict: str | None = None
+    owner_verdict_note: str | None = None
+    owner_verdict_at: str | None = None
+
+
+class FinalRenderVerdictRequest(BaseModel):
+    verdict: Literal["good", "bad"]
+    note: str | None = None
 
 
 class FinalRenderJobResponse(StartJobResponse):

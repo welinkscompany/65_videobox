@@ -44,6 +44,7 @@ from videobox_core_engine.ffmpeg_final_renderer import (
     FfmpegFinalRenderer,
     rendered_audio_has_sound,
 )
+from videobox_core_engine.render_quality_facts import composition_quality_facts
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
 from videobox_domain_models.output_variants import OutputVariant
@@ -2273,9 +2274,13 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     ),
                     source_session_absent=is_derived_variant_timeline or editing_session is None,
                     source_fence=final_source_fence,
-                    # 소리가 실렸는지는 만들어진 파일에서만 알 수 있다. 재 두지
-                    # 않으면 완전 무음 완성본이 아무 말 없이 나간다.
-                    metadata={"has_sound": has_sound} if has_sound is not None else None,
+                    # 이 완성본이 어땠는지 남긴다. 소리가 실렸는지는 만들어진
+                    # 파일에서만 알 수 있고, 나머지는 합성 계획에서 바로 나온다.
+                    # 재 두지 않으면 나중에 "지난 영상들보다 나은가"를 물을 수 없다.
+                    metadata={
+                        **composition_quality_facts(composition_plan),
+                        **({"has_sound": has_sound} if has_sound is not None else {}),
+                    },
                 )
             self.store.update_job(
                 project_id=project_id,

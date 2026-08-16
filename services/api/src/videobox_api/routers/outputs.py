@@ -16,6 +16,7 @@ from videobox_api.models import (
     ExportJobResponse,
     FinalRenderArtifactResponse,
     FinalRenderJobResponse,
+    FinalRenderVerdictRequest,
     OutputJobRequest,
     VariantRenderBatchResponse,
     VariantRenderItemResponse,
@@ -231,6 +232,35 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             job_id=result["job_id"],
             status=result["status"],
             render=FinalRenderArtifactResponse(**result["render"]) if result["render"] else None,
+        )
+
+    @router.post("/api/projects/{project_id}/final-renders/{job_id}/verdict")
+    def record_final_render_verdict(
+        project_id: str, job_id: str, payload: FinalRenderVerdictRequest
+    ) -> FinalRenderJobResponse:
+        """완성본을 보고 내린 판단을 그 완성본 옆에 남긴다.
+
+        기계가 잰 지표만으로는 무엇이 좋은 영상인지 배울 수 없다.
+        """
+        try:
+            result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+            if not result.get("render"):
+                raise KeyError(f"Final render has no artifact yet: {job_id}")
+            orchestrator.pipeline.store.record_final_render_verdict(
+                project_id=project_id,
+                export_id=result["render"]["export_id"],
+                verdict=payload.verdict,
+                note=payload.note,
+            )
+            result["render"] = orchestrator.pipeline.store.get_final_render_export(
+                project_id=project_id, export_id=result["render"]["export_id"]
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return FinalRenderJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            render=FinalRenderArtifactResponse(**result["render"]),
         )
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}/content")

@@ -661,6 +661,42 @@ describe("OutputsPage", () => {
     expect(screen.queryByText("완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.")).not.toBeInTheDocument();
   });
 
+  it("lets the owner say a finished video was good, and remembers it", async () => {
+    // 자기개선의 재료는 기계가 잰 지표 + 사람의 판단이다. 판단을 받을 자리가
+    // 화면에 없으면 라벨이 영영 쌓이지 않는다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    const artifact = {
+      export_id: "final-judged", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+      status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true, has_sound: true,
+    };
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({ job_id: currentFinalJob.job_id, status: "succeeded", render: artifact });
+    const verdict = vi.spyOn(api, "recordFinalRenderVerdict").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: { ...artifact, owner_verdict: "good" },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "이 완성본 좋아요" }));
+
+    await waitFor(() => expect(verdict).toHaveBeenCalledWith("project_a", currentFinalJob.job_id, { verdict: "good" }));
+    expect(await screen.findByText("좋았다고 기록했어요.")).toBeVisible();
+  });
+
+  it("keeps the judgement buttons away from a video that is not current", async () => {
+    // 낡은 완성본을 평가하면 어느 편집본에 대한 판단인지 알 수 없어진다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-stale", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://stale.mp4",
+        status: "succeeded", source_session_id: "session-old", source_session_revision: 3, is_current: false,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    await screen.findByText("완성본이 최신 편집본과 달라요.");
+    expect(screen.queryByRole("button", { name: "이 완성본 좋아요" })).not.toBeInTheDocument();
+  });
+
   it("accepts a rejected final request only when refresh finds a new running job", async () => {
     const runningFinalJob = {
       ...currentFinalJob,

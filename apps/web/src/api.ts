@@ -868,6 +868,11 @@ export type FinalRenderArtifact = {
   is_current?: boolean;
   /** 렌더가 실제로 잰 값. 재지 못했으면 없다 — 그때는 경고하지 않는다. */
   has_sound?: boolean | null;
+  /** 기계가 잰 것. 사람 판단(owner_verdict)과 섞지 않는다. */
+  quality_facts?: Record<string, unknown>;
+  owner_verdict?: "good" | "bad" | null;
+  owner_verdict_note?: string | null;
+  owner_verdict_at?: string | null;
 };
 
 export type FinalRenderJob = {
@@ -2380,6 +2385,10 @@ export const api = {
     }),
   getFinalRender: (projectId: string, jobId: string) =>
     request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}`),
+  recordFinalRenderVerdict: (projectId: string, jobId: string, payload: { verdict: "good" | "bad"; note?: string }) =>
+    request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}/verdict`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
   startCapcutDraftExport: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(
       `/api/projects/${projectId}/jobs/capcut-draft-export`,

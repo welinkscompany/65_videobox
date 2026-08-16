@@ -8103,6 +8103,34 @@ def test_output_jobs_ignore_stale_truthy_blocker_shapes_on_approved_timeline(tmp
     assert export_result.status_code == 200
 
 
+def test_the_verdict_route_refuses_a_word_it_cannot_count_later(tmp_path: Path) -> None:
+    # 아무 문자열이나 받으면 "좋았던 영상이 몇 개인가"를 물을 수 없다.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Verdict Route"}).json()["project_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/final-renders/final_render_job_001/verdict",
+        json={"verdict": "아주좋음"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_the_verdict_route_reports_a_render_that_has_no_video_yet(tmp_path: Path) -> None:
+    # 아직 만들어지지도 않은 완성본에 판단을 붙일 수는 없다.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Verdict Missing"}).json()["project_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/final-renders/final_render_job_001/verdict",
+        json={"verdict": "good"},
+    )
+
+    assert response.status_code == 404
+
+
 def test_capcut_export_result_rejects_a_job_that_is_not_a_capcut_export(tmp_path: Path) -> None:
     # 이 경로는 CapCut 초안 결과만 돌려준다. 다른 종류의 job_id를 주면 예전에는
     # 그 산출물을 JSON 매니페스트로 읽으려 들었고, 완성본(mp4)을 주면

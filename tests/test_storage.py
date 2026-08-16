@@ -341,6 +341,65 @@ def test_a_final_render_remembers_whether_it_had_sound(tmp_path: Path) -> None:
     assert fetched["has_sound"] is False
 
 
+def test_the_owner_verdict_on_a_finished_video_is_kept_with_it(tmp_path: Path) -> None:
+    # 기계가 잰 지표만으로는 "좋은 영상"을 배울 수 없다. owner의 판단이 라벨이다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Owner Verdict")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+        metadata={"has_sound": True, "scene_count": 4},
+    )
+
+    store.record_final_render_verdict(
+        project_id=project.project_id,
+        export_id=saved["export_id"],
+        verdict="good",
+        note="음악이 잘 맞았어요",
+    )
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["owner_verdict"] == "good"
+    assert fetched["owner_verdict_note"] == "음악이 잘 맞았어요"
+    # 잰 지표는 판단을 적어도 그대로 남는다. 둘을 함께 봐야 학습 재료가 된다.
+    assert fetched["quality_facts"]["scene_count"] == 4
+
+
+def test_a_finished_video_the_owner_has_not_judged_yet_says_so(tmp_path: Path) -> None:
+    # 판단하지 않은 것과 나쁘다는 것은 다르다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Unjudged")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id, timeline_id="t", source_output_path=rendered, source_session_absent=True,
+    )
+
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["owner_verdict"] is None
+
+
+def test_an_unknown_verdict_word_is_refused(tmp_path: Path) -> None:
+    # 아무 문자열이나 받으면 나중에 세어 볼 수가 없다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Bad Verdict")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id, timeline_id="t", source_output_path=rendered, source_session_absent=True,
+    )
+
+    with pytest.raises(ValueError):
+        store.record_final_render_verdict(
+            project_id=project.project_id, export_id=saved["export_id"], verdict="아주좋음",
+        )
+
+
 def test_a_final_render_saved_before_we_measured_sound_claims_nothing(tmp_path: Path) -> None:
     # 옛 완성본은 잰 적이 없다. 없는 것을 "소리 없음"으로 읽으면 멀쩡한 완성본에
     # 경고가 붙는다.

@@ -309,6 +309,10 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
   const [subtitleErrorProjectId, setSubtitleErrorProjectId] = useState<string | null>(null);
   const [isRenderingFinal, setIsRenderingFinal] = useState(false);
   const [finalErrorProjectId, setFinalErrorProjectId] = useState<string | null>(null);
+  // 판단은 프로젝트별로 기억한다. 프로젝트를 바꾸면 앞 프로젝트의 안내가 남으면 안 된다.
+  const [verdictProjectId, setVerdictProjectId] = useState<string | null>(null);
+  const [verdictSaved, setVerdictSaved] = useState<"good" | "bad" | null>(null);
+  const [isSavingVerdict, setIsSavingVerdict] = useState(false);
   const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
@@ -663,6 +667,20 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
       if (submissionEpoch === subtitleSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingSubtitle(false);
     }
   };
+  // 기계가 잰 지표만으로는 무엇이 좋은 영상인지 배울 수 없다. 이 판단이 라벨이다.
+  const handleVerdict = async (verdict: "good" | "bad") => {
+    const submissionProjectId = projectId;
+    if (!finalRender?.job_id || isSavingVerdict) return;
+    setIsSavingVerdict(true);
+    try {
+      await api.recordFinalRenderVerdict(submissionProjectId, finalRender.job_id, { verdict });
+      if (currentProjectId.current !== submissionProjectId) return;
+      setVerdictProjectId(submissionProjectId);
+      setVerdictSaved(verdict);
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsSavingVerdict(false);
+    }
+  };
   const handleRenderFinal = async () => {
     const submissionProjectId = projectId;
     const timelineKey = timelineJob ? `${submissionProjectId}:${timelineJob.job_id}` : null;
@@ -860,6 +878,14 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
           {currentFinal && finalRender.render?.has_sound === false ? <p>완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.</p> : null}
           {currentFinal ? <video className="vb-output-video" aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
+          {currentFinal ? <div className="vb-final-verdict">
+            {/* 낡은 완성본은 평가하지 않는다. 어느 편집본에 대한 판단인지 알 수 없어진다. */}
+            {verdictProjectId === projectId && verdictSaved
+              ? <p>{verdictSaved === "good" ? "좋았다고 기록했어요." : "아쉬웠다고 기록했어요."}</p>
+              : <p>이 완성본이 어땠는지 남겨 주시면 다음 추천이 좋아져요.</p>}
+            <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("good")}>이 완성본 좋아요</Button>
+            <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("bad")}>이 완성본 아쉬워요</Button>
+          </div> : null}
           {staleFinal ? <p>편집에서 새 완성본 만들기를 실행해 주세요.</p> : null}
           {finalRender?.status === "failed" ? <p>완성본 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
           {hasPendingFinal ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}

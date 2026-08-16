@@ -4658,6 +4658,13 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         except json.JSONDecodeError:
             metadata = {}
         has_sound = metadata.get("has_sound")
+        verdict = metadata.get("owner_verdict")
+        # 잰 지표와 owner 판단을 갈라서 돌려준다. 기계가 잰 것과 사람이 정한 것을
+        # 섞으면 나중에 무엇을 근거로 배웠는지 알 수 없다.
+        quality_facts = {
+            key: value for key, value in metadata.items()
+            if key not in {"owner_verdict", "owner_verdict_note", "owner_verdict_at"}
+        }
         return {
             "export_id": row["export_id"],
             "timeline_id": row["timeline_id"],
@@ -4672,7 +4679,52 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
             "invalidated_reason": row["invalidated_reason"],
             # 옛 완성본은 잰 적이 없다. 그때는 None으로 두어 화면이 경고하지 않는다.
             "has_sound": bool(has_sound) if isinstance(has_sound, bool) else None,
+            "quality_facts": quality_facts,
+            # 판단하지 않은 것과 나쁘다는 것은 다르다.
+            "owner_verdict": str(verdict) if isinstance(verdict, str) and verdict else None,
+            "owner_verdict_note": metadata.get("owner_verdict_note") or None,
+            "owner_verdict_at": metadata.get("owner_verdict_at") or None,
         }
+
+    def record_final_render_verdict(
+        self,
+        *,
+        project_id: str,
+        export_id: str,
+        verdict: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """완성본에 대한 owner의 판단을 그 완성본 옆에 남긴다.
+
+        기계가 잰 지표만으로는 "좋은 영상"을 배울 수 없다. 이 라벨이 학습 재료다.
+        렌더 기록을 지우거나 덮어쓰지 않고 metadata에 얹기만 한다.
+        """
+        allowed = {"good", "bad"}
+        if verdict not in allowed:
+            raise ValueError(f"final_render_verdict must be one of {sorted(allowed)}")
+        connection = self._connection(project_id)
+        try:
+            row = connection.execute(
+                "SELECT metadata_json FROM exports WHERE project_id = ? AND export_id = ?",
+                (project_id, export_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Export not found: {export_id}")
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+            metadata["owner_verdict"] = verdict
+            metadata["owner_verdict_note"] = (note or "").strip() or None
+            metadata["owner_verdict_at"] = self._now_iso()
+            connection.execute(
+                "UPDATE exports SET metadata_json = ? WHERE project_id = ? AND export_id = ?",
+                (json.dumps(metadata, ensure_ascii=True), project_id, export_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        return {"export_id": export_id, "owner_verdict": verdict}
 
     def save_capcut_draft_export(
         self,
