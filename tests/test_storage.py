@@ -321,6 +321,45 @@ def test_reading_an_export_run_refuses_a_media_artifact_instead_of_leaking_a_dec
     assert "codec" not in str(caught.value)
 
 
+def test_a_final_render_remembers_whether_it_had_sound(tmp_path: Path) -> None:
+    # 무음 완성본이 아무 말 없이 나가던 문제. 렌더가 잰 결과를 출력 행에 남겨야
+    # 화면이 owner에게 알릴 수 있다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Silent Final Render")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+        metadata={"has_sound": False},
+    )
+
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["has_sound"] is False
+
+
+def test_a_final_render_saved_before_we_measured_sound_claims_nothing(tmp_path: Path) -> None:
+    # 옛 완성본은 잰 적이 없다. 없는 것을 "소리 없음"으로 읽으면 멀쩡한 완성본에
+    # 경고가 붙는다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy Final Render")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+    )
+
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["has_sound"] is None
+
+
 def test_save_preview_run_summary_ignores_unknown_track_clip_group_count(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Preview Summary Count Project")

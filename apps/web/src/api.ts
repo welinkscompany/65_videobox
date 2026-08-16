@@ -866,6 +866,8 @@ export type FinalRenderArtifact = {
   source_session_id?: string | null;
   source_session_revision?: number | null;
   is_current?: boolean;
+  /** 렌더가 실제로 잰 값. 재지 못했으면 없다 — 그때는 경고하지 않는다. */
+  has_sound?: boolean | null;
 };
 
 export type FinalRenderJob = {

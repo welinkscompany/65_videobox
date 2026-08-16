@@ -631,6 +631,36 @@ describe("OutputsPage", () => {
     expect(api.listJobs).toHaveBeenCalledTimes(2);
   });
 
+  it("warns when the finished video carries no sound", async () => {
+    // 무음 완성본이 아무 말 없이 나가던 문제. 렌더가 실제로 잰 결과가
+    // "소리 없음"이면 내보내기 전에 화면에서 알려야 한다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-silent", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-silent.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true, has_sound: false,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.")).toBeVisible();
+  });
+
+  it("stays quiet about sound when the render carries sound or was not measured", async () => {
+    // 재는 데 실패했을 때 경고를 띄우면 멀쩡한 완성본을 의심하게 된다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-unmeasured", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-unmeasured.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByLabelText("완성본 재생")).toBeVisible();
+    expect(screen.queryByText("완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.")).not.toBeInTheDocument();
+  });
+
   it("accepts a rejected final request only when refresh finds a new running job", async () => {
     const runningFinalJob = {
       ...currentFinalJob,

@@ -4516,6 +4516,7 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         source_session_revision: int | None = None,
         source_session_absent: bool = False,
         source_fence: Callable[[sqlite3.Connection], bool] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Publish a final MP4 only while its durable source lineage is current.
 
@@ -4615,7 +4616,7 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
                     "final_render",
                     file_uri,
                     "succeeded",
-                    json.dumps({}, ensure_ascii=True),
+                    json.dumps(metadata or {}, ensure_ascii=True),
                     created_at,
                     source_session_id,
                     source_session_revision,
@@ -4641,7 +4642,7 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE project_id = ? AND export_id = ?
             """,
@@ -4652,6 +4653,11 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        has_sound = metadata.get("has_sound")
         return {
             "export_id": row["export_id"],
             "timeline_id": row["timeline_id"],
@@ -4664,6 +4670,8 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
             "is_current": bool(row["is_current"]),
             "invalidated_at": row["invalidated_at"],
             "invalidated_reason": row["invalidated_reason"],
+            # 옛 완성본은 잰 적이 없다. 그때는 None으로 두어 화면이 경고하지 않는다.
+            "has_sound": bool(has_sound) if isinstance(has_sound, bool) else None,
         }
 
     def save_capcut_draft_export(

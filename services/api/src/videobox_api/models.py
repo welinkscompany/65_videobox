@@ -1335,6 +1335,9 @@ class FinalRenderArtifactResponse(BaseModel):
     is_current: bool = True
     invalidated_at: str | None = None
     invalidated_reason: str | None = None
+    # 렌더가 실제로 잰 결과. 재지 못했거나 옛 완성본이면 None이고, 그때 화면은
+    # 소리에 대해 아무 말도 하지 않는다.
+    has_sound: bool | None = None
 
 
 class FinalRenderJobResponse(StartJobResponse):

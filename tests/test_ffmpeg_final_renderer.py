@@ -736,3 +736,32 @@ def test_final_render_audio_spans_the_timeline_when_music_covers_one_segment(tmp
         "-of", "default=noprint_wrappers=1:nokey=1", str(output_path),
     ], capture_output=True, text=True, check=True)
     assert float(probe.stdout.strip()) == pytest.approx(4.0, abs=0.5)
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_rendered_audio_has_sound_separates_a_silent_track_from_an_audible_one(tmp_path: Path) -> None:
+    # 오디오 스트림이 20초로 멀쩡히 있어도 내용이 무음일 수 있다. 길이만 보던
+    # 검사로는 구분되지 않아 완전 무음 완성본이 그대로 나갔다.
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store)
+    silent = tmp_path / "silent.mp4"
+    audible = tmp_path / "audible.mp4"
+    for path, source in ((silent, "anullsrc=r=48000:cl=stereo"), (audible, "sine=frequency=440:r=48000")):
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", source, "-t", "1", "-c:a", "aac", str(path)],
+            capture_output=True, text=True, check=True,
+        )
+
+    assert renderer.rendered_audio_has_sound(silent) is False
+    assert renderer.rendered_audio_has_sound(audible) is True
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_a_render_that_cannot_be_measured_claims_nothing_about_its_sound(tmp_path: Path) -> None:
+    # 재지 못한 것과 소리가 없는 것은 다르다. 섞으면 멀쩡한 완성본에 경고가 붙는다.
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store)
+    not_media = tmp_path / "not-media.mp4"
+    not_media.write_bytes(b"this is not a video")
+
+    assert renderer.rendered_audio_has_sound(not_media) is None

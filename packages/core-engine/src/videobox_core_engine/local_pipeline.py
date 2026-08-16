@@ -39,7 +39,11 @@ from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
-from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
+from videobox_core_engine.ffmpeg_final_renderer import (
+    FinalRenderError,
+    FfmpegFinalRenderer,
+    rendered_audio_has_sound,
+)
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
 from videobox_domain_models.output_variants import OutputVariant
@@ -2179,6 +2183,14 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                         project_id=project_id, job_id=job["job_id"], progress_percent=percent
                     ),
                 )
+                # 완성본에 들을 만한 소리가 담겼는지 여기서 잰다. 만들어진 파일에
+                # 대한 질문이라 렌더러 인터페이스를 거치지 않는다 — 대역 렌더러를
+                # 쓰는 호출부가 깨지면 안 된다. 재지 못하면 None이라 아무것도
+                # 주장하지 않는다.
+                has_sound = rendered_audio_has_sound(
+                    render_output_path,
+                    ffmpeg_binary=getattr(self.final_renderer, "ffmpeg_binary", "ffmpeg"),
+                )
                 # The renderer can run for minutes.  Re-check both the durable
                 # session/review contract and the *materialized* override inputs
                 # before an output file becomes a final-render export.
@@ -2261,6 +2273,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     ),
                     source_session_absent=is_derived_variant_timeline or editing_session is None,
                     source_fence=final_source_fence,
+                    # 소리가 실렸는지는 만들어진 파일에서만 알 수 있다. 재 두지
+                    # 않으면 완전 무음 완성본이 아무 말 없이 나간다.
+                    metadata={"has_sound": has_sound} if has_sound is not None else None,
                 )
             self.store.update_job(
                 project_id=project_id,

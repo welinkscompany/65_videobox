@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import tempfile
 import os
@@ -28,6 +29,64 @@ from videobox_storage.timeline_clip_source_resolution import (
 class FinalRenderError(RuntimeError):
     pass
 
+
+
+"""이 아래로는 들리지 않는 것으로 본다. 완전 무음은 -91dB로 측정된다."""
+AUDIBLE_PEAK_DBFS = -60.0
+
+
+def probe_audio_peak_dbfs(path: Path, *, ffmpeg_binary: str = "ffmpeg") -> float | None:
+    """만들어진 파일에서 실제로 들리는 가장 큰 음량(dBFS). 재지 못하면 None.
+
+    오디오 스트림이 20초로 멀쩡히 있어도 내용이 무음일 수 있다. 길이만 봐서는
+    구분되지 않아 완전 무음(-91dB) 완성본이 그대로 나간 적이 있다. 영상은 건너뛰고
+    오디오만 디코딩하므로 긴 영상에서도 몇 초면 끝난다.
+    """
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg_binary,
+                "-hide_banner",
+                "-nostats",
+                "-i",
+                str(path),
+                "-map",
+                "0:a:0",
+                "-af",
+                "volumedetect",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    found = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?) dB", result.stderr or "")
+    if found is None:
+        return None
+    try:
+        return float(found.group(1))
+    except ValueError:
+        return None
+
+
+def rendered_audio_has_sound(path: Path, *, ffmpeg_binary: str = "ffmpeg") -> bool | None:
+    """들을 만한 소리가 담겼는가. 재지 못했으면 None — 모르는 것과 없는 것은 다르다.
+
+    렌더러 객체가 아니라 만들어진 '파일'에 대한 질문이므로 함수로 둔다. 렌더러
+    인터페이스에 얹으면 대역 렌더러를 쓰는 호출부가 전부 깨진다.
+    """
+    peak = probe_audio_peak_dbfs(path, ffmpeg_binary=ffmpeg_binary)
+    if peak is None:
+        return None
+    return peak > AUDIBLE_PEAK_DBFS
 
 
 def _default_overlay_font() -> str:
@@ -583,6 +642,10 @@ class FfmpegFinalRenderer:
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
             raise FinalRenderError("Unable to inspect overlay media. Install/configure ffprobe.") from exc
         return result.returncode == 0 and result.stdout.strip() == "video"
+
+    def rendered_audio_has_sound(self, path: Path) -> bool | None:
+        """이 렌더러가 쓰는 ffmpeg로 재는 편의 메서드. 판단은 모듈 함수에 있다."""
+        return rendered_audio_has_sound(path, ffmpeg_binary=self.ffmpeg_binary)
 
     def _probe_audio_stream_duration(self, path: Path) -> float | None:
         """출력물 '오디오 스트림'의 실제 길이.
