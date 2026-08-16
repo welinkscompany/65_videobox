@@ -488,3 +488,70 @@ sha256이 달랐다. Task 1~3이 편집기 레이아웃을 더 바꿨고, Task 4
 
 이 넷은 다음 세션이 코드로 대신 완료할 수 없다. Claude가 할 수 있는 일은 이미
 2026-08-15·2026-08-16 두 세션에 걸쳐 전부 닫았다.
+
+---
+
+## 2026-08-16 후속 구현 — duration backfill + 라이브러리↔촬영본 카드 교차 진입
+
+위 미해결 항목 3·4 중 대표님이 실제로 진행을 지시한 두 건을 구현했다. 계획서는
+`C:\Users\atgro\.claude\plans\giggly-yawning-lightning.md`(로컬 plan 파일, 저장소 밖).
+3개 탐색 에이전트로 실제 코드를 조사해 범위를 좁혔다 — 프로젝트 "자산" 단계까지
+포함한 전면 통합과 5단계 단일 작업판 병합은 조사 결과 위험이 커서 **이번엔 하지
+않기로** 대표님께 확인받았다(편집기 렌더링 파이프라인·4,173줄 테스트 파급,
+세션 상태 공유 계층 부재·dock 2슬롯 한계가 각각의 이유).
+
+### Task 1: 라이브러리 duration backfill (`d2213582`)
+
+`library_ingest.py`의 `probe_metadata`는 ingest 시점 1회만 불렸고 실패하면 영구히
+비었다 — 프로젝트 b-roll에는 있던 재시도 루프(`_backfill_broll_media_facts`)가
+라이브러리 쪽엔 없었다. 같은 패턴으로 `_backfill_library_media_facts`를 추가하고
+같은 60초 유지보수 루프 자리에 연결했다.
+
+- 신규: `packages/core-engine/src/videobox_core_engine/library_media_facts.py`
+- 신규 store 메서드: `LibraryUserAssetStore.update_technical_metadata`
+- 신규 테스트: `tests/test_library_media_facts_backfill.py` (8개, 실제 ffmpeg로
+  end-to-end 검증)
+- 실제 컨테이너 재배포 후 유지보수 루프 1바퀴 확인: `wave2-long-qa.mp4`(18초),
+  `wave2-short-a/b/c.mp4`(각 3초) 전부 실제 길이로 채워짐. "길이 확인 중"/"길이
+  정보 없음" 0건.
+
+### Task 2: 라이브러리↔촬영본 카드 레벨 교차 진입 (`73a61d30`)
+
+기존 Task 6(2026-08-15) 링크는 자산을 **선택한 뒤** 미리보기 패널에만 보였다.
+P3의 "이 일은 어느 화면이지?"는 선택 전, 그리드를 보는 시점에 이미 생기는 고민이라
+링크를 카드/소스 항목 단위로 앞당겼다.
+
+- `VideoAssetGrid.tsx` 각 카드에 "구간 정리하기" 추가(`stopPropagation`으로 카드
+  선택과 분리), `FootageSourceList.tsx` 각 소스 항목에 "라이브러리에서 보기" 추가
+  (`<Button>` 안에 `<a>`를 중첩할 수 없어 형제 요소로 재구성)
+- 미리보기 패널의 기존 링크는 카드가 항상 보여주므로 중복이 되어 **제거**
+  (`LibraryPreviewPane.tsx`, `FootagePreview.tsx`)
+- 신규: `apps/web/e2e/library-footage-crosslink.spec.mjs` — `/footage`와 이
+  교차 링크에 처음 생긴 E2E(3개)
+- 실제 브라우저(1920×1080) 왕복 확인: 선택 없이 카드 링크 클릭 → 해당 자산이
+  선택된 채 `/footage` 로드 → 그 소스의 링크 클릭 → 같은 자산이 선택된 채
+  `/library`로 복귀. console error 0, 가로 overflow 0, 링크 키보드 포커스 가능.
+- 라이브러리/촬영본 화면 자체의 Playwright 스냅샷은 없어 재승인 불필요했다(확인
+  완료 — `apps/web/e2e/snapshots/`에 `editor-workbench-*`/`product-shell-*`뿐).
+
+### 검증 결과 (두 Task 공통 게이트)
+
+| 검증 | 결과 |
+|---|---|
+| Python 전체 (단독, Task 1 반영 후) | `3530 passed, 53 skipped` |
+| Python 전체 (단독, 최종 게이트) | `3530 passed, 53 skipped` |
+| frontend Vitest | `76 files / 975 passed` |
+| production build | 통과 |
+| Chromium E2E (`test:e2e`) | `45 passed` (신규 3개 포함) |
+| editor-workbench E2E | `10 passed` |
+| `git diff --check` | 통과 |
+| 실제 컨테이너 재배포·브라우저 확인 | Task별로 각각 완료(위 참고) |
+
+### 남은 것 — 이번에도 전부 사람 몫
+
+1. **owner acceptance** — 여전히 미완료.
+2. **Hermes 실제 provider(9119) 활성 상태에서 라이브 대화** — 여전히 미완료.
+   화면이 실제로 쓰는 로컬 qwen 경로는 2026-08-16 앞선 절에서 실제 대화로 확인됨.
+3. **UX "하지 않을 것" 남은 2건**(프로젝트 자산까지 포함한 전면 통합, 5단계 병합)
+   — 이번 세션에서 조사 후 대표님이 명시적으로 보류 결정. 재론의는 owner 판단.
+4. ~~옛 자산 4개 duration~~ — **이번 세션에서 해결.**
