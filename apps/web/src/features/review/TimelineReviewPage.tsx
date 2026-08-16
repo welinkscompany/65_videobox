@@ -1,40 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
-import {
-  api,
-  type EditingSession,
-  type JobRecord,
-  type ReviewApproval,
-  type ReviewSnapshot,
-  type TimelineJob,
-} from "../../api";
+import { api, type ReviewSnapshot } from "../../api";
 import { Button } from "../../components/ui/button";
-import {
-  collectTimelineReviewBlockers,
-  isCurrentTimelineReviewState,
-  selectCurrentTimelineJob,
-  type TimelineReviewBlocker,
-} from "./timeline-review-state";
-
-type ReadyState = Readonly<{
-  kind: "ready";
-  projectId: string;
-  session: EditingSession;
-  job: JobRecord;
-  timeline: TimelineJob;
-  review: ReviewSnapshot;
-  approval: ReviewApproval;
-  blockers: TimelineReviewBlocker[];
-}>;
-type ReviewState =
-  | ReadyState
-  | Readonly<{ kind: "loading"; projectId: string }>
-  | Readonly<{ kind: "no-session"; projectId: string }>
-  | Readonly<{ kind: "no-match"; projectId: string }>
-  | Readonly<{ kind: "error"; projectId: string }>
-  // 낡은 검토본을 지금 편집본으로 다시 세우려면 어느 편집본인지 알아야 한다.
-  // 편집본 자체를 못 읽은 경우에는 없으므로 단추도 그때는 뜨지 않는다.
-  | Readonly<{ kind: "stale"; projectId: string; sessionId?: string; reason?: string | null }>;
+import { useTimelineReviewState } from "./useTimelineReviewState";
 
 type OpenSegmentInput = Readonly<{ projectId: string; sessionId: string; segmentId: string }>;
 
@@ -45,88 +13,15 @@ export function TimelineReviewPage({
   projectId: string;
   onOpenSegment?: (input: OpenSegmentInput) => void;
 }) {
-  const [state, setState] = useState<ReviewState>({ kind: "loading", projectId });
+  const { state, refresh } = useTimelineReviewState(projectId);
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [deciding, setDeciding] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildMessage, setRebuildMessage] = useState<string | null>(null);
-  const requestEpoch = useRef(0);
+  // 승인·재개·다시 만들기가 끝난 뒤에도 여전히 같은 프로젝트를 보고 있는지
+  // 확인한다. 조회 쪽 경합 방어(훅 안)와는 별개로 이 화면이 직접 거는 가드다.
   const currentProjectId = useRef(projectId);
   currentProjectId.current = projectId;
-
-  const loadDetails = useCallback(async (
-    session: EditingSession,
-    job: JobRecord,
-    options?: Readonly<{ loading?: boolean }>,
-  ) => {
-    const loadProjectId = projectId;
-    const epoch = requestEpoch.current + 1;
-    requestEpoch.current = epoch;
-    const isCurrent = () => currentProjectId.current === loadProjectId && requestEpoch.current === epoch;
-    if (options?.loading !== false) setState({ kind: "loading", projectId: loadProjectId });
-    try {
-      const [timeline, review, approval] = await Promise.all([
-        api.getTimeline(loadProjectId, job.job_id),
-        api.getReviewSnapshot(loadProjectId, job.job_id),
-        api.getReviewApproval(loadProjectId, session.timeline_id),
-      ]);
-      if (!isCurrent()) return;
-      if (!isCurrentTimelineReviewState({ projectId: loadProjectId, session, job, timeline, review, approval })) {
-        setState({ kind: "stale", projectId: loadProjectId, sessionId: session.session_id, reason: approval.invalidated_reason });
-        return;
-      }
-      setState({
-        kind: "ready",
-        projectId: loadProjectId,
-        session,
-        job,
-        timeline,
-        review,
-        approval,
-        blockers: collectTimelineReviewBlockers(timeline, review),
-      });
-    } catch {
-      if (isCurrent()) setState({ kind: "error", projectId: loadProjectId });
-    }
-  }, [projectId]);
-
-  const refresh = useCallback(async () => {
-    const loadProjectId = projectId;
-    const epoch = requestEpoch.current + 1;
-    requestEpoch.current = epoch;
-    const isCurrent = () => currentProjectId.current === loadProjectId && requestEpoch.current === epoch;
-    setState({ kind: "loading", projectId: loadProjectId });
-    try {
-      const [session, jobs] = await Promise.all([
-        api.getLatestEditingSession(loadProjectId),
-        api.listJobs(loadProjectId),
-      ]);
-      if (!isCurrent()) return;
-      if (!session) {
-        setState({ kind: "no-session", projectId: loadProjectId });
-        return;
-      }
-      if (session.project_id !== loadProjectId || !session.timeline_id) {
-        setState({ kind: "stale", projectId: loadProjectId, reason: "session_mismatch" });
-        return;
-      }
-      const job = selectCurrentTimelineJob(session, jobs);
-      if (!job) {
-        setState({ kind: "no-match", projectId: loadProjectId });
-        return;
-      }
-      await loadDetails(session, job);
-    } catch {
-      if (isCurrent()) setState({ kind: "error", projectId: loadProjectId });
-    }
-  }, [loadDetails, projectId]);
-
-  useEffect(() => {
-    void refresh();
-    return () => {
-      requestEpoch.current += 1;
-    };
-  }, [refresh]);
 
   /** 낡은 검토본을 지금 편집본으로 다시 세운다.
    *
