@@ -16,6 +16,7 @@ import {
 } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
 import { VariantOutputCard } from "../features/outputs/VariantOutputCard";
 import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
 
@@ -309,6 +310,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
   const [subtitleErrorProjectId, setSubtitleErrorProjectId] = useState<string | null>(null);
   const [isRenderingFinal, setIsRenderingFinal] = useState(false);
   const [finalErrorProjectId, setFinalErrorProjectId] = useState<string | null>(null);
+  const [formatName, setFormatName] = useState("");
+  const [formatSavedProjectId, setFormatSavedProjectId] = useState<string | null>(null);
+  const [isSavingFormat, setIsSavingFormat] = useState(false);
   // 판단은 프로젝트별로 기억한다. 프로젝트를 바꾸면 앞 프로젝트의 안내가 남으면 안 된다.
   const [verdictProjectId, setVerdictProjectId] = useState<string | null>(null);
   const [verdictSaved, setVerdictSaved] = useState<"good" | "bad" | null>(null);
@@ -667,6 +671,23 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
       if (submissionEpoch === subtitleSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingSubtitle(false);
     }
   };
+  // 자동 제작은 "어떻게 만들지"를 이 포맷에서 가져간다. 마음에 든 완성본을 본
+  // 순간이 그것을 남길 유일한 때다.
+  const handleSaveFormat = async () => {
+    const submissionProjectId = projectId;
+    const name = formatName.trim();
+    // 이름 없는 포맷이 쌓이면 다음 영상에서 무엇을 고를지 알 수 없다.
+    if (!name || !currentSession?.session_id || isSavingFormat) return;
+    setIsSavingFormat(true);
+    try {
+      await api.saveFormatTemplate(submissionProjectId, { name, session_id: currentSession.session_id });
+      if (currentProjectId.current !== submissionProjectId) return;
+      setFormatSavedProjectId(submissionProjectId);
+      setFormatName("");
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsSavingFormat(false);
+    }
+  };
   // 기계가 잰 지표만으로는 무엇이 좋은 영상인지 배울 수 없다. 이 판단이 라벨이다.
   const handleVerdict = async (verdict: "good" | "bad") => {
     const submissionProjectId = projectId;
@@ -885,6 +906,19 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
               : <p>이 완성본이 어땠는지 남겨 주시면 다음 추천이 좋아져요.</p>}
             <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("good")}>이 완성본 좋아요</Button>
             <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("bad")}>이 완성본 아쉬워요</Button>
+          </div> : null}
+          {currentFinal ? <div className="vb-final-format">
+            {formatSavedProjectId === projectId
+              ? <p>포맷을 저장했어요. 다음 영상에서 편집 화면의 저장한 포맷에서 고를 수 있어요.</p>
+              : <p>이 영상처럼 만들고 싶으면 포맷으로 저장해 두세요.</p>}
+            <label htmlFor="format-template-name">포맷 이름</label>
+            <Input
+              id="format-template-name"
+              value={formatName}
+              placeholder="예: 내 브이로그 포맷"
+              onChange={(event) => setFormatName(event.target.value)}
+            />
+            <Button disabled={isSavingFormat} onClick={() => void handleSaveFormat()}>이 포맷 저장하기</Button>
           </div> : null}
           {staleFinal ? <p>편집에서 새 완성본 만들기를 실행해 주세요.</p> : null}
           {finalRender?.status === "failed" ? <p>완성본 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}

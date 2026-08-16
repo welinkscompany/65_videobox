@@ -420,6 +420,20 @@ export type EditorPreset = {
   style: CaptionStyleSnapshot;
 };
 
+/** 마음에 든 완성본의 '만드는 방식'. 자막 모양 프리셋보다 넓다 — 화면 크기·호흡·음악까지
+ *  함께 담고, 손으로 만드는 게 아니라 완성본에서 떠낸다. */
+export type FormatTemplate = {
+  template_id: string;
+  name: string;
+  caption_style: Record<string, unknown>;
+  width?: number | null;
+  height?: number | null;
+  average_scene_sec?: number;
+  scene_count?: number;
+  music_asset_id?: string | null;
+  updated_at?: string;
+};
+
 export type EditorFavorite = {
   favorite_id: string;
   favorite_type: "media" | "preset";
@@ -2385,6 +2399,21 @@ export const api = {
     }),
   getFinalRender: (projectId: string, jobId: string) =>
     request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}`),
+  listFormatTemplates: async (): Promise<FormatTemplate[]> =>
+    (await request<{ templates: FormatTemplate[] }>("/api/format-templates")).templates,
+  saveFormatTemplate: (projectId: string, payload: { name: string; session_id: string }) =>
+    request<FormatTemplate>(`/api/projects/${projectId}/format-templates`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  applyFormatTemplate: (
+    projectId: string,
+    templateId: string,
+    payload: { session_id: string; expected_revision: number; keep_output_size?: boolean },
+  ) =>
+    request<{ template_id: string; session: EditingSession }>(
+      `/api/projects/${projectId}/format-templates/${encodeURIComponent(templateId)}/apply`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
   recordFinalRenderVerdict: (projectId: string, jobId: string, payload: { verdict: "good" | "bad"; note?: string }) =>
     request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}/verdict`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

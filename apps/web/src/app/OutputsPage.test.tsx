@@ -681,6 +681,46 @@ describe("OutputsPage", () => {
     expect(await screen.findByText("좋았다고 기록했어요.")).toBeVisible();
   });
 
+  it("saves the format of a video the owner liked, under a name they chose", async () => {
+    // 자동 제작은 "어떻게 만들지"를 여기서 가져간다. 마음에 든 완성본을 봤을 때가
+    // 그 포맷을 남길 유일한 순간이다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-liked", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://f.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const save = vi.spyOn(api, "saveFormatTemplate").mockResolvedValue({
+      template_id: "format_template_1", name: "내 브이로그 포맷", caption_style: {},
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("포맷 이름"), { target: { value: "내 브이로그 포맷" } });
+    fireEvent.click(screen.getByRole("button", { name: "이 포맷 저장하기" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith("project_a", { name: "내 브이로그 포맷", session_id: "session-a" }));
+    expect(await screen.findByText("포맷을 저장했어요. 다음 영상에서 편집 화면의 저장한 포맷에서 고를 수 있어요.")).toBeVisible();
+  });
+
+  it("will not save a format without a name a person can recognize", async () => {
+    // 이름 없는 포맷이 쌓이면 다음 영상에서 무엇을 고를지 알 수 없다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-liked", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://f.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const save = vi.spyOn(api, "saveFormatTemplate");
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await screen.findByLabelText("포맷 이름");
+    fireEvent.click(screen.getByRole("button", { name: "이 포맷 저장하기" }));
+
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("keeps the judgement buttons away from a video that is not current", async () => {
     // 낡은 완성본을 평가하면 어느 편집본에 대한 판단인지 알 수 없어진다.
     stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });

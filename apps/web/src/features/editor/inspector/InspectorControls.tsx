@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CaptionStyleScope } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { CaptionPresetPicker, fromSnapshot } from "./CaptionPresetPicker";
+import { SavedFormatPicker } from "./SavedFormatPicker";
 import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
@@ -374,6 +375,8 @@ export function InspectorControls({
         <fieldset>
           <legend>자막 스타일</legend>
           {projectId ? <CaptionPresetPicker projectId={projectId} onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))} /> : null}
+          {/* 포맷은 프리셋과 같은 길로 들어온다 -- 화면 값에 넣고 아래 저장이 커밋한다. */}
+          <SavedFormatPicker onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))} />
           <label>글꼴<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, fontFamily: event.target.value }))} value={captionStyle.fontFamily} /></label>
           <label>글자 크기<Input disabled={disabled} min="1" onChange={(event) => setCaptionStyle((current) => ({ ...current, fontSizePx: numberValue(event.target.value, current.fontSizePx) }))} type="number" value={captionStyle.fontSizePx} /></label>
           <label>글자 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, textColor: event.target.value }))} value={captionStyle.textColor} /></label>
