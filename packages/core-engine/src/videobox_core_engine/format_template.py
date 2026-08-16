@@ -34,24 +34,47 @@ def _average_scene_sec(segments: list[dict[str, Any]]) -> float:
 
 def _single_music_asset_id(segments: list[dict[str, Any]]) -> str | None:
     """구간마다 음악이 다르면 하나로 줄이지 않는다. 아무거나 고르면 거짓말이 된다."""
-    chosen = {
-        str(segment.get("music_asset_id")).strip()
-        for segment in segments
-        if str(segment.get("music_asset_id") or "").strip()
-    }
+    chosen = set()
+    for segment in segments:
+        override = segment.get("music_override")
+        asset_id = str((override or {}).get("asset_id") or "").strip() if isinstance(override, dict) else ""
+        if asset_id:
+            chosen.add(asset_id)
     return chosen.pop() if len(chosen) == 1 else None
 
 
-def format_template_from_session(*, name: str, session: dict[str, Any]) -> dict[str, Any]:
-    """이 편집본이 '어떻게 보이는지'만 뽑아낸다."""
+def _caption_style(session: dict[str, Any], segments: list[dict[str, Any]]) -> dict[str, Any]:
+    """세션 수준 스타일이 비어 있으면 장면이 들고 있는 것을 쓴다.
+
+    실제 편집본은 `caption_style`이 `null`이고 장면마다 갖고 있을 수 있다.
+    세션만 보고 만들면 아무것도 안 담긴 포맷이 저장된다.
+    """
+    session_style = session.get("caption_style")
+    if isinstance(session_style, dict) and session_style:
+        return deepcopy(session_style)
+    for segment in segments:
+        style = segment.get("caption_style")
+        if isinstance(style, dict) and style:
+            return deepcopy(style)
+    return {}
+
+
+def format_template_from_session(
+    *, name: str, session: dict[str, Any], timeline: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """이 편집본이 '어떻게 보이는지'만 뽑아낸다.
+
+    화면 크기는 편집본이 아니라 타임라인에 있어서 따로 받는다.
+    """
     label = (name or "").strip()
     if not label:
         raise FormatTemplateError("포맷 이름을 지어 주세요.")
     segments = _segments(session)
-    output = session.get("output") if isinstance(session.get("output"), dict) else {}
+    raw_output = (timeline or {}).get("output")
+    output = raw_output if isinstance(raw_output, dict) else {}
     return {
         "name": label,
-        "caption_style": deepcopy(session.get("caption_style") or {}),
+        "caption_style": _caption_style(session, segments),
         "width": output.get("width"),
         "height": output.get("height"),
         # 호흡은 참고값이다. 다음 영상의 장면을 이 길이로 강제하지 않는다 —

@@ -42,6 +42,7 @@ from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.live_smoke_attestation import build_live_smoke_attestation_router
 from videobox_api.routers.media_inbox import build_media_inbox_router
 from videobox_api.routers.media_library import build_media_library_router
+from videobox_api.routers.format_templates import build_format_templates_router
 from videobox_api.routers.library_assets import build_library_assets_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
@@ -100,6 +101,7 @@ from videobox_core_engine.settings import (
     resolve_whisper_stt_config,
 )
 from videobox_core_engine.container_snapshot import ContainerSnapshotError, verify_container_snapshot
+from videobox_storage.format_template_store import FormatTemplateStore
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.postgres_project_store import PostgresProjectStore
@@ -1208,6 +1210,13 @@ def create_app(
             ingest_service=app.state.library_ingest_service,
             managed_root=user_library_root,
             managed_roots=resolved_library_asset_managed_roots,
+        )
+    )
+    # 포맷은 프로젝트가 아니라 사용자에게 붙는다 — 다음 영상은 보통 새 프로젝트다.
+    app.state.format_template_store = FormatTemplateStore(user_library_root)
+    app.include_router(
+        build_format_templates_router(
+            orchestrator=orchestrator, template_store=app.state.format_template_store
         )
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))

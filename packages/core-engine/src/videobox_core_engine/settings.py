@@ -295,9 +295,13 @@ class TTSEngineConfig:
     elevenlabs_voice_id: str = ""
     local_xtts_model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2"
     local_xtts_use_gpu: bool = False
+    chatterbox_use_gpu: bool = False
 
     def __post_init__(self) -> None:
-        valid_engines = {"gtts", "elevenlabs", "local_xtts"}
+        # `local_xtts`도 목소리를 복제하지만 Coqui CPML은 **비상업용**이다. 이 제품으로
+        # 매출을 내려면 `chatterbox`(Resemble AI, MIT, 한국어 지원)를 쓴다.
+        # 기능 차이가 아니라 라이선스 때문에 갈린다.
+        valid_engines = {"gtts", "elevenlabs", "local_xtts", "chatterbox"}
         if self.engine not in valid_engines:
             raise ValueError(f"tts_engine_config.engine must be one of {sorted(valid_engines)}.")
         if not self.language.strip():

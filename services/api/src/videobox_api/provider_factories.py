@@ -47,10 +47,17 @@ def _build_tts_provider(config: TTSEngineConfig) -> Any | None:
             api_key=config.elevenlabs_api_key,
             voice_id=config.elevenlabs_voice_id,
         )
-    from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
+    if config.engine == "local_xtts":
+        from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
 
-    return LocalXTTSProvider(
-        model_name=config.local_xtts_model_name,
+        return LocalXTTSProvider(
+            model_name=config.local_xtts_model_name,
+            language=config.language,
+            use_gpu=config.local_xtts_use_gpu,
+        )
+    from videobox_provider_interfaces.chatterbox_tts_provider import ChatterboxTTSProvider
+
+    return ChatterboxTTSProvider(
         language=config.language,
-        use_gpu=config.local_xtts_use_gpu,
+        device="cuda" if config.chatterbox_use_gpu else "cpu",
     )
