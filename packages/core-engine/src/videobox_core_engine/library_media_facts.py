@@ -12,35 +12,27 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
 from typing import Any, Iterable
 
 from videobox_domain_models.library_assets import LibraryMediaType
+from videobox_storage.local_project_store import sha256_file
 
 _logger = logging.getLogger(__name__)
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def library_assets_needing_media_facts(
-    *, store: Any, media_type: LibraryMediaType | str = LibraryMediaType.BROLL, limit: int | None = None
-) -> list[dict[str, Any]]:
+def library_assets_needing_media_facts(*, store: Any, limit: int | None = None) -> list[dict[str, Any]]:
     """길이를 아직 못 받은 라이브러리 broll 자산.
 
     `duration_seconds` 유무를 표시로 쓴다 -- ingest 성공 시 반드시 쓰는 값이고
-    화면(`assetDurationLabel.ts`)이 읽는 값이기 때문이다.
+    화면(`assetDurationLabel.ts`)이 읽는 값이기 때문이다. `is None` 체크다 --
+    `0.0`초(깨진 업로드가 ffprobe는 성공하되 길이 0으로 나온 경우)를 falsy로
+    보고 "아직 안 됨"으로 착각하면 그 자산이 매 패스마다 다시 걸린다.
     """
     pending: list[dict[str, Any]] = []
-    for asset in store.list_assets(media_type=media_type):
-        if asset.technical_metadata.get("duration_seconds"):
+    for asset in store.list_assets(media_type=LibraryMediaType.BROLL):
+        if asset.technical_metadata.get("duration_seconds") is not None:
             continue
         pending.append(
             {
@@ -55,13 +47,19 @@ def library_assets_needing_media_facts(
 
 
 def _resolve_verified_path(*, roots: Iterable[Path], managed_relative_path: str, content_sha256: str) -> Path | None:
+    # `source_for_user`(routers/library_assets.py)와 같은 검증이다 -- root도
+    # resolve해야 한다. 안 그러면 데이터 루트가 심볼릭 링크로 마운트된
+    # 배포본에서 candidate(resolve됨)와 root(안 됨)가 어긋나 relative_to가
+    # 매번 ValueError를 던지고, 실제로 존재하는 파일도 영원히 "못 찾음"으로
+    # 남는다.
     for root in roots:
-        candidate = (root / managed_relative_path).resolve()
+        resolved_root = root.resolve()
+        candidate = (resolved_root / managed_relative_path).resolve()
         try:
-            candidate.relative_to(root)
+            candidate.relative_to(resolved_root)
         except ValueError:
             continue
-        if candidate.is_file() and _sha256(candidate) == content_sha256:
+        if candidate.is_file() and sha256_file(candidate) == content_sha256:
             return candidate
     return None
 
@@ -94,6 +92,18 @@ def record_library_media_facts(
         probed = probe.probe_metadata(path)
         if not probed.width or not probed.height:
             raise ValueError("ffprobe가 영상의 가로·세로 크기를 돌려주지 않았습니다")
+        # store 쓰기도 이 try 안에 둔다 -- probe와 쓰기 사이에 owner가 자산을
+        # 완전히 삭제하면 KeyError가 나는데, 이 함수는 "실패해도 예외를 올리지
+        # 않는다"고 스스로 약속했다(위 docstring). 그 약속을 지킨다.
+        store.update_technical_metadata(
+            library_asset_id,
+            {
+                "duration_seconds": float(probed.duration_sec),
+                "width": int(probed.width),
+                "height": int(probed.height),
+                "has_audio": probed.audio_codec is not None,
+            },
+        )
     except Exception:
         _logger.warning(
             "라이브러리 자산의 영상 정보를 읽지 못했습니다 (library_asset_id=%s). 다음 차례에 다시 잽니다.",
@@ -101,15 +111,6 @@ def record_library_media_facts(
             exc_info=True,
         )
         return False
-    store.update_technical_metadata(
-        library_asset_id,
-        {
-            "duration_seconds": float(probed.duration_sec),
-            "width": int(probed.width),
-            "height": int(probed.height),
-            "has_audio": probed.audio_codec is not None,
-        },
-    )
     return True
 
 

@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import subprocess
 from pathlib import Path
 
@@ -18,8 +17,10 @@ from videobox_core_engine.library_media_facts import (
     library_assets_needing_media_facts,
     record_library_media_facts,
 )
+from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_domain_models.library_assets import LibraryAssetOrigin, LibraryMediaType
 from videobox_storage.library_user_asset_store import LibraryUserAssetStore
+from videobox_storage.local_project_store import sha256_file
 
 
 def _write_video(path: Path, *, size: str = "320x180", duration: int = 2) -> Path:
@@ -32,24 +33,21 @@ def _write_video(path: Path, *, size: str = "320x180", duration: int = 2) -> Pat
     return path
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-class _RealFFmpegProbe:
-    def probe_metadata(self, path: Path):
-        from videobox_core_engine.media_probe import FFmpegMediaProbe
-
-        return FFmpegMediaProbe().probe_metadata(path)
-
-
 class _ExplodingProbe:
     def probe_metadata(self, _path):  # noqa: ANN001
         raise RuntimeError("ffprobe binary is unavailable")
+
+
+class _FixedProbe:
+    """probe_metadata를 미리 정한 값으로 즉시 돌려준다 -- 배선/로직 테스트에서
+    ffmpeg 서브프로세스를 또 돌리지 않기 위해서다(정확한 프로브 값 자체는
+    real ffmpeg를 실제로 쓰는 테스트가 이미 검증한다)."""
+
+    def __init__(self, *, width=320, height=180, duration_sec=2.0, audio_codec="aac") -> None:
+        self._result = type("Probed", (), {"width": width, "height": height, "duration_sec": duration_sec, "audio_codec": audio_codec})()
+
+    def probe_metadata(self, _path):  # noqa: ANN001
+        return self._result
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +116,7 @@ def _ingest_broken(store: LibraryUserAssetStore, root: Path, tmp_path: Path, *, 
     destination = root / relative
     destination.parent.mkdir(parents=True, exist_ok=True)
     _write_video(destination, size="320x180")
-    content_sha256 = _sha256(destination)
+    content_sha256 = sha256_file(destination)
     asset = store.register_asset(
         library_asset_id=f"user:{name}",
         media_type=LibraryMediaType.BROLL,
@@ -152,7 +150,7 @@ def test_a_missing_source_file_is_not_treated_as_success(library, tmp_path: Path
     ).library_asset_id
 
     result = record_library_media_facts(
-        store=store, roots=(root,), probe=_RealFFmpegProbe(),
+        store=store, roots=(root,), probe=_FixedProbe(),
         library_asset_id=asset_id, managed_relative_path="assets/broll/does-not-exist.mp4",
         content_sha256="a" * 64,
     )
@@ -183,7 +181,7 @@ def test_a_later_pass_fills_in_what_intake_missed(library, tmp_path: Path) -> No
     asset = store.get_asset(asset_id)
 
     result = record_library_media_facts(
-        store=store, roots=(root,), probe=_RealFFmpegProbe(),
+        store=store, roots=(root,), probe=FFmpegMediaProbe(),
         library_asset_id=asset_id, managed_relative_path=asset.managed_relative_path,
         content_sha256=asset.content_sha256,
     )
@@ -199,6 +197,26 @@ def test_a_later_pass_fills_in_what_intake_missed(library, tmp_path: Path) -> No
     assert library_assets_needing_media_facts(store=store) == []
 
 
+def test_zero_second_duration_still_counts_as_recorded(library, tmp_path: Path) -> None:
+    """0.0초는 falsy라서 `if ...get("duration_seconds")`로 검사하면 "아직 안 됨"으로
+    착각해 매 패스마다 다시 건다. 깨진 업로드가 ffprobe는 성공하되 길이 0을
+    돌려주는 경우가 정확히 이 상황이다."""
+    store, root = library
+    asset_id = _ingest_broken(store, root, tmp_path, name="zero-duration")
+    asset = store.get_asset(asset_id)
+
+    result = record_library_media_facts(
+        store=store, roots=(root,), probe=_FixedProbe(duration_sec=0.0),
+        library_asset_id=asset_id, managed_relative_path=asset.managed_relative_path,
+        content_sha256=asset.content_sha256,
+    )
+
+    assert result is True
+    assert store.get_asset(asset_id).technical_metadata["duration_seconds"] == 0.0
+    # 0.0초로 채워졌으면 더 이상 대상이 아니다 -- 영원히 재시도되면 안 된다.
+    assert library_assets_needing_media_facts(store=store) == []
+
+
 def test_content_hash_mismatch_refuses_to_probe(library, tmp_path: Path) -> None:
     """다른 root의 다른 파일을 잘못 집어 ffprobe하지 않도록 해시로 지킨다."""
     store, root = library
@@ -206,13 +224,54 @@ def test_content_hash_mismatch_refuses_to_probe(library, tmp_path: Path) -> None
     asset = store.get_asset(asset_id)
 
     result = record_library_media_facts(
-        store=store, roots=(root,), probe=_RealFFmpegProbe(),
+        store=store, roots=(root,), probe=_FixedProbe(),
         library_asset_id=asset_id, managed_relative_path=asset.managed_relative_path,
         content_sha256="0" * 64,  # 저장된 값과 다름
     )
 
     assert result is False
     assert store.get_asset(asset_id).technical_metadata == {}
+
+
+def test_an_unresolved_root_still_finds_the_real_file(library, tmp_path: Path) -> None:
+    """root 자체를 resolve하지 않으면, root가 정규화되지 않은 경로일 때(컨테이너
+    볼륨 마운트가 심볼릭 링크를 거치는 배포본에서 흔하다) candidate(resolve됨)와
+    root(안 됨)가 어긋나 relative_to가 매번 ValueError를 던진다 -- 실제로 있는
+    파일도 영원히 "못 찾음"으로 남는 회귀다. 이 환경(Windows, 심볼릭 링크 권한
+    없음)에서도 재현 가능하도록 `..`로 되돌아오는 정규화 전 경로로 같은 결함
+    유형을 재현한다."""
+    store, root = library
+    asset_id = _ingest_broken(store, root, tmp_path, name="via-unresolved-root")
+    asset = store.get_asset(asset_id)
+
+    unresolved_root = root / "detour" / ".."  # resolve()해야만 root와 같아진다
+
+    result = record_library_media_facts(
+        store=store, roots=(unresolved_root,), probe=_FixedProbe(),
+        library_asset_id=asset_id, managed_relative_path=asset.managed_relative_path,
+        content_sha256=asset.content_sha256,
+    )
+
+    assert result is True
+    assert store.get_asset(asset_id).technical_metadata.get("duration_seconds") is not None
+
+
+def test_asset_deleted_between_probe_and_write_does_not_raise(library, tmp_path: Path) -> None:
+    """probe가 끝난 뒤 store 쓰기 직전에 owner가 자산을 완전히 삭제하면
+    `update_technical_metadata`가 KeyError를 던진다. 이 함수는 "실패해도 예외를
+    올리지 않는다"고 스스로 약속했으니 그 약속을 지켜야 한다."""
+    store, root = library
+    asset_id = _ingest_broken(store, root, tmp_path, name="deleted-mid-flight")
+    asset = store.get_asset(asset_id)
+    store.permanently_delete_asset(asset_id)
+
+    result = record_library_media_facts(
+        store=store, roots=(root,), probe=_FixedProbe(),
+        library_asset_id=asset_id, managed_relative_path=asset.managed_relative_path,
+        content_sha256=asset.content_sha256,
+    )
+
+    assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -235,14 +294,14 @@ def test_the_app_entry_point_recovers_missing_facts_directly(library, tmp_path: 
     app = SimpleNamespace(
         state=SimpleNamespace(
             media_library_store=media_library_store,
-            media_analysis_probe=_RealFFmpegProbe(),
+            media_analysis_probe=_FixedProbe(),
             library_asset_managed_roots=(root,),
         )
     )
 
     _backfill_library_media_facts(app)
 
-    assert store.get_asset(asset_id).technical_metadata.get("duration_seconds") == pytest.approx(2.0, abs=0.3)
+    assert store.get_asset(asset_id).technical_metadata.get("duration_seconds") == 2.0
 
 
 def test_missing_wiring_does_not_crash_the_loop() -> None:

@@ -175,11 +175,47 @@ describe("LibraryPage", () => {
 
     // 첫 번째 카드(선택되지 않은 카드)의 링크는 여전히 보이고, 클릭해도 선택은 안 바뀐다.
     const firstCard = screen.getByRole("article", { name: "walk.mp4" });
-    const entry = within(firstCard).getByRole("link", { name: "구간 정리하기" });
+    const entry = within(firstCard).getByRole("link", { name: "walk.mp4 구간 정리하기" });
     expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
 
     fireEvent.click(entry);
     expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+  });
+
+  it("does not let the card's select-on-Enter handler swallow keyboard activation of its crosslink", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({
+      assets: [asset(), asset({ library_asset_id: "user_asset_2", user_metadata: { filename: "second.mp4" } })],
+      total: 2,
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("second.mp4");
+    fireEvent.click(screen.getByRole("article", { name: "second.mp4" }));
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+
+    // 선택되지 않은 첫 카드(walk.mp4)의 링크에서 Enter를 누른다. 카드의
+    // onSelect(Enter/Space) 핸들러로 전파됐다면 선택이 walk.mp4로 바뀐다 --
+    // 링크는 네이티브 <a>라 실제로는 이동해야 할 키 입력이다.
+    const firstCard = screen.getByRole("article", { name: "walk.mp4" });
+    const entry = within(firstCard).getByRole("link", { name: "walk.mp4 구간 정리하기" });
+    fireEvent.keyDown(entry, { key: "Enter", code: "Enter" });
+
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+  });
+
+  it("keeps the selected video's crosslink reachable after switching to the music tab (the video card disappears from that tab)", async () => {
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+    expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "음악" }));
+
+    // walk.mp4는 여전히 선택된 채 미리보기에 남아 있지만, 음악 탭에는 그 영상의
+    // 카드가 없다 -- 미리보기 패널의 링크가 유일한 경로여야 한다.
+    expect(screen.queryByTestId("library-asset-card")).toBeNull();
+    expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
+    const entry = screen.getByRole("link", { name: "구간 정리하기" });
+    expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
   });
 
   it("preselects the video asset a footage-organizer link named in the URL", async () => {
