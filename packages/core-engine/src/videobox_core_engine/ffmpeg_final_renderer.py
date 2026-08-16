@@ -488,6 +488,13 @@ class FfmpegFinalRenderer:
         # `encoder_thread_limit` 참고.
         command = [self.ffmpeg_binary, "-y", "-filter_complex_threads", threads, "-filter_threads", threads]
         for path, is_image, should_loop in source_paths:
+            # 디코더도 상한을 지켜야 한다. 인코더·필터만 묶으면 입력 하나마다
+            # 디코더가 호스트 CPU 수(16)만큼 스레드를 잡아, 입력 6개짜리 렌더가
+            # 컨테이너 프로세스 상한(128)을 넘본다. 그 압박에서 스레드 생성이
+            # 조용히 실패하면 오디오 브랜치만 일찍 끝난 채 성공(0)으로 끝날 수
+            # 있다 — 2026-08-16에 20초 영상에 5초 소리만 담긴 완성본이 그렇게
+            # 나왔다.
+            command += ["-threads", threads]
             if should_loop:
                 command += ["-stream_loop", "-1"]
             if is_image:
@@ -511,6 +518,16 @@ class FfmpegFinalRenderer:
                 generated_ass.unlink(missing_ok=True)
         if result.returncode != 0:
             raise FinalRenderError(f"ffmpeg failed rendering canonical composition: {result.stderr[-800:]}")
+        # 오디오가 타임라인보다 짧게 나온 출력은 조용히 내보내지 않는다. 스레드
+        # 압박에서 ffmpeg가 오디오 쪽만 일찍 끝내고도 0으로 종료한 실사례가
+        # 있다(2026-08-16, 20초 영상에 5초 소리). 허용 오차는 AAC 프레임
+        # 정렬을 감안한 값이다.
+        audio_duration = self._probe_audio_stream_duration(output_path)
+        if audio_duration is None or audio_duration + 0.75 < duration:
+            measured = "missing" if audio_duration is None else f"{audio_duration:.2f}s"
+            raise FinalRenderError(
+                f"Rendered audio track is shorter than the timeline ({measured} < {duration:.2f}s). Retry the render."
+            )
         return output_path
 
     def _run(self, command: list[str]) -> subprocess.CompletedProcess:
@@ -566,6 +583,41 @@ class FfmpegFinalRenderer:
         except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
             raise FinalRenderError("Unable to inspect overlay media. Install/configure ffprobe.") from exc
         return result.returncode == 0 and result.stdout.strip() == "video"
+
+    def _probe_audio_stream_duration(self, path: Path) -> float | None:
+        """출력물 '오디오 스트림'의 실제 길이.
+
+        컨테이너(format) 길이는 영상이 길면 영상을 따라가므로, 오디오가 잘렸는지는
+        스트림을 직접 봐야 한다. 실패하면 None -- 호출부가 fail-closed로 다룬다.
+        """
+        try:
+            result = subprocess.run(
+                [
+                    self.ffprobe_binary,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        if result.returncode != 0:
+            return None
+        try:
+            return float((result.stdout or "").strip())
+        except ValueError:
+            return None
 
     def _probe_media_duration(self, path: Path) -> float:
         try:

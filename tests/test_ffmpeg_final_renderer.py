@@ -92,6 +92,7 @@ def test_the_render_command_caps_filter_threads_not_just_the_encoder(
         lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
     )
     monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
     monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
     monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
 
@@ -587,3 +588,151 @@ def _frame_rgb(video_path: Path, *, at_sec: float, width: int, height: int) -> b
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     assert len(result.stdout) == width * height * 3
     return result.stdout
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-16: 완성본 오디오가 음악 구간 길이(5초)로 잘린 채 20초 영상이 성공(0)
+# 처리된 실사례. 컨테이너 프로세스 상한(128) 근처에서 ffmpeg 스레드 생성이
+# 조용히 실패하면 브랜치 하나만 일찍 끝난 채 출력이 나올 수 있다. 대책 둘 --
+# 디코더까지 스레드 상한을 지키게 하고, 오디오가 짧게 나온 출력은 내보내기
+# 전에 실패로 돌린다.
+# ---------------------------------------------------------------------------
+
+
+def _tiny_plan_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, renderer: FfmpegFinalRenderer, store: LocalProjectStore, project_id: str, commands: list[list[str]]) -> None:
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 5.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    timeline = {
+        "timeline_id": "timeline-decoder-threads", "project_id": project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 5.0,
+            "media_controls": {},
+        }]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+
+def test_every_input_is_decoder_thread_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """인코더·필터만 묶으면 입력 6개짜리 렌더에서 디코더들이 호스트 CPU 수만큼
+    스레드를 잡는다. 모든 `-i` 앞에 상한이 붙어야 한다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("DecoderThreads")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    _tiny_plan_render(tmp_path, monkeypatch, renderer, store, project.project_id, commands)
+
+    command = commands[0]
+    cap = str(renderer.encoder_thread_limit())
+    for index, token in enumerate(command):
+        if token != "-i":
+            continue
+        window = command[max(0, index - 6):index]
+        assert "-threads" in window and window[window.index("-threads") + 1] == cap, (
+            f"input at position {index} has no decoder thread cap: {window}"
+        )
+
+
+def test_a_render_whose_audio_comes_out_short_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """오디오가 타임라인보다 짧게 나온 출력은 성공으로 내보내지 않는다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("ShortAudio")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    # 20초 계획인데 오디오 스트림이 5초로 끝난 상황.
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 5.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    timeline = {
+        "timeline_id": "timeline-short-audio", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 20.0,
+            "media_controls": {"loop": True},
+        }]}],
+    }
+    with pytest.raises(FinalRenderError, match="audio"):
+        renderer._render_composition_plan_to_mp4(
+            project_id=project.project_id,
+            composition_plan=renderer.extract_composition_plan(timeline=timeline),
+            timeline_context=timeline,
+            output_path=tmp_path / "out.mp4",
+            subtitle_file_path=None,
+            subtitle_ass_path=None,
+            proxy_profile=False,
+        )
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg is required")
+def test_final_render_audio_spans_the_timeline_when_music_covers_one_segment(tmp_path: Path) -> None:
+    """음악이 첫 구간에만 있어도 완성본 오디오는 타임라인 전체를 덮어야 한다.
+    2026-08-16 실사례에서는 20초 영상에 5초 소리만 담긴 채 성공 처리됐다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("PartialMusic")
+    video = tmp_path / "src.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=15",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video),
+    ], check=True, capture_output=True)
+    music = tmp_path / "bgm.wav"
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+        "-ac", "2", "-ar", "48000", str(music),
+    ], check=True, capture_output=True)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    bgm = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=music)
+    timeline = {
+        "timeline_id": "timeline-partial-music", "project_id": project.project_id,
+        "output": {"width": 320, "height": 240},
+        "tracks": [
+            {"track_id": "v", "track_type": "broll", "clips": [{
+                "clip_id": "b1", "clip_type": "broll", "asset_id": broll.asset_id,
+                "asset_uri": broll.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 4.0,
+                "media_controls": {},
+            }]},
+            {"track_id": "m", "track_type": "bgm", "clips": [{
+                "clip_id": "m1", "clip_type": "bgm", "asset_id": bgm.asset_id,
+                "asset_uri": bgm.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 1.0,
+                "media_controls": {},
+            }]},
+        ],
+    }
+    output_path = tmp_path / "out.mp4"
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15)
+    # 실제 파이프라인과 같은 경로(계획 기반)로 태운다.
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id, timeline=timeline, output_path=output_path,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+    )
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(output_path),
+    ], capture_output=True, text=True, check=True)
+    assert float(probe.stdout.strip()) == pytest.approx(4.0, abs=0.5)
