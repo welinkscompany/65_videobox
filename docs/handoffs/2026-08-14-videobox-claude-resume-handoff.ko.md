@@ -678,3 +678,114 @@ build 통과, E2E `46 passed`, `git diff --check` 통과, 실제 컨테이너 �
 **남은 것 (그대로):** owner acceptance(완성본 시청·승인), Hermes egress provider 로그인.
 `product-shell-*.png` 스냅샷 5장은 사이드바가 바뀌어 낡았고, 재생성은 owner 승인 사항이라
 하지 않았다.
+
+---
+
+## 2026-08-16 저녁 — owner 승인 두 건 실행과 완성본 실제 제작
+
+owner가 남은 두 항목을 모두 승인했다: ① 완성본을 Claude가 직접 만들어 기술 점검,
+② Hermes provider 확인. 결과는 아래와 같고, **취향 판단(자막 타이밍·음량·밀도)은
+여전히 owner 몫**이다 — 완성본 파일을 owner에게 전달했다.
+
+### ① 완성본 제작 — 전 구간을 실제 브라우저로 밟아 성공
+
+`my-project`의 QA 세션(`editing_session_draft_5ee4d7c4b924`)으로 owner가 밟을 경로
+그대로: gap 3개를 편집기에서 채우고 → 검토본 재생성 → 승인 → 자막 렌더 → 완성본
+렌더(export_002).
+
+**결과물 실측:** H.264 1920×1080 30fps + AAC 48kHz 스테레오, 정확히 20.000초, 3.1MB.
+프레임 추출로 장면별 자막 번인과 B-roll 배치 육안 확인. 음량 평균 -26dB/최대 -9.6dB
+(배경 음악 적용 후).
+
+**과정에서 나온 실사용 발견 3건:**
+
+1. **gap placeholder 자산이 "적용 가능한 자산"으로 노출된다.** 자산 dock의
+   `B-roll 1~4 적용` 버튼은 실제로는 0초짜리 gap placeholder 자산이라, 눌러도
+   공백이 공백으로 바뀔 뿐이다. 처음 세 번의 적용이 이것 때문에 헛돌았다.
+   owner도 같은 함정에 빠질 수 있다 — placeholder는 dock에서 숨기거나 구분 표시가
+   필요하다. (자산 화면의 "B-roll 1~4 · 길이 0초" 카드도 같은 뿌리)
+2. **첫 렌더는 완전 무음(-91dB)이었다.** 결함이 아니라 내용이었다 — 내레이션이
+   무음 자산이고 음악을 안 넣었기 때문. 다만 "출력 전에 소리가 없다"는 경고가
+   화면 어디에도 없다. 무음 완성본이 그대로 나간다.
+3. `GET /api/projects/{id}/exports/{job_id}`가 mp4를 utf-8로 읽으려다
+   `'utf-8' codec can't decode byte` 오류 JSON을 돌려준다(정상 경로는
+   `/final-renders/{job_id}`). 잘못된 인자에 대한 오류 처리가 새는 것으로 보임 —
+   확인 필요.
+
+또한 완성본 mp4의 format comment가 원본 자산에서 온 `vrew Enhanced Video Export`로
+남아 있다. §10.0의 권리 경고 metadata 기록과의 관계는 다음 세션에서 확인할 것.
+
+### ② Hermes provider — 로그인은 이미 있었고, 남은 건 Start 클릭 한 번
+
+- `openai-codex`가 **이미 메인 모델(gpt-5.4)로 로그인·설정돼 있다**(173 세션,
+  3일 전까지 사용). 새 로그인이 필요 없었다.
+- 막힌 것은 provider가 아니라 **게이트웨이 프로세스**다: `gateway_state: stopped`.
+- 대시보드 `/system`에 Start 버튼이 있으나 이 환경의 권한 분류기가 클릭을 차단했다.
+  **owner가 http://127.0.0.1:9119/system 에서 Start를 한 번 누르면** 게이트웨이가
+  올라오고, 그 상태에서 라이브 대화를 확인하면 이 항목이 닫힌다.
+
+### 다음 세션(Sonnet)용 — 오픈 전 전체 점검 계획서 제작 프롬프트
+
+owner 지시: "시스템 관리자이자 매출을 내야 하는 운영자 관점에서, 사이트 오픈 전
+전체 점검 계획서"를 만들 것. 아래 프롬프트를 새 세션에 그대로 붙여넣으면 된다.
+
+```text
+너는 VideoBox의 시스템 관리자다. 이 제품으로 매출을 내야 하는 운영자 입장에서,
+사이트(서비스) 오픈 전에 반드시 확인해야 할 것들을 빠짐없이 담은
+"오픈 전 전체 점검 계획서"를 만들어라. 이번 세션의 산출물은 계획서 하나다 —
+코드는 고치지 않는다.
+
+canonical worktree:
+D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility
+
+먼저 반드시 순서대로 읽어라:
+1. git status -sb · git rev-parse HEAD · git rev-list --left-right --count HEAD...@{upstream}
+2. CLAUDE.md 전체 (특히 §2.1 제품 범위, §4 완료의 정의, §6 승인 필요 변경)
+3. docs/development-fast-path.ko.md의 ## 10 (운영 규정 SSOT)
+4. docs/decisions/ 전체 (팔레트·작업판·단계 구성 승인 기록)
+5. docs/handoffs/2026-08-14-videobox-claude-resume-handoff.ko.md 맨 아래 최신 절
+6. docs/superpowers/plans/2026-08-16-videobox-full-system-inspection.md (최근 점검 기준선)
+
+세션 규칙 (이 저장소에서 반복 검증된 것):
+- 전체 pytest는 .venv\Scripts\python.exe -m pytest로 반드시 단독 실행. 실패가 나오면
+  그 파일만 격리 재실행해 오탐인지 먼저 판별한다 (유지보수 루프 테스트가 부하에 약하다).
+- owner-ready.ps1 -Mode Start는 -TimeoutSec 30 이상. Rebuild 뒤 FAIL이 나오면
+  docker ps로 healthy를 직접 확인한다.
+- 스냅샷 재생성은 owner 승인 없이 하지 않는다.
+- 완료 판정은 테스트가 아니라 실제 브라우저다(127.0.0.1:5173, 컨테이너 배포본).
+- ProductShell.tsx를 만지게 되면 파일 머리의 provenance 주석을 먼저 읽는다.
+
+계획서가 반드시 다뤄야 할 영역 (운영자·매출 관점):
+A. 제품 신뢰성 — 신규 사용자의 첫 여정(프로젝트 생성→기획→자산→편집→검토와 출력→
+   완성본)이 실제 브라우저에서 끊김 없이 되는가. 2026-08-16 실사용에서 나온 미해결
+   3건(placeholder 자산 노출, 무음 출력 무경고, exports 엔드포인트 오류 처리)을
+   우선순위에 포함하라.
+B. 데이터 안전 — 백업/복구 절차의 실존 여부, 프로젝트 데이터 유실 시나리오,
+   렌더 중 원본 변경에 대한 fail-closed 경계 유지 확인.
+C. 운영 준비 — 장애 시 재시작 절차(owner-ready), 로그로 원인 추적이 되는가,
+   디스크/메모리 사용량의 성장 추세, 유지보수 루프의 비용.
+D. 보안·프라이버시 — 외부로 나가는 경로 전수 조사(§10.14 경계 재확인),
+   Mem0·Hermes provider로 나가는 데이터의 범위가 문서와 일치하는가.
+E. 법적 준비 — 번들 자산(음악 30·효과음 100)의 라이선스 증거, OSS 고지
+   (THIRD_PARTY_NOTICES, provenance pin), 산출물 metadata의 권리 경고(§10.0)가
+   실제로 기록되는가.
+F. 성능·확장 — 긴 원본(수십 분)과 자산 수백 개에서의 실측, 렌더 시간,
+   라이브러리 스캔 비용.
+G. 상용화 격차 — §2.1이 정한 현재 범위(개인 로컬 MVP)와 "오픈" 사이에 빠져 있는
+   것들(과금, 다중 사용자, 인증, 호스팅, 약관)을 목록화하되, 이는 §6 승인 항목이므로
+   구현 계획이 아니라 owner 의사결정 항목으로 정리하라.
+
+작성 방식:
+- 문서를 근거로 쓰지 말고 실측하라. 수치에는 측정 방법을 함께 적어라.
+- docs/superpowers/plans/2026-08-XX-videobox-prelaunch-inspection.md 형식으로,
+  기존 계획서 형식(Task·체크박스·실측 진단·롤백·하지 않을 것)을 따라라.
+- 각 항목에 심각도(오픈 차단/오픈 후 1주 내/backlog)를 매겨라.
+- 자동 검증·실제 브라우저 확인·owner acceptance를 구분하고, 사람만 할 수 있는
+  것은 그렇게 표시하라.
+- 완성되면 커밋하고, 핸드오프 문서의 최신 절을 갱신하라.
+```
+
+### 검증·상태
+
+완성본 제작은 제품 데이터 변경(세션 revision 10→24, 렌더 산출물 2개)이며 코드
+변경은 없다. working tree 깨끗, 이 문서 커밋 외 추가 커밋 없음.
