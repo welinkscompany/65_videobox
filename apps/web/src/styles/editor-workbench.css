@@ -1,6 +1,10 @@
 .vb-product-main { min-height:0; display:flex; flex-direction:column; }
 .vb-product-content:has(.vb-editor-workbench) { flex:1 1 auto; min-height:0; height:calc(100svh - 4.25rem); overflow:hidden; }
-.vb-editor-workbench { display: grid; min-width:0; min-height:0; max-height:100%; height:100%; overflow:hidden; grid-template-rows: auto minmax(0, 1fr) auto; gap: 0.75rem; color: var(--foreground); }
+/* 두 번째 행(미리보기가 있는 body)에 바닥을 둔다. 2026-08-17에 타임라인 상한을
+   40vh로 올렸더니 390x844에서 타임라인이 364px를 가져가 **미리보기 영상이 0px가
+   됐다** -- 화면에 아무것도 안 보였다. 상한을 다시 계산해 고쳤지만, 다음에 누가
+   또 늘려도 미리보기가 통째로 사라지지는 않게 바닥을 남긴다. */
+.vb-editor-workbench { display: grid; min-width:0; min-height:0; max-height:100%; height:100%; overflow:hidden; grid-template-rows: auto minmax(8rem, 1fr) auto; gap: 0.75rem; color: var(--foreground); }
 .vb-editor-workbench__toolbar, .vb-editor-workbench__timeline, .vb-editor-workbench__dock, .vb-editor-workbench__preview { border: 1px solid var(--border); border-radius: 0.75rem; background: var(--card); }
 .vb-editor-workbench__toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; }
 .vb-editor-workbench__toolbar div { display: flex; gap: 0.5rem; }
@@ -25,8 +29,20 @@
 /* 캡컷처럼 타임라인이 아래쪽을 넉넉히 쓴다(owner 승인 2026-08-17,
    `docs/decisions/2026-08-17-editor-capcut-layout-approval.ko.md`).
    12rem이던 시절에는 눈금과 트랙이 자체 스크롤 안에 숨어, 재생 위치 선을 넣고도
-   보이지 않았다. 미리보기가 예전 8.5% 수준으로 되돌아가지 않도록 상한을 둔다. */
-.vb-editor-workbench__timeline { min-width:0; min-height:0; max-height:min(22rem, 40vh); overflow:auto; padding: 0.75rem 1rem; }
+   보이지 않았다. 미리보기가 예전 8.5% 수준으로 되돌아가지 않도록 상한을 둔다.
+
+   **화면 폭이 아니라 화면 높이에 묶는다.** 예전에는 1499px를 경계로 상한이 두 벌
+   있었고(아래는 4rem, 위는 min(8rem,12vh)) 그 둘이 서로 맞지 않아, 같은 900px
+   높이에서 1600px 화면이 1440px 화면보다 미리보기를 107px **작게** 그렸다.
+   타임라인이 먹는 높이는 폭과 아무 상관이 없다 -- 높이 하나로만 정한다.
+
+   아래 규칙은 좁은 화면(폰) 것이다. 거기서는 도크가 없어 화면을 미리보기와
+   타임라인이 나눠 쓴다. 데스크톱 규칙은 아래 `768px` 블록에 따로 있다 -- 그쪽
+   상수는 데스크톱 껍데기 높이에서 뽑은 것이라 폰에 쓰면 안 된다.
+
+   40vh였을 때 390x844에서 타임라인이 364px를 먹고 미리보기 영상이 0px가 됐다.
+   폰은 세로 툴바만 125px를 쓰기 때문에 데스크톱과 같은 비율을 쓸 수 없다. */
+.vb-editor-workbench__timeline { min-width:0; min-height:0; max-height:clamp(6rem, 19vh, 22rem); overflow:auto; padding: 0.75rem 1rem; }
 /* 재료를 끌어다 놓을 때 **받을 자리**를 보여 준다. 어디에 놓이는지 모르면 놓을 수 없다. */
 [data-drop-target="true"] { outline: 2px solid var(--vb-accent); outline-offset: -2px; border-radius: 0.25rem; }
 .vb-editor-workbench__timeline:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -35,14 +51,18 @@
 .vb-timeline-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--vb-accent); pointer-events: none; z-index: 3; }
 .vb-timeline-playhead__grip { position: absolute; top: 0; left: 50%; width: 0.7rem; height: 0.7rem; transform: translateX(-50%); border-radius: 0 0 0.2rem 0.2rem; background: var(--vb-accent); }
 .vb-editor-workbench__drawer { position: fixed; inset: 1rem; z-index: 40; padding: 1rem; overflow: auto; background: var(--background); border: 1px solid var(--border); border-radius: 0.75rem; }
-.vb-preview-stage { display: grid; min-width: 0; min-height: 0; height: 100%; grid-template-rows: auto minmax(0, 1fr) auto auto auto auto; align-content: stretch; gap: 0.75rem; padding: clamp(0.85rem, 2vw, 1.35rem); box-sizing: border-box; text-align: left; color: var(--foreground); outline: none; }
+/* 미리보기 판은 영상 한 줄 위아래로 제목·재생·상태 줄을 여섯 행에 나눠 놓는다.
+   여백을 넉넉히 주면 그 줄들이 영상 자리를 먹는다 -- 390px 폰에서 재어 보니
+   288px짜리 판에서 글자 줄이 231px를 가져가고 영상에 57px만 남았다. 좁을수록
+   글자가 줄바꿈돼 더 나빠진다. 여백은 어느 폭에서나 촘촘하게 간다. */
+.vb-preview-stage { display: grid; min-width: 0; min-height: 0; height: 100%; grid-template-rows: auto minmax(0, 1fr) auto auto auto auto; align-content: stretch; gap: 0.4rem; padding: 0.65rem; box-sizing: border-box; text-align: left; color: var(--foreground); outline: none; }
 .vb-preview-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); border-radius: 0.75rem; }
 .vb-preview-stage__header, .vb-preview-stage__playback { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
 /* 미리보기 판은 어두운 바탕(`--vb-preview`)인데 제목이 본문 글자색을 그대로 써서
    대비가 1.04였다 -- 사실상 보이지 않는다. 어두운 바탕 위에서 읽히는 색으로 바꾼다.
    측정해 보기 전에는 "글자가 겹쳤나" 싶었지 안 보인다고는 생각하지 못했다. */
-.vb-preview-stage__header h2 { margin: 0; font-size: 1rem; color: var(--vb-preview-text, #F4F4F5); }
-.vb-preview-stage__eyebrow { margin: 0 0 0.2rem; color: var(--muted-foreground); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; }
+.vb-preview-stage__header h2 { margin: 0; font-size: 0.9rem; color: var(--vb-preview-text, #F4F4F5); }
+.vb-preview-stage__eyebrow { margin: 0 0 0.2rem; color: var(--muted-foreground); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; }
 .vb-preview-stage__media-shell { display: grid; min-width: 0; min-height: 0; height: 100%; overflow: hidden; place-items: center; border: 1px solid var(--border); border-radius: 0.9rem; background: var(--vb-preview); }
 .vb-preview-stage__media-shell video { display: block; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; background: var(--vb-preview); }
 .vb-preview-stage__media-shell audio { width: min(90%, 35rem); }
@@ -51,9 +71,23 @@
 /* 여기도 어두운 미리보기 판 위다. `--foreground`는 밝은 바탕용이라 대비가 1.04였다. */
 .vb-preview-stage__empty strong { display: block; color: var(--vb-preview-text, #F4F4F5); }
 .vb-preview-stage__playback { color: var(--muted-foreground); font-size: 0.9rem; }
-.vb-preview-stage__status { margin: 0; color: var(--muted-foreground); font-size: 0.85rem; }
+.vb-preview-stage__status { margin: 0; color: var(--muted-foreground); font-size: 0.75rem; }
 .vb-preview-stage__visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-@media (max-width: 1279px) { .vb-editor-workbench__toolbar { align-items: flex-start; flex-direction: column; } .vb-editor-workbench__body { min-height:0; } }
+/* 좁은 화면에서는 툴바 버튼 줄이 화면 밖으로 나간다. 작업판은 `overflow:hidden`이라
+   가로로 밀어 볼 수도 없어서, 390px에서는 `빼기`부터 오른쪽이 통째로 손에 닿지
+   않았다 -- 재료 열도 유진이도 열 수 없다는 뜻이다.
+
+   줄바꿈은 답이 아니었다. 버튼 일곱 개가 세 줄이 되면서 툴바가 화면의 3분의 1을
+   먹고 미리보기 영상이 105px에서 17px로 주저앉았다(재 봤다). 한 줄로 두고 옆으로
+   밀어 보게 한다 -- 높이를 안 뺏으면서 전부 닿는다. */
+@media (max-width: 1279px) {
+  /* grid 자식은 기본이 `min-width:auto`라 내용만큼 부풀어 오른다. 0으로 눌러 두지
+     않으면 아래 `max-width:100%`가 이미 넓어진 툴바를 기준으로 잡혀 무의미하다. */
+  .vb-editor-workbench__toolbar { align-items: flex-start; flex-direction: column; min-width: 0; }
+  .vb-editor-workbench__toolbar div { flex-wrap: nowrap; min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+  .vb-editor-workbench__toolbar div > * { flex: 0 0 auto; }
+  .vb-editor-workbench__body { min-height:0; }
+}
 .vb-editor-assets { display: grid; min-width: 0; gap: 0.75rem; }
 .vb-editor-assets__controls, .vb-editor-assets__cards { display: grid; gap: 0.6rem; }
 .vb-editor-assets__search-label { display: grid; gap: 0.3rem; font-size: 0.85rem; font-weight: 700; }
@@ -112,29 +146,25 @@
 @media (max-width: 760px) {
   .vb-editor-variants__compare { grid-template-columns: 1fr; }
 }
-@media (min-width: 768px) and (max-width: 1499px) {
+/* 데스크톱에서는 미리보기 판과 변형 줄의 여백을 줄여 둔다. 예전에는 이 블록이
+   1499px에서 끊겨서, 폭이 넓어지는 순간 미리보기 판 껍데기가 55px 두꺼워지고
+   **화면이 커졌는데 영상이 작아졌다.** 여백은 폭이 아니라 밀도의 문제이므로
+   경계를 없애고 데스크톱 전체에 건다. */
+@media (min-width: 768px) {
   .vb-editor-variants { gap: 0.5rem; padding: 0.6rem 0.85rem; }
   .vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }
   .vb-editor-variants__header > span { display: none; }
   .vb-editor-variants__header h2 { font-size: 0.9rem; }
-  .vb-editor-workbench__timeline { max-height: 4rem; padding: 0.5rem 0.75rem; }
+  .vb-editor-workbench__timeline { padding: 0.5rem 0.75rem; }
   .vb-editor-workbench__timeline h2 { margin: 0.2rem 0; font-size: 0.9rem; }
-  .vb-editor-workbench__timeline > p:nth-of-type(2) { display: none; }
-  .vb-preview-stage { gap: 0.4rem; padding: 0.65rem; }
-  .vb-preview-stage__header h2 { font-size: 0.9rem; }
-  .vb-preview-stage__eyebrow { font-size: 0.7rem; }
-  .vb-preview-stage__status { font-size: 0.75rem; }
+  /* `70vh - 566px`가 뜻하는 것: 화면 높이에서 미리보기 바닥선과 고정 껍데기를
+     먼저 떼어 내고, 남는 만큼만 타임라인이 가져간다. 900px 높이에서는 남는 게
+     없어 4rem 그대로이고(오늘과 같다), 1080px부터 늘어난 높이가 타임라인으로
+     간다. 숫자는 `apps/web/e2e/exact-preview.spec.mjs`의 높이 가드가 지킨다. */
+  .vb-editor-workbench__timeline { max-height: clamp(4rem, calc(70vh - 566px), 20rem); }
 }
-/* 1499px 위에서는 compact 블록이 안 걸려서, 예전에는 변형 목록과 타임라인이 남는
-   높이를 다 먹고 Full HD 미리보기가 1440x900보다 작아졌다. 변형 목록은 계속 묶어
-   둔다 -- 그건 참고용이다.
-
-   **타임라인은 다르다.** 큰 화면일수록 편집하는 자리를 넓게 쓰는 것이 캡컷이고,
-   owner가 승인했다(2026-08-17). 그래도 화면 높이에 묶어 미리보기를 밀어내지 않는다. */
-@media (min-width: 1500px) {
-  .vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }
-  /* 1440에서는 compact 블록이 타임라인을 4rem으로 줄인다. 1920에서 그보다 많이
-     키우면 화면이 커졌는데 미리보기는 작아진다 -- e2e가 그걸 잡는다. 늘어난 화면
-     높이(+180px) 안에서만 키운다. */
-  .vb-editor-workbench__timeline { max-height: min(8rem, 12vh); }
+/* 좁은 데스크톱에서는 타임라인이 4rem밖에 못 쓰므로 키 안내 줄까지 넣을 자리가
+   없다. 타임라인이 실제로 넓어지는 큰 화면에서는 그대로 보여 준다. */
+@media (min-width: 768px) and (max-width: 1499px) {
+  .vb-editor-workbench__timeline > p:nth-of-type(2) { display: none; }
 }

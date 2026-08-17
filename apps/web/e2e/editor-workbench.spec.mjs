@@ -177,6 +177,32 @@ test("constrains real workbench body geometry and keeps the single preview at le
   expect(previewBox?.width ?? 0).toBeGreaterThanOrEqual(Math.max(640, (bodyBox?.width ?? 0) / 2));
 });
 
+test("every toolbar control stays reachable on a phone-width screen", async ({ page }) => {
+  await page.addInitScript(() => localStorage.removeItem("videobox.editor-workbench.ui"));
+  await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: "local-draft", name: "편집 작업판", status: "active", root_storage_uri: "local://editor-workbench" }] }) }));
+  await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
+
+  // 툴바 버튼 줄이 화면 밖으로 나가면 작업판이 `overflow:hidden`이라 가로로 밀어
+  // 볼 수도 없다. 컷 도구가 툴바에 붙은 뒤 390px에서 `빼기`부터 오른쪽이 통째로
+  // 손에 닿지 않았다 -- 재료 열도 유진이도 열 수 없다는 뜻이다.
+  //
+  // 줄바꿈 대신 옆으로 밀어 보게 했으므로, 지켜야 할 것은 "처음부터 다 보인다"가
+  // 아니라 **끝까지 밀면 마지막 버튼에 닿는다**이다. 툴바 높이도 함께 본다 --
+  // 줄바꿈으로 풀었을 때 툴바가 화면의 3분의 1을 먹고 미리보기가 무너졌다.
+  const row = page.locator(".vb-editor-workbench__toolbar div").first();
+  expect(await row.evaluate((node) => /(auto|scroll)/.test(getComputedStyle(node).overflowX))).toBe(true);
+  await row.evaluate((node) => { node.scrollLeft = node.scrollWidth; });
+  for (const name of ["빼기", "자산과 대본", "유진과 편집 항목"]) {
+    const right = await page.getByRole("button", { name }).evaluate((node) => node.getBoundingClientRect().right);
+    expect(right).toBeLessThanOrEqual(390 + 1);
+  }
+  const toolbarHeight = await page.locator(".vb-editor-workbench__toolbar").evaluate((node) => node.getBoundingClientRect().height);
+  expect(toolbarHeight).toBeLessThan(844 / 4);
+});
+
 test("narrow drawer traps focus and returns it to its trigger", async ({ page }) => {
   await page.addInitScript(() => localStorage.removeItem("videobox.editor-workbench.ui"));
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: "local-draft", name: "편집 작업판", status: "active", root_storage_uri: "local://editor-workbench" }] }) }));

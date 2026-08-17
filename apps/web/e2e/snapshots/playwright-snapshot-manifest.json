@@ -42,8 +42,8 @@
         "width": 1920,
         "height": 1080
       },
-      "bytes": 109770,
-      "sha256": "1ee3e13c19b5f830badc1c1fd63e95a9379513c32f493b761ea4a405bf2be4f4"
+      "bytes": 110274,
+      "sha256": "33825e2d56a822165f942389e83977917abe38e3634df27f135d4abc87ab379f"
     },
     {
       "path": "editor-workbench-390x844.png",
@@ -51,8 +51,8 @@
         "width": 390,
         "height": 844
       },
-      "bytes": 45963,
-      "sha256": "7a94c0b7e253fa58c2f9d0a23b6048a7ec9c513b44b16c294741b126757174f4"
+      "bytes": 44335,
+      "sha256": "6564599b910ba2275ddb700a30948cb4631cbac0c602b567979f1d982a444872"
     },
     {
       "path": "editor-workbench-768x1024.png",
@@ -60,8 +60,8 @@
         "width": 768,
         "height": 1024
       },
-      "bytes": 54299,
-      "sha256": "8d9de184716463f92dbdda23f5034ff582d3a483d83c8229fc5b80c03d0312c9"
+      "bytes": 59537,
+      "sha256": "53c07d07c9009867fc0e2ec83425677e07abb04820393c568305eee8d994c817"
     },
     {
       "path": "product-shell-1280.png",
@@ -69,8 +69,8 @@
         "width": 1280,
         "height": 800
       },
-      "bytes": 68465,
-      "sha256": "8e31884d28bae49d9036a9366459641b4eb5d43264c30c106ec0768db1c49488"
+      "bytes": 68931,
+      "sha256": "197a27fc51d5667d188fda62b5ff06c6941caf71c7ae321cded6736c41083617"
     },
     {
       "path": "product-shell-1440.png",
@@ -78,8 +78,8 @@
         "width": 1440,
         "height": 960
       },
-      "bytes": 84697,
-      "sha256": "245b4a3b49a6f8cf18f5f5631baffc5a44178530d6a91c6974145d481512e0ba"
+      "bytes": 85121,
+      "sha256": "bf3ac73bf4c15129d38c0b1aaae44f8986710f51ec64c64262773816fff04948"
     },
     {
       "path": "product-shell-1920.png",
@@ -87,8 +87,8 @@
         "width": 1920,
         "height": 1080
       },
-      "bytes": 86936,
-      "sha256": "6496f1fcef6cb74a126d8dcdcda691bbdaecbcf47a2baa9ce6471682935665ca"
+      "bytes": 87343,
+      "sha256": "34f25125a86eade579e1535fe6a6adc4fa1fe3741c1aa41f60d30822ea78d13c"
     },
     {
       "path": "product-shell-390.png",
@@ -105,8 +105,8 @@
         "width": 768,
         "height": 1024
       },
-      "bytes": 80008,
-      "sha256": "e8f3712615d44e7183b5b760bf28aee1b081cac8071e033282f354f07eb866fa"
+      "bytes": 80458,
+      "sha256": "a76af07517af839a6f454a28cbd9b1a97bbb238da2ee558658d2d155274a1572"
     }
   ]
 }

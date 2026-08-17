@@ -91,31 +91,64 @@ async function openEditor(page, state) {
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
 }
 
-test("a Full HD screen gives the preview more height than a 1440x900 screen, not less", async ({ page }) => {
+test("a bigger screen never shrinks the preview, and extra screen height goes to the timeline", async ({ page }) => {
   const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
   const measure = () => page.evaluate(() => {
     const video = document.querySelector(".vb-preview-stage__media-shell video");
     const shell = document.querySelector(".vb-preview-stage__media-shell");
-    if (!video || !shell) throw new Error("preview video is missing");
-    return { videoHeight: video.getBoundingClientRect().height, shellHeight: shell.getBoundingClientRect().height };
+    const timeline = document.querySelector(".vb-editor-workbench__timeline");
+    if (!video || !shell || !timeline) throw new Error("preview or timeline is missing");
+    return {
+      videoHeight: video.getBoundingClientRect().height,
+      shellHeight: shell.getBoundingClientRect().height,
+      timelineHeight: timeline.getBoundingClientRect().height,
+    };
   });
+  const at = async (width, height) => {
+    await page.setViewportSize({ width, height });
+    await expect.poll(async () => (await measure()).videoHeight).toBeGreaterThan(0);
+    return measure();
+  };
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await openEditor(page, state);
   await expect.poll(() => page.locator(".vb-preview-stage__media-shell video").evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
-  const medium = await measure();
 
-  await page.setViewportSize({ width: 1920, height: 1080 });
-  await expect.poll(async () => (await measure()).videoHeight).toBeGreaterThan(0);
-  const fullHd = await measure();
+  // 같은 높이에서 폭만 넓힌다. 타임라인이 먹는 높이는 폭과 아무 상관이 없어야
+  // 하는데, 예전에는 1499px를 경계로 상한이 두 벌이라 1600x900이 1440x900보다
+  // 미리보기를 107px 작게 그렸다. 옛 가드는 1440x900과 1920x**1080**만 비교해서
+  // 늘어난 화면 높이에 가려 이걸 놓쳤다 -- 높이를 고정해야 보인다.
+  const sameHeight = [await measure(), await at(1500, 900), await at(1600, 900), await at(1920, 900)];
+  for (const wider of sameHeight.slice(1)) expect(wider.videoHeight).toBeCloseTo(sameHeight[0].videoHeight, 0);
 
-  // The 768-1499px block compacts the side panels, so before this guard the
-  // larger screen fell back to the loose base rules and rendered a smaller
-  // preview than the smaller screen did.
+  // 화면이 높아지면 미리보기는 줄지 않고, 늘어난 높이는 타임라인이 가져간다
+  // (owner 승인 2026-08-17: 캡컷처럼 아래쪽을 타임라인이 쓴다).
+  const medium = sameHeight[0];
+  const fullHd = await at(1920, 1080);
   expect(fullHd.videoHeight).toBeGreaterThanOrEqual(medium.videoHeight);
+  expect(fullHd.timelineHeight).toBeGreaterThan(medium.timelineHeight);
+
   // Output variants collapse by default now (dashboard UX recovery Task 1),
   // reclaiming vertical space for the preview shell.
   expect(fullHd.shellHeight).toBeGreaterThanOrEqual(400);
+
+  // 폰에서도 **둘 다 보여야 한다.** 2026-08-17에 타임라인 상한을 40vh로 올렸을 때
+  // 390x844에서 타임라인이 364px를 먹고 미리보기 영상이 **0px**가 됐다 -- 단위
+  // 테스트도 스냅샷도 초록이었다. 그 스냅샷은 미리보기가 빈 상태라 영상이 없었고,
+  // 그래서 무너질 것이 없었다. 실제 영상을 올려놓고 높이를 재야 보인다.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
+  await expect(page.locator(".vb-preview-stage__media-shell video")).toHaveCount(1);
+  await expect.poll(async () => (await measure()).videoHeight).toBeGreaterThan(0);
+  const phone = await measure();
+  expect(phone.videoHeight).toBeGreaterThan(40);
+  expect(phone.timelineHeight).toBeGreaterThan(150);
+  // 40px는 넉넉해서 고른 값이 아니라 **지금 실제로 나오는 값(약 60px)** 아래에
+  // 둔 선이다. 390px에서는 미리보기 판의 글자 줄 여섯 개가 줄바꿈되면서 292px짜리
+  // 판에서 230px를 가져간다 -- 남은 자리가 그것뿐이다. 이걸 더 키우려면 그 글자
+  // 줄들을 좁은 화면에서 어떻게 접을지 정해야 하고, 그건 owner 판단이다.
+  // 여기서 지키는 것은 "0px로 무너지지 않는다"이다.
 });
 
 test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {

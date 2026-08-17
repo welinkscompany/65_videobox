@@ -209,38 +209,40 @@ describe("PreviewStage", () => {
     expect(dockRule).toContain("overflow: auto");
   });
 
-  it("bounds the medium-width output variants panel so it cannot starve the preview", () => {
+  it("bounds the output variants strip so it cannot starve the preview", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
-    const mediumLayout = css.match(/@media \(min-width: 768px\) and \(max-width: 1499px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
-
-    expect(mediumLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
-    expect(mediumLayout).toContain(".vb-editor-workbench__timeline { max-height: 4rem; padding: 0.5rem 0.75rem; }");
-  });
-
-  it("bounds output variants and timeline on Full HD so the preview remains visible", () => {
-    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
-    const variantsRule = css.match(/^\.vb-editor-variants\s*\{([^}]*)\}/m)?.[1] ?? "";
-    const timelineRule = css.match(/^\.vb-editor-workbench__timeline\s*\{([^}]*)\}/m)?.[1] ?? "";
+    const variantsRule = css.match(/^\.vb-editor-variants\s*\{([\s\S]*?)\}/m)?.[1] ?? "";
 
     expect(variantsRule).toContain("max-height: 10rem");
     expect(variantsRule).toContain("overflow: auto");
-    // 타임라인은 캡컷처럼 넉넉해졌지만(owner 승인 2026-08-17) **상한은 남는다** --
-    // 이 테스트가 지키는 것은 12rem이라는 숫자가 아니라 "미리보기가 사라지지 않는다"다.
-    // 화면 높이에 묶어 두어야 작은 화면에서 미리보기를 통째로 밀어내지 않는다.
-    expect(timelineRule).toMatch(/max-height:\s*min\([^)]*vh[^)]*\)/);
+    // 데스크톱에서는 더 조인다. 폭 구간마다 따로 적지 않고 한 번만 건다 --
+    // 768~1499와 1500 위에 같은 규칙을 두 벌 두었더니 그 경계에서 미리보기 크기가
+    // 튀었다.
+    expect(css).toMatch(/@media \(min-width: 768px\) \{[\s\S]*?\.vb-editor-variants \{ max-height: 6rem;/);
   });
 
-  it("bounds the side panels above 1500px so a bigger screen never shrinks the preview", () => {
+  it("bounds the timeline by screen height only, never by screen width", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
-    const wideLayout = css.match(/@media \(min-width: 1500px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+    // 타임라인이 먹는 높이는 화면 폭과 아무 상관이 없다. 예전에는 1499px를 경계로
+    // 상한이 두 벌 있었고 그 둘이 맞지 않아, 같은 900px 높이에서 1600px 화면이
+    // 1440px 화면보다 미리보기를 107px **작게** 그렸다. 이 테스트가 잡는 것은
+    // 그 형태(폭으로 자르지 않는다)뿐이고, 실제 높이는
+    // `apps/web/e2e/exact-preview.spec.mjs`가 브라우저에서 재서 지킨다.
+    const capRules = [...css.matchAll(/\.vb-editor-workbench__timeline[^{]*\{([^}]*max-height:[^;]*;)/g)].map((match) => match[1]);
+    expect(capRules.length).toBeGreaterThan(0);
+    for (const rule of capRules) expect(rule).toMatch(/max-height:\s*clamp\([^;]*vh/);
+    const widthScoped = css.match(/@media \(min-width: 768px\) and \(max-width: 1499px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
+    expect(widthScoped).not.toContain("max-height");
+  });
 
-    // Without this block a 1920x1080 screen falls back to the loose base rules
-    // (variants 10rem, timeline 12rem) and ends up with a smaller preview than
-    // a 1440x900 screen, which the 768-1499px block already compacts.
-    expect(wideLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
-    // 타임라인은 캡컷처럼 넓어졌다(owner 승인 2026-08-17). 지켜야 할 것은
-    // "6rem"이라는 숫자가 아니라 **화면 높이에 묶여 미리보기를 밀어내지 않는 것**이다.
-    expect(wideLayout).toMatch(/\.vb-editor-workbench__timeline \{ max-height: min\([^)]*vh[^)]*\); \}/);
+  it("keeps a floor under the preview row so the timeline can never crush it to nothing", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const workbenchRule = css.match(/^\.vb-editor-workbench\s*\{([^}]*)\}/m)?.[1] ?? "";
+
+    // 2026-08-17에 타임라인 상한을 40vh로 올렸더니 390x844에서 타임라인이 364px를
+    // 가져가 **미리보기 영상이 0px**가 됐다. 상한은 다시 계산해 고쳤지만, 다음에
+    // 누가 또 늘려도 미리보기가 통째로 사라지지는 않도록 행 자체에 바닥을 둔다.
+    expect(workbenchRule).toMatch(/grid-template-rows:\s*auto minmax\((?!0[,)])[^,]+, 1fr\) auto/);
   });
 
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
