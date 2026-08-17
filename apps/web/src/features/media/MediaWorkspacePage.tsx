@@ -6,8 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Input } from "../../components/ui/input";
 import { projectEditorAssets } from "../editor/assets/editorAssetProjection";
 import { MediaLibraryBrowser } from "./MediaLibraryBrowser";
+import { VoiceMaterialPanel } from "./VoiceMaterialPanel";
 
-type MediaTab = "videos" | "music" | "sfx" | "import";
+// 내레이션은 영상·음악·효과음과 같은 재료다. 2026-08-16까지 목소리만 설정 서랍에
+// 있었고, 그래서 자산 단계에서 사람 목소리가 빠져 보였다.
+type MediaTab = "videos" | "music" | "sfx" | "narration" | "import";
 
 type MediaState = {
   projectId: string;
@@ -258,6 +261,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     { value: "videos", label: "내 영상" },
     { value: "music", label: "음악" },
     { value: "sfx", label: "효과음" },
+    { value: "narration", label: "내레이션" },
     { value: "import", label: "가져오기" },
   ];
 
@@ -363,6 +367,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
 
       {activeTab === "music" ? <div id="media-panel-music" role="tabpanel" aria-label="음악"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="music" /></div> : null}
       {activeTab === "sfx" ? <div id="media-panel-sfx" role="tabpanel" aria-label="효과음"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="sfx" /></div> : null}
+      {activeTab === "narration" ? <div id="media-panel-narration" role="tabpanel" aria-label="내레이션"><VoiceMaterialPanel projectId={projectId} /></div> : null}
 
       {activeTab === "videos" && currentState ? (
         <div id="media-panel-videos" role="tabpanel" aria-label="내 영상" className="grid gap-4">
