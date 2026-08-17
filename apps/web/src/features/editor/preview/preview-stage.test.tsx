@@ -245,6 +245,28 @@ describe("PreviewStage", () => {
     expect(workbenchRule).toMatch(/grid-template-rows:\s*auto minmax\((?!0[,)])[^,]+, 1fr\) auto/);
   });
 
+  it("ignores the player's own position while a requested seek is still settling", () => {
+    // 자리를 옮겨 달라고 하면 플레이어는 잠깐 **옛 위치**를 그대로 알려 준다. 그걸
+    // 그대로 위로 올리면 소유자가 옛 위치를 되돌려 보내고, 두 쪽이 서로 밀며 제자리를
+    // 맴돈다. 실제 컨테이너에서 `다음 프레임`을 눌렀을 때 새 위치 → 옛 위치 →
+    // 새 위치가 번갈아 찍히는 것을 확인했다. 가라앉은 뒤에 오는 `seeked`만 믿는다.
+    const onPlaybackTimeChange = vi.fn();
+    render(<PreviewStage {...current} playbackSec={4} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 4 });
+    Object.defineProperty(media, "seeking", { configurable: true, writable: true, value: true });
+    onPlaybackTimeChange.mockClear();
+
+    fireEvent.seeking(media);
+    fireEvent.timeUpdate(media);
+    expect(onPlaybackTimeChange).not.toHaveBeenCalled();
+
+    Object.defineProperty(media, "seeking", { configurable: true, writable: true, value: false });
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 4.5 });
+    fireEvent.seeked(media);
+    expect(onPlaybackTimeChange).toHaveBeenLastCalledWith(4.5);
+  });
+
   it("steps one frame at a time from the fps the timeline actually uses", () => {
     // 컷을 어디서 자를지는 프레임 단위로 정해진다. `0.1초 뒤로`가 아니라 한 프레임씩
     // 움직여야 자를 자리를 고를 수 있다 -- 캡컷도 그렇다.

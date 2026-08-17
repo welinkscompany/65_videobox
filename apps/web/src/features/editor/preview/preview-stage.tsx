@@ -101,6 +101,11 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const showsADifferentMoment = currentMedia !== null && !isImageAudition && Number.isFinite(playbackSec)
     && Math.abs((playbackSec as number) - timelineTime) > 0.05;
   const updateTimeline = (node: MediaNode) => {
+    // 자리를 옮겨 달라고 하면 플레이어는 잠깐 **옛 위치**를 그대로 알려 준다. 그걸
+    // 위로 올리면 소유자가 옛 위치를 되돌려 보내고, 두 쪽이 서로 밀며 제자리를 맴돈다.
+    // 실제 컨테이너에서 `다음 프레임`을 눌렀을 때 새 위치 → 옛 위치 → 새 위치가
+    // 번갈아 찍혔다. 가라앉은 뒤에 오는 `seeked`만 믿는다.
+    if (node.seeking) return;
     // 반복이 켜져 있으면 구간 끝에서 되감는다. 자막·재생 위치를 갱신하기 전에 처리해야
     // 구간 밖 한 순간이 잠깐 보였다 사라지는 일이 없다.
     if (repeating && loopRange && mode.kind !== "idle") {
