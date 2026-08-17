@@ -681,7 +681,7 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(recoveryRouter.state.location.pathname).toBe("/projects/project_a/home"));
   });
 
-  it("owns voice and TTS review at the canonical voice settings route", async () => {
+  it("sends the voice settings route to where the voice work now lives", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
     ]);
@@ -691,8 +691,12 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
+    // 목소리 만들기는 2026-08-16에 설정에서 자산 단계로 옮겼다. 옛 주소는 지우지 않고
+    // 길만 알려 준다 — 즐겨찾기나 지난 문서로 들어오는 사람이 막다른 곳을 만나면 안 된다.
     expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "내 목소리와 읽어보기 후보" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "내레이션 열기" })).toHaveAttribute("href", "/projects/project_a/assets");
+    // 같은 일을 두 곳에서 하게 두지 않는다.
+    expect(screen.queryByRole("region", { name: "내 목소리와 읽어보기 후보" })).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings/voice");
     expect(screen.queryByTestId("project-recovery")).not.toBeInTheDocument();
   });

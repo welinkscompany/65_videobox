@@ -5,6 +5,7 @@ import { createMemoryHistory } from "@tanstack/react-router";
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
 import { HomePage, ProductShell, SettingsPage } from "./ProductShell";
+import { VoiceMaterialPanel } from "../features/media/VoiceMaterialPanel";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("PointerEvent", MouseEvent); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
@@ -354,12 +355,12 @@ describe("product shell", () => {
         })
         : sessionB
     ));
-    const view = render(<SettingsPage projectId="first" section="voice" onNavigate={vi.fn()} />);
+    const view = render(<VoiceMaterialPanel projectId="first" />);
     await screen.findByText("저장한 내 목소리 1개");
     const pathA = screen.getByLabelText("음성 파일이 있는 곳");
     fireEvent.change(pathA, { target: { value: "D:\\voices\\project-a.wav" } });
 
-    view.rerender(<SettingsPage projectId="second" section="voice" onNavigate={vi.fn()} />);
+    view.rerender(<VoiceMaterialPanel projectId="second" />);
 
     const pathB = screen.getByLabelText("음성 파일이 있는 곳");
     expect(pathA).not.toBeInTheDocument();
