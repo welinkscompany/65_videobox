@@ -75,7 +75,9 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     if (!Number.isFinite(playbackSec) || mode.kind === "idle" || (mode.kind === "audition" && mode.media.mediaKind === "image")) return;
     const timelineSeconds = Math.min(mode.media.timelineRange.endSec, Math.max(mode.media.timelineRange.startSec, playbackSec!));
     setTimelineTime(timelineSeconds);
-    if (timelineSeconds !== playbackSec) onPlaybackTimeChange?.(timelineSeconds);
+    // 여기서 되돌려 올려보내지 않는다. 예전에는 구간 밖 재생 위치를 자기 구간 안으로
+    // 밀어 올렸는데, 그러면 타임라인을 눌러도 재생 위치가 붙박여 `나누기`를 쓸 수 없다.
+    // 미리보기가 스스로 알리는 위치는 `updateTimeline`이 따로 올려보낸다.
     const media = mediaRef.current;
     const mediaSeconds = timelineSeconds - mode.media.timelineRange.startSec;
     if (media && Math.abs(media.currentTime - mediaSeconds) > 0.001) {
@@ -88,6 +90,10 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const visibleAuditionIssue = mode.kind === "audition" ? auditionIssue : null;
   const mediaLabel = mode.kind === "audition" ? `${sourceLabel(localSources, auditionRequest, mode.media.id)} 소스 미리보기` : "편집본 미리보기";
   const activeCaption = mode.kind === "exact" ? captions.find((caption) => timelineTime >= caption.startSec && timelineTime < caption.endSec) : null;
+  // 재생 위치를 더는 되돌리지 않으므로, 화면에 보이는 순간과 재생 위치가 갈릴 수 있다.
+  // 갈렸으면 말해 준다 -- 말없이 다른 순간을 보여 주는 것이 되돌리는 것보다 나쁘다.
+  const showsADifferentMoment = currentMedia !== null && !isImageAudition && Number.isFinite(playbackSec)
+    && Math.abs((playbackSec as number) - timelineTime) > 0.05;
   const updateTimeline = (node: MediaNode) => {
     const nextSeconds = coordinatorRef.current.timelineTime(node.currentTime);
     setTimelineTime(nextSeconds);
@@ -136,6 +142,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
       {!currentMedia && <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>}
     </div>
     {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><output aria-live="off">타임라인 {timelineTime.toFixed(1)}초</output></div>}
+    {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">이 화면은 타임라인 {timelineTime.toFixed(1)}초의 모습입니다. 재생 위치는 그보다 바깥에 있어 아직 볼 수 없어요.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `자막은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
   </section>;

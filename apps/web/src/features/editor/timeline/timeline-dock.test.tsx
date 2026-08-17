@@ -587,6 +587,25 @@ describe("TimelineDock", () => {
     expect(onPlaybackSeek).toHaveBeenCalledWith(2.5);
   });
 
+  it("keeps moving the playhead when the owner echoes the position back", () => {
+    // 2026-08-17에 실제 앱에서 확인: 타임라인을 눌러도 재생 위치가 첫 클릭 자리에
+    // 붙박였다. 우리가 올려보낸 위치가 `playbackSec`으로 되돌아오는데, 그때 우리
+    // playheadSec은 이미 다음 자리로 가 있어서 서로를 되돌리는 고리가 생겼다.
+    // 그래서 `나누기`가 영영 열리지 않았다.
+    const { rerender } = render(<TimelineDock onPlaybackSeek={() => undefined} playbackSec={0} view={view} viewportWidthPx={1000} />);
+    const timeline = screen.getByLabelText("타임라인");
+    timeline.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 200, width: 1000, height: 200, x: 0, y: 0, toJSON: () => ({}) });
+
+    fireEvent.click(timeline, { clientX: 100 });
+    const first = screen.getByLabelText("재생 위치").getAttribute("data-seconds");
+    // 소유자가 그 값을 그대로 돌려준다 -- 실제 앱이 하는 일이다.
+    rerender(<TimelineDock onPlaybackSeek={() => undefined} playbackSec={Number(first)} view={view} viewportWidthPx={1000} />);
+
+    fireEvent.click(timeline, { clientX: 300 });
+
+    expect(screen.getByLabelText("재생 위치")).not.toHaveAttribute("data-seconds", first);
+  });
+
   it("scrolls its local viewport from horizontal wheel pixels and clamps at both bounds", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 

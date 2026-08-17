@@ -61,11 +61,22 @@ describe("PreviewStage", () => {
     expect(onPlaybackTimeChange).toHaveBeenCalledWith(7);
   });
 
-  it("returns the effective selected-range position when an external seek is out of range", () => {
+  it("does not drag the playhead back when the seek is outside what it can show", () => {
+    // 2026-08-17에 실제 앱에서 확인: 타임라인을 눌러도 재생 위치가 한 번 움직인 뒤
+    // 그 자리에 붙박였다. 미리보기가 자기 구간 밖 재생 위치를 **되돌려 올려보내고**
+    // 있었기 때문이다. 그래서 `나누기`가 영영 열리지 않았다.
+    // 미리보기가 스스로 알리는 것(timeupdate)은 올려보내야 하지만, 못 보여 주는
+    // 자리로 옮긴 사용자를 되미는 것은 다른 일이다.
     const onPlaybackTimeChange = vi.fn();
     render(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "/api/range.mp4", artifactRevision: 4, timelineStartSec: 4, timelineEndSec: 8 }} playbackSec={20} onPlaybackTimeChange={onPlaybackTimeChange} />);
 
-    expect(onPlaybackTimeChange).toHaveBeenCalledWith(8);
+    expect(onPlaybackTimeChange).not.toHaveBeenCalled();
+  });
+
+  it("says the picture is not from where the playhead is", () => {
+    render(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "/api/range.mp4", artifactRevision: 4, timelineStartSec: 4, timelineEndSec: 8 }} playbackSec={20} />);
+
+    expect(screen.getByRole("status", { name: "미리보기 위치 안내" })).toHaveTextContent("8.0초");
   });
 
   it("never mounts a stale artifact source and offers explicit refresh", async () => {

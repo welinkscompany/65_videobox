@@ -17,6 +17,7 @@ import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from
 import { hasLegacyEditorUiState, readEditorUiState, readVariantsCollapsed, writeEditorUiState, writeVariantsCollapsed } from "./editorUiState";
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
 import { VariantCompare } from "../variants/VariantCompare";
+import { cutToolbarState } from "./cutToolbar";
 import { VariantConflictPanel } from "../variants/VariantConflictPanel";
 import { VariantSelector } from "../variants/VariantSelector";
 import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
@@ -261,6 +262,38 @@ function EditorWorkbenchInstance({
     ?? view.captions.find((caption) => caption.segmentId === selectedSegmentId)
     ?? null;
   const assetTarget = selectedNarration === null ? null : { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec };
+  // 캡컷처럼 컷 도구를 타임라인 위에 둔다. 2026-08-17까지 이 툴바에는 편집하는
+  // 단추가 하나도 없었고, 나누기·붙이기는 `선택 구간 편집`이라는 이름 뒤에 있어
+  // 컷편집을 찾는 사람은 만나지 못했다. 실제 변경은 기존 InspectorAction 경로가 한다.
+  const cutTools = cutToolbarState({
+    clips: view.tracks
+      .filter((track) => track.role === "narration")
+      .flatMap((track) => track.clips)
+      .map((clip) => ({
+        segmentId: clip.segmentId,
+        startSec: clip.startSec,
+        endSec: clip.endSec,
+        // 뺀 장면인지는 타임라인 클립이 아니라 편집 세션이 안다.
+        cutAction: session?.segments?.find((segment) => segment.segmentId === clip.segmentId)?.cutAction,
+      })),
+    selectedSegmentId,
+    playheadSec: playbackSec,
+  });
+  // 잠긴 단추는 마우스 이벤트를 받지 않아 자기 title을 못 띄운다. 감싸는 자리에
+  // 걸어야 **왜 잠겼는지**가 보인다 -- 이유 없이 회색인 단추는 고장으로 읽힌다.
+  const cutButton = (tool: typeof cutTools.split) => (
+    <span title={tool.hint} className="vb-cut-tool">
+      <Button
+        type="button"
+        variant="outline"
+        aria-description={tool.hint}
+        disabled={!tool.enabled || isSavingTimeline || !onInspectorAction}
+        onClick={() => { if (tool.action) void onInspectorAction?.(tool.action); }}
+      >
+        {tool.label}
+      </Button>
+    </span>
+  );
   const playAssetCard = (card: EditorAssetCard, previewUrl: string) => {
     const mediaKind = card.previewKind ?? (card.kind === "broll" ? "video" : "audio");
     setAuditionState((current) => {
@@ -377,7 +410,7 @@ function EditorWorkbenchInstance({
     void onVariantPatch(serverVariant, { resolve_conflicts: { [field]: decision } });
   };
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
-    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button><Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</Button></div></header>
+    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button>{cutButton(cutTools.split)}{cutButton(cutTools.join)}{cutButton(cutTools.drop)}<Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</Button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}

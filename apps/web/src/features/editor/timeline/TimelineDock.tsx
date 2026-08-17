@@ -187,7 +187,13 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
   const previousSelectionResetKey = useRef(selectionResetKey);
   const onPlaybackSeekRef = useRef(onPlaybackSeek);
   useEffect(() => { onPlaybackSeekRef.current = onPlaybackSeek; }, [onPlaybackSeek]);
-  useEffect(() => { onPlaybackSeekRef.current?.(state.playheadSec); }, [state.playheadSec]);
+  // 우리가 방금 소유자에게 올려보낸 위치. 그것이 `playbackSec`으로 되돌아왔을 때
+  // 다시 seek하지 않기 위한 표식이다.
+  const reportedPlayheadRef = useRef<number | null>(null);
+  useEffect(() => {
+    reportedPlayheadRef.current = state.playheadSec;
+    onPlaybackSeekRef.current?.(state.playheadSec);
+  }, [state.playheadSec]);
   useEffect(() => {
     if (previousSelectionResetKey.current === selectionResetKey) return;
     previousSelectionResetKey.current = selectionResetKey;
@@ -195,10 +201,15 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     setSelectedPlacementIds([]);
     setPointerDraft(null);
   }, [selectionResetKey]);
+  // **밖에서 온 위치만** 따라간다. 예전에는 `state.playheadSec`도 이 effect의 deps에
+  // 있어서, 우리가 타임라인을 눌러 위치를 옮기면 아직 갱신되지 않은 옛 `playbackSec`이
+  // 우리를 도로 끌어당겼다. 그 둘이 서로를 되돌리는 고리가 되어 재생 위치가 첫 클릭
+  // 자리에 붙박였고, 그 때문에 `나누기`를 쓸 수 없었다(2026-08-17 실제 앱에서 확인).
   useEffect(() => {
-    if (playbackSec === undefined || !Number.isFinite(playbackSec) || playbackSec === state.playheadSec) return;
+    if (playbackSec === undefined || !Number.isFinite(playbackSec)) return;
+    if (playbackSec === reportedPlayheadRef.current) return;
     dispatch({ type: "seek", seconds: playbackSec });
-  }, [playbackSec, state.playheadSec]);
+  }, [playbackSec]);
   const viewportEndSec = resolveViewportEnd(state, view.output.durationSec, viewportWidthPx);
   const rects = useMemo(() => projectVisibleTimelineClips({
     clips: clipSources(view),
