@@ -311,8 +311,12 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   // (`display:flex; align-items:center`)이다. 화면 전체가 그 한 줄에 눌려 제목
   // 글자가 세로로 한 자씩 쌓였다. 자산 단계로 옮기고 **캡처해 보고서야** 보였다:
   // 글자·제목 단계·가로 넘침을 다 재도 이건 안 잡힌다.
+  //
+  // 폭도 정해 준다. 설정 화면은 `.vb-settings`가 42rem으로 잡아 줬는데 자산 화면은
+  // 1440px까지 넓어서, 입력과 단추가 화면 끝까지 늘어나 읽기 어려웠다.
+  // `justify-items-start`가 없으면 grid가 자식을 열 폭에 맞춰 전부 늘린다.
   return (
-    <section aria-label="내 목소리와 읽어보기 후보" className="grid gap-4">
+    <section aria-label="내 목소리와 읽어보기 후보" className="vb-voice-workspace grid gap-4 justify-items-start">
       <h2>내 목소리 샘플</h2>
       <p className="vb-setting-note">이 기기에 있는 본인 음성만 추가해 주세요.</p>
       {loadState === "loading" || loadState === "idle" ? <p className="text-sm text-muted-foreground">음성 설정을 불러오는 중이에요.</p> : null}
@@ -333,7 +337,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
               {samples.map((sample, index) => <li key={sample.asset_id}>{`내 목소리 ${index + 1}`}</li>)}
             </ul>
           )}
-          <label className="grid gap-2 text-sm">
+          <label className="grid w-full gap-2 text-sm">
             <span>후보에 사용할 목소리</span>
             <NativeSelect
               aria-label="후보에 사용할 목소리"
@@ -348,7 +352,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         </>
       ) : null}
       <div>
-        <label className="grid gap-2 text-sm">
+        <label className="grid w-full gap-2 text-sm">
           <span>음성 파일이 있는 곳</span>
           <Input
             aria-label="음성 파일이 있는 곳"
@@ -364,7 +368,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         </Button>
       </div>
       <div>
-        <label className="grid gap-2 text-sm">
+        <label className="grid w-full gap-2 text-sm">
           <span>음성 파일 업로드</span>
           <Input
             key={uploadInputVersion}
@@ -384,7 +388,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       <h2>문장별 읽어보기 후보</h2>
       <p className="vb-setting-note">구간을 직접 고른 뒤 후보를 만들고 들어 보세요. 청취 결정만으로 편집본은 바뀌지 않아요.</p>
       {loadState === "ready" && segments.length === 0 ? <p className="text-sm text-muted-foreground">먼저 편집 초안을 만들어 주세요.</p> : null}
-      <label className="grid gap-2 text-sm">
+      <label className="grid w-full gap-2 text-sm">
         <span>후보를 만들 구간</span>
         <NativeSelect
           aria-label="후보를 만들 구간"
