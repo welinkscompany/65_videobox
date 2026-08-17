@@ -568,9 +568,15 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     onWheel={handleWheel}
     tabIndex={0}
   >
-    <h2>타임라인</h2>
-    <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
-    <p>클릭으로 재생 위치를 보고, 화살표·Home·End·+·- 키로 탐색합니다.</p>
+    {/* 안내는 지우지 않고 **한 줄로 모은다.** 재 보니 타임라인이 필요로 하는 449px
+        가운데 눈금과 트랙은 222px뿐이고 나머지는 이렇게 한 줄씩 차지한 글자였다.
+        그래서 owner가 승인한 "타임라인을 아래쪽으로 넉넉히"가 자리를 더 줘도 계속
+        스크롤 안에 숨어 있었다 -- 자리가 모자란 게 아니라 글자가 먹고 있었다. */}
+    <div className="vb-editor-workbench__timeline-head">
+      <h2>타임라인</h2>
+      <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
+      <p>클릭으로 재생 위치를 보고, 화살표·Home·End·+·- 키로 탐색합니다.</p>
+    </div>
     {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.
         예전에는 맨 아래 숫자뿐이라 어디서 나뉘는지 눈으로 찾을 수 없었다. */}
     <div className="vb-timeline-scale" style={{ position: "relative" }}>
@@ -653,15 +659,19 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         style={{ left: `${playheadX}px` }}
       ><span className="vb-timeline-playhead__grip" /></div>
     </div>
-    {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
-    {caption ? <p>현재 자막: {caption.text}</p> : <p>현재 자막 없음</p>}
-    {selectedPlacementIds.length > 1 ? <p>선택한 독립 항목: {selectedPlacementIds.length}개</p> : null}
-    {/* §10.13: the snap target id is an internal key (caption:<segment>:start)
-        and meant nothing to the owner. The kind and the time are the parts that
-        actually tell them where the playhead landed. */}
-    {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
-    {mutationMessage ? <p role="status" aria-label="편집 저장 상태">{mutationMessage}</p> : null}
-    <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
-    {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>표시할 타임라인 항목이 없습니다.</p> : null}
+    {/* 아래 상태 줄들도 같은 이유로 한 줄에 모은다. 하나하나는 짧은 조각인데
+        한 줄씩 차지하면 눈금과 트랙이 밀려 스크롤 안으로 들어간다. */}
+    <div className="vb-editor-workbench__timeline-foot">
+      {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
+      {caption ? <p>현재 자막: {caption.text}</p> : <p>현재 자막 없음</p>}
+      {selectedPlacementIds.length > 1 ? <p>선택한 독립 항목: {selectedPlacementIds.length}개</p> : null}
+      {/* §10.13: the snap target id is an internal key (caption:<segment>:start)
+          and meant nothing to the owner. The kind and the time are the parts that
+          actually tell them where the playhead landed. */}
+      {snap ? <p>스냅: {snapKindLabel[snap.kind]} ({formatSeconds(snap.timeSec)}초)</p> : <p>스냅 없음</p>}
+      {mutationMessage ? <p role="status" aria-label="편집 저장 상태">{mutationMessage}</p> : null}
+      <output aria-label="재생 위치" data-seconds={formatSeconds(state.playheadSec)}>{formatSeconds(state.playheadSec)}초</output>
+      {draftProjection.rects.length === 0 && visibleGaps.length === 0 ? <p>표시할 타임라인 항목이 없습니다.</p> : null}
+    </div>
   </section>;
 }

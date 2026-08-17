@@ -128,9 +128,13 @@ test("a bigger screen never shrinks the preview, and extra screen height goes to
   expect(fullHd.videoHeight).toBeGreaterThanOrEqual(medium.videoHeight);
   expect(fullHd.timelineHeight).toBeGreaterThan(medium.timelineHeight);
 
-  // Output variants collapse by default now (dashboard UX recovery Task 1),
-  // reclaiming vertical space for the preview shell.
-  expect(fullHd.shellHeight).toBeGreaterThanOrEqual(400);
+  // 2026-08-15에 출력 변형을 접어 미리보기 판을 되찾았을 때 넣은 줄이다. 그때는
+  // `400px`라는 숫자로 적었는데, 타임라인이 아래쪽을 넉넉히 쓰게 되자 그 숫자가
+  // 승인된 정책보다 먼저 걸렸다. 지키려는 것은 숫자가 아니라 **미리보기가 여전히
+  // 작업판에서 가장 큰 한 칸**이라는 것이다. 승인된 하한(화면 면적 20.8%)은 아래
+  // `whole timeline` 가드가 실제 면적으로 잰다.
+  const workbenchHeight = await page.locator(".vb-editor-workbench").evaluate((node) => node.getBoundingClientRect().height);
+  expect(fullHd.shellHeight).toBeGreaterThan(workbenchHeight / 3);
 
   // 폰에서도 **둘 다 보여야 한다.** 2026-08-17에 타임라인 상한을 40vh로 올렸을 때
   // 390x844에서 타임라인이 364px를 먹고 미리보기 영상이 **0px**가 됐다 -- 단위
@@ -149,6 +153,39 @@ test("a bigger screen never shrinks the preview, and extra screen height goes to
   // 판에서 230px를 가져간다 -- 남은 자리가 그것뿐이다. 이걸 더 키우려면 그 글자
   // 줄들을 좁은 화면에서 어떻게 접을지 정해야 하고, 그건 owner 판단이다.
   // 여기서 지키는 것은 "0px로 무너지지 않는다"이다.
+});
+
+test("a Full HD screen shows the whole timeline without hiding it in its own scroll, and still keeps the approved preview size", async ({ page }) => {
+  const state = {
+    current: manifest({
+      tracks: [
+        { track_id: "narration", track_type: "narration", clips: [{ clip_id: "n1", segment_id: "segment-1", clip_type: "narration", asset_id: "a1", asset_uri: "local://a1", start_sec: 0, end_sec: 6, media_controls: {} }, { clip_id: "n2", segment_id: "segment-2", clip_type: "narration", asset_id: "a1", asset_uri: "local://a1", start_sec: 6, end_sec: 12, media_controls: {} }] },
+        { track_id: "broll", track_type: "broll", clips: [{ clip_id: "b1", segment_id: "segment-1", clip_type: "broll", asset_id: "a2", asset_uri: "local://a2", start_sec: 1, end_sec: 5, media_controls: {} }] },
+      ],
+    }),
+    retryBodies: [],
+  };
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openEditor(page, state);
+  await expect.poll(() => page.locator(".vb-preview-stage__media-shell video").evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+
+  const seen = await page.evaluate(() => {
+    const timeline = document.querySelector(".vb-editor-workbench__timeline");
+    const video = document.querySelector(".vb-preview-stage__media-shell video").getBoundingClientRect();
+    return {
+      hidden: timeline.scrollHeight - timeline.clientHeight,
+      areaPercent: (video.width * video.height) / (window.innerWidth * window.innerHeight) * 100,
+    };
+  });
+
+  // owner가 2026-08-17에 승인한 것은 "타임라인을 아래쪽으로 넉넉히"였다. 그때 든
+  // 이유가 이것이다 -- **눈금과 트랙이 자체 스크롤 안에 숨는다.** 숨은 픽셀이 0이어야
+  // 승인한 것이 실제로 된 것이다.
+  expect(seen.hidden).toBeLessThanOrEqual(1);
+  // 같은 승인문이 감수 사항으로 "미리보기 세로 공간이 줄어든다"를 적었고, 조건은
+  // 하나였다 -- **예전 8.5% 수준으로 되돌아가지 않는다.** 2026-07-22에 되찾은
+  // 수준이 화면 면적의 20.8%이므로 그것을 바닥으로 둔다.
+  expect(seen.areaPercent).toBeGreaterThanOrEqual(20.8);
 });
 
 test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {

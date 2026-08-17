@@ -157,19 +157,27 @@
   .vb-editor-variants__header h2 { font-size: 0.9rem; }
   .vb-editor-workbench__timeline { padding: 0.5rem 0.75rem; }
   .vb-editor-workbench__timeline h2 { margin: 0.2rem 0; font-size: 0.9rem; }
-  /* `70vh - 566px`가 뜻하는 것: 화면 높이에서 미리보기 바닥선과 고정 껍데기를
-     먼저 떼어 내고, 남는 만큼만 타임라인이 가져간다. 900px 높이에서는 남는 게
-     없어 4rem 그대로이고(오늘과 같다), 1080px부터 늘어난 높이가 타임라인으로
-     간다. 숫자는 `apps/web/e2e/exact-preview.spec.mjs`의 높이 가드가 지킨다. */
-  .vb-editor-workbench__timeline { max-height: clamp(4rem, calc(70vh - 566px), 20rem); }
+  /* `68vh - 400px`가 뜻하는 것: 화면 높이에서 미리보기 바닥선과 고정 껍데기를 먼저
+     떼어 내고, 남는 만큼을 타임라인이 가져간다.
+
+     바닥선은 지어낸 값이 아니다. 2026-07-22에 미리보기를 화면 면적의 8.5%에서
+     20.8%로 되찾았고, 2026-08-17 승인문이 "미리보기가 예전 8.5% 수준으로
+     되돌아가지 않게"를 유일한 조건으로 달았다. 그래서 20.8%를 바닥으로 잡고 그
+     위를 전부 타임라인에 준다. 실제 면적은
+     `apps/web/e2e/exact-preview.spec.mjs`가 브라우저에서 재서 지킨다. */
+  .vb-editor-workbench__timeline { max-height: clamp(4rem, calc(66vh - 390px), 26rem); }
 }
-/* 좁은 데스크톱에서는 타임라인이 4rem밖에 못 쓰므로 키 안내 줄까지 넣을 자리가
-   없다. 타임라인이 실제로 넓어지는 큰 화면에서는 그대로 보여 준다. */
-@media (min-width: 768px) and (max-width: 1499px) {
-  .vb-editor-workbench__timeline > p:nth-of-type(2) { display: none; }
-}
+/* 예전에는 좁은 데스크톱에서 키 안내 줄을 숨겼다. 안내가 한 줄씩 자리를 먹던
+   시절의 대처였고, 이제 안내가 모두 한 줄에 모여 있어 숨길 이유가 없다. */
 /* 재생 컨트롤은 한 줄 안에 모은다. 미리보기 판의 글자·단추 줄은 이미 세로 공간을
    가장 많이 먹는 쪽이라(1920x1080에서 181px), 줄을 새로 만들지 않는다. */
 .vb-preview-stage__transport { display: flex; align-items: center; gap: 0.35rem; }
 .vb-preview-stage__transport > button { flex: 0 0 auto; }
 .vb-preview-stage__transport > button[aria-pressed="true"] { border-color: var(--vb-accent); background: var(--vb-accent-bg); }
+/* 타임라인의 안내·상태 줄은 지우지 않고 한 줄로 모은다. 재 보니 타임라인이 필요로
+   하는 449px 중 눈금과 트랙은 222px뿐이었고 나머지는 이 조각들이 한 줄씩 차지한
+   것이었다 -- 자리를 더 줘도 눈금이 계속 스크롤 안에 숨은 이유다. */
+.vb-editor-workbench__timeline-head, .vb-editor-workbench__timeline-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; }
+.vb-editor-workbench__timeline-head h2 { margin: 0; font-size: 0.9rem; }
+.vb-editor-workbench__timeline-head p, .vb-editor-workbench__timeline-foot p { margin: 0; color: var(--muted-foreground); font-size: 0.78rem; }
+.vb-editor-workbench__timeline-foot output { color: var(--muted-foreground); font-size: 0.78rem; }
