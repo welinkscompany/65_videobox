@@ -51,6 +51,12 @@ body:has(.vb-product-shell) { margin:0; }
 /* 아래 일곱 화면은 클래스만 붙어 있고 규칙이 없어서 브라우저 기본 스타일로
    그려지고 있었다. 승인된 토큰만 쓰고 새 색을 만들지 않는다. */
 .vb-review-page { display:grid; gap:1rem; max-width:64rem; }
+/* grid는 자식을 열 폭에 맞춰 늘린다. 그래서 `검토 다시 열기` 같은 단추가 64rem을
+   가로질러, 글 한 줄짜리 동작이 화면을 가로지르는 띠처럼 보였다. 단추만 제 크기로
+   돌린다 -- 장면 목록 같은 블록은 폭을 그대로 써야 하므로 전체에 걸지 않는다. */
+.vb-review-page > [data-slot=button],
+.vb-project-archive > [data-slot=button],
+.vb-conversation-cleanup > [data-slot=button] { justify-self:start; }
 .vb-project-action-error { margin:.5rem 0 0; color:var(--destructive); font-size:.8rem; line-height:1.4; }
 .vb-outputs, .vb-creation-interview, .vb-media-library, .vb-project-archive { display:grid; gap:1rem; max-width:52rem; }
 .vb-outputs { max-width:none; }
