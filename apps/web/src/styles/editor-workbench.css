@@ -168,3 +168,8 @@
 @media (min-width: 768px) and (max-width: 1499px) {
   .vb-editor-workbench__timeline > p:nth-of-type(2) { display: none; }
 }
+/* 재생 컨트롤은 한 줄 안에 모은다. 미리보기 판의 글자·단추 줄은 이미 세로 공간을
+   가장 많이 먹는 쪽이라(1920x1080에서 181px), 줄을 새로 만들지 않는다. */
+.vb-preview-stage__transport { display: flex; align-items: center; gap: 0.35rem; }
+.vb-preview-stage__transport > button { flex: 0 0 auto; }
+.vb-preview-stage__transport > button[aria-pressed="true"] { border-color: var(--vb-accent); background: var(--vb-accent-bg); }

@@ -9,7 +9,7 @@ export type AuditionRequest = Readonly<{ requestId: number; source: AuditionSour
 export type PreviewCaption = Readonly<{ text: string; startSec: number; endSec: number }>;
 type MediaNode = HTMLVideoElement | HTMLAudioElement;
 
-export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, auditionRequest, onRefresh, playbackSec, onPlaybackTimeChange }: {
+export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, auditionRequest, onRefresh, playbackSec, onPlaybackTimeChange, fps, loopRange }: {
   expectedRevision: number;
   exactPreview: ExactPreviewInput;
   captions?: readonly PreviewCaption[];
@@ -18,6 +18,10 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   onRefresh?: () => void | Promise<void>;
   playbackSec?: number;
   onPlaybackTimeChange?: (seconds: number) => void;
+  /** 타임라인이 실제로 쓰는 프레임률. 한 프레임씩 움직이는 폭이 여기서 나온다. */
+  fps?: Readonly<{ num: number; den: number }>;
+  /** 고른 장면의 구간. 화면이 `적용 구간`으로 보여 주는 것과 같은 값이다. */
+  loopRange?: Readonly<{ startSec: number; endSec: number }> | null;
 }) {
   const exact = toExactPreviewState(exactPreview, expectedRevision);
   const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
@@ -28,6 +32,8 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [auditionIssue, setAuditionIssue] = useState<string | null>(null);
+  const [repeating, setRepeating] = useState(false);
+  const frameSec = fps && fps.num > 0 && fps.den > 0 ? fps.den / fps.num : 1 / 30;
 
   const stopActiveMedia = () => {
     const media = mediaRef.current;
@@ -95,9 +101,33 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const showsADifferentMoment = currentMedia !== null && !isImageAudition && Number.isFinite(playbackSec)
     && Math.abs((playbackSec as number) - timelineTime) > 0.05;
   const updateTimeline = (node: MediaNode) => {
+    // 반복이 켜져 있으면 구간 끝에서 되감는다. 자막·재생 위치를 갱신하기 전에 처리해야
+    // 구간 밖 한 순간이 잠깐 보였다 사라지는 일이 없다.
+    if (repeating && loopRange && mode.kind !== "idle") {
+      const timelineSeconds = coordinatorRef.current.timelineTime(node.currentTime);
+      if (timelineSeconds >= loopRange.endSec || timelineSeconds < loopRange.startSec) {
+        seekTimelineTo(node, loopRange.startSec);
+        return;
+      }
+    }
     const nextSeconds = coordinatorRef.current.timelineTime(node.currentTime);
     setTimelineTime(nextSeconds);
     onPlaybackTimeChange?.(nextSeconds);
+  };
+  /** 미리보기가 실제로 담고 있는 구간 안으로만 옮긴다. 밖은 갖고 있지 않다. */
+  const seekTimelineTo = (media: MediaNode, timelineSeconds: number) => {
+    if (mode.kind === "idle") return;
+    const range = mode.media.timelineRange;
+    const clamped = Math.min(range.endSec, Math.max(range.startSec, timelineSeconds));
+    try { media.currentTime = clamped - range.startSec; } catch { return; }
+    setTimelineTime(clamped);
+    onPlaybackTimeChange?.(clamped);
+  };
+  const stepFrame = (direction: -1 | 1) => {
+    const media = mediaRef.current;
+    if (!media || mode.kind === "idle") return;
+    try { media.pause(); } catch { /* native playback may already be detached */ }
+    seekTimelineTo(media, coordinatorRef.current.timelineTime(media.currentTime) + direction * frameSec);
   };
   const togglePlayback = () => {
     const media = mediaRef.current;
@@ -141,7 +171,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} controls preload="metadata" playsInline onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
       {!currentMedia && <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>}
     </div>
-    {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><output aria-live="off">타임라인 {timelineTime.toFixed(1)}초</output></div>}
+    {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}</div><output aria-live="off">타임라인 {timelineTime.toFixed(1)}초</output></div>}
     {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">이 화면은 타임라인 {timelineTime.toFixed(1)}초의 모습입니다. 재생 위치는 그보다 바깥에 있어 아직 볼 수 없어요.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `자막은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>

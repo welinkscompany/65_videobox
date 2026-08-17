@@ -245,6 +245,60 @@ describe("PreviewStage", () => {
     expect(workbenchRule).toMatch(/grid-template-rows:\s*auto minmax\((?!0[,)])[^,]+, 1fr\) auto/);
   });
 
+  it("steps one frame at a time from the fps the timeline actually uses", () => {
+    // 컷을 어디서 자를지는 프레임 단위로 정해진다. `0.1초 뒤로`가 아니라 한 프레임씩
+    // 움직여야 자를 자리를 고를 수 있다 -- 캡컷도 그렇다.
+    const onPlaybackTimeChange = vi.fn();
+    render(<PreviewStage {...current} fps={{ num: 25, den: 1 }} playbackSec={4} onPlaybackTimeChange={onPlaybackTimeChange} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 4 });
+
+    fireEvent.click(screen.getByRole("button", { name: "다음 프레임" }));
+    expect(media.currentTime).toBeCloseTo(4.04, 5);
+    expect(onPlaybackTimeChange).toHaveBeenLastCalledWith(expect.closeTo(4.04, 5));
+
+    fireEvent.click(screen.getByRole("button", { name: "이전 프레임" }));
+    expect(media.currentTime).toBeCloseTo(4, 5);
+  });
+
+  it("never steps outside the range the preview actually covers", () => {
+    // 구간 밖으로 나가면 미리보기는 그 순간을 갖고 있지 않다. 끝에서 한 번 더
+    // 누르면 조용히 제자리에 있어야지, 없는 곳을 가리키면 안 된다.
+    render(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "/api/range.mp4", artifactRevision: 4, timelineStartSec: 4, timelineEndSec: 8 }} fps={{ num: 30, den: 1 }} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 0 });
+
+    fireEvent.click(screen.getByRole("button", { name: "이전 프레임" }));
+    expect(media.currentTime).toBe(0);
+
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 4 });
+    fireEvent.click(screen.getByRole("button", { name: "다음 프레임" }));
+    expect(media.currentTime).toBe(4);
+  });
+
+  it("repeats only the selected scene while the creator is judging it", () => {
+    // 컷을 확인할 때는 그 장면만 몇 번씩 본다. 매번 되감는 대신 반복을 켜 둔다.
+    // 구간은 화면이 이미 `적용 구간`으로 보여 주는 것과 같은 것이다.
+    render(<PreviewStage {...current} loopRange={{ startSec: 3, endSec: 8 }} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 9 });
+
+    // 꺼져 있으면 지나간다.
+    fireEvent.timeUpdate(media);
+    expect(media.currentTime).toBe(9);
+
+    fireEvent.click(screen.getByRole("button", { name: "선택한 장면 반복" }));
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 9 });
+    fireEvent.timeUpdate(media);
+    expect(media.currentTime).toBe(3);
+  });
+
+  it("offers no repeat control when no scene is selected", () => {
+    // 반복할 구간이 없는데 단추만 있으면, 눌러도 아무 일이 없는 단추가 된다.
+    render(<PreviewStage {...current} />);
+    expect(screen.queryByRole("button", { name: "선택한 장면 반복" })).toBeNull();
+  });
+
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
     const refresh = vi.fn();
     const stale = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);
