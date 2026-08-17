@@ -98,8 +98,10 @@ const nativeControlAllowlist = {
       "button:timeline-reorder",
       "button:timeline-trim-end",
       "button:timeline-trim-start",
+      "button:timeline-zoom-in",
+      "button:timeline-zoom-out",
     ],
-    reason: "Timeline drag, trim, and keyboard interaction requires direct pointer and focus ownership.",
+    reason: "Timeline drag, trim, zoom, and keyboard interaction requires direct pointer and focus ownership.",
   },
   "features/footage/SceneTimeline.tsx": {
     controls: ["button:footage-playhead"],

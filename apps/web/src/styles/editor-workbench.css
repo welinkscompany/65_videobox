@@ -181,3 +181,5 @@
 .vb-editor-workbench__timeline-head h2 { margin: 0; font-size: 0.9rem; }
 .vb-editor-workbench__timeline-head p, .vb-editor-workbench__timeline-foot p { margin: 0; color: var(--muted-foreground); font-size: 0.78rem; }
 .vb-editor-workbench__timeline-foot output { color: var(--muted-foreground); font-size: 0.78rem; }
+.vb-editor-workbench__timeline-zoom { display: inline-flex; gap: 0.25rem; margin-left: auto; }
+.vb-editor-workbench__timeline-zoom > button { min-width: 1.75rem; padding: 0.1rem 0.4rem; border: 1px solid var(--border); border-radius: 0.35rem; color: var(--foreground); background: var(--background); font-size: 0.8rem; line-height: 1.4; }

@@ -259,6 +259,12 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     event.preventDefault();
     dispatch(action);
   };
+  // 단추도 키와 **같은 경로**를 탄다. 확대 계산을 여기서 다시 쓰면 같은 동작이 두
+  // 벌이 되고, 그중 하나가 조용히 낡는다.
+  const zoom = (key: "+" | "-") => {
+    const action = navigationKeyAction(key, false, { state, fps: view.fps });
+    if (action) dispatch(action);
+  };
   const handleWheel = (event: WheelEvent<HTMLElement>) => {
     if (event.deltaX === 0) return;
     event.preventDefault();
@@ -575,7 +581,13 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     <div className="vb-editor-workbench__timeline-head">
       <h2>타임라인</h2>
       <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
-      <p>클릭으로 재생 위치를 보고, 화살표·Home·End·+·- 키로 탐색합니다.</p>
+      <p>클릭으로 재생 위치를 보고, 화살표·Home·End 키로 탐색합니다.</p>
+      {/* 확대·축소는 `+`/`-` 키로만 됐다. 안내에 적어 두어도 **눈에 보이는 단추가
+          없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다. */}
+      <span className="vb-editor-workbench__timeline-zoom">
+        <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="- 키" onClick={() => zoom("-")}>−</button>
+        <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="+ 키" onClick={() => zoom("+")}>+</button>
+      </span>
     </div>
     {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.
         예전에는 맨 아래 숫자뿐이라 어디서 나뉘는지 눈으로 찾을 수 없었다. */}

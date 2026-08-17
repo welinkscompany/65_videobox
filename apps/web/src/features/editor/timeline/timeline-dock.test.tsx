@@ -579,6 +579,20 @@ describe("TimelineDock", () => {
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
 
+  it("puts timeline zoom on visible controls, not only on keys nobody presses", () => {
+    // 확대·축소는 `+`/`-` 키로만 됐다. 안내 문구에 적혀 있어도 **눈에 보이는 단추가
+    // 없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다(엔진은 다
+    // 있는데 부를 자리가 없었다). 키와 단추는 같은 경로를 탄다.
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "100");
+
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 확대" }));
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "125");
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 축소" }));
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "100");
+  });
+
   it("starts from an externally owned playback position without bouncing it back to zero", () => {
     const onPlaybackSeek = vi.fn();
     render(<TimelineDock onPlaybackSeek={onPlaybackSeek} playbackSec={2.5} view={view} viewportWidthPx={400} />);
