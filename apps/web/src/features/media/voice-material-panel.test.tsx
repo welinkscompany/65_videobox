@@ -38,6 +38,19 @@ describe("voice material panel", () => {
     expect(screen.getAllByRole("button", { name: "파일 업로드" })).toHaveLength(1);
   });
 
+  it("keeps every group on the one heading level the other tabs use", async () => {
+    // 여기만 h2 → h3 → h2였다. 화면에서는 티가 안 나지만 화면 낭독기에서는
+    // 목차가 거꾸로 올라간다. 탭 이름이 이미 `내레이션`이라 같은 제목을 한 번 더
+    // 둘 이유도 없었다.
+    stubVoiceScreen();
+
+    render(<VoiceMaterialPanel projectId="project_a" />);
+    await screen.findByText("이 영상의 내레이션");
+
+    const levels = screen.getAllByRole("heading").map((heading) => heading.tagName);
+    expect(new Set(levels)).toEqual(new Set(["H2"]));
+  });
+
   it("brings the voice work itself, not just a link to it", async () => {
     // 재료 단계에서 만나야 하는 것은 안내가 아니라 실제로 만드는 화면이다.
     stubVoiceScreen();

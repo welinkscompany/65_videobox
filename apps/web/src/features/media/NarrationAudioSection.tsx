@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, type AssetResponse } from "../../api";
 import { Button } from "../../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 
 /** 프로젝트가 지금 들고 있는 내레이션을 보여 주고, 바꿀 수 있게 한다.
  *
@@ -52,18 +53,27 @@ export function NarrationAudioSection({ projectId }: { projectId: string }) {
 
   return (
     <section aria-labelledby="narration-audio-heading">
-      <h3 id="narration-audio-heading">이 영상의 내레이션</h3>
+      {/* 다른 탭과 같은 평면(h2)을 쓴다. 여기만 h3였을 때 화면 낭독기에서
+          목차가 거꾸로 올라갔다 -- 뒤따르는 목소리 화면이 h2로 시작하기 때문이다. */}
+      <h2 id="narration-audio-heading">이 영상의 내레이션</h2>
       {message ? <p role="status">{message}</p> : null}
       {ready && assets.length === 0
         ? <p>아직 내레이션이 없어요. 녹음한 파일을 넣거나, 아래에서 내 목소리로 만들 수 있어요.</p>
         : null}
-      {assets.map((asset) => (
-        <article key={asset.asset_id} aria-label={`${asset.asset_id} 내레이션`}>
-          <strong>{asset.asset_id}</strong>
-          {/* 들어 봐야 무음인지 안다. 목록만으로는 파일이 있다는 것밖에 모른다. */}
-          <audio controls preload="metadata" src={api.assetContentUrl(projectId, asset.asset_id)} />
-        </article>
-      ))}
+      {/* 항목은 카드로 묶는다. 다른 탭이 재료 하나를 카드 하나로 보여 준다. */}
+      {assets.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {assets.map((asset) => (
+            <Card key={asset.asset_id} role="article" aria-label={`${asset.asset_id} 내레이션`}>
+              <CardHeader><CardTitle>{asset.asset_id}</CardTitle></CardHeader>
+              <CardContent>
+                {/* 들어 봐야 무음인지 안다. 목록만으로는 파일이 있다는 것밖에 모른다. */}
+                <audio controls preload="metadata" src={api.assetContentUrl(projectId, asset.asset_id)} />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : null}
       <label htmlFor="narration-audio-file">내레이션 파일 넣기</label>
       <input
         id="narration-audio-file"

@@ -9,19 +9,17 @@ import { VoiceTtsSettings } from "../settings/VoiceTtsSettings";
  * 내레이션이 무음 자산이었는데 **제작 흐름 어디에도 그것을 볼 자리가 없었다.**
  *
  * **이 패널은 기능을 새로 만들지 않는다.** 목소리 등록·후보 생성·청취 승인은
- * `VoiceTtsSettings`에 이미 다 있다. 처음에 여기 업로드를 하나 더 붙였다가
- * 같은 화면에 올리는 길이 두 개가 되어 걷어냈다 — 고쳐야 할 것은 기능이 아니라
+ * `VoiceTtsSettings`에 이미 다 있다. 고쳐야 할 것은 기능이 아니라
  * **어느 단계에서 만나는가**였다.
+ *
+ * 제목은 여기서 한 단계를 더 만들지 않는다. 다른 탭이 전부 `section`+`h2`를 묶음
+ * 단위로 쓰는데 여기만 `h2 → h3 → h2`로 되어 있어, 화면 낭독기에서 목차가 거꾸로
+ * 올라갔다. 탭 이름이 이미 `내레이션`이라 같은 제목을 한 번 더 둘 이유도 없다.
  */
 export function VoiceMaterialPanel({ projectId }: { projectId: string }) {
   return (
     <div className="grid gap-4">
-      <section aria-labelledby="narration-material-heading">
-        <h2 id="narration-material-heading">내레이션</h2>
-        {/* 목소리를 왜 등록하는지 여기서 말해 준다. 아래 화면은 "아직 저장한 목소리가
-            없어요"까지만 말해서, 처음 온 사람은 무엇을 넣어야 할지 알 수 없다. */}
-        <p>내 목소리를 등록하면 대본을 내 목소리로 읽어 줘요. 조용한 곳에서 30초쯤 말한 파일이 좋아요.</p>
-      </section>
+      <p>내 목소리를 등록하면 대본을 내 목소리로 읽어 줘요. 조용한 곳에서 30초쯤 말한 파일이 좋아요.</p>
       {/* 이미 녹음해 둔 내레이션을 넣는 길이 프로젝트를 만들 때뿐이었다.
           여기서 지금 들어 있는 것을 듣고 바꿀 수 있어야 무음 완성본을 미리 잡는다. */}
       <NarrationAudioSection projectId={projectId} />
