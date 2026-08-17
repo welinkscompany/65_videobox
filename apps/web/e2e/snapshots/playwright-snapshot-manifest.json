@@ -24,8 +24,8 @@
         "width": 1280,
         "height": 800
       },
-      "bytes": 53021,
-      "sha256": "11ecbfe20ec1cc10813c47376d1ff797be1b6cbcb322ef40bff56cbd35c0d019"
+      "bytes": 83839,
+      "sha256": "3ea52a3117e4902164f87fbdc626c7886e19aff65c0f4a604d56ba6e49b98fc6"
     },
     {
       "path": "editor-workbench-1440x900.png",
@@ -33,8 +33,8 @@
         "width": 1440,
         "height": 900
       },
-      "bytes": 54870,
-      "sha256": "789f1ba313eb150b523c109bfbba6d7821e83df2fbac61b8dceea2d6b7d11819"
+      "bytes": 91475,
+      "sha256": "df2940d1c6bb7cc4f73ce714a584b1a51db7910e21718034942432ac2db412be"
     },
     {
       "path": "editor-workbench-1920x1080.png",
@@ -42,8 +42,8 @@
         "width": 1920,
         "height": 1080
       },
-      "bytes": 60165,
-      "sha256": "80dc09ba58299b11d81c911663ba47a58c380401cfa5081e8d40bb20187195af"
+      "bytes": 109770,
+      "sha256": "1ee3e13c19b5f830badc1c1fd63e95a9379513c32f493b761ea4a405bf2be4f4"
     },
     {
       "path": "editor-workbench-390x844.png",
@@ -51,8 +51,8 @@
         "width": 390,
         "height": 844
       },
-      "bytes": 46552,
-      "sha256": "fcd4ff9b509cdc48cb3cdc0b01462ca6096bf86d4dbc255d8e6dfd8738944013"
+      "bytes": 45963,
+      "sha256": "7a94c0b7e253fa58c2f9d0a23b6048a7ec9c513b44b16c294741b126757174f4"
     },
     {
       "path": "editor-workbench-768x1024.png",
@@ -60,8 +60,8 @@
         "width": 768,
         "height": 1024
       },
-      "bytes": 51920,
-      "sha256": "734ac87ee779084baa3a40c27fb953faac0894aa98250e2fbacc13a188a80fc2"
+      "bytes": 54299,
+      "sha256": "8d9de184716463f92dbdda23f5034ff582d3a483d83c8229fc5b80c03d0312c9"
     },
     {
       "path": "product-shell-1280.png",

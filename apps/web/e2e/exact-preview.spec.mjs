@@ -231,7 +231,10 @@ test("audition replaces the exact player without autoplay and can return to exac
   };
   await openEditor(page, state);
 
-  await page.getByRole("button", { name: "자산과 대본" }).click();
+  // 이 테스트가 지키는 것은 **원본 미리보기가 편집본 플레이어를 대체하고 다시
+  // 돌아오는가**다. 재료 열을 여는 클릭은 그 원본 버튼에 닿기 위한 수단이었는데,
+  // 이제 그 열은 기본으로 펴져 있다 -- 누르면 오히려 닫혀 버튼이 사라진다.
+  await expect(page.getByRole("complementary", { name: "자산과 대본" })).toBeVisible();
   await page.getByRole("button", { name: "B-roll · 1번째 장면 원본 열기" }).click();
   const audition = page.getByLabel("B-roll · 1번째 장면 소스 미리보기");
   await expect(audition).toHaveCount(1);

@@ -35,14 +35,13 @@ describe("editorUiState", () => {
     expect(localStorage.getItem(editorUiStorageKey("project-1", "session-1"))).not.toContain("segments");
   });
 
-  it("starts a fresh session with both docks closed so the preview owns the screen", () => {
-    // resolveEditorWorkbenchLayout's own fallback default was fixed to
-    // leftOpen:false/rightOpen:false earlier, but readEditorUiState always
-    // returns a complete, valid object -- so that fallback is never actually
-    // reached in the running app. This is the default that matters.
+  it("starts a fresh session with the material column already open", () => {
+    // 이것이 화면에 실제로 닿는 기본값이다. `resolveEditorWorkbenchLayout`에도 같은
+    // 기본값이 한 벌 더 있지만 readEditorUiState가 항상 완전한 값을 돌려주므로
+    // 그쪽 fallback은 실행 중에 닿지 않는다 -- 그래서 여기가 승인된 기본값의 자리다.
     localStorage.clear();
     expect(readEditorUiState("project-x", "session-x")).toEqual({
-      leftOpen: false,
+      leftOpen: true,
       rightOpen: false,
       activeDrawer: null,
       leftSize: 280,

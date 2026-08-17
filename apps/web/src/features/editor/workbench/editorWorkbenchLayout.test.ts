@@ -28,14 +28,12 @@ describe("resolveEditorWorkbenchLayout", () => {
     expect(layout.mode).toBe(viewportWidth === 1599 ? "desktop-single" : "drawer");
   });
 
-  it("opens with the preview alone so the edit is the largest thing on screen", () => {
-    // A creator judging a cut needs the picture, not two reference columns.
-    // Both docks are one toolbar click away.
-    //
-    // 2026-08-17: 캡컷처럼 왼쪽 재료 열을 기본으로 펴는 것은 owner 승인을 받았으나
-    // 아직 넣지 않았다 -- 이 파일과 편집 작업판 테스트 13개를 함께 다시 써야 한다.
+  it("opens with the material column beside the preview, and only that column", () => {
+    // 캡컷처럼 재료가 편집기 왼쪽에 늘 붙어 있어야 한다(owner 승인 2026-08-17).
+    // 오른쪽까지 함께 펴면 `desktop-both`가 되어 미리보기가 720px 아래로 밀리므로
+    // 오른쪽은 툴바 클릭 한 번 거리에 그대로 둔다.
     const fresh = resolveEditorWorkbenchLayout({ viewportWidth: 1920, availableWorkbenchWidth: 1720, persisted: undefined });
-    expect(fresh).toMatchObject({ mode: "desktop-single", leftOpen: false, rightOpen: false });
+    expect(fresh).toMatchObject({ mode: "desktop-single", leftOpen: true, rightOpen: false });
   });
 
   it("keeps both docks shut when the creator shut them", () => {
@@ -51,7 +49,7 @@ describe("resolveEditorWorkbenchLayout", () => {
   });
 
   it("rejects stale persisted state that contains editor identity", () => {
-    // Falls back to the default, which is now preview-only.
-    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1440, availableWorkbenchWidth: 1130, persisted: { ...bothOpen, projectId: "wrong" } })).toMatchObject({ leftOpen: false, rightOpen: false, activeDrawer: null });
+    // 저장된 값이 `bothOpen`이어도 채택하지 않고 기본값(왼쪽만 펴짐)으로 떨어진다.
+    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1440, availableWorkbenchWidth: 1130, persisted: { ...bothOpen, projectId: "wrong" } })).toMatchObject({ leftOpen: true, rightOpen: false, activeDrawer: null });
   });
 });

@@ -79,6 +79,20 @@ const outputVariant = {
 };
 const horizontalVariant = { ...outputVariant, variant_id: "horizontal", kind: "horizontal" };
 
+// 왼쪽 재료 열은 기본으로 펴져 있다(owner 승인 2026-08-17). 도크 버튼은 토글이라
+// 무조건 누르면 **열린 것을 닫아 버린다.** 도크를 여는 것이 목적인 자리에서는
+// 닫혀 있을 때만 누른다.
+// 첫 프레임은 작업판 폭이 아직 0이라 잠깐 `drawer`로 잡히고, 그 순간에는 펴져 있는
+// 도크도 DOM에 없다. 폭이 측정된 뒤에 판단하지 않으면 열린 것을 닫힌 것으로 읽고
+// 눌러서 닫아 버린다 -- 2026-08-17 세 번째 시도가 여기서 실패가 늘었다.
+async function ensureDockOpen(page, name) {
+  await expect
+    .poll(async () => Number(await page.getByRole("region", { name: "편집 작업판" }).getAttribute("data-available-workbench-width")))
+    .toBeGreaterThan(0);
+  if (await page.getByRole("complementary", { name }).count()) return;
+  await page.getByRole("button", { name }).click();
+}
+
 test.beforeEach(async ({ page }) => {
   await installFixedClock(page);
   await page.route(
@@ -103,8 +117,8 @@ for (const [width, height] of snapshots) test(`editor workbench snapshot ${width
   const previewSlot = page.locator(".vb-editor-workbench__preview");
   await expect(preview).toBeVisible();
   await expect(page.locator("audio, video")).toHaveCount(0);
-  // A fresh session opens with the preview alone regardless of width, so the
-  // default never reaches desktop-both -- that needs both docks open first.
+  // 새 세션은 왼쪽 재료 열만 펴고 시작한다. 오른쪽은 닫혀 있으므로 기본값만으로는
+  // `desktop-both`에 닿지 않는다 -- 그건 두 도크가 모두 열려야 한다.
   const expectedDensity = width >= 1280 ? "desktop-single" : "drawer";
   await expect(workbench).toHaveAttribute("data-editor-density", expectedDensity);
   await expect(page.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeVisible();
@@ -122,10 +136,11 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   await page.evaluate(() => localStorage.removeItem("videobox.editor-workbench.ui"));
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
   const workbench = page.getByRole("region", { name: "편집 작업판" });
-  // A fresh session opens preview-only now; open both docks to reach
-  // desktop-both, which this test's drag/reload assertions assume.
-  await page.getByRole("button", { name: "자산과 대본" }).click();
-  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
+  // 이 테스트가 지키는 것은 **드래그한 도크 폭이 새로고침 뒤에도 남는가**다.
+  // `desktop-both`는 오른쪽 크기 조절 핸들이 있는 상태를 만드는 수단이지 목적이
+  // 아니다 -- 기본값이 바뀌어도 같은 상태에 도달하도록 열려 있는 것은 그냥 둔다.
+  await ensureDockOpen(page, "자산과 대본");
+  await ensureDockOpen(page, "유진과 편집 항목");
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
   const rightDock = page.getByRole("complementary", { name: "유진과 편집 항목" });
   const before = await rightDock.boundingBox();

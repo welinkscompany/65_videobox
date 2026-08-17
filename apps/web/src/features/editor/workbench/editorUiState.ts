@@ -3,8 +3,12 @@ import type { EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
 // 기본값은 **한 곳에만** 두어야 한다. 2026-08-17에 `editorWorkbenchLayout`의 것만
 // 바꿨더니 여기 있던 두 번째 벌이 이겨서 화면이 그대로였다 -- 승인된 변경이
 // 아무에게도 닿지 않았다. 바꿀 때는 두 곳을 함께 본다.
+//
+// 왼쪽 재료 열은 기본으로 펴 둔다(owner 승인 2026-08-17). 캡컷처럼 영상·음악·
+// 효과음이 편집기 왼쪽에 늘 붙어 있어야 한다. 오른쪽은 그대로 닫혀 있다 --
+// 둘 다 펴면 미리보기가 `desktop-both` 최소폭(720px) 아래로 밀린다.
 export const defaultEditorUiState: EditorWorkbenchPersistedState = Object.freeze({
-  leftOpen: false,
+  leftOpen: true,
   rightOpen: false,
   activeDrawer: null,
   leftSize: 280,
