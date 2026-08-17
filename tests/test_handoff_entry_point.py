@@ -16,14 +16,35 @@ _ENTRY_LINE = re.compile(
 )
 
 
+_SUPERSEDED = "**대체됨:**"
+
+
 def _newest_handoff() -> str:
-    dated = sorted(
+    """가장 나중 인계 문서.
+
+    파일 이름 순으로만 고르면 **같은 날 인계가 두 번 나오는 순간 틀린다.**
+    2026-08-18에 실제로 그랬다 -- 나중에 쓴 `...capcut-close...`가 먼저 쓴
+    `...next-session...`보다 알파벳 앞이라, 이 함수가 옛 문서를 최신이라고 했다.
+
+    날짜는 이름으로 알 수 있지만 같은 날 안의 순서는 이름으로 알 수 없다. 그래서
+    **대체된 쪽이 스스로 밝히게** 한다 -- 그 편이 사람에게도 낫다. 옛 문서를 열면
+    첫 줄에서 어디로 가야 하는지 바로 보인다.
+    """
+    live = [
         path.name
         for path in HANDOFF_ROOT.iterdir()
-        if path.is_file() and _DATED_HANDOFF.match(path.name)
+        if path.is_file()
+        and _DATED_HANDOFF.match(path.name)
+        and _SUPERSEDED not in path.read_text(encoding="utf-8")
+    ]
+    assert live, "날짜가 붙은, 대체되지 않은 인계 문서가 하나도 없다"
+    newest_date = max(name[:10] for name in live)
+    same_day = sorted(name for name in live if name.startswith(newest_date))
+    assert len(same_day) == 1, (
+        f"{newest_date}에 살아 있는 인계 문서가 {len(same_day)}개다: {same_day}. "
+        f"옛 것에 `{_SUPERSEDED}` 줄을 넣어 어느 것이 현재인지 밝혀라."
     )
-    assert dated, "날짜가 붙은 인계 문서가 하나도 없다"
-    return dated[-1]
+    return same_day[0]
 
 
 def test_entry_map_points_at_the_newest_handoff() -> None:

@@ -1,5 +1,10 @@
 # 다음 세션은 여기서 시작한다
 
+**대체됨:** `docs/handoffs/2026-08-18-videobox-capcut-close-and-one-icon-launch.ko.md`
+
+이 문서가 남긴 A·B·C 중 A와 C는 닫혔고 B는 절반 진행됐다. **현재 상태는 위 문서를 봐라.**
+아래는 그때의 기록으로 남긴다.
+
 - 작성: 2026-08-17
 - 직전 세션: 캡컷 벤치마킹 (`83261f4e5`, `f7cb56939`)
 - **읽는 순서:** 이 문서 → `docs/decisions/2026-08-17-editor-capcut-layout-approval.ko.md`
