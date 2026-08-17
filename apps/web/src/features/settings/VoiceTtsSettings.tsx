@@ -307,8 +307,12 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   const selectedSegment = segments.find((segment) => segment.segment_id === selectedSegmentId) ?? null;
   const isBusy = actionName !== null;
 
+  // 루트가 `vb-setting-control`이었다 -- 설정 화면의 **한 줄짜리 행** 스타일
+  // (`display:flex; align-items:center`)이다. 화면 전체가 그 한 줄에 눌려 제목
+  // 글자가 세로로 한 자씩 쌓였다. 자산 단계로 옮기고 **캡처해 보고서야** 보였다:
+  // 글자·제목 단계·가로 넘침을 다 재도 이건 안 잡힌다.
   return (
-    <section aria-label="내 목소리와 읽어보기 후보" className="vb-setting-control">
+    <section aria-label="내 목소리와 읽어보기 후보" className="grid gap-4">
       <h2>내 목소리 샘플</h2>
       <p className="vb-setting-note">이 기기에 있는 본인 음성만 추가해 주세요.</p>
       {loadState === "loading" || loadState === "idle" ? <p className="text-sm text-muted-foreground">음성 설정을 불러오는 중이에요.</p> : null}

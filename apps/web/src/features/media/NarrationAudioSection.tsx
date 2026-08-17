@@ -74,7 +74,9 @@ export function NarrationAudioSection({ projectId }: { projectId: string }) {
           ))}
         </div>
       ) : null}
-      <label htmlFor="narration-audio-file">내레이션 파일 넣기</label>
+      {/* 보이는 단추가 이미 같은 말을 한다. 라벨까지 보이면 같은 문구가 두 번 뜬다 --
+          숨기되 지우지는 않는다. 파일 입력에 이름이 없으면 화면 낭독기가 못 읽는다. */}
+      <label className="sr-only" htmlFor="narration-audio-file">내레이션 파일 넣기</label>
       <input
         id="narration-audio-file"
         data-native-control="narration-audio-input"
