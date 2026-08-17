@@ -10927,9 +10927,11 @@ owner: *"그냥 캡컷하고 인터페이스를 벤치마킹해."* 그 앞의 �
 
 | | |
 |---|---|
-| `npm test` | 84 파일 · 1,033 passed |
-| `npm run test:e2e` / editor-workbench | 47 + 11 passed (가드 2개 추가) |
+| 전체 pytest (**단독**) | 3,610 passed · 53 skipped · 실패 0 |
+| `npm test` | 84 파일 · 1,038 passed |
+| `npm run test:e2e` / editor-workbench | 47 + 11 passed (가드 3개 추가) |
 | `Start-VideoBox` 테스트 | 11 passed |
+| 실제 컨테이너 | 재료 열 기본 펴짐 · 프레임 이동 1/30초 정확 · 장면 반복 동작 |
 
 ### owner 확인 대기
 
