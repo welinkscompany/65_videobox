@@ -1077,9 +1077,17 @@ if ($Mode -ceq "Start") {
     $healthUri = [Uri]::new($VideoBoxUri, "/health")
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSec)
     $health = [pscustomobject]@{ State = "blocked"; StatusCode = 0 }
+    # 시작 직후에는 게이트웨이가 앱보다 먼저 뜬다. 실측(2026-08-17): 1~3초는 502,
+    # 4초부터 200. 이 구간의 502를 '실패'로 보고 루프를 빠져나오는 바람에 재빌드할
+    # 때마다 `[FAIL]`이 떴고, 확인해 보면 매번 healthy였다. **거짓 실패는 불편해서가
+    # 아니라 진짜 실패와 똑같이 생겨서 사람이 FAIL을 무시하게 만들기 때문에 위험하다.**
+    # 아직 안 뜬 것과 잘못된 것은 다르다 -- 앞의 것만 기다린다.
+    $warmingUpCodes = @(502, 503, 504)
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         $health = Invoke-LoopbackProbe -Uri $healthUri -RequireHealthJson
-        if ($health.State -ceq "pass" -or $health.State -ceq "fail") { break }
+        if ($health.State -ceq "pass") { break }
+        $stillWarmingUp = $health.State -ceq "blocked" -or ($warmingUpCodes -contains [int]$health.StatusCode)
+        if (-not $stillWarmingUp) { break }
         Start-Sleep -Milliseconds 250
     }
     if ($health.State -ceq "pass") {

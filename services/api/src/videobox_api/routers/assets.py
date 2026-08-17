@@ -60,6 +60,62 @@ def build_assets_router(
             storage_uri=asset.storage_uri,
         )
 
+    @router.get("/api/projects/{project_id}/assets/narration-audio")
+    def list_narration_audio_assets(project_id: str) -> AssetListResponse:
+        """넣는 길만 있고 보는 길이 없으면 잘못 넣은 것을 영영 모른다.
+
+        2026-08-16에 완성본이 완전 무음으로 나갔는데, 내레이션이 무음 파일이라는 것을
+        화면 어디에서도 확인할 수 없었다.
+        """
+        try:
+            assets = orchestrator.list_narration_audio_assets(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+
+    @router.post("/api/projects/{project_id}/assets/narration-audio/upload", status_code=status.HTTP_201_CREATED)
+    async def upload_narration_audio(
+        project_id: str,
+        file: UploadFile = File(...),
+    ) -> AssetResponse:
+        """음성 샘플은 파일을 바로 올릴 수 있는데 내레이션만 경로를 타이핑해야 했다."""
+        filename = Path(file.filename or "").name
+        suffix = Path(filename).suffix.lower()
+        if not filename or suffix not in {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac"}:
+            raise _http_error(ValueError("Narration must be an audio file with a supported extension."))
+        staged_path = (
+            store.project_root(project_id)
+            / "tmp"
+            / "narration_uploads"
+            / f".n{uuid4().hex[:8]}{suffix}"
+        )
+        try:
+            staged_path.parent.mkdir(parents=True, exist_ok=True)
+            total_bytes = 0
+            with staged_path.open("wb") as staged_file:
+                while chunk := await file.read(VOICE_SAMPLE_UPLOAD_CHUNK_BYTES):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_VOICE_SAMPLE_UPLOAD_BYTES:
+                        raise ValueError("Narration upload exceeds the 128 MiB limit.")
+                    staged_file.write(chunk)
+            # 빈 파일을 받아 두면 무음 완성본이 다시 나간다.
+            if total_bytes == 0:
+                raise ValueError("Narration upload is empty.")
+            asset = orchestrator.register_narration_audio(
+                project_id=project_id,
+                source_path=staged_path,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        finally:
+            await file.close()
+            staged_path.unlink(missing_ok=True)
+        return AssetResponse(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            storage_uri=asset.storage_uri,
+        )
+
     @router.post("/api/projects/{project_id}/assets/script-document", status_code=status.HTTP_201_CREATED)
     def register_script_document(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
         try:

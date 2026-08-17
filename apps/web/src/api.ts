@@ -2352,6 +2352,20 @@ export const api = {
       body: payload,
     });
   },
+  listNarrationAudio: async (projectId: string): Promise<AssetResponse[]> => {
+    const payload = await request<{ assets: AssetResponse[] }>(
+      `/api/projects/${projectId}/assets/narration-audio`,
+    );
+    return payload.assets;
+  },
+  uploadNarrationAudio: (projectId: string, file: File) => {
+    const payload = new FormData();
+    payload.append("file", file);
+    return request<AssetResponse>(`/api/projects/${projectId}/assets/narration-audio/upload`, {
+      method: "POST",
+      body: payload,
+    });
+  },
   listVoiceSamples: async (projectId: string): Promise<AssetResponse[]> => {
     const payload = await request<{ assets: AssetResponse[] }>(
       `/api/projects/${projectId}/assets/voice-sample`,

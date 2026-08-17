@@ -865,6 +865,51 @@ def test_start_runs_only_the_two_base_services_and_waits_for_health(tmp_path: Pa
     assert str(fixture["env_file"]).lower() not in serialized
 
 
+def test_start_waits_through_the_gateway_502s_that_precede_a_ready_app(tmp_path: Path) -> None:
+    """실측(2026-08-17): 재시작 직후 1~3초는 nginx가 502를 돌려주고 4초부터 200이다.
+
+    프로브가 첫 502를 '실패'로 보고 대기 루프를 즉시 빠져나오는 바람에, 재빌드할 때마다
+    `[FAIL]`이 떴고 확인해 보면 매번 healthy였다. **거짓 실패가 위험한 이유는 불편해서가
+    아니라, 진짜 실패와 똑같이 생겨서 사람이 FAIL을 무시하도록 길들이기 때문이다.**
+    """
+    attempts: list[str] = []
+
+    class WarmingUpHandler(BaseHTTPRequestHandler):
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback
+            attempts.append(self.path)
+            if len(attempts) <= 3:
+                self.send_response(502)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), WarmingUpHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        fixture = _fixture_repository(tmp_path)
+        result = _run(fixture, mode="Start", video_uri=f"http://127.0.0.1:{server.server_port}")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    payload = _payload(result)
+    started = next(row for row in payload["checks"] if row["id"] == "start")
+    assert started["status"] == "pass", started
+    assert started["evidence"]["health_status_code"] == 200
+    # 포기하지 않고 다시 물어봤다는 증거.
+    assert len(attempts) > 3
+
+
 def test_start_validates_the_actual_env_without_output_before_compose_up(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
     result = _run(

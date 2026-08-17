@@ -238,6 +238,10 @@ test("manages voice samples and TTS listening review at the canonical settings r
       await route.fulfill(json({ items: [] }));
       return;
     }
+    if (method === "GET" && path === `/api/projects/${projectId}/assets/narration-audio`) {
+      await route.fulfill(json({ assets: [] }));
+      return;
+    }
     if (method === "GET" && path === "/api/library/assets") {
       await route.fulfill(json({ assets: [], total: 0 }));
       return;

@@ -26756,6 +26756,52 @@ def test_provider_trace_audit_endpoint_deduplicates_repeated_unpersisted_review_
     assert len(attempt_entries) == 1
 
 
+def test_the_narration_a_project_is_carrying_can_be_listed(tmp_path: Path) -> None:
+    """내레이션은 넣을 수만 있고 **볼 수가 없었다.**
+
+    2026-08-16에 완성본이 완전 무음(-91dB)으로 나갔는데, 내레이션이 무음 파일이라는
+    것을 화면 어디에서도 확인할 방법이 없었다. 넣는 길만 있고 보는 길이 없으면
+    잘못 넣은 것을 영영 모른다.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "내레이션 목록"}).json()["project_id"]
+    source = tmp_path / "narration.wav"
+    source.write_bytes(b"RIFFnarration-audio")
+
+    empty = client.get(f"/api/projects/{project_id}/assets/narration-audio")
+    registered = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source)},
+    )
+    listed = client.get(f"/api/projects/{project_id}/assets/narration-audio")
+
+    assert empty.status_code == 200
+    assert empty.json()["assets"] == []
+    assert registered.status_code == 201
+    assert [item["asset_id"] for item in listed.json()["assets"]] == [registered.json()["asset_id"]]
+
+
+def test_narration_upload_registers_project_owned_audio_and_rejects_empty_files(tmp_path: Path) -> None:
+    # 경로를 타이핑하게 하면 owner는 탐색기에서 경로를 복사해 와야 한다.
+    # 음성 샘플은 이미 파일을 바로 올릴 수 있는데 내레이션만 그럴 수 없었다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "내레이션 업로드"}).json()["project_id"]
+
+    uploaded = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio/upload",
+        files={"file": ("내 내레이션.wav", b"RIFFnarration", "audio/wav")},
+    )
+    empty = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio/upload",
+        files={"file": ("empty.wav", b"", "audio/wav")},
+    )
+
+    assert uploaded.status_code == 201
+    assert uploaded.json()["asset_type"] == "narration_audio"
+    # 빈 파일을 받아 두면 무음 완성본이 다시 나간다.
+    assert empty.status_code == 400
+
+
 def test_voice_sample_upload_registers_project_owned_audio_and_rejects_empty_files(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id = client.post("/api/projects", json={"name": "Voice upload"}).json()["project_id"]

@@ -109,6 +109,10 @@ const nativeControlAllowlist = {
     controls: ["button:library-filter"],
     reason: "The library sidebar owns the six native filter controls used to switch the visible asset lifecycle and media type.",
   },
+  "features/media/NarrationAudioSection.tsx": {
+    controls: ["input:narration-audio-input"],
+    reason: "Putting narration into a project needs the platform file picker; the visible trigger stays an owned Button.",
+  },
   "features/library/AssetIngestDropzone.tsx": {
     controls: ["button:asset-file-add", "button:asset-folder-add", "input:asset-file-input", "input:asset-folder-input"],
     reason: "The library ingest surface owns the hidden file and folder inputs and their explicit picker triggers.",
