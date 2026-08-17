@@ -31,6 +31,9 @@ describe("resolveEditorWorkbenchLayout", () => {
   it("opens with the preview alone so the edit is the largest thing on screen", () => {
     // A creator judging a cut needs the picture, not two reference columns.
     // Both docks are one toolbar click away.
+    //
+    // 2026-08-17: 캡컷처럼 왼쪽 재료 열을 기본으로 펴는 것은 owner 승인을 받았으나
+    // 아직 넣지 않았다 -- 이 파일과 편집 작업판 테스트 13개를 함께 다시 써야 한다.
     const fresh = resolveEditorWorkbenchLayout({ viewportWidth: 1920, availableWorkbenchWidth: 1720, persisted: undefined });
     expect(fresh).toMatchObject({ mode: "desktop-single", leftOpen: false, rightOpen: false });
   });

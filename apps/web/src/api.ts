@@ -1972,6 +1972,9 @@ export const api = {
     ),
   getEditingSession: (projectId: string, sessionId: string) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
+  /** 기획을 통과하지 않고 편집기를 여는 길(캡컷의 빈 편집판). */
+  createBlankEditingSession: (projectId: string) =>
+    request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/blank`, { method: "POST" }),
   listOutputVariants: (projectId: string, sessionId: string) =>
     request<{ variants: OutputVariant[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/output-variants?session_id=${encodeURIComponent(sessionId)}`,

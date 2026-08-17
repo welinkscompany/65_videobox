@@ -2,8 +2,9 @@ import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, t
 
 import type { EditorViewModel } from "../editorViewModel";
 import { classifyTimelineHit } from "./hit-testing";
+import { carriesAsset, readAssetDrag } from "../assets/assetDragPayload";
 import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind } from "./snapping";
-import { frameToSeconds, pixelsToTime, secondsToFrameHalfUp } from "./time-scale";
+import { frameToSeconds, pixelsToTime, secondsToFrameHalfUp, timeToPixels } from "./time-scale";
 import { TIMELINE_LANES, type ClipRect, type TimelineLane } from "./timeline-geometry";
 import { deriveNarrationTrim, reorderNarrationLayout, type NarrationSegment, type NarrationReorderLayout } from "./narrationMutation";
 import { derivePlacementMove, derivePlacementTrim, type TimelinePlacement, type TimelinePlacementKind } from "./placementMutation";
@@ -50,6 +51,8 @@ type Props = Readonly<{
   selectedSegmentId?: string | null;
   selectionResetKey?: string | number | null;
   playbackSec?: number;
+  /** 캡컷처럼 재료를 장면 위로 끌어다 놓았을 때. 없으면 클립은 드래그를 받지 않는다. */
+  onDropAsset?: (input: Readonly<{ cardId: string; segmentId: string }>) => void;
   isSaving?: boolean;
   mutationMessage?: string;
 }>;
@@ -170,7 +173,7 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onSelectSegment, onPlaybackSeek, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage }: Props) {
+export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage }: Props) {
   const options = { durationSec: view.output.durationSec, viewportWidthPx, fps: view.fps };
   const [state, dispatch] = useReducer(
     (current: TimelineNavigationState, action: TimelineNavigationAction) => navigationReducer(current, action, options),
@@ -183,6 +186,8 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     },
   );
   const [pointerDraft, setPointerDraft] = useState<TimelinePointerDraft | null>(null);
+  // 지금 어느 장면 위에 떠 있는지. 받을 자리를 보여 주지 않으면 어디에 놓이는지 모른다.
+  const [dragOverClipId, setDragOverClipId] = useState<string | null>(null);
   const [selectedPlacementIds, setSelectedPlacementIds] = useState<readonly string[]>([]);
   const previousSelectionResetKey = useRef(selectionResetKey);
   const onPlaybackSeekRef = useRef(onPlaybackSeek);
@@ -228,6 +233,12 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     scale: { pixelsPerSecond: state.pixelsPerSecond, originSec: state.viewportStartSec },
     fps: view.fps,
   });
+  // 클립과 **같은 좌표계**로 재생 위치 선을 놓는다. 다른 식으로 계산하면 확대하거나
+  // 옆으로 밀었을 때 선만 어긋난다.
+  const playheadX = timeToPixels(state.playheadSec, {
+    pixelsPerSecond: state.pixelsPerSecond,
+    originSec: state.viewportStartSec,
+  });
   const rulerMarks = useMemo(() => {
     const first = Math.ceil(state.viewportStartSec);
     const last = Math.floor(viewportEndSec);
@@ -267,14 +278,23 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
       const caption = captionsByPlacementId.get(hit.clipId);
       const timelineClip = timelineClipById.get(hit.clipId);
       const segmentId = narrationClip?.segmentId ?? caption?.segmentId ?? timelineClip?.segmentId;
-      if (segmentId) onSelectSegment?.(segmentId);
+      // 재생 위치를 먼저 옮기고 **그 다음에** 고른다. 순서가 반대면, seek이 재생
+      // 위치에서 장면을 다시 유도하면서 방금 고른 클립을 덮어쓴다(경계에서는 앞
+      // 장면이 잡힌다). 2026-08-17 실제 앱에서 두 클립이 함께 골라져 있었다.
       const segmentStartSec = narrationClip?.startSec ?? caption?.startSec ?? timelineClip?.startSec;
       if (segmentStartSec !== undefined) onPlaybackSeek?.(segmentStartSec);
+      if (segmentId) onSelectSegment?.(segmentId);
       const placement = placementsByClipId.get(hit.clipId);
       if (placement) setSelectedPlacementIds((current) => additive ? (current.includes(placement.placementId) ? current.filter((id) => id !== placement.placementId) : [...current, placement.placementId]) : [placement.placementId]);
       else if (!additive) setSelectedPlacementIds([]);
     }
   };
+  /** 끌어다 놓은 자리가 어느 장면인지. 클립 id는 표시용이고 편집은 장면 단위다. */
+  const segmentIdForClip = (clipId: string): string | null =>
+    narrationByClipId.get(clipId)?.segmentId
+    ?? captionsByPlacementId.get(clipId)?.segmentId
+    ?? timelineClipById.get(clipId)?.segmentId
+    ?? null;
   const narration = useMemo(() => narrationSegments(view), [view]);
   const narrationByClipId = useMemo(() => new Map(
     view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => [clip.clipId, {
@@ -551,10 +571,13 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
     <h2>타임라인</h2>
     <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
     <p>클릭으로 재생 위치를 보고, 화살표·Home·End·+·- 키로 탐색합니다.</p>
-    <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "1.5rem", overflow: "hidden" }}>
-      {rulerMarks.map((seconds) => <span key={seconds} aria-label={`눈금 ${seconds}초`} role="listitem" style={{ minWidth: `${state.pixelsPerSecond}px` }}>{seconds}s</span>)}
-    </div>
-    <div data-timeline-track data-testid="timeline-track" onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative" }}>
+    {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.
+        예전에는 맨 아래 숫자뿐이라 어디서 나뉘는지 눈으로 찾을 수 없었다. */}
+    <div className="vb-timeline-scale" style={{ position: "relative" }}>
+      <div aria-label="시간 눈금" role="list" style={{ display: "flex", minHeight: "1.5rem", overflow: "hidden" }}>
+        {rulerMarks.map((seconds) => <span key={seconds} aria-label={`눈금 ${seconds}초`} role="listitem" style={{ minWidth: `${state.pixelsPerSecond}px` }}>{seconds}s</span>)}
+      </div>
+      <div data-timeline-track data-testid="timeline-track" onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative" }}>
       <div aria-label="고정 트랙" role="list">
         {TIMELINE_LANES.map((lane) => <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative" }}>
           <span>{laneLabel[lane]}</span>
@@ -578,6 +601,25 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         data-testid="timeline-clip"
         key={rect.clipId}
         role="group"
+        // 캡컷처럼 재료를 장면 위로 끌어다 놓는다. **우리가 실은 짐일 때만** 받는다 --
+        // 파일 탐색기에서 끌어온 것에 커서를 바꾸면 받을 것처럼 보이는 거짓말이 된다.
+        data-drop-target={dragOverClipId === rect.clipId ? "true" : undefined}
+        onDragOver={(event) => {
+          const segmentId = segmentIdForClip(rect.clipId);
+          if (!onDropAsset || !segmentId || !carriesAsset(event.dataTransfer)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          if (dragOverClipId !== rect.clipId) setDragOverClipId(rect.clipId);
+        }}
+        onDragLeave={() => { if (dragOverClipId === rect.clipId) setDragOverClipId(null); }}
+        onDrop={(event) => {
+          const segmentId = segmentIdForClip(rect.clipId);
+          const cardId = readAssetDrag(event.dataTransfer);
+          setDragOverClipId(null);
+          if (!onDropAsset || !segmentId || !cardId) return;
+          event.preventDefault();
+          onDropAsset({ cardId, segmentId });
+        }}
         style={{ left: `${rect.x}px`, overflow: "hidden", position: "absolute", top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}
       ><button data-native-control="timeline-clip-select"
         aria-label={clipDisplayName}
@@ -592,16 +634,24 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
         style={{ height: "100%", width: "100%" }}
         type="button"
       >{clipDisplayName}</button>{narrationClip && isSelected ? <span data-mutation-controls="true" onClick={(event) => event.stopPropagation()} style={{ inset: 0, overflow: "hidden", pointerEvents: "none", position: "absolute" }}>
-        <button data-native-control="timeline-trim-start" aria-label={`${rect.clipId} 시작 자르기`} data-trim-edge="start" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "start")} onPointerDown={(event) => startTrim(event, narrationClip, "start")} style={{ bottom: 0, left: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
-        <button data-native-control="timeline-trim-end" aria-label={`${rect.clipId} 끝 자르기`} data-trim-edge="end" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "end")} onPointerDown={(event) => startTrim(event, narrationClip, "end")} style={{ bottom: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", right: 0, top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
-        <button data-native-control="timeline-reorder" aria-label={`${rect.clipId} 순서 바꾸기`} data-reorder-control="true" disabled={isSaving} onKeyDown={(event) => keyboardReorder(event, narrationClip)} onPointerDown={(event) => startReorder(event, narrationClip)} style={{ bottom: 0, left: "33.333%", maxWidth: "33.334%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.334%" }} title="왼쪽·오른쪽 화살표로 한 칸씩 이동" type="button">순서</button>
+        <button data-native-control="timeline-trim-start" aria-label={`${clipDisplayName} 시작 자르기`} data-trim-edge="start" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "start")} onPointerDown={(event) => startTrim(event, narrationClip, "start")} style={{ bottom: 0, left: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
+        <button data-native-control="timeline-trim-end" aria-label={`${clipDisplayName} 끝 자르기`} data-trim-edge="end" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "end")} onPointerDown={(event) => startTrim(event, narrationClip, "end")} style={{ bottom: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", right: 0, top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
+        <button data-native-control="timeline-reorder" aria-label={`${clipDisplayName} 순서 바꾸기`} data-reorder-control="true" disabled={isSaving} onKeyDown={(event) => keyboardReorder(event, narrationClip)} onPointerDown={(event) => startReorder(event, narrationClip)} style={{ bottom: 0, left: "33.333%", maxWidth: "33.334%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.334%" }} title="왼쪽·오른쪽 화살표로 한 칸씩 이동" type="button">순서</button>
       </span> : null}{placement && isSelected ? <span data-placement-controls="true" onClick={(event) => event.stopPropagation()} style={{ display: "flex", gap: 2, inset: 0, pointerEvents: "none", position: "absolute" }}>
-        <button data-native-control="placement-trim-start" aria-label={`${rect.clipId} 시작 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "start")} onPointerDown={(event) => startPlacement(event, placement, "trim", "start")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
-        <button data-native-control="placement-move" aria-label={`${rect.clipId} 이동`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementMove(event, placement)} onPointerDown={(event) => startPlacement(event, placement, "move")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 이동" type="button">이동</button>
-        <button data-native-control="placement-trim-end" aria-label={`${rect.clipId} 끝 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "end")} onPointerDown={(event) => startPlacement(event, placement, "trim", "end")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
+        <button data-native-control="placement-trim-start" aria-label={`${clipDisplayName} 시작 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "start")} onPointerDown={(event) => startPlacement(event, placement, "trim", "start")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
+        <button data-native-control="placement-move" aria-label={`${clipDisplayName} 이동`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementMove(event, placement)} onPointerDown={(event) => startPlacement(event, placement, "move")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 이동" type="button">이동</button>
+        <button data-native-control="placement-trim-end" aria-label={`${clipDisplayName} 끝 자르기`} disabled={isSaving} onKeyDown={(event) => keyboardPlacementTrim(event, placement, "end")} onPointerDown={(event) => startPlacement(event, placement, "trim", "end")} style={{ pointerEvents: "auto" }} title="드래그하거나 왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
       </span> : null}</div>;
         })}
       </div>
+      </div>
+      <div
+        aria-hidden="true"
+        className="vb-timeline-playhead"
+        data-seconds={formatSeconds(state.playheadSec)}
+        data-testid="timeline-playhead"
+        style={{ left: `${playheadX}px` }}
+      ><span className="vb-timeline-playhead__grip" /></div>
     </div>
     {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
     {caption ? <p>현재 자막: {caption.text}</p> : <p>현재 자막 없음</p>}

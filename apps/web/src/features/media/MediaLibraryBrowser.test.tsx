@@ -246,6 +246,93 @@ describe("MediaLibraryBrowser", () => {
   });
 });
 
+function personalAsset(overrides: Partial<api.LibraryAsset> = {}): api.LibraryAsset {
+  return {
+    library_asset_id: "user:music:1",
+    asset_id: "user-music-1",
+    media_type: "music",
+    origin: "user",
+    lifecycle: "ready",
+    user_metadata: { filename: "출근 음악.mp3" },
+    technical_metadata: { duration_seconds: 18 },
+    preview_url: "/api/library/assets/user%3Amusic%3A1/preview",
+    ...overrides,
+  } as api.LibraryAsset;
+}
+
+describe("종류 안에서 찾기", () => {
+  // owner 지적: "자산 폴더는 분류도 안 되고, 그냥 나열만 하고 있고".
+  // 종류 탭은 있었지만 그 안에서 좁힐 방법이 없었다.
+  it("이름으로 목록을 좁힌다", async () => {
+    const morning = personalAsset();
+    const evening = personalAsset({
+      library_asset_id: "user:music:2",
+      asset_id: "user-music-2",
+      user_metadata: { filename: "저녁 산책.mp3" },
+    });
+    vi.spyOn(api.api, "listLibraryAssets").mockResolvedValue({ assets: [morning, evening] } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" fixedFilter="music" />);
+    await screen.findByText("출근 음악.mp3");
+
+    fireEvent.change(screen.getByLabelText("이름으로 찾기"), { target: { value: "저녁" } });
+
+    expect(screen.getByText("저녁 산책.mp3")).toBeVisible();
+    expect(screen.queryByText("출근 음악.mp3")).toBeNull();
+  });
+
+  it("이름 순으로 다시 줄 세운다", async () => {
+    const sky = personalAsset({ library_asset_id: "user:music:1", asset_id: "user-music-1", user_metadata: { filename: "하늘.mp3" } });
+    const autumn = personalAsset({ library_asset_id: "user:music:2", asset_id: "user-music-2", user_metadata: { filename: "가을.mp3" } });
+    vi.spyOn(api.api, "listLibraryAssets").mockResolvedValue({ assets: [sky, autumn] } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" fixedFilter="music" />);
+    await screen.findByText("하늘.mp3");
+    expect((await screen.findAllByRole("article"))[0]).toHaveTextContent("하늘.mp3");
+
+    fireEvent.click(screen.getByRole("button", { name: "이름 순" }));
+
+    const items = await screen.findAllByRole("article");
+    expect(items[0]).toHaveTextContent("가을.mp3");
+    expect(items[1]).toHaveTextContent("하늘.mp3");
+  });
+
+  it("즐겨찾기만 남겨서 본다", async () => {
+    const loved = personalAsset({ library_asset_id: "user:music:1", asset_id: "user-music-1", user_metadata: { filename: "자주 쓰는 곡.mp3" } });
+    const plain = personalAsset({ library_asset_id: "user:music:2", asset_id: "user-music-2", user_metadata: { filename: "한 번 쓴 곡.mp3" } });
+    vi.spyOn(api.api, "listLibraryAssets").mockResolvedValue({ assets: [loved, plain] } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: ["user:music:1"] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" fixedFilter="music" />);
+    await screen.findByText("한 번 쓴 곡.mp3");
+
+    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기만 보기" }));
+
+    expect(screen.getByText("자주 쓰는 곡.mp3")).toBeVisible();
+    expect(screen.queryByText("한 번 쓴 곡.mp3")).toBeNull();
+  });
+
+  it("즐겨찾기가 하나도 없을 때는 무엇을 해야 하는지 알려 준다", async () => {
+    // 담아 둔 것이 없는데 "고른 조건에 맞는 것이 없어요"만 뜨면 owner는 보관함이
+    // 빈 줄 안다. 막다른 길을 만든 것은 방금 켠 이 단추다.
+    vi.spyOn(api.api, "listLibraryAssets").mockResolvedValue({ assets: [personalAsset()] } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" fixedFilter="music" />);
+    await screen.findByText("출근 음악.mp3");
+
+    fireEvent.click(screen.getByRole("button", { name: "즐겨찾기만 보기" }));
+
+    expect(screen.getByText("아직 즐겨찾기에 담아 둔 것이 없어요. 자주 쓰는 것에 즐겨찾기를 눌러 두세요.")).toBeVisible();
+  });
+});
+
 describe("항목 이름", () => {
   it("팩 내부 슬러그 대신 제품 언어로 항목을 부른다", async () => {
     // 음악 이름이 `music-005` 하나뿐이면 owner는 영어 슬러그를 읽어야 한다.

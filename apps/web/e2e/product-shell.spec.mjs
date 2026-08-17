@@ -74,8 +74,8 @@ test("mobile menu exposes the same creator navigation", async ({ page }) => {
   await page.getByRole("button", { name: "메뉴 열기" }).click();
 
   const menu = page.getByRole("dialog");
-  await expect(menu.getByRole("button", { name: "자산" })).toBeVisible();
-  await menu.getByRole("button", { name: "자산" }).click();
+  await expect(menu.getByRole("button", { name: "재료" })).toBeVisible();
+  await menu.getByRole("button", { name: "재료" }).click();
   await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
   await expect(page.getByRole("heading", { name: "자산 보관함" })).toBeVisible();
 });

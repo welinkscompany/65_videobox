@@ -26,7 +26,7 @@ describe("product shell", () => {
     }
     const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
     expect(within(stages).getAllByRole("button")).toHaveLength(4);
-    for (const label of ["기획", "자산", "편집", "검토와 출력"]) {
+    for (const label of ["편집", "이야기", "재료", "확인과 내보내기"]) {
       expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(view.container.querySelectorAll("main")).toHaveLength(1);
@@ -74,7 +74,7 @@ describe("product shell", () => {
     const navigation = await screen.findByRole("navigation", { name: "프로젝트 단계" });
     const navButtons = within(navigation).getAllByRole("button");
     expect(navButtons).toHaveLength(4);
-    for (const label of ["기획", "자산", "편집", "검토와 출력"]) {
+    for (const label of ["편집", "이야기", "재료", "확인과 내보내기"]) {
       const button = within(navigation).getByRole("button", { name: label });
       expect(button.querySelector("svg")).toBeTruthy();
       expect(button.querySelector(".vb-nav-label")).toHaveTextContent(label);
@@ -96,8 +96,8 @@ describe("product shell", () => {
     fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
 
     const navigation = screen.getByRole("navigation", { name: "프로젝트 단계" });
-    const plan = within(navigation).getByRole("button", { name: "기획" });
-    expect(plan).toHaveAttribute("aria-label", "기획");
+    const plan = within(navigation).getByRole("button", { name: "이야기" });
+    expect(plan).toHaveAttribute("aria-label", "이야기");
     expect(plan.querySelector(".vb-nav-label")).toHaveClass("group-data-[collapsible=icon]:hidden");
   });
   it("opens the current-project recovery surface only when the user asks for job status", async () => {
@@ -238,7 +238,7 @@ describe("product shell", () => {
 
     await screen.findByTestId("media-workspace-page");
 
-    expect(screen.getByRole("button", { name: "자산" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "재료" })).toBeInTheDocument();
     expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 
@@ -255,7 +255,7 @@ describe("product shell", () => {
     expect(screen.queryByText(/provider|job metric/i)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "두 번째 영상" }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/second/home"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/second/editor"));
   });
 
   it("archives a project from the switcher after a confirm step, and it drops off the list (F-5)", async () => {

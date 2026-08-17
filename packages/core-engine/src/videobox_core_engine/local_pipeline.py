@@ -175,6 +175,7 @@ from videobox_core_engine.editing_session import (
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
+from videobox_core_engine.blank_editing_session import build_blank_editing_session, build_blank_timeline_payload
 from videobox_core_engine.script_draft_session import (
     apply_narration_alignment_to_script_draft,
     build_provisional_script_draft_session,
@@ -2538,6 +2539,29 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=str(job["job_id"]),
             )
+
+    def create_blank_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        """기획을 통과하지 않고 편집기를 연다 -- 캡컷의 빈 편집판.
+
+        `create_editing_session`은 기획 산출물을, `create_script_draft_editing_session`은
+        대본을 요구한다. 둘 다 없이 편집기를 열 길이 없어서 owner가 잠긴 문을 만났다.
+        """
+        # 타임라인을 **먼저** 만든다. 편집기는 세션과 그 짝이 되는 타임라인이
+        # 둘 다 있어야 재생 목록을 만들 수 있고, 없으면 화면이 열리지 않는다.
+        timeline = self.store.save_timeline_run(
+            project_id=project_id,
+            output_mode="landscape",
+            timeline_payload=build_blank_timeline_payload(),
+        )
+        session_payload = build_blank_editing_session(
+            project_id=project_id, timeline_id=str(timeline["timeline_id"])
+        )
+        saved = self.store.save_editing_session(
+            project_id=project_id,
+            timeline_id=str(session_payload["timeline_id"]),
+            session_payload=session_payload,
+        )
+        return saved
 
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
         asset = self.store.get_asset(project_id=project_id, asset_id=script_asset_id)

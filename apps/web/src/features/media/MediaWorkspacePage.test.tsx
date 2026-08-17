@@ -468,3 +468,40 @@ describe("MediaWorkspacePage", () => {
     expect(await screen.findByText("미리보기 길이 9초")).toBeVisible();
   });
 });
+
+describe("프로젝트 영상 정리", () => {
+  // owner 지적: "자산 폴더는 분류도 안 되고, 그냥 나열만 하고 있고".
+  // 라이브러리 쪽은 좁힐 수 있게 됐지만 기본으로 열리는 "내 영상" 위쪽은
+  // 여전히 그냥 나열이었다.
+  // 보관함은 오래된 것부터 도착한다(`local_project_store.list_assets`가 `created_at ASC`).
+  const twoClips = (): BrollAsset[] => ([
+    { asset_id: "asset-old", asset_type: "broll_video", storage_uri: "local://project-a/old", created_at: "2026-07-01T00:00:00Z", metadata: { title: "산책 장면", duration_seconds: 5 } },
+    { asset_id: "asset-new", asset_type: "broll_video", storage_uri: "local://project-a/new", created_at: "2026-07-30T00:00:00Z", metadata: { title: "회의 장면", duration_seconds: 7 } },
+  ]);
+  const cards = () => Array.from(document.querySelectorAll(".vb-media-project-card"));
+
+  it("이름으로 프로젝트 영상을 좁힌다", async () => {
+    vi.mocked(api.listBrollAssets).mockResolvedValue(twoClips());
+    render(<MediaWorkspacePage projectId="project-a" />);
+    await screen.findByText("산책 장면");
+
+    fireEvent.change(screen.getByLabelText("프로젝트 영상 이름으로 찾기"), { target: { value: "회의" } });
+
+    expect(screen.getByText("회의 장면")).toBeVisible();
+    expect(screen.queryByText("산책 장면")).toBeNull();
+  });
+
+  it("최근에 넣은 영상을 앞에 두고, 이름 순으로도 다시 세운다", async () => {
+    vi.mocked(api.listBrollAssets).mockResolvedValue(twoClips());
+    render(<MediaWorkspacePage projectId="project-a" />);
+    await screen.findByText("산책 장면");
+
+    expect(cards()[0]).toHaveTextContent("회의 장면");
+    expect(cards()[1]).toHaveTextContent("산책 장면");
+
+    fireEvent.click(screen.getByRole("button", { name: "프로젝트 영상 이름 순" }));
+
+    expect(cards()[0]).toHaveTextContent("산책 장면");
+    expect(cards()[1]).toHaveTextContent("회의 장면");
+  });
+});

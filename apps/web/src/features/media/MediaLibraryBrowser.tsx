@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { api, type LibraryAsset, type MediaLibraryAsset, type MediaLibraryInstallState } from "../../api";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 import { orderByFavouriteThenRecent } from "../../lib/pickerOrder";
 
 type Filter = "all" | "broll" | "music" | "sfx";
@@ -46,6 +47,13 @@ function browserCopy(fixedFilter?: Exclude<Filter, "all">) {
   };
 }
 
+type SortOrder = "recent" | "name";
+
+const sortOrders: readonly { value: SortOrder; label: string }[] = [
+  { value: "recent", label: "최근 순" },
+  { value: "name", label: "이름 순" },
+];
+
 const filters: readonly { value: Filter; label: string }[] = [
   { value: "all", label: "전체 보기" },
   { value: "broll", label: "영상만 보기" },
@@ -67,10 +75,16 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
   const [favouriteBusy, setFavouriteBusy] = useState<readonly string[]>([]);
   const [materializeBusy, setMaterializeBusy] = useState<readonly string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortOrder>("recent");
+  const [favouritesOnly, setFavouritesOnly] = useState(false);
+  const searchId = useId();
 
   useEffect(() => {
     let active = true;
     setReady(false); setLoadFailed(false); setInstallState(null); setRecents([]); setFavouriteBusy([]); setMaterializeBusy([]); setMessage(null);
+    // 좁혀 둔 조건은 다른 보관함으로 옮기면 뜻이 없어진다. 정렬 취향은 그대로 둔다.
+    setQuery(""); setFavouritesOnly(false);
     void api.getMediaLibraryInstallState().then((state) => { if (active) setInstallState(state); }).catch(() => undefined);
     void api.listProjectRecentMediaLibraryAssetIds(projectId).then((recent) => { if (active) setRecents(recent.asset_ids); }).catch(() => undefined);
     let legacyFailed = false;
@@ -117,8 +131,22 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
     const label = kind === "broll" ? "영상" : kind === "music" ? "음악" : "효과음";
     assets.filter((item) => item.media_type === kind).slice().sort((left, right) => String(left.asset_id ?? "").localeCompare(String(right.asset_id ?? ""))).forEach((item, index) => displayNames.set(item.library_asset_id, displayFilename(item, `${label} ${index + 1}`)));
   }
+  const nameOf = (item: BrowserAsset) => displayNames.get(item.library_asset_id) ?? displayFilename(item, item.asset_id ?? item.library_asset_id);
   const selectedFilter = fixedFilter ?? filter;
-  const visible = orderByFavouriteThenRecent(assets.filter((item) => selectedFilter === "all" || item.media_type === selectedFilter), (item) => item.library_asset_id, favourites, recents, (left, right) => String(left.asset_id ?? "").localeCompare(String(right.asset_id ?? "")));
+  // 이름으로 좁히기. 종류 탭 안이 그냥 나열이라 쌓일수록 찾을 수 없었다.
+  const needle = query.trim().toLocaleLowerCase("ko");
+  const matching = assets.filter((item) => (selectedFilter === "all" || item.media_type === selectedFilter)
+    && (needle === "" || nameOf(item).toLocaleLowerCase("ko").includes(needle))
+    && (!favouritesOnly || favourites.includes(item.library_asset_id)));
+  // 즐겨찾기는 어느 순서에서도 위에 남는다 -- 담아 둔 것을 다시 내려보내면 담아 둔 뜻이 없어진다.
+  // "최근 순"은 프로젝트에서 최근에 쓴 것 다음에 늦게 넣은 것부터, "이름 순"은 가나다 순이다.
+  const addedAt = (item: BrowserAsset) => (isPersonalAsset(item) && typeof item.created_at === "string" ? item.created_at : "");
+  const byId = (left: BrowserAsset, right: BrowserAsset) => String(left.asset_id ?? "").localeCompare(String(right.asset_id ?? ""));
+  const byAdded = (left: BrowserAsset, right: BrowserAsset) => addedAt(right).localeCompare(addedAt(left)) || byId(left, right);
+  const byName = (left: BrowserAsset, right: BrowserAsset) => nameOf(left).localeCompare(nameOf(right), "ko") || byId(left, right);
+  const visible = sort === "name"
+    ? orderByFavouriteThenRecent(matching, (item) => item.library_asset_id, favourites, [], byName)
+    : orderByFavouriteThenRecent(matching, (item) => item.library_asset_id, favourites, recents, byAdded);
   const pageCount = Math.max(1, Math.ceil(visible.length / MEDIA_LIBRARY_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
   const pageItems = visible.slice((safePage - 1) * MEDIA_LIBRARY_PAGE_SIZE, safePage * MEDIA_LIBRARY_PAGE_SIZE);
@@ -132,6 +160,16 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
     {message ? <p role="status">{message}</p> : null}
     {installState?.status === "degraded" ? <p role="status">{`들여놓은 ${installState.installed_asset_count}개 가운데 일부는 확인이 끝나지 않아 아직 쓸 수 없어요.`}</p> : null}
     {fixedFilter ? null : <div className="vb-media-library__filters">{filters.map((item) => <Button key={item.value} type="button" variant={filter === item.value ? "default" : "outline"} aria-pressed={filter === item.value} onClick={() => { setFilter(item.value); setPage(1); }}>{item.label}</Button>)}</div>}
+    <div className="vb-media-library__toolbar">
+      <label htmlFor={searchId}>이름으로 찾기</label>
+      <Input id={searchId} type="search" value={query} placeholder="이름 일부를 적어 보세요" onChange={(event) => { setQuery(event.target.value); setPage(1); }} />
+      <div role="group" aria-label="정렬 순서" className="vb-media-library__filters">
+        {sortOrders.map((item) => <Button key={item.value} type="button" variant={sort === item.value ? "default" : "outline"} aria-pressed={sort === item.value} onClick={() => { setSort(item.value); setPage(1); }}>{item.label}</Button>)}
+      </div>
+      <div className="vb-media-library__filters">
+        <Button type="button" variant={favouritesOnly ? "default" : "outline"} aria-pressed={favouritesOnly} onClick={() => { setFavouritesOnly((current) => !current); setPage(1); }}>즐겨찾기만 보기</Button>
+      </div>
+    </div>
     {loadFailed ? <Button type="button" variant="outline" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>다시 불러오기</Button> : null}
     {visible.length ? <>
       <div className="vb-media-library__grid">{pageItems.map((item) => {
@@ -144,6 +182,8 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
         </article>;
       })}</div>
       {pageCount > 1 ? <nav aria-label={copy.pagination} className="vb-media-library__pagination"><Button type="button" variant="outline" disabled={safePage <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>이전 페이지</Button><span aria-live="polite">{safePage} / {pageCount}페이지</span><Button type="button" variant="outline" disabled={safePage >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>다음 페이지</Button></nav> : null}
-    </> : <p>{assets.length ? "고른 조건에 맞는 것이 없어요." : libraryEmptyReason(installState, loadFailed, fixedFilter)}</p>}
+    </> : <p>{favouritesOnly && favourites.length === 0
+      ? "아직 즐겨찾기에 담아 둔 것이 없어요. 자주 쓰는 것에 즐겨찾기를 눌러 두세요."
+      : assets.length ? "고른 조건에 맞는 것이 없어요." : libraryEmptyReason(installState, loadFailed, fixedFilter)}</p>}
   </section>;
 }

@@ -17,7 +17,8 @@ import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from
 import { hasLegacyEditorUiState, readEditorUiState, readVariantsCollapsed, writeEditorUiState, writeVariantsCollapsed } from "./editorUiState";
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
 import { VariantCompare } from "../variants/VariantCompare";
-import { cutToolbarState } from "./cutToolbar";
+import { cutToolbarState, EMPTY_CUT_TOOLS, type CutToolbarState } from "./cutToolbar";
+import { cutShortcutFor } from "./cutShortcuts";
 import { VariantConflictPanel } from "../variants/VariantConflictPanel";
 import { VariantSelector } from "../variants/VariantSelector";
 import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
@@ -155,14 +156,26 @@ function EditorWorkbenchInstance({
   // a second undo. Never while a text field has focus -- undoing the whole
   // edit mid-sentence would throw away the typing and a real edit at once, and
   // the browser's own text undo is the right thing there.
+  // 컷 도구는 이 아래에서 계산된다. ref로 들고 있어야 키 처리기를 매번 다시 붙이지
+  // 않으면서도 늘 최신 상태를 본다.
+  const cutToolsRef = useRef<CutToolbarState>(EMPTY_CUT_TOOLS);
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       const key = event.key.toLowerCase();
-      if (key !== "z" && key !== "y") return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable) return;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      // 캡컷 컷 단축키. 무엇을 할 수 있는지는 툴바가 이미 정했으므로 그것을 그대로
+      // 쓴다 -- 여기서 다시 계산하면 단추와 키가 서로 다른 판단을 하게 된다.
+      const cutAction = cutShortcutFor(event, cutToolsRef.current);
+      if (cutAction) {
+        if (isSavingTimeline || !onInspectorAction) return;
+        event.preventDefault();
+        void onInspectorAction(cutAction);
+        return;
+      }
+      if (key !== "z" && key !== "y") return;
       const chord = (event.ctrlKey || event.metaKey) && !event.altKey;
       const redo = chord && ((key === "z" && event.shiftKey) || (key === "y" && !event.shiftKey));
       const undo = chord && key === "z" && !event.shiftKey;
@@ -179,7 +192,7 @@ function EditorWorkbenchInstance({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isSavingTimeline, onUndo, onRedo, session?.undoCount, session?.redoCount]);
+  }, [isSavingTimeline, onUndo, onRedo, onInspectorAction, session?.undoCount, session?.redoCount]);
   useLayoutEffect(() => {
     const measure = () => setAvailableWorkbenchWidth(bodyRef.current?.getBoundingClientRect().width || window.innerWidth);
     measure();
@@ -247,12 +260,16 @@ function EditorWorkbenchInstance({
   const seekPlayback = (seconds: number) => {
     const nextSeconds = clampPlaybackSeconds(seconds, view.output.durationSec);
     setPlaybackSec(nextSeconds);
-    const activeSegmentId = activeSegmentIdAt(
-      view.captions.length
-        ? view.captions
-        : view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))),
-      nextSeconds,
-    );
+    // **장면(내레이션 클립)이 먼저다.** 예전에는 자막이 있으면 자막에서 골랐는데,
+    // 장면을 나누고 나면 자막 구간과 장면 구간이 어긋난다. 그래서 7초를 눌렀는데
+    // 5~7초 장면이 골라지고 `나누기`가 영영 잠겼다(2026-08-17 실제 앱에서 확인).
+    // 컷 도구가 다루는 단위는 장면이므로, 고를 것도 장면이어야 한다.
+    const narrationSpans = view.tracks
+      .filter((track) => track.role === "narration")
+      .flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec })));
+    // 다만 내레이션이 **긴 통짜 하나**일 때는(원본 영상 소리로 만든 초안) 장면이
+    // 하나뿐이라 아무것도 구분하지 못한다. 그때는 자막이 의미 단위다.
+    const activeSegmentId = activeSegmentIdAt(narrationSpans.length > 1 ? narrationSpans : view.captions.length ? view.captions : narrationSpans, nextSeconds);
     setSelectedSegmentId(activeSegmentId);
   };
   const selectedNarration = selectedSegmentId === null ? null : view.tracks
@@ -281,6 +298,7 @@ function EditorWorkbenchInstance({
   });
   // 잠긴 단추는 마우스 이벤트를 받지 않아 자기 title을 못 띄운다. 감싸는 자리에
   // 걸어야 **왜 잠겼는지**가 보인다 -- 이유 없이 회색인 단추는 고장으로 읽힌다.
+  cutToolsRef.current = cutTools;
   const cutButton = (tool: typeof cutTools.split) => (
     <span title={tool.hint} className="vb-cut-tool">
       <Button
@@ -432,6 +450,12 @@ function EditorWorkbenchInstance({
     <TimelineDock
       isSaving={isSavingTimeline}
       mutationMessage={timelineMutationMessage}
+      // 끌어다 놓기는 **이미 있는 `적용` 경로**를 그대로 탄다. 같은 편집이 두 경로를
+      // 갖지 않게 -- 하나만 고치면 다른 하나가 조용히 옛 동작으로 남는다.
+      onDropAsset={onApplyAssetCard ? ({ cardId, segmentId }) => {
+        const card = assetCards.find((item) => item.id === cardId);
+        if (card) void onApplyAssetCard(card, segmentId);
+      } : undefined}
       onReorderNarration={onReorderNarration}
       onUpdatePlacements={onUpdatePlacements}
       onTrimNarration={onTrimNarration}

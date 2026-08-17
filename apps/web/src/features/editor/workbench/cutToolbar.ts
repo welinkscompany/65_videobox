@@ -33,6 +33,13 @@ export type CutToolbarState = Readonly<{
 
 const disabled = (label: string, hint: string): CutTool => ({ enabled: false, label, action: null, hint });
 
+/** 아직 아무것도 계산되기 전의 상태. 키 처리기가 첫 렌더 전에 참조할 수 있다. */
+export const EMPTY_CUT_TOOLS: CutToolbarState = {
+  split: disabled("나누기", ""),
+  join: disabled("앞과 붙이기", ""),
+  drop: disabled("빼기", ""),
+};
+
 export function cutToolbarState({
   clips,
   selectedSegmentId,
@@ -61,7 +68,7 @@ export function cutToolbarState({
 
   return {
     split: splittable
-      ? { enabled: true, label: "나누기", hint: "재생 위치에서 두 장면으로 나눕니다.", action: { kind: "split-narration", segmentId: selected.segmentId, splitSec: playheadSec } }
+      ? { enabled: true, label: "나누기", hint: "재생 위치에서 두 장면으로 나눕니다. (Ctrl+B)", action: { kind: "split-narration", segmentId: selected.segmentId, splitSec: playheadSec } }
       : disabled("나누기", "재생 위치를 고른 장면 안으로 옮기세요. 그 자리에서 나눕니다."),
     join: previous
       ? { enabled: true, label: "앞과 붙이기", hint: "앞 장면과 하나로 합칩니다.", action: { kind: "merge-narration", leftSegmentId: previous.segmentId, rightSegmentId: selected.segmentId } }
@@ -72,7 +79,7 @@ export function cutToolbarState({
     drop: {
       enabled: true,
       label: "빼기",
-      hint: "고른 장면을 영상에서 뺍니다. 되돌리려면 실행 취소를 누르세요.",
+      hint: "고른 장면을 영상에서 뺍니다. (Delete) 되돌리려면 실행 취소를 누르세요.",
       action: { kind: "set-cut-action", segmentId: selected.segmentId, cutAction: "remove" },
     },
   };

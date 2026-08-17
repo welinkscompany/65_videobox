@@ -157,7 +157,7 @@ describe("TimelineDock", () => {
     render(<TimelineDock view={mutable} viewportWidthPx={1000} onUpdatePlacements={onUpdatePlacements} />);
 
     selectTimelineClip("broll:b-1");
-    fireEvent.keyDown(screen.getByRole("button", { name: "broll:b-1 이동" }), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "영상 1번째 장면, 5초부터 이동" }), { key: "ArrowRight" });
 
     expect(onUpdatePlacements).toHaveBeenCalledWith({ changes: [{ placementId: "broll:b-1", kind: "broll", startSec: 5.04, endSec: 9.04 }] });
   });
@@ -168,14 +168,14 @@ describe("TimelineDock", () => {
     firstClip.focus();
     expect(firstClip).toHaveFocus();
     fireEvent.keyDown(firstClip, { key: "Enter" });
-    expect(screen.getByRole("button", { name: "n-1 시작 자르기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeInTheDocument();
 
     const secondClip = timelineClipSelection("n-2");
     secondClip.focus();
     expect(secondClip).toHaveFocus();
     fireEvent.keyDown(secondClip, { key: " " });
-    expect(screen.getByRole("button", { name: "n-2 시작 자르기" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "n-1 시작 자르기" })).toBeNull();
+    expect(screen.getByRole("button", { name: "내레이션 2번째 장면, 1초부터 시작 자르기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeNull();
   });
 
   it("keeps the selection button separate from narration mutation buttons", () => {
@@ -185,18 +185,18 @@ describe("TimelineDock", () => {
     fireEvent.click(selection);
 
     expect(selection).toHaveAttribute("aria-pressed", "true");
-    expect(selection).not.toContainElement(screen.getByRole("button", { name: "n-1 시작 자르기" }));
-    expect(selection).not.toContainElement(screen.getByRole("button", { name: "n-1 끝 자르기" }));
-    expect(selection).not.toContainElement(screen.getByRole("button", { name: "n-1 순서 바꾸기" }));
+    expect(selection).not.toContainElement(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" }));
+    expect(selection).not.toContainElement(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 끝 자르기" }));
+    expect(selection).not.toContainElement(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" }));
   });
 
   it("anchors trim handles and the reorder control inside the selected clip", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
     selectTimelineClip("n-1");
 
-    const start = screen.getByRole("button", { name: "n-1 시작 자르기" });
-    const end = screen.getByRole("button", { name: "n-1 끝 자르기" });
-    const reorder = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const start = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    const end = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 끝 자르기" });
+    const reorder = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     const controls = start.parentElement;
 
     expect(controls).toHaveAttribute("data-mutation-controls", "true");
@@ -212,11 +212,11 @@ describe("TimelineDock", () => {
   it("renders mutation controls only for the selected narration clip", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 
-    expect(screen.queryByRole("button", { name: "n-1 시작 자르기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeNull();
     selectTimelineClip("n-1");
-    expect(screen.getByRole("button", { name: "n-1 시작 자르기" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "n-1 끝 자르기" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "n-1 순서 바꾸기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 끝 자르기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "b-1 시작 자르기" })).toBeNull();
   });
 
@@ -227,7 +227,7 @@ describe("TimelineDock", () => {
     mockTimelineRect("n-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(control, "pointerdown", 0);
     pointer(control, "pointermove", 200);
     pointer(control, "pointermove", 300);
@@ -244,7 +244,7 @@ describe("TimelineDock", () => {
     selectTimelineClip("n-offset");
     mockTimelineTrackRect(40);
 
-    const control = screen.getByRole("button", { name: "n-offset 시작 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 3초부터 시작 자르기" });
     pointer(control, "pointerdown", 240);
     pointer(control, "pointerup", 240);
 
@@ -259,7 +259,7 @@ describe("TimelineDock", () => {
     mockTimelineRect("n-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "n-1 끝 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 끝 자르기" });
     pointer(control, "pointerdown", 100);
     pointer(control, "pointermove", 200);
     pointer(control, "pointercancel");
@@ -275,7 +275,7 @@ describe("TimelineDock", () => {
     mockTimelineRect("n-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     pointer(control, "pointerdown", 0);
     pointer(control, "pointermove", 250);
     expect(onReorderNarration).not.toHaveBeenCalled();
@@ -297,7 +297,7 @@ describe("TimelineDock", () => {
     selectTimelineClip("n-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     pointer(control, "pointerdown", 0);
     pointer(control, "pointerup", 250);
 
@@ -314,7 +314,7 @@ describe("TimelineDock", () => {
     selectTimelineClip("long-1");
     mockTimelineTrackRect(40);
 
-    const control = screen.getByRole("button", { name: "long-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     pointer(control, "pointerdown", 140);
     pointer(control, "pointerup", 140);
 
@@ -327,7 +327,7 @@ describe("TimelineDock", () => {
     render(<TimelineDock isSaving mutationMessage="저장 중" onTrimNarration={onTrimNarration} view={view} viewportWidthPx={400} />);
 
     selectTimelineClip("n-1");
-    const control = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     expect(control).toBeDisabled();
     expect(screen.getByText("저장 중")).toBeInTheDocument();
     pointer(control, "pointerdown", 0);
@@ -339,7 +339,7 @@ describe("TimelineDock", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 
     selectTimelineClip("n-1");
-    fireEvent.click(screen.getByRole("button", { name: "n-1 시작 자르기" }));
+    fireEvent.click(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" }));
     expect(screen.getByTestId("timeline-clip")).toHaveAttribute("data-selected", "true");
   });
 
@@ -352,7 +352,7 @@ describe("TimelineDock", () => {
     mockTimelineRect("n-offset", 140);
     mockTimelineTrackRect(40);
 
-    const control = screen.getByRole("button", { name: "n-offset 시작 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 3초부터 시작 자르기" });
     pointer(control, "pointerdown", 240);
     pointer(control, "pointermove", 340);
     pointer(control, "pointerup", 340);
@@ -367,7 +367,7 @@ describe("TimelineDock", () => {
     selectTimelineClip("n-offset");
     mockTimelineTrackRect(40);
 
-    const control = screen.getByRole("button", { name: "n-offset 끝 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 3초부터 끝 자르기" });
     pointer(control, "pointerdown", 200);
     pointer(control, "pointermove", 10_200);
     pointer(control, "pointerup", 10_200);
@@ -381,7 +381,7 @@ describe("TimelineDock", () => {
     selectTimelineClip("n-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(control, "pointerdown", 0);
     pointer(control, "pointermove", 200);
     expect(timelineClip("n-1")).toHaveAttribute("data-start-seconds", "2");
@@ -400,7 +400,7 @@ describe("TimelineDock", () => {
     selectTimelineClip("n-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     pointer(control, "pointerdown", 0);
     pointer(control, "pointermove", 250);
     expect(screen.getAllByTestId("timeline-clip").slice(0, 2).map((clip) => clip.getAttribute("data-clip-id"))).toEqual(["n-2", "n-1"]);
@@ -422,11 +422,11 @@ describe("TimelineDock", () => {
     selectTimelineClip("long-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "long-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     const track = screen.getByTestId("timeline-track");
     pointer(control, "pointerdown", 0);
     pointer(control, "pointermove", 1_000);
-    expect(screen.queryByRole("button", { name: "long-1 순서 바꾸기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" })).toBeNull();
     pointer(track, "pointerup", 1_000);
 
     expect(onReorderNarration).toHaveBeenCalledTimes(1);
@@ -445,7 +445,7 @@ describe("TimelineDock", () => {
     selectTimelineClip("long-1");
     mockTimelineTrackRect();
 
-    const control = screen.getByRole("button", { name: "long-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     const track = screen.getByTestId("timeline-track");
     pointer(control, "pointerdown", 0);
     pointer(control, "pointermove", 1_000);
@@ -453,7 +453,7 @@ describe("TimelineDock", () => {
     pointer(track, "pointercancel", 1_000);
 
     expect(timelineClip("long-1")).toHaveAttribute("data-start-seconds", "0");
-    expect(screen.getByRole("button", { name: "long-1 순서 바꾸기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" })).toBeInTheDocument();
     expect(onReorderNarration).not.toHaveBeenCalled();
   });
 
@@ -462,8 +462,8 @@ describe("TimelineDock", () => {
     render(<TimelineDock onTrimNarration={onTrimNarration} view={view} viewportWidthPx={400} />);
     selectTimelineClip("n-1");
 
-    fireEvent.keyDown(screen.getByRole("button", { name: "n-1 시작 자르기" }), { key: "ArrowRight" });
-    fireEvent.keyDown(screen.getByRole("button", { name: "n-1 끝 자르기" }), { key: "ArrowLeft" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" }), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 끝 자르기" }), { key: "ArrowLeft" });
 
     expect(onTrimNarration).toHaveBeenNthCalledWith(1, { segmentId: "segment-1", startSec: 0.04, endSec: 5 });
     expect(onTrimNarration).toHaveBeenNthCalledWith(2, { segmentId: "segment-1", startSec: 0, endSec: 4.96 });
@@ -474,7 +474,7 @@ describe("TimelineDock", () => {
     render(<TimelineDock onReorderNarration={onReorderNarration} view={twoNarrationView} viewportWidthPx={400} />);
     selectTimelineClip("n-1");
 
-    fireEvent.keyDown(screen.getByRole("button", { name: "n-1 순서 바꾸기" }), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" }), { key: "ArrowRight" });
 
     expect(onReorderNarration).toHaveBeenCalledTimes(1);
     expect(onReorderNarration).toHaveBeenCalledWith(expect.objectContaining({ segmentIds: ["segment-2", "segment-1"] }));
@@ -585,6 +585,41 @@ describe("TimelineDock", () => {
 
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "2.5");
     expect(onPlaybackSeek).toHaveBeenCalledWith(2.5);
+  });
+
+  it("never names an edit control with an internal clip id", () => {
+    // 장면을 고르면 `clip_narration_7568b55139 시작 자르기` 같은 이름이 나왔다.
+    // 사용자에게 내부 clip ID를 그대로 보여 주는 것은 §10.13 위반이고, 애초에
+    // 무엇을 자르는지 알 수 없다. 같은 자리에 이미 사람이 읽는 이름이 있다.
+    render(<TimelineDock view={view} viewportWidthPx={1000} />);
+    selectTimelineClip("n-1");
+
+    for (const control of ["시작 자르기", "끝 자르기", "순서 바꾸기"]) {
+      const button = screen.getByRole("button", { name: new RegExp(`${control}$`) });
+      expect(button.getAttribute("aria-label")).not.toContain("n-1");
+      expect(button.getAttribute("aria-label")).toContain("번째 장면");
+    }
+  });
+
+  it("draws the playhead as a line the eye can find, not just a number", () => {
+    // 캡컷은 재생 위치가 눈금부터 트랙까지 관통하는 세로선이다. 우리는 맨 아래에
+    // 숫자 하나뿐이라 어디서 나뉘는지 보이지 않았다. 2026-08-17 owner 지적.
+    render(<TimelineDock playbackSec={3} view={view} viewportWidthPx={1000} />);
+
+    const marker = screen.getByTestId("timeline-playhead");
+    expect(marker).toHaveAttribute("data-seconds", "3");
+    // 화면 밖 상태가 아니라 실제 좌표를 갖는다.
+    expect(marker.style.left).toBe("300px");
+  });
+
+  it("moves the playhead line together with the position", () => {
+    render(<TimelineDock view={view} viewportWidthPx={1000} />);
+    const timeline = screen.getByLabelText("타임라인");
+    timeline.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 200, width: 1000, height: 200, x: 0, y: 0, toJSON: () => ({}) });
+
+    fireEvent.click(timeline, { clientX: 250 });
+
+    expect(screen.getByTestId("timeline-playhead").style.left).toBe("250px");
   });
 
   it("keeps moving the playhead when the owner echoes the position back", () => {

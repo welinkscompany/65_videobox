@@ -19,6 +19,11 @@ export type EditorWorkbenchLayout = Readonly<{
 export const editorWorkbenchPanelConstants = Object.freeze({ leftMinPx: 220, rightMinPx: 260, gutterPx: 12, bothPreviewMinPx: 720, singlePreviewMinPx: 640 });
 // The preview is what the creator is judging, so it starts alone. Both docks
 // are one toolbar click away and the choice is remembered per project.
+//
+// 2026-08-17: 캡컷처럼 **왼쪽 재료 패널을 기본으로 펴는 것**은 owner 승인을 받았지만
+// (`docs/decisions/2026-08-17-editor-capcut-layout-approval.ko.md`) 아직 넣지 않았다 --
+// 편집 작업판 테스트 13개가 `닫힘 기본값`을 전제로 동작을 고정하고 있어서, 그 13개를
+// 함께 다시 쓰는 별도 조각이 필요하다. 같은 승인의 타임라인 높이는 이미 들어갔다.
 const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: false, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320 };
 
 function persistedState(value: unknown): EditorWorkbenchPersistedState {

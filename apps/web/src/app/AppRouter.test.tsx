@@ -107,9 +107,17 @@ describe("AppRouter URL ownership", () => {
     const draftCard = await screen.findByRole("article", { name: "초안 프로젝트 프로젝트" });
     const assetCard = await screen.findByRole("article", { name: "자산 프로젝트 프로젝트" });
     const newCard = await screen.findByRole("article", { name: "새 프로젝트 프로젝트" });
-    expect(draftCard).toHaveTextContent("편집");
-    expect(assetCard).toHaveTextContent("자산");
-    expect(newCard).toHaveTextContent("기획");
+    // 첫 화면도 앱 안이어야 한다. 예전에는 사이드바가 없어서 프로그램이 아니라
+    // 웹페이지 한 장으로 보였다(2026-08-17 owner 지적).
+    expect(await screen.findByLabelText("전체 메뉴")).toBeInTheDocument();
+    // 카드는 우리 내부 단계 이름(`기획`·`자산`)이 아니라, 그 프로젝트가 지금 어떤
+    // 상태인지 사람 말로 적는다(§10.13). 2026-08-17 owner 지적.
+    expect(draftCard).toHaveTextContent("편집하는 중");
+    // 이 픽스처는 `attention`이라 "모으는 중"이 아니라 확인을 청하는 문장이 맞다.
+    expect(assetCard).toHaveTextContent("빠진 재료가 있어요");
+    expect(newCard).toHaveTextContent("이야기를 정하는 중");
+    // 기계 시각을 그대로 내보내지 않는다.
+    expect(newCard).not.toHaveTextContent("+00:00");
     expect(within(draftCard).getAllByRole("link")).toHaveLength(1);
     expect(within(assetCard).getAllByRole("link")).toHaveLength(1);
     expect(within(newCard).getAllByRole("link")).toHaveLength(1);
@@ -307,7 +315,7 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_b/home"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_b/editor"));
     expect(listProjects).toHaveBeenCalledTimes(1);
   });
 
@@ -593,9 +601,13 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
-    expect(await screen.findByText("먼저 영상 초안을 만들어 주세요.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "기획" })).toBeVisible();
-    const createButtons = screen.getAllByRole("button", { name: "새 영상 만들기" });
+    // 편집기의 빈 상태는 잠긴 문이 아니라 시작하는 자리다.
+    expect(await screen.findByText(/아직 편집할 영상이 없어요/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "영상 정하러 가기" })).toBeVisible();
+    // 캡컷처럼 **기획을 건너뛰고 빈 편집판으로** 바로 들어갈 수도 있어야 한다.
+    expect(screen.getByRole("button", { name: "빈 편집판으로 시작" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "이야기" })).toBeVisible();
+    const createButtons = screen.getAllByRole("button", { name: "영상 정하러 가기" });
     expect(createButtons.length).toBeGreaterThan(0);
 
     fireEvent.click(createButtons[0]);

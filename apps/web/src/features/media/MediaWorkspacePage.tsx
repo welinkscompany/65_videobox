@@ -4,13 +4,21 @@ import { api, type BrollAsset, type MediaAnalysis, type MediaInboxAsset } from "
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
-import { projectEditorAssets } from "../editor/assets/editorAssetProjection";
+import { filterEditorAssets, projectEditorAssets } from "../editor/assets/editorAssetProjection";
 import { MediaLibraryBrowser } from "./MediaLibraryBrowser";
 import { VoiceMaterialPanel } from "./VoiceMaterialPanel";
 
 // 내레이션은 영상·음악·효과음과 같은 재료다. 2026-08-16까지 목소리만 설정 서랍에
 // 있었고, 그래서 자산 단계에서 사람 목소리가 빠져 보였다.
 type MediaTab = "videos" | "music" | "sfx" | "narration" | "import";
+
+/** 보관함은 오래된 것부터 도착한다(`local_project_store.list_assets`가 `created_at ASC`). */
+type ProjectSort = "recent" | "name";
+
+const projectSorts: readonly { value: ProjectSort; label: string }[] = [
+  { value: "recent", label: "최근 순" },
+  { value: "name", label: "이름 순" },
+];
 
 type MediaState = {
   projectId: string;
@@ -58,6 +66,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
   const [tags, setTags] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<MediaTab>("videos");
+  const [projectQuery, setProjectQuery] = useState("");
+  const [projectSort, setProjectSort] = useState<ProjectSort>("recent");
   const tabRefs = useRef<Partial<Record<MediaTab, HTMLButtonElement>>>({});
   const currentContext = useRef({ projectId, generation: 0 });
   const loadEpoch = useRef(0);
@@ -114,6 +124,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     setMessage(null);
     setBusyKey(null);
     setActiveTab("videos");
+    setProjectQuery("");
     void load();
     return () => {
       loadEpoch.current += 1;
@@ -253,9 +264,14 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
 
   const currentState = state?.projectId === projectId ? state : null;
   const assetById = new Map(currentState?.assets.map((item) => [item.asset_id, item]) ?? []);
-  const projectCards = currentState
+  // 번호는 좁히기 전에 매긴다. 검색어를 칠 때마다 이름이 바뀌면 같은 영상을 놓친다.
+  const allProjectCards = currentState
     ? projectEditorAssets({ projectId, brollAssets: currentState.assets, libraryAssets: [] })
     : [];
+  const orderedProjectCards = projectSort === "name"
+    ? allProjectCards.slice().sort((left, right) => left.title.localeCompare(right.title, "ko"))
+    : allProjectCards.slice().reverse();
+  const projectCards = filterEditorAssets(orderedProjectCards, { type: "all", query: projectQuery });
 
   const tabs: readonly { value: MediaTab; label: string }[] = [
     { value: "videos", label: "내 영상" },
@@ -374,7 +390,35 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
           <section aria-labelledby="media-assets-heading">
             <h2>프로젝트 자산</h2>
             <h2 id="media-assets-heading">내 영상</h2>
-            {projectCards.length === 0 ? <p>아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요.</p> : (
+            {allProjectCards.length > 0 ? (
+              <div className="vb-media-library__toolbar">
+                <label htmlFor="media-project-search">프로젝트 영상 이름으로 찾기</label>
+                <Input
+                  id="media-project-search"
+                  type="search"
+                  value={projectQuery}
+                  placeholder="이름 일부를 적어 보세요"
+                  onChange={(event) => setProjectQuery(event.target.value)}
+                />
+                <div role="group" aria-label="프로젝트 영상 정렬 순서" className="vb-media-library__filters">
+                  {projectSorts.map((item) => (
+                    <Button
+                      key={item.value}
+                      type="button"
+                      variant={projectSort === item.value ? "default" : "outline"}
+                      aria-pressed={projectSort === item.value}
+                      aria-label={`프로젝트 영상 ${item.label}`}
+                      onClick={() => setProjectSort(item.value)}
+                    >
+                      {item.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {projectCards.length === 0 ? <p>{allProjectCards.length > 0
+              ? "찾는 이름과 맞는 영상이 없어요."
+              : "아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요."}</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {projectCards.map((card) => (
                   <Card key={card.id} className="vb-media-project-card" aria-label={`${card.title} 자산`}>

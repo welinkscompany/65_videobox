@@ -65,6 +65,15 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @router.post("/api/projects/{project_id}/editing-sessions/blank", status_code=status.HTTP_201_CREATED)
+    def create_blank_editing_session(project_id: str) -> EditingSessionResponse:
+        """기획을 통과하지 않고 편집기를 여는 길(캡컷의 빈 편집판)."""
+        try:
+            result = orchestrator.create_blank_editing_session(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
     @router.post("/api/projects/{project_id}/editing-sessions/from-script", status_code=status.HTTP_201_CREATED)
     def create_script_draft_editing_session(project_id: str, payload: CreateScriptDraftEditingSessionRequest) -> EditingSessionResponse:
         try:

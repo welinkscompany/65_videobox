@@ -450,6 +450,9 @@ class ApiOrchestrator:
     def create_editing_session(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.create_editing_session(project_id=project_id, timeline_job_id=timeline_job_id)
 
+    def create_blank_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        return self.pipeline.create_blank_editing_session(project_id=project_id)
+
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
         return self.pipeline.create_script_draft_editing_session(project_id=project_id, script_asset_id=script_asset_id)
 

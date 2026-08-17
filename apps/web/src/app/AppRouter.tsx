@@ -24,6 +24,7 @@ import { ReviewAndOutputPage } from "../features/review/ReviewAndOutputPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
 import { resolveLastValidProjectId } from "./projectSelection";
+import { readableMoment } from "./readableMoment";
 import {
   parseWorkspaceLocation,
   resolveGlobalLocation,
@@ -74,7 +75,8 @@ const indexRoute = createRoute({
   beforeLoad: async ({ context }) => {
     const projects = await context.catalog.load();
     const saved = opensLastProjectOnStart() ? resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) : null;
-    throw redirect({ to: saved ? resolveWorkspaceLocation(saved, "home") : "/projects" });
+    // 프로젝트를 열면 **편집 화면이 먼저**다. 캡컷은 열면 바로 편집판이다.
+    throw redirect({ to: saved ? resolveWorkspaceLocation(saved, "editing") : "/projects" });
   },
 });
 
@@ -143,10 +145,20 @@ export function AppRouter({ router = createAppRouter() }: { router?: ReturnType<
   return <RouterProvider router={router} />;
 }
 
+/** 첫 화면도 **앱 껍데기 안**이다.
+ *
+ * 예전에는 `/projects`가 껍데기 밖의 맨 `<main>`이라 사이드바가 없었고, 프로젝트를
+ * 하나 만들고 나서야 나타났다. 그래서 처음 여는 사람에게는 프로그램이 아니라
+ * 웹페이지 한 장으로 보였다(2026-08-17 owner 지적).
+ *
+ * `ProductShell`은 이미 `hasProject`로 프로젝트 없는 상태를 다룬다 -- 전환 목록과
+ * 단계 메뉴만 숨기고 나머지는 그대로 그린다. 새로 만들지 않고 그것을 쓴다.
+ */
 function ProjectsPage() {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
   const router = useRouter();
+  const archive = useArchivedProjects(router);
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -181,13 +193,22 @@ function ProjectsPage() {
   }
 
   return (
+    <ProductShell
+      projectId=""
+      projects={projects}
+      section="home"
+      archive={archive}
+      onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
+      onOpenSettings={() => void navigate({ to: "/settings/general" })}
+      onArchiveProject={(id) => archiveProjectAndRefresh(router, id)}
+      onDeleteProjectPermanently={(id) => deleteProjectPermanentlyAndRefresh(router, id)}
+    >
     <main data-testid="projects-catalog" className="vb-catalog">
       <p className="vb-eyebrow">VideoBox</p>
       <h1>프로젝트</h1>
       <p>영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
-      <div className="vb-catalog-grid">
-        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} />)}
-      </div>
+      {/* 새 프로젝트 입력은 **목록 위**에 둔다. 예전에는 카드 6개를 지나 맨 아래로
+          스크롤해야 나왔다. */}
       {isCreating ? (
         <form className="vb-catalog-form" onSubmit={(event) => void handleCreate(event)}>
           <label className="grid gap-2 text-sm">
@@ -203,7 +224,11 @@ function ProjectsPage() {
       ) : (
         <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
       )}
+      <div className="vb-catalog-grid">
+        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} />)}
+      </div>
     </main>
+    </ProductShell>
   );
 }
 
@@ -224,13 +249,22 @@ function GlobalDestinationPage({ testId, title, description, readiness }: { test
   </main>;
 }
 
-const workspaceStageLabels: Record<ProjectWorkspaceSummary["current_stage"], string> = {
-  plan: "기획",
-  assets: "자산",
-  edit: "편집",
-  review: "검토",
-  output: "출력",
+/** 카드에 적히던 `기획 · 준비됨`은 **우리 내부 단계 이름**이었다. 무엇을 하면
+ * 되는지가 아니라 시스템이 그 프로젝트를 어느 칸에 넣어 뒀는지를 말한다.
+ * 사람이 읽고 바로 아는 한 문장으로 바꾼다(§10.13). */
+const projectStateSentence: Record<ProjectWorkspaceSummary["current_stage"], Record<"blocked" | "attention" | "ready", string>> = {
+  plan: { blocked: "이야기를 정하다 막혔어요", attention: "이야기를 확인해 주세요", ready: "이야기를 정하는 중" },
+  assets: { blocked: "재료를 넣다 막혔어요", attention: "빠진 재료가 있어요", ready: "재료를 모으는 중" },
+  edit: { blocked: "편집하다 막혔어요", attention: "편집을 확인해 주세요", ready: "편집하는 중" },
+  review: { blocked: "확인하다 막혔어요", attention: "확인이 필요해요", ready: "마지막 확인 중" },
+  output: { blocked: "영상을 만들다 막혔어요", attention: "완성본을 확인해 주세요", ready: "영상으로 뽑는 중" },
 };
+
+function projectStateLabel(summary: ProjectWorkspaceSummary): string {
+  const byState = projectStateSentence[summary.current_stage];
+  if (!byState) return "상태 확인 중";
+  return summary.state === "blocked" ? byState.blocked : summary.state === "attention" ? byState.attention : byState.ready;
+}
 
 function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onNavigateHref?: (href: string) => void }) {
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
@@ -263,8 +297,8 @@ function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onN
   return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
     {summary.thumbnail_url ? <img src={summary.thumbnail_url} alt={`${summary.display_name} 대표 이미지`} loading="lazy" /> : null}
     <h2>{summary.display_name}</h2>
-    <p>{workspaceStageLabels[summary.current_stage]} · {summary.state === "blocked" ? "막힘" : summary.state === "attention" ? "확인 필요" : "준비됨"}</p>
-    <time dateTime={summary.updated_at}>최근 편집 {summary.updated_at}</time>
+    <p>{projectStateLabel(summary)}</p>
+    {readableMoment(summary.updated_at) ? <time dateTime={summary.updated_at}>최근 편집 {readableMoment(summary.updated_at)}</time> : null}
     <p className="vb-catalog-card__finished">완성본 {summary.finished_video_count}개</p>
     <Button asChild type="button" variant="outline" aria-label={summary.next_action.label}><a href={summary.next_action.href} onClick={(event) => {
       if (!onNavigateHref) return;
@@ -423,12 +457,32 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
   const navigate = useNavigate();
   const [message, setMessage] = useState("편집할 초안을 불러오는 중이에요.");
   const [hasNoDraft, setHasNoDraft] = useState(false);
+  const [isOpeningBlank, setIsOpeningBlank] = useState(false);
+  const [blankError, setBlankError] = useState<string | null>(null);
+  const openBlankBoard = async () => {
+    setIsOpeningBlank(true);
+    setBlankError(null);
+    try {
+      const session = await api.createBlankEditingSession(projectId);
+      await navigate({
+        to: "/projects/$projectId/$section",
+        params: { projectId, section: "editor" },
+        search: { session_id: session.session_id },
+        replace: true,
+      });
+    } catch {
+      setBlankError("편집판을 열지 못했어요. 다시 시도해 주세요.");
+      setIsOpeningBlank(false);
+    }
+  };
   useEffect(() => {
     let cancelled = false;
     void api.getLatestEditingSession(projectId).then((session) => {
       if (cancelled) return;
       if (!session) {
-        setMessage("먼저 영상 초안을 만들어 주세요.");
+        // 예전 문구는 `먼저 영상 초안을 만들어 주세요.`였다. 편집기를 열었는데
+        // **잠긴 문**을 만난 것처럼 읽혔다. 지금은 여기가 시작하는 자리다.
+        setMessage("아직 편집할 영상이 없어요. 어떤 영상을 만들지 정하면 여기에 펼쳐 드릴게요.");
         setHasNoDraft(true);
         return;
       }
@@ -445,7 +499,15 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
   }, [navigate, projectId]);
   return <div aria-live="polite">
     <p>{message}</p>
-    {hasNoDraft ? <Button type="button" onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button> : null}
+    {hasNoDraft ? <>
+      <Button type="button" onClick={() => onNavigate(projectId, "create")}>영상 정하러 가기</Button>
+      {/* 캡컷은 열면 바로 빈 편집판이다. 기획을 건너뛰고 여기서 시작할 수 있어야 한다. */}
+      <Button type="button" variant="outline" disabled={isOpeningBlank} onClick={() => void openBlankBoard()}>
+        {isOpeningBlank ? "편집판을 여는 중" : "빈 편집판으로 시작"}
+      </Button>
+      <Button type="button" variant="outline" onClick={() => onNavigate(projectId, "media")}>먼저 재료부터 모으기</Button>
+      {blankError ? <p role="alert">{blankError}</p> : null}
+    </> : null}
   </div>;
 }
 

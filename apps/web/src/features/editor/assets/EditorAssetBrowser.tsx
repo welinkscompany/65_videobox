@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { assetPreferenceChoice, canonicalPreferenceTag, useDirectorPreferences } from "./directorPreferences";
 import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind, type EditorAssetOrientation } from "./editorAssetProjection";
+import { writeAssetDrag } from "./assetDragPayload";
 
 type EditorAssetTarget = Readonly<{
   segmentId: string;
@@ -106,7 +107,12 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         const previewState = previewStates[card.id];
         const choice = assetPreferenceChoice(taste.preferences, card.assetId);
         const creator = card.sourceMetadata.creator.trim();
-        return <article key={card.id} className="vb-editor-assets__card">
+        // 캡컷처럼 끌어다 놓을 수 있게 한다. `적용` 단추는 그대로 둔다 --
+        // 끌기가 안 되는 환경(키보드만 쓰는 경우 포함)에서도 길이 있어야 한다.
+        return <article key={card.id} className="vb-editor-assets__card"
+          draggable
+          onDragStart={(event) => writeAssetDrag(event.dataTransfer, card.id)}
+          title="타임라인의 장면 위로 끌어다 놓을 수 있어요">
           {card.thumbnailUrl ? (
             <img
               className="vb-editor-assets__thumb"

@@ -67,6 +67,16 @@ describe("cut toolbar", () => {
     expect(cutToolbarState({ clips, selectedSegmentId: "s1", playheadSec: 2 }).join.hint).toContain("첫 장면");
   });
 
+  it("opens 나누기 from a single timeline click inside a clip", () => {
+    // 2026-08-17 실제 앱에서 확인: 눈금 7초를 눌렀는데 5~7초 장면이 골라져
+    // `나누기`가 영영 잠겨 있었다. 재생 위치가 있는 곳의 장면이 골라져야
+    // 한 번의 동작으로 나눌 수 있다.
+    const state = cutToolbarState({ clips, selectedSegmentId: "s2", playheadSec: 8 });
+
+    expect(state.split.enabled).toBe(true);
+    expect(state.split.action).toMatchObject({ splitSec: 8 });
+  });
+
   it("offers nothing while no clip is selected", () => {
     const state = cutToolbarState({ clips, selectedSegmentId: null, playheadSec: 3 });
 

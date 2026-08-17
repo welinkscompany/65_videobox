@@ -224,7 +224,10 @@ describe("PreviewStage", () => {
 
     expect(variantsRule).toContain("max-height: 10rem");
     expect(variantsRule).toContain("overflow: auto");
-    expect(timelineRule).toMatch(/max-height:\s*12rem/);
+    // 타임라인은 캡컷처럼 넉넉해졌지만(owner 승인 2026-08-17) **상한은 남는다** --
+    // 이 테스트가 지키는 것은 12rem이라는 숫자가 아니라 "미리보기가 사라지지 않는다"다.
+    // 화면 높이에 묶어 두어야 작은 화면에서 미리보기를 통째로 밀어내지 않는다.
+    expect(timelineRule).toMatch(/max-height:\s*min\([^)]*vh[^)]*\)/);
   });
 
   it("bounds the side panels above 1500px so a bigger screen never shrinks the preview", () => {
@@ -235,7 +238,9 @@ describe("PreviewStage", () => {
     // (variants 10rem, timeline 12rem) and ends up with a smaller preview than
     // a 1440x900 screen, which the 768-1499px block already compacts.
     expect(wideLayout).toContain(".vb-editor-variants { max-height: 6rem; overflow: auto; min-height: 0; }");
-    expect(wideLayout).toContain(".vb-editor-workbench__timeline { max-height: 6rem; }");
+    // 타임라인은 캡컷처럼 넓어졌다(owner 승인 2026-08-17). 지켜야 할 것은
+    // "6rem"이라는 숫자가 아니라 **화면 높이에 묶여 미리보기를 밀어내지 않는 것**이다.
+    expect(wideLayout).toMatch(/\.vb-editor-workbench__timeline \{ max-height: min\([^)]*vh[^)]*\); \}/);
   });
 
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {

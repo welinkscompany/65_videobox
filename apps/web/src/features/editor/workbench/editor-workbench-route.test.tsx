@@ -1905,7 +1905,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
 
     pointer(trim, "pointerdown", 100);
     expect(update).not.toHaveBeenCalled();
@@ -1953,7 +1953,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -1978,7 +1978,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
 
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
@@ -2009,7 +2009,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2031,7 +2031,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2055,7 +2055,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2094,7 +2094,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
 
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
@@ -2164,7 +2164,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2192,7 +2192,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const control = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
 
     pointer(control, "pointerdown", 0);
     expect(reorder).not.toHaveBeenCalled();
@@ -2223,7 +2223,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2249,7 +2249,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -3082,7 +3082,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     let track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    let trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    let trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -3095,7 +3095,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -3145,7 +3145,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<Harness />);
     await expectEditorRevision(1);
     fireEvent.click(clipSelectionButton("n-1"));
-    const reorder = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const reorder = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     fireEvent.keyDown(reorder, { key: "ArrowRight" });
     await waitFor(() => expect(screen.getByText("변경 내용을 저장하고 있어요.")).toBeVisible());
 

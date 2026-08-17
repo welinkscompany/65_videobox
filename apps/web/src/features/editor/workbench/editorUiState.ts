@@ -1,7 +1,8 @@
 import type { EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
 
-// The preview is what the creator is judging, so a session with no saved
-// choice opens with it alone. Both docks are one toolbar click away.
+// 기본값은 **한 곳에만** 두어야 한다. 2026-08-17에 `editorWorkbenchLayout`의 것만
+// 바꿨더니 여기 있던 두 번째 벌이 이겨서 화면이 그대로였다 -- 승인된 변경이
+// 아무에게도 닿지 않았다. 바꿀 때는 두 곳을 함께 본다.
 export const defaultEditorUiState: EditorWorkbenchPersistedState = Object.freeze({
   leftOpen: false,
   rightOpen: false,
@@ -10,8 +11,17 @@ export const defaultEditorUiState: EditorWorkbenchPersistedState = Object.freeze
   rightSize: 320,
 });
 
+/** 저장 키의 세대.
+ *
+ * 승인된 기본값을 바꿔도 예전에 저장된 값이 그대로 이기면 **바꾼 것이 아무에게도
+ * 닿지 않는다.** 2026-08-17에 왼쪽 재료 패널을 기본으로 펴기로 했는데, 이미 써 온
+ * 화면에는 `접힘`이 저장돼 있어 그대로였다. 세대를 올려 한 번만 새 기본값으로
+ * 시작하게 한다 -- 그 뒤로 접으면 그 선택은 다시 지켜진다.
+ */
+const editorUiGeneration = "v2";
+
 export function editorUiStorageKey(projectId: string, sessionId: string): string {
-  return `videobox.editor-workbench.ui:${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}`;
+  return `videobox.editor-workbench.ui.${editorUiGeneration}:${encodeURIComponent(projectId)}:${encodeURIComponent(sessionId)}`;
 }
 const legacyEditorUiStorageKey = "videobox.editor-workbench.ui";
 export function hasLegacyEditorUiState(): boolean {
