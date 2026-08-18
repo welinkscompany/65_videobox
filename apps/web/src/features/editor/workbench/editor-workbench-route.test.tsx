@@ -3382,8 +3382,12 @@ describe("EditorWorkbenchRoute", () => {
     ).toBeNull());
   });
 
-  it("says why an out-of-date recommendation cannot be applied and offers a fresh one", async () => {
-    // 적용 단추가 이유 없이 꺼져 있는 것처럼 보이던 자리다.
+  it("re-asks by itself when the recommendation is out of date and the creator is looking at it", async () => {
+    // 예전에는 죽은 카드와 `다시 추천받기` 단추만 남았고, 창작자가 그걸 눈치채고
+    // 눌러야 대화가 이어졌다. 편집을 몇 번만 해도 매번 그렇게 된다.
+    //
+    // 편집본이 바뀌면 추천이 무효가 되는 것은 백엔드가 여러 겹으로 지키는 계약이라
+    // 그대로 둔다. 바뀐 것은 **그다음**이다 -- 도크가 보이면 대신 물어본다.
     vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
     vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
@@ -3397,9 +3401,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(7);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
 
-    expect(await screen.findByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "지금 편집본으로 다시 추천받기" }));
-
+    // 누르지 않았는데 스스로 다시 물어본다.
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("project-a", "proposal-1"));
     await waitFor(() => expect(
       screen.queryByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요."),

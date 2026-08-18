@@ -59,6 +59,34 @@ function openInspector(): void {
 }
 
 describe("EditorWorkbench", () => {
+  it("lets the creator decide how tall the timeline is", async () => {
+    // 컷을 딸 때는 타임라인을 키우고 화면을 볼 때는 미리보기를 키운다 -- 편집자가
+    // 실제로 하는 일이다. 지금은 내가 CSS로 정해 놓아서 못 바꾼다.
+    //
+    // 이걸 넣으면 "타임라인이 화면의 몇 %여야 하나"라는 물음 자체가 사라진다.
+    // 좌우 도크는 이미 끌어서 폭을 바꾼다 -- 위아래도 같아야 한다.
+    render(<EditorWorkbench view={view} />);
+    const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+    const handle = screen.getByLabelText("타임라인 높이 조절");
+
+    fireEvent.keyDown(handle, { key: "ArrowUp" });
+
+    expect(workbench.style.getPropertyValue("--vb-timeline-height")).toBe("21rem");
+  });
+
+  it("keeps the timeline height between a floor and a ceiling", async () => {
+    // 0으로 줄이면 타임라인이 사라지고, 끝까지 키우면 미리보기가 사라진다.
+    render(<EditorWorkbench view={view} />);
+    const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+    const handle = screen.getByLabelText("타임라인 높이 조절");
+
+    for (let index = 0; index < 40; index += 1) fireEvent.keyDown(handle, { key: "ArrowDown" });
+    expect(workbench.style.getPropertyValue("--vb-timeline-height")).toBe("6rem");
+
+    for (let index = 0; index < 80; index += 1) fireEvent.keyDown(handle, { key: "ArrowUp" });
+    expect(workbench.style.getPropertyValue("--vb-timeline-height")).toBe("32rem");
+  });
+
   it("uses the measured workbench width rather than viewport width", async () => {
     render(<EditorWorkbench view={view} />);
     expect(await screen.findByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-density", "desktop-single");

@@ -129,6 +129,16 @@ export function RightDock({
     && proposal.baseSessionRevision === proposal.currentRevision;
   // 편집본이 앞서 나가면 이 추천은 적용할 수 없다. 그 사실을 말하지 않으면
   // 적용 단추가 이유 없이 꺼져 있는 것처럼만 보인다.
+  // **보고 있을 때는 대신 물어본다.** 편집본이 바뀌면 추천이 무효가 되는 것은
+  // 백엔드가 여러 겹으로 지키는 계약이라 그대로 둔다. 문제는 그다음이었다 --
+  // 죽은 카드와 단추만 남고, 창작자가 그걸 눈치채고 눌러야 대화가 이어졌다.
+  //
+  // 이 도크가 그려졌다는 것은 창작자가 지금 그것을 보고 있다는 뜻이다. 닫혀 있으면
+  // 아무 일도 하지 않는다 -- 다시 묻는 것은 로컬 모델을 한 번 돌리는 일이라,
+  // 안 보는 화면 때문에 시간을 쓸 이유가 없다.
+  //
+  // 같은 편집본에서는 한 번만 묻는다. 두 번 물으면 답은 같고 시간만 쓴다.
+  const askedForRevision = useRef<number | null>(null);
   const proposalIsOutOfDate = Boolean(
     proposal && proposal.baseSessionRevision !== proposal.currentRevision,
   );
@@ -160,6 +170,15 @@ export function RightDock({
     : runState.kind === "unavailable"
     ? `${runState.message} 수동 편집을 계속할 수 있어요.`
     : null;
+  useEffect(() => {
+    if (!proposalIsOutOfDate || !onRefreshProposal) return;
+    if (state === "analysis_running" || state === "applying") return;
+    const revision = proposal?.currentRevision ?? null;
+    if (revision === null || askedForRevision.current === revision) return;
+    askedForRevision.current = revision;
+    void onRefreshProposal();
+  }, [onRefreshProposal, proposal?.currentRevision, proposalIsOutOfDate, state]);
+
   const recommendationCandidates = proposal?.candidates.filter((candidate) => !candidate.readOnlyFinding) ?? [];
   const readOnlyFindings = proposal?.candidates.filter((candidate) => candidate.readOnlyFinding) ?? [];
 

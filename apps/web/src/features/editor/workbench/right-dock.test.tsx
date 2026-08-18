@@ -129,6 +129,33 @@ describe("RightDock", () => {
     expect(dock.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("re-asks by itself when the recommendation goes stale while the creator is looking at it", async () => {
+    // 편집본이 바뀌면 추천이 무효가 된다(백엔드가 7군데에서 지키는 계약이라 그건
+    // 그대로 둔다). 문제는 그다음이다 -- 죽은 카드와 단추만 남고, 창작자가 그걸
+    // 눈치채고 눌러야 대화가 이어진다. 보고 있을 때는 대신 물어본다.
+    const onRefreshProposal = vi.fn();
+    render(<RightDock
+      draft="" onDraftChange={vi.fn()}
+      proposal={{ proposalId: "p1", status: "ready", baseSessionRevision: 22, currentRevision: 31, candidates: [] } as never}
+      onRefreshProposal={onRefreshProposal}
+    />);
+
+    await waitFor(() => expect(onRefreshProposal).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not keep re-asking the same stale revision over and over", async () => {
+    // 다시 묻는 것은 로컬 모델을 한 번 돌리는 일이다. 같은 편집본에서 두 번
+    // 물으면 답은 같고 시간만 쓴다.
+    const onRefreshProposal = vi.fn();
+    const proposal = { proposalId: "p1", status: "ready", baseSessionRevision: 22, currentRevision: 31, candidates: [] } as never;
+    const rendered = render(<RightDock draft="" onDraftChange={vi.fn()} proposal={proposal} onRefreshProposal={onRefreshProposal} />);
+    await waitFor(() => expect(onRefreshProposal).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<RightDock draft="다른 초안" onDraftChange={vi.fn()} proposal={proposal} onRefreshProposal={onRefreshProposal} />);
+
+    expect(onRefreshProposal).toHaveBeenCalledTimes(1);
+  });
+
   it("still lets the creator fold the properties away", () => {
     // 항상 펴 두는 것과 접을 수 없는 것은 다르다.
     render(<PersistentDock />);

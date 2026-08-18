@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api, type OutputVariant, type OutputVariantPatch } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -126,6 +126,14 @@ function EditorWorkbenchInstance({
   });
   const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
   const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
+  // **타임라인 높이는 편집자가 정한다.** 컷을 딸 때는 타임라인을 키우고 화면을 볼
+  // 때는 미리보기를 키우는 것이 편집자가 실제로 하는 일이다. 좌우 도크는 이미
+  // 끌어서 폭을 바꾸는데 위아래만 내가 CSS로 정해 놓고 있었다.
+  //
+  // 손대기 전에는 `null`이고, 그동안은 화면 높이에 맞춘 CSS 기본값이 그대로 쓰인다.
+  const [timelineRem, setTimelineRem] = useState<number | null>(null);
+  const resizeTimeline = (deltaRem: number) => setTimelineRem((current) =>
+    Math.min(32, Math.max(6, (current ?? 20) + deltaRem)));
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
   const [requestedSegmentFocusEpoch, setRequestedSegmentFocusEpoch] = useState(0);
@@ -448,7 +456,7 @@ function EditorWorkbenchInstance({
     if (!serverVariant || !onVariantPatch) return;
     void onVariantPatch(serverVariant, { resolve_conflicts: { [field]: decision } });
   };
-  return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)}>
+  return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)} style={timelineRem === null ? undefined : ({ "--vb-timeline-height": `${timelineRem}rem` } as CSSProperties)}>
     <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button>{cutButton(cutTools.split)}{cutButton(cutTools.join)}{cutButton(cutTools.drop)}{cutButton(cutTools.copyToNext)}<Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</Button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
@@ -468,6 +476,34 @@ function EditorWorkbenchInstance({
       {showVariantCompare ? <VariantConflictPanel conflicts={variantPreview.conflicts} onKeep={(field) => resolveConflict(field, "keep_local")} onRebase={(field) => resolveConflict(field, "rebase_master")} /> : null}
       {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} /> : null}</> : null}
     </section>
+    <div
+      role="separator"
+      aria-label="타임라인 높이 조절"
+      aria-orientation="horizontal"
+      className="vb-editor-workbench__timeline-handle"
+      tabIndex={0}
+      title="위·아래 화살표로 조절"
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        resizeTimeline(event.key === "ArrowUp" ? 1 : -1);
+      }}
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const startY = event.clientY;
+        const startRem = timelineRem ?? 20;
+        const move = (moveEvent: PointerEvent) => {
+          // 위로 끌면 타임라인이 커진다. 1rem = 16px.
+          setTimelineRem(Math.min(32, Math.max(6, startRem + (startY - moveEvent.clientY) / 16)));
+        };
+        const stop = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", stop);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", stop);
+      }}
+    />
     <TimelineDock
       clipPictures={clipPictures}
       isSaving={isSavingTimeline}

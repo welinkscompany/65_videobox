@@ -230,7 +230,9 @@ describe("PreviewStage", () => {
     // `apps/web/e2e/exact-preview.spec.mjs`가 브라우저에서 재서 지킨다.
     const capRules = [...css.matchAll(/\.vb-editor-workbench__timeline[^{]*\{([^}]*max-height:[^;]*;)/g)].map((match) => match[1]);
     expect(capRules.length).toBeGreaterThan(0);
-    for (const rule of capRules) expect(rule).toMatch(/max-height:\s*clamp\([^;]*vh/);
+    // 편집자가 손잡이로 정한 값이 있으면 그것이 이기고, 없으면 화면 높이에 맞춘
+    // 기본값이 쓰인다. 어느 쪽이든 **폭으로 자르지 않는다**는 것이 요점이다.
+    for (const rule of capRules) expect(rule).toMatch(/max-height:\s*(var\(--vb-timeline-height,\s*)?clamp\([^;]*vh/);
     const widthScoped = css.match(/@media \(min-width: 768px\) and \(max-width: 1499px\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(widthScoped).not.toContain("max-height");
   });
