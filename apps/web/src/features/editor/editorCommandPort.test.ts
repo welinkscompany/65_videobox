@@ -96,6 +96,35 @@ describe("EditorCommandPort", () => {
     );
   });
 
+  it("carries every B-roll control it was given, so a save cannot silently reset one", async () => {
+    // 2026-08-18: 이 함수가 실어 보내는 키가 정해져 있어서 **목록에 없는 값은
+    // 저장할 때마다 사라졌다.** 서버는 없는 키를 기본값으로 되돌리므로,
+    // 인스펙터에서 배속만 고쳐 저장해도 `자체 소리 살리기`가 꺼지고 앞부분
+    // 잘라내기가 0으로 돌아간다. 지금 데이터가 전부 기본값이라 눈에 안 띌 뿐이다.
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.updateMediaControls({
+      kind: "broll",
+      segmentId: "seg",
+      assetId: "asset-b",
+      controls: { speed: 2, volume: 0.5, preserveSourceAudio: true, loop: false, pad: true, trimStartSec: 1.5, fit: "crop" },
+    });
+
+    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-b",
+      media_controls: {
+        speed: 2,
+        volume: 0.5,
+        preserve_source_audio: true,
+        loop: false,
+        pad: true,
+        trim_start_sec: 1.5,
+        fit: "crop",
+      },
+      expected_revision: 7,
+    });
+  });
+
   it("serializes authoritative BGM and SFX fade controls without replacing hidden gain or ducking", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
 

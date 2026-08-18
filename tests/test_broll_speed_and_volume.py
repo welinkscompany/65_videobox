@@ -239,3 +239,70 @@ def test_a_sped_up_broll_actually_shows_a_later_moment_in_the_real_mp4(tmp_path:
         capture_output=True, text=True, timeout=60, check=True,
     ).stdout.strip()
     assert float(duration) == pytest.approx(2.0, abs=0.1)
+
+
+@pytest.mark.skipif(
+    not __import__("shutil").which("ffmpeg") or not __import__("shutil").which("ffprobe"),
+    reason="ffmpeg/ffprobe not installed on this machine",
+)
+def test_broll_volume_actually_changes_how_loud_the_finished_file_is(tmp_path: Path) -> None:
+    """`소리 크기`가 완성본의 실제 음량을 바꾸는지.
+
+    2026-08-18에 배속을 렌더러까지 이어 놓고도 음량은 **여전히 결과에 닿지
+    않았다.** 음량은 그 클립의 자체 소리를 살려 둘 때만 섞이는데, 그걸 켜는
+    자리가 화면에 없었기 때문이다. 이제 켤 수 있으니, 켜고 줄이면 실제로
+    조용해지는지를 파일에서 잰다.
+
+    길이가 아니라 **음량으로** 잰다 -- 이 저장소가 소리 문제를 길이로 재다가
+    무음 완성본을 내보낸 적이 있다.
+    """
+    import subprocess
+
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+    from videobox_domain_models.assets import AssetType
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="B-roll volume end to end")
+    narration_file = tmp_path / "silence.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:a", "pcm_s16le", str(narration_file)],
+        check=True, capture_output=True, timeout=60,
+    )
+    # 소리가 실린 B-roll. 내레이션은 무음이라 완성본의 소리는 전부 여기서 온다.
+    broll_file = tmp_path / "loud-broll.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "lavfi", "-i", "color=c=teal:s=320x240:r=15:d=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2",
+            "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(broll_file),
+        ],
+        check=True, capture_output=True, timeout=120,
+    )
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+
+    def render(volume: float, name: str) -> Path:
+        output = tmp_path / name
+        FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+            project_id=project.project_id,
+            output_path=output,
+            timeline={
+                "narration_source_uri": narration.storage_uri,
+                "tracks": [
+                    {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+                    {"track_type": "broll", "clips": [{
+                        "asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 2.0,
+                        "media_controls": {"preserve_source_audio": True, "loop": False, "volume": volume},
+                    }]},
+                ],
+            },
+        )
+        return output
+
+    loud = probe_audio_peak_dbfs(render(1.0, "loud.mp4"))
+    quiet = probe_audio_peak_dbfs(render(0.25, "quiet.mp4"))
+
+    assert loud is not None and quiet is not None
+    # 4분의 1로 줄이면 약 12dB 낮아진다. 측정 오차를 감안해 6dB만 요구한다.
+    assert quiet < loud - 6

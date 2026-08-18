@@ -56,6 +56,14 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     // never sent, so an inspector edit had nowhere to go.
     in_sec: value.inSec,
     out_sec: value.outSec,
+    // **여기 없는 키는 저장할 때마다 사라진다.** 서버는 안 온 키를 기본값으로
+    // 되돌리므로, 배속만 고쳐 저장해도 `자체 소리 살리기`가 꺼지고 앞부분
+    // 잘라내기가 0으로 돌아간다(2026-08-18 확인). 새 제어를 만들면 반드시
+    // 이 목록에도 넣는다 -- 화면에 붙이는 것만으로는 절반이다.
+    preserve_source_audio: value.preserveSourceAudio,
+    loop: value.loop,
+    pad: value.pad,
+    trim_start_sec: value.trimStartSec,
   }).filter(([, item]) => item !== undefined));
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {

@@ -236,6 +236,45 @@ describe("InspectorControls", () => {
     expect(document.body).not.toHaveTextContent(/asset-internal|segment-internal/);
   });
 
+  it("lets the creator keep a clip's own sound, which is what makes 소리 크기 mean anything", () => {
+    // 2026-08-18에 배속을 이어 놓고도 **음량은 여전히 결과에 닿지 않았다.**
+    // B-roll 음량은 그 클립의 자체 소리를 살려 둘 때만 섞이는데(렌더러가
+    // `preserve_source_audio`로 가른다), 그걸 켜는 자리가 화면에 없었다.
+    // 백엔드에서도 이 값을 참으로 만드는 곳이 한 군데도 없었다 -- 읽기만 했다.
+    const onAction = vi.fn();
+    const broll: InspectorTarget = {
+      assetId: "asset-internal-broll",
+      clearOnly: false,
+      controls: { inSec: 0, outSec: 4, speed: 1, volume: 1, preserveSourceAudio: false },
+      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    };
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll}
+      />,
+    );
+
+    const toggle = screen.getByLabelText("이 영상의 원래 소리도 함께 쓰기");
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+
+    expect(onAction).toHaveBeenLastCalledWith({
+      assetId: "asset-internal-broll",
+      controls: { inSec: 0, outSec: 4, speed: 1, volume: 1, preserveSourceAudio: true },
+      kind: "save-media",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    });
+  });
+
   it("lets the creator turn on music that steps aside for the narration", () => {
     // 백엔드는 2026-08-18 이전부터 사이드체인 압축으로 이걸 실제로 해 왔다
     // (`ffmpeg_final_renderer`). 켜고 끄는 자리가 화면에 없어서 아무도 못 썼을

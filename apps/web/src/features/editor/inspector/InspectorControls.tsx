@@ -127,6 +127,9 @@ export function InspectorControls({
   // 말할 때 음악이 비켜서기(덕킹). 렌더러는 처음부터 이걸 할 수 있었는데
   // 켜고 끄는 자리가 화면에 없었다.
   const [ducking, setDucking] = useState(false);
+  // 이 클립의 원래 소리를 살릴지. **`소리 크기`와 한 벌이다** -- 이게 꺼져 있으면
+  // 섞일 소리가 없어서 음량을 아무리 바꿔도 결과가 같다.
+  const [preserveSourceAudio, setPreserveSourceAudio] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<EditorCaptionStyle>(defaultStyle);
   const [overlayTitle, setOverlayTitle] = useState("");
   const [overlayBody, setOverlayBody] = useState("");
@@ -170,6 +173,7 @@ export function InspectorControls({
       setSpeed(target.controls.speed ?? 1);
       setVolume(target.controls.volume ?? 1);
       setDucking(target.controls.ducking ?? false);
+      setPreserveSourceAudio(target.controls.preserveSourceAudio ?? false);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
     if (target?.kind === "overlay") {
@@ -369,6 +373,20 @@ export function InspectorControls({
                   <Input disabled={disabled} max="2" min="0" onChange={(event) => setVolume(numberValue(event.target.value, volume))} step="0.05" type="number" value={volume} />
                 </label>
               ) : null}
+              {/* 음량 바로 아래. 이게 꺼져 있으면 `소리 크기`는 아무 일도 하지
+                  않는다 -- 섞일 소리가 없기 때문이다. §10.13: `소스 오디오` 같은
+                  말 대신 무엇을 쓰겠다는 건지로 적는다. */}
+              {target.fields.includes("preserveSourceAudio") ? (
+                <label>
+                  <Input
+                    checked={preserveSourceAudio}
+                    disabled={disabled}
+                    onChange={(event) => setPreserveSourceAudio(event.target.checked)}
+                    type="checkbox"
+                  />
+                  이 영상의 원래 소리도 함께 쓰기
+                </label>
+              ) : null}
               {/* 말이 음악에 묻히는 것은 완성본에서 가장 자주 걸리는 문제다.
                   §10.13: `사이드체인`·`덕킹` 같은 말 대신 무슨 일이 일어나는지로
                   적는다. 끄고 켜는 것뿐이므로 숫자를 묻지 않는다. */}
@@ -396,6 +414,7 @@ export function InspectorControls({
                     ...(target.fields.includes("speed") ? { speed } : {}),
                     ...(target.fields.includes("volume") ? { volume } : {}),
                     ...(target.fields.includes("ducking") ? { ducking } : {}),
+                    ...(target.fields.includes("preserveSourceAudio") ? { preserveSourceAudio } : {}),
                   },
                 })}
                 type="button"

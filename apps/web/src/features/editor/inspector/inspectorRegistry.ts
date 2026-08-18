@@ -1,7 +1,7 @@
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking";
+type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
@@ -31,7 +31,12 @@ const bgmFields = ["fadeInSec", "fadeOutSec", "ducking"] as const;
 // 2026-08-18: 페이드가 다시 들어왔다. 위 문장은 **소리** 페이드 이야기였고,
 // 여기 것은 **화면** 페이드다 -- 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비쳐
 // 장면이 부드럽게 바뀐다(디졸브). 렌더러가 알파를 태워 실제로 그렇게 그린다.
-const brollFields = ["inSec", "outSec", "speed", "volume", "fadeInSec", "fadeOutSec"] as const;
+//
+// 2026-08-18: `소리 크기` 옆에 **자체 소리를 살릴지**가 함께 있어야 한다. 렌더러는
+// 그 스위치가 켜져 있을 때만 이 클립의 소리를 섞는데, 켜는 자리가 없어서 음량이
+// 영영 아무 일도 하지 못했다. 순서도 소리 크기 바로 뒤에 둔다 -- 떨어뜨려 놓으면
+// 둘이 한 벌이라는 게 보이지 않는다.
+const brollFields = ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec"] as const;
 const mediaLabels = { broll: "B-roll", bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {
