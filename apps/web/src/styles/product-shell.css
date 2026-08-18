@@ -17,7 +17,27 @@ body:has(.vb-product-shell) { margin:0; }
 }
 .vb-product-sidebar { width: 16rem; flex: 0 0 16rem; display: flex; flex-direction: column; border-right: 1px solid var(--vb-border); background: var(--vb-canvas); padding: 1rem; transition: width .2s ease; box-sizing:border-box; min-width:0; }
 .is-collapsed .vb-product-sidebar { width: 4.5rem; overflow: hidden; }.is-collapsed .vb-product-sidebar span, .is-collapsed .vb-product-sidebar p, .is-collapsed .vb-product-sidebar small { display:none; }
-.vb-shell-brand { display:flex; align-items:center; gap:.55rem; font-weight:750; font-size:1.1rem; padding:.5rem; }.vb-shell-brand svg { color:var(--vb-accent); }
+.vb-shell-brand { display:flex; align-items:center; gap:.55rem; font-weight:750; font-size:1.1rem; padding:.5rem; }
+/* 아래 `.vb-global-nav svg`와 **같은 규칙**을 쓴다. 여기만 `flex:0 0 auto`와 크기가
+   빠져 있어서 아이콘이 옆 것에 밀려 찌그러졌다 -- 접으면 24px 자리에 15px로 눌리고,
+   펴면 `VideoBox` 글자에 밀려 **폭이 0이 돼 아예 사라졌다**(2026-08-19 재서 확인). */
+.vb-shell-brand svg { flex:0 0 auto; width:1.25rem; height:1.25rem; color:var(--vb-accent); }
+/* 접었을 때는 레일 한가운데로 한 줄 세운다. 예전에는 맨 위 아이콘 중심이 31.5px,
+   아래 아이콘들이 36px에 있어 위 하나만 왼쪽으로 튀어나와 보였다. 여백을 지우고
+   가운데 정렬하면 폭(4rem)의 정중앙에서 전부 만난다. */
+[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-shell-brand,
+[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-global-nav a,
+[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar [data-sidebar="menu-button"] {
+  justify-content:center; gap:0; padding-left:0; padding-right:0;
+}
+/* 크기도 한 벌로 맞춘다. 접으면 아이콘들이 **세로 한 줄에 나란히** 서기 때문에
+   16px·20px·24px이 섞여 있으면 줄이 안 맞은 것처럼 보인다. 펼친 상태는 글자
+   옆에 있어 서로 비교되지 않으므로 그대로 둔다. */
+[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-shell-brand svg,
+[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-global-nav a svg,
+[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar [data-sidebar="menu-button"] svg {
+  width:1.25rem; height:1.25rem; flex:0 0 auto;
+}
 .vb-sidebar-section-label { margin:0 0 .4rem; padding:0 .2rem; color:var(--vb-muted); font-size:.72rem; font-weight:650; letter-spacing:.03em; text-transform:uppercase; }
 .vb-global-nav { margin-top:1rem; padding-bottom:1rem; border-bottom:1px solid var(--vb-border); }.vb-global-nav ul { display:grid; gap:.5rem; margin:0; padding:0; list-style:none; }.vb-global-nav a { display:flex; min-height:40px; align-items:center; gap:.6rem; border:1px solid transparent; border-radius:.55rem; padding:.5rem .7rem; color:var(--vb-muted); text-decoration:none; font:inherit; }.vb-global-nav a:hover, .vb-global-nav a:focus-visible { border-color:var(--vb-accent-border); background:var(--vb-accent-bg); color:var(--vb-accent); }.vb-global-nav svg { flex:0 0 auto; width:1rem; height:1rem; }
 .vb-project-switcher { border:1px solid var(--vb-border); background:var(--vb-panel); border-radius:.75rem; padding:.6rem; margin:1rem 0; max-height:18rem; overflow-y:auto; }.vb-project-switcher p { margin:0 0 .4rem; color:var(--vb-muted); font-size:.75rem; }.vb-project-row { display:flex; align-items:center; gap:.5rem; min-width:0; }.vb-project-switcher .vb-project-select { min-width:0; flex:1 1 auto; width:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.vb-project-switcher .vb-project-more { flex:0 0 2rem; width:2rem; min-height:32px; padding:.35rem; justify-content:center; }.vb-project-switcher button { min-height:40px; border:0; border-radius:.45rem; background:transparent; text-align:left; padding:.45rem; color:inherit; cursor:pointer; }.vb-project-switcher button[aria-pressed=true] { background:var(--accent); color:var(--vb-accent); font-weight:650; }
