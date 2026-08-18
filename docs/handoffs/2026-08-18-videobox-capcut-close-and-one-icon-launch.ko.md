@@ -1,5 +1,9 @@
 # 다음 세션은 여기서 시작한다
 
+**대체됨:** `docs/handoffs/2026-08-18-videobox-editor-comfort-and-yujin.ko.md`
+
+같은 날 뒤 세션이 이어서 1·2·3번을 닫았다. **현재 상태는 위 문서를 봐라.**
+
 - 작성: 2026-08-18
 - 직전 세션: 캡컷 A·B·C (`551fe5123`, `83ddba9f3`, 그리고 이 문서의 커밋)
 - **읽는 순서:** 이 문서 → `docs/decisions/2026-08-17-editor-capcut-layout-approval.ko.md`
