@@ -42,7 +42,11 @@
 
    40vh였을 때 390x844에서 타임라인이 364px를 먹고 미리보기 영상이 0px가 됐다.
    폰은 세로 툴바만 125px를 쓰기 때문에 데스크톱과 같은 비율을 쓸 수 없다. */
-.vb-editor-workbench__timeline { min-width:0; min-height:0; max-height: var(--vb-timeline-height, clamp(6rem, 19vh, 22rem)); overflow:auto; padding: 0.75rem 1rem; }
+/* `max-height`만 걸면 **제한만** 되고 늘어나지 않는다 -- 내용이 그보다 짧으면
+   손잡이를 올려도 아무 일이 없다(배포된 화면에서 확인했다). 편집자가 위로 끄는
+   것은 자리를 **더 달라**는 뜻이므로 높이도 함께 잡는다. 손대기 전에는 `auto`라
+   내용만큼만 쓰고 상한만 걸린다. */
+.vb-editor-workbench__timeline { min-width:0; min-height:0; height: var(--vb-timeline-height, auto); max-height: var(--vb-timeline-height, clamp(6rem, 19vh, 22rem)); overflow:auto; padding: 0.75rem 1rem; }
 /* 재료를 끌어다 놓을 때 **받을 자리**를 보여 준다. 어디에 놓이는지 모르면 놓을 수 없다. */
 [data-drop-target="true"] { outline: 2px solid var(--vb-accent); outline-offset: -2px; border-radius: 0.25rem; }
 .vb-editor-workbench__timeline:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -166,7 +170,7 @@
      위를 전부 타임라인에 준다. 실제 면적은
      `apps/web/e2e/exact-preview.spec.mjs`가 브라우저에서 재서 지킨다. */
   /* 편집자가 손잡이를 잡으면 그 값이 이긴다. 안 잡았으면 화면 높이에 맞춘 기본값. */
-  .vb-editor-workbench__timeline { max-height: var(--vb-timeline-height, clamp(4rem, calc(66vh - 390px), 26rem)); }
+  .vb-editor-workbench__timeline { height: var(--vb-timeline-height, auto); max-height: var(--vb-timeline-height, clamp(4rem, calc(66vh - 390px), 26rem)); }
 }
 /* 예전에는 좁은 데스크톱에서 키 안내 줄을 숨겼다. 안내가 한 줄씩 자리를 먹던
    시절의 대처였고, 이제 안내가 모두 한 줄에 모여 있어 숨길 이유가 없다. */

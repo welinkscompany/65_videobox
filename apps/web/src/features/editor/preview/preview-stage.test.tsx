@@ -237,6 +237,18 @@ describe("PreviewStage", () => {
     expect(widthScoped).not.toContain("max-height");
   });
 
+  it("makes the creator's timeline height actually take effect, not just cap it", () => {
+    // `max-height`만 걸면 **제한만** 되고 늘어나지 않는다. 배포된 화면에서 손잡이를
+    // 올려 변수는 24rem이 됐는데 타임라인은 293px 그대로였다 -- 내용이 그보다
+    // 짧으면 상한을 올려도 아무 일이 없기 때문이다.
+    // 편집자가 위로 끌면 **자리를 더 주는 것**이 뜻이므로 높이도 함께 잡는다.
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const rules = [...css.matchAll(/\.vb-editor-workbench__timeline[^{]*\{([^}]*--vb-timeline-height[^}]*)\}/g)].map((match) => match[1]);
+
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) expect(rule).toMatch(/(^|;|\s)height:\s*var\(--vb-timeline-height/);
+  });
+
   it("keeps a floor under the preview row so the timeline can never crush it to nothing", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
     const workbenchRule = css.match(/^\.vb-editor-workbench\s*\{([^}]*)\}/m)?.[1] ?? "";
