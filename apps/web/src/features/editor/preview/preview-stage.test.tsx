@@ -73,6 +73,28 @@ describe("PreviewStage", () => {
     expect(onPlaybackTimeChange).not.toHaveBeenCalled();
   });
 
+  it("puts the whole stage into fullscreen so the transport buttons come along", () => {
+    // 마지막 확인은 크게 봐야 한다. 영상 요소만 키우면 재생·프레임 단추를 잃으므로
+    // 판 전체를 올린다. 켜짐 표시는 브라우저 이벤트가 정답이다 -- Esc로도 나간다.
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    HTMLElement.prototype.requestFullscreen = requestFullscreen;
+    const { container } = render(<PreviewStage {...current} />);
+    const stage = container.querySelector(".vb-preview-stage") as HTMLElement;
+    const button = screen.getByRole("button", { name: "미리보기 전체화면" });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(button);
+    expect(requestFullscreen).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, value: stage });
+    fireEvent(document, new Event("fullscreenchange"));
+    expect(screen.getByRole("button", { name: "미리보기 전체화면" })).toHaveAttribute("aria-pressed", "true");
+
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, value: null });
+    fireEvent(document, new Event("fullscreenchange"));
+    expect(screen.getByRole("button", { name: "미리보기 전체화면" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("says the picture is not from where the playhead is", () => {
     render(<PreviewStage {...current} exactPreview={{ status: "succeeded", url: "/api/range.mp4", artifactRevision: 4, timelineStartSec: 4, timelineEndSec: 8 }} playbackSec={20} />);
 

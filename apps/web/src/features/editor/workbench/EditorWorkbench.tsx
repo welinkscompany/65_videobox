@@ -13,7 +13,7 @@ import { PreviewStage, type AuditionRequest, type AuditionSource } from "../prev
 import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
-import { resolveEditorWorkbenchLayout, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
+import { resolveEditorWorkbenchLayout, timelineHeightLimitsRem, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
 import { hasLegacyEditorUiState, readEditorUiState, readVariantsCollapsed, writeEditorUiState, writeVariantsCollapsed } from "./editorUiState";
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
 import { VariantCompare } from "../variants/VariantCompare";
@@ -131,9 +131,12 @@ function EditorWorkbenchInstance({
   // 끌어서 폭을 바꾸는데 위아래만 내가 CSS로 정해 놓고 있었다.
   //
   // 손대기 전에는 `null`이고, 그동안은 화면 높이에 맞춘 CSS 기본값이 그대로 쓰인다.
-  const [timelineRem, setTimelineRem] = useState<number | null>(null);
-  const resizeTimeline = (deltaRem: number) => setTimelineRem((current) =>
-    Math.min(32, Math.max(6, (current ?? 20) + deltaRem)));
+  // 높이는 좌우 도크 폭과 같은 자리(`editorUiState`)에 저장돼 새로고침을 넘긴다.
+  const setTimelineRem = (nextRem: number) => setUi((current) => ({
+    ...current,
+    timelineRem: Math.min(timelineHeightLimitsRem.max, Math.max(timelineHeightLimitsRem.min, nextRem)),
+  }));
+  const resizeTimeline = (deltaRem: number) => setTimelineRem((ui.timelineRem ?? 20) + deltaRem);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(view.local.selectedSegmentId);
   const [playbackSec, setPlaybackSec] = useState(view.local.seekSec);
   const [requestedSegmentFocusEpoch, setRequestedSegmentFocusEpoch] = useState(0);
@@ -456,7 +459,7 @@ function EditorWorkbenchInstance({
     if (!serverVariant || !onVariantPatch) return;
     void onVariantPatch(serverVariant, { resolve_conflicts: { [field]: decision } });
   };
-  return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)} style={timelineRem === null ? undefined : ({ "--vb-timeline-height": `${timelineRem}rem` } as CSSProperties)}>
+  return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)} style={ui.timelineRem === null ? undefined : ({ "--vb-timeline-height": `${ui.timelineRem}rem` } as CSSProperties)}>
     <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button>{cutButton(cutTools.split)}{cutButton(cutTools.join)}{cutButton(cutTools.drop)}{cutButton(cutTools.copyToNext)}<Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</Button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
@@ -491,10 +494,10 @@ function EditorWorkbenchInstance({
       onPointerDown={(event) => {
         event.currentTarget.setPointerCapture(event.pointerId);
         const startY = event.clientY;
-        const startRem = timelineRem ?? 20;
+        const startRem = ui.timelineRem ?? 20;
         const move = (moveEvent: PointerEvent) => {
-          // 위로 끌면 타임라인이 커진다. 1rem = 16px.
-          setTimelineRem(Math.min(32, Math.max(6, startRem + (startY - moveEvent.clientY) / 16)));
+          // 위로 끌면 타임라인이 커진다. 1rem = 16px. 한계는 setTimelineRem이 잡는다.
+          setTimelineRem(startRem + (startY - moveEvent.clientY) / 16);
         };
         const stop = () => {
           window.removeEventListener("pointermove", move);

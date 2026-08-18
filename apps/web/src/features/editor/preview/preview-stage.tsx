@@ -33,6 +33,25 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [auditionIssue, setAuditionIssue] = useState<string | null>(null);
   const [repeating, setRepeating] = useState(false);
+  // 마지막 확인은 크게 봐야 한다. 영상 요소만 키우면 재생·프레임 단추를 잃으므로
+  // 판 전체를 전체화면으로 올린다. 켜짐 여부는 브라우저가 정답이다 -- Esc로도
+  // 나갈 수 있어서 우리 상태만 믿으면 단추가 거짓말을 한다.
+  const stageRef = useRef<HTMLElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => setIsFullscreen(document.fullscreenElement === stageRef.current && stageRef.current !== null);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      const attempt = document.exitFullscreen?.();
+      if (attempt && typeof attempt.catch === "function") void attempt.catch(() => undefined);
+      return;
+    }
+    const attempt = stageRef.current?.requestFullscreen?.();
+    if (attempt && typeof attempt.catch === "function") void attempt.catch(() => undefined);
+  };
   const frameSec = fps && fps.num > 0 && fps.den > 0 ? fps.den / fps.num : 1 / 30;
 
   const stopActiveMedia = () => {
@@ -167,7 +186,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     setAuditionIssue("이 원본은 여기서 화면을 열 수 없어요. 적용한 뒤 편집본 미리보기에서 확인해 주세요.");
   };
 
-  return <section className="vb-preview-stage" aria-label="미리보기" tabIndex={0} onKeyDown={onStageKeyDown} onBlur={onStageBlur}>
+  return <section ref={stageRef} className="vb-preview-stage" aria-label="미리보기" tabIndex={0} onKeyDown={onStageKeyDown} onBlur={onStageBlur}>
     <header className="vb-preview-stage__header"><div><p className="vb-preview-stage__eyebrow">{mode.kind === "audition" ? "소스 미리보기" : "편집본 미리보기"}</p><h2>{mode.kind === "audition" ? "원본을 확인하는 중" : "현재 편집 결과"}</h2></div>{mode.kind === "audition" && exact.kind === "current" && <button data-native-control="return-exact" type="button" onClick={showExact}>편집본으로 돌아가기</button>}</header>
     <div className="vb-preview-stage__media-shell" aria-busy={exact.kind === "pending" || exact.kind === "running"}>
       {visibleAuditionIssue
@@ -179,7 +198,7 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} controls preload="metadata" playsInline onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
       {!currentMedia && <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>}
     </div>
-    {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}</div><output aria-live="off">타임라인 {timelineTime.toFixed(1)}초</output></div>}
+    {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button></div><output aria-live="off">타임라인 {timelineTime.toFixed(1)}초</output></div>}
     {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">이 화면은 타임라인 {timelineTime.toFixed(1)}초의 모습입니다. 재생 위치는 그보다 바깥에 있어 아직 볼 수 없어요.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `자막은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>

@@ -23,6 +23,7 @@ describe("editorUiState", () => {
       activeDrawer: "right",
       leftSize: 180,
       rightSize: 410,
+      timelineRem: 24,
     });
 
     expect(readEditorUiState("project-1", "session-1")).toEqual({
@@ -31,8 +32,28 @@ describe("editorUiState", () => {
       activeDrawer: "right",
       leftSize: 220,
       rightSize: 410,
+      timelineRem: 24,
     });
     expect(localStorage.getItem(editorUiStorageKey("project-1", "session-1"))).not.toContain("segments");
+  });
+
+  it("keeps pre-timelineRem saved state valid instead of resetting the dock widths", () => {
+    // `timelineRem` 칸은 2026-08-18에 생겼다. 그 전에 저장된 값에는 칸이 없는데,
+    // 이를 무효로 치면 도크 폭까지 이유 없이 초기화된다. 없는 칸은 "손대지 않음"이다.
+    localStorage.clear();
+    localStorage.setItem(
+      editorUiStorageKey("project-1", "session-1"),
+      JSON.stringify({ leftOpen: false, rightOpen: true, activeDrawer: null, leftSize: 300, rightSize: 410 }),
+    );
+
+    expect(readEditorUiState("project-1", "session-1")).toEqual({
+      leftOpen: false,
+      rightOpen: true,
+      activeDrawer: null,
+      leftSize: 300,
+      rightSize: 410,
+      timelineRem: null,
+    });
   });
 
   it("starts a fresh session with the material column already open", () => {
@@ -46,6 +67,7 @@ describe("editorUiState", () => {
       activeDrawer: null,
       leftSize: 280,
       rightSize: 320,
+      timelineRem: null,
     });
   });
 

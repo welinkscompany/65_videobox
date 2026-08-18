@@ -4,6 +4,8 @@ export type EditorWorkbenchPersistedState = Readonly<{
   activeDrawer: "left" | "right" | null;
   leftSize: number;
   rightSize: number;
+  /** 편집자가 끌어서 정한 타임라인 높이(rem). 손대기 전에는 null이고 CSS 기본값이 쓰인다. */
+  timelineRem: number | null;
 }>;
 
 export type EditorWorkbenchLayout = Readonly<{
@@ -13,6 +15,7 @@ export type EditorWorkbenchLayout = Readonly<{
   activeDrawer: "left" | "right" | null;
   leftSize: number;
   rightSize: number;
+  timelineRem: number | null;
   previewMinPx: number;
 }>;
 
@@ -22,15 +25,31 @@ export const editorWorkbenchPanelConstants = Object.freeze({ leftMinPx: 220, rig
 //
 // **여기만 고치면 화면에 닿지 않는다.** 실제로 쓰이는 기본값은 `editorUiState.ts`에
 // 있고 이 벌은 persisted가 깨졌을 때의 대비책이다. 두 곳을 함께 본다.
-const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320 };
+const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320, timelineRem: null };
+
+// 타임라인 높이의 상·하한. 손잡이(`EditorWorkbench`)와 두 검증기가 같은 값을 봐야
+// 한다 -- 저장할 때와 읽을 때의 한계가 다르면 저장된 값이 조용히 잘린다.
+export const timelineHeightLimitsRem = Object.freeze({ min: 6, max: 32 });
+
+/** 저장된 타임라인 높이를 한계 안으로.
+ *
+ * `null`은 "손대지 않음"(이 칸이 생기기 전의 저장분 포함), `undefined`는 "무효"다.
+ * 무효면 호출한 쪽이 저장분 전체를 버린다.
+ */
+export function normalizedTimelineRem(value: unknown): number | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.min(timelineHeightLimitsRem.max, Math.max(timelineHeightLimitsRem.min, value));
+}
 
 function persistedState(value: unknown): EditorWorkbenchPersistedState {
   if (!value || typeof value !== "object") return defaultPersisted;
   const candidate = value as Record<string, unknown>;
-  const validKeys = ["leftOpen", "rightOpen", "activeDrawer", "leftSize", "rightSize"];
+  const validKeys = ["leftOpen", "rightOpen", "activeDrawer", "leftSize", "rightSize", "timelineRem"];
   if (Object.keys(candidate).some((key) => !validKeys.includes(key))) return defaultPersisted;
-  if (typeof candidate.leftOpen !== "boolean" || typeof candidate.rightOpen !== "boolean" || (candidate.activeDrawer !== null && candidate.activeDrawer !== "left" && candidate.activeDrawer !== "right") || !Number.isFinite(candidate.leftSize) || !Number.isFinite(candidate.rightSize)) return defaultPersisted;
-  return { leftOpen: candidate.leftOpen, rightOpen: candidate.rightOpen, activeDrawer: candidate.activeDrawer, leftSize: Math.max(editorWorkbenchPanelConstants.leftMinPx, Number(candidate.leftSize)), rightSize: Math.max(editorWorkbenchPanelConstants.rightMinPx, Number(candidate.rightSize)) };
+  const timelineRem = normalizedTimelineRem(candidate.timelineRem);
+  if (typeof candidate.leftOpen !== "boolean" || typeof candidate.rightOpen !== "boolean" || (candidate.activeDrawer !== null && candidate.activeDrawer !== "left" && candidate.activeDrawer !== "right") || !Number.isFinite(candidate.leftSize) || !Number.isFinite(candidate.rightSize) || timelineRem === undefined) return defaultPersisted;
+  return { leftOpen: candidate.leftOpen, rightOpen: candidate.rightOpen, activeDrawer: candidate.activeDrawer, leftSize: Math.max(editorWorkbenchPanelConstants.leftMinPx, Number(candidate.leftSize)), rightSize: Math.max(editorWorkbenchPanelConstants.rightMinPx, Number(candidate.rightSize)), timelineRem };
 }
 
 export function resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbenchWidth, persisted }: { viewportWidth: number; availableWorkbenchWidth: number; persisted: unknown }): EditorWorkbenchLayout {

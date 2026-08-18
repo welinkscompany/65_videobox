@@ -525,12 +525,19 @@ describe("TimelineDock", () => {
     expect(screen.getByRole("button", { name: "내레이션 2번째 장면, 1초부터" })).toBeInTheDocument();
   });
 
-  it("keeps the clip selection accessible name in sync with the button's visible text", () => {
+  it("shows a short left-anchored name whose text is the start of the accessible name", () => {
+    // 전체 이름("내레이션 1번째 장면, 0초부터")을 막대 전체에 깔면 썸네일·파형이
+    // 덮인다. 보이는 것은 짧은 이름뿐이되, 접근 이름의 **앞부분**이어야 한다 --
+    // 보이는 글자로 음성 호출했을 때 어긋나지 않는 조건이고, 내부 ID가 보이는
+    // 글자로 새는 것도 함께 막는다(F-3).
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 
     const selectionButton = timelineClipSelection("n-1");
     expect(selectionButton).toHaveAccessibleName("내레이션 1번째 장면, 0초부터");
-    expect(selectionButton.textContent).toBe("내레이션 1번째 장면, 0초부터");
+    expect(selectionButton.textContent).toBe("내레이션 1");
+    expect("내레이션 1번째 장면, 0초부터".startsWith(selectionButton.textContent ?? "")).toBe(true);
+    const name = selectionButton.querySelector(".vb-timeline-clip__name");
+    expect(name).not.toBeNull();
   });
 
   it("shows a linked caption but never exposes independent caption timing controls", () => {
@@ -717,6 +724,63 @@ describe("TimelineDock", () => {
     fireEvent.click(timeline, { clientX: 300 });
 
     expect(screen.getByLabelText("재생 위치")).not.toHaveAttribute("data-seconds", first);
+  });
+
+  it("drags the playhead to scrub the position, without a duplicate seek from the trailing click", () => {
+    // 클릭만 되던 때는 자를 자리를 찾으려면 찍고 확인하고 다시 찍기를 반복해야
+    // 했다. 트림 손잡이와 같은 상대 이동 방식이라 눈금 원점과 무관하게 정확하다.
+    const onPlaybackSeek = vi.fn();
+    render(<TimelineDock onPlaybackSeek={onPlaybackSeek} view={view} viewportWidthPx={400} />);
+    const handle = screen.getByRole("button", { name: "재생 위치 끌기" });
+
+    pointer(handle, "pointerdown", 100);
+    pointer(handle, "pointermove", 300);
+    // 문지르는 동안 위치가 실시간으로 움직인다 -- 미리보기가 그 자리를 바로 보여준다.
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "2");
+    pointer(handle, "pointerup", 300);
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "2");
+    expect(onPlaybackSeek).toHaveBeenCalledWith(2);
+
+    // 드래그 끝에 브라우저가 쏘는 click이 타임라인 onClick으로 새면 좌표계가 다른
+    // 두 번째 seek이 위치를 튕긴다. 단추에서 난 click은 무시되어야 한다.
+    fireEvent.click(handle, { clientX: 40 });
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "2");
+  });
+
+  it("keeps the playhead where it is when the handle is pressed and released without moving", () => {
+    render(<TimelineDock playbackSec={1.5} view={view} viewportWidthPx={400} />);
+    const handle = screen.getByRole("button", { name: "재생 위치 끌기" });
+
+    pointer(handle, "pointerdown", 150);
+    pointer(handle, "pointerup", 150);
+
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "1.5");
+  });
+
+  it("follows the playhead past the viewport edge during playback", () => {
+    // 확대해 놓고 재생하면 재생 머리가 보이는 구간을 지나쳐 버리는데 타임라인은
+    // 그대로였다. 밖에서 온 재생 위치가 구간을 벗어나면 뷰포트가 따라가야 한다.
+    const { rerender } = render(<TimelineDock playbackSec={0} view={view} viewportWidthPx={400} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
+
+    // 400px·초당 100px이면 0~4초만 보인다. 5초는 화면 밖이다.
+    rerender(<TimelineDock playbackSec={5} view={view} viewportWidthPx={400} />);
+
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "5");
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "5");
+  });
+
+  it("does not drag a deliberately scrolled viewport back to the resting playhead", () => {
+    // 따라가기는 재생 위치가 **움직일 때**만이다. 편집자가 다른 구간을 보려고
+    // 옆으로 민 뷰포트를 가만히 있는 재생 머리가 도로 끌어당기면 안 된다.
+    render(<TimelineDock playbackSec={0} view={view} viewportWidthPx={400} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+
+    fireEvent.wheel(timeline, { deltaX: 600 });
+
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "6");
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
 
   it("scrolls its local viewport from horizontal wheel pixels and clamps at both bounds", () => {

@@ -79,7 +79,8 @@ type PointerDraft = Readonly<{
 }>;
 type PlacementMoveDraft = Readonly<{ pointerId: number; kind: "placement-move"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; placements: readonly TimelinePlacement[]; bounds: Readonly<{ startSec: number; endSec: number }> }>;
 type PlacementTrimDraft = Readonly<{ pointerId: number; kind: "placement-trim"; downClientX: number; hasMoved: boolean; placement: TimelinePlacement; edge: "start" | "end"; bounds: Readonly<{ startSec: number; endSec: number }> }>;
-type TimelinePointerDraft = PointerDraft | PlacementMoveDraft | PlacementTrimDraft;
+type ScrubDraft = Readonly<{ pointerId: number; kind: "scrub"; downClientX: number; hasMoved: boolean; originSec: number }>;
+type TimelinePointerDraft = PointerDraft | PlacementMoveDraft | PlacementTrimDraft | ScrubDraft;
 
 function formatSeconds(seconds: number): string {
   return String(Number(seconds.toFixed(6)));
@@ -92,6 +93,13 @@ function formatSeconds(seconds: number): string {
 // clip selection button's accessible name and visible text).
 function formatClipDisplayName(lane: TimelineLane, ordinalInLane: number, startSec: number): string {
   return `${laneLabel[lane]} ${ordinalInLane}번째 장면, ${Math.round(startSec)}초부터`;
+}
+
+// 막대 위에 실제로 보이는 이름. 전체 이름이 막대를 가로질러 깔리면 썸네일·파형을
+// 덮는다(캡컷은 짧은 이름을 왼쪽 위에만 둔다). 반드시 전체 이름(aria-label)의
+// 앞부분이어야 한다 -- 보이는 글자와 접근 이름이 다르면 음성으로 부를 수 없다.
+function formatClipShortName(lane: TimelineLane, ordinalInLane: number): string {
+  return `${laneLabel[lane]} ${ordinalInLane}`;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -217,6 +225,18 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     if (playbackSec === reportedPlayheadRef.current) return;
     dispatch({ type: "seek", seconds: playbackSec });
   }, [playbackSec]);
+  // 재생 머리가 보이는 구간을 벗어나면 뷰포트를 그 자리로 넘긴다. 확대해 놓고
+  // 재생하면 머리가 오른쪽 끝을 지나가 버리는데, 타임라인이 따라가지 않으면
+  // 편집자는 지금 어디를 지나는지 볼 수 없다.
+  //
+  // deps는 **재생 위치 하나뿐**이다. viewportStartSec까지 넣으면 편집자가 다른
+  // 구간을 보려고 옆으로 밀어 둔 뷰포트를 재생 위치가 도로 끌어당긴다.
+  useEffect(() => {
+    const followEndSec = resolveViewportEnd(state, view.output.durationSec, viewportWidthPx);
+    if (state.playheadSec >= state.viewportStartSec && state.playheadSec <= followEndSec) return;
+    dispatch({ type: "scroll", seconds: state.playheadSec });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.playheadSec]);
   const viewportEndSec = resolveViewportEnd(state, view.output.durationSec, viewportWidthPx);
   const rects = useMemo(() => projectVisibleTimelineClips({
     clips: clipSources(view),
@@ -249,7 +269,10 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
 
   const handleClick = (event: MouseEvent<HTMLElement>) => {
     if (event.target instanceof Element && event.target.closest("button")) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
+    // 클립·재생 머리와 **같은 좌표계**(트랙 원점)로 잰다. 섹션 원점으로 재면
+    // 섹션 안쪽 여백만큼 옆으로 어긋난 자리로 seek한다.
+    const track = event.currentTarget.querySelector<HTMLElement>("[data-timeline-track]");
+    const bounds = (track ?? event.currentTarget).getBoundingClientRect();
     dispatch({ type: "seek", seconds: pixelsToTime(event.clientX - bounds.left, {
       pixelsPerSecond: state.pixelsPerSecond,
       originSec: state.viewportStartSec,
@@ -516,6 +539,47 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       } else updatePlacement(draft.placement, bounds);
     }
   };
+  // 재생 머리를 끌어서 문지른다(스크럽). 트림 손잡이와 같은 상대 이동 방식이다 --
+  // 절대 좌표로 계산하면 눈금 원점과 어긋났을 때 머리가 튄다. 이동량만 초로 바꾼다.
+  const scrubSecondsAtPointer = (draft: ScrubDraft, event: PointerEvent<HTMLElement>): number => {
+    const deltaSec = pixelsToTime(pointerClientX(event) - draft.downClientX, {
+      pixelsPerSecond: state.pixelsPerSecond,
+      originSec: 0,
+    });
+    return frameToSeconds(Math.max(0, secondsToFrameHalfUp(draft.originSec + deltaSec, view.fps)), view.fps);
+  };
+  const startScrub = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    capturePointer(event.currentTarget, event.pointerId);
+    setPointerDraft({
+      pointerId: event.pointerId,
+      kind: "scrub",
+      downClientX: pointerClientX(event),
+      hasMoved: false,
+      originSec: state.playheadSec,
+    });
+  };
+  const moveScrub = (event: PointerEvent<HTMLElement>) => {
+    const draft = pointerDraft;
+    if (!draft || draft.kind !== "scrub" || draft.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setPointerDraft({ ...draft, hasMoved: draft.hasMoved || pointerClientX(event) !== draft.downClientX });
+    // 문지르는 동안 계속 seek한다. 미리보기가 그 자리를 바로 보여 주는 것이 목적이다.
+    dispatch({ type: "seek", seconds: scrubSecondsAtPointer(draft, event) });
+  };
+  const endScrub = (event: PointerEvent<HTMLElement>) => {
+    const draft = pointerDraft;
+    if (!draft || draft.kind !== "scrub" || draft.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    releasePointerCapture(event.currentTarget, event.pointerId);
+    setPointerDraft(null);
+    // 움직이지 않은 채 놓았으면 seek할 것도 없다. 머리는 이미 그 자리에 있다.
+    // (드래그 끝의 click은 handleClick이 button을 무시하므로 중복 seek이 없다.)
+    if (draft.hasMoved || pointerClientX(event) !== draft.downClientX) {
+      dispatch({ type: "seek", seconds: scrubSecondsAtPointer(draft, event) });
+    }
+  };
   const cancelPointerDraft = (event: PointerEvent<HTMLElement>) => {
     if (pointerDraft?.pointerId !== event.pointerId) return;
     releasePointerCapture(event.currentTarget, event.pointerId);
@@ -620,6 +684,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         const isTranscriptSelected = narrationClip?.segmentId === selectedSegmentId || captionsByPlacementId.get(rect.clipId)?.segmentId === selectedSegmentId;
         const isSelected = state.selectedClipId === rect.clipId;
         const clipDisplayName = formatClipDisplayName(rect.lane, ordinalInLane, displayBounds?.startSec ?? 0);
+        const clipShortName = formatClipShortName(rect.lane, ordinalInLane);
         return <div
         aria-label={`${clipDisplayName} 클립`}
         data-clip-id={rect.clipId}
@@ -669,7 +734,10 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         }}
         style={{ height: "100%", width: "100%" }}
         type="button"
-      >{clipDisplayName}</button>{narrationClip && isSelected ? <span data-mutation-controls="true" onClick={(event) => event.stopPropagation()} style={{ inset: 0, overflow: "hidden", pointerEvents: "none", position: "absolute" }}>
+      >{/* 보이는 이름은 짧게 왼쪽 위에만. 전체 이름이 막대를 가로질러 깔리면
+          썸네일·파형을 덮는다. 시작 시각까지 담은 전체 이름은 aria-label에 있고,
+          이 짧은 이름은 그 앞부분이라 음성으로 불러도 어긋나지 않는다. */}
+        <span aria-hidden="true" className="vb-timeline-clip__name">{clipShortName}</span></button>{narrationClip && isSelected ? <span data-mutation-controls="true" onClick={(event) => event.stopPropagation()} style={{ inset: 0, overflow: "hidden", pointerEvents: "none", position: "absolute" }}>
         <button data-native-control="timeline-trim-start" aria-label={`${clipDisplayName} 시작 자르기`} data-trim-edge="start" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "start")} onPointerDown={(event) => startTrim(event, narrationClip, "start")} style={{ bottom: 0, left: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">시작</button>
         <button data-native-control="timeline-trim-end" aria-label={`${clipDisplayName} 끝 자르기`} data-trim-edge="end" disabled={isSaving} onKeyDown={(event) => keyboardTrim(event, narrationClip, "end")} onPointerDown={(event) => startTrim(event, narrationClip, "end")} style={{ bottom: 0, maxWidth: "33.333%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", right: 0, top: 0, width: "33.333%" }} title="왼쪽·오른쪽 화살표로 한 프레임씩 조절" type="button">끝</button>
         <button data-native-control="timeline-reorder" aria-label={`${clipDisplayName} 순서 바꾸기`} data-reorder-control="true" disabled={isSaving} onKeyDown={(event) => keyboardReorder(event, narrationClip)} onPointerDown={(event) => startReorder(event, narrationClip)} style={{ bottom: 0, left: "33.333%", maxWidth: "33.334%", overflow: "hidden", padding: 0, pointerEvents: "auto", position: "absolute", top: 0, width: "33.334%" }} title="왼쪽·오른쪽 화살표로 한 칸씩 이동" type="button">순서</button>
@@ -682,12 +750,26 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       </div>
       </div>
       <div
-        aria-hidden="true"
         className="vb-timeline-playhead"
         data-seconds={formatSeconds(state.playheadSec)}
         data-testid="timeline-playhead"
         style={{ left: `${playheadX}px` }}
-      ><span className="vb-timeline-playhead__grip" /></div>
+      ><span aria-hidden="true" className="vb-timeline-playhead__grip" />{/*
+        캡컷처럼 재생 머리를 잡고 문지른다. 클릭만 되던 때는 자를 자리를 찾으려면
+        찍고 확인하고 다시 찍기를 반복해야 했다. 선은 2px뿐이라 잡을 수 없으므로
+        이 단추가 선 위에 넓은 손자리를 겹쳐 둔다. 화살표 키는 타임라인의 기존
+        키 경로가 그대로 받는다.
+      */}<button
+        aria-label="재생 위치 끌기"
+        className="vb-timeline-playhead__handle"
+        data-native-control="timeline-scrub"
+        onPointerCancel={cancelPointerDraft}
+        onPointerDown={startScrub}
+        onPointerMove={moveScrub}
+        onPointerUp={endScrub}
+        title="끌어서 재생 위치를 훑고, 왼쪽·오른쪽 화살표로 한 프레임씩"
+        type="button"
+      /></div>
     </div>
     {/* 아래 상태 줄들도 같은 이유로 한 줄에 모은다. 하나하나는 짧은 조각인데
         한 줄씩 차지하면 눈금과 트랙이 밀려 스크롤 안으로 들어간다. */}

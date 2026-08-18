@@ -48,6 +48,15 @@ describe("resolveEditorWorkbenchLayout", () => {
       .toMatchObject({ leftOpen: true, rightOpen: false });
   });
 
+  it("carries a clamped timeline height through, and treats a missing one as untouched", () => {
+    // 두 검증기(editorUiState/여기)가 어긋나면 저장된 높이가 이 fallback에서 조용히
+    // 사라진다. 한계 밖 값은 잘라서 받고, 칸이 없는 예전 저장분은 null이다.
+    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1440, availableWorkbenchWidth: 1130, persisted: { ...bothOpen, timelineRem: 40 } }))
+      .toMatchObject({ timelineRem: 32 });
+    expect(resolveEditorWorkbenchLayout({ viewportWidth: 1440, availableWorkbenchWidth: 1130, persisted: bothOpen }))
+      .toMatchObject({ timelineRem: null });
+  });
+
   it("rejects stale persisted state that contains editor identity", () => {
     // 저장된 값이 `bothOpen`이어도 채택하지 않고 기본값(왼쪽만 펴짐)으로 떨어진다.
     expect(resolveEditorWorkbenchLayout({ viewportWidth: 1440, availableWorkbenchWidth: 1130, persisted: { ...bothOpen, projectId: "wrong" } })).toMatchObject({ leftOpen: true, rightOpen: false, activeDrawer: null });

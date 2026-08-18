@@ -86,8 +86,8 @@ const nativeControlAllowlist = {
     reason: "Media audition transport directly coordinates the owned audio and video elements.",
   },
   "features/editor/preview/preview-stage.tsx": {
-    controls: ["button:refresh-exact", "button:return-exact", "button:step-back", "button:step-forward", "button:toggle-playback", "button:toggle-repeat"],
-    reason: "The one-player preview transport directly owns playback and audition state, including frame stepping and scene repeat.",
+    controls: ["button:refresh-exact", "button:return-exact", "button:step-back", "button:step-forward", "button:toggle-fullscreen", "button:toggle-playback", "button:toggle-repeat"],
+    reason: "The one-player preview transport directly owns playback and audition state, including frame stepping, scene repeat, and stage fullscreen.",
   },
   "features/editor/timeline/TimelineDock.tsx": {
     controls: [
@@ -96,6 +96,7 @@ const nativeControlAllowlist = {
       "button:placement-trim-start",
       "button:timeline-clip-select",
       "button:timeline-reorder",
+      "button:timeline-scrub",
       "button:timeline-trim-end",
       "button:timeline-trim-start",
       "button:timeline-zoom-in",

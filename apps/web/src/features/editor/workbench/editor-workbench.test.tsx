@@ -87,6 +87,20 @@ describe("EditorWorkbench", () => {
     expect(workbench.style.getPropertyValue("--vb-timeline-height")).toBe("32rem");
   });
 
+  it("remembers the chosen timeline height across a reload, like the dock widths", async () => {
+    // 어제 세션이 남긴 구멍: 끌어서 정한 높이가 새로고침하면 기본값으로 돌아갔다.
+    // 좌우 도크 폭이 저장되는 자리(`editorUiState`)에 같이 저장한다.
+    const first = render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    fireEvent.keyDown(screen.getByLabelText("타임라인 높이 조절"), { key: "ArrowUp" });
+    first.unmount();
+
+    render(<EditorWorkbench view={view} />);
+    const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+
+    expect(workbench.style.getPropertyValue("--vb-timeline-height")).toBe("21rem");
+  });
+
   it("uses the measured workbench width rather than viewport width", async () => {
     render(<EditorWorkbench view={view} />);
     expect(await screen.findByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-density", "desktop-single");

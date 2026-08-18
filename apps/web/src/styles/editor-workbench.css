@@ -46,7 +46,10 @@
    손잡이를 올려도 아무 일이 없다(배포된 화면에서 확인했다). 편집자가 위로 끄는
    것은 자리를 **더 달라**는 뜻이므로 높이도 함께 잡는다. 손대기 전에는 `auto`라
    내용만큼만 쓰고 상한만 걸린다. */
-.vb-editor-workbench__timeline { min-width:0; min-height:0; height: var(--vb-timeline-height, auto); max-height: var(--vb-timeline-height, clamp(6rem, 19vh, 22rem)); overflow:auto; padding: 0.75rem 1rem; }
+/* 폰에서는 저장된 높이(`--vb-timeline-height`)를 쓰지 않는다. 손잡이도 폰에서는
+   숨긴다 -- 데스크톱에서 32rem까지 키워 저장한 값이 폰 화면에 그대로 적용되면
+   미리보기가 다시 쪼그라든다. 저장된 높이는 아래 768px 블록(데스크톱)만 읽는다. */
+.vb-editor-workbench__timeline { min-width:0; min-height:0; max-height: clamp(6rem, 19vh, 22rem); overflow:auto; padding: 0.75rem 1rem; }
 /* 재료를 끌어다 놓을 때 **받을 자리**를 보여 준다. 어디에 놓이는지 모르면 놓을 수 없다. */
 [data-drop-target="true"] { outline: 2px solid var(--vb-accent); outline-offset: -2px; border-radius: 0.25rem; }
 .vb-editor-workbench__timeline:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -54,6 +57,14 @@
    색은 승인된 accent(`--vb-accent`)를 그대로 쓴다 -- 새 색을 만들지 않는다. */
 .vb-timeline-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--vb-accent); pointer-events: none; z-index: 3; }
 .vb-timeline-playhead__grip { position: absolute; top: 0; left: 50%; width: 0.7rem; height: 0.7rem; transform: translateX(-50%); border-radius: 0 0 0.2rem 0.2rem; background: var(--vb-accent); }
+/* 재생 머리를 잡는 손자리. 선은 2px뿐이라 잡을 수 없어서, 보이지 않는 단추가
+   선 위에 넓게 겹친다. 선·머리 장식은 pointer-events:none 그대로 두고 이 단추만
+   포인터를 받는다 -- 클립 클릭을 가리지 않도록 폭은 손끝 하나 수준으로 제한한다. */
+.vb-timeline-playhead__handle { position: absolute; top: 0; bottom: 0; left: 50%; width: 0.9rem; transform: translateX(-50%); padding: 0; border: 0; background: transparent; pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.vb-timeline-playhead__handle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* 클립의 짧은 이름표. 전체 이름을 막대에 깔면 썸네일·파형이 덮인다 -- 캡컷처럼
+   왼쪽 위에만 두고, 넘치면 말줄임한다. 그림 위에서도 읽히게 살짝 바탕을 깐다. */
+.vb-timeline-clip__name { position: absolute; top: 1px; left: 1px; max-width: calc(100% - 2px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 0.3rem; border-radius: 0.25rem; background: color-mix(in srgb, var(--card) 78%, transparent); color: var(--foreground); font-size: 0.68rem; line-height: 1.3; text-align: left; pointer-events: none; }
 .vb-editor-workbench__drawer { position: fixed; inset: 1rem; z-index: 40; padding: 1rem; overflow: auto; background: var(--background); border: 1px solid var(--border); border-radius: 0.75rem; }
 /* 미리보기 판은 영상 한 줄 위아래로 제목·재생·상태 줄을 여섯 행에 나눠 놓는다.
    여백을 넉넉히 주면 그 줄들이 영상 자리를 먹는다 -- 390px 폰에서 재어 보니
@@ -179,6 +190,10 @@
 .vb-preview-stage__transport { display: flex; align-items: center; gap: 0.35rem; }
 .vb-preview-stage__transport > button { flex: 0 0 auto; }
 .vb-preview-stage__transport > button[aria-pressed="true"] { border-color: var(--vb-accent); background: var(--vb-accent-bg); }
+/* 전체화면은 판 전체가 커진다(영상만 키우면 재생·프레임 단추를 잃는다).
+   바탕을 직접 깔아야 한다 -- 안 깔면 브라우저 기본 검정 위에 껍데기만 뜬다. */
+.vb-preview-stage:fullscreen { background: var(--vb-preview); padding: 1rem; }
+.vb-preview-stage:fullscreen .vb-preview-stage__playback, .vb-preview-stage:fullscreen .vb-preview-stage__status { color: var(--vb-preview-text, #F4F4F5); }
 /* 타임라인의 안내·상태 줄은 지우지 않고 한 줄로 모은다. 재 보니 타임라인이 필요로
    하는 449px 중 눈금과 트랙은 222px뿐이었고 나머지는 이 조각들이 한 줄씩 차지한
    것이었다 -- 자리를 더 줘도 눈금이 계속 스크롤 안에 숨은 이유다. */
