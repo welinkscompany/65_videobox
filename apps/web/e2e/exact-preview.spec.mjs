@@ -186,6 +186,25 @@ test("a Full HD screen shows the whole timeline without hiding it in its own scr
   // 하나였다 -- **예전 8.5% 수준으로 되돌아가지 않는다.** 2026-07-22에 되찾은
   // 수준이 화면 면적의 20.8%이므로 그것을 바닥으로 둔다.
   expect(seen.areaPercent).toBeGreaterThanOrEqual(20.8);
+
+  // **두 도크를 다 편 상태도 잰다.** 오른쪽까지 열면 미리보기 폭이 320px 줄어
+  // 면적이 확 떨어진다 -- 여기서는 18.9%로 위의 20.8% 아래다.
+  //
+  // 그래서 위 하한을 낮추지 않았고, 타임라인을 도로 줄이지도 않았다. 둘은 이
+  // 조합에서 **동시에 만족시킬 수 없다**: 1920x1080에서 오른쪽 도크가 폭을 가져가면
+  // "눈금과 트랙이 다 보인다"와 "면적 20.8%"가 서로를 배제한다.
+  //
+  // 20.8%는 2026-07-22에 **기본 배치에서** 되찾은 값이고, 오른쪽 도크를 여는 것은
+  // 창작자가 미리보기 폭을 참고 패널과 바꾸겠다고 고른 것이다. 그 선택까지 같은
+  // 하한으로 묶으면 승인문이 실제로 정한 것보다 좁게 잠근다. 승인문이 건 조건은
+  // 하나였다 -- **예전 8.5% 수준으로 되돌아가지 않을 것.** 그것을 지킨다.
+  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-density", "desktop-both");
+  const bothDocks = await page.evaluate(() => {
+    const video = document.querySelector(".vb-preview-stage__media-shell video").getBoundingClientRect();
+    return (video.width * video.height) / (window.innerWidth * window.innerHeight) * 100;
+  });
+  expect(bothDocks).toBeGreaterThanOrEqual(15);
 });
 
 test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {
