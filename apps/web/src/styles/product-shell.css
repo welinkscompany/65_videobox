@@ -52,7 +52,10 @@ body:has(.vb-product-shell) { margin:0; }
    폭을 잡아 줬는데 자산 화면은 1440px까지 넓어서, 입력과 선택 상자가 화면 끝까지
    늘어나 읽기 어려웠다. 여기서 같은 폭을 다시 잡아 준다. */
 .vb-voice-workspace { max-width:42rem; }
-.vb-catalog { max-width:1200px; margin:0 auto; padding:2rem clamp(1rem,3vw,2.5rem); }
+/* 페이지 여백과 최대 폭은 **껍데기(`.vb-product-content`)가 정한다.** 여기서 다시
+   걸면 두 벌이 겹쳐 제목이 왼쪽에서 80px, 위에서 91px까지 밀렸다 -- 같은 값
+   (32px·40px)이 두 번 걸린 것이다(2026-08-19 재서 확인). 화면마다 다시 적지 않는다. */
+.vb-catalog { min-width:0; }
 .vb-catalog h1 { margin:.1rem 0 .5rem; font-size:clamp(1.65rem,3vw,2.35rem); letter-spacing:-.04em; }
 .vb-catalog > p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }
 .vb-catalog-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(14rem,1fr)); gap:1rem; margin-top:2rem; }
@@ -121,7 +124,7 @@ body:has(.vb-product-shell) { margin:0; }
 .vb-product-shell [data-slot=button][data-variant="default"] { border-radius:var(--radius-2xl); }
 .vb-product-shell [data-slot=button][data-variant="outline"] { border:0; box-shadow:0 0 0 1px var(--vb-control-ring); border-radius:var(--radius-2xl); }
 .vb-product-shell :where(button,a,input,textarea,select):focus-visible { outline:0; box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 30%,transparent); }
-.vb-catalog { width:100%; max-width:1200px; box-sizing:border-box; min-width:0; overflow-x:hidden; }
+.vb-catalog { width:100%; box-sizing:border-box; min-width:0; overflow-x:hidden; }
 @media (min-width:1600px) { .vb-catalog { max-width:1600px; } }
 .vb-catalog-grid { min-width:0; }
 .vb-catalog-card { box-sizing:border-box; min-width:0; overflow-wrap:anywhere; border:0; border-radius:var(--radius-lg); box-shadow:0 0 0 1px var(--vb-surface-ring); }
