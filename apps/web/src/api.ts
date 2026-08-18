@@ -2406,6 +2406,8 @@ export const api = {
     request<AssetBrowserPreview>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview`, { credentials: "same-origin", redirect: "error", signal }),
   assetThumbnailUrl: (projectId: string, assetId: string) =>
     `/api/projects/${projectId}/assets/${assetId}/thumbnail`,
+  assetWaveformUrl: (projectId: string, assetId: string) =>
+    `/api/projects/${projectId}/assets/${assetId}/waveform`,
   startFinalRender: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/final-render`, {
       method: "POST",

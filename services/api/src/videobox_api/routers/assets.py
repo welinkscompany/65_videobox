@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 import threading
 from pathlib import Path
 from uuid import uuid4
@@ -416,6 +417,46 @@ def build_assets_router(
         if not thumbnail_path.exists():
             raise _http_error(FileNotFoundError(f"No thumbnail generated for asset '{asset_id}'."))
         return FileResponse(thumbnail_path)
+
+    @router.get("/api/projects/{project_id}/assets/{asset_id}/waveform")
+    def get_asset_waveform(project_id: str, asset_id: str) -> FileResponse:
+        """소리 클립 위에 그릴 파형 그림.
+
+        캡컷처럼 타임라인에서 **눈으로** 크고 작은 데를 찾으려면 이 그림이 있어야
+        한다. 만드는 방법은 라이브러리 자산 쪽(`routers/library_assets.py`)과 같은
+        ffmpeg `showwavespic`이다 -- 새 방식을 들이지 않는다.
+
+        한 번 만들고 다시 쓴다. 클립마다, 스크롤마다 ffmpeg를 부르면 타임라인이
+        멈춘다.
+        """
+        try:
+            asset = store.get_asset(project_id=project_id, asset_id=asset_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        target = store.waveform_storage_path(project_id=project_id, asset_id=asset_id)
+        if not target.exists():
+            # 원본 찾기는 저장소가 정본이다. 여기서 uri를 다시 해석하면 같은 규칙이
+            # 두 벌이 된다.
+            source = store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
+            if not source.exists():
+                raise _http_error(FileNotFoundError(f"No source for asset '{asset_id}'."))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            command = [
+                "ffmpeg", "-y", "-v", "error", "-i", str(source),
+                "-filter_complex", "aformat=channel_layouts=mono,showwavespic=s=640x120:colors=orangered",
+                "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1",
+            ]
+            result = subprocess.run(command, capture_output=True, timeout=30, check=False)
+            if result.returncode != 0 or not result.stdout:
+                # 그림이 없다고 편집이 막히면 안 된다. 없으면 없는 대로 넘어간다.
+                raise _http_error(FileNotFoundError(f"No waveform for asset '{asset_id}'."))
+            # 같은 소리를 여러 클립이 쓰면 첫 화면에서 같은 파일을 **동시에** 만들려
+            # 든다(실측: 클립 12개가 자산 2개를 가리켰다). 곧바로 쓰면 반쯤 쓰인
+            # 파일을 옆에서 읽는다. 따로 쓰고 통째로 바꿔 끼운다.
+            staging = target.with_name(f"{target.name}.{uuid4().hex}.part")
+            staging.write_bytes(result.stdout)
+            staging.replace(target)
+        return FileResponse(target, media_type="image/png")
 
     @router.post("/api/projects/{project_id}/jobs/auto-cut-plan")
     def plan_auto_cut(project_id: str, payload: AutoCutPlanRequest) -> AutoCutPlanResponse:

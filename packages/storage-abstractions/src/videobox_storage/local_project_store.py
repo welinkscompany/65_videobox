@@ -1120,6 +1120,11 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
     def thumbnail_storage_path(self, *, project_id: str, asset_id: str) -> Path:
         return self.project_root(project_id) / "derived" / "thumbnails" / f"{asset_id}.jpg"
 
+    def waveform_storage_path(self, *, project_id: str, asset_id: str) -> Path:
+        # 썸네일 옆에 둔다. 둘 다 원본에서 다시 만들 수 있는 파생물이라 같은
+        # `derived/` 아래에 있어야 정리 규칙(§10.16)이 함께 적용된다.
+        return self.project_root(project_id) / "derived" / "waveforms" / f"{asset_id}.png"
+
     def thumbnail_storage_uri(self, *, project_id: str, asset_id: str) -> str:
         return self._path_to_uri(project_id, self.thumbnail_storage_path(project_id=project_id, asset_id=asset_id))
 

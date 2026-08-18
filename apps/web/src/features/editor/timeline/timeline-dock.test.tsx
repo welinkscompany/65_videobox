@@ -579,6 +579,51 @@ describe("TimelineDock", () => {
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
 
+  it("draws the clip's own picture on video clips instead of only its name", () => {
+    // 캡컷은 클립 위에 영상 썸네일을 그린다. 눈으로 어디가 어느 장면인지 찾는 것이
+    // 그것이다. 지금은 `영상 1번째 장면, 0초부터` 같은 글자뿐이라 화면만 보고는
+    // 무엇이 들어 있는지 알 수 없었다.
+    //
+    // 그림은 새로 만들지 않는다. 자산 카드가 이미 쓰는 그 주소를 그대로 쓴다.
+    const withPicture: EditorViewModel = {
+      ...view,
+      tracks: view.tracks.map((track) => track.role === "broll"
+        ? { ...track, clips: track.clips.map((clip) => ({ ...clip, assetId: "asset-b" })) }
+        : track),
+    };
+    // 400px면 0~4초만 보이고 5~9초 B-roll은 그려지지도 않는다.
+    render(<TimelineDock view={withPicture} viewportWidthPx={1000} />);
+
+    const picture = document.querySelector('[data-clip-picture="true"]');
+    expect(picture).not.toBeNull();
+    expect(picture?.getAttribute("src")).toContain("/assets/asset-b/thumbnail");
+  });
+
+  it("draws a waveform on sound clips, not a video thumbnail", () => {
+    // 소리에는 썸네일이 없다. 크고 작은 데를 눈으로 찾으려면 파형이어야 한다.
+    const withSound: EditorViewModel = {
+      ...view,
+      tracks: [{
+        trackId: "m", role: "bgm",
+        clips: [{ clipId: "m-1", segmentId: "segment-1", type: "bgm", assetId: "asset-m", assetUri: null, startSec: 0, endSec: 4, controls: {} }],
+      }],
+      captions: [],
+      gaps: [],
+    };
+    render(<TimelineDock view={withSound} viewportWidthPx={1000} />);
+
+    const picture = document.querySelector('[data-clip-picture="true"]');
+    expect(picture?.getAttribute("src")).toContain("/assets/asset-m/waveform");
+  });
+
+  it("never asks for a picture a clip has no asset for", () => {
+    // 내레이션 클립에는 영상이 없다. 없는 그림을 부르면 매 클립마다 404가 나간다.
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+
+    const narration = screen.getAllByTestId("timeline-clip").find((clip) => clip.getAttribute("data-clip-id") === "n-1");
+    expect(narration?.querySelector('[data-clip-picture="true"]')).toBeNull();
+  });
+
   it("puts timeline zoom on visible controls, not only on keys nobody presses", () => {
     // 확대·축소는 `+`/`-` 키로만 됐다. 안내 문구에 적혀 있어도 **눈에 보이는 단추가
     // 없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다(엔진은 다

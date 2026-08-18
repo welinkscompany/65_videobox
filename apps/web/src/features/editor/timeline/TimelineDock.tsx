@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
 
 import type { EditorViewModel } from "../editorViewModel";
+import { api } from "../../../api";
 import { classifyTimelineHit } from "./hit-testing";
 import { carriesAsset, readAssetDrag } from "../assets/assetDragPayload";
 import { findTimelineSnap, type SnapCandidate, type SnapCandidateKind } from "./snapping";
@@ -312,6 +313,22 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
   ]), [view]);
   const captionsByPlacementId = useMemo(() => new Map(view.captions.flatMap((caption) => caption.placementId ? [[caption.placementId, caption] as const] : [])), [view]);
   const timelineClipById = useMemo(() => new Map(clipSources(view).map((clip) => [clip.id, clip] as const)), [view]);
+  // 클립 위에 그 클립의 **그림**을 그린다. 캡컷은 그렇게 하고, 글자만 있으면
+  // 무엇이 들어 있는지 화면만 보고는 알 수 없다. 그림은 새로 만들지 않는다 --
+  // 자산 카드가 이미 쓰는 그 주소(`assetThumbnailUrl`)를 그대로 쓴다.
+  //
+  // 자산이 없는 클립(내레이션 등)은 넣지 않는다. 넣으면 클립마다 404가 나간다.
+  const clipPictureByClipId = useMemo(() => new Map(
+    view.tracks.flatMap((track) => track.clips.flatMap((clip) => (
+      clip.assetId
+        ? [[clip.placementId ?? clip.clipId, track.role === "narration" || track.role === "bgm" || track.role === "sfx"
+          // 소리 클립에는 파형을 그린다. 어디가 크고 어디가 조용한지는 그림으로만
+          // 보인다 -- 글자 이름으로는 자를 자리를 고를 수 없다.
+          ? api.assetWaveformUrl(view.projectId, clip.assetId)
+          : api.assetThumbnailUrl(view.projectId, clip.assetId)] as const]
+        : []
+    ))),
+  ), [view]);
   // Computed over the full (unfiltered) clip list, not the viewport-visible
   // subset draftProjection.rects renders -- otherwise scrolling or zooming
   // the timeline would renumber/rename the same physical clip, undermining
@@ -639,7 +656,14 @@ export function TimelineDock({ view, viewportWidthPx, onTrimNarration, onReorder
           onDropAsset({ cardId, segmentId });
         }}
         style={{ left: `${rect.x}px`, overflow: "hidden", position: "absolute", top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}
-      ><button data-native-control="timeline-clip-select"
+      >{clipPictureByClipId.get(rect.clipId) ? <img
+        data-clip-picture="true"
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        src={clipPictureByClipId.get(rect.clipId)}
+        style={{ height: "100%", inset: 0, objectFit: "cover", opacity: 0.55, pointerEvents: "none", position: "absolute", width: "100%" }}
+      /> : null}<button data-native-control="timeline-clip-select"
         aria-label={clipDisplayName}
         aria-pressed={isSelected || isTranscriptSelected}
         onClick={(event) => { event.stopPropagation(); selectClip(rect, event.shiftKey); }}
