@@ -1830,6 +1830,14 @@ export const api = {
     request<EditorPreset[]>(`/api/projects/${projectId}/editor-library/presets`),
   listEditorFavorites: (projectId: string) =>
     request<EditorFavorite[]>(`/api/projects/${projectId}/editor-library/favorites`),
+  // 백엔드에 이미 있던 저장 경로다. 부르는 화면이 없어서 프리셋 목록이 내장 둘로
+  // 고정돼 있었고, 그래서 즐겨찾기가 걸 수 있는 것이 하나도 없었다.
+  saveEditorPreset: (projectId: string, presetId: string, payload: Readonly<{ name: string; style: Record<string, unknown>; global_scope?: boolean }>) =>
+    request<EditorPreset>(`/api/projects/${projectId}/editor-library/presets/${presetId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   listRecentEditorPresetIds: (projectId: string) =>
     request<string[]>(`/api/projects/${projectId}/editor-library/recent-presets`),
   markRecentEditorPreset: (projectId: string, presetId: string) =>

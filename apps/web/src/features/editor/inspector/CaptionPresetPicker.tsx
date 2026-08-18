@@ -51,9 +51,12 @@ export function canFavourite(presetId: string, projectId: string): boolean {
 export function CaptionPresetPicker({
   projectId,
   onApply,
+  currentStyle,
 }: {
   projectId: string;
   onApply: (style: CaptionStyleSnapshot) => void | Promise<void>;
+  /** 지금 화면에 잡혀 있는 모양. 이것을 저장해야 즐겨찾기가 걸 것이 생긴다. */
+  currentStyle?: CaptionStyleSnapshot;
 }) {
   const [presets, setPresets] = useState<readonly EditorPreset[]>([]);
   const [favourites, setFavourites] = useState<readonly string[]>([]);
@@ -104,6 +107,24 @@ export function CaptionPresetPicker({
     } catch { /* 기록 실패가 적용을 되돌리지 않는다 */ }
   };
 
+  // 지금 모양을 프리셋으로 남긴다. **`project:`로 시작해야** 즐겨찾기를 걸 수
+  // 있다(`canFavourite`). 이 한 칸이 없어서 프리셋이 내장 둘로 고정돼 있었고,
+  // 즐겨찾기 기능 전체가 걸 대상 없이 놀고 있었다.
+  const keepCurrent = async () => {
+    if (!currentStyle) return;
+    setError(null);
+    const ordinal = presets.filter((preset) => preset.preset_id.startsWith(`project:${projectId}:`)).length + 1;
+    try {
+      const saved = await api.saveEditorPreset(projectId, `project:${projectId}:${ordinal}`, {
+        name: `내 모양 ${ordinal}`,
+        style: fromSnapshot(currentStyle) as Record<string, unknown>,
+      });
+      setPresets((current) => [...current.filter((preset) => preset.preset_id !== saved.preset_id), saved]);
+    } catch {
+      setError("이 모양을 저장하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+    }
+  };
+
   // 즐겨찾기가 위로, 그다음이 최근에 쓴 것. 자주 쓰는 모양을 매번 찾아
   // 내려가지 않게 하는 것이 뜻이다.
   const visible = orderByFavouriteThenRecent(
@@ -118,6 +139,7 @@ export function CaptionPresetPicker({
     <section className="vb-caption-presets" aria-labelledby="caption-presets-heading">
       <h3 id="caption-presets-heading">자막 모양</h3>
       {error ? <p role="status">{error}</p> : null}
+      {currentStyle ? <Button type="button" variant="outline" onClick={() => void keepCurrent()}>이 모양 저장해 두기</Button> : null}
       {visible.length ? visible.map((preset) => {
         const loved = favourites.includes(preset.preset_id);
         return (

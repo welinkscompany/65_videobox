@@ -148,4 +148,24 @@ describe("즐겨찾기할 수 없는 모양", () => {
 
     expect(await screen.findByRole("button", { name: "내 모양 즐겨찾기" })).toBeVisible();
   });
+
+  it("lets the creator keep the style they just made, so favourites have something to hold", async () => {
+    // 즐겨찾기는 백엔드도 화면도 다 있었는데 **즐겨찾기할 수 있는 것이 0개**였다.
+    // 프리셋 목록에 `builtin:clean`·`builtin:highlight` 둘뿐이고, 즐겨찾기는
+    // `project:`로 시작하는 것만 걸 수 있기 때문이다. `자막 스타일 저장`이 만든
+    // 모양이 프리셋이 되지 않아 목록이 영원히 비어 있었다.
+    const save = vi.spyOn(api.api, "saveEditorPreset").mockResolvedValue({
+      preset_id: "project:project-a:1", name: "내 모양 1", style: {},
+    } as never);
+    vi.spyOn(api.api, "listEditorPresets").mockResolvedValue([] as never);
+    vi.spyOn(api.api, "listEditorFavorites").mockResolvedValue([] as never);
+
+    render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} currentStyle={{ fontFamily: "Pretendard", fontSizePx: 28 } as never} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "이 모양 저장해 두기" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    // 즐겨찾기가 걸리려면 `project:`로 시작해야 한다.
+    expect(save.mock.calls[0][1]).toMatch(/^project:project-a:/);
+  });
 });

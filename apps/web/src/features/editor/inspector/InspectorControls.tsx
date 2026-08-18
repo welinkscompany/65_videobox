@@ -394,7 +394,12 @@ export function InspectorControls({
       {target?.kind === "caption" ? (
         <fieldset>
           <legend>자막 스타일</legend>
-          {projectId ? <CaptionPresetPicker projectId={projectId} onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))} /> : null}
+          {projectId ? <CaptionPresetPicker
+            projectId={projectId}
+            /* 지금 잡아 놓은 모양을 넘겨야 `이 모양 저장해 두기`가 저장할 것이 생긴다. */
+            currentStyle={{ font_family: captionStyle.fontFamily, font_size: captionStyle.fontSizePx, text_color: captionStyle.textColor } as never}
+            onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))}
+          /> : null}
           {/* 포맷은 프리셋과 같은 길로 들어온다 -- 화면 값에 넣고 아래 저장이 커밋한다. */}
           <SavedFormatPicker onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))} />
           <label>글꼴<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, fontFamily: event.target.value }))} value={captionStyle.fontFamily} /></label>
