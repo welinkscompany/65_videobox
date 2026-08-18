@@ -617,6 +617,24 @@ describe("TimelineDock", () => {
     expect(picture?.getAttribute("src")).toContain("/assets/asset-m/waveform");
   });
 
+  it("hides a picture that fails to load instead of showing a broken icon", () => {
+    // 스냅샷을 보고 찾았다. 그 자산에 파형·썸네일이 없으면(ffmpeg가 없거나 404)
+    // 클립 위에 **깨진 이미지 아이콘**이 그대로 뜬다. 그림이 없는 것과 고장난
+    // 것처럼 보이는 것은 다르다.
+    const withPicture: EditorViewModel = {
+      ...view,
+      tracks: view.tracks.map((track) => track.role === "broll"
+        ? { ...track, clips: track.clips.map((clip) => ({ ...clip, assetId: "asset-b" })) }
+        : track),
+    };
+    render(<TimelineDock view={withPicture} viewportWidthPx={1000} clipPictures={new Map([["b-1", "/missing.png"]])} />);
+
+    const picture = document.querySelector('[data-clip-picture="true"]') as HTMLImageElement;
+    fireEvent.error(picture);
+
+    expect(document.querySelector('[data-clip-picture="true"]')).toBeNull();
+  });
+
   it("never asks for a picture a clip has no asset for", () => {
     // 내레이션 클립에는 영상이 없다. 없는 그림을 부르면 매 클립마다 404가 나간다.
     render(<TimelineDock view={view} viewportWidthPx={400} />);

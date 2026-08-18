@@ -318,6 +318,10 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   // 서버를 알지 않는다(`test_editor_ui_source_provenance`가 그 경계를 지킨다).
   // 무엇을 그릴지 고르는 것은 소유자(`EditorWorkbench`)의 일이다.
   const clipPictureByClipId = clipPictures;
+  // 그림이 없는 것과 **고장난 것처럼 보이는 것**은 다르다. 그 자산에 파형·썸네일이
+  // 없으면(ffmpeg가 없거나 404) 클립 위에 깨진 이미지 아이콘이 그대로 떴다 --
+  // 스냅샷을 보고 찾았다. 한 번 실패한 주소는 다시 걸지 않는다.
+  const [brokenPictures, setBrokenPictures] = useState<ReadonlySet<string>>(new Set());
   // Computed over the full (unfiltered) clip list, not the viewport-visible
   // subset draftProjection.rects renders -- otherwise scrolling or zooming
   // the timeline would renumber/rename the same physical clip, undermining
@@ -645,11 +649,12 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           onDropAsset({ cardId, segmentId });
         }}
         style={{ left: `${rect.x}px`, overflow: "hidden", position: "absolute", top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}
-      >{clipPictureByClipId.get(rect.clipId) ? <img
+      >{clipPictureByClipId.get(rect.clipId) && !brokenPictures.has(rect.clipId) ? <img
         data-clip-picture="true"
         alt=""
         aria-hidden="true"
         loading="lazy"
+        onError={() => setBrokenPictures((current) => new Set(current).add(rect.clipId))}
         src={clipPictureByClipId.get(rect.clipId)}
         style={{ height: "100%", inset: 0, objectFit: "cover", opacity: 0.55, pointerEvents: "none", position: "absolute", width: "100%" }}
       /> : null}<button data-native-control="timeline-clip-select"
