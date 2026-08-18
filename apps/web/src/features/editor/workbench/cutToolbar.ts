@@ -1,3 +1,4 @@
+import type { EditorControls } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
 
 /** 캡컷처럼 **타임라인 위에 컷 도구를 둔다.**
@@ -25,10 +26,20 @@ export type CutTool = Readonly<{
   hint: string;
 }>;
 
+/** 한 장면에 붙어 있는 재료. `save-media`가 다루는 단위와 같다. */
+export type SceneMedia = Readonly<{
+  segmentId: string;
+  mediaKind: "broll" | "bgm" | "sfx";
+  assetId: string;
+  controls: EditorControls;
+}>;
+
 export type CutToolbarState = Readonly<{
   split: CutTool;
   join: CutTool;
   drop: CutTool;
+  /** 캡컷의 `복제`에 해당한다 -- 아래 주석 참고. */
+  copyToNext: CutTool;
 }>;
 
 const disabled = (label: string, hint: string): CutTool => ({ enabled: false, label, action: null, hint });
@@ -38,16 +49,19 @@ export const EMPTY_CUT_TOOLS: CutToolbarState = {
   split: disabled("나누기", ""),
   join: disabled("앞과 붙이기", ""),
   drop: disabled("빼기", ""),
+  copyToNext: disabled("다음 장면에도", ""),
 };
 
 export function cutToolbarState({
   clips,
   selectedSegmentId,
   playheadSec,
+  media = [],
 }: {
   clips: readonly CutClip[];
   selectedSegmentId: string | null;
   playheadSec: number;
+  media?: readonly SceneMedia[];
 }): CutToolbarState {
   const ordered = [...clips].sort((left, right) => left.startSec - right.startSec);
   const index = ordered.findIndex((clip) => clip.segmentId === selectedSegmentId);
@@ -58,6 +72,7 @@ export function cutToolbarState({
       split: disabled("나누기", pickFirst),
       join: disabled("앞과 붙이기", pickFirst),
       drop: disabled("빼기", pickFirst),
+      copyToNext: disabled("다음 장면에도", pickFirst),
     };
   }
 
@@ -65,6 +80,12 @@ export function cutToolbarState({
   // 나누면 길이 0짜리 장면이 생긴다.
   const splittable = playheadSec > selected.startSec && playheadSec < selected.endSec;
   const previous = index > 0 ? ordered[index - 1] : null;
+  // **캡컷의 `복제`는 우리 모델에 그대로 없다.** 배치는 장면에서 파생되고 따로 만드는
+  // 길이 없다(`timeline_placements.apply_placement_changes`는 있는 것만 옮긴다).
+  // 같은 화면을 한 번 더 쓰는 실제 방법은 그 재료를 다음 장면에도 적용하는 것이고,
+  // 그건 이미 있는 명령이다. 여기서는 그 길을 한 번에 만들 뿐 새 명령을 만들지 않는다.
+  const next = index >= 0 && index + 1 < ordered.length ? ordered[index + 1] : null;
+  const carried = media.find((item) => item.segmentId === selected.segmentId);
 
   return {
     split: splittable
@@ -82,5 +103,15 @@ export function cutToolbarState({
       hint: "고른 장면을 영상에서 뺍니다. (Delete) 되돌리려면 실행 취소를 누르세요.",
       action: { kind: "set-cut-action", segmentId: selected.segmentId, cutAction: "remove" },
     },
+    copyToNext: !carried
+      ? disabled("다음 장면에도", "이 장면에 옮길 재료가 없습니다. 왼쪽에서 먼저 골라 적용하세요.")
+      : !next
+      ? disabled("다음 장면에도", "마지막 장면 뒤에는 붙일 곳이 없습니다.")
+      : {
+          enabled: true,
+          label: "다음 장면에도",
+          hint: "이 장면의 재료를 다음 장면에도 그대로 씁니다.",
+          action: { kind: "save-media", mediaKind: carried.mediaKind, segmentId: next.segmentId, assetId: carried.assetId, controls: carried.controls },
+        },
   };
 }

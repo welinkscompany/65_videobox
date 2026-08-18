@@ -36,6 +36,38 @@ describe("cut toolbar", () => {
     expect(cutToolbarState({ clips, selectedSegmentId: "s1", playheadSec: 2 }).join.enabled).toBe(false);
   });
 
+  it("puts this scene's material on the next scene too", () => {
+    // 캡컷의 `복제`다. 우리 모델에서는 클립을 복사할 수 없다 -- 배치는 장면에서
+    // 파생되고 따로 만드는 길이 없다(`timeline_placement_unknown`). 같은 화면을
+    // 한 번 더 쓰는 실제 방법은 **그 재료를 다음 장면에도 적용**하는 것이고,
+    // 그건 이미 있는 명령(`save-media`)이다. 여기서는 그 길을 한 번에 만든다.
+    const state = cutToolbarState({
+      clips,
+      selectedSegmentId: "s1",
+      playheadSec: 2,
+      media: [{ segmentId: "s1", mediaKind: "broll", assetId: "asset-a", controls: { speed: 1.5 } }],
+    });
+
+    expect(state.copyToNext.enabled).toBe(true);
+    expect(state.copyToNext.action).toEqual({
+      kind: "save-media", mediaKind: "broll", segmentId: "s2", assetId: "asset-a", controls: { speed: 1.5 },
+    });
+  });
+
+  it("says why it cannot copy instead of showing a dead button", () => {
+    // 재료가 없으면 복사할 것이 없고, 마지막 장면 뒤에는 붙일 곳이 없다.
+    const noMedia = cutToolbarState({ clips, selectedSegmentId: "s1", playheadSec: 2, media: [] });
+    expect(noMedia.copyToNext.enabled).toBe(false);
+    expect(noMedia.copyToNext.hint).toContain("재료");
+
+    const last = cutToolbarState({
+      clips, selectedSegmentId: "s2", playheadSec: 8,
+      media: [{ segmentId: "s2", mediaKind: "broll", assetId: "asset-a", controls: {} }],
+    });
+    expect(last.copyToNext.enabled).toBe(false);
+    expect(last.copyToNext.hint).toContain("마지막");
+  });
+
   it("drops the selected clip from the video", () => {
     const state = cutToolbarState({ clips, selectedSegmentId: "s2", playheadSec: 8 });
 
