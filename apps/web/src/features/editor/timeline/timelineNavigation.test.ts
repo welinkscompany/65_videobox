@@ -95,18 +95,28 @@ describe("timeline navigation", () => {
     });
     expect(navigationKeyAction("Home", false, { state, fps: options.fps })).toEqual({ type: "seek", bound: "start" });
     expect(navigationKeyAction("End", false, { state, fps: options.fps })).toEqual({ type: "seek", bound: "end" });
-    expect(navigationKeyAction("+", false, { state, fps: options.fps })).toEqual({
-      type: "zoom",
-      pixelsPerSecond: 125,
-      anchorPx: 2,
-    });
-    expect(navigationKeyAction("-", false, { state, fps: options.fps })).toEqual({
-      type: "zoom",
-      pixelsPerSecond: 80,
-      anchorPx: 2,
-    });
+    // 확대는 **배율**로 전달한다. 절대값으로 보내면 두 번을 같은 상태에서 계산한
+    // 순간(React가 한 묶음으로 처리할 때) 두 번째가 첫 번째를 덮어써 한 칸만 먹는다.
+    // 실제 컨테이너에서 빠르게 두 번 누르면 100 → 125 → 125가 나왔다.
+    expect(navigationKeyAction("+", false, { state, fps: options.fps })).toEqual({ type: "zoom", factor: 1.25 });
+    expect(navigationKeyAction("-", false, { state, fps: options.fps })).toEqual({ type: "zoom", factor: 1 / 1.25 });
     expect(navigationKeyAction("ArrowRight", true, { state, fps: options.fps })).toBeNull();
     expect(navigationKeyAction("x", false, { state, fps: options.fps })).toBeNull();
+  });
+
+  it("compounds two zoom steps that were both computed from the same state", () => {
+    // 한 묶음 안에서 두 번 누르면 둘 다 **같은 옛 상태**를 보고 계산한다. 배율로
+    // 보내면 reducer가 자기 상태에서 곱하므로 두 번 눌린 만큼 두 칸 간다.
+    const options = { durationSec: 20, viewportWidthPx: 400, fps: { num: 30, den: 1 } } as const;
+    const state = createTimelineNavigation({ durationSec: 20, pixelsPerSecond: 100 });
+    const action = navigationKeyAction("+", false, { state, fps: options.fps });
+    if (!action) throw new Error("zoom action is missing");
+
+    const once = reduceTimelineNavigation(state, action, options);
+    const twice = reduceTimelineNavigation(once, action, options);
+
+    expect(once.pixelsPerSecond).toBeCloseTo(125, 6);
+    expect(twice.pixelsPerSecond).toBeCloseTo(156.25, 6);
   });
 
   it("advances 10,000 ArrowRight actions by exact rational frame indices", () => {
@@ -133,11 +143,13 @@ describe("timeline navigation", () => {
     expect(() => createTimelineNavigation({ durationSec: 1, pixelsPerSecond: 0 })).toThrow(RangeError);
     expect(() => reduceTimelineNavigation(initial, { type: "seek", seconds: Number.NaN }, options)).toThrow(RangeError);
     expect(() => reduceTimelineNavigation(initial, { type: "zoom", pixelsPerSecond: 10, anchorPx: Number.NaN }, options)).toThrow(RangeError);
-    expect(() => navigationKeyAction("+", false, {
-      state: { ...initial, pixelsPerSecond: Number.MAX_VALUE },
-      fps: options.fps,
-      zoomFactor: 2,
-    })).toThrow(RangeError);
+    // 넘쳐 버린 확대는 거부한다. 계산이 키 처리기에서 reducer로 옮겨 갔으므로
+    // **막는 자리도 같이 옮겼다** -- 곱하는 쪽이 막는다.
+    expect(() => reduceTimelineNavigation(
+      { ...initial, pixelsPerSecond: Number.MAX_VALUE },
+      { type: "zoom", factor: 2 },
+      options,
+    )).toThrow(RangeError);
     expect(() => reduceTimelineNavigation({ ...initial, pixelsPerSecond: Number.MIN_VALUE }, { type: "scroll", seconds: 0 }, {
       durationSec: 1,
       viewportWidthPx: Number.MAX_VALUE,

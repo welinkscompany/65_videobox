@@ -27,6 +27,10 @@ export type TimelineNavigationAction =
   | Readonly<{ type: "seek"; bound: "start" | "end" }>
   | Readonly<{ type: "scroll"; seconds: number }>
   | Readonly<{ type: "zoom"; pixelsPerSecond: number; anchorPx: number }>
+  // 배율 형태. **누가 계산하느냐**가 다르다 -- 이쪽은 reducer가 자기 상태에서
+  // 곱한다. 절대값으로 보내면 한 묶음 안에서 두 번 누른 순간 둘 다 같은 옛
+  // 상태를 보고 계산해 두 번째가 첫 번째를 덮어쓴다(실제로 그랬다).
+  | Readonly<{ type: "zoom"; factor: number; anchorPx?: number }>
   | Readonly<{ type: "select"; clipId: string | null }>;
 
 export type TimelineNavigationOptions = Readonly<{
@@ -193,13 +197,16 @@ export function reduceTimelineNavigation(
       };
     }
     case "zoom": {
-      requirePositive(action.pixelsPerSecond, "Pixels per second");
-      requireFinite(action.anchorPx, "Anchor pixel");
-      const nextScale = zoomAroundAnchor(
-        { pixelsPerSecond: current.pixelsPerSecond, originSec: current.viewportStartSec },
-        action.anchorPx,
-        action.pixelsPerSecond,
-      );
+      const scale = { pixelsPerSecond: current.pixelsPerSecond, originSec: current.viewportStartSec };
+      const target = "factor" in action
+        ? (requirePositive(action.factor, "Zoom factor"), current.pixelsPerSecond * action.factor)
+        : action.pixelsPerSecond;
+      // 배율로 온 경우 기준점도 여기서 잡는다. 화면 쪽에서 미리 잡아 두면 그 값도
+      // 같은 이유로 낡는다.
+      const anchorPx = action.anchorPx ?? timeToPixels(current.playheadSec, scale);
+      requirePositive(target, "Pixels per second");
+      requireFinite(anchorPx, "Anchor pixel");
+      const nextScale = zoomAroundAnchor(scale, anchorPx, target);
       return {
         ...current,
         pixelsPerSecond: nextScale.pixelsPerSecond,
@@ -249,17 +256,9 @@ export function navigationKeyAction(
     case "End":
       return { type: "seek", bound: "end" };
     case "+":
-      {
-        const pixelsPerSecond = context.state.pixelsPerSecond * zoomFactor;
-        requirePositive(pixelsPerSecond, "Pixels per second");
-        return { type: "zoom", pixelsPerSecond, anchorPx };
-      }
+      return { type: "zoom", factor: zoomFactor };
     case "-":
-      {
-        const pixelsPerSecond = context.state.pixelsPerSecond / zoomFactor;
-        requirePositive(pixelsPerSecond, "Pixels per second");
-        return { type: "zoom", pixelsPerSecond, anchorPx };
-      }
+      return { type: "zoom", factor: 1 / zoomFactor };
     default:
       return null;
   }

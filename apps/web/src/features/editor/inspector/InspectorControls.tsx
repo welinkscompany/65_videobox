@@ -230,9 +230,16 @@ export function InspectorControls({
   const preparedSegmentMatches = !partialRegeneration?.preparedSegmentId
     || partialRegeneration.preparedSegmentId === selectedSegment?.segmentId;
 
+  // 이름을 바꾼 이유: 2026-08-17 첫 사용 점검이 `선택 구간 편집`을 "찾을 수 없는
+  // 이름"으로 지적했다. 컷편집을 찾는 사람은 이 낱말에 닿지 않는다.
+  //
+  // 툴바의 컷 도구와 **겹치지 않는다.** 툴바 `나누기`는 재생 위치에서 나누므로
+  // 재생 위치가 고른 장면 안에 있어야 켜진다. 여기 있는 것은 그때도 되는 대체
+  // 경로이고, `유지/삭제`는 **뺀 장면을 되살리는 유일한 길**이다.
   return (
-    <section aria-label="선택 구간 편집">
-      <h3>선택 구간 편집</h3>
+    <section aria-label="고른 장면">
+      <h3>고른 장면</h3>
+      <p>툴바의 <strong>나누기</strong>는 재생 위치에서 자릅니다. 재생 위치가 이 장면 밖이면 아래를 쓰세요.</p>
       {selectedSegment ? (
         <>
           <p>{`${selectedSegment.startSec.toFixed(2)}–${selectedSegment.endSec.toFixed(2)}초 구간`}</p>
