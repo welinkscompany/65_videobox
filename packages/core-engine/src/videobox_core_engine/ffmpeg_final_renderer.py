@@ -410,8 +410,14 @@ class FfmpegFinalRenderer:
                     labels.append(f"[{ducked}]")
                 else:
                     labels.append(f"[{label}]")
+        # `normalize=0`. 이게 없으면 `amix`가 입력 수만큼 나눠서, **소리를 하나
+        # 더할 때마다 이미 있던 소리가 전부 작아진다** -- B-roll 소리를 켰더니
+        # 그 장면과 상관없는 구간의 내레이션까지 조용해졌다(2026-08-19 완성본에서
+        # 재서 찾았다). 켠 사람은 소리를 더한 것이지 나머지를 줄인 게 아니다.
+        #
+        # 합쳐서 너무 커지는 것은 클립별 `소리 크기`와 `gain_db`로 조절한다.
         filters.append(
-            f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest,"
+            f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest:normalize=0,"
             f"apad=whole_dur={duration},atrim=duration={duration},asetpts=PTS-STARTPTS[aout]"
         )
         return ";".join(filters)
