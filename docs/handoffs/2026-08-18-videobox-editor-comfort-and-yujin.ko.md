@@ -1,5 +1,7 @@
 # 다음 세션은 여기서 시작한다
 
+**대체됨:** `docs/handoffs/2026-08-18-videobox-editor-scrub-follow-and-height-persist.ko.md`
+
 - 작성: 2026-08-18 (밤샘 세션 마감)
 - **읽는 순서:** 이 문서 → `docs/handoffs/2026-08-18-videobox-capcut-close-and-one-icon-launch.ko.md`
   (같은 날 앞 세션. 캡컷 배치·아이콘 실행·전환까지의 기록)
