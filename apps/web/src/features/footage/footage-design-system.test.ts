@@ -52,7 +52,11 @@ describe("footage organizer design-system contract", () => {
   })
 
   it("keeps catalog content inside the 1280px desktop shell", () => {
-    expect(productShellCss).toMatch(/\.vb-catalog \{[^}]*width:100%;\s*max-width:1200px;\s*box-sizing:border-box;\s*min-width:0;\s*overflow-x:hidden/)
+    // 폭 상한과 페이지 여백은 **껍데기가 정한다**(2026-08-19). 예전에는 카탈로그가
+    // 같은 값을 한 벌 더 걸어서 여백이 두 겹이 됐다 -- 제목이 왼쪽에서 80px,
+    // 위에서 91px까지 밀렸다. 상한이 사라진 게 아니라 임자가 하나로 정리된 것이다.
+    expect(productShellCss).toMatch(/\.vb-product-content \{[^}]*max-width:1200px/)
+    expect(productShellCss).toMatch(/\.vb-catalog \{[^}]*width:100%;\s*box-sizing:border-box;\s*min-width:0;\s*overflow-x:hidden/)
     expect(productShellCss).toMatch(/\.vb-catalog-grid \{ min-width:0/)
     expect(productShellCss).toMatch(/\.vb-catalog-card \{ box-sizing:border-box;\s*min-width:0;\s*overflow-wrap:anywhere/)
   })
