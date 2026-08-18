@@ -290,6 +290,14 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     const action = navigationKeyAction(key, false, { state, fps: view.fps });
     if (action) dispatch(action);
   };
+  // 전체 맞춤. 축소를 열 번 누르는 대신 한 번에 처음으로 돌아온다. 확대와 같은
+  // reducer를 타므로 배율 계산이 두 벌이 되지 않는다. 길이가 0이면 나눌 수 없어
+  // 아무 일도 하지 않는다.
+  const fitAll = () => {
+    if (!(view.output.durationSec > 0) || !(viewportWidthPx > 0)) return;
+    dispatch({ type: "zoom", pixelsPerSecond: viewportWidthPx / view.output.durationSec, anchorPx: 0 });
+    dispatch({ type: "scroll", seconds: 0 });
+  };
   const handleWheel = (event: WheelEvent<HTMLElement>) => {
     if (event.deltaX === 0) return;
     event.preventDefault();
@@ -661,6 +669,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       <span className="vb-editor-workbench__timeline-zoom">
         <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="- 키" onClick={() => zoom("-")}>−</button>
         <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="+ 키" onClick={() => zoom("+")}>+</button>
+        <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title="영상 전체가 한 화면에 들어오게" onClick={fitAll}>전체</button>
       </span>
     </div>
     {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.

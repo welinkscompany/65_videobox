@@ -236,6 +236,69 @@ describe("InspectorControls", () => {
     expect(document.body).not.toHaveTextContent(/asset-internal|segment-internal/);
   });
 
+  it("lets the creator turn on music that steps aside for the narration", () => {
+    // 백엔드는 2026-08-18 이전부터 사이드체인 압축으로 이걸 실제로 해 왔다
+    // (`ffmpeg_final_renderer`). 켜고 끄는 자리가 화면에 없어서 아무도 못 썼을
+    // 뿐이다 -- 부품은 있는데 부르는 자리가 없던 그 패턴이다.
+    const onAction = vi.fn();
+    const bgm: InspectorTarget = {
+      assetId: "asset-internal-bgm",
+      clearOnly: false,
+      controls: { ducking: false, fadeInSec: 0.5, fadeOutSec: 1, gainDb: -8 },
+      fields: ["fadeInSec", "fadeOutSec", "ducking"],
+      id: "clip:bgm",
+      kind: "media",
+      label: "배경 음악",
+      mediaKind: "bgm",
+      segmentId: "segment-internal-current",
+    };
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={bgm}
+      />,
+    );
+
+    const toggle = screen.getByLabelText("말할 때 배경 음악 낮추기");
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "배경 음악 설정 저장" }));
+
+    expect(onAction).toHaveBeenLastCalledWith({
+      assetId: "asset-internal-bgm",
+      controls: { ducking: true, fadeInSec: 0.5, fadeOutSec: 1, gainDb: -8 },
+      kind: "save-media",
+      mediaKind: "bgm",
+      segmentId: "segment-internal-current",
+    });
+  });
+
+  it("never offers the ducking switch where there is no narration to duck under", () => {
+    // 효과음과 B-roll에는 이 개념이 없다. 렌더러도 bgm에만 사이드체인을 건다.
+    const onAction = vi.fn();
+    const sfx: InspectorTarget = {
+      assetId: "asset-internal-sfx",
+      clearOnly: false,
+      controls: { fadeInSec: 0.2, fadeOutSec: 0.2 },
+      fields: ["fadeInSec", "fadeOutSec"],
+      id: "clip:sfx",
+      kind: "media",
+      label: "효과음",
+      mediaKind: "sfx",
+      segmentId: "segment-internal-current",
+    };
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={sfx}
+      />,
+    );
+
+    expect(screen.queryByLabelText("말할 때 배경 음악 낮추기")).not.toBeInTheDocument();
+  });
+
   it("saves the complete current caption style without exposing independent timing", () => {
     const onAction = renderControls({
       target: {

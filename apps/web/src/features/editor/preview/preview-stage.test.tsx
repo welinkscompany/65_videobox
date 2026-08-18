@@ -375,6 +375,37 @@ describe("PreviewStage", () => {
     expect(screen.queryByRole("button", { name: "선택한 장면 반복" })).toBeNull();
   });
 
+  it("plays and pauses from the space bar anywhere, not only inside the preview", () => {
+    // 캡컷은 어디서나 스페이스다. 우리는 미리보기 판을 클릭해 둔 상태에서만
+    // 들었고, 타임라인을 만지다 스페이스를 누르면 아무 일도 없었다 -- 편집 중에
+    // 가장 자주 누르는 키가 자리를 타면 안 쓰게 된다.
+    render(<PreviewStage {...current} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const play = vi.spyOn(media, "play").mockResolvedValue(undefined);
+    Object.defineProperty(media, "paused", { configurable: true, value: true });
+
+    fireEvent.keyDown(document.body, { key: " " });
+
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the space bar alone while the creator is typing or on a control", () => {
+    // 글을 쓰다 스페이스를 누르면 띄어쓰기여야 한다. 단추 위에서는 그 단추를
+    // 누르는 것이고 -- 여기서 가로채면 접근성이 깨진다.
+    render(<PreviewStage {...current} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const play = vi.spyOn(media, "play").mockResolvedValue(undefined);
+    Object.defineProperty(media, "paused", { configurable: true, value: true });
+
+    const field = document.createElement("textarea");
+    document.body.append(field);
+    fireEvent.keyDown(field, { key: " " });
+    fireEvent.keyDown(screen.getByRole("button", { name: "다음 프레임" }), { key: " " });
+
+    expect(play).not.toHaveBeenCalled();
+    field.remove();
+  });
+
   it("leaves Enter and Space on controls to their native action without toggling player playback", async () => {
     const refresh = vi.fn();
     const stale = render(<PreviewStage {...current} exactPreview={{ status: "stale", url: "/api/old.mp4", artifactRevision: 3 }} onRefresh={refresh} />);

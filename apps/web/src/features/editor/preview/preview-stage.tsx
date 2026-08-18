@@ -170,6 +170,25 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     event.preventDefault();
     togglePlayback();
   };
+  // 스페이스는 **어디서 눌러도** 재생/일시정지다. 예전에는 미리보기 판을 클릭해
+  // 둔 상태에서만 들어서, 타임라인을 만지다 누르면 아무 일도 없었다.
+  //
+  // 다만 글을 쓰는 중이면 띄어쓰기이고 단추 위에서는 그 단추를 누르는 것이다 --
+  // 거기서 가로채면 접근성이 깨진다. 플레이어를 가진 이 컴포넌트가 직접 듣는다:
+  // 소유자에게 올려 두면 재생 상태가 두 군데에 생긴다.
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== " " || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable) return;
+      if (target?.closest("input, textarea, select, button, [role='button'], [contenteditable='true']")) return;
+      if (!mediaRef.current) return;
+      event.preventDefault();
+      togglePlayback();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
   const onStageBlur = (event: FocusEvent<HTMLElement>) => {
     if (!event.currentTarget.contains(event.relatedTarget)) stopActiveMedia();
   };

@@ -67,7 +67,9 @@ describe("projectInspectorTargets", () => {
       label: "배경 음악",
       segmentId: "segment-1",
       mediaKind: "bgm",
-      fields: ["fadeInSec", "fadeOutSec"],
+      // 덕킹은 **배경 음악에만** 붙는다. 렌더러도 bgm에만 사이드체인을 건다 --
+      // 효과음에 스위치를 주면 눌러도 아무 일이 없다.
+      fields: ["fadeInSec", "fadeOutSec", "ducking"],
       assetId: "asset-bgm",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,

@@ -95,6 +95,7 @@ const nativeControlAllowlist = {
       "button:placement-trim-end",
       "button:placement-trim-start",
       "button:timeline-clip-select",
+      "button:timeline-fit",
       "button:timeline-reorder",
       "button:timeline-scrub",
       "button:timeline-trim-end",

@@ -664,6 +664,23 @@ describe("TimelineDock", () => {
     expect(timeline).toHaveAttribute("data-pixels-per-second", "100");
   });
 
+  it("fits the whole timeline into view with one control", () => {
+    // 확대·축소는 한 칸씩만 움직인다. 긴 영상에서 전체를 다시 보려면 축소를
+    // 열 번 눌러야 했다 -- 캡컷에는 전체 맞춤이 따로 있다. 확대와 **같은
+    // 경로**를 타므로 계산이 두 벌이 되지 않는다.
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    const timeline = screen.getByRole("region", { name: "타임라인" });
+    fireEvent.wheel(timeline, { deltaX: 600 });
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 확대" }));
+    expect(timeline).not.toHaveAttribute("data-viewport-start-seconds", "0");
+
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
+
+    // 20초짜리를 400px에 담으면 초당 20px이고, 왼쪽 끝에서 시작한다.
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "20");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
+  });
+
   it("starts from an externally owned playback position without bouncing it back to zero", () => {
     const onPlaybackSeek = vi.fn();
     render(<TimelineDock onPlaybackSeek={onPlaybackSeek} playbackSec={2.5} view={view} viewportWidthPx={400} />);

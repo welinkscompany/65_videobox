@@ -1,7 +1,7 @@
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume";
+type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
@@ -18,6 +18,10 @@ export type InspectorTarget =
 // and offering a second loudness control here would write a value the
 // owner never set onto every save.
 const mediaFields = ["fadeInSec", "fadeOutSec"] as const;
+// 배경 음악만 내레이션 밑으로 비켜설 수 있다. 렌더러가 사이드체인 압축을
+// **bgm에만** 걸기 때문이다(`ffmpeg_final_renderer`) -- 효과음에 스위치를 주면
+// 눌러도 아무 일이 없는 단추가 된다.
+const bgmFields = ["fadeInSec", "fadeOutSec", "ducking"] as const;
 // Task 24: B-roll carries no audio by default, so fades are meaningless for it.
 // What the owner actually corrects is which slice of a long take gets used --
 // the recommendation picks a scene window, this is where that is overridden.
@@ -62,7 +66,7 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         label: mediaLabels[mediaKind],
         segmentId: selectedSegmentId,
         mediaKind,
-        fields: mediaKind === "broll" ? brollFields : mediaFields,
+        fields: mediaKind === "broll" ? brollFields : mediaKind === "bgm" ? bgmFields : mediaFields,
         assetId: clip.assetId!,
         controls: clip.controls,
         clearOnly: false,

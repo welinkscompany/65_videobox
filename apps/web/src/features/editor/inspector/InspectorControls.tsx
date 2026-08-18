@@ -124,6 +124,9 @@ export function InspectorControls({
   // them. Phone B-roll is routinely too long and too loud.
   const [speed, setSpeed] = useState(1);
   const [volume, setVolume] = useState(1);
+  // 말할 때 음악이 비켜서기(덕킹). 렌더러는 처음부터 이걸 할 수 있었는데
+  // 켜고 끄는 자리가 화면에 없었다.
+  const [ducking, setDucking] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<EditorCaptionStyle>(defaultStyle);
   const [overlayTitle, setOverlayTitle] = useState("");
   const [overlayBody, setOverlayBody] = useState("");
@@ -166,6 +169,7 @@ export function InspectorControls({
       setOutSec(target.controls.outSec ?? 0);
       setSpeed(target.controls.speed ?? 1);
       setVolume(target.controls.volume ?? 1);
+      setDucking(target.controls.ducking ?? false);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
     if (target?.kind === "overlay") {
@@ -365,6 +369,20 @@ export function InspectorControls({
                   <Input disabled={disabled} max="2" min="0" onChange={(event) => setVolume(numberValue(event.target.value, volume))} step="0.05" type="number" value={volume} />
                 </label>
               ) : null}
+              {/* 말이 음악에 묻히는 것은 완성본에서 가장 자주 걸리는 문제다.
+                  §10.13: `사이드체인`·`덕킹` 같은 말 대신 무슨 일이 일어나는지로
+                  적는다. 끄고 켜는 것뿐이므로 숫자를 묻지 않는다. */}
+              {target.fields.includes("ducking") ? (
+                <label>
+                  <Input
+                    checked={ducking}
+                    disabled={disabled}
+                    onChange={(event) => setDucking(event.target.checked)}
+                    type="checkbox"
+                  />
+                  말할 때 배경 음악 낮추기
+                </label>
+              ) : null}
               <Button
                 disabled={disabled || (target.fields.includes("inSec") && outSec <= inSec)}
                 onClick={() => emit({
@@ -377,6 +395,7 @@ export function InspectorControls({
                     ...(target.fields.includes("inSec") ? { inSec, outSec } : { fadeInSec, fadeOutSec }),
                     ...(target.fields.includes("speed") ? { speed } : {}),
                     ...(target.fields.includes("volume") ? { volume } : {}),
+                    ...(target.fields.includes("ducking") ? { ducking } : {}),
                   },
                 })}
                 type="button"
