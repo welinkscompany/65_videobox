@@ -1,5 +1,7 @@
 # 편집기 조작감 다섯 항목이 전부 닫혔다
 
+**대체됨:** `docs/handoffs/2026-08-18-videobox-speed-volume-ducking-and-transport.ko.md`
+
 - 작성: 2026-08-18 (저녁 세션 마감)
 - **읽는 순서:** 이 문서 → `docs/handoffs/2026-08-18-videobox-editor-comfort-and-yujin.ko.md`
   (같은 날 앞 세션. 1·2·3번을 닫고 4·5번과 "높이 저장"을 남긴 기록)
