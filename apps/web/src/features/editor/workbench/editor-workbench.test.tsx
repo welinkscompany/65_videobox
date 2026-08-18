@@ -50,6 +50,14 @@ function openMaterialDock(): void {
   fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
 }
 
+
+// 편집 항목은 이제 기본으로 펴져 있다(캡컷처럼 고른 것의 속성이 바로 보인다).
+// 무조건 누르면 오히려 **닫힌다** -- 좁은 화면이나 접어 둔 상태에서만 누른다.
+function openInspector(): void {
+  if (screen.queryByRole("region", { name: "편집 항목" })) return;
+  fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+}
+
 describe("EditorWorkbench", () => {
   it("uses the measured workbench width rather than viewport width", async () => {
     render(<EditorWorkbench view={view} />);
@@ -320,7 +328,7 @@ describe("EditorWorkbench", () => {
     } as const;
     window.localStorage.setItem("videobox.editor-workbench.ui", JSON.stringify({ leftOpen: false, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320 }));
     render(<EditorWorkbench view={brollOnlyView} />);
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    openInspector();
     expect(screen.getByRole("region", { name: "편집 항목" })).not.toHaveTextContent("broll 트랙");
     expect(screen.getByText("현재 편집 명령이 지원하는 항목만 표시됩니다.")).toBeInTheDocument();
   });

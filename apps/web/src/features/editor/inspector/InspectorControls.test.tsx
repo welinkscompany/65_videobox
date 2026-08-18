@@ -274,6 +274,9 @@ describe("InspectorControls", () => {
       />,
     );
 
+    // 청취 승인 음성은 이제 부를 때만 부른다 -- 편집기를 여는 것만으로 조회가
+    // 나가지 않게 하기 위해서다.
+    fireEvent.click(screen.getByRole("button", { name: "승인한 음성 불러오기" }));
     expect(await screen.findByRole("option", { name: "승인 후보 1 · 승인된 음성" })).toBeVisible();
     expect(loadApprovedTtsCandidates).toHaveBeenCalledWith("segment-internal-current");
     expect(onAction).not.toHaveBeenCalled();
@@ -314,6 +317,9 @@ describe("InspectorControls", () => {
       />,
     );
 
+    // 청취 승인 음성은 이제 부를 때만 부른다 -- 편집기를 여는 것만으로 조회가
+    // 나가지 않게 하기 위해서다.
+    fireEvent.click(screen.getByRole("button", { name: "승인한 음성 불러오기" }));
     expect(await screen.findByText("승인한 음성을 불러오지 못했어요. 직접 편집은 계속할 수 있어요.")).toBeVisible();
     expect(screen.getByRole("button", { name: "컷 저장" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "승인한 음성 다시 불러오기" })).toBeEnabled();

@@ -116,6 +116,26 @@ describe("RightDock", () => {
     expect(screen.getByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" })).toBeDisabled();
   });
 
+  it("shows the selected clip's properties first and already open", () => {
+    // 캡컷은 클립을 누르면 속성이 이미 거기 있다. 우리는 `유진과 편집 항목` →
+    // `편집 항목 열기` → `편집 대상` 셀렉트까지 **네 겹**을 지나야 속도에 닿았다.
+    // 2026-08-17에 컷 도구에서 고친 것과 같은 병이 클립 속성에 남아 있었다.
+    render(<PersistentDock />);
+
+    expect(screen.getByRole("region", { name: "편집 항목" })).toBeInTheDocument();
+    // 도크 안에서 **가장 먼저** 온다. 유진 대화를 지나 스크롤해야 나오면 여전히 못 찾는다.
+    const dock = screen.getByRole("region", { name: "편집 항목" });
+    const conversation = screen.getByRole("log", { name: "유진 대화" });
+    expect(dock.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("still lets the creator fold the properties away", () => {
+    // 항상 펴 두는 것과 접을 수 없는 것은 다르다.
+    render(<PersistentDock />);
+    fireEvent.click(screen.getByRole("button", { name: "편집 항목 닫기" }));
+    expect(screen.queryByRole("region", { name: "편집 항목" })).not.toBeInTheDocument();
+  });
+
   it("preserves the composer, selected candidate, and conversation scroll while Inspector opens and closes", () => {
     render(<PersistentDock />);
     const composer = screen.getByLabelText("유진에게 요청하기");
@@ -124,9 +144,9 @@ describe("RightDock", () => {
     fireEvent.click(screen.getByRole("radio", { name: "B-002 선택" }));
     Object.defineProperty(history, "scrollTop", { configurable: true, writable: true, value: 72 });
 
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
-    expect(screen.getByRole("region", { name: "편집 항목" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "편집 항목 닫기" }));
+    expect(screen.queryByRole("region", { name: "편집 항목" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
 
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("다음 추천도 보여 줘");
     expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();

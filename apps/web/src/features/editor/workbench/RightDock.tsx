@@ -93,7 +93,10 @@ export function RightDock({
   onRetryRun,
   retryAfterSeconds = null,
 }: RightDockProps) {
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  // 캡컷은 클립을 누르면 속성이 이미 거기 있다. 접힌 채로 두었더니 `유진과 편집
+  // 항목` → `편집 항목 열기` → `편집 대상`까지 네 겹을 지나야 속도·소리에 닿았다.
+  // 접는 것은 여전히 되지만 기본은 펴 둔다.
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [selectedInspectorTargetId, setSelectedInspectorTargetId] = useState<string | null>(null);
   const inspectorTargetIdentity = inspectorTargets.map((target) => target.id).join("|");
   const [retryRemaining, setRetryRemaining] = useState(0);
@@ -160,7 +163,28 @@ export function RightDock({
   const recommendationCandidates = proposal?.candidates.filter((candidate) => !candidate.readOnlyFinding) ?? [];
   const readOnlyFindings = proposal?.candidates.filter((candidate) => candidate.readOnlyFinding) ?? [];
 
+  // **선택한 것의 속성이 맨 앞에 온다.** 유진 대화를 지나 스크롤해야 나오면
+  // 있어도 못 찾는다 -- 2026-08-17에 컷 도구가 정확히 그랬다.
   return <div className="vb-editor-right-dock">
+    <section className="vb-editor-workbench__summary">
+      <Button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "편집 항목 닫기" : "편집 항목 열기"}</Button>
+      {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
+        <h2>편집 항목</h2>
+        {selectedSegment ? <p>{selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초 구간</p> : <p>선택한 구간이 없어요.</p>}
+        {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
+        {!inspectorTargets.length ? <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p> : null}
+        {onInspectorAction ? <InspectorControls
+          disabled={inspectorDisabled}
+          loadApprovedTtsCandidates={loadApprovedTtsCandidates}
+          onAction={onInspectorAction}
+          partialRegeneration={partialRegeneration}
+          projectId={projectId}
+          selectedSegment={selectedSegment ?? null}
+          target={selectedInspectorTarget}
+          ttsCandidateScopeKey={ttsCandidateScopeKey}
+        /> : null}
+      </div> : null}
+    </section>
     <section aria-label="유진" className="vb-editor-workbench__summary">
       <h2>유진</h2>
       {runStatusAnnouncement ? <p role="status" aria-live="polite" aria-atomic="true" aria-label="유진 대화 상태" className="sr-only">{runStatusAnnouncement}</p> : null}
@@ -276,25 +300,6 @@ export function RightDock({
       </article>)}
     </section> : null}
 
-    <section className="vb-editor-workbench__summary">
-      <Button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "편집 항목 닫기" : "편집 항목 열기"}</Button>
-      {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
-        <h2>편집 항목</h2>
-        {selectedSegment ? <p>{selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초 구간</p> : <p>선택한 구간이 없어요.</p>}
-        {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
-        {!inspectorTargets.length ? <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p> : null}
-        {onInspectorAction ? <InspectorControls
-          disabled={inspectorDisabled}
-          loadApprovedTtsCandidates={loadApprovedTtsCandidates}
-          onAction={onInspectorAction}
-          partialRegeneration={partialRegeneration}
-          projectId={projectId}
-          selectedSegment={selectedSegment ?? null}
-          target={selectedInspectorTarget}
-          ttsCandidateScopeKey={ttsCandidateScopeKey}
-        /> : null}
-      </div> : null}
-    </section>
   </div>;
 }
 

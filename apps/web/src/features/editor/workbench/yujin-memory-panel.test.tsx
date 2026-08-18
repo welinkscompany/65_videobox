@@ -51,6 +51,14 @@ function renderDock(memory: Record<string, unknown>) {
   );
 }
 
+
+// 편집 항목은 이제 기본으로 펴져 있다(캡컷처럼 고른 것의 속성이 바로 보인다).
+// 무조건 누르면 오히려 **닫힌다** -- 좁은 화면이나 접어 둔 상태에서만 누른다.
+function openInspector(): void {
+  if (screen.queryByRole("region", { name: "편집 항목" })) return;
+  fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+}
+
 describe("Yujin memory panel", () => {
   it("has one separate explicit typed producer and never fires it automatically", () => {
     const callbacks = memoryCallbacks();
@@ -254,9 +262,7 @@ describe("Yujin memory panel", () => {
       loadError: "기억을 불러오지 못했어요.",
       ...callbacks,
     });
-    fireEvent.click(screen.getByRole(
-      "button", { name: "편집 항목 열기" },
-    ));
+    openInspector();
     fireEvent.click(screen.getByRole(
       "button", { name: "편집 항목 닫기" },
     ));

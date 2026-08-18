@@ -394,7 +394,7 @@ async function openInspector() {
   fireEvent.click(await findClipSelectionButton("n-1"));
   fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
   await screen.findByRole("dialog", { name: "유진과 편집 항목" });
-  fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+  openInspector();
   return screen.findByRole("region", { name: "편집 항목" });
 }
 
@@ -2414,6 +2414,9 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
     await openInspector();
+    // 청취 승인 음성은 이제 부를 때만 부른다 -- 편집기를 여는 것만으로 조회가
+    // 나가지 않게 하기 위해서다.
+    fireEvent.click(screen.getByRole("button", { name: "승인한 음성 불러오기" }));
     expect(await screen.findByRole("option", { name: "승인 후보 1 · 승인된 음성" })).toBeVisible();
     expect(screen.queryByText("승인 전 음성")).toBeNull();
 
@@ -2952,7 +2955,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(3);
     await act(async () => { resolvePreflight(partialPreflight); });
 
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    openInspector();
     const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
     expect(runButton).toBeDisabled();
     fireEvent.click(runButton);

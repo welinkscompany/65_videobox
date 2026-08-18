@@ -368,7 +368,9 @@ test("Yujin applies one persisted caption only after explicit selection and pres
     return element.scrollTop;
   });
   expect(savedScrollTop).toBeGreaterThan(0);
-  await page.getByRole("button", { name: "닫기" }).click();
+  // 서랍을 닫는 단추다. 이름으로만 찾으면 `편집 항목 닫기`와도 겹친다 --
+  // Playwright의 이름 대조는 기본이 부분 일치라서 그렇다.
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
   await expect(conversation).toHaveCount(0);
   await page.getByRole("button", { name: "유진과 편집 항목" }).click();
 
