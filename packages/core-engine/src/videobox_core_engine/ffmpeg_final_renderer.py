@@ -1081,7 +1081,14 @@ class FfmpegFinalRenderer:
                     "-i",
                     str(video_path),
                     "-filter_complex",
-                    "[0:a][1:a]amix=inputs=2:duration=first[aout]",
+                    # `normalize=0`이 **꼭 있어야 한다.** `amix`는 기본으로 입력
+                    # 수만큼 나누므로, B-roll 소리를 켜면 그 장면과 아무 상관
+                    # 없는 구간의 내레이션까지 6dB 내려간다 -- 완성본을 재서
+                    # 찾았다(2026-08-19). 켠 사람은 소리를 **더한** 것이지
+                    # 나머지를 줄인 게 아니다.
+                    #
+                    # 합쳐서 커지는 것은 클립별 `소리 크기`로 조절한다.
+                    "[0:a][1:a]amix=inputs=2:duration=first:normalize=0[aout]",
                     "-map",
                     "[aout]",
                     "-ar",
