@@ -1,6 +1,6 @@
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { OutputVariant, OutputVariantPatch } from "../../../api";
+import { api, type OutputVariant, type OutputVariantPatch } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
@@ -403,6 +403,19 @@ function EditorWorkbenchInstance({
   const rightVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.rightOpen);
   // 반복 구간은 새로 만들지 않는다. 화면이 이미 `적용 구간`으로 보여 주는 그 구간이다 --
   // 같은 개념이 두 벌이 되면 하나가 조용히 낡는다.
+  // 클립 위에 깔 그림. **주소를 아는 것은 여기의 일**이다 -- 타임라인은 서버를
+  // 알지 않는다(`test_editor_ui_source_provenance`가 그 경계를 지킨다).
+  //
+  // 그림은 새로 만들지 않는다: 영상은 자산 카드가 이미 쓰는 썸네일, 소리는
+  // 라이브러리 자산이 이미 쓰던 파형이다. 자산이 없는 클립은 넣지 않는다 --
+  // 넣으면 클립마다 404가 나간다.
+  const clipPictures = new Map<string, string>(
+    view.tracks.flatMap((track) => track.clips.flatMap((clip) => clip.assetId
+      ? [[clip.placementId ?? clip.clipId, track.role === "narration" || track.role === "bgm" || track.role === "sfx"
+        ? api.assetWaveformUrl(view.projectId, clip.assetId)
+        : api.assetThumbnailUrl(view.projectId, clip.assetId)] as const]
+      : [])),
+  );
   const stage = <PreviewStage key={`${view.projectId}:${view.sessionId}`} auditionRequest={auditionRequest} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} fps={view.fps} loopRange={assetTarget} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
   const variantMaster = {
     variantId: "master",
@@ -456,6 +469,7 @@ function EditorWorkbenchInstance({
       {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} /> : null}</> : null}
     </section>
     <TimelineDock
+      clipPictures={clipPictures}
       isSaving={isSavingTimeline}
       mutationMessage={timelineMutationMessage}
       // 끌어다 놓기는 **이미 있는 `적용` 경로**를 그대로 탄다. 같은 편집이 두 경로를

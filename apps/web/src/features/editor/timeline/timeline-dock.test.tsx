@@ -592,7 +592,8 @@ describe("TimelineDock", () => {
         : track),
     };
     // 400px면 0~4초만 보이고 5~9초 B-roll은 그려지지도 않는다.
-    render(<TimelineDock view={withPicture} viewportWidthPx={1000} />);
+    // 주소는 소유자가 정해서 넘긴다 -- 타임라인은 서버를 알지 않는다.
+    render(<TimelineDock view={withPicture} viewportWidthPx={1000} clipPictures={new Map([["b-1", "/api/projects/p/assets/asset-b/thumbnail"]])} />);
 
     const picture = document.querySelector('[data-clip-picture="true"]');
     expect(picture).not.toBeNull();
@@ -610,7 +611,7 @@ describe("TimelineDock", () => {
       captions: [],
       gaps: [],
     };
-    render(<TimelineDock view={withSound} viewportWidthPx={1000} />);
+    render(<TimelineDock view={withSound} viewportWidthPx={1000} clipPictures={new Map([["m-1", "/api/projects/p/assets/asset-m/waveform"]])} />);
 
     const picture = document.querySelector('[data-clip-picture="true"]');
     expect(picture?.getAttribute("src")).toContain("/assets/asset-m/waveform");
