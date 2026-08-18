@@ -9,7 +9,7 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { api, type Project, type ProjectWorkspaceSummary } from "../api";
 import { Button } from "../components/ui/button";
@@ -232,12 +232,38 @@ function ProjectsPage() {
   );
 }
 
+/** 전역 목적지를 대시보드 껍데기 안에 넣는다.
+ *
+ * 2026-08-19 owner 지적: `내 라이브러리`를 누르면 좌측 메뉴가 통째로 사라져
+ * **여기가 어느 화면인지도, 어떻게 돌아가는지도 알 수 없었다.** 프로젝트 목록과
+ * 설정은 이미 껍데기 안에 있었고 이 둘만 밖에 있었다.
+ *
+ * 프로젝트에 매이지 않는 화면이므로 `projectId`는 비워 둔다 -- `ProductShell`이
+ * `hasProject`로 그 경우를 이미 다룬다(프로젝트 단계 메뉴를 숨긴다).
+ */
+function GlobalShell({ section, children }: { section: "library" | "footage"; children: ReactNode }) {
+  const projects = rootRoute.useLoaderData() as Project[];
+  const navigate = useNavigate();
+  const router = useRouter();
+  const archive = useArchivedProjects(router);
+  return <ProductShell
+    projectId=""
+    projects={projects}
+    section={section}
+    archive={archive}
+    onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
+    onOpenSettings={() => void navigate({ to: "/settings/general" })}
+    onArchiveProject={(id) => archiveProjectAndRefresh(router, id)}
+    onDeleteProjectPermanently={(id) => deleteProjectPermanentlyAndRefresh(router, id)}
+  >{children}</ProductShell>;
+}
+
 function LibraryPage() {
-  return <PersonalLibraryPage />;
+  return <GlobalShell section="library"><PersonalLibraryPage /></GlobalShell>;
 }
 
 function FootagePage() {
-  return <FootageOrganizerPage />;
+  return <GlobalShell section="footage"><FootageOrganizerPage /></GlobalShell>;
 }
 
 function GlobalDestinationPage({ testId, title, description, readiness }: { testId: string; title: string; description: string; readiness: string }) {
@@ -296,7 +322,15 @@ function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onN
   }
   return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
     {summary.thumbnail_url ? <img src={summary.thumbnail_url} alt={`${summary.display_name} 대표 이미지`} loading="lazy" /> : null}
-    <h2>{summary.display_name}</h2>
+    {/* 프로젝트를 고르면 **편집기**다(owner 지적 2026-08-19, 캡컷도 열면 바로
+        편집판이다). 아래 단추는 백엔드가 정한 다음 할 일이라 `/plan`·`/review`
+        같은 곳으로 가는데, 그것만 있으면 편집기로 가는 길이 아예 없었다.
+        안내는 남기고 이름에 편집기를 건다. */}
+    <h2><a href={resolveWorkspaceLocation(project.project_id, "editing")} aria-label={`${summary.display_name} 편집기 열기`} onClick={(event) => {
+      if (!onNavigateHref) return;
+      event.preventDefault();
+      onNavigateHref(resolveWorkspaceLocation(project.project_id, "editing"));
+    }}>{summary.display_name}</a></h2>
     <p>{projectStateLabel(summary)}</p>
     {readableMoment(summary.updated_at) ? <time dateTime={summary.updated_at}>최근 편집 {readableMoment(summary.updated_at)}</time> : null}
     <p className="vb-catalog-card__finished">완성본 {summary.finished_video_count}개</p>

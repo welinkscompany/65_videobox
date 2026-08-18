@@ -63,6 +63,27 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  // 2026-08-19 owner 지적: `내 라이브러리`를 누르면 좌측 메뉴가 통째로 사라져서
+  // **여기가 어느 화면인지도, 어떻게 돌아가는지도 알 수 없었다.** 프로젝트 목록과
+  // 설정은 이미 껍데기 안에 있었고 라이브러리·촬영본 둘만 밖에 있었다.
+  it.each(["/library", "/footage", "/projects"])("keeps the left menu on %s, so there is always a way back", async (path) => {
+    // 프로젝트가 0개면 시작 화면이 따로 나온다. 여기서 보려는 것은 그게 아니라
+    // **평소 상태에서 좌측 메뉴가 남아 있는가**이므로 하나 있는 상태로 둔다.
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "프로젝트 A", status: "draft", root_storage_uri: "local://projects/project_a" }]);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: [path] }));
+    render(<AppRouter router={router} />);
+
+    // 껍데기는 데스크톱용과 좁은 화면용을 함께 그릴 수 있다. 하나만 있으면 된다.
+    const menus = await screen.findAllByRole("navigation", { name: "전체 메뉴", hidden: true });
+    expect(within(menus[0]).getByRole("link", { name: "프로젝트", hidden: true })).toBeInTheDocument();
+    expect(within(menus[0]).getByRole("link", { name: "내 라이브러리", hidden: true })).toBeInTheDocument();
+
+    // 헤더는 **어느 화면인지** 말해야 한다. 전부 `홈`이라고 적으면 좌측 메뉴가
+    // 돌아와도 여전히 자기가 어디 있는지 알 수 없다.
+    const title = { "/library": "내 라이브러리", "/footage": "촬영본 정리", "/projects": "홈" }[path];
+    expect(document.querySelector(".vb-product-header strong")).toHaveTextContent(title!);
+  });
+
   it("mounts the library workspace and keeps footage copy free of internal plan names", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const libraryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/library"] }));
@@ -77,6 +98,33 @@ describe("AppRouter URL ownership", () => {
     // §10.13: dashboard copy names creator outcomes, never internal plan phases.
     expect(screen.queryByText(/Wave-?\s?2/i)).toBeNull();
     expect(screen.getByTestId("footage-workspace")).toHaveTextContent("VideoBox");
+  });
+
+  it("opens the editor when the creator picks a project by name", async () => {
+    // 2026-08-19 owner 지적: "사이트에 들어가면 편집기부터"라고 했는데 유진과
+    // 대화하는 화면이 먼저 나온다. 재 보니 **카드에서 편집기로 가는 길이 하나도
+    // 없었다** -- 카드 단추는 백엔드가 정한 다음 할 일(`/plan`·`/review`·`/output`)
+    // 로만 갔다. 다음 할 일 안내는 그대로 두고, 이름을 누르면 편집기로 간다.
+    const projects = [{ project_id: "project_plan", name: "이야기 단계", status: "active", root_storage_uri: "local://plan" }];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockResolvedValue({
+      project_id: "project_plan",
+      display_name: "이야기 단계",
+      updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan",
+      state: "ready",
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: { label: "계속 만들기", href: "/projects/project_plan/plan" },
+    });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    const card = await screen.findByRole("article", { name: "이야기 단계 프로젝트" });
+
+    expect(within(card).getByRole("link", { name: "이야기 단계 편집기 열기" })).toHaveAttribute("href", "/projects/project_plan/editor");
+    // 다음 할 일 안내는 없애지 않는다. 둘 다 있어야 한다.
+    expect(within(card).getByRole("link", { name: "계속 만들기" })).toHaveAttribute("href", "/projects/project_plan/plan");
   });
 
   it("summarizes each project and exposes exactly one next action", async () => {
@@ -118,9 +166,15 @@ describe("AppRouter URL ownership", () => {
     expect(newCard).toHaveTextContent("이야기를 정하는 중");
     // 기계 시각을 그대로 내보내지 않는다.
     expect(newCard).not.toHaveTextContent("+00:00");
-    expect(within(draftCard).getAllByRole("link")).toHaveLength(1);
-    expect(within(assetCard).getAllByRole("link")).toHaveLength(1);
-    expect(within(newCard).getAllByRole("link")).toHaveLength(1);
+    // **다음 할 일은 카드마다 하나**다. 2026-08-19에 이름이 편집기 링크가 되면서
+    // 카드의 링크는 둘이 됐지만, 안내 단추가 하나라는 이 규칙은 그대로다 --
+    // 이름 링크는 "다음 할 일"이 아니라 그 프로젝트를 여는 문이다.
+    const nextActions = (card: HTMLElement) =>
+      within(card).getAllByRole("link").filter((link) => !link.getAttribute("aria-label")?.endsWith("편집기 열기"));
+    expect(nextActions(draftCard)).toHaveLength(1);
+    expect(nextActions(assetCard)).toHaveLength(1);
+    expect(nextActions(newCard)).toHaveLength(1);
+    expect(within(draftCard).getByRole("link", { name: "초안 프로젝트 편집기 열기" })).toBeInTheDocument();
     expect(within(draftCard).getByRole("link", { name: "계속 편집" })).toHaveAttribute("href", "/projects/project_draft/edit");
     expect(within(assetCard).getByRole("link", { name: "자산 준비" })).toHaveAttribute("href", "/projects/project_assets/assets");
     expect(within(newCard).getByRole("link", { name: "계속 만들기" })).toHaveAttribute("href", "/projects/project_new/plan");
