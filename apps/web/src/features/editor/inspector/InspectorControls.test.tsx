@@ -236,6 +236,108 @@ describe("InspectorControls", () => {
     expect(document.body).not.toHaveTextContent(/asset-internal|segment-internal/);
   });
 
+  it("can save a B-roll that has no source window, instead of locking every other control", () => {
+    // 2026-08-18 실제 화면에서 찾았다. `쓸 구간`을 따로 정하지 않은 B-roll은
+    // 시작·끝이 둘 다 0으로 시작하는데, 저장 단추가 `끝 <= 시작`이면 잠기도록
+    // 돼 있어 **0/0에서 영영 잠겨 있었다.** 그래서 배속·음량·페이드·소리
+    // 스위치 어느 것도 저장되지 않았다 -- 화면에는 값이 남아 있어서 저장된 줄
+    // 알았다(내가 그렇게 잘못 보고했다).
+    //
+    // 0/0은 잘못된 구간이 아니라 **구간을 안 정했다**는 뜻이다. 그때는 구간을
+    // 아예 보내지 않아야 한다 -- 서버는 `끝 > 시작`을 요구하므로 0/0을 실어
+    // 보내면 거절당한다.
+    const onAction = vi.fn();
+    const broll: InspectorTarget = {
+      assetId: "asset-internal-broll",
+      clearOnly: false,
+      controls: { speed: 1, volume: 1 },
+      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    };
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll}
+      />,
+    );
+
+    const save = screen.getByRole("button", { name: "B-roll 설정 저장" });
+    expect(save).toBeEnabled();
+
+    fireEvent.click(screen.getByLabelText("이 영상의 원래 소리도 함께 쓰기"));
+    fireEvent.click(save);
+
+    const sent = onAction.mock.calls.at(-1)?.[0];
+    expect(sent.controls.preserveSourceAudio).toBe(true);
+    expect(sent.controls).not.toHaveProperty("inSec");
+    expect(sent.controls).not.toHaveProperty("outSec");
+  });
+
+  it("sends a B-roll dissolve edit instead of quietly resending the old value", () => {
+    // 페이드와 구간이 하나의 삼항으로 묶여 있어서, 구간을 가진 B-roll은
+    // 페이드를 고쳐도 옛 값이 실려 나갔다. 화면에서 바꾼 것이 사라진다.
+    const onAction = vi.fn();
+    const broll: InspectorTarget = {
+      assetId: "asset-internal-broll",
+      clearOnly: false,
+      controls: { inSec: 2, outSec: 6, fadeInSec: 0, fadeOutSec: 0 },
+      fields: ["inSec", "outSec", "speed", "volume", "fadeInSec", "fadeOutSec"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    };
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("B-roll 서서히 나타나기"), { target: { value: "0.75" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+
+    const sent = onAction.mock.calls.at(-1)?.[0];
+    expect(sent.controls.fadeInSec).toBe(0.75);
+    // 구간은 그대로 살아 있어야 한다.
+    expect(sent.controls.inSec).toBe(2);
+    expect(sent.controls.outSec).toBe(6);
+  });
+
+  it("still refuses a source window that ends before it starts", () => {
+    // 구간을 실제로 정했는데 끝이 시작보다 앞이면 그건 잘못된 값이다. 이건 계속 막는다.
+    const onAction = vi.fn();
+    const broll: InspectorTarget = {
+      assetId: "asset-internal-broll",
+      clearOnly: false,
+      controls: { inSec: 8, outSec: 13 },
+      fields: ["inSec", "outSec", "speed", "volume"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    };
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("B-roll 쓸 구간 끝"), { target: { value: "4" } });
+
+    expect(screen.getByRole("button", { name: "B-roll 설정 저장" })).toBeDisabled();
+  });
+
   it("lets the creator keep a clip's own sound, which is what makes 소리 크기 mean anything", () => {
     // 2026-08-18에 배속을 이어 놓고도 **음량은 여전히 결과에 닿지 않았다.**
     // B-roll 음량은 그 클립의 자체 소리를 살려 둘 때만 섞이는데(렌더러가

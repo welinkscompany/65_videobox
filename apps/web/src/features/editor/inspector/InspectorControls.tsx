@@ -401,8 +401,15 @@ export function InspectorControls({
                   말할 때 배경 음악 낮추기
                 </label>
               ) : null}
+              {/* `쓸 구간`을 **안 정한 것**(둘 다 0)과 **잘못 정한 것**(끝이 시작보다
+                  앞)은 다르다. 예전에는 둘을 같이 취급해서, 구간을 지정하지 않은
+                  B-roll은 저장 단추가 영영 잠겨 있었다 -- 배속·음량·페이드·소리
+                  스위치 어느 것도 저장할 수 없었고, 화면에는 값이 남아 있어서
+                  저장된 것처럼 보였다(2026-08-18 실제 화면에서 확인).
+                  안 정했으면 구간을 아예 보내지 않는다. 서버는 `끝 > 시작`을
+                  요구하므로 0/0을 실어 보내면 거절당한다. */}
               <Button
-                disabled={disabled || (target.fields.includes("inSec") && outSec <= inSec)}
+                disabled={disabled || (target.fields.includes("inSec") && outSec > 0 && outSec <= inSec)}
                 onClick={() => emit({
                   kind: "save-media",
                   mediaKind: target.mediaKind,
@@ -410,7 +417,11 @@ export function InspectorControls({
                   assetId: target.assetId,
                   controls: {
                     ...target.controls,
-                    ...(target.fields.includes("inSec") ? { inSec, outSec } : { fadeInSec, fadeOutSec }),
+                    // 페이드와 구간은 **따로** 판단한다. 예전에는 하나의 삼항으로
+                    // 묶여 있어서, 구간을 가진 B-roll은 페이드를 고쳐도 payload에
+                    // 옛 값이 실렸다 -- 화면에서 바꾼 것이 조용히 사라졌다.
+                    ...(target.fields.includes("fadeInSec") ? { fadeInSec, fadeOutSec } : {}),
+                    ...(target.fields.includes("inSec") && outSec > 0 ? { inSec, outSec } : {}),
                     ...(target.fields.includes("speed") ? { speed } : {}),
                     ...(target.fields.includes("volume") ? { volume } : {}),
                     ...(target.fields.includes("ducking") ? { ducking } : {}),

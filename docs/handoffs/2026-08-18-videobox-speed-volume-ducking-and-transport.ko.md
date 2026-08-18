@@ -1,5 +1,8 @@
 # 눌리는데 무시되던 것을 잇고, 있는데 못 부르던 것을 꺼냈다
 
+**대체됨:** `docs/handoffs/2026-08-18-videobox-source-audio-switch-and-save-path.ko.md`
+(음량은 이 문서가 말한 것보다 한 겹 더 남아 있었다 — 그쪽을 먼저 읽어라)
+
 - 작성: 2026-08-18 (밤 세션 마감)
 - **읽는 순서:** 이 문서 →
   `docs/handoffs/2026-08-18-videobox-editor-scrub-follow-and-height-persist.ko.md`
