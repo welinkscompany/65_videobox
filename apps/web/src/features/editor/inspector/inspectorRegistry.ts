@@ -23,7 +23,11 @@ const mediaFields = ["fadeInSec", "fadeOutSec"] as const;
 // the recommendation picks a scene window, this is where that is overridden.
 // Phone B-roll is routinely too long and too loud, so the clip carries a
 // source window, a rate, and its own loudness.
-const brollFields = ["inSec", "outSec", "speed", "volume"] as const;
+//
+// 2026-08-18: 페이드가 다시 들어왔다. 위 문장은 **소리** 페이드 이야기였고,
+// 여기 것은 **화면** 페이드다 -- 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비쳐
+// 장면이 부드럽게 바뀐다(디졸브). 렌더러가 알파를 태워 실제로 그렇게 그린다.
+const brollFields = ["inSec", "outSec", "speed", "volume", "fadeInSec", "fadeOutSec"] as const;
 const mediaLabels = { broll: "B-roll", bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {

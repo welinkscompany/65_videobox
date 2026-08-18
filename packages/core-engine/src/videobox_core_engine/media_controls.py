@@ -42,12 +42,23 @@ def normalize_media_controls(
         trim_start_sec = _finite_control_number(payload.get("trim_start_sec", 0.0))
         if trim_start_sec < 0:
             raise ValueError("B-roll trim_start_sec must not be negative.")
+        # 장면이 바뀔 때 부드럽게 넘어가기(디졸브). `audio`의 같은 이름은 소리
+        # 페이드이고 여기 것은 **화면** 페이드다 -- 종류가 다르므로 이름을 나누지
+        # 않는다. 겹쳐 놓은 두 클립에서 위 클립에 걸면 아래가 비쳐 보인다.
+        video_fade_in_sec = _finite_control_number(payload.get("fade_in_sec", 0.0))
+        video_fade_out_sec = _finite_control_number(payload.get("fade_out_sec", 0.0))
+        if video_fade_in_sec < 0 or video_fade_out_sec < 0:
+            raise ValueError("B-roll fade durations must not be negative.")
+        if video_fade_in_sec + video_fade_out_sec > duration_sec:
+            raise ValueError("B-roll fade durations must fit within the clip duration.")
         normalized = {
             "fit": fit,
             "loop": bool(payload.get("loop", True)),
             "pad": bool(payload.get("pad", False)),
             "trim_start_sec": trim_start_sec,
             "preserve_source_audio": bool(payload.get("preserve_source_audio", False)),
+            "fade_in_sec": video_fade_in_sec,
+            "fade_out_sec": video_fade_out_sec,
         }
         # Source-window controls come from a selected local asset.  They are
         # distinct from timeline trim and must survive Director apply so both

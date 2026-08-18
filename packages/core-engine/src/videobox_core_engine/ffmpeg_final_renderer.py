@@ -231,8 +231,17 @@ class FfmpegFinalRenderer:
                     f",fps={self.video_fps},loop=loop=-1:size={loop_frames}:start=0,"
                     f"trim=duration={duration_sec},setpts=PTS-STARTPTS"
                 )
+            # 디졸브. **알파를 태워야** 아래 클립이 비친다 -- `alpha=1` 없이 fade를
+            # 걸면 검은색으로 가라앉는다. 안 쓰면 필터를 아예 더하지 않는다.
+            dissolve = ""
+            if controls["fade_in_sec"] or controls["fade_out_sec"]:
+                dissolve = ",format=yuva420p"
+                if controls["fade_in_sec"]:
+                    dissolve += f",fade=t=in:st=0:d={controls['fade_in_sec']}:alpha=1"
+                if controls["fade_out_sec"]:
+                    dissolve += f",fade=t=out:st={max(0.0, duration_sec - controls['fade_out_sec'])}:d={controls['fade_out_sec']}:alpha=1"
             filters.append(
-                f"{source_filter},{transform},setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
+                f"{source_filter},{transform}{dissolve},setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
             )
             next_canvas = f"canvas{ordinal}"
             filters.append(f"[{canvas}][{label}]overlay=eof_action=pass:repeatlast=0[{next_canvas}]")

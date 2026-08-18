@@ -53,7 +53,10 @@ describe("projectInspectorTargets", () => {
       // Task 24: B-roll gets the source window, not the audio fades. Which
       // part of a ten-minute take to use is the one thing the owner adjusts by
       // hand after the recommendation picks a scene.
-      fields: ["inSec", "outSec", "speed", "volume"],
+      // 장면이 바뀔 때 부드럽게 넘어가려면 **화면** 페이드가 필요하다. 예전에는
+      // "B-roll에는 소리가 없으니 페이드도 의미 없다"고 뺐는데, 그건 소리 페이드
+      // 이야기였다. 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
+      fields: ["inSec", "outSec", "speed", "volume", "fadeInSec", "fadeOutSec"],
       assetId: "asset-broll",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,

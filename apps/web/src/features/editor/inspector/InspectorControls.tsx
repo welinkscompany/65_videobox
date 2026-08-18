@@ -330,11 +330,13 @@ export function InspectorControls({
               {target.fields.includes("fadeInSec") ? (
                 <>
                   <label>
-                    {`${target.label} 페이드 인`}
+                    {/* 소리 페이드와 화면 페이드는 다른 것이다. B-roll에 거는 것은
+                        장면이 부드럽게 바뀌는 쪽(디졸브)이므로 그렇게 부른다. */}
+                    {target.mediaKind === "broll" ? `${target.label} 서서히 나타나기` : `${target.label} 페이드 인`}
                     <Input disabled={disabled} min="0" onChange={(event) => setFadeInSec(numberValue(event.target.value, fadeInSec))} step="0.05" type="number" value={fadeInSec} />
                   </label>
                   <label>
-                    {`${target.label} 페이드 아웃`}
+                    {target.mediaKind === "broll" ? `${target.label} 서서히 사라지기` : `${target.label} 페이드 아웃`}
                     <Input disabled={disabled} min="0" onChange={(event) => setFadeOutSec(numberValue(event.target.value, fadeOutSec))} step="0.05" type="number" value={fadeOutSec} />
                   </label>
                 </>

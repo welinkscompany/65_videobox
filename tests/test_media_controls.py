@@ -24,6 +24,10 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
         "pad": False,
         "trim_start_sec": 0.25,
         "preserve_source_audio": False,
+        # 화면 페이드(디졸브). 소리 페이드와 이름은 같지만 종류가 다르다 --
+        # 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
+        "fade_in_sec": 0.0,
+        "fade_out_sec": 0.0,
     }
     with pytest.raises(ValueError, match="fade"):
         normalize_media_controls({"fade_in_sec": 3.0, "fade_out_sec": 2.0}, media_kind="audio", duration_sec=4.0)
@@ -74,6 +78,10 @@ def test_timeline_builder_carries_manual_media_controls_to_renderable_clips() ->
         "pad": True,
         "trim_start_sec": 0.5,
         "preserve_source_audio": False,
+        # 화면 페이드(디졸브). 소리 페이드와 이름은 같지만 종류가 다르다 --
+        # 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
+        "fade_in_sec": 0.0,
+        "fade_out_sec": 0.0,
     }
 
 
