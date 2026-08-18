@@ -241,11 +241,6 @@ export function navigationKeyAction(
   const currentFrame = secondsToFrameHalfUp(context.state.playheadSec, context.fps);
   const zoomFactor = context.zoomFactor ?? 1.25;
   requirePositive(zoomFactor, "Zoom factor");
-  const anchorPx = timeToPixels(context.state.playheadSec, {
-    pixelsPerSecond: context.state.pixelsPerSecond,
-    originSec: context.state.viewportStartSec,
-  });
-
   switch (key) {
     case "ArrowLeft":
       return { type: "seek", seconds: frameToSeconds(Math.max(0, currentFrame - 1), context.fps) };

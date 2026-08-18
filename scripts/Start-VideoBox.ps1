@@ -97,14 +97,22 @@ function Test-VideoBoxAnswering {
 }
 
 function Test-DockerEngine {
+    # 이 함수는 실행 환경이 뜰 때까지 2초마다 다시 불린다. 임시 파일을 호출마다
+    # 만들고 안 지우면 도커가 느린 날 %TEMP%에 수백 개가 쌓인다.
+    $outFile = [System.IO.Path]::GetTempFileName()
+    $errFile = [System.IO.Path]::GetTempFileName()
     try {
         $process = Start-Process -FilePath $DockerExecutable -ArgumentList @("info", "--format", "{{.ServerVersion}}") `
-            -NoNewWindow -Wait -PassThru -RedirectStandardOutput ([System.IO.Path]::GetTempFileName()) `
-            -RedirectStandardError ([System.IO.Path]::GetTempFileName())
+            -NoNewWindow -Wait -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
         return $process.ExitCode -eq 0
     }
     catch {
         return $false
+    }
+    finally {
+        foreach ($path in @($outFile, $errFile)) {
+            try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop } catch { }
+        }
     }
 }
 

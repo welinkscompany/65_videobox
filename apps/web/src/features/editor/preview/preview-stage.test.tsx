@@ -315,6 +315,24 @@ describe("PreviewStage", () => {
     expect(media.currentTime).toBe(3);
   });
 
+  it("does not fight the player when the chosen scene is outside what the preview holds", () => {
+    // 부분 구간 미리보기(4~8초)를 보는 중에 9~12초 장면을 고르면, 반복이 도달할 수
+    // 없는 자리를 계속 노려 매 tick마다 되감는다 -- 재생이 그 자리에 붙박인다.
+    // 담고 있지 않은 구간은 반복하지 않는다.
+    render(<PreviewStage
+      {...current}
+      exactPreview={{ status: "succeeded", url: "/api/range.mp4", artifactRevision: 4, timelineStartSec: 4, timelineEndSec: 8 }}
+      loopRange={{ startSec: 9, endSec: 12 }}
+    />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    fireEvent.click(screen.getByRole("button", { name: "선택한 장면 반복" }));
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 3 });
+
+    fireEvent.timeUpdate(media);
+
+    expect(media.currentTime).toBe(3);
+  });
+
   it("offers no repeat control when no scene is selected", () => {
     // 반복할 구간이 없는데 단추만 있으면, 눌러도 아무 일이 없는 단추가 된다.
     render(<PreviewStage {...current} />);

@@ -46,6 +46,24 @@ function renderControls({
 }
 
 describe("InspectorControls", () => {
+  it("does not fetch approved voices for a scene the creator never asked about", async () => {
+    // 초기화를 effect에서 하면 조회 effect가 **같은 commit에서 옛 값을 읽어** 새
+    // 장면의 후보를 한 번 불러온다. 부를 때만 부르기로 한 것이 두 번째 장면부터
+    // 무너진다.
+    const load = vi.fn().mockResolvedValue([]);
+    const segment = (id: string) => ({ segmentId: id, startSec: 0, endSec: 1, nextSegmentId: null, cutAction: "keep" });
+    const rendered = render(<InspectorControls disabled={false} onAction={vi.fn()} projectId="p" selectedSegment={segment("a")} target={null} loadApprovedTtsCandidates={load} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "승인한 음성 불러오기" }));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+
+    rendered.rerender(<InspectorControls disabled={false} onAction={vi.fn()} projectId="p" selectedSegment={segment("b")} target={null} loadApprovedTtsCandidates={load} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "승인한 음성 불러오기" })).toBeInTheDocument());
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(load).not.toHaveBeenCalledWith("b");
+  });
+
   it("emits narration, cut, and partial regeneration intents only from explicit buttons", () => {
     const onAction = renderControls();
 

@@ -140,7 +140,13 @@ export function InspectorControls({
   // 속성이 기본으로 펴지면서 이 조회가 **편집기를 여는 것만으로** 나갔다.
   // `편집기를 열었을 뿐인데 아무 일도 하지 않는다`를 지키는 테스트가 그걸
   // 잡았다. 청취 승인 음성은 자주 쓰는 길이 아니므로 부를 때만 부른다.
-  const [ttsRequested, setTtsRequested] = useState(false);
+  //
+  // "요청했다"를 **어느 장면에 대해** 요청했는지까지 함께 들고 있는다. 그냥
+  // boolean으로 두고 장면이 바뀔 때 effect에서 끄면, 조회 effect가 같은 commit에서
+  // 아직 켜져 있는 옛 값을 읽어 **묻지도 않은 새 장면의 후보를 한 번 불러온다.**
+  const [ttsRequest, setTtsRequest] = useState<string | null>(null);
+  const ttsScope = `${selectedSegment?.segmentId ?? ""}|${ttsCandidateScopeKey ?? ""}`;
+  const ttsRequested = ttsRequest === ttsScope;
   const ttsLoadOperation = useRef(0);
   const ttsLoaderRef = useRef(loadApprovedTtsCandidates);
   ttsLoaderRef.current = loadApprovedTtsCandidates;
@@ -181,7 +187,6 @@ export function InspectorControls({
       return (partialRegeneration?.defaultFields ?? partialRegeneration?.fields ?? []).filter((field) => available.has(field));
     });
   }, [defaultPartialFieldIdentity, partialFieldIdentity]);
-  useEffect(() => { setTtsRequested(false); }, [selectedSegment?.segmentId, ttsCandidateScopeKey]);
   useEffect(() => {
     const loader = ttsLoaderRef.current;
     const segmentId = selectedSegment?.segmentId;
@@ -283,7 +288,7 @@ export function InspectorControls({
             <fieldset>
               <legend>내레이션 음성</legend>
               {selectedSegment.ttsReplacement ? <p>청취 승인한 음성이 적용되어 있어요.</p> : <p>청취 승인한 후보를 골라 명시적으로 적용할 수 있어요.</p>}
-              {!ttsRequested ? <Button disabled={disabled} onClick={() => setTtsRequested(true)} type="button">승인한 음성 불러오기</Button> : null}
+              {!ttsRequested ? <Button disabled={disabled} onClick={() => setTtsRequest(ttsScope)} type="button">승인한 음성 불러오기</Button> : null}
               {ttsLoadState === "loading" ? <p>승인한 음성을 불러오는 중이에요.</p> : null}
               {ttsLoadState === "error" ? (
                 <>

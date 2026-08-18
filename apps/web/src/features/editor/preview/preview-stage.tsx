@@ -108,7 +108,10 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     if (node.seeking) return;
     // 반복이 켜져 있으면 구간 끝에서 되감는다. 자막·재생 위치를 갱신하기 전에 처리해야
     // 구간 밖 한 순간이 잠깐 보였다 사라지는 일이 없다.
-    if (repeating && loopRange && mode.kind !== "idle") {
+    // 담고 있지 않은 구간은 반복하지 않는다. 부분 구간 미리보기(예: 4~8초)를 보는
+    // 중에 9~12초 장면을 고르면, 되감을 자리가 이 미리보기 안에 없어서 매 tick마다
+    // 닿을 수 없는 곳을 노리고 재생이 그 자리에 붙박인다.
+    if (repeating && loopRange && mode.kind !== "idle" && rangesOverlap(loopRange, mode.media.timelineRange)) {
       const timelineSeconds = coordinatorRef.current.timelineTime(node.currentTime);
       if (timelineSeconds >= loopRange.endSec || timelineSeconds < loopRange.startSec) {
         seekTimelineTo(node, loopRange.startSec);
@@ -181,6 +184,10 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
     <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `자막은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
   </section>;
+}
+
+function rangesOverlap(left: Readonly<{ startSec: number; endSec: number }>, right: TimelineRange): boolean {
+  return left.startSec < right.endSec && right.startSec < left.endSec;
 }
 
 function exactMediaId(exact: Extract<ReturnType<typeof toExactPreviewState>, { kind: "current" }>): string {
