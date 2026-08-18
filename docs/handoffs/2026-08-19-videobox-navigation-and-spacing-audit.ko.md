@@ -78,6 +78,23 @@
   그랬다. 단위 테스트 1,078개가 전부 초록인 채로 넘어갔고 **실제 면적을 재는
   e2e만 잡았다.** 여백을 건드리면 그 가드를 꼭 돌려라.
 
+## 놓칠 뻔한 것 — provenance 해시
+
+`ProductShell.tsx`를 고치면 `docs/oss/editor-ui-source-map.json`의
+`normalized_sha256`을 **같이 갱신해야 한다.** 이 파일은 shadcn-admin에서 반입한
+것이고, 그 기록이 "지금 우리가 싣고 있는 파일"의 해시를 못 박고 있다.
+
+이번에 잊었더니 `tests/test_editor_ui_source_provenance.py` **5건이 깨졌다.**
+웹 1,078개도 e2e 48개도 전부 초록인 채로 넘어갔고, **백엔드 전체 pytest만
+잡았다**(31분짜리라 마지막에 돌린다). 기준 커밋에서 21개 전부 통과하는 것을
+확인해 이번 변경이 원인임을 못 박은 뒤 갱신했다.
+
+이 함정은 처음이 아니다 -- `8e99a308e fix: update ProductShell.tsx's stale
+provenance hash pin`이 같은 실수를 뒤늦게 고친 커밋이다.
+
+**화면 껍데기를 건드렸으면 백엔드 전체 검사까지 돌려라.** 앞의 두 관문은
+이걸 못 잡는다.
+
 ## 검증
 
 - 웹 1,078개 통과, `tsc --noEmit` 깨끗, e2e 48개 통과(스냅샷 포함)
