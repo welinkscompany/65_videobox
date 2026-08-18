@@ -17,6 +17,8 @@ from __future__ import annotations
 import inspect
 import time
 
+from conftest import wait_for
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -60,8 +62,11 @@ def test_a_failing_prune_does_not_fall_back_to_running_every_second(
         media_analysis_poll_interval_seconds=0.01,
     )
     with TestClient(app):
-        # Long enough for many passes at a 10 ms cadence.
-        time.sleep(0.6)
+        # 한 번은 돌아야 하고, 그 뒤로 여러 번 돌 수 있는 시간을 준다.
+        # 여기서 지키는 것은 **실패한 정비가 다시 안 걸린다**이므로, 기다린 뒤에도
+        # 1회여야 한다.
+        wait_for(lambda: calls >= 1)
+        time.sleep(0.3)
 
     assert calls == 1, f"a failing prune ran {calls} times instead of keeping its schedule"
 
@@ -92,7 +97,7 @@ def test_a_failing_maintenance_pass_says_why_and_keeps_running(
             media_analysis_poll_interval_seconds=0.01,
         )
         with TestClient(app):
-            time.sleep(0.3)
+            wait_for(lambda: calls > 1)
 
     assert calls > 1, f"작업자가 첫 실패에서 멈췄습니다 (calls={calls})"
 
@@ -126,6 +131,6 @@ def test_the_analysis_cache_is_actually_pruned(tmp_path, monkeypatch: pytest.Mon
     )
     app.state.store.bootstrap_project("보관 정리")
     with TestClient(app):
-        time.sleep(0.4)
+        wait_for(lambda: bool(pruned))
 
     assert pruned, "analysis cache retention never ran"

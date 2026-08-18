@@ -11,11 +11,14 @@
 from __future__ import annotations
 
 from videobox_core_engine.media_analysis import (
+
     TAG_PROMPT_VERSION,
     VISION_ANALYSIS_PROMPT,
     AnalysisProfile,
     MediaAnalysisService,
 )
+
+from conftest import wait_for
 
 
 def test_the_prompt_version_moved_when_the_prompt_did() -> None:
@@ -109,7 +112,7 @@ def test_the_running_app_requeues_stale_analyses_without_being_asked(tmp_path, m
     # 디스패처가 없으면 분석 자체를 돌리지 않으므로 그 앞에서 넘어간다.
     app.state.media_analysis_dispatcher = lambda **_kwargs: None
     with TestClient(app):
-        time.sleep(0.4)
+        wait_for(lambda: bool(calls))
 
     assert calls, "낡은 분석을 찾는 패스가 돌지 않았다"
 

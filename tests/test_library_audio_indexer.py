@@ -16,10 +16,13 @@ import pytest
 
 from videobox_core_engine.audio_descriptors import AudioDescriptor
 from videobox_core_engine.library_audio_indexer import (
+
     LibraryAudioIndexReport,
     build_asset_description,
     index_pending_library_audio,
 )
+
+from conftest import wait_for
 
 
 class _FakeStore:
@@ -226,7 +229,7 @@ def test_the_running_app_indexes_new_library_assets_without_being_asked(tmp_path
         media_analysis_poll_interval_seconds=0.01,
     )
     with TestClient(app):
-        time.sleep(0.4)
+        wait_for(lambda: len(passes) >= 2)
 
     # Ran at startup and kept running -- this is what covers assets added later.
     assert len(passes) >= 2

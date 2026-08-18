@@ -14,6 +14,8 @@ import pytest
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_storage.local_project_store import LocalProjectStore
 
+from conftest import wait_for
+
 
 def _write_video(path: Path, *, size: str, with_audio: bool, duration: int = 2) -> Path:
     command = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc=duration={duration}:size={size}:rate=15"]
@@ -249,12 +251,6 @@ def test_the_running_app_refills_missing_media_facts_without_being_asked(
     )
     app.state.store.bootstrap_project("영상 정보")
     with TestClient(app):
-        # 고정 시간(0.4초)을 기다렸더니 전체 스위트에서 가끔 깨졌다. 3,600개를 함께
-        # 돌리는 동안에는 백그라운드 패스가 그 안에 못 도는 때가 있다 -- 제품 결함이
-        # 아니라 **기다리는 방법**의 문제였다. 조건이 되면 바로 끝나므로 평소에는
-        # 오히려 빠르다.
-        deadline = time.monotonic() + 5
-        while not calls and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_for(lambda: bool(calls))
 
     assert calls, "빠진 영상 정보를 찾는 패스가 돌지 않았다"
