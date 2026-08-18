@@ -189,7 +189,9 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   await page.goto("/library");
   await expect(page.getByTestId("library-workspace")).toBeVisible();
   await expect(page.getByTestId("library-results-scroll")).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "전체 메뉴" }).getByRole("link")).toHaveCount(4);
+  // 전역 메뉴는 이제 **껍데기의 좌측 메뉴 하나**다(owner 지적 2026-08-19).
+  // 예전에는 이 화면이 껍데기 밖에 있어서 같은 링크를 자기도 한 벌 그렸다.
+  await expect(page.getByRole("navigation", { name: "전체 메뉴" }).first().getByRole("link")).toHaveCount(4);
 
   await dispatchDrop(page, [
     { name: "commute.mp4", type: "video/mp4", bytes: "video-source" },
@@ -247,12 +249,20 @@ test("library uses the Full HD canvas for wider desktop panes without page overf
     return {
       viewportWidth: window.innerWidth,
       workspaceWidth: workspace?.getBoundingClientRect().width ?? 0,
+      // 이 화면은 이제 껍데기 안에 있다. 화면 전체가 아니라 **껍데기가 내준 자리**를
+      // 남김없이 쓰는지가 기준이다(owner 지적 2026-08-19).
+      availableWidth: workspace?.parentElement?.getBoundingClientRect().width ?? 0,
       leftPaneWidth: columns[0] ?? 0,
       previewPaneWidth: columns.at(-1) ?? 0,
       bodyScrollWidth: document.body.scrollWidth,
     };
   });
-  expect(metrics.workspaceWidth).toBeGreaterThanOrEqual(metrics.viewportWidth - 16);
+  // 껍데기가 본문에 주는 좌우 여백(최대 2.5rem씩)만 빼고 나머지를 다 쓴다.
+  // 예전에는 화면 전체를 재던 자리다 -- 이제 좌측 메뉴가 늘 옆에 있으므로
+  // 기준이 `화면`이 아니라 `내준 자리`다.
+  expect(metrics.workspaceWidth).toBeGreaterThanOrEqual(metrics.availableWidth - 96);
+  // 좌측 메뉴에 자리를 내주고도 세 칸이 넉넉히 살아 있어야 한다.
+  expect(metrics.workspaceWidth).toBeGreaterThanOrEqual(1400);
   expect(metrics.leftPaneWidth).toBeGreaterThanOrEqual(256);
   expect(metrics.previewPaneWidth).toBeGreaterThanOrEqual(384);
   expect(metrics.bodyScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth + 1);
