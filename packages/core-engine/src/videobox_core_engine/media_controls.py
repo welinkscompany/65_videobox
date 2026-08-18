@@ -14,6 +14,13 @@ def _finite_control_number(value: object) -> float:
     return parsed
 
 
+# 화면 입력이 허용하는 범위와 **같은** 경계다(inspector: 속도 0.25~4, 소리 0~2).
+# 여기를 넓게 열어 두면 화면에서 만들 수 없는 값이 저장되고, 그 값은 결국
+# 렌더러에서 터진다 -- 거절은 사용자 가까운 쪽에서 한 번 더 하는 게 맞다.
+SPEED_RANGE = (0.25, 4.0)
+VOLUME_RANGE = (0.0, 2.0)
+
+
 def normalize_media_controls(
     controls: object,
     *,
@@ -51,6 +58,19 @@ def normalize_media_controls(
             raise ValueError("B-roll fade durations must not be negative.")
         if video_fade_in_sec + video_fade_out_sec > duration_sec:
             raise ValueError("B-roll fade durations must fit within the clip duration.")
+        # 배속과 소리 크기. **예전에는 여기서 조용히 버려졌다** -- inspector에
+        # 입력이 있고 저장도 성공하는데 결과가 그대로였다(2026-08-18 확인).
+        # 기본값 1.0은 "손대지 않음"이고, 아래 렌더러는 그때 필터를 더하지 않는다.
+        speed = _finite_control_number(payload.get("speed", 1.0))
+        if not SPEED_RANGE[0] <= speed <= SPEED_RANGE[1]:
+            raise ValueError(
+                f"B-roll speed must be between {SPEED_RANGE[0]} and {SPEED_RANGE[1]}."
+            )
+        volume = _finite_control_number(payload.get("volume", 1.0))
+        if not VOLUME_RANGE[0] <= volume <= VOLUME_RANGE[1]:
+            raise ValueError(
+                f"B-roll volume must be between {VOLUME_RANGE[0]} and {VOLUME_RANGE[1]}."
+            )
         normalized = {
             "fit": fit,
             "loop": bool(payload.get("loop", True)),
@@ -59,6 +79,8 @@ def normalize_media_controls(
             "preserve_source_audio": bool(payload.get("preserve_source_audio", False)),
             "fade_in_sec": video_fade_in_sec,
             "fade_out_sec": video_fade_out_sec,
+            "speed": speed,
+            "volume": volume,
         }
         # Source-window controls come from a selected local asset.  They are
         # distinct from timeline trim and must survive Director apply so both

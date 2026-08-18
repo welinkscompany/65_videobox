@@ -28,6 +28,10 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
         # 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
         "fade_in_sec": 0.0,
         "fade_out_sec": 0.0,
+        # 손대지 않은 배속·음량. 2026-08-18까지 이 둘은 여기서 조용히
+        # 버려졌고, 화면 입력이 결과에 닿지 않았다.
+        "speed": 1.0,
+        "volume": 1.0,
     }
     with pytest.raises(ValueError, match="fade"):
         normalize_media_controls({"fade_in_sec": 3.0, "fade_out_sec": 2.0}, media_kind="audio", duration_sec=4.0)
@@ -82,6 +86,8 @@ def test_timeline_builder_carries_manual_media_controls_to_renderable_clips() ->
         # 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
         "fade_in_sec": 0.0,
         "fade_out_sec": 0.0,
+        "speed": 1.0,
+        "volume": 1.0,
     }
 
 

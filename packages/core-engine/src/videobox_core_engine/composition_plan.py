@@ -719,17 +719,23 @@ class CompositionPlan:
                     if str(controls.get("fit") or "").strip().lower() == "contain":
                         controls["fit"] = "fit"
                     normalized = normalize_media_controls(controls, media_kind="broll", duration_sec=end - start)
+                    # 배속은 **원본을 얼마나 먹는가**를 바꾼다. 2배속으로 4초를
+                    # 채우려면 원본 8초가 필요하다. 이걸 빼먹으면 절반만 빨리
+                    # 지나가고 뒤가 빈다.
+                    speed = float(normalized["speed"])
                     source_in += normalized["trim_start_sec"] + float(normalized.get("in_sec", 0.0))
                     natural_source_out = (
                         source_out + normalized["trim_start_sec"]
                         if has_explicit_source_out
-                        else source_in + (end - start)
+                        else source_in + (end - start) * speed
                     )
                     source_out = min(natural_source_out, float(normalized.get("out_sec", natural_source_out)))
                     controls = normalized
                     if source_out <= source_in:
                         raise ValueError("composition_plan_invalid_source_bounds")
-                    if source_out - source_in < end - start and not controls["loop"] and not controls["pad"]:
+                    # 모자란지도 배속을 반영해 잰다. 원본 4초는 0.5배속에서
+                    # 타임라인 8초를 채운다 -- 배속을 무시하면 멀쩡한 것을 막는다.
+                    if (source_out - source_in) / speed < end - start and not controls["loop"] and not controls["pad"]:
                         raise ValueError("composition_plan_insufficient_broll_source")
                 raw_items.append(CompositionItem(
                     clip_id=str(raw.get("clip_id") or f"{track_type}-{index}"), track_type=track_type,

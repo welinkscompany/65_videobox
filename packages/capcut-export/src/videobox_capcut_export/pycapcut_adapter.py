@@ -370,23 +370,40 @@ class PyCapCutRealExportAdapter:
         # PyCapCut rejects a source timerange longer than a material. Keep
         # each source pass editable and use a project-local black pad when
         # looping is intentionally disabled.
+        #
+        # 배속은 **원본 시간과 화면 시간의 환산비**다. 아래 루프는 화면 시간으로
+        # 세므로, 원본이 화면에서 얼마나 버티는지로 한 번 바꿔 두고 그 값으로
+        # 자른다. 둘을 섞어 재면 배속을 걸었을 때 길이가 어긋난다.
+        speed = float(controls["speed"])
+        volume = float(controls["volume"])
+        source_available_timeline_us = int(source_available_us / speed)
+        if source_available_timeline_us <= 0:
+            raise PyCapCutExportError(
+                f"B-roll source is too short for the requested speed: {resolved.path}."
+            )
         elapsed_us = 0
         while elapsed_us < needed_duration_us and controls["loop"]:
-            segment_duration_us = min(source_available_us, needed_duration_us - elapsed_us)
+            segment_duration_us = min(source_available_timeline_us, needed_duration_us - elapsed_us)
+            # `speed`를 함께 주면 pycapcut이 target 길이를 source/speed로 다시
+            # 계산한다. 그래서 source에 화면 시간 × 배속을 넣는다.
             segment = VideoSegment(
                 material,
                 Timerange(start=placement_start_us + elapsed_us, duration=segment_duration_us),
-                source_timerange=Timerange(start=source_start_us, duration=segment_duration_us),
+                source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
+                speed=speed,
+                volume=volume,
             )
             script.add_segment(segment, "broll")
             elapsed_us += segment_duration_us
         if not controls["loop"]:
-            segment_duration_us = min(source_available_us, needed_duration_us)
+            segment_duration_us = min(source_available_timeline_us, needed_duration_us)
             script.add_segment(
                 VideoSegment(
                     material,
                     Timerange(start=placement_start_us, duration=segment_duration_us),
-                    source_timerange=Timerange(start=source_start_us, duration=segment_duration_us),
+                    source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
+                    speed=speed,
+                    volume=volume,
                 ),
                 "broll",
             )

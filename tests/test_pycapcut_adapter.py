@@ -473,3 +473,41 @@ def test_real_capcut_draft_preserves_broll_trim_crop_loop_pad_and_audio_controls
     assert tracks["bgm"][0]["volume"] == pytest.approx(0.25 * 10 ** (-6 / 20))
     assert tracks["bgm"][0]["extra_material_refs"]
     assert "ducking is not natively supported by CapCut draft export; apply it in CapCut after import" in result.capcut_compatibility_warnings
+
+
+def test_real_capcut_draft_carries_broll_speed_and_volume(tmp_path: Path) -> None:
+    """편집 초안도 최종 렌더와 **같은** 배속·음량을 들고 가야 한다.
+
+    두 경로가 갈리면 owner는 캡컷에서 열었을 때 다른 영상을 보게 된다.
+    CapCut 초안은 배속·음량을 직접 지원하므로 경고로 넘기지 않고 실제로 싣는다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Speed Contract")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll_path = tmp_path / "speed_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=6:size=240x320:rate=15", str(broll_path)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+
+    result = PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
+        project_id=project.project_id,
+        timeline={
+            "narration_source_uri": narration_asset.storage_uri,
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]},
+                {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"speed": 2.0, "volume": 0.5, "loop": False, "preserve_source_audio": True}}]},
+            ],
+        },
+        drafts_root=tmp_path / "drafts",
+        draft_name="speed-contract",
+        editing_session={"caption_style": {}, "segments": []},
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    tracks = {track["name"]: track["segments"] for track in content["tracks"]}
+    segment = tracks["broll"][0]
+    # 2배속으로 타임라인 2초를 채우려면 원본 4초를 먹는다.
+    assert segment["source_timerange"]["duration"] == 4_000_000
+    assert segment["target_timerange"]["duration"] == 2_000_000
+    assert segment["volume"] == pytest.approx(0.5)

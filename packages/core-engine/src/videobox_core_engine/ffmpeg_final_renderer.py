@@ -77,6 +77,25 @@ def probe_audio_peak_dbfs(path: Path, *, ffmpeg_binary: str = "ffmpeg") -> float
         return None
 
 
+def _atempo_chain(speed: float) -> str:
+    """배속을 ffmpeg가 실제로 받는 `atempo` 단계로 나눈다.
+
+    `atempo`는 한 번에 0.5~2.0배만 받는다. 4배를 그대로 주면 ffmpeg가 필터를
+    거절해 **렌더가 통째로 실패한다.** 허용 범위(0.25~4)의 양 끝이 정확히 두
+    단계이므로, 한계에 닿을 때까지 곱을 쪼개고 나머지를 마지막에 태운다.
+    """
+    steps: list[float] = []
+    remaining = speed
+    while remaining > 2.0:
+        steps.append(2.0)
+        remaining /= 2.0
+    while remaining < 0.5:
+        steps.append(0.5)
+        remaining /= 0.5
+    steps.append(remaining)
+    return ",".join(f"atempo={step}" for step in steps)
+
+
 def rendered_audio_has_sound(path: Path, *, ffmpeg_binary: str = "ffmpeg") -> bool | None:
     """들을 만한 소리가 담겼는가. 재지 못했으면 None — 모르는 것과 없는 것은 다르다.
 
@@ -217,11 +236,18 @@ class FfmpegFinalRenderer:
                 transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height}"
             else:
                 transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
-            source_window_sec = item.source_out_sec - item.source_in_sec
+            # 배속을 걸면 원본 창이 **화면에서 차지하는 시간**은 그만큼 줄거나
+            # 는다. 아래 loop/pad 판단은 전부 화면 시간 기준이므로 여기서 한 번
+            # 환산해 두고 그 값만 쓴다.
+            speed = float(controls["speed"])
+            source_window_sec = (item.source_out_sec - item.source_in_sec) / speed
             if controls["pad"] and not controls["loop"]:
                 transform += f",tpad=stop_mode=add:stop_duration={max(0.0, duration_sec - source_window_sec)}"
+            # 배속 1에는 필터를 더하지 않는다 -- 안 쓰는 기능에 화질과 시간을
+            # 들이지 않는다.
+            retime = "setpts=PTS-STARTPTS" if speed == 1.0 else f"setpts=(PTS-STARTPTS)/{speed}"
             source_filter = (
-                f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},setpts=PTS-STARTPTS"
+                f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},{retime}"
             )
             if controls["loop"] and source_window_sec < duration_sec:
                 numerator, separator, denominator = str(self.video_fps).partition("/")
@@ -348,9 +374,17 @@ class FfmpegFinalRenderer:
                     continue
                 label = f"a_{item.clip_id}"
                 delay = max(0, round(item.start_sec * 1000))
-                source_window_sec = item.source_out_sec - item.source_in_sec
+                speed = float(controls["speed"])
+                volume = float(controls["volume"])
+                # 소리도 화면과 **같은 배속**으로 가야 입이 맞는다. 화면만
+                # 빨라지면 말과 그림이 어긋난다.
+                source_window_sec = (item.source_out_sec - item.source_in_sec) / speed
                 timeline_duration_sec = item.end_sec - item.start_sec
                 source_filter = f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec}"
+                if speed != 1.0:
+                    source_filter += f",{_atempo_chain(speed)}"
+                if volume != 1.0:
+                    source_filter += f",volume={volume}"
                 if controls["loop"] and source_window_sec < timeline_duration_sec:
                     # Normalize before aloop so its sample count exactly spans
                     # the selected source window, not an input-dependent rate.
@@ -768,6 +802,12 @@ class FfmpegFinalRenderer:
                 available_duration_sec = min(available_duration_sec, float(controls["out_sec"]) - source_start_sec)
             if available_duration_sec <= 0:
                 raise FinalRenderError(f"B-roll trim starts after the source ends: '{source.path}'. Reduce trim_start_sec.")
+            # **완성본 MP4는 이 경로로 나온다.** 그래프(`build_plan_filter_graph`)는
+            # 미리보기 쪽이고, 여기를 빼먹으면 배속이 화면에만 있고 파일에는 없다 --
+            # 2026-08-18에 실제 mp4의 색을 읽어 보고 알았다.
+            speed = float(controls["speed"])
+            # 아래 판단은 전부 **화면 시간** 기준이므로 원본 여유를 한 번 환산한다.
+            available_duration_sec /= speed
             needs_padding = bool(
                 output_duration_sec is not None
                 and not controls["loop"]
@@ -783,6 +823,10 @@ class FfmpegFinalRenderer:
                 video_filter = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2,setsar={self.video_sar.replace(':', '/')}"
             if needs_padding:
                 video_filter += f",tpad=stop_mode=add:stop_duration={float(output_duration_sec) - available_duration_sec}"
+            # 되감기(retime)는 **자르고 늘리기 전에** 온다. 배속 1이면 아무것도
+            # 더하지 않는다 -- 안 쓰는 기능에 화질과 시간을 들이지 않는다.
+            if speed != 1.0:
+                video_filter = f"setpts=PTS/{speed}," + video_filter
             command += [
                 "-vf",
                 video_filter,
@@ -796,7 +840,17 @@ class FfmpegFinalRenderer:
                 "20",
             ]
             if controls["preserve_source_audio"]:
-                command += ["-map", "0:v:0", "-map", "0:a:0?", "-c:a", "aac", "-ar", "48000", "-ac", "2"]
+                # 소리도 화면과 같은 배속이어야 입이 맞는다. 음량은 여기서만
+                # 걸 수 있다 -- 이 조각이 그대로 이어붙기 때문이다.
+                audio_effects = []
+                if speed != 1.0:
+                    audio_effects.append(_atempo_chain(speed))
+                if float(controls["volume"]) != 1.0:
+                    audio_effects.append(f"volume={float(controls['volume'])}")
+                command += ["-map", "0:v:0", "-map", "0:a:0?"]
+                if audio_effects:
+                    command += ["-af", ",".join(audio_effects)]
+                command += ["-c:a", "aac", "-ar", "48000", "-ac", "2"]
             else:
                 command += ["-an"]
         else:
