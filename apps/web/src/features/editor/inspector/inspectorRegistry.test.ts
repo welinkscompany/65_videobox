@@ -145,8 +145,44 @@ describe("projectInspectorTargets", () => {
     expect(projectInspectorTargets({ view: assetlessView, selectedSegmentId: "segment-1" })).not.toContainEqual(expect.objectContaining({ id: "clip:bgm-1" }));
   });
 
-  it("returns no targets without a selection or for an unsupported selection", () => {
+  it("returns no targets without a selection or for a segment the view does not contain", () => {
     expect(projectInspectorTargets({ view, selectedSegmentId: null })).toEqual([]);
-    expect(projectInspectorTargets({ view, selectedSegmentId: "segment-unsupported" })).toEqual([]);
+    expect(projectInspectorTargets({ view, selectedSegmentId: "segment-not-in-view" })).toEqual([]);
+  });
+
+  // 백엔드는 처음부터 upsert였다 -- 없는 오버레이에 저장하면 만들어진다.
+  // 화면에만 부르는 자리가 없어서 owner는 설명 카드·표를 새로 얹을 수 없었다.
+  it("offers new explanation-card and table targets on a segment that has none", () => {
+    const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-unsupported" });
+
+    expect(targets).toContainEqual({
+      id: "overlay-new:explanation-card:segment-unsupported",
+      kind: "overlay",
+      label: "설명 카드",
+      segmentId: "segment-unsupported",
+      overlayKind: "explanation-card",
+      fields: ["title", "body", "text"],
+      value: { title: "", body: "", text: "" },
+      isNew: true,
+    });
+    expect(targets).toContainEqual({
+      id: "overlay-new:table:segment-unsupported",
+      kind: "overlay",
+      label: "표",
+      segmentId: "segment-unsupported",
+      overlayKind: "table",
+      fields: ["columns", "rows", "text"],
+      value: { columns: [], rows: [], text: "" },
+      isNew: true,
+    });
+    // 이미지는 고를 자산 없이 저장할 수 없으므로 빈 이미지 항목은 주지 않는다.
+    // 이미지는 자산 목록의 `화면에 얹기`로 만든다 -- 죽은 저장 단추를 두지 않는다.
+    expect(targets.filter((target) => target.kind === "overlay" && target.overlayKind === "image")).toEqual([]);
+  });
+
+  it("does not duplicate an overlay target the segment already has", () => {
+    const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-1" });
+
+    expect(targets.filter((target) => target.id.startsWith("overlay-new:"))).toEqual([]);
   });
 });

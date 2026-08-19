@@ -108,6 +108,50 @@ def rendered_audio_has_sound(path: Path, *, ffmpeg_binary: str = "ffmpeg") -> bo
     return peak > AUDIBLE_PEAK_DBFS
 
 
+def export_overlay_text_lines(overlay: dict[str, Any]) -> list[str]:
+    """오버레이가 화면에 그려야 할 글줄. 두 렌더 경로가 이 하나를 쓴다.
+
+    예전에는 두 경로 모두 `text or title or body` 한 줄만 그려서, owner가
+    저장한 표의 열·행과 설명 카드의 제목·본문이 어디에도 나오지 않았다 --
+    화면과 백엔드는 보내고 저장하는데 렌더만 안 읽는 필드였다. 이미 보이던
+    문구(`text`)는 계속 보인다: 구조를 그리면서 문구를 조용히 빼지 않는다.
+    """
+    overlay_type = str(overlay.get("overlay_type") or "").strip().lower()
+    text = str(overlay.get("text") or "").strip()
+    title = str(overlay.get("title") or "").strip()
+    body = str(overlay.get("body") or "").strip()
+    lines: list[str] = []
+    if overlay_type in {"table_card", "table_overlay"}:
+        raw_columns = overlay.get("columns")
+        columns = [str(item).strip() for item in raw_columns] if isinstance(raw_columns, list) else []
+        if any(columns):
+            lines.append(" | ".join(columns))
+        raw_rows = overlay.get("rows")
+        for row in raw_rows if isinstance(raw_rows, list) else []:
+            if not isinstance(row, list):
+                continue
+            cells = [str(cell).strip() for cell in row]
+            if any(cells):
+                lines.append(" | ".join(cells))
+        if text:
+            lines.append(text)
+    elif overlay_type == "explanation_card":
+        lines = [item for item in (title, body, text) if item]
+    else:
+        fallback = text or title or body
+        lines = [fallback] if fallback else []
+    deduplicated: list[str] = []
+    for line in lines:
+        if line not in deduplicated:
+            deduplicated.append(line)
+    return deduplicated
+
+
+# 여러 줄을 쌓을 때 줄 사이 간격(px). drawtext는 자기 줄의 text_h만 알므로
+# 줄 높이는 fontsize 36 기준 고정 간격으로 잡는다.
+_OVERLAY_LINE_PITCH_PX = 54
+
+
 def _default_overlay_font() -> str:
     """The name here must match the one the failure message tells the owner to
     set. It read `VIDEBOX_OVERLAY_FONT` -- an `O` short -- so following the
@@ -315,23 +359,29 @@ class FfmpegFinalRenderer:
         for overlay_index, overlay in enumerate(composition_plan.export_overlays):
             if overlay.get("asset_uri") or overlay.get("asset_id"):
                 continue
-            text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()
-            if not text:
+            lines = export_overlay_text_lines(dict(overlay))
+            if not lines:
                 continue
             start_sec, end_sec = float(overlay.get("start_sec") or 0.0), float(overlay.get("end_sec") or 0.0)
             if end_sec <= start_sec:
                 continue
             if not Path(self.overlay_font_file).is_file():
                 raise FinalRenderError("Overlay font is missing; set VIDEOBOX_OVERLAY_FONT before rendering text overlays.")
-            escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
             font = self.overlay_font_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-            next_canvas = f"canvas_text_{overlay_index}"
-            filters.append(
-                f"[{canvas}]drawtext=fontfile='{font}':text='{escaped}':x=(w-text_w)/2:y=h-(text_h*3):"
-                f"fontsize=36:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=12:"
-                f"enable='between(t,{start_sec},{end_sec})'[{next_canvas}]"
-            )
-            canvas = next_canvas
+            # 여러 줄은 아래에서 위로 쌓는다: 마지막 줄이 기존 한 줄 자리
+            # (`h-(text_h*3)`)에 오고, 앞 줄일수록 위로 올라간다. 읽는 순서는
+            # 그대로 위→아래다.
+            for line_index, line in enumerate(lines):
+                escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+                rise_px = (len(lines) - 1 - line_index) * _OVERLAY_LINE_PITCH_PX
+                y_expression = f"h-(text_h*3)-{rise_px}" if rise_px else "h-(text_h*3)"
+                next_canvas = f"canvas_text_{overlay_index}_{line_index}"
+                filters.append(
+                    f"[{canvas}]drawtext=fontfile='{font}':text='{escaped}':x=(w-text_w)/2:y={y_expression}:"
+                    f"fontsize=36:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=12:"
+                    f"enable='between(t,{start_sec},{end_sec})'[{next_canvas}]"
+                )
+                canvas = next_canvas
         filters.append(f"[{canvas}]null[vout]")
         return ";".join(filters)
 
@@ -963,19 +1013,24 @@ class FfmpegFinalRenderer:
                     image_overlays.append(
                         (self._resolve_generic_asset_uri(project_id=project_id, asset_uri=asset_uri), start_sec, end_sec)
                     )
-            text = str(overlay.get("text") or overlay.get("title") or overlay.get("body") or "").strip()
-            if not text:
+            lines = export_overlay_text_lines(overlay)
+            if not lines:
                 continue
             if not Path(self.overlay_font_file).is_file():
                 raise FinalRenderError(
                     f"Overlay font is missing: '{self.overlay_font_file}'. Install the font or set VIDEOBOX_OVERLAY_FONT."
                 )
-            escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
             font_file = self.overlay_font_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-            text_filters.append(
-                f"drawtext=fontfile='{font_file}':text='{escaped}':x=(w-text_w)/2:y=h-(text_h*3):fontsize=36:fontcolor=white:"
-                f"box=1:boxcolor=black@0.65:boxborderw=12:enable='between(t,{start_sec},{end_sec})'"
-            )
+            # 그래프 경로(`build_plan_filter_graph`)와 같은 쌓기: 마지막 줄이
+            # 기존 한 줄 자리에 오고 앞 줄일수록 위로 올라간다.
+            for line_index, line in enumerate(lines):
+                escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+                rise_px = (len(lines) - 1 - line_index) * _OVERLAY_LINE_PITCH_PX
+                y_expression = f"h-(text_h*3)-{rise_px}" if rise_px else "h-(text_h*3)"
+                text_filters.append(
+                    f"drawtext=fontfile='{font_file}':text='{escaped}':x=(w-text_w)/2:y={y_expression}:fontsize=36:fontcolor=white:"
+                    f"box=1:boxcolor=black@0.65:boxborderw=12:enable='between(t,{start_sec},{end_sec})'"
+                )
         if not text_filters and not image_overlays:
             return video_path
         overlaid_path = work_dir / "broll_with_overlays.mp4"

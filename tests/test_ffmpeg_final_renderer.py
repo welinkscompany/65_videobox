@@ -188,6 +188,45 @@ def test_export_overlay_blocks_a_missing_font_before_starting_ffmpeg(tmp_path: P
         )
 
 
+@pytest.mark.skipif(OVERLAY_FONT is None, reason="no font available to draw a text overlay")
+def test_apply_export_overlays_draws_table_structure_in_the_legacy_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """렌더 경로가 둘이다: composition plan 그래프뿐 아니라 이 legacy 경로도
+    표의 열·행을 실제로 그려야 한다. 예전에는 `text`만 그렸다."""
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store, overlay_font_file=OVERLAY_FONT)
+    captured: list[list[str]] = []
+
+    def fake_run(self: FfmpegFinalRenderer, command: list[str]) -> subprocess.CompletedProcess:
+        captured.append(command)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", fake_run)
+
+    result = renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=[{
+            "overlay_type": "table_overlay",
+            "columns": ["항목", "값"],
+            "rows": [["길이", "10초"]],
+            "text": "요약표",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+        }],
+        work_dir=tmp_path,
+    )
+
+    assert result != tmp_path / "video.mp4"
+    assert captured, "the overlay render command never ran"
+    filter_graph = captured[0][captured[0].index("-filter_complex") + 1]
+    assert "항목 | 값" in filter_graph
+    assert "길이 | 10초" in filter_graph
+    assert "요약표" in filter_graph
+    assert filter_graph.index("항목 | 값") < filter_graph.index("길이 | 10초")
+
+
 def test_final_renderer_explains_missing_broll_media_before_rendering(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Missing B-roll")

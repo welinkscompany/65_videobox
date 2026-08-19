@@ -1790,6 +1790,32 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
   });
 
+  // 이미지 오버레이 endpoint와 렌더는 처음부터 있었는데 화면에 부르는 자리가
+  // 없었다. 자산 목록의 이미지 카드가 그 선택기다.
+  it("lays an image asset over the selected scene through the image overlay command", async () => {
+    const imageAsset = {
+      asset_id: "image-1",
+      asset_type: "broll_image",
+      storage_uri: "file:///image-1.png",
+      created_at: "2026-08-20T00:00:00Z",
+      metadata: { title: "제품 사진", analysis_status: "succeeded", review_required: false },
+    };
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([imageAsset] as never);
+    const applyOverlay = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "제품 사진 화면에 얹기" });
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "제품 사진 화면에 얹기" }));
+
+    await waitFor(() => expect(applyOverlay).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "image-1",
+      text: "",
+      expected_revision: 1,
+    }));
+  });
+
   it("applies B-roll through the current revision fence without materializing it", async () => {
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([broll] as never);
     const materialize = vi.spyOn(api, "materializeMediaLibraryAsset");

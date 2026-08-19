@@ -72,6 +72,7 @@ type EditorWorkbenchProps = Readonly<{
   partialRegeneration?: PartialRegenerationControls;
   assetCards?: readonly EditorAssetCard[];
   onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>;
+  onApplyImageOverlay?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>;
   onPrepareAssetPreview?: (card: EditorAssetCard) => Promise<string>;
   isSavingTimeline?: boolean;
   timelineMutationMessage?: string;
@@ -105,6 +106,7 @@ function EditorWorkbenchInstance({
   partialRegeneration,
   assetCards = [],
   onApplyAssetCard,
+  onApplyImageOverlay,
   onPrepareAssetPreview,
   isSavingTimeline = false,
   timelineMutationMessage,
@@ -425,7 +427,7 @@ function EditorWorkbenchInstance({
       return { routeKey: viewRouteKey, request: { requestId: (currentRequest?.requestId ?? 0) + 1, source } };
     });
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };

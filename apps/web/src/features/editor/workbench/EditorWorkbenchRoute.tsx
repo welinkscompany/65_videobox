@@ -695,6 +695,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       }
     }
   };
+  // 이미지 자산을 장면 **위에** 얹는다. `적용`(B-roll 교체)과 다른 길이다.
+  // 오버레이 endpoint와 렌더는 처음부터 있었는데 화면에 부르는 자리가 없었다.
+  // 문구는 나중에 편집 항목의 `이미지` 절에서 붙일 수 있으므로 빈 값으로 만든다.
+  const applyImageOverlay = (card: EditorAssetCard, segmentId: string) =>
+    commitTimelineMutation((port) => port.applyOverlay({ kind: "image", segmentId, assetId: card.assetId, text: "" }));
   const applyAssetCard = (card: EditorAssetCard, segmentId: string) => card.kind === "broll"
     ? commitTimelineMutation((port) => port.applyMedia({ kind: "broll", segmentId, assetId: card.assetId }))
     : commitTimelineMutation(async (port, isCurrent) => {
@@ -1762,6 +1767,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     isSavingTimeline={mutation.isSaving}
     loadApprovedTtsCandidates={loadApprovedTtsCandidates}
     onApplyAssetCard={applyAssetCard}
+    onApplyImageOverlay={applyImageOverlay}
     onPrepareAssetPreview={prepareAssetPreview}
     onInspectorAction={handleInspectorAction}
     onPreviewRefresh={refreshPreview}
