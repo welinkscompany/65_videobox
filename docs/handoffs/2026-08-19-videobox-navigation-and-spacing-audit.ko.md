@@ -1,5 +1,7 @@
 # 길을 잃지 않게 고치고, 여백을 재 봤다
 
+**대체됨:** `docs/handoffs/2026-08-19-videobox-talk-to-edit-three-links.ko.md`
+
 - 작성: 2026-08-19
 - **읽는 순서:** 이 문서 →
   `docs/handoffs/2026-08-18-videobox-source-audio-switch-and-save-path.ko.md`
