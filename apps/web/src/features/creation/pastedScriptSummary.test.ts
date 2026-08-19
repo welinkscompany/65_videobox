@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pastedScriptSummary } from "./pastedScriptSummary";
+import { creationBriefStorageKey, pastedScriptSummary } from "./pastedScriptSummary";
 
 describe("pastedScriptSummary", () => {
   it("uses the opening line, because that is what the creator already wrote", () => {
@@ -21,5 +21,15 @@ describe("pastedScriptSummary", () => {
     // 확정 화면이 빈 요약으로 막히면 안 된다. 사람이 고쳐 쓸 자리를 준다.
     expect(pastedScriptSummary("   ")).toBe("붙여넣은 대본");
     expect(pastedScriptSummary("")).toBe("붙여넣은 대본");
+  });
+});
+
+describe("creationBriefStorageKey", () => {
+  it("is the one place both screens look, so a pasted script is not lost", () => {
+    // 2026-08-19: 편집기에서 대본을 붙여 넣어 브리프를 만들고도 이 키를 쓰지
+    // 않아, 확정 화면이 빈 폼을 보여 줬다. 대본은 서버에 있는데 화면에서
+    // 만날 길이 없었다. 두 화면이 같은 키를 보는지 여기서 지킨다.
+    expect(creationBriefStorageKey("project-a")).toBe("videobox.creation-brief.project-a");
+    expect(creationBriefStorageKey("project-a")).not.toBe(creationBriefStorageKey("project-b"));
   });
 });

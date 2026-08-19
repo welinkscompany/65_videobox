@@ -19,3 +19,14 @@ export function pastedScriptSummary(script: string): string {
     ? opening
     : `${opening.slice(0, MAX_SUMMARY_CHARACTERS - 1)}…`;
 }
+
+
+/** 기획 화면이 브리프를 되찾는 자리.
+ *
+ * 2026-08-19: 편집기에서 대본을 붙여 넣어 브리프를 만들어 놓고 **이 키를 쓰지
+ * 않아서**, 확정 화면이 빈 폼을 보여 줬다. 대본은 서버에 있는데 화면에서 만날
+ * 길이 없었다. 키를 한 곳에 두어 두 벌이 되지 않게 한다.
+ */
+export function creationBriefStorageKey(projectId: string): string {
+  return `videobox.creation-brief.${projectId}`;
+}

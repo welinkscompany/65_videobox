@@ -6,8 +6,9 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { AssetPreviewPlayer, type PreviewCandidate } from "../director/AssetPreviewPlayer";
 import { usePlaceholderConfirmation } from "./usePlaceholderConfirmation";
+import { creationBriefStorageKey as briefStorageKey } from "./pastedScriptSummary";
 
-const briefStorageKey = (projectId: string) => `videobox.creation-brief.${projectId}`;
+
 const pendingKey = (projectId: string, source: "paste" | "upload") => `videobox.creation-pending.${projectId}.${source}`;
 const shortcutAnswers = ["모르겠어요", "추천해줘", "건너뛰기"] as const;
 type PendingAnswer = { questionId: string; answer: string; expectedRevision: number };

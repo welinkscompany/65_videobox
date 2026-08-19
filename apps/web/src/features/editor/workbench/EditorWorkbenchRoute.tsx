@@ -5,7 +5,7 @@ import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, t
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
-import { pastedScriptSummary } from "../../creation/pastedScriptSummary";
+import { creationBriefStorageKey, pastedScriptSummary } from "../../creation/pastedScriptSummary";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
@@ -1725,6 +1725,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
           expected_revision: brief.revision,
         });
       }
+      // **확정 화면이 이 브리프를 찾을 수 있게 남긴다.** 이걸 빼먹었더니 대본은
+      // 서버에 만들어졌는데 화면은 빈 폼을 보여 줬다 -- 붙여 넣은 글을 다시
+      // 만날 길이 없었다(2026-08-19, 배포 뒤에 발견). 기획 화면은 이 키로만
+      // 브리프를 되찾는다.
+      try { window.localStorage.setItem(creationBriefStorageKey(projectId), brief.brief_id); } catch { /* 저장이 막혀도 이동은 한다 */ }
       // 확정 화면으로 보낸다. 전역 메뉴와 같은 평범한 주소 이동이다 -- 이
       // 컴포넌트는 라우터를 갖고 있지 않고, 갖게 하려고 결합을 늘리지 않는다.
       window.location.assign(resolveWorkspaceLocation(projectId, "create"));
