@@ -216,3 +216,43 @@ def test_workspace_image_runs_api_and_web_proxy_together() -> None:
     assert "/var/lib/nginx" not in nginx
     assert "error_log /tmp/nginx-error.log notice;" in nginx
     assert "access_log /tmp/nginx-access.log;" in nginx
+
+
+def _workspace_environment() -> dict[str, str]:
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    return {
+        str(key): str(value)
+        for key, value in compose["services"]["videobox-workspace"]["environment"].items()
+    }
+
+
+def test_speech_to_text_defaults_to_on_so_a_container_never_ships_fake_transcripts() -> None:
+    """이 저장소가 **가장 비싸게 배운 사고**를 한 글자로 되돌릴 수 있었다.
+
+    `VIDEOBOX_STT_ENABLED`가 `0`으로 바뀌면 `create_app`은 `MockSTTProvider`로
+    내려간다. 그 provider는 오디오를 **무시하고** `"Line one."` 같은 영어 문장을
+    돌려준다 -- owner에게는 가짜 전사가 완성본에 박힌다.
+
+    그런데 2026-08-19까지 이 기본값을 지키는 테스트가 하나도 없었다. 백엔드
+    3,650개도 웹 1,088개도 e2e 48개도 전부 초록인 채로 그 사고가 재현된다.
+    테스트가 오히려 **컨테이너 기본이 mock임을 정답으로 고정**하고 있었다
+    (`tests/test_stt_runtime_config.py`는 인자 없는 `create_app()`을 재는데,
+    컨테이너는 그 경로에 이 환경변수를 넣어 준다).
+    """
+    environment = _workspace_environment()
+
+    assert environment["VIDEOBOX_STT_ENABLED"] == "${VIDEOBOX_STT_ENABLED:-1}"
+    assert environment["VIDEOBOX_STT_LANGUAGE"] == "${VIDEOBOX_STT_LANGUAGE:-ko}"
+
+
+def test_the_local_model_address_stays_on_the_host_loopback_bridge() -> None:
+    """로컬 모델 주소가 바뀌면 분석·의미검색·유진 대화가 한꺼번에 조용히 죽는다.
+
+    실패해도 `/health`는 `ok`이고 `owner-ready`도 PASS라, 화면에서만 "추천이
+    안 나온다"로 나타난다. 기본값을 여기서 못 박아 둔다.
+    """
+    environment = _workspace_environment()
+
+    assert environment["VIDEOBOX_LOCAL_RUNTIME_BASE_URL"] == (
+        "${VIDEOBOX_LOCAL_RUNTIME_BASE_URL:-http://host.docker.internal:1234/v1}"
+    )
