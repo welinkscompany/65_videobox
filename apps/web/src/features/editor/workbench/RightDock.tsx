@@ -50,6 +50,8 @@ export type RightDockProps = Readonly<{
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   onRefreshProposal?: () => void | Promise<void>;
   onManualEdit?: () => void;
+  /** 붙여 넣은 글을 대본으로 받는다. 확정은 사람이 한다. */
+  onUseDraftAsScript?: (script: string) => void | Promise<void>;
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
   /** 추천 시작이 거절된 이유. 다시 누를 수 있는 상태로 함께 보인다. */
@@ -59,6 +61,13 @@ export type RightDockProps = Readonly<{
   onRetryRun?: () => void | Promise<void>;
   retryAfterSeconds?: number | null;
 }>;
+
+/** 붙여 넣은 것이 **대본인지 요청인지** 가른다. 기준은 길이 하나다 --
+ *  "B-roll 추천해 줘"는 요청이고, 문장 여럿이 이어지면 대본으로 본다. */
+const SCRIPT_MINIMUM_CHARACTERS = 30;
+function looksLikeScript(draft: string): boolean {
+  return draft.trim().length >= SCRIPT_MINIMUM_CHARACTERS;
+}
 
 /** 후보를 **부르는 이름**. 코드는 사람이 고르는 근거가 못 된다 -- 2026-08-19에
  *  owner 화면의 후보 일곱 개가 전부 `P08-B-01 · 미디어`였고, 실제로는 서로 다른
@@ -100,6 +109,7 @@ export function RightDock({
   onApplyProposal,
   onRefreshProposal,
   onManualEdit,
+  onUseDraftAsScript,
   onPreviewCandidate,
   onStart,
   startFailure = null,
@@ -266,6 +276,13 @@ export function RightDock({
         <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
       </div>
       <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
+      {/* 긴 글을 붙여 넣었으면 그것을 대본으로 받는 길을 준다(owner 2026-08-19).
+          예전에는 대본이 `/plan`의 문답형 인터뷰로만 들어와서, 이미 써 둔 대본을
+          가진 사람은 질문에 답해 가며 다시 만들어야 했다.
+          짧은 한 줄에는 띄우지 않는다 -- 그건 요청이지 대본이 아니다. */}
+      {onUseDraftAsScript && looksLikeScript(draft)
+        ? <Button type="button" onClick={() => void onUseDraftAsScript(draft)}>이 글을 대본으로 쓰기</Button>
+        : null}
       {onCancelRun
         ? <Button type="button" onClick={() => void onCancelRun()}>답변 중단</Button>
         : null}

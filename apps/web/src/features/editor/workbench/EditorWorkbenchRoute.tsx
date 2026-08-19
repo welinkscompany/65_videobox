@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
+import { resolveWorkspaceLocation } from "../../../app/routeManifest";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
@@ -1691,6 +1692,25 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onApplyProposal: applyDirectorProposal,
     onRefreshProposal: activeDirector.proposal ? refreshDirectorProposal : undefined,
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
+    // 붙여 넣은 글을 이 프로젝트의 대본으로 받는다(owner 2026-08-19). 대본을
+    // 통째로 받는 경로는 이미 있었고(`creation-briefs/upload`) **부르는 자리만
+    // 없었다** -- 대본은 `/plan`의 문답형 인터뷰로만 들어왔다.
+    //
+    // **여기서 장면을 만들지 않는다.** 대본을 만들어 두고 확정 화면으로 보낸다 --
+    // 확정은 owner가 누르는 게이트이고, 그것을 없애지 않기로 승인돼 있다
+    // (`decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md`).
+    onUseDraftAsScript: async (script: string) => {
+      const trimmed = script.trim();
+      if (!trimmed) return;
+      const file = new File([trimmed], "붙여넣은-대본.txt", { type: "text/plain" });
+      const brief = await api.uploadCreationBrief(projectId, file, {
+        idempotency_key: `paste:${Date.now()}`,
+        capability_profile: {},
+      });
+      // 확정 화면으로 보낸다. 전역 메뉴와 같은 평범한 주소 이동이다 -- 이
+      // 컴포넌트는 라우터를 갖고 있지 않고, 갖게 하려고 결합을 늘리지 않는다.
+      window.location.assign(resolveWorkspaceLocation(projectId, "create"));
+    },
     // 재생은 편집 작업판이 가진 미리 듣기 자리가 맡는다. 여기서 빈 함수를
     // 넘기고 있었는데, 그 값은 작업판이 어차피 덮어쓴다 -- 남겨 두면 화면이
     // 미리 보기를 안 한다는 잘못된 인상만 준다.

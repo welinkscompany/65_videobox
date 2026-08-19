@@ -214,6 +214,28 @@ describe("RightDock", () => {
     expect(screen.queryByRole("radio", { name: /P01-B-01/ })).toBeNull();
   });
 
+  it("offers to take a pasted script, so the editor is reachable without the interview", () => {
+    // 2026-08-19 owner: "유진이랑 대화하면서 대본을 복붙하면 유진이가 그걸 보고
+    // 편집기에 붙여 줬으면". 지금은 대본이 `/plan`의 문답형 인터뷰로만 들어간다.
+    // 긴 글을 붙여 넣으면 그것을 대본으로 받는 길을 준다. **확정은 사람이 한다** --
+    // 이 단추는 대본을 만들 뿐 장면을 바로 만들지 않는다.
+    const onUseDraftAsScript = vi.fn();
+    const script = "안녕하세요. 오늘은 제주 바다를 소개합니다. 두 번째 문장입니다.";
+    render(<RightDock draft={script} onDraftChange={() => undefined} onUseDraftAsScript={onUseDraftAsScript} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "이 글을 대본으로 쓰기" }));
+
+    expect(onUseDraftAsScript).toHaveBeenCalledWith(script);
+  });
+
+  it("does not offer the script button for a short question", () => {
+    // 짧은 한 줄은 요청이지 대본이 아니다. 늘 띄우면 단추가 소음이 된다.
+    const onUseDraftAsScript = vi.fn();
+    render(<RightDock draft="B-roll 추천해 줘" onDraftChange={() => undefined} onUseDraftAsScript={onUseDraftAsScript} />);
+
+    expect(screen.queryByRole("button", { name: "이 글을 대본으로 쓰기" })).toBeNull();
+  });
+
   it("is a controlled adapter for candidate selection and restored conversation scroll", () => {
     const onSelectedCandidateIdsChange = vi.fn();
     const onConversationScrollChange = vi.fn();

@@ -103,6 +103,9 @@ export type RightDockDirector = Readonly<{
   /** 낡은 추천에서 유진에게 돌아가는 길. 추천이 있을 때만 있다. */
   onRefreshProposal?: () => void | Promise<void>;
   onManualEdit: () => void;
+  /** 붙여 넣은 글을 이 프로젝트의 대본으로 받는다. **확정은 사람이 한다** --
+   *  이 경로는 대본을 만들 뿐 장면을 바로 만들지 않는다. */
+  onUseDraftAsScript?: (script: string) => void | Promise<void>;
   /** 편집 작업판이 미리 듣기 자리를 물려 준다. 경로 자체는 재생하지 않는다. */
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
   onStart?: () => void | Promise<void>;
