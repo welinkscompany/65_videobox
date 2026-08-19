@@ -264,6 +264,26 @@ function EditorWorkbenchInstance({
   }, [requestedSegmentId, view.captions, view.output.durationSec, view.sessionId, view.tracks]);
   useEffect(() => { const side = restoreFocusRef.current; if (!ui.activeDrawer && side) { restoreFocusRef.current = null; window.setTimeout(() => (side === "left" ? leftTriggerRef : rightTriggerRef).current?.focus(), 0); } }, [ui.activeDrawer]);
   const layout = resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbenchWidth, persisted: ui });
+  /** 도크 단추. **방금 누른 쪽이 이긴다.**
+   *
+   * 좁은 데스크톱은 도크를 하나만 보여 주는데, 어느 쪽을 보일지는 `leftOpen`이
+   * 먼저 정했다. 그래서 왼쪽이 열려 있으면 `유진과 편집 항목`을 눌러도 **아무 일도
+   * 없는 것처럼** 보였다 -- 왼쪽을 먼저 닫아야 나왔다(2026-08-19 배포 화면에서 확인).
+   * 처음 쓰는 사람은 그것을 고장으로 읽는다.
+   *
+   * 넓은 화면(`desktop-both`)에서는 둘 다 열리므로 여는 동작만 하고 상대를 닫지
+   * 않는다. 닫는 것은 어느 폭에서나 그대로 닫는다.
+   */
+  const toggleDock = (side: "left" | "right") => setUi((current) => {
+    const opening = side === "left" ? !current.leftOpen : !current.rightOpen;
+    if (!opening) return { ...current, [side === "left" ? "leftOpen" : "rightOpen"]: false };
+    const closesTheOther = opening && layout.mode === "desktop-single";
+    return {
+      ...current,
+      leftOpen: side === "left" ? true : closesTheOther ? false : current.leftOpen,
+      rightOpen: side === "right" ? true : closesTheOther ? false : current.rightOpen,
+    };
+  });
   const openDrawer = (side: "left" | "right") => { lastActiveDrawer = side; writeActiveDrawer(side); setUi((current) => ({ ...current, activeDrawer: side })); };
   const closeDrawer = () => { lastActiveDrawer = null; writeActiveDrawer(null); setUi((current) => ({ ...current, activeDrawer: null })); };
   const closeAndRestore = () => { restoreFocusRef.current = ui.activeDrawer; closeDrawer(); };
@@ -460,7 +480,7 @@ function EditorWorkbenchInstance({
     void onVariantPatch(serverVariant, { resolve_conflicts: { [field]: decision } });
   };
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)} style={ui.timelineRem === null ? undefined : ({ "--vb-timeline-height": `${ui.timelineRem}rem` } as CSSProperties)}>
-    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button>{cutButton(cutTools.split)}{cutButton(cutTools.join)}{cutButton(cutTools.drop)}{cutButton(cutTools.copyToNext)}<Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : setUi((current) => ({ ...current, leftOpen: !current.leftOpen }))}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : setUi((current) => ({ ...current, rightOpen: !current.rightOpen }))}>유진과 편집 항목</Button></div></header>
+    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button>{cutButton(cutTools.split)}{cutButton(cutTools.join)}{cutButton(cutTools.drop)}{cutButton(cutTools.copyToNext)}<Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}>유진과 편집 항목</Button></div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}

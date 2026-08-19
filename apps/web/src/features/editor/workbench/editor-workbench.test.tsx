@@ -101,6 +101,32 @@ describe("EditorWorkbench", () => {
     expect(workbench.style.getPropertyValue("--vb-timeline-height")).toBe("21rem");
   });
 
+  it("shows the dock the creator just asked for, instead of leaving the button dead", async () => {
+    // 2026-08-19 배포 화면에서 확인: 좁은 데스크톱에서는 도크가 하나만 보이는데
+    // **왼쪽이 늘 이겨서** `유진과 편집 항목`을 눌러도 아무 일이 없는 것처럼
+    // 보였다. 왼쪽을 먼저 닫아야 오른쪽이 나왔다 -- 처음 쓰는 사람은 고장으로 읽는다.
+    render(<EditorWorkbench view={view} />);
+    const workbench = await screen.findByRole("region", { name: "편집 작업판" });
+    expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
+    expect(screen.getByRole("complementary", { name: "자산과 대본" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    expect(screen.getByRole("complementary", { name: "유진과 편집 항목" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "자산과 대본" })).toBeNull();
+  });
+
+  it("gives the material dock back the same way, without needing a second click", async () => {
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+
+    expect(screen.getByRole("complementary", { name: "자산과 대본" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "유진과 편집 항목" })).toBeNull();
+  });
+
   it("uses the measured workbench width rather than viewport width", async () => {
     render(<EditorWorkbench view={view} />);
     expect(await screen.findByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-density", "desktop-single");
