@@ -829,7 +829,7 @@ export type FootageSequencePreview = {
   preview_items: Array<{ item_id: string; source_id: string; source_sha256: string; preview_url: string }>;
   items: FootageSequenceItem[];
 };
-export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string };
+export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string; semantic_match?: boolean };
 export type LibraryUsageLocation = {
   project_id?: string | null;
   materialized_asset_id?: string | null;

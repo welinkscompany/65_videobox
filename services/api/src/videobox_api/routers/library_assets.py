@@ -237,14 +237,36 @@ def build_library_assets_router(
                     semantic_matches = media_library_store.find_audio_matches(query_embedding=vector, media_type=kind.value, limit=limit)
                 for value in semantic_matches:
                     value["reason"] = "의미 기반 색인 일치"
+                    value["semantic_match"] = True
+                    # 색인 행에는 라이브러리 화면이 필터에 쓰는 필드가 없다.
+                    # 채우지 않으면 화면이 전부 걸러내서, 배지는 `뜻으로 찾음`인데
+                    # 목록에는 단어 매칭만 남는 거짓말이 된다.
+                    value.setdefault("media_type", kind.value)
+                    asset_ref = str(value.get("library_asset_id") or "")
+                    if asset_ref:
+                        value.setdefault("lifecycle", "ready")
+                        value.setdefault("origin", "builtin" if asset_ref.startswith("pack:") else "user")
                 matches.extend(semantic_matches)
-                semantic = True
+                # 조회가 돌았어도 0건이면 보이는 목록은 전부 단어 매칭이다.
+                semantic = bool(semantic_matches)
             except Exception:
                 # Search remains useful with filename/metadata matches when
                 # LM Studio is unavailable; never fabricate semantic scores.
                 semantic = False
         matches.sort(key=lambda value: (-float(value.get("score", 0)), str(value.get("library_asset_id", value.get("content_sha256", "")))))
-        return {"matches": matches[:limit], "semantic": semantic}
+        # 같은 자산이 단어와 뜻 양쪽에서 잡히면 한 번만 내려보낸다. 촬영본
+        # 색인 조각(`source_segment_id`가 있는 행)은 자산이 아니라 구간이라
+        # 촬영본 정리 화면의 계약이므로 dedup에서 제외하고 그대로 둔다.
+        seen_asset_ids: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for value in matches:
+            asset_ref = str(value.get("library_asset_id") or "")
+            if asset_ref and "source_segment_id" not in value:
+                if asset_ref in seen_asset_ids:
+                    continue
+                seen_asset_ids.add(asset_ref)
+            deduped.append(value)
+        return {"matches": deduped[:limit], "semantic": semantic}
 
     @router.get("/api/library/assets/{asset_id}/usage")
     def get_library_asset_usage(asset_id: str) -> dict[str, Any]:

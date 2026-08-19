@@ -445,18 +445,21 @@ export function InspectorControls({
           <legend>자막 스타일</legend>
           {projectId ? <CaptionPresetPicker
             projectId={projectId}
-            /* 지금 잡아 놓은 모양 **전부**를 스냅샷 이름으로 넘긴다. 세 값만 넘기면
-               외곽선·배경·위치가 빠진 모양이 저장되고, owner는 적용해 보고서야 안다. */
+            /* 지금 잡아 놓은 모양 **전부**를 CaptionStyle 정본 이름으로 넘긴다.
+               세 값만 넘기면 외곽선·배경·위치가 빠진 모양이 저장되고, owner는
+               적용해 보고서야 안다. 이름을 섞으면(font_size와 shadow_blur_px)
+               다음 사람이 어느 어휘가 맞는지 알 수 없다. */
             currentStyle={{
               font_family: captionStyle.fontFamily,
-              font_size: captionStyle.fontSizePx,
+              font_size_px: captionStyle.fontSizePx,
               text_color: captionStyle.textColor,
               outline_color: captionStyle.outlineColor,
-              outline_width: captionStyle.outlineWidthPx,
+              outline_width_px: captionStyle.outlineWidthPx,
               background_color: captionStyle.backgroundColor,
-              position_x: captionStyle.positionXPercent,
-              position_y: captionStyle.positionYPercent,
+              position_x_percent: captionStyle.positionXPercent,
+              position_y_percent: captionStyle.positionYPercent,
               horizontal_align: captionStyle.horizontalAlign,
+              safe_area_enabled: captionStyle.safeAreaEnabled,
               shadow_blur_px: captionStyle.shadowBlurPx,
             }}
             onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))}

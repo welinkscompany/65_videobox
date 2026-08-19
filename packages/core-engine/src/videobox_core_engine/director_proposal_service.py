@@ -270,12 +270,12 @@ class DirectorProposalService:
             )
             return assets, WORD_MATCH
         score_by_asset_id = {str(match["asset_id"]): float(match["score"]) for match in matches}
-        if not score_by_asset_id:
-            # 조회는 성공했지만 0건이다. 의미 점수가 하나도 안 붙었으니 실제
-            # 순위는 전부 단어 매칭이 정한다 -- 그걸 `뜻으로 찾음`이라고
-            # 말하면 화면이 거짓말을 한다.
+        # 0건이거나, 돌아온 점수가 **지금 순위에 올릴 자산과 하나도 겹치지
+        # 않으면** 의미 점수는 하나도 안 붙는다. 실제 순위는 전부 단어 매칭이
+        # 정하는데 그걸 `뜻으로 찾음`이라고 말하면 화면이 거짓말을 한다.
+        if not any(str(asset.get("asset_id")) in score_by_asset_id for asset in assets):
             _logger.info(
-                "Semantic lookup returned no matches for project %s; ranking is lexical.",
+                "Semantic lookup contributed no scores for project %s; ranking is lexical.",
                 project_id,
             )
             return assets, WORD_MATCH

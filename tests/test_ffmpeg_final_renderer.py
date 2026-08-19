@@ -864,6 +864,65 @@ def test_plan_render_survives_a_soundless_broll_with_source_audio_kept(tmp_path:
     assert peak is not None and peak > -30.0, "내레이션 소리가 완성본에 남아 있어야 한다"
 
 
+def test_every_amix_line_in_the_renderer_keeps_normalize_off() -> None:
+    """`amix`는 기본으로 입력 수만큼 나눈다(normalize=1). 같은 함정에 이미
+    세 번 걸렸다 -- 새 믹스 자리가 또 잊지 못하게 소스에서 직접 잰다.
+    ffmpeg 없는 기계에서도 도는 가드다."""
+    import inspect
+
+    from videobox_core_engine import ffmpeg_final_renderer as module
+
+    offenders = [
+        line.strip()
+        for line in inspect.getsource(module).splitlines()
+        if "amix=inputs" in line and "normalize=0" not in line
+    ]
+
+    assert offenders == []
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.skipif(OVERLAY_FONT is None, reason="no usable overlay font on this machine")
+def test_export_overlays_do_not_break_the_kept_broll_source_audio(tmp_path: Path) -> None:
+    """자막 카드(오버레이)를 얹는 재인코딩이 `-an`으로 돌아서, 오버레이가 하나라도
+    있으면 `원본 소리 살리기` 믹스가 잡을 `[1:a]`가 사라져 렌더가 통째로 막혔다.
+    소리는 오버레이를 얹기 **전** 이어붙인 파일에서 가져와야 한다."""
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="overlay must not eat broll audio")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:a", "pcm_s16le", str(narration_file)])
+    sound_broll_file = tmp_path / "sound-broll.mp4"
+    _generate([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=15:d=2",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2",
+        "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(sound_broll_file),
+    ])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=sound_broll_file)
+    output = tmp_path / "overlay-and-source-audio.mp4"
+
+    FfmpegFinalRenderer(
+        store=store, video_width=320, video_height=240, video_fps=15, overlay_font_file=OVERLAY_FONT,
+    ).render_timeline_to_mp4(
+        project_id=project.project_id,
+        output_path=output,
+        timeline={
+            "narration_source_uri": narration.storage_uri,
+            "export_overlays": [{"overlay_type": "explanation_card", "text": "설명 카드", "start_sec": 0.2, "end_sec": 1.2}],
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+                {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"preserve_source_audio": True, "loop": False}}]},
+            ],
+        },
+    )
+
+    peak = probe_audio_peak_dbfs(output)
+    assert peak is not None and peak > -30.0, "살려 둔 B-roll 소리가 완성본에 남아 있어야 한다"
+
+
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
 @pytest.mark.parametrize("ducking", [False, True])
 def test_adding_bgm_does_not_quiet_the_narration_in_the_segment_path(tmp_path: Path, ducking: bool) -> None:

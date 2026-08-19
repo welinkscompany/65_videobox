@@ -63,7 +63,13 @@ describe("LibraryPage", () => {
     // 없었다 -- 검색은 언제나 단어 매칭이었다. 종류 탭을 고르고 검색하면
     // 의미검색을 부르고, 어느 방식으로 찾았는지 말한다.
     const search = vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
-      matches: [{ ...asset({ library_asset_id: "match_1", user_metadata: { filename: "calm-walk.mp4", tags: [] } }), score: 0.9, reason: "묘사 일치" }],
+      matches: [
+        { ...asset({ library_asset_id: "match_1", user_metadata: { filename: "calm-walk.mp4", tags: [] } }), score: 0.9, reason: "묘사 일치", semantic_match: true },
+        // 촬영본 색인 조각(자산 아님)은 이 화면이 다룰 수 없어 걸러야 한다.
+        { library_asset_id: null, score: 0.8, semantic_match: true } as never,
+        // 같은 자산이 두 번 오면 한 번만 그린다 -- React key가 겹친다.
+        { ...asset({ library_asset_id: "match_1", user_metadata: { filename: "calm-walk.mp4", tags: [] } }), score: 0.5, semantic_match: true },
+      ],
       semantic: true,
     });
     render(<LibraryPage />);
@@ -72,6 +78,8 @@ describe("LibraryPage", () => {
 
     await waitFor(() => expect(search).toHaveBeenCalledWith("차분한 산책", "broll", undefined));
     expect((await screen.findAllByText("calm-walk.mp4")).length).toBeGreaterThan(0);
+    // 조각 행은 걸러지고, 중복 자산은 카드 하나만 남는다.
+    expect(screen.getAllByTestId("library-asset-card")).toHaveLength(1);
     expect(screen.getByRole("status", { name: "찾은 방식" })).toHaveTextContent("뜻으로 찾음");
   });
 
@@ -83,6 +91,23 @@ describe("LibraryPage", () => {
     render(<LibraryPage />);
     fireEvent.click(await screen.findByRole("tab", { name: "영상" }));
     fireEvent.change(screen.getByLabelText("검색"), { target: { value: "걷기" } });
+
+    expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
+  });
+
+  it("does not claim meaning-based results when every semantic row was unusable", async () => {
+    // 의미검색이 돌았어도(semantic: true) 남은 행이 전부 단어 매칭이면
+    // `뜻으로 찾음` 배지는 거짓말이다 -- 실제로 걸러 낸 뒤 기준으로 말한다.
+    vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [
+        { ...asset(), score: 0.5, reason: "파일명 또는 분석 메타데이터 일치" },
+        { library_asset_id: null, score: 0.9, semantic_match: true } as never,
+      ],
+      semantic: true,
+    });
+    render(<LibraryPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "영상" }));
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "노을" } });
 
     expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
   });

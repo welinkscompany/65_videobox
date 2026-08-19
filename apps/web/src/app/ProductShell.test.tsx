@@ -606,7 +606,8 @@ describe("settings that cannot do what they offered", () => {
     // 이번 세션에는 적용된다.
     expect(screen.getByRole("button", { name: /시작할 때 마지막 프로젝트 열기: 꺼짐/ })).toBeVisible();
     // 그리고 저장되지 않았다는 것을 숨기지 않는다.
-    expect(screen.getByRole("status")).toHaveTextContent("설정을 이 기기에 저장하지 못했어요. 다음에 열면 이전 설정으로 돌아갈 수 있어요.");
+    // 실패 문구는 다음 행동을 안내한다(§10.13) -- 결과만 알리고 끝내지 않는다.
+    expect(screen.getByRole("status")).toHaveTextContent("설정을 이 기기에 저장하지 못했어요. 브라우저 저장 공간을 확인한 뒤 다시 눌러 주세요.");
   });
 });
 

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from videobox_api.errors import _http_error
 from videobox_core_engine.format_template import (
+    FormatTemplateError,
     apply_format_template,
     format_template_from_session,
 )
@@ -76,6 +77,13 @@ def build_format_templates_router(*, orchestrator: Any, template_store: FormatTe
             applied = apply_format_template(
                 session=session, template=template, keep_output_size=payload.keep_output_size
             )
+            # 자막 모양이 빈 포맷을 그대로 흘리면 `CaptionStyle.from_dict({})`가
+            # 기본값(Arial 54 흰색)을 만들어 **장면마다 손본 모양까지 전부**
+            # 덮어쓴다. 입힐 모양이 없으면 입히지 않고 그렇게 말한다.
+            if not applied.get("caption_style"):
+                raise FormatTemplateError(
+                    "이 포맷에는 저장된 자막 모양이 없어요. 자막 모양을 정한 편집본에서 다시 저장해 주세요."
+                )
             # 자막 스타일 변경은 이미 검증된 경로가 있다. 여기서 저장소를 직접
             # 건드리면 같은 규칙이 두 벌이 되고, 그중 하나가 조용히 낡는다.
             # scope는 그 경로의 어휘를 써야 한다 -- `all`은 없는 scope라서

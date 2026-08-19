@@ -266,6 +266,59 @@ def test_search_user_asset(tmp_path):
     assert matches[0]["library_asset_id"] == asset_id
 
 
+class _FakeEmbeddings:
+    def embed(self, request):
+        class _Response:
+            vectors = ((0.1, 0.2),)
+
+        return _Response()
+
+
+def _semantic_app(tmp_path, monkeypatch, *, audio_rows=None, footage_rows=None):
+    store = MediaLibraryStore(tmp_path / "library")
+    application = create_app(projects_root=tmp_path / "projects", media_library_store=store)
+    application.state.media_analysis_embedding_provider = _FakeEmbeddings()
+    application.state.media_analysis_profile = {"embedding_model_name": "bge-m3"}
+    if audio_rows is not None:
+        monkeypatch.setattr(type(store), "find_audio_matches", lambda self, **_kw: [dict(row) for row in audio_rows])
+    if footage_rows is not None:
+        monkeypatch.setattr(type(store), "find_footage_matches", lambda self, **_kw: [dict(row) for row in footage_rows])
+    return TestClient(application)
+
+
+def test_semantic_search_rows_carry_what_the_library_screen_needs(tmp_path, monkeypatch):
+    """의미검색 행에 `media_type`·`lifecycle`·`origin`이 없어서 화면 필터가 전부
+    걸러냈다 -- 배지는 `뜻으로 찾음`인데 목록에는 단어 매칭만 남는 거짓말이 됐다.
+    같은 자산이 단어와 뜻 양쪽으로 잡히면 한 번만 내려보낸다."""
+    client = _semantic_app(tmp_path, monkeypatch, audio_rows=[
+        {"library_asset_id": "pack:starter-v1:music-x", "asset_id": "music-x", "media_type": "music", "score": 0.9},
+    ])
+    ingested = client.post(
+        "/api/library/ingest", data={"media_type": "music"},
+        files=[("files", ("calm.mp3", b"bytes", "audio/mpeg"))],
+    ).json()["items"][0]["library_asset_id"]
+
+    body = client.get("/api/library/search", params={"q": "calm", "media_type": "music"}).json()
+
+    assert body["semantic"] is True
+    row = next(value for value in body["matches"] if value["library_asset_id"] == "pack:starter-v1:music-x")
+    assert row["media_type"] == "music"
+    assert row["lifecycle"] == "ready"
+    assert row["origin"] == "builtin"
+    assert row["semantic_match"] is True
+    assert sum(1 for value in body["matches"] if value["library_asset_id"] == ingested) == 1
+
+
+def test_semantic_flag_is_false_when_the_lookup_contributes_nothing(tmp_path, monkeypatch):
+    # 조회는 돌았지만 0건이면 보이는 목록은 전부 단어 매칭이다. 그걸
+    # `뜻으로 찾음`이라고 내려보내면 화면이 거짓말을 한다.
+    client = _semantic_app(tmp_path, monkeypatch, audio_rows=[])
+
+    body = client.get("/api/library/search", params={"q": "calm", "media_type": "music"}).json()
+
+    assert body["semantic"] is False
+
+
 # ---------------------------------------------------------------------------
 # `source_for_user`의 실패 분기 두 개. 이 라우터가 파일 바이트를 내주기 전에
 # "설정된 root 안에 있는가 + 내용 해시가 맞는가"를 확인하는데, 그 **실패** 경로에는

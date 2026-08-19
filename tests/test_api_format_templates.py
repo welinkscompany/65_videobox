@@ -95,6 +95,43 @@ def test_saving_and_applying_a_format_round_trips_onto_the_session(tmp_path: Pat
     assert all(segment["caption_style"]["font_size_px"] == 42 for segment in applied_session["segments"])
 
 
+def test_applying_a_format_with_no_caption_style_does_not_wipe_hand_tuned_captions(tmp_path: Path) -> None:
+    """자막 모양이 비어 있는 포맷을 적용하면 `CaptionStyle.from_dict({})`가
+    기본값을 만들어, 장면마다 손본 모양까지 전부 기본값으로 덮어썼다.
+    입힐 모양이 없으면 입히지 말고 그렇게 말해야 한다."""
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "빈 포맷"}).json()["project_id"]
+    timeline = app.state.store.save_timeline_run(
+        project_id=project_id, output_mode="landscape",
+        timeline_payload={"output": {"width": 1920, "height": 1080}, "tracks": []},
+    )
+    # 자막 모양이 어디에도 없는 편집본에서 포맷을 뜬다 -- 포맷의 모양이 {}가 된다.
+    unstyled_session = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg-a", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "모양 없음"}], "history": []},
+    )
+    template_id = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "빈 포맷", "session_id": unstyled_session["session_id"]},
+    ).json()["template_id"]
+    # 손본 모양이 있는 편집본에 그 빈 포맷을 적용해 본다.
+    tuned_session = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg-1", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "손본 자막", "caption_style": {"font_size_px": 30}}], "history": []},
+    )
+
+    apply = client.post(
+        f"/api/projects/{project_id}/format-templates/{template_id}/apply",
+        json={"session_id": tuned_session["session_id"], "expected_revision": int(tuned_session["session_revision"])},
+    )
+
+    assert apply.status_code == 400, apply.text
+    # 손본 장면 모양은 그대로여야 한다.
+    current = app.state.store.get_editing_session(project_id=project_id, session_id=tuned_session["session_id"])
+    assert current["segments"][0]["caption_style"] == {"font_size_px": 30}
+
+
 def test_applying_a_format_nobody_saved_is_reported(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id = client.post("/api/projects", json={"name": "포맷"}).json()["project_id"]

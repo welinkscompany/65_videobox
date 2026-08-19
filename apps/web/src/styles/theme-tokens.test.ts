@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { resolve } from "node:path"
 
 const productShellCss = readFileSync(
@@ -40,13 +40,16 @@ describe("shell theme tokens", () => {
   it("never wraps a color token in hsl() -- the tokens are complete colors", () => {
     // `--border` 같은 토큰은 `#EAEAEC` 같은 **완성색**이다. `hsl(var(--border))`는
     // `hsl(#EAEAEC)`가 되어 무효 선언이고, 브라우저는 그 속성을 통째로 버린다.
-    // 이렇게 13곳이 조용히 죽어 있었다 -- 화면은 뜨지만 그 테두리·색만 사라진다.
-    for (const [name, css] of [
-      ["product-shell.css", productShellCss],
-      ["editor-workbench.css", editorWorkbenchCss],
-    ] as const) {
+    // 이렇게 17곳(선언 13줄)이 조용히 죽어 있었다 -- 화면은 뜨지만 그 테두리·색만
+    // 사라진다. 두 파일만 지키면 다음 파일에서 또 죽으니 css 전부를 훑는다.
+    const sourceRoot = resolve(process.cwd(), "src")
+    const cssFiles = (readdirSync(sourceRoot, { recursive: true }) as string[])
+      .filter((file) => String(file).endsWith(".css"))
+    expect(cssFiles.length).toBeGreaterThan(2)
+    for (const file of cssFiles) {
+      const css = readFileSync(resolve(sourceRoot, String(file)), "utf8")
       const matches = css.match(/hsl\(\s*var\(/g) ?? []
-      expect(matches, `${name} wraps complete color tokens in hsl()`).toEqual([])
+      expect(matches, `${file} wraps complete color tokens in hsl()`).toEqual([])
     }
   })
 

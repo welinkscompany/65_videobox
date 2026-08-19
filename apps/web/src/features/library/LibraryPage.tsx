@@ -56,8 +56,19 @@ export function LibraryPage() {
       if (semanticEligible) {
         const result = await api.searchLibraryAssets(search.trim(), activeFilter as LibraryMediaType, undefined);
         if (currentEpoch !== epoch.current) return;
-        nextAssets = result.matches;
-        setSearchMode(result.semantic ? "semantic" : "word");
+        // 촬영본 색인 조각(자산 아닌 행, id 없음)과 중복 행은 이 화면이 다룰 수
+        // 없다 -- 남겨 두면 목록·미리보기·React key가 전부 흔들린다.
+        const seenIds = new Set<string>();
+        const usable = result.matches.filter((match) => {
+          const identity = String(match.library_asset_id ?? "");
+          if (!identity || seenIds.has(identity)) return false;
+          seenIds.add(identity);
+          return true;
+        });
+        nextAssets = usable;
+        // 배지는 화면에 실제로 남은 행 기준으로 말한다. 의미검색이 돌았어도
+        // 남은 행이 전부 단어 매칭이면 `뜻으로 찾음`은 거짓말이다.
+        setSearchMode(result.semantic && usable.some((match) => match.semantic_match) ? "semantic" : "word");
       } else {
         const result = await api.listLibraryAssets({ includeTrashed: activeFilter === "trash", q: search || undefined, limit: 500 });
         if (currentEpoch !== epoch.current) return;

@@ -140,6 +140,9 @@ class FfmpegFinalRenderer:
     # which is the same trap the misspelled name set.
     overlay_font_file: str = field(default_factory=_default_overlay_font)
     ffprobe_binary: str = "ffprobe"
+    # (경로, selector, mtime) → 스트림 존재 여부. 렌더 하나가 같은 원본을
+    # 클립 수만큼 다시 재지 않게 한다.
+    _stream_probe_cache: dict[tuple[str, str, int], bool] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     @staticmethod
     def _cgroup_cpu_quota() -> int | None:
@@ -516,7 +519,6 @@ class FfmpegFinalRenderer:
         source_indices: dict[str, int] = {}
         track_overlay_indices: dict[str, int] = {}
         soundless_source_clip_ids: set[str] = set()
-        audio_items = []
         for item in composition_plan.items:
             if item.track_type == "overlay":
                 # Overlay items are represented in the canonical plan but need
@@ -538,7 +540,6 @@ class FfmpegFinalRenderer:
                     project_id=project_id, timeline=timeline_context,
                     clip={"asset_uri": item.asset_uri, "start_sec": item.start_sec, "end_sec": item.end_sec},
                 ).path
-                audio_items.append(item)
                 should_loop = False
             elif item.track_type == "broll":
                 source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
@@ -548,15 +549,11 @@ class FfmpegFinalRenderer:
                     raise FinalRenderError("B-roll source bounds are outside the available media. Adjust trim or source controls.")
                 if available_source_window < item.end_sec - item.start_sec and not controls["loop"] and not controls["pad"]:
                     raise FinalRenderError("B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration.")
-                if controls["preserve_source_audio"]:
-                    if self._has_audio_stream(source):
-                        audio_items.append(item)
-                    else:
-                        soundless_source_clip_ids.add(item.clip_id)
+                if controls["preserve_source_audio"] and not self._has_audio_stream(source):
+                    soundless_source_clip_ids.add(item.clip_id)
                 should_loop = controls["loop"]
             elif item.track_type in {"bgm", "sfx"}:
                 source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
-                audio_items.append(item)
                 should_loop = item.track_type == "bgm"
             else:
                 continue
@@ -679,61 +676,58 @@ class FfmpegFinalRenderer:
             raise FinalRenderError(f"Unable to convert legacy subtitle artifact to ASS: {result.stderr[-800:]}")
         return ass_path
 
+    def _has_stream(self, path: Path, *, selector: str, codec_type: str, error_label: str) -> bool:
+        """`selector`(`a:0`/`v:0`)의 스트림이 실제로 있는지 ffprobe에게 묻는다.
+
+        같은 파일을 클립마다 다시 재지 않도록 경로+수정시각으로 캐시한다 --
+        프로세스 하나가 수십 ms라, 클립 30개짜리 렌더가 시작도 전에 초 단위를
+        먹는다.
+        """
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            stamp = -1
+        key = (str(path), selector, stamp)
+        cached = self._stream_probe_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            result = subprocess.run(
+                [
+                    self.ffprobe_binary,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    selector,
+                    "-show_entries",
+                    "stream=codec_type",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            raise FinalRenderError(f"Unable to inspect {error_label}. Install/configure ffprobe.") from exc
+        found = result.returncode == 0 and result.stdout.strip() == codec_type
+        self._stream_probe_cache[key] = found
+        return found
+
     def _has_audio_stream(self, path: Path) -> bool:
         """`원본 소리 살리기`가 켜진 원본에 실제로 오디오 스트림이 있는지 잰다.
 
         무음 B-roll(영상만 있는 원본)의 없는 스트림을 참조하면 렌더가 통째로
         막힌다. 짐작하지 말고 ffprobe에게 물어본다.
         """
-        try:
-            result = subprocess.run(
-                [
-                    self.ffprobe_binary,
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "a:0",
-                    "-show_entries",
-                    "stream=codec_type",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    str(path),
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=30,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-            raise FinalRenderError("Unable to inspect source audio. Install/configure ffprobe.") from exc
-        return result.returncode == 0 and result.stdout.strip() == "audio"
+        return self._has_stream(path, selector="a:0", codec_type="audio", error_label="source audio")
 
     def _has_visual_stream(self, path: Path) -> bool:
         """Accept non-image overlays only when ffprobe confirms a video stream."""
-        try:
-            result = subprocess.run(
-                [
-                    self.ffprobe_binary,
-                    "-v",
-                    "error",
-                    "-select_streams",
-                    "v:0",
-                    "-show_entries",
-                    "stream=codec_type",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    str(path),
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=30,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-            raise FinalRenderError("Unable to inspect overlay media. Install/configure ffprobe.") from exc
-        return result.returncode == 0 and result.stdout.strip() == "video"
+        return self._has_stream(path, selector="v:0", codec_type="video", error_label="overlay media")
 
     def rendered_audio_has_sound(self, path: Path) -> bool | None:
         """이 렌더러가 쓰는 ffmpeg로 재는 편의 메서드. 판단은 모듈 함수에 있다."""
@@ -1120,6 +1114,10 @@ class FfmpegFinalRenderer:
                 broll_segment_paths.append(segment_path)
             video_path = work_dir / "broll_full.mp4"
             self._concat(segment_paths=broll_segment_paths, output_path=video_path, work_dir=work_dir)
+            # 오버레이 재인코딩은 `-an`으로 돈다. 살려 둔 B-roll 소리는 오버레이를
+            # 얹기 **전** 파일에서 가져와야 한다 -- 얹은 파일에서 `[1:a]`를 찾으면
+            # 오버레이가 하나라도 있는 순간 렌더가 통째로 막힌다.
+            broll_audio_source_path = video_path
             video_path = self._apply_export_overlays(
                 project_id=project_id,
                 video_path=video_path,
@@ -1137,7 +1135,7 @@ class FfmpegFinalRenderer:
                     "-i",
                     str(narration_path),
                     "-i",
-                    str(video_path),
+                    str(broll_audio_source_path),
                     "-filter_complex",
                     # `normalize=0`이 **꼭 있어야 한다.** `amix`는 기본으로 입력
                     # 수만큼 나누므로, B-roll 소리를 켜면 그 장면과 아무 상관

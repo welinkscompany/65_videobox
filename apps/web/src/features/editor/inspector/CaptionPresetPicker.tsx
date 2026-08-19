@@ -11,7 +11,7 @@ import { orderByFavouriteThenRecent } from "../../../lib/pickerOrder";
  * 정본 이름을 모르면 포맷을 적용해도 글자 크기·두께·위치가 조용히 빠진다.
  * 그 밖의 모르는 것은 버린다 -- 지어내면 owner가 고르지 않은 모양이 적용된다.
  */
-export function fromSnapshot(style: CaptionStyleSnapshot): Partial<Record<string, string | number>> {
+export function fromSnapshot(style: CaptionStyleSnapshot): Partial<Record<string, string | number | boolean>> {
   const numbers: Readonly<Record<string, string>> = {
     font_size: "fontSizePx",
     font_size_px: "fontSizePx",
@@ -30,12 +30,20 @@ export function fromSnapshot(style: CaptionStyleSnapshot): Partial<Record<string
     background_color: "backgroundColor",
     horizontal_align: "horizontalAlign",
   };
-  const mapped: Record<string, string | number> = {};
+  const booleans: Readonly<Record<string, string>> = {
+    safe_area_enabled: "safeAreaEnabled",
+  };
+  const mapped: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(style ?? {})) {
     if (key in numbers && typeof value === "number" && Number.isFinite(value)) {
       mapped[numbers[key]] = value;
     } else if (key in strings && typeof value === "string" && value) {
+      // 백엔드는 정렬을 left·center·right만 받는다. 다른 값을 화면에 넣으면
+      // 다음 저장이 422로 거부돼 되돌릴 길이 없다.
+      if (key === "horizontal_align" && !["left", "center", "right"].includes(value)) continue;
       mapped[strings[key]] = value;
+    } else if (key in booleans && typeof value === "boolean") {
+      mapped[booleans[key]] = value;
     }
   }
   return mapped;
