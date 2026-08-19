@@ -5,6 +5,7 @@ import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, t
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
+import { pastedScriptSummary } from "../../creation/pastedScriptSummary";
 import { projectEditorAssets, type EditorAssetCard } from "../assets/editorAssetProjection";
 import { createEditorCommandPort, type EditorCommandPort } from "../editorCommandPort";
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
@@ -1707,10 +1708,23 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       const trimmed = script.trim();
       if (!trimmed) return;
       const file = new File([trimmed], "붙여넣은-대본.txt", { type: "text/plain" });
-      const brief = await api.uploadCreationBrief(projectId, file, {
+      let brief = await api.uploadCreationBrief(projectId, file, {
         idempotency_key: `paste:${Date.now()}`,
         capability_profile: {},
       });
+      // 대본을 이미 가진 사람에게 **다시 묻지 않는다.** 붙여 넣고 나면 브리프는
+      // `interviewing`으로 시작해 "누구에게 보여줄까요" 같은 질문 다섯 개를 세우고,
+      // 요약이 비어 있으면 확정이 400으로 거절된다(2026-08-19에 끝까지 돌려 보고
+      // 알았다). 둘 다 여기서 넘겨 두고 **확정만 사람에게 남긴다.**
+      if (brief.status === "interviewing") {
+        brief = await api.bypassCreationBriefInterview(projectId, brief.brief_id, { expected_revision: brief.revision });
+      }
+      if (!brief.summary?.trim()) {
+        brief = await api.updateCreationBriefSummary(projectId, brief.brief_id, {
+          summary: pastedScriptSummary(trimmed),
+          expected_revision: brief.revision,
+        });
+      }
       // 확정 화면으로 보낸다. 전역 메뉴와 같은 평범한 주소 이동이다 -- 이
       // 컴포넌트는 라우터를 갖고 있지 않고, 갖게 하려고 결합을 늘리지 않는다.
       window.location.assign(resolveWorkspaceLocation(projectId, "create"));
