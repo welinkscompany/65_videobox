@@ -10,7 +10,9 @@ import { Button } from "../../../components/ui/button";
  *
  * 적용은 프리셋과 **똑같이** 화면 값에 넣고 기존 `자막 스타일 저장`이 커밋한다.
  * 여기서 저장소를 따로 부르면 같은 변경이 두 경로를 갖게 되고, 그중 하나가 조용히 낡는다.
- * 자막 밖의 것(크기·음악)은 아직 자동으로 적용하지 않고 **무엇이 걸려 있는지 보여만 준다.**
+ * 자막 밖의 것(크기·음악)은 적용하지 않고 **무엇이 걸려 있는지 보여만 준다** —
+ * 크기를 실제로 바꾸는 검증된 경로가 없어서, 카드가 그 사실을 화면에서 직접 말한다.
+ * 말하지 않으면 크기 표시가 "적용하면 이 크기가 된다"는 약속처럼 읽힌다.
  */
 export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSnapshot) => void }) {
   const [templates, setTemplates] = useState<readonly FormatTemplate[]>([]);
@@ -30,6 +32,10 @@ export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSn
   return (
     <section className="vb-saved-formats" aria-labelledby="saved-formats-heading">
       <h3 id="saved-formats-heading">저장한 포맷</h3>
+      {templates.length ? (
+        // 크기·음악 표시가 약속처럼 읽히지 않게, 실제로 바뀌는 것을 먼저 말한다.
+        <p>적용하면 자막 모양만 바뀌어요. 화면 크기와 음악은 그대로예요.</p>
+      ) : null}
       {message ? <p role="status">{message}</p> : null}
       {templates.length ? templates.map((template) => (
         <article key={template.template_id} aria-label={`${template.name} 포맷`}>

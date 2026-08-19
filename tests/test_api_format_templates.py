@@ -132,6 +132,65 @@ def test_applying_a_format_with_no_caption_style_does_not_wipe_hand_tuned_captio
     assert current["segments"][0]["caption_style"] == {"font_size_px": 30}
 
 
+def test_applying_a_landscape_format_leaves_a_vertical_video_vertical(tmp_path: Path) -> None:
+    """적용은 자막 모양만 바꾼다 — 화면 크기는 약속에서 뺐다.
+
+    예전 모델의 `keep_output_size`는 라우터가 계산 결과를 버려서 no-op이었다.
+    크기를 실제로 바꾸는 검증된 경로가 없으니, 받는 척하는 옵션을 없애고
+    세로 영상이 세로로 남는 것을 여기서 못박는다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "크기 약속"}).json()["project_id"]
+    landscape = app.state.store.save_timeline_run(
+        project_id=project_id, output_mode="landscape",
+        timeline_payload={"output": {"width": 1920, "height": 1080}, "tracks": []},
+    )
+    styled = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=landscape["timeline_id"],
+        session_payload={
+            "segments": [{"segment_id": "seg-1", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "가로"}],
+            "history": [],
+            "caption_style": {"font_size_px": 42},
+        },
+    )
+    template_id = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "가로 포맷", "session_id": styled["session_id"]},
+    ).json()["template_id"]
+    vertical = app.state.store.save_timeline_run(
+        project_id=project_id, output_mode="vertical",
+        timeline_payload={"output": {"width": 1080, "height": 1920}, "tracks": []},
+    )
+    vertical_session = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=vertical["timeline_id"],
+        session_payload={
+            "segments": [{"segment_id": "seg-v", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "세로"}],
+            "history": [],
+        },
+    )
+
+    apply = client.post(
+        f"/api/projects/{project_id}/format-templates/{template_id}/apply",
+        json={
+            "session_id": vertical_session["session_id"],
+            "expected_revision": int(vertical_session["session_revision"]),
+        },
+    )
+
+    assert apply.status_code == 200, apply.text
+    assert apply.json()["session"]["caption_style"]["font_size_px"] == 42
+    # 완성본이 실제로 읽는 곳은 타임라인이다. 세로가 세로로 남아야 한다.
+    current_timeline = app.state.store.get_timeline_run(
+        project_id=project_id, timeline_id=vertical["timeline_id"]
+    )
+    assert current_timeline["output"] == {"width": 1080, "height": 1920}
+    current_session = app.state.store.get_editing_session(
+        project_id=project_id, session_id=vertical_session["session_id"]
+    )
+    assert "output" not in current_session
+
+
 def test_applying_a_format_nobody_saved_is_reported(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id = client.post("/api/projects", json={"name": "포맷"}).json()["project_id"]

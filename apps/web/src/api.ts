@@ -2436,10 +2436,12 @@ export const api = {
     request<FormatTemplate>(`/api/projects/${projectId}/format-templates`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
+  // 적용은 자막 모양만 바꾼다. 화면 크기·음악은 기록으로만 보여 준다 —
+  // 크기를 바꾸는 검증된 경로가 없어서 `keep_output_size` 옵션을 약속에서 뺐다.
   applyFormatTemplate: (
     projectId: string,
     templateId: string,
-    payload: { session_id: string; expected_revision: number; keep_output_size?: boolean },
+    payload: { session_id: string; expected_revision: number },
   ) =>
     request<{ template_id: string; session: EditingSession }>(
       `/api/projects/${projectId}/format-templates/${encodeURIComponent(templateId)}/apply`,

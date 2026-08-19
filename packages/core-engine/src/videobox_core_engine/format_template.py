@@ -89,20 +89,17 @@ def apply_format_template(
     *,
     session: dict[str, Any],
     template: dict[str, Any],
-    keep_output_size: bool = False,
 ) -> dict[str, Any]:
-    """포맷을 다른 편집본에 입힌다. 원본은 건드리지 않는다.
+    """포맷의 자막 모양을 다른 편집본에 입힌다. 원본은 건드리지 않는다.
 
-    `keep_output_size`는 가로 포맷을 세로 영상에 쓸 때를 위한 것이다. 그게 없으면
-    세로 영상이 조용히 가로가 된다.
+    화면 크기는 입히지 않는다. 크기는 영상을 만들 때 정해져 타임라인에 살고,
+    이미 있는 편집본의 크기를 바꾸는 검증된 경로가 없다 — 세션에만 써 두면
+    아무도 읽지 않아, 화면은 바뀌었다고 말하고 완성본은 원래 크기로 나온다.
+    포맷의 `width`/`height`는 "어디서 떠낸 포맷인지" 보여 주는 기록으로만 쓴다.
     """
     if not isinstance(template, dict) or not str(template.get("name") or "").strip():
         raise FormatTemplateError("쓸 수 있는 포맷이 아니에요.")
     # 되돌릴 수 있어야 한다. 원본을 그 자리에서 고치면 되돌릴 것이 없다.
     applied = deepcopy(session)
     applied["caption_style"] = deepcopy(template.get("caption_style") or {})
-    if not keep_output_size:
-        width, height = template.get("width"), template.get("height")
-        if isinstance(width, int) and isinstance(height, int):
-            applied["output"] = {"width": width, "height": height}
     return applied
