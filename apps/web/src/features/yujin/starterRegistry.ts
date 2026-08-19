@@ -77,6 +77,16 @@ const registry: readonly YujinStarter[] = [
     blockers: [],
   },
   {
+    // owner 승인(2026-08-19): 유진이 프로젝트의 제목·대본·장면 자막을 읽고
+    // 썸네일 이미지 생성 도구에 붙여 넣을 프롬프트를 추천한다. 이미지 생성
+    // 자체는 하지 않는다 -- 만드는 것도 올리는 것도 사람이 한다.
+    id: "thumbnail-prompt-recommendation",
+    label: "썸네일 만들 프롬프트 추천해 줘",
+    surfaces: ["plan", "edit", "output"],
+    selections: ["none", "segment", "proposal", "variant"],
+    blockers: [],
+  },
+  {
     id: "plan-format-recommendation",
     label: "이번 촬영으로 만들 만한 영상 형식 추천해 줘",
     surfaces: ["plan"],

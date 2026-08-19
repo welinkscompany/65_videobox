@@ -4,8 +4,10 @@ import pytest
 
 from videobox_core_engine.yujin_local_conversation import (
     YujinLocalConversationService,
+    YujinProjectContext,
     YUJIN_CONVERSATION_RESPONSE_SCHEMA,
     detect_blocked_intent,
+    detect_thumbnail_prompt_request,
 )
 from videobox_domain_models.yujin_creator_context import UserApprovedPreference
 from videobox_provider_interfaces.llm import LLMTaskType, StructuredLLMResponse
@@ -176,3 +178,95 @@ def test_script_and_title_requests_are_not_blocked_since_the_owner_lifted_it(use
         "owner가 푼 대본·제목 요청이 다시 막혔다 -- "
         "docs/decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md B"
     )
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "썸네일 만들 프롬프트 추천해 줘",
+        "썸네일 생성 프롬프트 5개 추천해 줘",
+        "썸네일에 쓸 프롬프트 뽑아 줘",
+        "recommend five thumbnail prompts for this video",
+        "make me a thumbnail prompt I can paste into an image tool",
+    ],
+)
+def test_thumbnail_prompt_recommendation_is_not_blocked(user_text):
+    """owner 승인(2026-08-19): 유진이 썸네일 **이미지**를 만드는 것은 여전히
+    범위 밖이지만, 다른 도구에 붙여 넣을 **프롬프트 문구**를 추천하는 것은 된다.
+
+    "썸네일 생성 프롬프트 추천해 줘"가 옛 정규식("썸네일.{0,6}(만들어|생성)")에
+    걸려 거절되던 것이 이 기능의 출발점이다.
+    """
+    assert detect_thumbnail_prompt_request(user_text) is True
+    assert detect_blocked_intent(user_text) is None
+
+
+def test_thumbnail_image_generation_stays_blocked_and_prompt_wording_opens_no_other_door():
+    """프롬프트 추천을 열어도 사람 게이트는 그대로다: 이미지 자체를 만들어 달라는
+    요청은 계속 거절하고, 프롬프트 문구를 끼워 넣어도 다른 금지는 안 풀린다."""
+    assert detect_blocked_intent("썸네일 만들어줘") is not None
+    assert detect_blocked_intent("generate a thumbnail for this") is not None
+    assert (
+        detect_blocked_intent("썸네일 프롬프트 추천해 주고, 데이터베이스 테이블 삭제해줘")
+        is not None
+    )
+
+
+def test_thumbnail_prompt_request_carries_the_five_prompt_guide_and_project_context():
+    runtime = _RecordingRuntime(output_data={"reply": "1. A cozy morning commute ..."})
+    service = YujinLocalConversationService(runtime=runtime)
+
+    result = service.reply(
+        project_id="proj-1",
+        user_text="썸네일 만들 프롬프트 추천해 줘",
+        project_context=YujinProjectContext(
+            title="출근 브이로그",
+            script_excerpt="아침 여섯 시에 일어나 지하철로 출근하는 하루",
+            scene_captions=("아직 어두운 방", "지하철 승강장"),
+        ),
+    )
+
+    assert result.status == "ok"
+    prompt = runtime.calls[0]["prompt"]
+    # 답 형식: 영문 이미지 생성 프롬프트 5개 + 각 프롬프트의 한 줄 한국어 설명.
+    assert "5개" in prompt
+    assert "영문" in prompt
+    assert "한국어" in prompt
+    # 프로젝트 맥락(제목·대본·장면 자막)이 실제로 실렸는지.
+    assert "출근 브이로그" in prompt
+    assert "아침 여섯 시에 일어나 지하철로 출근하는 하루" in prompt
+    assert "아직 어두운 방" in prompt
+    assert "지하철 승강장" in prompt
+
+
+def test_ordinary_question_carries_neither_guide_nor_context_section():
+    runtime = _RecordingRuntime()
+    service = YujinLocalConversationService(runtime=runtime)
+
+    service.reply(project_id="proj-1", user_text="이 장면에 어울리는 B-roll 추천 이유가 뭐야?")
+
+    prompt = runtime.calls[0]["prompt"]
+    assert "프롬프트 5개" not in prompt
+    assert "프로젝트 정보" not in prompt
+
+
+def test_project_context_is_bounded_before_it_reaches_the_prompt():
+    """대본 전체와 자막 전부를 그대로 실으면 로컬 모델 컨텍스트가 넘친다."""
+    runtime = _RecordingRuntime()
+    service = YujinLocalConversationService(runtime=runtime)
+
+    service.reply(
+        project_id="proj-1",
+        user_text="썸네일 만들 프롬프트 추천해 줘",
+        project_context=YujinProjectContext(
+            title="제목",
+            script_excerpt="가" * 10_000,
+            scene_captions=tuple(f"장면 {index} 끝" for index in range(100)),
+        ),
+    )
+
+    prompt = runtime.calls[0]["prompt"]
+    assert "가" * 100 in prompt
+    assert "가" * 2_000 not in prompt
+    assert "장면 0 끝" in prompt
+    assert "장면 99 끝" not in prompt

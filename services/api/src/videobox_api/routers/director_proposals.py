@@ -14,7 +14,11 @@ from videobox_core_engine.director_proposal_service import (
     DirectorProposalService,
     is_actionable_yujin_media_candidate,
 )
-from videobox_core_engine.yujin_local_conversation import YujinLocalConversationService
+from videobox_core_engine.yujin_local_conversation import (
+    YujinLocalConversationService,
+    YujinProjectContext,
+    detect_thumbnail_prompt_request,
+)
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.yujin_creator_proposal_adapter import variant_patch_from_yujin_candidate
 from videobox_core_engine.output_variants import apply_variant_patch
@@ -54,6 +58,40 @@ def _approved_memories(
         )
     except Exception:
         return ()
+
+
+def _thumbnail_project_context(
+    store: LocalProjectStore, *, project_id: str, session: dict
+) -> YujinProjectContext:
+    """Gather the title, script, and scene captions for a thumbnail-prompt
+    recommendation (owner, 2026-08-19).
+
+    Loaded only when the message actually asks for thumbnail prompts, so the
+    ordinary chat hot path stays as it was. Each part degrades to empty on
+    failure -- a missing script must never turn a chat reply into an error.
+    """
+    title = ""
+    try:
+        title = str(store.get_project(project_id=project_id).get("name") or "")
+    except Exception:
+        pass
+    script_excerpt = ""
+    try:
+        briefs = store.list_creation_briefs(project_id=project_id)
+        if briefs:
+            script_excerpt = str(briefs[0].get("script_text") or "")
+    except Exception:
+        pass
+    captions = tuple(
+        text
+        for item in session.get("segments", [])
+        if isinstance(item, dict)
+        for text in (str(item.get("caption_text") or item.get("text") or "").strip(),)
+        if text
+    )
+    return YujinProjectContext(
+        title=title, script_excerpt=script_excerpt, scene_captions=captions
+    )
 
 
 class ProposalCreateRequest(BaseModel):
@@ -245,6 +283,13 @@ def build_director_proposals_router(
                             project_id=project_id,
                             conversation_id=conversation_id,
                             query=body.text,
+                        ),
+                        project_context=(
+                            _thumbnail_project_context(
+                                store, project_id=project_id, session=session
+                            )
+                            if detect_thumbnail_prompt_request(body.text)
+                            else None
                         ),
                     )
                     assistant_text = result.reply
