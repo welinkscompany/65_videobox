@@ -31,6 +31,10 @@ from videobox_core_engine.canonical_track import (
     canonical_track_type as _canonical_runtime_track_type,
     VALID_CANONICAL_TRACK_TYPES as VALID_RUNTIME_TRACK_TYPES,
 )
+from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_SHAPES,
+    canonical_shape_overlay_shape,
+)
 from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
@@ -192,9 +196,9 @@ def _is_valid_runtime_overlay(overlay: object) -> bool:
     }:
         return False
     if overlay_type == "shape_overlay":
-        # 정지 도형은 글·자산이 없어도 도형 이름만 맞으면 유효하다. 여기서
-        # 떨어지면 부분 재생성이 보존 대상에서 도형을 조용히 지운다.
-        return str(overlay.get("shape") or "").strip().lower() in {"highlight_box", "underline"}
+        # 정지 도형과 아이콘은 글·자산이 없어도 이름만 맞으면 유효하다. 여기서
+        # 떨어지면 부분 재생성이 보존 대상에서 그 표시를 조용히 지운다.
+        return canonical_shape_overlay_shape(overlay.get("shape")) in SHAPE_OVERLAY_SHAPES
     if overlay_type in {"explanation_card", "table_card", "table_overlay"}:
         return bool(str(overlay.get("text") or "").strip())
     if overlay_type in {"hook_title", "visual_overlay"}:

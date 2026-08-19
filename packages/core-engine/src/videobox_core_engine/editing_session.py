@@ -9,6 +9,14 @@ import uuid
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.editing_transactions import apply_user_transaction
+# 도형 프리셋 목록은 여기서 다시 정의하지 않고 그대로 가져다 쓴다. 예전 이름을
+# 그대로 두어 이 모듈에서 가져다 쓰던 곳은 손대지 않아도 된다.
+from videobox_core_engine.overlay_shapes import (  # noqa: F401
+    SHAPE_OVERLAY_HORIZONTALS,
+    SHAPE_OVERLAY_SHAPES,
+    SHAPE_OVERLAY_SIZES,
+    SHAPE_OVERLAY_VERTICALS,
+)
 
 MIN_SEGMENT_DURATION_SEC = 0.2
 MAX_TIMELINE_UNDO_EVENTS = 10
@@ -1061,13 +1069,9 @@ def remove_segment_table_overlay(
     )
 
 
-# 정지 도형("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가 범위
-# 밖으로 못박았다(고급 모션그래픽). 화살표는 drawbox로 그릴 수 없어 뺐다 --
-# 억지로 품질 낮은 화살표를 넣지 않는다.
-SHAPE_OVERLAY_SHAPES = frozenset({"highlight_box", "underline"})
-SHAPE_OVERLAY_VERTICALS = frozenset({"top", "middle", "bottom"})
-SHAPE_OVERLAY_HORIZONTALS = frozenset({"left", "center", "right"})
-SHAPE_OVERLAY_SIZES = frozenset({"small", "medium", "large"})
+# 정지 도형·아이콘("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가
+# 범위 밖으로 못박았다(고급 모션그래픽). 목록은 `overlay_shapes`가 유일한 출처다 --
+# 여기에 사본을 두었더니 화면·API·렌더가 서로 다른 목록을 보게 됐다.
 
 
 def update_segment_shape_overlay(

@@ -244,6 +244,39 @@ def test_build_targeted_segments_keeps_a_valid_shape_overlay() -> None:
     assert targeted_segments[0]["visual_overlays"] == [shape_overlay]
 
 
+def test_build_targeted_segments_keeps_a_valid_icon_overlay() -> None:
+    """아이콘도 글·자산이 없다. 여기서 걸러지면 부분 재생성 미리보기에서
+    이 장면의 화살표가 조용히 사라진다."""
+    from videobox_api.main import _build_targeted_segments
+
+    icon_overlay = {
+        "overlay_type": "shape_overlay",
+        "shape": "icon_arrow_right",
+        "vertical": "middle",
+        "horizontal": "right",
+        "size": "medium",
+    }
+    targeted_segments = _build_targeted_segments(
+        {
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Office overview.",
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [icon_overlay, {"overlay_type": "shape_overlay", "shape": "icon_rocket"}],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ]
+        },
+        ["seg_001"],
+    )
+
+    assert targeted_segments[0]["visual_overlays"] == [icon_overlay]
+
+
 def test_partial_regeneration_helper_matches_trimmed_source_segment_ids() -> None:
     class _FakeStore:
         def list_segments(self, *, project_id: str) -> list[dict[str, object]]:
@@ -22965,6 +22998,53 @@ def test_editing_session_api_can_set_and_clear_a_shape_overlay(tmp_path: Path) -
     assert cleared.status_code == 200
     assert cleared.json()["segments"][0]["visual_overlays"] == []
     assert cleared.json()["history"][-1]["mutation_type"] == "shape_overlay_remove"
+
+
+def test_editing_session_api_can_set_an_icon_shape_overlay(tmp_path: Path) -> None:
+    """아이콘(화살표 등)은 기존 정지 도형과 같은 endpoint·같은 프리셋을 탄다."""
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "icon_arrow_right",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "large",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "icon_arrow_right",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "large",
+        }
+    ]
+
+    # 목록에 없는 아이콘은 저장 전에 거절된다.
+    rejected = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "icon_rocket",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "large",
+            "expected_revision": 2,
+        },
+    )
+    assert rejected.status_code == 422
 
 
 def test_editing_session_api_visual_overlay_patch_preserves_existing_explanation_overlay(tmp_path: Path) -> None:

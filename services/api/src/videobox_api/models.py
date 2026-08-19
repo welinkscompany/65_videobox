@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_SHAPES,
+    canonical_shape_overlay_shape,
+)
 from videobox_domain_models.yujin_memory import YujinMemoryCandidate
 
 
@@ -826,14 +830,26 @@ class ImageOverlayRequest(BaseModel):
 
 
 class ShapeOverlayRequest(BaseModel):
-    """정지 도형("여기를 보세요"). 프리셋만 받는다 -- 자유 좌표·애니메이션은
-    계획서 §4가 범위 밖으로 못박았고, 화살표는 렌더 품질 문제로 뺐다."""
+    """정지 도형·아이콘("여기를 보세요"). 프리셋만 받는다 -- 자유 좌표·애니메이션은
+    계획서 §4가 범위 밖으로 못박았다.
+
+    고를 수 있는 이름은 `overlay_shapes`가 정한 목록 하나뿐이다. 여기에 사본을
+    적어 두면 렌더가 그리는 목록과 화면이 보내는 목록이 조용히 갈라진다.
+    """
 
     expected_revision: int = Field(ge=1)
-    shape: Literal["highlight_box", "underline"]
+    shape: str
     vertical: Literal["top", "middle", "bottom"]
     horizontal: Literal["left", "center", "right"]
     size: Literal["small", "medium", "large"]
+
+    @field_validator("shape")
+    @classmethod
+    def validate_shape(cls, value: str) -> str:
+        normalized = canonical_shape_overlay_shape(value)
+        if normalized not in SHAPE_OVERLAY_SHAPES:
+            raise ValueError(f"shape must be one of {sorted(SHAPE_OVERLAY_SHAPES)}: {value!r}")
+        return normalized
 
 
 class TableOverlayRequest(OptionalYujinCandidateAttestation):

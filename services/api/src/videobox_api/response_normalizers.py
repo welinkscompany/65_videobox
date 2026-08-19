@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_SHAPES,
+    canonical_shape_overlay_shape,
+)
 from videobox_core_engine.provider_trace import build_provider_trace
 from videobox_domain_models.recommendations import RecommendationType
 
@@ -43,9 +47,9 @@ def _is_valid_preflight_visual_overlay(overlay: object) -> bool:
     }:
         return False
     if overlay_type == "shape_overlay":
-        # 정지 도형은 글·자산 없이도 유효하다. 빠지면 부분 재생성 미리보기가
-        # 이 장면의 도형을 조용히 숨긴다.
-        return str(overlay.get("shape") or "").strip().lower() in {"highlight_box", "underline"}
+        # 정지 도형과 아이콘은 글·자산 없이도 유효하다. 빠지면 부분 재생성
+        # 미리보기가 이 장면의 표시를 조용히 숨긴다.
+        return canonical_shape_overlay_shape(overlay.get("shape")) in SHAPE_OVERLAY_SHAPES
     if overlay_type in {"explanation_card", "table_card", "table_overlay"}:
         return bool(str(overlay.get("text") or "").strip())
     if overlay_type in {"hook_title", "visual_overlay"}:

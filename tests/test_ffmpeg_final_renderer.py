@@ -11,6 +11,7 @@ from videobox_core_engine.ffmpeg_final_renderer import (
     FinalRenderError,
 )
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
+from videobox_core_engine.overlay_shapes import SHAPE_OVERLAY_ICON_GLYPHS, font_supports_glyph
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.timeline_clip_source_resolution import ResolvedClipSource
@@ -28,6 +29,24 @@ _FONT_CANDIDATES = (
     r"C:\Windows\Fonts\malgun.ttf",
 )
 OVERLAY_FONT = next((path for path in _FONT_CANDIDATES if Path(path).is_file()), None)
+
+# 아이콘 오버레이는 글자 하나를 그린다. 그 글자를 전부 가진 글꼴이라야 검사가
+# 의미 있다 -- 나눔고딕에는 없는 기호가 있어 후보를 따로 고른다.
+_ICON_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    r"C:\Windows\Fonts\seguisym.ttf",
+    r"C:\Windows\Fonts\DejaVuSans.ttf",
+)
+ICON_FONT = next(
+    (
+        path
+        for path in _ICON_FONT_CANDIDATES
+        if Path(path).is_file()
+        and all(font_supports_glyph(path, glyph) for glyph in SHAPE_OVERLAY_ICON_GLYPHS.values())
+    ),
+    None,
+)
 
 
 def test_final_renderer_rejects_post_materialization_content_mutation_before_ffmpeg(
@@ -278,6 +297,150 @@ def test_apply_export_overlays_draws_static_shapes_in_the_legacy_path(
     assert "between(t,2.0,3.0)" in filter_graph
     assert "t=fill" in filter_graph
     assert "drawtext" not in filter_graph
+
+
+def _capture_export_overlay_filter_graph(
+    renderer: FfmpegFinalRenderer,
+    *,
+    overlays: list[dict[str, object]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> str:
+    captured: list[list[str]] = []
+
+    def fake_run(self: FfmpegFinalRenderer, command: list[str]) -> subprocess.CompletedProcess:
+        captured.append(command)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", fake_run)
+    renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=overlays,
+        work_dir=tmp_path,
+    )
+    assert captured, "the overlay render command never ran"
+    return captured[0][captured[0].index("-filter_complex") + 1]
+
+
+@pytest.mark.skipif(ICON_FONT is None, reason="no font carrying the icon glyphs is available")
+def test_apply_export_overlays_draws_icon_overlays_in_the_legacy_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """화살표 같은 아이콘은 drawbox로 못 그린다(사각형만 그린다).
+
+    새 필터 체계를 만들지 않고 이미 있는 drawtext 경로를 그대로 쓴다 -- 크기는
+    3단이 fontsize로, 위치는 9칸이 기존 x/y 식으로 간다.
+    """
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path),
+        overlay_font_file=ICON_FONT,
+        video_width=1280,
+        video_height=720,
+    )
+
+    filter_graph = _capture_export_overlay_filter_graph(
+        renderer,
+        overlays=[{
+            "overlay_type": "shape_overlay",
+            "shape": "icon_arrow_right",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "medium",
+            "start_sec": 1.0,
+            "end_sec": 2.0,
+        }],
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert "drawtext=" in filter_graph
+    assert "text='→'" in filter_graph
+    assert "fontsize=187" in filter_graph
+    assert "x=w-text_w-77:y=(h-text_h)/2" in filter_graph
+    assert "between(t,1.0,2.0)" in filter_graph
+    # 아이콘은 도형이 아니다: drawbox로 사각형을 덧그리면 안 된다.
+    assert "drawbox=" not in filter_graph
+    # 글줄 오버레이의 검은 상자·아래 정렬은 아이콘에 딸려오지 않는다.
+    assert "box=1" not in filter_graph
+
+
+@pytest.mark.skipif(ICON_FONT is None, reason="no font carrying the icon glyphs is available")
+def test_both_render_paths_place_the_same_icon_at_the_same_spot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """이 저장소가 같은 함정에 여러 번 걸렸다: 렌더 경로가 둘이다.
+
+    두 경로가 같은 아이콘을 같은 자리·같은 크기로 그리지 않으면, 미리보기에서
+    맞춰 놓은 위치가 완성본에서 어긋난다.
+    """
+    from videobox_core_engine.composition_plan import CompositionPlan
+
+    overlay = {
+        "overlay_type": "shape_overlay",
+        "shape": "icon_arrow_down_left",
+        "vertical": "top",
+        "horizontal": "left",
+        "size": "large",
+        "start_sec": 0.5,
+        "end_sec": 3.25,
+    }
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path),
+        overlay_font_file=ICON_FONT,
+        video_width=1080,
+        video_height=1920,
+    )
+
+    legacy_graph = _capture_export_overlay_filter_graph(
+        renderer, overlays=[dict(overlay)], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
+    plan_graph = renderer.build_plan_filter_graph(
+        composition_plan=CompositionPlan.from_timeline(timeline={
+            "output": {"width": 1080, "height": 1920},
+            "tracks": [],
+            "export_overlays": [dict(overlay)],
+        }),
+        source_indices={},
+    )
+
+    placement = "text='↙':x=65:y=154:fontsize=691"
+    assert placement in legacy_graph
+    assert placement in plan_graph
+    assert "enable='between(t,0.5,3.25)'" in legacy_graph
+    assert "enable='between(t,0.5,3.25)'" in plan_graph
+
+
+def test_icon_overlay_fails_closed_when_the_font_cannot_draw_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """글꼴이 없으면 조용히 두부(빈 상자)를 그리지 않고 멈춘다.
+
+    빈 상자가 그려진 완성본은 성공으로 끝나기 때문에 owner가 알아채지 못한다.
+    """
+    import videobox_core_engine.overlay_shapes as overlay_shapes
+
+    monkeypatch.setattr(overlay_shapes, "ICON_FONT_FALLBACKS", ())
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path), overlay_font_file=str(tmp_path / "no-font-anywhere.ttf")
+    )
+    overlays = [{
+        "overlay_type": "shape_overlay",
+        "shape": "icon_arrow_right",
+        "vertical": "middle",
+        "horizontal": "center",
+        "size": "medium",
+        "start_sec": 0.0,
+        "end_sec": 1.0,
+    }]
+
+    with pytest.raises(FinalRenderError, match="Overlay font"):
+        renderer._apply_export_overlays(
+            project_id="project_001",
+            video_path=tmp_path / "video.mp4",
+            overlays=overlays,
+            work_dir=tmp_path,
+        )
 
 
 def test_final_renderer_explains_missing_broll_media_before_rendering(tmp_path: Path) -> None:
