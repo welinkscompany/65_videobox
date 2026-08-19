@@ -1,3 +1,4 @@
+import type { ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
@@ -8,9 +9,35 @@ type ImageField = "assetId" | "text";
 type TableField = "columns" | "rows" | "text";
 type ShapeField = "shape" | "vertical" | "horizontal" | "size";
 
-// 정지 도형("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가
-// 범위 밖으로 못박았다. 백엔드 ShapeOverlayRequest와 같은 값들이다.
-export type ShapeOverlayShape = "highlight_box" | "underline";
+// 정지 도형·아이콘("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가
+// 범위 밖으로 못박았다. 고를 수 있는 이름은 명령 포트(`api.ts`)가 정한 하나뿐이다.
+export type { ShapeOverlayShape };
+
+// 화면에 보이는 이름. 내부 이름·유니코드 이름·코드포인트는 노출하지 않는다(§10.13).
+// 순서가 곧 목록에 보이는 순서다 -- 도형 먼저, 그다음 화살표 여덟, 그다음 표시들.
+export const SHAPE_OVERLAY_LABELS: Readonly<Record<ShapeOverlayShape, string>> = {
+  highlight_box: "강조 상자",
+  underline: "밑줄",
+  icon_arrow_right: "화살표(오른쪽)",
+  icon_arrow_left: "화살표(왼쪽)",
+  icon_arrow_up: "화살표(위)",
+  icon_arrow_down: "화살표(아래)",
+  icon_arrow_up_left: "화살표(왼쪽 위)",
+  icon_arrow_up_right: "화살표(오른쪽 위)",
+  icon_arrow_down_left: "화살표(왼쪽 아래)",
+  icon_arrow_down_right: "화살표(오른쪽 아래)",
+  icon_circle: "동그라미",
+  icon_check: "체크",
+  icon_x: "엑스",
+  icon_star: "별",
+  icon_warning: "경고",
+  icon_pointer: "손가락",
+  icon_triangle: "삼각형",
+  icon_diamond: "마름모",
+};
+
+export const SHAPE_OVERLAY_CHOICES = Object.keys(SHAPE_OVERLAY_LABELS) as readonly ShapeOverlayShape[];
+
 export type ShapeOverlayVertical = "top" | "middle" | "bottom";
 export type ShapeOverlayHorizontal = "left" | "center" | "right";
 export type ShapeOverlaySize = "small" | "medium" | "large";
@@ -77,8 +104,8 @@ function stringRows(value: unknown): string[][] {
 
 // 저장된 값이 프리셋 밖이면 조용히 기본값으로 좁힌다 -- 백엔드가 프리셋만
 // 저장하므로 실제로는 방어선일 뿐이다.
-function shapeValue(value: unknown): ShapeOverlayShape {
-  return value === "underline" ? "underline" : "highlight_box";
+export function shapeValue(value: unknown): ShapeOverlayShape {
+  return SHAPE_OVERLAY_CHOICES.find((choice) => choice === value) ?? "highlight_box";
 }
 
 function shapeVertical(value: unknown): ShapeOverlayVertical {

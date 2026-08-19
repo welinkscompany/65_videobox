@@ -766,6 +766,41 @@ describe("InspectorControls", () => {
     });
   });
 
+  // 화살표 등 아이콘. drawbox가 사각형만 그려서 못 넣었던 자리를 구워 둔 그림으로
+  // 메운다 -- 위치·크기 프리셋은 강조 상자와 똑같은 것을 그대로 쓴다.
+  it("offers icons in the same shape picker and saves the chosen one", () => {
+    const onAction = renderControls({
+      target: {
+        fields: ["shape", "vertical", "horizontal", "size"],
+        id: "overlay-new:shape:segment-internal-current",
+        isNew: true,
+        kind: "overlay",
+        label: "강조 표시",
+        overlayKind: "shape",
+        segmentId: "segment-internal-current",
+        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" },
+      },
+    });
+
+    // 화면 문구는 쉬운 말만 쓴다 -- 내부 이름이나 파일명을 노출하지 않는다.
+    expect(screen.getByRole("option", { name: "화살표(오른쪽)" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "손가락" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: /icon_/ })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("모양"), { target: { value: "icon_arrow_right" } });
+    fireEvent.click(screen.getByRole("button", { name: "강조 표시 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "save-overlay",
+      overlayKind: "shape",
+      segmentId: "segment-internal-current",
+      shape: "icon_arrow_right",
+      vertical: "middle",
+      horizontal: "center",
+      size: "medium",
+    });
+  });
+
   it("erases an existing shape overlay through the shared clear action", () => {
     const onAction = renderControls({
       target: {
