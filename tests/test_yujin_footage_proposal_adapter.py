@@ -7,6 +7,7 @@ import pytest
 
 from videobox_core_engine.yujin_footage_proposal_adapter import (
     interpret_yujin_footage_request,
+    is_unsafe_yujin_footage_instruction,
 )
 from videobox_domain_models.yujin_footage_proposals import (
     YujinFootageContext,
@@ -305,6 +306,65 @@ def test_unsafe_variants_are_rejected_even_with_a_valid_proposal(text: str) -> N
 
     assert result.status == "rejected"
     assert result.rejection_reason == "unsafe_instruction"
+
+
+def test_system_hex_identifiers_are_not_flagged_as_unsafe() -> None:
+    # 세그먼트/제안 id는 uuid4 또는 sha256의 hex다. hex 안에는 "db" 같은
+    # 키워드 철자가 약 5% 확률로 나타난다 (예: pseg_4db2..., fprop_...0db1...).
+    # 2026-08-19 전체 pytest에서 이 이유로 유효한 요청이 unsafe_instruction으로
+    # 거부됐다. 숫자·밑줄과 붙어 있는 키워드는 자연어 지시가 아니라 식별자다.
+    assert is_unsafe_yujin_footage_instruction("pseg_4db2aa00aa00aa00aa00aa00aa00aa00") is False
+    assert is_unsafe_yujin_footage_instruction("pseg_db4f00aa00aa00aa00aa00aa00aa00aa") is False
+    assert is_unsafe_yujin_footage_instruction("fprop_76e0cf8fba658bf2d91b30f2200db110") is False
+    assert is_unsafe_yujin_footage_instruction("db를 지워줘") is True
+    assert is_unsafe_yujin_footage_instruction("database에 저장해줘") is True
+
+
+def test_response_referencing_hex_segment_id_with_keyword_bytes_is_candidate_only() -> None:
+    segment_id = "pseg_4db2aa00aa00aa00aa00aa00aa00aa00"
+    context = YujinFootageContext.model_validate(
+        {
+            "schema_version": "videobox.yujin-footage-context.v1",
+            "source_id": "source:take-001",
+            "source_sha256": SOURCE_SHA256,
+            "proposal_id": "fprop_76e0cf8fba658bf2d91b30f2200db110",
+            "proposal_revision": 1,
+            "duration_sec": 30.0,
+            "is_vertical": True,
+            "segments": (
+                {
+                    "segment_id": segment_id,
+                    "source_segment_id": "fseg_0db100aa00aa00aa00aa00aa00aa00aa",
+                    "start_sec": 0.0,
+                    "end_sec": 10.0,
+                    "quality_flags": (),
+                },
+            ),
+        }
+    )
+
+    result = interpret_yujin_footage_request(
+        {
+            "schema_version": "videobox.yujin-footage-response.v1",
+            "reply_text": "출근 장면 후보를 준비했어요.",
+            "proposal": {
+                "source_id": "source:take-001",
+                "proposal_id": "fprop_76e0cf8fba658bf2d91b30f2200db110",
+                "base_revision": 1,
+                "operations": [
+                    {
+                        "intent": "select_process",
+                        "segment_ids": [segment_id],
+                        "process_label": "출근",
+                    }
+                ],
+            },
+        },
+        context,
+    )
+
+    assert result.status == "candidate_only"
+    assert result.proposal is not None
 
 
 def test_deep_malformed_json_is_rejected_without_recursion_error() -> None:

@@ -29,16 +29,20 @@ from videobox_domain_models.yujin_footage_proposals import (
 _MAX_PAYLOAD_BYTES = 64 * 1024
 _MAX_OBJECT_NODES = 256
 _MAX_OBJECT_DEPTH = 12
+# 키워드 경계는 숫자·밑줄도 단어 문자로 취급한다.  세그먼트/제안 id가
+# uuid4·sha256 hex라서 "db" 같은 철자가 hex 안에 약 5% 확률로 나타나는데,
+# `(?<![A-Za-z])`만 쓰면 `pseg_4db2...` 같은 시스템 식별자를 운영 명령으로
+# 오인해 유효한 요청을 거부한다 (2026-08-19 전체 pytest 간헐 실패의 원인).
 _UNSAFE_TEXT = re.compile(
     r"(?ix)"
     r"(?:"
     r"file[ _-]*(?:system|path)|filesystem|파일[ _-]*(?:시스템|경로)|"
     r"(?:file|directory)\s+path|"
     r"(?:[a-z]:[\\/]|\\\\|\.\.[\\/]|\.[\\/]|/(?:[^/\s]+/)*[^/\s]+)|"
-    r"(?<![A-Za-z])(?:shell|powershell|bash|terminal|cmd|command[ _-]*line|command|"
+    r"(?<![A-Za-z0-9_])(?:shell|powershell|bash|terminal|cmd|command[ _-]*line|command|"
     r"명령줄|명령어|renderer|렌더러|ffmpeg|database|데이터베이스|sql|db|셸|쉘|"
     r"http|https|web[ _-]*request|network[ _-]*request|웹[ _-]*요청|네트워크|"
-    r"credential|자격증명|token|api[ _-]*key|secret|password|비밀번호|oauth)(?![A-Za-z])|"
+    r"credential|자격증명|token|api[ _-]*key|secret|password|비밀번호|oauth)(?![A-Za-z0-9_])|"
     r"\b[a-z][a-z0-9+.-]*://"
     r")"
 )
