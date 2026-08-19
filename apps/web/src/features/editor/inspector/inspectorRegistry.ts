@@ -1,7 +1,7 @@
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio";
+type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
@@ -14,14 +14,15 @@ export type InspectorTarget =
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }> }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }> }>;
 
-// Music and effects keep fades only. They already carry gain and ducking,
-// and offering a second loudness control here would write a value the
-// owner never set onto every save.
-const mediaFields = ["fadeInSec", "fadeOutSec"] as const;
+// 2026-08-19: `소리 크기`(gainDb)가 화면에 들어왔다. 예전에는 "입력 자리를 주면
+// owner가 정하지 않은 값이 저장마다 실린다"고 뺐는데, 슬라이더는 저장된 값에서
+// 시작하므로 손대지 않은 저장이 값을 옮기지 않는다. 렌더러는 처음부터 클립별
+// gain_db를 반영하고 있었다(`ffmpeg_final_renderer`) -- 화면에 자리만 없었다.
+const mediaFields = ["fadeInSec", "fadeOutSec", "gainDb"] as const;
 // 배경 음악만 내레이션 밑으로 비켜설 수 있다. 렌더러가 사이드체인 압축을
 // **bgm에만** 걸기 때문이다(`ffmpeg_final_renderer`) -- 효과음에 스위치를 주면
 // 눌러도 아무 일이 없는 단추가 된다.
-const bgmFields = ["fadeInSec", "fadeOutSec", "ducking"] as const;
+const bgmFields = ["fadeInSec", "fadeOutSec", "ducking", "gainDb"] as const;
 // Task 24: B-roll carries no audio by default, so fades are meaningless for it.
 // What the owner actually corrects is which slice of a long take gets used --
 // the recommendation picks a scene window, this is where that is overridden.

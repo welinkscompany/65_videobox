@@ -236,6 +236,82 @@ describe("InspectorControls", () => {
     expect(document.body).not.toHaveTextContent(/asset-internal|segment-internal/);
   });
 
+  it("gives music and effects a loudness slider in creator language and rides gainDb into the save", () => {
+    // 렌더러는 처음부터 클립별 gain_db를 반영했다 -- 화면에 입력 자리만 없었다.
+    // §10.13: dB는 내부 단위라 화면에 쓰지 않는다. 라벨은 `소리 크기`, 양 끝은
+    // `조용히`/`크게`. 중앙(50)=그대로(0dB), 왼쪽 끝=-18dB, 오른쪽 끝=+6dB.
+    const onAction = vi.fn();
+    const segment = { cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 };
+    const bgm: InspectorTarget = {
+      assetId: "asset-internal-bgm",
+      clearOnly: false,
+      controls: { ducking: true, fadeInSec: 0.5, fadeOutSec: 1, gainDb: -8 },
+      fields: ["fadeInSec", "fadeOutSec", "ducking", "gainDb"],
+      id: "clip:bgm",
+      kind: "media",
+      label: "배경 음악",
+      mediaKind: "bgm",
+      segmentId: "segment-internal-current",
+    };
+    const { rerender } = render(<InspectorControls onAction={onAction} selectedSegment={segment} target={bgm} />);
+
+    const slider = screen.getByLabelText("배경 음악 소리 크기") as HTMLInputElement;
+    expect(slider.type).toBe("range");
+    expect(screen.getByText("조용히")).toBeInTheDocument();
+    expect(screen.getByText("크게")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/dB|데시벨|gain/i);
+
+    // 손대지 않은 저장은 저장돼 있던 값을 **정확히 그대로** 돌려보낸다.
+    // 슬라이더 눈금으로 반올림해 버리면 페이드만 고친 저장이 음량을 몰래 옮긴다.
+    fireEvent.click(screen.getByRole("button", { name: "배경 음악 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith({
+      assetId: "asset-internal-bgm",
+      controls: { ducking: true, fadeInSec: 0.5, fadeOutSec: 1, gainDb: -8 },
+      kind: "save-media",
+      mediaKind: "bgm",
+      segmentId: "segment-internal-current",
+    });
+
+    // 오른쪽 끝(크게)=+6dB, 중앙=그대로(0dB), 왼쪽 끝(조용히)=-18dB.
+    const expectSavedGain = (position: string, gainDb: number) => {
+      fireEvent.change(screen.getByLabelText("배경 음악 소리 크기"), { target: { value: position } });
+      fireEvent.click(screen.getByRole("button", { name: "배경 음악 설정 저장" }));
+      expect(onAction).toHaveBeenLastCalledWith({
+        assetId: "asset-internal-bgm",
+        controls: { ducking: true, fadeInSec: 0.5, fadeOutSec: 1, gainDb },
+        kind: "save-media",
+        mediaKind: "bgm",
+        segmentId: "segment-internal-current",
+      });
+    };
+    expectSavedGain("100", 6);
+    expectSavedGain("50", 0);
+    expectSavedGain("0", -18);
+
+    // 효과음도 같은 자리를 얻는다. 필드가 시키는 대로 그려지는지만 본다.
+    const sfx: InspectorTarget = {
+      assetId: "asset-internal-sfx",
+      clearOnly: false,
+      controls: { fadeInSec: 0, fadeOutSec: 0 },
+      fields: ["fadeInSec", "fadeOutSec", "gainDb"],
+      id: "clip:sfx",
+      kind: "media",
+      label: "효과음",
+      mediaKind: "sfx",
+      segmentId: "segment-internal-current",
+    };
+    rerender(<InspectorControls onAction={onAction} selectedSegment={segment} target={sfx} />);
+    fireEvent.change(screen.getByLabelText("효과음 소리 크기"), { target: { value: "75" } });
+    fireEvent.click(screen.getByRole("button", { name: "효과음 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith({
+      assetId: "asset-internal-sfx",
+      controls: { fadeInSec: 0, fadeOutSec: 0, gainDb: 3 },
+      kind: "save-media",
+      mediaKind: "sfx",
+      segmentId: "segment-internal-current",
+    });
+  });
+
   it("can save a B-roll that has no source window, instead of locking every other control", () => {
     // 2026-08-18 실제 화면에서 찾았다. `쓸 구간`을 따로 정하지 않은 B-roll은
     // 시작·끝이 둘 다 0으로 시작하는데, 저장 단추가 `끝 <= 시작`이면 잠기도록
