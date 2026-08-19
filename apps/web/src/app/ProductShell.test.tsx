@@ -591,6 +591,23 @@ describe("settings that cannot do what they offered", () => {
     expect(screen.queryByRole("button", { name: "저장공간" })).toBeNull();
     expect(screen.queryByRole("button", { name: /저장 공간 알림/ })).toBeNull();
   });
+
+  it("says so when a setting cannot be kept, instead of failing silently", () => {
+    // 저장소가 막혀 있으면(사생활 모드·용량 초과) 토글은 켜진 것처럼 보이는데
+    // 다시 켜면 원래대로다. 이번 켬은 유지하되, 저장되지 않았다는 사실을 말한다.
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    render(<SettingsPage section="general" onNavigate={vi.fn()} projectId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /시작할 때 마지막 프로젝트 열기/ }));
+
+    expect(setItem).toHaveBeenCalled();
+    // 이번 세션에는 적용된다.
+    expect(screen.getByRole("button", { name: /시작할 때 마지막 프로젝트 열기: 꺼짐/ })).toBeVisible();
+    // 그리고 저장되지 않았다는 것을 숨기지 않는다.
+    expect(screen.getByRole("status")).toHaveTextContent("설정을 이 기기에 저장하지 못했어요. 다음에 열면 이전 설정으로 돌아갈 수 있어요.");
+  });
 });
 
 describe("사이드바 손잡이", () => {

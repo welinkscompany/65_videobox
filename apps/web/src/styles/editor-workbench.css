@@ -91,6 +91,8 @@
 .vb-preview-stage__empty strong { display: block; color: var(--vb-preview-text, #F4F4F5); }
 .vb-preview-stage__playback { color: var(--muted-foreground); font-size: var(--vb-text-md); }
 .vb-preview-stage__status { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-xs); }
+/* 재생 위치가 미리보기 밖일 때의 안내문. 이 클래스에 CSS가 없어 기본 문단으로 떠 있었다. */
+.vb-preview-stage__elsewhere { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-xs); }
 .vb-preview-stage__visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 /* 좁은 화면에서는 툴바 버튼 줄이 화면 밖으로 나간다. 작업판은 `overflow:hidden`이라
    가로로 밀어 볼 수도 없어서, 390px에서는 `빼기`부터 오른쪽이 통째로 손에 닿지
@@ -132,8 +134,8 @@
   overflow: auto;
   gap: var(--vb-space-4);
   padding: var(--vb-space-4) var(--vb-space-5);
-  border-top: 1px solid hsl(var(--border));
-  background: hsl(var(--card));
+  border-top: 1px solid var(--border);
+  background: var(--card);
 }
 .vb-editor-variants[data-collapsed="true"] { max-height: none; padding: var(--vb-space-2) var(--vb-space-5); }
 .vb-editor-variants__header, .vb-editor-variants__pane header {
@@ -143,24 +145,24 @@
   gap: var(--vb-space-4);
 }
 .vb-editor-variants__header h2 { margin: var(--vb-space-1) 0 0; font-size: var(--vb-text-md); }
-.vb-editor-variants__hint, .vb-editor-variants__master-note { color: hsl(var(--muted-foreground)); font-size: var(--vb-text-sm); }
-.vb-editor-variants__eyebrow { margin: 0; color: hsl(var(--muted-foreground)); font-size: var(--vb-text-xs); letter-spacing: 0.08em; text-transform: uppercase; }
+.vb-editor-variants__hint, .vb-editor-variants__master-note { color: var(--muted-foreground); font-size: var(--vb-text-sm); }
+.vb-editor-variants__eyebrow { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-xs); letter-spacing: 0.08em; text-transform: uppercase; }
 .vb-editor-variants__selector { display: flex; flex-wrap: wrap; gap: var(--vb-space-2); }
 .vb-editor-variants__compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--vb-space-3); position: relative; }
-.vb-editor-variants__audio-note { grid-column: 1 / -1; color: hsl(var(--muted-foreground)); font-size: var(--vb-text-xs); }
-.vb-editor-variants__pane { display: grid; gap: var(--vb-space-2); min-width: 0; padding: var(--vb-space-3); border: 1px solid hsl(var(--border)); border-radius: 0.75rem; background: hsl(var(--background)); }
-.vb-editor-variants__pane header span, .vb-editor-variants__pane output { color: hsl(var(--muted-foreground)); font-size: var(--vb-text-xs); }
-.vb-editor-variants__canvas { display: grid; place-items: center; gap: var(--vb-space-1); min-height: 8rem; border: 1px dashed hsl(var(--border)); border-radius: 0.6rem; color: hsl(var(--muted-foreground)); font-size: var(--vb-text-xs); }
+.vb-editor-variants__audio-note { grid-column: 1 / -1; color: var(--muted-foreground); font-size: var(--vb-text-xs); }
+.vb-editor-variants__pane { display: grid; gap: var(--vb-space-2); min-width: 0; padding: var(--vb-space-3); border: 1px solid var(--border); border-radius: 0.75rem; background: var(--background); }
+.vb-editor-variants__pane header span, .vb-editor-variants__pane output { color: var(--muted-foreground); font-size: var(--vb-text-xs); }
+.vb-editor-variants__canvas { display: grid; place-items: center; gap: var(--vb-space-1); min-height: 8rem; border: 1px dashed var(--border); border-radius: 0.6rem; color: var(--muted-foreground); font-size: var(--vb-text-xs); }
 .vb-editor-variants__canvas[data-aspect-ratio="9:16"] { min-height: 10rem; }
-.vb-editor-variants__conflicts { display: grid; gap: var(--vb-space-3); padding: var(--vb-space-3); border: 1px solid hsl(var(--destructive)); border-radius: 0.75rem; }
+.vb-editor-variants__conflicts { display: grid; gap: var(--vb-space-3); padding: var(--vb-space-3); border: 1px solid var(--destructive); border-radius: 0.75rem; }
 .vb-editor-variants__conflicts h3, .vb-editor-variants__conflicts p { margin: 0; }
 .vb-editor-variants__conflicts article { display: grid; gap: var(--vb-space-2); }
 .vb-editor-variants__conflicts article > div { display: flex; flex-wrap: wrap; gap: var(--vb-space-2); }
-.vb-editor-variants__server-controls { display: grid; gap: var(--vb-space-3); padding: var(--vb-space-3); border: 1px solid hsl(var(--border)); border-radius: 0.75rem; background: color-mix(in srgb, hsl(var(--card)) 94%, hsl(var(--muted))); }
+.vb-editor-variants__server-controls { display: grid; gap: var(--vb-space-3); padding: var(--vb-space-3); border: 1px solid var(--border); border-radius: 0.75rem; background: color-mix(in srgb, var(--card) 94%, var(--muted)); }
 .vb-editor-variants__server-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--vb-space-2); font-size: var(--vb-text-sm); }
-.vb-editor-variants__server-line span { color: hsl(var(--muted-foreground)); }
-.vb-editor-variants__server-line span[role="status"] { color: hsl(var(--destructive)); font-weight: 700; }
-.vb-editor-variants__server-warning { margin: 0; color: hsl(var(--destructive)); font-size: var(--vb-text-sm); }
+.vb-editor-variants__server-line span { color: var(--muted-foreground); }
+.vb-editor-variants__server-line span[role="status"] { color: var(--destructive); font-weight: 700; }
+.vb-editor-variants__server-warning { margin: 0; color: var(--destructive); font-size: var(--vb-text-sm); }
 .vb-editor-variants__server-actions { display: flex; flex-wrap: wrap; gap: var(--vb-space-2); }
 @media (max-width: 760px) {
   .vb-editor-variants__compare { grid-template-columns: 1fr; }
@@ -197,7 +199,7 @@
 /* 전체화면은 판 전체가 커진다(영상만 키우면 재생·프레임 단추를 잃는다).
    바탕을 직접 깔아야 한다 -- 안 깔면 브라우저 기본 검정 위에 껍데기만 뜬다. */
 .vb-preview-stage:fullscreen { background: var(--vb-preview); padding: var(--vb-space-4); }
-.vb-preview-stage:fullscreen .vb-preview-stage__playback, .vb-preview-stage:fullscreen .vb-preview-stage__status { color: var(--vb-preview-text, #F4F4F5); }
+.vb-preview-stage:fullscreen .vb-preview-stage__playback, .vb-preview-stage:fullscreen .vb-preview-stage__status, .vb-preview-stage:fullscreen .vb-preview-stage__elsewhere { color: var(--vb-preview-text, #F4F4F5); }
 /* 타임라인의 안내·상태 줄은 지우지 않고 한 줄로 모은다. 재 보니 타임라인이 필요로
    하는 449px 중 눈금과 트랙은 222px뿐이었고 나머지는 이 조각들이 한 줄씩 차지한
    것이었다 -- 자리를 더 줘도 눈금이 계속 스크롤 안에 숨은 이유다. */

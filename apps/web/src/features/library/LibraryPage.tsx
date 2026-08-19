@@ -35,6 +35,8 @@ export function LibraryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ingestItems, setIngestItems] = useState<LibraryIngestItem[]>([]);
+  // 종류 탭 + 검색어일 때만 의미검색이 돈다. 어느 방식으로 찾았는지는 말한다.
+  const [searchMode, setSearchMode] = useState<"semantic" | "word" | null>(null);
   const failedFiles = useRef(new Map<string, File>());
   const epoch = useRef(0);
   // A cross-entry link (e.g. from the footage organizer) names the asset it
@@ -46,13 +48,27 @@ export function LibraryPage() {
     const currentEpoch = ++epoch.current;
     setLoading(true); setError(null);
     try {
-      const result = await api.listLibraryAssets({ includeTrashed: activeFilter === "trash", q: search || undefined, limit: 500 });
-      if (currentEpoch !== epoch.current) return;
-      setAssets(result.assets);
+      // 종류 탭을 고르고 검색하면 의미검색(`/api/library/search`)을 부른다.
+      // 이 엔드포인트는 백엔드에 있었는데 부르는 화면이 없어 검색이 언제나
+      // 단어 매칭이었다. 종류가 없는 탭(전체·즐겨찾기·휴지통)은 목록 검색 그대로다.
+      const semanticEligible = Boolean(search.trim()) && (activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx");
+      let nextAssets: LibraryAsset[];
+      if (semanticEligible) {
+        const result = await api.searchLibraryAssets(search.trim(), activeFilter as LibraryMediaType, undefined);
+        if (currentEpoch !== epoch.current) return;
+        nextAssets = result.matches;
+        setSearchMode(result.semantic ? "semantic" : "word");
+      } else {
+        const result = await api.listLibraryAssets({ includeTrashed: activeFilter === "trash", q: search || undefined, limit: 500 });
+        if (currentEpoch !== epoch.current) return;
+        nextAssets = result.assets;
+        setSearchMode(null);
+      }
+      setAssets(nextAssets);
       const requestedId = requestedAssetId.current;
       requestedAssetId.current = null;
-      const requested = requestedId ? result.assets.find((item) => item.library_asset_id === requestedId) : null;
-      setSelected((previous) => requested ?? (previous ? result.assets.find((item) => item.library_asset_id === previous.library_asset_id) ?? null : result.assets[0] ?? null));
+      const requested = requestedId ? nextAssets.find((item) => item.library_asset_id === requestedId) : null;
+      setSelected((previous) => requested ?? (previous ? nextAssets.find((item) => item.library_asset_id === previous.library_asset_id) ?? null : nextAssets[0] ?? null));
     } catch {
       if (currentEpoch === epoch.current) setError("라이브러리를 불러오지 못했어요.");
     } finally { if (currentEpoch === epoch.current) setLoading(false); }
@@ -104,5 +120,5 @@ export function LibraryPage() {
   return <main className="vb-library-page" data-testid="library-workspace" data-layout="three-pane">{/* 2026-08-19: 자체 메뉴 줄을 뺐다. 이 화면이 대시보드 껍데기 안으로 들어가면서
     좌측 메뉴가 늘 함께 있고, 여기 것과 **같은 링크 네 개가 두 벌**이 됐다.
     owner가 "좌측 메뉴는 그대로 두라"고 한 뒤의 정리다. */}
-<span data-testid="global-library-page" className="sr-only">내 라이브러리</span><LibrarySidebar activeFilter={activeFilter} onFilter={selectFilter} counts={counts} status={assets.some((item) => item.lifecycle === "needs_attention") ? "needs_attention" : "all"} /><section className="vb-library-main"><AssetIngestDropzone onFiles={(files) => void ingest(files)} /><IngestJobTable items={ingestItems} onRetry={(filename) => void retry(filename)} /><LibraryResults assets={visible} activeFilter={activeFilter} search={search} onSearch={setSearch} onFilter={selectFilter} selectedId={selected?.library_asset_id} onSelect={setSelected} loading={loading} error={error} /></section><LibraryPreviewPane asset={selected} onChanged={() => void load()} /></main>;
+<span data-testid="global-library-page" className="sr-only">내 라이브러리</span><LibrarySidebar activeFilter={activeFilter} onFilter={selectFilter} counts={counts} status={assets.some((item) => item.lifecycle === "needs_attention") ? "needs_attention" : "all"} /><section className="vb-library-main"><AssetIngestDropzone onFiles={(files) => void ingest(files)} /><IngestJobTable items={ingestItems} onRetry={(filename) => void retry(filename)} /><LibraryResults assets={visible} activeFilter={activeFilter} search={search} onSearch={setSearch} onFilter={selectFilter} selectedId={selected?.library_asset_id} onSelect={setSelected} loading={loading} error={error} searchMode={searchMode} /></section><LibraryPreviewPane asset={selected} onChanged={() => void load()} /></main>;
 }

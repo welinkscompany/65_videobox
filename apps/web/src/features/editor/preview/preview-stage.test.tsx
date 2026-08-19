@@ -231,6 +231,18 @@ describe("PreviewStage", () => {
     expect(dockRule).toContain("overflow: auto");
   });
 
+  it("styles the elsewhere hint -- a class with no CSS is a promise the screen never kept", () => {
+    // `vb-preview-stage__elsewhere`는 재생 위치가 미리보기 밖일 때 그 사실을
+    // 알리는 안내문이다. 대응 CSS가 없어 기본 문단으로 굴러다녔다.
+    const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
+    const elsewhereRule = css.match(/\.vb-preview-stage__elsewhere\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(elsewhereRule).toContain("color: var(--muted-foreground)");
+    expect(elsewhereRule).toContain("font-size: var(--vb-text-xs)");
+    // 전체화면은 어두운 배경이라 밝은 글자로 바꿔야 읽힌다 -- status와 같은 규칙.
+    expect(css).toMatch(/\.vb-preview-stage:fullscreen[^{]*\.vb-preview-stage__elsewhere/);
+  });
+
   it("bounds the output variants strip so it cannot starve the preview", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
     const variantsRule = css.match(/^\.vb-editor-variants\s*\{([\s\S]*?)\}/m)?.[1] ?? "";

@@ -78,6 +78,31 @@ def test_a_failed_lookup_reports_that_it_fell_back(monkeypatch: pytest.MonkeyPat
     assert assets == [{"asset_id": "asset-1"}]
 
 
+def test_an_empty_lookup_result_is_word_matching_not_a_semantic_success() -> None:
+    """색인이 비어 0건이 돌아오면 의미 점수는 하나도 안 붙는다. 그래 놓고
+    `뜻으로 찾음`이라고 말하면 화면이 거짓말을 한다 -- 실제 순위는 전부
+    단어 매칭이 정했다."""
+    from videobox_core_engine import director_proposal_service as module
+
+    service = module.DirectorProposalService.__new__(module.DirectorProposalService)
+    service.embedding_provider = _Embeddings()
+    service.embedding_model_name = "bge-m3"
+
+    class _Store:
+        @staticmethod
+        def find_local_media_embedding_matches(**_kwargs):
+            return []
+
+    service.store = _Store()
+
+    assets, mode = service._apply_semantic_scores(
+        project_id="p1", segment_text="조용한 아침 산책", assets=[{"asset_id": "asset-1"}]
+    )
+
+    assert mode == WORD_MATCH
+    assert assets == [{"asset_id": "asset-1"}]
+
+
 def test_no_embedding_provider_at_all_is_also_word_matching() -> None:
     from videobox_core_engine import director_proposal_service as module
 

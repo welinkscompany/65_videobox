@@ -37,6 +37,19 @@ describe("shell theme tokens", () => {
     expect(defaultButtonRule).toContain("color:var(--primary-foreground)")
   })
 
+  it("never wraps a color token in hsl() -- the tokens are complete colors", () => {
+    // `--border` 같은 토큰은 `#EAEAEC` 같은 **완성색**이다. `hsl(var(--border))`는
+    // `hsl(#EAEAEC)`가 되어 무효 선언이고, 브라우저는 그 속성을 통째로 버린다.
+    // 이렇게 13곳이 조용히 죽어 있었다 -- 화면은 뜨지만 그 테두리·색만 사라진다.
+    for (const [name, css] of [
+      ["product-shell.css", productShellCss],
+      ["editor-workbench.css", editorWorkbenchCss],
+    ] as const) {
+      const matches = css.match(/hsl\(\s*var\(/g) ?? []
+      expect(matches, `${name} wraps complete color tokens in hsl()`).toEqual([])
+    }
+  })
+
   it("has no hardcoded colors left in the preview shell of editor-workbench.css", () => {
     const previewShellRule = editorWorkbenchCss.match(
       /\.vb-preview-stage__media-shell\s*\{[^}]*\}/,

@@ -58,6 +58,35 @@ describe("LibraryPage", () => {
     expect(musicTab).toHaveAttribute("aria-selected", "true");
   });
 
+  it("searches by meaning when a media type is chosen, and says which way it found things", async () => {
+    // `/api/library/search`(의미검색)는 백엔드에 있는데 부르는 화면이 하나도
+    // 없었다 -- 검색은 언제나 단어 매칭이었다. 종류 탭을 고르고 검색하면
+    // 의미검색을 부르고, 어느 방식으로 찾았는지 말한다.
+    const search = vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [{ ...asset({ library_asset_id: "match_1", user_metadata: { filename: "calm-walk.mp4", tags: [] } }), score: 0.9, reason: "묘사 일치" }],
+      semantic: true,
+    });
+    render(<LibraryPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "영상" }));
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "차분한 산책" } });
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith("차분한 산책", "broll", undefined));
+    expect((await screen.findAllByText("calm-walk.mp4")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("status", { name: "찾은 방식" })).toHaveTextContent("뜻으로 찾음");
+  });
+
+  it("says when a search fell back to word matching", async () => {
+    vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [{ ...asset(), score: 0.5, reason: "파일명 또는 분석 메타데이터 일치" }],
+      semantic: false,
+    });
+    render(<LibraryPage />);
+    fireEvent.click(await screen.findByRole("tab", { name: "영상" }));
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "걷기" } });
+
+    expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
+  });
+
   it("reconciles a mixed drop and keeps a failed item visible", async () => {
     vi.mocked(api.ingestLibraryAssets)
       .mockResolvedValueOnce({ ingest_batch_id: "batch_b", partial: false, items: [{ filename: "clip.mp4", state: "ready", library_asset_id: "new_clip" }] })

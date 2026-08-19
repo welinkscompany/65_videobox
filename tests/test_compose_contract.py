@@ -245,6 +245,21 @@ def test_speech_to_text_defaults_to_on_so_a_container_never_ships_fake_transcrip
     assert environment["VIDEOBOX_STT_LANGUAGE"] == "${VIDEOBOX_STT_LANGUAGE:-ko}"
 
 
+def test_the_stack_verifier_names_only_services_that_still_exist() -> None:
+    """`verify_container_stack.ps1`이 `videobox-api`·`videobox-web`을 요구하고
+    있었다 -- 두 서비스는 `videobox-workspace`로 합쳐져 사라진 지 오래라,
+    스택이 멀쩡해도 이 검증은 항상 실패한다. 항상 실패하는 검증은 아무도
+    안 돌리게 되고, 그 순간부터 지키는 것이 없다."""
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    verifier = (ROOT / "scripts" / "verify_container_stack.ps1").read_text(encoding="utf-8")
+
+    referenced = set(re.findall(r"videobox-[a-z0-9-]+", verifier))
+    missing = sorted(referenced - set(compose["services"]))
+
+    assert referenced, "검증 스크립트가 아무 서비스도 확인하지 않는다"
+    assert missing == []
+
+
 def test_the_local_model_address_stays_on_the_host_loopback_bridge() -> None:
     """로컬 모델 주소가 바뀌면 분석·의미검색·유진 대화가 한꺼번에 조용히 죽는다.
 

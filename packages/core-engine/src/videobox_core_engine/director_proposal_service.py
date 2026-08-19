@@ -270,6 +270,15 @@ class DirectorProposalService:
             )
             return assets, WORD_MATCH
         score_by_asset_id = {str(match["asset_id"]): float(match["score"]) for match in matches}
+        if not score_by_asset_id:
+            # 조회는 성공했지만 0건이다. 의미 점수가 하나도 안 붙었으니 실제
+            # 순위는 전부 단어 매칭이 정한다 -- 그걸 `뜻으로 찾음`이라고
+            # 말하면 화면이 거짓말을 한다.
+            _logger.info(
+                "Semantic lookup returned no matches for project %s; ranking is lexical.",
+                project_id,
+            )
+            return assets, WORD_MATCH
         return [
             {**asset, "semantic_score": score_by_asset_id[str(asset["asset_id"])]}
             if str(asset.get("asset_id")) in score_by_asset_id

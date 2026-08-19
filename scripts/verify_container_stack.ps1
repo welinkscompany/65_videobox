@@ -51,19 +51,28 @@ foreach ($entry in $manifest.file_hashes.PSObject.Properties) {
     }
 }
 
+# api·web은 videobox-workspace 한 서비스로 합쳐졌다. 옛 이름을 요구하면
+# 스택이 멀쩡해도 이 검증이 항상 실패하고, 항상 실패하는 검증은 아무도 안 돌린다.
 $services = docker compose -f $ComposeFile ps --format json | ConvertFrom-Json
-foreach ($name in "videobox-postgres", "videobox-api", "videobox-web") {
+foreach ($name in "videobox-postgres", "videobox-workspace") {
     $service = @($services | Where-Object Service -eq $name)
     if ($service.Count -ne 1 -or $service[0].State -ne "running") {
         throw "Required service is not running: $name"
     }
 }
 
-foreach ($name in "videobox-api", "videobox-postgres") {
-    $container = (docker compose -f $ComposeFile ps -q $name).Trim()
-    if (-not $container) { throw "Missing container for $name" }
-    $publishedPorts = @(docker port $container)
-    if ($publishedPorts.Count -gt 0) { throw "$name exposes a host port" }
+# postgres는 호스트 포트를 아예 열지 않는다.
+$postgresContainer = (docker compose -f $ComposeFile ps -q "videobox-postgres").Trim()
+if (-not $postgresContainer) { throw "Missing container for videobox-postgres" }
+if (@(docker port $postgresContainer).Count -gt 0) { throw "videobox-postgres exposes a host port" }
+
+# workspace는 웹 포트 하나를, 그것도 루프백(127.0.0.1)으로만 연다.
+$workspaceContainer = (docker compose -f $ComposeFile ps -q "videobox-workspace").Trim()
+if (-not $workspaceContainer) { throw "Missing container for videobox-workspace" }
+$workspacePorts = @(docker port $workspaceContainer)
+if ($workspacePorts.Count -eq 0) { throw "videobox-workspace publishes no web port" }
+foreach ($line in $workspacePorts) {
+    if ($line -notmatch "127\.0\.0\.1") { throw "videobox-workspace publishes a non-loopback port: $line" }
 }
 
 $projects = (Invoke-RestMethod "http://127.0.0.1:$WebPort/api/projects").projects

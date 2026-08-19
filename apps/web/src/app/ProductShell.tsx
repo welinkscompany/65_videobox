@@ -42,7 +42,16 @@ type SettingsState = { compact: boolean; reducedMotion: boolean; openLastProject
 const settingsKey = "videobox.settings";
 const defaultSettings: SettingsState = { compact: false, reducedMotion: false, openLastProject: true };
 function readSettings(): SettingsState { try { const stored = JSON.parse(window.localStorage.getItem(settingsKey) ?? "{}"); return { ...defaultSettings, ...stored, openLastProject: stored.openLastProject ?? stored.storageHint ?? true }; } catch { return defaultSettings; } }
-function saveSettings(next: SettingsState) { window.localStorage.setItem(settingsKey, JSON.stringify(next)); }
+/** 저장 성공 여부를 돌려준다. 사생활 모드·용량 초과에서는 localStorage 쓰기가
+ *  던지는데, 조용히 삼키면 토글이 켜진 것처럼 보이고 다음에 열면 원래대로다. */
+function saveSettings(next: SettingsState): boolean {
+  try {
+    window.localStorage.setItem(settingsKey, JSON.stringify(next));
+    return true;
+  } catch {
+    return false;
+  }
+}
 export function opensLastProjectOnStart() { return readSettings().openLastProject; }
 
 export function ProductShell({ projectId, projects, archive, section, onNavigate, onOpenSettings, onArchiveProject, onDeleteProjectPermanently, children, forceCollapsed = false }: { projectId: string; projects: Project[]; archive?: ProjectArchiveControls; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; onArchiveProject?: (projectId: string) => void | Promise<void>; onDeleteProjectPermanently?: (projectId: string) => void | Promise<void>; children: ReactNode; forceCollapsed?: boolean }) {
@@ -197,9 +206,12 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
 function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
 
 export function SettingsPage({ section, onNavigate, projectId }: { section: SettingsSection; onNavigate: (section: SettingsSection) => void; projectId: string }) {
-  const [settings, setSettings] = useState(readSettings); const update = (patch: Partial<SettingsState>) => setSettings((previous) => { const next = { ...previous, ...patch }; saveSettings(next); return next; });
+  const [settings, setSettings] = useState(readSettings);
+  const [saveFailed, setSaveFailed] = useState(false);
+  // 이번 세션에는 적용하되, 기기에 남지 않았다는 사실은 말한다.
+  const update = (patch: Partial<SettingsState>) => { const next = { ...settings, ...patch }; setSaveFailed(!saveSettings(next)); setSettings(next); };
   const labels: Record<SettingsSection, string> = { general: "일반", appearance: "화면", "ai-privacy": "AI·개인정보", voice: "내 목소리", output: "출력", conversations: "유진 대화" };
-  return <section className="vb-settings" data-testid="settings-page"><p className="vb-eyebrow">설정</p><h1>{labels[section]}</h1><div className="vb-settings-nav">{(Object.keys(labels) as SettingsSection[]).map((key) => <Button key={key} variant={key === section ? "default" : "outline"} onClick={() => onNavigate(key)}>{labels[key]}</Button>)}</div><p>이 기기에 저장되는 작업 환경을 조절합니다.</p><p className="vb-setting-note">설정은 이 기기에서만 관리됩니다.</p>{section === "general" && <SettingToggle label="시작할 때 마지막 프로젝트 열기" checked={settings.openLastProject} onChange={(checked) => update({ openLastProject: checked })} />}{section === "appearance" && <><SettingToggle label="조밀한 화면" checked={settings.compact} onChange={(checked) => update({ compact: checked })} /><SettingToggle label="움직임 줄이기" checked={settings.reducedMotion} onChange={(checked) => update({ reducedMotion: checked })} /></>}{/* Not a switch: VideoBox has no non-local mode to turn this off into. */}
+  return <section className="vb-settings" data-testid="settings-page"><p className="vb-eyebrow">설정</p><h1>{labels[section]}</h1><div className="vb-settings-nav">{(Object.keys(labels) as SettingsSection[]).map((key) => <Button key={key} variant={key === section ? "default" : "outline"} onClick={() => onNavigate(key)}>{labels[key]}</Button>)}</div><p>이 기기에 저장되는 작업 환경을 조절합니다.</p><p className="vb-setting-note">설정은 이 기기에서만 관리됩니다.</p>{saveFailed ? <p role="status" className="vb-setting-note">설정을 이 기기에 저장하지 못했어요. 다음에 열면 이전 설정으로 돌아갈 수 있어요.</p> : null}{section === "general" && <SettingToggle label="시작할 때 마지막 프로젝트 열기" checked={settings.openLastProject} onChange={(checked) => update({ openLastProject: checked })} />}{section === "appearance" && <><SettingToggle label="조밀한 화면" checked={settings.compact} onChange={(checked) => update({ compact: checked })} /><SettingToggle label="움직임 줄이기" checked={settings.reducedMotion} onChange={(checked) => update({ reducedMotion: checked })} /></>}{/* Not a switch: VideoBox has no non-local mode to turn this off into. */}
       {section === "ai-privacy" && <div className="vb-setting-control"><span>모든 처리는 이 기기 안에서만 이뤄집니다.</span></div>}{section === "voice" && <div className="vb-setting-control"><span>내 목소리 등록과 내레이션 만들기는 자산 단계의 내레이션에서 합니다.</span><a className="vb-action-link" href={`/projects/${encodeURIComponent(projectId)}/assets`}>내레이션 열기</a></div>}{section === "output" && <div className="vb-setting-control"><span>완성본은 MP4(H.264)로 만듭니다.</span></div>}{section === "conversations" && <ConversationCleanup key={projectId} projectId={projectId} />}</section>;
 }
 export function ProductEmptyPage({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Empty><EmptyHeader><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader><Button onClick={onClick}>{action}</Button></Empty>; }
