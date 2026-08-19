@@ -1,5 +1,7 @@
 # 대화로 편집하기 — 끊겨 있던 세 곳을 이었다
 
+**대체됨:** `docs/handoffs/2026-08-19-videobox-verification-guards-and-the-open-four.ko.md`
+
 - 작성: 2026-08-19
 - **읽는 순서:** 이 문서 → `docs/handoffs/2026-08-19-videobox-navigation-and-spacing-audit.ko.md`
 
