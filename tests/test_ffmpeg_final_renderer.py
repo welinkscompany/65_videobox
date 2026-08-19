@@ -765,3 +765,189 @@ def test_a_render_that_cannot_be_measured_claims_nothing_about_its_sound(tmp_pat
     not_media.write_bytes(b"this is not a video")
 
     assert renderer.rendered_audio_has_sound(not_media) is None
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.parametrize("soundless_first", [False, True])
+def test_segment_render_survives_a_soundless_broll_between_sound_kept_brolls(tmp_path: Path, soundless_first: bool) -> None:
+    """`원본 소리 살리기`를 켰는데 원본에 오디오 스트림이 아예 없어도 렌더가 막히면 안 된다.
+
+    무음 원본이 섞이면 조각마다 스트림 구성이 달라진다. concat은 **첫 조각**의
+    스트림 구성을 기준으로 삼으므로, 무음 조각이 앞에 오면 뒤 조각의 소리가
+    통째로 사라지거나 `[1:a]` 믹스가 잡을 스트림이 없어 막힌다. 켠 사람은
+    잘못한 게 없다 -- 무음 원본은 무음을 실어 주면 된다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="soundless broll must not block")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    sound_broll_file = tmp_path / "sound-broll.mp4"
+    _generate([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=15:d=1",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
+        "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(sound_broll_file),
+    ])
+    soundless_broll_file = tmp_path / "soundless-broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:r=15:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(soundless_broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    sound_broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=sound_broll_file)
+    soundless_broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=soundless_broll_file)
+    output = tmp_path / "soundless-mixed.mp4"
+
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+        project_id=project.project_id,
+        output_path=output,
+        timeline={"narration_source_uri": narration.storage_uri, "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+            {"track_type": "broll", "clips": (
+                [
+                    {"asset_uri": soundless_broll.storage_uri, "start_sec": 0.0, "end_sec": 1.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                    {"asset_uri": sound_broll.storage_uri, "start_sec": 1.0, "end_sec": 2.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                ]
+                if soundless_first
+                else [
+                    {"asset_uri": sound_broll.storage_uri, "start_sec": 0.0, "end_sec": 1.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                    {"asset_uri": soundless_broll.storage_uri, "start_sec": 1.0, "end_sec": 2.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                ]
+            )},
+        ]},
+    )
+
+    peak = probe_audio_peak_dbfs(output)
+    assert peak is not None and peak > -30.0, "내레이션 소리가 완성본에 남아 있어야 한다"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_plan_render_survives_a_soundless_broll_with_source_audio_kept(tmp_path: Path) -> None:
+    """계획 기반 경로도 같은 함정을 밟는다 -- 렌더 경로가 둘이라는 걸 잊지 마라.
+
+    그래프가 무음 원본의 `[N:a]`를 참조하면 ffmpeg가 통째로 실패한다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="plan path soundless broll")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    soundless_broll_file = tmp_path / "soundless-broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=green:s=320x240:r=15:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(soundless_broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=soundless_broll_file)
+    output = tmp_path / "plan-soundless.mp4"
+    timeline = {
+        "timeline_id": "timeline-plan-soundless", "project_id": project.project_id,
+        "narration_source_uri": narration.storage_uri,
+        "output": {"width": 320, "height": 240},
+        "tracks": [
+            {"track_id": "n", "track_type": "narration", "clips": [{
+                "clip_id": "n1", "clip_type": "narration", "asset_id": narration.asset_id,
+                "asset_uri": narration.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 2.0,
+            }]},
+            {"track_id": "b", "track_type": "broll", "clips": [{
+                "clip_id": "b1", "clip_type": "broll", "asset_id": broll.asset_id,
+                "asset_uri": broll.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 2.0,
+                "media_controls": {"preserve_source_audio": True, "loop": False},
+            }]},
+        ],
+    }
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15)
+
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id, timeline=timeline, output_path=output,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+    )
+
+    peak = probe_audio_peak_dbfs(output)
+    assert peak is not None and peak > -30.0, "내레이션 소리가 완성본에 남아 있어야 한다"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.parametrize("ducking", [False, True])
+def test_adding_bgm_does_not_quiet_the_narration_in_the_segment_path(tmp_path: Path, ducking: bool) -> None:
+    """음악을 깔았다고 **내레이션이 작아지면 안 된다.**
+
+    `amix`는 기본으로 입력 수만큼 나눈다(normalize=1). 조각 이어붙이기 경로의
+    음악 믹스에는 `normalize=0`이 없어서, 무음 음악을 깔아도 말소리가 6dB
+    내려갔다. 같은 함정에 이미 두 번 걸렸다 -- 이번이 세 번째 자리다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name=f"bgm must not duck narration ducking={ducking}")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    # 음악은 **무음**으로 둔다. 그래야 완성본 음량 변화가 오직 섞는 방식 때문임을 안다.
+    bgm_file = tmp_path / "silent-bgm.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:a", "pcm_s16le", str(bgm_file)])
+    broll_file = tmp_path / "backdrop.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=gray:s=320x240:r=15:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    bgm = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=bgm_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+
+    def render(with_bgm: bool, name: str) -> Path:
+        output = tmp_path / name
+        tracks: list[dict] = [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"loop": False}}]},
+        ]
+        if with_bgm:
+            tracks.append({"track_type": "bgm", "clips": [{
+                "asset_uri": bgm.storage_uri, "start_sec": 0.0, "end_sec": 2.0,
+                "media_controls": {"ducking": ducking},
+            }]})
+        FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+            project_id=project.project_id, output_path=output,
+            timeline={"narration_source_uri": narration.storage_uri, "tracks": tracks},
+        )
+        return output
+
+    without = probe_audio_peak_dbfs(render(False, "no-bgm.mp4"))
+    with_bgm = probe_audio_peak_dbfs(render(True, "with-bgm.mp4"))
+
+    assert without is not None and with_bgm is not None
+    # 소리를 더했으니 조용해질 리가 없다. 측정 오차만 감안한다.
+    assert with_bgm >= without - 1.0
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_adding_sfx_does_not_quiet_the_narration_in_the_segment_path(tmp_path: Path) -> None:
+    """효과음도 같다 -- 더한 것이지 나머지를 줄인 게 아니다."""
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="sfx must not duck narration")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    sfx_file = tmp_path / "silent-sfx.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "1", "-c:a", "pcm_s16le", str(sfx_file)])
+    broll_file = tmp_path / "backdrop.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=gray:s=320x240:r=15:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    sfx = store.register_asset(project_id=project.project_id, asset_type=AssetType.SFX, source_path=sfx_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+
+    def render(with_sfx: bool, name: str) -> Path:
+        output = tmp_path / name
+        tracks: list[dict] = [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"loop": False}}]},
+        ]
+        if with_sfx:
+            tracks.append({"track_type": "sfx", "clips": [{
+                "asset_uri": sfx.storage_uri, "start_sec": 0.5, "end_sec": 1.5, "media_controls": {},
+            }]})
+        FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+            project_id=project.project_id, output_path=output,
+            timeline={"narration_source_uri": narration.storage_uri, "tracks": tracks},
+        )
+        return output
+
+    without = probe_audio_peak_dbfs(render(False, "no-sfx.mp4"))
+    with_sfx = probe_audio_peak_dbfs(render(True, "with-sfx.mp4"))
+
+    assert without is not None and with_sfx is not None
+    assert with_sfx >= without - 1.0

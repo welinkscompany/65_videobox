@@ -333,7 +333,8 @@ class FfmpegFinalRenderer:
         return ";".join(filters)
 
     def build_plan_audio_filter_graph(
-        self, *, composition_plan: CompositionPlan, source_indices: dict[str, int]
+        self, *, composition_plan: CompositionPlan, source_indices: dict[str, int],
+        soundless_source_clip_ids: set[str] | frozenset[str] = frozenset(),
     ) -> str:
         """Shared audio placement/control graph for final and proxy output."""
         duration = max(composition_plan.duration_sec, 0.001)
@@ -350,7 +351,8 @@ class FfmpegFinalRenderer:
         elif len(narration_labels) == 1:
             filters.append(f"{narration_labels[0]}anull[narration_mix]")
         else:
-            filters.append(f"{''.join(narration_labels)}amix=inputs={len(narration_labels)}:duration=longest[narration_mix]")
+            # `normalize=0` -- 클립이 둘로 잘렸다고 목소리가 절반이 되면 안 된다.
+            filters.append(f"{''.join(narration_labels)}amix=inputs={len(narration_labels)}:duration=longest:normalize=0[narration_mix]")
 
         has_ducked_bgm = any(
             item.track_type == "bgm"
@@ -371,6 +373,10 @@ class FfmpegFinalRenderer:
             if item.track_type == "broll":
                 controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(item.end_sec - item.start_sec, 0.001))
                 if not controls["preserve_source_audio"]:
+                    continue
+                if item.clip_id in soundless_source_clip_ids:
+                    # 원본에 오디오 스트림이 없다. 없는 `[N:a]`를 그래프에 넣으면
+                    # ffmpeg가 통째로 실패한다 -- 실을 소리가 없으니 건너뛴다.
                     continue
                 label = f"a_{item.clip_id}"
                 delay = max(0, round(item.start_sec * 1000))
@@ -509,6 +515,7 @@ class FfmpegFinalRenderer:
         source_paths: list[tuple[Path, bool, bool]] = []
         source_indices: dict[str, int] = {}
         track_overlay_indices: dict[str, int] = {}
+        soundless_source_clip_ids: set[str] = set()
         audio_items = []
         for item in composition_plan.items:
             if item.track_type == "overlay":
@@ -542,7 +549,10 @@ class FfmpegFinalRenderer:
                 if available_source_window < item.end_sec - item.start_sec and not controls["loop"] and not controls["pad"]:
                     raise FinalRenderError("B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration.")
                 if controls["preserve_source_audio"]:
-                    audio_items.append(item)
+                    if self._has_audio_stream(source):
+                        audio_items.append(item)
+                    else:
+                        soundless_source_clip_ids.add(item.clip_id)
                 should_loop = controls["loop"]
             elif item.track_type in {"bgm", "sfx"}:
                 source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
@@ -576,7 +586,10 @@ class FfmpegFinalRenderer:
             track_overlay_indices=track_overlay_indices,
         )
         duration = max(composition_plan.duration_sec, 0.001)
-        graph += ";" + self.build_plan_audio_filter_graph(composition_plan=composition_plan, source_indices=source_indices)
+        graph += ";" + self.build_plan_audio_filter_graph(
+            composition_plan=composition_plan, source_indices=source_indices,
+            soundless_source_clip_ids=soundless_source_clip_ids,
+        )
         video_label = "vout"
         if subtitle_file_path is not None and subtitle_ass_path is None:
             generated_ass = self.convert_legacy_subtitle_to_ass(
@@ -665,6 +678,36 @@ class FfmpegFinalRenderer:
             ass_path.unlink(missing_ok=True)
             raise FinalRenderError(f"Unable to convert legacy subtitle artifact to ASS: {result.stderr[-800:]}")
         return ass_path
+
+    def _has_audio_stream(self, path: Path) -> bool:
+        """`원본 소리 살리기`가 켜진 원본에 실제로 오디오 스트림이 있는지 잰다.
+
+        무음 B-roll(영상만 있는 원본)의 없는 스트림을 참조하면 렌더가 통째로
+        막힌다. 짐작하지 말고 ffprobe에게 물어본다.
+        """
+        try:
+            result = subprocess.run(
+                [
+                    self.ffprobe_binary,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=codec_type",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            raise FinalRenderError("Unable to inspect source audio. Install/configure ffprobe.") from exc
+        return result.returncode == 0 and result.stdout.strip() == "audio"
 
     def _has_visual_stream(self, path: Path) -> bool:
         """Accept non-image overlays only when ffprobe confirms a video stream."""
@@ -845,7 +888,7 @@ class FfmpegFinalRenderer:
                 "-crf",
                 "20",
             ]
-            if controls["preserve_source_audio"]:
+            if controls["preserve_source_audio"] and self._has_audio_stream(source.path):
                 # 소리도 화면과 같은 배속이어야 입이 맞는다. 음량은 여기서만
                 # 걸 수 있다 -- 이 조각이 그대로 이어붙기 때문이다.
                 audio_effects = []
@@ -853,9 +896,18 @@ class FfmpegFinalRenderer:
                     audio_effects.append(_atempo_chain(speed))
                 if float(controls["volume"]) != 1.0:
                     audio_effects.append(f"volume={float(controls['volume'])}")
-                command += ["-map", "0:v:0", "-map", "0:a:0?"]
+                command += ["-map", "0:v:0", "-map", "0:a:0"]
                 if audio_effects:
                     command += ["-af", ",".join(audio_effects)]
+                command += ["-c:a", "aac", "-ar", "48000", "-ac", "2"]
+            elif controls["preserve_source_audio"]:
+                # 원본에 오디오 스트림이 아예 없다. 스트림 없는 조각을 만들면
+                # concat이 **첫 조각**의 구성을 기준으로 삼아, 무음 조각이 앞에
+                # 올 때 뒤 조각의 소리가 통째로 사라지거나 `[1:a]` 믹스가 막힌다.
+                # 무음을 실어 조각들의 모양을 맞춘다.
+                input_at = command.index(str(source.path)) + 1
+                command[input_at:input_at] = ["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]
+                command += ["-map", "0:v:0", "-map", "1:a", "-shortest"]
                 command += ["-c:a", "aac", "-ar", "48000", "-ac", "2"]
             else:
                 command += ["-an"]
@@ -1122,9 +1174,11 @@ class FfmpegFinalRenderer:
                     bgm_filter += f",afade=t=in:st=0:d={bgm_controls['fade_in_sec']}"
                 if bgm_controls["fade_out_sec"]:
                     bgm_filter += f",afade=t=out:st={max(0.0, bgm_duration - bgm_controls['fade_out_sec'])}:d={bgm_controls['fade_out_sec']}"
-                mix_filter = f"[1:a]{bgm_filter}[bgm];[0:a][bgm]amix=inputs=2:duration=first[aout]"
+                # `normalize=0` -- 음악을 깔았다고 내레이션이 6dB 내려가면 안 된다.
+                # 같은 함정(amix 기본 normalize=1)에 이미 두 번 걸렸다.
+                mix_filter = f"[1:a]{bgm_filter}[bgm];[0:a][bgm]amix=inputs=2:duration=first:normalize=0[aout]"
                 if bgm_controls["ducking"]:
-                    mix_filter = f"[1:a]{bgm_filter}[bgm];[bgm][0:a]sidechaincompress=threshold=0.05:ratio=8[ducked];[0:a][ducked]amix=inputs=2:duration=first[aout]"
+                    mix_filter = f"[1:a]{bgm_filter}[bgm];[bgm][0:a]sidechaincompress=threshold=0.05:ratio=8[ducked];[0:a][ducked]amix=inputs=2:duration=first:normalize=0[aout]"
                 command = [
                     self.ffmpeg_binary,
                     "-y",
@@ -1164,7 +1218,8 @@ class FfmpegFinalRenderer:
                         sfx_filter += f",afade=t=out:st={max(0.0, duration_sec - controls['fade_out_sec'])}:d={controls['fade_out_sec']}"
                     filter_parts.append(f"{sfx_filter},adelay={start_ms}|{start_ms}[sfx{index}]")
                     mix_inputs += f"[sfx{index}]"
-                filter_parts.append(f"{mix_inputs}amix=inputs={len(sfx_clips) + 1}:duration=first[aout]")
+                # `normalize=0` -- 효과음은 더한 것이지 나머지를 줄인 게 아니다.
+                filter_parts.append(f"{mix_inputs}amix=inputs={len(sfx_clips) + 1}:duration=first:normalize=0[aout]")
                 command += ["-filter_complex", ";".join(filter_parts), "-map", "[aout]", str(mixed_path)]
                 result = self._run(command)
                 if result.returncode != 0:

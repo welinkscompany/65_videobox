@@ -344,7 +344,7 @@ def test_plan_audio_ducks_bgm_against_the_mixed_full_narration_track(tmp_path: P
     ]})
     graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_audio_filter_graph(composition_plan=plan, source_indices={"n1": 0, "n2": 1, "bgm": 2})
 
-    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_mix]" in graph
+    assert "[a_n1][a_n2]amix=inputs=2:duration=longest:normalize=0[narration_mix]" in graph
     assert "[narration_mix]asplit=2[narration_final][narration_sidechain]" in graph
     assert "[a_bgm][narration_sidechain]sidechaincompress" in graph
 
@@ -364,10 +364,50 @@ def test_plan_audio_ducking_splits_the_single_narration_mix_before_final_mix(tmp
         composition_plan=plan, source_indices={"n1": 0, "n2": 1, "bgm": 2}
     )
 
-    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_mix]" in graph
+    assert "[a_n1][a_n2]amix=inputs=2:duration=longest:normalize=0[narration_mix]" in graph
     assert "[narration_mix]asplit=2[narration_final][narration_sidechain]" in graph
     assert "[a_bgm][narration_sidechain]sidechaincompress=threshold=0.05:ratio=8[duck_bgm]" in graph
     assert "[narration_final][duck_bgm]amix=inputs=2:duration=longest" in graph
+
+
+def test_plan_audio_narration_mix_does_not_divide_by_clip_count(tmp_path: Path) -> None:
+    # 내레이션 클립이 둘로 잘렸다고 목소리가 절반이 되면 안 된다. `amix`는
+    # 기본으로 입력 수만큼 나눈다(normalize=1) -- 같은 함정에 이미 두 번 걸렸다.
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [
+        {"track_type": "narration", "clips": [
+            {"clip_id": "n1", "asset_uri": "local://n1", "start_sec": 0, "end_sec": 1},
+            {"clip_id": "n2", "asset_uri": "local://n2", "start_sec": 1, "end_sec": 2},
+        ]},
+    ]})
+
+    graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_audio_filter_graph(
+        composition_plan=plan, source_indices={"n1": 0, "n2": 1}
+    )
+
+    assert "amix=inputs=2:duration=longest:normalize=0[narration_mix]" in graph
+
+
+def test_plan_audio_graph_skips_source_audio_for_soundless_brolls(tmp_path: Path) -> None:
+    # `원본 소리 살리기`를 켰는데 원본에 오디오 스트림이 없으면, 없는 `[N:a]`를
+    # 그래프에 넣는 순간 ffmpeg가 통째로 실패한다. 무음 원본은 건너뛴다 --
+    # 어차피 실을 소리가 없으니 결과는 같다.
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [
+        {"track_type": "narration", "clips": [{"clip_id": "n1", "asset_uri": "local://n1", "start_sec": 0, "end_sec": 2}]},
+        {"track_type": "broll", "clips": [{
+            "clip_id": "b1", "asset_uri": "local://b1", "start_sec": 0, "end_sec": 2,
+            "media_controls": {"loop": False, "preserve_source_audio": True},
+        }]},
+    ]})
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    with_audio = renderer.build_plan_audio_filter_graph(composition_plan=plan, source_indices={"n1": 0, "b1": 1})
+    without_audio = renderer.build_plan_audio_filter_graph(
+        composition_plan=plan, source_indices={"n1": 0, "b1": 1}, soundless_source_clip_ids={"b1"}
+    )
+
+    assert "[1:a]" in with_audio
+    assert "[1:a]" not in without_audio
+    assert "amix=inputs=1" in without_audio or "[narration_mix]" in without_audio
 
 
 @pytest.mark.skipif(
