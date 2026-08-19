@@ -211,6 +211,39 @@ def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
     ]
 
 
+def test_build_targeted_segments_keeps_a_valid_shape_overlay() -> None:
+    """정지 도형은 글·자산이 없어도 유효하다. 미리보기 목록이 이걸 거르면
+    부분 재생성이 이 장면의 도형을 건드린다는 사실이 owner에게 안 보인다."""
+    from videobox_api.main import _build_targeted_segments
+
+    shape_overlay = {
+        "overlay_type": "shape_overlay",
+        "shape": "underline",
+        "vertical": "bottom",
+        "horizontal": "center",
+        "size": "large",
+    }
+    targeted_segments = _build_targeted_segments(
+        {
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Office overview.",
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [shape_overlay, {"overlay_type": "shape_overlay", "shape": "arrow"}],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ]
+        },
+        ["seg_001"],
+    )
+
+    assert targeted_segments[0]["visual_overlays"] == [shape_overlay]
+
+
 def test_partial_regeneration_helper_matches_trimmed_source_segment_ids() -> None:
     class _FakeStore:
         def list_segments(self, *, project_id: str) -> list[dict[str, object]]:
@@ -22876,6 +22909,62 @@ def test_editing_session_api_can_clear_image_and_table_overlays(tmp_path: Path) 
     assert payload["segments"][0]["visual_overlays"] == []
     assert payload["history"][-2]["mutation_type"] == "image_overlay_remove"
     assert payload["history"][-1]["mutation_type"] == "table_overlay_remove"
+
+
+def test_editing_session_api_can_set_and_clear_a_shape_overlay(tmp_path: Path) -> None:
+    """정지 도형(강조 상자·밑줄)은 다른 오버레이와 같은 endpoint 체계를 탄다."""
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "highlight_box",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "medium",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "highlight_box",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "medium",
+        }
+    ]
+    assert saved.json()["history"][-1]["mutation_type"] == "shape_overlay_update"
+
+    # 프리셋 밖 값은 저장 전에 거절된다 -- 자유 좌표는 이번 범위 밖이다.
+    rejected = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "arrow",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "medium",
+            "expected_revision": 2,
+        },
+    )
+    assert rejected.status_code == 422
+
+    cleared = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        params={"expected_revision": 2},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["segments"][0]["visual_overlays"] == []
+    assert cleared.json()["history"][-1]["mutation_type"] == "shape_overlay_remove"
 
 
 def test_editing_session_api_visual_overlay_patch_preserves_existing_explanation_overlay(tmp_path: Path) -> None:

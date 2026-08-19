@@ -825,6 +825,17 @@ class ImageOverlayRequest(BaseModel):
         return self
 
 
+class ShapeOverlayRequest(BaseModel):
+    """정지 도형("여기를 보세요"). 프리셋만 받는다 -- 자유 좌표·애니메이션은
+    계획서 §4가 범위 밖으로 못박았고, 화살표는 렌더 품질 문제로 뺐다."""
+
+    expected_revision: int = Field(ge=1)
+    shape: Literal["highlight_box", "underline"]
+    vertical: Literal["top", "middle", "bottom"]
+    horizontal: Literal["left", "center", "right"]
+    size: Literal["small", "medium", "large"]
+
+
 class TableOverlayRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     columns: list[str] = Field(default_factory=list)
@@ -1036,7 +1047,7 @@ class EditorClipResponse(BaseModel):
     media_controls: EditorMediaControlsResponse
     expected_content_sha256: str | None = None
     media_revision: str | None = None
-    overlay_type: Literal["explanation_card", "image_overlay", "table_overlay"] | None = None
+    overlay_type: Literal["explanation_card", "image_overlay", "table_overlay", "shape_overlay"] | None = None
     overlay_payload: dict[str, object] = Field(default_factory=dict)
 
 

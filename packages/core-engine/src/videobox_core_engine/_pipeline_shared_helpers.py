@@ -188,8 +188,13 @@ def _is_valid_runtime_overlay(overlay: object) -> bool:
         "table_overlay",
         "hook_title",
         "visual_overlay",
+        "shape_overlay",
     }:
         return False
+    if overlay_type == "shape_overlay":
+        # 정지 도형은 글·자산이 없어도 도형 이름만 맞으면 유효하다. 여기서
+        # 떨어지면 부분 재생성이 보존 대상에서 도형을 조용히 지운다.
+        return str(overlay.get("shape") or "").strip().lower() in {"highlight_box", "underline"}
     if overlay_type in {"explanation_card", "table_card", "table_overlay"}:
         return bool(str(overlay.get("text") or "").strip())
     if overlay_type in {"hook_title", "visual_overlay"}:

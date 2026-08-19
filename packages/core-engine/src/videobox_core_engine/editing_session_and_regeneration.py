@@ -54,6 +54,7 @@ from videobox_core_engine.editing_session import (
     clear_segment_tts_replacement,
     remove_segment_explanation_card,
     remove_segment_image_overlay,
+    remove_segment_shape_overlay,
     remove_segment_table_overlay,
     select_segment_tts_replacement,
     set_segment_bounds,
@@ -67,6 +68,7 @@ from videobox_core_engine.editing_session import (
     update_segment_cut_action,
     update_segment_music_override,
     update_segment_sfx_override,
+    update_segment_shape_overlay,
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
@@ -898,6 +900,44 @@ class EditingSessionRegenerationMixin:
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = remove_segment_table_overlay(
+            session=session,
+            segment_id=segment_id,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+
+    def update_editing_session_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        shape: str,
+        vertical: str,
+        horizontal: str,
+        size: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_shape_overlay(
+            session=session,
+            segment_id=segment_id,
+            shape=shape,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+
+    def remove_editing_session_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = remove_segment_shape_overlay(
             session=session,
             segment_id=segment_id,
         )

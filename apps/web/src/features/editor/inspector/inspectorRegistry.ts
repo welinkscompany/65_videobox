@@ -6,6 +6,20 @@ type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
 type TableField = "columns" | "rows" | "text";
+type ShapeField = "shape" | "vertical" | "horizontal" | "size";
+
+// 정지 도형("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가
+// 범위 밖으로 못박았다. 백엔드 ShapeOverlayRequest와 같은 값들이다.
+export type ShapeOverlayShape = "highlight_box" | "underline";
+export type ShapeOverlayVertical = "top" | "middle" | "bottom";
+export type ShapeOverlayHorizontal = "left" | "center" | "right";
+export type ShapeOverlaySize = "small" | "medium" | "large";
+export type ShapeOverlayValue = Readonly<{
+  shape: ShapeOverlayShape;
+  vertical: ShapeOverlayVertical;
+  horizontal: ShapeOverlayHorizontal;
+  size: ShapeOverlaySize;
+}>;
 
 export type InspectorTarget =
   | Readonly<{ id: string; kind: "media"; label: string; segmentId: string; mediaKind: MediaKind; fields: readonly MediaField[]; assetId: string; controls: EditorControls; clearOnly: boolean }>
@@ -14,7 +28,8 @@ export type InspectorTarget =
   // upsert가 그대로 만들어 주고, 아직 없는 것에는 `지우기`를 보이지 않는다.
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "explanation-card"; fields: readonly ExplanationCardField[]; value: Readonly<{ title: string; body: string; text: string }>; isNew?: boolean }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }>; isNew?: boolean }>
-  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }>; isNew?: boolean }>;
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }>; isNew?: boolean }>
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "shape"; fields: readonly ShapeField[]; value: ShapeOverlayValue; isNew?: boolean }>;
 
 // 2026-08-19: `소리 크기`(gainDb)가 화면에 들어왔다. 예전에는 "입력 자리를 주면
 // owner가 정하지 않은 값이 저장마다 실린다"고 뺐는데, 슬라이더는 저장된 값에서
@@ -58,6 +73,24 @@ function stringRows(value: unknown): string[][] {
   return Array.isArray(value)
     ? value.filter(Array.isArray).map((row) => row.filter((item): item is string => typeof item === "string"))
     : [];
+}
+
+// 저장된 값이 프리셋 밖이면 조용히 기본값으로 좁힌다 -- 백엔드가 프리셋만
+// 저장하므로 실제로는 방어선일 뿐이다.
+function shapeValue(value: unknown): ShapeOverlayShape {
+  return value === "underline" ? "underline" : "highlight_box";
+}
+
+function shapeVertical(value: unknown): ShapeOverlayVertical {
+  return value === "top" || value === "bottom" ? value : "middle";
+}
+
+function shapeHorizontal(value: unknown): ShapeOverlayHorizontal {
+  return value === "left" || value === "right" ? value : "center";
+}
+
+function shapeSize(value: unknown): ShapeOverlaySize {
+  return value === "small" || value === "large" ? value : "medium";
 }
 
 export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ view: EditorViewModel; selectedSegmentId: string | null }>): readonly InspectorTarget[] {
@@ -107,6 +140,10 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         id: `overlay:${clip.clipId}`, kind: "overlay", label: "표", segmentId: selectedSegmentId, overlayKind: "table", fields: ["columns", "rows", "text"],
         value: { columns: stringList(payload.columns), rows: stringRows(payload.rows), text: stringValue(payload.text) },
       }];
+      if (clip.overlayType === "shape_overlay") return [{
+        id: `overlay:${clip.clipId}`, kind: "overlay", label: "강조 표시", segmentId: selectedSegmentId, overlayKind: "shape", fields: ["shape", "vertical", "horizontal", "size"],
+        value: { shape: shapeValue(payload.shape), vertical: shapeVertical(payload.vertical), horizontal: shapeHorizontal(payload.horizontal), size: shapeSize(payload.size) },
+      }];
       return [];
     });
 
@@ -126,6 +163,11 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
   if (segmentExists && !presentOverlayKinds.has("table")) newOverlayTargets.push({
     id: `overlay-new:table:${selectedSegmentId}`, kind: "overlay", label: "표", segmentId: selectedSegmentId, overlayKind: "table", fields: ["columns", "rows", "text"],
     value: { columns: [], rows: [], text: "" }, isNew: true,
+  });
+  // 정지 도형은 프리셋뿐이라 자산 없이도 저장이 되므로 빈 자리를 준다.
+  if (segmentExists && !presentOverlayKinds.has("shape")) newOverlayTargets.push({
+    id: `overlay-new:shape:${selectedSegmentId}`, kind: "overlay", label: "강조 표시", segmentId: selectedSegmentId, overlayKind: "shape", fields: ["shape", "vertical", "horizontal", "size"],
+    value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" }, isNew: true,
   });
 
   return [...mediaTargets, ...captionTargets, ...overlayTargets, ...newOverlayTargets];

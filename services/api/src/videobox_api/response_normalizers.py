@@ -39,8 +39,13 @@ def _is_valid_preflight_visual_overlay(overlay: object) -> bool:
         "table_overlay",
         "hook_title",
         "visual_overlay",
+        "shape_overlay",
     }:
         return False
+    if overlay_type == "shape_overlay":
+        # 정지 도형은 글·자산 없이도 유효하다. 빠지면 부분 재생성 미리보기가
+        # 이 장면의 도형을 조용히 숨긴다.
+        return str(overlay.get("shape") or "").strip().lower() in {"highlight_box", "underline"}
     if overlay_type in {"explanation_card", "table_card", "table_overlay"}:
         return bool(str(overlay.get("text") or "").strip())
     if overlay_type in {"hook_title", "visual_overlay"}:

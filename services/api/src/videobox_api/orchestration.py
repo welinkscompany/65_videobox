@@ -909,6 +909,44 @@ class ApiOrchestrator:
             expected_revision=expected_revision,
         )
 
+    def update_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        shape: str,
+        vertical: str,
+        horizontal: str,
+        size: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_shape_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            shape=shape,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+            expected_revision=expected_revision,
+        )
+
+    def remove_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        return self.pipeline.remove_editing_session_segment_shape_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            expected_revision=expected_revision,
+        )
+
     def update_segment_music_override(
         self,
         *,

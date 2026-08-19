@@ -32,6 +32,7 @@ const view = {
         { clipId: "explanation-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "explanation_card", overlayPayload: { title: "제목", body: "본문", text: "설명" } },
         { clipId: "image-1", segmentId: "segment-1", type: "overlay", assetId: "asset-image", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "stale-asset", text: "이미지 설명" } },
         { clipId: "table-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "table_overlay", overlayPayload: { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" } },
+        { clipId: "shape-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "shape_overlay", overlayPayload: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large" } },
         { clipId: "unsupported-overlay", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: null },
       ],
     },
@@ -127,6 +128,16 @@ describe("projectInspectorTargets", () => {
       fields: ["columns", "rows", "text"],
       value: { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" },
     });
+    // 정지 도형("여기를 보세요")도 같은 오버레이 체계를 탄다.
+    expect(targets).toContainEqual({
+      id: "overlay:shape-1",
+      kind: "overlay",
+      label: "강조 표시",
+      segmentId: "segment-1",
+      overlayKind: "shape",
+      fields: ["shape", "vertical", "horizontal", "size"],
+      value: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large" },
+    });
     expect(targets.find((target) => target.id === "overlay:unsupported-overlay")).toBeUndefined();
   });
 
@@ -173,6 +184,17 @@ describe("projectInspectorTargets", () => {
       overlayKind: "table",
       fields: ["columns", "rows", "text"],
       value: { columns: [], rows: [], text: "" },
+      isNew: true,
+    });
+    // 정지 도형도 빈 편집 자리를 준다 -- 프리셋뿐이라 자산 없이도 저장이 된다.
+    expect(targets).toContainEqual({
+      id: "overlay-new:shape:segment-unsupported",
+      kind: "overlay",
+      label: "강조 표시",
+      segmentId: "segment-unsupported",
+      overlayKind: "shape",
+      fields: ["shape", "vertical", "horizontal", "size"],
+      value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" },
       isNew: true,
     });
     // 이미지는 고를 자산 없이 저장할 수 없으므로 빈 이미지 항목은 주지 않는다.

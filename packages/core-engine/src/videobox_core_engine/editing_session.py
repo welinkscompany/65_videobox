@@ -1061,6 +1061,63 @@ def remove_segment_table_overlay(
     )
 
 
+# 정지 도형("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가 범위
+# 밖으로 못박았다(고급 모션그래픽). 화살표는 drawbox로 그릴 수 없어 뺐다 --
+# 억지로 품질 낮은 화살표를 넣지 않는다.
+SHAPE_OVERLAY_SHAPES = frozenset({"highlight_box", "underline"})
+SHAPE_OVERLAY_VERTICALS = frozenset({"top", "middle", "bottom"})
+SHAPE_OVERLAY_HORIZONTALS = frozenset({"left", "center", "right"})
+SHAPE_OVERLAY_SIZES = frozenset({"small", "medium", "large"})
+
+
+def update_segment_shape_overlay(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+    shape: str,
+    vertical: str,
+    horizontal: str,
+    size: str,
+) -> dict[str, Any]:
+    normalized = {
+        "shape": shape.strip().lower(),
+        "vertical": vertical.strip().lower(),
+        "horizontal": horizontal.strip().lower(),
+        "size": size.strip().lower(),
+    }
+    allowed = {
+        "shape": SHAPE_OVERLAY_SHAPES,
+        "vertical": SHAPE_OVERLAY_VERTICALS,
+        "horizontal": SHAPE_OVERLAY_HORIZONTALS,
+        "size": SHAPE_OVERLAY_SIZES,
+    }
+    for field_name, values in allowed.items():
+        if normalized[field_name] not in values:
+            raise ValueError(
+                f"shape overlay {field_name} must be one of {sorted(values)}: {normalized[field_name]!r}"
+            )
+    return _upsert_segment_overlay(
+        session=session,
+        segment_id=segment_id,
+        overlay_type="shape_overlay",
+        overlay_payload={"overlay_type": "shape_overlay", **normalized},
+        mutation_type="shape_overlay_update",
+    )
+
+
+def remove_segment_shape_overlay(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+) -> dict[str, Any]:
+    return _remove_segment_overlay(
+        session=session,
+        segment_id=segment_id,
+        overlay_type="shape_overlay",
+        mutation_type="shape_overlay_remove",
+    )
+
+
 def update_segment_music_override(
     *,
     session: dict[str, Any],
