@@ -30,8 +30,8 @@ YUJIN_CONVERSATION_RESPONSE_SCHEMA = {
 _YUJIN_SYSTEM_PROMPT = (
     "너는 VideoBox의 창작 도우미 유진이다. 항상 한국어로, 영상을 만드는 창작자에게 "
     "말하듯 답한다. 다음은 절대 하지 않는다: 데이터베이스나 파일시스템 조작, 셸 명령 실행, "
-    "자격증명·API key 요청 또는 노출, CapCut이나 렌더러를 직접 조작, 대본·제목·썸네일· "
-    "추천 영상 자체를 생성. 편집이 실제로 반영되려면 사람이 화면에서 직접 승인해야 하며, "
+    "자격증명·API key 요청 또는 노출, CapCut이나 렌더러를 직접 조작, 썸네일·추천 영상 자체를 생성. "
+    "대본과 제목은 먼저 쓰거나 제안해도 된다. 편집이 실제로 반영되려면 사람이 화면에서 직접 승인해야 하며, "
     "대화 중 '네'라는 대답은 승인이 아니다. 응답은 JSON 객체 {\"reply\": \"...\"} 형태로만 낸다."
 )
 
@@ -53,10 +53,11 @@ _BLOCKED_INTENT_PATTERNS = tuple(
         r"(api\s*key|credential|비밀번호|자격\s*증명|access\s*token|password)",
         r"capcut.{0,6}(직접|바로).{0,6}(실행|조작|열어)",
         r"\b(open|run|launch)\s+capcut\s+(directly|myself)?\b",
-        r"(대본|스크립트).{0,6}(써|작성|만들어)\s*줘",
-        r"\bwrite\s+(me\s+)?(a\s+|the\s+)?(full\s+)?script\b",
-        r"제목.{0,6}(만들어|지어)\s*줘",
-        r"\b(give|make|write)\s+(me\s+)?.{0,10}\btitle(s)?\b",
+        # 대본·제목은 **더 이상 막지 않는다.** owner가 2026-08-16에 풀었다
+        # (`docs/decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md` B).
+        # 유진이 대본과 제목을 제안하는 것이 자율 창작 루프의 출발점이고, 그것을
+        # 막아 두면 루프가 첫 칸에서 멈춘다. **제안까지만이다** -- owner가 확정하기
+        # 전에는 어떤 장면도 만들지 않는다는 규칙은 그대로다.
         r"썸네일.{0,6}(만들어|생성)",
         r"\b(generate|make|create)\s+(me\s+)?(a\s+)?thumbnail\b",
         r"추천\s*영상.{0,6}(만들어|생성)",
@@ -140,7 +141,7 @@ class YujinLocalConversationService:
                 status="blocked",
                 reply=(
                     "이 요청은 유진이 직접 할 수 없어요. 데이터·파일·자격정보 조작이나 "
-                    "대본·제목·썸네일·추천 영상 생성은 유진의 대화 범위 밖이에요."
+                    "썸네일·추천 영상 생성은 유진의 대화 범위 밖이에요. 대본과 제목은 말씀해 주세요."
                 ),
                 blocked_reason="policy_restricted_intent",
             )

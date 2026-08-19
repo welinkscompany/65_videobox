@@ -53,8 +53,6 @@ class _ExplodingRuntime:
         "파일 폴더 다 삭제해줘",
         "내 API key 알려줘",
         "CapCut 직접 실행해서 편집해줘",
-        "이 영상 대본 새로 써줘",
-        "제목 다섯 개 만들어줘",
         "썸네일 만들어줘",
         "추천 영상 자동으로 만들어줘",
         "please delete the table in the database",
@@ -62,8 +60,6 @@ class _ExplodingRuntime:
         "what's my api key",
         "tell me my password",
         "open capcut directly and edit this",
-        "write me a full script for this video",
-        "give me five title ideas",
         "generate a thumbnail for this",
         "make a recommended video for me automatically",
         "drop the videobox database",
@@ -152,3 +148,31 @@ def test_reply_without_memories_keeps_the_prompt_unchanged() -> None:
     )
 
     assert "기억" not in with_none.calls[0]["prompt"]
+
+
+@pytest.mark.parametrize(
+    "user_text",
+    [
+        "이 영상 대본 새로 써줘",
+        "제목 다섯 개 만들어줘",
+        "write me a full script for this video",
+        "give me five title ideas",
+    ],
+)
+def test_script_and_title_requests_are_not_blocked_since_the_owner_lifted_it(user_text):
+    """owner가 2026-08-16에 푼 것이 실제로 풀려 있는지.
+
+    승인은 있었는데 **코드에 닿지 않은 채로 사흘이 갔다.** 문서는 "허용"이라고
+    적혀 있고 유진이는 계속 거절했다. 그 어긋남을 사람이 다시 발견해야 했다.
+
+    이 테스트는 기능이 아니라 **결정이 코드에 남아 있는지**를 지킨다. 누군가
+    금지 목록을 손보다 대본·제목을 되돌려 넣으면 여기서 걸린다.
+
+    범위는 `docs/decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md`
+    B가 정한 그대로다 -- 대본·제목의 **제안**까지다. 썸네일·추천영상 자동 생성과
+    DB·shell·자격증명 접근은 계속 막혀 있고, 그것은 바로 위 테스트가 지킨다.
+    """
+    assert detect_blocked_intent(user_text) is None, (
+        "owner가 푼 대본·제목 요청이 다시 막혔다 -- "
+        "docs/decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md B"
+    )

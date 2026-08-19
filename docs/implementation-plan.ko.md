@@ -1268,6 +1268,18 @@ Agent Gateway는 run ownership, context filtering, tool allowlist, idempotency, 
 > 개정 범위와 유지 경계는 `23.3B`에 적는다. 4항의 나머지 제약(대본·썸네일·추천 영상 생성
 > `disabled`, compression 결과 비신뢰, SSOT 불변)은 그대로 유지한다.
 
+> **2026-08-16 owner 재개정 — 대본·제목은 풀렸다.**
+> 위 줄의 "대본 생성 `disabled`"는 더 이상 유효하지 않다
+> (`docs/decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md` B).
+> 유진은 **대본과 제목을 쓰고 제안할 수 있다.** 썸네일·추천 영상 자동 생성,
+> DB·shell·filesystem·credential 접근, owner 확정 없는 제작은 그대로 막혀 있다.
+>
+> 이 개정은 **2026-08-19까지 코드에 닿지 않았다.** 문서는 "허용"인데 유진이는
+> 계속 거절했고, 사람이 다시 발견해야 했다. 지금은
+> `tests/test_yujin_local_conversation.py`의
+> `test_script_and_title_requests_are_not_blocked_since_the_owner_lifted_it`이
+> 이 결정이 코드에 남아 있는지 지킨다.
+
 유진의 주 대화/창작 route와 로컬 보조 route는 같은 agent로 위장하거나 자동 fallback하지 않는다. profile·모델·prompt·skill·route 결정은 모두 run ledger에 남기고, provider 변경은 별도 gate로 처리한다.
 
 1. `[x] 완료 (done)`: Hermes 공식 `openai-codex` ChatGPT OAuth route가 curated Codex model 목록에서 `gpt-5.4-mini`를 선택할 수 있음을 공식 provider 문서·모델 코드·release로 다시 확인했다. OpenAI API model page도 GPT-5.4 mini의 tool calling/structured output/400K context를 확인한다. 근거: <https://hermes-agent.nousresearch.com/docs/integrations/providers/>, <https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/models.py>, <https://developers.openai.com/api/docs/models/gpt-5.4-mini>.
