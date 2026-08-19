@@ -2500,6 +2500,37 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(8);
   });
 
+  it.each([
+    { fixture: "bgm" as const, label: "배경 음악", saveEndpoint: "bgm" as const },
+    { fixture: "sfx" as const, label: "효과음", saveEndpoint: "sfx" as const },
+  ])("routes the $fixture loudness slider into the saved gain_db request body", async ({ fixture, label, saveEndpoint }) => {
+    // 슬라이더 오른쪽 끝(크게)은 +6dB다. 화면 조작이 emit을 지나 실제 요청
+    // body의 gain_db까지 닿는지 본다. 렌더 반영은 백엔드 테스트 몫이다.
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7, fixture) as never)
+      .mockResolvedValueOnce(inspectorManifest(8, fixture) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    const saveBgm = vi.spyOn(api, "updateEditingSessionMusicOverride").mockResolvedValue({} as never);
+    const saveSfx = vi.spyOn(api, "updateEditingSessionSfxOverride").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.change(screen.getByLabelText(`${label} 소리 크기`), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: `${label} 설정 저장` }));
+
+    const save = saveEndpoint === "bgm" ? saveBgm : saveSfx;
+    await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: `asset-${fixture}`,
+      expected_revision: 7,
+      media_controls: { ducking: true, fade_in_sec: 0.5, fade_out_sec: 1, gain_db: 6 },
+    }));
+    expect(saveBgm.mock.calls.length + saveSfx.mock.calls.length).toBe(1);
+    await expectEditorRevision(8);
+  });
+
   it("routes a complete caption style edit without exposing independent caption timing", async () => {
     vi.mocked(api.getEditorPlaybackManifest)
       .mockResolvedValueOnce(inspectorManifest(7, "caption") as never)

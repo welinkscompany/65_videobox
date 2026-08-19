@@ -97,6 +97,30 @@ function numberValue(value: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// `소리 크기` 슬라이더(0~100)와 gainDb 사이 변환. 중앙(50)이 `그대로`(0dB),
+// 왼쪽 끝이 -18dB(조용히), 오른쪽 끝이 +6dB(크게)다. 줄이는 폭이 늘리는 폭보다
+// 넓어야 해서 중앙을 0에 고정한 조각 선형으로 잇는다. §10.13: dB는 내부 단위라
+// 화면에는 쓰지 않는다. 백엔드 `normalize_media_controls`는 유한값이면 다
+// 받으므로 경계는 화면이 정한다.
+const QUIETEST_GAIN_DB = -18;
+const LOUDEST_GAIN_DB = 6;
+
+function gainSliderPosition(gainDb: number): number {
+  const clamped = Math.min(LOUDEST_GAIN_DB, Math.max(QUIETEST_GAIN_DB, gainDb));
+  return clamped <= 0
+    ? 50 - (clamped / QUIETEST_GAIN_DB) * 50
+    : 50 + (clamped / LOUDEST_GAIN_DB) * 50;
+}
+
+function gainDbFromSlider(position: number): number {
+  const clamped = Math.min(100, Math.max(0, position));
+  const gainDb = clamped <= 50
+    ? ((50 - clamped) / 50) * QUIETEST_GAIN_DB
+    : ((clamped - 50) / 50) * LOUDEST_GAIN_DB;
+  const rounded = Math.round(gainDb * 10) / 10;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
 function parseColumns(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
@@ -130,6 +154,9 @@ export function InspectorControls({
   // 이 클립의 원래 소리를 살릴지. **`소리 크기`와 한 벌이다** -- 이게 꺼져 있으면
   // 섞일 소리가 없어서 음량을 아무리 바꿔도 결과가 같다.
   const [preserveSourceAudio, setPreserveSourceAudio] = useState(false);
+  // 배경 음악·효과음의 `소리 크기`. 상태는 dB로 든다 -- 슬라이더 눈금으로 들면
+  // 손대지 않은 저장이 저장돼 있던 값을 눈금에 반올림해 몰래 옮긴다.
+  const [gainDb, setGainDb] = useState(0);
   const [captionStyle, setCaptionStyle] = useState<EditorCaptionStyle>(defaultStyle);
   const [overlayTitle, setOverlayTitle] = useState("");
   const [overlayBody, setOverlayBody] = useState("");
@@ -174,6 +201,7 @@ export function InspectorControls({
       setVolume(target.controls.volume ?? 1);
       setDucking(target.controls.ducking ?? false);
       setPreserveSourceAudio(target.controls.preserveSourceAudio ?? false);
+      setGainDb(target.controls.gainDb ?? 0);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
     if (target?.kind === "overlay") {
@@ -349,6 +377,26 @@ export function InspectorControls({
                   </label>
                 </>
               ) : null}
+              {/* 배경 음악·효과음의 음량. 렌더러는 처음부터 클립별 gain_db를
+                  반영했는데 화면에 입력 자리만 없었다. §10.13: `gain`·`dB` 같은
+                  내부 용어 대신 `소리 크기`와 `조용히/크게`로 적는다. */}
+              {target.fields.includes("gainDb") ? (
+                <label>
+                  {`${target.label} 소리 크기`}
+                  <span aria-hidden="true">조용히</span>
+                  <Input
+                    aria-label={`${target.label} 소리 크기`}
+                    disabled={disabled}
+                    max="100"
+                    min="0"
+                    onChange={(event) => setGainDb(gainDbFromSlider(numberValue(event.target.value, gainSliderPosition(gainDb))))}
+                    step="1"
+                    type="range"
+                    value={gainSliderPosition(gainDb)}
+                  />
+                  <span aria-hidden="true">크게</span>
+                </label>
+              ) : null}
               {target.fields.includes("inSec") ? (
                 <>
                   <label>
@@ -421,6 +469,7 @@ export function InspectorControls({
                     // 묶여 있어서, 구간을 가진 B-roll은 페이드를 고쳐도 payload에
                     // 옛 값이 실렸다 -- 화면에서 바꾼 것이 조용히 사라졌다.
                     ...(target.fields.includes("fadeInSec") ? { fadeInSec, fadeOutSec } : {}),
+                    ...(target.fields.includes("gainDb") ? { gainDb } : {}),
                     ...(target.fields.includes("inSec") && outSec > 0 ? { inSec, outSec } : {}),
                     ...(target.fields.includes("speed") ? { speed } : {}),
                     ...(target.fields.includes("volume") ? { volume } : {}),

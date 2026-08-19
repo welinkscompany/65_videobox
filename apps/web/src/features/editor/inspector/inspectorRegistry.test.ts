@@ -70,7 +70,8 @@ describe("projectInspectorTargets", () => {
       mediaKind: "bgm",
       // 덕킹은 **배경 음악에만** 붙는다. 렌더러도 bgm에만 사이드체인을 건다 --
       // 효과음에 스위치를 주면 눌러도 아무 일이 없다.
-      fields: ["fadeInSec", "fadeOutSec", "ducking"],
+      // `소리 크기`(gainDb)는 렌더러가 처음부터 읽고 있었다 -- 화면에 자리만 없었다.
+      fields: ["fadeInSec", "fadeOutSec", "ducking", "gainDb"],
       assetId: "asset-bgm",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,
@@ -81,7 +82,7 @@ describe("projectInspectorTargets", () => {
       label: "효과음",
       segmentId: "segment-1",
       mediaKind: "sfx",
-      fields: ["fadeInSec", "fadeOutSec"],
+      fields: ["fadeInSec", "fadeOutSec", "gainDb"],
       assetId: "asset-sfx",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,
