@@ -123,6 +123,8 @@ export type DirectorReference = { reference_code: string; immutable_id: string |
 export type DirectorCandidate = {
   candidate_id: string;
   visible_reference_code: string;
+  /** 이 추천이 겨냥한 장면. 표시용이라 저장 모델에는 없다(placements가 원본). */
+  target_segment_id?: string | null;
   media_type: string;
   asset_id: string;
   library_asset_id: string | null;

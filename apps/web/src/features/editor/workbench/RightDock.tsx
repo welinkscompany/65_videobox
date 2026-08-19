@@ -60,6 +60,21 @@ export type RightDockProps = Readonly<{
   retryAfterSeconds?: number | null;
 }>;
 
+/** 후보를 **부르는 이름**. 코드는 사람이 고르는 근거가 못 된다 -- 2026-08-19에
+ *  owner 화면의 후보 일곱 개가 전부 `P08-B-01 · 미디어`였고, 실제로는 서로 다른
+ *  장면을 겨냥한 같은 자산이었다. 이름이 오면 이름을, 없으면 코드를 쓴다.
+ *
+ *  **종류는 여기 넣지 않는다.** 접근 이름은 부르는 말이고, 종류는 카드가 `미디어`
+ *  줄로 이미 말한다. 넣었더니 음성으로 부르는 이름이 통째로 바뀌었다. */
+function candidateLabel(candidate: RightDockCandidate): string {
+  return candidate.displayName?.trim() || candidate.visibleReferenceCode;
+}
+
+/** 카드에 보이는 글자. 이름 옆에 종류를 붙여 한눈에 구분되게 한다. */
+function candidateTitle(candidate: RightDockCandidate): string {
+  return `${candidateLabel(candidate)} · ${mediaKindLabel(candidate.sourceMediaKind)}`;
+}
+
 export function RightDock({
   projectId,
   state = "idle",
@@ -288,20 +303,20 @@ export function RightDock({
             <label><Input
               type="radio"
               name="vb-eugene-candidate"
-              aria-label={`${candidate.visibleReferenceCode} 선택`}
+              aria-label={`${candidateLabel(candidate)} 선택`}
               checked={activeCandidateIds.includes(candidate.candidateId)}
               disabled={!candidateIsActionable}
               onChange={() => {
                 if (candidateIsActionable) onSelectedCandidateIdsChange?.([candidate.candidateId]);
               }}
-            />{candidate.visibleReferenceCode} · {mediaKindLabel(candidate.sourceMediaKind)}</label>
+            />{candidateTitle(candidate)}</label>
             <p>{candidate.previewSummary}</p>
             <p>{`후보 상태: ${candidateDeclaresActionable ? "적용 가능" : "수동 적용"}`}</p>
             <dl>
               <dt>미디어</dt><dd>{mediaKindLabel(candidate.sourceMediaKind)}</dd>
               <dt>적용 설정</dt><dd>{controlSummary(candidate.supportedControls ?? {})}</dd>
             </dl>
-            {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" aria-label={`${candidate.visibleReferenceCode} ${previewVerb(candidate.sourceMediaKind)}`} onClick={() => onPreviewCandidate(candidate)}>{previewVerb(candidate.sourceMediaKind)}</Button> : null}
+            {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" aria-label={`${candidateLabel(candidate)} ${previewVerb(candidate.sourceMediaKind)}`} onClick={() => onPreviewCandidate(candidate)}>{previewVerb(candidate.sourceMediaKind)}</Button> : null}
           </article>;
         })}
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}

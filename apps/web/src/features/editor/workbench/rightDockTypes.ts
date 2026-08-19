@@ -6,6 +6,8 @@ export type RightDockCandidate = Readonly<{
   kind: "broll" | "bgm" | "sfx" | string;
   sourceMediaKind: "raw_video" | "broll_video" | "image" | "bgm" | "sfx" | string;
   targetSegmentId: string;
+  /** 카드에 보일 자산 이름. 없으면 코드로 떨어진다 -- 코드만으로는 고를 수 없다. */
+  displayName?: string;
   previewSummary: string;
   supportedControls: Readonly<Record<string, unknown>>;
   availability: string;

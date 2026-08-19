@@ -1778,7 +1778,10 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
           : candidate.preview_uri,
         kind: candidate.media_type,
         sourceMediaKind: String(metadata.source_media_kind ?? candidate.media_type),
-        targetSegmentId: String(metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? ""),
+        // 후보마다 겨냥한 장면이 다르다. 예전에는 제안의 **첫 장면**으로 떨어져서
+        // 카드가 전부 같은 장면을 가리켰다(2026-08-19 owner 지적).
+        targetSegmentId: String(candidate.target_segment_id ?? metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? ""),
+        displayName: typeof metadata.display_name === "string" && metadata.display_name.trim() ? metadata.display_name.trim() : undefined,
         previewSummary: String(metadata.preview_summary ?? candidate.reason_chips[0] ?? "추천 세부 내용을 확인해 주세요."),
         supportedControls: candidate.controls ?? {},
         availability: isYujin ? candidate.availability : actionable ? "actionable" : candidate.availability,

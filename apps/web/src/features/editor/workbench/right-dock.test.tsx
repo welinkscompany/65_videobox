@@ -180,6 +180,40 @@ describe("RightDock", () => {
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
   });
 
+  it("names a candidate by its asset, because a code is not something a person can choose by", () => {
+    // 2026-08-19 owner 지적: 후보 일곱 개가 전부 `P08-B-01 · 미디어`였다.
+    // 실제로 재 보니 서로 다른 장면을 겨냥한 같은 자산이었고, 카드만 봐서는
+    // 무엇을 고르는지 알 수 없었다. 이름이 오면 이름을 쓴다.
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      proposal={{
+        proposalId: "proposal-1",
+        status: "ready",
+        baseSessionRevision: 1,
+        currentRevision: 1,
+        candidates: [{
+          candidateId: "candidate:segment-1:asset-sea",
+          visibleReferenceCode: "P01-B-01",
+          displayName: "제주 바다 드론",
+          mediaType: "broll",
+          previewUrl: null,
+          kind: "broll",
+          sourceMediaKind: "broll_video",
+          targetSegmentId: "segment-1",
+          previewSummary: "요약",
+          supportedControls: {},
+          availability: "available",
+          reviewStatus: "approved",
+          actionable: true,
+        }],
+      }}
+    />);
+
+    expect(screen.getByRole("radio", { name: "제주 바다 드론 선택" })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /P01-B-01/ })).toBeNull();
+  });
+
   it("is a controlled adapter for candidate selection and restored conversation scroll", () => {
     const onSelectedCandidateIdsChange = vi.fn();
     const onConversationScrollChange = vi.fn();
