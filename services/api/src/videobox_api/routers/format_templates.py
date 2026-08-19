@@ -78,12 +78,16 @@ def build_format_templates_router(*, orchestrator: Any, template_store: FormatTe
             )
             # 자막 스타일 변경은 이미 검증된 경로가 있다. 여기서 저장소를 직접
             # 건드리면 같은 규칙이 두 벌이 되고, 그중 하나가 조용히 낡는다.
+            # scope는 그 경로의 어휘를 써야 한다 -- `all`은 없는 scope라서
+            # 적용이 항상 500이었다. 장면이 없는 편집본에는 기본값만 바꾼다
+            # (`whole_project`는 바꿀 장면이 없으면 에러가 된다).
+            has_segments = any(isinstance(item, dict) for item in session.get("segments", []))
             updated = orchestrator.update_caption_style(
                 project_id=project_id,
                 session_id=payload.session_id,
                 style=applied.get("caption_style") or {},
-                scope="all",
-                segment_ids=None,
+                scope="whole_project" if has_segments else "project_default",
+                segment_ids=[],
                 expected_revision=payload.expected_revision,
             )
             return {"template_id": template_id, "session": updated}

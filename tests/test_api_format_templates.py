@@ -45,6 +45,56 @@ def test_a_format_needs_a_name(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
+def test_saving_and_applying_a_format_round_trips_onto_the_session(tmp_path: Path) -> None:
+    """저장한 포맷을 실제로 적용하는 왕복이 한 번은 성공해야 한다.
+
+    기존 테스트는 404·422만 확인해서 전부 초록인 채로 적용이 **항상 500**이었다 --
+    라우터가 자막 스타일 갱신에 없는 scope(`all`)와 `segment_ids=None`을 넘기고
+    있었고, 성공 경로를 밟는 테스트가 하나도 없어 아무도 몰랐다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "포맷 왕복"}).json()["project_id"]
+    timeline = app.state.store.save_timeline_run(
+        project_id=project_id,
+        output_mode="landscape",
+        timeline_payload={"output": {"width": 1920, "height": 1080}, "tracks": []},
+    )
+    saved_session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-1", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "안녕"},
+                {"segment_id": "seg-2", "start_sec": 2.0, "end_sec": 4.0, "caption_text": "하세요"},
+            ],
+            "history": [],
+            # 편집본은 CaptionStyle 정본 이름(`font_size_px`)을 쓴다. 프리셋의
+            # 짧은 이름(`font_size`)과 다르다 -- 그걸 넣으면 적용이 400이 된다.
+            "caption_style": {"font_size_px": 42, "text_color": "#FFFFFFFF", "font_family": "Noto Sans KR"},
+        },
+    )
+    session_id = saved_session["session_id"]
+
+    save = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "내 포맷", "session_id": session_id},
+    )
+    assert save.status_code == 201, save.text
+    template_id = save.json()["template_id"]
+
+    apply = client.post(
+        f"/api/projects/{project_id}/format-templates/{template_id}/apply",
+        json={"session_id": session_id, "expected_revision": int(saved_session["session_revision"])},
+    )
+
+    assert apply.status_code == 200, apply.text
+    applied_session = apply.json()["session"]
+    assert applied_session["caption_style"]["font_size_px"] == 42
+    # 장면까지 같은 모양이어야 한다. 세션 값만 바꾸면 화면이 장면 스타일을 이긴다.
+    assert all(segment["caption_style"]["font_size_px"] == 42 for segment in applied_session["segments"])
+
+
 def test_applying_a_format_nobody_saved_is_reported(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id = client.post("/api/projects", json={"name": "포맷"}).json()["project_id"]

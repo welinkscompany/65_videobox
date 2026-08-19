@@ -445,8 +445,20 @@ export function InspectorControls({
           <legend>자막 스타일</legend>
           {projectId ? <CaptionPresetPicker
             projectId={projectId}
-            /* 지금 잡아 놓은 모양을 넘겨야 `이 모양 저장해 두기`가 저장할 것이 생긴다. */
-            currentStyle={{ font_family: captionStyle.fontFamily, font_size: captionStyle.fontSizePx, text_color: captionStyle.textColor } as never}
+            /* 지금 잡아 놓은 모양 **전부**를 스냅샷 이름으로 넘긴다. 세 값만 넘기면
+               외곽선·배경·위치가 빠진 모양이 저장되고, owner는 적용해 보고서야 안다. */
+            currentStyle={{
+              font_family: captionStyle.fontFamily,
+              font_size: captionStyle.fontSizePx,
+              text_color: captionStyle.textColor,
+              outline_color: captionStyle.outlineColor,
+              outline_width: captionStyle.outlineWidthPx,
+              background_color: captionStyle.backgroundColor,
+              position_x: captionStyle.positionXPercent,
+              position_y: captionStyle.positionYPercent,
+              horizontal_align: captionStyle.horizontalAlign,
+              shadow_blur_px: captionStyle.shadowBlurPx,
+            }}
             onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))}
           /> : null}
           {/* 포맷은 프리셋과 같은 길로 들어온다 -- 화면 값에 넣고 아래 저장이 커밋한다. */}

@@ -120,6 +120,33 @@ describe("저장된 모양을 화면 값으로 옮기기", () => {
     expect(fromSnapshot({ unknown_thing: 1, font_size: "크게" })).toEqual({});
   });
 
+  it("편집본과 포맷이 쓰는 정본 이름(_px·_percent)도 화면 이름으로 바꾼다", () => {
+    // 저장한 포맷의 자막 모양은 편집본에서 그대로 떠 와서 `font_size_px` 같은
+    // 정본 이름을 쓴다. 이 이름을 모르면 포맷을 적용해도 글자 크기·외곽선
+    // 두께·위치가 조용히 빠진다 -- 왕복이 끊겨 있던 자리 중 하나다.
+    expect(
+      fromSnapshot({
+        font_size_px: 54,
+        outline_width_px: 3,
+        position_x_percent: 50,
+        position_y_percent: 88,
+        shadow_blur_px: 2,
+        horizontal_align: "center",
+        font_family: "Noto Sans KR",
+        text_color: "#FFFFFFFF",
+      }),
+    ).toEqual({
+      fontSizePx: 54,
+      outlineWidthPx: 3,
+      positionXPercent: 50,
+      positionYPercent: 88,
+      shadowBlurPx: 2,
+      horizontalAlign: "center",
+      fontFamily: "Noto Sans KR",
+      textColor: "#FFFFFFFF",
+    });
+  });
+
   it("빈 것도 그대로 견딘다", () => {
     expect(fromSnapshot({})).toEqual({});
   });
@@ -160,12 +187,41 @@ describe("즐겨찾기할 수 없는 모양", () => {
     vi.spyOn(api.api, "listEditorPresets").mockResolvedValue([] as never);
     vi.spyOn(api.api, "listEditorFavorites").mockResolvedValue([] as never);
 
-    render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} currentStyle={{ fontFamily: "Pretendard", fontSizePx: 28 } as never} />);
+    render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} currentStyle={{ font_family: "Pretendard", font_size: 28 }} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "이 모양 저장해 두기" }));
 
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     // 즐겨찾기가 걸리려면 `project:`로 시작해야 한다.
     expect(save.mock.calls[0][1]).toMatch(/^project:project-a:/);
+  });
+
+  it("저장한 모양을 다시 적용하면 같은 모양이 돌아온다 -- 왕복이 끊기면 안 된다", async () => {
+    // 저장할 때 화면 이름(camelCase)으로 바꿔 저장하면, 적용할 때 다시
+    // `fromSnapshot`이 스냅샷 이름(snake_case)을 기대해서 **아무것도 적용되지
+    // 않는다.** 저장은 스냅샷 그대로, 변환은 적용할 때 한 번만 한다.
+    const snapshot = { font_family: "Pretendard", font_size: 28, text_color: "#112233FF" };
+    const save = vi.spyOn(api.api, "saveEditorPreset").mockImplementation(
+      (_projectId, presetId, payload) => Promise.resolve({
+        preset_id: presetId, name: payload.name, scope: "project", style: payload.style,
+      } as never),
+    );
+    vi.spyOn(api.api, "listEditorPresets").mockResolvedValue([] as never);
+    vi.spyOn(api.api, "listEditorFavorites").mockResolvedValue([] as never);
+    const onApply = vi.fn();
+
+    render(<CaptionPresetPicker projectId="project-a" onApply={onApply} currentStyle={snapshot} />);
+    fireEvent.click(await screen.findByRole("button", { name: "이 모양 저장해 두기" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    // 저장된 것은 스냅샷 그대로여야 한다.
+    expect(save.mock.calls[0][2].style).toEqual(snapshot);
+
+    // 방금 저장한 모양을 바로 적용하면 화면 값으로 온전히 돌아와야 한다.
+    fireEvent.click(await screen.findByRole("button", { name: "내 모양 1 적용" }));
+    await waitFor(() => expect(onApply).toHaveBeenCalledWith(snapshot));
+    expect(fromSnapshot(onApply.mock.calls[0][0])).toEqual({
+      fontFamily: "Pretendard", fontSizePx: 28, textColor: "#112233FF",
+    });
   });
 });

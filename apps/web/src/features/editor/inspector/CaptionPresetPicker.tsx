@@ -6,21 +6,29 @@ import { orderByFavouriteThenRecent } from "../../../lib/pickerOrder";
 
 /** 저장된 모양을 화면 값으로 옮긴다.
  *
- * 백엔드 프리셋은 `font_size`, `text_color`, `font_family`로 온다. 아는 것만
- * 옮기고 나머지는 버린다 -- 지어내면 owner가 고르지 않은 모양이 적용된다.
+ * 두 가지 스냅샷 이름을 안다: 내장 프리셋의 짧은 이름(`font_size`)과, 편집본·
+ * 저장한 포맷이 그대로 떠 오는 정본 이름(`font_size_px` 같은 `_px`·`_percent`).
+ * 정본 이름을 모르면 포맷을 적용해도 글자 크기·두께·위치가 조용히 빠진다.
+ * 그 밖의 모르는 것은 버린다 -- 지어내면 owner가 고르지 않은 모양이 적용된다.
  */
 export function fromSnapshot(style: CaptionStyleSnapshot): Partial<Record<string, string | number>> {
   const numbers: Readonly<Record<string, string>> = {
     font_size: "fontSizePx",
+    font_size_px: "fontSizePx",
     outline_width: "outlineWidthPx",
+    outline_width_px: "outlineWidthPx",
     position_x: "positionXPercent",
+    position_x_percent: "positionXPercent",
     position_y: "positionYPercent",
+    position_y_percent: "positionYPercent",
+    shadow_blur_px: "shadowBlurPx",
   };
   const strings: Readonly<Record<string, string>> = {
     font_family: "fontFamily",
     text_color: "textColor",
     outline_color: "outlineColor",
     background_color: "backgroundColor",
+    horizontal_align: "horizontalAlign",
   };
   const mapped: Record<string, string | number> = {};
   for (const [key, value] of Object.entries(style ?? {})) {
@@ -115,9 +123,11 @@ export function CaptionPresetPicker({
     setError(null);
     const ordinal = presets.filter((preset) => preset.preset_id.startsWith(`project:${projectId}:`)).length + 1;
     try {
+      // 스냅샷 이름 그대로 저장한다. 화면 이름(camelCase)으로 바꿔 저장하면
+      // 적용할 때 `fromSnapshot`이 아무것도 알아보지 못해 왕복이 끊긴다.
       const saved = await api.saveEditorPreset(projectId, `project:${projectId}:${ordinal}`, {
         name: `내 모양 ${ordinal}`,
-        style: fromSnapshot(currentStyle) as Record<string, unknown>,
+        style: currentStyle as Record<string, unknown>,
       });
       setPresets((current) => [...current.filter((preset) => preset.preset_id !== saved.preset_id), saved]);
     } catch {
