@@ -394,7 +394,6 @@ async function openInspector() {
   fireEvent.click(await findClipSelectionButton("n-1"));
   fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
   await screen.findByRole("dialog", { name: "유진과 편집 항목" });
-  openInspector();
   return screen.findByRole("region", { name: "편집 항목" });
 }
 
