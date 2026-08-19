@@ -699,6 +699,37 @@ describe("InspectorControls", () => {
     expect(document.body).not.toHaveTextContent(/asset-internal|segment-internal/);
   });
 
+  it("creates a new explanation card without offering to erase what does not exist yet", () => {
+    const onAction = renderControls({
+      target: {
+        fields: ["title", "body", "text"],
+        id: "overlay-new:explanation-card:segment-internal-current",
+        isNew: true,
+        kind: "overlay",
+        label: "설명 카드",
+        overlayKind: "explanation-card",
+        segmentId: "segment-internal-current",
+        value: { body: "", text: "", title: "" },
+      },
+    });
+
+    expect(screen.queryByRole("button", { name: "설명 카드 지우기" })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("제목"), { target: { value: "새 제목" } });
+    fireEvent.change(screen.getByLabelText("본문"), { target: { value: "새 본문" } });
+    fireEvent.change(screen.getByLabelText("설명"), { target: { value: "새 설명" } });
+    fireEvent.click(screen.getByRole("button", { name: "설명 카드 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      body: "새 본문",
+      kind: "save-overlay",
+      overlayKind: "explanation-card",
+      segmentId: "segment-internal-current",
+      text: "새 설명",
+      title: "새 제목",
+    });
+  });
+
   it("lets the owner set playback speed and loudness on a clip", async () => {
     // Both rode in the command port from the start and no screen ever offered
     // them, so a clip could not be sped up or quietened without leaving

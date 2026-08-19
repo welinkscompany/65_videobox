@@ -20,6 +20,8 @@ type Props = Readonly<{
   isSaving: boolean;
   onPreview: (card: EditorAssetCard) => void;
   onApply: (card: EditorAssetCard, segmentId: string) => void;
+  /** 이미지 카드를 장면 위에 오버레이로 얹는다. 없으면 그 단추만 빠진다. */
+  onApplyOverlay?: (card: EditorAssetCard, segmentId: string) => void;
   previewStates?: Readonly<Record<string, EditorAssetPreviewState>>;
   onRefreshExactPreview?: () => void;
   /** 있으면 "항상 쓰기 / 쓰지 않기"를 저장한다. 없으면 그 절만 빠진다. */
@@ -45,7 +47,7 @@ function targetLabel(target: EditorAssetTarget | null): string {
     : "적용할 내레이션 구간을 먼저 선택하세요.";
 }
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, previewStates = {}, onRefreshExactPreview, projectId }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId }: Props) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
   const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
@@ -209,6 +211,12 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
             <Button type="button" aria-label={`${card.title} ${previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}`} disabled={!card.previewUrl || previewState?.status === "preparing"} onClick={() => onPreview(card)}>{previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}</Button>
             {previewState?.status === "failed" && onRefreshExactPreview ? <Button type="button" variant="outline" onClick={onRefreshExactPreview}>정확한 미리보기 새로고침</Button> : null}
             <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>
+            {/* 이미지만: 장면을 바꾸는 `적용`(B-roll)과 달리, 장면 위에 얹는다.
+                오버레이 endpoint와 렌더는 처음부터 있었는데 이미지를 고를 자리가
+                없었다 -- 자산 목록이 그 선택기다. */}
+            {onApplyOverlay && card.previewKind === "image" ? (
+              <Button type="button" aria-label={`${card.title} 화면에 얹기`} disabled={applyDisabled} onClick={() => target && onApplyOverlay(card, target.segmentId)}>화면에 얹기</Button>
+            ) : null}
           </div>
         </article>;
       })}

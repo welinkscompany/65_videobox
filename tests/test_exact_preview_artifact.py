@@ -307,6 +307,63 @@ def test_plan_renderer_draws_assetless_export_text_overlay_from_canonical_plan(t
     assert "between(t,1.0,2.0)" in graph
 
 
+def test_plan_renderer_draws_table_overlay_structure_not_only_its_summary(tmp_path: Path) -> None:
+    """표 오버레이는 열·행이 실제로 화면에 그려져야 한다.
+
+    화면과 백엔드는 columns/rows를 저장해 왔지만 렌더는 `text`만 그려서,
+    owner가 넣은 표가 미리보기·완성본 어디에도 나오지 않았다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [{
+            "overlay_type": "table_overlay",
+            "columns": ["항목", "값"],
+            "rows": [["길이", "10초"], ["장면", "3개"]],
+            "text": "요약표",
+            "start_sec": 1,
+            "end_sec": 2,
+        }],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert "항목 | 값" in graph
+    assert "길이 | 10초" in graph
+    assert "장면 | 3개" in graph
+    # 기존에 보이던 설명은 계속 보인다 -- 구조를 그리면서 문구를 조용히 빼지 않는다.
+    assert "요약표" in graph
+    # 표는 위에서 아래로 읽힌다: 머리글이 첫 줄이다.
+    assert graph.index("항목 | 값") < graph.index("길이 | 10초") < graph.index("장면 | 3개")
+
+
+def test_plan_renderer_draws_explanation_card_title_and_body_with_its_text(tmp_path: Path) -> None:
+    """설명 카드의 제목·본문이 함께 그려져야 한다.
+
+    렌더가 `text or title or body` 중 첫 값만 그려서, owner가 넣은 제목과
+    본문이 설명(text)에 가려 한 번도 화면에 나오지 않았다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [{
+            "overlay_type": "explanation_card",
+            "title": "제목 줄",
+            "body": "본문 줄",
+            "text": "설명 줄",
+            "start_sec": 1,
+            "end_sec": 2,
+        }],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert "제목 줄" in graph
+    assert "본문 줄" in graph
+    assert "설명 줄" in graph
+    assert graph.index("제목 줄") < graph.index("본문 줄") < graph.index("설명 줄")
+
+
 def test_plan_renderer_fails_closed_when_track_overlay_source_cannot_be_resolved(tmp_path: Path) -> None:
     plan = CompositionPlan.from_timeline(timeline={
         "output": {"duration_sec": 1},

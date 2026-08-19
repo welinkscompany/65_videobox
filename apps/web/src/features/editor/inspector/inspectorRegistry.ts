@@ -10,9 +10,11 @@ type TableField = "columns" | "rows" | "text";
 export type InspectorTarget =
   | Readonly<{ id: string; kind: "media"; label: string; segmentId: string; mediaKind: MediaKind; fields: readonly MediaField[]; assetId: string; controls: EditorControls; clearOnly: boolean }>
   | Readonly<{ id: string; kind: "caption"; label: string; segmentId: string; fields: readonly CaptionField[]; style: EditorCaptionStyle }>
-  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "explanation-card"; fields: readonly ExplanationCardField[]; value: Readonly<{ title: string; body: string; text: string }> }>
-  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }> }>
-  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }> }>;
+  // `isNew`: 이 장면에 아직 없는 오버레이의 빈 편집 자리다. 저장은 백엔드
+  // upsert가 그대로 만들어 주고, 아직 없는 것에는 `지우기`를 보이지 않는다.
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "explanation-card"; fields: readonly ExplanationCardField[]; value: Readonly<{ title: string; body: string; text: string }>; isNew?: boolean }>
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }>; isNew?: boolean }>
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }>; isNew?: boolean }>;
 
 // 2026-08-19: `소리 크기`(gainDb)가 화면에 들어왔다. 예전에는 "입력 자리를 주면
 // owner가 정하지 않은 값이 저장마다 실린다"고 뺐는데, 슬라이더는 저장된 값에서
@@ -108,5 +110,23 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
       return [];
     });
 
-  return [...mediaTargets, ...captionTargets, ...overlayTargets];
+  // 2026-08-20: 없는 오버레이를 얹을 자리. 백엔드 upsert는 처음부터 만들 수
+  // 있었는데("부품은 있는데 부르는 자리가 없다") 화면에는 이미 있는 오버레이의
+  // 편집 자리만 있었다. 이미지는 여기 넣지 않는다 -- 고를 자산 없이는 저장이
+  // 영영 잠긴 죽은 자리가 되므로, 이미지는 자산 목록의 `화면에 얹기`로 만든다.
+  const segmentExists = view.tracks.some((track) => track.clips.some((clip) => clip.segmentId === selectedSegmentId));
+  const presentOverlayKinds = new Set(
+    overlayTargets.flatMap((target) => (target.kind === "overlay" ? [target.overlayKind] : [])),
+  );
+  const newOverlayTargets: InspectorTarget[] = [];
+  if (segmentExists && !presentOverlayKinds.has("explanation-card")) newOverlayTargets.push({
+    id: `overlay-new:explanation-card:${selectedSegmentId}`, kind: "overlay", label: "설명 카드", segmentId: selectedSegmentId, overlayKind: "explanation-card", fields: ["title", "body", "text"],
+    value: { title: "", body: "", text: "" }, isNew: true,
+  });
+  if (segmentExists && !presentOverlayKinds.has("table")) newOverlayTargets.push({
+    id: `overlay-new:table:${selectedSegmentId}`, kind: "overlay", label: "표", segmentId: selectedSegmentId, overlayKind: "table", fields: ["columns", "rows", "text"],
+    value: { columns: [], rows: [], text: "" }, isNew: true,
+  });
+
+  return [...mediaTargets, ...captionTargets, ...overlayTargets, ...newOverlayTargets];
 }

@@ -22,6 +22,7 @@ const cards: readonly EditorAssetCard[] = [
     license: "프로젝트 로컬 B-roll",
     canApply: true,
     previewUrl: "/api/projects/project-a/assets/image-1/content",
+    previewKind: "image",
     sourceMetadata: { tags: ["제품"], source: "프로젝트 로컬 B-roll", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
   },
   {
@@ -94,6 +95,28 @@ describe("EditorAssetBrowser", () => {
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 적용" }));
     expect(onApply).toHaveBeenCalledWith(cards[0], "seg-1");
     expect(screen.getByRole("button", { name: "효과음 1 적용" })).toBeDisabled();
+  });
+
+  // 렌더러와 편집 명령은 처음부터 이미지 오버레이를 만들 수 있었는데, 이미지를
+  // 고를 자리가 화면에 없었다. 자산 목록이 그 선택기다.
+  it("offers to lay an image over the scene, image cards only, through an explicit callback", () => {
+    const onApplyOverlay = vi.fn();
+    const { rerender } = render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={onApplyOverlay} />);
+
+    expect(screen.getByRole("button", { name: "제품 사진 화면에 얹기" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "배경 음악 1 화면에 얹기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "효과음 1 화면에 얹기" })).toBeNull();
+
+    rerender(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={onApplyOverlay} />);
+    fireEvent.click(screen.getByRole("button", { name: "제품 사진 화면에 얹기" }));
+
+    expect(onApplyOverlay).toHaveBeenCalledWith(cards[0], "seg-1");
+  });
+
+  it("keeps the card actions unchanged when no overlay callback is wired", () => {
+    render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "제품 사진 화면에 얹기" })).toBeNull();
   });
 
   it("explains when no card matches the active filters", () => {

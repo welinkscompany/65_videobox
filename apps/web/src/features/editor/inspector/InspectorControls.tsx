@@ -564,9 +564,12 @@ export function InspectorControls({
           >
             {`${target.label} 저장`}
           </Button>
-          <Button disabled={disabled} onClick={() => emit({ kind: "clear-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId })} type="button">
-            {`${target.label} 지우기`}
-          </Button>
+          {/* 아직 없는 오버레이(빈 편집 자리)에는 지울 것이 없다. */}
+          {!target.isNew ? (
+            <Button disabled={disabled} onClick={() => emit({ kind: "clear-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId })} type="button">
+              {`${target.label} 지우기`}
+            </Button>
+          ) : null}
         </fieldset>
       ) : null}
 
