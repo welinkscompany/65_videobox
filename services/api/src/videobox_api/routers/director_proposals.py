@@ -8,6 +8,7 @@ from threading import Event, Thread
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
+from videobox_core_engine.director_media_focus import media_focus_for_request
 from videobox_core_engine.director_proposal_service import (
     DirectorProposalBlockedError,
     DirectorProposalService,
@@ -58,6 +59,9 @@ def _approved_memories(
 class ProposalCreateRequest(BaseModel):
     session_id: str = Field(min_length=1)
     expires_at: str | None = None
+    # 창작자가 방금 한 말. 종류 판단은 **백엔드 한 곳**에서 한다 -- 같은 규칙을
+    # 화면에도 두면 두 벌이 어긋난다(이 저장소가 여러 번 겪은 일이다).
+    request_text: str | None = None
 
     @field_validator("expires_at")
     @classmethod
@@ -279,7 +283,7 @@ def build_director_proposals_router(
     @router.post("/api/projects/{project_id}/director/proposals", status_code=status.HTTP_201_CREATED)
     def create(project_id: str, body: ProposalCreateRequest) -> dict:
         try:
-            return payload(project_id, service.create(project_id=project_id, session_id=body.session_id, expires_at=body.expires_at))
+            return payload(project_id, service.create(project_id=project_id, session_id=body.session_id, expires_at=body.expires_at, media_types=media_focus_for_request(body.request_text)))
         except DirectorProposalBlockedError as exc:
             return JSONResponse(status_code=409, content={"code": "director_analysis_blocked", "lifecycle": exc.lifecycle})
         except KeyError as exc:

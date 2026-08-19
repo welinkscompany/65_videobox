@@ -1512,7 +1512,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         if (!isCurrentDirector(epoch, operationId)) return;
         conversationId = conversation.conversation_id;
       }
-      const proposal = await api.createDirectorProposal(projectId, { session_id: sessionId });
+      // 방금 한 말을 함께 보낸다. 무엇을 청했는지가 후보에 닿지 않으면 "음악
+      // 추천해 줘"에 영상만 오는 일이 생긴다(owner 2026-08-19). **판단은 백엔드가**
+      // 한다 -- 같은 규칙을 여기에도 두면 두 벌이 조용히 어긋난다.
+      const lastRequest = [...activeDirector.messages].reverse().find((message) => message.role === "user")?.text;
+      const proposal = await api.createDirectorProposal(projectId, { session_id: sessionId, request_text: lastRequest });
       if (isCurrentDirector(epoch, operationId)) setDirector((current) => current.key === requestKey ? { ...current, state: "proposal_ready", conversationId, proposal, startFailure: null, selectedCandidateIds: proposal.candidates[0]?.candidate_id ? [proposal.candidates[0].candidate_id] : [] } : current);
     } catch (error) {
       // 상태를 `blocked`으로 떨어뜨리지 않는다. 그러면 이유는 보여도 다시 누를

@@ -117,7 +117,9 @@ export type MediaAnalysis = {
   created_at: string;
 };
 
-export type DirectorProposalCreateRequest = { session_id: string; expires_at?: string };
+export type DirectorProposalCreateRequest = { session_id: string; expires_at?: string   /** 방금 한 말. 어떤 종류를 청했는지는 백엔드가 판단한다(규칙을 한 곳에 둔다). */
+  request_text?: string;
+};
 export type DirectorPreferences = { pin_asset?: string[]; exclude_asset?: string[]; exclude_creator?: string[]; exclude_tag?: string[] };
 export type DirectorReference = { reference_code: string; immutable_id: string | { segment_id: string; track_type: string }; source: string };
 export type DirectorCandidate = {

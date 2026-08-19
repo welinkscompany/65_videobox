@@ -63,7 +63,13 @@ class DirectorProposalService:
         self.embedding_provider = embedding_provider
         self.embedding_model_name = embedding_model_name
 
-    def create(self, *, project_id: str, session_id: str, expires_at: str | None = None) -> DirectorProposal:
+    def create(self, *, project_id: str, session_id: str, expires_at: str | None = None, media_types: tuple[str, ...] | None = None) -> DirectorProposal:
+        """`media_types`가 오면 그 종류만 순위에 올린다.
+
+        2026-08-19 owner 지적: "음악 추천해 줘"라고 했는데 후보에는 영상만 왔다.
+        무엇을 청했는지가 후보에 닿지 않으면 대화로 편집한다는 말이 성립하지 않는다.
+        **`None`이면 좁히지 않는다** -- 넘겨짚어 거르면 있는 후보가 사라진다.
+        """
         snapshot = self.store.read_director_proposal_snapshot(project_id=project_id, session_id=session_id)
         session = snapshot["session"]
         analyses = {str(item["asset_id"]): item for item in snapshot["analyses"]}
@@ -87,6 +93,13 @@ class DirectorProposalService:
         if not assets:
             states = sorted({str(item.get("status") or "unavailable") for item in snapshot["analyses"]})
             raise DirectorProposalBlockedError({"status": "blocked", "analysis_states": states or ["missing"], "recovery_action": "analyse_or_retry_assets"})
+        # 종류를 좁히는 것은 **`blocked` 검사 뒤**다. 앞에 두었더니 음악이 없는
+        # 프로젝트에 음악을 청했을 때 "분석을 다시 하라"는 오류가 났다 --
+        # 분석은 멀쩡하고 그 종류가 없을 뿐이다. 없으면 빈 추천으로 돌려주고
+        # 화면이 "아직 추천이 없어요"라고 말하게 둔다(2026-08-19 실제로 409였다).
+        if media_types:
+            wanted = set(media_types)
+            assets = [asset for asset in assets if str(asset.get("media_type")) in wanted]
         preferences = snapshot["preferences"]
         candidates = []
         placement_targets: dict[str, str] = {}
