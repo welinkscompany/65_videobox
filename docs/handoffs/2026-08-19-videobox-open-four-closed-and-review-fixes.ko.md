@@ -83,19 +83,32 @@ no-op이고 `applyFormatTemplate`을 부르는 화면이 없다 — **원래부�
 웹은 영향 스위트 통과(라이브러리·인스펙터·프리뷰·앱·스타일 280+, 에디터 588),
 `tsc --noEmit` 깨끗. e2e는 이번에 돌리지 않았다.
 
-## 병렬 작업 4건 — 진행 중 (owner 승인, 2026-08-19 밤)
+## 병렬 작업 4건 — **전부 병합·푸시·재빌드·실화면 확인 완료** (2026-08-20 새벽)
 
-격리 worktree에서 topic 브랜치로 작업 중. **끝나면 개발선에 병합하고 focused
-테스트 재실행 후 푸시·재빌드해야 한다.** 각 브랜치는 `codex/videobox-container-compatibility`
-(051f6843)에서 분기.
+owner 승인으로 격리 worktree 에이전트 4개가 병렬 작업했고, 전부 개발선에
+병합됐다(`07ac670f`, `088faabb`, `6b74c69b`, `67c0e9ed`). 재빌드 후 실화면 검증까지 끝.
 
-1. `feat/audio-gain-slider` — 음악·효과음 클립 "소리 크기" 슬라이더(내부 gain_db,
-   화면엔 쉬운 말만). 백엔드 반영 경로는 이미 있음.
-2. `fix/workbench-test-rejections` — 워크벤치 vitest의 unhandled rejection 24건.
-3. `fix/format-output-size` — 위 이관 건. 반영하거나, 화면 약속을 동작에 맞추거나.
-4. `feat/yujin-thumbnail-prompts` — 유진이 썸네일 **이미지 생성 프롬프트 5개**를
-   추천(생성은 owner가 GPT·Flux/ComfyUI에서). owner 컴퓨터에 Flux·ComfyUI 있음,
-   RAM 128GB 교체 예정. 로컬 이미지 생성은 **하지 않기로 함** — 프롬프트 추천까지만.
+1. `fix/workbench-test-rejections` — unhandled rejection 24건의 원인은 테스트
+   헬퍼의 **잘못된 자기 재호출 한 줄**(33aae0eba의 흔적). 삭제로 0건.
+2. `fix/format-output-size` — **약속을 동작에 맞춰 좁혔다.** 편집본의 output을
+   읽는 코드가 저장소에 없음을 재고, no-op이던 `keep_output_size`를 제거하고
+   카드에 "적용하면 자막 모양만 바뀌어요"를 명시(실화면 확인).
+3. `feat/audio-gain-slider` — 배경 음악·효과음 "소리 크기" 슬라이더. 배관
+   (gainDb→api→렌더러)은 이미 있었고 화면만 붙였다. 중앙=그대로(0dB),
+   -18~+6dB 조각 선형, 화면엔 "조용히/크게"만(실화면 확인, dB 노출 없음).
+4. `feat/yujin-thumbnail-prompts` — 유진 스타터 "썸네일 만들 프롬프트 추천해 줘".
+   프로젝트 이름·대본·장면 자막을 컨텍스트로 실어 **영문 프롬프트 5개 + 한국어
+   설명**을 답한다. 실화면에서 실제 대본("제주 바다") 기반 5개 응답 확인.
+   생성은 owner가 GPT·Flux(ComfyUI)에서 — 로컬 이미지 생성은 하지 않기로 함.
+   Hermes 경로(`yujin_profile_contract.py`)는 여전히 썸네일을 막는다(별도 작업,
+   905b21fe6과 같은 SHA 고정 이유). 화면이 쓰는 로컬 경로는 열려 있다.
+
+**병합 중 사고 하나 기록:** 셸이 재시작되면 기본 폴더(낡은 main 루트)에서
+시작한다. 병합 두 번이 main 체크아웃 위에서 시도돼 CLAUDE.md 충돌이 났고,
+`git merge --abort`로 **잔여물·커밋 오염 없이 복구**했다. 교훈: **git 명령은
+항상 명시적 `cd`를 붙여라.** 에이전트가 낸 부산물 칩 1건: `react-resizable-panels`
+lockfile(4.5.8)과 설치본(4.12.2) 불일치 — 깨끗한 `npm ci` 환경에서만 워크벤치
+테스트 2개가 깨진다.
 
 ## owner와 나눈 방향 논의 (2026-08-19 밤, 결정 대기 아님·기록용)
 
