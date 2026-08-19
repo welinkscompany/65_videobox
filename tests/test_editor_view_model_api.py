@@ -215,6 +215,44 @@ def test_overlay_patches_roundtrip_through_content_windows_and_typed_manifest(tm
     assert all(track["track_type"] != "overlay" for track in final_manifest.json()["tracks"])
 
 
+def test_shape_overlay_patch_reaches_the_typed_playback_manifest(tmp_path) -> None:
+    """저장된 정지 도형은 화면(manifest)에도 보여야 한다.
+
+    manifest의 오버레이 허용 목록에 빠지면 저장은 되는데 편집 화면에는 영영
+    나타나지 않는다 -- "부품은 있는데 부르는 자리가 없다"의 재판이다.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/shape-overlay",
+        json={
+            "shape": "underline",
+            "vertical": "bottom",
+            "horizontal": "center",
+            "size": "large",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+
+    manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+    assert manifest.status_code == 200
+    shape_clip = next(
+        clip
+        for track in manifest.json()["tracks"]
+        if track["track_type"] == "overlay"
+        for clip in track["clips"]
+    )
+    assert shape_clip["overlay_type"] == "shape_overlay"
+    assert shape_clip["overlay_payload"]["shape"] == "underline"
+    assert shape_clip["overlay_payload"]["vertical"] == "bottom"
+    assert shape_clip["overlay_payload"]["horizontal"] == "center"
+    assert shape_clip["overlay_payload"]["size"] == "large"
+
+
 def test_manifest_never_substitutes_latest_session_and_is_project_isolated(tmp_path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, other_project_id, session_id = _manifest_fixture(client, tmp_path)

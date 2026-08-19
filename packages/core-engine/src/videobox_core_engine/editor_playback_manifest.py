@@ -146,7 +146,7 @@ def _track_contract(track: dict[str, Any]) -> dict[str, Any] | None:
         if not isinstance(controls, dict):
             raise ValueError("editor_manifest_invalid_media_controls")
         if clip_type == "overlay":
-            if raw.get("overlay_type") not in {"explanation_card", "image_overlay", "table_overlay"}:
+            if raw.get("overlay_type") not in {"explanation_card", "image_overlay", "table_overlay", "shape_overlay"}:
                 raise ValueError("editor_manifest_unsupported_overlay_subtype")
             if not isinstance(raw.get("overlay_payload"), dict):
                 raise ValueError("editor_manifest_invalid_overlay_payload")
@@ -177,7 +177,7 @@ def _export_overlay_track(raw_overlays: object) -> dict[str, Any] | None:
             else "table_overlay" if raw_type in {"table_card", "table_overlay"}
             else raw_type
         )
-        if overlay_type not in {"explanation_card", "image_overlay", "table_overlay"}:
+        if overlay_type not in {"explanation_card", "image_overlay", "table_overlay", "shape_overlay"}:
             continue
         payload = dict(raw)
         payload["overlay_type"] = overlay_type

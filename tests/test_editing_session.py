@@ -2815,3 +2815,100 @@ def test_broll_override_keeps_the_source_window_the_inspector_sends() -> None:
     assert (controls["in_sec"], controls["out_sec"]) == (20.0, 26.5)
     # B-roll stays silent unless the owner opts in, so the default must not flip.
     assert controls["preserve_source_audio"] is False
+
+
+def test_update_and_remove_segment_shape_overlay_record_history() -> None:
+    """정지 도형(강조 상자·밑줄)은 다른 오버레이와 같은 upsert 체계를 탄다."""
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import remove_segment_shape_overlay
+    from videobox_core_engine.editing_session import update_segment_shape_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_shape_overlay(
+        session=session,
+        segment_id="seg_001",
+        shape="highlight_box",
+        vertical="top",
+        horizontal="left",
+        size="small",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "highlight_box",
+            "vertical": "top",
+            "horizontal": "left",
+            "size": "small",
+        }
+    ]
+    assert updated["history"][-1]["mutation_type"] == "shape_overlay_update"
+
+    # 같은 장면에 다시 저장하면 도형이 쌓이지 않고 바뀐다 -- upsert다.
+    replaced = update_segment_shape_overlay(
+        session=updated,
+        segment_id="seg_001",
+        shape="underline",
+        vertical="bottom",
+        horizontal="center",
+        size="large",
+    )
+    assert replaced["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "underline",
+            "vertical": "bottom",
+            "horizontal": "center",
+            "size": "large",
+        }
+    ]
+
+    removed = remove_segment_shape_overlay(session=replaced, segment_id="seg_001")
+    assert removed["segments"][0]["visual_overlays"] == []
+    assert removed["history"][-1]["mutation_type"] == "shape_overlay_remove"
+
+
+def test_update_segment_shape_overlay_rejects_values_outside_the_presets() -> None:
+    """도형·위치·크기는 프리셋만 받는다. 자유 좌표는 이번 범위 밖이다."""
+    import pytest
+
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_shape_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    for bad in (
+        {"shape": "arrow", "vertical": "top", "horizontal": "left", "size": "small"},
+        {"shape": "highlight_box", "vertical": "37%", "horizontal": "left", "size": "small"},
+        {"shape": "highlight_box", "vertical": "top", "horizontal": "12px", "size": "small"},
+        {"shape": "highlight_box", "vertical": "top", "horizontal": "left", "size": "huge"},
+    ):
+        with pytest.raises(ValueError):
+            update_segment_shape_overlay(session=session, segment_id="seg_001", **bad)

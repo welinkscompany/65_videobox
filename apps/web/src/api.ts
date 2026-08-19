@@ -476,7 +476,7 @@ export type EditorPlaybackManifest = {
       clip_id: string; segment_id: string; placement_id?: string | null; clip_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
       asset_id: string | null; asset_uri: string | null; start_sec: number; end_sec: number;
       media_controls: EditorMediaControls; expected_content_sha256?: string | null; media_revision?: string | null;
-      overlay_type?: "explanation_card" | "image_overlay" | "table_overlay" | null; overlay_payload?: Record<string, unknown>;
+      overlay_type?: "explanation_card" | "image_overlay" | "table_overlay" | "shape_overlay" | null; overlay_payload?: Record<string, unknown>;
     }>;
   }>;
   captions: Array<{
@@ -560,6 +560,14 @@ export type TableOverlayRequest = RevisionedEditingSessionMutation & {
   rows: string[][];
   text: string;
 } & OptionalYujinCandidateAttestation;
+
+// 정지 도형("여기를 보세요"). 프리셋만 있다 -- 자유 좌표·애니메이션은 범위 밖.
+export type ShapeOverlayRequest = RevisionedEditingSessionMutation & {
+  shape: "highlight_box" | "underline";
+  vertical: "top" | "middle" | "bottom";
+  horizontal: "left" | "center" | "right";
+  size: "small" | "medium" | "large";
+};
 
 export type TtsReplacementRequest = RevisionedEditingSessionMutation & {
   recommendation_id: string;
@@ -2281,6 +2289,34 @@ export const api = {
   ) =>
     request<EditingSession>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/table-overlay?expected_revision=${expectedRevision}`,
+      {
+        method: "DELETE",
+      },
+    ),
+  updateEditingSessionShapeOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: ShapeOverlayRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/shape-overlay`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  removeEditingSessionShapeOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    expectedRevision: number,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/shape-overlay?expected_revision=${expectedRevision}`,
       {
         method: "DELETE",
       },

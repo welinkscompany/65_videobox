@@ -8,7 +8,7 @@ import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
 import type { EditorCaptionStyle, EditorControls } from "../editorViewModel";
-import type { InspectorTarget } from "./inspectorRegistry";
+import type { InspectorTarget, ShapeOverlayValue } from "./inspectorRegistry";
 
 type CutAction = "keep" | "remove";
 
@@ -22,7 +22,9 @@ export type InspectorAction =
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
-  | Readonly<{ kind: "clear-overlay"; overlayKind: "explanation-card" | "image" | "table"; segmentId: string }>
+  // 정지 도형("여기를 보세요"). 프리셋만 보낸다 -- 자유 좌표는 범위 밖이다.
+  | Readonly<{ kind: "save-overlay"; overlayKind: "shape"; segmentId: string; shape: ShapeOverlayValue["shape"]; vertical: ShapeOverlayValue["vertical"]; horizontal: ShapeOverlayValue["horizontal"]; size: ShapeOverlayValue["size"] }>
+  | Readonly<{ kind: "clear-overlay"; overlayKind: "explanation-card" | "image" | "table" | "shape"; segmentId: string }>
   | Readonly<{ kind: "apply-tts-candidate"; segmentId: string; candidateId: string; assetId: string }>
   | Readonly<{ kind: "clear-tts-candidate"; segmentId: string }>
   | Readonly<{ kind: "partial-preflight"; segmentIds: string[]; fields: string[] }>
@@ -163,6 +165,11 @@ export function InspectorControls({
   const [overlayText, setOverlayText] = useState("");
   const [tableColumns, setTableColumns] = useState("");
   const [tableRows, setTableRows] = useState("");
+  // 정지 도형의 프리셋 선택. 저장된 값에서 시작하므로 손대지 않은 저장이
+  // 값을 옮기지 않는다.
+  const [shapeOverlay, setShapeOverlay] = useState<ShapeOverlayValue>({
+    shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium",
+  });
   const [selectedPartialFields, setSelectedPartialFields] = useState<readonly string[]>(() =>
     partialRegeneration?.defaultFields ?? partialRegeneration?.fields ?? [],
   );
@@ -205,13 +212,15 @@ export function InspectorControls({
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
     if (target?.kind === "overlay") {
-      setOverlayText(target.value.text);
+      if (target.overlayKind !== "shape") setOverlayText(target.value.text);
       if (target.overlayKind === "explanation-card") {
         setOverlayTitle(target.value.title);
         setOverlayBody(target.value.body);
       } else if (target.overlayKind === "table") {
         setTableColumns(target.value.columns.join(", "));
         setTableRows(target.value.rows.map((row) => row.join(" | ")).join("\n"));
+      } else if (target.overlayKind === "shape") {
+        setShapeOverlay(target.value);
       }
     }
   }, [targetIdentity]);
@@ -552,12 +561,53 @@ export function InspectorControls({
               <label>표 행<Textarea disabled={disabled} onChange={(event) => setTableRows(event.target.value)} value={tableRows} /></label>
             </>
           ) : null}
-          <label>설명<Textarea disabled={disabled} onChange={(event) => setOverlayText(event.target.value)} value={overlayText} /></label>
+          {/* 정지 도형: "여기를 보세요"용 강조 상자·밑줄. 자유 좌표 대신
+              프리셋만 준다 -- 움직이는 도형·키프레임은 계획서 §4 범위 밖이다. */}
+          {target.overlayKind === "shape" ? (
+            <>
+              <p>장면 위에 얹어 "여기를 보세요"를 표시해요. 장면이 보이는 동안 함께 나와요.</p>
+              <label>
+                모양
+                <NativeSelect aria-label="모양" disabled={disabled} onChange={(event) => setShapeOverlay((current) => ({ ...current, shape: event.target.value === "underline" ? "underline" : "highlight_box" }))} value={shapeOverlay.shape}>
+                  <option value="highlight_box">강조 상자</option>
+                  <option value="underline">밑줄</option>
+                </NativeSelect>
+              </label>
+              <label>
+                세로 위치
+                <NativeSelect aria-label="세로 위치" disabled={disabled} onChange={(event) => setShapeOverlay((current) => ({ ...current, vertical: event.target.value === "top" || event.target.value === "bottom" ? event.target.value : "middle" }))} value={shapeOverlay.vertical}>
+                  <option value="top">위</option>
+                  <option value="middle">가운데</option>
+                  <option value="bottom">아래</option>
+                </NativeSelect>
+              </label>
+              <label>
+                가로 위치
+                <NativeSelect aria-label="가로 위치" disabled={disabled} onChange={(event) => setShapeOverlay((current) => ({ ...current, horizontal: event.target.value === "left" || event.target.value === "right" ? event.target.value : "center" }))} value={shapeOverlay.horizontal}>
+                  <option value="left">왼쪽</option>
+                  <option value="center">가운데</option>
+                  <option value="right">오른쪽</option>
+                </NativeSelect>
+              </label>
+              <label>
+                크기
+                <NativeSelect aria-label="크기" disabled={disabled} onChange={(event) => setShapeOverlay((current) => ({ ...current, size: event.target.value === "small" || event.target.value === "large" ? event.target.value : "medium" }))} value={shapeOverlay.size}>
+                  <option value="small">작게</option>
+                  <option value="medium">보통</option>
+                  <option value="large">크게</option>
+                </NativeSelect>
+              </label>
+            </>
+          ) : null}
+          {target.overlayKind !== "shape" ? (
+            <label>설명<Textarea disabled={disabled} onChange={(event) => setOverlayText(event.target.value)} value={overlayText} /></label>
+          ) : null}
           <Button
             disabled={disabled || (target.overlayKind === "image" && !target.value.assetId)}
             onClick={() => {
               if (target.overlayKind === "explanation-card") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, title: overlayTitle, body: overlayBody, text: overlayText });
               else if (target.overlayKind === "image") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, assetId: target.value.assetId, text: overlayText });
+              else if (target.overlayKind === "shape") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, ...shapeOverlay });
               else emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, columns: parseColumns(tableColumns), rows: parseRows(tableRows), text: overlayText });
             }}
             type="button"

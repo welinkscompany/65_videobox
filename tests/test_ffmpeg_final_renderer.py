@@ -227,6 +227,59 @@ def test_apply_export_overlays_draws_table_structure_in_the_legacy_path(
     assert filter_graph.index("항목 | 값") < filter_graph.index("길이 | 10초")
 
 
+def test_apply_export_overlays_draws_static_shapes_in_the_legacy_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """렌더 경로가 둘이다: 그래프 경로뿐 아니라 이 legacy 경로도 정지 도형을
+    drawbox로 그려야 한다. 도형은 글줄이 아니므로 글꼴 없이도 그려진다."""
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(
+        store=store, overlay_font_file=str(tmp_path / "no-font-anywhere.ttf")
+    )
+    captured: list[list[str]] = []
+
+    def fake_run(self: FfmpegFinalRenderer, command: list[str]) -> subprocess.CompletedProcess:
+        captured.append(command)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", fake_run)
+
+    result = renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=[
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "highlight_box",
+                "vertical": "middle",
+                "horizontal": "right",
+                "size": "medium",
+                "start_sec": 0.0,
+                "end_sec": 1.5,
+            },
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "underline",
+                "vertical": "bottom",
+                "horizontal": "center",
+                "size": "small",
+                "start_sec": 2.0,
+                "end_sec": 3.0,
+            },
+        ],
+        work_dir=tmp_path,
+    )
+
+    assert result != tmp_path / "video.mp4"
+    assert captured, "the overlay render command never ran"
+    filter_graph = captured[0][captured[0].index("-filter_complex") + 1]
+    assert filter_graph.count("drawbox=") == 2
+    assert "between(t,0.0,1.5)" in filter_graph
+    assert "between(t,2.0,3.0)" in filter_graph
+    assert "t=fill" in filter_graph
+    assert "drawtext" not in filter_graph
+
+
 def test_final_renderer_explains_missing_broll_media_before_rendering(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Missing B-roll")

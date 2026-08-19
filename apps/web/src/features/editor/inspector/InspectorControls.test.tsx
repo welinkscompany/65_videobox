@@ -730,6 +730,64 @@ describe("InspectorControls", () => {
     });
   });
 
+  // 정지 도형("여기를 보세요"). 자유 좌표 대신 프리셋 선택지만 준다 --
+  // 움직이는 도형·키프레임은 계획서 §4가 범위 밖으로 못박았다.
+  it("saves a static shape overlay from preset choices only", () => {
+    const onAction = renderControls({
+      target: {
+        fields: ["shape", "vertical", "horizontal", "size"],
+        id: "overlay-new:shape:segment-internal-current",
+        isNew: true,
+        kind: "overlay",
+        label: "강조 표시",
+        overlayKind: "shape",
+        segmentId: "segment-internal-current",
+        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" },
+      },
+    });
+
+    // 아직 없는 도형에는 지우기를 보이지 않는다.
+    expect(screen.queryByRole("button", { name: "강조 표시 지우기" })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("모양"), { target: { value: "underline" } });
+    fireEvent.change(screen.getByLabelText("세로 위치"), { target: { value: "bottom" } });
+    fireEvent.change(screen.getByLabelText("가로 위치"), { target: { value: "left" } });
+    fireEvent.change(screen.getByLabelText("크기"), { target: { value: "large" } });
+    fireEvent.click(screen.getByRole("button", { name: "강조 표시 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "save-overlay",
+      overlayKind: "shape",
+      segmentId: "segment-internal-current",
+      shape: "underline",
+      vertical: "bottom",
+      horizontal: "left",
+      size: "large",
+    });
+  });
+
+  it("erases an existing shape overlay through the shared clear action", () => {
+    const onAction = renderControls({
+      target: {
+        fields: ["shape", "vertical", "horizontal", "size"],
+        id: "overlay:shape-1",
+        kind: "overlay",
+        label: "강조 표시",
+        overlayKind: "shape",
+        segmentId: "segment-internal-current",
+        value: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large" },
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "강조 표시 지우기" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "clear-overlay",
+      overlayKind: "shape",
+      segmentId: "segment-internal-current",
+    });
+  });
+
   it("lets the owner set playback speed and loudness on a clip", async () => {
     // Both rode in the command port from the start and no screen ever offered
     // them, so a clip could not be sped up or quietened without leaving

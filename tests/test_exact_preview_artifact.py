@@ -364,6 +364,51 @@ def test_plan_renderer_draws_explanation_card_title_and_body_with_its_text(tmp_p
     assert graph.index("제목 줄") < graph.index("본문 줄") < graph.index("설명 줄")
 
 
+def test_plan_renderer_draws_static_shape_overlays_from_canonical_plan(tmp_path: Path) -> None:
+    """정지 도형(강조 상자·밑줄)은 그래프 경로에서 drawbox로 그려진다.
+
+    글줄이 아니라 도형이므로 drawtext(글꼴 필요)를 타지 않는다 -- 글꼴이 없는
+    환경에서도 도형만 있는 장면은 렌더돼야 한다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "highlight_box",
+                "vertical": "top",
+                "horizontal": "left",
+                "size": "small",
+                "start_sec": 1,
+                "end_sec": 2,
+            },
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "underline",
+                "vertical": "bottom",
+                "horizontal": "center",
+                "size": "large",
+                "start_sec": 3,
+                "end_sec": 4,
+            },
+        ],
+    })
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path),
+        overlay_font_file=str(tmp_path / "no-font-anywhere.ttf"),
+    )
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert graph.count("drawbox=") == 2
+    assert "between(t,1.0,2.0)" in graph
+    assert "between(t,3.0,4.0)" in graph
+    # 밑줄은 채워진 띠, 강조 상자는 테두리만이다.
+    assert "t=fill" in graph
+    # 도형에는 글줄이 없다: drawtext가 나타나면 글꼴 없는 환경이 통째로 막힌다.
+    assert "drawtext" not in graph
+
+
 def test_plan_renderer_fails_closed_when_track_overlay_source_cannot_be_resolved(tmp_path: Path) -> None:
     plan = CompositionPlan.from_timeline(timeline={
         "output": {"duration_sec": 1},

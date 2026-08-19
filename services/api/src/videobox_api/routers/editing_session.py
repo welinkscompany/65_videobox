@@ -27,6 +27,7 @@ from videobox_api.models import (
     SegmentOrderRequest,
     SegmentSplitRequest,
     SelectedRangePreviewRequest,
+    ShapeOverlayRequest,
     TableOverlayRequest,
     TimelinePayloadResponse,
     TimelinePlacementPatchRequest,
@@ -662,6 +663,50 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
     ) -> EditingSessionResponse:
         try:
             result = orchestrator.remove_segment_table_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                expected_revision=expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/shape-overlay")
+    def patch_editing_session_shape_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: ShapeOverlayRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_shape_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                shape=payload.shape,
+                vertical=payload.vertical,
+                horizontal=payload.horizontal,
+                size=payload.size,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/shape-overlay")
+    def delete_editing_session_shape_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        expected_revision: int = Query(ge=1),
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.remove_segment_shape_overlay(
                 project_id=project_id,
                 session_id=session_id,
                 segment_id=segment_id,

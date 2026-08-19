@@ -6,7 +6,7 @@ const api = {
   splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), reorderEditingSessionSegments: vi.fn(), updateEditingSessionTimelinePlacements: vi.fn(),
   undoEditingSession: vi.fn(), redoEditingSession: vi.fn(), updateEditingSessionCutAction: vi.fn(),
   updateEditingSessionBroll: vi.fn(), clearEditingSessionBrollOverride: vi.fn(), updateEditingSessionMusicOverride: vi.fn(), clearEditingSessionMusicOverride: vi.fn(), updateEditingSessionSfxOverride: vi.fn(), clearEditingSessionSfxOverride: vi.fn(),
-  updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(),
+  updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(), updateEditingSessionShapeOverlay: vi.fn(), removeEditingSessionShapeOverlay: vi.fn(),
   updateEditingSessionTtsReplacement: vi.fn(), clearEditingSessionTtsReplacement: vi.fn(),
   updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(),
 } satisfies EditorCommandApi;
@@ -163,6 +163,20 @@ describe("EditorCommandPort", () => {
     expect(api.removeEditingSessionTableOverlay).toHaveBeenCalledWith("p", "s", "seg", 7);
     expect(api.updateEditingSessionCaption).toHaveBeenCalledWith("p", "s", "seg", { caption_text: "새 자막", expected_revision: 7 });
     expect(api.updateEditingSessionCaptionStyle).toHaveBeenCalledWith("p", "s", expect.objectContaining({ expected_revision: 7, segment_ids: ["seg"] }));
+  });
+
+  it("routes a static shape overlay through its own revisioned endpoints", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+    await port.applyOverlay({ kind: "shape", segmentId: "seg", shape: "highlight_box", vertical: "top", horizontal: "right", size: "small" });
+    await port.clearOverlay({ kind: "shape", segmentId: "seg" });
+    expect(api.updateEditingSessionShapeOverlay).toHaveBeenCalledWith("p", "s", "seg", {
+      shape: "highlight_box",
+      vertical: "top",
+      horizontal: "right",
+      size: "small",
+      expected_revision: 7,
+    });
+    expect(api.removeEditingSessionShapeOverlay).toHaveBeenCalledWith("p", "s", "seg", 7);
   });
 
   it("forwards paired server attestation only for an attested image overlay command", async () => {
