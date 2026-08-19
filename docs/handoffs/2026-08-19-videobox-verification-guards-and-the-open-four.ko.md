@@ -1,5 +1,9 @@
 # 검증 장치 둘을 세웠다 — 나머지 셋은 안 건드렸다
 
+> **2026-08-19 밤 갱신:** 아래 2·3·4는 전부 닫혔다. 현재 상태는
+> `2026-08-19-videobox-open-four-closed-and-review-fixes.ko.md`를 읽어라.
+> 이 문서의 "안 건드림" 목록을 현재로 믿으면 틀린다.
+
 - 작성: 2026-08-19
 - **읽는 순서:** 이 문서 →
   `docs/handoffs/2026-08-19-videobox-navigation-and-spacing-audit.ko.md`
