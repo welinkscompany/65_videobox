@@ -57,8 +57,21 @@ describe("Yujin starter registry", () => {
     expect(starters.some((starter) => starter.id === "caption-tighten")).toBe(false);
   });
 
+  it("offers the thumbnail prompt starter where thumbnails are decided", () => {
+    // owner 승인(2026-08-19): 유진이 썸네일 이미지 생성 도구에 붙여 넣을
+    // 프롬프트를 추천한다. 이미지 생성 자체는 하지 않는다.
+    const label = "썸네일 만들 프롬프트 추천해 줘";
+    expect(getYujinStarters({ surface: "plan", selection: "none" })
+      .some((starter) => starter.label === label)).toBe(true);
+    expect(getYujinStarters({ surface: "output", selection: "proposal" })
+      .some((starter) => starter.label === label)).toBe(true);
+    // 편집 화면의 유진 패널은 includeRelated로 관련 스타터까지 보여 준다.
+    expect(getYujinStarters({ surface: "edit", selection: "segment", includeRelated: true })
+      .some((starter) => starter.label === label)).toBe(true);
+  });
+
   it("keeps plan, asset, review, and output contexts separate", () => {
-    expect(getYujinStarters({ surface: "plan", selection: "none" })).toHaveLength(4);
+    expect(getYujinStarters({ surface: "plan", selection: "none" })).toHaveLength(5);
     expect(getYujinStarters({ surface: "assets", selection: "asset" })[0]?.id)
       .toBe("assets-organize-sources");
     expect(getYujinStarters({
