@@ -75,7 +75,10 @@ def test_a_template_needs_a_name_a_person_can_recognize() -> None:
         format_template_from_session(name="   ", session=_session())
 
 
-def test_applying_a_template_changes_the_look_and_leaves_the_content_alone() -> None:
+def test_applying_a_template_changes_the_captions_and_leaves_everything_else_alone() -> None:
+    # 적용은 자막 모양만 바꾼다. 화면 크기는 영상을 만들 때 정한 그대로다 —
+    # 크기를 실제로 바꾸는 검증된 경로가 없는데 세션에만 써 두면, 화면은
+    # 바뀌었다고 말하고 완성본은 원래 크기로 나오는 거짓말이 된다.
     template = format_template_from_session(
         name="포맷", session=_session(), timeline={"output": {"width": 1920, "height": 1080}},
     )
@@ -89,7 +92,8 @@ def test_applying_a_template_changes_the_look_and_leaves_the_content_alone() -> 
     applied = apply_format_template(session=target, template=template)
 
     assert applied["caption_style"]["font_size_px"] == 48
-    assert applied["output"] == {"width": 1920, "height": 1080}
+    # 세로 영상은 세로 그대로다. 가로 포맷을 눌렀다고 조용히 가로가 되지 않는다.
+    assert applied["output"] == {"width": 1080, "height": 1920}
     # 내용은 그대로다.
     assert applied["segments"] == target["segments"]
     assert applied["session_id"] == "session_b"
@@ -106,15 +110,19 @@ def test_applying_a_template_does_not_mutate_what_it_was_given() -> None:
     assert target["output"]["width"] == 1080
 
 
-def test_the_target_keeps_its_own_orientation_when_asked() -> None:
-    # 가로 포맷을 세로 영상에 적용하고 싶을 때가 있다. 그때 크기까지 끌고 오면
-    # 세로 영상이 조용히 가로가 된다.
+def test_the_size_a_template_remembers_is_a_record_not_a_command() -> None:
+    # 크기는 포맷 카드가 "이건 가로에서 떠낸 포맷"이라고 알려 주는 기록이다.
+    # 저장은 계속 담되, 적용이 그 크기를 세션에 쓰지 않는다.
     template = format_template_from_session(
         name="가로 포맷", session=_session(), timeline={"output": {"width": 1920, "height": 1080}},
     )
-    target = {"session_id": "b", "caption_style": {}, "output": {"width": 1080, "height": 1920}}
+    assert template["width"] == 1920
+    assert template["height"] == 1080
 
-    applied = apply_format_template(session=target, template=template, keep_output_size=True)
+    applied = apply_format_template(
+        session={"session_id": "b", "caption_style": {}, "segments": []}, template=template
+    )
 
-    assert applied["output"] == {"width": 1080, "height": 1920}
+    # 크기가 없던 편집본에 크기를 심지도 않는다.
+    assert "output" not in applied
     assert applied["caption_style"]["font_size_px"] == 48

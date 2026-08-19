@@ -26,11 +26,11 @@ class SaveFormatTemplateRequest(BaseModel):
 
 
 class ApplyFormatTemplateRequest(BaseModel):
+    # 적용은 자막 모양만 바꾼다. 화면 크기·음악은 포맷 카드가 보여 주는 기록이다 —
+    # 크기를 바꾸는 검증된 경로가 없어서, 받는 척하는 옵션(`keep_output_size`)을
+    # 두는 대신 약속 자체를 좁혔다.
     session_id: str = Field(min_length=1)
     expected_revision: int
-    # 가로 포맷을 세로 영상에 쓰고 싶을 때가 있다. 이게 없으면 세로 영상이
-    # 조용히 가로가 된다.
-    keep_output_size: bool = False
 
 
 def build_format_templates_router(*, orchestrator: Any, template_store: FormatTemplateStore) -> APIRouter:
@@ -74,9 +74,7 @@ def build_format_templates_router(*, orchestrator: Any, template_store: FormatTe
             session = orchestrator.pipeline.store.get_editing_session(
                 project_id=project_id, session_id=payload.session_id
             )
-            applied = apply_format_template(
-                session=session, template=template, keep_output_size=payload.keep_output_size
-            )
+            applied = apply_format_template(session=session, template=template)
             # 자막 모양이 빈 포맷을 그대로 흘리면 `CaptionStyle.from_dict({})`가
             # 기본값(Arial 54 흰색)을 만들어 **장면마다 손본 모양까지 전부**
             # 덮어쓴다. 입힐 모양이 없으면 입히지 않고 그렇게 말한다.

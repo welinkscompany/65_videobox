@@ -32,6 +32,17 @@ describe("saved format picker", () => {
     expect(await screen.findByText("1920×1080 · 장면 4개")).toBeVisible();
   });
 
+  it("promises exactly what applying does: captions change, size and music do not", async () => {
+    // 크기를 실제로 바꾸는 경로가 없다. 카드가 크기를 보여 주는 이상,
+    // "적용해도 크기는 안 바뀐다"를 화면이 직접 말해야 약속과 동작이 맞는다.
+    vi.spyOn(api, "listFormatTemplates").mockResolvedValue([template] as never);
+    render(<SavedFormatPicker onApply={vi.fn()} />);
+
+    expect(
+      await screen.findByText("적용하면 자막 모양만 바뀌어요. 화면 크기와 음악은 그대로예요."),
+    ).toBeVisible();
+  });
+
   it("points at where formats come from when there are none", async () => {
     vi.spyOn(api, "listFormatTemplates").mockResolvedValue([] as never);
     render(<SavedFormatPicker onApply={vi.fn()} />);
