@@ -44,8 +44,10 @@ def test_strict_library_asset_vocabulary_and_metadata_separation(tmp_path: Path)
     assert asset.user_metadata == {"title": "출근 장면"}
     assert store.get_asset(asset.library_asset_id) == asset
 
+    # `image`는 2026-08-20에 실제 종류가 됐다. 어휘가 좁다는 것을 보이려면
+    # 여전히 종류가 아닌 말을 써야 한다.
     with pytest.raises(ValueError, match="media_type"):
-        store.register_asset(**{**_asset_kwargs(tmp_path), "library_asset_id": "bad", "media_type": "image"})
+        store.register_asset(**{**_asset_kwargs(tmp_path), "library_asset_id": "bad", "media_type": "그림파일"})
 
 
 def test_content_hash_is_global_idempotency_key(tmp_path: Path) -> None:

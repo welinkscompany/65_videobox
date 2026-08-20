@@ -269,7 +269,9 @@ class ProjectAssetMaterializer:
         if not expected:
             raise ValueError("library_asset_changed")
         media_type = str(library_asset.get("media_type") or "")
-        asset_type = {"broll": AssetType.BROLL_VIDEO, "music": AssetType.BGM, "sfx": AssetType.SFX}.get(media_type)
+        # 그림은 프로젝트에서 이미 `image`로 살아 있고 오버레이가 그 종류를
+        # 읽는다. 여기만 빠지면 라이브러리 그림이 프로젝트로 넘어오지 못한다.
+        asset_type = {"broll": AssetType.BROLL_VIDEO, "music": AssetType.BGM, "sfx": AssetType.SFX, "image": AssetType.IMAGE}.get(media_type)
         if asset_type is None:
             raise ValueError("unsupported_media_type")
         metadata = {

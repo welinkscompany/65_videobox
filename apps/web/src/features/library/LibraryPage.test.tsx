@@ -291,6 +291,82 @@ describe("LibraryPage", () => {
     expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
   });
 
+  // 사진·일러스트를 여러 프로젝트가 나눠 쓰는 자리 (owner 승인 2026-08-20).
+  function imageAsset(overrides: Partial<LibraryAsset> = {}): LibraryAsset {
+    return asset({
+      library_asset_id: "user_image_1",
+      media_type: "image",
+      mime_type: "image/png",
+      managed_relative_path: "assets/image/aa/aa.png",
+      technical_metadata: {},
+      machine_metadata: {},
+      user_metadata: { filename: "바다.png", tags: [] },
+      preview_url: "/api/library/assets/user_image_1/preview",
+      thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+      // 그림에는 소리가 없다. 서버도 이 칸을 안 내려보낸다.
+      waveform_url: undefined,
+      ...overrides,
+    });
+  }
+
+  it("accepts pictures instead of turning them away as an unsupported file", async () => {
+    render(<LibraryPage />);
+    const png = new File(["p"], "바다.png", { type: "image/png" });
+    const jpg = new File(["j"], "노을.JPG", { type: "" });
+    const webp = new File(["w"], "로고.webp", { type: "image/webp" });
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("library-folder-input"), { target: { files: [png, jpg, webp] } });
+    });
+
+    expect(api.ingestLibraryAssets).toHaveBeenCalledWith([png, jpg, webp], "image", expect.any(String));
+    expect(screen.queryByText(/다시 시도/)).toBeNull();
+  });
+
+  it("gives pictures their own tab and shows them as thumbnails, not as sound rows", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [imageAsset()], total: 1 });
+    render(<LibraryPage />);
+    await screen.findAllByText("바다.png");
+
+    fireEvent.click(screen.getByRole("tab", { name: "그림" }));
+    const card = await screen.findByRole("article", { name: "바다.png" });
+    expect(within(card).getByRole("presentation")).toHaveAttribute("src", "/api/library/assets/user_image_1/thumbnail");
+    // 구간 정리는 영상에만 있는 길이다. 그림에 붙이면 열어 봐야 아무것도 없다.
+    expect(within(card).queryByRole("link", { name: /구간 정리하기/ })).toBeNull();
+    expect(screen.queryByTestId("library-audio-rows")).toBeNull();
+  });
+
+  it("shows a picture as a picture, and never as an empty sound player", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [imageAsset()], total: 1 });
+    vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({ library_asset_id: "user_image_1", locations: [] });
+    render(<LibraryPage />);
+    await screen.findAllByText("바다.png");
+    fireEvent.click(screen.getByRole("article", { name: "바다.png" }));
+
+    const player = await screen.findByTestId("library-preview-player");
+    expect(player.querySelector("audio")).toBeNull();
+    expect(player.querySelector("video")).toBeNull();
+    expect(player.querySelector("img")).toHaveAttribute("src", "/api/library/assets/user_image_1/preview");
+    // 종류 칸이 `효과음`으로 떨어지지 않는지 본다 -- 옛 갈래의 마지막 칸이었다.
+    const preview = screen.getByTestId("library-preview");
+    expect([...preview.querySelectorAll("dd")].map((node) => node.textContent)).toContain("그림");
+    expect(within(preview).queryByRole("link", { name: "구간 정리하기" })).toBeNull();
+  });
+
+  it("says plainly that pictures are only found by word, because nothing reads them yet", async () => {
+    // 그림에는 의미 색인이 없다. `뜻으로 찾음`이라고 하면 거짓말이다.
+    const search = vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [{ ...imageAsset(), score: 1, reason: "파일명 또는 분석 메타데이터 일치" }],
+      semantic: false,
+    });
+    render(<LibraryPage />);
+    fireEvent.click(screen.getByRole("tab", { name: "그림" }));
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "바다" } });
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith("바다", "image", undefined));
+    expect(await screen.findByLabelText("찾은 방식")).toHaveTextContent("단어로만 찾음");
+  });
+
   it("preselects the video asset a footage-organizer link named in the URL", async () => {
     window.history.replaceState({}, "", "/library?library_asset_id=user_asset_1");
     vi.mocked(api.listLibraryAssets).mockResolvedValue({

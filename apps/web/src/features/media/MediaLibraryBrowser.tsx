@@ -5,7 +5,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { orderByFavouriteThenRecent } from "../../lib/pickerOrder";
 
-type Filter = "all" | "broll" | "music" | "sfx";
+type Filter = "all" | "broll" | "music" | "sfx" | "image";
 export const MEDIA_LIBRARY_PAGE_SIZE = 24;
 type BrowserAsset = MediaLibraryAsset | LibraryAsset;
 
@@ -127,8 +127,8 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
   };
 
   const displayNames = new Map<string, string>();
-  for (const kind of ["broll", "music", "sfx"] as const) {
-    const label = kind === "broll" ? "영상" : kind === "music" ? "음악" : "효과음";
+  for (const kind of ["broll", "music", "sfx", "image"] as const) {
+    const label = kind === "broll" ? "영상" : kind === "music" ? "음악" : kind === "sfx" ? "효과음" : "그림";
     assets.filter((item) => item.media_type === kind).slice().sort((left, right) => String(left.asset_id ?? "").localeCompare(String(right.asset_id ?? ""))).forEach((item, index) => displayNames.set(item.library_asset_id, displayFilename(item, `${label} ${index + 1}`)));
   }
   const nameOf = (item: BrowserAsset) => displayNames.get(item.library_asset_id) ?? displayFilename(item, item.asset_id ?? item.library_asset_id);
@@ -175,8 +175,10 @@ export function MediaLibraryBrowser({ projectId, fixedFilter, onMaterialized }: 
       <div className="vb-media-library__grid">{pageItems.map((item) => {
         const loved = favourites.includes(item.library_asset_id); const name = displayNames.get(item.library_asset_id) ?? displayFilename(item, item.asset_id ?? item.library_asset_id); const personal = isPersonalAsset(item); const previewUrl = personal ? (item.preview_url ?? api.libraryAssetPreviewUrl(item.library_asset_id)) : api.mediaLibraryPreviewUrl(item.library_asset_id);
         return <article key={item.library_asset_id} aria-label={`${name} 항목`}>
-          <p><strong>{name}</strong>{" · "}{item.media_type === "broll" ? "영상" : item.media_type === "music" ? "음악" : "효과음"}{" · "}{`${Math.round(isPersonalAsset(item) ? (item.duration_seconds ?? (typeof item.technical_metadata?.duration_seconds === "number" ? item.technical_metadata.duration_seconds : 0)) : (item.duration_seconds ?? 0))}초`}{!loved && recents.includes(item.library_asset_id) ? " · 최근에 썼어요" : ""}</p>
-          {item.media_type === "broll" ? <video controls preload="metadata" aria-label={`${name} 미리보기`} src={previewUrl} /> : <audio controls preload="none" aria-label={`${name} 미리 듣기`} src={previewUrl} />}
+          {/* 그림은 길이가 없고 들을 것도 없다. 옛 갈래("영상이 아니면 소리")를
+              그대로 두면 `효과음 · 0초`에 빈 소리 재생기가 붙는다. */}
+          <p><strong>{name}</strong>{" · "}{item.media_type === "broll" ? "영상" : item.media_type === "music" ? "음악" : item.media_type === "image" ? "그림" : "효과음"}{item.media_type === "image" ? "" : `${" · "}${Math.round(isPersonalAsset(item) ? (item.duration_seconds ?? (typeof item.technical_metadata?.duration_seconds === "number" ? item.technical_metadata.duration_seconds : 0)) : (item.duration_seconds ?? 0))}초`}{!loved && recents.includes(item.library_asset_id) ? " · 최근에 썼어요" : ""}</p>
+          {item.media_type === "image" ? <img aria-label={`${name} 미리보기`} src={previewUrl} alt={name} /> : item.media_type === "broll" ? <video controls preload="metadata" aria-label={`${name} 미리보기`} src={previewUrl} /> : <audio controls preload="none" aria-label={`${name} 미리 듣기`} src={previewUrl} />}
           <Button type="button" variant="default" disabled={materializeBusy.includes(item.library_asset_id)} aria-label={`${name} 프로젝트에 추가`} onClick={() => void materialize(item)}>{materializeBusy.includes(item.library_asset_id) ? "추가 중" : "프로젝트에 추가"}</Button>
           <Button type="button" variant="outline" disabled={favouriteBusy.includes(item.library_asset_id)} aria-label={`${name} 즐겨찾기${loved ? " 해제" : ""}`} onClick={() => void toggle(item.library_asset_id, !loved)}>{loved ? "즐겨찾기 해제" : "즐겨찾기"}</Button>
         </article>;

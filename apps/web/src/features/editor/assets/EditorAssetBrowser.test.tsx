@@ -113,6 +113,30 @@ describe("EditorAssetBrowser", () => {
     expect(onApplyOverlay).toHaveBeenCalledWith(cards[0], "seg-1");
   });
 
+  it("offers a picture filter so the shared library's pictures can be narrowed to", () => {
+    const pictureCard: EditorAssetCard = {
+      id: "library-image:user_image_1",
+      kind: "image",
+      assetId: "",
+      libraryAssetId: "user_image_1",
+      label: "그림",
+      title: "바다.png",
+      durationLabel: "",
+      status: "준비됨",
+      audioPresence: "오디오 없음",
+      license: "내 그림",
+      canApply: true,
+      previewUrl: "/api/library/assets/user_image_1/preview",
+      previewKind: "image",
+      sourceMetadata: { tags: [], source: "내 라이브러리", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+    };
+    render(<EditorAssetBrowser cards={[...cards, pictureCard]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "그림 필터" }));
+    expect(screen.getByRole("button", { name: "바다.png 화면에 얹기" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "제품 사진 화면에 얹기" })).toBeNull();
+  });
+
   it("keeps the card actions unchanged when no overlay callback is wired", () => {
     render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
 

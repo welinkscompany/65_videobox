@@ -7,6 +7,7 @@ const filters: Array<{ key: LibraryFilter; label: string }> = [
   { key: "broll", label: "영상" },
   { key: "music", label: "음악" },
   { key: "sfx", label: "효과음" },
+  { key: "image", label: "그림" },
   { key: "favorites", label: "즐겨찾기" },
   { key: "trash", label: "휴지통" },
 ];

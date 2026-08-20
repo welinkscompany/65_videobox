@@ -762,7 +762,7 @@ export type MediaLibraryInstallState = {
   installed_asset_count: number;
 };
 
-export type LibraryMediaType = "broll" | "music" | "sfx";
+export type LibraryMediaType = "broll" | "music" | "sfx" | "image";
 export type LibraryAssetLifecycle = "processing" | "ready" | "needs_attention" | "trashed";
 export type LibraryAssetOrigin = "builtin" | "user";
 

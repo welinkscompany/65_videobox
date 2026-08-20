@@ -20,6 +20,9 @@ class LibraryMediaType(StrEnum):
     BROLL = "broll"
     MUSIC = "music"
     SFX = "sfx"
+    # 사진·일러스트. 프로젝트 안 이미지는 원래 됐고, 여러 프로젝트가 나눠 쓰는
+    # 자리가 없었다 (owner 승인 2026-08-20).
+    IMAGE = "image"
 
 
 class LibraryAssetOrigin(StrEnum):
@@ -98,7 +101,7 @@ class LibraryUserAsset:
         try:
             resolved_type = LibraryMediaType(media_type)
         except ValueError as error:
-            raise ValueError("media_type must be broll, music or sfx") from error
+            raise ValueError("media_type must be broll, music, sfx or image") from error
         try:
             resolved_origin = LibraryAssetOrigin(origin)
         except ValueError as error:

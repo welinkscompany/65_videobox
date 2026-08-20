@@ -254,6 +254,56 @@ describe("thumbnails on b-roll cards", () => {
     expect(cards.map((card) => card.assetId)).toEqual(["real-1"]);
   });
 
+  it("brings the shared library's pictures in as pickable cards", () => {
+    // 라이브러리 그림은 아직 프로젝트 자산이 아니다. 카드가 라이브러리 쪽
+    // 식별자만 들고 오고, 얹을 때 프로젝트로 복사된다.
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [],
+      libraryAssets: [],
+      libraryImageAssets: [{
+        library_asset_id: "user_image_1",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "ready",
+        mime_type: "image/png",
+        user_metadata: { filename: "바다.png" },
+        preview_url: "/api/library/assets/user_image_1/preview",
+        thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+      }],
+    });
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0].kind).toBe("image");
+    // 얹기 단추는 이 칸을 보고 나타난다.
+    expect(cards[0].previewKind).toBe("image");
+    expect(cards[0].libraryAssetId).toBe("user_image_1");
+    expect(cards[0].title).toBe("바다.png");
+    expect(cards[0].canApply).toBe(true);
+    expect(cards[0].thumbnailUrl).toBe("/api/library/assets/user_image_1/thumbnail");
+    // 그림에는 길이가 없다. `길이 정보 없음`으로 물어볼 것이 아니다.
+    expect(cards[0].durationLabel).toBe("");
+    expect(filterEditorAssets(cards, { type: "image", query: "" })).toHaveLength(1);
+    expect(filterEditorAssets(cards, { type: "broll", query: "" })).toHaveLength(0);
+  });
+
+  it("leaves a trashed library picture out of the pickable materials", () => {
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [],
+      libraryAssets: [],
+      libraryImageAssets: [{
+        library_asset_id: "user_image_gone",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "trashed",
+        user_metadata: { filename: "지운그림.png" },
+      }],
+    });
+
+    expect(cards).toEqual([]);
+  });
+
   it("numbers the remaining materials without counting the hidden placeholders", () => {
     // 자리표시를 빼기만 하고 번호를 원래 순번으로 두면 "B-roll 2"로 시작해
     // owner가 앞의 하나를 잃어버렸다고 읽는다.
