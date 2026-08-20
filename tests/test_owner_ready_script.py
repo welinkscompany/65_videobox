@@ -489,7 +489,7 @@ def _connection_classification_map(script: Path, names: tuple[str, ...]) -> dict
         timeout=10,
         check=False,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     return dict(line.split("=", 1) for line in result.stdout.splitlines())
 
 
@@ -501,7 +501,7 @@ def test_default_check_is_read_only_sanitized_and_classifies_protected_residue(t
         result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["schema_version"] == "videobox-owner-ready-v1"
     assert payload["mode"] == "Check"
     assert payload["overall_status"] == "pass"
@@ -844,7 +844,7 @@ def test_start_runs_only_the_two_base_services_and_waits_for_health(tmp_path: Pa
         result = _run(fixture, mode="Start", video_uri=video_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["mode"] == "Start"
     assert payload["overall_status"] == "pass"
     started = next(row for row in payload["checks"] if row["id"] == "start")
@@ -955,7 +955,7 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["mode"] == "Smoke"
     assert payload["overall_status"] == "pass"
     assert payload["readiness_status"] == "local_ready"
@@ -1083,7 +1083,7 @@ def test_receipt_temp_writer_creates_exclusive_unique_files(tmp_path: Path) -> N
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     payload = json.loads(result.stdout)
     assert payload["first"] != payload["second"]
     assert payload["first_text"] == "first"
@@ -1127,7 +1127,7 @@ def test_receipt_temp_writer_removes_partial_file_after_write_failure(tmp_path: 
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert result.stdout.strip() == "0"
 
 
@@ -1138,7 +1138,7 @@ def test_smoke_dashboard_accepts_only_an_unfollowed_same_loopback_login_redirect
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["dashboard_status"] == "ready"
     assert payload["readiness_status"] == "local_ready"
     assert requests == ["/"]
@@ -1421,7 +1421,7 @@ def test_smoke_credential_classifier_accepts_safe_literal_and_comment_forms(
 
     payload = _payload(result)
     serialized = result.stdout + result.stderr + _smoke_receipt_text(fixture)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
     assert replacement not in serialized
@@ -1456,6 +1456,31 @@ def test_smoke_credential_classifier_rejects_non_utf8_bom_encodings(
     assert str(fixture["env_file"]) not in serialized
 
 
+
+def _why_it_failed(result: subprocess.CompletedProcess[str]) -> str:
+    """실패했을 때 **무엇이** 실패했는지 말한다.
+
+    2026-08-20 전체 실행에서 이 파일의 한 건이 깨졌는데, 단정문이 `stderr`만
+    보여 줬고 그 값은 비어 있었다. 정작 단서(어느 검사가 fail인지)는 stdout의
+    JSON에 있었고, 그걸 보려고 출력 파일을 따로 뒤져야 했다. 재현이 안 되는
+    실패일수록 **한 번 볼 때 다 보여야** 한다.
+    """
+    detail = [f"exit={result.returncode}"]
+    if result.stderr.strip():
+        detail.append(f"stderr={result.stderr.strip()[:500]}")
+    try:
+        payload = json.loads(result.stdout.splitlines()[-1])
+    except (ValueError, IndexError):
+        detail.append(f"stdout={result.stdout.strip()[-500:]}")
+        return " | ".join(detail)
+    failed = [
+        f"{check.get('id')}({check.get('status')}): {check.get('summary')}"
+        for check in payload.get("checks", [])
+        if check.get("status") != "pass"
+    ]
+    detail.append(f"failed checks={failed}" if failed else f"payload={payload}")
+    return " | ".join(detail)
+
 def test_smoke_credential_classifier_accepts_strict_utf8_bom(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
     env_text = _valid_env_text(fixture["data_root"])
@@ -1464,7 +1489,7 @@ def test_smoke_credential_classifier_accepts_strict_utf8_bom(tmp_path: Path) -> 
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
 
@@ -1477,7 +1502,7 @@ def test_smoke_credential_classifier_ignores_optional_mem0_key(tmp_path: Path) -
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
     assert "MEM0_API_KEY" not in result.stdout
@@ -1536,7 +1561,7 @@ def test_smoke_credential_values_and_metadata_never_leave_process(tmp_path: Path
     payload = _payload(result)
     receipt_text = _smoke_receipt_text(fixture)
     serialized = result.stdout + result.stderr + receipt_text
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
     assert str(fixture["env_file"]) not in serialized
