@@ -108,3 +108,60 @@
 
 .vb-ui { font-family: var(--vb-font); color: var(--vb-text); background: var(--vb-canvas); }
 .vb-button { font: inherit; }
+
+/* ---------------------------------------------------------------------------
+   편집 화면만 어둡게 — owner 승인 2026-08-20
+   docs/decisions/2026-08-20-editor-dark-surface.ko.md
+
+   `:root`가 아니라 편집 작업판 뿌리에만 얹는다. 대시보드·검토·재료·설정은 위의
+   흰 팔레트 그대로다. 미리보기 무대는 원래도 어두웠고(`#18181B`), 이제 그 위에
+   붙은 패널들이 무대와 이어진다.
+
+   **왜 강조색이 두 개인가.** 실측: 흰 배경용 `#C2410C`는 어두운 패널에서 3.28로
+   글자 기준(4.5)에 못 미친다. 그대로 옮기면 오렌지가 안 읽힌다. 그래서 글자·테두리
+   용은 같은 색조를 밝힌 `#E8613A`(5.02)를 쓰고, **채운 단추는 `#C2410C` 그대로**
+   둔다 — 거기 얹히는 흰 글자가 5.18이고, 밝은 색조로 바꾸면 오히려 3.39로 떨어진다.
+   --------------------------------------------------------------------------- */
+.vb-product-shell[data-shell-section="editing"],
+.vb-editor-workbench {
+  --vb-canvas: #141416;
+  --vb-panel: #1C1C1F;
+  --vb-border: #2E2E33;
+  --vb-border-strong: #3C3C43;
+  --vb-text: #F2F2F4;
+  --vb-muted: #A9A9B2;
+  --vb-faint: #94949E;
+  --vb-accent: #E8613A;
+  --vb-accent-bg: #2A1710;
+  --vb-accent-border: #7A3410;
+  --vb-preview: #0F0F11;
+  --vb-success: #4ADE80;
+  --vb-success-bg: #10291B;
+
+  /* shadcn 쪽도 같이 뒤집는다. 한쪽만 바꾸면 카드·입력칸이 흰 채로 남는다. */
+  --background: #141416;
+  --foreground: #F2F2F4;
+  --card: #1C1C1F;
+  --card-foreground: #F2F2F4;
+  --popover: #1C1C1F;
+  --popover-foreground: #F2F2F4;
+  --primary: #C2410C;
+  --primary-foreground: #FFFFFF;
+  --secondary: #26262A;
+  --secondary-foreground: #F2F2F4;
+  --muted: #26262A;
+  --muted-foreground: #A9A9B2;
+  --accent: #2A1710;
+  --accent-foreground: #E8613A;
+  --border: #2E2E33;
+  --input: #2E2E33;
+  --ring: #E8613A;
+
+  /* 브라우저에게 이 표면이 어둡다고 알린다. 이걸 안 하면 단추·입력칸 같은
+     기본 컨트롤이 시스템 색(`buttontext`)을 그대로 써서 어두운 바탕에 검은
+     글자가 된다 -- 실측: `작업 상태` 단추가 대비 1.14로 사실상 안 보였다.
+     스크롤막대와 선택 영역도 같이 어두워진다. */
+  color-scheme: dark;
+  color: var(--vb-text);
+  background: var(--vb-canvas);
+}

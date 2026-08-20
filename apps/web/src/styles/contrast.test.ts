@@ -81,3 +81,82 @@ describe("approved white-orange palette contrast", () => {
     expect(contrastRatio(APPROVED.success, APPROVED.successBg)).toBeGreaterThanOrEqual(4.5)
   })
 })
+
+// docs/decisions/2026-08-20-editor-dark-surface.ko.md
+//
+// **편집 화면만** 어둡다. 나머지 화면은 위의 흰 팔레트 그대로다. 그래서 어두운
+// 값은 `:root`가 아니라 편집 작업판 뿌리에만 얹는다 -- `readToken`이 파일에서
+// 처음 만나는 값을 읽으므로 위 검사들은 그대로 흰 값을 본다.
+const EDITOR_SURFACE = ".vb-editor-workbench"
+
+function readScopedToken(selector: string, name: string): string {
+  // 정규식을 쓰지 않는다 -- 이 파일을 셸로 만들다 역슬래시가 먹혀서 패턴이
+  // 조용히 다른 것이 된 적이 있다. 자르는 일에 정규식이 꼭 필요하지도 않다.
+  const start = uiSystemCss.indexOf(selector + " {")
+  if (start < 0) throw new Error(`${selector} 블록이 ui-system.css에 없다`)
+  const block = uiSystemCss.slice(start, uiSystemCss.indexOf("}", start))
+  const at = block.indexOf(name + ":")
+  if (at < 0) throw new Error(`${selector} 안에 ${name}이 없다`)
+  const line = block.slice(at, block.indexOf(";", at))
+  return line.slice(line.indexOf(":") + 1).replace(";", "").trim()
+}
+
+const DARK = {
+  canvas: "#141416",
+  panel: "#1C1C1F",
+  text: "#F2F2F4",
+  muted: "#A9A9B2",
+  faint: "#94949E",
+  accent: "#E8613A",
+  accentBg: "#2A1710",
+  success: "#4ADE80",
+  successBg: "#10291B",
+}
+
+describe("어두운 편집 표면", () => {
+  it("어두운 값은 편집 작업판 안에서만 정의된다", () => {
+    for (const [token, expected] of [
+      ["--vb-canvas", DARK.canvas], ["--vb-panel", DARK.panel], ["--vb-text", DARK.text],
+      ["--vb-muted", DARK.muted], ["--vb-faint", DARK.faint], ["--vb-accent", DARK.accent],
+    ] as const) {
+      expect(readScopedToken(EDITOR_SURFACE, token)).toBe(expected)
+      // 밖은 그대로여야 한다. 여기가 깨지면 편집기만 어둡게 한 게 아니다.
+      expect(readToken(token)).not.toBe(expected)
+    }
+  })
+
+  it("어두운 값은 편집 구간에만 걸린다", () => {
+    // 편집판만 어둡게 하면 흰 껍데기가 검은 편집판을 액자처럼 감싼다. 승인 문구는
+    // `편집 화면만 어둡게`였고, 편집 화면에는 위 띠와 왼쪽 줄도 들어간다.
+    expect(uiSystemCss).toContain('.vb-product-shell[data-shell-section="editing"]')
+    // 구간을 안 가리고 껍데기 전체를 어둡게 하면 대시보드까지 따라 어두워진다.
+    expect(uiSystemCss).not.toContain(".vb-product-shell {")
+  })
+
+  it("본문·보조·희미한 글자가 어두운 패널에서 4.5:1을 넘는다", () => {
+    // 어둡게 만들면서 읽기 어려워지면 고친 게 아니다 -- 승인 기록이 못박은 조건.
+    expect(contrastRatio(DARK.text, DARK.panel)).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio(DARK.muted, DARK.panel)).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio(DARK.faint, DARK.panel)).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio(DARK.text, DARK.canvas)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it("강조색은 어두운 바탕에서 글자로 읽힌다", () => {
+    // 실측: 흰 배경용 `#C2410C`는 어두운 패널에서 3.28로 **기준 미달**이다.
+    // 같은 색을 그대로 옮기면 오렌지가 글자로 안 읽힌다. 색조는 지키고 밝기만 올린다.
+    expect(contrastRatio(APPROVED.accent, DARK.panel)).toBeLessThan(4.5)
+    expect(contrastRatio(DARK.accent, DARK.panel)).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio(DARK.accent, DARK.accentBg)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it("채운 단추는 흰 글자를 얹은 원래 오렌지 그대로다", () => {
+    // 단추 배경으로는 `#C2410C`가 흰 글자에서 5.18로 통과한다. 밝은 색조로
+    // 바꾸면 오히려 흰 글자가 3.39로 떨어진다 -- 여기는 건드리지 않는다.
+    expect(readScopedToken(EDITOR_SURFACE, "--primary")).toBe(APPROVED.accent)
+    expect(contrastRatio("#FFFFFF", APPROVED.accent)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it("성공 상태도 어두운 바탕에서 읽힌다", () => {
+    expect(contrastRatio(DARK.success, DARK.successBg)).toBeGreaterThanOrEqual(4.5)
+  })
+})

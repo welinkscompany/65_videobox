@@ -22,6 +22,12 @@ else {
   # same hexes from the JS side; both must move together, and only with a new
   # approval record (CLAUDE.md §6).
   foreach ($token in @('--vb-canvas: #FAFAFA', '--vb-accent: #C2410C', '--vb-preview: #18181B', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
+  # 편집 화면만 어둡다 (docs/decisions/2026-08-20-editor-dark-surface.ko.md).
+  # 어두운 값이 여기 없으면 세 곳 중 두 곳에만 남아 다음에 조용히 갈라진다.
+  # 실측으로 고른 값이다: 흰 배경용 #C2410C는 어두운 패널에서 3.28로 글자
+  # 기준에 못 미쳐서, 글자용은 #E8613A(5.02)를 쓰고 채운 단추만 #C2410C로 둔다.
+  foreach ($token in @('--vb-canvas: #141416', '--vb-panel: #1C1C1F', '--vb-accent: #E8613A')) { if (-not $css.Contains($token)) { $errors.Add("missing dark editor token: $token") } }
+  if (-not $css.Contains('.vb-editor-workbench {')) { $errors.Add('dark tokens must stay scoped to the editor surface') }
   if ($css -match '@import\s+["'']tailwindcss["'']') { $errors.Add('Tailwind preflight import is forbidden') }
 }
 $indexHtml = Join-Path $web 'index.html'

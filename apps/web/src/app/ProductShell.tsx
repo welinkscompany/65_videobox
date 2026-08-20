@@ -114,6 +114,9 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   return <SidebarProvider open={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
     <div
       className="vb-product-shell"
+      // 편집 구간일 때만 화면 전체가 어둡다(승인 2026-08-20). 껍데기가
+      // 흰 채로 남으면 검은 편집판을 흰 액자가 감싸는 모양이 된다.
+      data-shell-section={section}
       data-vb-desktop-shell
       data-compact={String(display.compact)}
       data-reduced-motion={String(display.reducedMotion)}
