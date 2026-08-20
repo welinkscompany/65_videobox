@@ -105,7 +105,8 @@ SHAPE_OVERLAY_SHAPES = SHAPE_OVERLAY_DRAWN_SHAPES | SHAPE_OVERLAY_ICON_SHAPES
 # 아이콘 글꼴 글자만 모아 둔다. 그릴 때 "이 글자는 아이콘 글꼴 것인가"를
 # 도형 이름이 아니라 글자로 판단할 수 있어야 `resolve_icon_font`의 서명이
 # 그대로 유지된다(부르는 곳이 셋이다).
-_ICON_FONT_GLYPH_SET = frozenset(SHAPE_OVERLAY_ICON_FONT_GLYPHS.values())
+ICON_FONT_GLYPH_SET = frozenset(SHAPE_OVERLAY_ICON_FONT_GLYPHS.values())
+_ICON_FONT_GLYPH_SET = ICON_FONT_GLYPH_SET
 
 SHAPE_OVERLAY_VERTICALS = frozenset({"top", "middle", "bottom"})
 SHAPE_OVERLAY_HORIZONTALS = frozenset({"left", "center", "right"})

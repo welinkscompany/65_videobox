@@ -17,6 +17,10 @@ from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_warning_notes
 from videobox_core_engine.overlay_shapes import (
+    BUNDLED_ICON_FONT_DIRECTORY,
+    CONTAINER_ICON_FONT_DIRECTORY,
+    ICON_FONT_FILE_NAME,
+    ICON_FONT_GLYPH_SET,
     SHAPE_OVERLAY_DRAWN_SHAPES,
     canonical_shape_overlay_motion,
     overlay_icon_glyph,
@@ -339,6 +343,15 @@ def _icon_overlay_filter(
     if resolved_font is None:
         # 없는 글자를 그리면 ffmpeg는 실패하지 않고 빈 상자를 그린다. 그 완성본은
         # 성공으로 끝나서 owner가 알아채지 못하므로 여기서 멈춘다.
+        # 안내는 **실제로 듣는 조치**를 말해야 한다. 아이콘 글꼴 글자는 위 함수가
+        # `preferred`를 일부러 무시하므로 `VIDEOBOX_OVERLAY_FONT`를 바꿔도 달라지지
+        # 않는다 -- 그걸 시키면 owner가 안 되는 일을 반복하게 된다.
+        if glyph in ICON_FONT_GLYPH_SET:
+            raise FinalRenderError(
+                "The bundled icon font is missing, so this mark would render as an empty box. "
+                f"Restore '{ICON_FONT_FILE_NAME}' under '{BUNDLED_ICON_FONT_DIRECTORY}' "
+                f"(or '{CONTAINER_ICON_FONT_DIRECTORY}') and retry."
+            )
         raise FinalRenderError(
             "Overlay font cannot draw this icon; it would render as an empty box. "
             "Install a font that includes it or set VIDEOBOX_OVERLAY_FONT."
