@@ -1840,6 +1840,10 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
     currentRevision,
     // 뜻으로 찾았는지 단어로만 찾았는지. 없으면 화면이 아무 말도 하지 않는다.
     matchMode: typeof proposal.diff?.match_mode === "string" ? proposal.diff.match_mode : undefined,
+    // 서버가 여러 후보를 한 번에 받는 추천에서만 여러 개를 고르게 한다. 유진이
+    // 직접 실행하는 추천은 `reject_yujin_direct_apply`가 422로 막으므로, 여기서
+    // 열어 주면 고를 수는 있는데 적용이 거절되는 화면이 된다.
+    allowsMultipleSelection: !isYujinActionableProposal(proposal),
     candidates: proposal.candidates.map((candidate) => {
       const metadata = candidate.canonical_metadata ?? {};
       const targetSegmentId = String(candidate.target_segment_id ?? metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? "");

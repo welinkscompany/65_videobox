@@ -29,6 +29,10 @@ export type RightDockProposal = Readonly<{
   /** 뜻으로 찾았는지 단어로만 찾았는지. 임베딩 조회가 실패하면 조용히 단어
    *  매칭으로 떨어져서, 추천이 갑자기 나빠져도 owner가 원인을 알 수 없었다. */
   matchMode?: string;
+  /** 여러 후보를 한 번에 적용할 수 있는 추천인가. **서버가 정한다** --
+   *  유진이 직접 실행하는 추천은 한 번에 하나만 받으므로(`reject_yujin_direct_apply`)
+   *  그런 추천에서 여러 개를 고르게 하면 고를 수는 있는데 적용이 거절된다. */
+  allowsMultipleSelection?: boolean;
   candidates: readonly RightDockCandidate[];
 }>;
 

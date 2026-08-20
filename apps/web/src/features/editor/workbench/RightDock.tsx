@@ -186,16 +186,43 @@ export function RightDock({
   );
   const activeCandidateIds = selectedCandidateIds
     ?? (proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
+  // 빈 구간이 열두 개면 고르기·적용을 열두 번 반복해야 했다. `batch-apply`는
+  // 처음부터 여러 개를 받아 **한 번의 편집**으로 쓰므로(되돌리기도 한 번),
+  // 서버가 함께 받는 추천에서는 카드도 여러 개 고를 수 있어야 한다.
+  const allowsMultipleSelection = proposal?.allowsMultipleSelection === true;
+  const candidateIsChoosable = (candidate: RightDockCandidate) => (
+    candidate.actionable
+    && candidate.availability === "actionable"
+    && candidate.reviewStatus === "approved"
+  );
   const selectedCandidatesAreActionable = Boolean(
     proposalIsCurrent
-    && activeCandidateIds.length === 1
-    && proposal?.candidates.some((candidate) => (
-      candidate.candidateId === activeCandidateIds[0]
-      && candidate.actionable
-      && candidate.availability === "actionable"
-      && candidate.reviewStatus === "approved"
-    )),
+    && activeCandidateIds.length >= 1
+    && (allowsMultipleSelection || activeCandidateIds.length === 1)
+    && activeCandidateIds.every((candidateId) => proposal?.candidates.some((candidate) => (
+      candidate.candidateId === candidateId && candidateIsChoosable(candidate)
+    ))),
   );
+  // 같은 장면에 둘을 고르면 서버는 둘 다 그 장면에 쓰고 **나중 것이 이긴다** --
+  // 조용히 하나가 사라진다. 장면당 하나로 묶어 그 일이 일어나지 않게 한다.
+  const sceneKey = (candidate: RightDockCandidate) => candidate.targetSegmentId || candidate.candidateId;
+  const chooseCandidate = (candidate: RightDockCandidate, chosen: boolean) => {
+    if (!allowsMultipleSelection) {
+      onSelectedCandidateIdsChange?.([candidate.candidateId]);
+      return;
+    }
+    const dropped = new Set(
+      (proposal?.candidates ?? [])
+        .filter((other) => sceneKey(other) === sceneKey(candidate))
+        .map((other) => other.candidateId),
+    );
+    const kept = activeCandidateIds.filter((candidateId) => !dropped.has(candidateId));
+    const next = chosen ? [...kept, candidate.candidateId] : kept;
+    // 카드 순서를 그대로 지킨다. 고른 순서로 보내면 적용 순서가 화면과 달라져
+    // 무엇이 어디에 들어갔는지 되짚기 어렵다.
+    const order = (proposal?.candidates ?? []).map((item) => item.candidateId);
+    onSelectedCandidateIdsChange?.([...next].sort((left, right) => order.indexOf(left) - order.indexOf(right)));
+  };
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
   const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
   const showConversationStarters = messages.length === 0
@@ -331,7 +358,18 @@ export function RightDock({
           {onRefreshProposal ? <Button type="button" disabled={state === "analysis_running" || state === "applying"} onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}
         </> : null}
       </div> : null}
-      {recommendationCandidates.length ? <div role="radiogroup" aria-label="추천 후보">
+      {recommendationCandidates.length && allowsMultipleSelection ? <div className="vb-editor-right-dock__bulk-pick">
+        <Button type="button" onClick={() => {
+          const bySceneFirst = new Map<string, string>();
+          for (const candidate of recommendationCandidates) {
+            if (!candidateIsChoosable(candidate)) continue;
+            if (!bySceneFirst.has(sceneKey(candidate))) bySceneFirst.set(sceneKey(candidate), candidate.candidateId);
+          }
+          onSelectedCandidateIdsChange?.([...bySceneFirst.values()]);
+        }}>장면마다 하나씩 모두 고르기</Button>
+        <Button type="button" variant="outline" disabled={!activeCandidateIds.length} onClick={() => onSelectedCandidateIdsChange?.([])}>고른 추천 모두 끄기</Button>
+      </div> : null}
+      {recommendationCandidates.length ? <div role={allowsMultipleSelection ? "group" : "radiogroup"} aria-label="추천 후보">
         {recommendationCandidates.map((candidate) => {
           const candidateDeclaresActionable = candidate.actionable === undefined
             ? proposalIsReady
@@ -346,13 +384,13 @@ export function RightDock({
           );
           return <article key={candidate.candidateId}>
             <label><Input
-              type="radio"
-              name="vb-eugene-candidate"
+              type={allowsMultipleSelection ? "checkbox" : "radio"}
+              name={allowsMultipleSelection ? undefined : "vb-eugene-candidate"}
               aria-label={`${candidateLabel(candidate)} 선택`}
               checked={activeCandidateIds.includes(candidate.candidateId)}
               disabled={!candidateIsActionable}
-              onChange={() => {
-                if (candidateIsActionable) onSelectedCandidateIdsChange?.([candidate.candidateId]);
+              onChange={(event) => {
+                if (candidateIsActionable) chooseCandidate(candidate, event.target.checked);
               }}
             />{candidate.targetSceneLabel?.trim()
               ? <><strong className="vb-editor-right-dock__candidate-scene">{candidate.targetSceneLabel.trim()}</strong>{" "}<span>{candidateTitle(candidate)}</span></>
@@ -367,7 +405,7 @@ export function RightDock({
           </article>;
         })}
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
-      {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
+      {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>{activeCandidateIds.length > 1 ? `고른 추천 ${activeCandidateIds.length}개 적용` : "선택한 추천 적용"}</Button> : null}
     </section>
 
     {memory ? <YujinMemoryPanel memory={memory} /> : null}

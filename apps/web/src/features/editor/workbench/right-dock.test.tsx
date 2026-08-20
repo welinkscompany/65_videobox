@@ -28,6 +28,32 @@ const proposal: RightDockProposal = {
   ],
 } as const;
 
+/** 빈 장면 둘, 첫 장면에는 후보가 둘. 서버가 한 번에 받는 추천이다. */
+const multiSceneProposal: RightDockProposal = {
+  proposalId: "proposal-gaps",
+  status: "ready",
+  baseSessionRevision: 3,
+  currentRevision: 3,
+  allowsMultipleSelection: true,
+  candidates: [
+    {
+      candidateId: "gap-1", visibleReferenceCode: "P02-B-01", displayName: "하늘 영상", mediaType: "broll", previewUrl: null,
+      kind: "broll", sourceMediaKind: "broll", targetSegmentId: "segment-1", targetSceneLabel: "1번째 장면",
+      previewSummary: "요약", supportedControls: {}, availability: "actionable", reviewStatus: "approved", actionable: true,
+    },
+    {
+      candidateId: "gap-1-alt", visibleReferenceCode: "P02-B-02", displayName: "구름 영상", mediaType: "broll", previewUrl: null,
+      kind: "broll", sourceMediaKind: "broll", targetSegmentId: "segment-1", targetSceneLabel: "1번째 장면",
+      previewSummary: "요약", supportedControls: {}, availability: "actionable", reviewStatus: "approved", actionable: true,
+    },
+    {
+      candidateId: "gap-2", visibleReferenceCode: "P02-B-03", displayName: "바다 영상", mediaType: "broll", previewUrl: null,
+      kind: "broll", sourceMediaKind: "broll", targetSegmentId: "segment-2", targetSceneLabel: "2번째 장면",
+      previewSummary: "요약", supportedControls: {}, availability: "actionable", reviewStatus: "approved", actionable: true,
+    },
+  ],
+} as const;
+
 function PersistentDock() {
   const [draft, setDraft] = useState("");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<readonly string[]>(["candidate-1"]);
@@ -340,6 +366,94 @@ describe("RightDock", () => {
     render(<RightDock draft="B-roll 추천해 줘" onDraftChange={() => undefined} onUseDraftAsScript={onUseDraftAsScript} />);
 
     expect(screen.queryByRole("button", { name: "이 글을 대본으로 쓰기" })).toBeNull();
+  });
+
+  it("lets several scenes be filled in one go when the server can apply them together", () => {
+    // 2026-08-20 owner 실측: 빈 구간 열세 개를 채우려면 고르기·적용을 열세 번
+    // 반복해야 했다. 후보 고르기가 라디오라 **한 번에 하나**만 됐기 때문이다.
+    // `batch-apply`는 처음부터 여러 개를 한 번에 받아 **한 번의 편집**으로 쓴다.
+    const onSelectedCandidateIdsChange = vi.fn();
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      proposal={multiSceneProposal}
+      selectedCandidateIds={["gap-1"]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+    />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "2번째 장면 — 바다 영상 선택" }));
+
+    expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith(["gap-1", "gap-2"]);
+    expect(screen.queryByRole("radio")).toBeNull();
+  });
+
+  it("keeps one candidate per scene, because two candidates for one scene would overwrite each other", () => {
+    // 한 장면에 둘을 고르면 서버는 둘 다 그 장면에 쓰고 **나중 것이 이긴다** --
+    // 조용히 하나가 사라진다. 같은 장면의 다른 후보를 고르면 앞의 것을 대신한다.
+    const onSelectedCandidateIdsChange = vi.fn();
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      proposal={multiSceneProposal}
+      selectedCandidateIds={["gap-1", "gap-2"]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+    />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "1번째 장면 — 구름 영상 선택" }));
+
+    expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith(["gap-1-alt", "gap-2"]);
+  });
+
+  it("selects one candidate for every scene at once, and clears them again", () => {
+    const onSelectedCandidateIdsChange = vi.fn();
+    const rendered = render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      proposal={multiSceneProposal}
+      selectedCandidateIds={[]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "장면마다 하나씩 모두 고르기" }));
+    expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith(["gap-1", "gap-2"]);
+
+    rendered.rerender(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      proposal={multiSceneProposal}
+      selectedCandidateIds={["gap-1", "gap-2"]}
+      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "고른 추천 모두 끄기" }));
+    expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith([]);
+  });
+
+  it("applies every selected scene in one press, and says how many are going", () => {
+    const onApplyProposal = vi.fn();
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      proposal={multiSceneProposal}
+      selectedCandidateIds={["gap-1", "gap-2"]}
+      onSelectedCandidateIdsChange={vi.fn()}
+      onApplyProposal={onApplyProposal}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "고른 추천 2개 적용" }));
+
+    expect(onApplyProposal).toHaveBeenCalledWith("proposal-gaps", ["gap-1", "gap-2"]);
+    expect(onApplyProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a single-pick proposal on radios, because the server refuses to apply those together", () => {
+    // 유진이 직접 실행하는 추천은 서버가 한 번에 하나만 받는다
+    // (`reject_yujin_direct_apply`). 그런 추천까지 여러 개 고르게 하면
+    // 고를 수는 있는데 적용이 거절되는 화면이 된다.
+    render(<RightDock draft="" onDraftChange={() => undefined} proposal={proposal} />);
+
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "장면마다 하나씩 모두 고르기" })).toBeNull();
   });
 
   it("is a controlled adapter for candidate selection and restored conversation scroll", () => {

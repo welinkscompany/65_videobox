@@ -3388,8 +3388,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
 
-    expect(await screen.findByRole("radio", { name: "1번째 장면 · 안녕하세요, 제주입니다 — 20260612_091959 선택" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "2번째 장면 · 오름에 올라 바다를 봅니다 — 20260612_091959 선택" })).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: "1번째 장면 · 안녕하세요, 제주입니다 — 20260612_091959 선택" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "2번째 장면 · 오름에 올라 바다를 봅니다 — 20260612_091959 선택" })).toBeInTheDocument();
   });
 
   it("says only the scene number when that scene has no caption yet", async () => {
@@ -3407,7 +3407,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
 
-    expect(await screen.findByRole("radio", { name: "2번째 장면 · 1초부터 — P01-B-01 선택" })).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: "2번째 장면 · 1초부터 — P01-B-01 선택" })).toBeInTheDocument();
   });
 
   it("never prints the ranker's internal word on a card, and says the same thing in Korean", async () => {
@@ -3425,7 +3425,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
 
-    const cards = await screen.findByRole("radiogroup", { name: "추천 후보" });
+    const cards = await screen.findByRole("group", { name: "추천 후보" });
     expect(cards.textContent).not.toContain("metadata");
     expect(within(cards).getByText("자막과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.")).toBeVisible();
   });
@@ -3457,8 +3457,56 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
 
-    const cards = await screen.findByRole("radiogroup", { name: "추천 후보" });
+    const cards = await screen.findByRole("group", { name: "추천 후보" });
     expect(cards.textContent).toContain("P01-B-01 · 영상");
+  });
+
+  it("fills every empty scene in one press, as one edit the creator can undo once", async () => {
+    // 2026-08-20 owner 실측: 빈 구간 열두 개면 고르기·적용을 열두 번 반복해야 했다.
+    // `batch-apply`는 처음부터 여러 후보를 받아 **한 번의 CAS 쓰기**로 적용한다 --
+    // 되돌리기 기록도 하나다. 없던 것은 여러 개를 고를 화면뿐이었다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(twoNarrationManifest(1) as never);
+    const proposal = directorProposal();
+    proposal.target_segment_ids = ["segment-1", "segment-2"];
+    proposal.candidates[0] = { ...proposal.candidates[0], target_segment_id: "segment-1" } as never;
+    proposal.candidates.push({
+      ...proposal.candidates[0],
+      candidate_id: "candidate-2",
+      visible_reference_code: "P01-B-02",
+      target_segment_id: "segment-2",
+    } as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+    const preflight = vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(await screen.findByRole("button", { name: "장면마다 하나씩 모두 고르기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "고른 추천 2개 적용" }));
+
+    await waitFor(() => expect(preflight).toHaveBeenCalledTimes(1));
+    expect(batchApply).toHaveBeenCalledTimes(1);
+    expect(batchApply).toHaveBeenCalledWith("project-a", "proposal-1", { candidate_ids: ["candidate-1", "candidate-2"], expected_revision: 1 });
+  });
+
+  it("keeps a Yujin-run recommendation on one pick, because the server refuses a batch of those", async () => {
+    // `reject_yujin_direct_apply`가 422로 막는다. 고를 수는 있는데 적용이 거절되는
+    // 화면을 만들지 않는다.
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: yujinMediaProposal(), references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    expect(await screen.findByRole("radio", { name: endingWith("P01-BROLL-01 선택") })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "장면마다 하나씩 모두 고르기" })).toBeNull();
   });
 
   it("preflights then batch-applies only the current route proposal after navigation", async () => {
@@ -4215,7 +4263,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "작성 중" } });
-    fireEvent.click(screen.getByRole("radio", { name: endingWith("P01-B-02 선택") }));
+    fireEvent.click(screen.getByRole("checkbox", { name: endingWith("P01-B-02 선택") }));
     const history = screen.getByRole("log", { name: "유진 대화" });
     Object.defineProperties(history, {
       scrollHeight: { configurable: true, value: 200 },
@@ -4230,7 +4278,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("작성 중");
     expect(screen.getByText("요청")).toBeVisible();
     expect(screen.getByText("답변")).toBeVisible();
-    expect(screen.getByRole("radio", { name: endingWith("P01-B-02 선택") })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: endingWith("P01-B-02 선택") })).toBeChecked();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(player);
     expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
