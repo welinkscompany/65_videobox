@@ -1193,7 +1193,21 @@ def create_app(
         )
     app.include_router(build_editor_library_router(user_library_store))
     app.include_router(build_caption_fonts_router(user_library_store))
-    app.include_router(build_media_library_router(store, resolved_media_library_store))
+    def _schedule_scene_analysis(project_id: str, asset_id: str) -> None:
+        """자산이 프로젝트에 들어온 순간 장면 분석을 건다. 이 함수가 없으면
+        라이브러리에서 넣은 촬영본은 아무도 분석을 걸지 않아 유진의 추천이
+        영원히 409로 막힌다 -- 뒤에서 도는 재분석 작업자는 **한 번도 분석하지
+        않은 자산은 일부러 건너뛴다.**
+        """
+        service = getattr(orchestrator, "media_analysis_service", None)
+        if service is None:
+            return
+        analysis = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+        dispatcher = getattr(orchestrator, "media_analysis_dispatcher", None)
+        if dispatcher is not None:
+            dispatcher(project_id=project_id, analysis_id=analysis["analysis_id"])
+
+    app.include_router(build_media_library_router(store, resolved_media_library_store, schedule_scene_analysis=_schedule_scene_analysis))
     app.include_router(
         build_footage_organizer_router(
             media_library_store=resolved_media_library_store,
@@ -1212,6 +1226,7 @@ def create_app(
             ingest_service=app.state.library_ingest_service,
             managed_root=user_library_root,
             managed_roots=resolved_library_asset_managed_roots,
+            schedule_scene_analysis=_schedule_scene_analysis,
         )
     )
     # 포맷은 프로젝트가 아니라 사용자에게 붙는다 — 다음 영상은 보통 새 프로젝트다.

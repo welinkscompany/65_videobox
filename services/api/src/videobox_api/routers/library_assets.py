@@ -9,10 +9,11 @@ actual preview always streams a re-checked source file.
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 from pathlib import Path
 import subprocess
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile, status
@@ -28,6 +29,8 @@ from videobox_storage.library_user_asset_store import LibraryUserAssetStore
 from videobox_storage.managed_path_resolution import resolve_managed_path, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
+
+_LOGGER = logging.getLogger(__name__)
 
 
 DERIVATIVE_VERSION = "v2"
@@ -45,6 +48,10 @@ def build_library_assets_router(
     ingest_service: LibraryIngestService,
     managed_root: Path,
     managed_roots: tuple[Path, ...] | None = None,
+    # 촬영본이 프로젝트에 들어오면 장면 분석을 건다. 올려서 넣는 길과 수신함은
+    # 넣는 순간 걸었는데 라이브러리에서 넣는 길만 안 걸어서, 같은 자산이 어느
+    # 문으로 들어왔느냐에 따라 유진의 추천이 되기도 하고 영원히 막히기도 했다.
+    schedule_scene_analysis: Callable[[str, str], None] | None = None,
 ) -> APIRouter:
     router = APIRouter()
     materializer = ProjectAssetMaterializer(project_store)
@@ -427,6 +434,25 @@ def build_library_assets_router(
         derivative_path = managed_root / str(derivative["managed_relative_path"])
         return FileResponse(derivative_path, media_type=str(derivative["mime_type"]))
 
+    def _queue_scene_analysis(*, project_id: str, asset: dict[str, Any], media_type: object) -> None:
+        """장면 분석은 촬영본을 보는 일이다 -- 음악 서른 개를 넣었다고 로컬
+        모델을 서른 번 돌리지 않는다. 예약이 실패해도 자산은 이미 들어갔으므로
+        가져오기를 실패로 만들지 않는다. 태그가 안 붙을 뿐이고, 그건 남긴다.
+        """
+        if schedule_scene_analysis is None or str(media_type) != LibraryMediaType.BROLL.value:
+            return
+        asset_id = str(asset.get("asset_id") or "")
+        if not asset_id:
+            return
+        try:
+            schedule_scene_analysis(project_id, asset_id)
+        except Exception:
+            _LOGGER.warning(
+                "프로젝트에 넣은 촬영본의 장면 분석을 걸지 못했습니다 "
+                "(project=%s, 자산=%s). 태그가 붙지 않아 유진의 추천이 막힙니다.",
+                project_id, asset_id, exc_info=True,
+            )
+
     @router.post("/api/library/assets/{asset_id}/materialize", status_code=status.HTTP_201_CREATED)
     def materialize_library_asset(asset_id: str, payload: MaterializeLibraryAssetRequest) -> dict[str, Any]:
         asset, builtin = find_asset(asset_id)
@@ -453,6 +479,7 @@ def build_library_assets_router(
             raise HTTPException(status_code=404, detail="project_missing") from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _queue_scene_analysis(project_id=payload.project_id, asset=result, media_type=asset.media_type)
         return {"asset": result, "reference": reference}
 
     @router.delete("/api/library/assets/{asset_id}/references/{reference_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)

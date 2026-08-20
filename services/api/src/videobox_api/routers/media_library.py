@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from typing import Callable
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
@@ -16,9 +18,17 @@ from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 
+_LOGGER = logging.getLogger(__name__)
+
+# 장면 분석을 거는 자산 종류. 음악·효과음은 볼 장면이 없다.
+_SCENE_ANALYSED_ASSET_TYPES = frozenset({"broll_video", "raw_video"})
+
 
 def build_media_library_router(
     project_store: LocalProjectStore, library_store: MediaLibraryStore,
+    # 사용자 라이브러리 쪽과 **같이** 걸어야 한다. 이 저장소는 렌더 경로가 둘인
+    # 것을 두 번 잊었고, 자산이 들어오는 문도 마찬가지로 둘이다.
+    schedule_scene_analysis: Callable[[str, str], None] | None = None,
 ) -> APIRouter:
     router = APIRouter()
     materializer = ProjectAssetMaterializer(project_store)
@@ -193,6 +203,15 @@ def build_media_library_router(
         project_store.mark_project_media_library_recent(
             project_id=payload.project_id, library_asset_id=library_asset_id,
         )
+        if schedule_scene_analysis is not None and str(result.get("asset_type") or "") in _SCENE_ANALYSED_ASSET_TYPES:
+            try:
+                schedule_scene_analysis(payload.project_id, str(result["asset_id"]))
+            except Exception:
+                _LOGGER.warning(
+                    "팩에서 넣은 촬영본의 장면 분석을 걸지 못했습니다 (project=%s, 자산=%s). "
+                    "태그가 붙지 않아 유진의 추천이 막힙니다.",
+                    payload.project_id, result.get("asset_id"), exc_info=True,
+                )
         return result
 
     return router
