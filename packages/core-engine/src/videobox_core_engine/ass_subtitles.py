@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import unicodedata
 from collections.abc import Iterable
+from math import ceil
 from typing import Any
 
 from videobox_domain_models.caption_fonts import (
@@ -40,6 +42,13 @@ _UNUSED_SHADOW_COLOUR = "&HFF000000"
 _FULLY_TRANSPARENT = "&HFF000000"
 _BORDER_STYLE_OUTLINE = 1
 _BORDER_STYLE_OPAQUE_BOX = 3
+# 가로 정렬 → ASS Alignment. 1·2·3은 화면 **아래**에 붙는 줄이고, 그때 MarginV는
+# 아래에서 잰 거리다. `caption_band_px`가 이 표를 같이 읽는다 -- 위쪽 정렬을
+# 나중에 더하면 띠 계산이 저절로 따라온다.
+_ALIGNMENT_BY_HORIZONTAL = {"left": 1, "center": 2, "right": 3}
+# libass가 실제로 칠한 줄은 계산값보다 1px 위까지 나갔다(실측: 계산 889, 실측 888).
+# 반올림 차이라 띠에 그만큼 여유를 둔다.
+_BAND_ROUNDING_SLACK_PX = 1
 
 
 def _background_is_visible(value: CaptionStyle) -> bool:
@@ -57,6 +66,104 @@ def _box_padding_px(value: CaptionStyle, size: int) -> int:
     유지되기 때문이다. 고정 px로 두면 세로 영상에서만 상자가 두꺼워진다.
     """
     return max(value.outline_width_px, max(1, round(size / 8)))
+
+
+def _caption_font_size_px(value: CaptionStyle, video_height: int) -> int:
+    """ASS `Fontsize`. 화면 높이에 비례하므로 세로 영상에서도 비율이 같다."""
+    return max(1, round(value.font_size_px * video_height / 1080))
+
+
+def _wrapped_line_count(text: str, *, size: int, usable_width: int) -> int:
+    """libass가 이 문장을 몇 줄로 접을지 어림한다.
+
+    **왜 어림인가:** 실제 줄바꿈 폭은 글꼴 metric을 읽어야 정확한데, 자막 글꼴은
+    owner가 고르고 컨테이너에 설치된 것을 libass가 찾아 쓴다. 렌더 그래프를 짓는
+    시점에 그 파일을 열어 재는 것은 hot path에 디스크 I/O를 얹는 일이라 하지 않는다.
+
+    대신 글자 종류별 폭을 재서 잡았다(1920px·크기 54 실측): 한글·한자·가나는
+    글자 크기와 거의 같은 폭을 먹고, 라틴 문자는 절반쯤, 공백은 그보다 훨씬 좁다.
+    33자 문장은 한 줄, 61자 문장은 두 줄로 접혔고 이 가중치가 둘 다 맞혔다.
+
+    틀리는 방향도 적어 둔다: 폭을 낮게 잡으면 띠가 실제보다 짧아지고, 그 위에
+    놓는 카드가 자막 윗줄을 물 수 있다. 그래서 애매하면 올려 잡는다.
+    """
+    if usable_width <= 0:
+        return 1
+    width = 0.0
+    for character in text:
+        if character.isspace():
+            width += size * 0.3
+        elif unicodedata.east_asian_width(character) in {"W", "F"}:
+            width += size
+        else:
+            width += size * 0.55
+    return max(1, ceil(width / usable_width))
+
+
+def caption_band_px(
+    captions: Iterable[Any],
+    *,
+    video_width: int,
+    video_height: int,
+    start_sec: float | None = None,
+    end_sec: float | None = None,
+) -> tuple[int, int] | None:
+    """이 시간대의 자막이 실제로 먹는 세로 띠 `(위, 아래)`. 자막이 없으면 None.
+
+    화면에 무엇을 얹든 **자막을 피하려면 자막이 어디 있는지부터 알아야 한다.**
+    그 답을 렌더러가 따로 계산하지 않고 여기서 낸다 -- 자막 자리를 정하는 식
+    (`style_line`의 MarginV·Fontsize·상자 여백)이 바로 위에 있고, 두 벌로 나뉘면
+    반드시 어긋난다.
+
+    받는 것은 `render_editing_session_ass`가 받는 `segments`와 같은 모양이다:
+    `caption_text`, `caption_style`, `start_sec`, `end_sec`. 같은 입력으로 ASS를
+    굽고 같은 입력으로 띠를 재므로 둘이 다른 자막을 볼 수 없다.
+
+    `start_sec`/`end_sec`을 주면 그 시간과 겹치는 자막만 센다. 20초에 나오는
+    자막 때문에 7초에 나오는 카드를 밀어 올리지 않기 위해서다.
+
+    한계: libass의 자동 줄바꿈은 어림으로 센다(`_wrapped_line_count`).
+    """
+    usable_width = max(1, int(video_width))
+    top: int | None = None
+    bottom: int | None = None
+    for segment in captions:
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("caption_text") or "").strip()
+        if not text:
+            continue
+        cue_start, cue_end = float(segment.get("start_sec") or 0.0), float(segment.get("end_sec") or 0.0)
+        if cue_end <= cue_start:
+            continue
+        if start_sec is not None and end_sec is not None and (cue_end <= start_sec or cue_start >= end_sec):
+            continue
+        raw_style = segment.get("caption_style")
+        style = CaptionStyle.from_dict(raw_style) if isinstance(raw_style, dict) else CaptionStyle()
+        size = _caption_font_size_px(style, video_height)
+        padding = _box_padding_px(style, size)
+        margin_l = round(video_width * style.position_x_percent / 100) if style.horizontal_align == "left" else 0
+        margin_r = round(video_width * (100 - style.position_x_percent) / 100) if style.horizontal_align == "right" else 0
+        lines = sum(
+            _wrapped_line_count(part, size=size, usable_width=usable_width - margin_l - margin_r)
+            for part in text.split("\n")
+        )
+        block = lines * size + 2 * padding
+        margin_v = round(video_height * (100 - style.position_y_percent) / 100)
+        alignment = _ALIGNMENT_BY_HORIZONTAL[style.horizontal_align]
+        if alignment <= 3:
+            cue_bottom = video_height - margin_v + padding
+            cue_top = cue_bottom - block
+        elif alignment <= 6:
+            cue_top = round((video_height - block) / 2)
+            cue_bottom = cue_top + block
+        else:
+            cue_top, cue_bottom = margin_v - padding, margin_v - padding + block
+        top = cue_top if top is None else min(top, cue_top)
+        bottom = cue_bottom if bottom is None else max(bottom, cue_bottom)
+    if top is None or bottom is None:
+        return None
+    return max(0, top - _BAND_ROUNDING_SLACK_PX), min(video_height, bottom + _BAND_ROUNDING_SLACK_PX)
 
 
 def _warn_about_fonts_this_machine_does_not_have(styles: Iterable[CaptionStyle]) -> None:
@@ -100,8 +207,8 @@ def render_editing_session_ass(editing_session: dict[str, Any], *, video_width: 
     style = CaptionStyle.from_dict(raw_style) if isinstance(raw_style, dict) else CaptionStyle()
 
     def style_line(name: str, value: CaptionStyle, *, as_box: bool = False) -> str:
-        size = max(1, round(value.font_size_px * video_height / 1080))
-        alignment = {"left": 1, "center": 2, "right": 3}[value.horizontal_align]
+        size = _caption_font_size_px(value, video_height)
+        alignment = _ALIGNMENT_BY_HORIZONTAL[value.horizontal_align]
         margin_l = round(video_width * value.position_x_percent / 100) if value.horizontal_align == "left" else 0
         margin_r = round(video_width * (100 - value.position_x_percent) / 100) if value.horizontal_align == "right" else 0
         margin_v = round(video_height * (100 - value.position_y_percent) / 100)
