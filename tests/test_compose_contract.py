@@ -271,3 +271,35 @@ def test_the_local_model_address_stays_on_the_host_loopback_bridge() -> None:
     assert environment["VIDEOBOX_LOCAL_RUNTIME_BASE_URL"] == (
         "${VIDEOBOX_LOCAL_RUNTIME_BASE_URL:-http://host.docker.internal:1234/v1}"
     )
+
+
+def test_the_build_context_ignores_the_heavy_trees_at_every_depth() -> None:
+    """Docker의 무시 규칙은 gitignore와 다르다 -- `*`가 `/`를 넘지 않는다.
+
+    그래서 `__pycache__`라고만 적으면 **저장소 루트에서만** 맞는다. 2026-08-20에
+    실측해 보니 이미지 안에 `__pycache__` 경로가 176개 들어 있었고, 목록에 아예
+    없던 `artifacts/`(안에 110MB짜리 wav 하나)까지 실려서 `COPY` 층과 `chown` 층에
+    각각 한 벌씩 쌓였다. 고치니 **디스크 사용량이 2.62GB에서 1.87GB로** 줄었다.
+
+    조용히 되돌아가도 아무도 모르고 대가는 750MB다. 그래서 여기서 못박는다.
+    같은 방식의 본보기가 `test_hermes_yujin_compose_contract.py`에 이미 있다.
+    """
+    patterns = {
+        line.strip()
+        for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    # 어느 깊이에서 나와도 무거운 것들. 루트에만 걸면 하위 패키지 것이 그대로 실린다.
+    must_match_anywhere = {
+        "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        ".venv", "node_modules", "test-results", "playwright-report",
+        "*.sqlite", "*.mp4", "*.wav", "*.mp3",
+    }
+
+    missing = sorted(name for name in must_match_anywhere if f"**/{name}" not in patterns)
+    assert missing == [], (
+        f"이 이름들은 하위 폴더에서도 걸러야 한다. `**/`를 붙여라: {missing}"
+    )
+    # `artifacts/`는 일부러 루트 고정이다 -- `RESEARCH/*/artifacts/`에 커밋된
+    # 기록이 있어서 `**/artifacts`로 하면 그것까지 빠진다.
+    assert "artifacts" in patterns, "재생성 가능한 artifacts 트리가 빌드 컨텍스트에 실린다"
