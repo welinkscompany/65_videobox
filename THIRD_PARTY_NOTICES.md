@@ -18,6 +18,23 @@ Task 22 adds local, read-only voice readiness to that adapted shell. It reads
 existing VideoBox state only and does not add upstream authentication, provider,
 or administration behavior.
 
+## Fonts shipped inside the container image
+
+컨테이너 이미지에 글꼴을 담는 것은 **재배포**에 해당한다. 2026-08-20 owner 결정
+(`docs/decisions/2026-08-20-overlay-and-caption-scope-expansion.ko.md` 3항)이
+정한 조건은 "재배포·임베딩을 명시 허용하는 라이선스만, 근거를 여기 남긴다"이다.
+아래 둘은 그 조건을 만족한다. 둘 다 Debian 패키지로 설치하며 저장소에 글꼴
+바이트를 커밋하지 않는다(`docker/workspace.Dockerfile`).
+
+| 패키지 | 글꼴 | 라이선스 | 쓰는 곳 |
+|---|---|---|---|
+| `fonts-nanum` | 나눔고딕 등 | SIL OFL-1.1 | 자막과 글줄 오버레이의 한글 |
+| `fonts-dejavu-core` | DejaVu Sans 등 | Bitstream Vera / DejaVu 라이선스 (재배포 허용) | "여기를 보세요" 아이콘이 그리는 기호(✔ ✕ ⚠ 등) — 한글 글꼴에 없다 |
+
+`fonts-nanum`은 이전부터 있었고, `fonts-dejavu-core`는 다른 패키지에 딸려 들어와
+있던 것을 2026-08-20에 명시 설치로 바꿨다. 아이콘은 **글꼴에 이미 있는 글자
+하나**로 그리므로 아이콘용 자산 파일을 따로 담지 않는다.
+
 ## Future materialization rule
 
 Before a source file or generated component is added, record its pinned source
