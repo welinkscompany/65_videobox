@@ -10,6 +10,10 @@ import { orderByFavouriteThenRecent } from "../../../lib/pickerOrder";
  * 완성본이 조용히 다른 글꼴로 나왔다 -- 화면 기본값 `Pretendard`가 실제로
  * 그랬다. 목록은 백엔드가 아는 것 하나뿐이고 화면은 따로 들고 있지 않는다.
  *
+ * 그 목록에는 **글꼴 파일이 실제로 있는 것만** 담겨 온다. 그래서 지금 쓰는
+ * 글꼴이 목록에 없다면 그건 이 컴퓨터에 없다는 뜻이고, 그대로 두면 완성본만
+ * 조용히 다른 글꼴로 나온다. 그때는 화면이 먼저 말한다.
+ *
  * 정렬은 자막 모양 고르기와 같은 규칙을 쓴다(`orderByFavouriteThenRecent`).
  * 즐겨찾기가 맨 위, 그다음이 최근에 쓴 것이다.
  */
@@ -74,9 +78,16 @@ export function CaptionFontPicker({
     recents,
   );
 
+  // 목록을 받아 왔는데 지금 쓰는 글꼴이 그 안에 없다 -- 이 컴퓨터에 그 글꼴이
+  // 없다는 뜻이다. 말해 주지 않으면 owner는 완성본을 보고서야 알게 된다.
+  const missingHere = fonts.length > 0 && !fonts.some((font) => font.family === value);
+
   return (
     <section className="vb-caption-fonts" aria-labelledby="caption-fonts-heading">
       <h3 id="caption-fonts-heading">글꼴</h3>
+      {missingHere ? (
+        <p role="status">지금 쓰는 글꼴이 이 컴퓨터에 없어요. 아래에서 하나 골라 주세요.</p>
+      ) : null}
       {error ? <p role="status">{error}</p> : null}
       <ul>
         {visible.map((font) => {
