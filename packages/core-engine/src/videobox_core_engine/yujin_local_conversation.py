@@ -167,7 +167,8 @@ def _project_context_section(context: YujinProjectContext | None) -> str:
     if not (title or script or captions):
         return ""
     lines = [
-        "\n\n지금 열려 있는 프로젝트 정보다. 썸네일 프롬프트를 추천할 때 이 내용을 근거로 쓴다."
+        "\n\n지금 열려 있는 프로젝트 정보다. 추천과 답변은 이 내용을 근거로 쓴다. "
+        "여기 있는 것을 창작자에게 되묻지 않는다."
     ]
     if title:
         lines.append(f"- 제목: {title}")

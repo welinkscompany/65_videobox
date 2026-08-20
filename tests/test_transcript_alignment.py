@@ -288,3 +288,30 @@ def test_transcript_aligner_keeps_positive_durations_when_splitting_short_coarse
     assert aligned[0]["start_sec"] < aligned[0]["end_sec"]
     assert aligned[1]["start_sec"] < aligned[1]["end_sec"]
     assert aligned[0]["end_sec"] <= aligned[1]["start_sec"]
+
+
+def test_split_script_units_keeps_a_list_number_with_the_sentence_it_labels() -> None:
+    """번호 매긴 대본이 번호만 있는 장면을 만들었다(2026-08-20 실측).
+
+    유진에게 대본을 써 달라고 하면 `1. ...` `2. ...` 꼴로 준다. 그대로 대본으로
+    쓰면 `1.`이 문장 하나로 잘려 **자막이 "1"인 장면**이 생겼다. 다섯 문장짜리
+    대본이 열세 장면이 됐고, 그중 다섯은 숫자만 보였다.
+    """
+    assert split_script_units("1. 붉게 물든 단풍. 2. 낙엽이 흩날린다.") == [
+        "1. 붉게 물든 단풍.",
+        "2. 낙엽이 흩날린다.",
+    ]
+    assert split_script_units("1) 첫 문장이다. 2) 둘째 문장이다.") == [
+        "1) 첫 문장이다.",
+        "2) 둘째 문장이다.",
+    ]
+    # 줄로 나뉜 번호 목록도 마찬가지다.
+    assert split_script_units("1. 첫 장면\n2. 둘째 장면") == [
+        "1. 첫 장면",
+        "2. 둘째 장면",
+    ]
+    # 문장 끝에 온 숫자는 여전히 문장의 끝이다.
+    assert split_script_units("총 3. 그리고 다음 문장.") == [
+        "총 3.",
+        "그리고 다음 문장.",
+    ]

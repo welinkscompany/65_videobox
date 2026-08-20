@@ -17,7 +17,6 @@ from videobox_core_engine.director_proposal_service import (
 from videobox_core_engine.yujin_local_conversation import (
     YujinLocalConversationService,
     YujinProjectContext,
-    detect_thumbnail_prompt_request,
 )
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.yujin_creator_proposal_adapter import variant_patch_from_yujin_candidate
@@ -60,15 +59,19 @@ def _approved_memories(
         return ()
 
 
-def _thumbnail_project_context(
+def _project_context(
     store: LocalProjectStore, *, project_id: str, session: dict
 ) -> YujinProjectContext:
-    """Gather the title, script, and scene captions for a thumbnail-prompt
-    recommendation (owner, 2026-08-19).
+    """Gather the title, script, and scene captions the reply may cite.
 
-    Loaded only when the message actually asks for thumbnail prompts, so the
-    ordinary chat hot path stays as it was. Each part degrades to empty on
-    failure -- a missing script must never turn a chat reply into an error.
+    Originally loaded only for thumbnail-prompt requests (owner, 2026-08-19).
+    실측(2026-08-20): 그래서 편집 화면에서 "이 장면에 어울리는 B-roll 추천해 줘"라고
+    물으면 유진이 **자기가 열어 놓고 있는 영상**을 두고 "영상의 분위기나 주제를
+    알려주시면"이라고 되물었다. 대화로 편집한다는 것이 성립하지 않는다.
+
+    이제 모든 대화에 싣는다. 양은 `yujin_local_conversation`의 상한이 자르므로
+    (제목 200B·대본 4KB·자막 32개) 프롬프트가 무한정 커지지는 않는다. 각 조각은
+    실패하면 빈 값으로 떨어진다 -- 대본이 없다고 대화가 오류가 되면 안 된다.
     """
     title = ""
     try:
@@ -284,12 +287,8 @@ def build_director_proposals_router(
                             conversation_id=conversation_id,
                             query=body.text,
                         ),
-                        project_context=(
-                            _thumbnail_project_context(
-                                store, project_id=project_id, session=session
-                            )
-                            if detect_thumbnail_prompt_request(body.text)
-                            else None
+                        project_context=_project_context(
+                            store, project_id=project_id, session=session
                         ),
                     )
                     assistant_text = result.reply
