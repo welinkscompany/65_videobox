@@ -32,8 +32,32 @@ or administration behavior.
 | `fonts-dejavu-core` | DejaVu Sans 등 | Bitstream Vera / DejaVu 라이선스 (재배포 허용) | "여기를 보세요" 아이콘이 그리는 기호(✔ ✕ ⚠ 등) — 한글 글꼴에 없다 |
 
 `fonts-nanum`은 이전부터 있었고, `fonts-dejavu-core`는 다른 패키지에 딸려 들어와
-있던 것을 2026-08-20에 명시 설치로 바꿨다. 아이콘은 **글꼴에 이미 있는 글자
-하나**로 그리므로 아이콘용 자산 파일을 따로 담지 않는다.
+있던 것을 2026-08-20에 명시 설치로 바꿨다. 아이콘은 **글꼴에 있는 글자 하나**로
+그리므로 아이콘마다 딸린 그림 파일은 없다. 다만 아래 아이콘 글꼴 한 벌은
+저장소에 담는다.
+
+## 아이콘 글꼴 (컨테이너에 함께 배포)
+
+`docs/decisions/2026-08-20-overlay-and-caption-scope-expansion.ko.md` 1항이
+"나중에 Material Symbols 글꼴(Apache-2.0) 한 장을 더해 아이콘 폭을 넓히는 것"까지
+승인 범위로 정해 두었다. 위 두 글꼴 꾸러미가 가진 기호만으로는 정작 자주 쓰는
+전구·돋보기·물음표·느낌표를 그릴 수 없었다 — 실측하면 넷 다 같은 픽셀 수, 곧
+두부(빠진 글자 상자)로 나왔다.
+
+| 글꼴 | 파일 | 라이선스 | 원본 | 라이선스 원문 |
+|---|---|---|---|---|
+| Material Symbols Outlined | `MaterialSymbolsOutlined-Variable.ttf` | Apache-2.0 | https://raw.githubusercontent.com/google/material-design-icons/e083cc60a0828fdd3b404cea0cb8a5b900e9c23e/variablefont/MaterialSymbolsOutlined%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf | https://raw.githubusercontent.com/google/material-design-icons/e083cc60a0828fdd3b404cea0cb8a5b900e9c23e/LICENSE |
+
+Apache-2.0은 재배포를 명시적으로 허용하므로 3항이 정한 조건("재배포·임베딩을
+명시 허용하는 라이선스만")을 만족한다. §4가 요구하는 대로 라이선스 원문 사본을
+`assets/fonts/icons/licenses/`에 함께 두고, 글꼴은 고치지 않고 원본 그대로 싣는다
+(파일 이름만 바꿨다 — 상류 이름의 대괄호·쉼표가 ffmpeg 필터 문자열과 Dockerfile에서
+다루기 나쁘다. 바이트는 그대로이며 해시로 확인한다).
+
+파일 해시와 출처는 `assets/fonts/icons/provenance.json`에 있고,
+`tests/test_icon_font_asset.py`가 파일·해시·라이선스 원문·이미지 설치 지시가
+서로 어긋나면 잡는다. **자막 글꼴 목록에는 넣지 않는다** — owner가 자막에 고를
+글꼴이 아니고, 같은 테스트가 그것도 함께 지킨다.
 
 ## Future materialization rule
 

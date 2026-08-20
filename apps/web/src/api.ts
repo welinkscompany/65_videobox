@@ -597,7 +597,23 @@ export type ShapeOverlayShape =
   | "icon_warning"
   | "icon_pointer"
   | "icon_triangle"
-  | "icon_diamond";
+  | "icon_diamond"
+  | "icon_lightbulb"
+  | "icon_search"
+  | "icon_question"
+  | "icon_exclamation"
+  | "icon_lock"
+  | "icon_clock"
+  | "icon_calendar"
+  | "icon_location"
+  | "icon_play"
+  | "icon_stop"
+  | "icon_heart"
+  | "icon_thumb_up"
+  | "icon_money"
+  | "icon_trend_up"
+  | "icon_trend_down"
+  | "icon_cart";
 
 export type ShapeOverlayRequest = RevisionedEditingSessionMutation & {
   shape: ShapeOverlayShape;

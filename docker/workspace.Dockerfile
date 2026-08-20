@@ -34,6 +34,12 @@ COPY --from=web-build /app/dist /app/apps/web/dist
 # `assets/fonts/korean/provenance.json`과 THIRD_PARTY_NOTICES.md에 있다.
 # 이 자리에 없으면 libass가 조용히 다른 글꼴로 떨어져 완성본만 달라진다.
 COPY assets/fonts/korean /usr/share/fonts/truetype/videobox-korean
+
+# "여기를 보세요" 아이콘용 글꼴(Material Symbols Outlined, Apache-2.0). 전구·
+# 돋보기·물음표·느낌표처럼 글줄 글꼴에 없는 그림을 그린다 -- 그 넷은 이 글꼴이
+# 오기 전까지 컨테이너에서 전부 두부로 나왔다. 자막 글꼴 목록에는 넣지 않는다.
+# 근거는 `assets/fonts/icons/provenance.json`과 THIRD_PARTY_NOTICES.md에 있다.
+COPY assets/fonts/icons /usr/share/fonts/truetype/videobox-icons
 RUN fc-cache -f
 
 RUN groupadd --gid 10001 videobox-api \

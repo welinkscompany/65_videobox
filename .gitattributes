@@ -34,3 +34,8 @@ docker/workspace-supervisor.py text eol=lf
 assets/fonts/korean/*.ttf binary
 assets/fonts/korean/*.otf binary
 assets/fonts/korean/licenses/*.txt text eol=lf
+
+# 아이콘 글꼴도 같은 이유로 못박는다. 라이선스 원문의 줄바꿈이 체크아웃마다
+# 달라지면 sha256이 흔들려 tests/test_icon_font_asset.py가 Windows에서만 터진다.
+assets/fonts/icons/*.ttf binary
+assets/fonts/icons/licenses/*.txt text eol=lf
