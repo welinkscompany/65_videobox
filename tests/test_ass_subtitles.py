@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import logging
 import shutil
 import subprocess
 from pathlib import Path
@@ -71,6 +72,60 @@ def test_ass_keeps_editing_session_caption_text_timing_and_style() -> None:
     assert "Style: Default,Arial,32" in ass
     assert "Style: Default,Arial,32,&H000000FF" in ass
     assert "Dialogue: 0,0:00:01.25,0:00:03.50,Default,,0,0,0,,스타일 보존" in ass
+
+
+# ---------------------------------------------------------------------------
+# 없는 글꼴로 굽는 것을 알아채기
+#
+# libass는 없는 글꼴을 요청받아도 실패하지 않는다. **조용히 다른 글꼴로 바꿔**
+# 그리고, 완성본은 성공으로 끝난다. 그래서 이 저장소는 화면 기본값이 컨테이너에
+# 없는 이름이던 것을 한참 뒤에야 알았다.
+#
+# 그렇다고 렌더를 멈추지는 않는다. 아이콘은 없으면 **두부**라서 완성본이 못 쓰게
+# 되지만, 자막은 글꼴이 바뀌어도 글은 읽힌다 -- 멈추는 쪽이 손해가 크다.
+# 그리고 옛 편집본이 들고 있는 이름(`Arial` 등)으로 편집을 막지 않는 것이
+# 이미 정해진 경계다. 그래서 여기서 하는 일은 하나다: **적어 둔다.**
+# ---------------------------------------------------------------------------
+
+
+def _ass_with_font(family: str) -> str:
+    return render_editing_session_ass(
+        {
+            "caption_style": {"font_family": family},
+            "segments": [{"caption_text": "글꼴 확인", "start_sec": 0.0, "end_sec": 1.0}],
+        },
+        video_width=320,
+        video_height=180,
+    )
+
+
+def test_the_render_writes_down_a_caption_font_this_machine_does_not_have(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """멈추지도, 이름을 바꾸지도 않는다. 다만 왜 다르게 나왔는지 남는다.
+
+    이게 없으면 "완성본 글꼴이 왜 이래?"에 답할 근거가 어디에도 없다 -- 렌더는
+    성공으로 끝나고 ASS에는 owner가 고른 이름이 그대로 적혀 있기 때문이다.
+    """
+    with caplog.at_level(logging.WARNING, logger="videobox_core_engine.ass_subtitles"):
+        ass = _ass_with_font("Arial")
+
+    # 경계: 이름을 대신 골라 주지 않는다. 이 기계가 못 찾는 것과 libass가 못
+    # 그리는 것은 다르고(글꼴은 우리가 안 보는 자리에도 설치될 수 있다),
+    # 넘겨짚어 바꾸면 멀쩡히 그려지던 글꼴을 우리가 망가뜨린다.
+    assert "Style: Default,Arial," in ass
+    assert "Arial" in caplog.text
+
+
+def test_a_caption_font_this_machine_has_is_rendered_without_a_word(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """거짓 경보를 남기지 않는다. 매번 떠드는 경고는 아무도 안 읽는다."""
+    with caplog.at_level(logging.WARNING, logger="videobox_core_engine.ass_subtitles"):
+        ass = _ass_with_font("Gaegu")
+
+    assert "Style: Default,Gaegu," in ass
+    assert caplog.records == []
 
 
 def test_ass_preserves_per_caption_window_style() -> None:
