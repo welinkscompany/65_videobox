@@ -1398,6 +1398,7 @@ class FinalRenderVerdictRequest(BaseModel):
 
 class FinalRenderJobResponse(StartJobResponse):
     render: FinalRenderArtifactResponse | None = None
+    error_message: str | None = None
 
 
 class VariantRenderItemResponse(BaseModel):

@@ -83,6 +83,19 @@ function deriveExactPreviewState(
   ) ? "current" : "stale";
 }
 
+// 백엔드가 실패 이유를 코드로 보내 준다. 옮길 문구가 없는 코드는 그대로
+// 흘려보내지 않고 원래 쓰던 한 줄로 돌아간다 -- 화면에 영어를 띄우느니
+// 덜 구체적인 편이 낫다.
+const FINAL_RENDER_FAILURES: Record<string, string> = {
+  final_output_requires_review_approval: "검토에서 아직 승인하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요.",
+  draft_bundle_gap_blocks_final_and_capcut_output: "장면이 비어 있는 구간이 있어요. 그 구간에 영상을 넣은 뒤 다시 만들어 주세요.",
+};
+
+export function finalRenderFailureMessage(reason: string | null | undefined) {
+  const mapped = reason ? FINAL_RENDER_FAILURES[reason.trim()] : undefined;
+  return mapped ?? "완성본을 만들지 못했어요.";
+}
+
 function exactPreviewDescription(state: ExactPreviewState | undefined) {
   switch (state) {
     case "current": return "현재 편집본 미리보기가 준비되었어요.";
@@ -892,9 +905,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>완성본</CardTitle><CardDescription>{currentFinal ? "완성본을 확인할 수 있어요." : staleFinal ? "완성본이 최신 편집본과 달라요." : finalRender?.status === "failed" ? "완성본을 만들지 못했어요." : hasPendingFinal ? "완성본을 만드는 중이에요." : timelineJob ? "현재 편집본의 완성본을 만들 수 있어요." : "아직 완성본이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>완성본</CardTitle><CardDescription>{currentFinal ? "완성본을 확인할 수 있어요." : staleFinal ? "완성본이 최신 편집본과 달라요." : finalRender?.status === "failed" ? finalRenderFailureMessage(finalRender?.error_message) : hasPendingFinal ? "완성본을 만드는 중이에요." : timelineJob ? "현재 편집본의 완성본을 만들 수 있어요." : "아직 완성본이 없어요."}</CardDescription></CardHeader>
         <CardContent>
-          {finalError ? <p>완성본을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {finalError ? <p>{finalRenderFailureMessage(finalRender?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
           {currentFinal && finalRender.render?.has_sound === false ? <p>완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.</p> : null}

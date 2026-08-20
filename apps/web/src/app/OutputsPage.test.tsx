@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api } from "../api";
-import { OutputsPage } from "./OutputsPage";
+import { finalRenderFailureMessage, OutputsPage } from "./OutputsPage";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -2058,5 +2058,19 @@ describe("OutputsPage", () => {
 
     expect(await screen.findByText("미리보기가 최신 편집본과 달라요.")).toBeVisible();
     expect(document.body).not.toHaveTextContent("/exact-previews/");
+  });
+});
+
+describe("완성본 실패 이유", () => {
+  it("검토 승인이 없어서 막힌 것이면 그렇게 말한다", () => {
+    // 실제로 겪은 실패다. 백엔드는 이유를 알고 있었고, 화면은 `완성본을
+    // 만들지 못했어요`만 말할 수 있었다 -- 정작 필요한 동작은 클릭 한 번이었다.
+    expect(finalRenderFailureMessage("final_output_requires_review_approval")).toContain("검토");
+  });
+
+  it("모르는 코드는 원래 쓰던 한 줄로 돌아간다", () => {
+    // 영어 코드가 화면에 그대로 나가는 것보다 덜 구체적인 편이 낫다.
+    expect(finalRenderFailureMessage("something_new_from_the_engine")).toBe("완성본을 만들지 못했어요.");
+    expect(finalRenderFailureMessage(null)).toBe("완성본을 만들지 못했어요.");
   });
 });

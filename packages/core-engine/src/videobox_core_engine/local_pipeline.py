@@ -2311,10 +2311,14 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
 
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        # 실패한 이유는 job 행에 이미 적혀 있었다. 여기서 빼고 내보내는 바람에
+        # 화면은 `완성본을 만들지 못했어요`밖에 말할 수 없었다 -- 실제 원인이
+        # 검토 승인 한 번인 경우까지 포함해서.
+        failure = job.get("error_message") or None
         if not job["output_ref"]:
-            return {"job_id": job["job_id"], "status": job["status"], "render": None}
+            return {"job_id": job["job_id"], "status": job["status"], "render": None, "error_message": failure}
         render = self.store.get_final_render_export(project_id=project_id, export_id=job["output_ref"])
-        return {"job_id": job["job_id"], "status": job["status"], "render": render}
+        return {"job_id": job["job_id"], "status": job["status"], "render": render, "error_message": failure}
 
     def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         """Synchronous convenience wrapper: create the job and run it to completion

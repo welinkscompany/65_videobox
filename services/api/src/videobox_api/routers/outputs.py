@@ -232,6 +232,7 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             job_id=result["job_id"],
             status=result["status"],
             render=FinalRenderArtifactResponse(**result["render"]) if result["render"] else None,
+            error_message=result.get("error_message"),
         )
 
     @router.post("/api/projects/{project_id}/final-renders/{job_id}/verdict")

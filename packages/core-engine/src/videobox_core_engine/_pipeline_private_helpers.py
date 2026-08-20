@@ -229,7 +229,9 @@ class _PipelinePrivateHelpersMixin:
             timeline_id=str(timeline["timeline_id"]),
         )
         if review_state["status"] != "approved" or not bool(review_state.get("is_current", True)):
-            raise ValueError("Timeline requires explicit approval before preview, subtitle, or export.")
+            # 코드로 던진다. 문장으로 던지면 화면이 그것을 creator 문구로
+            # 옮길 방법이 없어서, 영어 문장이 그대로 나가거나 아무것도 안 나간다.
+            raise ValueError("final_output_requires_review_approval")
 
     def _ensure_timeline_has_no_blockers(self, timeline: dict[str, Any]) -> None:
         review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
