@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { CaptionStyleScope } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { CaptionFontPicker } from "./CaptionFontPicker";
 import { CaptionPresetPicker, fromSnapshot } from "./CaptionPresetPicker";
 import { SavedFormatPicker } from "./SavedFormatPicker";
 import { Input } from "../../../components/ui/input";
@@ -68,6 +69,8 @@ type Props = Readonly<{
 }>;
 
 const defaultStyle: EditorCaptionStyle = {
+  // 컨테이너에 실제로 들어 있는 글꼴이다. 예전에는 이 자리에 없는 글꼴이
+  // 적혀 있어서 모든 자막이 조용히 다른 글꼴로 떨어졌다.
   fontFamily: "Pretendard",
   fontSizePx: 28,
   textColor: "#ffffff",
@@ -524,7 +527,13 @@ export function InspectorControls({
           /> : null}
           {/* 포맷은 프리셋과 같은 길로 들어온다 -- 화면 값에 넣고 아래 저장이 커밋한다. */}
           <SavedFormatPicker onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))} />
-          <label>글꼴<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, fontFamily: event.target.value }))} value={captionStyle.fontFamily} /></label>
+          {/* 자유 입력이던 칸이다. 없는 글꼴을 쳐도 화면은 받아들이고 완성본만
+              다른 글꼴로 나왔다. 이제 설치된 글꼴 중에서만 고른다. */}
+          <CaptionFontPicker
+            disabled={disabled}
+            onSelect={(family) => setCaptionStyle((current) => ({ ...current, fontFamily: family }))}
+            value={captionStyle.fontFamily}
+          />
           <label>글자 크기<Input disabled={disabled} min="1" onChange={(event) => setCaptionStyle((current) => ({ ...current, fontSizePx: numberValue(event.target.value, current.fontSizePx) }))} type="number" value={captionStyle.fontSizePx} /></label>
           <label>글자 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, textColor: event.target.value }))} value={captionStyle.textColor} /></label>
           <label>외곽선 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, outlineColor: event.target.value }))} value={captionStyle.outlineColor} /></label>
@@ -539,7 +548,10 @@ export function InspectorControls({
             </NativeSelect>
           </label>
           <label>안전 영역 사용<Input checked={captionStyle.safeAreaEnabled} disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, safeAreaEnabled: event.target.checked }))} type="checkbox" /></label>
-          <label>그림자 흐림<Input disabled={disabled} min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, shadowBlurPx: numberValue(event.target.value, current.shadowBlurPx) }))} type="number" value={captionStyle.shadowBlurPx} /></label>
+          {/* `그림자 흐림` 칸은 뺐다. 자막을 굽는 ASS에는 그림자를 흐리게 하는
+              값이 없고, CapCut으로 내보내는 길도 "지원하지 않는다"고 경고만
+              남기고 있었다. 즉 어느 길에서도 아무 일이 없는 칸이었다. 값 자체는
+              저장된 것을 그대로 들고 다닌다. */}
           <Button disabled={disabled} onClick={() => emit({ kind: "save-caption-style", segmentIds: [target.segmentId], scope: "current_caption", style: captionStyle })} type="button">
             자막 스타일 저장
           </Button>
