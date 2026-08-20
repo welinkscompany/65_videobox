@@ -915,6 +915,7 @@ class EditingSessionRegenerationMixin:
         vertical: str,
         horizontal: str,
         size: str,
+        motion: str = "none",
         expected_revision: int,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -925,6 +926,7 @@ class EditingSessionRegenerationMixin:
             vertical=vertical,
             horizontal=horizontal,
             size=size,
+            motion=motion,
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 

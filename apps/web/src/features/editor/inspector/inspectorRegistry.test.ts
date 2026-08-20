@@ -135,8 +135,11 @@ describe("projectInspectorTargets", () => {
       label: "강조 표시",
       segmentId: "segment-1",
       overlayKind: "shape",
-      fields: ["shape", "vertical", "horizontal", "size"],
-      value: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large" },
+      fields: ["shape", "vertical", "horizontal", "size", "motion"],
+      // 이 표시는 움직임이 생기기 전에 저장된 것이라 `motion`이 아예 없다.
+      // 화면은 그것을 `그대로`로 읽어야 한다 -- 편집기를 여는 것만으로 이미
+      // 만들어 둔 표시가 움직이기 시작하면 안 된다.
+      value: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large", motion: "none" },
     });
     expect(targets.find((target) => target.id === "overlay:unsupported-overlay")).toBeUndefined();
   });
@@ -193,8 +196,8 @@ describe("projectInspectorTargets", () => {
       label: "강조 표시",
       segmentId: "segment-unsupported",
       overlayKind: "shape",
-      fields: ["shape", "vertical", "horizontal", "size"],
-      value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" },
+      fields: ["shape", "vertical", "horizontal", "size", "motion"],
+      value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" },
       isNew: true,
     });
     // 이미지는 고를 자산 없이 저장할 수 없으므로 빈 이미지 항목은 주지 않는다.

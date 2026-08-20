@@ -613,11 +613,23 @@ export type ShapeOverlayShape =
   | "icon_trend_down"
   | "icon_cart";
 
+// 표시가 등장·퇴장·이동하는 방식(2026-08-20 승인 5항). 프리셋만 있다 -- 시간이나
+// 좌표를 보내기 시작하면 그게 곧 승인 범위 밖인 키프레임 편집기다. 목록은 백엔드
+// `overlay_shapes`와 같아야 한다.
+export type ShapeOverlayMotion =
+  | "none"
+  | "fade_in"
+  | "fade_out"
+  | "fade_in_out"
+  | "slide_in_left"
+  | "slide_in_right";
+
 export type ShapeOverlayRequest = RevisionedEditingSessionMutation & {
   shape: ShapeOverlayShape;
   vertical: "top" | "middle" | "bottom";
   horizontal: "left" | "center" | "right";
   size: "small" | "medium" | "large";
+  motion: ShapeOverlayMotion;
 };
 
 export type TtsReplacementRequest = RevisionedEditingSessionMutation & {

@@ -111,6 +111,37 @@ SHAPE_OVERLAY_VERTICALS = frozenset({"top", "middle", "bottom"})
 SHAPE_OVERLAY_HORIZONTALS = frozenset({"left", "center", "right"})
 SHAPE_OVERLAY_SIZES = frozenset({"small", "medium", "large"})
 
+# 표시가 등장·퇴장·이동하는 방식.
+#
+# owner 승인(2026-08-20, 5항)이 푼 것은 **"오버레이 하나가 등장·퇴장·이동하는
+# 정도"**까지다. 타임라인에 점을 찍는 편집기가 아니라 **고르기 쉬운 프리셋**이며,
+# 그래서 이 목록은 짧게 유지한다. 순서가 곧 화면에 보이는 순서다.
+#
+# 첫 항목이 `none`인 것이 중요하다: 기본값이자, 이 기능이 생기기 전에 만들어 둔
+# 오버레이가 그대로 그려지는 자리다.
+SHAPE_OVERLAY_MOTIONS: tuple[str, ...] = (
+    "none",
+    "fade_in",
+    "fade_out",
+    "fade_in_out",
+    "slide_in_left",
+    "slide_in_right",
+)
+SHAPE_OVERLAY_MOTION_SET = frozenset(SHAPE_OVERLAY_MOTIONS)
+
+
+def canonical_shape_overlay_motion(value: object) -> str:
+    """저장된 값을 그릴 수 있는 이름으로. 없거나 모르는 이름이면 `none`이다.
+
+    이 기능이 생기기 전에 저장된 오버레이에는 이 열쇠가 **아예 없다.** 그때
+    렌더가 멈추거나 표시가 통째로 사라지면 owner는 이유를 알 수 없으므로,
+    읽는 쪽에서는 '움직이지 않음'으로 좁힌다. 쓰는 쪽(편집 세션·API)은 반대로
+    목록에 없는 이름을 **거절**한다 -- 오타가 조용히 `그대로`가 되면 owner는
+    고른 것이 왜 안 되는지 모른다.
+    """
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in SHAPE_OVERLAY_MOTION_SET else "none"
+
 
 # 아이콘 글자를 그릴 글꼴 후보. 글줄 오버레이는 한글 글꼴이 필요하지만 아이콘은
 # 기호 하나라 어느 글꼴로 그려도 결과가 같다. 지정된 글꼴에 그 기호가 없을 때

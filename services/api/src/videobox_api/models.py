@@ -6,6 +6,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_MOTION_SET,
+    SHAPE_OVERLAY_MOTIONS,
     SHAPE_OVERLAY_SHAPES,
     canonical_shape_overlay_shape,
 )
@@ -830,8 +832,12 @@ class ImageOverlayRequest(BaseModel):
 
 
 class ShapeOverlayRequest(BaseModel):
-    """정지 도형·아이콘("여기를 보세요"). 프리셋만 받는다 -- 자유 좌표·애니메이션은
-    계획서 §4가 범위 밖으로 못박았다.
+    """정지 도형·아이콘("여기를 보세요"). 프리셋만 받는다 -- 자유 좌표는 계획서 §4가
+    범위 밖으로 못박았다.
+
+    `motion`은 2026-08-20 승인(5항)으로 열린 **등장·퇴장·이동**이다. 여기서도
+    프리셋만 받는다: 초 단위 시간이나 좌표를 받기 시작하면 그게 곧 승인 범위 밖인
+    키프레임 편집기다.
 
     고를 수 있는 이름은 `overlay_shapes`가 정한 목록 하나뿐이다. 여기에 사본을
     적어 두면 렌더가 그리는 목록과 화면이 보내는 목록이 조용히 갈라진다.
@@ -842,6 +848,8 @@ class ShapeOverlayRequest(BaseModel):
     vertical: Literal["top", "middle", "bottom"]
     horizontal: Literal["left", "center", "right"]
     size: Literal["small", "medium", "large"]
+    # 안 보내면 `그대로`. 이 기능이 생기기 전 화면이 보내던 요청이 그대로 통한다.
+    motion: str = "none"
 
     @field_validator("shape")
     @classmethod
@@ -849,6 +857,16 @@ class ShapeOverlayRequest(BaseModel):
         normalized = canonical_shape_overlay_shape(value)
         if normalized not in SHAPE_OVERLAY_SHAPES:
             raise ValueError(f"shape must be one of {sorted(SHAPE_OVERLAY_SHAPES)}: {value!r}")
+        return normalized
+
+    @field_validator("motion")
+    @classmethod
+    def validate_motion(cls, value: str) -> str:
+        normalized = str(value or "none").strip().lower()
+        if normalized not in SHAPE_OVERLAY_MOTION_SET:
+            raise ValueError(
+                f"motion must be one of {list(SHAPE_OVERLAY_MOTIONS)}: {value!r}"
+            )
         return normalized
 
 

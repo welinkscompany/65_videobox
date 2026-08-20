@@ -919,6 +919,7 @@ class ApiOrchestrator:
         vertical: str,
         horizontal: str,
         size: str,
+        motion: str = "none",
         expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_shape_overlay(
@@ -929,6 +930,7 @@ class ApiOrchestrator:
             vertical=vertical,
             horizontal=horizontal,
             size=size,
+            motion=motion,
             expected_revision=expected_revision,
         )
 

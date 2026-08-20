@@ -18,6 +18,7 @@ from videobox_core_engine.output_source_verifier import OutputSourceStaleError, 
 from videobox_core_engine.output_warning_provenance import output_warning_notes
 from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_DRAWN_SHAPES,
+    canonical_shape_overlay_motion,
     overlay_icon_glyph,
     resolve_icon_font,
 )
@@ -170,11 +171,152 @@ _SHAPE_OVERLAY_SIZE_FRACTIONS = {
     "large": (0.60, 0.36),
 }
 # 강조용 노랑. drawbox는 `#` 표기도 받지만 필터 문자열 안에서는 0x 표기가 안전하다.
-_SHAPE_OVERLAY_COLOR = "0xFFD400@0.9"
+_SHAPE_OVERLAY_RGB = "0xFFD400"
+_SHAPE_OVERLAY_BASE_ALPHA = 0.9
+_SHAPE_OVERLAY_COLOR = f"{_SHAPE_OVERLAY_RGB}@{_SHAPE_OVERLAY_BASE_ALPHA}"
+
+# 등장·퇴장·이동에 쓰는 시간(초). 화면에서 고르는 값이 아니다 -- 길이를 정하는
+# 입력칸을 주면 그게 곧 키프레임 편집기의 첫 칸이 되고, 승인 범위 밖이다.
+_SHAPE_OVERLAY_MOTION_SEC = 0.4
+
+# 도형(drawbox)의 움직임을 몇 조각으로 쪼갤 것인가. **왜 쪼개는지가 중요하다:**
+# 2026-08-20에 컨테이너의 ffmpeg 7.1.5로 직접 재 보니 `drawbox`에는 시간을 담은
+# 변수가 아예 없다.
+#  - `color=0xFFD400@min(1,t)` → "Invalid alpha value specifier"로 즉시 실패.
+#  - 식 안의 `t`는 시간이 아니라 **두께**다(`x='10+80*t'`가 t=fill일 때 상자를
+#    화면 밖으로 밀어냈고, t=1일 때 x=90에 고정됐다 -- 시간이 흘러도 그대로).
+#  - 프레임 번호 `n`은 "Undefined constant"다.
+# 그래서 시간을 다룰 수 있는 유일한 손잡이인 `enable`로 짧은 조각을 쌓는다.
+# 조각마다 알파와 x가 다르면 그것이 곧 움직임이다.
+#
+# 24조각을 고른 근거도 실측이다: 1280x720·3초·30fps에서 한 조각 0.50초, 24조각
+# 0.51초로 사실상 같았다(`enable`이 거짓인 프레임에서는 필터가 통째로 건너뛴다).
+# 0.4초를 24로 나누면 조각당 약 17ms -- 30fps에서 프레임보다 짧으므로 계단이
+# 보이지 않는다.
+_SHAPE_OVERLAY_MOTION_STEPS = 24
 
 
 def _escaped_filter_path(path: str) -> str:
     return path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
+def _motion_number(value: float) -> str:
+    """필터 식에 넣을 숫자. 꼬리 0을 떼어 필터 문자열이 읽히게 둔다."""
+    return f"{value:.4f}".rstrip("0").rstrip(".") or "0"
+
+
+def _shape_motion_sec(motion: str, *, start_sec: float, end_sec: float) -> float:
+    """이 표시가 등장·퇴장에 쓸 수 있는 시간.
+
+    장면보다 긴 움직임을 걸면 표시가 **끝까지 흐린 채로** 장면이 끝난다. 짧은
+    장면에서는 장면 길이에 맞춰 줄인다 -- 나타났다 사라지는 것은 둘로 나눠 써야
+    하므로 더 짧게 잡는다.
+    """
+    span = end_sec - start_sec
+    if motion == "none" or span <= 0:
+        return 0.0
+    share = span / 3 if motion == "fade_in_out" else span / 2
+    return min(_SHAPE_OVERLAY_MOTION_SEC, share)
+
+
+def _shape_motion_slices(
+    motion: str, *, start_sec: float, end_sec: float
+) -> list[tuple[str, float, float]]:
+    """`drawbox`로 움직임을 내기 위한 시간 조각들.
+
+    돌려주는 것은 `(구간 조건식, 알파 배수, 가로 오프셋 비율)`이다. `그대로`면
+    조각이 하나뿐이고, 그 하나는 이 기능이 생기기 전과 **한 글자도 같아야 한다** --
+    승인 기록 5항이 "기존에 만들어 둔 오버레이의 결과가 바뀌면 안 된다"고 못박았다.
+    """
+    if motion == "none":
+        return [(f"between(t,{start_sec},{end_sec})", 1.0, 0.0)]
+
+    window = _shape_motion_sec(motion, start_sec=start_sec, end_sec=end_sec)
+    steps = _SHAPE_OVERLAY_MOTION_STEPS
+    spans: list[tuple[float, float, float, float]] = []
+
+    entering = motion in {"fade_in", "fade_in_out", "slide_in_left", "slide_in_right"}
+    if entering:
+        direction = -1.0 if motion == "slide_in_left" else 1.0
+        sliding = motion in {"slide_in_left", "slide_in_right"}
+        for index in range(steps):
+            progress = (index + 1) / steps
+            spans.append((
+                start_sec + window * index / steps,
+                start_sec + window * (index + 1) / steps,
+                1.0 if sliding else progress,
+                direction * (1.0 - progress) if sliding else 0.0,
+            ))
+    body_start = start_sec + window if entering else start_sec
+    body_end = end_sec - window if motion in {"fade_out", "fade_in_out"} else end_sec
+    if body_end > body_start:
+        spans.append((body_start, body_end, 1.0, 0.0))
+    if motion in {"fade_out", "fade_in_out"}:
+        for index in range(steps):
+            # 마지막 조각의 알파가 0이 되면 아무것도 안 그리는 필터가 하나 남는다.
+            # 1에서 시작해 한 칸씩 내려오면 끝은 1/steps -- 거기서 장면이 끝난다.
+            spans.append((
+                body_end + window * index / steps,
+                body_end + window * (index + 1) / steps,
+                1.0 - index / steps,
+                0.0,
+            ))
+
+    slices: list[tuple[str, float, float]] = []
+    for position, (slice_start, slice_end, alpha, offset) in enumerate(spans):
+        # 조각 경계에서 `between`을 쓰면 두 조각이 **같은 프레임에 겹쳐** 그려져
+        # 그 한 프레임만 진해진다(실측: 21.39 → 31.11 → 21.39). 반열림 구간이면
+        # 값이 평평하다. 마지막 조각만 끝을 닫아 장면 끝까지 그린다.
+        last = position == len(spans) - 1
+        closing = "lte" if last else "lt"
+        slices.append((
+            f"gte(t,{_motion_number(slice_start)})*{closing}(t,{_motion_number(slice_end)})",
+            alpha,
+            offset,
+        ))
+    return slices
+
+
+def _shape_overlay_color(alpha_scale: float) -> str:
+    if alpha_scale >= 1.0:
+        return _SHAPE_OVERLAY_COLOR
+    return f"{_SHAPE_OVERLAY_RGB}@{round(_SHAPE_OVERLAY_BASE_ALPHA * alpha_scale, 3)}"
+
+
+def _icon_motion_expressions(
+    motion: str, *, start_sec: float, end_sec: float, base_x: str
+) -> tuple[str | None, str]:
+    """아이콘(`drawtext`)의 `(알파 식, 가로 자리 식)`.
+
+    도형과 달리 `drawtext`는 `alpha`·`x`에 **진짜 시간 식**을 받는다(실측으로
+    확인했다). 그래서 조각을 쌓지 않고 식 하나로 매끄럽게 간다 -- 필터도 하나다.
+    두 방식이 다른 이유는 ffmpeg 쪽 사정이지 화면에서 고른 것의 차이가 아니다.
+
+    밀려 들어오는 거리는 **화면 가장자리까지 딱 그만큼**이다. 화면 너비를 통째로
+    쓰면 절반 넘게 화면 밖에 있다가 마지막에 휙 들어와서, 고른 사람이 기대한
+    "밀려 들어오기"로 보이지 않는다. `text_w`는 그리기 직전에 ffmpeg가 아는
+    값이라 여기서 픽셀로 고정할 수 없고, 식에 그대로 태운다.
+    """
+    if motion == "none":
+        return None, base_x
+    window = _shape_motion_sec(motion, start_sec=start_sec, end_sec=end_sec)
+    if window <= 0:
+        return None, base_x
+    span = _motion_number(window)
+    appearing = f"clip((t-{_motion_number(start_sec)})/{span},0,1)"
+    leaving = f"clip(({_motion_number(end_sec)}-t)/{span},0,1)"
+    if motion == "fade_in":
+        return appearing, base_x
+    if motion == "fade_out":
+        return leaving, base_x
+    if motion == "fade_in_out":
+        return f"min({appearing},{leaving})", base_x
+    # 쉼표가 든 식은 따옴표로 묶어야 ffmpeg가 옵션 구분자로 읽지 않는다. 자리 식
+    # 안의 `({base_x})` 괄호도 필수다 -- `w-text_w-77` 같은 식을 괄호 없이 빼면
+    # 부호가 뒤집힌다.
+    if motion == "slide_in_left":
+        return None, f"'({base_x})-(1-{appearing})*(({base_x})+text_w)'"
+    return None, f"'({base_x})+(1-{appearing})*(w-({base_x}))'"
 
 
 def _icon_overlay_filter(
@@ -221,12 +363,23 @@ def _icon_overlay_filter(
         else f"h-text_h-{margin_y}" if vertical == "bottom"
         else "(h-text_h)/2"
     )
+    # 등장·퇴장·이동.
+    alpha_expression, x = _icon_motion_expressions(
+        canonical_shape_overlay_motion(overlay.get("motion")),
+        start_sec=start_sec,
+        end_sec=end_sec,
+        base_x=x,
+    )
+    # `alpha`는 fontcolor에 이미 붙은 0.9를 **덮어쓰지 않고 곱한다**(실측: 0.9와
+    # alpha=0.5가 fontcolor 1.0과 alpha=0.45와 같은 픽셀을 냈다). 그래서 다
+    # 나타났을 때의 진하기가 `그대로`와 같다.
+    alpha = f"alpha='{alpha_expression}':" if alpha_expression else ""
     # 강조색만으로는 밝은 화면 위에서 사라진다. 같은 글자에 어두운 테두리를 둘러
-    # 어느 장면에서도 보이게 한다.
+    # 어느 장면에서도 보이게 한다. 테두리도 `alpha`를 따라 함께 흐려진다(실측).
     return (
         f"drawtext=fontfile='{_escaped_filter_path(resolved_font)}':text='{glyph}':x={x}:y={y}:"
         f"fontsize={font_size}:fontcolor={_SHAPE_OVERLAY_COLOR}:"
-        f"borderw={max(2, round(font_size * 0.06))}:bordercolor=black@0.7:"
+        f"borderw={max(2, round(font_size * 0.06))}:bordercolor=black@0.7:{alpha}"
         f"enable='between(t,{start_sec},{end_sec})'"
     )
 
@@ -277,18 +430,23 @@ def export_overlay_shape_filters(
         else height - box_height - margin_y if vertical == "bottom"
         else (height - box_height) // 2
     )
-    enable = f"enable='between(t,{start_sec},{end_sec})'"
     if shape == "underline":
         # 밑줄은 고른 칸의 아래 변에 놓인 채워진 띠다.
         bar_height = max(4, round(height * 0.015))
-        return [
-            f"drawbox=x={x}:y={y + box_height - bar_height}:w={box_width}:h={bar_height}:"
-            f"color={_SHAPE_OVERLAY_COLOR}:t=fill:{enable}"
-        ]
-    thickness = max(3, round(height * 0.011))
+        draw_y, draw_height, thickness = y + box_height - bar_height, bar_height, "fill"
+    else:
+        draw_y, draw_height, thickness = y, box_height, str(max(3, round(height * 0.011)))
+    # 등장·퇴장·이동. `그대로`면 조각이 하나뿐이라 예전 필터와 글자까지 같다.
+    motion = canonical_shape_overlay_motion(overlay.get("motion"))
+    # 밀려 들어오는 거리는 **가장자리까지 딱 그만큼**이다. 화면 너비를 통째로
+    # 쓰면 대부분의 시간을 화면 밖에서 보내다가 마지막에 휙 들어온다.
+    travel = x + box_width if motion == "slide_in_left" else max(0, width - x)
     return [
-        f"drawbox=x={x}:y={y}:w={box_width}:h={box_height}:"
-        f"color={_SHAPE_OVERLAY_COLOR}:t={thickness}:{enable}"
+        f"drawbox=x={x + round(offset * travel)}:y={draw_y}:w={box_width}:h={draw_height}:"
+        f"color={_shape_overlay_color(alpha)}:t={thickness}:enable='{enable}'"
+        for enable, alpha, offset in _shape_motion_slices(
+            motion, start_sec=start_sec, end_sec=end_sec
+        )
     ]
 
 

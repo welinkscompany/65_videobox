@@ -878,7 +878,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
       if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
-      if (action.overlayKind === "shape") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, shape: action.shape, vertical: action.vertical, horizontal: action.horizontal, size: action.size });
+      if (action.overlayKind === "shape") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, shape: action.shape, vertical: action.vertical, horizontal: action.horizontal, size: action.size, motion: action.motion });
       return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, columns: action.columns, rows: action.rows, text: action.text });
     });
   };

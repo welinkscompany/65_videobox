@@ -22974,6 +22974,8 @@ def test_editing_session_api_can_set_and_clear_a_shape_overlay(tmp_path: Path) -
             "vertical": "top",
             "horizontal": "right",
             "size": "medium",
+            # 움직임을 안 보내면 `그대로`. 예전 화면이 보내던 요청이 그대로 통한다.
+            "motion": "none",
         }
     ]
     assert saved.json()["history"][-1]["mutation_type"] == "shape_overlay_update"
@@ -23030,6 +23032,7 @@ def test_editing_session_api_can_set_an_icon_shape_overlay(tmp_path: Path) -> No
             "vertical": "middle",
             "horizontal": "right",
             "size": "large",
+            "motion": "none",
         }
     ]
 
@@ -23045,6 +23048,50 @@ def test_editing_session_api_can_set_an_icon_shape_overlay(tmp_path: Path) -> No
         },
     )
     assert rejected.status_code == 422
+
+
+def test_editing_session_api_can_choose_how_a_shape_overlay_appears(tmp_path: Path) -> None:
+    """표시가 등장·퇴장·이동하는 방식도 같은 endpoint로 저장된다.
+
+    승인 범위는 프리셋까지다 -- 임의 키프레임이나 초 단위 시간 값은 받지 않는다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "highlight_box",
+            "vertical": "middle",
+            "horizontal": "center",
+            "size": "medium",
+            "motion": "fade_in_out",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["segments"][0]["visual_overlays"][0]["motion"] == "fade_in_out"
+
+    for outside_the_presets in ("spin", "0.4s ease-in", "keyframe"):
+        rejected = client.patch(
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+            json={
+                "shape": "highlight_box",
+                "vertical": "middle",
+                "horizontal": "center",
+                "size": "medium",
+                "motion": outside_the_presets,
+                "expected_revision": 2,
+            },
+        )
+        assert rejected.status_code == 422, outside_the_presets
 
 
 def test_editing_session_api_visual_overlay_patch_preserves_existing_explanation_overlay(tmp_path: Path) -> None:
