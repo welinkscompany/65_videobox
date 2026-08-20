@@ -27,7 +27,14 @@ COPY --from=node-runtime /usr/local /usr/local
 WORKDIR /app
 COPY requirements-container.txt ./
 RUN pip install --no-cache-dir -r requirements-container.txt
-COPY . .
+# 글꼴만 뺀다. 바로 아래에서 fontconfig가 보는 자리에 같은 파일을 한 번 더 싣기
+# 때문에, 빼지 않으면 이미지에 두 벌이 들어간다 -- 실측(2026-08-20) 한국어
+# 34.1MB·아이콘 10.65MB가 `COPY . .` 층과 그 뒤 `chown -R /app` 층에 각각 앉아
+# 합쳐 약 90MB였다. 컨테이너에서 글꼴을 찾는 쪽은 `/usr/share/fonts/truetype/videobox-*`를
+# **먼저** 보므로(`overlay_shapes.ICON_FONT_FILES`) 저장소 자리는 이미지에 없어도
+# 된다. 그 자리는 컨테이너 없이 worktree에서 바로 돌릴 때만 쓴다.
+# `--exclude`는 BuildKit 프런트엔드가 필요하다(이 기계의 BuildKit v0.30에서 확인).
+COPY --exclude=assets/fonts . .
 COPY --from=web-build /app/dist /app/apps/web/dist
 
 # 자막용 한국어 글꼴. 전부 OFL-1.1이라 이미지에 함께 배포할 수 있고, 근거는
