@@ -31,6 +31,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -74,6 +75,15 @@ class Guard:
 
     notes: str = ""
 
+    command: tuple[str, ...] = ()
+    """pytest가 아닌 가드. 비어 있으면 `tests`를 pytest로 돌린다.
+
+    e2e는 Playwright라 pytest로 부를 수 없다. 그렇다고 별도 장치를 하나 더
+    만들면 "이 경로를 건드리면 무엇이 지키는가"를 두 곳에서 봐야 한다.
+    """
+
+    cwd: str = "."
+
     @property
     def is_fast(self) -> bool:
         return self.seconds <= FAST_LIMIT_SECONDS
@@ -87,6 +97,29 @@ class Guard:
 # 표가 낡는 것은 `tests/test_guard_router_table.py`가 잡는다.
 # ---------------------------------------------------------------------------
 GUARDS: tuple[Guard, ...] = (
+    Guard(
+        name="editor-e2e",
+        what="화면 전체가 브라우저에서 실제로 도는지",
+        tests=(
+            "apps/web/e2e/editor-workbench.spec.mjs",
+            "apps/web/e2e/exact-preview.spec.mjs",
+        ),
+        patterns=(
+            "apps/web/src/features/editor/**",
+            "apps/web/src/app/*.tsx",
+            "apps/web/src/features/library/**",
+            "apps/web/e2e/**",
+            "apps/web/playwright.config.mjs",
+        ),
+        seconds=34.4,
+        command=("npx", "playwright", "test"),
+        cwd="apps/web",
+        notes=(
+            "2026-08-20에 돌려 보니 **08-19부터 깨져 있었다.** 스펙은 08-18에 쓰였고"
+            " 도크 동작은 그다음 날 바뀌었는데, 그사이 아무도 e2e를 돌리지 않았다."
+            " 단위 테스트도 픽셀 테스트도 못 잡은 것을 이 층이 잡았다."
+        ),
+    ),
     Guard(
         name="editor-ui-provenance",
         what="반입한 화면 파일의 해시가 docs/oss 핀과 맞는지",
@@ -411,12 +444,34 @@ def run_guard(python: Path, guard: Guard, triggers: list[str]) -> Result:
 
     timeout = FAST_TIMEOUT_SECONDS if guard.is_fast else SLOW_TIMEOUT_SECONDS
     started = time.perf_counter()
+    if guard.command:
+        # Windows에서 `npx`는 `npx.cmd`다. 이름 그대로 부르면 파일을 못 찾고,
+        # 그 결과가 "안 돌아감"으로 잡히기는 하지만 **영원히 안 돈다.**
+        # 도는 척하는 것보다 낫되, 도는 것보다는 못하다.
+        executable = shutil.which(guard.command[0])
+        if executable is None:
+            return Result(
+                guard,
+                UNKNOWN,
+                0.0,
+                f"'{guard.command[0]}'을(를) 찾지 못했습니다. Node가 설치돼 있는지 보세요.",
+                triggers,
+            )
+        argv = [executable, *guard.command[1:]]
+    else:
+        argv = [str(python), "-m", "pytest", *guard.tests, "-q", "-p", "no:cacheprovider"]
     try:
         completed = subprocess.run(
-            [str(python), "-m", "pytest", *guard.tests, "-q", "-p", "no:cacheprovider"],
-            cwd=REPO_ROOT,
+            argv,
+            cwd=REPO_ROOT / guard.cwd,
             capture_output=True,
             text=True,
+            # Playwright는 체크 표시 같은 UTF-8을 찍는다. 이 기계의 기본 인코딩
+            # (cp949)으로 읽으면 **출력을 읽다가 죽는다** -- 통과일 때는 티가 안
+            # 나지만 실패했을 때 근거가 통째로 사라진다. 오늘 그 종류의 결함을
+            # 하나 고쳤으니 여기서 되풀이하지 않는다.
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
     except subprocess.TimeoutExpired:
