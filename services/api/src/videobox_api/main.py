@@ -38,6 +38,7 @@ from videobox_api.routers.atomic_draft_bundles import build_atomic_draft_bundles
 from videobox_api.routers.editing_session import build_editing_session_router
 from videobox_api.routers.director_proposals import build_director_proposals_router
 from videobox_api.routers.editor_library import build_editor_library_router
+from videobox_api.routers.caption_fonts import build_caption_fonts_router
 from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.live_smoke_attestation import build_live_smoke_attestation_router
 from videobox_api.routers.media_inbox import build_media_inbox_router
@@ -1191,6 +1192,7 @@ def create_app(
             build_hermes_conversation_router(app.state.hermes_run_service)
         )
     app.include_router(build_editor_library_router(user_library_store))
+    app.include_router(build_caption_fonts_router(user_library_store))
     app.include_router(build_media_library_router(store, resolved_media_library_store))
     app.include_router(
         build_footage_organizer_router(

@@ -28,3 +28,9 @@ apps/web/src/components/ui/resizable.tsx text eol=lf
 # worktree에서만 터진다. 실제로 2026-08-10에 그렇게 걸렸다.
 *.sh text eol=lf
 docker/workspace-supervisor.py text eol=lf
+
+# 자막 글꼴은 받아 온 바이트 그대로여야 한다. sha256이 provenance.json에 걸려
+# 있고 tests/test_caption_fonts.py가 그것을 다시 잰다.
+assets/fonts/korean/*.ttf binary
+assets/fonts/korean/*.otf binary
+assets/fonts/korean/licenses/*.txt text eol=lf

@@ -443,6 +443,21 @@ export type EditorFavorite = {
   favorite_type: "media" | "preset";
 };
 
+/** 고를 수 있는 자막 글꼴 하나. `family`가 완성본에 그대로 나가는 이름이다. */
+export type CaptionFont = {
+  family: string;
+  label: string;
+  group: string;
+};
+
+/** 목록·즐겨찾기·최근을 한 번에 받는다. 나눠 부르면 하나만 실패해도 아무것도 못 고른다. */
+export type CaptionFontLibrary = {
+  fonts: CaptionFont[];
+  default_family: string;
+  favorites: string[];
+  recents: string[];
+};
+
 /** Authoritative, project/session-scoped editor read contract. Times are seconds. */
 export type EditorMediaControls = {
   volume?: number;
@@ -1891,6 +1906,19 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+  // 글꼴은 프로젝트가 아니라 사람에게 붙는다 -- 다음 영상은 보통 새 프로젝트다.
+  // 그래서 주소에 프로젝트가 없다. 저장한 포맷과 같은 자리다.
+  listCaptionFonts: () => request<CaptionFontLibrary>("/api/caption-fonts"),
+  toggleCaptionFontFavorite: (family: string, enabled: boolean) =>
+    request<{ favorites: string[] }>(`/api/caption-fonts/${encodeURIComponent(family)}/favorite`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+  markRecentCaptionFont: (family: string) =>
+    request<{ recents: string[] }>(`/api/caption-fonts/${encodeURIComponent(family)}/recent`, {
+      method: "PUT",
+    }),
   createProject: (payload: { name: string }) =>
     request<Project>("/api/projects", {
       method: "POST",

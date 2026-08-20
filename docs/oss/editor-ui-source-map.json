@@ -74,8 +74,8 @@
       "release": "v1.3.9",
       "commit": "5c41199ea0024a9e0b2cb31735265056e5472d76",
       "license": "SIL OFL-1.1",
-      "license_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE.txt",
-      "notice_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE.txt",
+      "license_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE",
+      "notice_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE",
       "decision": "locked-binary",
       "materialized": true,
       "upstream_paths": [

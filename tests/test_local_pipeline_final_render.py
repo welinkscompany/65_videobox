@@ -550,5 +550,5 @@ def test_final_render_keeps_windowed_right_caption_style_after_merge(tmp_path: P
     ass = str(fake_renderer.received_calls[0]["subtitle_ass_text"])
     # The default 54 px logical style scales to 96 px at the 1920 px ASS
     # play resolution; keep the right caption's red color after the merge.
-    assert "Style: Segment1,Arial,96,&H000000FF" in ass
+    assert "Style: Segment1,Pretendard,96,&H000000FF" in ass
     assert "Dialogue: 0,0:00:01.00,0:00:02.00,Segment1,,0,0,0,,right" in ass
