@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { clipContentLabel } from "./clipNames";
 
 import type { EditorViewModel } from "../editorViewModel";
 import { classifyTimelineHit } from "./hit-testing";
@@ -91,15 +92,20 @@ function formatSeconds(seconds: number): string {
 // what the creator reads (F-3: internal IDs like
 // "broll:session-broll-segment_draft_1726b9574a-0" were leaking into the
 // clip selection button's accessible name and visible text).
-function formatClipDisplayName(lane: TimelineLane, ordinalInLane: number, startSec: number): string {
-  return `${laneLabel[lane]} ${ordinalInLane}번째 장면, ${Math.round(startSec)}초부터`;
+function formatClipDisplayName(lane: TimelineLane, ordinalInLane: number, startSec: number, content: string | null): string {
+  // 보이는 이름이 앞부분이어야 한다(아래 주석). 내용이 붙은 막대에까지
+  // `번째 장면`을 끼우면 `자막 1 · 요즘 영상…번째 장면`처럼 읽힌다.
+  const stem = formatClipShortName(lane, ordinalInLane, content);
+  return content ? `${stem}, ${Math.round(startSec)}초부터` : `${stem}번째 장면, ${Math.round(startSec)}초부터`;
 }
 
 // 막대 위에 실제로 보이는 이름. 전체 이름이 막대를 가로질러 깔리면 썸네일·파형을
 // 덮는다(캡컷은 짧은 이름을 왼쪽 위에만 둔다). 반드시 전체 이름(aria-label)의
 // 앞부분이어야 한다 -- 보이는 글자와 접근 이름이 다르면 음성으로 부를 수 없다.
-function formatClipShortName(lane: TimelineLane, ordinalInLane: number): string {
-  return `${laneLabel[lane]} ${ordinalInLane}`;
+function formatClipShortName(lane: TimelineLane, ordinalInLane: number, content: string | null): string {
+  // 내용이 있으면 그것까지가 보이는 이름이다. 없으면 예전 그대로 -- 영상·음악
+  // 막대에는 여기서 읽을 내용이 없고, 없는 이름을 지어 붙이지 않는다.
+  return content ? `${laneLabel[lane]} ${ordinalInLane} · ${content}` : `${laneLabel[lane]} ${ordinalInLane}`;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -343,6 +349,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   const placementsByClipId = useMemo(() => new Map<string, TimelinePlacement>([
     ...view.tracks.flatMap((track) => track.clips.flatMap((clip) => clip.placementId ? [[clip.placementId, { placementId: clip.placementId, kind: track.role as TimelinePlacementKind, startSec: clip.startSec, endSec: clip.endSec } as TimelinePlacement] as const] : [])),
   ]), [view]);
+  // 막대가 자기를 부르는 이름은 `placement_id`다(`overlay:session-…`). `clip_id`로
+  // 열쇠를 삼으면 앞의 `overlay:`가 없어서 영영 안 맞는다 -- 실측으로 확인했다.
+  const overlayByPlacementId = useMemo(() => new Map(view.tracks.flatMap((track) => track.clips.map((clip) => [clip.placementId ?? clip.clipId, clip] as const))), [view]);
   const captionsByPlacementId = useMemo(() => new Map(view.captions.flatMap((caption) => caption.placementId ? [[caption.placementId, caption] as const] : [])), [view]);
   const timelineClipById = useMemo(() => new Map(clipSources(view).map((clip) => [clip.id, clip] as const)), [view]);
   // 클립 위에 그 클립의 **그림**을 그린다. 주소는 **받는다** -- 이 컴포넌트는
@@ -692,8 +701,13 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         const displayBounds = draftProjection.boundsByClipId.get(rect.clipId);
         const isTranscriptSelected = narrationClip?.segmentId === selectedSegmentId || captionsByPlacementId.get(rect.clipId)?.segmentId === selectedSegmentId;
         const isSelected = state.selectedClipId === rect.clipId;
-        const clipDisplayName = formatClipDisplayName(rect.lane, ordinalInLane, displayBounds?.startSec ?? 0);
-        const clipShortName = formatClipShortName(rect.lane, ordinalInLane);
+        const clipContent = clipContentLabel({
+          captionText: captionsByPlacementId.get(rect.clipId)?.text,
+          overlayType: overlayByPlacementId.get(rect.clipId)?.overlayType,
+          overlayPayload: overlayByPlacementId.get(rect.clipId)?.overlayPayload,
+        });
+        const clipDisplayName = formatClipDisplayName(rect.lane, ordinalInLane, displayBounds?.startSec ?? 0, clipContent);
+        const clipShortName = formatClipShortName(rect.lane, ordinalInLane, clipContent);
         return <div
         aria-label={`${clipDisplayName} 클립`}
         data-clip-id={rect.clipId}
