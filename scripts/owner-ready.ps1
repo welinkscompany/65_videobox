@@ -123,7 +123,7 @@ function Invoke-CapturedProcess {
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $processInfo
         if (-not $process.Start()) {
-            return [pscustomobject]@{ ExitCode = 127; StdOut = "" }
+            return [pscustomobject]@{ ExitCode = 127; StdOut = ""; StdErr = "" }
         }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
@@ -169,19 +169,25 @@ function Invoke-CapturedProcess {
             try { $process.StandardOutput.Dispose() } catch { }
             try { $process.StandardError.Dispose() } catch { }
             $process.Dispose()
-            return [pscustomobject]@{ ExitCode = 124; StdOut = "" }
+            # 시간 초과. 124는 "빌드가 틀렸다"가 아니라 "시계가 짧았다"는 뜻이다.
+            return [pscustomobject]@{ ExitCode = 124; StdOut = ""; StdErr = "TIMEOUT: the command was still running when the budget ran out." }
         }
         $stdout = [string]$stdoutTask.GetAwaiter().GetResult()
-        [void]$stderrTask.GetAwaiter().GetResult()
+        # stderr를 읽어 놓고 버리고 있었다. docker build는 진행과 오류를 여기로
+        # 내보내므로, 버리면 실패했을 때 볼 것이 하나도 남지 않는다.
+        $stderr = [string]$stderrTask.GetAwaiter().GetResult()
         $exitCode = $process.ExitCode
         $process.Dispose()
         if ($stdout.Length -gt 4096) {
             $stdout = $stdout.Substring(0, 4096)
         }
-        return [pscustomobject]@{ ExitCode = $exitCode; StdOut = $stdout }
+        if ($stderr.Length -gt 4096) {
+            $stderr = $stderr.Substring($stderr.Length - 4096)
+        }
+        return [pscustomobject]@{ ExitCode = $exitCode; StdOut = $stdout; StdErr = $stderr }
     }
     catch {
-        return [pscustomobject]@{ ExitCode = 127; StdOut = "" }
+        return [pscustomobject]@{ ExitCode = 127; StdOut = ""; StdErr = "" }
     }
 }
 
@@ -1016,14 +1022,32 @@ if ($Mode -ceq "Start") {
         Write-OwnerReadyPayload -Checks $checks
     }
     if ($Rebuild -and -not $PSBoundParameters.ContainsKey("WhatIf")) {
-        $rebuildResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 180)) -Arguments @(
+        # 화면 묶음을 처음부터 다시 만드는 빌드는 분 단위다. 캐시가 살아 있을 때만
+        # 빠르다. 2026-08-20에 이 둘을 같은 180초로 재다가 **181초짜리 멀쩡한
+        # 빌드가 잘려 거짓 FAIL**이 났다 -- 손으로 같은 명령을 돌리면 성공했다.
+        # 거짓 FAIL은 다음 사람이 진짜 실패와 구분할 수 없어서 더 나쁘다.
+        $rebuildResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 900)) -Arguments @(
             @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("build", "--pull=false", "videobox-workspace")
         )
         $rebuildStatus = if ($rebuildResult.ExitCode -eq 0) { "pass" } else { "fail" }
+        # 실패 안내가 "빌드 로그를 확인하세요"인데 로그를 아무 데도 안 남기면 그
+        # 안내는 빈말이다. 실패했을 때만, 끝부분만 남긴다.
+        $rebuildLogPath = $null
+        if ($rebuildStatus -cne "pass") {
+            try {
+                [void](New-Item -ItemType Directory -Force -Path $ReceiptRoot -ErrorAction Stop)
+                $rebuildLogPath = Join-Path $ReceiptRoot "rebuild-failure.log"
+                $rebuildLogText = @($rebuildResult.StdOut, $rebuildResult.StdErr) -join "`n"
+                $rebuildLogLines = @($rebuildLogText -split "`r?`n")
+                if ($rebuildLogLines.Count -gt 200) { $rebuildLogLines = $rebuildLogLines[-200..-1] }
+                Set-Content -LiteralPath $rebuildLogPath -Value ($rebuildLogLines -join [Environment]::NewLine) -Encoding utf8
+            }
+            catch { $rebuildLogPath = $null }
+        }
         $checks += New-OwnerReadyResult -Id "rebuild" -Status $rebuildStatus `
             -Summary $(if ($rebuildStatus -ceq "pass") { "현재 소스에서 VideoBox 이미지를 다시 만들었습니다." } else { "현재 소스에서 VideoBox 이미지를 다시 만들지 못했습니다." }) `
-            -Action $(if ($rebuildStatus -ceq "pass") { "이 이미지로 VideoBox를 시작합니다." } else { "Docker 빌드 로그와 현재 소스 의존성을 확인하세요." }) `
-            -Evidence @{ rebuilt = ($rebuildStatus -ceq "pass"); source = "current_worktree" }
+            -Action $(if ($rebuildStatus -ceq "pass") { "이 이미지로 VideoBox를 시작합니다." } elseif ($rebuildResult.ExitCode -eq 124) { "빌드가 아직 도는 중에 시간이 다 됐습니다. -TimeoutSec을 늘려 다시 시도하세요." } else { "남겨 둔 빌드 기록을 확인하세요." }) `
+            -Evidence @{ rebuilt = ($rebuildStatus -ceq "pass"); source = "current_worktree"; rebuild_log = $rebuildLogPath; timed_out = ($rebuildResult.ExitCode -eq 124) }
         if ($rebuildStatus -cne "pass") {
             Write-OwnerReadyPayload -Checks $checks
         }

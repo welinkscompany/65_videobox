@@ -4,6 +4,7 @@ import codecs
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -1928,3 +1929,44 @@ def test_yujin_memory_start_installs_profile_before_compose_up() -> None:
 
     guard = source.rfind("if ($WithYujinMemory)", 0, installer)
     assert guard != -1, "프로필 설치는 -WithYujinMemory 일 때만 실행해야 한다"
+
+
+def test_the_rebuild_budget_fits_a_cold_image_build() -> None:
+    """재빌드를 180초로 묶어 두면 **멀쩡한 빌드가 거짓 FAIL로 뜬다.**
+
+    2026-08-20에 실제로 겪었다. 화면 코드를 고친 뒤 재빌드하니 09:33:34에 시작해
+    09:36:35에 끝났다 -- **181초**, 제한시간 180초 바로 위다. 손으로 같은
+    `docker compose build`를 돌리면 성공한다. 즉 빌드는 멀쩡했고 시계만 짧았다.
+
+    화면 묶음을 처음부터 다시 만드는 빌드는 원래 분 단위다. 캐시가 살아 있을
+    때만 빠르다. 그 두 경우를 같은 잣대로 재면 안 된다.
+
+    거짓 FAIL이 더 나쁜 이유는 다음 사람이 **진짜 실패와 구분할 수 없기**
+    때문이다 -- 이 저장소는 "FAIL이 뜨면 진짜 실패"를 전제로 검증을 쌓아 왔다.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    rebuild_budget = re.search(
+        r"rebuildResult = Invoke-CapturedProcess[^\n]*CommandTimeoutSec \(\[Math\]::Max\(\$TimeoutSec, (\d+)\)\)",
+        script,
+    )
+
+    assert rebuild_budget is not None, "재빌드 제한시간을 찾지 못했다"
+    assert int(rebuild_budget.group(1)) >= 900, (
+        "재빌드 제한시간이 차가운 빌드보다 짧다. 실측 181초짜리 빌드가 180초 벽에 잘려 "
+        "거짓 FAIL이 났다."
+    )
+
+
+def test_a_failed_rebuild_keeps_the_log_it_tells_the_owner_to_read() -> None:
+    """실패 안내는 "Docker 빌드 로그를 확인하세요"인데 **로그를 아무 데도 안 남겼다.**
+
+    2026-08-20에 재빌드가 실패했을 때 원인을 알아내려고 같은 명령을 손으로 다시
+    돌려야 했다. 안내가 가리키는 것을 스스로 남기지 않으면 그 안내는 빈말이다.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    start = script.index("$rebuildResult = Invoke-CapturedProcess")
+    rebuild_block = script[start : script.index("-Evidence @{ rebuilt", start) + 400]
+
+    assert "rebuild_log" in rebuild_block, (
+        "재빌드가 실패해도 로그가 근거로 남지 않는다. 실패 원인을 다음 사람이 볼 수 있어야 한다."
+    )
