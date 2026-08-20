@@ -303,3 +303,26 @@ def test_the_build_context_ignores_the_heavy_trees_at_every_depth() -> None:
     # `artifacts/`는 일부러 루트 고정이다 -- `RESEARCH/*/artifacts/`에 커밋된
     # 기록이 있어서 `**/artifacts`로 하면 그것까지 빠진다.
     assert "artifacts" in patterns, "재생성 가능한 artifacts 트리가 빌드 컨텍스트에 실린다"
+
+
+def test_the_proxy_lets_through_every_upload_the_api_says_it_accepts() -> None:
+    """The API declares a 128MB ceiling for narration and B-roll uploads, but
+    nginx sits in front of it and defaults to 1MB when nobody says otherwise.
+    Neither config said otherwise, so the owner's real footage -- and any
+    narration longer than a few seconds -- came back as an nginx 413 HTML page
+    that no Korean error message and no test ever saw. Every test in this repo
+    talks to FastAPI directly and skips the proxy entirely, which is exactly
+    why this survived: both sides were tested, the seam between them was not.
+    """
+    from videobox_api.routers.draft_readiness import MAX_NARRATION_UPLOAD_BYTES
+
+    units = {"k": 1024, "m": 1024**2, "g": 1024**3}
+    for relative in ("docker/nginx.conf", "docker/workspace-nginx.conf"):
+        config = (ROOT / relative).read_text(encoding="utf-8")
+        declared = re.search(r"client_max_body_size\s+(\d+)([kmg]?)\s*;", config, re.IGNORECASE)
+        assert declared is not None, f"{relative} lets nginx fall back to its 1MB default"
+        allowed = int(declared.group(1)) * units.get(declared.group(2).lower(), 1)
+        assert allowed >= MAX_NARRATION_UPLOAD_BYTES, (
+            f"{relative} caps bodies at {allowed} bytes while the API accepts "
+            f"{MAX_NARRATION_UPLOAD_BYTES}; uploads die at the proxy with no readable reason"
+        )
