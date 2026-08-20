@@ -382,6 +382,49 @@ def test_motion_fits_inside_a_very_short_scene(tmp_path: Path) -> None:
     assert _strength(video, 0.55) < _strength(video, 0.75)
 
 
+@pytest.mark.skipif(
+    not FFMPEG_AVAILABLE or ICON_FONT is None, reason="ffmpeg or an icon font is unavailable"
+)
+def test_the_plan_graph_itself_survives_ffmpeg_and_moves_the_pixels(tmp_path: Path) -> None:
+    """완성본이 나오는 그래프를 **통짜로** ffmpeg에 넘겨 본다.
+
+    `-vf`로 필터 하나만 재면 반쪽이다. 그래프 경로는 여러 필터를 `;`로 이어
+    `-filter_complex`에 넘기고, 밀려 들어오기의 자리 식에는 따옴표와 쉼표가 들어
+    있다. 그 파서를 통과하는지, 그리고 실제로 움직이는지 여기서 확인한다.
+    """
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path / "store"),
+        overlay_font_file=ICON_FONT,
+        video_width=PROBE_WIDTH,
+        video_height=PROBE_HEIGHT,
+        video_fps=25,
+    )
+
+    for name, shape, motion in (
+        ("graph_box", "highlight_box", "slide_in_left"),
+        ("graph_icon", "icon_star", "slide_in_left"),
+    ):
+        graph = renderer.build_plan_filter_graph(
+            composition_plan=CompositionPlan.from_timeline(timeline={
+                "output": {"width": PROBE_WIDTH, "height": PROBE_HEIGHT},
+                "tracks": [],
+                "export_overlays": [_shape_overlay(shape=shape, motion=motion)],
+            }),
+            source_indices={},
+        )
+        output = tmp_path / f"{name}.mkv"
+        subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+             "-filter_complex", graph, "-map", "[vout]",
+             "-c:v", "ffv1", "-pix_fmt", "bgr0", str(output)],
+            check=True, capture_output=True, timeout=120,
+        )
+
+        early, later, resting = (_centroid_x(output, at) for at in (0.58, 0.75, 2.00))
+        assert early is not None and later is not None and resting is not None, name
+        assert early < later < resting, name
+
+
 # --- 픽셀로 재기: 아이콘(drawtext) ------------------------------------------
 
 
