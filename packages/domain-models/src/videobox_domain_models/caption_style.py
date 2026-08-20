@@ -3,13 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+from videobox_domain_models.caption_fonts import DEFAULT_CAPTION_FONT_FAMILY
+
 
 _RGBA = re.compile(r"^#[0-9A-Fa-f]{8}$")
 
 
 @dataclass(frozen=True, slots=True)
 class CaptionStyle:
-    font_family: str = "Arial"
+    # 기본값은 **실제로 설치돼 있는** 글꼴이어야 한다. 예전 기본값 `Arial`은
+    # 컨테이너에 없어서, 모양을 따로 고르지 않은 자막이 전부 조용히 다른
+    # 글꼴로 떨어지고 있었다.
+    font_family: str = DEFAULT_CAPTION_FONT_FAMILY
     font_size_px: int = 54
     text_color: str = "#FFFFFFFF"
     outline_color: str = "#000000FF"

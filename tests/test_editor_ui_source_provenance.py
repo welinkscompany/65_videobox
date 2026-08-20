@@ -71,7 +71,7 @@ EXPECTED_PIN_POLICY = {
     "opencut-classic": ("OpenCut-app/opencut-classic", "partial-port", "MIT", "https://github.com/OpenCut-app/opencut-classic/blob/cf5e79e919144200294fb9fed22a222592a0aeea/LICENSE"),
     "opencast-editor": ("opencast/editor", "partial-port", "Apache-2.0", "https://github.com/opencast/editor/blob/1208afb64d9de0ab50b321f84f9dd2695780db87/LICENSE"),
     "supabase": ("supabase/supabase", "reference-only", "Apache-2.0", "https://github.com/supabase/supabase/blob/1c827c5cbb29cacc6e9052adff2e1659e3cb05fb/LICENSE"),
-    "pretendard": ("orioncactus/pretendard", "locked-binary", "SIL OFL-1.1", "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE.txt"),
+    "pretendard": ("orioncactus/pretendard", "locked-binary", "SIL OFL-1.1", "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE"),
 }
 
 

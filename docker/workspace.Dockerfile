@@ -26,6 +26,12 @@ RUN pip install --no-cache-dir -r requirements-container.txt
 COPY . .
 COPY --from=web-build /app/dist /app/apps/web/dist
 
+# 자막용 한국어 글꼴. 전부 OFL-1.1이라 이미지에 함께 배포할 수 있고, 근거는
+# `assets/fonts/korean/provenance.json`과 THIRD_PARTY_NOTICES.md에 있다.
+# 이 자리에 없으면 libass가 조용히 다른 글꼴로 떨어져 완성본만 달라진다.
+COPY assets/fonts/korean /usr/share/fonts/truetype/videobox-korean
+RUN fc-cache -f
+
 RUN groupadd --gid 10001 videobox-api \
     && useradd --uid 10001 --gid 10001 --create-home videobox-api \
     && groupadd --gid 10002 videobox-web \

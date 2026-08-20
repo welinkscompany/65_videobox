@@ -89,8 +89,8 @@ def test_ass_preserves_per_caption_window_style() -> None:
         video_height=180,
     )
 
-    assert "Style: Default,Arial,9,&H00FFFFFF" in ass
-    assert "Style: Segment1,Arial,9,&H000000FF" in ass
+    assert "Style: Default,Pretendard,9,&H00FFFFFF" in ass
+    assert "Style: Segment1,Pretendard,9,&H000000FF" in ass
     assert "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,left" in ass
     assert "Dialogue: 0,0:00:01.00,0:00:02.00,Segment1,,0,0,0,,right" in ass
 
