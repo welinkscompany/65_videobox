@@ -90,6 +90,12 @@ CAPTION_FONT_DIRECTORIES: tuple[str, ...] = (
     str(_REPOSITORY_ROOT / BUNDLED_FONT_DIRECTORY),
 )
 
+# 우리가 내주는 이름 전부. **이 기계에 있다는 뜻이 아니다** -- 그것은
+# `is_installed_caption_font()`가 답한다. 자를 둘로 나눠 둔 이유는, 소스에 박힌
+# 이름이 오타인지 묻는 것과 이 기계가 그릴 수 있는지 묻는 것이 다른 질문이고,
+# 뒤쪽 답은 기계마다 다르기 때문이다.
+CAPTION_FONT_FAMILIES: frozenset[str] = frozenset(font.family for font in CAPTION_FONTS)
+
 _FONT_FILE_SUFFIXES = frozenset({".ttf", ".otf", ".ttc", ".otc"})
 # 글꼴 안의 이름표 중 fontconfig가 갈래 이름으로 쓰는 둘. 16번이 있으면 그것이
 # 갈래 이름이고(`Noto Sans KR`), 1번은 굵기까지 붙은 이름일 수 있다
