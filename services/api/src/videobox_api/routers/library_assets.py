@@ -69,7 +69,10 @@ def build_library_assets_router(
         value["origin"] = LibraryAssetOrigin.USER.value
         value["preview_url"] = f"/api/library/assets/{asset.library_asset_id}/preview"
         value["thumbnail_url"] = f"/api/library/assets/{asset.library_asset_id}/thumbnail"
-        value["waveform_url"] = f"/api/library/assets/{asset.library_asset_id}/waveform"
+        # 그림에는 소리가 없다. 파형 주소를 내려보내면 화면이 그 자리를 만들고
+        # 아무것도 못 그린 채 남는다.
+        if asset.media_type is not LibraryMediaType.IMAGE:
+            value["waveform_url"] = f"/api/library/assets/{asset.library_asset_id}/waveform"
         return value
 
     def public_builtin(item: dict[str, Any]) -> dict[str, Any]:
@@ -228,6 +231,10 @@ def build_library_assets_router(
         provider = getattr(request.app.state, "media_analysis_embedding_provider", None)
         model_name = (getattr(request.app.state, "media_analysis_profile", None) or {}).get("embedding_model_name")
         semantic = False
+        # 그림에는 아직 색인이 없다. 음원 색인에 물어보면 조용히 0건이 돌아와
+        # 우연히 정직해지는데, 색인이 생기는 날 그 우연이 깨진다. 여기서 막는다.
+        if kind is LibraryMediaType.IMAGE:
+            provider = None
         if provider is not None and model_name:
             try:
                 vector = [float(value) for value in provider.embed(EmbeddingRequest(model_name=model_name, inputs=(q.strip(),))).vectors[0]]
@@ -407,6 +414,8 @@ def build_library_assets_router(
         if derivative_kind not in {"thumbnail", "waveform"}:
             raise HTTPException(status_code=404, detail="derivative_missing")
         asset, builtin = find_asset(asset_id)
+        if asset is not None and asset.media_type is LibraryMediaType.IMAGE and derivative_kind == "waveform":
+            raise HTTPException(status_code=404, detail="derivative_missing")
         if builtin is not None:
             return {"library_asset_id": asset_id, "kind": derivative_kind, "source_hash": builtin.get("sha256"), "version": DERIVATIVE_VERSION}
         source = source_for_user(asset)
@@ -501,7 +510,11 @@ def _ensure_derivative(store: LibraryUserAssetStore, root: Path, asset: Any, kin
 
 
 def _render_derivative(*, source: Path, media_type: str, kind: str) -> bytes | None:
-    if media_type == "broll":
+    if media_type == "image":
+        # 파형 필터(`showwavespic`)를 그림에 태우면 ffmpeg가 실패하고, 화면에는
+        # 해시 막대 대체 이미지가 떠서 "썸네일이 있다"고 거짓말한다.
+        command = ["ffmpeg", "-y", "-v", "error", "-i", str(source), "-frames:v", "1", "-vf", "scale=640:360:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
+    elif media_type == "broll":
         command = ["ffmpeg", "-y", "-v", "error", "-ss", "0", "-i", str(source), "-frames:v", "1", "-vf", "scale=640:360:force_original_aspect_ratio=decrease", "-f", "image2pipe", "-vcodec", "png", "pipe:1"]
     else:
         height = "220" if kind == "waveform" else "360"

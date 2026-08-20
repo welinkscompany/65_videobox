@@ -25,7 +25,7 @@ from videobox_domain_models.library_assets import (
 LIBRARY_USER_ASSET_SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_user_assets (
     library_asset_id TEXT PRIMARY KEY,
-    media_type TEXT NOT NULL CHECK (media_type IN ('broll', 'music', 'sfx')),
+    media_type TEXT NOT NULL CHECK (media_type IN ('broll', 'music', 'sfx', 'image')),
     origin TEXT NOT NULL CHECK (origin IN ('builtin', 'user')),
     lifecycle TEXT NOT NULL CHECK (lifecycle IN ('processing', 'ready', 'needs_attention', 'trashed')),
     content_sha256 TEXT NOT NULL UNIQUE,
@@ -105,6 +105,64 @@ def ensure_library_user_asset_schema(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE library_ingest_items ADD COLUMN content_sha256 TEXT")
     if "media_type" not in columns:
         connection.execute("ALTER TABLE library_ingest_items ADD COLUMN media_type TEXT")
+    _widen_media_type_check(connection)
+
+
+def _widen_media_type_check(connection: sqlite3.Connection) -> None:
+    """Let a library made before images accept them.
+
+    SQLite cannot alter a CHECK constraint, so the table is rebuilt.  Without
+    this the screen shows a `그림` tab on an existing library and every drop
+    fails at the database -- exactly the silent lie this repo keeps finding.
+    """
+    definition = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'library_user_assets'"
+    ).fetchone()
+    if definition is None:
+        return
+    sql = str(definition[0] if not isinstance(definition, sqlite3.Row) else definition["sql"])
+    if "'image'" in sql:
+        return
+    widened = LIBRARY_USER_ASSET_SCHEMA.split("CREATE INDEX", 1)[0].replace(
+        "CREATE TABLE IF NOT EXISTS library_user_assets",
+        "CREATE TABLE library_user_assets_migrated",
+    )
+    # Copy by explicit column list: an older library may be missing a column
+    # this schema added later, and `SELECT *` would then shift the values.
+    target_columns = [
+        "library_asset_id", "media_type", "origin", "lifecycle", "content_sha256",
+        "managed_relative_path", "byte_count", "mime_type", "technical_json",
+        "machine_json", "user_json", "provenance_json", "created_at", "updated_at",
+        "trashed_at",
+    ]
+    existing = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_user_assets)")}
+    selected = ", ".join(name if name in existing else "NULL" for name in target_columns)
+    # Derivatives cascade and project references restrict on this table.  With
+    # the guard left on, dropping the old parent would take the owner's
+    # thumbnails with it or refuse outright, so it is off for the swap only.
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DROP TABLE IF EXISTS library_user_assets_migrated")
+        # A single statement, so `execute` -- `executescript` would commit the
+        # transaction opened just above and leave the swap half-applied.
+        connection.execute(widened)
+        connection.execute(
+            f"INSERT INTO library_user_assets_migrated ({', '.join(target_columns)}) "
+            f"SELECT {selected} FROM library_user_assets"
+        )
+        connection.execute("DROP TABLE library_user_assets")
+        connection.execute("ALTER TABLE library_user_assets_migrated RENAME TO library_user_assets")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_library_user_assets_type_lifecycle"
+            " ON library_user_assets (media_type, lifecycle, updated_at)"
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
 
 
 def _now() -> str:
