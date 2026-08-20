@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 import asyncio
+import logging
 import os
 import json
 from threading import Event, Thread
@@ -131,6 +132,33 @@ class ProposalApplyRequest(BaseModel):
 
 class ProposalBatchApplyRequest(ProposalApplyRequest):
     """A single explicit user action; materialization happens only inside this endpoint."""
+
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _apply_failure_detail(exc: BaseException) -> str:
+    """무엇이 잘못됐는지 그대로 흘려보낸다.
+
+    이 자리는 원래 원인 여덟 가지를 `candidate_unavailable` 하나로 뭉개고
+    `from None`으로 어디서 터졌는지까지 지웠다. **원인을 지우는 오류는 잘못된
+    진단을 만들어 낸다** -- 2026-08-20에 실제로 그랬다. 단서가 없으니 "지문이
+    80자에서 잘렸다"는 그럴듯하고 틀린 이야기가 나왔고, 재 보니 지문은 149자로
+    온전했고 파일 해시도 정확히 일치했다.
+
+    이 저장소의 `ValueError`는 이미 코드를 들고 다닌다(`candidate_ids_duplicate`,
+    `target_segment_missing`, `candidate_analysis_unavailable` …). 여기에 목록을
+    또 적으면 두 벌이 갈라지므로, **코드처럼 생겼으면 그대로 내보낸다.**
+
+    `KeyError`는 다르다. 그 문자열은 없는 열쇠 자체라 화면에 내보낼 말이 아니다.
+    예전 이름을 그대로 쓰되 **기록에는 남긴다** -- 조용히 사라지지 않게.
+    """
+    if isinstance(exc, ValueError):
+        code = str(exc).strip()
+        if code and " " not in code and code.replace("_", "").isalnum():
+            return code
+    _LOGGER.warning("추천 적용이 막혔습니다.", exc_info=exc)
+    return "candidate_unavailable"
 
 
 def build_director_proposals_router(
@@ -375,8 +403,8 @@ def build_director_proposals_router(
         try:
             candidate = candidate_for(project_id, proposal_id, candidate_id)
             source = materializer.preview_snapshot(project_id=project_id, candidate=candidate)
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=422, detail="candidate_unavailable") from None
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=_apply_failure_detail(exc)) from exc
         return FileResponse(source, media_type=_mime_type(source), background=BackgroundTask(_remove_preview_snapshot, source), headers={"X-VideoBox-Proposal-Controls": json.dumps(dict(candidate.controls), sort_keys=True), "X-VideoBox-Autoplay": "false", "X-VideoBox-In-Sec": str(candidate.controls.get("in_sec", "")), "X-VideoBox-Out-Sec": str(candidate.controls.get("out_sec", ""))})
 
     @router.post("/api/projects/{project_id}/director/proposals/{proposal_id}/candidates/{candidate_id:path}/materialize", status_code=status.HTTP_201_CREATED)
@@ -386,8 +414,8 @@ def build_director_proposals_router(
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)
             require_ready(proposal)
             return materializer.materialize(project_id=project_id, candidate=candidate, expected_asset_index_revision=proposal.asset_index_revision)
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=422, detail="candidate_unavailable") from None
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=_apply_failure_detail(exc)) from exc
 
     @router.post("/api/projects/{project_id}/director/proposals/{proposal_id}/refresh", status_code=status.HTTP_201_CREATED)
     def refresh(project_id: str, proposal_id: str) -> dict:
@@ -457,8 +485,8 @@ def build_director_proposals_router(
             return store.apply_director_proposal_transaction(project_id=project_id, session_id=proposal.source_session_id, proposal_id=proposal_id, session_payload=updated, expected_revision=body.expected_revision, proposal_base_revision=proposal.base_session_revision, materialized_expectations=expectations)
         except HTTPException:
             raise
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=422, detail="candidate_unavailable") from None
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=_apply_failure_detail(exc)) from exc
         except EditingSessionRevisionConflict:
             raise HTTPException(status_code=409, detail="session_revision_mismatch") from None
 
@@ -535,8 +563,8 @@ def build_director_proposals_router(
             raise
         except EditingSessionRevisionConflict:
             raise HTTPException(status_code=409, detail="stale_proposal") from None
-        except (KeyError, ValueError):
-            raise HTTPException(status_code=422, detail="candidate_unavailable") from None
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=_apply_failure_detail(exc)) from exc
         finally:
             materializer.cleanup_staged(staged)
 

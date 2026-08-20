@@ -104,7 +104,9 @@ def test_stale_review_blocks_output_until_reapproval_restores_current_freshness(
     runner = LocalPipelineRunner(store)
 
     assert store.get_review_state(project_id=project.project_id, timeline_id=timeline["timeline_id"])["is_current"] is False
-    with pytest.raises(ValueError, match="explicit approval"):
+    # 게이트가 영어 문장 대신 코드를 던진다 -- 문장은 화면이 creator 문구로
+    # 옮길 방법이 없어서, 완성본이 실패해도 이유가 owner에게 못 갔다.
+    with pytest.raises(ValueError, match="final_output_requires_review_approval"):
         runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
 
     approved = runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
