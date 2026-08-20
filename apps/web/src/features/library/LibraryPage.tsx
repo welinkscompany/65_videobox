@@ -12,6 +12,9 @@ function fileType(file: File): LibraryMediaType | null {
   const name = file.name.toLowerCase();
   if (file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|avi|mkv)$/.test(name)) return "broll";
   if (file.type.startsWith("audio/") || /\.(mp3|wav|m4a|ogg|flac|aac)$/.test(name)) return name.includes("sfx") || name.includes("effect") ? "sfx" : "music";
+  // `.webp`는 영상 `.webm`과 한 글자 차이다. 위의 영상 판정이 먼저 지나가므로
+  // 여기서 잡아도 안전하다.
+  if (file.type.startsWith("image/") || /\.(png|jpg|jpeg|webp)$/.test(name)) return "image";
   return null;
 }
 
@@ -51,7 +54,10 @@ export function LibraryPage() {
       // 종류 탭을 고르고 검색하면 의미검색(`/api/library/search`)을 부른다.
       // 이 엔드포인트는 백엔드에 있었는데 부르는 화면이 없어 검색이 언제나
       // 단어 매칭이었다. 종류가 없는 탭(전체·즐겨찾기·휴지통)은 목록 검색 그대로다.
-      const semanticEligible = Boolean(search.trim()) && (activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx");
+      // 그림도 이 길로 보낸다. 그림에는 의미 색인이 없어 서버가 `semantic:
+      // false`를 돌려주고, 배지가 `단어로만 찾음`으로 정직하게 뜬다. 목록
+      // 검색으로 돌리면 어느 방식으로 찾았는지 아예 말하지 못한다.
+      const semanticEligible = Boolean(search.trim()) && (activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image");
       let nextAssets: LibraryAsset[];
       if (semanticEligible) {
         const result = await api.searchLibraryAssets(search.trim(), activeFilter as LibraryMediaType, undefined);
@@ -92,6 +98,7 @@ export function LibraryPage() {
     broll: assets.filter((item) => item.media_type === "broll" && item.lifecycle !== "trashed").length,
     music: assets.filter((item) => item.media_type === "music" && item.lifecycle !== "trashed").length,
     sfx: assets.filter((item) => item.media_type === "sfx" && item.lifecycle !== "trashed").length,
+    image: assets.filter((item) => item.media_type === "image" && item.lifecycle !== "trashed").length,
     favorites: assets.filter((item) => Boolean(item.user_metadata?.favorite)).length,
     trash: assets.filter((item) => item.lifecycle === "trashed").length,
   }), [assets]);

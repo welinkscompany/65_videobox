@@ -1,6 +1,6 @@
-import { api, type BrollAsset, type MediaLibraryAsset } from "../../../api";
+import { api, type BrollAsset, type LibraryAsset, type MediaLibraryAsset } from "../../../api";
 
-export type EditorAssetKind = "broll" | "bgm" | "sfx";
+export type EditorAssetKind = "broll" | "bgm" | "sfx" | "image";
 export type EditorAssetPreviewKind = "audio" | "video" | "image";
 export type EditorAssetAudioPresence = "오디오 있음" | "오디오 없음" | "오디오 정보 확인 중";
 /** Derived from the media at intake, not a tag the owner writes. */
@@ -47,6 +47,8 @@ export type ProjectEditorAssetsInput = Readonly<{
   projectId: string;
   brollAssets: readonly BrollAsset[];
   libraryAssets: readonly MediaLibraryAsset[];
+  /** 여러 프로젝트가 나눠 쓰는 라이브러리의 그림. 아직 이 프로젝트 자산이 아니다. */
+  libraryImageAssets?: readonly LibraryAsset[];
 }>;
 
 const brollLabels: Readonly<Record<string, string>> = {
@@ -197,6 +199,43 @@ function projectLibrary(asset: MediaLibraryAsset, index: number): EditorAssetCar
 }
 
 /**
+ * 라이브러리 그림 카드.
+ *
+ * `assetId`가 비어 있는 것이 이 카드의 성질이다 -- 아직 프로젝트로 복사되지
+ * 않았으므로 오버레이가 부를 프로젝트 자산 식별자가 없다. 얹는 순간 복사하고
+ * 그때 받은 식별자로 **이미 있는** 이미지 오버레이 경로를 탄다.
+ */
+function libraryPicture(asset: LibraryAsset, index: number): EditorAssetCard {
+  const filename = typeof asset.user_metadata?.filename === "string" ? asset.user_metadata.filename.trim() : "";
+  return {
+    id: `library-image:${asset.library_asset_id}`,
+    kind: "image",
+    assetId: "",
+    libraryAssetId: asset.library_asset_id,
+    label: "그림",
+    title: filename || `그림 ${index + 1}`,
+    // 그림에는 길이가 없다. `길이 정보 없음`은 물어볼 것이 아닌 것에 답하는 꼴이다.
+    durationLabel: "",
+    status: asset.lifecycle === "needs_attention" ? "확인 필요" : asset.lifecycle === "processing" ? "준비 중" : "준비됨",
+    audioPresence: "오디오 없음",
+    thumbnailUrl: asset.thumbnail_url ?? undefined,
+    license: "내 그림",
+    canApply: asset.lifecycle === "ready",
+    previewUrl: asset.preview_url ?? api.libraryAssetPreviewUrl(asset.library_asset_id),
+    previewKind: "image",
+    requiresBrowserPreviewPreparation: false,
+    sourceMetadata: {
+      tags: Array.isArray(asset.tags) ? asset.tags : [],
+      source: "내 라이브러리",
+      creator: "",
+      officialLicenseUrl: "",
+      attributionRequired: false,
+      attributionText: "",
+    },
+  };
+}
+
+/**
  * 초안이 빈 자리를 표시하려고 넣는 자산은 고를 수 있는 재료가 아니다.
  * 저장소가 `in_app_only`로 표시하고 합성 계획도 렌더 입력에서 빼는데, 이
  * 목록에만 남아 "B-roll 1"·0초짜리 재료처럼 보였다.
@@ -205,7 +244,7 @@ function isInAppPlaceholder(asset: BrollAsset): boolean {
   return (asset.metadata ?? {}).in_app_only === true;
 }
 
-export function projectEditorAssets({ projectId, brollAssets, libraryAssets }: ProjectEditorAssetsInput): EditorAssetCard[] {
+export function projectEditorAssets({ projectId, brollAssets, libraryAssets, libraryImageAssets = [] }: ProjectEditorAssetsInput): EditorAssetCard[] {
   // 번호는 걸러낸 뒤에 매긴다. 앞의 것을 숨긴 채 원래 순번을 쓰면 "B-roll 2"로
   // 시작해 owner가 하나를 잃어버렸다고 읽는다.
   const brollCards = brollAssets
@@ -217,7 +256,12 @@ export function projectEditorAssets({ projectId, brollAssets, libraryAssets }: P
     libraryIndexes[asset.media_type] += 1;
     return projectLibrary(asset, index);
   });
-  return [...brollCards, ...libraryCards];
+  // 휴지통에 넣은 그림은 고를 수 있는 재료가 아니다. 남겨 두면 얹는 순간
+  // 프로젝트 복사가 실패한다.
+  const pictureCards = libraryImageAssets
+    .filter((asset) => asset.lifecycle !== "trashed")
+    .map((asset, index) => libraryPicture(asset, index));
+  return [...brollCards, ...libraryCards, ...pictureCards];
 }
 
 export function filterEditorAssets(cards: readonly EditorAssetCard[], filter: EditorAssetFilter): EditorAssetCard[] {

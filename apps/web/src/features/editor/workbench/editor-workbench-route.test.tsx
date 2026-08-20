@@ -406,6 +406,7 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [] });
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
     vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
     vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
@@ -1811,6 +1812,42 @@ describe("EditorWorkbenchRoute", () => {
 
     await waitFor(() => expect(applyOverlay).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
       asset_id: "image-1",
+      text: "",
+      expected_revision: 1,
+    }));
+  });
+
+  it("copies a shared-library picture into the project before laying it over the scene", async () => {
+    // 라이브러리 그림은 프로젝트 자산이 아니라서 오버레이가 부를 식별자가
+    // 없다. 먼저 프로젝트로 복사하고, 그 결과 자산으로 얹는다 -- 이미 있는
+    // 이미지 오버레이 경로를 그대로 쓴다.
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [{
+        library_asset_id: "user_image_1",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "ready",
+        user_metadata: { filename: "바다.png" },
+        thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+        preview_url: "/api/library/assets/user_image_1/preview",
+      }],
+      total: 1,
+    } as never);
+    const materialize = vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({
+      asset: { asset_id: "project-image-9", asset_type: "image", storage_uri: "file:///x.png" },
+      reference: { reference_id: "ref-1", project_id: "project-a", library_asset_id: "user_image_1" },
+    } as never);
+    const applyOverlay = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "바다.png 화면에 얹기" });
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "바다.png 화면에 얹기" }));
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("user_image_1", "project-a"));
+    await waitFor(() => expect(applyOverlay).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "project-image-9",
       text: "",
       expected_revision: 1,
     }));
@@ -4213,6 +4250,7 @@ describe("서버 출력 변형 연결", () => {
     vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
     vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
     vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);

@@ -33,6 +33,7 @@ const filters: readonly Readonly<{ type: "all" | EditorAssetKind; label: string 
   { type: "broll", label: "영상" },
   { type: "bgm", label: "음악" },
   { type: "sfx", label: "효과음" },
+  { type: "image", label: "그림" },
 ];
 
 const orientationFilters: readonly { value: "all" | EditorAssetOrientation; label: string }[] = [
@@ -210,7 +211,10 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <div className="vb-editor-assets__actions">
             <Button type="button" aria-label={`${card.title} ${previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}`} disabled={!card.previewUrl || previewState?.status === "preparing"} onClick={() => onPreview(card)}>{previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}</Button>
             {previewState?.status === "failed" && onRefreshExactPreview ? <Button type="button" variant="outline" onClick={onRefreshExactPreview}>정확한 미리보기 새로고침</Button> : null}
-            <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>
+            {/* 라이브러리 그림에는 `적용`이 없다. 그건 장면 영상을 갈아 끼우는
+                길인데 그림으로는 할 수 없고, 단추만 두면 눌러 보고 나서야 안다.
+                그림이 장면에 닿는 길은 아래 `화면에 얹기` 하나다. */}
+            {card.kind === "image" ? null : <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>}
             {/* 이미지만: 장면을 바꾸는 `적용`(B-roll)과 달리, 장면 위에 얹는다.
                 오버레이 endpoint와 렌더는 처음부터 있었는데 이미지를 고를 자리가
                 없었다 -- 자산 목록이 그 선택기다. */}

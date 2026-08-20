@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
@@ -20,6 +20,8 @@ type AssetState = Readonly<{
   key: string;
   brollAssets: readonly BrollAsset[];
   libraryAssets: readonly MediaLibraryAsset[];
+  /** 여러 프로젝트가 나눠 쓰는 라이브러리의 그림 (owner 승인 2026-08-20). */
+  libraryImageAssets: readonly LibraryAsset[];
   error: string | null;
 }>;
 type DirectorState = Readonly<{
@@ -206,7 +208,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [refreshToken, setRefreshToken] = useState(0);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
-  const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
+  const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], libraryImageAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
   const [director, setDirector] = useState<DirectorState>(() => createDirectorState(requestKey, sessionId));
   const [memory, setMemory] = useState<MemoryState>(() => createMemoryState(requestKey));
@@ -470,13 +472,13 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   }, [partialRecoveryRetryToken, projectId, requestKey, sessionId, state.session?.updatedAt]);
   useEffect(() => {
     if (!sessionId) {
-      setAssets({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
+      setAssets({ key: requestKey, brollAssets: [], libraryAssets: [], libraryImageAssets: [], error: null });
       return;
     }
     const epoch = routeEpoch.current.value;
     let active = true;
     const isCurrent = () => active && routeEpoch.current.value === epoch;
-    setAssets({ key: requestKey, brollAssets: [], libraryAssets: [], error: null });
+    setAssets({ key: requestKey, brollAssets: [], libraryAssets: [], libraryImageAssets: [], error: null });
     void api.listBrollAssets(projectId).then((brollAssets) => {
       if (!isCurrent()) return;
       setAssets((current) => current.key === requestKey ? { ...current, brollAssets } : current);
@@ -487,6 +489,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     void api.listMediaLibraryAssets().then(({ assets: libraryAssets }) => {
       if (!isCurrent()) return;
       setAssets((current) => current.key === requestKey ? { ...current, libraryAssets } : current);
+    }).catch(() => {
+      if (!isCurrent()) return;
+      setAssets((current) => current.key === requestKey ? { ...current, error: assetLoadError } : current);
+    });
+    // 라이브러리 그림. 프로젝트마다 다시 넣지 않고 한 번 넣어 여러 프로젝트가
+    // 나눠 쓴다. 얹기 전까지는 이 프로젝트 자산이 아니다.
+    void api.listLibraryAssets({ mediaType: "image", limit: 500 }).then(({ assets: libraryImageAssets }) => {
+      if (!isCurrent()) return;
+      setAssets((current) => current.key === requestKey ? { ...current, libraryImageAssets } : current);
     }).catch(() => {
       if (!isCurrent()) return;
       setAssets((current) => current.key === requestKey ? { ...current, error: assetLoadError } : current);
@@ -698,11 +709,26 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   // 이미지 자산을 장면 **위에** 얹는다. `적용`(B-roll 교체)과 다른 길이다.
   // 오버레이 endpoint와 렌더는 처음부터 있었는데 화면에 부르는 자리가 없었다.
   // 문구는 나중에 편집 항목의 `이미지` 절에서 붙일 수 있으므로 빈 값으로 만든다.
+  // 라이브러리 그림은 아직 이 프로젝트 자산이 아니다. 오버레이는 프로젝트
+  // 자산 식별자만 읽으므로 먼저 복사한다. 복사는 내용 해시로 이미 있는 것을
+  // 다시 쓰므로, 같은 그림을 여러 장면에 얹어도 사본이 늘지 않는다.
   const applyImageOverlay = (card: EditorAssetCard, segmentId: string) =>
-    commitTimelineMutation((port) => port.applyOverlay({ kind: "image", segmentId, assetId: card.assetId, text: "" }));
+    commitTimelineMutation(async (port, isCurrent) => {
+      let assetId = card.assetId;
+      if (!assetId && card.libraryAssetId) {
+        const materialized = await api.materializeLibraryAsset(card.libraryAssetId, projectId);
+        if (!isCurrent()) return;
+        assetId = materialized.asset.asset_id;
+      }
+      if (!assetId) throw new Error("asset identifier is missing");
+      return port.applyOverlay({ kind: "image", segmentId, assetId, text: "" });
+    });
   const applyAssetCard = (card: EditorAssetCard, segmentId: string) => card.kind === "broll"
     ? commitTimelineMutation((port) => port.applyMedia({ kind: "broll", segmentId, assetId: card.assetId }))
     : commitTimelineMutation(async (port, isCurrent) => {
+      // 그림은 장면을 갈아 끼우지 않고 그 위에 얹는다. 화면에도 `적용` 단추가
+      // 없지만, 이 갈래가 열려 있으면 다른 호출자가 조용히 잘못 들어온다.
+      if (card.kind === "image") throw new Error("pictures are laid over a scene, not applied to it");
       if (!card.libraryAssetId) throw new Error("library asset identifier is missing");
       const materialized = await api.materializeMediaLibraryAsset(card.libraryAssetId, projectId);
       if (!isCurrent()) return;
@@ -869,7 +895,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       }));
   };
   const assetCards = assets.key === requestKey
-    ? projectEditorAssets({ projectId, brollAssets: assets.brollAssets, libraryAssets: assets.libraryAssets })
+    ? projectEditorAssets({ projectId, brollAssets: assets.brollAssets, libraryAssets: assets.libraryAssets, libraryImageAssets: assets.libraryImageAssets })
     : [];
   const prepareAssetPreview = async (card: EditorAssetCard) => {
     assetPreviewAbort.current?.abort();
