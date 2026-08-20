@@ -18,6 +18,15 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(min_length=1)
 
 
+class RenameProjectRequest(BaseModel):
+    # `extra="forbid"`: a caller that also sends `status` or `project_id` gets
+    # told, rather than watching the request succeed while those fields were
+    # silently dropped. Only the display name is editable here.
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str = Field(min_length=1, max_length=200)
+
+
 class OutputVariantCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

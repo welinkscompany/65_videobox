@@ -23,6 +23,7 @@ import { JobRecovery } from "../features/jobs/JobRecovery";
 import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { ConversationCleanup } from "../features/settings/ConversationCleanup";
 import { HomeYujinChat } from "../features/home/HomeYujinChat";
+import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 
 // 프로젝트에 매이지 않는 전역 목적지도 껍데기 안에서 그린다(owner 지적
@@ -54,7 +55,7 @@ function saveSettings(next: SettingsState): boolean {
 }
 export function opensLastProjectOnStart() { return readSettings().openLastProject; }
 
-export function ProductShell({ projectId, projects, archive, section, onNavigate, onOpenSettings, onArchiveProject, onDeleteProjectPermanently, children, forceCollapsed = false }: { projectId: string; projects: Project[]; archive?: ProjectArchiveControls; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; onArchiveProject?: (projectId: string) => void | Promise<void>; onDeleteProjectPermanently?: (projectId: string) => void | Promise<void>; children: ReactNode; forceCollapsed?: boolean }) {
+export function ProductShell({ projectId, projects, archive, section, onNavigate, onOpenSettings, onArchiveProject, onDeleteProjectPermanently, onRenameProject, children, forceCollapsed = false }: { projectId: string; projects: Project[]; archive?: ProjectArchiveControls; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; onArchiveProject?: (projectId: string) => void | Promise<void>; onDeleteProjectPermanently?: (projectId: string) => void | Promise<void>; onRenameProject?: (projectId: string, name: string) => void | Promise<void>; children: ReactNode; forceCollapsed?: boolean }) {
   // Task 32: archived projects are loaded only when the owner opens the
   // archive, so the common path keeps its single project request.
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -62,6 +63,9 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
+  // 제목을 바꾸는 창은 메뉴 **밖**에서 그린다. 드롭다운 안에 두면 메뉴가 닫힐
+  // 때 창까지 함께 사라져 첫 글자도 못 적는다.
+  const [renameTargetId, setRenameTargetId] = useState<string | null>(null);
   const [projectActionError, setProjectActionError] = useState<string | null>(null);
   const [projectActionBusy, setProjectActionBusy] = useState<string | null>(null);
   // Permanent delete needs two separate confirmations (owner decision,
@@ -77,6 +81,7 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
     if (!collapsed) setCollapsed(true);
   } else if (!forceCollapsed) previousForceCollapsed.current = false;
   const current = projects.find((project) => project.project_id === projectId);
+  const renameTarget = projects.find((project) => project.project_id === renameTargetId) ?? null;
   const hasProject = Boolean(projectId && current);
   const globalNav = [["프로젝트", "/projects", Home], ["내 라이브러리", "/library", Images], ["촬영본 정리", "/footage", Video], ["설정", "/settings/general", Settings]] as const;
   // 검토와 출력은 한 화면이 됐다. 단추도 하나다 -- 같은 곳으로 가는 단추를
@@ -122,6 +127,7 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button className="vb-project-more" variant="ghost" size="icon" aria-label={`${project.name} 더보기`} title={`${project.name} 더보기`}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="start">
+            {onRenameProject ? <DropdownMenuItem onSelect={() => setRenameTargetId(project.project_id)}>제목 바꾸기</DropdownMenuItem> : null}
             {onArchiveProject ? (archiveConfirmId === project.project_id ? (
               <DropdownMenuItem disabled={projectActionBusy === `archive:${project.project_id}`} onSelect={() => { setArchiveConfirmId(null); void runProjectAction(`archive:${project.project_id}`, () => onArchiveProject(project.project_id)); }}>보관 확인</DropdownMenuItem>
             ) : (
@@ -151,7 +157,14 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
             <Button variant="outline" disabled={projectActionBusy === `restore:${project.project_id}`} aria-label={`${project.name} 되돌리기`} onClick={() => void runProjectAction(`restore:${project.project_id}`, () => archive.restore(project.project_id))}>되돌리기</Button>
           </div>
         ))}
-      </div> : null}{projectActionError ? <p className="vb-project-action-error" role="alert">{projectActionError}</p> : null}</div> : null}
+      </div> : null}{projectActionError ? <p className="vb-project-action-error" role="alert">{projectActionError}</p> : null}
+      {onRenameProject && renameTarget ? <ProjectTitleDialog
+        projectId={renameTarget.project_id}
+        currentName={renameTarget.name}
+        open
+        onOpenChange={(next) => { if (!next) setRenameTargetId(null); }}
+        onRename={onRenameProject}
+      /> : null}</div> : null}
       </SidebarHeader><SidebarContent>
         {hasProject ? <nav aria-label="프로젝트 단계" className="vb-product-nav"><p className="vb-sidebar-section-label group-data-[collapsible=icon]:hidden">프로젝트 단계</p><SidebarMenu>{stageNav.map(([label, target, Icon]) => <SidebarMenuItem key={target}><SidebarMenuButton aria-label={label} isActive={target === "create" ? section === "create" || section === "home" : target === "media" ? section === "media" : target === "editing" ? section === "editing" : section === "review" || section === "timeline" || section === "outputs"} tooltip={label} onClick={() => go(target)}><Icon aria-hidden="true" /><span className="vb-nav-label group-data-[collapsible=icon]:hidden">{label}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></nav> : null}
       </SidebarContent><SidebarFooter><div className="vb-sidebar-footer"><small className="group-data-[collapsible=icon]:hidden">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small></div></SidebarFooter><SidebarRail aria-label={collapsed ? "작업실 펼치기" : "작업실 접기"} title={collapsed ? "작업실 펼치기" : "작업실 접기"} />

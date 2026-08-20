@@ -16,6 +16,7 @@ from videobox_api.models import (
     ProjectListResponse,
     ProjectResponse,
     ProjectWorkspaceSummaryResponse,
+    RenameProjectRequest,
     WorkspaceNextActionResponse,
 )
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -82,6 +83,31 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
                 )
                 for project in projects
             ]
+        )
+
+    @router.patch("/api/projects/{project_id}")
+    def rename_project(project_id: str, payload: RenameProjectRequest) -> ProjectResponse:
+        """Rename the project. No `expected_revision` here on purpose.
+
+        Every endpoint in this repo that carries one guards a row that
+        actually has a `revision` column (creation briefs, draft readiness,
+        editing sessions). The `projects` table has no such column, and its
+        two existing mutations -- archive and restore -- guard nothing
+        either. Inventing a counter for this one field would mean a schema
+        migration on both SQLite and Postgres to protect a single-user,
+        local-first tool from a lost update it cannot really have. Left out
+        deliberately; add it with the rest of the table if projects ever gain
+        concurrent writers.
+        """
+        try:
+            project = store.rename_project(project_id=project_id, name=payload.name)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ProjectResponse(
+            project_id=project["project_id"],
+            name=project["name"],
+            status=project["status"],
+            root_storage_uri=project["root_storage_uri"],
         )
 
     @router.post("/api/projects/{project_id}/archive")
