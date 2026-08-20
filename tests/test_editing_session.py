@@ -2854,6 +2854,9 @@ def test_update_and_remove_segment_shape_overlay_record_history() -> None:
             "vertical": "top",
             "horizontal": "left",
             "size": "small",
+            # 움직임을 고르지 않으면 `그대로`다. 승인 기록 5항이 정한 기본값이며,
+            # 렌더는 이 값에서 예전과 똑같은 필터를 낸다.
+            "motion": "none",
         }
     ]
     assert updated["history"][-1]["mutation_type"] == "shape_overlay_update"
@@ -2874,6 +2877,7 @@ def test_update_and_remove_segment_shape_overlay_record_history() -> None:
             "vertical": "bottom",
             "horizontal": "center",
             "size": "large",
+            "motion": "none",
         }
     ]
 
@@ -2909,6 +2913,63 @@ def test_update_segment_shape_overlay_rejects_values_outside_the_presets() -> No
         {"shape": "highlight_box", "vertical": "37%", "horizontal": "left", "size": "small"},
         {"shape": "highlight_box", "vertical": "top", "horizontal": "12px", "size": "small"},
         {"shape": "highlight_box", "vertical": "top", "horizontal": "left", "size": "huge"},
+        # 움직임도 프리셋만 받는다. 임의 키프레임은 이번 범위 밖이다.
+        {
+            "shape": "highlight_box", "vertical": "top", "horizontal": "left",
+            "size": "small", "motion": "spin",
+        },
+        {
+            "shape": "highlight_box", "vertical": "top", "horizontal": "left",
+            "size": "small", "motion": "0.4s ease-in",
+        },
     ):
         with pytest.raises(ValueError):
             update_segment_shape_overlay(session=session, segment_id="seg_001", **bad)
+
+
+def test_shape_overlay_remembers_how_it_should_appear_and_leave() -> None:
+    """고른 움직임이 저장되고, 다시 저장하면 바뀐다.
+
+    화면에서 고른 것이 렌더까지 닿으려면 여기 저장돼야 한다 -- 이 저장소는
+    "부품은 있는데 부르는 자리가 없다"에 여러 번 걸렸다.
+    """
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_shape_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    appearing = update_segment_shape_overlay(
+        session=session,
+        segment_id="seg_001",
+        shape="icon_arrow_right",
+        vertical="middle",
+        horizontal="right",
+        size="medium",
+        motion="fade_in",
+    )
+    assert appearing["segments"][0]["visual_overlays"][0]["motion"] == "fade_in"
+
+    sliding = update_segment_shape_overlay(
+        session=appearing,
+        segment_id="seg_001",
+        shape="icon_arrow_right",
+        vertical="middle",
+        horizontal="right",
+        size="medium",
+        motion="slide_in_left",
+    )
+    assert sliding["segments"][0]["visual_overlays"][0]["motion"] == "slide_in_left"
+    assert len(sliding["segments"][0]["visual_overlays"]) == 1

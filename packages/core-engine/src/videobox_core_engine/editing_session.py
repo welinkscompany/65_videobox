@@ -13,6 +13,7 @@ from videobox_core_engine.editing_transactions import apply_user_transaction
 # 그대로 두어 이 모듈에서 가져다 쓰던 곳은 손대지 않아도 된다.
 from videobox_core_engine.overlay_shapes import (  # noqa: F401
     SHAPE_OVERLAY_HORIZONTALS,
+    SHAPE_OVERLAY_MOTION_SET,
     SHAPE_OVERLAY_SHAPES,
     SHAPE_OVERLAY_SIZES,
     SHAPE_OVERLAY_VERTICALS,
@@ -1069,9 +1070,12 @@ def remove_segment_table_overlay(
     )
 
 
-# 정지 도형·아이콘("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가
-# 범위 밖으로 못박았다(고급 모션그래픽). 목록은 `overlay_shapes`가 유일한 출처다 --
-# 여기에 사본을 두었더니 화면·API·렌더가 서로 다른 목록을 보게 됐다.
+# 정지 도형·아이콘("여기를 보세요")의 프리셋. 자유 좌표는 계획서 §4가 범위 밖으로
+# 못박았고 지금도 그렇다. 목록은 `overlay_shapes`가 유일한 출처다 -- 여기에 사본을
+# 두었더니 화면·API·렌더가 서로 다른 목록을 보게 됐다.
+#
+# 2026-08-20: **등장·퇴장·이동만** 승인 범위 안으로 들어왔다(승인 기록 5항).
+# 프리셋 몇 가지이고, 타임라인에 점을 찍는 편집기가 아니다.
 
 
 def update_segment_shape_overlay(
@@ -1082,18 +1086,25 @@ def update_segment_shape_overlay(
     vertical: str,
     horizontal: str,
     size: str,
+    motion: str = "none",
 ) -> dict[str, Any]:
     normalized = {
         "shape": shape.strip().lower(),
         "vertical": vertical.strip().lower(),
         "horizontal": horizontal.strip().lower(),
         "size": size.strip().lower(),
+        # 안 보내면 `그대로`다. 이 기능이 생기기 전 화면이 보내던 요청도 그대로 통한다.
+        "motion": (motion or "none").strip().lower(),
     }
     allowed = {
         "shape": SHAPE_OVERLAY_SHAPES,
         "vertical": SHAPE_OVERLAY_VERTICALS,
         "horizontal": SHAPE_OVERLAY_HORIZONTALS,
         "size": SHAPE_OVERLAY_SIZES,
+        # 오타를 조용히 `그대로`로 좁히지 않는다 -- 고른 것이 왜 안 되는지
+        # owner가 알 수 없게 된다. 읽는 쪽(`canonical_shape_overlay_motion`)만
+        # 관대하다.
+        "motion": SHAPE_OVERLAY_MOTION_SET,
     }
     for field_name, values in allowed.items():
         if normalized[field_name] not in values:

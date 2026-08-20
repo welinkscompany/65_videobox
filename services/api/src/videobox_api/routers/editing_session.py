@@ -690,6 +690,7 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 vertical=payload.vertical,
                 horizontal=payload.horizontal,
                 size=payload.size,
+                motion=payload.motion,
                 expected_revision=payload.expected_revision,
             )
         except EditingSessionConflict as exc:

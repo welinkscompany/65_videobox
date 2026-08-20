@@ -227,6 +227,61 @@ def test_both_render_paths_carry_the_same_motion_for_an_icon(
         assert "alpha=" in graph
 
 
+def test_a_motion_chosen_on_screen_survives_all_the_way_to_the_filter_graph(
+    tmp_path: Path,
+) -> None:
+    """편집 세션에 저장한 움직임이 렌더까지 닿는가.
+
+    이 저장소가 반복해서 걸린 함정이 이것이다 -- 부품(저장·렌더)은 각각 되는데
+    사이를 잇는 자리가 없어 화면에서 고른 것이 완성본에 닿지 않는다. 그래서
+    세션 저장부터 필터 그래프까지 한 번에 통과시켜 본다.
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import (
+        build_editing_session,
+        update_segment_shape_overlay,
+    )
+
+    session = update_segment_shape_overlay(
+        session=build_editing_session(
+            project_id="project_001",
+            timeline={"timeline_id": "timeline_001"},
+            segments=[{
+                "segment_id": "seg_001",
+                "text": "여기를 보세요",
+                "start_sec": 0.0,
+                "end_sec": 3.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }],
+        ),
+        segment_id="seg_001",
+        shape="highlight_box",
+        vertical="middle",
+        horizontal="center",
+        size="medium",
+        motion="fade_in",
+    )
+    materialized = materialize_editing_session_timeline(
+        timeline={"tracks": [], "output": {"width": 1280, "height": 720}},
+        editing_session=session,
+    )
+
+    assert materialized["export_overlays"][0]["motion"] == "fade_in"
+
+    graph = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path),
+        overlay_font_file=str(tmp_path / "no-font-anywhere.ttf"),
+        video_width=1280,
+        video_height=720,
+    ).build_plan_filter_graph(
+        composition_plan=CompositionPlan.from_timeline(timeline=materialized),
+        source_indices={},
+    )
+
+    assert graph.count("drawbox=") > 1, "고른 움직임이 렌더까지 닿지 않았다"
+
+
 def _legacy_filter_graph(
     renderer: FfmpegFinalRenderer,
     overlays: list[dict[str, object]],
