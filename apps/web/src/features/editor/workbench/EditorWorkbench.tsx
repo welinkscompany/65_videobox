@@ -279,7 +279,16 @@ function EditorWorkbenchInstance({
   const toggleDock = (side: "left" | "right") => setUi((current) => {
     const opening = side === "left" ? !current.leftOpen : !current.rightOpen;
     if (!opening) return { ...current, [side === "left" ? "leftOpen" : "rightOpen"]: false };
-    const closesTheOther = opening && layout.mode === "desktop-single";
+    // **지금 어느 모드인가가 아니라 "둘 다 들어가는가"로 정한다.** 앞엣것으로
+    // 재면 왼쪽이 열린 상태는 늘 `desktop-single`이라, 1920 화면처럼 자리가
+    // 남는데도 상대를 닫았다 -- 누른 사람은 열린 줄 모르고 한 번 더 누른다.
+    // 자리를 물어보는 곳은 레이아웃 계산 한 군데뿐이니 그것에게 그대로 묻는다.
+    const bothWouldFit = resolveEditorWorkbenchLayout({
+      viewportWidth,
+      availableWorkbenchWidth,
+      persisted: { ...current, leftOpen: true, rightOpen: true },
+    }).mode === "desktop-both";
+    const closesTheOther = opening && !bothWouldFit;
     return {
       ...current,
       leftOpen: side === "left" ? true : closesTheOther ? false : current.leftOpen,
