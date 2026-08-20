@@ -215,3 +215,65 @@ def test_a_library_image_becomes_a_project_image_asset(tmp_path: Path) -> None:
     assert materialized.status_code == 201, materialized.text
     # 오버레이 경로가 읽는 종류다. 여기서 어긋나면 얹기 단추가 조용히 실패한다.
     assert materialized.json()["asset"]["asset_type"] == "image"
+
+
+def test_an_owner_library_with_footage_triggers_can_still_widen_to_images(tmp_path: Path) -> None:
+    """이관은 **실제 owner 라이브러리에서** 돌아야 한다.
+
+    2026-08-20에 이관을 넣고 배포했더니 컨테이너에서 라이브러리에 **아무것도**
+    추가할 수 없었다(그림뿐 아니라 영상·음악까지 500). 이관이 매번 실패하고
+    롤백해서, 연결을 여는 모든 호출이 함께 죽었기 때문이다.
+
+    원인은 한 파일을 두 저장소가 나눠 쓴다는 것이다. `media_library_store`가
+    만든 촬영본 트리거 10개가 `library_user_assets`를 참조하는데, 이관이 그 표를
+    `DROP` 한 뒤 새 표를 `RENAME` 하면 SQLite가 스키마를 다시 파싱하다가 참조가
+    끊긴 트리거에서 멈춘다:
+
+        error in trigger footage_sources_require_canonical_asset_insert:
+        no such table: main.library_user_assets
+
+    새로 만든 시험용 DB에는 그 트리거가 없어서 초록이었다. **제품에서는 두
+    저장소가 같은 파일을 쓴다** -- 그 조건에서 재야 한다.
+    """
+    from videobox_storage.library_user_asset_store import LIBRARY_USER_ASSET_SCHEMA
+    from videobox_storage.media_library_store import MediaLibraryStore
+
+    root = tmp_path / "library"
+    # 촬영본 트리거까지 만들어지는 진짜 라이브러리를 먼저 세운다. 읽기를 한 번
+    # 시켜야 실제로 파일과 스키마가 생긴다.
+    MediaLibraryStore(root).inspect_active_assets()
+    database = root / "media_library.sqlite"
+    old_schema = LIBRARY_USER_ASSET_SCHEMA.replace(
+        "'broll', 'music', 'sfx', 'image'", "'broll', 'music', 'sfx'"
+    )
+    assert "'image'" not in old_schema.split("CREATE TABLE IF NOT EXISTS library_user_assets", 1)[1].split(")", 1)[0]
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute("DROP TABLE library_user_assets")
+        connection.executescript(
+            old_schema.split("CREATE TABLE IF NOT EXISTS library_ingest_batches", 1)[0]
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    # 그림을 받아들이게 넓히는 것이 이 호출의 일이다. 실패하면 라이브러리 전체가 멈춘다.
+    store = MediaLibraryStore(root).user_asset_store
+    store.create_ingest_batch(idempotency_key="after-migration")
+
+    connection = sqlite3.connect(database)
+    try:
+        definition = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'library_user_assets'"
+        ).fetchone()[0]
+        triggers = connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger'"
+            " AND sql LIKE '%library_user_assets%'"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+
+    assert "'image'" in definition, "그림을 받아들이도록 넓혀지지 않았다"
+    # 트리거를 잃어버리는 것도 실패다. 촬영본이 정본 자산을 가리키게 지키는 장치다.
+    assert triggers > 0, "이관이 촬영본 트리거를 데려갔다"

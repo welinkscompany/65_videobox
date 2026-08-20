@@ -141,6 +141,16 @@ def _widen_media_type_check(connection: sqlite3.Connection) -> None:
     # the guard left on, dropping the old parent would take the owner's
     # thumbnails with it or refuse outright, so it is off for the swap only.
     connection.execute("PRAGMA foreign_keys = OFF")
+    # 이 파일은 촬영본 저장소와 함께 쓴다. 그쪽 트리거 열 개가 이 표를
+    # 이름으로 참조하는데, 표를 지웠다가 새 표를 그 이름으로 되돌리는 동안
+    # SQLite가 스키마를 다시 읽으면 **참조가 끊긴 트리거에서 멈춘다**:
+    #   error in trigger footage_sources_require_canonical_asset_insert:
+    #   no such table: main.library_user_assets
+    # 그러면 이관이 매번 롤백하고, 연결을 여는 **모든 호출이 함께 죽는다** --
+    # 2026-08-20에 배포본에서 라이브러리에 아무것도 못 넣게 됐다.
+    # legacy 모드에서는 이름 바꾸기가 트리거 본문을 건드리지도, 검사하지도
+    # 않는다. 바꾼 뒤에는 그 이름이 다시 존재하므로 트리거는 그대로 맞다.
+    connection.execute("PRAGMA legacy_alter_table = ON")
     try:
         connection.execute("BEGIN IMMEDIATE")
         connection.execute("DROP TABLE IF EXISTS library_user_assets_migrated")
@@ -162,6 +172,7 @@ def _widen_media_type_check(connection: sqlite3.Connection) -> None:
         connection.rollback()
         raise
     finally:
+        connection.execute("PRAGMA legacy_alter_table = OFF")
         connection.execute("PRAGMA foreign_keys = ON")
 
 
