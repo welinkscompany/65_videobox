@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import { ApiConflictError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
@@ -42,7 +42,7 @@ type DirectorState = Readonly<{
 type MemoryCandidateState = Readonly<{
   candidate: YujinMemoryCandidate;
   action: "idle" | "approving" | "rejecting" | "saving" | "deleting";
-  error: "save" | "delete" | null;
+  error: "save" | "delete" | "not_configured" | null;
 }>;
 type MemoryState = Readonly<{
   key: string;
@@ -1211,12 +1211,14 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         candidateId,
         (current) => mergeMemoryStorageResult(current, result),
       );
-    } catch {
+    } catch (failure) {
       if (!isCurrentMemoryMutation(ownership)) return;
       updateMemoryCandidate(candidateId, (current) => ({
         ...current,
         action: "idle",
-        error: "save",
+        // 기억 기능이 켜져 있지 않은 것은 저장 실패가 아니다. owner가 할 일이
+        // 다르다 -- 다시 누르는 게 아니라 켜는 것이다.
+        error: failure instanceof ApiRequestError && failure.detail === "memory_not_configured" ? "not_configured" : "save",
       }));
     } finally {
       finishMemoryMutation(ownership);

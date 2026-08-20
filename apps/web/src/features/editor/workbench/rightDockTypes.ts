@@ -65,7 +65,7 @@ export type RightDockMemoryCandidate = Readonly<{
   storageStatus: YujinMemoryStorageStatus;
   retryable: boolean;
   action: "idle" | "approving" | "rejecting" | "saving" | "deleting";
-  error: "save" | "delete" | null;
+  error: "save" | "delete" | "not_configured" | null;
 }>;
 
 export type RightDockMemory = Readonly<{

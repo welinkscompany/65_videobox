@@ -284,8 +284,10 @@ class YujinMemoryService:
             return current
         if current["storage_status"] == "deleted":
             raise ValueError("memory_candidate_deleted")
+        # 켜져 있지 않은 것과 부르다 실패한 것은 owner가 할 일이 다르다.
+        # 하나는 켜는 일이고 하나는 다시 눌러 보는 일이다 -- 이름을 나눈다.
         if self._gateway is None:
-            raise MemoryStoreUnavailable("memory_store_unavailable")
+            raise MemoryStoreUnavailable("memory_not_configured")
         claim_token = "claim-" + hashlib.sha256(uuid.uuid4().bytes).hexdigest()
         claim = self._store.claim_yujin_memory_store(
             project_id=project_id,
@@ -378,8 +380,9 @@ class YujinMemoryService:
             project_id=project_id,
             candidate_id=candidate_id,
         )
+        # 위와 같은 이유로 같은 이름을 쓴다.
         if self._gateway is None:
-            raise MemoryStoreUnavailable("memory_delete_unavailable")
+            raise MemoryStoreUnavailable("memory_not_configured")
         try:
             delete_state = (
                 self._store.mark_yujin_memory_delete_call_started(

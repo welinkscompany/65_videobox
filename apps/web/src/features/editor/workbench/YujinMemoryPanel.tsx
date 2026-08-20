@@ -173,6 +173,11 @@ function MemoryCandidateStatus({
       </div>
     );
   }
+  // 켜져 있지 않은 것은 실패가 아니다. `저장 다시 시도`를 내주면 owner는 눌러도
+  // 안 되는 단추를 계속 누르게 된다.
+  if (candidate.error === "not_configured") {
+    return <p>기억 기능이 아직 켜져 있지 않아요. 편집과 대화는 그대로 쓸 수 있어요.</p>;
+  }
   if (
     candidate.error === "save"
     || candidate.storageStatus === "failed_retryable"

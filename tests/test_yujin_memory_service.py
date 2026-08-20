@@ -818,7 +818,9 @@ def test_delete_without_gateway_adds_no_durable_call_marker(
             )
         )
     except MemoryStoreUnavailable as error:
-        assert str(error) == "memory_delete_unavailable"
+        # 게이트웨이가 아예 없는 것은 "지우다 실패"가 아니라 "켜져 있지 않음"이다.
+        # 화면이 `켜 주세요`와 `다시 눌러 주세요`를 갈라 말하려고 이름을 나눴다.
+        assert str(error) == "memory_not_configured"
     else:
         raise AssertionError("missing gateway must fail closed")
 

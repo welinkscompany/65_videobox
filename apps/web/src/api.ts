@@ -1069,16 +1069,31 @@ export class CapcutDraftHandoffInProgressError extends Error {
   }
 }
 
+// 서버가 붙여 보낸 이유(`detail`). 예전에는 상태 코드만 남기고 버려서, 화면은
+// 무엇이 잘못됐든 한 문장으로만 말할 수 있었다 -- 켜지 않은 기능과 실패한 호출이
+// 같은 말을 했다. 기존 `catch`는 그대로 돈다: 여전히 Error다.
+export class ApiRequestError extends Error {
+  constructor(readonly detail: string | null, readonly status: number, path: string) {
+    super(`Request failed: ${path} (${status})`);
+    this.name = "ApiRequestError";
+  }
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
-    if (response.status === 409) {
-      const payload = (await response.json()) as { latest_session?: T };
-      if (payload.latest_session !== undefined) {
-        throw new ApiConflictError(payload.latest_session, path);
-      }
+    // 본문은 한 번만 읽을 수 있다. 409 검사와 이유 읽기가 같은 읽기를 나눠 쓴다.
+    const body = await response.text().catch(() => "");
+    let payload: { latest_session?: T; detail?: unknown } | null = null;
+    try {
+      payload = body ? JSON.parse(body) as { latest_session?: T; detail?: unknown } : null;
+    } catch {
+      payload = null;
     }
-    throw new Error(`Request failed: ${path} (${response.status})`);
+    if (response.status === 409 && payload?.latest_session !== undefined) {
+      throw new ApiConflictError(payload.latest_session, path);
+    }
+    throw new ApiRequestError(typeof payload?.detail === "string" ? payload.detail : null, response.status, path);
   }
   // 204에는 본문이 없다. 읽으려 들면 성공한 요청이 실패로 보인다 -- 대화
   // 삭제가 실제로는 지워졌는데 화면은 "지우지 못했어요"를 띄웠다.
