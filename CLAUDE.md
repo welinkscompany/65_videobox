@@ -57,18 +57,18 @@
 | 상태/closeout 로그 | `docs/development-status-2026-06-29.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
 | 미해결 수정 backlog | `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` |
-| **최신 세션 인계** | `docs/handoffs/2026-08-19-videobox-open-four-closed-and-review-fixes.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-08-20-videobox-real-video-and-the-editor-look.ko.md` |
 
 승인된 시각 결정은 현재 네 건이다. 전부 사용자가 명시 승인했고 재승인 없이 바꾸지 않는다.
-**현재 화면에 적용된 팔레트는 가장 나중 것이다** — 앞의 둘을 읽고 색을 판단하면 틀린다.
+경로는 위 표의 `docs/decisions/`다. **색은 가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
 
-- `docs/decisions/2026-08-20-editor-dark-surface.ko.md` (2026-08-20, **편집 화면만 어둡게**.
-  나머지 화면은 아래 2026-08-05 팔레트 그대로다. 오렌지 강조는 유지)
-- `docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md` (2026-08-05,
-  **현행 팔레트**: canvas `#FAFAFA`, accent `#C2410C`, text `#1C1C1E`)
-- `docs/decisions/2026-07-20-editor-workbench-visual-approval.ko.md` (2026-07-22, 편집 작업판 5개 viewport)
-- `docs/decisions/creator-workspace-visual-approval.ko.md` (2026-07-17, 홈·인터뷰·편집기 팔레트 —
-  warm-white/indigo. **위 2026-08-05 결정이 색을 대체했다**)
+- `2026-08-20-editor-dark-surface.ko.md` — **편집 화면만 어둡게**. 나머지 화면은
+  아래 팔레트 그대로고 오렌지 강조도 유지한다
+- `2026-08-05-dashboard-white-orange-direction.ko.md` — **현행 팔레트**:
+  canvas `#FAFAFA`, accent `#C2410C`, text `#1C1C1E`
+- `2026-07-20-editor-workbench-visual-approval.ko.md` — 편집 작업판 5개 viewport
+- `creator-workspace-visual-approval.ko.md` (2026-07-17) — warm-white/indigo.
+  **2026-08-05 결정이 색을 대체했다**
 
 ## 2.1 제품 범위 경계
 

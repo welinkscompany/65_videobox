@@ -1,5 +1,7 @@
 # 남아 있던 2·3·4를 닫고, 리뷰가 찾은 결함까지 정리했다
 
+> **대체됨:** `docs/handoffs/2026-08-20-videobox-real-video-and-the-editor-look.ko.md`
+
 - 작성: 2026-08-19 (밤)
 - **읽는 순서:** 이 문서 → `docs/handoffs/2026-08-19-videobox-verification-guards-and-the-open-four.ko.md`
 - 커밋: `9707ae3b`(2번) → `b81ced3f`(3번) → `652a94f7`(4번) → `758e9f85`(리뷰 수정) → `051f6843`(provenance 해시)
