@@ -33,7 +33,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TESTS = ROOT / "tests"
 SCANNED_TREES = ("packages", "services")
 
 # 표를 다시 쓰지 않고는 넘어갈 수 없는 DDL. 표가 살아 있는 채로 열이 늘어나는
