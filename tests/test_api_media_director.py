@@ -2250,6 +2250,46 @@ def test_batch_apply_materializes_two_candidates_and_consumes_one_proposal_in_on
     assert len(store.list_assets(project_id=project_id)) == 2
 
 
+def test_one_undo_takes_back_every_scene_a_batch_apply_filled(tmp_path: Path) -> None:
+    """화면이 여러 후보를 한 번에 고르게 되면, 되돌리기도 한 번이어야 한다.
+
+    빈 구간 열두 개를 채운 뒤 실행 취소를 열두 번 눌러야 한다면 그건 고친 게 아니다.
+    `batch-apply`는 한 번의 CAS 쓰기라 기록도 하나이며, 그 성질을 여기서 못박는다.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "batch undo"}).json()["project_id"]
+    source = tmp_path / "undo.mp4"; source.write_bytes(b"batch-undo-broll")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"review_status": "approved"})
+    digest = sha256(source.read_bytes()).hexdigest()
+    analysis = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="undo")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"]); assert claim
+    store.complete_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=claim["attempt"], result={"frames": [{"summary": "undo"}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [
+        {"segment_id": "seg-1", "caption_text": "first", "start_sec": 0.0, "end_sec": 2.0, "cut_action": "keep", "review_required": False},
+        {"segment_id": "seg-2", "caption_text": "second", "start_sec": 2.0, "end_sec": 4.0, "cut_action": "keep", "review_required": False},
+    ], "history": []})
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    selected = [item["candidate_id"] for item in proposal["candidates"] if item["candidate_id"].split(":")[1] in {"seg-1", "seg-2"}]
+    assert len(selected) == 2
+
+    applied = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/batch-apply", json={
+        "candidate_ids": selected, "expected_revision": session["session_revision"],
+    }).json()
+    assert {segment["segment_id"] for segment in applied["segments"] if segment.get("broll_override")} == {"seg-1", "seg-2"}
+    assert applied["undo_count"] == 1
+
+    undone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo",
+        json={"expected_revision": applied["session_revision"]},
+    )
+
+    assert undone.status_code == 200, undone.text
+    assert [segment.get("broll_override") for segment in undone.json()["segments"]] == [None, None]
+    assert undone.json()["undo_count"] == 0
+
+
 def test_batch_apply_source_failure_leaves_session_proposal_and_assets_clean(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store
     project_id = client.post("/api/projects", json={"name": "batch rollback"}).json()["project_id"]

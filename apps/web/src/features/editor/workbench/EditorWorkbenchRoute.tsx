@@ -11,6 +11,7 @@ import { createEditorCommandPort, type EditorCommandPort } from "../editorComman
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
+import { sceneLabelsBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
 import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
@@ -1672,7 +1673,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const rightDock: RightDockDirector = {
     state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
-    proposal: projectDirectorProposal(projectId, activeDirector.proposal, state.view.expectedRevision),
+    proposal: projectDirectorProposal(projectId, activeDirector.proposal, state.view.expectedRevision, sceneLabelsBySegmentId(state.view)),
     draft: activeDirector.draft,
     runState: activeDirector.runState,
     selectedCandidateIds: activeDirector.selectedCandidateIds,
@@ -1829,7 +1830,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   </>;
 }
 
-function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number): RightDockProposal | null {
+function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number, sceneLabels: ReadonlyMap<string, string> = new Map()): RightDockProposal | null {
   if (!proposal) return null;
   const isYujin = isYujinProposal(proposal);
   return {
@@ -1839,8 +1840,13 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
     currentRevision,
     // 뜻으로 찾았는지 단어로만 찾았는지. 없으면 화면이 아무 말도 하지 않는다.
     matchMode: typeof proposal.diff?.match_mode === "string" ? proposal.diff.match_mode : undefined,
+    // 서버가 여러 후보를 한 번에 받는 추천에서만 여러 개를 고르게 한다. 유진이
+    // 직접 실행하는 추천은 `reject_yujin_direct_apply`가 422로 막으므로, 여기서
+    // 열어 주면 고를 수는 있는데 적용이 거절되는 화면이 된다.
+    allowsMultipleSelection: !isYujinActionableProposal(proposal),
     candidates: proposal.candidates.map((candidate) => {
       const metadata = candidate.canonical_metadata ?? {};
+      const targetSegmentId = String(candidate.target_segment_id ?? metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? "");
       const actionable = isYujin
         ? isActionableYujinCandidate(candidate)
         : proposal.status === "ready";
@@ -1858,9 +1864,14 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
         sourceMediaKind: String(metadata.source_media_kind ?? candidate.media_type),
         // 후보마다 겨냥한 장면이 다르다. 예전에는 제안의 **첫 장면**으로 떨어져서
         // 카드가 전부 같은 장면을 가리켰다(2026-08-19 owner 지적).
-        targetSegmentId: String(candidate.target_segment_id ?? metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? ""),
+        targetSegmentId,
+        // **부품은 있는데 부르는 자리가 없었다.** `targetSegmentId`는 2026-08-19에
+        // 후보별로 정확해졌지만 카드가 그것을 한 번도 읽지 않아, 같은 자산을
+        // 열세 장면에 추천하면 카드 열세 개가 화면에서 완전히 똑같아 보였다.
+        // 내부 id는 창작자에게 보일 수 없으므로 편집판이 쓰는 장면 이름으로 바꾼다.
+        targetSceneLabel: sceneLabels.get(targetSegmentId),
         displayName: typeof metadata.display_name === "string" && metadata.display_name.trim() ? metadata.display_name.trim() : undefined,
-        previewSummary: String(metadata.preview_summary ?? candidate.reason_chips[0] ?? "추천 세부 내용을 확인해 주세요."),
+        previewSummary: String(metadata.preview_summary ?? "").trim() || candidateReason(candidate.reason_chips),
         supportedControls: candidate.controls ?? {},
         availability: isYujin ? candidate.availability : actionable ? "actionable" : candidate.availability,
         reviewStatus: isYujin ? candidate.review_status : actionable ? "approved" : candidate.review_status,
@@ -1869,6 +1880,18 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
       };
     }),
   };
+}
+
+/** 순위 매기기는 **자막과 겹치는 말이 하나도 없을 때** 이 한 단어를 남긴다.
+ *  값 자체는 서버 계약이라 그대로 두고, 화면에서만 창작자의 말로 바꾼다 --
+ *  2026-08-20에 이 단어가 카드 열세 개에 그대로 찍혀 나갔다(§10.13). */
+const RANKED_WITHOUT_MATCHING_WORDS = "metadata";
+
+function candidateReason(reasonChips: readonly string[]): string {
+  const words = reasonChips.map((chip) => chip.trim()).filter((chip) => chip && chip !== RANKED_WITHOUT_MATCHING_WORDS);
+  if (words.length) return `자막과 겹치는 말: ${words.join(", ")}`;
+  if (reasonChips.includes(RANKED_WITHOUT_MATCHING_WORDS)) return "자막과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.";
+  return "추천 세부 내용을 확인해 주세요.";
 }
 
 function isYujinMediaProposal(proposal: DirectorProposal) {

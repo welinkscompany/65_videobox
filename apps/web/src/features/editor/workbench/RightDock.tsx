@@ -69,19 +69,36 @@ function looksLikeScript(draft: string): boolean {
   return draft.trim().length >= SCRIPT_MINIMUM_CHARACTERS;
 }
 
+/** 유진 답마다 붙는 단추의 **부르는 이름**. 보이는 글자는 짧게 두고 뒤에 그 답의
+ *  첫머리를 붙인다 -- 긴 대화에서는 같은 이름의 단추가 여러 개가 되고, 그러면
+ *  음성으로는 어느 것도 고를 수 없다. 보이는 글자가 이름의 **앞부분**이어야
+ *  한다는 규칙은 타임라인 클립과 같다. */
+const SCRIPT_BUTTON_TEXT = "이 답을 대본으로 쓰기";
+function scriptButtonLabel(text: string): string {
+  return `${SCRIPT_BUTTON_TEXT} — ${text.trim().slice(0, 20)}…`;
+}
+
 /** 후보를 **부르는 이름**. 코드는 사람이 고르는 근거가 못 된다 -- 2026-08-19에
  *  owner 화면의 후보 일곱 개가 전부 `P08-B-01 · 미디어`였고, 실제로는 서로 다른
  *  장면을 겨냥한 같은 자산이었다. 이름이 오면 이름을, 없으면 코드를 쓴다.
  *
  *  **종류는 여기 넣지 않는다.** 접근 이름은 부르는 말이고, 종류는 카드가 `미디어`
  *  줄로 이미 말한다. 넣었더니 음성으로 부르는 이름이 통째로 바뀌었다. */
-function candidateLabel(candidate: RightDockCandidate): string {
+function candidateAssetLabel(candidate: RightDockCandidate): string {
   return candidate.displayName?.trim() || candidate.visibleReferenceCode;
+}
+
+/** 부르는 이름에 **장면이 먼저 온다.** 같은 자산을 여러 장면에 추천하는 일이
+ *  흔해서(빈 구간을 한 자산으로 메우는 경우가 그렇다) 자산 이름만으로는 열세
+ *  개가 전부 같은 이름이 된다. 장면을 모르면 예전처럼 자산 이름만 쓴다. */
+function candidateLabel(candidate: RightDockCandidate): string {
+  const scene = candidate.targetSceneLabel?.trim();
+  return scene ? `${scene} — ${candidateAssetLabel(candidate)}` : candidateAssetLabel(candidate);
 }
 
 /** 카드에 보이는 글자. 이름 옆에 종류를 붙여 한눈에 구분되게 한다. */
 function candidateTitle(candidate: RightDockCandidate): string {
-  return `${candidateLabel(candidate)} · ${mediaKindLabel(candidate.sourceMediaKind)}`;
+  return `${candidateAssetLabel(candidate)} · ${mediaKindLabel(candidate.sourceMediaKind)}`;
 }
 
 export function RightDock({
@@ -169,16 +186,43 @@ export function RightDock({
   );
   const activeCandidateIds = selectedCandidateIds
     ?? (proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
+  // 빈 구간이 열두 개면 고르기·적용을 열두 번 반복해야 했다. `batch-apply`는
+  // 처음부터 여러 개를 받아 **한 번의 편집**으로 쓰므로(되돌리기도 한 번),
+  // 서버가 함께 받는 추천에서는 카드도 여러 개 고를 수 있어야 한다.
+  const allowsMultipleSelection = proposal?.allowsMultipleSelection === true;
+  const candidateIsChoosable = (candidate: RightDockCandidate) => (
+    candidate.actionable
+    && candidate.availability === "actionable"
+    && candidate.reviewStatus === "approved"
+  );
   const selectedCandidatesAreActionable = Boolean(
     proposalIsCurrent
-    && activeCandidateIds.length === 1
-    && proposal?.candidates.some((candidate) => (
-      candidate.candidateId === activeCandidateIds[0]
-      && candidate.actionable
-      && candidate.availability === "actionable"
-      && candidate.reviewStatus === "approved"
-    )),
+    && activeCandidateIds.length >= 1
+    && (allowsMultipleSelection || activeCandidateIds.length === 1)
+    && activeCandidateIds.every((candidateId) => proposal?.candidates.some((candidate) => (
+      candidate.candidateId === candidateId && candidateIsChoosable(candidate)
+    ))),
   );
+  // 같은 장면에 둘을 고르면 서버는 둘 다 그 장면에 쓰고 **나중 것이 이긴다** --
+  // 조용히 하나가 사라진다. 장면당 하나로 묶어 그 일이 일어나지 않게 한다.
+  const sceneKey = (candidate: RightDockCandidate) => candidate.targetSegmentId || candidate.candidateId;
+  const chooseCandidate = (candidate: RightDockCandidate, chosen: boolean) => {
+    if (!allowsMultipleSelection) {
+      onSelectedCandidateIdsChange?.([candidate.candidateId]);
+      return;
+    }
+    const dropped = new Set(
+      (proposal?.candidates ?? [])
+        .filter((other) => sceneKey(other) === sceneKey(candidate))
+        .map((other) => other.candidateId),
+    );
+    const kept = activeCandidateIds.filter((candidateId) => !dropped.has(candidateId));
+    const next = chosen ? [...kept, candidate.candidateId] : kept;
+    // 카드 순서를 그대로 지킨다. 고른 순서로 보내면 적용 순서가 화면과 달라져
+    // 무엇이 어디에 들어갔는지 되짚기 어렵다.
+    const order = (proposal?.candidates ?? []).map((item) => item.candidateId);
+    onSelectedCandidateIdsChange?.([...next].sort((left, right) => order.indexOf(left) - order.indexOf(right)));
+  };
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
   const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
   const showConversationStarters = messages.length === 0
@@ -258,7 +302,18 @@ export function RightDock({
         }}
       >
         {messages.length
-          ? messages.map((message) => <article key={message.id}><p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p></article>)
+          ? messages.map((message) => <article key={message.id}>
+            <p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p>
+            {/* 유진이 써 준 대본에는 단추가 없었다. 받아도 **손으로 복사해서
+                입력칸에 도로 붙여넣어야** 쓸 수 있었다(2026-08-20 owner 실측).
+                복사·붙여넣기 수고만 없앤다 -- 이 단추도 아래 붙여넣기 단추와
+                똑같이 대본을 만들어 두고 **확정 화면으로 보낼 뿐**이다.
+                확정을 사람이 한다는 게이트는 그대로다
+                (`decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md`). */}
+            {onUseDraftAsScript && message.role === "assistant" && looksLikeScript(message.text)
+              ? <Button type="button" aria-label={scriptButtonLabel(message.text)} onClick={() => void onUseDraftAsScript(message.text)}>{SCRIPT_BUTTON_TEXT}</Button>
+              : null}
+          </article>)
           : <>
             <p>유진 대화는 아직 시작하지 않았어요.</p>
             {showConversationStarters ? <YujinStarters
@@ -303,7 +358,18 @@ export function RightDock({
           {onRefreshProposal ? <Button type="button" disabled={state === "analysis_running" || state === "applying"} onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}
         </> : null}
       </div> : null}
-      {recommendationCandidates.length ? <div role="radiogroup" aria-label="추천 후보">
+      {recommendationCandidates.length && allowsMultipleSelection ? <div className="vb-editor-right-dock__bulk-pick">
+        <Button type="button" onClick={() => {
+          const bySceneFirst = new Map<string, string>();
+          for (const candidate of recommendationCandidates) {
+            if (!candidateIsChoosable(candidate)) continue;
+            if (!bySceneFirst.has(sceneKey(candidate))) bySceneFirst.set(sceneKey(candidate), candidate.candidateId);
+          }
+          onSelectedCandidateIdsChange?.([...bySceneFirst.values()]);
+        }}>장면마다 하나씩 모두 고르기</Button>
+        <Button type="button" variant="outline" disabled={!activeCandidateIds.length} onClick={() => onSelectedCandidateIdsChange?.([])}>고른 추천 모두 끄기</Button>
+      </div> : null}
+      {recommendationCandidates.length ? <div role={allowsMultipleSelection ? "group" : "radiogroup"} aria-label="추천 후보">
         {recommendationCandidates.map((candidate) => {
           const candidateDeclaresActionable = candidate.actionable === undefined
             ? proposalIsReady
@@ -318,15 +384,17 @@ export function RightDock({
           );
           return <article key={candidate.candidateId}>
             <label><Input
-              type="radio"
-              name="vb-eugene-candidate"
+              type={allowsMultipleSelection ? "checkbox" : "radio"}
+              name={allowsMultipleSelection ? undefined : "vb-eugene-candidate"}
               aria-label={`${candidateLabel(candidate)} 선택`}
               checked={activeCandidateIds.includes(candidate.candidateId)}
               disabled={!candidateIsActionable}
-              onChange={() => {
-                if (candidateIsActionable) onSelectedCandidateIdsChange?.([candidate.candidateId]);
+              onChange={(event) => {
+                if (candidateIsActionable) chooseCandidate(candidate, event.target.checked);
               }}
-            />{candidateTitle(candidate)}</label>
+            />{candidate.targetSceneLabel?.trim()
+              ? <><strong className="vb-editor-right-dock__candidate-scene">{candidate.targetSceneLabel.trim()}</strong>{" "}<span>{candidateTitle(candidate)}</span></>
+              : candidateTitle(candidate)}</label>
             <p>{candidate.previewSummary}</p>
             <p>{`후보 상태: ${candidateDeclaresActionable ? "적용 가능" : "수동 적용"}`}</p>
             <dl>
@@ -337,7 +405,7 @@ export function RightDock({
           </article>;
         })}
       </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
-      {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
+      {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>{activeCandidateIds.length > 1 ? `고른 추천 ${activeCandidateIds.length}개 적용` : "선택한 추천 적용"}</Button> : null}
     </section>
 
     {memory ? <YujinMemoryPanel memory={memory} /> : null}
@@ -375,6 +443,9 @@ function previewVerb(kind: RightDockCandidate["sourceMediaKind"]): string {
 function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
   return {
     raw_video: "원본 영상",
+    // `source_media_kind`가 없는 후보는 `media_type`으로 떨어진다. 그 값은
+    // `broll`이라 사전에 없었고, B-roll 후보가 전부 `미디어`로 보였다.
+    broll: "영상",
     broll_video: "영상",
     image: "이미지",
     bgm: "배경 음악",

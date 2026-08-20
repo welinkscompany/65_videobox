@@ -6,6 +6,11 @@ export type RightDockCandidate = Readonly<{
   kind: "broll" | "bgm" | "sfx" | string;
   sourceMediaKind: "raw_video" | "broll_video" | "image" | "bgm" | "sfx" | string;
   targetSegmentId: string;
+  /** 그 장면을 **사람이 아는 말로** 부르는 이름(`3번째 장면 · 자막 첫머리`).
+   *  `targetSegmentId`는 내부 id라 카드에 그대로 쓸 수 없고, 그래서 2026-08-20까지
+   *  카드가 장면을 아예 말하지 않았다 -- 같은 자산을 쓰는 후보 열세 개가 화면에서
+   *  전부 똑같아 보였다. 장면을 모르면 **비워 둔다.** 지어낸 이름은 코드보다 나쁘다. */
+  targetSceneLabel?: string;
   /** 카드에 보일 자산 이름. 없으면 코드로 떨어진다 -- 코드만으로는 고를 수 없다. */
   displayName?: string;
   previewSummary: string;
@@ -24,6 +29,10 @@ export type RightDockProposal = Readonly<{
   /** 뜻으로 찾았는지 단어로만 찾았는지. 임베딩 조회가 실패하면 조용히 단어
    *  매칭으로 떨어져서, 추천이 갑자기 나빠져도 owner가 원인을 알 수 없었다. */
   matchMode?: string;
+  /** 여러 후보를 한 번에 적용할 수 있는 추천인가. **서버가 정한다** --
+   *  유진이 직접 실행하는 추천은 한 번에 하나만 받으므로(`reject_yujin_direct_apply`)
+   *  그런 추천에서 여러 개를 고르게 하면 고를 수는 있는데 적용이 거절된다. */
+  allowsMultipleSelection?: boolean;
   candidates: readonly RightDockCandidate[];
 }>;
 

@@ -363,6 +363,41 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      주소·같은 기계**이며, 두 곳이 각각 못박고 있어 따로 열어야 했다.
      다른 host bridge의 근거가 아니다(조항 4 유지).
 
+2-C. **대본에 맞춘 이미지 생성 경로 — owner 승인 (2026-08-20).** workspace 컨테이너가
+   호스트의 ComfyUI(`host.docker.internal:8188`)에 연결한다. 승인 배경은 owner가
+   **대본의 각 장면에 맞는 그림을 만들어 자산 공백을 채우기를** 원하기 때문이다.
+   지금은 그 자리에 "장면을 보여 줄 영상이 없어요"만 남고 owner가 손으로 채운다.
+
+   - **이 경로로 나가는 것은 이 컴퓨터 밖으로 나가지 않는다.** `host.docker.internal`은
+     도커 호스트, 즉 같은 기계다. 2-B와 같은 성격이고 조항 1의 provider egress와 다르다.
+   - 허용 값은 **두 개뿐**이어야 한다: `http://127.0.0.1:8188`(로컬 실행)과
+     `http://host.docker.internal:8188`(컨테이너). 2-B가 `LocalOpenAICompatibleRuntimeConfig`
+     `__post_init__`에서 그 밖의 값을 거부하는 것과 **같은 방식으로** 막는다.
+     scheme·port·path를 바꾼 값, 자격 증명이 붙은 값은 거부한다.
+   - 이 승인은 **호스트의 ComfyUI를 부르는 경로에만** 적용된다. 다른 host bridge의
+     근거가 아니다(조항 4 유지).
+
+   **함께 못박는 것 — 라이선스.** 2026-08-20 실측에서 이 경로를 막고 있던 것은
+   하드웨어가 아니라 라이선스였다. 디스크의 유일한 이미지 모델이 **FLUX.1-dev
+   (비상업)**인데 이 제품의 용도는 수익 유튜브다. 따라서:
+
+   - **상업 이용이 허용된 모델만 쓴다.** 확보 대상은 `FLUX.1-schnell`(Apache-2.0).
+   - 모델 이름을 설정에서 바꿀 수 있게 만든다면, **비상업 모델이 들어왔을 때
+     조용히 돌아가게 두지 않는다.** 라이선스는 실행 중에 눈에 보이지 않는 종류의
+     제약이라, 사람이 기억하는 것에 맡기면 반드시 새어 나간다.
+
+   **아직 재지 않은 것 (승인과 별개로 남는다).**
+
+   - 장당 생성 시간과 실제 VRAM 점유. `FLUX.1-schnell`을 확보한 뒤 ComfyUI 단독으로
+     먼저 잰다. **LM Studio(유진의 두뇌)를 켜 둔 채로** 재야 한다 — 내리고 재면
+     같이 못 쓰는 조합을 된다고 판단하게 된다.
+   - 주의: ComfyUI `/system_stats`의 `vram_free`는 **남의 프로세스 점유를 못 본다.**
+     용량 판단은 `nvidia-smi`로 한다.
+   - ComfyUI API는 OpenAI 모양이 아니다(`POST /prompt` 그래프 JSON → `/history` 폴링
+     → `/view` 회수). 2-B의 provider를 재사용할 수 없고 새로 짜야 한다.
+   - `docs/llm-provider-strategy.ko.md`가 "ComfyUI는 범위 밖"이라고 적고 있다.
+     통합할 때 **같이 고친다** — 두 문서가 서로 다른 말을 하게 두지 않는다.
+
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.
 
