@@ -3,8 +3,16 @@
 같은 목록이 core-engine·API·화면에 흩어져 있었고, 한쪽만 고치면 화면과 렌더 중
 한 곳에서만 살아남는다. 이 파일이 그 목록의 유일한 출처다.
 
-아이콘은 **글꼴에 이미 있는 글자 하나**다. 자산 파일도, 굽는 단계도, 새 라이선스도
+아이콘은 **글꼴에 있는 글자 하나**다. 굽는 단계도, 아이콘마다 딸린 그림 파일도
 없다. 렌더는 이미 있는 `drawtext` 경로를 그대로 쓴다.
+
+아이콘이 오는 글꼴은 두 갈래다.
+
+- **글줄 글꼴에 이미 있는 기호**(화살표·별·체크 등). 어느 글꼴이 가졌는지가
+  기계마다 달라서 후보를 훑는다.
+- **아이콘 글꼴**(Material Symbols, Apache-2.0). 전구·돋보기처럼 글줄 글꼴에는
+  없는 것들이다. 이쪽은 후보를 훑지 **않는다** -- 아래 `resolve_icon_font` 주석에
+  적은 이유로, 훑으면 owner가 고른 것과 다른 그림이 나갈 수 있다.
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ import struct
 # 없는 이유이고, 그 구멍을 아래 아이콘이 메운다.
 SHAPE_OVERLAY_DRAWN_SHAPES = frozenset({"highlight_box", "underline"})
 
-# 아이콘 → 실제로 그릴 글자.
+# 글줄 글꼴이 이미 갖고 있는 기호로 그리는 아이콘.
 #
 # 근거(짐작이 아니라 잰 것):
 #  - owner가 2026-08-20에 **실행 중인 컨테이너**에서 drawtext로 그려 픽셀을 셌다.
@@ -27,11 +35,12 @@ SHAPE_OVERLAY_DRAWN_SHAPES = frozenset({"highlight_box", "underline"})
 #  - 이 목록 16개를 640x360 화면에 실제 ffmpeg로 그려 강조색 픽셀을 세어
 #    빈 것이 없음을 확인했다(다만 잰 글꼴은 Windows의 Segoe UI Symbol이다).
 #  - 이모지 계열(전구·돋보기·물음표·느낌표)은 컨테이너 글꼴에서 **전부 같은
-#    픽셀 수**로 나왔다 -- 두부(빠진 글자 상자)라는 뜻이라 목록에서 뺐다.
+#    픽셀 수**로 나왔다 -- 두부(빠진 글자 상자)라는 뜻이라 이 목록에서 뺐다.
+#    그 넷은 아래 아이콘 글꼴 목록에서 되살아났다.
 #
 # 어느 글꼴에 무엇이 있는지는 기계마다 다르므로 그리기 직전에 다시 확인한다
 # (`resolve_icon_font`). 이 목록은 "고를 수 있는 것"이지 "항상 그려지는 것"이 아니다.
-SHAPE_OVERLAY_ICON_GLYPHS: dict[str, str] = {
+SHAPE_OVERLAY_TEXT_FONT_ICON_GLYPHS: dict[str, str] = {
     "icon_arrow_up": "↑",
     "icon_arrow_down": "↓",
     "icon_arrow_left": "←",
@@ -49,8 +58,54 @@ SHAPE_OVERLAY_ICON_GLYPHS: dict[str, str] = {
     "icon_triangle": "▶",
     "icon_diamond": "◆",
 }
+
+# 아이콘 글꼴(Material Symbols Outlined)이 넓혀 준 몫.
+#
+# 위 목록이 글줄 글꼴의 재고에 갇혀 있었기 때문에 정작 자주 쓰는 전구·돋보기·
+# 물음표·느낌표가 빠져 있었다. 2026-08-20에 실측한 근거:
+#  - `💡 🔍 ❓ ❗`를 컨테이너 글꼴로 그리면 **넷 다 정확히 같은 픽셀 수**가 나왔다.
+#    두부(빠진 글자 상자)라는 뜻이다.
+#  - 아래 16개를 아이콘 글꼴로 320x240에 실제로 그려 강조색 픽셀을 세었더니
+#    전부 서로 다른 그림이 나왔다(오름세·내림세는 좌우 대칭이라 잉크 양이 같다).
+#
+# **리거처가 아니라 코드포인트로 적는다.** Material Symbols는 `lightbulb` 같은
+# 이름을 리거처로도 받지만 drawtext에는 리거처 합성이 없다 -- 이름을 그대로
+# 넘기면 `l`,`i`,`g`,... 가 낱낱이 그려진다.
+#
+# 글꼴에는 4,271개가 들어 있지만 여기 올리는 것은 14개다. 목록이 길수록 고르는
+# 값이 비싸지므로, 이미 있는 표시와 **그림이 겹치는 것**은 넣지 않는다. 실제로
+# 그려 보고 뺀 둘: `play_arrow`는 기존 `삼각형`(▶)과 같은 그림이고, `stop`은
+# 오버레이 크기에서 `강조 상자`와 구별되지 않는 작은 네모로 보였다.
+SHAPE_OVERLAY_ICON_FONT_GLYPHS: dict[str, str] = {
+    "icon_lightbulb":     "\ue90f",   # lightbulb
+    "icon_search":        "\uef7a",   # search
+    "icon_question":      "\ueb8b",   # question_mark
+    "icon_exclamation":   "\ue645",   # priority_high
+    "icon_lock":          "\ue899",   # lock
+    "icon_clock":         "\uefd6",   # schedule
+    "icon_calendar":      "\uebcc",   # calendar_month
+    "icon_location":      "\uf1db",   # location_on
+    "icon_heart":         "\ue87e",   # favorite
+    "icon_thumb_up":      "\uf577",   # thumb_up
+    "icon_money":         "\ue227",   # attach_money
+    "icon_trend_up":      "\ue8e5",   # trending_up
+    "icon_trend_down":    "\ue8e3",   # trending_down
+    "icon_cart":          "\ue8cc",   # shopping_cart
+}
+
+SHAPE_OVERLAY_ICON_GLYPHS: dict[str, str] = {
+    **SHAPE_OVERLAY_TEXT_FONT_ICON_GLYPHS,
+    **SHAPE_OVERLAY_ICON_FONT_GLYPHS,
+}
+SHAPE_OVERLAY_TEXT_FONT_ICON_SHAPES = frozenset(SHAPE_OVERLAY_TEXT_FONT_ICON_GLYPHS)
+SHAPE_OVERLAY_ICON_FONT_SHAPES = frozenset(SHAPE_OVERLAY_ICON_FONT_GLYPHS)
 SHAPE_OVERLAY_ICON_SHAPES = frozenset(SHAPE_OVERLAY_ICON_GLYPHS)
 SHAPE_OVERLAY_SHAPES = SHAPE_OVERLAY_DRAWN_SHAPES | SHAPE_OVERLAY_ICON_SHAPES
+
+# 아이콘 글꼴 글자만 모아 둔다. 그릴 때 "이 글자는 아이콘 글꼴 것인가"를
+# 도형 이름이 아니라 글자로 판단할 수 있어야 `resolve_icon_font`의 서명이
+# 그대로 유지된다(부르는 곳이 셋이다).
+_ICON_FONT_GLYPH_SET = frozenset(SHAPE_OVERLAY_ICON_FONT_GLYPHS.values())
 
 SHAPE_OVERLAY_VERTICALS = frozenset({"top", "middle", "bottom"})
 SHAPE_OVERLAY_HORIZONTALS = frozenset({"left", "center", "right"})
@@ -66,10 +121,44 @@ ICON_FONT_FALLBACKS: tuple[str, ...] = (
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
 )
 
+# 아이콘 글꼴. 저장소에 파일로 함께 두고 이미지에도 같은 파일을 싣는다
+# (`docker/workspace.Dockerfile`). 근거는 `assets/fonts/icons/provenance.json`과
+# `THIRD_PARTY_NOTICES.md`에 있으며, 자막 글꼴 팩과 같은 방식이다.
+BUNDLED_ICON_FONT_DIRECTORY = "assets/fonts/icons"
+CONTAINER_ICON_FONT_DIRECTORY = "/usr/share/fonts/truetype/videobox-icons"
+ICON_FONT_FILE_NAME = "MaterialSymbolsOutlined-Variable.ttf"
+
+# 찾는 순서: 컨테이너에 설치된 자리 → 저장소 안의 원본. 두 번째가 있어야
+# 컨테이너 없이 worktree에서 바로 돌릴 때도 아이콘이 그려진다.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+ICON_FONT_FILES: tuple[str, ...] = (
+    f"{CONTAINER_ICON_FONT_DIRECTORY}/{ICON_FONT_FILE_NAME}",
+    str(_REPOSITORY_ROOT / BUNDLED_ICON_FONT_DIRECTORY / ICON_FONT_FILE_NAME),
+)
+
+
+def bundled_icon_font_file() -> str | None:
+    """이 기계에서 실제로 읽을 수 있는 아이콘 글꼴 파일. 없으면 None."""
+    for candidate in ICON_FONT_FILES:
+        if Path(candidate).is_file():
+            return candidate
+    return None
+
 
 def resolve_icon_font(glyph: str, *, preferred: object = None) -> str | None:
-    """이 글자를 실제로 그릴 수 있는 글꼴. 없으면 None -- 부르는 쪽이 멈춘다."""
-    for candidate in (preferred, *ICON_FONT_FALLBACKS):
+    """이 글자를 실제로 그릴 수 있는 글꼴. 없으면 None -- 부르는 쪽이 멈춘다.
+
+    아이콘 글꼴 글자는 **후보를 훑지 않는다.** Material Symbols는 아이콘을
+    사용자 영역(PUA)에 놓는데, 그 자리의 뜻은 글꼴마다 제각각이라 다른 글꼴이
+    같은 자리에 전혀 다른 글자를 갖고 있을 수 있다. 실측: Windows의 Segoe UI
+    Symbol은 `돈`(U+E227)·`저금통`(U+E2EB) 자리를 이미 쓰고 있다. 후보를 훑다가
+    그런 글꼴에 먼저 걸리면 owner가 고른 것과 다른 그림이 조용히 완성본에
+    실린다 -- 두부보다 알아채기 어렵다.
+    """
+    candidates = (
+        ICON_FONT_FILES if glyph in _ICON_FONT_GLYPH_SET else (preferred, *ICON_FONT_FALLBACKS)
+    )
+    for candidate in candidates:
         if candidate and font_supports_glyph(candidate, glyph):
             return str(candidate)
     return None

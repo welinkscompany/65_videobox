@@ -13,8 +13,9 @@ type ShapeField = "shape" | "vertical" | "horizontal" | "size";
 // 범위 밖으로 못박았다. 고를 수 있는 이름은 명령 포트(`api.ts`)가 정한 하나뿐이다.
 export type { ShapeOverlayShape };
 
-// 화면에 보이는 이름. 내부 이름·유니코드 이름·코드포인트는 노출하지 않는다(§10.13).
-// 순서가 곧 목록에 보이는 순서다 -- 도형 먼저, 그다음 화살표 여덟, 그다음 표시들.
+// 화면에 보이는 이름. 내부 이름·유니코드 이름·코드포인트·글꼴 이름은 노출하지
+// 않는다(§10.13). 순서가 곧 목록에 보이는 순서다 -- 도형 먼저, 그다음 화살표
+// 여덟, 그다음 표시들, 마지막이 뜻을 담은 그림들.
 export const SHAPE_OVERLAY_LABELS: Readonly<Record<ShapeOverlayShape, string>> = {
   highlight_box: "강조 상자",
   underline: "밑줄",
@@ -34,6 +35,20 @@ export const SHAPE_OVERLAY_LABELS: Readonly<Record<ShapeOverlayShape, string>> =
   icon_pointer: "손가락",
   icon_triangle: "삼각형",
   icon_diamond: "마름모",
+  icon_lightbulb: "전구",
+  icon_search: "돋보기",
+  icon_question: "물음표",
+  icon_exclamation: "느낌표",
+  icon_lock: "자물쇠",
+  icon_clock: "시계",
+  icon_calendar: "달력",
+  icon_location: "위치",
+  icon_heart: "하트",
+  icon_thumb_up: "엄지척",
+  icon_money: "돈",
+  icon_trend_up: "오름세",
+  icon_trend_down: "내림세",
+  icon_cart: "장바구니",
 };
 
 export const SHAPE_OVERLAY_CHOICES = Object.keys(SHAPE_OVERLAY_LABELS) as readonly ShapeOverlayShape[];

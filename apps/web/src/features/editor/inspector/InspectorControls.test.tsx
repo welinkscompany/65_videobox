@@ -801,6 +801,42 @@ describe("InspectorControls", () => {
     });
   });
 
+  // 아이콘 글꼴을 얹어 넓힌 몫. 예전에는 컨테이너 글꼴에 없어서 두부로 나왔고,
+  // 그래서 목록에 아예 올리지 못하던 것들이다.
+  it("offers the icon-font pictures in plain words and saves the chosen one", () => {
+    const onAction = renderControls({
+      target: {
+        fields: ["shape", "vertical", "horizontal", "size"],
+        id: "overlay-new:shape:segment-internal-current",
+        isNew: true,
+        kind: "overlay",
+        label: "강조 표시",
+        overlayKind: "shape",
+        segmentId: "segment-internal-current",
+        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" },
+      },
+    });
+
+    for (const label of ["전구", "돋보기", "물음표", "느낌표", "자물쇠", "장바구니"]) {
+      expect(screen.getByRole("option", { name: label })).toBeTruthy();
+    }
+    // 코드포인트·글꼴 이름은 화면에 나오지 않는다.
+    expect(screen.queryByRole("option", { name: /Material|U\+|\\u/i })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("모양"), { target: { value: "icon_lightbulb" } });
+    fireEvent.click(screen.getByRole("button", { name: "강조 표시 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "save-overlay",
+      overlayKind: "shape",
+      segmentId: "segment-internal-current",
+      shape: "icon_lightbulb",
+      vertical: "middle",
+      horizontal: "center",
+      size: "medium",
+    });
+  });
+
   it("erases an existing shape overlay through the shared clear action", () => {
     const onAction = renderControls({
       target: {
