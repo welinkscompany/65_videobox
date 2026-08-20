@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
 from typing import Any
 
+from videobox_domain_models.caption_fonts import (
+    CAPTION_FONT_DIRECTORIES,
+    is_installed_caption_font,
+)
 from videobox_domain_models.caption_style import CaptionStyle
+
+
+_logger = logging.getLogger(__name__)
 
 
 def _ass_color(rgba: str) -> str:
@@ -48,6 +57,42 @@ def _box_padding_px(value: CaptionStyle, size: int) -> int:
     유지되기 때문이다. 고정 px로 두면 세로 영상에서만 상자가 두꺼워진다.
     """
     return max(value.outline_width_px, max(1, round(size / 8)))
+
+
+def _warn_about_fonts_this_machine_does_not_have(styles: Iterable[CaptionStyle]) -> None:
+    """이 자막이 요청하는 글꼴 중 여기서 못 찾은 것을 적어 둔다.
+
+    libass는 없는 글꼴을 요청받아도 **실패하지 않는다.** 조용히 다른 글꼴로
+    바꿔 그리고 렌더는 성공으로 끝난다. 그래서 "완성본 글꼴이 왜 이래?"에 답할
+    근거가 어디에도 남지 않았다 -- ASS 파일에는 owner가 고른 이름이 그대로
+    적혀 있기 때문이다.
+
+    **멈추지 않고, 이름을 바꾸지도 않는다.**
+
+    - 멈추지 않는 이유: 아이콘은 없으면 두부라서 완성본이 못 쓰게 되지만
+      (`ffmpeg_final_renderer._icon_overlay_filter`가 그래서 멈춘다), 자막은
+      글꼴이 바뀌어도 글은 읽힌다. 옛 편집본이 들고 있는 이름 때문에 렌더가
+      막히면 손해가 훨씬 크다.
+    - 이름을 바꾸지 않는 이유: 우리가 보는 자리는 세 곳뿐이다. 글꼴은 그 밖에도
+      설치될 수 있고, 그때 libass는 멀쩡히 그린다. 넘겨짚어 바꾸면 잘 나오던
+      글꼴을 우리가 망가뜨린다. 못 찾은 것과 없는 것은 다르다.
+
+    한계도 분명히 해 둔다: 이건 **로그**다. owner 화면에 닿지 않는다. owner에게
+    말하는 몫은 글꼴 고르기 화면이 이미 맡고 있다(`CaptionFontPicker`가 지금
+    쓰는 글꼴이 목록에 없으면 한 줄로 알린다). 여기 남는 것은 그 화면을 지나쳐
+    구웠을 때 나중에 되짚을 근거다.
+    """
+    missing = sorted(
+        {style.font_family for style in styles if not is_installed_caption_font(style.font_family)}
+    )
+    if not missing:
+        return
+    _logger.warning(
+        "Caption fonts not found on this machine: %s. libass will silently substitute another "
+        "font, so the finished video will not use them. Looked in: %s.",
+        ", ".join(missing),
+        ", ".join(CAPTION_FONT_DIRECTORIES),
+    )
 
 
 def render_editing_session_ass(editing_session: dict[str, Any], *, video_width: int, video_height: int) -> str:
@@ -116,6 +161,7 @@ def render_editing_session_ass(editing_session: dict[str, Any], *, video_width: 
                 dialogue_lines.append(f"Dialogue: 1,{timing},{style_name},,0,0,0,,{escaped_text}")
             else:
                 dialogue_lines.append(f"Dialogue: 0,{timing},{style_name},,0,0,0,,{escaped_text}")
+    _warn_about_fonts_this_machine_does_not_have(style_names)
     return "\n".join([
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {video_width}", f"PlayResY: {video_height}", "",
         "[V4+ Styles]", "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding", *style_lines, "",

@@ -13,6 +13,9 @@ import re
 import shutil
 from pathlib import Path
 
+import pytest
+
+from videobox_domain_models import caption_fonts
 from videobox_domain_models.caption_fonts import (
     BUNDLED_FONT_DIRECTORY,
     CAPTION_FONTS,
@@ -229,6 +232,35 @@ def _font_literals_in_source() -> list[tuple[str, int, str]]:
 def test_the_saved_default_caption_font_is_one_owner_can_actually_get() -> None:
     """모양을 따로 고르지 않은 자막이 전부 이 이름으로 나간다."""
     assert is_installed_caption_font(CaptionStyle().font_family)
+
+
+def test_the_saved_default_follows_the_machine_instead_of_a_frozen_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`CaptionStyle()`을 직접 만드는 자리도 **이 기계에 있는** 글꼴을 받아야 한다.
+
+    2026-08-20에 기계에게 묻는 자를 만들었지만 쓰는 곳이 한 군데뿐이었다 --
+    API가 내주는 기본값만 그 자를 썼고, 모델의 기본값은 박힌 이름 그대로였다.
+    그래서 두 자리가 서로 다른 답을 할 수 있었다.
+
+    위 시험(`..._is_one_owner_can_actually_get`)은 **이 기계에서만** 재므로 그
+    어긋남을 못 잡는다. 여기서는 글꼴이 하나뿐인 자리를 만들어 놓고 물어서,
+    기본값이 목록을 따라오는지 자체를 잰다.
+
+    이 자리가 왜 실제 경로인가: 자막 모양을 한 번도 고치지 않은 편집본은
+    `caption_style`이 비어 있고, 렌더는 그때 `CaptionStyle.from_dict({})`로
+    기본값을 만들어 그 이름을 그대로 ASS `Fontname`에 적는다.
+    """
+    here = tmp_path / "fonts"
+    here.mkdir()
+    shutil.copy(FONT_DIRECTORY / "Gaegu-Regular.ttf", here / "Gaegu-Regular.ttf")
+    monkeypatch.setattr(caption_fonts, "CAPTION_FONT_DIRECTORIES", (str(here),))
+
+    assert CaptionStyle().font_family == "Gaegu"
+    assert CaptionStyle.from_dict({}).font_family == "Gaegu"
+    # 고른 이름은 그대로 둔다. 기본값을 정하는 것과 남이 고른 것을 고쳐 주는 것은
+    # 다른 일이고, 뒤쪽은 옛 편집본을 못 열게 만든다.
+    assert CaptionStyle.from_dict({"font_family": "Arial"}).font_family == "Arial"
 
 
 def test_every_built_in_caption_preset_names_a_font_that_exists() -> None:

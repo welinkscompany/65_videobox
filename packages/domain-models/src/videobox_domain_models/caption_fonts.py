@@ -75,8 +75,14 @@ CAPTION_FONTS: tuple[CaptionFont, ...] = (
     CaptionFont("Gaegu", "개구쟁이", HANDWRITING, "Gaegu-Regular.ttf"),
 )
 
-# 화면 기본값이자 저장 기본값. 예전 기본값 `Arial`과 `Pretendard`는 둘 다
-# 컨테이너에 없어서 조용히 대체되고 있었다. 이제 실제로 들어 있는 글꼴을 쓴다.
+# 아무것도 안 골랐을 때 **첫째로 주고 싶은** 글꼴. 예전 기본값 `Arial`은 어디에도
+# 없는 이름이었고, `Pretendard`는 글꼴 파일을 함께 넣기 전까지 컨테이너에 없어서
+# 조용히 대체되고 있었다. 지금은 `assets/fonts/korean`에 함께 들어 있다.
+#
+# **이 상수를 기본값으로 그대로 박지 마라.** 이건 희망 사항이고, 이 기계에 정말
+# 있는지는 모른다 -- 물어야 할 곳은 `default_caption_font_family()`다. 그 함수만
+# 없을 때 있는 것으로 내려간다. 박아 두었다가 이미지에서 글꼴이 빠지면 그 자리만
+# 남아 다시 어긋난다.
 DEFAULT_CAPTION_FONT_FAMILY = "Pretendard"
 
 # 저장소 루트. 컨테이너 없이 worktree에서 바로 돌릴 때 여기서 글꼴을 찾는다.
