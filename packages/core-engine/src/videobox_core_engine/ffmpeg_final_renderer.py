@@ -464,7 +464,7 @@ def export_overlay_shape_filters(
 
 
 def _default_overlay_font() -> str:
-    """The name here must match the one the failure message tells the owner to
+    r"""The name here must match the one the failure message tells the owner to
     set. It read `VIDEBOX_OVERLAY_FONT` -- an `O` short -- so following the
     instruction changed nothing. The default is a font that exists in the
     container and has Korean glyphs; the old `C:\Windows\Fonts` default
