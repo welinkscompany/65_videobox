@@ -357,3 +357,33 @@ describe("항목 이름", () => {
     expect(screen.queryByText(/music-005|sfx-pop/)).toBeNull();
   });
 });
+
+describe("고르는 자리의 그림", () => {
+  // 이 고르개는 종류를 안 정해 주고 열 수도 있다. 그러면 라이브러리의 그림이
+  // 함께 실려 오는데, 옛 갈래는 "영상이 아니면 소리"라 그림을 `효과음`이라
+  // 부르고 빈 소리 재생기를 띄웠다.
+  it("그림을 효과음이라 부르지 않고 그림으로 보여 준다", async () => {
+    const picture = personalAsset({
+      library_asset_id: "user:image:1",
+      asset_id: "user-image-1",
+      media_type: "image",
+      mime_type: "image/png",
+      technical_metadata: {},
+      user_metadata: { filename: "바다.png" },
+      preview_url: "/api/library/assets/user%3Aimage%3A1/preview",
+    });
+    vi.spyOn(api.api, "listLibraryAssets").mockResolvedValue({ assets: [picture] } as never);
+    vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api.api, "listProjectMediaLibraryFavorites").mockResolvedValue({ asset_ids: [] } as never);
+
+    render(<MediaLibraryBrowser projectId="project-a" />);
+
+    const entry = await screen.findByRole("article", { name: "바다.png 항목" });
+    expect(entry).toHaveTextContent("그림");
+    expect(entry).not.toHaveTextContent("효과음");
+    // 그림에는 길이가 없다. `0초`라고 적으면 재 본 것처럼 읽힌다.
+    expect(entry).not.toHaveTextContent("0초");
+    expect(entry.querySelector("audio")).toBeNull();
+    expect(entry.querySelector("img")).toHaveAttribute("src", "/api/library/assets/user%3Aimage%3A1/preview");
+  });
+});
