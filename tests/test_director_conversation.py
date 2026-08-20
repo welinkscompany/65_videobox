@@ -391,14 +391,71 @@ def test_thumbnail_prompt_request_carries_project_title_script_and_captions(tmp_
     assert "아직 어두운 방" in prompt
     assert "지하철 승강장" in prompt
 
-    # 보통 질문은 프로젝트 정보 섹션 없이 그대로 나간다.
-    ordinary = client.post(url, json={
-        "session_id": session["session_id"],
-        "client_message_id": "ordinary-1",
-        "text": "요즘 영상 편집 팁 좀 알려줘",
-    })
-    assert ordinary.status_code == 200
-    assert "프로젝트 정보" not in str(runtime.calls[1]["prompt"])
+
+def test_editing_requests_also_carry_project_title_script_and_captions(tmp_path: Path) -> None:
+    """맥락은 썸네일 요청에만 실렸다. 그래서 편집 화면에서 "이 장면에 어울리는
+    B-roll 추천해 줘"라고 물으면 유진이 *지금 열어 놓고 있는* 영상을 두고
+    "영상의 분위기나 주제를 알려주시면"이라고 되물었다(2026-08-20 실측).
+    편집 요청도 같은 프로젝트 사실을 근거로 답해야 한다."""
+    from fastapi.testclient import TestClient
+    from videobox_api.main import create_app
+
+    class RecordingRuntime:
+        routing_mode = "local_only"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def generate_structured(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+
+            class _Response:
+                output_data = {"reply": "이 장면에는 ..."}
+
+            return _Response()
+
+    runtime = RecordingRuntime()
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "가을 오름"}).json()["project_id"]
+    app.state.store.create_creation_brief(
+        project_id=project_id,
+        script_filename="script.txt",
+        script_text="붉게 물든 단풍과 푸른 하늘이 어우러진 제주 오름",
+        idempotency_key="edit-context-brief",
+        capability_profile={},
+    )
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-1", "caption_text": "낙엽이 흩날리는 흙길"},
+                {"segment_id": "seg-2", "caption_text": "멀리 보이는 바다"},
+            ],
+            "history": [],
+        },
+    )
+    conversation = client.post(f"/api/projects/{project_id}/director/conversations", json={"session_id": session["session_id"]}).json()
+    url = f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages"
+
+    for index, text in enumerate((
+        "이 장면에 어울리는 B-roll 추천해 줘",
+        "첫 장면 자막을 더 간결하게 다듬어 줘",
+    )):
+        response = client.post(url, json={
+            "session_id": session["session_id"],
+            "client_message_id": f"edit-{index}",
+            "text": text,
+        })
+        assert response.status_code == 200
+        prompt = str(runtime.calls[index]["prompt"])
+        assert "가을 오름" in prompt, text
+        assert "붉게 물든 단풍과 푸른 하늘이 어우러진 제주 오름" in prompt, text
+        assert "낙엽이 흩날리는 흙길" in prompt, text
+        assert "멀리 보이는 바다" in prompt, text
+        # 썸네일 안내는 썸네일 요청에만 실린다 -- 맥락을 넓혀도 그건 그대로다.
+        assert "프롬프트 5개" not in prompt, text
 
 
 def test_thumbnail_prompt_request_survives_a_project_with_no_script_or_captions(tmp_path: Path) -> None:
