@@ -1975,6 +1975,12 @@ export const api = {
     return payload.projects;
   },
   getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
+  renameProject: (projectId: string, name: string) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
   archiveProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/archive`, { method: "POST" }),
   restoreProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/restore`, { method: "POST" }),
   deleteProjectPermanently: async (projectId: string): Promise<void> => {

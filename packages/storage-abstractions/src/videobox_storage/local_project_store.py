@@ -578,6 +578,26 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
     def restore_project(self, *, project_id: str) -> dict[str, Any]:
         return self._set_project_status(project_id=project_id, status=ProjectStatus.DRAFT)
 
+    def rename_project(self, *, project_id: str, name: str) -> dict[str, Any]:
+        """Change only what the owner reads: the display name.
+
+        `project_id` and `root_storage_uri` deliberately stay put. They are
+        the on-disk directory and the address every already-made asset and
+        finished video points at -- moving them each time a title is edited
+        would orphan the work that was already done. So a title stays
+        editable forever while the storage layout stays stable.
+        """
+        display_name = name.strip()
+        if not display_name:
+            raise ValueError("project_name_required")
+        self.get_project(project_id=project_id)  # raises KeyError if missing, on either backend
+        self._execute(
+            project_id,
+            "UPDATE projects SET name = ?, updated_at = ? WHERE project_id = ?",
+            (display_name, self._now_iso(), project_id),
+        )
+        return self.get_project(project_id=project_id)
+
     def delete_project_permanently(self, *, project_id: str) -> None:
         """Irreversibly remove a project's directory (its DB, assets,
         exports -- everything). Owner decision (2026-08-06): archive alone

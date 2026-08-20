@@ -276,6 +276,32 @@ describe("product shell", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
   });
 
+  it("renames a project from the switcher and the new title reaches the header", async () => {
+    // 제목을 바꿀 길이 아예 없었다 -- 만들 때 적은 이름이 끝이었다.
+    const renamed = { ...projects[0], name: "출근길 브이로그" };
+    vi.spyOn(api, "listProjects")
+      .mockResolvedValueOnce(projects)
+      .mockResolvedValueOnce([renamed, projects[1]]);
+    vi.spyOn(api, "getHomeSummary").mockResolvedValue({ finished_video_count: 0, has_draft: false, asset_gap_count: 0 });
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
+    const renameProject = vi.spyOn(api, "renameProject").mockResolvedValue(renamed);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "첫 번째 영상 더보기" }), { button: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "제목 바꾸기" }));
+
+    const field = await screen.findByLabelText("새 제목");
+    expect(field).toHaveValue("첫 번째 영상");
+    fireEvent.change(field, { target: { value: "출근길 브이로그" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(renameProject).toHaveBeenCalledWith("first", "출근길 브이로그"));
+    // 백엔드가 도는 것은 완료가 아니다. 사이드바와 머리말이 실제로 바뀌어야 한다.
+    await waitFor(() => expect(screen.getByRole("button", { name: "출근길 브이로그" })).toBeInTheDocument());
+  });
+
   it("requires two separate confirmations before permanently deleting a project", async () => {
     vi.spyOn(api, "listProjects")
       .mockResolvedValueOnce(projects)

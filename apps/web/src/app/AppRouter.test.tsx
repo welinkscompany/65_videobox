@@ -180,6 +180,53 @@ describe("AppRouter URL ownership", () => {
     expect(within(newCard).getByRole("link", { name: "계속 만들기" })).toHaveAttribute("href", "/projects/project_new/plan");
   });
 
+  it("lets the creator rename a video straight from its card", async () => {
+    // 프로젝트 목록은 owner가 가장 먼저 여는 화면인데, 여기서는 사이드바의
+    // 프로젝트 전환 목록이 나오지 않는다(`hasProject`가 거짓). 그래서 카드
+    // 자체에 제목을 바꾸는 길이 없으면 목록 화면에서는 아예 못 바꾼다.
+    const project = { project_id: "project_plan", name: "이야기 단계", status: "active", root_storage_uri: "local://plan" };
+    const renamed = { ...project, name: "출근길 브이로그" };
+    vi.spyOn(api, "listProjects")
+      .mockResolvedValueOnce([project])
+      .mockResolvedValue([renamed]);
+    // 카드에 보이는 이름은 프로젝트 목록이 아니라 **카드가 따로 불러오는 요약**에서
+    // 온다. 서버가 바뀌어도 이 요약을 다시 부르지 않으면 카드는 옛 제목을 계속
+    // 보여 준다 -- 브라우저에서 실제로 그렇게 나왔다.
+    let servedName = "이야기 단계";
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockImplementation(async (projectId) => ({
+      project_id: projectId,
+      display_name: servedName,
+      updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan" as const,
+      state: "ready" as const,
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: { label: "계속 만들기", href: "/projects/project_plan/plan" },
+    }));
+    const renameProject = vi.spyOn(api, "renameProject").mockImplementation(async () => {
+      servedName = "출근길 브이로그";
+      return renamed;
+    });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    const card = await screen.findByRole("article", { name: "이야기 단계 프로젝트" });
+    fireEvent.click(within(card).getByRole("button", { name: "이야기 단계 제목 바꾸기" }));
+
+    const field = await screen.findByLabelText("새 제목");
+    fireEvent.change(field, { target: { value: "출근길 브이로그" } });
+    fireEvent.click(screen.getByRole("button", { name: "저장" }));
+
+    await waitFor(() => expect(renameProject).toHaveBeenCalledWith("project_plan", "출근길 브이로그"));
+    await waitFor(() => expect(screen.queryByLabelText("새 제목")).not.toBeInTheDocument());
+    // 백엔드가 바뀐 것은 완료가 아니다. 카드가 새 제목을 보여야 한다.
+    // `편집기 열기` 이름은 카드가 따로 불러오는 요약에서 나오므로, 이것이
+    // 바뀌었다면 요약을 실제로 다시 불렀다는 뜻이다.
+    await waitFor(() => expect(screen.getByRole("link", { name: "출근길 브이로그 편집기 열기" })).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: "이야기 단계 편집기 열기" })).not.toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "출근길 브이로그 프로젝트" })).toBeInTheDocument();
+  });
+
   it("keeps a failed workspace summary out of project creation", async () => {
     const project = { project_id: "project_broken", name: "확인 필요", status: "active", root_storage_uri: "local://broken" };
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);

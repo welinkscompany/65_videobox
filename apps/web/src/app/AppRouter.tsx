@@ -20,6 +20,7 @@ import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
 import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
 import { FootageOrganizerPage } from "../features/footage/FootageOrganizerPage";
+import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
 import { ReviewAndOutputPage } from "../features/review/ReviewAndOutputPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
@@ -202,6 +203,7 @@ function ProjectsPage() {
       onOpenSettings={() => void navigate({ to: "/settings/general" })}
       onArchiveProject={(id) => archiveProjectAndRefresh(router, id)}
       onDeleteProjectPermanently={(id) => deleteProjectPermanentlyAndRefresh(router, id)}
+      onRenameProject={(id, name) => renameProjectAndRefresh(router, id, name)}
     >
     <main data-testid="projects-catalog" className="vb-catalog">
       <p className="vb-eyebrow">VideoBox</p>
@@ -225,7 +227,7 @@ function ProjectsPage() {
         <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
       )}
       <div className="vb-catalog-grid">
-        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} />)}
+        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} onRename={(id, name) => renameProjectAndRefresh(router, id, name)} />)}
       </div>
     </main>
     </ProductShell>
@@ -255,6 +257,7 @@ function GlobalShell({ section, children }: { section: "library" | "footage"; ch
     onOpenSettings={() => void navigate({ to: "/settings/general" })}
     onArchiveProject={(id) => archiveProjectAndRefresh(router, id)}
     onDeleteProjectPermanently={(id) => deleteProjectPermanentlyAndRefresh(router, id)}
+    onRenameProject={(id, name) => renameProjectAndRefresh(router, id, name)}
   >{children}</ProductShell>;
 }
 
@@ -292,10 +295,13 @@ function projectStateLabel(summary: ProjectWorkspaceSummary): string {
   return summary.state === "blocked" ? byState.blocked : summary.state === "attention" ? byState.attention : byState.ready;
 }
 
-function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onNavigateHref?: (href: string) => void }) {
+function ProjectCatalogCard({ project, onNavigateHref, onRename }: { project: Project; onNavigateHref?: (href: string) => void; onRename?: (projectId: string, name: string) => void | Promise<void> }) {
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
   const [summaryError, setSummaryError] = useState(false);
   const [requestNumber, setRequestNumber] = useState(0);
+  // 목록 화면에서는 사이드바의 프로젝트 전환 목록이 나오지 않는다
+  // (`hasProject`가 거짓). 카드에 길이 없으면 여기서는 제목을 못 바꾼다.
+  const [renaming, setRenaming] = useState(false);
   useEffect(() => {
     let active = true;
     setSummary(null);
@@ -306,7 +312,10 @@ function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onN
       if (active) setSummaryError(true);
     });
     return () => { active = false; };
-  }, [project.project_id, requestNumber]);
+    // 이름이 바뀌면 요약도 다시 부른다. 카드에 보이는 제목은 목록이 아니라 이
+    // 요약에서 오므로, 여기에 `project.name`이 없으면 제목을 바꿔도 카드는 옛
+    // 이름을 계속 보여 준다 -- 브라우저에서 실제로 그렇게 나왔다.
+  }, [project.project_id, project.name, requestNumber]);
   if (summaryError) {
     return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
       <h2>{project.name}</h2>
@@ -339,11 +348,27 @@ function ProjectCatalogCard({ project, onNavigateHref }: { project: Project; onN
       event.preventDefault();
       onNavigateHref(summary.next_action.href);
     }}>{summary.next_action.label}</a></Button>
+    {onRename ? <>
+      <Button type="button" variant="ghost" className="vb-catalog-card__rename" aria-label={`${summary.display_name} 제목 바꾸기`} onClick={() => setRenaming(true)}>제목 바꾸기</Button>
+      {renaming ? <ProjectTitleDialog
+        projectId={project.project_id}
+        currentName={summary.display_name}
+        open
+        onOpenChange={(next) => { if (!next) setRenaming(false); }}
+        onRename={onRename}
+      /> : null}
+    </> : null}
   </article>;
 }
 
 async function archiveProjectAndRefresh(router: ReturnType<typeof createAppRouter>, projectId: string) {
   await api.archiveProject(projectId);
+  await router.options.context.catalog.refresh();
+  await router.invalidate();
+}
+
+async function renameProjectAndRefresh(router: ReturnType<typeof createAppRouter>, projectId: string, name: string) {
+  await api.renameProject(projectId, name);
   await router.options.context.catalog.refresh();
   await router.invalidate();
 }
@@ -386,6 +411,7 @@ function WorkspacePage() {
   const router = useRouter();
   const handleArchiveProject = (id: string) => archiveProjectAndRefresh(router, id);
   const handleDeleteProjectPermanently = (id: string) => deleteProjectPermanentlyAndRefresh(router, id);
+  const handleRenameProject = (id: string, name: string) => renameProjectAndRefresh(router, id, name);
   const archive = useArchivedProjects(router);
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     session_id?: unknown;
@@ -423,12 +449,12 @@ function WorkspacePage() {
     search: { project_id: projectId } as never,
   });
   if (section === "home") {
-    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
   if (section === "create" || section === "plan") {
-    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
       <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
@@ -437,15 +463,15 @@ function WorkspacePage() {
       ? (routeSearch as { return_to: string }).return_to
       : null;
     const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
-    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
       <MediaWorkspacePage projectId={projectId} />
     </ProductShell>;
   }
   // 검토와 출력은 한 단계다. 두 주소를 모두 살려 둔 채 같은 화면을 그린다 --
   // 한쪽을 리다이렉트로 접으면 그 주소로 바로 들어오던 경로가 끊긴다.
   if (section === "outputs" || section === "output" || section === "timeline" || section === "review") {
-    return <ProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+    return <ProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
       <ReviewAndOutputPage
         projectId={projectId}
         onOpenEditor={() => navigateTo(projectId, "editing")}
@@ -458,17 +484,17 @@ function WorkspacePage() {
     </ProductShell>;
   }
   if ((section === "editor" || section === "edit") && rawEditingSessionId !== null && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
   if ((section === "editor" || section === "edit") && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive} forceCollapsed>
       <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
   if (section === "editor" || section === "edit") {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive} forceCollapsed>
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
@@ -552,6 +578,7 @@ function SettingsRoutePage() {
   const router = useRouter();
   const handleArchiveProject = (id: string) => archiveProjectAndRefresh(router, id);
   const handleDeleteProjectPermanently = (id: string) => deleteProjectPermanentlyAndRefresh(router, id);
+  const handleRenameProject = (id: string, name: string) => renameProjectAndRefresh(router, id, name);
   const archive = useArchivedProjects(router);
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     project_id?: unknown;
@@ -563,7 +590,7 @@ function SettingsRoutePage() {
   const projectId = requestedProjectId || resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) || projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;
   const settingsLocation = (nextSection: typeof validSections[number]) => `/settings/${nextSection}?project_id=${encodeURIComponent(projectId)}`;
-  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} archive={archive}>
+  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
     <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: settingsLocation(nextSection) })} />
   </ProductShell>;
 }
