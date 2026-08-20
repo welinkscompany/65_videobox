@@ -6,6 +6,11 @@ export type RightDockCandidate = Readonly<{
   kind: "broll" | "bgm" | "sfx" | string;
   sourceMediaKind: "raw_video" | "broll_video" | "image" | "bgm" | "sfx" | string;
   targetSegmentId: string;
+  /** 그 장면을 **사람이 아는 말로** 부르는 이름(`3번째 장면 · 자막 첫머리`).
+   *  `targetSegmentId`는 내부 id라 카드에 그대로 쓸 수 없고, 그래서 2026-08-20까지
+   *  카드가 장면을 아예 말하지 않았다 -- 같은 자산을 쓰는 후보 열세 개가 화면에서
+   *  전부 똑같아 보였다. 장면을 모르면 **비워 둔다.** 지어낸 이름은 코드보다 나쁘다. */
+  targetSceneLabel?: string;
   /** 카드에 보일 자산 이름. 없으면 코드로 떨어진다 -- 코드만으로는 고를 수 없다. */
   displayName?: string;
   previewSummary: string;

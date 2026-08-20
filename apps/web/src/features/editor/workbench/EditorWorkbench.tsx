@@ -10,6 +10,7 @@ import type { EditorAssetCard } from "../assets/editorAssetProjection";
 import type { EditorAssetPreviewState } from "../assets/EditorAssetBrowser";
 import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls } from "../inspector/InspectorControls";
 import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
+import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
@@ -411,14 +412,9 @@ function EditorWorkbenchInstance({
   // §10.13: this label is read aloud by screen readers and shown on screen, so
   // it must not carry a raw role name or an internal segment id. Scene numbers
   // follow timeline order, matching how the review screen counts them.
-  const sceneNumbers = new Map<string, number>();
-  view.tracks
-    .flatMap((track) => track.clips)
-    .slice()
-    .sort((left, right) => left.startSec - right.startSec)
-    .forEach((clip) => {
-      if (clip.segmentId && !sceneNumbers.has(clip.segmentId)) sceneNumbers.set(clip.segmentId, sceneNumbers.size + 1);
-    });
+  // 세는 규칙은 `sceneNames`에 하나만 둔다 -- 추천 카드도 같은 번호로 장면을
+  // 부르므로, 여기서 따로 세면 같은 장면이 화면마다 다른 번호가 된다.
+  const sceneNumbers = sceneNumbersBySegmentId(view);
   const sources: AuditionSource[] = view.tracks.flatMap((track) => track.clips.flatMap((clip) => {
     if (!clip.assetId) return [];
     const url = view.playback.auditionUrls[clip.assetId];

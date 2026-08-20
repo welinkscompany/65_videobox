@@ -214,6 +214,57 @@ describe("RightDock", () => {
     expect(screen.queryByRole("radio", { name: /P01-B-01/ })).toBeNull();
   });
 
+  it("says which scene each candidate is for, so the same asset twice is still two choices", () => {
+    // 2026-08-20 owner 실측: 카드 열세 개가 전부 `20260612_091959 · 미디어`였다.
+    // 서버는 후보마다 다른 `target_segment_id`를 실어 보내고 화면 코드도 그것을
+    // 받는데, **카드가 그 값을 한 번도 쓰지 않았다.** 장면을 말하지 않으면
+    // 같은 자산을 쓰는 후보들은 화면에서 구별할 방법이 없다.
+    const sceneCandidate = (candidateId: string, targetSegmentId: string, targetSceneLabel: string) => ({
+      candidateId,
+      visibleReferenceCode: "P02-B-01",
+      displayName: "20260612_091959",
+      mediaType: "broll",
+      previewUrl: null,
+      kind: "broll",
+      sourceMediaKind: "broll",
+      targetSegmentId,
+      targetSceneLabel,
+      previewSummary: "요약",
+      supportedControls: {},
+      availability: "actionable",
+      reviewStatus: "approved",
+      actionable: true,
+    });
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      proposal={{
+        proposalId: "proposal-1",
+        status: "ready",
+        baseSessionRevision: 1,
+        currentRevision: 1,
+        candidates: [
+          sceneCandidate("candidate-1", "segment-1", "1번째 장면 · 안녕하세요, 제주입니다"),
+          sceneCandidate("candidate-2", "segment-2", "2번째 장면 · 오름에 올라 봅니다"),
+        ],
+      }}
+    />);
+
+    // 보이는 글자와 접근 이름이 **둘 다** 갈라져야 한다. 하나만 갈라지면
+    // 눈으로 보거나 음성으로 듣는 사람 중 한쪽은 여전히 못 고른다.
+    expect(screen.getByRole("radio", { name: "1번째 장면 · 안녕하세요, 제주입니다 — 20260612_091959 선택" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "2번째 장면 · 오름에 올라 봅니다 — 20260612_091959 선택" })).toBeInTheDocument();
+    expect(screen.getByText(/1번째 장면 · 안녕하세요, 제주입니다/)).toBeVisible();
+    expect(screen.getByText(/2번째 장면 · 오름에 올라 봅니다/)).toBeVisible();
+  });
+
+  it("keeps the old name when nothing is known about the scene, instead of inventing one", () => {
+    // 장면을 모르면 아무 말도 하지 않는다. 지어낸 장면 이름은 코드보다 나쁘다.
+    render(<RightDock draft="" onDraftChange={() => undefined} proposal={proposal} />);
+
+    expect(screen.getByRole("radio", { name: "B-001 선택" })).toBeInTheDocument();
+  });
+
   it("offers to take a pasted script, so the editor is reachable without the interview", () => {
     // 2026-08-19 owner: "유진이랑 대화하면서 대본을 복붙하면 유진이가 그걸 보고
     // 편집기에 붙여 줬으면". 지금은 대본이 `/plan`의 문답형 인터뷰로만 들어간다.

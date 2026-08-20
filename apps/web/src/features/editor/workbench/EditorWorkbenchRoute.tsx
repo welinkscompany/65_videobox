@@ -11,6 +11,7 @@ import { createEditorCommandPort, type EditorCommandPort } from "../editorComman
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
+import { sceneLabelsBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
 import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
@@ -1672,7 +1673,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const rightDock: RightDockDirector = {
     state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
-    proposal: projectDirectorProposal(projectId, activeDirector.proposal, state.view.expectedRevision),
+    proposal: projectDirectorProposal(projectId, activeDirector.proposal, state.view.expectedRevision, sceneLabelsBySegmentId(state.view)),
     draft: activeDirector.draft,
     runState: activeDirector.runState,
     selectedCandidateIds: activeDirector.selectedCandidateIds,
@@ -1829,7 +1830,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   </>;
 }
 
-function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number): RightDockProposal | null {
+function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number, sceneLabels: ReadonlyMap<string, string> = new Map()): RightDockProposal | null {
   if (!proposal) return null;
   const isYujin = isYujinProposal(proposal);
   return {
@@ -1841,6 +1842,7 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
     matchMode: typeof proposal.diff?.match_mode === "string" ? proposal.diff.match_mode : undefined,
     candidates: proposal.candidates.map((candidate) => {
       const metadata = candidate.canonical_metadata ?? {};
+      const targetSegmentId = String(candidate.target_segment_id ?? metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? "");
       const actionable = isYujin
         ? isActionableYujinCandidate(candidate)
         : proposal.status === "ready";
@@ -1858,7 +1860,12 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
         sourceMediaKind: String(metadata.source_media_kind ?? candidate.media_type),
         // 후보마다 겨냥한 장면이 다르다. 예전에는 제안의 **첫 장면**으로 떨어져서
         // 카드가 전부 같은 장면을 가리켰다(2026-08-19 owner 지적).
-        targetSegmentId: String(candidate.target_segment_id ?? metadata.target_segment_id ?? proposal.target_segment_ids[0] ?? ""),
+        targetSegmentId,
+        // **부품은 있는데 부르는 자리가 없었다.** `targetSegmentId`는 2026-08-19에
+        // 후보별로 정확해졌지만 카드가 그것을 한 번도 읽지 않아, 같은 자산을
+        // 열세 장면에 추천하면 카드 열세 개가 화면에서 완전히 똑같아 보였다.
+        // 내부 id는 창작자에게 보일 수 없으므로 편집판이 쓰는 장면 이름으로 바꾼다.
+        targetSceneLabel: sceneLabels.get(targetSegmentId),
         displayName: typeof metadata.display_name === "string" && metadata.display_name.trim() ? metadata.display_name.trim() : undefined,
         previewSummary: String(metadata.preview_summary ?? candidate.reason_chips[0] ?? "추천 세부 내용을 확인해 주세요."),
         supportedControls: candidate.controls ?? {},

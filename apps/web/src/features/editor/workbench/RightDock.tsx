@@ -75,13 +75,21 @@ function looksLikeScript(draft: string): boolean {
  *
  *  **종류는 여기 넣지 않는다.** 접근 이름은 부르는 말이고, 종류는 카드가 `미디어`
  *  줄로 이미 말한다. 넣었더니 음성으로 부르는 이름이 통째로 바뀌었다. */
-function candidateLabel(candidate: RightDockCandidate): string {
+function candidateAssetLabel(candidate: RightDockCandidate): string {
   return candidate.displayName?.trim() || candidate.visibleReferenceCode;
+}
+
+/** 부르는 이름에 **장면이 먼저 온다.** 같은 자산을 여러 장면에 추천하는 일이
+ *  흔해서(빈 구간을 한 자산으로 메우는 경우가 그렇다) 자산 이름만으로는 열세
+ *  개가 전부 같은 이름이 된다. 장면을 모르면 예전처럼 자산 이름만 쓴다. */
+function candidateLabel(candidate: RightDockCandidate): string {
+  const scene = candidate.targetSceneLabel?.trim();
+  return scene ? `${scene} — ${candidateAssetLabel(candidate)}` : candidateAssetLabel(candidate);
 }
 
 /** 카드에 보이는 글자. 이름 옆에 종류를 붙여 한눈에 구분되게 한다. */
 function candidateTitle(candidate: RightDockCandidate): string {
-  return `${candidateLabel(candidate)} · ${mediaKindLabel(candidate.sourceMediaKind)}`;
+  return `${candidateAssetLabel(candidate)} · ${mediaKindLabel(candidate.sourceMediaKind)}`;
 }
 
 export function RightDock({
@@ -326,7 +334,9 @@ export function RightDock({
               onChange={() => {
                 if (candidateIsActionable) onSelectedCandidateIdsChange?.([candidate.candidateId]);
               }}
-            />{candidateTitle(candidate)}</label>
+            />{candidate.targetSceneLabel?.trim()
+              ? <><strong className="vb-editor-right-dock__candidate-scene">{candidate.targetSceneLabel.trim()}</strong>{" "}<span>{candidateTitle(candidate)}</span></>
+              : candidateTitle(candidate)}</label>
             <p>{candidate.previewSummary}</p>
             <p>{`후보 상태: ${candidateDeclaresActionable ? "적용 가능" : "수동 적용"}`}</p>
             <dl>
