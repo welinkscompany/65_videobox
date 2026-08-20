@@ -69,6 +69,15 @@ function looksLikeScript(draft: string): boolean {
   return draft.trim().length >= SCRIPT_MINIMUM_CHARACTERS;
 }
 
+/** 유진 답마다 붙는 단추의 **부르는 이름**. 보이는 글자는 짧게 두고 뒤에 그 답의
+ *  첫머리를 붙인다 -- 긴 대화에서는 같은 이름의 단추가 여러 개가 되고, 그러면
+ *  음성으로는 어느 것도 고를 수 없다. 보이는 글자가 이름의 **앞부분**이어야
+ *  한다는 규칙은 타임라인 클립과 같다. */
+const SCRIPT_BUTTON_TEXT = "이 답을 대본으로 쓰기";
+function scriptButtonLabel(text: string): string {
+  return `${SCRIPT_BUTTON_TEXT} — ${text.trim().slice(0, 20)}…`;
+}
+
 /** 후보를 **부르는 이름**. 코드는 사람이 고르는 근거가 못 된다 -- 2026-08-19에
  *  owner 화면의 후보 일곱 개가 전부 `P08-B-01 · 미디어`였고, 실제로는 서로 다른
  *  장면을 겨냥한 같은 자산이었다. 이름이 오면 이름을, 없으면 코드를 쓴다.
@@ -266,7 +275,18 @@ export function RightDock({
         }}
       >
         {messages.length
-          ? messages.map((message) => <article key={message.id}><p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p></article>)
+          ? messages.map((message) => <article key={message.id}>
+            <p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p>
+            {/* 유진이 써 준 대본에는 단추가 없었다. 받아도 **손으로 복사해서
+                입력칸에 도로 붙여넣어야** 쓸 수 있었다(2026-08-20 owner 실측).
+                복사·붙여넣기 수고만 없앤다 -- 이 단추도 아래 붙여넣기 단추와
+                똑같이 대본을 만들어 두고 **확정 화면으로 보낼 뿐**이다.
+                확정을 사람이 한다는 게이트는 그대로다
+                (`decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md`). */}
+            {onUseDraftAsScript && message.role === "assistant" && looksLikeScript(message.text)
+              ? <Button type="button" aria-label={scriptButtonLabel(message.text)} onClick={() => void onUseDraftAsScript(message.text)}>{SCRIPT_BUTTON_TEXT}</Button>
+              : null}
+          </article>)
           : <>
             <p>유진 대화는 아직 시작하지 않았어요.</p>
             {showConversationStarters ? <YujinStarters

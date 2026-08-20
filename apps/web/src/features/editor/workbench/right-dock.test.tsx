@@ -279,6 +279,61 @@ describe("RightDock", () => {
     expect(onUseDraftAsScript).toHaveBeenCalledWith(script);
   });
 
+  it("offers the same script button on Yujin's own answer, so nobody copies it back into the box", () => {
+    // 2026-08-20 owner 실측: 유진에게 대본을 받아도 **손으로 복사해서 입력칸에
+    // 도로 붙여넣어야** 단추가 떴다. 복사·붙여넣기 수고만 없앤다 --
+    // 확정은 여전히 사람이 한다(2026-08-16 승인 기록).
+    const onUseDraftAsScript = vi.fn();
+    const script = "안녕하세요. 오늘은 제주 바다를 소개합니다. 두 번째 문장입니다.";
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      onUseDraftAsScript={onUseDraftAsScript}
+      messages={[
+        { id: "user-1", role: "user", text: "60초 대본 하나 써 줘" },
+        { id: "assistant-1", role: "assistant", text: script },
+      ]}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: `이 답을 대본으로 쓰기 — ${script.slice(0, 20)}…` }));
+
+    expect(onUseDraftAsScript).toHaveBeenCalledWith(script);
+  });
+
+  it("tells two Yujin answers apart, so the button can be reached by voice", () => {
+    // 같은 이름의 단추가 여러 개면 음성으로 고를 수 없다. 보이는 글자는 짧게
+    // 두고 접근 이름 뒤에 그 답의 첫머리를 붙인다(타임라인 클립과 같은 방식).
+    const first = "첫 번째 대본입니다. 제주 바다에서 시작해 오름으로 올라갑니다.";
+    const second = "두 번째 대본입니다. 한라산에서 시작해 바다로 내려갑니다.";
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      onUseDraftAsScript={vi.fn()}
+      messages={[
+        { id: "assistant-1", role: "assistant", text: first },
+        { id: "assistant-2", role: "assistant", text: second },
+      ]}
+    />);
+
+    expect(screen.getByRole("button", { name: `이 답을 대본으로 쓰기 — ${first.slice(0, 20)}…` })).toBeVisible();
+    expect(screen.getByRole("button", { name: `이 답을 대본으로 쓰기 — ${second.slice(0, 20)}…` })).toBeVisible();
+  });
+
+  it("does not offer the script button on a short answer or on what the creator typed", () => {
+    // 짧은 답은 대본이 아니라 대꾸다. 그리고 내가 쓴 말은 유진의 대본이 아니다.
+    render(<RightDock
+      draft=""
+      onDraftChange={() => undefined}
+      onUseDraftAsScript={vi.fn()}
+      messages={[
+        { id: "assistant-1", role: "assistant", text: "네, 알겠습니다." },
+        { id: "user-1", role: "user", text: "안녕하세요. 오늘은 제주 바다를 소개합니다. 두 번째 문장입니다." },
+      ]}
+    />);
+
+    expect(screen.queryByRole("button", { name: /대본으로 쓰기/ })).toBeNull();
+  });
+
   it("does not offer the script button for a short question", () => {
     // 짧은 한 줄은 요청이지 대본이 아니다. 늘 띄우면 단추가 소음이 된다.
     const onUseDraftAsScript = vi.fn();
