@@ -358,3 +358,62 @@ class AutoCutConfig:
             raise ValueError("auto_cut.static_duration must be greater than zero.")
         if self.merge_threshold < 0:
             raise ValueError("auto_cut.merge_threshold must not be negative.")
+
+
+# 상업 이용이 열려 있는지 아는 모델만 여기 적는다. 모르는 이름은 `None`이다 --
+# 지어내지 않는다. 라이선스는 실행 중에 눈에 보이지 않는 제약이라, 사람이 기억하는
+# 것에 맡기면 반드시 새어 나간다 (§10.14 조항 2-C).
+_UNRESTRICTED_IMAGE_MODELS = frozenset({"flux1-schnell.safetensors", "flux1-schnell-fp8.safetensors"})
+_NON_COMMERCIAL_IMAGE_MODELS = frozenset({"flux1-dev.safetensors", "flux1-dev-fp8.safetensors"})
+
+
+@dataclass(slots=True, frozen=True)
+class ImageGenerationConfig:
+    """대본에 맞춰 그림을 만드는 경로. owner 승인 2026-08-20 (§10.14 조항 2-C).
+
+    ComfyUI는 OpenAI 모양이 아니라서 2-B의 provider를 재사용할 수 없다
+    (`POST /prompt` 그래프 JSON → `/history` 폴링 → `/view` 회수).
+    """
+
+    enabled: bool = True
+    base_url: str = "http://127.0.0.1:8188"
+    model_name: str = "flux1-dev.safetensors"
+    # 실측(2026-08-21, RTX 5090): bf16은 22GB라 여유 10.7GB에 안 들어간다. fp8로 실으면
+    # 절반이 되어 **LM Studio를 켜 둔 채로** 1920x1080이 24초다. 기본값이 곧 그 실측이다.
+    weight_dtype: str = "fp8_e4m3fn"
+    steps: int = 20
+    guidance: float = 3.5
+    timeout_seconds: int = 600
+
+    # 2-B와 같은 방식으로 묶는다. 설정 한 줄로 밖에 나갈 수 있으면 그 조항은
+    # 문서에만 있는 것이 된다. `host.docker.internal`은 같은 기계다.
+    _CONTAINER_BASE_URL = "http://host.docker.internal:8188"
+
+    def __post_init__(self) -> None:
+        if self.base_url not in ("http://127.0.0.1:8188", self._CONTAINER_BASE_URL):
+            raise ValueError(
+                "image_generation_config.base_url must be exactly "
+                "http://127.0.0.1:8188, or "
+                f"{self._CONTAINER_BASE_URL} when running in the container."
+            )
+        if not self.model_name.strip():
+            raise ValueError("image_generation_config.model_name must not be blank.")
+        if not self.weight_dtype.strip():
+            raise ValueError("image_generation_config.weight_dtype must not be blank.")
+        for name, value in (("steps", self.steps), ("timeout_seconds", self.timeout_seconds)):
+            if value <= 0:
+                raise ValueError(f"image_generation_config.{name} must be greater than zero.")
+
+    @property
+    def commercial_use_is_unrestricted(self) -> bool | None:
+        """상업 이용이 열려 있는가. **모르면 `None`** -- 아는 척하지 않는다.
+
+        막지는 않는다. owner가 2026-08-21에 `flux1-dev`로 가겠다고 결정했고 라이선스는
+        본인이 맡는다고 했다. 다만 어느 쪽을 쓰고 있는지는 스스로 말할 수 있어야 한다.
+        """
+        name = self.model_name.strip()
+        if name in _UNRESTRICTED_IMAGE_MODELS:
+            return True
+        if name in _NON_COMMERCIAL_IMAGE_MODELS:
+            return False
+        return None
