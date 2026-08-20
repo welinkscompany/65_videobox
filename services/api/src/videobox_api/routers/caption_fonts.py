@@ -17,8 +17,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from videobox_domain_models.caption_fonts import (
-    DEFAULT_CAPTION_FONT_FAMILY,
     caption_font_catalog,
+    default_caption_font_family,
     is_installed_caption_font,
 )
 from videobox_storage.user_library_store import UserLibraryStore
@@ -33,19 +33,23 @@ def build_caption_fonts_router(store: UserLibraryStore) -> APIRouter:
 
     def _require_installed(family: str) -> None:
         # 없는 글꼴을 담아 두면 다음에 골랐을 때 조용히 다른 글꼴로 떨어진다.
-        # 담기는 자리에서 막는 것이 가장 싸다.
+        # 담기는 자리에서 막는 것이 가장 싸다. 목록에 있는지가 아니라 이 기계에
+        # 글꼴 파일이 있는지를 본다 -- 목록만 믿으면 같은 문이 다시 열린다.
         if not is_installed_caption_font(family):
-            raise HTTPException(status_code=422, detail="설치되지 않은 글꼴이에요.")
+            raise HTTPException(status_code=422, detail="이 컴퓨터에 없는 글꼴이에요.")
 
     @router.get("/api/caption-fonts")
     def list_caption_fonts() -> dict[str, Any]:
         """목록·즐겨찾기·최근을 한 번에 준다.
 
         화면이 나눠 부르면 그중 하나만 실패해도 글꼴을 아예 못 고르게 된다.
+
+        목록은 **이 기계에 글꼴 파일이 있는 것만**이다. 화면과 이 길이 같은
+        사실을 말하도록 목록 정본 한 곳에서 걸러서 내보낸다.
         """
         return {
             "fonts": caption_font_catalog(),
-            "default_family": DEFAULT_CAPTION_FONT_FAMILY,
+            "default_family": default_caption_font_family(),
             "favorites": store.list_favorite_fonts(),
             "recents": store.list_recent_font_families(),
         }

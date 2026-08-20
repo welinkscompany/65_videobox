@@ -78,6 +78,25 @@ describe("자막 글꼴 고르기", () => {
     expect(await screen.findByRole("button", { name: "개구쟁이 즐겨찾기" })).toBeInTheDocument();
   });
 
+  it("지금 쓰는 글꼴이 이 컴퓨터에 없으면 먼저 말해 준다", async () => {
+    // 목록에는 글꼴 파일이 실제로 있는 것만 담겨 온다. 그 안에 없다는 것은
+    // 완성본이 조용히 다른 글꼴로 나온다는 뜻이라 owner에게 먼저 알린다.
+    vi.spyOn(api.api, "listCaptionFonts").mockResolvedValue(library as never);
+
+    render(<CaptionFontPicker value="NanumGothic" onSelect={vi.fn()} />);
+
+    expect(await screen.findByText(/이 컴퓨터에 없어요/)).toBeInTheDocument();
+  });
+
+  it("지금 쓰는 글꼴이 목록에 있으면 아무 말도 하지 않는다", async () => {
+    vi.spyOn(api.api, "listCaptionFonts").mockResolvedValue(library as never);
+
+    render(<CaptionFontPicker value="Gaegu" onSelect={vi.fn()} />);
+    await screen.findByRole("button", { name: "개구쟁이 고르기" });
+
+    expect(screen.queryByText(/이 컴퓨터에 없어요/)).not.toBeInTheDocument();
+  });
+
   it("목록을 못 읽으면 지금 쓰는 글꼴이라도 보여주고 편집을 막지 않는다", async () => {
     vi.spyOn(api.api, "listCaptionFonts").mockRejectedValue(new Error("nope"));
 

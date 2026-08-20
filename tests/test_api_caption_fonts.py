@@ -11,7 +11,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-from videobox_domain_models.caption_fonts import CAPTION_FONTS, DEFAULT_CAPTION_FONT_FAMILY
+from videobox_domain_models.caption_fonts import (
+    CAPTION_FONTS,
+    default_caption_font_family,
+    installed_caption_fonts,
+)
 
 
 @pytest.fixture(name="client")
@@ -22,13 +26,23 @@ def _client(tmp_path) -> TestClient:
     return TestClient(create_app(projects_root=tmp_path / "projects"))
 
 
-def test_caption_font_list_is_the_installed_catalogue(client: TestClient) -> None:
+def test_caption_font_list_is_what_this_machine_can_actually_draw(client: TestClient) -> None:
+    """화면과 이 길이 같은 사실을 말해야 한다.
+
+    목록 전체가 아니라 **글꼴 파일이 있는 것만** 나간다. 개발기에는 apt가 넣어
+    주는 셋이 없으므로 여기서 목록보다 짧을 수 있다 -- 컨테이너에서는 전부 있다.
+    """
     response = client.get("/api/caption-fonts")
 
     assert response.status_code == 200
     body = response.json()
-    assert [font["family"] for font in body["fonts"]] == [font.family for font in CAPTION_FONTS]
-    assert body["default_family"] == DEFAULT_CAPTION_FONT_FAMILY
+    assert [font["family"] for font in body["fonts"]] == [
+        font.family for font in installed_caption_fonts()
+    ]
+    assert body["fonts"], "고를 것이 하나도 없으면 자막을 만들 수 없다"
+    assert {font["family"] for font in body["fonts"]} <= {font.family for font in CAPTION_FONTS}
+    assert body["default_family"] == default_caption_font_family()
+    assert body["default_family"] in {font["family"] for font in body["fonts"]}
     assert body["favorites"] == []
     assert body["recents"] == []
     assert all(font["label"] and font["group"] for font in body["fonts"])
