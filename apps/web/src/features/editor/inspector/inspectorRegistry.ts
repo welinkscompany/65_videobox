@@ -43,8 +43,6 @@ export const SHAPE_OVERLAY_LABELS: Readonly<Record<ShapeOverlayShape, string>> =
   icon_clock: "시계",
   icon_calendar: "달력",
   icon_location: "위치",
-  icon_play: "재생",
-  icon_stop: "정지",
   icon_heart: "하트",
   icon_thumb_up: "엄지척",
   icon_money: "돈",

@@ -71,6 +71,11 @@ SHAPE_OVERLAY_TEXT_FONT_ICON_GLYPHS: dict[str, str] = {
 # **리거처가 아니라 코드포인트로 적는다.** Material Symbols는 `lightbulb` 같은
 # 이름을 리거처로도 받지만 drawtext에는 리거처 합성이 없다 -- 이름을 그대로
 # 넘기면 `l`,`i`,`g`,... 가 낱낱이 그려진다.
+#
+# 글꼴에는 4,271개가 들어 있지만 여기 올리는 것은 14개다. 목록이 길수록 고르는
+# 값이 비싸지므로, 이미 있는 표시와 **그림이 겹치는 것**은 넣지 않는다. 실제로
+# 그려 보고 뺀 둘: `play_arrow`는 기존 `삼각형`(▶)과 같은 그림이고, `stop`은
+# 오버레이 크기에서 `강조 상자`와 구별되지 않는 작은 네모로 보였다.
 SHAPE_OVERLAY_ICON_FONT_GLYPHS: dict[str, str] = {
     "icon_lightbulb":     "\ue90f",   # lightbulb
     "icon_search":        "\uef7a",   # search
@@ -80,8 +85,6 @@ SHAPE_OVERLAY_ICON_FONT_GLYPHS: dict[str, str] = {
     "icon_clock":         "\uefd6",   # schedule
     "icon_calendar":      "\uebcc",   # calendar_month
     "icon_location":      "\uf1db",   # location_on
-    "icon_play":          "\ue037",   # play_arrow
-    "icon_stop":          "\ue047",   # stop
     "icon_heart":         "\ue87e",   # favorite
     "icon_thumb_up":      "\uf577",   # thumb_up
     "icon_money":         "\ue227",   # attach_money

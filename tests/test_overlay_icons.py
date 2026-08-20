@@ -75,8 +75,6 @@ def test_the_selected_icon_set_is_the_measured_one() -> None:
         "icon_clock",
         "icon_calendar",
         "icon_location",
-        "icon_play",
-        "icon_stop",
         "icon_heart",
         "icon_thumb_up",
         "icon_money",

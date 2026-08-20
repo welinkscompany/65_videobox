@@ -606,8 +606,6 @@ export type ShapeOverlayShape =
   | "icon_clock"
   | "icon_calendar"
   | "icon_location"
-  | "icon_play"
-  | "icon_stop"
   | "icon_heart"
   | "icon_thumb_up"
   | "icon_money"
