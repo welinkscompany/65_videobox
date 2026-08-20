@@ -385,6 +385,9 @@ function previewVerb(kind: RightDockCandidate["sourceMediaKind"]): string {
 function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
   return {
     raw_video: "원본 영상",
+    // `source_media_kind`가 없는 후보는 `media_type`으로 떨어진다. 그 값은
+    // `broll`이라 사전에 없었고, B-roll 후보가 전부 `미디어`로 보였다.
+    broll: "영상",
     broll_video: "영상",
     image: "이미지",
     bgm: "배경 음악",

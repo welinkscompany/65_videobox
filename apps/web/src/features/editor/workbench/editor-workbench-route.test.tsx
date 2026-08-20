@@ -3410,6 +3410,57 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByRole("radio", { name: "2번째 장면 · 1초부터 — P01-B-01 선택" })).toBeInTheDocument();
   });
 
+  it("never prints the ranker's internal word on a card, and says the same thing in Korean", async () => {
+    // 2026-08-20 실화면: 카드 열세 개가 전부 `metadata`를 이유로 달고 있었다.
+    // 자막과 겹치는 말이 하나도 없을 때 순위 매기기가 남기는 표시인데, 그 표시가
+    // 그대로 창작자 화면에 나갔다(§10.13 위반).
+    const proposal = directorProposal();
+    proposal.candidates[0] = { ...proposal.candidates[0], reason_chips: ["metadata"] } as never;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    const cards = await screen.findByRole("radiogroup", { name: "추천 후보" });
+    expect(cards.textContent).not.toContain("metadata");
+    expect(within(cards).getByText("자막과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.")).toBeVisible();
+  });
+
+  it("lists the words a candidate actually matched, instead of only the first one", async () => {
+    const proposal = directorProposal();
+    proposal.candidates[0] = { ...proposal.candidates[0], reason_chips: ["바다", "하늘"] } as never;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    expect(await screen.findByText("자막과 겹치는 말: 바다, 하늘")).toBeVisible();
+  });
+
+  it("calls a b-roll candidate a video, not just media", async () => {
+    // `media_type`은 `broll`인데 화면 사전에는 `broll_video`만 있어서, 모든
+    // B-roll 후보가 `· 미디어`로 떨어졌다.
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: directorProposal(), references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+
+    const cards = await screen.findByRole("radiogroup", { name: "추천 후보" });
+    expect(cards.textContent).toContain("P01-B-01 · 영상");
+  });
+
   it("preflights then batch-applies only the current route proposal after navigation", async () => {
     vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
     vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({

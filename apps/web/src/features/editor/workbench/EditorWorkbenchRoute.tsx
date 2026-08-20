@@ -1867,7 +1867,7 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
         // 내부 id는 창작자에게 보일 수 없으므로 편집판이 쓰는 장면 이름으로 바꾼다.
         targetSceneLabel: sceneLabels.get(targetSegmentId),
         displayName: typeof metadata.display_name === "string" && metadata.display_name.trim() ? metadata.display_name.trim() : undefined,
-        previewSummary: String(metadata.preview_summary ?? candidate.reason_chips[0] ?? "추천 세부 내용을 확인해 주세요."),
+        previewSummary: String(metadata.preview_summary ?? "").trim() || candidateReason(candidate.reason_chips),
         supportedControls: candidate.controls ?? {},
         availability: isYujin ? candidate.availability : actionable ? "actionable" : candidate.availability,
         reviewStatus: isYujin ? candidate.review_status : actionable ? "approved" : candidate.review_status,
@@ -1876,6 +1876,18 @@ function projectDirectorProposal(projectId: string, proposal: DirectorProposal |
       };
     }),
   };
+}
+
+/** 순위 매기기는 **자막과 겹치는 말이 하나도 없을 때** 이 한 단어를 남긴다.
+ *  값 자체는 서버 계약이라 그대로 두고, 화면에서만 창작자의 말로 바꾼다 --
+ *  2026-08-20에 이 단어가 카드 열세 개에 그대로 찍혀 나갔다(§10.13). */
+const RANKED_WITHOUT_MATCHING_WORDS = "metadata";
+
+function candidateReason(reasonChips: readonly string[]): string {
+  const words = reasonChips.map((chip) => chip.trim()).filter((chip) => chip && chip !== RANKED_WITHOUT_MATCHING_WORDS);
+  if (words.length) return `자막과 겹치는 말: ${words.join(", ")}`;
+  if (reasonChips.includes(RANKED_WITHOUT_MATCHING_WORDS)) return "자막과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.";
+  return "추천 세부 내용을 확인해 주세요.";
 }
 
 function isYujinMediaProposal(proposal: DirectorProposal) {
