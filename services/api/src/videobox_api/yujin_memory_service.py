@@ -228,9 +228,11 @@ class YujinMemoryService:
             # 소속·승인 확인을 먼저 한다. 걸러 낼 줄까지 "읽지 못했다"고
             # 세면 기록이 시끄러워진다. 두 조건을 모두 통과해야 채택되는
             # 것은 그대로다.
+            # 대화는 가리지 않는다 -- 기억은 대화보다 오래 산다. 프로젝트와
+            # 승인·저장 상태는 그대로 본다: 이 대조가 게이트웨이가 돌려준 항목
+            # 중 owner가 실제로 승인한 것만 채택하게 만드는 문이다(CLAUDE.md §6).
             if (
                 row.get("project_id") != project_id
-                or row.get("conversation_id") != conversation_id
                 or row.get("status") != "approved"
                 or row.get("storage_status") != "stored"
             ):

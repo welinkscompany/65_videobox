@@ -533,7 +533,15 @@ class YujinMemoryMixin:
         project_id: str,
         conversation_id: str,
     ) -> list[dict[str, Any]]:
-        """Return private approved+stored rows for one owned conversation."""
+        """이 프로젝트에서 owner가 승인해 저장한 기억. 대화를 가리지 않는다.
+
+        예전에는 `conversation_id`로도 묶었다. 그래서 대화 A에서 저장한 취향을
+        대화 B에서 물으면 유진이 못 꺼냈다(2026-08-20 실측) -- 대화가 끝날 때마다
+        기억이 사라지는 셈이라, owner는 같은 말을 새 대화마다 다시 해야 했다.
+
+        `conversation_id`는 이제 **부르는 쪽이 실재하는 대화인지 확인하는 용도**로만
+        남는다. 없는 대화 id로 남의 프로젝트 기억을 긁어 갈 수 없어야 한다.
+        """
 
         connection = self._connection(project_id)
         try:
@@ -550,14 +558,14 @@ class YujinMemoryMixin:
                        storage_status, provider_memory_ref AS memory_ref,
                        external_ref, proposed_text AS text, category
                 FROM yujin_memory_candidates
-                WHERE project_id = ? AND conversation_id = ?
+                WHERE project_id = ?
                   AND status = 'approved' AND storage_status = 'stored'
                   AND provider_memory_ref IS NOT NULL
                   AND external_ref IS NOT NULL
                 ORDER BY category, proposed_text, candidate_id
                 LIMIT 100
                 """,
-                (project_id, conversation_id),
+                (project_id,),
             ).fetchall()
             return [dict(row) for row in rows]
         finally:
