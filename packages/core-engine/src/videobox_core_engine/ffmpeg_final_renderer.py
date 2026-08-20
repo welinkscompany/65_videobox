@@ -16,6 +16,11 @@ from videobox_core_engine.composition_plan import CompositionPlan
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_warning_notes
+from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_DRAWN_SHAPES,
+    overlay_icon_glyph,
+    resolve_icon_font,
+)
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.timeline_clip_source_resolution import (
     ResolvedClipSource,
@@ -118,8 +123,9 @@ def export_overlay_text_lines(overlay: dict[str, Any]) -> list[str]:
     """
     overlay_type = str(overlay.get("overlay_type") or "").strip().lower()
     if overlay_type == "shape_overlay":
-        # 정지 도형은 글줄이 아니라 drawbox로 그린다(`export_overlay_shape_filters`).
-        # 여기서 글줄을 돌려주면 도형만 있는 장면이 글꼴 검사에 걸린다.
+        # 도형·아이콘은 글줄이 아니다. `export_overlay_shape_filters`가 도형은
+        # drawbox로, 아이콘은 글자 하나를 drawtext로 따로 그린다 -- 여기서 글줄을
+        # 돌려주면 아래에 쌓이는 자막 자리로 밀려나고 검은 상자까지 딸려온다.
         return []
     text = str(overlay.get("text") or "").strip()
     title = str(overlay.get("title") or "").strip()
@@ -167,19 +173,90 @@ _SHAPE_OVERLAY_SIZE_FRACTIONS = {
 _SHAPE_OVERLAY_COLOR = "0xFFD400@0.9"
 
 
-def export_overlay_shape_filters(
-    overlay: dict[str, Any], *, width: int, height: int, start_sec: float, end_sec: float
-) -> list[str]:
-    """정지 도형 오버레이(강조 상자·밑줄)가 그릴 drawbox 필터. 두 렌더 경로가
-    이 하나를 쓴다 -- 경로마다 따로 계산하면 같은 도형이 다른 자리에 그려진다.
+def _escaped_filter_path(path: str) -> str:
+    return path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
-    화살표는 여기 없다: drawbox는 사각형만 그릴 수 있고, 사각형 조합으로 만든
-    화살표는 품질이 낮아 범위에서 뺐다(2026-08-20 과제 지시).
+
+def _icon_overlay_filter(
+    overlay: dict[str, Any],
+    *,
+    glyph: str,
+    width: int,
+    height: int,
+    start_sec: float,
+    end_sec: float,
+    font_file: str | None,
+) -> str:
+    """아이콘 오버레이가 그릴 drawtext 필터.
+
+    아이콘은 자산 파일이 아니라 **글꼴에 이미 있는 글자 하나**다. 그래서 새 필터
+    체계를 만들지 않고 두 렌더 경로가 이미 쓰는 drawtext를 그대로 탄다 -- 크기
+    3단은 fontsize로, 위치 9칸은 도형과 같은 여백 계산으로 간다.
+    """
+    resolved_font = resolve_icon_font(glyph, preferred=font_file)
+    if resolved_font is None:
+        # 없는 글자를 그리면 ffmpeg는 실패하지 않고 빈 상자를 그린다. 그 완성본은
+        # 성공으로 끝나서 owner가 알아채지 못하므로 여기서 멈춘다.
+        raise FinalRenderError(
+            "Overlay font cannot draw this icon; it would render as an empty box. "
+            "Install a font that includes it or set VIDEOBOX_OVERLAY_FONT."
+        )
+    size = str(overlay.get("size") or "").strip().lower()
+    _width_fraction, height_fraction = _SHAPE_OVERLAY_SIZE_FRACTIONS.get(
+        size, _SHAPE_OVERLAY_SIZE_FRACTIONS["medium"]
+    )
+    font_size = max(8, round(height * height_fraction))
+    margin_x, margin_y = round(width * 0.06), round(height * 0.08)
+    horizontal = str(overlay.get("horizontal") or "").strip().lower()
+    vertical = str(overlay.get("vertical") or "").strip().lower()
+    # 글자 크기는 글꼴마다 달라 픽셀로 고정할 수 없다. drawtext가 아는 실제 글자
+    # 상자(text_w/text_h)로 계산해야 9칸이 어느 글꼴에서나 같은 자리에 온다.
+    x = (
+        str(margin_x) if horizontal == "left"
+        else f"w-text_w-{margin_x}" if horizontal == "right"
+        else "(w-text_w)/2"
+    )
+    y = (
+        str(margin_y) if vertical == "top"
+        else f"h-text_h-{margin_y}" if vertical == "bottom"
+        else "(h-text_h)/2"
+    )
+    # 강조색만으로는 밝은 화면 위에서 사라진다. 같은 글자에 어두운 테두리를 둘러
+    # 어느 장면에서도 보이게 한다.
+    return (
+        f"drawtext=fontfile='{_escaped_filter_path(resolved_font)}':text='{glyph}':x={x}:y={y}:"
+        f"fontsize={font_size}:fontcolor={_SHAPE_OVERLAY_COLOR}:"
+        f"borderw={max(2, round(font_size * 0.06))}:bordercolor=black@0.7:"
+        f"enable='between(t,{start_sec},{end_sec})'"
+    )
+
+
+def export_overlay_shape_filters(
+    overlay: dict[str, Any],
+    *,
+    width: int,
+    height: int,
+    start_sec: float,
+    end_sec: float,
+    font_file: str | None = None,
+) -> list[str]:
+    """정지 도형·아이콘 오버레이가 그릴 필터. 두 렌더 경로가 이 하나를 쓴다 --
+    경로마다 따로 계산하면 같은 표시가 다른 자리에 그려진다.
+
+    강조 상자·밑줄은 drawbox로, 화살표 같은 아이콘은 drawtext로 그린다. drawbox가
+    사각형만 그릴 수 있어서 화살표를 못 넣었던 자리를, 글꼴에 이미 있는 글자
+    하나로 메운 것이다 -- 자산 파일도 굽는 단계도 없다.
     """
     if str(overlay.get("overlay_type") or "").strip().lower() != "shape_overlay":
         return []
     shape = str(overlay.get("shape") or "").strip().lower()
-    if shape not in {"highlight_box", "underline"}:
+    glyph = overlay_icon_glyph(shape)
+    if glyph is not None:
+        return [_icon_overlay_filter(
+            overlay, glyph=glyph, width=width, height=height,
+            start_sec=start_sec, end_sec=end_sec, font_file=font_file,
+        )]
+    if shape not in SHAPE_OVERLAY_DRAWN_SHAPES:
         return []
     size = str(overlay.get("size") or "").strip().lower()
     width_fraction, height_fraction = _SHAPE_OVERLAY_SIZE_FRACTIONS.get(
@@ -445,15 +522,16 @@ class FfmpegFinalRenderer:
                     f"enable='between(t,{start_sec},{end_sec})'[{next_canvas}]"
                 )
                 canvas = next_canvas
-        # 정지 도형(강조 상자·밑줄). 글줄 경로와 분리한다 -- 도형은 글꼴이 필요
-        # 없고, 두 렌더 경로가 export_overlay_shape_filters 하나를 같이 쓴다.
+        # 정지 도형(강조 상자·밑줄)과 아이콘(화살표 등). 글줄 경로와 분리한다 --
+        # 도형은 글꼴이 필요 없고, 아이콘은 글자 하나라 줄 쌓기를 타지 않는다.
+        # 두 렌더 경로가 export_overlay_shape_filters 하나를 같이 쓴다.
         for overlay_index, overlay in enumerate(composition_plan.export_overlays):
             start_sec, end_sec = float(overlay.get("start_sec") or 0.0), float(overlay.get("end_sec") or 0.0)
             if end_sec <= start_sec:
                 continue
             shape_filters = export_overlay_shape_filters(
                 dict(overlay), width=self.video_width, height=self.video_height,
-                start_sec=start_sec, end_sec=end_sec,
+                start_sec=start_sec, end_sec=end_sec, font_file=self.overlay_font_file,
             )
             for shape_index, shape_filter in enumerate(shape_filters):
                 next_canvas = f"canvas_shape_{overlay_index}_{shape_index}"
@@ -1090,13 +1168,13 @@ class FfmpegFinalRenderer:
                     image_overlays.append(
                         (self._resolve_generic_asset_uri(project_id=project_id, asset_uri=asset_uri), start_sec, end_sec)
                     )
-            # 정지 도형. drawtext처럼 이어붙는 단일 필터이므로 같은 사슬에 싣는다.
-            # 도형은 글꼴 검사보다 앞에 있어야 한다 -- 글줄이 없는 도형 장면이
-            # 글꼴 없는 환경에서 막히면 안 된다.
+            # 정지 도형과 아이콘. 둘 다 이어붙는 단일 필터이므로 같은 사슬에 싣는다.
+            # 글줄 검사보다 앞에 있어야 한다 -- 글줄이 없는 도형 장면이 글꼴 없는
+            # 환경에서 막히면 안 된다(아이콘은 자기 글꼴을 스스로 확인한다).
             text_filters.extend(
                 export_overlay_shape_filters(
                     overlay, width=self.video_width, height=self.video_height,
-                    start_sec=start_sec, end_sec=end_sec,
+                    start_sec=start_sec, end_sec=end_sec, font_file=self.overlay_font_file,
                 )
             )
             lines = export_overlay_text_lines(overlay)

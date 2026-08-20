@@ -15,8 +15,25 @@ from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_
 from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError
+from videobox_core_engine.overlay_shapes import SHAPE_OVERLAY_ICON_GLYPHS, font_supports_glyph
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_domain_models.assets import AssetType
+
+# 아이콘 오버레이는 글자 하나를 그린다. 그 글자를 전부 가진 글꼴이라야 검사가 선다.
+ICON_FONT = next(
+    (
+        path
+        for path in (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            r"C:\Windows\Fonts\seguisym.ttf",
+            r"C:\Windows\Fonts\DejaVuSans.ttf",
+        )
+        if Path(path).is_file()
+        and all(font_supports_glyph(path, glyph) for glyph in SHAPE_OVERLAY_ICON_GLYPHS.values())
+    ),
+    None,
+)
 
 
 class _SteppingClock:
@@ -407,6 +424,49 @@ def test_plan_renderer_draws_static_shape_overlays_from_canonical_plan(tmp_path:
     assert "t=fill" in graph
     # 도형에는 글줄이 없다: drawtext가 나타나면 글꼴 없는 환경이 통째로 막힌다.
     assert "drawtext" not in graph
+
+
+@pytest.mark.skipif(ICON_FONT is None, reason="no font carrying the icon glyphs is available")
+def test_plan_renderer_draws_icon_overlays_from_canonical_plan(tmp_path: Path) -> None:
+    """화살표 등 아이콘은 그래프 경로에서도 그려진다.
+
+    drawbox는 사각형만 그린다. 아이콘은 같은 프리셋(9칸 위치·3단 크기)을 그대로
+    쓰면서 이미 있는 drawtext 경로로 글자 하나를 그려 그 구멍을 메운다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "icon_arrow_right",
+                "vertical": "middle",
+                "horizontal": "right",
+                "size": "medium",
+                "start_sec": 1,
+                "end_sec": 2,
+            },
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "underline",
+                "vertical": "bottom",
+                "horizontal": "center",
+                "size": "large",
+                "start_sec": 3,
+                "end_sec": 4,
+            },
+        ],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), overlay_font_file=ICON_FONT)
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert "text='→':x=w-text_w-77:y=(h-text_h)/2:fontsize=187" in graph
+    assert "enable='between(t,1.0,2.0)'" in graph
+    # 아이콘을 더해도 기존 도형은 그대로 drawbox로 그려진다.
+    assert graph.count("drawbox=") == 1
+    assert "between(t,3.0,4.0)" in graph
+    # 글줄 오버레이의 검은 상자는 아이콘에 딸려오지 않는다.
+    assert "box=1" not in graph
 
 
 def test_plan_renderer_fails_closed_when_track_overlay_source_cannot_be_resolved(tmp_path: Path) -> None:

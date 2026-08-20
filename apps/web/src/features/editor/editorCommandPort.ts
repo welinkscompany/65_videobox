@@ -1,4 +1,4 @@
-import { api, type BrollOverrideRequest, type CaptionOverrideRequest, type CaptionStyleMutationRequest, type EditingSession, type ExplanationCardRequest, type ImageOverlayRequest, type MusicOverrideRequest, type TableOverlayRequest, type TtsReplacementRequest } from "../../api";
+import { api, type BrollOverrideRequest, type CaptionOverrideRequest, type CaptionStyleMutationRequest, type EditingSession, type ExplanationCardRequest, type ImageOverlayRequest, type MusicOverrideRequest, type ShapeOverlayShape, type TableOverlayRequest, type TtsReplacementRequest } from "../../api";
 import type { EditorCaptionStyle, EditorControls } from "./editorViewModel";
 
 type Context = Readonly<{ projectId: string; sessionId: string; expectedRevision: number }>;
@@ -9,8 +9,8 @@ type OverlayApply =
   | Readonly<{ kind: "explanation-card"; segmentId: string; title: string; body: string; text: string; attestation?: CandidateAttestation }>
   | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; attestation?: CandidateAttestation }>
   | Readonly<{ kind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string; attestation?: CandidateAttestation }>
-  // 정지 도형. 유진 attestation 경로는 이번 범위에서 열지 않는다(화면 수동 얹기만).
-  | Readonly<{ kind: "shape"; segmentId: string; shape: "highlight_box" | "underline"; vertical: "top" | "middle" | "bottom"; horizontal: "left" | "center" | "right"; size: "small" | "medium" | "large" }>;
+  // 정지 도형과 아이콘. 유진 attestation 경로는 이번 범위에서 열지 않는다(화면 수동 얹기만).
+  | Readonly<{ kind: "shape"; segmentId: string; shape: ShapeOverlayShape; vertical: "top" | "middle" | "bottom"; horizontal: "left" | "center" | "right"; size: "small" | "medium" | "large" }>;
 type OverlayClear = Readonly<{ kind: OverlayApply["kind"]; segmentId: string }>;
 
 export type EditorCommandApi = Pick<typeof api,

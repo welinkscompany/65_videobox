@@ -561,9 +561,31 @@ export type TableOverlayRequest = RevisionedEditingSessionMutation & {
   text: string;
 } & OptionalYujinCandidateAttestation;
 
-// 정지 도형("여기를 보세요"). 프리셋만 있다 -- 자유 좌표·애니메이션은 범위 밖.
+// 정지 도형과 아이콘("여기를 보세요"). 프리셋만 있다 -- 자유 좌표·애니메이션은
+// 범위 밖이다. 아이콘 목록은 백엔드 `overlay_shapes`와 같아야 한다: 화면이
+// 보내는 이름을 렌더가 모르면 저장은 되는데 아무것도 그려지지 않는다.
+export type ShapeOverlayShape =
+  | "highlight_box"
+  | "underline"
+  | "icon_arrow_up"
+  | "icon_arrow_down"
+  | "icon_arrow_left"
+  | "icon_arrow_right"
+  | "icon_arrow_up_left"
+  | "icon_arrow_up_right"
+  | "icon_arrow_down_left"
+  | "icon_arrow_down_right"
+  | "icon_circle"
+  | "icon_check"
+  | "icon_x"
+  | "icon_star"
+  | "icon_warning"
+  | "icon_pointer"
+  | "icon_triangle"
+  | "icon_diamond";
+
 export type ShapeOverlayRequest = RevisionedEditingSessionMutation & {
-  shape: "highlight_box" | "underline";
+  shape: ShapeOverlayShape;
   vertical: "top" | "middle" | "bottom";
   horizontal: "left" | "center" | "right";
   size: "small" | "medium" | "large";

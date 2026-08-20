@@ -8,7 +8,7 @@ import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
 import type { EditorCaptionStyle, EditorControls } from "../editorViewModel";
-import type { InspectorTarget, ShapeOverlayValue } from "./inspectorRegistry";
+import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, shapeValue, type InspectorTarget, type ShapeOverlayValue } from "./inspectorRegistry";
 
 type CutAction = "keep" | "remove";
 
@@ -561,16 +561,18 @@ export function InspectorControls({
               <label>표 행<Textarea disabled={disabled} onChange={(event) => setTableRows(event.target.value)} value={tableRows} /></label>
             </>
           ) : null}
-          {/* 정지 도형: "여기를 보세요"용 강조 상자·밑줄. 자유 좌표 대신
-              프리셋만 준다 -- 움직이는 도형·키프레임은 계획서 §4 범위 밖이다. */}
+          {/* 정지 도형·아이콘: "여기를 보세요"용 강조 상자·밑줄과 화살표 등.
+              자유 좌표 대신 프리셋만 준다 -- 움직이는 도형·키프레임은 계획서 §4
+              범위 밖이다. 아이콘도 같은 위치·크기 프리셋을 그대로 쓴다. */}
           {target.overlayKind === "shape" ? (
             <>
               <p>장면 위에 얹어 "여기를 보세요"를 표시해요. 장면이 보이는 동안 함께 나와요.</p>
               <label>
                 모양
-                <NativeSelect aria-label="모양" disabled={disabled} onChange={(event) => setShapeOverlay((current) => ({ ...current, shape: event.target.value === "underline" ? "underline" : "highlight_box" }))} value={shapeOverlay.shape}>
-                  <option value="highlight_box">강조 상자</option>
-                  <option value="underline">밑줄</option>
+                <NativeSelect aria-label="모양" disabled={disabled} onChange={(event) => setShapeOverlay((current) => ({ ...current, shape: shapeValue(event.target.value) }))} value={shapeOverlay.shape}>
+                  {SHAPE_OVERLAY_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>{SHAPE_OVERLAY_LABELS[choice]}</option>
+                  ))}
                 </NativeSelect>
               </label>
               <label>
