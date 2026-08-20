@@ -2041,6 +2041,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -2072,6 +2075,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -2139,10 +2145,44 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
 
     expect(await screen.findByText("편집 세션 정보가 일치하지 않아요. 다시 열어 주세요.")).toBeVisible();
     expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
+  });
+
+  it("opening the editor makes a preview instead of showing an empty stage", async () => {
+    // owner가 사무실에서 편집기를 보고 "완전 캡컷과 다른데"라고 했다. 그 인상의
+    // 한 몫이 **열면 비어 있는 미리보기**였다 -- 예전에는 편집을 한 번 해야
+    // 생겼고, 그전까지는 `아직 편집본 미리보기가 없어요`와 단추뿐이었다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    mockEditingSessionRevisions(1);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+
+    await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
+    expect(startPreview).toHaveBeenCalledWith("project-a", "session-a", { expected_revision: 1 });
+  });
+
+  it("opening the same editing draft does not queue a second preview", async () => {
+    // 편집 뒤의 생성은 mutation 쪽이 맡는다. 여는 쪽까지 판수를 따라가면 편집할
+    // 때마다 두 곳이 같은 일을 시킨다 -- 실측으로 확인하고 열쇠를 편집본 하나로 좁혔다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    mockEditingSessionRevisions(1);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
+
+    // 편집본을 다시 읽어도(폴링·되돌리기 등) 또 시키지 않는다.
+    await act(async () => { await Promise.resolve(); });
+    expect(startPreview).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the manual preview button as a fallback when the automatic refresh fails", async () => {
@@ -2157,6 +2197,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
@@ -3274,6 +3317,9 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
     await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
 

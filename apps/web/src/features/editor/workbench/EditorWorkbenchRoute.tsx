@@ -580,9 +580,37 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     });
     return () => { active = false; };
   }, [memoryConversationId, projectId, requestKey, sessionId]);
+  // 열었을 때 화면이 비어 있지 않게 한 번 만든다.
+  //
+  // 예전에는 **편집을 한 번 해야** 미리보기가 생겼다(아래 mutation 뒤의 자동
+  // 생성). 편집기를 처음 열면 `아직 편집본 미리보기가 없어요`와 단추뿐이었다 --
+  // 캡컷은 열면 항상 화면이 살아 있다.
+  //
+  // **편집본 하나에 한 번뿐이다.** 편집 뒤의 생성은 mutation 쪽이 맡는다. 판수를
+  // 열쇠에 넣으면 편집할 때마다 두 곳이 같은 일을 시킨다(실측으로 확인했다).
+  //
+  // 길이 경계는 mutation 쪽과 **같은 것**을 쓴다. 120초를 넘는 영상은 여전히
+  // 사람이 눌러야 한다 -- 열기만 해도 몇 분짜리 FFmpeg가 도는 것은 고친 게 아니다.
+  const autoPreviewStartedFor = useRef<string | null>(null);
+  const [autoPreviewWaiting, setAutoPreviewWaiting] = useState(false);
+  useEffect(() => {
+    const view = state.view;
+    if (!sessionId || !view) return;
+    if (view.playback.exactPreview.status !== "unavailable") return;
+    if (view.output.durationSec > 120) return;
+    if (autoPreviewStartedFor.current === sessionId) return;
+    autoPreviewStartedFor.current = sessionId;
+    const epoch = routeEpoch.current.value;
+    void api.startExactPreview(projectId, sessionId, { expected_revision: view.expectedRevision })
+      .then(() => { if (routeEpoch.current.value === epoch) setAutoPreviewWaiting(true); })
+      // 조용히 실패한다. `미리보기 새로 만들기` 단추가 그대로 남는다.
+      .catch(() => {});
+  }, [projectId, sessionId, state.view?.playback.exactPreview.status, state.view?.output.durationSec]);
+
   useEffect(() => {
     const status = state.view?.playback.exactPreview.status;
-    if (status !== "pending" && status !== "running") return;
+    // 방금 우리가 시킨 것도 기다린다. 아직 편집본에는 `unavailable`로 남아 있다.
+    if (status !== "pending" && status !== "running" && !(status === "unavailable" && autoPreviewWaiting)) return;
     const epoch = routeEpoch.current.value;
     const operationId = pollOperationId.current + 1;
     pollOperationId.current = operationId;
@@ -592,7 +620,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       }
     }, 1200);
     return () => window.clearTimeout(poll);
-  }, [refreshToken, requestKey, state.view?.playback.exactPreview.status, state.view?.playback.exactPreview.generationId]);
+  }, [autoPreviewWaiting, refreshToken, requestKey, state.view?.playback.exactPreview.status, state.view?.playback.exactPreview.generationId]);
   if (state.key !== requestKey) return <section aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></section>;
   if (!state.view) return <section aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></section>;
   const refreshPreview = async () => {
