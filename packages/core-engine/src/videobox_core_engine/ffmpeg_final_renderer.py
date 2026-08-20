@@ -11,6 +11,7 @@ from math import ceil
 from pathlib import Path
 from typing import Any
 
+from videobox_core_engine.ass_subtitles import caption_band_px
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.composition_plan import CompositionPlan
 from videobox_core_engine.media_controls import normalize_media_controls
@@ -165,6 +166,19 @@ def export_overlay_text_lines(overlay: dict[str, Any]) -> list[str]:
 # 여러 줄을 쌓을 때 줄 사이 간격(px). drawtext는 자기 줄의 text_h만 알므로
 # 줄 높이는 fontsize 36 기준 고정 간격으로 잡는다.
 _OVERLAY_LINE_PITCH_PX = 54
+_OVERLAY_FONT_SIZE_PX = 36
+_OVERLAY_BOX_BORDER_PX = 12
+# fontsize 36에서 drawtext가 실제로 잡은 `text_h`는 32~36px이었다(실측, 한글).
+# 자리를 정할 때만 쓰는 어림값이라 넉넉한 쪽으로 잡는다 -- 실제 그릴 때는 어림이
+# 아니라 drawtext가 아는 `text_h`를 그대로 쓴다.
+_OVERLAY_TEXT_HEIGHT_ESTIMATE_PX = 40
+# 화면 가장자리에서 띄우는 거리. 비율로 두어야 세로 영상에서도 같은 여백이 된다.
+# 0.05는 1080에서 54px이고, 결함 이전 자리(`h-(text_h*3)`)와 거의 같은 높이다 --
+# 자막이 없을 때는 지금까지 보던 자리가 그대로 유지된다.
+_OVERLAY_SAFE_MARGIN_RATIO = 0.05
+# 자막 띠와 카드 사이에 남길 틈. 글자 높이 어림에 ±4px 오차가 있으므로 그보다
+# 좁은 틈은 틈이라고 부를 수 없다. 1080에서 22px.
+_OVERLAY_CAPTION_GAP_RATIO = 0.02
 
 # 정지 도형 프리셋: (가로 비율, 세로 비율). 자유 좌표는 범위 밖이므로 화면
 # 크기에 대한 비율만 있다 -- 미리보기 프록시와 완성본이 해상도가 달라도 같은
@@ -202,6 +216,99 @@ _SHAPE_OVERLAY_MOTION_STEPS = 24
 
 def _escaped_filter_path(path: str) -> str:
     return path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
+def _overlay_block_bottom_px(
+    *, line_count: int, video_height: int, caption_band: tuple[int, int] | None
+) -> int:
+    """글줄 뭉치의 **아래 변**을 어디에 둘 것인가 (px, 화면 위에서 잰 값).
+
+    2026-08-20 완성본에서 설명 카드의 제목과 표의 한 줄이 자막에 가렸다. 원인은
+    글줄을 화면 맨 아래에 고정으로 쌓았기 때문이고, 자막 기본 자리가 바로 거기다.
+
+    **아래를 무조건 비워 두는 식으로 고치지 않는다.** 자막은 위로 올릴 수 있고
+    (`position_y_percent`), 그때는 아래가 넓은 자리다. 그래서 자막이 실제로 먹는
+    띠를 받아서 그 띠를 피해 **넓은 쪽**에 놓는다.
+    """
+    margin = max(8, round(video_height * _OVERLAY_SAFE_MARGIN_RATIO))
+    default_bottom = video_height - margin
+    if caption_band is None:
+        return default_bottom
+    gap = max(6, round(video_height * _OVERLAY_CAPTION_GAP_RATIO))
+    band_top, band_bottom = caption_band
+    block_height = (
+        max(0, line_count - 1) * _OVERLAY_LINE_PITCH_PX
+        + _OVERLAY_TEXT_HEIGHT_ESTIMATE_PX
+        + 2 * _OVERLAY_BOX_BORDER_PX
+    )
+    if default_bottom - block_height >= band_bottom + gap:
+        # 자막이 위쪽에 있다 -- 원래 자리(아래)가 그대로 넓다.
+        return default_bottom
+    above_bottom = band_top - gap
+    room_above, room_below = above_bottom - margin, default_bottom - (band_bottom + gap)
+    if room_above >= block_height or room_above >= room_below:
+        return above_bottom
+    return default_bottom
+
+
+def export_overlay_text_filters(
+    lines: list[str],
+    *,
+    font_file: str,
+    video_height: int,
+    start_sec: float,
+    end_sec: float,
+    caption_band: tuple[int, int] | None,
+) -> list[str]:
+    """오버레이 글줄이 그릴 drawtext 필터. **두 렌더 경로가 이 하나를 쓴다.**
+
+    경로마다 따로 쓰면 같은 카드가 미리보기와 완성본에서 다른 자리에 그려진다 --
+    이 저장소는 그 함정에 이미 두 번 걸렸다.
+
+    쌓는 순서는 그대로다: 마지막 줄이 뭉치의 아래 변에 오고 앞 줄일수록 위로
+    올라간다. 읽는 순서는 위에서 아래다.
+    """
+    font = _escaped_filter_path(font_file)
+    block_bottom = _overlay_block_bottom_px(
+        line_count=len(lines), video_height=video_height, caption_band=caption_band
+    )
+    # drawtext의 `y`는 글자 **위**를 가리키고 상자는 거기서 `boxborderw`만큼 더
+    # 번진다. 아래 변을 맞추려면 그 둘을 빼야 한다. `text_h`는 글꼴마다 다르므로
+    # 어림하지 않고 drawtext가 아는 값을 그대로 식에 남긴다.
+    bottom_offset = video_height - block_bottom + _OVERLAY_BOX_BORDER_PX
+    filters: list[str] = []
+    for line_index, line in enumerate(lines):
+        escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
+        rise_px = (len(lines) - 1 - line_index) * _OVERLAY_LINE_PITCH_PX
+        y_expression = f"h-{bottom_offset}-text_h" + (f"-{rise_px}" if rise_px else "")
+        filters.append(
+            f"drawtext=fontfile='{font}':text='{escaped}':x=(w-text_w)/2:y={y_expression}:"
+            f"fontsize={_OVERLAY_FONT_SIZE_PX}:fontcolor=white:box=1:boxcolor=black@0.65:"
+            f"boxborderw={_OVERLAY_BOX_BORDER_PX}:enable='between(t,{start_sec},{end_sec})'"
+        )
+    return filters
+
+
+def caption_segments_from_timeline(timeline: dict[str, Any]) -> list[dict[str, Any]]:
+    """타임라인의 자막 클립을 `caption_band_px`가 읽는 모양으로 옮긴다.
+
+    조각 이어붙이기 경로에는 canonical plan이 없어서 자막을 여기서 모은다.
+    돌려주는 모양은 `render_editing_session_ass`가 받는 `segments`와 같다.
+    """
+    segments: list[dict[str, Any]] = []
+    for track in timeline.get("tracks", []):
+        if not isinstance(track, dict) or canonical_track_type(track.get("track_type")) != "caption":
+            continue
+        for clip in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
+            if not isinstance(clip, dict):
+                continue
+            segments.append({
+                "caption_text": clip.get("caption_text"),
+                "caption_style": clip.get("caption_style"),
+                "start_sec": clip.get("start_sec"),
+                "end_sec": clip.get("end_sec"),
+            })
+    return segments
 
 
 def _motion_number(value: float) -> str:
@@ -667,6 +774,12 @@ class FfmpegFinalRenderer:
             )
             filters.append(f"[{canvas}][{label}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:repeatlast=0[{next_canvas}]")
             canvas = next_canvas
+        # 자막은 ASS로, 글줄 오버레이는 drawtext로 그려서 두 필터는 서로를 모른다.
+        # 자막이 먹는 띠를 여기서 받아 카드가 그 위를 밟지 않게 한다.
+        plan_caption_segments = [
+            {"caption_text": cue.text, "caption_style": cue.style, "start_sec": cue.start_sec, "end_sec": cue.end_sec}
+            for cue in composition_plan.captions
+        ]
         for overlay_index, overlay in enumerate(composition_plan.export_overlays):
             if overlay.get("asset_uri") or overlay.get("asset_id"):
                 continue
@@ -678,20 +791,17 @@ class FfmpegFinalRenderer:
                 continue
             if not Path(self.overlay_font_file).is_file():
                 raise FinalRenderError("Overlay font is missing; set VIDEOBOX_OVERLAY_FONT before rendering text overlays.")
-            font = self.overlay_font_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-            # 여러 줄은 아래에서 위로 쌓는다: 마지막 줄이 기존 한 줄 자리
-            # (`h-(text_h*3)`)에 오고, 앞 줄일수록 위로 올라간다. 읽는 순서는
-            # 그대로 위→아래다.
-            for line_index, line in enumerate(lines):
-                escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
-                rise_px = (len(lines) - 1 - line_index) * _OVERLAY_LINE_PITCH_PX
-                y_expression = f"h-(text_h*3)-{rise_px}" if rise_px else "h-(text_h*3)"
+            text_filters = export_overlay_text_filters(
+                lines, font_file=self.overlay_font_file, video_height=self.video_height,
+                start_sec=start_sec, end_sec=end_sec,
+                caption_band=caption_band_px(
+                    plan_caption_segments, video_width=self.video_width, video_height=self.video_height,
+                    start_sec=start_sec, end_sec=end_sec,
+                ),
+            )
+            for line_index, text_filter in enumerate(text_filters):
                 next_canvas = f"canvas_text_{overlay_index}_{line_index}"
-                filters.append(
-                    f"[{canvas}]drawtext=fontfile='{font}':text='{escaped}':x=(w-text_w)/2:y={y_expression}:"
-                    f"fontsize=36:fontcolor=white:box=1:boxcolor=black@0.65:boxborderw=12:"
-                    f"enable='between(t,{start_sec},{end_sec})'[{next_canvas}]"
-                )
+                filters.append(f"[{canvas}]{text_filter}[{next_canvas}]")
                 canvas = next_canvas
         # 정지 도형(강조 상자·밑줄)과 아이콘(화살표 등). 글줄 경로와 분리한다 --
         # 도형은 글꼴이 필요 없고, 아이콘은 글자 하나라 줄 쌓기를 타지 않는다.
@@ -1321,6 +1431,7 @@ class FfmpegFinalRenderer:
         video_path: Path,
         overlays: list[dict[str, Any]],
         work_dir: Path,
+        captions: list[dict[str, Any]] | None = None,
     ) -> Path:
         text_filters: list[str] = []
         image_overlays: list[tuple[Path, float, float]] = []
@@ -1355,17 +1466,18 @@ class FfmpegFinalRenderer:
                 raise FinalRenderError(
                     f"Overlay font is missing: '{self.overlay_font_file}'. Install the font or set VIDEOBOX_OVERLAY_FONT."
                 )
-            font_file = self.overlay_font_file.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-            # 그래프 경로(`build_plan_filter_graph`)와 같은 쌓기: 마지막 줄이
-            # 기존 한 줄 자리에 오고 앞 줄일수록 위로 올라간다.
-            for line_index, line in enumerate(lines):
-                escaped = line.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:")
-                rise_px = (len(lines) - 1 - line_index) * _OVERLAY_LINE_PITCH_PX
-                y_expression = f"h-(text_h*3)-{rise_px}" if rise_px else "h-(text_h*3)"
-                text_filters.append(
-                    f"drawtext=fontfile='{font_file}':text='{escaped}':x=(w-text_w)/2:y={y_expression}:fontsize=36:fontcolor=white:"
-                    f"box=1:boxcolor=black@0.65:boxborderw=12:enable='between(t,{start_sec},{end_sec})'"
+            # 자리 잡기는 그래프 경로와 **같은 함수**를 쓴다. 여기서 따로 계산하면
+            # 같은 카드가 미리보기와 완성본에서 다른 자리에 그려진다.
+            text_filters.extend(
+                export_overlay_text_filters(
+                    lines, font_file=self.overlay_font_file, video_height=self.video_height,
+                    start_sec=start_sec, end_sec=end_sec,
+                    caption_band=caption_band_px(
+                        captions or [], video_width=self.video_width, video_height=self.video_height,
+                        start_sec=start_sec, end_sec=end_sec,
+                    ),
                 )
+            )
         if not text_filters and not image_overlays:
             return video_path
         overlaid_path = work_dir / "broll_with_overlays.mp4"
@@ -1513,6 +1625,9 @@ class FfmpegFinalRenderer:
                 video_path=video_path,
                 overlays=[item for item in timeline.get("export_overlays", []) if isinstance(item, dict)],
                 work_dir=work_dir,
+                # 자막을 실제로 **구울 때만** 그 자리를 비켜 준다. 소프트 자막
+                # (`-c:s mov_text`)은 화면에 얹히지 않으므로 피할 것도 없다.
+                captions=caption_segments_from_timeline(timeline) if subtitle_ass_path is not None else [],
             )
             report_progress(60)
 
