@@ -425,6 +425,50 @@ def test_the_plan_graph_itself_survives_ffmpeg_and_moves_the_pixels(tmp_path: Pa
         assert early < later < resting, name
 
 
+@pytest.mark.skipif(
+    not FFMPEG_AVAILABLE or ICON_FONT is None, reason="ffmpeg or an icon font is unavailable"
+)
+def test_the_legacy_path_really_runs_ffmpeg_and_moves_the_pixels(tmp_path: Path) -> None:
+    """legacy 경로도 **모형이 아니라 진짜로** 돌려 본다.
+
+    여기까지 와야 "두 렌더 경로 모두"가 픽셀로 확인된 것이 된다. 이 경로는
+    ffmpeg를 별도 pass로 부르므로, 그래프 경로가 통과한다고 해서 이쪽도
+    통과한다는 보장이 없다.
+    """
+    source = tmp_path / "blue.mp4"
+    subprocess.run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+         "-i", f"color=c=blue:s={PROBE_WIDTH}x{PROBE_HEIGHT}:r=25:d=4",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)],
+        check=True, capture_output=True, timeout=120,
+    )
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path / "store"),
+        overlay_font_file=ICON_FONT,
+        video_width=PROBE_WIDTH,
+        video_height=PROBE_HEIGHT,
+    )
+
+    def overlaid(name: str, overlay: dict[str, object]) -> Path:
+        work_dir = tmp_path / name
+        work_dir.mkdir()
+        return renderer._apply_export_overlays(
+            project_id="project_001", video_path=source,
+            overlays=[overlay], work_dir=work_dir,
+        )
+
+    appearing = overlaid("appear", _shape_overlay(motion="fade_in"))
+    assert _strength(appearing, 0.55) < _strength(appearing, 0.70) < _strength(appearing, 2.00)
+
+    sliding = overlaid("slide", _shape_overlay(shape="icon_star", motion="slide_in_right"))
+    early, later, resting = (_centroid_x(sliding, at) for at in (0.58, 0.75, 2.00))
+    assert early is not None and later is not None and resting is not None
+    assert early > later > resting
+
+    steady = overlaid("steady", _shape_overlay())
+    assert _strength(steady, 0.70) == pytest.approx(_strength(steady, 2.50), abs=0.1)
+
+
 # --- 픽셀로 재기: 아이콘(drawtext) ------------------------------------------
 
 
