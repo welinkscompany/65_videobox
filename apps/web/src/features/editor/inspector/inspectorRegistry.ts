@@ -1,4 +1,4 @@
-import type { ShapeOverlayShape } from "../../../api";
+import type { ShapeOverlayMotion, ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
@@ -7,11 +7,11 @@ type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
 type TableField = "columns" | "rows" | "text";
-type ShapeField = "shape" | "vertical" | "horizontal" | "size";
+type ShapeField = "shape" | "vertical" | "horizontal" | "size" | "motion";
 
-// 정지 도형·아이콘("여기를 보세요")의 프리셋. 자유 좌표·애니메이션은 계획서 §4가
-// 범위 밖으로 못박았다. 고를 수 있는 이름은 명령 포트(`api.ts`)가 정한 하나뿐이다.
-export type { ShapeOverlayShape };
+// 정지 도형·아이콘("여기를 보세요")의 프리셋. 자유 좌표는 계획서 §4가 범위 밖으로
+// 못박았다. 고를 수 있는 이름은 명령 포트(`api.ts`)가 정한 하나뿐이다.
+export type { ShapeOverlayMotion, ShapeOverlayShape };
 
 // 화면에 보이는 이름. 내부 이름·유니코드 이름·코드포인트는 노출하지 않는다(§10.13).
 // 순서가 곧 목록에 보이는 순서다 -- 도형 먼저, 그다음 화살표 여덟, 그다음 표시들.
@@ -38,6 +38,24 @@ export const SHAPE_OVERLAY_LABELS: Readonly<Record<ShapeOverlayShape, string>> =
 
 export const SHAPE_OVERLAY_CHOICES = Object.keys(SHAPE_OVERLAY_LABELS) as readonly ShapeOverlayShape[];
 
+// 표시가 어떻게 나타나고 사라지는가. 화면에 보이는 이름은 쉬운 말만 쓴다(§10.13) --
+// `알파`·`페이드`·`키프레임` 같은 내부 용어는 여기 오지 않는다.
+//
+// 목록이 짧은 것이 실수가 아니다. 승인 범위(2026-08-20 5항)는 "오버레이 하나가
+// 등장·퇴장·이동하는 정도"까지이며, 고르기 쉬운 정도로 유지하라는 조건이 붙어
+// 있다. 시간이나 세기를 정하는 칸을 여기 더하면 그게 곧 범위 밖의 키프레임
+// 편집기가 된다.
+export const SHAPE_OVERLAY_MOTION_LABELS: Readonly<Record<ShapeOverlayMotion, string>> = {
+  none: "그대로",
+  fade_in: "천천히 나타나기",
+  fade_out: "천천히 사라지기",
+  fade_in_out: "나타났다 사라지기",
+  slide_in_left: "왼쪽에서 밀려 들어오기",
+  slide_in_right: "오른쪽에서 밀려 들어오기",
+};
+
+export const SHAPE_OVERLAY_MOTION_CHOICES = Object.keys(SHAPE_OVERLAY_MOTION_LABELS) as readonly ShapeOverlayMotion[];
+
 export type ShapeOverlayVertical = "top" | "middle" | "bottom";
 export type ShapeOverlayHorizontal = "left" | "center" | "right";
 export type ShapeOverlaySize = "small" | "medium" | "large";
@@ -46,6 +64,7 @@ export type ShapeOverlayValue = Readonly<{
   vertical: ShapeOverlayVertical;
   horizontal: ShapeOverlayHorizontal;
   size: ShapeOverlaySize;
+  motion: ShapeOverlayMotion;
 }>;
 
 export type InspectorTarget =
@@ -120,6 +139,12 @@ function shapeSize(value: unknown): ShapeOverlaySize {
   return value === "small" || value === "large" ? value : "medium";
 }
 
+// 이 기능이 생기기 전에 저장된 표시에는 이 값이 **아예 없다.** 그때 `그대로`로
+// 읽어야 편집기를 여는 것만으로 이미 만들어 둔 표시가 움직이기 시작하지 않는다.
+export function shapeMotion(value: unknown): ShapeOverlayMotion {
+  return SHAPE_OVERLAY_MOTION_CHOICES.find((choice) => choice === value) ?? "none";
+}
+
 export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ view: EditorViewModel; selectedSegmentId: string | null }>): readonly InspectorTarget[] {
   if (!selectedSegmentId) return [];
 
@@ -168,8 +193,8 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         value: { columns: stringList(payload.columns), rows: stringRows(payload.rows), text: stringValue(payload.text) },
       }];
       if (clip.overlayType === "shape_overlay") return [{
-        id: `overlay:${clip.clipId}`, kind: "overlay", label: "강조 표시", segmentId: selectedSegmentId, overlayKind: "shape", fields: ["shape", "vertical", "horizontal", "size"],
-        value: { shape: shapeValue(payload.shape), vertical: shapeVertical(payload.vertical), horizontal: shapeHorizontal(payload.horizontal), size: shapeSize(payload.size) },
+        id: `overlay:${clip.clipId}`, kind: "overlay", label: "강조 표시", segmentId: selectedSegmentId, overlayKind: "shape", fields: ["shape", "vertical", "horizontal", "size", "motion"],
+        value: { shape: shapeValue(payload.shape), vertical: shapeVertical(payload.vertical), horizontal: shapeHorizontal(payload.horizontal), size: shapeSize(payload.size), motion: shapeMotion(payload.motion) },
       }];
       return [];
     });
@@ -193,8 +218,8 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
   });
   // 정지 도형은 프리셋뿐이라 자산 없이도 저장이 되므로 빈 자리를 준다.
   if (segmentExists && !presentOverlayKinds.has("shape")) newOverlayTargets.push({
-    id: `overlay-new:shape:${selectedSegmentId}`, kind: "overlay", label: "강조 표시", segmentId: selectedSegmentId, overlayKind: "shape", fields: ["shape", "vertical", "horizontal", "size"],
-    value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" }, isNew: true,
+    id: `overlay-new:shape:${selectedSegmentId}`, kind: "overlay", label: "강조 표시", segmentId: selectedSegmentId, overlayKind: "shape", fields: ["shape", "vertical", "horizontal", "size", "motion"],
+    value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" }, isNew: true,
   });
 
   return [...mediaTargets, ...captionTargets, ...overlayTargets, ...newOverlayTargets];

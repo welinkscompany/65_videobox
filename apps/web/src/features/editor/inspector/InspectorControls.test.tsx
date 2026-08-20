@@ -731,18 +731,18 @@ describe("InspectorControls", () => {
   });
 
   // 정지 도형("여기를 보세요"). 자유 좌표 대신 프리셋 선택지만 준다 --
-  // 움직이는 도형·키프레임은 계획서 §4가 범위 밖으로 못박았다.
+  // 자유 좌표·키프레임 편집기는 계획서 §4가 범위 밖으로 못박았다.
   it("saves a static shape overlay from preset choices only", () => {
     const onAction = renderControls({
       target: {
-        fields: ["shape", "vertical", "horizontal", "size"],
+        fields: ["shape", "vertical", "horizontal", "size", "motion"],
         id: "overlay-new:shape:segment-internal-current",
         isNew: true,
         kind: "overlay",
         label: "강조 표시",
         overlayKind: "shape",
         segmentId: "segment-internal-current",
-        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" },
+        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" },
       },
     });
 
@@ -763,7 +763,72 @@ describe("InspectorControls", () => {
       vertical: "bottom",
       horizontal: "left",
       size: "large",
+      // 손대지 않은 저장은 움직임을 바꾸지 않는다.
+      motion: "none",
     });
+  });
+
+  // 등장·퇴장·이동(2026-08-20 승인 5항). 프리셋 몇 가지이고, 타임라인에 점을 찍는
+  // 편집기가 아니다 -- 시간·좌표를 입력하는 칸을 주지 않는다.
+  it("lets the owner choose how a shape comes and goes, in plain words", () => {
+    const onAction = renderControls({
+      target: {
+        fields: ["shape", "vertical", "horizontal", "size", "motion"],
+        id: "overlay-new:shape:segment-internal-current",
+        isNew: true,
+        kind: "overlay",
+        label: "강조 표시",
+        overlayKind: "shape",
+        segmentId: "segment-internal-current",
+        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" },
+      },
+    });
+
+    const motion = screen.getByLabelText("움직임") as HTMLSelectElement;
+    // 기본은 `그대로`. 승인 기록 5항이 정한 값이고, 이미 만들어 둔 표시가
+    // 저장만으로 움직이기 시작하면 안 된다.
+    expect(motion.value).toBe("none");
+    expect(screen.getByRole("option", { name: "그대로" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "천천히 나타나기" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "천천히 사라지기" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "나타났다 사라지기" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "왼쪽에서 밀려 들어오기" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "오른쪽에서 밀려 들어오기" })).toBeTruthy();
+
+    // 화면 문구는 쉬운 말만 쓴다(§10.13) -- 내부 용어를 보이지 않는다.
+    expect(screen.queryByRole("option", { name: /alpha|fade|keyframe|slide|opacity|투명도/i })).toBeNull();
+    // 시간을 직접 넣는 칸은 없다. 그게 곧 승인 범위 밖인 키프레임 편집기다.
+    expect(screen.queryByLabelText(/초|시간|길이/)).toBeNull();
+
+    fireEvent.change(motion, { target: { value: "slide_in_left" } });
+    fireEvent.click(screen.getByRole("button", { name: "강조 표시 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "save-overlay",
+      overlayKind: "shape",
+      segmentId: "segment-internal-current",
+      shape: "highlight_box",
+      vertical: "middle",
+      horizontal: "center",
+      size: "medium",
+      motion: "slide_in_left",
+    });
+  });
+
+  it("starts the motion picker from what was already saved", () => {
+    renderControls({
+      target: {
+        fields: ["shape", "vertical", "horizontal", "size", "motion"],
+        id: "overlay:shape-1",
+        kind: "overlay",
+        label: "강조 표시",
+        overlayKind: "shape",
+        segmentId: "segment-internal-current",
+        value: { shape: "icon_star", vertical: "top", horizontal: "left", size: "small", motion: "fade_in_out" },
+      },
+    });
+
+    expect((screen.getByLabelText("움직임") as HTMLSelectElement).value).toBe("fade_in_out");
   });
 
   // 화살표 등 아이콘. drawbox가 사각형만 그려서 못 넣었던 자리를 구워 둔 그림으로
@@ -771,14 +836,14 @@ describe("InspectorControls", () => {
   it("offers icons in the same shape picker and saves the chosen one", () => {
     const onAction = renderControls({
       target: {
-        fields: ["shape", "vertical", "horizontal", "size"],
+        fields: ["shape", "vertical", "horizontal", "size", "motion"],
         id: "overlay-new:shape:segment-internal-current",
         isNew: true,
         kind: "overlay",
         label: "강조 표시",
         overlayKind: "shape",
         segmentId: "segment-internal-current",
-        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium" },
+        value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" },
       },
     });
 
@@ -798,6 +863,7 @@ describe("InspectorControls", () => {
       vertical: "middle",
       horizontal: "center",
       size: "medium",
+      motion: "none",
     });
   });
 

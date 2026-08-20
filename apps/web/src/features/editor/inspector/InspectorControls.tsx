@@ -9,7 +9,7 @@ import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
 import type { EditorCaptionStyle, EditorControls } from "../editorViewModel";
-import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, shapeValue, type InspectorTarget, type ShapeOverlayValue } from "./inspectorRegistry";
+import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type InspectorTarget, type ShapeOverlayValue } from "./inspectorRegistry";
 
 type CutAction = "keep" | "remove";
 
@@ -24,7 +24,7 @@ export type InspectorAction =
   | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
   // 정지 도형("여기를 보세요"). 프리셋만 보낸다 -- 자유 좌표는 범위 밖이다.
-  | Readonly<{ kind: "save-overlay"; overlayKind: "shape"; segmentId: string; shape: ShapeOverlayValue["shape"]; vertical: ShapeOverlayValue["vertical"]; horizontal: ShapeOverlayValue["horizontal"]; size: ShapeOverlayValue["size"] }>
+  | Readonly<{ kind: "save-overlay"; overlayKind: "shape"; segmentId: string; shape: ShapeOverlayValue["shape"]; vertical: ShapeOverlayValue["vertical"]; horizontal: ShapeOverlayValue["horizontal"]; size: ShapeOverlayValue["size"]; motion: ShapeOverlayValue["motion"] }>
   | Readonly<{ kind: "clear-overlay"; overlayKind: "explanation-card" | "image" | "table" | "shape"; segmentId: string }>
   | Readonly<{ kind: "apply-tts-candidate"; segmentId: string; candidateId: string; assetId: string }>
   | Readonly<{ kind: "clear-tts-candidate"; segmentId: string }>
@@ -171,7 +171,7 @@ export function InspectorControls({
   // 정지 도형의 프리셋 선택. 저장된 값에서 시작하므로 손대지 않은 저장이
   // 값을 옮기지 않는다.
   const [shapeOverlay, setShapeOverlay] = useState<ShapeOverlayValue>({
-    shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium",
+    shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none",
   });
   const [selectedPartialFields, setSelectedPartialFields] = useState<readonly string[]>(() =>
     partialRegeneration?.defaultFields ?? partialRegeneration?.fields ?? [],
@@ -573,9 +573,11 @@ export function InspectorControls({
               <label>표 행<Textarea disabled={disabled} onChange={(event) => setTableRows(event.target.value)} value={tableRows} /></label>
             </>
           ) : null}
-          {/* 정지 도형·아이콘: "여기를 보세요"용 강조 상자·밑줄과 화살표 등.
-              자유 좌표 대신 프리셋만 준다 -- 움직이는 도형·키프레임은 계획서 §4
-              범위 밖이다. 아이콘도 같은 위치·크기 프리셋을 그대로 쓴다. */}
+          {/* 도형·아이콘: "여기를 보세요"용 강조 상자·밑줄과 화살표 등.
+              자유 좌표 대신 프리셋만 준다 -- 좌표를 찍는 편집기와 키프레임은
+              계획서 §4 범위 밖이다. 아이콘도 같은 위치·크기 프리셋을 쓴다.
+              `움직임`은 2026-08-20 승인(5항)으로 열린 등장·퇴장·이동이며,
+              여기서도 고르는 것은 프리셋뿐이다. */}
           {target.overlayKind === "shape" ? (
             <>
               <p>장면 위에 얹어 "여기를 보세요"를 표시해요. 장면이 보이는 동안 함께 나와요.</p>
@@ -609,6 +611,14 @@ export function InspectorControls({
                   <option value="small">작게</option>
                   <option value="medium">보통</option>
                   <option value="large">크게</option>
+                </NativeSelect>
+              </label>
+              <label>
+                움직임
+                <NativeSelect aria-label="움직임" disabled={disabled} onChange={(event) => setShapeOverlay((current) => ({ ...current, motion: shapeMotion(event.target.value) }))} value={shapeOverlay.motion}>
+                  {SHAPE_OVERLAY_MOTION_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>{SHAPE_OVERLAY_MOTION_LABELS[choice]}</option>
+                  ))}
                 </NativeSelect>
               </label>
             </>
