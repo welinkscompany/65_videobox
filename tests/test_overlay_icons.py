@@ -71,9 +71,17 @@ def test_drawn_shapes_have_no_glyph() -> None:
 
 @pytest.mark.skipif(GLYPH_FONT is None, reason="no font available to check glyph coverage")
 @pytest.mark.parametrize("shape", sorted(SHAPE_OVERLAY_ICON_SHAPES))
-def test_the_chosen_font_really_carries_every_icon_glyph(shape: str) -> None:
-    """고른 글자가 글꼴에 없으면 화면에 빈 상자가 나간다. 목록 자체를 검증한다."""
-    assert font_supports_glyph(GLYPH_FONT, SHAPE_OVERLAY_ICON_GLYPHS[shape])
+def test_some_available_font_carries_every_icon_glyph(shape: str) -> None:
+    """고른 글자를 그릴 글꼴이 이 기계에 하나도 없으면 그 아이콘은 못 쓴다.
+
+    한 글꼴이 전부 가질 필요는 없다 -- 한글 글꼴에 없는 기호는 기호 글꼴이 맡는다.
+    여기가 빨개지면 목록에서 그 글자를 빼거나 글꼴을 하나 더 넣어야 한다는 뜻이다.
+    """
+    glyph = SHAPE_OVERLAY_ICON_GLYPHS[shape]
+    available = [path for path in _FONT_CANDIDATES if Path(path).is_file()]
+    assert any(font_supports_glyph(path, glyph) for path in available), (
+        f"{shape}: none of {available} can draw it"
+    )
 
 
 @pytest.mark.skipif(GLYPH_FONT is None, reason="no font available to check glyph coverage")
