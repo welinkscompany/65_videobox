@@ -19,7 +19,7 @@ const messageByDetail: Record<string, string> = {
  *  받아쓰기가 요청 안에서 끝나야 하는데 중간 프록시가 330초에서 끊는다
  *  (`docker/workspace-nginx.conf`). "다시 시도"라고 하면 owner는 같은 영상을
  *  몇 번이고 다시 올린다. */
-const TOO_LONG = "영상이 길어서 받아쓰기를 제 시간에 마치지 못했어요. 5분 안쪽으로 잘라서 올려 주세요.";
+const TOO_LONG = "영상이 길어서 받아쓰기를 제 시간에 마치지 못했어요. 절반쯤으로 잘라서 올려 주세요.";
 const TOO_BIG = "영상이 너무 커요. 128MB보다 작게 줄이거나 잘라서 올려 주세요.";
 const UNKNOWN = "영상에서 대본을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.";
 
@@ -113,7 +113,11 @@ export function SourceVideoStart({
       <h2>찍어 둔 영상이 있어요</h2>
       <p>영상에서 말을 받아써 대본을 만들어 드릴게요. 올린 영상은 그대로 본편으로 씁니다.</p>
       <label htmlFor="source-video-file">찍어 둔 영상 선택</label>
-      <p id="source-video-file-help">MP4, MOV, WEBM, MKV, M4V 영상을 고를 수 있어요. 5분 안쪽이 가장 잘 됩니다.</p>
+      {/* 길이 안내는 **재서** 적었다. 2026-08-21 실측으로 3분 20초짜리가 24초에
+          끝났다(대략 8배속). 중간에서 끊는 벽이 330초이므로 길이만 보면 20분도
+          넉넉하지만, 재 본 것은 잡음 없는 한 사람 목소리다 -- 실제 촬영본은
+          더 느리므로 여유를 두고 말한다. 128MB는 서버가 정한 상한이다. */}
+      <p id="source-video-file-help">MP4, MOV, WEBM, MKV, M4V 영상을 고를 수 있어요. 128MB보다 작고 20분 안쪽이면 넉넉합니다.</p>
       <Input
         id="source-video-file"
         type="file"
