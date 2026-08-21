@@ -145,9 +145,9 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
   // 아래 상태 카드는 남기되 **단추를 뗐다** -- 각 화면으로 가는 길은 메뉴에 이미
   // 있고, 여기서는 사실만 한 번씩 말한다.
   return <section className="vb-home" data-testid="product-home">
-    {/* 대본으로 시작하는 길과 찍어 둔 영상으로 시작하는 길은 **같은 화면**으로
-        간다. 이야기 화면이 대본을 받는 자리(붙여넣기·파일·영상)를 모두 갖고
-        있어서, 길마다 화면을 따로 두면 같은 것을 세 벌 관리하게 된다. */}
+    {/* 이어서 하기를 뺀 세 길(대본·찍어 둔 영상·유진에게 부탁)은 **같은 화면**으로
+        간다. 이야기 화면이 대본을 받는 자리(붙여넣기·파일·영상·유진)를 모두 갖고
+        있어서, 길마다 화면을 따로 두면 같은 것을 네 벌 관리하게 된다. */}
     <StartChooser hasDraft={summary?.has_draft === true} onStart={(path) => onNavigate(projectId, path === "continue" ? "editing" : "create")} />
     <div className="vb-home-grid"><HomeCard title="자산" description={assetText} /><HomeCard title="편집" description={draftText} /><HomeCard title="완성본" description={finishedText} /></div>
     {summaryError ? <Button variant="outline" onClick={() => setSummaryRequest((value) => value + 1)}>상태 다시 확인</Button> : null}

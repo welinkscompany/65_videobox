@@ -16,6 +16,9 @@ class LLMTaskType(str, Enum):
     # 대본 한 줄을 그림 만드는 프로그램이 알아듣는 영어 묘사로 바꾼다.
     # 한국어를 그대로 넣으면 전혀 다른 그림이 나온다 -- 2026-08-21 실측.
     SCENE_IMAGE_PROMPT = "scene_image_prompt"
+    # 주제 한 줄에서 대본 초안을 쓴다. **구조화 출력으로만 부른다** --
+    # 자유형 대화로 물으면 생각 과정이 영어로 새어 나온다(2026-08-21 실측).
+    SCRIPT_DRAFT = "script_draft"
 
 
 @dataclass(slots=True, frozen=True)

@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-08-21-videobox-yujin-writes-the-first-draft.ko.md`
+
 # 띠가 모양을 말한다 — 그리고 내보내기를 일부러 안 올린 이유
 
 - 작성: 2026-08-21

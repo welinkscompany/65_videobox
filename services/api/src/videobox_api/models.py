@@ -422,6 +422,40 @@ class SceneImageListResponse(BaseModel):
     images: list[SceneImageResponse]
 
 
+class ScriptDraftCreateRequest(BaseModel):
+    """주제 한 줄에서 대본 초안을 받는다.
+
+    길이와 장면 수를 함께 싣는다 -- 60초 다섯 장면과 3분 열 장면은 전혀 다른
+    글이라, 안 물어보면 매번 다른 길이가 돌아온다.
+    """
+
+    topic: str = Field(min_length=1, max_length=500)
+    duration_sec: int = Field(default=60, ge=5, le=1800)
+    scene_count: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("topic")
+    @classmethod
+    def _topic_is_not_blank(cls, value: str) -> str:
+        # 공백만 적어 보내면 모델을 깨우기 전에 막는다.
+        if not value.strip():
+            raise ValueError("topic must not be blank")
+        return value.strip()
+
+
+class ScriptDraftSceneResponse(BaseModel):
+    scene_number: int
+    narration: str
+    #: 그 장면에서 보여 줄 그림. 비어 있을 수 있다.
+    visual: str = ""
+
+
+class ScriptDraftResponse(BaseModel):
+    title: str
+    #: owner가 고칠 글 한 덩이. 장면 줄을 이어 붙인 것이라 둘이 어긋나지 않는다.
+    script_text: str
+    scenes: list[ScriptDraftSceneResponse]
+
+
 class TTSCandidateRequest(BaseModel):
     segment_text: str = Field(min_length=1)
     voice_sample_asset_id: str = Field(min_length=1)

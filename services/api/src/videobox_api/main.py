@@ -52,7 +52,9 @@ from videobox_api.routers.hermes_operations import build_hermes_operations_route
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.scene_images import build_scene_images_router
+from videobox_api.routers.script_drafts import build_script_drafts_router
 from videobox_core_engine.scene_image_prompt import SceneImagePromptWriter
+from videobox_core_engine.script_draft_writer import ScriptDraftWriter
 from videobox_core_engine.scene_image_service import SceneImageService
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
@@ -802,6 +804,7 @@ def create_app(
     image_generation_config: ImageGenerationConfig | None = None,
     scene_image_provider=None,
     scene_image_prompt_writer=None,
+    script_draft_writer=None,
     capcut_handoff_service=None,
     local_only_runtime_service_factory=None,
     stt_provider=None,
@@ -1057,6 +1060,12 @@ def create_app(
         if resolved_scene_image_provider is not None
         else None
     )
+    # 유진이 주제 한 줄에서 대본 초안을 쓴다. 첫 화면의 네 번째 길이 이것을 부른다.
+    # `SceneImageService`와 달리 켜고 끄는 설정이 없다 -- 부르는 곳이 유진의 두뇌
+    # 하나뿐이고, 그 두뇌는 이미 대화·추천·장면 계획이 모두 쓰고 있다.
+    app.state.script_draft_writer = script_draft_writer or ScriptDraftWriter(
+        runtime_service=runtime_service
+    )
     app.state.build_local_only_runtime_service = build_local_only_runtime_service
     app.state.local_only_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
@@ -1265,6 +1274,7 @@ def create_app(
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_scene_images_router(store))
+    app.include_router(build_script_drafts_router())
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
     app.include_router(build_output_variants_router(store))
