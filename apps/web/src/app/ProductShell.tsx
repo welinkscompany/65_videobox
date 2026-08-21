@@ -23,6 +23,7 @@ import { ConversationCleanup } from "../features/settings/ConversationCleanup";
 import { HomeYujinChat } from "../features/home/HomeYujinChat";
 import { StartChooser } from "../features/home/StartChooser";
 import { TopBar } from "../features/shell/TopBar";
+import { ShellCanvasProvider, useShellCanvas } from "../features/shell/shellCanvas";
 
 // 프로젝트에 매이지 않는 전역 목적지도 껍데기 안에서 그린다(owner 지적
 // 2026-08-19). 띠가 **어느 화면인지** 말해야 하므로 이름을 따로 갖는다 --
@@ -45,7 +46,18 @@ function saveSettings(next: SettingsState): boolean {
 }
 export function opensLastProjectOnStart() { return readSettings().openLastProject; }
 
-export function ProductShell({ projectId, projects, section, onNavigate, onOpenSettings, children }: { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; children: ReactNode }) {
+type ProductShellProps = { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; children: ReactNode };
+
+/** 껍데기는 화면 비율을 **스스로 알아내지 않는다.** 그 값은 열려 있는 초안에만
+ *  있고, 껍데기가 프로젝트마다 그것을 물어보면 모든 화면에 요청이 하나씩 는다 --
+ *  이 껍데기는 작업 목록조차 다이얼로그를 열 때만 부르도록 못박혀 있다.
+ *  대신 **아는 화면이 알려 주고**(`usePublishShellCanvas`) 띠가 받아 적는다. */
+export function ProductShell(props: ProductShellProps) {
+  return <ShellCanvasProvider><ProductShellFrame {...props} /></ShellCanvasProvider>;
+}
+
+function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSettings, children }: ProductShellProps) {
+  const canvas = useShellCanvas();
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
   const setJobDialogOpenSafely = (open: boolean) => {
@@ -78,6 +90,7 @@ export function ProductShell({ projectId, projects, section, onNavigate, onOpenS
         projects={projects}
         section={section}
         screenName={screenName}
+        canvas={canvas}
         onNavigate={onNavigate}
         onSelectProject={(nextProjectId) => onNavigate(nextProjectId, "editing")}
         onOpenSettings={onOpenSettings}

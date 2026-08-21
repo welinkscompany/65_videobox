@@ -136,6 +136,13 @@ body:has(.vb-product-shell) { margin: 0; }
    단계가 보일 때는 켜진 단추가 이미 같은 말을 하고 있다. */
 .vb-top-bar__screen { flex:1 1 auto; min-width:0; font-size: var(--vb-text-md); font-weight:650; }
 .vb-top-bar__note { color:var(--vb-muted); font-size: var(--vb-text-xs); white-space:nowrap; }
+/* 캡컷 위 툴바의 화면 비율 자리. **테두리가 있어도 단추가 아니다** -- 우리는 여기서
+   비율을 고르지 않고 지금 만드는 모양을 말하기만 한다(`shellCanvas.tsx`에 이유).
+   그래서 색은 승인된 `--vb-muted` 그대로 두고 강조색을 쓰지 않는다. 강조색을 주면
+   눌러야 하는 것처럼 보이고, owner를 막았던 문제가 띠에서 되풀이된다. */
+.vb-top-bar__canvas { color:var(--vb-muted); font-size: var(--vb-text-xs); white-space:nowrap;
+  flex:0 0 auto; padding: var(--vb-space-1) var(--vb-space-2); border:1px solid var(--vb-border);
+  border-radius:.5rem; font-variant-numeric: tabular-nums; }
 .vb-top-bar__stages [data-slot=button] { gap: var(--vb-space-2); white-space:nowrap; }
 .vb-top-bar__stages svg { flex:0 0 auto; width:1rem; height:1rem; }
 .vb-top-bar__menu { position:relative; flex:0 0 auto; }
@@ -152,6 +159,10 @@ body:has(.vb-product-shell) { margin: 0; }
    기둥 시절에는 이 폭에서 Sheet가 그 일을 했으므로, 여기서 잃으면 안 된다. */
 @media (max-width: 767px) { .vb-product-shell { --vb-top-bar-h: 6.25rem; }
   .vb-top-bar { flex-wrap:wrap; gap: var(--vb-space-2); padding: var(--vb-space-2); }
-  .vb-top-bar__brand span, .vb-top-bar__note { display:none; }
+  /* 화면 비율도 여기서는 접는다. 좁은 화면의 띠는 이미 두 줄이고 높이가
+     `--vb-top-bar-h: 6.25rem`으로 못박혀 있는데, 첫 줄에 글자를 더 얹으면 한 줄이
+     더 생겨 **편집판 높이 계산이 어긋난다** -- 2026-08-21에 실제로 32px 밀린 적이
+     있다. 비율은 캡컷이 그것을 보여 주는 넓은 화면에서만 말한다. */
+  .vb-top-bar__brand span, .vb-top-bar__note, .vb-top-bar__canvas { display:none; }
   .vb-top-bar__project [data-slot=button] { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
   .vb-top-bar__stages { order:1; flex:1 0 100%; } }

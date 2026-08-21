@@ -122,3 +122,52 @@ describe("위 띠", () => {
     expect(screen.getByRole("button", { name: "전체 메뉴" })).toBeVisible();
   });
 });
+
+/** 캡컷 위 툴바에서 가장 눈에 띄는 둘이 **화면 비율**과 **내보내기**다. 우리 띠엔
+ *  없었다. 다만 승인 기록이 못박은 원칙이 있다 -- 띠에는 **우리가 실제로 하는 일만**
+ *  올린다(`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`).
+ *
+ *  아래 시험들은 그 선을 지킨다. 다음 사람이 "캡컷엔 고르는 단추가 있으니 우리도"
+ *  하고 손대면 여기서 걸린다. */
+describe("위 띠 — 화면 비율과 내보내기", () => {
+  it("지금 만드는 모양을 띠가 말한다", () => {
+    renderBar({ canvas: { width: 1080, height: 1920 } });
+
+    expect(screen.getByText("세로 9:16")).toBeVisible();
+  });
+
+  it("가로도 같은 자리에서 말한다", () => {
+    renderBar({ canvas: { width: 1920, height: 1080 } });
+
+    expect(screen.getByText("가로 16:9")).toBeVisible();
+  });
+
+  it("아직 모르면 아무것도 말하지 않는다", () => {
+    // 짐작해서 `가로 16:9`라고 적어 두면 세로 초안에서 띠가 거짓말을 한다.
+    renderBar();
+
+    expect(screen.queryByText(/\d+:\d+/)).toBeNull();
+  });
+
+  it("비율은 말하기만 하고 고르게 하지 않는다", () => {
+    // **이 시험이 이 자리의 이유다.** 마스터 편집본의 비율을 바꾸는 길은 서버에
+    // 아예 없다 -- 비율은 초안을 만들 때 기획 화면에서 한 번 정해진다. 여기에
+    // 고르는 단추를 놓으면 눌러도 아무 일이 없거나, 기획 화면의 체크와 **두 벌**이
+    // 된다. 캡컷과 똑같이 생긴 자리에 없는 기능을 걸어 두면 배치가 거짓말을 한다.
+    renderBar({ canvas: { width: 1920, height: 1080 } });
+
+    const ratio = screen.getByText("가로 16:9");
+    expect(ratio.closest("button")).toBeNull();
+    expect(ratio.closest("a")).toBeNull();
+  });
+
+  it("내보내기로 가는 문은 띠 안에 하나뿐이다", () => {
+    // 캡컷은 내보내기를 위 툴바 오른쪽 끝에 둔다. 우리는 그 일을 이미 단계 넷의
+    // `확인과 내보내기`가 한다. 띠에 단추를 하나 더 놓으면 **같은 화면으로 가는
+    // 문이 둘**이 되고, owner를 막았던 그 문제 -- "다음에 할 일로 보이는 것이
+    // 여러 개" -- 를 띠에서 되풀이한다.
+    renderBar();
+
+    expect(screen.getAllByRole("button", { name: /내보내기/ })).toHaveLength(1);
+  });
+});

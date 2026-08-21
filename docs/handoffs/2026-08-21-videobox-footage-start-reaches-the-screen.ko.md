@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-08-21-videobox-top-bar-says-the-shape.ko.md`
+
 # 찍어 둔 영상으로 시작하는 문이 화면까지 닿았다
 
 - 작성: 2026-08-21

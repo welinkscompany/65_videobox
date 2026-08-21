@@ -6,6 +6,7 @@ import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
 import { HomePage, ProductShell, SettingsPage } from "./ProductShell";
 import { VoiceMaterialPanel } from "../features/media/VoiceMaterialPanel";
+import { usePublishShellCanvas } from "../features/shell/shellCanvas";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("PointerEvent", MouseEvent); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
@@ -36,6 +37,29 @@ describe("product shell", () => {
       expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(view.container.querySelectorAll("main")).toHaveLength(1);
+  });
+
+  it("says what shape the open draft makes, and forgets it on the way out", () => {
+    // 캡컷 위 툴바의 **화면 비율** 자리다. 띠는 이 값을 스스로 불러오지 않는다 --
+    // 껍데기가 프로젝트마다 무언가를 더 물어보면 화면마다 요청이 한 번씩 늘고,
+    // 이 껍데기는 작업 목록조차 다이얼로그를 열 때만 부르도록 못박혀 있다.
+    // 대신 **아는 화면이 알려 준다.** 알려 준 화면을 떠나면 비워야 한다 -- 안 그러면
+    // 내 라이브러리에서도 아까 그 초안의 비율이 띠에 남는다.
+    function Publisher({ canvas }: { canvas: { width: number; height: number } | null }) {
+      usePublishShellCanvas(canvas);
+      return <p>본문</p>;
+    }
+    const shell = (canvas: { width: number; height: number } | null) => (
+      <ProductShell projectId="first" projects={projects as never} section="editing" onNavigate={vi.fn()} onOpenSettings={vi.fn()}>
+        <Publisher canvas={canvas} />
+      </ProductShell>
+    );
+
+    const view = render(shell({ width: 1080, height: 1920 }));
+    expect(screen.getByText("세로 9:16")).toBeInTheDocument();
+
+    view.rerender(shell(null));
+    expect(screen.queryByText(/\d+:\d+/)).not.toBeInTheDocument();
   });
 
   it("does not render project stages when no project is open", () => {

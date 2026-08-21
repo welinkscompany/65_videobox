@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 
 import { EditorWorkbench, persistedPanelPixels } from "./EditorWorkbench";
 import * as previewStageModule from "../preview/preview-stage";
+import { ShellCanvasProvider, useShellCanvas } from "../../shell/shellCanvas";
 import * as timelineDockModule from "../timeline/TimelineDock";
 
 const assetCards = [{
@@ -787,5 +788,35 @@ describe("좁은 화면의 도크 단추", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "자산과 대본" })).toBeNull());
     expect(screen.getByRole("button", { name: "자산과 대본" }).getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+/** 캡컷은 위 툴바에 화면 비율을 띄운다. 우리 띠도 그걸 말하는데, **띠는 그 값을
+ *  스스로 불러오지 않는다** — 껍데기가 프로젝트마다 무언가를 더 물어보면 모든
+ *  화면에 요청이 하나씩 는다. 아는 화면이 알려 주는 구조이고, 그 아는 화면이
+ *  편집기다(재생 매니페스트에 이미 크기가 들어 있다).
+ *
+ *  이 시험이 없으면 띠는 **영원히 비어 있는데 아무 시험도 안 깨진다** — 알려 주는
+ *  쪽을 빼먹는 것은 이 저장소가 반복해 온 "부품은 있는데 부르는 자리가 없다"다. */
+describe("편집기가 껍데기에 화면 비율을 알린다", () => {
+  function Probe() {
+    const canvas = useShellCanvas();
+    return <p data-testid="probe">{canvas ? `${canvas.width}x${canvas.height}` : "없음"}</p>;
+  }
+
+  it("열려 있는 초안의 크기를 그대로 알린다", () => {
+    render(<ShellCanvasProvider><Probe /><EditorWorkbench view={view} /></ShellCanvasProvider>);
+
+    expect(screen.getByTestId("probe")).toHaveTextContent("1080x1920");
+  });
+
+  it("편집기를 떠나면 지운다", () => {
+    // 안 지우면 내 라이브러리로 옮겨도 아까 그 초안의 비율이 띠에 남아, 띠가 지금
+    // 화면과 아무 상관 없는 사실을 말한다.
+    const workbench = render(<ShellCanvasProvider><Probe /><EditorWorkbench view={view} /></ShellCanvasProvider>);
+
+    workbench.rerender(<ShellCanvasProvider><Probe /></ShellCanvasProvider>);
+
+    expect(screen.getByTestId("probe")).toHaveTextContent("없음");
   });
 });
