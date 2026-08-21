@@ -7,11 +7,12 @@ import { Textarea } from "../../components/ui/textarea";
 import { AssetPreviewPlayer, type PreviewCandidate } from "../director/AssetPreviewPlayer";
 import { SceneImageStudio } from "../media/SceneImageStudio";
 import { SourceVideoStart } from "./SourceVideoStart";
+import { YujinScriptStart } from "./YujinScriptStart";
 import { usePlaceholderConfirmation } from "./usePlaceholderConfirmation";
 import { creationBriefStorageKey as briefStorageKey } from "./pastedScriptSummary";
 
 
-const pendingKey = (projectId: string, source: "paste" | "upload" | "footage") => `videobox.creation-pending.${projectId}.${source}`;
+const pendingKey = (projectId: string, source: "paste" | "upload" | "footage" | "yujin") => `videobox.creation-pending.${projectId}.${source}`;
 const shortcutAnswers = ["모르겠어요", "추천해줘", "건너뛰기"] as const;
 type PendingAnswer = { questionId: string; answer: string; expectedRevision: number };
 type PendingCandidateRange = { assetId: string; startSec: number; endSec: number; expectedRevision: number };
@@ -202,7 +203,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     <Button type="button" variant="outline" onClick={continueDraft}>초안 이어서 하기</Button>
   </section> : null;
 
-  function getPendingIdempotencyKey(source: "paste" | "upload" | "footage") {
+  function getPendingIdempotencyKey(source: "paste" | "upload" | "footage" | "yujin") {
     const key = pendingKey(projectId, source);
     const existing = window.localStorage.getItem(key);
     if (existing) return existing;
@@ -298,6 +299,33 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setBrief(created);
     } catch {
       setError("받아쓴 대본으로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  /** 유진이 쓴 초안으로 기획을 연다.
+   *
+   *  `start()`와 다른 점은 대본이 어디서 왔는지 이름으로 남는 것뿐이다. **여기서
+   *  받는 글은 이미 owner가 고치고 확인을 누른 글이다** -- 초안 그대로가 아니다.
+   *  확정 게이트는 `YujinScriptStart` 안에 있다. */
+  async function startFromYujinDraft({ scriptText: written }: { scriptText: string }) {
+    const trimmed = written.trim();
+    if (!trimmed) return;
+    setError(null);
+    setIsStarting(true);
+    try {
+      const created = await api.createCreationBrief(projectId, {
+        script_filename: "유진이-쓴-대본.txt",
+        script_text: trimmed,
+        idempotency_key: getPendingIdempotencyKey("yujin"),
+        capability_profile: { ai_execution: "disabled" },
+      });
+      window.localStorage.setItem(briefStorageKey(projectId), created.brief_id);
+      window.localStorage.removeItem(pendingKey(projectId, "yujin"));
+      setBrief(created);
+    } catch {
+      setError("유진이 쓴 대본으로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -544,6 +572,9 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       {/* 대본이 없어도 시작할 수 있는 길. 영상에서 말을 받아써 대본을 만든다.
           첫 화면의 "찍어 둔 영상이 있어요"가 여기로 온다. */}
       <SourceVideoStart projectId={projectId} disabled={isStarting} onReady={(start) => void startFromFootage(start)} />
+      {/* 대본도 영상도 없는 사람이 시작하는 길. 첫 화면의 "아직 아무것도 없어요"가
+          여기로 온다. 주제만 받아 유진이 초안을 쓰고, owner가 고쳐 확인한다. */}
+      <YujinScriptStart projectId={projectId} disabled={isStarting} onReady={(start) => void startFromYujinDraft(start)} />
       {error ? <p role="alert">{error}</p> : null}
     </section>;
   }
