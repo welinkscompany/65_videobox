@@ -62,8 +62,8 @@
 승인된 시각 결정은 현재 네 건이다. 전부 사용자가 명시 승인했고 재승인 없이 바꾸지 않는다.
 경로는 위 표의 `docs/decisions/`다. **색은 가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
 
-- `2026-08-20-editor-dark-surface.ko.md` — **편집 화면만 어둡게**. 나머지 화면은
-  아래 팔레트 그대로고 오렌지 강조도 유지한다
+- `2026-08-21-editor-back-to-light.ko.md` — **편집 화면도 흰 톤**. 하루 썼던
+  `2026-08-20-editor-dark-surface.ko.md`를 되돌린 것이다. 미리보기 무대만 어둡다
 - `2026-08-05-dashboard-white-orange-direction.ko.md` — **현행 팔레트**:
   canvas `#FAFAFA`, accent `#C2410C`, text `#1C1C1E`
 - `2026-07-20-editor-workbench-visual-approval.ko.md` — 편집 작업판 5개 viewport

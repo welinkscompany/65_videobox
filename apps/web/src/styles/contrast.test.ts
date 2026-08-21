@@ -101,62 +101,33 @@ function readScopedToken(selector: string, name: string): string {
   return line.slice(line.indexOf(":") + 1).replace(";", "").trim()
 }
 
-const DARK = {
-  canvas: "#141416",
-  panel: "#1C1C1F",
-  text: "#F2F2F4",
-  muted: "#A9A9B2",
-  faint: "#94949E",
-  accent: "#E8613A",
-  accentBg: "#2A1710",
-  success: "#4ADE80",
-  successBg: "#10291B",
-}
+describe("편집 화면도 흰 톤이다 — owner 결정 2026-08-21", () => {
+  // 2026-08-20에 편집 화면만 어둡게 했다가 owner가 써 보고 되돌렸다
+  // (`docs/decisions/2026-08-21-editor-back-to-light.ko.md`).
+  //
+  // 되돌린 방식이 중요하다. 어두운 값을 흰 값으로 **다시 칠한** 것이 아니라
+  // 편집 화면 전용 블록을 **없앴다.** 그래야 편집 화면이 승인된 팔레트를 다른
+  // 화면과 같은 한 벌로 쓴다 -- 색 값이 두 벌이 되면 한쪽이 조용히 낡는다.
 
-describe("어두운 편집 표면", () => {
-  it("어두운 값은 편집 작업판 안에서만 정의된다", () => {
-    for (const [token, expected] of [
-      ["--vb-canvas", DARK.canvas], ["--vb-panel", DARK.panel], ["--vb-text", DARK.text],
-      ["--vb-muted", DARK.muted], ["--vb-faint", DARK.faint], ["--vb-accent", DARK.accent],
-    ] as const) {
-      expect(readScopedToken(EDITOR_SURFACE, token)).toBe(expected)
-      // 밖은 그대로여야 한다. 여기가 깨지면 편집기만 어둡게 한 게 아니다.
-      expect(readToken(token)).not.toBe(expected)
+  it("편집 화면 전용 색 블록이 남아 있지 않다", () => {
+    expect(uiSystemCss).not.toContain('[data-shell-section="editing"] {')
+    expect(uiSystemCss).not.toContain(".vb-editor-workbench {")
+    // 어두운 값 자체가 파일에 남아 있으면 안 된다. 남겨 두면 다음 사람이
+    // "쓰는 데가 있나" 하고 되살린다.
+    for (const dead of ["#141416", "#1C1C1F", "#E8613A", "#2A1710", "#A9A9B2"]) {
+      expect(uiSystemCss).not.toContain(dead)
     }
   })
 
-  it("어두운 값은 편집 구간에만 걸린다", () => {
-    // 편집판만 어둡게 하면 흰 껍데기가 검은 편집판을 액자처럼 감싼다. 승인 문구는
-    // `편집 화면만 어둡게`였고, 편집 화면에는 위 띠와 왼쪽 줄도 들어간다.
-    expect(uiSystemCss).toContain('.vb-product-shell[data-shell-section="editing"]')
-    // 구간을 안 가리고 껍데기 전체를 어둡게 하면 대시보드까지 따라 어두워진다.
-    expect(uiSystemCss).not.toContain(".vb-product-shell {")
+  it("편집 화면도 승인된 밝은 팔레트를 그대로 쓴다", () => {
+    expect(readToken("--vb-canvas")).toBe(APPROVED.canvas)
+    expect(readToken("--vb-panel")).toBe(APPROVED.panel)
+    expect(readToken("--vb-accent")).toBe(APPROVED.accent)
   })
 
-  it("본문·보조·희미한 글자가 어두운 패널에서 4.5:1을 넘는다", () => {
-    // 어둡게 만들면서 읽기 어려워지면 고친 게 아니다 -- 승인 기록이 못박은 조건.
-    expect(contrastRatio(DARK.text, DARK.panel)).toBeGreaterThanOrEqual(4.5)
-    expect(contrastRatio(DARK.muted, DARK.panel)).toBeGreaterThanOrEqual(4.5)
-    expect(contrastRatio(DARK.faint, DARK.panel)).toBeGreaterThanOrEqual(4.5)
-    expect(contrastRatio(DARK.text, DARK.canvas)).toBeGreaterThanOrEqual(4.5)
-  })
-
-  it("강조색은 어두운 바탕에서 글자로 읽힌다", () => {
-    // 실측: 흰 배경용 `#C2410C`는 어두운 패널에서 3.28로 **기준 미달**이다.
-    // 같은 색을 그대로 옮기면 오렌지가 글자로 안 읽힌다. 색조는 지키고 밝기만 올린다.
-    expect(contrastRatio(APPROVED.accent, DARK.panel)).toBeLessThan(4.5)
-    expect(contrastRatio(DARK.accent, DARK.panel)).toBeGreaterThanOrEqual(4.5)
-    expect(contrastRatio(DARK.accent, DARK.accentBg)).toBeGreaterThanOrEqual(4.5)
-  })
-
-  it("채운 단추는 흰 글자를 얹은 원래 오렌지 그대로다", () => {
-    // 단추 배경으로는 `#C2410C`가 흰 글자에서 5.18로 통과한다. 밝은 색조로
-    // 바꾸면 오히려 흰 글자가 3.39로 떨어진다 -- 여기는 건드리지 않는다.
-    expect(readScopedToken(EDITOR_SURFACE, "--primary")).toBe(APPROVED.accent)
-    expect(contrastRatio("#FFFFFF", APPROVED.accent)).toBeGreaterThanOrEqual(4.5)
-  })
-
-  it("성공 상태도 어두운 바탕에서 읽힌다", () => {
-    expect(contrastRatio(DARK.success, DARK.successBg)).toBeGreaterThanOrEqual(4.5)
+  it("미리보기 무대는 그대로 어둡다", () => {
+    // 이 값은 2026-08-05 승인표에 있던 것이고 이번 되돌림과 무관하다.
+    // 영상을 보는 자리라 어두운 편이 맞다.
+    expect(readToken("--vb-preview")).toBe(APPROVED.preview)
   })
 })

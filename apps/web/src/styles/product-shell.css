@@ -135,3 +135,13 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog-grid { min-width:0; }
 .vb-catalog-card { box-sizing:border-box; min-width:0; overflow-wrap:anywhere; border:0; border-radius:var(--radius-lg); box-shadow:0 0 0 1px var(--vb-surface-ring); }
 .vb-catalog-card:hover { border:0; box-shadow:0 0 0 1px var(--vb-accent); }
+
+/* 작업실 접기 띠 — owner가 "클릭하기가 너무 어렵다"고 한 자리 (2026-08-21).
+   가져온 원본은 폭 16px이고, 그중 실제로 보이는 것은 가운데 2px 선뿐이다.
+   손가락·마우스가 닿는 크기로 넓히고, 어디를 눌러야 하는지 보이게 한다.
+   24px는 WCAG 2.2 목표 크기 최소값이다. */
+.vb-product-shell .vb-sidebar-rail { width: 24px; }
+.vb-product-shell .vb-sidebar-rail::after { width: 3px; }
+.vb-product-shell .vb-sidebar-rail:hover::after,
+.vb-product-shell .vb-sidebar-rail:focus-visible::after { background: var(--vb-accent); }
+.vb-product-shell .vb-sidebar-rail:focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent); }

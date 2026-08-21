@@ -22,12 +22,10 @@ else {
   # same hexes from the JS side; both must move together, and only with a new
   # approval record (CLAUDE.md §6).
   foreach ($token in @('--vb-canvas: #FAFAFA', '--vb-accent: #C2410C', '--vb-preview: #18181B', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
-  # 편집 화면만 어둡다 (docs/decisions/2026-08-20-editor-dark-surface.ko.md).
-  # 어두운 값이 여기 없으면 세 곳 중 두 곳에만 남아 다음에 조용히 갈라진다.
-  # 실측으로 고른 값이다: 흰 배경용 #C2410C는 어두운 패널에서 3.28로 글자
-  # 기준에 못 미쳐서, 글자용은 #E8613A(5.02)를 쓰고 채운 단추만 #C2410C로 둔다.
-  foreach ($token in @('--vb-canvas: #141416', '--vb-panel: #1C1C1F', '--vb-accent: #E8613A')) { if (-not $css.Contains($token)) { $errors.Add("missing dark editor token: $token") } }
-  if (-not $css.Contains('.vb-editor-workbench {')) { $errors.Add('dark tokens must stay scoped to the editor surface') }
+  # 편집 화면 어둡게는 owner가 2026-08-21에 되돌렸다
+  # (`docs/decisions/2026-08-21-editor-back-to-light.ko.md`). 어두운 토큰을
+  # 여기서 요구하면 올바른 코드가 검증에서 실패한다 -- 그런 검증기는 아무도 안 돌린다.
+  foreach ($dead in @('#141416', '#1C1C1F', '#E8613A')) { if ($css.Contains($dead)) { $errors.Add("reverted dark editor token is back: $dead") } }
   if ($css -match '@import\s+["'']tailwindcss["'']') { $errors.Add('Tailwind preflight import is forbidden') }
 }
 $indexHtml = Join-Path $web 'index.html'

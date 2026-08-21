@@ -656,4 +656,24 @@ describe("사이드바 손잡이", () => {
     expect(screen.getByRole("button", { name: "작업실 접기" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Toggle Sidebar/i })).toBeNull();
   });
+
+  it("작업실 접기는 키보드로도 닿는다", () => {
+    // owner: "작업실 접기 버튼이 아직도 클릭하기가 너무 어렵게 되어 있고".
+    // 가져온 shadcn `SidebarRail`은 폭 16px 띠에 `tabIndex={-1}`이다 -- 마우스로
+    // 정확히 겨눠야 하고, 키보드로는 **아예 닿지 않는다.** 접는 길이 마우스
+    // 하나뿐이면 그건 접을 수 없는 것과 다르지 않다.
+    render(
+      <ProductShell
+        projectId="project-a"
+        projects={[{ project_id: "project-a", name: "프로젝트 가", status: "active", root_storage_uri: "" }]}
+        section="home"
+        onNavigate={vi.fn()}
+        onOpenSettings={vi.fn()}
+      >
+        <p>본문</p>
+      </ProductShell>,
+    );
+
+    expect(screen.getByRole("button", { name: "작업실 접기" })).not.toHaveAttribute("tabindex", "-1");
+  });
 });
