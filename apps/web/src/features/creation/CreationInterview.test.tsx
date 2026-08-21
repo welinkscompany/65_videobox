@@ -501,4 +501,49 @@ describe("CreationInterview", () => {
     const view = render(<CreationInterview projectId="project_1" />); fireEvent.click(await screen.findByRole("button", { name: "마이크로 녹음 시작" })); await waitFor(() => expect(stop).not.toHaveBeenCalled()); view.unmount();
     expect(stop).toHaveBeenCalled(); expect(upload).not.toHaveBeenCalled();
   });
+
+  /** 찍어 둔 영상으로 시작하는 길이 **기존 기획 흐름으로 이어지는지**를 본다.
+   *
+   *  이 저장소가 반복해 온 실패가 "부품은 있는데 부르는 자리가 없다"이고,
+   *  그 다음 단계가 "부르긴 하는데 그 다음으로 안 이어진다"이다. 받아쓰기만
+   *  되고 그 영상이 내레이션으로 안 이어지면 owner는 자기가 올린 본편을 두고
+   *  무음 초안을 만들게 된다. */
+  it("영상에서 받아쓴 대본으로 기획을 열고, 그 영상을 내레이션으로도 이어 준다", async () => {
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    vi.spyOn(api, "uploadSourceVideo").mockResolvedValue({ asset_id: "raw_video_1", script_text: "받아쓴 대본", spoken_segment_count: 2 });
+    // 올린 영상은 프로젝트 자산으로 남으므로 서버 후보 목록에도 들어온다.
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([{ asset_id: "raw_video_1", asset_type: "raw_video" }]);
+    const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue(approved);
+    const startDraft = vi.spyOn(api, "startDraftReadiness").mockResolvedValue({ readiness_id: "readiness_1", brief_id: "brief_1", status: "planning", revision: 1, result: null });
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.change(screen.getByLabelText("찍어 둔 영상 선택"), { target: { files: [new File(["v"], "본편.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "영상에서 대본 만들기" }));
+
+    const edited = await screen.findByLabelText("영상에서 받아쓴 대본");
+    fireEvent.change(edited, { target: { value: "고쳐 쓴 대본" } });
+    fireEvent.click(screen.getByRole("button", { name: "이 대본으로 기획 시작" }));
+
+    // 받아쓴 글이 아니라 **owner가 고친 글**로 기획이 열려야 한다.
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][1]).toMatchObject({ script_text: "고쳐 쓴 대본" });
+
+    // 그 영상이 곧 본편이다. 내레이션으로 고를 수 있어야 한다.
+    fireEvent.click(await screen.findByRole("button", { name: "영상 소리로 초안 준비" }));
+    await waitFor(() => expect(startDraft).toHaveBeenCalled());
+    expect(startDraft.mock.calls[0][1]).toMatchObject({ narration_choice: { kind: "source_video", asset_id: "raw_video_1" } });
+  });
+
+  it("새로 고쳐도 올려 둔 영상을 내레이션 후보로 다시 찾아 준다", async () => {
+    // 이 되짚기는 **이미 있던 동작**을 고정한다(승인되면 서버에서 후보를 다시
+    // 읽는 효과가 이미 걸려 있다). 찍어 둔 영상 길이 생기면서 이 경로가 처음으로
+    // 실제 쓰임을 갖게 됐으므로 -- 그 전에는 `raw_video` 후보를 만들 방법이
+    // 아예 없었다 -- 조용히 끊기지 않게 여기서 붙잡아 둔다.
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue({ ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([{ asset_id: "raw_video_1", asset_type: "raw_video" }]);
+    render(<CreationInterview projectId="project_1" />);
+
+    expect(await screen.findByRole("button", { name: "영상 소리로 초안 준비" })).toBeVisible();
+  });
 });

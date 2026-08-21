@@ -6,11 +6,12 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { AssetPreviewPlayer, type PreviewCandidate } from "../director/AssetPreviewPlayer";
 import { SceneImageStudio } from "../media/SceneImageStudio";
+import { SourceVideoStart } from "./SourceVideoStart";
 import { usePlaceholderConfirmation } from "./usePlaceholderConfirmation";
 import { creationBriefStorageKey as briefStorageKey } from "./pastedScriptSummary";
 
 
-const pendingKey = (projectId: string, source: "paste" | "upload") => `videobox.creation-pending.${projectId}.${source}`;
+const pendingKey = (projectId: string, source: "paste" | "upload" | "footage") => `videobox.creation-pending.${projectId}.${source}`;
 const shortcutAnswers = ["모르겠어요", "추천해줘", "건너뛰기"] as const;
 type PendingAnswer = { questionId: string; answer: string; expectedRevision: number };
 type PendingCandidateRange = { assetId: string; startSec: number; endSec: number; expectedRevision: number };
@@ -149,7 +150,10 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     return () => { active = false; };
   }, [projectId]);
 
-  useEffect(() => { if (brief?.status === "approved") void api.listDraftNarrationOptions(projectId).then(setNarrationOptions).catch(() => setNarrationOptions([])); }, [brief?.status, projectId]);
+  // 후보를 못 읽었을 때 목록을 **비우지 않는다.** 방금 올린 영상은 이미 화면이
+  // 알고 있는데, 실패했다고 지워 버리면 owner는 본편을 두고 무음을 고르게 된다.
+  // 프로젝트가 바뀔 때는 위쪽 전환 처리가 따로 비운다.
+  useEffect(() => { if (brief?.status === "approved") void api.listDraftNarrationOptions(projectId).then(setNarrationOptions).catch(() => undefined); }, [brief?.status, projectId]);
   useEffect(() => {
     if (brief?.status !== "approved") return;
     const params = new URLSearchParams(window.location.search);
@@ -198,7 +202,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     <Button type="button" variant="outline" onClick={continueDraft}>초안 이어서 하기</Button>
   </section> : null;
 
-  function getPendingIdempotencyKey(source: "paste" | "upload") {
+  function getPendingIdempotencyKey(source: "paste" | "upload" | "footage") {
     const key = pendingKey(projectId, source);
     const existing = window.localStorage.getItem(key);
     if (existing) return existing;
@@ -263,6 +267,37 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setBrief(created);
     } catch {
       setError("대본 파일을 준비하지 못했습니다. 파일 형식과 내용을 확인해 주세요.");
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  /** 찍어 둔 영상에서 받아쓴 대본으로 기획을 연다.
+   *
+   *  `start()`와 다른 점은 하나뿐이다 -- 대본을 만들어 준 그 영상이 **곧 본편**이라
+   *  내레이션 후보로도 바로 올려 둔다. 승인 뒤 서버에서 후보를 다시 읽지만, 그
+   *  사이 화면에 "무음으로 초안 준비"만 보이면 owner가 그것을 눌러 자기 목소리를
+   *  통째로 버리게 된다. */
+  async function startFromFootage({ assetId, scriptText: heard }: { assetId: string; scriptText: string }) {
+    const trimmed = heard.trim();
+    if (!trimmed) return;
+    setError(null);
+    setIsStarting(true);
+    try {
+      const created = await api.createCreationBrief(projectId, {
+        script_filename: "영상에서-받아쓴-대본.txt",
+        script_text: trimmed,
+        idempotency_key: getPendingIdempotencyKey("footage"),
+        capability_profile: { ai_execution: "disabled" },
+      });
+      window.localStorage.setItem(briefStorageKey(projectId), created.brief_id);
+      window.localStorage.removeItem(pendingKey(projectId, "footage"));
+      setNarrationOptions((items) => items.some((item) => item.asset_id === assetId)
+        ? items
+        : [...items, { asset_id: assetId, asset_type: "raw_video" }]);
+      setBrief(created);
+    } catch {
+      setError("받아쓴 대본으로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -506,6 +541,9 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       <p id="creation-script-file-help">지원 형식: TXT, MD, SRT 파일을 선택할 수 있어요.</p>
       <Input id="creation-script-file" type="file" accept=".txt,.md,.srt,text/plain,text/markdown,application/x-subrip" onChange={(event) => { setScriptFile(event.target.files?.[0] ?? null); window.localStorage.removeItem(pendingKey(projectId, "upload")); }} />
       <Button type="button" variant="outline" onClick={() => void startFromFile()} disabled={isStarting}>{isStarting ? "대본 준비 중" : "파일로 기획 시작"}</Button>
+      {/* 대본이 없어도 시작할 수 있는 길. 영상에서 말을 받아써 대본을 만든다.
+          첫 화면의 "찍어 둔 영상이 있어요"가 여기로 온다. */}
+      <SourceVideoStart projectId={projectId} disabled={isStarting} onReady={(start) => void startFromFootage(start)} />
       {error ? <p role="alert">{error}</p> : null}
     </section>;
   }

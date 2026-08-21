@@ -40,6 +40,10 @@ export type CreateCreationBriefRequest = {
 export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { script_segments?: { segment_id: string; text: string; start_sec: number; end_sec: number }[]; gap_slots?: { gap_slot_id: string; reason: string; segment_id?: string; target_range?: { start_sec: number; end_sec: number } }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
 export type DraftReadinessRequest = { brief_id: string; narration_choice: { kind: "silent" | "existing" | "source_video"; asset_id?: string }; idempotency_key: string; expected_brief_revision: number; capability?: Record<string, unknown> };
 export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio" };
+/** 찍어 둔 영상으로 시작할 때 돌아오는 것. 올린 영상은 버려지지 않고 `raw_video`
+ *  자산으로 남으므로, `asset_id`는 그대로 내레이션(`source_video`) 선택에 쓴다 --
+ *  그 영상이 곧 본편이다. */
+export type SourceVideoStart = { asset_id: string; script_text: string; spoken_segment_count: number };
 /** 만든 장면 그림. `commercial_use_is_unrestricted`가 `null`이면 **모른다**는 뜻이다 --
  *  아는 척하지 않는다(§10.14 2-C). */
 export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; image_prompt?: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
@@ -1768,6 +1772,10 @@ export const api = {
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listSceneImages: (projectId: string) => request<{ images: SceneImage[] }>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`),
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
+  /** 올린 영상에서 말을 받아써 대본으로 돌려준다. 받아쓰기가 이 요청 **안에서**
+   *  끝나므로 10분짜리 영상이면 몇 분이 걸린다 -- 부르는 쪽이 기다리는 동안
+   *  화면에 상태를 말하고 두 번 눌리지 않게 막아야 한다. */
+  uploadSourceVideo: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<SourceVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/source-video/upload`, { method: "POST", body: form }); },
   reloadDirectorSession: (projectId: string, sessionId: string) =>
     request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),
   listDirectorConversations: (projectId: string) =>
