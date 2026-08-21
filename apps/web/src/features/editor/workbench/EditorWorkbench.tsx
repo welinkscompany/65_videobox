@@ -354,8 +354,7 @@ function EditorWorkbenchInstance({
     <span title={tool.hint} className="vb-cut-tool">
       <Button
         type="button"
-        variant="ghost"
-        size="sm"
+        variant="outline"
         aria-description={tool.hint}
         disabled={!tool.enabled || isSavingTimeline || !onInspectorAction}
         onClick={() => { if (tool.action) void onInspectorAction?.(tool.action); }}
@@ -443,6 +442,10 @@ function EditorWorkbenchInstance({
   const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "자산과 대본" : "유진과 편집 항목"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
   const leftVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.leftOpen);
   const rightVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.rightOpen);
+  // 지금 그 도크가 **실제로 보이는가**. 넓은 화면이면 펴져 있는지, 좁은 화면이면
+  // 그 서랍이 열려 있는지 -- 두 모드가 다른 상태를 쓰므로 한 자리에서 합친다.
+  const leftShowing = layout.mode === "drawer" ? layout.activeDrawer === "left" : leftVisible;
+  const rightShowing = layout.mode === "drawer" ? layout.activeDrawer === "right" : rightVisible;
   // 반복 구간은 새로 만들지 않는다. 화면이 이미 `적용 구간`으로 보여 주는 그 구간이다 --
   // 같은 개념이 두 벌이 되면 하나가 조용히 낡는다.
   // 클립 위에 깔 그림. **주소를 아는 것은 여기의 일**이다 -- 타임라인은 서버를
@@ -494,14 +497,19 @@ function EditorWorkbenchInstance({
     <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div>
       {/* 승인 기록 2026-08-20 항목 2: 큰 주황 알약 여덟 개가 줄지어 있던 자리다.
           채운 주황은 이 저장소에서 **강조**를 뜻하므로(활성 메뉴·선택된 항목·주요 단추)
-          도구가 전부 그 색이면 강조가 강조를 못 한다. 도구는 조용한 회색으로 내리고,
+          도구가 전부 그 색이면 강조가 강조를 못 한다. 도구는 조용한 `outline`으로 내리고,
           강조는 **지금 열려 있는 도크**만 가져간다. 이름은 지우지 않는다 -- 아이콘만
-          두면 캡컷을 안 써 본 사람은 무엇인지 알 수 없다. */}
-      <Button type="button" variant="ghost" size="sm" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" />실행 취소</Button>
-      <Button type="button" variant="ghost" size="sm" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" />다시 실행</Button>
+          두면 캡컷을 안 써 본 사람은 무엇인지 알 수 없다.
+
+          **`ghost`를 쓰지 않는다.** 이 앱은 Tailwind preflight 없이 `utilities`만
+          불러와서, 배경을 지정하지 않는 `ghost`는 브라우저 기본 단추색이 남는다 --
+          어두운 편집 화면에서 실측하니 투명이 아니라 `rgb(107,107,107)` 회색
+          상자였다. `outline`은 `bg-background`를 직접 깔아서 그 틈에 안 걸린다. */}
+      <Button type="button" variant="outline" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" />실행 취소</Button>
+      <Button type="button" variant="outline" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" />다시 실행</Button>
       {cutButton(cutTools.split, Scissors)}{cutButton(cutTools.join, ChevronsLeftRight)}{cutButton(cutTools.drop, Trash2)}{cutButton(cutTools.copyToNext, Copy)}
-      <Button ref={leftTriggerRef} type="button" size="sm" variant={leftVisible ? "default" : "ghost"} aria-pressed={leftVisible} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />자산과 대본</Button>
-      <Button ref={rightTriggerRef} type="button" size="sm" variant={rightVisible ? "default" : "ghost"} aria-pressed={rightVisible} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />유진과 편집 항목</Button>
+      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />자산과 대본</Button>
+      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />유진과 편집 항목</Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">

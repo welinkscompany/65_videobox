@@ -764,3 +764,28 @@ describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
     }
   });
 });
+
+describe("좁은 화면의 도크 단추", () => {
+  // 좁은 화면에서는 도크가 **서랍**으로 열린다. 데스크톱 상태만 보고 눌림을
+  // 판단하면, 서랍을 열어 놓고도 단추가 "안 눌림"이라고 말한다 -- 읽어 주는
+  // 도구에게 거짓말이고, 강조색도 따라오지 않는다.
+  it("서랍이 열려 있으면 그 단추가 눌린 것으로 읽힌다", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 640 });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 640 } as DOMRect);
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    // 시작 상태는 단정하지 않는다 -- 서랍은 마지막으로 열었던 쪽을 기억한다.
+    // 여기서 재는 것은 **열림과 눌림이 같이 움직이는가**다.
+    if (!screen.queryByRole("dialog", { name: "자산과 대본" })) {
+      fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    }
+    await screen.findByRole("dialog", { name: "자산과 대본" });
+    expect(screen.getByRole("button", { name: "자산과 대본" }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "닫기" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "자산과 대본" })).toBeNull());
+    expect(screen.getByRole("button", { name: "자산과 대본" }).getAttribute("aria-pressed")).toBe("false");
+  });
+});
