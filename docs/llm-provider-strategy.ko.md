@@ -41,7 +41,21 @@ Hermes Agent 공식 문서는 `hermes model`에서 OpenAI Codex를 선택하면 
 
 ## 5. 외부 연동과 보조 기능
 
-- ComfyUI, SaaS auth/billing, mem0와 VideoBox의 direct OAuth는 현재 runtime 범위 밖이다. Hermes service는 계획 §23의 isolated read-only slice로만 후속 도입한다.
+- **ComfyUI는 2026-08-20에 범위 안으로 들어왔다** (owner 승인, `development-fast-path.ko.md` §10.14 조항 2-C).
+  대본의 장면에 맞는 그림을 만들어 자산 공백을 채우는 한 경로에만 적용된다.
+  이 문서의 이전 판은 "범위 밖"이라고 적고 있었다 -- 두 문서가 서로 다른 말을 하게
+  두지 않으려고 여기서 같이 고친다.
+  - LLM provider가 아니다. ComfyUI는 OpenAI 모양이 아니라
+    (`POST /prompt` 그래프 JSON → `/history` 폴링 → `/view` 회수) 이 문서의 §1~§4가
+    말하는 provider 경계와 종류가 다르다. 전용 provider는
+    `videobox_provider_interfaces/comfyui_image_generation.py`다.
+  - **외부로 나가지 않는다.** 주소는 `http://127.0.0.1:8188` 또는
+    `http://host.docker.internal:8188` 둘뿐이고 `ImageGenerationConfig.__post_init__`이
+    그 밖의 값을 거절한다. `host.docker.internal`은 도커 호스트, 즉 같은 기계다.
+  - 라이선스는 **실행 중에 눈에 보이지 않는 제약**이라 설정이 스스로 말한다
+    (`commercial_use_is_unrestricted`). 막지는 않는다 -- owner가 2026-08-21에
+    `flux1-dev`로 가기로 하고 라이선스는 본인이 맡는다고 했다.
+- SaaS auth/billing, mem0와 VideoBox의 direct OAuth는 현재 runtime 범위 밖이다. Hermes service는 계획 §23의 isolated read-only slice로만 후속 도입한다.
 - TTS/STT와 FFmpeg/CapCut handoff는 각자의 typed provider/handler 경계를 따르며 LLM fallback을 만들지 않는다.
 - provider 변경은 공식 계획의 별도 slice, 사람 승인, static/runtime zero-call 검증 없이는 시작하지 않는다.
 

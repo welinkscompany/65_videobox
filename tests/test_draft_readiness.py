@@ -187,3 +187,55 @@ def test_draft_readiness_planner_failure_is_durable_and_retryable(tmp_path: Path
     with pytest.raises(RuntimeError): store.complete_draft_readiness(project_id=project.project_id, readiness_id=started["readiness_id"], expected_revision=planning["revision"])
     failed = LocalProjectStore(tmp_path).get_draft_readiness(project_id=project.project_id, readiness_id=started["readiness_id"])
     assert failed["status"] == "failed" and failed["error_code"] == "draft_readiness_planning_failed"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe are required to register playable video")
+def test_a_generated_scene_picture_lands_on_the_scene_it_was_made_for(tmp_path: Path) -> None:
+    """준비는 B-roll을 **순서대로** 짝지어 왔다(`zip(segments, playable_broll)`).
+
+    촬영본은 어느 장면 것인지 아무도 안 적어 뒀으니 순서가 유일한 규칙이었다.
+    만든 그림은 다르다 -- 3번째 장면을 보고 만든 그림이 1번째 장면에 붙으면
+    owner가 보기엔 그냥 엉뚱한 그림이다. 짝이 정해진 자산이 먼저 자리를 잡고,
+    나머지가 남은 자리를 순서대로 채운다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Pinned scene")
+    brief = _approved_brief(store, project.project_id, "첫 장면입니다. 둘째 장면입니다. 셋째 장면입니다.")
+    footage = tmp_path / "footage.mp4"; _write_playable_video(footage)
+    generated = tmp_path / "generated.mp4"; _write_playable_video(generated)
+    store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=footage)
+    pinned = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=generated,
+        source_kind="generated_image", metadata={"scene_segment_id": "script-3", "title": "3번째 장면 그림"},
+    )
+
+    started = store.start_draft_readiness(project_id=project.project_id, brief_id=brief["brief_id"], narration_choice={"kind": "silent"}, idempotency_key="pin", expected_brief_revision=brief["revision"])
+    planning = store.begin_draft_readiness_planning(project_id=project.project_id, readiness_id=started["readiness_id"], expected_revision=started["revision"])
+    completed = store.complete_draft_readiness(project_id=project.project_id, readiness_id=started["readiness_id"], expected_revision=planning["revision"])
+
+    by_segment = {item["segment_id"]: item["asset_id"] for item in completed["result"]["broll_candidates"]}
+    assert by_segment["script-3"] == pinned.asset_id
+    # 짝이 없는 촬영본은 남은 자리를 앞에서부터 채운다 -- 기존 규칙 그대로다.
+    assert by_segment["script-1"] != pinned.asset_id
+    # 그림이 붙은 장면은 더 이상 공백이 아니다.
+    assert "script-3" not in {gap["segment_id"] for gap in completed["result"]["gap_slots"]}
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe are required to register playable video")
+def test_a_picture_pinned_to_a_scene_that_no_longer_exists_does_not_disappear(tmp_path: Path) -> None:
+    """대본을 고치면 장면 수가 줄어든다. 그때 짝을 잃은 그림을 조용히 버리면
+    owner는 만든 것이 어디로 갔는지 알 수 없다 -- 남은 자리에 그냥 쓴다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Orphan pin")
+    brief = _approved_brief(store, project.project_id, "하나뿐인 장면입니다.")
+    generated = tmp_path / "generated.mp4"; _write_playable_video(generated)
+    pinned = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=generated,
+        source_kind="generated_image", metadata={"scene_segment_id": "script-9"},
+    )
+
+    started = store.start_draft_readiness(project_id=project.project_id, brief_id=brief["brief_id"], narration_choice={"kind": "silent"}, idempotency_key="orphan", expected_brief_revision=brief["revision"])
+    planning = store.begin_draft_readiness_planning(project_id=project.project_id, readiness_id=started["readiness_id"], expected_revision=started["revision"])
+    completed = store.complete_draft_readiness(project_id=project.project_id, readiness_id=started["readiness_id"], expected_revision=planning["revision"])
+
+    assert [item["asset_id"] for item in completed["result"]["broll_candidates"]] == [pinned.asset_id]

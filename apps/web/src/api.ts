@@ -37,9 +37,13 @@ export type CreateCreationBriefRequest = {
   script_asset_id?: string;
 };
 
-export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { gap_slots?: { gap_slot_id: string; reason: string }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
+export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { script_segments?: { segment_id: string; text: string; start_sec: number; end_sec: number }[]; gap_slots?: { gap_slot_id: string; reason: string; segment_id?: string; target_range?: { start_sec: number; end_sec: number } }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
 export type DraftReadinessRequest = { brief_id: string; narration_choice: { kind: "silent" | "existing" | "source_video"; asset_id?: string }; idempotency_key: string; expected_brief_revision: number; capability?: Record<string, unknown> };
 export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio" };
+/** 만든 장면 그림. `commercial_use_is_unrestricted`가 `null`이면 **모른다**는 뜻이다 --
+ *  아는 척하지 않는다(§10.14 2-C). */
+export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
+export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
 export type MediaInboxAsset = { filename: string; size_bytes: number };
 export type MediaInboxImport = { asset_id: string; project_id: string; asset_type: string; storage_uri: string };
 export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
@@ -1761,6 +1765,8 @@ export const api = {
   createAtomicDraftBundle: (projectId: string, payload: AtomicDraftBundleRequest) => request<AtomicDraftBundle>(`/api/projects/${encodeURIComponent(projectId)}/draft-bundles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listDraftNarrationOptions: async (projectId: string): Promise<NarrationOption[]> => (await request<{ assets: NarrationOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration-options`)).assets,
   uploadDraftNarration: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration/upload`, { method: "POST", body: form }); },
+  createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  listSceneImages: (projectId: string) => request<{ images: SceneImage[] }>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`),
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
   reloadDirectorSession: (projectId: string, sessionId: string) =>
     request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),

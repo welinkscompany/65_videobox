@@ -395,8 +395,9 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
      용량 판단은 `nvidia-smi`로 한다.
    - ComfyUI API는 OpenAI 모양이 아니다(`POST /prompt` 그래프 JSON → `/history` 폴링
      → `/view` 회수). 2-B의 provider를 재사용할 수 없고 새로 짜야 한다.
-   - `docs/llm-provider-strategy.ko.md`가 "ComfyUI는 범위 밖"이라고 적고 있다.
-     통합할 때 **같이 고친다** — 두 문서가 서로 다른 말을 하게 두지 않는다.
+   - ~~`docs/llm-provider-strategy.ko.md`가 "ComfyUI는 범위 밖"이라고 적고 있다.~~
+     **2026-08-21에 같이 고쳤다.** 그 문서 §5가 이제 범위 안이라고 적고, 왜 LLM
+     provider 경계와 종류가 다른지도 함께 적는다.
 
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.

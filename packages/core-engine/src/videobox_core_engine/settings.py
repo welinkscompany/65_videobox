@@ -184,6 +184,32 @@ def resolve_whisper_stt_config() -> "WhisperSTTConfig":
     )
 
 
+def resolve_image_generation_config() -> "ImageGenerationConfig":
+    """Resolve the ComfyUI image path for callers that pass none.
+
+    Same reason as the two resolvers above: the container runs
+    `uvicorn ... create_app --factory`, so the factory gets no arguments and
+    would otherwise always take the loopback default -- which inside the
+    container is the container, exactly the mistake clause 2-B had to fix for
+    the chat route (`docs/development-fast-path.ko.md` §10.14).
+
+    `enabled` defaults to False here, not to the dataclass default: a
+    `create_app()` caller that does not opt in (the whole test suite) must
+    never construct a transport that reaches for a real ComfyUI.
+    """
+    defaults = ImageGenerationConfig()
+    return ImageGenerationConfig(
+        enabled=_environment_flag("VIDEOBOX_IMAGE_GENERATION_ENABLED"),
+        base_url=_environment_text("VIDEOBOX_IMAGE_GENERATION_BASE_URL", defaults.base_url),
+        model_name=_environment_text("VIDEOBOX_IMAGE_MODEL_NAME", defaults.model_name),
+        weight_dtype=_environment_text("VIDEOBOX_IMAGE_WEIGHT_DTYPE", defaults.weight_dtype),
+        steps=_environment_positive_int("VIDEOBOX_IMAGE_STEPS", defaults.steps),
+        timeout_seconds=_environment_positive_int(
+            "VIDEOBOX_IMAGE_TIMEOUT_SECONDS", defaults.timeout_seconds
+        ),
+    )
+
+
 def resolve_local_runtime_config() -> "LocalOpenAICompatibleRuntimeConfig":
     """Resolve the local LM Studio runtime config for callers that pass none.
 

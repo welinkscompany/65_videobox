@@ -96,6 +96,22 @@ services:
       # keeps weights out of the owner's project data.
       HF_HOME: /opt/models
       XDG_CACHE_HOME: /opt/models
+      # 대본에 맞춘 그림 만들기. ComfyUI는 호스트에서 돈다 -- 컨테이너 안의
+      # 127.0.0.1은 컨테이너라서 loopback 기본값으로는 아무 데도 닿지 않는다.
+      # LM Studio와 같은 성격의 host bridge이고, owner가 2026-08-20에 이 한 경로만
+      # 승인했다 (`docs/development-fast-path.ko.md` §10.14 조항 2-C).
+      VIDEOBOX_IMAGE_GENERATION_ENABLED: ${VIDEOBOX_IMAGE_GENERATION_ENABLED:-1}
+      VIDEOBOX_IMAGE_GENERATION_BASE_URL: ${VIDEOBOX_IMAGE_GENERATION_BASE_URL:-http://host.docker.internal:8188}
+      # 디스크에 있는 유일한 이미지 모델이다. 상업 이용이 열린 모델이 아니며
+      # (`flux1-dev`), owner가 2026-08-21에 그걸 알고 이걸로 가기로 했다.
+      # 이름을 바꾸면 `ImageGenerationConfig`가 어느 쪽인지 스스로 말한다.
+      VIDEOBOX_IMAGE_MODEL_NAME: ${VIDEOBOX_IMAGE_MODEL_NAME:-flux1-dev.safetensors}
+      # 실측(2026-08-21, RTX 5090): bf16은 22GB라 안 들어가고 fp8은 절반이다.
+      VIDEOBOX_IMAGE_WEIGHT_DTYPE: ${VIDEOBOX_IMAGE_WEIGHT_DTYPE:-fp8_e4m3fn}
+      VIDEOBOX_IMAGE_STEPS: ${VIDEOBOX_IMAGE_STEPS:-20}
+      # 한 장이 22~24초다. 그림 요청은 한 번에 끝나는 요청이라 이 값보다 nginx가
+      # 더 오래 기다려야 한다 -- `tests/test_compose_contract.py`가 지킨다.
+      VIDEOBOX_IMAGE_TIMEOUT_SECONDS: ${VIDEOBOX_IMAGE_TIMEOUT_SECONDS:-300}
       # Draft export for CapCut.  Size is configurable because the owner shoots
       # 1920x1080 and also needs a vertical canvas for shortform.
       VIDEOBOX_CAPCUT_ENABLED: ${VIDEOBOX_CAPCUT_ENABLED:-1}

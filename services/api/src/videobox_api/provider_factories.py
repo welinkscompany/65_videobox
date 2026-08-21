@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from videobox_core_engine.settings import CapCutDraftExportConfig, TTSEngineConfig, WhisperSTTConfig
+from videobox_core_engine.settings import CapCutDraftExportConfig, ImageGenerationConfig, TTSEngineConfig, WhisperSTTConfig
 from videobox_provider_interfaces.faster_whisper_stt import FasterWhisperSTTProvider
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider
 from videobox_storage.local_project_store import LocalProjectStore
@@ -60,4 +60,23 @@ def _build_tts_provider(config: TTSEngineConfig) -> Any | None:
     return ChatterboxTTSProvider(
         language=config.language,
         device="cuda" if config.chatterbox_use_gpu else "cpu",
+    )
+
+
+def _build_scene_image_provider(config: ImageGenerationConfig) -> Any | None:
+    """켜지 않았으면 아무것도 만들지 않는다.
+
+    켜지 않았는데 provider를 붙여 두면 화면은 "만들 수 있다"고 보이고 누르는 순간
+    실패한다. 켜진 것과 꺼진 것을 화면이 구분할 수 있어야 한다 (§10.14 2-C).
+    """
+    if not config.enabled:
+        return None
+    from videobox_provider_interfaces.comfyui_image_generation import (
+        ComfyUIHTTPTransport,
+        ComfyUIImageGenerationProvider,
+    )
+
+    return ComfyUIImageGenerationProvider(
+        transport=ComfyUIHTTPTransport(base_url=config.base_url),
+        config=config,
     )

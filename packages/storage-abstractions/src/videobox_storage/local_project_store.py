@@ -1547,6 +1547,43 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
             return None
 
     @staticmethod
+    def _pair_broll_with_segments(
+        *,
+        segments: list[dict[str, Any]],
+        playable_broll: list[tuple[dict[str, Any], float]],
+    ) -> list[tuple[dict[str, Any], tuple[dict[str, Any], float]]]:
+        """어느 장면에 무엇을 붙일지 정한다.
+
+        촬영본은 어느 장면 것인지 아무도 적어 두지 않았으므로 **순서**가 유일한
+        규칙이었고, 그래서 오래도록 `zip(segments, playable_broll)` 한 줄이었다.
+
+        만든 그림은 다르다 -- 3번째 장면을 보고 만든 그림은 3번째 장면 것이다
+        (`scene_image_service.py`가 `scene_segment_id`를 적어 둔다). 짝이 정해진
+        것이 먼저 자리를 잡고, 나머지가 남은 자리를 앞에서부터 채운다.
+
+        짝이 있다고 적혀 있는데 그 장면이 사라졌으면(대본을 고치면 그렇게 된다)
+        **버리지 않고** 짝 없는 것과 똑같이 취급한다. 만든 것이 조용히 없어지면
+        owner는 어디로 갔는지 알 수 없다.
+        """
+        segment_index = {str(segment["segment_id"]): index for index, segment in enumerate(segments)}
+        pinned: dict[int, tuple[dict[str, Any], float]] = {}
+        unpinned: list[tuple[dict[str, Any], float]] = []
+        for item, duration_sec in playable_broll:
+            wanted = str((item.get("metadata") or {}).get("scene_segment_id") or "")
+            index = segment_index.get(wanted)
+            if index is None or index in pinned:
+                unpinned.append((item, duration_sec))
+                continue
+            pinned[index] = (item, duration_sec)
+        remaining = iter(unpinned)
+        paired: list[tuple[dict[str, Any], tuple[dict[str, Any], float]]] = []
+        for index, segment in enumerate(segments):
+            chosen = pinned.get(index) or next(remaining, None)
+            if chosen is not None:
+                paired.append((segment, chosen))
+        return paired
+
+    @staticmethod
     def _candidate_range_is_usable(candidate: dict[str, Any], duration_sec: float) -> bool:
         target_range = candidate.get("target_range") or {}
         try:
@@ -1661,7 +1698,9 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         playable_broll = [(item, self._probe_playable_broll_duration(project_id=project_id, asset=item)) for item in assets if item["asset_type"] == AssetType.BROLL_VIDEO.value]
         playable_broll = [(item, duration_sec) for item, duration_sec in playable_broll if duration_sec is not None]
         broll = []
-        for index, (segment, (item, duration_sec)) in enumerate(zip(segments, playable_broll)):
+        for index, (segment, (item, duration_sec)) in enumerate(
+            self._pair_broll_with_segments(segments=segments, playable_broll=playable_broll)
+        ):
             # Task 23: a ten-minute take is not usable from its first five
             # seconds, so pick a settled scene window when analysis found one.
             # Falls back to the head of the clip for unanalyzed footage.

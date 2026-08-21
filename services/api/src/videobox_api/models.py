@@ -382,6 +382,33 @@ class BrollAssetRegistrationRequest(AssetRegistrationRequest):
     tags: list[str] = Field(default_factory=list)
 
 
+class SceneImageCreateRequest(BaseModel):
+    """대본의 한 장면에 얹을 그림 하나. §10.14 조항 2-C."""
+
+    prompt: str = Field(min_length=1)
+    segment_id: str = Field(min_length=1)
+    # 세로가 기본이 되면 F-9가 재발한다 -- 롱폼까지 전부 세로로 렌더된 적이 있다.
+    vertical: bool = False
+    duration_sec: float = Field(default=5.0, gt=0)
+    gap_slot_id: str | None = None
+
+
+class SceneImageResponse(BaseModel):
+    image_asset_id: str
+    scene_asset_id: str
+    segment_id: str
+    title: str
+    prompt: str
+    seed: int
+    elapsed_sec: float | None = None
+    # 상업 이용이 열려 있는지. **모르면 `None`이다** -- 아는 척하지 않는다.
+    commercial_use_is_unrestricted: bool | None = None
+
+
+class SceneImageListResponse(BaseModel):
+    images: list[SceneImageResponse]
+
+
 class TTSCandidateRequest(BaseModel):
     segment_text: str = Field(min_length=1)
     voice_sample_asset_id: str = Field(min_length=1)

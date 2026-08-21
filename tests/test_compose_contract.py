@@ -326,3 +326,44 @@ def test_the_proxy_lets_through_every_upload_the_api_says_it_accepts() -> None:
             f"{relative} caps bodies at {allowed} bytes while the API accepts "
             f"{MAX_NARRATION_UPLOAD_BYTES}; uploads die at the proxy with no readable reason"
         )
+
+
+def test_the_proxy_waits_longer_than_the_app_spends_making_a_picture() -> None:
+    """그림 한 장이 22~24초다(2026-08-21 실측). nginx는 기본 60초에서 끊는다.
+
+    업로드 1MB 벽과 **정확히 같은 자리**다 -- 양쪽 설정은 각자 멀쩡한데 이음매를
+    잰 것이 없었다. 이 저장소의 테스트는 전부 FastAPI를 직접 부르고 프록시를 한
+    번도 안 지나므로, 여기서 두 값을 맞대 보지 않으면 아무도 안 본다.
+
+    끊기면 화면은 우리가 쓴 한국어 대신 nginx의 504 HTML을 받는다 -- owner에게는
+    제품이 고장 난 것으로 보인다.
+    """
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    declared = str(compose["services"]["videobox-workspace"]["environment"]["VIDEOBOX_IMAGE_TIMEOUT_SECONDS"])
+    app_seconds = int(re.search(r":-(\d+)}", declared).group(1))
+
+    config = (ROOT / "docker/workspace-nginx.conf").read_text(encoding="utf-8")
+    proxy = re.search(r"proxy_read_timeout\s+(\d+)s\s*;", config)
+    assert proxy is not None, "nginx가 기본 60초로 떨어진다 -- 그림 요청이 프록시에서 잘린다"
+    assert int(proxy.group(1)) > app_seconds, (
+        f"nginx는 {proxy.group(1)}초에 끊는데 앱은 {app_seconds}초까지 기다린다; "
+        "화면은 우리 문구 대신 프록시의 504를 본다"
+    )
+
+
+def test_the_image_path_may_only_reach_this_machine() -> None:
+    """§10.14 조항 2-C가 허용한 것은 이 기계의 ComfyUI 하나다.
+
+    compose 한 줄로 밖으로 나갈 수 있으면 그 조항은 문서에만 있는 것이 된다.
+    `ImageGenerationConfig.__post_init__`이 값을 거절하지만, **거절당하는 값이
+    기본값으로 적혀 있으면 컨테이너가 그냥 안 뜬다** -- 여기서 먼저 잡는다.
+    """
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    environment = compose["services"]["videobox-workspace"]["environment"]
+
+    assert environment["VIDEOBOX_IMAGE_GENERATION_BASE_URL"] == (
+        "${VIDEOBOX_IMAGE_GENERATION_BASE_URL:-http://host.docker.internal:8188}"
+    )
+    # 2-B와 같은 성격의 host bridge다. 컨테이너 안의 127.0.0.1은 컨테이너라서
+    # loopback 기본값으로는 아무 데도 닿지 않는다.
+    assert "host.docker.internal" in environment["VIDEOBOX_LOCAL_RUNTIME_BASE_URL"]

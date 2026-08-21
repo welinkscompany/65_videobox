@@ -24,7 +24,7 @@ from videobox_api.orchestration import (
     build_local_only_runtime_service,
 )
 from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService
-from videobox_api.provider_factories import _build_pycapcut_exporter, _build_stt_provider, _build_tts_provider
+from videobox_api.provider_factories import _build_pycapcut_exporter, _build_scene_image_provider, _build_stt_provider, _build_tts_provider
 from videobox_api.response_normalizers import (
     _build_preflight_review_prediction,
     _build_targeted_segments,
@@ -51,6 +51,8 @@ from videobox_api.routers.hermes_conversation import build_hermes_conversation_r
 from videobox_api.routers.hermes_operations import build_hermes_operations_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
+from videobox_api.routers.scene_images import build_scene_images_router
+from videobox_core_engine.scene_image_service import SceneImageService
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
 from videobox_api.routers.footage_organizer import build_footage_organizer_router
@@ -82,6 +84,7 @@ from videobox_core_engine.settings import (
     DEFAULT_PROJECTS_ROOT,
     AutoCutConfig,
     CapCutDraftExportConfig,
+    ImageGenerationConfig,
     LocalOpenAICompatibleRuntimeConfig,
     TTSEngineConfig,
     WhisperSTTConfig,
@@ -89,6 +92,7 @@ from videobox_core_engine.settings import (
     resolve_capcut_draft_export_config,
     resolve_database_url,
     resolve_enable_local_media_analysis,
+    resolve_image_generation_config,
     resolve_container_snapshot_root,
     resolve_local_runtime_config,
     resolve_media_inbox_library_root,
@@ -794,6 +798,8 @@ def create_app(
     whisper_stt_config: WhisperSTTConfig | None = None,
     capcut_draft_export_config: CapCutDraftExportConfig | None = None,
     tts_engine_config: TTSEngineConfig | None = None,
+    image_generation_config: ImageGenerationConfig | None = None,
+    scene_image_provider=None,
     capcut_handoff_service=None,
     local_only_runtime_service_factory=None,
     stt_provider=None,
@@ -932,6 +938,10 @@ def create_app(
         capcut_draft_export_config or resolve_capcut_draft_export_config()
     )
     resolved_tts_engine_config = tts_engine_config or TTSEngineConfig()
+    resolved_image_generation_config = image_generation_config or resolve_image_generation_config()
+    resolved_scene_image_provider = scene_image_provider or _build_scene_image_provider(
+        resolved_image_generation_config
+    )
     _music_library_search, _music_project_asset = _build_music_library_hooks(
         library_store=resolved_media_library_store, project_store=store, app=app
     )
@@ -1030,6 +1040,14 @@ def create_app(
     app.state.whisper_stt_config = resolved_whisper_stt_config
     app.state.capcut_draft_export_config = resolved_capcut_draft_export_config
     app.state.tts_engine_config = resolved_tts_engine_config
+    app.state.image_generation_config = resolved_image_generation_config
+    # 켜지 않았으면 `None`이다. 라우터가 그것을 "꺼져 있다"로 답하고, 화면은
+    # 꺼진 것과 고장 난 것을 구분할 수 있다 (§10.14 2-C).
+    app.state.scene_image_service = (
+        SceneImageService(store=store, provider=resolved_scene_image_provider)
+        if resolved_scene_image_provider is not None
+        else None
+    )
     app.state.build_local_only_runtime_service = build_local_only_runtime_service
     app.state.local_only_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
@@ -1237,6 +1255,7 @@ def create_app(
         )
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
+    app.include_router(build_scene_images_router(store))
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
     app.include_router(build_output_variants_router(store))
