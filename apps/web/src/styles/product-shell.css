@@ -1,5 +1,8 @@
 body:has(.vb-product-shell) { margin: 0; }
-.vb-product-shell { min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; flex-direction: column; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); }
+/* 띠 높이를 값 하나로 둔다. 편집판이 `100svh`에서 이걸 빼서 제 높이를 잡는데,
+   좁은 화면에서 띠가 두 줄이 되면 숫자를 박아 둔 쪽이 어긋난다 -- 실제로 375px에서
+   페이지가 32px 밀려났다(2026-08-21 재서 확인). */
+.vb-product-shell { --vb-top-bar-h: 4.25rem; min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; flex-direction: column; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); }
 [data-vb-desktop-shell] { min-width:0; box-sizing:border-box; overflow-x:hidden; }
 @media (min-width: 1024px) { [data-vb-desktop-shell] { min-width:1280px; min-height:800px; height:100vh; overflow:hidden; } }
 .vb-product-main { min-width:0; min-height:0; flex:1; overflow:hidden; }.vb-product-content { width:100%; max-width:1200px; min-height:0; overflow-y:auto; margin: 0 auto; padding: var(--vb-space-7) clamp(var(--vb-space-4),3vw,var(--vb-space-8)); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }
@@ -143,6 +146,12 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-top-bar__menu-list a { display:flex; min-height:40px; align-items:center; gap: var(--vb-space-2); border:1px solid transparent; border-radius:.55rem; padding: var(--vb-space-2) var(--vb-space-3); color:var(--vb-text); text-decoration:none; font:inherit; }
 .vb-top-bar__menu-list a:hover, .vb-top-bar__menu-list a:focus-visible { border-color:var(--vb-accent-border); background:var(--vb-accent-bg); color:var(--vb-accent); }
 .vb-top-bar__menu-list [data-slot=button] { justify-content:flex-start; }
-/* 좁은 화면에서는 띠가 한 줄에 다 못 들어간다. 지우는 대신 글자만 접는다. */
-@media (max-width: 767px) { .vb-top-bar { gap: var(--vb-space-2); padding: var(--vb-space-2); }
-  .vb-top-bar__brand span, .vb-top-bar__note { display:none; } }
+/* 좁은 화면에서는 띠가 한 줄에 다 못 들어간다. 지우는 대신 글자를 접고 단계를
+   제 줄로 내린다. 한 줄에 밀어 넣었더니 375px에서 단계 칸이 **32px로 눌려**
+   네 단추가 사실상 못 누르는 상태가 됐다(2026-08-21 브라우저에서 재서 확인).
+   기둥 시절에는 이 폭에서 Sheet가 그 일을 했으므로, 여기서 잃으면 안 된다. */
+@media (max-width: 767px) { .vb-product-shell { --vb-top-bar-h: 6.25rem; }
+  .vb-top-bar { flex-wrap:wrap; gap: var(--vb-space-2); padding: var(--vb-space-2); }
+  .vb-top-bar__brand span, .vb-top-bar__note { display:none; }
+  .vb-top-bar__project [data-slot=button] { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+  .vb-top-bar__stages { order:1; flex:1 0 100%; } }
