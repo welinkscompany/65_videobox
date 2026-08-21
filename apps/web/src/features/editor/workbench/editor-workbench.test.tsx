@@ -711,3 +711,56 @@ describe("EditorWorkbench 되돌리기 단축키", () => {
     expect(onUndo).not.toHaveBeenCalled();
   });
 });
+
+describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
+  // owner가 사무실에서 편집 화면을 보고 "완전 캡컷과 다른데?"라고 했고, 캡처를
+  // 놓고 세어 보니 이유가 넷이었다. 배경(1)·빈 미리보기(3)·밋밋한 클립(4)은
+  // 닫혔고 **툴바(2)만 남아 있었다** — `큰 주황 알약 단추 여덟 개가 위에 줄지어
+  // 있음. 캡컷 툴바는 작은 회색 아이콘`.
+  //
+  // 채운 주황은 이 저장소에서 **강조**를 뜻한다(승인 기록: 활성 메뉴, 선택된 항목,
+  // 주요 단추). 도구 여덟 개가 전부 그 색이면 강조가 강조를 못 한다.
+
+  function toolbarButtons(): HTMLElement[] {
+    // 화면에 `banner`가 둘이라(제품 껍데기와 작업판) 툴바로 좁힌다.
+    const toolbar = document.querySelector(".vb-editor-workbench__toolbar");
+    if (!toolbar) throw new Error("편집 툴바를 찾지 못했다");
+    return Array.from(toolbar.querySelectorAll("button"));
+  }
+
+  it("도구 단추는 조용하다 — 채운 주황은 열린 도크만 가져간다", async () => {
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    const filled = toolbarButtons()
+      .filter((button) => button.className.includes("bg-primary"))
+      .map((button) => button.textContent);
+
+    // 넓은 화면에서 왼쪽 재료 열은 기본으로 펴져 있다(owner 승인 2026-08-17).
+    // 그 하나만 강조를 가져가고, 나머지 일곱 개는 조용하다.
+    expect(filled).toEqual(["자산과 대본"]);
+  });
+
+  it("열려 있는 도크만 강조를 가져간다 — 그것이 '선택된 항목'이다", async () => {
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    const materials = screen.getByRole("button", { name: "자산과 대본" });
+
+    // 넓은 화면에서는 왼쪽 재료 열이 기본으로 펴져 있다(owner 승인 2026-08-17).
+    expect(materials.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(materials);
+    expect(screen.getByRole("button", { name: "자산과 대본" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("이름은 그대로 읽힌다 — 아이콘만 남기지 않는다", async () => {
+    // 아이콘만 두면 캡컷을 안 써 본 사람은 무엇인지 알 수 없고, 읽어 주는 도구도
+    // 잃는다. 작게 만드는 것과 이름을 없애는 것은 다른 일이다.
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    for (const name of ["실행 취소", "다시 실행", "나누기", "앞과 붙이기", "빼기", "다음 장면에도", "자산과 대본", "유진과 편집 항목"]) {
+      expect(screen.getByRole("button", { name })).toBeVisible();
+    }
+  });
+});

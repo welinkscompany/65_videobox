@@ -1,6 +1,8 @@
 import { type CSSProperties, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api, type OutputVariant, type OutputVariantPatch } from "../../../api";
+import { ChevronsLeftRight, Copy, PanelLeft, PanelRight, Redo2, Scissors, Trash2, Undo2 } from "lucide-react";
+
 import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
 import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
@@ -348,15 +350,17 @@ function EditorWorkbenchInstance({
   // 잠긴 단추는 마우스 이벤트를 받지 않아 자기 title을 못 띄운다. 감싸는 자리에
   // 걸어야 **왜 잠겼는지**가 보인다 -- 이유 없이 회색인 단추는 고장으로 읽힌다.
   cutToolsRef.current = cutTools;
-  const cutButton = (tool: typeof cutTools.split) => (
+  const cutButton = (tool: typeof cutTools.split, Icon: typeof Scissors) => (
     <span title={tool.hint} className="vb-cut-tool">
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
+        size="sm"
         aria-description={tool.hint}
         disabled={!tool.enabled || isSavingTimeline || !onInspectorAction}
         onClick={() => { if (tool.action) void onInspectorAction?.(tool.action); }}
       >
+        <Icon aria-hidden="true" />
         {tool.label}
       </Button>
     </span>
@@ -487,7 +491,18 @@ function EditorWorkbenchInstance({
     void onVariantPatch(serverVariant, { resolve_conflicts: { [field]: decision } });
   };
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)} style={ui.timelineRem === null ? undefined : ({ "--vb-timeline-height": `${ui.timelineRem}rem` } as CSSProperties)}>
-    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div><Button type="button" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}>실행 취소</Button><Button type="button" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}>다시 실행</Button>{cutButton(cutTools.split)}{cutButton(cutTools.join)}{cutButton(cutTools.drop)}{cutButton(cutTools.copyToNext)}<Button ref={leftTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}>자산과 대본</Button><Button ref={rightTriggerRef} type="button" onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}>유진과 편집 항목</Button></div></header>
+    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div>
+      {/* 승인 기록 2026-08-20 항목 2: 큰 주황 알약 여덟 개가 줄지어 있던 자리다.
+          채운 주황은 이 저장소에서 **강조**를 뜻하므로(활성 메뉴·선택된 항목·주요 단추)
+          도구가 전부 그 색이면 강조가 강조를 못 한다. 도구는 조용한 회색으로 내리고,
+          강조는 **지금 열려 있는 도크**만 가져간다. 이름은 지우지 않는다 -- 아이콘만
+          두면 캡컷을 안 써 본 사람은 무엇인지 알 수 없다. */}
+      <Button type="button" variant="ghost" size="sm" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" />실행 취소</Button>
+      <Button type="button" variant="ghost" size="sm" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" />다시 실행</Button>
+      {cutButton(cutTools.split, Scissors)}{cutButton(cutTools.join, ChevronsLeftRight)}{cutButton(cutTools.drop, Trash2)}{cutButton(cutTools.copyToNext, Copy)}
+      <Button ref={leftTriggerRef} type="button" size="sm" variant={leftVisible ? "default" : "ghost"} aria-pressed={leftVisible} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />자산과 대본</Button>
+      <Button ref={rightTriggerRef} type="button" size="sm" variant={rightVisible ? "default" : "ghost"} aria-pressed={rightVisible} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />유진과 편집 항목</Button>
+    </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}
