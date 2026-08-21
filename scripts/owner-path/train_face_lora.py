@@ -28,6 +28,21 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+# **먼저 자리를 확인하라. 설정을 만지기 전에 이것부터다.**
+#
+# 2026-08-22에 두 번 실패했고 둘 다 원인이 같았다 -- 자리가 없었다.
+#   1차: GPU 메모리 부족(74분)  2차: 4시간 초과(offloading으로 억지로 밀어 넣음)
+#
+# 그때 실측: GPU 사용률 6%인데 **VRAM 29.2/32.6GB**, 시스템 **RAM 56.9/61.6GB**.
+# LM Studio 하나가 VRAM 29GB와 RAM 25GB를 동시에 물고 있었다. 모델이 올라만
+# 있고 놀아도 자리는 그대로 차지한다 -- **사용률과 점유는 다른 값이다.**
+#
+# 나는 사진 크기와 학습 설정만 두 번 만졌다. 원인은 거기가 아니었다.
+#
+#     nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv
+#
+# 여유가 20GB 아래면 **LM Studio에서 모델을 내리고** 시작하라. 그동안 유진 대화·
+# 대본 쓰기·B-roll 분석이 멈춘다(끝나면 다시 올리면 된다).
 BASE = "http://127.0.0.1:8188"
 PHOTOS = Path(r"D:\AI_Workspace_louis_office_50\20_project\65_videobox-project\drive-sync\내 얼굴 사진")
 #: ComfyUI input 아래의 폴더 이름. `LoadImageDataSetFromFolder`가 이 이름으로 읽는다.
@@ -119,7 +134,7 @@ def graph() -> dict:
             #   3) 그래도면 사진을 768px로 줄이고, 마지막에 offloading을 켠다.
             #
             # 시간을 재서 남겨라. 지금 4시간 상한(`main`의 while)도 근거 없는 값이다.
-            "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": True,
+            "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": False,
             "existing_lora": "[None]", "bucket_mode": False, "bypass_mode": False}},
         "7": {"class_type": "SaveLoRA", "inputs": {
             "lora": ["6", 0], "prefix": f"loras/{LORA_NAME}", "steps": STEPS}},
