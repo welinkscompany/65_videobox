@@ -72,10 +72,20 @@ class _RefusingProvider:
         raise ComfyUIProviderError("ComfyUI local resource is unavailable.", "blocked")
 
 
-def _service(tmp_path: Path, provider: object | None = None) -> tuple[SceneImageService, LocalProjectStore, str]:
+class _PassThroughWriter:
+    """한국어를 영어 묘사로 바꾸는 자리. 여기서는 그 번역 품질이 아니라 **자산 쪽**을
+    재므로, 유진이 답했다는 사실만 흉내 내고 내용은 그대로 둔다."""
+
+    def write(self, *, project_id: str, line: str, vertical: bool) -> str:
+        return f"an illustration of: {line[:40]}, cinematic"
+
+
+def _service(
+    tmp_path: Path, provider: object | None = None, *, writer: object | None = _PassThroughWriter(),
+) -> tuple[SceneImageService, LocalProjectStore, str]:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="그림 만들기")
-    service = SceneImageService(store=store, provider=provider or _StubProvider())
+    service = SceneImageService(store=store, provider=provider or _StubProvider(), prompt_writer=writer)
     return service, store, project.project_id
 
 
@@ -180,3 +190,90 @@ def test_an_empty_prompt_is_refused_before_the_gpu_is_woken_up(tmp_path: Path) -
 
     assert exc.value.code == "invalid"
     assert provider.requests == []
+
+
+class _KoreanBlindProvider(_StubProvider):
+    """그림 모델은 한국어를 **거절하지 않는다.** 아무 그림이나 그럴듯하게 내놓는다."""
+
+
+def test_a_korean_line_never_reaches_the_image_model_unchanged(tmp_path: Path) -> None:
+    """2026-08-21 실측. 같은 씨앗(606386459)·같은 설정으로 두 번 만들었다.
+
+    `자막은 따로, 음악도 따로 붙입니다` -> **픽셀아트 당나귀 두 마리**
+    같은 뜻의 영어 묘사 -> 실제로 그 장면
+    (`artifacts/scene-image-check/korean.png`, `english.png`)
+
+    배관만 보면 다 되는 것처럼 보이는 자리다 -- 자산도 만들어지고 장면도 채워진다.
+    owner만 24초 뒤에 당나귀를 본다.
+    """
+    class _Writer:
+        def write(self, *, project_id: str, line: str, vertical: bool) -> str:
+            return "a desk with two screens, one showing subtitles and one showing a waveform, cinematic, 16:9"
+
+    provider = _KoreanBlindProvider()
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="한국어 대본")
+    service = SceneImageService(store=store, provider=provider, prompt_writer=_Writer())
+
+    result = service.generate_scene_image(
+        project_id=project.project_id, prompt="자막은 따로, 음악도 따로 붙입니다", segment_id="script-2",
+    )
+
+    assert "당나귀" not in provider.requests[0].prompt
+    assert provider.requests[0].prompt.startswith("a desk with two screens")
+    # owner가 쓴 줄과 실제로 들어간 말을 **둘 다** 남긴다. 엉뚱한 그림이 나왔을 때
+    # 어느 쪽 문제인지 알 수 있어야 한다.
+    assert result["prompt"] == "자막은 따로, 음악도 따로 붙입니다"
+    assert result["image_prompt"].startswith("a desk with two screens")
+
+
+def test_english_the_owner_typed_is_sent_exactly_as_written(tmp_path: Path) -> None:
+    """사람이 쓴 것이 모델이 다시 쓴 것보다 낫다. 무엇보다 적은 그대로 나오기를 기대한다."""
+    class _Writer:
+        def write(self, **_kwargs: object) -> str:
+            raise AssertionError("영어는 다시 쓰지 않는다")
+
+    provider = _StubProvider()
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="영어 프롬프트")
+    service = SceneImageService(store=store, provider=provider, prompt_writer=_Writer())
+
+    service.generate_scene_image(
+        project_id=project.project_id, prompt="a quiet desk at dawn, cinematic", segment_id="script-1",
+    )
+
+    assert provider.requests[0].prompt == "a quiet desk at dawn, cinematic"
+
+
+def test_when_yujin_cannot_answer_it_refuses_instead_of_making_a_donkey(tmp_path: Path) -> None:
+    """조용히 틀린 그림을 만드는 것은 실패하는 것보다 나쁘다.
+
+    24초를 기다린 뒤 엉뚱한 그림을 받으면 owner는 무엇이 잘못됐는지 알 수 없다.
+    """
+    from videobox_core_engine.scene_image_prompt import SceneImagePromptUnavailable
+
+    class _Silent:
+        def write(self, **_kwargs: object) -> str:
+            raise SceneImagePromptUnavailable("scene_image_prompt_writer_unavailable")
+
+    provider = _StubProvider()
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="유진 없음")
+    service = SceneImageService(store=store, provider=provider, prompt_writer=_Silent())
+
+    with pytest.raises(SceneImageGenerationError) as exc:
+        service.generate_scene_image(project_id=project.project_id, prompt="해 뜨는 바다", segment_id="script-1")
+
+    assert exc.value.code == "blocked"
+    assert provider.requests == []
+    assert store.list_assets(project_id=project.project_id) == []
+
+
+def test_without_any_writer_a_korean_line_is_refused_before_the_gpu_wakes_up(tmp_path: Path) -> None:
+    service, store, project_id = _service(tmp_path, writer=None)
+
+    with pytest.raises(SceneImageGenerationError) as exc:
+        service.generate_scene_image(project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1")
+
+    assert exc.value.code == "invalid"
+    assert str(exc.value) == "scene_image_prompt_needs_english"

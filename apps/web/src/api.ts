@@ -42,7 +42,7 @@ export type DraftReadinessRequest = { brief_id: string; narration_choice: { kind
 export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio" };
 /** 만든 장면 그림. `commercial_use_is_unrestricted`가 `null`이면 **모른다**는 뜻이다 --
  *  아는 척하지 않는다(§10.14 2-C). */
-export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
+export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; image_prompt?: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
 export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
 export type MediaInboxAsset = { filename: string; size_bytes: number };
 export type MediaInboxImport = { asset_id: string; project_id: string; asset_type: string; storage_uri: string };

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from videobox_core_engine.scene_image_prompt import SceneImagePromptUnavailable, needs_rewriting
 from videobox_domain_models.assets import AssetType
 from videobox_provider_interfaces.visual_generation import SceneImageProvider, SceneImageRequest
 
@@ -64,6 +65,9 @@ class SceneImageGenerationError(Exception):
 class SceneImageService:
     store: Any
     provider: SceneImageProvider
+    #: 대본 한 줄을 그림 모델이 알아듣는 영어 묘사로 바꾼다. 없으면 한국어 요청을
+    #: **거절한다** -- 그대로 넣으면 24초 뒤에 엉뚱한 그림이 나온다(§scene_image_prompt).
+    prompt_writer: Any | None = None
     ffmpeg_binary: str = "ffmpeg"
 
     def generate_scene_image(
@@ -82,12 +86,13 @@ class SceneImageService:
         if not (segment_id or "").strip():
             raise SceneImageGenerationError("scene_image_segment_missing", "invalid")
         width, height = _PORTRAIT if vertical else _LANDSCAPE
+        image_prompt = self._image_prompt(project_id=project_id, written=cleaned, vertical=vertical)
         # 씨앗을 고정하면 "다시 만들기"가 같은 그림을 돌려주는 -- 아무것도 안 하는
         # 버튼이 된다. 매번 새로 뽑고, 어느 씨앗이었는지는 자산에 적어 둔다.
         seed = secrets.randbelow(2**31)
 
         generated = self._generate(
-            SceneImageRequest(prompt=cleaned, width=width, height=height, seed=seed)
+            SceneImageRequest(prompt=image_prompt, width=width, height=height, seed=seed)
         )
 
         scene_number = _scene_number(segment_id)
@@ -96,6 +101,9 @@ class SceneImageService:
             "scene_segment_id": segment_id,
             "gap_slot_id": gap_slot_id,
             "prompt": cleaned,
+            # owner가 쓴 줄과 **실제로 그림 모델에 들어간 말**은 다를 수 있다.
+            # 둘 다 남긴다 -- 엉뚱한 그림이 나왔을 때 어느 쪽 문제인지 알 수 있다.
+            "image_prompt": image_prompt,
             "generated_by": generated.provider_name,
             "seed": seed,
             "model_name": generated.metadata.get("model_name"),
@@ -148,10 +156,29 @@ class SceneImageService:
             "segment_id": segment_id,
             "title": title,
             "prompt": cleaned,
+            "image_prompt": image_prompt,
             "seed": seed,
             "elapsed_sec": generated.metadata.get("elapsed_sec"),
             "commercial_use_is_unrestricted": generated.metadata.get("commercial_use_is_unrestricted"),
         }
+
+    def _image_prompt(self, *, project_id: str, written: str, vertical: bool) -> str:
+        """그림 모델에 실제로 들어갈 말.
+
+        영어로 적어 준 것은 그대로 쓴다 -- 사람이 쓴 것이 모델이 다시 쓴 것보다 낫고,
+        무엇보다 owner는 적은 그대로 나오기를 기대한다. 한글이 섞여 있으면 유진이
+        영어 묘사로 다시 쓴다. **닿지 않으면 거절한다** -- 한국어를 그대로 넣으면
+        거절당하는 게 아니라 전혀 다른 그림이 나오고(2026-08-21 실측: 픽셀아트
+        당나귀), owner는 24초를 기다린 뒤에야 그것을 본다.
+        """
+        if not needs_rewriting(written):
+            return written
+        if self.prompt_writer is None:
+            raise SceneImageGenerationError("scene_image_prompt_needs_english", "invalid")
+        try:
+            return self.prompt_writer.write(project_id=project_id, line=written, vertical=vertical)
+        except SceneImagePromptUnavailable as exc:
+            raise SceneImageGenerationError(str(exc), "blocked") from exc
 
     def _generate(self, request: SceneImageRequest) -> Any:
         try:

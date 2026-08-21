@@ -13,6 +13,9 @@ class LLMTaskType(str, Enum):
     ALIGNMENT_REVIEW = "alignment_review"
     OPERATOR_COPY = "operator_copy"
     YUJIN_CONVERSATION = "yujin_conversation"
+    # 대본 한 줄을 그림 만드는 프로그램이 알아듣는 영어 묘사로 바꾼다.
+    # 한국어를 그대로 넣으면 전혀 다른 그림이 나온다 -- 2026-08-21 실측.
+    SCENE_IMAGE_PROMPT = "scene_image_prompt"
 
 
 @dataclass(slots=True, frozen=True)

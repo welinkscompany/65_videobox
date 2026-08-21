@@ -23,6 +23,11 @@ const messageByDetail: Record<string, string> = {
   scene_image_generation_blocked: "그림 만드는 프로그램에 닿지 않았어요. 켜져 있는지 확인한 뒤 다시 눌러 주세요.",
   scene_image_generation_timeout: "그림이 제 시간에 안 나왔어요. 잠시 뒤 다시 눌러 주세요.",
   scene_image_prompt_empty: "어떤 그림을 원하는지 먼저 적어 주세요.",
+  // 그림 만드는 쪽은 영어로만 알아듣는다. 한국어를 그대로 넣으면 거절하는 게 아니라
+  // **전혀 다른 그림**이 나온다 -- 그래서 유진이 먼저 영어로 옮겨 적는다.
+  scene_image_prompt_writer_unavailable: "유진이 지금 답하지 못해서 그림 설명을 옮기지 못했어요. 잠시 뒤 다시 눌러 주세요.",
+  scene_image_prompt_still_korean: "그림 설명을 옮기지 못했어요. 잠시 뒤 다시 눌러 주세요.",
+  scene_image_prompt_needs_english: "그림 설명을 옮길 수 없어요. 잠시 뒤 다시 눌러 주세요.",
   scene_image_ffmpeg_missing: "그림을 장면에 넣지 못했어요. 다시 눌러 주세요.",
 };
 

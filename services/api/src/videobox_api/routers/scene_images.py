@@ -101,6 +101,7 @@ def _as_scene_image(asset: dict[str, Any], scene_asset_id: str) -> SceneImageRes
         image_asset_id=str(asset["asset_id"]),
         scene_asset_id=scene_asset_id,
         segment_id=str(metadata.get("scene_segment_id") or ""),
+        image_prompt=str(metadata.get("image_prompt") or metadata.get("prompt") or ""),
         title=str(metadata.get("title") or "장면 그림"),
         prompt=str(metadata.get("prompt") or ""),
         seed=int(metadata.get("seed") or 0),

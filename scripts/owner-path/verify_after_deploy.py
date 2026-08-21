@@ -101,7 +101,38 @@ def yujin_sees_the_project() -> None:
     check("유진이 열어 놓은 영상을 보는가", knows, text[:160])
 
 
-for step in (health, upload_ceiling, failure_reason_reaches_the_screen, yujin_sees_the_project, memory_round_trip):
+def a_picture_gets_made_for_a_scene() -> None:
+    """그림 한 장이 실제로 나오고 **프록시를 지나 돌아오는가.**
+
+    이 요청은 22~24초 걸린다. nginx 기본 60초는 그 위로 여유가 크지 않고, 이
+    저장소의 테스트는 프록시를 한 번도 안 지난다 -- 업로드 1MB 벽이 그렇게 숨어
+    있었다. 그래서 여기서는 반드시 5173(프록시)으로 부른다.
+    """
+    code, made = call("POST", f"/api/projects/{PROJECT}/scene-images", {
+        "prompt": "a calm empty desk at dawn, soft window light, cinematic, 16:9",
+        "segment_id": "script-1", "duration_sec": 4.0,
+    }, timeout=330.0)
+    if code != 201:
+        check("장면 그림이 만들어지는가", False, f"{code} {json.dumps(made, ensure_ascii=False)[:200]}")
+        return
+    check("장면 그림이 만들어지는가", True,
+          f"{made.get('elapsed_sec')}초, 상업이용열림={made.get('commercial_use_is_unrestricted')}")
+
+    # 만든 것을 화면이 다시 볼 수 있어야 한다. 넣는 길만 있고 보는 길이 없으면
+    # 잘못 만든 것을 영영 모른다. (`call`은 JSON만 읽으므로 여기만 직접 연다.)
+    import urllib.request
+
+    with urllib.request.urlopen(
+        f"{BASE}/api/projects/{PROJECT}/assets/{made['image_asset_id']}/content", timeout=60
+    ) as response:
+        head = response.read(8)
+    check("만든 그림을 화면이 다시 볼 수 있는가", head[:4] == bytes([0x89, 0x50, 0x4E, 0x47]), repr(head))
+
+
+
+
+for step in (health, upload_ceiling, failure_reason_reaches_the_screen, yujin_sees_the_project,
+             a_picture_gets_made_for_a_scene, memory_round_trip):
     try:
         step()
     except Exception as error:  # noqa: BLE001 - 한 자리가 막혀도 나머지는 잰다

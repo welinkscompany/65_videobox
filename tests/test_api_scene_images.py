@@ -61,8 +61,19 @@ class _BlockedProvider:
         raise ComfyUIProviderError("ComfyUI local resource is unavailable.", "blocked")
 
 
+class _Writer:
+    """유진이 대본 한 줄을 영어 묘사로 다시 쓰는 자리. 여기서는 번역 품질이 아니라
+    **문이 열리는가**를 재므로 답했다는 사실만 흉내 낸다."""
+
+    def write(self, *, project_id: str, line: str, vertical: bool) -> str:
+        return f"an illustration of: {line[:40]}, cinematic"
+
+
 def _client(tmp_path: Path, provider: object | None = None) -> tuple[TestClient, str]:
-    client = TestClient(create_app(projects_root=tmp_path / "data", scene_image_provider=provider))
+    client = TestClient(create_app(
+        projects_root=tmp_path / "data", scene_image_provider=provider,
+        scene_image_prompt_writer=_Writer(),
+    ))
     project_id = client.post("/api/projects", json={"name": "그림"}).json()["project_id"]
     return client, project_id
 
@@ -81,7 +92,12 @@ def test_it_makes_a_picture_for_one_scene_and_says_what_it_made(tmp_path: Path) 
     assert body["segment_id"] == "script-3"
     assert body["title"] == "3번째 장면 그림"
     assert body["image_asset_id"] and body["scene_asset_id"]
-    assert provider.prompts == ["해 뜨는 바다"]
+
+    # owner가 쓴 줄과 실제로 그림 모델에 들어간 말은 다르다. 둘 다 돌려준다 --
+    # 엉뚱한 그림이 나왔을 때 어느 쪽 문제인지 알 수 있어야 한다.
+    assert body["prompt"] == "해 뜨는 바다"
+    assert body["image_prompt"].startswith("an illustration of")
+    assert provider.prompts == [body["image_prompt"]]
 
     listed = client.get(f"/api/projects/{project_id}/scene-images")
     assert listed.status_code == 200

@@ -398,7 +398,10 @@ class SceneImageResponse(BaseModel):
     scene_asset_id: str
     segment_id: str
     title: str
+    #: owner가 쓴 줄. 한국어일 수 있다.
     prompt: str
+    #: 실제로 그림 모델에 들어간 영어 묘사. 둘이 다를 수 있어 따로 남긴다.
+    image_prompt: str = ""
     seed: int
     elapsed_sec: float | None = None
     # 상업 이용이 열려 있는지. **모르면 `None`이다** -- 아는 척하지 않는다.

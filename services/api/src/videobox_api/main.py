@@ -52,6 +52,7 @@ from videobox_api.routers.hermes_operations import build_hermes_operations_route
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.scene_images import build_scene_images_router
+from videobox_core_engine.scene_image_prompt import SceneImagePromptWriter
 from videobox_core_engine.scene_image_service import SceneImageService
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
@@ -800,6 +801,7 @@ def create_app(
     tts_engine_config: TTSEngineConfig | None = None,
     image_generation_config: ImageGenerationConfig | None = None,
     scene_image_provider=None,
+    scene_image_prompt_writer=None,
     capcut_handoff_service=None,
     local_only_runtime_service_factory=None,
     stt_provider=None,
@@ -1044,7 +1046,14 @@ def create_app(
     # 켜지 않았으면 `None`이다. 라우터가 그것을 "꺼져 있다"로 답하고, 화면은
     # 꺼진 것과 고장 난 것을 구분할 수 있다 (§10.14 2-C).
     app.state.scene_image_service = (
-        SceneImageService(store=store, provider=resolved_scene_image_provider)
+        SceneImageService(
+            store=store,
+            provider=resolved_scene_image_provider,
+            # 유진이 대본 한 줄을 영어 묘사로 다시 쓴다. 없으면 한국어 요청을
+            # 거절한다 -- 그대로 넣으면 24초 뒤에 엉뚱한 그림이 나온다.
+            prompt_writer=scene_image_prompt_writer
+            or SceneImagePromptWriter(runtime_service=runtime_service),
+        )
         if resolved_scene_image_provider is not None
         else None
     )
