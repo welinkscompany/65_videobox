@@ -26,6 +26,7 @@ import { VariantConflictPanel } from "../variants/VariantConflictPanel";
 import { VariantSelector } from "../variants/VariantSelector";
 import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
 import { VariantServerControls } from "../variants/VariantServerControls";
+import { usePublishShellCanvas } from "../../shell/shellCanvas";
 
 export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: number) {
   const pixels = Number(size.inPixels);
@@ -131,6 +132,10 @@ function EditorWorkbenchInstance({
   });
   const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
   const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
+  // 위 띠의 화면 비율 자리는 **이 줄이 채운다**(`features/shell/shellCanvas.tsx`).
+  // 껍데기가 직접 물어보게 하지 않는 이유는 그쪽 주석에 적었다. 편집기를 떠나면
+  // 저절로 지워지므로, 다른 화면에서 남은 값이 보일 일은 없다.
+  usePublishShellCanvas(view.output);
   // **타임라인 높이는 편집자가 정한다.** 컷을 딸 때는 타임라인을 키우고 화면을 볼
   // 때는 미리보기를 키우는 것이 편집자가 실제로 하는 일이다. 좌우 도크는 이미
   // 끌어서 폭을 바꾸는데 위아래만 내가 CSS로 정해 놓고 있었다.
