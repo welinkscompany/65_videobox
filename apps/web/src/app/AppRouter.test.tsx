@@ -84,6 +84,29 @@ describe("AppRouter URL ownership", () => {
     expect(document.querySelector(".vb-product-header strong")).toHaveTextContent(title!);
   });
 
+  // 진짜 백엔드에 e2e를 붙여 처음 돌려 보고 나왔다(2026-08-20). 프로젝트가 하나도
+  // 없으면 `/projects`가 제품 껍데기 **밖으로** 빠져나가 옛 `ProjectOnboarding`을
+  // 그렸다 -- 메뉴도 없고, 스타일도 없고, **창작자에게 파일 경로를 손으로 적으라고**
+  // 했다. 이 제품이 벗어난 바로 그 방식이다. 새 기계에서 처음 켠 사람이 보는 첫
+  // 화면이 그것이었고, 지금까지 아무도 못 본 이유는 모든 e2e가 자료가 심어진
+  // 상태에서만 돌았기 때문이다.
+  it("첫 설치에서도 제품 화면으로 맞이하고, 파일 경로를 묻지 않는다", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    // 껍데기 안이어야 한다 -- 여기가 어디인지, 어디로 갈 수 있는지 보여야 한다.
+    const menus = await screen.findAllByRole("navigation", { name: "전체 메뉴", hidden: true });
+    expect(within(menus[0]).getByRole("link", { name: "내 라이브러리", hidden: true })).toBeInTheDocument();
+
+    // 시작하는 길은 평소와 **같은 길**이다. 첫 사용자에게만 다른 문을 만들지 않는다.
+    expect(await screen.findByRole("button", { name: "새 프로젝트 만들기" })).toBeInTheDocument();
+
+    // 파일 경로를 손으로 적으라고 하지 않는다.
+    expect(screen.queryByLabelText(/파일이 있는 곳/)).toBeNull();
+    expect(screen.queryByText("프로젝트 만들고 소스 등록")).toBeNull();
+  });
+
   it("mounts the library workspace and keeps footage copy free of internal plan names", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const libraryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/library"] }));
@@ -525,16 +548,6 @@ describe("AppRouter URL ownership", () => {
     expect(screen.queryByTestId("settings-page")).not.toBeInTheDocument();
   });
 
-  it("shows onboarding at /projects when the catalog is empty", async () => {
-    vi.spyOn(api, "listProjects").mockResolvedValue([]);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
-
-    render(<AppRouter router={router} />);
-
-    await screen.findByText("영상 만들기 시작");
-    expect(router.state.location.pathname).toBe("/projects");
-  });
-
   it("redirects the prior editing URL to the canonical workbench without mounting legacy workspace data", async () => {
     const projects = [{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }];
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
@@ -635,41 +648,20 @@ describe("AppRouter URL ownership", () => {
   });
 
   it("refreshes the catalog and moves a newly created project to its create route", async () => {
+    // 예전에는 옛 시작 화면을 거쳤다. 그 화면이 사라졌으므로 **평소 쓰는 길**로 잰다 --
+    // 첫 사용자에게만 다른 문을 만들지 않는 것이 이번 변경의 요점이다.
     const created = { project_id: "project_new", name: "New", status: "active", root_storage_uri: "local://new" };
     const listProjects = vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
     vi.spyOn(api, "createProject").mockResolvedValue(created);
-    vi.spyOn(api, "registerNarrationAudio").mockResolvedValue({ asset_id: "narration" } as never);
-    vi.spyOn(api, "registerScriptDocument").mockResolvedValue({ asset_id: "script" } as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
-    fireEvent.change(await screen.findByLabelText("프로젝트 이름"), { target: { value: "New" } });
-    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "local://narration" } });
-    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "local://script" } });
-    fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
+    fireEvent.click(await screen.findByRole("button", { name: "새 프로젝트 만들기" }));
+    fireEvent.change(await screen.findByLabelText("새 프로젝트 이름"), { target: { value: "New" } });
+    fireEvent.click(screen.getByRole("button", { name: "만들기" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_new/create"));
     expect(listProjects).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole("heading", { name: "영상 만들기 시작" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "프로젝트 만들고 소스 등록" })).toBeNull();
-  });
-
-  it("keeps onboarding at /projects when either required source registration fails", async () => {
-    const created = { project_id: "project_retry", name: "Retry", status: "active", root_storage_uri: "local://retry" };
-    const listProjects = vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
-    vi.spyOn(api, "createProject").mockResolvedValue(created);
-    vi.spyOn(api, "registerNarrationAudio").mockRejectedValue(new Error("missing narration"));
-    vi.spyOn(api, "registerScriptDocument").mockResolvedValue({ asset_id: "script" } as never);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
-    render(<AppRouter router={router} />);
-    fireEvent.change(await screen.findByLabelText("프로젝트 이름"), { target: { value: "Retry" } });
-    fireEvent.change(screen.getByLabelText("내레이션 파일이 있는 곳"), { target: { value: "local://missing" } });
-    fireEvent.change(screen.getByLabelText("대본 파일이 있는 곳"), { target: { value: "local://script" } });
-    fireEvent.click(screen.getByRole("button", { name: "프로젝트 만들고 소스 등록" }));
-
-    await screen.findByRole("button", { name: "내레이션 다시 등록" });
-    expect(router.state.location.pathname).toBe("/projects");
-    expect(listProjects).toHaveBeenCalledTimes(1);
   });
 
   it("lets the owner start a second project from a non-empty catalog", async () => {

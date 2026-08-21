@@ -58,7 +58,6 @@ const uiFiles = discoverUiFiles();
 
 const previouslyCoveredUiFiles = [
   "ErrorBoundary.tsx",
-  "ProjectOnboarding.tsx",
   "app/AppRouter.tsx",
   "app/OutputsPage.tsx",
   "app/ProductShell.tsx",

@@ -67,6 +67,7 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog-card img { width:100%; height:9rem; object-fit:cover; border-radius:.6rem; background:color-mix(in srgb, var(--vb-text) 6%, transparent); }
 .vb-catalog-card > [data-slot=button], .vb-catalog-card > a { margin-top: auto; }
 .vb-catalog-card__finished { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); font-weight:500; }
+.vb-catalog-empty { margin: var(--vb-space-4) 0 0; color:var(--vb-muted); font-size: var(--vb-text-md); }
 /* 카드 제목은 편집기로 가는 링크인데 규칙이 없어서 브라우저 기본 파란 밑줄이
    나왔다 -- 승인 팔레트에 없는 색이다. 색을 바꾸는 게 아니라, 팔레트가
    닿지 않던 자리에 입힌다. */

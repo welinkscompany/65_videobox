@@ -287,7 +287,7 @@ describe("Task 22 canonical production owners", () => {
       {
         capability: "project create/select and source ingest",
         ownerSource: router, owner: /section === "create" \|\| section === "plan"[\s\S]{0,360}<CreationInterview\b/,
-        componentEvidence: [["project-onboarding.test.tsx", "registers narration plus script from local paths"], ["features/creation/CreationInterview.test.tsx", "uploads a supported creator script"]],
+        componentEvidence: [["app/AppRouter.test.tsx", "첫 설치에서도 제품 화면으로 맞이하고, 파일 경로를 묻지 않는다"], ["features/creation/CreationInterview.test.tsx", "uploads a supported creator script"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "ready-assets approval uses returned IDs"],
       },
       {
@@ -353,7 +353,9 @@ describe("Task 22 canonical production owners", () => {
         ownerSource: router,
         owner: /section === "create" \|\| section === "plan"[\s\S]{0,360}<CreationInterview\b/,
         componentEvidence: [
-          ["project-onboarding.test.tsx", "keeps the created project and retries only the failed narration ingest"],
+          // 옛 시작 화면(파일 경로를 손으로 적게 하던 것)은 2026-08-21에 없앴다.
+          // 프로젝트를 만드는 일은 이제 목록 화면 하나가 맡는다.
+          ["app/AppRouter.test.tsx", "refreshes the catalog and moves a newly created project to its create route"],
           ["features/creation/CreationInterview.test.tsx", "keeps a failed durable answer on the same question with an actionable retry"],
           ["app/AppRouter.test.tsx", "does not let a late A workspace response overwrite the currently routed B workspace"],
         ],

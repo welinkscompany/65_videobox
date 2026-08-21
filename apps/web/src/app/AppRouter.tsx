@@ -14,7 +14,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, type Project, type ProjectWorkspaceSummary } from "../api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { ProjectOnboarding } from "../ProjectOnboarding";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
@@ -171,10 +170,6 @@ function ProjectsPage() {
     await navigate({ to: resolveWorkspaceLocation(project.project_id, "create") });
   }
 
-  if (projects.length === 0) {
-    return <ProjectOnboarding onProjectCreated={goToNewProject} />;
-  }
-
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newProjectName.trim()) {
@@ -226,6 +221,13 @@ function ProjectsPage() {
       ) : (
         <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
       )}
+      {/* 프로젝트가 하나도 없을 때 격자만 비워 두면 화면이 고장 난 것처럼 보인다.
+          예전에는 이 경우 제품 껍데기 밖의 옛 화면으로 빠져나가 **파일 경로를 손으로
+          적으라고** 했다(2026-08-20, 진짜 백엔드에 e2e를 붙여 처음 돌려 보고 나왔다).
+          첫 사용자에게 다른 문을 만들지 않는다 -- 시작하는 길은 위의 같은 단추다. */}
+      {projects.length === 0 ? (
+        <p className="vb-catalog-empty">아직 만든 영상이 없어요. 위에서 새 프로젝트를 시작하면 여기에 모아 드릴게요.</p>
+      ) : null}
       <div className="vb-catalog-grid">
         {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} onRename={(id, name) => renameProjectAndRefresh(router, id, name)} />)}
       </div>
