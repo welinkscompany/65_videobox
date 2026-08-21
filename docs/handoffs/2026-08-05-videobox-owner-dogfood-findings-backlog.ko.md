@@ -791,33 +791,3 @@ owner 결정: "가로로 기본값으로 해야지. 다른 일반 캡컷이나 �
 1~4번을 끝낸 뒤 곧바로 설계에 들어가는 것을 권한다.
 
 `F-8`은 개발 항목에서 빠졌다. 이미 구현돼 있고 `D-4` 인증만 남았기 때문이다.
-
-## 열려 있는 것 — PowerShell 껍데기 시험 50개 (2026-08-22)
-
-**단정하지 마라. 아직 원인을 모른다.**
-
-네 파일이 실패한다 — `test_owner_ready_script.py`, `test_start_hermes_yujin_script.py`,
-`test_hermes_yujin_profile_distribution.py`, `test_smoke_hermes_yujin_creator_flow_script.py`.
-
-**확인된 것:**
-
-- 에이전트 worktree에서 54개 실패 → "`.venv`가 없어서"라는 진단이 나왔다. **틀렸다.**
-  venv를 넣으니 오히려 73개로 늘었고, `.venv`가 있는 **개발선에서도 50개가 실패**했다.
-- 그 네 파일은 전부 **PowerShell·소켓·docker를 부르는 껍데기 시험**이다. 셋은 앱 코드를
-  아예 import하지 않는다.
-- 그중 하나(`test_validate_only_rejects_low_entropy_service_token...`)는 **전체에서는
-  실패하고 단독으로는 통과**했다.
-
-**아직 모르는 것:** 진짜 회귀인지, 부하·포트 다툼인지. 개발선 실행(49분)도 얼굴 LoRA
-학습과 다른 에이전트가 같은 기계를 쓰는 동안 돌았다. 이 저장소는 이미
-`videobox-full-pytest-must-run-alone` 교훈을 갖고 있다.
-
-**다음 사람이 할 일 — 이 순서로:**
-
-1. **기계를 비우고** 그 네 파일만 단독으로 돌린다. 그때도 실패하면 진짜다.
-2. 진짜라면 `git stash`나 `HEAD~N`으로 **어느 커밋부터 실패하는지** 찾아라.
-   오늘 들어간 것 중 이 파일들이 읽을 만한 것은 `ProductShell.tsx` 해시 핀과
-   `_new_project_id` 정도다.
-3. 부하 탓이면 그 사실을 여기 적고 닫아라 — 다음 사람이 또 파지 않게.
-
-**이 상태로 "초록"이라고 말하지 마라.** 오늘 아무도 깨끗한 전체 실행을 얻지 못했다.
