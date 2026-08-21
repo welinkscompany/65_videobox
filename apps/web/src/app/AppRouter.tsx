@@ -198,12 +198,8 @@ function ProjectsPage() {
       projectId=""
       projects={projects}
       section="home"
-      archive={archive}
       onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
       onOpenSettings={() => void navigate({ to: "/settings/general" })}
-      onArchiveProject={(id) => archiveProjectAndRefresh(router, id)}
-      onDeleteProjectPermanently={(id) => deleteProjectPermanentlyAndRefresh(router, id)}
-      onRenameProject={(id, name) => renameProjectAndRefresh(router, id, name)}
     >
     <main data-testid="projects-catalog" className="vb-catalog">
       <p className="vb-eyebrow">VideoBox</p>
@@ -284,18 +280,12 @@ function ProjectsPage() {
 function GlobalShell({ section, children }: { section: "library" | "footage"; children: ReactNode }) {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
-  const router = useRouter();
-  const archive = useArchivedProjects(router);
   return <ProductShell
     projectId=""
     projects={projects}
     section={section}
-    archive={archive}
     onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
     onOpenSettings={() => void navigate({ to: "/settings/general" })}
-    onArchiveProject={(id) => archiveProjectAndRefresh(router, id)}
-    onDeleteProjectPermanently={(id) => deleteProjectPermanentlyAndRefresh(router, id)}
-    onRenameProject={(id, name) => renameProjectAndRefresh(router, id, name)}
   >{children}</ProductShell>;
 }
 
@@ -502,11 +492,6 @@ function WorkspacePage() {
   const { projectId, section } = workspaceRoute.useParams();
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
-  const router = useRouter();
-  const handleArchiveProject = (id: string) => archiveProjectAndRefresh(router, id);
-  const handleDeleteProjectPermanently = (id: string) => deleteProjectPermanentlyAndRefresh(router, id);
-  const handleRenameProject = (id: string, name: string) => renameProjectAndRefresh(router, id, name);
-  const archive = useArchivedProjects(router);
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     session_id?: unknown;
     segment_id?: unknown;
@@ -543,12 +528,12 @@ function WorkspacePage() {
     search: { project_id: projectId } as never,
   });
   if (section === "home") {
-    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
+    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
   if (section === "create" || section === "plan") {
-    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
+    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <CreationInterview projectId={projectId} />
     </ProductShell>;
   }
@@ -557,15 +542,15 @@ function WorkspacePage() {
       ? (routeSearch as { return_to: string }).return_to
       : null;
     const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
-    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
+    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
+    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
       <MediaWorkspacePage projectId={projectId} />
     </ProductShell>;
   }
   // 검토와 출력은 한 단계다. 두 주소를 모두 살려 둔 채 같은 화면을 그린다 --
   // 한쪽을 리다이렉트로 접으면 그 주소로 바로 들어오던 경로가 끊긴다.
   if (section === "outputs" || section === "output" || section === "timeline" || section === "review") {
-    return <ProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
+    return <ProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
       <ReviewAndOutputPage
         projectId={projectId}
         onOpenEditor={() => navigateTo(projectId, "editing")}
@@ -578,17 +563,17 @@ function WorkspacePage() {
     </ProductShell>;
   }
   if ((section === "editor" || section === "edit") && rawEditingSessionId !== null && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
   if ((section === "editor" || section === "edit") && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
     </ProductShell>;
   }
   if (section === "editor" || section === "edit") {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive} forceCollapsed>
+    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </ProductShell>;
   }
@@ -669,11 +654,6 @@ function SettingsRoutePage() {
   const { section } = settingsRoute.useParams();
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
-  const router = useRouter();
-  const handleArchiveProject = (id: string) => archiveProjectAndRefresh(router, id);
-  const handleDeleteProjectPermanently = (id: string) => deleteProjectPermanentlyAndRefresh(router, id);
-  const handleRenameProject = (id: string, name: string) => renameProjectAndRefresh(router, id, name);
-  const archive = useArchivedProjects(router);
   const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as {
     project_id?: unknown;
   };
@@ -684,7 +664,7 @@ function SettingsRoutePage() {
   const projectId = requestedProjectId || resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) || projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;
   const settingsLocation = (nextSection: typeof validSections[number]) => `/settings/${nextSection}?project_id=${encodeURIComponent(projectId)}`;
-  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })} onArchiveProject={handleArchiveProject} onDeleteProjectPermanently={handleDeleteProjectPermanently} onRenameProject={handleRenameProject} archive={archive}>
+  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })}>
     <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: settingsLocation(nextSection) })} />
   </ProductShell>;
 }

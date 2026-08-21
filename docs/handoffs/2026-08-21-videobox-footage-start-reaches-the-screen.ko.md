@@ -156,21 +156,12 @@ owner가 2026-08-21에 왼쪽 기둥을 없애고 위 띠 하나로 가기로 �
    `ProductShell.tsx`를 건드렸으므로 `docs/oss/editor-ui-source-map.json`의
    `normalized_sha256` 두 줄도 함께 옮겼다.
 
-2. **이제 바로 이것을 하면 된다.** `ProductShell`의 `<Sidebar>…</Sidebar>`를 들어내고
-   `TopBar`를 끼운다. **기둥을 지워도 이제 잃는 것이 없다** — 관리 기능은 전부
-   `프로젝트` 화면에 있고, 기둥 쪽 markup은 그냥 지우면 된다(`useProjectManagement()`는
-   목록 화면이 계속 쓰므로 남긴다).
+2. ~~**이제 바로 이것을 하면 된다.** `ProductShell`의 `<Sidebar>…</Sidebar>`를 들어내고
+   `TopBar`를 끼운다.~~ **닫혔다 (2026-08-21).** 아래 `### 기둥을 들어냈다` 절 참고.
+3. ~~시험 16개를 고친다.~~ **닫혔다 (2026-08-21).** 같은 절에 어느 것을 왜 지웠는지 적었다.
 
-   기둥 쪽 시험 7개(`ProductShell.test.tsx`의 보관·삭제·보관함)는 **지금도 초록이다** —
-   기둥이 살아 있는 동안 양쪽 다 돌게 두었기 때문이다. 기둥을 지울 때 이 7개는
-   같은 것을 `프로젝트` 화면에서 지키는 시험 5개(`AppRouter.test.tsx`에 새로 넣었다)가
-   이미 있으므로 **지워도 잃는 것이 없다.** 값이 아니라 무엇을 지키는지로 판단하라.
-3. 시험 16개를 고친다. 다섯은 기둥이 없어지면서 **의미 자체가 사라지는 것**이라
-   지운다(접힘 상태, 아이콘 전용 이름, 가져온 부품 영어 문구, 접기 띠 키보드 접근).
-   나머지는 지키려는 것이 그대로이므로 **위 띠를 가리키도록** 다시 쓴다.
-
-**되돌린 것은 `ProductShell.tsx` 하나뿐이다.** `TopBar.tsx`, `top-bar.test.tsx`,
-`.vb-top-bar*` CSS는 그대로 있고 시험 7개가 초록이다. 끼우는 일만 남았다.
+**되돌린 것은 `ProductShell.tsx` 하나뿐이었다.** `TopBar.tsx`, `top-bar.test.tsx`,
+`.vb-top-bar*` CSS는 그대로 남아 있었고, 이번 턴에 그 위에 끼웠다.
 
 ### 관리 옮기기에서 확인하지 못한 것 (2026-08-21)
 
@@ -188,3 +179,137 @@ owner가 2026-08-21에 왼쪽 기둥을 없애고 위 띠 하나로 가기로 �
   판단했을 뿐 돌려서 확인하지는 않았다.**
 - 곁다리로 본 것: 프로젝트 이름을 한글로 지으면 `project_id`가 한글을 통째로
   버린다. `관리화면 점검 A` → `a`. 이번 변경과 무관한 옛 동작이라 건드리지 않았다.
+
+### 기둥을 들어냈다 — 이제 위 띠 하나다 (2026-08-21)
+
+`ProductShell.tsx`에서 `<Sidebar>…</Sidebar>`와 `SidebarProvider`/`SidebarInset`을
+통째로 들어내고 `<TopBar>`를 놓았다. **머리말(`.vb-product-header`)도 함께 없앴다** —
+프로젝트 이름·작업 상태가 띠와 머리말 두 곳에 겹쳤고, 띠 위에 머리말을 또 얹으면
+세로 7.5rem을 먹어 "기둥을 없애 화면을 넓힌다"는 뜻이 사라진다. 작업 상태 다이얼로그는
+`TopBar`의 `children`으로 들어갔다.
+
+**기둥에 있던 것이 어디서 지켜지는지 — 하나씩 짚었다.**
+
+| 기둥에 있던 것 | 지금 있는 곳 | 지키는 시험 |
+|---|---|---|
+| 단계 넷(이야기·재료·편집·확인과 내보내기) | 띠 | `top-bar.test.tsx`, `ProductShell.test.tsx`(단계 넷·아이콘) |
+| 프로젝트 전환 | 띠(지금 것만 보이고 나머지는 눌러야 나옴) | `top-bar.test.tsx`, `ProductShell.test.tsx` |
+| 전체 목적지 넷 | 띠의 접힌 메뉴 | `top-bar.test.tsx`, `ProductShell.test.tsx`, `AppRouter.test.tsx`(세 화면 모두) |
+| 이름 바꾸기·보관·영구 삭제·보관함·재시도 안내 | `프로젝트` 목록 화면 | `AppRouter.test.tsx` 6개 |
+| 브랜드(`VideoBox`) | 띠 왼쪽 끝 | (시험 없음, 예전에도 없었음) |
+| `이 기기에서 작업` 표시 | 띠 오른쪽(`children`) | (시험 없음, 예전에도 없었음) |
+| 머리말의 **화면 이름** | 띠 — 단계가 없는 화면에서만 | `top-bar.test.tsx` 2개(새로), `AppRouter.test.tsx` |
+
+**화면 이름은 일부러 조건부다.** 단계 단추가 켜져 있으면 그것이 이미 "여기가 어디인지"를
+말한다. 옆에 이름을 또 적으면 owner를 막았던 그 문제 — 화면에 그럴듯한 것이 하나 더
+늘어나는 것 — 를 되풀이한다. 그래서 `내 라이브러리`·`촬영본 정리`·`설정`·`프로젝트`처럼
+**단계로 표시되지 않는 화면에서만** 나온다. 이 넷 중 앞의 둘에는 보이는 제목이 아예
+없어서, 이게 없으면 화면 이름이 통째로 사라진다.
+
+**지운 시험 12개 — 왜 지웠는지.**
+
+- *의미 자체가 사라지는 것 (5개)*: 접힘 상태(`data-state="collapsed"`), 접었을 때의
+  아이콘 전용 이름, 가져온 부품의 영어 문구(`Toggle Sidebar`), `작업실 접기` 키보드
+  접근, 사이드바 구획 라벨(세 구획이 세로로 쌓일 때만 뜻이 있었다). 기둥이 없으면
+  지킬 대상이 없다.
+- *`프로젝트` 화면 시험이 같은 것을 지키는 것 (7개)*: 보관·이름 바꾸기·삭제 2단
+  확인·실패 재시도·보관함 열기/되돌리기·빈 보관함. 전부 `AppRouter.test.tsx`에
+  대응이 있다. **다만 하나는 정확히 일치하지 않는다** — 되돌리기가 실패했을 때의
+  안내는 목록 화면 쪽에 따로 없고, 보관 실패 시험이 같은
+  `useProjectManagement().run` 경로를 지난다. 규칙이 한 곳(`projectManagement.ts`)에
+  있어서 실질적으로 덮이지만, 별개 시험은 아니다.
+
+**다시 쓴 시험**: 전체 목적지 넷과 단계 넷의 구분, 프로젝트가 없을 때 단계를 안
+보여 주는 것, 단계 아이콘, 프로젝트 전환, 홈이 행동만 담는 것,
+`AppRouter.test.tsx`의 세 화면 메뉴·화면 이름·설정 진입.
+
+**CSS도 같이 정리했다.** `.vb-product-sidebar`, `.vb-global-nav`, `.vb-project-switcher`,
+`.vb-product-nav`, `.vb-sidebar-*`, `.vb-mobile-menu`, `.vb-collapse`,
+`.vb-product-header`, 좁은 화면 Sheet 규칙을 지웠다(전부 없어진 마크업만 가리킨다).
+대신 `.vb-top-bar__brand/__screen/__note/__menu/__menu-list` 규칙을 넣었다 —
+**`__menu`와 `__menu-list`는 규칙이 아예 없었다.** 그대로 뒀으면 전체 메뉴를 열 때
+목록이 띠 안으로 밀고 들어가 띠가 통째로 벌어졌을 것이다.
+
+`components/ui/sidebar.tsx`는 **지우지 않았다.** 출처 핀이 걸려 있고
+(`docs/oss/editor-ui-source-map.json`), 지우면 provenance 게이트가 깨진다. 지금은
+아무도 import하지 않는다.
+
+**남긴 판단 하나 (owner 몫):** `ProductShell.tsx`의 머리말 주석과 source map이
+아직 `app-sidebar.tsx`를 출처로 적고 있다. 그 코드는 이제 이 파일에 없다. 저작권
+표기를 줄이는 일이라 임의로 지우지 않았다.
+
+**확인한 것과 못 한 것**은 아래 `### 위 띠 끼우기 검증` 절에 적었다.
+
+### 위 띠 끼우기 검증 (2026-08-21)
+
+`scripts/owner-ready.ps1 -Mode Start -Rebuild -WithYujinMemory`로 다시 띄우고
+**브라우저에서 실제로 밟았다.** 전 항목 PASS.
+
+**확인한 것 (1440x900):**
+
+- 띠에서 단계 넷을 눌러 각 화면이 실제로 떴다 — `이야기`→`/create`(기획 화면),
+  `재료`→`/media`(자산 화면), `편집`→`/editor`(편집 작업판이 실제로 그려짐),
+  `확인과 내보내기`→`/review`(검토·출력). 누를 때마다 그 단추만
+  `aria-current="page"`가 됐다.
+- 프로젝트 전환: 지금 것만 보이고, 누르면 나머지 15개가 뜨고, 고르면 그 프로젝트의
+  편집기로 갔다. 고른 뒤 목록이 닫혔다.
+- 전체 메뉴 넷이 전부 살아 있다. `내 라이브러리`→`/library`, `촬영본 정리`→`/footage`,
+  `설정`→`/settings/general`(누르면 메뉴가 닫힌다), `프로젝트`→`/projects`.
+- 화면 이름: `/projects`에서 `홈`, `/library`에서 `내 라이브러리`, `/footage`에서
+  `촬영본 정리`, `/settings`에서 `설정`. 단계가 켜진 화면에서는 **나오지 않는다**(중복 없음).
+- 작업 상태 다이얼로그가 띠에서 열리고 유진 연결 상태·작업 목록이 그대로 나온다.
+- 레이아웃: 띠 69px, 본문이 바로 아래 69px에서 시작, 가로 넘침 없음
+  (`bodyScrollWidth == innerWidth`), 편집 작업판 767px에 세로 스크롤 없음.
+- 전체 메뉴 목록이 `position:absolute`로 띠 **아래에 걸린다** — 띠를 밀지 않는다.
+
+**재다가 고친 것 두 개 (이 턴에 같이 넣었다).**
+
+1. **375px에서 단계 칸이 32px로 눌렸다.** 띠를 한 줄로 두면 브랜드·프로젝트·작업
+   상태·메뉴가 폭을 다 먹고, `flex:1 1 auto`인 단계 칸만 줄어든다. 네 단추가
+   사실상 못 누르는 상태였다. 기둥 시절에는 이 폭에서 Sheet가 그 일을 했으므로
+   **여기서 잃으면 안 된다.** 좁은 화면에서 띠를 두 줄로 접고 단계에 제 줄을 줬다.
+2. **편집판 높이가 어긋났다.** `calc(100svh - 4.25rem)`의 `4.25rem`은 옛 머리말
+   높이였고, 띠가 두 줄이 되는 좁은 화면에서 페이지가 32px 밀려났다. 띠 높이를
+   `--vb-top-bar-h`로 빼서 두 파일이 같은 값을 쓰게 했다.
+   고친 뒤 375px에서도 `bodyScrollHeight == innerHeight`다.
+
+**확인하지 못한 것:**
+
+- **생김새는 못 봤다.** Browser pane이 화면에 떠 있지 않아 스크린샷이
+  `Screenshot timed out ... not compositing frames`로 실패한다. 구조·문구·크기·위치는
+  접근성 트리와 `getBoundingClientRect`로 실제로 쟀지만, **"보기에 캡컷 같은가"는
+  owner가 봐야 안다.** 특히 띠의 여백·정렬·브랜드 크기, 좁은 화면에서 두 줄이 된
+  띠의 모양.
+  (`resize_window`는 이번에는 **동작했다** — 앞 인계의 "안 바뀐다"는 더 이상 맞지 않는다.
+  뷰포트를 1440x900·375x812로 실제로 바꿔 가며 쟀다.)
+- **e2e 스냅샷은 다시 만들지 않았다.** 이번에는 확실히 낡았다 — 껍데기가 통째로
+  바뀌었다. `apps/web/e2e/snapshots/README.ko.md`가 **사람이 차이를 검토한 뒤에만**
+  다시 쓰라고 못박고 있어서 손대지 않았다. 다섯 폭(1920/1440/1280/768/390) 전부
+  owner 확인이 필요하다(`2026-08-15` 절차).
+- **`product-shell.spec.mjs`는 기둥 부분만 고쳤다.** 그 파일에는 **이번 변경과 무관한
+  옛 assertion이 남아 있다** — `다음 작업`, `영상 만들기 시작`,
+  `프로젝트 만들고 소스 등록`, `자산 준비하기`. 전부 `apps/web/src`에 더는 없는
+  문구다(`StartChooser`가 들어오면서 없어졌다). 이 e2e는 **내 변경 이전에 이미**
+  통과할 수 없는 상태였다. 범위 밖이라 건드리지 않았다.
+
+### 에이전트 worktree에서 backend 전체 pytest를 돌리면 42개가 깨진다 (환경 문제)
+
+전체 pytest를 단독으로 돌렸더니 `3873 passed, 42 failed`였다. **42개 전부
+PowerShell 스크립트를 부르는 시험이고, 원인은 이 worktree에 `.venv`가 없는 것이다.**
+
+- `test_start_hermes_yujin_script.py` 31개
+- `test_hermes_yujin_profile_distribution.py` 5개
+- `test_smoke_hermes_yujin_creator_flow_script.py` 6개
+
+스크립트들이 `<repositoryRoot>/.venv/Scripts/python.exe`를 못박고 있어서
+(`scripts/start-hermes-yujin.ps1:110`, `scripts/verify-hermes-yujin-profile.ps1:33`),
+없으면 `... runtime is unavailable`로 죽는다. **재서 확인했다** — worktree에 빈
+`.venv`를 만들고 `pyyaml`·`cryptography==45.0.6`을 넣자 **42개가 5개로 줄었고**,
+남은 5개도 `ModuleNotFoundError: No module named 'httpx'`였다. 확인 뒤 그 `.venv`는
+지웠다.
+
+**즉 프런트 변경과 무관하다.** 프런트 소스를 실제로 읽는 backend 시험
+10개 파일(`test_editor_ui_source_provenance.py` 포함) **247개는 전부 통과**했다.
+
+다음 사람에게: 이 worktree에서 backend 전체를 돌릴 거면 `.venv`를 먼저 만들고
+`requirements-dev.txt`를 설치해라. 안 하면 초록이어야 할 42개가 빨갛게 나온다.
