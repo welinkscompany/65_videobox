@@ -356,3 +356,32 @@ describe("유진에게 알려 주는 자산 취향", () => {
       .toHaveAttribute("aria-pressed", "false");
   });
 });
+
+describe("자산 내역 길이", () => {
+  // owner: "자산 내역에 스크롤이 엄청 길다니까.. 대체 이건 몇번 말해"
+  //
+  // 카드 한 장에 썸네일·제목·설명·태그·단추가 다 들어간다. 맞는 것을 전부 그리면
+  // 자산이 늘어나는 만큼 스크롤이 길어지고, 아래쪽은 아무도 못 본다.
+  function manyCards(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `broll:${index}`, kind: "broll" as const, assetId: `asset-${index}`,
+      label: `장면 영상 ${index}`, title: `촬영본 ${index}`, durationLabel: "4초",
+      status: "준비됨", audioPresence: "오디오 없음" as const, license: "프로젝트 로컬 B-roll",
+      canApply: true, previewUrl: `/api/x/${index}`, previewKind: "video" as const,
+      sourceMetadata: { tags: [], source: "", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+    }));
+  }
+
+  it("한 화면에서 훑을 만큼만 그리고, 나머지는 눌러서 편다", () => {
+    render(<EditorAssetBrowser cards={manyCards(30) as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
+
+    expect(screen.getAllByRole("button", { name: /촬영본 \d+ 적용/ }).length).toBeLessThanOrEqual(8);
+    expect(screen.getByRole("button", { name: "22개 더 보기" })).toBeVisible();
+  });
+
+  it("적을 때는 더 보기가 나오지 않는다", () => {
+    render(<EditorAssetBrowser cards={manyCards(3) as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /더 보기/ })).toBeNull();
+  });
+});

@@ -141,6 +141,9 @@ export function RightDock({
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [selectedInspectorTargetId, setSelectedInspectorTargetId] = useState<string | null>(null);
   const inspectorTargetIdentity = inspectorTargets.map((target) => target.id).join("|");
+  /** 한 번에 그리는 추천 카드 수. 왼쪽 자산 내역과 같은 기준이다. */
+  const CANDIDATE_PAGE = 4;
+  const [shownCandidates, setShownCandidates] = useState(CANDIDATE_PAGE);
   const [retryRemaining, setRetryRemaining] = useState(0);
   const historyRef = useRef<HTMLDivElement>(null);
   const composerContainerRef = useRef<HTMLDivElement>(null);
@@ -370,7 +373,11 @@ export function RightDock({
         <Button type="button" variant="outline" disabled={!activeCandidateIds.length} onClick={() => onSelectedCandidateIdsChange?.([])}>고른 추천 모두 끄기</Button>
       </div> : null}
       {recommendationCandidates.length ? <div role={allowsMultipleSelection ? "group" : "radiogroup"} aria-label="추천 후보">
-        {recommendationCandidates.map((candidate) => {
+        {/* owner: 오른쪽 도크도 스크롤이 길다. 유진 대화는 이미 14rem으로 묶여
+            있고, 길게 만드는 것은 이 추천 카드다 -- 한 장면에 13개까지 나오고
+            카드마다 이유·구간·단추가 붙는다. 왼쪽 자산 내역과 같은 방식으로
+            한 화면에서 훑을 만큼만 그리고 나머지는 눌러서 편다. */}
+        {recommendationCandidates.slice(0, shownCandidates).map((candidate) => {
           const candidateDeclaresActionable = candidate.actionable === undefined
             ? proposalIsReady
             : (
@@ -404,7 +411,7 @@ export function RightDock({
             {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" aria-label={`${candidateLabel(candidate)} ${previewVerb(candidate.sourceMediaKind)}`} onClick={() => onPreviewCandidate(candidate)}>{previewVerb(candidate.sourceMediaKind)}</Button> : null}
           </article>;
         })}
-      </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
+      {recommendationCandidates.length > shownCandidates ? <Button type="button" variant="outline" onClick={() => setShownCandidates((count) => count + CANDIDATE_PAGE)}>{`추천 ${recommendationCandidates.length - shownCandidates}개 더 보기`}</Button> : null}</div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
       {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>{activeCandidateIds.length > 1 ? `고른 추천 ${activeCandidateIds.length}개 적용` : "선택한 추천 적용"}</Button> : null}
     </section>
 

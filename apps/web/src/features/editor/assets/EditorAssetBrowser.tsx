@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -48,11 +48,26 @@ function targetLabel(target: EditorAssetTarget | null): string {
     : "적용할 내레이션 구간을 먼저 선택하세요.";
 }
 
+/** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
+const FIRST_PAGE = 8;
+
 export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId }: Props) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
   const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
-  const visibleCards = filterEditorAssets(cards, { type, query, orientation });
+  const matchingCards = filterEditorAssets(cards, { type, query, orientation });
+  // owner: "자산 내역에 스크롤이 엄청 길다니까."
+  //
+  // 카드 한 장에 썸네일·제목·설명·태그·단추가 다 들어간다. 맞는 것을 전부 그리면
+  // 자산이 늘어나는 만큼 스크롤이 길어지고, 아래쪽 카드는 아무도 못 본다.
+  // **찾는 것은 위의 검색과 필터가 하는 일이다** -- 목록은 한 화면에서 훑을 수 있는
+  // 만큼만 보여 주고 나머지는 눌러서 편다.
+  const [shown, setShown] = useState(FIRST_PAGE);
+  const visibleCards = matchingCards.slice(0, shown);
+  const hiddenCount = matchingCards.length - visibleCards.length;
+  // 검색·필터를 바꾸면 다시 처음부터 본다. 안 그러면 조건을 좁혔는데도 앞서 펼친
+  // 만큼 그대로 길게 남는다.
+  useEffect(() => { setShown(FIRST_PAGE); }, [type, query, orientation]);
   const taste = useDirectorPreferences(projectId);
   const tasteReady = Boolean(projectId) && taste.ready;
   const excludedCreators = taste.preferences.exclude_creator;
@@ -225,6 +240,11 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         </article>;
       })}
     </div>
+    {hiddenCount > 0 ? (
+      <Button type="button" variant="outline" className="vb-editor-assets__more" onClick={() => setShown((count) => count + FIRST_PAGE)}>
+        {`${hiddenCount}개 더 보기`}
+      </Button>
+    ) : null}
     {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 자산이 없어요.</p> : null}
   </section>;
 }
