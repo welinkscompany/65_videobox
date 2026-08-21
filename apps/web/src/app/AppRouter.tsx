@@ -20,6 +20,7 @@ import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
 import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
 import { FootageOrganizerPage } from "../features/footage/FootageOrganizerPage";
 import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
+import { useProjectManagement, type ProjectManagement } from "../features/projects/projectManagement";
 import { ReviewAndOutputPage } from "../features/review/ReviewAndOutputPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
 import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
@@ -159,6 +160,10 @@ function ProjectsPage() {
   const navigate = useNavigate();
   const router = useRouter();
   const archive = useArchivedProjects(router);
+  // 프로젝트 관리는 왼쪽 기둥이 아니라 **여기**에 산다(owner 결정 2026-08-21).
+  // 기둥은 곧 위 띠로 바뀌고, 띠는 고르는 것만 맡는다.
+  const management = useProjectManagement();
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -229,8 +234,39 @@ function ProjectsPage() {
         <p className="vb-catalog-empty">아직 만든 영상이 없어요. 위에서 새 프로젝트를 시작하면 여기에 모아 드릴게요.</p>
       ) : null}
       <div className="vb-catalog-grid">
-        {projects.map((project) => <ProjectCatalogCard key={project.project_id} project={project} onNavigateHref={(href) => void navigate({ href })} onRename={(id, name) => renameProjectAndRefresh(router, id, name)} />)}
+        {projects.map((project) => <ProjectCatalogCard
+          key={project.project_id}
+          project={project}
+          onNavigateHref={(href) => void navigate({ href })}
+          onRename={(id, name) => renameProjectAndRefresh(router, id, name)}
+          onArchive={(id) => archiveProjectAndRefresh(router, id)}
+          onDeletePermanently={(id) => deleteProjectPermanentlyAndRefresh(router, id)}
+          management={management}
+        />)}
       </div>
+      {/* 보관은 되돌릴 수 있어야 뜻이 있다. 예전에는 되돌리는 길이 왼쪽 기둥
+          안에만 있었는데, 그 기둥은 프로젝트를 연 뒤에만 나온다 -- 즉 **목록
+          화면에서는 보관함에 닿을 방법이 아예 없었다.** */}
+      <section className="vb-catalog-archive" aria-label="보관함">
+        {archiveOpen
+          ? <Button type="button" variant="ghost" onClick={() => setArchiveOpen(false)}>보관함 닫기</Button>
+          : <Button type="button" variant="ghost" onClick={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</Button>}
+        {archiveOpen ? <div className="vb-catalog-archive-list">
+          {archive.archivedProjects.length === 0
+            ? <p>보관한 프로젝트가 없어요.</p>
+            : archive.archivedProjects.map((archivedProject) => <div key={archivedProject.project_id} className="vb-catalog-archive-row">
+              <span>{archivedProject.name}</span>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={management.busyKey === `restore:${archivedProject.project_id}`}
+                aria-label={`${archivedProject.name} 되돌리기`}
+                onClick={() => void management.run(`restore:${archivedProject.project_id}`, () => archive.restore(archivedProject.project_id))}
+              >되돌리기</Button>
+            </div>)}
+        </div> : null}
+      </section>
+      {management.error ? <p className="vb-project-action-error" role="alert">{management.error}</p> : null}
     </main>
     </ProductShell>
   );
@@ -297,7 +333,7 @@ function projectStateLabel(summary: ProjectWorkspaceSummary): string {
   return summary.state === "blocked" ? byState.blocked : summary.state === "attention" ? byState.attention : byState.ready;
 }
 
-function ProjectCatalogCard({ project, onNavigateHref, onRename }: { project: Project; onNavigateHref?: (href: string) => void; onRename?: (projectId: string, name: string) => void | Promise<void> }) {
+function ProjectCatalogCard({ project, onNavigateHref, onRename, onArchive, onDeletePermanently, management }: { project: Project; onNavigateHref?: (href: string) => void; onRename?: (projectId: string, name: string) => void | Promise<void>; onArchive?: (projectId: string) => void | Promise<void>; onDeletePermanently?: (projectId: string) => void | Promise<void>; management?: ProjectManagement }) {
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
   const [summaryError, setSummaryError] = useState(false);
   const [requestNumber, setRequestNumber] = useState(0);
@@ -360,6 +396,62 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename }: { project: Pr
         onRename={onRename}
       /> : null}
     </> : null}
+    {/* 보관과 삭제는 한 줄에 묶는다. 카드의 아래쪽 단추들이 저마다
+        `margin-top:auto`를 가지면 flex가 빈자리를 나눠 가져 서로 멀어진다. */}
+    <div className="vb-catalog-card__manage">
+    {/* 보관은 확인 한 번. 카드가 사라지는 일이라 실수로 한 번 눌린 것과
+        정말로 하려는 것을 구분해야 한다. */}
+    {onArchive && management ? (
+      management.archiveConfirmId === project.project_id ? (
+        <Button
+          type="button"
+          variant="outline"
+          className="vb-catalog-card__archive"
+          disabled={management.busyKey === `archive:${project.project_id}`}
+          aria-label={`${summary.display_name} 보관 확인`}
+          onClick={() => { management.setArchiveConfirmId(null); void management.run(`archive:${project.project_id}`, () => onArchive(project.project_id)); }}
+        >보관 확인</Button>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          className="vb-catalog-card__archive"
+          aria-label={`${summary.display_name} 보관하기`}
+          onClick={() => management.setArchiveConfirmId(project.project_id)}
+        >보관하기</Button>
+      )
+    ) : null}
+    {/* 영구 삭제는 확인 두 번이고, 두 번이 같은 말을 하면 두 번인 의미가 없다.
+        첫 번째는 되돌릴 수 없다는 것을 말하고, 두 번째에서 실제로 지운다. */}
+    {onDeletePermanently && management ? (
+      management.deleteConfirm?.projectId === project.project_id && management.deleteConfirm.stage === 2 ? (
+        <Button
+          type="button"
+          variant="destructive"
+          className="vb-catalog-card__delete"
+          disabled={management.busyKey === `delete:${project.project_id}`}
+          aria-label={`${summary.display_name} 영구 삭제 · 한 번 더 확인할게요`}
+          onClick={() => { management.setDeleteConfirm(null); void management.run(`delete:${project.project_id}`, () => onDeletePermanently(project.project_id)); }}
+        >영구 삭제 · 한 번 더 확인할게요</Button>
+      ) : management.deleteConfirm?.projectId === project.project_id && management.deleteConfirm.stage === 1 ? (
+        <Button
+          type="button"
+          variant="destructive"
+          className="vb-catalog-card__delete"
+          aria-label={`${summary.display_name} 삭제 1차 확인 · 되돌릴 수 없어요`}
+          onClick={() => management.setDeleteConfirm({ projectId: project.project_id, stage: 2 })}
+        >삭제 1차 확인 · 되돌릴 수 없어요</Button>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          className="vb-catalog-card__delete"
+          aria-label={`${summary.display_name} 완전 삭제`}
+          onClick={() => management.setDeleteConfirm({ projectId: project.project_id, stage: 1 })}
+        >완전 삭제</Button>
+      )
+    ) : null}
+    </div>
   </article>;
 }
 

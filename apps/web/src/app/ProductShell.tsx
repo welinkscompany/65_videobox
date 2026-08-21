@@ -25,6 +25,7 @@ import { ConversationCleanup } from "../features/settings/ConversationCleanup";
 import { HomeYujinChat } from "../features/home/HomeYujinChat";
 import { StartChooser } from "../features/home/StartChooser";
 import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
+import { useProjectManagement } from "../features/projects/projectManagement";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 
 // 프로젝트에 매이지 않는 전역 목적지도 껍데기 안에서 그린다(owner 지적
@@ -63,18 +64,21 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   const [collapsed, setCollapsed] = useState(forceCollapsed);
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
-  const [archiveConfirmId, setArchiveConfirmId] = useState<string | null>(null);
   // 제목을 바꾸는 창은 메뉴 **밖**에서 그린다. 드롭다운 안에 두면 메뉴가 닫힐
   // 때 창까지 함께 사라져 첫 글자도 못 적는다.
   const [renameTargetId, setRenameTargetId] = useState<string | null>(null);
-  const [projectActionError, setProjectActionError] = useState<string | null>(null);
-  const [projectActionBusy, setProjectActionBusy] = useState<string | null>(null);
-  // Permanent delete needs two separate confirmations (owner decision,
-  // 2026-08-06) -- stage 1 warns it's irreversible, stage 2 asks once more
-  // before the actual call. Enforced again server-side (routers/projects.py
-  // requires ?confirm=true) so this UI gate isn't the only thing standing
-  // between a stray click and real data loss.
-  const [deleteConfirmStage, setDeleteConfirmStage] = useState<{ projectId: string; stage: 1 | 2 } | null>(null);
+  // 보관·영구 삭제·되돌리기의 규칙은 `프로젝트` 목록 화면과 **같은 것**을 쓴다
+  // (`features/projects/projectManagement.ts`). 확인을 몇 번 받는지 같은 규칙이
+  // 두 벌이면 반드시 어긋난다 -- 특히 이 기둥은 곧 위 띠로 바뀌면서 사라진다.
+  const {
+    error: projectActionError,
+    busyKey: projectActionBusy,
+    archiveConfirmId,
+    setArchiveConfirmId,
+    deleteConfirm: deleteConfirmStage,
+    setDeleteConfirm: setDeleteConfirmStage,
+    run: runProjectAction,
+  } = useProjectManagement();
   const previousForceCollapsed = useRef(forceCollapsed);
   const mobileTriggerRef = useRef<HTMLButtonElement>(null);
   if (forceCollapsed && !previousForceCollapsed.current) {
@@ -95,17 +99,6 @@ export function ProductShell({ projectId, projects, archive, section, onNavigate
   const setJobDialogOpenSafely = (open: boolean) => {
     if (!open && jobRecoveryBusy) return;
     setJobDialogOpen(open);
-  };
-  const runProjectAction = async (key: string, action: () => void | Promise<void>) => {
-    setProjectActionError(null);
-    setProjectActionBusy(key);
-    try {
-      await action();
-    } catch {
-      setProjectActionError("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
-    } finally {
-      setProjectActionBusy(null);
-    }
   };
   useEffect(() => { const restoreMobileTrigger = (event: KeyboardEvent) => { if (event.key === "Escape" && window.innerWidth < 768) queueMicrotask(() => mobileTriggerRef.current?.focus()); }; document.addEventListener("keydown", restoreMobileTrigger); return () => document.removeEventListener("keydown", restoreMobileTrigger); }, []);
   // These two settings used to write to localStorage and change nothing else,
