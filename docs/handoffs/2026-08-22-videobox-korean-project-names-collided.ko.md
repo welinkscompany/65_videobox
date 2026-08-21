@@ -157,10 +157,27 @@ workspace 이미지를 다시 만들어 **공유 스택을 갈아끼운다.** �
 
 ### 백엔드 pytest
 
-- 새 시험 파일 + 직접 영향받는 파일 40개 통과
+- 새 시험 파일 + 직접 영향받는 파일 **40개 통과**
   (`test_project_id_never_collides.py`, `test_domain_models.py`,
   `test_handoff_entry_point.py`, `test_project_rename.py`, `test_project_archive.py`)
-- 전체 pytest는 **단독으로** 돌렸다.
+
+**전체 pytest는 단독으로 돌리지 못했다. 이건 확인하지 못한 채로 남는다.**
+
+돌리려고 했는데 **다른 작업 둘이 이미 전체 pytest를 돌리고 있었다.** 프로세스를
+직접 확인한 결과다 — 하나는 `-q --tb=short`(내 명령에는 `--tb=short`가 없다),
+다른 하나는 `agent-a4f0a82fffa50322c` worktree의 venv에서 돌고 있었다. 셋이 같이
+도니 20분에 12%밖에 못 갔다. 규정이 단독을 요구하는데 **기계를 나 혼자 쓸 수가
+없었다.** 남의 실행은 죽이지 않았고, 내 것만 멈췄다.
+
+**다음 세션이 알아 둘 것:** 에이전트 여럿이 같이 돌면 "전체 pytest 단독"은 규정만으로는
+지켜지지 않는다. 돌리기 전에 `Get-CimInstance Win32_Process -Filter "Name='python.exe'"`로
+남이 돌리고 있는지 먼저 보는 편이 낫다. 안 보고 띄우면 서로를 느리게 만들고
+**둘 다 근거로 쓸 수 없는 값**이 나온다.
+
+다음 세션에서 기계가 한가할 때 `.venv\Scripts\python.exe -m pytest`를 단독으로
+한 번 돌려 주면 이 칸이 닫힌다. 다만 이번 변경이 건드리는 것은 문자열 하나를
+만드는 순수 함수 하나이고, 옛 모양을 그대로 박아 둔 곳은
+`tests/test_domain_models.py` 하나뿐이라(전체 grep으로 확인) 남은 위험은 작다고 본다.
 
 ## 안 한 것 / 확인하지 못한 것
 
