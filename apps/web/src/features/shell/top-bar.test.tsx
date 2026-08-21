@@ -95,6 +95,24 @@ describe("위 띠", () => {
     expect(screen.queryByRole("navigation", { name: "전체 메뉴" })).toBeNull();
   });
 
+  it("단계로 말할 수 없는 화면에서는 이름으로 말한다", () => {
+    // 왼쪽 기둥 시절에는 머리말이 "여기가 어디인지"를 말했다. 그 머리말이
+    // 없어지면 내 라이브러리·촬영본 정리·설정에서 화면 이름이 통째로 사라진다 --
+    // 그 화면들에는 보이는 제목이 따로 없다.
+    renderBar({ projects: [], projectId: "", section: "library", screenName: "내 라이브러리" });
+
+    expect(screen.getByText("내 라이브러리")).toBeVisible();
+  });
+
+  it("단계가 켜져 있으면 같은 말을 두 번 하지 않는다", () => {
+    // 켜진 단계 단추가 이미 어느 화면인지 말한다. 옆에 이름을 또 적으면 첫 화면에
+    // "누를 것처럼 보이는 것"이 하나 더 늘어난다 -- owner가 막혔던 바로 그 문제다.
+    renderBar({ section: "editing", screenName: "편집" });
+
+    expect(screen.getAllByText("편집")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "편집" })).toHaveAttribute("aria-current", "page");
+  });
+
   it("프로젝트가 아직 없으면 단계를 보여 주지 않는다", () => {
     // 갈 수 없는 곳을 띠에 띄워 두면 눌렀을 때 빈 화면이 뜬다.
     renderBar({ projects: [], projectId: "" });

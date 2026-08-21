@@ -1,53 +1,13 @@
 body:has(.vb-product-shell) { margin: 0; }
-.vb-product-shell { min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); }
+.vb-product-shell { min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; flex-direction: column; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); }
 [data-vb-desktop-shell] { min-width:0; box-sizing:border-box; overflow-x:hidden; }
 @media (min-width: 1024px) { [data-vb-desktop-shell] { min-width:1280px; min-height:800px; height:100vh; overflow:hidden; } }
-/* The canonical Sidebar uses utility classes for its desktop gap. Keep a small
-   product-owned fallback so the port remains visible when Tailwind's scanner
-   has not emitted the responsive utility in a Vite development build. */
-@media (min-width: 768px) {
-  [data-slot="sidebar-wrapper"] [data-slot="sidebar"] { display:block !important; }
-  [data-slot="sidebar-wrapper"] [data-slot="sidebar"] [data-slot="sidebar-container"].vb-product-sidebar { display:flex !important; }
-  .vb-product-shell > [data-slot="sidebar"][data-state="collapsed"] { flex:0 0 4rem !important; width:4rem !important; }
-  [data-slot="sidebar"].vb-product-sidebar[data-state="expanded"] { width:16rem; flex:0 0 16rem; }
-  [data-slot="sidebar"].vb-product-sidebar[data-state="collapsed"] { width:4rem; flex:0 0 4rem; }
-  [data-slot="sidebar"].vb-product-sidebar[data-state="collapsed"] [data-slot="sidebar-container"] { width:4rem; }
-  [data-slot="sidebar"][data-state="expanded"] [data-slot="sidebar-container"].vb-product-sidebar { width:16rem; }
-  [data-slot="sidebar"][data-state="collapsed"] [data-slot="sidebar-container"].vb-product-sidebar { width:4rem; }
-}
-.vb-product-sidebar { width: 16rem; flex: 0 0 16rem; display: flex; flex-direction: column; border-right: 1px solid var(--vb-border); background: var(--vb-canvas); padding: var(--vb-space-4); transition: width .2s ease; box-sizing:border-box; min-width:0; }
-.is-collapsed .vb-product-sidebar { width: 4.5rem; overflow: hidden; }.is-collapsed .vb-product-sidebar span, .is-collapsed .vb-product-sidebar p, .is-collapsed .vb-product-sidebar small { display:none; }
-.vb-shell-brand { display:flex; align-items:center; gap: var(--vb-space-2); font-weight:750; font-size: var(--vb-text-lg); padding: var(--vb-space-2); }
-/* 아래 `.vb-global-nav svg`와 **같은 규칙**을 쓴다. 여기만 `flex:0 0 auto`와 크기가
-   빠져 있어서 아이콘이 옆 것에 밀려 찌그러졌다 -- 접으면 24px 자리에 15px로 눌리고,
-   펴면 `VideoBox` 글자에 밀려 **폭이 0이 돼 아예 사라졌다**(2026-08-19 재서 확인). */
-.vb-shell-brand svg { flex:0 0 auto; width:1.25rem; height:1.25rem; color:var(--vb-accent); }
-/* 접었을 때는 레일 한가운데로 한 줄 세운다. 예전에는 맨 위 아이콘 중심이 31.5px,
-   아래 아이콘들이 36px에 있어 위 하나만 왼쪽으로 튀어나와 보였다. 여백을 지우고
-   가운데 정렬하면 폭(4rem)의 정중앙에서 전부 만난다. */
-[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-shell-brand,
-[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-global-nav a,
-[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar [data-sidebar="menu-button"] {
-  justify-content:center; gap: 0; padding-left: 0; padding-right: 0;
-}
-/* 크기도 한 벌로 맞춘다. 접으면 아이콘들이 **세로 한 줄에 나란히** 서기 때문에
-   16px·20px·24px이 섞여 있으면 줄이 안 맞은 것처럼 보인다. 펼친 상태는 글자
-   옆에 있어 서로 비교되지 않으므로 그대로 둔다. */
-[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-shell-brand svg,
-[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar .vb-global-nav a svg,
-[data-slot="sidebar"][data-state="collapsed"] .vb-product-sidebar [data-sidebar="menu-button"] svg {
-  width:1.25rem; height:1.25rem; flex:0 0 auto;
-}
-.vb-sidebar-section-label { margin: 0 0 var(--vb-space-2); padding: 0 var(--vb-space-1); color:var(--vb-muted); font-size: var(--vb-text-xs); font-weight:650; letter-spacing:.03em; text-transform:uppercase; }
-.vb-global-nav { margin-top: var(--vb-space-4); padding-bottom: var(--vb-space-4); border-bottom:1px solid var(--vb-border); }.vb-global-nav ul { display:grid; gap: var(--vb-space-2); margin: 0; padding: 0; list-style:none; }.vb-global-nav a { display:flex; min-height:40px; align-items:center; gap: var(--vb-space-2); border:1px solid transparent; border-radius:.55rem; padding: var(--vb-space-2) var(--vb-space-3); color:var(--vb-muted); text-decoration:none; font:inherit; }.vb-global-nav a:hover, .vb-global-nav a:focus-visible { border-color:var(--vb-accent-border); background:var(--vb-accent-bg); color:var(--vb-accent); }.vb-global-nav svg { flex:0 0 auto; width:1rem; height:1rem; }
-.vb-project-switcher { border:1px solid var(--vb-border); background:var(--vb-panel); border-radius:.75rem; padding: var(--vb-space-2); margin: var(--vb-space-4) 0; max-height:18rem; overflow-y:auto; }.vb-project-switcher p { margin: 0 0 var(--vb-space-2); color:var(--vb-muted); font-size: var(--vb-text-xs); }.vb-project-row { display:flex; align-items:center; gap: var(--vb-space-2); min-width:0; }.vb-project-switcher .vb-project-select { min-width:0; flex:1 1 auto; width:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.vb-project-switcher .vb-project-more { flex:0 0 2rem; width:2rem; min-height:32px; padding: var(--vb-space-1); justify-content:center; }.vb-project-switcher button { min-height:40px; border:0; border-radius:.45rem; background:transparent; text-align:left; padding: var(--vb-space-2); color:inherit; cursor:pointer; }.vb-project-switcher button[aria-pressed=true] { background:var(--accent); color:var(--vb-accent); font-weight:650; }
-.vb-product-nav { padding-top: var(--vb-space-4); border-top:1px solid var(--vb-border); }.vb-product-nav [data-sidebar="menu"] { list-style:none; margin: 0; padding: 0; display:grid; gap: var(--vb-space-2); }.vb-product-nav [data-sidebar="menu-button"] { width:100%; min-height:40px; border:0; border-radius:.55rem; padding: var(--vb-space-2) var(--vb-space-3); color:var(--vb-muted); background:transparent; cursor:pointer; text-align:left; font:inherit; }.vb-product-nav [data-sidebar="menu-button"][data-active="true"] { background:var(--accent); color:var(--vb-accent); font-weight:650; }.vb-project-actions { width:100%; min-height:40px; justify-content:flex-start; margin-top: var(--vb-space-2); }.vb-sidebar-footer { margin-top: auto; display:grid; gap: var(--vb-space-1); }.vb-sidebar-footer button { border:0; background:transparent; cursor:pointer; text-align:left; font:inherit; }.vb-sidebar-footer small { color:var(--vb-muted); padding: var(--vb-space-1) var(--vb-space-3); }
-.vb-product-main { min-width:0; min-height:0; flex:1; overflow:hidden; }.vb-product-header { position:sticky; top:0; z-index:5; height:4.25rem; flex:0 0 4.25rem; display:flex; align-items:center; gap: var(--vb-space-3); padding: 0 var(--vb-space-6); border-bottom:1px solid var(--vb-border); background:color-mix(in srgb, var(--vb-panel) 92%, transparent); backdrop-filter:blur(12px); }.vb-product-header div { flex:1; }.vb-product-header p { margin: 0; color:var(--vb-muted); font-size: var(--vb-text-xs); }.vb-product-header strong { font-size: var(--vb-text-md); }.vb-product-content { width:100%; max-width:1200px; min-height:0; overflow-y:auto; margin: 0 auto; padding: var(--vb-space-7) clamp(var(--vb-space-4),3vw,var(--vb-space-8)); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }.vb-mobile-menu { display:none; }
-.vb-product-main, .vb-product-content, .vb-product-header > div { min-width:0; box-sizing:border-box; }
+.vb-product-main { min-width:0; min-height:0; flex:1; overflow:hidden; }.vb-product-content { width:100%; max-width:1200px; min-height:0; overflow-y:auto; margin: 0 auto; padding: var(--vb-space-7) clamp(var(--vb-space-4),3vw,var(--vb-space-8)); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }
+.vb-product-main, .vb-product-content { min-width:0; box-sizing:border-box; }
 @media (min-width:1600px) { .vb-product-content { max-width:1600px; } }
 .vb-dialog-content { width:min(35rem, calc(100vw - 2rem)); max-width:calc(100vw - 2rem); max-height:70vh; overflow-y:auto; box-sizing:border-box; padding: var(--vb-space-6); }
 .vb-job-dialog { width:100%; box-sizing:border-box; }.vb-job-row { overflow-wrap:anywhere; }.vb-job-row > span, .vb-job-row > strong { min-width:0; }
-.vb-eyebrow { color:var(--vb-accent); font-size: var(--vb-text-sm); font-weight:700; margin: 0 0 var(--vb-space-2); }.vb-home h1, .vb-settings h1 { margin: var(--vb-space-1) 0 var(--vb-space-2); font-size: clamp(var(--vb-text-2xl),3vw,var(--vb-text-3xl)); letter-spacing:-.04em; }.vb-home>div:first-child>p:not(.vb-eyebrow), .vb-settings>p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }.vb-home-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap: var(--vb-space-4); margin-top: var(--vb-space-7); }.vb-home-grid [data-slot=card] { display:flex; min-height:14rem; justify-content:space-between; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); }.vb-home-grid [data-slot=card-header], .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-5); }.vb-home-grid [data-slot=card-title] { font-weight:700; }.vb-home-grid [data-slot=card-description] { margin-top: var(--vb-space-2); color:var(--vb-muted); line-height:1.55; }.vb-product-shell [data-slot=button] { min-height:40px; }.vb-product-shell [data-slot=button][data-size="icon"], .vb-product-shell .vb-project-more, .vb-product-shell .vb-collapse, .vb-product-shell .vb-mobile-menu { min-height:32px; }.vb-product-shell [data-slot=button][data-variant="default"] { border:0; border-radius:.55rem; background:var(--primary); color:var(--primary-foreground); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; font-weight:650; }.vb-product-shell [data-slot=button][data-variant="outline"] { border:1px solid var(--vb-border); border-radius:.55rem; background:var(--vb-panel); color:var(--vb-text); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; }.vb-home-chat { margin-top: var(--vb-space-7); max-width:52rem; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); padding: var(--vb-space-5); }.vb-home-chat h2 { margin: 0 0 var(--vb-space-3); font-size: var(--vb-text-lg); font-weight:700; }.vb-home-chat label { display:block; margin: var(--vb-space-3) 0 var(--vb-space-1); font-size: var(--vb-text-md); color:var(--vb-muted); }.vb-home-chat textarea { width:100%; min-height:4.5rem; border:1px solid var(--vb-border); border-radius:.6rem; padding: var(--vb-space-2) var(--vb-space-3); font:inherit; background:var(--vb-canvas); color:var(--vb-text); }.vb-home-chat-history { display:flex; flex-direction:column; gap: var(--vb-space-2); max-height:16rem; overflow-y:auto; }.vb-home-chat-history p { margin: 0; line-height:1.55; }.vb-home-chat-history article p strong { margin-right: var(--vb-space-2); color:var(--vb-accent); }.vb-home-chat > p { color:var(--vb-muted); margin: 0; }.vb-product-shell[data-compact="true"] .vb-product-content { padding: var(--vb-space-3) var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid { gap: var(--vb-space-2); margin-top: var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card] { min-height:10rem; }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-header], .vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-3); }.vb-product-shell[data-reduced-motion="true"] *, .vb-product-shell[data-reduced-motion="true"] *::before, .vb-product-shell[data-reduced-motion="true"] *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }.vb-settings { max-width:42rem; }.vb-setting-control { display:flex; align-items:center; gap: var(--vb-space-2); margin-top: var(--vb-space-4); border:1px solid var(--vb-border); background:var(--vb-panel); border-radius:.75rem; padding: var(--vb-space-4); }.vb-setting-note { color:var(--vb-muted); font-size: var(--vb-text-md); }
+.vb-eyebrow { color:var(--vb-accent); font-size: var(--vb-text-sm); font-weight:700; margin: 0 0 var(--vb-space-2); }.vb-home h1, .vb-settings h1 { margin: var(--vb-space-1) 0 var(--vb-space-2); font-size: clamp(var(--vb-text-2xl),3vw,var(--vb-text-3xl)); letter-spacing:-.04em; }.vb-home>div:first-child>p:not(.vb-eyebrow), .vb-settings>p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }.vb-home-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap: var(--vb-space-4); margin-top: var(--vb-space-7); }.vb-home-grid [data-slot=card] { display:flex; min-height:14rem; justify-content:space-between; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); }.vb-home-grid [data-slot=card-header], .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-5); }.vb-home-grid [data-slot=card-title] { font-weight:700; }.vb-home-grid [data-slot=card-description] { margin-top: var(--vb-space-2); color:var(--vb-muted); line-height:1.55; }.vb-product-shell [data-slot=button] { min-height:40px; }.vb-product-shell [data-slot=button][data-size="icon"] { min-height:32px; }.vb-product-shell [data-slot=button][data-variant="default"] { border:0; border-radius:.55rem; background:var(--primary); color:var(--primary-foreground); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; font-weight:650; }.vb-product-shell [data-slot=button][data-variant="outline"] { border:1px solid var(--vb-border); border-radius:.55rem; background:var(--vb-panel); color:var(--vb-text); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; }.vb-home-chat { margin-top: var(--vb-space-7); max-width:52rem; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); padding: var(--vb-space-5); }.vb-home-chat h2 { margin: 0 0 var(--vb-space-3); font-size: var(--vb-text-lg); font-weight:700; }.vb-home-chat label { display:block; margin: var(--vb-space-3) 0 var(--vb-space-1); font-size: var(--vb-text-md); color:var(--vb-muted); }.vb-home-chat textarea { width:100%; min-height:4.5rem; border:1px solid var(--vb-border); border-radius:.6rem; padding: var(--vb-space-2) var(--vb-space-3); font:inherit; background:var(--vb-canvas); color:var(--vb-text); }.vb-home-chat-history { display:flex; flex-direction:column; gap: var(--vb-space-2); max-height:16rem; overflow-y:auto; }.vb-home-chat-history p { margin: 0; line-height:1.55; }.vb-home-chat-history article p strong { margin-right: var(--vb-space-2); color:var(--vb-accent); }.vb-home-chat > p { color:var(--vb-muted); margin: 0; }.vb-product-shell[data-compact="true"] .vb-product-content { padding: var(--vb-space-3) var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid { gap: var(--vb-space-2); margin-top: var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card] { min-height:10rem; }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-header], .vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-3); }.vb-product-shell[data-reduced-motion="true"] *, .vb-product-shell[data-reduced-motion="true"] *::before, .vb-product-shell[data-reduced-motion="true"] *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }.vb-settings { max-width:42rem; }.vb-setting-control { display:flex; align-items:center; gap: var(--vb-space-2); margin-top: var(--vb-space-4); border:1px solid var(--vb-border); background:var(--vb-panel); border-radius:.75rem; padding: var(--vb-space-4); }.vb-setting-note { color:var(--vb-muted); font-size: var(--vb-text-md); }
 /* 목소리 화면은 설정에서 자산 단계로 옮겨 왔다. 설정에서는 `.vb-settings`가 42rem으로
    폭을 잡아 줬는데 자산 화면은 1440px까지 넓어서, 입력과 선택 상자가 화면 끝까지
    늘어나 읽기 어려웠다. 여기서 같은 폭을 다시 잡아 준다. */
@@ -91,7 +51,7 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog-create { margin-top: var(--vb-space-7); }
 .vb-catalog-form { margin-top: var(--vb-space-7); max-width:26rem; display:grid; gap: var(--vb-space-3); }
 .vb-mobile-scrim { display:none; }
-@media (max-width: 767px) { [data-slot="sidebar"][data-mobile="true"] { display:flex !important; position:fixed !important; inset:0 auto 0 0 !important; flex-direction:column; width:min(18rem,85vw) !important; height:100svh !important; max-height:100svh; overflow:hidden !important; } [data-slot="sidebar"][data-mobile="true"][data-state="open"] { left:0 !important; transform:translateX(0) !important; } [data-slot="sidebar"][data-mobile="true"] > div { display:flex; height:100%; min-height:0; flex:1 1 auto; flex-direction:column; } [data-slot="sidebar"][data-mobile="true"] [data-sidebar="header"], [data-slot="sidebar"][data-mobile="true"] [data-sidebar="footer"] { flex:0 0 auto; } [data-slot="sidebar"][data-mobile="true"] [data-sidebar="content"] { flex:1 1 auto; min-height:0; overflow-y:auto; } .vb-mobile-menu { display:inline-flex; }.vb-collapse { display:none; }.vb-product-header { padding: 0 var(--vb-space-4); }.vb-product-content { padding: var(--vb-space-5) var(--vb-space-4); }.vb-home-grid { grid-template-columns:1fr; } }
+@media (max-width: 767px) { .vb-product-content { padding: var(--vb-space-5) var(--vb-space-4); }.vb-home-grid { grid-template-columns:1fr; } }
 
 /* 아래 일곱 화면은 클래스만 붙어 있고 규칙이 없어서 브라우저 기본 스타일로
    그려지고 있었다. 승인된 토큰만 쓰고 새 색을 만들지 않는다. */
@@ -147,22 +107,15 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog-card { box-sizing:border-box; min-width:0; overflow-wrap:anywhere; border:0; border-radius:var(--radius-lg); box-shadow:0 0 0 1px var(--vb-surface-ring); }
 .vb-catalog-card:hover { border:0; box-shadow:0 0 0 1px var(--vb-accent); }
 
-/* 작업실 접기 띠 — owner가 "클릭하기가 너무 어렵다"고 한 자리 (2026-08-21).
-   가져온 원본은 폭 16px이고, 그중 실제로 보이는 것은 가운데 2px 선뿐이다.
-   손가락·마우스가 닿는 크기로 넓히고, 어디를 눌러야 하는지 보이게 한다.
-   24px는 WCAG 2.2 목표 크기 최소값이다. */
-.vb-product-shell .vb-sidebar-rail { width: 24px; }
-.vb-product-shell .vb-sidebar-rail::after { width: 3px; }
-.vb-product-shell .vb-sidebar-rail:hover::after,
-.vb-product-shell .vb-sidebar-rail:focus-visible::after { background: var(--vb-accent); }
-.vb-product-shell .vb-sidebar-rail:focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent); }
 
 /* 캡컷 배치의 위 띠 — owner 승인 2026-08-21
    docs/decisions/2026-08-21-capcut-shell-layout.ko.md
 
    왼쪽 기둥이 하던 일을 한 줄로 받는다. 폭을 먹던 것이 높이를 먹게 되는데,
    편집기는 가로가 아쉬운 화면이라 대체로 이득이다. */
-.vb-top-bar { display:flex; align-items:center; gap: var(--vb-space-4); min-height:3.25rem;
+/* 껍데기가 세로로 쌓이므로 띠는 줄어들지 않아야 한다 -- `flex-shrink`가 열려
+   있으면 편집 화면처럼 아래가 꽉 찬 곳에서 띠가 눌린다. */
+.vb-top-bar { display:flex; align-items:center; gap: var(--vb-space-4); min-height:3.25rem; flex:0 0 auto;
   padding: var(--vb-space-2) var(--vb-space-4); border-bottom:1px solid var(--vb-border);
   background: var(--vb-panel); }
 .vb-top-bar__project { position:relative; flex:0 0 auto; }
@@ -173,3 +126,23 @@ body:has(.vb-product-shell) { margin: 0; }
   background: var(--vb-panel); box-shadow:0 8px 24px color-mix(in srgb, var(--vb-text) 12%, transparent); }
 .vb-top-bar__stages { display:flex; align-items:center; gap: var(--vb-space-2); flex:1 1 auto; min-width:0; overflow-x:auto; }
 .vb-top-bar__end { display:flex; align-items:center; gap: var(--vb-space-2); flex:0 0 auto; margin-left:auto; }
+/* 기둥 머리의 이름표가 이리로 왔다. 캡컷도 로고를 왼쪽 끝에 둔다. */
+.vb-top-bar__brand { display:flex; align-items:center; gap: var(--vb-space-2); flex:0 0 auto; font-weight:750; font-size: var(--vb-text-md); }
+.vb-top-bar__brand svg { flex:0 0 auto; width:1.25rem; height:1.25rem; color:var(--vb-accent); }
+/* 단계가 없는 화면(내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서만 나온다.
+   단계가 보일 때는 켜진 단추가 이미 같은 말을 하고 있다. */
+.vb-top-bar__screen { flex:1 1 auto; min-width:0; font-size: var(--vb-text-md); font-weight:650; }
+.vb-top-bar__note { color:var(--vb-muted); font-size: var(--vb-text-xs); white-space:nowrap; }
+.vb-top-bar__stages [data-slot=button] { gap: var(--vb-space-2); white-space:nowrap; }
+.vb-top-bar__stages svg { flex:0 0 auto; width:1rem; height:1rem; }
+.vb-top-bar__menu { position:relative; flex:0 0 auto; }
+.vb-top-bar__menu-list { position:absolute; z-index:20; top:calc(100% + var(--vb-space-1)); right:0;
+  display:grid; gap: var(--vb-space-1); min-width:12rem; padding: var(--vb-space-2);
+  border:1px solid var(--vb-border); border-radius:.6rem; background: var(--vb-panel);
+  box-shadow:0 8px 24px color-mix(in srgb, var(--vb-text) 12%, transparent); }
+.vb-top-bar__menu-list a { display:flex; min-height:40px; align-items:center; gap: var(--vb-space-2); border:1px solid transparent; border-radius:.55rem; padding: var(--vb-space-2) var(--vb-space-3); color:var(--vb-text); text-decoration:none; font:inherit; }
+.vb-top-bar__menu-list a:hover, .vb-top-bar__menu-list a:focus-visible { border-color:var(--vb-accent-border); background:var(--vb-accent-bg); color:var(--vb-accent); }
+.vb-top-bar__menu-list [data-slot=button] { justify-content:flex-start; }
+/* 좁은 화면에서는 띠가 한 줄에 다 못 들어간다. 지우는 대신 글자만 접는다. */
+@media (max-width: 767px) { .vb-top-bar { gap: var(--vb-space-2); padding: var(--vb-space-2); }
+  .vb-top-bar__brand span, .vb-top-bar__note { display:none; } }

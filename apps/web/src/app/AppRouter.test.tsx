@@ -73,15 +73,18 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: [path] }));
     render(<AppRouter router={router} />);
 
-    // 껍데기는 데스크톱용과 좁은 화면용을 함께 그릴 수 있다. 하나만 있으면 된다.
-    const menus = await screen.findAllByRole("navigation", { name: "전체 메뉴", hidden: true });
-    expect(within(menus[0]).getByRole("link", { name: "프로젝트", hidden: true })).toBeInTheDocument();
-    expect(within(menus[0]).getByRole("link", { name: "내 라이브러리", hidden: true })).toBeInTheDocument();
+    // 왼쪽 기둥은 없어졌고 전역 목적지는 위 띠의 전체 메뉴 안에 있다
+    // (`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`). 지키는 것은 같다 --
+    // 어느 화면에서든 돌아갈 길이 있어야 한다.
+    fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
+    const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
+    expect(within(menu).getByRole("link", { name: "프로젝트" })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "내 라이브러리" })).toBeInTheDocument();
 
-    // 헤더는 **어느 화면인지** 말해야 한다. 전부 `홈`이라고 적으면 좌측 메뉴가
-    // 돌아와도 여전히 자기가 어디 있는지 알 수 없다.
+    // 띠도 **어느 화면인지** 말해야 한다. 이 세 화면에는 보이는 제목이 따로 없어서,
+    // 이 이름이 없으면 돌아갈 길이 있어도 자기가 어디 있는지 알 수 없다.
     const title = { "/library": "내 라이브러리", "/footage": "촬영본 정리", "/projects": "홈" }[path];
-    expect(document.querySelector(".vb-product-header strong")).toHaveTextContent(title!);
+    expect(document.querySelector(".vb-top-bar__screen")).toHaveTextContent(title!);
   });
 
   // 진짜 백엔드에 e2e를 붙여 처음 돌려 보고 나왔다(2026-08-20). 프로젝트가 하나도
@@ -96,8 +99,9 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     // 껍데기 안이어야 한다 -- 여기가 어디인지, 어디로 갈 수 있는지 보여야 한다.
-    const menus = await screen.findAllByRole("navigation", { name: "전체 메뉴", hidden: true });
-    expect(within(menus[0]).getByRole("link", { name: "내 라이브러리", hidden: true })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
+    const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
+    expect(within(menu).getByRole("link", { name: "내 라이브러리" })).toBeInTheDocument();
 
     // 시작하는 길은 평소와 **같은 길**이다. 첫 사용자에게만 다른 문을 만들지 않는다.
     expect(await screen.findByRole("button", { name: "새 프로젝트 만들기" })).toBeInTheDocument();
@@ -626,11 +630,12 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     expect(await screen.findByTestId("settings-page")).toBeVisible();
-    expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "true");
+    // 띠는 **지금 프로젝트만** 보여 준다 -- 보인다는 것이 곧 열려 있다는 뜻이다.
+    expect(screen.getByRole("button", { name: "B" })).toBeVisible();
     await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
   });
 
-  it("keeps the open project when the shell settings link is activated", async () => {
+  it("keeps the open project when the top bar settings entry is activated", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
       { project_id: "project_b", name: "B", status: "active", root_storage_uri: "local://b" },
@@ -642,12 +647,11 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
-    const settingsLink = await screen.findByRole("link", { name: "설정" });
-    expect(settingsLink).toHaveAttribute("href", "/settings/general");
-    fireEvent.click(settingsLink);
+    fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
+    fireEvent.click(screen.getByRole("button", { name: "설정" }));
 
     await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
-    expect(screen.getByRole("button", { name: "B" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "B" })).toBeVisible();
   });
 
   it("does not redirect an unknown project-scoped settings URL into another project's settings", async () => {

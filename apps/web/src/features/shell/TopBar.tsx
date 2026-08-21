@@ -28,6 +28,7 @@ export function TopBar({
   projectId,
   projects,
   section,
+  screenName,
   onNavigate,
   onSelectProject,
   onOpenSettings,
@@ -36,6 +37,10 @@ export function TopBar({
   projectId: string;
   projects: readonly ShellProject[];
   section: string;
+  /** 단계로 표시되지 않는 화면(내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서
+   *  **여기가 어디인지** 말하는 이름. 왼쪽 기둥 시절에는 머리말이 이걸 맡았고,
+   *  전부 `홈`이라고 적혀 있으면 돌아갈 길이 있어도 자기 위치를 알 수 없다. */
+  screenName?: string;
   onNavigate: (projectId: string, section: ShellSection) => void;
   onSelectProject: (projectId: string) => void;
   onOpenSettings: () => void;
@@ -58,6 +63,9 @@ export function TopBar({
 
   return (
     <header className="vb-top-bar">
+      {/* 기둥 머리에 있던 이름표. 캡컷도 여기에 로고를 둔다. */}
+      <div className="vb-top-bar__brand"><Video aria-hidden="true" /><span>VideoBox</span></div>
+
       {hasProject ? (
         <div className="vb-top-bar__project">
           <Button type="button" variant="outline" aria-expanded={switcherOpen} onClick={() => setSwitcherOpen((open) => !open)}>
@@ -95,6 +103,13 @@ export function TopBar({
             </Button>
           ))}
         </nav>
+      ) : null}
+
+      {/* 단계가 그려지지 않거나 어느 단계도 아닌 화면에서만 이름을 말한다. 단계가
+          보일 때는 켜진 단계 단추가 이미 그 말을 하고 있고, 같은 사실을 두 번
+          적으면 첫 화면에 "누를 것처럼 보이는 것"이 또 하나 늘어난다. */}
+      {screenName && (!hasProject || activeStage === null) ? (
+        <strong className="vb-top-bar__screen">{screenName}</strong>
       ) : null}
 
       <div className="vb-top-bar__end">

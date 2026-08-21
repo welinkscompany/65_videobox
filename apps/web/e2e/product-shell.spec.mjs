@@ -29,7 +29,7 @@ test("local catalog renders the creator shell without an external request", asyn
 
   await expect(page.getByRole("button", { name: "작업 상태" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "다음 작업" })).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "전체 메뉴" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "전체 메뉴" })).toBeVisible();
   await expect(page.getByText(/provider|billing|account/i)).toHaveCount(0);
 });
 
@@ -44,14 +44,17 @@ test("an empty local catalog leads to the single project-start action", async ({
 });
 
 test("desktop shell keeps global destinations separate from the open project's four stages", async ({ page }) => {
+  // 왼쪽 기둥은 없앴다 -- 위 띠 하나가 그 일을 받는다
+  // (docs/decisions/2026-08-21-capcut-shell-layout.ko.md, owner 승인 2026-08-21).
+  // 구분은 그대로다: 전역 목적지는 한 겹 접힌 메뉴 안, 단계는 띠 위에 펼쳐져 있다.
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/projects/local-draft/home");
-  await expect(page.getByRole("navigation", { name: "전체 메뉴" }).getByRole("link")).toHaveCount(4);
+  await expect(page.getByRole("navigation", { name: "전체 메뉴" })).toHaveCount(0);
+  await page.getByRole("button", { name: "전체 메뉴" }).click();
+  const menu = page.getByRole("navigation", { name: "전체 메뉴" });
+  await expect(menu.getByRole("link")).toHaveCount(3);
+  await expect(menu.getByRole("button", { name: "설정" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "프로젝트 단계" }).getByRole("button")).toHaveCount(4);
-  await page.getByRole("button", { name: "사이드바 접기" }).click();
-  await expect(page.getByRole("button", { name: "사이드바 펼치기" })).toBeVisible();
-  await page.getByRole("button", { name: "사이드바 펼치기" }).click();
-  await expect(page.getByRole("button", { name: "사이드바 접기" })).toBeVisible();
 });
 
 test("unknown project route offers canonical recovery without a project-scoped request", async ({ page }) => {
@@ -68,34 +71,15 @@ test("unknown project route offers canonical recovery without a project-scoped r
   expect(projectScopedRequests).toEqual([]);
 });
 
-test("mobile menu exposes the same creator navigation", async ({ page }) => {
+test("the top bar keeps creator navigation reachable on a narrow screen", async ({ page }) => {
+  // 좁은 화면에서도 띠는 그대로 있다. 기둥 시절에는 Sheet로 접혀 있어서 단계를
+  // 누르기 전에 `메뉴 열기`를 먼저 눌러야 했다. 그 한 겹이 없어졌다.
+  // Sheet와 접기 띠(`SidebarRail`)를 잡던 시험도 함께 지웠다 -- 지킬 대상이 없다.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/projects/local-draft/home");
-  await page.getByRole("button", { name: "메뉴 열기" }).click();
-
-  const menu = page.getByRole("dialog");
-  await expect(menu.getByRole("button", { name: "재료" })).toBeVisible();
-  await menu.getByRole("button", { name: "재료" }).click();
+  await page.getByRole("button", { name: "재료" }).click();
   await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
   await expect(page.getByRole("heading", { name: "자산 보관함" })).toBeVisible();
-});
-
-test("mobile Sheet closes with Escape and returns focus, while the desktop rail collapses", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/projects/local-draft/home");
-  const trigger = page.getByRole("button", { name: "메뉴 열기" });
-  await trigger.click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.reload();
-  const sidebar = page.locator('[data-slot="sidebar"]').first();
-  await expect(sidebar).toHaveAttribute("data-state", "expanded");
-  await page.getByRole("button", { name: "사이드바 접기" }).click();
-  await expect(sidebar).toHaveAttribute("data-state", "collapsed");
 });
 
 test("Home empty-state actions and settings tabs follow their visible routes", async ({ page }) => {
