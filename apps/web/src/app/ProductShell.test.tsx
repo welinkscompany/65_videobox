@@ -519,7 +519,10 @@ describe("home dashboard", () => {
     expect(screen.getAllByText("초안 있음")).toHaveLength(1);
     expect(screen.getAllByText("부족 2곳")).toHaveLength(1);
     expect(screen.getAllByText("3개")).toHaveLength(1);
-    expect(screen.getAllByText("편집 계속하기")).toHaveLength(1);
+    // `편집 계속하기`는 없어졌다. 첫 화면이 이제 **들어가는 길을 고르게** 하고,
+    // 만들던 것이 있으면 그 자리에 `만들던 영상 이어서`가 온다
+    // (owner 지시 2026-08-21, Vrew 방식). 사실을 한 번씩만 말하는 규칙은 그대로다.
+    expect(screen.getAllByText("만들던 영상 이어서")).toHaveLength(1);
   });
 
   it("says so plainly when the project is still empty", async () => {
@@ -541,7 +544,11 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByRole("button", { name: "출력 확인" })).toBeVisible();
+    // 상태 카드에서 단추를 뗐다 -- 각 화면으로 가는 길은 왼쪽 메뉴에 이미 있고,
+    // 첫 화면에 "다음에 할 일"로 보이는 것이 늘어나는 게 owner를 막던 원인이었다.
+    // 여기서 지키는 것은 그대로다: 못 읽었다고 **없는 상태를 단정하지 않고**,
+    // 다시 확인할 길이 남아 있어야 한다.
+    expect(await screen.findByRole("button", { name: "상태 다시 확인" })).toBeVisible();
     expect(screen.queryByText("아직 완성한 영상이 없어요.")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
     expect(api.getHomeSummary).toHaveBeenCalledTimes(2);

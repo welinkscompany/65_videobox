@@ -23,6 +23,7 @@ import { JobRecovery } from "../features/jobs/JobRecovery";
 import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { ConversationCleanup } from "../features/settings/ConversationCleanup";
 import { HomeYujinChat } from "../features/home/HomeYujinChat";
+import { StartChooser } from "../features/home/StartChooser";
 import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "../components/ui/dropdown-menu";
 
@@ -205,13 +206,7 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
     : `${summary.finished_video_count}개`;
   const assetText = summaryError ? "상태 확인 실패" : summary === null ? "상태 확인 중"
     : summary.asset_gap_count > 0 ? `부족 ${summary.asset_gap_count}곳` : "준비 완료";
-  const nextTask = summaryError
-    ? { label: "상태 다시 확인", section: "home" as WorkspaceSection, keyword: "상태 확인 실패" }
-    : summary?.has_draft
-    ? { label: "편집 계속하기", section: "editing" as WorkspaceSection, keyword: "초안 있음" }
-    : summary && summary.asset_gap_count > 0
-      ? { label: "자산 준비하기", section: "media" as WorkspaceSection, keyword: `부족 ${summary.asset_gap_count}곳` }
-      : { label: "새 영상 시작하기", section: "create" as WorkspaceSection, keyword: "대본 준비" };
+
   // The cards are ordered the way the work actually runs: bring footage in,
   // edit it, then take it out. The old order opened with editing, which is
   // the middle of the job.
@@ -220,9 +215,23 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
   // checklist under it, and again on whichever card matched. The three cards
   // below already say each fact exactly once, so this section now only names
   // and acts on the next step -- one button, no restated heading or list.
-  return <section className="vb-home" data-testid="product-home"><div><p className="vb-eyebrow">영상 만들기</p><h1>다음 작업</h1><p>대본 · 자산 · 편집 · 출력</p><Button onClick={() => onNavigate(projectId, "create")}>새 영상 만들기</Button></div><section className="vb-home-next" aria-label={`다음 할 일: ${nextTask.label}`}><p className="vb-eyebrow">다음 할 일</p><Button variant="outline" onClick={() => summaryError ? setSummaryRequest((value) => value + 1) : onNavigate(projectId, nextTask.section)}>{nextTask.label}</Button></section><div className="vb-home-grid"><HomeCard title="자산" description={assetText} action="자산 준비하기" onClick={() => onNavigate(projectId, "media")} /><HomeCard title="편집" description={draftText} action="편집 열기" onClick={() => onNavigate(projectId, "editing")} /><HomeCard title="완성본" description={finishedText} action="출력 확인" onClick={() => onNavigate(projectId, "outputs")} /></div><HomeYujinChat projectId={projectId} /></section>;
+  // owner: "어떤 버튼을 눌러야 할지 하나도 모르겠어." 여기에 `다음에 할 일`처럼
+  // 보이는 단추가 다섯 개 있었다 -- 새 영상 만들기, 다음 할 일, 그리고 카드 세
+  // 개의 단추. 다 그럴듯해서 어느 것이 지금 할 일인지 화면이 말해 주지 않았다.
+  //
+  // 이제 **들어가는 길을 먼저 고르게** 한다(Vrew 방식, owner 지시 2026-08-21).
+  // 아래 상태 카드는 남기되 **단추를 뗐다** -- 각 화면으로 가는 길은 메뉴에 이미
+  // 있고, 여기서는 사실만 한 번씩 말한다.
+  return <section className="vb-home" data-testid="product-home">
+    <StartChooser hasDraft={summary?.has_draft === true} onStart={(path) => onNavigate(projectId, path === "continue" ? "editing" : "create")} />
+    <div className="vb-home-grid"><HomeCard title="자산" description={assetText} /><HomeCard title="편집" description={draftText} /><HomeCard title="완성본" description={finishedText} /></div>
+    {summaryError ? <Button variant="outline" onClick={() => setSummaryRequest((value) => value + 1)}>상태 다시 확인</Button> : null}
+    <HomeYujinChat projectId={projectId} />
+  </section>;
 }
-function HomeCard({ title, description, action, onClick }: { title: string; description: string; action: string; onClick: () => void }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader><CardContent><Button variant="outline" onClick={onClick}>{action}</Button></CardContent></Card>; }
+/** 상태만 말한다. 단추를 달면 첫 화면에 "다음에 할 일"로 보이는 것이 또 늘어난다 --
+ *  각 화면으로 가는 길은 왼쪽 메뉴에 이미 있다. */
+function HomeCard({ title, description }: { title: string; description: string }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{description}</CardDescription></CardHeader></Card>; }
 
 export function SettingsPage({ section, onNavigate, projectId }: { section: SettingsSection; onNavigate: (section: SettingsSection) => void; projectId: string }) {
   const [settings, setSettings] = useState(readSettings);
