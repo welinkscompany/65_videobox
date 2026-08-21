@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-08-21-videobox-footage-start-reaches-the-screen.ko.md`
+
 # 대본에 맞는 그림이 붙었고, 거기서 당나귀가 나왔다
 
 - 작성: 2026-08-21

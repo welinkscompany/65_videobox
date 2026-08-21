@@ -15,7 +15,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
  *  여기서 지키는 것은 하나다 — 이 화면에서 고를 수 있는 길은 **실제로 뚫려 있는
  *  길뿐이다.** 없는 기능의 자리를 흉내 내면 배치가 거짓말을 한다. */
 describe("시작 선택창", () => {
-  it("아무것도 시작하지 않았으면 대본으로 들어가는 길만 준다", () => {
+  it("만들던 것이 없으면 이어서 하는 길을 감춘다", () => {
     render(<StartChooser hasDraft={false} onStart={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: /대본이 있어요/ })).toBeVisible();
@@ -42,21 +42,42 @@ describe("시작 선택창", () => {
     expect(onStart).toHaveBeenCalledWith("continue");
   });
 
-  it("아직 만들지 않은 길은 아예 보여 주지 않는다", () => {
-    // 영상을 올려 자막까지 만드는 길은 다음 조각이다. 부품(받아쓰기)은 있지만
-    // 이어 붙인 데가 없어서 지금 누르면 아무 데도 못 간다. 회색으로 띄워 두는
-    // 것도 안 한다 -- 누를 수 없는 단추는 고장으로 읽힌다.
+  it("찍어 둔 영상으로 들어가는 길을 준다", () => {
+    // **갱신 이유(2026-08-21).** 이 시험은 원래 "아직 만들지 않은 길은 아예
+    // 보여 주지 않는다"였고, 영상으로 들어가는 길이 없다는 것을 고정하고 있었다.
+    // 그 사이 그 길이 실제로 뚫렸다(`POST .../source-video/upload`, 7ed84d040) --
+    // 이제는 **감추는 쪽이** 거짓말이다. 지키려던 것은 "없는 길을 흉내 내지
+    // 않는다"이지 "영상 길이 없다"가 아니었으므로, 지키는 것은 그대로 두고
+    // 값만 현재 사실에 맞춘다.
     render(<StartChooser hasDraft={false} onStart={vi.fn()} />);
 
-    expect(screen.queryByRole("button", { name: /영상/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /찍어 둔 영상이 있어요/ })).toBeVisible();
+  });
+
+  it("아직 만들지 않은 길은 아예 보여 주지 않는다", () => {
+    // 유진이 처음부터 대본을 써 주는 길은 아직 없다. 회색으로 띄워 두는 것도
+    // 안 한다 -- 누를 수 없는 단추는 고장으로 읽힌다.
+    render(<StartChooser hasDraft={false} onStart={vi.fn()} />);
+
     expect(screen.queryByRole("button", { name: /유진이 대본/ })).toBeNull();
   });
 
-  it("고를 것이 둘을 넘지 않는다", () => {
-    // 이 화면이 존재하는 이유가 "다섯 개가 다 그럴듯해 보인다"였다.
-    // 선택창이 또 목록이 되면 아무것도 고친 게 아니다.
+  it("고른 길이 영상이면 그것도 그대로 알려 준다", () => {
+    const onStart = vi.fn();
+    render(<StartChooser hasDraft={false} onStart={onStart} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /찍어 둔 영상이 있어요/ }));
+    expect(onStart).toHaveBeenCalledWith("footage");
+  });
+
+  it("고를 것이 셋을 넘지 않는다", () => {
+    // **갱신 이유(2026-08-21).** 원래 상한이 둘이었다. 그 둘은 "지금 뚫려 있는
+    // 길이 둘"이라는 당시 사실을 적은 것이지, 둘이 옳은 수라는 결정이 아니었다.
+    // 지키려는 것은 수가 아니라 **이 화면이 다시 목록이 되지 않는 것**이다 --
+    // 이 선택창이 생긴 이유가 "다섯 개가 다 그럴듯해 보인다"였다.
+    // 길이 하나 늘었으므로 상한도 하나 올린다. 더 올릴 때는 이 이유를 다시 본다.
     render(<StartChooser hasDraft onStart={vi.fn()} />);
 
-    expect(screen.getAllByRole("button")).toHaveLength(2);
+    expect(screen.getAllByRole("button")).toHaveLength(3);
   });
 });

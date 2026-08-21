@@ -4,11 +4,12 @@ import { Button } from "../../components/ui/button";
  *
  *  `continue` — 만들던 편집본으로. 초안이 있을 때만.
  *  `script`   — 대본 붙여넣기 / 파일 불러오기.
+ *  `footage`  — 찍어 둔 영상에서 말을 받아써 대본을 만든다(2026-08-21에 뚫렸다).
  *
- *  아직 없는 길(영상 올려서 자막까지, 유진이 대본 쓰기)은 **일부러 빼 두었다.**
+ *  아직 없는 길(유진이 처음부터 대본 쓰기)은 **일부러 빼 두었다.**
  *  없는 기능의 자리를 흉내 내면 배치가 거짓말을 하고, 익숙해서 쉬운 게 아니라
  *  익숙해서 더 헷갈리게 된다(`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`). */
-export type StartPath = "continue" | "script";
+export type StartPath = "continue" | "script" | "footage";
 
 export function StartChooser({
   hasDraft,
@@ -35,6 +36,15 @@ export function StartChooser({
         >
           <strong>대본이 있어요</strong>
           <span>붙여넣거나 파일로 불러옵니다.</span>
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="vb-start-path"
+          onClick={() => onStart("footage")}
+        >
+          <strong>찍어 둔 영상이 있어요</strong>
+          <span>영상에서 말을 받아써 대본으로 만듭니다.</span>
         </Button>
       </div>
     </section>
