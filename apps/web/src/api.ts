@@ -346,6 +346,19 @@ export type EditingSessionSegment = {
   sfx_override?: Record<string, unknown> | null;
   tts_replacement: Record<string, unknown> | null;
   caption_style?: CaptionStyleSnapshot | null;
+  transition_in?: SceneTransition | null;
+};
+
+/**
+ * 앞 장면에서 이 장면으로 넘어오는 방법.
+ *
+ * `chosen_by`는 **누가 골랐는지**다. 지금은 owner뿐이지만 유진이 골라 주는 것이
+ * 이 제품의 값어치라서 자리를 미리 둔다.
+ */
+export type SceneTransition = {
+  type: string;
+  duration_sec: number;
+  chosen_by?: string;
 };
 
 export type CaptionStyleSnapshot = Record<string, unknown>;
@@ -557,6 +570,11 @@ export type CaptionOverrideRequest = RevisionedEditingSessionMutation & {
 
 export type CutActionOverrideRequest = RevisionedEditingSessionMutation & {
   cut_action: string;
+};
+
+export type SegmentTransitionRequest = RevisionedEditingSessionMutation & {
+  /** `null`이면 전환을 끈다. */
+  transition: SceneTransition | null;
 };
 
 export type BrollOverrideRequest = RevisionedEditingSessionMutation & {
@@ -2238,6 +2256,22 @@ export const api = {
   ) =>
     request<EditingSession>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/cut-action`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionSegmentTransition: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: SegmentTransitionRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/transition`,
       {
         method: "PATCH",
         headers: {

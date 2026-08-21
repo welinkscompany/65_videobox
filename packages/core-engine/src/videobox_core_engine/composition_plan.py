@@ -12,6 +12,7 @@ from math import isfinite
 from typing import Any, Iterable
 
 from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.transitions import normalize_transition
 
 
 COMPOSITION_VERSION = "videobox_composition_v1"
@@ -570,6 +571,26 @@ def materialize_editing_session_timeline(
         used_track_ids.add(candidate)
         return candidate
 
+    # 장면의 전환을 그 장면을 **여는** 화면 클립에 싣는다.
+    #
+    # 장면 하나가 화면 클립 여러 개로 쪼개질 수 있다(override 창, 빈 구간).
+    # 전환은 장면이 시작하는 경계 하나에만 붙으므로 **가장 앞선 클립**만 받는다.
+    # 뒤쪽 클립까지 받으면 장면 한복판에서 전환이 또 돈다.
+    for segment_id, segment in segments.items():
+        transition = normalize_transition(segment.get("transition_in"))
+        if transition is None or str(segment.get("cut_action") or "keep") == "remove":
+            continue
+        opening = min(
+            (
+                clip for clip in tracks.get("broll", [])
+                if str(clip.get("segment_id") or "") == segment_id
+            ),
+            key=lambda clip: _number(clip.get("start_sec")),
+            default=None,
+        )
+        if opening is not None:
+            opening["transition"] = dict(transition)
+
     materialized["tracks"] = [
         {
             "track_id": materialized_track_id(kind),
@@ -623,6 +644,9 @@ class CompositionItem:
     media_revision: str | None = None
     overlay_type: str | None = None
     overlay_payload: dict[str, Any] = field(default_factory=dict)
+    # 앞 장면에서 이 클립으로 넘어오는 방법. **클립 경계에 붙는 값**이라
+    # 들어오는 쪽에 싣는다 -- 경계는 이 클립의 시작 시각 하나로 정해진다.
+    transition: dict[str, Any] | None = None
 
     def clipped(self, *, start_sec: float, end_sec: float) -> "CompositionItem | None":
         left, right = max(self.start_sec, start_sec), min(self.end_sec, end_sec)
@@ -638,6 +662,10 @@ class CompositionItem:
             media_controls=dict(self.media_controls), expected_content_sha256=self.expected_content_sha256,
             media_revision=self.media_revision, overlay_type=self.overlay_type,
             overlay_payload=dict(self.overlay_payload),
+            # 앞을 잘라 내면 **넘어올 앞 장면이 없다.** 전환은 경계에 붙은
+            # 값이므로 경계가 사라지면 같이 사라진다. 그대로 두면 구간
+            # 미리보기의 첫 프레임이 난데없이 전환으로 시작한다.
+            transition=dict(self.transition) if self.transition and left == self.start_sec else None,
         )
 
 
@@ -747,6 +775,9 @@ class CompositionPlan:
                     media_revision=str(raw.get("media_revision") or "").strip() or None,
                     overlay_type=str(raw.get("overlay_type")) if raw.get("overlay_type") is not None else None,
                     overlay_payload=dict(raw.get("overlay_payload") or {}) if isinstance(raw.get("overlay_payload"), dict) else {},
+                    # 전환은 **화면 클립에만** 붙는다. 소리 트랙의 경계에는
+                    # 넘길 그림이 없다 -- 조용히 무시하지 않고 아예 안 읽는다.
+                    transition=normalize_transition(raw.get("transition")) if track_type == "broll" else None,
                 ))
         cues: list[CaptionCue] = []
         for raw in captions:

@@ -89,6 +89,8 @@ describe("joinEditorSnapshot", () => {
           mediaRevision: null,
           controls: { gainDb: -3, fadeInSec: 0.1, fadeOutSec: 0.2, ducking: false },
         },
+        // 전환을 안 고른 장면. 안 고른 것과 "없음"을 구별하지 않는다.
+        transitionIn: null,
         ttsReplacement: null,
       }],
     });

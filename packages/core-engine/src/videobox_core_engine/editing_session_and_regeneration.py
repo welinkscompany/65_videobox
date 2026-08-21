@@ -66,6 +66,7 @@ from videobox_core_engine.editing_session import (
     update_segment_broll_override,
     update_segment_caption,
     update_segment_cut_action,
+    update_segment_transition,
     update_segment_music_override,
     update_segment_sfx_override,
     update_segment_shape_overlay,
@@ -401,6 +402,23 @@ class EditingSessionRegenerationMixin:
             session=session,
             segment_id=segment_id,
             cut_action=cut_action,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+
+    def update_editing_session_segment_transition(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        transition: dict[str, Any] | None,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_transition(
+            session=session,
+            segment_id=segment_id,
+            transition=transition,
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 

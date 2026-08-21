@@ -19,8 +19,10 @@ type SelectedSegment = Readonly<{
   startSec: number;
   endSec: number;
   nextSegmentId: string | null;
+  previousSegmentId?: string | null;
   cutAction: string;
   draftApplied: boolean;
+  transitionIn?: Readonly<{ type: string; durationSec: number }> | null;
   ttsReplacement?: Readonly<{ candidateId: string; assetId: string }> | null;
 }>;
 

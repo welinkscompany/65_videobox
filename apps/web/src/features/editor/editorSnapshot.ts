@@ -1,4 +1,4 @@
-import type { EditingSession, EditorPlaybackManifest } from "../../api";
+import type { EditingSession, EditorPlaybackManifest, SceneTransition } from "../../api";
 import { VideoBoxEditorAdapter, type EditorControls, type EditorViewModel } from "./editorViewModel";
 
 export type EditorSessionMedia = Readonly<{
@@ -27,8 +27,15 @@ export type EditorSessionSnapshot = Readonly<{
     cutAction: string;
     bgm: EditorSessionMedia | null;
     sfx: EditorSessionMedia | null;
+    /** 앞 장면에서 이 장면으로 넘어오는 방법. 안 골랐으면 null. */
+    transitionIn: EditorSessionTransition | null;
     ttsReplacement: EditorSessionTtsReplacement | null;
   }>>;
+}>;
+
+export type EditorSessionTransition = Readonly<{
+  type: string;
+  durationSec: number;
 }>;
 
 export type EditorSnapshot = Readonly<{
@@ -69,6 +76,16 @@ function ttsReplacement(value: Record<string, unknown> | null | undefined): Edit
   return candidateId && assetId ? { candidateId, assetId } : null;
 }
 
+function transition(value: SceneTransition | null | undefined): EditorSessionTransition | null {
+  const type = stringOrNull(value?.type);
+  // `none`은 "전환 없음"이다. 값이 아예 없는 것과 화면에서 구별하지 않는다.
+  if (!type || type === "none") return null;
+  return {
+    type,
+    durationSec: typeof value?.duration_sec === "number" ? value.duration_sec : 0.5,
+  };
+}
+
 export function joinEditorSnapshot(
   manifest: EditorPlaybackManifest,
   editingSession: EditingSession,
@@ -102,6 +119,7 @@ export function joinEditorSnapshot(
         cutAction: segment.cut_action,
         bgm: media(segment.music_override),
         sfx: media(segment.sfx_override),
+        transitionIn: transition(segment.transition_in),
         ttsReplacement: ttsReplacement(segment.tts_replacement),
       })),
     },

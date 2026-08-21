@@ -22,6 +22,11 @@ class TimelineClip:
     expected_content_sha256: str | None = None
     media_revision: str | None = None
     warning_provenance: list[str] = field(default_factory=list)
+    # 앞 장면에서 이 클립으로 넘어오는 방법(`{"type", "duration_sec", "chosen_by"}`).
+    # **경계에 붙는 값**이라 들어오는 쪽에 싣는다 -- 경계는 이 클립의 시작 시각
+    # 하나로 정해지므로 양쪽에 두면 서로 어긋날 자리가 생긴다.
+    # 값의 뜻과 허용 범위는 `videobox_core_engine.transitions`가 정한다.
+    transition: dict[str, object] | None = None
 
 
 @dataclass(slots=True, frozen=True)
