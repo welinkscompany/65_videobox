@@ -112,6 +112,33 @@ The inputs needs to be a constant frame rate; current rate of 1/0 is invalid
 - **길이 25.000초로 그대로**(전환 없을 때와 동일). 자막 위치도 안 밀림
 - `npm --prefix apps/web test -- --run` 1226개 전부 통과, `npx tsc --noEmit` 깨끗
 - 전환 관련 pytest 19 + 7 + 2개 통과
+- **백엔드 전체 pytest 단독 실행: 3943개 통과, 실패 0** (28분 26초)
+
+### 전체 pytest에서 걸린 것 둘 — 둘 다 원인이 다르다
+
+**하나는 내 회귀였다.** `transition_in`을 응답에 **늘** 실었더니 전환과 아무
+상관 없는 장면의 모양까지 바뀌어, 그 모양을 그대로 비교하던 `test_api.py`의
+legacy string-false 검사 2건이 깨졌다. `source_script_segment_id`가 쓰는
+`exclude_if` 방식으로 바꿔 **값이 있을 때만** 싣는다.
+
+**하나는 도구 탓이었다.** `test_smoke_hermes_yujin_creator_flow_script.py`가
+`AssertionError: None`으로 죽었는데, **단독으로 돌리면 통과한다.** 원인은
+Windows 콘솔 기본 인코딩(cp949)이 하위 프로세스의 한글 출력을 못 읽어
+읽기 스레드가 죽고 `result.stderr`가 `None`이 된 것이다.
+
+```
+UnicodeDecodeError: 'cp949' codec can't decode byte 0xec ...
+```
+
+**`PYTHONIOENCODING=utf-8`을 주면 사라진다.** 곁다리로 전체 수행 시간도
+59분 → 28분으로 줄었다. 전체 pytest를 돌릴 때 이 환경변수를 주는 것을 권한다.
+
+```powershell
+$env:PYTHONIOENCODING = "utf-8"; .venv\Scripts\python.exe -m pytest -q
+```
+
+[[videobox-windows-curl-mangles-korean-filenames]]와 같은 종류다 —
+**결함으로 적기 전에 도구부터 의심하라.**
 
 ## 검증하지 못한 것 — 나눠서 적는다
 
