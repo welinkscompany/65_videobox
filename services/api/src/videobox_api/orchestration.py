@@ -680,6 +680,23 @@ class ApiOrchestrator:
             expected_revision=expected_revision,
         )
 
+    def update_segment_transition(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        transition: dict[str, Any] | None,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_transition(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            transition=transition,
+            expected_revision=expected_revision,
+        )
+
     def update_segment_broll_override(
         self,
         *,

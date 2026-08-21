@@ -21,13 +21,15 @@ export type EditorCommandApi = Pick<typeof api,
   "updateEditingSessionImageOverlay" | "removeEditingSessionImageOverlay" | "updateEditingSessionTableOverlay" | "removeEditingSessionTableOverlay" |
   "updateEditingSessionShapeOverlay" | "removeEditingSessionShapeOverlay" |
   "updateEditingSessionTtsReplacement" | "clearEditingSessionTtsReplacement" |
-  "updateEditingSessionCaption" | "updateEditingSessionCaptionStyle"
+  "updateEditingSessionCaption" | "updateEditingSessionCaptionStyle" | "updateEditingSessionSegmentTransition"
 >;
 
 export type EditorCommandPort = Readonly<{
   undo(): Promise<EditingSession>;
   redo(): Promise<EditingSession>;
   setCutAction(input: { segmentId: string; cutAction: "keep" | "remove" }): Promise<EditingSession>;
+  /** 앞 장면에서 이 장면으로 넘어오는 방법. `null`이면 끈다. */
+  setSceneTransition(input: { segmentId: string; transition: { type: string; durationSec: number } | null }): Promise<EditingSession>;
   splitNarration(input: { segmentId: string; splitSec: number }): Promise<EditingSession>;
   mergeNarration(input: { leftSegmentId: string; rightSegmentId: string }): Promise<EditingSession>;
   setNarrationBounds(input: { segmentId: string; startSec: number; endSec: number }): Promise<EditingSession>;
@@ -90,6 +92,15 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
       sessionId,
       segmentId,
       { cut_action: cutAction, ...revise },
+    ),
+    setSceneTransition: ({ segmentId, transition }) => commandApi.updateEditingSessionSegmentTransition(
+      projectId,
+      sessionId,
+      segmentId,
+      {
+        transition: transition ? { type: transition.type, duration_sec: transition.durationSec } : null,
+        ...revise,
+      },
     ),
     splitNarration: ({ segmentId, splitSec }) => commandApi.splitEditingSessionSegment(projectId, sessionId, segmentId, { split_sec: splitSec, ...revise }),
     mergeNarration: ({ leftSegmentId, rightSegmentId }) => commandApi.mergeEditingSessionSegments(projectId, sessionId, { left_segment_id: leftSegmentId, right_segment_id: rightSegmentId, ...revise }),

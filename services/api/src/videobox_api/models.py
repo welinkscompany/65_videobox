@@ -754,6 +754,18 @@ class CutActionOverrideRequest(BaseModel):
         return self
 
 
+class SegmentTransitionRequest(BaseModel):
+    """이 장면으로 넘어올 때 쓸 전환.
+
+    ``transition``이 ``None``이거나 ``{"type": "none"}``이면 전환을 끈다.
+    실제 허용 값 검사는 `videobox_core_engine.transitions`가 한 벌만 갖는다 --
+    여기서 목록을 또 적으면 두 벌이 어긋난다.
+    """
+
+    expected_revision: int = Field(ge=1)
+    transition: dict[str, object] | None = None
+
+
 class BrollOverrideRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
@@ -1018,6 +1030,9 @@ class EditingSessionSegmentResponse(BaseModel):
     sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
     caption_style: dict[str, object] | None = None
+    # 앞 장면에서 이 장면으로 넘어오는 방법. 안 고른 장면에는 아예 없다 --
+    # 화면이 "없음"과 "고르지 않음"을 구별할 필요가 없게 둔다.
+    transition_in: dict[str, object] | None = None
     source_script_segment_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 

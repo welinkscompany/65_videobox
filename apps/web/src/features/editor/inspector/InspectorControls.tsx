@@ -9,6 +9,11 @@ import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
 import type { EditorCaptionStyle, EditorControls } from "../editorViewModel";
+import {
+  DEFAULT_SCENE_TRANSITION_DURATION_SEC,
+  SCENE_TRANSITION_CHOICES,
+  SCENE_TRANSITION_NONE,
+} from "./sceneTransitions";
 import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type InspectorTarget, type ShapeOverlayValue } from "./inspectorRegistry";
 
 type CutAction = "keep" | "remove";
@@ -17,6 +22,8 @@ export type InspectorAction =
   | Readonly<{ kind: "split-narration"; segmentId: string; splitSec: number }>
   | Readonly<{ kind: "merge-narration"; leftSegmentId: string; rightSegmentId: string }>
   | Readonly<{ kind: "set-cut-action"; segmentId: string; cutAction: CutAction }>
+  // 앞 장면에서 이 장면으로 넘어오는 방법. `transition`이 null이면 끈다.
+  | Readonly<{ kind: "set-transition"; segmentId: string; transition: Readonly<{ type: string; durationSec: number }> | null }>
   | Readonly<{ kind: "save-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string; assetId: string; controls: EditorControls }>
   | Readonly<{ kind: "clear-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string }>
   | Readonly<{ kind: "save-caption-style"; segmentIds: string[]; scope: CaptionStyleScope; style: EditorCaptionStyle }>
@@ -37,7 +44,11 @@ type SelectedSegment = Readonly<{
   startSec: number;
   endSec: number;
   nextSegmentId: string | null;
+  /** 앞에 붙은 장면. 없으면 넘어올 경계가 없어서 전환을 고를 수 없다. */
+  previousSegmentId?: string | null;
   cutAction: string;
+  /** 지금 이 장면에 걸려 있는 전환. 안 골랐으면 없다. */
+  transitionIn?: Readonly<{ type: string; durationSec: number }> | null;
   ttsReplacement?: Readonly<{ candidateId: string; assetId: string }> | null;
 }>;
 
@@ -145,6 +156,9 @@ export function InspectorControls({
   onAction,
 }: Props) {
   const [cutAction, setCutAction] = useState<CutAction>(() => asCutAction(selectedSegment?.cutAction ?? "keep"));
+  const [transition, setTransition] = useState<string>(
+    () => selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE,
+  );
   const [fadeInSec, setFadeInSec] = useState(0);
   const [fadeOutSec, setFadeOutSec] = useState(0);
   const [inSec, setInSec] = useState(0);
@@ -200,6 +214,12 @@ export function InspectorControls({
   useEffect(() => {
     setCutAction(asCutAction(selectedSegment?.cutAction ?? "keep"));
   }, [selectedSegment?.cutAction, selectedSegment?.segmentId]);
+
+  // 장면을 바꿔 고르면 그 장면에 실제로 걸린 값으로 되돌린다. 안 하면 앞
+  // 장면에서 고르던 값이 남아, 저장하지도 않은 전환이 걸린 것처럼 보인다.
+  useEffect(() => {
+    setTransition(selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE);
+  }, [selectedSegment?.transitionIn?.type, selectedSegment?.segmentId]);
 
   useEffect(() => {
     if (target?.kind === "media") {
@@ -332,6 +352,43 @@ export function InspectorControls({
           <Button disabled={disabled} onClick={() => emit({ kind: "set-cut-action", segmentId: selectedSegment.segmentId, cutAction })} type="button">
             컷 저장
           </Button>
+          {/*
+            앞 장면이 붙어 있을 때만 보여 준다. 첫 장면에는 넘어올 앞 장면이
+            없어서 고를 수 있는 척하면 배치가 거짓말을 한다.
+          */}
+          {selectedSegment.previousSegmentId ? (
+            <fieldset>
+              <legend>앞 장면에서 넘어오기</legend>
+              <label>
+                넘기는 방법
+                <NativeSelect
+                  aria-label="넘기는 방법"
+                  disabled={disabled}
+                  onChange={(event) => setTransition(event.target.value)}
+                  value={transition}
+                >
+                  <option value={SCENE_TRANSITION_NONE}>바로 넘기기</option>
+                  {SCENE_TRANSITION_CHOICES.map((choice) => (
+                    <option key={choice.value} value={choice.value}>{choice.label}</option>
+                  ))}
+                </NativeSelect>
+              </label>
+              <Button
+                disabled={disabled}
+                onClick={() => emit({
+                  kind: "set-transition",
+                  segmentId: selectedSegment.segmentId,
+                  transition: transition === SCENE_TRANSITION_NONE ? null : {
+                    type: transition,
+                    durationSec: selectedSegment.transitionIn?.durationSec ?? DEFAULT_SCENE_TRANSITION_DURATION_SEC,
+                  },
+                })}
+                type="button"
+              >
+                넘기기 저장
+              </Button>
+            </fieldset>
+          ) : null}
           {loadApprovedTtsCandidates ? (
             <fieldset>
               <legend>내레이션 음성</legend>

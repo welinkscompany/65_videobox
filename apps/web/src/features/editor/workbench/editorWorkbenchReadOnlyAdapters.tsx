@@ -81,8 +81,11 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
       startSec: selectedRange.startSec,
       endSec: selectedRange.endSec,
       nextSegmentId: selectedSessionSegmentIndex >= 0 ? session?.segments[selectedSessionSegmentIndex + 1]?.segmentId ?? null : null,
+      // 전환은 **앞 장면이 있어야** 고를 수 있다. 첫 장면이면 null이다.
+      previousSegmentId: selectedSessionSegmentIndex > 0 ? session?.segments[selectedSessionSegmentIndex - 1]?.segmentId ?? null : null,
       cutAction: selectedSessionSegment?.cutAction ?? "keep",
       draftApplied: false,
+      transitionIn: selectedSessionSegment?.transitionIn ?? null,
       ttsReplacement: selectedSessionSegment?.ttsReplacement ?? null,
     } : undefined}
     ttsCandidateScopeKey={ttsCandidateScopeKey}

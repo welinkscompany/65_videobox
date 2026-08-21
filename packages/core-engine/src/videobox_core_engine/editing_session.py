@@ -8,6 +8,7 @@ import uuid
 
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.transitions import normalize_transition
 from videobox_core_engine.editing_transactions import apply_user_transaction
 # 도형 프리셋 목록은 여기서 다시 정의하지 않고 그대로 가져다 쓴다. 예전 이름을
 # 그대로 두어 이 모듈에서 가져다 쓰던 곳은 손대지 않아도 된다.
@@ -821,6 +822,39 @@ def update_segment_cut_action(
             continue
         segment["cut_action"] = normalized_cut_action
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="cut_action_update", segment_id=segment_id, extra={"cut_action": normalized_cut_action})
+    raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+
+def update_segment_transition(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+    transition: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """이 장면으로 **넘어올 때** 쓸 전환을 정한다.
+
+    값을 들어오는 쪽 장면에 싣는 이유는 경계가 그 장면의 시작 시각 하나로
+    정해지기 때문이다. 앞 장면에 실으면 장면을 지우거나 순서를 바꿀 때
+    전환이 어느 경계 것이었는지 알 수 없게 된다.
+
+    첫 장면에도 저장은 된다. 앞에 붙은 장면이 없으면 렌더러가 조용히 넘긴다
+    (`build_plan_filter_graph`) -- 저장을 거절하면 순서를 바꿔 두 번째로
+    내려온 순간 owner가 다시 골라야 한다.
+    """
+    normalized = normalize_transition(transition)
+    updated = deepcopy(session)
+    for segment in updated.get("segments", []):
+        if str(segment.get("segment_id")) != segment_id:
+            continue
+        if normalized is None:
+            segment.pop("transition_in", None)
+        else:
+            segment["transition_in"] = normalized
+        return _apply_manual_mutation(
+            before=session, updated=updated, mutation_type="transition_update",
+            segment_id=segment_id,
+            extra={"transition": normalized["type"] if normalized else "none"},
+        )
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 

@@ -12,6 +12,7 @@ from videobox_api.models import (
     CreateEditingSessionRequest,
     CreateScriptDraftEditingSessionRequest,
     CutActionOverrideRequest,
+    SegmentTransitionRequest,
     EditingSessionResponse,
     EditorPlaybackManifestResponse,
     EditingSessionRevisionRequest,
@@ -305,6 +306,29 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/transition")
+    def patch_editing_session_segment_transition(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: SegmentTransitionRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_transition(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                transition=payload.transition,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)

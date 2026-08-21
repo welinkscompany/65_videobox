@@ -5,11 +5,11 @@ import subprocess
 import tempfile
 import os
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from math import ceil
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from videobox_core_engine.ass_subtitles import caption_band_px
 from videobox_core_engine.canonical_track import canonical_track_type
@@ -212,6 +212,41 @@ _SHAPE_OVERLAY_MOTION_SEC = 0.4
 # 0.4초를 24로 나누면 조각당 약 17ms -- 30fps에서 프레임보다 짧으므로 계단이
 # 보이지 않는다.
 _SHAPE_OVERLAY_MOTION_STEPS = 24
+
+
+def transition_boundaries(items: Iterable[Any]) -> list[tuple[Any, Any]]:
+    """전환이 실제로 걸리는 `(앞 장면, 들어오는 장면)` 쌍을 순서대로.
+
+    **두 곳이 반드시 같은 답을 내야 한다** -- 필터 그래프를 만드는 쪽과
+    ffmpeg 입력을 다는 쪽이 서로 다르게 세면 필터가 엉뚱한 입력을 가리킨다.
+    그래서 세는 규칙을 여기 한 벌만 둔다.
+
+    전환이 걸려 있어도 **앞 장면이 딱 붙어 있지 않으면 쌍이 아니다.** 사이가
+    비어 있으면 넘겨줄 그림이 없다 -- 지어내지 않고 그냥 빼는 쪽이 맞다.
+    """
+    ordered = sorted(
+        (item for item in items if item.track_type == "broll"),
+        key=lambda item: (item.start_sec, item.clip_id),
+    )
+    pairs: list[tuple[Any, Any]] = []
+    for item in ordered:
+        if not item.transition:
+            continue
+        previous = next(
+            (
+                candidate for candidate in ordered
+                if candidate is not item and abs(candidate.end_sec - item.start_sec) <= 1e-6
+            ),
+            None,
+        )
+        if previous is not None:
+            pairs.append((previous, item))
+    return pairs
+
+
+def _seconds(value: float) -> str:
+    """필터 문자열에 넣을 초. 부동소수 찌꺼기(`4.500000000000001`)를 잘라 낸다."""
+    return str(round(float(value), 6))
 
 
 def _escaped_filter_path(path: str) -> str:
@@ -579,6 +614,21 @@ def _default_overlay_font() -> str:
     return os.environ.get("VIDEOBOX_OVERLAY_FONT", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf")
 
 
+class TransitionSources(NamedTuple):
+    """전환 하나가 쓰는 두 입력, 그리고 앞 장면이 재료를 꺼낼 지점.
+
+    `outgoing_start_sec`을 렌더러가 **실제로 재서** 넘긴다. 앞 장면이 원본을
+    끝까지 다 쓴 경우 그 뒤에는 빌릴 프레임이 한 장도 없고, 그러면 `tpad`가
+    붙들 프레임도 없어 **전환이 통째로 사라진다.** 그때 ffmpeg는 실패하지
+    않는다 -- 성공(0)으로 끝나고 길이도 맞는데 화면만 딱 끊긴다. 실측으로
+    확인했다. 이 저장소가 가장 싫어하는 종류의 실패라 그냥 두지 않는다.
+    """
+
+    outgoing_index: int
+    incoming_index: int
+    outgoing_start_sec: float
+
+
 @dataclass(frozen=True, slots=True)
 class CompositionRenderInputs:
     """The one immutable composition/caption input accepted by every renderer."""
@@ -669,10 +719,63 @@ class FfmpegFinalRenderer:
         # proxy is a different profile, never a different composition.
         return CompositionRenderInputs(composition_plan=composition_plan, captions=composition_plan.captions)
 
+    def _frame_seconds(self) -> float:
+        """프레임 한 장의 길이. `video_fps`는 `30`일 수도 `30000/1001`일 수도 있다."""
+        numerator, separator, denominator = str(self.video_fps).partition("/")
+        frames_per_second = float(numerator) / float(denominator) if separator else float(numerator)
+        return 1.0 / frames_per_second if frames_per_second > 0 else 1.0 / 30.0
+
+    def _broll_fit_transform(self, controls: dict[str, Any]) -> str:
+        """화면 클립을 출력 크기에 맞추는 방법. 전환 양쪽도 **같은 것**을 써야 한다.
+
+        여기가 어긋나면 전환 중에만 그림이 튄다 -- 잘린 화면과 여백 넣은 화면이
+        1초 동안 서로 넘어가는 모양이 된다.
+        """
+        if controls["fit"] == "crop":
+            return (
+                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,"
+                f"crop={self.video_width}:{self.video_height}"
+            )
+        return (
+            f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+            f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
+        )
+
+    def _transition_side_filter(
+        self, *, source_index: int, source_start_sec: float, seconds: float,
+        speed: float, transform: str, sar: str, label: str,
+    ) -> str:
+        """전환 한쪽의 재료를 정확히 ``seconds``초짜리 스트림으로 만든다.
+
+        **`fps`가 맨 끝에 와야 한다.** `xfade`는 들어오는 스트림이 *고정
+        프레임률*이라야 받아 주는데, `trim`·`setpts`를 거치면 그 정보가 사라진다.
+        앞쪽에 두었다가 컨테이너에서 이렇게 거부당했다:
+
+            The inputs needs to be a constant frame rate; current rate of 1/0 is invalid
+
+        같은 이유로 **`settb`를 쓰지 않는다.** 시간기준을 다시 잡으면 프레임률이
+        `1/0`(모름)이 되어 xfade가 거부한다. 처음에 `settb=AVTB`를 넣었다가
+        이 사고를 냈다 -- 개발 기기의 ffmpeg 8.1은 통과시키고 컨테이너의 7.1은
+        거부해서, **로컬 테스트는 전부 초록인데 실물만 터졌다.**
+
+        `tpad=stop_mode=clone`은 원본이 모자랄 때의 대비다. 앞 장면의 남은
+        원본이 전환 길이보다 짧으면 마지막 프레임을 붙들어 길이를 채운다.
+        **길이를 못 채우면 xfade가 조용히 짧아져** 뒤가 어긋난다.
+        """
+        source_window = _seconds(source_start_sec + seconds * speed)
+        retime = "setpts=PTS-STARTPTS" if speed == 1.0 else f"setpts=(PTS-STARTPTS)/{speed}"
+        return (
+            f"[{source_index}:v]trim=start={_seconds(source_start_sec)}:end={source_window},{retime},"
+            f"{transform},setsar={sar},format=yuv420p,"
+            f"tpad=stop_mode=clone:stop_duration={_seconds(seconds)},"
+            f"trim=start=0:end={_seconds(seconds)},setpts=PTS-STARTPTS,fps={self.video_fps}[{label}]"
+        )
+
     def build_plan_filter_graph(
         self, *, composition_plan: CompositionPlan, source_indices: dict[str, int],
         export_overlay_indices: dict[int, int] | None = None,
         track_overlay_indices: dict[str, int] | None = None,
+        transition_source_indices: dict[str, TransitionSources] | None = None,
     ) -> str:
         """Build the shared timeline placement graph.
 
@@ -681,6 +784,11 @@ class FfmpegFinalRenderer:
         timeline PTS, and later `(start_sec, clip_id)` overlays win where
         intervals overlap.  That preserves leading/internal gaps instead of
         concatenating unrelated source segments.
+
+        **이 함수 하나가 완성본과 정확 미리보기 양쪽을 만든다.** 둘 다
+        `_render_composition_plan_to_mp4`를 거치므로 여기만 고치면 두 곳이
+        같이 바뀐다. `render_timeline_to_mp4`의 조각 추출+concat 경로는
+        `composition_plan` 없이 부를 때만 쓰이며 지금 제품 경로에는 없다.
         """
         duration = max(composition_plan.duration_sec, 0.001)
         sar = composition_plan.sample_aspect_ratio.replace(":", "/")
@@ -697,10 +805,7 @@ class FfmpegFinalRenderer:
             label = f"v_{item.clip_id}"
             duration_sec = item.end_sec - item.start_sec
             controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(duration_sec, 0.001))
-            if controls["fit"] == "crop":
-                transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,crop={self.video_width}:{self.video_height}"
-            else:
-                transform = f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
+            transform = self._broll_fit_transform(controls)
             # 배속을 걸면 원본 창이 **화면에서 차지하는 시간**은 그만큼 줄거나
             # 는다. 아래 loop/pad 판단은 전부 화면 시간 기준이므로 여기서 한 번
             # 환산해 두고 그 값만 쓴다.
@@ -735,6 +840,65 @@ class FfmpegFinalRenderer:
                 f"{source_filter},{transform}{dissolve},setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
             )
             next_canvas = f"canvas{ordinal}"
+            filters.append(f"[{canvas}][{label}]overlay=eof_action=pass:repeatlast=0[{next_canvas}]")
+            canvas = next_canvas
+        # ------------------------------------------------------------------
+        # 장면 전환.
+        #
+        # **아무것도 옮기지 않는다.** 전환은 들어오는 클립 B의 첫 `d`초 구간
+        # `[T, T+d]` 안에서만 일어나고, 그 구간에 `xfade(앞 장면의 남은 원본,
+        # B의 앞부분)`을 얹는다. B는 자기 자리에 그대로 있고 A도 그대로다.
+        # 그래서 **전체 길이·자막 위치가 하나도 안 움직인다.**
+        #
+        # A쪽 재료를 타임라인이 아니라 **원본 뒷부분**(`source_out_sec` 이후)에서
+        # 빌리는 것이 핵심이다. 타임라인에서 빌리면 A의 마지막 구간이 두 번 보인다.
+        #
+        # 두 클립을 모두 **덮어써야** 하므로 위 배치 루프가 끝난 뒤에 그린다.
+        for ordinal, (previous, item) in enumerate(transition_boundaries(composition_plan.items), start=1):
+            if transition_source_indices is None:
+                continue
+            indices = transition_source_indices.get(item.clip_id)
+            if indices is None:
+                continue
+            incoming_sec = item.end_sec - item.start_sec
+            outgoing_sec = previous.end_sec - previous.start_sec
+            # 전환이 옆 장면보다 길면 그 장면을 통째로 먹는다. 짧은 쪽에 맞춘다.
+            seconds = min(float(item.transition["duration_sec"]), incoming_sec, outgoing_sec)
+            if seconds <= 0:
+                continue
+            outgoing_index, incoming_index, outgoing_start_sec = indices
+            outgoing_controls = normalize_media_controls(
+                previous.media_controls, media_kind="broll", duration_sec=max(outgoing_sec, 0.001)
+            )
+            incoming_controls = normalize_media_controls(
+                item.media_controls, media_kind="broll", duration_sec=max(incoming_sec, 0.001)
+            )
+            filters.append(self._transition_side_filter(
+                source_index=outgoing_index,
+                # 앞 장면이 **원래 안 쓰고 남긴** 원본이다. 남은 것이 없으면
+                # 렌더러가 마지막 프레임 자리를 재서 넘겨 준다.
+                source_start_sec=outgoing_start_sec,
+                seconds=seconds, speed=float(outgoing_controls["speed"]),
+                transform=self._broll_fit_transform(outgoing_controls), sar=sar,
+                label=f"transition_out_{ordinal}",
+            ))
+            filters.append(self._transition_side_filter(
+                source_index=incoming_index,
+                # 들어오는 장면은 앞당기지 않는다. 자기 첫 프레임 그대로다.
+                source_start_sec=item.source_in_sec,
+                seconds=seconds, speed=float(incoming_controls["speed"]),
+                transform=self._broll_fit_transform(incoming_controls), sar=sar,
+                label=f"transition_in_{ordinal}",
+            ))
+            label = f"transition_{item.clip_id}"
+            filters.append(
+                f"[transition_out_{ordinal}][transition_in_{ordinal}]"
+                f"xfade=transition={item.transition['type']}:duration={_seconds(seconds)}:offset=0,"
+                # xfade는 안에서 yuv444p로 섞는다. 여기서 되돌려 놓지 않으면
+                # 캔버스에 얹을 때 변환기가 끼어든다.
+                f"format=yuv420p,setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
+            )
+            next_canvas = f"canvas_transition_{ordinal}"
             filters.append(f"[{canvas}][{label}]overlay=eof_action=pass:repeatlast=0[{next_canvas}]")
             canvas = next_canvas
         track_overlays = sorted(
@@ -1005,6 +1169,18 @@ class FfmpegFinalRenderer:
         source_indices: dict[str, int] = {}
         track_overlay_indices: dict[str, int] = {}
         soundless_source_clip_ids: set[str] = set()
+        broll_source_paths: dict[str, Path] = {}
+        # 디코더 스레드를 1로 묶을 입력들. 지금은 전환 입력만 들어간다.
+        #
+        # 전환 하나가 입력을 **둘** 늘린다. 이 저장소는 입력이 늘어 컨테이너의
+        # 프로세스 상한(128)에 걸린 사고를 이미 두 번 겪었고, 그때 ffmpeg는
+        # 이유를 말해 주지 않았다(`encoder_thread_limit` 참고). 전환 입력은
+        # 1초 남짓만 읽으므로 1스레드로 충분하다 -- 미리 줄여 둔다.
+        #
+        # **주의: 이것이 2026-08-22의 렌더 실패를 고친 것은 아니다.** 그건
+        # `settb`가 프레임률을 지워 xfade가 거부한 것이었다
+        # (`_transition_side_filter` 참고). 여기는 예방일 뿐이다.
+        single_thread_source_indices: set[int] = set()
         for item in composition_plan.items:
             if item.track_type == "overlay":
                 # Overlay items are represented in the canonical plan but need
@@ -1038,6 +1214,7 @@ class FfmpegFinalRenderer:
                 if controls["preserve_source_audio"] and not self._has_audio_stream(source):
                     soundless_source_clip_ids.add(item.clip_id)
                 should_loop = controls["loop"]
+                broll_source_paths[item.clip_id] = source
             elif item.track_type in {"bgm", "sfx"}:
                 source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
                 should_loop = item.track_type == "bgm"
@@ -1047,6 +1224,36 @@ class FfmpegFinalRenderer:
                 raise FinalRenderError(f"Exact preview source is missing: '{source}'. Restore or re-import it and retry.")
             source_indices[item.clip_id] = len(source_paths)
             source_paths.append((source, False, should_loop))
+        # 전환은 두 클립의 원본을 **한 번 더** 읽는다.
+        #
+        # 필터그래프에서 입력 하나는 한 번만 쓸 수 있다. 이미 배치에 쓴
+        # `[N:v]`를 전환에서 또 쓰려면 `split`으로 갈라야 하는데, 그러면 전환을
+        # 안 쓰는 클립의 사슬까지 전부 바꿔야 한다. 같은 파일을 입력으로 다시
+        # 다는 편이 기존 사슬을 하나도 건드리지 않는다 -- 이 파일이 화면 오버레이에
+        # 쓰는 것과 **같은 방식**이다. 값은 전환 하나당 디코더 두 개다.
+        transition_source_indices: dict[str, TransitionSources] = {}
+        for previous, item in transition_boundaries(composition_plan.items):
+            outgoing = broll_source_paths.get(previous.clip_id)
+            incoming = broll_source_paths.get(item.clip_id)
+            if outgoing is None or incoming is None:
+                continue
+            # 앞 장면이 원본을 어디까지 썼는지 **재서** 정한다. 남은 뒷부분이
+            # 있으면 거기서 빌리고, 끝까지 다 썼으면 마지막 프레임 자리에서
+            # 시작해 `tpad`가 그 한 장을 붙들게 한다. 이 계산을 빼면 전환이
+            # 조용히 사라진다(`TransitionSources` 참고).
+            last_frame_start = max(0.0, self._probe_media_duration(outgoing) - self._frame_seconds())
+            transition_source_indices[item.clip_id] = TransitionSources(
+                outgoing_index=len(source_paths),
+                incoming_index=len(source_paths) + 1,
+                outgoing_start_sec=min(previous.source_out_sec, last_frame_start),
+            )
+            # 이 둘은 **1초 남짓만 읽는다.** 디코더 스레드를 넉넉히 줄 이유가 없고,
+            # 주면 실제로 렌더가 통째로 죽는다 -- 컨테이너에서 실측했다.
+            # 자세한 이유는 `single_thread_source_indices` 참고.
+            single_thread_source_indices.add(len(source_paths))
+            single_thread_source_indices.add(len(source_paths) + 1)
+            source_paths.append((outgoing, False, False))
+            source_paths.append((incoming, False, False))
         export_overlay_indices: dict[int, int] = {}
         for overlay_index, overlay in enumerate(composition_plan.export_overlays):
             asset_uri = str(overlay.get("asset_uri") or "")
@@ -1067,6 +1274,7 @@ class FfmpegFinalRenderer:
             composition_plan=composition_plan, source_indices=source_indices,
             export_overlay_indices=export_overlay_indices,
             track_overlay_indices=track_overlay_indices,
+            transition_source_indices=transition_source_indices,
         )
         duration = max(composition_plan.duration_sec, 0.001)
         graph += ";" + self.build_plan_audio_filter_graph(
@@ -1091,14 +1299,17 @@ class FfmpegFinalRenderer:
         # 프로세스 상한(128)에 걸려 스레드 생성이 실패한다. 자세한 이유는
         # `encoder_thread_limit` 참고.
         command = [self.ffmpeg_binary, "-y", "-filter_complex_threads", threads, "-filter_threads", threads]
-        for path, is_image, should_loop in source_paths:
+        for source_index, (path, is_image, should_loop) in enumerate(source_paths):
             # 디코더도 상한을 지켜야 한다. 인코더·필터만 묶으면 입력 하나마다
             # 디코더가 호스트 CPU 수(16)만큼 스레드를 잡아, 입력 6개짜리 렌더가
             # 컨테이너 프로세스 상한(128)을 넘본다. 그 압박에서 스레드 생성이
             # 조용히 실패하면 오디오 브랜치만 일찍 끝난 채 성공(0)으로 끝날 수
             # 있다 — 2026-08-16에 20초 영상에 5초 소리만 담긴 완성본이 그렇게
             # 나왔다.
-            command += ["-threads", threads]
+            #
+            # 전환 입력은 그보다 더 묶는다. 1초 남짓만 읽는 입력에 스레드를
+            # 넉넉히 주면 상한을 넘겨 렌더가 통째로 죽는다.
+            command += ["-threads", "1" if source_index in single_thread_source_indices else threads]
             if should_loop:
                 command += ["-stream_loop", "-1"]
             if is_image:
@@ -1540,6 +1751,25 @@ class FfmpegFinalRenderer:
                 project_id=project_id, composition_plan=composition_plan, timeline_context=timeline,
                 output_path=output_path, subtitle_file_path=subtitle_file_path,
                 subtitle_ass_path=subtitle_ass_path, proxy_profile=proxy_profile,
+            )
+        # 여기부터가 **조각 추출 + concat 경로**다. 완성본도 정확 미리보기도
+        # 이쪽으로 나가지 않는다 -- 둘 다 위에서 `composition_plan`을 넘겨
+        # `_render_composition_plan_to_mp4`로 간다. 장면 전환은 그 그래프에만
+        # 구현돼 있다.
+        #
+        # **조용히 빼먹지 않는다.** 이 저장소가 가장 비싸게 배운 것이
+        # "화면엔 있는데 완성본엔 없다"이고, 그 사고는 두 렌더 경로 중 한 곳만
+        # 고쳐서 두 번 났다. 전환이 걸린 타임라인이 이 경로로 들어오면 여기서
+        # 멈춘다 -- 전환 없는 mp4를 성공이라고 돌려주는 것보다 낫다.
+        if any(
+            isinstance(clip, dict) and clip.get("transition")
+            for track in timeline.get("tracks", []) if isinstance(track, dict)
+            and canonical_track_type(track.get("track_type")) == "broll"
+            for clip in (track.get("clips") or [])
+        ):
+            raise FinalRenderError(
+                "Scene transitions render only from the composition plan. "
+                "Pass composition_plan to render this timeline."
             )
         verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
         # Keep extraction on the final-render path now so source/timeline
