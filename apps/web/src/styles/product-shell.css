@@ -68,6 +68,17 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog-card > [data-slot=button], .vb-catalog-card > a { margin-top: auto; }
 .vb-catalog-card__finished { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); font-weight:500; }
 .vb-catalog-empty { margin: var(--vb-space-4) 0 0; color:var(--vb-muted); font-size: var(--vb-text-md); }
+/* 보관·영구 삭제는 프로젝트를 여는 일보다 훨씬 드물게 하는 일이다. 카드에서
+   가장 눈에 띄는 자리는 `편집기 열기`와 다음 할 일이 계속 갖고, 관리는 그
+   아래 한 줄에 작게 둔다. 자리를 나눠 무게도 나눈다. */
+.vb-catalog-card__manage { display:flex; flex-wrap:wrap; gap: var(--vb-space-2); margin-top: var(--vb-space-2); }
+.vb-catalog-card__manage [data-slot=button] { font-size: var(--vb-text-sm); font-weight:500; height:auto; padding: var(--vb-space-1) var(--vb-space-3); }
+/* 보관함은 목록 아래에 접어 둔다. 늘 펴 두면 살아 있는 프로젝트와 보관한
+   프로젝트가 한 화면에서 섞여 보인다. */
+.vb-catalog-archive { margin-top: var(--vb-space-7); display:grid; gap: var(--vb-space-3); justify-items:start; }
+.vb-catalog-archive-list { display:grid; gap: var(--vb-space-2); width:100%; max-width:32rem; }
+.vb-catalog-archive-list p { margin:0; color:var(--vb-muted); font-size: var(--vb-text-sm); }
+.vb-catalog-archive-row { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); padding: var(--vb-space-2) var(--vb-space-3); border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); }
 /* 카드 제목은 편집기로 가는 링크인데 규칙이 없어서 브라우저 기본 파란 밑줄이
    나왔다 -- 승인 팔레트에 없는 색이다. 색을 바꾸는 게 아니라, 팔레트가
    닿지 않던 자리에 입힌다. */

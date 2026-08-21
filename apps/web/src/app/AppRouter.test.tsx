@@ -250,6 +250,124 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("article", { name: "출근길 브이로그 프로젝트" })).toBeInTheDocument();
   });
 
+  // 프로젝트 관리(보관·영구 삭제·보관함 되돌리기)는 왼쪽 기둥의 프로젝트 전환
+  // 목록 안에만 있었다. 그런데 그 목록은 `hasProject`가 참일 때만 그려지므로
+  // **프로젝트 목록 화면에서는 애초에 나오지 않는다.** 기둥을 위 띠로 옮기기로
+  // 한 이상(`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`) 관리는 여기서
+  // 되어야 한다. 띠는 고르는 것만 맡는다.
+  function catalogSummary(projectId: string, displayName: string) {
+    return {
+      project_id: projectId,
+      display_name: displayName,
+      updated_at: "2026-08-21T00:00:00Z",
+      current_stage: "plan" as const,
+      state: "ready" as const,
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: { label: "계속 만들기", href: `/projects/${projectId}/plan` },
+    };
+  }
+
+  const catalogNames: Record<string, string> = { project_a: "첫 영상", project_b: "둘째 영상" };
+
+  function mockCatalogSummaries() {
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockImplementation(async (projectId: string) =>
+      catalogSummary(projectId, catalogNames[projectId] ?? projectId));
+  }
+
+  const liveProjects = [
+    { project_id: "project_a", name: "첫 영상", status: "active", root_storage_uri: "local://a" },
+    { project_id: "project_b", name: "둘째 영상", status: "active", root_storage_uri: "local://b" },
+  ];
+
+  it("archives a video from its card after one confirm, and it drops off the list", async () => {
+    vi.spyOn(api, "listProjects")
+      .mockResolvedValueOnce(liveProjects as never)
+      .mockResolvedValue([liveProjects[0]] as never);
+    mockCatalogSummaries();
+    const archiveProject = vi.spyOn(api, "archiveProject").mockResolvedValue({ ...liveProjects[1], status: "archived" } as never);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관하기" }));
+    // 한 번 누른 것으로 사라지면 안 된다. 확인이 한 번 있다.
+    expect(archiveProject).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관 확인" }));
+
+    await waitFor(() => expect(archiveProject).toHaveBeenCalledWith("project_b"));
+    await waitFor(() => expect(screen.queryByRole("article", { name: "둘째 영상 프로젝트" })).not.toBeInTheDocument());
+  });
+
+  it("requires two separate confirmations before permanently deleting from a card", async () => {
+    vi.spyOn(api, "listProjects")
+      .mockResolvedValueOnce(liveProjects as never)
+      .mockResolvedValue([liveProjects[0]] as never);
+    mockCatalogSummaries();
+    const deleteProjectPermanently = vi.spyOn(api, "deleteProjectPermanently").mockResolvedValue(undefined as never);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 완전 삭제" }));
+    expect(deleteProjectPermanently).not.toHaveBeenCalled();
+    // 첫 확인은 되돌릴 수 없다는 것을 말하고, 지우지는 않는다.
+    expect(within(card).getByText(/되돌릴 수 없어요/)).toBeVisible();
+
+    fireEvent.click(within(card).getByRole("button", { name: /삭제 1차 확인/ }));
+    expect(deleteProjectPermanently).not.toHaveBeenCalled();
+    expect(within(card).getByText(/한 번 더 확인/)).toBeVisible();
+
+    fireEvent.click(within(card).getByRole("button", { name: /영구 삭제/ }));
+
+    await waitFor(() => expect(deleteProjectPermanently).toHaveBeenCalledWith("project_b"));
+    await waitFor(() => expect(screen.queryByRole("article", { name: "둘째 영상 프로젝트" })).not.toBeInTheDocument());
+  });
+
+  it("opens the archive on the projects screen and puts a video back", async () => {
+    const archived = { project_id: "project_c", name: "보관한 영상", status: "archived", root_storage_uri: "local://c" };
+    vi.spyOn(api, "listProjects").mockImplementation(async (includeArchived = false) =>
+      (includeArchived ? [liveProjects[0], archived] : [liveProjects[0]]) as never);
+    mockCatalogSummaries();
+    const restoreProject = vi.spyOn(api, "restoreProject").mockResolvedValue({ ...archived, status: "active" } as never);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    await screen.findByRole("article", { name: "첫 영상 프로젝트" });
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+
+    expect(await screen.findByText("보관한 영상")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "보관한 영상 되돌리기" }));
+
+    await waitFor(() => expect(restoreProject).toHaveBeenCalledWith("project_c"));
+  });
+
+  it("says the archive is empty on the projects screen instead of showing nothing", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([liveProjects[0]] as never);
+    mockCatalogSummaries();
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    await screen.findByRole("article", { name: "첫 영상 프로젝트" });
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+
+    expect(await screen.findByText("보관한 프로젝트가 없어요.")).toBeVisible();
+  });
+
+  it("shows a retryable message when a project action fails on the projects screen", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue(liveProjects as never);
+    mockCatalogSummaries();
+    vi.spyOn(api, "archiveProject").mockRejectedValue(new Error("network down"));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관하기" }));
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관 확인" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
+  });
+
   it("keeps a failed workspace summary out of project creation", async () => {
     const project = { project_id: "project_broken", name: "확인 필요", status: "active", root_storage_uri: "local://broken" };
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);
