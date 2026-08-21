@@ -32,6 +32,7 @@ BASE = "http://127.0.0.1:8188"
 PHOTOS = Path(r"D:\AI_Workspace_louis_office_50\20_project\65_videobox-project\drive-sync\내 얼굴 사진")
 #: ComfyUI input 아래의 폴더 이름. `LoadImageDataSetFromFolder`가 이 이름으로 읽는다.
 DATASET = "videobox-owner-face"
+#: **사진은 1024px 이하로 줄여서 넣는다.** 원본 크기로는 메모리가 터진다(위 참고).
 #: 학습 문장. 이 낱말이 나중에 프롬프트에서 얼굴을 부르는 열쇠가 된다.
 TRIGGER = "photo of ohwnrface person"
 LORA_NAME = "videobox-owner-face"
@@ -101,7 +102,11 @@ def graph() -> dict:
             "lora_dtype": "bf16", "quantized_backward": False, "algorithm": "LoRA",
             # 5090에 32GB가 있어도 LM Studio가 같이 물고 있다. 체크포인팅을 끄면
             # 학습이 아니라 메모리가 먼저 터진다.
-            "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": False,
+            # 2026-08-22 실측: 원본 크기(최대 2639px) 18장으로 돌렸더니 74분 만에
+            # **GPU 메모리 부족**으로 죽었다(60.45GiB 요구 / 31.84GiB 한계).
+            # 사진을 1024px로 줄이고 `offloading`을 켠다 -- 안 쓰는 층을 램으로
+            # 내려 두는 옵션이라 느려지지만 32GB 안에 들어간다.
+            "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": True,
             "existing_lora": "[None]", "bucket_mode": False, "bypass_mode": False}},
         "7": {"class_type": "SaveLoRA", "inputs": {
             "lora": ["6", 0], "prefix": f"loras/{LORA_NAME}", "steps": STEPS}},
