@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ClipboardCheck, Images, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ClipboardCheck, Images, Menu, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
 
@@ -31,6 +31,7 @@ export function TopBar({
   onNavigate,
   onSelectProject,
   onOpenSettings,
+  children,
 }: {
   projectId: string;
   projects: readonly ShellProject[];
@@ -38,8 +39,11 @@ export function TopBar({
   onNavigate: (projectId: string, section: ShellSection) => void;
   onSelectProject: (projectId: string) => void;
   onOpenSettings: () => void;
+  /** 작업 상태처럼 띠 오른쪽에 붙는 것. 껍데기가 그 내용을 알 필요는 없다. */
+  children?: ReactNode;
 }) {
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const current = projects.find((project) => project.project_id === projectId);
   const hasProject = Boolean(current);
   const others = projects.filter((project) => project.project_id !== projectId);
@@ -94,10 +98,26 @@ export function TopBar({
       ) : null}
 
       <div className="vb-top-bar__end">
-        <Button type="button" variant="outline" onClick={onOpenSettings}>
-          <SettingsIcon aria-hidden="true" />
-          설정
-        </Button>
+        {children}
+        {/* 왼쪽 기둥에 있던 **전체 메뉴 4개**가 여기로 온다. 빼먹으면 내 라이브러리와
+            촬영본 정리가 갈 수 없는 곳이 된다 -- 기둥을 없애는 변경에서 가장 흔한 사고다.
+            띠에 네 개를 그대로 늘어놓으면 다시 목록이 되므로 한 겹 접어 둔다. */}
+        <div className="vb-top-bar__menu">
+          <Button type="button" variant="outline" aria-expanded={menuOpen} aria-label="전체 메뉴" onClick={() => setMenuOpen((open) => !open)}>
+            <Menu aria-hidden="true" />
+          </Button>
+          {menuOpen ? (
+            <nav aria-label="전체 메뉴" className="vb-top-bar__menu-list">
+              <a href="/projects">프로젝트</a>
+              <a href="/library">내 라이브러리</a>
+              <a href="/footage">촬영본 정리</a>
+              <Button type="button" variant="outline" onClick={() => { setMenuOpen(false); onOpenSettings(); }}>
+                <SettingsIcon aria-hidden="true" />
+                설정
+              </Button>
+            </nav>
+          ) : null}
+        </div>
       </div>
     </header>
   );

@@ -73,14 +73,26 @@ describe("위 띠", () => {
     expect(onSelectProject).toHaveBeenCalledWith("b");
   });
 
-  it("설정으로 가는 길이 남아 있다", () => {
-    // 왼쪽 기둥이 없어지면서 여기 있던 것이 조용히 사라지면 안 된다.
+  it("왼쪽 기둥에 있던 전체 메뉴 넷이 하나도 안 사라진다", () => {
+    // 기둥을 없애는 변경에서 가장 흔한 사고다. 빼먹으면 내 라이브러리와 촬영본
+    // 정리가 **갈 수 없는 곳**이 된다.
     const onOpenSettings = vi.fn();
     renderBar({ onOpenSettings });
 
-    fireEvent.click(screen.getByRole("button", { name: "설정" }));
+    fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
 
+    const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
+    for (const label of ["프로젝트", "내 라이브러리", "촬영본 정리"]) {
+      expect(within(menu).getByRole("link", { name: label })).toBeVisible();
+    }
+    fireEvent.click(within(menu).getByRole("button", { name: "설정" }));
     expect(onOpenSettings).toHaveBeenCalled();
+  });
+
+  it("전체 메뉴는 접혀 있다 — 띠가 다시 목록이 되지 않는다", () => {
+    renderBar();
+
+    expect(screen.queryByRole("navigation", { name: "전체 메뉴" })).toBeNull();
   });
 
   it("프로젝트가 아직 없으면 단계를 보여 주지 않는다", () => {
@@ -88,6 +100,7 @@ describe("위 띠", () => {
     renderBar({ projects: [], projectId: "" });
 
     expect(screen.queryByRole("navigation", { name: "프로젝트 단계" })).toBeNull();
-    expect(screen.getByRole("button", { name: "설정" })).toBeVisible();
+    // 프로젝트가 없어도 전체 메뉴로는 갈 수 있어야 한다.
+    expect(screen.getByRole("button", { name: "전체 메뉴" })).toBeVisible();
   });
 });
