@@ -1030,9 +1030,12 @@ class EditingSessionSegmentResponse(BaseModel):
     sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
     caption_style: dict[str, object] | None = None
-    # 앞 장면에서 이 장면으로 넘어오는 방법. 안 고른 장면에는 아예 없다 --
-    # 화면이 "없음"과 "고르지 않음"을 구별할 필요가 없게 둔다.
-    transition_in: dict[str, object] | None = None
+    # 앞 장면에서 이 장면으로 넘어오는 방법.
+    #
+    # **안 고른 장면에는 이 칸이 아예 없다**(`source_script_segment_id`와 같은
+    # 방식). 늘 실어 보내면 전환을 안 쓰는 장면의 응답 모양까지 바뀌고,
+    # 실제로 그 모양을 그대로 비교하던 시험 둘이 깨졌다.
+    transition_in: dict[str, object] | None = Field(default=None, exclude_if=lambda value: value is None)
     source_script_segment_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
