@@ -160,6 +160,10 @@ workspace 이미지를 다시 만들어 **공유 스택을 갈아끼운다.** �
 - 새 시험 파일 + 직접 영향받는 파일 **40개 통과**
   (`test_project_id_never_collides.py`, `test_domain_models.py`,
   `test_handoff_entry_point.py`, `test_project_rename.py`, `test_project_archive.py`)
+- 넓힌 범위 **410개 통과, 43개 건너뜀** (12분 55초)
+  (`test_api.py` 전체 + `test_cross_project_job_dashboard.py` +
+  `test_postgres_project_store.py`) — API 표면 전체와 두 저장소를 다 지난다
+- 개발선을 병합한 뒤 다시 **17개 통과** (진입점·식별자·도메인 모델)
 
 **전체 pytest는 단독으로 돌리지 못했다. 이건 확인하지 못한 채로 남는다.**
 
@@ -174,10 +178,11 @@ workspace 이미지를 다시 만들어 **공유 스택을 갈아끼운다.** �
 남이 돌리고 있는지 먼저 보는 편이 낫다. 안 보고 띄우면 서로를 느리게 만들고
 **둘 다 근거로 쓸 수 없는 값**이 나온다.
 
-다음 세션에서 기계가 한가할 때 `.venv\Scripts\python.exe -m pytest`를 단독으로
-한 번 돌려 주면 이 칸이 닫힌다. 다만 이번 변경이 건드리는 것은 문자열 하나를
-만드는 순수 함수 하나이고, 옛 모양을 그대로 박아 둔 곳은
-`tests/test_domain_models.py` 하나뿐이라(전체 grep으로 확인) 남은 위험은 작다고 본다.
+대신 **넓힌 범위를 410개까지 돌려 놨다**(위). 다음 세션에서 기계가 한가할 때
+`.venv\Scripts\python.exe -m pytest`를 단독으로 한 번 돌려 주면 이 칸이 닫힌다.
+다만 이번 변경이 건드리는 것은 문자열 하나를 만드는 순수 함수 하나이고, 옛 모양을
+그대로 박아 둔 곳은 `tests/test_domain_models.py` 하나뿐이라(전체 grep으로 확인)
+남은 위험은 작다고 본다.
 
 ## 안 한 것 / 확인하지 못한 것
 
