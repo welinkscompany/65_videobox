@@ -5,11 +5,13 @@ import { Button } from "../../components/ui/button";
  *  `continue` — 만들던 편집본으로. 초안이 있을 때만.
  *  `script`   — 대본 붙여넣기 / 파일 불러오기.
  *  `footage`  — 찍어 둔 영상에서 말을 받아써 대본을 만든다(2026-08-21에 뚫렸다).
+ *  `draft`    — 주제만 알려 주면 유진이 대본 초안을 쓴다(2026-08-21에 뚫렸다).
  *
- *  아직 없는 길(유진이 처음부터 대본 쓰기)은 **일부러 빼 두었다.**
- *  없는 기능의 자리를 흉내 내면 배치가 거짓말을 하고, 익숙해서 쉬운 게 아니라
- *  익숙해서 더 헷갈리게 된다(`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`). */
-export type StartPath = "continue" | "script" | "footage";
+ *  **앞의 셋은 전부 이미 가진 것을 전제했다** — 만들던 편집본, 써 둔 대본, 찍어 둔
+ *  영상. 아무것도 없는 사람은 들어갈 문이 없었고, 그래서 네 번째 자리를 비워 뒀다는
+ *  주석이 여기 있었다. 그 길이 실제로 뚫렸으므로 이제는 감추는 쪽이 거짓말이다
+ *  (`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`). */
+export type StartPath = "continue" | "script" | "footage" | "draft";
 
 export function StartChooser({
   hasDraft,
@@ -45,6 +47,15 @@ export function StartChooser({
         >
           <strong>찍어 둔 영상이 있어요</strong>
           <span>영상에서 말을 받아써 대본으로 만듭니다.</span>
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="vb-start-path"
+          onClick={() => onStart("draft")}
+        >
+          <strong>아직 아무것도 없어요</strong>
+          <span>주제만 알려 주면 유진이 대본 초안을 써 드려요.</span>
         </Button>
       </div>
     </section>

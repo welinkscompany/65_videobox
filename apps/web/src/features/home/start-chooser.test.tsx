@@ -54,12 +54,27 @@ describe("시작 선택창", () => {
     expect(screen.getByRole("button", { name: /찍어 둔 영상이 있어요/ })).toBeVisible();
   });
 
-  it("아직 만들지 않은 길은 아예 보여 주지 않는다", () => {
-    // 유진이 처음부터 대본을 써 주는 길은 아직 없다. 회색으로 띄워 두는 것도
-    // 안 한다 -- 누를 수 없는 단추는 고장으로 읽힌다.
+  it("아무것도 없는 사람에게도 들어갈 길을 준다", () => {
+    // **갱신 이유(2026-08-21).** 이 시험은 원래 "아직 만들지 않은 길은 아예
+    // 보여 주지 않는다"였고, 유진이 처음부터 대본을 써 주는 길이 없다는 것을
+    // 고정하고 있었다. 그 사이 그 길이 실제로 뚫렸다
+    // (`POST .../script-drafts`) -- 이제는 **감추는 쪽이** 거짓말이다.
+    // 지키려던 것은 "없는 길을 흉내 내지 않는다"이지 "유진 대본 길이 없다"가
+    // 아니었으므로, 지키는 것은 그대로 두고 값만 현재 사실에 맞춘다.
+    //
+    // 앞의 세 길은 전부 **이미 가진 것**을 전제한다 -- 만들던 편집본, 써 둔
+    // 대본, 찍어 둔 영상. 아무것도 없는 사람은 들어갈 문이 없었다.
     render(<StartChooser hasDraft={false} onStart={vi.fn()} />);
 
-    expect(screen.queryByRole("button", { name: /유진이 대본/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /유진이 대본 초안/ })).toBeVisible();
+  });
+
+  it("고른 길이 유진 대본이면 그것도 그대로 알려 준다", () => {
+    const onStart = vi.fn();
+    render(<StartChooser hasDraft={false} onStart={onStart} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /아직 아무것도 없어요/ }));
+    expect(onStart).toHaveBeenCalledWith("draft");
   });
 
   it("고른 길이 영상이면 그것도 그대로 알려 준다", () => {
@@ -70,14 +85,17 @@ describe("시작 선택창", () => {
     expect(onStart).toHaveBeenCalledWith("footage");
   });
 
-  it("고를 것이 셋을 넘지 않는다", () => {
-    // **갱신 이유(2026-08-21).** 원래 상한이 둘이었다. 그 둘은 "지금 뚫려 있는
-    // 길이 둘"이라는 당시 사실을 적은 것이지, 둘이 옳은 수라는 결정이 아니었다.
-    // 지키려는 것은 수가 아니라 **이 화면이 다시 목록이 되지 않는 것**이다 --
-    // 이 선택창이 생긴 이유가 "다섯 개가 다 그럴듯해 보인다"였다.
-    // 길이 하나 늘었으므로 상한도 하나 올린다. 더 올릴 때는 이 이유를 다시 본다.
+  it("고를 것이 넷을 넘지 않는다", () => {
+    // **갱신 이유(2026-08-21, 두 번째).** 상한이 둘 → 셋 → 넷으로 왔다. 매번
+    // "지금 뚫려 있는 길이 몇인가"라는 당시 사실을 적은 것이지, 그 수가 옳다는
+    // 결정이 아니었다. 지키려는 것은 수가 아니라 **이 화면이 다시 목록이 되지
+    // 않는 것**이다 -- 이 선택창이 생긴 이유가 "다섯 개가 다 그럴듯해 보인다"였다.
+    //
+    // **넷이 그 이유에 닿는 자리다.** 다음에 길을 또 더하고 싶으면 상한을 올리기
+    // 전에 먼저 물어라: 새 길이 정말 다른 시작점인가, 아니면 이미 있는 길의
+    // 변형인가. 변형이면 그 길 안에서 고르게 한다.
     render(<StartChooser hasDraft onStart={vi.fn()} />);
 
-    expect(screen.getAllByRole("button")).toHaveLength(3);
+    expect(screen.getAllByRole("button")).toHaveLength(4);
   });
 });

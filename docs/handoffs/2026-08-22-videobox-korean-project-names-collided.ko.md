@@ -1,7 +1,7 @@
 # 한글 이름이 한 글자가 되던 문제 — 진짜 위험은 "조용히 섞인다"였다
 
 - 작성: 2026-08-22 (작업은 2026-08-21 밤부터, 실측 날짜는 본문에 그대로 적는다)
-- 앞 문서: `2026-08-21-videobox-top-bar-says-the-shape.ko.md`
+- 앞 문서: `2026-08-21-videobox-yujin-writes-the-first-draft.ko.md`
 - 개발선: `codex/videobox-container-compatibility`
 
 ## 한 줄

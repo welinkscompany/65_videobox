@@ -48,6 +48,11 @@ export type SourceVideoStart = { asset_id: string; script_text: string; spoken_s
  *  아는 척하지 않는다(§10.14 2-C). */
 export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; image_prompt?: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
 export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
+/** 유진이 쓴 대본 초안. **확정이 아니다** -- `script_text`는 owner가 고치는 글이고,
+ *  고친 뒤에야 `createCreationBrief`로 넘어간다. */
+export type ScriptDraftScene = { scene_number: number; narration: string; visual: string };
+export type ScriptDraft = { title: string; script_text: string; scenes: ScriptDraftScene[] };
+export type ScriptDraftRequest = { topic: string; duration_sec?: number; scene_count?: number };
 export type MediaInboxAsset = { filename: string; size_bytes: number };
 export type MediaInboxImport = { asset_id: string; project_id: string; asset_type: string; storage_uri: string };
 export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
@@ -1771,6 +1776,7 @@ export const api = {
   uploadDraftNarration: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration/upload`, { method: "POST", body: form }); },
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listSceneImages: (projectId: string) => request<{ images: SceneImage[] }>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`),
+  createScriptDraft: (projectId: string, payload: ScriptDraftRequest) => request<ScriptDraft>(`/api/projects/${encodeURIComponent(projectId)}/script-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
   /** 올린 영상에서 말을 받아써 대본으로 돌려준다. 받아쓰기가 이 요청 **안에서**
    *  끝나므로 10분짜리 영상이면 몇 분이 걸린다 -- 부르는 쪽이 기다리는 동안
