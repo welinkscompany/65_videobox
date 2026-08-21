@@ -106,6 +106,19 @@ def graph() -> dict:
             # **GPU 메모리 부족**으로 죽었다(60.45GiB 요구 / 31.84GiB 한계).
             # 사진을 1024px로 줄이고 `offloading`을 켠다 -- 안 쓰는 층을 램으로
             # 내려 두는 옵션이라 느려지지만 32GB 안에 들어간다.
+            # **2차도 실패했다 — 이번엔 4시간을 넘겨 안 끝났다(14,409초).**
+            #
+            # 내 방법이 틀렸다. 사진을 1024px로 줄이면서 `offloading`도 **같이**
+            # 켰다. offloading은 안 쓰는 층을 램으로 내렸다 올리므로 훨씬 느리다.
+            # 1024px만으로 메모리가 충분했을 수도 있는데 확인하지 않았다.
+            #
+            # **다음 사람: 한 번에 하나만 바꿔라.**
+            #   1) `offloading: False`로 되돌리고 1024px 그대로 돌린다.
+            #      들어가면 그걸로 끝이다 -- 1차 실패는 사진 크기 탓이었던 것이다.
+            #   2) 그래도 메모리가 터지면 `STEPS`를 800으로, 그다음 `RANK`를 8로.
+            #   3) 그래도면 사진을 768px로 줄이고, 마지막에 offloading을 켠다.
+            #
+            # 시간을 재서 남겨라. 지금 4시간 상한(`main`의 while)도 근거 없는 값이다.
             "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": True,
             "existing_lora": "[None]", "bucket_mode": False, "bypass_mode": False}},
         "7": {"class_type": "SaveLoRA", "inputs": {
