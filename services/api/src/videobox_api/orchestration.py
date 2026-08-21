@@ -346,6 +346,16 @@ class ApiOrchestrator:
             raw_video_asset_id=raw_video_asset_id,
         )
 
+    def transcribe_source_video(self, *, project_id: str, asset_id: str) -> dict[str, Any]:
+        """올린 영상에서 말을 받아써 **대본으로 쓸 글**까지 돌려준다.
+
+        `start_transcription`은 주소만 돌려주고 글을 버린다. 화면은 그 글을 보여
+        주고 대본으로 삼아야 하므로 여기서 함께 꺼낸다. 받아쓰기는 자산 종류를
+        가리지 않아 영상 파일에도 그대로 돈다.
+        """
+        started = self.pipeline.start_transcription(project_id=project_id, narration_asset_id=asset_id)
+        return self.pipeline.get_transcription_result(project_id=project_id, job_id=started["job_id"])
+
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
         result = self.pipeline.start_transcription(
             project_id=project_id,

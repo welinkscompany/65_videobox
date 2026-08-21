@@ -4,6 +4,10 @@ from fastapi import HTTPException, status
 
 
 def _http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, ValueError) and str(exc) == "source_video_has_no_speech":
+        # 말이 없는 영상은 잘못된 요청이 아니라 **쓸 수 없는 재료**다. 화면이
+        # "소리가 없어요"라고 말할 수 있게 422로 구분한다.
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="source_video_has_no_speech")
     if isinstance(exc, ValueError) and str(exc) == "asset_missing":
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
     if isinstance(exc, FileNotFoundError):

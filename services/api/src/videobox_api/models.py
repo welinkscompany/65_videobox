@@ -382,6 +382,16 @@ class BrollAssetRegistrationRequest(AssetRegistrationRequest):
     tags: list[str] = Field(default_factory=list)
 
 
+class SourceVideoStartResponse(BaseModel):
+    """찍어 둔 영상으로 시작할 때 화면이 받는 것."""
+
+    asset_id: str
+    script_text: str
+    #: 자막이 어디에 놓일지는 받아쓴 구간이 정한다. 문장만 돌려주면 자막이
+    #: 말한 자리에 안 붙는다.
+    spoken_segment_count: int
+
+
 class SceneImageCreateRequest(BaseModel):
     """대본의 한 장면에 얹을 그림 하나. §10.14 조항 2-C."""
 
