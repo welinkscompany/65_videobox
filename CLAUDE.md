@@ -59,9 +59,11 @@
 | 미해결 수정 backlog | `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` |
 | **최신 세션 인계** | `docs/handoffs/2026-08-21-videobox-scene-images-and-the-donkey.ko.md` |
 
-승인된 시각 결정은 현재 네 건이다. 전부 사용자가 명시 승인했고 재승인 없이 바꾸지 않는다.
+승인된 시각 결정은 현재 다섯 건이다. 전부 사용자가 명시 승인했고 재승인 없이 바꾸지 않는다.
 경로는 위 표의 `docs/decisions/`다. **색은 가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
 
+- `2026-08-21-capcut-shell-layout.ko.md` — **왼쪽 기둥을 없애고 위 띠로**(캡컷 배치).
+  따라가는 것은 **껍데기뿐이고 기능 범위는 §2.1 그대로다**
 - `2026-08-21-editor-back-to-light.ko.md` — **편집 화면도 흰 톤**. 하루 썼던
   `2026-08-20-editor-dark-surface.ko.md`를 되돌린 것이다. 미리보기 무대만 어둡다
 - `2026-08-05-dashboard-white-orange-direction.ko.md` — **현행 팔레트**:
