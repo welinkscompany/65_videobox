@@ -202,9 +202,9 @@ function ProjectsPage() {
       onOpenSettings={() => void navigate({ to: "/settings/general" })}
     >
     <main data-testid="projects-catalog" className="vb-catalog">
-      <p className="vb-eyebrow">VideoBox</p>
+      {/* `VideoBox` 이름표를 뺐다 -- 위 띠가 이미 말한다. 캡컷 홈에도 가운데에
+          제품 이름이 또 적혀 있지 않다. */}
       <h1>프로젝트</h1>
-      <p>고르기 · 새로 만들기</p>
       {/* 새 프로젝트 입력은 **목록 위**에 둔다. 예전에는 카드 6개를 지나 맨 아래로
           스크롤해야 나왔다. */}
       {isCreating ? (

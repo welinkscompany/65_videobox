@@ -143,7 +143,7 @@ describe("RightDock", () => {
   });
 
   it("shows the selected clip's properties first and already open", () => {
-    // 캡컷은 클립을 누르면 속성이 이미 거기 있다. 우리는 `유진과 편집 항목` →
+    // 캡컷은 클립을 누르면 속성이 이미 거기 있다. 우리는 `세부 정보` →
     // `편집 항목 열기` → `편집 대상` 셀렉트까지 **네 겹**을 지나야 속도에 닿았다.
     // 2026-08-17에 컷 도구에서 고친 것과 같은 병이 클립 속성에 남아 있었다.
     render(<PersistentDock />);

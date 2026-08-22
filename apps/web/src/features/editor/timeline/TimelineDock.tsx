@@ -672,7 +672,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     <div className="vb-editor-workbench__timeline-head">
       <h2>타임라인</h2>
       <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
-      <p>클릭으로 재생 위치를 보고, 화살표·Home·End 키로 탐색합니다.</p>
+      {/* 조작 설명 한 줄을 뺐다(owner 지시 2026-08-22: 설명 문장을 키워드로).
+          클릭해서 재생 위치를 보는 것은 타임라인이면 다 그렇고, 화살표·Home·End는
+          눌러 보면 안다. 캡컷 타임라인에도 이런 안내가 없다. */}
       {/* 확대·축소는 `+`/`-` 키로만 됐다. 안내에 적어 두어도 **눈에 보이는 단추가
           없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다. */}
       <span className="vb-editor-workbench__timeline-zoom">

@@ -10,6 +10,20 @@
 .vb-editor-workbench__toolbar, .vb-editor-workbench__timeline, .vb-editor-workbench__dock, .vb-editor-workbench__preview { border: 1px solid var(--border); border-radius: 0.75rem; background: var(--card); }
 .vb-editor-workbench__toolbar { display: flex; justify-content: space-between; align-items: center; gap: var(--vb-space-3); padding: var(--vb-space-3) var(--vb-space-4); }
 .vb-editor-workbench__toolbar div { display: flex; gap: var(--vb-space-2); }
+
+/* **툴바 단추를 캡컷 크기로 줄인다(owner 지시 2026-08-22).**
+   > "지금 설명하는 문장이나 글자크기가 커서 버튼 자체가 크잖아"
+
+   맞는 지적이다. 캡컷 편집기 툴바는 **작은 아이콘 + 작은 글씨** 한 줄이고, 그래서
+   열한 개가 한 줄에 들어간다. 우리 단추는 기본 크기(글씨 14px·높이 36px)라 여덟 개가
+   툴바를 꽉 채웠다. 이름을 줄인 것만으로는 모자라고 크기도 같이 줄여야 한다. */
+.vb-editor-workbench__toolbar [data-slot="button"] {
+  height: auto;
+  padding: var(--vb-space-1) var(--vb-space-2);
+  font-size: var(--vb-text-sm);
+  font-weight: 500;
+}
+.vb-editor-workbench__toolbar [data-slot="button"] svg { width: 1rem; height: 1rem; }
 .vb-editor-workbench__body, .vb-editor-workbench__panels { min-width:0; min-height:0; height:100%; max-height:100%; overflow:hidden; }
 .vb-editor-workbench__dock { min-width:0; min-height:0; max-height:100%; height:100%; overflow: auto; padding: var(--vb-space-3); }
 .vb-editor-workbench__summary { padding-block: var(--vb-space-2); border-bottom: 1px solid var(--border); }

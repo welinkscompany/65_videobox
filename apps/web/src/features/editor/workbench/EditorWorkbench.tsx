@@ -277,7 +277,7 @@ function EditorWorkbenchInstance({
   /** 도크 단추. **방금 누른 쪽이 이긴다.**
    *
    * 좁은 데스크톱은 도크를 하나만 보여 주는데, 어느 쪽을 보일지는 `leftOpen`이
-   * 먼저 정했다. 그래서 왼쪽이 열려 있으면 `유진과 편집 항목`을 눌러도 **아무 일도
+   * 먼저 정했다. 그래서 왼쪽이 열려 있으면 `세부 정보`을 눌러도 **아무 일도
    * 없는 것처럼** 보였다 -- 왼쪽을 먼저 닫아야 나왔다(2026-08-19 배포 화면에서 확인).
    * 처음 쓰는 사람은 그것을 고장으로 읽는다.
    *
@@ -440,11 +440,11 @@ function EditorWorkbenchInstance({
       return { routeKey: viewRouteKey, request: { requestId: (currentRequest?.requestId ?? 0) + 1, source } };
     });
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "자산과 대본" : "유진과 편집 항목"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "소재" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
-  const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "자산과 대본" : "유진과 편집 항목"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
+  const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "소재" : "세부 정보"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
   const leftVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.leftOpen);
   const rightVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.rightOpen);
   // 지금 그 도크가 **실제로 보이는가**. 넓은 화면이면 펴져 있는지, 좁은 화면이면
@@ -499,7 +499,10 @@ function EditorWorkbenchInstance({
     void onVariantPatch(serverVariant, { resolve_conflicts: { [field]: decision } });
   };
   return <section className="vb-editor-workbench" aria-label="편집 작업판" data-editor-viewport="bounded" data-project-id={view.projectId} data-session-id={view.sessionId} data-editor-revision={view.expectedRevision} data-editor-density={layout.mode} data-available-workbench-width={Math.round(availableWorkbenchWidth)} style={ui.timelineRem === null ? undefined : ({ "--vb-timeline-height": `${ui.timelineRem}rem` } as CSSProperties)}>
-    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><span>현재 편집본</span><div>
+    {/* `현재 편집본`을 뺐다(owner 지시 2026-08-22: 설명 문장을 키워드로).
+        늘 같은 글자라 아무것도 말해 주지 않으면서 툴바 자리만 먹었다.
+        캡컷 편집기 툴바에는 이런 이름표가 없다 -- 연장만 있다. */}
+    <header className="vb-editor-workbench__toolbar"><strong>편집 작업판</strong><div>
       {/* 승인 기록 2026-08-20 항목 2: 큰 주황 알약 여덟 개가 줄지어 있던 자리다.
           채운 주황은 이 저장소에서 **강조**를 뜻하므로(활성 메뉴·선택된 항목·주요 단추)
           도구가 전부 그 색이면 강조가 강조를 못 한다. 도구는 조용한 `outline`으로 내리고,
@@ -513,8 +516,14 @@ function EditorWorkbenchInstance({
       <Button type="button" variant="outline" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" />실행 취소</Button>
       <Button type="button" variant="outline" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" />다시 실행</Button>
       {cutButton(cutTools.split, Scissors)}{cutButton(cutTools.join, ChevronsLeftRight)}{cutButton(cutTools.drop, Trash2)}{cutButton(cutTools.copyToNext, Copy)}
-      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />자산과 대본</Button>
-      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />유진과 편집 항목</Button>
+      {/* **이름을 캡컷 길이로 줄였다(owner 지시 2026-08-22).**
+          > "자산과대본. 이라는 것도 말도 안되고 유진과편집항목. 이런메뉴가 어딨어"
+
+          맞는 지적이다. 둘 다 메뉴 이름이 아니라 **안에 뭐가 들었는지 설명하는
+          문장**이었다. 캡컷은 같은 자리를 `소재`, `세부 정보`라고 부른다.
+          이름이 길면 단추가 커지고, 단추가 크면 툴바가 화면을 먹는다. */}
+      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />소재</Button>
+      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />세부 정보</Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
@@ -524,7 +533,7 @@ function EditorWorkbenchInstance({
       </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-scroll-owner="preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
     </div>
     <section className="vb-editor-variants" aria-label="출력 변형" data-collapsed={variantsCollapsed}>
-      <div className="vb-editor-variants__header"><div><p className="vb-editor-variants__eyebrow">연결된 출력</p><h2>가로·세로 결과를 한 박자에 비교</h2></div><Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "출력 변형 펼치기" : "출력 변형 접기"}</Button></div>
+      <div className="vb-editor-variants__header"><div><h2>가로·세로 비교</h2></div><Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "출력 변형 펼치기" : "출력 변형 접기"}</Button></div>
       {!variantsCollapsed ? <><span className="vb-editor-variants__hint">마스터 편집은 하나, 출력은 안전하게 분기</span>
       <VariantSelector selected={variantMode} onSelect={setVariantMode} />
       {variantMode === "master" ? <p className="vb-editor-variants__master-note">현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.</p> : <>

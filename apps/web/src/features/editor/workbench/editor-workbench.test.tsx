@@ -47,8 +47,8 @@ async function findClipSelectionButton(clipId: string): Promise<HTMLElement> {
 // 게 아니라 **닫힌다** -- 이 토글이 아래 테스트 13개를 한 번에 깨뜨렸다. 좁은 폭에서는
 // 여전히 닫힌 서랍으로 시작하므로 누르는 동작 자체는 남겨 둔다.
 function openMaterialDock(): void {
-  if (screen.queryByRole("complementary", { name: "자산과 대본" })) return;
-  fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+  if (screen.queryByRole("complementary", { name: "소재" })) return;
+  fireEvent.click(screen.getByRole("button", { name: "소재" }));
 }
 
 
@@ -104,28 +104,28 @@ describe("EditorWorkbench", () => {
 
   it("shows the dock the creator just asked for, instead of leaving the button dead", async () => {
     // 2026-08-19 배포 화면에서 확인: 좁은 데스크톱에서는 도크가 하나만 보이는데
-    // **왼쪽이 늘 이겨서** `유진과 편집 항목`을 눌러도 아무 일이 없는 것처럼
+    // **왼쪽이 늘 이겨서** `세부 정보`을 눌러도 아무 일이 없는 것처럼
     // 보였다. 왼쪽을 먼저 닫아야 오른쪽이 나왔다 -- 처음 쓰는 사람은 고장으로 읽는다.
     render(<EditorWorkbench view={view} />);
     const workbench = await screen.findByRole("region", { name: "편집 작업판" });
     expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
-    expect(screen.getByRole("complementary", { name: "자산과 대본" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "소재" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 
-    expect(screen.getByRole("complementary", { name: "유진과 편집 항목" })).toBeInTheDocument();
-    expect(screen.queryByRole("complementary", { name: "자산과 대본" })).toBeNull();
+    expect(screen.getByRole("complementary", { name: "세부 정보" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "소재" })).toBeNull();
   });
 
   it("gives the material dock back the same way, without needing a second click", async () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    fireEvent.click(screen.getByRole("button", { name: "소재" }));
 
-    expect(screen.getByRole("complementary", { name: "자산과 대본" })).toBeInTheDocument();
-    expect(screen.queryByRole("complementary", { name: "유진과 편집 항목" })).toBeNull();
+    expect(screen.getByRole("complementary", { name: "소재" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "세부 정보" })).toBeNull();
   });
 
   it("uses the measured workbench width rather than viewport width", async () => {
@@ -139,9 +139,9 @@ describe("EditorWorkbench", () => {
   it("opens a narrow drawer, focuses it, and restores the trigger after Escape", async () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     render(<EditorWorkbench view={view} />);
-    const trigger = screen.getByRole("button", { name: "유진과 편집 항목" });
+    const trigger = screen.getByRole("button", { name: "세부 정보" });
     fireEvent.click(trigger);
-    const dialog = await screen.findByRole("dialog", { name: "유진과 편집 항목" });
+    const dialog = await screen.findByRole("dialog", { name: "세부 정보" });
     expect(dialog).toHaveFocus();
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -314,7 +314,7 @@ describe("EditorWorkbench", () => {
     } as const;
 
     render(<EditorWorkbench director={director} view={view} />);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 
     expect(screen.getByText("남아 있는 요청")).toBeVisible();
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존된 초안");
@@ -428,7 +428,7 @@ describe("EditorWorkbench", () => {
     render(<EditorWorkbench view={narrationView} />);
     openMaterialDock();
     const preview = screen.getByRole("region", { name: "미리보기" });
-    const dock = screen.getByRole("complementary", { name: "자산과 대본" });
+    const dock = screen.getByRole("complementary", { name: "소재" });
     const button = screen.getByRole("button", { name: "내레이션 · 1번째 장면 원본 열기" });
     expect(preview.contains(button)).toBe(false);
     expect(dock.contains(button)).toBe(true);
@@ -548,7 +548,7 @@ describe("EditorWorkbench", () => {
       onPreviewCandidate: vi.fn(),
     } as const;
     const rendered = render(<EditorWorkbench director={director} view={routeA} />);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 
     fireEvent.click(screen.getByRole("button", { name: "A-01 미리 보기" }));
     await waitFor(() => expect(
@@ -742,19 +742,19 @@ describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
 
     // 넓은 화면에서 왼쪽 재료 열은 기본으로 펴져 있다(owner 승인 2026-08-17).
     // 그 하나만 강조를 가져가고, 나머지 일곱 개는 조용하다.
-    expect(filled).toEqual(["자산과 대본"]);
+    expect(filled).toEqual(["소재"]);
   });
 
   it("열려 있는 도크만 강조를 가져간다 — 그것이 '선택된 항목'이다", async () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    const materials = screen.getByRole("button", { name: "자산과 대본" });
+    const materials = screen.getByRole("button", { name: "소재" });
 
     // 넓은 화면에서는 왼쪽 재료 열이 기본으로 펴져 있다(owner 승인 2026-08-17).
     expect(materials.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(materials);
-    expect(screen.getByRole("button", { name: "자산과 대본" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "소재" }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("이름은 그대로 읽힌다 — 아이콘만 남기지 않는다", async () => {
@@ -763,7 +763,7 @@ describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    for (const name of ["실행 취소", "다시 실행", "나누기", "앞과 붙이기", "빼기", "다음 장면에도", "자산과 대본", "유진과 편집 항목"]) {
+    for (const name of ["실행 취소", "다시 실행", "나누기", "앞과 붙이기", "빼기", "다음 장면에도", "소재", "세부 정보"]) {
       expect(screen.getByRole("button", { name })).toBeVisible();
     }
   });
@@ -781,16 +781,16 @@ describe("좁은 화면의 도크 단추", () => {
 
     // 시작 상태는 단정하지 않는다 -- 서랍은 마지막으로 열었던 쪽을 기억한다.
     // 여기서 재는 것은 **열림과 눌림이 같이 움직이는가**다.
-    if (!screen.queryByRole("dialog", { name: "자산과 대본" })) {
-      fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
+    if (!screen.queryByRole("dialog", { name: "소재" })) {
+      fireEvent.click(screen.getByRole("button", { name: "소재" }));
     }
-    await screen.findByRole("dialog", { name: "자산과 대본" });
-    expect(screen.getByRole("button", { name: "자산과 대본" }).getAttribute("aria-pressed")).toBe("true");
+    await screen.findByRole("dialog", { name: "소재" });
+    expect(screen.getByRole("button", { name: "소재" }).getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
 
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "자산과 대본" })).toBeNull());
-    expect(screen.getByRole("button", { name: "자산과 대본" }).getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "소재" })).toBeNull());
+    expect(screen.getByRole("button", { name: "소재" }).getAttribute("aria-pressed")).toBe("false");
   });
 });
 

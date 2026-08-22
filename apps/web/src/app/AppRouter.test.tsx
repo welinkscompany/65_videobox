@@ -515,7 +515,7 @@ describe("AppRouter URL ownership", () => {
     const workbench = await screen.findByRole("region", { name: "편집 작업판" });
     const preview = screen.getByRole("region", { name: "미리보기" });
     const timeline = screen.getByTestId("timeline-track");
-    const rightDock = screen.getByRole("complementary", { name: "유진과 편집 항목" });
+    const rightDock = screen.getByRole("complementary", { name: "세부 정보" });
     expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
     fireEvent.change(screen.getByLabelText("유진에게 요청하기"), { target: { value: "보존할 요청" } });
     fireEvent.click(clipSelectionButton("clip-2"));
@@ -529,7 +529,7 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(preview);
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
-    expect(screen.getByRole("complementary", { name: "유진과 편집 항목" })).toBe(rightDock);
+    expect(screen.getByRole("complementary", { name: "세부 정보" })).toBe(rightDock);
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존할 요청");
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(47);
     expect(clipSelectionButton("clip-1")).toHaveAttribute("aria-pressed", "true");
@@ -751,7 +751,7 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "640");
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/projects/project_a/exact-previews/generation-1/content");
     expect(document.querySelectorAll("audio,video")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();
