@@ -45,6 +45,26 @@ describe("LibraryPage", () => {
     expect((await screen.findAllByText("walk.mp4")).length).toBeGreaterThan(0);
   });
 
+  it("offers each media type once, not twice, between the sidebar and the results tabs", async () => {
+    // `capcut-observed` 기록 §5: "탭을 누르면 왼쪽에 분류 목록, 오른쪽에 격자" --
+    // 한 축에 목록이 하나다. 예전엔 왼쪽 사이드바와 결과 위 탭이 영상·음악·
+    // 효과음·그림을 똑같이 두 번 물었다.
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+
+    const sidebar = screen.getByTestId("library-sidebar");
+    expect(within(sidebar).getByRole("button", { name: /^전체/ })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: /^즐겨찾기/ })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: /^휴지통/ })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: /^영상/ })).toBeNull();
+    expect(within(sidebar).queryByRole("button", { name: /^음악/ })).toBeNull();
+    expect(within(sidebar).queryByRole("button", { name: /^효과음/ })).toBeNull();
+    expect(within(sidebar).queryByRole("button", { name: /^그림/ })).toBeNull();
+
+    expect(screen.getByRole("tab", { name: "영상" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "음악" })).toBeInTheDocument();
+  });
+
   it("shows only 24 results in the bounded center and switches keyboard tabs", async () => {
     const many = Array.from({ length: 40 }, (_, index) => asset({
       library_asset_id: `asset_${index}`,
