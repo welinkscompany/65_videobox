@@ -14,7 +14,7 @@ import type { InspectorAction } from "../inspector/InspectorControls";
 import { sceneLabelsBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
-import type { RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
+import type { RightDockCompletionEntry, RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
 type MutationState = Readonly<{ isSaving: boolean; message?: string }>;
 type AssetState = Readonly<{
@@ -30,6 +30,10 @@ type DirectorState = Readonly<{
   state: RightDockDirector["state"];
   conversationId: string | null;
   messages: readonly RightDockMessage[];
+  /** 유진 대화창의 완료 목록(2026-08-22). 원본은 서버 대화가 아니라 이 프로젝트
+   *  세션 안에서 실제로 적용에 성공한 것만 쌓는다 -- 새로고침하면 비워진다.
+   *  캡컷 EditPilot도 대화창을 새로 열면 그 안의 목록이었지 영구 기록이 아니다. */
+  completions: readonly RightDockCompletionEntry[];
   proposal: DirectorProposal | null;
   draft: string;
   runState: RightDockDirector["runState"];
@@ -169,6 +173,7 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
     state: sessionId ? "analysis_running" : "script_required",
     conversationId: null,
     messages: [],
+    completions: [],
     proposal: null,
     draft: readDirectorDraft(requestKey),
     runState: { kind: "idle" },
@@ -1644,6 +1649,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     directorOperationId.current = operationId;
     directorMutationInFlight.current = true;
     const currentRevision = state.view.expectedRevision;
+    // 완료 목록에 쓸 장면 이름표를 여기서 미리 잡아 둔다 -- await 뒤에서
+    // `state.view`를 다시 읽으면 그사이 갱신됐을 수 있고, 타입도 다시 좁혀지지 않는다.
+    const sceneLabelsForCompletion = sceneLabelsBySegmentId(state.view);
     setDirector({ ...activeDirector, state: "applying" });
     try {
       await commitTimelineMutation(async (port, isCurrentMutation) => {
@@ -1682,7 +1690,21 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
           } else {
             await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
           }
-          if (isCurrentApply()) setDirector({ ...activeDirector, state: "proposal_ready" });
+          if (isCurrentApply()) {
+            // **여기서만 완료로 적는다.** 실패는 catch로 빠지므로 이 줄에 왔다는
+            // 것 자체가 성공이다 -- 성공/실패를 따로 판단하지 않는다.
+            const completionEntry = buildCompletionEntry(
+              projectDirectorProposal(projectId, proposal, currentRevision, sceneLabelsForCompletion),
+              candidateIds,
+            );
+            setDirector({
+              ...activeDirector,
+              state: "proposal_ready",
+              completions: completionEntry
+                ? [...(activeDirector.completions ?? []), completionEntry]
+                : activeDirector.completions,
+            });
+          }
         } catch (error) {
           if (isCurrentMutation() && isCurrentDirector(epoch, operationId)) setDirector({ ...activeDirector, state: "blocked" });
           throw error;
@@ -1702,6 +1724,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const rightDock: RightDockDirector = {
     state: mutation.isSaving ? "applying" : activeDirector.state,
     messages: activeDirector.messages,
+    completions: activeDirector.completions,
     proposal: projectDirectorProposal(projectId, activeDirector.proposal, state.view.expectedRevision, sceneLabelsBySegmentId(state.view)),
     draft: activeDirector.draft,
     runState: activeDirector.runState,
@@ -1857,6 +1880,27 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     view={state.view}
     />
   </>;
+}
+
+/** 성공적으로 적용된 후보들을 완료 목록 한 줄로 묶는다. **찾지 못한 후보는
+ *  버리지 않고 코드로 남긴다** -- 조용히 빠뜨리면 "완료됐다는데 몇 개는 안 보인다"는
+ *  더 나쁜 화면이 된다. `projected`가 비었으면(제안이 그새 사라짐 등) 아무 기록도
+ *  남기지 않는다 -- 빈 완료 카드는 EditPilot에도 없는, 뜻 없는 화면이다. */
+function buildCompletionEntry(
+  projected: RightDockProposal | null,
+  candidateIds: readonly string[],
+): RightDockCompletionEntry | null {
+  if (!projected) return null;
+  const byId = new Map(projected.candidates.map((candidate) => [candidate.candidateId, candidate]));
+  const items = candidateIds.map((candidateId) => {
+    const candidate = byId.get(candidateId);
+    return {
+      label: candidate?.displayName ?? candidate?.visibleReferenceCode ?? candidateId,
+      sceneLabel: candidate?.targetSceneLabel,
+    };
+  });
+  if (!items.length) return null;
+  return { id: `completion-${candidateIds.join("-")}-${Date.now()}`, appliedAt: new Date().toISOString(), items };
 }
 
 function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number, sceneLabels: ReadonlyMap<string, string> = new Map()): RightDockProposal | null {

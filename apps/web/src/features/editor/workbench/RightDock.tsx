@@ -7,7 +7,7 @@ import { Textarea } from "../../../components/ui/textarea";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
 import { YujinStarters } from "../../yujin/YujinStarters";
-import type { RightDockCandidate, RightDockConversationScroll, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
+import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
@@ -33,6 +33,7 @@ export type RightDockProps = Readonly<{
   draft: string;
   onDraftChange: (draft: string) => void;
   messages?: readonly RightDockMessage[];
+  completions?: readonly RightDockCompletionEntry[];
   proposal?: RightDockProposal | null;
   runState?: YujinRunState;
   selectedCandidateIds?: readonly string[];
@@ -109,6 +110,7 @@ export function RightDock({
   draft,
   onDraftChange,
   messages = [],
+  completions = [],
   proposal = null,
   runState = { kind: "idle" },
   selectedCandidateIds,
@@ -319,7 +321,20 @@ export function RightDock({
               ? <Button type="button" aria-label={scriptButtonLabel(message.text)} onClick={() => void onUseDraftAsScript(message.text)}>{SCRIPT_BUTTON_TEXT}</Button>
               : null}
           </article>)
-          : <>
+          : null}
+        {/* **캡컷 EditPilot의 완료 체크리스트**(`capcut-observed` 기록 §6,
+            owner 지시 2026-08-22: "유진 대화창에 완료된 작업목록은 만들자").
+            자유 대화 다음에 이어 붙인다 -- 적용은 늘 대화보다 나중에 일어나므로
+            시간 순서와 맞는다. 목록 밖 새 필드를 따로 만들지 않고, 이미 있는
+            같은 `history` 스크롤 안에 둔다. */}
+        {completions.length
+          ? completions.map((completion) => <article key={completion.id} className="vb-editor-right-dock__completion" role="status" aria-label={`모든 작업 완료 ${completion.items.length}/${completion.items.length}`}>
+            <p><strong>모든 작업 완료</strong> {completion.items.length}/{completion.items.length}</p>
+            <ul>{completion.items.map((item, index) => <li key={`${completion.id}-${index}`}>{item.sceneLabel ? `${item.sceneLabel} · ` : ""}{item.label}</li>)}</ul>
+          </article>)
+          : null}
+        {!messages.length && !completions.length
+          ? <>
             <p>유진 대화는 아직 시작하지 않았어요.</p>
             {showConversationStarters ? <YujinStarters
               // The original fixed starters were available before a segment
@@ -329,7 +344,8 @@ export function RightDock({
               disabled={composerDisabled}
               onSelect={chooseConversationStarter}
             /> : null}
-          </>}
+          </>
+          : null}
       </div>
       <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
       <div ref={composerContainerRef}>

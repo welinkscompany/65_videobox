@@ -114,6 +114,43 @@ describe("RightDock", () => {
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveFocus();
   });
 
+  it("shows a CapCut-style completion checklist after Yujin applies something", () => {
+    // 캡컷 EditPilot이 실행하면 "모든 작업 완료 1/1"과 실행한 항목을 목록으로
+    // 남긴다(`capcut-observed` 기록 §6). owner 지시 2026-08-22: "유진 대화창에
+    // 완료된 작업목록은 만들자."
+    render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[
+        { id: "message-1", role: "user", text: "첫 장면에 산책 영상 넣어 줘" },
+        { id: "message-2", role: "assistant", text: "산책 영상으로 채울게요." },
+      ]}
+      completions={[
+        {
+          id: "completion-1",
+          appliedAt: "2026-08-22T00:00:00Z",
+          items: [{ label: "산책 영상", sceneLabel: "1번째 장면" }],
+        },
+      ]}
+    />);
+
+    const completion = screen.getByRole("status", { name: /모든 작업 완료/ });
+    expect(completion).toHaveTextContent("모든 작업 완료");
+    expect(completion).toHaveTextContent("1/1");
+    expect(completion).toHaveTextContent("1번째 장면 · 산책 영상");
+  });
+
+  it("says nothing has run yet when there is no completion, instead of an empty checklist", () => {
+    render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      messages={[{ id: "message-1", role: "user", text: "요청" }]}
+      completions={[]}
+    />);
+
+    expect(screen.queryByRole("status", { name: /모든 작업 완료/ })).not.toBeInTheDocument();
+  });
+
   it("hides conversation starters once a conversation or proposal exists", () => {
     const { rerender } = render(<RightDock
       draft=""

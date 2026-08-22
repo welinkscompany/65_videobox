@@ -35,6 +35,11 @@
 .vb-editor-right-dock, .vb-editor-right-dock__history, .vb-editor-right-dock__fallback, .vb-editor-right-dock__inspector { display: grid; gap: var(--vb-space-2); }
 .vb-editor-right-dock__history { max-height: 14rem; overflow: auto; padding: var(--vb-space-2); border: 1px solid var(--border); border-radius: 0.5rem; }
 .vb-editor-right-dock__history article p { margin-block: var(--vb-space-1); }
+/* 캡컷 EditPilot 완료 체크리스트(`capcut-observed` 기록 §6). 자유 대화 말풍선과
+   구분되게 옅은 배경과 왼쪽 강조선을 준다 -- "실행됨"이 눈에 들어와야 한다. */
+.vb-editor-right-dock__completion { background: var(--vb-accent-bg); border-left: 3px solid var(--vb-accent); border-radius: 0.375rem; padding: var(--vb-space-2) var(--vb-space-3); }
+.vb-editor-right-dock__completion p { margin: 0 0 var(--vb-space-1); }
+.vb-editor-right-dock__completion ul { margin: 0; padding-left: 1.1rem; font-size: var(--vb-text-sm); color: var(--vb-muted); }
 /* 어느 장면인지가 카드에서 가장 먼저 읽혀야 한다 -- 같은 자산이 여러 장면에
    추천되면 그것 말고는 카드를 가를 것이 없다. */
 .vb-editor-right-dock__candidate-scene { display: block; color: var(--vb-accent); }

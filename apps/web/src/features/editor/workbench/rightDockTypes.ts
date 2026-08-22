@@ -42,6 +42,19 @@ export type RightDockMessage = Readonly<{
   text: string;
 }>;
 
+/** 대화 하나가 실제로 적용됐을 때 남기는 기록. **캡컷 EditPilot이 하는 것과 같은
+ *  자리다**(`docs/reference/capcut-observed-2026-08-22.ko.md` §6) -- 한 번 말하면
+ *  한 번 실행하고, 무엇을 했는지 목록으로 남긴다. owner 지시 2026-08-22:
+ *  "유진 대화창에 완료된 작업목록은 만들자."
+ *
+ *  자유 대화(`RightDockMessage`)와 나란히 두지 않고 따로 둔 이유는, EditPilot의
+ *  체크리스트가 답장 문장과 다른 모양(항목별 완료 표시)이기 때문이다. */
+export type RightDockCompletionEntry = Readonly<{
+  id: string;
+  appliedAt: string;
+  items: readonly Readonly<{ label: string; sceneLabel?: string }>[];
+}>;
+
 export type YujinRunState =
   | { kind: "idle" }
   | {
@@ -97,6 +110,7 @@ export type RightDockMemory = Readonly<{
 export type RightDockDirector = Readonly<{
   state: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
   messages: readonly RightDockMessage[];
+  completions?: readonly RightDockCompletionEntry[];
   proposal: RightDockProposal | null;
   draft: string;
   runState: YujinRunState;
