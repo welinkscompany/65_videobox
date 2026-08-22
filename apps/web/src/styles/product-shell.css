@@ -30,6 +30,9 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog-card img { width:100%; height:9rem; object-fit:cover; border-radius:.6rem; background:color-mix(in srgb, var(--vb-text) 6%, transparent); }
 .vb-catalog-card > [data-slot=button], .vb-catalog-card > a { margin-top: auto; }
 .vb-catalog-card__finished { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); font-weight:500; }
+/* 캡컷 카드의 `용량 | 길이` 자리. 상태·날짜·완성본 수 세 줄을 한 줄로 합쳤다.
+   조용해야 한다 -- 이름과 다음 할 일 단추가 카드에서 눈에 들어와야 한다. */
+.vb-catalog-card__meta { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); }
 .vb-catalog-empty { margin: var(--vb-space-4) 0 0; color:var(--vb-muted); font-size: var(--vb-text-md); }
 /* 보관·영구 삭제는 프로젝트를 여는 일보다 훨씬 드물게 하는 일이다. 카드에서
    가장 눈에 띄는 자리는 `편집기 열기`와 다음 할 일이 계속 갖고, 관리는 그

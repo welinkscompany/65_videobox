@@ -365,14 +365,25 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename, onArchive, onDe
         편집판이다). 아래 단추는 백엔드가 정한 다음 할 일이라 `/plan`·`/review`
         같은 곳으로 가는데, 그것만 있으면 편집기로 가는 길이 아예 없었다.
         안내는 남기고 이름에 편집기를 건다. */}
+    {/* **캡컷 카드 모양으로 줄인다(owner 지시 2026-08-22: "레이아웃을 아예 똑같이").**
+        캡컷 카드는 `그림 · 이름 · 용량|길이` 두 줄이 전부이고, 카드를 누르면 열린다.
+        우리 카드는 상태·날짜·완성본 수·다음 할 일 단추까지 다섯 줄이었다.
+
+        **줄인 것은 글줄뿐이다.** 상태·날짜·완성본 수 세 줄을 한 줄로 합쳤다.
+        이름을 누르면 편집기로 가는 것은 **그대로 둔다** -- owner가 2026-08-19에
+        직접 정한 것이고(캡컷도 열면 바로 편집판이다), 처음에 이걸 `next_action`으로
+        바꿨다가 시험 셋이 막았다. 시험이 막은 게 맞았다.
+        다음 할 일 단추도 그대로다 -- 없애면 `/plan`·`/review`로 가는 길이 사라진다. */}
     <h2><a href={resolveWorkspaceLocation(project.project_id, "editing")} aria-label={`${summary.display_name} 편집기 열기`} onClick={(event) => {
       if (!onNavigateHref) return;
       event.preventDefault();
       onNavigateHref(resolveWorkspaceLocation(project.project_id, "editing"));
     }}>{summary.display_name}</a></h2>
-    <p>{projectStateLabel(summary)}</p>
-    {readableMoment(summary.updated_at) ? <time dateTime={summary.updated_at}>최근 편집 {readableMoment(summary.updated_at)}</time> : null}
-    <p className="vb-catalog-card__finished">완성본 {summary.finished_video_count}개</p>
+    <p className="vb-catalog-card__meta">
+      {[projectStateLabel(summary),
+        readableMoment(summary.updated_at) ? `${readableMoment(summary.updated_at)} 편집` : null,
+        `완성본 ${summary.finished_video_count}개`].filter(Boolean).join(" · ")}
+    </p>
     <Button asChild type="button" variant="outline" aria-label={summary.next_action.label}><a href={summary.next_action.href} onClick={(event) => {
       if (!onNavigateHref) return;
       event.preventDefault();
