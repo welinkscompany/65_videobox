@@ -99,6 +99,7 @@ def main() -> int:
             face = source.convert("RGB").crop((left, top, left + side, top + side))
             if side > EDGE:  # 줄이기만 한다. 늘리지 않는다.
                 face = face.resize((EDGE, EDGE), Image.LANCZOS)
+            face = neutralize(face)
         index = len(kept)
         face.save(OUT / f"face-{index:02d}.png")
         (OUT / f"face-{index:02d}.txt").write_text(CAPTION, encoding="utf-8")
@@ -120,6 +121,46 @@ def main() -> int:
     print(f"\n**{SHEET} 를 먼저 열어 보세요.**")
     print("얼굴이 꽉 차 있지 않으면 학습에 26분을 쓰기 전에 여기서 멈추는 게 낫습니다.")
     return 0
+
+
+def neutralize(face):
+    """조명이 물들인 색을 걷어낸다.
+
+    **왜 필요한가 (2026-08-22 3차 실패).** owner가 결과를 보고
+    `피부톤도 너무 동남아사람 같고`라고 했다. 재보니 13장 중 **8장이 노란색이
+    강했다**(얼굴 부분에서 빨강이 파랑보다 45 이상 높음) -- 실내 형광등과 노을빛이다.
+    모델은 그 노란빛을 **조명이 아니라 피부색으로** 배웠다.
+
+    **처음에 회색기준(gray-world)으로 맞췄다가 한 번 더 틀렸다.** 얼굴 평균을 완전한
+    회색으로 만들면 빨강-파랑 차이가 0이 되는데, **사람 피부는 원래 붉다.** 0으로
+    만들면 회색으로 뜬 얼굴을 배우게 된다.
+
+    그래서 기준을 owner 사진 중 **증명사진**(스튜디오 조명이라 색이 맞는 것)에서
+    가져왔다. 그 사진의 얼굴 부분이 `R 177 · G 144 · B 135`이고, 평균으로 나누면
+    아래 `TARGET`이다. 조명이 다른 사진들을 이 비율로 옮긴다.
+
+    실측 비교 (얼굴 부분 빨강-파랑):
+        증명사진·사무실 등 색이 맞는 것   42~44
+        실내 형광등·노을이 물든 것        50~59   <- 이것들을 42 근처로 옮긴다
+        회색기준으로 맞췄을 때             0      <- 너무 걷어낸 값
+
+    **너무 세게 걷어내면 얼굴이 파랗게 뜬다.** 그래서 보정 배율에 상한을 둔다.
+    """
+    import numpy as np
+    from PIL import Image
+
+    array = np.asarray(face, dtype=np.float32)
+    height, width = array.shape[:2]
+    # 가장자리는 배경이라 뺀다. 가운데 절반만 보고 조명 색을 잰다.
+    middle = array[height // 4:height * 3 // 4, width // 4:width * 3 // 4]
+    means = middle.reshape(-1, 3).mean(axis=0)
+    if means.min() <= 1:
+        return face
+    #: owner의 증명사진에서 잰 얼굴 색 비율(R 177 · G 144 · B 135를 평균으로 나눈 값).
+    target = np.array([1.157, 0.941, 0.882], dtype=np.float32)
+    gains = (means.mean() * target) / means
+    gains = np.clip(gains, 0.75, 1.35)
+    return Image.fromarray(np.clip(array * gains, 0, 255).astype(np.uint8))
 
 
 def contact_sheet(kept: list) -> None:
