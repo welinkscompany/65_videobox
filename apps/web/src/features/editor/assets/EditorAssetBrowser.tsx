@@ -79,11 +79,20 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         <span>자산 검색</span>
         <Input className="vb-editor-assets__search" type="search" aria-label="자산 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
-      <div className="vb-editor-assets__filters" role="group" aria-label="자산 유형 필터">
-        {filters.map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={type === filter.type} onClick={() => setType(filter.type)}>{filter.label} 필터</Button>)}
+      {/* **캡컷처럼 탭 줄로 바꿨다(owner 지시 2026-08-22).**
+          > "캡컷은 대부분 메뉴들을 탭으로 정리해서 깔끔하게 만들었어"
+
+          앞서는 알약 여덟 개(`전체 필터`·`영상 필터`···`세로 필터`)가 한꺼번에 펼쳐져
+          있었다. 캡컷 편집기는 `미디어·오디오·텍스트·스티커···`를 **탭 한 줄**로 두고
+          고른 탭의 내용만 아래에 보여 준다.
+
+          이름에서 `필터`를 뺐다 -- 캡컷 탭은 그냥 명사다. 화면 방향은 탭이 아니라
+          **고른 탭 안에서 더 좁히는 것**이라 한 단 아래로 내렸다. */}
+      <div className="vb-editor-assets__tabs" role="tablist" aria-label="자산 종류">
+        {filters.map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__tab" type="button" role="tab" aria-selected={type === filter.type} onClick={() => setType(filter.type)}>{filter.label}</Button>)}
       </div>
-      <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향 필터">
-        {orientationFilters.map((filter) => <Button key={filter.value} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label} 필터</Button>)}
+      <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향">
+        {orientationFilters.map((filter) => <Button key={filter.value} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label}</Button>)}
       </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>

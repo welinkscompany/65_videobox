@@ -63,12 +63,16 @@ describe("EditorAssetBrowser", () => {
     const { container } = render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={onPreview} onApply={vi.fn()} />);
 
     screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용 구간: 3.00–7.00초"));
-    fireEvent.click(screen.getByRole("button", { name: "음악 필터" }));
-    expect(screen.getByRole("button", { name: "음악 필터" })).toHaveAttribute("aria-pressed", "true");
+    // **갱신 이유(2026-08-22).** 알약이 캡컷식 탭이 됐다(owner: "캡컷은 대부분
+    // 메뉴들을 탭으로 정리해서 깔끔하게 만들었어"). 이름에서 `필터`가 빠지고
+    // 역할이 `button`에서 `tab`이 됐다. 지키려는 것은 "종류로 좁힐 수 있다"이지
+    // 알약이 아니었으므로, 지키는 것은 그대로 두고 부르는 이름만 맞춘다.
+    fireEvent.click(screen.getByRole("tab", { name: "음악" }));
+    expect(screen.getByRole("tab", { name: "음악" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("heading", { name: "배경 음악 1" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "제품 사진" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "전체 필터" }));
+    fireEvent.click(screen.getByRole("tab", { name: "전체" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "자산 검색" }), { target: { value: "제품" } });
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 원본 미리보기" }));
 
@@ -132,7 +136,7 @@ describe("EditorAssetBrowser", () => {
     };
     render(<EditorAssetBrowser cards={[...cards, pictureCard]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "그림 필터" }));
+    fireEvent.click(screen.getByRole("tab", { name: "그림" }));
     expect(screen.getByRole("button", { name: "바다.png 화면에 얹기" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "제품 사진 화면에 얹기" })).toBeNull();
   });
@@ -154,7 +158,7 @@ describe("EditorAssetBrowser", () => {
   it("groups type filters with an accessible name", () => {
     render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
 
-    expect(screen.getByRole("group", { name: "자산 유형 필터" })).toBeVisible();
+    expect(screen.getByRole("tablist", { name: "자산 종류" })).toBeVisible();
   });
 
   it("shows truthful audio presence on every card", () => {
@@ -228,7 +232,7 @@ describe("orientation on the asset browser", () => {
   it("narrows the list to vertical footage for shortform", () => {
     render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={() => {}} onApply={() => {}} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "세로 필터" }));
+    fireEvent.click(screen.getByRole("button", { name: "세로" }));
 
     expect(screen.getByText("세로 장면")).toBeVisible();
     expect(screen.queryByText("가로 장면")).toBeNull();

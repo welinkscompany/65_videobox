@@ -124,6 +124,22 @@
 .vb-editor-assets__taste > p { flex: 1 1 100%; }
 .vb-editor-assets__filter { padding: var(--vb-space-1) var(--vb-space-2); border: 1px solid var(--border); border-radius: 999px; color: var(--foreground); background: var(--background); }
 .vb-editor-assets__filter[aria-pressed="true"] { border-color: var(--ring); background: var(--vb-accent-bg); }
+
+/* **캡컷식 탭 줄**(owner 지시 2026-08-22: "캡컷은 대부분 메뉴들을 탭으로 정리해서
+   깔끔하게 만들었어"). 알약이 아니라 탭으로 보여야 한다 -- 둥근 테두리를 없애고
+   고른 것만 아래에 선을 긋는다. 캡컷 편집기 왼쪽 위가 이 모양이다. */
+.vb-editor-assets__tabs { display: flex; gap: var(--vb-space-1); border-bottom: 1px solid var(--border); margin-bottom: var(--vb-space-2); }
+.vb-editor-assets__tab {
+  padding: var(--vb-space-2) var(--vb-space-3);
+  border: 0; border-radius: 0; background: transparent;
+  color: var(--vb-muted); font-weight: 500;
+  /* 고른 탭의 밑줄이 탭 줄의 선 위에 겹치게 한다. */
+  margin-bottom: -1px; border-bottom: 2px solid transparent;
+}
+.vb-editor-assets__tab:hover { color: var(--foreground); }
+.vb-editor-assets__tab[aria-selected="true"] {
+  color: var(--vb-accent); border-bottom-color: var(--vb-accent); background: transparent;
+}
 .vb-editor-assets__target, .vb-editor-assets__card-target, .vb-editor-assets__detail, .vb-editor-assets__reason, .vb-editor-assets__empty { margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-sm); }
 .vb-editor-assets__card { display: grid; min-width: 0; gap: var(--vb-space-1); padding: var(--vb-space-3); border: 1px solid var(--border); border-radius: 0.6rem; background: color-mix(in srgb, var(--card) 92%, var(--muted)); }
 .vb-editor-assets__title, .vb-editor-assets__detail { margin: 0; overflow-wrap: anywhere; }
