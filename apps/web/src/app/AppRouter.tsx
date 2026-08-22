@@ -168,9 +168,11 @@ function ProjectsPage() {
   // **캡컷 홈에도 프로젝트 목록 위에 검색이 있다**(2026-08-22, `capcut-observed`
   // 기록 §1: "프로젝트 목록은 맨 아래. 오른쪽에 검색·보기전환·휴지통·프로젝트
   // 동기화"). 프로젝트가 쌓이면(owner는 지금도 16개) 스크롤로 찾아야 했다.
-  // 보기전환·동기화는 새 백엔드가 필요해 여기서 만들지 않는다 -- 검색은 이미 있는
-  // `projects` 목록을 이름으로 거르기만 하면 되므로 화면만으로 끝난다.
+  // **동기화**는 클라우드 계정을 전제해 승인 없이 만들지 않는다.
   const [projectQuery, setProjectQuery] = useState("");
+  // **보기전환은 백엔드가 필요 없다** -- 처음에 그렇게 적어 뒀다가 틀렸다고
+  // 알아챘다. `projects` 목록을 다른 모양으로 그리기만 하면 된다(2026-08-22).
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const filteredProjects = projectQuery.trim()
     ? projects.filter((project) => project.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))
     : projects;
@@ -239,15 +241,23 @@ function ProjectsPage() {
         <p className="vb-catalog-empty">아직 만든 영상이 없어요. 위에서 새 프로젝트를 시작하면 여기에 모아 드릴게요.</p>
       ) : null}
       {projects.length > 0 ? (
-        <label className="vb-catalog-search">
-          <span className="sr-only">프로젝트 검색</span>
-          <Input type="search" placeholder="프로젝트 이름으로 찾기" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} />
-        </label>
+        <div className="vb-catalog-controls">
+          <label className="vb-catalog-search">
+            <span className="sr-only">프로젝트 검색</span>
+            <Input type="search" placeholder="프로젝트 이름으로 찾기" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} />
+          </label>
+          {/* 격자·줄 보기 전환(2026-08-22, `capcut-observed` 기록 §1). 화면 배치만
+              바꾸므로 새 백엔드가 필요 없다. */}
+          <div className="vb-catalog-view-toggle" role="group" aria-label="보기 방식">
+            <Button type="button" variant={viewMode === "grid" ? "default" : "outline"} aria-pressed={viewMode === "grid"} onClick={() => setViewMode("grid")}>격자로 보기</Button>
+            <Button type="button" variant={viewMode === "list" ? "default" : "outline"} aria-pressed={viewMode === "list"} onClick={() => setViewMode("list")}>줄로 보기</Button>
+          </div>
+        </div>
       ) : null}
       {projectQuery.trim() && filteredProjects.length === 0 ? (
         <p className="vb-catalog-empty">"{projectQuery.trim()}"과 맞는 프로젝트가 없어요.</p>
       ) : (
-      <div className="vb-catalog-grid">
+      <div className={`vb-catalog-grid${viewMode === "list" ? " vb-catalog-grid--list" : ""}`}>
         {filteredProjects.map((project) => <ProjectCatalogCard
           key={project.project_id}
           project={project}

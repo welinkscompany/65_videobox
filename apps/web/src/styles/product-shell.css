@@ -34,8 +34,21 @@ body:has(.vb-product-shell) { margin: 0; }
    조용해야 한다 -- 이름과 다음 할 일 단추가 카드에서 눈에 들어와야 한다. */
 .vb-catalog-card__meta { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); }
 .vb-catalog-empty { margin: var(--vb-space-4) 0 0; color:var(--vb-muted); font-size: var(--vb-text-md); }
-/* 캡컷 홈의 프로젝트 목록 검색(2026-08-22, `capcut-observed` 기록 §1). */
-.vb-catalog-search { display:block; margin-top: var(--vb-space-4); max-width: 20rem; }
+/* 캡컷 홈의 프로젝트 목록 검색·보기전환(2026-08-22, `capcut-observed` 기록 §1). */
+.vb-catalog-controls { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-4); margin-top: var(--vb-space-4); flex-wrap:wrap; }
+.vb-catalog-search { display:block; max-width: 20rem; flex:1 1 16rem; }
+.vb-catalog-view-toggle { display:flex; gap: var(--vb-space-2); flex:0 0 auto; }
+/* **줄 보기.** 카드 컴포넌트는 그대로 두고 배치만 바꾼다 -- 새 카드 모양을 따로
+   만들면 관리 단추 접기 같은 동작을 두 벌 유지해야 한다. `.vb-catalog-card`는
+   기본이 세로 flex이므로 여기서만 가로로 뒤집는다. */
+.vb-catalog-grid--list { grid-template-columns: 1fr; gap: var(--vb-space-2); }
+.vb-catalog-grid--list .vb-catalog-card { flex-direction:row; align-items:center; gap: var(--vb-space-4); min-height:0; padding: var(--vb-space-3) var(--vb-space-4); }
+.vb-catalog-grid--list .vb-catalog-card img { width:3.5rem; height:3.5rem; flex:0 0 auto; }
+.vb-catalog-grid--list .vb-catalog-card h2 { margin:0; }
+.vb-catalog-grid--list .vb-catalog-card__meta { margin:0; }
+.vb-catalog-grid--list .vb-catalog-card > [data-slot=button], .vb-catalog-grid--list .vb-catalog-card > a { margin-top:0; margin-left:auto; flex:0 0 auto; }
+.vb-catalog-grid--list .vb-catalog-card__more { flex:0 0 auto; }
+.vb-catalog-grid--list .vb-catalog-card__manage { margin-top:0; flex:0 0 auto; }
 /* 보관·영구 삭제는 프로젝트를 여는 일보다 훨씬 드물게 하는 일이다. 카드에서
    가장 눈에 띄는 자리는 `편집기 열기`와 다음 할 일이 계속 갖고, 관리는 그
    아래 한 줄에 작게 둔다. 자리를 나눠 무게도 나눈다. */

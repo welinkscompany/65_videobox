@@ -239,6 +239,38 @@ describe("AppRouter URL ownership", () => {
     expect(screen.queryByRole("article", { name: "새 프로젝트 프로젝트" })).toBeNull();
   });
 
+  it("switches between grid and list without losing any project, like CapCut's view toggle", async () => {
+    // 캡컷 기록 §1: "프로젝트 목록은 맨 아래. 오른쪽에 검색·보기전환·휴지통·
+    // 프로젝트 동기화." 보기전환이 없었다. 화면 배치만 바꾸는 일이라 백엔드가
+    // 필요 없다 -- 처음에 "새 백엔드가 필요해서 안 만든다"고 적어 뒀다가 틀렸다는
+    // 것을 알아챘다(2026-08-22).
+    const projects = [{ project_id: "project_plan", name: "이야기 단계", status: "active", root_storage_uri: "local://plan" }];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockResolvedValue({
+      project_id: "project_plan",
+      display_name: "이야기 단계",
+      updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan",
+      state: "ready",
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: { label: "계속 만들기", href: "/projects/project_plan/plan" },
+    });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("article", { name: "이야기 단계 프로젝트" });
+
+    expect(screen.getByRole("button", { name: "격자로 보기" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "줄로 보기" })).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "줄로 보기" }));
+
+    // 배치만 바뀐다. 카드는 그대로 있고 접은 관리 단추도 그대로 접혀 있다.
+    expect(screen.getByRole("article", { name: "이야기 단계 프로젝트" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "줄로 보기" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "격자로 보기" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("says which search found nothing, instead of showing an empty grid", async () => {
     const projects = [{ project_id: "project_plan", name: "이야기 단계", status: "active", root_storage_uri: "local://plan" }];
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
