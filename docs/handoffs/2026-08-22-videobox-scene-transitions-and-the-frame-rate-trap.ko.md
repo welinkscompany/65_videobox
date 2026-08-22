@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-08-22-videobox-face-lora-hits-the-card-limit.ko.md`
+
 # 장면 전환이 생겼다 — 그리고 로컬만 초록이던 함정
 
 - 작성: 2026-08-22
