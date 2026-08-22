@@ -34,6 +34,12 @@ body:has(.vb-product-shell) { margin: 0; }
 /* 보관·영구 삭제는 프로젝트를 여는 일보다 훨씬 드물게 하는 일이다. 카드에서
    가장 눈에 띄는 자리는 `편집기 열기`와 다음 할 일이 계속 갖고, 관리는 그
    아래 한 줄에 작게 둔다. 자리를 나눠 무게도 나눈다. */
+/* `display:flex`는 브라우저 기본 `[hidden] { display:none }`을 이긴다. 그래서
+   `hidden`을 붙여도 화면에서는 그대로 보인다 -- 2026-08-22에 이걸로 한 번 속았다.
+   시험은 jsdom이라 CSS를 안 그리므로 통과했고, **화면을 캡처해서야 보였다.**
+   `.클래스[hidden]`은 `.클래스`보다 선택자가 한 겹 더 있어서 세기로 이긴다.
+   순서가 아니라 세기다 -- 아래로 옮겨도 결과는 같다. */
+.vb-catalog-card__manage[hidden] { display:none; }
 .vb-catalog-card__manage { display:flex; flex-wrap:wrap; gap: var(--vb-space-2); margin-top: var(--vb-space-2); }
 .vb-catalog-card__manage [data-slot=button] { font-size: var(--vb-text-sm); font-weight:500; height:auto; padding: var(--vb-space-1) var(--vb-space-3); }
 /* 보관함은 목록 아래에 접어 둔다. 늘 펴 두면 살아 있는 프로젝트와 보관한
