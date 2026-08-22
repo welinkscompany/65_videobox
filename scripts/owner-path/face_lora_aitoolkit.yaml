@@ -88,12 +88,12 @@ config:
           # 없고 썸네일로 쓸 수도 없었다.**
           #
           # owner가 원하는 것은 썸네일이다 -- 가까이, 밝게, 또렷하게.
-          - "close-up portrait photo of [trigger], korean man, head and shoulders, warm confident smile, soft key light, shallow depth of field, sharp focus on eyes, clean bright background, 85mm lens"
+          - "close-up portrait photo of [trigger], korean man, head and shoulders, warm confident smile, smooth clear skin, youthful, soft key light, shallow depth of field, sharp focus on eyes, clean bright background, 85mm lens"
           # **어두운 그림은 뽑지 않는다(owner 지시 2026-08-22).** 앞서 `dramatic side
           # lighting, dark background`로 뽑았더니 얼굴이 어둡게 깔려 썸네일로 못 쓴다.
-          - "close-up portrait photo of [trigger], korean man, looking straight at camera, confident expression, bright even lighting, light grey background, crisp and clean, youtube thumbnail"
-          - "portrait photo of [trigger], korean man, wearing a dark suit jacket, arms crossed, professional studio lighting, plain grey background, sharp detail"
-          - "close-up photo of [trigger], korean man, neutral expression, even soft lighting, plain white background, passport style, very sharp facial detail"
+          - "close-up portrait photo of [trigger], korean man, looking straight at camera, confident expression, smooth clear skin, youthful, bright even lighting, light grey background, crisp and clean, youtube thumbnail"
+          - "portrait photo of [trigger], korean man, wearing a dark suit jacket, arms crossed, smooth clear skin, youthful, professional studio lighting, plain grey background, sharp detail"
+          - "close-up photo of [trigger], korean man, neutral expression, smooth clear skin, youthful, even soft lighting, plain white background, passport style, very sharp facial detail"
         neg: ""
         seed: 42
         walk_seed: true

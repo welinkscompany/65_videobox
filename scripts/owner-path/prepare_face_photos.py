@@ -37,6 +37,10 @@ EDGE = 768
 #: 얼굴 상자를 얼마나 넓혀 잡을지. 1.0이면 얼굴만 딱 -- 머리와 턱이 잘린다.
 #: 1.8이면 머리 위와 어깨가 조금 들어와 사람으로 보인다. 얼굴 LoRA의 보통 값이다.
 MARGIN = 1.8
+#: 살결을 부드럽게 하는 세기(0이면 안 함, 1이면 최대). 0.65면 결이 조금 남는다.
+SOFTEN = 0.65
+#: 1보다 작으면 어두운 쪽이 밝아진다. 0.85면 그늘만 옅어지고 밝은 쪽은 거의 그대로다.
+SHADOW_GAMMA = 0.85
 SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 CAPTION = "photo of [trigger] man"
 
@@ -100,6 +104,7 @@ def main() -> int:
             if side > EDGE:  # 줄이기만 한다. 늘리지 않는다.
                 face = face.resize((EDGE, EDGE), Image.LANCZOS)
             face = neutralize(face)
+            face = soften(face)
         index = len(kept)
         face.save(OUT / f"face-{index:02d}.png")
         (OUT / f"face-{index:02d}.txt").write_text(CAPTION, encoding="utf-8")
@@ -161,6 +166,42 @@ def neutralize(face):
     gains = (means.mean() * target) / means
     gains = np.clip(gains, 0.75, 1.35)
     return Image.fromarray(np.clip(array * gains, 0, 255).astype(np.uint8))
+
+
+def soften(face):
+    """그늘과 잔주름을 부드럽게 편다. **owner 지시 2026-08-22.**
+
+    > `얼굴이 주름이랑 굴곡이 없게해줘. 지금 너무 나이 들어보여`
+    > `보정한 사진으로 만들어서 학습해봐`
+
+    학습 사진이 형광등 아래 셀카라 **눈 밑 그림자와 팔자주름이 강하게 찍혔다.**
+    모델은 그것을 조명이 아니라 얼굴 생김새로 배운다. 그래서 실제보다 나이 들어
+    보이는 얼굴이 나온다. 조명 색을 걷어낸 것과 같은 이유다(`neutralize`).
+
+    두 가지를 한다.
+
+    1. **어두운 쪽만 끌어올린다.** 그늘이 옅어지면 주름이 덜 파인다. 밝은 쪽은
+       그대로 둬서 얼굴이 밋밋해지지 않게 한다.
+    2. **살결만 부드럽게 한다**(bilateral). 경계는 지키므로 눈·눈썹·머리카락은
+       또렷하게 남는다.
+
+    **너무 하면 플라스틱처럼 된다.** 그래서 원본과 65:35로 섞는다 -- 사람 피부의
+    결이 조금 남아야 사진으로 보인다. 세기를 바꾸고 싶으면 `SOFTEN`을 만져라.
+    """
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    array = np.asarray(face, dtype=np.uint8)
+
+    # 1) 어두운 쪽만 끌어올린다. 감마 곡선이라 밝은 쪽은 거의 그대로다.
+    lifted = (np.power(array / 255.0, SHADOW_GAMMA) * 255.0).astype(np.uint8)
+
+    # 2) 살결만 부드럽게. 색 차이가 큰 경계(눈·눈썹)는 안 뭉갠다.
+    smooth = cv2.bilateralFilter(lifted, d=9, sigmaColor=45, sigmaSpace=9)
+
+    blended = cv2.addWeighted(smooth, SOFTEN, lifted, 1.0 - SOFTEN, 0)
+    return Image.fromarray(blended)
 
 
 def contact_sheet(kept: list) -> None:
