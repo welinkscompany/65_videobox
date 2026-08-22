@@ -193,12 +193,29 @@ def graph() -> dict:
             #   3) 그래도면 사진을 768px로 줄이고, 마지막에 offloading을 켠다.
             #
             # 시간을 재서 남겨라. 지금 4시간 상한(`main`의 while)도 근거 없는 값이다.
-            # 2026-08-22 5·6·7차 실측 (요구 메모리, 한계는 31.84GB):
-            #   dtype bf16 + depth 1            -> 59.08GB
-            #   dtype none + depth 1            -> 54.73GB  (dtype이 4.35GB 아꼈다)
-            #   dtype none + depth 5            -> 57.99GB  (**깊게 하면 오히려 나쁘다**)
-            # 그래서 depth는 1로 되돌리고 마지막 남은 손잡이인 offloading을 켠다.
-            # 2차가 이 설정으로 **메모리 벽은 통과했다** -- 터지지 않고 돌았다.
+            # ================================================================
+            # **손잡이 넷을 다 돌려 봤고 넷 다 실패했다. 다시 돌리지 마라.**
+            # 2026-08-22 실측, 요구 메모리(한계 31.84GB):
+            #
+            #   dtype bf16 + depth 1                 -> 59.08GB   터짐
+            #   dtype none + depth 1                 -> 54.73GB   터짐
+            #   dtype none + depth 5                 -> 57.99GB   터짐 (깊게 = 더 나쁨)
+            #   dtype none + depth 1 + offloading    -> 55.79GB   터짐
+            #
+            # 사진도 72장->18장, 크기도 4분의 1로 줄였는데 숫자가 55~59GB에서 안 나온다.
+            # GPU를 통째로 비워도 같다. **어느 손잡이도 이 벽을 못 넘는다.**
+            #
+            # **다음 사람에게: 이 숫자를 그대로 믿지 마라.** 32GB 카드에서 "할당됨
+            # 55GB"는 실제 상주 메모리일 수 없다. 누적 할당량이거나 offload된 것까지
+            # 세는 값으로 보인다. 그렇다면 나는 내내 **비교할 수 없는 값을 비교하며**
+            # 손잡이를 돌린 셈이다. 다음 판단은 이 숫자가 아니라 실제 상주량
+            # (`torch.cuda.max_memory_allocated`나 nvidia-smi 최고치)으로 하라.
+            #
+            # 아직 안 해 본 것 (여기서부터 시작하라):
+            #   - 사진을 512x512로. 768은 FLUX 12B + 32GB에는 여전히 크다
+            #   - `bucket_mode: True` -- 크기를 묶어서 처리한다
+            #   - `algorithm`을 `LoKr`로. LoRA보다 학습 파라미터가 훨씬 적다
+            # ================================================================
             "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": True,
             "existing_lora": "[None]", "bucket_mode": False, "bypass_mode": False}},
         "7": {"class_type": "SaveLoRA", "inputs": {
