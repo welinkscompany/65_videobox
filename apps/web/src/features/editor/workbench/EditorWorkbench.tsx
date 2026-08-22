@@ -485,7 +485,7 @@ function EditorWorkbenchInstance({
         : api.assetThumbnailUrl(view.projectId, clip.assetId)] as const]
       : [])),
   );
-  const stage = <PreviewStage key={`${view.projectId}:${view.sessionId}`} auditionRequest={auditionRequest} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} fps={view.fps} loopRange={assetTarget} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
+  const stage = <PreviewStage key={`${view.projectId}:${view.sessionId}`} auditionRequest={auditionRequest} durationSec={view.output.durationSec} expectedRevision={view.expectedRevision} exactPreview={view.playback.exactPreview} captions={view.captions} fps={view.fps} loopRange={assetTarget} onPlaybackTimeChange={seekPlayback} playbackSec={playbackSec} sources={sources} onRefresh={onPreviewRefresh} />;
   const variantMaster = {
     variantId: "master",
     label: "마스터" as const,

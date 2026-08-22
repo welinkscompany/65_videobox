@@ -20,6 +20,22 @@ describe("PreviewStage", () => {
     expect(container.querySelector(".vb-preview-stage__caption-overlay")).toBeNull();
   });
 
+  it("shows the total length next to the playback position when the caller knows it", () => {
+    // `capcut-observed` 기록 §2: "아래 00:00:00:00 / 00:10:00:00" -- 재생
+    // 위치 옆에 전체 길이가 붙는다. 프레임 단위 타임코드까지는 만들지 않고,
+    // 이 화면이 이미 쓰는 초 단위 표기에 전체 길이만 더한다.
+    const { container } = render(<PreviewStage {...current} durationSec={20} />);
+    const output = container.querySelector(".vb-preview-stage__playback output");
+    expect(output).toHaveTextContent("타임라인 0.0 / 20.0초");
+  });
+
+  it("falls back to just the playback position when the total length is unknown", () => {
+    const { container } = render(<PreviewStage {...current} />);
+    const output = container.querySelector(".vb-preview-stage__playback output");
+    expect(output).toHaveTextContent("타임라인 0.0초");
+    expect(output).not.toHaveTextContent("/");
+  });
+
   it("puts the burned-caption note and the timeline status in one row, not two", () => {
     // These were two separate <p> elements (16px + status row); merged into
     // one so the stage recovers a line of vertical space.
