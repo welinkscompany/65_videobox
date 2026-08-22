@@ -204,7 +204,7 @@ function ProjectsPage() {
     <main data-testid="projects-catalog" className="vb-catalog">
       <p className="vb-eyebrow">VideoBox</p>
       <h1>프로젝트</h1>
-      <p>영상을 만들 프로젝트를 선택하거나, 새 프로젝트를 시작하세요.</p>
+      <p>고르기 · 새로 만들기</p>
       {/* 새 프로젝트 입력은 **목록 위**에 둔다. 예전에는 카드 6개를 지나 맨 아래로
           스크롤해야 나왔다. */}
       {isCreating ? (
@@ -330,6 +330,8 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename, onArchive, onDe
   // 목록 화면에서는 사이드바의 프로젝트 전환 목록이 나오지 않는다
   // (`hasProject`가 거짓). 카드에 길이 없으면 여기서는 제목을 못 바꾼다.
   const [renaming, setRenaming] = useState(false);
+  //: 관리 단추(제목 바꾸기·보관·삭제)를 접어 둔다. 아래 `···`가 연다.
+  const [manageOpen, setManageOpen] = useState(false);
   useEffect(() => {
     let active = true;
     setSummary(null);
@@ -376,7 +378,16 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename, onArchive, onDe
       event.preventDefault();
       onNavigateHref(summary.next_action.href);
     }}>{summary.next_action.label}</a></Button>
-    {onRename ? <>
+    {/* **관리 단추를 접는다(2026-08-22).** 화면을 처음 찍어 보고 나왔다 --
+        카드 하나에 단추가 4~5개씩이고 프로젝트가 16개면 첫 화면에 단추가 70개쯤
+        된다. owner가 막혔던 "어떤 버튼을 눌러야 할지 하나도 모르겠어"가 바로
+        이 모습이었다. 캡컷은 카드에 그림과 이름만 두고 관리는 `···`에 넣는다.
+        펼친 채로 두면 **다음에 할 일**과 **관리**가 똑같은 무게로 보인다. */}
+    {onRename || (onArchive && management) || (onDeletePermanently && management) ? (
+      <Button type="button" variant="ghost" className="vb-catalog-card__more" aria-expanded={manageOpen}
+        aria-label={`${summary.display_name} 관리`} onClick={() => setManageOpen((open) => !open)}>···</Button>
+    ) : null}
+    {manageOpen && onRename ? <>
       <Button type="button" variant="ghost" className="vb-catalog-card__rename" aria-label={`${summary.display_name} 제목 바꾸기`} onClick={() => setRenaming(true)}>제목 바꾸기</Button>
       {renaming ? <ProjectTitleDialog
         projectId={project.project_id}
@@ -388,7 +399,7 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename, onArchive, onDe
     </> : null}
     {/* 보관과 삭제는 한 줄에 묶는다. 카드의 아래쪽 단추들이 저마다
         `margin-top:auto`를 가지면 flex가 빈자리를 나눠 가져 서로 멀어진다. */}
-    <div className="vb-catalog-card__manage">
+    <div className="vb-catalog-card__manage" hidden={!manageOpen}>
     {/* 보관은 확인 한 번. 카드가 사라지는 일이라 실수로 한 번 눌린 것과
         정말로 하려는 것을 구분해야 한다. */}
     {onArchive && management ? (

@@ -238,6 +238,11 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     const card = await screen.findByRole("article", { name: "이야기 단계 프로젝트" });
+    // **갱신 이유(2026-08-22).** 관리 단추가 `···` 뒤로 접혔다 -- 화면을
+    // 찍어 보니 카드마다 단추가 4~5개씩이라 첫 화면이 단추 70개였다.
+    // 지키려는 것은 "목록 화면에서 관리할 수 있다"이지 "항상 펼쳐져
+    // 있다"가 아니었으므로, 여는 단추를 한 번 누르는 것만 더한다.
+    fireEvent.click(within(card).getByRole("button", { name: "이야기 단계 관리" }));
     fireEvent.click(within(card).getByRole("button", { name: "이야기 단계 제목 바꾸기" }));
 
     const field = await screen.findByLabelText("새 제목");
@@ -294,6 +299,11 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    // **갱신 이유(2026-08-22).** 관리 단추가 `···` 뒤로 접혔다 -- 화면을
+    // 찍어 보니 카드마다 단추가 4~5개씩이라 첫 화면이 단추 70개였다.
+    // 지키려는 것은 "목록 화면에서 관리할 수 있다"이지 "항상 펼쳐져
+    // 있다"가 아니었으므로, 여는 단추를 한 번 누르는 것만 더한다.
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 관리" }));
     fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관하기" }));
     // 한 번 누른 것으로 사라지면 안 된다. 확인이 한 번 있다.
     expect(archiveProject).not.toHaveBeenCalled();
@@ -313,6 +323,11 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    // **갱신 이유(2026-08-22).** 관리 단추가 `···` 뒤로 접혔다 -- 화면을
+    // 찍어 보니 카드마다 단추가 4~5개씩이라 첫 화면이 단추 70개였다.
+    // 지키려는 것은 "목록 화면에서 관리할 수 있다"이지 "항상 펼쳐져
+    // 있다"가 아니었으므로, 여는 단추를 한 번 누르는 것만 더한다.
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 관리" }));
     fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 완전 삭제" }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
     // 첫 확인은 되돌릴 수 없다는 것을 말하고, 지우지는 않는다.
@@ -366,6 +381,11 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    // **갱신 이유(2026-08-22).** 관리 단추가 `···` 뒤로 접혔다 -- 화면을
+    // 찍어 보니 카드마다 단추가 4~5개씩이라 첫 화면이 단추 70개였다.
+    // 지키려는 것은 "목록 화면에서 관리할 수 있다"이지 "항상 펼쳐져
+    // 있다"가 아니었으므로, 여는 단추를 한 번 누르는 것만 더한다.
+    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 관리" }));
     fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관하기" }));
     fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관 확인" }));
 
