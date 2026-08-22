@@ -65,6 +65,15 @@ beforeEach(() => {
 });
 
 describe("FootageOrganizerPage", () => {
+  it("doesn't repeat the VideoBox name in the page body, since the top bar already says it", async () => {
+    // 2026-08-22 카탈로그 화면과 같은 정리(`capcut-observed` 기록: 캡컷 홈에도
+    // 가운데에 제품 이름이 또 적혀 있지 않다) -- 이 화면만 빠뜨리고 있었다.
+    render(<FootageOrganizerPage />);
+    expect(await screen.findByTestId("footage-workspace")).toBeInTheDocument();
+    expect(screen.queryByText("VideoBox")).toBeNull();
+    expect(screen.getByRole("heading", { name: "촬영본 정리" })).toBeInTheDocument();
+  });
+
   it("renders four bounded panes and starter chips only fill the input", async () => {
     render(<FootageOrganizerPage />);
     expect(await screen.findByTestId("footage-workspace")).toHaveAttribute("data-layout", "four-pane");

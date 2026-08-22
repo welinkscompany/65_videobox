@@ -129,7 +129,10 @@ export function FootageOrganizerPage() {
 
   return <main className="vb-footage-page" data-testid="footage-workspace" data-layout="four-pane">
     <span data-testid="global-footage-page" className="sr-only">촬영본 정리</span>
-    <header className="vb-footage-header"><div><p className="vb-eyebrow">VideoBox</p><h1>촬영본 정리</h1><p>원본은 그대로 두고, 장면을 나누고 묶어 다음 단계에 보낼 수 있어요.</p></div><span className="vb-footage-status">{busy ? `${busy} 중…` : notice ?? "명시적으로 적용하기 전에는 저장되지 않아요."}</span></header>
+    {/* `VideoBox` 이름표를 뺐다 -- 위 띠가 이미 말한다(2026-08-22 카탈로그
+        화면과 같은 정리, `capcut-observed` 기록: 캡컷 홈에도 가운데에 제품
+        이름이 또 적혀 있지 않다). 이 화면만 빠뜨리고 있었다. */}
+    <header className="vb-footage-header"><div><h1>촬영본 정리</h1><p>원본은 그대로 두고, 장면을 나누고 묶어 다음 단계에 보낼 수 있어요.</p></div><span className="vb-footage-status">{busy ? `${busy} 중…` : notice ?? "명시적으로 적용하기 전에는 저장되지 않아요."}</span></header>
     {loading ? <div className="vb-footage-state" role="status">촬영본을 불러오는 중…</div> : error ? <div className="vb-footage-state" role="alert"><p>{error}</p><Button type="button" variant="outline" onClick={() => void loadAssets()}>다시 시도</Button></div> : <div className="vb-footage-grid">
       <FootageSourceList assets={assets} selectedIds={selectedSourceIds} onSelect={selectAsset} />
       <div className="vb-footage-center"><FootagePreview asset={selectedAsset} previewUrl={sequencePreview?.preview_url ?? sequencePreview?.preview_items.find((item) => item.item_id === selectedSequencePreviewItemId)?.preview_url ?? proposalPreview?.preview_url} previewRanges={proposalPreview?.segments} previewUnavailable={previewUnavailable} currentTime={playhead} duration={duration} frameStep={FRAME_STEP} onTimeChange={setPlayhead} onPreviewError={() => { setProposalPreview(null); setSequencePreview(null); setSelectedSequencePreviewItemId(null); setPreviewUnavailable(true); setNotice("미리보기를 재생하지 못했습니다. 다시 준비하세요."); }} onFrameStep={(delta) => setPlayhead((time) => Math.max(0, Math.min(duration || Infinity, time + delta * FRAME_STEP)))} /><SceneTimeline proposal={proposal} playhead={playhead} selectedSegmentId={selectedSegmentId} selectedSegmentIds={selectedSegmentIds} onSelectSegment={selectSegment} onSplit={split} onMerge={merge} onExclude={exclude} onBoundary={moveBoundary} /></div>

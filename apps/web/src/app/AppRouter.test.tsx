@@ -130,7 +130,10 @@ describe("AppRouter URL ownership", () => {
     expect(await screen.findByTestId("global-footage-page")).toHaveTextContent("촬영본 정리");
     // §10.13: dashboard copy names creator outcomes, never internal plan phases.
     expect(screen.queryByText(/Wave-?\s?2/i)).toBeNull();
-    expect(screen.getByTestId("footage-workspace")).toHaveTextContent("VideoBox");
+    // 갱신 이유(2026-08-23): 이 화면 본문의 "VideoBox" 이름표를 뺐다 -- 위 띠가
+    // 이미 말한다(2026-08-22 카탈로그 화면과 같은 정리). 띠의 이름표(`banner`)는
+    // 그대로이므로 본문(`footage-workspace`)만 좁혀서 본다.
+    expect(within(screen.getByTestId("footage-workspace")).queryByText("VideoBox")).toBeNull();
   });
 
   it("opens the editor when the creator picks a project by name", async () => {
