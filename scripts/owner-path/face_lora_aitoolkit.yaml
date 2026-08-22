@@ -1,0 +1,92 @@
+# 대표님 얼굴 LoRA — ai-toolkit 설정
+#
+# **왜 ComfyUI가 아니라 여기인가.** 2026-08-22에 ComfyUI 내장 학습 노드로 다섯 번
+# 실패했다. 메모리를 넘긴 뒤에도 **한 단계에 149초, 1600단계면 65시간**이었다.
+# 원인은 그 노드가 12B 모델을 fp32로 통째로 올리는 것이다(48GB). 자세한 실측은
+# `train_face_lora.py` 주석에 있다.
+#
+# ai-toolkit은 fp8로 양자화해 학습한다(`quantize: true`). 24GB 카드용 예제가
+# 딸려 있고 우리는 32GB다.
+#
+# 돌리는 법:
+#   1) 한 번만: .venv/Scripts/python.exe scripts/owner-path/convert_flux_for_aitoolkit.py
+#   2) cd C:\Users\atgro\Documents\ai-toolkit
+#      .venv\Scripts\python.exe run.py <이 파일의 경로>
+---
+job: extension
+config:
+  name: "videobox-owner-face"
+  process:
+    - type: 'sd_trainer'
+      training_folder: "output"
+      device: cuda:0
+      # 프롬프트에서 얼굴을 부르는 열쇠. ComfyUI 쪽 스크립트와 **같은 낱말**을 쓴다.
+      # 다르면 나중에 어느 쪽으로 불러야 하는지 알 수 없게 된다.
+      trigger_word: "ohwnrface"
+      network:
+        type: "lora"
+        linear: 16
+        linear_alpha: 16
+      save:
+        dtype: float16
+        save_every: 250
+        max_step_saves_to_keep: 4
+        push_to_hub: false
+      datasets:
+        # **원본이 아니라 잘라 둔 사본을 쓴다.** 원본은 가로 1024인데 세로가
+        # 1822까지 섞여 있어서 크기가 제각각이다. `train_face_lora.py`가 가운데를
+        # 정사각형으로 잘라 만들어 둔다.
+        - folder_path: "D:\\AI_Workspace_louis_office_50\\10_workspace\\65_videobox\\.worktrees\\videobox-container-compatibility\\scripts\\owner-path\\.prepared-face-photos"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          resolution: [ 512, 768 ]
+      train:
+        batch_size: 1
+        # **1600이 아니라 1000이다.** 사진 18장 기준으로 얼굴은 보통 이 근처에서
+        # 닮기 시작한다. 250단계마다 저장하므로 **중간 것들을 비교해서 고르면 된다** --
+        # 끝까지 갈 필요가 없다. 이것이 ComfyUI 노드와 다른 점이기도 하다.
+        steps: 1000
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+        ema_config:
+          use_ema: true
+          ema_decay: 0.99
+        dtype: bf16
+      model:
+        # 우리가 이미 가진 24GB를 변환해 쓴다. 다시 받지 않는다.
+        name_or_path: "C:/Users/atgro/Documents/ai-toolkit/models/flux1-dev-diffusers"
+        # **글자 이해기·토크나이저·스케줄러만 여기서 받는다.** dev는 HuggingFace에서
+        # 약관 동의가 필요하고 schnell은 Apache-2.0이라 그냥 받힌다. 두 모델은 이
+        # 부품들이 같다 -- 학습되는 본체는 위의 우리 dev 파일이다.
+        extras_name_or_path: "black-forest-labs/FLUX.1-schnell"
+        is_flux: true
+        quantize: true
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        sample_start_step: 0
+        width: 1024
+        height: 1024
+        # **썸네일에 실제로 쓸 문장으로 뽑는다.** 예제에 있던 곰·기타 같은 문장은
+        # 지웠다 -- 250단계마다 보는 그림이 우리가 쓸 그림이어야 고를 수 있다.
+        # 한국어를 넣으면 당나귀가 나온다(2026-08-21 실측). 영어로 적는다.
+        prompts:
+          - "photo of [trigger] man, korean, confident smile, looking at camera, bright studio lighting, clean background, youtube thumbnail"
+          - "photo of [trigger] man, korean, speaking on a stage with a microphone, warm lighting, audience blurred in background"
+          - "photo of [trigger] man, korean, sitting at a desk with a laptop, home office, soft window light, medium shot"
+          - "photo of [trigger] man, korean, neutral expression, plain grey background, studio headshot"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 20
+meta:
+  name: "[name]"
+  version: '1.0'
