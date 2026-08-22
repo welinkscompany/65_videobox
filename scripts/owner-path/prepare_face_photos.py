@@ -29,6 +29,10 @@ SRC = Path(r"D:\AI_Workspace_louis_office_50\20_project\65_videobox-project\driv
 OUT = Path(__file__).resolve().parent / ".prepared-face-photos"
 SHEET = Path(__file__).resolve().parents[2] / "artifacts" / "face-check" / "prepared-contact-sheet.jpg"
 
+#: **늘리지 않는다. 이것이 2026-08-22 두 번째 실패의 원인이었다.**
+#: 원본에서 얼굴이 240~250px인 사진이 많아서 768로 맞추면 16장 중 13장이 **늘어난다.**
+#: 늘린 얼굴은 흐릿해서 배울 게 없고, 모델은 원래 알던 "잘생긴 한국 남자"로 돌아간다.
+#: 그래서 자른 크기가 이 값보다 작으면 **그 크기 그대로 둔다.** 큰 것만 줄인다.
 EDGE = 768
 #: 얼굴 상자를 얼마나 넓혀 잡을지. 1.0이면 얼굴만 딱 -- 머리와 턱이 잘린다.
 #: 1.8이면 머리 위와 어깨가 조금 들어와 사람으로 보인다. 얼굴 LoRA의 보통 값이다.
@@ -92,16 +96,22 @@ def main() -> int:
         side = int(side)
 
         with Image.open(photo) as source:
-            face = source.convert("RGB").crop(
-                (left, top, left + side, top + side)).resize((EDGE, EDGE), Image.LANCZOS)
+            face = source.convert("RGB").crop((left, top, left + side, top + side))
+            if side > EDGE:  # 줄이기만 한다. 늘리지 않는다.
+                face = face.resize((EDGE, EDGE), Image.LANCZOS)
         index = len(kept)
         face.save(OUT / f"face-{index:02d}.png")
         (OUT / f"face-{index:02d}.txt").write_text(CAPTION, encoding="utf-8")
-        kept.append((photo.name, f"{w}x{h} 얼굴"))
+        kept.append((photo.name, side))
 
     for name, why in dropped:
         print(f"!! 버림  {name[:40]:40} -- {why}")
     print(f"\n남긴 사진 {len(kept)}장 / 전체 {len(photos)}장 -> {OUT}")
+    if kept:
+        sizes = sorted(size for _, size in kept)
+        print(f"자른 크기: 가장 작은 것 {sizes[0]}px, 가운데 {sizes[len(sizes) // 2]}px")
+        print(f"**학습 설정의 `resolution`을 {min(768, sizes[len(sizes) // 2] // 64 * 64)} 이하로 두세요.**")
+        print("그보다 크게 잡으면 늘어난 흐릿한 얼굴로 배우게 됩니다 -- 2026-08-22에 그래서 안 닮았다.")
 
     if len(kept) < 10:
         print("!! 10장보다 적습니다. 닮은 정도가 낮게 나옵니다 -- 사진을 더 넣어 주세요.")

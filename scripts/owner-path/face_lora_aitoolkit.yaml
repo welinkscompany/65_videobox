@@ -41,7 +41,10 @@ config:
           caption_dropout_rate: 0.05
           shuffle_tokens: false
           cache_latents_to_disk: true
-          resolution: [ 512, 768 ]
+          # **실측에 맞춘다(2026-08-22 3차).** 잘라 낸 얼굴이 424~768px이고
+          # 가운데값이 448px이다. 768로 잡으면 대부분이 늘어나고, 늘린 흐릿한
+          # 얼굴로는 배울 게 없다 -- 2차가 안 닮은 이유가 이것이었다.
+          resolution: [ 448 ]
       train:
         batch_size: 1
         # **1000에서 2000으로 올렸다(2026-08-22, 첫 학습이 안 닮은 뒤).**
@@ -80,10 +83,15 @@ config:
         # 지웠다 -- 250단계마다 보는 그림이 우리가 쓸 그림이어야 고를 수 있다.
         # 한국어를 넣으면 당나귀가 나온다(2026-08-21 실측). 영어로 적는다.
         prompts:
-          - "photo of [trigger] man, korean, confident smile, looking at camera, bright studio lighting, clean background, youtube thumbnail"
-          - "photo of [trigger] man, korean, speaking on a stage with a microphone, warm lighting, audience blurred in background"
-          - "photo of [trigger] man, korean, sitting at a desk with a laptop, home office, soft window light, medium shot"
-          - "photo of [trigger] man, korean, neutral expression, plain grey background, studio headshot"
+          # **얼굴이 화면을 채우는 문장만 쓴다.** 2차까지는 `무대에서 마이크를 들고`
+          # 같은 문장을 썼는데, 얼굴이 손톱만 하게 나와서 **닮았는지 판단할 수도
+          # 없고 썸네일로 쓸 수도 없었다.**
+          #
+          # owner가 원하는 것은 썸네일이다 -- 가까이, 밝게, 또렷하게.
+          - "close-up portrait photo of [trigger], korean man, head and shoulders, warm confident smile, soft key light, shallow depth of field, sharp focus on eyes, clean bright background, 85mm lens"
+          - "close-up portrait photo of [trigger], korean man, looking straight at camera, serious confident expression, dramatic side lighting, dark background, high contrast, youtube thumbnail"
+          - "portrait photo of [trigger], korean man, wearing a dark suit jacket, arms crossed, professional studio lighting, plain grey background, sharp detail"
+          - "close-up photo of [trigger], korean man, neutral expression, even soft lighting, plain white background, passport style, very sharp facial detail"
         neg: ""
         seed: 42
         walk_seed: true
