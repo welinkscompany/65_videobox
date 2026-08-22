@@ -563,6 +563,29 @@ describe("TimelineDock", () => {
     expect(screen.getByRole("group", { name: "타임라인 클립" })).not.toBe(laneList);
   });
 
+  it("locks a track so its clips cannot be trimmed or moved until unlocked again", () => {
+    // owner 지시 2026-08-22: 트랙 잠금이 있어야 한다. 이 잠금은 세션 동안만 유지되고
+    // (새로고침하면 풀림), 눌린 트랙의 자르기·순서 바꾸기·이동 버튼을 막는다.
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    selectTimelineClip("n-1");
+
+    const start = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    expect(start).not.toBeDisabled();
+
+    const lockButton = screen.getByRole("button", { name: "내레이션 트랙 잠금" });
+    expect(lockButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(lockButton);
+    expect(lockButton).toHaveAttribute("aria-pressed", "true");
+
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 끝 자르기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" })).toBeDisabled();
+
+    fireEvent.click(lockButton);
+    expect(lockButton).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).not.toBeDisabled();
+  });
+
   it("keeps click and keyboard navigation local while guarding editable targets", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 
