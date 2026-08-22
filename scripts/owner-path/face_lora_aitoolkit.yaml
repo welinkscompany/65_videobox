@@ -62,10 +62,9 @@ config:
       model:
         # 우리가 이미 가진 24GB를 변환해 쓴다. 다시 받지 않는다.
         name_or_path: "C:/Users/atgro/Documents/ai-toolkit/models/flux1-dev-diffusers"
-        # **글자 이해기·토크나이저·스케줄러만 여기서 받는다.** dev는 HuggingFace에서
-        # 약관 동의가 필요하고 schnell은 Apache-2.0이라 그냥 받힌다. 두 모델은 이
-        # 부품들이 같다 -- 학습되는 본체는 위의 우리 dev 파일이다.
-        extras_name_or_path: "black-forest-labs/FLUX.1-schnell"
+        # `extras_name_or_path`는 쓰지 않는다 -- 글자 이해기·토크나이저·스케줄러까지
+        # 전부 위 폴더 안에 있다. 변환 스크립트가 로컬 파일과 **잠기지 않은** 저장소
+        # (`openai/clip-vit-large-patch14`, `google/t5-v1_1-xxl`)만으로 만들었다.
         is_flux: true
         quantize: true
       sample:
