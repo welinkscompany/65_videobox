@@ -168,7 +168,11 @@ def graph() -> dict:
             "model": ["1", 0], "latents": ["5", 0], "positive": ["5", 1],
             "batch_size": BATCH_SIZE, "grad_accumulation_steps": 1, "steps": STEPS,
             "learning_rate": LEARNING_RATE, "rank": RANK, "optimizer": "AdamW",
-            "loss_function": "MSE", "seed": 20260821, "training_dtype": "bf16",
+            # **`none` = 모델의 원래 계산 dtype을 그대로 둔다.** `bf16`은 fp8로 실은 12B
+            # 모델을 통째로 bf16으로 되올려서 그것만으로 24GB쯤 된다. 2026-08-22 4차
+            # 실패까지 이 값이 `bf16`이었다. (`fp8_e4m3fn`은 이 노드의 선택지에 없다 --
+            # 고를 수 있는 것은 `bf16`/`fp32`/`none` 셋뿐이다.)
+            "loss_function": "MSE", "seed": 20260821, "training_dtype": "none",
             "lora_dtype": "bf16", "quantized_backward": False, "algorithm": "LoRA",
             # 5090에 32GB가 있어도 LM Studio가 같이 물고 있다. 체크포인팅을 끄면
             # 학습이 아니라 메모리가 먼저 터진다.
@@ -189,7 +193,13 @@ def graph() -> dict:
             #   3) 그래도면 사진을 768px로 줄이고, 마지막에 offloading을 켠다.
             #
             # 시간을 재서 남겨라. 지금 4시간 상한(`main`의 while)도 근거 없는 값이다.
-            "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": False,
+            # 2026-08-22 5·6·7차 실측 (요구 메모리, 한계는 31.84GB):
+            #   dtype bf16 + depth 1            -> 59.08GB
+            #   dtype none + depth 1            -> 54.73GB  (dtype이 4.35GB 아꼈다)
+            #   dtype none + depth 5            -> 57.99GB  (**깊게 하면 오히려 나쁘다**)
+            # 그래서 depth는 1로 되돌리고 마지막 남은 손잡이인 offloading을 켠다.
+            # 2차가 이 설정으로 **메모리 벽은 통과했다** -- 터지지 않고 돌았다.
+            "gradient_checkpointing": True, "checkpoint_depth": 1, "offloading": True,
             "existing_lora": "[None]", "bucket_mode": False, "bypass_mode": False}},
         "7": {"class_type": "SaveLoRA", "inputs": {
             "lora": ["6", 0], "prefix": f"loras/{LORA_NAME}", "steps": STEPS}},
