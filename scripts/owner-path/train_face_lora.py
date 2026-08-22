@@ -28,6 +28,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from PIL import Image
+
 # **먼저 자리를 확인하라. 설정을 만지기 전에 이것부터다.**
 #
 # 2026-08-22에 두 번 실패했고 둘 다 원인이 같았다 -- 자리가 없었다.
@@ -43,6 +45,21 @@ from pathlib import Path
 #
 # 여유가 20GB 아래면 **LM Studio에서 모델을 내리고** 시작하라. 그동안 유진 대화·
 # 대본 쓰기·B-roll 분석이 멈춘다(끝나면 다시 올리면 된다).
+#
+# **그런데 `lms unload`만으로는 안 내려간다 -- 몇 초 만에 저절로 다시 올라온다.**
+# 2026-08-22에 내리자마자 `lms ps`에 다시 떠 있었다. VideoBox 컨테이너의 B-roll
+# 분석 루프가 1분마다 모델을 부르고, LM Studio는 요청이 오면 알아서 다시 올린다.
+# **부르는 쪽을 먼저 멈춰야 한다.** 순서는 이렇다:
+#
+#     docker compose -p 65_videobox stop      # 부르는 쪽부터
+#     lms unload --all                        # 그다음 내린다
+#     nvidia-smi ...                          # 여유 20GB 넘는지 눈으로 확인
+#     .venv/Scripts/python.exe scripts/owner-path/train_face_lora.py
+#
+# 끝나면 `scripts/owner-ready.ps1 -Mode Start`로 다시 올린다.
+#
+# 2026-08-22 3차 시작 시점 실측 -- VRAM 여유 24.2GB, RAM 여유 32.6GB.
+# 1·2차 때는 각각 3.4GB와 4.7GB였다. **여기에 실제 걸린 시간을 적어라.**
 BASE = "http://127.0.0.1:8188"
 PHOTOS = Path(r"D:\AI_Workspace_louis_office_50\20_project\65_videobox-project\drive-sync\내 얼굴 사진")
 #: ComfyUI input 아래의 폴더 이름. `LoadImageDataSetFromFolder`가 이 이름으로 읽는다.
@@ -52,6 +69,12 @@ DATASET = "videobox-owner-face"
 TRIGGER = "photo of ohwnrface person"
 LORA_NAME = "videobox-owner-face"
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+#: **전부 같은 크기의 정사각형으로 맞춰서 올린다.** 2026-08-22 3차 실패의 원인이다 --
+#: GPU를 통째로 비웠는데도 56.8GB를 요구하며 터졌다. 사진을 "1024px로 줄였다"고
+#: 했지만 실제로는 **가로만** 1024였고 세로는 그대로여서 1024x1822짜리가 섞여
+#: 있었다. `bucket_mode`가 꺼져 있으면 전부 가장 큰 것에 맞춰지므로 한 장이 크면
+#: 열여덟 장이 다 커진다. 얼굴 학습은 정사각형 가운데 잘라내기가 표준이기도 하다.
+EDGE = 768
 
 #: 실측이 아니라 출발점이다. **돌려 보고 이 값을 고쳐라.** 15장 기준으로
 #: 얼굴 LoRA는 보통 사진 한 장당 100단계 안팎이면 닮기 시작한다.
@@ -80,7 +103,12 @@ def upload(image: Path, subfolder: str) -> str:
     """
     boundary = "----videobox" + uuid.uuid4().hex
     mime = mimetypes.guess_type(image.name)[0] or "image/png"
-    name = f"{image.stem.encode('ascii', 'ignore').decode() or 'photo'}-{uuid.uuid4().hex[:8]}{image.suffix.lower()}"
+    # **이름에 무작위 꼬리를 붙이지 않는다.** 2026-08-22에 이것 때문에 네 번 실패했다 --
+    # 돌릴 때마다 18장이 새 이름으로 올라가서 폴더에 18 -> 36 -> 54 -> **72장**이
+    # 쌓였고, `LoadImageDataSetFromFolder`는 그 폴더를 통째로 읽는다. 학습은 매번
+    # 앞선 실패의 사진까지 같이 물고 있었다. 메모리가 터진 진짜 이유가 여기다.
+    # 같은 이름 + `overwrite=true`라야 다시 돌려도 18장 그대로다.
+    name = f"{image.stem.encode('ascii', 'ignore').decode() or 'photo'}{image.suffix.lower()}"
     parts = [
         (f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="{name}"\r\n'
          f"Content-Type: {mime}\r\n\r\n").encode("utf-8"),
@@ -159,9 +187,23 @@ def main() -> int:
         print(f"!! 사진이 {len(found)}장뿐입니다. 10장보다 적으면 닮은 정도가 낮게 나옵니다.")
         print("!! 그 결과를 'LoRA가 별로다'의 근거로 쓰지 마세요. 사진이 모자란 것입니다.")
 
-    print(f"사진 {len(found)}장을 올립니다 -> ComfyUI input/{DATASET}", flush=True)
-    for photo in found:
-        upload(photo, DATASET)
+    print(f"사진 {len(found)}장을 {EDGE}x{EDGE}로 맞춰 올립니다 -> ComfyUI input/{DATASET}", flush=True)
+    staged = Path(__file__).resolve().parent / ".prepared-face-photos"
+    staged.mkdir(exist_ok=True)
+    for old in staged.glob("*.png"):
+        old.unlink()
+    for index, photo in enumerate(found):
+        # 원본은 건드리지 않는다. 가운데를 정사각형으로 잘라 옆에 새로 만든다.
+        with Image.open(photo) as image:
+            image = image.convert("RGB")
+            side = min(image.size)
+            left = (image.width - side) // 2
+            top = (image.height - side) // 2
+            square = image.crop((left, top, left + side, top + side)).resize(
+                (EDGE, EDGE), Image.LANCZOS)
+        prepared = staged / f"face-{index:02d}.png"
+        square.save(prepared)
+        upload(prepared, DATASET)
 
     print(f"학습 시작: {STEPS}단계, rank {RANK}, 학습률 {LEARNING_RATE}", flush=True)
     print("  (5090에서 20~40분 예상입니다. 정확한 값은 아래 결과가 말해 줍니다.)", flush=True)
