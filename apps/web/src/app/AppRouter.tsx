@@ -155,6 +155,24 @@ export function AppRouter({ router = createAppRouter() }: { router?: ReturnType<
  * `ProductShell`은 이미 `hasProject`로 프로젝트 없는 상태를 다룬다 -- 전환 목록과
  * 단계 메뉴만 숨기고 나머지는 그대로 그린다. 새로 만들지 않고 그것을 쓴다.
  */
+const catalogViewModeStorageKey = "videobox.catalog.view-mode";
+/** 세션마다 다시 고르게 하지 않는다. `readActiveDrawer`(편집기 도크)와 같은
+ *  방어적 패턴 -- 브라우저가 저장을 막아도(사생활 모드 등) 조용히 기본값으로. */
+function readCatalogViewMode(): "grid" | "list" {
+  try {
+    return window.localStorage.getItem(catalogViewModeStorageKey) === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+function writeCatalogViewMode(mode: "grid" | "list"): void {
+  try {
+    window.localStorage.setItem(catalogViewModeStorageKey, mode);
+  } catch {
+    // 보기 방식은 화면 전용이라 최선만 한다.
+  }
+}
+
 function ProjectsPage() {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
@@ -172,7 +190,10 @@ function ProjectsPage() {
   const [projectQuery, setProjectQuery] = useState("");
   // **보기전환은 백엔드가 필요 없다** -- 처음에 그렇게 적어 뒀다가 틀렸다고
   // 알아챘다. `projects` 목록을 다른 모양으로 그리기만 하면 된다(2026-08-22).
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  // 고른 방식을 기억한다 -- 매번 새로고침할 때마다 격자로 돌아가면 캡컷과 달리
+  // "전환"이 아니라 "매번 다시 고르기"가 된다.
+  const [viewMode, setViewMode] = useState<"grid" | "list">(readCatalogViewMode);
+  const chooseViewMode = (mode: "grid" | "list") => { setViewMode(mode); writeCatalogViewMode(mode); };
   const filteredProjects = projectQuery.trim()
     ? projects.filter((project) => project.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))
     : projects;
@@ -249,8 +270,8 @@ function ProjectsPage() {
           {/* 격자·줄 보기 전환(2026-08-22, `capcut-observed` 기록 §1). 화면 배치만
               바꾸므로 새 백엔드가 필요 없다. */}
           <div className="vb-catalog-view-toggle" role="group" aria-label="보기 방식">
-            <Button type="button" variant={viewMode === "grid" ? "default" : "outline"} aria-pressed={viewMode === "grid"} onClick={() => setViewMode("grid")}>격자로 보기</Button>
-            <Button type="button" variant={viewMode === "list" ? "default" : "outline"} aria-pressed={viewMode === "list"} onClick={() => setViewMode("list")}>줄로 보기</Button>
+            <Button type="button" variant={viewMode === "grid" ? "default" : "outline"} aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
+            <Button type="button" variant={viewMode === "list" ? "default" : "outline"} aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
           </div>
         </div>
       ) : null}

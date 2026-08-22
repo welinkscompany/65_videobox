@@ -8,7 +8,13 @@ import { parseWorkspaceLocation, resolveWorkspaceLocation } from "./routeManifes
 import { editorUiStorageKey } from "../features/editor/workbench/editorUiState";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  // 보기 방식 기억이 새로 생겼다(2026-08-22). 지우지 않으면 "줄로 보기"를 누른
+  // 시험 뒤에 오는 시험이 격자를 기대하다가 깨진다.
+  window.localStorage.clear();
+});
 
 // TimelineDock's clip selection button no longer shows the raw clip ID as
 // its accessible name (F-3/Task 7) -- it shows a human-readable name like
@@ -269,6 +275,32 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("article", { name: "이야기 단계 프로젝트" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "줄로 보기" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "격자로 보기" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("remembers the view mode across a reload, so it is a switch and not a re-ask", async () => {
+    // 매번 새로고침할 때마다 격자로 돌아가면 캡컷과 달리 "전환"이 아니라
+    // "매번 다시 고르기"가 된다.
+    const projects = [{ project_id: "project_plan", name: "이야기 단계", status: "active", root_storage_uri: "local://plan" }];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockResolvedValue({
+      project_id: "project_plan",
+      display_name: "이야기 단계",
+      updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan",
+      state: "ready",
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: { label: "계속 만들기", href: "/projects/project_plan/plan" },
+    });
+    const first = render(<AppRouter router={createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }))} />);
+    await screen.findByRole("article", { name: "이야기 단계 프로젝트" });
+    fireEvent.click(screen.getByRole("button", { name: "줄로 보기" }));
+    first.unmount();
+
+    render(<AppRouter router={createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }))} />);
+    await screen.findByRole("article", { name: "이야기 단계 프로젝트" });
+
+    expect(screen.getByRole("button", { name: "줄로 보기" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("says which search found nothing, instead of showing an empty grid", async () => {
