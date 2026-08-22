@@ -480,6 +480,21 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(restoreProject).toHaveBeenCalledWith("project_c"));
   });
 
+  it("puts the archive toggle in the same row as search and view mode, not below the card list", async () => {
+    // `capcut-observed` 기록 §1: "프로젝트 목록은 맨 아래. 오른쪽에 검색·보기전환·
+    // 휴지통·프로젝트 동기화." 예전엔 보관함 단추가 카드 목록을 다 지나야 나오는
+    // 맨 아래 링크였다 -- 검색·보기전환과 같은 줄, 같은 오른쪽 자리로 옮겼다.
+    vi.spyOn(api, "listProjects").mockResolvedValue(liveProjects as never);
+    mockCatalogSummaries();
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    await screen.findByRole("article", { name: "첫 영상 프로젝트" });
+    const controls = screen.getByRole("group", { name: "보기 방식" }).closest(".vb-catalog-controls");
+    expect(controls).not.toBeNull();
+    expect(controls).toContainElement(screen.getByRole("button", { name: "보관함 보기" }));
+  });
+
   it("says the archive is empty on the projects screen instead of showing nothing", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([liveProjects[0]] as never);
     mockCatalogSummaries();

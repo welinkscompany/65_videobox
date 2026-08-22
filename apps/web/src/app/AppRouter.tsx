@@ -273,6 +273,16 @@ function ProjectsPage() {
             <Button type="button" variant={viewMode === "grid" ? "default" : "outline"} aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
             <Button type="button" variant={viewMode === "list" ? "default" : "outline"} aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
           </div>
+          {/* 보관함(휴지통)도 같은 줄, 같은 오른쪽 자리다(`capcut-observed` 기록
+              §1: "오른쪽에 검색·보기전환·휴지통·프로젝트 동기화"). 예전엔 카드
+              목록을 다 지나야 나오는 맨 아래 링크였다 -- 검색·보기전환 옆으로
+              옮긴다. 여는 기능 자체는 그대로, 자리만 옮긴다. */}
+          <Button
+            type="button"
+            variant="ghost"
+            className="vb-catalog-archive-toggle"
+            onClick={() => { if (archiveOpen) setArchiveOpen(false); else { setArchiveOpen(true); void archive.load(); } }}
+          >{archiveOpen ? "보관함 닫기" : "보관함 보기"}</Button>
         </div>
       ) : null}
       {projectQuery.trim() && filteredProjects.length === 0 ? (
@@ -292,12 +302,10 @@ function ProjectsPage() {
       )}
       {/* 보관은 되돌릴 수 있어야 뜻이 있다. 예전에는 되돌리는 길이 왼쪽 기둥
           안에만 있었는데, 그 기둥은 프로젝트를 연 뒤에만 나온다 -- 즉 **목록
-          화면에서는 보관함에 닿을 방법이 아예 없었다.** */}
-      <section className="vb-catalog-archive" aria-label="보관함">
-        {archiveOpen
-          ? <Button type="button" variant="ghost" onClick={() => setArchiveOpen(false)}>보관함 닫기</Button>
-          : <Button type="button" variant="ghost" onClick={() => { setArchiveOpen(true); void archive.load(); }}>보관함 보기</Button>}
-        {archiveOpen ? <div className="vb-catalog-archive-list">
+          화면에서는 보관함에 닿을 방법이 아예 없었다.** 여는 단추는 위 검색·보기전환
+          줄로 옮겼고, 여기는 열렸을 때 펼쳐지는 목록만 맡는다. */}
+      {archiveOpen ? <section className="vb-catalog-archive" aria-label="보관함">
+        <div className="vb-catalog-archive-list">
           {archive.archivedProjects.length === 0
             ? <p>보관한 프로젝트가 없어요.</p>
             : archive.archivedProjects.map((archivedProject) => <div key={archivedProject.project_id} className="vb-catalog-archive-row">
@@ -310,8 +318,8 @@ function ProjectsPage() {
                 onClick={() => void management.run(`restore:${archivedProject.project_id}`, () => archive.restore(archivedProject.project_id))}
               >되돌리기</Button>
             </div>)}
-        </div> : null}
-      </section>
+        </div>
+      </section> : null}
       {management.error ? <p className="vb-project-action-error" role="alert">{management.error}</p> : null}
     </main>
     </ProductShell>
