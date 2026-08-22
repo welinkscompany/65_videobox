@@ -27,7 +27,7 @@ export function StartChooser({
         {hasDraft ? (
           <Button type="button" className="vb-start-path" onClick={() => onStart("continue")}>
             <strong>만들던 영상 이어서</strong>
-            <span>저장해 둔 편집본을 그대로 엽니다.</span>
+            <span>저장된 편집본 열기</span>
           </Button>
         ) : null}
         <Button
@@ -37,7 +37,7 @@ export function StartChooser({
           onClick={() => onStart("script")}
         >
           <strong>대본이 있어요</strong>
-          <span>붙여넣거나 파일로 불러옵니다.</span>
+          <span>붙여넣기 · 파일 불러오기</span>
         </Button>
         <Button
           type="button"
@@ -46,7 +46,7 @@ export function StartChooser({
           onClick={() => onStart("footage")}
         >
           <strong>찍어 둔 영상이 있어요</strong>
-          <span>영상에서 말을 받아써 대본으로 만듭니다.</span>
+          <span>말 받아쓰기 → 대본</span>
         </Button>
         <Button
           type="button"
@@ -55,7 +55,7 @@ export function StartChooser({
           onClick={() => onStart("draft")}
         >
           <strong>아직 아무것도 없어요</strong>
-          <span>주제만 알려 주면 유진이 대본 초안을 써 드려요.</span>
+          <span>주제 입력 → 유진이 대본 초안</span>
         </Button>
       </div>
     </section>
