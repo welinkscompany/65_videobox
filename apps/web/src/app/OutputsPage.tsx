@@ -839,7 +839,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
   };
 
   return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page">
-    <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>현재 승인된 편집본의 자막, 완성본, CapCut 초안을 여기에서 만들 수 있어요.</p></div>
+    <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>승인된 편집본 · 자막 · 완성본 · CapCut 초안</p></div>
     {outputBlocked ? <section aria-label="출력 준비 체크리스트" className="vb-output-readiness">
       <h2>출력 준비 체크리스트</h2>
       <ol aria-label="출력 준비 단계">
