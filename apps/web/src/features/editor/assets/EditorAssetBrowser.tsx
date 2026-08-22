@@ -77,7 +77,10 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     <div className="vb-editor-assets__controls">
       <label className="vb-editor-assets__search-label">
         <span>자산 검색</span>
-        <Input className="vb-editor-assets__search" type="search" aria-label="자산 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {/* **빈 칸에 힌트를 넣는다**(2026-08-22, `capcut-observed` 기록 §5 "공통 생김새":
+            캡컷은 모든 탭 검색창에 지금 뭘 찾을 수 있는지 안내 문구를 넣는다). 우리
+            칸은 비어 있었다 -- 무엇을 검색할 수 있는지 눌러 보기 전엔 알 수 없었다. */}
+        <Input className="vb-editor-assets__search" type="search" aria-label="자산 검색" placeholder="영상 · 음악 · 효과음 · 그림 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
       {/* **캡컷처럼 탭 줄로 바꿨다(owner 지시 2026-08-22).**
           > "캡컷은 대부분 메뉴들을 탭으로 정리해서 깔끔하게 만들었어"
