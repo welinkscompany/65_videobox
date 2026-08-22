@@ -24,7 +24,10 @@ describe("CreationInterview", () => {
     cleanup();
     window.localStorage.clear();
     render(<CreationInterview projectId="project_1" />);
-    expect(screen.getByText(/TXT, MD, SRT/)).toBeVisible();
+    // **갱신 이유(2026-08-22).** 구분자만 바뀌었다(`,` -> `·`) -- owner 지시로
+    // 설명 문장을 키워드로 옮기는 중이다. 지키려는 것은 "어떤 파일을 고를 수
+    // 있는지 화면이 말한다"이지 쉼표가 아니다.
+    expect(screen.getByText(/TXT · MD · SRT/)).toBeVisible();
     expect(screen.getByLabelText("대본 파일 선택")).toBeVisible();
   });
 

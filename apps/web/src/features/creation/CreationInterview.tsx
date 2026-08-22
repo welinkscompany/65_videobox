@@ -566,7 +566,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       <Textarea id="creation-script" value={scriptText} onChange={(event) => { setScriptText(event.target.value); window.localStorage.removeItem(pendingKey(projectId, "paste")); }} placeholder="영상에서 전할 내용을 붙여넣어 주세요." rows={10} />
       <Button type="button" onClick={() => void start()} disabled={isStarting}>{isStarting ? "대본 준비 중" : "유진과 기획 시작"}</Button>
       <label htmlFor="creation-script-file">대본 파일 선택</label>
-      <p id="creation-script-file-help">지원 형식: TXT, MD, SRT 파일을 선택할 수 있어요.</p>
+      <p id="creation-script-file-help">지원 형식: TXT · MD · SRT</p>
       <Input id="creation-script-file" type="file" accept=".txt,.md,.srt,text/plain,text/markdown,application/x-subrip" onChange={(event) => { setScriptFile(event.target.files?.[0] ?? null); window.localStorage.removeItem(pendingKey(projectId, "upload")); }} />
       <Button type="button" variant="outline" onClick={() => void startFromFile()} disabled={isStarting}>{isStarting ? "대본 준비 중" : "파일로 기획 시작"}</Button>
       {/* 대본이 없어도 시작할 수 있는 길. 영상에서 말을 받아써 대본을 만든다.
@@ -584,7 +584,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       {resumeBanner}
       <p className="vb-eyebrow">영상 기획</p>
       <h1 id="creation-summary-heading">{brief.status === "approved" ? "기획을 확인했어요" : "기획 요약을 확인해 주세요"}</h1>
-      {brief.status === "approved" ? <><p>영상에 넣을 소리를 고르고 초안을 준비할 수 있어요.</p>
+      {brief.status === "approved" ? <><p>소리 고르기 · 초안 준비</p>
         {!readiness ? <><Button type="button" disabled={isSaving} onClick={() => void startDraft({ kind: "silent" })}>무음으로 초안 준비</Button>
           {narrationOptions.filter((item) => item.asset_type === "raw_video").map((item) => <Button key={item.asset_id} type="button" variant="outline" onClick={() => void startDraft({ kind: "source_video", asset_id: item.asset_id })}>영상 소리로 초안 준비</Button>)}
           {narrationOptions.filter((item) => item.asset_type === "narration_audio").map((item) => <Button key={item.asset_id} type="button" variant="outline" onClick={() => void startDraft({ kind: "existing", asset_id: item.asset_id })}>준비한 내레이션으로 초안 준비</Button>)}

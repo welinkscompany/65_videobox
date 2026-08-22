@@ -115,7 +115,7 @@ export function TimelineReviewSections({
     <section className="vb-review-page" data-testid="timeline-review-page" data-project-id={state.projectId} aria-live="polite">
       <p>검토</p>
       <h1>영상 검토</h1>
-      <p>장면과 추천 상태를 확인해 주세요.</p>
+      <p>장면 · 추천 상태</p>
       <p>{approved ? "현재 편집본의 검토가 승인되었어요." : "현재 편집본을 검토하고 있어요."}</p>
       {approved ? (
         <>
