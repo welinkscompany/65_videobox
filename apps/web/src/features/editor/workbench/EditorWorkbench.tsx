@@ -284,8 +284,27 @@ function EditorWorkbenchInstance({
    * 넓은 화면(`desktop-both`)에서는 둘 다 열리므로 여는 동작만 하고 상대를 닫지
    * 않는다. 닫는 것은 어느 폭에서나 그대로 닫는다.
    */
+  /** 저장된 값이 아니라 **지금 화면에 실제로 보이는지**를 돌려준다.
+   *  좁은 화면에서는 둘 다 열려 있어도 하나만 보인다. */
+  const resolvedVisible = (state: EditorWorkbenchPersistedState) => {
+    const resolved = resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbenchWidth, persisted: state });
+    const both = resolved.mode === "desktop-both";
+    return { left: both || resolved.leftOpen, right: both || resolved.rightOpen };
+  };
   const toggleDock = (side: "left" | "right") => setUi((current) => {
-    const opening = side === "left" ? !current.leftOpen : !current.rightOpen;
+    // **누르는 사람이 보는 것을 기준으로 정한다. 저장된 값이 아니라.**
+    //
+    // 2026-08-22에 기본값을 `양쪽 다 열림`으로 바꾸자 이 자리가 다시 죽었다.
+    // 좁은 데스크톱에서는 둘 다 못 들어가서 왼쪽이 이기는데, 저장된 값으로는
+    // 오른쪽도 `열림`이다. 그래서 `세부 정보`를 누르면 **닫기**로 읽혀 아무 일도
+    // 일어나지 않았다 -- 화면에는 처음부터 안 보이는데.
+    //
+    // 이건 2026-08-19에 고쳤던 그 결함과 같은 것이고,
+    // `shows the dock the creator just asked for`가 다시 잡아 줬다.
+    const showing = side === "left"
+      ? resolvedVisible(current).left
+      : resolvedVisible(current).right;
+    const opening = !showing;
     if (!opening) return { ...current, [side === "left" ? "leftOpen" : "rightOpen"]: false };
     // **지금 어느 모드인가가 아니라 "둘 다 들어가는가"로 정한다.** 앞엣것으로
     // 재면 왼쪽이 열린 상태는 늘 `desktop-single`이라, 1920 화면처럼 자리가

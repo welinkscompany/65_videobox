@@ -312,7 +312,9 @@ export function InspectorControls({
   return (
     <section aria-label="고른 장면">
       <h3>고른 장면</h3>
-      <p>툴바의 <strong>나누기</strong>는 재생 위치에서 자릅니다. 재생 위치가 이 장면 밖이면 아래를 쓰세요.</p>
+      {/* 두 문장을 한 줄로 줄였다. `나누기`가 재생 위치에서 자른다는 것은 눌러 보면
+          알고, 여기서 꼭 알아야 하는 것은 **이 아래가 언제 필요한가**뿐이다. */}
+      <p>재생 위치가 이 장면 밖일 때 아래를 씁니다</p>
       {selectedSegment ? (
         <>
           <p>{`${selectedSegment.startSec.toFixed(2)}–${selectedSegment.endSec.toFixed(2)}초 구간`}</p>

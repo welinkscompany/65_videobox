@@ -56,14 +56,19 @@ describe("editorUiState", () => {
     });
   });
 
-  it("starts a fresh session with the material column already open", () => {
+  it("starts a fresh session with both columns already open, like CapCut", () => {
     // 이것이 화면에 실제로 닿는 기본값이다. `resolveEditorWorkbenchLayout`에도 같은
     // 기본값이 한 벌 더 있지만 readEditorUiState가 항상 완전한 값을 돌려주므로
     // 그쪽 fallback은 실행 중에 닿지 않는다 -- 그래서 여기가 승인된 기본값의 자리다.
+    //
+    // **갱신 이유(2026-08-22).** `rightOpen: false`였다. 캡컷은 소재와 세부 정보가
+    // 둘 다 붙어 있고 owner가 "캡컷과 완전 비슷하게"라고 했다. 앞서 닫아 둔 근거는
+    // "둘 다 펴면 미리보기가 720px 아래로 밀린다"였는데 재보니 1216px이라 틀렸다.
+    // 좁은 화면에서는 `resolveEditorWorkbenchLayout`이 알아서 한쪽만 남긴다.
     localStorage.clear();
     expect(readEditorUiState("project-x", "session-x")).toEqual({
       leftOpen: true,
-      rightOpen: false,
+      rightOpen: true,
       activeDrawer: null,
       leftSize: 280,
       rightSize: 320,

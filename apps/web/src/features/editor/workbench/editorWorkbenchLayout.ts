@@ -25,7 +25,14 @@ export const editorWorkbenchPanelConstants = Object.freeze({ leftMinPx: 220, rig
 //
 // **여기만 고치면 화면에 닿지 않는다.** 실제로 쓰이는 기본값은 `editorUiState.ts`에
 // 있고 이 벌은 persisted가 깨졌을 때의 대비책이다. 두 곳을 함께 본다.
-const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: false, activeDrawer: null, leftSize: 280, rightSize: 320, timelineRem: null };
+/** 처음 여는 사람이 보는 배치. **캡컷은 소재와 세부 정보가 둘 다 열려 있다.**
+ *
+ *  `rightOpen`이 거짓이면 1600px가 넘어도 `desktop-both`로 못 간다(아래 `resolve`의
+ *  첫 줄이 `state.rightOpen`을 본다). 그래서 넓은 화면에서도 늘 한쪽만 보였다 --
+ *  2026-08-22에 1600px로 찍어 보고 알았다.
+ *
+ *  좁으면 `resolve`가 알아서 한쪽만 남기므로 여기서 걱정하지 않는다. */
+const defaultPersisted: EditorWorkbenchPersistedState = { leftOpen: true, rightOpen: true, activeDrawer: null, leftSize: 280, rightSize: 320, timelineRem: null };
 
 // 타임라인 높이의 상·하한. 손잡이(`EditorWorkbench`)와 두 검증기가 같은 값을 봐야
 // 한다 -- 저장할 때와 읽을 때의 한계가 다르면 저장된 값이 조용히 잘린다.

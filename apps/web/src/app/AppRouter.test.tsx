@@ -104,7 +104,7 @@ describe("AppRouter URL ownership", () => {
     expect(within(menu).getByRole("link", { name: "내 라이브러리" })).toBeInTheDocument();
 
     // 시작하는 길은 평소와 **같은 길**이다. 첫 사용자에게만 다른 문을 만들지 않는다.
-    expect(await screen.findByRole("button", { name: "새 프로젝트 만들기" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" })).toBeInTheDocument();
 
     // 파일 경로를 손으로 적으라고 하지 않는다.
     expect(screen.queryByLabelText(/파일이 있는 곳/)).toBeNull();
@@ -747,11 +747,20 @@ describe("AppRouter URL ownership", () => {
     const workbench = await screen.findByRole("region", { name: "편집 작업판" });
     // A fresh session opens with the preview alone -- the picture is what the
     // creator is judging, not the docks. Both open with one toolbar click.
-    expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
-    expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "640");
+    // **갱신 이유(2026-08-22).** 오른쪽 도크가 기본으로 펴지면서 넓은 화면의 기본
+    // 밀도가 `desktop-single`에서 `desktop-both`가 됐다(캡컷은 소재와 세부 정보가
+    // 둘 다 붙어 있다). 이 시험이 지키는 것은 **정식 편집기가 뜨고 옛 미디어 화면이
+    // 안 섞인다**이지 밀도 값이 아니었으므로, 지키는 것은 그대로 두고 값만 맞춘다.
+    expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
+    // 밀도가 `desktop-both`가 되면서 미리보기 최소폭도 640에서 720으로 올라간다
+    // (`bothPreviewMinPx`). 같은 갱신의 일부다 -- 위 주석 참고.
+    expect(screen.getByRole("region", { name: "미리보기" }).parentElement).toHaveAttribute("data-preview-min-width", "720");
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/projects/project_a/exact-previews/generation-1/content");
     expect(document.querySelectorAll("audio,video")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    // 세부 정보는 이제 기본으로 펴져 있다. **누르면 오히려 닫힌다.**
+    if (!screen.queryByRole("complementary", { name: "세부 정보" })) {
+      fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    }
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();
@@ -798,7 +807,7 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
-    fireEvent.click(await screen.findByRole("button", { name: "새 프로젝트 만들기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" }));
     fireEvent.change(await screen.findByLabelText("새 프로젝트 이름"), { target: { value: "New" } });
     fireEvent.click(screen.getByRole("button", { name: "만들기" }));
 
@@ -816,7 +825,7 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={router} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "새 프로젝트 만들기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" }));
     fireEvent.change(screen.getByLabelText("새 프로젝트 이름"), { target: { value: "Second" } });
     fireEvent.click(screen.getByRole("button", { name: "만들기" }));
 

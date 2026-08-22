@@ -220,7 +220,7 @@ function ProjectsPage() {
           {createError ? <p className="text-sm text-destructive" role="alert">{createError}</p> : null}
         </form>
       ) : (
-        <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>새 프로젝트 만들기</Button>
+        <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>+ 새 프로젝트 만들기</Button>
       )}
       {/* 프로젝트가 하나도 없을 때 격자만 비워 두면 화면이 고장 난 것처럼 보인다.
           예전에는 이 경우 제품 껍데기 밖의 옛 화면으로 빠져나가 **파일 경로를 손으로

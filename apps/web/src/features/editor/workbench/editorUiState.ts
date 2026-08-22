@@ -5,11 +5,22 @@ import { normalizedTimelineRem, type EditorWorkbenchPersistedState } from "./edi
 // 아무에게도 닿지 않았다. 바꿀 때는 두 곳을 함께 본다.
 //
 // 왼쪽 재료 열은 기본으로 펴 둔다(owner 승인 2026-08-17). 캡컷처럼 영상·음악·
-// 효과음이 편집기 왼쪽에 늘 붙어 있어야 한다. 오른쪽은 그대로 닫혀 있다 --
-// 둘 다 펴면 미리보기가 `desktop-both` 최소폭(720px) 아래로 밀린다.
+// 효과음이 편집기 왼쪽에 늘 붙어 있어야 한다.
+//
+// **오른쪽도 편다(2026-08-22).** 캡컷은 `세부 정보`가 늘 붙어 있고, owner가
+// "캡컷과 완전 비슷하게"라고 했다.
+//
+// 앞서 여기 적혀 있던 이유는 **둘 다 펴면 미리보기가 720px 아래로 밀린다**였는데,
+// 지금 상수로 재보면 그렇지 않다:
+//
+//     available 1720 - leftMin 220 - rightMin 260 - gutter 12x2 = 1216px
+//
+// 720px을 훨씬 넘는다. 그리고 좁은 화면에서는 `resolveEditorWorkbenchLayout`이
+// **알아서 한쪽만 남긴다**(`bothPreview >= bothPreviewMinPx` 검사). 그 되돌림은
+// `editorWorkbenchLayout.test.ts`가 이미 지키고 있으므로 여기서 미리 닫아 둘 필요가 없다.
 export const defaultEditorUiState: EditorWorkbenchPersistedState = Object.freeze({
   leftOpen: true,
-  rightOpen: false,
+  rightOpen: true,
   activeDrawer: null,
   leftSize: 280,
   rightSize: 320,

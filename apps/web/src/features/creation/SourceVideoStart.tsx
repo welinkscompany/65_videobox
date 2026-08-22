@@ -117,7 +117,9 @@ export function SourceVideoStart({
           끝났다(대략 8배속). 중간에서 끊는 벽이 330초이므로 길이만 보면 20분도
           넉넉하지만, 재 본 것은 잡음 없는 한 사람 목소리다 -- 실제 촬영본은
           더 느리므로 여유를 두고 말한다. 128MB는 서버가 정한 상한이다. */}
-      <p id="source-video-file-help">MP4, MOV, WEBM, MKV, M4V 영상을 고를 수 있어요. 128MB보다 작고 20분 안쪽이면 넉넉합니다.</p>
+      {/* 조건을 문장으로 늘어놓으면 읽지 않는다. 셋 다 **고르기 전에 알아야 하는
+          사실**이라 빼지 않고, 키워드로 줄여서 한눈에 들어오게 한다. */}
+      <p id="source-video-file-help">MP4 · MOV · WEBM · MKV · M4V · 128MB 이하 · 20분 이내</p>
       <Input
         id="source-video-file"
         type="file"

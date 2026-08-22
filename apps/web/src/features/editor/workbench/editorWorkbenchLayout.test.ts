@@ -28,12 +28,20 @@ describe("resolveEditorWorkbenchLayout", () => {
     expect(layout.mode).toBe(viewportWidth === 1599 ? "desktop-single" : "drawer");
   });
 
-  it("opens with the material column beside the preview, and only that column", () => {
-    // 캡컷처럼 재료가 편집기 왼쪽에 늘 붙어 있어야 한다(owner 승인 2026-08-17).
-    // 오른쪽까지 함께 펴면 `desktop-both`가 되어 미리보기가 720px 아래로 밀리므로
-    // 오른쪽은 툴바 클릭 한 번 거리에 그대로 둔다.
+  it("opens with both columns beside the preview, like CapCut", () => {
+    // **갱신 이유(2026-08-22).** 이 시험은 `오른쪽은 닫힌 채로 연다`를 고정하고
+    // 있었고, 그 근거로 "둘 다 펴면 미리보기가 720px 아래로 밀린다"고 적혀 있었다.
+    // **지금 상수로 재보면 틀렸다:**
+    //
+    //     1720 - leftMin 220 - rightMin 260 - gutter 12x2 = 1216px
+    //
+    // 720px을 훨씬 넘는다. 캡컷은 소재와 세부 정보가 둘 다 붙어 있고, owner가
+    // "캡컷과 완전 비슷하게"라고 했다(2026-08-22).
+    //
+    // **좁아지면 되돌아간다** -- 바로 위 시험들이 그것을 지킨다(available 900이면
+    // `desktop-single`, 800이면 `drawer`). 그러니 여기서 미리 닫아 둘 이유가 없다.
     const fresh = resolveEditorWorkbenchLayout({ viewportWidth: 1920, availableWorkbenchWidth: 1720, persisted: undefined });
-    expect(fresh).toMatchObject({ mode: "desktop-single", leftOpen: true, rightOpen: false });
+    expect(fresh).toMatchObject({ mode: "desktop-both", leftOpen: true, rightOpen: true });
   });
 
   it("keeps both docks shut when the creator shut them", () => {

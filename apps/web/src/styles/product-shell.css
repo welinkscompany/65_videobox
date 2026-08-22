@@ -60,7 +60,23 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-home-next .vb-eyebrow { margin: 0; }
 .vb-action-link { display:inline-flex; width:max-content; align-items:center; color:var(--vb-accent); font-weight:650; text-decoration:underline; text-underline-offset:.18em; }
 .vb-catalog [data-slot=button][data-variant="outline"] { border-color:var(--vb-border); }
-.vb-catalog-create { margin-top: var(--vb-space-7); }
+/* **캡컷 홈의 `+ 프로젝트 만들기` 띠**(owner 지시 2026-08-22: "캡컷과 완전 비슷하게").
+   캡컷은 홈 가운데 맨 위에 이 단추 하나를 가로로 꽉 차게 둔다. 다음에 할 일이
+   하나로 보이는 것이 요점이다 -- owner가 우리 화면에서 막혔던 지점의 정반대다.
+
+   **카드 여러 개를 두지 않는다.** 캡컷 홈의 다른 카드들(AI 이미지·동영상 연장·
+   AI 아바타)은 우리가 안 하는 일이고, owner가 2026-08-22에 안 만들어도 된다고
+   명시했다. 우리 네 갈래(대본·영상·유진·이어서)는 **전부 같은 화면으로 가므로**
+   여기에 카드 넷을 두면 "다 그럴듯해 보이는" 문제가 되돌아온다. 그 고르기는
+   프로젝트를 연 뒤 이야기 화면이 맡는다. */
+.vb-catalog-create {
+  margin-top: var(--vb-space-6);
+  width: 100%;
+  min-height: 5rem;
+  font-size: var(--vb-text-lg);
+  font-weight: 600;
+  border-radius: 0.75rem;
+}
 .vb-catalog-form { margin-top: var(--vb-space-7); max-width:26rem; display:grid; gap: var(--vb-space-3); }
 .vb-mobile-scrim { display:none; }
 @media (max-width: 767px) { .vb-product-content { padding: var(--vb-space-5) var(--vb-space-4); }.vb-home-grid { grid-template-columns:1fr; } }

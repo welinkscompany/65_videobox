@@ -52,6 +52,13 @@ function openMaterialDock(): void {
 }
 
 
+// 세부 정보(오른쪽) 도크도 이제 기본으로 펴져 있다(2026-08-22, 캡컷 배치).
+// **무조건 누르면 오히려 닫힌다** -- 좁아서 안 보일 때만 누른다.
+function openDetailDock(): void {
+  if (screen.queryByRole("complementary", { name: "세부 정보" })) return;
+  fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+}
+
 // 편집 항목은 이제 기본으로 펴져 있다(캡컷처럼 고른 것의 속성이 바로 보인다).
 // 무조건 누르면 오히려 **닫힌다** -- 좁은 화면이나 접어 둔 상태에서만 누른다.
 function openInspector(): void {
@@ -314,7 +321,7 @@ describe("EditorWorkbench", () => {
     } as const;
 
     render(<EditorWorkbench director={director} view={view} />);
-    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    openDetailDock();
 
     expect(screen.getByText("남아 있는 요청")).toBeVisible();
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존된 초안");
@@ -548,7 +555,7 @@ describe("EditorWorkbench", () => {
       onPreviewCandidate: vi.fn(),
     } as const;
     const rendered = render(<EditorWorkbench director={director} view={routeA} />);
-    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    openDetailDock();
 
     fireEvent.click(screen.getByRole("button", { name: "A-01 미리 보기" }));
     await waitFor(() => expect(
