@@ -399,7 +399,10 @@ describe("EditorWorkbench", () => {
     render(<EditorWorkbench view={brollOnlyView} />);
     openInspector();
     expect(screen.getByRole("region", { name: "편집 항목" })).not.toHaveTextContent("broll 트랙");
-    expect(screen.getByText("현재 편집 명령이 지원하는 항목만 표시됩니다.")).toBeInTheDocument();
+    // **갱신 이유(2026-08-22).** 문구만 바뀌었다 -- owner 지시로 화면 문구를
+    // 설명 문장에서 키워드 중심으로 옮기는 중이다. 지키려는 것은 "다룰 항목이
+    // 없을 때 화면이 그 사실을 말한다"이지 그 문장 자체가 아니었다.
+    expect(screen.getByText("이 명령이 다루는 항목 없음")).toBeInTheDocument();
   });
 
   it("uses an audio element for a narration audition and never mounts a second player", () => {

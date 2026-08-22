@@ -215,7 +215,10 @@ describe("MediaWorkspacePage", () => {
     render(<MediaWorkspacePage projectId="project-a" />);
 
     expect(await screen.findByRole("heading", { name: "자산 보관함" })).toBeVisible();
-    expect(screen.getByText("이 프로젝트에 준비한 영상을 확인하고 분석 상태를 관리할 수 있어요.")).toBeVisible();
+    // **갱신 이유(2026-08-22).** 문구만 바뀌었다 -- owner 지시로 설명 문장을
+    // 키워드로 옮기는 중이다. 이 줄은 바로 위 제목(`자산 보관함`)을 말만 바꿔
+    // 되풀이하고 있었다.
+    expect(screen.getByText("영상 · 분석 상태")).toBeVisible();
     expect(screen.getAllByText("회의 장면")).toHaveLength(2);
     expect(screen.queryByText("숨겨진 사진")).not.toBeInTheDocument();
     expect(screen.queryByText("사진")).not.toBeInTheDocument();

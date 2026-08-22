@@ -300,7 +300,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 id="media-workspace-heading">자산 보관함</h1>
-          <p>이 프로젝트에 준비한 영상을 확인하고 분석 상태를 관리할 수 있어요.</p>
+          <p>영상 · 분석 상태</p>
         </div>
         <Button type="button" variant="outline" disabled={loading || busyKey !== null} onClick={() => void load()}>
           새로고침
@@ -336,7 +336,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
         <section aria-labelledby="media-upload-heading">
           <h2 id="media-upload-heading">새 파일 추가</h2>
           <p className="sr-only">영상 올리기</p>
-          <p>평소에 찍어둔 장면 영상을 여러 개 한 번에 올려 보관함에 쌓아 둘 수 있어요.</p>
+          <p>여러 개 한 번에 · 보관함에 쌓임</p>
           <label htmlFor="media-broll-upload">장면 영상 파일 추가</label>
           <Input
             id="media-broll-upload"
@@ -354,7 +354,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
         {currentState ? <section aria-labelledby="media-collection-heading">
             <h2 id="media-collection-heading">촬영본 가져오기</h2>
             <p className="sr-only">따로 모아둔 영상 가져오기</p>
-            <p>미리 옮겨둔 영상이 여기에 쌓여요. 이 프로젝트에서 쓸 영상을 골라 가져오세요.</p>
+            <p>따로 모아둔 영상에서 고르기</p>
             {currentState.collection.length === 0 ? <p>아직 따로 모아둔 영상이 없어요.</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {currentState.collection.map((item) => (
