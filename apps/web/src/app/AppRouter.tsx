@@ -165,6 +165,15 @@ function ProjectsPage() {
   const management = useProjectManagement();
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  // **캡컷 홈에도 프로젝트 목록 위에 검색이 있다**(2026-08-22, `capcut-observed`
+  // 기록 §1: "프로젝트 목록은 맨 아래. 오른쪽에 검색·보기전환·휴지통·프로젝트
+  // 동기화"). 프로젝트가 쌓이면(owner는 지금도 16개) 스크롤로 찾아야 했다.
+  // 보기전환·동기화는 새 백엔드가 필요해 여기서 만들지 않는다 -- 검색은 이미 있는
+  // `projects` 목록을 이름으로 거르기만 하면 되므로 화면만으로 끝난다.
+  const [projectQuery, setProjectQuery] = useState("");
+  const filteredProjects = projectQuery.trim()
+    ? projects.filter((project) => project.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))
+    : projects;
   const [newProjectName, setNewProjectName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -229,8 +238,17 @@ function ProjectsPage() {
       {projects.length === 0 ? (
         <p className="vb-catalog-empty">아직 만든 영상이 없어요. 위에서 새 프로젝트를 시작하면 여기에 모아 드릴게요.</p>
       ) : null}
+      {projects.length > 0 ? (
+        <label className="vb-catalog-search">
+          <span className="sr-only">프로젝트 검색</span>
+          <Input type="search" placeholder="프로젝트 이름으로 찾기" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} />
+        </label>
+      ) : null}
+      {projectQuery.trim() && filteredProjects.length === 0 ? (
+        <p className="vb-catalog-empty">"{projectQuery.trim()}"과 맞는 프로젝트가 없어요.</p>
+      ) : (
       <div className="vb-catalog-grid">
-        {projects.map((project) => <ProjectCatalogCard
+        {filteredProjects.map((project) => <ProjectCatalogCard
           key={project.project_id}
           project={project}
           onNavigateHref={(href) => void navigate({ href })}
@@ -240,6 +258,7 @@ function ProjectsPage() {
           management={management}
         />)}
       </div>
+      )}
       {/* 보관은 되돌릴 수 있어야 뜻이 있다. 예전에는 되돌리는 길이 왼쪽 기둥
           안에만 있었는데, 그 기둥은 프로젝트를 연 뒤에만 나온다 -- 즉 **목록
           화면에서는 보관함에 닿을 방법이 아예 없었다.** */}

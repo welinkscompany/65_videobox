@@ -34,6 +34,8 @@ body:has(.vb-product-shell) { margin: 0; }
    조용해야 한다 -- 이름과 다음 할 일 단추가 카드에서 눈에 들어와야 한다. */
 .vb-catalog-card__meta { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); }
 .vb-catalog-empty { margin: var(--vb-space-4) 0 0; color:var(--vb-muted); font-size: var(--vb-text-md); }
+/* 캡컷 홈의 프로젝트 목록 검색(2026-08-22, `capcut-observed` 기록 §1). */
+.vb-catalog-search { display:block; margin-top: var(--vb-space-4); max-width: 20rem; }
 /* 보관·영구 삭제는 프로젝트를 여는 일보다 훨씬 드물게 하는 일이다. 카드에서
    가장 눈에 띄는 자리는 `편집기 열기`와 다음 할 일이 계속 갖고, 관리는 그
    아래 한 줄에 작게 둔다. 자리를 나눠 무게도 나눈다. */

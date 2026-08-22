@@ -207,6 +207,61 @@ describe("AppRouter URL ownership", () => {
     expect(within(newCard).getByRole("link", { name: "계속 만들기" })).toHaveAttribute("href", "/projects/project_new/plan");
   });
 
+  it("filters the project list by name, like CapCut's search on the same screen", async () => {
+    // 캡컷 기록(2026-08-22 캡처, `docs/reference/capcut-observed-2026-08-22.ko.md`
+    // §1): "프로젝트 목록은 맨 아래. 오른쪽에 검색·보기전환·휴지통·프로젝트 동기화."
+    // 우리 목록에는 검색이 아예 없었다 -- owner가 지금도 16개를 쓰고 있어서
+    // 늘어날수록 스크롤로만 찾아야 한다.
+    const projects = [
+      { project_id: "project_draft", name: "초안 프로젝트", status: "active", root_storage_uri: "local://draft" },
+      { project_id: "project_assets", name: "자산 프로젝트", status: "active", root_storage_uri: "local://assets" },
+      { project_id: "project_new", name: "새 프로젝트", status: "active", root_storage_uri: "local://new" },
+    ];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockImplementation(async (projectId) => ({
+      project_id: projectId,
+      display_name: projects.find((item) => item.project_id === projectId)?.name ?? projectId,
+      updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan",
+      state: "ready",
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: { label: "계속 만들기", href: `/projects/${projectId}/plan` },
+    }));
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("article", { name: "초안 프로젝트 프로젝트" });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "프로젝트 검색" }), { target: { value: "자산" } });
+
+    expect(screen.getByRole("article", { name: "자산 프로젝트 프로젝트" })).toBeInTheDocument();
+    expect(screen.queryByRole("article", { name: "초안 프로젝트 프로젝트" })).toBeNull();
+    expect(screen.queryByRole("article", { name: "새 프로젝트 프로젝트" })).toBeNull();
+  });
+
+  it("says which search found nothing, instead of showing an empty grid", async () => {
+    const projects = [{ project_id: "project_plan", name: "이야기 단계", status: "active", root_storage_uri: "local://plan" }];
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    vi.spyOn(api, "getProjectWorkspaceSummary").mockResolvedValue({
+      project_id: "project_plan",
+      display_name: "이야기 단계",
+      updated_at: "2026-08-12T00:00:00Z",
+      current_stage: "plan",
+      state: "ready",
+      thumbnail_url: null,
+      finished_video_count: 0,
+      next_action: { label: "계속 만들기", href: "/projects/project_plan/plan" },
+    });
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+    await screen.findByRole("article", { name: "이야기 단계 프로젝트" });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "프로젝트 검색" }), { target: { value: "존재하지않음" } });
+
+    expect(screen.getByText('"존재하지않음"과 맞는 프로젝트가 없어요.')).toBeVisible();
+    expect(screen.queryByRole("article")).toBeNull();
+  });
+
   it("lets the creator rename a video straight from its card", async () => {
     // 프로젝트 목록은 owner가 가장 먼저 여는 화면인데, 여기서는 사이드바의
     // 프로젝트 전환 목록이 나오지 않는다(`hasProject`가 거짓). 그래서 카드
