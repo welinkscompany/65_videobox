@@ -26,14 +26,36 @@ def _canonical_source_uri(value: object) -> str:
 VALID_EXPORT_TRACK_TYPES = {"narration", "broll", "bgm", "sfx"}
 
 
+# 소리만 내는 레인. 꺼 두었으면 **넘기지 않는다** -- 이 만듦새에는 음소거를
+# 표현할 칸이 없어서(`track_name`·`track_role`·`source_uri`·`segments`뿐)
+# 넣으면 대표가 지운 소리가 캡컷에서 되살아난다. `broll`은 여기 없다:
+# 음소거해도 그림은 남겨야 하므로 트랙을 빼면 안 된다.
+SOUND_ONLY_TRACK_TYPES = {"narration", "bgm", "sfx"}
+
+
 class CapCutExportAdapter:
+    def _dropped_track_types(self, timeline: dict[str, Any]) -> set[str]:
+        """캡컷 초안에서 뺄 레인(`track_states.py`).
+
+        완성본에서는 눈·음소거가 지켜지는데 캡컷 초안은 그것을 안 읽고 있었다 --
+        화면에서 뺀 영상이 초안에는 그대로 들어갔다(2026-08-23 갭검증).
+        """
+        from videobox_core_engine.track_states import hidden_lanes, muted_lanes
+
+        hidden = hidden_lanes(timeline)
+        muted = muted_lanes(timeline)
+        return set(hidden) | (set(muted) & SOUND_ONLY_TRACK_TYPES)
+
     def _promptable_tracks(self, timeline: dict[str, Any]) -> list[dict[str, Any]]:
         promptable_tracks: list[dict[str, Any]] = []
+        dropped = self._dropped_track_types(timeline)
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
             track_type = _canonical_track_type(track.get("track_type"))
             if track_type not in VALID_EXPORT_TRACK_TYPES:
+                continue
+            if track_type in dropped:
                 continue
             clips = track.get("clips", [])
             if not isinstance(clips, list):
@@ -56,6 +78,12 @@ class CapCutExportAdapter:
         subtitle_file_uri: str | None = None,
     ) -> dict[str, Any]:
         tracks = self._promptable_tracks(timeline)
+        # **내용이 들어오는 길이 셋이다**: 트랙, 자막 파일, 글자 오버레이.
+        # 완성본에서 자막만 고치고 오버레이를 놓쳐 같은 실패를 두 번 냈다.
+        dropped = self._dropped_track_types(timeline)
+        if "caption" in dropped:
+            subtitle_file_uri = None
+        export_overlays = [] if "overlay" in dropped else timeline.get("export_overlays", [])
         canonical_subtitle_file_uri = _canonical_source_uri(subtitle_file_uri) if subtitle_file_uri else None
         return {
             "project_id": project_id,
@@ -69,7 +97,7 @@ class CapCutExportAdapter:
                 tracks=tracks,
                 narration_source_uri=_canonical_source_uri(timeline.get("narration_source_uri")),
                 subtitle_file_uri=canonical_subtitle_file_uri,
-                export_overlays=timeline.get("export_overlays", []),
+                export_overlays=export_overlays,
                 narration_override_segments={
                     str(item.get("target_segment_id") or "").strip()
                     for item in timeline.get("applied_recommendations", [])
