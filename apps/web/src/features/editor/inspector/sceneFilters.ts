@@ -23,6 +23,9 @@ export const SCENE_FILTER_CHOICES: readonly SceneFilterChoice[] = [
   { value: "cool", label: "차갑게" },
   { value: "vivid", label: "진하게" },
   { value: "faded", label: "옅게" },
+  { value: "bright", label: "뽀샤시하게" },
+  { value: "sepia", label: "세피아" },
+  { value: "cinematic", label: "영화처럼" },
 ];
 
 /** 안 고른 상태. 값이 없는 것과 "없음"을 고른 것을 화면에서 구별하지 않는다. */

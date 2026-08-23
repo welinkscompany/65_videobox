@@ -24,7 +24,9 @@ def test_keeps_the_chosen_look_and_who_chose_it() -> None:
     assert normalize_filter({"type": "warm", "chosen_by": "yujin"}) == {"type": "warm", "chosen_by": "yujin"}
 
 
-@pytest.mark.parametrize("value", [{"type": "sepia"}, {"type": "mono", "chosen_by": "someone"}, "mono", 3])
+# `sepia`가 예시였는데 2026-08-23에 실제로 표에 들어가면서 이 시험이 붉게 됐다.
+# 표에 넣을 생각이 없는 이름으로 바꾼다 -- 시험이 제 역할을 한 것이다.
+@pytest.mark.parametrize("value", [{"type": "glitch"}, {"type": "mono", "chosen_by": "someone"}, "mono", 3])
 def test_rejects_what_it_cannot_draw_or_attribute(value: object) -> None:
     # 이 값은 필터 그래프 문자열에 그대로 들어간다 -- 모르는 값이 흘러가면 안 된다.
     with pytest.raises(ValueError):

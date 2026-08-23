@@ -17,6 +17,10 @@ import {
 } from "./sceneTransitions";
 import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type InspectorTarget, type ShapeOverlayValue } from "./inspectorRegistry";
 
+// 배속 버튼에 올릴 값. `media_controls.py`의 `SPEED_RANGE`(0.25~4.0) 안에서
+// 숏폼에 실제로 자주 쓰는 것만 골랐다. 여기 없는 값은 숫자칸으로 넣는다.
+const SPEED_PRESETS = [0.5, 1, 1.5, 2] as const;
+
 type CutAction = "keep" | "remove";
 
 export type InspectorAction =
@@ -485,10 +489,32 @@ export function InspectorControls({
                 </>
               ) : null}
               {target.fields.includes("speed") ? (
-                <label>
-                  {`${target.label} 재생 속도`}
-                  <Input disabled={disabled} max="4" min="0.25" onChange={(event) => setSpeed(numberValue(event.target.value, speed))} step="0.05" type="number" value={speed} />
-                </label>
+                <>
+                  <label>
+                    {`${target.label} 재생 속도`}
+                    <Input disabled={disabled} max="4" min="0.25" onChange={(event) => setSpeed(numberValue(event.target.value, speed))} step="0.05" type="number" value={speed} />
+                  </label>
+                  {/* 숏폼에서는 같은 배속을 클립마다 반복해서 건다. 숫자칸만
+                      두면 그때마다 지우고 다시 쳐야 한다. 자주 쓰는 값만
+                      버튼으로 두고, 그 밖의 값은 여전히 숫자칸으로 넣는다 --
+                      버튼이 숫자칸을 대신하는 게 아니라 같은 값을 움직인다. */}
+                  <div className="vb-inspector__presets">
+                    {SPEED_PRESETS.map((preset) => (
+                      <Button
+                        aria-label={`${target.label} ${preset}배속`}
+                        aria-pressed={speed === preset}
+                        disabled={disabled}
+                        key={preset}
+                        onClick={() => setSpeed(preset)}
+                        size="xs"
+                        type="button"
+                        variant={speed === preset ? "default" : "outline"}
+                      >
+                        {`${preset}배`}
+                      </Button>
+                    ))}
+                  </div>
+                </>
               ) : null}
               {target.fields.includes("volume") ? (
                 <label>
@@ -512,6 +538,11 @@ export function InspectorControls({
                       <option key={choice.value} value={choice.value}>{choice.label}</option>
                     ))}
                   </NativeSelect>
+                  {/* 캡컷 초안에는 캡컷 쪽에서 가장 비슷한 색감을 얹는다
+                      (`capcut_looks.py`). 우리가 그리는 그림과 같지 않으므로
+                      고르는 자리에서 미리 말해 둔다 -- 조용히 다른 그림을
+                      주지 않는다. */}
+                  <small>캡컷으로 넘기면 비슷한 색감으로 바뀝니다.</small>
                 </label>
               ) : null}
               {/* 음량 바로 아래. 이게 꺼져 있으면 `소리 크기`는 아무 일도 하지

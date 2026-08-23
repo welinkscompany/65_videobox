@@ -292,3 +292,7 @@
 @media (max-width: 767px) {
   .vb-editor-workbench__timeline-handle { display: none; }
 }
+/* 배속 버튼 줄. 숫자칸 바로 아래에 붙여 한 벌로 보이게 하고, 좁은 도크에서
+   넘칠 수 있으니 접히게 둔다. 색은 Button의 기본/외곽선 변형을 그대로 쓴다 --
+   승인된 팔레트 밖의 값을 여기서 새로 만들지 않는다. */
+.vb-inspector__presets { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); margin-top: calc(var(--vb-space-1) * -1); }

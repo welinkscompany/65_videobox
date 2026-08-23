@@ -1008,6 +1008,32 @@ describe("InspectorControls", () => {
     expect(onAction.mock.calls[0][0].controls.filter).toBeNull();
   });
 
+  it("says up front that CapCut will not show the same look", async () => {
+    // 캡컷 필터는 캡컷 서버 자원이라 우리 ffmpeg 그림과 같을 수 없다. 고른
+    // 뒤에 캡컷에서 다른 그림을 보는 것보다, 고르는 자리에서 아는 편이 낫다.
+    const broll = {
+      assetId: "asset-broll",
+      clearOnly: false,
+      controls: { crop: "center", speed: 1, volume: 1 },
+      fields: ["speed", "volume", "filter"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    } as const;
+
+    render(
+      <InspectorControls
+        onAction={vi.fn()}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll as never}
+      />,
+    );
+
+    expect(screen.getByText("캡컷으로 넘기면 비슷한 색감으로 바뀝니다.")).toBeInTheDocument();
+  });
+
   it("lets the owner set playback speed and loudness on a clip", async () => {
     // Both rode in the command port from the start and no screen ever offered
     // them, so a clip could not be sped up or quietened without leaving
@@ -1045,5 +1071,65 @@ describe("InspectorControls", () => {
     // The range the owner already chose must survive the same save.
     expect(sent.controls.inSec).toBe(0);
     expect(sent.controls.outSec).toBe(4);
+  });
+
+  it("lets the owner pick a common speed with one press instead of typing it", async () => {
+    // 숏폼에서는 같은 배속을 클립마다 반복해서 건다. 숫자를 지우고 다시 치는
+    // 것이 실제로 걸리적거린다는 지적을 받아 자주 쓰는 값만 버튼으로 뒀다.
+    const onAction = vi.fn();
+    const broll = {
+      assetId: "asset-broll",
+      clearOnly: false,
+      controls: { crop: "center", speed: 1, volume: 1 },
+      fields: ["speed", "volume"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    } as const;
+
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll as never}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 2배속" }));
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+
+    expect(onAction.mock.calls[0][0].controls.speed).toBe(2);
+    // 버튼은 숫자칸을 대신하는 게 아니라 같이 움직인다. 어긋나면 화면이
+    // 보여 주는 값과 저장되는 값이 달라진다.
+    expect((screen.getByLabelText("B-roll 재생 속도") as HTMLInputElement).value).toBe("2");
+  });
+
+  it("shows which speed is currently chosen", async () => {
+    // 어느 배속인지 버튼만 보고 알 수 없으면, 눌러 놓고도 다시 숫자칸을 본다.
+    const onAction = vi.fn();
+    const broll = {
+      assetId: "asset-broll",
+      clearOnly: false,
+      controls: { crop: "center", speed: 0.5, volume: 1 },
+      fields: ["speed", "volume"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    } as const;
+
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll as never}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "B-roll 0.5배속" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "B-roll 2배속" })).toHaveAttribute("aria-pressed", "false");
   });
 });

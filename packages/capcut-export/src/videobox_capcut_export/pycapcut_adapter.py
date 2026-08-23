@@ -15,7 +15,9 @@ from pycapcut.text_segment import TextBackground, TextBorder, TextSegment, TextS
 from pycapcut.time_util import Timerange
 from pycapcut.track import TrackType
 from pycapcut.video_segment import VideoSegment
+from pycapcut import FilterType
 
+from videobox_capcut_export.capcut_looks import capcut_filter_name
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
@@ -30,6 +32,19 @@ from videobox_storage.timeline_clip_source_resolution import (
 )
 
 _MICROSECONDS_PER_SECOND = 1_000_000
+
+
+def _with_look(segment: VideoSegment, controls: dict[str, Any]) -> VideoSegment:
+    """고른 색감을 캡컷 쪽 이름표로 얹는다.
+
+    **B-roll 조각을 만드는 자리가 둘이다**(이어 붙이는 쪽과 한 번만 놓는 쪽).
+    이 저장소는 그런 짝을 한쪽만 고쳐 같은 결함을 두 번 낸 적이 있어서,
+    얹는 일을 여기 한 군데로 모아 둔다.
+    """
+    name = capcut_filter_name(controls)
+    if name is not None:
+        segment.add_filter(FilterType[name])
+    return segment
 
 
 class PyCapCutExportError(RuntimeError):
@@ -395,25 +410,25 @@ class PyCapCutRealExportAdapter:
             segment_duration_us = min(source_available_timeline_us, needed_duration_us - elapsed_us)
             # `speed`를 함께 주면 pycapcut이 target 길이를 source/speed로 다시
             # 계산한다. 그래서 source에 화면 시간 × 배속을 넣는다.
-            segment = VideoSegment(
+            segment = _with_look(VideoSegment(
                 material,
                 Timerange(start=placement_start_us + elapsed_us, duration=segment_duration_us),
                 source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
                 speed=speed,
                 volume=volume,
-            )
+            ), controls)
             script.add_segment(segment, "broll")
             elapsed_us += segment_duration_us
         if not controls["loop"]:
             segment_duration_us = min(source_available_timeline_us, needed_duration_us)
             script.add_segment(
-                VideoSegment(
+                _with_look(VideoSegment(
                     material,
                     Timerange(start=placement_start_us, duration=segment_duration_us),
                     source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
                     speed=speed,
                     volume=volume,
-                ),
+                ), controls),
                 "broll",
             )
             elapsed_us = segment_duration_us

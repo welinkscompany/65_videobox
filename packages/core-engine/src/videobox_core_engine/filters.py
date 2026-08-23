@@ -38,6 +38,18 @@ FILTER_CATALOG: dict[str, dict[str, str]] = {
     "vivid": {"label": "진하게", "family": "진하기", "ffmpeg": "eq=saturation=1.35:contrast=1.10"},
     # 색을 덜어 내고 어두운 쪽을 들어 올린다. 배경으로 깔 화면에.
     "faded": {"label": "옅게", "family": "진하기", "ffmpeg": "eq=saturation=0.72,curves=preset=lighter"},
+    # 밝히면서 가장자리를 부드럽게 눕힌다. 얼굴이 나오는 화면에.
+    # `unsharp`의 음수 amount가 흐리게 하는 쪽이다 -- 밝기만 올리면 뽀샤시가
+    # 아니라 그냥 허옇게 뜬 화면이 된다.
+    "bright": {"label": "뽀샤시하게", "family": "밝기",
+               "ffmpeg": "eq=brightness=0.08:saturation=1.06:contrast=0.96,unsharp=7:7:-1.1:7:7:-0.6"},
+    # 갈색 한 가지로 눕힌다. `vintage`는 원래 색이 남지만 이건 색을 갈아 끼운다.
+    "sepia": {"label": "세피아", "family": "옛날",
+              "ffmpeg": "colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"},
+    # 어두운 쪽은 푸르게, 밝은 쪽은 붉게. 영화에서 흔히 보는 그 나뉨이다.
+    # `warm`/`cool`은 화면 전체를 한쪽으로 밀지만 이건 밝기에 따라 갈라 놓는다.
+    "cinematic": {"label": "영화처럼", "family": "온도",
+                  "ffmpeg": "curves=r=0/0 0.5/0.58 1/1:b=0/0 0.5/0.42 1/1,eq=saturation=1.08:contrast=1.06"},
 }
 
 FILTER_TYPES = frozenset(FILTER_CATALOG)
