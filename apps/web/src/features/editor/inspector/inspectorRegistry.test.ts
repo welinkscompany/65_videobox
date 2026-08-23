@@ -58,7 +58,9 @@ describe("projectInspectorTargets", () => {
       // "B-roll에는 소리가 없으니 페이드도 의미 없다"고 뺐는데, 그건 소리 페이드
       // 이야기였다. 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
       // `소리 크기`는 자체 소리를 살려 둘 때만 뜻이 있으므로 그 스위치를 같이 준다.
-      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec"],
+      // 갱신 이유(2026-08-23): 색감(`filter`)이 붙었다. 화면이 있는 클립에만
+      // 붙으므로 아래 음악·효과음 목록은 그대로다.
+      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter"],
       assetId: "asset-broll",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,

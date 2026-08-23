@@ -68,6 +68,10 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     // 잘라내기가 0으로 돌아간다(2026-08-18 확인). 새 제어를 만들면 반드시
     // 이 목록에도 넣는다 -- 화면에 붙이는 것만으로는 절반이다.
     preserve_source_audio: value.preserveSourceAudio,
+    // 색감(`filters.py`). 위 경고를 읽고도 2026-08-23에 여기를 빠뜨려서,
+    // 화면에서 고르고 "저장했어요"까지 떴는데 값이 이 자리에서 조용히
+    // 버려졌다. 실제 화면에서 눌러 보고 찾았다.
+    filter: value.filter,
     loop: value.loop,
     pad: value.pad,
     trim_start_sec: value.trimStartSec,

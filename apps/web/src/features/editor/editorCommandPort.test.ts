@@ -125,6 +125,30 @@ describe("EditorCommandPort", () => {
     });
   });
 
+  it("carries the chosen look to the server, and carries turning it off too", async () => {
+    // 2026-08-23: 화면에 색감을 붙이고 여기 목록에 넣는 것을 빠뜨렸다. 고르고
+    // 저장하면 "저장했어요"까지 뜨는데 값은 이 자리에서 조용히 버려졌다 --
+    // 바로 위 주석이 경고하던 그 사고를 그대로 냈다.
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.updateMediaControls({
+      kind: "broll", segmentId: "seg", assetId: "asset-b",
+      controls: { filter: { type: "vintage" } },
+    });
+    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-b", media_controls: { filter: { type: "vintage" } }, expected_revision: 7,
+    });
+
+    // 끄는 것도 실려야 한다. `null`은 "없앤다"이고 `undefined`("말하지 않았다")와
+    // 다르다 -- 걸러지면 켠 색감을 영영 못 끈다.
+    await port.updateMediaControls({
+      kind: "broll", segmentId: "seg", assetId: "asset-b", controls: { filter: null },
+    });
+    expect(api.updateEditingSessionBroll).toHaveBeenLastCalledWith("p", "s", "seg", {
+      asset_id: "asset-b", media_controls: { filter: null }, expected_revision: 7,
+    });
+  });
+
   it("serializes authoritative BGM and SFX fade controls without replacing hidden gain or ducking", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from math import isfinite
 from typing import Any
 
+from videobox_core_engine.filters import normalize_filter
+
 
 def _finite_control_number(value: object) -> float:
     try:
@@ -82,6 +84,12 @@ def normalize_media_controls(
             "speed": speed,
             "volume": volume,
         }
+        # 색감(`filters.py`). **안 고른 클립에는 칸 자체를 넣지 않는다** --
+        # 넣으면 옛 저장분과 모양이 달라지고, 아무것도 안 바뀐 편집본이
+        # 바뀐 것처럼 보인다.
+        chosen_filter = normalize_filter(payload.get("filter"))
+        if chosen_filter is not None:
+            normalized["filter"] = chosen_filter
         # Source-window controls come from a selected local asset.  They are
         # distinct from timeline trim and must survive Director apply so both
         # FFmpeg and CapCut read the same original bytes.

@@ -486,6 +486,8 @@ export type CaptionFontLibrary = {
 
 /** Authoritative, project/session-scoped editor read contract. Times are seconds. */
 export type EditorMediaControls = {
+  /** 색감(`filters.py`). 안 고르면 아예 없는 칸이다. */
+  filter?: { type: string; chosen_by?: string } | null;
   volume?: number;
   crop?: string;
   speed?: number;

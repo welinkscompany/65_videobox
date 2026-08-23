@@ -341,6 +341,32 @@ def test_track_states_patch_refuses_a_flag_that_would_do_nothing(tmp_path) -> No
     assert "track_states_muted_unsupported" in response.text
 
 
+def test_a_chosen_look_comes_back_out_of_the_manifest(tmp_path) -> None:
+    # 색감을 고르면 화면이 그것을 **되읽어야** 한다. 응답 모델이
+    # `extra="forbid"`라 `filter` 칸이 없으면 조용히 빠지는 게 아니라 응답이
+    # 통째로 터진다 -- 그래서 여기서 실물 응답으로 확인한다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+    store = LocalProjectStore(tmp_path)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    timeline_id = str(session["timeline_id"])
+    timeline = store.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+    # 실제 저장 경로와 같게 정규화해서 넣는다 -- 재생 목록은 검사기가 아니라
+    # 저장된 것을 그대로 싣는 자리다.
+    from videobox_core_engine.media_controls import normalize_media_controls
+    stored = normalize_media_controls({"fit": "crop", "filter": {"type": "vintage"}}, media_kind="broll", duration_sec=2.0)
+    for track in timeline["tracks"]:
+        if track["track_type"] == "broll":
+            track["clips"][0]["media_controls"] = stored
+    store.update_timeline_run(project_id=project_id, timeline_id=timeline_id, timeline_payload=timeline)
+
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert manifest.status_code == 200, manifest.text
+    broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")
+    assert broll["clips"][0]["media_controls"]["filter"] == {"type": "vintage", "chosen_by": "owner"}
+
+
 def test_manifest_marks_old_timeline_source_stale_and_separates_stale_final(tmp_path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, _, session_id = _manifest_fixture(client, tmp_path)

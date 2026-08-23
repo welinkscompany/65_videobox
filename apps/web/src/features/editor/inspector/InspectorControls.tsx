@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { CaptionStyleScope } from "../../../api";
+import { SCENE_FILTER_CHOICES, SCENE_FILTER_NONE } from "./sceneFilters";
 import { Button } from "../../../components/ui/button";
 import { CaptionFontPicker } from "./CaptionFontPicker";
 import { CaptionPresetPicker, fromSnapshot } from "./CaptionPresetPicker";
@@ -167,6 +168,8 @@ export function InspectorControls({
   // them. Phone B-roll is routinely too long and too loud.
   const [speed, setSpeed] = useState(1);
   const [volume, setVolume] = useState(1);
+  // 색감. 안 고른 상태는 `none`이고, 저장할 때 `null`로 바뀐다.
+  const [look, setLook] = useState<string>(SCENE_FILTER_NONE);
   // 말할 때 음악이 비켜서기(덕킹). 렌더러는 처음부터 이걸 할 수 있었는데
   // 켜고 끄는 자리가 화면에 없었다.
   const [ducking, setDucking] = useState(false);
@@ -229,6 +232,7 @@ export function InspectorControls({
       setOutSec(target.controls.outSec ?? 0);
       setSpeed(target.controls.speed ?? 1);
       setVolume(target.controls.volume ?? 1);
+      setLook(target.controls.filter?.type ?? SCENE_FILTER_NONE);
       setDucking(target.controls.ducking ?? false);
       setPreserveSourceAudio(target.controls.preserveSourceAudio ?? false);
       setGainDb(target.controls.gainDb ?? 0);
@@ -492,6 +496,24 @@ export function InspectorControls({
                   <Input disabled={disabled} max="2" min="0" onChange={(event) => setVolume(numberValue(event.target.value, volume))} step="0.05" type="number" value={volume} />
                 </label>
               ) : null}
+              {/* 색감(`sceneFilters.ts`). 만든 여섯 개만 보여 준다 -- 캡컷 필터
+                  탭의 이름표는 캡컷 서버 자원이라 우리 렌더러가 못 그린다. */}
+              {target.fields.includes("filter") ? (
+                <label>
+                  {`${target.label} 색감`}
+                  <NativeSelect
+                    aria-label={`${target.label} 색감`}
+                    disabled={disabled}
+                    onChange={(event) => setLook(event.target.value)}
+                    value={look}
+                  >
+                    <option value={SCENE_FILTER_NONE}>원본 그대로</option>
+                    {SCENE_FILTER_CHOICES.map((choice) => (
+                      <option key={choice.value} value={choice.value}>{choice.label}</option>
+                    ))}
+                  </NativeSelect>
+                </label>
+              ) : null}
               {/* 음량 바로 아래. 이게 꺼져 있으면 `소리 크기`는 아무 일도 하지
                   않는다 -- 섞일 소리가 없기 때문이다. §10.13: `소스 오디오` 같은
                   말 대신 무엇을 쓰겠다는 건지로 적는다. */}
@@ -544,6 +566,7 @@ export function InspectorControls({
                     ...(target.fields.includes("inSec") && outSec > 0 ? { inSec, outSec } : {}),
                     ...(target.fields.includes("speed") ? { speed } : {}),
                     ...(target.fields.includes("volume") ? { volume } : {}),
+                    ...(target.fields.includes("filter") ? { filter: look === SCENE_FILTER_NONE ? null : { type: look } } : {}),
                     ...(target.fields.includes("ducking") ? { ducking } : {}),
                     ...(target.fields.includes("preserveSourceAudio") ? { preserveSourceAudio } : {}),
                   },

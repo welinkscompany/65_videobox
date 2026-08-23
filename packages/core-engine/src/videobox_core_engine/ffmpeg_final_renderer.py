@@ -14,6 +14,7 @@ from typing import Any, NamedTuple
 from videobox_core_engine.ass_subtitles import caption_band_px
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.composition_plan import CompositionPlan
+from videobox_core_engine.filters import filter_chain
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_warning_notes
@@ -732,14 +733,21 @@ class FfmpegFinalRenderer:
         1초 동안 서로 넘어가는 모양이 된다.
         """
         if controls["fit"] == "crop":
-            return (
+            transform = (
                 f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,"
                 f"crop={self.video_width}:{self.video_height}"
             )
-        return (
-            f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
-            f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
-        )
+        else:
+            transform = (
+                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
+            )
+        # 색감(`filters.py`)을 **여기서** 붙인다. 이 함수가 전환 양쪽에도 쓰이므로
+        # (위 docstring 참고) 여기 붙이면 전환 중에도 같은 색이 유지된다.
+        # 다른 데 붙였다가는 전환 1초 동안만 색이 튄다 -- `fit`이 어긋났을 때와
+        # 똑같은 사고다.
+        look = filter_chain(controls.get("filter"))
+        return f"{transform},{look}" if look else transform
 
     def _transition_side_filter(
         self, *, source_index: int, source_start_sec: float, seconds: float,

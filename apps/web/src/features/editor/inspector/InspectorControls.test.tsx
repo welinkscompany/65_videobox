@@ -925,6 +925,89 @@ describe("InspectorControls", () => {
     });
   });
 
+  it("lets the owner pick a look, and sends it with the rest of the clip's settings", async () => {
+    // 색감이 저장 payload에 안 실리면 고르고 저장해도 아무 일이 없다.
+    const onAction = vi.fn();
+    const broll = {
+      assetId: "asset-broll",
+      clearOnly: false,
+      controls: { crop: "center", speed: 1, volume: 1 },
+      fields: ["speed", "volume", "filter"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    } as const;
+
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll as never}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("B-roll 색감"), { target: { value: "vintage" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+
+    expect(onAction.mock.calls[0][0].controls.filter).toEqual({ type: "vintage" });
+  });
+
+  it("reads back the look already saved on the clip", async () => {
+    // 저장된 것을 되읽지 못하면 고른 적 없는 것처럼 보이고, 다음 저장에서
+    // 조용히 지워진다 -- 2026-08-23에 자막 숨김에서 똑같은 자리를 빠뜨렸다.
+    const broll = {
+      assetId: "asset-broll",
+      clearOnly: false,
+      controls: { crop: "center", filter: { type: "warm", chosen_by: "owner" } },
+      fields: ["filter"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    } as const;
+
+    render(
+      <InspectorControls
+        onAction={vi.fn()}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll as never}
+      />,
+    );
+
+    expect(screen.getByLabelText("B-roll 색감")).toHaveValue("warm");
+  });
+
+  it("turning a look off sends null, not the word none", async () => {
+    const onAction = vi.fn();
+    const broll = {
+      assetId: "asset-broll",
+      clearOnly: false,
+      controls: { crop: "center", filter: { type: "warm", chosen_by: "owner" } },
+      fields: ["filter"],
+      id: "clip:broll",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    } as const;
+
+    render(
+      <InspectorControls
+        onAction={onAction}
+        selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }}
+        target={broll as never}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("B-roll 색감"), { target: { value: "none" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+
+    expect(onAction.mock.calls[0][0].controls.filter).toBeNull();
+  });
+
   it("lets the owner set playback speed and loudness on a clip", async () => {
     // Both rode in the command port from the start and no screen ever offered
     // them, so a clip could not be sped up or quietened without leaving

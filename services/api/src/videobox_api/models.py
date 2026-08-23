@@ -1181,6 +1181,9 @@ class EditorMediaControlsResponse(BaseModel):
     preserve_source_audio: bool | None = None
     in_sec: float | None = Field(default=None, ge=0)
     out_sec: float | None = Field(default=None, gt=0)
+    # 색감(`filters.py`). 이 모델은 `extra="forbid"`라 여기 없으면 색감이 실린
+    # 클립의 응답이 통째로 터진다 -- 조용히 빠지는 게 아니다.
+    filter: dict[str, str] | None = None
     model_config = {"extra": "forbid"}
 
 
