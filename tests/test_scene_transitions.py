@@ -50,11 +50,28 @@ FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe"
 
 
 def test_the_catalog_is_small_on_purpose() -> None:
-    """1,137개를 만들지 않는다. 서로 생김새가 겹치지 않는 여섯 갈래다."""
-    assert len(TRANSITION_CATALOG) == 6
+    """1,137개를 만들지 않는다. 서로 생김새가 겹치지 않는 갈래만 둔다.
+
+    갱신 이유(2026-08-23): 방향이 있는 둘에 **반대 방향**을 더해 여덟이 됐다.
+    처음에 방향 변종을 뺀 이유는 "갈래가 겹치면 고민만 는다"였는데, 반대
+    방향은 겹치는 게 아니라 **반대다** -- 오른쪽으로 걸어 나가는 장면에
+    왼쪽으로 쓸어내면 움직임과 싸운다. 네 방향을 다 넣지는 않는다. 그건
+    원래 뺐던 이유에 그대로 걸린다.
+    """
+    assert len(TRANSITION_CATALOG) == 8
     assert set(TRANSITION_CATALOG) == {
-        "fade", "fadeblack", "dissolve", "wipeleft", "slideup", "circleopen",
+        "fade", "fadeblack", "dissolve",
+        "wipeleft", "wiperight", "slideup", "slidedown", "circleopen",
     }
+
+
+def test_every_direction_has_its_opposite_and_no_more() -> None:
+    """방향이 있는 것은 짝을 이룬다. 짝이 없으면 되돌릴 길이 없다."""
+    names = set(TRANSITION_CATALOG)
+    for one, other in (("wipeleft", "wiperight"), ("slideup", "slidedown")):
+        assert one in names and other in names
+    # 네 방향까지 벌리지 않는다 -- 여덟이 열둘이 되면 고르기가 일이 된다.
+    assert not names & {"wipeup", "wipedown", "slideleft", "slideright"}
 
 
 def test_a_transition_records_who_chose_it() -> None:
@@ -324,6 +341,38 @@ def test_a_transition_is_actually_visible_in_the_rendered_mp4(tmp_path: Path) ->
     assert mid_right[2] > 150 and mid_right[0] < 100, f"전환 중 오른쪽이 파랑이어야 한다: {mid_right}"
     # 전환 후 -- 온통 파랑.
     assert _rgb_at(output, at_sec=6.0, crop=left)[2] > 200
+    assert _rgb_at(output, at_sec=6.0, crop=right)[2] > 200
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_the_opposite_direction_really_goes_the_other_way(tmp_path: Path) -> None:
+    """`wiperight`가 **정말 반대로** 가는지 픽셀로 잰다.
+
+    표에 한 줄 넣는 것만으로는 "돈다"밖에 모른다. 방향을 넣은 이유가 방향이므로,
+    같은 순간에 좌우가 `wipeleft`와 **뒤바뀌어** 있어야 뜻이 있다.
+
+    빨강[0,4] → 파랑[4,8], 경계에 1초. `wipeleft`는 왼쪽이 아직 빨강인데,
+    `wiperight`는 같은 순간 왼쪽이 이미 파랑이어야 한다.
+    """
+    store, project_id, timeline = _project_with_two_scenes(tmp_path)
+    for track in timeline["tracks"]:
+        if track["track_type"] == "broll":
+            track["clips"][1]["transition"] = {"type": "wiperight", "duration_sec": 1.0, "chosen_by": "owner"}
+    output = tmp_path / "right.mp4"
+
+    FfmpegFinalRenderer(store=store).render_timeline_to_mp4(
+        project_id=project_id, timeline=timeline,
+        output_path=output, composition_plan=CompositionPlan.from_timeline(timeline=timeline),
+    )
+
+    left, right = "60:240:0:0", "60:240:260:0"
+    mid_left = _rgb_at(output, at_sec=4.4, crop=left)
+    mid_right = _rgb_at(output, at_sec=4.4, crop=right)
+    # `wipeleft`의 정확히 반대다 -- 거기서는 왼쪽이 빨강, 오른쪽이 파랑이었다.
+    assert mid_left[2] > 150 and mid_left[0] < 100, f"오른쪽 쓸기면 왼쪽이 먼저 파랑이어야 한다: {mid_left}"
+    assert mid_right[0] > 150 and mid_right[2] < 100, f"오른쪽 쓸기면 오른쪽이 아직 빨강이어야 한다: {mid_right}"
+    # 앞뒤는 그대로 -- 방향만 바뀌지 길이나 순서가 바뀌면 안 된다.
+    assert _rgb_at(output, at_sec=3.5, crop=left)[0] > 200
     assert _rgb_at(output, at_sec=6.0, crop=right)[2] > 200
 
 

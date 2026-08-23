@@ -20,7 +20,9 @@ export const SCENE_TRANSITION_CHOICES: readonly SceneTransitionChoice[] = [
   { value: "fadeblack", label: "검게 저물기" },
   { value: "dissolve", label: "흩어지며 넘기기" },
   { value: "wipeleft", label: "왼쪽으로 쓸어내기" },
+  { value: "wiperight", label: "오른쪽으로 쓸어내기" },
   { value: "slideup", label: "위로 밀어올리기" },
+  { value: "slidedown", label: "아래로 밀어내리기" },
   { value: "circleopen", label: "원으로 열기" },
 ];
 
