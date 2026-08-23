@@ -194,10 +194,19 @@ class PyCapCutRealExportAdapter:
         broll_clips: list[dict[str, Any]] = []
         bgm_clips: list[dict[str, Any]] = []
         sfx_clips: list[dict[str, Any]] = []
+        # 꺼 둔 레인은 초안에 싣지 않는다(`videobox_capcut_export.adapter`의
+        # `dropped_track_types`가 규칙을 갖고 있다). 여기가 **대표가 실제로 여는
+        # 초안**을 만드는 자리라, 이걸 빠뜨리면 화면에서 뺀 영상이 캡컷에서
+        # 되살아난다.
+        from videobox_capcut_export.adapter import dropped_track_types
+
+        dropped = dropped_track_types(timeline)
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
             track_type = canonical_track_type(track.get("track_type"))
+            if track_type in dropped:
+                continue
             clips = track.get("clips", [])
             if not isinstance(clips, list):
                 continue

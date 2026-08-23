@@ -124,3 +124,28 @@ def test_muting_the_video_lane_keeps_its_picture() -> None:
 
 def test_states_that_are_all_off_change_nothing() -> None:
     assert _payload({}) == _payload()
+
+
+def test_the_export_decides_about_the_subtitle_once_for_both_consumers() -> None:
+    """payload와 안내문이 자막을 두고 서로 다른 말을 하지 않는가.
+
+    `start_capcut_export`는 자막을 **두 곳**에 넘긴다: 어댑터(payload의
+    `subtitle_file_uri`)와 안내문 작성기(`Subtitle attached: yes/no`). 자막
+    레인을 숨겼을 때 어댑터만 걸러 두면 payload는 "없음"인데 안내문은 "붙음"이
+    된다 -- 같은 내보내기 안에서 두 곳이 어긋난다(2026-08-23 코드리뷰 지적).
+
+    이 저장소가 이미 쓰는 방식대로(전환·색감 목록 대조) 원본을 맞대어 본다.
+    """
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "packages" / "core-engine" / "src" / "videobox_core_engine" / "local_pipeline.py"
+    ).read_text(encoding="utf-8")
+    body = source.split("def start_capcut_export(", 1)[1].split(chr(10) + "    def ", 1)[0]
+
+    # 한 번 정하고 두 번 쓴다.
+    assert body.count("capcut_subtitle_file_uri = (") == 1
+    assert body.count("subtitle_file_uri=capcut_subtitle_file_uri") == 2
+    # 원래 값을 두 번째 소비자에게 직접 넘기는 길이 남아 있으면 안 된다.
+    assert 'subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None' not in body

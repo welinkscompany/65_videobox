@@ -33,18 +33,22 @@ VALID_EXPORT_TRACK_TYPES = {"narration", "broll", "bgm", "sfx"}
 SOUND_ONLY_TRACK_TYPES = {"narration", "bgm", "sfx"}
 
 
+def dropped_track_types(timeline: dict[str, Any]) -> set[str]:
+    """캡컷으로 넘기지 않을 레인(`track_states.py`).
+
+    **캡컷으로 나가는 길이 둘이라 규칙을 여기 하나만 둔다** -- 매니페스트
+    (`CapCutExportAdapter`)와 실제 초안(`PyCapCutRealExportAdapter`). 2026-08-23에
+    한쪽만 고쳐 놓고 "캡컷이 지운 것을 되살리지 않는다"고 적었는데, 고친 쪽은
+    UI가 더 이상 안 부르는 옛 길이었고 실제 초안은 그대로였다.
+    """
+    from videobox_core_engine.track_states import hidden_lanes, muted_lanes
+
+    return set(hidden_lanes(timeline)) | (set(muted_lanes(timeline)) & SOUND_ONLY_TRACK_TYPES)
+
+
 class CapCutExportAdapter:
     def _dropped_track_types(self, timeline: dict[str, Any]) -> set[str]:
-        """캡컷 초안에서 뺄 레인(`track_states.py`).
-
-        완성본에서는 눈·음소거가 지켜지는데 캡컷 초안은 그것을 안 읽고 있었다 --
-        화면에서 뺀 영상이 초안에는 그대로 들어갔다(2026-08-23 갭검증).
-        """
-        from videobox_core_engine.track_states import hidden_lanes, muted_lanes
-
-        hidden = hidden_lanes(timeline)
-        muted = muted_lanes(timeline)
-        return set(hidden) | (set(muted) & SOUND_ONLY_TRACK_TYPES)
+        return dropped_track_types(timeline)
 
     def _promptable_tracks(self, timeline: dict[str, Any]) -> list[dict[str, Any]]:
         promptable_tracks: list[dict[str, Any]] = []

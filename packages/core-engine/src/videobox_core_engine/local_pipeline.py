@@ -46,6 +46,8 @@ from videobox_core_engine.ffmpeg_final_renderer import (
 )
 from videobox_core_engine.render_quality_facts import composition_quality_facts
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+from videobox_capcut_export.adapter import dropped_track_types
+from videobox_core_engine.track_states import apply_track_states_to_timeline, normalize_track_states
 from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
 from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
@@ -1806,10 +1808,32 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
             )
+            # 눈·음소거를 실어 준다. **이 길은 저장된 타임라인을 받는다** --
+            # 초안 경로와 달리 `materialize`를 거치지 않아 `track_states`가
+            # 없었고, 그래서 어댑터의 판단이 아무 데서도 걸리지 않았다
+            # (2026-08-23). 어댑터만 고치고 여기를 빠뜨려 놓고 고쳤다고 적었다.
+            editing_session = self._editing_session_for_output_timeline(
+                project_id=project_id,
+                timeline=timeline,
+            )
+            if editing_session is not None:
+                apply_track_states_to_timeline(
+                    timeline=timeline,
+                    states=normalize_track_states(editing_session.get("track_states")),
+                )
+            # 자막을 실을지는 **한 번 정해서 둘 다에 같은 값을 넘긴다.** 어댑터만
+            # 걸러 두면 payload는 "자막 없음"인데 아래 안내문은 "자막 붙음"이라고
+            # 말한다 -- 같은 내보내기 안에서 두 곳이 서로 다른 말을 하게 된다
+            # (2026-08-23 코드리뷰 지적).
+            capcut_subtitle_file_uri = (
+                None
+                if "caption" in dropped_track_types(timeline)
+                else (latest_subtitle["file_uri"] if latest_subtitle else None)
+            )
             export_payload = self.capcut_exporter.build_payload(
                 project_id=project_id,
                 timeline=timeline,
-                subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
+                subtitle_file_uri=capcut_subtitle_file_uri,
             )
         except Exception as exc:
             failed_job = self.store.update_job(
@@ -1830,7 +1854,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 timeline=timeline,
                 output_target=JobType.CAPCUT_EXPORT.value,
-                subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
+                subtitle_file_uri=capcut_subtitle_file_uri,
             )
         except Exception as exc:
             failed_job = self.store.update_job(
