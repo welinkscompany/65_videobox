@@ -498,6 +498,20 @@ describe("AppRouter URL ownership", () => {
     expect(controls).toContainElement(screen.getByRole("button", { name: "보관함 보기" }));
   });
 
+  it("keeps the archive toggle reachable even after every live project is archived", async () => {
+    // 코드리뷰로 찾은 회귀(2026-08-23): 보관함 단추가 검색·보기전환과 같은
+    // `projects.length > 0` 조건 안에 있었다. 마지막 프로젝트를 보관하면
+    // `projects`(살아 있는 목록)가 0개가 되고, 그 조건 전체가 사라지면서
+    // 보관함으로 되돌릴 길이 함께 사라졌다 -- 이 단추를 만든 원래 이유
+    // ("목록 화면에서는 보관함에 닿을 방법이 아예 없었다")가 그대로
+    // 재현되는 회귀였다.
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    expect(await screen.findByRole("button", { name: "보관함 보기" })).toBeInTheDocument();
+  });
+
   it("says the archive is empty on the projects screen instead of showing nothing", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([liveProjects[0]] as never);
     mockCatalogSummaries();

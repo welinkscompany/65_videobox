@@ -261,30 +261,40 @@ function ProjectsPage() {
       {projects.length === 0 ? (
         <p className="vb-catalog-empty">아직 만든 영상이 없어요. 위에서 새 프로젝트를 시작하면 여기에 모아 드릴게요.</p>
       ) : null}
-      {projects.length > 0 ? (
-        <div className="vb-catalog-controls">
-          <label className="vb-catalog-search">
-            <span className="sr-only">프로젝트 검색</span>
-            <Input type="search" placeholder="프로젝트 이름으로 찾기" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} />
-          </label>
-          {/* 격자·줄 보기 전환(2026-08-22, `capcut-observed` 기록 §1). 화면 배치만
-              바꾸므로 새 백엔드가 필요 없다. */}
-          <div className="vb-catalog-view-toggle" role="group" aria-label="보기 방식">
-            <Button type="button" variant={viewMode === "grid" ? "default" : "outline"} aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
-            <Button type="button" variant={viewMode === "list" ? "default" : "outline"} aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
-          </div>
-          {/* 보관함(휴지통)도 같은 줄, 같은 오른쪽 자리다(`capcut-observed` 기록
-              §1: "오른쪽에 검색·보기전환·휴지통·프로젝트 동기화"). 예전엔 카드
-              목록을 다 지나야 나오는 맨 아래 링크였다 -- 검색·보기전환 옆으로
-              옮긴다. 여는 기능 자체는 그대로, 자리만 옮긴다. */}
-          <Button
-            type="button"
-            variant="ghost"
-            className="vb-catalog-archive-toggle"
-            onClick={() => { if (archiveOpen) setArchiveOpen(false); else { setArchiveOpen(true); void archive.load(); } }}
-          >{archiveOpen ? "보관함 닫기" : "보관함 보기"}</Button>
-        </div>
-      ) : null}
+      {/* 검색·보기전환은 검색·전환할 프로젝트가 있을 때만 의미가 있어 목록이
+          있을 때만 보인다. 보관함 단추는 그렇지 않다 -- **전부 보관하면
+          프로젝트 목록이 0개가 된다**(2026-08-23 코드리뷰로 발견: 이전에는
+          이 단추가 검색·보기전환과 함께 `projects.length > 0`에 묶여 있어서,
+          마지막 프로젝트를 보관한 순간 되돌릴 길이 통째로 사라졌다 -- 이
+          단추를 만든 원래 이유("목록 화면에서는 보관함에 닿을 방법이 아예
+          없었다")가 그대로 재현되는 회귀였다). 그래서 이 줄은 항상 그리고,
+          검색·보기전환만 안에서 조건을 건다. */}
+      <div className="vb-catalog-controls">
+        {projects.length > 0 ? (
+          <>
+            <label className="vb-catalog-search">
+              <span className="sr-only">프로젝트 검색</span>
+              <Input type="search" placeholder="프로젝트 이름으로 찾기" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} />
+            </label>
+            {/* 격자·줄 보기 전환(2026-08-22, `capcut-observed` 기록 §1). 화면 배치만
+                바꾸므로 새 백엔드가 필요 없다. */}
+            <div className="vb-catalog-view-toggle" role="group" aria-label="보기 방식">
+              <Button type="button" variant={viewMode === "grid" ? "default" : "outline"} aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
+              <Button type="button" variant={viewMode === "list" ? "default" : "outline"} aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
+            </div>
+          </>
+        ) : null}
+        {/* 보관함(휴지통)도 같은 줄, 같은 오른쪽 자리다(`capcut-observed` 기록
+            §1: "오른쪽에 검색·보기전환·휴지통·프로젝트 동기화"). 예전엔 카드
+            목록을 다 지나야 나오는 맨 아래 링크였다 -- 검색·보기전환 옆으로
+            옮긴다. 여는 기능 자체는 그대로, 자리만 옮긴다. */}
+        <Button
+          type="button"
+          variant="ghost"
+          className="vb-catalog-archive-toggle"
+          onClick={() => { if (archiveOpen) setArchiveOpen(false); else { setArchiveOpen(true); void archive.load(); } }}
+        >{archiveOpen ? "보관함 닫기" : "보관함 보기"}</Button>
+      </div>
       {projectQuery.trim() && filteredProjects.length === 0 ? (
         <p className="vb-catalog-empty">"{projectQuery.trim()}"과 맞는 프로젝트가 없어요.</p>
       ) : (

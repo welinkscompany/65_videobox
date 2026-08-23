@@ -245,16 +245,21 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
         gaps = session.get("gap_slots") if isinstance(session, dict) else None
         timeline_review_status: str | None = None
         if isinstance(session, dict) and session.get("timeline_id"):
+            timeline_id = str(session["timeline_id"])
+            # 아직 첫 초안을 만들지 않은 세션(빈 편집판 `blank:...`, 붙여넣은
+            # 대본으로 여는 `script_draft:...`)은 `timelines` 행이 아예 없다 --
+            # 검토를 받을 대상이 아직 없는 정상 상태다. 실제 타임라인을 만드는
+            # 경로(`save_timeline_run`, atomic draft bundle)는 전부 검토 행도
+            # 같은 호출에서 함께 만든다 -- 타임라인은 있는데 검토 행이 없으면
+            # 그건 진짜 자료 문제(예: 두 기록 사이 비정상 종료)다. 한 번의
+            # LEFT JOIN 조회로 세 경우(없음/있고 검토도 있음/있는데 검토만
+            # 없음)를 한 번에 가른다 -- 카탈로그 카드마다 부르는 자리라 조회를
+            # 두 번으로 나누지 않는다.
             try:
-                review = store.get_review_state(
+                review = store.get_review_state_if_timeline_started(
                     project_id=project_id,
-                    timeline_id=str(session["timeline_id"]),
+                    timeline_id=timeline_id,
                 )
-            except KeyError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="workspace_summary_unavailable",
-                ) from exc
             except Exception as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

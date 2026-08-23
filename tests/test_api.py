@@ -4832,7 +4832,7 @@ def test_workspace_summary_output_state_overrides_asset_gaps(
     )
     monkeypatch.setattr(
         store,
-        "get_review_state",
+        "get_review_state_if_timeline_started",
         lambda *, project_id, timeline_id: {"status": "draft"},
     )
     monkeypatch.setattr(
@@ -4872,7 +4872,7 @@ def test_workspace_summary_selects_latest_final_render_by_timestamp_not_job_id(
     )
     monkeypatch.setattr(
         store,
-        "get_review_state",
+        "get_review_state_if_timeline_started",
         lambda *, project_id, timeline_id: {"status": "draft"},
     )
     monkeypatch.setattr(
@@ -4921,7 +4921,7 @@ def test_workspace_summary_pending_retry_without_timestamps_supersedes_older_fai
     )
     monkeypatch.setattr(
         store,
-        "get_review_state",
+        "get_review_state_if_timeline_started",
         lambda *, project_id, timeline_id: {"status": "draft"},
     )
     monkeypatch.setattr(
@@ -4959,22 +4959,90 @@ def test_workspace_summary_pending_retry_without_timestamps_supersedes_older_fai
     }
 
 
-def test_workspace_summary_fails_closed_when_session_timeline_review_is_missing(
+def test_workspace_summary_treats_a_pre_draft_session_as_ordinary_edit_state(
     tmp_path: Path,
 ) -> None:
+    # A session whose `timeline_id` has no matching `timelines` row is the
+    # ordinary "blank" pre-first-draft state (`local_project_store.py`'s
+    # `save_editing_session` binds a session without ever creating a timeline
+    # or review row). It used to be indistinguishable from real data
+    # corruption because `get_review_state` raises the same `KeyError`
+    # either way, which broke the catalog card for any project sitting in
+    # this completely normal, common state -- fixed 2026-08-23.
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
-    project_id = client.post("/api/projects", json={"name": "Missing review"}).json()["project_id"]
+    project_id = client.post("/api/projects", json={"name": "Pre-draft session"}).json()["project_id"]
     app.state.store.save_editing_session(
         project_id=project_id,
-        timeline_id="timeline-without-review",
+        timeline_id="blank:no-timeline-yet",
         session_payload={"segments": [], "history": []},
     )
 
     response = client.get(f"/api/projects/{project_id}/workspace-summary")
 
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "edit"
+    assert payload["state"] == "ready"
+
+
+def test_workspace_summary_fails_closed_when_a_real_timelines_row_has_no_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unlike the pre-draft case above, every real store path that writes a
+    # `timelines` row also writes its `review_approvals` row right alongside
+    # it (`save_timeline_run` calls `save_review_state` itself; the
+    # atomic-bundle path inserts both in the same transaction) -- so this
+    # exact state can't be reached through the public store API in a test.
+    # It's still a real crash-consistency gap (the two writes aren't atomic
+    # with each other), so the endpoint must keep failing closed for it;
+    # simulate it directly rather than skip the guarantee.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Missing review"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-orphaned",
+        session_payload={"segments": [], "history": []},
+    )
+
+    def missing_review(*, project_id: str, timeline_id: str) -> dict[str, object]:
+        raise KeyError(f"Review state not found: {timeline_id}")
+
+    monkeypatch.setattr(store, "get_review_state_if_timeline_started", missing_review)
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
     assert response.status_code == 503, response.text
     assert response.json()["detail"] == "workspace_summary_unavailable"
+
+
+def test_workspace_summary_treats_a_pasted_script_draft_session_as_ordinary_edit_state(
+    tmp_path: Path,
+) -> None:
+    # `create_script_draft_editing_session` (packages/core-engine/src/
+    # videobox_core_engine/local_pipeline.py) saves a session whose
+    # `timeline_id` is `script_draft:{asset_id}` without ever calling
+    # `save_timeline_run` -- pasting a script to start editing is a real,
+    # currently-used feature that produces exactly this "no timelines row
+    # yet" shape, same as the blank-session case, but with a different ID
+    # prefix. The fix must not be narrowed to only recognize `blank:`.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Script draft"}).json()["project_id"]
+    app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="script_draft:asset-1",
+        session_payload={"segments": [], "history": []},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "edit"
+    assert payload["state"] == "ready"
 
 
 def test_workspace_summary_surfaces_blocked_review_as_review_action(
@@ -4991,7 +5059,7 @@ def test_workspace_summary_surfaces_blocked_review_as_review_action(
     )
     monkeypatch.setattr(
         store,
-        "get_review_state",
+        "get_review_state_if_timeline_started",
         lambda *, project_id, timeline_id: {"status": "blocked"},
     )
 

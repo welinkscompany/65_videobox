@@ -4204,6 +4204,44 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         candidate["operator_review_status"] = normalized_decision
         return candidate
 
+    def get_review_state_if_timeline_started(
+        self, *, project_id: str, timeline_id: str
+    ) -> dict[str, Any] | None:
+        """Tell "no timeline yet" apart from "timeline exists, review missing".
+
+        `get_review_state` alone can't -- it raises `KeyError` either way.
+        This answers both in one query, since the caller sits on a hot path.
+
+        A session's `timeline_id` legitimately has no `timelines` row yet
+        for two real, current product paths: a blank pre-draft session
+        (`blank_editing_session.py`) and a pasted-script draft session
+        (`script_draft_session.py`) -- neither has produced a real timeline
+        to review, so this returns `None`. Every path that DOES write a
+        `timelines` row (`save_timeline_run`, the atomic draft bundle) also
+        writes its `review_approvals` row in the same call; a `timelines`
+        row existing with no matching review row is a genuine data
+        inconsistency, and this raises `KeyError` for that, same as
+        `get_review_state` does.
+        """
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT t.timeline_id, t.project_id, r.status, r.approved_at, r.updated_at, r.source_session_id, r.source_session_revision, r.source_variant_id, r.source_variant_revision, r.is_current, r.invalidated_at, r.invalidated_reason
+            FROM timelines t
+            LEFT JOIN review_approvals r ON r.project_id = t.project_id AND r.timeline_id = t.timeline_id
+            WHERE t.project_id = ? AND t.timeline_id = ?
+            """,
+            (project_id, timeline_id),
+        )
+        if row is None:
+            return None
+        if row["status"] is None:
+            raise KeyError(f"Review state not found: {timeline_id}")
+        payload = dict(row)
+        payload["status"] = str(payload.get("status") or "").strip().lower()
+        payload["is_current"] = bool(payload.get("is_current"))
+        return payload
+
     def get_review_state(self, *, project_id: str, timeline_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
