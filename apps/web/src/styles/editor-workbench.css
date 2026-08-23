@@ -168,6 +168,38 @@
 .vb-editor-assets__actions { margin-top: var(--vb-space-1); }
 @media (max-width: 480px) { .vb-editor-assets__actions > button { flex: 1 1 8rem; } }
 .vb-editor-assets__thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 0.45rem; background: var(--muted); display: block; margin-bottom: var(--vb-space-1); }
+/* **소리 자산은 줄로 눕힌다**(`capcut-observed` 기록 §5 오디오: "오른쪽은
+   격자가 아니라 목록이다"). 카드를 새로 만들지 않고 같은 `article`의 배치만
+   바꾼다 -- 파형과 제목이 한 줄에 서고, 나머지 설명·단추는 그 아래로 흐른다.
+   효과음이 100개라 카드로 그리면 한 화면에 몇 개 못 본다. */
+.vb-editor-assets__card--row { grid-template-columns: 3.25rem minmax(0, 1fr); align-items: center; column-gap: var(--vb-space-2); padding: var(--vb-space-2) var(--vb-space-3); }
+.vb-editor-assets__card--row > * { grid-column: 2; }
+.vb-editor-assets__card--row > .vb-editor-assets__wave { grid-column: 1; grid-row: 1 / span 2; }
+.vb-editor-assets__card--row .vb-editor-assets__title { font-size: var(--vb-text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 줄에서 접는 것은 **되풀이되는 말뿐이다.** 소리 있음/없음은 음악·효과음에선
+   당연하고, `직접 선택한 자산`은 모든 카드에 같은 문구이며, 적용 구간은 패널
+   맨 위가 이미 말한다. **상태와 라이선스는 접지 않는다** -- 출처 표기 필요
+   여부가 거기 있고, 음악·효과음이 바로 그게 걸리는 자산이다. */
+.vb-editor-assets__card--row .vb-editor-assets__audio-presence,
+.vb-editor-assets__card--row .vb-editor-assets__reason,
+.vb-editor-assets__card--row .vb-editor-assets__card-target,
+/* 줄에서는 긴 URL이 든 라이선스 줄 대신 짧은 `출처 표기 …`만 보인다. 전체
+   문구는 그 줄의 `title`에 있다. 격자에서는 반대로 라이선스 줄이 이미
+   표기 여부까지 담고 있으므로 짧은 쪽을 접는다 -- 같은 말을 두 번 쓰지 않는다. */
+.vb-editor-assets__card--row .vb-editor-assets__license { display: none; }
+.vb-editor-assets__card:not(.vb-editor-assets__card--row) .vb-editor-assets__attribution { display: none; }
+.vb-editor-assets__card--row .vb-editor-assets__status,
+.vb-editor-assets__card--row .vb-editor-assets__attribution { font-size: var(--vb-text-sm); }
+.vb-editor-assets__wave { display: flex; align-items: center; justify-content: center; gap: 2px; width: 3.25rem; height: 2.4rem; padding: 0.15rem; border-radius: 0.4rem; background: var(--vb-accent-bg); }
+.vb-editor-assets__wave i { display: block; width: 2px; min-height: 8%; border-radius: 2px; background: var(--vb-accent); }
+/* 줄에서는 취향 단추를 작게 눕힌다. **빼지는 않는다** -- 캡컷 오디오 줄은
+   별·내려받기 둘뿐이지만 캡컷의 그 패널은 우리 소재 도크(280px)보다 훨씬
+   넓다. 좁은 칸에서 캡컷의 줄 높이를 그대로 흉내 내려면 단추를 없애야 하고,
+   그건 보기 좋아지고 못 쓰게 되는 맞바꿈이다. */
+.vb-editor-assets__card--row .vb-editor-assets__taste { gap: var(--vb-space-1); }
+.vb-editor-assets__card--row .vb-editor-assets__taste > button { min-height: 28px; padding: 0.15rem 0.4rem; font-size: var(--vb-text-sm); }
+.vb-editor-assets__card--row .vb-editor-assets__actions { margin-top: 0; }
+.vb-editor-assets__card--row .vb-editor-assets__actions > button { min-height: 28px; padding: 0.15rem 0.5rem; font-size: var(--vb-text-sm); }
 .vb-editor-variants {
   display: grid;
   min-height: 0;

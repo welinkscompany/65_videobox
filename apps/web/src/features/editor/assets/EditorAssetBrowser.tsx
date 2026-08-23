@@ -139,7 +139,15 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         const creator = card.sourceMetadata.creator.trim();
         // 캡컷처럼 끌어다 놓을 수 있게 한다. `적용` 단추는 그대로 둔다 --
         // 끌기가 안 되는 환경(키보드만 쓰는 경우 포함)에서도 길이 있어야 한다.
-        return <article key={card.id} className="vb-editor-assets__card"
+        // **소리는 줄로, 보는 것은 격자로**(`capcut-observed` 기록 §5 오디오:
+        // "오른쪽은 격자가 아니라 목록이다 -- 앨범 그림 + 곡명 + `아티스트 ·
+        // 길이`"). 음악·효과음은 썸네일이 없어 카드로 그리면 글자만 든 빈
+        // 상자가 되고, 효과음 100개를 한 화면에서 훑을 수가 없다. 카드를 새로
+        // 만들지 않고 **같은 `article`을 가로로 눕힌다** -- 적용·미리듣기·취향
+        // 단추가 전부 그대로 살아 있어야 하고, 두 벌을 유지하면 한쪽만 고치는
+        // 사고가 난다.
+        const isSound = card.kind === "bgm" || card.kind === "sfx";
+        return <article key={card.id} className={`vb-editor-assets__card${isSound ? " vb-editor-assets__card--row" : ""}`}
           draggable
           onDragStart={(event) => writeAssetDrag(event.dataTransfer, card.id)}
           title="타임라인의 장면 위로 끌어다 놓을 수 있어요">
@@ -150,15 +158,31 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
               alt={`${card.title} 미리 이미지`}
               loading="lazy"
             />
+          ) : isSound ? (
+            // 캡컷 오디오 줄의 앨범 그림 자리. 우리 자산에는 그림이 없으므로
+            // 파형 모양을 그려 **줄마다 눈에 걸리는 것**을 둔다(라이브러리
+            // 화면의 `vb-library-waveform`과 같은 방식).
+            <span className="vb-editor-assets__wave" aria-hidden="true">
+              {Array.from({ length: 14 }, (_, index) => <i key={index} style={{ height: `${24 + ((index * 17) % 48)}%` }} />)}
+            </span>
           ) : null}
           <h3 className="vb-editor-assets__title">{card.title}</h3>
           <p className="vb-editor-assets__summary">
             {card.label} · {card.durationLabel}
             {card.orientation ? <> · <span className="vb-editor-assets__orientation">{card.orientation}</span></> : null}
           </p>
-          <p className="vb-editor-assets__detail">{card.status}</p>
-          <p className="vb-editor-assets__detail">{card.audioPresence}</p>
-          <p className="vb-editor-assets__detail">{card.license}</p>
+          {/* 상태와 **출처 표기 여부**는 권리 정보라 줄로 눕혀도 감추지 않는다 --
+              음악·효과음이 바로 그게 걸리는 자산이다. 다만 줄에서는 `라이선스:
+              {긴 URL} · 출처 표기 불필요` 전체를 그리면 URL이 세 줄로 감겨
+              줄이 카드보다 길어졌다(2026-08-23 실측 325px). 창작자에게 필요한
+              것은 URL이 아니라 **표기가 필요한지**이므로, 줄에서는 짧은 쪽만
+              보이고 URL을 포함한 전체 문구는 `title`로 남긴다. */}
+          <p className="vb-editor-assets__detail vb-editor-assets__status">{card.status}</p>
+          <p className="vb-editor-assets__detail vb-editor-assets__audio-presence">{card.audioPresence}</p>
+          <p className="vb-editor-assets__detail vb-editor-assets__license">{card.license}</p>
+          <p className="vb-editor-assets__detail vb-editor-assets__attribution" title={card.license}>
+            {card.sourceMetadata.attributionRequired ? "출처 표기 필요" : "출처 표기 불필요"}
+          </p>
           <p className="vb-editor-assets__reason">직접 선택한 자산</p>
           {previewState?.status === "preparing" ? <p role="status">원본 미리보기를 준비하고 있어요</p> : null}
           {previewState?.status === "failed" ? <p role="alert">원본 미리보기를 준비하지 못했어요. 편집과 적용은 계속할 수 있어요.</p> : null}

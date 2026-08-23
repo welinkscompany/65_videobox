@@ -83,6 +83,38 @@ describe("EditorAssetBrowser", () => {
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
   });
 
+  it("lays sound assets out as rows and keeps picture assets as cards", () => {
+    // `capcut-observed` 기록 §5 오디오: "오른쪽은 격자가 아니라 목록이다 --
+    // 앨범 그림 + 곡명 + `아티스트 · 길이`". 음악·효과음은 썸네일이 없어
+    // 카드로 그리면 글자만 든 빈 상자가 되고, 효과음이 100개면 한 화면에 몇
+    // 개 못 본다. 같은 `article`을 눕히는 방식이라 단추는 그대로 살아 있다.
+    const { container } = render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+
+    const rowOf = (title: string) => screen.getByRole("heading", { name: title }).closest("article");
+    expect(rowOf("배경 음악 1")).toHaveClass("vb-editor-assets__card--row");
+    expect(rowOf("제품 사진")).not.toHaveClass("vb-editor-assets__card--row");
+    // 소리 줄에도 눈에 걸리는 것이 있어야 한다 -- 캡컷 오디오 줄의 앨범 그림 자리.
+    expect(rowOf("배경 음악 1")?.querySelector(".vb-editor-assets__wave")).not.toBeNull();
+    // 눕혀도 적용·미리듣기는 그대로다. 이게 깨지면 보기 좋아지고 못 쓰게 된다.
+    expect(screen.getByRole("button", { name: "배경 음악 1 적용" })).toBeInTheDocument();
+    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
+  });
+
+  it("keeps rights wording on a sound row, where attribution actually applies", () => {
+    // 줄로 눕히면서 되풀이되는 설명을 접었는데, 처음엔 라이선스 줄까지 같이
+    // 접혔다. 음악·효과음이 **출처 표기가 걸리는 바로 그 자산**이라, 상태와
+    // 라이선스는 접으면 안 된다. 접는 것은 `소리 있음`(음악에선 당연한 말),
+    // `직접 선택한 자산`(모든 카드가 같은 문구), 적용 구간(패널 맨 위가 말함)뿐.
+    render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+
+    const row = screen.getByRole("heading", { name: "배경 음악 1" }).closest("article");
+    // 줄에서는 짧은 표기만 보이고, URL을 포함한 전체 문구는 `title`에 남는다.
+    const attribution = row?.querySelector(".vb-editor-assets__attribution");
+    expect(attribution?.textContent).toContain("출처 표기");
+    expect(attribution?.getAttribute("title")).toContain("라이선스:");
+    expect(row?.querySelector(".vb-editor-assets__status")?.textContent).toContain("이용 가능");
+  });
+
   it("applies the exact card and target segment only when target, save state, and availability permit", () => {
     const onApply = vi.fn();
     const { rerender } = render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={onApply} />);

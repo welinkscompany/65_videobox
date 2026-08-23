@@ -27,7 +27,7 @@ export const editorWorkbenchPanelConstants = Object.freeze({ leftMinPx: 220, rig
 // 있고 이 벌은 persisted가 깨졌을 때의 대비책이다. 두 곳을 함께 본다.
 /** 처음 여는 사람이 보는 배치. **캡컷은 소재와 세부 정보가 둘 다 열려 있다.**
  *
- *  `rightOpen`이 거짓이면 1600px가 넘어도 `desktop-both`로 못 간다(아래 `resolve`의
+ *  `rightOpen`이 거짓이면 아무리 넓어도 `desktop-both`로 못 간다(아래 `resolve`의
  *  첫 줄이 `state.rightOpen`을 본다). 그래서 넓은 화면에서도 늘 한쪽만 보였다 --
  *  2026-08-22에 1600px로 찍어 보고 알았다.
  *
@@ -64,7 +64,13 @@ export function resolveEditorWorkbenchLayout({ viewportWidth, availableWorkbench
   const available = Math.max(0, availableWorkbenchWidth);
   const { leftMinPx, rightMinPx, gutterPx, bothPreviewMinPx, singlePreviewMinPx } = editorWorkbenchPanelConstants;
   const bothPreview = available - leftMinPx - rightMinPx - gutterPx * 2;
-  if (viewportWidth >= 1600 && state.leftOpen && state.rightOpen && bothPreview >= bothPreviewMinPx) return { ...state, mode: "desktop-both", activeDrawer: null, previewMinPx: bothPreviewMinPx };
+  // 관문은 `desktop-single`과 같은 1280이고, **실제 판단은 `bothPreview`가 한다.**
+  // 예전에는 여기가 1600이었는데 그 숫자가 폭 계산보다 훨씬 보수적이었다 --
+  // 1440px 노트북에서 재 보니 미리보기에 856px가 남는데도(720 필요) 관문에서만
+  // 막혀 오른쪽 세부 정보가 접혔다(2026-08-23 실측). 1280에서는 남는 폭이
+  // 696px라 `bothPreview` 조건이 알아서 걸러 낸다 -- 관문을 낮춰도 좁은 화면이
+  // 뚫리지 않는 이유가 이것이다.
+  if (viewportWidth >= 1280 && state.leftOpen && state.rightOpen && bothPreview >= bothPreviewMinPx) return { ...state, mode: "desktop-both", activeDrawer: null, previewMinPx: bothPreviewMinPx };
 
   // Shutting both docks is a real choice, not a state to correct: it gives the
   // preview the whole width. Only pick a dock when the creator asked for one.
