@@ -34,6 +34,15 @@ beforeEach(() => {
   vi.spyOn(api, "ingestLibraryAssets").mockResolvedValue({ ingest_batch_id: "batch_1", partial: false, items: [] });
 });
 
+/** 분류를 고르는 자리는 왼쪽 목록 하나다(2026-08-23). 목록 단추는 이름 옆에
+ *  개수를 함께 그리므로 이름 앞부분으로 찾는다. */
+function chooseCategory(label: string): HTMLElement {
+  const sidebar = screen.getByTestId("library-sidebar");
+  const button = within(sidebar).getByRole("button", { name: new RegExp(`^${label}`) });
+  fireEvent.click(button);
+  return button;
+}
+
 describe("LibraryPage", () => {
   it("keeps the desktop library bounded to three panes and a center scroll region", async () => {
     render(<LibraryPage />);
@@ -45,27 +54,27 @@ describe("LibraryPage", () => {
     expect((await screen.findAllByText("walk.mp4")).length).toBeGreaterThan(0);
   });
 
-  it("offers each media type once, not twice, between the sidebar and the results tabs", async () => {
-    // `capcut-observed` 기록 §5: "탭을 누르면 왼쪽에 분류 목록, 오른쪽에 격자" --
-    // 한 축에 목록이 하나다. 예전엔 왼쪽 사이드바와 결과 위 탭이 영상·음악·
-    // 효과음·그림을 똑같이 두 번 물었다.
+  it("picks a category from one sidebar list, with no second row asking the same thing", async () => {
+    // `capcut-observed` 기록 §5: "탭을 누르면 **왼쪽에 분류 목록, 오른쪽에
+    // 격자**가 나온다" -- 캡컷은 왼쪽 목록 하나로 고르고 격자 위에 같은 것을
+    // 다시 묻지 않는다. 그 왼쪽 목록도 `가져오기 · 내 보관함 · 음악 · 사운드
+    // 효과`처럼 종류와 보관 상태를 한 줄에 섞어 둔다(§5 오디오).
+    //
+    // 2026-08-23에 한 번 반대로 정리했다 -- 사이드바에서 종류를 빼고 결과
+    // 영역 탭을 남겼는데, `전체`가 두 군데에 남아 **둘 다 동시에 "선택됨"으로
+    // 보이는** 상태가 됐다. owner 결정으로 왼쪽 하나에 합쳤다.
     render(<LibraryPage />);
     await screen.findAllByText("walk.mp4");
 
     const sidebar = screen.getByTestId("library-sidebar");
-    expect(within(sidebar).getByRole("button", { name: /^전체/ })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: /^즐겨찾기/ })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: /^휴지통/ })).toBeInTheDocument();
-    expect(within(sidebar).queryByRole("button", { name: /^영상/ })).toBeNull();
-    expect(within(sidebar).queryByRole("button", { name: /^음악/ })).toBeNull();
-    expect(within(sidebar).queryByRole("button", { name: /^효과음/ })).toBeNull();
-    expect(within(sidebar).queryByRole("button", { name: /^그림/ })).toBeNull();
-
-    expect(screen.getByRole("tab", { name: "영상" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "음악" })).toBeInTheDocument();
+    for (const label of ["전체", "영상", "음악", "효과음", "그림", "즐겨찾기", "휴지통"]) {
+      expect(within(sidebar).getByRole("button", { name: new RegExp(`^${label}`) })).toBeInTheDocument();
+    }
+    // 고르는 자리는 이 목록 하나뿐이다.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
-  it("shows only 24 results in the bounded center and switches keyboard tabs", async () => {
+  it("shows only 24 results in the bounded center and marks the chosen category", async () => {
     const many = Array.from({ length: 40 }, (_, index) => asset({
       library_asset_id: `asset_${index}`,
       user_metadata: { filename: `clip-${index}.mp4`, tags: [] },
@@ -73,9 +82,9 @@ describe("LibraryPage", () => {
     vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: many, total: many.length });
     render(<LibraryPage />);
     expect((await screen.findAllByTestId("library-asset-card"))).toHaveLength(24);
-    const musicTab = screen.getByRole("tab", { name: "음악" });
-    fireEvent.keyDown(musicTab, { key: "Enter" });
-    expect(musicTab).toHaveAttribute("aria-selected", "true");
+    // 분류 목록은 진짜 `<button>`이라 키보드 조작은 브라우저가 맡는다. 여기서는
+    // 고른 것이 눌린 상태로 남는지만 본다.
+    expect(chooseCategory("음악")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("searches by meaning when a media type is chosen, and says which way it found things", async () => {
@@ -93,7 +102,7 @@ describe("LibraryPage", () => {
       semantic: true,
     });
     render(<LibraryPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: "영상" }));
+    chooseCategory("영상");
     fireEvent.change(screen.getByLabelText("검색"), { target: { value: "차분한 산책" } });
 
     await waitFor(() => expect(search).toHaveBeenCalledWith("차분한 산책", "broll", undefined));
@@ -109,7 +118,7 @@ describe("LibraryPage", () => {
       semantic: false,
     });
     render(<LibraryPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: "영상" }));
+    chooseCategory("영상");
     fireEvent.change(screen.getByLabelText("검색"), { target: { value: "걷기" } });
 
     expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
@@ -126,7 +135,7 @@ describe("LibraryPage", () => {
       semantic: true,
     });
     render(<LibraryPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: "영상" }));
+    chooseCategory("영상");
     fireEvent.change(screen.getByLabelText("검색"), { target: { value: "노을" } });
 
     expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
@@ -301,7 +310,7 @@ describe("LibraryPage", () => {
     fireEvent.click(screen.getByTestId("library-asset-card"));
     expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "음악" }));
+    chooseCategory("음악");
 
     // walk.mp4는 여전히 선택된 채 미리보기에 남아 있지만, 음악 탭에는 그 영상의
     // 카드가 없다 -- 미리보기 패널의 링크가 유일한 경로여야 한다.
@@ -348,7 +357,7 @@ describe("LibraryPage", () => {
     render(<LibraryPage />);
     await screen.findAllByText("바다.png");
 
-    fireEvent.click(screen.getByRole("tab", { name: "그림" }));
+    chooseCategory("그림");
     const card = await screen.findByRole("article", { name: "바다.png" });
     expect(within(card).getByRole("presentation")).toHaveAttribute("src", "/api/library/assets/user_image_1/thumbnail");
     // 구간 정리는 영상에만 있는 길이다. 그림에 붙이면 열어 봐야 아무것도 없다.
@@ -380,7 +389,7 @@ describe("LibraryPage", () => {
       semantic: false,
     });
     render(<LibraryPage />);
-    fireEvent.click(screen.getByRole("tab", { name: "그림" }));
+    chooseCategory("그림");
     fireEvent.change(screen.getByLabelText("검색"), { target: { value: "바다" } });
 
     await waitFor(() => expect(search).toHaveBeenCalledWith("바다", "image", undefined));

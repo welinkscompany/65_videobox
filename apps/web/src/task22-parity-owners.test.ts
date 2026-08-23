@@ -131,8 +131,8 @@ const nativeControlAllowlist = {
     reason: "The ingest result table owns its explicit retry action for failed asset registration.",
   },
   "features/library/LibraryResults.tsx": {
-    controls: ["button:library-tab", "input:library-search"],
-    reason: "The library result pane owns its search field and media-type tab controls.",
+    controls: ["input:library-search"],
+    reason: "The library result pane owns its search field; picking a media type belongs to the one sidebar list beside it.",
   },
   "app/OutputsPage.tsx": {
     controls: ["input:output-variant-select"],
