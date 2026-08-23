@@ -167,16 +167,13 @@ def _track_contract(track: dict[str, Any]) -> dict[str, Any] | None:
             "overlay_type": raw.get("overlay_type") if clip_type == "overlay" else None,
             "overlay_payload": dict(raw.get("overlay_payload") or {}) if clip_type == "overlay" and isinstance(raw.get("overlay_payload"), dict) else {},
         })
-    contract: dict[str, Any] = {"track_id": str(track.get("track_id") or "track"), "track_type": track_type, "clips": clips}
-    # 눈·음소거(`track_states.py`). **숨겨도 목록에서 빼지 않는다** -- 빼면
-    # 화면에 트랙이 없어져 다시 켤 방법이 사라진다. 결과물에서 빼는 것은
-    # `CompositionPlan.from_timeline`이 맡는다. 켜져 있을 때만 실어서, 안
-    # 건드린 타임라인의 응답 모양이 예전 그대로 남게 한다.
-    if track.get("hidden"):
-        contract["hidden"] = True
-    if track.get("muted"):
-        contract["muted"] = True
-    return contract
+    # 눈·음소거는 **트랙마다 싣지 않는다.** 화면은 맨 위 `track_states` 하나만
+    # 읽는다(자막 트랙은 여기 `tracks`에 아예 안 실려서 트랙 쪽으로는 못 읽는다).
+    # 한 사실에 출처를 둘 두면 반드시 어긋난다.
+    #
+    # **숨겨도 목록에서 빼지 않는다** -- 빼면 화면에 트랙이 없어져 다시 켤
+    # 방법이 사라진다. 결과물에서 빼는 것은 `CompositionPlan.from_timeline`이 맡는다.
+    return {"track_id": str(track.get("track_id") or "track"), "track_type": track_type, "clips": clips}
 
 
 def _export_overlay_track(raw_overlays: object) -> dict[str, Any] | None:

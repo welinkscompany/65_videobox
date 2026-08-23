@@ -28,7 +28,6 @@ export const SCENE_FILTER_CHOICES: readonly SceneFilterChoice[] = [
 /** 안 고른 상태. 값이 없는 것과 "없음"을 고른 것을 화면에서 구별하지 않는다. */
 export const SCENE_FILTER_NONE = "none";
 
-export function sceneFilterLabel(value: string | null | undefined): string {
-  if (!value || value === SCENE_FILTER_NONE) return "원본 그대로";
-  return SCENE_FILTER_CHOICES.find((choice) => choice.value === value)?.label ?? "원본 그대로";
-}
+// 이름표를 돌려주는 helper는 두지 않는다. 전환 쪽에 같은 모양의
+// `sceneTransitionLabel`이 있는데 부르는 곳이 하나도 없다 -- 쓸 자리가 생기면
+// 그때 만든다. 안 쓰는 것을 미리 두면 다음 사람이 "어디서 쓰나" 찾게 된다.

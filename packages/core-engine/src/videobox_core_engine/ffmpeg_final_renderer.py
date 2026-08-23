@@ -999,7 +999,14 @@ class FfmpegFinalRenderer:
     ) -> str:
         """Shared audio placement/control graph for final and proxy output."""
         duration = max(composition_plan.duration_sec, 0.001)
-        narration = [item for item in composition_plan.items if item.track_type == "narration"]
+        # 음소거한 레인(`track_states.py`)은 **아예 안 섞는다.** 음량 값을
+        # 덮어쓰는 방식은 트랙마다 제어가 달라서 통하지 않는다 -- 내레이션은
+        # `media_controls`를 안 읽고, `bgm`·`sfx`는 `gain_db`를 쓴다.
+        muted = composition_plan.muted_tracks
+        narration = [
+            item for item in composition_plan.items
+            if item.track_type == "narration" and "narration" not in muted
+        ]
         filters: list[str] = []
         narration_labels: list[str] = []
         for item in narration:
@@ -1017,6 +1024,7 @@ class FfmpegFinalRenderer:
 
         has_ducked_bgm = any(
             item.track_type == "bgm"
+            and "bgm" not in muted
             and normalize_media_controls(
                 item.media_controls,
                 media_kind="audio",
@@ -1031,6 +1039,8 @@ class FfmpegFinalRenderer:
             narration_sidechain = "[narration_sidechain]"
             labels = ["[narration_final]"]
         for item in composition_plan.items:
+            if item.track_type in muted:
+                continue
             if item.track_type == "broll":
                 controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(item.end_sec - item.start_sec, 0.001))
                 if not controls["preserve_source_audio"]:
@@ -1777,6 +1787,25 @@ class FfmpegFinalRenderer:
         ):
             raise FinalRenderError(
                 "Scene transitions render only from the composition plan. "
+                "Pass composition_plan to render this timeline."
+            )
+        # 색감과 눈·음소거도 **같은 이유로** 여기서 멈춘다. 이 경로의
+        # `_extract_segment`는 자기 `scale/crop` 사슬을 따로 만들고 색감을 안
+        # 붙이며, 트랙 상태도 안 읽는다. 전환만 막아 두고 이 둘을 열어 두면
+        # 같은 사고를 셋째·넷째로 내는 것이다(2026-08-23 코드리뷰 지적).
+        if any(
+            isinstance(clip, dict) and isinstance(clip.get("media_controls"), dict)
+            and clip["media_controls"].get("filter")
+            for track in timeline.get("tracks", []) if isinstance(track, dict)
+            for clip in (track.get("clips") or [])
+        ):
+            raise FinalRenderError(
+                "Clip colour looks render only from the composition plan. "
+                "Pass composition_plan to render this timeline."
+            )
+        if isinstance(timeline.get("track_states"), dict) and timeline["track_states"]:
+            raise FinalRenderError(
+                "Track hide/mute renders only from the composition plan. "
                 "Pass composition_plan to render this timeline."
             )
         verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)

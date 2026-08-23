@@ -300,8 +300,12 @@ def test_a_hidden_track_stays_in_the_manifest_but_leaves_the_render(tmp_path) ->
     session = store.get_editing_session(project_id=project_id, session_id=session_id)
     assert session["track_states"] == {"broll": {"hidden": True}}
     assert manifest.status_code == 200
-    broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")
-    assert broll["hidden"] is True, "타임라인은 숨긴 트랙을 계속 보여 줘야 다시 켤 수 있다"
+    body = manifest.json()
+    # 숨겼어도 트랙은 목록에 남는다 -- 사라지면 화면에서 다시 켤 수 없다.
+    assert any(track["track_type"] == "broll" for track in body["tracks"])
+    # 되읽는 자리는 `track_states` 하나다. 트랙마다 싣지 않는다 -- 자막 트랙은
+    # 이 목록에 아예 안 실려서, 두 출처를 두면 자막만 못 읽는 상태가 된다.
+    assert body["track_states"] == {"broll": {"hidden": True}}
 
     # 결과물에서는 빠진다 -- 세션이 만드는 합성계획에 그 트랙이 없다.
     from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
@@ -365,6 +369,23 @@ def test_a_chosen_look_comes_back_out_of_the_manifest(tmp_path) -> None:
     assert manifest.status_code == 200, manifest.text
     broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")
     assert broll["clips"][0]["media_controls"]["filter"] == {"type": "vintage", "chosen_by": "owner"}
+
+
+def test_track_states_patch_refuses_a_misspelled_flag_instead_of_saving_nothing(tmp_path) -> None:
+    # pydantic 기본값이면 오타 난 키가 조용히 버려져 빈 dict로 코어에 닿는다.
+    # 그러면 코어의 "뜻 없는 값은 거절한다"가 안 걸리고, 200에 revision까지
+    # 올라가는데 저장된 건 없다 -- 저장했다고 믿게 만드는 가장 나쁜 실패다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"broll": {"hiden": True}}},
+    )
+
+    assert response.status_code == 422, response.text
+    session = LocalProjectStore(tmp_path).get_editing_session(project_id=project_id, session_id=session_id)
+    assert session["session_revision"] == 1, "거절했으면 편집본이 앞으로 가면 안 된다"
 
 
 def test_manifest_marks_old_timeline_source_stale_and_separates_stale_final(tmp_path) -> None:

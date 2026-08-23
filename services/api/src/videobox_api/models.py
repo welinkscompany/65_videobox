@@ -857,10 +857,17 @@ class TimelinePlacementPatchRequest(BaseModel):
 
 
 class TrackStateRequest(BaseModel):
-    """한 트랙의 눈·음소거. 그 트랙에 뜻이 없는 값은 코어가 거절한다."""
+    """한 트랙의 눈·음소거. 그 트랙에 뜻이 없는 값은 코어가 거절한다.
+
+    `extra="forbid"`가 **꼭 필요하다.** pydantic 기본값(`ignore`)이면 오타 난
+    키(`hiden`)가 조용히 버려져 빈 dict로 코어에 닿는다 -- 코어의 "뜻 없는
+    값은 거절한다"가 영영 안 걸리고, 200에 revision까지 올라가는데 저장된 건
+    없다(2026-08-23 코드리뷰에서 발견).
+    """
 
     hidden: bool | None = None
     muted: bool | None = None
+    model_config = {"extra": "forbid"}
 
 
 class TrackStatesPatchRequest(BaseModel):
@@ -1207,10 +1214,8 @@ class EditorTrackResponse(BaseModel):
     track_id: str
     track_type: Literal["narration", "broll", "bgm", "sfx", "overlay"]
     clips: list[EditorClipResponse]
-    # 눈·음소거(`track_states.py`). **숨겼어도 목록에는 남는다** -- 사라지면
-    # 화면에서 다시 켤 수가 없다. 빠지는 것은 렌더 쪽(`CompositionPlan`)이다.
-    hidden: bool | None = None
-    muted: bool | None = None
+    # 눈·음소거는 여기 싣지 않는다. 화면은 맨 위 `track_states` 하나만 읽는다
+    # (자막 트랙은 이 목록에 아예 안 실려 트랙 쪽으로는 못 읽는다).
 
 
 class EditorCaptionStyleResponse(BaseModel):

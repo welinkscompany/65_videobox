@@ -702,6 +702,9 @@ class CompositionPlan:
     items: tuple[CompositionItem, ...]
     captions: tuple[CaptionCue, ...] = ()
     export_overlays: tuple[dict[str, Any], ...] = ()
+    # 소리를 끈 레인(`track_states.py`). 렌더러가 이 레인의 소리를 안 섞는다 --
+    # 트랙마다 음량 제어가 달라서 값 하나를 덮어쓰는 방식으로는 못 끈다.
+    muted_tracks: frozenset[str] = frozenset()
     version: str = COMPOSITION_VERSION
 
     @property
@@ -716,6 +719,12 @@ class CompositionPlan:
     @classmethod
     def from_timeline(cls, *, timeline: dict[str, Any], captions: Iterable[dict[str, Any] | CaptionCue] = ()) -> "CompositionPlan":
         output = timeline.get("output") if isinstance(timeline.get("output"), dict) else {}
+        # 눈·음소거는 **맨 위 한 칸**에서 읽는다(`track_states.py`). 트랙마다
+        # 표시하는 방식은 materializer가 안 만드는 트랙(자막, 빈 오버레이)을
+        # 영영 못 잡았다 -- 그 주석은 `apply_track_states_to_timeline`에 있다.
+        from videobox_core_engine.track_states import hidden_lanes, muted_lanes
+        hidden = hidden_lanes(timeline)
+        muted = muted_lanes(timeline)
         raw_items: list[CompositionItem] = []
         gap_slot_ids = {
             str(gap.get("gap_slot_id") or "").strip()
@@ -728,11 +737,11 @@ class CompositionPlan:
             track_type = str(track.get("track_type") or "").strip().lower()
             if track_type not in _SUPPORTED_TRACKS:
                 continue
-            # 눈·음소거(`track_states.py`). **숨김은 통째로 빼고, 음소거는
-            # 소리만 끈다** -- 음소거로 클립을 빼면 그림까지 사라진다.
-            if bool(track.get("hidden")):
+            # 눈(`track_states.py`). **숨김은 통째로 뺀다.** 음소거는 여기서
+            # 손대지 않는다 -- 클립을 빼면 그림까지 사라지고, 음량 제어가
+            # 트랙마다 달라 값 하나로는 못 끈다. 렌더러가 맡는다.
+            if track_type in hidden:
                 continue
-            track_muted = bool(track.get("muted"))
             for index, raw in enumerate(track.get("clips", []) if isinstance(track.get("clips"), list) else []):
                 if not isinstance(raw, dict):
                     continue
@@ -777,12 +786,6 @@ class CompositionPlan:
                     # 타임라인 8초를 채운다 -- 배속을 무시하면 멀쩡한 것을 막는다.
                     if (source_out - source_in) / speed < end - start and not controls["loop"] and not controls["pad"]:
                         raise ValueError("composition_plan_insufficient_broll_source")
-                if track_muted:
-                    # 트랙이 꺼져 있으면 클립마다 매긴 음량을 덮어쓴다.
-                    # `broll`은 위에서 이미 정규화를 거쳤고 그 결과에도 그대로
-                    # 얹는다 -- 정규화가 `volume` 범위(0.0~2.0)를 지키므로 0은
-                    # 유효한 값이고, 렌더러는 1.0이 아닐 때만 필터를 더한다.
-                    controls = {**controls, "volume": 0.0}
                 raw_items.append(CompositionItem(
                     clip_id=str(raw.get("clip_id") or f"{track_type}-{index}"), track_type=track_type,
                     asset_uri=str(raw["asset_uri"]) if raw.get("asset_uri") is not None else None,
@@ -797,17 +800,15 @@ class CompositionPlan:
                     # 넘길 그림이 없다 -- 조용히 무시하지 않고 아예 안 읽는다.
                     transition=normalize_transition(raw.get("transition")) if track_type == "broll" else None,
                 ))
-        # 자막 숨김(`track_states.py`). 자막은 트랙이 아니라 **따로 들어오므로**
-        # 위의 트랙 순회가 못 잡는다 -- 여기서 따로 봐야 한다. 처음엔 이걸
-        # 빠뜨려서 "저장은 되는데 결과는 그대로"인 단추가 됐다.
-        captions_hidden = any(
-            isinstance(track, dict)
-            and str(track.get("track_type") or "").strip().lower() == "caption"
-            and bool(track.get("hidden"))
-            for track in timeline.get("tracks", [])
-        )
+        # **트랙 순회가 못 잡는 레인이 둘 있다**(`track_states.py`). 자막은 따로
+        # 들어오고(`captions=`), 글자 오버레이(설명 카드·표·도형)는 트랙이 아니라
+        # `export_overlays`에 있다. 둘 다 화면에는 자기 레인으로 그려지므로,
+        # 눈을 끄면 사라진 것처럼 보이는데 완성본에는 그대로 박힌다.
+        #
+        # 자막만 고치고 오버레이를 놓쳐서 같은 실패를 두 번 냈다(2026-08-23).
+        # 그래서 한 자리에서 한꺼번에 읽는다 -- 레인이 늘면 여기만 본다.
         cues: list[CaptionCue] = []
-        for raw in () if captions_hidden else captions:
+        for raw in () if "caption" in hidden else captions:
             if isinstance(raw, CaptionCue):
                 cues.append(raw)
             elif isinstance(raw, dict):
@@ -815,7 +816,10 @@ class CompositionPlan:
                 if end > start:
                     raw_style = raw.get("style") if isinstance(raw.get("style"), dict) else raw.get("caption_style")
                     cues.append(CaptionCue(start, end, str(raw.get("text") or raw.get("caption_text") or ""), dict(raw_style) if isinstance(raw_style, dict) else {}, str(raw["segment_id"]) if raw.get("segment_id") else None))
-        overlays = tuple(
+        # 오버레이 레인을 껐으면 글자 오버레이도 함께 빠진다 -- 위 `hidden_lanes`
+        # 주석 참고. `tracks` 쪽 오버레이 클립은 이미 트랙 순회에서 빠졌고,
+        # 여기 있는 것이 그 나머지 절반이다.
+        overlays = () if "overlay" in hidden else tuple(
             dict(overlay)
             for overlay in timeline.get("export_overlays", [])
             if isinstance(overlay, dict) and _number(overlay.get("end_sec"), _number(overlay.get("start_sec"))) > _number(overlay.get("start_sec"))
@@ -830,6 +834,7 @@ class CompositionPlan:
             items=tuple(sorted(raw_items, key=lambda item: (item.start_sec, item.track_type, item.clip_id))),
             captions=tuple(sorted(cues, key=lambda cue: (cue.start_sec, cue.end_sec, cue.segment_id or ""))),
             export_overlays=overlays,
+            muted_tracks=muted,
         )
 
     def for_range(self, *, start_sec: float, end_sec: float) -> "CompositionPlan":

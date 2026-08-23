@@ -80,20 +80,49 @@ def track_is_muted(states: dict[str, dict[str, bool]], kind: str) -> bool:
 def apply_track_states_to_timeline(
     *, timeline: dict[str, Any], states: dict[str, dict[str, bool]]
 ) -> dict[str, Any]:
-    """정규화한 상태를 타임라인 트랙에 실어 준다.
+    """정규화한 상태를 타임라인에 **맨 위 한 칸으로** 실어 준다.
 
-    합성계획(`CompositionPlan.from_timeline`)이 트랙 dict만 보고 판단할 수 있게
-    한다 -- 렌더러가 세션을 다시 열지 않도록.
+    합성계획(`CompositionPlan.from_timeline`)이 세션을 다시 열지 않고 판단할 수
+    있게 하는 것이 목적이다.
+
+    **트랙마다 표시하지 않는다.** 처음엔 그렇게 했는데 두 가지가 새어 나갔다
+    (2026-08-23 코드리뷰에서 발견):
+
+    - `materialize_editing_session_timeline`은 **지원 트랙만, 클립이 있을 때만**
+      낸다. 자막 트랙은 아예 안 만들고, 빈 오버레이 트랙도 안 만든다. 표시할
+      트랙이 없으니 자막·오버레이 숨김이 렌더까지 닿지 못했다.
+    - 글자 오버레이는 `tracks`가 아니라 `export_overlays`에 있다.
+
+    맨 위 한 칸이면 트랙이 살아남았는지와 무관하게 읽힌다.
     """
-    tracks = timeline.get("tracks")
-    if not isinstance(tracks, list):
-        return timeline
-    for track in tracks:
-        if not isinstance(track, dict):
-            continue
-        kind = str(track.get("track_type") or "").strip()
-        if track_is_hidden(states, kind):
-            track["hidden"] = True
-        if track_is_muted(states, kind):
-            track["muted"] = True
+    timeline["track_states"] = {kind: dict(state) for kind, state in states.items()}
     return timeline
+
+
+def hidden_lanes(timeline: dict[str, Any]) -> frozenset[str]:
+    """이 타임라인에서 꺼진(눈) 레인. 없으면 빈 집합."""
+    states = timeline.get("track_states")
+    if not isinstance(states, dict):
+        return frozenset()
+    return frozenset(
+        kind for kind, state in states.items()
+        if isinstance(state, dict) and state.get("hidden")
+    )
+
+
+def muted_lanes(timeline: dict[str, Any]) -> frozenset[str]:
+    """이 타임라인에서 소리를 끈 레인. 없으면 빈 집합.
+
+    **음소거는 트랙마다 쓰는 제어가 다르다** -- 내레이션은 `media_controls`를
+    아예 안 읽고, `bgm`·`sfx`는 `gain_db`, `broll`만 `volume`이다. 그래서
+    합성계획에서 값 하나를 덮어쓰는 방식으로는 넷 중 하나밖에 못 껐다.
+    어느 레인이 꺼졌는지를 렌더러까지 들고 가서, 렌더러가 그 레인의 소리를
+    **아예 섞지 않는** 쪽이 넷 모두에 통한다.
+    """
+    states = timeline.get("track_states")
+    if not isinstance(states, dict):
+        return frozenset()
+    return frozenset(
+        kind for kind, state in states.items()
+        if isinstance(state, dict) and state.get("muted")
+    )
