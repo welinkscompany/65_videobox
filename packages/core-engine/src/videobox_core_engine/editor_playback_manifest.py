@@ -16,6 +16,7 @@ from videobox_core_engine.composition_plan import (
     materialize_editing_session_timeline,
 )
 from videobox_core_engine.timeline_placements import placement_id
+from videobox_core_engine.track_states import normalize_track_states
 
 
 DEFAULT_FPS_NUM = 30
@@ -95,6 +96,11 @@ def build_editor_playback_manifest(
             "duration_sec": _duration_seconds(output, tracks, segments),
         },
         "tracks": tracks,
+        # 눈·음소거의 **되읽는 자리는 여기 하나다**(`track_states.py`). 트랙마다
+        # 실은 값만으로는 자막을 못 읽는다 -- 자막 트랙은 위 `tracks`에 아예
+        # 안 실리기 때문이다(자기 필드가 따로 있다). 그래서 화면이 자막
+        # 숨김을 되읽지 못해 새로고침하면 꺼진 것처럼 보였다.
+        "track_states": normalize_track_states(session.get("track_states")),
         "captions": [
             {
                 "segment_id": str(segment["segment_id"]),
@@ -161,7 +167,16 @@ def _track_contract(track: dict[str, Any]) -> dict[str, Any] | None:
             "overlay_type": raw.get("overlay_type") if clip_type == "overlay" else None,
             "overlay_payload": dict(raw.get("overlay_payload") or {}) if clip_type == "overlay" and isinstance(raw.get("overlay_payload"), dict) else {},
         })
-    return {"track_id": str(track.get("track_id") or "track"), "track_type": track_type, "clips": clips}
+    contract: dict[str, Any] = {"track_id": str(track.get("track_id") or "track"), "track_type": track_type, "clips": clips}
+    # 눈·음소거(`track_states.py`). **숨겨도 목록에서 빼지 않는다** -- 빼면
+    # 화면에 트랙이 없어져 다시 켤 방법이 사라진다. 결과물에서 빼는 것은
+    # `CompositionPlan.from_timeline`이 맡는다. 켜져 있을 때만 실어서, 안
+    # 건드린 타임라인의 응답 모양이 예전 그대로 남게 한다.
+    if track.get("hidden"):
+        contract["hidden"] = True
+    if track.get("muted"):
+        contract["muted"] = True
+    return contract
 
 
 def _export_overlay_track(raw_overlays: object) -> dict[str, Any] | None:

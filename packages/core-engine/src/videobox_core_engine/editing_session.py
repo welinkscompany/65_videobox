@@ -637,6 +637,27 @@ def set_timeline_placement_overrides(*, session: dict[str, Any], overrides: dict
     )
 
 
+def set_track_states(*, session: dict[str, Any], states: dict[str, dict[str, bool]]) -> dict[str, Any]:
+    """트랙 눈·음소거를 세션에 남긴다(`track_states.py`).
+
+    되돌리기 대상이다 -- 결과물이 달라지는 편집이므로, 실수로 트랙을 통째로
+    숨겨 놓고 왜 안 보이는지 찾아 헤매는 일이 없어야 한다.
+    """
+    updated = deepcopy(session)
+    if states:
+        updated["track_states"] = deepcopy(states)
+    else:
+        # 전부 기본으로 돌아왔으면 칸 자체를 지운다 -- 한 번도 안 건드린
+        # 세션과 같은 모양이 되도록(`normalize_track_states`와 같은 규칙).
+        updated.pop("track_states", None)
+    return _record_undoable_mutation(
+        before=session,
+        updated=updated,
+        mutation_type="track_state_update",
+        segment_id=",".join(sorted(states)),
+    )
+
+
 def undo(*, session: dict[str, Any]) -> dict[str, Any]:
     undo_stack = list(deepcopy(session.get("undo_stack", [])))
     if not undo_stack:

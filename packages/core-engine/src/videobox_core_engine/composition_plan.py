@@ -604,8 +604,15 @@ def materialize_editing_session_timeline(
     materialized["export_overlays"] = export_overlays
     materialized["session_captions"] = session_captions
     from videobox_core_engine.timeline_placements import apply_timeline_placement_overrides
+    from videobox_core_engine.track_states import apply_track_states_to_timeline, normalize_track_states
     overrides = editing_session.get("timeline_placement_overrides")
-    return apply_timeline_placement_overrides(timeline=materialized, overrides=overrides if isinstance(overrides, dict) else {})
+    placed = apply_timeline_placement_overrides(timeline=materialized, overrides=overrides if isinstance(overrides, dict) else {})
+    # 눈·음소거를 트랙 dict에 실어 준다. 여기서 얹어야 렌더러가 세션을 다시
+    # 열지 않고 타임라인만 보고 판단할 수 있다.
+    return apply_track_states_to_timeline(
+        timeline=placed,
+        states=normalize_track_states(editing_session.get("track_states")),
+    )
 
 
 def _number(value: object, default: float = 0.0) -> float:
@@ -721,6 +728,11 @@ class CompositionPlan:
             track_type = str(track.get("track_type") or "").strip().lower()
             if track_type not in _SUPPORTED_TRACKS:
                 continue
+            # 눈·음소거(`track_states.py`). **숨김은 통째로 빼고, 음소거는
+            # 소리만 끈다** -- 음소거로 클립을 빼면 그림까지 사라진다.
+            if bool(track.get("hidden")):
+                continue
+            track_muted = bool(track.get("muted"))
             for index, raw in enumerate(track.get("clips", []) if isinstance(track.get("clips"), list) else []):
                 if not isinstance(raw, dict):
                     continue
@@ -765,6 +777,12 @@ class CompositionPlan:
                     # 타임라인 8초를 채운다 -- 배속을 무시하면 멀쩡한 것을 막는다.
                     if (source_out - source_in) / speed < end - start and not controls["loop"] and not controls["pad"]:
                         raise ValueError("composition_plan_insufficient_broll_source")
+                if track_muted:
+                    # 트랙이 꺼져 있으면 클립마다 매긴 음량을 덮어쓴다.
+                    # `broll`은 위에서 이미 정규화를 거쳤고 그 결과에도 그대로
+                    # 얹는다 -- 정규화가 `volume` 범위(0.0~2.0)를 지키므로 0은
+                    # 유효한 값이고, 렌더러는 1.0이 아닐 때만 필터를 더한다.
+                    controls = {**controls, "volume": 0.0}
                 raw_items.append(CompositionItem(
                     clip_id=str(raw.get("clip_id") or f"{track_type}-{index}"), track_type=track_type,
                     asset_uri=str(raw["asset_uri"]) if raw.get("asset_uri") is not None else None,
@@ -779,8 +797,17 @@ class CompositionPlan:
                     # 넘길 그림이 없다 -- 조용히 무시하지 않고 아예 안 읽는다.
                     transition=normalize_transition(raw.get("transition")) if track_type == "broll" else None,
                 ))
+        # 자막 숨김(`track_states.py`). 자막은 트랙이 아니라 **따로 들어오므로**
+        # 위의 트랙 순회가 못 잡는다 -- 여기서 따로 봐야 한다. 처음엔 이걸
+        # 빠뜨려서 "저장은 되는데 결과는 그대로"인 단추가 됐다.
+        captions_hidden = any(
+            isinstance(track, dict)
+            and str(track.get("track_type") or "").strip().lower() == "caption"
+            and bool(track.get("hidden"))
+            for track in timeline.get("tracks", [])
+        )
         cues: list[CaptionCue] = []
-        for raw in captions:
+        for raw in () if captions_hidden else captions:
             if isinstance(raw, CaptionCue):
                 cues.append(raw)
             elif isinstance(raw, dict):

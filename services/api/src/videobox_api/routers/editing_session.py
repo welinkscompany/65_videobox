@@ -32,6 +32,7 @@ from videobox_api.models import (
     TableOverlayRequest,
     TimelinePayloadResponse,
     TimelinePlacementPatchRequest,
+    TrackStatesPatchRequest,
     TTSReplacementRequest,
     VisualOverlayRequest,
 )
@@ -257,6 +258,28 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
     def patch_editing_session_timeline_placements(project_id: str, session_id: str, payload: TimelinePlacementPatchRequest) -> EditingSessionResponse:
         try:
             result = orchestrator.update_editing_session_timeline_placements(project_id=project_id, session_id=session_id, changes=[item.model_dump() for item in payload.changes], expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/track-states")
+    def patch_editing_session_track_states(project_id: str, session_id: str, payload: TrackStatesPatchRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_editing_session_track_states(
+                project_id=project_id,
+                session_id=session_id,
+                # 보내지 않은 칸(`None`)은 "그 값은 말하지 않았다"이므로 뺀다 --
+                # `False`로 바꿔 보내면 코어가 뜻 없는 조합을 거절할 수 없다.
+                states={
+                    kind: {field: value for field, value in state.model_dump().items() if value is not None}
+                    for kind, state in payload.track_states.items()
+                },
+                expected_revision=payload.expected_revision,
+            )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
         except ValueError as exc:

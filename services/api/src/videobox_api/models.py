@@ -856,6 +856,20 @@ class TimelinePlacementPatchRequest(BaseModel):
     changes: list[TimelinePlacementChangeRequest] = Field(min_length=1)
 
 
+class TrackStateRequest(BaseModel):
+    """한 트랙의 눈·음소거. 그 트랙에 뜻이 없는 값은 코어가 거절한다."""
+
+    hidden: bool | None = None
+    muted: bool | None = None
+
+
+class TrackStatesPatchRequest(BaseModel):
+    """트랙 눈·음소거 전체. 보낸 것이 곧 전체 상태다(조각 병합 아님)."""
+
+    expected_revision: int = Field(ge=1)
+    track_states: dict[str, TrackStateRequest]
+
+
 class EditingSessionRevisionRequest(BaseModel):
     expected_revision: int = Field(ge=1)
 
@@ -1190,6 +1204,10 @@ class EditorTrackResponse(BaseModel):
     track_id: str
     track_type: Literal["narration", "broll", "bgm", "sfx", "overlay"]
     clips: list[EditorClipResponse]
+    # 눈·음소거(`track_states.py`). **숨겼어도 목록에는 남는다** -- 사라지면
+    # 화면에서 다시 켤 수가 없다. 빠지는 것은 렌더 쪽(`CompositionPlan`)이다.
+    hidden: bool | None = None
+    muted: bool | None = None
 
 
 class EditorCaptionStyleResponse(BaseModel):
@@ -1283,6 +1301,9 @@ class EditorPlaybackManifestResponse(BaseModel):
     fps: EditorFpsResponse
     output: EditorOutputResponse
     tracks: list[EditorTrackResponse]
+    # 눈·음소거를 되읽는 단일 자리. 자막 트랙은 `tracks`에 안 실리므로
+    # 트랙마다 붙은 값만으로는 자막 숨김을 읽을 수 없다(`track_states.py`).
+    track_states: dict[str, dict[str, bool]] = {}
     captions: list[EditorCaptionResponse]
     gap_slots: list[EditorGapSlotResponse]
     source_status: EditorSourceStatusResponse

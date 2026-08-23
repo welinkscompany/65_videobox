@@ -15,7 +15,7 @@ type OverlayClear = Readonly<{ kind: OverlayApply["kind"]; segmentId: string }>;
 
 export type EditorCommandApi = Pick<typeof api,
   "splitEditingSessionSegment" | "mergeEditingSessionSegments" | "updateEditingSessionSegmentBounds" | "reorderEditingSessionSegments" |
-  "updateEditingSessionTimelinePlacements" | "undoEditingSession" | "redoEditingSession" | "updateEditingSessionCutAction" |
+  "updateEditingSessionTimelinePlacements" | "updateEditingSessionTrackStates" | "undoEditingSession" | "redoEditingSession" | "updateEditingSessionCutAction" |
   "updateEditingSessionBroll" | "clearEditingSessionBrollOverride" | "updateEditingSessionMusicOverride" | "clearEditingSessionMusicOverride" |
   "updateEditingSessionSfxOverride" | "clearEditingSessionSfxOverride" | "updateEditingSessionExplanationCard" | "removeEditingSessionExplanationCard" |
   "updateEditingSessionImageOverlay" | "removeEditingSessionImageOverlay" | "updateEditingSessionTableOverlay" | "removeEditingSessionTableOverlay" |
@@ -35,6 +35,8 @@ export type EditorCommandPort = Readonly<{
   setNarrationBounds(input: { segmentId: string; startSec: number; endSec: number }): Promise<EditingSession>;
   reorderNarration(input: { segmentIds: string[]; boundsById: Record<string, { startSec: number; endSec: number }> }): Promise<EditingSession>;
   setTimelinePlacements(input: { changes: Array<{ placementId: string; kind: "broll" | "bgm" | "sfx" | "overlay" | "caption"; startSec: number; endSec: number }> }): Promise<EditingSession>;
+  /** 트랙 눈·음소거. 보낸 것이 곧 전체 상태다(조각 병합 아님). */
+  setTrackStates(states: Record<string, { hidden?: boolean; muted?: boolean }>): Promise<EditingSession>;
   applyMedia(input: MediaCommand): Promise<EditingSession>;
   updateMediaControls(input: MediaCommand): Promise<EditingSession>;
   clearMedia(input: { kind: MediaKind; segmentId: string }): Promise<EditingSession>;
@@ -114,6 +116,7 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
       changes: changes.map((change) => ({ placement_id: change.placementId, kind: change.kind, start_sec: change.startSec, end_sec: change.endSec })),
       ...revise,
     }),
+    setTrackStates: (states) => commandApi.updateEditingSessionTrackStates(projectId, sessionId, { track_states: states, ...revise }),
     applyMedia,
     updateMediaControls: applyMedia,
     clearMedia: ({ kind, segmentId }) => kind === "broll" ? commandApi.clearEditingSessionBrollOverride(projectId, sessionId, segmentId, expectedRevision) : kind === "bgm" ? commandApi.clearEditingSessionMusicOverride(projectId, sessionId, segmentId, expectedRevision) : commandApi.clearEditingSessionSfxOverride(projectId, sessionId, segmentId, expectedRevision),

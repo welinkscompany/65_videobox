@@ -96,7 +96,9 @@ const nativeControlAllowlist = {
       "button:placement-trim-start",
       "button:timeline-clip-select",
       "button:timeline-fit",
+      "button:timeline-lane-hidden",
       "button:timeline-lane-lock",
+      "button:timeline-lane-muted",
       "button:timeline-reorder",
       "button:timeline-scrub",
       "button:timeline-trim-end",
@@ -104,7 +106,7 @@ const nativeControlAllowlist = {
       "button:timeline-zoom-in",
       "button:timeline-zoom-out",
     ],
-    reason: "Timeline drag, trim, zoom, keyboard interaction, and the per-lane lock toggle require direct pointer and focus ownership.",
+    reason: "Timeline drag, trim, zoom, keyboard interaction, and the per-lane lock/eye/mute toggles require direct pointer and focus ownership.",
   },
   "features/footage/SceneTimeline.tsx": {
     controls: ["button:footage-playhead"],

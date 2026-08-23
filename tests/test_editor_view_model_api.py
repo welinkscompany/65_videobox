@@ -281,6 +281,66 @@ def test_timeline_placement_patch_reappears_in_the_authoritative_manifest(tmp_pa
     assert broll["end_sec"] == 1.5015
 
 
+def test_a_hidden_track_stays_in_the_manifest_but_leaves_the_render(tmp_path) -> None:
+    # 캡컷 타임라인의 눈(`capcut-observed` 기록 §2). 숨긴 트랙은 **타임라인에는
+    # 남아야** 한다 -- 목록에서 사라지면 화면에서 다시 켤 방법이 없다. 빠지는
+    # 것은 결과물 쪽이다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"broll": {"hidden": True}}},
+    )
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["session_revision"] == 2
+    store = LocalProjectStore(tmp_path)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    assert session["track_states"] == {"broll": {"hidden": True}}
+    assert manifest.status_code == 200
+    broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")
+    assert broll["hidden"] is True, "타임라인은 숨긴 트랙을 계속 보여 줘야 다시 켤 수 있다"
+
+    # 결과물에서는 빠진다 -- 세션이 만드는 합성계획에 그 트랙이 없다.
+    from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+    timeline = store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=session, project_id=project_id)
+    assert "broll" not in {item.track_type for item in CompositionPlan.from_timeline(timeline=materialized).items}
+
+
+def test_track_states_patch_mutes_without_removing_the_clip(tmp_path) -> None:
+    # 음소거는 소리만 끈다. 클립이 사라지면 그림까지 사라진다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"broll": {"muted": True}}},
+    )
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert saved.status_code == 200, saved.text
+    broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")
+    assert broll["clips"], "음소거가 클립을 지우면 안 된다"
+
+
+def test_track_states_patch_refuses_a_flag_that_would_do_nothing(tmp_path) -> None:
+    # 자막 트랙 음소거처럼 뜻이 없는 조합은 조용히 버리지 않고 거절한다 --
+    # 조용히 버리면 "켰고 저장도 됐는데 결과는 그대로"가 된다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"caption": {"muted": True}}},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "track_states_muted_unsupported" in response.text
+
+
 def test_manifest_marks_old_timeline_source_stale_and_separates_stale_final(tmp_path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, _, session_id = _manifest_fixture(client, tmp_path)

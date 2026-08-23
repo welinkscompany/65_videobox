@@ -630,6 +630,9 @@ class ApiOrchestrator:
     def update_editing_session_timeline_placements(self, *, project_id: str, session_id: str, changes: list[dict[str, object]], expected_revision: int) -> dict[str, Any]:
         return self.pipeline.update_editing_session_timeline_placements(project_id=project_id, session_id=session_id, changes=changes, expected_revision=expected_revision)
 
+    def update_editing_session_track_states(self, *, project_id: str, session_id: str, states: dict[str, Any], expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_track_states(project_id=project_id, session_id=session_id, states=states, expected_revision=expected_revision)
+
     def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
         return self.pipeline.undo_editing_session(project_id=project_id, session_id=session_id, expected_revision=expected_revision)
 

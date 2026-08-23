@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
-import { Lock, Unlock } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from "lucide-react";
 import { clipContentLabel } from "./clipNames";
 
 import type { EditorViewModel } from "../editorViewModel";
@@ -20,6 +20,10 @@ import {
 } from "./timelineNavigation";
 
 const LANE_HEIGHT_PX = 32;
+/** 눈·음소거를 그릴 트랙. 서버(`track_states.py`)가 받는 것과 같은 갈래이고,
+ *  두 벌이 어긋나면 눌러도 422로 거절되는 단추가 생긴다. */
+const HIDEABLE_LANES = new Set<TimelineLane>(["broll", "overlay", "caption"]);
+const MUTABLE_LANES = new Set<TimelineLane>(["narration", "broll", "bgm", "sfx"]);
 const SNAP_THRESHOLD_PX = 8;
 
 // Source status describes base-timeline provenance. Session edits are already
@@ -50,6 +54,9 @@ type Props = Readonly<{
   onTrimNarration?: (input: TrimNarration) => void;
   onReorderNarration?: (input: ReorderNarration) => void;
   onUpdatePlacements?: (input: UpdatePlacements) => void;
+  /** 트랙 눈·음소거를 저장한다. 없으면 그 단추들이 꺼진 채로 보인다 --
+   *  숨기지 않는다. 있는데 안 되는 것과 아예 없는 것은 다르다. */
+  onUpdateTrackStates?: (states: Record<string, { hidden?: boolean; muted?: boolean }>) => void | Promise<void>;
   onSelectSegment?: (segmentId: string) => void;
   onPlaybackSeek?: (seconds: number) => void;
   selectedSegmentId?: string | null;
@@ -190,7 +197,7 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage }: Props) {
+export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage }: Props) {
   const options = { durationSec: view.output.durationSec, viewportWidthPx, fps: view.fps };
   const [state, dispatch] = useReducer(
     (current: TimelineNavigationState, action: TimelineNavigationAction) => navigationReducer(current, action, options),
@@ -223,6 +230,36 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     if (next.has(lane)) next.delete(lane); else next.add(lane);
     return next;
   });
+  // **눈·음소거는 잠금과 달리 여기 상태가 아니다.** 결과물이 달라지는
+  // 편집이라 세션이 원본이고(`track_states.py`), 화면은 그것을 그릴 뿐이다.
+  // 여기에 따로 들고 있으면 저장이 실패해도 켜진 것처럼 보인다.
+  // 트랙마다 붙은 값이 아니라 `trackStates` 한자리에서 읽는다 -- 자막 트랙은
+  // 재생 목록의 `tracks`에 아예 안 실려서(자기 필드가 따로 있다) 트랙 쪽만
+  // 보면 자막 숨김을 되읽지 못한다.
+  const trackStates = view.trackStates ?? {};
+  const hiddenLanes = useMemo(
+    () => new Set(TIMELINE_LANES.filter((lane) => trackStates[lane]?.hidden)),
+    [trackStates],
+  );
+  const mutedLanes = useMemo(
+    () => new Set(TIMELINE_LANES.filter((lane) => trackStates[lane]?.muted)),
+    [trackStates],
+  );
+  const toggleTrackState = (lane: TimelineLane, field: "hidden" | "muted") => {
+    if (!onUpdateTrackStates || isSaving) return;
+    // **보낸 것이 곧 전체 상태다.** 지금 켜져 있는 것 전부를 다시 실어 보내고
+    // 누른 것 하나만 뒤집는다 -- 조각만 보내면 서버가 나머지를 지운다.
+    const next: Record<string, { hidden?: boolean; muted?: boolean }> = {};
+    for (const other of TIMELINE_LANES) {
+      const hidden = other === lane && field === "hidden" ? !hiddenLanes.has(other) : hiddenLanes.has(other);
+      const muted = other === lane && field === "muted" ? !mutedLanes.has(other) : mutedLanes.has(other);
+      const state: { hidden?: boolean; muted?: boolean } = {};
+      if (HIDEABLE_LANES.has(other) && hidden) state.hidden = true;
+      if (MUTABLE_LANES.has(other) && muted) state.muted = true;
+      if (Object.keys(state).length) next[other] = state;
+    }
+    void onUpdateTrackStates(next);
+  };
   const previousSelectionResetKey = useRef(selectionResetKey);
   const onPlaybackSeekRef = useRef(onPlaybackSeek);
   useEffect(() => { onPlaybackSeekRef.current = onPlaybackSeek; }, [onPlaybackSeek]);
@@ -715,8 +752,12 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       <div aria-label="고정 트랙" role="list">
         {TIMELINE_LANES.map((lane) => <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative" }}>
           <span>{laneLabel[lane]}</span>
-          {/* **잠금**(owner 지시 2026-08-22, `capcut-observed` 기록 §2). 눈·음소거는
-              만들지 않는다 -- 이유는 위 `lockedLanes` 선언부 주석에 적었다. */}
+          {/* **잠금 · 눈 · 음소거**(`capcut-observed` 기록 §2: "트랙마다 왼쪽에
+              잠금 · 눈 · 음소거 · `···`"). 셋의 성격이 다르다 --
+              **잠금**은 화면 안에서만 쓰는 것이라 여기 상태로 끝나고(새로고침하면
+              풀린다), **눈·음소거는 결과물이 달라지는 편집**이라 세션에 남고
+              렌더까지 간다(`track_states.py`). `···`는 기록에 메뉴 내용이
+              없어 만들지 않는다 -- 만들면 지어내는 것이다. */}
           <button
             type="button"
             data-native-control="timeline-lane-lock"
@@ -726,6 +767,28 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           >
             {lockedLanes.has(lane) ? <Lock aria-hidden="true" size={14} /> : <Unlock aria-hidden="true" size={14} />}
           </button>
+          {/* 트랙마다 **뜻이 있는 것만** 그린다. 자막 트랙 음소거처럼 눌러도
+              아무 일도 안 일어날 단추는 두지 않는다(기록 §4). */}
+          {HIDEABLE_LANES.has(lane) ? <button
+            type="button"
+            data-native-control="timeline-lane-hidden"
+            aria-label={`${laneLabel[lane]} 트랙 숨기기`}
+            aria-pressed={hiddenLanes.has(lane)}
+            disabled={!onUpdateTrackStates || isSaving}
+            onClick={() => toggleTrackState(lane, "hidden")}
+          >
+            {hiddenLanes.has(lane) ? <EyeOff aria-hidden="true" size={14} /> : <Eye aria-hidden="true" size={14} />}
+          </button> : null}
+          {MUTABLE_LANES.has(lane) ? <button
+            type="button"
+            data-native-control="timeline-lane-muted"
+            aria-label={`${laneLabel[lane]} 트랙 음소거`}
+            aria-pressed={mutedLanes.has(lane)}
+            disabled={!onUpdateTrackStates || isSaving}
+            onClick={() => toggleTrackState(lane, "muted")}
+          >
+            {mutedLanes.has(lane) ? <VolumeX aria-hidden="true" size={14} /> : <Volume2 aria-hidden="true" size={14} />}
+          </button> : null}
         </div>)}
       </div>
       <div aria-label="타임라인 클립" role="group" style={{ inset: 0, position: "absolute" }}>

@@ -59,6 +59,7 @@ from videobox_core_engine.editing_session import (
     select_segment_tts_replacement,
     set_segment_bounds,
     set_timeline_placement_overrides,
+    set_track_states,
     split_segment,
     undo,
     update_segment_explanation_card,
@@ -349,6 +350,17 @@ class EditingSessionRegenerationMixin:
         normalized = apply_placement_changes(placements=collect_timeline_placements(timeline=materialized), changes=changes, output_duration_sec=duration_sec, fps_num=fps_num, fps_den=fps_den)
         previous = session.get("timeline_placement_overrides") if isinstance(session.get("timeline_placement_overrides"), dict) else {}
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_timeline_placement_overrides(session=session, overrides={**previous, **normalized}), expected_revision=expected_revision)
+
+    def update_editing_session_track_states(self, *, project_id: str, session_id: str, states: dict[str, Any], expected_revision: int) -> dict[str, Any]:
+        """트랙 눈·음소거를 통째로 바꾼다(`track_states.py`).
+
+        조각 병합이 아니라 **보낸 것이 곧 전체**다 -- 트랙이 여섯 개뿐이고,
+        화면이 늘 여섯 개의 현재 상태를 알고 있어서 부분 갱신이 얻는 게 없다.
+        """
+        from videobox_core_engine.track_states import normalize_track_states
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        normalized = normalize_track_states(states)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_track_states(session=session, states=normalized), expected_revision=expected_revision)
 
     def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)

@@ -69,6 +69,7 @@ type EditorWorkbenchProps = Readonly<{
   onTrimNarration?: (input: NarrationTrim) => void | Promise<void>;
   onReorderNarration?: (input: NarrationReorder) => void | Promise<void>;
   onUpdatePlacements?: (input: TimelinePlacements) => void | Promise<void>;
+  onUpdateTrackStates?: (states: Record<string, { hidden?: boolean; muted?: boolean }>) => void | Promise<void>;
   onUpdateCaption?: (input: CaptionText) => void | Promise<void>;
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
   loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
@@ -103,6 +104,7 @@ function EditorWorkbenchInstance({
   onTrimNarration,
   onReorderNarration,
   onUpdatePlacements,
+  onUpdateTrackStates,
   onUpdateCaption,
   onInspectorAction,
   loadApprovedTtsCandidates,
@@ -602,6 +604,7 @@ function EditorWorkbenchInstance({
       } : undefined}
       onReorderNarration={onReorderNarration}
       onUpdatePlacements={onUpdatePlacements}
+      onUpdateTrackStates={onUpdateTrackStates}
       onTrimNarration={onTrimNarration}
       onPlaybackSeek={seekPlayback}
       onSelectSegment={selectSegment}

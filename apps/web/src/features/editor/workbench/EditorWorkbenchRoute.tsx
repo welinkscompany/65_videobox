@@ -1859,6 +1859,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onUndo={() => commitTimelineMutation((port) => port.undo())}
     onUpdateCaption={(input) => commitTimelineMutation((port) => port.setCaptionText(input))}
     onUpdatePlacements={(input) => commitTimelineMutation((port) => port.setTimelinePlacements(input))}
+    onUpdateTrackStates={(states) => commitTimelineMutation((port) => port.setTrackStates(states))}
     partialRegeneration={{
       fields: PARTIAL_REGENERATION_FIELDS,
       defaultFields: ["caption", "music"],

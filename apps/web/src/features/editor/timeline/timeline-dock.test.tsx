@@ -586,6 +586,51 @@ describe("TimelineDock", () => {
     expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).not.toBeDisabled();
   });
 
+  it("offers eye and mute only on the tracks where they would do something", () => {
+    // `capcut-observed` 기록 §2는 트랙마다 잠금·눈·음소거를 그리지만, 우리는
+    // **뜻이 있는 것만** 그린다(기록 §4: "띠에 없는 기능의 자리를 만들지
+    // 않는다"). 자막 트랙 음소거는 눌러도 아무 일도 안 일어나고, 서버도
+    // 그 조합을 422로 거절한다(`track_states.py`).
+    render(<TimelineDock view={view} viewportWidthPx={400} onUpdateTrackStates={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "영상 트랙 숨기기" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "영상 트랙 음소거" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "내레이션 트랙 음소거" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "내레이션 트랙 숨기기" })).toBeNull();
+    expect(screen.getByRole("button", { name: "자막 트랙 숨기기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "자막 트랙 음소거" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "배경 음악 트랙 숨기기" })).toBeNull();
+  });
+
+  it("sends the whole track-state map, not just the one that changed", () => {
+    // 서버는 보낸 것을 전체 상태로 받는다. 누른 것만 보내면 이미 켜져 있던
+    // 다른 트랙의 눈·음소거가 조용히 꺼진다.
+    const onUpdateTrackStates = vi.fn();
+    const withStates: EditorViewModel = { ...view, trackStates: { bgm: { muted: true } } };
+    render(<TimelineDock view={withStates} viewportWidthPx={400} onUpdateTrackStates={onUpdateTrackStates} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "영상 트랙 숨기기" }));
+
+    expect(onUpdateTrackStates).toHaveBeenCalledWith({ broll: { hidden: true }, bgm: { muted: true } });
+  });
+
+  it("draws eye and mute from the saved session, not from its own state", () => {
+    // 저장이 원본이다. 화면이 따로 들고 있으면 저장이 실패해도 켜진 것처럼 보인다.
+    const hiddenBroll: EditorViewModel = { ...view, trackStates: { broll: { hidden: true } } };
+    render(<TimelineDock view={hiddenBroll} viewportWidthPx={400} onUpdateTrackStates={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "영상 트랙 숨기기" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "영상 트랙 음소거" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("shows eye and mute disabled rather than hidden when nothing can save them", () => {
+    // 있는데 안 되는 것과 아예 없는 것은 다르다.
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+
+    expect(screen.getByRole("button", { name: "영상 트랙 숨기기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "영상 트랙 음소거" })).toBeDisabled();
+  });
+
   it("keeps click and keyboard navigation local while guarding editable targets", () => {
     render(<TimelineDock view={view} viewportWidthPx={400} />);
 

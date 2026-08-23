@@ -510,6 +510,9 @@ export type EditorPlaybackManifest = {
   timebase: "seconds";
   fps: { num: number; den: number };
   output: { width: number; height: number; sample_aspect_ratio: string; rotation: number; duration_sec: number };
+  /** 트랙 눈·음소거를 되읽는 단일 자리. 자막 트랙은 `tracks`에 안 실리므로
+   *  트랙마다 붙은 값으로는 자막 숨김을 읽을 수 없다. */
+  track_states?: Record<string, { hidden?: boolean; muted?: boolean }>;
   tracks: Array<{
     track_id: string;
     track_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
@@ -552,6 +555,13 @@ export type SegmentOrderRequest = RevisionedEditingSessionMutation & {
 };
 export type TimelinePlacementPatchRequest = RevisionedEditingSessionMutation & {
   changes: Array<{ placement_id: string; kind: "broll" | "bgm" | "sfx" | "overlay" | "caption"; start_sec: number; end_sec: number }>;
+};
+/** 트랙 눈·음소거. **보낸 것이 곧 전체 상태다**(조각 병합이 아니다).
+ *
+ *  트랙마다 뜻이 있는 값만 서버가 받는다 -- 자막 트랙 음소거처럼 눌러도 아무
+ *  일도 안 일어날 조합은 422로 거절된다(`track_states.py`). */
+export type TrackStatesPatchRequest = RevisionedEditingSessionMutation & {
+  track_states: Record<string, { hidden?: boolean; muted?: boolean }>;
 };
 export type FixedTimeline = {
   tracks: Array<{ role: "narration" | "broll" | "bgm" | "sfx" | "overlay"; clips: Record<string, unknown>[] }>;
@@ -2204,6 +2214,10 @@ export const api = {
     }),
   updateEditingSessionTimelinePlacements: (projectId: string, sessionId: string, payload: TimelinePlacementPatchRequest) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/timeline-placements`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  updateEditingSessionTrackStates: (projectId: string, sessionId: string, payload: TrackStatesPatchRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/track-states`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
   undoEditingSession: (projectId: string, sessionId: string, expectedRevision: number) =>
