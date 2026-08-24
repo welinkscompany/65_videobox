@@ -121,7 +121,7 @@ export function joinEditorSnapshot(
         bgm: media(segment.music_override),
         sfx: media(segment.sfx_override),
         transitionIn: transition(segment.transition_in),
-        ripplePlaybackRate: segment.ripple_playback_rate ?? 1,
+        ...(segment.ripple_playback_rate ? { ripplePlaybackRate: segment.ripple_playback_rate } : {}),
         ttsReplacement: ttsReplacement(segment.tts_replacement),
       })),
     },
