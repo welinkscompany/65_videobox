@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-08-24-videobox-p1-capcut-caption-fixture-handoff.ko.md`
+
 # VideoBox 숏폼 장면 리플 배속 인계 — 2026-08-24
 
 ## 현재 작업선

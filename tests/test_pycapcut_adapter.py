@@ -9,6 +9,8 @@ import wave
 import pytest
 
 from videobox_capcut_export.pycapcut_adapter import PyCapCutExportError, PyCapCutRealExportAdapter
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.editing_session import build_editing_session
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError
@@ -38,10 +40,36 @@ def test_export_timeline_maps_editing_session_caption_style_to_real_capcut_text_
     narration_path = tmp_path / "narration.wav"
     _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_path)])
     narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    source_timeline = {
+        "project_id": project.project_id,
+        "timeline_id": "timeline_caption_style",
+        "narration_source_uri": narration_asset.storage_uri,
+        "tracks": [{"track_type": "narration", "clips": [{
+            "segment_id": "seg_001", "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+            "start_sec": 0.0, "end_sec": 2.0,
+        }]}],
+    }
+    editing_session = build_editing_session(
+        project_id=project.project_id,
+        timeline=source_timeline,
+        segments=[{"segment_id": "seg_001", "text": "CAPTION STYLE", "start_sec": 0.2, "end_sec": 1.5}],
+    )
+    editing_session["caption_style"] = {
+        "font_size_px": 64,
+        "text_color": "#00FF00FF",
+        "outline_width_px": 3,
+        "background_color": "#000000AA",
+        "shadow_blur_px": 2,
+    }
+    materialized = materialize_editing_session_timeline(
+        timeline=source_timeline,
+        editing_session=editing_session,
+        project_id=project.project_id,
+    )
     result = PyCapCutRealExportAdapter(store=store).export_timeline(
         project_id=project.project_id,
-        timeline={"narration_source_uri": narration_asset.storage_uri, "tracks": [{"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]}]},
-        editing_session={"caption_style": {"font_size_px": 64, "text_color": "#00FF00FF", "outline_width_px": 3, "background_color": "#000000AA", "shadow_blur_px": 2}, "segments": [{"caption_text": "CAPTION STYLE", "start_sec": 0.2, "end_sec": 1.5}]},
+        timeline=materialized,
+        editing_session=editing_session,
         drafts_root=tmp_path / "drafts",
         draft_name="styled-caption",
     )

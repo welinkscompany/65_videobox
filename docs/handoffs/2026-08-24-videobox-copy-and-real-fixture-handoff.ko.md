@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-08-24-videobox-shortform-ripple-speed-handoff.ko.md`
+
 # VideoBox 문구 계측·실제 시험 입력 인계 — 2026-08-24
 
 ## 현재 작업선
