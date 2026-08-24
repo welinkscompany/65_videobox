@@ -464,6 +464,7 @@ def materialize_editing_session_timeline(
         if str(segment.get("cut_action") or "keep") == "remove":
             continue
         start, end = _number(segment.get("start_sec")), _number(segment.get("end_sec"))
+        segment_playback_rate = _ripple_playback_rate(segment)
         if end <= start:
             continue
         raw_windows = segment.get("media_windows")
@@ -496,7 +497,24 @@ def materialize_editing_session_timeline(
                 asset_uri = str(override.get("asset_uri") or "").strip()
                 if not asset_uri and asset_id and project:
                     asset_uri = f"local://projects/{project}/assets/{asset_id}"
-                clip: dict[str, Any] = {"clip_id": f"session-{track_type}-{segment_id}-{window_index}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri or None, "start_sec": window_start, "end_sec": window_end, "media_controls": deepcopy(override.get("media_controls") or {})}
+                playback_rate = 1.0 if track_type == "bgm" else segment_playback_rate
+                clip: dict[str, Any] = {
+                    "clip_id": f"session-{track_type}-{segment_id}-{window_index}",
+                    "segment_id": segment_id,
+                    "asset_id": asset_id,
+                    "asset_uri": asset_uri or None,
+                    "start_sec": window_start,
+                    "end_sec": window_end,
+                    "source_in_sec": 0.0,
+                    "source_out_sec": (window_end - window_start) * playback_rate,
+                    "playback_rate": playback_rate,
+                    "media_controls": deepcopy(override.get("media_controls") or {}),
+                }
+                if track_type == "broll":
+                    clip["effective_playback_rate"] = playback_rate * _number(
+                        clip["media_controls"].get("speed"),
+                        1.0,
+                    )
                 for key in ("expected_content_sha256", "media_revision"):
                     if override.get(key):
                         clip[key] = override[key]
@@ -507,7 +525,7 @@ def materialize_editing_session_timeline(
             if window_end <= window_start:
                 continue
             content_segment_id = str(window.get("source_segment_id") or segment_id)
-            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption-{segment_id}-{window_index}"), "segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
+            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption-{segment_id}-{window_index}"), "segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
             for ordinal, overlay in enumerate(window.get("visual_overlays", []) if isinstance(window.get("visual_overlays"), list) else []):
                 if not isinstance(overlay, dict):
                     continue
@@ -520,7 +538,7 @@ def materialize_editing_session_timeline(
                 if not asset_uri and asset_id and project:
                     asset_uri = f"local://projects/{project}/assets/{asset_id}"
                 if asset_uri:
-                    clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload}
+                    clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload}
                     for key in ("expected_content_sha256", "media_revision"):
                         if payload.get(key):
                             clip[key] = payload[key]

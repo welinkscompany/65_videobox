@@ -14,7 +14,7 @@ type OverlayApply =
 type OverlayClear = Readonly<{ kind: OverlayApply["kind"]; segmentId: string }>;
 
 export type EditorCommandApi = Pick<typeof api,
-  "splitEditingSessionSegment" | "mergeEditingSessionSegments" | "updateEditingSessionSegmentBounds" | "reorderEditingSessionSegments" |
+  "splitEditingSessionSegment" | "mergeEditingSessionSegments" | "updateEditingSessionSegmentBounds" | "updateEditingSessionSegmentRipplePlaybackRate" | "reorderEditingSessionSegments" |
   "updateEditingSessionTimelinePlacements" | "updateEditingSessionTrackStates" | "undoEditingSession" | "redoEditingSession" | "updateEditingSessionCutAction" |
   "updateEditingSessionBroll" | "clearEditingSessionBrollOverride" | "updateEditingSessionMusicOverride" | "clearEditingSessionMusicOverride" |
   "updateEditingSessionSfxOverride" | "clearEditingSessionSfxOverride" | "updateEditingSessionExplanationCard" | "removeEditingSessionExplanationCard" |
@@ -33,6 +33,7 @@ export type EditorCommandPort = Readonly<{
   splitNarration(input: { segmentId: string; splitSec: number }): Promise<EditingSession>;
   mergeNarration(input: { leftSegmentId: string; rightSegmentId: string }): Promise<EditingSession>;
   setNarrationBounds(input: { segmentId: string; startSec: number; endSec: number }): Promise<EditingSession>;
+  setSegmentRippleSpeed(input: { segmentId: string; rate: 1 | 1.5 | 2 }): Promise<EditingSession>;
   reorderNarration(input: { segmentIds: string[]; boundsById: Record<string, { startSec: number; endSec: number }> }): Promise<EditingSession>;
   setTimelinePlacements(input: { changes: Array<{ placementId: string; kind: "broll" | "bgm" | "sfx" | "overlay" | "caption"; startSec: number; endSec: number }> }): Promise<EditingSession>;
   /** 트랙 눈·음소거. 보낸 것이 곧 전체 상태다(조각 병합 아님). */
@@ -111,6 +112,7 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     splitNarration: ({ segmentId, splitSec }) => commandApi.splitEditingSessionSegment(projectId, sessionId, segmentId, { split_sec: splitSec, ...revise }),
     mergeNarration: ({ leftSegmentId, rightSegmentId }) => commandApi.mergeEditingSessionSegments(projectId, sessionId, { left_segment_id: leftSegmentId, right_segment_id: rightSegmentId, ...revise }),
     setNarrationBounds: ({ segmentId, startSec, endSec }) => commandApi.updateEditingSessionSegmentBounds(projectId, sessionId, segmentId, { start_sec: startSec, end_sec: endSec, ...revise }),
+    setSegmentRippleSpeed: ({ segmentId, rate }) => commandApi.updateEditingSessionSegmentRipplePlaybackRate(projectId, sessionId, segmentId, { rate, ...revise }),
     reorderNarration: ({ segmentIds, boundsById }) => commandApi.reorderEditingSessionSegments(projectId, sessionId, {
       segment_ids: segmentIds,
       bounds_by_id: Object.fromEntries(Object.entries(boundsById).map(([segmentId, bounds]) => [segmentId, { start_sec: bounds.startSec, end_sec: bounds.endSec }])),

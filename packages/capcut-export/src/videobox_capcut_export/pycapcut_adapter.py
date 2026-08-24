@@ -74,6 +74,13 @@ def _seconds_to_us(seconds: float) -> int:
     return int(round(seconds * _MICROSECONDS_PER_SECOND))
 
 
+def _clip_playback_rate(clip: dict[str, Any]) -> float:
+    rate = float(clip.get("playback_rate", 1.0))
+    if not math.isfinite(rate) or rate <= 0:
+        raise PyCapCutExportError("CapCut clip playback_rate must be a positive finite number.")
+    return rate
+
+
 @dataclass(slots=True)
 class PyCapCutRealExportAdapter:
     """Generates a real, CapCut-openable draft folder from a VideoBox timeline.
@@ -256,6 +263,7 @@ class PyCapCutRealExportAdapter:
             raise PyCapCutExportError(str(exc)) from exc
         material = AudioMaterial(str(resolved.path))
         placement_start_us = _seconds_to_us(float(clip["start_sec"]))
+        playback_rate = _clip_playback_rate(clip)
         target_duration_us = _seconds_to_us(
             resolved.target_duration_sec
             if resolved.target_duration_sec is not None
@@ -265,7 +273,11 @@ class PyCapCutRealExportAdapter:
             source_duration_us = _seconds_to_us(resolved.trim_duration_sec)
         else:
             source_duration_us = material.duration
-        natural_duration_us = min(source_duration_us, material.duration, target_duration_us)
+        natural_duration_us = min(
+            source_duration_us,
+            material.duration,
+            round(target_duration_us * playback_rate),
+        )
         source_timerange = Timerange(
             start=_seconds_to_us(resolved.trim_start_sec),
             duration=natural_duration_us,
@@ -274,9 +286,10 @@ class PyCapCutRealExportAdapter:
             material,
             Timerange(start=placement_start_us, duration=natural_duration_us),
             source_timerange=source_timerange,
+            speed=playback_rate,
         )
         script.add_segment(segment, "voiceover")
-        padding_duration_us = target_duration_us - natural_duration_us
+        padding_duration_us = target_duration_us - round(natural_duration_us / playback_rate)
         if padding_duration_us <= 0:
             return
         if silence_path is None:
@@ -317,9 +330,10 @@ class PyCapCutRealExportAdapter:
                 if resolved.trim_duration_sec is not None
                 else material_duration_us
             )
+            playback_rate = _clip_playback_rate(clip)
             required_duration_us = max(
                 required_duration_us,
-                target_duration_us - min(source_duration_us, target_duration_us),
+                target_duration_us - min(target_duration_us, round(source_duration_us / playback_rate)),
             )
         return required_duration_us
 
@@ -398,7 +412,7 @@ class PyCapCutRealExportAdapter:
         # 배속은 **원본 시간과 화면 시간의 환산비**다. 아래 루프는 화면 시간으로
         # 세므로, 원본이 화면에서 얼마나 버티는지로 한 번 바꿔 두고 그 값으로
         # 자른다. 둘을 섞어 재면 배속을 걸었을 때 길이가 어긋난다.
-        speed = float(controls["speed"])
+        speed = float(controls["speed"]) * _clip_playback_rate(clip)
         volume = float(controls["volume"])
         source_available_timeline_us = int(source_available_us / speed)
         if source_available_timeline_us <= 0:
@@ -525,9 +539,10 @@ class PyCapCutRealExportAdapter:
         material = AudioMaterial(str(path))
         placement_start_us = _seconds_to_us(float(clip.get("start_sec", 0.0)))
         needed_duration_us = _seconds_to_us(float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)))
-        source_duration_us = min(needed_duration_us, material.duration) or material.duration
+        playback_rate = _clip_playback_rate(clip)
+        source_duration_us = min(round(needed_duration_us * playback_rate), material.duration) or material.duration
         controls = normalize_media_controls(clip.get("media_controls"), media_kind="audio", duration_sec=max(needed_duration_us / _MICROSECONDS_PER_SECOND, 0.001))
-        segment = AudioSegment(material, Timerange(start=placement_start_us, duration=needed_duration_us), source_timerange=Timerange(start=0, duration=source_duration_us), volume=10 ** (controls["gain_db"] / 20))
+        segment = AudioSegment(material, Timerange(start=placement_start_us, duration=needed_duration_us), source_timerange=Timerange(start=0, duration=source_duration_us), speed=playback_rate, volume=10 ** (controls["gain_db"] / 20))
         if controls["fade_in_sec"] or controls["fade_out_sec"]:
             segment.add_fade(_seconds_to_us(controls["fade_in_sec"]), _seconds_to_us(controls["fade_out_sec"]))
         if controls["ducking"]:

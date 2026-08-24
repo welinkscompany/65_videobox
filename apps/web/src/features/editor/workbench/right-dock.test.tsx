@@ -192,6 +192,26 @@ describe("RightDock", () => {
     expect(dock.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("offers only the approved shortform scene lengths for the selected scene", () => {
+    const onSetSegmentRippleSpeed = vi.fn();
+    render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      selectedSegment={{
+        segmentId: "segment-2", startSec: 4, endSec: 8, nextSegmentId: "segment-3",
+        cutAction: "keep", draftApplied: false, ripplePlaybackRate: 1.5,
+      }}
+      onSetSegmentRippleSpeed={onSetSegmentRippleSpeed}
+    />);
+
+    const speed = screen.getByRole("group", { name: "장면 길이" });
+    expect(speed).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1.5배" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "2배" })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "2배" }));
+    expect(onSetSegmentRippleSpeed).toHaveBeenCalledWith({ segmentId: "segment-2", rate: 2 });
+  });
+
   it("re-asks by itself when the recommendation goes stale while the creator is looking at it", async () => {
     // 편집본이 바뀌면 추천이 무효가 된다(백엔드가 7군데에서 지키는 계약이라 그건
     // 그대로 둔다). 문제는 그다음이다 -- 죽은 카드와 단추만 남고, 창작자가 그걸

@@ -5,6 +5,13 @@
 """
 from __future__ import annotations
 
+import shutil
+import subprocess
+
+import pytest
+
+from videobox_domain_models.assets import AssetType
+from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
 from videobox_core_engine.composition_plan import materialize_editing_session_timeline
 from videobox_core_engine.editing_session import build_editing_session, set_segment_ripple_playback_rate
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
@@ -117,3 +124,58 @@ def test_ripple_speed_reaches_composition_and_the_actual_video_and_audio_filters
     assert "setpts=(PTS-STARTPTS)/3.0" in video
     # 내레이션과 효과음도 같은 장면 비율로 빨라진다. BGM은 normal pitch다.
     assert audio.count("atempo=2.0") >= 2
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg is required to make local export sources")
+def test_capcut_export_uses_the_same_materialized_scene_speed_for_voice_and_video(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="Ripple speed CapCut")
+    narration_path = tmp_path / "narration.wav"
+    broll_path = tmp_path / "broll.mp4"
+    for command in (
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", str(narration_path)],
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=4:size=240x320:rate=15", str(broll_path)],
+    ):
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+    source = {
+        "project_id": project.project_id,
+        "timeline_id": "timeline-ripple-capcut",
+        "narration_source_uri": narration.storage_uri,
+        "tracks": [
+            {"track_type": "narration", "clips": [{"clip_id": "voice", "segment_id": "scene", "asset_uri": f"local://projects/{project.project_id}/segments/scene", "start_sec": 0.0, "end_sec": 4.0}]},
+            {"track_type": "broll", "clips": [{"clip_id": "video", "segment_id": "scene", "asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 4.0}]},
+        ],
+    }
+    session = set_segment_ripple_playback_rate(
+        session=build_editing_session(
+            project_id=project.project_id,
+            timeline=source,
+            segments=[{"segment_id": "scene", "text": "빠른 장면", "start_sec": 0.0, "end_sec": 4.0}],
+        ),
+        segment_id="scene",
+        rate=2.0,
+    )
+    materialized = materialize_editing_session_timeline(
+        timeline=source,
+        editing_session=session,
+        project_id=project.project_id,
+    )
+
+    result = PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
+        project_id=project.project_id,
+        timeline=materialized,
+        drafts_root=tmp_path / "drafts",
+        draft_name="ripple-speed-contract",
+        editing_session=session,
+    )
+
+    import json
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    tracks = {track["name"]: track["segments"] for track in content["tracks"]}
+    for track_name in ("voiceover", "broll"):
+        segment = tracks[track_name][0]
+        assert segment["target_timerange"]["duration"] == 2_000_000
+        assert segment["source_timerange"]["duration"] == 4_000_000
+        assert segment["speed"] == pytest.approx(2.0)

@@ -347,6 +347,7 @@ export type EditingSessionSegment = {
   tts_replacement: Record<string, unknown> | null;
   caption_style?: CaptionStyleSnapshot | null;
   transition_in?: SceneTransition | null;
+  ripple_playback_rate?: 1.5 | 2.0 | null;
 };
 
 /**
@@ -551,6 +552,7 @@ type RevisionedEditingSessionMutation = {
 
 export type SegmentSplitRequest = RevisionedEditingSessionMutation & { split_sec: number };
 export type SegmentBoundsRequest = RevisionedEditingSessionMutation & { start_sec: number; end_sec: number };
+export type SegmentRipplePlaybackRateRequest = RevisionedEditingSessionMutation & { rate: 1 | 1.5 | 2 };
 export type SegmentOrderRequest = RevisionedEditingSessionMutation & {
   segment_ids: string[];
   bounds_by_id?: Record<string, { start_sec: number; end_sec: number }>;
@@ -2208,6 +2210,10 @@ export const api = {
     }),
   updateEditingSessionSegmentBounds: (projectId: string, sessionId: string, segmentId: string, payload: SegmentBoundsRequest) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/bounds`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  updateEditingSessionSegmentRipplePlaybackRate: (projectId: string, sessionId: string, segmentId: string, payload: SegmentRipplePlaybackRateRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/ripple-playback-rate`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
   reorderEditingSessionSegments: (projectId: string, sessionId: string, payload: SegmentOrderRequest) =>

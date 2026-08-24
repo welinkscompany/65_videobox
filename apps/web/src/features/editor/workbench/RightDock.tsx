@@ -24,6 +24,7 @@ type SelectedSegment = Readonly<{
   draftApplied: boolean;
   transitionIn?: Readonly<{ type: string; durationSec: number }> | null;
   ttsReplacement?: Readonly<{ candidateId: string; assetId: string }> | null;
+  ripplePlaybackRate?: 1 | 1.5 | 2;
 }>;
 
 export type RightDockProps = Readonly<{
@@ -48,6 +49,7 @@ export type RightDockProps = Readonly<{
   loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
   ttsCandidateScopeKey?: string;
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+  onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>;
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
@@ -125,6 +127,7 @@ export function RightDock({
   loadApprovedTtsCandidates,
   ttsCandidateScopeKey,
   onInspectorAction,
+  onSetSegmentRippleSpeed,
   composerDisabled = false,
   onSendMessage,
   onApplyProposal,
@@ -266,6 +269,17 @@ export function RightDock({
       {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
         <h2>편집 항목</h2>
         {selectedSegment ? <p>{selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초 구간</p> : <p>선택한 구간이 없어요.</p>}
+        {selectedSegment && onSetSegmentRippleSpeed ? <div role="group" aria-label="장면 길이">
+          <p>장면 길이</p>
+          {([1, 1.5, 2] as const).map((rate) => <Button
+            aria-pressed={(selectedSegment.ripplePlaybackRate ?? 1) === rate}
+            disabled={inspectorDisabled}
+            key={rate}
+            onClick={() => void onSetSegmentRippleSpeed({ segmentId: selectedSegment.segmentId, rate })}
+            type="button"
+            variant="outline"
+          >{rate === 1 ? "기본" : `${rate}배`}</Button>)}
+        </div> : null}
         {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
         {!inspectorTargets.length ? <p>이 명령이 다루는 항목 없음</p> : null}
         {onInspectorAction ? <InspectorControls

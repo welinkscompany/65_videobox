@@ -3,7 +3,7 @@ import type { EditorCommandApi } from "./editorCommandPort";
 import { createEditorCommandPort } from "./editorCommandPort";
 
 const api = {
-  splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), reorderEditingSessionSegments: vi.fn(), updateEditingSessionTimelinePlacements: vi.fn(),
+  splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), updateEditingSessionSegmentRipplePlaybackRate: vi.fn(), reorderEditingSessionSegments: vi.fn(), updateEditingSessionTimelinePlacements: vi.fn(),
   undoEditingSession: vi.fn(), redoEditingSession: vi.fn(), updateEditingSessionCutAction: vi.fn(),
   updateEditingSessionBroll: vi.fn(), clearEditingSessionBrollOverride: vi.fn(), updateEditingSessionMusicOverride: vi.fn(), clearEditingSessionMusicOverride: vi.fn(), updateEditingSessionSfxOverride: vi.fn(), clearEditingSessionSfxOverride: vi.fn(),
   updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(), updateEditingSessionShapeOverlay: vi.fn(), removeEditingSessionShapeOverlay: vi.fn(),
@@ -26,6 +26,16 @@ describe("EditorCommandPort", () => {
       bounds_by_id: { seg: { start_sec: 0, end_sec: 1 }, next: { start_sec: 1, end_sec: 2 } },
       expected_revision: 7,
     });
+  });
+
+  it("sends the selected scene's ripple speed with the current revision", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.setSegmentRippleSpeed({ segmentId: "seg", rate: 2 });
+
+    expect(api.updateEditingSessionSegmentRipplePlaybackRate).toHaveBeenCalledWith(
+      "p", "s", "seg", { rate: 2, expected_revision: 7 },
+    );
   });
 
   it("sends the complete layout when reordering narration", async () => {

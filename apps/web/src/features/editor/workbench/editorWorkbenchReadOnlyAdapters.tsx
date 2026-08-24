@@ -28,7 +28,7 @@ function trackRoleLabel(role: string): string {
   return trackRoleLabels[role] ?? "트랙";
 }
 
-export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director, eugeneDraft, onEugeneDraftChange, selectedSegmentId, playbackSec, onSelectSegment, onSeek, onSaveCaption, isSavingCaption = false, assetCards = [], assetPreviewStates = {}, assetTarget, onPreviewAsset, onPreviewSource, sources = [], onRefreshExactPreview, onApplyAssetCard, onApplyImageOverlay, onInspectorAction, partialRegeneration, loadApprovedTtsCandidates, ttsCandidateScopeKey }: { view: EditorViewModel; session?: EditorSessionSnapshot | null; dock: "left" | "right"; director?: RightDockDirector; eugeneDraft: string; onEugeneDraftChange: (value: string) => void; selectedSegmentId: string | null; playbackSec: number; onSelectSegment: (segmentId: string) => void; onSeek: (seconds: number) => void; onSaveCaption?: (input: { segmentId: string; text: string }) => void | Promise<void>; isSavingCaption?: boolean; assetCards?: readonly EditorAssetCard[]; assetPreviewStates?: Readonly<Record<string, EditorAssetPreviewState>>; assetTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null; onPreviewAsset: (card: EditorAssetCard) => void; onPreviewSource?: (source: AuditionSource) => void; sources?: readonly AuditionSource[]; onRefreshExactPreview?: () => void; onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onApplyImageOverlay?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onInspectorAction?: (action: InspectorAction) => void | Promise<void>; partialRegeneration?: PartialRegenerationControls; loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>; ttsCandidateScopeKey?: string }) {
+export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director, eugeneDraft, onEugeneDraftChange, selectedSegmentId, playbackSec, onSelectSegment, onSeek, onSaveCaption, isSavingCaption = false, assetCards = [], assetPreviewStates = {}, assetTarget, onPreviewAsset, onPreviewSource, sources = [], onRefreshExactPreview, onApplyAssetCard, onApplyImageOverlay, onInspectorAction, onSetSegmentRippleSpeed, partialRegeneration, loadApprovedTtsCandidates, ttsCandidateScopeKey }: { view: EditorViewModel; session?: EditorSessionSnapshot | null; dock: "left" | "right"; director?: RightDockDirector; eugeneDraft: string; onEugeneDraftChange: (value: string) => void; selectedSegmentId: string | null; playbackSec: number; onSelectSegment: (segmentId: string) => void; onSeek: (seconds: number) => void; onSaveCaption?: (input: { segmentId: string; text: string }) => void | Promise<void>; isSavingCaption?: boolean; assetCards?: readonly EditorAssetCard[]; assetPreviewStates?: Readonly<Record<string, EditorAssetPreviewState>>; assetTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null; onPreviewAsset: (card: EditorAssetCard) => void; onPreviewSource?: (source: AuditionSource) => void; sources?: readonly AuditionSource[]; onRefreshExactPreview?: () => void; onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onApplyImageOverlay?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onInspectorAction?: (action: InspectorAction) => void | Promise<void>; onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>; partialRegeneration?: PartialRegenerationControls; loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>; ttsCandidateScopeKey?: string }) {
   if (dock === "left") {
     const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
     return <>
@@ -75,6 +75,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     inspectorDisabled={isSavingCaption}
     loadApprovedTtsCandidates={loadApprovedTtsCandidates}
     onInspectorAction={onInspectorAction}
+    onSetSegmentRippleSpeed={onSetSegmentRippleSpeed}
     partialRegeneration={partialRegeneration}
     selectedSegment={selectedRange ? {
       segmentId: selectedRange.segmentId,
@@ -86,6 +87,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
       cutAction: selectedSessionSegment?.cutAction ?? "keep",
       draftApplied: false,
       transitionIn: selectedSessionSegment?.transitionIn ?? null,
+      ripplePlaybackRate: selectedSessionSegment?.ripplePlaybackRate ?? 1,
       ttsReplacement: selectedSessionSegment?.ttsReplacement ?? null,
     } : undefined}
     ttsCandidateScopeKey={ttsCandidateScopeKey}

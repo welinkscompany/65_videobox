@@ -29,6 +29,7 @@ export type EditorSessionSnapshot = Readonly<{
     sfx: EditorSessionMedia | null;
     /** 앞 장면에서 이 장면으로 넘어오는 방법. 안 골랐으면 null. */
     transitionIn: EditorSessionTransition | null;
+    ripplePlaybackRate?: 1 | 1.5 | 2;
     ttsReplacement: EditorSessionTtsReplacement | null;
   }>>;
 }>;
@@ -120,6 +121,7 @@ export function joinEditorSnapshot(
         bgm: media(segment.music_override),
         sfx: media(segment.sfx_override),
         transitionIn: transition(segment.transition_in),
+        ripplePlaybackRate: segment.ripple_playback_rate ?? 1,
         ttsReplacement: ttsReplacement(segment.tts_replacement),
       })),
     },

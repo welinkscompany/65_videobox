@@ -1856,6 +1856,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onReorderNarration={(input) => commitTimelineMutation((port) => port.reorderNarration(input))}
     onRedo={() => commitTimelineMutation((port) => port.redo())}
     onTrimNarration={(input) => commitTimelineMutation((port) => port.setNarrationBounds(input))}
+    onSetSegmentRippleSpeed={(input) => commitTimelineMutation((port) => port.setSegmentRippleSpeed(input))}
     onUndo={() => commitTimelineMutation((port) => port.undo())}
     onUpdateCaption={(input) => commitTimelineMutation((port) => port.setCaptionText(input))}
     onUpdatePlacements={(input) => commitTimelineMutation((port) => port.setTimelinePlacements(input))}
