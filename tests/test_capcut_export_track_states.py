@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 from videobox_capcut_export.adapter import CapCutExportAdapter
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
 
 
 def _timeline(states: dict | None = None) -> dict:
-    timeline: dict = {
+    timeline = {
         "timeline_id": "timeline_001",
+        "project_id": "p",
         "narration_source_uri": "local://projects/p/inputs/narration/source.wav",
         "tracks": [
             {
@@ -51,9 +53,27 @@ def _timeline(states: dict | None = None) -> dict:
              "start_sec": 0.0, "end_sec": 2.0},
         ],
     }
-    if states is not None:
-        timeline["track_states"] = states
-    return timeline
+    session = {
+        "session_id": "session_001",
+        "project_id": "p",
+        "timeline_id": "timeline_001",
+        "session_revision": 1,
+        "segments": [{
+            "segment_id": "seg_001",
+            "caption_text": "캡컷 초안 자막",
+            "start_sec": 0.0,
+            "end_sec": 4.0,
+            "cut_action": "keep",
+            "review_required": False,
+        }],
+        "history": [],
+        "track_states": states or {},
+    }
+    return materialize_editing_session_timeline(
+        timeline=timeline,
+        editing_session=session,
+        project_id="p",
+    )
 
 
 def _payload(states: dict | None = None) -> dict:
