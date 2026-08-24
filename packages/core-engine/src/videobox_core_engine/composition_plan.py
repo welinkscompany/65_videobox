@@ -505,11 +505,17 @@ def materialize_editing_session_timeline(
                     "asset_uri": asset_uri or None,
                     "start_sec": window_start,
                     "end_sec": window_end,
-                    "source_in_sec": 0.0,
-                    "source_out_sec": (window_end - window_start) * playback_rate,
                     "playback_rate": playback_rate,
                     "media_controls": deepcopy(override.get("media_controls") or {}),
                 }
+                # B-roll's `in_sec`/`out_sec` is resolved by
+                # CompositionPlan.  Supplying a synthetic source range here
+                # turns that established trim into a second trim and can make
+                # a valid range empty.  Audio has no such source-window
+                # controls, so it can carry the exact accelerated source span.
+                if track_type != "broll":
+                    clip["source_in_sec"] = 0.0
+                    clip["source_out_sec"] = (window_end - window_start) * playback_rate
                 if track_type == "broll":
                     clip["effective_playback_rate"] = playback_rate * _number(
                         clip["media_controls"].get("speed"),
@@ -830,7 +836,7 @@ class CompositionPlan:
                     natural_source_out = (
                         source_out + normalized["trim_start_sec"]
                         if has_explicit_source_out
-                        else source_in + (end - start) * speed
+                        else source_in + (end - start) * speed * playback_rate
                     )
                     source_out = min(natural_source_out, float(normalized.get("out_sec", natural_source_out)))
                     controls = normalized
