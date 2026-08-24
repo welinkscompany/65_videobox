@@ -1,5 +1,7 @@
 # VideoBox P1-1 실제 CapCut 자막 시험 입력 인계 — 2026-08-24
 
+**대체됨:** `docs/handoffs/2026-08-24-videobox-p1-render-overlay-fixture-handoff.ko.md`
+
 ## 현재 작업선
 
 - worktree: `D:\AI_Workspace_louis_office_50\10_workspace\65_videobox\.worktrees\videobox-container-compatibility`

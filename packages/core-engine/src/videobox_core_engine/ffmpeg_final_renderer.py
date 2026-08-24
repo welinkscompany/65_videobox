@@ -1747,6 +1747,27 @@ class FfmpegFinalRenderer:
             raise FinalRenderError(f"ffmpeg failed applying export overlays: {result.stderr[-800:]}")
         return overlaid_path
 
+    @staticmethod
+    def _legacy_overlay_inputs(timeline: dict[str, Any]) -> list[dict[str, Any]]:
+        """Collect legacy overlays and asset-backed materialized overlay clips."""
+        overlays = [
+            dict(item)
+            for item in timeline.get("export_overlays", [])
+            if isinstance(item, dict)
+        ]
+        for track in timeline.get("tracks", []):
+            if not isinstance(track, dict) or canonical_track_type(track.get("track_type")) != "overlay":
+                continue
+            for clip in track.get("clips", []):
+                if not isinstance(clip, dict):
+                    continue
+                payload = dict(clip.get("overlay_payload") or {}) if isinstance(clip.get("overlay_payload"), dict) else {}
+                for key in ("overlay_type", "asset_id", "asset_uri", "start_sec", "end_sec", "clip_id", "segment_id"):
+                    if key not in payload and clip.get(key) is not None:
+                        payload[key] = clip[key]
+                overlays.append(payload)
+        return overlays
+
     def render_timeline_to_mp4(
         self,
         *,
@@ -1892,7 +1913,7 @@ class FfmpegFinalRenderer:
             video_path = self._apply_export_overlays(
                 project_id=project_id,
                 video_path=video_path,
-                overlays=[item for item in timeline.get("export_overlays", []) if isinstance(item, dict)],
+                overlays=self._legacy_overlay_inputs(timeline),
                 work_dir=work_dir,
                 # 자막을 실제로 **구울 때만** 그 자리를 비켜 준다. 소프트 자막
                 # (`-c:s mov_text`)은 화면에 얹히지 않으므로 피할 것도 없다.

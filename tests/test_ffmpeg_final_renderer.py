@@ -11,6 +11,8 @@ from videobox_core_engine.ffmpeg_final_renderer import (
     FinalRenderError,
 )
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.editing_session import build_editing_session, update_segment_image_overlay
 from videobox_core_engine.overlay_shapes import SHAPE_OVERLAY_ICON_GLYPHS, font_supports_glyph
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -614,19 +616,43 @@ def test_render_timeline_materializes_image_overlay_during_its_window(tmp_path: 
     image_file = tmp_path / "yellow_overlay.png"
     _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=yellow:s=80x60", "-frames:v", "1", str(image_file)])
     image_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.IMAGE, source_path=image_file)
-    timeline = {
+    source_timeline = {
+        "project_id": project.project_id,
+        "timeline_id": "timeline_image_overlay",
         "narration_source_uri": narration_asset.storage_uri,
-        "export_overlays": [{
-            "overlay_type": "visual_overlay",
-            "asset_id": image_asset.asset_id,
-            "start_sec": 1.0,
-            "end_sec": 3.0,
-        }],
         "tracks": [
-            {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
-            {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
+            {"track_type": "narration", "clips": [
+                {"segment_id": "scene-before", "asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 0.0, "end_sec": 1.0},
+                {"segment_id": "scene-overlay", "asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 1.0, "end_sec": 3.0},
+                {"segment_id": "scene-after", "asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 3.0, "end_sec": 4.0},
+            ]},
+            {"track_type": "broll", "clips": [
+                {"segment_id": "scene-before", "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 1.0},
+                {"segment_id": "scene-overlay", "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 1.0, "end_sec": 3.0},
+                {"segment_id": "scene-after", "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 3.0, "end_sec": 4.0},
+            ]},
         ],
     }
+    editing_session = build_editing_session(
+        project_id=project.project_id,
+        timeline=source_timeline,
+        segments=[
+            {"segment_id": "scene-before", "text": "앞", "start_sec": 0.0, "end_sec": 1.0},
+            {"segment_id": "scene-overlay", "text": "오버레이", "start_sec": 1.0, "end_sec": 3.0},
+            {"segment_id": "scene-after", "text": "뒤", "start_sec": 3.0, "end_sec": 4.0},
+        ],
+    )
+    editing_session = update_segment_image_overlay(
+        session=editing_session,
+        segment_id="scene-overlay",
+        asset_id=image_asset.asset_id,
+        text="Overlay proof",
+    )
+    timeline = materialize_editing_session_timeline(
+        timeline=source_timeline,
+        editing_session=editing_session,
+        project_id=project.project_id,
+    )
     output_path = tmp_path / "image_overlay.mp4"
 
     FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(

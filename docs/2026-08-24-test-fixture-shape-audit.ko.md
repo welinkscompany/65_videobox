@@ -30,15 +30,17 @@
 
 즉 이 조사의 48개는 **검토 모수**이지, 48개 전부를 일괄 변환한다는 뜻이 아니다.
 
-## 이번에 실제로 바꾼 것 — 3개
+## 이번에 실제로 바꾼 것 — 4개
 
 | 파일 | 바꾸기 전 | 바꾼 뒤 | 결과 |
 |---|---|---|---|
 | `tests/test_pycapcut_track_states.py` | 완성 timeline에 `track_states`를 직접 삽입 | 편집 session에 상태를 넣고 materializer 출력만 실제 PyCapCut 어댑터에 전달 | 5개 통과 |
 | `tests/test_capcut_export_track_states.py` | 레거시 JSON export timeline에 `track_states`를 직접 삽입 | 같은 session→materializer 모양을 레거시 어댑터에도 전달 | 8개 통과 |
 | `tests/test_pycapcut_adapter.py` | 수제 session·완성 timeline을 실제 CapCut 어댑터에 직접 전달 | 제품 `build_editing_session` 결과와 materialized timeline만 실제 초안 어댑터에 전달 | 17개 통과 |
+| `tests/test_ffmpeg_final_renderer.py` | 완성 timeline의 `export_overlays`에 이미지 오버레이를 직접 삽입 | 제품 session에서 이미지 오버레이를 갱신하고 materializer 출력만 레거시 최종 렌더러에 전달 | 파일 32개 통과 / 2개 건너뜀 |
 
-세 변환 모두 기존 시험은 계속 통과했다. 이번 세 파일에서는 새 제품 결함이 나오지 않았다.
+네 변환 모두 기존 시험은 계속 통과했다. 네 번째 변환에서 materializer가 만든 자산 오버레이
+트랙을 레거시 최종 렌더러가 놓치던 결함을 발견해, 레거시 입력을 모으는 최소 보정을 넣었다.
 시험을 되돌리거나 제품 코드를 우회하지 않았다.
 
 ## 이미 materializer를 직접 쓰는 혼합 파일 — 9개
@@ -72,14 +74,13 @@ materializer를 호출한다. `test_api_exact_preview.py`의 source timeline은 
 2026-08-24에 `test_api_exact_preview.py` focused 실행은 4개 통과했다. 이 파일은
 “손수 만든 완성 timeline을 어댑터에 직접 넣는 시험”이 아니므로 이번 전환 대상에서 뺐다.
 
-## 렌더·내보내기 쪽 다음 검토 대상 — 8개
+## 렌더·내보내기 쪽 다음 검토 대상 — 7개
 
 아래 파일은 출력에 가깝지만, 낮은 단계 계획·필터 계약과 세션 통합 계약이 섞여 있을 수
 있다. 파일 전체를 바꾸지 말고, **세션 편집 결과를 주장하는 시험만** 실제 만듦새로 옮긴다.
 
 - `tests/test_broll_dissolve.py`
 - `tests/test_broll_speed_and_volume.py`
-- `tests/test_ffmpeg_final_renderer.py`
 - `tests/test_icon_font_overlay_render.py`
 - `tests/test_overlay_text_avoids_the_caption_band.py`
 - `tests/test_preview_export.py`
