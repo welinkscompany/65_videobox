@@ -21,6 +21,7 @@ from videobox_core_engine.overlay_shapes import (  # noqa: F401
 )
 
 MIN_SEGMENT_DURATION_SEC = 0.2
+RIPPLE_PLAYBACK_RATES = frozenset({1.0, 1.5, 2.0})
 MAX_TIMELINE_UNDO_EVENTS = 10
 MAX_TIMELINE_AUDIT_EVENTS = 100
 FIXED_TIMELINE_TRACK_ROLES = ("narration", "broll", "bgm", "sfx", "overlay")
@@ -604,6 +605,69 @@ def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: f
     updated["segments"][index]["media_window_basis_offset_sec"] = next_media_offset
     updated["segments"][index]["content_windows"] = _slice_content_windows(segment=segment, start_sec=start_sec, end_sec=end_sec)
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_bounds_update", segment_id=segment_id)
+
+
+def set_segment_ripple_playback_rate(*, session: dict[str, Any], segment_id: str, rate: float) -> dict[str, Any]:
+    """Retime one visible scene without trimming its narrative source.
+
+    `set_segment_bounds` deliberately changes the source window.  A shortform
+    speed command has the opposite contract: it keeps that whole window,
+    shortens the displayed time, and moves only later scenes by the resulting
+    delta.  The materializer turns the durable rate into renderer instructions.
+    """
+    requested_rate = float(rate)
+    if not isfinite(requested_rate) or requested_rate not in RIPPLE_PLAYBACK_RATES:
+        raise ValueError("segment_ripple_playback_rate_invalid")
+
+    updated = deepcopy(session)
+    index = _segment_index(session=updated, segment_id=segment_id)
+    segment = updated["segments"][index]
+    source_duration = sum(
+        float(source_slice["duration_sec"])
+        for source_slice in _source_slices(segment)
+    )
+    display_duration = source_duration / requested_rate
+    if display_duration < MIN_SEGMENT_DURATION_SEC:
+        raise ValueError("segment_ripple_playback_rate_below_minimum_duration")
+
+    previous_start = float(segment["start_sec"])
+    previous_duration = float(segment["end_sec"]) - previous_start
+    delta = previous_duration - display_duration
+    previous_rate = float(segment.get("ripple_playback_rate", 1.0))
+    # Window offsets are displayed-time coordinates.  Keep them aligned with
+    # the same source moments after a speed change; otherwise captions and
+    # scene-attached media still last four seconds over a two-second scene.
+    window_scale = previous_rate / requested_rate
+    for field in ("media_windows", "media_window_basis", "content_windows"):
+        windows = segment.get(field)
+        if not isinstance(windows, list):
+            continue
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            for key in ("start_offset_sec", "duration_sec"):
+                if key in window:
+                    window[key] = float(window[key]) * window_scale
+    if "media_window_basis_offset_sec" in segment:
+        segment["media_window_basis_offset_sec"] = float(segment["media_window_basis_offset_sec"]) * window_scale
+    segment["end_sec"] = previous_start + display_duration
+    if requested_rate == 1.0:
+        segment.pop("ripple_playback_rate", None)
+    else:
+        segment["ripple_playback_rate"] = requested_rate
+    # A ripple edit must not reflow any earlier scene.  Subsequent scenes keep
+    # their own duration (and their own rate) but move by the exact shrink/grow
+    # delta, preserving deliberate later gaps if the source had them.
+    for later_segment in updated["segments"][index + 1 :]:
+        later_segment["start_sec"] = float(later_segment["start_sec"]) - delta
+        later_segment["end_sec"] = float(later_segment["end_sec"]) - delta
+    _validate_segment_bounds(segments=updated["segments"])
+    return _record_undoable_mutation(
+        before=session,
+        updated=updated,
+        mutation_type="segment_ripple_speed_update",
+        segment_id=segment_id,
+    )
 
 
 def reorder_segments(*, session: dict[str, Any], segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None = None) -> dict[str, Any]:

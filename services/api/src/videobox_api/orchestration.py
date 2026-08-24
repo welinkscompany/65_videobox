@@ -624,6 +624,15 @@ class ApiOrchestrator:
     def set_editing_session_segment_bounds(self, *, project_id: str, session_id: str, segment_id: str, start_sec: float, end_sec: float, expected_revision: int) -> dict[str, Any]:
         return self.pipeline.set_editing_session_segment_bounds(project_id=project_id, session_id=session_id, segment_id=segment_id, start_sec=start_sec, end_sec=end_sec, expected_revision=expected_revision)
 
+    def set_editing_session_segment_ripple_playback_rate(self, *, project_id: str, session_id: str, segment_id: str, rate: float, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.set_editing_session_segment_ripple_playback_rate(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            rate=rate,
+            expected_revision=expected_revision,
+        )
+
     def reorder_editing_session_segments(self, *, project_id: str, session_id: str, segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None, expected_revision: int) -> dict[str, Any]:
         return self.pipeline.reorder_editing_session_segments(project_id=project_id, session_id=session_id, segment_ids=segment_ids, bounds_by_id=bounds_by_id, expected_revision=expected_revision)
 

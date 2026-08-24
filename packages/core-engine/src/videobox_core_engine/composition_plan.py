@@ -19,6 +19,14 @@ COMPOSITION_VERSION = "videobox_composition_v1"
 DEFAULT_OUTPUT_WIDTH = 1080
 DEFAULT_OUTPUT_HEIGHT = 1920
 _SUPPORTED_TRACKS = frozenset({"narration", "broll", "bgm", "sfx", "overlay"})
+_RIPPLE_PLAYBACK_RATES = frozenset({1.0, 1.5, 2.0})
+
+
+def _ripple_playback_rate(segment: dict[str, Any]) -> float:
+    rate = _number(segment.get("ripple_playback_rate", 1.0))
+    if rate not in _RIPPLE_PLAYBACK_RATES:
+        raise ValueError("composition_plan_invalid_ripple_playback_rate")
+    return rate
 
 
 def _legacy_segment_source_offset(*, editing_session: dict[str, Any], segment: dict[str, Any], original_start: float) -> float:
@@ -253,7 +261,16 @@ def materialize_editing_session_timeline(
         # are independent of placement and survive reorder.
         for source_slice in _session_source_slices(editing_session=editing_session, segment=segment, source_durations=source_durations):
             source_targets.setdefault(str(source_slice["segment_id"]), []).append((segment, source_slice, placement))
-            placement += float(source_slice["duration_sec"])
+            placement += float(source_slice["duration_sec"]) / _ripple_playback_rate(segment)
+
+    session_output_end = max(
+        (
+            _number(segment.get("end_sec"))
+            for segment in segments.values()
+            if str(segment.get("cut_action") or "keep") != "remove"
+        ),
+        default=0.0,
+    )
 
     def caption_has_identity_projection(caption: dict[str, Any]) -> bool:
         source_id = str(caption.get("segment_id") or "")
@@ -339,7 +356,14 @@ def materialize_editing_session_timeline(
             if targets is None:
                 if source_id in removed_source_ids:
                     continue
-                clips.append(deepcopy(raw))
+                clip = deepcopy(raw)
+                # BGM has no scene id, so no source target can carry the
+                # ripple.  It must stay at normal pitch but cannot outlive
+                # the shortened final timeline.
+                if track_type == "bgm" and session_output_end > _number(clip.get("start_sec")):
+                    clip["end_sec"] = min(_number(clip.get("end_sec")), session_output_end)
+                if _number(clip.get("end_sec")) > _number(clip.get("start_sec")):
+                    clips.append(clip)
                 continue
             original_start, original_end = _number(raw.get("start_sec")), _number(raw.get("end_sec"))
             raw_controls = raw.get("media_controls") if isinstance(raw.get("media_controls"), dict) else {}
@@ -370,7 +394,9 @@ def materialize_editing_session_timeline(
                 original_source_in = base_source_in
                 original_source_out = base_source_out
             for segment, source_slice, placement in targets:
-                duration = float(source_slice["duration_sec"])
+                source_duration = float(source_slice["duration_sec"])
+                rate = _ripple_playback_rate(segment)
+                duration = source_duration / rate
                 if duration <= 0:
                     continue
                 override_field = {"broll": "broll_override", "bgm": "music_override", "sfx": "sfx_override"}.get(track_type)
@@ -394,10 +420,13 @@ def materialize_editing_session_timeline(
                 )
                 for interval_start, interval_end in _uncovered_intervals(start=placement, end=placement + duration, covered=covered):
                     clip = deepcopy(raw)
-                    source_piece_start = source_in + interval_start - placement
+                    source_piece_start = source_in + (interval_start - placement) * rate
                     clip["segment_id"] = str(segment.get("segment_id") or source_id)
                     clip["start_sec"], clip["end_sec"] = interval_start, interval_end
-                    clip["source_in_sec"], clip["source_out_sec"] = source_piece_start, min(original_source_out, source_piece_start + interval_end - interval_start)
+                    clip["source_in_sec"], clip["source_out_sec"] = source_piece_start, min(original_source_out, source_piece_start + (interval_end - interval_start) * rate)
+                    clip["playback_rate"] = rate
+                    if track_type == "broll":
+                        clip["effective_playback_rate"] = rate * _number(raw_controls.get("speed"), 1.0)
                     if bake_source_controls:
                         controls = deepcopy(raw_controls)
                         controls.pop("trim_start_sec", None)
@@ -646,6 +675,9 @@ class CompositionItem:
     end_sec: float
     source_in_sec: float
     source_out_sec: float
+    # Scene ripple rate.  B-roll's media_controls.speed remains an independent
+    # source-control rate; renderers combine the two only for that track.
+    playback_rate: float = 1.0
     media_controls: dict[str, Any] = field(default_factory=dict)
     expected_content_sha256: str | None = None
     media_revision: str | None = None
@@ -661,11 +693,12 @@ class CompositionItem:
             return None
         # Shift source only by the left-hand clipping amount.  The resulting
         # output is already zero based; callers must not apply another offset.
-        source_start = self.source_in_sec + (left - self.start_sec)
+        source_start = self.source_in_sec + (left - self.start_sec) * self.playback_rate
         return CompositionItem(
             clip_id=self.clip_id, track_type=self.track_type, asset_uri=self.asset_uri, asset_id=self.asset_id,
             start_sec=left - start_sec, end_sec=right - start_sec,
-            source_in_sec=source_start, source_out_sec=source_start + (right - left),
+            source_in_sec=source_start, source_out_sec=source_start + (right - left) * self.playback_rate,
+            playback_rate=self.playback_rate,
             media_controls=dict(self.media_controls), expected_content_sha256=self.expected_content_sha256,
             media_revision=self.media_revision, overlay_type=self.overlay_type,
             overlay_payload=dict(self.overlay_payload),
@@ -760,6 +793,9 @@ class CompositionPlan:
                 source_out = _number(raw.get("source_out_sec", raw.get("out_sec", source_in + (end - start))))
                 if source_out < source_in:
                     source_out = source_in + (end - start)
+                playback_rate = _number(raw.get("playback_rate", 1.0))
+                if playback_rate <= 0:
+                    raise ValueError("composition_plan_invalid_playback_rate")
                 controls = dict(raw.get("media_controls") or {}) if isinstance(raw.get("media_controls"), dict) else {}
                 if track_type == "broll":
                     # Older persisted timelines used ``contain`` for the
@@ -791,6 +827,7 @@ class CompositionPlan:
                     asset_uri=str(raw["asset_uri"]) if raw.get("asset_uri") is not None else None,
                     asset_id=str(raw["asset_id"]) if raw.get("asset_id") is not None else None,
                     start_sec=start, end_sec=end, source_in_sec=source_in, source_out_sec=source_out,
+                    playback_rate=playback_rate,
                     media_controls=controls,
                     expected_content_sha256=str(raw.get("expected_content_sha256") or "").strip() or None,
                     media_revision=str(raw.get("media_revision") or "").strip() or None,

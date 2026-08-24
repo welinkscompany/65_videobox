@@ -817,7 +817,7 @@ class FfmpegFinalRenderer:
             # 배속을 걸면 원본 창이 **화면에서 차지하는 시간**은 그만큼 줄거나
             # 는다. 아래 loop/pad 판단은 전부 화면 시간 기준이므로 여기서 한 번
             # 환산해 두고 그 값만 쓴다.
-            speed = float(controls["speed"])
+            speed = float(controls["speed"]) * item.playback_rate
             source_window_sec = (item.source_out_sec - item.source_in_sec) / speed
             if controls["pad"] and not controls["loop"]:
                 transform += f",tpad=stop_mode=add:stop_duration={max(0.0, duration_sec - source_window_sec)}"
@@ -1012,7 +1012,8 @@ class FfmpegFinalRenderer:
         for item in narration:
             label = f"a_{item.clip_id}"
             delay = max(0, round(item.start_sec * 1000))
-            filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
+            retime = "" if item.playback_rate == 1.0 else f",{_atempo_chain(item.playback_rate)}"
+            filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec}{retime},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
             narration_labels.append(f"[{label}]")
         if not narration_labels:
             filters.append(f"anullsrc=r=48000:cl=stereo,atrim=duration={duration}[narration_mix]")
@@ -1051,7 +1052,7 @@ class FfmpegFinalRenderer:
                     continue
                 label = f"a_{item.clip_id}"
                 delay = max(0, round(item.start_sec * 1000))
-                speed = float(controls["speed"])
+                speed = float(controls["speed"]) * item.playback_rate
                 volume = float(controls["volume"])
                 # 소리도 화면과 **같은 배속**으로 가야 입이 맞는다. 화면만
                 # 빨라지면 말과 그림이 어긋난다.
@@ -1080,7 +1081,8 @@ class FfmpegFinalRenderer:
                     effect += f",afade=t=in:st=0:d={controls['fade_in_sec']}"
                 if controls["fade_out_sec"]:
                     effect += f",afade=t=out:st={max(0.0, item.end_sec - item.start_sec - controls['fade_out_sec'])}:d={controls['fade_out_sec']}"
-                filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},{effect},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
+                retime = "" if item.playback_rate == 1.0 else f",{_atempo_chain(item.playback_rate)}"
+                filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec}{retime},{effect},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
                 if item.track_type == "bgm" and controls["ducking"]:
                     ducked = f"duck_{item.clip_id}"
                     filters.append(f"[{label}]{narration_sidechain}sidechaincompress=threshold=0.05:ratio=8[{ducked}]")

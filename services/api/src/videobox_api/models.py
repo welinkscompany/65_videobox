@@ -831,6 +831,11 @@ class SegmentBoundsRequest(BaseModel):
     end_sec: float = Field(gt=0, allow_inf_nan=False)
 
 
+class RipplePlaybackRateRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    rate: Literal[1.0, 1.5, 2.0]
+
+
 class SegmentOrderRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     segment_ids: list[str] = Field(min_length=1)
@@ -1085,6 +1090,7 @@ class EditingSessionSegmentResponse(BaseModel):
     sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
     caption_style: dict[str, object] | None = None
+    ripple_playback_rate: Literal[1.5, 2.0] | None = Field(default=None, exclude_if=lambda value: value is None)
     # 앞 장면에서 이 장면으로 넘어오는 방법.
     #
     # **안 고른 장면에는 이 칸이 아예 없다**(`source_script_segment_id`와 같은

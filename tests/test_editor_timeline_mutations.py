@@ -61,6 +61,80 @@ def _session() -> dict:
     }
 
 
+def test_ripple_speed_shortens_one_real_editing_session_scene_and_ripples_later_scenes() -> None:
+    """배속은 trim이 아니다. 만든 세션의 원본 말은 남기고 표시 길이만 줄인다."""
+    from videobox_core_engine.editing_session import (
+        build_editing_session,
+        redo,
+        set_segment_ripple_playback_rate,
+        undo,
+    )
+
+    source_timeline = {"timeline_id": "timeline_ripple", "tracks": []}
+    session = build_editing_session(
+        project_id="project_ripple",
+        timeline=source_timeline,
+        segments=[
+            {"segment_id": "scene-1", "text": "첫 장면", "start_sec": 0.0, "end_sec": 4.0},
+            {"segment_id": "scene-2", "text": "둘째 장면", "start_sec": 4.0, "end_sec": 8.0},
+            {"segment_id": "scene-3", "text": "셋째 장면", "start_sec": 8.0, "end_sec": 12.0},
+        ],
+    )
+
+    doubled = set_segment_ripple_playback_rate(
+        session=session,
+        segment_id="scene-2",
+        rate=2.0,
+    )
+
+    first, second, third = doubled["segments"]
+    assert (first["start_sec"], first["end_sec"]) == (0.0, 4.0)
+    assert (second["start_sec"], second["end_sec"]) == (4.0, 6.0)
+    assert (third["start_sec"], third["end_sec"]) == (6.0, 10.0)
+    assert second["ripple_playback_rate"] == 2.0
+    # source_slices는 말과 영상의 원본 4초를 가리킨다. 이걸 2초로 자르면
+    # "속도를 올린다"가 아니라 "뒤 절반을 버린다"가 된다.
+    assert second["source_slices"] == [{
+        "segment_id": "scene-2", "source_offset_sec": 0.0, "duration_sec": 4.0,
+    }]
+    assert doubled["history"][-1]["mutation_type"] == "segment_ripple_speed_update"
+
+    restored = set_segment_ripple_playback_rate(
+        session=doubled,
+        segment_id="scene-2",
+        rate=1.0,
+    )
+    assert [(item["start_sec"], item["end_sec"]) for item in restored["segments"]] == [
+        (0.0, 4.0), (4.0, 8.0), (8.0, 12.0),
+    ]
+
+    undone = undo(session=doubled)
+    redone = redo(session=undone)
+    assert [(item["start_sec"], item["end_sec"]) for item in undone["segments"]] == [
+        (0.0, 4.0), (4.0, 8.0), (8.0, 12.0),
+    ]
+    assert [(item["start_sec"], item["end_sec"]) for item in redone["segments"]] == [
+        (0.0, 4.0), (4.0, 6.0), (6.0, 10.0),
+    ]
+
+
+@pytest.mark.parametrize("rate", [0.0, -1.0, 1.25, 3.0, float("nan")])
+def test_ripple_speed_refuses_an_unsupported_rate_without_mutating_the_session(rate: float) -> None:
+    from videobox_core_engine.editing_session import build_editing_session, set_segment_ripple_playback_rate
+
+    session = build_editing_session(
+        project_id="project_ripple",
+        timeline={"timeline_id": "timeline_ripple", "tracks": []},
+        segments=[{"segment_id": "scene-1", "text": "첫 장면", "start_sec": 0.0, "end_sec": 4.0}],
+    )
+
+    with pytest.raises(ValueError, match="segment_ripple_playback_rate_invalid"):
+        set_segment_ripple_playback_rate(session=session, segment_id="scene-1", rate=rate)
+
+    assert session["segments"][0].get("ripple_playback_rate") is None
+    assert session["history"] == []
+
+
 def test_split_enforces_minimum_duration_and_preserves_editable_identity_and_lineage() -> None:
     from videobox_core_engine.editing_session import split_segment
 
@@ -361,6 +435,32 @@ def test_timeline_mutation_api_is_revisioned_and_selected_preview_returns_only_f
     assert preview.status_code == 200, preview.text
     assert [track["role"] for track in preview.json()["timeline"]["tracks"]] == ["narration", "broll", "bgm", "sfx", "overlay"]
     assert preview.json()["captions"][0]["segment_id"] == "seg_001"
+
+
+def test_ripple_speed_api_is_revisioned_and_keeps_the_whole_source_scene(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Ripple speed API")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload=_session())
+    client = TestClient(create_app(projects_root=tmp_path))
+    root = f"/api/projects/{project.project_id}/editing-sessions/{saved['session_id']}"
+
+    response = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 2.0, "expected_revision": saved["session_revision"]},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["session_revision"] == saved["session_revision"] + 1
+    assert [(item["start_sec"], item["end_sec"]) for item in body["segments"]] == [
+        (0.0, 2.0), (2.0, 3.0), (3.0, 5.0),
+    ]
+    assert body["segments"][1]["ripple_playback_rate"] == 2.0
+    stale = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 1.5, "expected_revision": saved["session_revision"]},
+    )
+    assert stale.status_code == 409
 
 
 def test_merge_api_rejects_removed_child_without_mutating_session(tmp_path: Path) -> None:

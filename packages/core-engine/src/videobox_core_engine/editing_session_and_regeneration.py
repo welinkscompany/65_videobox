@@ -58,6 +58,7 @@ from videobox_core_engine.editing_session import (
     remove_segment_table_overlay,
     select_segment_tts_replacement,
     set_segment_bounds,
+    set_segment_ripple_playback_rate,
     set_timeline_placement_overrides,
     set_track_states,
     split_segment,
@@ -335,6 +336,17 @@ class EditingSessionRegenerationMixin:
     def set_editing_session_segment_bounds(self, *, project_id: str, session_id: str, segment_id: str, start_sec: float, end_sec: float, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_segment_bounds(session=session, segment_id=segment_id, start_sec=start_sec, end_sec=end_sec), expected_revision=expected_revision)
+
+    def set_editing_session_segment_ripple_playback_rate(self, *, project_id: str, session_id: str, segment_id: str, rate: float, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated = set_segment_ripple_playback_rate(session=session, segment_id=segment_id, rate=rate)
+        return self._save_editing_session_with_revision(
+            project_id=project_id,
+            session_id=session_id,
+            session=session,
+            updated_session=updated,
+            expected_revision=expected_revision,
+        )
 
     def reorder_editing_session_segments(self, *, project_id: str, session_id: str, segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
