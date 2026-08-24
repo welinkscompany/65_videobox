@@ -56,23 +56,26 @@
 - `tests/test_scene_transition_session_and_api.py`
 - `tests/test_track_states.py`
 
-## 제품 출력 진입점 안에서 이미 materialize하는 파일 — 2개
+## 제품 출력 진입점 안에서 이미 materialize하는 파일 — 3개
 
 - `tests/test_local_pipeline_capcut_draft_export.py`
 - `tests/test_local_pipeline_final_render.py`
+- `tests/test_api_exact_preview.py`
 
-두 파일은 `LocalPipelineRunner`의 실제 CapCut/최종 렌더 진입점을 부른다. 제품 코드는 각각
-`run_capcut_draft_export_job`과 `run_final_render_job` 안에서 materializer를 호출한다.
-따라서 이 파일의 builder 기반 source timeline을 단지 dict라는 이유로 다시 materialize하면
-같은 계층을 두 번 통과시키게 된다.
+세 파일은 `LocalPipelineRunner`의 실제 출력 진입점을 부른다. 제품 코드는 각각
+`run_capcut_draft_export_job`, `run_final_render_job`, `_exact_preview_inputs` 안에서
+materializer를 호출한다. `test_api_exact_preview.py`의 source timeline은 편집 세션을
+적용하기 전 입력이며, pipeline이 그 둘을 합친다. 따라서 이 파일의 source timeline을
+단지 dict라는 이유로 먼저 materialize해 저장하면 같은 계층을 두 번 통과시키게 된다.
 
-## 렌더·내보내기 쪽 다음 검토 대상 — 11개
+2026-08-24에 `test_api_exact_preview.py` focused 실행은 4개 통과했다. 이 파일은
+“손수 만든 완성 timeline을 어댑터에 직접 넣는 시험”이 아니므로 이번 전환 대상에서 뺐다.
+
+## 렌더·내보내기 쪽 다음 검토 대상 — 9개
 
 아래 파일은 출력에 가깝지만, 낮은 단계 계획·필터 계약과 세션 통합 계약이 섞여 있을 수
 있다. 파일 전체를 바꾸지 말고, **세션 편집 결과를 주장하는 시험만** 실제 만듦새로 옮긴다.
 
-- `tests/test_api_capcut_draft_export_endpoint.py`
-- `tests/test_api_exact_preview.py`
 - `tests/test_broll_dissolve.py`
 - `tests/test_broll_speed_and_volume.py`
 - `tests/test_ffmpeg_final_renderer.py`
@@ -83,12 +86,13 @@
 - `tests/test_scene_transitions.py`
 - `tests/test_vertical_composition.py`
 
-## 나머지 API·저장소·도메인 후보 — 24개
+## 나머지 API·저장소·도메인 후보 — 25개
 
 이들은 출력 우선순위보다 뒤다. API validation, migration, 저장소 round-trip처럼 raw dict가
 의도된 입력인 시험이 많으므로 자동 변환하지 않는다.
 
 - `tests/test_api_atomic_draft_bundle.py`
+- `tests/test_api_capcut_draft_export_endpoint.py`
 - `tests/test_api_format_templates.py`
 - `tests/test_api_library_assets.py`
 - `tests/test_api_media_director.py`
