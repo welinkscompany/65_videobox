@@ -844,18 +844,18 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
       <h2>출력 준비 체크리스트</h2>
       <ol aria-label="출력 준비 단계">
         <li>
-          <strong>{hasCurrentEditingDraft ? "완료" : "편집본 준비 필요"}</strong>
-          <span>{hasCurrentEditingDraft ? "현재 편집본이 준비되었어요." : "편집본을 먼저 준비해 주세요."}</span>
+          <strong>편집본</strong>
+          <span>{hasCurrentEditingDraft ? "준비됨" : "준비 필요"}</span>
           {!hasCurrentEditingDraft ? <Button variant="outline" onClick={onOpenEditor}>편집 화면 열기</Button> : null}
         </li>
         <li>
-          <strong>{reviewApproved ? "완료" : "검토 승인 필요"}</strong>
-          <span>{reviewApproved ? "현재 편집본 검토가 승인되었어요." : "검토에서 확인할 항목을 마치고 승인해 주세요."}</span>
+          <strong>검토</strong>
+          <span>{reviewApproved ? "승인됨" : "승인 필요"}</span>
           {!reviewApproved && hasCurrentEditingDraft ? <a className="vb-action-link" href={`/projects/${encodeURIComponent(projectId)}/review`}>검토 화면 열기</a> : null}
         </li>
         <li>
-          <strong>{canRenderSubtitle ? "완료" : "출력 대기"}</strong>
-          <span>{canRenderSubtitle ? "자막과 완성본을 만들 수 있어요." : "앞 단계가 끝나면 자막과 완성본을 만들 수 있어요."}</span>
+          <strong>출력</strong>
+          <span>{canRenderSubtitle ? "자막과 완성본을 만들 수 있어요." : "앞 단계 완료 필요"}</span>
         </li>
       </ol>
     </section> : null}

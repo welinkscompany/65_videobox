@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "../api";
 import { finalRenderFailureMessage, OutputsPage } from "./OutputsPage";
@@ -1814,11 +1814,30 @@ describe("OutputsPage", () => {
     const checklist = await screen.findByRole("region", { name: "출력 준비 체크리스트" });
     expect(checklist).toBeVisible();
     expect(screen.getByRole("list", { name: "출력 준비 단계" })).toBeVisible();
-    expect(screen.getByText("편집본을 먼저 준비해 주세요.")).toBeVisible();
+    expect(within(checklist).getByText("편집본")).toBeVisible();
+    expect(within(checklist).getByText("준비 필요")).toBeVisible();
+    expect(within(checklist).getByText("검토")).toBeVisible();
+    expect(within(checklist).getByText("승인 필요")).toBeVisible();
+    expect(within(checklist).getByText("출력")).toBeVisible();
+    expect(within(checklist).getByText("앞 단계 완료 필요")).toBeVisible();
+    expect(within(checklist).queryByText("편집본을 먼저 준비해 주세요.")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "편집 화면 열기" }));
     expect(onOpenEditor).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "자막 만들기" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "완성본 만들기" })).toBeDisabled();
+  });
+
+  it("uses keyword statuses when the draft and review are ready but output still waits", async () => {
+    stubCanonicalSubtitleApi({ reviewFlags: [{ code: "review_required", segment_id: "segment-a", message: "확인이 필요해요." }] });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const checklist = await screen.findByRole("region", { name: "출력 준비 체크리스트" });
+    expect(within(checklist).getByText("준비됨")).toBeVisible();
+    expect(within(checklist).getByText("승인됨")).toBeVisible();
+    expect(within(checklist).getByText("앞 단계 완료 필요")).toBeVisible();
+    expect(within(checklist).queryByText("현재 편집본이 준비되었어요.")).not.toBeInTheDocument();
+    expect(within(checklist).queryByText("현재 편집본 검토가 승인되었어요.")).not.toBeInTheDocument();
   });
 
   it("fails closed when the active session lookup fails", async () => {
