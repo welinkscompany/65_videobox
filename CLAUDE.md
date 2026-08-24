@@ -57,7 +57,7 @@
 | 상태/closeout 로그 | `docs/development-status-2026-06-29.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
 | 미해결 수정 backlog | `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` |
-| **최신 세션 인계** | `docs/handoffs/2026-08-24-videobox-copy-and-real-fixture-handoff.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-08-24-videobox-shortform-ripple-speed-handoff.ko.md` |
 
 승인된 시각 결정은 `docs/decisions/`에 있다. 전부 명시 승인이고 재승인 없이 바꾸지 않는다.
 경로는 위 표의 `docs/decisions/`다. **색은 가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
