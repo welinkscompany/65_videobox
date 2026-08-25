@@ -110,7 +110,8 @@ export function resolveNavigationContext({
 
   const parsed = parseWorkspaceLocation(pathname);
   if (parsed) {
-    const currentSegment = pathname.split("/").at(-1);
+    const pathSegments = pathname.split("/");
+    const currentSegment = pathSegments[pathSegments.length - 1];
     const screenName = parsed.stage === "plan" ? "이야기"
       : parsed.stage === "assets" ? "재료"
         : parsed.stage === "edit" ? "편집"

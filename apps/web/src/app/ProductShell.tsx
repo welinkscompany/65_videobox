@@ -16,7 +16,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from "../components/ui/c
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { localDeploymentCapabilities } from "./deploymentCapabilities";
-import { type WorkspaceSection } from "./routeManifest";
+import { type NavigationContext, type WorkspaceSection } from "./routeManifest";
 import { JobRecovery } from "../features/jobs/JobRecovery";
 import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { ConversationCleanup } from "../features/settings/ConversationCleanup";
@@ -46,7 +46,16 @@ function saveSettings(next: SettingsState): boolean {
 }
 export function opensLastProjectOnStart() { return readSettings().openLastProject; }
 
-type ProductShellProps = { projectId: string; projects: Project[]; section: ShellSection; onNavigate: (projectId: string, section: WorkspaceSection) => void; onOpenSettings: () => void; children: ReactNode };
+export type ProductShellProps = {
+  projectId: string;
+  projects: Project[];
+  section: ShellSection;
+  onNavigate: (projectId: string, section: WorkspaceSection) => void;
+  onOpenSettings: () => void;
+  navigation?: NavigationContext;
+  onBack?: () => void;
+  children: ReactNode;
+};
 
 /** 껍데기는 화면 비율을 **스스로 알아내지 않는다.** 그 값은 열려 있는 초안에만
  *  있고, 껍데기가 프로젝트마다 그것을 물어보면 모든 화면에 요청이 하나씩 는다 --
@@ -56,7 +65,7 @@ export function ProductShell(props: ProductShellProps) {
   return <ShellCanvasProvider><ProductShellFrame {...props} /></ShellCanvasProvider>;
 }
 
-function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSettings, children }: ProductShellProps) {
+function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSettings, navigation, onBack, children }: ProductShellProps) {
   const canvas = useShellCanvas();
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
@@ -91,6 +100,8 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
         section={section}
         screenName={screenName}
         canvas={canvas}
+        navigation={navigation}
+        onBack={onBack}
         onNavigate={onNavigate}
         onSelectProject={(nextProjectId) => onNavigate(nextProjectId, "editing")}
         onOpenSettings={onOpenSettings}

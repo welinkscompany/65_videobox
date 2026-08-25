@@ -69,6 +69,22 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  it("uses visited history first and a safe destination for a direct global URL", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const visited = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects", "/library"], initialIndex: 1 }));
+    render(<AppRouter router={visited} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "이전 화면" }));
+    await waitFor(() => expect(visited.state.location.pathname).toBe("/projects"));
+    cleanup();
+
+    const direct = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/footage"] }));
+    render(<AppRouter router={direct} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "이전 화면" }));
+    await waitFor(() => expect(direct.state.location.pathname).toBe("/library"));
+  });
+
   // 2026-08-19 owner 지적: `내 라이브러리`를 누르면 좌측 메뉴가 통째로 사라져서
   // **여기가 어느 화면인지도, 어떻게 돌아가는지도 알 수 없었다.** 프로젝트 목록과
   // 설정은 이미 껍데기 안에 있었고 라이브러리·촬영본 둘만 밖에 있었다.

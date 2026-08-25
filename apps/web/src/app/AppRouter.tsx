@@ -23,11 +23,12 @@ import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
 import { useProjectManagement, type ProjectManagement } from "../features/projects/projectManagement";
 import { ReviewAndOutputPage } from "../features/review/ReviewAndOutputPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
-import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage } from "./ProductShell";
+import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage, type ProductShellProps } from "./ProductShell";
 import { resolveLastValidProjectId } from "./projectSelection";
 import { readableMoment } from "./readableMoment";
 import {
   parseWorkspaceLocation,
+  resolveNavigationContext,
   resolveGlobalLocation,
   resolveWorkspaceLocation,
   type WorkspaceSection,
@@ -146,6 +147,24 @@ export function AppRouter({ router = createAppRouter() }: { router?: ReturnType<
   return <RouterProvider router={router} />;
 }
 
+/** 실제 방문 이력이 있으면 그 길을 먼저 돌아가고, 주소를 직접 열었을 때만
+ * routeManifest의 안전한 상위 화면으로 간다. 화면 컴포넌트는 이 선택을 몰라도 된다. */
+function RoutedProductShell(props: ProductShellProps) {
+  const router = useRouter();
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (routerState) => routerState.location.pathname });
+  const projectName = props.projects.find((project) => project.project_id === props.projectId)?.name;
+  const navigation = resolveNavigationContext({ pathname, projectName });
+  const onBack = () => {
+    if (router.history.canGoBack()) {
+      router.history.back();
+      return;
+    }
+    void navigate({ href: navigation.fallbackHref });
+  };
+  return <ProductShell {...props} navigation={navigation} onBack={onBack} />;
+}
+
 /** 첫 화면도 **앱 껍데기 안**이다.
  *
  * 예전에는 `/projects`가 껍데기 밖의 맨 `<main>`이라 사이드바가 없었고, 프로젝트를
@@ -226,7 +245,7 @@ function ProjectsPage() {
   }
 
   return (
-    <ProductShell
+    <RoutedProductShell
       projectId=""
       projects={projects}
       section="home"
@@ -332,7 +351,7 @@ function ProjectsPage() {
       </section> : null}
       {management.error ? <p className="vb-project-action-error" role="alert">{management.error}</p> : null}
     </main>
-    </ProductShell>
+    </RoutedProductShell>
   );
 }
 
@@ -348,13 +367,13 @@ function ProjectsPage() {
 function GlobalShell({ section, children }: { section: "library" | "footage"; children: ReactNode }) {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
-  return <ProductShell
+  return <RoutedProductShell
     projectId=""
     projects={projects}
     section={section}
     onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
     onOpenSettings={() => void navigate({ to: "/settings/general" })}
-  >{children}</ProductShell>;
+  >{children}</RoutedProductShell>;
 }
 
 function LibraryPage() {
@@ -618,29 +637,29 @@ function WorkspacePage() {
     search: { project_id: projectId } as never,
   });
   if (section === "home") {
-    return <ProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings}>
+    return <RoutedProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
-    </ProductShell>;
+    </RoutedProductShell>;
   }
   if (section === "create" || section === "plan") {
-    return <ProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings}>
+    return <RoutedProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <CreationInterview projectId={projectId} />
-    </ProductShell>;
+    </RoutedProductShell>;
   }
   if (section === "media" || section === "assets") {
     const requestedReturn = typeof (routeSearch as { return_to?: unknown }).return_to === "string"
       ? (routeSearch as { return_to: string }).return_to
       : null;
     const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
-    if (safeReturn) return <ProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></ProductShell>;
-    return <ProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
+    if (safeReturn) return <RoutedProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></RoutedProductShell>;
+    return <RoutedProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
       <MediaWorkspacePage projectId={projectId} />
-    </ProductShell>;
+    </RoutedProductShell>;
   }
   // 검토와 출력은 한 단계다. 두 주소를 모두 살려 둔 채 같은 화면을 그린다 --
   // 한쪽을 리다이렉트로 접으면 그 주소로 바로 들어오던 경로가 끊긴다.
   if (section === "outputs" || section === "output" || section === "timeline" || section === "review") {
-    return <ProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
+    return <RoutedProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
       <ReviewAndOutputPage
         projectId={projectId}
         onOpenEditor={() => navigateTo(projectId, "editing")}
@@ -650,22 +669,22 @@ function WorkspacePage() {
           search: { session_id: sessionId, segment_id: segmentId } as never,
         })}
       />
-    </ProductShell>;
+    </RoutedProductShell>;
   }
   if ((section === "editor" || section === "edit") && rawEditingSessionId !== null && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
+    return <RoutedProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
-    </ProductShell>;
+    </RoutedProductShell>;
   }
   if ((section === "editor" || section === "edit") && !requestedEditingSessionId) {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
+    return <RoutedProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
-    </ProductShell>;
+    </RoutedProductShell>;
   }
   if (section === "editor" || section === "edit") {
-    return <ProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
+    return <RoutedProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
-    </ProductShell>;
+    </RoutedProductShell>;
   }
   return <RecoveryPage />;
 }
@@ -754,9 +773,9 @@ function SettingsRoutePage() {
   const projectId = requestedProjectId || resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) || projects[0]?.project_id;
   if (!projectId) return <ProjectsPage />;
   const settingsLocation = (nextSection: typeof validSections[number]) => `/settings/${nextSection}?project_id=${encodeURIComponent(projectId)}`;
-  return <ProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })}>
+  return <RoutedProductShell projectId={projectId} projects={projects} section="settings" onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })} onOpenSettings={() => void navigate({ to: settingsLocation("general") })}>
     <SettingsPage projectId={projectId} section={section as typeof validSections[number]} onNavigate={(nextSection) => void navigate({ to: settingsLocation(nextSection) })} />
-  </ProductShell>;
+  </RoutedProductShell>;
 }
 
 function RecoveryPage() {
