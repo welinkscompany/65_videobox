@@ -38,6 +38,7 @@ class YujinEditingContext:
     session_revision: int
     segment_ids: tuple[str, ...]
     approved_asset_ids: tuple[str, ...] = ()
+    approved_asset_types: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -119,8 +120,13 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
         if key in operation_targets:
             return "duplicate_conflicting_operation"
         operation_targets.add(key)
-        if isinstance(operation, ApplyMediaOperation) and operation.asset_id not in set(context.approved_asset_ids):
-            return "media_asset_not_approved"
+        if isinstance(operation, ApplyMediaOperation):
+            if operation.asset_id not in set(context.approved_asset_ids):
+                return "media_asset_not_approved"
+            asset_types = dict(context.approved_asset_types)
+            expected_asset_type = {"broll": "broll_video", "bgm": "bgm", "sfx": "sfx"}[operation.media_type]
+            if asset_types and asset_types.get(operation.asset_id) != expected_asset_type:
+                return "media_asset_type_mismatch"
     return None
 
 

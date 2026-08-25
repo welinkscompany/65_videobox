@@ -189,11 +189,17 @@ def build_director_proposals_router(
             session = store.get_editing_session(project_id=project_id, session_id=session_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="editing_session_missing") from exc
+        approved_assets = tuple(
+            item for item in store.list_assets(project_id=project_id)
+            if isinstance(item.get("metadata"), dict)
+            and str(item["metadata"].get("review_status") or "").strip().lower() == "approved"
+        )
         context = YujinEditingContext(
             session_id=session_id,
             session_revision=int(session["session_revision"]),
             segment_ids=tuple(str(item["segment_id"]) for item in session.get("segments", []) if isinstance(item, dict) and item.get("segment_id")),
-            approved_asset_ids=tuple(str(item["asset_id"]) for item in store.list_assets(project_id=project_id)),
+            approved_asset_ids=tuple(str(item["asset_id"]) for item in approved_assets),
+            approved_asset_types=tuple((str(item["asset_id"]), str(item["asset_type"])) for item in approved_assets),
         )
         result = YujinEditingProposalService(request.app.state.local_only_runtime_service_factory(store)).create(
             project_id=project_id, instruction=body.instruction, context=context
@@ -234,7 +240,14 @@ def build_director_proposals_router(
             if proposal.source_session_id != session_id or proposal.base_session_revision != body.expected_revision or int(session["session_revision"]) != body.expected_revision:
                 raise HTTPException(status_code=409, detail="editing_proposal_needs_refresh")
             from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
-            editing = YujinEditingProposal.model_validate({"proposal_id": proposal_id, "base_session_revision": proposal.base_session_revision, "operations": proposal.diff["operations"]})
+            operations = proposal.diff.get("operations") if hasattr(proposal.diff, "get") else None
+            if not isinstance(operations, (list, tuple)):
+                raise ValueError("editing_proposal_operations_required")
+            editing = YujinEditingProposal.model_validate({
+                "proposal_id": proposal_id,
+                "base_session_revision": proposal.base_session_revision,
+                "operations": [dict(item) for item in operations],
+            })
             updated = apply_yujin_editing_proposal(session=session, proposal=editing)
             return store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=updated, expected_revision=body.expected_revision)
         except HTTPException:

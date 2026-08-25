@@ -541,3 +541,31 @@ def test_ai_editing_proposal_is_one_undoable_transaction() -> None:
     assert len(applied["undo_stack"]) == 1
     assert applied["segments"][0]["caption_text"] == "새 자막"
     assert undo(session=applied)["redo_stack"]
+
+
+def test_ai_editing_proposal_composes_every_supported_edit_without_extra_undo_events() -> None:
+    """유진의 여러 편집은 중간 상태를 남기지 않고 한 번에 되돌려져야 한다."""
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "all-edits",
+        "base_session_revision": 1,
+        "operations": [
+            {"intent": "set_segment_bounds", "segment_id": "seg_001", "start_sec": 0.0, "end_sec": 1.5},
+            {"intent": "set_cut_action", "segment_id": "seg_001", "action": "exclude"},
+            {"intent": "set_caption_text", "segment_id": "seg_001", "text": "다듬은 첫 문장"},
+            {"intent": "apply_media", "segment_id": "seg_001", "media_type": "bgm", "asset_id": "music_002"},
+            {"intent": "remove_media", "segment_id": "seg_001", "media_type": "broll"},
+            {"intent": "reorder_segments", "segment_ids": ["seg_003", "seg_001", "seg_002"]},
+        ],
+    })
+
+    applied = apply_yujin_editing_proposal(session=_session(), proposal=proposal)
+
+    assert [item["segment_id"] for item in applied["segments"]] == ["seg_003", "seg_001", "seg_002"]
+    edited = next(item for item in applied["segments"] if item["segment_id"] == "seg_001")
+    assert edited["cut_action"] == "remove"
+    assert edited["caption_text"] == "다듬은 첫 문장"
+    assert edited["music_override"]["asset_id"] == "music_002"
+    assert edited["broll_override"] is None
+    assert len(applied["undo_stack"]) == 1
