@@ -31,7 +31,7 @@ export type InspectorAction =
   | Readonly<{ kind: "set-transition"; segmentId: string; transition: Readonly<{ type: string; durationSec: number }> | null }>
   | Readonly<{ kind: "save-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string; assetId: string; controls: EditorControls }>
   | Readonly<{ kind: "clear-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string }>
-  | Readonly<{ kind: "save-caption-style"; segmentIds: string[]; scope: CaptionStyleScope; style: EditorCaptionStyle }>
+  | Readonly<{ kind: "preflight-caption-style"; segmentIds: string[]; scope: CaptionStyleScope; style: EditorCaptionStyle }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
@@ -682,7 +682,7 @@ export function InspectorControls({
               값이 없고, CapCut으로 내보내는 길도 "지원하지 않는다"고 경고만
               남기고 있었다. 즉 어느 길에서도 아무 일이 없는 칸이었다. 값 자체는
               저장된 것을 그대로 들고 다닌다. */}
-          <Button disabled={disabled} onClick={() => emit({ kind: "save-caption-style", segmentIds: [target.segmentId], scope: "current_caption", style: captionStyle })} type="button">
+          <Button disabled={disabled} onClick={() => emit({ kind: "preflight-caption-style", segmentIds: [target.segmentId], scope: "current_caption", style: captionStyle })} type="button">
             자막 스타일 저장
           </Button>
         </fieldset>

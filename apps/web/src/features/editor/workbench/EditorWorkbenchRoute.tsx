@@ -638,6 +638,22 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       setRefreshToken((current) => current + 1);
     }
   };
+  const previewSelectedRange = async ({ startSec, endSec }: { segmentId: string; startSec: number; endSec: number }) => {
+    if (!sessionId || !state.view) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = previewOperationId.current + 1;
+    previewOperationId.current = operationId;
+    await api.previewEditingSessionSelectedRange(projectId, sessionId, { start_sec: startSec, end_sec: endSec });
+    if (routeEpoch.current.value !== epoch || previewOperationId.current !== operationId) return;
+    await api.startExactPreview(projectId, sessionId, {
+      expected_revision: state.view.expectedRevision,
+      start_sec: startSec,
+      end_sec: endSec,
+    });
+    if (routeEpoch.current.value === epoch && previewOperationId.current === operationId) {
+      setRefreshToken((current) => current + 1);
+    }
+  };
   const commitTimelineMutation = async (run: (port: EditorCommandPort, isCurrent: () => boolean) => Promise<unknown>) => {
     if (!sessionId || !state.view || mutationInFlight.current) return;
     const epoch = routeEpoch.current.value;
@@ -896,7 +912,22 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (ownsOperation()) partialInFlight.current = false;
     }
   };
+  const preflightCaptionStyle = async (action: Extract<InspectorAction, { kind: "preflight-caption-style" }>) => {
+    if (!sessionId || !state.view) return;
+    const epoch = routeEpoch.current.value;
+    const currentView = state.view;
+    try {
+      const port = createEditorCommandPort({ projectId, sessionId, expectedRevision: currentView.expectedRevision });
+      const preflight = await port.previewCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style });
+      if (routeEpoch.current.value !== epoch) return;
+      setMutation({ isSaving: false, message: `자막 모양을 ${preflight.affected_segment_ids.length}개 장면에 적용할 수 있어요.` });
+      await commitTimelineMutation((nextPort) => nextPort.setCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style }));
+    } catch {
+      if (routeEpoch.current.value === epoch) setMutation({ isSaving: false, message: "자막 모양을 적용할 범위를 확인하지 못했어요." });
+    }
+  };
   const handleInspectorAction = (action: InspectorAction) => {
+    if (action.kind === "preflight-caption-style") return preflightCaptionStyle(action);
     if (action.kind === "partial-preflight") return preflightPartialRegeneration(action);
     if (action.kind === "partial-run") return runPartialRegeneration(action);
     if (action.kind === "partial-resume") return resumePartialRegeneration(action);
@@ -907,7 +938,6 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "set-transition") return port.setSceneTransition({ segmentId: action.segmentId, transition: action.transition });
       if (action.kind === "save-media") return port.updateMediaControls({ kind: action.mediaKind, segmentId: action.segmentId, assetId: action.assetId, controls: action.controls });
       if (action.kind === "clear-media") return port.clearMedia({ kind: action.mediaKind, segmentId: action.segmentId });
-      if (action.kind === "save-caption-style") return port.setCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style });
       if (action.kind === "apply-tts-candidate") return port.applyTtsCandidate({ segmentId: action.segmentId, candidateId: action.candidateId, assetId: action.assetId });
       if (action.kind === "clear-tts-candidate") return port.clearTtsCandidate({ segmentId: action.segmentId });
       if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
@@ -1853,6 +1883,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onPrepareAssetPreview={prepareAssetPreview}
     onInspectorAction={handleInspectorAction}
     onPreviewRefresh={refreshPreview}
+    onPreviewSelectedRange={previewSelectedRange}
     onReorderNarration={(input) => commitTimelineMutation((port) => port.reorderNarration(input))}
     onRedo={() => commitTimelineMutation((port) => port.redo())}
     onTrimNarration={(input) => commitTimelineMutation((port) => port.setNarrationBounds(input))}

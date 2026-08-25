@@ -1,4 +1,4 @@
-import { api, type BrollOverrideRequest, type CaptionOverrideRequest, type CaptionStyleMutationRequest, type EditingSession, type ExplanationCardRequest, type ImageOverlayRequest, type MusicOverrideRequest, type ShapeOverlayMotion, type ShapeOverlayShape, type TableOverlayRequest, type TtsReplacementRequest } from "../../api";
+import { api, type BrollOverrideRequest, type CaptionOverrideRequest, type CaptionStyleMutationRequest, type CaptionStyleScopePreflight, type EditingSession, type ExplanationCardRequest, type ImageOverlayRequest, type MusicOverrideRequest, type ShapeOverlayMotion, type ShapeOverlayShape, type TableOverlayRequest, type TtsReplacementRequest } from "../../api";
 import type { EditorCaptionStyle, EditorControls } from "./editorViewModel";
 
 type Context = Readonly<{ projectId: string; sessionId: string; expectedRevision: number }>;
@@ -21,7 +21,7 @@ export type EditorCommandApi = Pick<typeof api,
   "updateEditingSessionImageOverlay" | "removeEditingSessionImageOverlay" | "updateEditingSessionTableOverlay" | "removeEditingSessionTableOverlay" |
   "updateEditingSessionShapeOverlay" | "removeEditingSessionShapeOverlay" |
   "updateEditingSessionTtsReplacement" | "clearEditingSessionTtsReplacement" |
-  "updateEditingSessionCaption" | "updateEditingSessionCaptionStyle" | "updateEditingSessionSegmentTransition"
+  "updateEditingSessionCaption" | "updateEditingSessionCaptionStyle" | "previewEditingSessionCaptionStyleScope" | "updateEditingSessionSegmentTransition"
 >;
 
 export type EditorCommandPort = Readonly<{
@@ -47,6 +47,7 @@ export type EditorCommandPort = Readonly<{
   clearTtsCandidate(input: { segmentId: string }): Promise<EditingSession>;
   setCaptionText(input: { segmentId: string; text: string; attestation?: CandidateAttestation }): Promise<EditingSession>;
   setCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle; attestation?: CandidateAttestation }): Promise<EditingSession>;
+  previewCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle }): Promise<CaptionStyleScopePreflight>;
 }>;
 
 function mediaControls(value: EditorControls | undefined): BrollOverrideRequest["media_controls"] {
@@ -132,5 +133,6 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     clearTtsCandidate: ({ segmentId }) => commandApi.clearEditingSessionTtsReplacement(projectId, sessionId, segmentId, expectedRevision),
     setCaptionText: ({ segmentId, text, attestation }) => commandApi.updateEditingSessionCaption(projectId, sessionId, segmentId, { caption_text: text, ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionOverrideRequest),
     setCaptionStyle: ({ segmentIds, scope, style, attestation }) => commandApi.updateEditingSessionCaptionStyle(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionStyleMutationRequest),
+    previewCaptionStyle: ({ segmentIds, scope, style }) => commandApi.previewEditingSessionCaptionStyleScope(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...revise } as CaptionStyleMutationRequest),
   };
 }

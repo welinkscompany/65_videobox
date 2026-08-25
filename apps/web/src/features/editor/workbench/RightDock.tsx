@@ -50,6 +50,7 @@ export type RightDockProps = Readonly<{
   ttsCandidateScopeKey?: string;
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
   onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>;
+  onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>;
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
@@ -128,6 +129,7 @@ export function RightDock({
   ttsCandidateScopeKey,
   onInspectorAction,
   onSetSegmentRippleSpeed,
+  onPreviewSelectedRange,
   composerDisabled = false,
   onSendMessage,
   onApplyProposal,
@@ -234,6 +236,11 @@ export function RightDock({
     onSelectedCandidateIdsChange?.([...next].sort((left, right) => order.indexOf(left) - order.indexOf(right)));
   };
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
+  const inspectorGroups = [
+    { id: "media", label: "영상·소리", target: inspectorTargets.find((target) => target.kind === "media") },
+    { id: "caption", label: "자막", target: inspectorTargets.find((target) => target.kind === "caption") },
+    { id: "overlay", label: "화면 요소", target: inspectorTargets.find((target) => target.kind === "overlay") },
+  ] as const;
   const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
   const showConversationStarters = messages.length === 0
     && !proposal
@@ -279,6 +286,27 @@ export function RightDock({
             type="button"
             variant="outline"
           >{rate === 1 ? "기본" : `${rate}배`}</Button>)}
+        </div> : null}
+        {selectedSegment && onPreviewSelectedRange ? <Button
+          type="button"
+          variant="outline"
+          disabled={inspectorDisabled}
+          onClick={() => void onPreviewSelectedRange({
+            segmentId: selectedSegment.segmentId,
+            startSec: selectedSegment.startSec,
+            endSec: selectedSegment.endSec,
+          })}
+        >선택 구간 미리보기</Button> : null}
+        {inspectorTargets.length > 0 ? <div role="tablist" aria-label="편집 항목 종류">
+          {inspectorGroups.map((group) => <Button
+            key={group.id}
+            role="tab"
+            aria-selected={selectedInspectorTarget?.kind === group.id || (group.id === "media" && selectedInspectorTarget?.kind === "media")}
+            disabled={inspectorDisabled || !group.target}
+            onClick={() => { if (group.target) setSelectedInspectorTargetId(group.target.id); }}
+            type="button"
+            variant="outline"
+          >{group.label}</Button>)}
         </div> : null}
         {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
         {!inspectorTargets.length ? <p>이 명령이 다루는 항목 없음</p> : null}

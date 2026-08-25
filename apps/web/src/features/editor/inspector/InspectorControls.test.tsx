@@ -564,7 +564,7 @@ describe("InspectorControls", () => {
     fireEvent.click(screen.getByRole("button", { name: "자막 스타일 저장" }));
 
     expect(onAction).toHaveBeenLastCalledWith({
-      kind: "save-caption-style",
+      kind: "preflight-caption-style",
       scope: "current_caption",
       segmentIds: ["segment-internal-current"],
       style: { ...style, fontSizePx: 32, horizontalAlign: "left" },

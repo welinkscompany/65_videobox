@@ -8,7 +8,7 @@ const api = {
   updateEditingSessionBroll: vi.fn(), clearEditingSessionBrollOverride: vi.fn(), updateEditingSessionMusicOverride: vi.fn(), clearEditingSessionMusicOverride: vi.fn(), updateEditingSessionSfxOverride: vi.fn(), clearEditingSessionSfxOverride: vi.fn(),
   updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(), updateEditingSessionShapeOverlay: vi.fn(), removeEditingSessionShapeOverlay: vi.fn(),
   updateEditingSessionTtsReplacement: vi.fn(), clearEditingSessionTtsReplacement: vi.fn(),
-  updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(),
+  updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(), previewEditingSessionCaptionStyleScope: vi.fn(),
 } satisfies EditorCommandApi;
 
 describe("EditorCommandPort", () => {
@@ -36,6 +36,14 @@ describe("EditorCommandPort", () => {
     expect(api.updateEditingSessionSegmentRipplePlaybackRate).toHaveBeenCalledWith(
       "p", "s", "seg", { rate: 2, expected_revision: 7 },
     );
+  });
+
+  it("previews the caption style scope with the current revision", async () => {
+    vi.mocked(api.previewEditingSessionCaptionStyleScope).mockResolvedValue({ affected_segment_ids: ["seg", "next"] });
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await expect(port.previewCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 2, backgroundColor: "#0000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } })).resolves.toEqual({ affected_segment_ids: ["seg", "next"] });
+    expect(api.previewEditingSessionCaptionStyleScope).toHaveBeenCalledWith("p", "s", expect.objectContaining({ segment_ids: ["seg"], scope: "current_caption", expected_revision: 7 }));
   });
 
   it("sends the complete layout when reordering narration", async () => {

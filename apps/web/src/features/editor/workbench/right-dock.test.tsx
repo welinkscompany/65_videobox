@@ -212,6 +212,35 @@ describe("RightDock", () => {
     expect(onSetSegmentRippleSpeed).toHaveBeenCalledWith({ segmentId: "segment-2", rate: 2 });
   });
 
+  it("offers a selected scene preview without changing the timeline", () => {
+    const onPreviewSelectedRange = vi.fn();
+    render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      selectedSegment={{ segmentId: "segment-2", startSec: 4, endSec: 8, nextSegmentId: null, cutAction: "keep", draftApplied: false }}
+      onPreviewSelectedRange={onPreviewSelectedRange}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "선택 구간 미리보기" }));
+    expect(onPreviewSelectedRange).toHaveBeenCalledWith({ segmentId: "segment-2", startSec: 4, endSec: 8 });
+  });
+
+  it("offers keyword shortcuts for video, captions, and screen elements", () => {
+    render(<RightDock
+      draft=""
+      onDraftChange={vi.fn()}
+      inspectorTargets={[
+        { id: "media-1", kind: "media", label: "영상", mediaKind: "broll", segmentId: "segment-1", fields: [], assetId: "asset-1", controls: {}, clearOnly: false },
+        { id: "caption-1", kind: "caption", label: "자막", segmentId: "segment-1", fields: ["style"], style: {} as never },
+        { id: "overlay-1", kind: "overlay", overlayKind: "shape", label: "화면 요소", segmentId: "segment-1", fields: [], value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" } },
+      ]}
+    />);
+
+    expect(screen.getByRole("tab", { name: "영상·소리" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "자막" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "화면 요소" })).toBeVisible();
+  });
+
   it("re-asks by itself when the recommendation goes stale while the creator is looking at it", async () => {
     // 편집본이 바뀌면 추천이 무효가 된다(백엔드가 7군데에서 지키는 계약이라 그건
     // 그대로 둔다). 문제는 그다음이다 -- 죽은 카드와 단추만 남고, 창작자가 그걸
