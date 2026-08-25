@@ -780,6 +780,39 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def apply_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -> dict[str, Any]:
+    """Apply validated AI operations as exactly one existing user transaction."""
+    from videobox_core_engine.editing_transactions import apply_user_transaction
+    from videobox_domain_models.yujin_editing_proposals import (
+        SetCaptionTextOperation,
+        SetSceneSpeedOperation,
+    )
+
+    operations = tuple(getattr(proposal, "operations", ()))
+    if not operations:
+        raise ValueError("editing_proposal_operations_required")
+    affected = [str(item.segment_id) for item in operations if hasattr(item, "segment_id")]
+
+    def mutate(draft: dict[str, Any]) -> None:
+        working = deepcopy(draft)
+        for operation in operations:
+            if isinstance(operation, SetSceneSpeedOperation):
+                working = set_segment_ripple_playback_rate(
+                    session=working, segment_id=operation.segment_id, rate=float(operation.rate)
+                )
+            elif isinstance(operation, SetCaptionTextOperation):
+                index = _segment_index(session=working, segment_id=operation.segment_id)
+                working["segments"][index]["caption_text"] = operation.text
+            else:
+                raise ValueError("editing_proposal_operation_not_supported")
+        draft["segments"] = working["segments"]
+
+    return apply_user_transaction(
+        session=session, label="유진 편집안 적용", affected_segment_ids=affected, mutate=mutate,
+        mutation_type="yujin_editing_proposal",
+    )
+
+
 def record_non_undoable_operation(*, session: dict[str, Any], operation_type: str) -> dict[str, Any]:
     if operation_type not in {"render", "import"}:
         raise ValueError("Only render and import may be recorded as non-undoable operations.")

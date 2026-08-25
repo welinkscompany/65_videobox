@@ -21,6 +21,7 @@ from videobox_core_engine.yujin_local_conversation import (
 )
 from videobox_core_engine.yujin_editing_proposal_adapter import YujinEditingContext
 from videobox_core_engine.yujin_editing_proposal_service import YujinEditingProposalService
+from videobox_core_engine.editing_session import apply_yujin_editing_proposal
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.yujin_creator_proposal_adapter import variant_patch_from_yujin_candidate
@@ -125,6 +126,10 @@ class YujinEditingProposalCreateRequest(BaseModel):
     instruction: str = Field(min_length=1, max_length=4_096)
 
 
+class YujinEditingProposalApplyRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
 class PreferencesRequest(BaseModel):
     pin_asset: list[str] = []
     exclude_asset: list[str] = []
@@ -220,6 +225,22 @@ def build_director_proposals_router(
         if proposal.source_session_id != session_id or proposal.base_session_revision != int(session["session_revision"]):
             return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
         return {"proposal_id": proposal_id, "status": "ready", "diff": proposal_to_payload(proposal)["diff"]}
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals/{proposal_id}/apply")
+    def apply_yujin_editing_proposal_route(project_id: str, session_id: str, proposal_id: str, body: YujinEditingProposalApplyRequest) -> dict:
+        try:
+            proposal = store.get_director_proposal(project_id, proposal_id)
+            session = store.get_editing_session(project_id=project_id, session_id=session_id)
+            if proposal.source_session_id != session_id or proposal.base_session_revision != body.expected_revision or int(session["session_revision"]) != body.expected_revision:
+                raise HTTPException(status_code=409, detail="editing_proposal_needs_refresh")
+            from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+            editing = YujinEditingProposal.model_validate({"proposal_id": proposal_id, "base_session_revision": proposal.base_session_revision, "operations": proposal.diff["operations"]})
+            updated = apply_yujin_editing_proposal(session=session, proposal=editing)
+            return store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=updated, expected_revision=body.expected_revision)
+        except HTTPException:
+            raise
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.get("/api/projects/{project_id}/director/sessions/{session_id}/reload")
     def reload_session(project_id: str, session_id: str) -> dict:

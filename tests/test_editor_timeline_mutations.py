@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from videobox_core_engine.editing_session import apply_yujin_editing_proposal
+
 from copy import deepcopy
 from pathlib import Path
 
@@ -527,3 +529,15 @@ def test_structural_timeline_regeneration_is_an_explicit_supported_output_step()
 
     assert request["fields"] == ["timeline_structure"]
     assert request["downstream_steps"] == ["timeline_build"]
+
+
+def test_ai_editing_proposal_is_one_undoable_transaction() -> None:
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+    from videobox_core_engine.editing_session import undo
+
+    proposal = YujinEditingProposal.model_validate({"proposal_id": "p", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "seg_001", "rate": 2}, {"intent": "set_caption_text", "segment_id": "seg_001", "text": "새 자막"}]})
+    applied = apply_yujin_editing_proposal(session=_session(), proposal=proposal)
+
+    assert len(applied["undo_stack"]) == 1
+    assert applied["segments"][0]["caption_text"] == "새 자막"
+    assert undo(session=applied)["redo_stack"]
