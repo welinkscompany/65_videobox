@@ -13,7 +13,8 @@ import pytest
 from videobox_domain_models.assets import AssetType
 from videobox_capcut_export.pycapcut_adapter import PyCapCutRealExportAdapter
 from videobox_core_engine.composition_plan import materialize_editing_session_timeline
-from videobox_core_engine.editing_session import build_editing_session, set_segment_ripple_playback_rate
+from videobox_core_engine.editing_session import apply_yujin_editing_proposal, build_editing_session, set_segment_ripple_playback_rate
+from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -91,6 +92,27 @@ def test_ripple_speed_materializes_one_shared_video_voice_caption_and_audio_time
     bgm = _clip(materialized, "bgm", "bgm-global")
     assert (bgm["start_sec"], bgm["end_sec"]) == (0.0, 10.0)
     assert bgm.get("playback_rate", 1.0) == 1.0
+
+
+def test_ai_applied_speed_proposal_materializes_the_shared_output_timeline() -> None:
+    timeline = _source_timeline()
+    session = apply_yujin_editing_proposal(
+        session=_session(timeline),
+        proposal=YujinEditingProposal.model_validate({
+            "proposal_id": "ai-speed", "base_session_revision": 1,
+            "operations": [{"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2}],
+        }),
+    )
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=session, project_id="project-ripple",
+    )
+
+    for track_type in ("narration", "broll", "sfx"):
+        clip = _clip(materialized, track_type, f"{track_type}-2")
+        assert (clip["start_sec"], clip["end_sec"], clip["playback_rate"]) == (4.0, 6.0, 2.0)
+    caption = next(cue for cue in materialized["session_captions"] if cue["segment_id"] == "scene-2")
+    assert (caption["start_sec"], caption["end_sec"]) == (4.0, 6.0)
 
 
 def test_ripple_speed_reaches_composition_and_the_actual_video_and_audio_filters(tmp_path) -> None:

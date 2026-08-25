@@ -2055,10 +2055,10 @@ function yujinEditingProposalSummary(proposal: YujinEditingProposal, view: Edito
 function yujinEditingOperationSummary(operation: YujinEditingProposal["diff"]["operations"][number]): string {
   if (operation.intent === "set_scene_speed" && typeof operation.rate === "number") return `${operation.rate}배로 속도를 바꿔요.`;
   if (operation.intent === "set_cut_action") return "장면 포함 여부를 바꿔요.";
-  if (operation.intent === "update_caption") return "자막을 고쳐요.";
-  if (operation.intent === "add_media" || operation.intent === "remove_media") return "승인된 미디어 배치를 바꿔요.";
-  if (operation.intent === "set_scene_bounds") return "장면 길이를 조정해요.";
-  if (operation.intent === "reorder_scenes") return "장면 순서를 바꿔요.";
+  if (operation.intent === "set_caption_text") return "자막을 고쳐요.";
+  if (operation.intent === "apply_media" || operation.intent === "remove_media") return "승인된 미디어 배치를 바꿔요.";
+  if (operation.intent === "set_segment_bounds") return "장면 길이를 조정해요.";
+  if (operation.intent === "reorder_segments") return "장면 순서를 바꿔요.";
   return "편집 항목을 바꿔요.";
 }
 
