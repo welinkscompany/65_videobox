@@ -4091,6 +4091,52 @@ describe("EditorWorkbenchRoute", () => {
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
+  it("creates a candidate-only editing proposal only after the creator explicitly asks for one", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000002");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValueOnce({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "두 번째 장면을 빠르게", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000002", created_at: "1" },
+        assistant_message: { message_id: "assistant-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "속도를 조절할 수 있어요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+      },
+    } as never).mockResolvedValueOnce({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit-next", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "세 번째 장면도 다듬어 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000002", created_at: "3" },
+        assistant_message: { message_id: "assistant-edit-next", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "세 번째 장면도 확인할게요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "4" },
+      },
+    } as never);
+    const createEditingProposal = vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({
+      proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+      source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    await screen.findByText("속도를 조절할 수 있어요.");
+
+    expect(createEditingProposal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "이 대화로 편집안 만들기" }));
+
+    await screen.findByText("편집안을 준비했어요.");
+    expect(createEditingProposal).toHaveBeenCalledWith("project-a", "session-a", { instruction: "두 번째 장면을 빠르게" });
+
+    fireEvent.change(composer, { target: { value: "세 번째 장면도 다듬어 줘" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    await waitFor(() => expect(screen.queryByText("편집안을 준비했어요.")).toBeNull());
+    expect(screen.getByRole("button", { name: "이 대화로 편집안 만들기" })).toBeEnabled();
+  });
+
   it("aborts an in-flight local send on explicit cancel and keeps manual editing enabled", async () => {
     let sendSignal!: AbortSignal;
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({

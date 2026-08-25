@@ -53,6 +53,9 @@ export type RightDockProps = Readonly<{
   onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>;
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
+  onCreateEditingProposal?: () => void | Promise<void>;
+  editingProposalSummary?: string | null;
+  editingProposalCreating?: boolean;
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   onRefreshProposal?: () => void | Promise<void>;
   onManualEdit?: () => void;
@@ -132,6 +135,9 @@ export function RightDock({
   onPreviewSelectedRange,
   composerDisabled = false,
   onSendMessage,
+  onCreateEditingProposal,
+  editingProposalSummary = null,
+  editingProposalCreating = false,
   onApplyProposal,
   onRefreshProposal,
   onManualEdit,
@@ -393,6 +399,12 @@ export function RightDock({
         <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
       </div>
       <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
+      {onCreateEditingProposal && messages.some((message) => message.role === "assistant")
+        ? <Button type="button" disabled={editingProposalCreating || Boolean(editingProposalSummary)} onClick={() => void onCreateEditingProposal()}>
+          {editingProposalCreating ? "편집안 만드는 중" : "이 대화로 편집안 만들기"}
+        </Button>
+        : null}
+      {editingProposalSummary ? <p role="status">{editingProposalSummary}</p> : null}
       {/* 긴 글을 붙여 넣었으면 그것을 대본으로 받는 길을 준다(owner 2026-08-19).
           예전에는 대본이 `/plan`의 문답형 인터뷰로만 들어와서, 이미 써 둔 대본을
           가진 사람은 질문에 답해 가며 다시 만들어야 했다.

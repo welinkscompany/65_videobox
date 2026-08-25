@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
@@ -11,7 +11,7 @@ import { createEditorCommandPort, type EditorCommandPort } from "../editorComman
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
-import { sceneLabelsBySegmentId } from "../sceneNames";
+import { sceneLabelsBySegmentId, sceneNumbersBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
 import type { RightDockCompletionEntry, RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
@@ -35,6 +35,8 @@ type DirectorState = Readonly<{
    *  캡컷 EditPilot도 대화창을 새로 열면 그 안의 목록이었지 영구 기록이 아니다. */
   completions: readonly RightDockCompletionEntry[];
   proposal: DirectorProposal | null;
+  editingProposal: YujinEditingProposal | null;
+  editingProposalCreating: boolean;
   draft: string;
   runState: RightDockDirector["runState"];
   selectedCandidateIds: readonly string[];
@@ -175,6 +177,8 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
     messages: [],
     completions: [],
     proposal: null,
+    editingProposal: null,
+    editingProposalCreating: false,
     draft: readDirectorDraft(requestKey),
     runState: { kind: "idle" },
     selectedCandidateIds: [],
@@ -1487,6 +1491,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       ...current,
       isSending: true,
       runState: { kind: "idle" },
+      // A new request changes the conversational context, so never let the
+      // creator apply the candidate derived from the previous instruction.
+      editingProposal: null,
+      editingProposalCreating: false,
       messages: capDirectorMessages([...current.messages, { id: optimisticUserId, role: "user", text: submittedDraft }]),
     } : current);
     try {
@@ -1556,6 +1564,46 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       return;
     }
     await submitDirectorMessage(submittedDraft, clientMessageId);
+  };
+  const createYujinEditingProposal = async () => {
+    if (
+      !sessionId
+      || !state.view
+      || activeDirector.editingProposal
+      || activeDirector.editingProposalCreating
+      || activeDirector.isSending
+      || mutationInFlight.current
+    ) return;
+    const instruction = [...activeDirector.messages]
+      .reverse()
+      .find((message) => message.role === "user")?.text.trim();
+    if (!instruction) return;
+    const epoch = routeEpoch.current.value;
+    const revision = state.view.expectedRevision;
+    setDirector((current) => current.key === requestKey
+      ? { ...current, editingProposalCreating: true, startFailure: null }
+      : current);
+    try {
+      const result = await api.createYujinEditingProposal(projectId, sessionId, { instruction });
+      if (
+        routeEpoch.current.value !== epoch
+        || currentEditorRevision.current !== revision
+      ) return;
+      if ("proposal" in result) {
+        setDirector((current) => current.key === requestKey
+          ? { ...current, editingProposalCreating: false, startFailure: result.reply_text }
+          : current);
+        return;
+      }
+      setDirector((current) => current.key === requestKey
+        ? { ...current, editingProposal: result, editingProposalCreating: false, startFailure: null }
+        : current);
+    } catch {
+      if (routeEpoch.current.value !== epoch) return;
+      setDirector((current) => current.key === requestKey
+        ? { ...current, editingProposalCreating: false, startFailure: "편집안을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요." }
+        : current);
+    }
   };
   const cancelDirectorRun = () => {
     const ownedRun = activeHermesRouteRun.current;
@@ -1814,6 +1862,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onSelectedCandidateIdsChange: (selectedCandidateIds) => setDirector((current) => current.key === requestKey ? { ...current, selectedCandidateIds } : current),
     onConversationScrollChange: (conversationScroll) => setDirector((current) => current.key === requestKey ? { ...current, conversationScroll } : current),
     onSendMessage: sendDirectorMessage,
+    onCreateEditingProposal: createYujinEditingProposal,
+    editingProposalSummary: activeDirector.editingProposal
+      ? yujinEditingProposalSummary(activeDirector.editingProposal, state.view)
+      : null,
+    editingProposalCreating: activeDirector.editingProposalCreating,
     onCancelRun: ownsActiveHermesRouteRun
       ? cancelDirectorRun
       : undefined,
@@ -1945,6 +1998,24 @@ function buildCompletionEntry(
   });
   if (!items.length) return null;
   return { id: `completion-${candidateIds.join("-")}-${Date.now()}`, appliedAt: new Date().toISOString(), items };
+}
+
+function yujinEditingProposalSummary(proposal: YujinEditingProposal, view: EditorViewModel): string {
+  const speed = proposal.diff.operations.find((operation) => operation.intent === "set_scene_speed");
+  if (!speed || typeof speed.segment_id !== "string" || typeof speed.rate !== "number") {
+    return "편집안을 준비했어요.";
+  }
+  const clips = view.tracks.flatMap((track) => track.clips)
+    .filter((clip) => clip.segmentId === speed.segment_id);
+  if (!clips.length || speed.rate <= 0) return "편집안을 준비했어요.";
+  const start = Math.min(...clips.map((clip) => clip.startSec));
+  const end = Math.max(...clips.map((clip) => clip.endSec));
+  const sceneNumber = sceneNumbersBySegmentId(view).get(speed.segment_id);
+  if (!sceneNumber) return "편집안을 준비했어요.";
+  const formatSeconds = (seconds: number) => Number.isInteger(seconds) ? String(seconds) : String(Number(seconds.toFixed(1)));
+  const before = formatSeconds(end - start);
+  const after = formatSeconds((end - start) / speed.rate);
+  return `${sceneNumber}번 장면 · ${before}초 → ${after}초`;
 }
 
 function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number, sceneLabels: ReadonlyMap<string, string> = new Map()): RightDockProposal | null {

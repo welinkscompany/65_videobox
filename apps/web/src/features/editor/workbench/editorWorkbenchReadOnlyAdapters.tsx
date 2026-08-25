@@ -54,6 +54,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     messages={director?.messages}
     memory={director?.memory}
     onApplyProposal={director?.onApplyProposal}
+    onCreateEditingProposal={director?.onCreateEditingProposal}
     onDraftChange={onEugeneDraftChange}
     onConversationScrollChange={director?.onConversationScrollChange}
     onCancelRun={director?.onCancelRun}
@@ -66,6 +67,8 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     onSelectedCandidateIdsChange={director?.onSelectedCandidateIdsChange}
     onSendMessage={director?.onSendMessage}
     onStart={director?.onStart}
+    editingProposalSummary={director?.editingProposalSummary}
+    editingProposalCreating={director?.editingProposalCreating}
     startFailure={director?.startFailure}
     proposal={director?.proposal}
     retryAfterSeconds={director?.retryAfterSeconds}

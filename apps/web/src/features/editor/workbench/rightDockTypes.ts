@@ -122,6 +122,10 @@ export type RightDockDirector = Readonly<{
   onSelectedCandidateIdsChange: (candidateIds: readonly string[]) => void;
   onConversationScrollChange: (scroll: RightDockConversationScroll) => void;
   onSendMessage: (draft: string) => void | Promise<void>;
+  /** 대화를 자동 편집으로 바꾸지 않는다. 창작자가 눌렀을 때만 읽기 전용 편집안을 만든다. */
+  onCreateEditingProposal?: () => void | Promise<void>;
+  editingProposalSummary?: string | null;
+  editingProposalCreating?: boolean;
   onApplyProposal: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   /** 낡은 추천에서 유진에게 돌아가는 길. 추천이 있을 때만 있다. */
   onRefreshProposal?: () => void | Promise<void>;

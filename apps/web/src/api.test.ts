@@ -555,6 +555,34 @@ describe("caption style API conflicts", () => {
     vi.unstubAllGlobals();
   });
 
+  it("validates the typed candidate-only editing proposal before returning it to the editor", async () => {
+    const proposal = {
+      proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 4, asset_index_revision: 2,
+      source_session_id: "session-1", target_segment_ids: ["scene-2"], source_script_segment_ids: [], status: "ready",
+      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "scene-2", rate: 2 }], follow_up_questions: ["이 구간만 미리 볼까요?"] },
+      expires_at: null, candidates: [],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(proposal), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ proposal_id: proposal.proposal_id, status: "ready", diff: proposal.diff }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.createYujinEditingProposal("project/1", "session 1", { instruction: "두 번째 장면을 빠르게" })).resolves.toMatchObject(proposal);
+    await expect(api.preflightYujinEditingProposal("project/1", "session 1", proposal.proposal_id)).resolves.toMatchObject({ proposal_id: proposal.proposal_id, status: "ready" });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/project%2F1/editing-sessions/session%201/yujin-editing-proposals", expect.objectContaining({ method: "POST", body: JSON.stringify({ instruction: "두 번째 장면을 빠르게" }) }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, `/api/projects/project%2F1/editing-sessions/session%201/yujin-editing-proposals/${proposal.proposal_id}/preflight`, expect.objectContaining({ method: "POST" }));
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a malformed editing proposal response instead of exposing it to the editor", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      proposal_id: "yujin-edit-1", status: "ready", diff: { operations: "not-an-array" },
+    }), { status: 201 })));
+
+    await expect(api.createYujinEditingProposal("project", "session", { instruction: "짧게" })).rejects.toThrow("yujin_editing_proposal_invalid");
+    vi.unstubAllGlobals();
+  });
+
   it("materializes the selected immutable candidate and constructs its preview route", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ asset_id: "asset-1" }), { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);

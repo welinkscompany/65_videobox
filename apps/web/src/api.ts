@@ -173,6 +173,10 @@ export type DirectorProposal = {
 };
 export type DirectorProposalPreflight = { proposal_id?: string; status?: string; code?: "stale_proposal"; stale_reasons?: string[]; action?: "refresh"; diff?: DirectorProposalDiff };
 export type ApplyDirectorProposalResponse = EditingSession;
+export type YujinEditingOperation = Record<string, unknown> & { intent: string; segment_id?: string };
+export type YujinEditingProposal = DirectorProposal & { diff: DirectorProposalDiff & { proposal_mode: "yujin_editing_candidate_v1"; operations: YujinEditingOperation[]; follow_up_questions: string[] } };
+export type YujinEditingProposalResult = YujinEditingProposal | { status: "clarification" | "rejected"; reply_text: string; proposal: null };
+export type YujinEditingProposalPreflight = { proposal_id: string; status: "ready"; diff: YujinEditingProposal["diff"] } | { status: "stale"; code: "editing_proposal_needs_refresh"; action: string };
 export type DirectorConversation = { conversation_id: string; project_id: string; session_id: string };
 export type DirectorMessage = { message_id: string; conversation_id: string; project_id: string; session_id: string; role: "user" | "assistant" | string; text: string; proposal_id: string | null; metadata: Record<string, unknown>; client_message_id: string | null; created_at: string };
 export type DirectorActionIntent = { action: string; target: DirectorReference; proposal_preflight: Record<string, string | number> | null };
@@ -1558,6 +1562,71 @@ async function createDirectorProposalRequest(path: string, payload: DirectorProp
   return (await response.json()) as DirectorProposal;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseYujinEditingProposalResult(value: unknown): YujinEditingProposalResult {
+  if (!isRecord(value)) throw new Error("yujin_editing_proposal_invalid");
+  if (value.proposal === null) {
+    if ((value.status !== "clarification" && value.status !== "rejected") || typeof value.reply_text !== "string") {
+      throw new Error("yujin_editing_proposal_invalid");
+    }
+    return value as YujinEditingProposalResult;
+  }
+  const diff = value.diff;
+  if (
+    typeof value.proposal_id !== "string" || typeof value.revision_code !== "string"
+    || !Number.isSafeInteger(value.revision) || !Number.isSafeInteger(value.base_session_revision)
+    || !Number.isSafeInteger(value.asset_index_revision) || typeof value.source_session_id !== "string"
+    || typeof value.status !== "string" || !Array.isArray(value.target_segment_ids)
+    || !Array.isArray(value.source_script_segment_ids) || !Array.isArray(value.candidates)
+    || !isRecord(diff) || diff.proposal_mode !== "yujin_editing_candidate_v1"
+    || !Array.isArray(diff.operations) || !diff.operations.every((operation) => isRecord(operation) && typeof operation.intent === "string")
+    || !Array.isArray(diff.follow_up_questions) || diff.follow_up_questions.length > 3
+    || !diff.follow_up_questions.every((question) => typeof question === "string" && question.trim().length > 0)
+  ) {
+    throw new Error("yujin_editing_proposal_invalid");
+  }
+  return value as YujinEditingProposal;
+}
+
+async function preflightYujinEditingProposalRequest(path: string): Promise<YujinEditingProposalPreflight> {
+  const response = await fetch(path, { method: "POST", credentials: "same-origin", redirect: "error" });
+  const payload = await response.json().catch(() => null);
+  if (response.status === 409 && isRecord(payload) && payload.code === "editing_proposal_needs_refresh" && typeof payload.action === "string") {
+    return { status: "stale", code: "editing_proposal_needs_refresh", action: payload.action };
+  }
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  if (!isRecord(payload) || typeof payload.proposal_id !== "string" || payload.status !== "ready" || !isRecord(payload.diff)) {
+    throw new Error("yujin_editing_proposal_preflight_invalid");
+  }
+  const proposal = parseYujinEditingProposalResult({
+    proposal_id: payload.proposal_id,
+    revision_code: "validated",
+    revision: 0,
+    base_session_revision: 0,
+    asset_index_revision: 0,
+    source_session_id: "validated",
+    target_segment_ids: [],
+    source_script_segment_ids: [],
+    status: "ready",
+    diff: payload.diff,
+    expires_at: null,
+    candidates: [],
+  });
+  if ("proposal" in proposal) throw new Error("yujin_editing_proposal_preflight_invalid");
+  return { proposal_id: payload.proposal_id, status: "ready", diff: proposal.diff };
+}
+
+async function createYujinEditingProposalRequest(path: string, payload: { instruction: string }): Promise<YujinEditingProposalResult> {
+  const result = await request<unknown>(path, {
+    method: "POST", credentials: "same-origin", redirect: "error",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return parseYujinEditingProposalResult(result);
+}
+
 async function openHermesRunEventsRequest(
   projectId: string,
   conversationId: string,
@@ -1881,6 +1950,12 @@ export const api = {
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}`),
   preflightDirectorProposal: (projectId: string, proposalId: string) =>
     preflightDirectorProposalRequest(`/api/projects/${projectId}/director/proposals/${proposalId}/preflight`),
+  createYujinEditingProposal: (projectId: string, sessionId: string, payload: { instruction: string }) =>
+    createYujinEditingProposalRequest(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals`, payload),
+  preflightYujinEditingProposal: (projectId: string, sessionId: string, proposalId: string) =>
+    preflightYujinEditingProposalRequest(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/preflight`),
+  applyYujinEditingProposal: (projectId: string, sessionId: string, proposalId: string, payload: { expected_revision: number }) =>
+    request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", credentials: "same-origin", redirect: "error", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   refreshDirectorProposal: (projectId: string, proposalId: string) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}/refresh`, { method: "POST" }),
   getDirectorPreferences: (projectId: string) => request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`),
