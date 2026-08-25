@@ -27,6 +27,16 @@ class _FixtureRuntime:
         return _StructuredResponse(self.output_data)
 
 
+@dataclass
+class _CapturingRuntime:
+    output_data: dict[str, object]
+    request: dict[str, object] | None = None
+
+    def generate_structured(self, **kwargs: object) -> _StructuredResponse:
+        self.request = kwargs
+        return _StructuredResponse(self.output_data)
+
+
 def _response(*, operation: dict[str, object] | None) -> dict[str, object]:
     return {
         "schema_version": "videobox.yujin-editing-response.v1",
@@ -90,3 +100,32 @@ def test_local_command_evaluation_rejects_an_unapproved_media_candidate() -> Non
     )
 
     assert (result.status, result.reason, result.proposal) == ("rejected", "media_asset_not_approved", None)
+
+
+def test_local_command_evaluation_tells_the_runtime_the_exact_candidate_contract() -> None:
+    runtime = _CapturingRuntime(_response(operation={
+        "intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2,
+    }))
+
+    result = YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="두 번째 장면을 두 배로 빠르게 해줘",
+        context=YujinEditingContext(
+            session_id="session-1",
+            session_revision=3,
+            segment_ids=("scene-1", "scene-2"),
+        ),
+    )
+
+    assert result.status == "candidate_only"
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    schema = runtime.request["response_schema"]
+    assert '"schema_version": "videobox.yujin-editing-response.v1"' in prompt
+    assert '"base_session_revision": 3' in prompt
+    assert '"intent": "set_scene_speed"' in prompt
+    assert '"segment_id": "scene-2"' in prompt
+    assert isinstance(schema, dict)
+    proposal_schema = schema["properties"]["proposal"]
+    assert proposal_schema["properties"]["base_session_revision"]["const"] == 3
+    assert proposal_schema["properties"]["operations"]["items"]["oneOf"]

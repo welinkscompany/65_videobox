@@ -399,3 +399,162 @@ test("Yujin applies one persisted caption only after explicit selection and pres
   await expect(page.getByTestId("outputs-page")).toBeVisible();
   expect(outputPosts).toHaveLength(0);
 });
+
+test("owned conversational-editing fixture keeps explicit AI speed apply reversible after refresh", async ({ page }) => {
+  // This is deliberately a project created only for this browser contract.  Do
+  // not substitute a representative or owner project: the route mutates and
+  // then reloads its editing-session state three times below.
+  const projectId = "owned-conversational-editing-fixture";
+  const sessionId = "owned-ai-edit-session";
+  const proposalId = "owned-speed-proposal";
+  const baseSession = {
+    ...structuredClone(editingSession),
+    project_id: projectId,
+    session_id: sessionId,
+    timeline_id: "owned-ai-edit-timeline",
+    session_revision: 7,
+    undo_count: 0,
+    redo_count: 0,
+    segments: [
+      { ...editingSession.segments[0], segment_id: "scene-1", start_sec: 0, end_sec: 8, caption_text: "첫 장면" },
+      { ...editingSession.segments[0], segment_id: "scene-2", start_sec: 8, end_sec: 16, caption_text: "두 번째 장면" },
+    ],
+  };
+  const baseManifest = {
+    ...structuredClone(manifest),
+    project_id: projectId,
+    session_id: sessionId,
+    timeline_id: "owned-ai-edit-timeline",
+    session_revision: 7,
+    timeline_version: "v7",
+    output: { ...manifest.output, duration_sec: 16 },
+    tracks: [{
+      ...manifest.tracks[0],
+      clips: [
+        { ...manifest.tracks[0].clips[0], clip_id: "owned-clip-1", segment_id: "scene-1", start_sec: 0, end_sec: 8 },
+        { ...manifest.tracks[0].clips[0], clip_id: "owned-clip-2", segment_id: "scene-2", start_sec: 8, end_sec: 16 },
+      ],
+    }],
+    captions: [
+      { ...manifest.captions[0], segment_id: "scene-1", text: "첫 장면", start_sec: 0, end_sec: 8 },
+      { ...manifest.captions[0], segment_id: "scene-2", text: "두 번째 장면", start_sec: 8, end_sec: 16 },
+    ],
+    source_status: { status: "current", source_session_id: sessionId, source_session_revision: 7 },
+    exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 7 },
+  };
+  const proposal = {
+    proposal_id: proposalId,
+    revision_code: "P-AI-SPEED-01",
+    revision: 1,
+    base_session_revision: 7,
+    asset_index_revision: 1,
+    source_session_id: sessionId,
+    target_segment_ids: ["scene-2"],
+    source_script_segment_ids: ["scene-2"],
+    status: "ready",
+    diff: {
+      proposal_mode: "yujin_editing_candidate_v1",
+      operations: [{ intent: "set_scene_speed", segment_id: "scene-2", rate: 2 }],
+      follow_up_questions: ["이 구간만 미리 볼까요?"],
+    },
+    expires_at: null,
+    candidates: [],
+  };
+  const fastSession = { ...baseSession, session_revision: 8, undo_count: 1, redo_count: 0 };
+  const undoneSession = { ...baseSession, session_revision: 9, undo_count: 0, redo_count: 1 };
+  const redoneSession = { ...baseSession, session_revision: 10, undo_count: 1, redo_count: 0 };
+  const fastManifest = {
+    ...baseManifest,
+    session_revision: 8,
+    timeline_version: "v8",
+    output: { ...baseManifest.output, duration_sec: 12 },
+    tracks: [{ ...baseManifest.tracks[0], clips: [baseManifest.tracks[0].clips[0], { ...baseManifest.tracks[0].clips[1], end_sec: 12, media_controls: { playback_rate: 2 } }] }],
+    captions: [baseManifest.captions[0], { ...baseManifest.captions[1], end_sec: 12 }],
+    source_status: { status: "current", source_session_id: sessionId, source_session_revision: 8 },
+    exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 8 },
+  };
+  const undoneManifest = { ...baseManifest, session_revision: 9, timeline_version: "v9", source_status: { status: "current", source_session_id: sessionId, source_session_revision: 9 }, exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 9 } };
+  const redoneManifest = { ...fastManifest, session_revision: 10, timeline_version: "v10", source_status: { status: "current", source_session_id: sessionId, source_session_revision: 10 }, exact_preview: { status: "unavailable", url: null, source_session_id: sessionId, source_session_revision: 10 } };
+  let activeSession = baseSession;
+  let activeManifest = baseManifest;
+  const appliedBodies = [];
+  const selectedRangeBodies = [];
+  const createdProposalBodies = [];
+
+  await page.addInitScript(() => localStorage.removeItem("videobox.editor-workbench.ui"));
+  await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: projectId, name: "소유 대화형 편집 검증", status: "active", root_storage_uri: "local://owned-conversational-editing-fixture" }] }) }));
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/playback-manifest`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(activeManifest) }));
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) }));
+  await page.route(`**/api/projects/${projectId}/director/conversations`, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ conversation_id: "owned-ai-conversation", project_id: projectId, session_id: sessionId }) });
+  });
+  await page.route(`**/api/projects/${projectId}/director/conversations/owned-ai-conversation/messages`, async (route) => {
+    const body = route.request().postDataJSON();
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      user_message: { message_id: "owned-user-message", conversation_id: "owned-ai-conversation", project_id: projectId, session_id: sessionId, role: "user", text: body.text, proposal_id: null, metadata: {}, client_message_id: body.client_message_id, created_at: "2026-08-26T00:00:00Z" },
+      assistant_message: { message_id: "owned-assistant-message", conversation_id: "owned-ai-conversation", project_id: projectId, session_id: sessionId, role: "assistant", text: "두 번째 장면 속도 편집안을 확인해 볼게요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2026-08-26T00:00:01Z" },
+    }) });
+  });
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/yujin-editing-proposals`, async (route) => {
+    createdProposalBodies.push(route.request().postDataJSON());
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(proposal) });
+  });
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/yujin-editing-proposals/${proposalId}/preflight`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ proposal_id: proposalId, status: "ready", diff: proposal.diff }) }));
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/yujin-editing-proposals/${proposalId}/apply`, async (route) => {
+    appliedBodies.push(route.request().postDataJSON());
+    activeSession = fastSession;
+    activeManifest = fastManifest;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) });
+  });
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/undo`, async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ expected_revision: 8 });
+    activeSession = undoneSession;
+    activeManifest = undoneManifest;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) });
+  });
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/redo`, async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ expected_revision: 9 });
+    activeSession = redoneSession;
+    activeManifest = redoneManifest;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) });
+  });
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/selected-range-preview`, async (route) => {
+    selectedRangeBodies.push(route.request().postDataJSON());
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({}) });
+  });
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/exact-preview`, (route) => route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({}) }));
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(`/projects/${projectId}/editor?session_id=${sessionId}`);
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "7");
+  await ensureDockOpen(page, "세부 정보");
+  await page.getByRole("textbox", { name: "유진에게 요청하기" }).fill("두 번째 장면을 두 배로 빠르게");
+  await page.getByRole("button", { name: "요청 보내기" }).click();
+  await expect(page.getByText("두 번째 장면 속도 편집안을 확인해 볼게요.")).toBeVisible();
+  expect(createdProposalBodies).toHaveLength(0);
+  await page.getByRole("button", { name: "이 대화로 편집안 만들기" }).click();
+  await expect.poll(() => createdProposalBodies.length).toBe(1);
+  expect(createdProposalBodies[0]).toEqual({ instruction: "두 번째 장면을 두 배로 빠르게" });
+  await expect(page.getByText("2번 장면 · 8초 → 4초")).toBeVisible();
+  await page.getByRole("button", { name: "편집안 보기" }).click();
+  const dialog = page.getByRole("dialog", { name: "편집안" });
+  await expect(dialog).toContainText("2번 장면 · 8초 → 4초");
+  await dialog.getByRole("button", { name: "이 구간 미리보기" }).click();
+  await expect.poll(() => selectedRangeBodies.length).toBe(1);
+  expect(selectedRangeBodies[0]).toEqual({ start_sec: 8, end_sec: 16 });
+  await dialog.getByRole("button", { name: "이 편집안 적용" }).click();
+  await expect.poll(() => appliedBodies.length).toBe(1);
+  expect(appliedBodies[0]).toEqual({ expected_revision: 7 });
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "8");
+  await page.reload();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "8");
+  await page.getByRole("button", { name: "실행 취소" }).click();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "9");
+  await page.reload();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "9");
+  await page.getByRole("button", { name: "다시 실행" }).click();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "10");
+  await page.reload();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-revision", "10");
+});
