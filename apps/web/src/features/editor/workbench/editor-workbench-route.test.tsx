@@ -2045,6 +2045,21 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(exactPreview).toHaveBeenCalledWith("project-a", "session-a", { expected_revision: 1, start_sec: 0, end_sec: 5 }));
   });
 
+  it("shows a recoverable message when selected scene preview fails", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValueOnce(narrationManifest(1) as never);
+    mockEditingSessionRevisions(1);
+    vi.spyOn(api, "previewEditingSessionSelectedRange").mockRejectedValue(new Error("preview unavailable"));
+    vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await openInspector();
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "선택 구간 미리보기" }));
+
+    expect(await screen.findByText("선택 구간 미리보기를 만들지 못했어요. 최신 편집본을 확인해 주세요.")).toBeVisible();
+  });
+
   it("automatically starts a new preview after a successful edit instead of waiting for a manual click (F-4)", async () => {
     let resolveUpdate!: (value: unknown) => void;
     vi.spyOn(api, "getEditorPlaybackManifest")

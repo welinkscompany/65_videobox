@@ -236,9 +236,9 @@ describe("RightDock", () => {
       ]}
     />);
 
-    expect(screen.getByRole("tab", { name: "영상·소리" })).toBeVisible();
-    expect(screen.getByRole("tab", { name: "자막" })).toBeVisible();
-    expect(screen.getByRole("tab", { name: "화면 요소" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "영상·소리" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "자막" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "화면 요소" })).toBeVisible();
   });
 
   it("re-asks by itself when the recommendation goes stale while the creator is looking at it", async () => {

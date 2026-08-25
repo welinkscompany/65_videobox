@@ -297,11 +297,10 @@ export function RightDock({
             endSec: selectedSegment.endSec,
           })}
         >선택 구간 미리보기</Button> : null}
-        {inspectorTargets.length > 0 ? <div role="tablist" aria-label="편집 항목 종류">
+        {inspectorTargets.length > 0 ? <div role="group" aria-label="편집 항목 종류 바로가기">
           {inspectorGroups.map((group) => <Button
             key={group.id}
-            role="tab"
-            aria-selected={selectedInspectorTarget?.kind === group.id || (group.id === "media" && selectedInspectorTarget?.kind === "media")}
+            aria-pressed={selectedInspectorTarget?.kind === group.id}
             disabled={inspectorDisabled || !group.target}
             onClick={() => { if (group.target) setSelectedInspectorTargetId(group.target.id); }}
             type="button"

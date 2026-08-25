@@ -216,6 +216,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], libraryImageAssets: [], error: null });
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
+  const captionPreflightInFlight = useRef(false);
   const [director, setDirector] = useState<DirectorState>(() => createDirectorState(requestKey, sessionId));
   const [memory, setMemory] = useState<MemoryState>(() => createMemoryState(requestKey));
   const [partial, setPartial] = useState<PartialState>({ key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null });
@@ -643,19 +644,25 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const epoch = routeEpoch.current.value;
     const operationId = previewOperationId.current + 1;
     previewOperationId.current = operationId;
-    await api.previewEditingSessionSelectedRange(projectId, sessionId, { start_sec: startSec, end_sec: endSec });
-    if (routeEpoch.current.value !== epoch || previewOperationId.current !== operationId) return;
-    await api.startExactPreview(projectId, sessionId, {
-      expected_revision: state.view.expectedRevision,
-      start_sec: startSec,
-      end_sec: endSec,
-    });
-    if (routeEpoch.current.value === epoch && previewOperationId.current === operationId) {
-      setRefreshToken((current) => current + 1);
+    try {
+      await api.previewEditingSessionSelectedRange(projectId, sessionId, { start_sec: startSec, end_sec: endSec });
+      if (routeEpoch.current.value !== epoch || previewOperationId.current !== operationId) return;
+      await api.startExactPreview(projectId, sessionId, {
+        expected_revision: state.view.expectedRevision,
+        start_sec: startSec,
+        end_sec: endSec,
+      });
+      if (routeEpoch.current.value === epoch && previewOperationId.current === operationId) {
+        setRefreshToken((current) => current + 1);
+      }
+    } catch {
+      if (routeEpoch.current.value === epoch && previewOperationId.current === operationId) {
+        setMutation({ isSaving: false, message: "선택 구간 미리보기를 만들지 못했어요. 최신 편집본을 확인해 주세요." });
+      }
     }
   };
   const commitTimelineMutation = async (run: (port: EditorCommandPort, isCurrent: () => boolean) => Promise<unknown>) => {
-    if (!sessionId || !state.view || mutationInFlight.current) return;
+    if (!sessionId || !state.view || mutationInFlight.current || captionPreflightInFlight.current) return;
     const epoch = routeEpoch.current.value;
     const operationId = mutationOperationId.current + 1;
     mutationOperationId.current = operationId;
@@ -913,17 +920,21 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }
   };
   const preflightCaptionStyle = async (action: Extract<InspectorAction, { kind: "preflight-caption-style" }>) => {
-    if (!sessionId || !state.view) return;
+    if (!sessionId || !state.view || mutationInFlight.current || captionPreflightInFlight.current) return;
     const epoch = routeEpoch.current.value;
     const currentView = state.view;
+    captionPreflightInFlight.current = true;
+    setMutation({ isSaving: true, message: "자막 적용 범위를 확인하고 있어요." });
     try {
       const port = createEditorCommandPort({ projectId, sessionId, expectedRevision: currentView.expectedRevision });
-      const preflight = await port.previewCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style });
+      await port.previewCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style });
       if (routeEpoch.current.value !== epoch) return;
-      setMutation({ isSaving: false, message: `자막 모양을 ${preflight.affected_segment_ids.length}개 장면에 적용할 수 있어요.` });
+      captionPreflightInFlight.current = false;
       await commitTimelineMutation((nextPort) => nextPort.setCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style }));
     } catch {
       if (routeEpoch.current.value === epoch) setMutation({ isSaving: false, message: "자막 모양을 적용할 범위를 확인하지 못했어요." });
+    } finally {
+      captionPreflightInFlight.current = false;
     }
   };
   const handleInspectorAction = (action: InspectorAction) => {
