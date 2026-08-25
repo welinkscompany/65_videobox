@@ -103,10 +103,10 @@ describe("AppRouter URL ownership", () => {
     expect(within(menu).getByRole("link", { name: "프로젝트" })).toBeInTheDocument();
     expect(within(menu).getByRole("link", { name: "내 라이브러리" })).toBeInTheDocument();
 
-    // 띠도 **어느 화면인지** 말해야 한다. 이 세 화면에는 보이는 제목이 따로 없어서,
-    // 이 이름이 없으면 돌아갈 길이 있어도 자기가 어디 있는지 알 수 없다.
-    const title = { "/library": "내 라이브러리", "/footage": "촬영본 정리", "/projects": "홈" }[path];
-    expect(document.querySelector(".vb-top-bar__screen")).toHaveTextContent(title!);
+    // 띠도 **어느 화면인지** 말해야 한다. 경로 마지막 항목이 그 일을 맡으므로,
+    // 전역 화면의 제목을 별도 굵은 글자로 한 번 더 반복하지 않는다.
+    const title = { "/library": "내 라이브러리", "/footage": "촬영본 정리", "/projects": "프로젝트" }[path];
+    expect(screen.getByRole("navigation", { name: "현재 위치" })).toHaveTextContent(title!);
   });
 
   // 진짜 백엔드에 e2e를 붙여 처음 돌려 보고 나왔다(2026-08-20). 프로젝트가 하나도

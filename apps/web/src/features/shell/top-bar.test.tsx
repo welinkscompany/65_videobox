@@ -64,6 +64,23 @@ describe("위 띠", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("프로젝트와 도구 메뉴 열기");
   });
 
+  it("경로가 있으면 전역 화면 이름을 한 번만 말한다", () => {
+    renderBar({
+      projects: [],
+      projectId: "",
+      section: "library",
+      screenName: "내 라이브러리",
+      navigation: {
+        screenName: "내 라이브러리",
+        fallbackHref: "/projects",
+        crumbs: [{ label: "프로젝트", href: "/projects" }, { label: "내 라이브러리" }],
+      },
+      onBack: vi.fn(),
+    });
+
+    expect(screen.getAllByText("내 라이브러리")).toHaveLength(1);
+  });
+
   it("만드는 순서대로 단계를 늘어놓는다", () => {
     renderBar();
 

@@ -152,7 +152,7 @@ export function TopBar({
       {/* 단계가 그려지지 않거나 어느 단계도 아닌 화면에서만 이름을 말한다. 단계가
           보일 때는 켜진 단계 단추가 이미 그 말을 하고 있고, 같은 사실을 두 번
           적으면 첫 화면에 "누를 것처럼 보이는 것"이 또 하나 늘어난다. */}
-      {screenName && (!hasProject || activeStage === null) ? (
+      {screenName && !navigation && (!hasProject || activeStage === null) ? (
         <strong className="vb-top-bar__screen">{screenName}</strong>
       ) : null}
 
