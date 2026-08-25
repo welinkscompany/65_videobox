@@ -28,19 +28,19 @@ test("local catalog renders the creator shell without an external request", asyn
   await page.goto("/projects/local-draft/home");
 
   await expect(page.getByRole("button", { name: "작업 상태" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "다음 작업" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "어떻게 시작할까요?" })).toBeVisible();
   await expect(page.getByRole("button", { name: "전체 메뉴" })).toBeVisible();
   await expect(page.getByText(/provider|billing|account/i)).toHaveCount(0);
 });
 
-test("an empty local catalog leads to the single project-start action", async ({ page }) => {
+test("an empty local catalog keeps project creation in the catalog shell", async ({ page }) => {
   await page.route("**/api/projects", async (route) => {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [] }) });
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "영상 만들기 시작" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "프로젝트 만들고 소스 등록" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "프로젝트" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ 새 프로젝트 만들기" })).toBeVisible();
 });
 
 test("desktop shell keeps global destinations separate from the open project's four stages", async ({ page }) => {
@@ -50,10 +50,16 @@ test("desktop shell keeps global destinations separate from the open project's f
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/projects/local-draft/home");
   await expect(page.getByRole("navigation", { name: "전체 메뉴" })).toHaveCount(0);
-  await page.getByRole("button", { name: "전체 메뉴" }).click();
+  const menuTrigger = page.getByRole("button", { name: "전체 메뉴", exact: true });
+  await expect(menuTrigger).toHaveAttribute("aria-expanded", "false");
+  await menuTrigger.click();
   const menu = page.getByRole("navigation", { name: "전체 메뉴" });
   await expect(menu.getByRole("link")).toHaveCount(3);
   await expect(menu.getByRole("button", { name: "설정" })).toBeVisible();
+  await expect(menuTrigger).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(menuTrigger).toBeFocused();
   await expect(page.getByRole("navigation", { name: "프로젝트 단계" }).getByRole("button")).toHaveCount(4);
 });
 
@@ -82,12 +88,18 @@ test("the top bar keeps creator navigation reachable on a narrow screen", async 
   await expect(page.getByRole("heading", { name: "자산 보관함" })).toBeVisible();
 });
 
-test("Home empty-state actions and settings tabs follow their visible routes", async ({ page }) => {
+test("Home start choices and settings tabs follow their visible routes", async ({ page }) => {
   await page.goto("/projects/local-draft/home");
-  await page.getByRole("button", { name: "자산 준비하기" }).click();
-  await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
+  for (const name of ["대본이 있어요", "찍어 둔 영상이 있어요", "아직 아무것도 없어요"]) {
+    await expect(page.getByRole("button", { name: new RegExp(`^${name}`) })).toBeVisible();
+  }
+  await page.getByRole("button", { name: /^찍어 둔 영상이 있어요/ }).click();
+  await expect(page).toHaveURL(/\/projects\/local-draft\/create$/);
+  await page.goto("/projects/local-draft/home");
+  await page.getByRole("button", { name: /^아직 아무것도 없어요/ }).click();
+  await expect(page).toHaveURL(/\/projects\/local-draft\/create$/);
   await page.goto("/settings/general");
-  await page.getByRole("button", { name: "화면" }).click();
+  await page.getByTestId("settings-page").getByRole("button", { name: "화면", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/appearance\?project_id=local-draft$/);
 });
 

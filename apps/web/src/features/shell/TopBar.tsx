@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronLeft, ClipboardCheck, Images, Menu, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
 
 import { type NavigationContext } from "../../app/routeManifest";
@@ -84,9 +84,18 @@ export function TopBar({
     : section === "editing" || section === "editor" ? "editing"
     : section === "review" || section === "timeline" || section === "outputs" ? "review"
     : null;
+  const closeOverlaysOnEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Escape") return;
+    // 접힌 목록은 열기만큼 닫기도 한 번에 되어야 한다. 메뉴 안의 링크를 눌러
+    // 이동하지 않고 둘러본 창작자도 키보드로 현재 화면으로 돌아올 수 있다.
+    if (!menuOpen && !switcherOpen) return;
+    event.preventDefault();
+    setMenuOpen(false);
+    setSwitcherOpen(false);
+  };
 
   return <TooltipProvider delayDuration={350}>
-    <header className="vb-top-bar">
+    <header className="vb-top-bar" onKeyDown={closeOverlaysOnEscape}>
       {navigation && onBack ? <CompactTooltip label="방금 보던 화면으로 돌아가기">
         <Button type="button" variant="outline" size="icon-sm" className="vb-top-bar__compact-control" aria-label="이전 화면" onClick={onBack}>
           <ChevronLeft aria-hidden="true" />

@@ -117,9 +117,12 @@ for (const [width, height] of snapshots) test(`editor workbench snapshot ${width
   const previewSlot = page.locator(".vb-editor-workbench__preview");
   await expect(preview).toBeVisible();
   await expect(page.locator("audio, video")).toHaveCount(0);
-  // 새 세션은 왼쪽 재료 열만 펴고 시작한다. 오른쪽은 닫혀 있으므로 기본값만으로는
-  // `desktop-both`에 닿지 않는다 -- 그건 두 도크가 모두 열려야 한다.
-  const expectedDensity = width >= 1280 ? "desktop-single" : "drawer";
+  // 넓은 화면의 새 세션은 소재와 세부 정보를 함께 열어 둔다. 창작자는 편집기에서
+  // 미리보기와 두 도크를 한 번에 비교해야 하므로, 기본 배치를 예전 단일 도크로
+  // 되돌리지 않는다.
+  // 1280px에서는 두 패널을 열면 미리보기에 필요한 720px이 남지 않아 한쪽만
+  // 보이는 것이 정상이다. 이 스냅샷 묶음에서는 1440px부터 양쪽이 함께 들어간다.
+  const expectedDensity = width >= 1440 ? "desktop-both" : width >= 1280 ? "desktop-single" : "drawer";
   await expect(workbench).toHaveAttribute("data-editor-density", expectedDensity);
   await expect(page.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeVisible();
   const previewBox = await previewSlot.boundingBox();
@@ -139,10 +142,10 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   // 이 테스트가 지키는 것은 **드래그한 도크 폭이 새로고침 뒤에도 남는가**다.
   // `desktop-both`는 오른쪽 크기 조절 핸들이 있는 상태를 만드는 수단이지 목적이
   // 아니다 -- 기본값이 바뀌어도 같은 상태에 도달하도록 열려 있는 것은 그냥 둔다.
-  await ensureDockOpen(page, "자산과 대본");
-  await ensureDockOpen(page, "유진과 편집 항목");
+  await ensureDockOpen(page, "소재");
+  await ensureDockOpen(page, "세부 정보");
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
-  const rightDock = page.getByRole("complementary", { name: "유진과 편집 항목" });
+  const rightDock = page.getByRole("complementary", { name: "세부 정보" });
   const before = await rightDock.boundingBox();
   const handle = await page.getByLabel("오른쪽 패널 크기 조절").boundingBox();
   if (!handle) throw new Error("right resize handle is missing");
@@ -154,8 +157,8 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   const resizedWidth = (await rightDock.boundingBox())?.width ?? 0;
   await page.reload();
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
-  await expect.poll(async () => (await page.getByRole("complementary", { name: "유진과 편집 항목" }).boundingBox())?.width ?? 0).toBeCloseTo(resizedWidth, 0);
-  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
+  await expect.poll(async () => (await page.getByRole("complementary", { name: "세부 정보" }).boundingBox())?.width ?? 0).toBeCloseTo(resizedWidth, 0);
+  await page.getByRole("button", { name: "세부 정보" }).click();
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-single");
 });
 
@@ -195,7 +198,7 @@ test("every toolbar control stays reachable on a phone-width screen", async ({ p
   const row = page.locator(".vb-editor-workbench__toolbar div").first();
   expect(await row.evaluate((node) => /(auto|scroll)/.test(getComputedStyle(node).overflowX))).toBe(true);
   await row.evaluate((node) => { node.scrollLeft = node.scrollWidth; });
-  for (const name of ["빼기", "자산과 대본", "유진과 편집 항목"]) {
+  for (const name of ["빼기", "소재", "세부 정보"]) {
     const right = await page.getByRole("button", { name }).evaluate((node) => node.getBoundingClientRect().right);
     expect(right).toBeLessThanOrEqual(390 + 1);
   }
@@ -209,9 +212,9 @@ test("narrow drawer traps focus and returns it to its trigger", async ({ page })
   await page.route("**/playback-manifest", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(manifest) }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/projects/local-draft/editor?session_id=editor-workbench-e2e");
-  const trigger = page.getByRole("button", { name: "유진과 편집 항목" });
+  const trigger = page.getByRole("button", { name: "세부 정보" });
   await trigger.click();
-  const drawer = page.getByRole("dialog", { name: "유진과 편집 항목" });
+  const drawer = page.getByRole("dialog", { name: "세부 정보" });
   await expect(drawer).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
@@ -352,7 +355,7 @@ test("Yujin applies one persisted caption only after explicit selection and pres
   const preview = page.getByRole("region", { name: "미리보기" });
   await expect(preview).toBeVisible();
   await preview.evaluate((element) => { element.setAttribute("data-b5-player", "same"); });
-  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
+  await page.getByRole("button", { name: "세부 정보" }).click();
   const draft = page.getByRole("textbox", { name: "유진에게 요청하기" });
   await draft.fill("닫아도 남을 초안");
   const candidate = page.getByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" });
@@ -372,7 +375,7 @@ test("Yujin applies one persisted caption only after explicit selection and pres
   // Playwright의 이름 대조는 기본이 부분 일치라서 그렇다.
   await page.getByRole("button", { name: "닫기", exact: true }).click();
   await expect(conversation).toHaveCount(0);
-  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
+  await page.getByRole("button", { name: "세부 정보" }).click();
 
   await expect(draft).toHaveValue("닫아도 남을 초안");
   await expect(candidate).toBeChecked();

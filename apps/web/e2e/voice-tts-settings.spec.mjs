@@ -330,9 +330,18 @@ test("manages voice samples and TTS listening review at the canonical settings r
   await expect(page.getByText("후보 2 · 청취 거부됨")).toBeVisible();
 
   const visibleCopy = await page.locator("body").innerText();
-  const accessibilityCopy = await page.locator("body").ariaSnapshot();
+  // `ariaSnapshot()`에는 링크의 href도 덤프한다. 테스트용 project id가 URL에
+  // 들어가는 것은 화면이나 보조기기 이름 누출이 아니므로, URL 문자열 대신 실제
+  // 접근성 이름을 만드는 속성·연결 텍스트만 검사한다.
+  const accessibleLabels = await page.locator("[aria-label], [aria-labelledby], img[alt]").evaluateAll((nodes) => nodes.map((node) => {
+    const labelledBy = node.getAttribute("aria-labelledby");
+    const labelledByText = labelledBy
+      ? labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? "").join(" ")
+      : "";
+    return [node.getAttribute("aria-label") ?? "", labelledByText, node.getAttribute("alt") ?? ""].join(" ");
+  }).join("\n"));
   expect(visibleCopy).not.toMatch(internalIdPattern);
-  expect(accessibilityCopy).not.toMatch(internalIdPattern);
+  expect(accessibleLabels).not.toMatch(internalIdPattern);
   expect(unexpectedApiCalls.map((call) => `${call.method} ${call.path}`).join(" | ")).toBe("");
   expect(
     apiRequests.filter(({ path }) => new RegExp(

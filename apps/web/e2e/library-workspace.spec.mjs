@@ -189,9 +189,10 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   await page.goto("/library");
   await expect(page.getByTestId("library-workspace")).toBeVisible();
   await expect(page.getByTestId("library-results-scroll")).toBeVisible();
-  // 전역 메뉴는 이제 **껍데기의 좌측 메뉴 하나**다(owner 지적 2026-08-19).
-  // 예전에는 이 화면이 껍데기 밖에 있어서 같은 링크를 자기도 한 벌 그렸다.
-  await expect(page.getByRole("navigation", { name: "전체 메뉴" }).first().getByRole("link")).toHaveCount(4);
+  // 전역 목적지는 접힌 위 메뉴 한 곳에만 둔다. 메뉴를 연 뒤에만 링크가 DOM에
+  // 나타나는 것이 현재 껍데기의 접근성 계약이다.
+  await page.getByRole("button", { name: "전체 메뉴" }).click();
+  await expect(page.getByRole("navigation", { name: "전체 메뉴" }).getByRole("link")).toHaveCount(3);
 
   await dispatchDrop(page, [
     { name: "commute.mp4", type: "video/mp4", bytes: "video-source" },
@@ -209,30 +210,30 @@ test("library desktop keeps a bounded three-pane layout and reconciles mixed dro
   expect(state.uploadedBodies).toHaveLength(3);
 
   // Each media type has a real preview control in the right pane.
-  await page.getByRole("tab", { name: "영상" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "영상" }).click();
   await page.locator('[data-testid="library-asset-card"]').filter({ hasText: media.broll.name }).click();
   const videoPreview = page.locator(".vb-library-preview video");
   await expect(videoPreview).toHaveAttribute("src", /asset-broll\/preview/);
   await waitForMediaMetadata(videoPreview);
-  await page.getByRole("tab", { name: "음악" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "음악" }).click();
   await page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.music.name }).click();
   const musicPreview = page.locator(".vb-library-preview audio");
   await expect(musicPreview).toHaveAttribute("src", /asset-music\/preview/);
   await waitForMediaMetadata(musicPreview);
-  await page.getByRole("tab", { name: "효과음" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "효과음" }).click();
   await page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.sfx.name }).click();
   const sfxPreview = page.locator(".vb-library-preview audio");
   await expect(sfxPreview).toHaveAttribute("src", /asset-sfx\/preview/);
   await waitForMediaMetadata(sfxPreview);
 
   // The list endpoint is the semantic-search authority for the desktop page.
-  await page.getByRole("tab", { name: "전체" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "전체" }).click();
   await page.getByPlaceholder("파일명·장면·분위기").fill("도시");
   await expect(page.locator('[data-testid="library-asset-card"]').filter({ hasText: media.broll.name })).toBeVisible();
-  await page.getByRole("tab", { name: "음악" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "음악" }).click();
   await page.getByPlaceholder("파일명·장면·분위기").fill("음악");
   await expect(page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.music.name })).toBeVisible();
-  await page.getByRole("tab", { name: "효과음" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "효과음" }).click();
   await page.getByPlaceholder("파일명·장면·분위기").fill("효과음");
   await expect(page.locator('[data-testid="library-audio-rows"] article').filter({ hasText: media.sfx.name })).toBeVisible();
   await page.getByPlaceholder("파일명·장면·분위기").fill("");
@@ -272,7 +273,7 @@ test("library lifecycle blocks in-use delete, then allows remove, restore and ex
   await installLibraryApi(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/library");
-  await page.getByRole("tab", { name: "영상" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "영상" }).click();
   await page.locator('[data-testid="library-asset-card"]').filter({ hasText: media.broll.name }).click();
 
   const materialized = await fetchStatus(page, `/api/library/assets/${media.broll.id}/materialize`, { method: "POST", body: JSON.stringify({ project_id: "local-draft" }) });
@@ -281,7 +282,7 @@ test("library lifecycle blocks in-use delete, then allows remove, restore and ex
   expect(blocked.status).toBe(409);
   expect(blocked.body.detail).toBe("asset_in_use");
   await page.reload();
-  await page.getByRole("tab", { name: "영상" }).click();
+  await page.getByTestId("library-sidebar").getByRole("button", { name: "영상" }).click();
   await page.locator('[data-testid="library-asset-card"]').filter({ hasText: media.broll.name }).click();
   await expect(page.getByText("사용 중인 위치")).toBeVisible();
   await expect(page.getByRole("button", { name: "휴지통으로 이동" })).toBeDisabled();

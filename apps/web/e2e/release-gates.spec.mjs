@@ -57,7 +57,9 @@ async function measureRightDockDrag(page, offset) {
 
 test("workbench dock drag has fixed warmup and five-sample local performance evidence", async ({ page, browser }) => {
   await openWorkbench(page);
-  await page.getByRole("button", { name: "유진과 편집 항목" }).click();
+  // 넓은 화면에서는 세부 정보가 기본으로 열려 있다. 토글하면 오히려 측정 대상인
+  // 크기 조절 손잡이가 사라진다.
+  await expect(page.getByRole("complementary", { name: "세부 정보" })).toBeVisible();
   const warmupMs = await measureRightDockDrag(page, -18);
   const measurementsMs = [];
   for (const offset of [18, -18, 18, -18, 18]) measurementsMs.push(await measureRightDockDrag(page, offset));
@@ -74,5 +76,5 @@ test("workbench dock drag has fixed warmup and five-sample local performance evi
 
   expect(report.structural_failure).toBe(false);
   expect(report.regression).toBe(false);
-  await expect(page.getByRole("complementary", { name: "유진과 편집 항목" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "세부 정보" })).toBeVisible();
 });
