@@ -171,7 +171,16 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-top-bar__end { display:flex; align-items:center; gap: var(--vb-space-2); flex:0 0 auto; margin-left:auto; }
 /* 기둥 머리의 이름표가 이리로 왔다. 캡컷도 로고를 왼쪽 끝에 둔다. */
 .vb-top-bar__brand { display:flex; align-items:center; gap: var(--vb-space-2); flex:0 0 auto; font-weight:750; font-size: var(--vb-text-md); }
+.vb-top-bar__brand { color:inherit; text-decoration:none; }
 .vb-top-bar__brand svg { flex:0 0 auto; width:1.25rem; height:1.25rem; color:var(--vb-accent); }
+/* 도구·이동 단추는 본문 주요 행동보다 조밀하게 쓰되, 색·중요도는 기존 규칙을
+   그대로 따른다. 주요 행동은 이 클래스를 받지 않아 읽기 쉬운 크기를 유지한다. */
+.vb-top-bar__compact-control[data-slot=button] { min-width:2rem; min-height:2rem; padding-inline:var(--vb-space-2); }
+.vb-top-bar__breadcrumb { display:flex; align-items:center; gap:var(--vb-space-1); min-width:0; max-width:24rem; overflow:hidden; color:var(--vb-muted); font-size:var(--vb-text-xs); white-space:nowrap; }
+.vb-top-bar__breadcrumb-item { display:inline-flex; align-items:center; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.vb-top-bar__breadcrumb-item:not(:last-child)::after { content:"/"; margin-left:var(--vb-space-1); color:var(--vb-muted); }
+.vb-top-bar__breadcrumb a { min-width:0; overflow:hidden; text-overflow:ellipsis; color:inherit; text-decoration:none; }
+.vb-top-bar__breadcrumb a:hover, .vb-top-bar__breadcrumb a:focus-visible { color:var(--vb-accent); text-decoration:underline; }
 /* 단계가 없는 화면(내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서만 나온다.
    단계가 보일 때는 켜진 단추가 이미 같은 말을 하고 있다. */
 .vb-top-bar__screen { flex:1 1 auto; min-width:0; font-size: var(--vb-text-md); font-weight:650; }
@@ -204,5 +213,7 @@ body:has(.vb-product-shell) { margin: 0; }
      더 생겨 **편집판 높이 계산이 어긋난다** -- 2026-08-21에 실제로 32px 밀린 적이
      있다. 비율은 캡컷이 그것을 보여 주는 넓은 화면에서만 말한다. */
   .vb-top-bar__brand span, .vb-top-bar__note, .vb-top-bar__canvas { display:none; }
+  .vb-top-bar__compact-control[data-slot=button] { min-width:2.25rem; min-height:2.25rem; }
+  .vb-top-bar__breadcrumb { flex:1 1 8rem; max-width:none; }
   .vb-top-bar__project [data-slot=button] { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
   .vb-top-bar__stages { order:1; flex:1 0 100%; } }

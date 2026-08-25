@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { Dialog, DialogContent, DialogTitle } from "../components/ui/dialog";
@@ -14,6 +16,14 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("desktop visual contracts", () => {
+  it("keeps shell controls compact without changing primary-action rules", () => {
+    const css = readFileSync(resolve(process.cwd(), "src/styles/product-shell.css"), "utf8");
+
+    expect(css).toContain(".vb-top-bar__compact-control[data-slot=button]");
+    expect(css).toContain(".vb-top-bar__breadcrumb");
+    expect(css).toContain("@media (max-width: 767px)");
+  });
+
   it("marks the product shell as a bounded desktop surface", () => {
     const { container } = render(
       <ProductShell
