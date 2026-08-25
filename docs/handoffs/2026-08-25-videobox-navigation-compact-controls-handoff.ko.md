@@ -1,5 +1,7 @@
 # VideoBox 2026-08-25 전역 이동·조밀한 조작 인계
 
+**대체됨:** 최신 재개 정보는 `docs/handoffs/2026-08-25-videobox-e2e-closeout-deployment-handoff.ko.md`를 먼저 읽습니다.
+
 ## 실제로 한 일
 
 - 상세 설계는 `docs/superpowers/specs/2026-08-25-videobox-navigation-compact-controls-design.ko.md`, 구현 순서는 `docs/superpowers/plans/2026-08-25-videobox-navigation-compact-controls.md`에 남겼습니다.
