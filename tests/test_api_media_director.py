@@ -29,6 +29,49 @@ def test_director_route_surface_has_no_external_provider_dependency() -> None:
     assert retired_provider not in source.lower()
 
 
+def test_yujin_editing_proposal_is_read_only_until_apply(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.", "proposal": {"proposal_id": "fixture", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2}]}},
+                raw_text="{}", metadata={},
+            )
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "editing candidate"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [
+                {"segment_id": "scene-1", "start_sec": 0, "end_sec": 4},
+                {"segment_id": "scene-2", "start_sec": 4, "end_sec": 12},
+            ],
+            "history": [],
+        },
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "두 번째 장면을 두 배로 빠르게 하고 자막도 맞춰줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "ready"
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"])["session_revision"] == session["session_revision"]
+    proposal_id = response.json()["proposal_id"]
+    store.update_editing_session(project_id=project_id, session_id=session["session_id"], session_payload=session)
+
+    stale = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals/{proposal_id}/preflight"
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()["action"] == "새 편집안을 받아 보세요."
+
+
 def test_generalized_yujin_direct_apply_and_batch_remain_forbidden(
     tmp_path: Path,
 ) -> None:

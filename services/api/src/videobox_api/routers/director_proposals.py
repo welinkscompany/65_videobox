@@ -19,6 +19,9 @@ from videobox_core_engine.yujin_local_conversation import (
     YujinLocalConversationService,
     YujinProjectContext,
 )
+from videobox_core_engine.yujin_editing_proposal_adapter import YujinEditingContext
+from videobox_core_engine.yujin_editing_proposal_service import YujinEditingProposalService
+from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.yujin_creator_proposal_adapter import variant_patch_from_yujin_candidate
 from videobox_core_engine.output_variants import apply_variant_patch
@@ -118,6 +121,10 @@ class ProposalCreateRequest(BaseModel):
         return value
 
 
+class YujinEditingProposalCreateRequest(BaseModel):
+    instruction: str = Field(min_length=1, max_length=4_096)
+
+
 class PreferencesRequest(BaseModel):
     pin_asset: list[str] = []
     exclude_asset: list[str] = []
@@ -170,6 +177,49 @@ def build_director_proposals_router(
 
     def payload(project_id, proposal):
         return proposal_to_payload(proposal) | {"status": proposal.status, "lifecycle": store.get_director_proposal_lifecycle(project_id, proposal.proposal_id)}
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals", status_code=status.HTTP_201_CREATED)
+    def create_yujin_editing_proposal(project_id: str, session_id: str, body: YujinEditingProposalCreateRequest, request: Request) -> dict:
+        try:
+            session = store.get_editing_session(project_id=project_id, session_id=session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="editing_session_missing") from exc
+        context = YujinEditingContext(
+            session_id=session_id,
+            session_revision=int(session["session_revision"]),
+            segment_ids=tuple(str(item["segment_id"]) for item in session.get("segments", []) if isinstance(item, dict) and item.get("segment_id")),
+            approved_asset_ids=tuple(str(item["asset_id"]) for item in store.list_assets(project_id=project_id)),
+        )
+        result = YujinEditingProposalService(request.app.state.local_only_runtime_service_factory(store)).create(
+            project_id=project_id, instruction=body.instruction, context=context
+        )
+        if result.proposal is None:
+            return {"status": result.status, "reply_text": body.instruction, "proposal": None}
+        revision = store.next_director_proposal_revision(project_id)
+        proposal = DirectorProposal(
+            proposal_id=f"yujin-edit-{__import__('uuid').uuid4().hex}",
+            revision_code=f"YE{revision:02d}", revision=revision,
+            base_session_revision=context.session_revision,
+            asset_index_revision=store.get_asset_index_revision(project_id),
+            source_session_id=session_id,
+            target_segment_ids=tuple(sorted({str(getattr(item, "segment_id", "")) for item in result.proposal.operations if getattr(item, "segment_id", None)})),
+            source_script_segment_ids=(), status="ready",
+            diff={"proposal_mode": "yujin_editing_candidate_v1", "operations": [item.model_dump(mode="json") for item in result.proposal.operations], "follow_up_questions": _editing_follow_ups(result.proposal.operations)},
+            expires_at=None, candidates=(),
+        )
+        store.save_director_proposal(project_id, proposal)
+        return payload(project_id, proposal)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals/{proposal_id}/preflight")
+    def preflight_yujin_editing_proposal(project_id: str, session_id: str, proposal_id: str) -> dict:
+        try:
+            proposal = store.get_director_proposal(project_id, proposal_id)
+            session = store.get_editing_session(project_id=project_id, session_id=session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="editing_proposal_missing") from exc
+        if proposal.source_session_id != session_id or proposal.base_session_revision != int(session["session_revision"]):
+            return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
+        return {"proposal_id": proposal_id, "status": "ready", "diff": proposal_to_payload(proposal)["diff"]}
 
     @router.get("/api/projects/{project_id}/director/sessions/{session_id}/reload")
     def reload_session(project_id: str, session_id: str) -> dict:
@@ -582,6 +632,15 @@ def build_director_proposals_router(
 def require_ready(proposal) -> None:
     if proposal.status != "ready":
         raise HTTPException(status_code=409, detail="proposal_not_ready")
+
+
+def _editing_follow_ups(operations: tuple[object, ...]) -> list[str]:
+    intent = str(getattr(operations[0], "intent", "")) if operations else ""
+    values = {
+        "set_scene_speed": ("원래 속도로 되돌려 볼까요?", "앞뒤 장면도 같은 속도로 맞출까요?", "이 구간만 미리 볼까요?"),
+        "apply_media": ("다른 분위기로 찾아볼까요?", "이 장면부터만 바꿀까요?", "효과음도 함께 넣을까요?"),
+    }.get(intent, ())
+    return [item for item in values if item][:3]
 
 
 def require_actionable_yujin_candidate(proposal, candidate) -> None:
