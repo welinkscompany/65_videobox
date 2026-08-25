@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { TopBar } from "./TopBar";
 
+beforeEach(() => { vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const projects = [
@@ -32,6 +33,37 @@ function renderBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
  *  왼쪽 기둥이 없어지면서 **거기 있던 것이 조용히 사라지면 안 된다** — 단계 이동,
  *  프로젝트 전환, 설정이 전부 여기로 온다. */
 describe("위 띠", () => {
+  it("현재 위치를 보여 주고 안전한 이전 동작을 쓴다", () => {
+    const onBack = vi.fn();
+    renderBar({
+      onBack,
+      navigation: {
+        screenName: "편집",
+        fallbackHref: "/projects/a/media",
+        crumbs: [
+          { label: "프로젝트", href: "/projects" },
+          { label: "첫 영상", href: "/projects/a/home" },
+          { label: "편집" },
+        ],
+      },
+    });
+
+    const breadcrumb = screen.getByRole("navigation", { name: "현재 위치" });
+    expect(breadcrumb).toHaveTextContent("프로젝트첫 영상편집");
+    expect(screen.getByRole("link", { name: "프로젝트" })).toHaveAttribute("href", "/projects");
+    expect(within(breadcrumb).getByText("편집").closest("a")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "이전 화면" }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("작은 전체 메뉴 버튼은 키보드에도 설명을 준다", async () => {
+    renderBar();
+
+    fireEvent.focus(screen.getByRole("button", { name: "전체 메뉴" }));
+
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("프로젝트와 도구 메뉴 열기");
+  });
+
   it("만드는 순서대로 단계를 늘어놓는다", () => {
     renderBar();
 

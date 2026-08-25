@@ -1,7 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { ClipboardCheck, Images, Menu, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
+import { ChevronLeft, ClipboardCheck, Images, Menu, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
 
+import { type NavigationContext } from "../../app/routeManifest";
 import { Button } from "../../components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
 import { shellCanvasLabel, type ShellCanvas } from "./shellCanvas";
 
 /** 캡컷 배치의 위 띠. 왼쪽 기둥을 대신한다
@@ -25,12 +27,21 @@ const STAGES: ReadonlyArray<readonly [string, ShellSection, typeof Video]> = [
   ["확인과 내보내기", "review", ClipboardCheck],
 ];
 
+function CompactTooltip({ label, children }: { label: string; children: ReactNode }) {
+  return <Tooltip>
+    <TooltipTrigger asChild>{children}</TooltipTrigger>
+    <TooltipContent side="bottom" sideOffset={6}>{label}</TooltipContent>
+  </Tooltip>;
+}
+
 export function TopBar({
   projectId,
   projects,
   section,
   screenName,
   canvas,
+  navigation,
+  onBack,
   onNavigate,
   onSelectProject,
   onOpenSettings,
@@ -45,6 +56,10 @@ export function TopBar({
    *  **말하는 자리**다 -- 비율은 기획 화면에서 초안을 만들 때 정해지고 그 뒤로
    *  바꾸는 길이 없다. 자세한 이유는 `shellCanvas.tsx`. */
   canvas?: ShellCanvas | null;
+  /** 어느 화면에서나 같은 방식으로 보이는 현재 위치와, 이력이 없을 때의 대체
+   * 목적지다. 실제 뒤로가기는 껍데기가 받아 라우터에서 수행한다. */
+  navigation?: NavigationContext;
+  onBack?: () => void;
   /** 단계로 표시되지 않는 화면(내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서
    *  **여기가 어디인지** 말하는 이름. 왼쪽 기둥 시절에는 머리말이 이걸 맡았고,
    *  전부 `홈`이라고 적혀 있으면 돌아갈 길이 있어도 자기 위치를 알 수 없다. */
@@ -70,16 +85,33 @@ export function TopBar({
     : section === "review" || section === "timeline" || section === "outputs" ? "review"
     : null;
 
-  return (
+  return <TooltipProvider delayDuration={350}>
     <header className="vb-top-bar">
+      {navigation && onBack ? <CompactTooltip label="방금 보던 화면으로 돌아가기">
+        <Button type="button" variant="outline" size="icon-sm" className="vb-top-bar__compact-control" aria-label="이전 화면" onClick={onBack}>
+          <ChevronLeft aria-hidden="true" />
+        </Button>
+      </CompactTooltip> : null}
       {/* 기둥 머리에 있던 이름표. 캡컷도 여기에 로고를 둔다. */}
-      <div className="vb-top-bar__brand"><Video aria-hidden="true" /><span>VideoBox</span></div>
+      <a className="vb-top-bar__brand" href="/projects" aria-label="프로젝트 목록으로">
+        <Video aria-hidden="true" /><span>VideoBox</span>
+      </a>
+
+      {navigation ? <nav className="vb-top-bar__breadcrumb" aria-label="현재 위치">
+        {navigation.crumbs.map((crumb, index) => <span key={`${crumb.label}:${index}`} className="vb-top-bar__breadcrumb-item">
+          {crumb.href && index < navigation.crumbs.length - 1
+            ? <a href={crumb.href}>{crumb.label}</a>
+            : <span aria-current={index === navigation.crumbs.length - 1 ? "page" : undefined}>{crumb.label}</span>}
+        </span>)}
+      </nav> : null}
 
       {hasProject ? (
         <div className="vb-top-bar__project">
-          <Button type="button" variant="outline" aria-expanded={switcherOpen} onClick={() => setSwitcherOpen((open) => !open)}>
+          <CompactTooltip label="다른 프로젝트 고르기">
+            <Button type="button" variant="outline" size="sm" className="vb-top-bar__compact-control" aria-expanded={switcherOpen} onClick={() => setSwitcherOpen((open) => !open)}>
             {current?.name}
-          </Button>
+            </Button>
+          </CompactTooltip>
           {switcherOpen && others.length ? (
             <div className="vb-top-bar__switcher" role="group" aria-label="다른 프로젝트">
               {others.map((project) => (
@@ -87,6 +119,7 @@ export function TopBar({
                   key={project.project_id}
                   type="button"
                   variant="outline"
+                  size="sm"
                   onClick={() => { setSwitcherOpen(false); onSelectProject(project.project_id); }}
                 >
                   {project.name}
@@ -104,6 +137,8 @@ export function TopBar({
               key={target}
               type="button"
               variant={activeStage === target ? "default" : "outline"}
+              size="sm"
+              className="vb-top-bar__compact-control"
               aria-current={activeStage === target ? "page" : undefined}
               onClick={() => onNavigate(projectId, target)}
             >
@@ -131,15 +166,17 @@ export function TopBar({
             촬영본 정리가 갈 수 없는 곳이 된다 -- 기둥을 없애는 변경에서 가장 흔한 사고다.
             띠에 네 개를 그대로 늘어놓으면 다시 목록이 되므로 한 겹 접어 둔다. */}
         <div className="vb-top-bar__menu">
-          <Button type="button" variant="outline" aria-expanded={menuOpen} aria-label="전체 메뉴" onClick={() => setMenuOpen((open) => !open)}>
-            <Menu aria-hidden="true" />
-          </Button>
+          <CompactTooltip label="프로젝트와 도구 메뉴 열기">
+            <Button type="button" variant="outline" size="icon-sm" className="vb-top-bar__compact-control" aria-expanded={menuOpen} aria-label="전체 메뉴" onClick={() => setMenuOpen((open) => !open)}>
+              <Menu aria-hidden="true" />
+            </Button>
+          </CompactTooltip>
           {menuOpen ? (
             <nav aria-label="전체 메뉴" className="vb-top-bar__menu-list">
               <a href="/projects">프로젝트</a>
               <a href="/library">내 라이브러리</a>
               <a href="/footage">촬영본 정리</a>
-              <Button type="button" variant="outline" onClick={() => { setMenuOpen(false); onOpenSettings(); }}>
+              <Button type="button" variant="outline" size="sm" onClick={() => { setMenuOpen(false); onOpenSettings(); }}>
                 <SettingsIcon aria-hidden="true" />
                 설정
               </Button>
@@ -148,5 +185,5 @@ export function TopBar({
         </div>
       </div>
     </header>
-  );
+  </TooltipProvider>;
 }
