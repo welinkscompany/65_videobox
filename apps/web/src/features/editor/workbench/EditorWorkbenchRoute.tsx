@@ -656,7 +656,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         setRefreshToken((current) => current + 1);
       }
     } catch {
-      if (routeEpoch.current.value === epoch && previewOperationId.current === operationId) {
+      if (routeEpoch.current.value === epoch && previewOperationId.current === operationId && !mutationInFlight.current) {
         setMutation({ isSaving: false, message: "선택 구간 미리보기를 만들지 못했어요. 최신 편집본을 확인해 주세요." });
       }
     }
