@@ -1,5 +1,7 @@
 # VideoBox 2026-08-25 캡컷 비교 잔여 작업 인계
 
+**대체됨:** `2026-08-25-videobox-navigation-compact-controls-handoff.ko.md`
+
 ## 실제로 한 일
 
 - B-roll 편집 항목에 `화면 안에 맞추기`와 `화면 채우기`를 추가하고, 화면 값이 `EditorControls`·명령 포트·API payload·렌더 경로까지 보존되도록 연결했습니다.
