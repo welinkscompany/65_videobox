@@ -155,14 +155,16 @@ function RoutedProductShell(props: ProductShellProps) {
   const pathname = useRouterState({ select: (routerState) => routerState.location.pathname });
   const projectName = props.projects.find((project) => project.project_id === props.projectId)?.name;
   const navigation = resolveNavigationContext({ pathname, projectName });
+  const hasVisitedPage = router.history.canGoBack();
+  const canGoBack = hasVisitedPage || navigation.fallbackHref !== pathname;
   const onBack = () => {
-    if (router.history.canGoBack()) {
+    if (hasVisitedPage) {
       router.history.back();
       return;
     }
     void navigate({ href: navigation.fallbackHref });
   };
-  return <ProductShell {...props} navigation={navigation} onBack={onBack} />;
+  return <ProductShell {...props} navigation={navigation} onBack={canGoBack ? onBack : undefined} />;
 }
 
 /** 첫 화면도 **앱 껍데기 안**이다.

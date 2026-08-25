@@ -69,6 +69,15 @@ describe("ProjectCatalog", () => {
 });
 
 describe("AppRouter URL ownership", () => {
+  it("does not show a no-op back button on a directly opened project list", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+    render(<AppRouter router={router} />);
+
+    await screen.findByRole("heading", { name: "프로젝트" });
+    expect(screen.queryByRole("button", { name: "이전 화면" })).toBeNull();
+  });
+
   it("uses visited history first and a safe destination for a direct global URL", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const visited = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects", "/library"], initialIndex: 1 }));
