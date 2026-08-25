@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseWorkspaceLocation,
+  resolveNavigationContext,
   resolveGlobalLocation,
   resolveProjectStage,
   resolveWorkspaceLocation,
@@ -43,6 +44,38 @@ describe("workspace route manifest", () => {
       projectId: "project_a",
       stage: "review",
       legacy: false,
+    });
+  });
+});
+
+describe("navigation context", () => {
+  it("gives the library a stable breadcrumb and project-list fallback", () => {
+    expect(resolveNavigationContext({ pathname: "/library" })).toEqual({
+      screenName: "내 라이브러리",
+      fallbackHref: "/projects",
+      crumbs: [
+        { label: "프로젝트", href: "/projects" },
+        { label: "내 라이브러리" },
+      ],
+    });
+  });
+
+  it("keeps a project edit page in its project breadcrumb and returns to materials", () => {
+    expect(resolveNavigationContext({ pathname: "/projects/p1/editor", projectName: "첫 영상" })).toEqual({
+      screenName: "편집",
+      fallbackHref: "/projects/p1/media",
+      crumbs: [
+        { label: "프로젝트", href: "/projects" },
+        { label: "첫 영상", href: "/projects/p1/home" },
+        { label: "편집" },
+      ],
+    });
+  });
+
+  it("normalizes legacy project routes before describing them", () => {
+    expect(resolveNavigationContext({ pathname: "/projects/p1/outputs", projectName: "첫 영상" })).toMatchObject({
+      screenName: "확인과 내보내기",
+      fallbackHref: "/projects/p1/editor",
     });
   });
 });
