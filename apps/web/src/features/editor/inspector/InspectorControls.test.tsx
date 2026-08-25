@@ -236,6 +236,35 @@ describe("InspectorControls", () => {
     expect(document.body).not.toHaveTextContent(/asset-internal|segment-internal/);
   });
 
+  it("shows and saves B-roll fit mode", () => {
+    const onAction = vi.fn();
+    const broll: InspectorTarget = {
+      assetId: "asset-internal-broll",
+      clearOnly: false,
+      controls: { fit: "crop", speed: 1 },
+      fields: ["fit", "speed"],
+      id: "clip:broll-fit",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    };
+
+    render(<InspectorControls onAction={onAction} selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }} target={broll} />);
+
+    const select = screen.getByRole("combobox", { name: "B-roll 화면 맞춤" });
+    expect(select).toHaveValue("crop");
+    fireEvent.change(select, { target: { value: "fit" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith({
+      kind: "save-media",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+      assetId: "asset-internal-broll",
+      controls: { fit: "fit", speed: 1 },
+    });
+  });
+
   it("gives music and effects a loudness slider in creator language and rides gainDb into the save", () => {
     // 렌더러는 처음부터 클립별 gain_db를 반영했다 -- 화면에 입력 자리만 없었다.
     // §10.13: dB는 내부 단위라 화면에 쓰지 않는다. 라벨은 `소리 크기`, 양 끝은

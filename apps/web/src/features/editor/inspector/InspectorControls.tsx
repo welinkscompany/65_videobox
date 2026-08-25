@@ -171,6 +171,7 @@ export function InspectorControls({
   // Both rode in the command port from the start with no screen offering
   // them. Phone B-roll is routinely too long and too loud.
   const [speed, setSpeed] = useState(1);
+  const [fit, setFit] = useState<"fit" | "crop">("fit");
   const [volume, setVolume] = useState(1);
   // 색감. 안 고른 상태는 `none`이고, 저장할 때 `null`로 바뀐다.
   const [look, setLook] = useState<string>(SCENE_FILTER_NONE);
@@ -235,6 +236,7 @@ export function InspectorControls({
       setInSec(target.controls.inSec ?? 0);
       setOutSec(target.controls.outSec ?? 0);
       setSpeed(target.controls.speed ?? 1);
+      setFit(target.controls.fit ?? "fit");
       setVolume(target.controls.volume ?? 1);
       setLook(target.controls.filter?.type ?? SCENE_FILTER_NONE);
       setDucking(target.controls.ducking ?? false);
@@ -516,6 +518,20 @@ export function InspectorControls({
                   </div>
                 </>
               ) : null}
+              {target.fields.includes("fit") ? (
+                <label>
+                  {`${target.label} 화면 맞춤`}
+                  <NativeSelect
+                    aria-label={`${target.label} 화면 맞춤`}
+                    disabled={disabled}
+                    onChange={(event) => setFit(event.target.value === "crop" ? "crop" : "fit")}
+                    value={fit}
+                  >
+                    <option value="fit">화면 안에 맞추기</option>
+                    <option value="crop">화면 채우기</option>
+                  </NativeSelect>
+                </label>
+              ) : null}
               {target.fields.includes("volume") ? (
                 <label>
                   {`${target.label} 소리 크기`}
@@ -596,6 +612,7 @@ export function InspectorControls({
                     ...(target.fields.includes("gainDb") ? { gainDb } : {}),
                     ...(target.fields.includes("inSec") && outSec > 0 ? { inSec, outSec } : {}),
                     ...(target.fields.includes("speed") ? { speed } : {}),
+                    ...(target.fields.includes("fit") ? { fit } : {}),
                     ...(target.fields.includes("volume") ? { volume } : {}),
                     ...(target.fields.includes("filter") ? { filter: look === SCENE_FILTER_NONE ? null : { type: look } } : {}),
                     ...(target.fields.includes("ducking") ? { ducking } : {}),

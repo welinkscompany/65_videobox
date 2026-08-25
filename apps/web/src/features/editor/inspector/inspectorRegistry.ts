@@ -2,7 +2,7 @@ import type { ShapeOverlayMotion, ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter";
+type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "fit";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
@@ -116,7 +116,7 @@ const bgmFields = ["fadeInSec", "fadeOutSec", "ducking", "gainDb"] as const;
 // 영영 아무 일도 하지 못했다. 순서도 소리 크기 바로 뒤에 둔다 -- 떨어뜨려 놓으면
 // 둘이 한 벌이라는 게 보이지 않는다.
 // 색감은 **화면이 있는 클립에만**. 음악·효과음에는 칠할 그림이 없다.
-const brollFields = ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter"] as const;
+const brollFields = ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit"] as const;
 const mediaLabels = { broll: "B-roll", bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {
