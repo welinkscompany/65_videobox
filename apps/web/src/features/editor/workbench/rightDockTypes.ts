@@ -107,6 +107,16 @@ export type RightDockMemory = Readonly<{
   onDelete: (candidateId: string) => void | Promise<void>;
 }>;
 
+export type RightDockEditingProposal = Readonly<{
+  proposalId: string;
+  summary: string;
+  operationSummaries: readonly string[];
+  followUpQuestions: readonly string[];
+  previewTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null;
+  isApplying: boolean;
+  error: string | null;
+}>;
+
 export type RightDockDirector = Readonly<{
   state: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
   messages: readonly RightDockMessage[];
@@ -124,8 +134,10 @@ export type RightDockDirector = Readonly<{
   onSendMessage: (draft: string) => void | Promise<void>;
   /** 대화를 자동 편집으로 바꾸지 않는다. 창작자가 눌렀을 때만 읽기 전용 편집안을 만든다. */
   onCreateEditingProposal?: () => void | Promise<void>;
-  editingProposalSummary?: string | null;
+  editingProposal?: RightDockEditingProposal | null;
   editingProposalCreating?: boolean;
+  onPreviewEditingProposal?: () => void | Promise<void>;
+  onApplyEditingProposal?: () => void | Promise<void>;
   onApplyProposal: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   /** 낡은 추천에서 유진에게 돌아가는 길. 추천이 있을 때만 있다. */
   onRefreshProposal?: () => void | Promise<void>;

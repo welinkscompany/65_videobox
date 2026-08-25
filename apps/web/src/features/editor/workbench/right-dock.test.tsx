@@ -866,3 +866,29 @@ describe("찾은 방식 표시", () => {
     expect(screen.queryByText(/찾음/)).toBeNull();
   });
 });
+
+describe("대화형 편집안", () => {
+  it("검토 창에서 미리보기와 적용을 분리하고 후속 질문은 초안에만 넣는다", () => {
+    const onDraftChange = vi.fn();
+    const onPreviewEditingProposal = vi.fn();
+    const onApplyEditingProposal = vi.fn();
+    render(<RightDock
+      draft=""
+      onDraftChange={onDraftChange}
+      messages={[{ id: "assistant-1", role: "assistant", text: "속도를 조절할 수 있어요." }]}
+      editingProposal={{ proposalId: "editing-1", summary: "2번 장면 · 8초 → 4초", operationSummaries: ["2배로 속도를 바꿔요."], followUpQuestions: ["자막도 짧게 할까요?"], previewTarget: { segmentId: "segment-2", startSec: 8, endSec: 16 }, isApplying: false, error: null }}
+      onPreviewEditingProposal={onPreviewEditingProposal}
+      onApplyEditingProposal={onApplyEditingProposal}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
+    expect(screen.getByRole("dialog", { name: "편집안" })).toHaveTextContent("아직 적용되지 않았어요");
+    fireEvent.click(screen.getByRole("button", { name: "이 구간 미리보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "이 편집안 적용" }));
+    fireEvent.click(screen.getByRole("button", { name: "자막도 짧게 할까요?" }));
+
+    expect(onPreviewEditingProposal).toHaveBeenCalledOnce();
+    expect(onApplyEditingProposal).toHaveBeenCalledOnce();
+    expect(onDraftChange).toHaveBeenCalledWith("자막도 짧게 할까요?");
+  });
+});

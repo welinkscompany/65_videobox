@@ -37,6 +37,8 @@ type DirectorState = Readonly<{
   proposal: DirectorProposal | null;
   editingProposal: YujinEditingProposal | null;
   editingProposalCreating: boolean;
+  editingProposalApplying: boolean;
+  editingProposalError: string | null;
   draft: string;
   runState: RightDockDirector["runState"];
   selectedCandidateIds: readonly string[];
@@ -179,6 +181,8 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
     proposal: null,
     editingProposal: null,
     editingProposalCreating: false,
+    editingProposalApplying: false,
+    editingProposalError: null,
     draft: readDirectorDraft(requestKey),
     runState: { kind: "idle" },
     selectedCandidateIds: [],
@@ -1495,6 +1499,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       // creator apply the candidate derived from the previous instruction.
       editingProposal: null,
       editingProposalCreating: false,
+      editingProposalApplying: false,
+      editingProposalError: null,
       messages: capDirectorMessages([...current.messages, { id: optimisticUserId, role: "user", text: submittedDraft }]),
     } : current);
     try {
@@ -1863,10 +1869,38 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onConversationScrollChange: (conversationScroll) => setDirector((current) => current.key === requestKey ? { ...current, conversationScroll } : current),
     onSendMessage: sendDirectorMessage,
     onCreateEditingProposal: createYujinEditingProposal,
-    editingProposalSummary: activeDirector.editingProposal
-      ? yujinEditingProposalSummary(activeDirector.editingProposal, state.view)
-      : null,
+    editingProposal: activeDirector.editingProposal ? {
+      proposalId: activeDirector.editingProposal.proposal_id,
+      summary: yujinEditingProposalSummary(activeDirector.editingProposal, state.view),
+      operationSummaries: activeDirector.editingProposal.diff.operations.map(yujinEditingOperationSummary),
+      followUpQuestions: activeDirector.editingProposal.diff.follow_up_questions.slice(0, 3),
+      previewTarget: yujinEditingProposalPreviewTarget(activeDirector.editingProposal, state.view),
+      isApplying: activeDirector.editingProposalApplying,
+      error: activeDirector.editingProposalError,
+    } : null,
     editingProposalCreating: activeDirector.editingProposalCreating,
+    onPreviewEditingProposal: activeDirector.editingProposal ? () => {
+      const target = yujinEditingProposalPreviewTarget(activeDirector.editingProposal!, state.view!);
+      if (target) return previewSelectedRange(target);
+    } : undefined,
+    onApplyEditingProposal: activeDirector.editingProposal ? async () => {
+      const proposal = activeDirector.editingProposal!;
+      const revision = state.view!.expectedRevision;
+      setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: true, editingProposalError: null } : current);
+      try {
+        const preflight = await api.preflightYujinEditingProposal(projectId, sessionId!, proposal.proposal_id);
+        if (preflight.status === "stale") {
+          setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false, editingProposalError: "편집본이 바뀌어서 이 편집안은 다시 만들어야 해요." } : current);
+          return;
+        }
+        await commitTimelineMutation(async () => {
+          await api.applyYujinEditingProposal(projectId, sessionId!, proposal.proposal_id, { expected_revision: revision });
+          setDirector((current) => current.key === requestKey ? { ...current, editingProposal: null, editingProposalApplying: false } : current);
+        });
+      } catch {
+        setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false, editingProposalError: "편집안을 적용하지 못했어요. 최신 편집본을 확인해 주세요." } : current);
+      }
+    } : undefined,
     onCancelRun: ownsActiveHermesRouteRun
       ? cancelDirectorRun
       : undefined,
@@ -2016,6 +2050,23 @@ function yujinEditingProposalSummary(proposal: YujinEditingProposal, view: Edito
   const before = formatSeconds(end - start);
   const after = formatSeconds((end - start) / speed.rate);
   return `${sceneNumber}번 장면 · ${before}초 → ${after}초`;
+}
+
+function yujinEditingOperationSummary(operation: YujinEditingProposal["diff"]["operations"][number]): string {
+  if (operation.intent === "set_scene_speed" && typeof operation.rate === "number") return `${operation.rate}배로 속도를 바꿔요.`;
+  if (operation.intent === "set_cut_action") return "장면 포함 여부를 바꿔요.";
+  if (operation.intent === "update_caption") return "자막을 고쳐요.";
+  if (operation.intent === "add_media" || operation.intent === "remove_media") return "승인된 미디어 배치를 바꿔요.";
+  if (operation.intent === "set_scene_bounds") return "장면 길이를 조정해요.";
+  if (operation.intent === "reorder_scenes") return "장면 순서를 바꿔요.";
+  return "편집 항목을 바꿔요.";
+}
+
+function yujinEditingProposalPreviewTarget(proposal: YujinEditingProposal, view: EditorViewModel): { segmentId: string; startSec: number; endSec: number } | null {
+  const segmentId = proposal.target_segment_ids[0];
+  if (!segmentId) return null;
+  const clip = view.tracks.flatMap((track) => track.clips).find((candidate) => candidate.segmentId === segmentId);
+  return clip ? { segmentId, startSec: clip.startSec, endSec: clip.endSec } : null;
 }
 
 function projectDirectorProposal(projectId: string, proposal: DirectorProposal | null, currentRevision: number, sceneLabels: ReadonlyMap<string, string> = new Map()): RightDockProposal | null {

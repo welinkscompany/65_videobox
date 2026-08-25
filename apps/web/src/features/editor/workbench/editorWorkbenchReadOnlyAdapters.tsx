@@ -67,8 +67,10 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     onSelectedCandidateIdsChange={director?.onSelectedCandidateIdsChange}
     onSendMessage={director?.onSendMessage}
     onStart={director?.onStart}
-    editingProposalSummary={director?.editingProposalSummary}
+    editingProposal={director?.editingProposal}
     editingProposalCreating={director?.editingProposalCreating}
+    onPreviewEditingProposal={director?.onPreviewEditingProposal}
+    onApplyEditingProposal={director?.onApplyEditingProposal}
     startFailure={director?.startFailure}
     proposal={director?.proposal}
     retryAfterSeconds={director?.retryAfterSeconds}

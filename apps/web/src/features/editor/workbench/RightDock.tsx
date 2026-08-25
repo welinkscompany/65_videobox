@@ -4,10 +4,11 @@ import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { Textarea } from "../../../components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
 import { YujinStarters } from "../../yujin/YujinStarters";
-import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
+import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
@@ -54,8 +55,10 @@ export type RightDockProps = Readonly<{
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
   onCreateEditingProposal?: () => void | Promise<void>;
-  editingProposalSummary?: string | null;
+  editingProposal?: RightDockEditingProposal | null;
   editingProposalCreating?: boolean;
+  onPreviewEditingProposal?: () => void | Promise<void>;
+  onApplyEditingProposal?: () => void | Promise<void>;
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   onRefreshProposal?: () => void | Promise<void>;
   onManualEdit?: () => void;
@@ -136,8 +139,10 @@ export function RightDock({
   composerDisabled = false,
   onSendMessage,
   onCreateEditingProposal,
-  editingProposalSummary = null,
+  editingProposal = null,
   editingProposalCreating = false,
+  onPreviewEditingProposal,
+  onApplyEditingProposal,
   onApplyProposal,
   onRefreshProposal,
   onManualEdit,
@@ -160,6 +165,7 @@ export function RightDock({
   const CANDIDATE_PAGE = 4;
   const [shownCandidates, setShownCandidates] = useState(CANDIDATE_PAGE);
   const [retryRemaining, setRetryRemaining] = useState(0);
+  const [editingProposalOpen, setEditingProposalOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const composerContainerRef = useRef<HTMLDivElement>(null);
 
@@ -400,11 +406,24 @@ export function RightDock({
       </div>
       <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
       {onCreateEditingProposal && messages.some((message) => message.role === "assistant")
-        ? <Button type="button" disabled={editingProposalCreating || Boolean(editingProposalSummary)} onClick={() => void onCreateEditingProposal()}>
+        ? <Button type="button" disabled={editingProposalCreating || Boolean(editingProposal)} onClick={() => void onCreateEditingProposal()}>
           {editingProposalCreating ? "편집안 만드는 중" : "이 대화로 편집안 만들기"}
         </Button>
         : null}
-      {editingProposalSummary ? <p role="status">{editingProposalSummary}</p> : null}
+      {editingProposal ? <><Button type="button" variant="outline" onClick={() => setEditingProposalOpen(true)}>편집안 보기</Button><p role="status">{editingProposal.summary}</p>
+        <Dialog open={editingProposalOpen} onOpenChange={setEditingProposalOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader><DialogTitle>편집안</DialogTitle><DialogDescription>아직 적용되지 않았어요. 내용을 확인한 뒤 직접 적용해 주세요.</DialogDescription></DialogHeader>
+            <p>{editingProposal.summary}</p>
+            <ul aria-label="바뀌는 항목">{editingProposal.operationSummaries.map((summary, index) => <li key={`${index}:${summary}`}>{summary}</li>)}</ul>
+            {editingProposal.followUpQuestions.length ? <div aria-label="이어서 물어보기">{editingProposal.followUpQuestions.map((question) => <Button key={question} type="button" variant="outline" onClick={() => onDraftChange(question)}>{question}</Button>)}</div> : null}
+            {editingProposal.error ? <p role="alert">{editingProposal.error}</p> : null}
+            <DialogFooter>
+              {editingProposal.previewTarget && onPreviewEditingProposal ? <Button type="button" variant="outline" disabled={editingProposal.isApplying} onClick={() => void onPreviewEditingProposal()}>이 구간 미리보기</Button> : null}
+              {onApplyEditingProposal ? <Button type="button" disabled={editingProposal.isApplying} onClick={() => void onApplyEditingProposal()}>{editingProposal.isApplying ? "편집안 적용 중" : "이 편집안 적용"}</Button> : null}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog></> : null}
       {/* 긴 글을 붙여 넣었으면 그것을 대본으로 받는 길을 준다(owner 2026-08-19).
           예전에는 대본이 `/plan`의 문답형 인터뷰로만 들어와서, 이미 써 둔 대본을
           가진 사람은 질문에 답해 가며 다시 만들어야 했다.
