@@ -249,6 +249,8 @@ def build_director_proposals_router(
             record = orchestrator.pipeline.start_proposal_preview(project_id=project_id, session_id=session_id, proposal_id=proposal_id)
             Thread(target=orchestrator.pipeline.run_proposal_preview, kwargs={"project_id": project_id, "generation_id": record["generation_id"]}, daemon=True).start()
             return _proposal_preview_payload(project_id, record)
+        except EditingSessionRevisionConflict:
+            return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
         except ValueError as exc:
             if str(exc) == "editing_proposal_needs_refresh":
                 return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})

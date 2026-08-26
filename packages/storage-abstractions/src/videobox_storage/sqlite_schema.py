@@ -660,6 +660,7 @@ PROJECT_SCHEMA_STATEMENTS = (
         state TEXT NOT NULL,
         artifact_uri TEXT,
         claim_token TEXT,
+        claimed_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         invalidated_reason TEXT,

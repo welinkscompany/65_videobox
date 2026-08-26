@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -109,6 +110,105 @@ def test_yujin_editing_proposal_preview_creates_a_durable_preview_without_mutati
     assert response.json()["generation_id"].startswith("proposal_preview_")
     assert response.json()["status"] in {"pending", "running", "failed"}
     assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+
+
+def test_yujin_editing_proposal_preview_recovers_a_running_claim_from_a_previous_process(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("proposal preview restart recovery")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    record = store.begin_proposal_preview(
+        project_id=project.project_id, session_id=session["session_id"], proposal_id="proposal",
+        expected_revision=session["session_revision"], fingerprint="f" * 64,
+    )
+    assert store.claim_proposal_preview(
+        project_id=project.project_id, generation_id=record["generation_id"],
+        owner_token="proposal-preview-worker:previous-process:worker",
+    )
+
+    recovered = LocalProjectStore(tmp_path / "projects")
+    assert recovered.recover_inherited_proposal_preview_claims(
+        project_id=project.project_id,
+        process_epoch="new-process",
+    ) == 1
+
+    failed = recovered.get_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"])
+    assert failed["state"] == "failed"
+    assert failed["error_message"] == "process_restarted"
+    retried = recovered.begin_proposal_preview(
+        project_id=project.project_id, session_id=session["session_id"], proposal_id="proposal",
+        expected_revision=session["session_revision"], fingerprint="f" * 64,
+    )
+    assert retried["generation_id"] != record["generation_id"]
+    assert retried["state"] == "pending"
+
+
+def test_yujin_editing_proposal_preview_reports_a_concurrent_session_conflict_as_creator_safe_409(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(provider_name="local", model_name="fixture", raw_text="{}", metadata={}, output_data={
+                "schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.",
+                "proposal": {"proposal_id": "race", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2}]},
+            })
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app, raise_server_exceptions=False)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "proposal preview revision race"}).json()["project_id"]
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []})
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "미리보기"}).json()
+
+    original = LocalPipelineRunner.start_proposal_preview
+    def race_revision(runner, **kwargs):
+        store.update_editing_session(project_id=project_id, session_id=session["session_id"], session_payload=session, expected_revision=1)
+        return original(runner, **kwargs)
+    monkeypatch.setattr(LocalPipelineRunner, "start_proposal_preview", race_revision)
+
+    response = client.post(f"{root}/yujin-editing-proposals/{proposal['proposal_id']}/preview")
+
+    assert response.status_code == 409
+    assert response.json() == {"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."}
+
+
+def test_proposal_preview_cleanup_keeps_only_its_retained_terminal_records_and_never_touches_exact_or_source_files(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("proposal preview cleanup")
+    session = store.save_editing_session(project_id=project.project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    source = store.project_root(project.project_id) / "inputs" / "raw_video" / "source.mp4"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"source")
+    exact = store.project_root(project.project_id) / "derived" / "exact_previews" / "exact_preview_keep.mp4"
+    exact.parent.mkdir(parents=True, exist_ok=True)
+    exact.write_bytes(b"exact")
+    records = []
+    for proposal_id in ("old", "middle", "new"):
+        record = store.begin_proposal_preview(project_id=project.project_id, session_id=session["session_id"], proposal_id=proposal_id, expected_revision=1, fingerprint=(proposal_id[0] * 64))
+        assert store.claim_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"], owner_token=f"owner-{proposal_id}")
+        rendered = tmp_path / f"{proposal_id}.mp4"
+        rendered.write_bytes(proposal_id.encode())
+        assert store.finish_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"], fingerprint=record["fingerprint"], artifact_path=rendered, owner_token=f"owner-{proposal_id}")
+        assert store.mark_proposal_preview_stale(project_id=project.project_id, generation_id=record["generation_id"], reason="test")
+        records.append(record)
+    store._execute(project.project_id, "UPDATE proposal_preview_renders SET updated_at = ? WHERE generation_id = ?", ("2020-01-01T00:00:00+00:00", records[0]["generation_id"]))
+    store._execute(project.project_id, "UPDATE proposal_preview_renders SET updated_at = ? WHERE generation_id = ?", ("2021-01-01T00:00:00+00:00", records[1]["generation_id"]))
+    orphan = store.project_root(project.project_id) / "derived" / "proposal_previews" / "proposal_preview_orphan.mp4"
+    orphan.write_bytes(b"orphan")
+    os.utime(orphan, (0, 0))
+
+    removed = store.cleanup_proposal_preview_artifacts(project_id=project.project_id, keep_last=1, orphan_older_than_seconds=0)
+
+    assert removed == 3
+    assert store.get_proposal_preview(project_id=project.project_id, generation_id=records[2]["generation_id"])["state"] == "obsolete"
+    for record in records[:2]:
+        with pytest.raises(KeyError):
+            store.get_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"])
+        assert not (store.project_root(project.project_id) / "derived" / "proposal_previews" / f"{record['generation_id']}.mp4").exists()
+    assert exact.read_bytes() == b"exact"
+    assert source.read_bytes() == b"source"
+    assert not orphan.exists()
 
 
 def test_yujin_editing_proposal_preview_status_refuses_a_stale_source_session(tmp_path: Path) -> None:

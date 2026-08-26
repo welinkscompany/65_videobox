@@ -493,6 +493,7 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         # workers lease this epoch, which lets startup reclaim a recent dead
         # process without weakening the generation/owner publish fence.
         self.exact_preview_process_epoch = uuid.uuid4().hex
+        self.proposal_preview_process_epoch = uuid.uuid4().hex
         # Deliberately injectable only for deterministic failure-contract tests.
         # Production callers leave this unset; it is never a runtime provider hook.
         self._atomic_bundle_fault_hook = atomic_bundle_fault_hook
@@ -1007,7 +1008,8 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         if not owner_token: raise ValueError("proposal_preview_claim_token_required")
         connection = self._connection(project_id)
         try:
-            cursor = connection.execute("UPDATE proposal_preview_renders SET state = ?, claim_token = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'pending'", (state, owner_token, self._now_iso(), project_id, generation_id)); connection.commit(); return cursor.rowcount == 1
+            now = self._now_iso()
+            cursor = connection.execute("UPDATE proposal_preview_renders SET state = ?, claim_token = ?, claimed_at = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'pending'", (state, owner_token, now, now, project_id, generation_id)); connection.commit(); return cursor.rowcount == 1
         finally: connection.close()
 
     def finish_proposal_preview(self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str, source_fence: Callable[[sqlite3.Connection], bool] | None = None, source_fence_result: bool | None = None) -> bool:
@@ -1052,6 +1054,61 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         row = self._fetchone(project_id, "SELECT * FROM proposal_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, generation_id))
         if row is None: raise KeyError(f"Proposal preview not found: {generation_id}")
         return self._exact_preview_row(dict(row))
+
+    def recover_stale_proposal_preview_claims(self, *, project_id: str, older_than_seconds: float = 900) -> int:
+        cutoff = (self._clock() - timedelta(seconds=older_than_seconds)).isoformat()
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("""UPDATE proposal_preview_renders SET state = 'failed', error_message = 'stale_running_claim', updated_at = ? WHERE project_id = ? AND state = 'running' AND claimed_at < ?""", (self._now_iso(), project_id, cutoff))
+            connection.commit()
+            return cursor.rowcount
+        finally:
+            connection.close()
+
+    def recover_inherited_proposal_preview_claims(self, *, project_id: str, process_epoch: str) -> int:
+        if not process_epoch:
+            raise ValueError("proposal_preview_process_epoch_required")
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("""UPDATE proposal_preview_renders SET state = 'failed', error_message = 'process_restarted', updated_at = ? WHERE project_id = ? AND state = 'running' AND (claim_token IS NULL OR claim_token NOT LIKE ?)""", (self._now_iso(), project_id, f"proposal-preview-worker:{process_epoch}:%"))
+            connection.commit()
+            return cursor.rowcount
+        finally:
+            connection.close()
+
+    def cleanup_proposal_preview_artifacts(self, *, project_id: str, keep_last: int = 5, orphan_older_than_seconds: float = 300) -> int:
+        """Prune proposal-preview terminal rows and renderer-owned orphans only."""
+        rows = self._fetchall(project_id, "SELECT generation_id, artifact_uri FROM proposal_preview_renders WHERE project_id = ? AND state IN ('obsolete', 'failed') ORDER BY updated_at DESC", (project_id,))
+        removed = 0
+        for row in rows[max(keep_last, 0):]:
+            uri = row["artifact_uri"]
+            if uri:
+                self.resolve_storage_uri(project_id=project_id, storage_uri=str(uri)).unlink(missing_ok=True)
+            self._execute(project_id, "DELETE FROM proposal_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, str(row["generation_id"])))
+            removed += 1
+        preview_root = self.project_root(project_id) / "derived" / "proposal_previews"
+        if not preview_root.is_dir():
+            return removed
+        referenced = {self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["artifact_uri"])).resolve() for row in self._fetchall(project_id, "SELECT artifact_uri FROM proposal_preview_renders WHERE project_id = ? AND artifact_uri IS NOT NULL", (project_id,))}
+        active_generation_ids = {str(row["generation_id"]) for row in self._fetchall(project_id, "SELECT generation_id FROM proposal_preview_renders WHERE project_id = ? AND state IN ('pending', 'running')", (project_id,))}
+        root = preview_root.resolve()
+        cutoff = self._clock().timestamp() - orphan_older_than_seconds
+        for candidate in preview_root.iterdir():
+            try:
+                resolved = candidate.resolve()
+                if not _is_relative_to(resolved, root) or resolved in referenced or not candidate.is_file():
+                    continue
+                if not ((candidate.name.startswith("proposal_preview_") and candidate.suffix == ".mp4") or candidate.name.startswith(".proposal_preview_") or candidate.name.startswith(".pp-")):
+                    continue
+                if any(candidate.name == f"{generation_id}.mp4" or candidate.name.startswith(f".{generation_id}.") or candidate.name.startswith(f".pp-{generation_id.rsplit('_', 1)[-1][-8:]}-") for generation_id in active_generation_ids):
+                    continue
+                if candidate.stat().st_mtime > cutoff:
+                    continue
+                candidate.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
 
     def get_latest_exact_preview(self, *, project_id: str, session_id: str) -> dict[str, Any] | None:
         row = self._fetchone(
@@ -8374,6 +8431,7 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
             self._ensure_director_hermes_run_context_columns(connection)
             self._ensure_creation_brief_columns(connection)
             self._ensure_exact_preview_columns(connection)
+            self._ensure_proposal_preview_columns(connection)
             self._ensure_artifact_freshness_triggers(connection)
             connection.commit()
             connection.row_factory = sqlite3.Row
@@ -8441,6 +8499,11 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(exact_preview_renders)").fetchall()}
         if columns and "duration_sec" not in columns:
             connection.execute("ALTER TABLE exact_preview_renders ADD COLUMN duration_sec REAL")
+
+    def _ensure_proposal_preview_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(proposal_preview_renders)").fetchall()}
+        if columns and "claimed_at" not in columns:
+            connection.execute("ALTER TABLE proposal_preview_renders ADD COLUMN claimed_at TEXT")
 
     def _ensure_director_message_metadata_column(self, connection: sqlite3.Connection) -> None:
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_messages)").fetchall()}

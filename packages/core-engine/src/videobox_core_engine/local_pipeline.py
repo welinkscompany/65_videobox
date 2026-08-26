@@ -499,12 +499,17 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         return session, timeline, plan, fingerprint
 
     def start_proposal_preview(self, *, project_id: str, session_id: str, proposal_id: str) -> dict[str, Any]:
+        self.store.recover_inherited_proposal_preview_claims(
+            project_id=project_id, process_epoch=str(self.store.proposal_preview_process_epoch),
+        )
+        self.store.recover_stale_proposal_preview_claims(project_id=project_id)
+        self._best_effort_cleanup_proposal_previews(project_id=project_id)
         session, _timeline, _plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=session_id, proposal_id=proposal_id)
         return self.store.begin_proposal_preview(project_id=project_id, session_id=session_id, proposal_id=proposal_id, expected_revision=int(session["session_revision"]), fingerprint=fingerprint)
 
     def run_proposal_preview(self, *, project_id: str, generation_id: str) -> None:
         record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
-        owner = f"proposal-preview-worker:{uuid.uuid4().hex}"
+        owner = f"proposal-preview-worker:{self.store.proposal_preview_process_epoch}:{uuid.uuid4().hex}"
         if not self.store.claim_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner): return
         try:
             session, timeline, plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=str(record["session_id"]), proposal_id=str(record["proposal_id"]))
@@ -521,6 +526,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 self.store.finish_proposal_preview(project_id=project_id, generation_id=generation_id, fingerprint=fingerprint, artifact_path=output, owner_token=owner, source_fence_result=revalidation.is_current, source_fence=lambda _connection: revalidation.still_matches())
         except Exception as exc:
             self.store.fail_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner, error_message=str(exc))
+        finally:
+            self._best_effort_cleanup_proposal_previews(project_id=project_id)
+
+    def _best_effort_cleanup_proposal_previews(self, *, project_id: str) -> None:
+        try:
+            self.store.cleanup_proposal_preview_artifacts(
+                project_id=project_id, keep_last=5, orphan_older_than_seconds=300,
+            )
+        except Exception:
+            return
 
     def get_proposal_preview_status(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
         record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
