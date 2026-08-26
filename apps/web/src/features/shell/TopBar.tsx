@@ -19,10 +19,15 @@ export type ShellSection = "create" | "media" | "editing" | "review";
 
 type ShellProject = { project_id: string; name: string };
 
-//: 일이 실제로 흐르는 순서. 대본을 쓰고, 재료를 모으고, 붙이고, 내보낸다.
+//: 일이 실제로 흐르는 순서. 대본을 쓰고, 미디어를 모으고, 붙이고, 내보낸다.
+//
+//  이름은 `미디어` 하나로 모았다(owner 승인 2026-08-27). 같은 것을 자산·재료·
+//  소재·라이브러리로 부르던 자리가 일곱 군데였고, 한 화면 안에서 넷이 부딪혔다.
+//  캡컷 왼쪽 패널 탭이 `미디어`라 그 이름을 골랐다 -- 아는 배치를 쓰면 배우는
+//  비용이 0이다. → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md`
 const STAGES: ReadonlyArray<readonly [string, ShellSection, typeof Video]> = [
   ["이야기", "create", Video],
-  ["재료", "media", Images],
+  ["미디어", "media", Images],
   ["편집", "editing", Scissors],
   ["확인과 내보내기", "review", ClipboardCheck],
 ];

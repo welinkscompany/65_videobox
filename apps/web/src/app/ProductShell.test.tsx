@@ -33,7 +33,7 @@ describe("product shell", () => {
 
     const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
     expect(within(stages).getAllByRole("button")).toHaveLength(4);
-    for (const label of ["편집", "이야기", "재료", "확인과 내보내기"]) {
+    for (const label of ["편집", "이야기", "미디어", "확인과 내보내기"]) {
       expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
     }
     expect(view.container.querySelectorAll("main")).toHaveLength(1);
@@ -88,7 +88,7 @@ describe("product shell", () => {
 
     const navigation = await screen.findByRole("navigation", { name: "프로젝트 단계" });
     expect(within(navigation).getAllByRole("button")).toHaveLength(4);
-    for (const label of ["편집", "이야기", "재료", "확인과 내보내기"]) {
+    for (const label of ["편집", "이야기", "미디어", "확인과 내보내기"]) {
       expect(within(navigation).getByRole("button", { name: label }).querySelector("svg")).toBeTruthy();
     }
   });
@@ -209,7 +209,7 @@ describe("product shell", () => {
 
     await screen.findByTestId("media-workspace-page");
 
-    expect(screen.getByRole("button", { name: "재료" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "미디어" })).toBeInTheDocument();
     expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 

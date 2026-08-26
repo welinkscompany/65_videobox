@@ -79,7 +79,7 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
   const display = readSettings();
   // 단계 단추가 켜져 있으면 그것이 곧 "여기가 어디인지"다. 단계가 없는 화면
   // (내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서만 띠가 이름으로 말한다.
-  const screenName = section === "home" ? "홈" : section === "create" ? "이야기" : section === "media" ? "재료" : section === "settings" ? "설정" : section === "library" ? "내 라이브러리" : section === "footage" ? "촬영본 정리" : section === "outputs" || section === "timeline" || section === "review" ? "확인과 내보내기" : "편집";
+  const screenName = section === "home" ? "홈" : section === "create" ? "이야기" : section === "media" ? "미디어" : section === "settings" ? "설정" : section === "library" ? "내 라이브러리" : section === "footage" ? "촬영본 정리" : section === "outputs" || section === "timeline" || section === "review" ? "확인과 내보내기" : "편집";
   return (
     <div
       className="vb-product-shell"
@@ -160,7 +160,7 @@ export function HomePage({ projectId, onNavigate }: { projectId: string; onNavig
         간다. 이야기 화면이 대본을 받는 자리(붙여넣기·파일·영상·유진)를 모두 갖고
         있어서, 길마다 화면을 따로 두면 같은 것을 네 벌 관리하게 된다. */}
     <StartChooser hasDraft={summary?.has_draft === true} onStart={(path) => onNavigate(projectId, path === "continue" ? "editing" : "create")} />
-    <div className="vb-home-grid"><HomeCard title="자산" description={assetText} /><HomeCard title="편집" description={draftText} /><HomeCard title="완성본" description={finishedText} /></div>
+    <div className="vb-home-grid"><HomeCard title="미디어" description={assetText} /><HomeCard title="편집" description={draftText} /><HomeCard title="완성본" description={finishedText} /></div>
     {summaryError ? <Button variant="outline" onClick={() => setSummaryRequest((value) => value + 1)}>상태 다시 확인</Button> : null}
     <HomeYujinChat projectId={projectId} />
   </section>;

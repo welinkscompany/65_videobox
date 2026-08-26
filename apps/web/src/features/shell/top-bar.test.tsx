@@ -88,22 +88,22 @@ describe("위 띠", () => {
       .getAllByRole("button")
       .map((button) => button.textContent);
 
-    // 이야기(대본) → 재료 → 편집 → 확인과 내보내기. 일이 실제로 흐르는 순서다.
-    expect(stages).toEqual(["이야기", "재료", "편집", "확인과 내보내기"]);
+    // 이야기(대본) → 미디어 → 편집 → 확인과 내보내기. 일이 실제로 흐르는 순서다.
+    expect(stages).toEqual(["이야기", "미디어", "편집", "확인과 내보내기"]);
   });
 
   it("지금 어느 단계인지 띠가 말한다", () => {
     renderBar({ section: "editing" });
 
     expect(screen.getByRole("button", { name: "편집" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "재료" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "미디어" })).not.toHaveAttribute("aria-current");
   });
 
   it("단계를 누르면 그 단계로 간다", () => {
     const onNavigate = vi.fn();
     renderBar({ onNavigate });
 
-    fireEvent.click(screen.getByRole("button", { name: "재료" }));
+    fireEvent.click(screen.getByRole("button", { name: "미디어" }));
 
     expect(onNavigate).toHaveBeenCalledWith("a", "media");
   });

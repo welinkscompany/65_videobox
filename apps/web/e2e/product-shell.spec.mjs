@@ -83,7 +83,7 @@ test("the top bar keeps creator navigation reachable on a narrow screen", async 
   // Sheet와 접기 띠(`SidebarRail`)를 잡던 시험도 함께 지웠다 -- 지킬 대상이 없다.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/projects/local-draft/home");
-  await page.getByRole("button", { name: "재료" }).click();
+  await page.getByRole("button", { name: "미디어" }).click();
   await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
   await expect(page.getByRole("heading", { name: "자산 보관함" })).toBeVisible();
 });

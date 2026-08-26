@@ -390,8 +390,8 @@ function pointer(target: Element, type: string, clientX: number) {
 }
 
 async function openAssetBrowser() {
-  fireEvent.click(await screen.findByRole("button", { name: "소재" }));
-  return screen.findByRole("dialog", { name: "소재" });
+  fireEvent.click(await screen.findByRole("button", { name: "미디어" }));
+  return screen.findByRole("dialog", { name: "미디어" });
 }
 
 async function openInspector() {
@@ -2256,8 +2256,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(4);
-    fireEvent.click(screen.getByRole("button", { name: "소재" }));
-    expect(await screen.findByRole("dialog", { name: "소재" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+    expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
     fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
     fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
@@ -2278,8 +2278,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(4);
-    fireEvent.click(screen.getByRole("button", { name: "소재" }));
-    expect(await screen.findByRole("dialog", { name: "소재" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+    expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
     fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
     fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
 
@@ -3434,7 +3434,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     fireEvent.click(await screen.findByRole("button", { name: "유진 없이 계속 편집" }));
-    expect(await screen.findByRole("button", { name: "소재" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "미디어" })).toBeVisible();
   });
 
   it("names the scene each candidate targets, in words the creator already reads elsewhere", async () => {

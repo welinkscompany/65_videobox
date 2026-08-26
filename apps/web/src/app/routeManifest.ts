@@ -113,7 +113,7 @@ export function resolveNavigationContext({
     const pathSegments = pathname.split("/");
     const currentSegment = pathSegments[pathSegments.length - 1];
     const screenName = parsed.stage === "plan" ? "이야기"
-      : parsed.stage === "assets" ? "재료"
+      : parsed.stage === "assets" ? "미디어"
         : parsed.stage === "edit" ? "편집"
           : "확인과 내보내기";
     const fallbackHref = parsed.stage === "plan"

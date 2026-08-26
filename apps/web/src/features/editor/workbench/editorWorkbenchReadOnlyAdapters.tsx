@@ -33,7 +33,11 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
     return <>
     <EditorAssetBrowser cards={assetCards} target={assetTarget} isSaving={isSavingCaption} onPreview={onPreviewAsset} onApply={(card, segmentId) => void onApplyAssetCard?.(card, segmentId)} onApplyOverlay={onApplyImageOverlay ? (card, segmentId) => void onApplyImageOverlay(card, segmentId) : undefined} previewStates={assetPreviewStates} onRefreshExactPreview={onRefreshExactPreview} projectId={view.projectId} />
-    <section aria-label="자산" className="vb-editor-workbench__summary"><h2>자산</h2>{view.tracks.map((track) => <p key={track.trackId}>{trackRoleLabel(track.role)}: {track.clips.length}개 클립</p>)}</section>
+    {/* 이 구역은 트랙마다 클립이 몇 개인지 세어 주는 **요약**이지 미디어 목록이
+        아니다. 그런데 이름이 `자산`이라 바로 위 도크 이름과 부딪혔고, 도크를 여는
+        단추는 또 `소재`였다(owner 승인 2026-08-27로 도크는 `미디어`가 됐다).
+        이름을 내용에 맞췄다 -- 목록처럼 들리면 여기서 미디어를 찾게 된다. */}
+    <section aria-label="영상 구성" className="vb-editor-workbench__summary"><h2>영상 구성</h2>{view.tracks.map((track) => <p key={track.trackId}>{trackRoleLabel(track.role)}: {track.clips.length}개 클립</p>)}</section>
     {localSources.length > 0 && <section aria-label="소스 확인" className="vb-editor-workbench__sources"><h2>소스 확인</h2><p>편집본에 적용하지 않고 원본만 확인합니다.</p><div>{localSources.map((source) => <Button key={source.id} type="button" variant="outline" onClick={() => onPreviewSource?.(source)} aria-label={`${source.label} 원본 열기`}>{source.label}</Button>)}</div></section>}
     <TranscriptPanel entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} />
   </>;

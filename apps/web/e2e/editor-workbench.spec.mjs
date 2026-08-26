@@ -79,7 +79,7 @@ const outputVariant = {
 };
 const horizontalVariant = { ...outputVariant, variant_id: "horizontal", kind: "horizontal" };
 
-// 왼쪽 재료 열은 기본으로 펴져 있다(owner 승인 2026-08-17). 도크 버튼은 토글이라
+// 왼쪽 미디어 열은 기본으로 펴져 있다(owner 승인 2026-08-17). 도크 버튼은 토글이라
 // 무조건 누르면 **열린 것을 닫아 버린다.** 도크를 여는 것이 목적인 자리에서는
 // 닫혀 있을 때만 누른다.
 // 첫 프레임은 작업판 폭이 아직 0이라 잠깐 `drawer`로 잡히고, 그 순간에는 펴져 있는
@@ -117,7 +117,7 @@ for (const [width, height] of snapshots) test(`editor workbench snapshot ${width
   const previewSlot = page.locator(".vb-editor-workbench__preview");
   await expect(preview).toBeVisible();
   await expect(page.locator("audio, video")).toHaveCount(0);
-  // 넓은 화면의 새 세션은 소재와 세부 정보를 함께 열어 둔다. 창작자는 편집기에서
+  // 넓은 화면의 새 세션은 미디어와 세부 정보를 함께 열어 둔다. 창작자는 편집기에서
   // 미리보기와 두 도크를 한 번에 비교해야 하므로, 기본 배치를 예전 단일 도크로
   // 되돌리지 않는다.
   // 1280px에서는 두 패널을 열면 미리보기에 필요한 720px이 남지 않아 한쪽만
@@ -142,7 +142,7 @@ test("desktop pointer drag persists the actual dock width across reload", async 
   // 이 테스트가 지키는 것은 **드래그한 도크 폭이 새로고침 뒤에도 남는가**다.
   // `desktop-both`는 오른쪽 크기 조절 핸들이 있는 상태를 만드는 수단이지 목적이
   // 아니다 -- 기본값이 바뀌어도 같은 상태에 도달하도록 열려 있는 것은 그냥 둔다.
-  await ensureDockOpen(page, "소재");
+  await ensureDockOpen(page, "미디어");
   await ensureDockOpen(page, "세부 정보");
   await expect(workbench).toHaveAttribute("data-editor-density", "desktop-both");
   const rightDock = page.getByRole("complementary", { name: "세부 정보" });
@@ -190,7 +190,7 @@ test("every toolbar control stays reachable on a phone-width screen", async ({ p
 
   // 툴바 버튼 줄이 화면 밖으로 나가면 작업판이 `overflow:hidden`이라 가로로 밀어
   // 볼 수도 없다. 컷 도구가 툴바에 붙은 뒤 390px에서 `빼기`부터 오른쪽이 통째로
-  // 손에 닿지 않았다 -- 재료 열도 유진이도 열 수 없다는 뜻이다.
+  // 손에 닿지 않았다 -- 미디어 열도 유진이도 열 수 없다는 뜻이다.
   //
   // 줄바꿈 대신 옆으로 밀어 보게 했으므로, 지켜야 할 것은 "처음부터 다 보인다"가
   // 아니라 **끝까지 밀면 마지막 버튼에 닿는다**이다. 툴바 높이도 함께 본다 --
@@ -198,7 +198,7 @@ test("every toolbar control stays reachable on a phone-width screen", async ({ p
   const row = page.locator(".vb-editor-workbench__toolbar div").first();
   expect(await row.evaluate((node) => /(auto|scroll)/.test(getComputedStyle(node).overflowX))).toBe(true);
   await row.evaluate((node) => { node.scrollLeft = node.scrollWidth; });
-  for (const name of ["빼기", "소재", "세부 정보"]) {
+  for (const name of ["빼기", "미디어", "세부 정보"]) {
     const right = await page.getByRole("button", { name }).evaluate((node) => node.getBoundingClientRect().right);
     expect(right).toBeLessThanOrEqual(390 + 1);
   }

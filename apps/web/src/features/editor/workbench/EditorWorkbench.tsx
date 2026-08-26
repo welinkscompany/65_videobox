@@ -465,11 +465,11 @@ function EditorWorkbenchInstance({
       return { routeKey: viewRouteKey, request: { requestId: (currentRequest?.requestId ?? 0) + 1, source } };
     });
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "소재" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} view={view} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
-  const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "소재" : "세부 정보"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
+  const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "미디어" : "세부 정보"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
   const leftVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.leftOpen);
   const rightVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.rightOpen);
   // 지금 그 도크가 **실제로 보이는가**. 넓은 화면이면 펴져 있는지, 좁은 화면이면
@@ -545,9 +545,15 @@ function EditorWorkbenchInstance({
           > "자산과대본. 이라는 것도 말도 안되고 유진과편집항목. 이런메뉴가 어딨어"
 
           맞는 지적이다. 둘 다 메뉴 이름이 아니라 **안에 뭐가 들었는지 설명하는
-          문장**이었다. 캡컷은 같은 자리를 `소재`, `세부 정보`라고 부른다.
-          이름이 길면 단추가 커지고, 단추가 크면 툴바가 화면을 먹는다. */}
-      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />소재</Button>
+          문장**이었다. 이름이 길면 단추가 커지고, 단추가 크면 툴바가 화면을 먹는다.
+
+          **왼쪽을 `소재` → `미디어`로 고쳤다(owner 승인 2026-08-27).** 여기 있던
+          "캡컷은 이 자리를 `소재`라고 부른다"는 주석은 **틀렸다** -- 한국어 캡컷 PC의
+          왼쪽 패널 첫 탭은 `미디어`다. 중국판 剪映의 `素材`를 옮긴 것으로 보인다.
+          같은 것을 자산·재료·소재·라이브러리로 부르던 자리가 일곱 군데였고 이 도크는
+          여는 단추가 `소재`, 열면 안쪽 제목이 `자산`이라 저 혼자서도 어긋나 있었다.
+          → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */}
+      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />미디어</Button>
       <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />세부 정보</Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
