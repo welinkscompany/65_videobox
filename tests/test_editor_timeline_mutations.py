@@ -576,6 +576,35 @@ def test_ai_editing_proposal_projection_changes_speed_without_mutating_session_m
     assert session == before
 
 
+def test_ai_editing_proposal_projection_composes_media_removal_and_reorder_without_metadata_changes() -> None:
+    from videobox_core_engine.editing_session import project_yujin_editing_proposal
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["output_freshness"] = {"preview": {"is_current": True}}
+    session["undo_stack"] = [{"event": "before"}]
+    session["redo_stack"] = [{"event": "after"}]
+    before = deepcopy(session)
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "media-reorder-preview",
+        "base_session_revision": 1,
+        "operations": [
+            {"intent": "apply_media", "segment_id": "seg_002", "media_type": "sfx", "asset_id": "sfx_002"},
+            {"intent": "remove_media", "segment_id": "seg_001", "media_type": "broll"},
+            {"intent": "reorder_segments", "segment_ids": ["seg_003", "seg_001", "seg_002"]},
+        ],
+    })
+
+    projected = project_yujin_editing_proposal(session=session, proposal=proposal)
+
+    assert [item["segment_id"] for item in projected["segments"]] == ["seg_003", "seg_001", "seg_002"]
+    assert projected["segments"][1]["broll_override"] is None
+    assert projected["segments"][2]["sfx_override"]["asset_id"] == "sfx_002"
+    for field in ("session_revision", "output_freshness", "history", "undo_stack", "redo_stack"):
+        assert projected[field] == before[field]
+    assert session == before
+
+
 def test_ai_editing_proposal_composes_every_supported_edit_without_extra_undo_events() -> None:
     """유진의 여러 편집은 중간 상태를 남기지 않고 한 번에 되돌려져야 한다."""
     from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
