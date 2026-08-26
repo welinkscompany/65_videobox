@@ -177,6 +177,13 @@ export type YujinEditingOperation = Record<string, unknown> & { intent: string; 
 export type YujinEditingProposal = DirectorProposal & { diff: DirectorProposalDiff & { proposal_mode: "yujin_editing_candidate_v1"; operations: YujinEditingOperation[]; follow_up_questions: string[] } };
 export type YujinEditingProposalResult = YujinEditingProposal | { status: "clarification" | "rejected"; reply_text: string; proposal: null };
 export type YujinEditingProposalPreflight = { proposal_id: string; status: "ready"; diff: YujinEditingProposal["diff"] } | { status: "stale"; code: "editing_proposal_needs_refresh"; action: string };
+// The candidate-result MP4 lives in its own namespace from the saved
+// session's exact preview -- it never mutates or reads the session's
+// selected-range state. `status: "stale"` covers both the 409 shapes the
+// backend returns (needs-refresh and the later obsolete/current-fence hit).
+export type YujinEditingProposalPreview =
+  | { status: "pending" | "running" | "succeeded" | "failed"; generationId: string; contentUrl: string | null; errorMessage: string | null }
+  | { status: "stale"; action: string };
 export type DirectorConversation = { conversation_id: string; project_id: string; session_id: string };
 export type DirectorMessage = { message_id: string; conversation_id: string; project_id: string; session_id: string; role: "user" | "assistant" | string; text: string; proposal_id: string | null; metadata: Record<string, unknown>; client_message_id: string | null; created_at: string };
 export type DirectorActionIntent = { action: string; target: DirectorReference; proposal_preflight: Record<string, string | number> | null };
@@ -1627,6 +1634,35 @@ async function createYujinEditingProposalRequest(path: string, payload: { instru
   return parseYujinEditingProposalResult(result);
 }
 
+function parseYujinEditingProposalPreviewResponse(status: number, payload: unknown): YujinEditingProposalPreview {
+  if (status === 409 && isRecord(payload) && payload.code === "editing_proposal_needs_refresh" && typeof payload.action === "string") {
+    return { status: "stale", action: payload.action };
+  }
+  if (
+    !isRecord(payload) || typeof payload.generation_id !== "string"
+    || (payload.status !== "pending" && payload.status !== "running" && payload.status !== "succeeded" && payload.status !== "failed")
+    || (payload.content_url !== null && typeof payload.content_url !== "string")
+    || (payload.error_message !== null && typeof payload.error_message !== "string")
+  ) {
+    throw new Error("yujin_editing_proposal_preview_invalid");
+  }
+  return { status: payload.status, generationId: payload.generation_id, contentUrl: payload.content_url, errorMessage: payload.error_message };
+}
+
+async function startYujinEditingProposalPreviewRequest(path: string): Promise<YujinEditingProposalPreview> {
+  const response = await fetch(path, { method: "POST", credentials: "same-origin", redirect: "error" });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok && response.status !== 409) throw new Error(`Request failed: ${path} (${response.status})`);
+  return parseYujinEditingProposalPreviewResponse(response.status, payload);
+}
+
+async function getYujinEditingProposalPreviewStatusRequest(path: string): Promise<YujinEditingProposalPreview> {
+  const response = await fetch(path, { method: "GET", credentials: "same-origin", redirect: "error" });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok && response.status !== 409) throw new Error(`Request failed: ${path} (${response.status})`);
+  return parseYujinEditingProposalPreviewResponse(response.status, payload);
+}
+
 async function openHermesRunEventsRequest(
   projectId: string,
   conversationId: string,
@@ -1956,6 +1992,10 @@ export const api = {
     preflightYujinEditingProposalRequest(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/preflight`),
   applyYujinEditingProposal: (projectId: string, sessionId: string, proposalId: string, payload: { expected_revision: number }) =>
     request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", credentials: "same-origin", redirect: "error", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  startYujinEditingProposalPreview: (projectId: string, sessionId: string, proposalId: string) =>
+    startYujinEditingProposalPreviewRequest(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/preview`),
+  getYujinEditingProposalPreviewStatus: (projectId: string, generationId: string) =>
+    getYujinEditingProposalPreviewStatusRequest(`/api/projects/${encodeURIComponent(projectId)}/proposal-previews/${encodeURIComponent(generationId)}`),
   refreshDirectorProposal: (projectId: string, proposalId: string) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}/refresh`, { method: "POST" }),
   getDirectorPreferences: (projectId: string) => request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`),

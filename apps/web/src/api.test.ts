@@ -574,6 +574,34 @@ describe("caption style API conflicts", () => {
     vi.unstubAllGlobals();
   });
 
+  it("starts a candidate-result proposal preview and polls its own status route", async () => {
+    const started = { status: "pending", generation_id: "proposal_preview_1", proposal_id: "yujin-edit-1", artifact_revision: 4, fingerprint: "f".repeat(64), content_url: null, error_message: null };
+    const succeeded = { ...started, status: "succeeded", content_url: "/api/projects/p/proposal-previews/proposal_preview_1/content" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(started), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(succeeded), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(api.startYujinEditingProposalPreview("p", "s", "yujin-edit-1")).resolves.toEqual({ status: "pending", generationId: "proposal_preview_1", contentUrl: null, errorMessage: null });
+    await expect(api.getYujinEditingProposalPreviewStatus("p", "proposal_preview_1")).resolves.toEqual({ status: "succeeded", generationId: "proposal_preview_1", contentUrl: "/api/projects/p/proposal-previews/proposal_preview_1/content", errorMessage: null });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/projects/p/editing-sessions/s/yujin-editing-proposals/yujin-edit-1/preview", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/projects/p/proposal-previews/proposal_preview_1", expect.objectContaining({ method: "GET" }));
+    vi.unstubAllGlobals();
+  });
+
+  it("normalizes a stale proposal-preview 409 from either preview route instead of throwing", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ code: "editing_proposal_needs_refresh", action: "새 편집안을 받아 보세요." }), { status: 409 }))));
+    await expect(api.startYujinEditingProposalPreview("p", "s", "yujin-edit-1")).resolves.toEqual({ status: "stale", action: "새 편집안을 받아 보세요." });
+    await expect(api.getYujinEditingProposalPreviewStatus("p", "proposal_preview_1")).resolves.toEqual({ status: "stale", action: "새 편집안을 받아 보세요." });
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects a malformed proposal-preview response instead of exposing it to the editor", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: "succeeded" }), { status: 200 })));
+    await expect(api.getYujinEditingProposalPreviewStatus("p", "proposal_preview_1")).rejects.toThrow("yujin_editing_proposal_preview_invalid");
+    vi.unstubAllGlobals();
+  });
+
   it("rejects a malformed editing proposal response instead of exposing it to the editor", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       proposal_id: "yujin-edit-1", status: "ready", diff: { operations: "not-an-array" },
