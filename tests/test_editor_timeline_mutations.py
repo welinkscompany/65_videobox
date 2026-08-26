@@ -543,6 +543,39 @@ def test_ai_editing_proposal_is_one_undoable_transaction() -> None:
     assert undo(session=applied)["redo_stack"]
 
 
+def test_ai_editing_proposal_projection_changes_speed_without_mutating_session_metadata() -> None:
+    from videobox_core_engine.editing_session import project_yujin_editing_proposal
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["end_sec"] = 4.0
+    session["segments"][1]["start_sec"] = 4.0
+    session["segments"][1]["end_sec"] = 6.0
+    session["segments"][2]["start_sec"] = 6.0
+    session["segments"][2]["end_sec"] = 8.0
+    session["output_freshness"] = {"preview": {"is_current": True}}
+    session["undo_stack"] = [{"event": "before"}]
+    session["redo_stack"] = [{"event": "after"}]
+    before = deepcopy(session)
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "speed-preview",
+        "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_speed", "segment_id": "seg_001", "rate": 2}],
+    })
+
+    projected = project_yujin_editing_proposal(session=session, proposal=proposal)
+
+    assert before["segments"][0]["end_sec"] == 4.0
+    assert projected["segments"][0]["end_sec"] == 2.0
+    assert projected["segments"][1]["start_sec"] == 2.0
+    assert projected["session_revision"] == before["session_revision"]
+    assert projected["output_freshness"] == before["output_freshness"]
+    assert projected["history"] == before["history"]
+    assert projected["undo_stack"] == before["undo_stack"]
+    assert projected["redo_stack"] == before["redo_stack"]
+    assert session == before
+
+
 def test_ai_editing_proposal_composes_every_supported_edit_without_extra_undo_events() -> None:
     """유진의 여러 편집은 중간 상태를 남기지 않고 한 번에 되돌려져야 한다."""
     from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal

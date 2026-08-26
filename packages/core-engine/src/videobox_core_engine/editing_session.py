@@ -780,9 +780,8 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
-def apply_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -> dict[str, Any]:
-    """Apply validated AI operations as exactly one existing user transaction."""
-    from videobox_core_engine.editing_transactions import apply_user_transaction
+def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tuple[object, ...]) -> dict[str, Any]:
+    """Return a session copy with validated AI editing operations applied."""
     from videobox_domain_models.yujin_editing_proposals import (
         ApplyMediaOperation,
         RemoveMediaOperation,
@@ -793,78 +792,100 @@ def apply_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -
         SetSceneSpeedOperation,
     )
 
+    working = deepcopy(session)
+    for operation in operations:
+        if isinstance(operation, SetSceneSpeedOperation):
+            working = set_segment_ripple_playback_rate(
+                session=working, segment_id=operation.segment_id, rate=float(operation.rate)
+            )
+        elif isinstance(operation, SetSegmentBoundsOperation):
+            working = set_segment_bounds(
+                session=working,
+                segment_id=operation.segment_id,
+                start_sec=operation.start_sec,
+                end_sec=operation.end_sec,
+            )
+        elif isinstance(operation, SetCutActionOperation):
+            working = update_segment_cut_action(
+                session=working,
+                segment_id=operation.segment_id,
+                cut_action={"exclude": "remove", "restore": "keep"}[operation.action],
+            )
+        elif isinstance(operation, SetCaptionTextOperation):
+            working = update_segment_caption(
+                session=working, segment_id=operation.segment_id, caption_text=operation.text
+            )
+        elif isinstance(operation, ApplyMediaOperation):
+            if operation.media_type == "broll":
+                working = update_segment_broll_override(
+                    session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
+                )
+            elif operation.media_type == "bgm":
+                working = update_segment_music_override(
+                    session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
+                )
+            else:
+                working = update_segment_sfx_override(
+                    session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
+                )
+        elif isinstance(operation, RemoveMediaOperation):
+            if operation.media_type == "broll":
+                working = clear_segment_broll_override(session=working, segment_id=operation.segment_id)
+            elif operation.media_type == "bgm":
+                working = clear_segment_music_override(session=working, segment_id=operation.segment_id)
+            else:
+                working = clear_segment_sfx_override(session=working, segment_id=operation.segment_id)
+        elif isinstance(operation, ReorderSegmentsOperation):
+            by_id = {
+                str(segment["segment_id"]): segment
+                for segment in working.get("segments", [])
+                if isinstance(segment, dict)
+            }
+            cursor = min(float(segment.get("start_sec", 0.0)) for segment in by_id.values())
+            bounds_by_id: dict[str, dict[str, float]] = {}
+            for segment_id in operation.segment_ids:
+                segment = by_id[segment_id]
+                duration = float(segment["end_sec"]) - float(segment["start_sec"])
+                bounds_by_id[segment_id] = {"start_sec": cursor, "end_sec": cursor + duration}
+                cursor += duration
+            working = reorder_segments(
+                session=working, segment_ids=list(operation.segment_ids), bounds_by_id=bounds_by_id
+            )
+        else:
+            raise ValueError("editing_proposal_operation_not_supported")
+    return working
+
+
+def project_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -> dict[str, Any]:
+    """Project a validated AI proposal without changing session metadata or undo state."""
+    operations = tuple(getattr(proposal, "operations", ()))
+    if not operations:
+        raise ValueError("editing_proposal_operations_required")
+    projected = _apply_yujin_editing_operations(session=session, operations=operations)
+    for field in ("session_revision", "output_freshness", "history", "undo_stack", "redo_stack"):
+        if field in session:
+            projected[field] = deepcopy(session[field])
+        else:
+            projected.pop(field, None)
+    return projected
+
+
+def apply_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -> dict[str, Any]:
+    """Apply validated AI operations as exactly one existing user transaction."""
     operations = tuple(getattr(proposal, "operations", ()))
     if not operations:
         raise ValueError("editing_proposal_operations_required")
     affected = [str(item.segment_id) for item in operations if hasattr(item, "segment_id")]
+    from videobox_domain_models.yujin_editing_proposals import ReorderSegmentsOperation
+
     for operation in operations:
         if isinstance(operation, ReorderSegmentsOperation):
             affected.extend(operation.segment_ids)
     affected = list(dict.fromkeys(affected))
 
     def mutate(draft: dict[str, Any]) -> None:
-        working = deepcopy(draft)
-        for operation in operations:
-            if isinstance(operation, SetSceneSpeedOperation):
-                working = set_segment_ripple_playback_rate(
-                    session=working, segment_id=operation.segment_id, rate=float(operation.rate)
-                )
-            elif isinstance(operation, SetSegmentBoundsOperation):
-                working = set_segment_bounds(
-                    session=working,
-                    segment_id=operation.segment_id,
-                    start_sec=operation.start_sec,
-                    end_sec=operation.end_sec,
-                )
-            elif isinstance(operation, SetCutActionOperation):
-                working = update_segment_cut_action(
-                    session=working,
-                    segment_id=operation.segment_id,
-                    cut_action={"exclude": "remove", "restore": "keep"}[operation.action],
-                )
-            elif isinstance(operation, SetCaptionTextOperation):
-                working = update_segment_caption(
-                    session=working, segment_id=operation.segment_id, caption_text=operation.text
-                )
-            elif isinstance(operation, ApplyMediaOperation):
-                if operation.media_type == "broll":
-                    working = update_segment_broll_override(
-                        session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
-                    )
-                elif operation.media_type == "bgm":
-                    working = update_segment_music_override(
-                        session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
-                    )
-                else:
-                    working = update_segment_sfx_override(
-                        session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
-                    )
-            elif isinstance(operation, RemoveMediaOperation):
-                if operation.media_type == "broll":
-                    working = clear_segment_broll_override(session=working, segment_id=operation.segment_id)
-                elif operation.media_type == "bgm":
-                    working = clear_segment_music_override(session=working, segment_id=operation.segment_id)
-                else:
-                    working = clear_segment_sfx_override(session=working, segment_id=operation.segment_id)
-            elif isinstance(operation, ReorderSegmentsOperation):
-                by_id = {
-                    str(segment["segment_id"]): segment
-                    for segment in working.get("segments", [])
-                    if isinstance(segment, dict)
-                }
-                cursor = min(float(segment.get("start_sec", 0.0)) for segment in by_id.values())
-                bounds_by_id: dict[str, dict[str, float]] = {}
-                for segment_id in operation.segment_ids:
-                    segment = by_id[segment_id]
-                    duration = float(segment["end_sec"]) - float(segment["start_sec"])
-                    bounds_by_id[segment_id] = {"start_sec": cursor, "end_sec": cursor + duration}
-                    cursor += duration
-                working = reorder_segments(
-                    session=working, segment_ids=list(operation.segment_ids), bounds_by_id=bounds_by_id
-                )
-            else:
-                raise ValueError("editing_proposal_operation_not_supported")
-        draft["segments"] = working["segments"]
+        projected = _apply_yujin_editing_operations(session=draft, operations=operations)
+        draft["segments"] = projected["segments"]
 
     return apply_user_transaction(
         session=session, label="유진 편집안 적용", affected_segment_ids=affected, mutate=mutate,
