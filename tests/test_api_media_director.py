@@ -147,6 +147,67 @@ def test_yujin_editing_proposal_preview_status_refuses_a_stale_source_session(tm
     assert stale_content.json() == stale.json()
 
 
+def test_yujin_editing_proposal_preview_refuses_an_asset_changed_during_render(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(provider_name="local", model_name="fixture", raw_text="{}", metadata={}, output_data={
+                "schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.",
+                "proposal": {"proposal_id": "asset-stale", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2}]},
+            })
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "asset stale proposal preview"}).json()["project_id"]
+    source = tmp_path / "source.mp4"; source.write_bytes(b"before-render")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    timeline = store.save_timeline_run(project_id=project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 4}, "tracks": [{"track_type": "broll", "clips": [{"clip_id": "b1", "asset_id": asset.asset_id, "asset_uri": asset.storage_uri, "start_sec": 0, "end_sec": 4}]}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []})
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "첫 장면을 빠르게"}).json()
+
+    class MutatingRenderer:
+        def render_exact_preview_to_mp4(self, **kwargs):
+            kwargs["output_path"].write_bytes(b"synthetic-mp4")
+            store.resolve_storage_uri(project_id=project_id, storage_uri=asset.storage_uri).write_bytes(b"changed-during-render")
+
+    pipeline = LocalPipelineRunner(store, final_renderer=MutatingRenderer())
+    record = pipeline.start_proposal_preview(project_id=project_id, session_id=session["session_id"], proposal_id=proposal["proposal_id"])
+    pipeline.run_proposal_preview(project_id=project_id, generation_id=record["generation_id"])
+
+    assert store.get_proposal_preview(project_id=project_id, generation_id=record["generation_id"])["state"] == "obsolete"
+    assert not (store.project_root(project_id) / "derived" / "proposal_previews" / f"{record['generation_id']}.mp4").exists()
+    assert client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}").status_code == 409
+    assert client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}/content").status_code == 409
+
+
+def test_yujin_editing_proposal_preview_content_serves_synthetic_mp4_only_while_current(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(provider_name="local", model_name="fixture", raw_text="{}", metadata={}, output_data={
+                "schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.",
+                "proposal": {"proposal_id": "success-preview", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2}]},
+            })
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "success proposal preview"}).json()["project_id"]
+    timeline = store.save_timeline_run(project_id=project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 4}, "tracks": []})
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []})
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "첫 장면을 빠르게"}).json()
+
+    class SyntheticRenderer:
+        def render_exact_preview_to_mp4(self, **kwargs): kwargs["output_path"].write_bytes(b"synthetic-mp4")
+
+    pipeline = LocalPipelineRunner(store, final_renderer=SyntheticRenderer())
+    record = pipeline.start_proposal_preview(project_id=project_id, session_id=session["session_id"], proposal_id=proposal["proposal_id"])
+    pipeline.run_proposal_preview(project_id=project_id, generation_id=record["generation_id"])
+
+    content = client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}/content")
+    assert store.get_proposal_preview(project_id=project_id, generation_id=record["generation_id"])["state"] == "succeeded"
+    assert content.status_code == 200 and content.headers["content-type"] == "video/mp4" and content.content == b"synthetic-mp4"
+
+
 def test_yujin_editing_proposal_apply_uses_the_common_undo_and_redo_history(tmp_path: Path) -> None:
     class EditingRuntime:
         def generate_structured(self, **_kwargs):
