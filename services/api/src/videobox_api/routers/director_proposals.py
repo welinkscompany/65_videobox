@@ -174,7 +174,7 @@ def _apply_failure_detail(exc: BaseException) -> str:
 
 
 def build_director_proposals_router(
-    store: LocalProjectStore, *, embedding_provider: object = None, embedding_model_name: str | None = None
+    store: LocalProjectStore, *, orchestrator: object, embedding_provider: object = None, embedding_model_name: str | None = None
 ) -> APIRouter:
     router = APIRouter()
     service = DirectorProposalService(store, embedding_provider=embedding_provider, embedding_model_name=embedding_model_name)
@@ -231,6 +231,47 @@ def build_director_proposals_router(
         if proposal.source_session_id != session_id or proposal.base_session_revision != int(session["session_revision"]):
             return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
         return {"proposal_id": proposal_id, "status": "ready", "diff": proposal_to_payload(proposal)["diff"]}
+
+    def _proposal_preview_payload(project_id: str, record: dict) -> dict:
+        state = "stale" if record.get("state") == "obsolete" else str(record.get("state") or "failed")
+        return {"status": state, "generation_id": str(record["generation_id"]), "proposal_id": str(record["proposal_id"]), "artifact_revision": int(record["expected_revision"]), "fingerprint": str(record["fingerprint"]), "content_url": f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}/content" if state == "succeeded" and record.get("artifact_uri") else None, "error_message": record.get("error_message")}
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals/{proposal_id}/preview", status_code=status.HTTP_202_ACCEPTED)
+    def preview_yujin_editing_proposal(project_id: str, session_id: str, proposal_id: str):
+        try:
+            proposal = store.get_director_proposal(project_id, proposal_id)
+            session = store.get_editing_session(project_id=project_id, session_id=session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="editing_proposal_missing") from exc
+        if proposal.source_session_id != session_id or int(proposal.base_session_revision) != int(session["session_revision"]):
+            return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
+        try:
+            record = orchestrator.pipeline.start_proposal_preview(project_id=project_id, session_id=session_id, proposal_id=proposal_id)
+            Thread(target=orchestrator.pipeline.run_proposal_preview, kwargs={"project_id": project_id, "generation_id": record["generation_id"]}, daemon=True).start()
+            return _proposal_preview_payload(project_id, record)
+        except ValueError as exc:
+            if str(exc) == "editing_proposal_needs_refresh":
+                return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.get("/api/projects/{project_id}/proposal-previews/{generation_id}")
+    def get_yujin_editing_proposal_preview(project_id: str, generation_id: str):
+        try:
+            return _proposal_preview_payload(project_id, orchestrator.pipeline.get_proposal_preview_status(project_id=project_id, generation_id=generation_id))
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="proposal_preview_missing") from exc
+
+    @router.get("/api/projects/{project_id}/proposal-previews/{generation_id}/content")
+    def get_yujin_editing_proposal_preview_content(project_id: str, generation_id: str):
+        try:
+            record = orchestrator.pipeline.get_proposal_preview_status(project_id=project_id, generation_id=generation_id)
+            if record.get("state") != "succeeded" or not record.get("artifact_uri"):
+                raise KeyError("proposal_preview_not_current")
+            path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(record["artifact_uri"]))
+            if not path.is_file(): raise KeyError("proposal_preview_content_missing")
+            return FileResponse(path, media_type="video/mp4")
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="proposal_preview_not_current") from exc
 
     @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals/{proposal_id}/apply")
     def apply_yujin_editing_proposal_route(project_id: str, session_id: str, proposal_id: str, body: YujinEditingProposalApplyRequest) -> dict:

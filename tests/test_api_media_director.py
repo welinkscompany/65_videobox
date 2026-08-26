@@ -72,6 +72,44 @@ def test_yujin_editing_proposal_is_read_only_until_apply(tmp_path: Path) -> None
     assert stale.json()["action"] == "새 편집안을 받아 보세요."
 
 
+def test_yujin_editing_proposal_preview_creates_a_durable_preview_without_mutating_the_session(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture", raw_text="{}", metadata={},
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.", "proposal": {
+                    "proposal_id": "preview", "base_session_revision": 1,
+                    "operations": [{"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2}],
+                }},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "editing proposal preview"}).json()["project_id"]
+    timeline = store.save_timeline_run(
+        project_id=project_id, output_mode="review", source_session_revision=1,
+        timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 12}, "tracks": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [
+            {"segment_id": "scene-1", "start_sec": 0, "end_sec": 4},
+            {"segment_id": "scene-2", "start_sec": 4, "end_sec": 12},
+        ], "history": []},
+    )
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "둘째 장면을 빠르게"}).json()
+    before = store.get_editing_session(project_id=project_id, session_id=session["session_id"])
+
+    response = client.post(f"{root}/yujin-editing-proposals/{proposal['proposal_id']}/preview")
+
+    assert response.status_code == 202, response.text
+    assert response.json()["generation_id"].startswith("proposal_preview_")
+    assert response.json()["status"] in {"pending", "running", "failed"}
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+
+
 def test_yujin_editing_proposal_apply_uses_the_common_undo_and_redo_history(tmp_path: Path) -> None:
     class EditingRuntime:
         def generate_structured(self, **_kwargs):

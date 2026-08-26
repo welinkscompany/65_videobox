@@ -1214,6 +1214,7 @@ def create_app(
     app.include_router(
         build_director_proposals_router(
             store,
+            orchestrator=orchestrator,
             embedding_provider=app.state.media_analysis_embedding_provider,
             embedding_model_name=(app.state.media_analysis_profile or {}).get("embedding_model_name"),
         )

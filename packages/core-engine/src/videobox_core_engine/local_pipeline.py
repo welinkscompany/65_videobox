@@ -51,6 +51,8 @@ from videobox_core_engine.track_states import apply_track_states_to_timeline, no
 from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
 from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
+from videobox_core_engine.editing_session import project_yujin_editing_proposal
+from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
 from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
 from videobox_core_engine.output_source_verifier import (
     OutputSourceStaleError,
@@ -473,6 +475,62 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
             return None
         return expected_by_path
+
+    def _proposal_preview_inputs(self, *, project_id: str, session_id: str, proposal_id: str) -> tuple[dict[str, Any], dict[str, Any], CompositionPlan, str]:
+        """Build the proposed timeline in memory; never persist it as an edit."""
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        proposal = self.store.get_director_proposal(project_id, proposal_id)
+        if proposal.source_session_id != session_id or int(proposal.base_session_revision) != int(session["session_revision"]):
+            raise ValueError("editing_proposal_needs_refresh")
+        operations = proposal.diff.get("operations") if hasattr(proposal.diff, "get") else None
+        if not isinstance(operations, (list, tuple)):
+            raise ValueError("editing_proposal_operations_required")
+        projected = project_yujin_editing_proposal(session=session, proposal=YujinEditingProposal.model_validate({
+            "proposal_id": proposal_id, "base_session_revision": proposal.base_session_revision, "operations": [dict(item) for item in operations],
+        }))
+        source_timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+        timeline = materialize_editing_session_timeline(timeline=source_timeline, editing_session=projected, project_id=project_id)
+        plan = self.build_composition_plan(timeline=source_timeline, editing_session=projected, project_id=project_id)
+        # Include byte identities in the durable cache key: a changed approved
+        # asset must neither reuse nor expose an old proposal-result proxy.
+        snapshots = self._capture_exact_preview_source_snapshots(project_id=project_id, session=session, timeline=timeline, plan=plan)
+        used_asset_sha256 = {str(path): digest for path, digest in (snapshots or {}).items()}
+        fingerprint = fingerprint_exact_preview(plan=plan, session_captions=plan.captions, used_asset_sha256=used_asset_sha256, overlay_inputs=plan.export_overlays, settings={"proposal_id": proposal_id, "canvas": plan.canonical_dict()["canvas"]})
+        return session, timeline, plan, fingerprint
+
+    def start_proposal_preview(self, *, project_id: str, session_id: str, proposal_id: str) -> dict[str, Any]:
+        session, _timeline, _plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=session_id, proposal_id=proposal_id)
+        return self.store.begin_proposal_preview(project_id=project_id, session_id=session_id, proposal_id=proposal_id, expected_revision=int(session["session_revision"]), fingerprint=fingerprint)
+
+    def run_proposal_preview(self, *, project_id: str, generation_id: str) -> None:
+        record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        owner = f"proposal-preview-worker:{uuid.uuid4().hex}"
+        if not self.store.claim_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner): return
+        try:
+            session, timeline, plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=str(record["session_id"]), proposal_id=str(record["proposal_id"]))
+            if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]):
+                self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_fingerprint_changed"); return
+            snapshots = self._capture_exact_preview_source_snapshots(project_id=project_id, session=session, timeline=timeline, plan=plan)
+            with tempfile.TemporaryDirectory(prefix="videobox_proposal_preview_") as raw_dir:
+                raw = Path(raw_dir); ass = raw / "captions.ass"; output = raw / "proposal-preview.mp4"
+                ass.write_text(render_editing_session_ass({"caption_style": session.get("caption_style") or {}, "segments": [{"caption_text": cue.text, "caption_style": cue.style, "start_sec": cue.start_sec, "end_sec": cue.end_sec} for cue in plan.captions]}, video_width=plan.width, video_height=plan.height), encoding="utf-8")
+                self.final_renderer.render_exact_preview_to_mp4(project_id=project_id, composition_plan=plan, timeline_context=timeline, output_path=output, subtitle_ass_path=ass)
+                revalidation = self._revalidate_exact_preview_source_snapshots(snapshots)
+                if not revalidation.is_current:
+                    self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="publish_revalidation_failed"); return
+                self.store.finish_proposal_preview(project_id=project_id, generation_id=generation_id, fingerprint=fingerprint, artifact_path=output, owner_token=owner, source_fence_result=revalidation.is_current, source_fence=lambda _connection: revalidation.still_matches())
+        except Exception as exc:
+            self.store.fail_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner, error_message=str(exc))
+
+    def get_proposal_preview_status(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
+        record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        if record["state"] in {"pending", "running", "succeeded"}:
+            try:
+                session, _timeline, _plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=str(record["session_id"]), proposal_id=str(record["proposal_id"]))
+                if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]): self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="read_revalidation_failed"); record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+            except Exception:
+                self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_unavailable"); record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        return record
 
     @staticmethod
     def _revalidate_exact_preview_source_snapshots(
