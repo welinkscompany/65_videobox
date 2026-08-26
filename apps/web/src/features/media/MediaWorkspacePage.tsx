@@ -8,8 +8,8 @@ import { filterEditorAssets, projectEditorAssets } from "../editor/assets/editor
 import { MediaLibraryBrowser } from "./MediaLibraryBrowser";
 import { VoiceMaterialPanel } from "./VoiceMaterialPanel";
 
-// 내레이션은 영상·음악·효과음과 같은 재료다. 2026-08-16까지 목소리만 설정 서랍에
-// 있었고, 그래서 자산 단계에서 사람 목소리가 빠져 보였다.
+// 내레이션도 영상·음악·효과음과 같은 미디어다. 2026-08-16까지 목소리만 설정 서랍에
+// 있었고, 그래서 미디어 단계에서 사람 목소리가 빠져 보였다.
 type MediaTab = "videos" | "music" | "sfx" | "narration" | "import";
 
 /** 보관함은 오래된 것부터 도착한다(`local_project_store.list_assets`가 `created_at ASC`). */
@@ -107,7 +107,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       const current = currentContext.current;
       if (current.projectId !== loadProjectId || current.generation !== loadGeneration || loadEpoch.current !== epoch) return false;
       setState(null);
-      setError("자산을 불러오지 못했어요. 다시 시도해 주세요.");
+      setError("미디어를 불러오지 못했어요. 다시 시도해 주세요.");
       return false;
     } finally {
       const current = currentContext.current;
@@ -299,7 +299,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     <section data-project-id={projectId} data-testid="media-workspace-page" aria-labelledby="media-workspace-heading">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 id="media-workspace-heading">자산 보관함</h1>
+          <h1 id="media-workspace-heading">미디어</h1>
           <p>영상 · 분석 상태</p>
         </div>
         <Button type="button" variant="outline" disabled={loading || busyKey !== null} onClick={() => void load()}>
@@ -307,11 +307,11 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
         </Button>
       </div>
 
-      {loading && !currentState ? <p role="status">자산을 불러오고 있어요.</p> : null}
+      {loading && !currentState ? <p role="status">미디어를 불러오고 있어요.</p> : null}
       {error ? <div role="alert"><p>{error}</p><Button type="button" onClick={() => void load()}>다시 불러오기</Button></div> : null}
       {message ? <p role="status">{message}</p> : null}
 
-      <div role="tablist" aria-label="자산 종류" className="vb-media-workspace__tabs">
+      <div role="tablist" aria-label="미디어 종류" className="vb-media-workspace__tabs">
         {tabs.map((tab) => (
           <Button
             key={tab.value}
@@ -388,7 +388,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
       {activeTab === "videos" && currentState ? (
         <div id="media-panel-videos" role="tabpanel" aria-label="내 영상" className="grid gap-4">
           <section aria-labelledby="media-assets-heading">
-            <h2>프로젝트 자산</h2>
+            <h2>이 프로젝트의 미디어</h2>
             <h2 id="media-assets-heading">내 영상</h2>
             {allProjectCards.length > 0 ? (
               <div className="vb-media-library__toolbar">
@@ -421,7 +421,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
               : "아직 준비한 영상이 없어요. 가져오기 탭에서 영상을 추가해 보세요."}</p> : (
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {projectCards.map((card) => (
-                  <Card key={card.id} className="vb-media-project-card" aria-label={`${card.title} 자산`}>
+                  <Card key={card.id} className="vb-media-project-card" aria-label={`${card.title} 미디어`}>
                     {card.thumbnailUrl ? <img className="vb-editor-assets__thumb" src={card.thumbnailUrl} alt={`${card.title} 미리보기`} loading="lazy" /> : null}
                     <CardHeader>
                       <CardTitle title={card.title}>{card.title}</CardTitle>

@@ -106,7 +106,7 @@ describe("MediaWorkspacePage", () => {
   it("separates project assets, library search, new files, and footage intake in the project flow", async () => {
     render(<MediaWorkspacePage projectId="project-a" />);
 
-    expect(await screen.findByRole("heading", { name: "프로젝트 자산" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "이 프로젝트의 미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "음악" }));
     expect(await screen.findByRole("heading", { name: "라이브러리에서 찾기" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "가져오기" }));
@@ -123,7 +123,7 @@ describe("MediaWorkspacePage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "walk.mp4 프로젝트에 추가" }));
 
     await waitFor(() => expect(api.materializeLibraryAsset).toHaveBeenCalledWith("user:broll:walk", "project-a"));
-    // 추가 직후 위쪽 프로젝트 자산 목록이 스스로 갱신된다.
+    // 추가 직후 위쪽 이 프로젝트의 미디어 목록이 스스로 갱신된다.
     await waitFor(() => expect(api.listBrollAssets).toHaveBeenCalledTimes(2));
   });
 
@@ -214,9 +214,9 @@ describe("MediaWorkspacePage", () => {
     ]);
     render(<MediaWorkspacePage projectId="project-a" />);
 
-    expect(await screen.findByRole("heading", { name: "자산 보관함" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "미디어" })).toBeVisible();
     // **갱신 이유(2026-08-22).** 문구만 바뀌었다 -- owner 지시로 설명 문장을
-    // 키워드로 옮기는 중이다. 이 줄은 바로 위 제목(`자산 보관함`)을 말만 바꿔
+    // 키워드로 옮기는 중이다. 이 줄은 바로 위 제목(`미디어`)을 말만 바꿔
     // 되풀이하고 있었다.
     expect(screen.getByText("영상 · 분석 상태")).toBeVisible();
     expect(screen.getAllByText("회의 장면")).toHaveLength(2);
@@ -293,9 +293,9 @@ describe("MediaWorkspacePage", () => {
     vi.mocked(api.listMediaAnalysis).mockResolvedValue({ items: [] });
     render(<MediaWorkspacePage projectId="project-a" />);
 
-    expect(screen.getByText("자산을 불러오고 있어요.")).toBeVisible();
+    expect(screen.getByText("미디어를 불러오고 있어요.")).toBeVisible();
     await act(async () => rejectInitial(new Error("raw provider failure")));
-    expect(await screen.findByText("자산을 불러오지 못했어요. 다시 시도해 주세요.")).toBeVisible();
+    expect(await screen.findByText("미디어를 불러오지 못했어요. 다시 시도해 주세요.")).toBeVisible();
     expect(document.body.textContent).not.toContain("raw provider failure");
 
     fireEvent.click(screen.getByRole("button", { name: "다시 불러오기" }));
@@ -311,7 +311,7 @@ describe("MediaWorkspacePage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "다시 분석하기" }));
 
-    expect(await screen.findByText("자산을 불러오지 못했어요. 다시 시도해 주세요.")).toBeVisible();
+    expect(await screen.findByText("미디어를 불러오지 못했어요. 다시 시도해 주세요.")).toBeVisible();
     expect(screen.queryByText("변경 내용을 확인했어요.")).not.toBeInTheDocument();
   });
 
@@ -335,7 +335,7 @@ describe("MediaWorkspacePage", () => {
   it("uploads one or more files from the asset screen and refreshes the list", async () => {
     render(<MediaWorkspacePage projectId="project-a" />);
     await openImportTab();
-    await screen.findByRole("heading", { name: "자산 보관함" });
+    await screen.findByRole("heading", { name: "미디어" });
     expect(api.listBrollAssets).toHaveBeenCalledTimes(1);
 
     const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
@@ -360,7 +360,7 @@ describe("MediaWorkspacePage", () => {
     ] });
     render(<MediaWorkspacePage projectId="project-a" />);
     await openImportTab();
-    await screen.findByRole("heading", { name: "자산 보관함" });
+    await screen.findByRole("heading", { name: "미디어" });
 
     const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [makeFile("good.mp4"), makeFile("bad.mp4")] } });
@@ -374,7 +374,7 @@ describe("MediaWorkspacePage", () => {
     vi.mocked(api.ingestLibraryAssets).mockImplementation(() => new Promise((resolve) => { release = () => resolve({ ingest_batch_id: "batch", partial: false, items: [{ filename: "one.mp4", state: "ready", library_asset_id: "user:one" }] }); }));
     render(<MediaWorkspacePage projectId="project-a" />);
     await openImportTab();
-    await screen.findByRole("heading", { name: "자산 보관함" });
+    await screen.findByRole("heading", { name: "미디어" });
 
     const input = screen.getByLabelText("장면 영상 파일 추가") as HTMLInputElement;
     fireEvent.change(input, { target: { files: [makeFile("one.mp4")] } });

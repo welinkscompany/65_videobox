@@ -215,10 +215,10 @@ describe("LibraryPage", () => {
     await screen.findAllByText("walk.mp4");
     fireEvent.click(screen.getByTestId("library-asset-card"));
 
-    const entry = await screen.findByRole("link", { name: "프로젝트 편집본 자산 화면 열기" });
+    const entry = await screen.findByRole("link", { name: "프로젝트 편집본 미디어 화면 열기" });
     expect(entry).toHaveAttribute("href", "/projects/project_1/assets");
     expect(screen.getByText("묶음")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "묶음 자산 화면 열기" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "묶음 미디어 화면 열기" })).toBeNull();
   });
 
   it("previews an asset and blocks trash when the usage endpoint reports a location", async () => {

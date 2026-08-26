@@ -73,14 +73,14 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const excludedCreators = taste.preferences.exclude_creator;
   const excludedTags = taste.preferences.exclude_tag;
 
-  return <section className="vb-editor-assets" aria-label="편집기 자산">
+  return <section className="vb-editor-assets" aria-label="편집기 미디어">
     <div className="vb-editor-assets__controls">
       <label className="vb-editor-assets__search-label">
-        <span>자산 검색</span>
+        <span>미디어 검색</span>
         {/* **빈 칸에 힌트를 넣는다**(2026-08-22, `capcut-observed` 기록 §5 "공통 생김새":
             캡컷은 모든 탭 검색창에 지금 뭘 찾을 수 있는지 안내 문구를 넣는다). 우리
             칸은 비어 있었다 -- 무엇을 검색할 수 있는지 눌러 보기 전엔 알 수 없었다. */}
-        <Input className="vb-editor-assets__search" type="search" aria-label="자산 검색" placeholder="영상 · 음악 · 효과음 · 그림 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <Input className="vb-editor-assets__search" type="search" aria-label="미디어 검색" placeholder="영상 · 음악 · 효과음 · 그림 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
       {/* **캡컷처럼 탭 줄로 바꿨다(owner 지시 2026-08-22).**
           > "캡컷은 대부분 메뉴들을 탭으로 정리해서 깔끔하게 만들었어"
@@ -91,7 +91,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
 
           이름에서 `필터`를 뺐다 -- 캡컷 탭은 그냥 명사다. 화면 방향은 탭이 아니라
           **고른 탭 안에서 더 좁히는 것**이라 한 단 아래로 내렸다. */}
-      <div className="vb-editor-assets__tabs" role="tablist" aria-label="자산 종류">
+      <div className="vb-editor-assets__tabs" role="tablist" aria-label="미디어 종류">
         {filters.map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__tab" type="button" role="tab" aria-selected={type === filter.type} onClick={() => setType(filter.type)}>{filter.label}</Button>)}
       </div>
       <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향">
@@ -183,7 +183,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <p className="vb-editor-assets__detail vb-editor-assets__attribution" title={card.license}>
             {card.sourceMetadata.attributionRequired ? "출처 표기 필요" : "출처 표기 불필요"}
           </p>
-          <p className="vb-editor-assets__reason">직접 선택한 자산</p>
+          <p className="vb-editor-assets__reason">직접 선택한 미디어</p>
           {previewState?.status === "preparing" ? <p role="status">원본 미리보기를 준비하고 있어요</p> : null}
           {previewState?.status === "failed" ? <p role="alert">원본 미리보기를 준비하지 못했어요. 편집과 적용은 계속할 수 있어요.</p> : null}
           <p className="vb-editor-assets__card-target">{targetLabel(target)}</p>
@@ -194,7 +194,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
                   ? "유진이 먼저 고려해요."
                   : choice === "never"
                     ? "유진이 추천에서 빼요."
-                    : "유진에게 이 자산을 어떻게 다룰지 알려 줄 수 있어요."}
+                    : "유진에게 이 미디어를 어떻게 다룰지 알려 줄 수 있어요."}
               </p>
               <Button
                 className="vb-editor-assets__filter"
@@ -281,6 +281,6 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         {`${hiddenCount}개 더 보기`}
       </Button>
     ) : null}
-    {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 자산이 없어요.</p> : null}
+    {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 미디어가 없어요.</p> : null}
   </section>;
 }

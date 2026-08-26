@@ -73,13 +73,13 @@ describe("EditorAssetBrowser", () => {
     expect(screen.queryByRole("heading", { name: "제품 사진" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "전체" }));
-    fireEvent.change(screen.getByRole("searchbox", { name: "자산 검색" }), { target: { value: "제품" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "미디어 검색" }), { target: { value: "제품" } });
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 원본 미리보기" }));
 
     expect(onPreview).toHaveBeenCalledWith(cards[0]);
     expect(screen.getByRole("status")).toHaveTextContent("적용 구간: 3.00–7.00초");
     expect(screen.getByRole("article")).toHaveTextContent("적용 구간: 3.00–7.00초");
-    expect(screen.getByText("직접 선택한 자산")).toBeVisible();
+    expect(screen.getByText("직접 선택한 미디어")).toBeVisible();
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
   });
 
@@ -104,7 +104,7 @@ describe("EditorAssetBrowser", () => {
     // 줄로 눕히면서 되풀이되는 설명을 접었는데, 처음엔 라이선스 줄까지 같이
     // 접혔다. 음악·효과음이 **출처 표기가 걸리는 바로 그 자산**이라, 상태와
     // 라이선스는 접으면 안 된다. 접는 것은 `소리 있음`(음악에선 당연한 말),
-    // `직접 선택한 자산`(모든 카드가 같은 문구), 적용 구간(패널 맨 위가 말함)뿐.
+    // `직접 선택한 미디어`(모든 카드가 같은 문구), 적용 구간(패널 맨 위가 말함)뿐.
     render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
 
     const row = screen.getByRole("heading", { name: "배경 음악 1" }).closest("article");
@@ -182,15 +182,15 @@ describe("EditorAssetBrowser", () => {
   it("explains when no card matches the active filters", () => {
     render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
 
-    fireEvent.change(screen.getByRole("searchbox", { name: "자산 검색" }), { target: { value: "없는 자산" } });
+    fireEvent.change(screen.getByRole("searchbox", { name: "미디어 검색" }), { target: { value: "없는 미디어" } });
 
-    expect(screen.getByText("일치하는 자산이 없어요.")).toBeVisible();
+    expect(screen.getByText("일치하는 미디어가 없어요.")).toBeVisible();
   });
 
   it("groups type filters with an accessible name", () => {
     render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
 
-    expect(screen.getByRole("tablist", { name: "자산 종류" })).toBeVisible();
+    expect(screen.getByRole("tablist", { name: "미디어 종류" })).toBeVisible();
   });
 
   it("shows truthful audio presence on every card", () => {
