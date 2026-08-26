@@ -538,16 +538,21 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             return
 
     def get_proposal_preview_status(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
-        # A creator may poll this route alone for the rest of a preview's
-        # life -- the preview UI never re-issues the POST after the first
-        # call. If the API process restarts (or a worker thread just dies)
-        # while a render is in flight, only these two fences here can ever
-        # retire it; run them on every read, not just on ``start``.
-        self.store.recover_inherited_proposal_preview_claims(
-            project_id=project_id, process_epoch=str(self.store.proposal_preview_process_epoch),
-        )
-        self.store.recover_stale_proposal_preview_claims(project_id=project_id)
         record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        if record["state"] in {"pending", "running"}:
+            # A creator may poll this route alone for the rest of a preview's
+            # life -- the preview UI never re-issues the POST after the first
+            # call. If the API process restarts (or a worker thread just
+            # dies) while a render is in flight, only these two fences here
+            # can ever retire it, so run them on every non-terminal read, not
+            # just on ``start``. Gated to pending/running: the succeeded
+            # content route can be polled many times per playback (range
+            # requests), and neither fence touches a terminal row anyway.
+            self.store.recover_inherited_proposal_preview_claims(
+                project_id=project_id, process_epoch=str(self.store.proposal_preview_process_epoch),
+            )
+            self.store.recover_stale_proposal_preview_claims(project_id=project_id)
+            record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
         if record["state"] in {"pending", "running", "succeeded"}:
             try:
                 session, _timeline, _plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=str(record["session_id"]), proposal_id=str(record["proposal_id"]))
