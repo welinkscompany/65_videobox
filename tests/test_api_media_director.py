@@ -145,6 +145,100 @@ def test_yujin_editing_proposal_preview_recovers_a_running_claim_from_a_previous
     assert retried["state"] == "pending"
 
 
+def _proposal_preview_scene_speed_runtime() -> object:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture", raw_text="{}", metadata={},
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.", "proposal": {
+                    "proposal_id": "preview", "base_session_revision": 1,
+                    "operations": [{"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2}],
+                }},
+            )
+    return EditingRuntime()
+
+
+def _start_a_real_proposal_preview(client: TestClient, store: LocalProjectStore, project_id: str) -> tuple[str, str]:
+    timeline = store.save_timeline_run(
+        project_id=project_id, output_mode="review", source_session_revision=1,
+        timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 12}, "tracks": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [
+            {"segment_id": "scene-1", "start_sec": 0, "end_sec": 4},
+            {"segment_id": "scene-2", "start_sec": 4, "end_sec": 12},
+        ], "history": []},
+    )
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "둘째 장면을 빠르게"}).json()
+    started = client.post(f"{root}/yujin-editing-proposals/{proposal['proposal_id']}/preview")
+    assert started.status_code == 202, started.text
+    return session["session_id"], started.json()["generation_id"]
+
+
+def test_yujin_editing_proposal_preview_status_polling_alone_recovers_a_running_claim_after_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker can die mid-render *after* the API process that started it has
+    already restarted (new store, new process epoch). The only thing the
+    creator does afterwards is poll the status GET -- never POST again. If
+    the GET route never re-runs the restart fence, this ``running`` row
+    (owned by a process that no longer exists) is stuck forever."""
+    monkeypatch.setattr(LocalPipelineRunner, "run_proposal_preview", lambda self, **kwargs: None)
+    projects_root = tmp_path / "projects"
+    app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "proposal preview poll-only running recovery"}).json()["project_id"]
+    _session_id, generation_id = _start_a_real_proposal_preview(client, store, project_id)
+    assert store.get_proposal_preview(project_id=project_id, generation_id=generation_id)["state"] == "pending"
+    assert store.claim_proposal_preview(
+        project_id=project_id, generation_id=generation_id,
+        owner_token="proposal-preview-worker:dead-process:worker",
+    )
+
+    # A brand-new API process attaches to the same project directory. It
+    # never calls the preview POST route again -- only GET polling follows.
+    restarted_app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    restarted_client = TestClient(restarted_app)
+
+    response = restarted_client.get(f"/api/projects/{project_id}/proposal-previews/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] not in {"pending", "running"}
+
+
+def test_yujin_editing_proposal_preview_status_polling_alone_recovers_an_aged_orphan_pending_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the process dies after the ``pending`` DB row is created but before
+    any worker thread claims it, the row never reaches ``running`` and the
+    restart-epoch fence never sees it. GET polling alone must still retire
+    it once it is old enough to be unambiguously orphaned."""
+    monkeypatch.setattr(LocalPipelineRunner, "run_proposal_preview", lambda self, **kwargs: None)
+    projects_root = tmp_path / "projects"
+    app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "proposal preview poll-only pending recovery"}).json()["project_id"]
+    _session_id, generation_id = _start_a_real_proposal_preview(client, store, project_id)
+    assert store.get_proposal_preview(project_id=project_id, generation_id=generation_id)["state"] == "pending"
+    store._execute(
+        project_id,
+        "UPDATE proposal_preview_renders SET created_at = ? WHERE generation_id = ?",
+        ("2020-01-01T00:00:00+00:00", generation_id),
+    )
+
+    restarted_app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    restarted_client = TestClient(restarted_app)
+
+    response = restarted_client.get(f"/api/projects/{project_id}/proposal-previews/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] not in {"pending", "running"}
+
+
 def test_yujin_editing_proposal_preview_reports_a_concurrent_session_conflict_as_creator_safe_409(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     class EditingRuntime:
         def generate_structured(self, **_kwargs):

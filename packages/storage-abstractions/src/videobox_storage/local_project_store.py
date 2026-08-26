@@ -1056,12 +1056,18 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         return self._exact_preview_row(dict(row))
 
     def recover_stale_proposal_preview_claims(self, *, project_id: str, older_than_seconds: float = 900) -> int:
+        """Retire both a worker that died mid-render and a row whose worker
+        thread never even started (the process died right after ``pending``
+        was written, before any claim). Neither is reachable through the
+        restart-epoch fence, since that only rewrites ``running`` rows owned
+        by a stale process token -- an unclaimed ``pending`` row has none."""
         cutoff = (self._clock() - timedelta(seconds=older_than_seconds)).isoformat()
         connection = self._connection(project_id)
         try:
             cursor = connection.execute("""UPDATE proposal_preview_renders SET state = 'failed', error_message = 'stale_running_claim', updated_at = ? WHERE project_id = ? AND state = 'running' AND claimed_at < ?""", (self._now_iso(), project_id, cutoff))
+            pending_cursor = connection.execute("""UPDATE proposal_preview_renders SET state = 'failed', error_message = 'stale_pending_claim', updated_at = ? WHERE project_id = ? AND state = 'pending' AND created_at < ?""", (self._now_iso(), project_id, cutoff))
             connection.commit()
-            return cursor.rowcount
+            return cursor.rowcount + pending_cursor.rowcount
         finally:
             connection.close()
 
