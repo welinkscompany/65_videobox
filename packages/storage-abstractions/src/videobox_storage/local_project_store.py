@@ -1011,20 +1011,42 @@ class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin
         finally: connection.close()
 
     def finish_proposal_preview(self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str, source_fence: Callable[[sqlite3.Connection], bool] | None = None, source_fence_result: bool | None = None) -> bool:
+        """Stage bytes first, then atomically publish only through the durable fence."""
+        if not owner_token: raise ValueError("proposal_preview_claim_token_required")
         if not artifact_path.is_file(): raise FileNotFoundError(artifact_path)
         destination = self.project_root(project_id) / "derived" / "proposal_previews"; destination.mkdir(parents=True, exist_ok=True)
-        published = destination / f"{generation_id}.mp4"; shutil.copyfile(artifact_path, published)
-        connection = self._connection(project_id)
+        temporary = destination / f".pp-{generation_id.rsplit('_', 1)[-1][-8:]}-{uuid.uuid4().hex[:6]}.tmp"
+        shutil.copyfile(artifact_path, temporary)
+        published: Path | None = None
+        connection: sqlite3.Connection | None = None
         try:
+            connection = self._connection(project_id)
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT * FROM proposal_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, generation_id)).fetchone()
             current = connection.execute("SELECT session_revision FROM editing_sessions WHERE project_id = ? AND session_id = ?", (project_id, str(row["session_id"]))).fetchone() if row else None
             source_current = (source_fence_result is None or bool(source_fence_result)) and (source_fence is None or bool(source_fence(connection)))
             if row is not None and not source_current:
-                connection.execute("UPDATE proposal_preview_renders SET state = 'obsolete', invalidated_reason = 'publish_source_fence_failed', updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?", (self._now_iso(), project_id, generation_id, owner_token)); connection.commit(); published.unlink(missing_ok=True); return False
+                connection.execute("UPDATE proposal_preview_renders SET state = 'obsolete', invalidated_reason = 'publish_source_fence_failed', updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?", (self._now_iso(), project_id, generation_id, owner_token)); connection.commit(); return False
             if row is None or str(row["state"]) != "running" or str(row["claim_token"] or "") != owner_token or str(row["fingerprint"]) != fingerprint or current is None or int(current["session_revision"]) != int(row["expected_revision"]) or not source_current:
-                published.unlink(missing_ok=True); return False
-            cursor = connection.execute("UPDATE proposal_preview_renders SET state = 'succeeded', artifact_uri = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?", (self._path_to_uri(project_id, published), self._now_iso(), project_id, generation_id, owner_token)); connection.commit(); return cursor.rowcount == 1
-        finally: connection.close()
+                if row is not None and current is not None and int(current["session_revision"]) != int(row["expected_revision"]):
+                    connection.execute("UPDATE proposal_preview_renders SET state = 'obsolete', invalidated_reason = 'session_revision_changed', updated_at = ? WHERE project_id = ? AND generation_id = ?", (self._now_iso(), project_id, generation_id))
+                    connection.commit()
+                else:
+                    connection.rollback()
+                return False
+            published = destination / f"{generation_id}.mp4"
+            temporary.replace(published)
+            cursor = connection.execute("UPDATE proposal_preview_renders SET state = 'succeeded', artifact_uri = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?", (self._path_to_uri(project_id, published), self._now_iso(), project_id, generation_id, owner_token))
+            if cursor.rowcount != 1:
+                connection.rollback(); published.unlink(missing_ok=True); return False
+            connection.commit(); return True
+        except Exception:
+            if connection is not None and connection.in_transaction: connection.rollback()
+            if published is not None: published.unlink(missing_ok=True)
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+            if connection is not None: connection.close()
 
     def get_proposal_preview(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
         row = self._fetchone(project_id, "SELECT * FROM proposal_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, generation_id))

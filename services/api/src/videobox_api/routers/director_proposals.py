@@ -257,7 +257,10 @@ def build_director_proposals_router(
     @router.get("/api/projects/{project_id}/proposal-previews/{generation_id}")
     def get_yujin_editing_proposal_preview(project_id: str, generation_id: str):
         try:
-            return _proposal_preview_payload(project_id, orchestrator.pipeline.get_proposal_preview_status(project_id=project_id, generation_id=generation_id))
+            record = orchestrator.pipeline.get_proposal_preview_status(project_id=project_id, generation_id=generation_id)
+            if record.get("state") == "obsolete":
+                return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
+            return _proposal_preview_payload(project_id, record)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="proposal_preview_missing") from exc
 
@@ -265,6 +268,8 @@ def build_director_proposals_router(
     def get_yujin_editing_proposal_preview_content(project_id: str, generation_id: str):
         try:
             record = orchestrator.pipeline.get_proposal_preview_status(project_id=project_id, generation_id=generation_id)
+            if record.get("state") == "obsolete":
+                return JSONResponse(status_code=409, content={"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."})
             if record.get("state") != "succeeded" or not record.get("artifact_uri"):
                 raise KeyError("proposal_preview_not_current")
             path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(record["artifact_uri"]))
