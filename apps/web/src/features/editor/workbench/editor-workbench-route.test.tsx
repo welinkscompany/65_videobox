@@ -1940,7 +1940,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
 
     await expectEditorRevision(1);
-    expect(await screen.findByText("일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.")).toBeVisible();
+    expect(await screen.findByText("일부 미디어를 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.")).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
@@ -3904,14 +3904,14 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
 
-    expect(await screen.findByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeVisible();
+    expect(await screen.findByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 미디어 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeVisible();
 
     const retry = screen.getByRole("button", { name: "유진에게 추천받기" });
     expect(retry).toBeEnabled();
     fireEvent.click(retry);
 
     await waitFor(() => expect(createProposal).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 미디어 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeNull());
   });
 
   it("does not repeat an explicit apply while its preflight and batch apply are in flight", async () => {

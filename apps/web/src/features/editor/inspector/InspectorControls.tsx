@@ -441,7 +441,7 @@ export function InspectorControls({
       {target?.kind === "media" ? (
         <fieldset>
           <legend>{target.label}</legend>
-          <p>현재 자산이 연결되어 있어요.</p>
+          <p>현재 미디어가 연결되어 있어요.</p>
           {!target.clearOnly ? (
             <>
               {target.fields.includes("fadeInSec") ? (

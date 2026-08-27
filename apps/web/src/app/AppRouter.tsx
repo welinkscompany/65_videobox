@@ -476,7 +476,7 @@ function GlobalDestinationPage({ testId, title, description, readiness }: { test
  * 사람이 읽고 바로 아는 한 문장으로 바꾼다(§10.13). */
 const projectStateSentence: Record<ProjectWorkspaceSummary["current_stage"], Record<"blocked" | "attention" | "ready", string>> = {
   plan: { blocked: "이야기를 정하다 막혔어요", attention: "이야기를 확인해 주세요", ready: "이야기를 정하는 중" },
-  assets: { blocked: "재료를 넣다 막혔어요", attention: "빠진 재료가 있어요", ready: "재료를 모으는 중" },
+  assets: { blocked: "미디어를 넣다 막혔어요", attention: "빠진 미디어가 있어요", ready: "미디어를 모으는 중" },
   edit: { blocked: "편집하다 막혔어요", attention: "편집을 확인해 주세요", ready: "편집하는 중" },
   review: { blocked: "확인하다 막혔어요", attention: "확인이 필요해요", ready: "마지막 확인 중" },
   output: { blocked: "영상을 만들다 막혔어요", attention: "완성본을 확인해 주세요", ready: "영상으로 뽑는 중" },
@@ -772,7 +772,7 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
       <Button type="button" variant="outline" disabled={isOpeningBlank} onClick={() => void openBlankBoard()}>
         {isOpeningBlank ? "편집판을 여는 중" : "빈 편집판으로 시작"}
       </Button>
-      <Button type="button" variant="outline" onClick={() => onNavigate(projectId, "assets")}>먼저 재료부터 모으기</Button>
+      <Button type="button" variant="outline" onClick={() => onNavigate(projectId, "assets")}>먼저 미디어부터 모으기</Button>
       {blankError ? <p role="alert">{blankError}</p> : null}
     </> : null}
   </div>;

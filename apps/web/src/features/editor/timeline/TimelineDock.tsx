@@ -730,7 +730,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         스크롤 안에 숨어 있었다 -- 자리가 모자란 게 아니라 글자가 먹고 있었다. */}
     <div className="vb-editor-workbench__timeline-head">
       <h2>타임라인</h2>
-      <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 자산 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
+      <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 미디어 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
       {/* 조작 설명 한 줄을 뺐다(owner 지시 2026-08-22: 설명 문장을 키워드로).
           클릭해서 재생 위치를 보는 것은 타임라인이면 다 그렇고, 화살표·Home·End는
           눌러 보면 안다. 캡컷 타임라인에도 이런 안내가 없다. */}
@@ -895,7 +895,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
     {/* 아래 상태 줄들도 같은 이유로 한 줄에 모은다. 하나하나는 짧은 조각인데
         한 줄씩 차지하면 눈금과 트랙이 밀려 스크롤 안으로 들어간다. */}
     <div className="vb-editor-workbench__timeline-foot">
-      {visibleGaps.map((gap) => <p key={gap.gapId}>자산 공백: {gap.reason}</p>)}
+      {visibleGaps.map((gap) => <p key={gap.gapId}>미디어 공백: {gap.reason}</p>)}
       {caption ? <p>현재 자막: {caption.text}</p> : <p>현재 자막 없음</p>}
       {selectedPlacementIds.length > 1 ? <p>선택한 독립 항목: {selectedPlacementIds.length}개</p> : null}
       {/* §10.13: the snap target id is an internal key (caption:<segment>:start)

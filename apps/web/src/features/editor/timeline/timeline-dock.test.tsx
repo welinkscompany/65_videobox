@@ -494,7 +494,7 @@ describe("TimelineDock", () => {
     expect(screen.queryByText("o-late")).toBeNull();
     expect(screen.getByLabelText("눈금 0초")).toBeInTheDocument();
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
-    expect(screen.getByText("자산 공백: asset_required")).toBeInTheDocument();
+    expect(screen.getByText("미디어 공백: asset_required")).toBeInTheDocument();
     expect(screen.getByText("현재 자막: 첫 자막")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (0초)" )).toBeInTheDocument();
   });

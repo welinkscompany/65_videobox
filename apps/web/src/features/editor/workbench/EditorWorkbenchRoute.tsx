@@ -126,7 +126,7 @@ type VariantState = Readonly<{
   busy: boolean;
 }>;
 
-const assetLoadError = "일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
+const assetLoadError = "일부 미디어를 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.";
 const yujinUnavailableMessage = "유진의 답을 받지 못했어요.";
 const hermesUnavailableTechnicalText = "Hermes is temporarily unavailable. Manual Director remains available.";
 const maxDirectorMessages = 200;
@@ -237,7 +237,7 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
  *  "실패했다"만 남기는 것이 지금까지의 문제였다. */
 function directorStartFailureMessage(error: unknown) {
   return error instanceof DirectorProposalBlockedError
-    ? "촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요."
+    ? "촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 미디어 화면에서 확인한 뒤 다시 눌러 주세요."
     : "유진에게 추천을 받지 못했어요. 잠시 뒤 다시 눌러 주세요.";
 }
 

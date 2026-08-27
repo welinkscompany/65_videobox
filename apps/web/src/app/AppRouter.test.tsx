@@ -223,7 +223,7 @@ describe("AppRouter URL ownership", () => {
     // 상태인지 사람 말로 적는다(§10.13). 2026-08-17 owner 지적.
     expect(draftCard).toHaveTextContent("편집하는 중");
     // 이 픽스처는 `attention`이라 "모으는 중"이 아니라 확인을 청하는 문장이 맞다.
-    expect(assetCard).toHaveTextContent("빠진 재료가 있어요");
+    expect(assetCard).toHaveTextContent("빠진 미디어가 있어요");
     expect(newCard).toHaveTextContent("이야기를 정하는 중");
     // 기계 시각을 그대로 내보내지 않는다.
     expect(newCard).not.toHaveTextContent("+00:00");

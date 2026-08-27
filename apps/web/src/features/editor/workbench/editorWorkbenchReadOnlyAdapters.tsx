@@ -44,7 +44,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     // 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이 세로로 더 쌓여 있었다.
     //
     // `영상 구성`은 **없앴다.** 타임라인 머리말이 이미 같은 말을 한다
-    // (`n개 트랙 · n개 자막 · n개 자산 공백`)는 데다, 클립은 타임라인이 직접 보여 준다.
+    // (`n개 트랙 · n개 자막 · n개 미디어 공백`)는 데다, 클립은 타임라인이 직접 보여 준다.
     // 나머지 둘은 탭 안으로 들어간다 -- 자막은 캡컷 `텍스트` 자리, 소스 확인은 미디어 안.
     return <EditorAssetBrowser
       cards={assetCards} target={assetTarget} isSaving={isSavingCaption}
