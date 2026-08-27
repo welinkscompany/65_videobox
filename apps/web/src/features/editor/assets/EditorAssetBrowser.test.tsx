@@ -421,3 +421,35 @@ describe("자산 내역 길이", () => {
     expect(screen.queryByRole("button", { name: /더 보기/ })).toBeNull();
   });
 });
+
+/** owner(2026-08-27): "우리 메뉴가 너무 각각 페이지별로 따로 놀아. 이걸 캡컷처럼
+ *  편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지 하는게 나을거 같어."
+ *
+ *  재 보니 **편집기 안에서는 새 미디어를 추가할 길이 아예 없었다.** 파일 입력도,
+ *  미디어 화면으로 나가는 링크조차 없었다. 쓰려면 위 띠에서 미디어 단계를 눌러
+ *  화면을 떠나야 한다는 것을 스스로 알아내야 했다.
+ *
+ *  캡컷은 미디어 탭 안에서 바로 가져온다. 여기서 지키는 것은 **편집기를 떠나지
+ *  않고 미디어를 더할 수 있는가**다.
+ *  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */
+describe("편집기에서 미디어 더하기", () => {
+  it("편집기를 떠나지 않고 파일을 더할 수 있다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    expect(screen.getByLabelText("미디어 파일 추가")).toBeVisible();
+  });
+
+  it("고른 파일을 라이브러리에 넣고 이 프로젝트로 가져온다", async () => {
+    const ingest = vi.spyOn(apiModule.api, "ingestLibraryAssets").mockResolvedValue({ items: [{ library_asset_id: "lib-1", state: "ready", filename: "a.mp4" }] } as never);
+    const materialize = vi.spyOn(apiModule.api, "materializeLibraryAsset").mockResolvedValue({} as never);
+    const onAdded = vi.fn();
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" onMediaAdded={onAdded} />);
+
+    fireEvent.change(screen.getByLabelText("미디어 파일 추가"), { target: { files: [new File(["x"], "a.mp4", { type: "video/mp4" })] } });
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("lib-1", "project-a"));
+    expect(ingest).toHaveBeenCalled();
+    // 더해진 것이 목록에 바로 보이도록 부른 쪽에 알린다.
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+  });
+});

@@ -264,6 +264,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], libraryImageAssets: [], error: null });
+  /** 편집기 안에서 미디어를 더하면 목록을 다시 읽는다. 더한 것이 바로 안 보이면
+   *  창작자는 실패한 줄 안다(owner 승인 2026-08-27). */
+  const [assetRefreshToken, setAssetRefreshToken] = useState(0);
   const [mutation, setMutation] = useState<MutationState>({ isSaving: false });
   const captionPreflightInFlight = useRef(false);
   const [director, setDirector] = useState<DirectorState>(() => createDirectorState(requestKey, sessionId));
@@ -562,7 +565,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       setAssets((current) => current.key === requestKey ? { ...current, error: assetLoadError } : current);
     });
     return () => { active = false; };
-  }, [projectId, requestKey, sessionId]);
+  }, [assetRefreshToken, projectId, requestKey, sessionId]);
   const memoryConversationId = director.key === requestKey
     ? director.conversationId
     : null;
@@ -2086,6 +2089,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onInspectorAction={handleInspectorAction}
     onPreviewRefresh={refreshPreview}
     onPreviewSelectedRange={previewSelectedRange}
+    onMediaAdded={() => setAssetRefreshToken((current) => current + 1)}
     onReorderNarration={(input) => commitTimelineMutation((port) => port.reorderNarration(input))}
     onRedo={() => commitTimelineMutation((port) => port.redo())}
     onTrimNarration={(input) => commitTimelineMutation((port) => port.setNarrationBounds(input))}

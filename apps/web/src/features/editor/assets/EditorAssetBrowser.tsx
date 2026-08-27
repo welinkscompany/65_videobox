@@ -5,6 +5,7 @@ import { Input } from "../../../components/ui/input";
 import { assetPreferenceChoice, canonicalPreferenceTag, useDirectorPreferences } from "./directorPreferences";
 import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind, type EditorAssetOrientation } from "./editorAssetProjection";
 import { writeAssetDrag } from "./assetDragPayload";
+import { AddMediaFiles } from "../../media/AddMediaFiles";
 
 type EditorAssetTarget = Readonly<{
   segmentId: string;
@@ -26,6 +27,8 @@ type Props = Readonly<{
   onRefreshExactPreview?: () => void;
   /** 있으면 "항상 쓰기 / 쓰지 않기"를 저장한다. 없으면 그 절만 빠진다. */
   projectId?: string;
+  /** 편집기 안에서 미디어를 더한 뒤 목록을 다시 읽게 한다. */
+  onMediaAdded?: () => void | Promise<void>;
 }>;
 
 const filters: readonly Readonly<{ type: "all" | EditorAssetKind; label: string }>[] = [
@@ -51,7 +54,7 @@ function targetLabel(target: EditorAssetTarget | null): string {
 /** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
 const FIRST_PAGE = 8;
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded }: Props) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
   const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
@@ -75,6 +78,12 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
 
   return <section className="vb-editor-assets" aria-label="편집기 미디어">
     <div className="vb-editor-assets__controls">
+      {/* **편집기를 떠나지 않고 미디어를 더한다(owner 승인 2026-08-27).**
+          2026-08-27에 재 보니 편집기 안에는 미디어를 더할 길이 아예 없었다 --
+          파일 입력도, 미디어 화면으로 나가는 링크조차 없었다. 쓰려면 위 띠에서
+          미디어 단계를 눌러 화면을 떠나야 한다는 것을 스스로 알아내야 했다.
+          올리는 절차는 미디어 화면과 **같은 조각**을 쓴다(두 벌로 적지 않는다). */}
+      {projectId ? <AddMediaFiles projectId={projectId} onAdded={onMediaAdded} /> : null}
       <label className="vb-editor-assets__search-label">
         <span>미디어 검색</span>
         {/* **빈 칸에 힌트를 넣는다**(2026-08-22, `capcut-observed` 기록 §5 "공통 생김새":
