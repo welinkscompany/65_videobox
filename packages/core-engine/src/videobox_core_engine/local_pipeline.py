@@ -296,6 +296,25 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # should run implicitly for callers/tests that don't opt in.
         self.tts_provider = tts_provider
         self.transcript_aligner = transcript_aligner or HeuristicTranscriptAligner()
+        # (경로, mtime_ns) → sha256. `FfmpegFinalRenderer._stream_probe_cache`와 같은
+        # 이유다 -- exact-preview 요청 하나가 같은 자산을 지문 계산·소스 스냅샷 두
+        # 자리에서 다시 잰다(2026-08-28 실측: my-project 18개 자산, 자리당 ~4.6초).
+        # `_revalidate_exact_preview_source_snapshots`는 여기서 뺀다 -- 그건 읽는
+        # 그 순간의 경합까지 잡으려고 일부러 매번 새로 읽는 자리다.
+        self._exact_preview_asset_hash_cache: dict[tuple[str, int], str] = {}
+
+    def _cached_sha256_file(self, path: Path) -> str:
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError:
+            return sha256_file(path)
+        key = (str(path), mtime_ns)
+        cached = self._exact_preview_asset_hash_cache.get(key)
+        if cached is not None:
+            return cached
+        digest = sha256_file(path)
+        self._exact_preview_asset_hash_cache[key] = digest
+        return digest
 
     def build_composition_plan(
         self, *, timeline: dict[str, Any], editing_session: dict[str, Any] | None = None,
@@ -400,7 +419,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     source = resolve_generic_asset_uri(
                         store=self.store, project_id=project_id, asset_uri=str(item.asset_uri or "")
                     )
-                used_asset_sha256[identity] = sha256_file(source) if source.is_file() else f"missing:{identity}"
+                used_asset_sha256[identity] = self._cached_sha256_file(source) if source.is_file() else f"missing:{identity}"
             except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
                 # A request still gets a durable, fenced generation so the
                 # worker can report an explicit recoverable failed state.
@@ -416,7 +435,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 identity = f"export_overlay:{asset_id or index}"
                 try:
                     source = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
-                    used_asset_sha256[identity] = sha256_file(source) if source.is_file() else f"missing:{identity}"
+                    used_asset_sha256[identity] = self._cached_sha256_file(source) if source.is_file() else f"missing:{identity}"
                 except (KeyError, OSError, ValueError, TimelineClipSourceError):
                     used_asset_sha256[identity] = f"missing:{identity}"
             resolved_overlays.append(normalized)
@@ -456,7 +475,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     )
                 if not path.is_file():
                     raise FileNotFoundError(path)
-                expected_by_path[path.resolve()] = sha256_file(path)
+                expected_by_path[path.resolve()] = self._cached_sha256_file(path)
             for overlay in plan.export_overlays:
                 asset_uri = str(overlay.get("asset_uri") or "")
                 asset_id = str(overlay.get("asset_id") or "")
@@ -467,11 +486,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 path = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
                 if not path.is_file():
                     raise FileNotFoundError(path)
-                expected_by_path[path.resolve()] = sha256_file(path)
+                expected_by_path[path.resolve()] = self._cached_sha256_file(path)
             timeline_path = self.store.project_root(project_id) / "timelines" / f"{session['timeline_id']}.json"
             if not timeline_path.is_file():
                 raise FileNotFoundError(timeline_path)
-            expected_by_path[timeline_path.resolve()] = sha256_file(timeline_path)
+            expected_by_path[timeline_path.resolve()] = self._cached_sha256_file(timeline_path)
         except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
             return None
         return expected_by_path
