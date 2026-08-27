@@ -37,7 +37,10 @@ class OutputSourceSnapshot:
     expected_media_revision: str | None
 
 
-def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: dict[str, Any]) -> tuple[OutputSourceSnapshot, ...]:
+def capture_output_source_snapshots(
+    *, store: Any, project_id: str, timeline: dict[str, Any],
+    hash_cache: dict[tuple[Path, int], str] | None = None,
+) -> tuple[OutputSourceSnapshot, ...]:
     """Snapshot every concrete project asset consumed by the composition.
 
     A persisted expected SHA/revision is validated when present, but cannot be
@@ -45,6 +48,25 @@ def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: di
     current SHA and revision for every project asset in tracks and export
     overlays so final publication cannot make an output from replaced bytes
     observable merely because an older timeline lacks Task-11 identity fields.
+
+    ``hash_cache`` is an optional, caller-owned ``(path, mtime_ns) -> sha256``
+    cache (same shape as ``FfmpegFinalRenderer._stream_probe_cache``). A
+    changed file always changes mtime, so a cache hit is exactly as trustworthy
+    as a fresh read. Omit it (default) and this hashes fresh every call, same
+    as before. This hashing is unrelated to (and on top of) the exact-preview
+    pipeline's own hash pass over the same files (``local_pipeline.py``'s
+    ``_exact_preview_asset_hash_cache``) -- the two do not share a cache.
+
+    2026-08-28: a single ``render_exact_preview_to_mp4`` call was measured
+    hashing the same handful of project-local sources here in ~3.2s with no
+    cache, ~2.5s of which was one real (546MB) source's first full read.
+    Passing ``FfmpegFinalRenderer._output_source_hash_cache`` in only helps
+    *within* one such call right now -- ``render_exact_preview_to_mp4``
+    builds its proxy renderer with ``dataclasses.replace(self, ...)``, and
+    `replace()` re-runs every ``init=False`` field's ``default_factory``,
+    so this cache (and the pre-existing ``_stream_probe_cache``) starts
+    empty again on every render. Making it survive across renders needs a
+    separate fix to that construction, not this function.
     """
     root = store.project_root(project_id).resolve()
     digests_by_path: dict[Path, str] = {}
@@ -120,7 +142,7 @@ def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: di
             raise OutputSourceStaleError("materialized source is not project-local") from exc
         if not path.is_file():
             raise OutputSourceStaleError("materialized source is missing")
-        actual_digest = _sha256_streaming(path, digests_by_path)
+        actual_digest = _cached_or_streamed_sha256(path, digests_by_path, hash_cache)
         if expected and actual_digest != expected:
             raise OutputSourceStaleError("content SHA-256 changed")
         actual_revision = str(asset.get("created_at") or "")
@@ -155,11 +177,27 @@ def verify_output_source_snapshots(
                 raise OutputSourceStaleError("media revision changed")
 
 
-def verify_output_sources(*, store: Any, project_id: str, timeline: dict[str, Any]) -> None:
-    """Verify all materialized timeline sources before output work begins."""
-    verify_output_source_snapshots(capture_output_source_snapshots(
-        store=store, project_id=project_id, timeline=timeline,
-    ))
+def verify_output_sources(
+    *, store: Any, project_id: str, timeline: dict[str, Any],
+    hash_cache: dict[tuple[Path, int], str] | None = None,
+) -> None:
+    """Verify all materialized timeline sources before output work begins.
+
+    2026-08-28: this used to call ``verify_output_source_snapshots`` right
+    after ``capture_output_source_snapshots`` with zero elapsed time in
+    between -- capture already raises ``OutputSourceStaleError`` on any
+    expected-vs-actual sha mismatch while it hashes, so re-hashing the same
+    bytes microseconds later could only ever agree with itself. Measured on
+    my-project: that immediate re-verify cost ~2.3s of a ~5.5s call for no
+    protection. The real "capture, do work, then recheck" fence this file
+    also provides is unaffected -- it lives at its own call sites
+    (``local_pipeline.py``), which capture before work and call
+    ``verify_output_source_snapshots`` again afterward, when real time (and
+    therefore real risk of the file changing) has actually elapsed.
+    """
+    capture_output_source_snapshots(
+        store=store, project_id=project_id, timeline=timeline, hash_cache=hash_cache,
+    )
 
 
 def _sha256_streaming(path: Path, digests_by_path: dict[Path, str]) -> str:
@@ -174,6 +212,27 @@ def _sha256_streaming(path: Path, digests_by_path: dict[Path, str]) -> str:
     value = digest.hexdigest()
     digests_by_path[path] = value
     return value
+
+
+def _cached_or_streamed_sha256(
+    path: Path, digests_by_path: dict[Path, str], hash_cache: dict[tuple[Path, int], str] | None,
+) -> str:
+    """As ``_sha256_streaming``, but backed by an optional caller-owned
+    ``(path, mtime_ns)`` cache that can outlive a single call (see
+    ``capture_output_source_snapshots``)."""
+    if hash_cache is None:
+        return _sha256_streaming(path, digests_by_path)
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return _sha256_streaming(path, digests_by_path)
+    key = (path, mtime_ns)
+    cached = hash_cache.get(key)
+    if cached is not None:
+        return cached
+    digest = _sha256_streaming(path, digests_by_path)
+    hash_cache[key] = digest
+    return digest
 
 
 def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline: dict[str, Any], subtitle: dict[str, Any] | None = None, review: dict[str, Any] | None = None, variant: dict[str, Any] | None = None) -> None:

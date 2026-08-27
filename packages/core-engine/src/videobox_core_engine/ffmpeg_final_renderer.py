@@ -656,6 +656,14 @@ class FfmpegFinalRenderer:
     # (경로, selector, mtime) → 스트림 존재 여부. 렌더 하나가 같은 원본을
     # 클립 수만큼 다시 재지 않게 한다.
     _stream_probe_cache: dict[tuple[str, str, int], bool] = field(default_factory=dict, init=False, repr=False, compare=False)
+    # (경로, mtime) → sha256. `verify_output_sources()`가 렌더 하나 안에서 같은
+    # 소스를 여러 클립이 가리킬 때 다시 재는 것을 막는다. **렌더를 넘어서는
+    # 못 막는다** -- `render_exact_preview_to_mp4`가 `dataclasses.replace(self, ...)`로
+    # proxy_renderer를 새로 만드는데, `replace()`는 `init=False` 필드의
+    # `default_factory`를 다시 부르므로 이 자리도 `_stream_probe_cache`도 렌더마다
+    # 빈 채로 되돌아간다(2026-08-28 확인). 자세한 내용은
+    # `output_source_verifier.capture_output_source_snapshots`의 docstring.
+    _output_source_hash_cache: dict[tuple[Path, int], str] = field(default_factory=dict, init=False, repr=False, compare=False)
 
     @staticmethod
     def _cgroup_cpu_quota() -> int | None:
@@ -1184,7 +1192,10 @@ class FfmpegFinalRenderer:
         if not composition_plan.items:
             raise FinalRenderError("Timeline has no composable clips to render.")
         generated_ass: Path | None = None
-        verify_output_sources(store=self.store, project_id=project_id, timeline=timeline_context)
+        verify_output_sources(
+            store=self.store, project_id=project_id, timeline=timeline_context,
+            hash_cache=self._output_source_hash_cache,
+        )
         source_paths: list[tuple[Path, bool, bool]] = []
         # **2026-08-27: owner가 실제 프로젝트에서 컷 한 번에 21초가 걸린다고
         # 신고했다.** 서버 기록으로 실측했다(created_at→updated_at). 원인은
@@ -1864,7 +1875,10 @@ class FfmpegFinalRenderer:
                 "Track hide/mute renders only from the composition plan. "
                 "Pass composition_plan to render this timeline."
             )
-        verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
+        verify_output_sources(
+            store=self.store, project_id=project_id, timeline=timeline,
+            hash_cache=self._output_source_hash_cache,
+        )
         # Keep extraction on the final-render path now so source/timeline
         # shapes are validated by its existing regression suite.  The proxy
         # renderer is deliberately not introduced in this task.
