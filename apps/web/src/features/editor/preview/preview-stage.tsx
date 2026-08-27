@@ -224,8 +224,14 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         : currentMedia && (isImageAudition
         ? <img aria-label={mediaLabel} src={currentMedia.url} alt="" />
         : mode.kind === "audition" && mode.media.mediaKind === "audio"
-        ? <audio ref={mediaRef as RefObject<HTMLAudioElement>} aria-label={mediaLabel} src={currentMedia.url} controls preload="metadata" onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />
-        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} controls preload="metadata" playsInline onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
+        // **재생바를 하나만 둔다(owner 지적: 재생 조작이 복잡하다).** 브라우저
+        // 기본 `controls`를 켜 두면 그 아래 우리 재생바(이전 프레임·재생·다음
+        // 프레임·반복·전체화면)와 겹쳐서 두 벌이 뜬다 -- 탐색바도 재생 버튼도
+        // 둘씩이었다. 재생·탐색은 이 컴포넌트가 이미 다 다룬다
+        // (`togglePlayback`·`stepFrame`·타임라인 재생헤드 끌기), 기본
+        // 컨트롤은 끈다.
+        ? <audio ref={mediaRef as RefObject<HTMLAudioElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />
+        : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" playsInline onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
       {!currentMedia && <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>}
     </div>
     {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button></div><output aria-live="off">타임라인 {timelineTime.toFixed(1)}{timelineTimeSuffix}</output></div>}
