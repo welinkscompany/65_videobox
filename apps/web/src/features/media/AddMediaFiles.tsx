@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 
 import { api } from "../../api";
-import { Input } from "../../components/ui/input";
+import { Button } from "../../components/ui/button";
 
 /** 파일을 골라 **이 프로젝트의 미디어로** 들이는 한 조각.
  *
@@ -23,7 +23,7 @@ import { Input } from "../../components/ui/input";
  */
 export function AddMediaFiles({
   projectId,
-  label = "미디어 파일 추가",
+  label = "파일 추가",
   onAdded,
 }: {
   projectId: string;
@@ -34,6 +34,7 @@ export function AddMediaFiles({
   const [message, setMessage] = useState<string | null>(null);
   // 화면이 사라진 뒤 상태를 건드리지 않도록, 마지막 요청만 말하게 한다.
   const requestId = useRef(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   async function addFiles(files: FileList) {
     if (files.length === 0 || busy) return;
@@ -73,20 +74,28 @@ export function AddMediaFiles({
 
   return (
     <div className="vb-add-media">
-      <label htmlFor={`add-media-${projectId}`}>{label}</label>
-      <Input
-        id={`add-media-${projectId}`}
+      {/* **입력칸을 감추고 단추로 연다.** 좁은 도크(265px)에서 네이티브 파일칸은
+          `파일 선택 | 선택된 파일 없음`까지 그려서 한 줄을 통째로 먹었다. 재 보니
+          도크 402px 중 조작부가 282px(70%)였고 첫 미디어 카드는 335px 아래에서야
+          시작했다 -- 미디어를 보러 연 칸인데 미디어가 안 보였다.
+          이 저장소가 이미 쓰는 방식이다(`AssetIngestDropzone`). */}
+      <input
+        ref={inputRef}
+        data-native-control="editor-media-file-input"
+        aria-label={label}
         type="file"
         accept="video/*,.mp4,.mov,.webm,.mkv"
         multiple
-        disabled={busy}
+        hidden
         onChange={(event) => {
           const files = event.target.files;
           event.target.value = "";
           if (files && files.length > 0) void addFiles(files);
         }}
       />
-      {busy ? <p role="status">파일을 더하고 있어요.</p> : null}
+      <Button type="button" variant="outline" disabled={busy} onClick={() => inputRef.current?.click()}>
+        {busy ? "더하는 중" : label}
+      </Button>
       {message ? <p role="status">{message}</p> : null}
     </div>
   );

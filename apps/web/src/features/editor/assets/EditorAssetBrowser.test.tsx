@@ -436,7 +436,12 @@ describe("편집기에서 미디어 더하기", () => {
   it("편집기를 떠나지 않고 파일을 더할 수 있다", () => {
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
 
-    expect(screen.getByLabelText("미디어 파일 추가")).toBeVisible();
+    // **갱신 이유(2026-08-27).** 네이티브 파일칸을 그대로 두니 좁은 도크에서
+    // `파일 선택 | 선택된 파일 없음`까지 그려 한 줄을 통째로 먹었다. 입력은 감추고
+    // 단추로 연다. 지키려던 것은 **떠나지 않고 더할 수 있는가**이지 입력칸이
+    // 눈에 보이는 것이 아니었으므로, 지키는 것은 그대로 두고 잡는 곳만 옮긴다.
+    expect(screen.getByRole("button", { name: "파일 추가" })).toBeVisible();
+    expect(screen.getByLabelText("파일 추가")).toHaveAttribute("type", "file");
   });
 
   it("고른 파일을 라이브러리에 넣고 이 프로젝트로 가져온다", async () => {
@@ -445,7 +450,7 @@ describe("편집기에서 미디어 더하기", () => {
     const onAdded = vi.fn();
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" onMediaAdded={onAdded} />);
 
-    fireEvent.change(screen.getByLabelText("미디어 파일 추가"), { target: { files: [new File(["x"], "a.mp4", { type: "video/mp4" })] } });
+    fireEvent.change(screen.getByLabelText("파일 추가"), { target: { files: [new File(["x"], "a.mp4", { type: "video/mp4" })] } });
 
     await waitFor(() => expect(materialize).toHaveBeenCalledWith("lib-1", "project-a"));
     expect(ingest).toHaveBeenCalled();

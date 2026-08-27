@@ -120,6 +120,10 @@ const nativeControlAllowlist = {
     controls: ["input:narration-audio-input"],
     reason: "Putting narration into a project needs the platform file picker; the visible trigger stays an owned Button.",
   },
+  "features/media/AddMediaFiles.tsx": {
+    controls: ["input:editor-media-file-input"],
+    reason: "The editor media dock owns a hidden file input so its picker trigger can be a compact button in a narrow column.",
+  },
   "features/library/AssetIngestDropzone.tsx": {
     controls: ["button:asset-file-add", "button:asset-folder-add", "input:asset-file-input", "input:asset-folder-input"],
     reason: "The library ingest surface owns the hidden file and folder inputs and their explicit picker triggers.",

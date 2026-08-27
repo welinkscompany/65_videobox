@@ -147,6 +147,11 @@
 /* **캡컷식 탭 줄**(owner 지시 2026-08-22: "캡컷은 대부분 메뉴들을 탭으로 정리해서
    깔끔하게 만들었어"). 알약이 아니라 탭으로 보여야 한다 -- 둥근 테두리를 없애고
    고른 것만 아래에 선을 긋는다. 캡컷 편집기 왼쪽 위가 이 모양이다. */
+/* 더하기 조작 셋을 한 줄로. 각자 한 줄씩 쓰던 때는 도크 402px 중 조작부가
+   282px(70%)를 먹어 첫 미디어 카드가 335px 아래에서 시작했다 -- 미디어를 보러
+   연 칸인데 미디어가 안 보였다(2026-08-27 실측). */
+.vb-editor-assets__add-row { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); margin-bottom: var(--vb-space-2); }
+.vb-editor-assets__add-row > * { flex: 1 1 auto; }
 .vb-editor-assets__tabs { display: flex; gap: var(--vb-space-1); border-bottom: 1px solid var(--border); margin-bottom: var(--vb-space-2); }
 .vb-editor-assets__tab {
   padding: var(--vb-space-2) var(--vb-space-3);

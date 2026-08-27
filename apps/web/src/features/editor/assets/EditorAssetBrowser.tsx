@@ -88,7 +88,8 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           파일 입력도, 미디어 화면으로 나가는 링크조차 없었다. 쓰려면 위 띠에서
           미디어 단계를 눌러 화면을 떠나야 한다는 것을 스스로 알아내야 했다.
           올리는 절차는 미디어 화면과 **같은 조각**을 쓴다(두 벌로 적지 않는다). */}
-      {projectId ? <AddMediaFiles projectId={projectId} onAdded={onMediaAdded} /> : null}
+      {projectId ? <div className="vb-editor-assets__add-row" role="group" aria-label="미디어 더하기">
+        <AddMediaFiles projectId={projectId} onAdded={onMediaAdded} />
       {/* **내레이션은 팝업으로 연다(owner 승인 2026-08-27).**
           > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
 
@@ -97,7 +98,6 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           떠나야 했다. 다만 이 도크는 220~400px이라 목소리 등록·후보 생성·청취
           승인까지 넣으면 답답하다. 그래서 도크에 밀어 넣지 않고 팝업으로 연다.
           패널은 **미디어 화면이 쓰는 것을 그대로** 쓴다. */}
-      {projectId ? <>
         <Button type="button" variant="outline" className="vb-editor-assets__narration" onClick={() => setNarrationOpen(true)}>내레이션</Button>
         <Button type="button" variant="outline" className="vb-editor-assets__footage" onClick={() => setFootageOpen(true)}>촬영본</Button>
         <Dialog open={footageOpen} onOpenChange={setFootageOpen}>
@@ -118,7 +118,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
             <VoiceMaterialPanel projectId={projectId} />
           </DialogContent>
         </Dialog>
-      </> : null}
+      </div> : null}
       <label className="vb-editor-assets__search-label">
         <span>미디어 검색</span>
         {/* **빈 칸에 힌트를 넣는다**(2026-08-22, `capcut-observed` 기록 §5 "공통 생김새":
