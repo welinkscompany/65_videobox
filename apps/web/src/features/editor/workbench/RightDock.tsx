@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
 import { YujinStarters } from "../../yujin/YujinStarters";
-import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
+import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockEditingProposalPreview, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
@@ -166,6 +166,7 @@ export function RightDock({
   const [shownCandidates, setShownCandidates] = useState(CANDIDATE_PAGE);
   const [retryRemaining, setRetryRemaining] = useState(0);
   const [editingProposalOpen, setEditingProposalOpen] = useState(false);
+  const editingProposalPreview: RightDockEditingProposalPreview = editingProposal?.preview ?? { kind: "idle" };
   const historyRef = useRef<HTMLDivElement>(null);
   const composerContainerRef = useRef<HTMLDivElement>(null);
 
@@ -418,8 +419,16 @@ export function RightDock({
             <ul aria-label="바뀌는 항목">{editingProposal.operationSummaries.map((summary, index) => <li key={`${index}:${summary}`}>{summary}</li>)}</ul>
             {editingProposal.followUpQuestions.length ? <div aria-label="이어서 물어보기">{editingProposal.followUpQuestions.map((question) => <Button key={question} type="button" variant="outline" onClick={() => onDraftChange(question)}>{question}</Button>)}</div> : null}
             {editingProposal.error ? <p role="alert">{editingProposal.error}</p> : null}
+            {/* 후보 결과 영상. **저장된 편집본이 아니다** -- 아직 적용하지 않은
+                결과를 그대로 본다. 낡았거나 만들지 못했으면 영상 자리를 비우고
+                무엇을 하면 되는지만 말한다. */}
+            {editingProposalPreview.kind === "working" ? <p role="status">{editingProposalPreview.message}</p> : null}
+            {editingProposalPreview.kind === "unavailable" ? <p role="alert">{editingProposalPreview.message}</p> : null}
+            {editingProposalPreview.kind === "ready"
+              ? <video aria-label="편집안 미리보기" controls preload="metadata" src={editingProposalPreview.videoUrl} />
+              : null}
             <DialogFooter>
-              {editingProposal.previewTarget && onPreviewEditingProposal ? <Button type="button" variant="outline" disabled={editingProposal.isApplying} onClick={() => void onPreviewEditingProposal()}>이 구간 미리보기</Button> : null}
+              {onPreviewEditingProposal ? <Button type="button" variant="outline" disabled={editingProposal.isApplying || editingProposalPreview.kind === "working"} onClick={() => void onPreviewEditingProposal()}>이 구간 미리보기</Button> : null}
               {onApplyEditingProposal ? <Button type="button" disabled={editingProposal.isApplying} onClick={() => void onApplyEditingProposal()}>{editingProposal.isApplying ? "편집안 적용 중" : "이 편집안 적용"}</Button> : null}
             </DialogFooter>
           </DialogContent>

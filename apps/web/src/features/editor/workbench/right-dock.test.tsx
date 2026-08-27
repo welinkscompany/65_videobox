@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { RightDock } from "./RightDock";
-import type { RightDockProposal } from "./rightDockTypes";
+import type { RightDockEditingProposal, RightDockProposal } from "./rightDockTypes";
 
 afterEach(cleanup);
 
@@ -890,5 +890,59 @@ describe("대화형 편집안", () => {
     expect(onPreviewEditingProposal).toHaveBeenCalledOnce();
     expect(onApplyEditingProposal).toHaveBeenCalledOnce();
     expect(onDraftChange).toHaveBeenCalledWith("자막도 짧게 할까요?");
+  });
+});
+
+describe("편집안 미리보기", () => {
+  // 이 창의 미리보기는 **아직 적용하지 않은 후보 결과**를 보여 준다.
+  // 2026-08-26까지는 저장된 편집본을 보여 주고 있었다 -- 창작자는 바뀐 결과를
+  // 확인했다고 믿었지만 실제로는 바뀌기 전 영상을 본 것이다.
+  const proposalWithPreview = (
+    preview: NonNullable<RightDockEditingProposal["preview"]>,
+  ): RightDockEditingProposal => ({
+    proposalId: "editing-1",
+    summary: "2번 장면 · 8초 → 4초",
+    operationSummaries: ["2배로 속도를 바꿔요."],
+    followUpQuestions: [],
+    previewTarget: { segmentId: "segment-2", startSec: 8, endSec: 16 },
+    isApplying: false,
+    error: null,
+    preview,
+  });
+
+  function openDialog(preview: NonNullable<RightDockEditingProposal["preview"]>) {
+    render(<RightDock
+      draft=""
+      onDraftChange={() => {}}
+      messages={[{ id: "assistant-1", role: "assistant", text: "속도를 조절할 수 있어요." }]}
+      editingProposal={proposalWithPreview(preview)}
+      onPreviewEditingProposal={vi.fn()}
+      onApplyEditingProposal={vi.fn()}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
+    return screen.getByRole("dialog", { name: "편집안" });
+  }
+
+  it("만드는 중에는 영상 대신 진행 상태를 말한다", () => {
+    const dialog = openDialog({ kind: "working", message: "편집안 미리보기를 만들고 있어요." });
+
+    expect(dialog).toHaveTextContent("편집안 미리보기를 만들고 있어요.");
+    expect(within(dialog).queryByLabelText("편집안 미리보기")).toBeNull();
+  });
+
+  it("준비되면 후보 결과 영상을 보여 준다", () => {
+    const dialog = openDialog({ kind: "ready", videoUrl: "/api/projects/project-a/proposal-previews/pp-1/content" });
+
+    expect(within(dialog).getByLabelText("편집안 미리보기")).toHaveAttribute(
+      "src",
+      "/api/projects/project-a/proposal-previews/pp-1/content",
+    );
+  });
+
+  it("편집본이 바뀌었으면 낡은 영상을 보여 주지 않는다", () => {
+    const dialog = openDialog({ kind: "unavailable", message: "편집본이 바뀌었어요. 새 편집안을 받아 보세요." });
+
+    expect(dialog).toHaveTextContent("편집본이 바뀌었어요. 새 편집안을 받아 보세요.");
+    expect(within(dialog).queryByLabelText("편집안 미리보기")).toBeNull();
   });
 });

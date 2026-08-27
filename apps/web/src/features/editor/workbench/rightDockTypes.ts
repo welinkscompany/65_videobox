@@ -107,6 +107,17 @@ export type RightDockMemory = Readonly<{
   onDelete: (candidateId: string) => void | Promise<void>;
 }>;
 
+/** 아직 적용하지 않은 **후보 결과** 영상. 저장된 편집본 미리보기와 다른 자리다 --
+ *  2026-08-26까지 편집안 창의 미리보기가 저장된 편집본을 보여 주고 있었고,
+ *  창작자는 바뀐 결과를 확인했다고 믿었지만 실제로는 바뀌기 전 영상을 봤다.
+ *  낡았을 때는 **영상을 아예 주지 않는다**(`unavailable`) -- 낡은 영상을 보여 주는
+ *  것이 아무것도 안 보여 주는 것보다 나쁘다. */
+export type RightDockEditingProposalPreview =
+  | Readonly<{ kind: "idle" }>
+  | Readonly<{ kind: "working"; message: string }>
+  | Readonly<{ kind: "ready"; videoUrl: string }>
+  | Readonly<{ kind: "unavailable"; message: string }>;
+
 export type RightDockEditingProposal = Readonly<{
   proposalId: string;
   summary: string;
@@ -115,6 +126,7 @@ export type RightDockEditingProposal = Readonly<{
   previewTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null;
   isApplying: boolean;
   error: string | null;
+  preview?: RightDockEditingProposalPreview;
 }>;
 
 export type RightDockDirector = Readonly<{
