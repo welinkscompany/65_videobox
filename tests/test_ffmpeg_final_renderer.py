@@ -1291,3 +1291,116 @@ def test_adding_sfx_does_not_quiet_the_narration_in_the_segment_path(tmp_path: P
 
     assert without is not None and with_sfx is not None
     assert with_sfx >= without - 1.0
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-27: owner가 실제 프로젝트에서 컷 하나 바꾸는 데 21초가 걸린다고
+# 신고했다. 서버 기록으로 실측했고(created_at→updated_at), B-roll 원본이
+# 494초짜리였다. `build_plan_filter_graph`는 `trim=start=X:end=Y` **필터**로
+# 자르는데, 필터 트림은 입력을 처음부터 디코딩한 뒤 버린다 -- X초까지 읽고
+# 버리는 시간이 고스란히 렌더 시간에 얹힌다. `-ss`를 `-i` **앞에** 두면
+# (입력 탐색) 그 낭비가 사라진다. 반복 재생(loop) 클립은 건드리지 않는다 --
+# 그 경우는 이미 있던 검증된 경로이고, `-ss`와 `-stream_loop`를 함께 쓰는
+# 조합은 새로 검증이 필요해 이번 범위 밖이다.
+# ---------------------------------------------------------------------------
+
+
+def test_broll_source_uses_fast_seek_before_decoding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """자르는 시작점까지 디코딩해서 버리지 않는다 -- `-ss`를 `-i` 앞에 둔다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("FastSeek")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    # 원본이 494초짜리라는 실제 신고 사례를 그대로 쓴다.
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_audio_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    timeline = {
+        "timeline_id": "timeline-fast-seek", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 1.5,
+            "source_in_sec": 7.5, "source_out_sec": 9.0,
+            "media_controls": {},
+        }]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    command = commands[0]
+    i_index = command.index("-i")
+    window = command[max(0, i_index - 6):i_index]
+    # 컨테이너의 실제 ffmpeg로 실측·검증한 조합이다(픽셀·오디오 PCM까지 동일,
+    # 500초 원본에서 3초를 뽑는 데 1.56초 → 0.11초로 14배 빨라졌다).
+    # `-copyts`가 원래 타임스탬프를 보존하므로 **trim 필터는 한 글자도 안
+    # 바꾼다** -- 잘라내는 지점이 절대 시각 그대로라 어긋날 여지가 없다.
+    assert "-ss" in window, f"-ss가 -i 앞에 없다: {window}"
+    assert float(window[window.index("-ss") + 1]) == pytest.approx(7.5)
+    assert "-copyts" in window, f"-copyts가 -i 앞에 없다: {window}"
+    filter_index = command.index("-filter_complex")
+    graph = command[filter_index + 1]
+    assert "trim=start=7.5:end=9.0" in graph, graph
+
+
+def test_fast_seek_is_disabled_when_two_broll_items_share_a_clip_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`split_segment` 직후 두 조각이 합쳐지기 전까지 **같은 clip_id**를 그대로
+    쓴다. `source_indices`는 clip_id로 찾으므로 나중 항목이 앞 항목의 색인을
+    덮어쓴다 -- 실측으로 걸린 회귀다(`test_split_merge_and_reorder_...`가 픽셀로
+    잡았다). 겹치면 빠른 탐색을 끈다: 두 clip_id 모두 `-ss`가 없어야 한다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("FastSeekCollision")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer, "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_audio_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    # 같은 clip_id("c1")를 쓰는 두 조각. source_in_sec가 서로 다르다 -- 실제
+    # split 직후 모양 그대로다.
+    timeline = {
+        "timeline_id": "timeline-fast-seek-collision", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [
+            {"clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id, "asset_uri": asset.storage_uri,
+             "segment_id": "s1", "start_sec": 0.0, "end_sec": 2.0, "source_in_sec": 0.0, "source_out_sec": 2.0, "media_controls": {}},
+            {"clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id, "asset_uri": asset.storage_uri,
+             "segment_id": "s2", "start_sec": 2.0, "end_sec": 4.0, "source_in_sec": 7.5, "source_out_sec": 9.5, "media_controls": {}},
+        ]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    command = commands[0]
+    assert "-ss" not in command, f"clip_id가 겹치는데 -ss가 붙었다: {command}"
+    assert "-copyts" not in command

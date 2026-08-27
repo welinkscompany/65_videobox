@@ -1186,6 +1186,31 @@ class FfmpegFinalRenderer:
         generated_ass: Path | None = None
         verify_output_sources(store=self.store, project_id=project_id, timeline=timeline_context)
         source_paths: list[tuple[Path, bool, bool]] = []
+        # **2026-08-27: owner가 실제 프로젝트에서 컷 한 번에 21초가 걸린다고
+        # 신고했다.** 서버 기록으로 실측했다(created_at→updated_at). 원인은
+        # B-roll 입력에 `-ss`가 없어서였다 -- `trim=start=X` **필터**는 X초까지
+        # 디코딩한 뒤 버린다. 494초짜리 원본에서 그 버리는 시간이 고스란히
+        # 렌더 시간에 얹혔다.
+        #
+        # `-ss`를 `-i` **앞**에 두면(입력 탐색) 그 낭비가 사라진다. `-copyts`를
+        # 같이 써서 **trim/atrim 필터는 한 글자도 안 바꾼다** -- 원래 타임스탬프가
+        # 그대로 보존되므로 자르는 지점이 절대 시각 그대로다. 컨테이너의 실제
+        # ffmpeg로 검증했다: 500초 원본에서 3초를 뽑는 데 1.56초 → 0.11초
+        # (14배), 비디오 픽셀과 오디오 PCM이 old/new 사이에 바이트 단위로
+        # 동일했다.
+        fast_seek_offsets: dict[int, float] = {}
+        # `source_indices`는 `clip_id`로 찾는다. 갓 나눈 조각(`split_segment`)은
+        # 합쳐지기 전까지 **둘이 같은 clip_id를 그대로 쓴다** -- 재보고 알았다:
+        # 이 경우 나중 항목이 앞 항목의 색인을 덮어써서 둘 다 같은 물리 입력을
+        # 가리키게 된다. 예전엔 그 입력에 탐색이 없어서 우연히 안전했다(둘 다
+        # 처음부터 다 읽힌 스트림에서 절대 시각으로 잘랐다). 여기서 탐색을 걸면
+        # 겹친 clip_id 중 하나는 **존재하지 않는 시간대**를 찾게 된다 -- 실측
+        # 회귀 시험(`test_split_merge_and_reorder_...`)이 잡아냈다. 그 겹침
+        # 구조는 고치지 않고, 겹치는 clip_id에는 이 최적화를 안전하게 끈다.
+        broll_clip_id_counts: dict[str, int] = {}
+        for item in composition_plan.items:
+            if item.track_type == "broll":
+                broll_clip_id_counts[item.clip_id] = broll_clip_id_counts.get(item.clip_id, 0) + 1
         source_indices: dict[str, int] = {}
         track_overlay_indices: dict[str, int] = {}
         soundless_source_clip_ids: set[str] = set()
@@ -1243,6 +1268,11 @@ class FfmpegFinalRenderer:
             if not source.is_file():
                 raise FinalRenderError(f"Exact preview source is missing: '{source}'. Restore or re-import it and retry.")
             source_indices[item.clip_id] = len(source_paths)
+            # B-roll만 대상이다 -- 내레이션·bgm·sfx는 소리뿐이라 이 낭비가 크지
+            # 않고, 굳이 넓히지 않는다. 시작점이 0이면 얻을 것도 없다.
+            # `clip_id`가 겹치면 안전하게 끈다 -- 위 `broll_clip_id_counts` 참고.
+            if item.track_type == "broll" and item.source_in_sec > 0 and broll_clip_id_counts.get(item.clip_id, 0) == 1:
+                fast_seek_offsets[len(source_paths)] = item.source_in_sec
             source_paths.append((source, False, should_loop))
         # 전환은 두 클립의 원본을 **한 번 더** 읽는다.
         #
@@ -1334,6 +1364,9 @@ class FfmpegFinalRenderer:
                 command += ["-stream_loop", "-1"]
             if is_image:
                 command += ["-loop", "1", "-framerate", str(self.video_fps)]
+            seek_offset = fast_seek_offsets.get(source_index)
+            if seek_offset is not None:
+                command += ["-ss", str(seek_offset), "-copyts"]
             command += ["-i", str(path)]
         command += [
             "-filter_complex", graph, "-map", f"[{video_label}]", "-map", "[aout]",
