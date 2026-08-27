@@ -436,7 +436,10 @@ describe("AppRouter URL ownership", () => {
     { project_id: "project_b", name: "둘째 영상", status: "active", root_storage_uri: "local://b" },
   ];
 
-  it("archives a video from its card after one confirm, and it drops off the list", async () => {
+  // 2026-08-27: 보관하기·완전 삭제가 카드에서 빠지고 `보관함` 패널 하나로
+  // 옮겨졌다(owner 승인, 재설계안 §3.3의 2번). 카드는 이제 이름·다음 할 일·
+  // 제목 바꾸기 셋만 남는다.
+  it("archives a video from the archive panel after one confirm, and it drops off the list", async () => {
     vi.spyOn(api, "listProjects")
       .mockResolvedValueOnce(liveProjects as never)
       .mockResolvedValue([liveProjects[0]] as never);
@@ -445,49 +448,43 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={router} />);
 
-    const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
-    // **갱신 이유(2026-08-22).** 관리 단추가 `···` 뒤로 접혔다 -- 화면을
-    // 찍어 보니 카드마다 단추가 4~5개씩이라 첫 화면이 단추 70개였다.
-    // 지키려는 것은 "목록 화면에서 관리할 수 있다"이지 "항상 펼쳐져
-    // 있다"가 아니었으므로, 여는 단추를 한 번 누르는 것만 더한다.
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 관리" }));
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관하기" }));
+    await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "둘째 영상 보관하기" }));
     // 한 번 누른 것으로 사라지면 안 된다. 확인이 한 번 있다.
     expect(archiveProject).not.toHaveBeenCalled();
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관 확인" }));
+    fireEvent.click(screen.getByRole("button", { name: "둘째 영상 보관 확인" }));
 
     await waitFor(() => expect(archiveProject).toHaveBeenCalledWith("project_b"));
     await waitFor(() => expect(screen.queryByRole("article", { name: "둘째 영상 프로젝트" })).not.toBeInTheDocument());
   });
 
-  it("requires two separate confirmations before permanently deleting from a card", async () => {
-    vi.spyOn(api, "listProjects")
-      .mockResolvedValueOnce(liveProjects as never)
-      .mockResolvedValue([liveProjects[0]] as never);
+  it("requires two separate confirmations before permanently deleting an archived project", async () => {
+    const archived = { project_id: "project_b", name: "둘째 영상", status: "archived", root_storage_uri: "local://b" };
+    vi.spyOn(api, "listProjects").mockImplementation(async (includeArchived = false) =>
+      (includeArchived ? [liveProjects[0], archived] : [liveProjects[0]]) as never);
     mockCatalogSummaries();
     const deleteProjectPermanently = vi.spyOn(api, "deleteProjectPermanently").mockResolvedValue(undefined as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={router} />);
 
-    const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
-    // **갱신 이유(2026-08-22).** 관리 단추가 `···` 뒤로 접혔다 -- 화면을
-    // 찍어 보니 카드마다 단추가 4~5개씩이라 첫 화면이 단추 70개였다.
-    // 지키려는 것은 "목록 화면에서 관리할 수 있다"이지 "항상 펼쳐져
-    // 있다"가 아니었으므로, 여는 단추를 한 번 누르는 것만 더한다.
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 관리" }));
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 완전 삭제" }));
+    await screen.findByRole("article", { name: "첫 영상 프로젝트" });
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    // 완전 삭제는 보관된 프로젝트에만 있다 -- 활성 프로젝트를 바로 지우는
+    // 길은 없앴다(보관을 먼저 거치게 한다).
+    expect(await screen.findByText("둘째 영상")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "둘째 영상 완전 삭제" }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
     // 첫 확인은 되돌릴 수 없다는 것을 말하고, 지우지는 않는다.
-    expect(within(card).getByText(/되돌릴 수 없어요/)).toBeVisible();
+    expect(screen.getByText(/되돌릴 수 없어요/)).toBeVisible();
 
-    fireEvent.click(within(card).getByRole("button", { name: /삭제 1차 확인/ }));
+    fireEvent.click(screen.getByRole("button", { name: /삭제 1차 확인/ }));
     expect(deleteProjectPermanently).not.toHaveBeenCalled();
-    expect(within(card).getByText(/한 번 더 확인/)).toBeVisible();
+    expect(screen.getByText(/한 번 더 확인/)).toBeVisible();
 
-    fireEvent.click(within(card).getByRole("button", { name: /영구 삭제/ }));
+    fireEvent.click(screen.getByRole("button", { name: /영구 삭제/ }));
 
     await waitFor(() => expect(deleteProjectPermanently).toHaveBeenCalledWith("project_b"));
-    await waitFor(() => expect(screen.queryByRole("article", { name: "둘째 영상 프로젝트" })).not.toBeInTheDocument());
   });
 
   it("opens the archive on the projects screen and puts a video back", async () => {
@@ -556,14 +553,10 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={router} />);
 
-    const card = await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
-    // **갱신 이유(2026-08-22).** 관리 단추가 `···` 뒤로 접혔다 -- 화면을
-    // 찍어 보니 카드마다 단추가 4~5개씩이라 첫 화면이 단추 70개였다.
-    // 지키려는 것은 "목록 화면에서 관리할 수 있다"이지 "항상 펼쳐져
-    // 있다"가 아니었으므로, 여는 단추를 한 번 누르는 것만 더한다.
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 관리" }));
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관하기" }));
-    fireEvent.click(within(card).getByRole("button", { name: "둘째 영상 보관 확인" }));
+    await screen.findByRole("article", { name: "둘째 영상 프로젝트" });
+    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
+    fireEvent.click(screen.getByRole("button", { name: "둘째 영상 보관하기" }));
+    fireEvent.click(screen.getByRole("button", { name: "둘째 영상 보관 확인" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("프로젝트 작업에 실패했어요. 다시 시도해 주세요.");
   });
