@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -37,6 +37,10 @@ type Props = Readonly<{
   /** 전환을 걸 대상. 캡컷처럼 왼쪽 `전환` 탭에서 고른다. */
   transitionTarget?: Readonly<{ segmentId: string; hasPrevious: boolean }> | null;
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+  /** 대본·자막 편집(캡컷 `텍스트` 자리). 주지 않으면 그 탭도 만들지 않는다. */
+  transcript?: ReactNode;
+  /** 원본만 확인하는 자리. 미디어 탭 안에 둔다. */
+  sourceCheck?: ReactNode;
 }>;
 
 /** 캡컷 왼쪽 패널은 `미디어 · 오디오 · 텍스트 · 스티커 · 효과 · 전환 · 필터`가
@@ -47,20 +51,27 @@ type Props = Readonly<{
  *  **가진 것만 탭으로 둔다.** 스티커·효과·필터는 우리에게 없으므로 탭도 만들지
  *  않는다 -- 없는 기능의 자리를 흉내 내면 배치가 거짓말을 한다(owner 결정 2026-08-27).
  *  텍스트는 자막이 대신하고 있어 이번 범위에서 뺐다. */
-type LeftPane = "media" | "audio" | "transition";
+type LeftPane = "media" | "audio" | "transcript" | "transition";
 
+/** **한 번에 하나만 보여 준다(owner 지시 2026-08-27).**
+ *  > "지금 사진 부분이 스크롤이 너무 길다고, 여길 뭔가 정리를 해야지"
+ *
+ *  실측: 왼쪽 도크는 보이는 높이 **137px**인데 내용이 **1,608px**이었다 --
+ *  **11.7배 스크롤**. 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이 세로로
+ *  더 쌓여 있었기 때문이다. 캡컷 왼쪽 패널은 고른 탭의 내용만 보여 준다. */
 const panes: readonly Readonly<{ pane: LeftPane; label: string }>[] = [
   { pane: "media", label: "미디어" },
   { pane: "audio", label: "오디오" },
+  { pane: "transcript", label: "자막" },
   { pane: "transition", label: "전환" },
 ];
 
-const paneKinds: Readonly<Record<Exclude<LeftPane, "transition">, readonly EditorAssetKind[]>> = {
+const paneKinds: Readonly<Record<"media" | "audio", readonly EditorAssetKind[]>> = {
   media: ["broll", "image"],
   audio: ["bgm", "sfx"],
 };
 
-const paneFilters: Readonly<Record<Exclude<LeftPane, "transition">, readonly Readonly<{ type: "all" | EditorAssetKind; label: string }>[]>> = {
+const paneFilters: Readonly<Record<"media" | "audio", readonly Readonly<{ type: "all" | EditorAssetKind; label: string }>[]>> = {
   media: [
     { type: "all", label: "전체" },
     { type: "broll", label: "영상" },
@@ -88,14 +99,14 @@ function targetLabel(target: EditorAssetTarget | null): string {
 /** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
 const FIRST_PAGE = 8;
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, sourceCheck }: Props) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
   const [pane, setPane] = useState<LeftPane>("media");
   const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
   // 탭이 먼저 갈라 놓고, 그 안에서 종류·검색·방향으로 좁힌다. 캡컷도 미디어 탭과
   // 오디오 탭이 서로 다른 목록이다.
-  const paneCards = pane === "transition" ? [] : cards.filter((card) => paneKinds[pane].includes(card.kind));
+  const paneCards = pane !== "media" && pane !== "audio" ? [] : cards.filter((card) => paneKinds[pane].includes(card.kind));
   const matchingCards = filterEditorAssets(paneCards, { type, query, orientation });
   // owner: "자산 내역에 스크롤이 엄청 길다니까."
   //
@@ -122,9 +133,10 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   return <section className="vb-editor-assets" aria-label="편집기 미디어">
     {/* 캡컷과 같은 자리의 최상위 탭. 가진 것만 둔다 -- 자세한 이유는 `LeftPane` 주석. */}
     <div className="vb-editor-assets__panes" role="tablist" aria-label="왼쪽 패널">
-      {panes.map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
+      {panes.filter((item) => item.pane !== "transcript" || transcript).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
     </div>
-    {pane === "transition" ? <TransitionPane target={transitionTarget} disabled={isSaving} onInspectorAction={onInspectorAction} /> : <>
+    {pane === "transition" ? <TransitionPane target={transitionTarget} disabled={isSaving} onInspectorAction={onInspectorAction} />
+      : pane === "transcript" ? transcript : <>
     <div className="vb-editor-assets__controls">
       {/* **편집기를 떠나지 않고 미디어를 더한다(owner 승인 2026-08-27).**
           2026-08-27에 재 보니 편집기 안에는 미디어를 더할 길이 아예 없었다 --
@@ -179,7 +191,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           이름에서 `필터`를 뺐다 -- 캡컷 탭은 그냥 명사다. 화면 방향은 탭이 아니라
           **고른 탭 안에서 더 좁히는 것**이라 한 단 아래로 내렸다. */}
       <div className="vb-editor-assets__tabs" role="tablist" aria-label="미디어 종류">
-        {paneFilters[pane].map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__tab" type="button" role="tab" aria-selected={type === filter.type} onClick={() => setType(filter.type)}>{filter.label}</Button>)}
+        {paneFilters[pane === "audio" ? "audio" : "media"].map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__tab" type="button" role="tab" aria-selected={type === filter.type} onClick={() => setType(filter.type)}>{filter.label}</Button>)}
       </div>
       <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향">
         {orientationFilters.map((filter) => <Button key={filter.value} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label}</Button>)}
@@ -369,6 +381,8 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
       </Button>
     ) : null}
     {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 미디어가 없어요.</p> : null}
+    {/* 원본만 확인하는 자리. 미디어를 다루는 탭 안에 두어야 찾을 수 있다. */}
+    {pane === "media" ? sourceCheck : null}
     </>}
   </section>;
 }

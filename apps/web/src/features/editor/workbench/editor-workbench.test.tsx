@@ -345,6 +345,11 @@ describe("EditorWorkbench", () => {
     } as const;
     const rendered = render(<EditorWorkbench view={transcriptView} />);
     openMaterialDock();
+    // **갱신 이유(2026-08-27).** 자막은 캡컷 `텍스트` 자리처럼 탭이 됐다. 도크가
+    // 한 번에 하나만 보여 주므로(11.7배 스크롤을 없앤 변경) 대본은 그 탭에 있다.
+    // 지키려는 것은 "대본·재생 위치·클립 선택이 한 segment id로 묶인다"이지
+    // 대본이 기본 화면에 있는 것이 아니었다.
+    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     const player = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
 
@@ -380,6 +385,9 @@ describe("EditorWorkbench", () => {
     fireEvent.click(clipSelectionButton("broll:b-2"));
 
     expect(player.currentTime).toBe(5);
+    // 자막은 이제 `자막` 탭에 있다(2026-08-27). 지키려는 것은 "B-roll 클립을 눌러도
+    // 그 장면의 대본이 함께 골라진다"이므로 탭을 열어 그대로 확인한다.
+    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     expect(screen.getByRole("button", { name: "둘째 자막 대본 선택" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "5");
   });

@@ -220,3 +220,35 @@ describe("위 띠 — 화면 비율과 내보내기", () => {
     expect(screen.getAllByRole("button", { name: /내보내기/ })).toHaveLength(1);
   });
 });
+
+/** owner(2026-08-27): "심지어 프로젝트 메뉴나 다른메뉴에 들어가면 다시 설정 버튼을
+ *  누르지 않는이상 뒤로가기가 안되"
+ *
+ *  실측으로 확인: `/projects`에 가면 `이전 화면` 단추가 **아예 사라졌다**. 브라우저
+ *  이력은 4개나 있었는데도.
+ *
+ *  원인은 전체 메뉴의 세 항목이 **맨 `<a href>`**여서 페이지를 통째로 새로
+ *  로드했기 때문이다. 그러면 앱이 들고 있던 이력이 날아가고 `이전 화면`이 설 자리를
+ *  잃는다. **설정만 정상이었던 이유**도 같다 -- 그것만 앱 안에서 이동하는 콜백이었다.
+ *
+ *  여기서 지키는 것은 **앱 안에서 이동한다**이다. 주소는 그대로 두되(사람이
+ *  북마크하는 계약) 이동은 라우터가 맡는다. */
+describe("전체 메뉴는 앱 안에서 이동한다", () => {
+  it("전역 화면으로 갈 때 페이지를 통째로 새로 열지 않는다", () => {
+    const onNavigateGlobal = vi.fn();
+    renderBar({ onNavigateGlobal });
+
+    for (const [label, destination] of [["프로젝트", "projects"], ["내 라이브러리", "library"], ["촬영본 정리", "footage"]] as const) {
+      // 고르면 메뉴가 닫히는 것이 정상이라 매번 다시 연다.
+      fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
+      const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
+      const link = within(menu).getByRole("link", { name: label });
+      // 주소는 그대로 남는다 -- 새 창에서 열기와 북마크가 계속 되어야 한다.
+      expect(link).toHaveAttribute("href", `/${destination}`);
+      fireEvent.click(link);
+      expect(onNavigateGlobal).toHaveBeenCalledWith(destination);
+      expect(screen.queryByRole("navigation", { name: "전체 메뉴" })).toBeNull();
+    }
+    expect(onNavigateGlobal).toHaveBeenCalledTimes(3);
+  });
+});

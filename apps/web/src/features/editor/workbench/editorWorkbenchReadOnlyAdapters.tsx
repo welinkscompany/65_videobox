@@ -39,16 +39,23 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
     const transitionTarget = selectedSegmentId === null || leftSelectedIndex < 0
       ? null
       : { segmentId: selectedSegmentId, hasPrevious: leftSelectedIndex > 0 };
-    return <>
-    <EditorAssetBrowser cards={assetCards} target={assetTarget} isSaving={isSavingCaption} onPreview={onPreviewAsset} onApply={(card, segmentId) => void onApplyAssetCard?.(card, segmentId)} onApplyOverlay={onApplyImageOverlay ? (card, segmentId) => void onApplyImageOverlay(card, segmentId) : undefined} previewStates={assetPreviewStates} onRefreshExactPreview={onRefreshExactPreview} projectId={view.projectId} onMediaAdded={onMediaAdded} transitionTarget={transitionTarget} onInspectorAction={onInspectorAction} />
-    {/* 이 구역은 트랙마다 클립이 몇 개인지 세어 주는 **요약**이지 미디어 목록이
-        아니다. 그런데 이름이 `자산`이라 바로 위 도크 이름과 부딪혔고, 도크를 여는
-        단추는 또 `소재`였다(owner 승인 2026-08-27로 도크는 `미디어`가 됐다).
-        이름을 내용에 맞췄다 -- 목록처럼 들리면 여기서 미디어를 찾게 된다. */}
-    <section aria-label="영상 구성" className="vb-editor-workbench__summary"><h2>영상 구성</h2>{view.tracks.map((track) => <p key={track.trackId}>{trackRoleLabel(track.role)}: {track.clips.length}개 클립</p>)}</section>
-    {localSources.length > 0 && <section aria-label="소스 확인" className="vb-editor-workbench__sources"><h2>소스 확인</h2><p>편집본에 적용하지 않고 원본만 확인합니다.</p><div>{localSources.map((source) => <Button key={source.id} type="button" variant="outline" onClick={() => onPreviewSource?.(source)} aria-label={`${source.label} 원본 열기`}>{source.label}</Button>)}</div></section>}
-    <TranscriptPanel entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} />
-  </>;
+    // **한 번에 하나만 보여 준다(owner 지시 2026-08-27).**
+    // 실측: 이 도크는 보이는 높이 137px인데 내용이 1,608px이었다 -- 11.7배 스크롤.
+    // 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이 세로로 더 쌓여 있었다.
+    //
+    // `영상 구성`은 **없앴다.** 타임라인 머리말이 이미 같은 말을 한다
+    // (`n개 트랙 · n개 자막 · n개 자산 공백`)는 데다, 클립은 타임라인이 직접 보여 준다.
+    // 나머지 둘은 탭 안으로 들어간다 -- 자막은 캡컷 `텍스트` 자리, 소스 확인은 미디어 안.
+    return <EditorAssetBrowser
+      cards={assetCards} target={assetTarget} isSaving={isSavingCaption}
+      onPreview={onPreviewAsset} onApply={(card, segmentId) => void onApplyAssetCard?.(card, segmentId)}
+      onApplyOverlay={onApplyImageOverlay ? (card, segmentId) => void onApplyImageOverlay(card, segmentId) : undefined}
+      previewStates={assetPreviewStates} onRefreshExactPreview={onRefreshExactPreview}
+      projectId={view.projectId} onMediaAdded={onMediaAdded}
+      transitionTarget={transitionTarget} onInspectorAction={onInspectorAction}
+      sourceCheck={localSources.length > 0 ? <section aria-label="소스 확인" className="vb-editor-workbench__sources"><h2>소스 확인</h2><p>편집본에 적용하지 않고 원본만 확인합니다.</p><div>{localSources.map((source) => <Button key={source.id} type="button" variant="outline" onClick={() => onPreviewSource?.(source)} aria-label={`${source.label} 원본 열기`}>{source.label}</Button>)}</div></section> : null}
+      transcript={<TranscriptPanel entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} />}
+    />;
   }
   const narrationClips = view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips);
   const selectedRange = selectedSegmentId === null

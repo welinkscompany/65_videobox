@@ -19,6 +19,12 @@ export type ShellSection = "create" | "media" | "editing" | "review";
 
 type ShellProject = { project_id: string; name: string };
 
+const globalMenuItems: ReadonlyArray<readonly ["projects" | "library" | "footage", string]> = [
+  ["projects", "프로젝트"],
+  ["library", "내 라이브러리"],
+  ["footage", "촬영본 정리"],
+];
+
 //: 일이 실제로 흐르는 순서. 대본을 쓰고, 미디어를 모으고, 붙이고, 내보낸다.
 //
 //  이름은 `미디어` 하나로 모았다(owner 승인 2026-08-27). 같은 것을 자산·재료·
@@ -50,6 +56,7 @@ export function TopBar({
   onNavigate,
   onSelectProject,
   onOpenSettings,
+  onNavigateGlobal,
   children,
 }: {
   projectId: string;
@@ -72,6 +79,8 @@ export function TopBar({
   onNavigate: (projectId: string, section: ShellSection) => void;
   onSelectProject: (projectId: string) => void;
   onOpenSettings: () => void;
+  /** 전역 화면으로 앱 안에서 이동한다. 없으면 주소 링크가 그대로 동작한다. */
+  onNavigateGlobal?: (destination: "projects" | "library" | "footage") => void;
   /** 작업 상태처럼 띠 오른쪽에 붙는 것. 껍데기가 그 내용을 알 필요는 없다. */
   children?: ReactNode;
 }) {
@@ -187,9 +196,34 @@ export function TopBar({
           </CompactTooltip>
           {menuOpen ? (
             <nav aria-label="전체 메뉴" className="vb-top-bar__menu-list">
-              <a href="/projects">프로젝트</a>
-              <a href="/library">내 라이브러리</a>
-              <a href="/footage">촬영본 정리</a>
+              {/* **앱 안에서 이동한다(owner 신고 2026-08-27).**
+                  > "프로젝트 메뉴나 다른메뉴에 들어가면 다시 설정 버튼을 누르지
+                  >  않는이상 뒤로가기가 안되"
+
+                  맨 `<a href>`라 눌리면 페이지를 통째로 새로 열었고, 그때 앱이
+                  들고 있던 이력이 날아가 `이전 화면` 단추가 **아예 사라졌다**
+                  (실측: `/projects`에서 단추 없음, 브라우저 이력은 4개).
+                  설정만 멀쩡했던 이유도 같다 -- 그것만 콜백으로 이동했다.
+
+                  **주소는 그대로 둔다.** 사람이 북마크하고 새 창으로 열 수 있어야
+                  하므로 `href`는 남기고, 평범한 왼쪽 클릭만 가로채 라우터에 넘긴다.
+                  새 창(Ctrl/Cmd·가운데 클릭)은 브라우저가 하던 대로 둔다. */}
+              {globalMenuItems.map(([destination, label]) => (
+                <a
+                  key={destination}
+                  href={`/${destination}`}
+                  onClick={(event) => {
+                    if (!onNavigateGlobal) return;
+                    if (event.defaultPrevented || event.button !== 0) return;
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    setMenuOpen(false);
+                    onNavigateGlobal(destination);
+                  }}
+                >
+                  {label}
+                </a>
+              ))}
               <Button type="button" variant="outline" size="sm" onClick={() => { setMenuOpen(false); onOpenSettings(); }}>
                 <SettingsIcon aria-hidden="true" />
                 설정

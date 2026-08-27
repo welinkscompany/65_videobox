@@ -166,7 +166,11 @@ function RoutedProductShell(props: ProductShellProps) {
     }
     void navigate({ href: navigation.fallbackHref });
   };
-  return <ProductShell {...props} navigation={navigation} onBack={canGoBack ? onBack : undefined} />;
+  // 전역 메뉴는 맨 `<a href>`라 페이지를 통째로 새로 열었고, 그때 앱 이력이 날아가
+  // `이전 화면` 단추가 사라졌다(owner 신고 2026-08-27, 실측 확인). 라우터로 옮긴다.
+  const onNavigateGlobal = (destination: "projects" | "library" | "footage") =>
+    void navigate({ href: resolveGlobalLocation(destination) });
+  return <ProductShell {...props} navigation={navigation} onBack={canGoBack ? onBack : undefined} onNavigateGlobal={onNavigateGlobal} />;
 }
 
 /** 첫 화면도 **앱 껍데기 안**이다.

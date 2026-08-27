@@ -592,3 +592,43 @@ describe("왼쪽 도크는 캡컷처럼 최상위 탭으로 갈린다", () => {
     expect(screen.getByText("첫 장면에는 넘어올 앞 장면이 없어요.")).toBeVisible();
   });
 });
+
+/** owner(2026-08-27): "지금 사진 부분이 스크롤이 너무 길다고, 여길 뭔가 정리를
+ *  해야지, 내용을 쉽게 찾고, 검색하고 정리해서 가져올거 아니야"
+ *
+ *  실측: 왼쪽 도크는 보이는 높이 **137px**인데 내용이 **1,608px**이었다 --
+ *  **11.7배 스크롤**. 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이
+ *  세로로 더 쌓여 있었기 때문이다. 캡컷 왼쪽 패널은 **한 번에 하나**만 보여 준다.
+ *
+ *  `영상 구성`은 타임라인 머리말이 이미 같은 말을 하므로(`n개 트랙 · n개 자막 ·
+ *  n개 자산 공백`) 없앤다. 자막은 캡컷 `텍스트` 자리에 해당하므로 탭이 된다.
+ *  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */
+describe("왼쪽 도크는 한 번에 하나만 보여 준다", () => {
+  it("자막이 있으면 탭이 되고, 다른 탭에서는 안 보인다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" transcript={<p>대본 자리</p>} />);
+
+    const panes = screen.getByRole("tablist", { name: "왼쪽 패널" });
+    expect(Array.from(panes.querySelectorAll('[role="tab"]')).map((tab) => tab.textContent?.trim())).toEqual(["미디어", "오디오", "자막", "전환"]);
+    // 미디어 탭에서는 대본이 같이 쌓이지 않는다 -- 이것이 11.7배 스크롤의 원인이었다.
+    expect(screen.queryByText("대본 자리")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
+    expect(screen.getByText("대본 자리")).toBeVisible();
+    // 자막 탭에서는 미디어 카드가 섞이지 않는다.
+    expect(screen.queryByRole("heading", { name: "제품 사진" })).toBeNull();
+  });
+
+  it("자막을 주지 않으면 그 탭도 만들지 않는다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    expect(screen.queryByRole("tab", { name: "자막" })).toBeNull();
+  });
+
+  it("소스 확인은 미디어 탭 안에 둔다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" sourceCheck={<p>소스 자리</p>} />);
+
+    expect(screen.getByText("소스 자리")).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
+    expect(screen.queryByText("소스 자리")).toBeNull();
+  });
+});

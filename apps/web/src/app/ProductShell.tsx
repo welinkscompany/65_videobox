@@ -54,6 +54,8 @@ export type ProductShellProps = {
   onOpenSettings: () => void;
   navigation?: NavigationContext;
   onBack?: () => void;
+  /** 전역 화면으로 앱 안에서 이동한다. 없으면 링크가 페이지를 통째로 새로 연다. */
+  onNavigateGlobal?: (destination: "projects" | "library" | "footage") => void;
   children: ReactNode;
 };
 
@@ -65,7 +67,7 @@ export function ProductShell(props: ProductShellProps) {
   return <ShellCanvasProvider><ProductShellFrame {...props} /></ShellCanvasProvider>;
 }
 
-function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSettings, navigation, onBack, children }: ProductShellProps) {
+function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSettings, onNavigateGlobal, navigation, onBack, children }: ProductShellProps) {
   const canvas = useShellCanvas();
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
@@ -105,6 +107,7 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
         onNavigate={onNavigate}
         onSelectProject={(nextProjectId) => onNavigate(nextProjectId, "editing")}
         onOpenSettings={onOpenSettings}
+        onNavigateGlobal={onNavigateGlobal}
       >
         <small className="vb-top-bar__note">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small>
         <Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent className="vb-dialog-content" showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog>

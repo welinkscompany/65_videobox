@@ -709,6 +709,10 @@ describe("AppRouter URL ownership", () => {
     const preview = screen.getByRole("region", { name: "미리보기" });
     const timeline = screen.getByTestId("timeline-track");
     const rightDock = screen.getByRole("complementary", { name: "세부 정보" });
+    // **갱신 이유(2026-08-27).** 자막은 캡컷 `텍스트` 자리처럼 왼쪽 탭이 됐다.
+    // 이 시험이 지키는 것은 "편집기가 한 번만 마운트된 채 segment가 바뀐다"이지
+    // 자막칸이 기본 화면에 있는 것이 아니었으므로, 탭을 한 번 열고 그대로 본다.
+    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
     fireEvent.change(screen.getByLabelText("유진에게 요청하기"), { target: { value: "보존할 요청" } });
     fireEvent.click(clipSelectionButton("clip-2"));

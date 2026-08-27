@@ -2267,6 +2267,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(4);
     fireEvent.click(screen.getByRole("button", { name: "미디어" }));
     expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
     fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
     fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
@@ -2289,6 +2290,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(4);
     fireEvent.click(screen.getByRole("button", { name: "미디어" }));
     expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
     fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
 
