@@ -391,12 +391,14 @@ function EditorWorkbenchInstance({
       <Button
         type="button"
         variant="outline"
+        size="icon"
+        title={`${tool.label} — ${tool.hint}`}
         aria-description={tool.hint}
         disabled={!tool.enabled || isSavingTimeline || !onInspectorAction}
         onClick={() => { if (tool.action) void onInspectorAction?.(tool.action); }}
       >
         <Icon aria-hidden="true" />
-        {tool.label}
+        <span className="sr-only">{tool.label}</span>
       </Button>
     </span>
   );
@@ -544,8 +546,8 @@ function EditorWorkbenchInstance({
           불러와서, 배경을 지정하지 않는 `ghost`는 브라우저 기본 단추색이 남는다 --
           어두운 편집 화면에서 실측하니 투명이 아니라 `rgb(107,107,107)` 회색
           상자였다. `outline`은 `bg-background`를 직접 깔아서 그 틈에 안 걸린다. */}
-      <Button type="button" variant="outline" title="Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" />실행 취소</Button>
-      <Button type="button" variant="outline" title="Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" />다시 실행</Button>
+      <Button type="button" variant="outline" size="icon" title="실행 취소 — Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" /><span className="sr-only">실행 취소</span></Button>
+      <Button type="button" variant="outline" size="icon" title="다시 실행 — Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" /><span className="sr-only">다시 실행</span></Button>
       {cutButton(cutTools.split, Scissors)}{cutButton(cutTools.join, ChevronsLeftRight)}{cutButton(cutTools.drop, Trash2)}{cutButton(cutTools.copyToNext, Copy)}
       {/* **이름을 캡컷 길이로 줄였다(owner 지시 2026-08-22).**
           > "자산과대본. 이라는 것도 말도 안되고 유진과편집항목. 이런메뉴가 어딨어"
@@ -559,8 +561,8 @@ function EditorWorkbenchInstance({
           같은 것을 자산·재료·소재·라이브러리로 부르던 자리가 일곱 군데였고 이 도크는
           여는 단추가 `소재`, 열면 안쪽 제목이 `자산`이라 저 혼자서도 어긋나 있었다.
           → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */}
-      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />미디어</Button>
-      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />세부 정보</Button>
+      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} size="icon" title="미디어 — 영상·음악·효과음·그림" aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" /><span className="sr-only">미디어</span></Button>
+      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성과 유진" aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
       {/* **내보내기를 편집기 안에서 연다(owner 지시 2026-08-27).**
           > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
 
@@ -571,7 +573,7 @@ function EditorWorkbenchInstance({
           체크리스트(편집본·검토·출력)와 완성본 만들기를 이미 갖고 있고, 그 판정은
           검토 승인·낡음·자산 현재성까지 본다. 두 벌로 적으면 무엇을 언제 내보낼 수
           있는지가 조용히 갈라진다. 그래서 그 화면을 **그대로** 팝업에 담는다. */}
-      <Button type="button" variant="outline" onClick={() => setExportOpen(true)}><Upload aria-hidden="true" />내보내기</Button>
+      <Button type="button" variant="outline" size="icon" title="내보내기 — 완성본 만들기" onClick={() => setExportOpen(true)}><Upload aria-hidden="true" /><span className="sr-only">내보내기</span></Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">

@@ -858,3 +858,52 @@ describe("편집기에서 내보내기", () => {
     expect(Array.from(toolbar?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim())).toContain("내보내기");
   });
 });
+
+/** owner(2026-08-27): "버튼에 글자를 안넣어도 되고, 마우스 가져다대면 설명 글자가
+ *  보이기 해도되. 캡컷도 편집화면떄문에 글자를 최소화 했더라고."
+ *
+ *  > "지금 너가 만든 프로그램은 너무 메뉴도 어렵고 뭐가 뭔지 하나도 모르겠어.
+ *  >  그래서 그냥 내가 캡컷하고 아예 똑같이 하라고 한거잖아"
+ *
+ *  툴바에 글자 단추가 아홉이었다. 캡컷 툴바는 작은 아이콘 줄이다. 아이콘은 이미
+ *  전부 붙어 있었고 **글자가 같이 나오는 것**이 달랐다.
+ *
+ *  **글자를 지우는 것이 아니라 눈에서만 뺀다.** 접근 이름은 그대로 남아야 화면
+ *  낭독기가 읽고, 마우스를 대면 툴팁으로 보인다. 지우면 눈이 보이는 사람만 쓰는
+ *  도구가 된다. */
+describe("편집 툴바는 캡컷처럼 아이콘 줄이다", () => {
+  function toolbar(): HTMLElement {
+    const found = document.querySelector(".vb-editor-workbench__toolbar");
+    if (!found) throw new Error("편집 툴바를 찾지 못했다");
+    return found as HTMLElement;
+  }
+
+  /** 눈에 보이는 글자만 센다. **`<span>`만 훑으면 안 된다** -- 글자가 텍스트
+   *  노드로 바로 들어 있으면 아무것도 못 보고 그냥 통과한다(2026-08-27에 실제로
+   *  그렇게 헛통과하는 시험을 썼다). 복제해서 `sr-only`를 떼고 남은 것을 본다. */
+  function visibleLabel(button: HTMLElement): string {
+    const clone = button.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll(".sr-only").forEach((node) => node.remove());
+    return (clone.textContent ?? "").trim();
+  }
+
+  it("단추에 글자가 눈에 보이지 않는다", async () => {
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    const buttons = Array.from(toolbar().querySelectorAll("button"));
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(visibleLabel(button), `${button.textContent?.trim()} 단추에 보이는 글자가 남아 있다`).toBe("");
+    }
+  });
+
+  it("이름은 그대로 남아 낭독기와 시험이 찾을 수 있다", async () => {
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    for (const name of ["실행 취소", "다시 실행", "미디어", "세부 정보", "내보내기"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+  });
+});
