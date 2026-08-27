@@ -30,7 +30,9 @@ import {
   parseWorkspaceLocation,
   resolveNavigationContext,
   resolveGlobalLocation,
+  resolveProjectStage,
   resolveWorkspaceLocation,
+  type ProjectStage,
   type WorkspaceSection,
 } from "./routeManifest";
 
@@ -78,7 +80,7 @@ const indexRoute = createRoute({
     const projects = await context.catalog.load();
     const saved = opensLastProjectOnStart() ? resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) : null;
     // 프로젝트를 열면 **편집 화면이 먼저**다. 캡컷은 열면 바로 편집판이다.
-    throw redirect({ to: saved ? resolveWorkspaceLocation(saved, "editing") : "/projects" });
+    throw redirect({ to: saved ? resolveProjectStage(saved, "edit") : "/projects" });
   },
 });
 
@@ -107,7 +109,7 @@ const workspaceRoute = createRoute({
     if (params.section === "settings") {
       const projects = await context.catalog.load();
       if (!projects.some((project) => project.project_id === params.projectId)) {
-        throw redirect({ href: `/projects/${encodeURIComponent(params.projectId)}/home`, replace: true });
+        throw redirect({ href: resolveWorkspaceLocation(params.projectId, "home"), replace: true });
       }
       throw redirect({ href: `/settings/general?project_id=${encodeURIComponent(params.projectId)}`, replace: true });
     }
@@ -121,7 +123,7 @@ const workspaceRoute = createRoute({
     if (sessionId !== null) nextSearch.set("session_id", sessionId);
     if (segmentId !== null) nextSearch.set("segment_id", segmentId);
     throw redirect({
-      href: `/projects/${encodeURIComponent(params.projectId)}/editor${nextSearch.size === 0 ? "" : `?${nextSearch.toString()}`}`,
+      href: `${resolveProjectStage(params.projectId, "edit")}${nextSearch.size === 0 ? "" : `?${nextSearch.toString()}`}`,
       replace: true,
     });
   },
@@ -225,7 +227,7 @@ function ProjectsPage() {
   async function goToNewProject(project: Project) {
     await router.options.context.catalog.refresh();
     await router.invalidate();
-    await navigate({ to: resolveWorkspaceLocation(project.project_id, "create") });
+    await navigate({ to: resolveProjectStage(project.project_id, "plan") });
   }
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
@@ -463,10 +465,10 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename, onArchive, onDe
         직접 정한 것이고(캡컷도 열면 바로 편집판이다), 처음에 이걸 `next_action`으로
         바꿨다가 시험 셋이 막았다. 시험이 막은 게 맞았다.
         다음 할 일 단추도 그대로다 -- 없애면 `/plan`·`/review`로 가는 길이 사라진다. */}
-    <h2><a href={resolveWorkspaceLocation(project.project_id, "editing")} aria-label={`${summary.display_name} 편집기 열기`} onClick={(event) => {
+    <h2><a href={resolveProjectStage(project.project_id, "edit")} aria-label={`${summary.display_name} 편집기 열기`} onClick={(event) => {
       if (!onNavigateHref) return;
       event.preventDefault();
-      onNavigateHref(resolveWorkspaceLocation(project.project_id, "editing"));
+      onNavigateHref(resolveProjectStage(project.project_id, "edit"));
     }}>{summary.display_name}</a></h2>
     <p className="vb-catalog-card__meta">
       {[projectStateLabel(summary),
@@ -619,52 +621,49 @@ function WorkspacePage() {
   if (!parsedLocation || !projects.some((project) => project.project_id === projectId)) {
     return <RecoveryPage />;
   }
-  const normalizedSection: WorkspaceSection = section === "editor" || parsedLocation.stage === "edit"
-    ? "editing"
-    : section === "media" || parsedLocation.stage === "assets"
-      ? "media"
-      : section === "outputs" || parsedLocation.stage === "output"
-        ? "outputs"
-        : section === "timeline" || parsedLocation.stage === "review"
-          ? "review"
-          : section === "create" || parsedLocation.stage === "plan"
-            ? "create"
-            : "home";
+  // 주소에 옛 이름이 와도(`/media`·`/editing`·`/outputs`…) **여기부터는 단계 이름
+  // 하나로만 말한다.** 예전에는 새 이름을 다시 옛 이름으로 되돌려서 화면을 골랐다.
+  const stage = parsedLocation.stage;
   window.localStorage.setItem(lastProjectKey, projectId);
   const navigateTo = (nextProjectId: string, nextSection: WorkspaceSection) => {
     void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) });
+  };
+  const goToStage = (nextProjectId: string, nextStage: ProjectStage) => {
+    void navigate({ to: resolveProjectStage(nextProjectId, nextStage) });
   };
   const openSettings = () => void navigate({
     to: "/settings/general",
     search: { project_id: projectId } as never,
   });
+  // `/home`은 단계가 아니라 프로젝트 첫 화면이다. 같은 `plan` 단계로 읽히지만
+  // 그리는 화면이 다르므로 주소 조각으로 가른다.
   if (section === "home") {
     return <RoutedProductShell projectId={projectId} projects={projects} section="home" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <HomePage projectId={projectId} onNavigate={navigateTo} />
     </RoutedProductShell>;
   }
-  if (section === "create" || section === "plan") {
+  if (stage === "plan") {
     return <RoutedProductShell projectId={projectId} projects={projects} section="create" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <CreationInterview projectId={projectId} />
     </RoutedProductShell>;
   }
-  if (section === "media" || section === "assets") {
+  if (stage === "assets") {
     const requestedReturn = typeof (routeSearch as { return_to?: unknown }).return_to === "string"
       ? (routeSearch as { return_to: string }).return_to
       : null;
     const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
-    if (safeReturn) return <RoutedProductShell projectId={projectId} projects={projects} section={section} onNavigate={navigateTo} onOpenSettings={openSettings}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></RoutedProductShell>;
-    return <RoutedProductShell projectId={projectId} projects={projects} section={normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
+    if (safeReturn) return <RoutedProductShell projectId={projectId} projects={projects} section="media" onNavigate={navigateTo} onOpenSettings={openSettings}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></RoutedProductShell>;
+    return <RoutedProductShell projectId={projectId} projects={projects} section="media" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <MediaWorkspacePage projectId={projectId} />
     </RoutedProductShell>;
   }
   // 검토와 출력은 한 단계다. 두 주소를 모두 살려 둔 채 같은 화면을 그린다 --
   // 한쪽을 리다이렉트로 접으면 그 주소로 바로 들어오던 경로가 끊긴다.
-  if (section === "outputs" || section === "output" || section === "timeline" || section === "review") {
-    return <RoutedProductShell projectId={projectId} projects={projects} section={section === "outputs" || section === "output" ? "outputs" : normalizedSection} onNavigate={navigateTo} onOpenSettings={openSettings}>
+  if (stage === "review" || stage === "output") {
+    return <RoutedProductShell projectId={projectId} projects={projects} section={stage === "output" ? "outputs" : "review"} onNavigate={navigateTo} onOpenSettings={openSettings}>
       <ReviewAndOutputPage
         projectId={projectId}
-        onOpenEditor={() => navigateTo(projectId, "editing")}
+        onOpenEditor={() => goToStage(projectId, "edit")}
         onOpenSegment={({ projectId: targetProjectId, sessionId, segmentId }) => void navigate({
           to: "/projects/$projectId/$section",
           params: { projectId: targetProjectId, section: "editor" },
@@ -673,21 +672,23 @@ function WorkspacePage() {
       />
     </RoutedProductShell>;
   }
-  if ((section === "editor" || section === "edit") && rawEditingSessionId !== null && !requestedEditingSessionId) {
+  if (stage === "edit" && rawEditingSessionId !== null && !requestedEditingSessionId) {
     return <RoutedProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <EditorWorkbenchRoute projectId={projectId} sessionId={null} requestedSegmentId={requestedSegmentId} />
     </RoutedProductShell>;
   }
-  if ((section === "editor" || section === "edit") && !requestedEditingSessionId) {
+  if (stage === "edit" && !requestedEditingSessionId) {
     return <RoutedProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
-      <CanonicalEditorEntry projectId={projectId} onNavigate={navigateTo} />
+      <CanonicalEditorEntry projectId={projectId} onNavigate={goToStage} />
     </RoutedProductShell>;
   }
-  if (section === "editor" || section === "edit") {
+  if (stage === "edit") {
     return <RoutedProductShell projectId={projectId} projects={projects} section="editing" onNavigate={navigateTo} onOpenSettings={openSettings}>
       <EditorWorkbenchRoute projectId={projectId} sessionId={requestedEditingSessionId} requestedSegmentId={requestedSegmentId} />
     </RoutedProductShell>;
   }
+  // 다섯 단계를 위에서 다 다뤘으므로 여기까지 오지 않는다. 단계가 늘었는데
+  // 그릴 화면을 붙이지 않은 경우에만 걸리는 안전망이다.
   return <RecoveryPage />;
 }
 
@@ -695,7 +696,7 @@ function resolveSafeCreationReturn(projectId: string, requestedReturn: string | 
   if (!requestedReturn) return null;
   try {
     const parsed = new URL(requestedReturn, window.location.origin);
-    const expectedPath = `/projects/${encodeURIComponent(projectId)}/create`;
+    const expectedPath = resolveProjectStage(projectId, "plan");
     if (parsed.origin !== window.location.origin || parsed.pathname !== expectedPath || parsed.hash) return null;
     return `${parsed.pathname}${parsed.search}`;
   } catch {
@@ -703,7 +704,7 @@ function resolveSafeCreationReturn(projectId: string, requestedReturn: string | 
   }
 }
 
-function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; onNavigate: (projectId: string, section: WorkspaceSection) => void }) {
+function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; onNavigate: (projectId: string, stage: ProjectStage) => void }) {
   const navigate = useNavigate();
   const [message, setMessage] = useState("편집할 초안을 불러오는 중이에요.");
   const [hasNoDraft, setHasNoDraft] = useState(false);
@@ -750,12 +751,12 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
   return <div aria-live="polite">
     <p>{message}</p>
     {hasNoDraft ? <>
-      <Button type="button" onClick={() => onNavigate(projectId, "create")}>영상 정하러 가기</Button>
+      <Button type="button" onClick={() => onNavigate(projectId, "plan")}>영상 정하러 가기</Button>
       {/* 캡컷은 열면 바로 빈 편집판이다. 기획을 건너뛰고 여기서 시작할 수 있어야 한다. */}
       <Button type="button" variant="outline" disabled={isOpeningBlank} onClick={() => void openBlankBoard()}>
         {isOpeningBlank ? "편집판을 여는 중" : "빈 편집판으로 시작"}
       </Button>
-      <Button type="button" variant="outline" onClick={() => onNavigate(projectId, "media")}>먼저 재료부터 모으기</Button>
+      <Button type="button" variant="outline" onClick={() => onNavigate(projectId, "assets")}>먼저 재료부터 모으기</Button>
       {blankError ? <p role="alert">{blankError}</p> : null}
     </> : null}
   </div>;

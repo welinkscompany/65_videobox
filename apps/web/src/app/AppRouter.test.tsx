@@ -581,6 +581,23 @@ describe("AppRouter URL ownership", () => {
     expect(within(card).queryByText("새 영상 시작")).not.toBeInTheDocument();
   });
 
+  // 새 이름 주소는 여태 시험이 없었다. 화면 고르는 기준이 단계로 바뀌었으니
+  // 옛 이름 주소와 **같은 화면**에 닿는지 여기서 못박는다.
+  it("opens the same screen for a canonical stage address as for its legacy twin", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
+    vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [] });
+
+    const assetsRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/assets"] }));
+    render(<AppRouter router={assetsRouter} />);
+    expect(await screen.findByTestId("media-workspace-page")).toHaveAttribute("data-project-id", "project_a");
+    cleanup();
+
+    const planRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/plan"] }));
+    render(<AppRouter router={planRouter} />);
+    await screen.findByRole("heading", { name: "유진과 영상 기획을 시작해요" });
+  });
+
   it("owns ordinary media with the canonical workspace and keeps the creation return adapter narrow", async () => {
     const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);
@@ -714,7 +731,9 @@ describe("AppRouter URL ownership", () => {
     expect(director).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["timeline", "review"])("routes /%s to the canonical timeline review owner", async (section) => {
+  // `output`은 새 이름, `outputs`·`timeline`은 옛 이름이다. 화면을 고르는 일이
+  // 주소 글자가 아니라 **단계**로 넘어갔으므로 네 주소가 모두 같은 화면에 닿아야 한다.
+  it.each(["timeline", "review", "output", "outputs"])("routes /%s to the canonical timeline review owner", async (section) => {
     vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
     vi.spyOn(api, "getLatestEditingSession").mockResolvedValue({
       session_id: "session-a", project_id: "project_a", timeline_id: "timeline-a", session_revision: 1, segments: [], history: [],
