@@ -7,7 +7,7 @@ type Props = { proposal: FootageProposal | null; playhead: number; onSelectSegme
 
 export function SceneTimeline({ proposal, playhead, onSelectSegment, selectedSegmentId, selectedSegmentIds = [], onSplit, onMerge, onExclude, onBoundary }: Props) {
   return <section className="vb-footage-timeline" data-testid="scene-timeline" aria-label="장면 타임라인">
-    <div className="vb-footage-timeline__heading"><div><p className="vb-eyebrow">SCENES</p><h2>장면 타임라인</h2></div><span>{proposal ? `${proposal.segments.length}개 장면` : "분석 전"}</span></div>
+    <div className="vb-footage-timeline__heading"><div><p className="vb-eyebrow">나눈 결과</p><h2>장면 타임라인</h2></div><span>{proposal ? `${proposal.segments.length}개 장면` : "분석 전"}</span></div>
     {!proposal ? <p className="vb-footage-empty">분석을 시작하면 장면 경계가 표시돼요.</p> : <>
       <div className="vb-footage-track" style={{ "--playhead": `${proposal.segments.length ? Math.min(100, playhead / Math.max(...proposal.segments.map((s) => s.end_sec)) * 100) : 0}%` } as CSSProperties}>
         {proposal.segments.map((segment) => <Button type="button" variant="ghost" key={segment.segment_id} className="vb-footage-segment" aria-pressed={selectedSegmentIds.includes(segment.segment_id) || selectedSegmentId === segment.segment_id} onClick={(event) => onSelectSegment(segment, event.shiftKey)} style={{ flex: `${Math.max(.08, segment.end_sec - segment.start_sec)} 1 0` }}><strong>{String(segment.confirmed_fields.label ?? segment.machine_fields.label ?? "장면")}</strong><small>{formatTime(segment.start_sec)}–{formatTime(segment.end_sec)}</small></Button>)}

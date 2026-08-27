@@ -68,3 +68,32 @@ describe("footage organizer design-system contract", () => {
     expect(footageCss).toMatch(/\.vb-footage-sequence__controls \{ display:flex; flex-wrap:wrap; gap:\.3rem/)
   })
 })
+
+/** owner(2026-08-27): "안에 들어 있는 내용과 기능들이 인터페이스가 너무 안좋아서
+ *  어떻게 운영을 하고 뭘클릭을 하고, 사용하는지 전혀 가늠이 안되"
+ *
+ *  화면을 열어 보니 구역 머리말에 **영어 대문자가 그대로** 나오고 있었다 --
+ *  `SOURCE · PREVIEW · ACTIONS · SUGGESTIONS · SCENES`. 창작자가 읽을 문구에
+ *  개발 용어를 쓰지 않는다는 규정(`development-fast-path.ko.md` §10.13) 위반이고,
+ *  무엇을 하는 자리인지 한국어로 말해 주지 않으니 "가늠이 안 된다"는 말이 나온다.
+ *
+ *  여기서 지키는 것은 **화면에 보이는 글자는 창작자의 말이다**이다. */
+describe("촬영본 화면은 창작자의 말로 말한다", () => {
+  const sources = [
+    "FootageOrganizerPage.tsx",
+    "FootageSourceList.tsx",
+    "FootagePreview.tsx",
+    "FootageSuggestions.tsx",
+    "SceneTimeline.tsx",
+  ];
+
+  for (const file of sources) {
+    it(`${file}의 구역 머리말에 영어가 남아 있지 않다`, () => {
+      const source = readFileSync(resolve(process.cwd(), `src/features/footage/${file}`), "utf8");
+      // `vb-eyebrow`는 구역 이름을 말하는 자리다. 여기 영어 대문자가 들어가면
+      // 화면에 그대로 보인다.
+      const englishEyebrows = source.match(/vb-eyebrow">[A-Z][A-Z ]+</g) ?? [];
+      expect(englishEyebrows).toEqual([]);
+    });
+  }
+});

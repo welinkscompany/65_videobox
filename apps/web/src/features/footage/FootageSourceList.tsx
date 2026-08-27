@@ -5,7 +5,7 @@ type Props = { assets: LibraryAsset[]; selectedIds: string[]; onSelect: (asset: 
 
 export function FootageSourceList({ assets, selectedIds, onSelect }: Props) {
   return <aside className="vb-footage-pane vb-footage-sources" data-testid="footage-source-list">
-    <div className="vb-footage-pane__heading"><p className="vb-eyebrow">SOURCE</p><h2>촬영본</h2><span>{assets.length}개</span></div>
+    <div className="vb-footage-pane__heading"><p className="vb-eyebrow">가져온 것</p><h2>촬영본</h2><span>{assets.length}개</span></div>
     {assets.length === 0 ? <p className="vb-footage-empty">준비된 촬영본이 없어요.</p> : <div className="vb-footage-source-scroll" data-bounded="true">
       {assets.map((asset) => {
         const filename = String(asset.user_metadata?.filename ?? asset.library_asset_id);
