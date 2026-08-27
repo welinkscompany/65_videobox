@@ -35,17 +35,33 @@ export function resolveGlobalLocation(destination: GlobalDestination) {
   return destination === "settings" ? "/settings/general" : `/${destination}`;
 }
 
+/**
+ * 단계마다 **실제로 내보내는 주소**다. 주소는 사람이 북마크하고 되돌아오는
+ * 계약이라 이번 정리에서 바꾸지 않았다 -- 바꾸는 것은 코드가 쓰는 말이지
+ * 주소가 아니다. 새 이름(`/plan`·`/assets`·`/edit`·`/output`)은 계속 **들어오는**
+ * 주소로 읽힌다(`legacyStageAliases`).
+ */
+const stageAddresses: Readonly<Record<ProjectStage, string>> = {
+  plan: "create",
+  assets: "media",
+  edit: "editor",
+  review: "review",
+  output: "outputs",
+};
+
+/** 우리 코드가 프로젝트 화면 링크를 만들 때 쓰는 **하나뿐인** 함수다. */
 export function resolveProjectStage(projectId: string, stage: ProjectStage) {
-  return `/projects/${encodeURIComponent(projectId)}/${stage}`;
+  return `/projects/${encodeURIComponent(projectId)}/${stageAddresses[stage]}`;
 }
 
-export function resolveWorkspaceLocation(projectId: string, section: WorkspaceSection = "home") {
+/**
+ * 껍데기(`ProductShell`/`TopBar`)와 `EditorWorkbenchRoute`는 아직 옛 이름으로
+ * 말한다. 그 경계에서만 쓰는 어댑터다 -- **새 코드는 `resolveProjectStage`를 쓴다.**
+ * `home`은 단계가 아니라 프로젝트 첫 화면이라 여기에만 있다.
+ */
+export function resolveWorkspaceLocation(projectId: string, section: WorkspaceSection) {
   const canonicalSection = section === "editing" ? "editor" : section;
   return `/projects/${encodeURIComponent(projectId)}/${canonicalSection}`;
-}
-
-export function isWorkspaceSection(value: string): value is WorkspaceSection {
-  return (workspaceSections as readonly string[]).includes(value);
 }
 
 export function isProjectStage(value: string): value is ProjectStage {
@@ -116,11 +132,13 @@ export function resolveNavigationContext({
       : parsed.stage === "assets" ? "미디어"
         : parsed.stage === "edit" ? "편집"
           : "확인과 내보내기";
+    // 돌아갈 곳은 **한 단계 앞**이다. 앞 단계를 새 이름으로 적어야 이 표가
+    // 무엇을 말하는지 읽힌다 -- 주소는 `resolveProjectStage`가 정한다.
     const fallbackHref = parsed.stage === "plan"
       ? currentSegment === "home" ? resolveGlobalLocation("projects") : resolveWorkspaceLocation(parsed.projectId, "home")
-      : parsed.stage === "assets" ? resolveWorkspaceLocation(parsed.projectId, "create")
-        : parsed.stage === "edit" ? resolveWorkspaceLocation(parsed.projectId, "media")
-          : resolveWorkspaceLocation(parsed.projectId, "editing");
+      : parsed.stage === "assets" ? resolveProjectStage(parsed.projectId, "plan")
+        : parsed.stage === "edit" ? resolveProjectStage(parsed.projectId, "assets")
+          : resolveProjectStage(parsed.projectId, "edit");
     return {
       screenName,
       fallbackHref,

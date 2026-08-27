@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseWorkspaceLocation,
+  projectStages,
   resolveNavigationContext,
   resolveGlobalLocation,
   resolveProjectStage,
@@ -14,7 +15,27 @@ describe("workspace route manifest", () => {
     expect(resolveGlobalLocation("library")).toBe("/library");
     expect(resolveGlobalLocation("footage")).toBe("/footage");
     expect(resolveGlobalLocation("settings")).toBe("/settings/general");
-    expect(resolveProjectStage("p1", "assets")).toBe("/projects/p1/assets");
+    expect(resolveProjectStage("p1", "assets")).toBe("/projects/p1/media");
+  });
+
+  /** 링크를 만드는 곳은 하나여야 한다. 껍데기(`ProductShell`/`TopBar`)는 아직 옛
+   *  이름으로 말하므로 `resolveWorkspaceLocation`이 남아 있는데, **두 함수가 같은
+   *  단계에 다른 주소를 내면** 같은 화면으로 가는 링크가 두 벌이 된다. */
+  it("emits one address per stage — the same one the shell's legacy names resolve to", () => {
+    expect(resolveProjectStage("p1", "plan")).toBe(resolveWorkspaceLocation("p1", "create"));
+    expect(resolveProjectStage("p1", "assets")).toBe(resolveWorkspaceLocation("p1", "media"));
+    expect(resolveProjectStage("p1", "edit")).toBe(resolveWorkspaceLocation("p1", "editing"));
+    expect(resolveProjectStage("p1", "review")).toBe(resolveWorkspaceLocation("p1", "review"));
+    expect(resolveProjectStage("p1", "output")).toBe(resolveWorkspaceLocation("p1", "outputs"));
+  });
+
+  /** 내보내는 주소를 옛 이름으로 고정해도, 새 이름으로 **들어오는** 주소는 계속
+   *  읽혀야 한다. 위 줄이 `/projects/p1/assets`를 더 이상 만들지 않게 되었으므로
+   *  그 입력 호환을 여기서 따로 지킨다. */
+  it("keeps every canonical stage name readable as an incoming address", () => {
+    for (const stage of projectStages) {
+      expect(parseWorkspaceLocation(`/projects/p1/${stage}`)).toMatchObject({ projectId: "p1", stage });
+    }
   });
 
   it("maps editing to /editor while retaining the previous address as input-only compatibility", () => {
