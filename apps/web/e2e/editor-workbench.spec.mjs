@@ -198,8 +198,19 @@ test("every toolbar control stays reachable on a phone-width screen", async ({ p
   const row = page.locator(".vb-editor-workbench__toolbar div").first();
   expect(await row.evaluate((node) => /(auto|scroll)/.test(getComputedStyle(node).overflowX))).toBe(true);
   await row.evaluate((node) => { node.scrollLeft = node.scrollWidth; });
+  // **범위를 툴바 안으로 좁혔다(2026-08-27).** 이 시험이 지키는 것은 "툴바를 끝까지
+  // 밀면 마지막 단추에 닿는다"이므로 애초에 툴바 안에서 찾는 것이 맞는 표현이었다.
+  // 이름이 겹치지 않던 동안 우연히 통했을 뿐이다.
+  //
+  // 겹친 이유를 남겨 둔다: 이름을 `미디어` 하나로 모으면서(owner 승인 2026-08-27)
+  // 위 띠의 단계 단추와 편집기 도크 단추가 **같은 이름**이 됐다. 하는 일은 다르다 --
+  // 하나는 미디어 화면으로 가고, 하나는 왼쪽 도크를 여닫는다. 이것은 편집기 중심
+  // 개편이 미디어 화면을 편집기 탭으로 들이면 저절로 사라진다
+  // (`docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` 순서 2).
+  // 그때까지는 두 단추가 서로 다른 landmark에 있어 화면 낭독기가 구분해 읽는다.
+  const workbench = page.getByLabel("편집 작업판");
   for (const name of ["빼기", "미디어", "세부 정보"]) {
-    const right = await page.getByRole("button", { name }).evaluate((node) => node.getBoundingClientRect().right);
+    const right = await workbench.getByRole("button", { name }).evaluate((node) => node.getBoundingClientRect().right);
     expect(right).toBeLessThanOrEqual(390 + 1);
   }
   const toolbarHeight = await page.locator(".vb-editor-workbench__toolbar").evaluate((node) => node.getBoundingClientRect().height);
