@@ -8,6 +8,7 @@ import { writeAssetDrag } from "./assetDragPayload";
 import { AddMediaFiles } from "../../media/AddMediaFiles";
 import { VoiceMaterialPanel } from "../../media/VoiceMaterialPanel";
 import { ImportFromFootageInbox } from "../../media/ImportFromFootageInbox";
+import { LibraryPickerDialog } from "./LibraryPickerDialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { DEFAULT_SCENE_TRANSITION_DURATION_SEC, SCENE_TRANSITION_CHOICES } from "../inspector/sceneTransitions";
 import type { InspectorAction } from "../inspector/InspectorControls";
@@ -117,6 +118,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const [shown, setShown] = useState(FIRST_PAGE);
   const [narrationOpen, setNarrationOpen] = useState(false);
   const [footageOpen, setFootageOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const visibleCards = matchingCards.slice(0, shown);
   const hiddenCount = matchingCards.length - visibleCards.length;
   // 검색·필터를 바꾸면 다시 처음부터 본다. 안 그러면 조건을 좁혔는데도 앞서 펼친
@@ -155,6 +157,14 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           패널은 **미디어 화면이 쓰는 것을 그대로** 쓴다. */}
         <Button type="button" variant="outline" className="vb-editor-assets__narration" onClick={() => setNarrationOpen(true)}>내레이션</Button>
         <Button type="button" variant="outline" className="vb-editor-assets__footage" onClick={() => setFootageOpen(true)}>촬영본</Button>
+        {/* **라이브러리에서 가져오기(owner 승인, 재설계안 §1.3).**
+            여러 프로젝트가 함께 쓰는 `/library`는 지금 편집 중인 프로젝트에
+            속하지 않는다 -- 그래서 편집기 안으로 통째로 접지 않고, "고르기"
+            슬라이스 하나만 팝업으로 연다. 팝업 내부는 `/library`가 쓰는
+            `LibrarySidebar`·`LibraryResults`를 그대로 재사용한다
+            (`LibraryPickerDialog.tsx` 주석 참고). */}
+        <Button type="button" variant="outline" className="vb-editor-assets__library" onClick={() => setLibraryOpen(true)}>라이브러리에서 가져오기</Button>
+        <LibraryPickerDialog open={libraryOpen} onOpenChange={setLibraryOpen} projectId={projectId} onImported={onMediaAdded} />
         <Dialog open={footageOpen} onOpenChange={setFootageOpen}>
           <DialogContent className="vb-dialog-content">
             <DialogHeader>

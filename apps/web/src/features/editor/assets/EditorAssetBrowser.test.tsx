@@ -540,6 +540,32 @@ describe("편집기에서 촬영본 가져오기", () => {
   });
 });
 
+/** 여러 프로젝트가 함께 쓰는 `/library`(전체 관리 화면)에서 편집기를 떠나지 않고
+ *  자산 하나를 골라 들여올 길. 관리(올리기·휴지통·사용처 확인)는 이 팝업에
+ *  넣지 않는다 -- "고르기"만 한다.
+ *  → `docs/superpowers/specs/2026-08-27-library-footage-projects-redesign-plan.ko.md` §1.3 */
+describe("편집기에서 라이브러리 자산 가져오기", () => {
+  it("라이브러리에서 골라 이 프로젝트로 가져온다", async () => {
+    vi.spyOn(apiModule.api, "listLibraryAssets").mockResolvedValue({
+      assets: [{ library_asset_id: "lib-9", media_type: "broll", origin: "upload", lifecycle: "ready", user_metadata: { filename: "해변.mp4" } }],
+      total: 1,
+    } as never);
+    const materialize = vi.spyOn(apiModule.api, "materializeLibraryAsset").mockResolvedValue({} as never);
+    const onAdded = vi.fn();
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" onMediaAdded={onAdded} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "라이브러리에서 가져오기" }));
+    const dialog = await screen.findByRole("dialog", { name: "라이브러리에서 가져오기" });
+
+    fireEvent.click(await within(dialog).findByRole("article", { name: "해변.mp4" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "가져오기" }));
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("lib-9", "project-a"));
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "라이브러리에서 가져오기" })).toBeNull());
+  });
+});
+
 /** owner(2026-08-27): "캡컷 메뉴 하나하나 세세하게 확인해서 우리거에 벤치마킹해줘"
  *  → 확인 결과 owner 결정: **있는 것만 자리 맞추기.**
  *
