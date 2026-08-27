@@ -538,6 +538,56 @@ describe("편집기에서 촬영본 가져오기", () => {
 
     expect(await within(dialog).findByText("아직 따로 모아 둔 영상이 없어요.")).toBeVisible();
   });
+
+  /** 재설계안 §2.3 item 3: `/footage`에서 이미 장면을 나눠 승인해 둔 가상
+   *  묶음을, 편집기 촬영본 팝업 안 새 탭에서 곧장 가져올 수 있어야 한다.
+   *  `/footage`의 나누기·타임라인 UI는 복제하지 않는다 -- 여기는 "묶음 하나를
+   *  고르는 목록"일 뿐이다.
+   *  → `docs/superpowers/specs/2026-08-27-library-footage-projects-redesign-plan.ko.md` §2.3, §2.4 */
+  it("이미 정리한 묶음 탭에서 승인된 가상 묶음을 골라 이 프로젝트로 가져온다", async () => {
+    vi.spyOn(apiModule.api, "listMediaInboxAssets").mockResolvedValue([] as never);
+    vi.spyOn(apiModule.api, "listApprovedFootageSequences").mockResolvedValue({
+      sequences: [
+        {
+          sequence_id: "vseq-1",
+          source_id: "source-1",
+          source_sha256: "hash-1",
+          sources: [{ source_id: "source-1", source_sha256: "hash-1", library_asset_id: "asset-take" }],
+          name: "해변 장면 묶음",
+          revision: 1,
+          items: [
+            { item_id: "item-1", source_segment_id: "seg-1", source_id: "source-1", item_order: 1, start_sec: 0, end_sec: 2 },
+            { item_id: "item-2", source_segment_id: "seg-2", source_id: "source-1", item_order: 2, start_sec: 2, end_sec: 4 },
+          ],
+        },
+      ],
+    } as never);
+    const materialize = vi.spyOn(apiModule.api, "materializeLibraryAsset").mockResolvedValue({} as never);
+    const onAdded = vi.fn();
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" onMediaAdded={onAdded} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "촬영본" }));
+    const dialog = await screen.findByRole("dialog", { name: "촬영본 가져오기" });
+
+    fireEvent.click(within(dialog).getByRole("tab", { name: "이미 정리한 묶음" }));
+    fireEvent.click(await within(dialog).findByRole("button", { name: "해변 장면 묶음 가져오기" }));
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("asset-take", "project-a"));
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+  });
+
+  it("승인된 묶음이 없으면 그렇게 말한다", async () => {
+    vi.spyOn(apiModule.api, "listMediaInboxAssets").mockResolvedValue([] as never);
+    vi.spyOn(apiModule.api, "listApprovedFootageSequences").mockResolvedValue({ sequences: [] } as never);
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "촬영본" }));
+    const dialog = await screen.findByRole("dialog", { name: "촬영본 가져오기" });
+
+    fireEvent.click(within(dialog).getByRole("tab", { name: "이미 정리한 묶음" }));
+
+    expect(await within(dialog).findByText("아직 승인해 둔 묶음이 없어요.")).toBeVisible();
+  });
 });
 
 /** 여러 프로젝트가 함께 쓰는 `/library`(전체 관리 화면)에서 편집기를 떠나지 않고

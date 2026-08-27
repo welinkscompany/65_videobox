@@ -938,7 +938,7 @@ export type FootageSequenceItem = {
   start_sec: number | null;
   end_sec: number | null;
 };
-export type FootageSequenceSource = { source_id: string; source_sha256: string };
+export type FootageSequenceSource = { source_id: string; source_sha256: string; library_asset_id?: string | null };
 export type FootageSequence = {
   sequence_id: string;
   source_id: string;
@@ -2054,6 +2054,7 @@ export const api = {
   createFootageSequence: (payload: { source_id: string; name?: string; items: Array<{ source_segment_id: string; source_id?: string; item_order: number; start_sec?: number; end_sec?: number }>; idempotency_key?: string }) =>
     request<FootageSequence>("/api/footage/sequences", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getFootageSequence: (sequenceId: string) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}`),
+  listApprovedFootageSequences: () => request<{ sequences: FootageSequence[] }>("/api/footage/sequences?status=approved"),
   reorderFootageSequence: (sequenceId: string, payload: { expected_revision: number; item_ids: string[] }) =>
     request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/reorder`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   previewFootageSequence: (sequenceId: string) => request<FootageSequencePreview>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/preview`, { method: "POST" }),
