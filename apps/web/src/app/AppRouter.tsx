@@ -170,7 +170,15 @@ function RoutedProductShell(props: ProductShellProps) {
   // `이전 화면` 단추가 사라졌다(owner 신고 2026-08-27, 실측 확인). 라우터로 옮긴다.
   const onNavigateGlobal = (destination: "projects" | "library" | "footage") =>
     void navigate({ href: resolveGlobalLocation(destination) });
-  return <ProductShell {...props} navigation={navigation} onBack={canGoBack ? onBack : undefined} onNavigateGlobal={onNavigateGlobal} />;
+  // 편집기로 돌아가는 길(owner 결정 2026-08-27). 마지막으로 연 프로젝트를 이미
+  // 기억하고 있으므로(`lastProjectKey`) 그걸 그대로 쓴다. **모르면 주지 않는다** --
+  // 없는 길을 흉내 내면 눌렀을 때 빈 화면이 뜬다.
+  const resumeProjectId = props.projectId
+    || resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), props.projects);
+  const onResumeEditor = resumeProjectId
+    ? () => void navigate({ href: resolveWorkspaceLocation(resumeProjectId, "editing") })
+    : undefined;
+  return <ProductShell {...props} navigation={navigation} onBack={canGoBack ? onBack : undefined} onNavigateGlobal={onNavigateGlobal} onResumeEditor={onResumeEditor} />;
 }
 
 /** 첫 화면도 **앱 껍데기 안**이다.

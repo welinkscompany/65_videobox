@@ -252,3 +252,37 @@ describe("전체 메뉴는 앱 안에서 이동한다", () => {
     expect(onNavigateGlobal).toHaveBeenCalledTimes(3);
   });
 });
+
+/** owner(2026-08-27): "그리고 편집기 화면 바로가기가 없고"
+ *
+ *  `/projects`·`/library`·`/footage`에서는 위 띠에 단계 단추가 안 나온다
+ *  (프로젝트에 매이지 않은 화면이라 `hasProject`가 false다). 그래서 **편집기로
+ *  돌아갈 길이 없었다** -- 프로젝트 목록에서 카드를 다시 찾아 눌러야 했다.
+ *
+ *  캡컷도 편집기가 중심이다. 마지막으로 편집하던 곳으로 한 번에 돌아가는 단추를
+ *  위 띠에 둔다(owner 결정 2026-08-27). 돌아갈 곳을 모르면 만들지 않는다 --
+ *  없는 길을 흉내 내면 눌렀을 때 빈 화면이 뜬다. */
+describe("위 띠 — 편집기로 돌아가기", () => {
+  it("돌아갈 편집본이 있으면 한 번에 간다", () => {
+    const onResumeEditor = vi.fn();
+    renderBar({ projects: [], projectId: "", section: "library", onResumeEditor });
+
+    fireEvent.click(screen.getByRole("button", { name: "편집기로 돌아가기" }));
+
+    expect(onResumeEditor).toHaveBeenCalledOnce();
+  });
+
+  it("돌아갈 곳을 모르면 단추를 만들지 않는다", () => {
+    renderBar({ projects: [], projectId: "", section: "library" });
+
+    expect(screen.queryByRole("button", { name: "편집기로 돌아가기" })).toBeNull();
+  });
+
+  it("이미 프로젝트 안이면 단계 단추가 그 일을 하므로 두지 않는다", () => {
+    // 같은 곳으로 가는 문이 둘이 되면 owner를 막았던 문제를 띠에서 되풀이한다.
+    renderBar({ onResumeEditor: vi.fn() });
+
+    expect(screen.queryByRole("button", { name: "편집기로 돌아가기" })).toBeNull();
+    expect(screen.getByRole("button", { name: "편집" })).toBeVisible();
+  });
+});

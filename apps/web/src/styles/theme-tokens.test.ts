@@ -63,3 +63,39 @@ describe("shell theme tokens", () => {
     expect(previewShellRule).toContain("var(--vb-preview)")
   })
 })
+
+/** owner(2026-08-27): "위에 페이지 모두다 디자인 톤앤매너, 패키지디자인이 모두 다
+ *  달라. 이것도 디자인을 통일해야지"
+ *
+ *  재 보니 색은 문제가 아니었다 -- `--vb-panel`과 `--card`는 **이미 같은 값**이다
+ *  (`#FFFFFF`). 실제로 달라 보이게 만든 것은 **모서리**였다. 네 스타일시트에
+ *  값이 **15가지**로 흩어져 있었다(0.25 ~ 1rem). 반지름 토큰은 이미 있었는데
+ *  아무도 쓰지 않았다.
+ *
+ *  여기서 지키는 것은 **한 벌에서만 값을 꺼내 쓴다**이다. 승인된 색은 건드리지
+ *  않는다(`docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md`).
+ *  새 모서리 값을 쓰고 싶으면 척도를 늘리기 전에 먼저 물어라 -- 척도가 늘면
+ *  다시 15가지가 된다. */
+describe("모서리는 한 벌에서만 나온다", () => {
+  const RAW_RADIUS = /border-radius:\s*(?!0\b|999|9999)[0-9.]+rem/g;
+  const sheets = {
+    "product-shell.css": productShellCss,
+    "editor-workbench.css": editorWorkbenchCss,
+    "library.css": readFileSync(resolve(process.cwd(), "src/features/library/library.css"), "utf8"),
+    "footage.css": readFileSync(resolve(process.cwd(), "src/features/footage/footage.css"), "utf8"),
+  };
+
+  for (const [name, css] of Object.entries(sheets)) {
+    it(`${name}은 모서리를 토큰으로만 정한다`, () => {
+      expect(css.match(RAW_RADIUS) ?? []).toEqual([]);
+    });
+  }
+
+  it("척도는 셋뿐이다 — 늘리기 전에 먼저 묻는다", () => {
+    const uiSystem = readFileSync(resolve(process.cwd(), "src/ui-system.css"), "utf8");
+    for (const token of ["--vb-radius-sm", "--vb-radius-md", "--vb-radius-lg"]) {
+      expect(uiSystem, `${token}가 정의돼 있어야 한다`).toContain(`${token}:`);
+    }
+    expect(uiSystem.match(/--vb-radius-[a-z]+:/g) ?? []).toHaveLength(3);
+  });
+});

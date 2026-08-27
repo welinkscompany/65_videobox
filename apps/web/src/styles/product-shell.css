@@ -10,7 +10,7 @@ body:has(.vb-product-shell) { margin: 0; }
 @media (min-width:1600px) { .vb-product-content { max-width:1600px; } }
 .vb-dialog-content { width:min(35rem, calc(100vw - 2rem)); max-width:calc(100vw - 2rem); max-height:70vh; overflow-y:auto; box-sizing:border-box; padding: var(--vb-space-6); }
 .vb-job-dialog { width:100%; box-sizing:border-box; }.vb-job-row { overflow-wrap:anywhere; }.vb-job-row > span, .vb-job-row > strong { min-width:0; }
-.vb-eyebrow { color:var(--vb-accent); font-size: var(--vb-text-sm); font-weight:700; margin: 0 0 var(--vb-space-2); }.vb-home h1, .vb-settings h1 { margin: var(--vb-space-1) 0 var(--vb-space-2); font-size: clamp(var(--vb-text-2xl),3vw,var(--vb-text-3xl)); letter-spacing:-.04em; }.vb-home>div:first-child>p:not(.vb-eyebrow), .vb-settings>p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }.vb-home-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap: var(--vb-space-4); margin-top: var(--vb-space-7); }.vb-home-grid [data-slot=card] { display:flex; min-height:14rem; justify-content:space-between; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); }.vb-home-grid [data-slot=card-header], .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-5); }.vb-home-grid [data-slot=card-title] { font-weight:700; }.vb-home-grid [data-slot=card-description] { margin-top: var(--vb-space-2); color:var(--vb-muted); line-height:1.55; }.vb-product-shell [data-slot=button] { min-height:40px; }.vb-product-shell [data-slot=button][data-size="icon"] { min-height:32px; }.vb-product-shell [data-slot=button][data-variant="default"] { border:0; border-radius:.55rem; background:var(--primary); color:var(--primary-foreground); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; font-weight:650; }.vb-product-shell [data-slot=button][data-variant="outline"] { border:1px solid var(--vb-border); border-radius:.55rem; background:var(--vb-panel); color:var(--vb-text); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; }.vb-home-chat { margin-top: var(--vb-space-7); max-width:52rem; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); padding: var(--vb-space-5); }.vb-home-chat h2 { margin: 0 0 var(--vb-space-3); font-size: var(--vb-text-lg); font-weight:700; }.vb-home-chat label { display:block; margin: var(--vb-space-3) 0 var(--vb-space-1); font-size: var(--vb-text-md); color:var(--vb-muted); }.vb-home-chat textarea { width:100%; min-height:4.5rem; border:1px solid var(--vb-border); border-radius:.6rem; padding: var(--vb-space-2) var(--vb-space-3); font:inherit; background:var(--vb-canvas); color:var(--vb-text); }.vb-home-chat-history { display:flex; flex-direction:column; gap: var(--vb-space-2); max-height:16rem; overflow-y:auto; }.vb-home-chat-history p { margin: 0; line-height:1.55; }.vb-home-chat-history article p strong { margin-right: var(--vb-space-2); color:var(--vb-accent); }.vb-home-chat > p { color:var(--vb-muted); margin: 0; }.vb-product-shell[data-compact="true"] .vb-product-content { padding: var(--vb-space-3) var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid { gap: var(--vb-space-2); margin-top: var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card] { min-height:10rem; }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-header], .vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-3); }.vb-product-shell[data-reduced-motion="true"] *, .vb-product-shell[data-reduced-motion="true"] *::before, .vb-product-shell[data-reduced-motion="true"] *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }.vb-settings { max-width:42rem; }.vb-setting-control { display:flex; align-items:center; gap: var(--vb-space-2); margin-top: var(--vb-space-4); border:1px solid var(--vb-border); background:var(--vb-panel); border-radius:.75rem; padding: var(--vb-space-4); }.vb-setting-note { color:var(--vb-muted); font-size: var(--vb-text-md); }
+.vb-eyebrow { color:var(--vb-accent); font-size: var(--vb-text-sm); font-weight:700; margin: 0 0 var(--vb-space-2); }.vb-home h1, .vb-settings h1 { margin: var(--vb-space-1) 0 var(--vb-space-2); font-size: clamp(var(--vb-text-2xl),3vw,var(--vb-text-3xl)); letter-spacing:-.04em; }.vb-home>div:first-child>p:not(.vb-eyebrow), .vb-settings>p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }.vb-home-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap: var(--vb-space-4); margin-top: var(--vb-space-7); }.vb-home-grid [data-slot=card] { display:flex; min-height:14rem; justify-content:space-between; border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); }.vb-home-grid [data-slot=card-header], .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-5); }.vb-home-grid [data-slot=card-title] { font-weight:700; }.vb-home-grid [data-slot=card-description] { margin-top: var(--vb-space-2); color:var(--vb-muted); line-height:1.55; }.vb-product-shell [data-slot=button] { min-height:40px; }.vb-product-shell [data-slot=button][data-size="icon"] { min-height:32px; }.vb-product-shell [data-slot=button][data-variant="default"] { border:0; border-radius: var(--vb-radius-md); background:var(--primary); color:var(--primary-foreground); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; font-weight:650; }.vb-product-shell [data-slot=button][data-variant="outline"] { border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); color:var(--vb-text); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; }.vb-home-chat { margin-top: var(--vb-space-7); max-width:52rem; border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); padding: var(--vb-space-5); }.vb-home-chat h2 { margin: 0 0 var(--vb-space-3); font-size: var(--vb-text-lg); font-weight:700; }.vb-home-chat label { display:block; margin: var(--vb-space-3) 0 var(--vb-space-1); font-size: var(--vb-text-md); color:var(--vb-muted); }.vb-home-chat textarea { width:100%; min-height:4.5rem; border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); padding: var(--vb-space-2) var(--vb-space-3); font:inherit; background:var(--vb-canvas); color:var(--vb-text); }.vb-home-chat-history { display:flex; flex-direction:column; gap: var(--vb-space-2); max-height:16rem; overflow-y:auto; }.vb-home-chat-history p { margin: 0; line-height:1.55; }.vb-home-chat-history article p strong { margin-right: var(--vb-space-2); color:var(--vb-accent); }.vb-home-chat > p { color:var(--vb-muted); margin: 0; }.vb-product-shell[data-compact="true"] .vb-product-content { padding: var(--vb-space-3) var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid { gap: var(--vb-space-2); margin-top: var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card] { min-height:10rem; }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-header], .vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-3); }.vb-product-shell[data-reduced-motion="true"] *, .vb-product-shell[data-reduced-motion="true"] *::before, .vb-product-shell[data-reduced-motion="true"] *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }.vb-settings { max-width:42rem; }.vb-setting-control { display:flex; align-items:center; gap: var(--vb-space-2); margin-top: var(--vb-space-4); border:1px solid var(--vb-border); background:var(--vb-panel); border-radius: var(--vb-radius-md); padding: var(--vb-space-4); }.vb-setting-note { color:var(--vb-muted); font-size: var(--vb-text-md); }
 /* 목소리 화면은 설정에서 자산 단계로 옮겨 왔다. 설정에서는 `.vb-settings`가 42rem으로
    폭을 잡아 줬는데 자산 화면은 1440px까지 넓어서, 입력과 선택 상자가 화면 끝까지
    늘어나 읽기 어려웠다. 여기서 같은 폭을 다시 잡아 준다. */
@@ -22,12 +22,12 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog h1 { margin: var(--vb-space-1) 0 var(--vb-space-2); font-size: clamp(var(--vb-text-2xl),3vw,var(--vb-text-3xl)); letter-spacing:-.04em; }
 .vb-catalog > p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }
 .vb-catalog-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(14rem,1fr)); gap: var(--vb-space-4); margin-top: var(--vb-space-7); }
-.vb-catalog-card { height:auto; min-height:6rem; padding: var(--vb-space-5); border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); font-weight:700; font-size: var(--vb-text-lg); white-space:normal; transition:border-color .15s ease, box-shadow .15s ease; }
+.vb-catalog-card { height:auto; min-height:6rem; padding: var(--vb-space-5); border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); font-weight:700; font-size: var(--vb-text-lg); white-space:normal; transition:border-color .15s ease, box-shadow .15s ease; }
 .vb-catalog-card:hover { border-color:var(--vb-accent); box-shadow:0 2px 6px color-mix(in srgb, var(--vb-text) 8%, transparent); background:var(--vb-panel); }
 /* 대표 이미지가 있는 카드와 없는 카드가 섞여 높이가 들쭉날쭉했다(2026-08-17 owner
    지적). 이미지 자리를 늘 같은 크기로 잡고, 단추를 아래로 밀어 줄을 맞춘다. */
 .vb-catalog-card { display:flex; flex-direction:column; }
-.vb-catalog-card img { width:100%; height:9rem; object-fit:cover; border-radius:.6rem; background:color-mix(in srgb, var(--vb-text) 6%, transparent); }
+.vb-catalog-card img { width:100%; height:9rem; object-fit:cover; border-radius: var(--vb-radius-md); background:color-mix(in srgb, var(--vb-text) 6%, transparent); }
 .vb-catalog-card > [data-slot=button], .vb-catalog-card > a { margin-top: auto; }
 .vb-catalog-card__finished { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); font-weight:500; }
 /* 캡컷 카드의 `용량 | 길이` 자리. 상태·날짜·완성본 수 세 줄을 한 줄로 합쳤다.
@@ -65,13 +65,13 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-catalog-archive { margin-top: var(--vb-space-7); display:grid; gap: var(--vb-space-3); justify-items:start; }
 .vb-catalog-archive-list { display:grid; gap: var(--vb-space-2); width:100%; max-width:32rem; }
 .vb-catalog-archive-list p { margin:0; color:var(--vb-muted); font-size: var(--vb-text-sm); }
-.vb-catalog-archive-row { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); padding: var(--vb-space-2) var(--vb-space-3); border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); }
+.vb-catalog-archive-row { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); padding: var(--vb-space-2) var(--vb-space-3); border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); }
 /* 카드 제목은 편집기로 가는 링크인데 규칙이 없어서 브라우저 기본 파란 밑줄이
    나왔다 -- 승인 팔레트에 없는 색이다. 색을 바꾸는 게 아니라, 팔레트가
    닿지 않던 자리에 입힌다. */
 .vb-catalog-card h2 a { color:var(--vb-text); text-decoration:none; }
 .vb-catalog-card h2 a:hover, .vb-catalog-card h2 a:focus-visible { color:var(--vb-accent); text-decoration:underline; }
-.vb-home-next { display:grid; grid-template-columns:minmax(0,1fr) auto; gap: var(--vb-space-3) var(--vb-space-5); align-items:center; margin-top: var(--vb-space-6); padding: var(--vb-space-4) var(--vb-space-5); border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); }
+.vb-home-next { display:grid; grid-template-columns:minmax(0,1fr) auto; gap: var(--vb-space-3) var(--vb-space-5); align-items:center; margin-top: var(--vb-space-6); padding: var(--vb-space-4) var(--vb-space-5); border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); }
 .vb-home-next .vb-eyebrow { margin: 0; }
 .vb-action-link { display:inline-flex; width:max-content; align-items:center; color:var(--vb-accent); font-weight:650; text-decoration:underline; text-underline-offset:.18em; }
 .vb-catalog [data-slot=button][data-variant="outline"] { border-color:var(--vb-border); }
@@ -90,7 +90,7 @@ body:has(.vb-product-shell) { margin: 0; }
   min-height: 5rem;
   font-size: var(--vb-text-lg);
   font-weight: 600;
-  border-radius: 0.75rem;
+  border-radius: var(--vb-radius-md);
 }
 .vb-catalog-form { margin-top: var(--vb-space-7); max-width:26rem; display:grid; gap: var(--vb-space-3); }
 .vb-mobile-scrim { display:none; }
@@ -110,18 +110,18 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-outputs { max-width:none; }
 .vb-outputs-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap: var(--vb-space-3); }
 .vb-outputs-grid [data-slot=card] { min-width:0; min-height:0; }
-.vb-output-video { display:block; width:100%; max-width:100%; height:auto; max-height:18rem; object-fit:contain; border-radius:.5rem; background:var(--vb-canvas); }
+.vb-output-video { display:block; width:100%; max-width:100%; height:auto; max-height:18rem; object-fit:contain; border-radius: var(--vb-radius-sm); background:var(--vb-canvas); }
 .vb-outputs h1, .vb-creation-interview h1, .vb-media-library h2, .vb-project-archive h2 { margin: 0; font-size: clamp(var(--vb-text-xl),2.4vw,var(--vb-text-2xl)); letter-spacing:-.03em; }
 .vb-outputs p, .vb-creation-interview p, .vb-media-library > p, .vb-project-archive p { margin: 0; color:var(--vb-muted); line-height:1.55; }
-.vb-outputs section, .vb-outputs article, .vb-creation-interview section, .vb-media-library article, .vb-project-archive article { border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); padding: var(--vb-space-4); display:grid; gap: var(--vb-space-2); }
+.vb-outputs section, .vb-outputs article, .vb-creation-interview section, .vb-media-library article, .vb-project-archive article { border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); padding: var(--vb-space-4); display:grid; gap: var(--vb-space-2); }
 .vb-media-library article strong { font-weight:650; }
 .vb-media-library audio { width:100%; max-width:28rem; }
 .vb-media-library__grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap: var(--vb-space-3); min-width:0; }
 .vb-media-library__grid article { min-width:0; min-height:0; padding: var(--vb-space-3); overflow:hidden; }
 .vb-media-library__grid audio { max-width:100%; }
-.vb-media-library__grid img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:.45rem; background:var(--vb-canvas); }
+.vb-media-library__grid img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius: var(--vb-radius-sm); background:var(--vb-canvas); }
 .vb-media-library__filters [aria-pressed="true"] { background:var(--primary); color:var(--primary-foreground); border-color:var(--primary); }
-.vb-media-project-card { display:grid; gap: var(--vb-space-2); min-width:0; padding: 0; overflow:hidden; border:1px solid var(--vb-border); border-radius:.85rem; background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 5%, transparent); }
+.vb-media-project-card { display:grid; gap: var(--vb-space-2); min-width:0; padding: 0; overflow:hidden; border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 5%, transparent); }
 .vb-media-project-card [data-slot=card-header] { display:grid; gap: var(--vb-space-1); padding: var(--vb-space-3) var(--vb-space-4) var(--vb-space-1); }
 .vb-media-project-card [data-slot=card-content] { display:grid; gap: var(--vb-space-1); padding: 0 var(--vb-space-4) var(--vb-space-4); }
 .vb-media-project-card [data-slot=card-description] { color:var(--vb-muted); }
@@ -131,12 +131,12 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-media-library__toolbar [data-slot=input] { flex:1 1 12rem; max-width:20rem; }
 .vb-settings-nav { display:flex; flex-wrap:wrap; gap: var(--vb-space-2); margin-bottom: var(--vb-space-4); }
 .vb-editor-assets__orientation { display:inline-flex; align-items:center; gap: var(--vb-space-1); border:1px solid var(--vb-border); border-radius:999px; padding: var(--vb-space-1) var(--vb-space-2); font-size: var(--vb-text-xs); color:var(--vb-muted); background:var(--vb-canvas); }
-.vb-editor-right-dock__sync-warning { border:1px solid var(--vb-accent); border-radius:.6rem; background:var(--vb-accent-bg); padding: var(--vb-space-2) var(--vb-space-3); display:grid; gap: var(--vb-space-2); }
+.vb-editor-right-dock__sync-warning { border:1px solid var(--vb-accent); border-radius: var(--vb-radius-md); background:var(--vb-accent-bg); padding: var(--vb-space-2) var(--vb-space-3); display:grid; gap: var(--vb-space-2); }
 .vb-editor-right-dock__sync-warning p { margin: 0; line-height:1.5; }
 .vb-conversation-cleanup { display:grid; gap: var(--vb-space-3); margin-top: var(--vb-space-4); }
 .vb-conversation-cleanup h2 { margin: 0; font-size: var(--vb-text-lg); font-weight:700; }
 .vb-conversation-cleanup > p { margin: 0; color:var(--vb-muted); }
-.vb-conversation-cleanup article { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); padding: var(--vb-space-3) var(--vb-space-4); }
+.vb-conversation-cleanup article { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); padding: var(--vb-space-3) var(--vb-space-4); }
 .vb-conversation-cleanup article p { margin: 0; }
 
 /* Intranet DS normalization for the product shell and catalog. */
@@ -165,7 +165,7 @@ body:has(.vb-product-shell) { margin: 0; }
 /* 프로젝트는 **지금 것만** 보인다. 왼쪽 기둥에서는 29개가 펼쳐져 가운데를 다 먹었다. */
 .vb-top-bar__switcher { position:absolute; z-index:20; top:calc(100% + var(--vb-space-1)); left:0;
   display:grid; gap: var(--vb-space-1); min-width:14rem; max-height:18rem; overflow-y:auto;
-  padding: var(--vb-space-2); border:1px solid var(--vb-border); border-radius:.6rem;
+  padding: var(--vb-space-2); border:1px solid var(--vb-border); border-radius: var(--vb-radius-md);
   background: var(--vb-panel); box-shadow:0 8px 24px color-mix(in srgb, var(--vb-text) 12%, transparent); }
 .vb-top-bar__stages { display:flex; align-items:center; gap: var(--vb-space-2); flex:1 1 auto; min-width:0; overflow-x:auto; }
 .vb-top-bar__end { display:flex; align-items:center; gap: var(--vb-space-2); flex:0 0 auto; margin-left:auto; }
@@ -191,15 +191,15 @@ body:has(.vb-product-shell) { margin: 0; }
    눌러야 하는 것처럼 보이고, owner를 막았던 문제가 띠에서 되풀이된다. */
 .vb-top-bar__canvas { color:var(--vb-muted); font-size: var(--vb-text-xs); white-space:nowrap;
   flex:0 0 auto; padding: var(--vb-space-1) var(--vb-space-2); border:1px solid var(--vb-border);
-  border-radius:.5rem; font-variant-numeric: tabular-nums; }
+  border-radius: var(--vb-radius-sm); font-variant-numeric: tabular-nums; }
 .vb-top-bar__stages [data-slot=button] { gap: var(--vb-space-2); white-space:nowrap; }
 .vb-top-bar__stages svg { flex:0 0 auto; width:1rem; height:1rem; }
 .vb-top-bar__menu { position:relative; flex:0 0 auto; }
 .vb-top-bar__menu-list { position:absolute; z-index:20; top:calc(100% + var(--vb-space-1)); right:0;
   display:grid; gap: var(--vb-space-1); min-width:12rem; padding: var(--vb-space-2);
-  border:1px solid var(--vb-border); border-radius:.6rem; background: var(--vb-panel);
+  border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background: var(--vb-panel);
   box-shadow:0 8px 24px color-mix(in srgb, var(--vb-text) 12%, transparent); }
-.vb-top-bar__menu-list a { display:flex; min-height:40px; align-items:center; gap: var(--vb-space-2); border:1px solid transparent; border-radius:.55rem; padding: var(--vb-space-2) var(--vb-space-3); color:var(--vb-text); text-decoration:none; font:inherit; }
+.vb-top-bar__menu-list a { display:flex; min-height:40px; align-items:center; gap: var(--vb-space-2); border:1px solid transparent; border-radius: var(--vb-radius-md); padding: var(--vb-space-2) var(--vb-space-3); color:var(--vb-text); text-decoration:none; font:inherit; }
 .vb-top-bar__menu-list a:hover, .vb-top-bar__menu-list a:focus-visible { border-color:var(--vb-accent-border); background:var(--vb-accent-bg); color:var(--vb-accent); }
 .vb-top-bar__menu-list [data-slot=button] { justify-content:flex-start; }
 /* 좁은 화면에서는 띠가 한 줄에 다 못 들어간다. 지우는 대신 글자를 접고 단계를

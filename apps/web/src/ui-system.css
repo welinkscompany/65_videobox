@@ -7,6 +7,19 @@
 }
 
 :root {
+  /* **모서리 척도 — 셋뿐이다(owner 결정 2026-08-27).**
+     owner: "위에 페이지 모두다 디자인 톤앤매너, 패키지디자인이 모두 다 달라."
+
+     재 보니 색은 문제가 아니었다. `--vb-panel`과 `--card`는 이미 같은 값이다.
+     달라 보이게 만든 것은 **모서리**였다 -- 네 스타일시트에 15가지가 흩어져
+     있었다(0.25 ~ 1rem). 반지름 토큰은 이미 있었는데 아무도 안 썼다.
+
+     새 값을 쓰고 싶으면 척도를 늘리기 전에 먼저 물어라. 늘리면 다시 15가지가
+     된다. `theme-tokens.test.ts`가 이 셋만 있도록 잡고 있다. */
+  --vb-radius-sm: 0.375rem;  /* 알약·칩·작은 단추 */
+  --vb-radius-md: 0.625rem;  /* 카드·입력칸 — 기본 */
+  --vb-radius-lg: 1rem;      /* 큰 패널·목록 카드 */
+
   /* docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md
      replaces the earlier warm-white/charcoal/indigo approval. */
   --vb-canvas: #FAFAFA;

@@ -57,6 +57,7 @@ export function TopBar({
   onSelectProject,
   onOpenSettings,
   onNavigateGlobal,
+  onResumeEditor,
   children,
 }: {
   projectId: string;
@@ -81,6 +82,9 @@ export function TopBar({
   onOpenSettings: () => void;
   /** 전역 화면으로 앱 안에서 이동한다. 없으면 주소 링크가 그대로 동작한다. */
   onNavigateGlobal?: (destination: "projects" | "library" | "footage") => void;
+  /** 마지막으로 편집하던 곳으로 돌아간다. **돌아갈 곳을 모르면 주지 않는다** --
+   *  없는 길을 흉내 내면 눌렀을 때 빈 화면이 뜬다. */
+  onResumeEditor?: () => void;
   /** 작업 상태처럼 띠 오른쪽에 붙는 것. 껍데기가 그 내용을 알 필요는 없다. */
   children?: ReactNode;
 }) {
@@ -178,6 +182,21 @@ export function TopBar({
       {screenName && !navigation && (!hasProject || activeStage === null) ? (
         <strong className="vb-top-bar__screen">{screenName}</strong>
       ) : null}
+
+      {/* **편집기로 돌아가는 길(owner 결정 2026-08-27).**
+          > "그리고 편집기 화면 바로가기가 없고"
+
+          프로젝트에 매이지 않는 화면(`/projects`·`/library`·`/footage`)에서는 단계
+          단추가 안 그려진다. 그래서 편집기로 돌아가려면 프로젝트 카드를 다시 찾아
+          눌러야 했다. 캡컷도 편집기가 중심이라 한 번에 돌아갈 수 있어야 한다.
+
+          **프로젝트 안에서는 두지 않는다** -- 단계의 `편집`이 이미 그 일을 하고,
+          같은 곳으로 가는 문이 둘이 되면 owner를 막았던 문제를 띠에서 되풀이한다. */}
+      {!hasProject && onResumeEditor ? <CompactTooltip label="마지막으로 편집하던 곳으로">
+        <Button type="button" variant="outline" size="sm" className="vb-top-bar__compact-control" aria-label="편집기로 돌아가기" onClick={onResumeEditor}>
+          <Scissors aria-hidden="true" />
+        </Button>
+      </CompactTooltip> : null}
 
       <div className="vb-top-bar__end">
         {/* 캡컷 위 툴바의 화면 비율 자리. **단추가 아니라 글자다** -- 우리는 여기서
