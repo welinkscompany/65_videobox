@@ -150,6 +150,9 @@
 /* 더하기 조작 셋을 한 줄로. 각자 한 줄씩 쓰던 때는 도크 402px 중 조작부가
    282px(70%)를 먹어 첫 미디어 카드가 335px 아래에서 시작했다 -- 미디어를 보러
    연 칸인데 미디어가 안 보였다(2026-08-27 실측). */
+/* 캡컷과 같은 자리의 최상위 탭(미디어·오디오·전환). 아래 종류 탭보다 한 단 위다. */
+.vb-editor-assets__panes { display: flex; gap: var(--vb-space-1); border-bottom: 1px solid var(--border); margin-bottom: var(--vb-space-2); }
+.vb-editor-assets__transitions { display: grid; gap: var(--vb-space-1); }
 .vb-editor-assets__add-row { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); margin-bottom: var(--vb-space-2); }
 .vb-editor-assets__add-row > * { flex: 1 1 auto; }
 .vb-editor-assets__tabs { display: flex; gap: var(--vb-space-1); border-bottom: 1px solid var(--border); margin-bottom: var(--vb-space-2); }

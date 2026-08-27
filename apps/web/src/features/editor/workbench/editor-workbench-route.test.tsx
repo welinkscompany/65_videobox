@@ -394,6 +394,12 @@ async function openAssetBrowser() {
   return screen.findByRole("dialog", { name: "미디어" });
 }
 
+/** 캡컷식 최상위 탭 분리(2026-08-27) 뒤 음악·효과음은 `오디오` 탭에 있다.
+ *  도크를 여는 단추와 이름이 겹치지 않는다 -- 그쪽은 `button`, 이쪽은 `tab`이다. */
+function openAudioPane() {
+  fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
+}
+
 async function openInspector() {
   fireEvent.click(await findClipSelectionButton("n-1"));
   fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
@@ -1754,6 +1760,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
+    openAudioPane();
     expect(await screen.findByRole("button", { name: "배경 음악 1 적용" })).toBeEnabled();
     fireEvent.click(clipSelectionButton("n-1"));
     const applyButton = screen.getByRole("button", { name: "배경 음악 1 적용" });
@@ -1784,6 +1791,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
+    openAudioPane();
     await screen.findByRole("button", { name: "배경 음악 1 적용" });
     fireEvent.click(clipSelectionButton("n-1"));
     fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 적용" }));
@@ -1909,6 +1917,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
+    openAudioPane();
     await screen.findByRole("button", { name: "배경 음악 1 적용" });
     fireEvent.click(clipSelectionButton("n-1"));
     fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 적용" }));

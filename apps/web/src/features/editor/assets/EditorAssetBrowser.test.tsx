@@ -57,6 +57,14 @@ const cards: readonly EditorAssetCard[] = [
   },
 ];
 
+/** **갱신 이유(2026-08-27).** 왼쪽 도크가 캡컷처럼 `미디어 · 오디오 · 전환`
+ *  최상위 탭으로 갈렸다. 아래 시험들은 소리 자산이 **기본 화면에 같이 있다**는
+ *  전제로 쓰여 있었는데 그 전제가 바뀌었다. 지키려는 것(줄로 눕는가, 적용이
+ *  되는가, 소리 유무를 사실대로 말하는가)은 그대로 두고 **가는 길만** 맞춘다. */
+function openAudioPane(): void {
+  fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
+}
+
 describe("EditorAssetBrowser", () => {
   it("filters by type and query, shows the selected range, and previews through a callback without media", () => {
     const onPreview = vi.fn();
@@ -67,12 +75,13 @@ describe("EditorAssetBrowser", () => {
     // 메뉴들을 탭으로 정리해서 깔끔하게 만들었어"). 이름에서 `필터`가 빠지고
     // 역할이 `button`에서 `tab`이 됐다. 지키려는 것은 "종류로 좁힐 수 있다"이지
     // 알약이 아니었으므로, 지키는 것은 그대로 두고 부르는 이름만 맞춘다.
+    openAudioPane();
     fireEvent.click(screen.getByRole("tab", { name: "음악" }));
     expect(screen.getByRole("tab", { name: "음악" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("heading", { name: "배경 음악 1" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "제품 사진" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("tab", { name: "전체" }));
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "미디어 검색" }), { target: { value: "제품" } });
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 원본 미리보기" }));
 
@@ -91,8 +100,11 @@ describe("EditorAssetBrowser", () => {
     const { container } = render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
 
     const rowOf = (title: string) => screen.getByRole("heading", { name: title }).closest("article");
-    expect(rowOf("배경 음악 1")).toHaveClass("vb-editor-assets__card--row");
+    // 그림은 미디어 탭에서 카드로.
     expect(rowOf("제품 사진")).not.toHaveClass("vb-editor-assets__card--row");
+    // 소리는 오디오 탭에서 줄로. 이제 둘은 같은 탭에 함께 있지 않다.
+    openAudioPane();
+    expect(rowOf("배경 음악 1")).toHaveClass("vb-editor-assets__card--row");
     // 소리 줄에도 눈에 걸리는 것이 있어야 한다 -- 캡컷 오디오 줄의 앨범 그림 자리.
     expect(rowOf("배경 음악 1")?.querySelector(".vb-editor-assets__wave")).not.toBeNull();
     // 눕혀도 적용·미리듣기는 그대로다. 이게 깨지면 보기 좋아지고 못 쓰게 된다.
@@ -106,6 +118,7 @@ describe("EditorAssetBrowser", () => {
     // 라이선스는 접으면 안 된다. 접는 것은 `소리 있음`(음악에선 당연한 말),
     // `직접 선택한 미디어`(모든 카드가 같은 문구), 적용 구간(패널 맨 위가 말함)뿐.
     render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    openAudioPane();
 
     const row = screen.getByRole("heading", { name: "배경 음악 1" }).closest("article");
     // 줄에서는 짧은 표기만 보이고, URL을 포함한 전체 문구는 `title`에 남는다.
@@ -122,7 +135,9 @@ describe("EditorAssetBrowser", () => {
     expect(screen.getByRole("status")).toHaveTextContent("적용할 내레이션 구간을 먼저 선택하세요.");
     screen.getAllByRole("article").forEach((card) => expect(card).toHaveTextContent("적용할 내레이션 구간을 먼저 선택하세요."));
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
+    openAudioPane();
     expect(screen.getByRole("button", { name: "효과음 1 적용" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
 
     rerender(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving onPreview={vi.fn()} onApply={onApply} />);
     expect(screen.getByRole("button", { name: "제품 사진 적용" })).toBeDisabled();
@@ -130,6 +145,7 @@ describe("EditorAssetBrowser", () => {
     rerender(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={onApply} />);
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 적용" }));
     expect(onApply).toHaveBeenCalledWith(cards[0], "seg-1");
+    openAudioPane();
     expect(screen.getByRole("button", { name: "효과음 1 적용" })).toBeDisabled();
   });
 
@@ -196,9 +212,11 @@ describe("EditorAssetBrowser", () => {
   it("shows truthful audio presence on every card", () => {
     render(<EditorAssetBrowser cards={cards} target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
 
+    // 탭이 갈렸으므로 미디어 탭의 영상과 오디오 탭의 음악·효과음을 각각 본다.
     expect(screen.getAllByRole("article")[0]).toHaveTextContent("오디오 정보 확인 중");
+    openAudioPane();
+    expect(screen.getAllByRole("article")[0]).toHaveTextContent("오디오 있음");
     expect(screen.getAllByRole("article")[1]).toHaveTextContent("오디오 있음");
-    expect(screen.getAllByRole("article")[2]).toHaveTextContent("오디오 있음");
   });
 
   it("shows bounded preparation and failure recovery without blocking manual apply", () => {
@@ -226,7 +244,10 @@ describe("EditorAssetBrowser", () => {
     const css = readFileSync(resolve(process.cwd(), "src/styles/editor-workbench.css"), "utf8");
 
     expect(window.innerWidth).toBe(390);
-    expect(screen.getAllByRole("article")).toHaveLength(3);
+    // 미디어 탭 1장 + 오디오 탭 2줄 = 셋. 좁은 서랍에서 줄바꿈이 안전한지가 요점이다.
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    openAudioPane();
+    expect(screen.getAllByRole("article")).toHaveLength(2);
     expect(css).toMatch(/\.vb-editor-assets__title,\s*\.vb-editor-assets__detail\s*\{[^}]*overflow-wrap:\s*anywhere;/);
     expect(css).toMatch(/@media \(max-width: 480px\)\s*\{\s*\.vb-editor-assets__actions > button/);
 
@@ -360,6 +381,8 @@ describe("유진에게 알려 주는 자산 취향", () => {
       .mockImplementation(async (_projectId, payload) => payload as never);
 
     render(<EditorAssetBrowser cards={cards} projectId="project-a" target={null} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    // 음악은 이제 오디오 탭에 있다(캡컷식 최상위 탭 분리, 2026-08-27).
+    openAudioPane();
     fireEvent.click(await screen.findByRole("button", { name: "배경 음악 1의 만든이 Creator 빼기" }));
 
     await waitFor(() => expect(write).toHaveBeenCalledWith("project-a", {
@@ -514,5 +537,58 @@ describe("편집기에서 촬영본 가져오기", () => {
     const dialog = await screen.findByRole("dialog", { name: "촬영본 가져오기" });
 
     expect(await within(dialog).findByText("아직 따로 모아 둔 영상이 없어요.")).toBeVisible();
+  });
+});
+
+/** owner(2026-08-27): "캡컷 메뉴 하나하나 세세하게 확인해서 우리거에 벤치마킹해줘"
+ *  → 확인 결과 owner 결정: **있는 것만 자리 맞추기.**
+ *
+ *  공식 매뉴얼로 대조하니 캡컷 왼쪽 패널은 `미디어 · 오디오 · 텍스트 · 스티커 ·
+ *  효과 · 전환 · 필터`가 **최상위 탭**이다. 우리는 영상·음악·효과음·그림이 한 줄에
+ *  섞여 있었고, **전환은 아예 오른쪽 속성 패널 안에 있었다** -- 기능은 6종 다
+ *  있는데 캡컷을 아는 사람이 왼쪽에서 찾으면 없다.
+ *
+ *  스티커·효과·필터는 우리에게 없으므로 **탭을 만들지 않는다.** 없는 기능의 자리를
+ *  흉내 내면 배치가 거짓말을 한다.
+ *  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */
+describe("왼쪽 도크는 캡컷처럼 최상위 탭으로 갈린다", () => {
+  it("가진 것만 최상위 탭으로 둔다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    const panes = screen.getByRole("tablist", { name: "왼쪽 패널" });
+    expect(Array.from(panes.querySelectorAll('[role="tab"]')).map((tab) => tab.textContent?.trim())).toEqual(["미디어", "오디오", "전환"]);
+    // 없는 것은 탭도 만들지 않는다.
+    for (const absent of ["스티커", "효과", "필터"]) {
+      expect(screen.queryByRole("tab", { name: absent })).toBeNull();
+    }
+  });
+
+  it("오디오 탭은 소리만 보여 준다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
+
+    expect(screen.getByText("배경 음악 1")).toBeVisible();
+    expect(screen.queryByText("제품 사진")).toBeNull();
+  });
+
+  it("전환 탭에서 고르면 앞 장면에서 넘어오는 방법이 저장된다", () => {
+    const onInspectorAction = vi.fn();
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" transitionTarget={{ segmentId: "scene-2", hasPrevious: true }} onInspectorAction={onInspectorAction} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "전환" }));
+    fireEvent.click(screen.getByRole("button", { name: "서서히 겹치기 적용" }));
+
+    expect(onInspectorAction).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "set-transition", segmentId: "scene-2",
+    }));
+  });
+
+  it("앞 장면이 없으면 전환을 걸 수 없다고 말한다", () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" transitionTarget={{ segmentId: "scene-1", hasPrevious: false }} onInspectorAction={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "전환" }));
+
+    expect(screen.getByText("첫 장면에는 넘어올 앞 장면이 없어요.")).toBeVisible();
   });
 });
