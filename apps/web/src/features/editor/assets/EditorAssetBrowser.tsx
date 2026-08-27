@@ -6,6 +6,9 @@ import { assetPreferenceChoice, canonicalPreferenceTag, useDirectorPreferences }
 import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind, type EditorAssetOrientation } from "./editorAssetProjection";
 import { writeAssetDrag } from "./assetDragPayload";
 import { AddMediaFiles } from "../../media/AddMediaFiles";
+import { VoiceMaterialPanel } from "../../media/VoiceMaterialPanel";
+import { ImportFromFootageInbox } from "../../media/ImportFromFootageInbox";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 
 type EditorAssetTarget = Readonly<{
   segmentId: string;
@@ -66,6 +69,8 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   // **찾는 것은 위의 검색과 필터가 하는 일이다** -- 목록은 한 화면에서 훑을 수 있는
   // 만큼만 보여 주고 나머지는 눌러서 편다.
   const [shown, setShown] = useState(FIRST_PAGE);
+  const [narrationOpen, setNarrationOpen] = useState(false);
+  const [footageOpen, setFootageOpen] = useState(false);
   const visibleCards = matchingCards.slice(0, shown);
   const hiddenCount = matchingCards.length - visibleCards.length;
   // 검색·필터를 바꾸면 다시 처음부터 본다. 안 그러면 조건을 좁혔는데도 앞서 펼친
@@ -84,6 +89,36 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           미디어 단계를 눌러 화면을 떠나야 한다는 것을 스스로 알아내야 했다.
           올리는 절차는 미디어 화면과 **같은 조각**을 쓴다(두 벌로 적지 않는다). */}
       {projectId ? <AddMediaFiles projectId={projectId} onAdded={onMediaAdded} /> : null}
+      {/* **내레이션은 팝업으로 연다(owner 승인 2026-08-27).**
+          > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
+
+          내레이션도 영상·음악·효과음과 같은 미디어인데(`VoiceMaterialPanel` 주석)
+          그 자리가 미디어 화면에만 있어서, 편집하다 목소리를 넣으려면 화면을
+          떠나야 했다. 다만 이 도크는 220~400px이라 목소리 등록·후보 생성·청취
+          승인까지 넣으면 답답하다. 그래서 도크에 밀어 넣지 않고 팝업으로 연다.
+          패널은 **미디어 화면이 쓰는 것을 그대로** 쓴다. */}
+      {projectId ? <>
+        <Button type="button" variant="outline" className="vb-editor-assets__narration" onClick={() => setNarrationOpen(true)}>내레이션</Button>
+        <Button type="button" variant="outline" className="vb-editor-assets__footage" onClick={() => setFootageOpen(true)}>촬영본</Button>
+        <Dialog open={footageOpen} onOpenChange={setFootageOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader>
+              <DialogTitle>촬영본 가져오기</DialogTitle>
+              <DialogDescription>따로 모아 둔 영상에서 골라 이 프로젝트로 가져옵니다.</DialogDescription>
+            </DialogHeader>
+            <ImportFromFootageInbox projectId={projectId} onImported={onMediaAdded} />
+          </DialogContent>
+        </Dialog>
+        <Dialog open={narrationOpen} onOpenChange={setNarrationOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader>
+              <DialogTitle>내레이션</DialogTitle>
+              <DialogDescription>내 목소리로 대본을 읽어 만들고, 들어 본 뒤 고릅니다.</DialogDescription>
+            </DialogHeader>
+            <VoiceMaterialPanel projectId={projectId} />
+          </DialogContent>
+        </Dialog>
+      </> : null}
       <label className="vb-editor-assets__search-label">
         <span>미디어 검색</span>
         {/* **빈 칸에 힌트를 넣는다**(2026-08-22, `capcut-observed` 기록 §5 "공통 생김새":

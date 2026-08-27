@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -451,5 +451,63 @@ describe("편집기에서 미디어 더하기", () => {
     expect(ingest).toHaveBeenCalled();
     // 더해진 것이 목록에 바로 보이도록 부른 쪽에 알린다.
     await waitFor(() => expect(onAdded).toHaveBeenCalled());
+  });
+});
+
+/** owner(2026-08-27): "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로
+ *  만든다던지 하는게 나을거 같어."
+ *
+ *  내레이션은 영상·음악·효과음과 같은 **미디어**다(`VoiceMaterialPanel` 주석).
+ *  그런데 그 자리가 미디어 화면에만 있어서, 편집하다 목소리를 넣으려면 화면을
+ *  떠나야 했다.
+ *
+ *  좁은 도크(220~400px)에 목소리 등록·후보 생성까지 밀어 넣지 않는다 -- **팝업으로
+ *  연다.** 지키는 것은 **편집기를 떠나지 않고 내레이션에 닿는가**다.
+ *  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */
+describe("편집기에서 내레이션 열기", () => {
+  it("편집기를 떠나지 않고 내레이션을 연다", async () => {
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "내레이션" }));
+
+    expect(await screen.findByRole("dialog", { name: "내레이션" })).toBeVisible();
+  });
+
+  it("프로젝트를 모르면 내레이션을 열지 않는다", () => {
+    // 프로젝트 없이 열면 빈 화면이 뜬다. 없는 길을 흉내 내지 않는다.
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: "내레이션" })).toBeNull();
+  });
+});
+
+/** 미디어 화면의 `가져오기` 탭에는 길이 둘이었다 -- 새 파일 올리기와, 따로 모아 둔
+ *  **촬영본**에서 고르기. 앞의 것은 도크에 바로 붙였고(`미디어 파일 추가`), 뒤의
+ *  것은 목록을 보여 줘야 해서 팝업으로 연다.
+ *  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */
+describe("편집기에서 촬영본 가져오기", () => {
+  it("따로 모아 둔 촬영본을 골라 이 프로젝트로 가져온다", async () => {
+    vi.spyOn(apiModule.api, "listMediaInboxAssets").mockResolvedValue([{ filename: "cut-01.mp4", size_bytes: 1024 }] as never);
+    const importAsset = vi.spyOn(apiModule.api, "importMediaInboxAsset").mockResolvedValue({} as never);
+    const onAdded = vi.fn();
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" onMediaAdded={onAdded} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "촬영본" }));
+    const dialog = await screen.findByRole("dialog", { name: "촬영본 가져오기" });
+
+    fireEvent.click(await within(dialog).findByRole("button", { name: "cut-01.mp4 가져오기" }));
+
+    await waitFor(() => expect(importAsset).toHaveBeenCalledWith("project-a", "cut-01.mp4"));
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+  });
+
+  it("모아 둔 촬영본이 없으면 그렇게 말한다", async () => {
+    vi.spyOn(apiModule.api, "listMediaInboxAssets").mockResolvedValue([] as never);
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "촬영본" }));
+    const dialog = await screen.findByRole("dialog", { name: "촬영본 가져오기" });
+
+    expect(await within(dialog).findByText("아직 따로 모아 둔 영상이 없어요.")).toBeVisible();
   });
 });
