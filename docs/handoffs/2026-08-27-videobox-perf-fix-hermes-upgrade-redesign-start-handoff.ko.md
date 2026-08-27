@@ -1,0 +1,137 @@
+# VideoBox 2026-08-27 렌더 성능·Hermes 업그레이드·화면 재설계 착수 인계
+
+## 완료 범위
+
+네 갈래 작업을 순서대로 끝냈다. 전부 `origin/codex/videobox-container-compatibility`에 push 완료.
+
+1. **렌더 성능 결함 수정** — b-roll 소스를 자르는 시작점까지 디코딩해서 버리던 문제.
+2. **Hermes Agent 업그레이드 + pin SSOT** — v0.18.2 → v0.20.5, 흩어져 있던 pin을 파일 하나로 모음.
+3. **화면 재설계안 작성** — `/library`·`/footage`·`/projects` 세 화면 실행안.
+4. **재설계 우선순위 1·2번 구현·배포·실제 화면 검증** — 라이브러리 팝업, 촬영본 "이미 정리한 묶음" 탭.
+
+## 구현 커밋 (전부 push됨)
+
+- `d2d4591e9` 수정: b-roll 렌더에서 -ss 빠른 탐색을 -i 앞에 둔다
+- `ec0d5a8bf` 잡일: Hermes Agent를 v0.20.5로 올리고 pin을 SSOT 하나로 모은다
+- `9938ee9b0` 기능: 편집기에서 라이브러리 자산 가져오기를 팝업으로 연다
+- `14887758b` 기능: 승인된 촬영본 가상 묶음 목록 API 추가
+- `4da5a3e67` 기능: 편집기 촬영본 팝업에 이미 정리한 묶음 탭 추가
+
+문서만 있고 아직 커밋 안 한 것: `docs/superpowers/specs/2026-08-27-library-footage-projects-redesign-plan.ko.md`
+(이 인계 문서와 함께 커밋한다 — 아래 "다음 세션이 바로 할 일" 참고)
+
+## 1. 렌더 성능 결함 — 무엇을 왜 고쳤나
+
+owner가 실측한 편집 화면 21.1초 대기의 원인 후보로 지목했던 것: b-roll 소스를 자르는
+시작점(`source_in_sec`)까지 전부 디코딩해서 버리고 있었다(`trim=` 필터만 있고 `-ss`가
+`-i` 앞에 없었음). `-ss`+`-copyts`를 `-i` 앞에 추가해 입력 탐색으로 바꿨다 — 기존
+`trim=`/`atrim=` 필터 문자열은 절대 timestamp를 그대로 쓰므로 손대지 않았다.
+
+- 컨테이너 안에서 500초 소스로 실측: 3초 추출이 1.56초 → 0.11초(약 14배), 비디오
+  픽셀·오디오 PCM 바이트 동일 확인.
+- 수정 과정에서 발견한 기존 결함도 같이 막았다: `split_segment()` 직후 같은 `clip_id`를
+  공유하는 두 b-roll 항목이 `source_indices` 딕셔너리에서 나중 것으로 덮어써지는 문제
+  (원래도 있었지만 미탐색 상태라 무해했음)가, 이번 탐색 추가로 검은 화면을 내는 실제
+  결함이 될 뻔했다. `clip_id`가 겹치면 빠른 탐색을 끄는 가드와 회귀 테스트를 추가했다.
+- 전체 backend pytest **4077 passed, 56 skipped**.
+
+**중요: 이 수정은 owner가 실측한 my-project의 21초 지연을 고치지 못했다.**
+my-project의 모든 b-roll 구간이 `trim_start_sec: 0.0`(소스 맨 처음부터 씀)이라 이
+최적화가 적용될 자리가 애초에 없다. 실제로 재측정하니 수정 전후 둘 다 20.97~21.13초로
+동일했다.
+
+**CPU 캡이 진짜 원인일 가능성이 높지만, 위험한 실험으로 확인했다.** 컨테이너를
+`docker update --cpus 8`로 잠깐 풀고 같은 편집을 재보니 **렌더가 실패했다** —
+`pids_limit: 128`은 그대로 두고 CPU만 올리니 ffmpeg가 스레드를 더 만들려다 프로세스
+상한에 걸려 `Terminating thread... Resource temporarily unavailable`로 죽었다. 이건
+`encoder_thread_limit()` 코드 주석이 경고하던 바로 그 사고의 재현이다. 즉시 2코어로
+되돌렸다(현재 정상). **CPU 캡을 올리려면 `compose.yaml`의 `cpus`·`pids_limit`과
+`encoder_thread_limit()`을 함께 조정하는 별도 작업이 필요하고, owner 컴퓨터의 다른
+작업 부하도 걸려 있어 owner 판단이 먼저 필요하다.** 이번 세션에서는 실행하지 않았다.
+
+## 2. Hermes Agent 업그레이드 — v0.18.2 → v0.20.5
+
+owner가 "우리 헤르메스 이미 설치되어 있잖아"라고 정정해 줘서 확인한 것: `videobox-hermes-yujin`
+컨테이너가 실제로 떠서 유진의 로컬 채팅을 굴리고 있었다(문서만 보고 "설치 전"이라
+잘못 판단했던 것을 정정했다). 최신 안정 릴리스(v2026.8.19 = v0.20.5, Bot Mode 릴리스,
+당일 올라온 v2026.8.27은 검증 안 된 태그라 쓰지 않았다)로 올렸다.
+
+- **새 SSOT: `config/hermes/agent-pin.env`.** 예전엔 같은 다이제스트가 compose 2개·
+  스크립트 3개·테스트 4개, 총 11개 파일에 손으로 복사돼 있었다. 이제 그 파일 하나가
+  정답이고, `tests/test_hermes_agent_pin_consistency.py`가 나머지가 어긋나면(또는
+  목록에 없는 곳에서 다른 다이제스트가 새로 생기면) 잡는다. docker-compose
+  변수치환이나 Dockerfile ARG로 배선하지 않았다 — 그 배선 자체가 더 위험하다고
+  판단했다.
+- 업그레이드 도중 새 버전이 64K 미만 컨텍스트 모델을 거부하는 새 검증에 걸렸다
+  (LM Studio가 기본 8,192로 불러오고 있었음). 로컬 모델을 65,536 컨텍스트로 다시
+  불러와 해결했다 — Hermes나 저장소 설정 문제가 아니라 로컬 런타임 상태 문제였다.
+- 재기동 후 화면이 실제로 쓰는 유진 대화 경로(`/director/conversations`, Hermes
+  컨테이너와는 별개 경로 — `videobox-hermes-yujin은 유진 채팅과 무관하지 않지만
+  화면의 주 경로는 로컬 Qwen 직결`)로 새 메시지를 보내 2초 안에 정상 응답하는 것도
+  확인했다.
+
+**다음에 버전을 또 올리고 싶으면 `config/hermes/agent-pin.env`만 열어서 그 파일
+맨 위 주석에 적힌 순서대로 하면 된다.**
+
+## 3. 화면 재설계안 — `docs/superpowers/specs/2026-08-27-library-footage-projects-redesign-plan.ko.md`
+
+`docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md`(이 세션 앞부분에서
+나온 승인된 방향 결정)를 실행안으로 내려썼다. `/library`·`/footage`·`/projects` 각각:
+무슨 일을 하는 화면인가 → 지금 몇 개 컨트롤이 있는가(코드 기준 실측) → 무엇을 어디로
+옮길지 → 재사용 게이트 → 하지 않는 것. 우선순위:
+
+| 순위 | 제안 | 상태 |
+|---|---|---|
+| 1 | `/library` 고르기 슬라이스 → 편집기 미디어 탭 팝업 | **구현·배포·실제 화면 검증 완료** |
+| 2 | `/footage` "이미 정리한 묶음 가져오기" 탭 추가 | **구현·배포·실제 화면 검증 완료** |
+| 3 | `/projects` 카드 관리 단추 축소(7개→3개, 보관/삭제를 전역 보관함으로) | **제안만, 실행 보류 — owner 결정 필요** |
+
+## 4. 우선순위 1·2번 실제 화면 검증 증거
+
+두 항목 모두 배경 에이전트가 구현 → 내가 직접 `docker exec`/실제 Postgres 조회로 커밋
+확인 → `./scripts/owner-ready.ps1 -Mode Start -Rebuild -WithYujinMemory`로 재빌드 →
+브라우저로 `http://127.0.0.1:5173`의 실제 편집기에서 클릭까지 확인하는 순서를 두 번
+반복했다.
+
+**1번 (`9938ee9b0`):** 편집기 미디어 탭 add-row에 "라이브러리에서 가져오기" 버튼 →
+클릭하면 팝업에 실제 라이브러리 데이터(전체 138·영상 8·음악 30·효과음 100)가 필터·
+검색과 함께 뜸. `LibrarySidebar`·`LibraryResults`를 그대로 재사용, 새 코드는 팝업
+전용 CSS와 로컬 선택 상태뿐. `LibraryPreviewPane`(휴지통·사용처)은 계획서대로
+넣지 않았다.
+
+**2번 (`14887758b`+`4da5a3e67`):** 촬영본 팝업에 "이미 정리한 묶음" 탭 추가 → 실제
+승인된 묶음 2개(`선택한 촬영본 가상 묶음`, `short-a-three-segment-virtual-sequence`,
+둘 다 2026-08-12부터 있던 진짜 데이터, 이번 세션이 만든 테스트 오염 아님 — 확인
+완료)가 뜸 → "가져오기" 클릭 → `POST /api/library/assets/.../materialize` 201 →
+"「선택한 촬영본 가상 묶음」을 가져왔어요." 성공 문구 확인. 목록 API는 재사용 게이트를
+먼저 확인했으나 없어서 최소한으로 추가(`GET /api/footage/sequences?status=approved`,
+새 스키마 없이 기존 승인 원장 테이블만 조인). `/footage`의 나누기·타임라인 UI는
+복제하지 않았다.
+
+## 5. 다음 세션이 바로 할 일
+
+1. **문서 커밋 두 개를 아직 안 했다** — 이 인계 문서와 재설계안 문서
+   (`docs/superpowers/specs/2026-08-27-library-footage-projects-redesign-plan.ko.md`)를
+   커밋하고 push한다. (다음 세션 시작 시 `git status`로 확인 — 첫 프롬프트가 이미
+   시킨다.)
+2. **`/projects` 카드 정리를 진행할지 owner에게 물어본다** — 계획서 §3.3의 2번,
+   보관/삭제 단추를 카드에서 빼고 전역 보관함 흐름으로 합칠지. 재사용 게이트는 이미
+   확인 끝(새 컴포넌트·API 불필요, `ProjectCatalogCard`의 JSX 순서만 바꾸면 됨) —
+   owner가 승인하면 구현 자체는 빠르다.
+3. **CPU 캡 조사는 보류 중** — my-project의 21초 렌더 지연 진짜 원인. `compose.yaml`의
+   `cpus`·`pids_limit`과 `encoder_thread_limit()`을 함께 조정하는 작업이 필요하고,
+   owner 컴퓨터의 다른 작업 부하 확인이 먼저다. 위 §1 참고.
+4. **재설계안 §4.1이 남긴 미확인 사실 하나** — owner가 "편집기 화면 바로가기가
+   없다"고 한 것이, 실제로는 `ProjectCatalogCard`가 이미 이름을 누르면 편집기로
+   보내는 것과 다른 얘기일 수 있다(전역 상단 띠에서 안 보였을 가능성). `ProductShell`
+   쪽 확인이 필요한 별도 사실 확인이라 이번 재설계 범위에서 결론 내지 않았다.
+
+## 6. 알려진 경계
+
+- 배포는 이 저장소의 유일한 배포 경로인 `owner-ready.ps1 -Rebuild`로 끝났다 — 별도
+  클라우드/원격 배포 파이프라인은 없다. 지금 컨테이너가 이미 최신 커밋 5개를 전부
+  반영한 상태로 떠 있다.
+- 이번 세션에서 CPU 캡을 8로 올렸다가 렌더 실패를 재현한 뒤 즉시 2로 되돌렸다 —
+  `docker update`로 한 임시 조작이라 compose 파일엔 흔적이 없고, 컨테이너 재시작하면
+  자동으로 compose 정의값(2.0)으로 돌아간다.
+- `output/`은 이번 세션 내내 건드리지 않았다(untracked 그대로).
