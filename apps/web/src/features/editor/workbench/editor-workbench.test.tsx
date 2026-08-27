@@ -830,3 +830,31 @@ describe("편집기가 껍데기에 화면 비율을 알린다", () => {
     expect(screen.getByTestId("probe")).toHaveTextContent("없음");
   });
 });
+
+/** owner(2026-08-27): "우리 메뉴가 너무 각각 페이지별로 따로 놀아. 이걸 캡컷처럼
+ *  편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지 하는게 나을거 같어."
+ *
+ *  편집을 끝내고 완성본을 받으려면 **화면을 떠나야 했다.** 캡컷은 편집기 안에서
+ *  `내보내기`를 누르면 팝업이 뜬다. 남은 "따로 노는" 자리 중 가장 큰 곳이다.
+ *
+ *  지키는 것은 **편집기를 떠나지 않고 내보내기에 닿는가**다. 무엇이 막고 있는지
+ *  판정하는 일은 출력 화면이 이미 한다 -- 여기서 새로 적지 않는다. 두 벌로 적으면
+ *  무엇을 언제 내보낼 수 있는지가 조용히 갈라진다.
+ *  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */
+describe("편집기에서 내보내기", () => {
+  it("편집기를 떠나지 않고 내보내기를 연다", async () => {
+    render(<EditorWorkbench view={view} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "내보내기" }));
+
+    expect(await screen.findByRole("dialog", { name: "내보내기" })).toBeVisible();
+  });
+
+  it("내보내기 단추는 툴바 안에 있다", async () => {
+    render(<EditorWorkbench view={view} />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    const toolbar = document.querySelector(".vb-editor-workbench__toolbar");
+    expect(Array.from(toolbar?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim())).toContain("내보내기");
+  });
+});

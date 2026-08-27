@@ -1,7 +1,7 @@
 import { type CSSProperties, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api, type OutputVariant, type OutputVariantPatch } from "../../../api";
-import { ChevronsLeftRight, Copy, PanelLeft, PanelRight, Redo2, Scissors, Trash2, Undo2 } from "lucide-react";
+import { ChevronsLeftRight, Copy, PanelLeft, PanelRight, Redo2, Scissors, Trash2, Undo2, Upload } from "lucide-react";
 
 import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
@@ -27,6 +27,8 @@ import { VariantSelector } from "../variants/VariantSelector";
 import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
 import { VariantServerControls } from "../variants/VariantServerControls";
 import { usePublishShellCanvas } from "../../shell/shellCanvas";
+import { OutputsPage } from "../../../app/OutputsPage";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 
 export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: number) {
   const pixels = Number(size.inPixels);
@@ -140,6 +142,7 @@ function EditorWorkbenchInstance({
     return { ...scoped, activeDrawer: useLegacy ? scoped.activeDrawer : (lastActiveDrawer ?? readActiveDrawer() ?? scoped.activeDrawer) };
   });
   const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
+  const [exportOpen, setExportOpen] = useState(false);
   const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
   // 위 띠의 화면 비율 자리는 **이 줄이 채운다**(`features/shell/shellCanvas.tsx`).
   // 껍데기가 직접 물어보게 하지 않는 이유는 그쪽 주석에 적었다. 편집기를 떠나면
@@ -558,6 +561,17 @@ function EditorWorkbenchInstance({
           → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */}
       <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" />미디어</Button>
       <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" />세부 정보</Button>
+      {/* **내보내기를 편집기 안에서 연다(owner 지시 2026-08-27).**
+          > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
+
+          편집을 끝내고 완성본을 받으려면 화면을 떠나야 했다 -- 남은 "따로 노는"
+          자리 중 가장 큰 곳이었다. 캡컷도 편집기 안에서 내보내기를 누른다.
+
+          **무엇이 막고 있는지 판정하는 일은 여기서 새로 적지 않는다.** 출력 화면이
+          체크리스트(편집본·검토·출력)와 완성본 만들기를 이미 갖고 있고, 그 판정은
+          검토 승인·낡음·자산 현재성까지 본다. 두 벌로 적으면 무엇을 언제 내보낼 수
+          있는지가 조용히 갈라진다. 그래서 그 화면을 **그대로** 팝업에 담는다. */}
+      <Button type="button" variant="outline" onClick={() => setExportOpen(true)}><Upload aria-hidden="true" />내보내기</Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
@@ -627,6 +641,18 @@ function EditorWorkbenchInstance({
       view={view}
       viewportWidthPx={Math.max(1, Math.round(availableWorkbenchWidth))}
     />
+    {/* 팝업은 열었을 때만 그린다 -- 출력 화면은 스스로 상태를 읽으므로, 늘 그려
+        두면 편집하는 내내 쓰지도 않을 요청이 돈다. */}
+    <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+      <DialogContent className="vb-dialog-content vb-export-dialog">
+        <DialogHeader>
+          <DialogTitle>내보내기</DialogTitle>
+          <DialogDescription>완성본을 만들고 받습니다. 아직 못 만들면 무엇이 남았는지 알려 줘요.</DialogDescription>
+        </DialogHeader>
+        {/* `편집 열기`는 이미 편집기 안이므로 팝업을 닫는 것으로 충분하다. */}
+        {exportOpen ? <OutputsPage projectId={view.projectId} onOpenEditor={() => setExportOpen(false)} /> : null}
+      </DialogContent>
+    </Dialog>
   </section>;
 }
 
