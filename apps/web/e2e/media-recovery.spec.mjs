@@ -6,7 +6,7 @@ test("the canonical media workspace previews and recovers local analysis with au
   expect((await page.request.post(`${fakeApiBaseUrl}/__e2e/reset-media`)).status()).toBe(200);
   await page.goto("/projects/local-draft/media");
 
-  await expect(page.getByRole("heading", { name: "자산 보관함" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "미디어", exact: true })).toBeVisible();
   await expect(page.getByText("항구 전경", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("분석을 마치지 못했어요 · 100%")).toBeVisible();
 

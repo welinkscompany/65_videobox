@@ -100,7 +100,7 @@ test("a library asset's in-use location links to that project's assets screen", 
 
   const usage = page.locator(".vb-library-usage");
   await expect(usage).toBeVisible();
-  const entry = usage.getByRole("link", { name: "프로젝트 편집본 자산 화면 열기" });
+  const entry = usage.getByRole("link", { name: "프로젝트 편집본 미디어 화면 열기" });
   await expect(entry).toHaveAttribute("href", "/projects/my-project/assets");
   // 프로젝트를 특정할 수 없는 위치는 링크가 되지 않는다.
   await expect(usage.getByText("묶음")).toBeVisible();

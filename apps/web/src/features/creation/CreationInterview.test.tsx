@@ -269,7 +269,7 @@ describe("CreationInterview", () => {
     const start = vi.spyOn(api, "startDraftReadiness").mockResolvedValue({ readiness_id: "ready_1", status: "needs_assets", revision: 1, result: { gap_slots: [{ gap_slot_id: "gap-1", reason: "영상이 없어요." }] } } as never);
     render(<CreationInterview projectId="project_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "무음으로 초안 준비" }));
-    await screen.findByText("추가 자산이 필요해요");
+    await screen.findByText("추가 미디어가 필요해요");
     expect(start).toHaveBeenCalledWith("project_1", expect.objectContaining({ brief_id: "brief_1", narration_choice: { kind: "silent" }, expected_brief_revision: 5 }));
   });
 

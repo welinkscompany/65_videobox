@@ -85,7 +85,7 @@ test("the top bar keeps creator navigation reachable on a narrow screen", async 
   await page.goto("/projects/local-draft/home");
   await page.getByRole("button", { name: "미디어" }).click();
   await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
-  await expect(page.getByRole("heading", { name: "자산 보관함" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "미디어", exact: true })).toBeVisible();
 });
 
 test("Home start choices and settings tabs follow their visible routes", async ({ page }) => {
@@ -108,8 +108,8 @@ test("approved brief prepares a local draft without an editing-session mutation"
   page.on("request", (request) => { if (request.url().includes("/editing-sessions") && request.method() !== "GET") editingMutations.push(request.url()); });
   await page.addInitScript(() => { localStorage.setItem("videobox.creation-brief.local-draft", "brief-e2e"); localStorage.setItem("videobox.draft-readiness.local-draft", "readiness_e2e"); });
   await page.goto("/projects/local-draft/create");
-  await expect(page.getByRole("heading", { name: "추가 자산이 필요해요" })).toBeVisible();
-  const addAssets = page.getByRole("link", { name: "자산 추가" });
+  await expect(page.getByRole("heading", { name: "추가 미디어가 필요해요" })).toBeVisible();
+  const addAssets = page.getByRole("link", { name: "미디어 추가" });
   await expect(addAssets).toHaveAttribute("href", /return_to=/);
   await addAssets.click();
   await expect(page.getByRole("heading", { name: "장면 영상 추가" })).toBeVisible();
