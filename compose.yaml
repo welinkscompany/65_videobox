@@ -161,7 +161,7 @@ services:
   # VideoBox data, DB, API, or host bridge access.  A later egress-gateway
   # slice must be complete before an interactive `hermes model` OAuth login.
   videobox-hermes-agent:
-    image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
+    image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-preauth]
     command: ["sleep", "infinity"]
     network_mode: none
@@ -192,7 +192,7 @@ services:
   # Interactive OAuth state is isolated from the pre-auth scratch volume and
   # from every VideoBox data, DB, API, and host mount.
   videobox-hermes-oauth-bootstrap:
-    image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
+    image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-oauth-bootstrap]
     command: ["sleep", "infinity"]
     volumes:
@@ -221,7 +221,7 @@ services:
   # VideoBox data, DB, API, or internal networks. Platform-only provider
   # configuration stays in the official Hermes dashboard.
   videobox-hermes-dashboard:
-    image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
+    image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-dashboard]
     command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure", "--no-open"]
     ports:

@@ -1,4 +1,4 @@
-FROM nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
+FROM nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
 
 RUN uv pip install \
     --python /opt/hermes/.venv/bin/python \

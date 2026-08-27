@@ -30,7 +30,12 @@ VideoBox는 외부 생성 모델 provider를 사용하지 않는다.
 
 ## 4. Hermes 소유 ChatGPT OAuth와 VideoBox direct OAuth 경계
 
-Hermes Agent 공식 문서는 `hermes model`에서 OpenAI Codex를 선택하면 ChatGPT OAuth device-code login을 지원한다고 명시한다. VideoBox의 첫 Hermes slice는 이 **Hermes 소유** 흐름만 검토·설치 대상으로 삼는다. 2026-07-19 기준 source pin은 signed release `v2026.7.7.2` / peeled commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`이다. 근거: <https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/>, <https://hermes-agent.nousresearch.com/docs/user-guide/configuration/>.
+Hermes Agent 공식 문서는 `hermes model`에서 OpenAI Codex를 선택하면 ChatGPT OAuth device-code login을 지원한다고 명시한다. VideoBox의 첫 Hermes slice는 이 **Hermes 소유** 흐름만 검토·설치 대상으로 삼는다. 근거: <https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/>, <https://hermes-agent.nousresearch.com/docs/user-guide/configuration/>.
+
+**Hermes Agent 버전 pin의 SSOT는 `config/hermes/agent-pin.env`다.** 태그·다이제스트를
+여기 적지 않는다 — 2026-08-27에 같은 값이 11개 파일에 흩어져 있다가 어긋날 뻔한 뒤로,
+버전 번호는 그 파일 하나에서만 관리하고 나머지는 `tests/test_hermes_agent_pin_consistency.py`가
+지킨다. 현재 값을 보려면 그 파일을 열어라.
 
 - Hermes OAuth는 아직 설치·로그인·runtime 검증 전이므로 GPT provider call은 **0**이다.
 - credential과 config는 Hermes 전용 state volume에만 두며 VideoBox API/DB, 일반 `.env`, mem0, snapshot, backup, log/trace에는 복사하지 않는다.

@@ -18,7 +18,7 @@ COMPOSE_PATH = ROOT / "compose.yaml"
 OVERLAY_PATH = ROOT / "compose.hermes-yujin.yaml"
 PINNED_HERMES_IMAGE = (
     "nousresearch/hermes-agent@"
-    "sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+    "sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09"
 )
 HERMES_NETWORK = "videobox-agent-gateway-network"
 GATEWAY_API_NETWORK = "videobox-agent-gateway-api-network"

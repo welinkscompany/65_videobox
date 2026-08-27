@@ -93,7 +93,7 @@ def test_hermes_preauth_service_is_pinned_isolated_and_has_no_videobox_data_moun
     assert hermes["profiles"] == ["hermes-preauth"]
     assert hermes["image"] == (
         "nousresearch/hermes-agent@"
-        "sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+        "sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09"
     )
     assert "ports" not in hermes
     assert hermes["network_mode"] == "none"
@@ -117,7 +117,7 @@ def test_hermes_oauth_bootstrap_is_isolated_from_preauth_and_videobox_data() -> 
     assert bootstrap["profiles"] == ["hermes-oauth-bootstrap"]
     assert bootstrap["image"] == (
         "nousresearch/hermes-agent@"
-        "sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+        "sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09"
     )
     assert bootstrap["command"] == ["sleep", "infinity"]
     assert bootstrap["volumes"] == ["videobox_hermes_oauth_state:/opt/data"]
@@ -160,7 +160,7 @@ def test_hermes_dashboard_is_loopback_only_and_uses_only_the_isolated_oauth_stat
 
     assert dashboard["profiles"] == ["hermes-dashboard"]
     assert dashboard["image"] == (
-        "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+        "nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09"
     )
     assert "build" not in dashboard
     assert dashboard["command"] == [
