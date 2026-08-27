@@ -39,7 +39,7 @@
    구분되게 옅은 배경과 왼쪽 강조선을 준다 -- "실행됨"이 눈에 들어와야 한다. */
 .vb-editor-right-dock__completion { background: var(--vb-accent-bg); border-left: 3px solid var(--vb-accent); border-radius: var(--vb-radius-sm); padding: var(--vb-space-2) var(--vb-space-3); }
 .vb-editor-right-dock__completion p { margin: 0 0 var(--vb-space-1); }
-.vb-editor-right-dock__completion ul { margin: 0; padding-left: 1.1rem; font-size: var(--vb-text-sm); color: var(--vb-muted); }
+.vb-editor-right-dock__completion ul { margin: 0; padding-left: var(--vb-space-5); font-size: var(--vb-text-sm); color: var(--vb-muted); }
 /* 어느 장면인지가 카드에서 가장 먼저 읽혀야 한다 -- 같은 자산이 여러 장면에
    추천되면 그것 말고는 카드를 가를 것이 없다. */
 .vb-editor-right-dock__candidate-scene { display: block; color: var(--vb-accent); }
@@ -198,16 +198,16 @@
 .vb-editor-assets__card:not(.vb-editor-assets__card--row) .vb-editor-assets__attribution { display: none; }
 .vb-editor-assets__card--row .vb-editor-assets__status,
 .vb-editor-assets__card--row .vb-editor-assets__attribution { font-size: var(--vb-text-sm); }
-.vb-editor-assets__wave { display: flex; align-items: center; justify-content: center; gap: 2px; width: 3.25rem; height: 2.4rem; padding: 0.15rem; border-radius: var(--vb-radius-sm); background: var(--vb-accent-bg); }
+.vb-editor-assets__wave { display: flex; align-items: center; justify-content: center; gap: 2px; width: 3.25rem; height: 2.4rem; padding: var(--vb-space-1); border-radius: var(--vb-radius-sm); background: var(--vb-accent-bg); }
 .vb-editor-assets__wave i { display: block; width: 2px; min-height: 8%; border-radius: 2px; background: var(--vb-accent); }
 /* 줄에서는 취향 단추를 작게 눕힌다. **빼지는 않는다** -- 캡컷 오디오 줄은
    별·내려받기 둘뿐이지만 캡컷의 그 패널은 우리 소재 도크(280px)보다 훨씬
    넓다. 좁은 칸에서 캡컷의 줄 높이를 그대로 흉내 내려면 단추를 없애야 하고,
    그건 보기 좋아지고 못 쓰게 되는 맞바꿈이다. */
 .vb-editor-assets__card--row .vb-editor-assets__taste { gap: var(--vb-space-1); }
-.vb-editor-assets__card--row .vb-editor-assets__taste > button { min-height: 28px; padding: 0.15rem 0.4rem; font-size: var(--vb-text-sm); }
+.vb-editor-assets__card--row .vb-editor-assets__taste > button { min-height: 28px; padding: var(--vb-space-1) 0.4rem; font-size: var(--vb-text-sm); }
 .vb-editor-assets__card--row .vb-editor-assets__actions { margin-top: 0; }
-.vb-editor-assets__card--row .vb-editor-assets__actions > button { min-height: 28px; padding: 0.15rem 0.5rem; font-size: var(--vb-text-sm); }
+.vb-editor-assets__card--row .vb-editor-assets__actions > button { min-height: 28px; padding: var(--vb-space-1) 0.5rem; font-size: var(--vb-text-sm); }
 .vb-editor-variants {
   display: grid;
   min-height: 0;

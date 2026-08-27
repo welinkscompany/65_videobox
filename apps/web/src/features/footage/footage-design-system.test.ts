@@ -22,7 +22,7 @@ describe("footage organizer design-system contract", () => {
 
   it("uses the semantic surface ring and radius scale", () => {
     expect(footageCss).toContain("var(--vb-surface-ring)")
-    expect(footageCss).toContain("var(--radius-")
+    expect(footageCss).toContain("var(--vb-radius-")
     expect(footageCss).not.toMatch(/border-radius:\s*[0-9.]+(px|rem)/)
     expect(footageCss).not.toMatch(/border:\s*1px\s+solid\s+var\(--vb-border\)/)
   })
@@ -64,8 +64,13 @@ describe("footage organizer design-system contract", () => {
   it("uses ring surfaces and token radii for sequence controls", () => {
     expect(footageCss).toContain(".vb-footage-sequence{display:grid")
     expect(footageCss).toContain("box-shadow:0 0 0 1px var(--vb-accent-border)")
-    expect(footageCss).toContain("border-radius:var(--radius-lg)")
-    expect(footageCss).toMatch(/\.vb-footage-sequence__controls \{ display:flex; flex-wrap:wrap; gap:\.3rem/)
+    expect(footageCss).toContain("border-radius:var(--vb-radius-lg)")
+    // **갱신 이유(2026-08-27).** 이 줄은 `gap:.3rem`이라는 **날값**을 박아 두고
+    // 있었는데, 그것이 바로 owner가 말한 "화면마다 따로 논다"의 원인이었다 --
+    // 이 화면만 간격 척도를 안 쓰고 있었다(날값 41개, 토큰 0개).
+    // 지키려는 것은 "고리 표면과 토큰 모서리를 쓴다"이지 특정 간격 값이
+    // 아니었으므로, 지키는 것은 두고 값만 척도에 맞춘다.
+    expect(footageCss).toMatch(/\.vb-footage-sequence__controls \{ display:flex; flex-wrap:wrap; gap: var\(--vb-space-1\)/)
   })
 })
 

@@ -99,3 +99,38 @@ describe("모서리는 한 벌에서만 나온다", () => {
     expect(uiSystem.match(/--vb-radius-[a-z]+:/g) ?? []).toHaveLength(3);
   });
 });
+
+/** owner(2026-08-27): "모든 페이지 톤앤매너, 디자인 패키지 셋팅 마치고"
+ *
+ *  재 보니 간격·글자 척도는 **이미 잘 정의돼 있었다**(`--vb-space-1..8`,
+ *  `--vb-text-xs..2xl`). 문제는 **쓰는 곳이 갈렸다**는 것이다.
+ *
+ *  | 화면 | 간격 토큰 | 간격 날값 |
+ *  |---|---|---|
+ *  | 껍데기 | 92 | 0 |
+ *  | 편집기 | 77 | 4 |
+ *  | 내 라이브러리 | **0** | **46** |
+ *  | 촬영본 정리 | **0** | **41** |
+ *
+ *  두 화면만 척도를 아예 안 썼다. 그래서 같은 제품인데 그 둘만 따로 논다.
+ *  여기서 지키는 것은 **모든 화면이 같은 척도에서 값을 꺼낸다**이다. */
+describe("간격과 글자는 한 척도에서만 나온다", () => {
+  const RAW_SPACE = /(?:gap|padding|margin)[a-z-]*:\s*(?!0\b)[0-9.]+rem/g;
+  const RAW_TYPE = /font-size:\s*[0-9.]+rem/g;
+  const screens = {
+    "product-shell.css": productShellCss,
+    "editor-workbench.css": editorWorkbenchCss,
+    "library.css": readFileSync(resolve(process.cwd(), "src/features/library/library.css"), "utf8"),
+    "footage.css": readFileSync(resolve(process.cwd(), "src/features/footage/footage.css"), "utf8"),
+  };
+
+  for (const [name, css] of Object.entries(screens)) {
+    it(`${name}은 간격을 척도에서 꺼낸다`, () => {
+      expect(css.match(RAW_SPACE) ?? []).toEqual([]);
+    });
+
+    it(`${name}은 글자 크기를 척도에서 꺼낸다`, () => {
+      expect(css.match(RAW_TYPE) ?? []).toEqual([]);
+    });
+  }
+});
