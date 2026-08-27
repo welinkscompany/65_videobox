@@ -136,10 +136,22 @@ owner가 "우리 헤르메스 이미 설치되어 있잖아"라고 정정해 줘
    소스 스냅샷 → 렌더 후 재검증, `_exact_preview_inputs`가 두 번 불림)이
    겹친 결과다. `D:/...` 윈도 경로를 컨테이너에 bind-mount로 넣어 쓰는
    구조라 파일 하나 여는 것 자체에 지연이 있는 것으로 보인다(WSL2/Docker
-   Desktop의 알려진 특성). **다음에 이 문제를 풀려면 `compose.yaml`의
-   `cpus`·`pids_limit`이 아니라, 같은 파일을 반복 해시하지 않게 캐시를
-   넣는 쪽**(기존 `_stream_probe_cache`와 같은 패턴)이 맞는 방향이다 — 이번
-   세션에서는 조사만 하고 구현하지 않았다. owner 결정이 필요하다.
+   Desktop의 알려진 특성).
+
+   ~~**owner 결정이 필요하다**~~ — **2026-08-28 owner 승인, 구현·배포·실측
+   완료**(커밋 `6b8c1afc`). `LocalPipelineRunner`에 `(경로, mtime_ns)` 키
+   캐시(`_cached_sha256_file`, 기존 `FfmpegFinalRenderer._stream_probe_cache`와
+   같은 패턴)를 추가해 지문 계산·소스 스냅샷 두 자리에 적용했다.
+   `_revalidate_exact_preview_source_snapshots`(렌더 직후 재검증)는 **일부러
+   캐싱에서 뺐다** — 그 자리는 읽는 순간의 파일 변경 경합까지 잡으려고 매번
+   새로 해시하도록 설계된 안전장치라, 캐싱하면 그 보호가 무력화된다.
+   컨테이너에서 my-project로 재실측: **22.2초 → 10.9초(51% 단축)**, cpus는
+   2.0 그대로 뒀다. 전체 backend pytest `4081 passed, 56 skipped`.
+
+   **남은 병목(이번 범위 밖, 다음 과제 후보):** 렌더러 내부(`render_exact_preview_to_mp4`
+   진입 이후, 실제 ffmpeg 호출 이전)에 sha256과 무관한 별도 지연이 ~6~7초
+   있다 — 실제 ffmpeg 서브프로세스는 1.3초뿐이다. 원인은 아직 특정하지
+   않았다(ffprobe 스트림 확인 반복, 자산 경로 해석의 DB 조회 등이 후보).
 4. ~~**재설계안 §4.1이 남긴 미확인 사실 하나**~~ — **2026-08-28 확인 완료, 이미
    해결돼 있었다.** `TopBar.tsx:186-199`에 owner의 그 발언을 그대로 인용한
    주석과 함께 `편집기로 돌아가기` 단추가 이미 있다(2026-08-27, 이 인계 문서를
