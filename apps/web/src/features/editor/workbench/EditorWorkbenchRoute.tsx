@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
@@ -14,7 +14,7 @@ import type { InspectorAction } from "../inspector/InspectorControls";
 import { sceneLabelsBySegmentId, sceneNumbersBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
-import type { RightDockCompletionEntry, RightDockDirector, RightDockMessage, RightDockProposal } from "./rightDockTypes";
+import type { RightDockCompletionEntry, RightDockDirector, RightDockEditingProposalPreview, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
 type MutationState = Readonly<{ isSaving: boolean; message?: string }>;
 type AssetState = Readonly<{
@@ -25,6 +25,45 @@ type AssetState = Readonly<{
   libraryImageAssets: readonly LibraryAsset[];
   error: string | null;
 }>;
+/** 편집안 창이 보여 줄 **후보 결과** 영상의 상태. 저장된 편집본 미리보기와 완전히
+ *  다른 자리이며, 적용 전에는 저장을 바꾸는 어떤 호출도 하지 않는다.
+ *  `tick`은 같은 `pending`이 다시 와도 기다리는 효과가 다시 돌게 하는 표시다 --
+ *  값이 같으면 상태 객체가 그대로라 폴링이 한 번에 멈춘다. */
+type EditingProposalPreviewState =
+  | Readonly<{ kind: "idle" }>
+  | Readonly<{ kind: "working"; generationId: string | null; tick: number }>
+  | Readonly<{ kind: "ready"; videoUrl: string }>
+  | Readonly<{ kind: "unavailable"; message: string }>;
+
+const editingProposalPreviewWorkingMessage = "편집안 미리보기를 만들고 있어요.";
+const editingProposalPreviewFailedMessage = "편집안 미리보기를 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.";
+
+/** 서버가 돌려준 후보 결과 상태를 화면 상태로 옮긴다.
+ *  낡았으면 **영상을 주지 않고** 무엇을 하면 되는지만 말한다 -- 서버가 준 안내
+ *  문장(`action`)을 그대로 붙인다. 안내가 비어 있으면 우리가 아는 말로 채운다. */
+function nextEditingProposalPreviewState(
+  result: YujinEditingProposalPreview,
+  tick: number,
+): EditingProposalPreviewState {
+  if (result.status === "stale") {
+    const action = result.action?.trim() ? result.action.trim() : "새 편집안을 받아 보세요.";
+    return { kind: "unavailable", message: `편집본이 바뀌었어요. ${action}` };
+  }
+  if (result.status === "succeeded") {
+    return result.contentUrl
+      ? { kind: "ready", videoUrl: result.contentUrl }
+      : { kind: "unavailable", message: editingProposalPreviewFailedMessage };
+  }
+  if (result.status === "failed") return { kind: "unavailable", message: editingProposalPreviewFailedMessage };
+  return { kind: "working", generationId: result.generationId, tick: tick + 1 };
+}
+
+function editingProposalPreviewForDock(state: EditingProposalPreviewState): RightDockEditingProposalPreview {
+  return state.kind === "working"
+    ? { kind: "working", message: editingProposalPreviewWorkingMessage }
+    : state;
+}
+
 type DirectorState = Readonly<{
   key: string;
   state: RightDockDirector["state"];
@@ -39,6 +78,7 @@ type DirectorState = Readonly<{
   editingProposalCreating: boolean;
   editingProposalApplying: boolean;
   editingProposalError: string | null;
+  editingProposalPreview: EditingProposalPreviewState;
   draft: string;
   runState: RightDockDirector["runState"];
   selectedCandidateIds: readonly string[];
@@ -183,6 +223,7 @@ function createDirectorState(requestKey: string, sessionId: string | null): Dire
     editingProposalCreating: false,
     editingProposalApplying: false,
     editingProposalError: null,
+    editingProposalPreview: { kind: "idle" },
     draft: readDirectorDraft(requestKey),
     runState: { kind: "idle" },
     selectedCandidateIds: [],
@@ -236,6 +277,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const mutationOperationId = useRef(0);
   const previewOperationId = useRef(0);
   const pollOperationId = useRef(0);
+  /** 편집안 후보 결과 미리보기. 저장 편집본 미리보기(`previewOperationId`)와 **따로**
+   *  센다 -- 두 경로가 같은 번호를 쓰면 한쪽이 다른 쪽 응답을 버린다. */
+  const proposalPreviewOperationId = useRef(0);
   const directorOperationId = useRef(0);
   const memoryListOperationId = useRef(0);
   const memoryMutationOperationId = useRef(0);
@@ -635,6 +679,37 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     }, 1200);
     return () => window.clearTimeout(poll);
   }, [autoPreviewWaiting, refreshToken, requestKey, state.view?.playback.exactPreview.status, state.view?.playback.exactPreview.generationId]);
+
+  // 후보 결과 미리보기가 끝날 때까지 기다린다. **상태만 물어본다** -- 이 경로는
+  // 저장된 편집본을 바꾸는 호출을 하나도 하지 않는다. 기다리는 간격은 편집본
+  // 미리보기와 같은 것을 쓴다.
+  useEffect(() => {
+    if (director.key !== requestKey) return;
+    const preview = director.editingProposalPreview;
+    if (preview.kind !== "working" || !preview.generationId) return;
+    const generationId = preview.generationId;
+    const tick = preview.tick;
+    const epoch = routeEpoch.current.value;
+    const operationId = proposalPreviewOperationId.current;
+    const isCurrent = () => routeEpoch.current.value === epoch && proposalPreviewOperationId.current === operationId;
+    const poll = window.setTimeout(() => {
+      if (!isCurrent()) return;
+      void api.getYujinEditingProposalPreviewStatus(projectId, generationId)
+        .then((result) => {
+          if (!isCurrent()) return;
+          setDirector((current) => current.key === requestKey
+            ? { ...current, editingProposalPreview: nextEditingProposalPreviewState(result, tick) }
+            : current);
+        })
+        .catch(() => {
+          if (!isCurrent()) return;
+          setDirector((current) => current.key === requestKey
+            ? { ...current, editingProposalPreview: { kind: "unavailable", message: editingProposalPreviewFailedMessage } }
+            : current);
+        });
+    }, 1200);
+    return () => window.clearTimeout(poll);
+  }, [projectId, requestKey, director.key, director.editingProposalPreview]);
   if (state.key !== requestKey) return <section aria-live="polite"><p>편집 내용을 불러오는 중이에요.</p></section>;
   if (!state.view) return <section aria-live="polite"><p>{state.error ?? "편집 내용을 불러오는 중이에요."}</p></section>;
   const refreshPreview = async () => {
@@ -667,6 +742,34 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (routeEpoch.current.value === epoch && previewOperationId.current === operationId && !mutationInFlight.current && !captionPreflightInFlight.current) {
         setMutation({ isSaving: false, message: "선택 구간 미리보기를 만들지 못했어요. 최신 편집본을 확인해 주세요." });
       }
+    }
+  };
+  /** 아직 적용하지 않은 **후보 결과**를 만들어 보여 준다.
+   *
+   *  2026-08-26까지 편집안 창의 미리보기는 `previewSelectedRange`를 불렀다 --
+   *  그것은 **저장된 편집본**을 잘라 보여 주는 길이라, 창작자는 바뀐 결과를
+   *  확인했다고 믿었지만 실제로는 바뀌기 전 영상을 봤다. 이 경로는 저장을 건드리는
+   *  호출을 하나도 하지 않는다. */
+  const previewYujinEditingProposal = async (proposalId: string) => {
+    if (!sessionId) return;
+    const epoch = routeEpoch.current.value;
+    const operationId = proposalPreviewOperationId.current + 1;
+    proposalPreviewOperationId.current = operationId;
+    const isCurrent = () => routeEpoch.current.value === epoch && proposalPreviewOperationId.current === operationId;
+    setDirector((current) => current.key === requestKey
+      ? { ...current, editingProposalPreview: { kind: "working", generationId: null, tick: 0 } }
+      : current);
+    try {
+      const result = await api.startYujinEditingProposalPreview(projectId, sessionId, proposalId);
+      if (!isCurrent()) return;
+      setDirector((current) => current.key === requestKey
+        ? { ...current, editingProposalPreview: nextEditingProposalPreviewState(result, 0) }
+        : current);
+    } catch {
+      if (!isCurrent()) return;
+      setDirector((current) => current.key === requestKey
+        ? { ...current, editingProposalPreview: { kind: "unavailable", message: editingProposalPreviewFailedMessage } }
+        : current);
     }
   };
   const commitTimelineMutation = async (run: (port: EditorCommandPort, isCurrent: () => boolean) => Promise<unknown>) => {
@@ -1501,6 +1604,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       editingProposalCreating: false,
       editingProposalApplying: false,
       editingProposalError: null,
+      editingProposalPreview: { kind: "idle" },
       messages: capDirectorMessages([...current.messages, { id: optimisticUserId, role: "user", text: submittedDraft }]),
     } : current);
     try {
@@ -1602,7 +1706,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         return;
       }
       setDirector((current) => current.key === requestKey
-        ? { ...current, editingProposal: result, editingProposalCreating: false, startFailure: null }
+        ? { ...current, editingProposal: result, editingProposalCreating: false, editingProposalPreview: { kind: "idle" }, startFailure: null }
         : current);
     } catch {
       if (routeEpoch.current.value !== epoch) return;
@@ -1877,12 +1981,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       previewTarget: yujinEditingProposalPreviewTarget(activeDirector.editingProposal, state.view),
       isApplying: activeDirector.editingProposalApplying,
       error: activeDirector.editingProposalError,
+      preview: editingProposalPreviewForDock(activeDirector.editingProposalPreview),
     } : null,
     editingProposalCreating: activeDirector.editingProposalCreating,
-    onPreviewEditingProposal: activeDirector.editingProposal ? () => {
-      const target = yujinEditingProposalPreviewTarget(activeDirector.editingProposal!, state.view!);
-      if (target) return previewSelectedRange(target);
-    } : undefined,
+    onPreviewEditingProposal: activeDirector.editingProposal
+      ? () => previewYujinEditingProposal(activeDirector.editingProposal!.proposal_id)
+      : undefined,
     onApplyEditingProposal: activeDirector.editingProposal ? async () => {
       const proposal = activeDirector.editingProposal!;
       const revision = state.view!.expectedRevision;
@@ -1895,7 +1999,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         }
         await commitTimelineMutation(async () => {
           await api.applyYujinEditingProposal(projectId, sessionId!, proposal.proposal_id, { expected_revision: revision });
-          setDirector((current) => current.key === requestKey ? { ...current, editingProposal: null, editingProposalApplying: false } : current);
+          setDirector((current) => current.key === requestKey ? { ...current, editingProposal: null, editingProposalApplying: false, editingProposalPreview: { kind: "idle" } } : current);
         });
       } catch {
         setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false, editingProposalError: "편집안을 적용하지 못했어요. 최신 편집본을 확인해 주세요." } : current);

@@ -4140,6 +4140,81 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByRole("button", { name: "이 대화로 편집안 만들기" })).toBeEnabled();
   });
 
+  // 후보 결과 미리보기(Task 3). 2026-08-26까지 `이 구간 미리보기`는 **저장된
+  // 편집본**을 보여 줬다 -- 창작자는 바뀐 결과를 봤다고 믿었지만 실제로는 바뀌기
+  // 전 영상을 본 것이다. 적용 전에는 저장을 건드리는 어떤 호출도 하지 않는다.
+  async function openEditingProposalDialog() {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000003");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValue({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "두 번째 장면을 빠르게", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000003", created_at: "1" },
+        assistant_message: { message_id: "assistant-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "속도를 조절할 수 있어요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+      },
+    } as never);
+    vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({
+      proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+      source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    await screen.findByText("속도를 조절할 수 있어요.");
+    fireEvent.click(screen.getByRole("button", { name: "이 대화로 편집안 만들기" }));
+    await screen.findByText("편집안을 준비했어요.");
+    fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
+    return screen.getByRole("dialog", { name: "편집안" });
+  }
+
+  it("shows the candidate result and never touches the saved session before apply", async () => {
+    const selectedRange = vi.spyOn(api, "previewEditingSessionSelectedRange").mockResolvedValue({} as never);
+    const exactPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+    const startProposalPreview = vi.spyOn(api, "startYujinEditingProposalPreview")
+      .mockResolvedValue({ status: "pending", generationId: "proposal-preview-1", contentUrl: null, errorMessage: null });
+    const proposalPreviewStatus = vi.spyOn(api, "getYujinEditingProposalPreviewStatus")
+      .mockResolvedValueOnce({ status: "running", generationId: "proposal-preview-1", contentUrl: null, errorMessage: null })
+      .mockResolvedValue({ status: "succeeded", generationId: "proposal-preview-1", contentUrl: "/api/projects/project-a/proposal-previews/proposal-preview-1/content", errorMessage: null });
+
+    const dialog = await openEditingProposalDialog();
+    // 편집기를 열면 편집본 미리보기를 한 번 만든다. 이 시험이 재는 것은 **누른 뒤**다.
+    exactPreview.mockClear();
+    fireEvent.click(within(dialog).getByRole("button", { name: "이 구간 미리보기" }));
+
+    expect(await screen.findByText("편집안 미리보기를 만들고 있어요.")).toBeVisible();
+    expect(await screen.findByLabelText("편집안 미리보기", {}, { timeout: 8_000 })).toHaveAttribute(
+      "src",
+      "/api/projects/project-a/proposal-previews/proposal-preview-1/content",
+    );
+    expect(startProposalPreview).toHaveBeenCalledWith("project-a", "session-a", "yujin-edit-1");
+    expect(proposalPreviewStatus).toHaveBeenCalledWith("project-a", "proposal-preview-1");
+    // 핵심 안전 성질: 적용 전 저장 변경 호출 0.
+    expect(selectedRange).not.toHaveBeenCalled();
+    expect(exactPreview).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("refuses to show a stale candidate result and tells the creator what to do", async () => {
+    const selectedRange = vi.spyOn(api, "previewEditingSessionSelectedRange").mockResolvedValue({} as never);
+    vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+    vi.spyOn(api, "startYujinEditingProposalPreview")
+      .mockResolvedValue({ status: "stale", action: "새 편집안을 받아 보세요." });
+
+    const dialog = await openEditingProposalDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "이 구간 미리보기" }));
+
+    expect(await screen.findByText("편집본이 바뀌었어요. 새 편집안을 받아 보세요.")).toBeVisible();
+    expect(screen.queryByLabelText("편집안 미리보기")).toBeNull();
+    expect(selectedRange).not.toHaveBeenCalled();
+  }, 15_000);
+
   it("aborts an in-flight local send on explicit cancel and keeps manual editing enabled", async () => {
     let sendSignal!: AbortSignal;
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({

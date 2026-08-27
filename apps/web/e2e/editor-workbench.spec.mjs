@@ -489,8 +489,13 @@ test("owned conversational-editing fixture keeps explicit AI speed apply reversi
   let activeSession = baseSession;
   let activeManifest = baseManifest;
   const appliedBodies = [];
-  const selectedRangeBodies = [];
   const createdProposalBodies = [];
+  // 적용 전에 **저장된 편집본을 건드린 횟수**. 후보 결과 미리보기는 읽기 전용이므로
+  // 여기에 한 건도 쌓이면 안 된다(2026-08-26 인계 Task 3의 핵심 안전 성질).
+  const sessionMutationCalls = [];
+  const proposalPreviewStatusCalls = [];
+  const proposalPreviewGenerationId = "owned-proposal-preview-1";
+  const proposalPreviewContentUrl = `/api/projects/${projectId}/proposal-previews/${proposalPreviewGenerationId}/content`;
 
   await page.addInitScript(() => localStorage.removeItem("videobox.editor-workbench.ui"));
   await page.route("**/api/projects", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ projects: [{ project_id: projectId, name: "소유 대화형 편집 검증", status: "active", root_storage_uri: "local://owned-conversational-editing-fixture" }] }) }));
@@ -531,10 +536,29 @@ test("owned conversational-editing fixture keeps explicit AI speed apply reversi
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(activeSession) });
   });
   await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/selected-range-preview`, async (route) => {
-    selectedRangeBodies.push(route.request().postDataJSON());
+    sessionMutationCalls.push("selected-range-preview");
     await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({}) });
   });
-  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/exact-preview`, (route) => route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({}) }));
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/exact-preview`, (route) => {
+    sessionMutationCalls.push("exact-preview");
+    return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({}) });
+  });
+  // 후보 결과 미리보기. 저장된 편집본과 **다른 주소**이고 세션을 바꾸지 않는다.
+  await page.route(`**/api/projects/${projectId}/editing-sessions/${sessionId}/yujin-editing-proposals/${proposalId}/preview`, (route) => route.fulfill({
+    status: 202,
+    contentType: "application/json",
+    body: JSON.stringify({ status: "pending", generation_id: proposalPreviewGenerationId, content_url: null, error_message: null }),
+  }));
+  await page.route(`**/api/projects/${projectId}/proposal-previews/${proposalPreviewGenerationId}`, (route) => {
+    proposalPreviewStatusCalls.push(route.request().url());
+    const ready = proposalPreviewStatusCalls.length > 1;
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      status: ready ? "succeeded" : "running",
+      generation_id: proposalPreviewGenerationId,
+      content_url: ready ? proposalPreviewContentUrl : null,
+      error_message: null,
+    }) });
+  });
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/projects/${projectId}/editor?session_id=${sessionId}`);
@@ -551,9 +575,13 @@ test("owned conversational-editing fixture keeps explicit AI speed apply reversi
   await page.getByRole("button", { name: "편집안 보기" }).click();
   const dialog = page.getByRole("dialog", { name: "편집안" });
   await expect(dialog).toContainText("2번 장면 · 8초 → 4초");
+  // 여기서부터 적용 전까지 저장된 편집본을 바꾸는 호출이 **한 건도** 없어야 한다.
+  const sessionMutationsBeforePreview = sessionMutationCalls.length;
   await dialog.getByRole("button", { name: "이 구간 미리보기" }).click();
-  await expect.poll(() => selectedRangeBodies.length).toBe(1);
-  expect(selectedRangeBodies[0]).toEqual({ start_sec: 8, end_sec: 16 });
+  await expect(dialog.getByText("편집안 미리보기를 만들고 있어요.")).toBeVisible();
+  await expect(dialog.locator('video[aria-label="편집안 미리보기"]')).toHaveAttribute("src", proposalPreviewContentUrl);
+  expect(proposalPreviewStatusCalls.length).toBeGreaterThan(0);
+  expect(sessionMutationCalls.slice(sessionMutationsBeforePreview)).toEqual([]);
   await dialog.getByRole("button", { name: "이 편집안 적용" }).click();
   await expect.poll(() => appliedBodies.length).toBe(1);
   expect(appliedBodies[0]).toEqual({ expected_revision: 7 });
