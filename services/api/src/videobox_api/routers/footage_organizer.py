@@ -315,6 +315,27 @@ def build_footage_organizer_router(
             raise _footage_error(exc) from exc
         return _sequence_payload(result)
 
+    @router.get("/api/footage/sequences")
+    def list_sequences(status: str | None = None) -> dict[str, Any]:
+        if status is not None and status != "approved":
+            raise HTTPException(status_code=422, detail="footage_sequence_list_status_unsupported")
+        connection = sqlite3.connect(footage_store.database_path)
+        try:
+            if status == "approved":
+                rows = connection.execute(
+                    "SELECT v.sequence_id FROM library_virtual_sequences v "
+                    "JOIN footage_sequence_approvals a ON a.sequence_id = v.sequence_id "
+                    "ORDER BY a.created_at DESC"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT sequence_id FROM library_virtual_sequences ORDER BY created_at DESC"
+                ).fetchall()
+        finally:
+            connection.close()
+        sequences = [footage_store.get_virtual_sequence(str(row[0])) for row in rows]
+        return {"sequences": [_sequence_payload_with_library_ids(footage_store, sequence) for sequence in sequences if sequence is not None]}
+
     @router.get("/api/footage/sequences/{sequence_id}")
     def get_sequence(sequence_id: str) -> dict[str, Any]:
         result = footage_store.get_virtual_sequence(sequence_id)
@@ -520,6 +541,18 @@ def _item_payload(value: Any) -> dict[str, Any]:
 
 def _sequence_payload(value: Any) -> dict[str, Any]:
     return {"sequence_id": value.sequence_id, "source_id": value.source_id, "source_sha256": value.source_sha256, "sources": [{"source_id": source.source_id, "source_sha256": source.source_sha256} for source in value.sources], "name": value.name, "revision": value.revision, "items": [_item_payload(item) for item in value.items]}
+
+
+def _sequence_payload_with_library_ids(store: FootageOrganizerStore, value: Any) -> dict[str, Any]:
+    # The listing tab in the editor's 촬영본 popup imports each item via
+    # materializeLibraryAsset(library_asset_id, ...), so it needs the
+    # underlying library asset per source -- the base payload only carries
+    # source_id/source_sha256 (see _sequence_payload).
+    payload = _sequence_payload(value)
+    for source in payload["sources"]:
+        found = store.get_source(str(source["source_id"]))
+        source["library_asset_id"] = found.library_asset_id if found is not None else None
+    return payload
 
 
 def _ranged_preview_url(source_id: str, values: Any) -> str:

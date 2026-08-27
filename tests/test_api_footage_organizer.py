@@ -298,6 +298,50 @@ def test_virtual_sequence_reorder_preview_cancel_and_approval(tmp_path: Path) ->
     assert approved.json() == replay.json()
 
 
+def test_list_virtual_sequences_only_returns_approved_ones(tmp_path: Path) -> None:
+    client, _library, _digest = _client(tmp_path)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-list"},
+    ).json()
+    segment_id = proposed["segments"][0]["source_segment_id"]
+
+    draft_sequence = client.post(
+        "/api/footage/sequences",
+        json={
+            "source_id": proposed["source_id"],
+            "name": "아직 승인 안 한 묶음",
+            "items": [{"source_segment_id": segment_id, "item_order": 1}],
+        },
+    ).json()
+
+    approved_sequence = client.post(
+        "/api/footage/sequences",
+        json={
+            "source_id": proposed["source_id"],
+            "name": "승인한 묶음",
+            "items": [{"source_segment_id": segment_id, "item_order": 1}],
+            "idempotency_key": "approved-seq-for-listing",
+        },
+    ).json()
+    approve = client.post(
+        f"/api/footage/sequences/{approved_sequence['sequence_id']}/approve",
+        json={"idempotency_key": "approve-for-listing"},
+    )
+    assert approve.status_code == 200, approve.text
+
+    listing = client.get("/api/footage/sequences", params={"status": "approved"})
+    assert listing.status_code == 200, listing.text
+    payload = listing.json()
+    sequence_ids = {item["sequence_id"] for item in payload["sequences"]}
+    assert approved_sequence["sequence_id"] in sequence_ids
+    assert draft_sequence["sequence_id"] not in sequence_ids
+    matched = next(item for item in payload["sequences"] if item["sequence_id"] == approved_sequence["sequence_id"])
+    assert matched["name"] == "승인한 묶음"
+    assert len(matched["items"]) == 1
+    assert matched["sources"][0]["library_asset_id"] == "asset-take"
+
+
 def test_multi_source_virtual_sequence_returns_item_previews_and_approves(tmp_path: Path) -> None:
     client, library, _digest = _client(tmp_path)
     second_path = tmp_path / "second.mp4"
