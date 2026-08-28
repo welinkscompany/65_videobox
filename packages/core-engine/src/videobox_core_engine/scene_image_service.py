@@ -43,6 +43,9 @@ _DEFAULT_SCENE_SECONDS = 5.0
 #: "B-roll이 화면 시간보다 짧다"로 렌더가 멈춘다. 여유를 앞에 붙여 둔다.
 _SCENE_HEADROOM_SECONDS = 2.0
 _SCENE_FPS = 30
+#: owner 요청(2026-08-28): 이미지 애니메이션 -- ffmpeg 팬·줌 방식 승인(AI 영상 생성은 범위 밖).
+#: 12%면 화면이 움직인다는 건 보이되 어지럽지 않다.
+_ZOOM_RATIO = 1.12
 
 
 @dataclass(slots=True, frozen=True)
@@ -196,13 +199,36 @@ class SceneImageService:
 
     def _still_to_clip(self, *, still: Path, target: Path, width: int, height: int, duration_sec: float) -> None:
         """정지 화면을 그 길이만큼의 mp4로. 소리 트랙은 만들지 않는다 --
-        무음 B-roll은 이미 다루고 있고, 빈 소리를 실으면 섞을 때 한 겹이 는다."""
+        무음 B-roll은 이미 다루고 있고, 빈 소리를 실으면 섞을 때 한 겹이 는다.
+
+        전에는 그냥 정지 화면이었다. 팬·줌(Ken Burns)을 얹어 완전히 멈춰 있지는
+        않게 한다 -- zoompan은 프레임 단위로 배율을 키워 가는 필터라, 입력을
+        `-loop 1`로 그냥 프레임률만 맞춰 넣으면 프레임마다 같은 그림이 다시 들어와
+        확대 상태가 프레임 사이에서 안 이어진다(직접 확인함). 대신 이미지를
+        한 프레임으로만 열고 zoompan 자신의 `d`(총 프레임 수)·`fps`가 시퀀스를
+        만들게 둬야 배율이 실제로 이어진다. 확대 중 화질이 깨지지 않도록 zoompan
+        전에 목표 해상도의 2배로 먼저 키워 둔다.
+        """
+        total_frames = max(round(duration_sec * _SCENE_FPS), 1)
+        step = (_ZOOM_RATIO - 1.0) / total_frames
+        # 매번 같은 방향으로 움직이면 장면들이 다 똑같아 보인다 -- 줄어들지
+        # 늘어나는지를 씨앗과 별개로 매번 무작위로 고른다.
+        zoom_expr = (
+            f"min(zoom+{step:.10f},{_ZOOM_RATIO})" if secrets.choice([True, False])
+            else f"if(eq(on,0),{_ZOOM_RATIO},max(zoom-{step:.10f},1.0))"
+        )
+        zoompan = (
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+            f"scale={width * 2}:{height * 2},"
+            f"zoompan=z='{zoom_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d={total_frames}:s={width}x{height}:fps={_SCENE_FPS},format=yuv420p"
+        )
         command = [
             self.ffmpeg_binary, "-y", "-v", "error",
-            "-loop", "1", "-framerate", str(_SCENE_FPS), "-i", str(still),
+            "-loop", "1", "-i", str(still),
             "-t", f"{duration_sec:.3f}",
-            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+            "-vf", zoompan,
             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
             "-r", str(_SCENE_FPS), "-an", str(target),
         ]

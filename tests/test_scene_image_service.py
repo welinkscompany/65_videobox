@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -33,13 +34,16 @@ pytestmark = pytest.mark.skipif(
 
 
 def _png_bytes() -> bytes:
-    """진짜 PNG여야 한다. 가짜 바이트를 쓰면 ffmpeg 단계가 시험을 안 지난다."""
-    import tempfile
+    """진짜 PNG여야 한다. 가짜 바이트를 쓰면 ffmpeg 단계가 시험을 안 지난다.
 
+    단색이 아니라 한쪽에 치우친 사각형을 넣는다 -- 단색이면 줌이 실제로 움직여도
+    프레임끼리 똑같아 보여서 팬·줌이 걸렸는지 시험으로 잡을 수 없다.
+    """
     with tempfile.TemporaryDirectory() as folder:
         target = Path(folder) / "seed.png"
         subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=orange:s=320x180",
+             "-vf", "drawbox=x=20:y=20:w=60:h=60:color=red:t=fill",
              "-frames:v", "1", str(target)],
             check=True, capture_output=True, timeout=60,
         )
@@ -111,6 +115,49 @@ def test_one_generated_image_becomes_two_assets_a_picture_and_a_scene_clip(tmp_p
     parsed = json.loads(probe.stdout)
     assert any(stream["codec_type"] == "video" for stream in parsed["streams"])
     assert float(parsed["format"]["duration"]) >= 4.0
+
+
+def test_the_clip_is_not_a_frozen_still_it_pans_and_zooms(tmp_path: Path) -> None:
+    """owner 요청(2026-08-28): 정지 화면이 아니라 캡컷처럼 은은하게 움직여야 한다.
+
+    ffmpeg만으로 되는 팬·줌(Ken Burns)으로 승인됐다 -- AI 영상 생성은 범위 밖이다.
+    첫 프레임과 끝 프레임을 뽑아 SSIM으로 비교한다. 완전히 같으면(1.0) 예전처럼
+    멈춰 있는 것이고, 줌이 실제로 이어졌다면 확실히 갈라진다.
+    """
+    service, store, project_id = _service(tmp_path)
+
+    service.generate_scene_image(
+        project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1", duration_sec=3.0,
+    )
+
+    clip = next(
+        item for item in store.list_assets(project_id=project_id)
+        if item["asset_type"] == AssetType.BROLL_VIDEO.value
+    )
+    clip_path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(clip["storage_uri"]))
+
+    with tempfile.TemporaryDirectory() as folder:
+        first = Path(folder) / "first.png"
+        last = Path(folder) / "last.png"
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", str(clip_path), "-vf", "select=eq(n\\,0)",
+             "-vframes", "1", str(first)],
+            check=True, capture_output=True, timeout=30,
+        )
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-sseof", "-1", "-i", str(clip_path),
+             "-vframes", "1", str(last)],
+            check=True, capture_output=True, timeout=30,
+        )
+        probe = subprocess.run(
+            ["ffmpeg", "-i", str(first), "-i", str(last), "-lavfi", "ssim", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        ssim_line = next(line for line in probe.stderr.splitlines() if "SSIM" in line)
+        # "All:0.993885" 꼴에서 값만 뽑는다.
+        all_value = float(ssim_line.split("All:")[1].split(" ")[0])
+
+    assert all_value < 0.999, f"clip looks frozen (SSIM {all_value}): {ssim_line}"
 
 
 def test_the_clip_says_which_scene_it_was_made_for(tmp_path: Path) -> None:
