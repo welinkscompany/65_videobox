@@ -681,6 +681,28 @@ describe("OutputsPage", () => {
     expect(await screen.findByText("좋았다고 기록했어요.")).toBeVisible();
   });
 
+  it("lets the owner make a preview share link for a colleague and shows the url", async () => {
+    // owner 요청(2026-08-28): 프리뷰 공유 링크. 동료가 앱 없이 이 링크만으로 완성본을
+    // 볼 수 있어야 하니, 만든 뒤에는 화면에 그 주소가 그대로 보여야 한다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-shared", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const createPreviewShare = vi.spyOn(api, "createPreviewShare").mockResolvedValue({
+      share_id: "preview-share-1", token: "opaque-token-abc", url: "/preview/opaque-token-abc",
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" }));
+
+    await waitFor(() => expect(createPreviewShare).toHaveBeenCalledWith("project_a", currentFinalJob.job_id));
+    const link = await screen.findByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`);
+    expect(link).toBeVisible();
+  });
+
   it("saves the format of a video the owner liked, under a name they chose", async () => {
     // 자동 제작은 "어떻게 만들지"를 여기서 가져간다. 마음에 든 완성본을 봤을 때가
     // 그 포맷을 남길 유일한 순간이다.

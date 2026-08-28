@@ -47,6 +47,8 @@ from videobox_api.routers.format_templates import build_format_templates_router
 from videobox_api.routers.library_assets import build_library_assets_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
+from videobox_api.routers.creation_recommendations import build_creation_recommendations_router
+from videobox_api.routers.preview_shares import build_preview_shares_router
 from videobox_api.routers.hermes_conversation import build_hermes_conversation_router
 from videobox_api.routers.hermes_operations import build_hermes_operations_router
 from videobox_api.routers.projects import build_projects_router
@@ -1276,8 +1278,12 @@ def create_app(
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_scene_images_router(store))
     app.include_router(build_script_drafts_router())
+    app.include_router(
+        build_creation_recommendations_router(store=store, media_library_store=resolved_media_library_store)
+    )
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
+    app.include_router(build_preview_shares_router(orchestrator))
     app.include_router(build_output_variants_router(store))
 
     return app

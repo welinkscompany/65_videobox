@@ -1136,6 +1136,22 @@ class ApiOrchestrator:
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_final_render_result(project_id=project_id, job_id=job_id)
 
+    # owner 요청(2026-08-28): 프리뷰 공유 링크 -- 토큰 링크 방식 승인. 이 앱은
+    # 지금까지 인증이 전혀 없었다는 점을 밝혀 둔다. 아래 넷은 store에 그대로 위임한다.
+    def create_preview_share(self, *, project_id: str, export_id: str) -> dict[str, Any]:
+        return self.store.create_preview_share(project_id=project_id, export_id=export_id)
+
+    def get_preview_share(self, *, token: str) -> dict[str, Any] | None:
+        return self.store.get_preview_share_by_token(token=token)
+
+    def revoke_preview_share(self, *, project_id: str, share_id: str) -> None:
+        self.store.revoke_preview_share(project_id=project_id, share_id=share_id)
+
+    def list_preview_shares_for_render(
+        self, *, project_id: str, export_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self.store.list_preview_shares(project_id=project_id, export_id=export_id)
+
     def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.start_capcut_draft_export(project_id=project_id, timeline_job_id=timeline_job_id)
 

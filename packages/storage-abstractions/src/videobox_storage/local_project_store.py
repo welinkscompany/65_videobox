@@ -56,6 +56,7 @@ from videobox_storage._store_yujin_memory import (
     YujinMemoryMixin,
 )
 from videobox_storage._store_output_variants import OutputVariantMixin
+from videobox_storage._store_preview_shares import PreviewShareMixin
 
 _LOGGER = logging.getLogger(__name__)
 from videobox_core_engine.creation_interview import (
@@ -479,7 +480,7 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
     )
 
 
-class LocalProjectStore(OutputVariantMixin, YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMixin):
+class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMixin):
     def __init__(
         self,
         projects_root: Path,

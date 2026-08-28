@@ -606,6 +606,23 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    -- owner 요청(2026-08-28): 프리뷰 공유 링크 -- 토큰 링크 방식 승인. 이 앱은
+    -- 지금까지 인증이 전혀 없었다는 점을 밝혀 둔다. token은 credential이라
+    -- UNIQUE로 잡아 두고, 조회는 token만으로 가능해야 하니 project_id를 조건에
+    -- 걸지 않는다(별도 인덱스로 빠르게 찾는다).
+    CREATE TABLE IF NOT EXISTS preview_shares (
+        share_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        export_id TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_preview_shares_token ON preview_shares(token)
+    """,
+    """
     CREATE TABLE IF NOT EXISTS director_hermes_run_events (
         project_id TEXT NOT NULL,
         run_id TEXT NOT NULL,

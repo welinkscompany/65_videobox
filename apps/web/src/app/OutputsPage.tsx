@@ -326,6 +326,12 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
   const [formatName, setFormatName] = useState("");
   const [formatSavedProjectId, setFormatSavedProjectId] = useState<string | null>(null);
   const [isSavingFormat, setIsSavingFormat] = useState(false);
+  // owner 요청(2026-08-28): 프리뷰 공유 링크. 프로젝트별로 기억해 다른 프로젝트로
+  // 넘어가면 앞서 만든 링크가 남아 보이지 않게 한다.
+  const [previewShareProjectId, setPreviewShareProjectId] = useState<string | null>(null);
+  const [previewShareUrl, setPreviewShareUrl] = useState<string | null>(null);
+  const [isCreatingPreviewShare, setIsCreatingPreviewShare] = useState(false);
+  const [previewShareErrorProjectId, setPreviewShareErrorProjectId] = useState<string | null>(null);
   // 판단은 프로젝트별로 기억한다. 프로젝트를 바꾸면 앞 프로젝트의 안내가 남으면 안 된다.
   const [verdictProjectId, setVerdictProjectId] = useState<string | null>(null);
   const [verdictSaved, setVerdictSaved] = useState<"good" | "bad" | null>(null);
@@ -715,6 +721,25 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
       if (currentProjectId.current === submissionProjectId) setIsSavingVerdict(false);
     }
   };
+  // owner 요청(2026-08-28): 프리뷰 공유 링크 — 토큰 링크 방식 승인. 이 앱은
+  // 지금까지 인증이 전혀 없었다는 점을 밝혀 둔다. 링크 하나가 이 완성본 하나에만 닿는다.
+  const handleCreatePreviewShare = async () => {
+    const submissionProjectId = projectId;
+    if (!finalRender?.job_id || isCreatingPreviewShare) return;
+    setIsCreatingPreviewShare(true);
+    setPreviewShareErrorProjectId(null);
+    try {
+      const created = await api.createPreviewShare(submissionProjectId, finalRender.job_id);
+      if (currentProjectId.current !== submissionProjectId) return;
+      setPreviewShareProjectId(submissionProjectId);
+      setPreviewShareUrl(`${window.location.origin}${created.url}`);
+    } catch {
+      if (currentProjectId.current !== submissionProjectId) return;
+      setPreviewShareErrorProjectId(submissionProjectId);
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsCreatingPreviewShare(false);
+    }
+  };
   const handleRenderFinal = async () => {
     const submissionProjectId = projectId;
     const timelineKey = timelineJob ? `${submissionProjectId}:${timelineJob.job_id}` : null;
@@ -918,6 +943,16 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
           {/* Vrew의 "다양한 내보내기"(#14) 참고, owner 요청 2026-08-28: "오디오만...
               내보내기". 완성본 mp4에서 그때그때 오디오만 뽑는다(새 렌더 아님). */}
           {currentFinal ? <a className="vb-action-link" download href={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/audio-content`}>오디오만 내려받기</a> : null}
+          {/* Vrew #15 "프리뷰 공유" 참고, owner 요청(2026-08-28): 동료에게 링크로
+              중간 공유. 토큰 하나가 이 완성본 하나에만 닿는다 — 앱에 로그인이 없어도
+              그 사람은 이 링크로만 영상을 볼 수 있다. */}
+          {currentFinal ? <div className="vb-preview-share">
+            <Button disabled={isCreatingPreviewShare} onClick={() => void handleCreatePreviewShare()}>{isCreatingPreviewShare ? "공유 링크 만드는 중" : "동료에게 공유 링크 만들기"}</Button>
+            {previewShareErrorProjectId === projectId ? <p>공유 링크를 만들지 못했어요. 다시 시도해 주세요.</p> : null}
+            {previewShareProjectId === projectId && previewShareUrl
+              ? <p>동료에게 이 링크를 보내 주세요: <input readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} /></p>
+              : null}
+          </div> : null}
           {currentFinal ? <div className="vb-final-verdict">
             {/* 낡은 완성본은 평가하지 않는다. 어느 편집본에 대한 판단인지 알 수 없어진다. */}
             {verdictProjectId === projectId && verdictSaved

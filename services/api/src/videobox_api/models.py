@@ -456,6 +456,51 @@ class ScriptDraftResponse(BaseModel):
     scenes: list[ScriptDraftSceneResponse]
 
 
+class CreationRecommendationSetRequest(BaseModel):
+    """대본을 확정하기 전, 주제 하나로 만들 소재 세트를 미리 본다.
+
+    owner 요청(2026-08-28): "주제 하나로 BGM+이미지스타일+AI보이스까지 세트로
+    추천." `script_text`가 있으면 그걸로(더 정확하게) 찾고, 없으면 `topic`만으로도
+    동작한다 -- 대본이 아직 없는 순간에도 미리 보여 줄 수 있어야 한다.
+    """
+
+    topic: str = Field(min_length=1, max_length=500)
+    script_text: str = Field(default="", max_length=20000)
+
+
+class BgmRecommendationResponse(BaseModel):
+    library_asset_id: str
+    description: str = ""
+    duration_seconds: float | None = None
+    score: float
+
+
+class ImageStyleRecommendationResponse(BaseModel):
+    style_id: str
+    name: str
+    #: 이미지 생성 프롬프트 뒤에 그대로 덧붙이는 영어 키워드. 실제로 적용하는
+    #: 곳(`scene_image_service.py`)은 이번 범위 밖이다 -- 여기는 추천만 한다.
+    prompt_suffix: str
+    reason: str
+
+
+class VoiceRecommendationResponse(BaseModel):
+    asset_id: str | None = None
+    filename: str | None = None
+    #: 등록된 목소리가 없을 때 무엇을 하면 되는지. 화면이 빈 값을 보고 추측하지
+    #: 않도록 말로 준다.
+    note: str
+
+
+class CreationRecommendationSetResponse(BaseModel):
+    bgm: list[BgmRecommendationResponse]
+    image_style: ImageStyleRecommendationResponse
+    voice: VoiceRecommendationResponse
+    #: 임베딩 모델이 없어 BGM 추천이 단어 매칭으로 떨어졌는지. 화면이 "뜻으로
+    #: 찾음" 배지를 거짓으로 달지 않게 한다(`library_assets.py`의 `semantic`과 같은 뜻).
+    bgm_semantic: bool
+
+
 class TTSCandidateRequest(BaseModel):
     segment_text: str = Field(min_length=1)
     voice_sample_asset_id: str = Field(min_length=1)
@@ -1478,6 +1523,27 @@ class PreviewArtifactResponse(BaseModel):
 
 class PreviewJobResponse(StartJobResponse):
     preview: PreviewArtifactResponse
+
+
+class PreviewShareCreateResponse(BaseModel):
+    """owner 요청(2026-08-28): 프리뷰 공유 링크. 토큰은 이 응답에서만 나온다 --
+    이후 목록(`PreviewShareSummaryResponse`)에는 다시 싣지 않는다."""
+
+    share_id: str
+    token: str
+    url: str
+
+
+class PreviewShareStatusResponse(BaseModel):
+    status: Literal["active"]
+
+
+class PreviewShareSummaryResponse(BaseModel):
+    share_id: str
+    project_id: str
+    export_id: str
+    created_at: str
+    revoked_at: str | None = None
 
 
 class ExportArtifactResponse(BaseModel):

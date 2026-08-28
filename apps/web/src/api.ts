@@ -53,6 +53,13 @@ export type SceneImageRequest = { prompt: string; segment_id: string; vertical?:
 export type ScriptDraftScene = { scene_number: number; narration: string; visual: string };
 export type ScriptDraft = { title: string; script_text: string; scenes: ScriptDraftScene[] };
 export type ScriptDraftRequest = { topic: string; duration_sec?: number; scene_count?: number };
+/** 주제 하나로 BGM·이미지 스타일·목소리를 세트로 미리 본다(owner 요청 2026-08-28).
+ *  전부 이미 있는 재료 위에서 고르는 추천이지, 새로 만들어 내는 게 아니다. */
+export type BgmRecommendation = { library_asset_id: string; description: string; duration_seconds: number | null; score: number };
+export type ImageStyleRecommendation = { style_id: string; name: string; prompt_suffix: string; reason: string };
+export type VoiceRecommendation = { asset_id: string | null; filename: string | null; note: string };
+export type CreationRecommendationSet = { bgm: BgmRecommendation[]; image_style: ImageStyleRecommendation; voice: VoiceRecommendation; bgm_semantic: boolean };
+export type CreationRecommendationSetRequest = { topic: string; script_text?: string };
 export type MediaInboxAsset = { filename: string; size_bytes: number };
 export type MediaInboxImport = { asset_id: string; project_id: string; asset_type: string; storage_uri: string };
 export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
@@ -1027,6 +1034,22 @@ export type FinalRenderJob = {
   error_message?: string | null;
 };
 
+// owner 요청(2026-08-28): 프리뷰 공유 링크. 토큰은 생성 응답에서만 나온다 —
+// 목록 조회에는 다시 싣지 않는다(재발급 창구로 쓰지 못하게).
+export type PreviewShareCreated = {
+  share_id: string;
+  token: string;
+  url: string;
+};
+
+export type PreviewShareSummary = {
+  share_id: string;
+  project_id: string;
+  export_id: string;
+  created_at: string;
+  revoked_at?: string | null;
+};
+
 export type VariantRenderItem = {
   variant_id: string;
   variant_kind?: string | null;
@@ -1914,6 +1937,7 @@ export const api = {
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   listSceneImages: (projectId: string) => request<{ images: SceneImage[] }>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`),
   createScriptDraft: (projectId: string, payload: ScriptDraftRequest) => request<ScriptDraft>(`/api/projects/${encodeURIComponent(projectId)}/script-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  createCreationRecommendationSet: (projectId: string, payload: CreationRecommendationSetRequest) => request<CreationRecommendationSet>(`/api/projects/${encodeURIComponent(projectId)}/creation-recommendations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
   /** 올린 영상에서 말을 받아써 대본으로 돌려준다. 받아쓰기가 이 요청 **안에서**
    *  끝나므로 10분짜리 영상이면 몇 분이 걸린다 -- 부르는 쪽이 기다리는 동안
@@ -2755,6 +2779,19 @@ export const api = {
     }),
   getFinalRender: (projectId: string, jobId: string) =>
     request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}`),
+  // owner 요청(2026-08-28): 프리뷰 공유 링크 — 토큰 링크 방식 승인.
+  createPreviewShare: (projectId: string, jobId: string) =>
+    request<PreviewShareCreated>(`/api/projects/${projectId}/final-renders/${jobId}/share`, {
+      method: "POST",
+    }),
+  listPreviewShares: (projectId: string, jobId: string) =>
+    request<{ shares: PreviewShareSummary[] }>(
+      `/api/projects/${projectId}/final-renders/${jobId}/shares`,
+    ),
+  revokePreviewShare: (projectId: string, shareId: string) =>
+    request<{ revoked: boolean }>(`/api/projects/${projectId}/preview-shares/${shareId}/revoke`, {
+      method: "POST",
+    }),
   listFormatTemplates: async (): Promise<FormatTemplate[]> =>
     (await request<{ templates: FormatTemplate[] }>("/api/format-templates")).templates,
   saveFormatTemplate: (projectId: string, payload: { name: string; session_id: string }) =>
