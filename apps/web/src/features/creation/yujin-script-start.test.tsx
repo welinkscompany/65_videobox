@@ -144,6 +144,43 @@ describe("유진이 대본 초안 쓰기", () => {
     expect(onReady).not.toHaveBeenCalled();
   });
 
+  it("대본을 받으면 주제로 어울리는 소재 세트도 함께 보여준다", async () => {
+    // owner 요청(2026-08-28, 필수): "주제 하나로 BGM+이미지스타일+AI보이스까지
+    // 세트로 추천." 대본이 먼저 뜨고, 소재 세트는 뒤이어 채워진다.
+    vi.spyOn(api, "createScriptDraft").mockResolvedValue(draft);
+    vi.spyOn(api, "createCreationRecommendationSet").mockResolvedValue({
+      bgm: [{ library_asset_id: "asset-1", description: "잔잔한 피아노", duration_seconds: 120, score: 0.8 }],
+      image_style: { style_id: "cinematic_realistic", name: "실사 시네마틱", prompt_suffix: "cinematic realistic photo", reason: '"브이로그" 낱말이 있어 추천했어요.' },
+      voice: { asset_id: "voice-1", filename: "my-voice.wav", note: "이미 등록한 목소리 중 가장 최근 것을 추천했어요." },
+      bgm_semantic: true,
+    });
+    render(<YujinScriptStart projectId="project_1" onReady={vi.fn()} />);
+
+    typeTopic();
+    fireEvent.click(screen.getByRole("button", { name: "유진에게 대본 부탁하기" }));
+    await screen.findByLabelText("유진이 쓴 대본");
+
+    const recommendationSection = await screen.findByRole("region", { name: "주제로 미리 본 소재 세트" });
+    expect(recommendationSection).toHaveTextContent("잔잔한 피아노");
+    expect(recommendationSection).toHaveTextContent("실사 시네마틱");
+    expect(recommendationSection).toHaveTextContent("my-voice.wav");
+  });
+
+  it("소재 세트를 못 받아도 대본 확정은 막지 않는다", async () => {
+    vi.spyOn(api, "createScriptDraft").mockResolvedValue(draft);
+    vi.spyOn(api, "createCreationRecommendationSet").mockRejectedValue(new Error("network"));
+    const onReady = vi.fn();
+    render(<YujinScriptStart projectId="project_1" onReady={onReady} />);
+
+    typeTopic();
+    fireEvent.click(screen.getByRole("button", { name: "유진에게 대본 부탁하기" }));
+    await screen.findByLabelText("유진이 쓴 대본");
+    await screen.findByText("소재 추천을 지금 불러오지 못했어요. 미디어 단계에서 직접 골라도 괜찮아요.");
+
+    fireEvent.click(screen.getByRole("button", { name: "이 대본으로 기획 시작" }));
+    expect(onReady).toHaveBeenCalledWith({ scriptText: draft.script_text });
+  });
+
   it("마음에 안 들면 주제를 다시 적을 수 있다", async () => {
     vi.spyOn(api, "createScriptDraft").mockResolvedValue(draft);
     render(<YujinScriptStart projectId="project_1" onReady={vi.fn()} />);

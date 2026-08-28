@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { api, type ScriptDraft } from "../../api";
+import { api, type CreationRecommendationSet, type ScriptDraft } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { NativeSelect } from "../../components/ui/native-select";
@@ -62,6 +62,11 @@ export function YujinScriptStart({
   const [error, setError] = useState<string | null>(null);
   const [written, setWritten] = useState<ScriptDraft | null>(null);
   const [scriptText, setScriptText] = useState("");
+  // 주제 하나로 BGM·이미지 스타일·목소리까지 세트로 미리 본다(owner 요청
+  // 2026-08-28, 필수 지정). 대본을 기다리게 하지 않는다 -- 대본이 먼저 뜨고
+  // 나서 따로, 조용히 늦게 채워져도 된다. 실패해도 대본 확정은 막지 않는다.
+  const [recommendations, setRecommendations] = useState<CreationRecommendationSet | null>(null);
+  const [recommendationsFailed, setRecommendationsFailed] = useState(false);
 
   async function ask() {
     if (isWriting) return;
@@ -71,6 +76,8 @@ export function YujinScriptStart({
     }
     setError(null);
     setIsWriting(true);
+    setRecommendations(null);
+    setRecommendationsFailed(false);
     try {
       const draft = await api.createScriptDraft(projectId, {
         topic: topic.trim(),
@@ -79,6 +86,9 @@ export function YujinScriptStart({
       });
       setWritten(draft);
       setScriptText(draft.script_text);
+      api.createCreationRecommendationSet(projectId, { topic: topic.trim(), script_text: draft.script_text })
+        .then(setRecommendations)
+        .catch(() => setRecommendationsFailed(true));
     } catch (caught) {
       setError(messageFor(caught));
     } finally {
@@ -112,6 +122,33 @@ export function YujinScriptStart({
             </li>
           ))}
         </ul>
+        {/* 주제 하나로 미리 본 소재 세트. 전부 이미 있는 재료 위에서 고른
+            추천이다 -- BGM은 의미 기반 검색, 스타일은 낱말 매칭, 목소리는
+            이미 등록한 것 중 최근 것이다(`creation_recommendations.py`). */}
+        {recommendations ? (
+          <section aria-label="주제로 미리 본 소재 세트">
+            <h3>이 주제로 어울리는 소재</h3>
+            <div>
+              <strong>배경음악</strong>
+              {recommendations.bgm.length ? (
+                <ul>
+                  {recommendations.bgm.map((track) => (
+                    <li key={track.library_asset_id}>{track.description || track.library_asset_id}</li>
+                  ))}
+                </ul>
+              ) : <p>{recommendations.bgm_semantic ? "어울리는 배경음악을 찾지 못했어요." : "지금은 뜻으로 찾을 수 없어 배경음악을 추천하지 못했어요."}</p>}
+            </div>
+            <div>
+              <strong>이미지 스타일</strong>
+              <p>{recommendations.image_style.name} -- {recommendations.image_style.reason}</p>
+            </div>
+            <div>
+              <strong>목소리</strong>
+              <p>{recommendations.voice.filename ?? recommendations.voice.note}</p>
+            </div>
+            <p>미디어를 모을 때 여기서 고른 대로 이어서 적용할 수 있어요.</p>
+          </section>
+        ) : recommendationsFailed ? <p>소재 추천을 지금 불러오지 못했어요. 미디어 단계에서 직접 골라도 괜찮아요.</p> : null}
         <Button
           type="button"
           disabled={disabled || !scriptText.trim()}
