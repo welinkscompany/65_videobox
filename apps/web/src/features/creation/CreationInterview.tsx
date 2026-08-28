@@ -7,12 +7,13 @@ import { Textarea } from "../../components/ui/textarea";
 import { AssetPreviewPlayer, type PreviewCandidate } from "../director/AssetPreviewPlayer";
 import { SceneImageStudio } from "../media/SceneImageStudio";
 import { SourceVideoStart } from "./SourceVideoStart";
+import { VoiceRecordStart } from "./VoiceRecordStart";
 import { YujinScriptStart } from "./YujinScriptStart";
 import { usePlaceholderConfirmation } from "./usePlaceholderConfirmation";
 import { creationBriefStorageKey as briefStorageKey } from "./pastedScriptSummary";
 
 
-const pendingKey = (projectId: string, source: "paste" | "upload" | "footage" | "yujin") => `videobox.creation-pending.${projectId}.${source}`;
+const pendingKey = (projectId: string, source: "paste" | "upload" | "footage" | "yujin" | "voice") => `videobox.creation-pending.${projectId}.${source}`;
 const shortcutAnswers = ["모르겠어요", "추천해줘", "건너뛰기"] as const;
 type PendingAnswer = { questionId: string; answer: string; expectedRevision: number };
 type PendingCandidateRange = { assetId: string; startSec: number; endSec: number; expectedRevision: number };
@@ -203,7 +204,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     <Button type="button" variant="outline" onClick={continueDraft}>초안 이어서 하기</Button>
   </section> : null;
 
-  function getPendingIdempotencyKey(source: "paste" | "upload" | "footage" | "yujin") {
+  function getPendingIdempotencyKey(source: "paste" | "upload" | "footage" | "yujin" | "voice") {
     const key = pendingKey(projectId, source);
     const existing = window.localStorage.getItem(key);
     if (existing) return existing;
@@ -299,6 +300,38 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       setBrief(created);
     } catch {
       setError("받아쓴 대본으로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  /** 녹음한 목소리로 받아쓴 대본으로 기획을 연다.
+   *
+   *  `startFromFootage`와 거의 같지만, 등록되는 자산 종류가 다르다 -- 여기서
+   *  올린 것은 영상이 아니라 순수 음성이라 `narration_audio`로 남아야
+   *  `raw_video` 버킷이 아니라 "준비한 내레이션" 버킷에 뜬다(§590 참고).
+   *  그대로 `startFromFootage`를 재사용하면 초안 준비 화면에서 엉뚱한
+   *  단추 아래 나타난다. */
+  async function startFromVoiceRecording({ assetId, scriptText: heard }: { assetId: string; scriptText: string }) {
+    const trimmed = heard.trim();
+    if (!trimmed) return;
+    setError(null);
+    setIsStarting(true);
+    try {
+      const created = await api.createCreationBrief(projectId, {
+        script_filename: "녹음한-목소리로-받아쓴-대본.txt",
+        script_text: trimmed,
+        idempotency_key: getPendingIdempotencyKey("voice"),
+        capability_profile: { ai_execution: "disabled" },
+      });
+      window.localStorage.setItem(briefStorageKey(projectId), created.brief_id);
+      window.localStorage.removeItem(pendingKey(projectId, "voice"));
+      setNarrationOptions((items) => items.some((item) => item.asset_id === assetId)
+        ? items
+        : [...items, { asset_id: assetId, asset_type: "narration_audio" }]);
+      setBrief(created);
+    } catch {
+      setError("녹음한 목소리로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
     } finally {
       setIsStarting(false);
     }
@@ -572,6 +605,10 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       {/* 대본이 없어도 시작할 수 있는 길. 영상에서 말을 받아써 대본을 만든다.
           첫 화면의 "찍어 둔 영상이 있어요"가 여기로 온다. */}
       <SourceVideoStart projectId={projectId} disabled={isStarting} onReady={(start) => void startFromFootage(start)} />
+      {/* 목소리만 녹음해서 시작하는 길(owner 요청 2026-08-29). 대본도 찍어 둔
+          영상도 없이 마이크로 바로 말하면, 받아쓰고 다시 들어볼 구간까지
+          골라 대본으로 만들어 준다. */}
+      <VoiceRecordStart projectId={projectId} disabled={isStarting} onReady={(start) => void startFromVoiceRecording(start)} />
       {/* 대본도 영상도 없는 사람이 시작하는 길. 첫 화면의 "아직 아무것도 없어요"가
           여기로 온다. 주제만 받아 유진이 초안을 쓰고, owner가 고쳐 확인한다. */}
       <YujinScriptStart projectId={projectId} disabled={isStarting} onReady={(start) => void startFromYujinDraft(start)} />

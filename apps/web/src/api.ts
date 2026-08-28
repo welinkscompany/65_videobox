@@ -44,6 +44,13 @@ export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "nar
  *  자산으로 남으므로, `asset_id`는 그대로 내레이션(`source_video`) 선택에 쓴다 --
  *  그 영상이 곧 본편이다. */
 export type SourceVideoStart = { asset_id: string; script_text: string; spoken_segment_count: number };
+/** 녹음한 목소리만으로 시작할 때 받는 것(owner 요청 2026-08-29). `SourceVideoStart`와
+ *  같은 모양에 다시 들어볼 구간 후보와 구간별 원문을 얹었다 -- 후보를 빼고
+ *  대본을 다시 만들 때 구간을 그대로 이어 붙이기 위해서다(문자열 치환이 아니다). */
+export type RetakeReason = "low_confidence" | "retry_cue" | "retry_cue_precursor";
+export type RetakeCandidate = { segment_index: number; start_sec: number; end_sec: number; text: string; reason: RetakeReason };
+export type SourceVoiceSegment = { segment_index: number; text: string };
+export type SourceVoiceStart = { asset_id: string; script_text: string; spoken_segment_count: number; segments: SourceVoiceSegment[]; retake_candidates: RetakeCandidate[] };
 /** 만든 장면 그림. `commercial_use_is_unrestricted`가 `null`이면 **모른다**는 뜻이다 --
  *  아는 척하지 않는다(§10.14 2-C). */
 export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; image_prompt?: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
@@ -1943,6 +1950,7 @@ export const api = {
    *  끝나므로 10분짜리 영상이면 몇 분이 걸린다 -- 부르는 쪽이 기다리는 동안
    *  화면에 상태를 말하고 두 번 눌리지 않게 막아야 한다. */
   uploadSourceVideo: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<SourceVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/source-video/upload`, { method: "POST", body: form }); },
+  uploadSourceVoice: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<SourceVoiceStart>(`/api/projects/${encodeURIComponent(projectId)}/source-voice/upload`, { method: "POST", body: form }); },
   reloadDirectorSession: (projectId: string, sessionId: string) =>
     request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),
   listDirectorConversations: (projectId: string) =>
