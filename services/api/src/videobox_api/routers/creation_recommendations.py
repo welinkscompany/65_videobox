@@ -127,6 +127,11 @@ def build_creation_recommendations_router(
             raise _http_error(exc) from exc
 
         query_text = (payload.script_text or payload.topic).strip()
+        # 스타일은 주제 낱말을 놓치면 안 된다 -- 유진이 쓴 대본이 "브이로그" 같은
+        # 장르 낱말을 그대로 안 쓰는 경우가 실제로 있었다(2026-08-28 실측: 주제엔
+        # 있었는데 대본 문장엔 한 번도 안 나와 기본 스타일로 떨어졌다). BGM은
+        # 의미 기반 검색이라 낱말이 없어도 괜찮지만, 스타일은 낱말 매칭이라 둘 다 본다.
+        style_query_text = f"{payload.topic} {payload.script_text}".strip()
 
         bgm: list[BgmRecommendationResponse] = []
         bgm_semantic = False
@@ -173,7 +178,7 @@ def build_creation_recommendations_router(
 
         return CreationRecommendationSetResponse(
             bgm=bgm,
-            image_style=_recommend_style(query_text),
+            image_style=_recommend_style(style_query_text),
             voice=voice,
             bgm_semantic=bgm_semantic,
         )

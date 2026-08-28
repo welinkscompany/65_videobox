@@ -99,6 +99,24 @@ def test_recommends_bgm_style_and_says_no_voice_registered_yet(tmp_path: Path) -
     assert "등록된 목소리가 아직 없어요" in body["voice"]["note"]
 
 
+def test_style_still_matches_the_topic_word_when_the_written_script_never_repeats_it(tmp_path: Path) -> None:
+    # 실제로 컨테이너에서 겪은 것(2026-08-28): 주제엔 "브이로그"가 있었는데
+    # 유진이 쓴 대본 문장에는 그 낱말이 한 번도 안 나와 기본 스타일로 떨어졌다.
+    # 스타일은 주제와 대본을 같이 봐야 한다.
+    with _client(tmp_path) as client:
+        project_id = client.post("/api/projects", json={"name": "Topic Word Draft"}).json()["project_id"]
+        response = client.post(
+            f"/api/projects/{project_id}/creation-recommendations",
+            json={
+                "topic": "집에서 즐기는 차분한 브이로그",
+                "script_text": "아침 햇살이 창문 틈으로 슬쩍 들어옵니다. 오늘 하루는 조용히 시작해 볼게요.",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["image_style"]["style_id"] == "cinematic_realistic"
+
+
 def test_recommends_the_most_recently_registered_voice_sample(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         project_id = client.post("/api/projects", json={"name": "Voice Draft"}).json()["project_id"]
