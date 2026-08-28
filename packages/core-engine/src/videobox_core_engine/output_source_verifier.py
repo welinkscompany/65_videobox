@@ -67,9 +67,21 @@ def capture_output_source_snapshots(
     so this cache (and the pre-existing ``_stream_probe_cache``) starts
     empty again on every render. Making it survive across renders needs a
     separate fix to that construction, not this function.
+
+    A cheap ``(size, mtime_ns)`` recheck runs after every item is hashed (see
+    the loop over ``stat_by_path`` below). 2026-08-28 code review: this used
+    to be a second full re-hash of every source via ``verify_output_source_snapshots``
+    called right after this function, removed as "zero elapsed time, zero
+    protection" -- that reasoning didn't hold for a multi-item timeline,
+    since this loop hashes item 1, then spends real time (up to several
+    seconds for a large later source) hashing items 2..N before a second
+    pass would reach item 1 again, leaving a real window where item 1 could
+    be swapped without being caught. A stat comparison after each hash
+    catches that same window for a fraction of a full re-hash's cost.
     """
     root = store.project_root(project_id).resolve()
     digests_by_path: dict[Path, str] = {}
+    stat_by_path: dict[Path, tuple[int, int]] = {}
     snapshots: dict[Path, OutputSourceSnapshot] = {}
     inputs: list[tuple[str, dict[str, Any]]] = []
     for track in timeline.get("tracks", []):
@@ -148,12 +160,27 @@ def capture_output_source_snapshots(
         actual_revision = str(asset.get("created_at") or "")
         if expected_revision and actual_revision != expected_revision:
             raise OutputSourceStaleError("media revision changed")
+        # 이 항목을 해시한 "직후" 상태를 남긴다. 뒤에 오는 항목들을 재는 동안
+        # (큰 파일이면 몇 초씩) 이 파일이 바뀌어도, 전체 순회가 끝난 뒤 한 번 더
+        # 값싸게(전체 재해시가 아니라 stat 하나로) 검사해서 잡는다.
+        try:
+            after_hash_stat = path.stat()
+        except OSError as exc:
+            raise OutputSourceStaleError("materialized source is missing") from exc
+        stat_by_path[path] = (after_hash_stat.st_size, after_hash_stat.st_mtime_ns)
         snapshots[path] = OutputSourceSnapshot(
             path=path,
             expected_content_sha256=expected or actual_digest,
             asset_id=asset_id,
             expected_media_revision=expected_revision or actual_revision,
         )
+    for checked_path, (expected_size, expected_mtime_ns) in stat_by_path.items():
+        try:
+            recheck_stat = checked_path.stat()
+        except OSError as exc:
+            raise OutputSourceStaleError("materialized source is missing") from exc
+        if (recheck_stat.st_size, recheck_stat.st_mtime_ns) != (expected_size, expected_mtime_ns):
+            raise OutputSourceStaleError("content SHA-256 changed")
     return tuple(snapshots.values())
 
 

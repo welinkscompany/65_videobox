@@ -654,16 +654,34 @@ class FfmpegFinalRenderer:
     overlay_font_file: str = field(default_factory=_default_overlay_font)
     ffprobe_binary: str = "ffprobe"
     # (경로, selector, mtime) → 스트림 존재 여부. 렌더 하나가 같은 원본을
-    # 클립 수만큼 다시 재지 않게 한다.
+    # 클립 수만큼 다시 재지 않게 한다. `_replace_sharing_caches`를 거치지 않고
+    # `dataclasses.replace()`를 직접 부르면 렌더마다 빈 채로 되돌아간다 --
+    # `init=False` 필드는 `replace()`가 새로 만들 때 `default_factory`를
+    # 다시 부르기 때문이다.
     _stream_probe_cache: dict[tuple[str, str, int], bool] = field(default_factory=dict, init=False, repr=False, compare=False)
-    # (경로, mtime) → sha256. `verify_output_sources()`가 렌더 하나 안에서 같은
-    # 소스를 여러 클립이 가리킬 때 다시 재는 것을 막는다. **렌더를 넘어서는
-    # 못 막는다** -- `render_exact_preview_to_mp4`가 `dataclasses.replace(self, ...)`로
-    # proxy_renderer를 새로 만드는데, `replace()`는 `init=False` 필드의
-    # `default_factory`를 다시 부르므로 이 자리도 `_stream_probe_cache`도 렌더마다
-    # 빈 채로 되돌아간다(2026-08-28 확인). 자세한 내용은
+    # (경로, mtime) → sha256. `verify_output_sources()`가 같은 소스를 다시 재는
+    # 것을 막는다. 위와 같은 이유로 `_replace_sharing_caches`를 거쳐야 렌더를
+    # 넘어 산다. 자세한 내용은
     # `output_source_verifier.capture_output_source_snapshots`의 docstring.
     _output_source_hash_cache: dict[tuple[Path, int], str] = field(default_factory=dict, init=False, repr=False, compare=False)
+
+    def _replace_sharing_caches(self, **changes: Any) -> "FfmpegFinalRenderer":
+        """`dataclasses.replace(self, **changes)`, but the new instance keeps
+        this one's per-source caches instead of starting them empty.
+
+        `replace()` doesn't pass `init=False` fields to the constructor, so
+        each one's `default_factory` runs again on the copy -- a plain
+        `replace(self, ...)` silently resets `_stream_probe_cache` and
+        `_output_source_hash_cache` on every proxy/plan renderer built for a
+        render (2026-08-28: found while measuring why per-render caching
+        wasn't paying off across repeated exact-preview requests for the
+        same project). Sharing the same dict objects instead means a hash or
+        probe computed by one renderer copy is visible to the next.
+        """
+        new_renderer = replace(self, **changes)
+        new_renderer._stream_probe_cache = self._stream_probe_cache
+        new_renderer._output_source_hash_cache = self._output_source_hash_cache
+        return new_renderer
 
     @staticmethod
     def _cgroup_cpu_quota() -> int | None:
@@ -1163,8 +1181,8 @@ class FfmpegFinalRenderer:
             width, height = 720, max(2, round((composition_plan.height * 720 / composition_plan.width) / 2) * 2)
         else:
             width, height = max(2, round((composition_plan.width * 720 / composition_plan.height) / 2) * 2), 720
-        proxy_renderer = replace(
-            self, video_width=width, video_height=height,
+        proxy_renderer = self._replace_sharing_caches(
+            video_width=width, video_height=height,
             video_fps=f"{composition_plan.fps_num}/{composition_plan.fps_den}",
             video_sar=composition_plan.sample_aspect_ratio,
         )
@@ -1825,8 +1843,7 @@ class FfmpegFinalRenderer:
         proxy_profile: bool = False,
     ) -> Path:
         if composition_plan is not None:
-            plan_renderer = self if proxy_profile else replace(
-                self,
+            plan_renderer = self if proxy_profile else self._replace_sharing_caches(
                 video_width=composition_plan.width,
                 video_height=composition_plan.height,
                 video_fps=f"{composition_plan.fps_num}/{composition_plan.fps_den}",
