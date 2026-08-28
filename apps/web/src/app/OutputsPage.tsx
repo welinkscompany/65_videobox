@@ -902,6 +902,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 자막을 만들 수 있어요.</p> : null}
           <Button disabled={!canRenderSubtitle || isRenderingCurrentSubtitle} onClick={() => void handleRenderSubtitle()}>{isRenderingCurrentSubtitle ? "자막 만드는 중" : "자막 만들기"}</Button>
+          {/* Vrew의 "다양한 내보내기"(#14) 참고, owner 요청 2026-08-28: "srt...
+              내보내기". 이미 디스크에 있던 .srt 파일을 내려받는 문 하나만 연다. */}
+          {currentSubtitle && subtitle ? <a className="vb-action-link" download href={`/api/projects/${encodeURIComponent(projectId)}/subtitles/${encodeURIComponent(subtitle.job_id)}/content`}>SRT 자막 파일 내려받기</a> : null}
         </CardContent>
       </Card>
       <Card>
@@ -912,6 +915,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
           {currentFinal && finalRender.render?.has_sound === false ? <p>완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.</p> : null}
           {currentFinal ? <video className="vb-output-video" aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
+          {/* Vrew의 "다양한 내보내기"(#14) 참고, owner 요청 2026-08-28: "오디오만...
+              내보내기". 완성본 mp4에서 그때그때 오디오만 뽑는다(새 렌더 아님). */}
+          {currentFinal ? <a className="vb-action-link" download href={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/audio-content`}>오디오만 내려받기</a> : null}
           {currentFinal ? <div className="vb-final-verdict">
             {/* 낡은 완성본은 평가하지 않는다. 어느 편집본에 대한 판단인지 알 수 없어진다. */}
             {verdictProjectId === projectId && verdictSaved
