@@ -88,6 +88,22 @@ def test_low_confidence_and_retry_cue_segments_come_back_as_retake_candidates(tm
     assert 3 not in reasons_by_index
 
 
+def test_all_segments_come_back_so_the_screen_can_rebuild_the_script_after_excluding_some(tmp_path: Path) -> None:
+    """문자열 치환으로 대본을 다시 만들면 같은 문장이 두 번 나올 때 엉뚱한
+    곳이 지워질 수 있다 -- 화면이 구간별로 이어 붙일 수 있게 원문 전체를 준다."""
+    client, project_id = _client(tmp_path)
+
+    body = _upload(client, project_id).json()
+
+    assert [item["text"] for item in body["segments"]] == [
+        "오늘은 라면을 끓여볼게요.",
+        "므러 므럴 물을 준비해요.",
+        "아 잠깐 다시 할게요.",
+        "뜨거운 물을 준비해요.",
+    ]
+    assert [item["segment_index"] for item in body["segments"]] == [0, 1, 2, 3]
+
+
 def test_the_recording_is_kept_as_a_narration_asset(tmp_path: Path) -> None:
     """올린 녹음은 버리지 않고 프로젝트의 내레이션 자산으로 남는다."""
     client, project_id = _client(tmp_path)

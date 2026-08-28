@@ -182,6 +182,10 @@ def build_draft_readiness_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 asset_id=asset.asset_id,
                 script_text=str(heard["transcript_text"]).strip(),
                 spoken_segment_count=len(spoken),
+                segments=[
+                    {"segment_index": index, "text": str(item.get("text") or "")}
+                    for index, item in enumerate(heard.get("segments") or [])
+                ],
                 retake_candidates=heard.get("retake_candidates") or [],
             )
         except Exception as exc:

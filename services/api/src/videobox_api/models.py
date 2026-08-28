@@ -403,13 +403,24 @@ class RetakeCandidateResponse(BaseModel):
     reason: Literal["low_confidence", "retry_cue", "retry_cue_precursor"]
 
 
+class SourceVoiceSegmentResponse(BaseModel):
+    """받아쓴 구간 하나. 화면이 다시 들어볼 후보만 빼고 나머지를 이어 붙여
+    대본을 다시 만들 수 있도록, `script_text`(전체 이어 붙인 글)와 별개로
+    구간 하나하나를 그대로 내려준다 -- 문자열 치환으로 지우면 같은 문장이
+    두 번 나올 때 엉뚱한 곳이 지워질 수 있다."""
+
+    segment_index: int
+    text: str
+
+
 class SourceVoiceStartResponse(BaseModel):
     """녹음한 목소리만으로 시작할 때 화면이 받는 것 -- `SourceVideoStartResponse`와
-    같은 모양에 다시 들어볼 구간 후보만 얹었다."""
+    같은 모양에 다시 들어볼 구간 후보와 구간별 원문을 얹었다."""
 
     asset_id: str
     script_text: str
     spoken_segment_count: int
+    segments: list[SourceVoiceSegmentResponse]
     retake_candidates: list[RetakeCandidateResponse]
 
 
