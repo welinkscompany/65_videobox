@@ -51,6 +51,38 @@ def test_create_highlight_is_explicit_and_optional(tmp_path: Path) -> None:
     assert response.json()["variant"]["kind"] == "vertical_highlight"
 
 
+def test_create_highlight_auto_selects_dense_caption_segments(tmp_path: Path) -> None:
+    # owner 결정(2026-08-28): "하이라이트 변형 만들기 -- 이것도 자동으로 만들도록
+    # 해줘." 전에는 만들자마자 `selected_segment_ids`가 비어 있어서 전체 장면이
+    # 그대로 하이라이트가 됐다 -- 자막이 빽빽한 장면 위주로 골라서 실제로 원본보다
+    # 짧아지는지 확인한다.
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "Auto highlight"}).json()
+    session = app.state.store.save_editing_session(
+        project_id=project["project_id"],
+        timeline_id="timeline-source",
+        session_payload={
+            "segments": [
+                # 말이 빽빽한 짧은 구간 -- 높은 점수, 골라야 한다.
+                {"segment_id": "seg-dense", "caption_text": "정말 중요한 대사가 여기 가득 담겨 있어요", "start_sec": 0.0, "end_sec": 2.0},
+                # 자막이 아예 없는 긴 정적 구간 -- 낮은 점수, 빠져야 한다.
+                {"segment_id": "seg-silent", "caption_text": "", "start_sec": 2.0, "end_sec": 30.0},
+            ],
+            "history": [],
+        },
+    )
+    response = client.post(
+        f"/api/projects/{project['project_id']}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert response.status_code == 201
+    variant = response.json()["variant"]
+    assert variant["selected_segment_ids"] == ["seg-dense"]
+    assert variant["master_segment_ids"] == ["seg-dense", "seg-silent"]
+
+
 def test_patch_and_rebase_return_revisioned_variant_conflicts(tmp_path: Path) -> None:
     client, project_id, _ = _client(tmp_path)
     variant = client.get(f"/api/projects/{project_id}/output-variants").json()["variants"][0]

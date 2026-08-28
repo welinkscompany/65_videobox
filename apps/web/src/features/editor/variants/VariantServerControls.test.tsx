@@ -46,7 +46,7 @@ describe("VariantServerControls", () => {
     expect(onCreateHighlight).toHaveBeenCalledOnce();
 
     render(<VariantServerControls variant={{ ...variant, kind: "vertical_highlight", variant_id: "highlight-1" }} onMaterialize={vi.fn()} onPatch={onPatch} masterSegmentIds={["seg-b", "seg-a"]} />);
-    fireEvent.click(screen.getByRole("button", { name: "하이라이트 순서 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "전체 장면으로 되돌리기" }));
     expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ kind: "vertical_highlight" }), { selected_segment_ids: ["seg-b", "seg-a"] });
   });
 

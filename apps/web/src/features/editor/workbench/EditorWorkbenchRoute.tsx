@@ -1177,7 +1177,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만드는 중이에요.", busy: true } : current);
     try {
       const result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: "하이라이트 변형을 만들었어요. master 장면 순서를 저장할 수 있어요.", busy: false } : current);
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: "하이라이트 변형을 만들었어요. 자막이 많은 장면 위주로 자동으로 골랐어요 -- 마음에 안 들면 전체 장면으로 되돌릴 수 있어요.", busy: false } : current);
     } catch {
       if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만들지 못했어요.", busy: false } : current);
     } finally {

@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from videobox_core_engine.highlight_scoring import select_highlight_segment_ids
 from videobox_domain_models.output_variants import OutputVariant
 
 
@@ -120,6 +121,17 @@ class OutputVariantMixin:
         if kind != "vertical_highlight":
             raise ValueError("only_vertical_highlight_can_be_created_explicitly")
         session = self.get_editing_session(project_id=project_id, session_id=source_session_id)
+        master_segments = [
+            segment
+            for segment in session.get("segments", [])
+            if isinstance(segment, Mapping) and str(segment.get("segment_id") or "").strip()
+        ]
+        # **자동 하이라이트(owner 결정 2026-08-28).** 예전에는 여기서
+        # `selected_segment_ids`를 비워 뒀고, 그 결과 `materialize_variant`가
+        # 전체 장면을 그대로 썼다 -- "하이라이트"라는 이름과 달리 원본 전체였다.
+        # 자막 밀도 휴리스틱으로 바로 골라 준다(`highlight_scoring.py` 참고 --
+        # AI 참여도 예측이 아니라는 한계를 그 파일에 적어 뒀다).
+        selected_segment_ids = select_highlight_segment_ids(master_segments) or None
         variant = OutputVariant(
             variant_id=variant_id or f"variant-{uuid.uuid4().hex}",
             kind="vertical_highlight",
@@ -127,10 +139,9 @@ class OutputVariantMixin:
             source_session_revision=int(session.get("session_revision") or 1),
             variant_revision=1,
             master_segment_ids=tuple(
-                str(segment["segment_id"])
-                for segment in session.get("segments", [])
-                if isinstance(segment, Mapping) and str(segment.get("segment_id") or "").strip()
+                str(segment["segment_id"]) for segment in master_segments
             ) or None,
+            selected_segment_ids=selected_segment_ids,
         )
         connection = self._connection(project_id)
         try:

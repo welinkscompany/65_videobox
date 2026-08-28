@@ -282,8 +282,8 @@ test("server-backed output variants keep revision lineage through materialize, l
   await page.getByRole("button", { name: "세로 변형 준비" }).click();
   await expect.poll(() => materializations.length).toBe(1);
   await page.getByRole("button", { name: "하이라이트 변형 만들기" }).click();
-  await expect(page.getByRole("button", { name: "하이라이트 순서 저장" })).toBeVisible();
-  await page.getByRole("button", { name: "하이라이트 순서 저장" }).click();
+  await expect(page.getByRole("button", { name: "전체 장면으로 되돌리기" })).toBeVisible();
+  await page.getByRole("button", { name: "전체 장면으로 되돌리기" }).click();
   await expect.poll(() => patchBodies.length).toBe(3);
   expect(materializations[0]).toEqual({ expected_master_session_revision: 7 });
 });
