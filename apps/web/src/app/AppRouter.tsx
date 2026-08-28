@@ -23,7 +23,7 @@ import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
 import { useProjectManagement } from "../features/projects/projectManagement";
 import { ReviewAndOutputPage } from "../features/review/ReviewAndOutputPage";
 import { EditorWorkbenchRoute } from "../features/editor/workbench/EditorWorkbenchRoute";
-import { HomePage, opensLastProjectOnStart, ProductShell, SettingsPage, type ProductShellProps } from "./ProductShell";
+import { HomePage, ProductShell, SettingsPage, type ProductShellProps } from "./ProductShell";
 import { resolveLastValidProjectId } from "./projectSelection";
 import { readableMoment } from "./readableMoment";
 import {
@@ -70,18 +70,29 @@ export type RouterContext = { catalog: ProjectCatalog };
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   loader: ({ context }) => context.catalog.load(),
   component: Outlet,
+  // **첫 화면이 흰 채로 비어 있었다(owner 지적 2026-08-28).** 주소창에 `/`를
+  // 치면 이 로더가 프로젝트 목록을 다 받아올 때까지 아무것도 안 그렸다 --
+  // 창작자에게는 프로그램이 멈춘 것으로 보였다. `index.html`의 `<div
+  // id="root">`도 비어 있어 그 앞 순간(JS 로딩)도 마찬가지였다. 그건 정적
+  // 셸의 몫이라 여기서는 못 고친다 -- 이건 라우터가 데이터를 받는 동안만
+  // 맡는다.
+  pendingComponent: () => <main className="vb-app-loading" aria-busy="true"><p role="status">VideoBox를 여는 중이에요…</p></main>,
+  pendingMs: 0,
   notFoundComponent: RecoveryPage,
 });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  beforeLoad: async ({ context }) => {
-    const projects = await context.catalog.load();
-    const saved = opensLastProjectOnStart() ? resolveLastValidProjectId(window.localStorage.getItem(lastProjectKey), projects) : null;
-    // 프로젝트를 열면 **편집 화면이 먼저**다. 캡컷은 열면 바로 편집판이다.
-    throw redirect({ to: saved ? resolveProjectStage(saved, "edit") : "/projects" });
-  },
+  // **`/`는 이제 항상 홈이다(owner 결정 2026-08-28, 2026-08-19 결정을 뒤집음).**
+  // 예전엔 마지막으로 열었던 프로젝트의 편집기로 조용히 건너뛰었다 -- 캡컷을
+  // 근거로 owner가 직접 정한 것이었지만, 다시 보니 "시작하는 자리"가 아예
+  // 없어서 owner 스스로도 답답해했다. `/projects`가 이제 그 자리다 -- 이어할
+  // 프로젝트 카드들과, 새로 시작하는 여러 갈래(이야기부터·빈 편집판으로
+  // 바로·목소리부터)를 한 화면에 같이 둔다. 마지막 프로젝트로 빠르게 가는
+  // 길은 없앤 게 아니라 위 띠의 `편집기로 돌아가기` 단추로 옮겨져 있다
+  // (`RoutedProductShell`의 `onResumeEditor`, `/library`·`/footage`에서도 보인다).
+  beforeLoad: () => { throw redirect({ to: "/projects" }); },
 });
 
 const projectsRoute = createRoute({
@@ -273,6 +284,51 @@ function ProjectsPage() {
     }
   }
 
+  // **첫 화면이 "이어하기"와 이름부터 정하는 "새 프로젝트 만들기" 둘뿐이었다
+  // (owner 지적 2026-08-28): "어떤 방식으로 편집할지 결정을 해야 되잖아".**
+  // 대본부터 정하는 길은 위 `handleCreate`(-> 이야기 화면)가 이미 맡는다.
+  // 여기 둘은 그 옆에 나란히 두는 지름길이다 -- 이름을 먼저 안 물어도 되는
+  // 대신 자동으로 이름을 붙이고, 나중에 언제든 이름 바꾸기로 고칠 수 있다.
+  const [quickStartBusy, setQuickStartBusy] = useState<"blank" | "voice" | null>(null);
+  const [quickStartError, setQuickStartError] = useState<string | null>(null);
+  const autoProjectName = (label: string) =>
+    `${label} ${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
+  async function startBlankProject() {
+    setQuickStartBusy("blank");
+    setQuickStartError(null);
+    try {
+      const created = await api.createProject({ name: autoProjectName("새 영상") });
+      const session = await api.createBlankEditingSession(created.project_id);
+      await router.options.context.catalog.refresh();
+      await router.invalidate();
+      await navigate({
+        to: "/projects/$projectId/$section",
+        params: { projectId: created.project_id, section: "editor" },
+        search: { session_id: session.session_id },
+      });
+    } catch {
+      setQuickStartError("빈 편집판을 열지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      setQuickStartBusy(null);
+    }
+  }
+  // 목소리 등록·클론은 프로젝트 자산이라(§10.15) 프로젝트 없이는 못 한다 --
+  // 대신 눈에 안 띄게 하나 만들고 바로 그 등록 자리(미디어 단계)로 보낸다.
+  async function startVoiceCloneProject() {
+    setQuickStartBusy("voice");
+    setQuickStartError(null);
+    try {
+      const created = await api.createProject({ name: autoProjectName("내 목소리") });
+      await router.options.context.catalog.refresh();
+      await router.invalidate();
+      await navigate({ to: resolveProjectStage(created.project_id, "assets") });
+    } catch {
+      setQuickStartError("프로젝트를 만들지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      setQuickStartBusy(null);
+    }
+  }
+
   return (
     <RoutedProductShell
       projectId=""
@@ -300,8 +356,19 @@ function ProjectsPage() {
           {createError ? <p className="text-sm text-destructive" role="alert">{createError}</p> : null}
         </form>
       ) : (
-        <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>+ 새 프로젝트 만들기</Button>
+        <div className="vb-catalog-quick-start">
+          <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>+ 새 프로젝트 만들기</Button>
+          {/* 이름부터 안 물어도 되는 지름길 둘. 자동으로 이름을 붙이고 바로
+              해당 화면으로 보낸다 -- 나중에 언제든 이름 바꾸기로 고칠 수 있다. */}
+          <Button type="button" variant="outline" disabled={quickStartBusy !== null} onClick={() => void startBlankProject()}>
+            {quickStartBusy === "blank" ? "편집판을 여는 중" : "빈 편집판으로 바로 시작"}
+          </Button>
+          <Button type="button" variant="outline" disabled={quickStartBusy !== null} onClick={() => void startVoiceCloneProject()}>
+            {quickStartBusy === "voice" ? "준비하는 중" : "내 목소리 등록·클론"}
+          </Button>
+        </div>
       )}
+      {quickStartError ? <p className="text-sm text-destructive" role="alert">{quickStartError}</p> : null}
       {/* 프로젝트가 하나도 없을 때 격자만 비워 두면 화면이 고장 난 것처럼 보인다.
           예전에는 이 경우 제품 껍데기 밖의 옛 화면으로 빠져나가 **파일 경로를 손으로
           적으라고** 했다(2026-08-20, 진짜 백엔드에 e2e를 붙여 처음 돌려 보고 나왔다).

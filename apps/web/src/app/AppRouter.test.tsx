@@ -763,9 +763,14 @@ describe("AppRouter URL ownership", () => {
     expect(manifest).not.toHaveBeenCalled();
   });
 
-  it("redirects / to the catalog-validated last project with only one catalog request", async () => {
+  // **2026-08-28, owner 결정: `/`는 이제 항상 홈(`/projects`)이다.** 예전엔
+  // 마지막으로 열었던 프로젝트의 편집기로 조용히 건너뛰었는데(2026-08-19
+  // 결정), owner 스스로 "시작하는 자리가 없다"고 답답해해서 뒤집었다. 마지막
+  // 프로젝트로 빠르게 가는 길은 없앤 게 아니라 위 띠의 `편집기로 돌아가기`
+  // 단추로 옮겨져 있다(`onResumeEditor`, 이 테스트 파일 다른 곳에서 확인).
+  it("always sends / to the projects catalog, even with a saved last project", async () => {
     window.localStorage.setItem("videobox.last-valid-project", "project_b");
-    const listProjects = vi.spyOn(api, "listProjects").mockResolvedValue([
+    vi.spyOn(api, "listProjects").mockResolvedValue([
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
       { project_id: "project_b", name: "B", status: "active", root_storage_uri: "local://b" },
     ]);
@@ -773,8 +778,7 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_b/editor"));
-    expect(listProjects).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects"));
   });
 
   it("renders recovery for an unknown project without any project-scoped request", async () => {
@@ -1024,6 +1028,37 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_second/create"));
     expect(createProject).toHaveBeenCalledWith({ name: "Second" });
     expect(listProjects).toHaveBeenCalledTimes(2);
+  });
+
+  // **2026-08-28, owner 결정: "어떤 방식으로 편집할지" 갈래를 첫 화면에 둔다.**
+  // 이름부터 물어야 하는 위 "+ 새 프로젝트 만들기"와 달리, 이 둘은 이름을
+  // 자동으로 붙이고 바로 목적지로 보낸다.
+  it("creates a project and jumps straight to a blank editor from the projects catalog", async () => {
+    const created = { project_id: "project_blank", name: "새 영상", status: "active", root_storage_uri: "local://blank" };
+    vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
+    vi.spyOn(api, "createProject").mockResolvedValue(created);
+    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_blank" } as never);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+
+    render(<AppRouter router={router} />);
+    fireEvent.click(await screen.findByRole("button", { name: "빈 편집판으로 바로 시작" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_blank/editor"));
+    expect(createSession).toHaveBeenCalledWith("project_blank");
+    expect(router.state.location.search).toMatchObject({ session_id: "session_blank" });
+  });
+
+  it("creates a project and opens its media stage for voice registration/cloning", async () => {
+    const created = { project_id: "project_voice", name: "내 목소리", status: "active", root_storage_uri: "local://voice" };
+    vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
+    const createProject = vi.spyOn(api, "createProject").mockResolvedValue(created);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
+
+    render(<AppRouter router={router} />);
+    fireEvent.click(await screen.findByRole("button", { name: "내 목소리 등록·클론" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_voice/media"));
+    expect(createProject).toHaveBeenCalled();
   });
 
   it("keeps the workspace shell when a project has no draft yet", async () => {
