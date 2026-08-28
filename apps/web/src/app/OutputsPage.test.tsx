@@ -170,6 +170,11 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(api.getSubtitle).toHaveBeenCalledWith("project_a", "subtitle-current"));
     expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
     expect(renderSubtitle).toHaveBeenCalledTimes(1);
+    // owner 요청(2026-08-28): "srt... 내보내기". 준비된 자막 옆에 실제로
+    // 내려받는 문이 보여야 한다.
+    expect(screen.getByRole("link", { name: "SRT 자막 파일 내려받기" })).toHaveAttribute(
+      "href", "/api/projects/project_a/subtitles/subtitle-current/content",
+    );
   });
 
   it("does not present a subtitle from an older session revision as current", async () => {
@@ -568,6 +573,11 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(api.getFinalRender).toHaveBeenCalledWith("project_a", "final-current-timeline"));
     expect(await screen.findByLabelText("완성본 재생")).toHaveAttribute("src", "/api/projects/project_a/final-renders/final-current-timeline/content");
     expect(startFinalRender).toHaveBeenCalledTimes(1);
+    // owner 요청(2026-08-28): "오디오만... 내보내기". 완성본 옆에 실제로
+    // 내려받는 문이 보여야 한다.
+    expect(screen.getByRole("link", { name: "오디오만 내려받기" })).toHaveAttribute(
+      "href", "/api/projects/project_a/final-renders/final-current-timeline/audio-content",
+    );
   });
 
   it("reconciles a rejected final request from authoritative current state before showing an error", async () => {
