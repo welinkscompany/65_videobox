@@ -101,6 +101,39 @@ const projectsRoute = createRoute({
   component: ProjectsPage,
 });
 
+// **동료가 실제로 열어 볼 자리(owner 요청 2026-08-28, 갭검증으로 발견).**
+// "동료에게 이 링크를 보내 주세요"라고 화면이 말해 놓고 그 주소를 처리하는
+// 라우트가 없었다 -- 눌러 보면 `RecoveryPage`("프로젝트를 찾을 수 없어요")가
+// 뜬다. 받는 사람은 VideoBox를 쓰는 사람이 아니므로 껍데기(로그인·프로젝트
+// 목록 전제) 없이 영상 하나만 보여준다.
+const previewShareRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/preview/$token",
+  component: PreviewSharePage,
+});
+
+function PreviewSharePage() {
+  const { token } = previewShareRoute.useParams();
+  const [failed, setFailed] = useState(false);
+  return (
+    <main className="vb-preview-share" aria-label="공유된 미리보기">
+      {failed ? (
+        <p>이 링크를 열 수 없어요. 만료되었거나 취소된 링크일 수 있어요.</p>
+      ) : (
+        <video
+          controls
+          autoPlay
+          aria-label="공유된 영상"
+          src={`/api/preview-shares/${encodeURIComponent(token)}/content`}
+          onError={() => setFailed(true)}
+        >
+          이 브라우저에서는 영상을 재생할 수 없어요.
+        </video>
+      )}
+    </main>
+  );
+}
+
 const libraryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/library",
@@ -147,7 +180,7 @@ const settingsRoute = createRoute({
   component: SettingsRoutePage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, libraryRoute, footageRoute, workspaceRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, previewShareRoute, libraryRoute, footageRoute, workspaceRoute, settingsRoute]);
 
 export function createAppRouter(
   catalog = new ProjectCatalog(),

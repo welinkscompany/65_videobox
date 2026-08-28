@@ -94,6 +94,33 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(direct.state.location.pathname).toBe("/library"));
   });
 
+  // 갭검증(2026-08-28)으로 찾은 것: "동료에게 이 링크를 보내 주세요"라고 화면이
+  // 말해 놓고, 그 주소를 처리하는 라우트가 없어서 눌러 보면 `RecoveryPage`
+  // ("프로젝트를 찾을 수 없어요")가 떴다. 받는 사람은 프로젝트 목록도, 로그인도
+  // 없으므로 껍데기 없이 영상 하나만 봐야 한다.
+  it("opens a shared preview link without the app shell", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/preview/tok_abc123"] }));
+    render(<AppRouter router={router} />);
+
+    const video = await screen.findByLabelText("공유된 영상");
+    expect(video).toHaveAttribute("src", "/api/preview-shares/tok_abc123/content");
+    // 껍데기(위 띠·프로젝트 목록)가 아니라 영상 하나만 보이는 맨 화면이어야 한다.
+    expect(screen.queryByRole("heading", { name: "프로젝트" })).toBeNull();
+    expect(screen.queryByLabelText("프로젝트와 도구 메뉴 열기")).toBeNull();
+  });
+
+  it("shows a plain message when the shared link is gone", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/preview/expired-token"] }));
+    render(<AppRouter router={router} />);
+
+    const video = await screen.findByLabelText("공유된 영상");
+    fireEvent.error(video);
+
+    expect(await screen.findByText("이 링크를 열 수 없어요. 만료되었거나 취소된 링크일 수 있어요.")).toBeVisible();
+  });
+
   // 2026-08-19 owner 지적: `내 라이브러리`를 누르면 좌측 메뉴가 통째로 사라져서
   // **여기가 어느 화면인지도, 어떻게 돌아가는지도 알 수 없었다.** 프로젝트 목록과
   // 설정은 이미 껍데기 안에 있었고 라이브러리·촬영본 둘만 밖에 있었다.
