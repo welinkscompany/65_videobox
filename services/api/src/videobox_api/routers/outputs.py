@@ -319,7 +319,13 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             extract_audio_only(source_video_path=video_path, destination_audio_path=audio_path, ffmpeg_binary=ffmpeg_binary)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return deliver_file(request=request, path=audio_path, media_type="audio/mp4")
+        # 코드리뷰로 발견(2026-08-28): `audio/mp4`는 `deliver_file`의 인라인
+        # 목록에 있어서 `Content-Disposition`을 안 붙인다 -- 재생 링크로는
+        # 맞는 동작이지만, 이 단추는 "내려받기"라 파일 이름이 있어야 한다.
+        # Range 지원(오디오 탐색)은 그대로 두고 이름만 얹는다.
+        response = deliver_file(request=request, path=audio_path, media_type="audio/mp4")
+        response.headers["Content-Disposition"] = f'attachment; filename="{job_id}.m4a"'
+        return response
 
     @router.post("/api/projects/{project_id}/jobs/capcut-draft-export", status_code=status.HTTP_202_ACCEPTED)
     def start_capcut_draft_export(project_id: str, payload: OutputJobRequest) -> StartJobResponse:

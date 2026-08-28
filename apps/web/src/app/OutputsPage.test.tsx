@@ -713,6 +713,30 @@ describe("OutputsPage", () => {
     expect(link).toBeVisible();
   });
 
+  it("lets the owner revoke a preview share link -- code review found no way to take one back", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-shared", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "createPreviewShare").mockResolvedValue({
+      share_id: "preview-share-1", token: "opaque-token-abc", url: "/preview/opaque-token-abc",
+    });
+    const revokePreviewShare = vi.spyOn(api, "revokePreviewShare").mockResolvedValue({ revoked: true });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" }));
+    await screen.findByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`);
+
+    fireEvent.click(screen.getByRole("button", { name: "이 링크 취소하기" }));
+
+    await waitFor(() => expect(revokePreviewShare).toHaveBeenCalledWith("project_a", "preview-share-1"));
+    expect(await screen.findByText("이 링크를 취소했어요. 더 이상 열리지 않아요.")).toBeVisible();
+    expect(screen.queryByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`)).not.toBeInTheDocument();
+  });
+
   it("saves the format of a video the owner liked, under a name they chose", async () => {
     // 자동 제작은 "어떻게 만들지"를 여기서 가져간다. 마음에 든 완성본을 봤을 때가
     // 그 포맷을 남길 유일한 순간이다.

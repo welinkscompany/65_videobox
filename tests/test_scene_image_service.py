@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -117,25 +118,7 @@ def test_one_generated_image_becomes_two_assets_a_picture_and_a_scene_clip(tmp_p
     assert float(parsed["format"]["duration"]) >= 4.0
 
 
-def test_the_clip_is_not_a_frozen_still_it_pans_and_zooms(tmp_path: Path) -> None:
-    """owner 요청(2026-08-28): 정지 화면이 아니라 캡컷처럼 은은하게 움직여야 한다.
-
-    ffmpeg만으로 되는 팬·줌(Ken Burns)으로 승인됐다 -- AI 영상 생성은 범위 밖이다.
-    첫 프레임과 끝 프레임을 뽑아 SSIM으로 비교한다. 완전히 같으면(1.0) 예전처럼
-    멈춰 있는 것이고, 줌이 실제로 이어졌다면 확실히 갈라진다.
-    """
-    service, store, project_id = _service(tmp_path)
-
-    service.generate_scene_image(
-        project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1", duration_sec=3.0,
-    )
-
-    clip = next(
-        item for item in store.list_assets(project_id=project_id)
-        if item["asset_type"] == AssetType.BROLL_VIDEO.value
-    )
-    clip_path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(clip["storage_uri"]))
-
+def _first_last_frame_ssim(clip_path: Path) -> float:
     with tempfile.TemporaryDirectory() as folder:
         first = Path(folder) / "first.png"
         last = Path(folder) / "last.png"
@@ -155,9 +138,38 @@ def test_the_clip_is_not_a_frozen_still_it_pans_and_zooms(tmp_path: Path) -> Non
         )
         ssim_line = next(line for line in probe.stderr.splitlines() if "SSIM" in line)
         # "All:0.993885" 꼴에서 값만 뽑는다.
-        all_value = float(ssim_line.split("All:")[1].split(" ")[0])
+        return float(ssim_line.split("All:")[1].split(" ")[0])
 
-    assert all_value < 0.999, f"clip looks frozen (SSIM {all_value}): {ssim_line}"
+
+@pytest.mark.parametrize("zooms_in", [True, False])
+def test_the_clip_is_not_a_frozen_still_it_zooms(tmp_path: Path, zooms_in: bool) -> None:
+    """owner 요청(2026-08-28): 정지 화면이 아니라 캡컷처럼 은은하게 움직여야 한다.
+
+    ffmpeg만으로 되는 팬·줌(Ken Burns) 중 **줌만** 승인·구현됐다 -- 코드리뷰로
+    확인됨: `x`/`y`가 항상 화면 중앙에 고정돼 있어 실제 팬은 없다. AI 영상 생성은
+    범위 밖이다. 첫 프레임과 끝 프레임을 뽑아 SSIM으로 비교한다. 완전히
+    같으면(1.0) 예전처럼 멈춰 있는 것이고, 줌이 실제로 이어졌다면 확실히 갈라진다.
+
+    방향(확대/축소)은 `secrets.choice`로 매번 무작위라 고정하지 않으면 이 시험이
+    두 갈래 중 하나만(대략 절반의 확률로) 실제로 확인하게 된다 -- 두 방향 모두
+    파라미터로 고정해서 둘 다 잰다.
+    """
+    service, store, project_id = _service(tmp_path)
+
+    with patch("videobox_core_engine.scene_image_service.secrets.choice", return_value=zooms_in):
+        service.generate_scene_image(
+            project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1", duration_sec=3.0,
+        )
+
+    clip = next(
+        item for item in store.list_assets(project_id=project_id)
+        if item["asset_type"] == AssetType.BROLL_VIDEO.value
+    )
+    clip_path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(clip["storage_uri"]))
+
+    all_value = _first_last_frame_ssim(clip_path)
+
+    assert all_value < 0.999, f"clip looks frozen when zooms_in={zooms_in} (SSIM {all_value})"
 
 
 def test_the_clip_says_which_scene_it_was_made_for(tmp_path: Path) -> None:

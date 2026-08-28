@@ -11,7 +11,9 @@ mp4보다 새 캐시 파일이 있으면 그대로 돌려준다.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import uuid
 from pathlib import Path
 
 
@@ -37,11 +39,19 @@ def extract_audio_only(
         return destination_audio_path
 
     destination_audio_path.parent.mkdir(parents=True, exist_ok=True)
+    # 코드리뷰로 발견(2026-08-28): ffmpeg가 `destination_audio_path`에 바로 쓰면,
+    # 같은 완성본을 동시에 두 번 누른 두 번째 요청이 **아직 다 안 써진 파일**을
+    # "캐시가 있다"고 보고 그대로 스트리밍할 수 있었다(mtime은 파일을 열자마자
+    # 갱신되므로). 매번 서로 다른 임시 파일에 쓰고, 다 쓴 뒤에만 원자적으로
+    # `os.replace`한다 -- 이 교체 전까지는 캐시 검사에 아예 걸리지 않는다.
+    staging_path = destination_audio_path.with_name(
+        f".{destination_audio_path.stem}.{uuid.uuid4().hex}.staging{destination_audio_path.suffix}"
+    )
     command = [
         ffmpeg_binary, "-y",
         "-i", str(source_video_path),
         "-vn", "-acodec", "aac", "-b:a", "192k",
-        str(destination_audio_path),
+        str(staging_path),
     ]
     try:
         result = subprocess.run(
@@ -49,10 +59,13 @@ def extract_audio_only(
             timeout=timeout_seconds,
         )
     except FileNotFoundError as exc:
+        staging_path.unlink(missing_ok=True)
         raise AudioExportError(f"'{ffmpeg_binary}' binary was not found. Install ffmpeg.") from exc
     except subprocess.TimeoutExpired as exc:
+        staging_path.unlink(missing_ok=True)
         raise AudioExportError(f"ffmpeg timed out after {timeout_seconds}s.") from exc
-    if result.returncode != 0 or not destination_audio_path.is_file():
-        destination_audio_path.unlink(missing_ok=True)
+    if result.returncode != 0 or not staging_path.is_file():
+        staging_path.unlink(missing_ok=True)
         raise AudioExportError(f"ffmpeg failed to extract audio: {result.stderr[-2000:]}")
+    os.replace(staging_path, destination_audio_path)
     return destination_audio_path

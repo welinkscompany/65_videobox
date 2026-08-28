@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_provider_interfaces.stt import STTResult, STTSegment
 
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
@@ -157,6 +158,37 @@ def test_preview_share_lifecycle_serves_real_mp4_then_revokes(
 
     assert client.get(f"/api/preview-shares/{token}").status_code == 404
     assert client.get(f"/api/preview-shares/{token}/content").status_code == 404
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_listing_shares_for_a_render_less_job_never_leaks_another_renders_shares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 코드리뷰로 발견(2026-08-28): `render`가 없는 job(아직 안 끝났거나 실패한
+    # final-render)으로 목록을 물으면 필터 없이 그 프로젝트의 **다른 완성본**
+    # 공유 링크까지 그대로 새어 나갔다. 진짜 succeeded render 하나로 공유를
+    # 만든 뒤, 같은 프로젝트에 아직 output_ref가 없는 job을 하나 더 심어서
+    # 그 job으로 물었을 때 빈 목록만 와야 한다는 것을 확인한다.
+    monkeypatch.setattr(
+        "videobox_provider_interfaces.stt.MockSTTProvider.transcribe",
+        _clean_high_confidence_transcribe,
+    )
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, render_job_id = _drive_project_to_succeeded_final_render(
+        client, tmp_path, name="Leak Check Draft"
+    )
+    create_response = client.post(f"/api/projects/{project_id}/final-renders/{render_job_id}/share")
+    assert create_response.status_code == 201
+
+    pending_job = app.state.store.create_job(
+        project_id=project_id, job_type=JobType.FINAL_RENDER,
+        input_ref="timeline-current", status=JobStatus.RUNNING,
+    )
+
+    shares_response = client.get(f"/api/projects/{project_id}/final-renders/{pending_job['job_id']}/shares")
+    assert shares_response.status_code == 200
+    assert shares_response.json()["shares"] == []
 
 
 @pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")

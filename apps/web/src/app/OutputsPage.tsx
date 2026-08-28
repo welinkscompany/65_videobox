@@ -330,8 +330,13 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
   // 넘어가면 앞서 만든 링크가 남아 보이지 않게 한다.
   const [previewShareProjectId, setPreviewShareProjectId] = useState<string | null>(null);
   const [previewShareUrl, setPreviewShareUrl] = useState<string | null>(null);
+  const [previewShareId, setPreviewShareId] = useState<string | null>(null);
   const [isCreatingPreviewShare, setIsCreatingPreviewShare] = useState(false);
   const [previewShareErrorProjectId, setPreviewShareErrorProjectId] = useState<string | null>(null);
+  // 코드리뷰로 발견(2026-08-28): 만드는 단추만 있고 되돌리는 단추가 없었다 --
+  // 토큰 하나가 인증 전부인 기능이라, 취소할 길이 만드는 길만큼 중요하다.
+  const [isRevokingPreviewShare, setIsRevokingPreviewShare] = useState(false);
+  const [previewShareRevoked, setPreviewShareRevoked] = useState(false);
   // 판단은 프로젝트별로 기억한다. 프로젝트를 바꾸면 앞 프로젝트의 안내가 남으면 안 된다.
   const [verdictProjectId, setVerdictProjectId] = useState<string | null>(null);
   const [verdictSaved, setVerdictSaved] = useState<"good" | "bad" | null>(null);
@@ -733,11 +738,25 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
       if (currentProjectId.current !== submissionProjectId) return;
       setPreviewShareProjectId(submissionProjectId);
       setPreviewShareUrl(`${window.location.origin}${created.url}`);
+      setPreviewShareId(created.share_id);
+      setPreviewShareRevoked(false);
     } catch {
       if (currentProjectId.current !== submissionProjectId) return;
       setPreviewShareErrorProjectId(submissionProjectId);
     } finally {
       if (currentProjectId.current === submissionProjectId) setIsCreatingPreviewShare(false);
+    }
+  };
+  const handleRevokePreviewShare = async () => {
+    const submissionProjectId = projectId;
+    if (!previewShareId || isRevokingPreviewShare) return;
+    setIsRevokingPreviewShare(true);
+    try {
+      await api.revokePreviewShare(submissionProjectId, previewShareId);
+      if (currentProjectId.current !== submissionProjectId) return;
+      setPreviewShareRevoked(true);
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsRevokingPreviewShare(false);
     }
   };
   const handleRenderFinal = async () => {
@@ -949,9 +968,17 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
           {currentFinal ? <div className="vb-preview-share">
             <Button disabled={isCreatingPreviewShare} onClick={() => void handleCreatePreviewShare()}>{isCreatingPreviewShare ? "공유 링크 만드는 중" : "동료에게 공유 링크 만들기"}</Button>
             {previewShareErrorProjectId === projectId ? <p>공유 링크를 만들지 못했어요. 다시 시도해 주세요.</p> : null}
-            {previewShareProjectId === projectId && previewShareUrl
-              ? <p>동료에게 이 링크를 보내 주세요: <input data-native-control="preview-share-url" readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} /></p>
-              : null}
+            {previewShareProjectId === projectId && previewShareUrl ? (
+              previewShareRevoked ? (
+                <p>이 링크를 취소했어요. 더 이상 열리지 않아요.</p>
+              ) : (
+                <p>
+                  동료에게 이 링크를 보내 주세요: <input data-native-control="preview-share-url" readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} />
+                  {" "}
+                  <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "이 링크 취소하기"}</Button>
+                </p>
+              )
+            ) : null}
           </div> : null}
           {currentFinal ? <div className="vb-final-verdict">
             {/* 낡은 완성본은 평가하지 않는다. 어느 편집본에 대한 판단인지 알 수 없어진다. */}

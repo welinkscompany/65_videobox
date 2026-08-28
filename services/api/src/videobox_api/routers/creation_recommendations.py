@@ -18,7 +18,7 @@ BGM+이미지스타일+AI보이스까지 세트로 자동 추천." Vrew의 "주�
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Request
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -163,7 +163,11 @@ def build_creation_recommendations_router(
                     )
                     for match in matches
                 ]
-                bgm_semantic = bool(bgm)
+                # 코드리뷰로 발견(2026-08-28): `bool(bgm)`로 두면 검색은 제대로
+                # 됐는데 라이브러리에 맞는 곡이 하나도 없을 때도
+                # `bgm_semantic=False`가 돼서, 화면이 "검색이 안 됐다"는 문구를
+                # 잘못 보여줬다. 검색 자체가 끝까지 갔는지만 본다.
+                bgm_semantic = True
             except Exception:
                 # 의미 기반 검색은 로컬 임베딩 모델이 꺼져 있으면 실패할 수 있다.
                 # `library_assets.py`의 같은 자리와 마찬가지로 조용히 빈 목록으로

@@ -76,12 +76,17 @@ def build_preview_shares_router(orchestrator: ApiOrchestrator) -> APIRouter:
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}/shares")
     def list_preview_shares(project_id: str, job_id: str) -> dict[str, list[PreviewShareSummaryResponse]]:
+        # 코드리뷰로 발견(2026-08-28): `render`가 없을 때(아직 안 끝났거나 실패한
+        # job) `export_id`를 `None`으로 넘기면 `list_preview_shares`가 필터를
+        # 통째로 건너뛰어 **이 프로젝트의 다른 완성본 공유 링크까지 전부** 돌려줬다.
+        # 이 job에 대한 목록을 물었으면 이 job의 공유만 와야 한다 -- 없으면 빈 목록이다.
         try:
             result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
             render = result.get("render")
-            export_id = str(render["export_id"]) if render else None
+            if not render:
+                return {"shares": []}
             shares = orchestrator.list_preview_shares_for_render(
-                project_id=project_id, export_id=export_id
+                project_id=project_id, export_id=str(render["export_id"])
             )
         except Exception as exc:
             raise _http_error(exc) from exc

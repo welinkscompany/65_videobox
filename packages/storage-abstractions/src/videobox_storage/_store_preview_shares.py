@@ -32,7 +32,7 @@ class PreviewShareMixin:
         share_id = f"preview-share-{secrets.token_hex(16)}"
         connection = self._connection(project_id)
         try:
-            self._begin_output_variant_write_table(connection, "preview_shares")
+            self._begin_preview_share_write(connection)
             now = self._now_iso()
             connection.execute(
                 "INSERT INTO preview_shares (share_id, project_id, export_id, token, created_at, revoked_at) "
@@ -56,27 +56,48 @@ class PreviewShareMixin:
             connection.close()
 
     def get_preview_share_by_token(self, *, token: str) -> dict[str, Any] | None:
+        # 코드리뷰로 발견(2026-08-28): 이 토큰은 로그인이 없는 유일한 접근
+        # 경로다. `<video>` 태그가 매 탐색(seek)마다 Range 요청을 새로 보내는데,
+        # 그때마다 프로젝트 전부를 돌며 `_connection()`을 열면 매번 스키마
+        # 마이그레이션 전체가 다시 돈다(`local_project_store.py`) -- 인증 없는
+        # 경로라 증폭 비용이 가장 싼 공격 표면이기도 하다. 한 번 찾은
+        # token→project_id만 캐시한다 -- 폐기(`revoked_at`) 여부는 캐시하지
+        # 않고 매번 그 project에서 새로 읽으므로 취소 반영은 그대로 즉시다.
+        cache: dict[str, str] = getattr(self, "_preview_share_token_project_cache", None) or {}
+        self._preview_share_token_project_cache = cache
+        cached_project_id = cache.get(token)
+        if cached_project_id is not None:
+            row = self._fetch_preview_share_row(cached_project_id, token)
+            if row is not None:
+                if row["revoked_at"]:
+                    return None
+                return self._preview_share_row(row)
+            cache.pop(token, None)
         for project in self.list_projects(include_archived=True):
             project_id = str(project["project_id"])
-            connection = self._connection(project_id)
-            try:
-                row = connection.execute(
-                    "SELECT * FROM preview_shares WHERE project_id = ? AND token = ?",
-                    (project_id, token),
-                ).fetchone()
-            finally:
-                connection.close()
+            row = self._fetch_preview_share_row(project_id, token)
             if row is None:
                 continue
+            cache[token] = project_id
             if row["revoked_at"]:
                 return None
             return self._preview_share_row(row)
         return None
 
+    def _fetch_preview_share_row(self, project_id: str, token: str) -> Any | None:
+        connection = self._connection(project_id)
+        try:
+            return connection.execute(
+                "SELECT * FROM preview_shares WHERE project_id = ? AND token = ?",
+                (project_id, token),
+            ).fetchone()
+        finally:
+            connection.close()
+
     def revoke_preview_share(self, *, project_id: str, share_id: str) -> None:
         connection = self._connection(project_id)
         try:
-            self._begin_output_variant_write_table(connection, "preview_shares")
+            self._begin_preview_share_write(connection)
             row = connection.execute(
                 "SELECT share_id FROM preview_shares WHERE project_id = ? AND share_id = ?",
                 (project_id, share_id),
@@ -116,12 +137,17 @@ class PreviewShareMixin:
         ]
 
     @staticmethod
-    def _begin_output_variant_write_table(connection: Any, table_name: str) -> None:
+    def _begin_preview_share_write(connection: Any) -> None:
+        # `_store_output_variants.py`의 `_begin_output_variant_write`와 같은
+        # 모양이지만 다른 테이블을 잠근다 -- 코드리뷰로 발견(2026-08-28): 예전
+        # 이름이 "output_variant"를 그대로 물려 써서 `preview_shares`를 잠근다는
+        # 사실을 가렸다. 두 mixin이 지금 공유 기반 클래스가 없어 하나로 합치지
+        # 않는다 -- 합치려면 더 큰 리팩터가 필요하다.
         if isinstance(connection, sqlite3.Connection):
             connection.execute("BEGIN IMMEDIATE")
         else:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(f"LOCK TABLE {table_name} IN SHARE ROW EXCLUSIVE MODE")
+            connection.execute("LOCK TABLE preview_shares IN SHARE ROW EXCLUSIVE MODE")
 
     @staticmethod
     def _preview_share_row(row: Any) -> dict[str, Any]:
