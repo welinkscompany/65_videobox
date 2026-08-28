@@ -141,8 +141,8 @@ const nativeControlAllowlist = {
     reason: "The library result pane owns its search field; picking a media type belongs to the one sidebar list beside it.",
   },
   "app/OutputsPage.tsx": {
-    controls: ["input:output-variant-select"],
-    reason: "The outputs surface owns the explicit variant selection controls before a render request is submitted.",
+    controls: ["input:output-variant-select", "input:preview-share-url"],
+    reason: "The outputs surface owns the explicit variant selection controls before a render request is submitted, and the read-only share-link field it shows after creating one (select-to-copy, not a form input).",
   },
   "features/library/LibraryPreviewPane.tsx": {
     controls: ["button:library-restore", "button:library-trash"],

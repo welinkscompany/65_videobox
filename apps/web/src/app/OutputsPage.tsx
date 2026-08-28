@@ -950,7 +950,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
             <Button disabled={isCreatingPreviewShare} onClick={() => void handleCreatePreviewShare()}>{isCreatingPreviewShare ? "공유 링크 만드는 중" : "동료에게 공유 링크 만들기"}</Button>
             {previewShareErrorProjectId === projectId ? <p>공유 링크를 만들지 못했어요. 다시 시도해 주세요.</p> : null}
             {previewShareProjectId === projectId && previewShareUrl
-              ? <p>동료에게 이 링크를 보내 주세요: <input readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} /></p>
+              ? <p>동료에게 이 링크를 보내 주세요: <input data-native-control="preview-share-url" readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} /></p>
               : null}
           </div> : null}
           {currentFinal ? <div className="vb-final-verdict">
