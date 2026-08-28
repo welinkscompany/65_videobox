@@ -549,4 +549,76 @@ describe("CreationInterview", () => {
 
     expect(await screen.findByRole("button", { name: "영상 소리로 초안 준비" })).toBeVisible();
   });
+
+  /** 빈 장면 자동 채우기(owner 요청 2026-08-29): "내 비롤에 ai 영상도 같이
+   *  붙여서 자동화를 만드는거야." 브롤이 안 닿은 장면마다 owner가 일일이
+   *  "그림 만들기"를 누르지 않아도, 한 번에 순서대로 다 채워야 한다. */
+  it("빈 장면 모두 AI로 채우기를 누르면 브롤이 못 채운 장면을 순서대로 다 채운다", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_gap");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue({ ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([]);
+
+    const scriptSegments = [
+      { segment_id: "seg-1", text: "첫 장면 대사", start_sec: 0, end_sec: 2 },
+      { segment_id: "seg-2", text: "둘째 장면 대사", start_sec: 2, end_sec: 4 },
+    ];
+    const withTwoGaps = {
+      readiness_id: "readiness_gap", brief_id: "brief_1", status: "needs_assets", revision: 3,
+      result: {
+        script_segments: scriptSegments,
+        gap_slots: [
+          { gap_slot_id: "gap-1", reason: "장면에 넣을 영상이 없어요.", segment_id: "seg-1", target_range: { start_sec: 0, end_sec: 2 } },
+          { gap_slot_id: "gap-2", reason: "장면에 넣을 영상이 없어요.", segment_id: "seg-2", target_range: { start_sec: 2, end_sec: 4 } },
+        ],
+      },
+    } as never;
+    const withOneGap = { ...withTwoGaps, revision: 4, result: { script_segments: scriptSegments, gap_slots: [withTwoGaps.result.gap_slots[1]] } } as never;
+    const ready = { readiness_id: "readiness_gap", brief_id: "brief_1", status: "ready", revision: 5, result: { script_segments: scriptSegments, gap_slots: [] } } as never;
+
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(withTwoGaps);
+    const createSceneImage = vi.spyOn(api, "createSceneImage").mockResolvedValue({
+      image_asset_id: "img-1", scene_asset_id: "scene-1", segment_id: "seg-1", title: "t", prompt: "p", seed: 1,
+    });
+    const retry = vi.spyOn(api, "retryDraftReadiness")
+      .mockResolvedValueOnce({ readiness_id: "readiness_gap", brief_id: "brief_1", status: "planning", revision: 4, result: null })
+      .mockResolvedValueOnce({ readiness_id: "readiness_gap", brief_id: "brief_1", status: "planning", revision: 5, result: null });
+    const complete = vi.spyOn(api, "completeDraftReadiness")
+      .mockResolvedValueOnce(withOneGap)
+      .mockResolvedValueOnce(ready);
+
+    render(<CreationInterview projectId="project_1" />);
+
+    const fillButton = await screen.findByRole("button", { name: "빈 장면 모두 AI로 채우기" });
+    fireEvent.click(fillButton);
+
+    await waitFor(() => expect(createSceneImage).toHaveBeenCalledTimes(2));
+    // 첫 번째는 첫 장면(seg-1), 두 번째는 남은 장면(seg-2) -- 순서대로다.
+    expect(createSceneImage.mock.calls[0][1]).toMatchObject({ segment_id: "seg-1", gap_slot_id: "gap-1", prompt: "첫 장면 대사" });
+    expect(createSceneImage.mock.calls[1][1]).toMatchObject({ segment_id: "seg-2", gap_slot_id: "gap-2", prompt: "둘째 장면 대사" });
+    expect(retry).toHaveBeenCalledTimes(2);
+    expect(complete).toHaveBeenCalledTimes(2);
+
+    await screen.findByText("AI 그림으로 2개 장면을 채웠어요.");
+    // 다 채워졌으니 더 채울 빈 장면 단추는 사라진다.
+    expect(screen.queryByRole("button", { name: "빈 장면 모두 AI로 채우기" })).not.toBeInTheDocument();
+  });
+
+  it("브롤이 못 채운 장면이 없으면 자동 채우기 단추가 보이지 않는다", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_no_gap");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue({ ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([]);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue({
+      readiness_id: "readiness_no_gap", brief_id: "brief_1", status: "needs_assets", revision: 2,
+      // segment_id 없는 공백은 AI로 못 채우는 자리다(예: 대본 자체가 비어 있는
+      // 경우) -- 이런 자리만 있으면 자동 채우기 단추를 보여주지 않는다.
+      result: { gap_slots: [{ gap_slot_id: "gap-1", reason: "대본이 비어 있어요." }] },
+    } as never);
+
+    render(<CreationInterview projectId="project_1" />);
+
+    await screen.findByText("대본이 비어 있어요.");
+    expect(screen.queryByRole("button", { name: "빈 장면 모두 AI로 채우기" })).not.toBeInTheDocument();
+  });
 });

@@ -87,6 +87,10 @@ export function CreationInterview({ projectId }: { projectId: string }) {
   const [answerDraft, setAnswerDraft] = useState("");
   const [summaryText, setSummaryText] = useState("");
   const [readiness, setReadiness] = useState<DraftReadiness | null>(null);
+  // 빈 장면 자동 채우기(owner 요청 2026-08-29). 하나씩 만드는 `SceneImageStudio`와
+  // 별개로, 남은 빈 장면 전부를 순서대로 채우는 동안의 진행 상태만 여기서 본다.
+  const [isAutoFillingGaps, setIsAutoFillingGaps] = useState(false);
+  const [autoFillProgress, setAutoFillProgress] = useState<string | null>(null);
   const [narrationOptions, setNarrationOptions] = useState<NarrationOption[]>([]);
   const [recording, setRecording] = useState(false);
   const [recordingFile, setRecordingFile] = useState<File | null>(null);
@@ -111,6 +115,8 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     setScriptFile(null);
     setSummaryText("");
     setReadiness(null);
+    setIsAutoFillingGaps(false);
+    setAutoFillProgress(null);
     setNarrationOptions([]);
     setVertical(false);
     setIsStarting(false);
@@ -517,6 +523,47 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     }
   }
 
+  /** 내 촬영본(브롤)이 안 닿는 빈 장면을 AI 그림으로 한 번에 채운다(owner 요청
+   *  2026-08-29): "내 비롤에 ai 영상도 같이 붙여서 자동화를 만드는거야."
+   *
+   *  **새 백엔드가 필요 없다.** `SceneImageStudio`가 이미 장면 하나씩 만드는
+   *  길을 갖고 있었다 -- 없던 것은 owner가 빈 장면마다 일일이 눌러야 했던
+   *  수고뿐이다. 이 함수는 같은 `createSceneImage`를 순서대로 부르고, 하나
+   *  만들 때마다 다시 준비를 돌려 빈 장면 목록을 새로 받는다 -- `gap_slot_id`가
+   *  그 준비 스냅샷에 묶여 있어서, 앞서 채운 장면을 반영하지 않은 옛 목록으로
+   *  다음 것을 채우면 어긋난다. **브롤이 우선이다** -- 이 자리는 브롤이 안 닿는
+   *  자리에만 켜진다(§630의 `gap_slots`는 브롤로도 못 채운 것만 남는다). */
+  async function autoFillRemainingGapsWithAi() {
+    if (!readiness) return;
+    setError(null);
+    setIsAutoFillingGaps(true);
+    let current = readiness;
+    let filled = 0;
+    try {
+      let gap = current.result?.gap_slots?.find((item) => item.segment_id);
+      while (gap && gap.segment_id) {
+        setAutoFillProgress(`${filled + 1}번째 빈 장면을 AI 그림으로 채우는 중이에요.`);
+        await api.createSceneImage(projectId, {
+          prompt: sceneTextOf(current, gap.segment_id),
+          segment_id: gap.segment_id,
+          gap_slot_id: gap.gap_slot_id,
+          duration_sec: gapDurationOf(gap),
+          vertical,
+        });
+        filled += 1;
+        const planning = await api.retryDraftReadiness(projectId, current.readiness_id, current.revision);
+        current = await api.completeDraftReadiness(projectId, planning.readiness_id, planning.revision);
+        setReadiness(current);
+        gap = current.result?.gap_slots?.find((item) => item.segment_id);
+      }
+      setAutoFillProgress(filled > 0 ? `AI 그림으로 ${filled}개 장면을 채웠어요.` : null);
+    } catch {
+      setError(`빈 장면을 AI로 채우다가 멈췄어요(${filled}개는 채웠어요). 남은 장면은 하나씩 만들어 주세요.`);
+    } finally {
+      setIsAutoFillingGaps(false);
+    }
+  }
+
   async function runReadinessAction(action: () => Promise<DraftReadiness>, failureMessage: string) {
     setError(null);
     setIsSaving(true);
@@ -627,7 +674,11 @@ export function CreationInterview({ projectId }: { projectId: string }) {
           {narrationOptions.filter((item) => item.asset_type === "narration_audio").map((item) => <Button key={item.asset_id} type="button" variant="outline" onClick={() => void startDraft({ kind: "existing", asset_id: item.asset_id })}>준비한 내레이션으로 초안 준비</Button>)}
           <label htmlFor="draft-narration-file">내레이션 파일 추가</label><Input id="draft-narration-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" onChange={(event) => void uploadNarration(event.target.files?.[0] ?? null)} />
           <Button type="button" variant="outline" disabled={isSaving || recording} onClick={() => void startRecording()}>마이크로 녹음 시작</Button>{recording ? <Button type="button" onClick={stopRecording}>녹음 마치기</Button> : null}{recordingFile && error ? <Button type="button" variant="outline" onClick={() => void uploadNarration(recordingFile)}>녹음 다시 올리기</Button> : null}
-        </> : <section aria-label="초안 준비 상태"><label><Input type="checkbox" checked={vertical} onChange={(event) => setVertical(event.target.checked)} />숏폼(세로)으로 만들기</label><h2>{readiness.status === "ready" ? "초안이 준비됐어요" : readiness.status === "needs_assets" ? "추가 미디어가 필요해요" : readiness.status === "cancelled" ? "초안 준비를 멈췄어요" : readiness.status === "failed" ? "초안을 준비하지 못했어요" : readiness.status === "asset_check" ? "미디어를 확인하고 있어요" : "초안을 준비하고 있어요"}</h2>{readiness.status === "ready" ? <Button type="button" disabled={isSaving} onClick={() => void createDraftBundle()}>초안 만들기</Button> : null}{readiness.status === "needs_assets" ? <><p role="note">누락된 장면은 빈 구간으로 남습니다. 이 초안은 내보낼 수 없어요.</p><label><Input type="checkbox" checked={allowPlaceholder} onChange={(event) => setAllowPlaceholder(event.target.checked)} />빈 구간을 남긴 채 편집용 초안을 만들겠습니다</label><Button type="button" variant="outline" disabled={isSaving || !allowPlaceholder} onClick={() => void createDraftBundle(true)}>빈 구간 포함 초안 만들기</Button></> : null}{advanceRetry ? <Button type="button" onClick={() => void advanceDraftReadiness(readiness)}>준비 계속하기</Button> : null}{readiness.result?.gap_slots?.map((gap) => <div key={gap.gap_slot_id}><p>{gap.reason} <a href={`/projects/${encodeURIComponent(projectId)}/media?return_to=${encodeURIComponent(`/projects/${projectId}/create?brief_id=${brief.brief_id}&readiness_id=${readiness.readiness_id}`)}`}>미디어 추가</a></p>{gap.segment_id ? <SceneImageStudio projectId={projectId} vertical={vertical} gap={{ gapSlotId: gap.gap_slot_id, segmentId: gap.segment_id, sceneNumber: sceneNumberOf(gap.segment_id), sceneText: sceneTextOf(readiness, gap.segment_id), durationSec: gapDurationOf(gap) }} onGenerated={() => void replanAfterSceneImage()} /> : null}</div>)}{usableBrollCandidates.length ? <><AssetPreviewPlayer proposalId={readiness.readiness_id} candidates={usableBrollCandidates.map((item): PreviewCandidate => ({ candidateId: item.asset_id, referenceCode: item.label, mediaType: "broll", controls: { in_sec: item.target_range.start_sec, out_sec: item.target_range.end_sec } }))} previewUrl={(assetId) => `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`} />{usableBrollCandidates.map((item) => <div key={item.asset_id}><label htmlFor={`${item.asset_id}-start`}>{item.label} 시작</label><Input id={`${item.asset_id}-start`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.start ?? String(item.target_range.start_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: event.target.value, end: ranges[item.asset_id]?.end ?? String(item.target_range.end_sec) } }))} /><label htmlFor={`${item.asset_id}-end`}>{item.label} 끝</label><Input id={`${item.asset_id}-end`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.end ?? String(item.target_range.end_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: ranges[item.asset_id]?.start ?? String(item.target_range.end_sec), end: event.target.value } }))} /><Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(item.asset_id)}>구간 저장</Button><Button type="button" variant="ghost" disabled={isSaving} onClick={() => void skipCandidate(item.asset_id)}>{item.label} 건너뛰기</Button></div>)}</> : null}{rangeRetry ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(rangeRetry.assetId, rangeRetry)}>구간 다시 저장</Button> : null}{["planning", "asset_check"].includes(readiness.status) ? <Button type="button" variant="ghost" disabled={isSaving} onClick={() => void runReadinessAction(() => api.cancelDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "준비를 멈추지 못했습니다. 다시 시도해 주세요.")}>준비 멈추기</Button> : null}{["failed", "cancelled", "needs_assets"].includes(readiness.status) ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void runReadinessAction(() => api.retryDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "다시 준비하지 못했습니다. 다시 시도해 주세요.")}>다시 준비</Button> : null}</section>}
+        </> : <section aria-label="초안 준비 상태"><label><Input type="checkbox" checked={vertical} onChange={(event) => setVertical(event.target.checked)} />숏폼(세로)으로 만들기</label><h2>{readiness.status === "ready" ? "초안이 준비됐어요" : readiness.status === "needs_assets" ? "추가 미디어가 필요해요" : readiness.status === "cancelled" ? "초안 준비를 멈췄어요" : readiness.status === "failed" ? "초안을 준비하지 못했어요" : readiness.status === "asset_check" ? "미디어를 확인하고 있어요" : "초안을 준비하고 있어요"}</h2>{readiness.status === "ready" ? <Button type="button" disabled={isSaving} onClick={() => void createDraftBundle()}>초안 만들기</Button> : null}{readiness.status === "needs_assets" ? <><p role="note">누락된 장면은 빈 구간으로 남습니다. 이 초안은 내보낼 수 없어요.</p><label><Input type="checkbox" checked={allowPlaceholder} onChange={(event) => setAllowPlaceholder(event.target.checked)} />빈 구간을 남긴 채 편집용 초안을 만들겠습니다</label><Button type="button" variant="outline" disabled={isSaving || !allowPlaceholder} onClick={() => void createDraftBundle(true)}>빈 구간 포함 초안 만들기</Button></> : null}{advanceRetry ? <Button type="button" onClick={() => void advanceDraftReadiness(readiness)}>준비 계속하기</Button> : null}{/* 브롤이 안 닿는 빈 장면을 AI 그림으로 한 번에 채운다(owner 요청 2026-08-29:
+          "내 비롤에 ai 영상도 같이 붙여서 자동화를 만드는거야"). 브롤이 우선이고,
+          이 자리는 브롤로도 못 채운 자리에만 뜬다. 다 채운 뒤에도 결과 문구는
+          남아야 owner가 "몇 개 채워졌는지" 볼 수 있으므로, 단추만 조건에
+          걸고 문구는 따로 둔다. */}{(readiness.result?.gap_slots ?? []).some((gap) => gap.segment_id) ? <div aria-label="빈 장면 자동 채우기"><Button type="button" variant="outline" disabled={isSaving || isAutoFillingGaps} onClick={() => void autoFillRemainingGapsWithAi()}>{isAutoFillingGaps ? "빈 장면을 AI로 채우는 중" : "빈 장면 모두 AI로 채우기"}</Button></div> : null}{autoFillProgress ? <p role="status">{autoFillProgress}</p> : null}{readiness.result?.gap_slots?.map((gap) => <div key={gap.gap_slot_id}><p>{gap.reason} <a href={`/projects/${encodeURIComponent(projectId)}/media?return_to=${encodeURIComponent(`/projects/${projectId}/create?brief_id=${brief.brief_id}&readiness_id=${readiness.readiness_id}`)}`}>미디어 추가</a></p>{gap.segment_id ? <SceneImageStudio projectId={projectId} vertical={vertical} gap={{ gapSlotId: gap.gap_slot_id, segmentId: gap.segment_id, sceneNumber: sceneNumberOf(gap.segment_id), sceneText: sceneTextOf(readiness, gap.segment_id), durationSec: gapDurationOf(gap) }} onGenerated={() => void replanAfterSceneImage()} /> : null}</div>)}{usableBrollCandidates.length ? <><AssetPreviewPlayer proposalId={readiness.readiness_id} candidates={usableBrollCandidates.map((item): PreviewCandidate => ({ candidateId: item.asset_id, referenceCode: item.label, mediaType: "broll", controls: { in_sec: item.target_range.start_sec, out_sec: item.target_range.end_sec } }))} previewUrl={(assetId) => `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`} />{usableBrollCandidates.map((item) => <div key={item.asset_id}><label htmlFor={`${item.asset_id}-start`}>{item.label} 시작</label><Input id={`${item.asset_id}-start`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.start ?? String(item.target_range.start_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: event.target.value, end: ranges[item.asset_id]?.end ?? String(item.target_range.end_sec) } }))} /><label htmlFor={`${item.asset_id}-end`}>{item.label} 끝</label><Input id={`${item.asset_id}-end`} type="number" min="0" step="0.1" value={candidateRanges[item.asset_id]?.end ?? String(item.target_range.end_sec)} onChange={(event) => setCandidateRanges((ranges) => ({ ...ranges, [item.asset_id]: { start: ranges[item.asset_id]?.start ?? String(item.target_range.end_sec), end: event.target.value } }))} /><Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(item.asset_id)}>구간 저장</Button><Button type="button" variant="ghost" disabled={isSaving} onClick={() => void skipCandidate(item.asset_id)}>{item.label} 건너뛰기</Button></div>)}</> : null}{rangeRetry ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void saveCandidateRange(rangeRetry.assetId, rangeRetry)}>구간 다시 저장</Button> : null}{["planning", "asset_check"].includes(readiness.status) ? <Button type="button" variant="ghost" disabled={isSaving} onClick={() => void runReadinessAction(() => api.cancelDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "준비를 멈추지 못했습니다. 다시 시도해 주세요.")}>준비 멈추기</Button> : null}{["failed", "cancelled", "needs_assets"].includes(readiness.status) ? <Button type="button" variant="outline" disabled={isSaving} onClick={() => void runReadinessAction(() => api.retryDraftReadiness(projectId, readiness.readiness_id, readiness.revision), "다시 준비하지 못했습니다. 다시 시도해 주세요.")}>다시 준비</Button> : null}</section>}
       </> : <>
         <p>유진이 정리한 내용을 고친 뒤, 마음에 들면 승인해 주세요.</p>
         <label htmlFor="creation-summary">기획 요약</label>
