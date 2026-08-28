@@ -63,13 +63,10 @@
 경로는 위 표의 `docs/decisions/`다. **색은 가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
 
 - `2026-08-28-home-screen-reversal.ko.md` — **`/`는 이제 항상 `/projects`다**
-  (2026-08-19 "열면 바로 편집기" 결정을 뒤집음). 이름 안 물어도 되는 시작
-  지름길 둘("빈 편집판으로 바로 시작"·"내 목소리 등록·클론")도 이때 생겼다.
-- `2026-08-21-capcut-shell-layout.ko.md` — **왼쪽 기둥을 없애고 위 띠로**(캡컷 배치).
-  따라가는 것은 **껍데기뿐, 기능 범위는 §2.1 그대로**
+  (2026-08-19 결정을 뒤집음). 시작 지름길 둘도 이때 생겼다.
+- `2026-08-21-capcut-shell-layout.ko.md` — **왼쪽 기둥을 없애고 위 띠로**(캡컷 배치, 껍데기뿐)
 - `2026-08-21-editor-back-to-light.ko.md` — **편집 화면도 흰 톤**(2026-08-20 어둡게를 되돌림)
-- `2026-08-05-dashboard-white-orange-direction.ko.md` — **현행 팔레트**:
-  canvas `#FAFAFA`, accent `#C2410C`, text `#1C1C1E`
+- `2026-08-05-dashboard-white-orange-direction.ko.md` — **현행 팔레트**: canvas `#FAFAFA`, accent `#C2410C`, text `#1C1C1E`
 - `2026-07-20-editor-workbench-visual-approval.ko.md` — 편집 작업판 5개 viewport
 
 ## 2.1 제품 범위 경계
@@ -90,10 +87,7 @@
 ## 2.2 자산 검색 체계
 
 음악·효과음·촬영본을 한 문으로 찾고, 새로 넣은 자산은 저절로 색인된다.
-세부는 `docs/development-fast-path.ko.md` §10.15.
-
-세부 운영 규정의 authoritative 본문은 `docs/development-fast-path.ko.md`에 유지한다.
-이 파일은 그것을 대체하지 않고 진입점 역할을 한다.
+세부(authoritative 본문)는 `docs/development-fast-path.ko.md` §10.15.
 
 ## 3. 개발 환경
 
