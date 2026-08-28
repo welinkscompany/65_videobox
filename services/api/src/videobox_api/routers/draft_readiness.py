@@ -6,7 +6,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, UploadFile, status
 
 from videobox_api.errors import _http_error
-from videobox_api.models import DraftReadinessCandidateRangeRequest, DraftReadinessCandidateRequest, DraftReadinessCreateRequest, DraftReadinessRevisionRequest, SourceVideoStartResponse
+from videobox_api.models import DraftReadinessCandidateRangeRequest, DraftReadinessCandidateRequest, DraftReadinessCreateRequest, DraftReadinessRevisionRequest, SourceVideoStartResponse, SourceVoiceStartResponse
 from videobox_api.orchestration import ApiOrchestrator
 
 MAX_NARRATION_UPLOAD_BYTES = 128 * 1024 * 1024
@@ -19,6 +19,10 @@ class _NoSpeech(ValueError):
 
 def _no_speech() -> _NoSpeech:
     return _NoSpeech("source_video_has_no_speech")
+
+
+def _no_speech_voice() -> _NoSpeech:
+    return _NoSpeech("source_voice_has_no_speech")
 
 
 def build_draft_readiness_router(orchestrator: ApiOrchestrator) -> APIRouter:
@@ -133,6 +137,52 @@ def build_draft_readiness_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 asset_id=asset.asset_id,
                 script_text=str(heard["transcript_text"]).strip(),
                 spoken_segment_count=len(spoken),
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        finally:
+            if stage is not None:
+                stage.unlink(missing_ok=True)
+            await file.close()
+
+    #: 목소리만 녹음해서 시작하는 길(owner 요청 2026-08-29). 영상도 대본도 없이
+    #: 첫 걸음을 뗄 수 있는 또 하나의 길이다 -- `source-video`와 짝이다.
+    SOURCE_VOICE_SUFFIXES = (".wav", ".mp3", ".m4a", ".ogg", ".webm")
+
+    @router.post("/api/projects/{project_id}/source-voice/upload", status_code=status.HTTP_201_CREATED)
+    async def upload_source_voice(project_id: str, file: UploadFile = File(...)) -> SourceVoiceStartResponse:
+        """녹음한 목소리에서 말을 받아써 대본으로, 다시 들어볼 구간까지 함께 돌려준다.
+
+        `upload_source_video`와 같은 모양이다 -- 다른 것은 등록하는 자산 종류
+        (`narration_audio`)와, 받아쓴 뒤 다시 들어볼 구간 후보를 얹는다는 점뿐이다.
+        """
+        stage: Path | None = None
+        try:
+            store.get_project(project_id=project_id)
+            suffix = Path(file.filename or "").suffix.lower()
+            if suffix not in SOURCE_VOICE_SUFFIXES:
+                raise ValueError("source_voice_upload_invalid")
+            stage = store.project_root(project_id) / "staging" / f"source-voice-{uuid4().hex}{suffix}"
+            stage.parent.mkdir(parents=True, exist_ok=True)
+            total = 0
+            with stage.open("wb") as handle:
+                while chunk := await file.read(NARRATION_UPLOAD_CHUNK_BYTES):
+                    total += len(chunk)
+                    if total > MAX_NARRATION_UPLOAD_BYTES:
+                        raise ValueError("source_voice_upload_too_large")
+                    handle.write(chunk)
+            asset = orchestrator.register_narration_audio(project_id=project_id, source_path=stage)
+            heard = orchestrator.transcribe_source_voice(project_id=project_id, asset_id=asset.asset_id)
+            spoken = [item for item in (heard.get("segments") or []) if str(item.get("text") or "").strip()]
+            if not str(heard.get("transcript_text") or "").strip() or not spoken:
+                # 무음 녹음으로 빈 대본을 만들면 다음 화면이 전부 빈 채로 흘러간다
+                # (`upload_source_video`와 같은 이유로 같은 곳에서 멈춘다).
+                raise _no_speech_voice()
+            return SourceVoiceStartResponse(
+                asset_id=asset.asset_id,
+                script_text=str(heard["transcript_text"]).strip(),
+                spoken_segment_count=len(spoken),
+                retake_candidates=heard.get("retake_candidates") or [],
             )
         except Exception as exc:
             raise _http_error(exc) from exc

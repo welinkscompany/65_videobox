@@ -18,6 +18,7 @@ from videobox_provider_interfaces.llm import (
     StructuredLLMResponse,
 )
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.narration_retake_detection import detect_retake_candidates
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -355,6 +356,29 @@ class ApiOrchestrator:
         """
         started = self.pipeline.start_transcription(project_id=project_id, narration_asset_id=asset_id)
         return self.pipeline.get_transcription_result(project_id=project_id, job_id=started["job_id"])
+
+    def transcribe_source_voice(self, *, project_id: str, asset_id: str) -> dict[str, Any]:
+        """녹음한 목소리만으로 시작하는 길(owner 요청 2026-08-29).
+
+        `transcribe_source_video`와 받아쓰는 방식은 완전히 같다 -- 받아쓰기는
+        영상이든 순수 음성이든 가리지 않는다. 다른 것은 여기서 그 결과 위에
+        "다시 들어볼 구간"까지 같이 골라 준다는 점이다
+        (`narration_retake_detection.detect_retake_candidates`). **조용히
+        지우지 않는다** -- 후보만 얹어 돌려주고, 뺄지는 화면에서 owner가 고른다.
+        """
+        transcription = self.transcribe_source_video(project_id=project_id, asset_id=asset_id)
+        candidates = detect_retake_candidates(transcription.get("segments") or [])
+        transcription["retake_candidates"] = [
+            {
+                "segment_index": candidate.segment_index,
+                "start_sec": candidate.start_sec,
+                "end_sec": candidate.end_sec,
+                "text": candidate.text,
+                "reason": candidate.reason,
+            }
+            for candidate in candidates
+        ]
+        return transcription
 
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
         result = self.pipeline.start_transcription(

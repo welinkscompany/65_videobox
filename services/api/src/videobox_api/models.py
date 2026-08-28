@@ -392,6 +392,27 @@ class SourceVideoStartResponse(BaseModel):
     spoken_segment_count: int
 
 
+class RetakeCandidateResponse(BaseModel):
+    """다시 들어볼 구간 하나. owner 요청(2026-08-29): 잘못 발음한 곳을 컷 편집으로
+    날리기 전에, 어디를 왜 후보로 골랐는지부터 말해 줘야 한다."""
+
+    segment_index: int
+    start_sec: float
+    end_sec: float
+    text: str
+    reason: Literal["low_confidence", "retry_cue", "retry_cue_precursor"]
+
+
+class SourceVoiceStartResponse(BaseModel):
+    """녹음한 목소리만으로 시작할 때 화면이 받는 것 -- `SourceVideoStartResponse`와
+    같은 모양에 다시 들어볼 구간 후보만 얹었다."""
+
+    asset_id: str
+    script_text: str
+    spoken_segment_count: int
+    retake_candidates: list[RetakeCandidateResponse]
+
+
 class SceneImageCreateRequest(BaseModel):
     """대본의 한 장면에 얹을 그림 하나. §10.14 조항 2-C."""
 
