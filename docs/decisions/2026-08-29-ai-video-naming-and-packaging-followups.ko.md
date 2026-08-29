@@ -30,15 +30,27 @@ AnimateDiff·Stable Video Diffusion류 ComfyUI 노드)은 아직 조사도 시�
 (2026-08-28 결정 참고).
 
 구현 시작 전에 필요한 것 (다음 세션 몫):
-- ComfyUI에 어떤 영상 생성 워크플로(노드 그래프)가 이미 설치돼 있는지 확인 —
-  `docs/decisions/videobox-comfyui-trains-lora-in-place`류 선례처럼 이미 있는
-  것부터 재사용 게이트(`CLAUDE.md` §3 재사용 게이트)로 판단한다.
+
+**재사용 게이트 조사 결과(2026-08-29, 이어진 세션, 읽기 전용 확인만 함 —
+파일 다운로드·설치는 owner 자신의 몫이라 손대지 않았다):**
+
+- **모델은 이미 있다.** `C:\Users\atgro\Documents\comfy\ComfyUI\models\diffusion_models\wan2.1_t2v_1.3B_fp16.safetensors`
+  (Wan 2.1 텍스트→영상, 1.3B, fp16) — 새로 받을 것 없다.
+- **노드도 이미 있다.** `custom_nodes/`에 별도 확장이 없는데도 ComfyUI 코어
+  자체가 Wan을 지원한다 — `comfy/ldm/wan/model.py`, `comfy_extras/nodes_wan.py`.
+  **커스텀 노드 설치가 필요 없다.**
+- 다만 이 발견은 "모델·노드가 있다"까지다. **VideoBox 쪽 워크플로 JSON·서비스
+  코드는 아직 하나도 없다** — `scene_image_service.py`의 `_generate`(정지
+  이미지 생성)와 `_still_to_clip`(zoompan 가짜 영상)이 지금 실제로 도는
+  전부다. 다음 세션은 여기서부터 시작: Wan t2v/i2v용 워크플로 그래프를
+  짜고, `_still_to_clip`을 대체하거나 나란히 두는 새 서비스 메서드를 만드는
+  일이 실제 구현 범위다.
 - 컨테이너 CPU 제약(2코어)이 정지화면 확대에서도 문제였다(`-threads 2` 수정,
   2026-08-29 커밋 `6ce7b51db`) — 실제 동영상 생성은 훨씬 무거우므로 리소스 요구량을
   먼저 실측한다.
-- 생성 시간이 길어지면 nginx 프록시 330초 타임아웃과 부딪힐 수 있다(유튜브 학습
-  기능에서 이미 같은 우려가 남아 있다, 핸드오프 §1 참고) — 비동기 처리가 필요한지
-  먼저 판단한다.
+- 생성 시간이 길어지면 nginx 프록시 330초 타임아웃과 부딪힐 수 있다 — 유튜브
+  학습 기능을 비동기로 바꾼 패턴(`BackgroundTasks` + `job_id` 폴링, 2026-08-29
+  이어진 세션 커밋 `4029f9baf`)을 그대로 재사용할 수 있는지 먼저 검토한다.
 
 ## 2. 설치형(Electron/Tauri) 패키징 — 보류 유지
 
