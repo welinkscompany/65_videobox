@@ -89,7 +89,10 @@ def analyze_color(
     *,
     sample_interval_sec: float = 2.0,
     ffmpeg_binary: str = "ffmpeg",
-    timeout_seconds: float = 180.0,
+    # owner 결정(2026-08-29): 유튜브 학습 다운로드는 10분(600s)까지 허용하는데
+    # 이 값이 3분(180s)에 그쳐 있었다 -- 다운로드는 되는데 분석에서 이유를 알
+    # 수 없이 실패하는 영상 구간(3~10분)이 있었다. 다운로드 한도와 맞춘다.
+    timeout_seconds: float = 600.0,
 ) -> ColorProfile:
     samples = _run_signalstats(
         video_path, sample_interval_sec=sample_interval_sec,
@@ -117,7 +120,8 @@ def analyze_pacing(
     initial_scene_ignore_seconds: float = 0.5,
     ffmpeg_binary: str = "ffmpeg",
     ffprobe_binary: str = "ffprobe",
-    timeout_seconds: float = 180.0,
+    # analyze_color와 같은 이유로 600s(다운로드 한도)로 맞춘다.
+    timeout_seconds: float = 600.0,
 ) -> PacingProfile:
     if not video_path.is_file():
         raise ReferenceStyleAnalysisError("reference_video_missing")
