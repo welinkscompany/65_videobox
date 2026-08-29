@@ -62,11 +62,18 @@
 승인된 시각 결정은 `docs/decisions/`에 있다. 전부 명시 승인이고 재승인 없이 바꾸지 않는다.
 경로는 위 표의 `docs/decisions/`다. **색은 가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
 
+- `2026-08-29-capcut-full-structure-and-dark-theme.ko.md` — **현행 팔레트는 다크다**
+  (`2026-08-21-editor-back-to-light`를 되돌림). **메뉴·배치를 캡컷과 끝까지 동일화**
+  (`2026-08-21`·`2026-08-27` 5단계 계획을 전부 완료하는 것으로 범위 확정).
+  설치형(Electron/Tauri) 패키징은 **이 문서로도 승인 안 됨** — 구두로 나왔으나 보류.
 - `2026-08-28-home-screen-reversal.ko.md` — **`/`는 이제 항상 `/projects`다**
   (2026-08-19 결정을 뒤집음). 시작 지름길 둘도 이때 생겼다.
-- `2026-08-21-capcut-shell-layout.ko.md` — **왼쪽 기둥을 없애고 위 띠로**(캡컷 배치, 껍데기뿐)
-- `2026-08-21-editor-back-to-light.ko.md` — **편집 화면도 흰 톤**(2026-08-20 어둡게를 되돌림)
-- `2026-08-05-dashboard-white-orange-direction.ko.md` — **현행 팔레트**: canvas `#FAFAFA`, accent `#C2410C`, text `#1C1C1E`
+- `2026-08-27-editor-centered-shell-direction.ko.md` — 편집기를 중심 화면으로, 미디어
+  3페이지를 도크 탭으로, 내보내기·검토를 팝업으로(5단계 계획, `2026-08-29`가 전부
+  완료로 범위 확정)
+- `2026-08-21-capcut-shell-layout.ko.md` — 왼쪽 기둥을 없애고 위 띠로(캡컷 배치)
+- ~~`2026-08-21-editor-back-to-light.ko.md`~~ — **`2026-08-29`가 되돌림.** 역사 기록으로만 남음
+- ~~`2026-08-05-dashboard-white-orange-direction.ko.md`~~ — **팔레트 표는 `2026-08-29`로 대체됨.** 구조 부분(3분할, 그리드 등)은 유효
 - `2026-07-20-editor-workbench-visual-approval.ko.md` — 편집 작업판 5개 viewport
 
 ## 2.1 제품 범위 경계
