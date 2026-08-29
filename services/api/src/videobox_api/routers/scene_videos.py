@@ -158,11 +158,11 @@ def _as_result(asset: dict[str, Any]) -> dict[str, Any]:
     metadata = asset.get("metadata") or {}
     return {
         "scene_asset_id": str(asset["asset_id"]),
-        # `gif_asset_id`와 같은 이유로 목록 조회에서는 짝을 다시 찾지 않는다 --
-        # 만드는 순간의 응답에서만 값이 있다. `library_asset_id`도 같다.
-        "gif_asset_id": None,
-        "library_asset_id": None,
-        "gif_library_asset_id": None,
+        # 만드는 순간에 `scene_video_service.py`가 이 값들을 scene 자산 메타데이터에도
+        # 같이 적어 둔다 -- 그래서 목록 조회(새로고침 뒤)에서도 그대로 보인다.
+        "gif_asset_id": metadata.get("gif_asset_id"),
+        "library_asset_id": metadata.get("library_asset_id"),
+        "gif_library_asset_id": metadata.get("gif_library_asset_id"),
         "segment_id": str(metadata.get("scene_segment_id") or ""),
         "title": str(metadata.get("title") or "장면 영상"),
         "prompt": str(metadata.get("prompt") or ""),

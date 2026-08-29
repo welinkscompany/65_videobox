@@ -131,6 +131,26 @@ def test_asking_for_a_preview_passes_the_quality_through(tmp_path: Path) -> None
     assert (provider.requests[0].length_frames, provider.requests[0].steps) == (17, 8)
 
 
+def test_the_list_view_still_shows_the_library_id_after_a_refresh(tmp_path: Path) -> None:
+    """알려진 격차(2026-08-29 3회차 turn) -- 목록 조회가 항상 `library_asset_id`를
+    `None`으로 돌려줬다. 만드는 순간의 응답에만 있으면 화면을 새로고침한 뒤에는
+    "자료실에도 저장했어요"가 사라져 보인다."""
+    client, project_id = _client(tmp_path, _StubProvider(tmp_path))
+
+    started = client.post(
+        f"/api/projects/{project_id}/scene-videos",
+        json={"prompt": "해 뜨는 바다", "segment_id": "script-1", "make_gif": True},
+    )
+    job_id = started.json()["job_id"]
+    created = client.get(f"/api/projects/{project_id}/scene-videos/{job_id}").json()["result"]
+
+    listed = client.get(f"/api/projects/{project_id}/scene-videos").json()["videos"]
+    assert len(listed) == 1
+    assert listed[0]["library_asset_id"] == created["library_asset_id"]
+    assert listed[0]["gif_asset_id"] == created["gif_asset_id"]
+    assert listed[0]["gif_library_asset_id"] == created["gif_library_asset_id"]
+
+
 def test_asking_for_a_gif_reports_the_gif_asset_id_too(tmp_path: Path) -> None:
     client, project_id = _client(tmp_path, _StubProvider(tmp_path))
 

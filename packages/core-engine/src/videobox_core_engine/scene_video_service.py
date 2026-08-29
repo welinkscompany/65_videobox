@@ -175,6 +175,18 @@ class SceneVideoService:
                         project_id=project_id, segment_id=segment_id, asset_id=gif_asset.asset_id,
                         title=f"{title} (GIF)",
                     )
+
+                # `list_scene_videos`(scene_videos.py)가 목록을 다시 보여 줄 때도
+                # 이 값들을 알아야 한다 -- 만드는 순간의 응답에만 있으면 화면을
+                # 새로고침한 뒤에는 자료실에 저장됐다는 사실이 사라져 보인다.
+                self.store.update_asset_metadata(
+                    project_id=project_id, asset_id=scene_asset.asset_id,
+                    metadata_patch={
+                        "library_asset_id": library_asset_id,
+                        "gif_asset_id": gif_asset_id,
+                        "gif_library_asset_id": gif_library_asset_id,
+                    },
+                )
         except SceneVideoGenerationError:
             self._compensate(project_id=project_id, asset_ids=registered)
             raise
