@@ -28,6 +28,8 @@ from videobox_api.models import (
     TTSCandidateRecordResponse,
     TTSCandidateRequest,
     TTSListeningReviewRequest,
+    YoutubeReferenceImportRequest,
+    YoutubeReferenceImportResponse,
 )
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_core_engine.asset_browser_preview import BrowserPreviewError
@@ -296,6 +298,23 @@ def build_assets_router(
             asset_type=asset.asset_type,
             storage_uri=asset.storage_uri,
         )
+
+    @router.post("/api/projects/{project_id}/reference-style/from-youtube", status_code=status.HTTP_201_CREATED)
+    def import_reference_style_from_youtube(
+        project_id: str, payload: YoutubeReferenceImportRequest
+    ) -> YoutubeReferenceImportResponse:
+        """owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?"
+
+        본인 유튜브 영상 하나에서 목소리 샘플(바로 쓸 수 있다)과 컷 빠르기·
+        색감 리포트(지금은 보여주기만 한다)를 같이 뽑는다.
+        """
+        try:
+            result = orchestrator.import_reference_style_from_youtube(
+                project_id=project_id, url=payload.url,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return YoutubeReferenceImportResponse(**result)
 
     @router.post("/api/projects/{project_id}/tts-candidates", status_code=status.HTTP_201_CREATED)
     def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> TTSCandidateResponse:

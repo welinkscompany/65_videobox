@@ -10,3 +10,8 @@ cryptography==45.0.6
 # Versions match requirements-runtime.txt.
 faster-whisper==1.2.1
 pycapcut==0.0.3
+
+# owner 요청(2026-08-29): 본인 유튜브 영상에서 목소리 샘플·편집 스타일 참고를
+# 뽑아 오는 길. 본인 소유 영상만 대상이고, 이 패키지 없이는 그 길이 아예 없다
+# (그 자리에서 명확한 오류로 안내한다).
+yt-dlp==2026.8.19

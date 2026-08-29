@@ -17,8 +17,11 @@ from videobox_provider_interfaces.llm import (
     StructuredLLMProvider,
     StructuredLLMResponse,
 )
+from videobox_core_engine.audio_export import extract_audio_only
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.narration_retake_detection import detect_retake_candidates
+from videobox_core_engine.reference_style_analysis import analyze_color, analyze_pacing
+from videobox_core_engine.youtube_import import download_youtube_video
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -288,6 +291,52 @@ class ApiOrchestrator:
             asset_type=asset["asset_type"],
             storage_uri=asset["storage_uri"],
         )
+
+    def import_reference_style_from_youtube(self, *, project_id: str, url: str) -> dict[str, Any]:
+        """본인 유튜브 영상 하나에서 목소리 샘플과 편집 스타일 리포트를 함께 뽑는다.
+
+        owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 영상을
+        두 번 받지 않는다 -- 한 번 내려받고, 그 파일에서 소리(목소리 샘플로
+        등록)와 그림(컷 빠르기·색감 분석)을 같이 뽑는다. 내려받은 영상 자체는
+        프로젝트 자산으로 남기지 않는다 -- 이번 요청은 "이 영상을 소재로 쓰겠다"가
+        아니라 "이 영상에서 스타일만 배우겠다"였다.
+        """
+        staging_dir = self.store.project_root(project_id) / "staging"
+        video_path: Path | None = None
+        try:
+            video_path = download_youtube_video(url, staging_dir)
+            audio_path = video_path.with_suffix(".reference-audio.m4a")
+            ffmpeg_binary = getattr(self.pipeline.final_renderer, "ffmpeg_binary", "ffmpeg")
+            extract_audio_only(
+                source_video_path=video_path, destination_audio_path=audio_path,
+                ffmpeg_binary=ffmpeg_binary,
+            )
+            voice_asset = self.register_voice_sample_asset(project_id=project_id, source_path=audio_path)
+            pacing = analyze_pacing(video_path, ffmpeg_binary=ffmpeg_binary)
+            color = analyze_color(video_path, ffmpeg_binary=ffmpeg_binary)
+            return {
+                "voice_sample_asset_id": voice_asset.asset_id,
+                "pacing": {
+                    "average_clip_duration_sec": pacing.average_clip_duration_sec,
+                    "clip_count": pacing.clip_count,
+                    "shortest_clip_sec": pacing.shortest_clip_sec,
+                    "longest_clip_sec": pacing.longest_clip_sec,
+                },
+                "color": {
+                    "average_brightness": color.average_brightness,
+                    "average_colorfulness": color.average_colorfulness,
+                    "warm_cool_bias": color.warm_cool_bias,
+                    "sample_count": color.sample_count,
+                },
+            }
+        finally:
+            if video_path is not None:
+                video_path.unlink(missing_ok=True)
+                audio_candidate = video_path.with_suffix(".reference-audio.m4a")
+                # 오디오는 목소리 샘플로 이미 프로젝트 저장소에 복사됐다 -- 스테이징
+                # 사본은 남겨 둘 이유가 없다.
+                if audio_candidate.is_file() and audio_candidate != video_path:
+                    audio_candidate.unlink(missing_ok=True)
 
     def generate_tts_replacement_candidate(
         self,

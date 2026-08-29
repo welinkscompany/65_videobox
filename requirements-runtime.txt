@@ -4,6 +4,8 @@ gtts==2.5.4
 requests==2.34.2
 python-multipart==0.0.20
 psycopg[binary]==3.2.9
+# 본인 유튜브 영상에서 목소리 샘플을 가져오는 길에 쓴다(owner 요청 2026-08-29).
+yt-dlp==2026.8.19
 
 # Optional TTS engines (enable via TTSEngineConfig.engine):
 # - "gtts" (default, no extra deps beyond gtts above, needs network access)

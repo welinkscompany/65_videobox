@@ -587,6 +587,39 @@ class AssetResponse(BaseModel):
     storage_uri: str
 
 
+class YoutubeReferenceImportRequest(BaseModel):
+    """owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 본인이
+    이미 올린 본인 영상만 대상이라는 전제를 화면 문구가 말한다."""
+
+    url: str = Field(min_length=1, max_length=2000)
+
+
+class ReferencePacingResponse(BaseModel):
+    """컷 빠르기만 잰 결과다 -- 지금은 화면에 보여주기만 하고, 실제 자동 컷
+    설정에 자동으로 먹이지 않는다(전역 설정이라 프로젝트별로 못 바꾼다)."""
+
+    average_clip_duration_sec: float
+    clip_count: int
+    shortest_clip_sec: float
+    longest_clip_sec: float
+
+
+class ReferenceColorResponse(BaseModel):
+    """색감만 잰 결과다 -- 전문 색보정은 이 제품 범위 밖이라(CLAUDE.md §2.1)
+    실제로 입히지 않는다. 숫자만 보여준다."""
+
+    average_brightness: float
+    average_colorfulness: float
+    warm_cool_bias: float
+    sample_count: int
+
+
+class YoutubeReferenceImportResponse(BaseModel):
+    voice_sample_asset_id: str
+    pacing: ReferencePacingResponse
+    color: ReferenceColorResponse
+
+
 class BrowserPreviewResponse(BaseModel):
     status: Literal["pending", "running", "ready", "failed"]
     job_id: str | None = None
