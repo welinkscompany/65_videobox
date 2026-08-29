@@ -10,6 +10,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
+import { Mic, Scissors } from "lucide-react";
 
 import { api, type Project, type ProjectWorkspaceSummary } from "../api";
 import { Button } from "../components/ui/button";
@@ -391,14 +392,41 @@ function ProjectsPage() {
       ) : (
         <div className="vb-catalog-quick-start">
           <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>+ 새 프로젝트 만들기</Button>
-          {/* 이름부터 안 물어도 되는 지름길 둘. 자동으로 이름을 붙이고 바로
-              해당 화면으로 보낸다 -- 나중에 언제든 이름 바꾸기로 고칠 수 있다. */}
-          <Button type="button" variant="outline" disabled={quickStartBusy !== null} onClick={() => void startBlankProject()}>
-            {quickStartBusy === "blank" ? "편집판을 여는 중" : "빈 편집판으로 바로 시작"}
-          </Button>
-          <Button type="button" variant="outline" disabled={quickStartBusy !== null} onClick={() => void startVoiceCloneProject()}>
-            {quickStartBusy === "voice" ? "준비하는 중" : "내 목소리 등록·클론"}
-          </Button>
+          {/* 캡컷 첫 화면의 진입 카드 자리(owner 캡처 2026-08-29, `2026-08-29-capcut-
+              full-structure-and-dark-theme.ko.md`). **VideoBox에 없는 기능(AI 이미지·
+              동영상 생성 등)의 자리는 흉내 내지 않는다** — 이름부터 안 물어도 되는
+              실제 지름길 둘만 카드로 놓는다(자동으로 이름을 붙이고 바로 해당 화면으로
+              보낸다 — 나중에 언제든 이름 바꾸기로 고칠 수 있다). */}
+          <div className="vb-catalog-entry-cards" role="group" aria-label="빠르게 시작하기">
+            <div className="vb-catalog-entry-card">
+              <Button
+                type="button"
+                variant="outline"
+                className="vb-catalog-entry-card__button"
+                disabled={quickStartBusy !== null}
+                aria-describedby="quick-start-blank-desc"
+                onClick={() => void startBlankProject()}
+              >
+                <Scissors aria-hidden="true" />
+                {quickStartBusy === "blank" ? "편집판을 여는 중" : "빈 편집판으로 바로 시작"}
+              </Button>
+              <p id="quick-start-blank-desc" className="vb-catalog-entry-card__desc">기획 없이 편집기부터 열어요</p>
+            </div>
+            <div className="vb-catalog-entry-card">
+              <Button
+                type="button"
+                variant="outline"
+                className="vb-catalog-entry-card__button"
+                disabled={quickStartBusy !== null}
+                aria-describedby="quick-start-voice-desc"
+                onClick={() => void startVoiceCloneProject()}
+              >
+                <Mic aria-hidden="true" />
+                {quickStartBusy === "voice" ? "준비하는 중" : "내 목소리 등록·클론"}
+              </Button>
+              <p id="quick-start-voice-desc" className="vb-catalog-entry-card__desc">녹음해서 내 목소리로 내레이션해요</p>
+            </div>
+          </div>
         </div>
       )}
       {quickStartError ? <p className="text-sm text-destructive" role="alert">{quickStartError}</p> : null}
@@ -408,7 +436,11 @@ function ProjectsPage() {
           첫 사용자에게 다른 문을 만들지 않는다 -- 시작하는 길은 위의 같은 단추다. */}
       {projects.length === 0 ? (
         <p className="vb-catalog-empty">아직 만든 영상이 없어요. 위에서 새 프로젝트를 시작하면 여기에 모아 드릴게요.</p>
-      ) : null}
+      ) : (
+        // 캡컷 첫 화면의 "최근 프로젝트" 그리드 자리(owner 캡처 2026-08-29). 목록
+        // 자체는 이미 있던 그대로다 -- 그리드 위에 제목만 더한다.
+        <h2 className="vb-catalog-recent-heading">최근 프로젝트</h2>
+      )}
       {/* 검색·보기전환은 검색·전환할 프로젝트가 있을 때만 의미가 있어 목록이
           있을 때만 보인다. 보관함 단추는 그렇지 않다 -- **전부 보관하면
           프로젝트 목록이 0개가 된다**(2026-08-23 코드리뷰로 발견: 이전에는
