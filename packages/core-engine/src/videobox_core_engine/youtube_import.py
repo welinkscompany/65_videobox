@@ -50,14 +50,24 @@ def download_youtube_video(
     destination_dir.mkdir(parents=True, exist_ok=True)
     output_template = str(destination_dir / "youtube-import-%(id)s.%(ext)s")
     options: dict[str, Any] = {
-        "format": "bestvideo[ext=mp4][filesize<?{limit}]+bestaudio[ext=m4a]/best[ext=mp4]/best".format(limit=max_bytes),
+        # 실제 유튜브로 직접 받아 보고서야 잡은 것들(2026-08-29, 코드리뷰가
+        # 아니라 진짜 실행이 잡았다):
+        # 1. `bestvideo+bestaudio` 조합은 이 환경에서 "Requested format is not
+        #    available"로 죽었다 -- JS 실행기(deno/node)가 없어서 유튜브가
+        #    분리된 영상·음성 스트림을 안 내준다(경고: "No supported
+        #    JavaScript runtime could be found"). 병합 없이 한 파일로 오는
+        #    구형 포맷 `18`(video+audio가 이미 한 mp4에 들어 있음)을 우선한다.
+        # 2. `player_client: android`를 안 주면 그 `18`조차 못 받는다 --
+        #    데스크톱 클라이언트 응답은 URL 없는 스텁만 내려온다("SABR-only
+        #    streaming"). 안드로이드 클라이언트로 물으면 실제 URL이 온다.
+        "format": "18/best[ext=mp4]/best",
         "outtmpl": output_template,
-        "merge_output_format": "mp4",
         "socket_timeout": timeout_seconds,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "max_filesize": max_bytes,
+        "extractor_args": {"youtube": {"player_client": ["android"]}},
     }
     try:
         with yt_dlp.YoutubeDL(options) as downloader:
