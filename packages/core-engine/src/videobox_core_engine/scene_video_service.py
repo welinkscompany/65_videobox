@@ -30,6 +30,7 @@ from typing import Any
 
 from videobox_core_engine.scene_image_prompt import SceneImagePromptUnavailable, needs_rewriting
 from videobox_domain_models.assets import AssetType
+from videobox_domain_models.library_assets import LibraryMediaType
 from videobox_provider_interfaces.visual_generation import SceneVideoProvider, SceneVideoRequest
 
 _LANDSCAPE = (1920, 1080)
@@ -71,6 +72,12 @@ class SceneVideoService:
     provider: SceneVideoProvider
     prompt_writer: Any | None = None
     ffmpeg_binary: str = "ffmpeg"
+    #: owner 요청(2026-08-29, 3회차): "이렇게 생성된것도 우리 자산으로 들어가도록".
+    #: 프로젝트 자산(위)과 별개로 자료실(여러 프로젝트가 나눠 쓰는 검색 가능한
+    #: 라이브러리, `docs/development-fast-path.ko.md` §10.15)에도 등록한다 --
+    #: 없으면 그림·B-roll처럼 이 장면 하나에만 갇힌다. 실패해도 20분 걸려 만든
+    #: 프로젝트 자산 자체는 그대로 남아야 하므로 조용히 넘어간다.
+    library_ingest: Any | None = None
 
     def generate_scene_video(
         self,
@@ -82,6 +89,8 @@ class SceneVideoService:
         gap_slot_id: str | None = None,
         make_gif: bool = False,
         quality: str = "full",
+        on_prompt_submitted: Any | None = None,
+        cancel_event: Any | None = None,
     ) -> dict[str, Any]:
         cleaned = (prompt or "").strip()
         if not cleaned:
@@ -100,10 +109,13 @@ class SceneVideoService:
         video_prompt = self._video_prompt(project_id=project_id, written=cleaned, vertical=vertical)
         seed = secrets.randbelow(2**31)
 
-        generated = self._generate(SceneVideoRequest(
-            prompt=video_prompt, width=width, height=height, seed=seed,
-            length_frames=length_frames, steps=steps,
-        ))
+        generated = self._generate(
+            SceneVideoRequest(
+                prompt=video_prompt, width=width, height=height, seed=seed,
+                length_frames=length_frames, steps=steps,
+            ),
+            on_prompt_submitted=on_prompt_submitted, cancel_event=cancel_event,
+        )
 
         scene_number = _scene_number(segment_id)
         title = f"{scene_number}번째 장면 영상" if scene_number else "장면 영상"
@@ -137,8 +149,14 @@ class SceneVideoService:
                     metadata={**shared, "title": title},
                 )
                 registered.append(scene_asset.asset_id)
+                library_asset_id = self._ingest_into_library(
+                    media_type=LibraryMediaType.BROLL, source_path=clip,
+                    project_id=project_id, segment_id=segment_id, asset_id=scene_asset.asset_id,
+                    title=title,
+                )
 
                 gif_asset_id: str | None = None
+                gif_library_asset_id: str | None = None
                 if make_gif:
                     gif = stage / f"scene-{scene_number or 'x'}-{seed}.gif"
                     self._webm_to_gif(source=webm, target=gif)
@@ -152,6 +170,11 @@ class SceneVideoService:
                     )
                     registered.append(gif_asset.asset_id)
                     gif_asset_id = gif_asset.asset_id
+                    gif_library_asset_id = self._ingest_into_library(
+                        media_type=LibraryMediaType.IMAGE, source_path=gif,
+                        project_id=project_id, segment_id=segment_id, asset_id=gif_asset.asset_id,
+                        title=f"{title} (GIF)",
+                    )
         except SceneVideoGenerationError:
             self._compensate(project_id=project_id, asset_ids=registered)
             raise
@@ -162,6 +185,8 @@ class SceneVideoService:
         return {
             "scene_asset_id": scene_asset.asset_id,
             "gif_asset_id": gif_asset_id,
+            "library_asset_id": library_asset_id,
+            "gif_library_asset_id": gif_library_asset_id,
             "segment_id": segment_id,
             "title": title,
             "prompt": cleaned,
@@ -170,6 +195,29 @@ class SceneVideoService:
             "seed": seed,
             "elapsed_sec": generated.metadata.get("elapsed_sec"),
         }
+
+    def _ingest_into_library(
+        self, *, media_type: LibraryMediaType, source_path: Path,
+        project_id: str, segment_id: str, asset_id: str, title: str,
+    ) -> str | None:
+        """자료실(여러 프로젝트가 나눠 쓰는 검색 가능한 라이브러리)에도 등록한다
+        -- 실패해도 20분 걸려 만든 프로젝트 자산은 그대로 둔다."""
+        if self.library_ingest is None:
+            return None
+        try:
+            ingested = self.library_ingest.ingest(
+                media_type=media_type,
+                source=source_path,
+                filename=source_path.name,
+                idempotency_key=f"scene-video:{asset_id}",
+                provenance={
+                    "generated_by": "comfyui", "source_kind": "generated_video",
+                    "project_id": project_id, "scene_segment_id": segment_id, "title": title,
+                },
+            )
+            return str(ingested["library_asset_id"])
+        except Exception:  # noqa: BLE001 -- 자료실 등록 실패가 방금 만든 프로젝트 자산을 지우면 안 된다
+            return None
 
     def _video_prompt(self, *, project_id: str, written: str, vertical: bool) -> str:
         """`SceneImageService._image_prompt`와 같은 이유 -- 그림 모델과 마찬가지로
@@ -183,16 +231,23 @@ class SceneVideoService:
         except SceneImagePromptUnavailable as exc:
             raise SceneVideoGenerationError(str(exc), "blocked") from exc
 
-    def _generate(self, request: SceneVideoRequest) -> Any:
+    def _generate(
+        self, request: SceneVideoRequest, *, on_prompt_submitted: Any | None = None, cancel_event: Any | None = None,
+    ) -> Any:
         try:
-            return self.provider.generate_video(request)
+            return self.provider.generate_video(
+                request, on_submitted=on_prompt_submitted, cancel_event=cancel_event,
+            )
         except SceneVideoGenerationError:
             raise
         except Exception as exc:
             code = getattr(exc, "code", None)
+            # "cancelled"는 owner가 취소 버튼을 눌러 만든 결과다 -- 실패가
+            # 아니라 owner의 명시적 선택이므로 `failed`로 뭉개지 않는다
+            # (owner 요청 2026-08-29 3회차).
             raise SceneVideoGenerationError(
                 str(exc) or "scene_video_generation_failed",
-                code if code in {"blocked", "timeout", "failed"} else "failed",
+                code if code in {"blocked", "timeout", "failed", "cancelled"} else "failed",
             ) from exc
 
     def _webm_to_mp4(self, *, source: Path, target: Path) -> None:

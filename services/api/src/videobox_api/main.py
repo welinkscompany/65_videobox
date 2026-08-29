@@ -1073,19 +1073,9 @@ def create_app(
         else None
     )
     app.state.video_generation_config = resolved_video_generation_config
-    # `scene_image_service`와 같은 이유 -- 켜지 않았으면 `None`이다. owner 결정
-    # 2026-08-29(2회차, "원래 만든거외에 별도로 만들자"): 이 서비스는
-    # `SceneImageService`와 별개다.
-    app.state.scene_video_service = (
-        SceneVideoService(
-            store=store,
-            provider=resolved_scene_video_provider,
-            prompt_writer=scene_image_prompt_writer
-            or SceneImagePromptWriter(runtime_service=runtime_service),
-        )
-        if resolved_scene_video_provider is not None
-        else None
-    )
+    # `scene_video_service`의 실제 구성은 `library_ingest_service`가 만들어진
+    # 뒤로 미룬다(아래) -- 자료실 등록(owner 요청 2026-08-29 3회차)을 넣으려면
+    # 그 서비스가 먼저 있어야 한다.
     # 유진이 주제 한 줄에서 대본 초안을 쓴다. 첫 화면의 네 번째 길이 이것을 부른다.
     # `SceneImageService`와 달리 켜고 끄는 설정이 없다 -- 부르는 곳이 유진의 두뇌
     # 하나뿐이고, 그 두뇌는 이미 대화·추천·장면 계획이 모두 쓰고 있다.
@@ -1106,6 +1096,22 @@ def create_app(
         store=resolved_media_library_store.user_asset_store,
         managed_root=user_library_root,
         probe_metadata=FFmpegMediaProbe().probe_metadata,
+    )
+    # `scene_image_service`와 같은 이유 -- 켜지 않았으면 `None`이다. owner 결정
+    # 2026-08-29(2회차, "원래 만든거외에 별도로 만들자"): 이 서비스는
+    # `SceneImageService`와 별개다. `library_ingest`(owner 요청 2026-08-29
+    # 3회차, "이렇게 생성된것도 우리 자산으로 들어가도록")는 위 서비스가 이미
+    # 있어야 해서 이 자리로 옮겼다.
+    app.state.scene_video_service = (
+        SceneVideoService(
+            store=store,
+            provider=resolved_scene_video_provider,
+            prompt_writer=scene_image_prompt_writer
+            or SceneImagePromptWriter(runtime_service=runtime_service),
+            library_ingest=app.state.library_ingest_service,
+        )
+        if resolved_scene_video_provider is not None
+        else None
     )
     media_inbox_watch_path = resolve_media_inbox_watch_path()
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()

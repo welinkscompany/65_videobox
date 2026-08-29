@@ -18,9 +18,11 @@ from pathlib import Path
 
 import pytest
 
+from videobox_core_engine.library_ingest import LibraryIngestService
 from videobox_core_engine.scene_video_service import SceneVideoGenerationError, SceneVideoService
 from videobox_domain_models.assets import AssetType
 from videobox_provider_interfaces.visual_generation import GeneratedSceneVideo, SceneVideoRequest
+from videobox_storage.library_user_asset_store import LibraryUserAssetStore
 from videobox_storage.local_project_store import LocalProjectStore
 
 
@@ -47,9 +49,15 @@ class _StubProvider:
 
     def __init__(self) -> None:
         self.requests: list[SceneVideoRequest] = []
+        self.on_submitted_calls: list[object] = []
+        self.cancel_events: list[object] = []
 
-    def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
+    def generate_video(self, request: SceneVideoRequest, *, on_submitted=None, cancel_event=None) -> GeneratedSceneVideo:
         self.requests.append(request)
+        self.on_submitted_calls.append(on_submitted)
+        self.cancel_events.append(cancel_event)
+        if on_submitted is not None:
+            on_submitted("job-1")
         return GeneratedSceneVideo(
             provider_name=self.provider_name,
             video_bytes=_webm_bytes(),
@@ -61,7 +69,7 @@ class _StubProvider:
 class _RefusingProvider:
     provider_name = "comfyui"
 
-    def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
+    def generate_video(self, request: SceneVideoRequest, *, on_submitted=None, cancel_event=None) -> GeneratedSceneVideo:
         from videobox_provider_interfaces.comfyui_image_generation import ComfyUIProviderError
 
         raise ComfyUIProviderError("ComfyUI local resource is unavailable.", "blocked")
@@ -124,6 +132,54 @@ def test_asking_for_a_gif_registers_it_as_a_plain_image_asset(tmp_path: Path) ->
     assert gif["metadata"]["source_video_asset_id"] == result["scene_asset_id"]
 
 
+def test_a_generated_clip_also_lands_in_the_shared_library(tmp_path: Path) -> None:
+    """owner 요청(2026-08-29, 3회차): "이렇게 생성된것도 우리 자산으로
+    들어가도록". 프로젝트 자산과 별개로 자료실(여러 프로젝트가 나눠 쓰는
+    검색 가능한 라이브러리)에도 실제로 등록되는지 잰다 -- 가짜가 아니라 진짜
+    `LibraryIngestService`로."""
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="영상 만들기")
+    library_store = LibraryUserAssetStore(tmp_path / "library-db")
+    library_ingest = LibraryIngestService(store=library_store, managed_root=tmp_path / "library-managed")
+    service = SceneVideoService(
+        store=store, provider=_StubProvider(), prompt_writer=_PassThroughWriter(), library_ingest=library_ingest,
+    )
+
+    result = service.generate_scene_video(
+        project_id=project.project_id, prompt="해 뜨는 바다", segment_id="script-1", make_gif=True,
+    )
+
+    assert result["library_asset_id"] is not None
+    library_asset = library_store.get_asset(result["library_asset_id"])
+    assert library_asset is not None
+    assert library_asset.media_type.value == "broll"
+
+    assert result["gif_library_asset_id"] is not None
+    gif_library_asset = library_store.get_asset(result["gif_library_asset_id"])
+    assert gif_library_asset is not None
+    assert gif_library_asset.media_type.value == "image"
+
+
+def test_a_broken_library_does_not_lose_the_project_asset_that_took_18_minutes(tmp_path: Path) -> None:
+    """자료실 등록은 곁가지다 -- 실패해도 방금 만든 프로젝트 자산(렌더에 실제로
+    쓰이는 것)까지 지우면 안 된다."""
+    class _BrokenLibraryIngest:
+        def ingest(self, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("library disk is full")
+
+    service, store, project_id = _service(tmp_path)
+    service.library_ingest = _BrokenLibraryIngest()
+
+    result = service.generate_scene_video(project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1")
+
+    assert result["library_asset_id"] is None
+    clip = next(
+        item for item in store.list_assets(project_id=project_id)
+        if item["asset_id"] == result["scene_asset_id"]
+    )
+    assert clip is not None
+
+
 def test_the_clip_says_which_scene_it_was_made_for(tmp_path: Path) -> None:
     service, store, project_id = _service(tmp_path)
 
@@ -178,6 +234,27 @@ def test_an_unknown_quality_is_refused_before_the_gpu_is_woken_up(tmp_path: Path
 
     assert exc.value.code == "invalid"
     assert provider.requests == []
+
+
+def test_the_cancel_wiring_reaches_the_provider_unchanged(tmp_path: Path) -> None:
+    """취소 버튼(owner 요청 2026-08-29 3회차) -- 실제로 멈추는 로직은
+    provider가 갖고 있다(`test_comfyui_video_generation_provider.py`가 잰다).
+    여기서는 서비스가 그 둘(콜백·이벤트)을 provider까지 그대로 전달하는지만
+    잰다."""
+    import threading
+
+    provider = _StubProvider()
+    service, _store, project_id = _service(tmp_path, provider)
+    cancel_event = threading.Event()
+    seen_prompt_ids: list[str] = []
+
+    service.generate_scene_video(
+        project_id=project_id, prompt="x", segment_id="script-1",
+        on_prompt_submitted=seen_prompt_ids.append, cancel_event=cancel_event,
+    )
+
+    assert seen_prompt_ids == ["job-1"]
+    assert provider.cancel_events == [cancel_event]
 
 
 def test_two_runs_of_the_same_prompt_are_not_the_same_video(tmp_path: Path) -> None:

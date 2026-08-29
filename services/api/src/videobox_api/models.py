@@ -479,6 +479,11 @@ class SceneVideoStartResponse(BaseModel):
 class SceneVideoResult(BaseModel):
     scene_asset_id: str
     gif_asset_id: str | None = None
+    #: 자료실(여러 프로젝트가 나눠 쓰는 라이브러리) 등록 결과. owner 요청
+    #: (2026-08-29 3회차) -- 프로젝트 자산과 별개로 검색 가능하게 남긴다.
+    #: 등록에 실패해도 위 프로젝트 자산은 그대로라 `None`일 수 있다.
+    library_asset_id: str | None = None
+    gif_library_asset_id: str | None = None
     segment_id: str
     title: str
     prompt: str

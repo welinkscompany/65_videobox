@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -38,7 +39,13 @@ class ComfyUIVideoGenerationProvider:
     sleep: Callable[[float], None] = time.sleep
     monotonic: Callable[[], float] = time.monotonic
 
-    def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
+    def generate_video(
+        self,
+        request: SceneVideoRequest,
+        *,
+        on_submitted: Callable[[str], None] | None = None,
+        cancel_event: "threading.Event | None" = None,
+    ) -> GeneratedSceneVideo:
         started = self.monotonic()
         queued = self.transport.request_json(
             "/prompt",
@@ -48,7 +55,15 @@ class ComfyUIVideoGenerationProvider:
         prompt_id = str(queued.get("prompt_id") or "")
         if not prompt_id:
             raise ComfyUIProviderError("ComfyUI accepted nothing to wait for.", "failed")
-        file_name, video_bytes = self._await_video(prompt_id=prompt_id, started=started)
+        # owner 요청(2026-08-29 3회차, 취소 버튼) -- 취소를 실제로 걸려면
+        # ComfyUI가 이 작업을 어떤 prompt_id로 부르는지 호출한 쪽이 알아야
+        # 한다. 여기서 알려 주고 나면, 실제로 멈추는 일은 아래 폴링 루프가
+        # (이 작업이 맞는지 매번 `/queue`로 확인한 뒤) 맡는다.
+        if on_submitted is not None:
+            on_submitted(prompt_id)
+        file_name, video_bytes = self._await_video(
+            prompt_id=prompt_id, started=started, cancel_event=cancel_event,
+        )
         return GeneratedSceneVideo(
             provider_name=self.provider_name,
             video_bytes=video_bytes,
@@ -70,12 +85,17 @@ class ComfyUIVideoGenerationProvider:
     def _step_timeout(self) -> int:
         return max(1, min(60, self.config.timeout_seconds))
 
-    def _await_video(self, *, prompt_id: str, started: float) -> tuple[str, bytes]:
+    def _await_video(
+        self, *, prompt_id: str, started: float, cancel_event: "threading.Event | None" = None,
+    ) -> tuple[str, bytes]:
         # `SaveWEBM`(ComfyUI 코어, comfy_extras/nodes_video.py)은 `SaveImage`와
         # 같은 `PreviewVideo` 모양으로 결과를 돌려준다 -- history 출력이
         # `{"images": [...]}`에 파일명을 담는다. 이미지 provider의 폴링 로직과
         # 똑같이 그 키를 본다.
         while self.monotonic() - started < self.config.timeout_seconds:
+            if cancel_event is not None and cancel_event.is_set():
+                self._cancel_prompt(prompt_id)
+                raise ComfyUIProviderError("scene_video_cancelled", "cancelled")
             self.sleep(_POLL_INTERVAL_SECONDS)
             entry = self.transport.request_json(
                 f"/history/{prompt_id}", None, timeout_seconds=self._step_timeout()
@@ -98,6 +118,37 @@ class ComfyUIVideoGenerationProvider:
         raise ComfyUIProviderError(
             f"ComfyUI did not finish within {self.config.timeout_seconds}s.", "timeout"
         )
+
+    def _cancel_prompt(self, prompt_id: str) -> None:
+        """이 작업이 아직 대기 중이면 큐에서 지우고, 지금 실행 중이면 멈춘다.
+
+        **다른 작업은 손대지 않는다** -- ComfyUI의 `/interrupt`는 전체 실행을
+        멈추는 전역 명령이라, 지금 도는 것이 정말 이 prompt_id인지 `/queue`로
+        먼저 확인한 뒤에만 부른다. 확인 자체가 실패하거나 이미 끝나 있으면
+        조용히 넘어간다 -- 취소는 편의 기능이지, 실패해도 작업 자체(성공/실패
+        판정)를 막으면 안 된다.
+        """
+        try:
+            queue = self.transport.request_json("/queue", None, timeout_seconds=self._step_timeout())
+        except ComfyUIProviderError:
+            return
+        pending_ids = {
+            str(entry[1]) for entry in queue.get("queue_pending", [])
+            if isinstance(entry, list) and len(entry) > 1
+        }
+        running_ids = {
+            str(entry[1]) for entry in queue.get("queue_running", [])
+            if isinstance(entry, list) and len(entry) > 1
+        }
+        try:
+            if prompt_id in pending_ids:
+                self.transport.request_json(
+                    "/queue", {"delete": [prompt_id]}, timeout_seconds=self._step_timeout(),
+                )
+            elif prompt_id in running_ids:
+                self.transport.request_json("/interrupt", {}, timeout_seconds=self._step_timeout())
+        except ComfyUIProviderError:
+            pass
 
     def _fetch(self, item: dict) -> tuple[str, bytes]:
         from urllib.parse import urlencode

@@ -4,7 +4,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { api } from "../../api";
 import { SceneImageStudio } from "./SceneImageStudio";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  // 새로고침 복귀 기능(owner 요청 2026-08-29 3회차)이 `localStorage`에
+  // job_id를 남긴다 -- 이 파일의 모든 시험이 같은 gapSlotId를 쓰므로,
+  // 안 지우면 다음 시험이 이전 시험의 미완료 job을 "이어서 확인"하려고 든다.
+  window.localStorage.clear();
+});
 
 const gap = { gapSlotId: "gap-broll-2", segmentId: "script-2", sceneNumber: 2, sceneText: "이렇게 하면 편집이 반으로 줄어요.", durationSec: 5 };
 
@@ -103,5 +110,24 @@ describe("장면 그림 만들기", () => {
     fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
     await waitFor(() => expect(onGenerated).toHaveBeenCalled());
+  });
+
+  it("취소 버튼을 누르면 지금 도는 job을 취소한다", async () => {
+    // 취소 버튼(owner 요청 2026-08-29 3회차) -- 폴링이 끝나기를 기다릴 필요
+    // 없이(끝나지 않는 프라미스), 시작 직후 취소 버튼이 뜨는지와 올바른
+    // job_id로 취소를 부르는지만 잰다.
+    vi.spyOn(api, "startSceneVideo").mockResolvedValue({ job_id: "job-1", status: "processing" });
+    vi.spyOn(api, "getSceneVideoStatus").mockReturnValue(new Promise(() => {}));
+    const cancelled = vi.spyOn(api, "cancelSceneVideo").mockResolvedValue({
+      job_id: "job-1", status: "processing", result: null, error_detail: null,
+    });
+
+    render(<SceneImageStudio projectId="project_a" gap={gap} />);
+    fireEvent.click(screen.getByRole("button", { name: "AI 영상 생성" }));
+
+    const cancelButton = await screen.findByRole("button", { name: "취소" });
+    fireEvent.click(cancelButton);
+
+    await waitFor(() => expect(cancelled).toHaveBeenCalledWith("project_a", "job-1"));
   });
 });

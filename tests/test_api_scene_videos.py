@@ -45,7 +45,7 @@ class _StubProvider:
         self.prompts: list[str] = []
         self.requests: list[SceneVideoRequest] = []
 
-    def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
+    def generate_video(self, request: SceneVideoRequest, *, on_submitted=None, cancel_event=None) -> GeneratedSceneVideo:
         self.prompts.append(request.prompt)
         self.requests.append(request)
         return GeneratedSceneVideo(
@@ -58,7 +58,7 @@ class _StubProvider:
 class _BlockedProvider:
     provider_name = "comfyui"
 
-    def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
+    def generate_video(self, request: SceneVideoRequest, *, on_submitted=None, cancel_event=None) -> GeneratedSceneVideo:
         from videobox_provider_interfaces.comfyui_image_generation import ComfyUIProviderError
 
         raise ComfyUIProviderError("ComfyUI local resource is unavailable.", "blocked")
@@ -99,6 +99,10 @@ def test_it_makes_a_video_for_one_scene_and_says_what_it_made(tmp_path: Path) ->
     assert result["title"] == "3번째 장면 영상"
     assert result["scene_asset_id"]
     assert result["gif_asset_id"] is None
+    # owner 요청(2026-08-29 3회차): "이렇게 생성된것도 우리 자산으로 들어가도록".
+    # `create_app`이 항상 진짜 `library_ingest_service`를 만들어 준다 --
+    # 이 경로도 실제 앱 배선을 그대로 거친다.
+    assert result["library_asset_id"] is not None
     assert result["prompt"] == "해 뜨는 바다"
     assert result["video_prompt"].startswith("a short clip of")
     assert provider.prompts == [result["video_prompt"]]
@@ -187,3 +191,28 @@ def test_an_unknown_job_id_is_a_404_not_an_empty_success(tmp_path: Path) -> None
     response = client.get(f"/api/projects/{project_id}/scene-videos/does-not-exist")
 
     assert response.status_code == 404
+
+
+def test_cancelling_an_unknown_job_is_also_a_404(tmp_path: Path) -> None:
+    client, project_id = _client(tmp_path, _StubProvider(tmp_path))
+
+    response = client.post(f"/api/projects/{project_id}/scene-videos/does-not-exist/cancel")
+
+    assert response.status_code == 404
+
+
+def test_cancelling_a_job_that_already_finished_is_refused(tmp_path: Path) -> None:
+    """취소 버튼(owner 요청 2026-08-29 3회차) -- 이미 끝난 작업을 다시
+    취소하면 안 된다. `TestClient`는 백그라운드 작업을 응답 준비 과정에서
+    같이 끝내므로, 이 시점에는 이미 `succeeded`다."""
+    client, project_id = _client(tmp_path, _StubProvider(tmp_path))
+    started = client.post(
+        f"/api/projects/{project_id}/scene-videos",
+        json={"prompt": "해 뜨는 바다", "segment_id": "script-1"},
+    )
+    job_id = started.json()["job_id"]
+
+    response = client.post(f"/api/projects/{project_id}/scene-videos/{job_id}/cancel")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "scene_video_job_not_cancellable"

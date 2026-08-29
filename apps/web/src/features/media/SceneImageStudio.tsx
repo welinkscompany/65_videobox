@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api } from "../../api";
 import { Button } from "../../components/ui/button";
@@ -41,6 +41,8 @@ const videoMessageByDetail: Record<string, string> = {
   scene_video_prompt_writer_unavailable: "유진이 지금 답하지 못해서 영상 설명을 옮기지 못했어요. 잠시 뒤 다시 눌러 주세요.",
   scene_video_prompt_needs_english: "영상 설명을 옮길 수 없어요. 잠시 뒤 다시 눌러 주세요.",
   scene_video_ffmpeg_missing: "영상을 장면에 넣지 못했어요. 다시 눌러 주세요.",
+  // 취소 버튼(owner 요청 2026-08-29 3회차) -- 실패가 아니라 owner의 명시적 선택이다.
+  scene_video_cancelled: "취소했어요.",
 };
 
 // 실측(2026-08-29, RTX 5090): 1920x1080 기본값이 약 18분 걸렸다. 2초 간격
@@ -50,6 +52,40 @@ const SCENE_VIDEO_POLL_MAX_ATTEMPTS = 700;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+// owner 요청(2026-08-29 3회차): 20분 가까이 걸리는 작업인데 화면 상태에만
+// job_id가 있으면 새로고침하거나 다른 화면에 갔다 오는 순간 진행 상황을
+// 놓친다 -- 실제 생성 자체는 서버에서 계속 도는데 화면만 그 사실을 모르게
+// 된다. `readActiveDrawer`(편집기 도크)와 같은 방어적 패턴 -- 저장이 막혀도
+// (사생활 모드 등) 조용히 새로 시작한다.
+function sceneVideoJobStorageKey(gapSlotId: string): string {
+  return `videobox.scene-video-job.${gapSlotId}`;
+}
+function readPendingSceneVideoJob(gapSlotId: string): { projectId: string; jobId: string } | null {
+  try {
+    const raw = window.localStorage.getItem(sceneVideoJobStorageKey(gapSlotId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { projectId?: unknown; jobId?: unknown };
+    if (typeof parsed.projectId !== "string" || typeof parsed.jobId !== "string") return null;
+    return { projectId: parsed.projectId, jobId: parsed.jobId };
+  } catch {
+    return null;
+  }
+}
+function writePendingSceneVideoJob(gapSlotId: string, projectId: string, jobId: string): void {
+  try {
+    window.localStorage.setItem(sceneVideoJobStorageKey(gapSlotId), JSON.stringify({ projectId, jobId }));
+  } catch {
+    // 이 화면 전용 편의 기능이다. 저장이 막혀도 최선만 한다.
+  }
+}
+function clearPendingSceneVideoJob(gapSlotId: string): void {
+  try {
+    window.localStorage.removeItem(sceneVideoJobStorageKey(gapSlotId));
+  } catch {
+    // 위와 같은 이유.
+  }
 }
 
 export function SceneImageStudio({
@@ -79,6 +115,9 @@ export function SceneImageStudio({
   const [videoStatus, setVideoStatus] = useState<string | null>(null);
   const [madeVideoAssetId, setMadeVideoAssetId] = useState<string | null>(null);
   const [madeGifAssetId, setMadeGifAssetId] = useState<string | null>(null);
+  // 취소 버튼(owner 요청 2026-08-29 3회차)이 어느 job을 멈출지 알아야 한다.
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   const videoFieldId = `scene-video-gif-${gap.gapSlotId}`;
   const qualityFieldId = `scene-video-quality-${gap.gapSlotId}`;
 
@@ -108,6 +147,74 @@ export function SceneImageStudio({
     }
   }
 
+  // 새로고침·화면 이동 복귀(owner 요청 2026-08-29 3회차) -- 페이지가 다시
+  // 뜰 때 이 장면에 아직 처리 중인 작업이 남아 있으면 새로 만들지 않고
+  // 그 job_id를 이어서 지켜본다. 서버는 이미 계속 돌고 있었다.
+  useEffect(() => {
+    const pending = readPendingSceneVideoJob(gap.gapSlotId);
+    if (!pending || pending.projectId !== projectId) return;
+    setIsMakingVideo(true);
+    setVideoStatus("이어서 확인하는 중이에요…");
+    void pollSceneVideoJob(pending.jobId);
+    // 장면(gapSlotId)이 바뀔 때만 다시 확인한다 -- 매 렌더마다 새로 걸면 안 된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gap.gapSlotId, projectId]);
+
+  async function pollSceneVideoJob(jobId: string) {
+    setActiveJobId(jobId);
+    try {
+      for (let attempt = 0; attempt < SCENE_VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
+        await delay(SCENE_VIDEO_POLL_INTERVAL_MS);
+        const current = await api.getSceneVideoStatus(projectId, jobId);
+        if (current.status === "succeeded" && current.result) {
+          setMadeVideoAssetId(current.result.scene_asset_id);
+          setMadeGifAssetId(current.result.gif_asset_id);
+          // owner 요청(2026-08-29 3회차): "이렇게 생성된것도 우리 자산으로
+          // 들어가도록". 자료실 등록은 실패해도 위 프로젝트 자산은 그대로라
+          // 따로 알려 주되 실패를 오류로 다루지 않는다.
+          setVideoStatus(
+            current.result.library_asset_id
+              ? "영상을 만들었어요. 자료실에도 저장했어요."
+              : "영상을 만들었어요.",
+          );
+          clearPendingSceneVideoJob(gap.gapSlotId);
+          // 그림 쪽과 같은 이유 -- 자산이 생긴 것과 장면이 채워진 것은 다른 일이다.
+          onGenerated?.();
+          return;
+        }
+        if (current.status === "failed") {
+          const detail = current.error_detail;
+          setVideoStatus((detail && videoMessageByDetail[detail]) ?? "영상을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+          clearPendingSceneVideoJob(gap.gapSlotId);
+          return;
+        }
+      }
+      setVideoStatus("영상이 제 시간에 안 나왔어요. 잠시 뒤 다시 눌러 주세요.");
+      clearPendingSceneVideoJob(gap.gapSlotId);
+    } catch {
+      setVideoStatus("진행 상황을 확인하지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+      clearPendingSceneVideoJob(gap.gapSlotId);
+    } finally {
+      setIsMakingVideo(false);
+      setActiveJobId(null);
+    }
+  }
+
+  async function cancelVideo() {
+    if (!activeJobId) return;
+    setIsCancelling(true);
+    try {
+      await api.cancelSceneVideo(projectId, activeJobId);
+      // 실제로 멈췄다는 확인은 폴링 쪽(`pollSceneVideoJob`)이 그대로 이어받는다
+      // -- 취소 요청을 보낸 자리와 최종 상태를 쓰는 자리를 하나로 유지한다.
+      setVideoStatus("취소하는 중이에요…");
+    } catch {
+      // 이미 끝났거나(409) 요청 자체가 실패한 것이다 -- 폴링이 곧 실제 결과를 보여준다.
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
   async function makeVideo() {
     if (!description.trim()) return setVideoStatus("어떤 영상을 원하는지 먼저 적어 주세요.");
     setIsMakingVideo(true);
@@ -127,28 +234,11 @@ export function SceneImageStudio({
         make_gif: makeGif,
         quality,
       });
-      for (let attempt = 0; attempt < SCENE_VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
-        await delay(SCENE_VIDEO_POLL_INTERVAL_MS);
-        const current = await api.getSceneVideoStatus(projectId, started.job_id);
-        if (current.status === "succeeded" && current.result) {
-          setMadeVideoAssetId(current.result.scene_asset_id);
-          setMadeGifAssetId(current.result.gif_asset_id);
-          setVideoStatus("영상을 만들었어요.");
-          // 그림 쪽과 같은 이유 -- 자산이 생긴 것과 장면이 채워진 것은 다른 일이다.
-          onGenerated?.();
-          return;
-        }
-        if (current.status === "failed") {
-          const detail = current.error_detail;
-          setVideoStatus((detail && videoMessageByDetail[detail]) ?? "영상을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.");
-          return;
-        }
-      }
-      setVideoStatus("영상이 제 시간에 안 나왔어요. 잠시 뒤 다시 눌러 주세요.");
+      writePendingSceneVideoJob(gap.gapSlotId, projectId, started.job_id);
+      await pollSceneVideoJob(started.job_id);
     } catch (error) {
       const detail = (error as { detail?: string | null })?.detail ?? null;
       setVideoStatus((detail && videoMessageByDetail[detail]) ?? "영상을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.");
-    } finally {
       setIsMakingVideo(false);
     }
   }
@@ -199,8 +289,13 @@ export function SceneImageStudio({
           {" "}GIF로 저장
         </label>
         <Button type="button" variant="outline" disabled={isMakingVideo} onClick={() => void makeVideo()}>
-          {isMakingVideo ? "영상 생성 중" : "AI 영상 생성"}
+          {isMakingVideo ? "영상 생성 중" : madeVideoAssetId ? "다시 만들기" : "AI 영상 생성"}
         </Button>
+        {isMakingVideo && activeJobId ? (
+          <Button type="button" variant="ghost" disabled={isCancelling} onClick={() => void cancelVideo()}>
+            {isCancelling ? "취소하는 중" : "취소"}
+          </Button>
+        ) : null}
         {videoStatus ? <p role="status">{videoStatus}</p> : null}
         {madeVideoAssetId ? (
           <video

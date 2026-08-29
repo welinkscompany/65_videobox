@@ -9,6 +9,7 @@ ComfyUI는 필요 없다(2026-08-29 조사: 텍스트 인코더·VAE가 아직 �
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 import pytest
@@ -70,6 +71,35 @@ class _FakeComfyUI:
         if "/view" in url:
             return _Response(self.video_bytes)
         raise AssertionError(f"unexpected call: {url}")
+
+
+class _FakeComfyUIWithQueue(_FakeComfyUI):
+    """취소(owner 요청 2026-08-29 3회차)를 재는 자리 -- `/queue`·`/interrupt`를
+    흉내 낸다. `running=True`면 이 작업이 지금 실행 중인 것으로,
+    `running=False`면 아직 대기 줄에 있는 것으로 답한다."""
+
+    def __init__(self, *, running: bool, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.running = running
+        self.interrupted = False
+        self.deleted: list[str] = []
+
+    def __call__(self, request: Any, **_kwargs: Any) -> _Response:
+        url = request.full_url
+        self.calls.append(url)
+        if url.endswith("/queue") and request.data is None:
+            entry = [0, "job-1", {}, {}, []]
+            if self.running:
+                return _Response({"queue_running": [entry], "queue_pending": []})
+            return _Response({"queue_running": [], "queue_pending": [entry]})
+        if url.endswith("/queue") and request.data is not None:
+            payload = json.loads(request.data.decode("utf-8"))
+            self.deleted.extend(payload.get("delete", []))
+            return _Response({})
+        if url.endswith("/interrupt"):
+            self.interrupted = True
+            return _Response({})
+        return super().__call__(request, **_kwargs)
 
 
 def _provider(comfy: _FakeComfyUI, *, clock: _Clock | None = None, **config: Any) -> ComfyUIVideoGenerationProvider:
@@ -164,3 +194,63 @@ def test_it_gives_up_with_a_timeout_instead_of_polling_forever() -> None:
 
     assert exc.value.code == "timeout"
     assert clock.now >= 30
+
+
+def test_on_submitted_reports_the_prompt_id_before_the_long_wait() -> None:
+    """취소 버튼(owner 요청 2026-08-29 3회차)이 나중에 이 작업을 정확히
+    가리키려면, 호출한 쪽이 폴링이 시작되기 전에 prompt_id를 알아야 한다."""
+    comfy = _FakeComfyUI()
+    seen: list[str] = []
+
+    _provider(comfy).generate_video(
+        SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+        on_submitted=seen.append,
+    )
+
+    assert seen == ["job-1"]
+
+
+def test_cancelling_a_running_job_interrupts_only_that_prompt() -> None:
+    comfy = _FakeComfyUIWithQueue(running=True)
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    with pytest.raises(ComfyUIProviderError) as exc:
+        _provider(comfy).generate_video(
+            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+            cancel_event=cancel_event,
+        )
+
+    assert exc.value.code == "cancelled"
+    assert comfy.interrupted is True
+    assert comfy.deleted == []
+
+
+def test_cancelling_a_still_queued_job_removes_it_from_the_queue_instead() -> None:
+    """아직 대기 중이면 `/interrupt`(전역 명령, 지금 실행 중인 다른 작업을
+    멈출 수 있다)를 쓰지 않는다 -- 큐에서 지우기만 한다."""
+    comfy = _FakeComfyUIWithQueue(running=False)
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    with pytest.raises(ComfyUIProviderError) as exc:
+        _provider(comfy).generate_video(
+            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+            cancel_event=cancel_event,
+        )
+
+    assert exc.value.code == "cancelled"
+    assert comfy.deleted == ["job-1"]
+    assert comfy.interrupted is False
+
+
+def test_without_a_cancel_request_it_ignores_the_event_and_finishes_normally() -> None:
+    comfy = _FakeComfyUI()
+    cancel_event = threading.Event()  # 절대 set되지 않는다
+
+    result = _provider(comfy).generate_video(
+        SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+        cancel_event=cancel_event,
+    )
+
+    assert result.video_bytes == b"WEBM-BYTES"

@@ -60,7 +60,7 @@ export type SceneImageRequest = { prompt: string; segment_id: string; vertical?:
  *  실제 AI 영상 생성을 맡는다. */
 export type SceneVideoRequest = { prompt: string; segment_id: string; vertical?: boolean; gap_slot_id?: string | null; make_gif?: boolean; quality?: "preview" | "full" };
 export type SceneVideoStart = { job_id: string; status: "processing" };
-export type SceneVideoResult = { scene_asset_id: string; gif_asset_id: string | null; segment_id: string; title: string; prompt: string; video_prompt: string; quality: "preview" | "full"; seed: number; elapsed_sec?: number | null };
+export type SceneVideoResult = { scene_asset_id: string; gif_asset_id: string | null; library_asset_id: string | null; gif_library_asset_id: string | null; segment_id: string; title: string; prompt: string; video_prompt: string; quality: "preview" | "full"; seed: number; elapsed_sec?: number | null };
 export type SceneVideoStatus = { job_id: string; status: "processing" | "succeeded" | "failed"; result: SceneVideoResult | null; error_detail: string | null };
 /** 유진이 쓴 대본 초안. **확정이 아니다** -- `script_text`는 owner가 고치는 글이고,
  *  고친 뒤에야 `createCreationBrief`로 넘어간다. */
@@ -1961,6 +1961,7 @@ export const api = {
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   startSceneVideo: (projectId: string, payload: SceneVideoRequest) => request<SceneVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getSceneVideoStatus: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}`),
+  cancelSceneVideo: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
   listSceneImages: (projectId: string) => request<{ images: SceneImage[] }>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`),
   createScriptDraft: (projectId: string, payload: ScriptDraftRequest) => request<ScriptDraft>(`/api/projects/${encodeURIComponent(projectId)}/script-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   createCreationRecommendationSet: (projectId: string, payload: CreationRecommendationSetRequest) => request<CreationRecommendationSet>(`/api/projects/${encodeURIComponent(projectId)}/creation-recommendations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
