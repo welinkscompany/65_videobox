@@ -839,6 +839,12 @@ export type AssetResponse = {
   asset_type: string;
   storage_uri: string;
 };
+/** 본인 유튜브 영상 하나에서 뽑아낸 것(owner 요청 2026-08-29). 목소리 샘플은
+ *  바로 쓸 수 있고, 컷 빠르기·색감은 지금은 **보여주기만** 한다 -- 실제로
+ *  자동 컷·색보정에 입히는 건 별도 범위다. */
+export type ReferencePacing = { average_clip_duration_sec: number; clip_count: number; shortest_clip_sec: number; longest_clip_sec: number };
+export type ReferenceColor = { average_brightness: number; average_colorfulness: number; warm_cool_bias: number; sample_count: number };
+export type YoutubeReferenceImport = { voice_sample_asset_id: string; pacing: ReferencePacing; color: ReferenceColor };
 
 export type AssetRegistrationRequest = {
   source_path: string;
@@ -2724,6 +2730,12 @@ export const api = {
       body: payload,
     });
   },
+  importReferenceStyleFromYoutube: (projectId: string, url: string) =>
+    request<YoutubeReferenceImport>(`/api/projects/${projectId}/reference-style/from-youtube`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }),
   listNarrationAudio: async (projectId: string): Promise<AssetResponse[]> => {
     const payload = await request<{ assets: AssetResponse[] }>(
       `/api/projects/${projectId}/assets/narration-audio`,

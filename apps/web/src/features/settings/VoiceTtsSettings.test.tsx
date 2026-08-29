@@ -197,6 +197,53 @@ describe("VoiceTtsSettings", () => {
     expect(document.body.textContent).not.toMatch(/sample_secret|segment_secret|session-project/);
   });
 
+  /** owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 목소리는
+   *  실제로 등록되고(목록에 반영), 컷 빠르기·색감은 참고용 숫자로만 보여준다. */
+  it("유튜브 링크로 목소리를 가져오면 목록에 반영되고 컷 빠르기·색감을 보여준다", async () => {
+    const listVoiceSamples = vi.spyOn(api, "listVoiceSamples")
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { asset_id: "sample_from_youtube", asset_type: "voice_sample_audio", storage_uri: "local://voice/youtube.wav" },
+      ]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+    const importFromYoutube = vi.spyOn(api, "importReferenceStyleFromYoutube").mockResolvedValue({
+      voice_sample_asset_id: "sample_from_youtube",
+      pacing: { average_clip_duration_sec: 2.4, clip_count: 5, shortest_clip_sec: 1.1, longest_clip_sec: 4.2 },
+      color: { average_brightness: 150, average_colorfulness: 30, warm_cool_bias: 12, sample_count: 8 },
+    });
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    expect(await screen.findByText("저장한 내 목소리 0개")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("내 유튜브 영상 링크"), {
+      target: { value: "https://youtu.be/dQw4w9WgXcQ" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "유튜브 링크로 배우기" }));
+
+    await waitFor(() => expect(importFromYoutube).toHaveBeenCalledWith("project-a", "https://youtu.be/dQw4w9WgXcQ"));
+    expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
+    expect(await screen.findByText(/컷 빠르기: 평균 2\.4초마다 전환/)).toBeVisible();
+    expect(screen.getByText(/색감: 밝기 150\/255, 따뜻한 톤/)).toBeVisible();
+    expect(listVoiceSamples).toHaveBeenCalled();
+  });
+
+  it("유튜브 링크를 가져오지 못하면 이유를 말하고 목록은 그대로 둔다", async () => {
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+    vi.spyOn(api, "importReferenceStyleFromYoutube").mockRejectedValue(new Error("not youtube"));
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    await screen.findByText("저장한 내 목소리 0개");
+    fireEvent.change(screen.getByLabelText("내 유튜브 영상 링크"), {
+      target: { value: "https://vimeo.com/12345" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "유튜브 링크로 배우기" }));
+
+    expect(await screen.findByText(/본인이 올린 유튜브 영상 주소가 맞는지/)).toBeVisible();
+    expect(screen.getByText("저장한 내 목소리 0개")).toBeVisible();
+  });
+
   it("keeps the newest A candidate read when an older A success arrives after A to B to A", async () => {
     vi.spyOn(api, "listVoiceSamples").mockResolvedValue([
       { asset_id: "sample_active", asset_type: "voice_sample_audio", storage_uri: "local://voice/active.wav" },

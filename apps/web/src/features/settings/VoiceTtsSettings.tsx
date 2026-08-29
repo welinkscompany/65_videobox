@@ -5,6 +5,7 @@ import {
   type AssetResponse,
   type EditingSessionSegment,
   type TtsCandidateRecord,
+  type YoutubeReferenceImport,
 } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -30,6 +31,9 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   const [localPath, setLocalPath] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadInputVersion, setUploadInputVersion] = useState(0);
+  // 본인 유튜브 영상으로 목소리·스타일 배우기(owner 요청 2026-08-29).
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeImportResult, setYoutubeImportResult] = useState<YoutubeReferenceImport | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [candidateLoadState, setCandidateLoadState] = useState<LoadState>("idle");
   const [actionName, setActionName] = useState<string | null>(null);
@@ -139,6 +143,8 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
     setActionName(null);
     setMessage(null);
     setActionError(null);
+    setYoutubeUrl("");
+    setYoutubeImportResult(null);
     void loadSettings(projectId, epoch);
   }, [projectId]);
 
@@ -218,6 +224,42 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       }
       if (isCurrent(token.epoch, expectedProjectId)) {
         setMessage("내 목소리 파일을 추가했어요.");
+      }
+    } finally {
+      finishAction(token);
+    }
+  }
+
+  async function importFromYoutube() {
+    const url = youtubeUrl.trim();
+    if (loadState !== "ready" || !url) return;
+    const token = beginAction("youtube-import");
+    if (!token) return;
+    const expectedProjectId = projectId;
+    setYoutubeImportResult(null);
+    try {
+      let result: YoutubeReferenceImport;
+      try {
+        result = await api.importReferenceStyleFromYoutube(expectedProjectId, url);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) {
+          setActionError("이 링크에서 목소리를 가져오지 못했어요. 본인이 올린 유튜브 영상 주소가 맞는지 확인해 주세요.");
+        }
+        return;
+      }
+      if (!isCurrent(token.epoch, expectedProjectId)) return;
+      setYoutubeUrl("");
+      setYoutubeImportResult(result);
+      try {
+        await refreshSamples(expectedProjectId, token.epoch);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) {
+          setActionError("목소리는 저장됐지만 목록을 새로 불러오지 못했어요. 목록 새로고침으로 확인해 주세요.");
+        }
+        return;
+      }
+      if (isCurrent(token.epoch, expectedProjectId)) {
+        setMessage("유튜브 영상에서 목소리를 가져왔어요.");
       }
     } finally {
       finishAction(token);
@@ -383,6 +425,32 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         <Button disabled={isBusy || loadState !== "ready" || !uploadFile} onClick={() => void uploadSelectedFile()} type="button">
           {actionName === "upload" ? "업로드하는 중" : "파일 업로드"}
         </Button>
+      </div>
+      {/* owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 본인이
+          올린 본인 영상만 대상이라는 전제를 문구로 분명히 한다 -- 확인할 방법이
+          없어서 화면 문구가 그 책임을 owner에게 남긴다. */}
+      <div>
+        <label className="grid w-full gap-2 text-sm">
+          <span>내 유튜브 영상 링크</span>
+          <Input
+            aria-label="내 유튜브 영상 링크"
+            className="rounded-md border bg-background px-3 py-2"
+            disabled={isBusy || loadState !== "ready"}
+            onChange={(event) => setYoutubeUrl(event.target.value)}
+            placeholder="본인이 올린 유튜브 영상 주소만 입력해 주세요"
+            value={youtubeUrl}
+          />
+        </label>
+        <Button disabled={isBusy || loadState !== "ready" || !youtubeUrl.trim()} onClick={() => void importFromYoutube()} type="button">
+          {actionName === "youtube-import" ? "영상에서 가져오는 중" : "유튜브 링크로 배우기"}
+        </Button>
+        <p className="vb-setting-note">목소리는 바로 후보 만들기에 쓸 수 있어요. 컷 빠르기·색감은 참고용으로 보여만 드려요 -- 실제 편집에 자동으로 입히지 않아요.</p>
+        {youtubeImportResult ? (
+          <section aria-label="유튜브 영상에서 배운 스타일">
+            <p>{`컷 빠르기: 평균 ${youtubeImportResult.pacing.average_clip_duration_sec.toFixed(1)}초마다 전환 (장면 ${youtubeImportResult.pacing.clip_count}개, 가장 짧은 구간 ${youtubeImportResult.pacing.shortest_clip_sec.toFixed(1)}초 · 가장 긴 구간 ${youtubeImportResult.pacing.longest_clip_sec.toFixed(1)}초)`}</p>
+            <p>{`색감: 밝기 ${youtubeImportResult.color.average_brightness.toFixed(0)}/255, ${youtubeImportResult.color.warm_cool_bias > 0 ? "따뜻한" : youtubeImportResult.color.warm_cool_bias < 0 ? "차가운" : "중립적인"} 톤`}</p>
+          </section>
+        ) : null}
       </div>
 
       <h2>문장별 읽어보기 후보</h2>
