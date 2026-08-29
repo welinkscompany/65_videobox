@@ -175,14 +175,59 @@ owner가 "보류 유지"를 선택. 코드 변경 없음. 위 문서에 재확�
   5건이 실패 — 새 해시로 갱신(같은 커밋). **UI 소스를 고치면 이 핀도 같이
   갱신해야 한다**는 기존 메모가 다시 확인됐다.
 
+## 2026-08-29 세 번째 이어진 세션 — AI 영상 생성 조사·provider 뼈대
+
+owner가 "계속 자율모드 loop로 개발해"라고 지시하고 자리를 비운 뒤 진행. 실제
+GPU·모델 파일 없이도 짤 수 있는 부분(그래프·이음매 코드)까지 진행했다.
+
+### 조사 결과 — **정정 있음, 낡은 결론 쓰지 말 것**
+
+owner 로컬 ComfyUI(`C:\Users\atgro\Documents\comfy\ComfyUI`)를 다시 살펴보니
+**앞서 "받을 것 없다"고 적은 것은 성급했고 틀렸다** — 체크포인트만 보고
+텍스트 인코더·VAE는 안 살폈었다.
+
+- Wan 2.1 t2v 체크포인트(`models/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors`)는 있다.
+- ComfyUI 코어 노드(`comfy/ldm/wan/`, `comfy_extras/nodes_wan.py`, 영상 저장은
+  `comfy_extras/nodes_video.py`의 `SaveWEBM`)도 이미 있어 커스텀 노드 확장이 필요 없다.
+- **텍스트 인코더가 미완성이다** — `models/text_encoders/umt5_xxl_fp16.safetensors.2nb_9owj.part`,
+  중단된 다운로드(1.74GB, 2026-08-06).
+- **Wan 전용 VAE가 아예 없다** — FLUX용 `ae.safetensors`(`AutoencoderKL`)와 다른
+  클래스(`WanVAE`, `comfy/ldm/wan/vae.py`)가 필요한데 없다.
+- 파일 다운로드는 owner 승인 없이 하지 않았다(명시 승인 필요 항목) — **다음
+  세션이 실제로 돌려 보려면 먼저 owner에게 이 두 파일을 받아도 되는지 물어야
+  한다.**
+
+### 만든 것 — provider 층까지만, 제품에는 아직 안 붙임 (커밋 `36d79593`)
+
+`ComfyUIImageGenerationProvider`(FLUX 그림 경로)와 완전히 같은 구조로
+`ComfyUIVideoGenerationProvider`를 새로 짰다 — `ComfyUIHTTPTransport`(POST
+/prompt → /history 폴링 → /view 회수)를 그대로 재사용하고, 새로 짠 것은
+Wan 그래프(`UNETLoader` + `CLIPLoader(type=wan)` + `VAELoader` +
+`WanImageToVideo`(순수 텍스트→영상, `start_image` 비움) + `KSampler` +
+`VAEDecode` + `SaveWEBM`)와 `VideoGenerationConfig`(`ImageGenerationConfig`와
+같은 검증 방식)뿐이다. 가짜 HTTP 클라이언트로 19개 테스트 전부 통과 —
+실제 GPU·모델 파일 없이도 그래프·이음매는 확정해 뒀다.
+
+**의도적으로 제품에는 안 붙였다.** 이유 둘:
+1. 파일이 없어서 어차피 지금은 못 돈다(위 조사 결과).
+2. 이걸 지금 있는 정지화면+zoompan(`scene_image_service.py`)을 **대체**할지
+   **별도 선택지**로 나란히 둘지는 제품 판단이다 — owner가 자리를 비운 사이
+   혼자 정하지 않았다.
+
+`cfg=5.0`은 커뮤니티 관행값이지 이 프로젝트가 잰 값이 아니다 — 첫 실행 뒤
+반드시 재조정.
+
 ## 다음 세션에서 할 일 (우선순위 순)
 
-1. **AI 영상 생성(로컬 비디오 모델) 실제 조사·구현 시작.** 방향은 정해졌으니
-   ComfyUI에 이미 있는 영상 생성 워크플로 확인 → 리소스/시간 실측 →
-   nginx 타임아웃 대비 설계(유튜브 학습 비동기 전환 패턴 재사용 가능한지 검토).
-2. **다크 테마·첫 화면 재구성의 스크린샷 증거 남기기.** 이번 세션은 계산된
+1. **owner에게 두 파일 승인 요청.** UMT5 텍스트 인코더(완결본)와 Wan VAE를
+   받아도 되는지 먼저 물은 뒤, 실제로 받아서 리소스·시간을 실측한다.
+2. **제품 결정: 대체냐 별도 선택지냐.** 위 provider가 준비되면
+   `scene_image_service.py`에 연결하는 방식을 owner와 정한다. 긴 생성 시간이면
+   유튜브 학습에 쓴 비동기 패턴(`BackgroundTasks` + `job_id` 폴링)을 재사용할 수
+   있는지도 그때 같이 본다.
+3. **다크 테마·첫 화면 재구성의 스크린샷 증거 남기기.** 이번 세션은 계산된
    스타일로만 검증했다 — 다음 세션에서 스크린샷 도구가 되면 실제 화면도 남길 것.
-3. **설치형 패키징 여부** — 구조·다크 작업이 다 끝났으니 이제 다시 논의할 시점.
+4. **설치형 패키징 여부** — 구조·다크 작업이 다 끝났으니 이제 다시 논의할 시점.
 
 ## 검증 상태
 
@@ -200,5 +245,8 @@ owner가 "보류 유지"를 선택. 코드 변경 없음. 위 문서에 재확�
   실물 확인 못 함(다음 세션 몫).
 - 커밋: `f452da74b`(다크 테마) · `9e276bac9`(자료실 이름·AI 영상 방향 기록) ·
   `ee67ed704`(첫 화면 카드) · `da15d697e`(타임아웃·자동채우기 잠금) ·
-  `4029f9baf`(유튜브 학습 비동기) · `7a657643`(CLAUDE.md 길이·provenance 해시).
+  `4029f9baf`(유튜브 학습 비동기) · `7a657643`(CLAUDE.md 길이·provenance 해시) ·
+  `36d79593`(Wan 비디오 provider 뼈대).
   전부 이 worktree 브랜치에 커밋됨, push는 안 함(요청 없었음).
+- Wan provider 추가 후 **백엔드 전체 pytest 재확인: 4145 passed, 56 skipped,
+  0 failed**(`0:31:30`) — 새 테스트 9개 포함해 전부 초록.
