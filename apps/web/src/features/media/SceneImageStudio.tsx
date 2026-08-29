@@ -31,6 +31,26 @@ const messageByDetail: Record<string, string> = {
   scene_image_ffmpeg_missing: "그림을 장면에 넣지 못했어요. 다시 눌러 주세요.",
 };
 
+// 진짜 동영상(Wan) 쪽 오류 문구. `scene_video_` 코드로 온다(owner 결정 2026-08-29 2회차).
+const videoMessageByDetail: Record<string, string> = {
+  scene_video_generation_unavailable: "AI 영상 만들기가 아직 켜져 있지 않아요.",
+  scene_video_generation_blocked: "영상 만드는 프로그램에 닿지 않았어요. 켜져 있는지 확인한 뒤 다시 눌러 주세요.",
+  scene_video_generation_timeout: "영상이 제 시간에 안 나왔어요. 잠시 뒤 다시 눌러 주세요.",
+  scene_video_prompt_empty: "어떤 영상을 원하는지 먼저 적어 주세요.",
+  scene_video_prompt_writer_unavailable: "유진이 지금 답하지 못해서 영상 설명을 옮기지 못했어요. 잠시 뒤 다시 눌러 주세요.",
+  scene_video_prompt_needs_english: "영상 설명을 옮길 수 없어요. 잠시 뒤 다시 눌러 주세요.",
+  scene_video_ffmpeg_missing: "영상을 장면에 넣지 못했어요. 다시 눌러 주세요.",
+};
+
+// 실측(2026-08-29, RTX 5090): 1920x1080 기본값이 약 18분 걸렸다. 2초 간격
+// 700회 = 최대 약 23분 -- 실측치에 여유를 둔다.
+const SCENE_VIDEO_POLL_INTERVAL_MS = 2000;
+const SCENE_VIDEO_POLL_MAX_ATTEMPTS = 700;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function SceneImageStudio({
   projectId,
   gap,
@@ -47,6 +67,15 @@ export function SceneImageStudio({
   const [status, setStatus] = useState<string | null>(null);
   const [madeAssetId, setMadeAssetId] = useState<string | null>(null);
   const fieldId = `scene-image-${gap.gapSlotId}`;
+  // 진짜 동영상(Wan)은 그림과 **같은 설명 칸을 공유한다** -- 같은 장면을
+  // 묘사하는 말이라 owner가 두 번 쓸 이유가 없다. 만드는 방식·시간만 다르다
+  // (owner 결정 2026-08-29 2회차, "원래 만든거외에 별도로 만들자").
+  const [makeGif, setMakeGif] = useState(false);
+  const [isMakingVideo, setIsMakingVideo] = useState(false);
+  const [videoStatus, setVideoStatus] = useState<string | null>(null);
+  const [madeVideoAssetId, setMadeVideoAssetId] = useState<string | null>(null);
+  const [madeGifAssetId, setMadeGifAssetId] = useState<string | null>(null);
+  const videoFieldId = `scene-video-gif-${gap.gapSlotId}`;
 
   async function make() {
     if (!description.trim()) return setStatus("어떤 그림을 원하는지 먼저 적어 주세요.");
@@ -74,9 +103,49 @@ export function SceneImageStudio({
     }
   }
 
+  async function makeVideo() {
+    if (!description.trim()) return setVideoStatus("어떤 영상을 원하는지 먼저 적어 주세요.");
+    setIsMakingVideo(true);
+    setVideoStatus("실제 영상을 만들고 있어요. 화질에 따라 최대 20분 정도 걸릴 수 있어요…");
+    setMadeVideoAssetId(null);
+    setMadeGifAssetId(null);
+    try {
+      const started = await api.startSceneVideo(projectId, {
+        prompt: description.trim(),
+        segment_id: gap.segmentId,
+        gap_slot_id: gap.gapSlotId,
+        vertical,
+        make_gif: makeGif,
+      });
+      for (let attempt = 0; attempt < SCENE_VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
+        await delay(SCENE_VIDEO_POLL_INTERVAL_MS);
+        const current = await api.getSceneVideoStatus(projectId, started.job_id);
+        if (current.status === "succeeded" && current.result) {
+          setMadeVideoAssetId(current.result.scene_asset_id);
+          setMadeGifAssetId(current.result.gif_asset_id);
+          setVideoStatus("영상을 만들었어요.");
+          // 그림 쪽과 같은 이유 -- 자산이 생긴 것과 장면이 채워진 것은 다른 일이다.
+          onGenerated?.();
+          return;
+        }
+        if (current.status === "failed") {
+          const detail = current.error_detail;
+          setVideoStatus((detail && videoMessageByDetail[detail]) ?? "영상을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+          return;
+        }
+      }
+      setVideoStatus("영상이 제 시간에 안 나왔어요. 잠시 뒤 다시 눌러 주세요.");
+    } catch (error) {
+      const detail = (error as { detail?: string | null })?.detail ?? null;
+      setVideoStatus((detail && videoMessageByDetail[detail]) ?? "영상을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+    } finally {
+      setIsMakingVideo(false);
+    }
+  }
+
   return (
     <div>
-      <label htmlFor={fieldId}>{`${gap.sceneNumber}번째 장면 그림 설명`}</label>
+      <label htmlFor={fieldId}>{`${gap.sceneNumber}번째 장면 그림·영상 설명`}</label>
       <Textarea
         id={fieldId}
         rows={2}
@@ -94,6 +163,42 @@ export function SceneImageStudio({
           width={320}
         />
       ) : null}
+
+      {/* 진짜 동영상(Wan) -- 그림·zoompan과는 별개 자리다(owner 결정
+          2026-08-29 2회차). 실측(RTX 5090)으로 기본 화질이 약 18분 걸려서
+          "빈 장면 모두 채우기"에는 안 넣고, 여기서 장면 하나씩 owner가
+          직접 고를 때만 쓴다. */}
+      <div>
+        <label>
+          <input
+            type="checkbox"
+            id={videoFieldId}
+            data-native-control="scene-video-make-gif"
+            checked={makeGif}
+            onChange={(event) => setMakeGif(event.target.checked)}
+          />
+          {" "}GIF로도 만들기
+        </label>
+        <Button type="button" variant="outline" disabled={isMakingVideo} onClick={() => void makeVideo()}>
+          {isMakingVideo ? "AI 영상을 만드는 중" : "AI로 진짜 영상 만들기"}
+        </Button>
+        {videoStatus ? <p role="status">{videoStatus}</p> : null}
+        {madeVideoAssetId ? (
+          <video
+            controls
+            src={api.assetContentUrl(projectId, madeVideoAssetId)}
+            width={320}
+            aria-label={`${gap.sceneNumber}번째 장면 영상`}
+          />
+        ) : null}
+        {madeGifAssetId ? (
+          <img
+            src={api.assetContentUrl(projectId, madeGifAssetId)}
+            alt={`${gap.sceneNumber}번째 장면 GIF`}
+            width={320}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

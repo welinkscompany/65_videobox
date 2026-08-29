@@ -14,7 +14,7 @@ describe("장면 그림 만들기", () => {
     // 이미 대본이 알고 있다.
     render(<SceneImageStudio projectId="project_a" gap={gap} />);
 
-    expect(screen.getByLabelText("2번째 장면 그림 설명")).toHaveValue("이렇게 하면 편집이 반으로 줄어요.");
+    expect(screen.getByLabelText("2번째 장면 그림·영상 설명")).toHaveValue("이렇게 하면 편집이 반으로 줄어요.");
   });
 
   it("만든 그림을 보여 준다 — 만들었다고 말만 하지 않는다", async () => {

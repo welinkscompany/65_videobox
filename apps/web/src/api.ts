@@ -55,6 +55,13 @@ export type SourceVoiceStart = { asset_id: string; script_text: string; spoken_s
  *  아는 척하지 않는다(§10.14 2-C). */
 export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; image_prompt?: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
 export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
+/** 진짜 동영상(Wan). `SceneImageRequest`와 별개 경로다(owner 결정 2026-08-29 2회차,
+ *  "원래 만든거외에 별도로 만들자") -- 정지 이미지+zoompan은 그대로 두고 이 자리가
+ *  실제 AI 영상 생성을 맡는다. */
+export type SceneVideoRequest = { prompt: string; segment_id: string; vertical?: boolean; gap_slot_id?: string | null; make_gif?: boolean };
+export type SceneVideoStart = { job_id: string; status: "processing" };
+export type SceneVideoResult = { scene_asset_id: string; gif_asset_id: string | null; segment_id: string; title: string; prompt: string; video_prompt: string; seed: number; elapsed_sec?: number | null };
+export type SceneVideoStatus = { job_id: string; status: "processing" | "succeeded" | "failed"; result: SceneVideoResult | null; error_detail: string | null };
 /** 유진이 쓴 대본 초안. **확정이 아니다** -- `script_text`는 owner가 고치는 글이고,
  *  고친 뒤에야 `createCreationBrief`로 넘어간다. */
 export type ScriptDraftScene = { scene_number: number; narration: string; visual: string };
@@ -1952,6 +1959,8 @@ export const api = {
   listDraftNarrationOptions: async (projectId: string): Promise<NarrationOption[]> => (await request<{ assets: NarrationOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration-options`)).assets,
   uploadDraftNarration: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration/upload`, { method: "POST", body: form }); },
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  startSceneVideo: (projectId: string, payload: SceneVideoRequest) => request<SceneVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getSceneVideoStatus: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}`),
   listSceneImages: (projectId: string) => request<{ images: SceneImage[] }>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`),
   createScriptDraft: (projectId: string, payload: ScriptDraftRequest) => request<ScriptDraft>(`/api/projects/${encodeURIComponent(projectId)}/script-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   createCreationRecommendationSet: (projectId: string, payload: CreationRecommendationSetRequest) => request<CreationRecommendationSet>(`/api/projects/${encodeURIComponent(projectId)}/creation-recommendations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),

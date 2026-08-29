@@ -148,6 +148,10 @@ const nativeControlAllowlist = {
     controls: ["button:library-restore", "button:library-trash"],
     reason: "The library preview pane owns the explicit restore and trash lifecycle actions.",
   },
+  "features/media/SceneImageStudio.tsx": {
+    controls: ["input:scene-video-make-gif"],
+    reason: "The scene video studio owns a simple checkbox toggle for whether the AI video generation run should also produce a GIF.",
+  },
 } as const;
 
 describe("Task 22 canonical production owners", () => {
