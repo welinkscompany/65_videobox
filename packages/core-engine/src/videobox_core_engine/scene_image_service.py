@@ -234,6 +234,14 @@ class SceneImageService:
             "-t", f"{duration_sec:.3f}",
             "-vf", zoompan,
             "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            # 스레드 수를 안 정하면 libx264가 호스트 코어 수(예: 16)만큼 열려고
+            # 하는데, 컨테이너는 CPU 쿼터로 묶여 있어(owner-ready 컨테이너
+            # 기준 2코어) 그 요청이 `pthread_create() failed: Resource
+            # temporarily unavailable`로 죽는다. 2026-08-29에 ComfyUI를 실제로
+            # 켜고 처음으로 끝까지 밟아 보고서야 드러났다 -- 정지 화면 한 장을
+            # 몇 초짜리 클립으로 바꾸는 가벼운 작업이라 스레드를 많이 쓸
+            # 이유도 없다.
+            "-threads", "2",
             "-r", str(_SCENE_FPS), "-an", str(target),
         ]
         try:
