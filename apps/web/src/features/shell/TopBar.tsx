@@ -21,7 +21,7 @@ type ShellProject = { project_id: string; name: string };
 
 const globalMenuItems: ReadonlyArray<readonly ["projects" | "library" | "footage", string]> = [
   ["projects", "프로젝트"],
-  ["library", "내 라이브러리"],
+  ["library", "미디어"],
   ["footage", "촬영본 정리"],
 ];
 

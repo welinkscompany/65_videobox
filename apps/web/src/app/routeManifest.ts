@@ -104,16 +104,16 @@ export function resolveNavigationContext({
 }): NavigationContext {
   if (pathname === "/library") {
     return {
-      screenName: "내 라이브러리",
+      screenName: "미디어",
       fallbackHref: resolveGlobalLocation("projects"),
-      crumbs: [{ label: "프로젝트", href: resolveGlobalLocation("projects") }, { label: "내 라이브러리" }],
+      crumbs: [{ label: "프로젝트", href: resolveGlobalLocation("projects") }, { label: "미디어" }],
     };
   }
   if (pathname === "/footage") {
     return {
       screenName: "촬영본 정리",
       fallbackHref: resolveGlobalLocation("library"),
-      crumbs: [{ label: "내 라이브러리", href: resolveGlobalLocation("library") }, { label: "촬영본 정리" }],
+      crumbs: [{ label: "미디어", href: resolveGlobalLocation("library") }, { label: "촬영본 정리" }],
     };
   }
   if (pathname.startsWith("/settings/")) {

@@ -22,7 +22,7 @@ export function libraryEmptyReason(installState: MediaLibraryInstallState | null
   // 영상은 꾸러미로 들여놓는 것이 아니라 owner가 직접 넣은 것만 있다.
   if (fixedFilter === "broll") {
     if (loadFailed) return "라이브러리 영상을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.";
-    return "아직 라이브러리에 영상이 없어요. 내 라이브러리에서 영상을 먼저 추가해 주세요.";
+    return "아직 라이브러리에 영상이 없어요. 미디어에서 영상을 먼저 추가해 주세요.";
   }
   if (installState?.status === "not_installed") return "음악과 효과음 꾸러미를 아직 들여놓지 않았어요. 꾸러미를 넣으면 여기에서 바로 들어볼 수 있어요.";
   if (loadFailed || !installState) return "음악과 효과음을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.";

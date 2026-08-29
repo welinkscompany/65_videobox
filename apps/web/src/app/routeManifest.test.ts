@@ -72,11 +72,11 @@ describe("workspace route manifest", () => {
 describe("navigation context", () => {
   it("gives the library a stable breadcrumb and project-list fallback", () => {
     expect(resolveNavigationContext({ pathname: "/library" })).toEqual({
-      screenName: "내 라이브러리",
+      screenName: "미디어",
       fallbackHref: "/projects",
       crumbs: [
         { label: "프로젝트", href: "/projects" },
-        { label: "내 라이브러리" },
+        { label: "미디어" },
       ],
     });
   });

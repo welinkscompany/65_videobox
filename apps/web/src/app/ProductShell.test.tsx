@@ -25,7 +25,7 @@ describe("product shell", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
     const global = screen.getByRole("navigation", { name: "전체 메뉴" });
-    for (const label of ["프로젝트", "내 라이브러리", "촬영본 정리"]) {
+    for (const label of ["프로젝트", "미디어", "촬영본 정리"]) {
       expect(within(global).getByRole("link", { name: label })).toBeInTheDocument();
     }
     // 넷째는 설정이다. 화면 안에서 여는 것이라 주소가 아니라 단추로 그린다.
@@ -220,7 +220,7 @@ describe("product shell", () => {
 
     await screen.findByRole("navigation", { name: "프로젝트 단계" });
     fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
-    expect(screen.getAllByRole("link", { name: "내 라이브러리" })).toHaveLength(1);
+    expect(screen.getAllByRole("link", { name: "미디어" })).toHaveLength(1);
     const home = screen.getByTestId("product-home");
     expect(within(home).getByText("편집")).toBeTruthy();
     expect(within(home).getByText("완성본")).toBeTruthy();

@@ -82,7 +82,7 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
   const display = readSettings();
   // 단계 단추가 켜져 있으면 그것이 곧 "여기가 어디인지"다. 단계가 없는 화면
   // (내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서만 띠가 이름으로 말한다.
-  const screenName = section === "home" ? "홈" : section === "create" ? "이야기" : section === "media" ? "미디어" : section === "settings" ? "설정" : section === "library" ? "내 라이브러리" : section === "footage" ? "촬영본 정리" : section === "outputs" || section === "timeline" || section === "review" ? "확인과 내보내기" : "편집";
+  const screenName = section === "home" ? "홈" : section === "create" ? "이야기" : section === "media" ? "미디어" : section === "settings" ? "설정" : section === "library" ? "미디어" : section === "footage" ? "촬영본 정리" : section === "outputs" || section === "timeline" || section === "review" ? "확인과 내보내기" : "편집";
   return (
     <div
       className="vb-product-shell"

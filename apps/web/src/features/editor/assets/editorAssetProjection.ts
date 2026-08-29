@@ -226,7 +226,7 @@ function libraryPicture(asset: LibraryAsset, index: number): EditorAssetCard {
     requiresBrowserPreviewPreparation: false,
     sourceMetadata: {
       tags: Array.isArray(asset.tags) ? asset.tags : [],
-      source: "내 라이브러리",
+      source: "미디어",
       creator: "",
       officialLicenseUrl: "",
       attributionRequired: false,

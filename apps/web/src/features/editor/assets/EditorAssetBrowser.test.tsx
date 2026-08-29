@@ -180,7 +180,7 @@ describe("EditorAssetBrowser", () => {
       canApply: true,
       previewUrl: "/api/library/assets/user_image_1/preview",
       previewKind: "image",
-      sourceMetadata: { tags: [], source: "내 라이브러리", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+      sourceMetadata: { tags: [], source: "미디어", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
     };
     render(<EditorAssetBrowser cards={[...cards, pictureCard]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} />);
 
