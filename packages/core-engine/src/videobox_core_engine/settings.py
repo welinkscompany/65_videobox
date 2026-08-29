@@ -487,11 +487,19 @@ class VideoGenerationConfig:
     #: Wan 전용 VAE. 2026-08-29 기준 owner 기계에 없다 -- 받으면 실제 파일명으로 맞춘다.
     vae_name: str = "wan_2.1_vae.safetensors"
     weight_dtype: str = "default"
+    #: 코드리뷰(2026-08-30)로 잡힌 결함 -- 화질 단계(preview/standard/full,
+    #: `scene_video_service.py`)가 생기면서 실제 생성은 이 값이 아니라 매
+    #: 요청의 `SceneVideoRequest.steps`(단계별 고정값)를 쓴다. 이 필드와
+    #: `VIDEOBOX_VIDEO_STEPS` 환경변수는 **이제 실제 생성에 아무 영향이
+    #: 없다** -- 데이터클래스 검증(양수 확인)과 기존 테스트 호환을 위해서만
+    #: 남겨 뒀다. `length_frames`도 같은 이유로 죽었다.
     steps: int = 20
     #: 커뮤니티에서 흔히 쓰는 값이다. **실측 전이라 owner 기계에서 첫 실행 뒤
     #: 조정이 필요할 수 있다** -- `weight_dtype`처럼 확정된 값이 아니다.
     cfg: float = 5.0
     #: (length - 1)이 4의 배수여야 한다. 81 = 24fps에서 약 3.3초.
+    #: 위 `steps`와 같은 이유로 실제 생성에는 쓰이지 않는다 -- 화질 단계마다
+    #: `scene_video_service.py`의 고정값(_PREVIEW_LENGTH_FRAMES 등)을 쓴다.
     length_frames: int = 81
     fps: float = 24.0
     timeout_seconds: int = 900

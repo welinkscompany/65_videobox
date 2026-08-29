@@ -122,6 +122,10 @@ services:
       VIDEOBOX_VIDEO_CLIP_NAME: ${VIDEOBOX_VIDEO_CLIP_NAME:-umt5_xxl_fp16.safetensors}
       VIDEOBOX_VIDEO_VAE_NAME: ${VIDEOBOX_VIDEO_VAE_NAME:-wan_2.1_vae.safetensors}
       VIDEOBOX_VIDEO_WEIGHT_DTYPE: ${VIDEOBOX_VIDEO_WEIGHT_DTYPE:-default}
+      # 코드리뷰(2026-08-30)로 잡힌 결함 -- 화질 단계(preview/standard/full)가
+      # 생기면서 실제 생성은 이 값이 아니라 단계별 고정 스텝 수를 쓴다. 이
+      # 줄은 이제 실제 생성에 아무 영향이 없다(VideoGenerationConfig.steps
+      # 참고) -- 화질을 조정하려면 화면의 화질 선택을 쓴다.
       VIDEOBOX_VIDEO_STEPS: ${VIDEOBOX_VIDEO_STEPS:-20}
       # 백그라운드 작업 안에서 도는 값이라 nginx 타임아웃과 다르다 -- 실측치(약
       # 18분)에 여유를 둔다.

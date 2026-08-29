@@ -63,10 +63,10 @@ def build_scene_videos_router(store: LocalProjectStore) -> APIRouter:
 
     @router.get("/api/projects/{project_id}/scene-videos/{job_id}")
     def get_scene_video_job(project_id: str, job_id: str) -> SceneVideoStatusResponse:
-        job = _get_job_or_404(project_id, job_id)
-        result = SceneVideoResult(**job["result"]) if job["result"] is not None else None
+        snapshot = _snapshot_job(project_id, job_id)
+        result = SceneVideoResult(**snapshot["result"]) if snapshot["result"] is not None else None
         return SceneVideoStatusResponse(
-            job_id=job_id, status=job["status"], result=result, error_detail=job["error_detail"],
+            job_id=job_id, status=snapshot["status"], result=result, error_detail=snapshot["error_detail"],
         )
 
     @router.post("/api/projects/{project_id}/scene-videos/{job_id}/cancel")
@@ -77,16 +77,25 @@ def build_scene_videos_router(store: LocalProjectStore) -> APIRouter:
         -- ComfyUI에 무엇을 멈추라고 말할지는 그 작업을 실제로 돌리고 있는
         스레드가(이 요청이 처리될 즈음엔 이미 최대 20분째 그 자리에 있다)
         `/queue`로 자기 작업이 맞는지 직접 확인한 뒤 결정한다.
+
+        코드리뷰(2026-08-30)로 잡힌 결함 -- 상태 확인과 이벤트를 켜는 동작이
+        예전엔 잠금 밖에서 따로 일어나서, `_run_job`이 그 사이에 끝내 버리면
+        이미 끝난 작업에 조용히 이벤트만 켜고(아무도 안 보는) 409도 안 뜨는
+        경합이 있었다. 이제 확인·이벤트 켜기·읽기를 한 번의 잠금 안에서 한다.
         """
-        job = _get_job_or_404(project_id, job_id)
-        if job["status"] != "processing":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="scene_video_job_not_cancellable",
-            )
-        job["cancel_event"].set()
-        result = SceneVideoResult(**job["result"]) if job["result"] is not None else None
+        with _jobs_lock:
+            job = _jobs.get(job_id)
+            if job is None or job["project_id"] != project_id:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="scene_video_job_not_found")
+            if job["status"] != "processing":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="scene_video_job_not_cancellable",
+                )
+            job["cancel_event"].set()
+            snapshot = dict(job)
+        result = SceneVideoResult(**snapshot["result"]) if snapshot["result"] is not None else None
         return SceneVideoStatusResponse(
-            job_id=job_id, status=job["status"], result=result, error_detail=job["error_detail"],
+            job_id=job_id, status=snapshot["status"], result=result, error_detail=snapshot["error_detail"],
         )
 
     @router.get("/api/projects/{project_id}/scene-videos")
@@ -102,12 +111,17 @@ def build_scene_videos_router(store: LocalProjectStore) -> APIRouter:
     return router
 
 
-def _get_job_or_404(project_id: str, job_id: str) -> dict[str, Any]:
+def _snapshot_job(project_id: str, job_id: str) -> dict[str, Any]:
+    """잠금 안에서 한 번에 복사해 돌려준다 -- 코드리뷰(2026-08-30)로 잡힌
+    결함: 예전엔 잠금 밖에서 같은 dict 참조를 그대로 돌려주고 호출부가
+    `status`/`result`/`error_detail`을 각각 따로 읽었다. 그 사이에
+    `_run_job`이 `job.update(...)`을 끝내면 "성공했는데 result는 없음" 같은
+    앞뒤가 안 맞는 조합을 돌려줄 수 있었다."""
     with _jobs_lock:
         job = _jobs.get(job_id)
-    if job is None or job["project_id"] != project_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="scene_video_job_not_found")
-    return job
+        if job is None or job["project_id"] != project_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="scene_video_job_not_found")
+        return dict(job)
 
 
 def _record_prompt_id(job_id: str, prompt_id: str) -> None:

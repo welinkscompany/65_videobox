@@ -86,12 +86,100 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
 백엔드가 다중 사용자·계정·과금을 지원하게 만드는 것이고, 그건 `CLAUDE.md`
 §6이 별도 승인 필요 항목으로 못박아 둔 것이라 이번엔 손대지 않았다.
 
+### 6. 코드리뷰 — 8각도 병렬 검토, 확실한 결함 3건 즉시 수정 (owner 요청 "코드리뷰 갭검증 역방향 동작검증 커밋 푸쉬")
+
+`0f7cafa12`~`4862e29d`(오늘 밤 7개 커밋, push 전) 전체를 대상으로 8개 각도
+(정확성 3·재사용·간결화·효율·고도·CLAUDE.md 준수)로 병렬 코드리뷰를 진행했다.
+10건이 검증을 통과했고, 그중 확실한(CONFIRMED) 결함 3건은 바로 고쳤다.
+
+**바로 고친 것:**
+
+1. **`update_asset_metadata` 실패가 성공한 생성물을 지워 버리던 결함**
+   (`scene_video_service.py`) — 자료실 id를 목록에도 보이게 하려고 생성
+   직후 자산 메타데이터를 다시 쓰는 호출(위 2번 항목)이 `_ingest_into_library`와
+   달리 자기 실패를 삼키지 않았다. 이 호출 하나가 실패하면(예: 일시적 DB
+   쓰기 오류) 바깥 `except Exception`이 방금 20분 걸려 만든 자산까지 보상
+   삭제(compensate)해 버렸다 — 세 곳(직접 읽기, efficiency 각도, 제거된
+   동작 감사 각도)에서 독립적으로 잡아낸 결함이다. `_ingest_into_library`와
+   같은 try/except로 감쌌다. 회귀 테스트
+   (`test_a_broken_metadata_patch_does_not_lose_the_project_asset_either`)를
+   추가해 수정 전 실패·수정 후 통과를 직접 확인했다.
+2. **`VIDEOBOX_VIDEO_STEPS`/길이 환경변수가 조용히 죽어 있던 것**
+   (`comfyui_video_generation.py`) — 화질 단계(preview/standard/full)가
+   생기면서 실제 생성은 `self.config.steps`가 아니라
+   `SceneVideoRequest.steps`(단계별 고정값)를 쓰는데, 문서·`compose.yaml`은
+   여전히 이 환경변수가 화질을 조정한다고 말하고 있었다. 재설계 대신
+   `VideoGenerationConfig`·`compose.yaml`에 "이제 실제 생성에 아무 영향이
+   없다"고 명시하는 쪽을 택했다 — 화질 단계 체계와 개념이 부딪히는
+   (어느 단계를 조정할지 모호한) 낡은 단일 환경변수를 억지로 되살리는 것보다
+   정직하게 죽었다고 적는 게 맞다고 판단했다.
+3. **provider Protocol 선언이 실제 호출 계약과 어긋나 있던 것**
+   (`visual_generation.py`) — `SceneVideoProvider.generate_video`가 여전히
+   `(self, request)`만 선언하고 있었는데, 실제 호출부(`scene_video_service.py`)와
+   구현체(`ComfyUIVideoGenerationProvider`)는 이미 `on_submitted`·`cancel_event`
+   키워드 인자를 쓴다. Protocol은 런타임에 강제되지 않아 지금 당장 뭔가
+   깨진 건 아니지만, 이 선언만 보고 새 provider를 짜면 취소 기능을 걸 때
+   `TypeError`가 난다. 선언을 실제 계약에 맞춰 갱신했다.
+
+**추가로 고친 것 (낮은 위험, 빠른 수정):**
+
+4. `get_scene_video_job`·`cancel_scene_video`가 잠금 밖에서 같은 job dict
+   참조를 여러 번 나눠 읽던 것 — `_run_job`의 원자적 `job.update(...)`과
+   경합하면 "성공했는데 결과는 없음" 같은 앞뒤 안 맞는 조합을 돌려줄 수
+   있었다(영향은 적다 — 폴링이 2초마다 다시 도니 다음 요청에서 바로잡힌다).
+   `cancel_scene_video`는 상태 확인과 취소 이벤트 켜기가 잠금 밖에서 따로
+   일어나 이미 끝난 작업에 조용히 이벤트만 켜고 409도 안 뜨는 경합도 있었다.
+   `_snapshot_job` 헬퍼로 통일해 확인·복사를 한 번의 잠금 안에서 하도록 고쳤다.
+
+**기록만 하고 이번엔 안 고친 것(범위가 크거나 위험 대비 이득이 낮음):**
+
+- `_cancel_prompt`의 `/queue` 스냅샷과 `/interrupt` 사이 TOCTOU 경합 — 두
+  작업이 거의 동시에 걸려 있을 때 취소가 다른(관련 없는) 작업을 멈출 수
+  있다. 실제로 이런 타이밍이 나려면 두 작업이 정확히 그 순간에 겹쳐야 해서
+  드물지만, ComfyUI가 prompt_id별 실행 상태를 실시간으로 알려주는 방법
+  (websocket `executing` 이벤트 등)으로 바꾸는 게 진짜 고침이라 오늘 밤엔
+  손대지 않았다.
+- job 상태가 백엔드 프로세스 안 메모리에만 있어서, 프론트가 방금 받은
+  새로고침 복귀 능력(3번 항목)과 내구성이 어긋난다 — 백엔드가 재시작되면
+  진행 중이던 job이 통째로 사라진다. 자산 저장소처럼 영속화하는 게 진짜
+  고침이라 큰 작업이다.
+- 화질 3단계가 4개 파일(`scene_video_service.py`·`models.py`·`api.ts`)에
+  각각 손으로 맞춘 리터럴로 중복돼 있다 — 넷째 단계가 생기면 하나라도
+  빠뜨리면 컴파일 오류 없이 조용히 어긋난다. 단일 preset 표로 합치는 게
+  진짜 고침이지만 지금 범위 밖.
+- `_ingest_into_library`가 `LibraryIngestService.ingest_batch`가 이미 갖고
+  있는 "실패해도 계속 진행 + error_code 기록" 패턴을 손으로 다시 짜면서
+  error_code 기록만 놓쳤다 — 실패 자체는 이미 안전하게 삼키므로 급하지 않다.
+- 유튜브 학습 poller와 이 파일의 `pollSceneVideoJob`이 거의 같은
+  polling 루프를 두 파일에 따로 짜 놓았다 — 공유 헬퍼로 뽑는 게 정리지만
+  기능에는 영향 없다.
+
+**검증**: 회귀 테스트 추가 뒤 관련 스위트(`test_scene_video_service.py`,
+`test_api_scene_videos.py`, `test_comfyui_video_generation_provider.py`,
+`test_video_generation_config.py`) 40 passed. 잠금 로직을 고친 취소 버튼은
+컨테이너 재빌드 후 실제 ComfyUI로 다시 검증(scene 4, 고화질 실행 →
+취소 → `/history`에서 `execution_interrupted` 확인, "취소했어요." 정상
+표시). 전체 백엔드 pytest 결과는 아래 검증 상태 참고.
+
 ## 검증 상태
 
-- 백엔드 전체 pytest: **4175 passed, 56 skipped, 0 failed**(`0:34:24`).
-- 프론트 전체 vitest: **97 files passed, 1364 passed, 0 failed**.
+- 백엔드 전체 pytest(코드리뷰 수정 반영, 최종): **4175 passed, 56 skipped,
+  1 failed**(`0:37:39`). 실패 1건은
+  `test_owner_ready_script.py::test_smoke_timeout_kills_the_child_tree_and_returns_bounded_failure`
+  — 이 세션이 건드리지 않은 파일이고, 격리 재실행에서도 2/2 재현돼(전체
+  스위트 부하와 무관) 오늘 밤 변경과 무관한 기존 결함으로 판단했다. PowerShell
+  자식 프로세스를 1초 안에 죽이는지 보는 시험인데, 이 머신에 밤새 떠 있는
+  무관한 docker 컨테이너 18개 이상(다른 프로젝트들)이 시스템 부하를 계속
+  주고 있어 타이밍에 민감한 것으로 보인다 — 직접 원인 조사는 이번 세션
+  범위 밖으로 남긴다.
+- 프론트 전체 vitest: **97 files passed, 1364 passed, 0 failed**(코드리뷰
+  수정은 프론트 파일을 건드리지 않아 재확인 안 함).
 - 표준 화질·자료실 id 수정 둘 다 컨테이너 재빌드 후 실제 브라우저에서
   종단 검증 완료(추정 아님).
+- 코드리뷰 수정 관련 스위트(4개 파일) 재확인: **40 passed, 0 failed**.
+- 취소 버튼(잠금 로직 재작성): 컨테이너 재빌드 후 scene 4에서 고화질 실행 →
+  취소 → ComfyUI `/history`에서 `execution_interrupted` 직접 확인, 화면에
+  "취소했어요." 정상 표시, 목록 조회도 그대로 정상.
 - Tauri 데스크톱 셸: 설정 파일만 있고 빌드·실행 미검증(위 4번 참고).
 
 ## 커밋
@@ -100,8 +188,10 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
 - `80647b8b8` — feat: add a standard-quality tier for AI scene video (Tauri 뼈대 포함 —
   파일 스테이징이 겹쳐 한 커밋에 같이 들어갔다, 내용은 서로 무관)
 - `579f83bc` — docs: record why the Tauri desktop shell build is blocked tonight
+- `4862e29d` — docs: hand off tonight's session
+- (다음) 코드리뷰 결함 3+1건 수정 — 위 6번 항목
 
-이 worktree 브랜치에 전부 커밋됨, push는 안 함(요청 없었음).
+전부 push 완료(owner 요청 "커밋 푸쉬").
 
 ## 다음 세션에서 할 일 (우선순위 순)
 
@@ -111,3 +201,7 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
    전에 만들어진 자산들(`asset_92d486e20847`, `asset_6ebe1226d94f` 등)은
    소급 반영되지 않는다. 문제로 지적되면 그때 마이그레이션을 논의한다(지금은
    조용히 넘어감 — 개수가 적고 재생성이 쉽다).
+3. **코드리뷰에서 기록만 하고 넘어간 5건**(위 6번 항목 "기록만 하고 이번엔
+   안 고친 것") — 여유 있을 때 우선순위대로: (a) `_cancel_prompt`의 TOCTOU
+   경합, (b) job 상태 영속화, (c) 화질 3단계 리터럴 4곳 중복, (d)
+   `_ingest_into_library`의 error_code 미기록, (e) 폴링 루프 중복.

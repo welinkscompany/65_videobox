@@ -191,14 +191,23 @@ class SceneVideoService:
                 # `list_scene_videos`(scene_videos.py)가 목록을 다시 보여 줄 때도
                 # 이 값들을 알아야 한다 -- 만드는 순간의 응답에만 있으면 화면을
                 # 새로고침한 뒤에는 자료실에 저장됐다는 사실이 사라져 보인다.
-                self.store.update_asset_metadata(
-                    project_id=project_id, asset_id=scene_asset.asset_id,
-                    metadata_patch={
-                        "library_asset_id": library_asset_id,
-                        "gif_asset_id": gif_asset_id,
-                        "gif_library_asset_id": gif_library_asset_id,
-                    },
-                )
+                # `_ingest_into_library`와 같은 이유로 이 patch 자체도 실패를
+                # 삼킨다 -- 코드리뷰(2026-08-30)로 잡힌 결함: 이 호출이 실패
+                # 예외를 그대로 던지면 바깥 `except Exception`이 방금 20분 걸려
+                # 만든 자산까지 보상 삭제(compensate)해 버린다. 목록에서
+                # `library_asset_id`가 안 보이는 것은 참을 수 있어도, 다 만든
+                # 영상 자체를 지우면 안 된다.
+                try:
+                    self.store.update_asset_metadata(
+                        project_id=project_id, asset_id=scene_asset.asset_id,
+                        metadata_patch={
+                            "library_asset_id": library_asset_id,
+                            "gif_asset_id": gif_asset_id,
+                            "gif_library_asset_id": gif_library_asset_id,
+                        },
+                    )
+                except Exception:  # noqa: BLE001 -- 위 주석 참고: 방금 만든 자산을 지우면 안 된다
+                    pass
         except SceneVideoGenerationError:
             self._compensate(project_id=project_id, asset_ids=registered)
             raise

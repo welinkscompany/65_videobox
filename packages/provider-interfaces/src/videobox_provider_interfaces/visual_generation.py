@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 @dataclass(slots=True, frozen=True)
@@ -91,5 +92,18 @@ class GeneratedSceneVideo:
 class SceneVideoProvider(Protocol):
     provider_name: str
 
-    def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
-        """Generate one short video clip for a script scene."""
+    def generate_video(
+        self,
+        request: SceneVideoRequest,
+        *,
+        on_submitted: Callable[[str], None] | None = None,
+        cancel_event: "threading.Event | None" = None,
+    ) -> GeneratedSceneVideo:
+        """Generate one short video clip for a script scene.
+
+        코드리뷰(2026-08-30)로 잡힌 결함 -- `on_submitted`/`cancel_event`는
+        취소 버튼(owner 요청 2026-08-29 3회차)을 위해 실제로 쓰이는 인자인데
+        이 Protocol 선언에 빠져 있었다. `ComfyUIVideoGenerationProvider`(실제
+        구현)와 `SceneVideoService._generate`(호출부)는 이미 이 모양으로
+        맞춰져 있다 -- 이 선언이 그 계약을 뒤늦게 따라잡는다.
+        """

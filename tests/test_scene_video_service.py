@@ -180,6 +180,38 @@ def test_a_broken_library_does_not_lose_the_project_asset_that_took_18_minutes(t
     assert clip is not None
 
 
+def test_a_broken_metadata_patch_does_not_lose_the_project_asset_either(tmp_path: Path) -> None:
+    """코드리뷰(2026-08-30)로 잡힌 결함 -- `library_asset_id`를 목록에서도
+    보이게 하려고 생성 직후 `update_asset_metadata`로 다시 적어 두는데, 이
+    호출 자체가 실패하면(예: 일시적 DB 쓰기 오류) `_ingest_into_library`와
+    달리 자기 실패를 삼키지 않아서 방금 만든 20분짜리 자산까지 보상
+    삭제(compensate)됐었다. `_ingest_into_library`와 같은 보호를 받아야 한다."""
+    class _BrokenMetadataPatchStore:
+        def __init__(self, real_store: LocalProjectStore) -> None:
+            self._real = real_store
+
+        def update_asset_metadata(self, **_kwargs: object) -> None:
+            raise RuntimeError("asset index is locked")
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._real, name)
+
+    real_store = LocalProjectStore(tmp_path)
+    project = real_store.bootstrap_project(name="영상 만들기")
+    service = SceneVideoService(
+        store=_BrokenMetadataPatchStore(real_store), provider=_StubProvider(), prompt_writer=_PassThroughWriter(),
+    )
+
+    result = service.generate_scene_video(project_id=project.project_id, prompt="해 뜨는 바다", segment_id="script-1")
+
+    assert result["scene_asset_id"]
+    clip = next(
+        item for item in real_store.list_assets(project_id=project.project_id)
+        if item["asset_id"] == result["scene_asset_id"]
+    )
+    assert clip is not None
+
+
 def test_the_clip_says_which_scene_it_was_made_for(tmp_path: Path) -> None:
     service, store, project_id = _service(tmp_path)
 
