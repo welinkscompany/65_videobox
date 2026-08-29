@@ -15,6 +15,31 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 type ActionToken = { epoch: number; name: string };
 type LoadToken = { epoch: number; key: string };
 
+// 유튜브 학습이 비동기로 바뀌면서(owner 결정 2026-08-29, 2회차) 화면이 결과를
+// 직접 기다리지 않고 물어서 받는다. 2초 간격 300회 = 최대 10분 -- 백엔드
+// 다운로드 한도(600초)와 맞춘다.
+const YOUTUBE_IMPORT_POLL_INTERVAL_MS = 2000;
+const YOUTUBE_IMPORT_POLL_MAX_ATTEMPTS = 300;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function pollYoutubeImportUntilDone(
+  projectId: string,
+  jobId: string,
+  isStillRelevant: () => boolean,
+): Promise<YoutubeReferenceImport> {
+  for (let attempt = 0; attempt < YOUTUBE_IMPORT_POLL_MAX_ATTEMPTS; attempt += 1) {
+    if (!isStillRelevant()) throw new Error("youtube_import_cancelled");
+    const current = await api.getYoutubeReferenceStyleImportStatus(projectId, jobId);
+    if (current.status === "succeeded" && current.result) return current.result;
+    if (current.status === "failed") throw new Error(current.error_detail ?? "youtube_import_failed");
+    await delay(YOUTUBE_IMPORT_POLL_INTERVAL_MS);
+  }
+  throw new Error("youtube_import_timed_out");
+}
+
 function candidateStatus(candidate: TtsCandidateRecord) {
   if (candidate.technical_status !== "accepted") return "사용할 수 없음";
   if (candidate.operator_review_status === "approved") return "청취 승인됨";
@@ -240,7 +265,12 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
     try {
       let result: YoutubeReferenceImport;
       try {
-        result = await api.importReferenceStyleFromYoutube(expectedProjectId, url);
+        // 비동기로 바뀌었다(owner 결정 2026-08-29, 2회차) -- 다운로드·오디오
+        // 추출·컷/색감 분석을 합치면 긴 영상에서 nginx 330초 타임아웃보다
+        // 오래 걸릴 수 있어, 요청 자체는 바로 돌아오고 여기서 상태를 물어본다.
+        const started = await api.startYoutubeReferenceStyleImport(expectedProjectId, url);
+        if (isCurrent(token.epoch, expectedProjectId)) setMessage("영상을 내려받고 분석하는 중이에요. 시간이 걸릴 수 있어요…");
+        result = await pollYoutubeImportUntilDone(expectedProjectId, started.job_id, () => isCurrent(token.epoch, expectedProjectId));
       } catch {
         if (isCurrent(token.epoch, expectedProjectId)) {
           setActionError("이 링크에서 목소리를 가져오지 못했어요. 본인이 올린 유튜브 영상 주소가 맞는지 확인해 주세요.");

@@ -206,10 +206,21 @@ describe("VoiceTtsSettings", () => {
         { asset_id: "sample_from_youtube", asset_type: "voice_sample_audio", storage_uri: "local://voice/youtube.wav" },
       ]);
     vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
-    const importFromYoutube = vi.spyOn(api, "importReferenceStyleFromYoutube").mockResolvedValue({
-      voice_sample_asset_id: "sample_from_youtube",
-      pacing: { average_clip_duration_sec: 2.4, clip_count: 5, shortest_clip_sec: 1.1, longest_clip_sec: 4.2 },
-      color: { average_brightness: 150, average_colorfulness: 30, warm_cool_bias: 12, sample_count: 8 },
+    // 비동기로 바뀌었다(owner 결정 2026-08-29, 2회차) -- 시작 요청은 job_id만
+    // 받고, 화면은 그 job_id로 상태를 물어서 결과를 받는다.
+    const startImport = vi.spyOn(api, "startYoutubeReferenceStyleImport").mockResolvedValue({
+      job_id: "job-1",
+      status: "processing",
+    });
+    vi.spyOn(api, "getYoutubeReferenceStyleImportStatus").mockResolvedValue({
+      job_id: "job-1",
+      status: "succeeded",
+      error_detail: null,
+      result: {
+        voice_sample_asset_id: "sample_from_youtube",
+        pacing: { average_clip_duration_sec: 2.4, clip_count: 5, shortest_clip_sec: 1.1, longest_clip_sec: 4.2 },
+        color: { average_brightness: 150, average_colorfulness: 30, warm_cool_bias: 12, sample_count: 8 },
+      },
     });
 
     render(<VoiceTtsSettings projectId="project-a" />);
@@ -220,7 +231,7 @@ describe("VoiceTtsSettings", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "유튜브 링크로 배우기" }));
 
-    await waitFor(() => expect(importFromYoutube).toHaveBeenCalledWith("project-a", "https://youtu.be/dQw4w9WgXcQ"));
+    await waitFor(() => expect(startImport).toHaveBeenCalledWith("project-a", "https://youtu.be/dQw4w9WgXcQ"));
     expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
     expect(await screen.findByText(/컷 빠르기: 평균 2\.4초마다 전환/)).toBeVisible();
     expect(screen.getByText(/색감: 밝기 150\/255, 따뜻한 톤/)).toBeVisible();
@@ -230,7 +241,9 @@ describe("VoiceTtsSettings", () => {
   it("유튜브 링크를 가져오지 못하면 이유를 말하고 목록은 그대로 둔다", async () => {
     vi.spyOn(api, "listVoiceSamples").mockResolvedValue([]);
     vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
-    vi.spyOn(api, "importReferenceStyleFromYoutube").mockRejectedValue(new Error("not youtube"));
+    // 유튜브가 아닌 링크는 다운로드를 걸기 전에 백엔드가 바로 거절한다
+    // (`start_youtube_reference_style_import`의 `is_youtube_url` 확인).
+    vi.spyOn(api, "startYoutubeReferenceStyleImport").mockRejectedValue(new Error("not youtube"));
 
     render(<VoiceTtsSettings projectId="project-a" />);
 

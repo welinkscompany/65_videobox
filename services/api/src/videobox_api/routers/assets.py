@@ -30,6 +30,8 @@ from videobox_api.models import (
     TTSListeningReviewRequest,
     YoutubeReferenceImportRequest,
     YoutubeReferenceImportResponse,
+    YoutubeReferenceImportStartResponse,
+    YoutubeReferenceImportStatusResponse,
 )
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_core_engine.asset_browser_preview import BrowserPreviewError
@@ -299,22 +301,35 @@ def build_assets_router(
             storage_uri=asset.storage_uri,
         )
 
-    @router.post("/api/projects/{project_id}/reference-style/from-youtube", status_code=status.HTTP_201_CREATED)
-    def import_reference_style_from_youtube(
-        project_id: str, payload: YoutubeReferenceImportRequest
-    ) -> YoutubeReferenceImportResponse:
+    @router.post("/api/projects/{project_id}/reference-style/from-youtube", status_code=status.HTTP_202_ACCEPTED)
+    def start_youtube_reference_style_import(
+        project_id: str, payload: YoutubeReferenceImportRequest, background_tasks: BackgroundTasks,
+    ) -> YoutubeReferenceImportStartResponse:
         """owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?"
 
-        본인 유튜브 영상 하나에서 목소리 샘플(바로 쓸 수 있다)과 컷 빠르기·
-        색감 리포트(지금은 보여주기만 한다)를 같이 뽑는다.
+        **비동기로 바뀌었다(owner 결정 2026-08-29, 2회차).** 다운로드·오디오
+        추출·컷/색감 분석을 합치면 긴 영상에서는 nginx 프록시 330초 타임아웃보다
+        오래 걸릴 수 있어, 이 요청은 작업만 걸어 두고 바로 202로 돌아온다.
+        실제 진행 상황은 `GET .../from-youtube/{job_id}`로 확인한다.
         """
         try:
-            result = orchestrator.import_reference_style_from_youtube(
-                project_id=project_id, url=payload.url,
-            )
+            started = orchestrator.start_youtube_reference_style_import(project_id=project_id, url=payload.url)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return YoutubeReferenceImportResponse(**result)
+        background_tasks.add_task(
+            orchestrator.run_youtube_reference_style_import_job,
+            project_id=project_id, job_id=started["job_id"], url=payload.url,
+        )
+        return YoutubeReferenceImportStartResponse(**started)
+
+    @router.get("/api/projects/{project_id}/reference-style/from-youtube/{job_id}")
+    def get_youtube_reference_style_import(project_id: str, job_id: str) -> YoutubeReferenceImportStatusResponse:
+        try:
+            job = orchestrator.get_youtube_reference_style_import_job(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        result = YoutubeReferenceImportResponse(**job["result"]) if job["result"] is not None else None
+        return YoutubeReferenceImportStatusResponse(job_id=job["job_id"], status=job["status"], result=result, error_detail=job["error_detail"])
 
     @router.post("/api/projects/{project_id}/tts-candidates", status_code=status.HTTP_201_CREATED)
     def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> TTSCandidateResponse:

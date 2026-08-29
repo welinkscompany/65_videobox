@@ -845,6 +845,10 @@ export type AssetResponse = {
 export type ReferencePacing = { average_clip_duration_sec: number; clip_count: number; shortest_clip_sec: number; longest_clip_sec: number };
 export type ReferenceColor = { average_brightness: number; average_colorfulness: number; warm_cool_bias: number; sample_count: number };
 export type YoutubeReferenceImport = { voice_sample_asset_id: string; pacing: ReferencePacing; color: ReferenceColor };
+/** 비동기로 바뀌었다(owner 결정 2026-08-29, 2회차) -- 요청은 바로 이걸 받고,
+ *  실제 결과는 `job_id`로 상태를 물어서 받는다. */
+export type YoutubeReferenceImportStart = { job_id: string; status: "processing" };
+export type YoutubeReferenceImportStatus = { job_id: string; status: "processing" | "succeeded" | "failed"; result: YoutubeReferenceImport | null; error_detail: string | null };
 
 export type AssetRegistrationRequest = {
   source_path: string;
@@ -2730,12 +2734,14 @@ export const api = {
       body: payload,
     });
   },
-  importReferenceStyleFromYoutube: (projectId: string, url: string) =>
-    request<YoutubeReferenceImport>(`/api/projects/${projectId}/reference-style/from-youtube`, {
+  startYoutubeReferenceStyleImport: (projectId: string, url: string) =>
+    request<YoutubeReferenceImportStart>(`/api/projects/${projectId}/reference-style/from-youtube`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url }),
     }),
+  getYoutubeReferenceStyleImportStatus: (projectId: string, jobId: string) =>
+    request<YoutubeReferenceImportStatus>(`/api/projects/${projectId}/reference-style/from-youtube/${jobId}`),
   listNarrationAudio: async (projectId: string): Promise<AssetResponse[]> => {
     const payload = await request<{ assets: AssetResponse[] }>(
       `/api/projects/${projectId}/assets/narration-audio`,

@@ -70,13 +70,24 @@ def test_imports_a_voice_sample_and_a_style_report_from_one_video(
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "Reference Import"}).json()["project_id"]
 
-    response = client.post(
+    started = client.post(
         f"/api/projects/{project_id}/reference-style/from-youtube",
         json={"url": "https://youtu.be/dQw4w9WgXcQ"},
     )
 
-    assert response.status_code == 201, response.text
-    body = response.json()
+    # 비동기로 바뀌었다(owner 결정 2026-08-29, 2회차) -- 요청 자체는 바로
+    # 202로 돌아오고, 실제 결과는 job_id로 상태를 확인해서 받는다.
+    # `TestClient`는 백그라운드 작업을 응답 준비 과정에서 같이 끝내므로
+    # 바로 이어서 확인해도 이미 끝나 있다.
+    assert started.status_code == 202, started.text
+    job_id = started.json()["job_id"]
+    assert started.json()["status"] == "processing"
+
+    response = client.get(f"/api/projects/{project_id}/reference-style/from-youtube/{job_id}")
+    assert response.status_code == 200, response.text
+    status_body = response.json()
+    assert status_body["status"] == "succeeded", status_body
+    body = status_body["result"]
     assert body["voice_sample_asset_id"]
     assert body["pacing"]["clip_count"] >= 1
     assert body["pacing"]["average_clip_duration_sec"] > 0

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 from urllib.request import urlopen
+from uuid import uuid4
 
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
@@ -21,7 +23,7 @@ from videobox_core_engine.audio_export import extract_audio_only
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.narration_retake_detection import detect_retake_candidates
 from videobox_core_engine.reference_style_analysis import analyze_color, analyze_pacing
-from videobox_core_engine.youtube_import import download_youtube_video
+from videobox_core_engine.youtube_import import YoutubeImportError, download_youtube_video, is_youtube_url
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -118,6 +120,16 @@ class ApiOrchestrator:
         # This is intentionally a provider-neutral local planning seam. No
         # LLM/provider transport is constructed for an interview.
         self.creation_interview_runtime = creation_interview_runtime or DeterministicCreationInterviewRuntime()
+        # 유튜브 학습 작업 상태(owner 결정 2026-08-29: "비동기로 바꾼다").
+        # 다운로드·오디오 추출·컷/색감 분석을 합치면 nginx 프록시의 330초
+        # 타임아웃보다 오래 걸릴 수 있어 요청 하나 안에서 동기로 끝내지 않는다.
+        # **메모리에만 있다** -- 이 작업은 재시도해도 비용이 크지 않은 일회성
+        # 가져오기라, 재시작 사이 생존이 필요한 진짜 작업 큐(`MediaAnalysisService`가
+        # 쓰는 SQLite claim 방식)를 새로 만들 만큼 값이 크지 않다고 판단했다.
+        # 서버가 재시작되면 진행 중이던 작업은 사라지고 owner가 다시 시도해야
+        # 한다 -- 그 트레이드오프를 감수한다.
+        self._youtube_import_jobs: dict[str, dict[str, Any]] = {}
+        self._youtube_import_jobs_lock = threading.Lock()
 
     def create_creation_brief(self, **kwargs: Any) -> dict[str, Any]:
         return self.pipeline.create_creation_brief(runtime=self.creation_interview_runtime, **kwargs)
@@ -292,6 +304,38 @@ class ApiOrchestrator:
             storage_uri=asset["storage_uri"],
         )
 
+    def start_youtube_reference_style_import(self, *, project_id: str, url: str) -> dict[str, Any]:
+        """유튜브 학습을 **바로 시작만** 하고 돌아온다(owner 결정 2026-08-29).
+
+        실제 다운로드·분석은 `run_youtube_reference_style_import_job`이 백그라운드에서
+        한다 -- 그래야 nginx 프록시 330초 타임아웃보다 오래 걸리는 긴 영상도
+        요청 자체는 즉시 끝난다. 주소 형식만 여기서 먼저 확인해 owner가 바로
+        고칠 수 있는 실수(유튜브 링크가 아님)는 기다리게 하지 않는다.
+        """
+        if not is_youtube_url(url):
+            raise YoutubeImportError("youtube_url_invalid")
+        job_id = uuid4().hex
+        with self._youtube_import_jobs_lock:
+            self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "processing", "result": None, "error_detail": None}
+        return {"job_id": job_id, "status": "processing"}
+
+    def run_youtube_reference_style_import_job(self, *, project_id: str, job_id: str, url: str) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        try:
+            result = self.import_reference_style_from_youtube(project_id=project_id, url=url)
+            with self._youtube_import_jobs_lock:
+                self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "succeeded", "result": result, "error_detail": None}
+        except Exception as exc:
+            with self._youtube_import_jobs_lock:
+                self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "failed", "result": None, "error_detail": str(exc)}
+
+    def get_youtube_reference_style_import_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        with self._youtube_import_jobs_lock:
+            job = self._youtube_import_jobs.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            raise KeyError("youtube_import_job_not_found")
+        return {"job_id": job_id, "status": job["status"], "result": job["result"], "error_detail": job["error_detail"]}
+
     def import_reference_style_from_youtube(self, *, project_id: str, url: str) -> dict[str, Any]:
         """본인 유튜브 영상 하나에서 목소리 샘플과 편집 스타일 리포트를 함께 뽑는다.
 
@@ -300,6 +344,9 @@ class ApiOrchestrator:
         등록)와 그림(컷 빠르기·색감 분석)을 같이 뽑는다. 내려받은 영상 자체는
         프로젝트 자산으로 남기지 않는다 -- 이번 요청은 "이 영상을 소재로 쓰겠다"가
         아니라 "이 영상에서 스타일만 배우겠다"였다.
+
+        **동기 버전은 그대로 남긴다** -- `run_youtube_reference_style_import_job`이
+        이 메서드를 그대로 부른다. 실제 무거운 일은 전부 여기 있다.
         """
         staging_dir = self.store.project_root(project_id) / "staging"
         video_path: Path | None = None

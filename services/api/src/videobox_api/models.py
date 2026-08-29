@@ -620,6 +620,22 @@ class YoutubeReferenceImportResponse(BaseModel):
     color: ReferenceColorResponse
 
 
+class YoutubeReferenceImportStartResponse(BaseModel):
+    """`from-youtube`를 걸면 바로 이걸 받는다(owner 결정 2026-08-29: 비동기로).
+
+    실제 결과는 `job_id`로 상태 확인 endpoint를 불러 받는다."""
+
+    job_id: str
+    status: Literal["processing"]
+
+
+class YoutubeReferenceImportStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["processing", "succeeded", "failed"]
+    result: YoutubeReferenceImportResponse | None = None
+    error_detail: str | None = None
+
+
 class BrowserPreviewResponse(BaseModel):
     status: Literal["pending", "running", "ready", "failed"]
     job_id: str | None = None
