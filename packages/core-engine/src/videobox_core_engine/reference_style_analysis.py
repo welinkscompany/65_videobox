@@ -116,6 +116,7 @@ def analyze_pacing(
     scene_threshold: float = 0.4,
     initial_scene_ignore_seconds: float = 0.5,
     ffmpeg_binary: str = "ffmpeg",
+    ffprobe_binary: str = "ffprobe",
     timeout_seconds: float = 180.0,
 ) -> PacingProfile:
     if not video_path.is_file():
@@ -147,7 +148,7 @@ def analyze_pacing(
             timestamps.append(timestamp)
     timestamps.sort()
 
-    duration = _probe_duration_sec(video_path, ffmpeg_binary=ffmpeg_binary, timeout_seconds=timeout_seconds)
+    duration = _probe_duration_sec(video_path, ffprobe_binary=ffprobe_binary, timeout_seconds=timeout_seconds)
     boundaries = [0.0, *timestamps, duration]
     clip_lengths = [
         boundaries[index + 1] - boundaries[index]
@@ -164,8 +165,7 @@ def analyze_pacing(
     )
 
 
-def _probe_duration_sec(video_path: Path, *, ffmpeg_binary: str, timeout_seconds: float) -> float:
-    ffprobe_binary = ffmpeg_binary.replace("ffmpeg", "ffprobe") if "ffmpeg" in ffmpeg_binary else "ffprobe"
+def _probe_duration_sec(video_path: Path, *, ffprobe_binary: str, timeout_seconds: float) -> float:
     command = [
         ffprobe_binary, "-v", "error", "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1", str(video_path),

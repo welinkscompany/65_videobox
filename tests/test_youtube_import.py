@@ -17,6 +17,9 @@ from videobox_core_engine.youtube_import import (
     "http://m.youtube.com/watch?v=dQw4w9WgXcQ",
     "https://youtu.be/dQw4w9WgXcQ",
     "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+    # 재생목록 안에서 영상을 보다가 복사한 링크는 v=가 첫 물음이 아니다
+    # (2026-08-29 QA에서 이런 정상 링크가 거절되는 것을 발견해 고침).
+    "https://www.youtube.com/watch?list=PLxxxxxx&v=dQw4w9WgXcQ",
 ])
 def test_recognizes_real_youtube_url_shapes(url: str) -> None:
     assert is_youtube_url(url)
@@ -28,6 +31,7 @@ def test_recognizes_real_youtube_url_shapes(url: str) -> None:
     "not a url at all",
     "",
     "https://evil.example.com/youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://www.youtube.com/watch?list=PLxxxxxx",
 ])
 def test_rejects_anything_that_is_not_actually_youtube(url: str) -> None:
     assert not is_youtube_url(url)

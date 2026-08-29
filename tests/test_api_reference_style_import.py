@@ -101,7 +101,9 @@ def test_rejects_a_url_that_is_not_youtube_before_touching_anything(tmp_path: Pa
         json={"url": "https://vimeo.com/12345"},
     )
 
-    assert response.status_code >= 400
+    # 잘못된 링크는 서버 고장(500)이 아니라 owner가 고칠 수 있는 입력(422)이다
+    # (2026-08-29 QA에서 YoutubeImportError가 500으로 새던 것을 잡음).
+    assert response.status_code == 422, response.text
     assert LocalProjectStore(tmp_path).list_assets(project_id=project_id) == []
 
 

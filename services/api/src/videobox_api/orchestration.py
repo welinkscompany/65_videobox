@@ -307,12 +307,13 @@ class ApiOrchestrator:
             video_path = download_youtube_video(url, staging_dir)
             audio_path = video_path.with_suffix(".reference-audio.m4a")
             ffmpeg_binary = getattr(self.pipeline.final_renderer, "ffmpeg_binary", "ffmpeg")
+            ffprobe_binary = getattr(self.pipeline.final_renderer, "ffprobe_binary", "ffprobe")
             extract_audio_only(
                 source_video_path=video_path, destination_audio_path=audio_path,
                 ffmpeg_binary=ffmpeg_binary,
             )
             voice_asset = self.register_voice_sample_asset(project_id=project_id, source_path=audio_path)
-            pacing = analyze_pacing(video_path, ffmpeg_binary=ffmpeg_binary)
+            pacing = analyze_pacing(video_path, ffmpeg_binary=ffmpeg_binary, ffprobe_binary=ffprobe_binary)
             color = analyze_color(video_path, ffmpeg_binary=ffmpeg_binary)
             return {
                 "voice_sample_asset_id": voice_asset.asset_id,

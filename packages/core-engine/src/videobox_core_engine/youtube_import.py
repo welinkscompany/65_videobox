@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any
 
 _YOUTUBE_HOST_PATTERN = re.compile(
-    r"^(https?://)?(www\.|m\.)?(youtube\.com/watch\?v=|youtube\.com/shorts/|youtu\.be/)",
+    r"^(https?://)?(www\.|m\.)?youtube\.com/(watch\?|shorts/)|^(https?://)?(www\.|m\.)?youtu\.be/",
     re.IGNORECASE,
 )
+_YOUTUBE_WATCH_VIDEO_ID_PATTERN = re.compile(r"[?&]v=", re.IGNORECASE)
 
 
 class YoutubeImportError(RuntimeError):
@@ -24,7 +25,18 @@ class YoutubeImportError(RuntimeError):
 
 
 def is_youtube_url(url: str) -> bool:
-    return bool(_YOUTUBE_HOST_PATTERN.match(url.strip()))
+    """유튜브 영상 링크인지 확인한다.
+
+    `watch?list=재생목록&v=영상id`처럼 `v=`가 첫 번째 물음이 아닌 재생목록
+    안에서 복사한 링크도 실제 owner 영상이다 -- `watch?v=`로 시작해야만
+    인정하던 옛 정규식은 이런 정상적인 링크를 거절했다(2026-08-29 QA에서 발견).
+    """
+    trimmed = url.strip()
+    if not _YOUTUBE_HOST_PATTERN.match(trimmed):
+        return False
+    if "youtube.com/watch" in trimmed.lower():
+        return bool(_YOUTUBE_WATCH_VIDEO_ID_PATTERN.search(trimmed))
+    return True
 
 
 def download_youtube_video(

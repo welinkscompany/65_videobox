@@ -541,7 +541,12 @@ export function CreationInterview({ projectId }: { projectId: string }) {
     let filled = 0;
     try {
       let gap = current.result?.gap_slots?.find((item) => item.segment_id);
+      let previousSegmentId: string | null = null;
       while (gap && gap.segment_id) {
+        // 같은 장면이 다시 나오면 replan이 그 장면을 못 지운 것이다 -- 채워지지도
+        // 않는데 계속 도는 것을 막는다(owner 요청 2026-08-29 QA에서 잡힌 결함).
+        if (gap.segment_id === previousSegmentId) throw new Error("auto_fill_stalled");
+        previousSegmentId = gap.segment_id;
         setAutoFillProgress(`${filled + 1}번째 빈 장면을 AI 그림으로 채우는 중이에요.`);
         await api.createSceneImage(projectId, {
           prompt: sceneTextOf(current, gap.segment_id),
@@ -558,6 +563,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       }
       setAutoFillProgress(filled > 0 ? `AI 그림으로 ${filled}개 장면을 채웠어요.` : null);
     } catch {
+      setAutoFillProgress(null);
       setError(`빈 장면을 AI로 채우다가 멈췄어요(${filled}개는 채웠어요). 남은 장면은 하나씩 만들어 주세요.`);
     } finally {
       setIsAutoFillingGaps(false);
