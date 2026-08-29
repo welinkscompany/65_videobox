@@ -31,7 +31,7 @@ export function ReviewAndOutputPage({
   return (
     <div className="vb-review-output" data-testid="review-and-output-page">
       <TimelineReviewSections projectId={projectId} state={state} refresh={refresh} onOpenSegment={onOpenSegment} />
-      <OutputsPage projectId={projectId} onOpenEditor={onOpenEditor} shared={data} onSharedRefresh={refresh} />
+      <OutputsPage projectId={projectId} onOpenEditor={onOpenEditor} shared={data} onSharedRefresh={refresh} reviewInline />
     </div>
   );
 }

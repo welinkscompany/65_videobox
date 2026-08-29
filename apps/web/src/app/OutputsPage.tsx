@@ -310,11 +310,16 @@ export type SharedTimelineRead = Readonly<{
   approval: ReviewApproval | null;
 }>;
 
-export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }: {
+export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, reviewInline = false }: {
   projectId: string;
   onOpenEditor: () => void;
   shared?: SharedTimelineRead;
   onSharedRefresh?: () => Promise<SharedTimelineRead>;
+  /** 이 화면 위에 검토 내용이 이미 같은 화면·같은 팝업 안에 보이고 있는가.
+   *  `ReviewAndOutputPage`가 그 경우 이 값을 준다 -- 그때는 체크리스트의
+   *  "검토" 항목이 통째로 `/review`로 이동시키는 링크를 내지 않는다. 승인
+   *  전이라는 사실 자체는 여전히 보여준다. */
+  reviewInline?: boolean;
 }) {
   const [state, setState] = useState<OutputState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -895,7 +900,10 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh }
         <li>
           <strong>검토</strong>
           <span>{reviewApproved ? "승인됨" : "승인 필요"}</span>
-          {!reviewApproved && hasCurrentEditingDraft ? <a className="vb-action-link" href={`/projects/${encodeURIComponent(projectId)}/review`}>검토 화면 열기</a> : null}
+          {/* 검토가 이미 이 화면 위에 함께 보이고 있으면(`ReviewAndOutputPage`)
+              따로 이동할 곳이 없다 -- 위로 올라가면 그 내용이 이미 있다.
+              단독으로 쓰일 때만 `/review`로 안내한다. */}
+          {!reviewApproved && hasCurrentEditingDraft && !reviewInline ? <a className="vb-action-link" href={`/projects/${encodeURIComponent(projectId)}/review`}>검토 화면 열기</a> : null}
         </li>
         <li>
           <strong>출력</strong>

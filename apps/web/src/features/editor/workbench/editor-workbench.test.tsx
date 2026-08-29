@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { EditorWorkbench, persistedPanelPixels } from "./EditorWorkbench";
 import * as previewStageModule from "../preview/preview-stage";
@@ -864,6 +864,21 @@ describe("편집기에서 내보내기", () => {
 
     const toolbar = document.querySelector(".vb-editor-workbench__toolbar");
     expect(Array.from(toolbar?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim())).toContain("내보내기");
+  });
+
+  /** owner(2026-08-27)의 지시대로 "검토"도 팝업 안에 들어와야 한다 -- 체크리스트의
+   *  `검토 화면 열기`가 `/review`로 통째로 이동시키면 편집기를 떠나는 것과
+   *  같다. 검토·출력을 이미 한 화면으로 합친 `ReviewAndOutputPage`를 그대로
+   *  재사용해서, 팝업을 열면 검토 내용이 처음부터 같은 다이얼로그 안에 보여야
+   *  한다(새 창·새 라우트로 이동하지 않고). */
+  it("내보내기 팝업 안에 검토 화면도 함께 있다", async () => {
+    render(<EditorWorkbench view={view} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "내보내기" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "내보내기" });
+    expect(await within(dialog).findByTestId("review-and-output-page")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("outputs-page")).toBeInTheDocument();
   });
 });
 

@@ -27,7 +27,7 @@ import { VariantSelector } from "../variants/VariantSelector";
 import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
 import { VariantServerControls } from "../variants/VariantServerControls";
 import { usePublishShellCanvas } from "../../shell/shellCanvas";
-import { OutputsPage } from "../../../app/OutputsPage";
+import { ReviewAndOutputPage } from "../../review/ReviewAndOutputPage";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 
 export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: number) {
@@ -572,7 +572,14 @@ function EditorWorkbenchInstance({
           **무엇이 막고 있는지 판정하는 일은 여기서 새로 적지 않는다.** 출력 화면이
           체크리스트(편집본·검토·출력)와 완성본 만들기를 이미 갖고 있고, 그 판정은
           검토 승인·낡음·자산 현재성까지 본다. 두 벌로 적으면 무엇을 언제 내보낼 수
-          있는지가 조용히 갈라진다. 그래서 그 화면을 **그대로** 팝업에 담는다. */}
+          있는지가 조용히 갈라진다. 그래서 그 화면을 **그대로** 팝업에 담는다.
+
+          **검토도 같은 팝업 안에 있다(owner 지시 2026-08-27 후속).** 체크리스트의
+          `검토 화면 열기`가 `/review`로 통째로 이동시키면 편집기를 떠나는 것과
+          같았다. `ReviewAndOutputPage`가 이미 검토와 출력을 한 화면으로 합쳐
+          두었으므로(`features/review/ReviewAndOutputPage.tsx`) 그것을 그대로
+          부른다 -- 검토 로직을 여기서 새로 적지 않는다. `/review`·`/output`
+          라우트는 그대로 남아 있어 주소를 직접 열면 여전히 같은 화면이 뜬다. */}
       <Button type="button" variant="outline" size="icon" title="내보내기 — 완성본 만들기" onClick={() => setExportOpen(true)}><Upload aria-hidden="true" /><span className="sr-only">내보내기</span></Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
@@ -651,8 +658,26 @@ function EditorWorkbenchInstance({
           <DialogTitle>내보내기</DialogTitle>
           <DialogDescription>완성본을 만들고 받습니다. 아직 못 만들면 무엇이 남았는지 알려 줘요.</DialogDescription>
         </DialogHeader>
-        {/* `편집 열기`는 이미 편집기 안이므로 팝업을 닫는 것으로 충분하다. */}
-        {exportOpen ? <OutputsPage projectId={view.projectId} onOpenEditor={() => setExportOpen(false)} /> : null}
+        {/* `편집 열기`는 이미 편집기 안이므로 팝업을 닫는 것으로 충분하다.
+            장면을 열면(검토 목록의 `편집하기`) 이 편집기 안에서 그 장면을 그대로
+            고르고 팝업만 닫는다 -- 라우트를 새로 부르면 세션이 다시 열려
+            "편집기를 떠나지 않는다"는 계약이 깨진다. */}
+        {exportOpen ? <ReviewAndOutputPage
+          projectId={view.projectId}
+          onOpenEditor={() => setExportOpen(false)}
+          onOpenSegment={({ segmentId }) => {
+            const target = view.tracks
+              .filter((track) => track.role === "narration")
+              .flatMap((track) => track.clips)
+              .find((clip) => clip.segmentId === segmentId)
+              ?? view.captions.find((caption) => caption.segmentId === segmentId);
+            if (target) {
+              selectSegment(segmentId);
+              setPlaybackSec(clampPlaybackSeconds(target.startSec, view.output.durationSec));
+            }
+            setExportOpen(false);
+          }}
+        /> : null}
       </DialogContent>
     </Dialog>
   </section>;
