@@ -110,6 +110,10 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-outputs { max-width:none; }
 .vb-outputs-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap: var(--vb-space-3); }
 .vb-outputs-grid [data-slot=card] { min-width:0; min-height:0; }
+/* `.vb-outputs`가 내보내기 팝업(`.vb-export-dialog`, 35rem 폭) 안에도 그대로
+   들어온다(2026-08-29). 4칸을 그대로 두면 칸마다 169px대로 눌려 완성본 카드의
+   영상·문구가 넘친다(실측 확인) -- 페이지 전용 4칸을 팝업 안에서만 1칸으로 줄인다. */
+.vb-export-dialog .vb-outputs-grid { grid-template-columns:1fr; }
 .vb-output-video { display:block; width:100%; max-width:100%; height:auto; max-height:18rem; object-fit:contain; border-radius: var(--vb-radius-sm); background:var(--vb-canvas); }
 .vb-outputs h1, .vb-creation-interview h1, .vb-media-library h2, .vb-project-archive h2 { margin: 0; font-size: clamp(var(--vb-text-xl),2.4vw,var(--vb-text-2xl)); letter-spacing:-.03em; }
 .vb-outputs p, .vb-creation-interview p, .vb-media-library > p, .vb-project-archive p { margin: 0; color:var(--vb-muted); line-height:1.55; }

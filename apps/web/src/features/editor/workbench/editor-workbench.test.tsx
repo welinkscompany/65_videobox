@@ -879,6 +879,10 @@ describe("편집기에서 내보내기", () => {
     const dialog = await screen.findByRole("dialog", { name: "내보내기" });
     expect(await within(dialog).findByTestId("review-and-output-page")).toBeInTheDocument();
     expect(within(dialog).getByTestId("outputs-page")).toBeInTheDocument();
+    // 이 문구가 다시 나타나면 그 링크가 되살아난 것이다 -- 누르면 `/review`로
+    // 통째로 이동해 팝업 안에 머문다는 이번 변경의 계약이 깨진다(코드리뷰에서
+    // 잡힘: 회귀를 잡는 테스트가 없었다).
+    expect(within(dialog).queryByText("검토 화면 열기")).not.toBeInTheDocument();
   });
 });
 
