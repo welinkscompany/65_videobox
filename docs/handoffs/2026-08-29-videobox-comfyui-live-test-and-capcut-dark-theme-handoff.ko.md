@@ -250,3 +250,37 @@ Wan 그래프(`UNETLoader` + `CLIPLoader(type=wan)` + `VAELoader` +
   전부 이 worktree 브랜치에 커밋됨, push는 안 함(요청 없었음).
 - Wan provider 추가 후 **백엔드 전체 pytest 재확인: 4145 passed, 56 skipped,
   0 failed**(`0:31:30`) — 새 테스트 9개 포함해 전부 초록.
+
+## 2026-08-29 네 번째 이어진 세션 — 실제로 받고, 실제로 돌리고, 화면 앞까지
+
+owner가 "푸쉬하고 comfyui 추가 파일받고, 원래 만든거외에 별도로 만들자.
+그리고 gif 이미지 만드는 기능도 해야되"라고 지시. 전부 처리했다.
+
+1. **푸시**: 이 시점까지의 모든 커밋 origin에 push 완료.
+2. **파일 다운로드**: UMT5 텍스트 인코더(11.37GB)·Wan VAE(253.8MB)를
+   huggingface(`Comfy-Org/Wan_2.1_ComfyUI_repackaged`)에서 받음 — 둘 다 기대
+   바이트 수와 정확히 일치, 완결.
+3. **실제로 검증함(추정 아님)**: owner의 실제 ComfyUI(RTX 5090)에 그래프를
+   직접 걸어 진짜 영상이 나오는지 확인.
+   - 작은 설정(512x288·17프레임·8스텝): **약 12초**.
+   - **제품 기본값(1920x1080·81프레임·20스텝): 약 18분(1067초).**
+   - mp4·GIF 변환도 이 실제 출력으로 검증(각 1초 미만).
+4. **별도 기능으로 구현**(owner 지시): `SceneVideoService` +
+   `POST/GET /api/projects/{id}/scene-videos`(비동기 202+`job_id` 폴링, 유튜브
+   학습과 같은 패턴). `scene_image_service.py`·자동채우기는 전혀 안 건드림 —
+   18분은 자동채우기(여러 장면을 한 번에 채움)에 넣기엔 너무 느리기 때문.
+   커밋 `f669f173b`.
+5. **GIF 기능**: 새 자산 종류 없이 `AssetType.IMAGE`로 등록 — 라이브러리
+   미리보기가 이미 그림 자산을 `<img>`로 그리고 있어서 화면 코드 무수정으로
+   애니메이션이 재생된다.
+6. 백엔드 전체 pytest 재확인: **4159 passed, 56 skipped, 0 failed**(`0:32:57`,
+   새 테스트 23건 포함). 전부 push 완료(`f669f173b`까지).
+
+**다음 세션 최우선순위 — 프론트엔드 진입점.** API는 실제로 도는 것까지
+검증했지만 화면에서 부르는 곳이 없다. `CLAUDE.md` §4 "부품과 제품은 다르다"가
+정확히 이 상태를 가리킨다 — **이 상태로는 완료가 아니다.** 편집기 어디에
+"AI로 진짜 영상 만들기" 버튼을 놓을지(장면 그림 만들기 옆? 별도 메뉴?)부터
+owner와 정해야 한다. 18분 대기가 실제 제품에 맞는지도 그때 같이 확인.
+
+`VideoGenerationConfig.enabled` 기본값은 여전히 꺼짐 — 켤 때는
+`VIDEOBOX_VIDEO_GENERATION_ENABLED=true` 한 줄이면 된다.
