@@ -31,8 +31,20 @@ npm run tauri build  # 배포용 실행 파일
 
 ## 아직 안 한 것 (다음 세션 몫)
 
-- Rust 설치 뒤 실제 빌드·실행 검증 — 지금은 설정 파일만 있고 owner 화면에서
-  실제로 눌러 본 적이 없다(`CLAUDE.md` §4, 완료 아님).
+- **실제 빌드가 막혀 있다.** Rust(rustup)와 Visual Studio Build Tools(C++
+  워크로드)는 2026-08-30에 winget으로 설치했고 MSVC 링커까지는 통과했지만,
+  **Windows 11 Smart App Control**(`Get-CimInstance ... SmartAppControlState`
+  → `On`)이 새로 컴파일된 서명 안 된 `build-script-build.exe`(cargo가 빌드
+  스크립트를 실행하려고 만드는 임시 실행 파일)를 차단한다(`os error 4551`,
+  "애플리케이션 제어 정책에서 이 파일을 차단했습니다"). **owner 확인 없이
+  Smart App Control을 끄지 않았다** — 이 기능은 한 번 끄면 OS 재설치 없이는
+  되돌리기 어려운 시스템 보안 설정이라 임의로 손대지 않는다.
+  - owner가 고를 수 있는 길: (1) Windows 보안 → 앱 및 브라우저 제어에서 이번에
+    막힌 항목을 개별적으로 허용(전체를 끄는 것보다 가볍다), (2) Smart App
+    Control 자체를 끄기(되돌리기 어려움, 신중히), (3) 서명된 빌드 파이프라인을
+    별도로 구성(더 큰 작업).
+  - 이 문제를 owner가 해결한 뒤에야 `npm run tauri dev`/`build` 실제 검증이
+    가능하다(`CLAUDE.md` §4, "완료 = owner가 화면에서 실제로 쓸 수 있는가").
 - 컨테이너 스택이 안 떠 있을 때 창이 자동으로 `owner-ready.ps1 -Mode Start`를
   불러 주는 부트스트랩(지금은 스택이 이미 떠 있다고 가정).
 - 앱 아이콘 — `src-tauri/icons/`가 비어 있어 Tauri 기본 아이콘으로 빌드된다.
