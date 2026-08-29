@@ -210,6 +210,27 @@ def resolve_image_generation_config() -> "ImageGenerationConfig":
     )
 
 
+def resolve_video_generation_config() -> "VideoGenerationConfig":
+    """`resolve_image_generation_config`와 같은 이유로 존재한다 -- 컨테이너
+    팩토리 호출은 인자를 안 받으므로 여기서 환경변수를 읽는다.
+
+    `enabled`는 기본이 꺼짐이다(2026-08-29 조사: 텍스트 인코더·VAE 미비로
+    아직 못 돈다) -- 값이 있어도 켜는 것은 별도 결정이다."""
+    defaults = VideoGenerationConfig()
+    return VideoGenerationConfig(
+        enabled=_environment_flag("VIDEOBOX_VIDEO_GENERATION_ENABLED"),
+        base_url=_environment_text("VIDEOBOX_VIDEO_GENERATION_BASE_URL", defaults.base_url),
+        model_name=_environment_text("VIDEOBOX_VIDEO_MODEL_NAME", defaults.model_name),
+        clip_name=_environment_text("VIDEOBOX_VIDEO_CLIP_NAME", defaults.clip_name),
+        vae_name=_environment_text("VIDEOBOX_VIDEO_VAE_NAME", defaults.vae_name),
+        weight_dtype=_environment_text("VIDEOBOX_VIDEO_WEIGHT_DTYPE", defaults.weight_dtype),
+        steps=_environment_positive_int("VIDEOBOX_VIDEO_STEPS", defaults.steps),
+        timeout_seconds=_environment_positive_int(
+            "VIDEOBOX_VIDEO_TIMEOUT_SECONDS", defaults.timeout_seconds
+        ),
+    )
+
+
 def resolve_local_runtime_config() -> "LocalOpenAICompatibleRuntimeConfig":
     """Resolve the local LM Studio runtime config for callers that pass none.
 
@@ -443,3 +464,56 @@ class ImageGenerationConfig:
         if name in _NON_COMMERCIAL_IMAGE_MODELS:
             return False
         return None
+
+
+@dataclass(slots=True, frozen=True)
+class VideoGenerationConfig:
+    """대본 장면에 짧은 실제 동영상을 만드는 경로. owner 결정 2026-08-29
+    (`docs/decisions/2026-08-29-ai-video-naming-and-packaging-followups.ko.md`) --
+    클라우드 API가 아니라 로컬 비디오 모델(ComfyUI 확장)로 간다.
+
+    **아직 실행할 수 없다.** 2026-08-29 조사로 Wan 체크포인트는 있지만 텍스트
+    인코더(`umt5_xxl_fp16.safetensors`)가 중단된 다운로드(`.part`)이고 Wan 전용
+    VAE가 아예 없다 -- 둘 다 owner 승인 후 받아야 한다. `enabled` 기본값이
+    `False`인 이유도 그것이다. 값을 미리 정의해 두는 것은 그래프·서비스 코드를
+    지금 짜고 테스트할 수 있게 하기 위해서다(2-C처럼 provider가 준비되면
+    설정 한 줄로 켠다).
+    """
+
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:8188"
+    model_name: str = "wan2.1_t2v_1.3B_fp16.safetensors"
+    clip_name: str = "umt5_xxl_fp16.safetensors"
+    #: Wan 전용 VAE. 2026-08-29 기준 owner 기계에 없다 -- 받으면 실제 파일명으로 맞춘다.
+    vae_name: str = "wan_2.1_vae.safetensors"
+    weight_dtype: str = "default"
+    steps: int = 20
+    #: 커뮤니티에서 흔히 쓰는 값이다. **실측 전이라 owner 기계에서 첫 실행 뒤
+    #: 조정이 필요할 수 있다** -- `weight_dtype`처럼 확정된 값이 아니다.
+    cfg: float = 5.0
+    #: (length - 1)이 4의 배수여야 한다. 81 = 24fps에서 약 3.3초.
+    length_frames: int = 81
+    fps: float = 24.0
+    timeout_seconds: int = 900
+
+    _CONTAINER_BASE_URL = "http://host.docker.internal:8188"
+
+    def __post_init__(self) -> None:
+        if self.base_url not in ("http://127.0.0.1:8188", self._CONTAINER_BASE_URL):
+            raise ValueError(
+                "video_generation_config.base_url must be exactly "
+                "http://127.0.0.1:8188, or "
+                f"{self._CONTAINER_BASE_URL} when running in the container."
+            )
+        for name, value in (
+            ("model_name", self.model_name), ("clip_name", self.clip_name), ("vae_name", self.vae_name),
+        ):
+            if not value.strip():
+                raise ValueError(f"video_generation_config.{name} must not be blank.")
+        if (self.length_frames - 1) % 4 != 0:
+            raise ValueError("video_generation_config.length_frames must satisfy (length - 1) % 4 == 0.")
+        for name, value in (
+            ("steps", self.steps), ("length_frames", self.length_frames), ("timeout_seconds", self.timeout_seconds),
+        ):
+            if value <= 0:
+                raise ValueError(f"video_generation_config.{name} must be greater than zero.")

@@ -56,3 +56,36 @@ class SceneImageProvider(Protocol):
 
     def generate_image(self, request: SceneImageRequest) -> GeneratedSceneImage:
         """Generate one still image for a script scene."""
+
+
+@dataclass(slots=True, frozen=True)
+class SceneVideoRequest:
+    """대본의 한 장면에 얹을 짧은 영상 하나 (owner 결정 2026-08-29 2회차: 로컬
+    비디오 모델). `SceneImageRequest`와 짝이지만 영상은 길이(프레임 수)가
+    추가로 필요하다."""
+
+    prompt: str
+    width: int
+    height: int
+    seed: int
+    #: Wan 계열은 4프레임 단위로 나뉜다((length-1) % 4 == 0) -- 그래프가 이 값을
+    #: 그대로 못 실으면 조용히 다른 길이가 나온다.
+    length_frames: int
+
+
+@dataclass(slots=True, frozen=True)
+class GeneratedSceneVideo:
+    """`GeneratedSceneImage`와 같은 이유로 바이트만 돌려준다 -- 저장·자산화는
+    호출자(장면 서비스)가 맡는다."""
+
+    provider_name: str
+    video_bytes: bytes
+    file_name: str
+    metadata: dict[str, Any]
+
+
+class SceneVideoProvider(Protocol):
+    provider_name: str
+
+    def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
+        """Generate one short video clip for a script scene."""

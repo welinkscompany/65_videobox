@@ -34,17 +34,33 @@ AnimateDiff·Stable Video Diffusion류 ComfyUI 노드)은 아직 조사도 시�
 **재사용 게이트 조사 결과(2026-08-29, 이어진 세션, 읽기 전용 확인만 함 —
 파일 다운로드·설치는 owner 자신의 몫이라 손대지 않았다):**
 
-- **모델은 이미 있다.** `C:\Users\atgro\Documents\comfy\ComfyUI\models\diffusion_models\wan2.1_t2v_1.3B_fp16.safetensors`
-  (Wan 2.1 텍스트→영상, 1.3B, fp16) — 새로 받을 것 없다.
-- **노드도 이미 있다.** `custom_nodes/`에 별도 확장이 없는데도 ComfyUI 코어
-  자체가 Wan을 지원한다 — `comfy/ldm/wan/model.py`, `comfy_extras/nodes_wan.py`.
-  **커스텀 노드 설치가 필요 없다.**
-- 다만 이 발견은 "모델·노드가 있다"까지다. **VideoBox 쪽 워크플로 JSON·서비스
-  코드는 아직 하나도 없다** — `scene_image_service.py`의 `_generate`(정지
-  이미지 생성)와 `_still_to_clip`(zoompan 가짜 영상)이 지금 실제로 도는
-  전부다. 다음 세션은 여기서부터 시작: Wan t2v/i2v용 워크플로 그래프를
-  짜고, `_still_to_clip`을 대체하거나 나란히 두는 새 서비스 메서드를 만드는
-  일이 실제 구현 범위다.
+**정정(같은 세션, 몇 시간 뒤): 아래 "받을 것 없다"는 처음에 성급하게 적은
+것이고 틀렸다.** 체크포인트만 보고 판단했지 텍스트 인코더·VAE까지는 안
+살폈다 — 다시 살펴보니 실제로 부족한 것이 있다.
+
+- **영상 모델 체크포인트는 있다.** `models/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors`
+  (Wan 2.1 텍스트→영상, 1.3B, fp16).
+- **ComfyUI 코어 노드도 있다.** `custom_nodes/`에 별도 확장 없이 코어 자체가
+  Wan을 지원한다 — `comfy/ldm/wan/model.py`, `comfy_extras/nodes_wan.py`
+  (`WanImageToVideo`는 `start_image`가 optional이라 이미 만들어 둔 장면
+  그림을 그대로 넣어 이미지→영상으로 쓸 수 있다). 영상 저장 노드도 코어에
+  있다(`comfy_extras/nodes_video.py`의 `SaveWEBM` — `SaveImage`와 같은 방식으로
+  `/history`·`/view`에서 꺼낼 수 있어 기존 `ComfyUIHTTPTransport` 재사용 가능).
+- **텍스트 인코더가 미완성이다.** `models/text_encoders/umt5_xxl_fp16.safetensors.2nb_9owj.part`
+  — `.part` 확장자가 그대로 남은 **중단된 다운로드**다(2026-08-06 날짜, 1.74GB
+  중 어디까지 받혔는지 불명).
+- **Wan 전용 VAE가 아예 없다.** Wan은 FLUX가 쓰는 `AutoencoderKL`(`ae.safetensors`)이
+  아니라 별도 `WanVAE` 클래스가 필요하다(`comfy/ldm/wan/vae.py`). `models/vae/`에는
+  `ae.safetensors`뿐이고 Wan용 파일(`wan_2.1_vae.safetensors`류)은 없다.
+- 다운로드·설치는 owner의 로컬 ComfyUI 설정이라 **owner 승인 없이 손대지
+  않았다**(파일 다운로드는 명시 승인 필요 항목). 다음 세션이 이 작업을
+  시작하려면 먼저 owner에게 두 파일(완결된 UMT5 텍스트 인코더, Wan VAE)이
+  필요하다고 알리고 받아도 되는지 물어야 한다.
+- VideoBox 쪽 워크플로 JSON·서비스 코드는 모델 준비와 별개로 **아직 하나도
+  없다** — `scene_image_service.py`의 `_generate`(정지 이미지 생성)와
+  `_still_to_clip`(zoompan 가짜 영상)이 지금 실제로 도는 전부다. 그래프
+  설계(`ComfyUIImageGenerationProvider._graph`와 같은 자리)는 모델 파일이
+  갖춰지지 않아도 미리 짤 수 있다.
 - 컨테이너 CPU 제약(2코어)이 정지화면 확대에서도 문제였다(`-threads 2` 수정,
   2026-08-29 커밋 `6ce7b51db`) — 실제 동영상 생성은 훨씬 무거우므로 리소스 요구량을
   먼저 실측한다.
