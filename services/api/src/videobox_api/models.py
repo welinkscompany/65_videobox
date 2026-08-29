@@ -454,6 +454,43 @@ class SceneImageListResponse(BaseModel):
     images: list[SceneImageResponse]
 
 
+class SceneVideoCreateRequest(BaseModel):
+    """대본의 한 장면에 얹을 짧은 실제 동영상 하나. owner 결정 2026-08-29(2회차) --
+    `SceneImageCreateRequest`(정지 이미지+zoompan)와는 별개 경로다."""
+
+    prompt: str = Field(min_length=1)
+    segment_id: str = Field(min_length=1)
+    vertical: bool = False
+    gap_slot_id: str | None = None
+    make_gif: bool = False
+
+
+class SceneVideoStartResponse(BaseModel):
+    """실측(2026-08-29): 1920x1080·81프레임·20스텝이 5분을 넘겨 nginx 330초
+    타임아웃보다 오래 걸린다 -- 그래서 이 요청은 작업만 걸고 바로 202로 돌아온다."""
+
+    job_id: str
+    status: Literal["processing"]
+
+
+class SceneVideoResult(BaseModel):
+    scene_asset_id: str
+    gif_asset_id: str | None = None
+    segment_id: str
+    title: str
+    prompt: str
+    video_prompt: str = ""
+    seed: int
+    elapsed_sec: float | None = None
+
+
+class SceneVideoStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["processing", "succeeded", "failed"]
+    result: SceneVideoResult | None = None
+    error_detail: str | None = None
+
+
 class ScriptDraftCreateRequest(BaseModel):
     """주제 한 줄에서 대본 초안을 받는다.
 

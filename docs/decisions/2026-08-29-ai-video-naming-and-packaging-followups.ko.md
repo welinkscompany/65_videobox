@@ -61,6 +61,51 @@ AnimateDiff·Stable Video Diffusion류 ComfyUI 노드)은 아직 조사도 시�
   `_still_to_clip`(zoompan 가짜 영상)이 지금 실제로 도는 전부다. 그래프
   설계(`ComfyUIImageGenerationProvider._graph`와 같은 자리)는 모델 파일이
   갖춰지지 않아도 미리 짤 수 있다.
+
+## 후속 — owner 승인으로 파일 받고 실제로 검증함 (같은 날, 2026-08-29 세 번째 이어진 세션)
+
+owner가 "comfyui 추가 파일받고, 원래 만든거외에 별도로 만들자. 그리고 gif
+이미지 만드는 기능도 해야되"라고 명시적으로 지시. 파일 둘을 huggingface에서
+받고(UMT5 텍스트 인코더 11.37GB, Wan VAE 253.8MB, 둘 다 정확한 크기로 완결),
+`ComfyUIVideoGenerationProvider`의 그래프를 owner의 실제 ComfyUI에 직접 걸어
+**진짜로 검증했다** — 추정이 아니라 실측이다.
+
+**실측 결과:**
+- 작은 설정(512x288·17프레임·8스텝): 약 12초. 실제 webm(vp9, 512x288, 1.42초) 생성 확인.
+- **실제 제품 기본값(1920x1080·81프레임·20스텝): 약 18분(1067초).** 실제
+  webm(vp9, 1920x1080, 3.375초 분량, 1.38MB) 생성 확인 — 진짜 GPU 추론이지
+  가짜가 아니다.
+- mp4 변환(h264)·GIF 변환(팔레트 2단계) 둘 다 이 실제 출력 파일로 검증
+  완료 — 각각 1초 미만.
+
+**제품적 함의: 18분은 매우 느리다.** "빈 장면 모두 AI로 채우기"(자동채우기,
+`CreationInterview.tsx`의 `autoFillRemainingGapsWithAi`) 흐름에 이대로 넣으면
+장면 하나당 18분씩 걸려 여러 장면을 자동으로 채우는 용도에는 안 맞는다.
+그래서 **별도 기능**(owner 지시)으로 짰다 — `SceneVideoService`는
+`scene_image_service.py`·자동채우기 흐름을 전혀 건드리지 않고, 장면 하나를
+owner가 명시적으로 골라 만드는 별개 문(`POST /api/projects/{id}/scene-videos`)이다.
+
+**만든 것 (커밋 예정):**
+- 백엔드: `packages/core-engine/.../scene_video_service.py`(새 서비스, mp4·GIF
+  둘 다 만듦), `services/api/.../routers/scene_videos.py`(비동기 202+`job_id`
+  폴링, 유튜브 학습과 같은 패턴), `provider_factories.py`·`main.py`·`models.py`
+  연결.
+- **GIF는 새 자산 종류를 안 만든다** — `AssetType.IMAGE`로 등록하면
+  `LibraryPreviewPane.tsx`가 이미 그림 자산을 `<img src=...>`로 그리고 있어서
+  애니메이션 GIF도 브라우저가 그냥 재생한다. 화면 코드 한 줄도 안 고쳤다.
+- 테스트: `test_scene_video_service.py`(8건, 진짜 ffmpeg로 mp4·GIF 확인) +
+  `test_api_scene_videos.py`(6건) + `test_video_generation_config.py`(4건) +
+  `test_comfyui_video_generation_provider.py`(5건) = 백엔드 전체 pytest에 23건 추가.
+
+**아직 안 한 것 (다음 세션 몫):**
+- 프론트엔드 진입점(버튼)이 없다 — 지금은 API만 있고 화면에서 부르는 곳이
+  없다. `CLAUDE.md` §4의 "부품과 제품은 다르다"가 정확히 이 상태를 가리킨다.
+- `VideoGenerationConfig.enabled` 기본값은 여전히 `False`다 — 이제 실제로
+  도는 것을 확인했으니 owner가 켜기로 결정하면
+  `VIDEOBOX_VIDEO_GENERATION_ENABLED=true` 환경변수 한 줄이면 된다
+  ([[videobox-local-model-swap-is-config-not-code]]와 같은 패턴).
+- 18분이라는 실측 시간을 owner에게 보여주고, 이 정도 대기 시간이 제품에
+  맞는지 다시 판단받아야 한다(품질을 낮춰 더 빠르게 할지, 이대로 둘지).
 - 컨테이너 CPU 제약(2코어)이 정지화면 확대에서도 문제였다(`-threads 2` 수정,
   2026-08-29 커밋 `6ce7b51db`) — 실제 동영상 생성은 훨씬 무거우므로 리소스 요구량을
   먼저 실측한다.

@@ -24,7 +24,7 @@ from videobox_api.orchestration import (
     build_local_only_runtime_service,
 )
 from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService
-from videobox_api.provider_factories import _build_pycapcut_exporter, _build_scene_image_provider, _build_stt_provider, _build_tts_provider
+from videobox_api.provider_factories import _build_pycapcut_exporter, _build_scene_image_provider, _build_scene_video_provider, _build_stt_provider, _build_tts_provider
 from videobox_api.response_normalizers import (
     _build_preflight_review_prediction,
     _build_targeted_segments,
@@ -54,10 +54,12 @@ from videobox_api.routers.hermes_operations import build_hermes_operations_route
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
 from videobox_api.routers.scene_images import build_scene_images_router
+from videobox_api.routers.scene_videos import build_scene_videos_router
 from videobox_api.routers.script_drafts import build_script_drafts_router
 from videobox_core_engine.scene_image_prompt import SceneImagePromptWriter
 from videobox_core_engine.script_draft_writer import ScriptDraftWriter
 from videobox_core_engine.scene_image_service import SceneImageService
+from videobox_core_engine.scene_video_service import SceneVideoService
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
 from videobox_api.routers.footage_organizer import build_footage_organizer_router
@@ -90,6 +92,7 @@ from videobox_core_engine.settings import (
     AutoCutConfig,
     CapCutDraftExportConfig,
     ImageGenerationConfig,
+    VideoGenerationConfig,
     LocalOpenAICompatibleRuntimeConfig,
     TTSEngineConfig,
     WhisperSTTConfig,
@@ -98,6 +101,7 @@ from videobox_core_engine.settings import (
     resolve_database_url,
     resolve_enable_local_media_analysis,
     resolve_image_generation_config,
+    resolve_video_generation_config,
     resolve_container_snapshot_root,
     resolve_local_runtime_config,
     resolve_media_inbox_library_root,
@@ -806,6 +810,8 @@ def create_app(
     image_generation_config: ImageGenerationConfig | None = None,
     scene_image_provider=None,
     scene_image_prompt_writer=None,
+    video_generation_config: VideoGenerationConfig | None = None,
+    scene_video_provider=None,
     script_draft_writer=None,
     capcut_handoff_service=None,
     local_only_runtime_service_factory=None,
@@ -949,6 +955,10 @@ def create_app(
     resolved_scene_image_provider = scene_image_provider or _build_scene_image_provider(
         resolved_image_generation_config
     )
+    resolved_video_generation_config = video_generation_config or resolve_video_generation_config()
+    resolved_scene_video_provider = scene_video_provider or _build_scene_video_provider(
+        resolved_video_generation_config
+    )
     _music_library_search, _music_project_asset = _build_music_library_hooks(
         library_store=resolved_media_library_store, project_store=store, app=app
     )
@@ -1060,6 +1070,20 @@ def create_app(
             or SceneImagePromptWriter(runtime_service=runtime_service),
         )
         if resolved_scene_image_provider is not None
+        else None
+    )
+    app.state.video_generation_config = resolved_video_generation_config
+    # `scene_image_service`와 같은 이유 -- 켜지 않았으면 `None`이다. owner 결정
+    # 2026-08-29(2회차, "원래 만든거외에 별도로 만들자"): 이 서비스는
+    # `SceneImageService`와 별개다.
+    app.state.scene_video_service = (
+        SceneVideoService(
+            store=store,
+            provider=resolved_scene_video_provider,
+            prompt_writer=scene_image_prompt_writer
+            or SceneImagePromptWriter(runtime_service=runtime_service),
+        )
+        if resolved_scene_video_provider is not None
         else None
     )
     # 유진이 주제 한 줄에서 대본 초안을 쓴다. 첫 화면의 네 번째 길이 이것을 부른다.
@@ -1277,6 +1301,7 @@ def create_app(
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
     app.include_router(build_scene_images_router(store))
+    app.include_router(build_scene_videos_router(store))
     app.include_router(build_script_drafts_router())
     app.include_router(
         build_creation_recommendations_router(store=store, media_library_store=resolved_media_library_store)

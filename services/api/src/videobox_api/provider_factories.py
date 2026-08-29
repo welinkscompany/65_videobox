@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from videobox_core_engine.settings import CapCutDraftExportConfig, ImageGenerationConfig, TTSEngineConfig, WhisperSTTConfig
+from videobox_core_engine.settings import CapCutDraftExportConfig, ImageGenerationConfig, TTSEngineConfig, VideoGenerationConfig, WhisperSTTConfig
 from videobox_provider_interfaces.faster_whisper_stt import FasterWhisperSTTProvider
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider
 from videobox_storage.local_project_store import LocalProjectStore
@@ -77,6 +77,21 @@ def _build_scene_image_provider(config: ImageGenerationConfig) -> Any | None:
     )
 
     return ComfyUIImageGenerationProvider(
+        transport=ComfyUIHTTPTransport(base_url=config.base_url),
+        config=config,
+    )
+
+
+def _build_scene_video_provider(config: VideoGenerationConfig) -> Any | None:
+    """`_build_scene_image_provider`와 같은 이유 -- 켜지 않았으면 아무것도
+    안 만든다. owner 결정 2026-08-29(2회차, "원래 만든거외에 별도로 만들자") --
+    이 provider는 `SceneVideoService`(정지 이미지+zoompan과는 별개 경로)에만 쓰인다."""
+    if not config.enabled:
+        return None
+    from videobox_provider_interfaces.comfyui_image_generation import ComfyUIHTTPTransport
+    from videobox_provider_interfaces.comfyui_video_generation import ComfyUIVideoGenerationProvider
+
+    return ComfyUIVideoGenerationProvider(
         transport=ComfyUIHTTPTransport(base_url=config.base_url),
         config=config,
     )
