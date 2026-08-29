@@ -225,6 +225,34 @@ def test_quality_defaults_to_full_and_preview_asks_for_less(tmp_path: Path) -> N
     assert (provider.requests[1].length_frames, provider.requests[1].steps) == (17, 8)
 
 
+def test_standard_quality_sits_between_preview_and_full(tmp_path: Path) -> None:
+    """중간 화질(owner 요청 2026-08-30) -- 실측(RTX 5090, 2026-08-30):
+    1280x720·65프레임·16스텝이 약 2분 19초. 미리보기(12초)와 고화질(18~20분)
+    사이에 아무것도 없어서 완성에 가까운 화질이 필요한데 18분을 못 기다리는
+    경우 고를 자리가 없었다."""
+    provider = _StubProvider()
+    service, _store, project_id = _service(tmp_path, provider)
+
+    result = service.generate_scene_video(
+        project_id=project_id, prompt="x", segment_id="script-1", quality="standard",
+    )
+
+    assert result["quality"] == "standard"
+    assert (provider.requests[0].width, provider.requests[0].height) == (1280, 720)
+    assert (provider.requests[0].length_frames, provider.requests[0].steps) == (65, 16)
+
+
+def test_standard_quality_is_vertical_when_asked(tmp_path: Path) -> None:
+    provider = _StubProvider()
+    service, _store, project_id = _service(tmp_path, provider)
+
+    service.generate_scene_video(
+        project_id=project_id, prompt="x", segment_id="script-1", quality="standard", vertical=True,
+    )
+
+    assert (provider.requests[0].width, provider.requests[0].height) == (720, 1280)
+
+
 def test_an_unknown_quality_is_refused_before_the_gpu_is_woken_up(tmp_path: Path) -> None:
     provider = _StubProvider()
     service, _store, project_id = _service(tmp_path, provider)

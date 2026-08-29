@@ -52,6 +52,16 @@ _PREVIEW_PORTRAIT = (288, 512)
 _PREVIEW_LENGTH_FRAMES = 17
 _PREVIEW_STEPS = 8
 
+#: 중간 화질(owner 요청 2026-08-30, "AI 영상 생성 단축 검토"). 미리보기(12초)와
+#: 고화질(18~20분) 사이에 아무것도 없어서, 완성에 가까운 화질이 필요한데 18분을
+#: 못 기다리는 경우 고를 자리가 없었다. 실측(RTX 5090, 2026-08-30):
+#: 1280x720·65프레임·16스텝이 약 2분 19초(139초) -- 완성본으로 그대로 쓰기엔
+#: 해상도가 낮지만, 장면을 고르는 용도로는 미리보기보다 훨씬 실제에 가깝다.
+_STANDARD_LANDSCAPE = (1280, 720)
+_STANDARD_PORTRAIT = (720, 1280)
+_STANDARD_LENGTH_FRAMES = 65
+_STANDARD_STEPS = 16
+
 
 @dataclass(slots=True, frozen=True)
 class SceneVideoGenerationError(Exception):
@@ -97,12 +107,14 @@ class SceneVideoService:
             raise SceneVideoGenerationError("scene_video_prompt_empty", "invalid")
         if not (segment_id or "").strip():
             raise SceneVideoGenerationError("scene_video_segment_missing", "invalid")
-        if quality not in ("preview", "full"):
+        if quality not in ("preview", "standard", "full"):
             raise SceneVideoGenerationError("scene_video_quality_invalid", "invalid")
-        is_preview = quality == "preview"
-        if is_preview:
+        if quality == "preview":
             width, height = _PREVIEW_PORTRAIT if vertical else _PREVIEW_LANDSCAPE
             length_frames, steps = _PREVIEW_LENGTH_FRAMES, _PREVIEW_STEPS
+        elif quality == "standard":
+            width, height = _STANDARD_PORTRAIT if vertical else _STANDARD_LANDSCAPE
+            length_frames, steps = _STANDARD_LENGTH_FRAMES, _STANDARD_STEPS
         else:
             width, height = _PORTRAIT if vertical else _LANDSCAPE
             length_frames, steps = _FULL_LENGTH_FRAMES, _FULL_STEPS

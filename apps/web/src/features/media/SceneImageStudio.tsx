@@ -110,7 +110,7 @@ export function SceneImageStudio({
   const [makeGif, setMakeGif] = useState(false);
   // 빠른 미리보기(owner 요청 2026-08-29, 3회차) -- 실측: preview 약 12초,
   // full(고화질) 약 18~23분. 매번 20분을 기다리지 않고 먼저 가늠해 볼 수 있다.
-  const [quality, setQuality] = useState<"preview" | "full">("preview");
+  const [quality, setQuality] = useState<"preview" | "standard" | "full">("preview");
   const [isMakingVideo, setIsMakingVideo] = useState(false);
   const [videoStatus, setVideoStatus] = useState<string | null>(null);
   const [madeVideoAssetId, setMadeVideoAssetId] = useState<string | null>(null);
@@ -221,7 +221,9 @@ export function SceneImageStudio({
     setVideoStatus(
       quality === "preview"
         ? "빠르게 미리 만들고 있어요. 15초 정도 걸려요…"
-        : "고화질로 만들고 있어요. 20분 정도 걸릴 수 있어요…",
+        : quality === "standard"
+          ? "표준 화질로 만들고 있어요. 3분 정도 걸려요…"
+          : "고화질로 만들고 있어요. 20분 정도 걸릴 수 있어요…",
     );
     setMadeVideoAssetId(null);
     setMadeGifAssetId(null);
@@ -273,9 +275,10 @@ export function SceneImageStudio({
         <NativeSelect
           id={qualityFieldId}
           value={quality}
-          onChange={(event) => setQuality(event.target.value as "preview" | "full")}
+          onChange={(event) => setQuality(event.target.value as "preview" | "standard" | "full")}
         >
           <option value="preview">빠르게 (약 15초)</option>
+          <option value="standard">표준 (약 3분)</option>
           <option value="full">고화질 (약 20분)</option>
         </NativeSelect>
         <label>

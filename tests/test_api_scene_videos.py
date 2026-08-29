@@ -151,6 +151,26 @@ def test_the_list_view_still_shows_the_library_id_after_a_refresh(tmp_path: Path
     assert listed[0]["gif_library_asset_id"] == created["gif_library_asset_id"]
 
 
+def test_asking_for_standard_quality_passes_the_middle_tier_through(tmp_path: Path) -> None:
+    """중간 화질(owner 요청 2026-08-30) -- 실측(RTX 5090): 1280x720·65프레임·
+    16스텝이 약 2분 19초. API 요청의 `quality=standard`가 서비스까지 그대로
+    전달되는지 확인한다."""
+    provider = _StubProvider(tmp_path)
+    client, project_id = _client(tmp_path, provider)
+
+    started = client.post(
+        f"/api/projects/{project_id}/scene-videos",
+        json={"prompt": "해 뜨는 바다", "segment_id": "script-1", "quality": "standard"},
+    )
+    job_id = started.json()["job_id"]
+
+    body = client.get(f"/api/projects/{project_id}/scene-videos/{job_id}").json()
+    assert body["status"] == "succeeded", body
+    assert body["result"]["quality"] == "standard"
+    assert (provider.requests[0].width, provider.requests[0].height) == (1280, 720)
+    assert (provider.requests[0].length_frames, provider.requests[0].steps) == (65, 16)
+
+
 def test_asking_for_a_gif_reports_the_gif_asset_id_too(tmp_path: Path) -> None:
     client, project_id = _client(tmp_path, _StubProvider(tmp_path))
 

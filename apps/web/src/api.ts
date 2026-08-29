@@ -58,9 +58,9 @@ export type SceneImageRequest = { prompt: string; segment_id: string; vertical?:
 /** 진짜 동영상(Wan). `SceneImageRequest`와 별개 경로다(owner 결정 2026-08-29 2회차,
  *  "원래 만든거외에 별도로 만들자") -- 정지 이미지+zoompan은 그대로 두고 이 자리가
  *  실제 AI 영상 생성을 맡는다. */
-export type SceneVideoRequest = { prompt: string; segment_id: string; vertical?: boolean; gap_slot_id?: string | null; make_gif?: boolean; quality?: "preview" | "full" };
+export type SceneVideoRequest = { prompt: string; segment_id: string; vertical?: boolean; gap_slot_id?: string | null; make_gif?: boolean; quality?: "preview" | "standard" | "full" };
 export type SceneVideoStart = { job_id: string; status: "processing" };
-export type SceneVideoResult = { scene_asset_id: string; gif_asset_id: string | null; library_asset_id: string | null; gif_library_asset_id: string | null; segment_id: string; title: string; prompt: string; video_prompt: string; quality: "preview" | "full"; seed: number; elapsed_sec?: number | null };
+export type SceneVideoResult = { scene_asset_id: string; gif_asset_id: string | null; library_asset_id: string | null; gif_library_asset_id: string | null; segment_id: string; title: string; prompt: string; video_prompt: string; quality: "preview" | "standard" | "full"; seed: number; elapsed_sec?: number | null };
 export type SceneVideoStatus = { job_id: string; status: "processing" | "succeeded" | "failed"; result: SceneVideoResult | null; error_detail: string | null };
 /** 유진이 쓴 대본 초안. **확정이 아니다** -- `script_text`는 owner가 고치는 글이고,
  *  고친 뒤에야 `createCreationBrief`로 넘어간다. */
