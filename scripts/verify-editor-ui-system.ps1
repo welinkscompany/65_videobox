@@ -15,17 +15,15 @@ if (-not (Test-Path $uiCss)) { $errors.Add('ui-system.css is absent') }
 else {
   $css = Get-Content -Raw $uiCss
   # These pin the palette the owner approved most recently
-  # (docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md), which
-  # superseded the warm-white/indigo direction. This list still named the old
-  # #FAFAF9/#4F46E5 values, so the verifier failed on correct code -- and a
-  # check that cries wolf is a check nobody runs. contrast.test.ts locks the
-  # same hexes from the JS side; both must move together, and only with a new
-  # approval record (CLAUDE.md §6).
-  foreach ($token in @('--vb-canvas: #FAFAFA', '--vb-accent: #C2410C', '--vb-preview: #18181B', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
-  # 편집 화면 어둡게는 owner가 2026-08-21에 되돌렸다
-  # (`docs/decisions/2026-08-21-editor-back-to-light.ko.md`). 어두운 토큰을
-  # 여기서 요구하면 올바른 코드가 검증에서 실패한다 -- 그런 검증기는 아무도 안 돌린다.
-  foreach ($dead in @('#141416', '#1C1C1F', '#E8613A')) { if ($css.Contains($dead)) { $errors.Add("reverted dark editor token is back: $dead") } }
+  # (docs/decisions/2026-08-29-capcut-full-structure-and-dark-theme.ko.md),
+  # which flips the whole :root from the white/orange direction
+  # (2026-08-05) to dark. contrast.test.ts locks the same hexes from the JS
+  # side; both must move together, and only with a new approval record
+  # (CLAUDE.md §6).
+  foreach ($token in @('--vb-canvas: #0F0F11', '--vb-panel: #18181B', '--vb-accent: #EA580C', '--vb-preview: #0B0B0C', 'PretendardVariable.woff2')) { if (-not $css.Contains($token)) { $errors.Add("missing UI token: $token") } }
+  # 흰 팔레트로 되돌아가면(2026-08-05 값) 여기서 잡는다 -- 다크 전환
+  # (2026-08-29)이 owner 재승인 없이 조용히 풀리는 것을 막는다.
+  foreach ($dead in @('--vb-canvas: #FAFAFA', '--vb-panel: #FFFFFF', '--vb-accent: #C2410C')) { if ($css.Contains($dead)) { $errors.Add("reverted light palette token is back: $dead") } }
   if ($css -match '@import\s+["'']tailwindcss["'']') { $errors.Add('Tailwind preflight import is forbidden') }
 }
 $indexHtml = Join-Path $web 'index.html'

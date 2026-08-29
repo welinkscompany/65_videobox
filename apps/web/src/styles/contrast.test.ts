@@ -26,36 +26,38 @@ function contrastRatio(hexA: string, hexB: string): number {
   return (lighter + 0.05) / (darker + 0.05)
 }
 
-// docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md
+// docs/decisions/2026-08-29-capcut-full-structure-and-dark-theme.ko.md
 const APPROVED = {
-  canvas: "#FAFAFA",
-  panel: "#FFFFFF",
-  border: "#EAEAEC",
-  borderStrong: "#DCDCE0",
-  text: "#1C1C1E",
-  muted: "#6E6E73",
-  faint: "#727279",
-  accent: "#C2410C",
-  accentBg: "#FFF1E7",
-  accentBorder: "#F5C9AC",
-  preview: "#18181B",
-  success: "#15803D",
-  successBg: "#ECFDF3",
+  canvas: "#0F0F11",
+  panel: "#18181B",
+  panelAlt: "#202024",
+  border: "#2E2E33",
+  borderStrong: "#3D3D44",
+  text: "#F2F2F3",
+  muted: "#A3A3AC",
+  faint: "#8A8A93",
+  accent: "#EA580C",
+  accentBg: "#3A1F0F",
+  accentBorder: "#7A3D18",
+  preview: "#0B0B0C",
+  success: "#4ADE80",
+  successBg: "#0F2A18",
 }
 
-describe("approved white-orange palette contrast", () => {
+describe("approved dark palette contrast", () => {
   it("only uses hex values recorded in the approval doc (no invented values)", () => {
     expect(readToken("--vb-canvas")).toBe(APPROVED.canvas)
     expect(readToken("--vb-panel")).toBe(APPROVED.panel)
+    expect(readToken("--vb-panel-alt")).toBe(APPROVED.panelAlt)
     expect(readToken("--vb-border")).toBe(APPROVED.border)
+    expect(readToken("--vb-border-strong")).toBe(APPROVED.borderStrong)
     expect(readToken("--vb-text")).toBe(APPROVED.text)
     expect(readToken("--vb-muted")).toBe(APPROVED.muted)
-    expect(readToken("--vb-accent")).toBe(APPROVED.accent)
-    expect(readToken("--vb-preview")).toBe(APPROVED.preview)
-    expect(readToken("--vb-border-strong")).toBe(APPROVED.borderStrong)
     expect(readToken("--vb-faint")).toBe(APPROVED.faint)
+    expect(readToken("--vb-accent")).toBe(APPROVED.accent)
     expect(readToken("--vb-accent-bg")).toBe(APPROVED.accentBg)
     expect(readToken("--vb-accent-border")).toBe(APPROVED.accentBorder)
+    expect(readToken("--vb-preview")).toBe(APPROVED.preview)
     expect(readToken("--vb-success")).toBe(APPROVED.success)
     expect(readToken("--vb-success-bg")).toBe(APPROVED.successBg)
   })
@@ -72,7 +74,7 @@ describe("approved white-orange palette contrast", () => {
     expect(contrastRatio(APPROVED.faint, APPROVED.panel)).toBeGreaterThanOrEqual(4.5)
   })
 
-  it("accent text/focus colour on panel clears 3:1 (non-text) and 4.5:1 (as text)", () => {
+  it("accent text/focus colour on panel clears 4.5:1", () => {
     const ratio = contrastRatio(APPROVED.accent, APPROVED.panel)
     expect(ratio).toBeGreaterThanOrEqual(4.5)
   })
@@ -82,52 +84,33 @@ describe("approved white-orange palette contrast", () => {
   })
 })
 
-// docs/decisions/2026-08-20-editor-dark-surface.ko.md
+// docs/decisions/2026-08-29-capcut-full-structure-and-dark-theme.ko.md
 //
-// **편집 화면만** 어둡다. 나머지 화면은 위의 흰 팔레트 그대로다. 그래서 어두운
-// 값은 `:root`가 아니라 편집 작업판 뿌리에만 얹는다 -- `readToken`이 파일에서
-// 처음 만나는 값을 읽으므로 위 검사들은 그대로 흰 값을 본다.
-const EDITOR_SURFACE = ".vb-editor-workbench"
-
-function readScopedToken(selector: string, name: string): string {
-  // 정규식을 쓰지 않는다 -- 이 파일을 셸로 만들다 역슬래시가 먹혀서 패턴이
-  // 조용히 다른 것이 된 적이 있다. 자르는 일에 정규식이 꼭 필요하지도 않다.
-  const start = uiSystemCss.indexOf(selector + " {")
-  if (start < 0) throw new Error(`${selector} 블록이 ui-system.css에 없다`)
-  const block = uiSystemCss.slice(start, uiSystemCss.indexOf("}", start))
-  const at = block.indexOf(name + ":")
-  if (at < 0) throw new Error(`${selector} 안에 ${name}이 없다`)
-  const line = block.slice(at, block.indexOf(";", at))
-  return line.slice(line.indexOf(":") + 1).replace(";", "").trim()
-}
-
-describe("편집 화면도 흰 톤이다 — owner 결정 2026-08-21", () => {
-  // 2026-08-20에 편집 화면만 어둡게 했다가 owner가 써 보고 되돌렸다
-  // (`docs/decisions/2026-08-21-editor-back-to-light.ko.md`).
-  //
-  // 되돌린 방식이 중요하다. 어두운 값을 흰 값으로 **다시 칠한** 것이 아니라
-  // 편집 화면 전용 블록을 **없앴다.** 그래야 편집 화면이 승인된 팔레트를 다른
-  // 화면과 같은 한 벌로 쓴다 -- 색 값이 두 벌이 되면 한쪽이 조용히 낡는다.
-
-  it("편집 화면 전용 색 블록이 남아 있지 않다", () => {
+// 이전엔 편집 화면만 어두웠다가(2026-08-20) owner가 되돌렸다(2026-08-21). 이번
+// 결정은 그 범위를 넘어 **`:root` 팔레트 자체**를 다크로 바꿨다 -- 화면마다
+// 다른 벌을 쓰지 않는다는 원칙(2026-08-21이 지킨 것)은 그대로 유지한 채, 그
+// 한 벌의 값 자체를 다크로 바꾼 것이다.
+describe("전체 화면이 다크다 — owner 결정 2026-08-29", () => {
+  it("편집 화면 전용 색 블록을 따로 두지 않는다", () => {
+    // 두 벌을 두면 한쪽이 조용히 낡는다는 교훈(2026-08-21)이 여전히 적용된다.
     expect(uiSystemCss).not.toContain('[data-shell-section="editing"] {')
     expect(uiSystemCss).not.toContain(".vb-editor-workbench {")
-    // 어두운 값 자체가 파일에 남아 있으면 안 된다. 남겨 두면 다음 사람이
-    // "쓰는 데가 있나" 하고 되살린다.
-    for (const dead of ["#141416", "#1C1C1F", "#E8613A", "#2A1710", "#A9A9B2"]) {
-      expect(uiSystemCss).not.toContain(dead)
+  })
+
+  it("옛 흰 팔레트 값이 :root에 남아 있지 않다", () => {
+    for (const stale of [
+      "--vb-canvas: #FAFAFA",
+      "--vb-panel: #FFFFFF",
+      "--vb-accent: #C2410C",
+      "--vb-text: #1C1C1E",
+    ]) {
+      expect(uiSystemCss).not.toContain(stale)
     }
   })
 
-  it("편집 화면도 승인된 밝은 팔레트를 그대로 쓴다", () => {
-    expect(readToken("--vb-canvas")).toBe(APPROVED.canvas)
-    expect(readToken("--vb-panel")).toBe(APPROVED.panel)
-    expect(readToken("--vb-accent")).toBe(APPROVED.accent)
-  })
-
-  it("미리보기 무대는 그대로 어둡다", () => {
-    // 이 값은 2026-08-05 승인표에 있던 것이고 이번 되돌림과 무관하다.
-    // 영상을 보는 자리라 어두운 편이 맞다.
-    expect(readToken("--vb-preview")).toBe(APPROVED.preview)
+  it("미리보기 무대는 패널보다 한 단계 더 어둡다", () => {
+    const previewLum = relativeLuminance(APPROVED.preview)
+    const panelLum = relativeLuminance(APPROVED.panel)
+    expect(previewLum).toBeLessThan(panelLum)
   })
 })

@@ -20,21 +20,26 @@
   --vb-radius-md: 0.625rem;  /* 카드·입력칸 — 기본 */
   --vb-radius-lg: 1rem;      /* 큰 패널·목록 카드 */
 
-  /* docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md
-     replaces the earlier warm-white/charcoal/indigo approval. */
-  --vb-canvas: #FAFAFA;
-  --vb-panel: #FFFFFF;
-  --vb-border: #EAEAEC;
-  --vb-border-strong: #DCDCE0;
-  --vb-text: #1C1C1E;
-  --vb-muted: #6E6E73;
-  --vb-faint: #727279;
-  --vb-accent: #C2410C;
-  --vb-accent-bg: #FFF1E7;
-  --vb-accent-border: #F5C9AC;
-  --vb-preview: #18181B;
-  --vb-success: #15803D;
-  --vb-success-bg: #ECFDF3;
+  /* docs/decisions/2026-08-29-capcut-full-structure-and-dark-theme.ko.md
+     replaces the earlier white-canvas/orange-accent approval
+     (2026-08-05-dashboard-white-orange-direction.ko.md). Dark is now the
+     single :root palette -- no separate editor-only block (that pattern was
+     tried in 2026-08-20 and reverted in 2026-08-21 for exactly this reason:
+     two copies of a palette let one go stale silently). */
+  --vb-canvas: #0F0F11;
+  --vb-panel: #18181B;
+  --vb-panel-alt: #202024;
+  --vb-border: #2E2E33;
+  --vb-border-strong: #3D3D44;
+  --vb-text: #F2F2F3;
+  --vb-muted: #A3A3AC;
+  --vb-faint: #8A8A93;
+  --vb-accent: #EA580C;
+  --vb-accent-bg: #3A1F0F;
+  --vb-accent-border: #7A3D18;
+  --vb-preview: #0B0B0C;
+  --vb-success: #4ADE80;
+  --vb-success-bg: #0F2A18;
   --vb-surface-ring: color-mix(in srgb, var(--foreground) 5%, transparent);
   --vb-control-ring: color-mix(in srgb, var(--foreground) 12%, transparent);
   --vb-font: "Pretendard", "Noto Sans KR", sans-serif;
@@ -61,24 +66,24 @@
   --vb-text-xl: 1.25rem;
   --vb-text-2xl: 1.65rem;
   --vb-text-3xl: 2.35rem;
-  --background: #FAFAFA;
-  --foreground: #1C1C1E;
-  --card: #FFFFFF;
-  --card-foreground: #1C1C1E;
-  --popover: #FFFFFF;
-  --popover-foreground: #1C1C1E;
-  --primary: #C2410C;
+  --background: #0F0F11;
+  --foreground: #F2F2F3;
+  --card: #202024;
+  --card-foreground: #F2F2F3;
+  --popover: #202024;
+  --popover-foreground: #F2F2F3;
+  --primary: #EA580C;
   --primary-foreground: #FFFFFF;
-  --secondary: #FFF1E7;
-  --secondary-foreground: #1C1C1E;
-  --muted: #F4F4F5;
-  --muted-foreground: #6E6E73;
-  --accent: #FFF1E7;
-  --accent-foreground: #1C1C1E;
-  --destructive: #B91C1C;
-  --border: #EAEAEC;
-  --input: #EAEAEC;
-  --ring: #C2410C;
+  --secondary: #3A1F0F;
+  --secondary-foreground: #F2F2F3;
+  --muted: #202024;
+  --muted-foreground: #A3A3AC;
+  --accent: #3A1F0F;
+  --accent-foreground: #F2F2F3;
+  --destructive: #F87171;
+  --border: #2E2E33;
+  --input: #2E2E33;
+  --ring: #EA580C;
   --radius: .625rem;
 }
 
@@ -123,18 +128,14 @@
 .vb-button { font: inherit; }
 
 /* ---------------------------------------------------------------------------
-   편집 화면도 흰 톤이다 — owner 결정 2026-08-21
-   docs/decisions/2026-08-21-editor-back-to-light.ko.md
+   전체 화면이 다크다 — owner 결정 2026-08-29
+   docs/decisions/2026-08-29-capcut-full-structure-and-dark-theme.ko.md
 
-   2026-08-20에 편집 화면만 어둡게 하는 결정이 있었고 실제로 적용했다. owner가
-   써 보고 다시 흰 톤으로 돌리기로 했다. 그 문서가 스스로 "픽셀 고정이 아니라
-   방향 승인"이라고 적어 두었으므로 이 되돌림도 그 절차 안에 있다.
+   2026-08-20에 편집 화면만 어둡게 했다가 2026-08-21에 owner가 되돌렸다. 이번
+   결정은 그 편집-화면-전용 범위를 넘어 **`:root` 팔레트 자체**를 다크로 바꾼다.
+   여전히 한 벌뿐이다 -- 편집 화면 전용 블록을 다시 만들지 않는다.
 
-   **되돌린 방식은 덮어쓰기가 아니라 삭제다.** 어두운 값을 흰 값으로 다시 칠하는
-   대신 편집 화면 전용 블록을 없앴다. 그래야 편집 화면이 `:root`의 승인된 팔레트를
-   다른 화면과 **같은 한 벌로** 쓴다 -- 값을 두 벌 두면 한쪽이 조용히 낡는다.
-
-   미리보기 무대는 그대로 어둡다(`--vb-preview: #18181B`). 그 값은 2026-08-05
-   승인표에 있던 것이고 이번 결정과 무관하다.
+   미리보기 무대는 패널보다 한 단계 더 어둡다(`--vb-preview: #0B0B0C`),
+   기존 `--vb-preview` 값(`#18181B`)은 패널 배경(`--vb-panel`)으로 승격했다.
    --------------------------------------------------------------------------- */
 
