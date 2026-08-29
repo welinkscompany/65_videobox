@@ -149,6 +149,37 @@ def test_a_landscape_project_does_not_get_a_vertical_request(tmp_path: Path) -> 
     assert (provider.requests[1].width, provider.requests[1].height) == (1080, 1920)
 
 
+def test_quality_defaults_to_full_and_preview_asks_for_less(tmp_path: Path) -> None:
+    """빠른 미리보기(owner 요청 2026-08-29, 3회차) -- 실측: full은 1920x1080·81프레임·
+    20스텝(약 18~23분), preview는 512x288·17프레임·8스텝(약 12초)."""
+    provider = _StubProvider()
+    service, _store, project_id = _service(tmp_path, provider)
+
+    result_full = service.generate_scene_video(project_id=project_id, prompt="x", segment_id="script-1")
+    result_preview = service.generate_scene_video(
+        project_id=project_id, prompt="x", segment_id="script-2", quality="preview",
+    )
+
+    assert result_full["quality"] == "full"
+    assert (provider.requests[0].width, provider.requests[0].height) == (1920, 1080)
+    assert (provider.requests[0].length_frames, provider.requests[0].steps) == (81, 20)
+
+    assert result_preview["quality"] == "preview"
+    assert (provider.requests[1].width, provider.requests[1].height) == (512, 288)
+    assert (provider.requests[1].length_frames, provider.requests[1].steps) == (17, 8)
+
+
+def test_an_unknown_quality_is_refused_before_the_gpu_is_woken_up(tmp_path: Path) -> None:
+    provider = _StubProvider()
+    service, _store, project_id = _service(tmp_path, provider)
+
+    with pytest.raises(SceneVideoGenerationError) as exc:
+        service.generate_scene_video(project_id=project_id, prompt="x", segment_id="script-1", quality="ultra")
+
+    assert exc.value.code == "invalid"
+    assert provider.requests == []
+
+
 def test_two_runs_of_the_same_prompt_are_not_the_same_video(tmp_path: Path) -> None:
     provider = _StubProvider()
     service, _store, project_id = _service(tmp_path, provider)

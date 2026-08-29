@@ -43,9 +43,11 @@ class _StubProvider:
     def __init__(self, tmp_path: Path) -> None:
         self.tmp_path = tmp_path
         self.prompts: list[str] = []
+        self.requests: list[SceneVideoRequest] = []
 
     def generate_video(self, request: SceneVideoRequest) -> GeneratedSceneVideo:
         self.prompts.append(request.prompt)
+        self.requests.append(request)
         return GeneratedSceneVideo(
             provider_name=self.provider_name, video_bytes=_webm_bytes(self.tmp_path),
             file_name="videobox-scene-video_00001_.webm",
@@ -104,6 +106,25 @@ def test_it_makes_a_video_for_one_scene_and_says_what_it_made(tmp_path: Path) ->
     listed = client.get(f"/api/projects/{project_id}/scene-videos")
     assert listed.status_code == 200
     assert [item["segment_id"] for item in listed.json()["videos"]] == ["script-3"]
+
+
+def test_asking_for_a_preview_passes_the_quality_through(tmp_path: Path) -> None:
+    """빠른 미리보기(owner 요청 2026-08-29, 3회차) -- API 요청의 `quality`가
+    서비스까지 그대로 전달되는지 확인한다."""
+    provider = _StubProvider(tmp_path)
+    client, project_id = _client(tmp_path, provider)
+
+    started = client.post(
+        f"/api/projects/{project_id}/scene-videos",
+        json={"prompt": "해 뜨는 바다", "segment_id": "script-1", "quality": "preview"},
+    )
+    job_id = started.json()["job_id"]
+
+    body = client.get(f"/api/projects/{project_id}/scene-videos/{job_id}").json()
+    assert body["status"] == "succeeded", body
+    assert body["result"]["quality"] == "preview"
+    assert (provider.requests[0].width, provider.requests[0].height) == (512, 288)
+    assert (provider.requests[0].length_frames, provider.requests[0].steps) == (17, 8)
 
 
 def test_asking_for_a_gif_reports_the_gif_asset_id_too(tmp_path: Path) -> None:

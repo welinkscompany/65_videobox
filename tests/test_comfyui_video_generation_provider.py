@@ -86,7 +86,7 @@ def test_it_walks_prompt_then_history_then_view_and_brings_the_video_bytes_back(
     comfy = _FakeComfyUI()
 
     result = _provider(comfy).generate_video(
-        SceneVideoRequest(prompt="해 뜨는 바다", width=832, height=480, seed=7, length_frames=81)
+        SceneVideoRequest(prompt="해 뜨는 바다", width=832, height=480, seed=7, length_frames=81, steps=20)
     )
 
     assert result.video_bytes == b"WEBM-BYTES"
@@ -103,7 +103,7 @@ def test_the_graph_wires_wan_nodes_with_the_configured_settings() -> None:
     comfy = _FakeComfyUI()
 
     _provider(comfy).generate_video(
-        SceneVideoRequest(prompt="해 뜨는 바다", width=832, height=480, seed=42, length_frames=81)
+        SceneVideoRequest(prompt="해 뜨는 바다", width=832, height=480, seed=42, length_frames=81, steps=20)
     )
 
     graph = (comfy.submitted or {})["prompt"]
@@ -147,7 +147,7 @@ def test_a_run_that_errored_reports_what_comfyui_said() -> None:
 
     with pytest.raises(ComfyUIProviderError) as exc:
         _provider(_Failing()).generate_video(
-            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9)
+            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8)
         )
 
     assert exc.value.code == "failed"
@@ -159,7 +159,7 @@ def test_it_gives_up_with_a_timeout_instead_of_polling_forever() -> None:
 
     with pytest.raises(ComfyUIProviderError) as exc:
         _provider(_FakeComfyUI(history_rounds=10_000), clock=clock, timeout_seconds=30).generate_video(
-            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9)
+            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8)
         )
 
     assert exc.value.code == "timeout"

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { api } from "../../api";
 import { Button } from "../../components/ui/button";
+import { NativeSelect } from "../../components/ui/native-select";
 import { Textarea } from "../../components/ui/textarea";
 
 /** 장면 하나에 얹을 그림을 만드는 자리.
@@ -71,11 +72,15 @@ export function SceneImageStudio({
   // 묘사하는 말이라 owner가 두 번 쓸 이유가 없다. 만드는 방식·시간만 다르다
   // (owner 결정 2026-08-29 2회차, "원래 만든거외에 별도로 만들자").
   const [makeGif, setMakeGif] = useState(false);
+  // 빠른 미리보기(owner 요청 2026-08-29, 3회차) -- 실측: preview 약 12초,
+  // full(고화질) 약 18~23분. 매번 20분을 기다리지 않고 먼저 가늠해 볼 수 있다.
+  const [quality, setQuality] = useState<"preview" | "full">("preview");
   const [isMakingVideo, setIsMakingVideo] = useState(false);
   const [videoStatus, setVideoStatus] = useState<string | null>(null);
   const [madeVideoAssetId, setMadeVideoAssetId] = useState<string | null>(null);
   const [madeGifAssetId, setMadeGifAssetId] = useState<string | null>(null);
   const videoFieldId = `scene-video-gif-${gap.gapSlotId}`;
+  const qualityFieldId = `scene-video-quality-${gap.gapSlotId}`;
 
   async function make() {
     if (!description.trim()) return setStatus("어떤 그림을 원하는지 먼저 적어 주세요.");
@@ -106,7 +111,11 @@ export function SceneImageStudio({
   async function makeVideo() {
     if (!description.trim()) return setVideoStatus("어떤 영상을 원하는지 먼저 적어 주세요.");
     setIsMakingVideo(true);
-    setVideoStatus("실제 영상을 만들고 있어요. 화질에 따라 최대 20분 정도 걸릴 수 있어요…");
+    setVideoStatus(
+      quality === "preview"
+        ? "빠르게 미리 만들고 있어요. 15초 정도 걸려요…"
+        : "고화질로 만들고 있어요. 20분 정도 걸릴 수 있어요…",
+    );
     setMadeVideoAssetId(null);
     setMadeGifAssetId(null);
     try {
@@ -116,6 +125,7 @@ export function SceneImageStudio({
         gap_slot_id: gap.gapSlotId,
         vertical,
         make_gif: makeGif,
+        quality,
       });
       for (let attempt = 0; attempt < SCENE_VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
         await delay(SCENE_VIDEO_POLL_INTERVAL_MS);
@@ -153,7 +163,7 @@ export function SceneImageStudio({
         onChange={(event) => setDescription(event.target.value)}
       />
       <Button type="button" disabled={isMaking} onClick={() => void make()}>
-        {isMaking ? "그림을 만들고 있어요" : "그림 만들기"}
+        {isMaking ? "이미지 생성 중" : "AI 이미지 생성"}
       </Button>
       {status ? <p role="status">{status}</p> : null}
       {madeAssetId ? (
@@ -165,10 +175,19 @@ export function SceneImageStudio({
       ) : null}
 
       {/* 진짜 동영상(Wan) -- 그림·zoompan과는 별개 자리다(owner 결정
-          2026-08-29 2회차). 실측(RTX 5090)으로 기본 화질이 약 18분 걸려서
+          2026-08-29 2회차). 실측(RTX 5090)으로 고화질이 약 18분 걸려서
           "빈 장면 모두 채우기"에는 안 넣고, 여기서 장면 하나씩 owner가
           직접 고를 때만 쓴다. */}
       <div>
+        <label htmlFor={qualityFieldId}>화질</label>
+        <NativeSelect
+          id={qualityFieldId}
+          value={quality}
+          onChange={(event) => setQuality(event.target.value as "preview" | "full")}
+        >
+          <option value="preview">빠르게 (약 15초)</option>
+          <option value="full">고화질 (약 20분)</option>
+        </NativeSelect>
         <label>
           <input
             type="checkbox"
@@ -177,10 +196,10 @@ export function SceneImageStudio({
             checked={makeGif}
             onChange={(event) => setMakeGif(event.target.checked)}
           />
-          {" "}GIF로도 만들기
+          {" "}GIF로 저장
         </label>
         <Button type="button" variant="outline" disabled={isMakingVideo} onClick={() => void makeVideo()}>
-          {isMakingVideo ? "AI 영상을 만드는 중" : "AI로 진짜 영상 만들기"}
+          {isMakingVideo ? "영상 생성 중" : "AI 영상 생성"}
         </Button>
         {videoStatus ? <p role="status">{videoStatus}</p> : null}
         {madeVideoAssetId ? (

@@ -85,6 +85,7 @@ def _run_job(service: Any, project_id: str, job_id: str, payload: SceneVideoCrea
             vertical=payload.vertical,
             gap_slot_id=payload.gap_slot_id,
             make_gif=payload.make_gif,
+            quality=payload.quality,
         )
         with _jobs_lock:
             _jobs[job_id] = {"project_id": project_id, "status": "succeeded", "result": result, "error_detail": None}
@@ -110,6 +111,7 @@ def _as_result(asset: dict[str, Any]) -> dict[str, Any]:
         "title": str(metadata.get("title") or "장면 영상"),
         "prompt": str(metadata.get("prompt") or ""),
         "video_prompt": str(metadata.get("video_prompt") or ""),
+        "quality": str(metadata.get("quality") or "full"),
         "seed": int(metadata.get("seed") or 0),
         "elapsed_sec": metadata.get("elapsed_sec"),
     }

@@ -463,6 +463,9 @@ class SceneVideoCreateRequest(BaseModel):
     vertical: bool = False
     gap_slot_id: str | None = None
     make_gif: bool = False
+    #: 빠른 미리보기(owner 요청 2026-08-29, 3회차). 실측: preview는 약 12초,
+    #: full은 약 18~23분(1920x1080·81프레임·20스텝).
+    quality: Literal["preview", "full"] = "full"
 
 
 class SceneVideoStartResponse(BaseModel):
@@ -480,6 +483,7 @@ class SceneVideoResult(BaseModel):
     title: str
     prompt: str
     video_prompt: str = ""
+    quality: Literal["preview", "full"] = "full"
     seed: int
     elapsed_sec: float | None = None
 

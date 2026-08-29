@@ -37,9 +37,19 @@ _PORTRAIT = (1080, 1920)
 #: Wan은 4프레임 단위로 나뉜다((length-1) % 4 == 0). 81 = 24fps에서 약 3.3초 --
 #: `_DEFAULT_SCENE_SECONDS`(scene_image_service.py의 5초)와 정확히 맞추면 매
 #: 장면마다 값이 달라 그래프가 매번 다른 길이를 계산해야 한다. 고정값으로 둔다.
-_DEFAULT_LENGTH_FRAMES = 81
+_FULL_LENGTH_FRAMES = 81
+_FULL_STEPS = 20
 _GIF_FPS = 12
 _GIF_SCALE_WIDTH = 480
+
+#: 빠른 미리보기(owner 요청 2026-08-29, 3회차). 실측(RTX 5090): 512x288·17프레임·
+#: 8스텝이 약 12초, 1920x1080·81프레임·20스텝(고화질)이 약 18~23분 -- 프롬프트를
+#: 고르는 동안 매번 20분을 기다리게 하지 않는다. 화질이 낮아 완성본에는 안 맞고,
+#: 어떤 그림이 나오는지 가늠하는 용도다.
+_PREVIEW_LANDSCAPE = (512, 288)
+_PREVIEW_PORTRAIT = (288, 512)
+_PREVIEW_LENGTH_FRAMES = 17
+_PREVIEW_STEPS = 8
 
 
 @dataclass(slots=True, frozen=True)
@@ -71,24 +81,34 @@ class SceneVideoService:
         vertical: bool = False,
         gap_slot_id: str | None = None,
         make_gif: bool = False,
+        quality: str = "full",
     ) -> dict[str, Any]:
         cleaned = (prompt or "").strip()
         if not cleaned:
             raise SceneVideoGenerationError("scene_video_prompt_empty", "invalid")
         if not (segment_id or "").strip():
             raise SceneVideoGenerationError("scene_video_segment_missing", "invalid")
-        width, height = _PORTRAIT if vertical else _LANDSCAPE
+        if quality not in ("preview", "full"):
+            raise SceneVideoGenerationError("scene_video_quality_invalid", "invalid")
+        is_preview = quality == "preview"
+        if is_preview:
+            width, height = _PREVIEW_PORTRAIT if vertical else _PREVIEW_LANDSCAPE
+            length_frames, steps = _PREVIEW_LENGTH_FRAMES, _PREVIEW_STEPS
+        else:
+            width, height = _PORTRAIT if vertical else _LANDSCAPE
+            length_frames, steps = _FULL_LENGTH_FRAMES, _FULL_STEPS
         video_prompt = self._video_prompt(project_id=project_id, written=cleaned, vertical=vertical)
         seed = secrets.randbelow(2**31)
 
         generated = self._generate(SceneVideoRequest(
             prompt=video_prompt, width=width, height=height, seed=seed,
-            length_frames=_DEFAULT_LENGTH_FRAMES,
+            length_frames=length_frames, steps=steps,
         ))
 
         scene_number = _scene_number(segment_id)
         title = f"{scene_number}번째 장면 영상" if scene_number else "장면 영상"
         shared = {
+            "quality": quality,
             "scene_segment_id": segment_id,
             "gap_slot_id": gap_slot_id,
             "prompt": cleaned,
@@ -146,6 +166,7 @@ class SceneVideoService:
             "title": title,
             "prompt": cleaned,
             "video_prompt": video_prompt,
+            "quality": quality,
             "seed": seed,
             "elapsed_sec": generated.metadata.get("elapsed_sec"),
         }

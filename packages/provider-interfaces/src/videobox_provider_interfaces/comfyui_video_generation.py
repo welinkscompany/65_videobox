@@ -55,7 +55,7 @@ class ComfyUIVideoGenerationProvider:
             file_name=file_name,
             metadata={
                 "model_name": self.config.model_name,
-                "steps": self.config.steps,
+                "steps": request.steps,
                 "cfg": self.config.cfg,
                 "length_frames": request.length_frames,
                 "fps": self.config.fps,
@@ -147,7 +147,7 @@ class ComfyUIVideoGenerationProvider:
             }},
             "7": {"class_type": "KSampler", "inputs": {
                 "model": ["1", 0], "positive": ["6", 0], "negative": ["6", 1], "latent_image": ["6", 2],
-                "seed": request.seed, "steps": self.config.steps, "cfg": self.config.cfg,
+                "seed": request.seed, "steps": request.steps, "cfg": self.config.cfg,
                 "sampler_name": "uni_pc", "scheduler": "simple", "denoise": 1.0,
             }},
             "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},

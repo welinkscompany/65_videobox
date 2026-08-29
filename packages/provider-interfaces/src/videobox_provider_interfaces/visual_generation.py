@@ -71,6 +71,10 @@ class SceneVideoRequest:
     #: Wan 계열은 4프레임 단위로 나뉜다((length-1) % 4 == 0) -- 그래프가 이 값을
     #: 그대로 못 실으면 조용히 다른 길이가 나온다.
     length_frames: int
+    #: 빠른 미리보기는 스텝을 줄여서 시간을 줄인다(owner 요청 2026-08-29,
+    #: 3회차). 화질(config 기본값)과 무관하게 요청마다 다르게 줄 수 있어야
+    #: 해서 provider가 아니라 요청 쪽 값이다.
+    steps: int
 
 
 @dataclass(slots=True, frozen=True)

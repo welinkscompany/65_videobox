@@ -25,7 +25,7 @@ describe("장면 그림 만들기", () => {
     } as never);
 
     const { container } = render(<SceneImageStudio projectId="project_a" gap={gap} />);
-    fireEvent.click(screen.getByRole("button", { name: "그림 만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
     await waitFor(() => expect(created).toHaveBeenCalledWith("project_a", {
       prompt: "이렇게 하면 편집이 반으로 줄어요.", segment_id: "script-2", gap_slot_id: "gap-broll-2",
@@ -41,9 +41,9 @@ describe("장면 그림 만들기", () => {
     vi.spyOn(api, "createSceneImage").mockReturnValue(new Promise((resolve) => { finish = resolve; }) as never);
 
     render(<SceneImageStudio projectId="project_a" gap={gap} />);
-    fireEvent.click(screen.getByRole("button", { name: "그림 만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "그림을 만들고 있어요" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "이미지 생성 중" })).toBeDisabled());
     finish({ image_asset_id: "a", scene_asset_id: "b", segment_id: "script-2", title: "t", prompt: "p", seed: 1 });
   });
 
@@ -54,7 +54,7 @@ describe("장면 그림 만들기", () => {
     );
 
     render(<SceneImageStudio projectId="project_a" gap={gap} />);
-    fireEvent.click(screen.getByRole("button", { name: "그림 만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
     expect(await screen.findByText("그림 만들기가 아직 켜져 있지 않아요.")).toBeVisible();
   });
@@ -65,7 +65,7 @@ describe("장면 그림 만들기", () => {
     );
 
     render(<SceneImageStudio projectId="project_a" gap={gap} />);
-    fireEvent.click(screen.getByRole("button", { name: "그림 만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
     expect(await screen.findByText("그림 만드는 프로그램에 닿지 않았어요. 켜져 있는지 확인한 뒤 다시 눌러 주세요.")).toBeVisible();
   });
@@ -74,7 +74,7 @@ describe("장면 그림 만들기", () => {
     const created = vi.spyOn(api, "createSceneImage");
 
     render(<SceneImageStudio projectId="project_a" gap={{ ...gap, sceneText: "" }} />);
-    fireEvent.click(screen.getByRole("button", { name: "그림 만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
     expect(await screen.findByText("어떤 그림을 원하는지 먼저 적어 주세요.")).toBeVisible();
     expect(created).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe("장면 그림 만들기", () => {
     } as never);
 
     render(<SceneImageStudio projectId="project_a" gap={gap} vertical />);
-    fireEvent.click(screen.getByRole("button", { name: "그림 만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
     await waitFor(() => expect(created).toHaveBeenCalledWith("project_a", expect.objectContaining({ vertical: true })));
   });
@@ -100,7 +100,7 @@ describe("장면 그림 만들기", () => {
     } as never);
 
     render(<SceneImageStudio projectId="project_a" gap={gap} onGenerated={onGenerated} />);
-    fireEvent.click(screen.getByRole("button", { name: "그림 만들기" }));
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
 
     await waitFor(() => expect(onGenerated).toHaveBeenCalled());
   });
