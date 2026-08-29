@@ -69,16 +69,16 @@ describe("위 띠", () => {
       projects: [],
       projectId: "",
       section: "library",
-      screenName: "미디어",
+      screenName: "자료실",
       navigation: {
-        screenName: "미디어",
+        screenName: "자료실",
         fallbackHref: "/projects",
-        crumbs: [{ label: "프로젝트", href: "/projects" }, { label: "미디어" }],
+        crumbs: [{ label: "프로젝트", href: "/projects" }, { label: "자료실" }],
       },
       onBack: vi.fn(),
     });
 
-    expect(screen.getAllByText("미디어")).toHaveLength(1);
+    expect(screen.getAllByText("자료실")).toHaveLength(1);
   });
 
   it("만드는 순서대로 단계를 늘어놓는다", () => {
@@ -131,7 +131,7 @@ describe("위 띠", () => {
     fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
 
     const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
-    for (const label of ["프로젝트", "미디어", "촬영본 정리"]) {
+    for (const label of ["프로젝트", "자료실", "촬영본 정리"]) {
       expect(within(menu).getByRole("link", { name: label })).toBeVisible();
     }
     fireEvent.click(within(menu).getByRole("button", { name: "설정" }));
@@ -148,9 +148,9 @@ describe("위 띠", () => {
     // 왼쪽 기둥 시절에는 머리말이 "여기가 어디인지"를 말했다. 그 머리말이
     // 없어지면 내 라이브러리·촬영본 정리·설정에서 화면 이름이 통째로 사라진다 --
     // 그 화면들에는 보이는 제목이 따로 없다.
-    renderBar({ projects: [], projectId: "", section: "library", screenName: "미디어" });
+    renderBar({ projects: [], projectId: "", section: "library", screenName: "자료실" });
 
-    expect(screen.getByText("미디어")).toBeVisible();
+    expect(screen.getByText("자료실")).toBeVisible();
   });
 
   it("단계가 켜져 있으면 같은 말을 두 번 하지 않는다", () => {
@@ -238,7 +238,7 @@ describe("전체 메뉴는 앱 안에서 이동한다", () => {
     const onNavigateGlobal = vi.fn();
     renderBar({ onNavigateGlobal });
 
-    for (const [label, destination] of [["프로젝트", "projects"], ["미디어", "library"], ["촬영본 정리", "footage"]] as const) {
+    for (const [label, destination] of [["프로젝트", "projects"], ["자료실", "library"], ["촬영본 정리", "footage"]] as const) {
       // 고르면 메뉴가 닫히는 것이 정상이라 매번 다시 연다.
       fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
       const menu = screen.getByRole("navigation", { name: "전체 메뉴" });

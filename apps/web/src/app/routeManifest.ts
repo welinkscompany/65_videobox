@@ -104,16 +104,18 @@ export function resolveNavigationContext({
 }): NavigationContext {
   if (pathname === "/library") {
     return {
-      screenName: "미디어",
+      // 전체 메뉴의 공용 라이브러리만 새 이름이다(owner 결정 2026-08-29) --
+      // 프로젝트 단계·편집기 도크의 "미디어"는 그대로 둔다.
+      screenName: "자료실",
       fallbackHref: resolveGlobalLocation("projects"),
-      crumbs: [{ label: "프로젝트", href: resolveGlobalLocation("projects") }, { label: "미디어" }],
+      crumbs: [{ label: "프로젝트", href: resolveGlobalLocation("projects") }, { label: "자료실" }],
     };
   }
   if (pathname === "/footage") {
     return {
       screenName: "촬영본 정리",
       fallbackHref: resolveGlobalLocation("library"),
-      crumbs: [{ label: "미디어", href: resolveGlobalLocation("library") }, { label: "촬영본 정리" }],
+      crumbs: [{ label: "자료실", href: resolveGlobalLocation("library") }, { label: "촬영본 정리" }],
     };
   }
   if (pathname.startsWith("/settings/")) {

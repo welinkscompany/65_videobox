@@ -137,11 +137,11 @@ describe("AppRouter URL ownership", () => {
     fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
     const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
     expect(within(menu).getByRole("link", { name: "프로젝트" })).toBeInTheDocument();
-    expect(within(menu).getByRole("link", { name: "미디어" })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "자료실" })).toBeInTheDocument();
 
     // 띠도 **어느 화면인지** 말해야 한다. 경로 마지막 항목이 그 일을 맡으므로,
     // 전역 화면의 제목을 별도 굵은 글자로 한 번 더 반복하지 않는다.
-    const title = { "/library": "미디어", "/footage": "촬영본 정리", "/projects": "프로젝트" }[path];
+    const title = { "/library": "자료실", "/footage": "촬영본 정리", "/projects": "프로젝트" }[path];
     expect(screen.getByRole("navigation", { name: "현재 위치" })).toHaveTextContent(title!);
   });
 
@@ -159,7 +159,7 @@ describe("AppRouter URL ownership", () => {
     // 껍데기 안이어야 한다 -- 여기가 어디인지, 어디로 갈 수 있는지 보여야 한다.
     fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
     const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
-    expect(within(menu).getByRole("link", { name: "미디어" })).toBeInTheDocument();
+    expect(within(menu).getByRole("link", { name: "자료실" })).toBeInTheDocument();
 
     // 시작하는 길은 평소와 **같은 길**이다. 첫 사용자에게만 다른 문을 만들지 않는다.
     expect(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" })).toBeInTheDocument();
@@ -173,7 +173,7 @@ describe("AppRouter URL ownership", () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const libraryRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/library"] }));
     render(<AppRouter router={libraryRouter} />);
-    expect(await screen.findByTestId("global-library-page")).toHaveTextContent("미디어");
+    expect(await screen.findByTestId("global-library-page")).toHaveTextContent("자료실");
     expect(screen.getByTestId("library-results")).toBeVisible();
     cleanup();
 

@@ -21,7 +21,10 @@ type ShellProject = { project_id: string; name: string };
 
 const globalMenuItems: ReadonlyArray<readonly ["projects" | "library" | "footage", string]> = [
   ["projects", "프로젝트"],
-  ["library", "미디어"],
+  // **전체 메뉴만 새 이름(owner 결정 2026-08-29).** 프로젝트 넘나드는 공용
+  // 라이브러리라 프로젝트 단계 탭·편집기 도크 탭의 "미디어"와 한 화면에 같이
+  // 보이면 다시 헷갈린다 -- 그 둘은 그대로 "미디어"로 두고 이 자리만 바꾼다.
+  ["library", "자료실"],
   ["footage", "촬영본 정리"],
 ];
 
