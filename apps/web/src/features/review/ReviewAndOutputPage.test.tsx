@@ -32,3 +32,14 @@ it("shows both halves on one screen", async () => {
   await waitFor(() => expect(screen.getByText("먼저 편집할 초안을 만들어 주세요.")).toBeVisible());
   await waitFor(() => expect(screen.getByTestId("outputs-page")).toBeInTheDocument());
 });
+
+it("has exactly one page-level heading, not one per half", async () => {
+  // 실측(2026-08-30, 브라우저): 두 절반이 각자 <h1>을 내서 화면 하나에
+  // <h1>이 둘이었다("영상 검토" · "완성본과 CapCut 초안") -- 스크린리더가
+  // 헤딩으로 훑을 때 페이지의 최상위 제목이 무엇인지 알 수 없게 만든다.
+  render(<ReviewAndOutputPage projectId="project-a" onOpenEditor={() => {}} />);
+
+  await waitFor(() => expect(screen.getByTestId("outputs-page")).toBeInTheDocument());
+
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+});

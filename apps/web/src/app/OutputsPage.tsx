@@ -318,9 +318,19 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   /** 이 화면 위에 검토 내용이 이미 같은 화면·같은 팝업 안에 보이고 있는가.
    *  `ReviewAndOutputPage`가 그 경우 이 값을 준다 -- 그때는 체크리스트의
    *  "검토" 항목이 통째로 `/review`로 이동시키는 링크를 내지 않는다. 승인
-   *  전이라는 사실 자체는 여전히 보여준다. */
+   *  전이라는 사실 자체는 여전히 보여준다.
+   *
+   *  실측(2026-08-30, 브라우저)으로 확인된 것도 이 값으로 함께 고친다 --
+   *  이 값이 참이면 위(`TimelineReviewSections`)가 이미 이 화면의 `<h1>`과
+   *  전체 aria-live 알림을 맡고 있으므로, 여기서 또 `<h1>`·`aria-live`를
+   *  내면 한 화면에 최상위 제목·알림 영역이 두 벌 생긴다. */
   reviewInline?: boolean;
 }) {
+  // `reviewInline`일 때는 `TimelineReviewSections`가 이미 이 화면의 <h1>과
+  // aria-live 알림을 맡는다 -- 그 아래 절은 <h2>로 내려가고, 알림 영역은
+  // 중복해서 만들지 않는다.
+  const HeadingTag = reviewInline ? "h2" : "h1";
+  const pageLiveRegion = reviewInline ? undefined : "polite";
   const [state, setState] = useState<OutputState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorProjectId, setErrorProjectId] = useState<string | null>(null);
@@ -574,8 +584,8 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     }));
     setVariantItems(next);
   };
-  if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live="polite"><p>출력 상태를 불러오는 중이에요.</p></section>;
-  if (hasError) return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page"><h1>출력</h1><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
+  if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live={pageLiveRegion}><p>출력 상태를 불러오는 중이에요.</p></section>;
+  if (hasError) return <section className="vb-outputs" aria-live={pageLiveRegion} data-testid="outputs-page"><HeadingTag>출력</HeadingTag><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
 
   const timelineJob = currentState?.timelineJob;
   const currentSession = currentState?.session;
@@ -887,8 +897,8 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     }
   };
 
-  return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page">
-    <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>승인된 편집본 · 자막 · 완성본 · CapCut 초안</p></div>
+  return <section className="vb-outputs" aria-live={pageLiveRegion} data-testid="outputs-page">
+    <div><p className="vb-eyebrow">출력</p><HeadingTag>완성본과 CapCut 초안</HeadingTag><p>승인된 편집본 · 자막 · 완성본 · CapCut 초안</p></div>
     {outputBlocked ? <section aria-label="출력 준비 체크리스트" className="vb-output-readiness">
       <h2>출력 준비 체크리스트</h2>
       <ol aria-label="출력 준비 단계">
