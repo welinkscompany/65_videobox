@@ -29,6 +29,19 @@ from videobox_provider_interfaces.visual_generation import GeneratedSceneVideo, 
 _POLL_INTERVAL_SECONDS = 2.0
 
 
+def _output_files(entry: dict) -> list[dict]:
+    """`/history/{prompt_id}` 항목 하나에서 완성된 출력 파일 목록을 뽑는다 --
+    정상 폴링과 취소 경합 재확인이 같은 모양을 보므로 한 곳에 둔다."""
+    outputs = entry.get("outputs") if isinstance(entry.get("outputs"), dict) else {}
+    return [
+        item
+        for node in outputs.values()
+        if isinstance(node, dict)
+        for item in (node.get("images") or [])
+        if isinstance(item, dict) and item.get("filename")
+    ]
+
+
 @dataclass(slots=True)
 class ComfyUIVideoGenerationProvider:
     """장면 하나에 짧은 영상 하나. `SceneVideoProvider`가 요구하는 모양이다."""
@@ -95,6 +108,16 @@ class ComfyUIVideoGenerationProvider:
         while self.monotonic() - started < self.config.timeout_seconds:
             if cancel_event is not None and cancel_event.is_set():
                 self._cancel_prompt(prompt_id)
+                # 코드리뷰(2026-08-30)로 잡힌 결함 -- `/queue` 확인과 실제
+                # 취소 사이에는 여전히 틈이 있다(TOCTOU, websocket으로 실행
+                # 상태를 실시간으로 받는 게 진짜 고침이라 아직 안 했다). 그
+                # 틈에서 가장 아까운 경우는 취소를 요청한 바로 그 순간 이
+                # 작업이 이미 자연히 끝나 버린 경우다 -- 그때는 취소가 늦은
+                # 것뿐이지 실패가 아니므로, 결과가 실제로 나와 있으면 그대로
+                # 돌려준다(버리지 않는다).
+                files = self._find_finished_files(prompt_id)
+                if files:
+                    return self._fetch(files[0])
                 raise ComfyUIProviderError("scene_video_cancelled", "cancelled")
             self.sleep(_POLL_INTERVAL_SECONDS)
             entry = self.transport.request_json(
@@ -103,14 +126,7 @@ class ComfyUIVideoGenerationProvider:
             if not isinstance(entry, dict):
                 continue
             status = entry.get("status") if isinstance(entry.get("status"), dict) else {}
-            outputs = entry.get("outputs") if isinstance(entry.get("outputs"), dict) else {}
-            files = [
-                item
-                for node in outputs.values()
-                if isinstance(node, dict)
-                for item in (node.get("images") or [])
-                if isinstance(item, dict) and item.get("filename")
-            ]
+            files = _output_files(entry)
             if files:
                 return self._fetch(files[0])
             if str(status.get("status_str") or "") == "error":
@@ -118,6 +134,15 @@ class ComfyUIVideoGenerationProvider:
         raise ComfyUIProviderError(
             f"ComfyUI did not finish within {self.config.timeout_seconds}s.", "timeout"
         )
+
+    def _find_finished_files(self, prompt_id: str) -> list[dict]:
+        try:
+            entry = self.transport.request_json(
+                f"/history/{prompt_id}", None, timeout_seconds=self._step_timeout()
+            ).get(prompt_id)
+        except ComfyUIProviderError:
+            return []
+        return _output_files(entry) if isinstance(entry, dict) else []
 
     def _cancel_prompt(self, prompt_id: str) -> None:
         """이 작업이 아직 대기 중이면 큐에서 지우고, 지금 실행 중이면 멈춘다.

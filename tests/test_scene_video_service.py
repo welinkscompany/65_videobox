@@ -173,11 +173,15 @@ def test_a_broken_library_does_not_lose_the_project_asset_that_took_18_minutes(t
     result = service.generate_scene_video(project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1")
 
     assert result["library_asset_id"] is None
+    # 코드리뷰(2026-08-30)로 잡힌 결함 -- 실패가 어디에도 안 남아서 왜 안 됐는지
+    # 알 방법이 없었다. 이제 error_code가 남아야 한다.
+    assert result["library_ingest_error"] == "RuntimeError"
     clip = next(
         item for item in store.list_assets(project_id=project_id)
         if item["asset_id"] == result["scene_asset_id"]
     )
     assert clip is not None
+    assert clip["metadata"]["library_ingest_error"] == "RuntimeError"
 
 
 def test_a_broken_metadata_patch_does_not_lose_the_project_asset_either(tmp_path: Path) -> None:

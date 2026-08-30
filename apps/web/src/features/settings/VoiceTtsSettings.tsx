@@ -10,6 +10,7 @@ import {
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { NativeSelect } from "../../components/ui/native-select";
+import { pollJobUntilTerminal } from "../../lib/pollJob";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type ActionToken = { epoch: number; name: string };
@@ -21,23 +22,19 @@ type LoadToken = { epoch: number; key: string };
 const YOUTUBE_IMPORT_POLL_INTERVAL_MS = 2000;
 const YOUTUBE_IMPORT_POLL_MAX_ATTEMPTS = 300;
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
 async function pollYoutubeImportUntilDone(
   projectId: string,
   jobId: string,
   isStillRelevant: () => boolean,
 ): Promise<YoutubeReferenceImport> {
-  for (let attempt = 0; attempt < YOUTUBE_IMPORT_POLL_MAX_ATTEMPTS; attempt += 1) {
-    if (!isStillRelevant()) throw new Error("youtube_import_cancelled");
-    const current = await api.getYoutubeReferenceStyleImportStatus(projectId, jobId);
-    if (current.status === "succeeded" && current.result) return current.result;
-    if (current.status === "failed") throw new Error(current.error_detail ?? "youtube_import_failed");
-    await delay(YOUTUBE_IMPORT_POLL_INTERVAL_MS);
-  }
-  throw new Error("youtube_import_timed_out");
+  const outcome = await pollJobUntilTerminal(
+    () => api.getYoutubeReferenceStyleImportStatus(projectId, jobId),
+    { intervalMs: YOUTUBE_IMPORT_POLL_INTERVAL_MS, maxAttempts: YOUTUBE_IMPORT_POLL_MAX_ATTEMPTS, isStillRelevant },
+  );
+  if (outcome.kind === "succeeded") return outcome.result;
+  if (outcome.kind === "cancelled") throw new Error("youtube_import_cancelled");
+  if (outcome.kind === "timed_out") throw new Error("youtube_import_timed_out");
+  throw new Error(outcome.error_detail ?? "youtube_import_failed");
 }
 
 function candidateStatus(candidate: TtsCandidateRecord) {

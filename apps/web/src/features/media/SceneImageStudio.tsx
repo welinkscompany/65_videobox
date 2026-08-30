@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 
-import { api } from "../../api";
+import { api, type SceneVideoQuality } from "../../api";
 import { Button } from "../../components/ui/button";
 import { NativeSelect } from "../../components/ui/native-select";
 import { Textarea } from "../../components/ui/textarea";
+import { pollJobUntilTerminal } from "../../lib/pollJob";
 
 /** 장면 하나에 얹을 그림을 만드는 자리.
  *
@@ -49,10 +50,6 @@ const videoMessageByDetail: Record<string, string> = {
 // 700회 = 최대 약 23분 -- 실측치에 여유를 둔다.
 const SCENE_VIDEO_POLL_INTERVAL_MS = 2000;
 const SCENE_VIDEO_POLL_MAX_ATTEMPTS = 700;
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
 
 // owner 요청(2026-08-29 3회차): 20분 가까이 걸리는 작업인데 화면 상태에만
 // job_id가 있으면 새로고침하거나 다른 화면에 갔다 오는 순간 진행 상황을
@@ -110,7 +107,7 @@ export function SceneImageStudio({
   const [makeGif, setMakeGif] = useState(false);
   // 빠른 미리보기(owner 요청 2026-08-29, 3회차) -- 실측: preview 약 12초,
   // full(고화질) 약 18~23분. 매번 20분을 기다리지 않고 먼저 가늠해 볼 수 있다.
-  const [quality, setQuality] = useState<"preview" | "standard" | "full">("preview");
+  const [quality, setQuality] = useState<SceneVideoQuality>("preview");
   const [isMakingVideo, setIsMakingVideo] = useState(false);
   const [videoStatus, setVideoStatus] = useState<string | null>(null);
   const [madeVideoAssetId, setMadeVideoAssetId] = useState<string | null>(null);
@@ -163,32 +160,34 @@ export function SceneImageStudio({
   async function pollSceneVideoJob(jobId: string) {
     setActiveJobId(jobId);
     try {
-      for (let attempt = 0; attempt < SCENE_VIDEO_POLL_MAX_ATTEMPTS; attempt += 1) {
-        await delay(SCENE_VIDEO_POLL_INTERVAL_MS);
-        const current = await api.getSceneVideoStatus(projectId, jobId);
-        if (current.status === "succeeded" && current.result) {
-          setMadeVideoAssetId(current.result.scene_asset_id);
-          setMadeGifAssetId(current.result.gif_asset_id);
-          // owner 요청(2026-08-29 3회차): "이렇게 생성된것도 우리 자산으로
-          // 들어가도록". 자료실 등록은 실패해도 위 프로젝트 자산은 그대로라
-          // 따로 알려 주되 실패를 오류로 다루지 않는다.
-          setVideoStatus(
-            current.result.library_asset_id
-              ? "영상을 만들었어요. 자료실에도 저장했어요."
-              : "영상을 만들었어요.",
-          );
-          clearPendingSceneVideoJob(gap.gapSlotId);
-          // 그림 쪽과 같은 이유 -- 자산이 생긴 것과 장면이 채워진 것은 다른 일이다.
-          onGenerated?.();
-          return;
-        }
-        if (current.status === "failed") {
-          const detail = current.error_detail;
-          setVideoStatus((detail && videoMessageByDetail[detail]) ?? "영상을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.");
-          clearPendingSceneVideoJob(gap.gapSlotId);
-          return;
-        }
+      const outcome = await pollJobUntilTerminal(
+        () => api.getSceneVideoStatus(projectId, jobId),
+        { intervalMs: SCENE_VIDEO_POLL_INTERVAL_MS, maxAttempts: SCENE_VIDEO_POLL_MAX_ATTEMPTS, delayFirst: true },
+      );
+      if (outcome.kind === "succeeded") {
+        setMadeVideoAssetId(outcome.result.scene_asset_id);
+        setMadeGifAssetId(outcome.result.gif_asset_id);
+        // owner 요청(2026-08-29 3회차): "이렇게 생성된것도 우리 자산으로
+        // 들어가도록". 자료실 등록은 실패해도 위 프로젝트 자산은 그대로라
+        // 따로 알려 주되 실패를 오류로 다루지 않는다.
+        setVideoStatus(
+          outcome.result.library_asset_id
+            ? "영상을 만들었어요. 자료실에도 저장했어요."
+            : "영상을 만들었어요.",
+        );
+        clearPendingSceneVideoJob(gap.gapSlotId);
+        // 그림 쪽과 같은 이유 -- 자산이 생긴 것과 장면이 채워진 것은 다른 일이다.
+        onGenerated?.();
+        return;
       }
+      if (outcome.kind === "failed") {
+        const detail = outcome.error_detail;
+        setVideoStatus((detail && videoMessageByDetail[detail]) ?? "영상을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+        clearPendingSceneVideoJob(gap.gapSlotId);
+        return;
+      }
+      // "cancelled"는 이 자리에서 안 쓴다(isStillRelevant를 안 넘겼다) --
+      // 남는 건 "timed_out"뿐이다.
       setVideoStatus("영상이 제 시간에 안 나왔어요. 잠시 뒤 다시 눌러 주세요.");
       clearPendingSceneVideoJob(gap.gapSlotId);
     } catch {
@@ -275,7 +274,7 @@ export function SceneImageStudio({
         <NativeSelect
           id={qualityFieldId}
           value={quality}
-          onChange={(event) => setQuality(event.target.value as "preview" | "standard" | "full")}
+          onChange={(event) => setQuality(event.target.value as SceneVideoQuality)}
         >
           <option value="preview">빠르게 (약 15초)</option>
           <option value="standard">표준 (약 3분)</option>

@@ -26,41 +26,52 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 from videobox_core_engine.scene_image_prompt import SceneImagePromptUnavailable, needs_rewriting
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.library_assets import LibraryMediaType
 from videobox_provider_interfaces.visual_generation import SceneVideoProvider, SceneVideoRequest
 
-_LANDSCAPE = (1920, 1080)
-_PORTRAIT = (1080, 1920)
-#: Wan은 4프레임 단위로 나뉜다((length-1) % 4 == 0). 81 = 24fps에서 약 3.3초 --
-#: `_DEFAULT_SCENE_SECONDS`(scene_image_service.py의 5초)와 정확히 맞추면 매
-#: 장면마다 값이 달라 그래프가 매번 다른 길이를 계산해야 한다. 고정값으로 둔다.
-_FULL_LENGTH_FRAMES = 81
-_FULL_STEPS = 20
+#: 화면·API가 고를 수 있는 화질 값 그 자체 -- 이 파일이 정본이다.
+#: `services/api/.../models.py`가 이 값을 그대로 가져다 쓴다(코드리뷰
+#: 2026-08-30로 잡힌 결함: 예전엔 이 문자열 목록이 여기·`models.py` 두 곳·
+#: `apps/web/src/api.ts` 두 곳, 총 4곳에 손으로 각각 박혀 있어서 하나를
+#: 빠뜨려도 컴파일 오류 없이 조용히 어긋날 수 있었다).
+SceneVideoQuality = Literal["preview", "standard", "full"]
+SCENE_VIDEO_QUALITIES: tuple[SceneVideoQuality, ...] = ("preview", "standard", "full")
+
+
+class _QualityPreset(NamedTuple):
+    landscape: tuple[int, int]
+    portrait: tuple[int, int]
+    length_frames: int
+    steps: int
+
+
+#: 화질별 실제 값 -- 위 문자열 목록과 짝을 이루는 표 하나. if/elif 가지 대신
+#: 조회 한 번으로 고른다(코드리뷰 2026-08-30, 넷째 화질이 생겨도 이 표
+#: 한 줄만 늘리면 된다).
+_QUALITY_PRESETS: dict[SceneVideoQuality, _QualityPreset] = {
+    # 빠른 미리보기(owner 요청 2026-08-29, 3회차). 실측(RTX 5090): 512x288·
+    # 17프레임·8스텝이 약 12초 -- 프롬프트를 고르는 동안 매번 20분을 기다리게
+    # 하지 않는다. 화질이 낮아 완성본에는 안 맞고, 어떤 그림이 나오는지
+    # 가늠하는 용도다.
+    "preview": _QualityPreset((512, 288), (288, 512), 17, 8),
+    # 중간 화질(owner 요청 2026-08-30, "AI 영상 생성 단축 검토"). 미리보기
+    # (12초)와 고화질(18~20분) 사이에 아무것도 없어서, 완성에 가까운 화질이
+    # 필요한데 18분을 못 기다리는 경우 고를 자리가 없었다. 실측(RTX 5090,
+    # 2026-08-30): 1280x720·65프레임·16스텝이 약 2분 19초(139초).
+    "standard": _QualityPreset((1280, 720), (720, 1280), 65, 16),
+    # Wan은 4프레임 단위로 나뉜다((length-1) % 4 == 0). 81 = 24fps에서 약
+    # 3.3초 -- `_DEFAULT_SCENE_SECONDS`(scene_image_service.py의 5초)와
+    # 정확히 맞추면 매 장면마다 값이 달라 그래프가 매번 다른 길이를 계산해야
+    # 한다. 고정값으로 둔다. 실측(RTX 5090): 약 18~23분.
+    "full": _QualityPreset((1920, 1080), (1080, 1920), 81, 20),
+}
+
 _GIF_FPS = 12
 _GIF_SCALE_WIDTH = 480
-
-#: 빠른 미리보기(owner 요청 2026-08-29, 3회차). 실측(RTX 5090): 512x288·17프레임·
-#: 8스텝이 약 12초, 1920x1080·81프레임·20스텝(고화질)이 약 18~23분 -- 프롬프트를
-#: 고르는 동안 매번 20분을 기다리게 하지 않는다. 화질이 낮아 완성본에는 안 맞고,
-#: 어떤 그림이 나오는지 가늠하는 용도다.
-_PREVIEW_LANDSCAPE = (512, 288)
-_PREVIEW_PORTRAIT = (288, 512)
-_PREVIEW_LENGTH_FRAMES = 17
-_PREVIEW_STEPS = 8
-
-#: 중간 화질(owner 요청 2026-08-30, "AI 영상 생성 단축 검토"). 미리보기(12초)와
-#: 고화질(18~20분) 사이에 아무것도 없어서, 완성에 가까운 화질이 필요한데 18분을
-#: 못 기다리는 경우 고를 자리가 없었다. 실측(RTX 5090, 2026-08-30):
-#: 1280x720·65프레임·16스텝이 약 2분 19초(139초) -- 완성본으로 그대로 쓰기엔
-#: 해상도가 낮지만, 장면을 고르는 용도로는 미리보기보다 훨씬 실제에 가깝다.
-_STANDARD_LANDSCAPE = (1280, 720)
-_STANDARD_PORTRAIT = (720, 1280)
-_STANDARD_LENGTH_FRAMES = 65
-_STANDARD_STEPS = 16
 
 
 @dataclass(slots=True, frozen=True)
@@ -98,7 +109,7 @@ class SceneVideoService:
         vertical: bool = False,
         gap_slot_id: str | None = None,
         make_gif: bool = False,
-        quality: str = "full",
+        quality: SceneVideoQuality = "full",
         on_prompt_submitted: Any | None = None,
         cancel_event: Any | None = None,
     ) -> dict[str, Any]:
@@ -107,17 +118,11 @@ class SceneVideoService:
             raise SceneVideoGenerationError("scene_video_prompt_empty", "invalid")
         if not (segment_id or "").strip():
             raise SceneVideoGenerationError("scene_video_segment_missing", "invalid")
-        if quality not in ("preview", "standard", "full"):
+        preset = _QUALITY_PRESETS.get(quality)
+        if preset is None:
             raise SceneVideoGenerationError("scene_video_quality_invalid", "invalid")
-        if quality == "preview":
-            width, height = _PREVIEW_PORTRAIT if vertical else _PREVIEW_LANDSCAPE
-            length_frames, steps = _PREVIEW_LENGTH_FRAMES, _PREVIEW_STEPS
-        elif quality == "standard":
-            width, height = _STANDARD_PORTRAIT if vertical else _STANDARD_LANDSCAPE
-            length_frames, steps = _STANDARD_LENGTH_FRAMES, _STANDARD_STEPS
-        else:
-            width, height = _PORTRAIT if vertical else _LANDSCAPE
-            length_frames, steps = _FULL_LENGTH_FRAMES, _FULL_STEPS
+        width, height = preset.portrait if vertical else preset.landscape
+        length_frames, steps = preset.length_frames, preset.steps
         video_prompt = self._video_prompt(project_id=project_id, written=cleaned, vertical=vertical)
         seed = secrets.randbelow(2**31)
 
@@ -161,7 +166,7 @@ class SceneVideoService:
                     metadata={**shared, "title": title},
                 )
                 registered.append(scene_asset.asset_id)
-                library_asset_id = self._ingest_into_library(
+                library_asset_id, library_ingest_error = self._ingest_into_library(
                     media_type=LibraryMediaType.BROLL, source_path=clip,
                     project_id=project_id, segment_id=segment_id, asset_id=scene_asset.asset_id,
                     title=title,
@@ -169,6 +174,7 @@ class SceneVideoService:
 
                 gif_asset_id: str | None = None
                 gif_library_asset_id: str | None = None
+                gif_library_ingest_error: str | None = None
                 if make_gif:
                     gif = stage / f"scene-{scene_number or 'x'}-{seed}.gif"
                     self._webm_to_gif(source=webm, target=gif)
@@ -182,7 +188,7 @@ class SceneVideoService:
                     )
                     registered.append(gif_asset.asset_id)
                     gif_asset_id = gif_asset.asset_id
-                    gif_library_asset_id = self._ingest_into_library(
+                    gif_library_asset_id, gif_library_ingest_error = self._ingest_into_library(
                         media_type=LibraryMediaType.IMAGE, source_path=gif,
                         project_id=project_id, segment_id=segment_id, asset_id=gif_asset.asset_id,
                         title=f"{title} (GIF)",
@@ -204,6 +210,8 @@ class SceneVideoService:
                             "library_asset_id": library_asset_id,
                             "gif_asset_id": gif_asset_id,
                             "gif_library_asset_id": gif_library_asset_id,
+                            "library_ingest_error": library_ingest_error,
+                            "gif_library_ingest_error": gif_library_ingest_error,
                         },
                     )
                 except Exception:  # noqa: BLE001 -- 위 주석 참고: 방금 만든 자산을 지우면 안 된다
@@ -220,6 +228,8 @@ class SceneVideoService:
             "gif_asset_id": gif_asset_id,
             "library_asset_id": library_asset_id,
             "gif_library_asset_id": gif_library_asset_id,
+            "library_ingest_error": library_ingest_error,
+            "gif_library_ingest_error": gif_library_ingest_error,
             "segment_id": segment_id,
             "title": title,
             "prompt": cleaned,
@@ -232,11 +242,19 @@ class SceneVideoService:
     def _ingest_into_library(
         self, *, media_type: LibraryMediaType, source_path: Path,
         project_id: str, segment_id: str, asset_id: str, title: str,
-    ) -> str | None:
+    ) -> tuple[str | None, str | None]:
         """자료실(여러 프로젝트가 나눠 쓰는 검색 가능한 라이브러리)에도 등록한다
-        -- 실패해도 20분 걸려 만든 프로젝트 자산은 그대로 둔다."""
+        -- 실패해도 20분 걸려 만든 프로젝트 자산은 그대로 둔다.
+
+        코드리뷰(2026-08-30)로 잡힌 결함 -- 실패를 삼키기만 하고 어디에도
+        남기지 않아서, 등록이 왜 안 됐는지 나중엔 알 방법이 없었다.
+        `LibraryIngestService.ingest_batch`가 이미 같은 상황에서 쓰는
+        `type(error).__name__` 관례를 그대로 따라 두 번째 값으로 돌려준다 --
+        `generate_scene_video`가 이 값을 자산 메타데이터·응답에 같이 싣는다.
+        `library_ingest`가 아예 없는 것(기능이 꺼진 정상 상태)은 오류가
+        아니므로 `None`을 그대로 돌려준다."""
         if self.library_ingest is None:
-            return None
+            return None, None
         try:
             ingested = self.library_ingest.ingest(
                 media_type=media_type,
@@ -248,9 +266,9 @@ class SceneVideoService:
                     "project_id": project_id, "scene_segment_id": segment_id, "title": title,
                 },
             )
-            return str(ingested["library_asset_id"])
-        except Exception:  # noqa: BLE001 -- 자료실 등록 실패가 방금 만든 프로젝트 자산을 지우면 안 된다
-            return None
+            return str(ingested["library_asset_id"]), None
+        except Exception as exc:  # noqa: BLE001 -- 자료실 등록 실패가 방금 만든 프로젝트 자산을 지우면 안 된다
+            return None, type(exc).__name__
 
     def _video_prompt(self, *, project_id: str, written: str, vertical: bool) -> str:
         """`SceneImageService._image_prompt`와 같은 이유 -- 그림 모델과 마찬가지로
@@ -334,4 +352,4 @@ def _scene_number(segment_id: str) -> int | None:
     return int(tail) if tail.isdigit() else None
 
 
-__all__ = ["SceneVideoGenerationError", "SceneVideoService"]
+__all__ = ["SCENE_VIDEO_QUALITIES", "SceneVideoGenerationError", "SceneVideoQuality", "SceneVideoService"]

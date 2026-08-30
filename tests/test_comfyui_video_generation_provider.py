@@ -244,6 +244,26 @@ def test_cancelling_a_still_queued_job_removes_it_from_the_queue_instead() -> No
     assert comfy.interrupted is False
 
 
+def test_cancelling_a_job_that_finished_in_the_race_window_keeps_the_result() -> None:
+    """코드리뷰(2026-08-30)로 잡힌 결함 -- `/queue` 확인과 실제 취소 사이에는
+    여전히 틈이 있다(TOCTOU, websocket으로 실행 상태를 실시간으로 받는 게
+    진짜 고침이라 아직 안 했다). 그 틈에서 가장 아까운 경우는 취소를 요청한
+    바로 그 순간 작업이 이미 자연히 끝나 버린 경우다 -- 그때는 결과가 실제로
+    나와 있으니 버리지 않고 그대로 돌려준다."""
+    comfy = _FakeComfyUIWithQueue(running=True, history_rounds=1)
+    cancel_event = threading.Event()
+    cancel_event.set()
+
+    result = _provider(comfy).generate_video(
+        SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+        cancel_event=cancel_event,
+    )
+
+    assert result.video_bytes == comfy.video_bytes
+    # 취소 자체는 여전히 시도한다 -- 판정만 결과를 우선한다.
+    assert comfy.interrupted is True
+
+
 def test_without_a_cancel_request_it_ignores_the_event_and_finishes_normally() -> None:
     comfy = _FakeComfyUI()
     cancel_event = threading.Event()  # 절대 set되지 않는다

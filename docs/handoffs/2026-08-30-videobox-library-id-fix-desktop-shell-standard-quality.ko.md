@@ -131,56 +131,82 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
    일어나 이미 끝난 작업에 조용히 이벤트만 켜고 409도 안 뜨는 경합도 있었다.
    `_snapshot_job` 헬퍼로 통일해 확인·복사를 한 번의 잠금 안에서 하도록 고쳤다.
 
-**기록만 하고 이번엔 안 고친 것(범위가 크거나 위험 대비 이득이 낮음):**
+**owner 요청으로 이어서 고친 것("기록만 하고 넘어간 것들도 마저 고쳐줘"):**
 
-- `_cancel_prompt`의 `/queue` 스냅샷과 `/interrupt` 사이 TOCTOU 경합 — 두
-  작업이 거의 동시에 걸려 있을 때 취소가 다른(관련 없는) 작업을 멈출 수
-  있다. 실제로 이런 타이밍이 나려면 두 작업이 정확히 그 순간에 겹쳐야 해서
-  드물지만, ComfyUI가 prompt_id별 실행 상태를 실시간으로 알려주는 방법
-  (websocket `executing` 이벤트 등)으로 바꾸는 게 진짜 고침이라 오늘 밤엔
-  손대지 않았다.
-- job 상태가 백엔드 프로세스 안 메모리에만 있어서, 프론트가 방금 받은
-  새로고침 복귀 능력(3번 항목)과 내구성이 어긋난다 — 백엔드가 재시작되면
-  진행 중이던 job이 통째로 사라진다. 자산 저장소처럼 영속화하는 게 진짜
-  고침이라 큰 작업이다.
-- 화질 3단계가 4개 파일(`scene_video_service.py`·`models.py`·`api.ts`)에
-  각각 손으로 맞춘 리터럴로 중복돼 있다 — 넷째 단계가 생기면 하나라도
-  빠뜨리면 컴파일 오류 없이 조용히 어긋난다. 단일 preset 표로 합치는 게
-  진짜 고침이지만 지금 범위 밖.
-- `_ingest_into_library`가 `LibraryIngestService.ingest_batch`가 이미 갖고
-  있는 "실패해도 계속 진행 + error_code 기록" 패턴을 손으로 다시 짜면서
-  error_code 기록만 놓쳤다 — 실패 자체는 이미 안전하게 삼키므로 급하지 않다.
-- 유튜브 학습 poller와 이 파일의 `pollSceneVideoJob`이 거의 같은
-  polling 루프를 두 파일에 따로 짜 놓았다 — 공유 헬퍼로 뽑는 게 정리지만
-  기능에는 영향 없다.
+5. **`_ingest_into_library`의 error_code 미기록.** `LibraryIngestService.ingest_batch`가
+   이미 쓰는 `type(error).__name__` 관례를 그대로 따라 `_ingest_into_library`가
+   `(library_asset_id, error_code)` 튜플을 돌려주게 바꿨다. `SceneVideoResult`·
+   `apps/web/src/api.ts`·`_as_result`(목록 조회)에 `library_ingest_error`·
+   `gif_library_ingest_error`를 새로 실어, 자료실 등록이 왜 안 됐는지 이제
+   asset 메타데이터·API 응답에서 확인할 수 있다. 회귀 테스트 갱신.
+6. **폴링 루프 중복.** 유튜브 학습(`VoiceTtsSettings.tsx`)과 AI 영상 생성
+   (`SceneImageStudio.tsx`)이 거의 같은 폴링 루프를 각자 따로 짜 놓고
+   있었다. `apps/web/src/lib/pollJob.ts`로 공통 루프(`pollJobUntilTerminal`)를
+   뽑았다 — 두 자리의 유일한 실제 차이(확인 순서)는 `delayFirst` 옵션 하나로
+   남겨 뒀다. 전용 단위 테스트(`pollJob.test.ts`) 5건 추가.
+7. **화질 3단계 리터럴 4곳 중복.** `scene_video_service.py`에 `SceneVideoQuality`
+   타입 별칭과 `_QUALITY_PRESETS` 표(딕셔너리) 하나로 모았다 — if/elif/else
+   가지와 9개 흩어진 상수를 없앴다. `services/api/.../models.py`는 이
+   타입을 그대로 가져다 쓰고, `apps/web/src/api.ts`도 `SceneVideoQuality`
+   타입 하나로 모아 `SceneImageStudio.tsx`가 재사용한다. 넷째 화질이
+   생기면 이제 표 한 줄만 늘리면 된다. `tsc -b` 통과 확인.
+8. **`_cancel_prompt`의 TOCTOU 경합 — 절반만 고쳤다.** `/queue` 스냅샷과
+   `/interrupt` 사이의 진짜 경합(다른 작업을 잘못 멈출 가능성)은 ComfyUI가
+   prompt_id별 실행 상태를 실시간으로 알려주는 방법(websocket `executing`
+   이벤트 등)으로 바꿔야 하는 큰 작업이라 이번에도 손대지 않았다. 대신 그
+   틈에서 **가장 아까운 경우**(취소를 요청한 바로 그 순간 이 작업이 이미
+   자연히 끝나 버린 경우, 즉 자기 자신의 성공한 결과를 취소로 버리는 것)는
+   막았다 — 취소 처리 직후 `/history`를 한 번 더 확인해서 실제로 결과가
+   나와 있으면 그걸 그대로 돌려준다. 회귀 테스트 추가.
+9. **job 상태 영속화 — 이번에도 안 했다(의도적).** 백엔드 프로세스가
+   재시작되면 진행 중이던 job이 사라지는 문제 자체는 그대로다. 이유:
+   실제 코드(`api.ts`의 `request()`)를 다시 읽어 확인해 보니, 재시작으로
+   job을 잃었을 때 화면은 이미 **안전하게** 실패한다 — 404가 그대로
+   `ApiRequestError`로 던져지고 `pollSceneVideoJob`의 catch가
+   "진행 상황을 확인하지 못했어요. 잠시 뒤 다시 눌러 주세요."를 보여주며
+   깨끗이 끝난다(무한 대기·크래시·거짓 성공 없음). 진짜 고치려면
+   `LocalProjectStore`(가장 민감하고 넓게 쓰이는 파일)에 새 테이블·스키마
+   마이그레이션을 넣어야 하는 큰 작업인데, 실제로 발생하는 경우(20분짜리
+   생성 도중 컨테이너가 재시작되는 것)는 드문 운영 사고이고 지금도 안전하게
+   실패하고 있어서, 이 시각에 그 파일을 건드리는 위험이 얻는 이득보다 크다고
+   판단했다. **범위 밖으로 남긴다 — owner가 원하면 별도 세션에서 신중하게.**
 
 **검증**: 회귀 테스트 추가 뒤 관련 스위트(`test_scene_video_service.py`,
 `test_api_scene_videos.py`, `test_comfyui_video_generation_provider.py`,
-`test_video_generation_config.py`) 40 passed. 잠금 로직을 고친 취소 버튼은
-컨테이너 재빌드 후 실제 ComfyUI로 다시 검증(scene 4, 고화질 실행 →
-취소 → `/history`에서 `execution_interrupted` 확인, "취소했어요." 정상
-표시). 전체 백엔드 pytest 결과는 아래 검증 상태 참고.
+`test_video_generation_config.py`) 41 passed, 프론트 신규 테스트
+(`pollJob.test.ts`) 5 passed. 잠금 로직을 고친 취소 버튼은 컨테이너 재빌드
+후 실제 ComfyUI로 다시 검증(scene 4, 고화질 실행 → 취소 → `/history`에서
+`execution_interrupted` 확인, "취소했어요." 정상 표시). 전체 백엔드 pytest
+결과는 아래 검증 상태 참고.
 
 ## 검증 상태
 
-- 백엔드 전체 pytest(코드리뷰 수정 반영, 최종): **4175 passed, 56 skipped,
+- 백엔드 전체 pytest 1차(코드리뷰 최초 수정 반영): **4175 passed, 56 skipped,
   1 failed**(`0:37:39`). 실패 1건은
   `test_owner_ready_script.py::test_smoke_timeout_kills_the_child_tree_and_returns_bounded_failure`
-  — 이 세션이 건드리지 않은 파일이고, 격리 재실행에서도 2/2 재현돼(전체
-  스위트 부하와 무관) 오늘 밤 변경과 무관한 기존 결함으로 판단했다. PowerShell
-  자식 프로세스를 1초 안에 죽이는지 보는 시험인데, 이 머신에 밤새 떠 있는
-  무관한 docker 컨테이너 18개 이상(다른 프로젝트들)이 시스템 부하를 계속
-  주고 있어 타이밍에 민감한 것으로 보인다 — 직접 원인 조사는 이번 세션
-  범위 밖으로 남긴다.
-- 프론트 전체 vitest: **97 files passed, 1364 passed, 0 failed**(코드리뷰
-  수정은 프론트 파일을 건드리지 않아 재확인 안 함).
-- 표준 화질·자료실 id 수정 둘 다 컨테이너 재빌드 후 실제 브라우저에서
-  종단 검증 완료(추정 아님).
-- 코드리뷰 수정 관련 스위트(4개 파일) 재확인: **40 passed, 0 failed**.
-- 취소 버튼(잠금 로직 재작성): 컨테이너 재빌드 후 scene 4에서 고화질 실행 →
-  취소 → ComfyUI `/history`에서 `execution_interrupted` 직접 확인, 화면에
-  "취소했어요." 정상 표시, 목록 조회도 그대로 정상.
-- Tauri 데스크톱 셸: 설정 파일만 있고 빌드·실행 미검증(위 4번 참고).
+  — 이 세션이 건드리지 않은 파일이고, 격리 재실행에서도 2/2 재현돼 그때는
+  기존 결함으로 판단했다.
+- 백엔드 전체 pytest 2차(위 5~8번 이어서 고친 것 반영, 최종):
+  **4177 passed, 56 skipped, 0 failed**(`0:34:57`). **`test_owner_ready_script.py`가
+  이번엔 통과했다** — 시스템 부하에 민감한 기존 타이밍 결함이었다는 판단을
+  뒷받침한다(이 세션이 그 파일을 건드린 적은 없다).
+- 프론트 전체 vitest: **98 files passed, 1369 passed, 0 failed**(`pollJob.test.ts`
+  5건 포함).
+- 표준 화질·자료실 id 수정·error_code 기록·화질 preset 통합·취소 경합 완화,
+  전부 컨테이너 재빌드 후 실제 브라우저·ComfyUI로 종단 검증 완료(추정 아님):
+  - scene 4에서 미리보기 재생성 → 성공, `library_asset_id` 채워짐,
+    `library_ingest_error: null` 정상 확인(목록 조회에도 그대로 남음).
+  - 재빌드 직후 첫 두 번의 시도는 `scene_video_generation_blocked`로
+    실패했다 — 컨테이너 재시작 직후 host.docker.internal 네트워킹이
+    안정되기 전의 일시적 현상으로 판단(같은 코드 경로를 컨테이너 안에서
+    직접 다시 호출해 즉시 성공했고, 몇 초 뒤 화면에서도 그대로 성공했다 —
+    코드 회귀가 아니다).
+  - `tsc -b` 통과(화질 타입 통합이 컴파일 오류를 만들지 않음).
+- 취소 버튼(잠금 로직 재작성, 이번엔 안 건드림): 1차 검증에서 scene 4
+  고화질 실행 → 취소 → ComfyUI `/history`에서 `execution_interrupted` 직접
+  확인, 화면에 "취소했어요." 정상 표시.
+- Tauri 데스크톱 셸: 설정 파일만 있고 빌드·실행 미검증(위 4번 참고, 오늘 밤
+  추가 진전 없음).
 
 ## 커밋
 
@@ -189,9 +215,10 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
   파일 스테이징이 겹쳐 한 커밋에 같이 들어갔다, 내용은 서로 무관)
 - `579f83bc` — docs: record why the Tauri desktop shell build is blocked tonight
 - `4862e29d` — docs: hand off tonight's session
-- (다음) 코드리뷰 결함 3+1건 수정 — 위 6번 항목
+- `0009e3db3` — fix: don't lose a finished AI video over a metadata patch, and fix job-read races
+- (다음) 코드리뷰에서 기록만 하고 넘어간 5건 중 4건 이어서 수정 — 위 5~8번 항목
 
-전부 push 완료(owner 요청 "커밋 푸쉬").
+전부 push 완료(owner 요청 "커밋 푸쉬", 이어서 "기록만 하고 넘어간 것들도 마저 고쳐줘").
 
 ## 다음 세션에서 할 일 (우선순위 순)
 
@@ -201,7 +228,15 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
    전에 만들어진 자산들(`asset_92d486e20847`, `asset_6ebe1226d94f` 등)은
    소급 반영되지 않는다. 문제로 지적되면 그때 마이그레이션을 논의한다(지금은
    조용히 넘어감 — 개수가 적고 재생성이 쉽다).
-3. **코드리뷰에서 기록만 하고 넘어간 5건**(위 6번 항목 "기록만 하고 이번엔
-   안 고친 것") — 여유 있을 때 우선순위대로: (a) `_cancel_prompt`의 TOCTOU
-   경합, (b) job 상태 영속화, (c) 화질 3단계 리터럴 4곳 중복, (d)
-   `_ingest_into_library`의 error_code 미기록, (e) 폴링 루프 중복.
+3. **job 상태 영속화만 의도적으로 남겨 뒀다.** 코드리뷰에서 "기록만 하고
+   넘어간 것" 5건 중 4건(error_code 기록·폴링 루프 공유·화질 preset 표
+   통합·취소 경합의 절반)은 이번에 마저 고쳤다. 나머지 하나(백엔드 재시작
+   시 job 상태가 통째로 사라지는 것)는 지금도 안전하게(무한 대기·거짓
+   성공 없이) 실패하고 있고, 고치려면 `LocalProjectStore`(가장 민감하고
+   넓게 쓰이는 파일)에 스키마 마이그레이션이 필요한 큰 작업이라 이 시각에
+   손대는 위험이 이득보다 크다고 판단해 남겨 뒀다. owner가 원하면 별도
+   세션에서 신중하게.
+4. **`_cancel_prompt`의 TOCTOU 경합 — 절반만 고쳤다.** 취소 요청과 거의
+   동시에 다른 작업이 시작되면 그 작업을 잘못 멈출 가능성 자체는 아직
+   남아 있다(websocket으로 실행 상태를 실시간으로 받아야 진짜 고침). "취소
+   요청 순간 자기 자신이 이미 끝나 버린 경우"만 이번에 막았다.

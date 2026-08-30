@@ -11,6 +11,7 @@ from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_SHAPES,
     canonical_shape_overlay_shape,
 )
+from videobox_core_engine.scene_video_service import SceneVideoQuality
 from videobox_domain_models.yujin_memory import YujinMemoryCandidate
 
 
@@ -465,7 +466,7 @@ class SceneVideoCreateRequest(BaseModel):
     make_gif: bool = False
     #: 빠른 미리보기(owner 요청 2026-08-29, 3회차). 실측: preview는 약 12초,
     #: full은 약 18~23분(1920x1080·81프레임·20스텝).
-    quality: Literal["preview", "standard", "full"] = "full"
+    quality: SceneVideoQuality = "full"
 
 
 class SceneVideoStartResponse(BaseModel):
@@ -484,11 +485,17 @@ class SceneVideoResult(BaseModel):
     #: 등록에 실패해도 위 프로젝트 자산은 그대로라 `None`일 수 있다.
     library_asset_id: str | None = None
     gif_library_asset_id: str | None = None
+    #: 코드리뷰(2026-08-30)로 잡힌 결함 -- 등록 실패가 어디에도 안 남아서
+    #: 왜 안 됐는지 알 방법이 없었다. `library_ingest`가 아예 꺼져 있는
+    #: 정상 상태(`library_asset_id is None`이지만 오류는 아님)와 실제 등록
+    #: 실패를 구분하려면 이 필드가 필요하다.
+    library_ingest_error: str | None = None
+    gif_library_ingest_error: str | None = None
     segment_id: str
     title: str
     prompt: str
     video_prompt: str = ""
-    quality: Literal["preview", "standard", "full"] = "full"
+    quality: SceneVideoQuality = "full"
     seed: int
     elapsed_sec: float | None = None
 

@@ -177,6 +177,8 @@ def _as_result(asset: dict[str, Any]) -> dict[str, Any]:
         "gif_asset_id": metadata.get("gif_asset_id"),
         "library_asset_id": metadata.get("library_asset_id"),
         "gif_library_asset_id": metadata.get("gif_library_asset_id"),
+        "library_ingest_error": metadata.get("library_ingest_error"),
+        "gif_library_ingest_error": metadata.get("gif_library_ingest_error"),
         "segment_id": str(metadata.get("scene_segment_id") or ""),
         "title": str(metadata.get("title") or "장면 영상"),
         "prompt": str(metadata.get("prompt") or ""),
