@@ -256,6 +256,79 @@ git status --short
 만든 게 아닌 무관한 산출물), `424bf8758`까지 전부 push·컨테이너 배포
 완료다.
 
+## 2026-08-30 이어진 세션 — job 상태 영속화 완료, 자율 루프 착수·두 우선순위 막힘
+
+owner가 일요일 휴일에 승인을 위임하고 2분 간격 `/loop` 자율 개발을 지시했다
+(cron job `f8e1c98a`, 세션 종료 시 사라짐, 7일 뒤 자동 만료).
+
+### 1. job 상태 영속화 — 완료 (위 "다음 세션 할 일 3번")
+
+새 스키마 없이 기존 재사용 게이트로 풀었다: `JobType.SCENE_VIDEO_GENERATION`
+한 줄을 `jobs.py`에 추가하니 `recover_orphaned_in_process_jobs`(재시작 시
+멈춘 job을 실패로 정리하는 기존 장치, `main.py`가 시작할 때마다 이미
+모든 프로젝트에 돌리는 것)가 새 JobType도 자동으로 덮었다(`_IN_PROCESS_JOB_TYPES`가
+`JobType` 전체에서 동적으로 계산되는 구조라서). `scene_videos.py`는 시작 시
+`store.create_job`, 완료 시 `store.update_job`으로 DB에도 기록하고, 조회
+시 메모리(`_jobs`)에 없으면 DB로 폴백 — 완성된 결과는 중복 저장하지 않고
+`output_ref`가 가리키는 scene 자산 메타데이터에서 `_as_result`로 재구성한다.
+새 테스트 3건(재시작 스트랜드 job 복구, 메모리 소실 후에도 결과 재현,
+메모리 소실 job은 취소 시 404 아닌 409) 추가, scene-video 테스트 14건·
+job 복구/대시보드/재시도 스위트 8건·프론트 전체 1369건 통과.
+
+### 2. CLAUDE.md 정리 — 완료
+
+낡은 SSOT 표 항목 2개 삭제(둘 다 이미 마감·비authoritative였던 문서를
+가리킴), 완전히 대체된 결정 기록 3건을 역사 기록으로 압축, 08-30
+Tauri 승인이 반영 안 돼 있던 "설치형 보류/미승인" 문구 2곳을 정정,
+새 결정(`2026-08-30-capcut-button-level-parity.ko.md`,
+`2026-08-30-installed-desktop-shell-tauri.ko.md`) 색인 추가. 7,956자/239줄
+(한도 8,000자/260줄), `test_handoff_entry_point.py` 5건 통과.
+
+### 3. 백엔드 전체 pytest — 1차 실행에서 내 실수로 오염, 2차 재실행 중
+
+1차 실행(4176 passed / 56 skipped / 4 failed, 52:39) 도중 프론트 전체
+vitest를 동시에 돌려 버렸다 — 이 저장소에 이미 있던 "전체 pytest는 무거운
+작업과 겹치면 안 된다"는 규정을 놓쳤다. 실패 4건을 격리 재실행하니 3건은
+바로 통과(오염이 원인인 거짓 실패), 1건(`test_owner_ready_script.py::test_smoke_timeout_kills_the_child_tree_and_returns_bounded_failure`)은
+격리해도 2/2 재현되지만 이 세션이 건드리지 않은 파일이고 어젯밤 세션에서도
+같은 방식으로 재현돼 "기존 결함, 세션 무관"으로 판단된 이력이 있다 — 이번에도
+같은 판단. 정확한 최종 기록을 위해 겹침 없이 2차 전체 실행을 다시 배경에서
+돌리는 중(결과는 다음 이어진 세션 절에 추가할 것).
+
+### 4. 자율 루프의 두 헤드라인 우선순위 — 둘 다 오늘 밤은 착수 보류(추측 대신 정직하게 막힘 기록)
+
+**TOCTOU 취소 경합 나머지 절반** (`comfyui_video_generation.py`의
+`_cancel_prompt`) — 진짜 고치려면 ComfyUI websocket의 `executing` 이벤트로
+실시간 실행 상태를 받아야 한다. 확인한 것:
+- 이 저장소 `.venv`에 websocket 클라이언트 라이브러리가 **없다**
+  (`websockets`·`websocket-client` 둘 다 `ModuleNotFoundError`). 새 의존성
+  추가가 필요하다.
+- `ComfyUIHTTPTransport`(`comfyui_image_generation.py`)는 보안 경계로
+  `_ALLOWED_COMFYUI_HOSTS`·`_COMFYUI_PORT`(8188)만 허용하는 host 검증을
+  자체 구현해 뒀다 — 새 websocket 연결도 정확히 같은 허용 목록을 따라야
+  SSRF류 구멍을 만들지 않는다.
+- **owner 컴퓨터의 ComfyUI가 지금 안 켜져 있다**(일요일, owner 부재) — 이
+  provider는 이미 실제 GPU로 검증된 적이 있는 코드라서(08-30 취소 실측),
+  websocket 계층을 추가하고 mock으로만 테스트한 뒤 "완료"라고 부르면
+  `CLAUDE.md` §4를 어기는 것이다. **그래서 오늘 밤은 코드를 짜지 않고
+  막힘만 기록한다** — 실제 ComfyUI가 켜져 있을 때(owner가 있거나, 다음
+  세션에서 직접 켜고) 다시 시작한다.
+
+**캡컷 버튼 단위 벤치마킹** (`2026-08-30-capcut-button-level-parity.ko.md`) —
+착수 전 저장소를 다 뒤졌지만 **owner가 보여준 캡컷 캡처 이미지가 파일로
+어디에도 저장돼 있지 않다**(`docs/decisions/` 등 어디에도 `.png`/`.jpg` 없음,
+채팅에서만 보여준 것). 채팅 요약 문구만 보고 버튼 크기·배치를 기억으로
+재구성하면 **추측**이지 벤치마킹이 아니다 — 틀리면 owner가 다시 다 고쳐야
+한다. **그래서 이 항목도 오늘 밤은 착수하지 않는다.** 다음 세션에서 owner가
+캡처 파일을 저장소에 남겨 주면(`docs/decisions/assets/` 같은 자리) 그때
+정확하게 시작한다.
+
+**루프가 이어서 하는 것**: 위 두 헤드라인이 막혀 있으므로, 2차 pytest가
+끝나는 대로 `docs/handoffs/2026-08-29-...capcut-dark-theme-handoff.ko.md`의
+"참고만 하고 안 고친 것" 목록(장면 찾기 로직 3중 중복, 내보내기 팝업 상태
+조회 중복 호출, 접근성 겹침 등) 중 **먼저 실물로 재현을 확인한 뒤** 확실한
+것만 고친다 — 옛 메모를 확인 없이 믿지 않는다(`[[videobox-measure-before-guessing]]`).
+
 ## 다음 세션 시작 프롬프트
 
 ```

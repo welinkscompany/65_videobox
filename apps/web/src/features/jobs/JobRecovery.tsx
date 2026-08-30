@@ -37,6 +37,7 @@ const jobTypeCopy: Record<string, string> = {
   capcut_export: "이전 CapCut 내보내기",
   final_render: "완성본 만들기",
   capcut_draft_export: "CapCut 초안 만들기",
+  scene_video_generation: "AI 장면 영상 만들기",
 };
 
 const jobStatusCopy: Record<string, string> = {

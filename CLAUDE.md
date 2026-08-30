@@ -54,28 +54,29 @@
 | 최상위 지침 | `CLAUDE.md` (이 파일) |
 | 운영 규정 SSOT | `docs/development-fast-path.ko.md` `## 10` |
 | 최상위 구현 계획 | `docs/implementation-plan.ko.md` |
-| 상태/closeout 로그 | `docs/development-status-2026-06-29.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
-| 미해결 수정 backlog | `docs/handoffs/2026-08-05-videobox-owner-dogfood-findings-backlog.ko.md` |
 | **최신 세션 인계** | `docs/handoffs/2026-08-30-videobox-library-id-fix-desktop-shell-standard-quality.ko.md` |
 
 승인된 시각 결정은 `docs/decisions/`에 있다. 전부 명시 승인이고 재승인 없이 바꾸지 않는다.
-경로는 위 표의 `docs/decisions/`다. **색은 가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
+**가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
 
+- `2026-08-30-capcut-button-level-parity.ko.md` — 버튼 구성·배치·크기까지
+  벤치마킹. 없는 기능 버튼은 안 만든다.
+- `2026-08-30-installed-desktop-shell-tauri.ko.md` — **설치형(Tauri) 착수
+  승인.** 아래 두 문서의 "설치형 보류"를 뒤집는다. 빌드는 Windows Smart App
+  Control에 막혀 아직 미검증(`apps/desktop/README.md`).
 - `2026-08-29-ai-video-naming-and-packaging-followups.ko.md` — AI 영상 생성은
-  **로컬 비디오 모델**(방향만, 구현 미착수). 설치형은 **보류 유지**. "미디어"는
-  **전체 메뉴(공용 라이브러리)만 "자료실"로** — 단계·도크 탭은 그대로.
+  **로컬 비디오 모델**(방향만, 구현 미착수). "미디어"는 **전체 메뉴(공용
+  라이브러리)만 "자료실"로** — 단계·도크 탭은 그대로.
 - `2026-08-29-capcut-full-structure-and-dark-theme.ko.md` — **현행 팔레트는
   다크다**(구현·검증 완료). **메뉴·배치를 캡컷과 끝까지 동일화**(5단계 계획
-  완료로 범위 확정). 설치형은 **이 문서로도 승인 안 됨**.
+  완료로 범위 확정).
 - `2026-08-28-home-screen-reversal.ko.md` — **`/`는 이제 항상 `/projects`다**
   (2026-08-19 결정을 뒤집음). 시작 지름길 둘도 이때 생겼다.
-- `2026-08-27-editor-centered-shell-direction.ko.md` — 편집기를 중심 화면으로, 미디어
-  3페이지를 도크 탭으로, 내보내기·검토를 팝업으로(5단계 계획, `2026-08-29`가 전부
-  완료로 범위 확정)
-- `2026-08-21-capcut-shell-layout.ko.md` — 왼쪽 기둥을 없애고 위 띠로(캡컷 배치)
-- ~~`2026-08-21-editor-back-to-light.ko.md`~~ — **`2026-08-29`가 되돌림.** 역사 기록으로만 남음
-- ~~`2026-08-05-dashboard-white-orange-direction.ko.md`~~ — **팔레트 표는 `2026-08-29`로 대체됨.** 구조 부분(3분할, 그리드 등)은 유효
+- ~~`2026-08-27-editor-centered-shell-direction.ko.md`~~ / ~~`2026-08-21-capcut-shell-layout.ko.md`~~
+  — 구조 개편 원안, `2026-08-29`·`2026-08-30`이 전부 완료로 확정(역사 기록)
+- ~~`2026-08-21-editor-back-to-light.ko.md`~~ — `2026-08-29`가 되돌림(역사 기록)
+- ~~`2026-08-05-dashboard-white-orange-direction.ko.md`~~ — 팔레트는 `2026-08-29`로 대체, 구조(3분할 등)만 유효
 - `2026-07-20-editor-workbench-visual-approval.ko.md` — 편집 작업판 5개 viewport
 
 ## 2.1 제품 범위 경계

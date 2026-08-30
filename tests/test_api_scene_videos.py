@@ -241,6 +241,75 @@ def test_cancelling_an_unknown_job_is_also_a_404(tmp_path: Path) -> None:
     assert response.status_code == 404
 
 
+def test_a_stranded_running_job_recovers_to_a_clear_failure_after_a_restart(tmp_path: Path) -> None:
+    """job 상태 영속화(2026-08-30) -- 다른 job 종류가 이미 쓰던
+    `recover_orphaned_in_process_jobs`(재시작 시 멈춰 있던 job을 실패로
+    정리하는 기존 장치)가 `JobType.SCENE_VIDEO_GENERATION`도 그대로 덮는지
+    확인한다. 이 job 자체는 그 장치를 전혀 몰라도 자동으로 덮인다 -- 새
+    스키마 없이 `JobType`에 한 줄만 더해 기존 재사용 게이트를 탄 결과다."""
+    from videobox_domain_models.jobs import JobStatus, JobType
+
+    client, project_id = _client(tmp_path, _StubProvider(tmp_path))
+    store = client.app.state.store
+    stranded = store.create_job(
+        project_id=project_id, job_type=JobType.SCENE_VIDEO_GENERATION,
+        input_ref="script-9", status=JobStatus.RUNNING,
+    )
+    job_id = str(stranded["job_id"])
+
+    store.recover_orphaned_in_process_jobs(project_id=project_id)
+
+    body = client.get(f"/api/projects/{project_id}/scene-videos/{job_id}").json()
+    assert body["status"] == "failed"
+    assert body["error_detail"] == "WORKER_RESTARTED"
+
+
+def test_a_finished_job_still_answers_after_this_process_forgets_it(tmp_path: Path) -> None:
+    """job 상태 영속화(2026-08-30) -- 이 프로세스의 메모리(`_jobs`)가
+    재시작으로 사라져도, DB의 job 행 + scene 자산 메타데이터만으로 같은
+    결과를 다시 돌려줄 수 있어야 한다. 결과 자체는 두 번 저장하지 않는다 --
+    `output_ref`가 가리키는 자산에서 되짚는다."""
+    from videobox_api.routers import scene_videos as scene_videos_module
+
+    client, project_id = _client(tmp_path, _StubProvider(tmp_path))
+    started = client.post(
+        f"/api/projects/{project_id}/scene-videos",
+        json={"prompt": "해 뜨는 바다", "segment_id": "script-1"},
+    )
+    job_id = started.json()["job_id"]
+    before = client.get(f"/api/projects/{project_id}/scene-videos/{job_id}").json()
+    assert before["status"] == "succeeded", before
+
+    # 실제 재시작을 흉내낸다 -- 이 프로세스가 이 job을 다루며 만든 메모리
+    # 기록을 지운다.
+    scene_videos_module._jobs.pop(job_id, None)
+
+    after = client.get(f"/api/projects/{project_id}/scene-videos/{job_id}").json()
+    assert after["status"] == "succeeded"
+    assert after["result"] == before["result"]
+
+
+def test_cancelling_a_job_this_process_no_longer_remembers_is_refused_not_lost(tmp_path: Path) -> None:
+    """job 상태 영속화(2026-08-30) -- 메모리를 잃은 job은 취소할 실제 스레드가
+    없다. 404(없음)로 답하면 "있던 job이 사라졌다"는 착각을 준다 -- 409(취소
+    불가)가 맞다. 진짜 없는 job(테스트 파일 위쪽의 `does-not-exist`)은 여전히
+    404다."""
+    from videobox_api.routers import scene_videos as scene_videos_module
+
+    client, project_id = _client(tmp_path, _StubProvider(tmp_path))
+    started = client.post(
+        f"/api/projects/{project_id}/scene-videos",
+        json={"prompt": "해 뜨는 바다", "segment_id": "script-1"},
+    )
+    job_id = started.json()["job_id"]
+    scene_videos_module._jobs.pop(job_id, None)
+
+    response = client.post(f"/api/projects/{project_id}/scene-videos/{job_id}/cancel")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "scene_video_job_not_cancellable"
+
+
 def test_cancelling_a_job_that_already_finished_is_refused(tmp_path: Path) -> None:
     """취소 버튼(owner 요청 2026-08-29 3회차) -- 이미 끝난 작업을 다시
     취소하면 안 된다. `TestClient`는 백그라운드 작업을 응답 준비 과정에서
