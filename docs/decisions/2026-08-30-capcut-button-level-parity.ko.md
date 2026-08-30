@@ -132,3 +132,46 @@ owner 확인 후("오른쪽 패널도 이어서 상시 노출로 바꿔줘") 착
 폭 기준 자체는 이번에 바꾸지 않았다 — persisted `leftOpen`/`rightOpen`이
 둘 다 참이어야 하는 기존 규칙 그대로다. 이번 지시는 "닫을 수 없게"였지
 "기준 폭을 넓혀라"가 아니었다.
+
+### 4단계 착수 — 첫 화면("프로젝트" 목록), 실측 중 시스템 버그 발견해 먼저 고침
+
+owner "진행해" 지시로 다음 화면(`/projects`)의 버튼 단위 대조를 시작했다.
+`docs/decisions/assets/2026-08-29-capcut-home-screen.webp`(캡컷 첫 화면)의
+"+ 프로젝트 만들기" 배너는 두드러지게 큰(약 140px 높이 추정) 둥근 CTA인
+반면, VideoBox의 "+ 새 프로젝트 만들기"는 실측 결과 높이 35px, 모서리
+반지름 0px로 렌더링되고 있었다 — `.vb-catalog-create`의 CSS 소스는
+`min-height: 5rem`(80px)·`border-radius: var(--vb-radius-md)`를 이미
+지정하고 있었는데도(캡컷 대조를 이미 염두에 둔 값), 실제로는 전혀
+반영되지 않고 있었다.
+
+**원인은 CapCut 대조와 무관한 기존 CSS 결함 두 가지였다** (개발자 도구로
+`getComputedStyle`·`document.styleSheets` 직접 대조해 확인, 화면 느낌이
+아니라 실측):
+
+1. `styles/product-shell.css`의 "Intranet DS normalization" 블록이
+   `.vb-product-shell [data-slot=button][data-variant="default"]`에
+   `border-radius: var(--radius-2xl)`를 걸고 있었는데, `--radius-2xl`은
+   **정의된 적이 없는 변수**였다 -- 반지름 척도를 셋(`--vb-radius-sm/md/lg`,
+   owner 결정 2026-08-27)으로 줄이면서 이 두 줄만 옛 이름 그대로 남았다.
+   정의 안 된 `var()`는 선언 자체를 무효로 만들어 초기값(0)으로 떨어진다 --
+   그래서 **이 화면 전체의 default·outline 버튼이 전부** 모서리 없이
+   각지게 그려지고 있었다. `features/footage/footage.css`에도 같은
+   패턴이 두 줄 더 있었다(그중 하나는 `footage-design-system.test.ts`가
+   깨진 값 그대로를 "정답"으로 박아 두고 있었다 -- 그 시험도 함께 고쳤다).
+2. 같은 블록의 `.vb-product-shell [data-slot=button] { min-height:32px; }`은
+   속성 선택자를 써서 특정도가 `.vb-catalog-create`(클래스 하나)보다 높다.
+   그래서 이 버튼만 크게 만들려던 `min-height: 5rem`이 이 일반 규칙에
+   조용히 눌려 한 번도 반영된 적이 없었다.
+
+**고친 것**: `--radius-2xl` 두 자리를 전부 `--vb-radius-md`로 바꾸고,
+`.vb-product-shell [data-slot=button].vb-catalog-create { min-height:5rem; border-radius:var(--vb-radius-md); }`를
+같은 특정도로 뒤에 추가해 이 버튼만 이긴다. 다른 버튼(일반 default·outline)의
+`min-height:32px`는 그대로 뒀다 -- 그건 버그가 아니라 "Intranet DS h-8
+역할 높이" 의도된 값이다(`footage-design-system.test.ts`의 "keeps ...
+h-8 role height" 시험이 그 의도를 명시).
+
+**아직 검증 중**: 프런트엔드 시험 재실행·컨테이너 재빌드·브라우저 실측
+확인은 백엔드 전체 pytest(다른 무거운 작업과 동시에 안 돌리는 규정)가
+끝난 뒤 진행. 첫 화면의 나머지 버튼(퀵스타트 카드 2장, 검색·보기전환·
+보관함 버튼 줄)은 이 CSS 버그가 고쳐진 화면을 실제로 보고 나서 마저
+대조한다 — 지금까지는 이 CTA 버튼 하나의 크기 문제였다.

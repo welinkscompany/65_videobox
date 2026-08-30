@@ -46,7 +46,7 @@ describe("footage organizer design-system contract", () => {
 
   it("uses the intranet control, filled-input, and focus-ring contract", () => {
     expect(productShellCss).toMatch(/\.vb-product-shell \[data-slot=button\] \{ min-height:32px/)
-    expect(footageCss).toContain("min-height:32px; border:1px solid transparent; border-radius:var(--radius-2xl)")
+    expect(footageCss).toContain("min-height:32px; border:1px solid transparent; border-radius:var(--vb-radius-md)")
     expect(footageCss).toContain("background:color-mix(in srgb,var(--input) 50%,transparent)")
     expect(footageCss).toContain("box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 30%,transparent)")
   })

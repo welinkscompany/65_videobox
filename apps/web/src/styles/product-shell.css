@@ -160,11 +160,23 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-conversation-cleanup article { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); padding: var(--vb-space-3) var(--vb-space-4); }
 .vb-conversation-cleanup article p { margin: 0; }
 
-/* Intranet DS normalization for the product shell and catalog. */
+/* Intranet DS normalization for the product shell and catalog.
+   `--radius-2xl`는 정의된 적이 없다 -- 셋으로 줄인 반지름 척도
+   (`--vb-radius-sm/md/lg`, ui-system.css:19-21, owner 결정 2026-08-27)로
+   정리하면서 이 두 줄만 옛 이름 그대로 남았다. 정의 안 된 var()는 그
+   선언 자체를 무효로 만들어 초기값(0)으로 떨어진다 -- 그래서 이 화면의
+   모든 default·outline 버튼이 모서리 없이 각지게 그려지고 있었다
+   (2026-08-30, 캡컷 버튼 단위 벤치마킹 중 실측으로 발견). */
 .vb-product-shell [data-slot=button] { min-height:32px; }
-.vb-product-shell [data-slot=button][data-variant="default"] { border-radius:var(--radius-2xl); }
-.vb-product-shell [data-slot=button][data-variant="outline"] { border:0; box-shadow:0 0 0 1px var(--vb-control-ring); border-radius:var(--radius-2xl); }
+.vb-product-shell [data-slot=button][data-variant="default"] { border-radius:var(--vb-radius-md); }
+.vb-product-shell [data-slot=button][data-variant="outline"] { border:0; box-shadow:0 0 0 1px var(--vb-control-ring); border-radius:var(--vb-radius-md); }
 .vb-product-shell :where(button,a,input,textarea,select):focus-visible { outline:0; box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 30%,transparent); }
+/* 위 `min-height:32px` 일반 규칙이 속성 선택자를 써서 특정도가
+   `.vb-catalog-create`(클래스 하나)보다 높다 -- 그래서 캡컷 첫 화면의
+   큰 CTA 배너를 흉내 낸 `min-height: 5rem`(아래 90행대)이 실제로는 한
+   번도 반영되지 않고 이 32px로 조용히 눌려 있었다(2026-08-30 실측).
+   같은 속성 선택자를 얹어 특정도를 맞추고, 위치를 뒤에 둬 이긴다. */
+.vb-product-shell [data-slot=button].vb-catalog-create { min-height:5rem; border-radius:var(--vb-radius-md); }
 .vb-catalog { width:100%; box-sizing:border-box; min-width:0; overflow-x:hidden; }
 @media (min-width:1600px) { .vb-catalog { max-width:1600px; } }
 .vb-catalog-grid { min-width:0; }
