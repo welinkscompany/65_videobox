@@ -62,7 +62,7 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
 
 
 def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
-    example = {
+    success_example = {
         "schema_version": "videobox.yujin-editing-response.v1",
         "reply_text": "2번 장면을 두 배 빠르게 하는 검토용 편집안을 만들었어요.",
         "proposal": {
@@ -71,16 +71,31 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
             "operations": [{"intent": "set_scene_speed", "segment_id": context.segment_ids[-1], "rate": 2}],
         },
     }
+    # 실측(2026-08-30)으로 잡힌 결함: "B-roll 색감을 바꿔줘"처럼 허용 intent 밖의
+    # 요청에 proposal을 null로 정확히 뒀으면서도, reply_text는 예시 문장의
+    # "만들었어요" 어투를 그대로 베껴 편집이 이미 성공한 것처럼 말했다.
+    # `interpret_yujin_editing_request`는 이 reply_text를 그대로 화면에
+    # 보여준다(§ clarification) -- 예시가 성공 케이스 하나뿐이라 모델이
+    # null일 때도 같은 어투를 흉내 낼 근거가 있었다. 실패 케이스 예시를
+    # 나란히 보여줘 모델이 베낄 어투를 분리한다.
+    no_proposal_example = {
+        "schema_version": "videobox.yujin-editing-response.v1",
+        "reply_text": "지금 대화 편집으로는 색감 보정을 지원하지 않아요. 오른쪽 패널의 B-roll 색감 메뉴에서 직접 골라 주세요.",
+        "proposal": None,
+    }
     return (
         "너는 VideoBox의 편집안 작성기다. 이 요청은 저장·실행·적용이 아닌 검토용 후보만 만든다. "
         "반드시 JSON 객체 하나만 출력하고 Markdown, 코드 블록, 설명문을 섞지 마라. "
         "proposal 안에는 현재 장면 ID만 쓰고, base_session_revision은 아래 값과 정확히 같아야 한다. "
         "허용 intent는 set_scene_speed, set_segment_bounds, set_cut_action, reorder_segments, "
         "set_caption_text, apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "proposal이 null이면 reply_text에 '만들었다/적용했다/바꿨다'처럼 편집이 이미 일어난 것으로 쓰지 않는다 -- "
+        "왜 후보를 못 만드는지 설명하거나 필요한 정보를 되묻는 문장만 쓴다. "
         "apply_media의 asset_id는 반드시 아래 승인된 자산 목록에 있는 값만 써야 한다 -- 없는 값을 지어내면 항상 거절된다. "
         f"현재 장면 ID: {', '.join(context.segment_ids)}. 현재 revision: {context.session_revision}. "
         f"{_approved_asset_catalogue(context)} "
-        f"정확한 출력 예시: {json.dumps(example, ensure_ascii=False)}. "
+        f"proposal이 있을 때 출력 예시: {json.dumps(success_example, ensure_ascii=False)}. "
+        f"proposal이 없을 때 출력 예시: {json.dumps(no_proposal_example, ensure_ascii=False)}. "
         f"창작자 요청: {instruction}"
     )
 

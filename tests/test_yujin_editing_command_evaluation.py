@@ -148,6 +148,28 @@ def test_local_command_evaluation_says_nothing_is_approved_when_nothing_is() -> 
     assert "승인된 자산이 없" in prompt
 
 
+def test_local_command_evaluation_tells_the_model_not_to_claim_success_without_a_proposal() -> None:
+    """실측(2026-08-30, 브라우저 종단 QA)으로 잡힌 결함 -- "B-roll 색감을
+    바꿔줘"처럼 허용 intent 밖의 요청에 모델이 proposal을 정확히 null로
+    두면서도, reply_text는 예시 문장의 성공 어투("만들었어요")를 그대로
+    베껴 편집이 이미 된 것처럼 말했다. 그 reply_text가 그대로 화면에
+    보인다(`interpret_yujin_editing_request`의 clarification 분기) --
+    프롬프트에 실패 케이스 예시와 명시적 금지 문구를 추가해 모델이 베낄
+    어투를 분리한다."""
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="B-roll 색감을 따뜻하게 바꿔줘",
+        context=YujinEditingContext(session_id="session-1", session_revision=3, segment_ids=("scene-1", "scene-2")),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "만들었다/적용했다/바꿨다" in prompt
+    assert '"proposal": null' in prompt
+
+
 def test_local_command_evaluation_tells_the_runtime_the_exact_candidate_contract() -> None:
     runtime = _CapturingRuntime(_response(operation={
         "intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2,
