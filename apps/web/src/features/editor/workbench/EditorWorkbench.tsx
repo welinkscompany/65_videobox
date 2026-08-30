@@ -530,6 +530,15 @@ function EditorWorkbenchInstance({
     if (layout.mode === "drawer") openDrawer("left");
     else if (!leftVisible) toggleDock("left");
   };
+  // 캡컷의 오른쪽 "세부 정보" 패널은 접을 방법이 없다(상시 노출) --
+  // owner 지시 2026-08-30. 왼쪽과 달리 탭이 하나뿐이라 전환할 대상이
+  // 없으니, 이미 보이면 아무 것도 하지 않는다(같은 자리를 다시 눌러도
+  // 안 닫힌다). 안 보이면 연다 -- 중간 폭 화면에서 왼쪽이 떠 있어도
+  // `toggleDock`의 기존 `closesTheOther` 조정이 왼쪽을 대신 접는다.
+  const openRightPane = () => {
+    if (layout.mode === "drawer") { openDrawer("right"); return; }
+    if (!rightVisible) toggleDock("right");
+  };
   const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} onMediaAdded={onMediaAdded} view={view} leftPane={leftPane} onLeftPaneChange={openLeftPane} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
@@ -619,7 +628,7 @@ function EditorWorkbenchInstance({
       <div className="vb-editor-workbench__panes" role="tablist" aria-label="왼쪽 패널">
         {editorAssetPanes.map((item) => <Button key={item.pane} ref={item.pane === leftPane ? leftTriggerRef : undefined} type="button" variant={leftShowing && leftPane === item.pane ? "default" : "outline"} size="sm" role="tab" aria-selected={leftShowing && leftPane === item.pane} onClick={() => openLeftPane(item.pane)}>{item.label}</Button>)}
       </div>
-      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성과 유진" aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
+      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성과 유진" aria-pressed={rightShowing} onClick={() => openRightPane()}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
       {/* **내보내기를 편집기 안에서 연다(owner 지시 2026-08-27).**
           > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
 
