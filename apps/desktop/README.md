@@ -29,23 +29,46 @@ npm run tauri dev    # 개발 중 실행 (owner-ready 스택이 먼저 떠 있�
 npm run tauri build  # 배포용 실행 파일
 ```
 
-## 아직 안 한 것 (다음 세션 몫)
+## 실제 빌드·설치·실행 검증 완료 (2026-08-30)
 
-- **실제 빌드가 막혀 있다.** Rust(rustup)와 Visual Studio Build Tools(C++
-  워크로드)는 2026-08-30에 winget으로 설치했고 MSVC 링커까지는 통과했지만,
-  **Windows 11 Smart App Control**(`Get-CimInstance ... SmartAppControlState`
-  → `On`)이 새로 컴파일된 서명 안 된 `build-script-build.exe`(cargo가 빌드
-  스크립트를 실행하려고 만드는 임시 실행 파일)를 차단한다(`os error 4551`,
-  "애플리케이션 제어 정책에서 이 파일을 차단했습니다"). **owner 확인 없이
-  Smart App Control을 끄지 않았다** — 이 기능은 한 번 끄면 OS 재설치 없이는
-  되돌리기 어려운 시스템 보안 설정이라 임의로 손대지 않는다.
-  - owner가 고를 수 있는 길: (1) Windows 보안 → 앱 및 브라우저 제어에서 이번에
-    막힌 항목을 개별적으로 허용(전체를 끄는 것보다 가볍다), (2) Smart App
-    Control 자체를 끄기(되돌리기 어려움, 신중히), (3) 서명된 빌드 파이프라인을
-    별도로 구성(더 큰 작업).
-  - 이 문제를 owner가 해결한 뒤에야 `npm run tauri dev`/`build` 실제 검증이
-    가능하다(`CLAUDE.md` §4, "완료 = owner가 화면에서 실제로 쓸 수 있는가").
+**`npm run tauri build`가 실제로 끝까지 성공했고, 나온 설치 파일로 실제 설치·
+실행까지 확인했다.** 그전 세션에 겪은 Windows 11 Smart App Control 차단
+(`os error 4551`, 새로 컴파일된 서명 안 된 `build-script-build.exe`를
+차단)은 owner가 "항목별 예외로 처리"하기로 정한 뒤 재시도에서 **재현되지
+않았다** — 다만 이번엔 이전 빌드 캐시가 남아 있는 상태에서 재시도한
+것이라, **캐시를 지우고 처음부터(clean) 다시 빌드하면 다시 막힐 가능성이
+남아 있다.** "이번엔 안 막혔다"를 "이 결함이 근본적으로 해결됐다"로
+읽지 않는다.
+
+막힌 진짜 원인은 따로 있었다 — `src-tauri/icons/`가 비어 있는데
+`tauri.conf.json`의 `bundle.icon`이 그 안의 파일 4개를 가리키고 있어서,
+"Tauri 기본 아이콘으로 조용히 대체"가 아니라 **Windows 리소스 생성
+단계에서 빌드 자체가 실패**했다(`icon.ico not found`). `npm run tauri icon
+<소스 이미지>`로 임시 아이콘 세트를 만들어 넣어 해결했다 — `icon-source.png`가
+그 소스이고, VideoBox 실제 로고가 아니라 자리표시용(주황 배경에 흰 "V")이다.
+**진짜 로고로 바꿀 때는 owner 확인 후 같은 명령으로 다시 만들면 된다.**
+
+검증한 것:
+- `npm run tauri build` → `videobox-desktop.exe` 빌드 성공, NSIS 설치
+  파일(`VideoBox_0.1.0_x64-setup.exe`) 생성 확인.
+- 그 설치 파일로 실제 설치(`/S` 조용히 설치, 관리자 권한 요구 없음 —
+  `%LOCALAPPDATA%\VideoBox`에 사용자 단위로 설치됨) 확인.
+- 설치된 `videobox-desktop.exe` 실제 실행 → owner-ready 스택이 띄운
+  실제 화면(프로젝트 목록, 실제 프로젝트 데이터, 이번 세션에 고친
+  CTA 버튼·아이콘 단추 스타일까지)이 native 창 안에 그대로 뜨는 것을
+  스크린샷으로 확인.
+
+## 남은 것
+
+- **clean 빌드에서 Smart App Control 재현 여부는 아직 확인 안 됨.** 지금
+  검증은 캐시가 남아 있는 상태의 재시도였다 — `target/` 전체를 지우고
+  처음부터 다시 빌드했을 때도 안 막히는지가 이 결함이 실제로 해결됐다고
+  말할 수 있는 다음 확인 지점이다.
+- **아이콘은 임시다.** `icon-source.png`는 자리표시용 — 실제 VideoBox
+  로고가 정해지면 owner 확인 후 교체한다(팔레트·비주얼 방향 변경에
+  준하는 승인 절차, `CLAUDE.md` §6).
 - 컨테이너 스택이 안 떠 있을 때 창이 자동으로 `owner-ready.ps1 -Mode Start`를
-  불러 주는 부트스트랩(지금은 스택이 이미 떠 있다고 가정).
-- 앱 아이콘 — `src-tauri/icons/`가 비어 있어 Tauri 기본 아이콘으로 빌드된다.
+  불러 주는 부트스트랩은 아직 없다(지금은 스택이 이미 떠 있다고 가정).
 - macOS/Linux 타깃 — owner 개발 머신이 Windows라 Windows만 먼저 본다.
+  `src-tauri/icons/android`·`ios`는 `tauri icon`이 기본으로 만들지만
+  범위 밖이라 지웠다.
