@@ -1,7 +1,7 @@
 import { type CSSProperties, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api, type OutputVariant, type OutputVariantPatch } from "../../../api";
-import { ChevronsLeftRight, Copy, PanelLeft, PanelRight, Redo2, Scissors, Trash2, Undo2, Upload } from "lucide-react";
+import { ChevronsLeftRight, Copy, PanelRight, Redo2, Scissors, Trash2, Undo2, Upload } from "lucide-react";
 
 import { Button } from "../../../components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "../../../components/ui/resizable";
@@ -9,7 +9,7 @@ import type { PanelImperativeHandle, PanelSize } from "react-resizable-panels";
 import type { EditorViewModel } from "../editorViewModel";
 import type { EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorAssetCard } from "../assets/editorAssetProjection";
-import type { EditorAssetPreviewState } from "../assets/EditorAssetBrowser";
+import { editorAssetPanes, type EditorAssetPreviewState, type LeftPane } from "../assets/EditorAssetBrowser";
 import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls } from "../inspector/InspectorControls";
 import { PreviewStage, type AuditionRequest, type AuditionSource } from "../preview/preview-stage";
 import { sceneNumbersBySegmentId } from "../sceneNames";
@@ -159,6 +159,11 @@ function EditorWorkbenchInstance({
     const useLegacy = hasLegacyEditorUiState();
     return { ...scoped, activeDrawer: useLegacy ? scoped.activeDrawer : (lastActiveDrawer ?? readActiveDrawer() ?? scoped.activeDrawer) };
   });
+  // 캡컷 참조(2026-08-30 버튼 단위 벤치마킹 2단계) -- 왼쪽 패널이 지금 어느
+  // 탭(미디어·오디오·자막·전환)인지는 편집기 맨 위 탭 줄이 관리한다. 패널
+  // 자체는 `EditorAssetBrowser`가 그리지만(재사용, 두 번 짜지 않는다) 탭을
+  // 누른 자리는 패널 안이 아니라 창 맨 위다.
+  const [leftPane, setLeftPane] = useState<LeftPane>("media");
   const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
   const [exportOpen, setExportOpen] = useState(false);
   const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
@@ -497,17 +502,39 @@ function EditorWorkbenchInstance({
       return { routeKey: viewRouteKey, request: { requestId: (currentRequest?.requestId ?? 0) + 1, source } };
     });
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} onMediaAdded={onMediaAdded} view={view} /></aside>;
-  const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
-  const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
-  const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
-  const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "미디어" : "세부 정보"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
   const leftVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.leftOpen);
   const rightVisible = layout.mode === "desktop-both" || (layout.mode === "desktop-single" && layout.rightOpen);
   // 지금 그 도크가 **실제로 보이는가**. 넓은 화면이면 펴져 있는지, 좁은 화면이면
   // 그 서랍이 열려 있는지 -- 두 모드가 다른 상태를 쓰므로 한 자리에서 합친다.
   const leftShowing = layout.mode === "drawer" ? layout.activeDrawer === "left" : leftVisible;
   const rightShowing = layout.mode === "drawer" ? layout.activeDrawer === "right" : rightVisible;
+  // 캡컷의 최상위 탭은 다른 탭을 누르면 그 내용으로 바뀌고 패널이 열려
+  // 있게 한다. **데스크톱 모드에서 같은 탭을 다시 누르면 접는다** -- 전체
+  // 화면 미리보기(owner 승인 2026-08-17)를 열 방법이 없어지면 안 되는데,
+  // 탭 하나짜리 토글 단추(예전 `미디어` 아이콘)가 이 탭 줄로 흡수됐으니
+  // 그 자리를 이어받는다. **서랍(drawer) 모드는 이 접기를 안 한다** --
+  // 예전 `미디어` 단추도 서랍 모드에서는 `openDrawer`만 불러 항상 열기만
+  // 했지 닫힌 적이 없다(`openDrawer`는 토글이 아니다). 여기서 접는 동작을
+  // 더하면 이미 열려 있는 서랍에서 같은 탭을 다시 눌렀을 때(예: 시험이
+  // 남긴 상태) 의도치 않게 닫혀 버린다.
+  //
+  // `dock`이 아래에서 이 함수를 곧바로 참조하므로(`drawer`가 그 자리에서
+  // `dock(...)`을 바로 부른다), 이 선언은 반드시 `dock`보다 앞에 있어야
+  // 한다 -- 뒤에 두면 TDZ로 죽는다(2026-08-30에 실제로 겪음).
+  const openLeftPane = (pane: LeftPane) => {
+    if (layout.mode !== "drawer" && pane === leftPane && leftShowing) {
+      toggleDock("left");
+      return;
+    }
+    setLeftPane(pane);
+    if (layout.mode === "drawer") openDrawer("left");
+    else if (!leftVisible) toggleDock("left");
+  };
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} onMediaAdded={onMediaAdded} view={view} leftPane={leftPane} onLeftPaneChange={openLeftPane} /></aside>;
+  const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
+  const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
+  const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
+  const drawer = layout.activeDrawer && <div ref={drawerRef} role="dialog" aria-modal="true" aria-label={layout.activeDrawer === "left" ? "미디어" : "세부 정보"} className="vb-editor-workbench__drawer" onKeyDown={trapDrawerFocus} tabIndex={-1}>{dock(layout.activeDrawer)}<Button type="button" onClick={closeAndRestore}>닫기</Button></div>;
   // 반복 구간은 새로 만들지 않는다. 화면이 이미 `적용 구간`으로 보여 주는 그 구간이다 --
   // 같은 개념이 두 벌이 되면 하나가 조용히 낡는다.
   // 클립 위에 깔 그림. **주소를 아는 것은 여기의 일**이다 -- 타임라인은 서버를
@@ -582,7 +609,16 @@ function EditorWorkbenchInstance({
           같은 것을 자산·재료·소재·라이브러리로 부르던 자리가 일곱 군데였고 이 도크는
           여는 단추가 `소재`, 열면 안쪽 제목이 `자산`이라 저 혼자서도 어긋나 있었다.
           → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` */}
-      <Button ref={leftTriggerRef} type="button" variant={leftShowing ? "default" : "outline"} size="icon" title="미디어 — 영상·음악·효과음·그림" aria-pressed={leftShowing} onClick={() => layout.mode === "drawer" ? openDrawer("left") : toggleDock("left")}><PanelLeft aria-hidden="true" /><span className="sr-only">미디어</span></Button>
+      {/* **최상위 콘텐츠 탭(승인 2026-08-30, 버튼 단위 벤치마킹 2단계).**
+          캡컷 참조(`docs/decisions/assets/2026-08-29-capcut-editor-screen.png`)의
+          왼쪽 패널 탭(미디어·오디오·텍스트·스티커·전환 등)은 패널 안이 아니라
+          창 맨 위에 늘 떠 있다. 예전엔 아이콘 하나(`미디어`)가 패널을 열고
+          닫기만 했고, 실제 탭(미디어/오디오/자막/전환)은 패널을 연 뒤에야
+          보였다 -- `EditorAssetBrowser`가 이미 그 탭을 옳게 만들어 뒀으므로
+          (`renderPaneTabs`) 그 자리를 여기로 옮긴다. */}
+      <div className="vb-editor-workbench__panes" role="tablist" aria-label="왼쪽 패널">
+        {editorAssetPanes.map((item) => <Button key={item.pane} ref={item.pane === leftPane ? leftTriggerRef : undefined} type="button" variant={leftShowing && leftPane === item.pane ? "default" : "outline"} size="sm" role="tab" aria-selected={leftShowing && leftPane === item.pane} onClick={() => openLeftPane(item.pane)}>{item.label}</Button>)}
+      </div>
       <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성과 유진" aria-pressed={rightShowing} onClick={() => layout.mode === "drawer" ? openDrawer("right") : toggleDock("right")}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
       {/* **내보내기를 편집기 안에서 연다(owner 지시 2026-08-27).**
           > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"

@@ -42,6 +42,15 @@ type Props = Readonly<{
   transcript?: ReactNode;
   /** 원본만 확인하는 자리. 미디어 탭 안에 둔다. */
   sourceCheck?: ReactNode;
+  /** 최상위 탭을 여기서 대신 관리하는 부모가 있으면 준다(승인 2026-08-30
+   *  버튼 단위 벤치마킹 2단계) -- 캡컷은 이 탭이 편집기 맨 위, 패널
+   *  바깥에 늘 떠 있다. 주지 않으면 이 컴포넌트가 예전처럼 자기 상태로
+   *  탭을 관리한다(단독 시험·다른 자리에서 재사용할 때를 위한 대비책). */
+  pane?: LeftPane;
+  onPaneChange?: (pane: LeftPane) => void;
+  /** 부모가 이미 같은 탭을 최상위에 그리고 있으면 여기서 또 그리지 않는다
+   *  (기본값 `true` — 안 주면 예전처럼 이 컴포넌트가 직접 그린다). */
+  renderPaneTabs?: boolean;
 }>;
 
 /** 캡컷 왼쪽 패널은 `미디어 · 오디오 · 텍스트 · 스티커 · 효과 · 전환 · 필터`가
@@ -52,7 +61,7 @@ type Props = Readonly<{
  *  **가진 것만 탭으로 둔다.** 스티커·효과·필터는 우리에게 없으므로 탭도 만들지
  *  않는다 -- 없는 기능의 자리를 흉내 내면 배치가 거짓말을 한다(owner 결정 2026-08-27).
  *  텍스트는 자막이 대신하고 있어 이번 범위에서 뺐다. */
-type LeftPane = "media" | "audio" | "transcript" | "transition";
+export type LeftPane = "media" | "audio" | "transcript" | "transition";
 
 /** **한 번에 하나만 보여 준다(owner 지시 2026-08-27).**
  *  > "지금 사진 부분이 스크롤이 너무 길다고, 여길 뭔가 정리를 해야지"
@@ -60,7 +69,7 @@ type LeftPane = "media" | "audio" | "transcript" | "transition";
  *  실측: 왼쪽 도크는 보이는 높이 **137px**인데 내용이 **1,608px**이었다 --
  *  **11.7배 스크롤**. 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이 세로로
  *  더 쌓여 있었기 때문이다. 캡컷 왼쪽 패널은 고른 탭의 내용만 보여 준다. */
-const panes: readonly Readonly<{ pane: LeftPane; label: string }>[] = [
+export const editorAssetPanes: readonly Readonly<{ pane: LeftPane; label: string }>[] = [
   { pane: "media", label: "미디어" },
   { pane: "audio", label: "오디오" },
   { pane: "transcript", label: "자막" },
@@ -100,10 +109,12 @@ function targetLabel(target: EditorAssetTarget | null): string {
 /** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
 const FIRST_PAGE = 8;
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, sourceCheck }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, sourceCheck, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
-  const [pane, setPane] = useState<LeftPane>("media");
+  const [uncontrolledPane, setUncontrolledPane] = useState<LeftPane>("media");
+  const pane = controlledPane ?? uncontrolledPane;
+  const setPane = onPaneChange ?? setUncontrolledPane;
   const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
   // 탭이 먼저 갈라 놓고, 그 안에서 종류·검색·방향으로 좁힌다. 캡컷도 미디어 탭과
   // 오디오 탭이 서로 다른 목록이다.
@@ -133,10 +144,13 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const excludedTags = taste.preferences.exclude_tag;
 
   return <section className="vb-editor-assets" aria-label="편집기 미디어">
-    {/* 캡컷과 같은 자리의 최상위 탭. 가진 것만 둔다 -- 자세한 이유는 `LeftPane` 주석. */}
-    <div className="vb-editor-assets__panes" role="tablist" aria-label="왼쪽 패널">
-      {panes.filter((item) => item.pane !== "transcript" || transcript).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
-    </div>
+    {/* 캡컷과 같은 자리의 최상위 탭. 가진 것만 둔다 -- 자세한 이유는 `LeftPane` 주석.
+        승인 2026-08-30(버튼 단위 벤치마킹 2단계)로 이 탭은 이제 편집기 맨 위,
+        패널 바깥에서도 그릴 수 있다(`renderPaneTabs={false}` + `pane`/`onPaneChange`
+        제어) -- 그때는 여기서 중복해서 그리지 않는다. */}
+    {renderPaneTabs ? <div className="vb-editor-assets__panes" role="tablist" aria-label="왼쪽 패널">
+      {editorAssetPanes.filter((item) => item.pane !== "transcript" || transcript).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
+    </div> : null}
     {pane === "transition" ? <TransitionPane target={transitionTarget} disabled={isSaving} onInspectorAction={onInspectorAction} />
       : pane === "transcript" ? transcript : <>
     <div className="vb-editor-assets__controls">

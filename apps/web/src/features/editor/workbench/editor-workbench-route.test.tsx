@@ -390,7 +390,9 @@ function pointer(target: Element, type: string, clientX: number) {
 }
 
 async function openAssetBrowser() {
-  fireEvent.click(await screen.findByRole("button", { name: "미디어" }));
+  // 승인 2026-08-30(버튼 단위 벤치마킹 2단계) -- 미디어는 이제 편집기 맨 위의
+  // 콘텐츠 탭(`role="tab"`)이다. 예전 아이콘 단추(`role="button"`)가 아니다.
+  fireEvent.click(await screen.findByRole("tab", { name: "미디어" }));
   return screen.findByRole("dialog", { name: "미디어" });
 }
 
@@ -2265,7 +2267,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(4);
-    fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
     expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
@@ -2288,7 +2290,7 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(4);
-    fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
     expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
@@ -3445,7 +3447,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     fireEvent.click(await screen.findByRole("button", { name: "유진 없이 계속 편집" }));
-    expect(await screen.findByRole("button", { name: "미디어" })).toBeVisible();
+    expect(await screen.findByRole("tab", { name: "미디어" })).toBeVisible();
   });
 
   it("names the scene each candidate targets, in words the creator already reads elsewhere", async () => {

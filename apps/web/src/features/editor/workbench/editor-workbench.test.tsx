@@ -48,7 +48,10 @@ async function findClipSelectionButton(clipId: string): Promise<HTMLElement> {
 // 여전히 닫힌 서랍으로 시작하므로 누르는 동작 자체는 남겨 둔다.
 function openMaterialDock(): void {
   if (screen.queryByRole("complementary", { name: "미디어" })) return;
-  fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+  // 승인 2026-08-30(버튼 단위 벤치마킹 2단계) -- 예전엔 아이콘 단추
+  // 하나(`role="button"`)가 이 도크를 열고 닫았다. 지금은 캡컷처럼 편집기
+  // 맨 위에 늘 떠 있는 콘텐츠 탭(`role="tab"`)이 그 자리를 맡는다.
+  fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
 }
 
 
@@ -129,7 +132,7 @@ describe("EditorWorkbench", () => {
     await screen.findByRole("region", { name: "편집 작업판" });
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
 
     expect(screen.getByRole("complementary", { name: "미디어" })).toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "세부 정보" })).toBeNull();
@@ -764,12 +767,13 @@ describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    const materials = screen.getByRole("button", { name: "미디어" });
+    const materials = screen.getByRole("tab", { name: "미디어" });
 
     // 넓은 화면에서는 왼쪽 재료 열이 기본으로 펴져 있다(owner 승인 2026-08-17).
-    expect(materials.getAttribute("aria-pressed")).toBe("true");
+    // 승인 2026-08-30 이후로는 `aria-pressed`가 아니라 탭의 `aria-selected`다.
+    expect(materials.getAttribute("aria-selected")).toBe("true");
     fireEvent.click(materials);
-    expect(screen.getByRole("button", { name: "미디어" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("tab", { name: "미디어" }).getAttribute("aria-selected")).toBe("false");
   });
 
   it("이름은 그대로 읽힌다 — 아이콘만 남기지 않는다", async () => {
@@ -778,8 +782,12 @@ describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    for (const name of ["실행 취소", "다시 실행", "나누기", "앞과 붙이기", "빼기", "다음 장면에도", "미디어", "세부 정보"]) {
+    for (const name of ["실행 취소", "다시 실행", "나누기", "앞과 붙이기", "빼기", "다음 장면에도", "세부 정보"]) {
       expect(screen.getByRole("button", { name })).toBeVisible();
+    }
+    // 승인 2026-08-30(버튼 단위 벤치마킹 2단계) -- 미디어는 이제 콘텐츠 탭이다.
+    for (const name of ["미디어", "오디오", "자막", "전환"]) {
+      expect(screen.getByRole("tab", { name })).toBeVisible();
     }
   });
 });
@@ -797,15 +805,16 @@ describe("좁은 화면의 도크 단추", () => {
     // 시작 상태는 단정하지 않는다 -- 서랍은 마지막으로 열었던 쪽을 기억한다.
     // 여기서 재는 것은 **열림과 눌림이 같이 움직이는가**다.
     if (!screen.queryByRole("dialog", { name: "미디어" })) {
-      fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+      fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
     }
     await screen.findByRole("dialog", { name: "미디어" });
-    expect(screen.getByRole("button", { name: "미디어" }).getAttribute("aria-pressed")).toBe("true");
+    // 승인 2026-08-30 이후로는 `aria-pressed`가 아니라 탭의 `aria-selected`다.
+    expect(screen.getByRole("tab", { name: "미디어" }).getAttribute("aria-selected")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "미디어" })).toBeNull());
-    expect(screen.getByRole("button", { name: "미디어" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("tab", { name: "미디어" }).getAttribute("aria-selected")).toBe("false");
   });
 });
 
@@ -918,7 +927,12 @@ describe("편집 툴바는 캡컷처럼 아이콘 줄이다", () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    const buttons = Array.from(toolbar().querySelectorAll("button"));
+    // 승인 2026-08-30(버튼 단위 벤치마킹 2단계) -- 왼쪽 콘텐츠 탭(미디어·오디오
+    // ·자막·전환)은 이 규칙 밖이다. 캡컷 참조 캡처도 이 탭엔 글자를 그대로
+    // 보여 준다(아이콘 하나였던 예전 `미디어` 단추와 달리, 탭은 여러 개를
+    // 구별해야 해서 아이콘만으로는 무엇인지 알 수 없다).
+    const buttons = Array.from(toolbar().querySelectorAll("button"))
+      .filter((button) => !button.closest(".vb-editor-workbench__panes"));
     expect(buttons.length).toBeGreaterThan(0);
     for (const button of buttons) {
       expect(visibleLabel(button), `${button.textContent?.trim()} 단추에 보이는 글자가 남아 있다`).toBe("");
@@ -929,8 +943,10 @@ describe("편집 툴바는 캡컷처럼 아이콘 줄이다", () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    for (const name of ["실행 취소", "다시 실행", "미디어", "세부 정보", "내보내기"]) {
+    for (const name of ["실행 취소", "다시 실행", "세부 정보", "내보내기"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
+    // 승인 2026-08-30(버튼 단위 벤치마킹 2단계) -- 미디어는 이제 콘텐츠 탭이다.
+    expect(screen.getByRole("tab", { name: "미디어" })).toBeInTheDocument();
   });
 });
