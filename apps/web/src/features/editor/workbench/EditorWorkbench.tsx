@@ -30,6 +30,24 @@ import { usePublishShellCanvas } from "../../shell/shellCanvas";
 import { ReviewAndOutputPage } from "../../review/ReviewAndOutputPage";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 
+/** 장면(내레이션 클립)이 먼저고, 자막은 그 다음이다 -- 340행 주석 참고: 장면을
+ * 나누면 자막 구간과 장면 구간이 어긋나서, 자막에서 먼저 고르면 엉뚱한 장면이
+ * 골라진다. 이 파일 안에 이 규칙을 쓰는 자리가 세 곳(요청받은 장면으로 이동,
+ * 현재 선택 장면 찾기, 내보내기 팝업에서 장면 클릭)이라 하나로 모았다 --
+ * 코드리뷰(2026-08-29)로 잡힌 결함: 예전엔 세 곳에 각자 손으로 있어서 이 규칙이
+ * 한 곳에서만 갱신되고 나머지에 안 옮겨질 위험이 있었다. */
+function findNarrationOrCaptionBySegment(
+  tracks: EditorViewModel["tracks"],
+  captions: EditorViewModel["captions"],
+  segmentId: string,
+) {
+  return tracks
+    .filter((track) => track.role === "narration")
+    .flatMap((track) => track.clips)
+    .find((clip) => clip.segmentId === segmentId)
+    ?? captions.find((caption) => caption.segmentId === segmentId);
+}
+
 export function persistedPanelPixels(size: PanelSize, minPx: number, fallback: number) {
   const pixels = Number(size.inPixels);
   return Number.isFinite(pixels) ? Math.max(minPx, Math.round(pixels)) : fallback;
@@ -270,11 +288,7 @@ function EditorWorkbenchInstance({
     }
     const key = `${view.sessionId}:${normalizedRequestedSegmentId}`;
     if (activeRequestedSegmentKey.current === key) return;
-    const requestedNarration = view.tracks
-      .filter((track) => track.role === "narration")
-      .flatMap((track) => track.clips)
-      .find((clip) => clip.segmentId === normalizedRequestedSegmentId)
-      ?? view.captions.find((caption) => caption.segmentId === normalizedRequestedSegmentId);
+    const requestedNarration = findNarrationOrCaptionBySegment(view.tracks, view.captions, normalizedRequestedSegmentId);
     if (!requestedNarration) {
       activeRequestedSegmentKey.current = null;
       return;
@@ -353,12 +367,9 @@ function EditorWorkbenchInstance({
     const activeSegmentId = activeSegmentIdAt(narrationSpans.length > 1 ? narrationSpans : view.captions.length ? view.captions : narrationSpans, nextSeconds);
     setSelectedSegmentId(activeSegmentId);
   };
-  const selectedNarration = selectedSegmentId === null ? null : view.tracks
-    .filter((track) => track.role === "narration")
-    .flatMap((track) => track.clips)
-    .find((clip) => clip.segmentId === selectedSegmentId)
-    ?? view.captions.find((caption) => caption.segmentId === selectedSegmentId)
-    ?? null;
+  const selectedNarration = selectedSegmentId === null
+    ? null
+    : findNarrationOrCaptionBySegment(view.tracks, view.captions, selectedSegmentId) ?? null;
   const assetTarget = selectedNarration === null ? null : { segmentId: selectedNarration.segmentId, startSec: selectedNarration.startSec, endSec: selectedNarration.endSec };
   // 캡컷처럼 컷 도구를 타임라인 위에 둔다. 2026-08-17까지 이 툴바에는 편집하는
   // 단추가 하나도 없었고, 나누기·붙이기는 `선택 구간 편집`이라는 이름 뒤에 있어
@@ -666,11 +677,7 @@ function EditorWorkbenchInstance({
           projectId={view.projectId}
           onOpenEditor={() => setExportOpen(false)}
           onOpenSegment={({ segmentId }) => {
-            const target = view.tracks
-              .filter((track) => track.role === "narration")
-              .flatMap((track) => track.clips)
-              .find((clip) => clip.segmentId === segmentId)
-              ?? view.captions.find((caption) => caption.segmentId === segmentId);
+            const target = findNarrationOrCaptionBySegment(view.tracks, view.captions, segmentId);
             if (target) {
               selectSegment(segmentId);
               setPlaybackSec(clampPlaybackSeconds(target.startSec, view.output.durationSec));
