@@ -332,6 +332,35 @@ vitest를 동시에 돌려 버렸다 — 이 저장소에 이미 있던 "전체 
 조회 중복 호출, 접근성 겹침 등) 중 **먼저 실물로 재현을 확인한 뒤** 확실한
 것만 고친다 — 옛 메모를 확인 없이 믿지 않는다(`[[videobox-measure-before-guessing]]`).
 
+### 5. 위 목록 중 두 건 실물 확인·수정 완료 (커밋 `78f4cf36`, `3dd495d2`)
+
+컨테이너를 띄우고 `/projects/my-project/output` 화면을 브라우저 JS로 직접
+재본 결과, 아래 두 건은 옛 메모 그대로 재현됐다 — 그 자리에서 고쳤다.
+
+1. **`<h1>` 두 개·`aria-live` 두 개 중복 — 확인 완료, 수정함.**
+   `document.querySelectorAll('h1')`로 실측: `["영상 검토", "완성본과
+   CapCut 초안"]` 두 개, `aria-live` 두 개. 원인: `ReviewAndOutputPage`가
+   `TimelineReviewSections`(자기 `<h1>`·`aria-live` 보유) 아래 `OutputsPage`를
+   `reviewInline`으로 붙이는데, `OutputsPage`는 그 값을 "검토 화면 열기"
+   링크를 숨기는 데만 쓰고 자기 `<h1>`·`aria-live`는 그대로 냈다.
+   `reviewInline`일 때 `<h1>`→`<h2>`로 내리고 `aria-live`를 비우도록 고침.
+   재빌드 후 재확인: `<h1>` 1개, `aria-live` 1개. 회귀 테스트 추가
+   (`ReviewAndOutputPage.test.tsx`), 프론트 전체 1371 passed.
+2. **내보내기 팝업 상태 조회 중복 — "두 번"이 아니라 매번 재동기화 때마다.**
+   `read_network_requests`로 실측: 한 화면 로드에 `/api/capcut/handoff-diagnostics`가
+   2번 나감. 원인: `OutputsPage`의 재조회 effect가 `[refresh, shared]`에
+   걸려 있어(의도적 — `shared`가 늦게 채워지면 다시 그린다) `shared`가
+   채워질 때마다 `refresh({reuseShared: true})`가 다시 도는데, 이때
+   `getCapcutHandoffDiagnostics()`만 캐시 없이 매번 새로 불렀다(다른
+   필드들은 전부 `sharedRead`/`options` 캐시가 있었음). CapCut 상태는
+   검토 승인 여부와 무관하므로 `reuseShared` 재동기화일 때는 마지막 값을
+   재사용하도록 캐시 추가(명시적 새로고침·프로젝트 전환 시엔 그대로
+   새로 부름). 새 탭으로 깨끗하게 재확인: 1번으로 감소. 회귀 테스트 추가,
+   프론트 전체 재확인 통과.
+
+**아직 확인 안 한 것**: "장면 찾기 로직이 파일 안에 세 벌" — 어느 세 파일인지
+부터 특정해야 하는 더 큰 조사라 이번 반복에서는 못 했다. 다음 반복이 이어간다.
+
 ## 다음 세션 시작 프롬프트
 
 ```
