@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 import { Eye, EyeOff, Lock, Unlock, Volume2, VolumeX } from "lucide-react";
 import { clipContentLabel } from "./clipNames";
 
@@ -66,6 +66,12 @@ type Props = Readonly<{
   onDropAsset?: (input: Readonly<{ cardId: string; segmentId: string }>) => void;
   isSaving?: boolean;
   mutationMessage?: string;
+  /** 되돌리기·자르기 같은 편집 동작 단추 묶음. 캡컷 참조(2026-08-30 버튼
+   *  단위 벤치마킹 승인) -- 이 동작들은 상단 도구줄이 아니라 타임라인
+   *  바로 위, 확대·축소와 같은 줄에 있다. 그 버튼들의 상태·핸들러는
+   *  전부 `EditorWorkbench`가 갖고 있으므로 여기서는 다시 짜지 않고
+   *  그린 결과만 받는다. */
+  editToolbar?: ReactNode;
 }>;
 
 type PointerDraft = Readonly<{
@@ -197,7 +203,7 @@ function navigationReducer(
   return reduceTimelineNavigation(state, action, options);
 }
 
-export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage }: Props) {
+export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, editToolbar }: Props) {
   const options = { durationSec: view.output.durationSec, viewportWidthPx, fps: view.fps };
   const [state, dispatch] = useReducer(
     (current: TimelineNavigationState, action: TimelineNavigationAction) => navigationReducer(current, action, options),
@@ -736,6 +742,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           눌러 보면 안다. 캡컷 타임라인에도 이런 안내가 없다. */}
       {/* 확대·축소는 `+`/`-` 키로만 됐다. 안내에 적어 두어도 **눈에 보이는 단추가
           없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다. */}
+      {editToolbar}
       <span className="vb-editor-workbench__timeline-zoom">
         <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="- 키" onClick={() => zoom("-")}>−</button>
         <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="+ 키" onClick={() => zoom("+")}>+</button>

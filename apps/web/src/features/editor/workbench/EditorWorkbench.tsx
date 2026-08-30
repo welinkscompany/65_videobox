@@ -397,6 +397,8 @@ function EditorWorkbenchInstance({
   // 잠긴 단추는 마우스 이벤트를 받지 않아 자기 title을 못 띄운다. 감싸는 자리에
   // 걸어야 **왜 잠겼는지**가 보인다 -- 이유 없이 회색인 단추는 고장으로 읽힌다.
   cutToolsRef.current = cutTools;
+  // 잠긴 단추는 마우스 이벤트를 받지 않아 자기 title을 못 띄운다. 감싸는 자리에
+  // 걸어야 **왜 잠겼는지**가 보인다 -- 이유 없이 회색인 단추는 고장으로 읽힌다.
   const cutButton = (tool: typeof cutTools.split, Icon: typeof Scissors) => (
     <span title={tool.hint} className="vb-cut-tool">
       <Button
@@ -413,6 +415,17 @@ function EditorWorkbenchInstance({
       </Button>
     </span>
   );
+  // 캡컷 참조(`docs/decisions/assets/2026-08-29-capcut-editor-screen.png`,
+  // 승인 2026-08-30 버튼 단위 벤치마킹) -- 편집 동작(되돌리기·자르기 등)은
+  // 상단 도구줄이 아니라 **타임라인 바로 위 한 줄**에 있고, 그 줄의 반대쪽
+  // 끝에 확대·축소가 있다. `TimelineDock`이 이미 그 자리(줌 조작)를 갖고
+  // 있으므로 여기 만든 조각을 그 줄의 `editToolbar` 자리로 그대로 넘긴다 --
+  // 같은 버튼을 두 번 짜지 않는다.
+  const editToolbar = <span className="vb-timeline-edit-toolbar">
+    <Button type="button" variant="outline" size="icon" title="실행 취소 — Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" /><span className="sr-only">실행 취소</span></Button>
+    <Button type="button" variant="outline" size="icon" title="다시 실행 — Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" /><span className="sr-only">다시 실행</span></Button>
+    {cutButton(cutTools.split, Scissors)}{cutButton(cutTools.join, ChevronsLeftRight)}{cutButton(cutTools.drop, Trash2)}{cutButton(cutTools.copyToNext, Copy)}
+  </span>;
   const playAssetCard = (card: EditorAssetCard, previewUrl: string) => {
     const mediaKind = card.previewKind ?? (card.kind === "broll" ? "video" : "audio");
     setAuditionState((current) => {
@@ -557,9 +570,6 @@ function EditorWorkbenchInstance({
           불러와서, 배경을 지정하지 않는 `ghost`는 브라우저 기본 단추색이 남는다 --
           어두운 편집 화면에서 실측하니 투명이 아니라 `rgb(107,107,107)` 회색
           상자였다. `outline`은 `bg-background`를 직접 깔아서 그 틈에 안 걸린다. */}
-      <Button type="button" variant="outline" size="icon" title="실행 취소 — Ctrl+Z" disabled={isSavingTimeline || !onUndo || !session?.undoCount} onClick={() => void onUndo?.()}><Undo2 aria-hidden="true" /><span className="sr-only">실행 취소</span></Button>
-      <Button type="button" variant="outline" size="icon" title="다시 실행 — Ctrl+Shift+Z 또는 Ctrl+Y" disabled={isSavingTimeline || !onRedo || !session?.redoCount} onClick={() => void onRedo?.()}><Redo2 aria-hidden="true" /><span className="sr-only">다시 실행</span></Button>
-      {cutButton(cutTools.split, Scissors)}{cutButton(cutTools.join, ChevronsLeftRight)}{cutButton(cutTools.drop, Trash2)}{cutButton(cutTools.copyToNext, Copy)}
       {/* **이름을 캡컷 길이로 줄였다(owner 지시 2026-08-22).**
           > "자산과대본. 이라는 것도 말도 안되고 유진과편집항목. 이런메뉴가 어딨어"
 
@@ -641,6 +651,7 @@ function EditorWorkbenchInstance({
     />
     <TimelineDock
       clipPictures={clipPictures}
+      editToolbar={editToolbar}
       isSaving={isSavingTimeline}
       mutationMessage={timelineMutationMessage}
       // 끌어다 놓기는 **이미 있는 `적용` 경로**를 그대로 탄다. 같은 편집이 두 경로를
