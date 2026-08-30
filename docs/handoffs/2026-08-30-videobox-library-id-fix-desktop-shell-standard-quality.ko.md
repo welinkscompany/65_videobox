@@ -216,9 +216,12 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
 - `579f83bc` — docs: record why the Tauri desktop shell build is blocked tonight
 - `4862e29d` — docs: hand off tonight's session
 - `0009e3db3` — fix: don't lose a finished AI video over a metadata patch, and fix job-read races
-- (다음) 코드리뷰에서 기록만 하고 넘어간 5건 중 4건 이어서 수정 — 위 5~8번 항목
+- `424bf8758` — fix: finish the deferred code-review items — error tracking, shared poller, quality presets, cancel-race
 
 전부 push 완료(owner 요청 "커밋 푸쉬", 이어서 "기록만 하고 넘어간 것들도 마저 고쳐줘").
+**컨테이너도 이 커밋 기준으로 재빌드·재시작 완료** — `scripts/owner-ready.ps1
+-Mode Start -Rebuild` 실행 후 `docker exec ... SCENE_VIDEO_QUALITIES` 직접
+조회로 최신 코드가 실제로 돌고 있음을 확인했다.
 
 ## 다음 세션에서 할 일 (우선순위 순)
 
@@ -240,3 +243,27 @@ owner가 "나중에 SaaS로 만들면 이 설치형에 로그인 정보를 붙�
    동시에 다른 작업이 시작되면 그 작업을 잘못 멈출 가능성 자체는 아직
    남아 있다(websocket으로 실행 상태를 실시간으로 받아야 진짜 고침). "취소
    요청 순간 자기 자신이 이미 끝나 버린 경우"만 이번에 막았다.
+
+## 다음 세션 시작 시 확인만 하면 된다
+
+```bash
+cd .worktrees/videobox-container-compatibility
+git log --oneline -10
+git status --short
+```
+
+현재(이 문서 작성 시점) 기준 작업 트리는 깨끗하고(`output/`는 이 세션이
+만든 게 아닌 무관한 산출물), `424bf8758`까지 전부 push·컨테이너 배포
+완료다.
+
+## 다음 세션 시작 프롬프트
+
+```
+CLAUDE.md와 docs/handoffs/2026-08-30-videobox-library-id-fix-desktop-shell-standard-quality.ko.md를
+먼저 읽어. 어젯밤 세션에서 AI 영상 생성 자료실 등록 버그 수정, 표준 화질
+단계 추가, Tauri 데스크톱 셸 착수, 코드리뷰 결함 수정까지 끝냈고 전부
+push·배포 완료된 상태야. 다음 우선순위는 (1) owner가 Windows Smart App
+Control 문제를 어떻게 풀지 결정한 뒤 Tauri 셸 실제 빌드·검증, (2) 원하면
+job 상태 영속화(LocalProjectStore 스키마 마이그레이션, 큰 작업이라 신중히)
+순서로 진행해. 다른 지시가 없으면 이 순서대로 진행 여부를 먼저 물어봐.
+```
