@@ -171,6 +171,21 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-product-shell [data-slot=button][data-variant="default"] { border-radius:var(--vb-radius-md); }
 .vb-product-shell [data-slot=button][data-variant="outline"] { border:0; box-shadow:0 0 0 1px var(--vb-control-ring); border-radius:var(--vb-radius-md); }
 .vb-product-shell :where(button,a,input,textarea,select):focus-visible { outline:0; box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 30%,transparent); }
+/* `size-4`/`size-9`류 번호 척도 유틸리티(shadcn 기본 버튼 아이콘 크기)가
+   이 빌드에서 한 번도 컴파일된 적이 없다 -- 컴파일된 CSS 전체를 뒤져도
+   `size-4`·`h-9`·`gap-2` 같은 문자열이 아예 없다(2026-08-30 실측,
+   `document.styleSheets` 직접 조회). 그래서 `.vb-catalog` 안 아이콘
+   단추는 안에 든 SVG가 원본 크기(24px)로 그대로 나왔다 -- 캡컷 첫 화면의
+   컴팩트한 아이콘 줄과 크기가 안 맞았다. 에디터 툴바에는 이미 같은
+   문제를 겪고 고친 자리가 있다(`.vb-editor-workbench__toolbar
+   [data-slot="button"] svg`, `editor-workbench.css`) -- 같은 값(1rem)으로
+   맞춘다. **이 빌드 전체의 번호 척도 유틸리티가 죽어 있다는 것은 훨씬
+   큰 별도 조사거리다 -- 여기서는 이 화면의 아이콘 단추만 고친다.** */
+.vb-catalog [data-slot=button] svg { width:1rem; height:1rem; }
+/* 같은 이유로 `size-9`도 안 먹어서 아이콘 단추 셋(보기전환 둘·보관함)이
+   서로 다른 크기로 나왔다(48x40 / 40x32, 2026-08-30 실측) -- 캡컷 첫
+   화면의 아이콘 줄은 전부 같은 크기다. 정사각형 하나로 맞춘다. */
+.vb-catalog [data-slot=button][data-size="icon"] { width:2rem; padding:0; }
 /* 위 `min-height:32px` 일반 규칙이 속성 선택자를 써서 특정도가
    `.vb-catalog-create`(클래스 하나)보다 높다 -- 그래서 캡컷 첫 화면의
    큰 CTA 배너를 흉내 낸 `min-height: 5rem`(아래 90행대)이 실제로는 한

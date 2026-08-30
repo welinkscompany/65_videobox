@@ -10,7 +10,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useEffect, useState, type ReactNode } from "react";
-import { Mic, Scissors } from "lucide-react";
+import { Archive, LayoutGrid, List, Mic, Scissors } from "lucide-react";
 
 import { api, type Project, type ProjectWorkspaceSummary } from "../api";
 import { Button } from "../components/ui/button";
@@ -456,24 +456,32 @@ function ProjectsPage() {
               <span className="sr-only">프로젝트 검색</span>
               <Input type="search" placeholder="프로젝트 이름으로 찾기" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} />
             </label>
-            {/* 격자·줄 보기 전환(2026-08-22, `capcut-observed` 기록 §1). 화면 배치만
-                바꾸므로 새 백엔드가 필요 없다. */}
+            {/* 격자·줄 보기 전환(2026-08-22, `capcut-observed` 기록 §1). 화면 배치는
+                이미 맞혔으니 새 백엔드가 필요 없다. **크기·구성은 2026-08-30
+                버튼 단위 벤치마킹으로 다시 맞춘다** -- 캡컷은 이 자리를 좁은
+                아이콘 두 개로 쓰는데, 여기는 실측 결과 전체 폭 텍스트 단추
+                두 개였다(§4단계). 접근성 이름은 시각적으로 숨기고 아이콘만
+                남긴다 -- `title`이 마우스 오버로, `sr-only`가 스크린리더로
+                같은 말을 한다. */}
             <div className="vb-catalog-view-toggle" role="group" aria-label="보기 방식">
-              <Button type="button" variant={viewMode === "grid" ? "default" : "outline"} aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
-              <Button type="button" variant={viewMode === "list" ? "default" : "outline"} aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
+              <Button type="button" size="icon" variant={viewMode === "grid" ? "default" : "outline"} title="격자로 보기" aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}><LayoutGrid aria-hidden="true" /><span className="sr-only">격자로 보기</span></Button>
+              <Button type="button" size="icon" variant={viewMode === "list" ? "default" : "outline"} title="줄로 보기" aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}><List aria-hidden="true" /><span className="sr-only">줄로 보기</span></Button>
             </div>
           </>
         ) : null}
         {/* 보관함(휴지통)도 같은 줄, 같은 오른쪽 자리다(`capcut-observed` 기록
             §1: "오른쪽에 검색·보기전환·휴지통·프로젝트 동기화"). 예전엔 카드
             목록을 다 지나야 나오는 맨 아래 링크였다 -- 검색·보기전환 옆으로
-            옮긴다. 여는 기능 자체는 그대로, 자리만 옮긴다. */}
+            옮긴다. 여는 기능 자체는 그대로, 자리만 옮긴다. 크기도 옆
+            보기전환과 맞춰 아이콘 단추로(2026-08-30). */}
         <Button
           type="button"
+          size="icon"
           variant="ghost"
           className="vb-catalog-archive-toggle"
+          title={archiveOpen ? "보관함 닫기" : "보관함 보기"}
           onClick={() => { if (archiveOpen) setArchiveOpen(false); else { setArchiveOpen(true); void archive.load(); } }}
-        >{archiveOpen ? "보관함 닫기" : "보관함 보기"}</Button>
+        ><Archive aria-hidden="true" /><span className="sr-only">{archiveOpen ? "보관함 닫기" : "보관함 보기"}</span></Button>
       </div>
       {projectQuery.trim() && filteredProjects.length === 0 ? (
         <p className="vb-catalog-empty">"{projectQuery.trim()}"과 맞는 프로젝트가 없어요.</p>
