@@ -8,15 +8,20 @@ ComfyUI는 필요 없다(2026-08-29 조사: 텍스트 인코더·VAE가 아직 �
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
+import time
 from typing import Any
 
 import pytest
 
 from videobox_core_engine.settings import VideoGenerationConfig
 from videobox_provider_interfaces.comfyui_image_generation import ComfyUIHTTPTransport, ComfyUIProviderError
-from videobox_provider_interfaces.comfyui_video_generation import ComfyUIVideoGenerationProvider
+from videobox_provider_interfaces.comfyui_video_generation import (
+    ComfyUIExecutionTracker,
+    ComfyUIVideoGenerationProvider,
+)
 from videobox_provider_interfaces.visual_generation import SceneVideoRequest
 
 
@@ -102,14 +107,77 @@ class _FakeComfyUIWithQueue(_FakeComfyUI):
         return super().__call__(request, **_kwargs)
 
 
-def _provider(comfy: _FakeComfyUI, *, clock: _Clock | None = None, **config: Any) -> ComfyUIVideoGenerationProvider:
+def _provider(
+    comfy: _FakeComfyUI, *, clock: _Clock | None = None,
+    execution_tracker_factory: Any = None, **config: Any,
+) -> ComfyUIVideoGenerationProvider:
     ticking = clock or _Clock()
     return ComfyUIVideoGenerationProvider(
         transport=ComfyUIHTTPTransport(http_client=comfy),
         config=VideoGenerationConfig(**config),
         sleep=ticking.sleep,
         monotonic=ticking.monotonic,
+        execution_tracker_factory=execution_tracker_factory,
     )
+
+
+class _FakeTracker:
+    """`_cancel_prompt`의 판정 로직만 재는 자리 -- 진짜 스레드·소켓 없이
+    `ComfyUIExecutionTracker`가 줄 수 있는 두 값(관측 여부·현재 prompt_id)만
+    미리 정해 둔다. 진짜 연결·스레드 동작은 `ComfyUIExecutionTracker` 자체
+    시험이 잰다."""
+
+    def __init__(self, *, current_prompt_id: str | None, observed: bool) -> None:
+        self._current_prompt_id = current_prompt_id
+        self._observed = observed
+
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def current_prompt_id(self) -> str | None:
+        return self._current_prompt_id
+
+    def has_observed_execution(self) -> bool:
+        return self._observed
+
+
+class _FakeWebsocketConnection:
+    """`websockets.connect`가 주는 async context manager를 흉내 낸다 --
+    `recv()`가 미리 정해 둔 메시지를 하나씩 내주고, 다 떨어지면 트래커가
+    멈출 때까지(`asyncio.wait_for` 타임아웃으로 반복 취소되며) 그냥 잠든다."""
+
+    def __init__(self, messages: list[str]) -> None:
+        self._messages = list(messages)
+
+    async def __aenter__(self) -> "_FakeWebsocketConnection":
+        return self
+
+    async def __aexit__(self, *_exc: object) -> None:
+        return None
+
+    async def recv(self) -> str:
+        if self._messages:
+            return self._messages.pop(0)
+        await asyncio.sleep(3600)
+        raise AssertionError("should have been cancelled by the tracker's own timeout loop")
+
+
+def _fake_connect(messages: list[str]) -> Any:
+    def connect(_url: str) -> _FakeWebsocketConnection:
+        return _FakeWebsocketConnection(messages)
+    return connect
+
+
+def _wait_until(predicate: Any, *, timeout: float = 2.0, interval: float = 0.01) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    raise AssertionError("condition was not met before the timeout")
 
 
 def test_it_walks_prompt_then_history_then_view_and_brings_the_video_bytes_back() -> None:
@@ -274,3 +342,124 @@ def test_without_a_cancel_request_it_ignores_the_event_and_finishes_normally() -
     )
 
     assert result.video_bytes == b"WEBM-BYTES"
+
+
+def test_a_stale_queue_snapshot_does_not_fool_a_live_tracker_into_interrupting_someone_else() -> None:
+    """TOCTOU 진짜 고침(2026-08-30) -- `/queue` 스냅샷은 여전히 우리 job이
+    실행 중이라고 말하지만(요청 시점의 사진일 뿐이라 시차가 있다), 실시간
+    트래커는 이미 다른 job이 실행 중이라고 안다. 트래커가 관측한 값이 있으면
+    그 값을 믿고, 스냅샷과 달라도 `/interrupt`를 부르지 않는다."""
+    comfy = _FakeComfyUIWithQueue(running=True)
+    cancel_event = threading.Event()
+    cancel_event.set()
+    tracker = _FakeTracker(current_prompt_id="someone-elses-job", observed=True)
+
+    with pytest.raises(ComfyUIProviderError) as exc:
+        _provider(comfy, execution_tracker_factory=lambda: tracker).generate_video(
+            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+            cancel_event=cancel_event,
+        )
+
+    assert exc.value.code == "cancelled"
+    assert comfy.interrupted is False
+
+
+def test_a_live_tracker_confirming_our_own_prompt_still_interrupts_it() -> None:
+    comfy = _FakeComfyUIWithQueue(running=True)
+    cancel_event = threading.Event()
+    cancel_event.set()
+    tracker = _FakeTracker(current_prompt_id="job-1", observed=True)
+
+    with pytest.raises(ComfyUIProviderError) as exc:
+        _provider(comfy, execution_tracker_factory=lambda: tracker).generate_video(
+            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+            cancel_event=cancel_event,
+        )
+
+    assert exc.value.code == "cancelled"
+    assert comfy.interrupted is True
+
+
+def test_a_tracker_that_never_connected_falls_back_to_the_queue_snapshot() -> None:
+    """연결 실패는 침묵한다 -- 트래커가 있기 전과 똑같이(더 racy하지만)
+    `/queue` 스냅샷으로 취소가 그대로 동작해야 한다(퇴행 방지)."""
+    comfy = _FakeComfyUIWithQueue(running=True)
+    cancel_event = threading.Event()
+    cancel_event.set()
+    tracker = _FakeTracker(current_prompt_id=None, observed=False)
+
+    with pytest.raises(ComfyUIProviderError) as exc:
+        _provider(comfy, execution_tracker_factory=lambda: tracker).generate_video(
+            SceneVideoRequest(prompt="x", width=64, height=64, seed=1, length_frames=9, steps=8),
+            cancel_event=cancel_event,
+        )
+
+    assert exc.value.code == "cancelled"
+    assert comfy.interrupted is True
+
+
+def test_execution_tracker_reports_the_currently_executing_prompt_id() -> None:
+    messages = [
+        json.dumps({"type": "status", "data": {"status": {"exec_info": {"queue_remaining": 1}}}}),
+        json.dumps({"type": "executing", "data": {"node": "7", "prompt_id": "job-A"}}),
+    ]
+    tracker = ComfyUIExecutionTracker(ws_url="ws://fake/ws", connect=_fake_connect(messages))
+    tracker.start()
+    try:
+        _wait_until(lambda: tracker.current_prompt_id() == "job-A")
+        assert tracker.has_observed_execution() is True
+    finally:
+        tracker.stop()
+
+
+def test_execution_tracker_clears_the_prompt_id_when_the_node_goes_null() -> None:
+    """ComfyUI 프로토콜 -- `node`가 `null`이면 그 prompt가 막 끝났다는 뜻이다."""
+    messages = [
+        json.dumps({"type": "executing", "data": {"node": "7", "prompt_id": "job-A"}}),
+        json.dumps({"type": "executing", "data": {"node": None, "prompt_id": "job-A"}}),
+    ]
+    tracker = ComfyUIExecutionTracker(ws_url="ws://fake/ws", connect=_fake_connect(messages))
+    tracker.start()
+    try:
+        _wait_until(lambda: tracker.has_observed_execution() and tracker.current_prompt_id() is None)
+    finally:
+        tracker.stop()
+
+
+def test_execution_tracker_ignores_messages_that_are_not_executing_events() -> None:
+    messages = [json.dumps({"type": "progress", "data": {"value": 1, "max": 10}})]
+    tracker = ComfyUIExecutionTracker(ws_url="ws://fake/ws", connect=_fake_connect(messages))
+    tracker.start()
+    try:
+        time.sleep(0.2)
+        assert tracker.has_observed_execution() is False
+        assert tracker.current_prompt_id() is None
+    finally:
+        tracker.stop()
+
+
+def test_execution_tracker_connection_failure_leaves_it_silently_unobserved() -> None:
+    """편의 기능이지 취소의 전제조건이 아니다 -- 연결이 안 되면 예외를 내지
+    않고 조용히 "관측 없음" 상태로 남아, 호출하는 쪽이 예전 방식으로
+    폴백한다."""
+    def failing_connect(_url: str) -> Any:
+        raise ConnectionRefusedError("no server here")
+
+    tracker = ComfyUIExecutionTracker(ws_url="ws://fake/ws", connect=failing_connect)
+    tracker.start()
+    try:
+        time.sleep(0.2)
+        assert tracker.has_observed_execution() is False
+        assert tracker.current_prompt_id() is None
+    finally:
+        tracker.stop()
+
+
+def test_websocket_endpoint_reuses_the_same_host_allowlist_as_http() -> None:
+    transport = ComfyUIHTTPTransport(base_url="http://127.0.0.1:8188")
+
+    assert transport.websocket_endpoint("/ws") == "ws://127.0.0.1:8188/ws"
+
+    blocked = ComfyUIHTTPTransport(base_url="http://example.com:8188")
+    with pytest.raises(ComfyUIProviderError):
+        blocked.websocket_endpoint("/ws")

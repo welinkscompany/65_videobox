@@ -89,9 +89,20 @@ def _build_scene_video_provider(config: VideoGenerationConfig) -> Any | None:
     if not config.enabled:
         return None
     from videobox_provider_interfaces.comfyui_image_generation import ComfyUIHTTPTransport
-    from videobox_provider_interfaces.comfyui_video_generation import ComfyUIVideoGenerationProvider
+    from videobox_provider_interfaces.comfyui_video_generation import (
+        ComfyUIExecutionTracker,
+        ComfyUIVideoGenerationProvider,
+    )
 
+    transport = ComfyUIHTTPTransport(base_url=config.base_url)
     return ComfyUIVideoGenerationProvider(
-        transport=ComfyUIHTTPTransport(base_url=config.base_url),
+        transport=transport,
         config=config,
+        # 취소 TOCTOU 경합 수정(코드리뷰 2026-08-30) -- 실시간 실행 상태를
+        # 받아 `/queue` 스냅샷의 시차 없이 취소를 판단한다. 매 취소 시도마다
+        # 새로 만든다(그 생성 하나의 생명주기만 추적하면 되고, 오래 떠 있는
+        # 연결 하나를 여러 생성이 나눠 쓰다 서로 헷갈릴 이유가 없다).
+        execution_tracker_factory=lambda: ComfyUIExecutionTracker(
+            ws_url=transport.websocket_endpoint("/ws"),
+        ),
     )

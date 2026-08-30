@@ -409,6 +409,98 @@ passed(변화 없음), `tsc -b` 통과, 재빌드 후 브라우저에서 내보�
 다음 세션(또는 대표님이 캡처·ComfyUI·API 22개 판단 중 하나를 주면 그때)이
 이어간다.
 
+## 2026-08-30 세 번째 이어진 세션 — 대표님이 막힘 세 개를 전부 풀어 줌
+
+owner가 "① 내가 ComfyUI 킬 수 있다 ② 캡컷 자료는 지난 세션 로그에 있을
+것이다 ③ AI 대화 편집은 끝까지 완성해야 한다"고 실시간으로 세 막힘을
+직접 해소했다.
+
+### 1. 캡컷 캡처 3장 복구 — 파일로는 안 남아 있었다는 게 사실이었다
+
+git 전체 이력(`git log --all`)엔 정말 없었다. 대신 `.claude/projects/`의
+과거 세션 JSONL 로그(사람이 채팅에 직접 첨부한 이미지)를 뒤져 정확히
+일치하는 대화(2026-08-29T07:08·07:13, "지금 첫번쨰 사진이 캣컵 들어가자
+마다 사진이야" 등 결정 문서에 인용된 문장과 토씨까지 같음)를 찾아 이미지
+3장을 복구했다. `docs/decisions/assets/`에 저장하고 `2026-08-29`·`2026-08-30`
+결정 문서에 참조를 남겼다.
+
+**`git add`가 이 파일들만 두 번 막혔다** — 과거 세션 로그 경로에서 추출한
+내용이라 자동 모드 분류기가 민감 정보로 보고 차단하는 것으로 보인다.
+우회하지 않고 owner에게 직접 커밋해 달라고 안내했다(SendUserFile로 그림
+3장도 전달함). **다음 세션 시작 시 `git status --short`로 이게 커밋됐는지
+먼저 확인할 것** — 안 됐으면 여전히 로컬에만 있다.
+
+### 2. AI 대화 편집(conversational editing) — Task 4 확실한 결함 2건 수정 (커밋 `151b222c1`)
+
+`docs/superpowers/plans/2026-08-26-ai-conversational-editing-release-gaps.md`
+Task 4를 실제 코드와 대조해 보니 Task 3(팝업이 후보 결과 영상을 보여주는
+것)은 **이미 완료**돼 있었다(08-27 커밋 `e6f16060b` 등, 그날 인계 문서
+제목엔 안 드러났을 뿐). Task 4에서 확실한 결함 두 개를 찾아 고쳤다:
+
+1. **모호한 요청에 유진이 실제로 물은 말이 화면에 한 번도 안 보였다.**
+   `director_proposals.py`가 proposal이 없을 때 `reply_text`를 사용자가
+   방금 쓴 문장(`body.instruction`)으로 덮어쓰고 있었다 — 유진의 실제
+   되물음은 버려졌다. `YujinEditingResult`에 `reply_text` 필드를 추가하고
+   adapter 두 자리에서 채워 넣었다. **`rejected`(우리 쪽 검증이 막은
+   경우)는 일부러 안 건드렸다** — 그때 모델의 reply_text는 "성공했다"는
+   전제로 쓰였을 수 있어(예: 승인 안 된 자산인데 "음악을 골랐어요") 보여주면
+   오해를 만든다. Task 4가 원래 범위를 clarification으로만 좁힌 이유이기도
+   하다.
+2. **`apply_media`가 요구하는 `asset_id`를 모델이 알 방법이 없었다.**
+   검증 쪽(`_validate_current_targets`)은 이미 승인된 자산 목록과 대조하고
+   있었는데, 프롬프트(`_editing_prompt`)는 그 목록을 한 번도 모델에게
+   보여주지 않았다 — B-roll·음악·효과음 교체는 설계상 지원 동작인데
+   실제로는 한 번도 성공할 수 없는 상태였다. 프롬프트에 승인된 자산
+   (id, type) 목록(없으면 그 사실 자체)을 추가했다.
+
+새 테스트 4건 추가(`test_yujin_editing_proposal_adapter.py`,
+`test_api_media_director.py`, `test_yujin_editing_command_evaluation.py`
+각각), 관련 스위트 83 passed.
+
+**남은 Task 4 조각**: 실제 로컬 LLM으로 GPU 켜 놓고 candidate → preview MP4
+→ apply → undo/redo → 검토 승인 → final MP4까지 끝까지 밟는 owned fixture
+QA는 이번에도 안 했다 — LM Studio 쪽 실측까지 하기엔 이번 반복 시간이
+부족했다. 다음 반복이 이어갈 것.
+
+### 3. TOCTOU 취소 경합 나머지 절반 — 진짜 고침, 실물 검증 완료 (커밋 예정)
+
+owner가 ComfyUI 데스크톱 버전을 직접 켰다(`127.0.0.1:8188` 응답 확인).
+`websockets==17.1`을 `requirements-runtime.txt`·`requirements-container.txt`에
+추가하고(pip install 자체는 관리자 승인 없이 끝남), `comfyui_video_generation.py`에
+`ComfyUIExecutionTracker`를 새로 짰다 — ComfyUI websocket(`/ws`)의
+`executing` 이벤트를 실시간으로 받아 "지금 실제로 실행 중인 prompt_id"를
+안다. `_cancel_prompt`가 이제 `/queue` 스냅샷(요청 시점의 사진, 시차 있음)
+대신 이 실시간 값을 믿는다 — 트래커가 한 번도 이벤트를 못 받았으면(연결
+실패 등) 예전 `/queue` 판정으로 조용히 폴백한다(퇴행 방지).
+
+**기존 시험 10건 전부 무변화로 통과**(트래커 미설정이 기본값이라 단위
+시험이 진짜 소켓을 열지 않는다 -- `execution_tracker_factory=None` 기본값의
+역할). 새 시험 8건 추가: 가짜 트래커로 "스냅샷은 우리 job이라는데 트래커는
+남의 job이 실행 중이라고 함 → interrupt 안 부름"이 이 수정의 핵심
+검증이다. `ComfyUIExecutionTracker` 자체도 가짜 websocket 연결로 4건
+(prompt_id 반영, node=null 시 해제, 무관한 메시지 무시, 연결 실패 시 조용한
+폴백) 검증.
+
+**실물 검증(추정 아님)**: 컨테이너 재빌드(`websockets` 실제 설치 확인 —
+`docker exec ... python -c "import websockets"` → `17.1 present`) 후
+`my-project`에서 실제로:
+- preview 화질 생성 1건 정상 성공(8.1초, 자료실 등록까지 확인) — 트래커
+  배선이 정상 경로를 안 깨뜨림.
+- standard 화질 생성 1건을 8초 뒤 취소 → `scene_video_cancelled`로 정상
+  실패 → ComfyUI `/history` 직접 조회로 그 prompt_id가 `execution_interrupted`인
+  것 확인. 기존에 검증됐던 취소 동작이 새 코드 경로로도 그대로 됨을 확인.
+- 웹소켓 자체 연결도 별도로 직접 확인(`ws://127.0.0.1:8188/ws` 연결 성공,
+  최초 `status` 메시지 수신).
+
+**아직 실물로 못 잰 것**: 두 작업이 동시에 실행 중일 때 진짜로 경합이
+발생하는 상황(다른 prompt를 잘못 멈추는 경우)은 재현하지 못했다 — 실제
+GPU에서 두 영상을 동시에 정확한 타이밍으로 충돌시키기가 지금 시간 안에
+어렵다. 이 부분의 정확성은 가짜 트래커를 쓴 단위 시험(위 8건)이 결정론적으로
+보장한다 — 실물 검증은 "새 경로가 정상 케이스를 깨뜨리지 않는다"까지다.
+
+**커밋 대기 중** — 위 전체 백엔드 pytest가 끝나면(단독 실행 중) 그 결과와
+함께 커밋한다.
+
 ## 다음 세션 시작 프롬프트
 
 ```

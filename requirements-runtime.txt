@@ -6,6 +6,9 @@ python-multipart==0.0.20
 psycopg[binary]==3.2.9
 # 본인 유튜브 영상에서 목소리 샘플을 가져오는 길에 쓴다(owner 요청 2026-08-29).
 yt-dlp==2026.8.19
+# ComfyUI websocket(`/ws`)의 `executing` 이벤트를 실시간으로 받아, 장면 영상
+# 취소가 다른 작업을 잘못 멈추는 TOCTOU 경합을 없앤다(코드리뷰 2026-08-30).
+websockets==17.1
 
 # Optional TTS engines (enable via TTSEngineConfig.engine):
 # - "gtts" (default, no extra deps beyond gtts above, needs network access)

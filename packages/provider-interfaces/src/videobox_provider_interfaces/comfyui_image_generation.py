@@ -100,6 +100,12 @@ class ComfyUIHTTPTransport:
             raise ComfyUIProviderError("ComfyUI request must stay on this machine.", "blocked")
         return f"{self.base_url}{path}"
 
+    def websocket_endpoint(self, path: str) -> str:
+        """`_endpoint`와 같은 허용 목록을 쓴다 -- 실시간 실행 상태(`executing`
+        이벤트, `comfyui_video_generation.py`의 취소 경합 수정에 쓴다)를 받는
+        websocket도 같은 기계의 ComfyUI 하나만 가리켜야 한다."""
+        return "ws://" + self._endpoint(path).removeprefix("http://")
+
     def request_json(self, path: str, payload: dict[str, Any] | None, *, timeout_seconds: int) -> dict[str, Any]:
         raw = self._request(path, payload, timeout_seconds=timeout_seconds)
         try:

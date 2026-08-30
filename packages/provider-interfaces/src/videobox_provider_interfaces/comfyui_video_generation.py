@@ -5,19 +5,21 @@
 폴링 → `/view` 회수)이라 `ComfyUIHTTPTransport`를 그대로 재사용한다 -- 이
 파일이 새로 짜는 것은 그래프(Wan 노드 조합)와 출력 회수(webm 파일)뿐이다.
 
-**아직 실측하지 않았다.** 2026-08-29 조사로 owner 기계의 ComfyUI에 Wan 체크포인트는
-있지만 텍스트 인코더가 중단된 다운로드이고 VAE가 없다 -- 그래서 `KSampler`의
-`cfg` 등 일부 값은 커뮤니티 관행값이지 이 프로젝트가 잰 값이 아니다
-(`VideoGenerationConfig`에 이유를 적어 뒀다). 파일이 갖춰진 뒤 첫 실행에서
-반드시 재조정한다.
+**2026-08-29 실측 완료** (owner 기계 RTX 5090) -- 텍스트 인코더·VAE를 받은 뒤
+실제로 돌렸다: preview 512x288·17프레임·8스텝 약 12초, standard 1280x720·
+65프레임·16스텝 약 139초, full 1920x1080·81프레임·20스텝 약 18~23분. `cfg`
+등 일부 값은 여전히 커뮤니티 관행값이다(`VideoGenerationConfig`에 이유를
+적어 뒀다) -- 실측은 시간·해상도만 확인했고 화질 미세조정은 아직이다.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import threading
 import time
 import uuid
-from dataclasses import dataclass
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Any, Callable
 
 from videobox_core_engine.settings import VideoGenerationConfig
 from videobox_provider_interfaces.comfyui_image_generation import (
@@ -27,6 +29,97 @@ from videobox_provider_interfaces.comfyui_image_generation import (
 from videobox_provider_interfaces.visual_generation import GeneratedSceneVideo, SceneVideoRequest
 
 _POLL_INTERVAL_SECONDS = 2.0
+
+
+@dataclass(slots=True)
+class ComfyUIExecutionTracker:
+    """ComfyUI websocket(`/ws`)의 `executing` 이벤트를 실시간으로 받아, 지금
+    실제로 실행 중인 prompt_id가 무엇인지 안다.
+
+    코드리뷰(2026-08-30)로 남겨 둔 TOCTOU 경합의 진짜 고침 -- `/queue` HTTP
+    스냅샷은 요청을 보낸 그 순간의 사진일 뿐이다. 우리 작업을 취소하려고
+    `/queue`로 "지금 실행 중" 확인하고 `/interrupt`를 부르는 그 사이에 우리
+    작업이 자연히 끝나고 **다른** 작업이 실행을 시작하면, `/interrupt`(전역
+    명령, prompt_id를 못 받는다)가 그 남의 작업을 대신 멈춘다. ComfyUI는
+    실행 상태가 바뀔 때마다 연결된 모든 websocket 클라이언트에 `executing`
+    이벤트를 그대로 뿌려주므로(클라이언트별 구분 없이 이 값은 서버 전역
+    상태다), 이 값을 직접 받으면 스냅샷의 시차가 없다.
+
+    `node`가 있으면 그 prompt_id가 지금 실행 중, `node`가 `null`이면 그
+    prompt_id가 막 끝났다는 뜻이다(ComfyUI 프로토콜). 다음 실행이 바로
+    이어지지 않는 한 그 사이엔 "확인된 실행 중인 것 없음" 상태가 된다.
+
+    **연결 실패는 침묵한다.** 이 값은 편의 기능이지 취소의 전제조건이
+    아니다 -- 연결이 안 되거나 끊기면 `has_observed_execution()`이 계속
+    `False`로 남고, 호출하는 쪽(`_cancel_prompt`)이 예전 `/queue` 스냅샷
+    판정으로 되돌아간다(더 racy하지만 이전과 똑같이 동작한다 -- 퇴행이
+    아니다)."""
+
+    ws_url: str
+    #: 실제 연결은 `websockets.connect`(런타임 의존성, `requirements-runtime.txt`
+    #: 참고)를 쓴다. 시험은 진짜 소켓을 열지 않도록 이 자리에 가짜 연결
+    #: 함수를 넣는다 -- `ComfyUIHTTPTransport.http_client`와 같은 자리다.
+    connect: Callable[[str], Any] | None = None
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _current_prompt_id: str | None = field(default=None, init=False, repr=False)
+    _observed_any_event: bool = field(default=False, init=False, repr=False)
+    _stop_event: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
+    _thread: threading.Thread | None = field(default=None, init=False, repr=False)
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def current_prompt_id(self) -> str | None:
+        with self._lock:
+            return self._current_prompt_id
+
+    def has_observed_execution(self) -> bool:
+        """websocket이 `executing` 이벤트를 한 번이라도 받았는가 -- 연결
+        실패와 "아무것도 안 도는 중"을 구분하는 값이다."""
+        with self._lock:
+            return self._observed_any_event
+
+    def _run_forever(self) -> None:
+        try:
+            asyncio.run(self._listen())
+        except Exception:  # noqa: BLE001 -- 연결 실패는 조용히 폴백으로 넘긴다(클래스 docstring 참고)
+            return
+
+    async def _listen(self) -> None:
+        connector = self.connect
+        if connector is None:
+            import websockets
+
+            connector = websockets.connect
+        async with connector(self.ws_url) as ws:
+            while not self._stop_event.is_set():
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                except Exception:  # noqa: BLE001 -- 연결이 끊기면 조용히 폴백으로 넘긴다
+                    return
+                self._handle_message(raw)
+
+    def _handle_message(self, raw: Any) -> None:
+        if not isinstance(raw, (str, bytes)):
+            return
+        try:
+            message = json.loads(raw)
+        except (TypeError, ValueError):
+            return
+        if not isinstance(message, dict) or message.get("type") != "executing":
+            return
+        data = message.get("data")
+        if not isinstance(data, dict):
+            return
+        with self._lock:
+            self._observed_any_event = True
+            self._current_prompt_id = data.get("prompt_id") if data.get("node") is not None else None
 
 
 def _output_files(entry: dict) -> list[dict]:
@@ -51,6 +144,11 @@ class ComfyUIVideoGenerationProvider:
     provider_name: str = "comfyui"
     sleep: Callable[[float], None] = time.sleep
     monotonic: Callable[[], float] = time.monotonic
+    #: 켜져 있으면 websocket으로 실시간 실행 상태를 받아 취소 TOCTOU 경합을
+    #: 없앤다(`ComfyUIExecutionTracker` 참고). 기본값 `None`은 예전처럼
+    #: `/queue` 스냅샷만으로 판단한다 -- 단위 시험이 진짜 소켓을 열지 않는
+    #: 것도 이 기본값의 역할이다. 실제 배선은 `main.py`에서 켠다.
+    execution_tracker_factory: Callable[[], ComfyUIExecutionTracker] | None = None
 
     def generate_video(
         self,
@@ -71,12 +169,20 @@ class ComfyUIVideoGenerationProvider:
         # owner 요청(2026-08-29 3회차, 취소 버튼) -- 취소를 실제로 걸려면
         # ComfyUI가 이 작업을 어떤 prompt_id로 부르는지 호출한 쪽이 알아야
         # 한다. 여기서 알려 주고 나면, 실제로 멈추는 일은 아래 폴링 루프가
-        # (이 작업이 맞는지 매번 `/queue`로 확인한 뒤) 맡는다.
+        # (이 작업이 맞는지 매번 `/queue`로, 트래커가 있으면 실시간으로 확인한
+        # 뒤) 맡는다.
         if on_submitted is not None:
             on_submitted(prompt_id)
-        file_name, video_bytes = self._await_video(
-            prompt_id=prompt_id, started=started, cancel_event=cancel_event,
-        )
+        tracker = self.execution_tracker_factory() if self.execution_tracker_factory is not None else None
+        if tracker is not None:
+            tracker.start()
+        try:
+            file_name, video_bytes = self._await_video(
+                prompt_id=prompt_id, started=started, cancel_event=cancel_event, tracker=tracker,
+            )
+        finally:
+            if tracker is not None:
+                tracker.stop()
         return GeneratedSceneVideo(
             provider_name=self.provider_name,
             video_bytes=video_bytes,
@@ -100,6 +206,7 @@ class ComfyUIVideoGenerationProvider:
 
     def _await_video(
         self, *, prompt_id: str, started: float, cancel_event: "threading.Event | None" = None,
+        tracker: ComfyUIExecutionTracker | None = None,
     ) -> tuple[str, bytes]:
         # `SaveWEBM`(ComfyUI 코어, comfy_extras/nodes_video.py)은 `SaveImage`와
         # 같은 `PreviewVideo` 모양으로 결과를 돌려준다 -- history 출력이
@@ -107,14 +214,10 @@ class ComfyUIVideoGenerationProvider:
         # 똑같이 그 키를 본다.
         while self.monotonic() - started < self.config.timeout_seconds:
             if cancel_event is not None and cancel_event.is_set():
-                self._cancel_prompt(prompt_id)
-                # 코드리뷰(2026-08-30)로 잡힌 결함 -- `/queue` 확인과 실제
-                # 취소 사이에는 여전히 틈이 있다(TOCTOU, websocket으로 실행
-                # 상태를 실시간으로 받는 게 진짜 고침이라 아직 안 했다). 그
-                # 틈에서 가장 아까운 경우는 취소를 요청한 바로 그 순간 이
-                # 작업이 이미 자연히 끝나 버린 경우다 -- 그때는 취소가 늦은
-                # 것뿐이지 실패가 아니므로, 결과가 실제로 나와 있으면 그대로
-                # 돌려준다(버리지 않는다).
+                self._cancel_prompt(prompt_id, tracker)
+                # 취소 요청 직후에도 이 작업이 실제로 끝나 있을 수 있다(취소가
+                # 늦은 것뿐, 실패가 아니다) -- 그때는 결과가 실제로 나와
+                # 있으면 그대로 돌려준다(버리지 않는다).
                 files = self._find_finished_files(prompt_id)
                 if files:
                     return self._fetch(files[0])
@@ -144,14 +247,22 @@ class ComfyUIVideoGenerationProvider:
             return []
         return _output_files(entry) if isinstance(entry, dict) else []
 
-    def _cancel_prompt(self, prompt_id: str) -> None:
+    def _cancel_prompt(self, prompt_id: str, tracker: ComfyUIExecutionTracker | None) -> None:
         """이 작업이 아직 대기 중이면 큐에서 지우고, 지금 실행 중이면 멈춘다.
 
         **다른 작업은 손대지 않는다** -- ComfyUI의 `/interrupt`는 전체 실행을
-        멈추는 전역 명령이라, 지금 도는 것이 정말 이 prompt_id인지 `/queue`로
-        먼저 확인한 뒤에만 부른다. 확인 자체가 실패하거나 이미 끝나 있으면
+        멈추는 전역 명령이다. 확인 자체가 실패하거나 이미 끝나 있으면
         조용히 넘어간다 -- 취소는 편의 기능이지, 실패해도 작업 자체(성공/실패
         판정)를 막으면 안 된다.
+
+        **"지금 실행 중"의 판정 기준(TOCTOU 수정, 2026-08-30 코드리뷰).**
+        `tracker`가 websocket으로 실제 실행 상태를 받아 본 적이 있으면
+        (`has_observed_execution()`) 그 실시간 값을 그대로 믿는다 -- `/queue`
+        스냅샷은 요청 시점의 사진이라, 확인과 `/interrupt` 사이에 우리 작업이
+        끝나고 **다른** 작업이 막 시작해도 알 수 없다. 트래커가 없거나 한
+        번도 이벤트를 못 받았으면(연결 실패 등) 예전처럼 `/queue`의
+        `queue_running` 스냅샷으로 되돌아간다 -- 더 racy하지만 트래커가 있기
+        전과 똑같이 동작한다(퇴행이 아니다).
         """
         try:
             queue = self.transport.request_json("/queue", None, timeout_seconds=self._step_timeout())
@@ -170,10 +281,18 @@ class ComfyUIVideoGenerationProvider:
                 self.transport.request_json(
                     "/queue", {"delete": [prompt_id]}, timeout_seconds=self._step_timeout(),
                 )
-            elif prompt_id in running_ids:
+            elif self._is_actually_running(prompt_id, running_ids, tracker):
                 self.transport.request_json("/interrupt", {}, timeout_seconds=self._step_timeout())
         except ComfyUIProviderError:
             pass
+
+    @staticmethod
+    def _is_actually_running(
+        prompt_id: str, running_ids: set[str], tracker: ComfyUIExecutionTracker | None,
+    ) -> bool:
+        if tracker is not None and tracker.has_observed_execution():
+            return tracker.current_prompt_id() == prompt_id
+        return prompt_id in running_ids
 
     def _fetch(self, item: dict) -> tuple[str, bytes]:
         from urllib.parse import urlencode
