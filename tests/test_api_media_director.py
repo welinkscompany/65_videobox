@@ -503,6 +503,46 @@ def test_yujin_editing_proposal_refuses_an_unapproved_media_asset(tmp_path: Path
     assert response.json() == {"status": "rejected", "reply_text": "이 장면에 음악을 넣어줘", "proposal": None}
 
 
+def test_yujin_editing_clarification_shows_what_yujin_actually_asked(tmp_path: Path) -> None:
+    """Task 4 (2026-08-26 계획서)로 잡힌 결함 -- 모호한 요청에 유진이 실제로
+    되물은 말(`reply_text`)이 있는데도, 이 문이 사용자가 방금 쓴 문장을
+    그대로 돌려주고 있었다. 유진이 무엇을 더 물었는지 화면에서 한 번도
+    보이지 않았다."""
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={
+                    "schema_version": "videobox.yujin-editing-response.v1",
+                    "reply_text": "어느 장면을 더 짧게 할지 콕 집어 말씀해 주시겠어요?",
+                    "proposal": None,
+                },
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "ambiguous editing request"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면을 더 짧게 해줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json() == {
+        "status": "clarification",
+        "reply_text": "어느 장면을 더 짧게 할지 콕 집어 말씀해 주시겠어요?",
+        "proposal": None,
+    }
+
+
 def test_yujin_editing_proposal_refuses_an_approved_asset_of_the_wrong_media_type(tmp_path: Path) -> None:
     class EditingRuntime:
         asset_id = "approved-but-wrong-kind"

@@ -102,6 +102,52 @@ def test_local_command_evaluation_rejects_an_unapproved_media_candidate() -> Non
     assert (result.status, result.reason, result.proposal) == ("rejected", "media_asset_not_approved", None)
 
 
+def test_local_command_evaluation_tells_the_model_which_assets_it_may_actually_use() -> None:
+    """Task 4 (2026-08-26 계획서)로 잡힌 결함 -- `apply_media`는 `asset_id`를
+    요구하는데, 프롬프트가 실제 승인된 자산 목록을 한 번도 알려주지 않았다.
+    모델은 있지도 않은 ID를 지어낼 수밖에 없었고, 그 ID는 검증에서 항상
+    `media_asset_not_approved`로 막혔다 -- B-roll·음악·효과음 교체 요청이
+    설계상 지원 동작인데도 실제로는 한 번도 성공할 수 없었다."""
+    runtime = _CapturingRuntime(_response(operation={
+        "intent": "apply_media", "segment_id": "scene-2", "media_type": "bgm", "asset_id": "approved-bgm-1",
+    }))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="분위기에 맞는 음악으로 바꿔줘",
+        context=YujinEditingContext(
+            session_id="session-1",
+            session_revision=3,
+            segment_ids=("scene-1", "scene-2"),
+            approved_asset_ids=("approved-bgm-1", "approved-broll-1"),
+            approved_asset_types=(("approved-bgm-1", "bgm"), ("approved-broll-1", "broll_video")),
+        ),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "approved-bgm-1" in prompt
+    assert "approved-broll-1" in prompt
+
+
+def test_local_command_evaluation_says_nothing_is_approved_when_nothing_is() -> None:
+    # 승인된 자산이 하나도 없으면 목록을 지어내지 않고, 그 사실 자체를
+    # 프롬프트에 명시해 모델이 apply_media를 시도하지 않게 한다.
+    runtime = _CapturingRuntime(_response(operation={
+        "intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2,
+    }))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="두 번째 장면을 두 배로 빠르게 해줘",
+        context=YujinEditingContext(session_id="session-1", session_revision=3, segment_ids=("scene-1", "scene-2")),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "승인된 자산이 없" in prompt
+
+
 def test_local_command_evaluation_tells_the_runtime_the_exact_candidate_contract() -> None:
     runtime = _CapturingRuntime(_response(operation={
         "intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2,

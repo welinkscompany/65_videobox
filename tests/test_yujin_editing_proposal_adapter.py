@@ -55,6 +55,22 @@ def test_ambiguous_request_returns_clarification_without_candidate() -> None:
     assert result.proposal is None
 
 
+def test_clarification_carries_the_models_own_reply_not_the_users_instruction() -> None:
+    # Task 4 gap (2026-08-26 계획서) -- 라우터가 이 값을 대신 사용자 원문으로
+    # 덮어써서, 유진이 실제로 물은 질문이 화면에 한 번도 안 보였다.
+    result = interpret_yujin_editing_request(
+        {
+            "schema_version": "videobox.yujin-editing-response.v1",
+            "reply_text": "어느 장면을 말씀하시는지 조금 더 알려 주시겠어요?",
+            "proposal": None,
+        },
+        _context(),
+    )
+
+    assert result.status == "clarification"
+    assert result.reply_text == "어느 장면을 말씀하시는지 조금 더 알려 주시겠어요?"
+
+
 def test_stale_or_missing_targets_never_create_a_candidate() -> None:
     stale = _response(intent="set_scene_speed", segment_id="scene-1", rate=2)
     stale["proposal"] = {**stale["proposal"], "base_session_revision": 6}  # type: ignore[dict-item]

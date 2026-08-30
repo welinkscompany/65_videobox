@@ -205,7 +205,15 @@ def build_director_proposals_router(
             project_id=project_id, instruction=body.instruction, context=context
         )
         if result.proposal is None:
-            return {"status": result.status, "reply_text": body.instruction, "proposal": None}
+            # `clarification`은 유진이 실제로 물은 말(`result.reply_text`)을 그대로
+            # 보인다 -- 코드리뷰(Task 4, 2026-08-26 계획서)로 잡힌 결함: 예전엔
+            # 여기서 사용자가 방금 쓴 문장(`body.instruction`)을 그대로 되돌려줘서,
+            # 유진이 실제로 무엇을 물었는지 화면에 한 번도 안 보였다. `rejected`는
+            # 우리 쪽 검증이 막은 것이라 모델의 말이 지금 상황과 안 맞을 수 있어
+            # (`YujinEditingResult.reply_text` 주석 참고) 그대로 두 지 않는다 -- 이
+            # 경우엔 `reply_text`가 비어 있으므로 예전 동작(사용자 문장 반사)이
+            # 그대로 유지된다(범위는 Task 4와 같이 clarification으로만 좁힌다).
+            return {"status": result.status, "reply_text": result.reply_text or body.instruction, "proposal": None}
         revision = store.next_director_proposal_revision(project_id)
         proposal = DirectorProposal(
             proposal_id=f"yujin-edit-{__import__('uuid').uuid4().hex}",

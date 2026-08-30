@@ -46,6 +46,12 @@ class YujinEditingResult:
     status: Literal["candidate_only", "clarification", "rejected"]
     proposal: YujinEditingProposal | None
     reason: str | None = None
+    #: 유진이 실제로 한 말. `clarification`일 때만 채워진다 -- `rejected`는
+    #: 우리 쪽 검증(승인 안 된 자산, 낡은 revision 등)이 막은 것이라 모델의
+    #: 말이 지금 일어난 일과 안 맞을 수 있다("음악을 골랐어요" 뒤에 그
+    #: 자산이 승인 안 돼 거절되는 식) -- 그 경우까지 이 값을 보여주면
+    #: 성공한 것처럼 보이는 오해를 만든다(Task 4, 2026-08-26 계획서).
+    reply_text: str | None = None
 
 
 def interpret_yujin_editing_request(
@@ -57,13 +63,13 @@ def interpret_yujin_editing_request(
     if raw is None or _contains_unsafe_instruction(raw):
         return _rejected("invalid_payload_or_unsafe_instruction")
     if raw.get("proposal") is None and isinstance(raw.get("reply_text"), str):
-        return YujinEditingResult(status="clarification", proposal=None)
+        return YujinEditingResult(status="clarification", proposal=None, reply_text=raw["reply_text"])
     try:
         response = YujinEditingResponse.model_validate(raw)
     except ValidationError:
         return _rejected("invalid_editing_response")
     if response.proposal is None:
-        return YujinEditingResult(status="clarification", proposal=None)
+        return YujinEditingResult(status="clarification", proposal=None, reply_text=response.reply_text)
     reason = _validate_current_targets(response.proposal, context)
     return _rejected(reason) if reason is not None else YujinEditingResult(
         status="candidate_only", proposal=response.proposal

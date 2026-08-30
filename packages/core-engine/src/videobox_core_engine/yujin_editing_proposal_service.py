@@ -48,6 +48,19 @@ def _editing_response_schema(session_revision: int) -> dict[str, object]:
     }
 
 
+def _approved_asset_catalogue(context: YujinEditingContext) -> str:
+    """`apply_media`가 요구하는 `asset_id`를 모델이 실제로 알 방법이 이것뿐이다.
+
+    코드리뷰(Task 4, 2026-08-26 계획서)로 잡힌 결함 -- 이 목록 없이는 모델이
+    `asset_id`를 지어낼 수밖에 없었고, 그 값은 승인된 자산과 우연히 맞을 리
+    없어 검증에서 항상 `media_asset_not_approved`로 막혔다. B-roll·음악·
+    효과음 교체는 설계상 지원 동작인데도 실제로는 한 번도 성공할 수 없었다.
+    """
+    asset_types = dict(context.approved_asset_types)
+    entries = [f"{asset_id}({asset_types.get(asset_id, '알 수 없음')})" for asset_id in context.approved_asset_ids]
+    return f"승인된 자산: {', '.join(entries)}." if entries else "승인된 자산이 없다 -- apply_media를 시도하지 마라."
+
+
 def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
     example = {
         "schema_version": "videobox.yujin-editing-response.v1",
@@ -64,7 +77,9 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "proposal 안에는 현재 장면 ID만 쓰고, base_session_revision은 아래 값과 정확히 같아야 한다. "
         "허용 intent는 set_scene_speed, set_segment_bounds, set_cut_action, reorder_segments, "
         "set_caption_text, apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "apply_media의 asset_id는 반드시 아래 승인된 자산 목록에 있는 값만 써야 한다 -- 없는 값을 지어내면 항상 거절된다. "
         f"현재 장면 ID: {', '.join(context.segment_ids)}. 현재 revision: {context.session_revision}. "
+        f"{_approved_asset_catalogue(context)} "
         f"정확한 출력 예시: {json.dumps(example, ensure_ascii=False)}. "
         f"창작자 요청: {instruction}"
     )
