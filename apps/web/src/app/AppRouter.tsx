@@ -294,10 +294,21 @@ function ProjectsPage() {
     await archive.load();
   }
 
+  // 캡컷의 "+ 프로젝트 만들기"는 이름을 안 물어도 바로 편집기로 들어간다 --
+  // 이야기(대본) 화면을 거치지 않는다. owner가 이 자리를 그렇게 다시
+  // 지시해(2026-08-30) `startBlankProject`와 같은 길(빈 편집 세션 생성 +
+  // 편집기로 이동)로 바꾼다 -- 다른 점은 자동 이름 대신 여기서 입력받은
+  // 이름을 쓰는 것뿐이다. "이야기부터 정하기"는 이 단추의 몫이 아니게
+  // 됐다(2026-08-28 결정의 이 부분만 뒤집음, `startBlankProject`는 그대로).
   async function goToNewProject(project: Project) {
+    const session = await api.createBlankEditingSession(project.project_id);
     await router.options.context.catalog.refresh();
     await router.invalidate();
-    await navigate({ to: resolveProjectStage(project.project_id, "plan") });
+    await navigate({
+      to: "/projects/$projectId/$section",
+      params: { projectId: project.project_id, section: "editor" },
+      search: { session_id: session.session_id },
+    });
   }
 
   async function handleCreate(event: React.FormEvent<HTMLFormElement>) {

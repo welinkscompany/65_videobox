@@ -369,7 +369,10 @@ describe("Task 22 canonical production owners", () => {
         componentEvidence: [
           // 옛 시작 화면(파일 경로를 손으로 적게 하던 것)은 2026-08-21에 없앴다.
           // 프로젝트를 만드는 일은 이제 목록 화면 하나가 맡는다.
-          ["app/AppRouter.test.tsx", "refreshes the catalog and moves a newly created project to its create route"],
+          // "+ 새 프로젝트 만들기"는 2026-08-30 owner 재지시로 더 이상 이 plan
+          // 단계를 거치지 않고 편집기로 바로 간다 -- 이 경로(직접 URL 진입)가
+          // CreationInterview가 여전히 살아 있다는 증거다.
+          ["app/AppRouter.test.tsx", "renders the durable Eugene creation interview at the routed create leaf"],
           ["features/creation/CreationInterview.test.tsx", "keeps a failed durable answer on the same question with an actionable retry"],
           ["app/AppRouter.test.tsx", "does not let a late A workspace response overwrite the currently routed B workspace"],
         ],

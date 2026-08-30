@@ -734,6 +734,7 @@ describe("AppRouter URL ownership", () => {
     // 자막칸이 기본 화면에 있는 것이 아니었으므로, 탭을 한 번 열고 그대로 본다.
     fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
     fireEvent.change(screen.getByLabelText("유진에게 요청하기"), { target: { value: "보존할 요청" } });
     fireEvent.click(clipSelectionButton("clip-2"));
     timeline.scrollLeft = 47;
@@ -747,6 +748,7 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(preview);
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
     expect(screen.getByRole("complementary", { name: "세부 정보" })).toBe(rightDock);
+    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존할 요청");
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(47);
     expect(clipSelectionButton("clip-1")).toHaveAttribute("aria-pressed", "true");
@@ -984,8 +986,10 @@ describe("AppRouter URL ownership", () => {
     if (!screen.queryByRole("complementary", { name: "세부 정보" })) {
       fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     }
+    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("tab", { name: "추천" }));
     expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();
     expect(loadManifest).toHaveBeenCalledTimes(1);
     expect(loadSession).toHaveBeenCalledTimes(1);
@@ -1021,12 +1025,13 @@ describe("AppRouter URL ownership", () => {
     expect(split).not.toHaveBeenCalled();
   });
 
-  it("refreshes the catalog and moves a newly created project to its create route", async () => {
-    // 예전에는 옛 시작 화면을 거쳤다. 그 화면이 사라졌으므로 **평소 쓰는 길**로 잰다 --
-    // 첫 사용자에게만 다른 문을 만들지 않는 것이 이번 변경의 요점이다.
+  it("refreshes the catalog and jumps a newly created named project straight to its editor", async () => {
+    // 캡컷은 이름을 물어도 이야기(대본) 화면을 거치지 않고 바로 편집기로
+    // 들어간다 -- owner 재지시(2026-08-30)로 이 단추도 같은 길을 탄다.
     const created = { project_id: "project_new", name: "New", status: "active", root_storage_uri: "local://new" };
     const listProjects = vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
     vi.spyOn(api, "createProject").mockResolvedValue(created);
+    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_new" } as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
@@ -1034,7 +1039,9 @@ describe("AppRouter URL ownership", () => {
     fireEvent.change(await screen.findByLabelText("새 프로젝트 이름"), { target: { value: "New" } });
     fireEvent.click(screen.getByRole("button", { name: "만들기" }));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_new/create"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_new/editor"));
+    expect(createSession).toHaveBeenCalledWith("project_new");
+    expect(router.state.location.search).toMatchObject({ session_id: "session_new" });
     expect(listProjects).toHaveBeenCalledTimes(2);
   });
 
@@ -1045,6 +1052,7 @@ describe("AppRouter URL ownership", () => {
       .mockResolvedValueOnce([existing])
       .mockResolvedValueOnce([existing, created]);
     const createProject = vi.spyOn(api, "createProject").mockResolvedValue(created);
+    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_second" } as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
     render(<AppRouter router={router} />);
 
@@ -1052,8 +1060,9 @@ describe("AppRouter URL ownership", () => {
     fireEvent.change(screen.getByLabelText("새 프로젝트 이름"), { target: { value: "Second" } });
     fireEvent.click(screen.getByRole("button", { name: "만들기" }));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_second/create"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_second/editor"));
     expect(createProject).toHaveBeenCalledWith({ name: "Second" });
+    expect(createSession).toHaveBeenCalledWith("project_second");
     expect(listProjects).toHaveBeenCalledTimes(2);
   });
 

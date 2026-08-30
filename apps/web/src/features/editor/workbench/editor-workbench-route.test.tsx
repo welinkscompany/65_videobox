@@ -479,6 +479,7 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole("region", { name: "유진 기억" });
     fireEvent.change(within(panel).getByLabelText("기억 종류"), {
       target: { value: "caption" },
@@ -557,6 +558,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -674,6 +676,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -793,6 +796,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -823,6 +827,7 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(vi.mocked(api.listYujinMemoryCandidates).mock.calls)
       .toHaveLength(listCallsBeforeLateResult);
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const currentPanel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -871,6 +876,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -921,6 +927,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
 
     expect(await screen.findByText("저장됨")).toBeVisible();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop)
@@ -986,6 +993,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1059,6 +1067,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1108,6 +1117,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1162,6 +1172,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1229,6 +1240,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     expect(await screen.findByRole(
       "region", { name: "유진 기억" },
     )).not.toHaveTextContent("빠른 컷 편집을 선호합니다.");
@@ -1256,6 +1268,7 @@ describe("EditorWorkbenchRoute", () => {
       api, "approveYujinMemoryCandidate",
     ).mockReturnValue(approvePromise as never);
     const store = vi.spyOn(api, "storeYujinMemoryCandidate");
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const routePanel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1354,6 +1367,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole(
       "button", { name: "세부 정보" },
     ));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1380,6 +1394,7 @@ describe("EditorWorkbenchRoute", () => {
       });
     });
 
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const currentPanel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1411,6 +1426,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("radio", { name: endingWith(`P01-${kind.toUpperCase()}-01 선택`) }));
     const applyButton = screen.getByRole("button", { name: "선택한 추천 적용" });
     fireEvent.click(applyButton);
@@ -1471,6 +1487,7 @@ describe("EditorWorkbenchRoute", () => {
       render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
       await expectEditorRevision(1);
       fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+      fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
       fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-CAPTION-STYLE-01 선택") }));
       fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
@@ -1516,6 +1533,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-TABLE-01 선택") }));
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
@@ -1576,6 +1594,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     const radio = await screen.findByRole("radio", { name: endingWith(`P01-${kind.toUpperCase()}-01 선택`) });
     fireEvent.click(radio);
 
@@ -1607,6 +1626,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     const candidate = await screen.findByRole("radio", { name: endingWith("P01-CAPTION-TEXT-01 선택") });
     fireEvent.click(candidate);
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
@@ -1633,6 +1653,7 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-CAPTION-TEXT-01 선택") }));
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(api.preflightDirectorProposal).toHaveBeenCalledTimes(1));
@@ -1682,6 +1703,7 @@ describe("EditorWorkbenchRoute", () => {
     const preview = screen.getByRole("region", { name: "미리보기" });
     await waitFor(() => expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true"));
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "작성 중인 요청" } });
     fireEvent.click(clipSelectionButton("n-1"));
     timeline.scrollLeft = 31;
@@ -3215,6 +3237,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(api.preflightDirectorProposal).toHaveBeenCalledTimes(1));
 
@@ -3248,6 +3271,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
     await waitFor(() => expect(api.undoEditingSession).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     const apply = await screen.findByRole("button", { name: "선택한 추천 적용" });
 
     expect(apply).toBeDisabled();
@@ -3436,7 +3460,9 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     expect(await screen.findByText("한 가지를 골랐어요.")).toBeVisible();
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     expect(screen.getByRole("button", { name: endingWith("P01-B-01 미리 보기") })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: endingWith("P01-B-01 미리 보기") }));
     expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
@@ -3446,6 +3472,7 @@ describe("EditorWorkbenchRoute", () => {
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.click(await screen.findByRole("button", { name: "유진 없이 계속 편집" }));
     expect(await screen.findByRole("tab", { name: "미디어" })).toBeVisible();
   });
@@ -3484,6 +3511,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     expect(await screen.findByRole("checkbox", { name: "1번째 장면 · 안녕하세요, 제주입니다 — 20260612_091959 선택" })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "2번째 장면 · 오름에 올라 바다를 봅니다 — 20260612_091959 선택" })).toBeInTheDocument();
@@ -3503,6 +3531,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     expect(await screen.findByRole("checkbox", { name: "2번째 장면 · 1초부터 — P01-B-01 선택" })).toBeInTheDocument();
   });
@@ -3521,6 +3550,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     const cards = await screen.findByRole("group", { name: "추천 후보" });
     expect(cards.textContent).not.toContain("metadata");
@@ -3538,6 +3568,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     expect(await screen.findByText("자막과 겹치는 말: 바다, 하늘")).toBeVisible();
   });
@@ -3553,6 +3584,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     const cards = await screen.findByRole("group", { name: "추천 후보" });
     expect(cards.textContent).toContain("P01-B-01 · 영상");
@@ -3582,6 +3614,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("button", { name: "장면마다 하나씩 모두 고르기" }));
     fireEvent.click(await screen.findByRole("button", { name: "고른 추천 2개 적용" }));
 
@@ -3601,6 +3634,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     expect(await screen.findByRole("radio", { name: endingWith("P01-BROLL-01 선택") })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "장면마다 하나씩 모두 고르기" })).toBeNull();
@@ -3618,6 +3652,7 @@ describe("EditorWorkbenchRoute", () => {
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-b", "proposal-session-b"));
     expect(batchApply).toHaveBeenCalledWith("project-b", "proposal-session-b", { candidate_ids: ["candidate-1"], expected_revision: 1 });
@@ -3641,6 +3676,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     expect(screen.getByText(`${kind} 추천 세부 내용`)).toBeVisible();
     expect(screen.getByRole("radio", { name: endingWith(`${proposal.candidates[0].visible_reference_code} 선택`) })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
@@ -3692,6 +3728,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     const reference = proposal.candidates[0].visible_reference_code;
     fireEvent.click(screen.getByRole("button", { name: endingWith(`${reference} ${verb}`) }));
@@ -3720,12 +3757,18 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
+    // preflight가 stale을 돌려주면 막힌 상태가 되고, "다시 추천받기"는
+    // (추천 탭 자신의 것과 별개로) `유진` 탭의 막힘 대체 화면에도 있다 --
+    // 지금 막힌 것은 그쪽이다.
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const again = await screen.findByRole("button", { name: "지금 편집본으로 다시 추천받기" });
     fireEvent.click(again);
 
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("project-a", "proposal-1"));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     expect(await screen.findByRole("button", { name: "선택한 추천 적용" })).toBeVisible();
     await waitFor(() => expect(
       screen.queryByRole("button", { name: "지금 편집본으로 다시 추천받기" }),
@@ -3771,6 +3814,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
     expect(materialize).not.toHaveBeenCalled();
@@ -3794,6 +3838,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     expect(screen.getByRole("radio", { name: endingWith(`${proposal.candidates[0].visible_reference_code} 선택`) })).toBeDisabled();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
@@ -3819,6 +3864,7 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-BROLL-01 선택") }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(materialize).toHaveBeenCalledTimes(1));
@@ -3842,9 +3888,11 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-BROLL-01 선택") }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     expect(await screen.findByRole("button", { name: "유진 없이 계속 편집" })).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
     expect(apply).not.toHaveBeenCalled();
@@ -3860,6 +3908,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(createConversation).not.toHaveBeenCalled();
     expect(createProposal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
 
     await waitFor(() => expect(createConversation).toHaveBeenCalledWith("project-a", { session_id: "session-a" }));
@@ -3867,6 +3916,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(createProposal).toHaveBeenCalledWith("project-a", { session_id: "session-a" });
     expect(createProposal).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeEnabled();
   });
 
@@ -3887,6 +3937,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
 
     expect(await screen.findByRole("button", { name: endingWith("P01-B-01 미리 보기") })).toBeVisible();
   });
@@ -3904,6 +3955,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
 
     expect(await screen.findByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 미디어 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeVisible();
@@ -3928,6 +3980,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     const apply = await screen.findByRole("button", { name: "선택한 추천 적용" });
     fireEvent.click(apply);
     fireEvent.click(apply);
@@ -3965,10 +4018,12 @@ describe("EditorWorkbenchRoute", () => {
     const workbench = screen.getByRole("region", { name: "편집 작업판" });
     const timeline = screen.getByTestId("timeline-track");
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const composer = await screen.findByLabelText("유진에게 요청하기");
     fireEvent.change(composer, { target: { value: "작성 중인 요청" } });
     fireEvent.click(clipSelectionButton("n-2"));
     timeline.scrollLeft = 37;
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
     await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
@@ -3976,6 +4031,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(37);
+    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
     expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true");
     await expectEditorRevision(1);
@@ -4014,6 +4070,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "추천" }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
     await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
@@ -4038,6 +4095,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
 
     const rows = Array.from((await screen.findByRole("log", { name: "유진 대화" })).querySelectorAll("article"))
       .map((row) => row.textContent);
@@ -4059,6 +4117,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
 
     const starter = await screen.findByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" });
     fireEvent.click(starter);
@@ -4089,6 +4148,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<StrictMode><EditorWorkbenchRoute projectId="project-a" sessionId="session-a" /></StrictMode>);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "장면을 설명해 줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
@@ -4132,6 +4192,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
@@ -4178,6 +4239,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
@@ -4244,6 +4306,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "취소할 요청" } },
@@ -4283,6 +4346,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "늦게 끝날 요청" } },
@@ -4290,6 +4354,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(releaseSend).toBeTypeOf("function"));
 
+    fireEvent.click(screen.getByRole("tab", { name: "추천" }));
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith(
       "project-a",
@@ -4330,6 +4395,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "다시 시도할 요청" } },
@@ -4375,6 +4441,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "곧 오래될 요청" } },
@@ -4420,6 +4487,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "데이터베이스 삭제해줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
 
@@ -4443,6 +4511,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "보존할 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
@@ -4453,6 +4522,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(clipSelectionButton("n-1")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "유진 없이 계속 편집" }));
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeVisible();
     expect(screen.getByText("남아 있는 대화")).toBeVisible();
     expect(createProposal).not.toHaveBeenCalled();
@@ -4482,9 +4552,12 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     const player = screen.getByRole("region", { name: "미리보기" });
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "작성 중" } });
+    fireEvent.click(screen.getByRole("tab", { name: "추천" }));
     fireEvent.click(screen.getByRole("checkbox", { name: endingWith("P01-B-02 선택") }));
+    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
     const history = screen.getByRole("log", { name: "유진 대화" });
     Object.defineProperties(history, {
       scrollHeight: { configurable: true, value: 200 },
@@ -4496,11 +4569,13 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.queryByRole("log", { name: "유진 대화" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
-    expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("작성 중");
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
+    expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("작성 중");
     expect(screen.getByText("요청")).toBeVisible();
     expect(screen.getByText("답변")).toBeVisible();
-    expect(screen.getByRole("checkbox", { name: endingWith("P01-B-02 선택") })).toBeChecked();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
+    fireEvent.click(screen.getByRole("tab", { name: "추천" }));
+    expect(screen.getByRole("checkbox", { name: endingWith("P01-B-02 선택") })).toBeChecked();
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(player);
     expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
   });
@@ -4514,15 +4589,18 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 초안" } });
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("");
     fireEvent.change(screen.getByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "B 초안" } });
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("A 초안");
   });
 
@@ -4540,6 +4618,7 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
@@ -4580,6 +4659,7 @@ describe("EditorWorkbenchRoute", () => {
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(sendSignalA).not.toBeUndefined());
@@ -4589,6 +4669,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(sendSignalA.aborted).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "유진" }));
     fireEvent.change(screen.getByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "B 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(sendSignalB).not.toBeUndefined());

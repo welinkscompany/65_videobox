@@ -32,7 +32,7 @@ const memoryCallbacks = () => ({
 });
 
 function renderDock(memory: Record<string, unknown>) {
-  return render(
+  const rendered = render(
     <RightDock
       draft=""
       onDraftChange={vi.fn()}
@@ -49,14 +49,19 @@ function renderDock(memory: Record<string, unknown>) {
       ]}
     />,
   );
+  // 이 파일은 기억 패널을 다룬다 -- 탭으로 나뉜 뒤(2026-08-30)로는 `유진`
+  // 탭을 먼저 열어야 그 안의 기억 패널이 보인다(기억은 따로 탭이 아니라
+  // 그 대화 다음 자리에 있다).
+  fireEvent.click(screen.getByRole("tab", { name: "유진" }));
+  return rendered;
 }
 
 
-// 편집 항목은 이제 기본으로 펴져 있다(캡컷처럼 고른 것의 속성이 바로 보인다).
-// 무조건 누르면 오히려 **닫힌다** -- 좁은 화면이나 접어 둔 상태에서만 누른다.
+// 편집 항목은 `속성` 탭 안에 있고 그 탭이 기본이다(2026-08-30, 캡컷처럼
+// 고른 것의 속성이 바로 보인다). 다른 탭에 가 있을 때만 넘어간다.
 function openInspector(): void {
   if (screen.queryByRole("region", { name: "편집 항목" })) return;
-  fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+  fireEvent.click(screen.getByRole("tab", { name: "속성" }));
 }
 
 describe("Yujin memory panel", () => {
@@ -263,16 +268,16 @@ describe("Yujin memory panel", () => {
       ...callbacks,
     });
     openInspector();
-    fireEvent.click(screen.getByRole(
-      "button", { name: "편집 항목 닫기" },
-    ));
-
-    expect(screen.getByRole("region", { name: "유진 기억" }))
-      .toHaveTextContent("빠른 컷 편집을 선호합니다.");
+    // 탭으로 나뉜 뒤(2026-08-30)로는 `속성`을 떠나는 것 자체가 예전의
+    // "편집 항목 닫기"다 -- `유진` 탭 안에서 대화와 기억이 둘 다 멀쩡한지 본다
+    // (기억은 따로 탭이 아니라 그 대화 다음 자리에 있다).
+    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop)
       .toBe(64);
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" }))
       .toBeDisabled();
+    expect(screen.getByRole("region", { name: "유진 기억" }))
+      .toHaveTextContent("빠른 컷 편집을 선호합니다.");
   });
 });

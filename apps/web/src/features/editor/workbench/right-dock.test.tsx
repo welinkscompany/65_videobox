@@ -7,6 +7,13 @@ import type { RightDockEditingProposal, RightDockProposal } from "./rightDockTyp
 
 afterEach(cleanup);
 
+/** 이 도크가 세 탭(속성·유진·추천)으로 나뉘면서(2026-08-30), 기본 탭
+ *  (속성) 밖의 내용은 그 탭을 먼저 열어야 보인다. 기억은 따로 탭이 아니라
+ *  `유진` 탭 안, 대화 다음 자리에 있다(기억 후보가 그 대화에서 나온다). */
+function openPane(label: "속성" | "유진" | "추천") {
+  fireEvent.click(screen.getByRole("tab", { name: label }));
+}
+
 const proposal: RightDockProposal = {
   proposalId: "proposal-1",
   status: "ready",
@@ -91,6 +98,7 @@ describe("RightDock", () => {
       state="idle"
       runState={{ kind: "idle" }}
     />);
+    openPane("유진");
 
     expect(screen.getByRole("group", { name: "대화 스타터" })).toBeInTheDocument();
     for (const label of [
@@ -133,6 +141,7 @@ describe("RightDock", () => {
         },
       ]}
     />);
+    openPane("유진");
 
     const completion = screen.getByRole("status", { name: /모든 작업 완료/ });
     expect(completion).toHaveTextContent("모든 작업 완료");
@@ -157,6 +166,7 @@ describe("RightDock", () => {
       onDraftChange={vi.fn()}
       messages={[{ id: "message-1", role: "user", text: "요청" }]}
     />);
+    openPane("유진");
 
     expect(screen.queryByRole("group", { name: "대화 스타터" })).not.toBeInTheDocument();
 
@@ -175,6 +185,7 @@ describe("RightDock", () => {
 
   it("disables conversation starters when the composer is disabled", () => {
     render(<RightDock draft="" onDraftChange={vi.fn()} composerDisabled />);
+    openPane("유진");
 
     expect(screen.getByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" })).toBeDisabled();
   });
@@ -182,14 +193,13 @@ describe("RightDock", () => {
   it("shows the selected clip's properties first and already open", () => {
     // 캡컷은 클립을 누르면 속성이 이미 거기 있다. 우리는 `세부 정보` →
     // `편집 항목 열기` → `편집 대상` 셀렉트까지 **네 겹**을 지나야 속도에 닿았다.
-    // 2026-08-17에 컷 도구에서 고친 것과 같은 병이 클립 속성에 남아 있었다.
+    // 2026-08-17에 컷 도구에서 고친 것과 같은 병이 클립 속성에 남아 있었다 --
+    // 탭으로 나뉜 뒤(2026-08-30)로는 "기본 탭이 속성"이라는 말이 그 자리를
+    // 잇는다. 유진 대화와 같이 안 보이니 DOM 순서 대신 기본 탭을 확인한다.
     render(<PersistentDock />);
 
+    expect(screen.getByRole("tab", { name: "속성" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("region", { name: "편집 항목" })).toBeInTheDocument();
-    // 도크 안에서 **가장 먼저** 온다. 유진 대화를 지나 스크롤해야 나오면 여전히 못 찾는다.
-    const dock = screen.getByRole("region", { name: "편집 항목" });
-    const conversation = screen.getByRole("log", { name: "유진 대화" });
-    expect(dock.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("offers only the approved shortform scene lengths for the selected scene", () => {
@@ -269,27 +279,38 @@ describe("RightDock", () => {
   });
 
   it("still lets the creator fold the properties away", () => {
-    // 항상 펴 두는 것과 접을 수 없는 것은 다르다.
+    // 항상 펴 두는 것과 접을 수 없는 것은 다르다 -- 탭으로 나뉜 뒤(2026-08-30)로는
+    // 다른 탭으로 넘어가는 것 자체가 접는 것이다.
     render(<PersistentDock />);
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 닫기" }));
+    openPane("유진");
     expect(screen.queryByRole("region", { name: "편집 항목" })).not.toBeInTheDocument();
   });
 
-  it("preserves the composer, selected candidate, and conversation scroll while Inspector opens and closes", () => {
+  it("preserves the composer, selected candidate, and conversation scroll while switching tabs away from and back to Yujin", () => {
     render(<PersistentDock />);
+    openPane("유진");
     const composer = screen.getByLabelText("유진에게 요청하기");
-    const history = screen.getByRole("log", { name: "유진 대화" });
     fireEvent.change(composer, { target: { value: "다음 추천도 보여 줘" } });
-    fireEvent.click(screen.getByRole("radio", { name: "B-002 선택" }));
+    const history = screen.getByRole("log", { name: "유진 대화" });
+    // 탭을 떠나면 이 로그의 DOM이 사라졌다가 돌아올 때 새로 생긴다 -- 그때
+    // 되살리는 값은 raw DOM이 아니라 `conversationScroll` 상태다. 그러니
+    // `onScroll`이 실제로 그 상태를 갱신하도록 스크롤 이벤트로 흉내 낸다
+    // (jsdom은 레이아웃을 안 재므로 scrollHeight·clientHeight도 같이 박아 둔다).
     Object.defineProperty(history, "scrollTop", { configurable: true, writable: true, value: 72 });
+    Object.defineProperty(history, "scrollHeight", { configurable: true, writable: true, value: 1000 });
+    Object.defineProperty(history, "clientHeight", { configurable: true, writable: true, value: 800 });
+    fireEvent.scroll(history);
+    openPane("추천");
+    fireEvent.click(screen.getByRole("radio", { name: "B-002 선택" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 닫기" }));
-    expect(screen.queryByRole("region", { name: "편집 항목" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    openPane("속성");
+    expect(screen.queryByRole("region", { name: "편집 항목" })).toBeInTheDocument();
+    openPane("유진");
 
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("다음 추천도 보여 줘");
-    expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
+    openPane("추천");
+    expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
   });
 
   it("names a candidate by its asset, because a code is not something a person can choose by", () => {
@@ -321,6 +342,7 @@ describe("RightDock", () => {
         }],
       }}
     />);
+    openPane("추천");
 
     expect(screen.getByRole("radio", { name: "제주 바다 드론 선택" })).toBeInTheDocument();
     expect(screen.queryByRole("radio", { name: /P01-B-01/ })).toBeNull();
@@ -361,6 +383,7 @@ describe("RightDock", () => {
         ],
       }}
     />);
+    openPane("추천");
 
     // 보이는 글자와 접근 이름이 **둘 다** 갈라져야 한다. 하나만 갈라지면
     // 눈으로 보거나 음성으로 듣는 사람 중 한쪽은 여전히 못 고른다.
@@ -373,6 +396,7 @@ describe("RightDock", () => {
   it("keeps the old name when nothing is known about the scene, instead of inventing one", () => {
     // 장면을 모르면 아무 말도 하지 않는다. 지어낸 장면 이름은 코드보다 나쁘다.
     render(<RightDock draft="" onDraftChange={() => undefined} proposal={proposal} />);
+    openPane("추천");
 
     expect(screen.getByRole("radio", { name: "B-001 선택" })).toBeInTheDocument();
   });
@@ -385,6 +409,7 @@ describe("RightDock", () => {
     const onUseDraftAsScript = vi.fn();
     const script = "안녕하세요. 오늘은 제주 바다를 소개합니다. 두 번째 문장입니다.";
     render(<RightDock draft={script} onDraftChange={() => undefined} onUseDraftAsScript={onUseDraftAsScript} />);
+    openPane("유진");
 
     fireEvent.click(screen.getByRole("button", { name: "이 글을 대본으로 쓰기" }));
 
@@ -406,6 +431,7 @@ describe("RightDock", () => {
         { id: "assistant-1", role: "assistant", text: script },
       ]}
     />);
+    openPane("유진");
 
     fireEvent.click(screen.getByRole("button", { name: `이 답을 대본으로 쓰기 — ${script.slice(0, 20)}…` }));
 
@@ -426,6 +452,7 @@ describe("RightDock", () => {
         { id: "assistant-2", role: "assistant", text: second },
       ]}
     />);
+    openPane("유진");
 
     expect(screen.getByRole("button", { name: `이 답을 대본으로 쓰기 — ${first.slice(0, 20)}…` })).toBeVisible();
     expect(screen.getByRole("button", { name: `이 답을 대본으로 쓰기 — ${second.slice(0, 20)}…` })).toBeVisible();
@@ -442,6 +469,7 @@ describe("RightDock", () => {
         { id: "user-1", role: "user", text: "안녕하세요. 오늘은 제주 바다를 소개합니다. 두 번째 문장입니다." },
       ]}
     />);
+    openPane("유진");
 
     expect(screen.queryByRole("button", { name: /대본으로 쓰기/ })).toBeNull();
   });
@@ -450,6 +478,7 @@ describe("RightDock", () => {
     // 짧은 한 줄은 요청이지 대본이 아니다. 늘 띄우면 단추가 소음이 된다.
     const onUseDraftAsScript = vi.fn();
     render(<RightDock draft="B-roll 추천해 줘" onDraftChange={() => undefined} onUseDraftAsScript={onUseDraftAsScript} />);
+    openPane("유진");
 
     expect(screen.queryByRole("button", { name: "이 글을 대본으로 쓰기" })).toBeNull();
   });
@@ -466,6 +495,7 @@ describe("RightDock", () => {
       selectedCandidateIds={["gap-1"]}
       onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
     />);
+    openPane("추천");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "2번째 장면 — 바다 영상 선택" }));
 
@@ -484,6 +514,7 @@ describe("RightDock", () => {
       selectedCandidateIds={["gap-1", "gap-2"]}
       onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
     />);
+    openPane("추천");
 
     fireEvent.click(screen.getByRole("checkbox", { name: "1번째 장면 — 구름 영상 선택" }));
 
@@ -499,6 +530,7 @@ describe("RightDock", () => {
       selectedCandidateIds={[]}
       onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
     />);
+    openPane("추천");
 
     fireEvent.click(screen.getByRole("button", { name: "장면마다 하나씩 모두 고르기" }));
     expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith(["gap-1", "gap-2"]);
@@ -524,6 +556,7 @@ describe("RightDock", () => {
       onSelectedCandidateIdsChange={vi.fn()}
       onApplyProposal={onApplyProposal}
     />);
+    openPane("추천");
 
     fireEvent.click(screen.getByRole("button", { name: "고른 추천 2개 적용" }));
 
@@ -536,6 +569,7 @@ describe("RightDock", () => {
     // (`reject_yujin_direct_apply`). 그런 추천까지 여러 개 고르게 하면
     // 고를 수는 있는데 적용이 거절되는 화면이 된다.
     render(<RightDock draft="" onDraftChange={() => undefined} proposal={proposal} />);
+    openPane("추천");
 
     expect(screen.getAllByRole("radio")).toHaveLength(2);
     expect(screen.queryByRole("checkbox")).toBeNull();
@@ -554,12 +588,14 @@ describe("RightDock", () => {
       conversationScroll={{ key: "route-a", top: 83, pinnedToBottom: false }}
       onConversationScrollChange={onConversationScrollChange}
     />);
+    openPane("추천");
 
     expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
-    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(83);
     fireEvent.click(screen.getByRole("radio", { name: "B-001 선택" }));
     expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith(["candidate-1"]);
     expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
+    openPane("유진");
+    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(83);
 
     rendered.rerender(<RightDock
       draft=""
@@ -570,8 +606,9 @@ describe("RightDock", () => {
       conversationScroll={{ key: "route-a", top: 12, pinnedToBottom: false }}
       onConversationScrollChange={onConversationScrollChange}
     />);
-    expect(screen.getByRole("radio", { name: "B-001 선택" })).toBeChecked();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(12);
+    openPane("추천");
+    expect(screen.getByRole("radio", { name: "B-001 선택" })).toBeChecked();
   });
 
   it("keeps manual editing available without clearing unavailable history", () => {
@@ -584,6 +621,7 @@ describe("RightDock", () => {
       onManualEdit={onManualEdit}
       messages={[{ id: "user-1", role: "user", text: "요청 내용" }]}
     />);
+    openPane("유진");
 
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeInTheDocument();
     expect(screen.getByText("요청 내용")).toBeInTheDocument();
@@ -600,6 +638,7 @@ describe("RightDock", () => {
       messages={[{ id: "assistant-1", role: "assistant", text: "첫" }]}
       runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "첫" }}
     />);
+    openPane("유진");
 
     expect(screen.getByRole("log", { name: "유진 대화" })).not.toHaveAttribute("aria-live");
     expect(screen.queryByRole("status")).toBeNull();
@@ -638,6 +677,7 @@ describe("RightDock", () => {
       messages={[{ id: "assistant-1", role: "assistant", text: "완료된 답" }]}
       runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "완료된 답" }}
     />);
+    openPane("유진");
     const announcements: string[] = [];
     let previousAnnouncement = "";
     const observer = new MutationObserver(() => {
@@ -693,6 +733,7 @@ describe("RightDock", () => {
       onSelectedCandidateIdsChange={vi.fn()}
       onApplyProposal={onApplyProposal}
     />);
+    openPane("추천");
 
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
@@ -728,6 +769,7 @@ describe("RightDock", () => {
       onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
       onApplyProposal={onApplyProposal}
     />);
+    openPane("추천");
 
     expect(screen.getByText("첫 장면을 산책 영상으로 채웁니다.")).toBeVisible();
     expect(screen.getByText("영상")).toBeVisible();
@@ -778,6 +820,7 @@ describe("RightDock", () => {
       onPreviewCandidate={onPreviewCandidate}
       onApplyProposal={onApplyProposal}
     />);
+    openPane("추천");
 
     expect(screen.getByRole("radio", { name: "P01-B-01 선택" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: "P01-B-01 미리 보기" })).toBeNull();
@@ -820,6 +863,7 @@ describe("RightDock", () => {
       onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
       onApplyProposal={onApplyProposal}
     />);
+    openPane("추천");
 
     const finding = screen.getByRole("region", { name: "검사 결과" });
     expect(finding).toHaveTextContent("빈 구간 2개");
@@ -833,7 +877,7 @@ describe("RightDock", () => {
 
 describe("찾은 방식 표시", () => {
   function renderWithMode(matchMode: string | undefined) {
-    return render(<RightDock
+    const rendered = render(<RightDock
       draft=""
       onDraftChange={() => {}}
       proposal={{ ...proposal, matchMode } as never}
@@ -844,6 +888,8 @@ describe("찾은 방식 표시", () => {
       onConversationScrollChange={() => {}}
       inspectorTargets={[]}
     />);
+    openPane("추천");
+    return rendered;
   }
 
   it("단어로만 찾았으면 그 사실을 말한다", () => {
@@ -880,6 +926,7 @@ describe("대화형 편집안", () => {
       onPreviewEditingProposal={onPreviewEditingProposal}
       onApplyEditingProposal={onApplyEditingProposal}
     />);
+    openPane("유진");
 
     fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
     expect(screen.getByRole("dialog", { name: "편집안" })).toHaveTextContent("아직 적용되지 않았어요");
@@ -919,6 +966,7 @@ describe("편집안 미리보기", () => {
       onPreviewEditingProposal={vi.fn()}
       onApplyEditingProposal={vi.fn()}
     />);
+    openPane("유진");
     fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
     return screen.getByRole("dialog", { name: "편집안" });
   }

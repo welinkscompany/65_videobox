@@ -113,6 +113,23 @@ function candidateTitle(candidate: RightDockCandidate): string {
   return `${candidateAssetLabel(candidate)} · ${mediaKindLabel(candidate.sourceMediaKind)}`;
 }
 
+/** 이 도크를 **탭으로 나눈다**(owner 지시 2026-08-30: "구분해서 탭으로
+ *  정리하라고 했더니 하나도 안 하고 다 때려박아 넣었다"). 왼쪽 패널을
+ *  캡컷 콘텐츠 탭으로 승격한 것(2단계, 2026-08-30)과 같은 자리. 기본은
+ *  `속성`이다 -- 캡컷의 `세부 정보`가 그렇듯, 클립을 고르면 그 속성이
+ *  바로 보이는 게 우선이다.
+ *
+ *  **`기억`은 따로 탭을 만들지 않는다.** 처음엔 네 번째 탭으로 뒀는데,
+ *  유진 대화 스크롤·작성 중인 요청과 기억 패널을 **같이** 다루는 흐름이
+ *  실제로 많았다(기억 후보는 유진 대화에서 나온다) -- 둘을 다른 탭에
+ *  두면 오히려 왔다 갔다 해야 했다. `유진` 탭 안, 대화 다음 자리에 둔다. */
+type RightDockPane = "properties" | "yujin" | "recommendations";
+const rightDockPanes: readonly Readonly<{ pane: RightDockPane; label: string }>[] = [
+  { pane: "properties", label: "속성" },
+  { pane: "yujin", label: "유진" },
+  { pane: "recommendations", label: "추천" },
+];
+
 export function RightDock({
   projectId,
   state = "idle",
@@ -155,10 +172,12 @@ export function RightDock({
   onRetryRun,
   retryAfterSeconds = null,
 }: RightDockProps) {
-  // 캡컷은 클립을 누르면 속성이 이미 거기 있다. 접힌 채로 두었더니 `유진과 편집
-  // 항목` → `편집 항목 열기` → `편집 대상`까지 네 겹을 지나야 속도·소리에 닿았다.
-  // 접는 것은 여전히 되지만 기본은 펴 둔다.
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  // 탭 자체가 이제 이 구역의 열고 닫기다(`rightDockPanes` 참고) -- 접었다
+  // 펴는 단추를 안에 하나 더 두면 캡컷은 클립을 누르면 속성이 이미 거기
+  // 있다. `유진과 편집 항목` → `편집 항목 열기` → `편집 대상`까지 네 겹을
+  // 지나야 속도·소리에 닿던 문제(2026-08-17)는 탭이 이미 열려 있는 것으로
+  // 해결된다 -- 두 벌 토글이 된다.
+  const [pane, setPane] = useState<RightDockPane>("properties");
   const [selectedInspectorTargetId, setSelectedInspectorTargetId] = useState<string | null>(null);
   const inspectorTargetIdentity = inspectorTargets.map((target) => target.id).join("|");
   /** 한 번에 그리는 추천 카드 수. 왼쪽 자산 내역과 같은 기준이다. */
@@ -183,13 +202,17 @@ export function RightDock({
     const timer = window.setTimeout(() => setRetryRemaining((seconds) => Math.max(0, seconds - 1)), 1000);
     return () => window.clearTimeout(timer);
   }, [retryRemaining]);
+  // `pane`이 여기 있는 이유: 탭이 갈라진 뒤(2026-08-30)로는 `유진` 탭을
+  // 떠나면 이 로그의 DOM 자체가 사라졌다가 돌아올 때 새로 생긴다 -- 새
+  // 노드는 항상 스크롤이 맨 위다. 의존 배열에 `pane`이 없으면 되돌아왔을
+  // 때 이 효과가 다시 안 돌아서 저장해 둔 위치를 잃는다.
   useLayoutEffect(() => {
     const history = historyRef.current;
     if (!history) return;
     history.scrollTop = conversationScroll.pinnedToBottom
       ? history.scrollHeight
       : conversationScroll.top;
-  }, [conversationScroll.key, conversationScroll.pinnedToBottom, conversationScroll.top, messages]);
+  }, [conversationScroll.key, conversationScroll.pinnedToBottom, conversationScroll.top, messages, pane]);
 
   const proposalIsReady = proposal?.status === "ready";
   const proposalIsCurrent = proposalIsReady
@@ -281,12 +304,14 @@ export function RightDock({
   const recommendationCandidates = proposal?.candidates.filter((candidate) => !candidate.readOnlyFinding) ?? [];
   const readOnlyFindings = proposal?.candidates.filter((candidate) => candidate.readOnlyFinding) ?? [];
 
-  // **선택한 것의 속성이 맨 앞에 온다.** 유진 대화를 지나 스크롤해야 나오면
-  // 있어도 못 찾는다 -- 2026-08-17에 컷 도구가 정확히 그랬다.
+  // **선택한 것의 속성이 맨 앞에 온다.** 기본 탭이 `속성`인 이유가 이것이다 --
+  // 2026-08-17에 컷 도구가 접힌 속성 뒤에 숨어 있던 문제와 같은 원칙.
   return <div className="vb-editor-right-dock">
-    <section className="vb-editor-workbench__summary">
-      <Button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "편집 항목 닫기" : "편집 항목 열기"}</Button>
-      {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
+    <div className="vb-editor-assets__tabs" role="tablist" aria-label="세부 정보">
+      {rightDockPanes.map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
+    </div>
+    {pane === "properties" ? <section className="vb-editor-workbench__summary">
+      <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
         <h2>편집 항목</h2>
         {selectedSegment ? <p>{selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초 구간</p> : <p>선택한 구간이 없어요.</p>}
         {selectedSegment && onSetSegmentRippleSpeed ? <div role="group" aria-label="장면 길이">
@@ -332,9 +357,9 @@ export function RightDock({
           target={selectedInspectorTarget}
           ttsCandidateScopeKey={ttsCandidateScopeKey}
         /> : null}
-      </div> : null}
-    </section>
-    <section aria-label="유진" className="vb-editor-workbench__summary">
+      </div>
+    </section> : null}
+    {pane === "yujin" ? <section aria-label="유진" className="vb-editor-workbench__summary">
       <h2>유진</h2>
       {runStatusAnnouncement ? <p role="status" aria-live="polite" aria-atomic="true" aria-label="유진 대화 상태" className="sr-only">{runStatusAnnouncement}</p> : null}
       {runState.kind === "complete" && runState.syncWarning
@@ -447,9 +472,10 @@ export function RightDock({
         ? <Button type="button" onClick={() => void onRetryRun()}>같은 요청 다시 보내기</Button>
         : null}
 
-    </section>
+      {memory ? <YujinMemoryPanel memory={memory} /> : null}
+    </section> : null}
 
-    <section aria-label="추천" className="vb-editor-workbench__summary">
+    {pane === "recommendations" ? <section aria-label="추천" className="vb-editor-workbench__summary">
       <h2>추천</h2>
       {proposal ? <div aria-label="제안 편집본">
         <p>{`제안 기준 편집본 ${proposal.baseSessionRevision}`}</p>
@@ -512,17 +538,14 @@ export function RightDock({
         })}
       {recommendationCandidates.length > shownCandidates ? <Button type="button" variant="outline" onClick={() => setShownCandidates((count) => count + CANDIDATE_PAGE)}>{`추천 ${recommendationCandidates.length - shownCandidates}개 더 보기`}</Button> : null}</div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
       {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>{activeCandidateIds.length > 1 ? `고른 추천 ${activeCandidateIds.length}개 적용` : "선택한 추천 적용"}</Button> : null}
-    </section>
-
-    {memory ? <YujinMemoryPanel memory={memory} /> : null}
-
-    {readOnlyFindings.length ? <section aria-label="검사 결과" className="vb-editor-workbench__summary">
-      <h2>검사 결과</h2>
-      {readOnlyFindings.map((finding) => <article key={finding.candidateId}>
-        {finding.supportedControls.check === "timeline_gaps"
-          ? <p>{`빈 구간 ${String(finding.supportedControls.gap_count ?? 0)}개`}</p>
-          : null}
-      </article>)}
+      {readOnlyFindings.length ? <section aria-label="검사 결과">
+        <h2>검사 결과</h2>
+        {readOnlyFindings.map((finding) => <article key={finding.candidateId}>
+          {finding.supportedControls.check === "timeline_gaps"
+            ? <p>{`빈 구간 ${String(finding.supportedControls.gap_count ?? 0)}개`}</p>
+            : null}
+        </article>)}
+      </section> : null}
     </section> : null}
 
   </div>;

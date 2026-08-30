@@ -62,11 +62,17 @@ function openDetailDock(): void {
   fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 }
 
-// 편집 항목은 이제 기본으로 펴져 있다(캡컷처럼 고른 것의 속성이 바로 보인다).
-// 무조건 누르면 오히려 **닫힌다** -- 좁은 화면이나 접어 둔 상태에서만 누른다.
+// 편집 항목은 `속성` 탭 안에 있고 그 탭이 기본이다(2026-08-30, 캡컷처럼
+// 고른 것의 속성이 바로 보인다). 다른 탭에 가 있을 때만 넘어간다.
 function openInspector(): void {
   if (screen.queryByRole("region", { name: "편집 항목" })) return;
-  fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+  fireEvent.click(screen.getByRole("tab", { name: "속성" }));
+}
+
+// 유진과의 대화/기억은 `유진` 탭 안에 있다(2026-08-30, 탭으로 나눔).
+// 기본 탭이 아니므로 항상 명시적으로 전환한다.
+function openYujin(): void {
+  fireEvent.click(screen.getByRole("tab", { name: "유진" }));
 }
 
 describe("EditorWorkbench", () => {
@@ -282,11 +288,13 @@ describe("EditorWorkbench", () => {
       onPreviewCandidate: vi.fn(),
     } as const;
     const rendered = render(<EditorWorkbench director={director} view={view} />);
+    openYujin();
     const composer = screen.getByLabelText("유진에게 요청하기");
     expect(composer).toHaveValue("다음에 확인할 추천 초안");
     expect(composer).toBeDisabled();
     rendered.unmount();
     render(<EditorWorkbench director={director} view={view} />);
+    openYujin();
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("다음에 확인할 추천 초안");
   });
 
@@ -325,6 +333,7 @@ describe("EditorWorkbench", () => {
 
     render(<EditorWorkbench director={director} view={view} />);
     openDetailDock();
+    openYujin();
 
     expect(screen.getByText("남아 있는 요청")).toBeVisible();
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존된 초안");
@@ -567,6 +576,7 @@ describe("EditorWorkbench", () => {
     } as const;
     const rendered = render(<EditorWorkbench director={director} view={routeA} />);
     openDetailDock();
+    fireEvent.click(screen.getByRole("tab", { name: "추천" }));
 
     fireEvent.click(screen.getByRole("button", { name: "A-01 미리 보기" }));
     await waitFor(() => expect(

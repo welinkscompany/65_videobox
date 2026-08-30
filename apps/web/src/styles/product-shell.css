@@ -5,7 +5,15 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-product-shell { --vb-top-bar-h: 4.25rem; min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; flex-direction: column; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); }
 [data-vb-desktop-shell] { min-width:0; box-sizing:border-box; overflow-x:hidden; }
 @media (min-width: 1024px) { [data-vb-desktop-shell] { min-width:1280px; min-height:800px; height:100vh; overflow:hidden; } }
-.vb-product-main { min-width:0; min-height:0; flex:1; overflow:hidden; }.vb-product-content { width:100%; max-width:1200px; min-height:0; overflow-y:auto; margin: 0 auto; padding: var(--vb-space-7) clamp(var(--vb-space-4),3vw,var(--vb-space-8)); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }
+.vb-product-main { min-width:0; min-height:0; flex:1; overflow:hidden; }.vb-product-content { width:100%; max-width:1200px; min-height:0; margin: 0 auto; padding: var(--vb-space-7) clamp(var(--vb-space-4),3vw,var(--vb-space-8)); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }
+/* 스크롤은 여기, 폭이 안 잡힌 `.vb-product-main`에서 한다 -- `.vb-product-content`가
+   직접 스크롤하면(예전처럼) 스크롤바가 1200px짜리 가운데 정렬 상자의 오른쪽
+   끝에 붙어서, 창이 그보다 넓을 때 스크롤바와 진짜 창 가장자리 사이에 빈
+   칸이 생긴다(2026-08-30, owner가 설치형 셸에서 직접 보고 발견 -- 브라우저
+   탭에서도 창 폭이 1200px보다 넓으면 똑같이 재현됨, 셸만의 문제가 아니었다).
+   편집기 화면은 예외다 -- 그 화면은 폭이 안 잡히고(`max-width:none`) 자기
+   안에서 따로 스크롤하므로 그대로 `overflow:hidden`으로 둔다. */
+.vb-product-main:not(:has(.vb-editor-workbench)) { overflow-y:auto; }
 .vb-product-main, .vb-product-content { min-width:0; box-sizing:border-box; }
 @media (min-width:1600px) { .vb-product-content { max-width:1600px; } }
 .vb-dialog-content { width:min(35rem, calc(100vw - 2rem)); max-width:calc(100vw - 2rem); max-height:70vh; overflow-y:auto; box-sizing:border-box; padding: var(--vb-space-6); }
