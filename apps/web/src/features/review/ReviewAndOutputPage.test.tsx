@@ -33,6 +33,20 @@ it("shows both halves on one screen", async () => {
   await waitFor(() => expect(screen.getByTestId("outputs-page")).toBeInTheDocument());
 });
 
+it("asks CapCut for handoff status once per screen, not once per re-sync", async () => {
+  // 실측(2026-08-30, 브라우저 네트워크 로그): 한 화면을 여는 동안
+  // `/api/capcut/handoff-diagnostics`가 두 번 나갔다. 출력 쪽 effect가
+  // `shared`가 채워질 때 다시 도는 것 자체는 의도(주석 참고)이지만, 그때
+  // CapCut 상태까지 다시 물을 이유는 없다 -- 검토 쪽 승인 여부와 CapCut
+  // 상태는 서로 무관하다.
+  render(<ReviewAndOutputPage projectId="project-a" onOpenEditor={() => {}} />);
+
+  await waitFor(() => expect(screen.getByTestId("outputs-page")).toBeInTheDocument());
+  await waitFor(() => expect(api.listJobs).toHaveBeenCalled());
+
+  expect(api.getCapcutHandoffDiagnostics).toHaveBeenCalledTimes(1);
+});
+
 it("has exactly one page-level heading, not one per half", async () => {
   // 실측(2026-08-30, 브라우저): 두 절반이 각자 <h1>을 내서 화면 하나에
   // <h1>이 둘이었다("영상 검토" · "완성본과 CapCut 초안") -- 스크린리더가

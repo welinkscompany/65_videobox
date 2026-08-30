@@ -385,6 +385,11 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   // 읽기는 `onSharedRefresh`(안정적)로만 걸고 값 자체는 ref로 본다.
   const sharedRef = useRef(shared);
   sharedRef.current = shared;
+  // CapCut 상태는 검토 쪽 승인 여부와 무관하다 -- `shared`가 새로 채워질
+  // 때마다(`reuseShared: true`로 다시 도는 재동기화, 511행 effect 주석 참고)
+  // 다시 물을 이유가 없다. 실측(2026-08-30)으로 한 화면에서 이 호출이
+  // 두 번 나가는 것을 확인했다. 프로젝트를 바꾸면 캐시를 버린다.
+  const diagnosticsRef = useRef<{ projectId: string; value: CapCutHandoffDiagnostics | null } | null>(null);
 
   const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null; reuseShared?: boolean }) => {
     const refreshProjectId = projectId;
@@ -434,7 +439,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         options?.capcutDraft && capcutJob && options.capcutDraft.job_id === capcutJob.job_id
           ? Promise.resolve(options.capcutDraft)
           : capcutJob ? api.getCapcutDraftExport(refreshProjectId, capcutJob.job_id) : Promise.resolve(null),
-        api.getCapcutHandoffDiagnostics().catch(() => null),
+        options?.reuseShared && diagnosticsRef.current?.projectId === refreshProjectId
+          ? Promise.resolve(diagnosticsRef.current.value)
+          : api.getCapcutHandoffDiagnostics().catch(() => null),
         session
           ? api.getEditorPlaybackManifest(refreshProjectId, session.session_id).catch(() => {
             exactPreviewReadFailed = true;
@@ -443,6 +450,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           : Promise.resolve(null),
       ]);
       if (!isCurrentRequest()) return;
+      diagnosticsRef.current = { projectId: refreshProjectId, value: diagnostics };
       setSubtitleErrorProjectId(null);
       setFinalErrorProjectId(null);
       setCapcutErrorProjectId(null);
