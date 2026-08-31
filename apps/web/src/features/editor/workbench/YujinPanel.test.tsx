@@ -661,7 +661,7 @@ describe("추천 후보", () => {
     });
 
     expect(screen.getByText("첫 장면을 산책 영상으로 채웁니다.")).toBeVisible();
-    expect(screen.getByText("영상")).toBeVisible();
+    expect(screen.getByText("B-roll")).toBeVisible();
     // 내부 세그먼트 식별자는 owner에게 뜻이 없다. 화면에는 나오지 않아야 한다.
     expect(screen.queryAllByText("segment-1")).toHaveLength(0);
     expect(screen.getByText("화면 채우기")).toBeVisible();

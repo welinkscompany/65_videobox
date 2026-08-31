@@ -246,11 +246,57 @@ bottom(644.97)이 타임라인 top(757.97)보다 위 — 겹침 0px, 1280×800�
 겹침 0px. 속성 도크를 닫아도 유진 패널은 그대로 열려 있고, 유진을
 닫으면 알약 버튼 하나로 정확히 접혔다.
 
+## 2026-08-31 여섯 번째 이어진 세션 — 남긴 항목까지 전부 근본 해결
+
+owner 지시: "남은부분 모두 문제없이 근본적으로 해결해줘. 완료하면 미구현
+부분 설명해줘." 다섯 번째 세션에서 판단만 하고 미룬 항목을 하나씩
+실제로 고쳤다.
+
+- **`hasSelectedSegment`**: `selectedSegmentId !== null`(범위가 넓음) 대신
+  `selectedNarration !== null`을 쓰게 했다 -- 속성 도크가 "선택 구간이
+  없어요"를 판정할 때 쓰는 것과 **같은 계산**(`findNarrationOrCaptionBySegment`)
+  이라 이미 `EditorWorkbench.tsx`에 있었다. 새 로직을 만들지 않고 기존
+  값을 재사용했다.
+- **`goToNewProject` 오류 문구**: `handleCreate`에서 `createProject`와
+  `goToNewProject`(세션 생성+이동)의 실패를 이제 각각 잡는다. 프로젝트
+  생성 자체가 실패하면 기존 문구 그대로, 그 다음 단계(세션 생성·이동)만
+  실패하면 카탈로그를 새로고침해 프로젝트가 목록에서 안 사라지게 하고
+  "프로젝트는 만들어졌지만 편집기를 열지 못했어요"로 정확히 말한다.
+- **Tailwind 테마 네임스페이스 전체**: `--spacing`만으로 안 끝났던 나머지
+  절반(`--text-*`, `--font-weight-*`, `--tracking-*`, `--leading-*`,
+  `--shadow-*`)을 Tailwind 자신의 기본값 그대로 `@theme`에 추가했다.
+  색은 안 건드렸다(그래서 여전히 전체 `tailwindcss`는 안 불러온다).
+  **빌드해서 직접 확인**: 압축 CSS가 102KB → 107.55KB로 늘었고,
+  `.text-sm{`·`.font-medium{`·`.font-semibold{`·`.tracking-wide{`·
+  `.shadow-xs{`·`.shadow-sm{`가 전부 실제로 컴파일됐다. 브라우저에서도
+  버튼 하나의 계산된 스타일이 `font-size:14px`(`text-sm`=0.875rem)·
+  `font-weight:500`(`font-medium`)·`box-shadow`에 `rgba(0,0,0,0.05) 0 1px 2px`
+  (`shadow-xs`)를 실제로 그리는 것을 확인했다.
+- **`mediaKindLabel` 불일치**: `YujinPanel.tsx`의 `broll`/`broll_video`
+  이름표를 "영상"에서 "B-roll"로 바꿔 `EditorWorkbench.tsx`의
+  `auditionRoleLabel`·`inspectorRegistry.ts`의 `mediaLabels`와 맞췄다(둘 다
+  이미 "B-roll"이었고, 실제 화면에도 "B-roll 1 항상 쓰기"로 그 글자가
+  떠 있었다 -- 소수 의견이던 "영상" 쪽을 고쳤다). 조사 중 이 값과 원래
+  또 disagree한다고 의심했던 `editorWorkbenchReadOnlyAdapters.tsx`의
+  `trackRoleLabels`는 **호출하는 곳이 아예 없는 죽은 코드**였다 -- 고치는
+  대신 통째로 지웠다.
+- **닫힌 도우미 필드 정리**: `rightDockTypes.ts`의 `onRetryMessage`·
+  `retryAfterSeconds`(어디서도 값을 채우지 않는 죽은 필드였다) 삭제.
+- **닫혀 있을 때 낭비되는 파생 상태**: `open` 확인을 후크(`useLayoutEffect`·
+  `useEffect`) 다음, 나머지 파생 상태·후보 계산보다 앞으로 옮겼다.
+  Rules of Hooks는 그대로 지킨다(훅 호출은 하나도 건너뛰지 않는다 --
+  건너뛰는 건 순수 계산뿐).
+
+**검증**: 위 두 라벨 변경으로 시험 둘이 깨졌다(`editor-workbench-route.test.tsx`의
+"calls a b-roll candidate a video, not just media"와 `YujinPanel.test.tsx`의
+후보 상세 시험) -- 둘 다 "B-roll"을 기대하도록 고쳤다(회귀 감시 자체는
+그대로 유지, 기대값만 새 이름표에 맞춤). `tsc -b --force`·전체
+vitest(1,372개) 통과, `vite build` 결과로 컴파일된 클래스 직접 확인,
+워크트리 dev 서버(`localhost:5199`)에서 실제 계산된 스타일과 화면 문구
+확인.
+
 ## 다음에 이어갈 사람에게
 
 이 문서가 최신 인계다. `CLAUDE.md` §2의 "최신 세션 인계" 줄을 이 파일로
-옮겨 두었다. 남은 것: 위 다섯 번째 세션에서 판단만 하고 안 고친 다섯
-항목(hasSelectedSegment 범위, goToNewProject 오류 문구, Tailwind 테마
-네임스페이스 전체, mediaKindLabel 불일치, 도우미 함수 중복) — 전부
-owner 판단이 필요하거나 별도 슬라이스로 미룬 것이지 놓친 게 아니다.
-그 외엔 캡컷 새 캡처·실제 로고 두 가지가 남아 있다.
+옮겨 두었다. 이번 여섯 번째 세션으로 다섯 번째 세션이 owner 판단용으로
+남겼던 다섯 항목이 전부 닫혔다. 남은 건 캡컷 새 캡처·실제 로고 두 가지뿐이다.

@@ -50,11 +50,15 @@ function previewVerb(kind: RightDockCandidate["sourceMediaKind"]): string {
   return kind === "bgm" || kind === "sfx" ? "미리 듣기" : "미리 보기";
 }
 
+// `broll`/`broll_video`는 "B-roll"로 쓴다 -- `EditorWorkbench.tsx`의
+// `auditionRoleLabel`과 `inspectorRegistry.ts`의 `mediaLabels`가 이미 같은
+// 트랙을 그렇게 부르고, 실제 화면에도 그 글자가 뜬다("B-roll 1 항상 쓰기").
+// 예전엔 여기만 "영상"이라 같은 대상이 패널마다 다른 이름으로 보였다.
 function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
   return {
     raw_video: "원본 영상",
-    broll: "영상",
-    broll_video: "영상",
+    broll: "B-roll",
+    broll_video: "B-roll",
     image: "이미지",
     bgm: "배경 음악",
     sfx: "효과음",
@@ -198,6 +202,16 @@ export function YujinPanel({
     void onRefreshProposal();
   }, [onRefreshProposal, proposal?.currentRevision, proposalIsOutOfDate, state]);
 
+  // 위 두 효과(훅) 다음, 나머지 파생 상태보다 앞에 둔다 -- 클릭 한 번으로
+  // 얻는 알약 버튼일 뿐인 접힌 모습에는 후보·검사 결과 파생값이 전혀
+  // 안 쓰이는데, 이 확인을 훅들보다 먼저 두면 Rules of Hooks를 어긴다.
+  // 훅 호출 없이 순수 계산만 건너뛰는 것이라 여기가 안전한 가장 이른 자리다.
+  if (!open) {
+    return <Button type="button" className="vb-yujin-panel__toggle" onClick={() => onOpenChange(true)}>
+      <Sparkles aria-hidden="true" /> 유진
+    </Button>;
+  }
+
   const activeCandidateIds = selectedCandidateIds
     ?? (proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
   // 빈 구간이 열두 개면 고르기·적용을 열두 번 반복해야 했다. `batch-apply`는
@@ -255,12 +269,6 @@ export function YujinPanel({
     : runState.kind === "unavailable"
     ? `${runState.message} 수동 편집을 계속할 수 있어요.`
     : null;
-
-  if (!open) {
-    return <Button type="button" className="vb-yujin-panel__toggle" onClick={() => onOpenChange(true)}>
-      <Sparkles aria-hidden="true" /> 유진
-    </Button>;
-  }
 
   return <section aria-label="유진" className="vb-yujin-panel">
     <header className="vb-yujin-panel__header">

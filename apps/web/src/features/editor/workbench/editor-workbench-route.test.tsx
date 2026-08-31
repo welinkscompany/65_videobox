@@ -3583,9 +3583,12 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByText("자막과 겹치는 말: 바다, 하늘")).toBeVisible();
   });
 
-  it("calls a b-roll candidate a video, not just media", async () => {
+  it("calls a b-roll candidate B-roll, not just media", async () => {
     // `media_type`은 `broll`인데 화면 사전에는 `broll_video`만 있어서, 모든
-    // B-roll 후보가 `· 미디어`로 떨어졌다.
+    // B-roll 후보가 `· 미디어`로 떨어졌다. 이름표 자체는 2026-08-31에
+    // "영상"에서 "B-roll"로 통일했다(`EditorWorkbench.tsx`의
+    // `auditionRoleLabel`·`inspectorRegistry.ts`의 `mediaLabels`와 맞춤 --
+    // 같은 자산이 패널마다 다른 이름으로 보이던 것을 없앴다).
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
       messages: [], proposal: directorProposal(), references: [],
@@ -3597,7 +3600,7 @@ describe("EditorWorkbenchRoute", () => {
     await openYujin();
 
     const cards = await screen.findByRole("group", { name: "추천 후보" });
-    expect(cards.textContent).toContain("P01-B-01 · 영상");
+    expect(cards.textContent).toContain("P01-B-01 · B-roll");
   });
 
   it("fills every empty scene in one press, as one edit the creator can undo once", async () => {

@@ -705,7 +705,11 @@ function EditorWorkbenchInstance({
         startFailure={rightDirector?.startFailure}
         onCancelRun={rightDirector?.onCancelRun}
         onRetryRun={rightDirector?.onRetryRun}
-        hasSelectedSegment={selectedSegmentId !== null}
+        // 속성 도크가 "선택 구간이 없어요"로 판정하는 것과 같은 기준(내레이션·
+        // 자막 매치)을 쓴다 -- `selectedSegmentId !== null`만 보면 재생 헤드가
+        // 내레이션·자막 어느 쪽에도 안 걸린 장면에서도 유진 쪽만 "구간 선택함"
+        // 으로 착각해 서로 다른 대화 시작 문구를 보여 줬다.
+        hasSelectedSegment={selectedNarration !== null}
       />
     </div>
     <section className="vb-editor-variants" aria-label="출력 변형" data-collapsed={variantsCollapsed}>

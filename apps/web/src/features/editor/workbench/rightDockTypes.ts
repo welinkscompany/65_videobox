@@ -162,10 +162,8 @@ export type RightDockDirector = Readonly<{
   onStart?: () => void | Promise<void>;
   /** 추천 시작이 거절된 이유. 다시 누를 수 있는 상태로 함께 보인다. */
   startFailure?: string | null;
-  onRetryMessage?: () => void | Promise<void>;
   onCancelRun?: () => void | Promise<void>;
   onRetryRun?: () => void | Promise<void>;
-  retryAfterSeconds?: number | null;
 }>;
 import type {
   YujinMemoryCategory,

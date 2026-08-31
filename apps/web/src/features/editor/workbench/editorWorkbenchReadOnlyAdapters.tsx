@@ -11,22 +11,6 @@ import type { ApprovedTtsCandidate, InspectorAction, PartialRegenerationControls
 import { projectInspectorTargets } from "../inspector/inspectorRegistry";
 import { RightDock } from "./RightDock";
 
-
-// `role`은 `narration | broll | bgm | sfx | overlay` 원값이다. 타임라인이 쓰는
-// 어휘와 같아야 owner가 같은 것을 두 이름으로 보지 않는다.
-const trackRoleLabels: Readonly<Record<string, string>> = {
-  narration: "내레이션",
-  broll: "영상",
-  bgm: "배경 음악",
-  sfx: "효과음",
-  overlay: "오버레이",
-  caption: "자막",
-};
-
-function trackRoleLabel(role: string): string {
-  return trackRoleLabels[role] ?? "트랙";
-}
-
 export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedSegmentId, playbackSec, onSelectSegment, onSeek, onSaveCaption, isSavingCaption = false, assetCards = [], assetPreviewStates = {}, assetTarget, onPreviewAsset, onPreviewSource, sources = [], onRefreshExactPreview, onApplyAssetCard, onApplyImageOverlay, onInspectorAction, onSetSegmentRippleSpeed, onPreviewSelectedRange, partialRegeneration, loadApprovedTtsCandidates, ttsCandidateScopeKey, onMediaAdded, leftPane, onLeftPaneChange }: { view: EditorViewModel; session?: EditorSessionSnapshot | null; dock: "left" | "right"; selectedSegmentId: string | null; playbackSec: number; onSelectSegment: (segmentId: string) => void; onSeek: (seconds: number) => void; onSaveCaption?: (input: { segmentId: string; text: string }) => void | Promise<void>; isSavingCaption?: boolean; assetCards?: readonly EditorAssetCard[]; assetPreviewStates?: Readonly<Record<string, EditorAssetPreviewState>>; assetTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null; onPreviewAsset: (card: EditorAssetCard) => void; onPreviewSource?: (source: AuditionSource) => void; sources?: readonly AuditionSource[]; onRefreshExactPreview?: () => void; onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onApplyImageOverlay?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onInspectorAction?: (action: InspectorAction) => void | Promise<void>; onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>; onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>; partialRegeneration?: PartialRegenerationControls; loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>; ttsCandidateScopeKey?: string; onMediaAdded?: () => void | Promise<void>; /** 최상위(편집기 맨 위)에서 관리하는 왼쪽 탭 -- 승인 2026-08-30(버튼 단위 벤치마킹 2단계). */ leftPane?: LeftPane; onLeftPaneChange?: (pane: LeftPane) => void }) {
   if (dock === "left") {
     const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));

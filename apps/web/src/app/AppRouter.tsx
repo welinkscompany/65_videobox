@@ -321,7 +321,16 @@ function ProjectsPage() {
     setCreateError(null);
     try {
       const created = await api.createProject({ name: newProjectName.trim() });
-      await goToNewProject(created);
+      try {
+        await goToNewProject(created);
+      } catch {
+        // 프로젝트 자체는 이미 서버에 만들어졌다 -- "만들지 못했다"고 하면
+        // 목록에 안 보이는 채로 남은 프로젝트를 창작자가 또 만들려고 한다.
+        // 목록만 새로고침해 orphan으로 남지 않게 하고, 사실대로 말한다.
+        await router.options.context.catalog.refresh();
+        await router.invalidate();
+        setCreateError("프로젝트는 만들어졌지만 편집기를 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.");
+      }
     } catch {
       setCreateError("프로젝트를 만들지 못했습니다.");
     } finally {
