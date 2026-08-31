@@ -28,7 +28,7 @@ function trackRoleLabel(role: string): string {
   return trackRoleLabels[role] ?? "트랙";
 }
 
-export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director, eugeneDraft, onEugeneDraftChange, selectedSegmentId, playbackSec, onSelectSegment, onSeek, onSaveCaption, isSavingCaption = false, assetCards = [], assetPreviewStates = {}, assetTarget, onPreviewAsset, onPreviewSource, sources = [], onRefreshExactPreview, onApplyAssetCard, onApplyImageOverlay, onInspectorAction, onSetSegmentRippleSpeed, onPreviewSelectedRange, partialRegeneration, loadApprovedTtsCandidates, ttsCandidateScopeKey, onMediaAdded, leftPane, onLeftPaneChange }: { view: EditorViewModel; session?: EditorSessionSnapshot | null; dock: "left" | "right"; director?: RightDockDirector; eugeneDraft: string; onEugeneDraftChange: (value: string) => void; selectedSegmentId: string | null; playbackSec: number; onSelectSegment: (segmentId: string) => void; onSeek: (seconds: number) => void; onSaveCaption?: (input: { segmentId: string; text: string }) => void | Promise<void>; isSavingCaption?: boolean; assetCards?: readonly EditorAssetCard[]; assetPreviewStates?: Readonly<Record<string, EditorAssetPreviewState>>; assetTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null; onPreviewAsset: (card: EditorAssetCard) => void; onPreviewSource?: (source: AuditionSource) => void; sources?: readonly AuditionSource[]; onRefreshExactPreview?: () => void; onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onApplyImageOverlay?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onInspectorAction?: (action: InspectorAction) => void | Promise<void>; onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>; onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>; partialRegeneration?: PartialRegenerationControls; loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>; ttsCandidateScopeKey?: string; onMediaAdded?: () => void | Promise<void>; /** 최상위(편집기 맨 위)에서 관리하는 왼쪽 탭 -- 승인 2026-08-30(버튼 단위 벤치마킹 2단계). */ leftPane?: LeftPane; onLeftPaneChange?: (pane: LeftPane) => void }) {
+export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director, selectedSegmentId, playbackSec, onSelectSegment, onSeek, onSaveCaption, isSavingCaption = false, assetCards = [], assetPreviewStates = {}, assetTarget, onPreviewAsset, onPreviewSource, sources = [], onRefreshExactPreview, onApplyAssetCard, onApplyImageOverlay, onInspectorAction, onSetSegmentRippleSpeed, onPreviewSelectedRange, partialRegeneration, loadApprovedTtsCandidates, ttsCandidateScopeKey, onMediaAdded, leftPane, onLeftPaneChange }: { view: EditorViewModel; session?: EditorSessionSnapshot | null; dock: "left" | "right"; director?: RightDockDirector; selectedSegmentId: string | null; playbackSec: number; onSelectSegment: (segmentId: string) => void; onSeek: (seconds: number) => void; onSaveCaption?: (input: { segmentId: string; text: string }) => void | Promise<void>; isSavingCaption?: boolean; assetCards?: readonly EditorAssetCard[]; assetPreviewStates?: Readonly<Record<string, EditorAssetPreviewState>>; assetTarget: Readonly<{ segmentId: string; startSec: number; endSec: number }> | null; onPreviewAsset: (card: EditorAssetCard) => void; onPreviewSource?: (source: AuditionSource) => void; sources?: readonly AuditionSource[]; onRefreshExactPreview?: () => void; onApplyAssetCard?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onApplyImageOverlay?: (card: EditorAssetCard, segmentId: string) => void | Promise<void>; onInspectorAction?: (action: InspectorAction) => void | Promise<void>; onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>; onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>; partialRegeneration?: PartialRegenerationControls; loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>; ttsCandidateScopeKey?: string; onMediaAdded?: () => void | Promise<void>; /** 최상위(편집기 맨 위)에서 관리하는 왼쪽 탭 -- 승인 2026-08-30(버튼 단위 벤치마킹 2단계). */ leftPane?: LeftPane; onLeftPaneChange?: (pane: LeftPane) => void }) {
   if (dock === "left") {
     const localSources = sources.filter((source) => isAllowedLocalUrl(source.url));
     // 캡컷은 전환을 왼쪽 패널 탭에서 고른다. 걸 대상은 오른쪽 속성 패널이 쓰는
@@ -68,33 +68,11 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
   const selectedSessionSegment = selectedSessionSegmentIndex >= 0 ? session?.segments[selectedSessionSegmentIndex] ?? null : null;
   return <RightDock
     projectId={view.projectId}
-    draft={eugeneDraft}
-    composerDisabled={director?.composerDisabled ?? true}
-    conversationScroll={director?.conversationScroll}
-    messages={director?.messages}
-    memory={director?.memory}
     onApplyProposal={director?.onApplyProposal}
-    onCreateEditingProposal={director?.onCreateEditingProposal}
-    onDraftChange={onEugeneDraftChange}
-    onConversationScrollChange={director?.onConversationScrollChange}
-    onCancelRun={director?.onCancelRun}
-    onManualEdit={director?.onManualEdit}
-    onUseDraftAsScript={director?.onUseDraftAsScript}
     onPreviewCandidate={director?.onPreviewCandidate}
     onRefreshProposal={director?.onRefreshProposal}
-    onRetryMessage={director?.onRetryMessage}
-    onRetryRun={director?.onRetryRun}
     onSelectedCandidateIdsChange={director?.onSelectedCandidateIdsChange}
-    onSendMessage={director?.onSendMessage}
-    onStart={director?.onStart}
-    editingProposal={director?.editingProposal}
-    editingProposalCreating={director?.editingProposalCreating}
-    onPreviewEditingProposal={director?.onPreviewEditingProposal}
-    onApplyEditingProposal={director?.onApplyEditingProposal}
-    startFailure={director?.startFailure}
     proposal={director?.proposal}
-    retryAfterSeconds={director?.retryAfterSeconds}
-    runState={director?.runState}
     selectedCandidateIds={director?.selectedCandidateIds}
     state={director?.state}
     inspectorDisabled={isSavingCaption}

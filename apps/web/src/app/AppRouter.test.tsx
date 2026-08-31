@@ -734,7 +734,10 @@ describe("AppRouter URL ownership", () => {
     // 자막칸이 기본 화면에 있는 것이 아니었으므로, 탭을 한 번 열고 그대로 본다.
     fireEvent.click(screen.getByRole("tab", { name: "자막" }));
     expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
-    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
+    // 유진 대화창은 2026-08-30 후속으로 도크와 무관한 독립 패널이 됐다
+    // (owner: "우리 유진 대화창도 캡컷처럼 해도 되", `docs/reference/capcut-observed-2026-08-22.ko.md`
+    // §7) -- 화면 구석의 알약 버튼으로 연다.
+    fireEvent.click(screen.getByRole("button", { name: "유진" }));
     fireEvent.change(screen.getByLabelText("유진에게 요청하기"), { target: { value: "보존할 요청" } });
     fireEvent.click(clipSelectionButton("clip-2"));
     timeline.scrollLeft = 47;
@@ -748,7 +751,8 @@ describe("AppRouter URL ownership", () => {
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(preview);
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
     expect(screen.getByRole("complementary", { name: "세부 정보" })).toBe(rightDock);
-    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
+    // 유진 패널은 도크와 무관하고 같은 라우트라 재마운트되지 않았으므로
+    // 계속 열려 있다 -- 다시 누를 필요가 없다.
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("보존할 요청");
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(47);
     expect(clipSelectionButton("clip-1")).toHaveAttribute("aria-pressed", "true");
@@ -986,7 +990,7 @@ describe("AppRouter URL ownership", () => {
     if (!screen.queryByRole("complementary", { name: "세부 정보" })) {
       fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     }
-    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
+    fireEvent.click(screen.getByRole("button", { name: "유진" }));
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
     fireEvent.click(screen.getByRole("tab", { name: "추천" }));

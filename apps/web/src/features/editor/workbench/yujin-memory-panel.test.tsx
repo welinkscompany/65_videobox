@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RightDock } from "./RightDock";
+import { YujinPanel } from "./YujinPanel";
 
 afterEach(cleanup);
 
@@ -31,9 +31,15 @@ const memoryCallbacks = () => ({
   onDelete: vi.fn(),
 });
 
-function renderDock(memory: Record<string, unknown>) {
-  const rendered = render(
-    <RightDock
+// 기억 패널은 `YujinPanel` 안, 대화 다음 자리에 있다(따로 탭이 아니다 --
+// 기억 후보는 그 대화에서 나온다). 2026-08-30 후속으로 유진 대화 자체가
+// `RightDock`에서 완전히 빠져 독립 패널이 됐다(`docs/reference/capcut-observed-2026-08-22.ko.md`
+// §7) -- 이 파일은 이제 그 패널을 직접 연다.
+function renderPanel(memory: Record<string, unknown>) {
+  return render(
+    <YujinPanel
+      open
+      onOpenChange={vi.fn()}
       draft=""
       onDraftChange={vi.fn()}
       onSendMessage={vi.fn()}
@@ -44,30 +50,14 @@ function renderDock(memory: Record<string, unknown>) {
         top: 64,
         pinnedToBottom: false,
       }}
-      inspectorTargets={[
-        { id: "segment-1", label: "장면 1", kind: "caption" },
-      ]}
     />,
   );
-  // 이 파일은 기억 패널을 다룬다 -- 탭으로 나뉜 뒤(2026-08-30)로는 `유진`
-  // 탭을 먼저 열어야 그 안의 기억 패널이 보인다(기억은 따로 탭이 아니라
-  // 그 대화 다음 자리에 있다).
-  fireEvent.click(screen.getByRole("tab", { name: "유진" }));
-  return rendered;
-}
-
-
-// 편집 항목은 `속성` 탭 안에 있고 그 탭이 기본이다(2026-08-30, 캡컷처럼
-// 고른 것의 속성이 바로 보인다). 다른 탭에 가 있을 때만 넘어간다.
-function openInspector(): void {
-  if (screen.queryByRole("region", { name: "편집 항목" })) return;
-  fireEvent.click(screen.getByRole("tab", { name: "속성" }));
 }
 
 describe("Yujin memory panel", () => {
   it("has one separate explicit typed producer and never fires it automatically", () => {
     const callbacks = memoryCallbacks();
-    renderDock({
+    renderPanel({
       candidates: [],
       loadError: null,
       ...callbacks,
@@ -99,7 +89,7 @@ describe("Yujin memory panel", () => {
 
   it("requires explicit approve-and-store or reject and renders no source/provider data", () => {
     const callbacks = memoryCallbacks();
-    renderDock({
+    renderPanel({
       candidates: [pending],
       loadError: null,
       ...callbacks,
@@ -126,7 +116,7 @@ describe("Yujin memory panel", () => {
 
   it("shows controlled saving, stored, failed retry, and delete states", () => {
     const callbacks = memoryCallbacks();
-    const rendered = renderDock({
+    const rendered = renderPanel({
       candidates: [{ ...pending, action: "saving" }],
       loadError: null,
       ...callbacks,
@@ -141,7 +131,9 @@ describe("Yujin memory panel", () => {
     )).toBeVisible();
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -167,7 +159,9 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onStore).toHaveBeenCalledWith("memory-1");
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -188,7 +182,9 @@ describe("Yujin memory panel", () => {
     )).toBeNull();
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -213,7 +209,9 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onStore).toHaveBeenCalledWith("memory-1");
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -235,7 +233,9 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onDelete).toHaveBeenCalledWith("memory-1");
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -260,18 +260,14 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onDelete).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps candidate and conversation usable across Inspector and memory failure", () => {
+  it("keeps candidate and conversation usable when memory fails to load", () => {
     const callbacks = memoryCallbacks();
-    renderDock({
+    renderPanel({
       candidates: [pending],
       loadError: "기억을 불러오지 못했어요.",
       ...callbacks,
     });
-    openInspector();
-    // 탭으로 나뉜 뒤(2026-08-30)로는 `속성`을 떠나는 것 자체가 예전의
-    // "편집 항목 닫기"다 -- `유진` 탭 안에서 대화와 기억이 둘 다 멀쩡한지 본다
-    // (기억은 따로 탭이 아니라 그 대화 다음 자리에 있다).
-    fireEvent.click(screen.getByRole("tab", { name: "유진" }));
+
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop)
       .toBe(64);
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();

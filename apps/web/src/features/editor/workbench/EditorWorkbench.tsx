@@ -16,6 +16,7 @@ import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
+import { YujinPanel } from "./YujinPanel";
 import { resolveEditorWorkbenchLayout, timelineHeightLimitsRem, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
 import { hasLegacyEditorUiState, readEditorUiState, readVariantsCollapsed, writeEditorUiState, writeVariantsCollapsed } from "./editorUiState";
 import type { RightDockCandidate, RightDockDirector } from "./rightDockTypes";
@@ -164,6 +165,12 @@ function EditorWorkbenchInstance({
   // 자체는 `EditorAssetBrowser`가 그리지만(재사용, 두 번 짜지 않는다) 탭을
   // 누른 자리는 패널 안이 아니라 창 맨 위다.
   const [leftPane, setLeftPane] = useState<LeftPane>("media");
+  // 유진 대화창은 속성/추천 도크와 완전히 독립이다(owner 지시 2026-08-30:
+  // "우리 유진 대화창도 캡컷처럼 해도 되" -- 캡컷 EditPilot은 화면 구석에
+  // 뜨는 독립 패널이지 속성 도크의 탭이 아니다). 라우트가 바뀌면 이
+  // 컴포넌트 자체가 다시 마운트되므로(`EditorWorkbench`의 `key={routeKey}`)
+  // 세션 간 영속은 따로 필요 없다 -- 새 프로젝트를 열면 닫힌 채로 시작한다.
+  const [yujinOpen, setYujinOpen] = useState(false);
   const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
   const [exportOpen, setExportOpen] = useState(false);
   const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
@@ -539,7 +546,7 @@ function EditorWorkbenchInstance({
     if (layout.mode === "drawer") { openDrawer("right"); return; }
     if (!rightVisible) toggleDock("right");
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} eugeneDraft={rightDirector?.draft ?? ""} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onEugeneDraftChange={rightDirector?.onDraftChange ?? (() => undefined)} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} onMediaAdded={onMediaAdded} view={view} leftPane={leftPane} onLeftPaneChange={openLeftPane} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} onMediaAdded={onMediaAdded} view={view} leftPane={leftPane} onLeftPaneChange={openLeftPane} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
@@ -628,7 +635,7 @@ function EditorWorkbenchInstance({
       <div className="vb-editor-workbench__panes" role="tablist" aria-label="왼쪽 패널">
         {editorAssetPanes.map((item) => <Button key={item.pane} ref={item.pane === leftPane ? leftTriggerRef : undefined} type="button" variant={leftShowing && leftPane === item.pane ? "default" : "outline"} size="sm" role="tab" aria-selected={leftShowing && leftPane === item.pane} onClick={() => openLeftPane(item.pane)}>{item.label}</Button>)}
       </div>
-      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성과 유진" aria-pressed={rightShowing} onClick={() => openRightPane()}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
+      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성과 추천" aria-pressed={rightShowing} onClick={() => openRightPane()}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
       {/* **내보내기를 편집기 안에서 연다(owner 지시 2026-08-27).**
           > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
 
@@ -743,6 +750,38 @@ function EditorWorkbenchInstance({
         /> : null}
       </DialogContent>
     </Dialog>
+    {/* 캡컷 EditPilot처럼 도크와 무관하게 화면 구석에 뜬다(owner 지시
+        2026-08-30, `docs/reference/capcut-observed-2026-08-22.ko.md` §7).
+        속성/추천 도크가 닫혀 있어도 열 수 있다. */}
+    <YujinPanel
+      open={yujinOpen}
+      onOpenChange={setYujinOpen}
+      state={rightDirector?.state}
+      draft={rightDirector?.draft ?? ""}
+      onDraftChange={rightDirector?.onDraftChange ?? (() => undefined)}
+      messages={rightDirector?.messages}
+      completions={rightDirector?.completions}
+      proposal={rightDirector?.proposal}
+      runState={rightDirector?.runState}
+      conversationScroll={rightDirector?.conversationScroll}
+      onConversationScrollChange={rightDirector?.onConversationScrollChange}
+      memory={rightDirector?.memory}
+      composerDisabled={rightDirector?.composerDisabled}
+      onSendMessage={rightDirector?.onSendMessage}
+      onCreateEditingProposal={rightDirector?.onCreateEditingProposal}
+      editingProposal={rightDirector?.editingProposal}
+      editingProposalCreating={rightDirector?.editingProposalCreating}
+      onPreviewEditingProposal={rightDirector?.onPreviewEditingProposal}
+      onApplyEditingProposal={rightDirector?.onApplyEditingProposal}
+      onRefreshProposal={rightDirector?.onRefreshProposal}
+      onManualEdit={rightDirector?.onManualEdit}
+      onUseDraftAsScript={rightDirector?.onUseDraftAsScript}
+      onStart={rightDirector?.onStart}
+      startFailure={rightDirector?.startFailure}
+      onCancelRun={rightDirector?.onCancelRun}
+      onRetryRun={rightDirector?.onRetryRun}
+      hasSelectedSegment={selectedSegmentId !== null}
+    />
   </section>;
 }
 

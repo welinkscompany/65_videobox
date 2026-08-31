@@ -69,10 +69,13 @@ function openInspector(): void {
   fireEvent.click(screen.getByRole("tab", { name: "속성" }));
 }
 
-// 유진과의 대화/기억은 `유진` 탭 안에 있다(2026-08-30, 탭으로 나눔).
-// 기본 탭이 아니므로 항상 명시적으로 전환한다.
+// 유진 대화창은 2026-08-30 후속으로 속성/추천 도크에서 완전히 빠져
+// 독립된 떠있는 패널이 됐다(owner 지시: "우리 유진 대화창도 캡컷처럼
+// 해도 되" -- 캡컷 EditPilot과 같은 자리, `docs/reference/capcut-observed-2026-08-22.ko.md`
+// §7). 도크와 무관하게 화면 구석의 알약 버튼을 눌러 연다. 기본은 닫힘이다.
 function openYujin(): void {
-  fireEvent.click(screen.getByRole("tab", { name: "유진" }));
+  if (screen.queryByRole("region", { name: "유진" })) return;
+  fireEvent.click(screen.getByRole("button", { name: "유진" }));
 }
 
 describe("EditorWorkbench", () => {

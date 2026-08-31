@@ -1,15 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
-import { Textarea } from "../../../components/ui/textarea";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
-import { YujinStarters } from "../../yujin/YujinStarters";
-import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockEditingProposalPreview, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
-import { YujinMemoryPanel } from "./YujinMemoryPanel";
+import type { RightDockCandidate, RightDockProposal } from "./rightDockTypes";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
 
@@ -32,17 +28,9 @@ export type RightDockProps = Readonly<{
   /** 저장된 자막 모양을 읽으려면 필요하다. 없으면 그 절만 빠진다. */
   projectId?: string;
   state?: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
-  draft: string;
-  onDraftChange: (draft: string) => void;
-  messages?: readonly RightDockMessage[];
-  completions?: readonly RightDockCompletionEntry[];
   proposal?: RightDockProposal | null;
-  runState?: YujinRunState;
   selectedCandidateIds?: readonly string[];
   onSelectedCandidateIdsChange?: (candidateIds: readonly string[]) => void;
-  conversationScroll?: RightDockConversationScroll;
-  memory?: RightDockMemory;
-  onConversationScrollChange?: (scroll: RightDockConversationScroll) => void;
   selectedSegment?: SelectedSegment;
   inspectorTargets?: readonly InspectorTarget[];
   inspectorDisabled?: boolean;
@@ -52,43 +40,10 @@ export type RightDockProps = Readonly<{
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
   onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>;
   onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>;
-  composerDisabled?: boolean;
-  onSendMessage?: (draft: string) => void | Promise<void>;
-  onCreateEditingProposal?: () => void | Promise<void>;
-  editingProposal?: RightDockEditingProposal | null;
-  editingProposalCreating?: boolean;
-  onPreviewEditingProposal?: () => void | Promise<void>;
-  onApplyEditingProposal?: () => void | Promise<void>;
   onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
   onRefreshProposal?: () => void | Promise<void>;
-  onManualEdit?: () => void;
-  /** 붙여 넣은 글을 대본으로 받는다. 확정은 사람이 한다. */
-  onUseDraftAsScript?: (script: string) => void | Promise<void>;
   onPreviewCandidate?: (candidate: RightDockCandidate) => void;
-  onStart?: () => void | Promise<void>;
-  /** 추천 시작이 거절된 이유. 다시 누를 수 있는 상태로 함께 보인다. */
-  startFailure?: string | null;
-  onRetryMessage?: () => void | Promise<void>;
-  onCancelRun?: () => void | Promise<void>;
-  onRetryRun?: () => void | Promise<void>;
-  retryAfterSeconds?: number | null;
 }>;
-
-/** 붙여 넣은 것이 **대본인지 요청인지** 가른다. 기준은 길이 하나다 --
- *  "B-roll 추천해 줘"는 요청이고, 문장 여럿이 이어지면 대본으로 본다. */
-const SCRIPT_MINIMUM_CHARACTERS = 30;
-function looksLikeScript(draft: string): boolean {
-  return draft.trim().length >= SCRIPT_MINIMUM_CHARACTERS;
-}
-
-/** 유진 답마다 붙는 단추의 **부르는 이름**. 보이는 글자는 짧게 두고 뒤에 그 답의
- *  첫머리를 붙인다 -- 긴 대화에서는 같은 이름의 단추가 여러 개가 되고, 그러면
- *  음성으로는 어느 것도 고를 수 없다. 보이는 글자가 이름의 **앞부분**이어야
- *  한다는 규칙은 타임라인 클립과 같다. */
-const SCRIPT_BUTTON_TEXT = "이 답을 대본으로 쓰기";
-function scriptButtonLabel(text: string): string {
-  return `${SCRIPT_BUTTON_TEXT} — ${text.trim().slice(0, 20)}…`;
-}
 
 /** 후보를 **부르는 이름**. 코드는 사람이 고르는 근거가 못 된다 -- 2026-08-19에
  *  owner 화면의 후보 일곱 개가 전부 `P08-B-01 · 미디어`였고, 실제로는 서로 다른
@@ -122,28 +77,25 @@ function candidateTitle(candidate: RightDockCandidate): string {
  *  **`기억`은 따로 탭을 만들지 않는다.** 처음엔 네 번째 탭으로 뒀는데,
  *  유진 대화 스크롤·작성 중인 요청과 기억 패널을 **같이** 다루는 흐름이
  *  실제로 많았다(기억 후보는 유진 대화에서 나온다) -- 둘을 다른 탭에
- *  두면 오히려 왔다 갔다 해야 했다. `유진` 탭 안, 대화 다음 자리에 둔다. */
-type RightDockPane = "properties" | "yujin" | "recommendations";
+ *  두면 오히려 왔다 갔다 해야 했다.
+ *
+ *  **`유진`은 2026-08-30 후속 지시로 이 탭 줄에서 다시 빠졌다** — "우리
+ *  유진 대화창도 캡컷처럼 해도 되"(`docs/reference/capcut-observed-2026-08-22.ko.md`
+ *  §7: 캡컷 EditPilot은 이 속성 도크의 탭이 아니라 화면 구석에 따로 뜨는
+ *  독립 패널이다). 유진 대화·기억은 `YujinPanel.tsx`로 옮겼고,
+ *  `EditorWorkbench`가 도크와 무관하게 따로 열고 닫는다. */
+type RightDockPane = "properties" | "recommendations";
 const rightDockPanes: readonly Readonly<{ pane: RightDockPane; label: string }>[] = [
   { pane: "properties", label: "속성" },
-  { pane: "yujin", label: "유진" },
   { pane: "recommendations", label: "추천" },
 ];
 
 export function RightDock({
   projectId,
   state = "idle",
-  draft,
-  onDraftChange,
-  messages = [],
-  completions = [],
   proposal = null,
-  runState = { kind: "idle" },
   selectedCandidateIds,
   onSelectedCandidateIdsChange,
-  conversationScroll = { key: "default", top: 0, pinnedToBottom: true },
-  memory,
-  onConversationScrollChange,
   selectedSegment,
   inspectorTargets = [],
   inspectorDisabled = false,
@@ -153,24 +105,9 @@ export function RightDock({
   onInspectorAction,
   onSetSegmentRippleSpeed,
   onPreviewSelectedRange,
-  composerDisabled = false,
-  onSendMessage,
-  onCreateEditingProposal,
-  editingProposal = null,
-  editingProposalCreating = false,
-  onPreviewEditingProposal,
-  onApplyEditingProposal,
   onApplyProposal,
   onRefreshProposal,
-  onManualEdit,
-  onUseDraftAsScript,
   onPreviewCandidate,
-  onStart,
-  startFailure = null,
-  onRetryMessage,
-  onCancelRun,
-  onRetryRun,
-  retryAfterSeconds = null,
 }: RightDockProps) {
   // 탭 자체가 이제 이 구역의 열고 닫기다(`rightDockPanes` 참고) -- 접었다
   // 펴는 단추를 안에 하나 더 두면 캡컷은 클립을 누르면 속성이 이미 거기
@@ -183,36 +120,12 @@ export function RightDock({
   /** 한 번에 그리는 추천 카드 수. 왼쪽 자산 내역과 같은 기준이다. */
   const CANDIDATE_PAGE = 4;
   const [shownCandidates, setShownCandidates] = useState(CANDIDATE_PAGE);
-  const [retryRemaining, setRetryRemaining] = useState(0);
-  const [editingProposalOpen, setEditingProposalOpen] = useState(false);
-  const editingProposalPreview: RightDockEditingProposalPreview = editingProposal?.preview ?? { kind: "idle" };
-  const historyRef = useRef<HTMLDivElement>(null);
-  const composerContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSelectedInspectorTargetId((current) => inspectorTargets.some((target) => target.id === current)
       ? current
       : inspectorTargets[0]?.id ?? null);
   }, [inspectorTargetIdentity, inspectorTargets]);
-  useEffect(() => {
-    setRetryRemaining(Math.max(0, retryAfterSeconds ?? 0));
-  }, [retryAfterSeconds]);
-  useEffect(() => {
-    if (retryRemaining <= 0) return;
-    const timer = window.setTimeout(() => setRetryRemaining((seconds) => Math.max(0, seconds - 1)), 1000);
-    return () => window.clearTimeout(timer);
-  }, [retryRemaining]);
-  // `pane`이 여기 있는 이유: 탭이 갈라진 뒤(2026-08-30)로는 `유진` 탭을
-  // 떠나면 이 로그의 DOM 자체가 사라졌다가 돌아올 때 새로 생긴다 -- 새
-  // 노드는 항상 스크롤이 맨 위다. 의존 배열에 `pane`이 없으면 되돌아왔을
-  // 때 이 효과가 다시 안 돌아서 저장해 둔 위치를 잃는다.
-  useLayoutEffect(() => {
-    const history = historyRef.current;
-    if (!history) return;
-    history.scrollTop = conversationScroll.pinnedToBottom
-      ? history.scrollHeight
-      : conversationScroll.top;
-  }, [conversationScroll.key, conversationScroll.pinnedToBottom, conversationScroll.top, messages, pane]);
 
   const proposalIsReady = proposal?.status === "ready";
   const proposalIsCurrent = proposalIsReady
@@ -223,12 +136,13 @@ export function RightDock({
   // 백엔드가 여러 겹으로 지키는 계약이라 그대로 둔다. 문제는 그다음이었다 --
   // 죽은 카드와 단추만 남고, 창작자가 그걸 눈치채고 눌러야 대화가 이어졌다.
   //
-  // 이 도크가 그려졌다는 것은 창작자가 지금 그것을 보고 있다는 뜻이다. 닫혀 있으면
-  // 아무 일도 하지 않는다 -- 다시 묻는 것은 로컬 모델을 한 번 돌리는 일이라,
-  // 안 보는 화면 때문에 시간을 쓸 이유가 없다.
-  //
-  // 같은 편집본에서는 한 번만 묻는다. 두 번 물으면 답은 같고 시간만 쓴다.
-  const askedForRevision = useRef<number | null>(null);
+  // **낡으면 자동으로 다시 묻는 효과는 이제 여기 없다.** 이 도크는 도크와
+  // 무관하게 열리는 `YujinPanel`과 달리 오른쪽 도크가 닫히면 통째로
+  // 마운트 해제된다 -- 자동 재요청 효과를 여기 두면 도크가 닫혀 있을 때는
+  // 안 도는데, 그게 "안 보는 화면이면 안 돈다"는 원래 의도와 맞았다.
+  // 다만 이제 유진 대화는 도크 밖에서도 열 수 있어서, 그 효과는
+  // `YujinPanel`로 옮겨 도크 상태와 무관하게 한 번만 돌게 했다. 여기
+  // "추천" 탭은 낡음을 보여 주고 **수동** 다시 추천받기 단추만 그대로 둔다.
   const proposalIsOutOfDate = Boolean(
     proposal && proposal.baseSessionRevision !== proposal.currentRevision,
   );
@@ -277,29 +191,6 @@ export function RightDock({
     { id: "caption", label: "자막", target: inspectorTargets.find((target) => target.kind === "caption") },
     { id: "overlay", label: "화면 요소", target: inspectorTargets.find((target) => target.kind === "overlay") },
   ] as const;
-  const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
-  const showConversationStarters = messages.length === 0
-    && !proposal
-    && state === "idle"
-    && runState.kind === "idle";
-  const chooseConversationStarter = (starter: { label: string }) => {
-    onDraftChange(starter.label);
-    composerContainerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
-  };
-  const submit = () => { if (canSend) void onSendMessage?.(draft.trim()); };
-  const runStatusAnnouncement = runState.kind === "complete"
-    ? "유진 답변을 받았어요."
-    : runState.kind === "unavailable"
-    ? `${runState.message} 수동 편집을 계속할 수 있어요.`
-    : null;
-  useEffect(() => {
-    if (!proposalIsOutOfDate || !onRefreshProposal) return;
-    if (state === "analysis_running" || state === "applying") return;
-    const revision = proposal?.currentRevision ?? null;
-    if (revision === null || askedForRevision.current === revision) return;
-    askedForRevision.current = revision;
-    void onRefreshProposal();
-  }, [onRefreshProposal, proposal?.currentRevision, proposalIsOutOfDate, state]);
 
   const recommendationCandidates = proposal?.candidates.filter((candidate) => !candidate.readOnlyFinding) ?? [];
   const readOnlyFindings = proposal?.candidates.filter((candidate) => candidate.readOnlyFinding) ?? [];
@@ -358,121 +249,6 @@ export function RightDock({
           ttsCandidateScopeKey={ttsCandidateScopeKey}
         /> : null}
       </div>
-    </section> : null}
-    {pane === "yujin" ? <section aria-label="유진" className="vb-editor-workbench__summary">
-      <h2>유진</h2>
-      {runStatusAnnouncement ? <p role="status" aria-live="polite" aria-atomic="true" aria-label="유진 대화 상태" className="sr-only">{runStatusAnnouncement}</p> : null}
-      {runState.kind === "complete" && runState.syncWarning
-        ? <p aria-label="대화 저장 상태" className="vb-editor-right-dock__sync-warning">{runState.syncWarning}</p>
-        : null}
-      {(runState.kind === "streaming" || runState.kind === "unavailable") && runState.cancelWarning
-        ? <p role="status" className="vb-editor-right-dock__sync-warning">{runState.cancelWarning}</p>
-        : null}
-      {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : proposalIsOutOfDate ? staleProposalMessage : "유진의 답을 받지 못했어요."}</p>{proposal && onRefreshProposal ? <Button type="button" onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}{onManualEdit ? <Button type="button" onClick={onManualEdit}>유진 없이 계속 편집</Button> : null}</div> : null}
-      {startFailure ? <p role="alert" className="vb-editor-right-dock__sync-warning">{startFailure}</p> : null}
-      {state === "idle" && !proposal && onStart ? <Button type="button" onClick={() => void onStart()}>유진에게 추천받기</Button> : null}
-      <div
-        ref={historyRef}
-        role="log"
-        aria-label="유진 대화"
-        aria-busy={runState.kind === "streaming"}
-        className="vb-editor-right-dock__history"
-        tabIndex={0}
-        onScroll={(event) => {
-          const history = event.currentTarget;
-          onConversationScrollChange?.({
-            key: conversationScroll.key,
-            top: history.scrollTop,
-            pinnedToBottom: history.scrollHeight - history.clientHeight - history.scrollTop <= 4,
-          });
-        }}
-      >
-        {messages.length
-          ? messages.map((message) => <article key={message.id}>
-            <p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p>
-            {/* 유진이 써 준 대본에는 단추가 없었다. 받아도 **손으로 복사해서
-                입력칸에 도로 붙여넣어야** 쓸 수 있었다(2026-08-20 owner 실측).
-                복사·붙여넣기 수고만 없앤다 -- 이 단추도 아래 붙여넣기 단추와
-                똑같이 대본을 만들어 두고 **확정 화면으로 보낼 뿐**이다.
-                확정을 사람이 한다는 게이트는 그대로다
-                (`decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md`). */}
-            {onUseDraftAsScript && message.role === "assistant" && looksLikeScript(message.text)
-              ? <Button type="button" aria-label={scriptButtonLabel(message.text)} onClick={() => void onUseDraftAsScript(message.text)}>{SCRIPT_BUTTON_TEXT}</Button>
-              : null}
-          </article>)
-          : null}
-        {/* **캡컷 EditPilot의 완료 체크리스트**(`capcut-observed` 기록 §6,
-            owner 지시 2026-08-22: "유진 대화창에 완료된 작업목록은 만들자").
-            자유 대화 다음에 이어 붙인다 -- 적용은 늘 대화보다 나중에 일어나므로
-            시간 순서와 맞는다. 목록 밖 새 필드를 따로 만들지 않고, 이미 있는
-            같은 `history` 스크롤 안에 둔다. */}
-        {completions.length
-          ? completions.map((completion) => <article key={completion.id} className="vb-editor-right-dock__completion" role="status" aria-label={`모든 작업 완료 ${completion.items.length}/${completion.items.length}`}>
-            <p><strong>모든 작업 완료</strong> {completion.items.length}/{completion.items.length}</p>
-            <ul>{completion.items.map((item, index) => <li key={`${completion.id}-${index}`}>{item.sceneLabel ? `${item.sceneLabel} · ` : ""}{item.label}</li>)}</ul>
-          </article>)
-          : null}
-        {!messages.length && !completions.length
-          ? <>
-            <p>유진 대화는 아직 시작하지 않았어요.</p>
-            {showConversationStarters ? <YujinStarters
-              // The original fixed starters were available before a segment
-              // was selected; keep that entry point while the registry grows
-              // context-aware alternatives.
-              context={{ surface: "edit", selection: selectedSegment ? "segment" : "none" }}
-              disabled={composerDisabled}
-              onSelect={chooseConversationStarter}
-            /> : null}
-          </>
-          : null}
-      </div>
-      <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
-      <div ref={composerContainerRef}>
-        <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
-      </div>
-      <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
-      {onCreateEditingProposal && messages.some((message) => message.role === "assistant")
-        ? <Button type="button" disabled={editingProposalCreating || Boolean(editingProposal)} onClick={() => void onCreateEditingProposal()}>
-          {editingProposalCreating ? "편집안 만드는 중" : "이 대화로 편집안 만들기"}
-        </Button>
-        : null}
-      {editingProposal ? <><Button type="button" variant="outline" onClick={() => setEditingProposalOpen(true)}>편집안 보기</Button><p role="status">{editingProposal.summary}</p>
-        <Dialog open={editingProposalOpen} onOpenChange={setEditingProposalOpen}>
-          <DialogContent className="vb-dialog-content">
-            <DialogHeader><DialogTitle>편집안</DialogTitle><DialogDescription>아직 적용되지 않았어요. 내용을 확인한 뒤 직접 적용해 주세요.</DialogDescription></DialogHeader>
-            <p>{editingProposal.summary}</p>
-            <ul aria-label="바뀌는 항목">{editingProposal.operationSummaries.map((summary, index) => <li key={`${index}:${summary}`}>{summary}</li>)}</ul>
-            {editingProposal.followUpQuestions.length ? <div aria-label="이어서 물어보기">{editingProposal.followUpQuestions.map((question) => <Button key={question} type="button" variant="outline" onClick={() => onDraftChange(question)}>{question}</Button>)}</div> : null}
-            {editingProposal.error ? <p role="alert">{editingProposal.error}</p> : null}
-            {/* 후보 결과 영상. **저장된 편집본이 아니다** -- 아직 적용하지 않은
-                결과를 그대로 본다. 낡았거나 만들지 못했으면 영상 자리를 비우고
-                무엇을 하면 되는지만 말한다. */}
-            {editingProposalPreview.kind === "working" ? <p role="status">{editingProposalPreview.message}</p> : null}
-            {editingProposalPreview.kind === "unavailable" ? <p role="alert">{editingProposalPreview.message}</p> : null}
-            {editingProposalPreview.kind === "ready"
-              ? <video aria-label="편집안 미리보기" controls preload="metadata" src={editingProposalPreview.videoUrl} />
-              : null}
-            <DialogFooter>
-              {onPreviewEditingProposal ? <Button type="button" variant="outline" disabled={editingProposal.isApplying || editingProposalPreview.kind === "working"} onClick={() => void onPreviewEditingProposal()}>이 구간 미리보기</Button> : null}
-              {onApplyEditingProposal ? <Button type="button" disabled={editingProposal.isApplying} onClick={() => void onApplyEditingProposal()}>{editingProposal.isApplying ? "편집안 적용 중" : "이 편집안 적용"}</Button> : null}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog></> : null}
-      {/* 긴 글을 붙여 넣었으면 그것을 대본으로 받는 길을 준다(owner 2026-08-19).
-          예전에는 대본이 `/plan`의 문답형 인터뷰로만 들어와서, 이미 써 둔 대본을
-          가진 사람은 질문에 답해 가며 다시 만들어야 했다.
-          짧은 한 줄에는 띄우지 않는다 -- 그건 요청이지 대본이 아니다. */}
-      {onUseDraftAsScript && looksLikeScript(draft)
-        ? <Button type="button" onClick={() => void onUseDraftAsScript(draft)}>이 글을 대본으로 쓰기</Button>
-        : null}
-      {onCancelRun
-        ? <Button type="button" onClick={() => void onCancelRun()}>답변 중단</Button>
-        : null}
-      {runState.kind === "unavailable" && runState.retryable && onRetryRun
-        ? <Button type="button" onClick={() => void onRetryRun()}>같은 요청 다시 보내기</Button>
-        : null}
-
-      {memory ? <YujinMemoryPanel memory={memory} /> : null}
     </section> : null}
 
     {pane === "recommendations" ? <section aria-label="추천" className="vb-editor-workbench__summary">
