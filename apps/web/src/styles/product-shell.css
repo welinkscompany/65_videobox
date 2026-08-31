@@ -148,6 +148,11 @@ body:has(.vb-product-shell) { margin: 0; }
    붙어 읽혔다. 목록 자체 여백과 줄 안 간격만 준다. */
 .vb-output-readiness ol { list-style:none; margin:0; padding:0; display:grid; gap: var(--vb-space-2); }
 .vb-output-readiness li { display:flex; align-items:center; flex-wrap:wrap; gap: var(--vb-space-2); }
+/* `.vb-home-grid`(3열 고정 grid, 홈 카드 3장 전용)를 좁은 카드 안 버튼 두 개
+   줄에도 그대로 썼더니 `minmax(0,1fr)`가 칸을 글자 폭보다 좁게 눌러서
+   버튼 두 개가 서로 겹쳐 보였다("가로·세로 출력 만들기력 상태 다시
+   확인"). 폭에 따라 줄바꿈하는 별도 클래스로 뗀다. */
+.vb-output-actions { display:flex; flex-wrap:wrap; gap: var(--vb-space-3); }
 .vb-media-library article strong { font-weight:650; }
 .vb-media-library audio { width:100%; max-width:28rem; }
 .vb-media-library__grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap: var(--vb-space-3); min-width:0; }

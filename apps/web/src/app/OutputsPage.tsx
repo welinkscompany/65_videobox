@@ -952,7 +952,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
               /> {variantLabel(option.kind)}
             </label>
           ))}
-          <div className="vb-home-grid">
+          <div className="vb-output-actions">
             <Button disabled={!currentState?.session || !selectedVariantIds.length || isRenderingVariants} onClick={() => void handleRenderVariants()}>{isRenderingVariants ? "출력 만드는 중" : "가로·세로 출력 만들기"}</Button>
             <Button variant="outline" disabled={!variantItems.length} onClick={() => void handleRefreshVariants()}>출력 상태 다시 확인</Button>
           </div>
@@ -1057,6 +1057,6 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         </CardContent>
       </Card>
     </div>
-    <div className="vb-home-grid"><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></div>
+    <div className="vb-output-actions"><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></div>
   </section>;
 }
