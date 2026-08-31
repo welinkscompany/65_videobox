@@ -105,6 +105,18 @@
   --breakpoint-lg: 64rem;
   --breakpoint-xl: 80rem;
   --breakpoint-2xl: 96rem;
+
+  /* 2026-08-30에 확인한 훨씬 큰 구멍의 원인. `tailwindcss/utilities`만
+     불러오면 `tailwindcss/theme.css`의 `--spacing: 0.25rem`이 안 딸려
+     온다 -- 이 한 값이 `size-*`·`h-*`·`w-*`·`gap-*`·`p-*`·`m-*` 같은 번호
+     척도 유틸리티 전부의 계산식(`calc(var(--spacing) * N)`)에 쓰인다.
+     값이 없으면 컴파일러가 이 유틸리티들을 아예 만들지 않는다 -- 계산이
+     틀리는 게 아니라 클래스 자체가 컴파일된 CSS에 없었다(실측: 이 줄
+     추가 전 91.96KB, 추가 후 102.26KB). 편집기 툴바·첫 화면 카탈로그에
+     이미 있는 `svg { width:1rem; height:1rem }` 같은 개별 우회는 이제
+     같은 값(`size-4`=1rem)이라 안 건드려도 충돌하지 않는다. Tailwind
+     자신의 기본값(`node_modules/tailwindcss/theme.css`)과 값을 맞췄다. */
+  --spacing: 0.25rem;
 }
 
 @theme inline {
