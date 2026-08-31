@@ -579,7 +579,7 @@ describe("EditorWorkbench", () => {
     } as const;
     const rendered = render(<EditorWorkbench director={director} view={routeA} />);
     openDetailDock();
-    fireEvent.click(screen.getByRole("tab", { name: "추천" }));
+    openYujin();
 
     fireEvent.click(screen.getByRole("button", { name: "A-01 미리 보기" }));
     await waitFor(() => expect(

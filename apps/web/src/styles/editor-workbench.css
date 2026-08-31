@@ -80,6 +80,24 @@
 }
 .vb-yujin-panel__header { display: flex; align-items: center; justify-content: space-between; }
 .vb-yujin-panel__header h2 { margin: 0; font-size: var(--vb-text-md); }
+/* 추천 카드가 대화 로그 안으로 들어오면서(2026-08-30, owner: "캡컷도
+   화면공간이 필요해서 버튼들을 엄청 작게 만들었어") 좁은 패널(20rem)
+   폭에 맞게 카드를 압축한다 -- 필드는 그대로 두고 글자 크기·여백만
+   줄인다. `<dl>`을 표로 안 벌리고 한 줄씩 쌓는 것도 좁은 폭 때문이다. */
+.vb-yujin-panel__candidates { display: grid; gap: var(--vb-space-2); }
+.vb-yujin-panel__candidate {
+  display: grid;
+  gap: var(--vb-space-1);
+  padding: var(--vb-space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--vb-radius-sm);
+  font-size: var(--vb-text-xs);
+}
+.vb-yujin-panel__candidate p { margin: 0; color: var(--vb-muted); }
+.vb-yujin-panel__candidate dl { display: grid; gap: 0 var(--vb-space-2); grid-template-columns: auto 1fr; margin: 0; }
+.vb-yujin-panel__candidate dt { color: var(--vb-faint); }
+.vb-yujin-panel__candidate dd { margin: 0; }
+.vb-yujin-panel__proposal-meta p { margin: 0; font-size: var(--vb-text-xs); color: var(--vb-muted); }
 .vb-yujin-starters { display: grid; gap: var(--vb-space-1); padding: var(--vb-space-1) 0; }
 .vb-yujin-starters h3 { margin: 0; font-size: var(--vb-text-sm); }
 .vb-yujin-starters > span { color: var(--muted-foreground); font-size: var(--vb-text-xs); }

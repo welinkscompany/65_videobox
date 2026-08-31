@@ -635,7 +635,7 @@ function EditorWorkbenchInstance({
       <div className="vb-editor-workbench__panes" role="tablist" aria-label="왼쪽 패널">
         {editorAssetPanes.map((item) => <Button key={item.pane} ref={item.pane === leftPane ? leftTriggerRef : undefined} type="button" variant={leftShowing && leftPane === item.pane ? "default" : "outline"} size="sm" role="tab" aria-selected={leftShowing && leftPane === item.pane} onClick={() => openLeftPane(item.pane)}>{item.label}</Button>)}
       </div>
-      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성과 추천" aria-pressed={rightShowing} onClick={() => openRightPane()}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
+      <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성" aria-pressed={rightShowing} onClick={() => openRightPane()}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
       {/* **내보내기를 편집기 안에서 연다(owner 지시 2026-08-27).**
           > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
 
@@ -752,7 +752,10 @@ function EditorWorkbenchInstance({
     </Dialog>
     {/* 캡컷 EditPilot처럼 도크와 무관하게 화면 구석에 뜬다(owner 지시
         2026-08-30, `docs/reference/capcut-observed-2026-08-22.ko.md` §7).
-        속성/추천 도크가 닫혀 있어도 열 수 있다. */}
+        속성 도크가 닫혀 있어도 열 수 있다. 추천 후보도 2026-08-30 후속
+        지시로 이 패널의 대화 로그 안으로 들어왔다(owner: "캡컷도
+        화면공간이 필요해서 버튼들을 엄청 작게 만들었어") -- `RightDock`은
+        더 이상 추천을 모른다. */}
     <YujinPanel
       open={yujinOpen}
       onOpenChange={setYujinOpen}
@@ -763,6 +766,10 @@ function EditorWorkbenchInstance({
       completions={rightDirector?.completions}
       proposal={rightDirector?.proposal}
       runState={rightDirector?.runState}
+      selectedCandidateIds={rightDirector?.selectedCandidateIds}
+      onSelectedCandidateIdsChange={rightDirector?.onSelectedCandidateIdsChange}
+      onApplyProposal={rightDirector?.onApplyProposal}
+      onPreviewCandidate={rightDirector?.onPreviewCandidate}
       conversationScroll={rightDirector?.conversationScroll}
       onConversationScrollChange={rightDirector?.onConversationScrollChange}
       memory={rightDirector?.memory}

@@ -68,13 +68,6 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, director,
   const selectedSessionSegment = selectedSessionSegmentIndex >= 0 ? session?.segments[selectedSessionSegmentIndex] ?? null : null;
   return <RightDock
     projectId={view.projectId}
-    onApplyProposal={director?.onApplyProposal}
-    onPreviewCandidate={director?.onPreviewCandidate}
-    onRefreshProposal={director?.onRefreshProposal}
-    onSelectedCandidateIdsChange={director?.onSelectedCandidateIdsChange}
-    proposal={director?.proposal}
-    selectedCandidateIds={director?.selectedCandidateIds}
-    state={director?.state}
     inspectorDisabled={isSavingCaption}
     loadApprovedTtsCandidates={loadApprovedTtsCandidates}
     onInspectorAction={onInspectorAction}

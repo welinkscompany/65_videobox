@@ -993,8 +993,9 @@ describe("AppRouter URL ownership", () => {
     fireEvent.click(screen.getByRole("button", { name: "유진" }));
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("tab", { name: "추천" }));
-    expect(screen.getByText("아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.")).toBeVisible();
+    // 추천 후보는 2026-08-30 후속으로 이 같은 유진 패널 안에 산다 --
+    // 별도 탭이 없다. 아직 대화도 추천도 없는 첫 상태를 확인한다.
+    expect(screen.getByText("유진 대화는 아직 시작하지 않았어요.")).toBeVisible();
     expect(loadManifest).toHaveBeenCalledTimes(1);
     expect(loadSession).toHaveBeenCalledTimes(1);
     expect(loadSession).toHaveBeenCalledWith("project_a", "editing_session_draft_1");

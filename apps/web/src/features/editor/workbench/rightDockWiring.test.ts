@@ -21,9 +21,12 @@ describe("right dock wiring", () => {
     const dockProps = read("./RightDock.tsx");
     const adapter = read("./editorWorkbenchReadOnlyAdapters.tsx");
 
-    // RightDock이 props 타입에서 받겠다고 선언한 `on*` 손잡이들
+    // RightDock이 props 타입에서 받겠다고 선언한 `on*` 손잡이들.
+    // 2026-08-30 후속으로 유진 대화·추천이 `YujinPanel`로 완전히 빠지면서
+    // RightDock은 속성 하나만 남았다 -- 손잡이 수가 확 줄어든 게 맞는
+    // 상태다. 여기서는 정규식이 조용히 0개를 잡는 사고만 막는다.
     const declared = [...dockProps.matchAll(/^\s{2}(on[A-Z]\w*)\??:/gm)].map((match) => match[1]);
-    expect(declared.length).toBeGreaterThan(3);
+    expect(declared.length).toBeGreaterThan(0);
 
     const missing = declared.filter((handler) => !adapter.includes(handler));
     expect(missing, `어댑터가 넘기지 않는 손잡이: ${missing.join(", ")}`).toEqual([]);
