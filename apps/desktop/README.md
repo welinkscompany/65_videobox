@@ -58,12 +58,44 @@ npm run tauri build  # 배포용 실행 파일
   CTA 버튼·아이콘 단추 스타일까지)이 native 창 안에 그대로 뜨는 것을
   스크린샷으로 확인.
 
+## clean 빌드에서 Smart App Control 재현 확인 (2026-08-31)
+
+**재현됐다.** `target/`(478.9MB)을 통째로 지우고 `npm run tauri build`를
+처음부터 다시 돌렸더니, 이번엔 `zmij v1.0.23`의 build script에서 같은
+차단이 다시 나왔다:
+
+```
+error: failed to run custom build command for `zmij v1.0.23`
+Caused by:
+  could not execute process `...\target\release\build\zmij-1bd5108013727698\build-script-build` (never executed)
+Caused by:
+  애플리케이션 제어 정책에서 이 파일을 차단했습니다. (os error 4551)
+```
+
+**결론: "저번엔 안 막혔다"는 결과는 우연이었다.** 2026-08-30의 재시도가
+안 막힌 건 이전 빌드에서 이미 서명 검사를 통과한 캐시 바이너리를 그대로
+썼기 때문이지, 차단 정책 자체가 풀린 게 아니었다. **clean 빌드 = 매번
+새로 컴파일되는 서명 안 된 `build-script-build.exe` = 매번 다시 막힐 수
+있다.** 이번엔 `zmij` 크레이트였지만, 어떤 크레이트의 build script가
+걸리느냐는 컴파일 순서에 따라 달라질 뿐 근본 원인은 하나다.
+
+**이건 코드로 못 고친다.** Windows Smart App Control은 OS 보안 정책이고,
+이 세션은 시스템/보안 설정을 바꿀 권한이 없다(`CLAUDE.md`가 스스로
+그렇게 정해 뒀다). 실제 선택지는 owner 몫이다:
+
+- **매번 예외 처리**: 막힐 때마다 Windows 보안 알림에서 "허용" — 확실하지만
+  clean 빌드·의존성 갱신마다 반복해야 한다.
+  (참고: Smart App Control 자체 UI에는 "차단 로그에서 개별 예외 추가"
+  기능이 없다 — 최초 실행이 차단됐을 때 뜨는 Windows 보안 알림에서
+  그 순간 허용하는 것만 가능하다. 알림을 놓치면 다시 빌드를 돌려야 한다.)
+- **코드 서명 인증서 구매**: `build-script-build.exe`를 포함해 빌드
+  산출물에 서명하면 근본적으로 막히지 않는다 — 비용 발생, owner 결정 필요.
+- **개발 머신에서 Smart App Control 평가 모드 해제**: 가능은 하지만 보안
+  기능을 끄는 것이라 owner가 직접 판단·실행해야 한다(Windows 설정 앱,
+  이 세션이 대신 하지 않는다).
+
 ## 남은 것
 
-- **clean 빌드에서 Smart App Control 재현 여부는 아직 확인 안 됨.** 지금
-  검증은 캐시가 남아 있는 상태의 재시도였다 — `target/` 전체를 지우고
-  처음부터 다시 빌드했을 때도 안 막히는지가 이 결함이 실제로 해결됐다고
-  말할 수 있는 다음 확인 지점이다.
 - **아이콘은 임시다.** `icon-source.png`는 자리표시용 — 실제 VideoBox
   로고가 정해지면 owner 확인 후 교체한다(팔레트·비주얼 방향 변경에
   준하는 승인 절차, `CLAUDE.md` §6).

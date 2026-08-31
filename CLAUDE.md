@@ -64,8 +64,9 @@
   벤치마킹. 없는 기능 버튼은 안 만든다.
 - `2026-08-30-installed-desktop-shell-tauri.ko.md` — **설치형(Tauri) 착수
   승인.** 아래 두 문서의 "설치형 보류"를 뒤집는다. 빌드·설치·실행 검증
-  완료(`apps/desktop/README.md`) — 다만 clean 빌드에서도 Smart App
-  Control이 안 막는지는 아직 확인 안 됨, 아이콘은 임시.
+  완료(`apps/desktop/README.md`) — **clean 빌드에서는 Windows Smart App
+  Control이 다시 막는 것을 2026-08-31에 확인**(OS 보안 정책이라 코드로
+  못 고침, owner 판단 필요), 아이콘은 임시.
 - `2026-08-29-ai-video-naming-and-packaging-followups.ko.md` — AI 영상 생성은
   **로컬 비디오 모델**(방향만, 구현 미착수). "미디어"는 **전체 메뉴(공용
   라이브러리)만 "자료실"로** — 단계·도크 탭은 그대로.
