@@ -167,6 +167,7 @@ export function TimelineReviewSections({
               <p>{`${segment.start_sec}초–${segment.end_sec}초`}</p>
               <a
                 className="vb-action-link"
+                aria-label={`${segment.text || segment.segment_id} 편집하기`}
                 href={editorSegmentHref(state.projectId, state.session.session_id, segment.segment_id)}
                 onClick={(event) => {
                   if (
@@ -185,7 +186,7 @@ export function TimelineReviewSections({
                   });
                 }}
               >
-                {`${segment.text || segment.segment_id} 편집하기`}
+                편집하기
               </a>
             </li>
           ))}</ul>

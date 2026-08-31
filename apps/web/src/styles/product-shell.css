@@ -143,6 +143,11 @@ body:has(.vb-product-shell) { margin: 0; }
 .vb-outputs h1, .vb-creation-interview h1, .vb-media-library h2, .vb-project-archive h2 { margin: 0; font-size: clamp(var(--vb-text-xl),2.4vw,var(--vb-text-2xl)); letter-spacing:-.03em; }
 .vb-outputs p, .vb-creation-interview p, .vb-media-library > p, .vb-project-archive p { margin: 0; color:var(--vb-muted); line-height:1.55; }
 .vb-outputs section, .vb-outputs article, .vb-creation-interview section, .vb-media-library article, .vb-project-archive article { border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); padding: var(--vb-space-4); display:grid; gap: var(--vb-space-2); }
+/* `.vb-output-readiness`의 `<ol>`이 스타일 없이 그대로 있어서 각 줄의
+   `<strong>편집본</strong><span>준비 필요</span>`가 "편집본준비 필요"처럼
+   붙어 읽혔다. 목록 자체 여백과 줄 안 간격만 준다. */
+.vb-output-readiness ol { list-style:none; margin:0; padding:0; display:grid; gap: var(--vb-space-2); }
+.vb-output-readiness li { display:flex; align-items:center; flex-wrap:wrap; gap: var(--vb-space-2); }
 .vb-media-library article strong { font-weight:650; }
 .vb-media-library audio { width:100%; max-width:28rem; }
 .vb-media-library__grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap: var(--vb-space-3); min-width:0; }
