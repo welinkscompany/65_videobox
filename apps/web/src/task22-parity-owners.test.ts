@@ -145,8 +145,8 @@ const nativeControlAllowlist = {
     reason: "The outputs surface owns the explicit variant selection controls before a render request is submitted, and the read-only share-link field it shows after creating one (select-to-copy, not a form input).",
   },
   "features/library/LibraryPreviewPane.tsx": {
-    controls: ["button:library-restore", "button:library-trash"],
-    reason: "The library preview pane owns the explicit restore and trash lifecycle actions.",
+    controls: ["button:library-permanent-delete", "button:library-permanent-delete-confirm", "button:library-restore", "button:library-trash"],
+    reason: "The library preview pane owns the explicit restore, trash, and two-stage permanent-delete lifecycle actions for a trashed asset.",
   },
   "features/media/SceneImageStudio.tsx": {
     controls: ["input:scene-video-make-gif"],

@@ -94,6 +94,45 @@ describe("장면 넘기기 고르기", () => {
     });
   });
 
+  it("'바로 넘기기'일 때는 길이 칸 자체가 없다", () => {
+    // 길이는 전환이 있을 때만 뜻이 있다. 없는데 칸을 보여 주면 고를 게 늘어난
+    // 것처럼 보인다(implementation-plan.ko.md §4.1.2 "화면에서 전환 길이
+    // 조절" 항목, 2026-08-31 owner 지시로 추가).
+    renderScene(middleScene);
+    expect(screen.queryByLabelText("전환 길이(초)")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("넘기는 방법"), { target: { value: "wipeleft" } });
+    expect(screen.getByLabelText("전환 길이(초)")).toBeInTheDocument();
+  });
+
+  it("길이 칸에서 직접 고친 값이 저장된다", () => {
+    const onAction = renderScene({ ...middleScene, transitionIn: { type: "fade", durationSec: 0.5 } });
+
+    fireEvent.change(screen.getByLabelText("전환 길이(초)"), { target: { value: "1.4" } });
+    fireEvent.click(screen.getByRole("button", { name: "넘기기 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "set-transition",
+      segmentId: "scene-2",
+      transition: { type: "fade", durationSec: 1.4 },
+    });
+  });
+
+  it("길이는 백엔드와 같은 0.1~2.0초 범위로 잘린다", () => {
+    // `transitions.py`의 `TRANSITION_DURATION_RANGE`와 같은 경계다 -- 화면이
+    // 그 밖의 값을 만들면 저장 요청이 422로 거절된다.
+    const onAction = renderScene({ ...middleScene, transitionIn: { type: "fade", durationSec: 0.5 } });
+
+    fireEvent.change(screen.getByLabelText("전환 길이(초)"), { target: { value: "9.9" } });
+    fireEvent.click(screen.getByRole("button", { name: "넘기기 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "set-transition",
+      segmentId: "scene-2",
+      transition: { type: "fade", durationSec: 2.0 },
+    });
+  });
+
   it("다른 장면을 고르면 앞 장면에서 고르던 값이 남지 않는다", () => {
     const rendered = render(
       <InspectorControls onAction={vi.fn()} selectedSegment={{ ...middleScene, transitionIn: { type: "fade", durationSec: 0.5 } }} target={null} />,

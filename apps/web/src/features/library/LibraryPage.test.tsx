@@ -247,6 +247,23 @@ describe("LibraryPage", () => {
     await waitFor(() => expect(api.restoreLibraryAsset).toHaveBeenCalledWith("user_asset_1"));
   });
 
+  it("permanently deletes a trashed asset only after a second confirm", async () => {
+    // 되돌릴 수 없는 동작이라 프로젝트 영구 삭제와 같은 2단계 확인을 거친다
+    // (`app/AppRouter.tsx`의 `deleteConfirm`). 백엔드는 이미 있었는데
+    // (`permanentDeleteLibraryAsset`) 이 화면에 부르는 단추가 없었다.
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [asset({ lifecycle: "trashed" })], total: 1 });
+    const permanentDelete = vi.spyOn(api, "permanentDeleteLibraryAsset").mockResolvedValue(undefined);
+    render(<LibraryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /휴지통/ }));
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByRole("button", { name: "walk.mp4 영구 삭제" }));
+
+    expect(permanentDelete).not.toHaveBeenCalled();
+    const confirmButton = await screen.findByRole("button", { name: /영구 삭제 · 한 번 더 확인할게요/ });
+    fireEvent.click(confirmButton);
+    await waitFor(() => expect(permanentDelete).toHaveBeenCalledWith("user_asset_1"));
+  });
+
   it("offers a footage-organizer entry for the selected video, and none for audio", async () => {
     render(<LibraryPage />);
     await screen.findAllByText("walk.mp4");

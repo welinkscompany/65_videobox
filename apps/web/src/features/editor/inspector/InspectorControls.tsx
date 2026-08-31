@@ -13,6 +13,7 @@ import type { EditorCaptionStyle, EditorControls } from "../editorViewModel";
 import {
   DEFAULT_SCENE_TRANSITION_DURATION_SEC,
   SCENE_TRANSITION_CHOICES,
+  SCENE_TRANSITION_DURATION_RANGE_SEC,
   SCENE_TRANSITION_NONE,
 } from "./sceneTransitions";
 import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type InspectorTarget, type ShapeOverlayValue } from "./inspectorRegistry";
@@ -164,6 +165,9 @@ export function InspectorControls({
   const [transition, setTransition] = useState<string>(
     () => selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE,
   );
+  const [transitionDurationSec, setTransitionDurationSec] = useState(
+    () => selectedSegment?.transitionIn?.durationSec ?? DEFAULT_SCENE_TRANSITION_DURATION_SEC,
+  );
   const [fadeInSec, setFadeInSec] = useState(0);
   const [fadeOutSec, setFadeOutSec] = useState(0);
   const [inSec, setInSec] = useState(0);
@@ -227,7 +231,8 @@ export function InspectorControls({
   // 장면에서 고르던 값이 남아, 저장하지도 않은 전환이 걸린 것처럼 보인다.
   useEffect(() => {
     setTransition(selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE);
-  }, [selectedSegment?.transitionIn?.type, selectedSegment?.segmentId]);
+    setTransitionDurationSec(selectedSegment?.transitionIn?.durationSec ?? DEFAULT_SCENE_TRANSITION_DURATION_SEC);
+  }, [selectedSegment?.transitionIn?.type, selectedSegment?.transitionIn?.durationSec, selectedSegment?.segmentId]);
 
   useEffect(() => {
     if (target?.kind === "media") {
@@ -385,6 +390,25 @@ export function InspectorControls({
                   ))}
                 </NativeSelect>
               </label>
+              {/* 바로 넘기기를 고르면 길이 자체가 의미 없다 -- 그때는 숨긴다.
+                  전환은 앞 장면의 남은 원본을 빌려 쓰므로 길수록 빌릴 것이
+                  모자랄 수 있다(`sceneTransitions.ts`의 범위 설명 참고). */}
+              {transition !== SCENE_TRANSITION_NONE ? (
+                <label>
+                  전환 길이(초)
+                  <Input
+                    disabled={disabled}
+                    min={SCENE_TRANSITION_DURATION_RANGE_SEC[0]}
+                    max={SCENE_TRANSITION_DURATION_RANGE_SEC[1]}
+                    step="0.1"
+                    type="number"
+                    value={transitionDurationSec}
+                    onChange={(event) => setTransitionDurationSec(
+                      numberValue(event.target.value, transitionDurationSec),
+                    )}
+                  />
+                </label>
+              ) : null}
               <Button
                 disabled={disabled}
                 onClick={() => emit({
@@ -392,7 +416,10 @@ export function InspectorControls({
                   segmentId: selectedSegment.segmentId,
                   transition: transition === SCENE_TRANSITION_NONE ? null : {
                     type: transition,
-                    durationSec: selectedSegment.transitionIn?.durationSec ?? DEFAULT_SCENE_TRANSITION_DURATION_SEC,
+                    durationSec: Math.min(
+                      SCENE_TRANSITION_DURATION_RANGE_SEC[1],
+                      Math.max(SCENE_TRANSITION_DURATION_RANGE_SEC[0], transitionDurationSec),
+                    ),
                   },
                 })}
                 type="button"

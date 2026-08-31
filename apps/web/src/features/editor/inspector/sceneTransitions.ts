@@ -31,6 +31,11 @@ export const SCENE_TRANSITION_NONE = "none";
 
 export const DEFAULT_SCENE_TRANSITION_DURATION_SEC = 0.5;
 
+/** 백엔드 `transitions.py`의 `TRANSITION_DURATION_RANGE`와 같은 경계다.
+ *  전환은 앞 장면의 남은 원본을 빌려 쓰므로, 길수록 빌릴 것이 모자라
+ *  마지막 프레임이 멎는다 — 화면에서 이 경계 밖 값을 만들 수 없게 막는다. */
+export const SCENE_TRANSITION_DURATION_RANGE_SEC = [0.1, 2.0] as const;
+
 export function sceneTransitionLabel(value: string | null | undefined): string {
   if (!value || value === SCENE_TRANSITION_NONE) return "바로 넘기기";
   return SCENE_TRANSITION_CHOICES.find((choice) => choice.value === value)?.label ?? "바로 넘기기";
