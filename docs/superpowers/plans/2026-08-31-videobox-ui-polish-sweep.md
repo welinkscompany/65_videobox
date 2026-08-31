@@ -67,9 +67,17 @@ comm -23 used.txt styled.txt
    옮기고 보이는 텍스트는 "편집하기"만 남겼다(접근성 이름은 그대로라
    테스트 안 깨짐). 커밋 `c3d03511`.
 
+6. **완성본 화면의 버튼 두 개가 서로 겹침** — `OutputsPage.tsx`. 홈 카드
+   3장 전용 3열 grid(`vb-home-grid`, `minmax(0,1fr)`)를 좁은 카드 안
+   버튼 두 개 줄에도 그대로 재사용해서, 칸이 버튼 글자 폭보다 좁아져
+   "가로·세로 출력 만들기"와 "출력 상태 다시 확인"이 겹쳐 보였다("가로
+   ·세로 출력 만들기력 상태 다시 확인"으로 읽힘). `my-project`(완성본
+   14개)에서 실제로 봤다. 전용 flex-wrap 클래스(`vb-output-actions`)로
+   뗐다. 커밋 `68a77c6f`.
+
 각 건 관련 vitest 스위트 전부 통과 확인(스타일 30 + 인스펙터 77 + 라이브러리/
-미디어/촬영본/에디터자산 178 + 검토 22). 1·4·5는 컨테이너 재빌드 후 실제
-브라우저에서도 재확인했다.
+미디어/촬영본/에디터자산 178 + 검토 22 + 출력 91). 1·4·5·6은 컨테이너
+재빌드 후 실제 브라우저에서도 재확인했다.
 
 ## 확인 중 아니라고 판정한 것 (오탐)
 
@@ -80,8 +88,16 @@ comm -23 used.txt styled.txt
   두 번 보이는 것 — 중복처럼 보이지만 하나는 섹션 heading, 하나는
   textarea의 접근성 label이라 기능상 문제는 아니다. 시각적으로는 약간
   거슬리지만 우선순위 낮음(아래 후보 목록에 남겨 둠).
+- `vb-project-title-suggest`/`__list` (제목 추천 대화상자) — 실제로
+  열어서 "유진에게 제목 추천받기"를 눌러 확인. 추천 5개가 pill 버튼으로
+  깔끔하게 줄바꿈됐다. CSS가 없어도 Button의 `inline-flex` 기본값만으로
+  충분했다. 오탐.
+- `vb-final-verdict`, `vb-final-format` (완성본 평가·포맷 저장 영역,
+  `OutputsPage.tsx`) — `my-project`(완성본 14개)에서 실제로 열어서 확인.
+  shadcn `Card`/`CardContent`의 기본 Tailwind 간격만으로 이미 깔끔했다.
+  오탐.
 
-## 위 스크립트로 나온 나머지 후보 (35개 중 확인한 5개 제외 30개)
+## 위 스크립트로 나온 나머지 후보 (35개 중 확인한 8개 제외 27개)
 
 기계적으로 걸러진 "쓰는데 스타일이 없는" 클래스 목록이다. **클래스가
 없다고 전부 버그는 아니다** — 부모 규칙이 자식 전체를 이미 처리하거나
@@ -92,8 +108,6 @@ comm -23 used.txt styled.txt
 우선순위 추정(코드만 보고 판단, 미확인):
 
 **먼저 볼 것 — 반복되는 목록/여러 항목이라 font-list와 같은 패턴일 위험**
-- `vb-project-title-suggest`, `vb-project-title-suggest__list`
-  (`ProjectTitleDialog.tsx`) — 제목 추천 목록
 - `vb-footage-source-row`, `vb-footage-selection-count`,
   `vb-footage-sequence__preview-status` (`FootageSourceList.tsx`,
   `FootageOrganizerPage.tsx`) — 촬영본 정리 화면. 실제 자산으로
@@ -101,9 +115,6 @@ comm -23 used.txt styled.txt
 - `vb-inbox-import__sequence-list` (`ImportFromFootageInbox.tsx`) —
   `vb-inbox-import__list`와 같이 쓰이므로 그쪽 스타일을 상속받을
   가능성 있음, 확인 필요
-- `vb-final-format`, `vb-final-verdict` (`OutputsPage.tsx`) — 완성본이
-  실제로 있는 프로젝트(`my-project`)에서 열어야 보이는 영역, 오늘
-  스크린샷엔 다른 데이터라 못 봄
 - `vb-catalog-archive-toggle`, `vb-catalog-card__rename`
   (`AppRouter.tsx`, 프로젝트 목록 카드) — 버튼 단독이라 위험 낮음
 
