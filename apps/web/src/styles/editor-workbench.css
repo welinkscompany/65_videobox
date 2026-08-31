@@ -380,3 +380,19 @@
    넘칠 수 있으니 접히게 둔다. 색은 Button의 기본/외곽선 변형을 그대로 쓴다 --
    승인된 팔레트 밖의 값을 여기서 새로 만들지 않는다. */
 .vb-inspector__presets { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); margin-top: calc(var(--vb-space-1) * -1); }
+
+/* 글꼴 목록이 스타일 없이 그대로 펼쳐져 있어 항목 하나당 세 줄(이름·고르기·
+   즐겨찾기)씩 쌓이고, 실측 1,350px까지 늘어나 오른쪽 패널 전체 스크롤의
+   절반 넘게를 차지했다. `__history`와 같은 방식(14rem 안에 가두고 자체
+   스크롤)으로 묶고, 항목을 한 줄로 눕힌다. 색·팔레트는 건드리지 않는다. */
+.vb-caption-fonts ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vb-space-1);
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: var(--vb-space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--vb-radius-sm);
+}
+.vb-caption-fonts li { display: flex; align-items: center; flex-wrap: wrap; gap: var(--vb-space-1); }
