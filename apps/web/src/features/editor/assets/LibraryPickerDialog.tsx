@@ -75,7 +75,7 @@ export function LibraryPickerDialog({
       }
       setAssets(nextAssets);
     } catch {
-      if (currentEpoch === epoch.current) setError("라이브러리를 불러오지 못했어요.");
+      if (currentEpoch === epoch.current) setError("자료실을 불러오지 못했어요.");
     } finally { if (currentEpoch === epoch.current) setLoading(false); }
   }, [activeFilter, search]);
 

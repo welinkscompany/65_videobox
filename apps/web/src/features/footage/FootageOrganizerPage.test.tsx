@@ -101,7 +101,7 @@ describe("FootageOrganizerPage", () => {
     await screen.findByTestId("footage-workspace");
     fireEvent.click(screen.getByRole("button", { name: /clip\.mp4/ }));
 
-    const entry = await screen.findByRole("link", { name: "clip.mp4 라이브러리에서 보기" });
+    const entry = await screen.findByRole("link", { name: "clip.mp4 자료실에서 보기" });
     expect(entry).toHaveAttribute("href", "/library?library_asset_id=asset-1");
   });
 
@@ -117,7 +117,7 @@ describe("FootageOrganizerPage", () => {
     expect(screen.getByRole("heading", { name: "short-b.mp4" })).toBeInTheDocument();
 
     const sourceList = screen.getByTestId("footage-source-list");
-    const entry = within(sourceList).getByRole("link", { name: "clip.mp4 라이브러리에서 보기" });
+    const entry = within(sourceList).getByRole("link", { name: "clip.mp4 자료실에서 보기" });
     expect(entry).toHaveAttribute("href", "/library?library_asset_id=asset-1");
 
     fireEvent.click(entry);

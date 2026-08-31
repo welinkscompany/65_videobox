@@ -87,7 +87,7 @@ export function LibraryPage() {
       const requested = requestedId ? nextAssets.find((item) => item.library_asset_id === requestedId) : null;
       setSelected((previous) => requested ?? (previous ? nextAssets.find((item) => item.library_asset_id === previous.library_asset_id) ?? null : nextAssets[0] ?? null));
     } catch {
-      if (currentEpoch === epoch.current) setError("라이브러리를 불러오지 못했어요.");
+      if (currentEpoch === epoch.current) setError("자료실을 불러오지 못했어요.");
     } finally { if (currentEpoch === epoch.current) setLoading(false); }
   }, [activeFilter, search]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), search ? 180 : 0); return () => window.clearTimeout(timer); }, [load, search]);

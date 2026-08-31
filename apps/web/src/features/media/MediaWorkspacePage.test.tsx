@@ -108,7 +108,7 @@ describe("MediaWorkspacePage", () => {
 
     expect(await screen.findByRole("heading", { name: "이 프로젝트의 미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "음악" }));
-    expect(await screen.findByRole("heading", { name: "라이브러리에서 찾기" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "자료실에서 찾기" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "가져오기" }));
     expect(await screen.findByRole("heading", { name: "새 파일 추가" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "촬영본 가져오기" })).toBeVisible();
@@ -119,7 +119,7 @@ describe("MediaWorkspacePage", () => {
     // 파일을 다시 올려야 했다. 음악·효과음은 처음부터 이 경로가 있었다.
     render(<MediaWorkspacePage projectId="project-a" />);
 
-    expect(await screen.findByRole("heading", { name: "라이브러리 영상" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "자료실 영상" })).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "walk.mp4 프로젝트에 추가" }));
 
     await waitFor(() => expect(api.materializeLibraryAsset).toHaveBeenCalledWith("user:broll:walk", "project-a"));
@@ -130,12 +130,12 @@ describe("MediaWorkspacePage", () => {
   it("says 영상 on the video tab and keeps 음악과 효과음 wording on the audio tabs", async () => {
     render(<MediaWorkspacePage projectId="project-a" />);
 
-    expect(await screen.findByRole("heading", { name: "라이브러리 영상" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "자료실 영상" })).toBeVisible();
     expect(screen.queryByText("음악과 효과음")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "음악" }));
     expect(await screen.findByText("음악과 효과음")).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "라이브러리 영상" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "자료실 영상" })).not.toBeInTheDocument();
   });
 
   it("removes a project copy through its reference without trashing the global library asset", async () => {

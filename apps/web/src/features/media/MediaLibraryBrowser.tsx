@@ -21,8 +21,8 @@ function displayFilename(item: BrowserAsset, fallback: string) {
 export function libraryEmptyReason(installState: MediaLibraryInstallState | null, loadFailed: boolean, fixedFilter?: Exclude<Filter, "all">): string {
   // 영상은 꾸러미로 들여놓는 것이 아니라 owner가 직접 넣은 것만 있다.
   if (fixedFilter === "broll") {
-    if (loadFailed) return "라이브러리 영상을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.";
-    return "아직 라이브러리에 영상이 없어요. 미디어에서 영상을 먼저 추가해 주세요.";
+    if (loadFailed) return "자료실 영상을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.";
+    return "아직 자료실에 영상이 없어요. 미디어에서 영상을 먼저 추가해 주세요.";
   }
   if (installState?.status === "not_installed") return "음악과 효과음 꾸러미를 아직 들여놓지 않았어요. 꾸러미를 넣으면 여기에서 바로 들어볼 수 있어요.";
   if (loadFailed || !installState) return "음악과 효과음을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.";
@@ -33,15 +33,15 @@ export function libraryEmptyReason(installState: MediaLibraryInstallState | null
 function browserCopy(fixedFilter?: Exclude<Filter, "all">) {
   if (fixedFilter === "broll") {
     return {
-      heading: "라이브러리 영상",
-      lead: "라이브러리에서 찾기 · 미리 보고 프로젝트에 추가하세요.",
-      loading: "라이브러리 영상을 불러오고 있어요.",
-      pagination: "라이브러리 영상 페이지 이동",
+      heading: "자료실 영상",
+      lead: "자료실에서 찾기 · 미리 보고 프로젝트에 추가하세요.",
+      loading: "자료실 영상을 불러오고 있어요.",
+      pagination: "자료실 영상 페이지 이동",
     };
   }
   return {
     heading: "음악과 효과음",
-    lead: "라이브러리에서 찾기 · 미리 듣고 프로젝트에 추가하세요.",
+    lead: "자료실에서 찾기 · 미리 듣고 프로젝트에 추가하세요.",
     loading: "음악과 효과음을 불러오고 있어요.",
     pagination: "음악과 효과음 페이지 이동",
   };

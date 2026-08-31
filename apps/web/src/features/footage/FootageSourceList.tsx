@@ -15,7 +15,7 @@ export function FootageSourceList({ assets, selectedIds, onSelect }: Props) {
             <span className="vb-footage-source__thumb">{asset.thumbnail_url ? <img src={asset.thumbnail_url} alt="" /> : <span aria-hidden="true">▶</span>}</span>
             <span className="vb-footage-source__copy"><strong>{filename}</strong><small>{formatTime(duration)} · 원본 유지</small></span>
           </Button>
-          <a className="vb-action-link" aria-label={`${filename} 라이브러리에서 보기`} href={`/library?library_asset_id=${encodeURIComponent(asset.library_asset_id)}`}>라이브러리에서 보기</a>
+          <a className="vb-action-link" aria-label={`${filename} 자료실에서 보기`} href={`/library?library_asset_id=${encodeURIComponent(asset.library_asset_id)}`}>자료실에서 보기</a>
         </div>;
       })}
     </div>}

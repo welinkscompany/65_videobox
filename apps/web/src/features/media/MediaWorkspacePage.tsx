@@ -234,7 +234,7 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
     const usage = await api.getLibraryAssetUsage(sourceLibraryAssetId);
     const reference = usage.locations.find((location) => location.project_id === projectId && location.materialized_asset_id === asset.asset_id);
     if (!reference?.reference_id) {
-      setMessage("프로젝트 참조 위치를 찾지 못했어요. 라이브러리에서 상태를 확인해 주세요.");
+      setMessage("프로젝트 참조 위치를 찾지 못했어요. 자료실에서 상태를 확인해 주세요.");
       return;
     }
     await api.removeLibraryReference(sourceLibraryAssetId, reference.reference_id);
@@ -381,8 +381,8 @@ export function MediaWorkspacePage({ projectId }: { projectId: string }) {
         </section> : null}
       </div> : null}
 
-      {activeTab === "music" ? <div id="media-panel-music" role="tabpanel" aria-label="음악"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="music" /></div> : null}
-      {activeTab === "sfx" ? <div id="media-panel-sfx" role="tabpanel" aria-label="효과음"><h2>라이브러리에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="sfx" /></div> : null}
+      {activeTab === "music" ? <div id="media-panel-music" role="tabpanel" aria-label="음악"><h2>자료실에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="music" /></div> : null}
+      {activeTab === "sfx" ? <div id="media-panel-sfx" role="tabpanel" aria-label="효과음"><h2>자료실에서 찾기</h2><MediaLibraryBrowser projectId={projectId} fixedFilter="sfx" /></div> : null}
       {activeTab === "narration" ? <div id="media-panel-narration" role="tabpanel" aria-label="내레이션"><VoiceMaterialPanel projectId={projectId} /></div> : null}
 
       {activeTab === "videos" && currentState ? (
