@@ -710,6 +710,8 @@ function EditorWorkbenchInstance({
         // 내레이션·자막 어느 쪽에도 안 걸린 장면에서도 유진 쪽만 "구간 선택함"
         // 으로 착각해 서로 다른 대화 시작 문구를 보여 줬다.
         hasSelectedSegment={selectedNarration !== null}
+        transitionSuggestions={rightDirector?.transitionSuggestions}
+        onApplyTransitionSuggestion={rightDirector?.onApplyTransitionSuggestion}
       />
     </div>
     <section className="vb-editor-variants" aria-label="출력 변형" data-collapsed={variantsCollapsed}>

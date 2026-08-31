@@ -102,6 +102,23 @@
 .vb-yujin-panel__candidate dl { display: grid; gap: 0 var(--vb-space-2); grid-template-columns: auto 1fr; margin: 0; }
 .vb-yujin-panel__candidate dt { color: var(--vb-faint); }
 .vb-yujin-panel__candidate dd { margin: 0; }
+/* B-roll/음악 추천 카드(`.vb-yujin-panel__candidate`)와 같은 밀도로 맞춘다 --
+   전환 추천은 필드가 더 적어서(이유·전환 이름·버튼) grid 대신 flex로 한 줄에
+   배치한다. */
+.vb-yujin-panel__transition-suggestions { display: grid; gap: var(--vb-space-2); margin: var(--vb-space-2) 0; }
+.vb-yujin-panel__transition-suggestions h2 { margin: 0; font-size: var(--vb-text-sm); }
+.vb-yujin-panel__transition-suggestions article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vb-space-2);
+  padding: var(--vb-space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--vb-radius-sm);
+  font-size: var(--vb-text-xs);
+}
+.vb-yujin-panel__transition-suggestions article p { margin: 0; }
+.vb-yujin-panel__transition-suggestions article p:first-child { color: var(--vb-muted); }
 .vb-yujin-panel__proposal-meta p { margin: 0; font-size: var(--vb-text-xs); color: var(--vb-muted); }
 .vb-yujin-starters { display: grid; gap: var(--vb-space-1); padding: var(--vb-space-1) 0; }
 .vb-yujin-starters h3 { margin: 0; font-size: var(--vb-text-sm); }

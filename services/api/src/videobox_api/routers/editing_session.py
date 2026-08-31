@@ -149,6 +149,14 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditorPlaybackManifestResponse(**result)
 
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/transition-suggestions")
+    def get_scene_transition_suggestions(project_id: str, session_id: str) -> dict[str, object]:
+        try:
+            suggestions = orchestrator.suggest_scene_transitions(project_id=project_id, session_id=session_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return {"suggestions": suggestions}
+
     @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/fixed-timeline")
     def get_editing_session_fixed_timeline(project_id: str, session_id: str) -> dict[str, object]:
         try:

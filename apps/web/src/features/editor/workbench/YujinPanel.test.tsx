@@ -879,3 +879,48 @@ describe("편집안 미리보기", () => {
     expect(within(dialog).queryByLabelText("편집안 미리보기")).toBeNull();
   });
 });
+
+describe("장면 전환 추천", () => {
+  // 유진이 자산 추천(`RightDockCandidate`)과 별도 경로로 내는 전환 추천이다
+  // (2026-08-31, `docs/handoffs/...` 열한 번째 세션). 대화·자산 추천과 무관하게
+  // 항상 보이는 자리라서 대화 로그나 편집안과 함께 켜져 있지 않아도 렌더된다.
+  it("추천이 없으면 추천 구역 자체를 그리지 않는다", () => {
+    renderOpen({ transitionSuggestions: [] });
+
+    expect(screen.queryByRole("region", { name: "장면 전환 추천" })).toBeNull();
+  });
+
+  it("추천을 이유·전환 이름과 함께 보여 주고, 적용을 누르면 그 추천 하나를 그대로 넘긴다", () => {
+    const onApplyTransitionSuggestion = vi.fn();
+    renderOpen({
+      transitionSuggestions: [
+        { segmentId: "segment-2", type: "fade", durationSec: 0.5, reason: "different_broll_asset" },
+      ],
+      onApplyTransitionSuggestion,
+    });
+
+    const region = screen.getByRole("region", { name: "장면 전환 추천" });
+    expect(region).toHaveTextContent("이 장면부터 다른 영상이 나와요");
+    expect(region).toHaveTextContent("서서히 겹치기");
+
+    fireEvent.click(within(region).getByRole("button", { name: "적용" }));
+
+    expect(onApplyTransitionSuggestion).toHaveBeenCalledWith({
+      segmentId: "segment-2",
+      type: "fade",
+      durationSec: 0.5,
+      reason: "different_broll_asset",
+    });
+  });
+
+  it("적용 콜백이 없으면 버튼 없이 추천 내용만 보여 준다", () => {
+    renderOpen({
+      transitionSuggestions: [
+        { segmentId: "segment-2", type: "fade", durationSec: 0.5, reason: "different_broll_asset" },
+      ],
+    });
+
+    const region = screen.getByRole("region", { name: "장면 전환 추천" });
+    expect(within(region).queryByRole("button", { name: "적용" })).toBeNull();
+  });
+});

@@ -21,6 +21,20 @@ export type RightDockCandidate = Readonly<{
   readOnlyFinding?: boolean;
 }>;
 
+/** 유진의 장면 전환 추천 하나 -- B-roll/음악/효과음 추천(`RightDockCandidate`)과는
+ *  다른, 훨씬 가벼운 별도 경로다(2026-08-31, `docs/handoffs/...` 열한 번째
+ *  세션). `RightDockCandidate`는 `asset_id`가 필수라 자산 없는 전환을
+ *  끼워 넣으려면 그 모델 전체를 흔들어야 했다 -- 대신 이미 있고 이미
+ *  테스트된 `PATCH .../segments/{id}/transition` 경로를 그대로 쓴다. */
+export type RightDockTransitionSuggestion = Readonly<{
+  segmentId: string;
+  type: string;
+  durationSec: number;
+  /** 사람이 읽을 수 있는 이유. 지금은 하나뿐이다 -- 화면 문구는 owner 승인
+   *  규정을 따라야 하므로 코드가 아니라 화면(`YujinPanel.tsx`)이 문장을 짓는다. */
+  reason: "different_broll_asset";
+}>;
+
 export type RightDockProposal = Readonly<{
   proposalId: string;
   status: string;
@@ -164,6 +178,10 @@ export type RightDockDirector = Readonly<{
   startFailure?: string | null;
   onCancelRun?: () => void | Promise<void>;
   onRetryRun?: () => void | Promise<void>;
+  /** 대화·자산 추천과 무관하게 항상 볼 수 있다 -- 계산이 가벼워서 유진이
+   *  실행 중이 아니어도 채운다. */
+  transitionSuggestions?: readonly RightDockTransitionSuggestion[];
+  onApplyTransitionSuggestion?: (suggestion: RightDockTransitionSuggestion) => void | Promise<void>;
 }>;
 import type {
   YujinMemoryCategory,

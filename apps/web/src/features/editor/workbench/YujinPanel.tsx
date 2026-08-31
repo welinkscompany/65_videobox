@@ -6,8 +6,9 @@ import { Input } from "../../../components/ui/input";
 import { Textarea } from "../../../components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { YujinStarters } from "../../yujin/YujinStarters";
-import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockEditingProposalPreview, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
+import type { RightDockCandidate, RightDockCompletionEntry, RightDockConversationScroll, RightDockEditingProposal, RightDockEditingProposalPreview, RightDockMemory, RightDockMessage, RightDockProposal, RightDockTransitionSuggestion, YujinRunState } from "./rightDockTypes";
 import { YujinMemoryPanel } from "./YujinMemoryPanel";
+import { sceneTransitionLabel } from "../inspector/sceneTransitions";
 
 const staleProposalMessage = "편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.";
 
@@ -66,6 +67,15 @@ function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
   }[kind] ?? "미디어";
 }
 
+// 지금은 이유가 하나뿐이지만(`different_broll_asset`), 백엔드가 문장을
+// 짓지 않고 코드만 보내는 이유가 여기 있다 -- 화면 문구는 creator-language
+// 규정을 따라야 한다(`development-fast-path.ko.md` §10.13). 새 이유가
+// 생기면 여기 한 줄만 늘면 된다.
+function transitionSuggestionReasonLabel(reason: string): string {
+  if (reason === "different_broll_asset") return "이 장면부터 다른 영상이 나와요";
+  return "장면이 바뀌는 자리예요";
+}
+
 function controlSummary(controls: Readonly<Record<string, unknown>>) {
   const labels = Object.entries(controls).map(([name, value]) => {
     if (name === "fit") return value === "crop" ? "화면 채우기" : "화면 안에 맞추기";
@@ -121,6 +131,9 @@ export type YujinPanelProps = Readonly<{
   onRetryRun?: () => void | Promise<void>;
   /** 대화 시작 문구가 "이미 고른 장면이 있는지"에 따라 달라진다. */
   hasSelectedSegment?: boolean;
+  /** 대화·자산 추천과 무관한 별도 경로다(`rightDockTypes.ts` 참고). */
+  transitionSuggestions?: readonly RightDockTransitionSuggestion[];
+  onApplyTransitionSuggestion?: (suggestion: RightDockTransitionSuggestion) => void | Promise<void>;
 }>;
 
 export function YujinPanel({
@@ -155,6 +168,8 @@ export function YujinPanel({
   onCancelRun,
   onRetryRun,
   hasSelectedSegment = false,
+  transitionSuggestions = [],
+  onApplyTransitionSuggestion,
 }: YujinPanelProps) {
   const [editingProposalOpen, setEditingProposalOpen] = useState(false);
   const editingProposalPreview: RightDockEditingProposalPreview = editingProposal?.preview ?? { kind: "idle" };
@@ -384,6 +399,18 @@ export function YujinPanel({
           {finding.supportedControls.check === "timeline_gaps"
             ? <p>{`빈 구간 ${String(finding.supportedControls.gap_count ?? 0)}개`}</p>
             : null}
+        </article>)}
+      </section> : null}
+      {transitionSuggestions.length ? <section aria-label="장면 전환 추천" className="vb-yujin-panel__transition-suggestions">
+        <h2>넘기기 추천</h2>
+        {transitionSuggestions.map((suggestion) => <article key={suggestion.segmentId}>
+          <p>{transitionSuggestionReasonLabel(suggestion.reason)}</p>
+          <p>{sceneTransitionLabel(suggestion.type)}</p>
+          {onApplyTransitionSuggestion ? (
+            <Button type="button" onClick={() => void onApplyTransitionSuggestion(suggestion)}>
+              적용
+            </Button>
+          ) : null}
         </article>)}
       </section> : null}
       {!messages.length && !completions.length && !proposal

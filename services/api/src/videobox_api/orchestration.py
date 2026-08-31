@@ -649,6 +649,12 @@ class ApiOrchestrator:
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
 
+    def suggest_scene_transitions(self, *, project_id: str, session_id: str) -> list[dict[str, Any]]:
+        from videobox_core_engine.transitions import suggest_scene_transitions
+
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return suggest_scene_transitions(session.get("segments", []))
+
     def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
         return self.pipeline.get_latest_editing_session(project_id=project_id)
 

@@ -528,6 +528,15 @@ export type EditorMediaControls = {
   in_sec?: number;
   out_sec?: number;
 };
+// 유진의 장면 전환 추천 하나. `reason`은 지금 하나뿐이다(`different_broll_asset`)
+// -- 화면이 문구를 정하고, 백엔드가 값을 지어내지 않는다는 걸 지키려고
+// 코드째로 받는다(다른 문구 규칙과 같다, `development-fast-path.ko.md` §10.13).
+export type SceneTransitionSuggestion = {
+  segment_id: string;
+  type: string;
+  duration_sec: number;
+  reason: "different_broll_asset";
+};
 export type EditorPlaybackManifest = {
   project_id: string;
   session_id: string;
@@ -2289,6 +2298,8 @@ export const api = {
   mediaAnalysisPreview: (projectId: string, assetId: string) => request<{ analysis_id: string; preview: unknown }>(`/api/projects/${projectId}/assets/${assetId}/analysis-preview`),
   getEditorPlaybackManifest: (projectId: string, sessionId: string) =>
     request<EditorPlaybackManifest>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/playback-manifest`),
+  getSceneTransitionSuggestions: (projectId: string, sessionId: string) =>
+    request<{ suggestions: SceneTransitionSuggestion[] }>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/transition-suggestions`),
   startExactPreview: (projectId: string, sessionId: string, payload: { expected_revision: number; start_sec?: number; end_sec?: number }) =>
     request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/exact-preview`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),

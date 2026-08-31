@@ -28,8 +28,10 @@ export type EditorCommandPort = Readonly<{
   undo(): Promise<EditingSession>;
   redo(): Promise<EditingSession>;
   setCutAction(input: { segmentId: string; cutAction: "keep" | "remove" }): Promise<EditingSession>;
-  /** 앞 장면에서 이 장면으로 넘어오는 방법. `null`이면 끈다. */
-  setSceneTransition(input: { segmentId: string; transition: { type: string; durationSec: number } | null }): Promise<EditingSession>;
+  /** 앞 장면에서 이 장면으로 넘어오는 방법. `null`이면 끈다.
+   *  `chosenBy`를 안 주면 서버가 `owner`로 채운다 -- owner가 직접 고르는
+   *  경로는 이 값을 몰라도 되고, 유진 추천을 적용하는 경로만 명시로 넘긴다. */
+  setSceneTransition(input: { segmentId: string; transition: { type: string; durationSec: number; chosenBy?: string } | null }): Promise<EditingSession>;
   splitNarration(input: { segmentId: string; splitSec: number }): Promise<EditingSession>;
   mergeNarration(input: { leftSegmentId: string; rightSegmentId: string }): Promise<EditingSession>;
   setNarrationBounds(input: { segmentId: string; startSec: number; endSec: number }): Promise<EditingSession>;
@@ -106,7 +108,7 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
       sessionId,
       segmentId,
       {
-        transition: transition ? { type: transition.type, duration_sec: transition.durationSec } : null,
+        transition: transition ? { type: transition.type, duration_sec: transition.durationSec, ...(transition.chosenBy ? { chosen_by: transition.chosenBy } : {}) } : null,
         ...revise,
       },
     ),

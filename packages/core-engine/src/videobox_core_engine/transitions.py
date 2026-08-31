@@ -111,3 +111,53 @@ def normalize_transition(transition: object) -> dict[str, Any] | None:
             "transition chosen_by must be one of: " + ", ".join(sorted(TRANSITION_CHOOSERS))
         )
     return {"type": raw_type, "duration_sec": duration_sec, "chosen_by": chosen_by}
+
+
+def suggest_scene_transitions(segments: Any) -> list[dict[str, Any]]:
+    """씬 사이 전환을 유진이 추천한다 -- `implementation-plan.ko.md` §4.1.2가
+    "아직 아닌 것"으로 남겨 뒀던 마지막 항목(owner 지시 2026-08-31, "너가 할 수
+    있는거 먼저 진행해줘").
+
+    **v1은 신호 하나만 본다: 앞 장면과 이 장면에 서로 다른 B-roll 자산이
+    붙어 있는가.** 다르면 진짜 장면이 바뀌는 순간이라 보고 `fade`(가장
+    무난한 겹침)를 추천한다. 둘 중 하나라도 B-roll이 아직 없으면 -- 신호가
+    없으면 -- **추천하지 않는다.** 확신 없이 넘겨짚어 owner가 "유진이 왜
+    이걸 골랐지"라고 묻게 만드는 것보다, 아무 말도 안 하는 쪽이 정직하다.
+
+    **안 보는 것**: 대본 내용·말투·움직임 방향·음악 분위기. 그래서 이건
+    "장면의 뜻을 이해해서 고르는 추천"이 아니라 "자산이 바뀌었으니 부드럽게
+    잇자"는 가장 낮은 단계의 신호다. 방향 있는 전환(`wipeleft`/`wiperight`
+    등)이나 `slideup`/`slidedown`은 화면 속 움직임을 봐야 고를 수 있는데,
+    그 신호가 아직 없어서 이 함수는 절대 추천하지 않는다.
+
+    이미 전환이 걸려 있는 장면은 건너뛴다 -- owner나 이전 추천이 이미 정한
+    것을 조용히 덮어쓰지 않는다.
+    """
+    if not isinstance(segments, (list, tuple)):
+        return []
+    suggestions: list[dict[str, Any]] = []
+    for index in range(1, len(segments)):
+        current = segments[index]
+        previous = segments[index - 1]
+        if not isinstance(current, dict) or not isinstance(previous, dict):
+            continue
+        if current.get("transition_in"):
+            continue
+        segment_id = current.get("segment_id")
+        if not segment_id:
+            continue
+        current_broll = current.get("broll_override")
+        previous_broll = previous.get("broll_override")
+        current_asset_id = current_broll.get("asset_id") if isinstance(current_broll, dict) else None
+        previous_asset_id = previous_broll.get("asset_id") if isinstance(previous_broll, dict) else None
+        if not current_asset_id or not previous_asset_id:
+            continue
+        if current_asset_id == previous_asset_id:
+            continue
+        suggestions.append({
+            "segment_id": segment_id,
+            "type": "fade",
+            "duration_sec": DEFAULT_TRANSITION_DURATION_SEC,
+            "reason": "different_broll_asset",
+        })
+    return suggestions

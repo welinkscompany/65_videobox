@@ -36,6 +36,7 @@ from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer, Tran
 from videobox_core_engine.transitions import (
     TRANSITION_CATALOG,
     normalize_transition,
+    suggest_scene_transitions,
 )
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
@@ -100,6 +101,84 @@ def test_an_unknown_name_never_reaches_ffmpeg() -> None:
 
 def test_the_default_length_is_half_a_second() -> None:
     assert normalize_transition({"type": "fade"})["duration_sec"] == 0.5
+
+
+# ---------------------------------------------------------------------------
+# 유진 추천 (2026-08-31)
+# ---------------------------------------------------------------------------
+
+
+def _segment(segment_id: str, *, broll_asset_id: str | None = None, transition_in: dict | None = None) -> dict:
+    return {
+        "segment_id": segment_id,
+        "broll_override": {"asset_id": broll_asset_id} if broll_asset_id else None,
+        "transition_in": transition_in,
+    }
+
+
+def test_recommends_fade_when_the_broll_asset_actually_changes() -> None:
+    segments = [
+        _segment("seg-1", broll_asset_id="asset-a"),
+        _segment("seg-2", broll_asset_id="asset-b"),
+    ]
+
+    assert suggest_scene_transitions(segments) == [
+        {"segment_id": "seg-2", "type": "fade", "duration_sec": 0.5, "reason": "different_broll_asset"},
+    ]
+
+
+def test_does_not_recommend_across_the_same_continuing_shot() -> None:
+    # 같은 자산이 이어지면 진짜 컷이 아니다 -- 부드럽게 이을 경계 자체가 없다.
+    segments = [
+        _segment("seg-1", broll_asset_id="asset-a"),
+        _segment("seg-2", broll_asset_id="asset-a"),
+    ]
+
+    assert suggest_scene_transitions(segments) == []
+
+
+def test_does_not_recommend_without_a_broll_signal_on_either_side() -> None:
+    # 신호가 없으면(B-roll이 아직 안 붙었으면) 추천하지 않는다 -- 확신 없이
+    # 넘겨짚지 않는다.
+    assert suggest_scene_transitions([_segment("seg-1"), _segment("seg-2", broll_asset_id="asset-b")]) == []
+    assert suggest_scene_transitions([_segment("seg-1", broll_asset_id="asset-a"), _segment("seg-2")]) == []
+    assert suggest_scene_transitions([_segment("seg-1"), _segment("seg-2")]) == []
+
+
+def test_does_not_recommend_when_a_transition_is_already_set() -> None:
+    # owner나 이전 추천이 이미 정한 것을 조용히 덮어쓰지 않는다.
+    segments = [
+        _segment("seg-1", broll_asset_id="asset-a"),
+        _segment("seg-2", broll_asset_id="asset-b", transition_in={"type": "dissolve", "duration_sec": 0.4, "chosen_by": "owner"}),
+    ]
+
+    assert suggest_scene_transitions(segments) == []
+
+
+def test_the_first_segment_is_never_a_recommendation_target() -> None:
+    # 첫 장면에는 넘어올 앞 장면이 없다 -- 화면도 이 규칙을 그대로 지킨다
+    # (`scene-transition-picker.test.tsx`의 "첫 장면에는 넘기기 칸이 아예 없다").
+    assert suggest_scene_transitions([_segment("seg-1", broll_asset_id="asset-a")]) == []
+
+
+def test_recommends_once_per_eligible_boundary_across_several_scenes() -> None:
+    segments = [
+        _segment("seg-1", broll_asset_id="asset-a"),
+        _segment("seg-2", broll_asset_id="asset-a"),  # same shot continues -- no boundary
+        _segment("seg-3", broll_asset_id="asset-b"),  # real cut -- recommend
+        _segment("seg-4", broll_asset_id="asset-b", transition_in={"type": "fade", "duration_sec": 0.5, "chosen_by": "yujin"}),  # already set -- skip
+        _segment("seg-5"),  # no signal -- skip
+        _segment("seg-6", broll_asset_id="asset-c"),  # previous has no signal -- skip
+    ]
+
+    assert [item["segment_id"] for item in suggest_scene_transitions(segments)] == ["seg-3"]
+
+
+def test_ignores_malformed_input_instead_of_raising() -> None:
+    assert suggest_scene_transitions(None) == []
+    assert suggest_scene_transitions([]) == []
+    assert suggest_scene_transitions(["not-a-dict", _segment("seg-1", broll_asset_id="asset-a")]) == []
+    assert suggest_scene_transitions([{"segment_id": "seg-1"}, "not-a-dict"]) == []
 
 
 # ---------------------------------------------------------------------------

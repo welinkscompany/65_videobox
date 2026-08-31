@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
@@ -263,6 +263,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [refreshToken, setRefreshToken] = useState(0);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
+  const [transitionSuggestions, setTransitionSuggestions] = useState<Readonly<{ key: string; items: readonly SceneTransitionSuggestion[] }>>({ key: requestKey, items: [] });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], libraryImageAssets: [], error: null });
   /** 편집기 안에서 미디어를 더하면 목록을 다시 읽는다. 더한 것이 바로 안 보이면
    *  창작자는 실패한 줄 안다(owner 승인 2026-08-27). */
@@ -426,6 +427,24 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     });
     return () => { active = false; };
   }, [projectId, requestKey, sessionId, refreshToken]);
+  useEffect(() => {
+    if (!sessionId) {
+      setTransitionSuggestions({ key: requestKey, items: [] });
+      return;
+    }
+    let active = true;
+    // `session_revision`을 의존값으로 쓴다 -- `refreshToken`은 짧은 영상의
+    // 정확 미리보기가 성공했을 때만 조건부로 올라가서(위 코드 참고), 그것에
+    // 기대면 긴 영상이나 미리보기 실패 뒤에는 방금 적용한 전환이 추천 목록에
+    // 그대로 남는다. 리비전은 성공한 편집마다 예외 없이 바뀐다.
+    void api.getSceneTransitionSuggestions(projectId, sessionId).then((result) => {
+      if (active) setTransitionSuggestions({ key: requestKey, items: result.suggestions });
+    }).catch(() => {
+      // 추천은 거들 뿐이다 -- 못 불러와도 화면은 그대로 쓸 수 있어야 한다.
+      if (active) setTransitionSuggestions({ key: requestKey, items: [] });
+    });
+    return () => { active = false; };
+  }, [projectId, requestKey, sessionId, state.session?.expectedRevision]);
   useEffect(() => {
     const currentView = state.key === requestKey ? state.view : null;
     const currentVariants = variants.key === requestKey ? variants.items : [];
@@ -2018,6 +2037,16 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       : undefined,
     onApplyProposal: applyDirectorProposal,
     onRefreshProposal: activeDirector.proposal ? refreshDirectorProposal : undefined,
+    transitionSuggestions: transitionSuggestions.key === requestKey ? transitionSuggestions.items.map((suggestion) => ({
+      segmentId: suggestion.segment_id,
+      type: suggestion.type,
+      durationSec: suggestion.duration_sec,
+      reason: suggestion.reason,
+    })) : [],
+    onApplyTransitionSuggestion: (suggestion) => commitTimelineMutation((port) => port.setSceneTransition({
+      segmentId: suggestion.segmentId,
+      transition: { type: suggestion.type, durationSec: suggestion.durationSec, chosenBy: "yujin" },
+    })),
     onManualEdit: () => setDirector((current) => current.key === requestKey ? { ...current, state: "idle" } : current),
     // 붙여 넣은 글을 이 프로젝트의 대본으로 받는다(owner 2026-08-19). 대본을
     // 통째로 받는 경로는 이미 있었고(`creation-briefs/upload`) **부르는 자리만
