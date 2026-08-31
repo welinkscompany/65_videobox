@@ -136,8 +136,8 @@ comm -23 used.txt styled.txt
 
 ## 다음에 할 일
 
-1. "낮은 우선순위" 나머지 항목도 시간 되는 대로 한 번씩은 실제로 열어서
-   확인한다(코드만 보고 판정한 것이라 확정 아님).
+1. ~~"낮은 우선순위" 나머지 항목도 시간 되는 대로 한 번씩은 실제로 열어서
+   확인한다~~ — 2026-09-01에 전부 확인 완료. 아래 절 참고.
 2. 이 스캔은 **CSS 존재 여부만** 본다 — 스타일이 있어도 배치가 이상하거나
    (`vb-home-grid`를 좁은 카드에 재사용해 버튼이 겹친 6번 건처럼) 문구가
    겹치는 경우는 못 잡는다. 그런 문제는 계속 실제 화면을 열어서 봐야
@@ -148,3 +148,54 @@ comm -23 used.txt styled.txt
    완성본·검토·프로젝트 목록·제목 대화상자까지 오늘 열어본 화면 기준으로는
    "완전히 엉망"이라기보다 **군데군데 스타일이 빠지거나 이름 정리가
    덜 된 부분**이 있는 상태였다.
+
+## 2026-09-01 — "낮은 우선순위" 19개 전부 확인 완료
+
+owner 지시로 남은 19개 후보를 실제 화면(컨테이너, `http://127.0.0.1:5173`)과
+코드를 대조해 하나씩 판정했다. **1건은 진짜 결함으로 확인해 고쳤고, 18건은
+오탐(CSS 없이도 정상 동작) 확인.**
+
+**실제 결함 1건 (고침)**
+
+- `vb-preview-share` (`AppRouter.tsx`, 공유 링크 공개 페이지) — CSS가
+  전혀 없어서 `<video>`가 원본 해상도(1920×1080) 그대로 그려지고, 뷰포트
+  (1280px)보다 커서 페이지가 가로로 밀렸다. `my-project`의 실제 완성본으로
+  공유 링크를 만들어 직접 열어서 확인(`docScrollWidth` 1928 vs 뷰포트
+  1280). `.vb-preview-stage__media-shell`이 이미 쓰는 것과 같은
+  `object-fit: contain` 방식으로 맞췄다. 컨테이너 재빌드 후 재확인 완료
+  (밀림 없음, 영상이 뷰포트 안에 비율 유지하며 들어감).
+
+**오탐 18건 (코드·실측으로 안전 확인, 수정 안 함)**
+
+- `vb-start-chooser`/`__paths`/`__more` — 프로젝트 홈에서 실측. `hasDraft`
+  분기에 따라 버튼 1개 또는 2개가 정상 폭으로 나옴.
+- `vb-catalog-archive-toggle` — 32×36 아이콘 버튼, 정상.
+- `vb-media-workspace__tabs` — 탭 5개가 겹침·줄바꿈 없이 한 줄.
+- `vb-timeline-scale` — 편집기 타임라인 눈금·트랙 정상 배치.
+- `vb-editor-workbench__panes`, `__stage-panel` — 상단 탭 정상, 미리보기
+  패널은 `react-resizable-panels`가 자체 레이아웃을 준다.
+- `vb-editor-assets__more`, `__pane-tab` — 코드로 확인: `more`는 단일
+  Button(항목이 `FIRST_PAGE`를 넘을 때만 등장), `pane-tab`은
+  `renderPaneTabs={false}`로 편집기에서 의도적으로 안 그려서(위 탭과 중복
+  방지, 2026-08-30 결정) 지금 이 배치에서는 애초에 안 나오는 게 정상.
+- `vb-ui` — 실제로는 CSS가 있다(`ui-system.css:214`). 원래 스캔이 잘못
+  걸렀거나 그 뒤에 추가된 것으로 보임.
+- `vb-app-loading` — 라우트 전환 중 잠깐 뜨는 로딩 문구 한 줄
+  (`<main><p>...</p></main>`). 구조상 줄바꿈·겹침이 날 수 없음.
+- `vb-preview-stage__caption-transcript` — 항상 짝 클래스
+  `vb-preview-stage__visually-hidden`(CSS 있음)과 같이 붙어서 그 클래스가
+  이미 전부 스타일한다.
+- `vb-review-output` — 검토·출력 화면 최상위 wrapper. 실측 1123×1377,
+  내부 카드들은 각자 스타일이 있어 정상 흐름.
+- `vb-media-library__pagination` — 프로젝트 미디어 화면 "음악" 탭(30개,
+  페이지 크기 24)에서 실제로 페이지네이션이 뜨는 것까지 확인. 버튼 두
+  개와 "1/2페이지" 텍스트가 겹치거나 밀리지 않고 한 줄로 읽힘(9px 정도
+  기준선 오차는 있으나 읽기에 지장 없음 — 필요하면 나중에
+  `align-items: center` 한 줄 추가 가능한 수준, 지금은 결함 아님).
+- `vb-add-media` — 편집기 도크의 "파일 추가" 버튼, 단일 Button.
+- `vb-footage-sequence__preview-status` — 실제 가상 묶음을 만들어 보진
+  못했지만(다단계 Yujin 흐름), 코드 확인 결과 `<small role="status">` 안에
+  텍스트 한 줄만 들어가는 구조라 CSS 없이도 깨질 수 없음.
+
+vitest 99파일·1,382건 전부 통과(회귀 없음). 컨테이너
+재빌드(`owner-ready.ps1 -Mode Start -Rebuild`) 후 고친 화면 재확인 완료.
