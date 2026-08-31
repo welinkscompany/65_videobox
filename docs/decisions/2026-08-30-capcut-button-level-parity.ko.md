@@ -272,9 +272,16 @@ interview at the routed create leaf").
 dark` 적용, "+ 새 프로젝트 만들기" → 편집기 직행, 속성/유진/추천 세 탭
 전환. 프런트엔드 전체 시험 1,371개, `tsc -b` 통과.
 
-**여기서는 안 고친 것**: `docker compose build`(no-cache 없이)가 소스가
-바뀐 뒤에도 `COPY apps/web ./` 레이어를 캐시로 재사용해 오래된 프런트엔드
-번들을 서빙한 사고를 이번에도 겪었다(`--no-cache`로 우회). BuildKit
-캐시가 왜 이 레이어의 소스 변경을 못 보는지는 원인을 못 찾았다 — 앞으로
-"재빌드했는데 화면이 그대로다"가 나오면 먼저 의심할 곳이다. 별도
-조사거리로 남겨 둔다.
+**정정(같은 날, 뒤이은 확인)**: 위 문단이 "BuildKit 캐시가 소스 변경을
+못 본다"고 단정한 것은 재현하지 않고 내린 결론이었다. 뒤이어
+`apps/web/src/ui-system.css`에 표식 주석을 붙이고 `docker compose build
+videobox-workspace`(no-cache 없이)와 `owner-ready.ps1`이 실제로 쓰는
+`... build --pull=false videobox-workspace`를 각각 직접 재현했더니
+**두 번 다 `COPY apps/web ./`와 `RUN npm run build`가 캐시 없이 정상
+재실행됐다** — `CACHED`가 안 떴다. 즉 이 세션에서 겪은 "재빌드해도
+화면이 그대로였다"는 실제로는 BuildKit 레이어 캐시 문제가 아니라
+[[videobox-container-rebuild-stale-bundle]]에 이미 적힌 **브라우저 쪽
+번들 캐시**였을 가능성이 크다 — 둘 다 증상("다시 빌드했는데 화면이
+그대로다")이 같아서 헷갈리기 쉽다. `--no-cache`로 우회한 것 자체는
+결과적으로 문제없었지만, 그게 원인을 고쳤다는 뜻은 아니었다. 앞으로 같은
+증상이 나오면 **Docker 캐시보다 브라우저 번들 해시 비교를 먼저** 본다.

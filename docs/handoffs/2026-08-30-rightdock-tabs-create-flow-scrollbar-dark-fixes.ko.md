@@ -93,12 +93,18 @@ owner가 설치된 Tauri 데스크톱 앱을 직접 써 본 뒤 네 가지를 �
 
 ## 감수한 것 / 남은 것
 
-- **Docker BuildKit 캐시 버그 (재확인, 미해결)**: `docker compose build`를
-  `--no-cache` 없이 돌리면 소스가 바뀐 뒤에도 `COPY apps/web ./` 레이어를
-  캐시로 재사용해 옛 프런트엔드 번들을 서빙한다 — 이번 세션에서도 겪었다.
-  `--no-cache`로 우회했지만 원인(왜 이 레이어가 소스 변경을 못 보는지)은
-  못 찾았다. **앞으로 "재빌드했는데 화면이 그대로다"가 나오면 먼저 의심할
-  곳** — 별도 조사거리로 남긴다.
+- **Docker BuildKit 캐시 버그 — 조사했으나 재현 안 됨(같은 세션에서 정정)**:
+  처음엔 `docker compose build`가 `--no-cache` 없이는 `COPY apps/web ./`
+  레이어를 잘못 캐시한다고 보고 `--no-cache`로 우회했다. 뒤이어 실제로
+  재현을 시도했다 — `ui-system.css`에 표식 주석을 붙이고 plain
+  `docker compose build videobox-workspace`와 `owner-ready.ps1`이 쓰는
+  `... build --pull=false videobox-workspace`를 각각 돌렸는데, **둘 다
+  캐시 없이 정상적으로 다시 빌드됐다**(`CACHED` 없음). 원래 증상("재빌드
+  해도 화면이 그대로")은 Docker 레이어 캐시가 아니라 이미 알려진
+  **브라우저 쪽 번들 캐시**([[videobox-container-rebuild-stale-bundle]])였을
+  가능성이 크다. 별도 조사 작업(`task_859f7ea4`)은 취소했다 — 재현이
+  안 되는 것을 계속 조사하는 건 낭비다. 같은 증상이 다시 나오면 Docker
+  캐시보다 브라우저 번들 해시 비교를 먼저 본다.
 - **Smart App Control**: clean Tauri 빌드에서 매 컴파일마다 새로 나오는
   proc-macro DLL을 개별적으로 계속 막는 것을 이전 확인에서 재확인했다.
   owner가 "항목별 예외로 처리하겠다"고 결정한 사안이라 이번엔 추가 조치
