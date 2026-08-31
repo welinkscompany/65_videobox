@@ -546,7 +546,7 @@ function EditorWorkbenchInstance({
     if (layout.mode === "drawer") { openDrawer("right"); return; }
     if (!rightVisible) toggleDock("right");
   };
-  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} director={rightDirector} dock={side} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} onMediaAdded={onMediaAdded} view={view} leftPane={leftPane} onLeftPaneChange={openLeftPane} /></aside>;
+  const dock = (side: "left" | "right") => <aside aria-label={side === "left" ? "미디어" : "세부 정보"} className={`vb-editor-workbench__dock vb-editor-workbench__dock--${side}`}><EditorWorkbenchReadOnlyAdapters assetCards={assetCards} assetPreviewStates={assetPreviewStates} assetTarget={assetTarget} dock={side} isSavingCaption={isSavingTimeline} loadApprovedTtsCandidates={loadApprovedTtsCandidates} onApplyAssetCard={onApplyAssetCard} onApplyImageOverlay={onApplyImageOverlay} onInspectorAction={onInspectorAction} onPreviewAsset={previewAssetCard} onPreviewSource={previewTimelineSource} onRefreshExactPreview={onPreviewRefresh} onSaveCaption={onUpdateCaption} onSeek={seekPlayback} onSelectSegment={selectSegment} onSetSegmentRippleSpeed={onSetSegmentRippleSpeed} onPreviewSelectedRange={onPreviewSelectedRange} partialRegeneration={partialRegeneration} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} session={session} sources={sources} ttsCandidateScopeKey={ttsCandidateScopeKey} onMediaAdded={onMediaAdded} view={view} leftPane={leftPane} onLeftPaneChange={openLeftPane} /></aside>;
   const resize = (side: "left" | "right", delta: number) => setUi((current) => { const key = side === "left" ? "leftSize" : "rightSize"; const value = Math.max(side === "left" ? 220 : 260, current[key] + delta); (side === "left" ? leftPanelRef : rightPanelRef).current?.resize(`${value}px`); return { ...current, [key]: value }; });
   const handleKey = (event: KeyboardEvent<HTMLDivElement>, side: "left" | "right") => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); event.stopPropagation(); resize(side, event.key === "ArrowRight" ? 20 : -20); } };
   const trapDrawerFocus = (event: KeyboardEvent<HTMLDivElement>) => { if (event.key === "Escape") { closeAndRestore(); return; } if (event.key !== "Tab") return; const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]')); if (!focusable.length) { event.preventDefault(); return; } const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } };
@@ -661,6 +661,52 @@ function EditorWorkbenchInstance({
         <ResizablePanel minSize={layout.previewMinPx} className="vb-editor-workbench__stage-panel"><div className="vb-editor-workbench__preview" data-scroll-owner="preview" data-preview-min-width={layout.previewMinPx}>{stage}</div></ResizablePanel>
         {rightVisible && <><ResizableHandle aria-label="오른쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "right")} /><ResizablePanel panelRef={rightPanelRef} defaultSize={`${ui.rightSize}px`} minSize="260px" onResize={(size) => setUi((current) => ({ ...current, rightSize: persistedPanelPixels(size, 260, current.rightSize) }))}>{dock("right")}</ResizablePanel></>}
       </ResizablePanelGroup> : <><div className="vb-editor-workbench__preview" data-scroll-owner="preview" data-preview-min-width="0">{stage}</div>{drawer}</>}
+      {/* 캡컷 EditPilot처럼 도크와 무관하게 화면 구석에 뜬다(owner 지시
+          2026-08-30, `docs/reference/capcut-observed-2026-08-22.ko.md` §7).
+          속성 도크가 닫혀 있어도 열 수 있다. 추천 후보도 2026-08-30 후속
+          지시로 이 패널의 대화 로그 안으로 들어왔다(owner: "캡컷도
+          화면공간이 필요해서 버튼들을 엄청 작게 만들었어") -- `RightDock`은
+          더 이상 추천을 모른다.
+
+          **`__body` 안에 둔다.** 처음엔 `.vb-editor-workbench` 전체 기준으로
+          띄웠는데, 그 전체엔 타임라인 구간까지 포함돼 있어서 넓은 화면에서
+          패널이 타임라인 확대·트랙 잠금 같은 조작 위를 그대로 덮었다(실측
+          2026-08-30: 1920px 폭에서 패널이 타임라인 영역과 275px 겹침).
+          미리보기·도크가 있는 이 줄 기준으로 옮기면 타임라인과 절대 안
+          겹친다. */}
+      <YujinPanel
+        open={yujinOpen}
+        onOpenChange={setYujinOpen}
+        state={rightDirector?.state}
+        draft={rightDirector?.draft ?? ""}
+        onDraftChange={rightDirector?.onDraftChange ?? (() => undefined)}
+        messages={rightDirector?.messages}
+        completions={rightDirector?.completions}
+        proposal={rightDirector?.proposal}
+        runState={rightDirector?.runState}
+        selectedCandidateIds={rightDirector?.selectedCandidateIds}
+        onSelectedCandidateIdsChange={rightDirector?.onSelectedCandidateIdsChange}
+        onApplyProposal={rightDirector?.onApplyProposal}
+        onPreviewCandidate={rightDirector?.onPreviewCandidate}
+        conversationScroll={rightDirector?.conversationScroll}
+        onConversationScrollChange={rightDirector?.onConversationScrollChange}
+        memory={rightDirector?.memory}
+        composerDisabled={rightDirector?.composerDisabled}
+        onSendMessage={rightDirector?.onSendMessage}
+        onCreateEditingProposal={rightDirector?.onCreateEditingProposal}
+        editingProposal={rightDirector?.editingProposal}
+        editingProposalCreating={rightDirector?.editingProposalCreating}
+        onPreviewEditingProposal={rightDirector?.onPreviewEditingProposal}
+        onApplyEditingProposal={rightDirector?.onApplyEditingProposal}
+        onRefreshProposal={rightDirector?.onRefreshProposal}
+        onManualEdit={rightDirector?.onManualEdit}
+        onUseDraftAsScript={rightDirector?.onUseDraftAsScript}
+        onStart={rightDirector?.onStart}
+        startFailure={rightDirector?.startFailure}
+        onCancelRun={rightDirector?.onCancelRun}
+        onRetryRun={rightDirector?.onRetryRun}
+        hasSelectedSegment={selectedSegmentId !== null}
+      />
     </div>
     <section className="vb-editor-variants" aria-label="출력 변형" data-collapsed={variantsCollapsed}>
       <div className="vb-editor-variants__header"><div><h2>가로·세로 비교</h2></div><Button type="button" variant="outline" aria-expanded={!variantsCollapsed} onClick={toggleVariantsCollapsed}>{variantsCollapsed ? "출력 변형 펼치기" : "출력 변형 접기"}</Button></div>
@@ -750,45 +796,6 @@ function EditorWorkbenchInstance({
         /> : null}
       </DialogContent>
     </Dialog>
-    {/* 캡컷 EditPilot처럼 도크와 무관하게 화면 구석에 뜬다(owner 지시
-        2026-08-30, `docs/reference/capcut-observed-2026-08-22.ko.md` §7).
-        속성 도크가 닫혀 있어도 열 수 있다. 추천 후보도 2026-08-30 후속
-        지시로 이 패널의 대화 로그 안으로 들어왔다(owner: "캡컷도
-        화면공간이 필요해서 버튼들을 엄청 작게 만들었어") -- `RightDock`은
-        더 이상 추천을 모른다. */}
-    <YujinPanel
-      open={yujinOpen}
-      onOpenChange={setYujinOpen}
-      state={rightDirector?.state}
-      draft={rightDirector?.draft ?? ""}
-      onDraftChange={rightDirector?.onDraftChange ?? (() => undefined)}
-      messages={rightDirector?.messages}
-      completions={rightDirector?.completions}
-      proposal={rightDirector?.proposal}
-      runState={rightDirector?.runState}
-      selectedCandidateIds={rightDirector?.selectedCandidateIds}
-      onSelectedCandidateIdsChange={rightDirector?.onSelectedCandidateIdsChange}
-      onApplyProposal={rightDirector?.onApplyProposal}
-      onPreviewCandidate={rightDirector?.onPreviewCandidate}
-      conversationScroll={rightDirector?.conversationScroll}
-      onConversationScrollChange={rightDirector?.onConversationScrollChange}
-      memory={rightDirector?.memory}
-      composerDisabled={rightDirector?.composerDisabled}
-      onSendMessage={rightDirector?.onSendMessage}
-      onCreateEditingProposal={rightDirector?.onCreateEditingProposal}
-      editingProposal={rightDirector?.editingProposal}
-      editingProposalCreating={rightDirector?.editingProposalCreating}
-      onPreviewEditingProposal={rightDirector?.onPreviewEditingProposal}
-      onApplyEditingProposal={rightDirector?.onApplyEditingProposal}
-      onRefreshProposal={rightDirector?.onRefreshProposal}
-      onManualEdit={rightDirector?.onManualEdit}
-      onUseDraftAsScript={rightDirector?.onUseDraftAsScript}
-      onStart={rightDirector?.onStart}
-      startFailure={rightDirector?.startFailure}
-      onCancelRun={rightDirector?.onCancelRun}
-      onRetryRun={rightDirector?.onRetryRun}
-      hasSelectedSegment={selectedSegmentId !== null}
-    />
   </section>;
 }
 

@@ -62,11 +62,11 @@ function openDetailDock(): void {
   fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 }
 
-// 편집 항목은 `속성` 탭 안에 있고 그 탭이 기본이다(2026-08-30, 캡컷처럼
-// 고른 것의 속성이 바로 보인다). 다른 탭에 가 있을 때만 넘어간다.
+// 편집 항목은 `세부 정보` 도크 안에 직접 있다 -- 도크 자신이 이제 탭
+// 없는 단일 패널이다(2026-08-30 후속, 추천이 유진 패널로 옮겨가면서
+// `속성` 탭 구분 자체가 없어졌다). 도크가 닫혀 있을 때만 연다.
 function openInspector(): void {
-  if (screen.queryByRole("region", { name: "편집 항목" })) return;
-  fireEvent.click(screen.getByRole("tab", { name: "속성" }));
+  openDetailDock();
 }
 
 // 유진 대화창은 2026-08-30 후속으로 속성/추천 도크에서 완전히 빠져

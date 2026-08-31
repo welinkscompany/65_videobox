@@ -6,10 +6,7 @@
    40vh로 올렸더니 390x844에서 타임라인이 364px를 가져가 **미리보기 영상이 0px가
    됐다** -- 화면에 아무것도 안 보였다. 상한을 다시 계산해 고쳤지만, 다음에 누가
    또 늘려도 미리보기가 통째로 사라지지는 않게 바닥을 남긴다. */
-/* `position: relative`는 아래 `.vb-yujin-panel`이 이 영역 기준으로 뜨기
-   위해 필요하다 -- 도크와 무관하게 화면 구석에 뜨는 캡컷 EditPilot 자리
-   (owner 지시 2026-08-30). 그리드 레이아웃 자체에는 영향 없다. */
-.vb-editor-workbench { position: relative; display: grid; min-width:0; min-height:0; max-height:100%; height:100%; overflow:hidden; grid-template-rows: auto minmax(8rem, 1fr) auto; gap: var(--vb-space-3); color: var(--foreground); }
+.vb-editor-workbench { display: grid; min-width:0; min-height:0; max-height:100%; height:100%; overflow:hidden; grid-template-rows: auto minmax(8rem, 1fr) auto; gap: var(--vb-space-3); color: var(--foreground); }
 .vb-editor-workbench__toolbar, .vb-editor-workbench__timeline, .vb-editor-workbench__dock, .vb-editor-workbench__preview { border: 1px solid var(--border); border-radius: var(--vb-radius-md); background: var(--card); }
 .vb-editor-workbench__toolbar { display: flex; justify-content: space-between; align-items: center; gap: var(--vb-space-3); padding: var(--vb-space-3) var(--vb-space-4); }
 .vb-editor-workbench__toolbar div { display: flex; gap: var(--vb-space-2); }
@@ -27,7 +24,15 @@
   font-weight: 500;
 }
 .vb-editor-workbench__toolbar [data-slot="button"] svg { width: 1rem; height: 1rem; }
-.vb-editor-workbench__body, .vb-editor-workbench__panels { min-width:0; min-height:0; height:100%; max-height:100%; overflow:hidden; }
+/* `position: relative`는 아래 `.vb-yujin-panel`이 이 영역(미리보기·도크
+   줄) 기준으로 뜨기 위해 필요하다 -- 도크와 무관하게 화면 구석에 뜨는
+   캡컷 EditPilot 자리(owner 지시 2026-08-30). **`.vb-editor-workbench`
+   전체가 아니라 여기다**: 처음엔 전체 기준으로 띄웠다가, 그 전체엔
+   타임라인 구간까지 포함돼 있어서 넓은 화면(1920px)에서 패널이 타임라인
+   확대·트랙 잠금 조작 위를 그대로 덮는 걸 실측으로 확인했다(패널과
+   타임라인 영역이 275px 겹침). 이 줄 기준으로 옮기면 타임라인과 절대
+   안 겹친다. */
+.vb-editor-workbench__body, .vb-editor-workbench__panels { position: relative; min-width:0; min-height:0; height:100%; max-height:100%; overflow:hidden; }
 .vb-editor-workbench__dock { min-width:0; min-height:0; max-height:100%; height:100%; overflow: auto; padding: var(--vb-space-3); }
 .vb-editor-workbench__summary { padding-block: var(--vb-space-2); border-bottom: 1px solid var(--border); }
 .vb-editor-workbench__summary textarea { width: 100%; min-height: 5rem; margin-block: var(--vb-space-2); }

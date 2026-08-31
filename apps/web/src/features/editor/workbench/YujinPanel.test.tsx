@@ -137,9 +137,7 @@ describe("YujinPanel", () => {
   it("re-asks by itself when the recommendation goes stale while the creator is looking at it", async () => {
     // 편집본이 바뀌면 추천이 무효가 된다(백엔드가 7군데에서 지키는 계약이라 그건
     // 그대로 둔다). 문제는 그다음이다 -- 죽은 카드와 단추만 남고, 창작자가 그걸
-    // 눈치채고 눌러야 대화가 이어진다. 보고 있을 때는 대신 물어본다. 패널이
-    // 닫혀 있어도(알약 버튼만 보여도) 이 효과는 계속 돈다 -- 도크와 달리
-    // 이 컴포넌트는 늘 마운트돼 있다.
+    // 눈치채고 눌러야 대화가 이어진다. 보고 있을 때는 대신 물어본다.
     const onRefreshProposal = vi.fn();
     renderOpen({
       proposal: { proposalId: "p1", status: "ready", baseSessionRevision: 22, currentRevision: 31, candidates: [] } as never,

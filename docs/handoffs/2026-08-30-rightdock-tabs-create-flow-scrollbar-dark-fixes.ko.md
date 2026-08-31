@@ -194,9 +194,63 @@ owner 반박 직후 착수. 카드를 어디에 넣을지 물어 **대화 로그
 열면 제안 메타·후보 카드·적용 단추가 대화 로그 안에 이어져 보였다.
 카드 폭 272px가 패널 346px 안에 깔끔히 들어가고 가로 넘침은 0건이었다.
 
+## 2026-08-31 다섯 번째 이어진 세션 — 코드리뷰·갭검증·역방향검증
+
+owner 지시: "코드리뷰 갭검증 역방향 동작검증 하고 커밋 푸쉬하자."
+
+**직전 작업(네 번째 세션의 타임라인 겹침 수정)을 고치다가 새 결함을
+냈고, 그걸 코드리뷰 에이전트가 잡았다.** `YujinPanel`을 `.vb-editor-workbench__body`
+안으로 옮기면서 원래 자리(export `Dialog` 뒤)의 옛 블록을 안 지웠다 —
+`grep -n "<YujinPanel"`이 두 줄(677, 805)을 돌려줬다. 라인바이라인 스캔
+에이전트가 잡아냈고, 즉시 옛 블록을 지웠다(`grep`으로 한 곳만 남은 것 확인).
+
+**자기 작업을 결함으로 오진할 뻔한 것도 하나 있었다 — 뒤집었다.** 효율
+관점 리뷰 지적("패널이 접혀 있어도 자동 재추천 효과가 로컬 모델을
+계속 돌린다")을 그대로 적용해 `open` 가드를 넣었더니, 전체 시험에서
+`editor-workbench-route.test.tsx`의 "re-asks by itself..." 시험이 깨졌다.
+그 시험은 `속성` 도크만 열고 유진 패널은 안 열어도 재추천이 스스로
+도는 것을 **의도적으로 고정한** 계약이었다(YujinPanel이 늘 마운트돼
+있는 것 자체가 이 배경 재요청을 지키기 위해서였다). 효율 지적을 그대로
+적용하면 이미 테스트로 굳힌 동작을 깬다는 뜻이라, `open` 가드를
+되돌리고 그걸 검증하던 새 시험도 지웠다.
+
+**코드리뷰 8개 앵글 실행 → `ReportFindings`로 10건 보고.** 그 중 즉시
+고친 것 셋:
+- 위 중복 `<YujinPanel>` 렌더 (correctness, CONFIRMED)
+- 타임라인 겹침 (correctness, CONFIRMED — 1920px에서 겹침 0px로 실측 확인)
+- `editor-workbench.test.tsx`의 `openInspector()`가 이제 없는 `역할="tab", 이름="속성"`을
+  누르려던 것(RightDock이 탭을 없앤 뒤 죽은 채로 통과만 하던 시험) — `openDetailDock()`
+  재사용으로 교체
+- 덤으로 `editorWorkbenchReadOnlyAdapters.tsx`의 죽은 `director` prop 정리(호출부도 같이)
+
+남겨 둔 것(판단이 필요하거나 이번 범위 밖이라 owner에게 넘김):
+- `hasSelectedSegment={selectedSegmentId !== null}`이 속성 도크의 실제
+  "선택 구간 없음" 판정보다 넓다 — 유진 대화 시작 문구만 영향
+- `goToNewProject`에서 `createBlankEditingSession`이 실패하면 프로젝트는
+  이미 만들어졌는데 사용자에겐 "프로젝트를 만들지 못했습니다"로 뜬다
+- Tailwind `--spacing` 수정은 같은 문제의 일부만 고쳤다 — `--text-*`,
+  `--font-weight-*`, `--tracking-*`, `--shadow-xs`/`--shadow-sm`도 같은
+  이유(기본 테마 미포함)로 컴파일 안 되는 게 v4.2.2 컴파일러로 직접
+  확인됨(15개 이상 파일, shadcn/ui 컴포넌트 전체 포함)
+- `mediaKindLabel`의 `broll → "영상"`이 `EditorWorkbench.tsx:805`·
+  `inspectorRegistry.ts:120`의 `broll → "B-roll"`과 어긋남
+- `rightDockTypes.ts`의 `onRetryMessage`/`retryAfterSeconds`는 죽은 필드
+  (이번 세션 전부터 죽어 있었음, 새 회귀 아님)
+- `YujinPanel`이 닫혀 있어도 추천 후보 파생 상태를 매 렌더 계산
+
+**검증**: `tsc -b --force`·전체 vitest(1,372개) 두 번 다 통과(위 두 수정
+전후로). 워크트리 소스를 직접 서빙하는 vite 개발 서버(`localhost:5199`,
+`/api`를 실제 8000 백엔드로 프록시)에서 실제 프로젝트를 열어 실측:
+"유진" 버튼·`.vb-yujin-panel__toggle` 정확히 1개, 1920×1080에서 패널
+bottom(644.97)이 타임라인 top(757.97)보다 위 — 겹침 0px, 1280×800에서도
+겹침 0px. 속성 도크를 닫아도 유진 패널은 그대로 열려 있고, 유진을
+닫으면 알약 버튼 하나로 정확히 접혔다.
+
 ## 다음에 이어갈 사람에게
 
 이 문서가 최신 인계다. `CLAUDE.md` §2의 "최신 세션 인계" 줄을 이 파일로
-옮겨 두었다. 남은 우선순위는 캡컷 새 캡처·실제 로고 두 가지뿐이다
-(Tailwind 결함·Docker 캐시 오진·유진 패널 독립화·추천 후보 통합은 이번
-세션에 전부 닫혔다).
+옮겨 두었다. 남은 것: 위 다섯 번째 세션에서 판단만 하고 안 고친 다섯
+항목(hasSelectedSegment 범위, goToNewProject 오류 문구, Tailwind 테마
+네임스페이스 전체, mediaKindLabel 불일치, 도우미 함수 중복) — 전부
+owner 판단이 필요하거나 별도 슬라이스로 미룬 것이지 놓친 게 아니다.
+그 외엔 캡컷 새 캡처·실제 로고 두 가지가 남아 있다.

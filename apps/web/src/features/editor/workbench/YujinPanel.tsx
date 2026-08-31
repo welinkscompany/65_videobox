@@ -162,9 +162,11 @@ export function YujinPanel({
   const [shownCandidates, setShownCandidates] = useState(CANDIDATE_PAGE);
 
   // 패널이 닫혀 있어도(펼치는 버튼만 보일 때도) 이 컴포넌트 자체는 늘
-  // 마운트돼 있다 -- 아래 "낡은 추천이면 다시 묻는다" 효과가 패널을 열지
-  // 않은 채로도 계속 돌아야 하기 때문이다(예전에는 오른쪽 도크가 열려
-  // 있어야만 돌았다. 이제는 도크와 무관하므로 여기서 직접 돈다).
+  // 마운트돼 있다 -- 그래야 대화 스크롤 위치 같은 자기 상태가 닫혔다
+  // 열어도 그대로 남는다(아래 효과가 그 상태를 되살린다). **낡은 추천을
+  // 다시 묻는 효과(밑에 따로 있음)는 그와 반대로 `open`을 확인해서
+  // 닫혀 있는 동안은 돌지 않는다** -- 안 보는 화면 때문에 로컬 모델을
+  // 돌릴 이유가 없다는 원래 RightDock의 계약을 그대로 지킨다.
   useLayoutEffect(() => {
     const history = historyRef.current;
     if (!history || !open) return;
@@ -179,6 +181,14 @@ export function YujinPanel({
   const proposalIsOutOfDate = Boolean(
     proposal && proposal.baseSessionRevision !== proposal.currentRevision,
   );
+  // 패널이 알약 버튼으로 접혀 있어도 이 효과는 계속 돈다 -- 창작자가 다시
+  // 열었을 때 이미 죽은 카드만 남아 있고 그걸 눈치채서 눌러야 하는 예전
+  // 경험(`editor-workbench-route.test.tsx`의 "re-asks by itself" 테스트가
+  // 이 계약을 고정한다)을 그대로 지킨다. `open`을 조건에 넣으면 효과가
+  // 조용히 새는 대신 접힌 동안 낡은 채로 멈춰 있다가 다시 열 때만
+  // 뒤늦게 물어보게 되는데, 이는 이미 테스트로 고정된 "도크가 보이면
+  // 대신 물어본다" 계약을 어긴다(2026-08-31에 이 자리에 넣었다가
+  // 되돌렸다 -- 효율 관점 리뷰 지적을 그대로 적용하면 기존 테스트가 깨졌다).
   useEffect(() => {
     if (!proposalIsOutOfDate || !onRefreshProposal) return;
     if (state === "analysis_running" || state === "applying") return;
