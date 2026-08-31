@@ -120,8 +120,8 @@ export function LibraryPickerDialog({
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="vb-dialog-content vb-library-picker">
       <DialogHeader>
-        <DialogTitle>라이브러리에서 가져오기</DialogTitle>
-        <DialogDescription>여러 프로젝트가 함께 쓰는 라이브러리에서 골라 이 프로젝트로 가져옵니다.</DialogDescription>
+        <DialogTitle>자료실에서 가져오기</DialogTitle>
+        <DialogDescription>여러 프로젝트가 함께 쓰는 자료실에서 골라 이 프로젝트로 가져옵니다.</DialogDescription>
       </DialogHeader>
       <div className="vb-library-picker__body">
         <LibrarySidebar activeFilter={activeFilter} onFilter={(filter) => { setActiveFilter(filter); setSelected(null); }} counts={counts} />

@@ -29,8 +29,8 @@ export function LibrarySidebar({ activeFilter, onFilter, counts, status }: {
   counts?: Partial<Record<LibraryFilter, number>>;
   status?: LibraryAssetLifecycle | "all";
 }) {
-  return <aside className="vb-library-sidebar" data-testid="library-sidebar" aria-label="라이브러리 필터">
-    <div className="vb-library-sidebar__heading"><h1>미디어</h1><p className="vb-eyebrow">여러 프로젝트가 함께 쓰는 미디어</p></div>
+  return <aside className="vb-library-sidebar" data-testid="library-sidebar" aria-label="자료실 필터">
+    <div className="vb-library-sidebar__heading"><h1>자료실</h1><p className="vb-eyebrow">여러 프로젝트가 함께 쓰는 자료실</p></div>
     <nav aria-label="미디어 분류"><ul className="vb-library-filter-list">{filters.map((item) => (
       <li key={item.key}><button data-native-control="library-filter" type="button" className={activeFilter === item.key ? "is-active" : ""} aria-pressed={activeFilter === item.key} onClick={() => onFilter(item.key)}>{item.label}<span>{counts?.[item.key] ?? ""}</span></button></li>
     ))}</ul></nav>

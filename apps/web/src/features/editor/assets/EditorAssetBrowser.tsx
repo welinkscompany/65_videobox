@@ -177,7 +177,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
             슬라이스 하나만 팝업으로 연다. 팝업 내부는 `/library`가 쓰는
             `LibrarySidebar`·`LibraryResults`를 그대로 재사용한다
             (`LibraryPickerDialog.tsx` 주석 참고). */}
-        <Button type="button" variant="outline" className="vb-editor-assets__library" onClick={() => setLibraryOpen(true)}>라이브러리에서 가져오기</Button>
+        <Button type="button" variant="outline" className="vb-editor-assets__library" onClick={() => setLibraryOpen(true)}>자료실에서 가져오기</Button>
         <LibraryPickerDialog open={libraryOpen} onOpenChange={setLibraryOpen} projectId={projectId} onImported={onMediaAdded} />
         <Dialog open={footageOpen} onOpenChange={setFootageOpen}>
           <DialogContent className="vb-dialog-content">

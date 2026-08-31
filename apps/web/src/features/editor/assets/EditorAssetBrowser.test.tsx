@@ -604,15 +604,15 @@ describe("편집기에서 라이브러리 자산 가져오기", () => {
     const onAdded = vi.fn();
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" onMediaAdded={onAdded} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "라이브러리에서 가져오기" }));
-    const dialog = await screen.findByRole("dialog", { name: "라이브러리에서 가져오기" });
+    fireEvent.click(screen.getByRole("button", { name: "자료실에서 가져오기" }));
+    const dialog = await screen.findByRole("dialog", { name: "자료실에서 가져오기" });
 
     fireEvent.click(await within(dialog).findByRole("article", { name: "해변.mp4" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "가져오기" }));
 
     await waitFor(() => expect(materialize).toHaveBeenCalledWith("lib-9", "project-a"));
     await waitFor(() => expect(onAdded).toHaveBeenCalled());
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "라이브러리에서 가져오기" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "자료실에서 가져오기" })).toBeNull());
   });
 });
 
