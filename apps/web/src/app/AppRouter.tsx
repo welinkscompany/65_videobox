@@ -352,14 +352,23 @@ function ProjectsPage() {
     setQuickStartError(null);
     try {
       const created = await api.createProject({ name: autoProjectName("새 영상") });
-      const session = await api.createBlankEditingSession(created.project_id);
-      await router.options.context.catalog.refresh();
-      await router.invalidate();
-      await navigate({
-        to: "/projects/$projectId/$section",
-        params: { projectId: created.project_id, section: "editor" },
-        search: { session_id: session.session_id },
-      });
+      try {
+        const session = await api.createBlankEditingSession(created.project_id);
+        await router.options.context.catalog.refresh();
+        await router.invalidate();
+        await navigate({
+          to: "/projects/$projectId/$section",
+          params: { projectId: created.project_id, section: "editor" },
+          search: { session_id: session.session_id },
+        });
+      } catch {
+        // 프로젝트 자체는 이미 서버에 만들어졌다 -- `goToNewProject`와 같은
+        // 이유로, "실패"라고 하면 목록에 안 보이는 채로 남은 프로젝트를
+        // 창작자가 또 만들려고 한다. 목록만 새로고침하고 사실대로 말한다.
+        await router.options.context.catalog.refresh();
+        await router.invalidate();
+        setQuickStartError("프로젝트는 만들어졌지만 편집판을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.");
+      }
     } catch {
       setQuickStartError("빈 편집판을 열지 못했어요. 다시 시도해 주세요.");
     } finally {
@@ -373,9 +382,16 @@ function ProjectsPage() {
     setQuickStartError(null);
     try {
       const created = await api.createProject({ name: autoProjectName("내 목소리") });
-      await router.options.context.catalog.refresh();
-      await router.invalidate();
-      await navigate({ to: resolveProjectStage(created.project_id, "assets") });
+      try {
+        await router.options.context.catalog.refresh();
+        await router.invalidate();
+        await navigate({ to: resolveProjectStage(created.project_id, "assets") });
+      } catch {
+        // 위 두 함수와 같은 이유 -- 프로젝트는 이미 만들어졌다.
+        await router.options.context.catalog.refresh();
+        await router.invalidate();
+        setQuickStartError("프로젝트는 만들어졌지만 등록 화면을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.");
+      }
     } catch {
       setQuickStartError("프로젝트를 만들지 못했어요. 다시 시도해 주세요.");
     } finally {
