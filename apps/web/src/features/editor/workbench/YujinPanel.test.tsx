@@ -923,4 +923,20 @@ describe("장면 전환 추천", () => {
     const region = screen.getByRole("region", { name: "장면 전환 추천" });
     expect(within(region).queryByRole("button", { name: "적용" })).toBeNull();
   });
+
+  it("다른 변경을 저장하는 중에는 적용 버튼도 함께 잠근다 -- 다른 적용 버튼들과 같은 규칙", () => {
+    // `onApplyProposal`·`onRefreshProposal` 버튼은 이미 `state === "applying"`일
+    // 때 잠긴다(코드리뷰에서 발견, 2026-08-31) -- 이 버튼만 빠져 있으면 저장
+    // 중에 눌러도 조용히 아무 일도 안 일어나 창작자가 원인을 알 수 없다.
+    renderOpen({
+      state: "applying",
+      transitionSuggestions: [
+        { segmentId: "segment-2", type: "fade", durationSec: 0.5, reason: "different_broll_asset" },
+      ],
+      onApplyTransitionSuggestion: vi.fn(),
+    });
+
+    const region = screen.getByRole("region", { name: "장면 전환 추천" });
+    expect(within(region).getByRole("button", { name: "적용" })).toBeDisabled();
+  });
 });

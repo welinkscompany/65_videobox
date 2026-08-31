@@ -407,7 +407,7 @@ export function YujinPanel({
           <p>{transitionSuggestionReasonLabel(suggestion.reason)}</p>
           <p>{sceneTransitionLabel(suggestion.type)}</p>
           {onApplyTransitionSuggestion ? (
-            <Button type="button" onClick={() => void onApplyTransitionSuggestion(suggestion)}>
+            <Button type="button" disabled={state === "applying"} onClick={() => void onApplyTransitionSuggestion(suggestion)}>
               적용
             </Button>
           ) : null}
