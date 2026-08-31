@@ -818,14 +818,12 @@ describe("AppRouter URL ownership", () => {
     const listProjects = vi.spyOn(api, "listProjects").mockResolvedValue([
       { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" },
     ]);
-    const getProject = vi.spyOn(api, "getProject");
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/missing/editing"] }));
 
     render(<AppRouter router={router} />);
 
     await screen.findByTestId("project-recovery");
     expect(listProjects).toHaveBeenCalledTimes(1);
-    expect(getProject).not.toHaveBeenCalled();
   });
 
   it("does not run output mutations while the canonical output route mounts", async () => {
@@ -922,7 +920,6 @@ describe("AppRouter URL ownership", () => {
   it("redirects the prior editing URL to the canonical workbench without mounting legacy workspace data", async () => {
     const projects = [{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }];
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    const getProject = vi.spyOn(api, "getProject");
     const loadManifest = vi.spyOn(api, "getEditorPlaybackManifest").mockRejectedValue(new Error("not ready"));
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/editing?session_id=legacy-session"] }));
 
@@ -930,7 +927,6 @@ describe("AppRouter URL ownership", () => {
 
     await waitFor(() => expect(router.state.location.href).toBe("/projects/project_a/editor?session_id=legacy-session"));
     await waitFor(() => expect(loadManifest).toHaveBeenCalledWith("project_a", "legacy-session"));
-    expect(getProject).not.toHaveBeenCalled();
   });
 
   it("mounts the canonical editor as a dense read-only workbench without legacy media", async () => {
@@ -938,7 +934,6 @@ describe("AppRouter URL ownership", () => {
     const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
     const atomicSession = { session_id: "editing_session_draft_1", project_id: "project_a", timeline_id: "timeline_draft_1", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment_1", caption_text: "소개", start_sec: 0, end_sec: 2, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] } as never;
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);
-    vi.spyOn(api, "getProject").mockResolvedValue(project);
     vi.spyOn(api, "listJobs").mockResolvedValue([
       { job_id: "timeline_build_job_selected", job_type: "timeline_build", status: "succeeded", input_ref: "ready-selected", output_ref: "timeline_draft_1", error_message: null, started_at: "2026-07-18T00:00:00Z", finished_at: "2026-07-18T00:00:01Z" },
       { job_id: "timeline_build_job_other", job_type: "timeline_build", status: "succeeded", input_ref: "ready-other", output_ref: "timeline_other", error_message: null, started_at: "2026-07-18T00:02:00Z", finished_at: "2026-07-18T00:03:00Z" },
@@ -957,7 +952,6 @@ describe("AppRouter URL ownership", () => {
     const saveMusic = vi.spyOn(api, "updateEditingSessionMusicOverride").mockResolvedValue({ ...atomicSession, session_revision: 2 } as never);
     const previewPartialRegeneration = vi.spyOn(api, "previewPartialRegeneration");
     const runPartialRegeneration = vi.spyOn(api, "runPartialRegeneration");
-    const importBrollBatch = vi.spyOn(api, "importBrollBatch");
     const generateTtsCandidate = vi.spyOn(api, "generateTtsCandidate");
     const listTtsCandidates = vi.spyOn(api, "listTtsCandidates");
     const loadLatest = vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null);
@@ -1002,7 +996,6 @@ describe("AppRouter URL ownership", () => {
     expect(getTimeline).not.toHaveBeenCalled();
     expect(previewPartialRegeneration).not.toHaveBeenCalled();
     expect(runPartialRegeneration).not.toHaveBeenCalled();
-    expect(importBrollBatch).not.toHaveBeenCalled();
     expect(generateTtsCandidate).not.toHaveBeenCalled();
     expect(listTtsCandidates).not.toHaveBeenCalled();
     expect(split).not.toHaveBeenCalled();
@@ -1013,7 +1006,6 @@ describe("AppRouter URL ownership", () => {
     const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
     const session = { session_id: "editing_session_pinned", project_id: "project_a", timeline_id: "timeline_pinned", session_revision: 1, history: [], undo_count: 0, redo_count: 0, segments: [{ segment_id: "segment_pinned", caption_text: "소개", start_sec: 0, end_sec: 2, cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [], music_override: null, sfx_override: null, tts_replacement: null }] } as never;
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);
-    vi.spyOn(api, "getProject").mockResolvedValue(project);
     vi.spyOn(api, "listJobs").mockResolvedValue([{ job_id: "timeline_build_pinned", job_type: "timeline_build", status: "succeeded", input_ref: "ready", output_ref: "timeline_pinned", error_message: null, started_at: "now", finished_at: "now" }] as never);
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
     vi.spyOn(api, "getEditingSession").mockResolvedValue(session);

@@ -357,11 +357,52 @@ owner용 선택지 셋(매번 알림에서 허용·코드 서명 인증서·Smar
 — 다음에 또 "재시도했더니 안 막혔다"가 나오면 clean 빌드로 재검증하기
 전엔 결론 내리지 말라는 뜻으로.
 
+## 2026-08-31 아홉 번째 이어진 세션 — api.ts 화면에서 안 부르는 메서드 24개 정리
+
+owner가 "1번부터 모두다 진행하자"(첫 번째 조사에서 나온 "화면에서 안 부르는
+api.ts 메서드 24개" 항목)로 지시했다. **하나씩 지우기 전에 검증하다가 두 번
+크게 틀릴 뻔했다** — 상세 경위는 새 메모리
+(`videobox-unwired-api-methods-are-not-automatically-dead`)에 남겼다.
+
+- **8개(`createHermesRun`·`openHermesRunEvents`·`cancelHermesRun`·
+  `retryHermesRun`·`applyDirectorProposal`(단수)·`getDirectorProposal`·
+  `listDirectorMessages`·`prepareDirectorMessage`)는 지우지 않았다.** 화면에서
+  안 부르는 건 맞지만, 백엔드 `hermes_run_service.py`가 실제 스트리밍
+  레지스트리를 구현하고 있고 `main.py`가 `hermes_run_service is not None`일
+  때만 그 라우터를 마운트한다 -- Hermes 실제 provider 연결 승인(CLAUDE.md §6)을
+  기다리는 **진짜 인프라**였다.
+- **`getPreview`/`getExport`도 처음엔 지웠다가 되돌렸다.** `task22-parity-owners.test.ts`가
+  이름으로 "호환 판독기로 일부러 남김"을 고정하고 있는 걸 테스트 실패로
+  알아챘다.
+- **나머지 15개는 실제로 지웠다** — 각각 superseding 형제 메서드가 실제
+  화면에서 쓰이고 있는 것을 확인한 뒤(`getProjectWorkspaceSummary`가
+  `getProject`를, `listJobs`가 개별 job 조회를, 업로드형이 `register*`형을
+  대체하는 식): `getProject`, `getFootageProposal`, `listSceneImages`,
+  `listPreviewShares`, `registerNarrationAudio`, `registerScriptDocument`,
+  `importBrollBatch`, `listMediaLibraryFavorites`, `listRecentMediaLibraryAssetIds`,
+  `setMediaLibraryFavorite`, `getLibraryAsset`, `applyFormatTemplate`,
+  `approveReviewRecommendation`. 딸려서 완전히 고아가 된 타입 6개
+  (`PreviewJob`·`ExportJob`·`PreviewArtifact`·`ExportArtifact`·
+  `PreviewShareSummary`·`RegisteredAsset`·`BrollBatchImportRequest`·
+  `BrollBatchImportResponse`, `getPreview`/`getExport`를 되돌리면서 그
+  타입 넷도 같이 되돌림)도 정리했다.
+- **`permanentDeleteLibraryAsset`은 지우지 않고 real gap으로 남겨 뒀다.**
+  휴지통에 간 자산 화면(`LibraryPreviewPane.tsx`)엔 "복원"만 있고 "영구
+  삭제"가 아예 없다 -- 이건 죽은 코드가 아니라 UI가 없는 진짜 기능이다.
+  owner 판단이 필요해 다음 항목으로 남긴다.
+
+**검증**: 지우고 나서 시험 12개가 깨졌다 -- 전부 이제 없는 메서드를
+`vi.spyOn`하던 회귀 시험이었다. `not.toHaveBeenCalled()` 가드는 그대로
+확인이 됐으니 스파이 줄만 지웠고, `importBrollBatch`의 단독 동작 시험은
+메서드와 함께 지웠다. `tsc -b --force`·전체 vitest 1,374개 통과. 워크트리
+dev 서버에서 편집기·자료실 화면을 직접 열어 콘솔 에러 없음과 "휴지통으로
+이동" 버튼이 여전히 동작하는 것 확인.
+
 ## 다음에 이어갈 사람에게
 
 이 문서가 최신 인계다. `CLAUDE.md` §2의 "최신 세션 인계" 줄을 이 파일로
-옮겨 두었다. 다섯·여섯 번째 세션이 남겼던 항목은 전부 닫혔고, 일곱
-번째 세션이 캡컷 새 캡처 중 웹으로 확인 가능한 부분을 채웠고, 여덟
-번째 세션이 Tauri clean 빌드 재검증까지 끝냈다(결과: 여전히 막힘,
-owner 판단 필요). 남은 건 **owner 입력이 있어야 진행되는** 두 가지뿐이다
-— 실제 로고, 캡컷 데스크톱판 캡처(타임라인 위쪽 도구줄).
+옮겨 두었다. 다섯~여덟 번째 세션이 남겼던 항목은 전부 닫혔고, 아홉 번째
+세션이 api.ts 죽은 메서드 정리를 끝냈다. 남은 건 **owner 입력이 있어야
+진행되는** 세 가지다 -- 실제 로고, 캡컷 데스크톱판 캡처(타임라인 위쪽
+도구줄), 그리고 **owner 판단이 필요한** 것 하나 -- 자산 휴지통에 "영구
+삭제" 단추를 만들지 여부(`permanentDeleteLibraryAsset` 백엔드는 이미 있음).

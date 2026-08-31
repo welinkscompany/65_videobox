@@ -39,10 +39,6 @@ describe("MediaLibraryBrowser", () => {
       .mockResolvedValue({ asset_ids: [] } as never);
     const saveProjectFavorite = vi.spyOn(api.api, "setProjectMediaLibraryFavorite")
       .mockResolvedValue({ asset_ids: [asset().library_asset_id] } as never);
-    const listGlobalFavorites = vi.spyOn(api.api, "listMediaLibraryFavorites")
-      .mockResolvedValue({ asset_ids: [] } as never);
-    const saveGlobalFavorite = vi.spyOn(api.api, "setMediaLibraryFavorite")
-      .mockResolvedValue({ asset_ids: [] } as never);
     vi.spyOn(api.api, "listMediaLibraryAssets").mockResolvedValue({ assets: [asset()] } as never);
 
     render(<MediaLibraryBrowser projectId={projectId} />);
@@ -51,8 +47,6 @@ describe("MediaLibraryBrowser", () => {
     await waitFor(() => expect(saveProjectFavorite).toHaveBeenCalledWith(projectId, asset().library_asset_id, true));
     expect(listProjectFavorites).toHaveBeenCalledWith(projectId);
     expect(listProjectRecents).toHaveBeenCalledWith(projectId);
-    expect(listGlobalFavorites).not.toHaveBeenCalled();
-    expect(saveGlobalFavorite).not.toHaveBeenCalled();
   });
 
   it("lets the owner listen to a track before choosing it", async () => {

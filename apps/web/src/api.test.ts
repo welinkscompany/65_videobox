@@ -682,16 +682,6 @@ describe("caption style API conflicts", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(5, "/api/projects/project_001/director/preferences", expect.objectContaining({ method: "PUT", body: JSON.stringify({ pin_asset: ["asset_1"] }) }));
     vi.unstubAllGlobals();
   });
-  it("preserves batch analysis jobs and per-file failures", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      assets: [{ asset_id: "asset_1" }], analysis_jobs: [{ analysis_id: "analysis_1" }], failures: [{ source_path: "bad.mp4", reason: "missing" }],
-    }), { status: 201 })));
-    const batch = await api.importBrollBatch("project_001", { source_paths: ["good.mp4"], tags: [] });
-    expect(batch.analysis_jobs).toEqual([{ analysis_id: "analysis_1" }]);
-    expect(batch.failures).toEqual([{ source_path: "bad.mp4", reason: "missing" }]);
-    vi.unstubAllGlobals();
-  });
-
   it("preserves latest_session from a 409 response for recovery", async () => {
     const latestSession = { session_id: "session_001", session_revision: 4 };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ latest_session: latestSession }), { status: 409 })));

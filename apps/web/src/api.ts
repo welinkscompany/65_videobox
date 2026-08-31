@@ -131,19 +131,6 @@ export type BrollAsset = {
   created_at: string;
 };
 
-export type BrollBatchImportRequest = {
-  source_paths: string[];
-  source_directory?: string;
-  tags: string[];
-  recursive?: boolean;
-};
-
-export type BrollBatchImportResponse = {
-  assets: BrollAsset[];
-  analysis_jobs: MediaAnalysis[];
-  failures: { source_path: string; reason: string }[];
-};
-
 export type MediaAnalysis = {
   analysis_id: string;
   asset_id: string;
@@ -1071,14 +1058,6 @@ export type PreviewShareCreated = {
   url: string;
 };
 
-export type PreviewShareSummary = {
-  share_id: string;
-  project_id: string;
-  export_id: string;
-  created_at: string;
-  revoked_at?: string | null;
-};
-
 export type VariantRenderItem = {
   variant_id: string;
   variant_kind?: string | null;
@@ -1094,12 +1073,6 @@ export type VariantRenderBatch = {
   project_id: string;
   status: string;
   items: VariantRenderItem[];
-};
-
-export type RegisteredAsset = {
-  asset_id: string;
-  asset_type: string;
-  storage_uri: string;
 };
 
 export type CapCutDraftExportArtifact = {
@@ -1967,7 +1940,6 @@ export const api = {
   startSceneVideo: (projectId: string, payload: SceneVideoRequest) => request<SceneVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getSceneVideoStatus: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}`),
   cancelSceneVideo: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
-  listSceneImages: (projectId: string) => request<{ images: SceneImage[] }>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`),
   createScriptDraft: (projectId: string, payload: ScriptDraftRequest) => request<ScriptDraft>(`/api/projects/${encodeURIComponent(projectId)}/script-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   createCreationRecommendationSet: (projectId: string, payload: CreationRecommendationSetRequest) => request<CreationRecommendationSet>(`/api/projects/${encodeURIComponent(projectId)}/creation-recommendations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
@@ -2060,12 +2032,6 @@ export const api = {
     request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getMediaLibraryInstallState: () => request<MediaLibraryInstallState>("/api/media-library/install-state"),
   listMediaLibraryAssets: () => request<{ assets: MediaLibraryAsset[] }>("/api/media-library/assets"),
-  listMediaLibraryFavorites: () => request<{ asset_ids: string[] }>("/api/media-library/favorites"),
-  listRecentMediaLibraryAssetIds: () => request<{ asset_ids: string[] }>("/api/media-library/recent"),
-  setMediaLibraryFavorite: (libraryAssetId: string, enabled: boolean) =>
-    request<{ asset_ids: string[] }>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
-    }),
   listProjectMediaLibraryFavorites: (projectId: string) =>
     request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/favorites`),
   listProjectRecentMediaLibraryAssetIds: (projectId: string) =>
@@ -2098,7 +2064,6 @@ export const api = {
   },
   proposeFootage: (payload: { library_asset_id: string; idempotency_key: string; analysis?: Record<string, unknown> }) =>
     request<FootageProposal>("/api/footage/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
-  getFootageProposal: (proposalId: string) => request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`),
   interpretYujinFootageProposal: (proposalId: string, payload: { instruction: string }) =>
     request<YujinFootageInterpretation>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/yujin/interpret`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   editFootageProposal: (proposalId: string, payload: { operation: "move_boundary" | "split" | "merge" | "exclude" | "confirm"; expected_revision: number; segment_id?: string; segment_ids?: string[]; boundary_sec?: number; split_sec?: number; fields?: Record<string, unknown> }) =>
@@ -2129,8 +2094,6 @@ export const api = {
     if (idempotencyKey) body.append("idempotency_key", idempotencyKey);
     return request<LibraryIngestBatch>("/api/library/ingest", { method: "POST", body, signal });
   },
-  getLibraryAsset: (libraryAssetId: string, signal?: AbortSignal) =>
-    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}`, { signal }),
   getLibraryAssetUsage: (libraryAssetId: string, signal?: AbortSignal) =>
     request<LibraryUsage>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/usage`, { signal }),
   trashLibraryAsset: (libraryAssetId: string) =>
@@ -2199,7 +2162,6 @@ export const api = {
     );
     return payload.projects;
   },
-  getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
   renameProject: (projectId: string, name: string) =>
     request<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
       method: "PATCH",
@@ -2215,18 +2177,6 @@ export const api = {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}?confirm=true`, { method: "DELETE" });
     if (!response.ok) throw new Error(`Request failed: /api/projects/${projectId} (${response.status})`);
   },
-  registerNarrationAudio: (projectId: string, payload: { source_path: string }) =>
-    request<RegisteredAsset>(`/api/projects/${projectId}/assets/narration-audio`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  registerScriptDocument: (projectId: string, payload: { source_path: string }) =>
-    request<RegisteredAsset>(`/api/projects/${projectId}/assets/script-document`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
   listMediaInboxAssets: async (): Promise<MediaInboxAsset[]> =>
     (await request<{ assets: MediaInboxAsset[] }>("/api/media-inbox/assets")).assets,
   importMediaInboxAsset: (projectId: string, filename: string) =>
@@ -2243,21 +2193,6 @@ export const api = {
       `/api/projects/${projectId}/assets/broll-video`,
     );
     return payload.assets;
-  },
-  importBrollBatch: async (
-    projectId: string,
-    payload: BrollBatchImportRequest,
-  ): Promise<BrollBatchImportResponse> => {
-    return request<BrollBatchImportResponse>(
-      `/api/projects/${projectId}/assets/broll-video/batch`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      },
-    );
   },
   listJobs: async (projectId: string): Promise<JobRecord[]> => {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);
@@ -2301,17 +2236,6 @@ export const api = {
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
   getReviewApproval: (projectId: string, timelineId: string) =>
     request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/timelines/${timelineId}`),
-  approveReviewRecommendation: (
-    projectId: string,
-    jobId: string,
-    recommendationId: string,
-  ) =>
-    request<ReviewSnapshot>(
-      `/api/projects/${projectId}/review-snapshots/${jobId}/recommendations/${recommendationId}/approve`,
-      {
-        method: "POST",
-      },
-    ),
   getEditingSession: (projectId: string, sessionId: string) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
   /** 기획을 통과하지 않고 편집기를 여는 길(캡컷의 빈 편집판). */
@@ -2729,6 +2653,13 @@ export const api = {
     request<PartialRegenerationJob>(`/api/projects/${projectId}/partial-regenerations/${jobId}`),
   getSubtitle: (projectId: string, jobId: string) =>
     request<SubtitleJob>(`/api/projects/${projectId}/subtitles/${jobId}`),
+  // `getPreview`/`getExport`는 화면에서 안 부른다(2026-08-31 확인) -- 실제
+  // 폴링은 `listJobs`로 전부 처리한다. 그래도 지운 적이 있다가 되돌린 전례가
+  // 있다 -- 예전 정리에서 짝을 이루던 mutation 두 개는 뺐지만 이 둘은 읽기
+  // 전용 "호환 판독기"로 일부러 남겼고, `task22-parity-owners.test.ts`가
+  // 그걸 이름으로 고정해 지킨다. 다시 지우기 전에 그 테스트와 이유부터
+  // 확인할 것(위에서 빠진 그 mutation 이름을 여기 다시 적지 말 것 -- 같은
+  // 테스트가 main.tsx에서 닿는 소스에 그 이름이 나오는지도 스캔한다).
   getPreview: (projectId: string, jobId: string) =>
     request<PreviewJob>(`/api/projects/${projectId}/previews/${jobId}`),
   getExport: (projectId: string, jobId: string) =>
@@ -2825,10 +2756,6 @@ export const api = {
     request<PreviewShareCreated>(`/api/projects/${projectId}/final-renders/${jobId}/share`, {
       method: "POST",
     }),
-  listPreviewShares: (projectId: string, jobId: string) =>
-    request<{ shares: PreviewShareSummary[] }>(
-      `/api/projects/${projectId}/final-renders/${jobId}/shares`,
-    ),
   revokePreviewShare: (projectId: string, shareId: string) =>
     request<{ revoked: boolean }>(`/api/projects/${projectId}/preview-shares/${shareId}/revoke`, {
       method: "POST",
@@ -2841,15 +2768,6 @@ export const api = {
     }),
   // 적용은 자막 모양만 바꾼다. 화면 크기·음악은 기록으로만 보여 준다 —
   // 크기를 바꾸는 검증된 경로가 없어서 `keep_output_size` 옵션을 약속에서 뺐다.
-  applyFormatTemplate: (
-    projectId: string,
-    templateId: string,
-    payload: { session_id: string; expected_revision: number },
-  ) =>
-    request<{ template_id: string; session: EditingSession }>(
-      `/api/projects/${projectId}/format-templates/${encodeURIComponent(templateId)}/apply`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
-    ),
   recordFinalRenderVerdict: (projectId: string, jobId: string, payload: { verdict: "good" | "bad"; note?: string }) =>
     request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}/verdict`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
