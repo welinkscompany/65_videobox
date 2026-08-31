@@ -1,0 +1,131 @@
+# VideoBox 화면 정리 전수 점검 (2026-08-31)
+
+## 배경
+
+owner 지적: "지금 너가 만든 편집기 프로그램에 화면 시작하는 부분부터 화면에
+기능구성, 편집기안에 기능 배치 이런것들이 완전 엉망이라서 내가 캡컷을
+벤치마킹하라고 한거잖아. 너가 그냥 다 때려박은게 아니라 탭으로 정렬하거나
+기능 버튼들을 체계적으로 만들었으면 벌써 끝났을 일이야" — 이어서 "다른
+부분들도 모두 세부적으로 자세히 체크해. 게다가 편집기외에 다른 페이지에
+있는 부분들도 정리가 안되어 있어."
+
+실제로 컨테이너를 띄워 화면을 하나씩 열어보니 지적이 맞았다. 아래에 확인
+방법, 지금까지 고친 것, 아직 확인 안 된 후보를 전부 남긴다.
+
+## 확인 방법 — 왜 이 패턴이 반복되는지
+
+화면마다 열어서 눈으로 보는 방법과 별도로, **기계적으로 찾는 방법**을
+하나 확립했다: 실제 코드에 정말 스타일이 빠진 곳이 있는지 클래스명 기준으로
+전수 대조한다.
+
+```bash
+# JSX에서 실제 쓰는 vb- 클래스 전부
+grep -rhoE 'className="[^"]*vb-[^"]*"' --include='*.tsx' apps/web/src \
+  | grep -oE 'vb-[a-zA-Z0-9_-]+' | sort -u > used.txt
+# CSS 어딘가에 정의된 vb- 클래스 전부
+grep -rhoE '\.vb-[a-zA-Z0-9_-]+' --include='*.css' apps/web/src \
+  | sed 's/^\.//' | sort -u > styled.txt
+# 쓰는데 스타일이 아예 없는 것
+comm -23 used.txt styled.txt
+```
+
+**왜 이게 반복되는가**: 오늘 고친 것 전부 같은 모양이었다 — 기능 로직은
+맞고 테스트(RTL `getByText`/`getByRole`)도 통과하는데, 실제 CSS가 한 줄도
+없어서 브라우저 기본 흐름(블록 쌓임)대로 그냥 쌓였다. RTL은 텍스트가
+있는지만 보지 간격·정렬을 보지 않아서 이런 결함을 못 잡는다
+([[videobox-green-tests-were-not-guarding]]와 같은 종류의 함정). 이번
+점검·수정에서 발견한 5건이 전부 이 패턴이었다.
+
+## 오늘 확인·수정 완료 (5건, 전부 커밋됨)
+
+1. **편집기 오른쪽 패널 — 글꼴 목록** (`CaptionFontPicker.tsx` /
+   `editor-workbench.css`). CSS가 아예 없어서 글꼴 15개가 항목당 3줄씩
+   쌓여 1,350px, 패널 전체 스크롤이 3,736px였다. `__history`와 같은
+   14rem 박스+자체 스크롤로 가뒀다. 실측: 3,736px → 2,670px. 커밋
+   `141b180e`.
+2. **"자료실" 이름 변경이 반쪽만 반영** (`LibrarySidebar.tsx` /
+   `LibraryPickerDialog.tsx`). 2026-08-29 결정은 breadcrumb·라우트만
+   바꿨고, 실제 화면 제목(`<h1>미디어</h1>`)과 가져오기 대화상자 제목·
+   설명은 그대로 "미디어"/"라이브러리"였다. 커밋 `d04c6857`.
+3. **같은 이름 문제가 7개 파일에 더** — 미디어 단계의 음악·효과음 탭
+   제목, 촬영본 정리 화면 링크, 자료실·가져오기 대화상자 에러 메시지가
+   전부 옛 이름 "라이브러리"였다. 전부 "자료실"로 통일. 커밋 `9db0a96f`.
+   - **주의**: `미디어`라는 단어 자체(장르 뜻: 영상·음악·그림)는 안 건드렸다.
+     예: "전체 미디어", "미디어를 불러오는 중", "미디어 분류" — 이건
+     페이지 정체성이 아니라 파일 종류를 가리키는 일반 명사라 이름 충돌
+     문제와 무관하다.
+4. **출력 준비 체크리스트 줄 붙음** (`OutputsPage.tsx` /
+   `product-shell.css`). `<strong>편집본</strong><span>준비 필요</span>`에
+   CSS가 없어서 "편집본준비 필요"처럼 붙어 읽혔다. `검토승인 필요`,
+   `출력앞 단계 완료 필요`도 같은 증상. `<ol>`/`<li>`에 grid/flex 간격을
+   줬다. 커밋 `c3d03511`.
+5. **검토 화면 장면 목록의 편집 링크가 문장을 통째로 반복** —
+   `TimelineReviewPage.tsx`. 장면 설명이 `<p>`로 이미 한 번 나오는데,
+   바로 아래 "편집하기" 링크의 **보이는 텍스트**가 같은 문장 전체를
+   반복하고 그 위에 강조색(`.vb-action-link`: 굵게·밑줄·강조색)까지
+   입어서, 화면에 큰 주황색 경고문처럼 보였다. 문장은 `aria-label`로
+   옮기고 보이는 텍스트는 "편집하기"만 남겼다(접근성 이름은 그대로라
+   테스트 안 깨짐). 커밋 `c3d03511`.
+
+각 건 관련 vitest 스위트 전부 통과 확인(스타일 30 + 인스펙터 77 + 라이브러리/
+미디어/촬영본/에디터자산 178 + 검토 22). 1·4·5는 컨테이너 재빌드 후 실제
+브라우저에서도 재확인했다.
+
+## 확인 중 아니라고 판정한 것 (오탐)
+
+- `/settings/*`에 프로젝트 이름·단계 탭이 계속 보이는 것 — 버그 아님.
+  `AppRouter.tsx`가 설정을 프로젝트 스코프로 의도적으로 설계했다
+  (`?project_id=`를 달아 이동, 돌아갈 자리를 유지하려는 목적).
+- 홈 화면의 "유진에게 물어보기"가 섹션 제목과 입력창 라벨에 각각 한 번씩,
+  두 번 보이는 것 — 중복처럼 보이지만 하나는 섹션 heading, 하나는
+  textarea의 접근성 label이라 기능상 문제는 아니다. 시각적으로는 약간
+  거슬리지만 우선순위 낮음(아래 후보 목록에 남겨 둠).
+
+## 위 스크립트로 나온 나머지 후보 (35개 중 확인한 5개 제외 30개)
+
+기계적으로 걸러진 "쓰는데 스타일이 없는" 클래스 목록이다. **클래스가
+없다고 전부 버그는 아니다** — 부모 규칙이 자식 전체를 이미 처리하거나
+(`.vb-outputs section`처럼), 같은 요소가 두 클래스를 갖고 있어 다른
+쪽에서 이미 스타일을 받거나, shadcn `Button`/`Input`의 Tailwind 유틸리티만
+으로 이미 충분한 경우가 있다. **실제로 열어서 확인해야 확정된다.**
+
+우선순위 추정(코드만 보고 판단, 미확인):
+
+**먼저 볼 것 — 반복되는 목록/여러 항목이라 font-list와 같은 패턴일 위험**
+- `vb-project-title-suggest`, `vb-project-title-suggest__list`
+  (`ProjectTitleDialog.tsx`) — 제목 추천 목록
+- `vb-footage-source-row`, `vb-footage-selection-count`,
+  `vb-footage-sequence__preview-status` (`FootageSourceList.tsx`,
+  `FootageOrganizerPage.tsx`) — 촬영본 정리 화면. 실제 자산으로
+  열어야 확인 가능(`library_asset_id` 쿼리 필요)
+- `vb-inbox-import__sequence-list` (`ImportFromFootageInbox.tsx`) —
+  `vb-inbox-import__list`와 같이 쓰이므로 그쪽 스타일을 상속받을
+  가능성 있음, 확인 필요
+- `vb-final-format`, `vb-final-verdict` (`OutputsPage.tsx`) — 완성본이
+  실제로 있는 프로젝트(`my-project`)에서 열어야 보이는 영역, 오늘
+  스크린샷엔 다른 데이터라 못 봄
+- `vb-catalog-archive-toggle`, `vb-catalog-card__rename`
+  (`AppRouter.tsx`, 프로젝트 목록 카드) — 버튼 단독이라 위험 낮음
+
+**낮은 우선순위 — 오늘 화면에서 이미 정상으로 보였거나 구조상 안전**
+- `vb-media-workspace__tabs`, `vb-timeline-scale`, `vb-start-chooser*` —
+  오늘 스크린샷에서 이미 정상 레이아웃으로 보였다
+- `vb-editor-workbench__panes`, `vb-editor-workbench__stage-panel` —
+  `react-resizable-panels`가 자체 레이아웃을 준다
+- `vb-editor-assets__more`, `vb-editor-assets__pane-tab` — 단일 Button
+- `vb-ui`, `vb-app-loading`, `vb-preview-stage__caption-transcript`
+  (sr-only 짝 클래스 있음), `vb-review-output` — 구조적 wrapper,
+  위험 낮음
+- `vb-preview-share` — 외부 공유 페이지, 거의 안 열림
+- `vb-media-library__pagination`, `vb-add-media` — 단순 구조 추정
+
+## 다음에 할 일
+
+1. 위 "먼저 볼 것" 5개를 실제 데이터로 열어서 확인 → 진짜면 오늘과 같은
+   방식(관련 CSS 파일에 박스/간격 규칙 추가)으로 고친다.
+2. "낮은 우선순위" 항목도 시간 되는 대로 한 번씩은 실제로 열어서 확인한다
+   (코드만 보고 판정한 것이라 확정 아님).
+3. 이 스캔은 **CSS 존재 여부만** 본다 — 스타일이 있어도 배치가 이상하거나
+   (본문에서 이번에 고친 것과 다른 종류) 문구가 겹치는 경우는 못 잡는다.
+   그런 문제는 계속 실제 화면을 열어서 봐야 한다
+   ([[videobox-capture-the-screen-to-see-it]]).
