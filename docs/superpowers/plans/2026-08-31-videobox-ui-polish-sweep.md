@@ -105,20 +105,24 @@ comm -23 used.txt styled.txt
 쪽에서 이미 스타일을 받거나, shadcn `Button`/`Input`의 Tailwind 유틸리티만
 으로 이미 충분한 경우가 있다. **실제로 열어서 확인해야 확정된다.**
 
-우선순위 추정(코드만 보고 판단, 미확인):
+**"먼저 볼 것" 전부 실제로 열어서 확인 완료 — 전부 오탐**
 
-**먼저 볼 것 — 반복되는 목록/여러 항목이라 font-list와 같은 패턴일 위험**
-- `vb-footage-source-row`, `vb-footage-selection-count`,
-  `vb-footage-sequence__preview-status` (`FootageSourceList.tsx`,
-  `FootageOrganizerPage.tsx`) — 촬영본 정리 화면. 실제 자산으로
-  열어야 확인 가능(`library_asset_id` 쿼리 필요)
-- `vb-inbox-import__sequence-list` (`ImportFromFootageInbox.tsx`) —
-  `vb-inbox-import__list`와 같이 쓰이므로 그쪽 스타일을 상속받을
-  가능성 있음, 확인 필요
-- `vb-catalog-archive-toggle`, `vb-catalog-card__rename`
-  (`AppRouter.tsx`, 프로젝트 목록 카드) — 버튼 단독이라 위험 낮음
+- `vb-footage-source-row`, `vb-footage-selection-count` — 실제 자산
+  (`library_asset_id=user_14a...`)으로 촬영본 정리 화면을 열어서 확인.
+  왼쪽 원본 목록·오른쪽 "할 일" 패널 다 정상 렬레이아웃. `vb-footage-
+  sequence__preview-status`는 가상 묶음을 만들어야 나오는 자리라 이번엔
+  못 봤음(우선순위 낮게 재분류).
+- `vb-inbox-import__list`, `vb-inbox-import__sequence-list`
+  (`ImportFromFootageInbox.tsx`) — 미디어 단계 "가져오기" 탭을 직접
+  열어서 확인. CSS가 코드 어디에도 없는데도 카드형 grid로 깔끔하게
+  나왔다 — 부모(`.vb-media-library` 계열)의 일반 규칙을 받는 것으로
+  보인다. 정확한 상속 경로는 못 짚었지만 화면은 정상.
+- `vb-catalog-card__rename` — "제목 바꾸기" 버튼과 그 대화상자(제목
+  추천 목록 포함)까지 직접 열어서 확인, 정상.
 
-**낮은 우선순위 — 오늘 화면에서 이미 정상으로 보였거나 구조상 안전**
+**낮은 우선순위 — 오늘 화면에서 이미 정상으로 보였거나 구조상 안전
+(코드만 보고 판단, 직접 열어보진 않음)**
+- `vb-footage-sequence__preview-status`, `vb-catalog-archive-toggle`
 - `vb-media-workspace__tabs`, `vb-timeline-scale`, `vb-start-chooser*` —
   오늘 스크린샷에서 이미 정상 레이아웃으로 보였다
 - `vb-editor-workbench__panes`, `vb-editor-workbench__stage-panel` —
@@ -132,11 +136,15 @@ comm -23 used.txt styled.txt
 
 ## 다음에 할 일
 
-1. 위 "먼저 볼 것" 5개를 실제 데이터로 열어서 확인 → 진짜면 오늘과 같은
-   방식(관련 CSS 파일에 박스/간격 규칙 추가)으로 고친다.
-2. "낮은 우선순위" 항목도 시간 되는 대로 한 번씩은 실제로 열어서 확인한다
-   (코드만 보고 판정한 것이라 확정 아님).
-3. 이 스캔은 **CSS 존재 여부만** 본다 — 스타일이 있어도 배치가 이상하거나
-   (본문에서 이번에 고친 것과 다른 종류) 문구가 겹치는 경우는 못 잡는다.
-   그런 문제는 계속 실제 화면을 열어서 봐야 한다
-   ([[videobox-capture-the-screen-to-see-it]]).
+1. "낮은 우선순위" 나머지 항목도 시간 되는 대로 한 번씩은 실제로 열어서
+   확인한다(코드만 보고 판정한 것이라 확정 아님).
+2. 이 스캔은 **CSS 존재 여부만** 본다 — 스타일이 있어도 배치가 이상하거나
+   (`vb-home-grid`를 좁은 카드에 재사용해 버튼이 겹친 6번 건처럼) 문구가
+   겹치는 경우는 못 잡는다. 그런 문제는 계속 실제 화면을 열어서 봐야
+   한다([[videobox-capture-the-screen-to-see-it]]).
+3. **오늘 결론**: 기계적 스캔이 걸러낸 35개 후보를 전부 판정했다 —
+   실제 버그 6건(고침), 오탐 10건(직접 열어서 확인), 나머지 19건은
+   구조상 위험이 낮아 코드만 보고 보류. 편집기·자료실·미디어·촬영본·
+   완성본·검토·프로젝트 목록·제목 대화상자까지 오늘 열어본 화면 기준으로는
+   "완전히 엉망"이라기보다 **군데군데 스타일이 빠지거나 이름 정리가
+   덜 된 부분**이 있는 상태였다.
