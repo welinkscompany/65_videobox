@@ -15,6 +15,7 @@ import { sceneFilterLabel } from "../inspector/sceneFilters";
 import { sceneLabelsBySegmentId, sceneNumbersBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
+import { buildQualityFollowUps } from "./qualityFollowUps";
 import type { RightDockCompletionEntry, RightDockDirector, RightDockEditingProposalPreview, RightDockMessage, RightDockProposal } from "./rightDockTypes";
 
 type MutationState = Readonly<{ isSaving: boolean; message?: string }>;
@@ -2069,6 +2070,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onSelectedCandidateIdsChange: (selectedCandidateIds) => setDirector((current) => current.key === requestKey ? { ...current, selectedCandidateIds } : current),
     onConversationScrollChange: (conversationScroll) => setDirector((current) => current.key === requestKey ? { ...current, conversationScroll } : current),
     onSendMessage: sendDirectorMessage,
+    // 답변이 끝날 때마다 이어서 해볼 것 셋. 대화를 시작하기 전에는 대화
+    // 스타터가 그 자리를 맡으므로, 주고받은 것이 있을 때만 낸다.
+    qualityFollowUps: activeDirector.messages.length && state.view
+      ? buildQualityFollowUps({ view: state.view, selectedSegmentId: state.view.local.selectedSegmentId })
+      : [],
     onCreateEditingProposal: createYujinEditingProposal,
     editingProposal: activeDirector.editingProposal ? {
       proposalId: activeDirector.editingProposal.proposal_id,

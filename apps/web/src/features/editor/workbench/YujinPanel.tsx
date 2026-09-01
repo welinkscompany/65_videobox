@@ -115,6 +115,7 @@ export type YujinPanelProps = Readonly<{
   memory?: RightDockMemory;
   composerDisabled?: boolean;
   onSendMessage?: (draft: string) => void | Promise<void>;
+  qualityFollowUps?: readonly string[];
   onCreateEditingProposal?: () => void | Promise<void>;
   editingProposal?: RightDockEditingProposal | null;
   editingProposalCreating?: boolean;
@@ -155,6 +156,7 @@ export function YujinPanel({
   memory,
   composerDisabled = false,
   onSendMessage,
+  qualityFollowUps = [],
   onCreateEditingProposal,
   editingProposal = null,
   editingProposalCreating = false,
@@ -323,6 +325,20 @@ export function YujinPanel({
             ? <Button type="button" aria-label={scriptButtonLabel(message.text)} onClick={() => void onUseDraftAsScript(message.text)}>{SCRIPT_BUTTON_TEXT}</Button>
             : null}
         </article>)
+        : null}
+      {/* **답변이 끝나면 이어서 해볼 것 셋**(owner 2026-09-01: "유진이와 질문
+          답변이 끝나면 꼬리질문도 3개 만들어서 제안해줘 -- 영상 퀄리티를 더
+          좋게 만드는 방법으로"). 지금 편집본을 읽어서 만든 것이라 이미 해 둔
+          것은 권하지 않고, 누르면 실제로 되는 것만 있다(`qualityFollowUps.ts`).
+          누르면 입력칸에 채워진다 -- 대화 스타터·편집안 꼬리질문과 같은 방식이라
+          "누르면 바로 실행되나?"를 새로 배울 필요가 없다. */}
+      {qualityFollowUps.length > 0 && runState.kind !== "streaming"
+        ? <div className="vb-yujin-panel__follow-ups" role="group" aria-label="이어서 해볼 것">
+          <p>이어서 해볼 것</p>
+          {qualityFollowUps.map((question) => (
+            <Button key={question} type="button" variant="outline" disabled={composerDisabled} onClick={() => onDraftChange(question)}>{question}</Button>
+          ))}
+        </div>
         : null}
       {completions.length
         ? completions.map((completion) => <article key={completion.id} className="vb-editor-right-dock__completion" role="status" aria-label={`모든 작업 완료 ${completion.items.length}/${completion.items.length}`}>

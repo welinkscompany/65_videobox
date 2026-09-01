@@ -158,6 +158,9 @@ export type RightDockDirector = Readonly<{
   onSelectedCandidateIdsChange: (candidateIds: readonly string[]) => void;
   onConversationScrollChange: (scroll: RightDockConversationScroll) => void;
   onSendMessage: (draft: string) => void | Promise<void>;
+  /** 답변이 끝난 뒤 이어서 해볼 것 셋. 지금 편집본을 읽어 만든 것이라 이미
+   *  해 둔 것은 들어 있지 않고, 누르면 유진이 실제로 할 수 있는 것만 있다. */
+  qualityFollowUps?: readonly string[];
   /** 다시 해석해 달라고 손으로 누르는 길.
    *
    *  2026-09-01까지는 **이것이 유일한 길이었다** -- 대화는 답만 하고, 편집으로

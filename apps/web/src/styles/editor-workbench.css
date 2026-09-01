@@ -148,6 +148,12 @@
 .vb-yujin-panel__transition-suggestions article p:first-child { color: var(--vb-muted); }
 .vb-yujin-panel__proposal-meta p { margin: 0; font-size: var(--vb-text-xs); color: var(--vb-muted); }
 .vb-yujin-starters { display: grid; gap: var(--vb-space-1); padding: var(--vb-space-1) 0; }
+/* 답변 뒤 "이어서 해볼 것" 셋. **대화 스타터와 같은 모양으로 맞춘다** -- 둘 다
+   "누르면 입력칸에 채워지는 문장"이라 생김새가 다르면 창작자가 서로 다른
+   동작이라고 읽는다. 스타터는 대화 전, 이건 답변 뒤에 뜬다. */
+.vb-yujin-panel__follow-ups { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); padding: var(--vb-space-1) 0; }
+.vb-yujin-panel__follow-ups > p { flex: 1 1 100%; margin: 0; color: var(--muted-foreground); font-size: var(--vb-text-xs); }
+.vb-yujin-panel__follow-ups > button { min-height: 2rem; height: auto; padding: var(--vb-space-1) var(--vb-space-2); border-radius: 999px; color: var(--foreground); font-size: var(--vb-text-xs); line-height: 1.35; text-align: left; white-space: normal; }
 .vb-yujin-starters h3 { margin: 0; font-size: var(--vb-text-sm); }
 /* 프로젝트 단계 독립 "미디어" 화면이 편집기 도크로 접히며(2026-09-01) 옮겨 온
    "분석 상태" 절 -- `.vb-yujin-panel__candidate`와 같은 좁은 도크 밀도로 맞췄다. */

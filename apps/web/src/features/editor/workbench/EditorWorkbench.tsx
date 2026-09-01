@@ -693,6 +693,7 @@ function EditorWorkbenchInstance({
         memory={rightDirector?.memory}
         composerDisabled={rightDirector?.composerDisabled}
         onSendMessage={rightDirector?.onSendMessage}
+        qualityFollowUps={rightDirector?.qualityFollowUps}
         onCreateEditingProposal={rightDirector?.onCreateEditingProposal}
         editingProposal={rightDirector?.editingProposal}
         editingProposalCreating={rightDirector?.editingProposalCreating}

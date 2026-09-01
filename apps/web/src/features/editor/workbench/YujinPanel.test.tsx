@@ -75,6 +75,52 @@ describe("YujinPanel", () => {
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveFocus();
   });
 
+  // owner 2026-09-01: "유진이와 질문 답변이 끝나면 꼬리질문도 3개 만들어서
+  // 제안해줘 -- 영상 퀄리티를 더 좋게 만드는 방법으로."
+  it("offers three follow-ups after a reply, and fills the composer without sending", () => {
+    const onDraftChange = vi.fn();
+    const onSendMessage = vi.fn();
+    renderOpen({
+      onDraftChange,
+      onSendMessage,
+      state: "idle",
+      runState: { kind: "idle" },
+      messages: [
+        { id: "u-1", role: "user", text: "이 장면 어때?" },
+        { id: "a-1", role: "assistant", text: "차분한 장면이에요." },
+      ],
+      qualityFollowUps: [
+        "1번 장면에 어울리는 배경 음악을 넣어 줘",
+        "1번 장면에 어울리는 효과음을 넣어 줘",
+        "1번 장면 색감을 따뜻하게 바꿔 줘",
+      ],
+    });
+
+    const group = screen.getByRole("group", { name: "이어서 해볼 것" });
+    expect(within(group).getAllByRole("button")).toHaveLength(3);
+
+    fireEvent.click(within(group).getByRole("button", { name: "1번 장면에 어울리는 배경 음악을 넣어 줘" }));
+
+    // 대화 스타터와 **같은 동작**이다 -- 누르면 입력칸에 채워지고, 보내는 것은
+    // 창작자가 정한다. 여기서만 바로 보내면 "누르면 뭐가 되는지"를 자리마다
+    // 새로 배워야 한다.
+    expect(onDraftChange).toHaveBeenCalledWith("1번 장면에 어울리는 배경 음악을 넣어 줘");
+    expect(onSendMessage).not.toHaveBeenCalled();
+  });
+
+  // 답이 오는 중에는 권하지 않는다 -- 아직 무슨 이야기인지 모르는 채로 다음
+  // 할 일을 들이미는 화면이 된다.
+  it("holds the follow-ups back while Yujin is still answering", () => {
+    renderOpen({
+      state: "idle",
+      runState: { kind: "streaming", runId: "run-1", routeEpoch: 0, text: "생각 중" },
+      messages: [{ id: "u-1", role: "user", text: "이 장면 어때?" }],
+      qualityFollowUps: ["1번 장면에 어울리는 배경 음악을 넣어 줘"],
+    });
+
+    expect(screen.queryByRole("group", { name: "이어서 해볼 것" })).toBeNull();
+  });
+
   it("shows a CapCut-style completion checklist after Yujin applies something", () => {
     // 캡컷 EditPilot이 실행하면 "모든 작업 완료 1/1"과 실행한 항목을 목록으로
     // 남긴다(`capcut-observed` 기록 §6). owner 지시 2026-08-22: "유진 대화창에
