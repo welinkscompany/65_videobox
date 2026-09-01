@@ -50,6 +50,11 @@ def _editing_response_schema(session_revision: int) -> dict[str, object]:
     }
 
 
+#: 목록이 길어지면 프롬프트가 커지고 모델이 뒤쪽을 안 본다. 자산이 아주 많은
+#: 프로젝트에서도 프롬프트가 감당할 크기로 남게 상한을 둔다.
+_ASSET_CATALOGUE_LIMIT = 40
+
+
 def _scene_look_catalogue(context: YujinEditingContext) -> str:
     """모델이 `look` 값을 알 방법이 이것뿐이다.
 
@@ -75,8 +80,18 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
     효과음 교체는 설계상 지원 동작인데도 실제로는 한 번도 성공할 수 없었다.
     """
     asset_types = dict(context.approved_asset_types)
-    entries = [f"{asset_id}({asset_types.get(asset_id, '알 수 없음')})" for asset_id in context.approved_asset_ids]
-    return f"승인된 자산: {', '.join(entries)}." if entries else "승인된 자산이 없다 -- apply_media를 시도하지 마라."
+    labels = dict(context.approved_asset_labels)
+    entries = []
+    for asset_id in context.approved_asset_ids[:_ASSET_CATALOGUE_LIMIT]:
+        label = labels.get(asset_id, "").strip()
+        kind = asset_types.get(asset_id, "알 수 없음")
+        entries.append(f"{asset_id}({kind}, {label})" if label else f"{asset_id}({kind})")
+    if not entries:
+        return "승인된 자산이 없다 -- apply_media를 시도하지 마라."
+    return (
+        f"승인된 자산: {', '.join(entries)}. "
+        "괄호 안의 이름과 태그를 보고 **장면에 어울리는 것**을 골라라 -- 목록의 첫 번째를 기계적으로 집지 마라."
+    )
 
 
 def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:

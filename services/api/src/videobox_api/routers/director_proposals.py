@@ -149,6 +149,30 @@ class ProposalBatchApplyRequest(ProposalApplyRequest):
 _LOGGER = logging.getLogger(__name__)
 
 
+def _asset_label(asset: dict) -> str:
+    """자산 하나를 **사람이 아는 말로** 한 줄로. 고를 근거가 없으면 빈 문자열.
+
+    `01-새벽-바다 · 6초 · 가로`처럼 창작자가 파일에 붙여 둔 이름이 가장 쓸모
+    있다 -- 그 이름이 곧 그 사람이 그 소재를 부르는 말이기 때문이다.
+    """
+    metadata = asset.get("metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    parts: list[str] = []
+    title = str(metadata.get("title") or "").strip()
+    if title:
+        parts.append(title)
+    tags = metadata.get("tags")
+    if isinstance(tags, (list, tuple)):
+        joined = ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
+        if joined:
+            parts.append(joined)
+    duration = metadata.get("duration_sec")
+    if isinstance(duration, (int, float)) and duration > 0:
+        parts.append(f"{round(float(duration))}초")
+    return " · ".join(parts)
+
+
 def _apply_failure_detail(exc: BaseException) -> str:
     """무엇이 잘못됐는지 그대로 흘려보낸다.
 
@@ -214,6 +238,17 @@ def build_director_proposals_router(
             segment_ids=tuple(str(item["segment_id"]) for item in session.get("segments", []) if isinstance(item, dict) and item.get("segment_id")),
             approved_asset_ids=tuple(str(item["asset_id"]) for item in approved_assets),
             approved_asset_types=tuple((str(item["asset_id"]), str(item["asset_type"])) for item in approved_assets),
+            # **이름을 같이 준다.** 예전에는 `asset_id(종류)`만 실어서 유진이
+            # 고를 근거가 하나도 없었고, 실측(2026-09-01) 결과 장면이 달라도
+            # 분위기를 지정해도 **늘 같은 자산 하나**를 집었다. 고르는 일이
+            # 이 제품의 차별점인데(`implementation-plan` §4.2) 그 자리에서
+            # 아무것도 고르지 않고 있었다는 뜻이다.
+            #
+            # 새로 읽어 오는 것이 아니라 이미 손에 든 값이다 -- `list_assets`가
+            # `metadata`를 통째로 돌려준다.
+            approved_asset_labels=tuple(
+                (str(item["asset_id"]), _asset_label(item)) for item in approved_assets
+            ),
             # 색감은 화면이 깔린 장면에만 걸 수 있다. 모델에게 알려 주고
             # 검증기가 다시 막는다 -- 알려 주지 않으면 지어내고, 지어낸 것은
             # 항상 거절돼서 "말로 보정하기"가 한 번도 성공하지 못한다

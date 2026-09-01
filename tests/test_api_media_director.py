@@ -3207,3 +3207,55 @@ def test_owner_uploaded_media_counts_as_approved_for_a_spoken_placement(tmp_path
     # 명시적으로 거절한 것은 그대로 빠진다 -- 게이트를 연 것이 아니다.
     assert rejected.asset_id not in prompt, "거절한 자산이 승인 목록에 들어왔다"
     assert "승인된 자산이 없다" not in prompt
+
+
+def test_yujin_is_told_what_each_asset_is_not_just_its_id(tmp_path: Path) -> None:
+    """**고를 근거를 준다.** id만으로는 아무것도 고를 수 없다.
+
+    실측(2026-09-01): 장면을 바꿔도, "슬프고 잔잔한"·"신나고 빠른"처럼 분위기를
+    지정해도 유진은 **늘 같은 자산 하나**를 집었다. 당연했다 -- 프롬프트에 실린
+    것이 `asset_x(bgm)`뿐이라 고를 정보가 없었기 때문이다. 고르는 일이 이
+    제품의 차별점인데(`implementation-plan` §4.2) 그 자리에서 아무것도 고르지
+    않고 있었다.
+
+    새로 읽어 오는 값이 아니다 -- `list_assets`가 `metadata`를 통째로 돌려주고
+    있었고, 프롬프트를 만들면서 그걸 버리고 있었을 뿐이다.
+    """
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "asset labels"}).json()["project_id"]
+    calm = tmp_path / "calm.wav"
+    calm.write_bytes(b"calm music")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=calm)
+    store.update_asset_metadata(
+        project_id=project_id, asset_id=asset.asset_id,
+        metadata_patch={"title": "새벽-잔잔한-피아노", "tags": ["차분", "잔잔"], "duration_sec": 42.0},
+    )
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 배경 음악을 넣어 줘"},
+    )
+
+    prompt = seen_prompts[-1]
+    assert "새벽-잔잔한-피아노" in prompt, "창작자가 붙인 이름이 유진에게 안 갔다"
+    assert "차분" in prompt and "잔잔" in prompt, "태그가 유진에게 안 갔다"
+    assert "42초" in prompt, "길이가 유진에게 안 갔다"
+    # 목록만 주고 끝내면 첫 번째를 기계적으로 집는다 -- 무엇을 하라고 말해 준다.
+    assert "어울리는 것" in prompt

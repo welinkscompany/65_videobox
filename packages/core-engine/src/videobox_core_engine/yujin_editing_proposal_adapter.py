@@ -41,6 +41,9 @@ class YujinEditingContext:
     segment_ids: tuple[str, ...]
     approved_asset_ids: tuple[str, ...] = ()
     approved_asset_types: tuple[tuple[str, str], ...] = ()
+    #: 자산을 **사람이 아는 말로** 부르는 이름(`01-새벽-바다`, `밝은 인트로 · 22초`).
+    #: 없으면 유진은 id만 보고 골라야 하는데, id에는 고를 근거가 하나도 없다.
+    approved_asset_labels: tuple[tuple[str, str], ...] = ()
     #: 지금 화면(B-roll)이 깔려 있는 장면들. 색감은 그 위에 얹는 것이라
     #: 화면 없는 장면에는 걸 수 없다 -- 여기서 막지 않으면 적용 단계에서
     #: 터지고, 창작자에게는 "적용하지 못했어요"라는 말만 남는다.
