@@ -79,6 +79,11 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     loop: value.loop,
     pad: value.pad,
     trim_start_sec: value.trimStartSec,
+    // 소리 정리(오디오)와 손떨림 보정(영상). 캡컷 대조로 2026-09-01에 들어왔다 --
+    // 위 경고대로 여기 안 넣으면 켜 두고 다른 값을 저장하는 순간 꺼진다.
+    normalize_loudness: value.normalizeLoudness,
+    denoise: value.denoise,
+    stabilize: value.stabilize,
   }).filter(([, item]) => item !== undefined));
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {

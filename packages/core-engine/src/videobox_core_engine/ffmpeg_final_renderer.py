@@ -108,6 +108,24 @@ def _atempo_chain(speed: float) -> str:
     return ",".join(f"atempo={step}" for step in steps)
 
 
+def _audio_cleanup_chain(controls: dict[str, Any]) -> str:
+    """켜 둔 소리 정리 필터를 `,`로 시작하는 조각으로 만든다. 없으면 빈 문자열.
+
+    **순서가 뜻을 바꾼다.** 잡음을 먼저 걷어내고 음량을 맞춰야 한다 -- 반대로
+    하면 `loudnorm`이 잡음까지 포함한 크기를 기준으로 맞춰서, 잡음을 지운 뒤
+    결과가 목표보다 조용해진다.
+
+    `loudnorm`은 EBU R128 기준값(I=-16 LUFS)으로 맞춘다. 유튜브·팟캐스트가
+    쓰는 값이라 다른 데 올려도 다시 안 맞춰도 된다.
+    """
+    chain = ""
+    if controls.get("denoise"):
+        chain += ",afftdn"
+    if controls.get("normalize_loudness"):
+        chain += ",loudnorm=I=-16:TP=-1.5:LRA=11"
+    return chain
+
+
 def rendered_audio_has_sound(path: Path, *, ffmpeg_binary: str = "ffmpeg") -> bool | None:
     """들을 만한 소리가 담겼는가. 재지 못했으면 None — 모르는 것과 없는 것은 다르다.
 
@@ -758,14 +776,19 @@ class FfmpegFinalRenderer:
         여기가 어긋나면 전환 중에만 그림이 튄다 -- 잘린 화면과 여백 넣은 화면이
         1초 동안 서로 넘어가는 모양이 된다.
         """
+        # 손떨림 보정은 **크기를 맞추기 전에** 건다. `deshake`는 흔들린 만큼
+        # 화면을 밀어서 보정하므로 가장자리가 비는데, 원본 해상도에서 걸어야
+        # 그 뒤의 `scale`·`crop`이 빈 자리를 함께 처리한다. 순서를 뒤집으면
+        # 출력 크기에 맞춘 그림이 다시 밀리면서 검은 테두리가 남는다.
+        stabilize = "deshake," if controls.get("stabilize") else ""
         if controls["fit"] == "crop":
             transform = (
-                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,"
+                f"{stabilize}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,"
                 f"crop={self.video_width}:{self.video_height}"
             )
         else:
             transform = (
-                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                f"{stabilize}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
                 f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
             )
         # 색감(`filters.py`)을 **여기서** 붙인다. 이 함수가 전환 양쪽에도 쓰이므로
@@ -1103,6 +1126,7 @@ class FfmpegFinalRenderer:
                 label = f"a_{item.clip_id}"
                 delay = max(0, round(item.start_sec * 1000))
                 effect = f"volume={controls['gain_db']}dB"
+                effect += _audio_cleanup_chain(controls)
                 if controls["fade_in_sec"]:
                     effect += f",afade=t=in:st=0:d={controls['fade_in_sec']}"
                 if controls["fade_out_sec"]:
@@ -2027,6 +2051,7 @@ class FfmpegFinalRenderer:
                 bgm_duration = float(bgm_clip.get("end_sec", 0.0)) - float(bgm_clip.get("start_sec", 0.0))
                 bgm_controls = normalize_media_controls(bgm_clip.get("media_controls"), media_kind="audio", duration_sec=max(bgm_duration, 0.001))
                 bgm_filter = f"volume={bgm_controls['gain_db']}dB"
+                bgm_filter += _audio_cleanup_chain(bgm_controls)
                 if bgm_controls["fade_in_sec"]:
                     bgm_filter += f",afade=t=in:st=0:d={bgm_controls['fade_in_sec']}"
                 if bgm_controls["fade_out_sec"]:
@@ -2068,7 +2093,7 @@ class FfmpegFinalRenderer:
                     start_ms = int(float(clip.get("start_sec", 0.0)) * 1000)
                     duration_sec = float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0))
                     controls = normalize_media_controls(clip.get("media_controls"), media_kind="audio", duration_sec=max(duration_sec, 0.001))
-                    sfx_filter = f"[{index}:a]volume={controls['gain_db']}dB,atrim=duration={duration_sec}"
+                    sfx_filter = f"[{index}:a]volume={controls['gain_db']}dB{_audio_cleanup_chain(controls)},atrim=duration={duration_sec}"
                     if controls["fade_in_sec"]:
                         sfx_filter += f",afade=t=in:st=0:d={controls['fade_in_sec']}"
                     if controls["fade_out_sec"]:

@@ -527,6 +527,13 @@ export type EditorMediaControls = {
   preserve_source_audio?: boolean;
   in_sec?: number;
   out_sec?: number;
+  /** 소리 정리(오디오 클립). 캡컷 오디오 탭 대조로 들어왔다 -- 캡컷은 유료
+   *  클라우드 AI로 파는데 우리는 FFmpeg 필터 하나씩이다(`loudnorm`·`afftdn`). */
+  normalize_loudness?: boolean;
+  denoise?: boolean;
+  /** 손떨림 보정(영상 클립). FFmpeg `deshake` -- 2-pass `vidstab`이 아니라
+   *  단일 패스라 렌더 시간이 안 늘어난다. */
+  stabilize?: boolean;
 };
 // 유진의 장면 전환 추천 하나. `reason`은 지금 하나뿐이다(`different_broll_asset`)
 // -- 화면이 문구를 정하고, 백엔드가 값을 지어내지 않는다는 걸 지키려고

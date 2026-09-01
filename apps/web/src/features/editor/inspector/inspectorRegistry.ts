@@ -2,7 +2,7 @@ import type { ShapeOverlayMotion, ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "fit";
+type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "fit" | "normalizeLoudness" | "denoise" | "stabilize";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";
@@ -96,11 +96,14 @@ export type InspectorTarget =
 // owner가 정하지 않은 값이 저장마다 실린다"고 뺐는데, 슬라이더는 저장된 값에서
 // 시작하므로 손대지 않은 저장이 값을 옮기지 않는다. 렌더러는 처음부터 클립별
 // gain_db를 반영하고 있었다(`ffmpeg_final_renderer`) -- 화면에 자리만 없었다.
-const mediaFields = ["fadeInSec", "fadeOutSec", "gainDb"] as const;
+// 소리 정리 둘(`normalizeLoudness`·`denoise`)은 **소리가 있는 클립 전부**에
+// 붙는다 -- 캡컷 오디오 탭 대조(2026-09-01). 캡컷은 유료 클라우드 AI로 파는데
+// 우리는 FFmpeg 필터 하나씩이면 된다(`loudnorm`·`afftdn`).
+const mediaFields = ["fadeInSec", "fadeOutSec", "gainDb", "normalizeLoudness", "denoise"] as const;
 // 배경 음악만 내레이션 밑으로 비켜설 수 있다. 렌더러가 사이드체인 압축을
 // **bgm에만** 걸기 때문이다(`ffmpeg_final_renderer`) -- 효과음에 스위치를 주면
 // 눌러도 아무 일이 없는 단추가 된다.
-const bgmFields = ["fadeInSec", "fadeOutSec", "ducking", "gainDb"] as const;
+const bgmFields = ["fadeInSec", "fadeOutSec", "ducking", "gainDb", "normalizeLoudness", "denoise"] as const;
 // Task 24: B-roll carries no audio by default, so fades are meaningless for it.
 // What the owner actually corrects is which slice of a long take gets used --
 // the recommendation picks a scene window, this is where that is overridden.
@@ -116,7 +119,9 @@ const bgmFields = ["fadeInSec", "fadeOutSec", "ducking", "gainDb"] as const;
 // 영영 아무 일도 하지 못했다. 순서도 소리 크기 바로 뒤에 둔다 -- 떨어뜨려 놓으면
 // 둘이 한 벌이라는 게 보이지 않는다.
 // 색감은 **화면이 있는 클립에만**. 음악·효과음에는 칠할 그림이 없다.
-const brollFields = ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit"] as const;
+// `stabilize`(손떨림 보정)는 화면이 있는 클립에만. 캡컷 동영상 탭 대조로
+// 2026-09-01에 들어왔다 -- FFmpeg `deshake`(단일 패스)라 렌더가 안 느려진다.
+const brollFields = ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit", "stabilize"] as const;
 const mediaLabels = { broll: "B-roll", bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {

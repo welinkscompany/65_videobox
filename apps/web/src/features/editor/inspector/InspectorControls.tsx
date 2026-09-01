@@ -185,6 +185,12 @@ export function InspectorControls({
   // 이 클립의 원래 소리를 살릴지. **`소리 크기`와 한 벌이다** -- 이게 꺼져 있으면
   // 섞일 소리가 없어서 음량을 아무리 바꿔도 결과가 같다.
   const [preserveSourceAudio, setPreserveSourceAudio] = useState(false);
+  // 캡컷 오디오·동영상 탭 대조로 들어온 셋(owner 승인 2026-09-01). 캡컷은 이걸
+  // 클라우드 AI 유료 기능으로 파는데, 우리 쪽은 FFmpeg 필터 하나씩이면 된다 --
+  // `loudnorm`·`afftdn`·`deshake`. 전부 끄고 켜는 것뿐이라 숫자를 묻지 않는다.
+  const [normalizeLoudness, setNormalizeLoudness] = useState(false);
+  const [denoise, setDenoise] = useState(false);
+  const [stabilize, setStabilize] = useState(false);
   // 배경 음악·효과음의 `소리 크기`. 상태는 dB로 든다 -- 슬라이더 눈금으로 들면
   // 손대지 않은 저장이 저장돼 있던 값을 눈금에 반올림해 몰래 옮긴다.
   const [gainDb, setGainDb] = useState(0);
@@ -246,6 +252,9 @@ export function InspectorControls({
       setLook(target.controls.filter?.type ?? SCENE_FILTER_NONE);
       setDucking(target.controls.ducking ?? false);
       setPreserveSourceAudio(target.controls.preserveSourceAudio ?? false);
+      setNormalizeLoudness(target.controls.normalizeLoudness ?? false);
+      setDenoise(target.controls.denoise ?? false);
+      setStabilize(target.controls.stabilize ?? false);
       setGainDb(target.controls.gainDb ?? 0);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
@@ -616,6 +625,42 @@ export function InspectorControls({
                   말할 때 배경 음악 낮추기
                 </label>
               ) : null}
+              {/* 캡컷 오디오 탭 대조(2026-09-01). §10.13: `노멀라이즈`·`LUFS`·
+                  `afftdn` 같은 말 대신 무슨 일이 일어나는지로 적는다. */}
+              {target.fields.includes("normalizeLoudness") ? (
+                <label>
+                  <Input
+                    checked={normalizeLoudness}
+                    disabled={disabled}
+                    onChange={(event) => setNormalizeLoudness(event.target.checked)}
+                    type="checkbox"
+                  />
+                  소리 크기를 고르게 맞추기
+                </label>
+              ) : null}
+              {target.fields.includes("denoise") ? (
+                <label>
+                  <Input
+                    checked={denoise}
+                    disabled={disabled}
+                    onChange={(event) => setDenoise(event.target.checked)}
+                    type="checkbox"
+                  />
+                  웅웅거리는 잡음 줄이기
+                </label>
+              ) : null}
+              {/* 캡컷 동영상 탭 대조(2026-09-01). 화면이 있는 클립에만 붙는다. */}
+              {target.fields.includes("stabilize") ? (
+                <label>
+                  <Input
+                    checked={stabilize}
+                    disabled={disabled}
+                    onChange={(event) => setStabilize(event.target.checked)}
+                    type="checkbox"
+                  />
+                  흔들린 화면 잡아주기
+                </label>
+              ) : null}
               {/* `쓸 구간`을 **안 정한 것**(둘 다 0)과 **잘못 정한 것**(끝이 시작보다
                   앞)은 다르다. 예전에는 둘을 같이 취급해서, 구간을 지정하지 않은
                   B-roll은 저장 단추가 영영 잠겨 있었다 -- 배속·음량·페이드·소리
@@ -644,6 +689,9 @@ export function InspectorControls({
                     ...(target.fields.includes("filter") ? { filter: look === SCENE_FILTER_NONE ? null : { type: look } } : {}),
                     ...(target.fields.includes("ducking") ? { ducking } : {}),
                     ...(target.fields.includes("preserveSourceAudio") ? { preserveSourceAudio } : {}),
+                    ...(target.fields.includes("normalizeLoudness") ? { normalizeLoudness } : {}),
+                    ...(target.fields.includes("denoise") ? { denoise } : {}),
+                    ...(target.fields.includes("stabilize") ? { stabilize } : {}),
                   },
                 })}
                 type="button"

@@ -17,6 +17,10 @@ export type EditorControls = Readonly<{
   preserveSourceAudio?: boolean;
   inSec?: number;
   outSec?: number;
+  /** 소리 정리(오디오 클립)와 손떨림 보정(영상 클립). 캡컷 대조로 들어왔다. */
+  normalizeLoudness?: boolean;
+  denoise?: boolean;
+  stabilize?: boolean;
 }>;
 export type EditorCaptionStyle = Readonly<{
   fontFamily: string; fontSizePx: number; textColor: string; outlineColor: string; outlineWidthPx: number;
@@ -56,6 +60,9 @@ function controls(value: EditorMediaControls): EditorControls {
     preserveSourceAudio: value.preserve_source_audio,
     inSec: value.in_sec,
     outSec: value.out_sec,
+    normalizeLoudness: value.normalize_loudness,
+    denoise: value.denoise,
+    stabilize: value.stabilize,
   };
 }
 

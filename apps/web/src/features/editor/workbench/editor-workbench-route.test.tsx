@@ -2680,7 +2680,10 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
       asset_id: `asset-${fixture}`,
       expected_revision: 7,
-      media_controls: { ducking: true, fade_in_sec: 1.25, fade_out_sec: 0.75, gain_db: -8 },
+      // 갱신 이유(2026-09-01): 소리 정리 둘(캡컷 오디오 탭 대조)이 붙었다.
+      // 이 시험이 지키는 것은 **화면에 없는 값이 저장에서 사라지지 않는가**이고,
+      // 새 둘도 정확히 그 대상이라 여기 같이 실려야 맞다.
+      media_controls: { ducking: true, fade_in_sec: 1.25, fade_out_sec: 0.75, gain_db: -8, normalize_loudness: false, denoise: false },
     }));
     expect(saveBgm.mock.calls.length + saveSfx.mock.calls.length).toBe(1);
     await expectEditorRevision(8);
@@ -2711,7 +2714,7 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
       asset_id: `asset-${fixture}`,
       expected_revision: 7,
-      media_controls: { ducking: true, fade_in_sec: 0.5, fade_out_sec: 1, gain_db: 6 },
+      media_controls: { ducking: true, fade_in_sec: 0.5, fade_out_sec: 1, gain_db: 6, normalize_loudness: false, denoise: false },
     }));
     expect(saveBgm.mock.calls.length + saveSfx.mock.calls.length).toBe(1);
     await expectEditorRevision(8);

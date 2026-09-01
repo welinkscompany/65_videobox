@@ -60,7 +60,9 @@ describe("projectInspectorTargets", () => {
       // `소리 크기`는 자체 소리를 살려 둘 때만 뜻이 있으므로 그 스위치를 같이 준다.
       // 갱신 이유(2026-08-23): 색감(`filter`)이 붙었다. 화면이 있는 클립에만
       // 붙으므로 아래 음악·효과음 목록은 그대로다.
-      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit"],
+      // 갱신 이유(2026-09-01): 손떨림 보정(`stabilize`)이 붙었다. 캡컷 동영상
+      // 탭 대조로 들어왔고, 색감과 같은 이유로 화면이 있는 클립에만 붙는다.
+      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit", "stabilize"],
       assetId: "asset-broll",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,
@@ -74,7 +76,9 @@ describe("projectInspectorTargets", () => {
       // 덕킹은 **배경 음악에만** 붙는다. 렌더러도 bgm에만 사이드체인을 건다 --
       // 효과음에 스위치를 주면 눌러도 아무 일이 없다.
       // `소리 크기`(gainDb)는 렌더러가 처음부터 읽고 있었다 -- 화면에 자리만 없었다.
-      fields: ["fadeInSec", "fadeOutSec", "ducking", "gainDb"],
+      // 갱신 이유(2026-09-01): 소리 정리 둘이 붙었다(캡컷 오디오 탭 대조).
+      // 소리가 있는 클립 전부에 붙으므로 아래 효과음 목록에도 같이 들어간다.
+      fields: ["fadeInSec", "fadeOutSec", "ducking", "gainDb", "normalizeLoudness", "denoise"],
       assetId: "asset-bgm",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,
@@ -85,7 +89,7 @@ describe("projectInspectorTargets", () => {
       label: "효과음",
       segmentId: "segment-1",
       mediaKind: "sfx",
-      fields: ["fadeInSec", "fadeOutSec", "gainDb"],
+      fields: ["fadeInSec", "fadeOutSec", "gainDb", "normalizeLoudness", "denoise"],
       assetId: "asset-sfx",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,

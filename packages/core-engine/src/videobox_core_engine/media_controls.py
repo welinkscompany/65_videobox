@@ -43,6 +43,12 @@ def normalize_media_controls(
             "fade_in_sec": fade_in_sec,
             "fade_out_sec": fade_out_sec,
             "ducking": bool(payload.get("ducking", False)),
+            # 캡컷 오디오 탭 대조로 들어온 둘(owner 승인 2026-09-01). 캡컷은 이
+            # 둘을 클라우드 AI 유료 기능으로 파는데, 우리 쪽은 FFmpeg 필터
+            # 하나씩이면 된다 -- `loudnorm`(EBU R128)과 `afftdn`.
+            # 기본값 False가 "손대지 않음"이고, 그때 렌더러는 필터를 안 더한다.
+            "normalize_loudness": bool(payload.get("normalize_loudness", False)),
+            "denoise": bool(payload.get("denoise", False)),
         }
     if media_kind == "broll":
         fit = str(payload.get("fit", "fit")).strip().lower()
@@ -83,6 +89,13 @@ def normalize_media_controls(
             "fade_out_sec": video_fade_out_sec,
             "speed": speed,
             "volume": volume,
+            # 손떨림 보정(캡컷 동영상 탭 대조, owner 승인 2026-09-01).
+            # 캡컷은 유료 AI로 파는데 FFmpeg `deshake` 하나면 된다.
+            # **`vidstab`이 아니라 `deshake`를 쓴다** -- vidstab이 더 정확하지만
+            # 2-pass라 분석 결과 파일을 따로 만들어야 하고, 이 렌더러는 필터
+            # 그래프를 한 번에 조립해 ffmpeg 한 번으로 끝내는 구조다. deshake는
+            # 단일 패스라 그 구조에 그대로 들어가고 렌더 시간도 안 늘어난다.
+            "stabilize": bool(payload.get("stabilize", False)),
         }
         # 색감(`filters.py`). **안 고른 클립에는 칸 자체를 넣지 않는다** --
         # 넣으면 옛 저장분과 모양이 달라지고, 아무것도 안 바뀐 편집본이

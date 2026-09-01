@@ -17,7 +17,16 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
         duration_sec=4.0,
     )
 
-    assert audio == {"gain_db": -6.0, "fade_in_sec": 0.5, "fade_out_sec": 0.75, "ducking": True}
+    assert audio == {
+        "gain_db": -6.0,
+        "fade_in_sec": 0.5,
+        "fade_out_sec": 0.75,
+        "ducking": True,
+        # 캡컷 오디오 탭 대조로 들어온 둘(2026-09-01). 기본값 False가
+        # "손대지 않음"이고, 그때 렌더러는 필터를 안 더한다.
+        "normalize_loudness": False,
+        "denoise": False,
+    }
     assert broll == {
         "fit": "crop",
         "loop": True,
@@ -32,7 +41,15 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
         # 버려졌고, 화면 입력이 결과에 닿지 않았다.
         "speed": 1.0,
         "volume": 1.0,
+        # 손떨림 보정(캡컷 동영상 탭 대조, 2026-09-01).
+        "stabilize": False,
     }
+    cleaned_audio = normalize_media_controls(
+        {"normalize_loudness": True, "denoise": True}, media_kind="audio", duration_sec=4.0,
+    )
+    assert cleaned_audio["normalize_loudness"] is True
+    assert cleaned_audio["denoise"] is True
+    assert normalize_media_controls({"stabilize": True}, media_kind="broll", duration_sec=4.0)["stabilize"] is True
     with pytest.raises(ValueError, match="fade"):
         normalize_media_controls({"fade_in_sec": 3.0, "fade_out_sec": 2.0}, media_kind="audio", duration_sec=4.0)
     with pytest.raises(ValueError, match="fit"):
@@ -88,6 +105,7 @@ def test_timeline_builder_carries_manual_media_controls_to_renderable_clips() ->
         "fade_out_sec": 0.0,
         "speed": 1.0,
         "volume": 1.0,
+        "stabilize": False,
     }
 
 

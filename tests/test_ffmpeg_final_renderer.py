@@ -1404,3 +1404,38 @@ def test_fast_seek_is_disabled_when_two_broll_items_share_a_clip_id(tmp_path: Pa
     command = commands[0]
     assert "-ss" not in command, f"clip_id가 겹치는데 -ss가 붙었다: {command}"
     assert "-copyts" not in command
+
+
+def test_audio_cleanup_chain_stays_empty_until_the_owner_turns_a_filter_on() -> None:
+    """캡컷 오디오 탭 대조로 들어온 둘(owner 승인 2026-09-01).
+
+    기본값에서 필터가 하나라도 붙으면 **아무것도 안 고른 편집본이 바뀐다.**
+    이 저장소가 이미 한 번 겪은 함정이라(색감 `filter` 칸) 여기서 못박는다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import _audio_cleanup_chain
+
+    assert _audio_cleanup_chain({"normalize_loudness": False, "denoise": False}) == ""
+    assert _audio_cleanup_chain({}) == ""
+    # 잡음을 먼저 걷고 음량을 맞춘다. 반대로 하면 loudnorm이 잡음까지 포함한
+    # 크기로 맞춰서, 잡음을 지운 결과가 목표보다 조용해진다.
+    assert _audio_cleanup_chain({"denoise": True, "normalize_loudness": True}) == ",afftdn,loudnorm=I=-16:TP=-1.5:LRA=11"
+    assert _audio_cleanup_chain({"denoise": True}) == ",afftdn"
+    assert _audio_cleanup_chain({"normalize_loudness": True}) == ",loudnorm=I=-16:TP=-1.5:LRA=11"
+
+
+def test_broll_transform_puts_stabilisation_before_the_size_fit(tmp_path: Path) -> None:
+    """`deshake`는 흔들린 만큼 화면을 밀어 가장자리를 비운다.
+
+    원본 해상도에서 먼저 걸어야 뒤의 `scale`·`crop`이 그 빈 자리를 함께
+    처리한다 -- 순서를 뒤집으면 출력 크기에 맞춘 그림이 다시 밀리면서 검은
+    테두리가 남는다.
+    """
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), video_width=1920, video_height=1080)
+
+    plain = renderer._broll_fit_transform({"fit": "fit"})
+    assert "deshake" not in plain
+
+    for fit_mode in ("fit", "crop"):
+        stabilised = renderer._broll_fit_transform({"fit": fit_mode, "stabilize": True})
+        assert stabilised.startswith("deshake,"), stabilised
+        assert stabilised.index("deshake") < stabilised.index("scale=")

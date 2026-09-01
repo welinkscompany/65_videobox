@@ -265,6 +265,58 @@ describe("InspectorControls", () => {
     });
   });
 
+  it("carries the CapCut-parity cleanup toggles into the save without leaking filter names", () => {
+    // 캡컷 오디오·동영상 탭 대조로 들어온 셋(owner 승인 2026-09-01). 캡컷은
+    // 클라우드 AI 유료 기능으로 파는데 우리는 FFmpeg 필터 하나씩이다.
+    // §10.13: `loudnorm`·`afftdn`·`deshake` 같은 내부 이름은 화면에 안 쓴다.
+    const onAction = vi.fn();
+    const segment = { cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 };
+    const broll: InspectorTarget = {
+      assetId: "asset-internal-broll",
+      clearOnly: false,
+      controls: { stabilize: false },
+      fields: ["stabilize"],
+      id: "clip:broll-stabilize",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-internal-current",
+    };
+
+    const rendered = render(<InspectorControls onAction={onAction} selectedSegment={segment} target={broll} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "흔들린 화면 잡아주기" }));
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: "save-media", mediaKind: "broll", controls: expect.objectContaining({ stabilize: true }),
+    }));
+    // 소리 정리 둘은 화면이 없는 클립에는 안 붙는다.
+    expect(screen.queryByRole("checkbox", { name: "소리 크기를 고르게 맞추기" })).toBeNull();
+    rendered.unmount();
+
+    const bgm: InspectorTarget = {
+      assetId: "asset-internal-bgm",
+      clearOnly: false,
+      controls: { normalizeLoudness: false, denoise: false },
+      fields: ["normalizeLoudness", "denoise"],
+      id: "clip:bgm-cleanup",
+      kind: "media",
+      label: "배경 음악",
+      mediaKind: "bgm",
+      segmentId: "segment-internal-current",
+    };
+
+    render(<InspectorControls onAction={onAction} selectedSegment={segment} target={bgm} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "소리 크기를 고르게 맞추기" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "웅웅거리는 잡음 줄이기" }));
+    fireEvent.click(screen.getByRole("button", { name: "배경 음악 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      controls: expect.objectContaining({ normalizeLoudness: true, denoise: true }),
+    }));
+    // 소리에는 화면이 없으니 손떨림 보정도 없다.
+    expect(screen.queryByRole("checkbox", { name: "흔들린 화면 잡아주기" })).toBeNull();
+    expect(document.body).not.toHaveTextContent(/loudnorm|afftdn|deshake|LUFS/i);
+  });
+
   it("gives music and effects a loudness slider in creator language and rides gainDb into the save", () => {
     // 렌더러는 처음부터 클립별 gain_db를 반영했다 -- 화면에 입력 자리만 없었다.
     // §10.13: dB는 내부 단위라 화면에 쓰지 않는다. 라벨은 `소리 크기`, 양 끝은
