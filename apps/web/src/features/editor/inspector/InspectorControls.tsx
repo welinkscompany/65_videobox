@@ -588,9 +588,13 @@ export function InspectorControls({
               {/* 변형(캡컷 동영상 탭 대조, 2026-09-01). 화면 맞춤이 "원본을 이
                   화면에 어떻게 앉힐까"라면, 이 넷은 그 뒤에 "앉힌 그림을 어떻게
                   움직일까"다 -- 그래서 화면 맞춤 바로 다음에 둔다. */}
+              {/* `확대`가 아니라 `크기`다. 이 칸은 0.5까지 내려가서 줄이기도
+                  하는데, 이름이 `확대`면 `확대: 0.5`라는 앞뒤 안 맞는 줄이 화면에
+                  남는다. 바로 위 `화면 맞춤`은 "원본을 화면에 어떻게 앉힐까"이고
+                  이건 "앉힌 그림을 얼마나 키울까"라 서로 다른 것을 묻는다. */}
               {target.fields.includes("zoom") ? (
                 <label>
-                  {`${target.label} 확대`}
+                  {`${target.label} 크기`}
                   <Input disabled={disabled} max="4" min="0.5" onChange={(event) => setZoom(numberValue(event.target.value, zoom))} step="0.05" type="number" value={zoom} />
                 </label>
               ) : null}

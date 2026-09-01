@@ -106,6 +106,10 @@ describe("YujinPanel", () => {
     // 새로 배워야 한다.
     expect(onDraftChange).toHaveBeenCalledWith("1번 장면에 어울리는 배경 음악을 넣어 줘");
     expect(onSendMessage).not.toHaveBeenCalled();
+    // 대화 스타터와 **같은 자리에 커서가 간다**. 둘은 화면에서 같은 알약 단추로
+    // 보이므로, 하나는 커서를 옮기고 다른 하나는 안 옮기면 "왜 어떤 건 바로 쓸
+    // 수 있고 어떤 건 다시 눌러야 하지"가 된다.
+    expect(screen.getByLabelText("유진에게 요청하기")).toHaveFocus();
   });
 
   // 답이 오는 중에는 권하지 않는다 -- 아직 무슨 이야기인지 모르는 채로 다음

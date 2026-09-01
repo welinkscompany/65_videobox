@@ -1465,6 +1465,26 @@ def test_legacy_path_refuses_a_stabilised_clip_instead_of_dropping_it(tmp_path: 
         )
 
 
+def test_plan_only_picture_controls_survive_a_session_with_junk_in_it() -> None:
+    """저장된 편집본에서 오는 값이라 **숫자가 아닐 수 있다.**
+
+    손으로 고쳤거나 옛 판에서 온 세션에 문자열이 들어 있으면, 여기서
+    `ValueError`가 나서 "렌더가 왜 안 되는지" 대신 엉뚱한 오류가 뜬다.
+    읽을 수 없는 값은 손대지 않은 것으로 본다 -- legacy 경로가 원래 그렇게
+    동작했으므로 못 읽어서 막지 않는 것이 새로운 손실은 아니다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import _uses_plan_only_picture_controls
+
+    assert _uses_plan_only_picture_controls(None) is False
+    assert _uses_plan_only_picture_controls({}) is False
+    assert _uses_plan_only_picture_controls({"zoom": 1.0, "rotation_deg": 0.0}) is False
+    assert _uses_plan_only_picture_controls({"zoom": "아주 크게"}) is False
+    assert _uses_plan_only_picture_controls({"zoom": 1.5}) is True
+    assert _uses_plan_only_picture_controls({"rotation_deg": -10.0}) is True
+    assert _uses_plan_only_picture_controls({"reduce_noise": True}) is True
+    assert _uses_plan_only_picture_controls({"filter": {"type": "warm"}}) is True
+
+
 def test_speed_audio_chain_only_lifts_the_pitch_when_the_owner_turns_preservation_off() -> None:
     """캡컷 속도 탭 대조(owner 승인 2026-09-01).
 

@@ -276,7 +276,13 @@ export function YujinPanel({
     && !proposal
     && state === "idle"
     && runState.kind === "idle";
-  const chooseConversationStarter = (starter: { label: string }) => {
+  /** 권한 문장을 입력칸에 채우고 커서를 거기 둔다. **보내지는 않는다** --
+   *  보낼지는 창작자가 정한다.
+   *
+   *  대화 스타터(대화 전)와 이어서 해볼 것(답변 뒤)이 같은 함수를 쓴다.
+   *  둘은 화면에서 같은 알약 단추로 보이므로, 하나는 커서를 옮기고 다른 하나는
+   *  안 옮기면 "왜 어떤 건 바로 쓸 수 있고 어떤 건 다시 눌러야 하지"가 된다. */
+  const fillComposerWith = (starter: { label: string }) => {
     onDraftChange(starter.label);
     composerContainerRef.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
   };
@@ -336,7 +342,7 @@ export function YujinPanel({
         ? <div className="vb-yujin-panel__follow-ups" role="group" aria-label="이어서 해볼 것">
           <p>이어서 해볼 것</p>
           {qualityFollowUps.map((question) => (
-            <Button key={question} type="button" variant="outline" disabled={composerDisabled} onClick={() => onDraftChange(question)}>{question}</Button>
+            <Button key={question} type="button" variant="outline" disabled={composerDisabled} onClick={() => fillComposerWith({ label: question })}>{question}</Button>
           ))}
         </div>
         : null}
@@ -435,7 +441,7 @@ export function YujinPanel({
           {showConversationStarters ? <YujinStarters
             context={{ surface: "edit", selection: hasSelectedSegment ? "segment" : "none" }}
             disabled={composerDisabled}
-            onSelect={chooseConversationStarter}
+            onSelect={fillComposerWith}
           /> : null}
         </>
         : null}

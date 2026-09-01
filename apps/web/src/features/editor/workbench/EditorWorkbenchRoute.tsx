@@ -2072,6 +2072,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onSendMessage: sendDirectorMessage,
     // 답변이 끝날 때마다 이어서 해볼 것 셋. 대화를 시작하기 전에는 대화
     // 스타터가 그 자리를 맡으므로, 주고받은 것이 있을 때만 낸다.
+    //
+    // `useMemo`로 감싸지 않았다. 이 컴포넌트는 hook을 전부 이른 반환(`state.view`
+    // 확인) 앞에 두고 있어서 여기에 hook을 새로 끼우려면 그 위로 올려야 하는데,
+    // 2,600줄짜리 컴포넌트에서 hook 순서를 옮기는 것이 이 계산을 아끼는 것보다
+    // 위험하다. 비용은 클립 수에 한 번 비례하는 정도이고(같은 렌더에서
+    // `sceneLabelsBySegmentId`가 이미 같은 일을 한다), 대화 전에는 아예 돌지 않는다.
     qualityFollowUps: activeDirector.messages.length && state.view
       ? buildQualityFollowUps({ view: state.view, selectedSegmentId: state.view.local.selectedSegmentId })
       : [],

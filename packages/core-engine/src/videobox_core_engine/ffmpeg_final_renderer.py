@@ -108,6 +108,34 @@ def _atempo_chain(speed: float) -> str:
     return ",".join(f"atempo={step}" for step in steps)
 
 
+def _uses_plan_only_picture_controls(media_controls: object) -> bool:
+    """이 클립이 **composition plan 경로에서만** 그려지는 조정을 쓰고 있는가.
+
+    legacy 경로(`_extract_segment`)는 자기 `scale/crop` 사슬을 따로 만들어서,
+    여기 열거된 것들을 조용히 버린다. 버리는 대신 멈추게 하려고 쓰는 판단이다.
+
+    **숫자를 `float()`으로 바로 까지 않는다.** 이 값은 저장된 편집본에서 오고,
+    손으로 고쳤거나 옛 판에서 온 세션에는 숫자가 아닌 것이 들어 있을 수 있다.
+    거기서 `ValueError`가 나면 "렌더가 왜 안 되는지" 대신 엉뚱한 오류가 뜬다 --
+    읽을 수 없는 값은 **손대지 않은 것으로 본다**(legacy 경로가 원래 그렇게
+    동작했으므로, 못 읽어서 막지 않는 것이 새로운 손실은 아니다).
+    """
+    if not isinstance(media_controls, dict):
+        return False
+    if media_controls.get("filter") or media_controls.get("stabilize") or media_controls.get("reduce_noise"):
+        return True
+    # 변형은 기본값이 0이 아니라 `zoom: 1.0`이라 "손댔는가"를 참·거짓으로 물을
+    # 수 없다. 기본값과 다른지로 판단한다.
+    for field, default in (("zoom", 1.0), ("position_x_percent", 0.0), ("position_y_percent", 0.0), ("rotation_deg", 0.0)):
+        try:
+            value = float(media_controls.get(field, default))
+        except (TypeError, ValueError):
+            continue
+        if value != default:
+            return True
+    return False
+
+
 def _speed_audio_chain(speed: float, controls: dict[str, Any]) -> str:
     """배속에 맞춰 소리를 늘이거나 줄이는 사슬.
 
@@ -1977,24 +2005,13 @@ class FfmpegFinalRenderer:
         # 켠 보정이 조용히 사라진 mp4가 나온다. **화면 사슬을 건드릴 때마다
         # 이 목록을 같이 늘려야 한다** -- 이 저장소가 이미 네 번 겪은 함정이다.
         if any(
-            isinstance(clip, dict) and isinstance(clip.get("media_controls"), dict)
-            and (
-                clip["media_controls"].get("filter")
-                or clip["media_controls"].get("stabilize")
-                or clip["media_controls"].get("reduce_noise")
-                # 변형은 기본값이 0이 아니라 `zoom: 1.0`이라 "손댔는가"를
-                # 참·거짓으로 물을 수 없다. 기본값과 다른지로 판단한다.
-                or float(clip["media_controls"].get("zoom", 1.0) or 1.0) != 1.0
-                or float(clip["media_controls"].get("position_x_percent", 0.0) or 0.0)
-                or float(clip["media_controls"].get("position_y_percent", 0.0) or 0.0)
-                or float(clip["media_controls"].get("rotation_deg", 0.0) or 0.0)
-            )
+            _uses_plan_only_picture_controls(clip.get("media_controls"))
             for track in timeline.get("tracks", []) if isinstance(track, dict)
-            for clip in (track.get("clips") or [])
+            for clip in (track.get("clips") or []) if isinstance(clip, dict)
         ):
             raise FinalRenderError(
-                "Clip colour looks and stabilisation render only from the composition plan. "
-                "Pass composition_plan to render this timeline."
+                "Clip colour looks, stabilisation, noise reduction, and transform render only "
+                "from the composition plan. Pass composition_plan to render this timeline."
             )
         if isinstance(timeline.get("track_states"), dict) and timeline["track_states"]:
             raise FinalRenderError(
