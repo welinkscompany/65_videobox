@@ -189,10 +189,24 @@ def build_director_proposals_router(
             session = store.get_editing_session(project_id=project_id, session_id=session_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="editing_session_missing") from exc
+        # **없으면 승인된 것으로 본다.** 이 저장소의 관례가 그것이다 --
+        # `media_ranking.py`(추천 후보를 고르는 자리)도, `director_proposal_service.py`
+        # (후보를 만드는 자리)도 `metadata.get("review_status", "approved")`로 읽는다.
+        # owner가 자기 컴퓨터에서 넣은 파일에는 검토 표시가 애초에 안 붙는다.
+        #
+        # 여기만 "있고 approved일 때만"이라 **승인 목록이 늘 비어 있었다.**
+        # 그러면 `_approved_asset_catalogue`가 "승인된 자산이 없다 --
+        # apply_media를 시도하지 마라"를 프롬프트에 싣고, 유진은 규칙대로
+        # 거절한다. 2026-09-01 실사용에서 "1번 장면에 어울리는 배경 음악을 넣어
+        # 줘"가 정확히 이렇게 막혔다 -- 말로 음악·효과음을 넣는 길이 설계상
+        # 지원 동작인데도 한 번도 성공할 수 없었다는 뜻이다.
+        #
+        # 게이트를 여는 것이 아니다. **명시적으로 `pending`·`rejected`인 자산은
+        # 그대로 빠진다** -- 비어 있는 것과 거절된 것을 가르는 것뿐이다.
         approved_assets = tuple(
             item for item in store.list_assets(project_id=project_id)
             if isinstance(item.get("metadata"), dict)
-            and str(item["metadata"].get("review_status") or "").strip().lower() == "approved"
+            and str(item["metadata"].get("review_status") or "approved").strip().lower() == "approved"
         )
         context = YujinEditingContext(
             session_id=session_id,

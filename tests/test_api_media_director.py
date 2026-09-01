@@ -3153,3 +3153,57 @@ def test_screen_chat_route_carries_owner_approved_memory_into_the_prompt(tmp_pat
     assert response.status_code == 200, response.text
     assert CapturingRuntime.prompts, "the local runtime was never called"
     assert "자막은 두 줄 이내를 선호합니다." in CapturingRuntime.prompts[0]
+
+
+def test_owner_uploaded_media_counts_as_approved_for_a_spoken_placement(tmp_path: Path) -> None:
+    """말로 음악·효과음을 넣는 길이 **한 번도 열린 적이 없었다.**
+
+    이 자리만 "`review_status`가 있고 approved일 때"로 읽고 있었는데, owner가
+    자기 컴퓨터에서 넣은 파일에는 검토 표시가 애초에 안 붙는다. 그래서 승인
+    목록이 늘 비었고, 프롬프트에 "승인된 자산이 없다 -- apply_media를 시도하지
+    마라"가 실려 유진이 규칙대로 거절했다(2026-09-01 실사용에서 확인).
+
+    저장소의 관례는 **없으면 승인**이다(`media_ranking.py`,
+    `director_proposal_service.py`). 게이트를 여는 것이 아니라 비어 있는 것과
+    거절된 것을 가르는 것이라, 명시적으로 거절된 자산은 그대로 빠져야 한다.
+    """
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "spoken placement"}).json()["project_id"]
+    source = tmp_path / "music.wav"
+    source.write_bytes(b"owner music")
+    rejected_source = tmp_path / "rejected.wav"
+    rejected_source.write_bytes(b"rejected music")
+    plain = store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=source)
+    rejected = store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=rejected_source)
+    store.update_asset_metadata(project_id=project_id, asset_id=rejected.asset_id, metadata_patch={"review_status": "rejected"})
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 배경 음악을 넣어 줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert seen_prompts, "유진에게 아무것도 안 물었다"
+    prompt = seen_prompts[-1]
+    # 검토 표시가 없는 owner 파일은 고를 수 있어야 한다.
+    assert plain.asset_id in prompt, "검토 표시 없는 자산이 승인 목록에서 빠졌다"
+    # 명시적으로 거절한 것은 그대로 빠진다 -- 게이트를 연 것이 아니다.
+    assert rejected.asset_id not in prompt, "거절한 자산이 승인 목록에 들어왔다"
+    assert "승인된 자산이 없다" not in prompt
