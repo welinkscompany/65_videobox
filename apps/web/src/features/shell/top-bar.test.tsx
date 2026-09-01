@@ -88,24 +88,37 @@ describe("위 띠", () => {
       .getAllByRole("button")
       .map((button) => button.textContent);
 
-    // 이야기(대본) → 미디어 → 편집 → 확인과 내보내기. 일이 실제로 흐르는 순서다.
-    expect(stages).toEqual(["이야기", "미디어", "편집", "확인과 내보내기"]);
+    // 이야기(대본) → 편집 → 확인과 내보내기. "미디어" 단계 단추는 없다
+    // (2026-09-01) -- 독립 화면이 편집기 도크로 접히면서 따로 갈 화면이
+    // 아니게 됐다. 편집기 도크가 이미 미디어 탭 기본값이다.
+    expect(stages).toEqual(["이야기", "편집", "확인과 내보내기"]);
   });
 
   it("지금 어느 단계인지 띠가 말한다", () => {
     renderBar({ section: "editing" });
 
     expect(screen.getByRole("button", { name: "편집" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "미디어" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "이야기" })).not.toHaveAttribute("aria-current");
+  });
+
+  // `DraftGapMedia`(안전한 return_to가 있는 갭 채우기 흐름)만 아직
+  // `section="media"`를 쓴다(2026-09-01) -- 더는 단계 하나가 아니라서
+  // 어떤 단추도 켜지 않는다.
+  it("갭 채우기 화면(section=media)은 어떤 단계 단추도 켜지 않는다", () => {
+    renderBar({ section: "media", screenName: "미디어" });
+
+    for (const label of ["이야기", "편집", "확인과 내보내기"]) {
+      expect(screen.getByRole("button", { name: label })).not.toHaveAttribute("aria-current");
+    }
   });
 
   it("단계를 누르면 그 단계로 간다", () => {
     const onNavigate = vi.fn();
     renderBar({ onNavigate });
 
-    fireEvent.click(screen.getByRole("button", { name: "미디어" }));
+    fireEvent.click(screen.getByRole("button", { name: "이야기" }));
 
-    expect(onNavigate).toHaveBeenCalledWith("a", "media");
+    expect(onNavigate).toHaveBeenCalledWith("a", "create");
   });
 
   it("프로젝트 이름이 보이고 거기서 바꿀 수 있다", () => {

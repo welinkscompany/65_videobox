@@ -17,7 +17,6 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
-import { MediaWorkspacePage } from "../features/media/MediaWorkspacePage";
 import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
 import { FootageOrganizerPage } from "../features/footage/FootageOrganizerPage";
 import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
@@ -157,6 +156,22 @@ const workspaceRoute = createRoute({
         throw redirect({ href: resolveWorkspaceLocation(params.projectId, "home"), replace: true });
       }
       throw redirect({ href: `/settings/general?project_id=${encodeURIComponent(params.projectId)}`, replace: true });
+    }
+    // **독립 "미디어" 단계 화면이 편집기 도크로 접혔다**(2026-08-27 결정
+    // §순서 2, 실행 2026-09-01). 이 stage로 오는 URL은 두 벌이다(`/media`가
+    // 정식 주소, `/assets`가 옛 이름 별칭 -- `legacyStageAliases`가 둘 다
+    // stage `assets`로 읽는다) -- 문자열로 하나만 비교하면 다른 철자로 들어온
+    // 요청을 놓친다. `DraftGapMedia`의 갭 채우기 흐름(`CreationInterview`의
+    // "미디어 추가", 안전한 `return_to`가 있을 때)만 아직 여기서 그린다 --
+    // 그 외에는 전부 편집기로 보낸다(도크가 이미 미디어 탭 기본값이다).
+    if (parseWorkspaceLocation(`/projects/${params.projectId}/${params.section}`)?.stage === "assets") {
+      const requestedReturn = typeof (search as { return_to?: unknown }).return_to === "string"
+        ? (search as { return_to: string }).return_to
+        : null;
+      if (!resolveSafeCreationReturn(params.projectId, requestedReturn)) {
+        throw redirect({ href: resolveProjectStage(params.projectId, "edit"), replace: true });
+      }
+      return;
     }
     if (params.section !== "editing") return;
     const routeSearch = search as { session_id?: unknown; segment_id?: unknown };
@@ -376,16 +391,26 @@ function ProjectsPage() {
     }
   }
   // 목소리 등록·클론은 프로젝트 자산이라(§10.15) 프로젝트 없이는 못 한다 --
-  // 대신 눈에 안 띄게 하나 만들고 바로 그 등록 자리(미디어 단계)로 보낸다.
+  // 대신 눈에 안 띄게 하나 만들고 바로 편집기(미디어 도크가 기본값)로 보낸다.
+  // **독립 "미디어" 단계 화면이 없어지면서(2026-08-27 결정 §순서 2, 실행
+  // 2026-09-01) `startBlankProject`와 같은 패턴으로 바뀌었다** -- 세션 없이
+  // 그 단계로만 보내면 `CanonicalEditorEntry`의 "아직 편집할 영상이 없어요"
+  // 화면에서 멈춘다(미디어 브라우저가 없다). 빈 세션을 직접 만들어 바로
+  // 편집기 미디어 탭으로 들어간다.
   async function startVoiceCloneProject() {
     setQuickStartBusy("voice");
     setQuickStartError(null);
     try {
       const created = await api.createProject({ name: autoProjectName("내 목소리") });
       try {
+        const session = await api.createBlankEditingSession(created.project_id);
         await router.options.context.catalog.refresh();
         await router.invalidate();
-        await navigate({ to: resolveProjectStage(created.project_id, "assets") });
+        await navigate({
+          to: "/projects/$projectId/$section",
+          params: { projectId: created.project_id, section: "editor" },
+          search: { session_id: session.session_id },
+        });
       } catch {
         // 위 두 함수와 같은 이유 -- 프로젝트는 이미 만들어졌다.
         await router.options.context.catalog.refresh();
@@ -840,13 +865,16 @@ function WorkspacePage() {
     </RoutedProductShell>;
   }
   if (stage === "assets") {
+    // 이 URL로 여기까지 왔다는 것은 `workspaceRoute`의 `beforeLoad`가 이미
+    // 안전한 `return_to`를 확인했다는 뜻이다(그렇지 않으면 edit로 리다이렉트
+    // 됐다) -- 독립 "미디어" 단계 화면은 2026-09-01에 편집기로 접혀 없어졌고,
+    // 이 분기는 `DraftGapMedia`(갭 채우기 흐름) 하나만 남는다.
     const requestedReturn = typeof (routeSearch as { return_to?: unknown }).return_to === "string"
       ? (routeSearch as { return_to: string }).return_to
       : null;
     const safeReturn = resolveSafeCreationReturn(projectId, requestedReturn);
-    if (safeReturn) return <RoutedProductShell projectId={projectId} projects={projects} section="media" onNavigate={navigateTo} onOpenSettings={openSettings}><DraftGapMedia projectId={projectId} returnTo={safeReturn} /></RoutedProductShell>;
     return <RoutedProductShell projectId={projectId} projects={projects} section="media" onNavigate={navigateTo} onOpenSettings={openSettings}>
-      <MediaWorkspacePage projectId={projectId} />
+      <DraftGapMedia projectId={projectId} returnTo={safeReturn ?? resolveProjectStage(projectId, "plan")} />
     </RoutedProductShell>;
   }
   // 검토와 출력은 한 단계다. 두 주소를 모두 살려 둔 채 같은 화면을 그린다 --
@@ -945,10 +973,13 @@ function CanonicalEditorEntry({ projectId, onNavigate }: { projectId: string; on
     {hasNoDraft ? <>
       <Button type="button" onClick={() => onNavigate(projectId, "plan")}>영상 정하러 가기</Button>
       {/* 캡컷은 열면 바로 빈 편집판이다. 기획을 건너뛰고 여기서 시작할 수 있어야 한다. */}
+      {/* "먼저 미디어부터 모으기" 버튼은 지웠다(2026-09-01, 독립 "미디어" 단계
+          화면을 편집기로 접으면서) -- 편집기 도크가 이미 미디어 탭 기본값이라
+          "빈 편집판으로 시작"이 정확히 같은 곳으로 데려간다. 둘을 남겨 두면
+          같은 동작을 하는 죽은 버튼이 하나 생긴다. */}
       <Button type="button" variant="outline" disabled={isOpeningBlank} onClick={() => void openBlankBoard()}>
         {isOpeningBlank ? "편집판을 여는 중" : "빈 편집판으로 시작"}
       </Button>
-      <Button type="button" variant="outline" onClick={() => onNavigate(projectId, "assets")}>먼저 미디어부터 모으기</Button>
       {blankError ? <p role="alert">{blankError}</p> : null}
     </> : null}
   </div>;

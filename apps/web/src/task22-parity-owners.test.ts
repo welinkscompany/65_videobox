@@ -263,7 +263,10 @@ describe("Task 22 canonical production owners", () => {
     const owners = [
       [/section === "home"/, /<HomePage\b/],
       [/stage === "plan"/, /<CreationInterview\b/],
-      [/stage === "assets"/, /<MediaWorkspacePage\b/],
+      // 독립 "미디어" 단계 화면은 편집기 도크로 접혔다(2026-09-01, 2026-08-27
+      // 결정 §순서 2 실행) -- 이 stage에는 이제 `DraftGapMedia`(갭 채우기
+      // 흐름) 하나만 남는다.
+      [/stage === "assets"/, /<DraftGapMedia\b/],
       // 검토와 출력은 한 단계로 합쳐졌다. 라우터가 가리키는 소유자는 둘을 담는
       // 화면 하나이고, 두 주소 모두 그 화면을 그린다.
       [/stage === "review" \|\| stage === "output"/, /<ReviewAndOutputPage\b/],
@@ -297,6 +300,7 @@ describe("Task 22 canonical production owners", () => {
   it("keeps every Task 22 parity row mapped to a canonical route, component test, and E2E owner", () => {
     const router = readFileSync(resolve(sourceRoot, "app/AppRouter.tsx"), "utf8");
     const shell = readFileSync(resolve(sourceRoot, "app/ProductShell.tsx"), "utf8");
+    const editorAdapters = readFileSync(resolve(sourceRoot, "features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx"), "utf8");
     const rows = [
       {
         capability: "project create/select and source ingest",
@@ -305,9 +309,11 @@ describe("Task 22 canonical production owners", () => {
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "ready-assets approval uses returned IDs"],
       },
       {
+        // 독립 "미디어" 단계 화면이 편집기 도크로 접히면서(2026-09-01) 이 능력의
+        // 주인이 라우터 stage 분기가 아니라 편집기 왼쪽 도크 어댑터로 옮겨 갔다.
         capability: "media list and recovery",
-        ownerSource: router, owner: /stage === "assets"[\s\S]{0,1000}<MediaWorkspacePage\b/,
-        componentEvidence: [["features/media/MediaWorkspacePage.test.tsx", "supports cancel, retry, and review"]],
+        ownerSource: editorAdapters, owner: /analysisPanel=\{<MediaAnalysisStatusPanel\b/,
+        componentEvidence: [["features/media/MediaAnalysisStatusPanel.test.tsx", "멈추기·다시 분석하기·태그 확인을 부르고 목록을 다시 읽는다"]],
         e2eEvidence: ["media-recovery.spec.mjs", "recovers local analysis with authoritative refreshes"],
       },
       {
@@ -380,11 +386,11 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         route: "media",
-        ownerSource: router,
-        owner: /stage === "assets"[\s\S]{0,1000}<MediaWorkspacePage\b/,
+        ownerSource: editorAdapters,
+        owner: /analysisPanel=\{<MediaAnalysisStatusPanel\b/,
         componentEvidence: [
-          ["features/media/MediaWorkspacePage.test.tsx", "shows loading, empty, failure, and refresh recovery"],
-          ["features/media/MediaWorkspacePage.test.tsx", "discards late project A results after switching to project B"],
+          ["features/media/MediaAnalysisStatusPanel.test.tsx", "확인할 분석이 없으면 아무것도 그리지 않는다"],
+          ["features/media/MediaAnalysisStatusPanel.test.tsx", "프로젝트가 바뀌면 늦게 도착한 이전 프로젝트 결과를 버린다"],
         ],
         e2eEvidence: ["media-recovery.spec.mjs", "recovers local analysis with authoritative refreshes"],
       },

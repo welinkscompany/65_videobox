@@ -202,7 +202,9 @@ describe("LibraryPage", () => {
     expect(api.ingestLibraryAssets).toHaveBeenNthCalledWith(2, [first], "broll", expect.any(String));
   });
 
-  it("takes the owner from a usage location straight to that project's assets", async () => {
+  // 독립 "미디어" 단계 화면이 편집기로 접히면서(2026-09-01) 이 링크의 목적지도
+  // 편집기로 바뀌었다 -- 그 도크가 이미 미디어 탭 기본값이다.
+  it("takes the owner from a usage location straight to that project's editor", async () => {
     vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
       library_asset_id: "user_asset_1",
       locations: [
@@ -215,10 +217,10 @@ describe("LibraryPage", () => {
     await screen.findAllByText("walk.mp4");
     fireEvent.click(screen.getByTestId("library-asset-card"));
 
-    const entry = await screen.findByRole("link", { name: "프로젝트 편집본 미디어 화면 열기" });
-    expect(entry).toHaveAttribute("href", "/projects/project_1/assets");
+    const entry = await screen.findByRole("link", { name: "프로젝트 편집본 편집기에서 열기" });
+    expect(entry).toHaveAttribute("href", "/projects/project_1/editor");
     expect(screen.getByText("묶음")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "묶음 미디어 화면 열기" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "묶음 편집기에서 열기" })).toBeNull();
   });
 
   it("previews an asset and blocks trash when the usage endpoint reports a location", async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 
+import { api } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { assetPreferenceChoice, canonicalPreferenceTag, useDirectorPreferences } from "./directorPreferences";
@@ -42,6 +43,9 @@ type Props = Readonly<{
   transcript?: ReactNode;
   /** 원본만 확인하는 자리. 미디어 탭 안에 둔다. */
   sourceCheck?: ReactNode;
+  /** 프로젝트 미디어 분석 상태. 미디어 탭 카드 목록 아래에 둔다(2026-08-27
+   *  결정 §순서 2 — 독립 "미디어" 화면의 유일한 고유 기능이라 편집기로 옮겼다). */
+  analysisPanel?: ReactNode;
   /** 최상위 탭을 여기서 대신 관리하는 부모가 있으면 준다(승인 2026-08-30
    *  버튼 단위 벤치마킹 2단계) -- 캡컷은 이 탭이 편집기 맨 위, 패널
    *  바깥에 늘 떠 있다. 주지 않으면 이 컴포넌트가 예전처럼 자기 상태로
@@ -109,7 +113,30 @@ function targetLabel(target: EditorAssetTarget | null): string {
 /** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
 const FIRST_PAGE = 8;
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, sourceCheck, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, sourceCheck, analysisPanel, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
+  const [removingCardId, setRemovingCardId] = useState<string | null>(null);
+  const [removeMessage, setRemoveMessage] = useState<string | null>(null);
+
+  async function removeFromProject(card: EditorAssetCard) {
+    const sourceLibraryAssetId = card.sourceMetadata.brollMetadata?.source_library_asset_id;
+    if (typeof sourceLibraryAssetId !== "string" || !sourceLibraryAssetId || !projectId) return;
+    setRemovingCardId(card.id);
+    setRemoveMessage(null);
+    try {
+      const usage = await api.getLibraryAssetUsage(sourceLibraryAssetId);
+      const reference = usage.locations.find((location) => location.project_id === projectId && location.materialized_asset_id === card.assetId);
+      if (!reference?.reference_id) {
+        setRemoveMessage("프로젝트 참조 위치를 찾지 못했어요. 자료실에서 상태를 확인해 주세요.");
+        return;
+      }
+      await api.removeLibraryReference(sourceLibraryAssetId, reference.reference_id);
+      await onMediaAdded?.();
+    } catch {
+      setRemoveMessage("지금은 뺄 수 없어요. 다시 시도해 주세요.");
+    } finally {
+      setRemovingCardId(null);
+    }
+  }
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
   const [uncontrolledPane, setUncontrolledPane] = useState<LeftPane>("media");
@@ -222,6 +249,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
       </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
+    {removeMessage ? <p className="vb-editor-assets__detail" role="status">{removeMessage}</p> : null}
     {taste.error ? <p className="vb-editor-assets__detail" role="status">{taste.error}</p> : null}
     {tasteReady && (excludedCreators.length || excludedTags.length) ? (
       <div className="vb-editor-assets__taste" role="group" aria-label="유진이 빼 둔 것">
@@ -395,6 +423,15 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
             {onApplyOverlay && card.previewKind === "image" ? (
               <Button type="button" aria-label={`${card.title} 화면에 얹기`} disabled={applyDisabled} onClick={() => target && onApplyOverlay(card, target.segmentId)}>화면에 얹기</Button>
             ) : null}
+            {/* 독립 "미디어" 화면(2026-08-27 결정으로 편집기에 접힘, 2026-09-01
+                실행)의 유일한 고유 동작 중 하나. 라이브러리에서 들여온 프로젝트
+                소속 영상만 뺄 수 있다 -- 프로젝트 전용 업로드는 원본에서도
+                못 뺐다(`source_library_asset_id` 없음 = 버튼 자체가 안 뜬다). */}
+            {typeof card.sourceMetadata.brollMetadata?.source_library_asset_id === "string" && card.sourceMetadata.brollMetadata.source_library_asset_id ? (
+              <Button type="button" variant="outline" disabled={removingCardId !== null} aria-label={`${card.title} 프로젝트에서 빼기`} onClick={() => void removeFromProject(card)}>
+                {removingCardId === card.id ? "빼는 중" : "프로젝트에서 빼기"}
+              </Button>
+            ) : null}
           </div>
         </article>;
       })}
@@ -407,6 +444,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 미디어가 없어요.</p> : null}
     {/* 원본만 확인하는 자리. 미디어를 다루는 탭 안에 두어야 찾을 수 있다. */}
     {pane === "media" ? sourceCheck : null}
+    {pane === "media" ? analysisPanel : null}
     </>}
   </section>;
 }

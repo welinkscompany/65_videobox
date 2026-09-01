@@ -43,7 +43,7 @@ test("an empty local catalog keeps project creation in the catalog shell", async
   await expect(page.getByRole("button", { name: "+ 새 프로젝트 만들기" })).toBeVisible();
 });
 
-test("desktop shell keeps global destinations separate from the open project's four stages", async ({ page }) => {
+test("desktop shell keeps global destinations separate from the open project's three stages", async ({ page }) => {
   // 왼쪽 기둥은 없앴다 -- 위 띠 하나가 그 일을 받는다
   // (docs/decisions/2026-08-21-capcut-shell-layout.ko.md, owner 승인 2026-08-21).
   // 구분은 그대로다: 전역 목적지는 한 겹 접힌 메뉴 안, 단계는 띠 위에 펼쳐져 있다.
@@ -60,7 +60,9 @@ test("desktop shell keeps global destinations separate from the open project's f
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
   await expect(menuTrigger).toBeFocused();
-  await expect(page.getByRole("navigation", { name: "프로젝트 단계" }).getByRole("button")).toHaveCount(4);
+  // "미디어" 단계 단추는 없다(2026-09-01) -- 독립 화면이 편집기 도크로
+  // 접히면서 따로 갈 화면이 아니게 됐다.
+  await expect(page.getByRole("navigation", { name: "프로젝트 단계" }).getByRole("button")).toHaveCount(3);
 });
 
 test("unknown project route offers canonical recovery without a project-scoped request", async ({ page }) => {
@@ -81,11 +83,14 @@ test("the top bar keeps creator navigation reachable on a narrow screen", async 
   // 좁은 화면에서도 띠는 그대로 있다. 기둥 시절에는 Sheet로 접혀 있어서 단계를
   // 누르기 전에 `메뉴 열기`를 먼저 눌러야 했다. 그 한 겹이 없어졌다.
   // Sheet와 접기 띠(`SidebarRail`)를 잡던 시험도 함께 지웠다 -- 지킬 대상이 없다.
+  //
+  // "미디어" 단계 단추는 없다(2026-09-01, 독립 화면이 편집기로 접혔다) --
+  // 남은 단계("편집") 하나로 같은 것(좁은 화면에서도 단계 단추가 바로
+  // 눌린다)을 확인한다.
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/projects/local-draft/home");
-  await page.getByRole("button", { name: "미디어" }).click();
-  await expect(page).toHaveURL(/\/projects\/local-draft\/media$/);
-  await expect(page.getByRole("heading", { name: "미디어", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "편집" }).click();
+  await expect(page).toHaveURL(/\/projects\/local-draft\/editor/);
 });
 
 test("Home start choices and settings tabs follow their visible routes", async ({ page }) => {

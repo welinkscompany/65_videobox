@@ -81,10 +81,13 @@ describe("navigation context", () => {
     });
   });
 
-  it("keeps a project edit page in its project breadcrumb and returns to materials", () => {
+  // 독립 "미디어" 단계 화면이 편집기로 접히면서(2026-09-01) `/media`가
+  // edit로 리다이렉트되게 됐다 -- fallback이 여전히 `/media`를 가리키면
+  // "뒤로"가 스스로에게 되돌아오는 루프가 된다.
+  it("keeps a project edit page in its project breadcrumb and returns to the story stage", () => {
     expect(resolveNavigationContext({ pathname: "/projects/p1/editor", projectName: "첫 영상" })).toEqual({
       screenName: "편집",
-      fallbackHref: "/projects/p1/media",
+      fallbackHref: "/projects/p1/create",
       crumbs: [
         { label: "프로젝트", href: "/projects" },
         { label: "첫 영상", href: "/projects/p1/home" },

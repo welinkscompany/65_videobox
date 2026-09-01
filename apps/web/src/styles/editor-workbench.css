@@ -122,6 +122,21 @@
 .vb-yujin-panel__proposal-meta p { margin: 0; font-size: var(--vb-text-xs); color: var(--vb-muted); }
 .vb-yujin-starters { display: grid; gap: var(--vb-space-1); padding: var(--vb-space-1) 0; }
 .vb-yujin-starters h3 { margin: 0; font-size: var(--vb-text-sm); }
+/* 프로젝트 단계 독립 "미디어" 화면이 편집기 도크로 접히며(2026-09-01) 옮겨 온
+   "분석 상태" 절 -- `.vb-yujin-panel__candidate`와 같은 좁은 도크 밀도로 맞췄다. */
+.vb-media-analysis-panel { display: grid; gap: var(--vb-space-2); margin-top: var(--vb-space-3); }
+.vb-media-analysis-panel h3 { margin: 0; font-size: var(--vb-text-sm); }
+.vb-media-analysis-panel__list { display: grid; gap: var(--vb-space-2); }
+.vb-media-analysis-panel__item {
+  display: grid;
+  gap: var(--vb-space-1);
+  padding: var(--vb-space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--vb-radius-sm);
+  font-size: var(--vb-text-xs);
+}
+.vb-media-analysis-panel__title { margin: 0; font-weight: 600; }
+.vb-media-analysis-panel__status, .vb-media-analysis-panel__error, .vb-media-analysis-panel__preview { margin: 0; color: var(--vb-muted); }
 .vb-yujin-starters > span { color: var(--muted-foreground); font-size: var(--vb-text-xs); }
 .vb-yujin-starters__list { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); }
 .vb-yujin-starters__list > button { min-height: 2rem; height: auto; padding: var(--vb-space-1) var(--vb-space-2); border-radius: 999px; color: var(--foreground); font-size: var(--vb-text-xs); line-height: 1.35; text-align: left; white-space: normal; }

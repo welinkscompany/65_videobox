@@ -14,12 +14,10 @@ import { Button } from "../../components/ui/button";
  *  미디어 탭 안에서 바로 가져온다.
  *  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md`
  *
- *  **지금 이 절차는 두 곳에 있다.** `MediaWorkspacePage`가 같은 두 단계를 자기
- *  action-token 모델 안에서 따로 돌린다. 합치지 않은 이유는 그 화면이 위 결정
- *  문서의 순서 2에서 **편집기 탭으로 접히며 없어질 예정**이라, 지금 합치면 곧
- *  버릴 것을 손보게 되기 때문이다. 감추지 않고 여기 적어 둔다 -- 그 화면이
- *  없어질 때 이 조각 하나만 남는지 반드시 확인하라. 그때까지 **업로드 절차를
- *  고치면 두 곳을 같이 고쳐야 한다.**
+ *  **이 절차가 두 곳에 있던 문제는 2026-09-01에 닫혔다.** `MediaWorkspacePage`
+ *  (독립 "미디어" 단계 화면)가 같은 두 단계를 자기 action-token 모델 안에서
+ *  따로 돌리고 있었는데, 그 화면이 위 결정 문서의 순서 2대로 편집기 탭으로
+ *  접히며 없어졌다 -- 이제 이 조각 하나만 남았다.
  */
 export function AddMediaFiles({
   projectId,

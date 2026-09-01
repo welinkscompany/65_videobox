@@ -202,12 +202,13 @@ test("every toolbar control stays reachable on a phone-width screen", async ({ p
   // 밀면 마지막 단추에 닿는다"이므로 애초에 툴바 안에서 찾는 것이 맞는 표현이었다.
   // 이름이 겹치지 않던 동안 우연히 통했을 뿐이다.
   //
-  // 겹친 이유를 남겨 둔다: 이름을 `미디어` 하나로 모으면서(owner 승인 2026-08-27)
-  // 위 띠의 단계 단추와 편집기 도크 단추가 **같은 이름**이 됐다. 하는 일은 다르다 --
-  // 하나는 미디어 화면으로 가고, 하나는 왼쪽 도크를 여닫는다. 이것은 편집기 중심
-  // 개편이 미디어 화면을 편집기 탭으로 들이면 저절로 사라진다
-  // (`docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` 순서 2).
-  // 그때까지는 두 단추가 서로 다른 landmark에 있어 화면 낭독기가 구분해 읽는다.
+  // 겹친 이유를 남겨 둔다(역사 기록): 이름을 `미디어` 하나로 모으면서(owner
+  // 승인 2026-08-27) 위 띠의 단계 단추와 편집기 도크 단추가 한때 **같은
+  // 이름**이었다. 위 띠의 "미디어" 단추는 2026-09-01에 없어졌다(독립 화면이
+  // 편집기 도크로 접힘, `2026-08-27-editor-centered-shell-direction.ko.md`
+  // 순서 2 실행) -- 이제 이 이름을 쓰는 단추는 편집기 도크 것 하나뿐이라
+  // 아래 scoped lookup은 더 이상 모호함을 피하기 위한 것이 아니라 그냥
+  // 정확한 범위 지정이다.
   const workbench = page.getByLabel("편집 작업판");
   for (const name of ["빼기", "미디어", "세부 정보"]) {
     const right = await workbench.getByRole("button", { name }).evaluate((node) => node.getBoundingClientRect().right);

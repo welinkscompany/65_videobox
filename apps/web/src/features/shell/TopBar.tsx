@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type ReactNode } from "react";
-import { ChevronLeft, ClipboardCheck, Images, Menu, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
+import { ChevronLeft, ClipboardCheck, Menu, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
 
 import { type NavigationContext } from "../../app/routeManifest";
 import { Button } from "../../components/ui/button";
@@ -28,15 +28,16 @@ const globalMenuItems: ReadonlyArray<readonly ["projects" | "library" | "footage
   ["footage", "촬영본 정리"],
 ];
 
-//: 일이 실제로 흐르는 순서. 대본을 쓰고, 미디어를 모으고, 붙이고, 내보낸다.
+//: 일이 실제로 흐르는 순서. 대본을 쓰고, 붙이고, 내보낸다.
 //
-//  이름은 `미디어` 하나로 모았다(owner 승인 2026-08-27). 같은 것을 자산·재료·
-//  소재·라이브러리로 부르던 자리가 일곱 군데였고, 한 화면 안에서 넷이 부딪혔다.
-//  캡컷 왼쪽 패널 탭이 `미디어`라 그 이름을 골랐다 -- 아는 배치를 쓰면 배우는
-//  비용이 0이다. → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md`
+//  **"미디어" 단계 단추는 뺐다(2026-09-01).** 독립 미디어 화면이 편집기
+//  도크 탭으로 접히면서(2026-08-27 결정 §순서 2 실행) 더는 따로 갈 화면이
+//  아니다 -- 편집기를 열면 그 도크가 이미 미디어 탭 기본값이다. 캡컷에도
+//  이런 중간 단계가 없다.
+//  → `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md`
+//  → `docs/decisions/2026-08-30-capcut-button-level-parity.ko.md` 9단계
 const STAGES: ReadonlyArray<readonly [string, ShellSection, typeof Video]> = [
   ["이야기", "create", Video],
-  ["미디어", "media", Images],
   ["편집", "editing", Scissors],
   ["확인과 내보내기", "review", ClipboardCheck],
 ];
@@ -99,9 +100,12 @@ export function TopBar({
   const canvasLabel = shellCanvasLabel(canvas);
 
   // 한 단계가 여러 주소를 갖는다 -- 검토와 내보내기는 한 단계이고, 홈은 이야기에 속한다.
+  // `media`는 이제 단계 띠에 없다(2026-09-01, 독립 화면이 편집기로 접혔다) --
+  // 여전히 `DraftGapMedia`(갭 채우기 흐름)가 이 section을 쓰지만, 그 화면은
+  // 더 이상 단계 하나가 아니라서 어떤 단추도 켜지 않는다(아래 `screenName`이
+  // 대신 "미디어"라고 말해 준다).
   const activeStage: ShellSection | null =
     section === "create" || section === "home" ? "create"
-    : section === "media" ? "media"
     : section === "editing" || section === "editor" ? "editing"
     : section === "review" || section === "timeline" || section === "outputs" ? "review"
     : null;

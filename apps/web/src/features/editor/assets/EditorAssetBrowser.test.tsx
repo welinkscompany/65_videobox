@@ -707,4 +707,67 @@ describe("왼쪽 도크는 한 번에 하나만 보여 준다", () => {
     fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
     expect(screen.queryByText("소스 자리")).toBeNull();
   });
+
+  it("분석 상태는 미디어 탭 안에 둔다", () => {
+    // 독립 "미디어" 단계 화면이 편집기로 접히며(2026-09-01) 옮겨 온 자리 --
+    // `소스 확인`과 같은 패턴(`sourceCheck`)으로 `analysisPanel`을 받는다.
+    render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" analysisPanel={<p>분석 자리</p>} />);
+
+    expect(screen.getByText("분석 자리")).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
+    expect(screen.queryByText("분석 자리")).toBeNull();
+  });
+});
+
+/** 독립 "미디어" 단계 화면(`MediaWorkspacePage`)이 편집기로 접히며(2026-09-01,
+ *  `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` §순서 2
+ *  실행) 그 화면의 "프로젝트에서 빼기" 동작도 여기로 옮겨 왔다. 라이브러리에서
+ *  들여온 프로젝트 소속 영상만 뺄 수 있다 -- 원본에서도 프로젝트 전용 업로드는
+ *  못 뺐다. */
+describe("편집기에서 프로젝트 미디어 빼기", () => {
+  const materializedCard: EditorAssetCard = {
+    id: "broll:asset-materialized",
+    kind: "broll",
+    assetId: "asset-materialized",
+    label: "영상 B-roll",
+    title: "공원 장면",
+    durationLabel: "5초",
+    status: "준비됨 · 검토 불필요",
+    audioPresence: "오디오 있음",
+    license: "내 영상",
+    canApply: true,
+    previewUrl: "/api/projects/project-a/assets/asset-materialized/content",
+    previewKind: "video",
+    sourceMetadata: {
+      tags: [], source: "내 영상", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "",
+      brollMetadata: { title: "공원 장면", source_library_asset_id: "user:broll:1" },
+    },
+  };
+
+  it("라이브러리에서 들여온 프로젝트 소속 카드에만 빼기 단추가 뜬다", () => {
+    render(<EditorAssetBrowser cards={[materializedCard, ...cards] as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
+
+    expect(screen.getByRole("button", { name: "공원 장면 프로젝트에서 빼기" })).toBeVisible();
+    // `cards`(고정값)에는 `source_library_asset_id`가 없다 -- 프로젝트 전용
+    // 업로드나 공용 라이브러리 자산은 뺄 원본 참조가 없어 단추 자체가 없다.
+    expect(screen.queryByRole("button", { name: "제품 사진 프로젝트에서 빼기" })).toBeNull();
+  });
+
+  it("눌러 빼면 참조만 지우고 자료실 자산은 건드리지 않는다", async () => {
+    const usage = vi.spyOn(apiModule.api, "getLibraryAssetUsage").mockResolvedValue({
+      library_asset_id: "user:broll:1",
+      locations: [{ project_id: "project-a", materialized_asset_id: "asset-materialized", reference_id: "ref-1", location: { kind: "project_asset" } }],
+    } as never);
+    const remove = vi.spyOn(apiModule.api, "removeLibraryReference").mockResolvedValue(undefined as never);
+    const trash = vi.spyOn(apiModule.api, "trashLibraryAsset");
+    const onAdded = vi.fn();
+    render(<EditorAssetBrowser cards={[materializedCard] as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" onMediaAdded={onAdded} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "공원 장면 프로젝트에서 빼기" }));
+
+    await waitFor(() => expect(usage).toHaveBeenCalledWith("user:broll:1"));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("user:broll:1", "ref-1"));
+    await waitFor(() => expect(onAdded).toHaveBeenCalled());
+    expect(trash).not.toHaveBeenCalled();
+  });
 });

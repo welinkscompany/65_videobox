@@ -603,14 +603,23 @@ describe("AppRouter URL ownership", () => {
 
   // 새 이름 주소는 여태 시험이 없었다. 화면 고르는 기준이 단계로 바뀌었으니
   // 옛 이름 주소와 **같은 화면**에 닿는지 여기서 못박는다.
+  //
+  // **독립 "미디어" 단계 화면이 편집기로 접혔다**(2026-09-01, 2026-08-27 결정
+  // §순서 2 실행) -- `/assets`도 `/media`도 이제 `return_to` 없이는 둘 다
+  // 편집기로 리다이렉트된다. "같은 화면에 닿는가"는 이제 "같은 리다이렉트
+  // 목적지로 가는가"로 확인한다.
   it("opens the same screen for a canonical stage address as for its legacy twin", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue([{ project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" }]);
-    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
-    vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [] });
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null as never);
 
     const assetsRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/assets"] }));
     render(<AppRouter router={assetsRouter} />);
-    expect(await screen.findByTestId("media-workspace-page")).toHaveAttribute("data-project-id", "project_a");
+    await waitFor(() => expect(assetsRouter.state.location.href).toBe("/projects/project_a/editor"));
+    cleanup();
+
+    const mediaRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/media"] }));
+    render(<AppRouter router={mediaRouter} />);
+    await waitFor(() => expect(mediaRouter.state.location.href).toBe("/projects/project_a/editor"));
     cleanup();
 
     const planRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/plan"] }));
@@ -618,15 +627,19 @@ describe("AppRouter URL ownership", () => {
     await screen.findByRole("heading", { name: "유진과 영상 기획을 시작해요" });
   });
 
-  it("owns ordinary media with the canonical workspace and keeps the creation return adapter narrow", async () => {
+  // 독립 "미디어" 단계 화면이 없어지면서(2026-09-01) 이 stage에는
+  // `DraftGapMedia`(안전한 `return_to`가 있을 때의 갭 채우기 흐름)만 남는다.
+  // 안전하지 않은 `return_to`와 `return_to` 자체가 없는 경우는 둘 다 편집기로
+  // 보낸다 -- 예전엔 이 둘이 갈라져서 하나는 리다이렉트, 하나는 옛 화면을
+  // 그대로 보여 줬지만 그 옛 화면이 없어졌으니 더는 가를 이유가 없다.
+  it("keeps the creation return adapter narrow, and sends everything else to the editor", async () => {
     const project = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
     vi.spyOn(api, "listProjects").mockResolvedValue([project]);
-    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
-    vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [] });
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/media"] }));
-    render(<AppRouter router={router} />);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null as never);
 
-    expect(await screen.findByTestId("media-workspace-page")).toHaveAttribute("data-project-id", "project_a");
+    const bareRouter = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/project_a/media"] }));
+    render(<AppRouter router={bareRouter} />);
+    await waitFor(() => expect(bareRouter.state.location.href).toBe("/projects/project_a/editor"));
     expect(screen.queryByRole("heading", { name: "장면 영상 추가" })).not.toBeInTheDocument();
     cleanup();
 
@@ -646,7 +659,7 @@ describe("AppRouter URL ownership", () => {
         initialEntries: [`/projects/project_a/media?return_to=${encodeURIComponent(unsafeReturn)}`],
       }));
       render(<AppRouter router={unsafeRouter} />);
-      expect(await screen.findByTestId("media-workspace-page")).toBeVisible();
+      await waitFor(() => expect(unsafeRouter.state.location.href).toBe("/projects/project_a/editor"));
       expect(screen.queryByRole("heading", { name: "장면 영상 추가" })).not.toBeInTheDocument();
       cleanup();
     }
@@ -1119,28 +1132,33 @@ describe("AppRouter URL ownership", () => {
     await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(2));
   });
 
-  it("creates a project and opens its media stage for voice registration/cloning", async () => {
+  // 독립 "미디어" 단계 화면이 편집기로 접히면서(2026-09-01) 이 지름길도
+  // `startBlankProject`와 같은 패턴(빈 세션을 만들어 곧바로 편집기로)으로
+  // 바뀌었다 -- 세션 없이 그 단계로만 보내면 편집기의 "아직 편집할 영상이
+  // 없어요" 화면에서 멈춘다(미디어 브라우저가 없다).
+  it("creates a project and opens its editor (media dock default) for voice registration/cloning", async () => {
     const created = { project_id: "project_voice", name: "내 목소리", status: "active", root_storage_uri: "local://voice" };
     vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
     const createProject = vi.spyOn(api, "createProject").mockResolvedValue(created);
+    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_voice" } as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
     fireEvent.click(await screen.findByRole("button", { name: "내 목소리 등록·클론" }));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_voice/media"));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_voice/editor"));
     expect(createProject).toHaveBeenCalled();
+    expect(createSession).toHaveBeenCalledWith("project_voice");
+    expect(router.state.location.search).toMatchObject({ session_id: "session_voice" });
   });
 
-  it("says the voice project was created when only opening its media stage fails", async () => {
-    // 위 둘과 같은 문제. 이 길은 세션을 안 만들고 카탈로그 새로고침 +
-    // 이동만 하므로, 새로고침 자체가 실패하는 경우로 재현한다.
+  it("says the voice project was created when only opening its editor fails", async () => {
+    // 위 blank-project 경로와 같은 문제(2026-08-31에 이미 겪었다) -- 세션
+    // 생성이 실패해도 프로젝트 자체는 이미 서버에 만들어졌다.
     const created = { project_id: "project_voice_orphan", name: "내 목소리", status: "active", root_storage_uri: "local://voice-orphan" };
-    const listProjects = vi.spyOn(api, "listProjects")
-      .mockResolvedValueOnce([])
-      .mockRejectedValueOnce(new Error("refresh boom"))
-      .mockResolvedValueOnce([created]);
+    const listProjects = vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
     vi.spyOn(api, "createProject").mockResolvedValue(created);
+    vi.spyOn(api, "createBlankEditingSession").mockRejectedValue(new Error("session boom"));
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
@@ -1148,7 +1166,7 @@ describe("AppRouter URL ownership", () => {
 
     expect(await screen.findByText("프로젝트는 만들어졌지만 등록 화면을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.")).toBeVisible();
     expect(router.state.location.pathname).toBe("/projects");
-    await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(2));
   });
 
   it("keeps the workspace shell when a project has no draft yet", async () => {
@@ -1267,7 +1285,7 @@ describe("AppRouter URL ownership", () => {
     // 목소리 만들기는 2026-08-16에 설정에서 자산 단계로 옮겼다. 옛 주소는 지우지 않고
     // 길만 알려 준다 — 즐겨찾기나 지난 문서로 들어오는 사람이 막다른 곳을 만나면 안 된다.
     expect(await screen.findByRole("heading", { name: "내 목소리" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "내레이션 열기" })).toHaveAttribute("href", "/projects/project_a/assets");
+    expect(screen.getByRole("link", { name: "내레이션 열기" })).toHaveAttribute("href", "/projects/project_a/editor");
     // 같은 일을 두 곳에서 하게 두지 않는다.
     expect(screen.queryByRole("region", { name: "내 목소리와 읽어보기 후보" })).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings/voice");

@@ -358,3 +358,82 @@ owner 반박(위 7단계 끝 참고) 직후 바로 착수. 카드를 어디에 �
 카드·적용 단추가 대화 로그 안에 그대로 이어져 보였다. 좁은 패널 안에서
 카드가 겹치거나 넘치지 않았다(실측: 카드 폭 272px, 패널 346px, 가로
 넘침 0건).
+
+### 9단계 완료 — 독립 "미디어" 단계 화면을 편집기 도크로 접음 (2026-09-01)
+
+owner "미디어 화면부터 대조해줘" 지시로 시작. VideoBox 안에 "미디어"라는
+이름이 두 곳(프로젝트 단계의 독립 화면 `MediaWorkspacePage`, 편집기 도크
+탭)에 있다는 게 드러났다. 2026-08-29 결정(§3)은 그때 owner에게 물어
+"이름은 그대로 두기"로 정했었지만, 더 앞선 2026-08-27 결정
+(`2026-08-27-editor-centered-shell-direction.ko.md` §순서 2)이 이미
+그 독립 화면 자체를 편집기 탭으로 접어 없애기로 승인해 둔 채 실행되지
+않고 있었다. 오늘 다시 묻자 owner가 그 계획대로 **구조적으로 합치는
+쪽**을 골랐다 — 이름을 또 바꾸는 게 아니라 화면 수 자체를 줄여서 중복을
+없앤다.
+
+**조사로 확인한 것**: `MediaWorkspacePage`의 5개 탭 중 음악·효과음·
+내레이션·가져오기 넷은 편집기 도크가 이미 같은 컴포넌트·같은 API로
+갖고 있는 진짜 중복이었다(`MediaLibraryBrowser`·`VoiceMaterialPanel`·
+`AddMediaFiles`·`ImportFromFootageInbox`). "내 영상" 탭만 편집기에 없는
+고유 기능 둘을 갖고 있었다 — "분석 상태"(`listMediaAnalysis` 등 5개
+API, 편집기 어디에도 참조 0건이었다)와 "프로젝트에서 빼기"
+(`removeLibraryReference`). 이 둘만 편집기로 옮겼다.
+
+**세션 없는 프로젝트 함정**: `stage="assets"`를 단순히 `stage="edit"`로
+리다이렉트하면 세션 없는 프로젝트는 `CanonicalEditorEntry`의 "아직
+편집할 영상이 없어요" 화면(미디어 브라우저가 없다)에서 멈춘다는 것을
+실행 전에 찾아냈다. "내 목소리 등록·클론" 빠른 시작(`startVoiceCloneProject`)
+은 원래 세션 없이 그 단계로 바로 보냈으므로, `startBlankProject`와
+같은 패턴(빈 세션을 만들어 곧바로 편집기로)으로 바꿨다. 무-초안 화면의
+"먼저 미디어부터 모으기" 버튼은 "빈 편집판으로 시작"과 정확히 같은
+동작이 되므로 지웠다(중복 버튼 방지).
+
+**한 일**:
+- `MediaAnalysisStatusPanel.tsx`(신규) — "분석 상태" 절을 그대로 옮기되
+  좁은 도크에 맞게 `.vb-yujin-panel__candidate`와 같은 밀도로 압축.
+  확인할 분석이 없으면 `null`(상시 노출 빈 문구 제거). 이름에 "Status"를
+  붙인 이유: `MediaAnalysisPanel`이라는 더 짧은 이름은 예전에 없앤 다른
+  컴포넌트가 이미 썼고 `task22-parity-owners.test.ts`가 그 이름의 부활을
+  막고 있었다.
+- `EditorAssetBrowser.tsx` — `sourceCheck`와 같은 자리·패턴으로
+  `analysisPanel` prop 추가. 카드 액션 줄에 "프로젝트에서 빼기" 추가,
+  게이팅은 원본과 동일하게 `source_library_asset_id` 존재 여부(단순
+  id 접두사가 아니다 — 잘못 게이팅하면 눌러도 실패만 하는 죽은 버튼이
+  생긴다).
+- `AppRouter.tsx` — `workspaceRoute`의 `beforeLoad`에 분기 추가:
+  미디어 URL인데 안전한 `return_to`가 없으면 edit로 리다이렉트.
+  `parseWorkspaceLocation`으로 판단해 `/assets`·`/media` 두 철자 모두
+  잡는다(문자열 하나만 비교하면 놓친다). `DraftGapMedia`(안전한
+  `return_to` 있을 때의 갭 채우기 흐름, `CreationInterview`의 "미디어
+  추가")는 그대로 둔다.
+- `TopBar.tsx` — 단계 띠 4개(이야기/미디어/편집/확인과 내보내기) →
+  3개(이야기/편집/확인과 내보내기). `activeStage`도 `media`를 더는 안
+  켠다.
+- `routeManifest.ts` — `edit` 단계의 뒤로가기 fallback을 `assets`에서
+  `plan`으로(안 그러면 `/media`가 edit로 리다이렉트되니 "뒤로"가 무한
+  루프).
+- `ProductShell.tsx`(설정 "내레이션 열기")·`LibraryPreviewPane.tsx`
+  (자산 사용처 "미디어 화면 열기")를 edit 단계로 재연결.
+- `MediaWorkspacePage.tsx`·그 테스트 삭제. `AddMediaFiles.tsx`의 낡은
+  주석("이 화면은 곧 없어질 예정") 갱신.
+
+**시험**: `task22-parity-owners.test.ts`(라우터 소유자 매핑),
+`AppRouter.test.tsx`(리다이렉트 체인, 목소리 빠른 시작), `ProductShell.test.tsx`
+·`top-bar.test.tsx`(3단계 띠), `routeManifest.test.ts`(fallback),
+`LibraryPage.test.tsx`(링크 목적지), `user-copy-policy.test.ts`(파일
+목록)까지 전부 갱신. 새 `MediaAnalysisStatusPanel.test.tsx`(5개)와
+`EditorAssetBrowser.test.tsx`의 "프로젝트에서 빼기" 2개로 잃은 커버리지를
+옮겼다. 프런트엔드 전체 1,368개, `tsc --noEmit`, production build 통과.
+
+재빌드 후 실제 프로젝트("My Project", 완성본 14개)에서 확인: 단계 띠
+3개, 편집기 미디어 탭에 "분석 상태"(준비된 것 3개 + 태그 확인 대기 1개)와
+라이브러리 소속 카드에만 "프로젝트에서 빼기"가 실제로 뜸(프로젝트 전용
+업로드 2건에는 안 뜸 — 원본과 같은 구분). `/projects/my-project/media`가
+세션이 있는 프로젝트에서도 곧바로 `editor?session_id=...`로 리다이렉트
+됨을 확인. `CreationInterview`의 "미디어 추가"(`return_to` 있음)는
+그대로 `DraftGapMedia`("장면 영상 추가" 화면)를 엶을 재확인 — 안 건드린
+경로가 정말 안 건드려졌는지 실측으로 확인.
+
+**남긴 것**: 편집기 미디어 탭 내부 구조(검색·필터·격자)를 캡컷과 더
+세밀하게 대조하는 것은 이번 범위 밖이다 — 이번은 "화면 두 개를 하나로
+합친다"였지, 남은 그 탭 자체의 캡컷 정합성 고도화가 아니다.

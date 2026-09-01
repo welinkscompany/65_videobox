@@ -2,6 +2,7 @@ import type { EditorViewModel } from "../editorViewModel";
 import type { EditorSessionSnapshot } from "../editorSnapshot";
 import { Button } from "../../../components/ui/button";
 import { EditorAssetBrowser, type EditorAssetPreviewState, type LeftPane } from "../assets/EditorAssetBrowser";
+import { MediaAnalysisStatusPanel } from "../../media/MediaAnalysisStatusPanel";
 import type { EditorAssetCard } from "../assets/editorAssetProjection";
 import type { AuditionSource } from "../preview/preview-stage";
 import { isAllowedLocalUrl } from "../../../lib/network-guard";
@@ -38,6 +39,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedS
       transitionTarget={transitionTarget} onInspectorAction={onInspectorAction}
       pane={leftPane} onPaneChange={onLeftPaneChange} renderPaneTabs={!onLeftPaneChange}
       sourceCheck={localSources.length > 0 ? <section aria-label="소스 확인" className="vb-editor-workbench__sources"><h2>소스 확인</h2><p>편집본에 적용하지 않고 원본만 확인합니다.</p><div>{localSources.map((source) => <Button key={source.id} type="button" variant="outline" onClick={() => onPreviewSource?.(source)} aria-label={`${source.label} 원본 열기`}>{source.label}</Button>)}</div></section> : null}
+      analysisPanel={<MediaAnalysisStatusPanel projectId={view.projectId} />}
       transcript={<TranscriptPanel entries={projectTranscriptEntries({ narration: view.tracks.filter((track) => track.role === "narration").flatMap((track) => track.clips.map((clip) => ({ segmentId: clip.segmentId, startSec: clip.startSec, endSec: clip.endSec }))), captions: view.captions })} isSaving={isSavingCaption} onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={playbackSec} selectedSegmentId={selectedSegmentId} />}
     />;
   }

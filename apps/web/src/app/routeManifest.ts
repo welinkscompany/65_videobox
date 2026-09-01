@@ -136,10 +136,15 @@ export function resolveNavigationContext({
           : "확인과 내보내기";
     // 돌아갈 곳은 **한 단계 앞**이다. 앞 단계를 새 이름으로 적어야 이 표가
     // 무엇을 말하는지 읽힌다 -- 주소는 `resolveProjectStage`가 정한다.
+    // `edit`의 앞은 예전엔 `assets`(미디어 단계)였지만, 그 화면이 편집기로
+    // 접히며 `assets` URL 자체가 이제 edit로 리다이렉트된다(`workspaceRoute`
+    // beforeLoad) -- 그대로 두면 "뒤로"가 스스로에게 되돌아오는 루프가 된다.
+    // 2026-09-01, `docs/decisions/2026-08-30-capcut-button-level-parity.ko.md`
+    // 9단계.
     const fallbackHref = parsed.stage === "plan"
       ? currentSegment === "home" ? resolveGlobalLocation("projects") : resolveWorkspaceLocation(parsed.projectId, "home")
       : parsed.stage === "assets" ? resolveProjectStage(parsed.projectId, "plan")
-        : parsed.stage === "edit" ? resolveProjectStage(parsed.projectId, "assets")
+        : parsed.stage === "edit" ? resolveProjectStage(parsed.projectId, "plan")
           : resolveProjectStage(parsed.projectId, "edit");
     return {
       screenName,

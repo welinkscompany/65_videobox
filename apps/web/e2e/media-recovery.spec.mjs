@@ -2,11 +2,17 @@ import { expect, test } from "./support/test-fixtures.mjs";
 
 const fakeApiBaseUrl = `http://127.0.0.1:${Number(process.env.PLAYWRIGHT_FAKE_API_PORT ?? 8000)}`;
 
-test("the canonical media workspace previews and recovers local analysis with authoritative refreshes", async ({ page }) => {
+test("the editor's media dock previews and recovers local analysis with authoritative refreshes", async ({ page }) => {
+  // 독립 "미디어" 단계 화면은 편집기 도크로 접혔다(2026-09-01,
+  // `docs/decisions/2026-08-27-editor-centered-shell-direction.ko.md` §순서 2
+  // 실행). `/projects/local-draft/media`는 이제 편집기로 리다이렉트되고
+  // (`workspaceRoute` beforeLoad -> `CanonicalEditorEntry`가 이 프로젝트의
+  // 기존 세션을 찾아 곧바로 편집기를 연다), 도크가 이미 미디어 탭 기본값이라
+  // 여기서 곧바로 같은 자산·분석 목록을 본다.
   expect((await page.request.post(`${fakeApiBaseUrl}/__e2e/reset-media`)).status()).toBe(200);
   await page.goto("/projects/local-draft/media");
 
-  await expect(page.getByRole("heading", { name: "미디어", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "미디어" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("항구 전경", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("분석을 마치지 못했어요 · 100%")).toBeVisible();
 

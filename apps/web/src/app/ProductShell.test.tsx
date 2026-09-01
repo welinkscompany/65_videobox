@@ -31,11 +31,15 @@ describe("product shell", () => {
     // 넷째는 설정이다. 화면 안에서 여는 것이라 주소가 아니라 단추로 그린다.
     expect(within(global).getByRole("button", { name: "설정" })).toBeInTheDocument();
 
+    // "미디어" 단계 단추는 없다(2026-09-01) -- 독립 화면이 편집기 도크로
+    // 접히면서 따로 갈 화면이 아니게 됐다. 편집기를 열면 그 도크가 이미
+    // 미디어 탭 기본값이다.
     const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
-    expect(within(stages).getAllByRole("button")).toHaveLength(4);
-    for (const label of ["편집", "이야기", "미디어", "확인과 내보내기"]) {
+    expect(within(stages).getAllByRole("button")).toHaveLength(3);
+    for (const label of ["편집", "이야기", "확인과 내보내기"]) {
       expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
     }
+    expect(within(stages).queryByRole("button", { name: "미디어" })).not.toBeInTheDocument();
     expect(view.container.querySelectorAll("main")).toHaveLength(1);
   });
 
@@ -87,8 +91,8 @@ describe("product shell", () => {
     render(<AppRouter router={router} />);
 
     const navigation = await screen.findByRole("navigation", { name: "프로젝트 단계" });
-    expect(within(navigation).getAllByRole("button")).toHaveLength(4);
-    for (const label of ["편집", "이야기", "미디어", "확인과 내보내기"]) {
+    expect(within(navigation).getAllByRole("button")).toHaveLength(3);
+    for (const label of ["편집", "이야기", "확인과 내보내기"]) {
       expect(within(navigation).getByRole("button", { name: label }).querySelector("svg")).toBeTruthy();
     }
   });
@@ -200,16 +204,18 @@ describe("product shell", () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  // **독립 "미디어" 단계 화면이 편집기로 접혔다**(2026-09-01) -- 그 URL은
+  // 이제 편집기로 리다이렉트되므로, "홈 화면 밖에서는 셸이 하나뿐인가"를
+  // 편집기(도크가 미디어 탭 기본값)에서 확인한다.
   it("keeps a single '새 영상 만들기' entry point outside the home screen (F-7)", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
-    vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [] });
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/media"] }));
     render(<AppRouter router={router} />);
 
-    await screen.findByTestId("media-workspace-page");
+    await screen.findByRole("button", { name: "빈 편집판으로 시작" });
 
-    expect(screen.getByRole("button", { name: "미디어" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "편집" })).toBeInTheDocument();
     expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 

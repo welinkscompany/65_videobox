@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type LibraryAsset, type LibraryUsage } from "../../api";
+import { resolveProjectStage } from "../../app/routeManifest";
 
 function filename(asset: LibraryAsset) { return String(asset.user_metadata?.filename ?? asset.asset_id ?? asset.library_asset_id); }
 
@@ -23,7 +24,7 @@ export function LibraryPreviewPane({ asset, onChanged }: { asset: LibraryAsset |
       // 어느 프로젝트인지 알면 그 프로젝트의 자산 화면으로 바로 보낸다. 위치를
       // 알려주면서 갈 길은 안 주면 owner가 다시 찾아 헤맨다.
       return <li key={`${location.project_id ?? "project"}-${index}`}>{location.project_id
-        ? <a className="vb-action-link" aria-label={`${label} 미디어 화면 열기`} href={`/projects/${encodeURIComponent(location.project_id)}/assets`}>{label}</a>
+        ? <a className="vb-action-link" aria-label={`${label} 편집기에서 열기`} href={resolveProjectStage(location.project_id, "edit")}>{label}</a>
         : label}</li>;
     })}</ul></div> : null}<div className="vb-library-preview__actions">{asset.lifecycle === "trashed" ? <>
       <button data-native-control="library-restore" type="button" onClick={() => void restore()} disabled={busy} aria-label="복원">복원</button>

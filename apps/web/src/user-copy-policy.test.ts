@@ -77,7 +77,10 @@ const previouslyCoveredUiFiles = [
   "features/jobs/JobRecovery.tsx",
   "features/jobs/HermesYujinStatus.tsx",
   "features/media/DraftGapMedia.tsx",
-  "features/media/MediaWorkspacePage.tsx",
+  // "features/media/MediaWorkspacePage.tsx"는 2026-09-01에 편집기로 접혀
+  // 없어졌다 -- 그 화면의 문구를 그리던 자리는 이제
+  // "features/media/MediaAnalysisStatusPanel.tsx"다(자동 발견 대상이라
+  // 이 손으로 적은 목록에 다시 넣을 필요는 없다).
   "features/review/TimelineReviewPage.tsx",
   "features/settings/VoiceTtsSettings.tsx",
 ];
