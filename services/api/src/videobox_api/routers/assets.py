@@ -9,6 +9,7 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 
+from videobox_core_engine.mojibake import repair_mojibake_metadata
 from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService, AssetBrowserPreviewUnsupported
 from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
@@ -41,6 +42,19 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_VOICE_SAMPLE_UPLOAD_BYTES = 128 * 1024 * 1024
 VOICE_SAMPLE_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+def _repaired_asset_response(asset: dict) -> "AssetArchiveItemResponse":
+    """자산 한 건을 화면이 읽을 모양으로. 깨진 한글 이름은 여기서 되살린다.
+
+    2026-08-20에 한 묶음으로 들어온 촬영본이 `02-µµ½Ã-Àú³á`처럼 저장돼 있어서
+    **화면에도 그대로 깨져 보였다.** 자산 이름을 바꾸는 길이 제품에 없으므로
+    저장을 고치는 대신 읽을 때 되살린다(`mojibake.py` -- 되살릴 수 있을 때만 손댄다).
+
+    세 목록(내레이션·촬영본·목소리)이 **같은 함수를 쓴다.** 세 벌로 적으면
+    한쪽만 고치는 사고가 난다 -- 이 저장소가 여러 번 겪은 일이다.
+    """
+    return AssetArchiveItemResponse(**{**asset, "metadata": repair_mojibake_metadata(asset.get("metadata"))})
 
 
 def build_assets_router(
@@ -76,7 +90,7 @@ def build_assets_router(
             assets = orchestrator.list_narration_audio_assets(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+        return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
 
     @router.post("/api/projects/{project_id}/assets/narration-audio/upload", status_code=status.HTTP_201_CREATED)
     async def upload_narration_audio(
@@ -159,7 +173,7 @@ def build_assets_router(
             assets = orchestrator.list_broll_assets(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+        return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
 
     @router.post("/api/projects/{project_id}/assets/broll-video/batch", status_code=status.HTTP_201_CREATED)
     def register_broll_assets_batch(
@@ -256,7 +270,7 @@ def build_assets_router(
             assets = orchestrator.list_voice_sample_assets(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+        return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
 
     @router.post("/api/projects/{project_id}/assets/voice-sample/upload", status_code=status.HTTP_201_CREATED)
     async def upload_voice_sample(

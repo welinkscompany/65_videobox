@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 from videobox_core_engine.director_media_focus import media_focus_for_request
+from videobox_core_engine.mojibake import repair_mojibake_metadata
 from videobox_core_engine.director_proposal_service import (
     DirectorProposalBlockedError,
     DirectorProposalService,
@@ -155,7 +156,7 @@ def _asset_label(asset: dict) -> str:
     `01-새벽-바다 · 6초 · 가로`처럼 창작자가 파일에 붙여 둔 이름이 가장 쓸모
     있다 -- 그 이름이 곧 그 사람이 그 소재를 부르는 말이기 때문이다.
     """
-    metadata = asset.get("metadata")
+    metadata = repair_mojibake_metadata(asset.get("metadata"))
     if not isinstance(metadata, dict):
         return ""
     parts: list[str] = []
