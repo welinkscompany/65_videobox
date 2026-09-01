@@ -108,6 +108,21 @@ def _atempo_chain(speed: float) -> str:
     return ",".join(f"atempo={step}" for step in steps)
 
 
+def _speed_audio_chain(speed: float, controls: dict[str, Any]) -> str:
+    """배속에 맞춰 소리를 늘이거나 줄이는 사슬.
+
+    기본은 `atempo`다 -- 길이만 바꾸고 높낮이는 그대로 둔다. 지금까지의 동작이
+    이것이었다. `preserve_pitch`를 끄면 표본율 자체를 바꿔(`asetrate`) 빨리 감은
+    테이프처럼 목소리가 올라간다. 캡컷의 `음조 유지` 스위치를 끈 소리가 그것이다.
+
+    `asetrate`는 표본율을 바꾸는 것이라 곧바로 `aresample`로 출력 표본율(48kHz)에
+    되돌린다. 되돌리지 않으면 이 조각만 다른 표본율로 남아 뒤의 믹스에서 어긋난다.
+    """
+    if controls.get("preserve_pitch", True):
+        return _atempo_chain(speed)
+    return f"asetrate={round(48000 * speed)},aresample=48000"
+
+
 def _audio_cleanup_chain(controls: dict[str, Any]) -> str:
     """켜 둔 소리 정리 필터를 `,`로 시작하는 조각으로 만든다. 없으면 빈 문자열.
 
@@ -1109,7 +1124,7 @@ class FfmpegFinalRenderer:
                 timeline_duration_sec = item.end_sec - item.start_sec
                 source_filter = f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec}"
                 if speed != 1.0:
-                    source_filter += f",{_atempo_chain(speed)}"
+                    source_filter += f",{_speed_audio_chain(speed, controls)}"
                 if volume != 1.0:
                     source_filter += f",volume={volume}"
                 if controls["loop"] and source_window_sec < timeline_duration_sec:
@@ -1690,7 +1705,7 @@ class FfmpegFinalRenderer:
                 # 걸 수 있다 -- 이 조각이 그대로 이어붙기 때문이다.
                 audio_effects = []
                 if speed != 1.0:
-                    audio_effects.append(_atempo_chain(speed))
+                    audio_effects.append(_speed_audio_chain(speed, controls))
                 if float(controls["volume"]) != 1.0:
                     audio_effects.append(f"volume={float(controls['volume'])}")
                 command += ["-map", "0:v:0", "-map", "0:a:0"]

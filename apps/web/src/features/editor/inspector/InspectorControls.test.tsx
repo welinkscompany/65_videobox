@@ -265,6 +265,40 @@ describe("InspectorControls", () => {
     });
   });
 
+  // 캡컷 속도 탭 대조(owner 승인 2026-09-01). **기본이 켜짐인 유일한 스위치다** --
+  // 지금까지의 동작이 유지였고(`atempo`), 기본값을 꺼짐으로 두면 예전에 저장한
+  // 배속 클립의 소리가 편집기를 여는 것만으로 달라진다.
+  it("keeps pitch preservation on by default and only sends it off when the creator unticks it", () => {
+    const onAction = vi.fn();
+    const segment = { cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-pitch", startSec: 1 };
+    const broll: InspectorTarget = {
+      assetId: "asset-pitch",
+      clearOnly: false,
+      controls: {},
+      fields: ["speed", "preservePitch"],
+      id: "clip:broll-pitch",
+      kind: "media",
+      label: "B-roll",
+      mediaKind: "broll",
+      segmentId: "segment-pitch",
+    };
+
+    render(<InspectorControls onAction={onAction} selectedSegment={segment} target={broll} />);
+    const toggle = screen.getByRole("checkbox", { name: "속도를 바꿔도 목소리 높낮이 그대로 두기" });
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      controls: expect.objectContaining({ preservePitch: true }),
+    }));
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      controls: expect.objectContaining({ preservePitch: false }),
+    }));
+  });
+
   it("carries the CapCut-parity cleanup toggles into the save without leaking filter names", () => {
     // 캡컷 오디오·동영상 탭 대조로 들어온 셋(owner 승인 2026-09-01). 캡컷은
     // 클라우드 AI 유료 기능으로 파는데 우리는 FFmpeg 필터 하나씩이다.

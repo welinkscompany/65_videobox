@@ -191,6 +191,10 @@ export function InspectorControls({
   const [normalizeLoudness, setNormalizeLoudness] = useState(false);
   const [denoise, setDenoise] = useState(false);
   const [stabilize, setStabilize] = useState(false);
+  // 배속을 걸 때 목소리 높낮이를 그대로 둘지. **기본이 켜짐인 유일한 스위치다** --
+  // 지금까지의 동작이 유지였고(`atempo`), 기본값을 꺼짐으로 두면 예전에 저장한
+  // 배속 클립의 소리가 편집기를 여는 것만으로 달라진다.
+  const [preservePitch, setPreservePitch] = useState(true);
   // 배경 음악·효과음의 `소리 크기`. 상태는 dB로 든다 -- 슬라이더 눈금으로 들면
   // 손대지 않은 저장이 저장돼 있던 값을 눈금에 반올림해 몰래 옮긴다.
   const [gainDb, setGainDb] = useState(0);
@@ -255,6 +259,7 @@ export function InspectorControls({
       setNormalizeLoudness(target.controls.normalizeLoudness ?? false);
       setDenoise(target.controls.denoise ?? false);
       setStabilize(target.controls.stabilize ?? false);
+      setPreservePitch(target.controls.preservePitch ?? true);
       setGainDb(target.controls.gainDb ?? 0);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
@@ -661,6 +666,20 @@ export function InspectorControls({
                   흔들린 화면 잡아주기
                 </label>
               ) : null}
+              {/* 캡컷 속도 탭 대조(2026-09-01). 끄면 빨리 감은 테이프처럼
+                  목소리가 올라간다 -- 캡컷에서 이 스위치를 꺼 본 창작자가
+                  기대하는 소리가 그것이다. 배속이 1배면 아무 차이가 없다. */}
+              {target.fields.includes("preservePitch") ? (
+                <label>
+                  <Input
+                    checked={preservePitch}
+                    disabled={disabled}
+                    onChange={(event) => setPreservePitch(event.target.checked)}
+                    type="checkbox"
+                  />
+                  속도를 바꿔도 목소리 높낮이 그대로 두기
+                </label>
+              ) : null}
               {/* `쓸 구간`을 **안 정한 것**(둘 다 0)과 **잘못 정한 것**(끝이 시작보다
                   앞)은 다르다. 예전에는 둘을 같이 취급해서, 구간을 지정하지 않은
                   B-roll은 저장 단추가 영영 잠겨 있었다 -- 배속·음량·페이드·소리
@@ -692,6 +711,7 @@ export function InspectorControls({
                     ...(target.fields.includes("normalizeLoudness") ? { normalizeLoudness } : {}),
                     ...(target.fields.includes("denoise") ? { denoise } : {}),
                     ...(target.fields.includes("stabilize") ? { stabilize } : {}),
+                    ...(target.fields.includes("preservePitch") ? { preservePitch } : {}),
                   },
                 })}
                 type="button"

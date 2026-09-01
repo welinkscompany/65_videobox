@@ -1463,3 +1463,20 @@ def test_legacy_path_refuses_a_stabilised_clip_instead_of_dropping_it(tmp_path: 
         FfmpegFinalRenderer(store=store).render_timeline_to_mp4(
             project_id=project.project_id, timeline=timeline, output_path=tmp_path / "out.mp4"
         )
+
+
+def test_speed_audio_chain_only_lifts_the_pitch_when_the_owner_turns_preservation_off() -> None:
+    """캡컷 속도 탭 대조(owner 승인 2026-09-01).
+
+    기본은 지금까지의 동작 그대로여야 한다 -- `atempo`는 길이만 바꾸고 높낮이는
+    안 건드린다. 이 기본값이 뒤집히면 예전에 저장한 배속 클립의 소리가 편집기를
+    여는 것만으로 달라진다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import _atempo_chain, _speed_audio_chain
+
+    assert _speed_audio_chain(2.0, {}) == _atempo_chain(2.0)
+    assert _speed_audio_chain(2.0, {"preserve_pitch": True}) == _atempo_chain(2.0)
+    # 껐을 때는 표본율을 바꿔 빨리 감은 테이프 소리를 낸다. 출력 표본율로
+    # 되돌리지 않으면 이 조각만 다른 표본율로 남아 뒤의 믹스에서 어긋난다.
+    assert _speed_audio_chain(2.0, {"preserve_pitch": False}) == "asetrate=96000,aresample=48000"
+    assert _speed_audio_chain(0.5, {"preserve_pitch": False}) == "asetrate=24000,aresample=48000"

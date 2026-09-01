@@ -89,6 +89,13 @@ def normalize_media_controls(
             "fade_out_sec": video_fade_out_sec,
             "speed": speed,
             "volume": volume,
+            # 배속을 걸 때 목소리 높낮이를 그대로 둘지(캡컷 속도 탭 대조,
+            # owner 승인 2026-09-01). **기본값이 True인 이유는 지금까지의
+            # 동작이 그것이기 때문이다** -- 렌더러는 처음부터 `atempo`를 써
+            # 왔고 그 필터는 높낮이를 안 건드린다. 껐을 때만 새 사슬로 간다.
+            # 끄면 빨리 감은 테이프처럼 목소리가 올라가는데, 캡컷에서
+            # 스위치를 꺼 본 창작자가 기대하는 소리가 그것이다.
+            "preserve_pitch": bool(payload.get("preserve_pitch", True)),
             # 손떨림 보정(캡컷 동영상 탭 대조, owner 승인 2026-09-01).
             # 캡컷은 유료 AI로 파는데 FFmpeg `deshake` 하나면 된다.
             # **`vidstab`이 아니라 `deshake`를 쓴다** -- vidstab이 더 정확하지만

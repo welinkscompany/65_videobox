@@ -534,6 +534,9 @@ export type EditorMediaControls = {
   /** 손떨림 보정(영상 클립). FFmpeg `deshake` -- 2-pass `vidstab`이 아니라
    *  단일 패스라 렌더 시간이 안 늘어난다. */
   stabilize?: boolean;
+  /** 배속을 걸 때 목소리 높낮이를 그대로 둘지(영상 클립). 캡컷 속도 탭 대조.
+   *  **없으면 유지가 기본**이다 -- 지금까지의 동작이 그것이었다(`atempo`). */
+  preserve_pitch?: boolean;
 };
 // 유진의 장면 전환 추천 하나. `reason`은 지금 하나뿐이다(`different_broll_asset`)
 // -- 화면이 문구를 정하고, 백엔드가 값을 지어내지 않는다는 걸 지키려고

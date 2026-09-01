@@ -84,6 +84,7 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     normalize_loudness: value.normalizeLoudness,
     denoise: value.denoise,
     stabilize: value.stabilize,
+    preserve_pitch: value.preservePitch,
   }).filter(([, item]) => item !== undefined));
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {

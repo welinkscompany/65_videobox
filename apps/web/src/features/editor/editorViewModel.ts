@@ -21,6 +21,7 @@ export type EditorControls = Readonly<{
   normalizeLoudness?: boolean;
   denoise?: boolean;
   stabilize?: boolean;
+  preservePitch?: boolean;
 }>;
 export type EditorCaptionStyle = Readonly<{
   fontFamily: string; fontSizePx: number; textColor: string; outlineColor: string; outlineWidthPx: number;
@@ -63,6 +64,7 @@ function controls(value: EditorMediaControls): EditorControls {
     normalizeLoudness: value.normalize_loudness,
     denoise: value.denoise,
     stabilize: value.stabilize,
+    preservePitch: value.preserve_pitch,
   };
 }
 

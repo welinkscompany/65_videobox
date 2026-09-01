@@ -62,7 +62,9 @@ describe("projectInspectorTargets", () => {
       // 붙으므로 아래 음악·효과음 목록은 그대로다.
       // 갱신 이유(2026-09-01): 손떨림 보정(`stabilize`)이 붙었다. 캡컷 동영상
       // 탭 대조로 들어왔고, 색감과 같은 이유로 화면이 있는 클립에만 붙는다.
-      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit", "stabilize"],
+      // 같은 날 음조 유지(`preservePitch`)도 붙었다 -- 캡컷 속도 탭 대조.
+      // 배속을 걸 수 있는 클립에만 뜻이 있으므로 아래 소리 목록에는 없다.
+      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit", "stabilize", "preservePitch"],
       assetId: "asset-broll",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,
