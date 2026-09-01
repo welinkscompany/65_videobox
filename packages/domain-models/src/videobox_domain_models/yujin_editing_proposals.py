@@ -59,6 +59,20 @@ class SetCaptionTextOperation(_SegmentOperation):
     text: str = Field(min_length=1, max_length=4096)
 
 
+class SetSceneLookOperation(_SegmentOperation):
+    """장면의 색감을 고른다.
+
+    `look`이 `Literal`이 아니라 `str`인 이유: 고를 수 있는 색감 목록은
+    `core_engine.filters.FILTER_CATALOG` 하나가 원본이고, 여기 옮겨 적으면
+    **두 벌이 갈라진다.** 목록 대조는 어차피 모든 경로가 지나는 검증기
+    (`yujin_editing_proposal_adapter`)에서 한다 -- 그쪽은 core-engine이라
+    원본 표를 그대로 읽을 수 있다.
+    """
+
+    intent: Literal["set_scene_look"]
+    look: str = Field(min_length=1, max_length=64)
+
+
 class ApplyMediaOperation(_SegmentOperation):
     intent: Literal["apply_media"]
     media_type: Literal["broll", "bgm", "sfx"]
@@ -76,6 +90,7 @@ YujinEditingOperation = Annotated[
     | SetCutActionOperation
     | ReorderSegmentsOperation
     | SetCaptionTextOperation
+    | SetSceneLookOperation
     | ApplyMediaOperation
     | RemoveMediaOperation,
     Field(discriminator="intent"),
@@ -102,6 +117,7 @@ __all__ = [
     "ReorderSegmentsOperation",
     "SetCaptionTextOperation",
     "SetCutActionOperation",
+    "SetSceneLookOperation",
     "SetSceneSpeedOperation",
     "SetSegmentBoundsOperation",
     "YujinEditingOperation",

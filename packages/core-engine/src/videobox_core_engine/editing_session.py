@@ -788,6 +788,7 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
         ReorderSegmentsOperation,
         SetCaptionTextOperation,
         SetCutActionOperation,
+        SetSceneLookOperation,
         SetSegmentBoundsOperation,
         SetSceneSpeedOperation,
     )
@@ -814,6 +815,35 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
         elif isinstance(operation, SetCaptionTextOperation):
             working = update_segment_caption(
                 session=working, segment_id=operation.segment_id, caption_text=operation.text
+            )
+        elif isinstance(operation, SetSceneLookOperation):
+            # 색감은 **화면 위에 얹는 것**이라 그 장면에 깔린 B-roll이 있어야
+            # 한다. 검증기가 미리 막지만(`scene_look_needs_broll`) 여기서도
+            # 한 번 더 본다 -- 이 함수는 미리보기 투영(`project_...`)에서도
+            # 불리고, 그 경로가 검증기를 안 지나는 날이 올 수 있다.
+            existing = next(
+                (
+                    segment.get("broll_override")
+                    for segment in working.get("segments", [])
+                    if isinstance(segment, dict) and str(segment.get("segment_id")) == operation.segment_id
+                ),
+                None,
+            )
+            if not isinstance(existing, dict) or not str(existing.get("asset_id") or "").strip():
+                raise ValueError("scene_look_needs_broll")
+            # `update_segment_broll_override`는 덮어쓰기라 지금 값을 통째로 다시
+            # 실어 보낸다. 원본 신원(해시·판)을 안 실으면 출력 검증이 그 장면을
+            # "바뀐 원본"으로 읽는다.
+            controls = dict(existing.get("media_controls") or {})
+            controls["filter"] = {"type": operation.look, "chosen_by": "yujin"}
+            for field in ("expected_content_sha256", "media_revision"):
+                if existing.get(field):
+                    controls[field] = existing[field]
+            working = update_segment_broll_override(
+                session=working,
+                segment_id=operation.segment_id,
+                asset_id=str(existing["asset_id"]),
+                media_controls=controls,
             )
         elif isinstance(operation, ApplyMediaOperation):
             if operation.media_type == "broll":

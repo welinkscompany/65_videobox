@@ -631,3 +631,61 @@ def test_ai_editing_proposal_composes_every_supported_edit_without_extra_undo_ev
     assert edited["music_override"]["asset_id"] == "music_002"
     assert edited["broll_override"] is None
     assert len(applied["undo_stack"]) == 1
+
+
+def test_ai_scene_look_keeps_the_source_identity_it_paints_over() -> None:
+    """말로 색감 바꾸기(2026-09-01). owner가 시켜 본 흐름 중 하나다.
+
+    `update_segment_broll_override`는 덮어쓰기라 지금 값을 통째로 다시 실어야
+    한다. 원본 신원(해시·판)을 안 실으면 출력 검증이 그 장면을 "바뀐 원본"으로
+    읽어서, 색만 바꿨는데 완성본이 낡았다고 나온다.
+    """
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001",
+        "expected_content_sha256": "a" * 64,
+        "media_revision": "broll-r7",
+        "media_controls": {"fit": "crop", "speed": 1.5},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "look",
+        "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_look", "segment_id": "seg_001", "look": "warm"}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    override = next(item for item in applied["segments"] if item["segment_id"] == "seg_001")["broll_override"]
+
+    assert override["asset_id"] == "broll_001"
+    assert override["expected_content_sha256"] == "a" * 64
+    assert override["media_revision"] == "broll-r7"
+    # 고른 것은 색감뿐이다. 같이 저장돼 있던 값을 조용히 되돌리지 않는다.
+    assert override["media_controls"]["fit"] == "crop"
+    assert override["media_controls"]["speed"] == 1.5
+    # 누가 골랐는지 남는다 -- 유진이 고른 것을 되돌리거나 설명하려면 출처가 있어야 한다.
+    assert override["media_controls"]["filter"] == {"type": "warm", "chosen_by": "yujin"}
+    assert len(applied["undo_stack"]) == 1
+
+
+def test_ai_scene_look_refuses_a_scene_with_no_picture_under_it() -> None:
+    """검증기가 먼저 막지만(`scene_look_needs_broll`) 여기서도 한 번 더 막는다.
+
+    이 함수는 미리보기 투영에서도 불리고, 그 경로가 검증기를 안 지나는 날이
+    올 수 있다. 그때 조용히 아무 일도 안 일어나는 것보다 멈추는 게 낫다.
+    """
+    import pytest as _pytest
+
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][1]["broll_override"] = None
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "look",
+        "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_look", "segment_id": "seg_002", "look": "mono"}],
+    })
+
+    with _pytest.raises(ValueError, match="scene_look_needs_broll"):
+        apply_yujin_editing_proposal(session=session, proposal=proposal)

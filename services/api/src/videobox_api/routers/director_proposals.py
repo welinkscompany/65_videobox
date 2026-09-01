@@ -200,6 +200,17 @@ def build_director_proposals_router(
             segment_ids=tuple(str(item["segment_id"]) for item in session.get("segments", []) if isinstance(item, dict) and item.get("segment_id")),
             approved_asset_ids=tuple(str(item["asset_id"]) for item in approved_assets),
             approved_asset_types=tuple((str(item["asset_id"]), str(item["asset_type"])) for item in approved_assets),
+            # 색감은 화면이 깔린 장면에만 걸 수 있다. 모델에게 알려 주고
+            # 검증기가 다시 막는다 -- 알려 주지 않으면 지어내고, 지어낸 것은
+            # 항상 거절돼서 "말로 보정하기"가 한 번도 성공하지 못한다
+            # (`apply_media`의 자산 목록에서 이미 겪은 그 사고다).
+            segment_ids_with_broll=tuple(
+                str(item["segment_id"])
+                for item in session.get("segments", [])
+                if isinstance(item, dict)
+                and isinstance(item.get("broll_override"), dict)
+                and str(item["broll_override"].get("asset_id") or "").strip()
+            ),
         )
         result = YujinEditingProposalService(request.app.state.local_only_runtime_service_factory(store)).create(
             project_id=project_id, instruction=body.instruction, context=context
@@ -729,6 +740,7 @@ def _editing_follow_ups(operations: tuple[object, ...]) -> list[str]:
     values = {
         "set_scene_speed": ("원래 속도로 되돌려 볼까요?", "앞뒤 장면도 같은 속도로 맞출까요?", "이 구간만 미리 볼까요?"),
         "apply_media": ("다른 분위기로 찾아볼까요?", "이 장면부터만 바꿀까요?", "효과음도 함께 넣을까요?"),
+        "set_scene_look": ("원래 색으로 되돌려 볼까요?", "앞뒤 장면도 같은 색감으로 맞출까요?", "이 구간만 미리 볼까요?"),
     }.get(intent, ())
     return [item for item in values if item][:3]
 

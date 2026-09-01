@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 
+from videobox_core_engine.filters import FILTER_CATALOG
 from videobox_core_engine.yujin_editing_proposal_adapter import (
     YujinEditingContext,
     YujinEditingResult,
@@ -20,6 +21,7 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_cut_action"}, "segment_id": {"type": "string"}, "action": {"enum": ["exclude", "restore"]}}, "required": ["intent", "segment_id", "action"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "reorder_segments"}, "segment_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["intent", "segment_ids"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_text"}, "segment_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["intent", "segment_id", "text"]},
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_look"}, "segment_id": {"type": "string"}, "look": {"enum": sorted(FILTER_CATALOG)}}, "required": ["intent", "segment_id", "look"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "apply_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}, "asset_id": {"type": "string"}}, "required": ["intent", "segment_id", "media_type", "asset_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}}, "required": ["intent", "segment_id", "media_type"]},
     ]
@@ -48,6 +50,22 @@ def _editing_response_schema(session_revision: int) -> dict[str, object]:
     }
 
 
+def _scene_look_catalogue(context: YujinEditingContext) -> str:
+    """모델이 `look` 값을 알 방법이 이것뿐이다.
+
+    `apply_media`의 자산 목록과 같은 이유다(아래 함수 주석 참고) -- 목록 없이는
+    코드를 지어낼 수밖에 없고, 지어낸 값은 검증에서 항상 막힌다. 화면에 보이는
+    한국어 이름표를 같이 줘야 "따뜻하게 해 줘"를 `warm`으로 옮길 수 있다.
+    """
+    looks = ", ".join(f"{key}({value['label']})" for key, value in sorted(FILTER_CATALOG.items()))
+    if not context.segment_ids_with_broll:
+        return f"고를 수 있는 색감: {looks}. 다만 지금은 화면이 깔린 장면이 없어 색감을 걸 수 없다."
+    return (
+        f"고를 수 있는 색감: {looks}. "
+        f"색감은 화면이 깔린 장면에만 걸 수 있다 -- 그런 장면: {', '.join(context.segment_ids_with_broll)}."
+    )
+
+
 def _approved_asset_catalogue(context: YujinEditingContext) -> str:
     """`apply_media`가 요구하는 `asset_id`를 모델이 실제로 알 방법이 이것뿐이다.
 
@@ -71,16 +89,20 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
             "operations": [{"intent": "set_scene_speed", "segment_id": context.segment_ids[-1], "rate": 2}],
         },
     }
-    # 실측(2026-08-30)으로 잡힌 결함: "B-roll 색감을 바꿔줘"처럼 허용 intent 밖의
-    # 요청에 proposal을 null로 정확히 뒀으면서도, reply_text는 예시 문장의
-    # "만들었어요" 어투를 그대로 베껴 편집이 이미 성공한 것처럼 말했다.
-    # `interpret_yujin_editing_request`는 이 reply_text를 그대로 화면에
-    # 보여준다(§ clarification) -- 예시가 성공 케이스 하나뿐이라 모델이
-    # null일 때도 같은 어투를 흉내 낼 근거가 있었다. 실패 케이스 예시를
-    # 나란히 보여줘 모델이 베낄 어투를 분리한다.
+    # 실측(2026-08-30)으로 잡힌 결함: 허용 intent 밖의 요청에 proposal을 null로
+    # 정확히 뒀으면서도, reply_text는 예시 문장의 "만들었어요" 어투를 그대로 베껴
+    # 편집이 이미 성공한 것처럼 말했다. `interpret_yujin_editing_request`는 이
+    # reply_text를 그대로 화면에 보여준다(§ clarification) -- 예시가 성공 케이스
+    # 하나뿐이라 모델이 null일 때도 같은 어투를 흉내 낼 근거가 있었다. 실패
+    # 케이스 예시를 나란히 보여줘 모델이 베낄 어투를 분리한다.
+    #
+    # **예시를 갈아 끼웠다(2026-09-01).** 예전 예시는 "색감 보정을 지원하지
+    # 않아요"였는데 그날 색감(`set_scene_look`)을 지원 목록에 넣었다 -- 그대로
+    # 두면 방금 만든 기능을 거절하라고 가르치는 예시가 된다. 실제로 허용 intent
+    # 밖에 있고 앞으로도 그럴 것(자막 글꼴은 오른쪽 패널의 자막 설정이다)으로 바꾼다.
     no_proposal_example = {
         "schema_version": "videobox.yujin-editing-response.v1",
-        "reply_text": "지금 대화 편집으로는 색감 보정을 지원하지 않아요. 오른쪽 패널의 B-roll 색감 메뉴에서 직접 골라 주세요.",
+        "reply_text": "지금 대화 편집으로는 자막 글꼴을 바꿀 수 없어요. 오른쪽 패널의 자막 설정에서 직접 골라 주세요.",
         "proposal": None,
     }
     return (
@@ -88,7 +110,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "반드시 JSON 객체 하나만 출력하고 Markdown, 코드 블록, 설명문을 섞지 마라. "
         "proposal 안에는 현재 장면 ID만 쓰고, base_session_revision은 아래 값과 정확히 같아야 한다. "
         "허용 intent는 set_scene_speed, set_segment_bounds, set_cut_action, reorder_segments, "
-        "set_caption_text, apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "set_caption_text, set_scene_look, apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
         # 완성본에서 빼는 것이었다. 한국어 "빼다"는 둘 다 되므로 어느 쪽인지를
@@ -101,6 +123,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "apply_media의 asset_id는 반드시 아래 승인된 자산 목록에 있는 값만 써야 한다 -- 없는 값을 지어내면 항상 거절된다. "
         f"현재 장면 ID: {', '.join(context.segment_ids)}. 현재 revision: {context.session_revision}. "
         f"{_approved_asset_catalogue(context)} "
+        f"{_scene_look_catalogue(context)} "
         f"proposal이 있을 때 출력 예시: {json.dumps(success_example, ensure_ascii=False)}. "
         f"proposal이 없을 때 출력 예시: {json.dumps(no_proposal_example, ensure_ascii=False)}. "
         f"창작자 요청: {instruction}"

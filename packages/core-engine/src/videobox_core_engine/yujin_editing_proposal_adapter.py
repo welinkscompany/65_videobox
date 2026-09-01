@@ -9,9 +9,11 @@ from typing import Literal
 
 from pydantic import ValidationError
 
+from videobox_core_engine.filters import FILTER_TYPES
 from videobox_domain_models.yujin_editing_proposals import (
     ApplyMediaOperation,
     ReorderSegmentsOperation,
+    SetSceneLookOperation,
     YujinEditingProposal,
     YujinEditingResponse,
 )
@@ -39,6 +41,10 @@ class YujinEditingContext:
     segment_ids: tuple[str, ...]
     approved_asset_ids: tuple[str, ...] = ()
     approved_asset_types: tuple[tuple[str, str], ...] = ()
+    #: 지금 화면(B-roll)이 깔려 있는 장면들. 색감은 그 위에 얹는 것이라
+    #: 화면 없는 장면에는 걸 수 없다 -- 여기서 막지 않으면 적용 단계에서
+    #: 터지고, 창작자에게는 "적용하지 못했어요"라는 말만 남는다.
+    segment_ids_with_broll: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -126,6 +132,11 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
         if key in operation_targets:
             return "duplicate_conflicting_operation"
         operation_targets.add(key)
+        if isinstance(operation, SetSceneLookOperation):
+            if operation.look not in FILTER_TYPES:
+                return "scene_look_not_available"
+            if operation.segment_id not in set(context.segment_ids_with_broll):
+                return "scene_look_needs_broll"
         if isinstance(operation, ApplyMediaOperation):
             if operation.asset_id not in set(context.approved_asset_ids):
                 return "media_asset_not_approved"

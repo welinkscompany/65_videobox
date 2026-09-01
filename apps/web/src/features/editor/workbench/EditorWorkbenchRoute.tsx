@@ -11,6 +11,7 @@ import { createEditorCommandPort, type EditorCommandPort } from "../editorComman
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
+import { sceneFilterLabel } from "../inspector/sceneFilters";
 import { sceneLabelsBySegmentId, sceneNumbersBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
@@ -2272,6 +2273,13 @@ function yujinEditingOperationSummary(operation: YujinEditingProposal["diff"]["o
     return operation.intent === "apply_media" ? `골라 둔 ${what}을 넣어요.` : `넣어 둔 ${what}을 빼요.`;
   }
   if (operation.intent === "set_segment_bounds") return "장면 길이를 조정해요.";
+  // 색감은 코드가 아니라 화면에 쓰는 이름으로 적는다(§10.13). 목록에 없는
+  // 코드는 검증기가 막으므로 여기 오지 않지만, 와도 코드를 그대로 내보이지
+  // 않는다 -- 창작자에게 `vintage`는 아무 뜻이 없다.
+  if (operation.intent === "set_scene_look") {
+    const label = typeof operation.look === "string" ? sceneFilterLabel(operation.look) : null;
+    return label ? `색감을 ${label} 바꿔요.` : "색감을 바꿔요.";
+  }
   if (operation.intent === "reorder_segments") return "장면 순서를 바꿔요.";
   return "편집 항목을 바꿔요.";
 }

@@ -31,6 +31,12 @@ export const SCENE_FILTER_CHOICES: readonly SceneFilterChoice[] = [
 /** 안 고른 상태. 값이 없는 것과 "없음"을 고른 것을 화면에서 구별하지 않는다. */
 export const SCENE_FILTER_NONE = "none";
 
-// 이름표를 돌려주는 helper는 두지 않는다. 전환 쪽에 같은 모양의
-// `sceneTransitionLabel`이 있는데 부르는 곳이 하나도 없다 -- 쓸 자리가 생기면
-// 그때 만든다. 안 쓰는 것을 미리 두면 다음 사람이 "어디서 쓰나" 찾게 된다.
+/** 색감 코드를 화면 문구로. 목록에 없으면 `null`.
+ *
+ *  예전에는 여기 "쓸 자리가 생기면 그때 만든다"고 적어 두고 helper를 두지
+ *  않았다. 2026-09-01에 자리가 생겼다 -- 유진이 말로 색감을 바꾸면 완료
+ *  목록에 무엇을 했는지 적어야 하는데, `vintage`는 창작자에게 아무 뜻이
+ *  없다(§10.13: 내부 코드를 화면에 쓰지 않는다). */
+export function sceneFilterLabel(value: string): string | null {
+  return SCENE_FILTER_CHOICES.find((choice) => choice.value === value)?.label ?? null;
+}

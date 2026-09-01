@@ -119,3 +119,39 @@ def test_unknown_operation_and_unsupported_speed_are_rejected() -> None:
 
     assert interpret_yujin_editing_request(unknown, _context()).reason == "invalid_editing_response"
     assert interpret_yujin_editing_request(unsupported_rate, _context()).reason == "invalid_editing_response"
+
+
+def test_scene_look_needs_a_real_look_and_a_scene_that_has_picture() -> None:
+    """말로 색감 바꾸기(2026-09-01). owner가 실제로 시켜 본 흐름 중 하나다.
+
+    색감은 화면 위에 얹는 것이라 그 장면에 B-roll이 깔려 있어야 한다. 여기서
+    막지 않으면 적용 단계에서 터지고, 창작자에게는 "적용하지 못했어요"라는
+    말만 남는다.
+    """
+    context = YujinEditingContext(
+        session_id="session-1",
+        session_revision=3,
+        segment_ids=("seg-1", "seg-2"),
+        segment_ids_with_broll=("seg-1",),
+    )
+
+    def response(segment_id: str, look: str) -> dict[str, object]:
+        return {
+            "schema_version": "videobox.yujin-editing-response.v1",
+            "reply_text": "색감을 바꾸는 편집안을 만들었어요.",
+            "proposal": {
+                "proposal_id": "candidate",
+                "base_session_revision": 3,
+                "operations": [{"intent": "set_scene_look", "segment_id": segment_id, "look": look}],
+            },
+        }
+
+    accepted = interpret_yujin_editing_request(response("seg-1", "warm"), context)
+    assert accepted.status == "candidate_only"
+    assert accepted.proposal is not None
+    assert accepted.proposal.operations[0].look == "warm"
+
+    # 화면이 없는 장면에는 걸 수 없다.
+    assert interpret_yujin_editing_request(response("seg-2", "warm"), context).reason == "scene_look_needs_broll"
+    # 표에 없는 색감은 지어낸 것이다. 그대로 흘러가면 필터 그래프에 들어간다.
+    assert interpret_yujin_editing_request(response("seg-1", "teal_dream"), context).reason == "scene_look_not_available"
