@@ -1744,7 +1744,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
    *  변경 한 건으로 쌓이고, 무엇이 바뀌었는지 완료 목록에 남는다. 편집 요청이
    *  아니었으면 편집안이 만들어지지 않으므로(`proposal: null`) 아무 일도 없다. */
   const interpretAndApplySpokenEdit = async (instruction: string) => {
-    if (!sessionId || !state.view || activeDirector.editingProposal || activeDirector.editingProposalCreating) return;
+    // 여기서 `activeDirector.editingProposal`을 보지 않는다. 이 값은 **보내기
+    // 이전 화면**의 것이고, 보내기가 이미 그것을 지웠다(`submitDirectorMessage`:
+    // "새 요청은 대화 맥락을 바꾸므로 이전 지시에서 나온 후보를 적용하게 두지
+    // 않는다"). 옛 값으로 막으면 화면에 후보가 떠 있던 상태에서 보낸 **첫
+    // 메시지만** 조용히 적용되지 않는다 -- 사람이 재현하기 어려운 종류의 결함이다.
+    if (!sessionId || !state.view) return;
     const epoch = routeEpoch.current.value;
     const revision = currentEditorRevision.current;
     if (revision === null) return;

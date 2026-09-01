@@ -4274,6 +4274,7 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(createEditingProposal).toHaveBeenCalledTimes(1));
     expect(applyEditingProposal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "이 대화로 편집안 만들기" }));
+    await screen.findByText("편집안을 준비했어요.");
 
     await screen.findByText("편집안을 준비했어요.");
     expect(createEditingProposal).toHaveBeenCalledWith("project-a", "session-a", { instruction: "두 번째 장면을 빠르게" });
@@ -4284,8 +4285,13 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.change(composer, { target: { value: "세 번째 장면도 다듬어 줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
 
+    // 새 요청은 이전 지시에서 나온 후보를 지운다.
     await waitFor(() => expect(screen.queryByText("편집안을 준비했어요.")).toBeNull());
-    expect(screen.getByRole("button", { name: "이 대화로 편집안 만들기" })).toBeEnabled();
+    // 그리고 **그 메시지도 자동 해석을 거친다.** 화면에 후보가 떠 있던 상태에서
+    // 보낸 메시지를 보내기 이전 값으로 막으면 첫 메시지만 조용히 빠진다 --
+    // 사람이 재현하기 어려운 종류의 결함이다.
+    await waitFor(() => expect(createEditingProposal).toHaveBeenCalledTimes(3));
+    expect(createEditingProposal).toHaveBeenLastCalledWith("project-a", "session-a", { instruction: "세 번째 장면도 다듬어 줘" });
   });
 
   // 후보 결과 미리보기(Task 3). 2026-08-26까지 `이 구간 미리보기`는 **저장된
