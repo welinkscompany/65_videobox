@@ -89,6 +89,13 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "proposal 안에는 현재 장면 ID만 쓰고, base_session_revision은 아래 값과 정확히 같아야 한다. "
         "허용 intent는 set_scene_speed, set_segment_bounds, set_cut_action, reorder_segments, "
         "set_caption_text, apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
+        # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
+        # 완성본에서 빼는 것이었다. 한국어 "빼다"는 둘 다 되므로 어느 쪽인지를
+        # 여기서 못박는다 -- 대화 편집이 곧바로 적용되는 지금은 잘못 읽으면
+        # 되돌리기까지 가야 한다.
+        "'장면을 빼줘/지워줘/없애줘'처럼 **장면 자체**를 빼라는 말은 set_cut_action(action=exclude)이다. "
+        "remove_media는 '이 장면의 영상만 빼줘', '배경 음악만 빼줘'처럼 **그 장면에 깔아 둔 미디어**를 지목했을 때만 쓴다. "
         "proposal이 null이면 reply_text에 '만들었다/적용했다/바꿨다'처럼 편집이 이미 일어난 것으로 쓰지 않는다 -- "
         "왜 후보를 못 만드는지 설명하거나 필요한 정보를 되묻는 문장만 쓴다. "
         "apply_media의 asset_id는 반드시 아래 승인된 자산 목록에 있는 값만 써야 한다 -- 없는 값을 지어내면 항상 거절된다. "

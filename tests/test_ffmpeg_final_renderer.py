@@ -1439,3 +1439,27 @@ def test_broll_transform_puts_stabilisation_before_the_size_fit(tmp_path: Path) 
         stabilised = renderer._broll_fit_transform({"fit": fit_mode, "stabilize": True})
         assert stabilised.startswith("deshake,"), stabilised
         assert stabilised.index("deshake") < stabilised.index("scale=")
+
+
+def test_legacy_path_refuses_a_stabilised_clip_instead_of_dropping_it(tmp_path: Path) -> None:
+    """렌더 경로가 둘인데 `deshake`는 그래프 쪽에만 붙는다.
+
+    legacy 경로의 `_extract_segment`는 자기 `scale/crop` 사슬을 따로 만들어서,
+    켜 둔 보정이 **조용히 사라진 mp4**가 나온다. 색감(`filter`)이 이미 같은
+    이유로 여기서 멈추고 있었다 -- 손떨림 보정도 같은 자리에서 멈춰야 한다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="stabilise-guard")
+    timeline = {
+        "tracks": [
+            {"track_type": "broll", "clips": [{
+                "asset_uri": "asset://missing", "start_sec": 0.0, "end_sec": 1.0,
+                "media_controls": {"stabilize": True},
+            }]},
+        ],
+    }
+
+    with pytest.raises(FinalRenderError, match="composition_plan"):
+        FfmpegFinalRenderer(store=store).render_timeline_to_mp4(
+            project_id=project.project_id, timeline=timeline, output_path=tmp_path / "out.mp4"
+        )

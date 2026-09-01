@@ -2264,7 +2264,13 @@ function yujinEditingOperationSummary(operation: YujinEditingProposal["diff"]["o
   if (operation.intent === "set_scene_speed" && typeof operation.rate === "number") return `${operation.rate}배로 속도를 바꿔요.`;
   if (operation.intent === "set_cut_action") return "장면 포함 여부를 바꿔요.";
   if (operation.intent === "set_caption_text") return "자막을 고쳐요.";
-  if (operation.intent === "apply_media" || operation.intent === "remove_media") return "승인된 미디어 배치를 바꿔요.";
+  // 넣는 것과 빼는 것을 한 줄로 뭉치지 않는다. 말로 시킨 편집은 창작자가 `적용`을
+  // 누르지 않으므로 **이 줄이 무엇을 했는지 알려 주는 유일한 자리다**(2026-09-01
+  // 실사용 확인: "승인된 미디어 배치를 바꿔요"만 보고는 넣었는지 뺐는지 알 수 없었다).
+  if (operation.intent === "apply_media" || operation.intent === "remove_media") {
+    const what = operation.media_type === "bgm" ? "배경 음악" : operation.media_type === "sfx" ? "효과음" : "영상";
+    return operation.intent === "apply_media" ? `골라 둔 ${what}을 넣어요.` : `넣어 둔 ${what}을 빼요.`;
+  }
   if (operation.intent === "set_segment_bounds") return "장면 길이를 조정해요.";
   if (operation.intent === "reorder_segments") return "장면 순서를 바꿔요.";
   return "편집 항목을 바꿔요.";

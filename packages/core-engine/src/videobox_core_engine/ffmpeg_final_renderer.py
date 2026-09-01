@@ -1897,18 +1897,23 @@ class FfmpegFinalRenderer:
                 "Scene transitions render only from the composition plan. "
                 "Pass composition_plan to render this timeline."
             )
-        # 색감과 눈·음소거도 **같은 이유로** 여기서 멈춘다. 이 경로의
+        # 색감·손떨림 보정과 눈·음소거도 **같은 이유로** 여기서 멈춘다. 이 경로의
         # `_extract_segment`는 자기 `scale/crop` 사슬을 따로 만들고 색감을 안
         # 붙이며, 트랙 상태도 안 읽는다. 전환만 막아 두고 이 둘을 열어 두면
         # 같은 사고를 셋째·넷째로 내는 것이다(2026-08-23 코드리뷰 지적).
+        #
+        # 손떨림 보정(2026-09-01)은 바로 그 다섯째가 될 뻔했다. `deshake`를
+        # `_broll_fit_transform`에만 넣고 이 경로를 잊었는데, 그러면 화면에서
+        # 켠 보정이 조용히 사라진 mp4가 나온다. **화면 사슬을 건드릴 때마다
+        # 이 목록을 같이 늘려야 한다** -- 이 저장소가 이미 네 번 겪은 함정이다.
         if any(
             isinstance(clip, dict) and isinstance(clip.get("media_controls"), dict)
-            and clip["media_controls"].get("filter")
+            and (clip["media_controls"].get("filter") or clip["media_controls"].get("stabilize"))
             for track in timeline.get("tracks", []) if isinstance(track, dict)
             for clip in (track.get("clips") or [])
         ):
             raise FinalRenderError(
-                "Clip colour looks render only from the composition plan. "
+                "Clip colour looks and stabilisation render only from the composition plan. "
                 "Pass composition_plan to render this timeline."
             )
         if isinstance(timeline.get("track_states"), dict) and timeline["track_states"]:
