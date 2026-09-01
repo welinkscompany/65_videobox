@@ -64,7 +64,10 @@ describe("projectInspectorTargets", () => {
       // 탭 대조로 들어왔고, 색감과 같은 이유로 화면이 있는 클립에만 붙는다.
       // 같은 날 음조 유지(`preservePitch`)도 붙었다 -- 캡컷 속도 탭 대조.
       // 배속을 걸 수 있는 클립에만 뜻이 있으므로 아래 소리 목록에는 없다.
-      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit", "stabilize", "preservePitch"],
+      // 같은 날 변형 넷(`zoom`/`positionXPercent`/`positionYPercent`/`rotationDeg`)도
+      // 붙었다 -- 캡컷 동영상 탭의 `확대·위치·회전`. 클립 전체에 한 번 걸리는
+      // 고정 값이고, 임의 키프레임은 계획서가 범위 밖으로 못박은 항목이다.
+      fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit", "stabilize", "preservePitch", "zoom", "positionXPercent", "positionYPercent", "rotationDeg"],
       assetId: "asset-broll",
       controls: { fadeInSec: 0.25, fadeOutSec: 0.5, gainDb: -4, ducking: true },
       clearOnly: false,

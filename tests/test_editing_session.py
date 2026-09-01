@@ -980,7 +980,7 @@ def test_partial_music_and_sfx_fade_updates_preserve_audio_controls_and_asset_id
         "asset_uri": "local://projects/project_001/assets/music_001",
         "expected_content_sha256": "a" * 64,
         "media_revision": "music-r2",
-        "media_controls": {"gain_db": -8.0, "fade_in_sec": 1.0, "fade_out_sec": 0.75, "ducking": True},
+        "media_controls": {"gain_db": -8.0, "fade_in_sec": 1.0, "fade_out_sec": 0.75, "ducking": True, "normalize_loudness": False, "denoise": False},
     }
     sfx_override = dict(updated["segments"][0]["sfx_override"])
     assert sfx_override.pop("source_action_id").startswith("action:sfx_override:")
@@ -989,7 +989,7 @@ def test_partial_music_and_sfx_fade_updates_preserve_audio_controls_and_asset_id
         "asset_uri": "local://projects/project_001/assets/sfx_001",
         "expected_content_sha256": "b" * 64,
         "media_revision": "sfx-r3",
-        "media_controls": {"gain_db": -3.0, "fade_in_sec": 0.3, "fade_out_sec": 0.5, "ducking": False},
+        "media_controls": {"gain_db": -3.0, "fade_in_sec": 0.3, "fade_out_sec": 0.5, "ducking": False, "normalize_loudness": False, "denoise": False},
     }
 
 

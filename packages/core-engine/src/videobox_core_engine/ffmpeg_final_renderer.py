@@ -785,6 +785,51 @@ class FfmpegFinalRenderer:
         frames_per_second = float(numerator) / float(denominator) if separator else float(numerator)
         return 1.0 / frames_per_second if frames_per_second > 0 else 1.0 / 30.0
 
+    def _broll_placement_chain(self, controls: dict[str, Any]) -> str:
+        """확대·위치·회전을 `,`로 시작하는 조각으로 만든다. 손대지 않았으면 빈 문자열.
+
+        들어올 때 그림은 이미 출력 크기(W×H)라, 여기서는 전부 화면 기준이다.
+
+        `pad`가 사이에 있는 이유: 1보다 작게 줄이면 그림이 화면보다 작아지는데,
+        그 상태로 `crop`을 걸면 잘라낼 자리가 모자라 ffmpeg가 거절한다. 화면
+        크기까지 검게 채워 두면 줄이든 키우든 같은 사슬이 그대로 통한다.
+
+        비어 있을 때 아무것도 안 더하는 것이 중요하다 -- 이 저장소는 기본값이
+        조용히 필터를 더해 "아무것도 안 고른 편집본이 바뀌는" 사고를 이미 겪었다.
+        """
+        zoom = float(controls.get("zoom", 1.0) or 1.0)
+        offset_x_percent = float(controls.get("position_x_percent", 0.0) or 0.0)
+        offset_y_percent = float(controls.get("position_y_percent", 0.0) or 0.0)
+        rotation_deg = float(controls.get("rotation_deg", 0.0) or 0.0)
+        chain = ""
+        if rotation_deg:
+            # 크기는 그대로 두고 돌린다. 생긴 빈 모서리는 검게 채운다 --
+            # 뒤에 오는 확대로 감출 수 있고, 감출지는 창작자가 정한다.
+            chain += f",rotate={rotation_deg}*PI/180:fillcolor=black"
+        if zoom != 1.0 or offset_x_percent or offset_y_percent:
+            width, height = self.video_width, self.video_height
+            # 화면 크기의 백분율이다. 오른쪽·아래가 양수 -- 화면 좌표와 같은 방향이라
+            # `50`을 넣으면 반 화면만큼 오른쪽으로 간다.
+            shift_x = round(width * offset_x_percent / 100.0)
+            shift_y = round(height * offset_y_percent / 100.0)
+            if zoom != 1.0:
+                chain += f",scale=iw*{zoom}:ih*{zoom}"
+            # **밀어낼 만큼 자리를 먼저 만든다.** 화면 크기까지만 채우면 확대하지
+            # 않은 그림은 딱 화면만 해서 잘라낼 여유가 없고, ffmpeg는 crop 위치를
+            # 조용히 화면 안으로 당겨 버린다 -- 창작자가 위치를 옮겨도 아무 일도
+            # 안 일어나는 화면이 된다(2026-09-01 실측으로 확인). 양쪽으로 밀 수
+            # 있어야 하므로 밀 거리의 두 배를 더한다.
+            #
+            # 부호를 식에 그대로 넣으면 `--480` 같은 두 겹 빼기가 나온다. 파서가
+            # 받아 주더라도 사람이 읽고 틀렸다고 판단할 모양이라 한 항으로 만든다.
+            canvas_width = width + 2 * abs(shift_x)
+            canvas_height = height + 2 * abs(shift_y)
+            chain += (
+                f",pad=max(iw\\,{canvas_width}):max(ih\\,{canvas_height}):(ow-iw)/2:(oh-ih)/2:black"
+                f",crop={width}:{height}:(iw-{width})/2{-shift_x:+d}:(ih-{height})/2{-shift_y:+d}"
+            )
+        return chain
+
     def _broll_fit_transform(self, controls: dict[str, Any]) -> str:
         """화면 클립을 출력 크기에 맞추는 방법. 전환 양쪽도 **같은 것**을 써야 한다.
 
@@ -806,6 +851,12 @@ class FfmpegFinalRenderer:
                 f"{stabilize}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
                 f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
             )
+        # 변형(확대·위치·회전)은 **화면 크기를 맞춘 뒤에** 온다. 앞에서 이미
+        # 출력 크기(W×H)가 되어 있으므로 여기서부터는 화면 기준으로 셈할 수 있다.
+        # 순서는 회전 → 확대 → 위치다. 회전을 먼저 걸어야 그 뒤의 확대가
+        # 회전으로 생긴 검은 모서리를 밀어낼 수 있다 -- 캡컷에서도 기울인 뒤
+        # 조금 키워 모서리를 감춘다.
+        transform += self._broll_placement_chain(controls)
         # 색감(`filters.py`)을 **여기서** 붙인다. 이 함수가 전환 양쪽에도 쓰이므로
         # (위 docstring 참고) 여기 붙이면 전환 중에도 같은 색이 유지된다.
         # 다른 데 붙였다가는 전환 1초 동안만 색이 튄다 -- `fit`이 어긋났을 때와
@@ -1923,7 +1974,16 @@ class FfmpegFinalRenderer:
         # 이 목록을 같이 늘려야 한다** -- 이 저장소가 이미 네 번 겪은 함정이다.
         if any(
             isinstance(clip, dict) and isinstance(clip.get("media_controls"), dict)
-            and (clip["media_controls"].get("filter") or clip["media_controls"].get("stabilize"))
+            and (
+                clip["media_controls"].get("filter")
+                or clip["media_controls"].get("stabilize")
+                # 변형은 기본값이 0이 아니라 `zoom: 1.0`이라 "손댔는가"를
+                # 참·거짓으로 물을 수 없다. 기본값과 다른지로 판단한다.
+                or float(clip["media_controls"].get("zoom", 1.0) or 1.0) != 1.0
+                or float(clip["media_controls"].get("position_x_percent", 0.0) or 0.0)
+                or float(clip["media_controls"].get("position_y_percent", 0.0) or 0.0)
+                or float(clip["media_controls"].get("rotation_deg", 0.0) or 0.0)
+            )
             for track in timeline.get("tracks", []) if isinstance(track, dict)
             for clip in (track.get("clips") or [])
         ):

@@ -1480,3 +1480,43 @@ def test_speed_audio_chain_only_lifts_the_pitch_when_the_owner_turns_preservatio
     # 되돌리지 않으면 이 조각만 다른 표본율로 남아 뒤의 믹스에서 어긋난다.
     assert _speed_audio_chain(2.0, {"preserve_pitch": False}) == "asetrate=96000,aresample=48000"
     assert _speed_audio_chain(0.5, {"preserve_pitch": False}) == "asetrate=24000,aresample=48000"
+
+
+def test_broll_placement_chain_stays_empty_until_the_owner_moves_something(tmp_path: Path) -> None:
+    """변형(캡컷 동영상 탭 `확대·위치·회전`, owner 승인 2026-09-01).
+
+    손대지 않은 클립에 사슬이 하나라도 붙으면 **아무것도 안 고른 편집본이
+    바뀐다.** 이 저장소가 색감 칸에서 이미 겪은 함정이라 여기서 못박는다.
+    """
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), video_width=1080, video_height=1920)
+
+    assert renderer._broll_placement_chain({}) == ""
+    assert renderer._broll_placement_chain({"zoom": 1.0, "position_x_percent": 0.0, "position_y_percent": 0.0, "rotation_deg": 0.0}) == ""
+    # 손대지 않은 클립은 화면 맞춤 사슬만 남는다.
+    assert renderer._broll_fit_transform({"fit": "fit"}).count("crop=") == 0
+
+
+def test_broll_placement_chain_rotates_before_it_zooms_and_pans(tmp_path: Path) -> None:
+    """회전을 먼저 걸어야 그 뒤의 확대가 회전으로 생긴 검은 모서리를 밀어낸다.
+
+    줄이는 쪽(`zoom < 1`)에는 `pad`가 반드시 있어야 한다 -- 화면보다 작아진
+    그림에 `crop`을 걸면 잘라낼 자리가 모자라 ffmpeg가 통째로 거절한다.
+    """
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), video_width=1080, video_height=1920)
+
+    chain = renderer._broll_placement_chain({"zoom": 2.0, "rotation_deg": 15.0})
+    assert chain.index("rotate=") < chain.index("scale=iw*2.0")
+    assert chain.index("scale=iw*2.0") < chain.index("crop=1080:1920")
+
+    shrunk = renderer._broll_placement_chain({"zoom": 0.5})
+    assert r"pad=max(iw\,1080):max(ih\,1920)" in shrunk
+    assert shrunk.index("pad=") < shrunk.index("crop=")
+
+    # 위치는 화면 크기의 백분율이다. 오른쪽·아래가 양수라 화면 좌표와 방향이 같다.
+    panned = renderer._broll_placement_chain({"position_x_percent": 50.0, "position_y_percent": -25.0})
+    assert "crop=1080:1920:(iw-1080)/2-540:(ih-1920)/2+480" in panned
+    # **밀어낼 자리를 먼저 만든다.** 화면 크기까지만 채우면 확대하지 않은 그림은
+    # 딱 화면만 해서 잘라낼 여유가 없고, ffmpeg가 crop 위치를 조용히 화면 안으로
+    # 당겨 버린다 -- 위치를 옮겨도 아무 일도 안 일어나는 화면이 된다(2026-09-01
+    # 실측). 양쪽으로 밀 수 있어야 하므로 밀 거리의 두 배를 더한다.
+    assert r"pad=max(iw\,2160):max(ih\,2880)" in panned

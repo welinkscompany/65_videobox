@@ -46,6 +46,11 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
         # 배속에 목소리 높낮이를 딸려 보낼지. 기본이 켜짐인 유일한 스위치다 --
         # 지금까지의 동작이 유지였다(`atempo`).
         "preserve_pitch": True,
+        # 변형(캡컷 동영상 탭 `확대·위치·회전`). 손대지 않음이 기본값이다.
+        "zoom": 1.0,
+        "position_x_percent": 0.0,
+        "position_y_percent": 0.0,
+        "rotation_deg": 0.0,
     }
     cleaned_audio = normalize_media_controls(
         {"normalize_loudness": True, "denoise": True}, media_kind="audio", duration_sec=4.0,
@@ -112,6 +117,11 @@ def test_timeline_builder_carries_manual_media_controls_to_renderable_clips() ->
         # 배속에 목소리 높낮이를 딸려 보낼지. 기본이 켜짐인 유일한 스위치다 --
         # 지금까지의 동작이 유지였다(`atempo`).
         "preserve_pitch": True,
+        # 변형(캡컷 동영상 탭 `확대·위치·회전`). 손대지 않음이 기본값이다.
+        "zoom": 1.0,
+        "position_x_percent": 0.0,
+        "position_y_percent": 0.0,
+        "rotation_deg": 0.0,
     }
 
 

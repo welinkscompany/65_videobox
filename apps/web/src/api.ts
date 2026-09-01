@@ -537,6 +537,12 @@ export type EditorMediaControls = {
   /** 배속을 걸 때 목소리 높낮이를 그대로 둘지(영상 클립). 캡컷 속도 탭 대조.
    *  **없으면 유지가 기본**이다 -- 지금까지의 동작이 그것이었다(`atempo`). */
   preserve_pitch?: boolean;
+  /** 변형(영상 클립). 캡컷 동영상 탭 `확대·위치·회전` 대조. 클립 전체에 한 번
+   *  걸리는 고정 값이다 -- 임의 키프레임은 계획서가 범위 밖으로 못박았다. */
+  zoom?: number;
+  position_x_percent?: number;
+  position_y_percent?: number;
+  rotation_deg?: number;
 };
 // 유진의 장면 전환 추천 하나. `reason`은 지금 하나뿐이다(`different_broll_asset`)
 // -- 화면이 문구를 정하고, 백엔드가 값을 지어내지 않는다는 걸 지키려고

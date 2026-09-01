@@ -22,6 +22,10 @@ export type EditorControls = Readonly<{
   denoise?: boolean;
   stabilize?: boolean;
   preservePitch?: boolean;
+  zoom?: number;
+  positionXPercent?: number;
+  positionYPercent?: number;
+  rotationDeg?: number;
 }>;
 export type EditorCaptionStyle = Readonly<{
   fontFamily: string; fontSizePx: number; textColor: string; outlineColor: string; outlineWidthPx: number;
@@ -65,6 +69,10 @@ function controls(value: EditorMediaControls): EditorControls {
     denoise: value.denoise,
     stabilize: value.stabilize,
     preservePitch: value.preserve_pitch,
+    zoom: value.zoom,
+    positionXPercent: value.position_x_percent,
+    positionYPercent: value.position_y_percent,
+    rotationDeg: value.rotation_deg,
   };
 }
 

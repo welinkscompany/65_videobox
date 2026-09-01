@@ -21,6 +21,19 @@ def _finite_control_number(value: object) -> float:
 # 렌더러에서 터진다 -- 거절은 사용자 가까운 쪽에서 한 번 더 하는 게 맞다.
 SPEED_RANGE = (0.25, 4.0)
 VOLUME_RANGE = (0.0, 2.0)
+# 변형(캡컷 동영상 탭 `확대·위치·회전`). 위와 같은 이유로 화면 입력과 **같은**
+# 경계다. 위치는 화면 크기에 대한 백분율이라 한 화면만큼 밀면 끝이고, 회전은
+# 반 바퀴면 양쪽 방향이 다 나온다.
+ZOOM_RANGE = (0.5, 4.0)
+POSITION_PERCENT_RANGE = (-100.0, 100.0)
+ROTATION_DEGREE_RANGE = (-180.0, 180.0)
+
+
+def _bounded(value: object, bounds: tuple[float, float], label: str) -> float:
+    parsed = _finite_control_number(value)
+    if not bounds[0] <= parsed <= bounds[1]:
+        raise ValueError(f"{label} must be between {bounds[0]} and {bounds[1]}.")
+    return parsed
 
 
 def normalize_media_controls(
@@ -96,6 +109,15 @@ def normalize_media_controls(
             # 끄면 빨리 감은 테이프처럼 목소리가 올라가는데, 캡컷에서
             # 스위치를 꺼 본 창작자가 기대하는 소리가 그것이다.
             "preserve_pitch": bool(payload.get("preserve_pitch", True)),
+            # 변형(캡컷 동영상 탭 대조, owner 승인 2026-09-01). **키프레임이
+            # 아니다** -- 클립 전체에 한 번 걸리는 고정 값이고, 임의 키프레임은
+            # 계획서 §2.1이 범위 밖으로 못박은 항목이다(`implementation-plan` §4).
+            # 기본값(1.0 / 0 / 0)이 "손대지 않음"이고 그때 렌더러는 사슬을
+            # 더하지 않는다 -- 아무것도 안 고른 편집본이 바뀌면 안 된다.
+            "zoom": _bounded(payload.get("zoom", 1.0), ZOOM_RANGE, "B-roll zoom"),
+            "position_x_percent": _bounded(payload.get("position_x_percent", 0.0), POSITION_PERCENT_RANGE, "B-roll position_x_percent"),
+            "position_y_percent": _bounded(payload.get("position_y_percent", 0.0), POSITION_PERCENT_RANGE, "B-roll position_y_percent"),
+            "rotation_deg": _bounded(payload.get("rotation_deg", 0.0), ROTATION_DEGREE_RANGE, "B-roll rotation_deg"),
             # 손떨림 보정(캡컷 동영상 탭 대조, owner 승인 2026-09-01).
             # 캡컷은 유료 AI로 파는데 FFmpeg `deshake` 하나면 된다.
             # **`vidstab`이 아니라 `deshake`를 쓴다** -- vidstab이 더 정확하지만

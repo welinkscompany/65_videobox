@@ -195,6 +195,12 @@ export function InspectorControls({
   // 지금까지의 동작이 유지였고(`atempo`), 기본값을 꺼짐으로 두면 예전에 저장한
   // 배속 클립의 소리가 편집기를 여는 것만으로 달라진다.
   const [preservePitch, setPreservePitch] = useState(true);
+  // 변형(캡컷 동영상 탭 `확대·위치·회전`). 손대지 않음이 1.0 / 0 / 0 / 0이고,
+  // 렌더러는 그때 사슬을 하나도 더하지 않는다.
+  const [zoom, setZoom] = useState(1);
+  const [positionXPercent, setPositionXPercent] = useState(0);
+  const [positionYPercent, setPositionYPercent] = useState(0);
+  const [rotationDeg, setRotationDeg] = useState(0);
   // 배경 음악·효과음의 `소리 크기`. 상태는 dB로 든다 -- 슬라이더 눈금으로 들면
   // 손대지 않은 저장이 저장돼 있던 값을 눈금에 반올림해 몰래 옮긴다.
   const [gainDb, setGainDb] = useState(0);
@@ -260,6 +266,10 @@ export function InspectorControls({
       setDenoise(target.controls.denoise ?? false);
       setStabilize(target.controls.stabilize ?? false);
       setPreservePitch(target.controls.preservePitch ?? true);
+      setZoom(target.controls.zoom ?? 1);
+      setPositionXPercent(target.controls.positionXPercent ?? 0);
+      setPositionYPercent(target.controls.positionYPercent ?? 0);
+      setRotationDeg(target.controls.rotationDeg ?? 0);
       setGainDb(target.controls.gainDb ?? 0);
     }
     if (target?.kind === "caption") setCaptionStyle(target.style);
@@ -573,6 +583,33 @@ export function InspectorControls({
                   </NativeSelect>
                 </label>
               ) : null}
+              {/* 변형(캡컷 동영상 탭 대조, 2026-09-01). 화면 맞춤이 "원본을 이
+                  화면에 어떻게 앉힐까"라면, 이 넷은 그 뒤에 "앉힌 그림을 어떻게
+                  움직일까"다 -- 그래서 화면 맞춤 바로 다음에 둔다. */}
+              {target.fields.includes("zoom") ? (
+                <label>
+                  {`${target.label} 확대`}
+                  <Input disabled={disabled} max="4" min="0.5" onChange={(event) => setZoom(numberValue(event.target.value, zoom))} step="0.05" type="number" value={zoom} />
+                </label>
+              ) : null}
+              {target.fields.includes("positionXPercent") ? (
+                <label>
+                  {`${target.label} 좌우 위치`}
+                  <Input disabled={disabled} max="100" min="-100" onChange={(event) => setPositionXPercent(numberValue(event.target.value, positionXPercent))} step="1" type="number" value={positionXPercent} />
+                </label>
+              ) : null}
+              {target.fields.includes("positionYPercent") ? (
+                <label>
+                  {`${target.label} 위아래 위치`}
+                  <Input disabled={disabled} max="100" min="-100" onChange={(event) => setPositionYPercent(numberValue(event.target.value, positionYPercent))} step="1" type="number" value={positionYPercent} />
+                </label>
+              ) : null}
+              {target.fields.includes("rotationDeg") ? (
+                <label>
+                  {`${target.label} 기울이기`}
+                  <Input disabled={disabled} max="180" min="-180" onChange={(event) => setRotationDeg(numberValue(event.target.value, rotationDeg))} step="1" type="number" value={rotationDeg} />
+                </label>
+              ) : null}
               {target.fields.includes("volume") ? (
                 <label>
                   {`${target.label} 소리 크기`}
@@ -712,6 +749,10 @@ export function InspectorControls({
                     ...(target.fields.includes("denoise") ? { denoise } : {}),
                     ...(target.fields.includes("stabilize") ? { stabilize } : {}),
                     ...(target.fields.includes("preservePitch") ? { preservePitch } : {}),
+                    ...(target.fields.includes("zoom") ? { zoom } : {}),
+                    ...(target.fields.includes("positionXPercent") ? { positionXPercent } : {}),
+                    ...(target.fields.includes("positionYPercent") ? { positionYPercent } : {}),
+                    ...(target.fields.includes("rotationDeg") ? { rotationDeg } : {}),
                   },
                 })}
                 type="button"

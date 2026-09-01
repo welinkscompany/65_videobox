@@ -1376,6 +1376,19 @@ class EditorMediaControlsResponse(BaseModel):
     # 색감(`filters.py`). 이 모델은 `extra="forbid"`라 여기 없으면 색감이 실린
     # 클립의 응답이 통째로 터진다 -- 조용히 빠지는 게 아니다.
     filter: dict[str, str] | None = None
+    # 캡컷 대조로 들어온 것들(2026-09-01). **바로 위 경고가 가리키는 자리가
+    # 여기다** -- `normalize_media_controls`에 칸을 늘리면 이 모델도 같이
+    # 늘려야 한다. 2026-09-01에 손떨림 보정을 넣으면서 실제로 빠뜨렸고,
+    # 그 클립의 설정을 한 번 저장한 뒤로는 편집기 화면이 통째로 안 열렸다.
+    # 화면·단위 테스트로는 안 잡히고 전체 pytest에서만 나왔다.
+    normalize_loudness: bool | None = None
+    denoise: bool | None = None
+    stabilize: bool | None = None
+    preserve_pitch: bool | None = None
+    zoom: float | None = None
+    position_x_percent: float | None = None
+    position_y_percent: float | None = None
+    rotation_deg: float | None = None
     model_config = {"extra": "forbid"}
 
 
