@@ -417,6 +417,22 @@ describe("PreviewStage", () => {
     expect(play).toHaveBeenCalledTimes(1);
   });
 
+  it("pauses in place instead of jumping the playhead back to zero (owner report, 2026-09-01)", () => {
+    // 스페이스로 멈출 때 `stopActiveMedia`(소스 전환용 함수)를 재사용했더니
+    // 재생 위치가 0초로 튀는 실사용 버그가 있었다 -- 여기서는 순수 pause만
+    // 부르고 위치를 안 건드리는지 확인한다.
+    render(<PreviewStage {...current} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const pause = vi.spyOn(media, "pause").mockImplementation(() => undefined);
+    Object.defineProperty(media, "paused", { configurable: true, value: false });
+    Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 7.5 });
+
+    fireEvent.keyDown(document.body, { key: " " });
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(media.currentTime).toBe(7.5);
+  });
+
   it("leaves the space bar alone while the creator is typing or on a control", () => {
     // 글을 쓰다 스페이스를 누르면 띄어쓰기여야 한다. 단추 위에서는 그 단추를
     // 누르는 것이고 -- 여기서 가로채면 접근성이 깨진다.

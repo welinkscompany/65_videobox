@@ -815,6 +815,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         const clipShortName = formatClipShortName(rect.lane, ordinalInLane, clipContent);
         return <div
         aria-label={`${clipDisplayName} 클립`}
+        className="vb-timeline-clip"
         data-clip-id={rect.clipId}
         data-end-seconds={displayBounds ? formatSeconds(displayBounds.endSec) : undefined}
         data-selected={isSelected || isTranscriptSelected ? "true" : "false"}
@@ -853,6 +854,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       /> : null}<button data-native-control="timeline-clip-select"
         aria-label={clipDisplayName}
         aria-pressed={isSelected || isTranscriptSelected}
+        className="vb-timeline-clip__select"
         onClick={(event) => { event.stopPropagation(); selectClip(rect, event.shiftKey); }}
         onKeyDown={(event) => {
           if (event.key !== "Enter" && event.key !== " ") return;

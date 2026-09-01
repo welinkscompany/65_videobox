@@ -172,7 +172,14 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
     if (media.paused) {
       const attempt = media.play();
       if (attempt && typeof attempt.catch === "function") void attempt.catch(() => undefined);
-    } else stopActiveMedia();
+    } else {
+      // **일시정지는 위치를 지키지 않는다** -- `stopActiveMedia`(소스를 바꿀 때
+      // 쓰는 함수)를 여기서도 재사용했더니 스페이스로 멈출 때마다 재생 위치가
+      // 0초로 튀었다(owner 실사용 제보, 2026-09-01). 소스 전환(`showExact`/
+      // `showAudition`)은 위치 초기화가 맞는 동작이라 그쪽은 그대로 둔다 --
+      // 여기는 순수 일시정지만 한다.
+      try { media.pause(); } catch { /* 이미 해제된 미디어일 수 있다 */ }
+    }
   };
   const onStageKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== " " && event.key !== "Enter") return;
