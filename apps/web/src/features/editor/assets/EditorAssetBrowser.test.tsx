@@ -112,6 +112,31 @@ describe("EditorAssetBrowser", () => {
     expect(container.querySelectorAll("audio, video")).toHaveLength(0);
   });
 
+  // 캡컷 미디어 탭 대조(2026-09-01). 도크가 좁아 카드를 한 줄에 하나씩 쌓으면
+  // 열 개를 보려고 계속 굴려야 한다. **기본은 지금까지의 모양(줄)이다** --
+  // 기본값을 바꾸면 쓰던 사람의 화면이 어느 날 갑자기 달라진다.
+  it("remembers the chosen view mode and never squeezes a sound row into a grid column", () => {
+    try { window.localStorage.removeItem("videobox.editor-assets.view-mode"); } catch { /* 저장이 막힌 브라우저 */ }
+    const { container, unmount } = render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+
+    const cardsBox = () => container.querySelector(".vb-editor-assets__cards");
+    expect(screen.getByRole("button", { name: "줄로 보기" })).toHaveAttribute("aria-pressed", "true");
+    expect(cardsBox()).not.toHaveClass("vb-editor-assets__cards--grid");
+
+    fireEvent.click(screen.getByRole("button", { name: "격자로 보기" }));
+    expect(cardsBox()).toHaveClass("vb-editor-assets__cards--grid");
+    unmount();
+
+    // 다시 열어도 고른 방식이 남아 있어야 "전환"이지 "매번 다시 고르기"가 아니다.
+    render(<EditorAssetBrowser cards={cards} target={{ segmentId: "seg-1", startSec: 3, endSec: 7 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "격자로 보기" })).toHaveAttribute("aria-pressed", "true");
+    // 소리는 격자에서도 줄로 남는다 -- 앨범 그림 + 곡명 + 길이를 반으로 자르면
+    // 읽을 수 없게 된다. CSS가 `grid-column: 1 / -1`로 한 줄을 통째로 준다.
+    openAudioPane();
+    expect(screen.getByRole("heading", { name: "배경 음악 1" }).closest("article")).toHaveClass("vb-editor-assets__card--row");
+    try { window.localStorage.removeItem("videobox.editor-assets.view-mode"); } catch { /* 저장이 막힌 브라우저 */ }
+  });
+
   it("keeps rights wording on a sound row, where attribution actually applies", () => {
     // 줄로 눕히면서 되풀이되는 설명을 접었는데, 처음엔 라이선스 줄까지 같이
     // 접혔다. 음악·효과음이 **출처 표기가 걸리는 바로 그 자산**이라, 상태와

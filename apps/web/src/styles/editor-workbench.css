@@ -17,13 +17,33 @@
    맞는 지적이다. 캡컷 편집기 툴바는 **작은 아이콘 + 작은 글씨** 한 줄이고, 그래서
    열한 개가 한 줄에 들어간다. 우리 단추는 기본 크기(글씨 14px·높이 36px)라 여덟 개가
    툴바를 꽉 채웠다. 이름을 줄인 것만으로는 모자라고 크기도 같이 줄여야 한다. */
-.vb-editor-workbench__toolbar [data-slot="button"] {
+/* **툴바만으로는 모자랐다(owner 지시 2026-09-01).**
+   > "지금 우리 프로그램에 아직도 버튼들이 다들 너무커. 그래서 화면 편집하는
+   > 영역이 불편해."
+
+   2026-08-22에는 툴바 한 줄만 줄였다. 실제 화면에서 재 보니 편집기 안 단추
+   138개 중 **85개가 아직 기본 크기(36px)** 였다 -- 왼쪽 자료 도크, 오른쪽
+   세부 정보, 유진 패널이 전부 그대로였고 그게 owner가 좁다고 한 자리다.
+   같은 처방을 편집 작업판 전체로 넓힌다. 편집기 **밖**(프로젝트 목록·자료실
+   같은 넓은 화면)은 건드리지 않는다 -- 거기는 좁아서 불편하다는 말이 없었고,
+   한 번에 다 바꾸면 무엇이 나아졌는지 잴 수 없다.
+
+   `아이콘 단추`는 정사각형이라 높이만 줄이면 찌그러진다. 따로 준다. */
+.vb-editor-workbench [data-slot="button"] {
   height: auto;
+  min-height: 1.75rem;
   padding: var(--vb-space-1) var(--vb-space-2);
   font-size: var(--vb-text-sm);
   font-weight: 500;
 }
-.vb-editor-workbench__toolbar [data-slot="button"] svg { width: 1rem; height: 1rem; }
+.vb-editor-workbench [data-slot="button"][data-size="icon"],
+.vb-editor-workbench [data-slot="button"][data-size="icon-sm"] {
+  width: 1.75rem;
+  height: 1.75rem;
+  min-height: 0;
+  padding: 0;
+}
+.vb-editor-workbench [data-slot="button"] svg { width: 1rem; height: 1rem; }
 /* `position: relative`는 아래 `.vb-yujin-panel`이 이 영역(미리보기·도크
    줄) 기준으로 뜨기 위해 필요하다 -- 도크와 무관하게 화면 구석에 뜨는
    캡컷 EditPilot 자리(owner 지시 2026-08-30). **`.vb-editor-workbench`
@@ -235,6 +255,14 @@
 }
 .vb-editor-assets { display: grid; min-width: 0; gap: var(--vb-space-3); }
 .vb-editor-assets__controls, .vb-editor-assets__cards { display: grid; gap: var(--vb-space-2); }
+/* 격자로 보기(캡컷 미디어 탭 대조, 2026-09-01). 도크는 220~400px이라 열을
+   고정하지 않는다 -- `auto-fill`로 들어가는 만큼만 나란히 놓고, 좁아지면
+   저절로 한 줄로 돌아간다. 소리 자산은 이미 줄(`--row`)이라 격자에서도
+   한 줄을 통째로 쓴다 -- 앨범 그림 + 곡명 + 길이가 옆으로 눕는 모양이
+   캡컷 오디오 목록이고, 그것을 반으로 자르면 읽을 수 없게 된다. */
+.vb-editor-assets__cards--grid { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); }
+.vb-editor-assets__cards--grid .vb-editor-assets__card--row { grid-column: 1 / -1; }
+.vb-editor-assets__cards--grid .vb-editor-assets__card { padding: var(--vb-space-2); }
 .vb-editor-assets__search-label { display: grid; gap: var(--vb-space-1); font-size: var(--vb-text-sm); font-weight: 700; }
 .vb-editor-assets__search { min-width: 0; width: 100%; padding: var(--vb-space-2) var(--vb-space-2); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); background: var(--background); }
 .vb-editor-assets__filters, .vb-editor-assets__actions, .vb-editor-assets__taste { display: flex; flex-wrap: wrap; gap: var(--vb-space-2); }

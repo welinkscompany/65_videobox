@@ -14,6 +14,28 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { DEFAULT_SCENE_TRANSITION_DURATION_SEC, SCENE_TRANSITION_CHOICES } from "../inspector/sceneTransitions";
 import type { InspectorAction } from "../inspector/InspectorControls";
 
+/** 고른 보기 방식을 기억한다. 프로젝트 목록의 `videobox.catalog.view-mode`와
+ *  같은 방어적 패턴 -- 브라우저가 저장을 막아도(사생활 모드 등) 조용히 기본값.
+ *
+ *  **기본값이 `list`인 이유**: 지금까지의 모양이 그것이다. 캡컷은 격자로 열지만,
+ *  기본값을 바꾸면 쓰던 사람의 화면이 어느 날 갑자기 달라진다. 격자는 골라서
+ *  켜는 쪽으로 둔다. */
+const assetViewModeStorageKey = "videobox.editor-assets.view-mode";
+function readAssetViewMode(): "grid" | "list" {
+  try {
+    return window.localStorage.getItem(assetViewModeStorageKey) === "grid" ? "grid" : "list";
+  } catch {
+    return "list";
+  }
+}
+function writeAssetViewMode(mode: "grid" | "list"): void {
+  try {
+    window.localStorage.setItem(assetViewModeStorageKey, mode);
+  } catch {
+    // 보기 방식은 화면 전용이라 최선만 한다.
+  }
+}
+
 type EditorAssetTarget = Readonly<{
   segmentId: string;
   startSec: number;
@@ -143,6 +165,11 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const pane = controlledPane ?? uncontrolledPane;
   const setPane = onPaneChange ?? setUncontrolledPane;
   const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
+  // 캡컷 미디어 탭 대조(2026-09-01). 도크가 좁아 카드를 한 줄에 하나씩 쌓으면
+  // 열 개를 보려고 계속 굴려야 한다 -- 격자로 두면 한눈에 훑을 수 있다.
+  // 소리 자산은 이미 줄로 그리고 있으므로(`--row`) 격자는 보는 것에만 건다.
+  const [viewMode, setViewMode] = useState<"grid" | "list">(readAssetViewMode);
+  const chooseViewMode = (mode: "grid" | "list") => { setViewMode(mode); writeAssetViewMode(mode); };
   // 탭이 먼저 갈라 놓고, 그 안에서 종류·검색·방향으로 좁힌다. 캡컷도 미디어 탭과
   // 오디오 탭이 서로 다른 목록이다.
   const paneCards = pane !== "media" && pane !== "audio" ? [] : cards.filter((card) => paneKinds[pane].includes(card.kind));
@@ -247,6 +274,14 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
       <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향">
         {orientationFilters.map((filter) => <Button key={filter.value} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label}</Button>)}
       </div>
+      {/* 보기 방식(캡컷 미디어 탭 대조, 2026-09-01). 백엔드가 필요 없다 --
+          같은 목록을 다른 모양으로 그리기만 한다. 프로젝트 목록의 같은 전환과
+          문구를 맞춘다("격자로 보기" / "줄로 보기") -- 한 제품 안에서 같은
+          동작에 다른 이름을 붙이지 않는다. */}
+      <div className="vb-editor-assets__filters" role="group" aria-label="보기 방식">
+        <Button variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
+        <Button variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
+      </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
     {removeMessage ? <p className="vb-editor-assets__detail" role="status">{removeMessage}</p> : null}
@@ -282,7 +317,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         ))}
       </div>
     ) : null}
-    <div className="vb-editor-assets__cards">
+    <div className={`vb-editor-assets__cards${viewMode === "grid" ? " vb-editor-assets__cards--grid" : ""}`}>
       {visibleCards.map((card) => {
         const applyDisabled = target === null || isSaving || !card.canApply;
         const previewState = previewStates[card.id];
