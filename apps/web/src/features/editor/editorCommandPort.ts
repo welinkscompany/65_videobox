@@ -84,6 +84,7 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     normalize_loudness: value.normalizeLoudness,
     denoise: value.denoise,
     stabilize: value.stabilize,
+    reduce_noise: value.reduceNoise,
     preserve_pitch: value.preservePitch,
     zoom: value.zoom,
     position_x_percent: value.positionXPercent,

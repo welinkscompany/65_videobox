@@ -21,6 +21,7 @@ export type EditorControls = Readonly<{
   normalizeLoudness?: boolean;
   denoise?: boolean;
   stabilize?: boolean;
+  reduceNoise?: boolean;
   preservePitch?: boolean;
   zoom?: number;
   positionXPercent?: number;
@@ -68,6 +69,7 @@ function controls(value: EditorMediaControls): EditorControls {
     normalizeLoudness: value.normalize_loudness,
     denoise: value.denoise,
     stabilize: value.stabilize,
+    reduceNoise: value.reduce_noise,
     preservePitch: value.preserve_pitch,
     zoom: value.zoom,
     positionXPercent: value.position_x_percent,

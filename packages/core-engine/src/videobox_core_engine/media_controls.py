@@ -125,6 +125,11 @@ def normalize_media_controls(
             # 그래프를 한 번에 조립해 ffmpeg 한 번으로 끝내는 구조다. deshake는
             # 단일 패스라 그 구조에 그대로 들어가고 렌더 시간도 안 늘어난다.
             "stabilize": bool(payload.get("stabilize", False)),
+            # 화면 노이즈 줄이기(캡컷 `이미지 노이즈 감소` 대조). 캡컷은 사진
+            # 한 장짜리 유료 기능인데, FFmpeg `hqdn3d`는 영상에도 그대로 걸린다.
+            # **소리 쪽 `denoise`와 이름을 나눈다** -- 같은 이름이면 나중에
+            # 오디오 칸과 헷갈려 한쪽만 고치는 사고가 난다.
+            "reduce_noise": bool(payload.get("reduce_noise", False)),
         }
         # 색감(`filters.py`). **안 고른 클립에는 칸 자체를 넣지 않는다** --
         # 넣으면 옛 저장분과 모양이 달라지고, 아무것도 안 바뀐 편집본이

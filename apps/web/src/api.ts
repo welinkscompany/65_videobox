@@ -536,6 +536,9 @@ export type EditorMediaControls = {
   stabilize?: boolean;
   /** 배속을 걸 때 목소리 높낮이를 그대로 둘지(영상 클립). 캡컷 속도 탭 대조.
    *  **없으면 유지가 기본**이다 -- 지금까지의 동작이 그것이었다(`atempo`). */
+  /** 화면 노이즈 줄이기(영상 클립). FFmpeg `hqdn3d`. 소리 쪽 `denoise`와
+   *  이름을 나눈다 -- 같은 이름이면 한쪽만 고치는 사고가 난다. */
+  reduce_noise?: boolean;
   preserve_pitch?: boolean;
   /** 변형(영상 클립). 캡컷 동영상 탭 `확대·위치·회전` 대조. 클립 전체에 한 번
    *  걸리는 고정 값이다 -- 임의 키프레임은 계획서가 범위 밖으로 못박았다. */

@@ -1384,6 +1384,7 @@ class EditorMediaControlsResponse(BaseModel):
     normalize_loudness: bool | None = None
     denoise: bool | None = None
     stabilize: bool | None = None
+    reduce_noise: bool | None = None
     preserve_pitch: bool | None = None
     zoom: float | None = None
     position_x_percent: float | None = None

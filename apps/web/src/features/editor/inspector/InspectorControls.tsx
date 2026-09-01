@@ -191,6 +191,7 @@ export function InspectorControls({
   const [normalizeLoudness, setNormalizeLoudness] = useState(false);
   const [denoise, setDenoise] = useState(false);
   const [stabilize, setStabilize] = useState(false);
+  const [reduceNoise, setReduceNoise] = useState(false);
   // 배속을 걸 때 목소리 높낮이를 그대로 둘지. **기본이 켜짐인 유일한 스위치다** --
   // 지금까지의 동작이 유지였고(`atempo`), 기본값을 꺼짐으로 두면 예전에 저장한
   // 배속 클립의 소리가 편집기를 여는 것만으로 달라진다.
@@ -265,6 +266,7 @@ export function InspectorControls({
       setNormalizeLoudness(target.controls.normalizeLoudness ?? false);
       setDenoise(target.controls.denoise ?? false);
       setStabilize(target.controls.stabilize ?? false);
+      setReduceNoise(target.controls.reduceNoise ?? false);
       setPreservePitch(target.controls.preservePitch ?? true);
       setZoom(target.controls.zoom ?? 1);
       setPositionXPercent(target.controls.positionXPercent ?? 0);
@@ -703,6 +705,19 @@ export function InspectorControls({
                   흔들린 화면 잡아주기
                 </label>
               ) : null}
+              {/* 캡컷 `이미지 노이즈 감소` 대조(2026-09-01). 캡컷은 사진 한
+                  장짜리 유료 기능인데, `hqdn3d`는 영상에도 그대로 걸린다. */}
+              {target.fields.includes("reduceNoise") ? (
+                <label>
+                  <Input
+                    checked={reduceNoise}
+                    disabled={disabled}
+                    onChange={(event) => setReduceNoise(event.target.checked)}
+                    type="checkbox"
+                  />
+                  지글거리는 화면 노이즈 줄이기
+                </label>
+              ) : null}
               {/* 캡컷 속도 탭 대조(2026-09-01). 끄면 빨리 감은 테이프처럼
                   목소리가 올라간다 -- 캡컷에서 이 스위치를 꺼 본 창작자가
                   기대하는 소리가 그것이다. 배속이 1배면 아무 차이가 없다. */}
@@ -748,6 +763,7 @@ export function InspectorControls({
                     ...(target.fields.includes("normalizeLoudness") ? { normalizeLoudness } : {}),
                     ...(target.fields.includes("denoise") ? { denoise } : {}),
                     ...(target.fields.includes("stabilize") ? { stabilize } : {}),
+                    ...(target.fields.includes("reduceNoise") ? { reduceNoise } : {}),
                     ...(target.fields.includes("preservePitch") ? { preservePitch } : {}),
                     ...(target.fields.includes("zoom") ? { zoom } : {}),
                     ...(target.fields.includes("positionXPercent") ? { positionXPercent } : {}),

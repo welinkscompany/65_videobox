@@ -841,14 +841,18 @@ class FfmpegFinalRenderer:
         # 그 뒤의 `scale`·`crop`이 빈 자리를 함께 처리한다. 순서를 뒤집으면
         # 출력 크기에 맞춘 그림이 다시 밀리면서 검은 테두리가 남는다.
         stabilize = "deshake," if controls.get("stabilize") else ""
+        # 노이즈 제거도 **줄이기 전에** 건다. 원본 해상도에서 걸어야 알갱이를
+        # 실제로 지운다 -- 줄인 뒤에 걸면 이미 뭉개진 그림을 한 번 더 뭉개서
+        # 노이즈는 남고 윤곽만 흐려진다.
+        denoise = "hqdn3d," if controls.get("reduce_noise") else ""
         if controls["fit"] == "crop":
             transform = (
-                f"{stabilize}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,"
+                f"{stabilize}{denoise}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=increase,"
                 f"crop={self.video_width}:{self.video_height}"
             )
         else:
             transform = (
-                f"{stabilize}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                f"{stabilize}{denoise}scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
                 f"pad={self.video_width}:{self.video_height}:(ow-iw)/2:(oh-ih)/2"
             )
         # 변형(확대·위치·회전)은 **화면 크기를 맞춘 뒤에** 온다. 앞에서 이미
@@ -1977,6 +1981,7 @@ class FfmpegFinalRenderer:
             and (
                 clip["media_controls"].get("filter")
                 or clip["media_controls"].get("stabilize")
+                or clip["media_controls"].get("reduce_noise")
                 # 변형은 기본값이 0이 아니라 `zoom: 1.0`이라 "손댔는가"를
                 # 참·거짓으로 물을 수 없다. 기본값과 다른지로 판단한다.
                 or float(clip["media_controls"].get("zoom", 1.0) or 1.0) != 1.0
