@@ -3393,3 +3393,64 @@ def test_a_library_snapshot_is_cleaned_up_even_when_bringing_it_in_fails(tmp_pat
 
     assert result is None
     assert removed, "실패했는데 스냅숏이 남았다"
+
+
+def test_the_library_is_still_reachable_without_the_semantic_index(tmp_path: Path) -> None:
+    """임베딩 모델이 안 올라와 있어도 자료실은 보여야 한다.
+
+    이 owner의 LM Studio에는 지금 임베딩 모델이 없어서 `find_audio_matches`가
+    503이다(2026-09-02 실측). 거기서 멈추면 자료실을 열어 준 것이 화면에서는
+    아무 일도 안 일어난 것과 같다 -- 이 저장소가 "완료"라고 부르지 않는 상태다.
+
+    이름을 그대로 준다. 자료실 이름은 `music-peaceful-drift`처럼 뜻을 담고 있고,
+    고르는 쪽은 어차피 말을 이해하는 모델이다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    class LibraryStore:
+        def inspect_active_assets(self):
+            return [
+                {"library_asset_id": "pack:starter-v1:music-peaceful-drift", "asset_id": "music-peaceful-drift", "media_type": "music", "duration_seconds": 128.0},
+                {"library_asset_id": "pack:starter-v1:sfx-click", "asset_id": "sfx-click", "media_type": "sfx", "duration_seconds": 0.4},
+            ]
+
+    def failing_search(query, limit, media_type="music"):
+        raise RuntimeError("library_search_unavailable")
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="no embeddings")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(),
+        library_store=LibraryStore(), library_search=failing_search,
+    ))
+
+    response = TestClient(app).post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 잔잔한 배경 음악을 넣어 줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    prompt = seen_prompts[-1]
+    # 검색이 통째로 터져도 자료실 곡이 고를 수 있는 목록에 들어간다.
+    assert "pack:starter-v1:music-peaceful-drift" in prompt
+    assert "music-peaceful-drift" in prompt
+    assert "pack:starter-v1:sfx-click" in prompt

@@ -234,6 +234,10 @@ def _apply_failure_detail(exc: BaseException) -> str:
 #: 쓰는 것과 같은 색인이라, 유진과 owner가 같은 기준으로 고르게 된다.
 _LIBRARY_SUGGESTION_LIMIT = 8
 
+#: 의미검색이 없을 때 이름만 보고 고르라고 줄 개수. 순위가 없으니 조금 넉넉히
+#: 주되, 효과음 100개를 통째로 실으면 목록이 본문보다 길어진다.
+_LIBRARY_FALLBACK_LIMIT = 24
+
 
 def build_director_proposals_router(
     store: LocalProjectStore, *, orchestrator: object, embedding_provider: object = None, embedding_model_name: str | None = None,
@@ -270,6 +274,28 @@ def build_director_proposals_router(
             return operation
         return {**operation, "asset_id": str(result["asset_id"])}
 
+    def _library_assets_by_name(media_type: str) -> list[dict]:
+        """순위 없이 자료실 목록 그대로. 의미검색이 없을 때 쓰는 대비책.
+
+        `find_audio_matches`와 **같은 모양**으로 돌려준다 -- 부르는 쪽이 두 경우를
+        구분하지 않아도 되게. 설명(`description`)은 색인이 만드는 값이라 여기서는
+        없고, 대신 이름이 그 자리를 맡는다.
+        """
+        if library_store is None:
+            return []
+        try:
+            assets = library_store.inspect_active_assets()
+        except Exception:
+            _LOGGER.warning("자료실 목록을 읽지 못해 유진에게 프로젝트 안 자산만 보입니다.", exc_info=True)
+            return []
+        rows = [item for item in assets if str(item.get("media_type") or "") == media_type]
+        return [{
+            "library_asset_id": str(item.get("library_asset_id") or ""),
+            "description": str(item.get("asset_id") or ""),
+            "words": [],
+            "duration_seconds": item.get("duration_seconds"),
+        } for item in rows[:_LIBRARY_FALLBACK_LIMIT]]
+
     def _library_candidates(instruction: str) -> list[dict]:
         """이 요청에 어울리는 자료실 음악·효과음 후보.
 
@@ -281,15 +307,24 @@ def build_director_proposals_router(
         유진은 예전처럼 프로젝트 안 자산만 보고 고른다 -- 자료실을 못 본다고
         대화 편집이 통째로 멈추면 안 된다.
         """
-        if library_search is None:
-            return []
         found: list[dict] = []
         for media_type in ("music", "sfx"):
-            try:
-                matches = library_search(instruction, _LIBRARY_SUGGESTION_LIMIT, media_type)
-            except Exception:
-                _LOGGER.warning("자료실 검색이 막혀 유진에게 프로젝트 안 자산만 보입니다.", exc_info=True)
-                continue
+            matches: list[dict] = []
+            if library_search is not None:
+                try:
+                    matches = list(library_search(instruction, _LIBRARY_SUGGESTION_LIMIT, media_type) or [])
+                except Exception:
+                    _LOGGER.warning("자료실 의미검색이 막혔습니다. 이름만 보고 고르는 쪽으로 떨어집니다.", exc_info=True)
+            if not matches:
+                # **의미검색이 없어도 자료실은 보인다.** 임베딩 모델이 안 올라와
+                # 있으면(이 owner의 LM Studio가 지금 그렇다) 위 검색이 늘 빈손이라,
+                # 여기서 멈추면 자료실을 열어 준 것이 화면에서는 아무 일도 안
+                # 일어난 것과 같다 -- 이 저장소가 "완료"라고 부르지 않는 상태다.
+                #
+                # 대신 이름을 그대로 준다. 자료실 이름은 `music-peaceful-drift`처럼
+                # 뜻을 담고 있고, 고르는 쪽은 어차피 말을 이해하는 모델이다.
+                # 순위가 없으니 개수를 조금 넉넉히 준다.
+                matches = _library_assets_by_name(media_type)
             for match in matches or []:
                 library_asset_id = str(match.get("library_asset_id") or "")
                 if not library_asset_id:
