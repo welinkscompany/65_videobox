@@ -1696,6 +1696,75 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       return;
     }
     await submitDirectorMessage(submittedDraft, clientMessageId);
+    await interpretAndApplySpokenEdit(submittedDraft);
+  };
+  /** 편집안 하나를 지금 편집본에 적용한다.
+   *
+   *  대화에서 저절로 부르는 자리와 `편집안 보기` 대화상자의 `적용` 단추가 같은
+   *  경로를 쓴다 -- 낡음 확인(preflight)과 되돌릴 수 있는 한 번의 저장을 두 벌로
+   *  갈라 두지 않는다. 갈라 두면 한쪽만 고쳐지는 사고가 난다. */
+  const applyEditingProposalNow = async (proposal: YujinEditingProposal, revision: number): Promise<boolean> => {
+    if (!sessionId || !state.view) return false;
+    const view = state.view;
+    setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: true, editingProposalError: null } : current);
+    try {
+      const preflight = await api.preflightYujinEditingProposal(projectId, sessionId, proposal.proposal_id);
+      if (preflight.status === "stale") {
+        setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false, editingProposalError: "편집본이 바뀌어서 이 편집안은 다시 만들어야 해요." } : current);
+        return false;
+      }
+      let applied = false;
+      await commitTimelineMutation(async () => {
+        await api.applyYujinEditingProposal(projectId, sessionId, proposal.proposal_id, { expected_revision: revision });
+        applied = true;
+        setDirector((current) => current.key === requestKey ? {
+          ...current,
+          editingProposal: null,
+          editingProposalApplying: false,
+          editingProposalPreview: { kind: "idle" },
+          completions: [...current.completions, editingProposalCompletionEntry(proposal, view)],
+        } : current);
+      });
+      if (!applied) setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false } : current);
+      return applied;
+    } catch {
+      setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false, editingProposalError: "편집안을 적용하지 못했어요. 최신 편집본을 확인해 주세요." } : current);
+      return false;
+    }
+  };
+  /** 말로 시킨 편집을 그대로 적용한다 (owner 2026-09-01: "바로 적용하자").
+   *
+   *  예전에는 대화가 **답만 하고 끝났다** -- 편집으로 옮기려면 `이 대화로 편집안
+   *  만들기`를 따로 누르고, 다시 `적용`을 눌러야 했다. owner는 실제로 써 보고
+   *  "말로 컷 편집이 되는지 확인한 적이 없는 것 같다"고 지적했고, 두 번 더 누르는
+   *  단계를 없애기로 결정했다(`decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`).
+   *
+   *  안전장치는 사람의 클릭이 아니라 **되돌리기**다. 이 저장은 되돌릴 수 있는
+   *  변경 한 건으로 쌓이고, 무엇이 바뀌었는지 완료 목록에 남는다. 편집 요청이
+   *  아니었으면 편집안이 만들어지지 않으므로(`proposal: null`) 아무 일도 없다. */
+  const interpretAndApplySpokenEdit = async (instruction: string) => {
+    if (!sessionId || !state.view || activeDirector.editingProposal || activeDirector.editingProposalCreating) return;
+    const epoch = routeEpoch.current.value;
+    const revision = currentEditorRevision.current;
+    if (revision === null) return;
+    let result: Awaited<ReturnType<typeof api.createYujinEditingProposal>>;
+    try {
+      result = await api.createYujinEditingProposal(projectId, sessionId, { instruction });
+    } catch {
+      // 창작자가 누른 동작이 아니라 우리가 덧붙인 해석이다. 대화 답변은 이미
+      // 화면에 있으니 조용히 둔다 -- 직접 만드는 단추가 그대로 남아 있다.
+      return;
+    }
+    if (routeEpoch.current.value !== epoch || currentEditorRevision.current !== revision) return;
+    // 편집 요청이 아니었거나 유진이 되물어야 하는 경우다. 대화 답변으로 충분하다.
+    if ("proposal" in result) return;
+    const applied = await applyEditingProposalNow(result, revision);
+    // 적용이 막혔으면 후보를 화면에 남긴다 -- 창작자가 내용을 보고 다시 누를 수 있다.
+    if (!applied) {
+      setDirector((current) => current.key === requestKey
+        ? { ...current, editingProposal: result, editingProposalPreview: { kind: "idle" } }
+        : current);
+    }
   };
   const createYujinEditingProposal = async () => {
     if (
@@ -2009,24 +2078,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onPreviewEditingProposal: activeDirector.editingProposal
       ? () => previewYujinEditingProposal(activeDirector.editingProposal!.proposal_id)
       : undefined,
-    onApplyEditingProposal: activeDirector.editingProposal ? async () => {
-      const proposal = activeDirector.editingProposal!;
-      const revision = state.view!.expectedRevision;
-      setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: true, editingProposalError: null } : current);
-      try {
-        const preflight = await api.preflightYujinEditingProposal(projectId, sessionId!, proposal.proposal_id);
-        if (preflight.status === "stale") {
-          setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false, editingProposalError: "편집본이 바뀌어서 이 편집안은 다시 만들어야 해요." } : current);
-          return;
-        }
-        await commitTimelineMutation(async () => {
-          await api.applyYujinEditingProposal(projectId, sessionId!, proposal.proposal_id, { expected_revision: revision });
-          setDirector((current) => current.key === requestKey ? { ...current, editingProposal: null, editingProposalApplying: false, editingProposalPreview: { kind: "idle" } } : current);
-        });
-      } catch {
-        setDirector((current) => current.key === requestKey ? { ...current, editingProposalApplying: false, editingProposalError: "편집안을 적용하지 못했어요. 최신 편집본을 확인해 주세요." } : current);
-      }
-    } : undefined,
+    onApplyEditingProposal: activeDirector.editingProposal
+      ? () => void applyEditingProposalNow(activeDirector.editingProposal!, state.view!.expectedRevision)
+      : undefined,
     onCancelRun: ownsActiveHermesRouteRun
       ? cancelDirectorRun
       : undefined,
@@ -2169,6 +2223,23 @@ function buildCompletionEntry(
   });
   if (!items.length) return null;
   return { id: `completion-${candidateIds.join("-")}-${Date.now()}`, appliedAt: new Date().toISOString(), items };
+}
+
+/** 적용된 편집안을 완료 목록 한 줄로 남긴다.
+ *
+ *  말로 시킨 편집은 창작자가 `적용`을 누르지 않으므로, **무엇이 바뀌었는지
+ *  화면에 남는 자리가 이것뿐이다.** 조용히 바뀌는 타임라인은 되돌리기가 있어도
+ *  나쁜 화면이다 -- 무엇을 되돌려야 하는지 알 수 없기 때문이다. */
+function editingProposalCompletionEntry(proposal: YujinEditingProposal, view: EditorViewModel): RightDockCompletionEntry {
+  const sceneNumbers = sceneNumbersBySegmentId(view);
+  return {
+    id: `completion-${proposal.proposal_id}-${Date.now()}`,
+    appliedAt: new Date().toISOString(),
+    items: proposal.diff.operations.map((operation) => {
+      const sceneNumber = typeof operation.segment_id === "string" ? sceneNumbers.get(operation.segment_id) : undefined;
+      return { label: yujinEditingOperationSummary(operation), sceneLabel: sceneNumber ? `${sceneNumber}번 장면` : undefined };
+    }),
+  };
 }
 
 function yujinEditingProposalSummary(proposal: YujinEditingProposal, view: EditorViewModel): string {

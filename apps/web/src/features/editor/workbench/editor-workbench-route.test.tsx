@@ -432,6 +432,10 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
     vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
     vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    // 2026-09-01부터 보낸 말은 곧바로 편집 해석을 한 번 거친다. 편집 이야기가
+    // 아닌 시험이 네트워크를 타지 않도록 "편집안 없음"을 기본값으로 둔다 --
+    // 편집을 재는 시험은 아래에서 각자 다시 덮어쓴다.
+    vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({ status: "clarification", reply_text: "", proposal: null });
   });
 
   it("accepts a local-first exchange as a memory source", async () => {
@@ -4180,7 +4184,55 @@ describe("EditorWorkbenchRoute", () => {
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
-  it("creates a candidate-only editing proposal only after the creator explicitly asks for one", async () => {
+  // owner 2026-09-01: "바로 적용하자". 예전에는 이 시험이 정반대를 재고 있었다 --
+  // 보낸 말로는 편집안조차 만들지 않는다는 것. 부품은 전부 있었고 대화가 그 경로를
+  // 부르지 않았을 뿐이라, owner는 말로 컷 편집이 되는 것을 한 번도 볼 수 없었다.
+  // `decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`
+  it("applies the edit the creator spoke, without a second and third click", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000009");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValue({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "두 번째 장면을 빠르게", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000009", created_at: "1" },
+        assistant_message: { message_id: "assistant-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "속도를 조절할게요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+      },
+    } as never);
+    const createEditingProposal = vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({
+      proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+      source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+    } as never);
+    const preflight = vi.spyOn(api, "preflightYujinEditingProposal").mockResolvedValue({
+      proposal_id: "yujin-edit-1", status: "ready",
+      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+    } as never);
+    const applyEditingProposal = vi.spyOn(api, "applyYujinEditingProposal").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    await screen.findByText("속도를 조절할게요.");
+    await waitFor(() => expect(applyEditingProposal).toHaveBeenCalledWith("project-a", "session-a", "yujin-edit-1", { expected_revision: 1 }));
+    expect(createEditingProposal).toHaveBeenCalledWith("project-a", "session-a", { instruction: "두 번째 장면을 빠르게" });
+    // 낡은 편집본 위에 적용하지 않는다 -- 클릭 대신 이것이 지킨다.
+    expect(preflight).toHaveBeenCalledWith("project-a", "session-a", "yujin-edit-1");
+    // 무엇이 바뀌었는지 화면에 남는다. 조용히 바뀌는 타임라인은 되돌리기가
+    // 있어도 무엇을 되돌릴지 알 수 없어 나쁜 화면이다.
+    expect(await screen.findByText("2배로 속도를 바꿔요.")).toBeVisible();
+  });
+
+  // 유진이 편집안을 못 만들었을 때 다시 시켜 보는 자리. 자동 해석은 "편집 요청이
+  // 아니다"로 조용히 끝나고(`clarification`), 단추는 그대로 남는다.
+  it("keeps the manual retry button for a message the automatic pass could not turn into an edit", async () => {
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000002");
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
       conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
@@ -4199,11 +4251,16 @@ describe("EditorWorkbenchRoute", () => {
         assistant_message: { message_id: "assistant-edit-next", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "세 번째 장면도 확인할게요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "4" },
       },
     } as never);
-    const createEditingProposal = vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({
-      proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
-      source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
-      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
-    } as never);
+    const applyEditingProposal = vi.spyOn(api, "applyYujinEditingProposal").mockResolvedValue({} as never);
+    // 보낸 말의 자동 해석은 "편집안 없음"으로 끝난다. 그 다음 손으로 누른
+    // 해석에서만 편집안이 나온다 -- 같은 말에도 모델은 다르게 답한다.
+    const createEditingProposal = vi.spyOn(api, "createYujinEditingProposal")
+      .mockResolvedValueOnce({ status: "clarification", reply_text: "어느 장면인지 알려 주세요.", proposal: null })
+      .mockResolvedValue({
+        proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+        source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+        diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+      } as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
@@ -4214,7 +4271,8 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await screen.findByText("속도를 조절할 수 있어요.");
 
-    expect(createEditingProposal).not.toHaveBeenCalled();
+    await waitFor(() => expect(createEditingProposal).toHaveBeenCalledTimes(1));
+    expect(applyEditingProposal).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "이 대화로 편집안 만들기" }));
 
     await screen.findByText("편집안을 준비했어요.");
@@ -4246,11 +4304,15 @@ describe("EditorWorkbenchRoute", () => {
         assistant_message: { message_id: "assistant-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "속도를 조절할 수 있어요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
       },
     } as never);
-    vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({
-      proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
-      source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
-      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
-    } as never);
+    // 보낸 말의 자동 해석은 여기서 "편집안 없음"으로 끝난다. 이 시험이 재는 것은
+    // **손으로 만든 편집안의 미리보기**이므로 그 경로만 남긴다.
+    vi.spyOn(api, "createYujinEditingProposal")
+      .mockResolvedValueOnce({ status: "clarification", reply_text: "어느 장면인지 알려 주세요.", proposal: null })
+      .mockResolvedValue({
+        proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+        source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+        diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+      } as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
@@ -4260,6 +4322,8 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await screen.findByText("속도를 조절할 수 있어요.");
+    // 자동 해석이 먼저 끝나야 손으로 누른 해석이 편집안을 받는다.
+    await waitFor(() => expect(vi.mocked(api.createYujinEditingProposal)).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole("button", { name: "이 대화로 편집안 만들기" }));
     await screen.findByText("편집안을 준비했어요.");
     fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));

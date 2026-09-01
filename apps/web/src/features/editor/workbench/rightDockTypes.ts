@@ -158,7 +158,12 @@ export type RightDockDirector = Readonly<{
   onSelectedCandidateIdsChange: (candidateIds: readonly string[]) => void;
   onConversationScrollChange: (scroll: RightDockConversationScroll) => void;
   onSendMessage: (draft: string) => void | Promise<void>;
-  /** 대화를 자동 편집으로 바꾸지 않는다. 창작자가 눌렀을 때만 읽기 전용 편집안을 만든다. */
+  /** 다시 해석해 달라고 손으로 누르는 길.
+   *
+   *  2026-09-01까지는 **이것이 유일한 길이었다** -- 대화는 답만 하고, 편집으로
+   *  옮기려면 이 단추와 `적용`을 차례로 눌러야 했다. 지금은 보낸 말이 곧바로
+   *  편집으로 이어지고(`decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`),
+   *  이 단추는 유진이 편집안을 만들지 못했을 때 다시 시켜 보는 자리로 남는다. */
   onCreateEditingProposal?: () => void | Promise<void>;
   editingProposal?: RightDockEditingProposal | null;
   editingProposalCreating?: boolean;
