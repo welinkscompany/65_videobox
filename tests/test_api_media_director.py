@@ -3259,3 +3259,137 @@ def test_yujin_is_told_what_each_asset_is_not_just_its_id(tmp_path: Path) -> Non
     assert "42초" in prompt, "길이가 유진에게 안 갔다"
     # 목록만 주고 끝내면 첫 번째를 기계적으로 집는다 -- 무엇을 하라고 말해 준다.
     assert "어울리는 것" in prompt
+
+
+def test_yujin_can_pick_from_the_library_the_owner_sees(tmp_path: Path) -> None:
+    """owner 지시(2026-09-02): "유진이 자료실도 볼 수 있게 해줘".
+
+    실측(2026-09-01)에서 편집기 오디오 탭에는 음악 8곡이 보이는데 유진에게 가는
+    것은 **1곡**이었다 -- 유진과 owner가 다른 선반을 보고 있었다. `apply_media`가
+    프로젝트 자산만 봤기 때문이다.
+
+    자료실을 통째로 읽히지 않는다. **owner가 쓰는 것과 같은 의미검색**으로 추린
+    위쪽만 준다 -- 고르는 일을 잘하려면 목록이 아니라 추린 것을 봐야 하고,
+    음악 30곡·효과음 100개를 다 실으면 목록이 본문보다 길어진다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+    searched: list[tuple[str, str]] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        searched.append((query, media_type))
+        if media_type != "music":
+            return []
+        return [{
+            "library_asset_id": "pack:starter-v1:music-005",
+            "asset_id": "music-005", "media_type": "music",
+            "description": "잔잔한 피아노 인트로", "words": ["차분", "잔잔"],
+            "duration_seconds": 192.0, "score": 0.91,
+        }]
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="library reach")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search,
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 잔잔한 배경 음악을 넣어 줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    # 창작자가 한 말 그대로 자료실을 찾는다 -- 음악과 효과음 둘 다.
+    assert ("이 장면에 어울리는 잔잔한 배경 음악을 넣어 줘", "music") in searched
+    assert any(media_type == "sfx" for _, media_type in searched)
+    prompt = seen_prompts[-1]
+    # 자료실 곡이 고를 수 있는 목록에 들어간다.
+    assert "pack:starter-v1:music-005" in prompt
+    # **이름이 아니라 설명이 간다.** 자료실 파일 이름(`music-005`)에는 뜻이 없고,
+    # 색인이 만들어 둔 설명이 owner가 검색할 때 걸리는 바로 그 글이다.
+    assert "잔잔한 피아노 인트로" in prompt
+    assert "192초" in prompt
+
+
+def test_a_library_pick_is_brought_into_the_project_before_it_is_applied(tmp_path: Path) -> None:
+    """편집본은 **프로젝트 자산만** 가리킬 수 있다.
+
+    유진이 고른 자료실 id(`pack:...`)를 그대로 저장하면 렌더러가 파일을 못 찾는다.
+    화면에서 자료실 곡을 적용할 때와 같은 경로로 들여오고(라이선스 기록까지 함께
+    복사된다) 프로젝트 자산 id로 바꿔 준 뒤에 적용해야 한다.
+    """
+    from videobox_core_engine.library_materialization import materialize_library_asset
+
+    calls: list[str] = []
+
+    class Materializer:
+        def materialize_verified_library_snapshot(self, **kwargs):
+            calls.append(str(kwargs["library_asset_id"]))
+            return {"asset_id": "asset_brought_in"}
+
+    removed: list[object] = []
+
+    class LibraryStore:
+        def snapshot_verified_asset(self, *, library_asset_id):
+            return ({"sha256": "x"}, tmp_path / "snap.ogg")
+
+        def remove_verified_snapshot(self, path):
+            removed.append(path)
+
+    result = materialize_library_asset(
+        library_store=LibraryStore(), materializer=Materializer(),
+        project_id="p", library_asset_id="pack:starter-v1:music-005",
+        mime_type_for=lambda path: "audio/ogg",
+    )
+
+    assert result == {"asset_id": "asset_brought_in"}
+    assert calls == ["pack:starter-v1:music-005"]
+    # 스냅숏은 성공해도 지운다 -- 성공 경로에만 두면 실패했을 때 남는다.
+    assert removed
+
+
+def test_a_library_snapshot_is_cleaned_up_even_when_bringing_it_in_fails(tmp_path: Path) -> None:
+    """실패해도 임시 파일을 남기지 않는다. 그리고 터뜨리지 않고 None을 준다 --
+    부르는 두 자리가 실패를 다르게 다뤄야 하기 때문이다."""
+    from videobox_core_engine.library_materialization import materialize_library_asset
+
+    removed: list[object] = []
+
+    class Materializer:
+        def materialize_verified_library_snapshot(self, **_kwargs):
+            raise ValueError("library_snapshot_changed")
+
+    class LibraryStore:
+        def snapshot_verified_asset(self, *, library_asset_id):
+            return ({"sha256": "x"}, tmp_path / "snap.ogg")
+
+        def remove_verified_snapshot(self, path):
+            removed.append(path)
+
+    result = materialize_library_asset(
+        library_store=LibraryStore(), materializer=Materializer(),
+        project_id="p", library_asset_id="pack:starter-v1:music-005",
+        mime_type_for=lambda path: "audio/ogg",
+    )
+
+    assert result is None
+    assert removed, "실패했는데 스냅숏이 남았다"

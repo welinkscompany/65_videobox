@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
 from videobox_core_engine.director_media_focus import media_focus_for_request
+from videobox_core_engine.library_materialization import materialize_library_asset
 from videobox_core_engine.mojibake import repair_mojibake_metadata
 from videobox_core_engine.director_proposal_service import (
     DirectorProposalBlockedError,
@@ -174,6 +175,35 @@ def _asset_label(asset: dict) -> str:
     return " · ".join(parts)
 
 
+def _library_mime_type(path) -> str | None:
+    """스냅숏 파일의 형식. 자료실 라우터가 쓰는 것과 같은 기준(확장자)이다."""
+    import mimetypes
+
+    return mimetypes.guess_type(str(path))[0]
+
+
+def _library_label(match: dict) -> str:
+    """자료실 후보 하나를 **고를 수 있는 말**로. 이름이 아니라 설명이 온다.
+
+    자료실 음악은 파일 이름이 `music-005`처럼 뜻이 없는 대신, 색인이 만들어 둔
+    설명(`description`)이 있다 -- owner가 화면에서 검색할 때 걸리는 바로 그 글이다.
+    유진에게도 같은 글을 줘야 둘이 같은 기준으로 고른다.
+    """
+    parts: list[str] = []
+    description = str(match.get("description") or "").strip()
+    if description:
+        parts.append(description)
+    words = match.get("words")
+    if isinstance(words, (list, tuple)):
+        joined = ", ".join(str(word).strip() for word in words if str(word).strip())
+        if joined:
+            parts.append(joined)
+    duration = match.get("duration_seconds")
+    if isinstance(duration, (int, float)) and duration > 0:
+        parts.append(f"{round(float(duration))}초")
+    return " · ".join(parts)
+
+
 def _apply_failure_detail(exc: BaseException) -> str:
     """무엇이 잘못됐는지 그대로 흘려보낸다.
 
@@ -198,8 +228,16 @@ def _apply_failure_detail(exc: BaseException) -> str:
     return "candidate_unavailable"
 
 
+#: 유진에게 한 번에 보여 줄 자료실 후보 수(종류마다). 자료실에는 음악 30곡·
+#: 효과음 100개가 있는데 그것을 통째로 프롬프트에 실으면 목록이 본문보다 길어지고
+#: 모델이 뒤쪽을 안 본다. **의미검색으로 추린 위쪽만** 준다 -- owner가 화면에서
+#: 쓰는 것과 같은 색인이라, 유진과 owner가 같은 기준으로 고르게 된다.
+_LIBRARY_SUGGESTION_LIMIT = 8
+
+
 def build_director_proposals_router(
-    store: LocalProjectStore, *, orchestrator: object, embedding_provider: object = None, embedding_model_name: str | None = None
+    store: LocalProjectStore, *, orchestrator: object, embedding_provider: object = None, embedding_model_name: str | None = None,
+    library_store: object = None, library_search: object = None,
 ) -> APIRouter:
     router = APIRouter()
     service = DirectorProposalService(store, embedding_provider=embedding_provider, embedding_model_name=embedding_model_name)
@@ -207,6 +245,63 @@ def build_director_proposals_router(
 
     def payload(project_id, proposal):
         return proposal_to_payload(proposal) | {"status": proposal.status, "lifecycle": store.get_director_proposal_lifecycle(project_id, proposal.proposal_id)}
+
+    def _with_materialized_library_asset(project_id: str, operation: dict) -> dict:
+        """자료실 자산을 고른 편집 항목이면 **먼저 프로젝트로 들여온다.**
+
+        편집본은 프로젝트 자산만 가리킬 수 있다. 유진이 자료실에서 고른 것은
+        `pack:starter-v1:music-005` 같은 자료실 id라, 그대로 저장하면 렌더러가
+        찾지 못한다. 화면에서 자료실 곡을 적용할 때와 **같은 경로**로 들여오고
+        (라이선스 기록까지 함께 복사된다) 프로젝트 자산 id로 바꿔 준다.
+
+        못 들여오면 원래 항목을 그대로 둔다 -- 그러면 검증에서 걸려 422가 되고,
+        창작자는 "적용하지 못했어요"를 본다. 조용히 다른 자산으로 바꾸는 것보다
+        낫다.
+        """
+        asset_id = str(operation.get("asset_id") or "")
+        if not asset_id.startswith("pack:") or library_store is None:
+            return operation
+        result = materialize_library_asset(
+            library_store=library_store, materializer=materializer,
+            project_id=project_id, library_asset_id=asset_id, mime_type_for=_library_mime_type,
+        )
+        if result is None:
+            _LOGGER.warning("자료실 자산을 프로젝트로 들여오지 못했습니다 (자산=%s).", asset_id)
+            return operation
+        return {**operation, "asset_id": str(result["asset_id"])}
+
+    def _library_candidates(instruction: str) -> list[dict]:
+        """이 요청에 어울리는 자료실 음악·효과음 후보.
+
+        **owner가 쓰는 것과 같은 의미검색**(`find_audio_matches`)이다. 유진에게
+        자료실을 통째로 읽히지 않는 이유는 프롬프트 크기 때문만이 아니다 --
+        고르는 일을 잘하려면 목록이 아니라 **추린 것**을 봐야 한다.
+
+        검색이 없거나(임베딩 모델 미설치) 실패하면 빈 목록을 돌려준다. 그때
+        유진은 예전처럼 프로젝트 안 자산만 보고 고른다 -- 자료실을 못 본다고
+        대화 편집이 통째로 멈추면 안 된다.
+        """
+        if library_search is None:
+            return []
+        found: list[dict] = []
+        for media_type in ("music", "sfx"):
+            try:
+                matches = library_search(instruction, _LIBRARY_SUGGESTION_LIMIT, media_type)
+            except Exception:
+                _LOGGER.warning("자료실 검색이 막혀 유진에게 프로젝트 안 자산만 보입니다.", exc_info=True)
+                continue
+            for match in matches or []:
+                library_asset_id = str(match.get("library_asset_id") or "")
+                if not library_asset_id:
+                    continue
+                found.append({
+                    "asset_id": library_asset_id,
+                    # 자료실은 `music`이라 부르고 편집본은 `bgm`이라 부른다.
+                    # 검증기가 보는 이름으로 맞춰 준다.
+                    "asset_type": "bgm" if media_type == "music" else "sfx",
+                    "label": _library_label(match),
+                })
+        return found
 
     @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals", status_code=status.HTTP_201_CREATED)
     def create_yujin_editing_proposal(project_id: str, session_id: str, body: YujinEditingProposalCreateRequest, request: Request) -> dict:
@@ -233,12 +328,19 @@ def build_director_proposals_router(
             if isinstance(item.get("metadata"), dict)
             and str(item["metadata"].get("review_status") or "approved").strip().lower() == "approved"
         )
+        library_candidates = _library_candidates(body.instruction)
         context = YujinEditingContext(
             session_id=session_id,
             session_revision=int(session["session_revision"]),
             segment_ids=tuple(str(item["segment_id"]) for item in session.get("segments", []) if isinstance(item, dict) and item.get("segment_id")),
-            approved_asset_ids=tuple(str(item["asset_id"]) for item in approved_assets),
-            approved_asset_types=tuple((str(item["asset_id"]), str(item["asset_type"])) for item in approved_assets),
+            approved_asset_ids=tuple(
+                [str(item["asset_id"]) for item in approved_assets]
+                + [item["asset_id"] for item in library_candidates]
+            ),
+            approved_asset_types=tuple(
+                [(str(item["asset_id"]), str(item["asset_type"])) for item in approved_assets]
+                + [(item["asset_id"], item["asset_type"]) for item in library_candidates]
+            ),
             # **이름을 같이 준다.** 예전에는 `asset_id(종류)`만 실어서 유진이
             # 고를 근거가 하나도 없었고, 실측(2026-09-01) 결과 장면이 달라도
             # 분위기를 지정해도 **늘 같은 자산 하나**를 집었다. 고르는 일이
@@ -248,7 +350,8 @@ def build_director_proposals_router(
             # 새로 읽어 오는 것이 아니라 이미 손에 든 값이다 -- `list_assets`가
             # `metadata`를 통째로 돌려준다.
             approved_asset_labels=tuple(
-                (str(item["asset_id"]), _asset_label(item)) for item in approved_assets
+                [(str(item["asset_id"]), _asset_label(item)) for item in approved_assets]
+                + [(item["asset_id"], item["label"]) for item in library_candidates]
             ),
             # 색감은 화면이 깔린 장면에만 걸 수 있다. 모델에게 알려 주고
             # 검증기가 다시 막는다 -- 알려 주지 않으면 지어내고, 지어낸 것은
@@ -363,7 +466,7 @@ def build_director_proposals_router(
             editing = YujinEditingProposal.model_validate({
                 "proposal_id": proposal_id,
                 "base_session_revision": proposal.base_session_revision,
-                "operations": [dict(item) for item in operations],
+                "operations": [_with_materialized_library_asset(project_id, dict(item)) for item in operations],
             })
             updated = apply_yujin_editing_proposal(session=session, proposal=editing)
             return store.update_editing_session(project_id=project_id, session_id=session_id, session_payload=updated, expected_revision=body.expected_revision)

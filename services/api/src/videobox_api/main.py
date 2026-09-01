@@ -282,7 +282,7 @@ def _build_music_library_hooks(
     라이브러리에서 아무거나 집어 주는 것보다 낫다.
     """
 
-    def search(query: str, limit: int) -> list[dict[str, object]]:
+    def search(query: str, limit: int, media_type: str = "music") -> list[dict[str, object]]:
         provider = getattr(app.state, "media_analysis_embedding_provider", None)
         model_name = (getattr(app.state, "media_analysis_profile", None) or {}).get(
             "embedding_model_name"
@@ -292,7 +292,7 @@ def _build_music_library_hooks(
         response = provider.embed(EmbeddingRequest(model_name=model_name, inputs=(query,)))
         return library_store.find_audio_matches(
             query_embedding=[float(value) for value in response.vectors[0]],
-            media_type="music",
+            media_type=media_type,
             limit=limit,
         )
 
@@ -1249,6 +1249,11 @@ def create_app(
             orchestrator=orchestrator,
             embedding_provider=app.state.media_analysis_embedding_provider,
             embedding_model_name=(app.state.media_analysis_profile or {}).get("embedding_model_name"),
+            # 유진이 자료실까지 보게 한다(owner 지시 2026-09-02). 이 둘이 없으면
+            # 유진은 예전처럼 프로젝트 안 자산만 본다 -- 실측(2026-09-01)에서
+            # owner에게는 음악 8곡이 보이는데 유진에게는 1곡만 가고 있었다.
+            library_store=resolved_media_library_store,
+            library_search=_music_library_search,
         )
     )
     app.include_router(
