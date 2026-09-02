@@ -478,3 +478,11 @@
   border-radius: var(--vb-radius-sm);
 }
 .vb-caption-fonts li { display: flex; align-items: center; flex-wrap: wrap; gap: var(--vb-space-1); }
+
+/* 세부 정보 패널의 캡컷식 탭줄(owner 지시 2026-09-02). 왼쪽 자료 도크의
+   탭줄(`.vb-editor-assets__tabs`)과 **같은 모양으로 맞춘다** -- 한 화면 안에서
+   같은 동작에 다른 생김새를 주면 창작자가 서로 다른 것으로 읽는다. */
+.vb-inspector-tabs { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); border-bottom: 1px solid var(--border); margin-bottom: var(--vb-space-2); }
+.vb-inspector-tabs__tab { border-radius: 0; border-bottom: 2px solid transparent; color: var(--muted-foreground); }
+.vb-inspector-tabs__tab:hover { color: var(--foreground); }
+.vb-inspector-tabs__tab[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--vb-accent); }

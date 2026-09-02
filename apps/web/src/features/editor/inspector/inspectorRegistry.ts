@@ -2,7 +2,7 @@ import type { ShapeOverlayMotion, ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "fit" | "normalizeLoudness" | "denoise" | "stabilize" | "reduceNoise" | "preservePitch" | "zoom" | "positionXPercent" | "positionYPercent" | "rotationDeg";
+export type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "fit" | "normalizeLoudness" | "denoise" | "stabilize" | "reduceNoise" | "preservePitch" | "zoom" | "positionXPercent" | "positionYPercent" | "rotationDeg";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text";

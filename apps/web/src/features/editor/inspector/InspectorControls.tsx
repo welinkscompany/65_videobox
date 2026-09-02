@@ -16,7 +16,7 @@ import {
   SCENE_TRANSITION_DURATION_RANGE_SEC,
   SCENE_TRANSITION_NONE,
 } from "./sceneTransitions";
-import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type InspectorTarget, type ShapeOverlayValue } from "./inspectorRegistry";
+import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type InspectorTarget, type MediaField, type ShapeOverlayValue } from "./inspectorRegistry";
 
 // 배속 버튼에 올릴 값. `media_controls.py`의 `SPEED_RANGE`(0.25~4.0) 안에서
 // 숏폼에 실제로 자주 쓰는 것만 골랐다. 여기 없는 값은 숫자칸으로 넣는다.
@@ -151,6 +151,32 @@ function parseRows(value: string): string[][] {
   return value.split(/\r?\n/).map((row) => row.split("|").map((item) => item.trim())).filter((row) => row.some(Boolean));
 }
 
+/** 세부 정보 패널을 캡컷처럼 묶는 표(owner 지시 2026-09-02).
+ *
+ *  2026-09-01에 조정 항목을 여섯 늘렸더니 이 패널 하나에 조건부 칸이 서른일곱이
+ *  됐다. 220~400px짜리 도크에 한 줄로 쌓이니, 단추를 줄여 벌어 놓은 자리를
+ *  이것이 도로 잡아먹었다. 캡컷은 같은 것들을 `동영상 / 오디오 / 속도 / 조정`
+ *  탭으로 나눈다 -- owner가 준 캡처가 그 화면이다.
+ *
+ *  **`애니메이션` 탭은 만들지 않는다.** 캡컷에는 있지만 그 내용이 임의 키프레임이고,
+ *  계획서 §2.1이 범위 밖으로 못박은 항목이다. 없는 기능의 탭을 만들지 않는다.
+ *
+ *  `fadeInSec`이 두 탭에 갈리는 이유: 같은 이름이 화면 클립에서는 **화면** 페이드,
+ *  소리 클립에서는 **소리** 페이드다(`media_controls.py`가 그렇게 갈라 둔다).
+ *  그래서 종류를 보고 자리를 정한다. */
+const MEDIA_TAB_LABELS = { picture: "화면", sound: "소리", speed: "속도", look: "보정" } as const;
+type MediaTab = keyof typeof MEDIA_TAB_LABELS;
+const MEDIA_TAB_ORDER: readonly MediaTab[] = ["picture", "sound", "speed", "look"];
+
+function mediaFieldTab(field: MediaField, mediaKind: string): MediaTab {
+  if (field === "fadeInSec" || field === "fadeOutSec") return mediaKind === "broll" ? "picture" : "sound";
+  if (field === "filter" || field === "stabilize" || field === "reduceNoise") return "look";
+  if (field === "speed" || field === "preservePitch") return "speed";
+  if (field === "volume" || field === "gainDb" || field === "ducking" || field === "preserveSourceAudio"
+      || field === "normalizeLoudness" || field === "denoise") return "sound";
+  return "picture";
+}
+
 export function InspectorControls({
   projectId,
   target,
@@ -196,6 +222,9 @@ export function InspectorControls({
   // 지금까지의 동작이 유지였고(`atempo`), 기본값을 꺼짐으로 두면 예전에 저장한
   // 배속 클립의 소리가 편집기를 여는 것만으로 달라진다.
   const [preservePitch, setPreservePitch] = useState(true);
+  // 지금 보고 있는 탭. 대상이 바뀌면 아래 `useEffect`가 첫 탭으로 되돌린다 --
+  // `소리` 탭을 보다가 화면 클립을 고르면 빈 탭이 뜨는 것을 막는다.
+  const [mediaTab, setMediaTab] = useState<MediaTab>("picture");
   // 변형(캡컷 동영상 탭 `확대·위치·회전`). 손대지 않음이 1.0 / 0 / 0 / 0이고,
   // 렌더러는 그때 사슬을 하나도 더하지 않는다.
   const [zoom, setZoom] = useState(1);
@@ -268,6 +297,7 @@ export function InspectorControls({
       setStabilize(target.controls.stabilize ?? false);
       setReduceNoise(target.controls.reduceNoise ?? false);
       setPreservePitch(target.controls.preservePitch ?? true);
+      setMediaTab("picture");
       setZoom(target.controls.zoom ?? 1);
       setPositionXPercent(target.controls.positionXPercent ?? 0);
       setPositionYPercent(target.controls.positionYPercent ?? 0);
@@ -350,6 +380,20 @@ export function InspectorControls({
   // 툴바의 컷 도구와 **겹치지 않는다.** 툴바 `나누기`는 재생 위치에서 나누므로
   // 재생 위치가 고른 장면 안에 있어야 켜진다. 여기 있는 것은 그때도 되는 대체
   // 경로이고, `유지/삭제`는 **뺀 장면을 되살리는 유일한 길**이다.
+  // 이 대상에 **실제로 칸이 있는 탭만** 낸다. 소리 클립에 `화면` 탭을 띄우면
+  // 눌러 봐야 빈 화면이고, 빈 탭은 "여기 뭔가 있어야 하는데"라는 오해를 만든다.
+  const mediaTabsWithFields = target?.kind === "media" && !target.clearOnly
+    ? MEDIA_TAB_ORDER.filter((tab) => target.fields.some((field) => mediaFieldTab(field, target.mediaKind) === tab))
+    : [];
+  // 고른 탭이 이 대상에 없으면 첫 탭으로 떨어진다 -- 대상이 바뀌는 찰나에
+  // 빈 화면이 스치는 것을 막는다(상태 초기화는 `useEffect`가 한 박자 늦다).
+  const activeMediaTab = mediaTabsWithFields.includes(mediaTab) ? mediaTab : mediaTabsWithFields[0];
+  const showMediaField = (field: MediaField): boolean =>
+    target?.kind === "media"
+    && target.fields.includes(field)
+    && mediaFieldTab(field, target.mediaKind) === activeMediaTab;
+
+
   return (
     <section aria-label="고른 장면">
       <h3>고른 장면</h3>
@@ -497,7 +541,26 @@ export function InspectorControls({
           <p>현재 미디어가 연결되어 있어요.</p>
           {!target.clearOnly ? (
             <>
-              {target.fields.includes("fadeInSec") ? (
+              {/* 캡컷처럼 묶는다(owner 지시 2026-09-02). **탭이 하나뿐이면 안 그린다** --
+                  고를 것이 없는 탭줄은 자리만 먹고 아무것도 알려 주지 않는다.
+                  소리 클립이 정확히 그 경우다(칸이 전부 `소리` 하나에 든다). */}
+              {mediaTabsWithFields.length > 1 ? (
+                <div className="vb-inspector-tabs" role="tablist" aria-label={`${target.label} 조정 항목`}>
+                  {mediaTabsWithFields.map((tab) => (
+                    <Button
+                      key={tab}
+                      type="button"
+                      variant="ghost"
+                      className="vb-inspector-tabs__tab"
+                      role="tab"
+                      aria-selected={tab === activeMediaTab}
+                      disabled={disabled}
+                      onClick={() => setMediaTab(tab)}
+                    >{MEDIA_TAB_LABELS[tab]}</Button>
+                  ))}
+                </div>
+              ) : null}
+              {showMediaField("fadeInSec") ? (
                 <>
                   <label>
                     {/* 소리 페이드와 화면 페이드는 다른 것이다. B-roll에 거는 것은
@@ -514,7 +577,7 @@ export function InspectorControls({
               {/* 배경 음악·효과음의 음량. 렌더러는 처음부터 클립별 gain_db를
                   반영했는데 화면에 입력 자리만 없었다. §10.13: `gain`·`dB` 같은
                   내부 용어 대신 `소리 크기`와 `조용히/크게`로 적는다. */}
-              {target.fields.includes("gainDb") ? (
+              {showMediaField("gainDb") ? (
                 <label>
                   {`${target.label} 소리 크기`}
                   <span aria-hidden="true">조용히</span>
@@ -531,7 +594,7 @@ export function InspectorControls({
                   <span aria-hidden="true">크게</span>
                 </label>
               ) : null}
-              {target.fields.includes("inSec") ? (
+              {showMediaField("inSec") ? (
                 <>
                   <label>
                     {`${target.label} 쓸 구간 시작`}
@@ -543,7 +606,7 @@ export function InspectorControls({
                   </label>
                 </>
               ) : null}
-              {target.fields.includes("speed") ? (
+              {showMediaField("speed") ? (
                 <>
                   <label>
                     {`${target.label} 재생 속도`}
@@ -571,7 +634,7 @@ export function InspectorControls({
                   </div>
                 </>
               ) : null}
-              {target.fields.includes("fit") ? (
+              {showMediaField("fit") ? (
                 <label>
                   {`${target.label} 화면 맞춤`}
                   <NativeSelect
@@ -592,31 +655,31 @@ export function InspectorControls({
                   하는데, 이름이 `확대`면 `확대: 0.5`라는 앞뒤 안 맞는 줄이 화면에
                   남는다. 바로 위 `화면 맞춤`은 "원본을 화면에 어떻게 앉힐까"이고
                   이건 "앉힌 그림을 얼마나 키울까"라 서로 다른 것을 묻는다. */}
-              {target.fields.includes("zoom") ? (
+              {showMediaField("zoom") ? (
                 <label>
                   {`${target.label} 크기`}
                   <Input disabled={disabled} max="4" min="0.5" onChange={(event) => setZoom(numberValue(event.target.value, zoom))} step="0.05" type="number" value={zoom} />
                 </label>
               ) : null}
-              {target.fields.includes("positionXPercent") ? (
+              {showMediaField("positionXPercent") ? (
                 <label>
                   {`${target.label} 좌우 위치`}
                   <Input disabled={disabled} max="100" min="-100" onChange={(event) => setPositionXPercent(numberValue(event.target.value, positionXPercent))} step="1" type="number" value={positionXPercent} />
                 </label>
               ) : null}
-              {target.fields.includes("positionYPercent") ? (
+              {showMediaField("positionYPercent") ? (
                 <label>
                   {`${target.label} 위아래 위치`}
                   <Input disabled={disabled} max="100" min="-100" onChange={(event) => setPositionYPercent(numberValue(event.target.value, positionYPercent))} step="1" type="number" value={positionYPercent} />
                 </label>
               ) : null}
-              {target.fields.includes("rotationDeg") ? (
+              {showMediaField("rotationDeg") ? (
                 <label>
                   {`${target.label} 기울이기`}
                   <Input disabled={disabled} max="180" min="-180" onChange={(event) => setRotationDeg(numberValue(event.target.value, rotationDeg))} step="1" type="number" value={rotationDeg} />
                 </label>
               ) : null}
-              {target.fields.includes("volume") ? (
+              {showMediaField("volume") ? (
                 <label>
                   {`${target.label} 소리 크기`}
                   <Input disabled={disabled} max="2" min="0" onChange={(event) => setVolume(numberValue(event.target.value, volume))} step="0.05" type="number" value={volume} />
@@ -624,7 +687,7 @@ export function InspectorControls({
               ) : null}
               {/* 색감(`sceneFilters.ts`). 만든 여섯 개만 보여 준다 -- 캡컷 필터
                   탭의 이름표는 캡컷 서버 자원이라 우리 렌더러가 못 그린다. */}
-              {target.fields.includes("filter") ? (
+              {showMediaField("filter") ? (
                 <label>
                   {`${target.label} 색감`}
                   <NativeSelect
@@ -648,7 +711,7 @@ export function InspectorControls({
               {/* 음량 바로 아래. 이게 꺼져 있으면 `소리 크기`는 아무 일도 하지
                   않는다 -- 섞일 소리가 없기 때문이다. §10.13: `소스 오디오` 같은
                   말 대신 무엇을 쓰겠다는 건지로 적는다. */}
-              {target.fields.includes("preserveSourceAudio") ? (
+              {showMediaField("preserveSourceAudio") ? (
                 <label>
                   <Input
                     checked={preserveSourceAudio}
@@ -662,7 +725,7 @@ export function InspectorControls({
               {/* 말이 음악에 묻히는 것은 완성본에서 가장 자주 걸리는 문제다.
                   §10.13: `사이드체인`·`덕킹` 같은 말 대신 무슨 일이 일어나는지로
                   적는다. 끄고 켜는 것뿐이므로 숫자를 묻지 않는다. */}
-              {target.fields.includes("ducking") ? (
+              {showMediaField("ducking") ? (
                 <label>
                   <Input
                     checked={ducking}
@@ -675,7 +738,7 @@ export function InspectorControls({
               ) : null}
               {/* 캡컷 오디오 탭 대조(2026-09-01). §10.13: `노멀라이즈`·`LUFS`·
                   `afftdn` 같은 말 대신 무슨 일이 일어나는지로 적는다. */}
-              {target.fields.includes("normalizeLoudness") ? (
+              {showMediaField("normalizeLoudness") ? (
                 <label>
                   <Input
                     checked={normalizeLoudness}
@@ -686,7 +749,7 @@ export function InspectorControls({
                   소리 크기를 고르게 맞추기
                 </label>
               ) : null}
-              {target.fields.includes("denoise") ? (
+              {showMediaField("denoise") ? (
                 <label>
                   <Input
                     checked={denoise}
@@ -698,7 +761,7 @@ export function InspectorControls({
                 </label>
               ) : null}
               {/* 캡컷 동영상 탭 대조(2026-09-01). 화면이 있는 클립에만 붙는다. */}
-              {target.fields.includes("stabilize") ? (
+              {showMediaField("stabilize") ? (
                 <label>
                   <Input
                     checked={stabilize}
@@ -711,7 +774,7 @@ export function InspectorControls({
               ) : null}
               {/* 캡컷 `이미지 노이즈 감소` 대조(2026-09-01). 캡컷은 사진 한
                   장짜리 유료 기능인데, `hqdn3d`는 영상에도 그대로 걸린다. */}
-              {target.fields.includes("reduceNoise") ? (
+              {showMediaField("reduceNoise") ? (
                 <label>
                   <Input
                     checked={reduceNoise}
@@ -725,7 +788,7 @@ export function InspectorControls({
               {/* 캡컷 속도 탭 대조(2026-09-01). 끄면 빨리 감은 테이프처럼
                   목소리가 올라간다 -- 캡컷에서 이 스위치를 꺼 본 창작자가
                   기대하는 소리가 그것이다. 배속이 1배면 아무 차이가 없다. */}
-              {target.fields.includes("preservePitch") ? (
+              {showMediaField("preservePitch") ? (
                 <label>
                   <Input
                     checked={preservePitch}

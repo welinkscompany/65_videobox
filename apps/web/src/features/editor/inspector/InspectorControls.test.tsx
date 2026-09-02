@@ -45,6 +45,14 @@ function renderControls({
   return onAction;
 }
 
+/** 세부 정보 패널은 캡컷처럼 탭으로 나뉜다(owner 지시 2026-09-02). 칸을 만지려면
+ *  그 칸이 있는 탭을 먼저 연다 -- 창작자도 화면에서 똑같이 한다. 탭이 하나뿐인
+ *  대상(소리 클립)에는 탭줄 자체가 없으므로 그때는 아무것도 하지 않는다. */
+function openInspectorTab(name: "화면" | "소리" | "속도" | "보정"): void {
+  const tab = screen.queryByRole("tab", { name });
+  if (tab) fireEvent.click(tab);
+}
+
 describe("InspectorControls", () => {
   it("does not fetch approved voices for a scene the creator never asked about", async () => {
     // 초기화를 effect에서 하면 조회 effect가 **같은 commit에서 옛 값을 읽어** 새
@@ -299,6 +307,55 @@ describe("InspectorControls", () => {
     }));
   });
 
+  // owner 지시 2026-09-02: 세부 정보 패널을 캡컷처럼 묶기. 2026-09-01에 조정 항목을
+  // 여섯 늘렸더니 이 패널 하나에 조건부 칸이 서른일곱이 됐고, 220~400px 도크에서
+  // 단추를 줄여 벌어 놓은 자리를 도로 잡아먹었다.
+  it("groups a video clip's controls into CapCut-style tabs, and keeps the save button out of them", () => {
+    const onAction = vi.fn();
+    const segment = { cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-tabs", startSec: 1 };
+    const broll: InspectorTarget = {
+      assetId: "asset-tabs", clearOnly: false, controls: {},
+      fields: ["fit", "zoom", "speed", "preservePitch", "volume", "preserveSourceAudio", "filter", "stabilize"],
+      id: "clip:broll-tabs", kind: "media", label: "B-roll", mediaKind: "broll", segmentId: "segment-tabs",
+    };
+
+    render(<InspectorControls onAction={onAction} selectedSegment={segment} target={broll} />);
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["화면", "소리", "속도", "보정"]);
+    // 처음에는 화면 탭이다. 다른 탭의 칸은 아직 안 보인다.
+    expect(screen.getByLabelText("B-roll 크기")).toBeVisible();
+    expect(screen.queryByLabelText("B-roll 재생 속도")).toBeNull();
+
+    fireEvent.click(screen.getByRole("tab", { name: "속도" }));
+    expect(screen.getByLabelText("B-roll 재생 속도")).toBeVisible();
+    expect(screen.queryByLabelText("B-roll 크기")).toBeNull();
+
+    // **저장 단추는 탭 밖에 있다.** 탭 안에 두면 어느 탭에서 눌렀느냐에 따라
+    // 저장되는 것이 다른 것처럼 읽힌다 -- 실제로는 늘 전부 저장된다.
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: "save-media",
+      // 지금 안 보이는 탭의 값도 같이 실린다.
+      controls: expect.objectContaining({ fit: "fit", speed: 1, volume: 1 }),
+    }));
+  });
+
+  // 소리 클립은 칸이 전부 한 탭에 든다 -- 그때 탭줄은 자리만 먹고 아무것도
+  // 알려 주지 않는다.
+  it("does not draw a tab strip when everything fits in one tab", () => {
+    const segment = { cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-one-tab", startSec: 1 };
+    const bgm: InspectorTarget = {
+      assetId: "asset-bgm-one", clearOnly: false, controls: {},
+      fields: ["fadeInSec", "fadeOutSec", "gainDb", "ducking", "normalizeLoudness", "denoise"],
+      id: "clip:bgm-one", kind: "media", label: "배경 음악", mediaKind: "bgm", segmentId: "segment-one-tab",
+    };
+
+    render(<InspectorControls onAction={vi.fn()} selectedSegment={segment} target={bgm} />);
+
+    expect(screen.queryAllByRole("tab")).toEqual([]);
+    expect(screen.getByLabelText("소리 크기를 고르게 맞추기")).toBeVisible();
+  });
+
   it("carries the CapCut-parity cleanup toggles into the save without leaking filter names", () => {
     // 캡컷 오디오·동영상 탭 대조로 들어온 셋(owner 승인 2026-09-01). 캡컷은
     // 클라우드 AI 유료 기능으로 파는데 우리는 FFmpeg 필터 하나씩이다.
@@ -460,6 +517,7 @@ describe("InspectorControls", () => {
     const save = screen.getByRole("button", { name: "B-roll 설정 저장" });
     expect(save).toBeEnabled();
 
+    openInspectorTab("소리");
     fireEvent.click(screen.getByLabelText("이 영상의 원래 소리도 함께 쓰기"));
     fireEvent.click(save);
 
@@ -554,6 +612,7 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("소리");
     const toggle = screen.getByLabelText("이 영상의 원래 소리도 함께 쓰기");
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
@@ -1063,6 +1122,7 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("보정");
     fireEvent.change(screen.getByLabelText("B-roll 색감"), { target: { value: "vintage" } });
     fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
 
@@ -1092,6 +1152,7 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("보정");
     expect(screen.getByLabelText("B-roll 색감")).toHaveValue("warm");
   });
 
@@ -1117,6 +1178,7 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("보정");
     fireEvent.change(screen.getByLabelText("B-roll 색감"), { target: { value: "none" } });
     fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
 
@@ -1146,6 +1208,7 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("보정");
     expect(screen.getByText("캡컷으로 넘기면 비슷한 색감으로 바뀝니다.")).toBeInTheDocument();
   });
 
@@ -1174,7 +1237,9 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("속도");
     fireEvent.change(screen.getByLabelText("B-roll 재생 속도"), { target: { value: "1.5" } });
+    openInspectorTab("소리");
     fireEvent.change(screen.getByLabelText("B-roll 소리 크기"), { target: { value: "0.3" } });
     fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
 
@@ -1212,6 +1277,7 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("속도");
     fireEvent.click(screen.getByRole("button", { name: "B-roll 2배속" }));
     fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
 
@@ -1244,6 +1310,7 @@ describe("InspectorControls", () => {
       />,
     );
 
+    openInspectorTab("속도");
     expect(screen.getByRole("button", { name: "B-roll 0.5배속" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "B-roll 2배속" })).toHaveAttribute("aria-pressed", "false");
   });
