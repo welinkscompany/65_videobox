@@ -3454,3 +3454,48 @@ def test_the_library_is_still_reachable_without_the_semantic_index(tmp_path: Pat
     assert "pack:starter-v1:music-peaceful-drift" in prompt
     assert "music-peaceful-drift" in prompt
     assert "pack:starter-v1:sfx-click" in prompt
+
+
+def test_yujin_is_handed_the_scene_numbers_instead_of_counting_them(tmp_path: Path) -> None:
+    """**번호를 세어 주지 않으면 유진이 세고, 틀린다.**
+
+    실측(2026-09-02): id를 나열만 한 채 "2번 장면에 음악을 넣어 줘"라고 했더니
+    **3번 장면**에 넣었다. 완성본을 뽑아 보고서야 2번 장면이 무음인 것으로
+    드러났다 -- 세션만 봤으면 "음악이 붙었다"로 보였을 종류의 결함이다.
+
+    창작자는 늘 번호로 부르고 화면도 `2번 장면`으로 쓴다. 자리를 세는 일을
+    모델에게 시킬 이유가 없다.
+    """
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "scene numbers"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id="timeline",
+        session_payload={"segments": [
+            {"segment_id": "seg-aaa", "start_sec": 0, "end_sec": 4},
+            {"segment_id": "seg-bbb", "start_sec": 4, "end_sec": 8},
+            {"segment_id": "seg-ccc", "start_sec": 8, "end_sec": 12},
+        ], "history": []},
+    )
+
+    client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "2번 장면에 배경 음악을 넣어 줘"},
+    )
+
+    prompt = seen_prompts[-1]
+    assert "1번 장면=seg-aaa" in prompt
+    assert "2번 장면=seg-bbb" in prompt
+    assert "3번 장면=seg-ccc" in prompt

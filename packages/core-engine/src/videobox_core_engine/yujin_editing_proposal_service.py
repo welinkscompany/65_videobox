@@ -136,7 +136,13 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "proposal이 null이면 reply_text에 '만들었다/적용했다/바꿨다'처럼 편집이 이미 일어난 것으로 쓰지 않는다 -- "
         "왜 후보를 못 만드는지 설명하거나 필요한 정보를 되묻는 문장만 쓴다. "
         "apply_media의 asset_id는 반드시 아래 승인된 자산 목록에 있는 값만 써야 한다 -- 없는 값을 지어내면 항상 거절된다. "
-        f"현재 장면 ID: {', '.join(context.segment_ids)}. 현재 revision: {context.session_revision}. "
+        # **번호를 세어 주지 않으면 유진이 센다. 그리고 틀린다.**
+        # 실측(2026-09-02): id를 나열만 하고 "2번 장면에 음악을 넣어 줘"라고 했더니
+        # 3번 장면에 넣었다. 창작자는 늘 번호로 부르고(화면도 `2번 장면`으로 쓴다)
+        # 자리를 세는 일을 모델에게 시킬 이유가 없다. 짝을 지어 준다.
+        f"현재 장면: {', '.join(f'{index}번 장면={segment_id}' for index, segment_id in enumerate(context.segment_ids, start=1))}. "
+        f"창작자가 말하는 번호는 이 표로 옮긴다 -- 자리를 세지 마라. "
+        f"현재 revision: {context.session_revision}. "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
         f"proposal이 있을 때 출력 예시: {json.dumps(success_example, ensure_ascii=False)}. "
