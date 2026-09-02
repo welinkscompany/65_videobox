@@ -131,3 +131,33 @@ def test_our_own_mistakes_are_not_swallowed_as_model_failures() -> None:
         CaptionTranslationService(runtime=runtime).translate(
             project_id="project_001", language="en", captions=[("segment_001", "안녕")]
         )
+
+
+def test_a_real_length_script_keeps_every_scene_matched() -> None:
+    """**243장면에서도 배치 경계에서 장면이 어긋나지 않는다.**
+
+    창작자의 실제 대본이 243문단이다(2026-09-03 실측, 8분 15초 영상).
+    12장면씩 21묶음으로 끊기는데, 묶음 안 번호를 다시 장면으로 옮기는 자리가
+    한 번이라도 어긋나면 **엉뚱한 장면에 엉뚱한 번역이 들어간다** -- 다섯
+    장면짜리 시험으로는 묶음이 하나뿐이라 이 위험이 안 보인다.
+    """
+    captions = [(f"s{index:03d}", f"{index}번째 문장입니다") for index in range(1, 244)]
+    runtime = _Runtime([])
+
+    def reply_with_same_numbers(**kwargs: Any) -> _Response:
+        block = kwargs["prompt"].split("옮길 자막:", 1)[1]
+        numbers = [int(line.split(".", 1)[0]) for line in block.splitlines() if line.strip()[:1].isdigit()]
+        return _Response({
+            "schema_version": "videobox.caption-translation.v1",
+            "translations": [{"scene": number, "text": f"EN-{number}"} for number in numbers],
+        })
+
+    runtime.generate_structured = reply_with_same_numbers  # type: ignore[assignment]
+    result = CaptionTranslationService(runtime=runtime).translate(
+        project_id="project_001", language="en", captions=captions,
+    )
+
+    assert len(result) == 243
+    for index, (segment_id, _) in enumerate(captions, start=1):
+        # 묶음 안에서 몇 번째였는지가 그대로 돌아와야 한다.
+        assert result[segment_id] == f"EN-{((index - 1) % 12) + 1}"

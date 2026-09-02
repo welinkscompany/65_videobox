@@ -12,8 +12,27 @@ import { pollJobUntilTerminal } from "../../../lib/pollJob";
  * 대부분 같은 숫자를 본다. 3초면 진행이 끊겨 보이지 않으면서 요청은 3분의 2다.
  */
 const DUBBING_POLL_INTERVAL_MS = 3000;
-/** 3초 × 700 = 35분. 백 장면이 넘는 영상(13초×100 ≈ 22분)도 넉넉히 덮는다. */
-const DUBBING_POLL_MAX_ATTEMPTS = 700;
+
+/** 장면 하나에 걸리는 시간(2026-09-03 실측, chatterbox). */
+const SECONDS_PER_SCENE = 13;
+/** 느린 날을 위한 여유. 기계가 바쁘면 장면당 시간이 늘어난다. */
+const PATIENCE_FACTOR = 2.5;
+/** 장면이 아주 적어도 이만큼은 기다린다(5분). */
+const MIN_POLL_ATTEMPTS = 100;
+
+/**
+ * 몇 번까지 물어볼지는 **장면 수에 따라 달라져야 한다.**
+ *
+ * 고정값(700회 = 35분)이었는데, 창작자의 실제 대본은 243장면이고 그건 52분이
+ * 걸린다 -- 더빙이 멀쩡히 도는 중에 화면만 "너무 오래 걸려서 멈췄어요"라고
+ * 말하게 된다(2026-09-03에 계산으로 잡았다). 백 장면짜리로만 시험하면 안 보인다.
+ */
+function pollAttemptsFor(sceneCount: number): number {
+  const seconds = sceneCount * SECONDS_PER_SCENE * PATIENCE_FACTOR;
+  return Math.max(MIN_POLL_ATTEMPTS, Math.ceil((seconds * 1000) / DUBBING_POLL_INTERVAL_MS));
+}
+
+export { pollAttemptsFor };
 
 export type DubbingOutcome =
   | { kind: "succeeded"; dubbedSceneCount: number; notice: string | null }
@@ -48,7 +67,7 @@ export async function runDubbingWithProgress(input: {
     },
     {
       intervalMs: DUBBING_POLL_INTERVAL_MS,
-      maxAttempts: DUBBING_POLL_MAX_ATTEMPTS,
+      maxAttempts: pollAttemptsFor(started.total_scene_count),
       delayFirst: true,
       isStillRelevant: input.isStillRelevant,
     },

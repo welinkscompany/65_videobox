@@ -4,7 +4,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import { api } from "../../../api";
-import { dubbingOutcomeMessage, runDubbingWithProgress } from "./dubbingProgress";
+import { dubbingOutcomeMessage, pollAttemptsFor, runDubbingWithProgress } from "./dubbingProgress";
 
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
@@ -60,5 +60,24 @@ describe("더빙 진행", () => {
     /** "실패했어요"만으로는 창작자가 할 일을 모른다. */
     expect(dubbingOutcomeMessage({ kind: "failed", detail: null }))
       .toContain("목소리 프로그램이 켜져 있는지");
+  });
+});
+
+describe("기다리는 시간", () => {
+  it("장면이 많으면 더 오래 기다린다", () => {
+    /** 창작자의 실제 대본은 243장면이고 그건 52분이 걸린다.
+     *  고정 35분이었을 때는 더빙이 도는 중에 화면만 포기했다(2026-09-03). */
+    const attempts = pollAttemptsFor(243);
+    const minutes = (attempts * 3) / 60;
+
+    expect(minutes).toBeGreaterThan(52);
+  });
+
+  it("장면이 적어도 너무 빨리 포기하지 않는다", () => {
+    expect(pollAttemptsFor(1) * 3).toBeGreaterThanOrEqual(300);
+  });
+
+  it("장면이 늘면 기다리는 시간도 늘어난다", () => {
+    expect(pollAttemptsFor(200)).toBeGreaterThan(pollAttemptsFor(50));
   });
 });
