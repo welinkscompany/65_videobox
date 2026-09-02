@@ -291,3 +291,62 @@ def test_the_shortcut_installer_creates_a_working_shortcut(tmp_path: Path) -> No
         capture_output=True, text=True, encoding="utf-8", timeout=120,
     )
     assert target.stdout.strip() == str(CMD)
+
+
+def _voice_step(result: subprocess.CompletedProcess[str]) -> dict:
+    payload = json.loads(result.stdout[result.stdout.index("{"):])
+    return next((step for step in payload["steps"] if step["id"] == "voice"), {})
+
+
+def test_the_icon_also_starts_the_voice_program(tmp_path: Path) -> None:
+    """아이콘 하나로 켜는 것에 **내 목소리 더빙**도 포함된다(owner 요청 2026-09-03).
+
+    안 켜면 창작자는 더빙을 누른 뒤에야 "켜 주세요"를 보고, 그제서야 다른
+    창을 찾아 켜야 한다.
+    """
+    with _answering_server() as uri:
+        result = _run(tmp_path, uri=uri, extra=[
+            "-SkipBrowser", "-VoiceTimeoutSec", "0",
+            "-VoiceUri", "http://127.0.0.1:9/health",
+        ])
+
+    assert result.returncode == 0, result.stderr
+    assert _voice_step(result), "목소리 단계가 아예 없다"
+
+
+def test_a_missing_voice_program_does_not_block_videobox(tmp_path: Path) -> None:
+    """**목소리가 없어도 VideoBox는 켠다.**
+
+    자막·편집·완성본은 목소리 없이도 다 된다. 그것 하나 때문에 아이콘이
+    아무것도 안 켜 주면 훨씬 나쁘다.
+    """
+    with _answering_server() as uri:
+        # 아무도 안 듣는 주소를 준다. 안 그러면 **이 기계에 진짜로 켜져 있는**
+        # 목소리 프로그램을 찾아서 "이미 켜져 있다"로 새어 나간다.
+        result = _run(tmp_path, uri=uri, extra=[
+            "-SkipBrowser",
+            "-VoiceScript", str(tmp_path / "없는파일.ps1"),
+            "-VoiceUri", "http://127.0.0.1:9/health",
+        ])
+
+    payload = json.loads(result.stdout[result.stdout.index("{"):])
+    assert payload["overall"] == "ready", payload
+    assert _voice_step(result)["status"] == "skipped"
+
+
+def test_the_voice_program_is_not_started_twice(tmp_path: Path) -> None:
+    """이미 켜져 있으면 또 켜지 않는다 -- 두 번 켜면 같은 포트를 다투다 죽는다."""
+    with _answering_server() as uri:
+        # 목소리 확인 주소를 살아 있는 주소로 준다 = 이미 켜져 있는 상황.
+        result = _run(tmp_path, uri=uri, extra=["-SkipBrowser", "-VoiceUri", uri])
+
+    step = _voice_step(result)
+    assert step["status"] == "pass"
+    assert step["evidence"]["started_by_us"] is False
+
+
+def test_the_voice_program_can_be_skipped(tmp_path: Path) -> None:
+    with _answering_server() as uri:
+        result = _run(tmp_path, uri=uri, extra=["-SkipBrowser", "-SkipVoice"])
+
+    assert _voice_step(result)["status"] == "skipped"
