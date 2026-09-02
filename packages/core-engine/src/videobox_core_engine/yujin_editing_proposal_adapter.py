@@ -55,6 +55,14 @@ class YujinEditingContext:
     #: 없는 장면에는 걸 수 없다 -- 색감이 화면을 요구하는 것과 같은 이유다.
     segment_ids_with_bgm: tuple[str, ...] = ()
     segment_ids_with_sfx: tuple[str, ...] = ()
+    #: 장면별 **지금 자막 글**. 없으면 유진은 "짧게 다듬어 줘"를 할 수 없다 --
+    #: 지금 뭐라고 적혀 있는지 모르는 채로 새 문장을 지어내야 하기 때문이다.
+    #: 2026-09-03까지 이 값이 없어서, 자막을 고치라는 요청은 늘 지어낸 문장이었다.
+    captions: tuple[tuple[str, str], ...] = ()
+    #: 창작자가 **지금 보고 있는** 자막 언어. `None`이면 원본(한국어).
+    #: 유진은 이 언어로 보고 이 언어를 고친다 -- 보는 것과 고치는 것이 달라지면
+    #: 창작자 눈에는 아무 일도 안 일어난 것처럼 보인다.
+    caption_language: str | None = None
 
 
 @dataclass(frozen=True)

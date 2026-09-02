@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 
+from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.filters import FILTER_CATALOG
 from videobox_core_engine.yujin_editing_proposal_adapter import (
     YujinEditingContext,
@@ -99,6 +100,31 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
     )
 
 
+def _caption_catalogue(context: YujinEditingContext) -> str:
+    """장면별 지금 자막. **보여 주지 않으면 다듬을 수 없다.**
+
+    2026-09-03까지 이걸 안 줬다. 그래서 "3번 장면 자막을 짧게 다듬어 줘"라는
+    요청에 유진은 지금 뭐라고 적혀 있는지 모르는 채로 새 문장을 지어냈다.
+
+    창작자가 보고 있는 언어로 보여 준다 -- 영어를 보고 있으면 영어를 보여 주고
+    영어를 고친다. 보는 것과 고치는 것이 다르면 창작자 눈에는 아무 일도 안
+    일어난 것처럼 보인다.
+    """
+    if not context.captions:
+        return "자막이 있는 장면이 없다."
+    numbers = {segment_id: index for index, segment_id in enumerate(context.segment_ids, start=1)}
+    shown = ", ".join(
+        f"{numbers.get(segment_id, '?')}번 자막=\"{text}\""
+        for segment_id, text in context.captions
+    )
+    language = SUPPORTED_CAPTION_LANGUAGES.get(context.caption_language or "", "원본")
+    return (
+        f"지금 자막({language}): {shown}. "
+        "자막을 다듬으라고 하면 **이 글을 고쳐서** set_caption_text로 낸다 -- "
+        f"새로 지어내지 말고 {language} 그대로 다듬는다."
+    )
+
+
 def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
     success_example = {
         "schema_version": "videobox.yujin-editing-response.v1",
@@ -149,6 +175,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"현재 장면: {', '.join(f'{index}번 장면={segment_id}' for index, segment_id in enumerate(context.segment_ids, start=1))}. "
         f"창작자가 말하는 번호는 이 표로 옮긴다 -- 자리를 세지 마라. "
         f"현재 revision: {context.session_revision}. "
+        f"{_caption_catalogue(context)} "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는

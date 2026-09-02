@@ -867,8 +867,12 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
                 cut_action={"exclude": "remove", "restore": "keep"}[operation.action],
             )
         elif isinstance(operation, SetCaptionTextOperation):
+            # **창작자가 보고 있던 언어를 고친다.** 유진에게도 그 언어로 보여
+            # 줬으므로 고치는 자리도 같아야 한다 -- 영어를 보며 "짧게 줄여 줘"라고
+            # 했는데 한국어가 고쳐지면 창작자 눈에는 아무 일도 안 일어난다.
             working = update_segment_caption(
-                session=working, segment_id=operation.segment_id, caption_text=operation.text
+                session=working, segment_id=operation.segment_id, caption_text=operation.text,
+                language=str(working.get("caption_language") or "") or None,
             )
         elif isinstance(operation, SetSceneLookOperation):
             # 손떨림·노이즈·변형과 **같은 자리**에 얹는다(전부 그 장면 B-roll의

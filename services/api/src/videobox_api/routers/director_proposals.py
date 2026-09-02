@@ -9,6 +9,7 @@ from threading import Event, Thread
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
+from videobox_core_engine.caption_translation import caption_text_for_language
 from videobox_core_engine.director_media_focus import media_focus_for_request
 from videobox_core_engine.library_materialization import materialize_library_asset
 from videobox_core_engine.mojibake import repair_mojibake_metadata
@@ -368,6 +369,19 @@ def build_director_proposals_router(
             session_id=session_id,
             session_revision=int(session["session_revision"]),
             segment_ids=tuple(str(item["segment_id"]) for item in session.get("segments", []) if isinstance(item, dict) and item.get("segment_id")),
+            # **유진에게 지금 자막을 보여 준다.** 안 보여 주면 "짧게 다듬어 줘"에
+            # 지금 뭐라고 적혀 있는지 모르는 채로 새 문장을 지어낸다(2026-09-03).
+            #
+            # 창작자가 보고 있는 언어로 보여 주고, 적용도 그 언어에 한다 --
+            # 보는 것과 고치는 것이 다르면 눈에는 아무 일도 안 일어난다.
+            caption_language=str(session.get("caption_language") or "") or None,
+            captions=tuple(
+                (str(item["segment_id"]), text)
+                for item in session.get("segments", [])
+                if isinstance(item, dict) and item.get("segment_id")
+                for text in [caption_text_for_language(item, str(session.get("caption_language") or "") or None).strip()]
+                if text
+            ),
             approved_asset_ids=tuple(
                 [str(item["asset_id"]) for item in approved_assets]
                 + [item["asset_id"] for item in library_candidates]
