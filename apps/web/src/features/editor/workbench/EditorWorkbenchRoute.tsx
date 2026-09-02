@@ -838,7 +838,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     let resultMessage = "변경 내용을 저장했어요.";
     let mutationSucceeded = true;
     try {
-      await run(port, isCurrent);
+      // 성공한 편집이 **자기 사정을 직접 말할 수 있게** 한다. 더빙처럼 "됐다"만으로는
+      // 모자란 편집이 있다 -- 못 넣은 장면이 있으면 그것까지 말해 줘야 한다.
+      const spoken = await run(port, isCurrent);
+      if (typeof spoken === "string" && spoken.trim()) resultMessage = spoken;
       if (isCurrent()) {
         setMutation({ isSaving: true, message: "변경 내용을 저장했어요. 최신 내용을 불러오고 있어요." });
       }
@@ -1077,7 +1080,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     if (action.kind === "partial-preflight") return preflightPartialRegeneration(action);
     if (action.kind === "partial-run") return runPartialRegeneration(action);
     if (action.kind === "partial-resume") return resumePartialRegeneration(action);
-    return commitTimelineMutation((port) => {
+    return commitTimelineMutation(async (port) => {
       if (action.kind === "split-narration") return port.splitNarration({ segmentId: action.segmentId, splitSec: action.splitSec });
       if (action.kind === "merge-narration") return port.mergeNarration({ leftSegmentId: action.leftSegmentId, rightSegmentId: action.rightSegmentId });
       if (action.kind === "set-cut-action") return port.setCutAction({ segmentId: action.segmentId, cutAction: action.cutAction });
@@ -1091,6 +1094,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       // 같은 통로로 보내서 되돌리기·충돌 확인을 그대로 받는다.
       if (action.kind === "translate-captions") return port.translateCaptions({ language: action.language });
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
+      if (action.kind === "dub-narration") {
+        const dubbed = await port.dubNarration({ language: action.language });
+        // 못 넣은 장면이 있으면 그 사정이, 없으면 몇 장면을 바꿨는지가 뜬다.
+        return dubbed.dubbing_notice
+          ?? `${dubbed.dubbed_scene_count ?? 0}개 장면의 목소리를 바꿨어요.`;
+      }
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
       if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
       if (action.overlayKind === "shape") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, shape: action.shape, vertical: action.vertical, horizontal: action.horizontal, size: action.size, motion: action.motion });

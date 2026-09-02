@@ -451,6 +451,35 @@ class EditingSessionRegenerationMixin:
             updated_session=updated_session, expected_revision=expected_revision,
         )
 
+    def set_editing_session_dubbed_takes(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        selections: dict[str, tuple[str, str]],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """더빙한 장면들을 **한 번에** 세션에 건다. `{장면: (후보, 소리)}`.
+
+        장면마다 따로 저장하지 않는 이유: 스무 장면을 더빙하면 되돌리기를 스무 번
+        눌러야 원래대로 돌아간다. 자막 번역과 같은 규칙이다 -- 한 번에 건 것은
+        한 번에 풀린다.
+        """
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = deepcopy(session)
+        for segment in updated_session.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            selection = selections.get(str(segment.get("segment_id") or ""))
+            if selection is None:
+                continue
+            recommendation_id, asset_id = selection
+            segment["tts_replacement"] = {"recommendation_id": recommendation_id, "asset_id": asset_id}
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=updated_session, expected_revision=expected_revision,
+        )
+
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.store.get_editing_session(project_id=project_id, session_id=session_id)
 

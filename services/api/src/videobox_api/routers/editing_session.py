@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CaptionLanguageRequest,
+    DubbingRequest,
     CaptionTranslationRequest,
     NarrationRecordingSyncRequest,
     BrollOverrideRequest,
@@ -229,6 +230,27 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 language=payload.language,
                 expected_revision=payload.expected_revision,
                 runtime=request.app.state.local_only_runtime_service_factory(store),
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/dubbing")
+    def dub_editing_session(
+        project_id: str, session_id: str, payload: DubbingRequest
+    ) -> EditingSessionResponse:
+        """옮겨 둔 자막을 그 언어 목소리로 읽혀 내레이션을 바꾼다."""
+        try:
+            result = orchestrator.dub_editing_session(
+                project_id=project_id,
+                session_id=session_id,
+                language=payload.language,
+                voice_sample_asset_id=payload.voice_sample_asset_id,
+                expected_revision=payload.expected_revision,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)

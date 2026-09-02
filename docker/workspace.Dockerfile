@@ -18,7 +18,10 @@ RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/ap
     # 아이콘이 그리는 기호(✔ ✕ ⚠ 등) -- 한글 글꼴에는 없다. 지금까지는 다른
     # 패키지에 딸려 들어와 있었을 뿐이라 여기서 명시한다: 사라지면 그 아이콘들이
     # 렌더에서 막힌다(빈 상자를 그리느니 멈추도록 돼 있다).
-    && apt-get install --no-install-recommends -y --fix-missing ffmpeg nginx util-linux fonts-nanum fonts-dejavu-core \
+    # espeak-ng는 더빙을 **설치 없이 오늘 써 볼 수 있게** 하는 내레이션 엔진이다
+    # (수 MB, 밖으로 나가지 않음). 목소리를 복제하지는 못한다 -- 창작자 목소리로
+    # 더빙하려면 chatterbox를 따로 설치하고 VIDEOBOX_TTS_ENGINE만 바꾸면 된다.
+    && apt-get install --no-install-recommends -y --fix-missing ffmpeg espeak-ng nginx util-linux fonts-nanum fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Keep the Node 20 toolchain available inside the trusted local workspace.

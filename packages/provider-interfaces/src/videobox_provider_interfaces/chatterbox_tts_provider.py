@@ -64,7 +64,7 @@ class ChatterboxTTSProvider:
             wav = model.generate(
                 request.text,
                 audio_prompt_path=str(speaker_wav),
-                language_id=self.language,
+                language_id=request.language or self.language,
             )
             _save_wav(request.output_path, wav, getattr(model, "sr", 24000))
         except TTSSynthesisError:

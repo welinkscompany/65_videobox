@@ -946,6 +946,19 @@ class CaptionTranslationRequest(BaseModel):
         return self
 
 
+class DubbingRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    language: str = Field(min_length=1)
+    #: 목소리를 복제하는 엔진에만 필요하다. 복제하지 않는 엔진은 없어도 된다.
+    voice_sample_asset_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_language(self) -> "DubbingRequest":
+        if self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
+
+
 class CaptionLanguageRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     #: `None`이면 원본(한국어)으로 되돌린다 -- 번역은 지우지 않는다.
@@ -1365,6 +1378,10 @@ class EditingSessionResponse(BaseModel):
     caption_style: dict[str, object] | None = None
     # 완성본에 실을 자막 언어. 없으면 원본(한국어)으로 나간다.
     caption_language: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: 이번 요청에서 목소리를 바꾼 장면 수. 더빙 요청에만 실린다.
+    dubbed_scene_count: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: 못 넣은 장면이 있으면 그 사정을 창작자 말로. 전부 됐으면 안 실린다.
+    dubbing_notice: str | None = Field(default=None, exclude_if=lambda value: value is None)
     segments: list[EditingSessionSegmentResponse]
     history: list[EditingSessionHistoryEntryResponse] = Field(default_factory=list)
     undo_count: int = 0

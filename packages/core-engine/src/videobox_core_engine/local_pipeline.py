@@ -61,6 +61,8 @@ from videobox_core_engine.output_source_verifier import (
     verify_output_source_snapshots,
 )
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
+from videobox_core_engine.audio_descriptors import probe_duration_seconds
+from videobox_core_engine.dubbing import apply_dubbing_fit, plan_dubbing_fit
 from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 
@@ -891,6 +893,86 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             )
             return {**self._asset_payload(asset), **candidate}
         return self._asset_payload(asset)
+
+    def generate_dubbed_take(
+        self,
+        *,
+        project_id: str,
+        segment_id: str,
+        text: str,
+        language: str,
+        target_duration_sec: float,
+        voice_sample_asset_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """한 장면을 그 언어로 읽어 장면 길이에 맞춘다. 못 맞추면 `None`.
+
+        `voice_sample_asset_id`가 **없어도 된다.** 목소리를 복제하는 엔진
+        (`chatterbox`)은 샘플이 필요하지만, 복제하지 않는 엔진(`espeak`)은 필요
+        없다. 필수로 두면 복제 안 하는 엔진에서 쓸 일 없는 샘플을 올리게 만든다.
+
+        못 맞춘 장면에 억지로 소리를 넣지 않는 이유는 `dubbing.py` 첫머리에 있다.
+        """
+        if self.tts_provider is None:
+            raise RuntimeError(
+                "TTS synthesis is not configured. Enable TTSEngineConfig and install the "
+                "matching engine package (see requirements-runtime.txt)."
+            )
+        voice_sample_path = ""
+        if voice_sample_asset_id:
+            voice_sample_asset = self.store.get_asset(project_id=project_id, asset_id=voice_sample_asset_id)
+            if voice_sample_asset["asset_type"] != AssetType.VOICE_SAMPLE_AUDIO.value:
+                raise ValueError("generate_dubbed_take requires a voice_sample_audio asset.")
+            voice_sample_path = str(
+                self.store.resolve_storage_uri(
+                    project_id=project_id, storage_uri=voice_sample_asset["storage_uri"]
+                )
+            )
+
+        with tempfile.TemporaryDirectory(prefix="videobox_dub_") as raw_work_dir:
+            work_dir = Path(raw_work_dir)
+            spoken_path = work_dir / "spoken.wav"
+            self.tts_provider.synthesize(
+                TTSRequest(
+                    text=text,
+                    voice_sample_uri=voice_sample_path,
+                    output_path=spoken_path,
+                    target_duration_sec=target_duration_sec,
+                    language=language,
+                )
+            )
+            fit = plan_dubbing_fit(
+                actual_duration_sec=probe_duration_seconds(spoken_path),
+                target_duration_sec=target_duration_sec,
+            )
+            if not fit.fitted:
+                return None
+            # 길이가 이미 딱 맞아도 한 번 통과시킨다 -- `-t`로 못박아야 완성본에서
+            # 몇 밀리초씩 어긋나 쌓이지 않는다.
+            fitted_path = work_dir / "fitted.wav"
+            apply_dubbing_fit(source=spoken_path, destination=fitted_path, fit=fit)
+            acceptance = assess_tts_audio(path=fitted_path, target_duration_sec=target_duration_sec)
+            asset = self.store.register_asset(
+                project_id=project_id,
+                asset_type=AssetType.GENERATED_TTS_AUDIO,
+                source_path=fitted_path,
+                metadata={
+                    "provider_name": getattr(self.tts_provider, "provider_name", "unknown"),
+                    "source_text": text,
+                    # 이 소리가 **무엇을 읽은 것인지** 남긴다. 나중에 자막을 고치고
+                    # 다시 더빙할 때 어느 것이 낡았는지 이걸로 안다.
+                    "dubbing_language": language,
+                    "dubbing_speed": round(fit.speed, 6),
+                    "dubbing_pad_sec": round(fit.pad_sec, 6),
+                },
+            )
+        candidate = self.store.save_tts_candidate(
+            project_id=project_id,
+            segment_id=segment_id,
+            asset_id=asset.asset_id,
+            source_text=text,
+            acceptance=acceptance,
+        )
+        return {**self._asset_payload(asset), **candidate}
 
     def register_sfx_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(

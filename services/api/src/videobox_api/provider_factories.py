@@ -47,6 +47,10 @@ def _build_tts_provider(config: TTSEngineConfig) -> Any | None:
             api_key=config.elevenlabs_api_key,
             voice_id=config.elevenlabs_voice_id,
         )
+    if config.engine == "espeak":
+        from videobox_provider_interfaces.espeak_tts_provider import EspeakTTSProvider
+
+        return EspeakTTSProvider(language=config.language)
     if config.engine == "local_xtts":
         from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
 

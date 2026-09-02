@@ -75,3 +75,27 @@ describe("자막 언어", () => {
     expect(screen.getByRole("button", { name: "원본" })).toHaveAttribute("aria-pressed", "true");
   });
 });
+
+describe("목소리 더빙", () => {
+  it("옮긴 언어만 더빙할 수 있다", () => {
+    /** 옮겨 둔 자막이 곧 대본이다 -- 번역 안 한 언어는 **읽을 것이 없다.** */
+    renderControls({ translatedLanguages: ["en"] });
+
+    expect(screen.getByRole("button", { name: "영어 목소리로 더빙" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "일본어 목소리로 더빙" })).not.toBeInTheDocument();
+  });
+
+  it("아무것도 안 옮겼으면 더빙 자리 자체가 없다", () => {
+    renderControls();
+
+    expect(screen.queryByText("목소리 더빙")).not.toBeInTheDocument();
+  });
+
+  it("누르면 그 언어로 더빙한다", () => {
+    const onAction = renderControls({ translatedLanguages: ["en"] });
+
+    fireEvent.click(screen.getByRole("button", { name: "영어 목소리로 더빙" }));
+
+    expect(onAction).toHaveBeenCalledWith({ kind: "dub-narration", language: "en" });
+  });
+});

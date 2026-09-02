@@ -1,7 +1,10 @@
 FROM python:3.12-slim
 
+# espeak-ng는 더빙을 **설치 없이 오늘 써 볼 수 있게** 하는 내레이션 엔진이다
+# (수 MB, 밖으로 나가지 않음). 목소리를 복제하지는 못한다 -- 창작자 목소리로
+# 더빙하려면 chatterbox를 따로 설치하고 TTSEngineConfig.engine만 바꾸면 된다.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ffmpeg \
+    && apt-get install --no-install-recommends -y ffmpeg espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

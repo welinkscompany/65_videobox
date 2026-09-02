@@ -184,6 +184,26 @@ def resolve_whisper_stt_config() -> "WhisperSTTConfig":
     )
 
 
+def resolve_tts_engine_config() -> "TTSEngineConfig":
+    """내레이션 엔진을 환경에서 읽는다. 안 주면 꺼진 채로 둔다.
+
+    위 resolver들과 같은 이유다: 컨테이너는 `create_app`을 인자 없이 부르므로
+    여기서 읽지 않으면 어떤 설정도 컨테이너에 닿지 않는다.
+
+    **엔진을 바꾸는 것은 코드가 아니라 설정이다.** 목소리 복제(`chatterbox`)를
+    쓰려면 그 패키지를 설치하고 `VIDEOBOX_TTS_ENGINE`만 바꾸면 된다 -- 부르는
+    자리는 그대로다.
+    """
+    defaults = TTSEngineConfig()
+    return TTSEngineConfig(
+        enabled=_environment_flag("VIDEOBOX_TTS_ENABLED"),
+        engine=_environment_text("VIDEOBOX_TTS_ENGINE", defaults.engine),
+        language=_environment_text("VIDEOBOX_TTS_LANGUAGE", defaults.language),
+        elevenlabs_api_key=_environment_text("VIDEOBOX_TTS_ELEVENLABS_API_KEY", ""),
+        elevenlabs_voice_id=_environment_text("VIDEOBOX_TTS_ELEVENLABS_VOICE_ID", ""),
+    )
+
+
 def resolve_image_generation_config() -> "ImageGenerationConfig":
     """Resolve the ComfyUI image path for callers that pass none.
 
@@ -348,7 +368,10 @@ class TTSEngineConfig:
         # `local_xtts`도 목소리를 복제하지만 Coqui CPML은 **비상업용**이다. 이 제품으로
         # 매출을 내려면 `chatterbox`(Resemble AI, MIT, 한국어 지원)를 쓴다.
         # 기능 차이가 아니라 라이선스 때문에 갈린다.
-        valid_engines = {"gtts", "elevenlabs", "local_xtts", "chatterbox"}
+        # `espeak`는 설치가 거의 없고 밖으로 나가지 않아 **더빙을 오늘 써 볼 수
+        # 있게 하는 자리**다. 다만 목소리를 복제하지는 못한다 -- 창작자 목소리로
+        # 더빙하려면 `chatterbox`를 설치하고 여기만 바꾸면 된다.
+        valid_engines = {"gtts", "elevenlabs", "local_xtts", "chatterbox", "espeak"}
         if self.engine not in valid_engines:
             raise ValueError(f"tts_engine_config.engine must be one of {sorted(valid_engines)}.")
         if not self.language.strip():

@@ -1,0 +1,203 @@
+"""더빙 엔드포인트 -- 화면이 밟을 경로를 그대로 밟는다.
+
+동영상 번역기 2단계다. 1단계가 만든 번역을 **그대로 대본으로 쓴다.**
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+import subprocess
+from typing import Any
+
+from fastapi.testclient import TestClient
+
+from videobox_api.main import create_app
+from videobox_core_engine.settings import TTSEngineConfig
+from videobox_provider_interfaces.tts import TTSRequest, TTSResult
+
+
+class _SpokenLength:
+    """말한 길이를 우리가 정하는 가짜 엔진.
+
+    진짜 엔진을 부르지 않는 이유: 이 시험이 재려는 것은 **길이가 안 맞을 때
+    어떻게 되는가**지 목소리가 어떤가가 아니다. 길이를 직접 정할 수 있어야
+    "너무 길어서 못 넣은 장면"을 만들 수 있다.
+    """
+
+    provider_name = "test_spoken_length"
+
+    def __init__(self, seconds_by_text: dict[str, float], default_seconds: float) -> None:
+        self.seconds_by_text = seconds_by_text
+        self.default_seconds = default_seconds
+        self.requests: list[TTSRequest] = []
+
+    def synthesize(self, request: TTSRequest) -> TTSResult:
+        self.requests.append(request)
+        seconds = self.seconds_by_text.get(request.text, self.default_seconds)
+        request.output_path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+             "-i", f"sine=frequency=300:duration={seconds}", str(request.output_path)],
+            check=True, capture_output=True, timeout=120,
+        )
+        return TTSResult(output_uri=str(request.output_path), provider_name=self.provider_name)
+
+
+def _client(tmp_path: Path, engine: _SpokenLength) -> tuple[TestClient, str, str]:
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        tts_provider=engine,
+        tts_engine_config=TTSEngineConfig(enabled=True, engine="espeak"),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "더빙"}).json()["project_id"]
+    session_id = client.post(f"/api/projects/{project_id}/editing-sessions/blank").json()["session_id"]
+    return client, project_id, session_id
+
+
+def _translate(
+    client: TestClient, project_id: str, session_id: str, english: str, projects_root: Path
+) -> dict[str, Any]:
+    """번역을 직접 심는다 -- 이 시험이 재는 것은 더빙이지 번역이 아니다."""
+    body = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    segment_id = body["segments"][0]["segment_id"]
+    body = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/caption",
+        json={"caption_text": "안녕하세요", "expected_revision": body["session_revision"]},
+    ).json()
+    from videobox_core_engine.caption_translation import apply_caption_translations
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    store = LocalProjectStore(projects_root)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    store.update_editing_session(
+        project_id=project_id, session_id=session_id,
+        session_payload=apply_caption_translations(
+            session=session, language="en", texts_by_segment={segment_id: english}
+        ),
+        expected_revision=session["session_revision"],
+    )
+    return client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+
+
+def test_a_fitting_take_replaces_the_narration(tmp_path: Path) -> None:
+    engine = _SpokenLength({}, default_seconds=5.2)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["dubbed_scene_count"] == 1
+    # 전부 들어갔으면 사정을 말할 것이 없다.
+    assert "dubbing_notice" not in body or body["dubbing_notice"] is None
+    assert body["segments"][0]["tts_replacement"] is not None
+
+
+def test_the_engine_is_told_which_language_to_read(tmp_path: Path) -> None:
+    """엔진에 언어를 안 넘기면 **영어 자막을 한국어로 읽는다.**"""
+    engine = _SpokenLength({}, default_seconds=5.0)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    )
+
+    assert engine.requests[0].language == "en"
+    assert engine.requests[0].text == "Hello there"
+
+
+def test_a_take_that_cannot_fit_leaves_the_original_voice_alone(tmp_path: Path) -> None:
+    """5초 장면에 12초짜리 말은 못 넣는다. **억지로 빠르게 감지 않는다.**"""
+    engine = _SpokenLength({}, default_seconds=12.0)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "A very long sentence indeed", tmp_path / "projects")
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["dubbed_scene_count"] == 0
+    assert body["segments"][0]["tts_replacement"] is None
+    # 무엇을 못 했는지 반드시 말해 준다 -- 조용히 아무 일 없는 것이 제일 나쁘다.
+    assert "넣지 못했어요" in body["dubbing_notice"]
+
+
+def test_nothing_to_dub_when_the_captions_are_not_translated_yet(tmp_path: Path) -> None:
+    engine = _SpokenLength({}, default_seconds=5.0)
+    client, project_id, session_id = _client(tmp_path, engine)
+    body = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": body["session_revision"]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["dubbed_scene_count"] == 0
+    assert engine.requests == []
+
+
+def test_an_unknown_language_is_refused(tmp_path: Path) -> None:
+    engine = _SpokenLength({}, default_seconds=5.0)
+    client, project_id, session_id = _client(tmp_path, engine)
+    body = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "klingon", "expected_revision": body["session_revision"]},
+    )
+
+    assert response.status_code == 422, response.text
+    assert engine.requests == []
+
+
+def test_dubbing_triggers_the_rebuild_that_swaps_the_narration(tmp_path: Path) -> None:
+    """**세션에 걸어 두는 것만으로는 완성본이 안 바뀐다.**
+
+    2026-09-02에 다섯 장면을 더빙하고 렌더까지 성공했는데 완성본이 이전 파일과
+    **바이트까지 같았다.** 내레이션을 실제로 갈아 끼우는 것은 타임라인이고,
+    세션의 선택이 거기 닿으려면 부분 재생성(`tts_replacement` -> `tts_refresh` +
+    `timeline_build`)을 지나야 한다. 손으로 음성을 고르는 기존 경로도 같은 길이다.
+
+    그때 통과하던 시험들은 **세션만 봤다** -- 그래서 아무도 못 잡았다.
+    이 시험은 재생성이 실제로 돌았는지를 본다.
+    """
+    engine = _SpokenLength({}, default_seconds=4.2)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    dubbed = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    ).json()
+
+    assert dubbed["dubbed_scene_count"] == 1
+    jobs = client.get(f"/api/projects/{project_id}/jobs").json().get("jobs") or []
+    regenerations = [job for job in jobs if job.get("job_type") == "partial_regeneration"]
+    assert regenerations, "더빙이 타임라인을 다시 만들지 않았다 -- 완성본은 그대로 나간다."
+    assert regenerations[-1]["status"] == "succeeded"
+
+
+def test_nothing_is_rebuilt_when_no_scene_could_be_dubbed(tmp_path: Path) -> None:
+    """한 장면도 못 넣었으면 타임라인을 건드릴 이유가 없다."""
+    engine = _SpokenLength({}, default_seconds=12.0)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Far too long", tmp_path / "projects")
+
+    client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    )
+
+    jobs = client.get(f"/api/projects/{project_id}/jobs").json().get("jobs") or []
+    assert [job for job in jobs if job.get("job_type") == "partial_regeneration"] == []

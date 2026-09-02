@@ -8,6 +8,7 @@ from urllib.request import urlopen
 from uuid import uuid4
 
 from videobox_core_engine.caption_translation_service import CaptionTranslationService
+from videobox_core_engine.dubbing import DubbingFit, dubbing_lines
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
     LocalOnlyStructuredRuntime,
@@ -837,6 +838,71 @@ class ApiOrchestrator:
             project_id=project_id, session_id=session_id, language=language,
             texts_by_segment=texts_by_segment, expected_revision=expected_revision,
         )
+
+    def dub_editing_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        language: str,
+        expected_revision: int,
+        voice_sample_asset_id: str | None = None,
+    ) -> dict[str, Any]:
+        """옮겨 둔 자막을 그 언어 목소리로 읽혀 내레이션을 바꾼다.
+
+        **대본은 1단계가 만든 번역을 그대로 쓴다.** 따로 번역하면 화면의 자막과
+        들리는 말이 어긋나고, 창작자가 자막을 고쳐도 목소리는 옛말을 계속 읽는다.
+
+        길이가 안 맞는 장면은 건너뛰고 **원래 목소리를 그대로 둔다** -- 무엇을
+        못 넣었는지는 `dubbing_notice`로 화면에 그대로 말해 준다.
+        """
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        lines = dubbing_lines(editing_session=session, language=language)
+        selections: dict[str, tuple[str, str]] = {}
+        fits: list[tuple[str, DubbingFit]] = []
+        for line in lines:
+            take = self.pipeline.generate_dubbed_take(
+                project_id=project_id,
+                segment_id=line.segment_id,
+                text=line.text,
+                language=language,
+                target_duration_sec=line.target_duration_sec,
+                voice_sample_asset_id=voice_sample_asset_id,
+            )
+            if take is None:
+                # 왜 못 넣었는지는 다시 재서 말해 준다. 만든 소리는 이미 버렸다.
+                fits.append((line.segment_id, DubbingFit(False, line.target_duration_sec, 0.0, 1.0, "did_not_fit")))
+                continue
+            selections[line.segment_id] = (str(take["candidate_id"]), str(take["asset_id"]))
+        result = self.pipeline.set_editing_session_dubbed_takes(
+            project_id=project_id, session_id=session_id,
+            selections=selections, expected_revision=expected_revision,
+        )
+        if selections:
+            # **세션에 걸어 두는 것만으로는 완성본이 안 바뀐다.**
+            # 내레이션을 실제로 갈아 끼우는 것은 타임라인이고, 세션의 선택이
+            # 타임라인에 닿으려면 이 저장소가 이미 쓰는 부분 재생성을 지나야 한다
+            # (`tts_replacement` -> `tts_refresh` + `timeline_build`).
+            #
+            # 2026-09-02에 이 줄이 없어서 다섯 장면을 더빙하고 렌더까지 성공했는데
+            # **완성본이 이전 파일과 바이트까지 같았다.** 손으로 음성을 고르는
+            # 기존 경로도 같은 길을 지난다 -- 새 길을 내지 않고 그 길을 쓴다.
+            self.pipeline.start_editing_session_partial_regeneration(
+                project_id=project_id,
+                session_id=session_id,
+                segment_ids=sorted(selections),
+                fields=["tts_replacement"],
+                expected_revision=int(result["session_revision"]),
+            )
+            result = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        skipped = len(lines) - len(selections)
+        notice = (
+            f"{skipped}개 장면은 옮긴 말의 길이가 장면과 너무 달라서 넣지 못했어요. "
+            "그 장면은 원래 목소리가 그대로 남아 있어요."
+            if skipped
+            else None
+        )
+        return {**result, "dubbed_scene_count": len(selections), "dubbing_notice": notice}
 
     def set_caption_language(
         self, *, project_id: str, session_id: str, language: str | None, expected_revision: int

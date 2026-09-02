@@ -37,6 +37,8 @@ export type InspectorAction =
   // 언어로 내보내는 완성본은 없다.
   | Readonly<{ kind: "translate-captions"; language: string }>
   | Readonly<{ kind: "set-caption-language"; language: string | null }>
+  // 목소리 더빙. **옮겨 둔 자막을 대본으로 쓴다** -- 그래서 번역이 먼저다.
+  | Readonly<{ kind: "dub-narration"; language: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
@@ -961,6 +963,31 @@ export function InspectorControls({
                 type="button"
               >
                 {translatedLanguages.includes(code) ? label : `${label}로 번역`}
+              </Button>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
+
+      {/* 목소리 더빙. 자막 언어 **바로 아래**에 두는 이유는 순서가 그렇기
+          때문이다 -- 옮겨 둔 자막이 곧 더빙 대본이라, 번역하지 않은 언어는
+          읽을 것이 없다. 그래서 옮긴 언어만 단추로 뜬다.
+
+          자막과 목소리가 같은 번역을 쓰는 것이 중요하다. 따로 번역하면 화면에
+          보이는 말과 들리는 말이 어긋나고, 창작자가 자막을 고쳐도 목소리는
+          옛말을 계속 읽는다. */}
+      {target?.kind === "caption" && translatedLanguages.length ? (
+        <fieldset>
+          <legend>목소리 더빙</legend>
+          <div className="vb-caption-languages">
+            {CAPTION_LANGUAGES.filter(({ code }) => translatedLanguages.includes(code)).map(({ code, label }) => (
+              <Button
+                disabled={disabled}
+                key={code}
+                onClick={() => emit({ kind: "dub-narration", language: code })}
+                type="button"
+              >
+                {`${label} 목소리로 더빙`}
               </Button>
             ))}
           </div>

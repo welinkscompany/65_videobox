@@ -88,6 +88,7 @@ from videobox_core_engine.recommenders import LocalOnlyKeywordBrollRecommender, 
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
 from videobox_core_engine.settings import (
+    resolve_tts_engine_config,
     DEFAULT_PROJECTS_ROOT,
     AutoCutConfig,
     CapCutDraftExportConfig,
@@ -950,7 +951,7 @@ def create_app(
     resolved_capcut_draft_export_config = (
         capcut_draft_export_config or resolve_capcut_draft_export_config()
     )
-    resolved_tts_engine_config = tts_engine_config or TTSEngineConfig()
+    resolved_tts_engine_config = tts_engine_config or resolve_tts_engine_config()
     resolved_image_generation_config = image_generation_config or resolve_image_generation_config()
     resolved_scene_image_provider = scene_image_provider or _build_scene_image_provider(
         resolved_image_generation_config
