@@ -72,6 +72,9 @@ describe("joinEditorSnapshot", () => {
       undoCount: 3,
       redoCount: 1,
       updatedAt: "2026-07-23T12:34:56Z",
+      // 자막 언어를 고른 적이 없는 편집본이다 -- 원본(한국어)으로 나간다.
+      captionLanguage: null,
+      translatedLanguages: [],
       segments: [{
         segmentId: "segment-a",
         cutAction: "keep",

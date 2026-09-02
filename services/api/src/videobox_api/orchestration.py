@@ -7,6 +7,7 @@ from typing import Any, Callable
 from urllib.request import urlopen
 from uuid import uuid4
 
+from videobox_core_engine.caption_translation_service import CaptionTranslationService
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
     LocalOnlyStructuredRuntime,
@@ -800,6 +801,49 @@ class ApiOrchestrator:
             expected_revision=expected_revision,
             proposal_id=proposal_id,
             candidate_id=candidate_id,
+        )
+
+    def translate_editing_session_captions(
+        self, *, project_id: str, session_id: str, language: str, expected_revision: int, runtime: Any
+    ) -> dict[str, Any]:
+        """장면 자막을 로컬 모델로 옮겨 원본 옆에 쌓고, 그 언어로 고른다.
+
+        **이미 번역해 둔 장면은 다시 부르지 않는다.** 자막 하나를 고친 뒤 다시
+        누르면 고친 장면만 새로 번역된다 -- 마흔 장면을 통째로 다시 돌리면
+        기다리는 시간도 길고, 이미 손본 번역까지 모델이 갈아치운다.
+        """
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        pending: list[tuple[str, str]] = []
+        for segment in session.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            if str(segment.get("cut_action") or "keep") == "remove":
+                continue
+            text = str(segment.get("caption_text") or "").strip()
+            if not text:
+                continue
+            existing = segment.get("caption_translations")
+            if isinstance(existing, dict) and str(existing.get(language) or "").strip():
+                continue
+            pending.append((str(segment.get("segment_id") or ""), text))
+        texts_by_segment = (
+            CaptionTranslationService(runtime=runtime).translate(
+                project_id=project_id, language=language, captions=pending
+            )
+            if pending
+            else {}
+        )
+        return self.pipeline.set_editing_session_caption_translations(
+            project_id=project_id, session_id=session_id, language=language,
+            texts_by_segment=texts_by_segment, expected_revision=expected_revision,
+        )
+
+    def set_caption_language(
+        self, *, project_id: str, session_id: str, language: str | None, expected_revision: int
+    ) -> dict[str, Any]:
+        return self.pipeline.set_editing_session_caption_language(
+            project_id=project_id, session_id=session_id, language=language,
+            expected_revision=expected_revision,
         )
 
     def update_segment_cut_action(

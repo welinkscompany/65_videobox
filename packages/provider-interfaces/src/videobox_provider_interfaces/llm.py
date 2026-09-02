@@ -19,6 +19,8 @@ class LLMTaskType(str, Enum):
     # 주제 한 줄에서 대본 초안을 쓴다. **구조화 출력으로만 부른다** --
     # 자유형 대화로 물으면 생각 과정이 영어로 새어 나온다(2026-08-21 실측).
     SCRIPT_DRAFT = "script_draft"
+    # 자막을 다른 언어로 옮긴다. 원본은 그대로 두고 나란히 쌓는다.
+    CAPTION_TRANSLATION = "caption_translation"
 
 
 @dataclass(slots=True, frozen=True)

@@ -370,6 +370,8 @@ export type EditingSessionSegment = {
   sfx_override?: Record<string, unknown> | null;
   tts_replacement: Record<string, unknown> | null;
   caption_style?: CaptionStyleSnapshot | null;
+  /** 언어별 자막 번역. 원본(`caption_text`)은 그대로 남는다. */
+  caption_translations?: Record<string, string>;
   transition_in?: SceneTransition | null;
   ripple_playback_rate?: 1.5 | 2.0 | null;
 };
@@ -433,6 +435,8 @@ export type EditingSession = {
   timeline_id: string;
   session_revision: number;
   caption_style?: CaptionStyleSnapshot | null;
+  /** 완성본에 실을 자막 언어. 없으면 원본(한국어)으로 나간다. */
+  caption_language?: string | null;
   segments: EditingSessionSegment[];
   history: EditingSessionHistoryEntry[];
   undo_count?: number;
@@ -2380,6 +2384,26 @@ export const api = {
     request<EditingSession>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style`,
       { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  /** 자막을 고른 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다. */
+  translateEditingSessionCaptions: (
+    projectId: string,
+    sessionId: string,
+    payload: { expected_revision: number; language: string },
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-translations`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  /** 어느 자막으로 내보낼지 고른다. `language: null`이면 원본으로 되돌린다. */
+  updateEditingSessionCaptionLanguage: (
+    projectId: string,
+    sessionId: string,
+    payload: { expected_revision: number; language: string | null },
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-language`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   updateEditingSessionCaption: (
     projectId: string,

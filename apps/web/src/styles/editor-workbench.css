@@ -486,3 +486,12 @@
 .vb-inspector-tabs__tab { border-radius: 0; border-bottom: 2px solid transparent; color: var(--muted-foreground); }
 .vb-inspector-tabs__tab:hover { color: var(--foreground); }
 .vb-inspector-tabs__tab[aria-selected="true"] { color: var(--foreground); border-bottom-color: var(--vb-accent); }
+
+/* 자막 언어 고르기. 칸이 좁은 도크(224px)라 줄바꿈을 허용하고, 지금 나가는
+   언어는 눌린 상태로 구분한다 -- 어느 자막이 완성본에 실리는지 한눈에 보이지
+   않으면 번역해 놓고도 원본이 나간 줄 모른다. */
+.vb-product-shell .vb-editor-workbench .vb-caption-languages { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); }
+.vb-product-shell .vb-editor-workbench .vb-caption-languages [data-slot="button"][aria-pressed="true"] {
+  border-color: var(--vb-accent);
+  color: var(--foreground);
+}

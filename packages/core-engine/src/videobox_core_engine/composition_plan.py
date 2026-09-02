@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import Any, Iterable
 
+from videobox_core_engine.caption_translation import caption_text_for_language
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.transitions import normalize_transition
 
@@ -154,7 +155,7 @@ def _segment_content_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
     return [{
         "start_offset_sec": 0.0, "duration_sec": _number(segment.get("end_sec")) - _number(segment.get("start_sec")),
         "source_segment_id": str(segment.get("segment_id") or ""),
-        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
+        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_translations", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
     }]
 
 
@@ -459,6 +460,9 @@ def materialize_editing_session_timeline(
             start, end = max(placement, placement + relative_start), min(window_end, placement + relative_end)
             if end > start:
                 export_overlays.append({**deepcopy(raw_overlay), "clip_id": str(raw_overlay.get("clip_id") or f"export-overlay-{source_id}-{overlay_index}"), "segment_id": source_id, "start_sec": start, "end_sec": end})
+    # 자막 언어는 **여기서 한 번만** 읽는다. 렌더 경로가 둘이라 인자로
+    # 흘리면 한쪽만 고쳐진다(`caption_translation` 모듈 주석 참고).
+    caption_language = str(editing_session.get("caption_language") or "").strip() or None
     session_captions: list[dict[str, Any]] = []
     for segment_id, segment in segments.items():
         if str(segment.get("cut_action") or "keep") == "remove":
@@ -531,7 +535,7 @@ def materialize_editing_session_timeline(
             if window_end <= window_start:
                 continue
             content_segment_id = str(window.get("source_segment_id") or segment_id)
-            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption-{segment_id}-{window_index}"), "segment_id": content_segment_id, "caption_text": str(window.get("caption_text") or ""), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement"))})
+            session_captions.append({"caption_id": str(window.get("caption_id") or f"caption-{segment_id}-{window_index}"), "segment_id": content_segment_id, "caption_text": caption_text_for_language(window, caption_language), "caption_style": deepcopy(window.get("caption_style") or segment.get("caption_style") or editing_session.get("caption_style") or {}), "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "review_required": window.get("review_required"), "tts_replacement": deepcopy(window.get("tts_replacement")), "caption_source_text": str(window.get("caption_text") or ""), "caption_language": caption_language})
             for ordinal, overlay in enumerate(window.get("visual_overlays", []) if isinstance(window.get("visual_overlays"), list) else []):
                 if not isinstance(overlay, dict):
                     continue

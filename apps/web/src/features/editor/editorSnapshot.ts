@@ -22,6 +22,10 @@ export type EditorSessionSnapshot = Readonly<{
   undoCount: number;
   redoCount: number;
   updatedAt: string | null;
+  /** 완성본에 실리는 자막 언어. `null`이면 원본(한국어). */
+  captionLanguage: string | null;
+  /** 이미 옮겨 둔 언어들. 하나라도 옮긴 장면이 있으면 그 언어가 들어온다. */
+  translatedLanguages: readonly string[];
   segments: ReadonlyArray<Readonly<{
     segmentId: string;
     cutAction: string;
@@ -115,6 +119,15 @@ export function joinEditorSnapshot(
       undoCount: editingSession.undo_count ?? 0,
       redoCount: editingSession.redo_count ?? 0,
       updatedAt: editingSession.updated_at ?? null,
+      captionLanguage: editingSession.caption_language ?? null,
+      // 장면마다 따로 셀 것이 아니라 **하나라도 있으면 고를 수 있는 언어**다.
+      // 반쯤 번역된 상태에서도 고를 수 있어야 한다 -- 나머지 장면은 원문으로
+      // 메워져 나가고, 다시 누르면 빠진 장면만 옮긴다.
+      translatedLanguages: [...new Set(
+        editingSession.segments.flatMap((segment) => Object.entries(segment.caption_translations ?? {})
+          .filter(([, text]) => String(text ?? "").trim().length > 0)
+          .map(([code]) => code)),
+      )],
       segments: editingSession.segments.map((segment) => ({
         segmentId: segment.segment_id,
         cutAction: segment.cut_action,

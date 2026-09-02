@@ -52,6 +52,8 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedS
   const selectedSessionSegmentIndex = selectedSegmentId === null ? -1 : session?.segments.findIndex((segment) => segment.segmentId === selectedSegmentId) ?? -1;
   const selectedSessionSegment = selectedSessionSegmentIndex >= 0 ? session?.segments[selectedSessionSegmentIndex] ?? null : null;
   return <RightDock
+    captionLanguage={session?.captionLanguage ?? null}
+    translatedLanguages={session?.translatedLanguages ?? []}
     projectId={view.projectId}
     inspectorDisabled={isSavingCaption}
     loadApprovedTtsCandidates={loadApprovedTtsCandidates}

@@ -33,6 +33,10 @@ export type InspectorAction =
   | Readonly<{ kind: "save-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string; assetId: string; controls: EditorControls }>
   | Readonly<{ kind: "clear-media"; mediaKind: "broll" | "bgm" | "sfx"; segmentId: string }>
   | Readonly<{ kind: "preflight-caption-style"; segmentIds: string[]; scope: CaptionStyleScope; style: EditorCaptionStyle }>
+  // 자막 번역. 장면 하나가 아니라 **편집본 전체**에 걸린다 -- 한 장면만 다른
+  // 언어로 내보내는 완성본은 없다.
+  | Readonly<{ kind: "translate-captions"; language: string }>
+  | Readonly<{ kind: "set-caption-language"; language: string | null }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
@@ -82,8 +86,21 @@ type Props = Readonly<{
   loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
   ttsCandidateScopeKey?: string;
   disabled?: boolean;
+  /** 지금 완성본에 실리는 자막 언어. `null`이면 원본(한국어). */
+  captionLanguage?: string | null;
+  /** 이미 옮겨 둔 언어들. 이 목록에 있으면 다시 번역하지 않고 고르기만 한다. */
+  translatedLanguages?: readonly string[];
   onAction: (action: InspectorAction) => void | Promise<void>;
 }>;
+
+/** 고를 수 있는 자막 언어. 백엔드 `SUPPORTED_CAPTION_LANGUAGES`와 짝이다.
+ *
+ *  한국어는 없다 -- 원본이 곧 한국어라서 `원본` 칸이 그 자리를 맡는다. */
+const CAPTION_LANGUAGES: readonly Readonly<{ code: string; label: string }>[] = [
+  { code: "en", label: "영어" },
+  { code: "ja", label: "일본어" },
+  { code: "zh", label: "중국어" },
+];
 
 const defaultStyle: EditorCaptionStyle = {
   // 컨테이너에 실제로 들어 있는 글꼴이다. 예전에는 이 자리에 없는 글꼴이
@@ -185,6 +202,8 @@ export function InspectorControls({
   loadApprovedTtsCandidates,
   ttsCandidateScopeKey = "",
   disabled = false,
+  captionLanguage = null,
+  translatedLanguages = [],
   onAction,
 }: Props) {
   const [cutAction, setCutAction] = useState<CutAction>(() => asCutAction(selectedSegment?.cutAction ?? "keep"));
@@ -904,6 +923,47 @@ export function InspectorControls({
           <Button disabled={disabled} onClick={() => emit({ kind: "preflight-caption-style", segmentIds: [target.segmentId], scope: "current_caption", style: captionStyle })} type="button">
             자막 스타일 저장
           </Button>
+        </fieldset>
+      ) : null}
+
+      {/* 자막 언어. 스타일과 나란히 두는 이유는 캡컷도 자막을 손보는 자리에서
+          번역을 걸기 때문이고, 무엇보다 **바꾼 결과가 바로 옆 미리보기에 뜨는
+          자리**라서다. 고른 언어는 완성본에까지 그대로 간다.
+
+          `원본`이 늘 첫 칸이다 -- 되돌릴 곳이 안 보이면 번역을 눌러 보기가
+          겁난다. 되돌려도 번역은 지워지지 않고 그대로 남는다. */}
+      {target?.kind === "caption" ? (
+        <fieldset>
+          <legend>자막 언어</legend>
+          <div className="vb-caption-languages">
+            <Button
+              aria-pressed={!captionLanguage}
+              disabled={disabled}
+              onClick={() => emit({ kind: "set-caption-language", language: null })}
+              type="button"
+            >
+              원본
+            </Button>
+            {CAPTION_LANGUAGES.map(({ code, label }) => (
+              <Button
+                aria-pressed={captionLanguage === code}
+                disabled={disabled}
+                key={code}
+                onClick={() =>
+                  emit(
+                    // 이미 옮겨 둔 언어면 고르기만 한다. 다시 번역하면 기다림도
+                    // 길고, 손봐 둔 번역까지 모델이 갈아치운다.
+                    translatedLanguages.includes(code)
+                      ? { kind: "set-caption-language", language: code }
+                      : { kind: "translate-captions", language: code },
+                  )
+                }
+                type="button"
+              >
+                {translatedLanguages.includes(code) ? label : `${label}로 번역`}
+              </Button>
+            ))}
+          </div>
         </fieldset>
       ) : null}
 

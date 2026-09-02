@@ -29,6 +29,10 @@ export type RightDockProps = Readonly<{
   partialRegeneration?: PartialRegenerationControls;
   loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
   ttsCandidateScopeKey?: string;
+  /** 지금 완성본에 실리는 자막 언어. `null`이면 원본(한국어). */
+  captionLanguage?: string | null;
+  /** 이미 옮겨 둔 언어들. */
+  translatedLanguages?: readonly string[];
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
   onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>;
   onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>;
@@ -49,6 +53,8 @@ export function RightDock({
   partialRegeneration,
   loadApprovedTtsCandidates,
   ttsCandidateScopeKey,
+  captionLanguage = null,
+  translatedLanguages = [],
   onInspectorAction,
   onSetSegmentRippleSpeed,
   onPreviewSelectedRange,
@@ -114,7 +120,9 @@ export function RightDock({
           partialRegeneration={partialRegeneration}
           projectId={projectId}
           selectedSegment={selectedSegment ?? null}
+          captionLanguage={captionLanguage}
           target={selectedInspectorTarget}
+          translatedLanguages={translatedLanguages}
           ttsCandidateScopeKey={ttsCandidateScopeKey}
         /> : null}
       </div>

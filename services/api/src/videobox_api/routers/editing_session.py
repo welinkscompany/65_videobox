@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
+    CaptionLanguageRequest,
+    CaptionTranslationRequest,
     NarrationRecordingSyncRequest,
     BrollOverrideRequest,
     CaptionOverrideRequest,
@@ -211,6 +213,46 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations")
+    def translate_editing_session_captions(
+        request: Request, project_id: str, session_id: str, payload: CaptionTranslationRequest
+    ) -> EditingSessionResponse:
+        """자막을 골라 준 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다."""
+        try:
+            result = orchestrator.translate_editing_session_captions(
+                project_id=project_id,
+                session_id=session_id,
+                language=payload.language,
+                expected_revision=payload.expected_revision,
+                runtime=request.app.state.local_only_runtime_service_factory(store),
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/caption-language")
+    def patch_editing_session_caption_language(
+        project_id: str, session_id: str, payload: CaptionLanguageRequest
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.set_caption_language(
+                project_id=project_id,
+                session_id=session_id,
+                language=payload.language,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)

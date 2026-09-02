@@ -8980,6 +8980,9 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
             # 트랙 눈·음소거. 켠 적이 없으면 아예 없는 칸이라 옛 저장분도
             # 그대로 읽힌다(`track_states.py`가 없는 값을 "전부 기본"으로 본다).
             "track_states",
+            # 완성본에 실을 자막 언어. 고른 적이 없으면 없는 칸이고, 그때는
+            # 원본(한국어)으로 나간다.
+            "caption_language",
         ):
             if key in session_payload:
                 payload[key] = session_payload[key]

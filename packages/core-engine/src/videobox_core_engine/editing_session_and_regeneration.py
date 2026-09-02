@@ -7,6 +7,10 @@ import json
 import tempfile
 import warnings
 
+from videobox_core_engine.caption_translation import (
+    SUPPORTED_CAPTION_LANGUAGES,
+    apply_caption_translations,
+)
 from videobox_core_engine.canonical_boolish import (
     normalize_strict_boolish as _normalize_runtime_boolish,
 )
@@ -405,6 +409,47 @@ class EditingSessionRegenerationMixin:
             caption_text=caption_text,
         )
         return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_text", segment_id=segment_id, controls={"text": caption_text})
+
+    def set_editing_session_caption_translations(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        language: str,
+        texts_by_segment: dict[str, str],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """번역을 세션에 적고, 그 언어를 출력 자막으로 고른다.
+
+        저장과 고르기를 한 번에 하는 이유: 번역을 만들어 두고 고르지 않으면
+        완성본이 그대로라서 "번역이 안 됐다"로 보인다. 되돌리기는 한 번이면 된다.
+        """
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = apply_caption_translations(
+            session=session, language=language, texts_by_segment=texts_by_segment
+        )
+        updated_session["caption_language"] = language
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=updated_session, expected_revision=expected_revision,
+        )
+
+    def set_editing_session_caption_language(
+        self, *, project_id: str, session_id: str, language: str | None, expected_revision: int
+    ) -> dict[str, Any]:
+        """어느 자막으로 내보낼지 고른다. `None`이면 원본(한국어)."""
+        if language is not None and language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {language}")
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = deepcopy(session)
+        if language:
+            updated_session["caption_language"] = language
+        else:
+            updated_session.pop("caption_language", None)
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=updated_session, expected_revision=expected_revision,
+        )
 
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.store.get_editing_session(project_id=project_id, session_id=session_id)

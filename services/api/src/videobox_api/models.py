@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_MOTION_SET,
     SHAPE_OVERLAY_MOTIONS,
@@ -934,6 +935,29 @@ class OptionalYujinCandidateAttestation(BaseModel):
         return self
 
 
+class CaptionTranslationRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    language: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_language(self) -> "CaptionTranslationRequest":
+        if self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
+
+
+class CaptionLanguageRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    #: `None`이면 원본(한국어)으로 되돌린다 -- 번역은 지우지 않는다.
+    language: str | None = None
+
+    @model_validator(mode="after")
+    def validate_language(self) -> "CaptionLanguageRequest":
+        if self.language is not None and self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
+
+
 class CaptionOverrideRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     caption_text: str = Field(min_length=1)
@@ -1259,6 +1283,8 @@ class PartialRegenerationJobResponse(StartJobResponse):
 class EditingSessionSegmentResponse(BaseModel):
     segment_id: str
     caption_text: str
+    # 언어별 번역. 원본(`caption_text`)은 그대로 두고 나란히 쌓인다.
+    caption_translations: dict[str, str] = Field(default_factory=dict)
     start_sec: float
     end_sec: float
     cut_action: str
@@ -1333,6 +1359,8 @@ class EditingSessionResponse(BaseModel):
     timeline_id: str
     session_revision: int
     caption_style: dict[str, object] | None = None
+    # 완성본에 실을 자막 언어. 없으면 원본(한국어)으로 나간다.
+    caption_language: str | None = Field(default=None, exclude_if=lambda value: value is None)
     segments: list[EditingSessionSegmentResponse]
     history: list[EditingSessionHistoryEntryResponse] = Field(default_factory=list)
     undo_count: int = 0

@@ -1087,6 +1087,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "apply-tts-candidate") return port.applyTtsCandidate({ segmentId: action.segmentId, candidateId: action.candidateId, assetId: action.assetId });
       if (action.kind === "clear-tts-candidate") return port.clearTtsCandidate({ segmentId: action.segmentId });
       if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
+      // 자막 번역은 장면 하나가 아니라 편집본 전체에 걸린다. 다른 편집과
+      // 같은 통로로 보내서 되돌리기·충돌 확인을 그대로 받는다.
+      if (action.kind === "translate-captions") return port.translateCaptions({ language: action.language });
+      if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
       if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
       if (action.overlayKind === "shape") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, shape: action.shape, vertical: action.vertical, horizontal: action.horizontal, size: action.size, motion: action.motion });

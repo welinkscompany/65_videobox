@@ -431,7 +431,7 @@ def _content_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
         "start_offset_sec": 0.0,
         "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
         "source_segment_id": str(segment.get("segment_id") or ""),
-        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
+        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_translations", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
     }]
 
 
