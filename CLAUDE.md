@@ -62,10 +62,8 @@
 
 - `2026-09-01-yujin-chat-applies-edits-directly.ko.md` — **유진에게 말한 편집은
   바로 적용된다.** 없앤 클릭 대신 되돌리기가 지킨다.
-- `2026-09-02-video-translator-step-two-dubbing.ko.md` — **2단계는 목소리 더빙.**
-  기본 엔진은 기계 목소리(`espeak`), 창작자 목소리는 `chatterbox` 설치가 필요하다.
-- `2026-09-02-video-translator-step-one-captions.ko.md` — **동영상 번역기 1단계는
-  자막만.** 원본을 지우지 않고 나란히 쌓는다. 목소리 더빙은 2단계.
+- `2026-09-02-video-translator-step-one-captions.ko.md` / `...-step-two-dubbing.ko.md`
+  — **동영상 번역기.** 1단계 자막(원본은 남긴다), 2단계 더빙. 목소리 복제는 설치 필요.
 - `2026-09-01-capcut-ai-feature-triage.ko.md` — 캡컷 AI 기능 열둘 중 **무엇을
   안 만드는지**. 색보정 넷과 `AI 스타일`은 안 만든다. 다음 큰 것은 동영상 번역기.
 - `2026-08-30-capcut-button-level-parity.ko.md` — 버튼 구성·배치·크기까지

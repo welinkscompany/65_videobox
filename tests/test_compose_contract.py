@@ -201,7 +201,10 @@ def test_workspace_image_runs_api_and_web_proxy_together() -> None:
 
     assert "FROM node:20-bookworm-slim AS web-build" in dockerfile
     assert "FROM python:3.12-slim" in dockerfile
-    assert "ffmpeg nginx" in dockerfile
+    # 한 줄에 붙어 있는지가 아니라 **깔리는지**를 본다. 붙여서 보면 사이에
+    # 패키지 하나만 끼워도 깨지는데, 실제로 espeak-ng를 넣다가 그렇게 깨졌다.
+    for package in ("ffmpeg", "nginx", "espeak-ng"):
+        assert package in dockerfile
     assert "exec python /app/docker/workspace-supervisor.py" in entrypoint
     assert '"--host", "127.0.0.1", "--port", "8000"' in supervisor
     assert '"setpriv", "--reuid=10001", "--regid=10001", "--init-groups"' in supervisor
