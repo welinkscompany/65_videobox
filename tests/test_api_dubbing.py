@@ -234,3 +234,36 @@ def test_one_broken_scene_does_not_throw_away_the_others(tmp_path: Path) -> None
     body = response.json()
     assert body["dubbed_scene_count"] == 0
     assert "목소리를 만들지 못했어요" in body["dubbing_notice"]
+
+
+def test_a_dubbed_project_can_still_be_exported(tmp_path: Path) -> None:
+    """더빙한 뒤에 **완성본을 만들 수 있어야 한다.**
+
+    출력 화면은 `지금 타임라인을 만든 timeline_build 작업`이 있어야 "편집본
+    준비됨"으로 본다. 더빙은 타임라인을 새로 내는데 그 기록을 안 남기고 있어서,
+    더빙한 프로젝트는 출력 화면에서 "편집 화면에서 준비해 주세요"라는 막다른
+    말만 보였다 -- 편집 화면에서 봐도 같은 말이었다(2026-09-03 실측).
+    """
+    engine = _SpokenLength({}, default_seconds=4.6)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    dubbed = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    ).json()
+    assert dubbed["dubbed_scene_count"] == 1
+
+    session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    jobs = client.get(f"/api/projects/{project_id}/jobs").json().get("jobs") or []
+    builds = [
+        job for job in jobs
+        if job.get("job_type") == "timeline_build"
+        and job.get("status") == "succeeded"
+        and job.get("output_ref") == session["timeline_id"]
+    ]
+
+    assert builds, (
+        "더빙이 만든 타임라인에 timeline_build 기록이 없다 -- "
+        "출력 화면이 '편집본 준비 필요'에서 멈춘다."
+    )

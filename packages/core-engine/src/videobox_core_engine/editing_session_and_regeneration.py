@@ -451,6 +451,34 @@ class EditingSessionRegenerationMixin:
             updated_session=updated_session, expected_revision=expected_revision,
         )
 
+    def _record_timeline_build(self, *, project_id: str, timeline_id: str) -> None:
+        """이 타임라인을 만들었다는 기록을 남긴다. 이미 있으면 그대로 둔다.
+
+        출력 화면은 `지금 타임라인을 만든 succeeded timeline_build 작업`이 있어야
+        "편집본 준비됨"으로 본다. 타임라인을 새로 낸 경로가 이 기록을 안 남기면
+        창작자는 완성본을 만들 길이 없다.
+        """
+        existing = any(
+            str(item.get("job_type")) == JobType.TIMELINE_BUILD.value
+            and str(item.get("output_ref") or "") == timeline_id
+            and str(item.get("status")) == JobStatus.SUCCEEDED.value
+            for item in self.store.list_jobs(project_id=project_id)
+        )
+        if existing:
+            return
+        build_job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.TIMELINE_BUILD,
+            input_ref=timeline_id,
+            status=JobStatus.RUNNING,
+        )
+        self.store.update_job(
+            project_id=project_id,
+            job_id=build_job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=timeline_id,
+        )
+
     def set_editing_session_dubbed_takes(
         self,
         *,
@@ -642,6 +670,16 @@ class EditingSessionRegenerationMixin:
                 },
             )
             partial_regeneration_id = str(persisted["partial_regeneration_id"])
+            # **새 타임라인을 만들었다고 작업 기록에도 남긴다.**
+            #
+            # 안 남기면 출력 화면이 "편집본 준비 필요"에서 멈춘다 -- 그 화면은
+            # `지금 타임라인을 만든 timeline_build 작업`을 찾는데, 부분 재생성은
+            # 자기 기록만 남기고 있었다. 그러면 창작자는 편집 화면에서
+            # "편집 화면에서 준비해 주세요"라는 막다른 말을 본다(2026-09-03 실측).
+            #
+            # 타임라인은 실제로 만들어졌으니 그렇게 적는 것이 사실에 맞다.
+            # 출력 변형 경로도 같은 일을 한다(`local_pipeline.py`의 변형 빌드).
+            self._record_timeline_build(project_id=project_id, timeline_id=published_timeline_id)
             self.store.update_job(
                 project_id=project_id,
                 job_id=job["job_id"],
