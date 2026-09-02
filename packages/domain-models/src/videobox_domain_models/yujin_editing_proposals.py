@@ -73,6 +73,61 @@ class SetSceneLookOperation(_SegmentOperation):
     look: str = Field(min_length=1, max_length=64)
 
 
+class SetPictureCleanupOperation(_SegmentOperation):
+    """흔들림 보정·화면 노이즈 줄이기. 켜고 끄는 것뿐이다.
+
+    **둘 다 `None`을 허용하는 이유**: 창작자가 "흔들림만 잡아 줘"라고 하면 노이즈
+    설정은 손대지 않아야 한다. 필수로 두면 모델이 안 물어본 칸까지 값을 채워야
+    하고, 그러면 이미 켜 둔 것을 끄는 일이 생긴다 -- 2026-09-02에 음악에서
+    똑같은 사고(옆 장면을 덮어씀)를 겪었다.
+    """
+
+    intent: Literal["set_picture_cleanup"]
+    stabilize: bool | None = None
+    reduce_noise: bool | None = None
+
+    @model_validator(mode="after")
+    def asks_for_at_least_one(self) -> "SetPictureCleanupOperation":
+        if self.stabilize is None and self.reduce_noise is None:
+            raise ValueError("picture_cleanup_needs_a_change")
+        return self
+
+
+class SetSoundCleanupOperation(_SegmentOperation):
+    """소리 크기 고르게 맞추기·잡음 줄이기. 위와 같은 이유로 둘 다 선택이다."""
+
+    intent: Literal["set_sound_cleanup"]
+    media_type: Literal["bgm", "sfx"]
+    normalize_loudness: bool | None = None
+    denoise: bool | None = None
+
+    @model_validator(mode="after")
+    def asks_for_at_least_one(self) -> "SetSoundCleanupOperation":
+        if self.normalize_loudness is None and self.denoise is None:
+            raise ValueError("sound_cleanup_needs_a_change")
+        return self
+
+
+class SetSceneTransformOperation(_SegmentOperation):
+    """확대·위치·기울이기. 말한 것만 바꾸고 나머지는 그대로 둔다.
+
+    경계는 `media_controls.py`가 정한 것과 **같은 값**이다 -- 화면 입력이 만들 수
+    없는 값을 말로는 만들 수 있게 두면, 그 값이 결국 렌더러에서 터진다.
+    """
+
+    intent: Literal["set_scene_transform"]
+    zoom: float | None = Field(default=None, ge=0.5, le=4.0)
+    position_x_percent: float | None = Field(default=None, ge=-100.0, le=100.0)
+    position_y_percent: float | None = Field(default=None, ge=-100.0, le=100.0)
+    rotation_deg: float | None = Field(default=None, ge=-180.0, le=180.0)
+
+    @model_validator(mode="after")
+    def asks_for_at_least_one(self) -> "SetSceneTransformOperation":
+        if all(value is None for value in (self.zoom, self.position_x_percent, self.position_y_percent, self.rotation_deg)):
+            raise ValueError("scene_transform_needs_a_change")
+        return self
+
+
 class ApplyMediaOperation(_SegmentOperation):
     intent: Literal["apply_media"]
     media_type: Literal["broll", "bgm", "sfx"]
@@ -91,6 +146,9 @@ YujinEditingOperation = Annotated[
     | ReorderSegmentsOperation
     | SetCaptionTextOperation
     | SetSceneLookOperation
+    | SetPictureCleanupOperation
+    | SetSoundCleanupOperation
+    | SetSceneTransformOperation
     | ApplyMediaOperation
     | RemoveMediaOperation,
     Field(discriminator="intent"),
@@ -117,7 +175,10 @@ __all__ = [
     "ReorderSegmentsOperation",
     "SetCaptionTextOperation",
     "SetCutActionOperation",
+    "SetPictureCleanupOperation",
     "SetSceneLookOperation",
+    "SetSceneTransformOperation",
+    "SetSoundCleanupOperation",
     "SetSceneSpeedOperation",
     "SetSegmentBoundsOperation",
     "YujinEditingOperation",

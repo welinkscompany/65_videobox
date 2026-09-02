@@ -70,11 +70,13 @@ describe("buildQualityFollowUps", () => {
 
     expect(followUps.some((item) => item.includes("1번 장면에 어울리는"))).toBe(false);
     expect(followUps.some((item) => item.includes("1번 장면 색감"))).toBe(false);
-    // 손볼 곳이 없어도 빈손으로 두지 않는다 -- 편집본 전체를 보는 것으로 채운다.
+    // 음악·효과음·색감은 이미 있으니 안 권한다. 대신 **아직 안 켠 것**을 권한다 --
+    // 이 장면은 손떨림 보정도 소리 크기 맞추기도 꺼져 있다(2026-09-02에 둘 다
+    // 유진이 말로 할 수 있게 됐다).
     expect(followUps).toEqual([
+      "1번 장면 흔들린 화면을 잡아 줘",
+      "1번 장면 배경 음악 소리 크기를 고르게 맞춰 줘",
       "장면 순서를 더 자연스럽게 바꿔 줘",
-      "모든 장면 색감을 하나로 맞춰 줘",
-      "늘어지는 장면이 있으면 빼 줘",
     ]);
   });
 
@@ -93,7 +95,7 @@ describe("buildQualityFollowUps", () => {
     expect(followUps).toEqual([
       "1번 장면 자막을 더 짧게 다듬어 줘",
       "1번 장면을 1.5배로 빠르게 해 줘",
-      "장면 순서를 더 자연스럽게 바꿔 줘",
+      "1번 장면 흔들린 화면을 잡아 줘",
     ]);
   });
 
@@ -123,8 +125,10 @@ describe("buildQualityFollowUps", () => {
       }),
     ].join(" ");
 
-    // 화면 패널에만 있는 조정은 권하지 않는다 -- 유진의 의도 목록에 없다.
-    for (const panelOnly of ["흔들린", "노이즈", "확대", "기울", "높낮이", "덕킹"]) {
+    // 아직 유진이 말로 못 하는 것은 권하지 않는다. 2026-09-02에 손떨림 보정과
+    // 소리 정리가 의도 목록에 들어와서 목록에서 빠졌다 -- 남은 것은 여전히
+    // 화면 패널 전용이다(변형의 숫자 칸, 음조 유지, 덕킹).
+    for (const panelOnly of ["기울", "높낮이", "덕킹"]) {
       expect(everything).not.toContain(panelOnly);
     }
   });

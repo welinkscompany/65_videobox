@@ -22,6 +22,11 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "reorder_segments"}, "segment_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["intent", "segment_ids"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_text"}, "segment_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["intent", "segment_id", "text"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_look"}, "segment_id": {"type": "string"}, "look": {"enum": sorted(FILTER_CATALOG)}}, "required": ["intent", "segment_id", "look"]},
+        # 켜고 끄는 것들. **말한 것만 실으라고** 하려고 required를 최소로 둔다 --
+        # "흔들림만 잡아 줘"에 노이즈 값까지 채우게 하면 이미 켜 둔 것을 끈다.
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_picture_cleanup"}, "segment_id": {"type": "string"}, "stabilize": {"type": "boolean"}, "reduce_noise": {"type": "boolean"}}, "required": ["intent", "segment_id"]},
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_sound_cleanup"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["bgm", "sfx"]}, "normalize_loudness": {"type": "boolean"}, "denoise": {"type": "boolean"}}, "required": ["intent", "segment_id", "media_type"]},
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_transform"}, "segment_id": {"type": "string"}, "zoom": {"type": "number"}, "position_x_percent": {"type": "number"}, "position_y_percent": {"type": "number"}, "rotation_deg": {"type": "number"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "apply_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}, "asset_id": {"type": "string"}}, "required": ["intent", "segment_id", "media_type", "asset_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}}, "required": ["intent", "segment_id", "media_type"]},
     ]
@@ -125,7 +130,8 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "반드시 JSON 객체 하나만 출력하고 Markdown, 코드 블록, 설명문을 섞지 마라. "
         "proposal 안에는 현재 장면 ID만 쓰고, base_session_revision은 아래 값과 정확히 같아야 한다. "
         "허용 intent는 set_scene_speed, set_segment_bounds, set_cut_action, reorder_segments, "
-        "set_caption_text, set_scene_look, apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "set_caption_text, set_scene_look, set_picture_cleanup, set_sound_cleanup, set_scene_transform, "
+        "apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
         # 완성본에서 빼는 것이었다. 한국어 "빼다"는 둘 다 되므로 어느 쪽인지를
@@ -145,6 +151,12 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"현재 revision: {context.session_revision}. "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
+        # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
+        # 그 장면에 음악·효과음이 있어야 한다.
+        "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "
+        "둘 다 화면이 깔린 장면에만 걸 수 있다. 소리 크기 맞추기·잡음 줄이기는 set_sound_cleanup이며 "
+        "그 장면에 깔린 음악(bgm)이나 효과음(sfx)을 media_type으로 지목해야 한다. "
+        "**창작자가 말한 칸만 싣는다** -- 안 물어본 칸을 채우면 이미 켜 둔 것을 끄게 된다. "
         f"proposal이 있을 때 출력 예시: {json.dumps(success_example, ensure_ascii=False)}. "
         f"proposal이 없을 때 출력 예시: {json.dumps(no_proposal_example, ensure_ascii=False)}. "
         f"창작자 요청: {instruction}"

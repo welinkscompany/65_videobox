@@ -11,10 +11,12 @@
  *    이미 둘이다).
  * 2. 지어내지 않는다. "배경 음악을 넣어 볼까요?"는 **그 장면에 음악이 없을 때만**
  *    나온다 -- 이미 넣은 장면에 다시 권하면 유진이 화면을 안 보고 있다는 뜻이 된다.
- * 3. **누르면 실제로 되는 것만 권한다.** 유진이 말로 할 수 있는 편집은 여덟
- *    가지뿐이다(속도·구간·컷 포함/제외·순서·자막 글·색감·미디어 넣기/빼기).
- *    그 밖의 것을 권하면 눌렀을 때 "그건 못 해요"가 돌아온다 -- 권하지 않느니만
- *    못하다. 유진의 의도 목록이 넓어지면 여기도 같이 넓힌다.
+ * 3. **누르면 실제로 되는 것만 권한다.** 그 밖의 것을 권하면 눌렀을 때 "그건
+ *    못 해요"가 돌아온다 -- 권하지 않느니만 못하다.
+ *
+ *    2026-09-02에 유진이 할 수 있는 것이 열하나로 늘었다(손떨림 보정·화면
+ *    노이즈·변형·소리 정리가 들어왔다). 그래서 여기서도 권할 수 있게 됐다 --
+ *    의도 목록이 넓어지면 이 파일도 같이 넓힌다는 약속을 지킨 것이다.
  */
 import type { EditorViewModel } from "../editorViewModel";
 import { sceneNumbersBySegmentId } from "../sceneNames";
@@ -74,6 +76,14 @@ export function buildQualityFollowUps(
   }
   if (caption && caption.endSec - caption.startSec > LONG_SCENE_SEC) {
     suggestions.push(`${scene}을 1.5배로 빠르게 해 줘`);
+  }
+  // 손떨림 보정은 **화면이 깔린 장면에만** 걸 수 있다(유진 쪽 검증도 같은 기준).
+  // 이미 켜 둔 장면에는 권하지 않는다 -- 다른 권유와 같은 규칙이다.
+  if (broll.length && !broll.some((clip) => clip.controls.stabilize)) {
+    suggestions.push(`${scene} 흔들린 화면을 잡아 줘`);
+  }
+  if (clipsFor(view, segmentId, "bgm").some((clip) => !clip.controls.normalizeLoudness)) {
+    suggestions.push(`${scene} 배경 음악 소리 크기를 고르게 맞춰 줘`);
   }
   // 이 장면에서 손볼 것이 셋이 안 되면 **편집본 전체를 보는 것**으로 채운다.
   // 처음에는 여기서도 색감을 한 번 더 권했는데, 이미 색감을 고른 장면에까지

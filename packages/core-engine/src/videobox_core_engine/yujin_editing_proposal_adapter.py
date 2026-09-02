@@ -13,7 +13,10 @@ from videobox_core_engine.filters import FILTER_TYPES
 from videobox_domain_models.yujin_editing_proposals import (
     ApplyMediaOperation,
     ReorderSegmentsOperation,
+    SetPictureCleanupOperation,
     SetSceneLookOperation,
+    SetSceneTransformOperation,
+    SetSoundCleanupOperation,
     YujinEditingProposal,
     YujinEditingResponse,
 )
@@ -48,6 +51,10 @@ class YujinEditingContext:
     #: 화면 없는 장면에는 걸 수 없다 -- 여기서 막지 않으면 적용 단계에서
     #: 터지고, 창작자에게는 "적용하지 못했어요"라는 말만 남는다.
     segment_ids_with_broll: tuple[str, ...] = ()
+    #: 지금 음악·효과음이 깔려 있는 장면들. 소리 정리는 깔린 것 위에 거는 것이라
+    #: 없는 장면에는 걸 수 없다 -- 색감이 화면을 요구하는 것과 같은 이유다.
+    segment_ids_with_bgm: tuple[str, ...] = ()
+    segment_ids_with_sfx: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -140,6 +147,14 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
                 return "scene_look_not_available"
             if operation.segment_id not in set(context.segment_ids_with_broll):
                 return "scene_look_needs_broll"
+        if isinstance(operation, (SetPictureCleanupOperation, SetSceneTransformOperation)):
+            # 화면 위에 얹는 조정이다. 색감과 같은 자리에서 막는다.
+            if operation.segment_id not in set(context.segment_ids_with_broll):
+                return "scene_look_needs_broll"
+        if isinstance(operation, SetSoundCleanupOperation):
+            available = context.segment_ids_with_bgm if operation.media_type == "bgm" else context.segment_ids_with_sfx
+            if operation.segment_id not in set(available):
+                return "sound_cleanup_needs_media"
         if isinstance(operation, ApplyMediaOperation):
             if operation.asset_id not in set(context.approved_asset_ids):
                 return "media_asset_not_approved"

@@ -392,6 +392,17 @@ def build_director_proposals_router(
             # 검증기가 다시 막는다 -- 알려 주지 않으면 지어내고, 지어낸 것은
             # 항상 거절돼서 "말로 보정하기"가 한 번도 성공하지 못한다
             # (`apply_media`의 자산 목록에서 이미 겪은 그 사고다).
+            # 소리 정리도 같은 이유로 "깔려 있는 장면"을 알려 준다.
+            segment_ids_with_bgm=tuple(
+                str(item["segment_id"]) for item in session.get("segments", [])
+                if isinstance(item, dict) and isinstance(item.get("music_override"), dict)
+                and str(item["music_override"].get("asset_id") or "").strip()
+            ),
+            segment_ids_with_sfx=tuple(
+                str(item["segment_id"]) for item in session.get("segments", [])
+                if isinstance(item, dict) and isinstance(item.get("sfx_override"), dict)
+                and str(item["sfx_override"].get("asset_id") or "").strip()
+            ),
             segment_ids_with_broll=tuple(
                 str(item["segment_id"])
                 for item in session.get("segments", [])

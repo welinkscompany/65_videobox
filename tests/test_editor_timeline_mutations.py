@@ -689,3 +689,78 @@ def test_ai_scene_look_refuses_a_scene_with_no_picture_under_it() -> None:
 
     with _pytest.raises(ValueError, match="scene_look_needs_broll"):
         apply_yujin_editing_proposal(session=session, proposal=proposal)
+
+
+def test_ai_picture_cleanup_changes_only_what_the_creator_asked_for() -> None:
+    """**말한 칸만 바꾼다.** owner가 "흔들림만 잡아 줘"라고 하면 노이즈 설정은
+    그대로여야 한다.
+
+    2026-09-02에 음악에서 똑같은 사고를 겪었다 -- 안 물어본 자리를 채우다가
+    이미 켜 둔 것을 덮어썼다. 그래서 이 의도들의 칸은 전부 선택이고, 온 것만
+    합친다.
+    """
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001",
+        "expected_content_sha256": "c" * 64,
+        "media_revision": "broll-r9",
+        "media_controls": {"fit": "crop", "reduce_noise": True, "speed": 1.5},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "cleanup", "base_session_revision": 1,
+        "operations": [{"intent": "set_picture_cleanup", "segment_id": "seg_001", "stabilize": True}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    controls = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")["broll_override"]["media_controls"]
+
+    assert controls["stabilize"] is True
+    # 안 물어본 칸은 그대로다.
+    assert controls["reduce_noise"] is True
+    assert controls["fit"] == "crop"
+    assert controls["speed"] == 1.5
+
+
+def test_ai_scene_transform_keeps_the_source_identity_like_the_look_does() -> None:
+    """변형도 색감과 **같은 함수**를 지난다 -- 원본 신원을 안 실으면 출력 검증이
+    그 장면을 "바뀐 원본"으로 읽는다."""
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001", "expected_content_sha256": "d" * 64,
+        "media_revision": "broll-r3", "media_controls": {"fit": "fit"},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "transform", "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_transform", "segment_id": "seg_001", "zoom": 1.4, "rotation_deg": 8.0}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    override = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")["broll_override"]
+
+    assert override["expected_content_sha256"] == "d" * 64
+    assert override["media_controls"]["zoom"] == 1.4
+    assert override["media_controls"]["rotation_deg"] == 8.0
+    # 말하지 않은 위치는 기본값 그대로다.
+    assert override["media_controls"]["position_x_percent"] == 0.0
+
+
+def test_ai_sound_cleanup_lands_on_the_media_the_creator_named() -> None:
+    """음악과 효과음은 다른 자리다. `media_type`으로 지목한 쪽만 바뀐다."""
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "sound", "base_session_revision": 1,
+        "operations": [{"intent": "set_sound_cleanup", "segment_id": "seg_001", "media_type": "bgm", "normalize_loudness": True}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    segment = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")
+
+    assert segment["music_override"]["media_controls"]["normalize_loudness"] is True
+    # 효과음은 손대지 않았다.
+    assert not (segment["sfx_override"].get("media_controls") or {}).get("normalize_loudness")

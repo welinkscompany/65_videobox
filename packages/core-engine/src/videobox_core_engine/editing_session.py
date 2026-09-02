@@ -780,6 +780,56 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
     return updated
 
 
+def _merge_broll_media_controls(*, session: dict[str, Any], segment_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """그 장면 B-roll의 조정값 몇 개만 바꾼다. 나머지는 그대로 둔다.
+
+    `update_segment_broll_override`는 덮어쓰기라 지금 값을 통째로 다시 실어야
+    한다 -- 원본 신원(해시·판)을 안 실으면 출력 검증이 그 장면을 "바뀐 원본"으로
+    읽는다. 색감·손떨림·변형이 전부 같은 함정을 지나므로 한 자리에 모은다.
+    """
+    existing = next(
+        (
+            segment.get("broll_override")
+            for segment in session.get("segments", [])
+            if isinstance(segment, dict) and str(segment.get("segment_id")) == segment_id
+        ),
+        None,
+    )
+    if not isinstance(existing, dict) or not str(existing.get("asset_id") or "").strip():
+        raise ValueError("scene_look_needs_broll")
+    controls = dict(existing.get("media_controls") or {})
+    controls.update(changes)
+    for field in ("expected_content_sha256", "media_revision"):
+        if existing.get(field):
+            controls[field] = existing[field]
+    return update_segment_broll_override(
+        session=session, segment_id=segment_id, asset_id=str(existing["asset_id"]), media_controls=controls
+    )
+
+
+def _merge_audio_media_controls(*, session: dict[str, Any], segment_id: str, field: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """그 장면 음악·효과음의 소리 정리 값만 바꾼다. 위와 같은 이유로 통째로 다시 싣는다."""
+    existing = next(
+        (
+            segment.get(field)
+            for segment in session.get("segments", [])
+            if isinstance(segment, dict) and str(segment.get("segment_id")) == segment_id
+        ),
+        None,
+    )
+    if not isinstance(existing, dict) or not str(existing.get("asset_id") or "").strip():
+        raise ValueError("sound_cleanup_needs_media")
+    controls = dict(existing.get("media_controls") or {})
+    controls.update(changes)
+    for key in ("expected_content_sha256", "media_revision"):
+        if existing.get(key):
+            controls[key] = existing[key]
+    updater = update_segment_music_override if field == "music_override" else update_segment_sfx_override
+    return updater(
+        session=session, segment_id=segment_id, asset_id=str(existing["asset_id"]), media_controls=controls
+    )
+
+
 def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tuple[object, ...]) -> dict[str, Any]:
     """Return a session copy with validated AI editing operations applied."""
     from videobox_domain_models.yujin_editing_proposals import (
@@ -788,7 +838,10 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
         ReorderSegmentsOperation,
         SetCaptionTextOperation,
         SetCutActionOperation,
+        SetPictureCleanupOperation,
         SetSceneLookOperation,
+        SetSceneTransformOperation,
+        SetSoundCleanupOperation,
         SetSegmentBoundsOperation,
         SetSceneSpeedOperation,
     )
@@ -817,33 +870,30 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
                 session=working, segment_id=operation.segment_id, caption_text=operation.text
             )
         elif isinstance(operation, SetSceneLookOperation):
-            # 색감은 **화면 위에 얹는 것**이라 그 장면에 깔린 B-roll이 있어야
-            # 한다. 검증기가 미리 막지만(`scene_look_needs_broll`) 여기서도
-            # 한 번 더 본다 -- 이 함수는 미리보기 투영(`project_...`)에서도
-            # 불리고, 그 경로가 검증기를 안 지나는 날이 올 수 있다.
-            existing = next(
-                (
-                    segment.get("broll_override")
-                    for segment in working.get("segments", [])
-                    if isinstance(segment, dict) and str(segment.get("segment_id")) == operation.segment_id
-                ),
-                None,
+            # 손떨림·노이즈·변형과 **같은 자리**에 얹는다(전부 그 장면 B-roll의
+            # 조정값이다). 병합과 원본 신원 보존은 한 함수가 맡는다 -- 두 벌이면
+            # 한쪽만 고쳐진다.
+            working = _merge_broll_media_controls(
+                session=working, segment_id=operation.segment_id,
+                changes={"filter": {"type": operation.look, "chosen_by": "yujin"}},
             )
-            if not isinstance(existing, dict) or not str(existing.get("asset_id") or "").strip():
-                raise ValueError("scene_look_needs_broll")
-            # `update_segment_broll_override`는 덮어쓰기라 지금 값을 통째로 다시
-            # 실어 보낸다. 원본 신원(해시·판)을 안 실으면 출력 검증이 그 장면을
-            # "바뀐 원본"으로 읽는다.
-            controls = dict(existing.get("media_controls") or {})
-            controls["filter"] = {"type": operation.look, "chosen_by": "yujin"}
-            for field in ("expected_content_sha256", "media_revision"):
-                if existing.get(field):
-                    controls[field] = existing[field]
-            working = update_segment_broll_override(
-                session=working,
-                segment_id=operation.segment_id,
-                asset_id=str(existing["asset_id"]),
-                media_controls=controls,
+        elif isinstance(operation, (SetPictureCleanupOperation, SetSceneTransformOperation)):
+            # 색감과 같은 자리에 얹는다 -- 전부 그 장면 B-roll의 조정값이다.
+            changes = {
+                field: value
+                for field, value in operation.model_dump(exclude={"intent", "segment_id"}).items()
+                if value is not None
+            }
+            working = _merge_broll_media_controls(session=working, segment_id=operation.segment_id, changes=changes)
+        elif isinstance(operation, SetSoundCleanupOperation):
+            field = "music_override" if operation.media_type == "bgm" else "sfx_override"
+            changes = {
+                key: value
+                for key, value in operation.model_dump(exclude={"intent", "segment_id", "media_type"}).items()
+                if value is not None
+            }
+            working = _merge_audio_media_controls(
+                session=working, segment_id=operation.segment_id, field=field, changes=changes
             )
         elif isinstance(operation, ApplyMediaOperation):
             if operation.media_type == "broll":
