@@ -1095,7 +1095,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "translate-captions") return port.translateCaptions({ language: action.language });
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
       if (action.kind === "dub-narration") {
-        const dubbed = await port.dubNarration({ language: action.language });
+        const dubbed = await port.dubNarration({ language: action.language, voiceSampleAssetId: action.voiceSampleAssetId });
         // 못 넣은 장면이 있으면 그 사정이, 없으면 몇 장면을 바꿨는지가 뜬다.
         return dubbed.dubbing_notice
           ?? `${dubbed.dubbed_scene_count ?? 0}개 장면의 목소리를 바꿨어요.`;
@@ -1106,6 +1106,21 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, columns: action.columns, rows: action.rows, text: action.text });
     });
   };
+  /** 더빙에 쓸 목소리 후보. 이름은 창작자가 알아볼 수 있는 것으로 준다. */
+  const loadVoiceSamples = async () => {
+    const assets = await api.listVoiceSamples(projectId);
+    // 자산 응답에는 파일 이름이 없다. 저장 위치의 끝 이름을 쓰되, 알아보기 어려운
+    // 해시뿐이면 **번호를 붙인 사람 말**로 부른다(§10.13 창작자 언어).
+    return assets.map((asset, index) => {
+      const tail = decodeURIComponent(asset.storage_uri.split("/").pop() ?? "").replace(/\.[a-z0-9]+$/i, "");
+      const readable = tail.replace(/^[0-9a-f]{16,}-/i, "").trim();
+      return {
+        assetId: asset.asset_id,
+        label: readable.length > 2 ? readable : `내 목소리 ${index + 1}`,
+      };
+    });
+  };
+
   const loadApprovedTtsCandidates = async (segmentId: string) => {
     const epoch = routeEpoch.current.value;
     const result = await api.listTtsCandidates(projectId, segmentId);
@@ -2197,6 +2212,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     assetCards={assetCards}
     isSavingTimeline={mutation.isSaving}
     loadApprovedTtsCandidates={loadApprovedTtsCandidates}
+    loadVoiceSamples={loadVoiceSamples}
     onApplyAssetCard={applyAssetCard}
     onApplyImageOverlay={applyImageOverlay}
     onPrepareAssetPreview={prepareAssetPreview}

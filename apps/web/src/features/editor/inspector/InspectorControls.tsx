@@ -38,7 +38,7 @@ export type InspectorAction =
   | Readonly<{ kind: "translate-captions"; language: string }>
   | Readonly<{ kind: "set-caption-language"; language: string | null }>
   // 목소리 더빙. **옮겨 둔 자막을 대본으로 쓴다** -- 그래서 번역이 먼저다.
-  | Readonly<{ kind: "dub-narration"; language: string }>
+  | Readonly<{ kind: "dub-narration"; language: string; voiceSampleAssetId: string | null }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
@@ -92,8 +92,13 @@ type Props = Readonly<{
   captionLanguage?: string | null;
   /** 이미 옮겨 둔 언어들. 이 목록에 있으면 다시 번역하지 않고 고르기만 한다. */
   translatedLanguages?: readonly string[];
+  /** 더빙에 쓸 목소리 후보를 읽어 온다. 목소리를 복제하는 엔진에만 쓰인다 --
+   *  복제 안 하는 엔진은 이 값을 무시하므로 **화면은 엔진을 몰라도 된다.** */
+  loadVoiceSamples?: () => Promise<readonly VoiceSampleChoice[]>;
   onAction: (action: InspectorAction) => void | Promise<void>;
 }>;
+
+export type VoiceSampleChoice = Readonly<{ assetId: string; label: string }>;
 
 /** 고를 수 있는 자막 언어. 백엔드 `SUPPORTED_CAPTION_LANGUAGES`와 짝이다.
  *
@@ -206,8 +211,11 @@ export function InspectorControls({
   disabled = false,
   captionLanguage = null,
   translatedLanguages = [],
+  loadVoiceSamples,
   onAction,
 }: Props) {
+  const [voiceSamples, setVoiceSamples] = useState<readonly VoiceSampleChoice[]>([]);
+  const [voiceSampleAssetId, setVoiceSampleAssetId] = useState<string | null>(null);
   const [cutAction, setCutAction] = useState<CutAction>(() => asCutAction(selectedSegment?.cutAction ?? "keep"));
   const [transition, setTransition] = useState<string>(
     () => selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE,
@@ -296,6 +304,22 @@ export function InspectorControls({
 
   // 장면을 바꿔 고르면 그 장면에 실제로 걸린 값으로 되돌린다. 안 하면 앞
   // 장면에서 고르던 값이 남아, 저장하지도 않은 전환이 걸린 것처럼 보인다.
+  // 더빙 자리가 보일 때만 읽는다. 자막을 안 옮긴 편집본에서까지 부를 이유가 없다.
+  useEffect(() => {
+    if (!loadVoiceSamples || !translatedLanguages.length) return;
+    let cancelled = false;
+    void loadVoiceSamples().then((samples) => {
+      if (cancelled) return;
+      setVoiceSamples(samples);
+      // 대개 목소리는 하나다. 하나뿐이면 고르게 하지 않고 그것을 쓴다.
+      setVoiceSampleAssetId((current) => current ?? samples[0]?.assetId ?? null);
+    }).catch(() => {
+      // 목소리를 못 읽어도 더빙 자리는 남는다 -- 복제 안 하는 엔진은 필요 없다.
+      if (!cancelled) setVoiceSamples([]);
+    });
+    return () => { cancelled = true; };
+  }, [loadVoiceSamples, translatedLanguages.length]);
+
   useEffect(() => {
     setTransition(selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE);
     setTransitionDurationSec(selectedSegment?.transitionIn?.durationSec ?? DEFAULT_SCENE_TRANSITION_DURATION_SEC);
@@ -979,12 +1003,27 @@ export function InspectorControls({
       {target?.kind === "caption" && translatedLanguages.length ? (
         <fieldset>
           <legend>목소리 더빙</legend>
+          {voiceSamples.length > 1 ? (
+            <label>
+              쓸 목소리
+              <NativeSelect
+                aria-label="쓸 목소리"
+                disabled={disabled}
+                onChange={(event) => setVoiceSampleAssetId(event.target.value)}
+                value={voiceSampleAssetId ?? ""}
+              >
+                {voiceSamples.map((sample) => (
+                  <option key={sample.assetId} value={sample.assetId}>{sample.label}</option>
+                ))}
+              </NativeSelect>
+            </label>
+          ) : null}
           <div className="vb-caption-languages">
             {CAPTION_LANGUAGES.filter(({ code }) => translatedLanguages.includes(code)).map(({ code, label }) => (
               <Button
                 disabled={disabled}
                 key={code}
-                onClick={() => emit({ kind: "dub-narration", language: code })}
+                onClick={() => emit({ kind: "dub-narration", language: code, voiceSampleAssetId })}
                 type="button"
               >
                 {`${label} 목소리로 더빙`}

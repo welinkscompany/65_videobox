@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { NativeSelect } from "../../../components/ui/native-select";
-import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
+import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls, type VoiceSampleChoice } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
@@ -28,6 +28,7 @@ export type RightDockProps = Readonly<{
   inspectorDisabled?: boolean;
   partialRegeneration?: PartialRegenerationControls;
   loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
+  loadVoiceSamples?: () => Promise<readonly VoiceSampleChoice[]>;
   ttsCandidateScopeKey?: string;
   /** 지금 완성본에 실리는 자막 언어. `null`이면 원본(한국어). */
   captionLanguage?: string | null;
@@ -52,6 +53,7 @@ export function RightDock({
   inspectorDisabled = false,
   partialRegeneration,
   loadApprovedTtsCandidates,
+  loadVoiceSamples,
   ttsCandidateScopeKey,
   captionLanguage = null,
   translatedLanguages = [],
@@ -116,6 +118,7 @@ export function RightDock({
         {onInspectorAction ? <InspectorControls
           disabled={inspectorDisabled}
           loadApprovedTtsCandidates={loadApprovedTtsCandidates}
+          loadVoiceSamples={loadVoiceSamples}
           onAction={onInspectorAction}
           partialRegeneration={partialRegeneration}
           projectId={projectId}

@@ -47,6 +47,15 @@ def _build_tts_provider(config: TTSEngineConfig) -> Any | None:
             api_key=config.elevenlabs_api_key,
             voice_id=config.elevenlabs_voice_id,
         )
+    if config.engine == "host_bridge":
+        # 목소리 복제 엔진은 이 컴퓨터의 호스트 쪽에 있다. 컨테이너를 3GB 불리지
+        # 않고 이미 있는 것을 쓴다 -- 그림 생성이 ComfyUI를 부르는 것과 같다.
+        from videobox_provider_interfaces.host_tts_bridge_provider import HostTTSBridgeProvider
+
+        return HostTTSBridgeProvider(
+            base_url=config.host_bridge_base_url,
+            language=config.language,
+        )
     if config.engine == "espeak":
         from videobox_provider_interfaces.espeak_tts_provider import EspeakTTSProvider
 

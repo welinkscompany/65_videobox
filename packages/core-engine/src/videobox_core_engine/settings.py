@@ -201,6 +201,9 @@ def resolve_tts_engine_config() -> "TTSEngineConfig":
         language=_environment_text("VIDEOBOX_TTS_LANGUAGE", defaults.language),
         elevenlabs_api_key=_environment_text("VIDEOBOX_TTS_ELEVENLABS_API_KEY", ""),
         elevenlabs_voice_id=_environment_text("VIDEOBOX_TTS_ELEVENLABS_VOICE_ID", ""),
+        host_bridge_base_url=_environment_text(
+            "VIDEOBOX_TTS_BRIDGE_URL", defaults.host_bridge_base_url
+        ),
     )
 
 
@@ -363,6 +366,8 @@ class TTSEngineConfig:
     local_xtts_model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2"
     local_xtts_use_gpu: bool = False
     chatterbox_use_gpu: bool = False
+    #: `host_bridge`가 부를 곳. 컨테이너에서는 `host.docker.internal`이 이 컴퓨터다.
+    host_bridge_base_url: str = "http://127.0.0.1:8199"
 
     def __post_init__(self) -> None:
         # `local_xtts`도 목소리를 복제하지만 Coqui CPML은 **비상업용**이다. 이 제품으로
@@ -371,7 +376,7 @@ class TTSEngineConfig:
         # `espeak`는 설치가 거의 없고 밖으로 나가지 않아 **더빙을 오늘 써 볼 수
         # 있게 하는 자리**다. 다만 목소리를 복제하지는 못한다 -- 창작자 목소리로
         # 더빙하려면 `chatterbox`를 설치하고 여기만 바꾸면 된다.
-        valid_engines = {"gtts", "elevenlabs", "local_xtts", "chatterbox", "espeak"}
+        valid_engines = {"gtts", "elevenlabs", "local_xtts", "chatterbox", "espeak", "host_bridge"}
         if self.engine not in valid_engines:
             raise ValueError(f"tts_engine_config.engine must be one of {sorted(valid_engines)}.")
         if not self.language.strip():

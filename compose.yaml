@@ -104,7 +104,11 @@ services:
       # 나가지 않지만 **목소리를 복제하지는 못한다** -- 기계 목소리다.
       # 창작자 목소리로 더빙하려면 `chatterbox`(MIT)를 설치하고 이 줄만 바꾼다.
       VIDEOBOX_TTS_ENABLED: ${VIDEOBOX_TTS_ENABLED:-1}
+      # `espeak`는 기계 목소리이고 설치가 필요 없다. 창작자 목소리로 더빙하려면
+      # `host_bridge`로 바꾸고 호스트에서 `scripts/host_tts_service.py`를 띄운다
+      # (owner 승인 2026-09-02, 그림 생성이 ComfyUI를 부르는 것과 같은 방식).
       VIDEOBOX_TTS_ENGINE: ${VIDEOBOX_TTS_ENGINE:-espeak}
+      VIDEOBOX_TTS_BRIDGE_URL: ${VIDEOBOX_TTS_BRIDGE_URL:-http://host.docker.internal:8199}
       VIDEOBOX_TTS_LANGUAGE: ${VIDEOBOX_TTS_LANGUAGE:-ko}
       VIDEOBOX_IMAGE_GENERATION_ENABLED: ${VIDEOBOX_IMAGE_GENERATION_ENABLED:-1}
       VIDEOBOX_IMAGE_GENERATION_BASE_URL: ${VIDEOBOX_IMAGE_GENERATION_BASE_URL:-http://host.docker.internal:8188}

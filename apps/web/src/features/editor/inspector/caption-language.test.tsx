@@ -96,6 +96,51 @@ describe("목소리 더빙", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "영어 목소리로 더빙" }));
 
-    expect(onAction).toHaveBeenCalledWith({ kind: "dub-narration", language: "en" });
+    expect(onAction).toHaveBeenCalledWith({ kind: "dub-narration", language: "en", voiceSampleAssetId: null });
+  });
+});
+
+describe("더빙에 쓸 목소리", () => {
+  it("목소리가 여럿이면 고를 수 있고, 고른 것이 실려 간다", async () => {
+    const onAction = renderControls({
+      translatedLanguages: ["en"],
+      loadVoiceSamples: async () => [
+        { assetId: "asset_a", label: "내 목소리 1" },
+        { assetId: "asset_b", label: "내 목소리 2" },
+      ],
+    });
+
+    const picker = await screen.findByLabelText("쓸 목소리");
+    fireEvent.change(picker, { target: { value: "asset_b" } });
+    fireEvent.click(screen.getByRole("button", { name: "영어 목소리로 더빙" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "dub-narration", language: "en", voiceSampleAssetId: "asset_b",
+    });
+  });
+
+  it("목소리가 하나뿐이면 고르게 하지 않고 그것을 쓴다", async () => {
+    const onAction = renderControls({
+      translatedLanguages: ["en"],
+      loadVoiceSamples: async () => [{ assetId: "asset_only", label: "내 목소리" }],
+    });
+
+    await screen.findByRole("button", { name: "영어 목소리로 더빙" });
+    expect(screen.queryByLabelText("쓸 목소리")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "영어 목소리로 더빙" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      kind: "dub-narration", language: "en", voiceSampleAssetId: "asset_only",
+    });
+  });
+
+  it("목소리를 못 읽어도 더빙 자리는 남는다", async () => {
+    /** 목소리를 복제하지 않는 엔진은 샘플이 필요 없다 -- 화면은 엔진을 모른다. */
+    renderControls({
+      translatedLanguages: ["en"],
+      loadVoiceSamples: async () => { throw new Error("no voice samples"); },
+    });
+
+    expect(await screen.findByRole("button", { name: "영어 목소리로 더빙" })).toBeInTheDocument();
   });
 });
