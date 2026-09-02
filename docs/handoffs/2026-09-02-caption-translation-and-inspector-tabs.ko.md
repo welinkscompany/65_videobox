@@ -45,7 +45,7 @@
 
 ### 3. 목소리 복제는 호스트에서 부른다 (owner 승인)
 
-`docs/decisions/2026-09-02-host-voice-bridge.ko.md`가 결정 기록.
+`docs/decisions/2026-09-03-host-voice-bridge.ko.md`가 결정 기록.
 
 **목소리 복제 엔진은 이미 이 컴퓨터에 있었다** — 저장소 루트 `.venv`에
 XTTS 0.27.5 + torch 2.8.0 + 모델 1.8GB. (앞서 "설치가 필요하다"고 한 것은
