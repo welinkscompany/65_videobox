@@ -946,6 +946,28 @@ class CaptionTranslationRequest(BaseModel):
         return self
 
 
+class DubbingStartResponse(BaseModel):
+    job_id: str
+    status: Literal["processing"]
+    #: 이 언어로 더빙할 장면 수. 화면이 "3/12 장면"처럼 보여 줄 수 있다.
+    total_scene_count: int
+
+
+class DubbingResultResponse(BaseModel):
+    dubbed_scene_count: int
+    dubbing_notice: str | None = None
+    session_revision: int
+
+
+class DubbingStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["processing", "succeeded", "failed"]
+    result: DubbingResultResponse | None = None
+    error_detail: str | None = None
+    done_scene_count: int = 0
+    total_scene_count: int = 0
+
+
 class DubbingRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     language: str = Field(min_length=1)

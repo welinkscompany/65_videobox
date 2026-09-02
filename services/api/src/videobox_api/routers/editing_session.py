@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CaptionLanguageRequest,
     DubbingRequest,
+    DubbingResultResponse,
+    DubbingStartResponse,
+    DubbingStatusResponse,
     CaptionTranslationRequest,
     NarrationRecordingSyncRequest,
     BrollOverrideRequest,
@@ -240,26 +243,49 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
-    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/dubbing")
-    def dub_editing_session(
-        project_id: str, session_id: str, payload: DubbingRequest
-    ) -> EditingSessionResponse:
-        """옮겨 둔 자막을 그 언어 목소리로 읽혀 내레이션을 바꾼다."""
+    @router.post(
+        "/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def start_dubbing(
+        project_id: str, session_id: str, payload: DubbingRequest, background_tasks: BackgroundTasks,
+    ) -> DubbingStartResponse:
+        """더빙을 걸어 두고 바로 돌아온다. 진행 상황은 `GET .../dubbing/{job_id}`.
+
+        **비동기여야 한다.** 장면당 13초가 걸려서(2026-09-03 실측) 스물세 장면이면
+        nginx 330초 벽에 부딪힌다 -- 창작자의 실제 영상은 그보다 훨씬 길다.
+        유튜브 학습을 비동기로 바꾼 것과 같은 이유이고 같은 방식이다.
+        """
         try:
-            result = orchestrator.dub_editing_session(
+            started = orchestrator.start_dubbing(
                 project_id=project_id,
                 session_id=session_id,
                 language=payload.language,
                 voice_sample_asset_id=payload.voice_sample_asset_id,
                 expected_revision=payload.expected_revision,
             )
-        except EditingSessionConflict as exc:
-            return _editing_session_conflict_response(exc)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
-        return EditingSessionResponse(**result)
+        background_tasks.add_task(
+            orchestrator.run_dubbing_job,
+            project_id=project_id, session_id=session_id, job_id=started["job_id"],
+            language=payload.language, expected_revision=payload.expected_revision,
+            voice_sample_asset_id=payload.voice_sample_asset_id,
+        )
+        return DubbingStartResponse(**started)
+
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/dubbing/{job_id}")
+    def get_dubbing_job(project_id: str, session_id: str, job_id: str) -> DubbingStatusResponse:
+        del session_id
+        try:
+            job = orchestrator.get_dubbing_job(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return DubbingStatusResponse(
+            **{**job, "result": DubbingResultResponse(**job["result"]) if job["result"] else None}
+        )
 
     @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/caption-language")
     def patch_editing_session_caption_language(

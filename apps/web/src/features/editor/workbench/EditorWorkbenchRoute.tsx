@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { voiceFailureMessage } from "./voiceFailureMessage";
+import { dubbingOutcomeMessage, runDubbingWithProgress, type DubbingOutcome } from "./dubbingProgress";
 
 import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -1080,6 +1081,10 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   };
   const handleInspectorAction = (action: InspectorAction) => {
     if (action.kind === "preflight-caption-style") return preflightCaptionStyle(action);
+    // 더빙은 **편집 한 번이 아니라 오래 도는 작업이다.** 장면당 13초라
+    // 스무 장면이면 사 분이 넘는다. 다른 편집과 같은 통로로 보내면 "저장하고
+    // 있어요"만 뜬 채로 몇 분이 흐르고, 프록시가 먼저 끊는다.
+    if (action.kind === "dub-narration") return dubNarration(action);
     if (action.kind === "partial-preflight") return preflightPartialRegeneration(action);
     if (action.kind === "partial-run") return runPartialRegeneration(action);
     if (action.kind === "partial-resume") return resumePartialRegeneration(action);
@@ -1097,12 +1102,6 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       // 같은 통로로 보내서 되돌리기·충돌 확인을 그대로 받는다.
       if (action.kind === "translate-captions") return port.translateCaptions({ language: action.language });
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
-      if (action.kind === "dub-narration") {
-        const dubbed = await port.dubNarration({ language: action.language, voiceSampleAssetId: action.voiceSampleAssetId });
-        // 못 넣은 장면이 있으면 그 사정이, 없으면 몇 장면을 바꿨는지가 뜬다.
-        return dubbed.dubbing_notice
-          ?? `${dubbed.dubbed_scene_count ?? 0}개 장면의 목소리를 바꿨어요.`;
-      }
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
       if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
       if (action.overlayKind === "shape") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, shape: action.shape, vertical: action.vertical, horizontal: action.horizontal, size: action.size, motion: action.motion });
@@ -1118,6 +1117,51 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
    *
    *  대신 **읽는 쪽이 이 함수의 정체성에 의존하지 않는다**(`InspectorControls`).
    */
+  /** 더빙을 걸고, 진행 상황을 화면에 계속 알리고, 끝나면 편집본을 다시 읽는다.
+   *
+   *  다른 편집과 통로를 나눈 이유: 장면당 13초라 스무 장면이면 사 분이 넘는다.
+   *  "저장하고 있어요"만 띄운 채로 그 시간을 흘려보내면 창작자는 멈춘 줄 안다.
+   */
+  const dubNarration = async (action: { language: string; voiceSampleAssetId: string | null }) => {
+    if (!sessionId || !state.session || mutationInFlight.current) return;
+    const epoch = routeEpoch.current.value;
+    const isCurrent = () => routeEpoch.current.value === epoch;
+    mutationInFlight.current = true;
+    setMutation({ isSaving: true, message: "목소리를 만들 준비를 하고 있어요." });
+    let outcome: DubbingOutcome;
+    try {
+      outcome = await runDubbingWithProgress({
+        projectId,
+        sessionId,
+        expectedRevision: state.session.expectedRevision,
+        language: action.language,
+        voiceSampleAssetId: action.voiceSampleAssetId,
+        isStillRelevant: isCurrent,
+        onProgress: (done, total) => {
+          if (!isCurrent()) return;
+          setMutation({
+            isSaving: true,
+            message: total > 0
+              ? `목소리를 만들고 있어요. ${total}개 장면 중 ${done}개 했어요.`
+              : "목소리를 만들고 있어요.",
+          });
+        },
+      });
+    } catch (error) {
+      outcome = { kind: "failed", detail: voiceFailureMessage(error) };
+    } finally {
+      mutationInFlight.current = false;
+    }
+    if (!isCurrent()) return;
+    // 실패 사유가 창작자 말로 있으면 그걸 그대로 쓴다(꺼진 목소리 프로그램 등).
+    const message = outcome.kind === "failed" && outcome.detail
+      ? outcome.detail
+      : dubbingOutcomeMessage(outcome);
+    // 편집본을 다시 읽고 결과를 알리는 일은 **기존 통로가 이미 한다.**
+    // 여기서 서버를 또 건드릴 필요는 없다 -- 더빙은 이미 끝났다.
+    await commitTimelineMutation(async () => message);
+  };
+
   const loadVoiceSamples = async () => {
     const assets = await api.listVoiceSamples(projectId);
     // 자산 응답에는 파일 이름이 없다. 저장 위치의 끝 이름을 쓰되, 알아보기 어려운

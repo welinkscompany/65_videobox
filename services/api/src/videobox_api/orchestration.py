@@ -9,6 +9,7 @@ from urllib.request import urlopen
 from uuid import uuid4
 
 from videobox_core_engine.caption_translation_service import CaptionTranslationService
+from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.dubbing import DubbingFit, dubbing_lines, unfitted_scene_message
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
@@ -136,6 +137,14 @@ class ApiOrchestrator:
         # 한다 -- 그 트레이드오프를 감수한다.
         self._youtube_import_jobs: dict[str, dict[str, Any]] = {}
         self._youtube_import_jobs_lock = threading.Lock()
+        # 더빙도 같은 이유로 비동기다. **장면당 13초**가 걸려서(2026-09-03 실측,
+        # chatterbox) 스물세 장면이면 nginx 330초 벽에 부딪힌다. 창작자의 실제
+        # 영상은 그보다 훨씬 길다 -- 8분짜리면 백 장면이 넘는다.
+        #
+        # 유튜브 학습과 똑같이 메모리에만 둔다. 다시 눌러도 되는 일이라
+        # 재시작 사이 살아남을 진짜 작업 큐를 새로 만들 값어치는 없다.
+        self._dubbing_jobs: dict[str, dict[str, Any]] = {}
+        self._dubbing_jobs_lock = threading.Lock()
 
     def create_creation_brief(self, **kwargs: Any) -> dict[str, Any]:
         return self.pipeline.create_creation_brief(runtime=self.creation_interview_runtime, **kwargs)
@@ -845,6 +854,89 @@ class ApiOrchestrator:
             texts_by_segment=texts_by_segment, expected_revision=expected_revision,
         )
 
+    def start_dubbing(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        language: str,
+        expected_revision: int,
+        voice_sample_asset_id: str | None = None,
+    ) -> dict[str, Any]:
+        """더빙을 **시작만** 하고 돌아온다. 실제 작업은 백그라운드에서 한다.
+
+        장면당 13초가 걸려서(2026-09-03 실측) 스물세 장면이면 nginx 330초 벽에
+        부딪힌다. 창작자의 실제 영상은 그보다 훨씬 길다. 유튜브 학습을 비동기로
+        바꾼 것과 같은 이유이고, 같은 방식을 쓴다.
+
+        언어가 틀린 것처럼 **바로 알 수 있는 실수**는 여기서 먼저 막는다 --
+        기다리게 한 뒤 알려 줄 이유가 없다.
+        """
+        if language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {language}")
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        total = len(dubbing_lines(editing_session=session, language=language))
+        job_id = uuid4().hex
+        with self._dubbing_jobs_lock:
+            self._dubbing_jobs[job_id] = {
+                "project_id": project_id, "status": "processing", "result": None,
+                "error_detail": None, "done_scene_count": 0, "total_scene_count": total,
+            }
+        return {"job_id": job_id, "status": "processing", "total_scene_count": total}
+
+    def run_dubbing_job(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        job_id: str,
+        language: str,
+        expected_revision: int,
+        voice_sample_asset_id: str | None = None,
+    ) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        def progress(done: int) -> None:
+            with self._dubbing_jobs_lock:
+                job = self._dubbing_jobs.get(job_id)
+                if job is not None:
+                    job["done_scene_count"] = done
+        try:
+            result = self.dub_editing_session(
+                project_id=project_id, session_id=session_id, language=language,
+                expected_revision=expected_revision,
+                voice_sample_asset_id=voice_sample_asset_id, on_progress=progress,
+            )
+            with self._dubbing_jobs_lock:
+                job = self._dubbing_jobs.get(job_id) or {}
+                self._dubbing_jobs[job_id] = {
+                    **job, "project_id": project_id, "status": "succeeded",
+                    "result": {
+                        "dubbed_scene_count": result.get("dubbed_scene_count"),
+                        "dubbing_notice": result.get("dubbing_notice"),
+                        "session_revision": result.get("session_revision"),
+                    },
+                    "error_detail": None,
+                }
+        except Exception as exc:  # noqa: BLE001
+            with self._dubbing_jobs_lock:
+                job = self._dubbing_jobs.get(job_id) or {}
+                self._dubbing_jobs[job_id] = {
+                    **job, "project_id": project_id, "status": "failed",
+                    "result": None, "error_detail": str(exc),
+                }
+
+    def get_dubbing_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        with self._dubbing_jobs_lock:
+            job = self._dubbing_jobs.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            raise KeyError("dubbing_job_not_found")
+        return {
+            "job_id": job_id, "status": job["status"], "result": job["result"],
+            "error_detail": job["error_detail"],
+            "done_scene_count": job.get("done_scene_count", 0),
+            "total_scene_count": job.get("total_scene_count", 0),
+        }
+
     def dub_editing_session(
         self,
         *,
@@ -853,6 +945,7 @@ class ApiOrchestrator:
         language: str,
         expected_revision: int,
         voice_sample_asset_id: str | None = None,
+        on_progress: Any = None,
     ) -> dict[str, Any]:
         """옮겨 둔 자막을 그 언어 목소리로 읽혀 내레이션을 바꾼다.
 
@@ -894,6 +987,9 @@ class ApiOrchestrator:
             selections[line.segment_id] = (
                 str(take.candidate["candidate_id"]), str(take.candidate["asset_id"])
             )
+            if on_progress is not None:
+                # 스무 장면이면 사 분이 넘는다. 어디까지 왔는지 말해 줘야 한다.
+                on_progress(len(selections) + len(fits))
         result = self.pipeline.set_editing_session_dubbed_takes(
             project_id=project_id, session_id=session_id,
             selections=selections, expected_revision=expected_revision,

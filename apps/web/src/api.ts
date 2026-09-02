@@ -437,16 +437,24 @@ export type EditingSession = {
   caption_style?: CaptionStyleSnapshot | null;
   /** 완성본에 실을 자막 언어. 없으면 원본(한국어)으로 나간다. */
   caption_language?: string | null;
-  /** 이번 더빙에서 목소리를 바꾼 장면 수. 더빙 응답에만 실린다. */
-  dubbed_scene_count?: number | null;
-  /** 못 넣은 장면이 있을 때 그 사정. 전부 됐으면 안 실린다. */
-  dubbing_notice?: string | null;
+
   segments: EditingSessionSegment[];
   history: EditingSessionHistoryEntry[];
   undo_count?: number;
   redo_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type DubbingStart = { job_id: string; status: "processing"; total_scene_count: number };
+export type DubbingResult = { dubbed_scene_count: number; dubbing_notice: string | null; session_revision: number };
+export type DubbingStatus = {
+  job_id: string;
+  status: "processing" | "succeeded" | "failed";
+  result: DubbingResult | null;
+  error_detail: string | null;
+  done_scene_count: number;
+  total_scene_count: number;
 };
 
 export type OutputVariant = {
@@ -2401,15 +2409,20 @@ export const api = {
       `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-translations`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
-  /** 옮겨 둔 자막을 그 언어 목소리로 읽혀 내레이션을 바꾼다. */
-  dubEditingSessionNarration: (
+  /** 더빙을 **걸어 두기만** 한다. 장면당 13초라 긴 영상은 한 요청에 못 끝낸다
+   *  -- 스물세 장면이면 프록시가 끊는다. 진행은 아래 상태 조회로 본다. */
+  startEditingSessionDubbing: (
     projectId: string,
     sessionId: string,
     payload: { expected_revision: number; language: string; voice_sample_asset_id?: string | null },
   ) =>
-    request<EditingSession>(
+    request<DubbingStart>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/dubbing`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  getEditingSessionDubbingStatus: (projectId: string, sessionId: string, jobId: string) =>
+    request<DubbingStatus>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/dubbing/${jobId}`,
     ),
   /** 어느 자막으로 내보낼지 고른다. `language: null`이면 원본으로 되돌린다. */
   updateEditingSessionCaptionLanguage: (

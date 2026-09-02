@@ -43,6 +43,27 @@ class _SpokenLength:
         return TTSResult(output_uri=str(request.output_path), provider_name=self.provider_name)
 
 
+def _dub(client: TestClient, project_id: str, session_id: str, **payload: Any) -> dict[str, Any]:
+    """더빙을 걸고 끝날 때까지 기다린다.
+
+    더빙은 **비동기다** -- 장면당 13초라 긴 영상은 nginx 330초 벽에 부딪힌다.
+    시험은 `TestClient`가 background task를 응답 뒤에 바로 돌리므로, 한 번
+    물어보면 이미 끝나 있다.
+    """
+    started = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing", json=payload
+    )
+    assert started.status_code in (202, 422), started.text
+    if started.status_code == 422:
+        return {"_status": 422, **started.json()}
+    job_id = started.json()["job_id"]
+    status_response = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing/{job_id}"
+    )
+    assert status_response.status_code == 200, status_response.text
+    return {"_status": 200, "started": started.json(), **status_response.json()}
+
+
 def _client(tmp_path: Path, engine: _SpokenLength) -> tuple[TestClient, str, str]:
     app = create_app(
         projects_root=tmp_path / "projects",
@@ -85,17 +106,16 @@ def test_a_fitting_take_replaces_the_narration(tmp_path: Path) -> None:
     client, project_id, session_id = _client(tmp_path, engine)
     before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
 
-    response = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    )
+    response = _dub(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["dubbed_scene_count"] == 1
+    assert response["status"] == "succeeded", response.get("error_detail")
+    assert response["result"]["dubbed_scene_count"] == 1
     # 전부 들어갔으면 사정을 말할 것이 없다.
-    assert "dubbing_notice" not in body or body["dubbing_notice"] is None
-    assert body["segments"][0]["tts_replacement"] is not None
+    assert response["result"]["dubbing_notice"] is None
+    # 걸어 두자마자 몇 장면짜리 일인지 말해 준다 -- 진행 표시의 모수가 된다.
+    assert response["started"]["total_scene_count"] == 1
+    session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    assert session["segments"][0]["tts_replacement"] is not None
 
 
 def test_the_engine_is_told_which_language_to_read(tmp_path: Path) -> None:
@@ -104,10 +124,7 @@ def test_the_engine_is_told_which_language_to_read(tmp_path: Path) -> None:
     client, project_id, session_id = _client(tmp_path, engine)
     before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
 
-    client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    )
+    _dub(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
     assert engine.requests[0].language == "en"
     assert engine.requests[0].text == "Hello there"
@@ -119,18 +136,15 @@ def test_a_take_that_cannot_fit_leaves_the_original_voice_alone(tmp_path: Path) 
     client, project_id, session_id = _client(tmp_path, engine)
     before = _translate(client, project_id, session_id, "A very long sentence indeed", tmp_path / "projects")
 
-    response = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    )
+    response = _dub(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["dubbed_scene_count"] == 0
-    assert body["segments"][0]["tts_replacement"] is None
+    assert response["status"] == "succeeded", response.get("error_detail")
+    assert response["result"]["dubbed_scene_count"] == 0
+    session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    assert session["segments"][0]["tts_replacement"] is None
     # 무엇을 못 했는지 반드시 말해 준다 -- 조용히 아무 일 없는 것이 제일 나쁘다.
     # 사유별로 말해 준다 -- "줄여라"와 "늘려라"는 창작자가 할 일이 다르다.
-    assert "옮긴 말이 길어서 넣지 못했어요" in body["dubbing_notice"]
+    assert "옮긴 말이 길어서 넣지 못했어요" in response["result"]["dubbing_notice"]
 
 
 def test_nothing_to_dub_when_the_captions_are_not_translated_yet(tmp_path: Path) -> None:
@@ -138,13 +152,10 @@ def test_nothing_to_dub_when_the_captions_are_not_translated_yet(tmp_path: Path)
     client, project_id, session_id = _client(tmp_path, engine)
     body = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
 
-    response = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": body["session_revision"]},
-    )
+    response = _dub(client, project_id, session_id, language="en", expected_revision=body["session_revision"])
 
-    assert response.status_code == 200, response.text
-    assert response.json()["dubbed_scene_count"] == 0
+    assert response["status"] == "succeeded", response.get("error_detail")
+    assert response["result"]["dubbed_scene_count"] == 0
     assert engine.requests == []
 
 
@@ -153,12 +164,9 @@ def test_an_unknown_language_is_refused(tmp_path: Path) -> None:
     client, project_id, session_id = _client(tmp_path, engine)
     body = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
 
-    response = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "klingon", "expected_revision": body["session_revision"]},
-    )
+    response = _dub(client, project_id, session_id, language="klingon", expected_revision=body["session_revision"])
 
-    assert response.status_code == 422, response.text
+    assert response["_status"] == 422, response
     assert engine.requests == []
 
 
@@ -177,12 +185,9 @@ def test_dubbing_triggers_the_rebuild_that_swaps_the_narration(tmp_path: Path) -
     client, project_id, session_id = _client(tmp_path, engine)
     before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
 
-    dubbed = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    ).json()
+    dubbed = _dub(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
-    assert dubbed["dubbed_scene_count"] == 1
+    assert dubbed["result"]["dubbed_scene_count"] == 1
     jobs = client.get(f"/api/projects/{project_id}/jobs").json().get("jobs") or []
     regenerations = [job for job in jobs if job.get("job_type") == "partial_regeneration"]
     assert regenerations, "더빙이 타임라인을 다시 만들지 않았다 -- 완성본은 그대로 나간다."
@@ -195,10 +200,7 @@ def test_nothing_is_rebuilt_when_no_scene_could_be_dubbed(tmp_path: Path) -> Non
     client, project_id, session_id = _client(tmp_path, engine)
     before = _translate(client, project_id, session_id, "Far too long", tmp_path / "projects")
 
-    client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    )
+    _dub(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
     jobs = client.get(f"/api/projects/{project_id}/jobs").json().get("jobs") or []
     assert [job for job in jobs if job.get("job_type") == "partial_regeneration"] == []
@@ -223,17 +225,13 @@ def test_one_broken_scene_does_not_throw_away_the_others(tmp_path: Path) -> None
     client, project_id, session_id = _client(tmp_path, engine)
     before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
 
-    response = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    )
+    response = _dub(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
-    # 장면이 하나뿐인 편집본이라 그 하나가 실패한다. 그래도 **500이 아니라**
-    # 무엇을 못 했는지 말해 주는 응답이 온다.
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["dubbed_scene_count"] == 0
-    assert "목소리를 만들지 못했어요" in body["dubbing_notice"]
+    # 장면이 하나뿐인 편집본이라 그 하나가 실패한다. 그래도 **작업이 죽지 않고**
+    # 무엇을 못 했는지 말해 준다.
+    assert response["status"] == "succeeded", response.get("error_detail")
+    assert response["result"]["dubbed_scene_count"] == 0
+    assert "목소리를 만들지 못했어요" in response["result"]["dubbing_notice"]
 
 
 def test_a_dubbed_project_can_still_be_exported(tmp_path: Path) -> None:
@@ -248,11 +246,8 @@ def test_a_dubbed_project_can_still_be_exported(tmp_path: Path) -> None:
     client, project_id, session_id = _client(tmp_path, engine)
     before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
 
-    dubbed = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    ).json()
-    assert dubbed["dubbed_scene_count"] == 1
+    dubbed = _dub(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
+    assert dubbed["result"]["dubbed_scene_count"] == 1
 
     session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
     jobs = client.get(f"/api/projects/{project_id}/jobs").json().get("jobs") or []
@@ -267,3 +262,42 @@ def test_a_dubbed_project_can_still_be_exported(tmp_path: Path) -> None:
         "더빙이 만든 타임라인에 timeline_build 기록이 없다 -- "
         "출력 화면이 '편집본 준비 필요'에서 멈춘다."
     )
+
+
+def test_the_request_only_books_the_work(tmp_path: Path) -> None:
+    """**요청은 일을 걸어 두기만 하고 돌아온다.**
+
+    장면당 13초가 걸린다(2026-09-03 실측, chatterbox). 스물세 장면이면 nginx
+    330초 벽에 부딪히고, 창작자의 실제 영상은 그보다 훨씬 길다 -- 8분짜리면
+    백 장면이 넘는다.
+
+    **"엔진을 아직 안 불렀다"는 여기서 못 잰다.** `TestClient`는 background
+    task를 응답 안에서 바로 돌리기 때문이다 -- 시험 환경의 성질이지 제품이
+    그런 게 아니다. 그래서 잴 수 있는 것만 잰다: 202로 돌아오고, 그 몸통이
+    아직 "처리 중"이며, 몇 장면짜리 일인지 바로 말해 준다는 것.
+    """
+    engine = _SpokenLength({}, default_seconds=4.6)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    started = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    )
+
+    assert started.status_code == 202, started.text
+    body = started.json()
+    assert body["status"] == "processing"
+    # 몇 장면짜리 일인지 바로 말해 준다 -- 진행 표시의 모수가 된다.
+    assert body["total_scene_count"] == 1
+
+
+def test_asking_about_a_job_that_does_not_exist_is_not_a_crash(tmp_path: Path) -> None:
+    engine = _SpokenLength({}, default_seconds=4.6)
+    client, project_id, session_id = _client(tmp_path, engine)
+
+    response = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing/nope"
+    )
+
+    assert response.status_code in (404, 422), response.text

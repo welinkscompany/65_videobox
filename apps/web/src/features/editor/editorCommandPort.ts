@@ -22,7 +22,7 @@ export type EditorCommandApi = Pick<typeof api,
   "updateEditingSessionShapeOverlay" | "removeEditingSessionShapeOverlay" |
   "updateEditingSessionTtsReplacement" | "clearEditingSessionTtsReplacement" |
   "updateEditingSessionCaption" | "updateEditingSessionCaptionStyle" | "previewEditingSessionCaptionStyleScope" | "updateEditingSessionSegmentTransition" |
-  "translateEditingSessionCaptions" | "updateEditingSessionCaptionLanguage" | "dubEditingSessionNarration"
+  "translateEditingSessionCaptions" | "updateEditingSessionCaptionLanguage"
 >;
 
 export type EditorCommandPort = Readonly<{
@@ -57,8 +57,6 @@ export type EditorCommandPort = Readonly<{
   translateCaptions(input: { language: string }): Promise<EditingSession>;
   /** 어느 자막으로 내보낼지 고른다. `null`이면 원본. */
   setCaptionLanguage(input: { language: string | null }): Promise<EditingSession>;
-  /** 옮겨 둔 자막을 그 언어 목소리로 읽혀 내레이션을 바꾼다. */
-  dubNarration(input: { language: string; voiceSampleAssetId?: string | null }): Promise<EditingSession>;
 }>;
 
 function mediaControls(value: EditorControls | undefined): BrollOverrideRequest["media_controls"] {
@@ -158,6 +156,5 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     previewCaptionStyle: ({ segmentIds, scope, style }) => commandApi.previewEditingSessionCaptionStyleScope(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...revise } as CaptionStyleMutationRequest),
     translateCaptions: ({ language }) => commandApi.translateEditingSessionCaptions(projectId, sessionId, { language, ...revise }),
     setCaptionLanguage: ({ language }) => commandApi.updateEditingSessionCaptionLanguage(projectId, sessionId, { language, ...revise }),
-    dubNarration: ({ language, voiceSampleAssetId }) => commandApi.dubEditingSessionNarration(projectId, sessionId, { language, voice_sample_asset_id: voiceSampleAssetId ?? null, ...revise }),
   };
 }
