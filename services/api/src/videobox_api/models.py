@@ -1284,7 +1284,11 @@ class EditingSessionSegmentResponse(BaseModel):
     segment_id: str
     caption_text: str
     # 언어별 번역. 원본(`caption_text`)은 그대로 두고 나란히 쌓인다.
-    caption_translations: dict[str, str] = Field(default_factory=dict)
+    #
+    # **번역이 없으면 칸 자체를 안 보낸다.** 빈 칸이라도 늘 실으면 번역을 한 번도
+    # 안 쓴 프로젝트의 응답까지 모양이 바뀌고, 저장 파일과 응답을 그대로 맞대는
+    # 창작 흐름 점검이 어긋난다(2026-09-02 전체 pytest가 이걸 잡았다).
+    caption_translations: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
     start_sec: float
     end_sec: float
     cut_action: str
