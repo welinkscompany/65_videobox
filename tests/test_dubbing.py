@@ -81,12 +81,22 @@ def test_unknown_language_is_refused() -> None:
         dubbing_lines(editing_session=_session(), language="klingon")
 
 
-def test_a_close_enough_take_is_left_alone() -> None:
-    """거의 맞으면 건드리지 않는다 -- 손대면 소리만 나빠진다."""
+def test_a_slightly_long_take_is_just_trimmed() -> None:
+    """조금 긴 것은 끝을 자른다 -- 속도를 건드리면 소리만 나빠진다."""
     fit = plan_dubbing_fit(actual_duration_sec=5.05, target_duration_sec=5.0)
 
     assert fit.fitted is True
     assert fit.speed == 1.0
+    assert fit.pad_sec == 0.0
+
+
+def test_even_a_barely_short_take_gets_padded() -> None:
+    """`-t`는 자르기만 한다. 채우지 않으면 **그만큼 짧은 소리가 그대로 나간다**
+    (코드리뷰 2026-09-02에서 나왔다)."""
+    fit = plan_dubbing_fit(actual_duration_sec=4.90, target_duration_sec=5.0)
+
+    assert fit.fitted is True
+    assert fit.pad_sec == pytest.approx(0.10)
 
 
 def test_a_slightly_long_take_is_sped_up_to_fit_exactly() -> None:
@@ -136,6 +146,16 @@ def test_the_speed_bound_stays_inside_what_one_atempo_can_do() -> None:
     """`atempo` 한 번은 0.5~2.0만 낸다. 범위를 넓히면 필터를 이어 붙여야 한다."""
     assert 1.0 < DUBBING_MAX_SPEED <= 2.0
     assert 0.0 < DUBBING_MIN_FILL_RATIO < 1.0
+
+
+def test_the_message_calls_out_engine_failures_separately() -> None:
+    """목소리를 못 만든 것은 길이 문제가 아니다 -- 창작자가 할 일도 다르다."""
+    message = unfitted_scene_message([
+        ("s1", DubbingFit(False, 5.0, 0.0, 1.0, reason="engine_failed")),
+    ])
+
+    assert message is not None
+    assert "목소리를 만들지 못했어요" in message
 
 
 def test_the_message_separates_too_long_from_too_short() -> None:

@@ -62,7 +62,7 @@ from videobox_core_engine.output_source_verifier import (
 )
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.audio_descriptors import probe_duration_seconds
-from videobox_core_engine.dubbing import apply_dubbing_fit, plan_dubbing_fit
+from videobox_core_engine.dubbing import DubbedTake, apply_dubbing_fit, plan_dubbing_fit
 from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 
@@ -903,8 +903,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         language: str,
         target_duration_sec: float,
         voice_sample_asset_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        """한 장면을 그 언어로 읽어 장면 길이에 맞춘다. 못 맞추면 `None`.
+    ) -> DubbedTake:
+        """한 장면을 그 언어로 읽어 장면 길이에 맞춘다.
+
+        못 맞췄으면 `candidate`가 `None`이고 **`fit.reason`에 왜인지가 들어 있다** --
+        부르는 쪽이 창작자에게 "번역을 줄여라"인지 "늘려라"인지 말해 줘야 한다.
 
         `voice_sample_asset_id`가 **없어도 된다.** 목소리를 복제하는 엔진
         (`chatterbox`)은 샘플이 필요하지만, 복제하지 않는 엔진(`espeak`)은 필요
@@ -945,7 +948,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 target_duration_sec=target_duration_sec,
             )
             if not fit.fitted:
-                return None
+                return DubbedTake(candidate=None, fit=fit)
             # 길이가 이미 딱 맞아도 한 번 통과시킨다 -- `-t`로 못박아야 완성본에서
             # 몇 밀리초씩 어긋나 쌓이지 않는다.
             fitted_path = work_dir / "fitted.wav"
@@ -972,7 +975,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             source_text=text,
             acceptance=acceptance,
         )
-        return {**self._asset_payload(asset), **candidate}
+        return DubbedTake(candidate={**self._asset_payload(asset), **candidate}, fit=fit)
 
     def register_sfx_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(

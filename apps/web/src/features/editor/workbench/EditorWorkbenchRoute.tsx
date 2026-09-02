@@ -1106,7 +1106,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, columns: action.columns, rows: action.rows, text: action.text });
     });
   };
-  /** 더빙에 쓸 목소리 후보. 이름은 창작자가 알아볼 수 있는 것으로 준다. */
+  /** 더빙에 쓸 목소리 후보. 이름은 창작자가 알아볼 수 있는 것으로 준다.
+   *
+   *  **여기서 `useCallback`을 쓰면 안 된다** -- 이 자리는 early return 아래라
+   *  hook을 부르면 렌더마다 hook 개수가 달라진다(2026-09-02에 실제로 그렇게
+   *  깨뜨렸고 프런트 시험 147건이 잡았다). 바로 아래 `loadApprovedTtsCandidates`가
+   *  평범한 함수인 것도 같은 이유다.
+   *
+   *  대신 **읽는 쪽이 이 함수의 정체성에 의존하지 않는다**(`InspectorControls`).
+   */
   const loadVoiceSamples = async () => {
     const assets = await api.listVoiceSamples(projectId);
     // 자산 응답에는 파일 이름이 없다. 저장 위치의 끝 이름을 쓰되, 알아보기 어려운

@@ -129,7 +129,8 @@ def test_a_take_that_cannot_fit_leaves_the_original_voice_alone(tmp_path: Path) 
     assert body["dubbed_scene_count"] == 0
     assert body["segments"][0]["tts_replacement"] is None
     # 무엇을 못 했는지 반드시 말해 준다 -- 조용히 아무 일 없는 것이 제일 나쁘다.
-    assert "넣지 못했어요" in body["dubbing_notice"]
+    # 사유별로 말해 준다 -- "줄여라"와 "늘려라"는 창작자가 할 일이 다르다.
+    assert "옮긴 말이 길어서 넣지 못했어요" in body["dubbing_notice"]
 
 
 def test_nothing_to_dub_when_the_captions_are_not_translated_yet(tmp_path: Path) -> None:
@@ -201,3 +202,35 @@ def test_nothing_is_rebuilt_when_no_scene_could_be_dubbed(tmp_path: Path) -> Non
 
     jobs = client.get(f"/api/projects/{project_id}/jobs").json().get("jobs") or []
     assert [job for job in jobs if job.get("job_type") == "partial_regeneration"] == []
+
+
+def test_one_broken_scene_does_not_throw_away_the_others(tmp_path: Path) -> None:
+    """목소리 복제는 장면당 20초가 넘는다. 열여덟째가 실패했다고 앞의 것을
+    전부 버리면 몇 분이 통째로 날아간다(코드리뷰 2026-09-02).
+    """
+    class _BreaksOnce(_SpokenLength):
+        def __init__(self) -> None:
+            super().__init__({}, default_seconds=4.6)
+            self.seen = 0
+
+        def synthesize(self, request: TTSRequest) -> TTSResult:
+            self.seen += 1
+            if self.seen == 1:
+                raise RuntimeError("engine fell over on this scene")
+            return super().synthesize(request)
+
+    engine = _BreaksOnce()
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    )
+
+    # 장면이 하나뿐인 편집본이라 그 하나가 실패한다. 그래도 **500이 아니라**
+    # 무엇을 못 했는지 말해 주는 응답이 온다.
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["dubbed_scene_count"] == 0
+    assert "목소리를 만들지 못했어요" in body["dubbing_notice"]

@@ -23,9 +23,28 @@ COQUI_TOS_AGREED=1 <저장소루트>/.venv/Scripts/python.exe scripts/host_tts_s
 
 ## 엔진은 갈아 끼울 수 있다
 
-`VIDEOBOX_HOST_TTS_ENGINE`으로 고른다. 기본은 `local_xtts`(지금 깔려 있는 것).
-`chatterbox`(MIT)를 별도 환경에 깔면 그 값만 바꾸면 된다 -- **라이선스가 다르므로**
-(XTTS는 비상업용) 무엇으로 돌고 있는지 시작할 때 찍어 준다.
+`VIDEOBOX_HOST_TTS_ENGINE`으로 고른다. **라이선스가 다르므로**(XTTS는 비상업용,
+chatterbox는 MIT) 무엇으로 돌고 있는지 시작할 때 찍어 준다.
+
+| 엔진 | 띄우는 파이썬 | 라이선스 |
+|---|---|---|
+| `local_xtts` (기본) | 저장소 루트 `.venv` | Coqui CPML (비상업용) |
+| `chatterbox` | 저장소 루트 `.venv-chatterbox` | MIT |
+
+**둘은 한 환경에 못 넣는다.** chatterbox는 torch 2.6을 요구해서 같은 venv에
+넣으면 torch가 내려가고 XTTS가 깨진다(2026-09-02 실측). 그래서 venv를 나눈다.
+
+```
+python -m venv .venv-chatterbox
+.venv-chatterbox/Scripts/python -m pip install chatterbox-tts "setuptools<81"
+VIDEOBOX_HOST_TTS_ENGINE=chatterbox .venv-chatterbox/Scripts/python scripts/host_tts_service.py
+```
+
+`setuptools<81`이 필요한 이유가 있다. chatterbox가 쓰는 워터마커(`perth`)가
+`pkg_resources`를 부르는데 setuptools 81부터 그게 빠졌다. `perth`는 그 import
+실패를 조용히 삼키고 클래스를 `None`으로 두어서, 정작 터질 때는
+**`'NoneType' object is not callable`**이라는 엉뚱한 말이 나온다(2026-09-02에
+여기서 한참 헤맸다).
 """
 
 from __future__ import annotations
@@ -37,6 +56,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 for src_path in (
@@ -69,6 +89,10 @@ def _build_provider():
 class _Handler(BaseHTTPRequestHandler):
     provider = None
     engine_name = ""
+    #: 목소리 모델은 **여러 갈래로 동시에 못 쓴다.** 요청은 각자 다른 실에서
+    #: 오는데 모델은 하나뿐이라, 두 요청이 겹치면 소리가 섞이거나 죽는다
+    #: (코드리뷰 2026-09-02). 읽는 일(`/health`)은 이 자물쇠를 안 지난다.
+    synthesis_lock = threading.Lock()
 
     def _send(self, code: int, body: bytes, content_type: str) -> None:
         self.send_response(code)
@@ -128,14 +152,15 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             output = work / "spoken.wav"
             try:
-                self.provider.synthesize(
-                    TTSRequest(
-                        text=text,
-                        voice_sample_uri=str(sample_path),
-                        output_path=output,
-                        language=str(payload.get("language") or "") or None,
+                with self.synthesis_lock:
+                    self.provider.synthesize(
+                        TTSRequest(
+                            text=text,
+                            voice_sample_uri=str(sample_path),
+                            output_path=output,
+                            language=str(payload.get("language") or "") or None,
+                        )
                     )
-                )
             except Exception as exc:  # noqa: BLE001 - 사유를 그대로 돌려준다
                 self._fail(500, f"{type(exc).__name__}: {exc}"[:500])
                 return

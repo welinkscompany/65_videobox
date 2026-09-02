@@ -59,6 +59,19 @@ DUBBING_MIN_FILL_RATIO = 0.5
 
 
 @dataclass(frozen=True, slots=True)
+class DubbedTake:
+    """한 장면을 더빙한 결과. **못 넣었으면 왜인지가 같이 온다.**
+
+    처음에는 못 넣었을 때 그냥 `None`을 돌려줬는데, 그러면 부르는 쪽이 사유를
+    몰라서 "길이가 너무 달라서"라고 뭉뚱그릴 수밖에 없었다(코드리뷰 2026-09-02).
+    창작자가 할 일은 "번역을 줄여라"와 "늘려라"가 서로 다르다.
+    """
+
+    candidate: dict[str, Any] | None
+    fit: DubbingFit
+
+
+@dataclass(frozen=True, slots=True)
 class DubbingLine:
     """한 장면에 넣을 더빙 한 줄."""
 
@@ -130,19 +143,23 @@ def plan_dubbing_fit(*, actual_duration_sec: float, target_duration_sec: float) 
         return DubbingFit(False, target_duration_sec, actual_duration_sec, 1.0, reason="target_not_positive")
     if actual_duration_sec <= 0:
         return DubbingFit(False, target_duration_sec, actual_duration_sec, 1.0, reason="silent_audio")
-    if abs(actual_duration_sec - target_duration_sec) <= DUBBING_EXACT_TOLERANCE_SEC:
-        return DubbingFit(True, target_duration_sec, actual_duration_sec, 1.0)
     if actual_duration_sec < target_duration_sec:
         # 말이 짧다. **늘리지 않는다** -- 말이 끝나고 조용해지면 된다.
         if actual_duration_sec < target_duration_sec * DUBBING_MIN_FILL_RATIO:
             return DubbingFit(
                 False, target_duration_sec, actual_duration_sec, 1.0, reason="too_short_to_fill"
             )
+        # **거의 맞아도 채운다.** 예전에는 0.15초 안이면 그냥 뒀는데, `-t`는
+        # 자르기만 할 뿐 늘리지 못해서 그만큼 짧은 소리가 그대로 나갔다
+        # (코드리뷰 2026-09-02). 채우는 값이 0.1초든 1.4초든 하는 일은 같다.
         return DubbingFit(
             True, target_duration_sec, actual_duration_sec, 1.0,
             pad_sec=target_duration_sec - actual_duration_sec,
         )
-    # 말이 길다. 자연스러운 만큼만 빠르게 해서 맞춘다.
+    # 말이 길다. 조금 긴 것은 그냥 끝을 자른다 -- 속도를 건드리면 소리만 나빠진다.
+    if actual_duration_sec - target_duration_sec <= DUBBING_EXACT_TOLERANCE_SEC:
+        return DubbingFit(True, target_duration_sec, actual_duration_sec, 1.0)
+    # 그보다 길면 자연스러운 만큼만 빠르게 해서 맞춘다.
     speed = actual_duration_sec / target_duration_sec
     if speed > DUBBING_MAX_SPEED:
         return DubbingFit(False, target_duration_sec, actual_duration_sec, speed, reason="too_long_to_fit")
@@ -184,11 +201,19 @@ def unfitted_scene_message(fits: Sequence[tuple[str, DubbingFit]]) -> str | None
     """
     too_long = [segment_id for segment_id, fit in fits if fit.reason == "too_long_to_fit"]
     too_short = [segment_id for segment_id, fit in fits if fit.reason == "too_short_to_fill"]
+    # 엔진이 못 만든 것은 길이 문제가 아니다. 창작자가 할 일도 다르다 --
+    # 번역을 손보는 게 아니라 목소리가 준비됐는지 보는 것이다.
+    failed = [
+        segment_id for segment_id, fit in fits
+        if fit.reason not in {None, "too_long_to_fit", "too_short_to_fill"}
+    ]
     parts = []
     if too_long:
         parts.append(f"{len(too_long)}개 장면은 옮긴 말이 길어서 넣지 못했어요")
     if too_short:
         parts.append(f"{len(too_short)}개 장면은 옮긴 말이 짧아서 넣지 못했어요")
+    if failed:
+        parts.append(f"{len(failed)}개 장면은 목소리를 만들지 못했어요")
     if not parts:
         return None
     return " · ".join(parts) + ". 그 장면은 원래 목소리가 그대로 남아 있어요."

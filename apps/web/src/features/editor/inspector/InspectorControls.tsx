@@ -216,6 +216,12 @@ export function InspectorControls({
 }: Props) {
   const [voiceSamples, setVoiceSamples] = useState<readonly VoiceSampleChoice[]>([]);
   const [voiceSampleAssetId, setVoiceSampleAssetId] = useState<string | null>(null);
+  // 읽는 함수는 **의존성이 아니라 ref로** 들고 있는다. 부르는 쪽이 매 렌더마다
+  // 새 함수를 만들기 때문에(그 자리는 early return 아래라 memo를 못 쓴다),
+  // 의존성에 넣으면 effect가 자기 setState 때문에 끝없이 다시 돈다.
+  // 옆의 `loadApprovedTtsCandidates`도 같은 이유로 함수가 아니라 값에 의존한다.
+  const loadVoiceSamplesRef = useRef(loadVoiceSamples);
+  loadVoiceSamplesRef.current = loadVoiceSamples;
   const [cutAction, setCutAction] = useState<CutAction>(() => asCutAction(selectedSegment?.cutAction ?? "keep"));
   const [transition, setTransition] = useState<string>(
     () => selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE,
@@ -306,9 +312,10 @@ export function InspectorControls({
   // 장면에서 고르던 값이 남아, 저장하지도 않은 전환이 걸린 것처럼 보인다.
   // 더빙 자리가 보일 때만 읽는다. 자막을 안 옮긴 편집본에서까지 부를 이유가 없다.
   useEffect(() => {
-    if (!loadVoiceSamples || !translatedLanguages.length) return;
+    const load = loadVoiceSamplesRef.current;
+    if (!load || !translatedLanguages.length) return;
     let cancelled = false;
-    void loadVoiceSamples().then((samples) => {
+    void load().then((samples) => {
       if (cancelled) return;
       setVoiceSamples(samples);
       // 대개 목소리는 하나다. 하나뿐이면 고르게 하지 않고 그것을 쓴다.
@@ -318,7 +325,7 @@ export function InspectorControls({
       if (!cancelled) setVoiceSamples([]);
     });
     return () => { cancelled = true; };
-  }, [loadVoiceSamples, translatedLanguages.length]);
+  }, [projectId, translatedLanguages.length]);
 
   useEffect(() => {
     setTransition(selectedSegment?.transitionIn?.type ?? SCENE_TRANSITION_NONE);

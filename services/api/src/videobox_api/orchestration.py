@@ -4,11 +4,12 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+import logging
 from urllib.request import urlopen
 from uuid import uuid4
 
 from videobox_core_engine.caption_translation_service import CaptionTranslationService
-from videobox_core_engine.dubbing import DubbingFit, dubbing_lines
+from videobox_core_engine.dubbing import DubbingFit, dubbing_lines, unfitted_scene_message
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
     LocalOnlyStructuredRuntime,
@@ -110,6 +111,9 @@ def build_local_only_runtime_service(
         ),
         local_runtime_config=local_runtime_config,
     )
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ApiOrchestrator:
@@ -861,19 +865,33 @@ class ApiOrchestrator:
         selections: dict[str, tuple[str, str]] = {}
         fits: list[tuple[str, DubbingFit]] = []
         for line in lines:
-            take = self.pipeline.generate_dubbed_take(
-                project_id=project_id,
-                segment_id=line.segment_id,
-                text=line.text,
-                language=language,
-                target_duration_sec=line.target_duration_sec,
-                voice_sample_asset_id=voice_sample_asset_id,
-            )
-            if take is None:
-                # 왜 못 넣었는지는 다시 재서 말해 준다. 만든 소리는 이미 버렸다.
-                fits.append((line.segment_id, DubbingFit(False, line.target_duration_sec, 0.0, 1.0, "did_not_fit")))
+            try:
+                take = self.pipeline.generate_dubbed_take(
+                    project_id=project_id,
+                    segment_id=line.segment_id,
+                    text=line.text,
+                    language=language,
+                    target_duration_sec=line.target_duration_sec,
+                    voice_sample_asset_id=voice_sample_asset_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # **한 장면이 죽어도 나머지를 살린다.** 목소리 복제는 장면당 20초가
+                # 넘게 걸려서, 스무 장면 중 열여덟째가 실패했다고 앞의 것을 전부
+                # 버리면 몇 분이 통째로 날아간다(코드리뷰 2026-09-02).
+                _LOGGER.warning(
+                    "dubbing take failed for segment %s: %s", line.segment_id, exc
+                )
+                fits.append((
+                    line.segment_id,
+                    DubbingFit(False, line.target_duration_sec, 0.0, 1.0, reason="engine_failed"),
+                ))
                 continue
-            selections[line.segment_id] = (str(take["candidate_id"]), str(take["asset_id"]))
+            if take.candidate is None:
+                fits.append((line.segment_id, take.fit))
+                continue
+            selections[line.segment_id] = (
+                str(take.candidate["candidate_id"]), str(take.candidate["asset_id"])
+            )
         result = self.pipeline.set_editing_session_dubbed_takes(
             project_id=project_id, session_id=session_id,
             selections=selections, expected_revision=expected_revision,
@@ -895,14 +913,13 @@ class ApiOrchestrator:
                 expected_revision=int(result["session_revision"]),
             )
             result = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
-        skipped = len(lines) - len(selections)
-        notice = (
-            f"{skipped}개 장면은 옮긴 말의 길이가 장면과 너무 달라서 넣지 못했어요. "
-            "그 장면은 원래 목소리가 그대로 남아 있어요."
-            if skipped
-            else None
-        )
-        return {**result, "dubbed_scene_count": len(selections), "dubbing_notice": notice}
+        # 못 넣은 장면을 **사유별로** 말해 준다. "줄여라"와 "늘려라"는 창작자가
+        # 할 일이 다르고, "목소리를 못 만들었다"는 아예 다른 이야기다.
+        return {
+            **result,
+            "dubbed_scene_count": len(selections),
+            "dubbing_notice": unfitted_scene_message(fits),
+        }
 
     def set_caption_language(
         self, *, project_id: str, session_id: str, language: str | None, expected_revision: int

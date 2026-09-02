@@ -49,7 +49,14 @@ owner가 2026-09-02에 승인했다.
 
 ## 남은 것
 
-- **라이선스**: 지금 도는 XTTS는 Coqui CPML(**비상업용**)이다. 상업적으로 쓰려면
-  별도 환경에 `chatterbox`(MIT)를 깔고 `VIDEOBOX_HOST_TTS_ENGINE`만 바꾼다.
-  같은 venv에는 못 넣는다 — torch가 2.6으로 내려가 XTTS가 깨진다.
+- ~~**라이선스**~~ — **닫혔다(2026-09-02).** `chatterbox`(MIT)를 별도 환경
+  `.venv-chatterbox`에 깔고 실측했다. **다섯 장면 전부 더빙**(XTTS는 셋이었다 —
+  chatterbox가 더 빠르게 말해서 길이 규칙에 덜 걸린다). 같은 venv에는 여전히
+  못 넣는다(torch가 2.6으로 내려가 XTTS가 깨진다) — 그래서 환경을 나눴고,
+  다리는 어느 환경에서 뜨든 상관하지 않는다.
+
+  설치에 함정이 하나 있다: `setuptools<81`을 같이 깔아야 한다. chatterbox의
+  워터마커(`perth`)가 `pkg_resources`를 부르는데 setuptools 81부터 빠졌고,
+  `perth`가 그 실패를 조용히 삼켜 클래스를 `None`으로 둔다. 그래서 터질 때
+  **`'NoneType' object is not callable`**이라는 엉뚱한 말이 나온다.
 - **호스트 서비스를 손으로 띄워야 한다.** 자동 시작은 아직 없다.

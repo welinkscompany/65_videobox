@@ -143,4 +143,34 @@ describe("더빙에 쓸 목소리", () => {
 
     expect(await screen.findByRole("button", { name: "영어 목소리로 더빙" })).toBeInTheDocument();
   });
+
+  it("다시 그려도 목소리 목록을 **한 번만** 읽는다", async () => {
+    /** 이 시험이 잡는 것: effect가 자기 setState 때문에 끝없이 다시 도는 문제.
+     *
+     *  **부모가 매번 새 함수를 넘기는 상황을 흉내 내야 잡힌다.** 부르는 쪽은
+     *  early return 아래에서 이 함수를 만들어 memo를 못 쓰기 때문이다. 처음 쓴
+     *  시험은 같은 함수를 계속 넘겨서 이 결함을 못 잡았다(2026-09-02).
+     */
+    let calls = 0;
+    const freshLoader = () => async () => {
+      calls += 1;
+      return [{ assetId: "asset_a", label: "내 목소리" }];
+    };
+    const draw = () => (
+      <InspectorControls
+        loadVoiceSamples={freshLoader()}
+        onAction={vi.fn()}
+        selectedSegment={null}
+        target={captionTarget}
+        translatedLanguages={["en"]}
+      />
+    );
+
+    const { rerender } = render(draw());
+    await screen.findByRole("button", { name: "영어 목소리로 더빙" });
+    for (let index = 0; index < 3; index += 1) rerender(draw());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(calls).toBe(1);
+  });
 });
