@@ -401,12 +401,14 @@ class EditingSessionRegenerationMixin:
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
+        language: str | None = None,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_caption(
             session=session,
             segment_id=segment_id,
             caption_text=caption_text,
+            language=language,
         )
         return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_text", segment_id=segment_id, controls={"text": caption_text})
 

@@ -640,6 +640,8 @@ export type SelectedRangePreview = {
 
 export type CaptionOverrideRequest = RevisionedEditingSessionMutation & {
   caption_text: string;
+  /** 지금 화면에 보이는 자막의 언어. 주면 그 번역을 고치고 원본은 그대로 둔다. */
+  language?: string | null;
 } & OptionalYujinCandidateAttestation;
 
 export type CutActionOverrideRequest = RevisionedEditingSessionMutation & {

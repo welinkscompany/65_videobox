@@ -148,3 +148,67 @@ def test_an_unknown_language_is_refused(tmp_path: Path) -> None:
 
     assert response.status_code == 422, response.text
     assert provider.calls == []
+
+
+def test_editing_while_viewing_english_does_not_destroy_the_korean(tmp_path: Path) -> None:
+    """**화면에 보이는 것과 저장되는 곳이 같아야 한다.**
+
+    2026-09-03 실측: 영어 자막을 보면서 고쳤더니 한국어 원본이 영어로 덮여
+    사라졌고, 정작 완성본에 나가는 영어는 그대로였다. 두 겹으로 나빴다 --
+    원본을 잃고, 고친 것은 반영도 안 됐다.
+    """
+    client, project_id, session_id = _client(tmp_path)[:3]
+    before = _write_caption(client, project_id, session_id, "안녕하세요")
+    translated = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    ).json()
+    segment_id = translated["segments"][0]["segment_id"]
+
+    edited = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/caption",
+        json={
+            "caption_text": "Hello there, friend.",
+            "language": "en",
+            "expected_revision": translated["session_revision"],
+        },
+    )
+
+    assert edited.status_code == 200, edited.text
+    segment = edited.json()["segments"][0]
+    assert segment["caption_text"] == "안녕하세요", "한국어 원본이 사라졌다"
+    assert segment["caption_translations"]["en"] == "Hello there, friend.", "고친 영어가 반영되지 않았다"
+
+
+def test_editing_without_a_language_still_edits_the_original(tmp_path: Path) -> None:
+    """유진이 고치는 길은 언어를 안 준다 -- 한국어 원문을 보고 말하기 때문이다."""
+    client, project_id, session_id = _client(tmp_path)[:3]
+    before = _write_caption(client, project_id, session_id, "안녕하세요")
+    translated = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
+        json={"language": "en", "expected_revision": before["session_revision"]},
+    ).json()
+    segment_id = translated["segments"][0]["segment_id"]
+
+    edited = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/caption",
+        json={"caption_text": "반갑습니다", "expected_revision": translated["session_revision"]},
+    ).json()
+
+    segment = edited["segments"][0]
+    assert segment["caption_text"] == "반갑습니다"
+    # 영어 번역은 그대로 남는다 -- 원본을 고쳤다고 번역이 사라지면 안 된다.
+    assert segment["caption_translations"]["en"] == "EN 1"
+
+
+def test_an_unknown_language_cannot_be_edited(tmp_path: Path) -> None:
+    client, project_id, session_id = _client(tmp_path)[:3]
+    before = _write_caption(client, project_id, session_id, "안녕하세요")
+    segment_id = before["segments"][0]["segment_id"]
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/caption",
+        json={"caption_text": "x", "language": "klingon", "expected_revision": before["session_revision"]},
+    )
+
+    assert response.status_code == 422, response.text

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
+from typing import Any, Mapping
 from datetime import UTC, datetime
 from math import isfinite
 import uuid
 
 from videobox_domain_models.caption_style import CaptionStyle
+from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.transitions import normalize_transition
 from videobox_core_engine.editing_transactions import apply_user_transaction
@@ -1055,12 +1056,36 @@ def update_caption_style(*, session: dict[str, Any], style: dict[str, Any], scop
     return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_style_update", segment_id=",".join(target_ids))
 
 
+def _write_caption(target: dict[str, Any], text: str, language: str | None) -> None:
+    """원본 자리에 쓸지, 그 언어 번역 자리에 쓸지 한 곳에서 정한다."""
+    if language is None:
+        target["caption_text"] = text
+        return
+    translations = target.get("caption_translations")
+    target["caption_translations"] = {
+        **(translations if isinstance(translations, Mapping) else {}),
+        language: text,
+    }
+
+
 def update_segment_caption(
     *,
     session: dict[str, Any],
     segment_id: str,
     caption_text: str,
+    language: str | None = None,
 ) -> dict[str, Any]:
+    """자막을 고친다. `language`를 주면 **그 언어 번역을 고치고 원본은 안 건드린다.**
+
+    언어를 받는 이유: 창작자가 영어 자막을 보면서 고치면 화면에 보이는 것과
+    저장되는 곳이 같아야 한다. 안 그러면 **한국어 원본이 영어로 덮여 사라지고**,
+    정작 완성본에 나가는 영어는 그대로다 -- 2026-09-03에 실제로 그랬다.
+
+    유진이 고치는 길은 언어를 안 준다. 유진은 한국어 원문을 보고 말하므로
+    원본을 고치는 것이 맞다.
+    """
+    if language is not None and language not in SUPPORTED_CAPTION_LANGUAGES:
+        raise ValueError(f"Unsupported caption language: {language}")
     updated = deepcopy(session)
     normalized_caption = caption_text.strip()
     matched = False
@@ -1069,7 +1094,7 @@ def update_segment_caption(
             continue
         containing_segment_id = str(segment.get("segment_id") or "")
         if containing_segment_id == segment_id:
-            segment["caption_text"] = normalized_caption
+            _write_caption(segment, normalized_caption, language)
             matched = True
         content_windows = segment.get("content_windows")
         if not isinstance(content_windows, list):
@@ -1080,10 +1105,10 @@ def update_segment_caption(
             source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
             if source_segment_id != segment_id:
                 continue
-            window["caption_text"] = normalized_caption
+            _write_caption(window, normalized_caption, language)
             matched = True
     if matched:
-        return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_update", segment_id=segment_id, extra={"caption_text": normalized_caption})
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_update", segment_id=segment_id, extra={"caption_text": normalized_caption, **({"language": language} if language else {})})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 

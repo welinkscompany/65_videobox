@@ -48,7 +48,9 @@ export type EditorCommandPort = Readonly<{
   clearOverlay(input: OverlayClear): Promise<EditingSession>;
   applyTtsCandidate(input: { segmentId: string; candidateId: string; assetId: string; attestation?: CandidateAttestation }): Promise<EditingSession>;
   clearTtsCandidate(input: { segmentId: string }): Promise<EditingSession>;
-  setCaptionText(input: { segmentId: string; text: string; attestation?: CandidateAttestation }): Promise<EditingSession>;
+  /** `language`를 주면 **그 번역을 고치고 원본은 안 건드린다.** 화면이 영어를
+   *  보여 주는 중이면 반드시 넘겨야 한다 -- 안 넘기면 한국어 원본이 덮인다. */
+  setCaptionText(input: { segmentId: string; text: string; language?: string | null; attestation?: CandidateAttestation }): Promise<EditingSession>;
   setCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle; attestation?: CandidateAttestation }): Promise<EditingSession>;
   previewCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle }): Promise<CaptionStyleScopePreflight>;
   /** 자막을 그 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다. */
@@ -151,7 +153,7 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     clearOverlay: (input) => input.kind === "explanation-card" ? commandApi.removeEditingSessionExplanationCard(projectId, sessionId, input.segmentId, expectedRevision) : input.kind === "image" ? commandApi.removeEditingSessionImageOverlay(projectId, sessionId, input.segmentId, expectedRevision) : input.kind === "shape" ? commandApi.removeEditingSessionShapeOverlay(projectId, sessionId, input.segmentId, expectedRevision) : commandApi.removeEditingSessionTableOverlay(projectId, sessionId, input.segmentId, expectedRevision),
     applyTtsCandidate: ({ segmentId, candidateId, assetId, attestation }) => commandApi.updateEditingSessionTtsReplacement(projectId, sessionId, segmentId, { recommendation_id: candidateId, asset_id: assetId, ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as TtsReplacementRequest),
     clearTtsCandidate: ({ segmentId }) => commandApi.clearEditingSessionTtsReplacement(projectId, sessionId, segmentId, expectedRevision),
-    setCaptionText: ({ segmentId, text, attestation }) => commandApi.updateEditingSessionCaption(projectId, sessionId, segmentId, { caption_text: text, ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionOverrideRequest),
+    setCaptionText: ({ segmentId, text, language, attestation }) => commandApi.updateEditingSessionCaption(projectId, sessionId, segmentId, { caption_text: text, ...(language ? { language } : {}), ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionOverrideRequest),
     setCaptionStyle: ({ segmentIds, scope, style, attestation }) => commandApi.updateEditingSessionCaptionStyle(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionStyleMutationRequest),
     previewCaptionStyle: ({ segmentIds, scope, style }) => commandApi.previewEditingSessionCaptionStyleScope(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...revise } as CaptionStyleMutationRequest),
     translateCaptions: ({ language }) => commandApi.translateEditingSessionCaptions(projectId, sessionId, { language, ...revise }),

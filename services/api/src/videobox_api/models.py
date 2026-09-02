@@ -974,6 +974,15 @@ class CaptionLanguageRequest(BaseModel):
 class CaptionOverrideRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     caption_text: str = Field(min_length=1)
+    #: 지금 화면에 보이는 자막의 언어. 주면 **그 번역을 고치고 원본은 안 건드린다.**
+    #: 없으면 원본을 고친다(유진이 고치는 길이 그렇다).
+    language: str | None = None
+
+    @model_validator(mode="after")
+    def validate_caption_language(self) -> "CaptionOverrideRequest":
+        if self.language is not None and self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
 
     @model_validator(mode="after")
     def validate_caption_text(self) -> "CaptionOverrideRequest":

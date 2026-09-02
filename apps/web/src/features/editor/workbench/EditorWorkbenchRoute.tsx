@@ -2236,7 +2236,14 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     onTrimNarration={(input) => commitTimelineMutation((port) => port.setNarrationBounds(input))}
     onSetSegmentRippleSpeed={(input) => commitTimelineMutation((port) => port.setSegmentRippleSpeed(input))}
     onUndo={() => commitTimelineMutation((port) => port.undo())}
-    onUpdateCaption={(input) => commitTimelineMutation((port) => port.setCaptionText(input))}
+    onUpdateCaption={(input) => commitTimelineMutation((port) => port.setCaptionText({
+      ...input,
+      // **화면이 보여 주는 언어를 같이 보낸다.** 영어를 보면서 고치는데 이걸
+      // 빼면 한국어 원본이 영어로 덮여 사라지고, 완성본에 나가는 영어는
+      // 그대로다(2026-09-03 실측). 유진이 고치는 길은 이걸 안 보낸다 --
+      // 유진은 한국어 원문을 보고 말하므로 원본을 고치는 것이 맞다.
+      language: state.session?.captionLanguage ?? null,
+    }))}
     onUpdatePlacements={(input) => commitTimelineMutation((port) => port.setTimelinePlacements(input))}
     onUpdateTrackStates={(states) => commitTimelineMutation((port) => port.setTrackStates(states))}
     partialRegeneration={{

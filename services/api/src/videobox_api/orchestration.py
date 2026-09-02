@@ -797,6 +797,7 @@ class ApiOrchestrator:
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
+        language: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_caption(
             project_id=project_id,
@@ -806,6 +807,7 @@ class ApiOrchestrator:
             expected_revision=expected_revision,
             proposal_id=proposal_id,
             candidate_id=candidate_id,
+            language=language,
         )
 
     def translate_editing_session_captions(
