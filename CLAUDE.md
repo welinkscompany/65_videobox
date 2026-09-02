@@ -55,15 +55,16 @@
 | 운영 규정 SSOT | `docs/development-fast-path.ko.md` `## 10` |
 | 최상위 구현 계획 | `docs/implementation-plan.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
-| **최신 세션 인계** | `docs/handoffs/2026-09-02-caption-translation-and-inspector-tabs.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-09-03-voice-cloned-dubbing-end-to-end.ko.md` |
 
 승인된 시각 결정은 `docs/decisions/`에 있다. 전부 명시 승인이고 재승인 없이 바꾸지 않는다.
 **가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
 
 - `2026-09-01-yujin-chat-applies-edits-directly.ko.md` — **유진에게 말한 편집은
   바로 적용된다.** 없앤 클릭 대신 되돌리기가 지킨다.
-- `2026-09-02-video-translator-step-one-captions.ko.md` / `...-step-two-dubbing.ko.md`
-  — **동영상 번역기.** 1단계 자막(원본은 남긴다), 2단계 더빙. 목소리 복제는 설치 필요.
+- `2026-09-02-video-translator-step-{one-captions,two-dubbing}.ko.md` /
+  `2026-09-03-host-voice-bridge.ko.md` — **동영상 번역기.** 자막(원본은 남긴다) +
+  창작자 목소리 더빙. 엔진은 호스트에 있고 `scripts/start-voice.ps1`로 켠다.
 - `2026-09-01-capcut-ai-feature-triage.ko.md` — 캡컷 AI 기능 열둘 중 **무엇을
   안 만드는지**. 색보정 넷과 `AI 스타일`은 안 만든다. 다음 큰 것은 동영상 번역기.
 - `2026-08-30-capcut-button-level-parity.ko.md` — 버튼 구성·배치·크기까지
