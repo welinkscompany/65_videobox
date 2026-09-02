@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 
 from videobox_core_engine.mojibake import repair_mojibake_metadata
@@ -14,6 +14,7 @@ from videobox_api.asset_browser_preview_service import AssetBrowserPreviewServic
 from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
 from videobox_api.models import (
+    VoiceSampleRenameRequest,
     AssetArchiveItemResponse,
     AssetListResponse,
     AssetRegistrationRequest,
@@ -271,6 +272,35 @@ def build_assets_router(
         except Exception as exc:
             raise _http_error(exc) from exc
         return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
+
+    @router.patch("/api/projects/{project_id}/assets/voice-sample/{asset_id}")
+    def rename_voice_sample(project_id: str, asset_id: str, payload: VoiceSampleRenameRequest) -> AssetArchiveItemResponse:
+        """목소리에 이름을 붙인다.
+
+        목소리가 여럿이면(채널마다 다른 목소리를 쓸 수 있다) **이름이 없으면
+        고를 수가 없다** -- 저장 위치 끝의 해시로는 어느 것이 어느 목소리인지
+        알 수 없다.
+        """
+        try:
+            asset = orchestrator.rename_voice_sample_asset(
+                project_id=project_id, asset_id=asset_id, display_name=payload.display_name.strip(),
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return _repaired_asset_response(asset)
+
+    @router.delete(
+        "/api/projects/{project_id}/assets/voice-sample/{asset_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+    )
+    def delete_voice_sample(project_id: str, asset_id: str) -> Response:
+        """목소리를 지운다. 잘못 녹음한 것을 남겨 두면 고를 때마다 헷갈린다."""
+        try:
+            orchestrator.delete_voice_sample_asset(project_id=project_id, asset_id=asset_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post("/api/projects/{project_id}/assets/voice-sample/upload", status_code=status.HTTP_201_CREATED)
     async def upload_voice_sample(

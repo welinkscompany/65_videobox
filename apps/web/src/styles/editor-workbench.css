@@ -495,3 +495,11 @@
   border-color: var(--vb-accent);
   color: var(--foreground);
 }
+
+/* 목소리 관리. 녹음 중에는 길이가 계속 바뀌므로 자리를 미리 잡아 둔다 --
+   글자 수에 따라 단추가 흔들리면 멈추기 버튼을 놓친다. */
+.vb-voice-recorder { display: flex; align-items: center; gap: var(--vb-space-2); flex-wrap: wrap; }
+.vb-voice-recorder [aria-live] { min-width: 22ch; color: var(--muted-foreground); }
+.vb-voice-list { display: grid; gap: var(--vb-space-1); }
+.vb-voice-list li { display: flex; align-items: center; gap: var(--vb-space-1); }
+.vb-voice-list li input { flex: 1 1 auto; }

@@ -883,6 +883,8 @@ export type AssetResponse = {
   asset_id: string;
   asset_type: string;
   storage_uri: string;
+  /** 목록으로 받을 때 실려 온다. 창작자가 붙인 이름은 `display_name`에 있다. */
+  metadata?: Record<string, unknown>;
 };
 /** 본인 유튜브 영상 하나에서 뽑아낸 것(owner 요청 2026-08-29). 목소리 샘플은
  *  바로 쓸 수 있고, 컷 빠르기·색감은 지금은 **보여주기만** 한다 -- 실제로
@@ -2785,6 +2787,16 @@ export const api = {
       body: payload,
     });
   },
+  /** 목소리에 이름을 붙인다. 목소리가 여럿이면 이름이 없으면 고를 수가 없다. */
+  renameVoiceSample: (projectId: string, assetId: string, displayName: string) =>
+    request<AssetResponse>(`/api/projects/${projectId}/assets/voice-sample/${assetId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: displayName }),
+    }),
+  /** 잘못 녹음한 목소리를 지운다. */
+  deleteVoiceSample: (projectId: string, assetId: string) =>
+    request<void>(`/api/projects/${projectId}/assets/voice-sample/${assetId}`, { method: "DELETE" }),
   listVoiceSamples: async (projectId: string): Promise<AssetResponse[]> => {
     const payload = await request<{ assets: AssetResponse[] }>(
       `/api/projects/${projectId}/assets/voice-sample`,

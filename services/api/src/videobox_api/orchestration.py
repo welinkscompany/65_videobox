@@ -320,6 +320,23 @@ class ApiOrchestrator:
             storage_uri=asset["storage_uri"],
         )
 
+    def rename_voice_sample_asset(self, *, project_id: str, asset_id: str, display_name: str) -> dict[str, Any]:
+        """목소리에 이름을 붙인다. 목소리 자산이 아니면 거절한다."""
+        asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+        if str(asset.get("asset_type") or "") != AssetType.VOICE_SAMPLE_AUDIO.value:
+            raise ValueError("rename_voice_sample_asset requires a voice_sample_audio asset.")
+        return self.store.update_asset_metadata(
+            project_id=project_id, asset_id=asset_id, metadata_patch={"display_name": display_name},
+        )
+
+    def delete_voice_sample_asset(self, *, project_id: str, asset_id: str) -> None:
+        """목소리를 지운다. **목소리 자산만** 지운다 -- 자산 id를 잘못 넘겨
+        내레이션이나 촬영본이 사라지면 되돌릴 길이 없다."""
+        asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+        if str(asset.get("asset_type") or "") != AssetType.VOICE_SAMPLE_AUDIO.value:
+            raise ValueError("delete_voice_sample_asset requires a voice_sample_audio asset.")
+        self.store.delete_asset(project_id=project_id, asset_id=asset_id)
+
     def start_youtube_reference_style_import(self, *, project_id: str, url: str) -> dict[str, Any]:
         """유튜브 학습을 **바로 시작만** 하고 돌아온다(owner 결정 2026-08-29).
 

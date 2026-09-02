@@ -641,6 +641,16 @@ class AssetResponse(BaseModel):
     storage_uri: str
 
 
+class VoiceSampleRenameRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=60)
+
+    @model_validator(mode="after")
+    def validate_display_name(self) -> "VoiceSampleRenameRequest":
+        if not self.display_name.strip():
+            raise ValueError("display_name must not be blank.")
+        return self
+
+
 class YoutubeReferenceImportRequest(BaseModel):
     """owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 본인이
     이미 올린 본인 영상만 대상이라는 전제를 화면 문구가 말한다."""

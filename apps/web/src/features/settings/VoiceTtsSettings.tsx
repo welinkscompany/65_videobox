@@ -10,6 +10,7 @@ import {
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { NativeSelect } from "../../components/ui/native-select";
+import { recordingHint, useVoiceRecorder } from "./useVoiceRecorder";
 import { pollJobUntilTerminal } from "../../lib/pollJob";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -37,6 +38,15 @@ async function pollYoutubeImportUntilDone(
   throw new Error(outcome.error_detail ?? "youtube_import_failed");
 }
 
+/** 화면에 보일 목소리 이름. 붙인 이름이 있으면 그것, 없으면 순번.
+ *
+ *  읽는 자리를 하나로 둔다 -- 목록과 고르는 칸이 다른 이름을 보이면
+ *  창작자는 어느 것을 고른 건지 알 수 없다. */
+function voiceName(sample: AssetResponse, index: number): string {
+  const named = String((sample.metadata?.display_name as string | undefined) ?? "").trim();
+  return named || `내 목소리 ${index + 1}`;
+}
+
 function candidateStatus(candidate: TtsCandidateRecord) {
   if (candidate.technical_status !== "accepted") return "사용할 수 없음";
   if (candidate.operator_review_status === "approved") return "청취 승인됨";
@@ -46,6 +56,8 @@ function candidateStatus(candidate: TtsCandidateRecord) {
 
 export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   const [samples, setSamples] = useState<AssetResponse[]>([]);
+  const recorder = useVoiceRecorder();
+  const stopRecording = recorder.stop;
   const [segments, setSegments] = useState<EditingSessionSegment[]>([]);
   const [candidates, setCandidates] = useState<TtsCandidateRecord[]>([]);
   const [selectedSampleId, setSelectedSampleId] = useState("");
@@ -214,6 +226,67 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       if (isCurrent(token.epoch, expectedProjectId)) {
         setMessage("내 목소리를 추가했어요.");
       }
+    } finally {
+      finishAction(token);
+    }
+  }
+
+  async function saveRecording() {
+    const file = await stopRecording();
+    if (!file) return;
+    const token = beginAction("record");
+    if (!token) return;
+    const expectedProjectId = projectId;
+    try {
+      try {
+        await api.uploadVoiceSample(expectedProjectId, file);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) {
+          setActionError("녹음한 목소리를 저장하지 못했어요. 다시 시도해 주세요.");
+        }
+        return;
+      }
+      if (!isCurrent(token.epoch, expectedProjectId)) return;
+      await refreshSamples(expectedProjectId, token.epoch).catch(() => undefined);
+      if (isCurrent(token.epoch, expectedProjectId)) setMessage("녹음한 목소리를 저장했어요.");
+    } finally {
+      finishAction(token);
+    }
+  }
+
+  async function renameSample(assetId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const token = beginAction("rename");
+    if (!token) return;
+    const expectedProjectId = projectId;
+    try {
+      try {
+        await api.renameVoiceSample(expectedProjectId, assetId, trimmed);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) setActionError("이름을 바꾸지 못했어요.");
+        return;
+      }
+      await refreshSamples(expectedProjectId, token.epoch).catch(() => undefined);
+      if (isCurrent(token.epoch, expectedProjectId)) setMessage("이름을 바꿨어요.");
+    } finally {
+      finishAction(token);
+    }
+  }
+
+  async function removeSample(assetId: string) {
+    const token = beginAction("delete");
+    if (!token) return;
+    const expectedProjectId = projectId;
+    try {
+      try {
+        await api.deleteVoiceSample(expectedProjectId, assetId);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) setActionError("목소리를 지우지 못했어요.");
+        return;
+      }
+      await refreshSamples(expectedProjectId, token.epoch).catch(() => undefined);
+      if (isCurrent(token.epoch, expectedProjectId)) setMessage("목소리를 지웠어요.");
     } finally {
       finishAction(token);
     }
@@ -401,9 +474,47 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         <>
           <p>{`저장한 내 목소리 ${samples.length}개`}</p>
           <Button disabled={isBusy} onClick={() => void reloadSamples()} type="button">목록 새로고침</Button>
+          {/* 버튼 하나로 녹음한다(창작자 요청 2026-09-03). 길이를 같이 보여
+              주는 것이 중요하다 -- 목소리 복제는 참조가 짧으면 안 닮는데,
+              몇 초를 읽었는지 안 보이면 "짧아서"인 줄 모르고 포기한다. */}
+          <div className="vb-voice-recorder">
+            {recorder.state === "recording" ? (
+              <>
+                <Button disabled={isBusy} onClick={() => void saveRecording()} type="button">녹음 멈추고 저장</Button>
+                <span aria-live="polite">{recordingHint(recorder.seconds)}</span>
+              </>
+            ) : (
+              <Button disabled={isBusy} onClick={() => void recorder.start()} type="button">내 목소리 녹음하기</Button>
+            )}
+            {recorder.state === "denied" ? <p>마이크를 쓸 수 없어요. 브라우저에서 마이크를 허용해 주세요.</p> : null}
+            {recorder.state === "unsupported" ? <p>이 브라우저에서는 녹음할 수 없어요. 음성 파일로 올려 주세요.</p> : null}
+          </div>
           {samples.length === 0 ? <p className="text-sm text-muted-foreground">아직 저장한 목소리가 없어요.</p> : (
-            <ul>
-              {samples.map((sample, index) => <li key={sample.asset_id}>{`내 목소리 ${index + 1}`}</li>)}
+            <ul className="vb-voice-list">
+              {samples.map((sample, index) => (
+                <li key={sample.asset_id}>
+                  {/* 이름을 붙일 수 있어야 관리가 된다 -- 유튜브 채널이 여럿이면
+                      목소리도 여럿이고, `내 목소리 3`으로는 어느 것이 어느
+                      채널인지 알 수 없다. */}
+                  <Input
+                    aria-label={`${voiceName(sample, index)} 이름`}
+                    defaultValue={voiceName(sample, index)}
+                    disabled={isBusy}
+                    onBlur={(event) => {
+                      if (event.target.value.trim() !== voiceName(sample, index)) {
+                        void renameSample(sample.asset_id, event.target.value);
+                      }
+                    }}
+                  />
+                  <Button
+                    aria-label={`${voiceName(sample, index)} 지우기`}
+                    disabled={isBusy}
+                    onClick={() => void removeSample(sample.asset_id)}
+                    type="button"
+                    variant="outline"
+                  >지우기</Button>
+                </li>
+              ))}
             </ul>
           )}
           <label className="grid w-full gap-2 text-sm">
@@ -415,7 +526,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
               value={selectedSampleId}
             >
               {samples.length === 0 ? <option value="">먼저 목소리를 추가해 주세요</option> : null}
-              {samples.map((sample, index) => <option key={sample.asset_id} value={sample.asset_id}>{`내 목소리 ${index + 1}`}</option>)}
+              {samples.map((sample, index) => <option key={sample.asset_id} value={sample.asset_id}>{voiceName(sample, index)}</option>)}
             </NativeSelect>
           </label>
         </>
