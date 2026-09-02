@@ -102,3 +102,48 @@ def test_without_a_chosen_language_the_original_is_edited() -> None:
     )
 
     assert updated["segments"][0]["caption_text"] == "프로그램 서너 개를 켜야 하죠"
+
+
+def _many_captions(count: int) -> YujinEditingContext:
+    ids = tuple(f"s{index}" for index in range(1, count + 1))
+    return YujinEditingContext(
+        session_id="editing_session_001", session_revision=1, segment_ids=ids,
+        captions=tuple((segment_id, f"{segment_id}번 장면의 자막입니다") for segment_id in ids),
+    )
+
+
+def test_a_long_video_does_not_dump_every_caption_into_the_prompt() -> None:
+    """창작자의 실제 대본은 243문단이다(2026-09-03 실측).
+
+    그대로 실으면 자막만 11,000자가 넘고, 모델은 뒤쪽을 안 본다 -- 자산 목록에
+    40개 상한을 둔 것과 같은 이유다.
+    """
+    prompt = _editing_prompt(instruction="자막 다듬어 줘", context=_many_captions(243))
+
+    # 글자 수로 재지 않는다 -- 프롬프트에는 장면 번호표처럼 자막이 아닌 것도
+    # 들어 있어서 기준값이 금방 낡는다. **자막이 잘렸는가**를 직접 본다.
+    assert "40번 자막=" in prompt
+    assert "41번 자막=" not in prompt
+    assert "243번 자막=" not in prompt
+    # 안 보여 준 것이 있으면 그렇게 말한다. 조용히 자르면 지어낸다.
+    assert "여기 없다" in prompt
+
+
+def test_the_scene_the_creator_named_is_always_shown() -> None:
+    """**말한 장면은 상한과 상관없이 보여 준다.**
+
+    안 그러면 백 장면짜리 영상에서 "200번 장면 자막 줄여 줘"가 통하지 않고,
+    유진은 목록에 없는 자막을 지어낸다 -- 방금 고친 그 결함이다.
+    """
+    prompt = _editing_prompt(
+        instruction="200번 장면 자막을 짧게 줄여 줘", context=_many_captions(243),
+    )
+
+    assert "200번 자막=" in prompt
+
+
+def test_a_short_video_still_shows_everything() -> None:
+    prompt = _editing_prompt(instruction="자막 다듬어 줘", context=_many_captions(5))
+
+    assert "5번 자막=" in prompt
+    assert "여기 없다" not in prompt

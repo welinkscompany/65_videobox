@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import re
 
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.filters import FILTER_CATALOG
@@ -100,7 +101,23 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
     )
 
 
-def _caption_catalogue(context: YujinEditingContext) -> str:
+#: 프롬프트에 보여 줄 자막 수의 상한. 자산 목록(40)과 같은 이유다 -- 목록이
+#: 길어지면 모델이 뒤쪽을 안 본다. 실측(2026-09-03): 창작자의 실제 대본은
+#: 243문단이고 그대로 실으면 자막만 11,000자가 넘는다.
+_CAPTION_CATALOGUE_LIMIT = 40
+
+
+def _mentioned_scene_numbers(instruction: str) -> list[int]:
+    """창작자가 말한 장면 번호. `3번 장면`, `12번 자막` 같은 말에서 뽑는다.
+
+    **말한 장면은 상한과 상관없이 반드시 보여 준다.** 안 그러면 백 장면짜리
+    영상에서 "200번 장면 자막 줄여 줘"가 통하지 않는다 -- 목록에 없는 장면을
+    다듬으라고 하면 유진은 지어낼 수밖에 없고, 그게 바로 방금 고친 결함이다.
+    """
+    return [int(found) for found in re.findall(r"(\d{1,4})\s*번", instruction)]
+
+
+def _caption_catalogue(context: YujinEditingContext, instruction: str) -> str:
     """장면별 지금 자막. **보여 주지 않으면 다듬을 수 없다.**
 
     2026-09-03까지 이걸 안 줬다. 그래서 "3번 장면 자막을 짧게 다듬어 줘"라는
@@ -113,13 +130,28 @@ def _caption_catalogue(context: YujinEditingContext) -> str:
     if not context.captions:
         return "자막이 있는 장면이 없다."
     numbers = {segment_id: index for index, segment_id in enumerate(context.segment_ids, start=1)}
+    mentioned = set(_mentioned_scene_numbers(instruction))
+    # 말한 장면을 먼저 넣고, 남는 자리를 앞에서부터 채운다.
+    ordered = sorted(
+        context.captions,
+        key=lambda item: (numbers.get(item[0], 10**6) not in mentioned, numbers.get(item[0], 10**6)),
+    )
+    shown_pairs = ordered[:_CAPTION_CATALOGUE_LIMIT]
     shown = ", ".join(
         f"{numbers.get(segment_id, '?')}번 자막=\"{text}\""
-        for segment_id, text in context.captions
+        for segment_id, text in sorted(shown_pairs, key=lambda item: numbers.get(item[0], 10**6))
     )
     language = SUPPORTED_CAPTION_LANGUAGES.get(context.caption_language or "", "원본")
+    hidden = len(context.captions) - len(shown_pairs)
+    # 안 보여 준 장면이 있으면 **그렇게 말한다.** 모르는 자막을 지어내는 것보다
+    # "그 장면은 안 보인다"고 말하는 편이 낫다.
+    tail = (
+        f" 자막이 많아 {hidden}개 장면은 여기 없다 -- 목록에 없는 장면을 다듬으라고 하면"
+        " 지어내지 말고 그 번호를 말해 달라고 답하라."
+        if hidden > 0 else ""
+    )
     return (
-        f"지금 자막({language}): {shown}. "
+        f"지금 자막({language}): {shown}.{tail} "
         "자막을 다듬으라고 하면 **이 글을 고쳐서** set_caption_text로 낸다 -- "
         f"새로 지어내지 말고 {language} 그대로 다듬는다."
     )
@@ -175,7 +207,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"현재 장면: {', '.join(f'{index}번 장면={segment_id}' for index, segment_id in enumerate(context.segment_ids, start=1))}. "
         f"창작자가 말하는 번호는 이 표로 옮긴다 -- 자리를 세지 마라. "
         f"현재 revision: {context.session_revision}. "
-        f"{_caption_catalogue(context)} "
+        f"{_caption_catalogue(context, instruction)} "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
