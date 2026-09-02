@@ -301,3 +301,47 @@ def test_asking_about_a_job_that_does_not_exist_is_not_a_crash(tmp_path: Path) -
     )
 
     assert response.status_code in (404, 422), response.text
+
+
+def test_a_stale_revision_is_refused_before_any_voice_is_made(tmp_path: Path) -> None:
+    """**52분을 돌린 뒤에 충돌로 버리면 안 된다.**
+
+    편집본이 그 사이 바뀌었으면 걸어 두기 전에 막는다. 안 그러면 창작자는
+    목소리가 다 만들어진 줄 알고 기다린 뒤에야 헛일이었다는 걸 안다.
+    """
+    engine = _SpokenLength({}, default_seconds=4.6)
+    client, project_id, session_id = _client(tmp_path, engine)
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        json={"language": "en", "expected_revision": before["session_revision"] - 1},
+    )
+
+    assert response.status_code == 409, response.text
+    assert engine.requests == [], "낡은 revision인데 목소리를 만들기 시작했다"
+
+
+def test_a_scene_that_fails_still_moves_the_progress_along(tmp_path: Path) -> None:
+    """실패한 장면도 지나간 장면이다. 안 세면 진행 표시가 멈춰서 죽은 줄 안다."""
+    seen: list[tuple[int, int]] = []
+
+    class _AlwaysBreaks(_SpokenLength):
+        def synthesize(self, request: TTSRequest) -> TTSResult:
+            raise RuntimeError("engine down")
+
+    from videobox_api.orchestration import ApiOrchestrator
+    from videobox_storage.local_project_store import LocalProjectStore
+
+    client, project_id, session_id = _client(tmp_path, _AlwaysBreaks({}, default_seconds=4.6))
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+    orchestrator = ApiOrchestrator(LocalProjectStore(tmp_path / "projects"))
+    orchestrator.pipeline.tts_provider = _AlwaysBreaks({}, default_seconds=4.6)
+
+    orchestrator.dub_editing_session(
+        project_id=project_id, session_id=session_id, language="en",
+        expected_revision=before["session_revision"],
+        on_progress=lambda done: seen.append((done, 1)),
+    )
+
+    assert seen, "실패만 있었는데 진행이 한 번도 안 움직였다"

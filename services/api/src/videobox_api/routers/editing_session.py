@@ -264,6 +264,9 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 voice_sample_asset_id=payload.voice_sample_asset_id,
                 expected_revision=payload.expected_revision,
             )
+        except EditingSessionConflict as exc:
+            # 편집본이 그 사이 바뀌었다. **52분을 돌리기 전에** 말해 준다.
+            return _editing_session_conflict_response(exc)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:

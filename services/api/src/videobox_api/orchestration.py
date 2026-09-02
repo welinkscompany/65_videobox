@@ -11,6 +11,7 @@ from uuid import uuid4
 from videobox_core_engine.caption_translation_service import CaptionTranslationService
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.dubbing import DubbingFit, dubbing_lines, unfitted_scene_message
+from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
     LocalOnlyStructuredRuntime,
@@ -875,6 +876,11 @@ class ApiOrchestrator:
         if language not in SUPPORTED_CAPTION_LANGUAGES:
             raise ValueError(f"Unsupported caption language: {language}")
         session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        # **편집본이 그 사이 바뀌었으면 여기서 막는다.** 안 막으면 52분을 다
+        # 돌린 뒤 저장할 때 충돌로 통째로 버려진다 -- 창작자는 목소리가 다
+        # 만들어진 줄 알고 기다린 뒤에야 안다.
+        if int(session.get("session_revision") or 1) != expected_revision:
+            raise EditingSessionConflict(session)
         total = len(dubbing_lines(editing_session=session, language=language))
         job_id = uuid4().hex
         with self._dubbing_jobs_lock:
@@ -980,9 +986,15 @@ class ApiOrchestrator:
                     line.segment_id,
                     DubbingFit(False, line.target_duration_sec, 0.0, 1.0, reason="engine_failed"),
                 ))
+                # 실패한 장면도 **지나간 장면이다.** 안 세면 진행 표시가 거기서
+                # 멈춰서 창작자는 더빙이 죽은 줄 안다.
+                if on_progress is not None:
+                    on_progress(len(selections) + len(fits))
                 continue
             if take.candidate is None:
                 fits.append((line.segment_id, take.fit))
+                if on_progress is not None:
+                    on_progress(len(selections) + len(fits))
                 continue
             selections[line.segment_id] = (
                 str(take.candidate["candidate_id"]), str(take.candidate["asset_id"])
