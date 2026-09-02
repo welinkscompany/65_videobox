@@ -156,6 +156,11 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "
         "둘 다 화면이 깔린 장면에만 걸 수 있다. 소리 크기 맞추기·잡음 줄이기는 set_sound_cleanup이며 "
         "그 장면에 깔린 음악(bgm)이나 효과음(sfx)을 media_type으로 지목해야 한다. "
+        # **어느 장면에 걸 수 있는지 목록으로 준다.** 색감에서 세운 규칙이고,
+        # 규칙만 글로 적고 목록을 빼먹으면 모델이 지어내거나 아예 포기한다 --
+        # 2026-09-02 실측에서 소리 정리가 그렇게 거절됐다.
+        f"음악이 깔린 장면: {', '.join(context.segment_ids_with_bgm) or '없음'}. "
+        f"효과음이 깔린 장면: {', '.join(context.segment_ids_with_sfx) or '없음'}. "
         "**창작자가 말한 칸만 싣는다** -- 안 물어본 칸을 채우면 이미 켜 둔 것을 끄게 된다. "
         f"proposal이 있을 때 출력 예시: {json.dumps(success_example, ensure_ascii=False)}. "
         f"proposal이 없을 때 출력 예시: {json.dumps(no_proposal_example, ensure_ascii=False)}. "
