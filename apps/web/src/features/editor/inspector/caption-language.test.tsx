@@ -134,6 +134,13 @@ describe("더빙에 쓸 목소리", () => {
     });
   });
 
+  it("목소리가 없으면 어디로 가면 되는지 말해 준다", async () => {
+    /** 눌러도 안 되는 이유를 안 말하면 창작자는 눌러 보다 포기한다. */
+    renderControls({ translatedLanguages: ["en"], loadVoiceSamples: async () => [] });
+
+    expect(await screen.findByText(/자료실의 내 목소리/)).toBeInTheDocument();
+  });
+
   it("목소리를 못 읽어도 더빙 자리는 남는다", async () => {
     /** 목소리를 복제하지 않는 엔진은 샘플이 필요 없다 -- 화면은 엔진을 모른다. */
     renderControls({

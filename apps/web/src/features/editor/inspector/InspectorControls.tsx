@@ -1010,6 +1010,13 @@ export function InspectorControls({
       {target?.kind === "caption" && translatedLanguages.length ? (
         <fieldset>
           <legend>목소리 더빙</legend>
+          {/* 목소리가 하나도 없으면 **어디로 가면 되는지** 말해 준다. 여기서
+              바로 가져오게 만들지 않은 이유: 유튜브에서 목소리를 배우는 자리는
+              이미 `자료실 > 내 목소리`에 있고, 그 화면이 진행 상황·실패 사유를
+              훨씬 자세히 보여 준다. 같은 것을 두 벌 두면 반드시 어긋난다. */}
+          {!voiceSamples.length ? (
+            <p>아직 읽어 줄 목소리가 없어요. 자료실의 내 목소리에서 유튜브 영상 주소로 가져올 수 있어요.</p>
+          ) : null}
           {voiceSamples.length > 1 ? (
             <label>
               쓸 목소리
