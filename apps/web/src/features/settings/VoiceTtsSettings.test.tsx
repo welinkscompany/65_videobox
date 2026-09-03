@@ -118,6 +118,50 @@ describe("VoiceTtsSettings", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  /** 목소리는 지우면 **되돌릴 길이 없다.** 이름 칸과 버튼이 줄줄이 붙어 있어
+   *  옆줄을 누르기 쉬운데, 한 번 눌렀다고 바로 지우면 60초를 다시 읽어야 한다. */
+  it("지우기는 한 번 더 묻고, 그대로 두기를 고르면 지우지 않는다", async () => {
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([
+      { asset_id: "sample_secret_one", asset_type: "voice_sample_audio", storage_uri: "local://voice/one.wav" },
+    ]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+    const remove = vi.spyOn(api, "deleteVoiceSample").mockResolvedValue(undefined);
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 1 지우기" }));
+    expect(screen.getByText("정말 지울까요? 되돌릴 수 없어요.")).toBeVisible();
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "그대로 두기" }));
+    await waitFor(() => expect(screen.queryByText("정말 지울까요? 되돌릴 수 없어요.")).toBeNull());
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 1 지우기" }));
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 1 정말 지우기" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("project-a", "sample_secret_one"));
+  });
+
+  /** 창작자가 붙인 이름이 있으면 **목록과 고르는 칸이 같은 이름**을 보여야 한다. */
+  it("붙인 이름이 있으면 목록과 고르는 칸이 같은 이름을 보여 준다", async () => {
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([
+      {
+        asset_id: "sample_secret_one",
+        asset_type: "voice_sample_audio",
+        storage_uri: "local://voice/one.wav",
+        metadata: { display_name: "노마드루이스 목소리" },
+      },
+    ]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
+    expect(screen.getByLabelText("노마드루이스 목소리 이름")).toBeVisible();
+    expect(screen.getByRole("option", { name: "노마드루이스 목소리" })).toBeVisible();
+  });
+
   it("blocks sample mutations and reload until the initial project read is ready", async () => {
     const initialSamples = deferred<Awaited<ReturnType<typeof api.listVoiceSamples>>>();
     const initialSession = deferred<Awaited<ReturnType<typeof api.getLatestEditingSession>>>();

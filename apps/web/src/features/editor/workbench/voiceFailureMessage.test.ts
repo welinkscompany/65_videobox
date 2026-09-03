@@ -18,6 +18,23 @@ describe("더빙 실패 안내", () => {
     expect(voiceFailureMessage(error)).toContain("목소리를 만드는 프로그램이 꺼져 있어요");
   });
 
+  it("작업 상태로 온 사유도 창작자 말로 옮긴다", () => {
+    // 더빙이 비동기가 된 뒤로 실패 사유는 `ApiRequestError`가 아니라 작업
+    // 상태의 문자열로 온다. 문자열을 안 받으면 **영어 원문이 그대로 화면에
+    // 나간다** -- 2026-09-03 리뷰에서 실제로 그러고 있었다.
+    expect(
+      voiceFailureMessage(
+        "Voice bridge is not answering at http://host.docker.internal:8199. Start it with scripts/start-voice.ps1",
+      ),
+    ).toContain("목소리를 만드는 프로그램이 꺼져 있어요");
+  });
+
+  it("옮길 말이 없으면 null이다 -- 못 옮긴 영어를 보여 주느니 일반 안내가 낫다", () => {
+    expect(voiceFailureMessage("KeyError: 'timeline_042:007'")).toBeNull();
+    expect(voiceFailureMessage("")).toBeNull();
+    expect(voiceFailureMessage(null)).toBeNull();
+  });
+
   it("읽어 줄 목소리가 없으면 어디서 가져오는지 말해 준다", () => {
     const error = new ApiRequestError(
       "Voice sample not found: ''. Voice cloning needs a reference recording.",

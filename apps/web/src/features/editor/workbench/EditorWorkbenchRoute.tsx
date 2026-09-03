@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
 import { voiceFailureMessage } from "./voiceFailureMessage";
+import { voiceSampleLabel } from "./voiceSampleLabel";
 import { dubbingOutcomeMessage, runDubbingWithProgress, type DubbingOutcome } from "./dubbingProgress";
 
 import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
@@ -1100,7 +1101,23 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
       // 자막 번역은 장면 하나가 아니라 편집본 전체에 걸린다. 다른 편집과
       // 같은 통로로 보내서 되돌리기·충돌 확인을 그대로 받는다.
-      if (action.kind === "translate-captions") return port.translateCaptions({ language: action.language });
+      if (action.kind === "translate-captions") {
+        const translated = await port.translateCaptions({ language: action.language });
+        // **못 옮긴 장면이 있으면 말해 준다.** 안 말하면 그 장면은 원래 자막
+        // 그대로 완성본에 나가는데, 창작자는 다 옮겨진 줄 안다 -- 243장면이면
+        // 스물한 묶음이라 한 묶음만 어긋나도 영어 영상 한가운데 한국어가 뜬다.
+        //
+        // 다시 눌러도 손해가 없다는 것까지 말한다. 이미 옮긴 장면은 건너뛰고
+        // 남은 장면만 다시 시도한다.
+        const missing = translated.segments.filter(
+          (segment) =>
+            String(segment.caption_text ?? "").trim() &&
+            !String(segment.caption_translations?.[action.language] ?? "").trim(),
+        ).length;
+        return missing > 0
+          ? `${missing}개 장면은 옮기지 못했어요. 그 장면은 원래 자막 그대로 나가요. 다시 눌러 주시면 남은 장면만 다시 해 봐요.`
+          : undefined;
+      }
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
       if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
@@ -1148,14 +1165,18 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         },
       });
     } catch (error) {
-      outcome = { kind: "failed", detail: voiceFailureMessage(error) };
+      // **사유는 원문 그대로 들고 있는다.** 여기서 미리 옮겨 두면 아래에서 또
+      // 옮기려다 못 알아보고 일반 안내로 떨어진다 -- 옮기는 자리는 한 곳이다.
+      outcome = { kind: "failed", detail: error instanceof ApiRequestError ? error.detail : null };
     } finally {
       mutationInFlight.current = false;
     }
     if (!isCurrent()) return;
-    // 실패 사유가 창작자 말로 있으면 그걸 그대로 쓴다(꺼진 목소리 프로그램 등).
-    const message = outcome.kind === "failed" && outcome.detail
-      ? outcome.detail
+    // 실패 사유는 **반드시 창작자 말로 옮겨서** 쓴다. 서버가 준 사유는 영어
+    // 기술 문구라 그대로 내보내면 안 된다(§10.13). 옮길 말이 없으면 일반 안내로
+    // 돌아간다 -- 못 옮긴 영어를 보여 주느니 그 편이 낫다.
+    const message = outcome.kind === "failed"
+      ? voiceFailureMessage(outcome.detail) ?? dubbingOutcomeMessage(outcome)
       : dubbingOutcomeMessage(outcome);
     // 편집본을 다시 읽고 결과를 알리는 일은 **기존 통로가 이미 한다.**
     // 여기서 서버를 또 건드릴 필요는 없다 -- 더빙은 이미 끝났다.
@@ -1166,14 +1187,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const assets = await api.listVoiceSamples(projectId);
     // 자산 응답에는 파일 이름이 없다. 저장 위치의 끝 이름을 쓰되, 알아보기 어려운
     // 해시뿐이면 **번호를 붙인 사람 말**로 부른다(§10.13 창작자 언어).
-    return assets.map((asset, index) => {
-      const tail = decodeURIComponent(asset.storage_uri.split("/").pop() ?? "").replace(/\.[a-z0-9]+$/i, "");
-      const readable = tail.replace(/^[0-9a-f]{16,}-/i, "").trim();
-      return {
-        assetId: asset.asset_id,
-        label: readable.length > 2 ? readable : `내 목소리 ${index + 1}`,
-      };
-    });
+    return assets.map((asset, index) => ({ assetId: asset.asset_id, label: voiceSampleLabel(asset, index) }));
   };
 
   const loadApprovedTtsCandidates = async (segmentId: string) => {

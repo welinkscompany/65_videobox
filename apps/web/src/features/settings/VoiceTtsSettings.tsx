@@ -58,6 +58,11 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   const [samples, setSamples] = useState<AssetResponse[]>([]);
   const recorder = useVoiceRecorder();
   const stopRecording = recorder.stop;
+  //: 저장에 실패한 녹음. **버리지 않고 들고 있는다** -- 녹음은 다시 만들 수
+  //: 없다. "다시 시도해 주세요"라고 말해 놓고 시도할 것을 버리면 안 된다.
+  const [unsavedRecording, setUnsavedRecording] = useState<File | null>(null);
+  //: 지우기를 한 번 더 묻는 자리. 목소리는 지우면 되돌릴 길이 없다.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [segments, setSegments] = useState<EditingSessionSegment[]>([]);
   const [candidates, setCandidates] = useState<TtsCandidateRecord[]>([]);
   const [selectedSampleId, setSelectedSampleId] = useState("");
@@ -232,20 +237,28 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   }
 
   async function saveRecording() {
-    const file = await stopRecording();
+    const file = (await stopRecording()) ?? unsavedRecording;
     if (!file) return;
     const token = beginAction("record");
-    if (!token) return;
+    // **녹음을 들고 있는다.** 여기서 그냥 돌아가면 방금 읽은 60초가 사라진다.
+    if (!token) {
+      setUnsavedRecording(file);
+      return;
+    }
     const expectedProjectId = projectId;
     try {
       try {
         await api.uploadVoiceSample(expectedProjectId, file);
       } catch {
         if (isCurrent(token.epoch, expectedProjectId)) {
-          setActionError("녹음한 목소리를 저장하지 못했어요. 다시 시도해 주세요.");
+          // 들고 있으니 진짜로 "다시 시도"가 된다. 안 들고 있으면 이 말은
+          // 거짓말이다 -- 다시 눌러 봐야 처음부터 읽어야 한다.
+          setUnsavedRecording(file);
+          setActionError("녹음한 목소리를 저장하지 못했어요. 아래 `다시 저장해 보기`를 눌러 주세요.");
         }
         return;
       }
+      setUnsavedRecording(null);
       if (!isCurrent(token.epoch, expectedProjectId)) return;
       await refreshSamples(expectedProjectId, token.epoch).catch(() => undefined);
       if (isCurrent(token.epoch, expectedProjectId)) setMessage("녹음한 목소리를 저장했어요.");
@@ -275,6 +288,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   }
 
   async function removeSample(assetId: string) {
+    setConfirmingDeleteId(null);
     const token = beginAction("delete");
     if (!token) return;
     const expectedProjectId = projectId;
@@ -488,6 +502,10 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
             )}
             {recorder.state === "denied" ? <p>마이크를 쓸 수 없어요. 브라우저에서 마이크를 허용해 주세요.</p> : null}
             {recorder.state === "unsupported" ? <p>이 브라우저에서는 녹음할 수 없어요. 음성 파일로 올려 주세요.</p> : null}
+            {/* 저장에 실패한 녹음이 아직 여기 있다. 다시 읽을 필요 없다. */}
+            {unsavedRecording && recorder.state !== "recording" ? (
+              <Button disabled={isBusy} onClick={() => void saveRecording()} type="button">다시 저장해 보기</Button>
+            ) : null}
           </div>
           {samples.length === 0 ? <p className="text-sm text-muted-foreground">아직 저장한 목소리가 없어요.</p> : (
             <ul className="vb-voice-list">
@@ -506,13 +524,29 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
                       }
                     }}
                   />
-                  <Button
-                    aria-label={`${voiceName(sample, index)} 지우기`}
-                    disabled={isBusy}
-                    onClick={() => void removeSample(sample.asset_id)}
-                    type="button"
-                    variant="outline"
-                  >지우기</Button>
+                  {/* 한 번 더 묻는다. 목소리는 지우면 **되돌릴 길이 없고**,
+                      이름 칸과 버튼이 줄줄이 붙어 있어 옆줄을 누르기 쉽다. */}
+                  {confirmingDeleteId === sample.asset_id ? (
+                    <>
+                      <span>정말 지울까요? 되돌릴 수 없어요.</span>
+                      <Button
+                        aria-label={`${voiceName(sample, index)} 정말 지우기`}
+                        disabled={isBusy}
+                        onClick={() => void removeSample(sample.asset_id)}
+                        type="button"
+                        variant="outline"
+                      >지웁니다</Button>
+                      <Button disabled={isBusy} onClick={() => setConfirmingDeleteId(null)} type="button">그대로 두기</Button>
+                    </>
+                  ) : (
+                    <Button
+                      aria-label={`${voiceName(sample, index)} 지우기`}
+                      disabled={isBusy}
+                      onClick={() => setConfirmingDeleteId(sample.asset_id)}
+                      type="button"
+                      variant="outline"
+                    >지우기</Button>
+                  )}
                 </li>
               ))}
             </ul>

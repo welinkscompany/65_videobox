@@ -14,8 +14,11 @@ import { ApiRequestError } from "../../../api";
  * 여기서 **무엇을 하면 되는지**로 옮긴다.
  */
 export function voiceFailureMessage(error: unknown): string | null {
-  if (!(error instanceof ApiRequestError)) return null;
-  const detail = error.detail ?? "";
+  // **문자열도 받는다.** 더빙이 비동기가 된 뒤로 실패 사유는 `ApiRequestError`가
+  // 아니라 작업 상태의 `error_detail` 문자열로 온다. 문자열을 안 받으면 그 사유가
+  // 여기를 안 거치고 **영어 원문 그대로 화면에 나간다**(2026-09-03 리뷰에서 잡음).
+  const detail = typeof error === "string" ? error : error instanceof ApiRequestError ? (error.detail ?? "") : "";
+  if (!detail) return null;
   if (detail.includes("Voice bridge is not answering")) {
     return "목소리를 만드는 프로그램이 꺼져 있어요. 이 컴퓨터에서 목소리 프로그램을 켠 뒤 다시 시도해 주세요.";
   }
