@@ -448,6 +448,11 @@
 .vb-editor-workbench__timeline-foot output { color: var(--muted-foreground); font-size: var(--vb-text-xs); }
 .vb-editor-workbench__timeline-zoom { display: inline-flex; gap: var(--vb-space-1); margin-left: auto; }
 .vb-editor-workbench__timeline-zoom > button { min-width: 1.75rem; padding: var(--vb-space-1) var(--vb-space-2); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); color: var(--foreground); background: var(--background); font-size: var(--vb-text-sm); line-height: 1.4; }
+/* 실행 취소·다시 실행·자르기 도구 여섯 개(`vb-cut-tool`이 하나씩 감싼다)가
+   간격 0px로 완전히 붙어 있었다(2026-09-04 실측) -- 아이콘 단추끼리라
+   텍스트 단추와 달리 안쪽 여백이 시각적 틈을 안 만들어 준다. 줌 그룹
+   (바로 위 두 줄)과 같은 무늬로 간격만 준다. */
+.vb-timeline-edit-toolbar { display: inline-flex; align-items: center; gap: var(--vb-space-1); }
 /* 타임라인 높이 손잡이. 좌우 도크 손잡이와 같은 일을 위아래로 한다 --
    컷을 딸 때는 타임라인을 키우고 화면을 볼 때는 미리보기를 키운다. */
 .vb-editor-workbench__timeline-handle { height: 0.5rem; cursor: row-resize; border-radius: 999px; background: var(--border); }

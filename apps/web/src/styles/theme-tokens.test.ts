@@ -164,3 +164,18 @@ describe("대화상자 밖에서도 단추가 브라우저 기본 테두리로 �
     }
   });
 });
+
+describe("실행 취소·자르기 도구 여섯 개가 다닥다닥 붙지 않는다", () => {
+  // 2026-09-04 실측: `.vb-timeline-edit-toolbar`(실행 취소·다시 실행·나누기·
+  // 앞과 붙이기·빼기·다음 장면에도)에 CSS가 하나도 없어서 아이콘 단추 여섯
+  // 개가 간격 0px로 붙어 있었다. 아이콘만 있는 단추라 글자 단추와 달리
+  // 안쪽 여백이 시각적 틈을 만들어 주지 않는다 -- 어디까지가 한 단추인지
+  // 구분이 안 됐다. 옆에 있는 확대·축소 묶음(`vb-editor-workbench__timeline-zoom`)과
+  // 같은 무늬(`inline-flex` + 척도 간격)를 준다.
+  it(".vb-timeline-edit-toolbar가 flex와 척도 간격을 건다", () => {
+    const rule = editorWorkbenchCss.match(/\.vb-timeline-edit-toolbar\s*\{[^}]*\}/)?.[0];
+    expect(rule, ".vb-timeline-edit-toolbar 규칙을 못 찾았다").toBeDefined();
+    expect(rule).toMatch(/display:\s*(inline-)?flex/);
+    expect(rule).toMatch(/gap:\s*var\(--vb-space-\d\)/);
+  });
+});
