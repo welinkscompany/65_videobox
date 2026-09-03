@@ -1982,6 +1982,35 @@ def test_the_rebuild_budget_fits_a_cold_image_build() -> None:
     )
 
 
+def test_starting_the_stack_gets_the_same_generous_budget_as_the_rebuild() -> None:
+    """재빌드만 고치고 **바로 옆 시작 단계는 30초 그대로 두었다.**
+
+    2026-09-03에 실제로 겪었다. 재빌드는 통과했는데 그 다음 `compose up -d`가
+    30초 벽에 잘려 `[FAIL] VideoBox 서비스를 시작하지 못했습니다.`가 떴다 --
+    그런데 40초 뒤 컨테이너는 healthy였고 화면은 200을 돌려줬다. 즉 시작은
+    멀쩡했고 시계만 짧았다.
+
+    새로 만든 이미지로 컨테이너를 다시 세우는 일은 원래 30초를 넘긴다. 이미
+    떠 있는 스택을 확인만 할 때나 빠르다. 그 두 경우를 같은 잣대로 재면 안 된다
+    -- 바로 위 재빌드가 같은 이유로 이미 한 번 고쳐졌다.
+
+    거짓 FAIL이 더 나쁜 이유는 다음 사람이 **진짜 실패와 구분할 수 없기** 때문이다.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    up_budget = re.search(
+        r"upResult = Invoke-CapturedProcess.*CommandTimeoutSec \(\[Math\]::Max\(\$TimeoutSec, (\d+)\)\)",
+        script,
+    )
+
+    assert up_budget is not None, (
+        "시작 제한시간이 `[Math]::Max`로 바닥을 두고 있지 않다. 기본값 30초로 두면 "
+        "재빌드 직후 컨테이너를 다시 세울 때 잘려 거짓 FAIL이 난다."
+    )
+    assert int(up_budget.group(1)) >= 300, (
+        "시작 제한시간이 컨테이너를 다시 세우는 시간보다 짧다."
+    )
+
+
 def test_a_failed_rebuild_keeps_the_log_it_tells_the_owner_to_read() -> None:
     """실패 안내는 "Docker 빌드 로그를 확인하세요"인데 **로그를 아무 데도 안 남겼다.**
 

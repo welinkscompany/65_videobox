@@ -1088,7 +1088,12 @@ if ($Mode -ceq "Start") {
             Write-OwnerReadyPayload -Checks $checks
         }
     }
-    $upResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec $TimeoutSec -Arguments @(
+    # **시작에도 넉넉한 바닥이 필요하다.** 바로 위 재빌드는 2026-08-20에 이걸
+    # 고쳤는데 시작 단계는 기본값 30초 그대로였다. 새로 만든 이미지로 컨테이너를
+    # 다시 세울 때는 30초를 넘기고, 그러면 명령이 잘려 **거짓 FAIL**이 난다 --
+    # 2026-09-03에 실제로 그랬다(FAIL이 뜬 40초 뒤 컨테이너는 healthy였다).
+    # 거짓 FAIL은 다음 사람이 진짜 실패와 구분할 수 없어서 더 나쁘다.
+    $upResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 300)) -Arguments @(
         @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("up", "-d") + $serviceNames
     )
     if ($upResult.ExitCode -ne 0) {
