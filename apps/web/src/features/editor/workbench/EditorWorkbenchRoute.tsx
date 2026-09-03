@@ -2729,6 +2729,13 @@ function captionStyleFromCandidate(raw: Record<string, unknown>): EditorCaptionS
     horizontalAlign: raw.horizontal_align,
     safeAreaEnabled: raw.safe_area_enabled,
     shadowBlurPx: raw.shadow_blur_px,
+    // 유진의 자막 모양 제안은 이 열한 칸만 안다(`yujin_creator_proposals.py`의
+    // `EditorCaptionStyle`이 정본이고, 구조화 생성 스키마라 함부로 늘리면
+    // 모델이 못 채운 응답이 매번 거부된다). 굵게·기울임·자간은 유진이 손대지
+    // 않으므로 기본값(꺼짐)으로 채운다 -- 다른 열한 칸과 같은 값 그대로다.
+    bold: false,
+    italic: false,
+    letterSpacingPx: 0,
   };
 }
 

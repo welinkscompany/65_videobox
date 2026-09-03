@@ -42,7 +42,7 @@ describe("EditorCommandPort", () => {
     vi.mocked(api.previewEditingSessionCaptionStyleScope).mockResolvedValue({ affected_segment_ids: ["seg", "next"] });
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
 
-    await expect(port.previewCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 2, backgroundColor: "#0000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } })).resolves.toEqual({ affected_segment_ids: ["seg", "next"] });
+    await expect(port.previewCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 2, backgroundColor: "#0000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } })).resolves.toEqual({ affected_segment_ids: ["seg", "next"] });
     expect(api.previewEditingSessionCaptionStyleScope).toHaveBeenCalledWith("p", "s", expect.objectContaining({ segment_ids: ["seg"], scope: "current_caption", expected_revision: 7 }));
   });
 
@@ -195,12 +195,35 @@ describe("EditorCommandPort", () => {
     });
   });
 
+  it("sends bold, italic, and letter spacing with the caption style request", async () => {
+    // 2026-09-03 owner 지적으로 굵게·기울임·자간 칸을 만들었는데, 화면 상태는
+    // 바뀌어도 **저장 요청 만드는 자리(`captionStyle` 변환 함수)가 그 셋을
+    // 빠뜨리고 있었다** -- 실기계에서 체크박스를 눌러 보니 보낸 요청에 아예
+    // 안 실렸다. `expect.objectContaining`으로는 이 결함을 못 잡는다.
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+    const update = vi.mocked(api.updateEditingSessionCaptionStyle).mockResolvedValue({} as never);
+
+    await port.setCaptionStyle({
+      segmentIds: ["seg"], scope: "current_caption",
+      style: {
+        fontFamily: "Pretendard", fontSizePx: 30, textColor: "#fff", outlineColor: "#000",
+        outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90,
+        horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0,
+        bold: true, italic: true, letterSpacingPx: 18,
+      },
+    });
+
+    expect(update).toHaveBeenCalledWith("p", "s", expect.objectContaining({
+      style: expect.objectContaining({ bold: true, italic: true, letter_spacing_px: 18 }),
+    }));
+  });
+
   it("uses only supported discriminated overlays and caption endpoints", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
     await port.applyOverlay({ kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품" });
     await port.clearOverlay({ kind: "table", segmentId: "seg" });
     await port.setCaptionText({ segmentId: "seg", text: "새 자막" });
-    await port.setCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 30, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } });
+    await port.setCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 30, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } });
     expect(api.updateEditingSessionImageOverlay).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-image", text: "제품", expected_revision: 7 });
     expect(api.removeEditingSessionTableOverlay).toHaveBeenCalledWith("p", "s", "seg", 7);
     expect(api.updateEditingSessionCaption).toHaveBeenCalledWith("p", "s", "seg", { caption_text: "새 자막", expected_revision: 7 });

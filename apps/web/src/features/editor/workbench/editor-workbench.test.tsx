@@ -258,8 +258,8 @@ describe("EditorWorkbench", () => {
         { clipId: "n-1", segmentId: "visible-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 10, controls: {} },
       ] }],
       captions: [
-        { segmentId: "visible-1", placementId: "caption:visible-1", text: "첫 장면", startSec: 0, endSec: 5, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
-        { segmentId: "visible-2", placementId: "caption:visible-2", text: "둘째 장면", startSec: 5, endSec: 10, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
+        { segmentId: "visible-1", placementId: "caption:visible-1", text: "첫 장면", startSec: 0, endSec: 5, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } },
+        { segmentId: "visible-2", placementId: "caption:visible-2", text: "둘째 장면", startSec: 5, endSec: 10, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } },
       ],
     } as const;
     render(<EditorWorkbench view={sessionSegmentView} assetCards={assetCards} onApplyAssetCard={onApplyAssetCard} />);
@@ -353,8 +353,8 @@ describe("EditorWorkbench", () => {
         { clipId: "n-2", segmentId: "segment-2", type: "narration", assetId: null, assetUri: null, startSec: 1, endSec: 2, controls: {} },
       ] }],
       captions: [
-        { segmentId: "segment-1", text: "첫 자막", startSec: 0, endSec: 1, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
-        { segmentId: "segment-2", text: "둘째 자막", startSec: 1, endSec: 2, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } },
+        { segmentId: "segment-1", text: "첫 자막", startSec: 0, endSec: 1, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } },
+        { segmentId: "segment-2", text: "둘째 자막", startSec: 1, endSec: 2, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } },
       ],
       playback: { auditionUrls: {}, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-preview/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 2 } },
     } as const;
@@ -389,7 +389,7 @@ describe("EditorWorkbench", () => {
         clipId: "b-2", placementId: "broll:b-2", segmentId: "segment-2", type: "broll",
         assetId: "asset-b", assetUri: null, startSec: 5, endSec: 10, controls: {},
       }] }],
-      captions: [{ segmentId: "segment-2", text: "둘째 자막", startSec: 5, endSec: 10, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } }],
+      captions: [{ segmentId: "segment-2", text: "둘째 자막", startSec: 5, endSec: 10, style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } }],
       playback: { auditionUrls: {}, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-preview/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 10 } },
     } as const;
     render(<EditorWorkbench view={brollView} />);

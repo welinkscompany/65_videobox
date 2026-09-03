@@ -22,6 +22,7 @@ export function fromSnapshot(style: CaptionStyleSnapshot): Partial<Record<string
     position_y: "positionYPercent",
     position_y_percent: "positionYPercent",
     shadow_blur_px: "shadowBlurPx",
+    letter_spacing_px: "letterSpacingPx",
   };
   const strings: Readonly<Record<string, string>> = {
     font_family: "fontFamily",
@@ -32,6 +33,8 @@ export function fromSnapshot(style: CaptionStyleSnapshot): Partial<Record<string
   };
   const booleans: Readonly<Record<string, string>> = {
     safe_area_enabled: "safeAreaEnabled",
+    bold: "bold",
+    italic: "italic",
   };
   const mapped: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(style ?? {})) {

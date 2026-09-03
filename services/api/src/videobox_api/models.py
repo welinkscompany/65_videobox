@@ -1519,6 +1519,9 @@ class EditorCaptionStyleResponse(BaseModel):
     horizontal_align: Literal["left", "center", "right"]
     safe_area_enabled: bool
     shadow_blur_px: int = Field(ge=0)
+    bold: bool = False
+    italic: bool = False
+    letter_spacing_px: int = Field(ge=-80, le=80, default=0)
     model_config = {"extra": "forbid"}
 
 

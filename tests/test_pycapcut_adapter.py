@@ -60,6 +60,9 @@ def test_export_timeline_maps_editing_session_caption_style_to_real_capcut_text_
         "outline_width_px": 3,
         "background_color": "#000000AA",
         "shadow_blur_px": 2,
+        "bold": True,
+        "italic": True,
+        "letter_spacing_px": 12,
     }
     materialized = materialize_editing_session_timeline(
         timeline=source_timeline,
@@ -79,6 +82,13 @@ def test_export_timeline_maps_editing_session_caption_style_to_real_capcut_text_
     material = next(item for item in content["materials"]["texts"] if "CAPTION STYLE" in item["content"])
     assert captions[0]["target_timerange"] == {"start": 200_000, "duration": 1_300_000}
     assert '"color": [0.0, 1.0, 0.0]' in material["content"]
+    # 굵게·기울임·자간(owner 지적 2026-09-03)도 pycapcut의 TextStyle이 그대로
+    # 받는다 -- 렌더용 ASS 경로와 같은 CaptionStyle 필드 이름을 쓴다.
+    assert '"bold": true' in material["content"]
+    assert '"italic": true' in material["content"]
+    # `letter_spacing`은 `content` 안이 아니라 소재 딕셔너리의 형제 칸이다
+    # (pycapcut이 안에서 0.05를 곱해 자기 단위로 맞춘다: 12 * 0.05 = 0.6).
+    assert material["letter_spacing"] == pytest.approx(0.6)
     assert "shadow_blur_px is not supported by CapCut export" in result.capcut_compatibility_warnings
 
 

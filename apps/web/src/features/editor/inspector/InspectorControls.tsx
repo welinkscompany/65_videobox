@@ -123,6 +123,9 @@ const defaultStyle: EditorCaptionStyle = {
   horizontalAlign: "center",
   safeAreaEnabled: true,
   shadowBlurPx: 0,
+  bold: false,
+  italic: false,
+  letterSpacingPx: 0,
 };
 const partialFieldLabels: Readonly<Record<string, string>> = {
   caption: "자막",
@@ -950,6 +953,9 @@ export function InspectorControls({
               horizontal_align: captionStyle.horizontalAlign,
               safe_area_enabled: captionStyle.safeAreaEnabled,
               shadow_blur_px: captionStyle.shadowBlurPx,
+              bold: captionStyle.bold,
+              italic: captionStyle.italic,
+              letter_spacing_px: captionStyle.letterSpacingPx,
             }}
             onApply={(style) => setCaptionStyle((current) => ({ ...current, ...fromSnapshot(style) }))}
           /> : null}
@@ -963,6 +969,12 @@ export function InspectorControls({
             value={captionStyle.fontFamily}
           />
           <label>글자 크기<Input disabled={disabled} min="1" onChange={(event) => setCaptionStyle((current) => ({ ...current, fontSizePx: numberValue(event.target.value, current.fontSizePx) }))} type="number" value={captionStyle.fontSizePx} /></label>
+          {/* 굵게·기울임·자간. owner 지적(2026-09-03): "글꼴, 자막크기, 색깔
+              등등 이거 외에 글자를 수정하는 컴포넌트가 모두 있어야지" --
+              캡컷 자막판의 기본 서식이고 고급 기능이 아니다. */}
+          <label>굵게<Input checked={captionStyle.bold} disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, bold: event.target.checked }))} type="checkbox" /></label>
+          <label>기울임<Input checked={captionStyle.italic} disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, italic: event.target.checked }))} type="checkbox" /></label>
+          <label>자간<Input disabled={disabled} max="80" min="-80" onChange={(event) => setCaptionStyle((current) => ({ ...current, letterSpacingPx: numberValue(event.target.value, current.letterSpacingPx) }))} type="number" value={captionStyle.letterSpacingPx} /></label>
           <label>글자 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, textColor: event.target.value }))} value={captionStyle.textColor} /></label>
           <label>외곽선 색<Input disabled={disabled} onChange={(event) => setCaptionStyle((current) => ({ ...current, outlineColor: event.target.value }))} value={captionStyle.outlineColor} /></label>
           <label>외곽선 두께<Input disabled={disabled} min="0" onChange={(event) => setCaptionStyle((current) => ({ ...current, outlineWidthPx: numberValue(event.target.value, current.outlineWidthPx) }))} type="number" value={captionStyle.outlineWidthPx} /></label>

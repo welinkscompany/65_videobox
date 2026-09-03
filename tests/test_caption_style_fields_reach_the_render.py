@@ -86,6 +86,9 @@ PROBES: dict[str, tuple[dict[str, Any], Any, Any]] = {
     # 안전 영역은 94%를 넘을 때만 잘라낸다. 그 밑에서는 켜나 끄나 같다.
     "safe_area_enabled": ({"position_y_percent": 100}, True, False),
     "shadow_blur_px": ({}, 0, 9),
+    "bold": ({}, False, True),
+    "italic": ({}, False, True),
+    "letter_spacing_px": ({}, 0, 40),
 }
 
 _FRAME_WIDTH = 640

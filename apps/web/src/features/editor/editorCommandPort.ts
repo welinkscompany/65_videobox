@@ -100,7 +100,9 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
   }).filter(([, item]) => item !== undefined));
 }
 function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["style"] {
-  return { font_family: style.fontFamily, font_size_px: style.fontSizePx, text_color: style.textColor, outline_color: style.outlineColor, outline_width_px: style.outlineWidthPx, background_color: style.backgroundColor, position_x_percent: style.positionXPercent, position_y_percent: style.positionYPercent, horizontal_align: style.horizontalAlign, safe_area_enabled: style.safeAreaEnabled, shadow_blur_px: style.shadowBlurPx };
+  // 굵게·기울임·자간을 빠뜨리면 화면 칸은 바뀌는데 **저장 요청에는 안 실린다**
+  // -- 체크박스를 눌러도 서버는 모른 채로 남는다(2026-09-03 실기계에서 실측).
+  return { font_family: style.fontFamily, font_size_px: style.fontSizePx, text_color: style.textColor, outline_color: style.outlineColor, outline_width_px: style.outlineWidthPx, background_color: style.backgroundColor, position_x_percent: style.positionXPercent, position_y_percent: style.positionYPercent, horizontal_align: style.horizontalAlign, safe_area_enabled: style.safeAreaEnabled, shadow_blur_px: style.shadowBlurPx, bold: style.bold, italic: style.italic, letter_spacing_px: style.letterSpacingPx };
 }
 
 export function createEditorCommandPort(context: Context, commandApi: EditorCommandApi = api): EditorCommandPort {

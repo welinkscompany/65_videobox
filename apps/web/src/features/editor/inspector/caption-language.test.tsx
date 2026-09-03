@@ -26,7 +26,7 @@ const captionTarget = {
     positionYPercent: 90,
     horizontalAlign: "center",
     safeAreaEnabled: true,
-    shadowBlurPx: 0,
+    shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0,
   },
 } as never;
 

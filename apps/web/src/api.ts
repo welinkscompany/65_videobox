@@ -596,7 +596,7 @@ export type EditorPlaybackManifest = {
   }>;
   captions: Array<{
     segment_id: string; caption_id: string; placement_id: string; text: string; start_sec: number; end_sec: number;
-    style: { font_family: string; font_size_px: number; text_color: string; outline_color: string; outline_width_px: number; background_color: string; position_x_percent: number; position_y_percent: number; horizontal_align: "left" | "center" | "right"; safe_area_enabled: boolean; shadow_blur_px: number };
+    style: { font_family: string; font_size_px: number; text_color: string; outline_color: string; outline_width_px: number; background_color: string; position_x_percent: number; position_y_percent: number; horizontal_align: "left" | "center" | "right"; safe_area_enabled: boolean; shadow_blur_px: number; bold: boolean; italic: boolean; letter_spacing_px: number };
   }>;
   gap_slots: Array<{ gap_id: string; segment_id: string; start_sec: number; end_sec: number; reason: string }>;
   source_status: { status: "current" | "stale"; source_session_id?: string | null; source_session_revision?: number | null };

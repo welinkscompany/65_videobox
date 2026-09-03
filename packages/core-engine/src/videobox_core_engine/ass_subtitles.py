@@ -224,9 +224,14 @@ def render_editing_session_ass(editing_session: dict[str, Any], *, video_width: 
             border_colour = _ass_color(value.outline_color)
             border_style = _BORDER_STYLE_OUTLINE
             border_width = value.outline_width_px
+        # ASS `Bold`/`Italic`는 SSA 시절 관례를 그대로 쓴다 -- 켠 것은 `-1`,
+        # 끈 것은 `0`이다(불리언 전부를 세운 비트 패턴). `1`도 libass는 받아
+        # 주지만 스펙에 맞춰 `-1`을 쓴다. `Spacing`은 글자 사이 여백(px)이다.
+        bold = -1 if value.bold else 0
+        italic = -1 if value.italic else 0
         return (
             f"Style: {name},{value.font_family},{size},{primary},{primary},"
-            f"{border_colour},{_UNUSED_SHADOW_COLOUR},0,0,0,0,100,100,0,0,"
+            f"{border_colour},{_UNUSED_SHADOW_COLOUR},{bold},{italic},0,0,100,100,{value.letter_spacing_px},0,"
             f"{border_style},{border_width},0,{alignment},{margin_l},{margin_r},{margin_v},1"
         )
 

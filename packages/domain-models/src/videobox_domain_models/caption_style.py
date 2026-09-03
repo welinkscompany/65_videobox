@@ -34,6 +34,15 @@ class CaptionStyle:
     horizontal_align: str = "center"
     safe_area_enabled: bool = True
     shadow_blur_px: int = 0
+    # 굵게·기울임·자간. owner 지적(2026-09-03): "글꼴, 자막크기, 색깔 등등 이거
+    # 외에 글자를 수정하는 컴포넌트가 모두 있어야지" -- 캡컷 자막 편집판의
+    # 기본 서식이고 고급 기능이 아니다(`CLAUDE.md` §2.1의 제외 목록에 없다).
+    # ASS `Bold`/`Italic`/`Spacing` 칸과 pycapcut `TextStyle.bold`/`italic`/
+    # `letter_spacing`이 둘 다 이 이름을 그대로 받는다 -- 새 렌더 경로를
+    # 만들지 않는다.
+    bold: bool = False
+    italic: bool = False
+    letter_spacing_px: int = 0
 
     def __post_init__(self) -> None:
         for field_name in ("text_color", "outline_color", "background_color"):
@@ -43,6 +52,11 @@ class CaptionStyle:
             raise ValueError("font_size_px must be between 12 and 160.")
         if not 0 <= self.outline_width_px <= 12:
             raise ValueError("outline_width_px must be between 0 and 12.")
+        # ASS Spacing은 음수를 허용하지만(글자를 좁힌다), 실측 없이 넓혀 두면
+        # 화면 밖으로 글자가 밀려날 값도 받아 준다. 자막 글자 크기(12~160px)의
+        # 절반을 위아래 한계로 잡아 안전 범위 안에서만 자유롭게 둔다.
+        if not -80 <= self.letter_spacing_px <= 80:
+            raise ValueError("letter_spacing_px must be between -80 and 80.")
         if self.horizontal_align not in {"left", "center", "right"}:
             raise ValueError("horizontal_align must be left, center, or right.")
         if not 0 <= self.position_x_percent <= 100:

@@ -233,7 +233,13 @@ class PyCapCutRealExportAdapter:
         border_red, border_green, border_blue, border_alpha = style.rgba_floats(style.outline_color)
         background_red, background_green, background_blue, background_alpha = style.rgba_floats(style.background_color)
         alignment = {"left": 0, "center": 1, "right": 2}[style.horizontal_align]
-        capcut_style = TextStyle(size=style.font_size_px / 6, color=(red, green, blue), align=alignment, auto_wrapping=True)
+        capcut_style = TextStyle(
+            size=style.font_size_px / 6, color=(red, green, blue), align=alignment, auto_wrapping=True,
+            bold=style.bold, italic=style.italic,
+            # pycapcut이 안에서 0.05를 곱해 CapCut 자체 단위로 맞춘다(주석 "定义与CapCut中一致") --
+            # 여기서 미리 나누지 않는다. 나누면 두 번 줄어든다.
+            letter_spacing=style.letter_spacing_px,
+        )
         border = TextBorder(color=(border_red, border_green, border_blue), alpha=border_alpha, width=style.outline_width_px * 10)
         background = None
         if background_alpha:
