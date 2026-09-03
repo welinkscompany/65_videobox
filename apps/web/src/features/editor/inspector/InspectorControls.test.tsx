@@ -690,6 +690,42 @@ describe("InspectorControls", () => {
     expect(screen.queryByLabelText("말할 때 배경 음악 낮추기")).not.toBeInTheDocument();
   });
 
+  it("자막 칸도 스타일·번역 두 탭으로 나뉜다 -- 다섯 뭉치를 한 줄로 쌓지 않는다", () => {
+    // 2026-09-03 owner 지적: "글꼴 있는 박스"가 있는 세부 정보 칸이 자막
+    // 스타일·자막 언어·목소리 더빙을 한 줄로 쌓아 두고 있었다. 실측 스크롤
+    // 전체 길이가 보이는 높이의 3.5배였고 그중 `자막 스타일` 혼자 1223px
+    // (절반)였다. 미디어 칸이 이미 쓰는 `.vb-inspector-tabs` 무늬를 그대로
+    // 재사용해 둘로 갈랐다 -- 새 시각 방향이 아니라서 §6 재승인 대상이 아니다.
+    renderControls({
+      target: {
+        fields: ["style"],
+        id: "caption:current",
+        kind: "caption",
+        label: "연결 자막",
+        segmentId: "segment-internal-current",
+        style,
+      },
+    });
+
+    const tabs = screen.getAllByRole("tab", { name: /스타일|번역·더빙/ });
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["스타일", "번역·더빙"]);
+
+    // 기본은 스타일 탭이다 -- 글꼴·색·위치가 바로 보여야 방금까지 하던 조정을
+    // 잇는다. 번역·더빙 칸은 아직 안 보인다.
+    expect(screen.getByText("글꼴")).toBeVisible();
+    expect(screen.queryByText("자막 언어")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "번역·더빙" }));
+
+    expect(screen.getByText("자막 언어")).toBeVisible();
+    expect(screen.queryByText("글꼴")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "스타일" }));
+
+    expect(screen.getByText("글꼴")).toBeVisible();
+    expect(screen.queryByText("자막 언어")).not.toBeInTheDocument();
+  });
+
   it("saves the complete current caption style without exposing independent timing", () => {
     const onAction = renderControls({
       target: {

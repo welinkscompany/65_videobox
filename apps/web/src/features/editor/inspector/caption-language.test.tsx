@@ -40,6 +40,10 @@ function renderControls(props: Partial<Parameters<typeof InspectorControls>[0]> 
       {...props}
     />,
   );
+  // 2026-09-03: 자막 언어·목소리 더빙은 `번역·더빙` 탭으로 옮겨졌다(owner
+  // 지적 -- 세부 정보 칸이 다섯 뭉치를 한 줄로 쌓아 스크롤이 보이는 높이의
+  // 3.5배였다). 이 파일의 모든 시험이 그 안의 내용을 보므로 여기서 한 번만 연다.
+  fireEvent.click(screen.getByRole("tab", { name: "번역·더빙" }));
   return onAction;
 }
 
@@ -174,6 +178,7 @@ describe("더빙에 쓸 목소리", () => {
     );
 
     const { rerender } = render(draw());
+    fireEvent.click(screen.getByRole("tab", { name: "번역·더빙" }));
     await screen.findByRole("button", { name: "영어 목소리로 더빙" });
     for (let index = 0; index < 3; index += 1) rerender(draw());
     await new Promise((resolve) => setTimeout(resolve, 50));

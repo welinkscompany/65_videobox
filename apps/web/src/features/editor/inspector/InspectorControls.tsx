@@ -189,6 +189,9 @@ function parseRows(value: string): string[][] {
  *  소리 클립에서는 **소리** 페이드다(`media_controls.py`가 그렇게 갈라 둔다).
  *  그래서 종류를 보고 자리를 정한다. */
 const MEDIA_TAB_LABELS = { picture: "화면", sound: "소리", speed: "속도", look: "보정" } as const;
+const CAPTION_TAB_LABELS = { style: "스타일", language: "번역·더빙" } as const;
+type CaptionTab = keyof typeof CAPTION_TAB_LABELS;
+const CAPTION_TAB_ORDER: readonly CaptionTab[] = ["style", "language"];
 type MediaTab = keyof typeof MEDIA_TAB_LABELS;
 const MEDIA_TAB_ORDER: readonly MediaTab[] = ["picture", "sound", "speed", "look"];
 
@@ -260,6 +263,13 @@ export function InspectorControls({
   // 지금 보고 있는 탭. 대상이 바뀌면 아래 `useEffect`가 첫 탭으로 되돌린다 --
   // `소리` 탭을 보다가 화면 클립을 고르면 빈 탭이 뜨는 것을 막는다.
   const [mediaTab, setMediaTab] = useState<MediaTab>("picture");
+  // 자막 칸도 미디어 칸과 같은 탭 무늬를 쓴다(owner 지적 2026-09-03: "글꼴 있는
+  // 박스"가 있는 세부 정보 칸이 다섯 뭉치를 한 줄로 쌓아 두고 있어서, 실측
+  // 스크롤 전체 길이가 보이는 높이의 3.5배였다 -- 그중 `자막 스타일` 하나가
+  // 1223px로 절반을 차지했다. 미디어 칸에 이미 있는 `.vb-inspector-tabs`
+  // 무늬를 그대로 재사용한다 -- 새 시각 방향을 만드는 게 아니라 이미 쓰는
+  // 것을 한 군데 더 쓰는 것이라 §6 재승인 대상이 아니다.
+  const [captionTab, setCaptionTab] = useState<CaptionTab>("style");
   // 변형(캡컷 동영상 탭 `확대·위치·회전`). 손대지 않음이 1.0 / 0 / 0 / 0이고,
   // 렌더러는 그때 사슬을 하나도 더하지 않는다.
   const [zoom, setZoom] = useState(1);
@@ -356,7 +366,7 @@ export function InspectorControls({
       setRotationDeg(target.controls.rotationDeg ?? 0);
       setGainDb(target.controls.gainDb ?? 0);
     }
-    if (target?.kind === "caption") setCaptionStyle(target.style);
+    if (target?.kind === "caption") { setCaptionStyle(target.style); setCaptionTab("style"); }
     if (target?.kind === "overlay") {
       if (target.overlayKind !== "shape") setOverlayText(target.value.text);
       if (target.overlayKind === "explanation-card") {
@@ -903,6 +913,23 @@ export function InspectorControls({
       ) : null}
 
       {target?.kind === "caption" ? (
+        <div className="vb-inspector-tabs" role="tablist" aria-label="자막 조정 항목">
+          {CAPTION_TAB_ORDER.map((tab) => (
+            <Button
+              key={tab}
+              type="button"
+              variant="ghost"
+              className="vb-inspector-tabs__tab"
+              role="tab"
+              aria-selected={tab === captionTab}
+              disabled={disabled}
+              onClick={() => setCaptionTab(tab)}
+            >{CAPTION_TAB_LABELS[tab]}</Button>
+          ))}
+        </div>
+      ) : null}
+
+      {target?.kind === "caption" && captionTab === "style" ? (
         <fieldset>
           <legend>자막 스타일</legend>
           {projectId ? <CaptionPresetPicker
@@ -965,7 +992,7 @@ export function InspectorControls({
 
           `원본`이 늘 첫 칸이다 -- 되돌릴 곳이 안 보이면 번역을 눌러 보기가
           겁난다. 되돌려도 번역은 지워지지 않고 그대로 남는다. */}
-      {target?.kind === "caption" ? (
+      {target?.kind === "caption" && captionTab === "language" ? (
         <fieldset>
           <legend>자막 언어</legend>
           <div className="vb-caption-languages">
@@ -1007,7 +1034,7 @@ export function InspectorControls({
           자막과 목소리가 같은 번역을 쓰는 것이 중요하다. 따로 번역하면 화면에
           보이는 말과 들리는 말이 어긋나고, 창작자가 자막을 고쳐도 목소리는
           옛말을 계속 읽는다. */}
-      {target?.kind === "caption" && translatedLanguages.length ? (
+      {target?.kind === "caption" && captionTab === "language" && translatedLanguages.length ? (
         <fieldset>
           <legend>목소리 더빙</legend>
           {/* 목소리가 하나도 없으면 **어디로 가면 되는지** 말해 준다. 여기서
