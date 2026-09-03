@@ -34,7 +34,6 @@ from videobox_storage.sqlite_schema import (
     HERMES_CAPABILITY_LEDGER_SCHEMA_STATEMENT,
     PROJECT_SCHEMA_STATEMENTS,
 )
-from videobox_domain_models.caption_style import CaptionStyle
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_domain_models.yujin_creator_proposals import (
     CaptionTextParameters,
@@ -298,18 +297,28 @@ def _session_matches_yujin_b4_command(
         )
     if command_kind == "set_caption_style":
         # 유진이 보낸 칸(11개, `yujin_creator_proposals.EditorCaptionStyle`
-        # 고정 스키마)과 세션에 저장된 칸을 그냥 비교하면 안 맞는다 -- 저장은
-        # `CaptionStyle.from_dict(...).to_dict()`를 거쳐 굵게·기울임·자간
-        # 기본값(2026-09-03 추가)까지 채워서 14개가 되기 때문이다. 원문
-        # 그대로 대조하면 유진이 자막 모양을 바꿀 때마다 매번 증명 불일치로
-        # 막힌다 -- 나중에 칸이 늘 때마다 반복될 함정이라 **양쪽 다 같은
-        # 정규화를 거쳐** 비교한다.
-        try:
-            expected_style = CaptionStyle.from_dict(controls.get("style")).to_dict()
-        except (TypeError, ValueError):
+        # 고정 스키마)과 세션에 저장된 칸을 **통째로** 맞대면 안 된다. 굵게·
+        # 기울임·자간(2026-09-03 추가)처럼 유진이 모르는 칸이 CaptionStyle
+        # 정본에 늘어나면, 저장은 이제 그런 칸까지 갖고 있는데 유진의 제안은
+        # 여전히 11개뿐이다. 전체를 맞대면 두 가지 함정이 번갈아 온다:
+        # 원문 그대로 대조하면 유진이 뭘 바꿔도 매번 증명 불일치가 나고,
+        # 양쪽을 정규화(기본값 채우기)해서 맞대면 이번엔 **저장 쪽이 실제로
+        # 창작자가 정한 굵게·자간을 유진 제안 적용 한 번에 기본값으로
+        # 지워야만** 증명이 통과한다 -- 유진이 자막 색 하나만 바꾸려다
+        # 창작자가 방금 켠 굵게를 조용히 꺼 버리는 것이다.
+        #
+        # 그래서 **유진이 보낸 칸만** 대조한다. 저장 쪽에 유진이 모르는 칸이
+        # 남아 있어도(창작자가 직접 정한 값을 그대로 지켰다는 뜻) 상관없다 --
+        # 유진이 실제로 제안한 것이 그대로 반영됐는지만 증명하면 된다.
+        submitted_style = controls.get("style")
+        if not isinstance(submitted_style, Mapping):
             return False
         return any(
-            _json_plain_value(item.get("caption_style")) == _json_plain_value(expected_style)
+            isinstance(item.get("caption_style"), Mapping)
+            and all(
+                _json_plain_value(item["caption_style"].get(key)) == _json_plain_value(value)
+                for key, value in submitted_style.items()
+            )
             for item in targets
         )
     if command_kind == "apply_tts_candidate":

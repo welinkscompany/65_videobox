@@ -1269,6 +1269,125 @@ def test_non_image_yujin_terminal_attestation_rejects_substituted_controls(
     assert accepted.json()["session_revision"] == 2
 
 
+def test_applying_a_yujin_caption_style_candidate_keeps_fields_yujin_does_not_know_about(
+    tmp_path: Path,
+) -> None:
+    """2026-09-04 코드리뷰로 잡힘.
+
+    유진의 자막 모양 제안 스키마(`yujin_creator_proposals.EditorCaptionStyle`)는
+    열한 칸뿐이라 굵게·기울임·자간(2026-09-03 추가)을 모른다. 세션 저장은
+    `CaptionStyle.from_dict(...)`가 빠진 칸을 기본값(꺼짐)으로 채우므로,
+    창작자가 세부 정보 칸에서 직접 켠 굵게·자간이 유진의 사소한 색 제안 하나에
+    조용히 지워질 뻔했다 -- 셋 다 독립 리뷰 각도에서 잡아냈다.
+
+    이 시험은 창작자가 먼저 굵게·자간을 켠 상태에서 유진의(그 칸을 모르는)
+    제안을 적용해도 그 값이 그대로 남는 것을 지킨다.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "attested caption style merge"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{
+                "segment_id": "seg",
+                "caption_text": "기존 자막",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "cut_action": "keep",
+                "review_required": False,
+                # 창작자가 직접 켠 값 -- 유진은 이 두 칸을 모른다.
+                "caption_style": {
+                    "font_family": "Pretendard",
+                    "font_size_px": 42,
+                    "text_color": "#FFFFFFFF",
+                    "outline_color": "#000000FF",
+                    "outline_width_px": 2,
+                    "background_color": "#00000000",
+                    "position_x_percent": 50,
+                    "position_y_percent": 88,
+                    "horizontal_align": "center",
+                    "safe_area_enabled": True,
+                    "shadow_blur_px": 0,
+                    "bold": True,
+                    "italic": False,
+                    "letter_spacing_px": 18,
+                },
+            }],
+            "history": [],
+        },
+    )
+    yujin_style = {
+        "font_family": "Pretendard",
+        "font_size_px": 64,
+        "text_color": "#00FF00FF",
+        "outline_color": "#000000FF",
+        "outline_width_px": 2,
+        "background_color": "#00000000",
+        "position_x_percent": 50,
+        "position_y_percent": 88,
+        "horizontal_align": "center",
+        "safe_area_enabled": True,
+        "shadow_blur_px": 0,
+    }
+    candidate = DirectorCandidate(
+        candidate_id="attested-caption-style-merge",
+        visible_reference_code="P00-CAPTION-STYLE-MERGE-01",
+        media_type="caption",
+        asset_id="attested-caption-style-merge",
+        library_asset_id=None,
+        reason_chips=("caption_style",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={"scope": "current_caption", "style": yujin_style},
+        expected_content_sha256=None,
+        media_revision="control-r1",
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "caption",
+            "yujin_actionable_operation": True,
+            "command_kind": "set_caption_style",
+            "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = _save_generalized_yujin_proposal(
+        store=store,
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        proposal_id="attested-caption-style-merge-proposal",
+        candidates=(candidate,),
+    )
+    base = f"/api/projects/{project_id}"
+    assert client.post(f"{base}/director/proposals/{proposal.proposal_id}/preflight").status_code == 200
+
+    applied = client.patch(
+        f"{base}/editing-sessions/{session['session_id']}/caption-style",
+        json={
+            "scope": "current_caption",
+            "segment_ids": ["seg"],
+            "style": yujin_style,
+            "expected_revision": 1,
+            "proposal_id": proposal.proposal_id,
+            "candidate_id": candidate.candidate_id,
+        },
+    )
+
+    assert applied.status_code == 200, applied.text
+    stored_style = applied.json()["segments"][0]["caption_style"]
+    # 유진이 제안한 칸은 새 값으로 바뀐다.
+    assert stored_style["font_size_px"] == 64
+    assert stored_style["text_color"] == "#00FF00FF"
+    # 유진이 모르는 칸은 창작자가 정한 값 그대로 남는다 -- 기본값으로 지워지지 않는다.
+    assert stored_style["bold"] is True
+    assert stored_style["letter_spacing_px"] == 18
+
+
 @pytest.mark.parametrize(
     ("route_suffix", "payload"),
     [

@@ -388,9 +388,31 @@ class EditingSessionRegenerationMixin:
 
     def update_editing_session_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int, proposal_id: str | None = None, candidate_id: str | None = None) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        updated = update_caption_style(session=session, style=style, scope=scope, segment_ids=segment_ids)
         target_segment_id = segment_ids[0] if len(segment_ids) == 1 else ""
+        write_style = style
+        if proposal_id is not None and candidate_id is not None and target_segment_id:
+            # **유진이 제안한 열한 칸만 덮어쓴다.** 유진의 제안 스키마
+            # (`yujin_creator_proposals.EditorCaptionStyle`)는 굵게·기울임·
+            # 자간(2026-09-03 추가)을 모른다. 그대로 통째로 덮으면
+            # `CaptionStyle.from_dict`가 그 세 칸을 기본값(꺼짐)으로 채워서,
+            # 창작자가 방금 세부 정보 칸에서 켜 둔 굵게·자간이 유진의 사소한
+            # 색 제안 하나에 조용히 지워진다. 유진이 관여하는 칸만 새 값으로
+            # 바꾸고 나머지는 지금 저장된 값을 그대로 들고 간다 -- 수동 편집은
+            # 매번 전체 칸을 보내므로 이 자리를 안 타서 영향이 없다.
+            current_style = self._current_caption_style(session=session, segment_id=target_segment_id)
+            if current_style is not None:
+                write_style = {**current_style, **style}
+        updated = update_caption_style(session=session, style=write_style, scope=scope, segment_ids=segment_ids)
         return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_style", segment_id=target_segment_id, controls={"scope": scope, "style": style})
+
+    @staticmethod
+    def _current_caption_style(*, session: dict[str, Any], segment_id: str) -> dict[str, Any] | None:
+        """이 장면에 지금 저장된 자막 모양. 없으면 `None`(뒤덮을 것이 없다)."""
+        for segment in session.get("segments", []):
+            if isinstance(segment, dict) and str(segment.get("segment_id")) == segment_id:
+                current = segment.get("caption_style")
+                return dict(current) if isinstance(current, dict) else None
+        return None
     def update_editing_session_segment_caption(
         self,
         *,

@@ -132,6 +132,36 @@ describe("목소리 녹음으로 시작", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("녹음 파일을 먼저 골라 주세요");
   });
 
+  it("올린 파일이 실패하면 다시 고르라고 말한다 -- '다시 녹음'은 파일을 고른 사람에게 할 수 없는 말이다", async () => {
+    // 2026-09-04 코드리뷰로 잡힘: 마이크 녹음과 파일 올리기가 같은 오류 안내를
+    // 썼다. 파일을 올린 사람은 마이크를 쓴 적이 없어 "다시 녹음해 주세요"를
+    // 따를 수 없다.
+    vi.spyOn(api, "uploadSourceVoice").mockRejectedValue(new ApiRequestError("source_voice_has_no_speech", 422, "/api/x"));
+    render(<VoiceRecordStart projectId="project_1" onReady={vi.fn()} />);
+
+    const file = new File(["audio"], "무음.wav", { type: "audio/wav" });
+    fireEvent.change(screen.getByLabelText("녹음 파일 선택"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "파일에서 대본 만들기" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("이 파일에는 말소리가 없어요");
+    // "다시 녹음해 주세요"는 파일을 고른 사람에게 할 수 없는 말이다 -- 마이크를
+    // 쓴 적이 없다. "녹음 파일" 자체를 가리키는 말(할 수 있는 일 안내)은 괜찮다.
+    expect(alert).not.toHaveTextContent("다시 녹음");
+  });
+
+  it("마이크로 녹음한 것이 무음이면 여전히 마이크를 확인하라고 말한다", async () => {
+    // 위 시험의 반대짝 -- 마이크 경로는 문구가 안 바뀌었는지 지킨다.
+    vi.spyOn(api, "uploadSourceVoice").mockRejectedValue(new ApiRequestError("source_voice_has_no_speech", 422, "/api/x"));
+    stubMicrophone();
+    render(<VoiceRecordStart projectId="project_1" onReady={vi.fn()} />);
+
+    await recordAndStop();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("마이크가 켜져 있는지 확인하고 다시 녹음해 주세요");
+  });
+
   it("마이크 권한이 없으면 이유를 말한다", async () => {
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,

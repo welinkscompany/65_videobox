@@ -290,3 +290,26 @@ def test_burned_caption_paints_both_the_background_box_and_the_outline(tmp_path:
 
     assert green > 2000, f"배경 상자가 칠해지지 않았다: {counts.most_common(6)}"
     assert red_outline > 200, f"외곽선이 상자에 먹혔다: {counts.most_common(6)}"
+
+
+def _ass_style_field(ass_text: str, index: int) -> str:
+    """`Style:` 줄 하나에서 콤마로 나눈 필드 하나. `Fontsize`=2, `Spacing`=13."""
+    line = next(row for row in ass_text.splitlines() if row.startswith("Style: Default,"))
+    return line.split(",")[index]
+
+
+def test_letter_spacing_scales_with_video_height_like_font_size_does() -> None:
+    """2026-09-04 코드리뷰로 잡힘: `Fontsize`는 `video_height / 1080`에 비례해서
+    세로 영상에서도 자막 비율이 같은데, 새로 더한 `Spacing`(자간)은 그 비율을
+    안 타고 있었다 -- 세로 영상에서는 글자가 커지는데 자간은 그대로라 상대적으로
+    좁아 보였을 것이다."""
+    style = {"font_size_px": 100, "letter_spacing_px": 20}
+    session = {"caption_style": style, "segments": [{"caption_text": "자간 확인", "start_sec": 0.0, "end_sec": 1.0}]}
+
+    small = render_editing_session_ass(session, video_width=640, video_height=360)
+    large = render_editing_session_ass(session, video_width=1920, video_height=1080)
+
+    assert _ass_style_field(small, 2) == "33"  # round(100 * 360 / 1080)
+    assert _ass_style_field(large, 2) == "100"
+    assert _ass_style_field(small, 13) == "7"  # round(20 * 360 / 1080)
+    assert _ass_style_field(large, 13) == "20"

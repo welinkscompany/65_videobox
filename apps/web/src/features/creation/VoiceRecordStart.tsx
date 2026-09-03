@@ -6,23 +6,32 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 
 /** 서버가 붙여 보낸 이유를 owner가 **할 수 있는 일**로 옮긴다.
- *  `SourceVideoStart.tsx`의 같은 자리와 같은 이유다 -- 무엇을 바꿔야 하는지를 말한다. */
-const messageByDetail: Record<string, string> = {
-  source_voice_has_no_speech: "이 녹음에는 말소리가 없어요. 마이크가 켜져 있는지 확인하고 다시 녹음해 주세요.",
-  source_voice_upload_invalid: "받아쓸 수 없는 형식이에요. 다시 녹음해 주세요.",
-  source_voice_upload_too_large: "녹음이 너무 길어요. 조금 더 짧게 나눠서 다시 녹음해 주세요.",
+ *  `SourceVideoStart.tsx`의 같은 자리와 같은 이유다 -- 무엇을 바꿔야 하는지를 말한다.
+ *
+ *  마이크 녹음과 파일 올리기가 이 안내를 같이 쓴다(둘 다 `upload()`를 지난다).
+ *  "다시 녹음해 주세요"는 파일을 고른 사람에게는 할 수 없는 말이다 -- 마이크를
+ *  쓴 적이 없다. 문제가 된 파일을 다시 고르라고 해야 실제로 할 수 있는 일이다
+ *  (2026-09-04 코드리뷰로 잡힘). 그래서 안내를 `source`별로 나눈다. */
+type VoiceSource = "recording" | "file";
+const RETRY_ACTION: Record<VoiceSource, string> = {
+  recording: "다시 녹음해 주세요.",
+  file: "다른 녹음 파일을 골라 주세요.",
 };
-const TOO_LONG = "녹음이 길어서 받아쓰기를 제 시간에 마치지 못했어요. 조금 더 짧게 나눠서 다시 녹음해 주세요.";
-const TOO_BIG = "녹음이 너무 커요. 조금 더 짧게 나눠서 다시 녹음해 주세요.";
-const UNKNOWN = "녹음에서 대본을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.";
 
-function messageFor(error: unknown): string {
+function messageFor(error: unknown, source: VoiceSource): string {
+  const action = RETRY_ACTION[source];
   const detail = (error as { detail?: string | null })?.detail ?? null;
-  if (detail && messageByDetail[detail]) return messageByDetail[detail];
+  if (detail === "source_voice_has_no_speech") {
+    return source === "recording"
+      ? `이 녹음에는 말소리가 없어요. 마이크가 켜져 있는지 확인하고 ${action}`
+      : `이 파일에는 말소리가 없어요. ${action}`;
+  }
+  if (detail === "source_voice_upload_invalid") return `받아쓸 수 없는 형식이에요. ${action}`;
+  if (detail === "source_voice_upload_too_large") return `녹음이 너무 길어요. 조금 더 짧게 나눠서 ${action}`;
   const status = (error as { status?: number })?.status;
-  if (status === 504 || status === 408) return TOO_LONG;
-  if (status === 413) return TOO_BIG;
-  return UNKNOWN;
+  if (status === 504 || status === 408) return `녹음이 길어서 받아쓰기를 제 시간에 마치지 못했어요. 조금 더 짧게 나눠서 ${action}`;
+  if (status === 413) return `녹음이 너무 커요. 조금 더 짧게 나눠서 ${action}`;
+  return "녹음에서 대본을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.";
 }
 
 const reasonLabel: Record<RetakeCandidate["reason"], string> = {
@@ -75,7 +84,7 @@ export function VoiceRecordStart({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const recordingStreamRef = useRef<MediaStream | null>(null);
 
-  async function upload(file: File) {
+  async function upload(file: File, source: VoiceSource) {
     setIsReading(true);
     setError(null);
     try {
@@ -85,7 +94,7 @@ export function VoiceRecordStart({
       setExcludedIndices(initiallyExcluded);
       setScriptText(rebuildScript(start.segments, initiallyExcluded));
     } catch (caught) {
-      setError(messageFor(caught));
+      setError(messageFor(caught, source));
     } finally {
       setIsReading(false);
     }
@@ -104,7 +113,7 @@ export function VoiceRecordStart({
         recordingStreamRef.current = null;
         setRecording(false);
         const file = new File([new Blob(chunks, { type: recorder.mimeType || "audio/webm" })], "녹음한-목소리.webm", { type: recorder.mimeType || "audio/webm" });
-        void upload(file);
+        void upload(file, "recording");
       };
       recorderRef.current = recorder;
       recordingStreamRef.current = stream;
@@ -128,7 +137,7 @@ export function VoiceRecordStart({
       return;
     }
     setError(null);
-    void upload(file);
+    void upload(file, "file");
   }
 
   function toggleExcluded(segmentIndex: number) {

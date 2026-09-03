@@ -73,6 +73,15 @@ def _caption_font_size_px(value: CaptionStyle, video_height: int) -> int:
     return max(1, round(value.font_size_px * video_height / 1080))
 
 
+def _caption_letter_spacing_px(value: CaptionStyle, video_height: int) -> int:
+    """ASS `Spacing`도 글자 크기와 **같은 비율**로 늘려야 한다(2026-09-04
+    코드리뷰로 잡힘). 안 그러면 세로 영상(1920높이, 1.78배)에서 글자는
+    커지는데 자간은 그대로라 상대적으로 좁아 보인다 -- 편집 화면에서 잡아 둔
+    느낌과 완성본이 달라진다. 자간은 음수(글자를 좁힘)도 허용하므로 크기처럼
+    1 이상으로 바닥을 두지 않는다."""
+    return round(value.letter_spacing_px * video_height / 1080)
+
+
 def _wrapped_line_count(text: str, *, size: int, usable_width: int) -> int:
     """libass가 이 문장을 몇 줄로 접을지 어림한다.
 
@@ -229,9 +238,10 @@ def render_editing_session_ass(editing_session: dict[str, Any], *, video_width: 
         # 주지만 스펙에 맞춰 `-1`을 쓴다. `Spacing`은 글자 사이 여백(px)이다.
         bold = -1 if value.bold else 0
         italic = -1 if value.italic else 0
+        spacing = _caption_letter_spacing_px(value, video_height)
         return (
             f"Style: {name},{value.font_family},{size},{primary},{primary},"
-            f"{border_colour},{_UNUSED_SHADOW_COLOUR},{bold},{italic},0,0,100,100,{value.letter_spacing_px},0,"
+            f"{border_colour},{_UNUSED_SHADOW_COLOUR},{bold},{italic},0,0,100,100,{spacing},0,"
             f"{border_style},{border_width},0,{alignment},{margin_l},{margin_r},{margin_v},1"
         )
 
