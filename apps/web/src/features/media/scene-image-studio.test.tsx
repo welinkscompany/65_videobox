@@ -24,6 +24,49 @@ describe("장면 그림 만들기", () => {
     expect(screen.getByLabelText("2번째 장면 그림·영상 설명")).toHaveValue("이렇게 하면 편집이 반으로 줄어요.");
   });
 
+  it("상업적으로 못 쓰는 그림이면 그림 옆에서 말해 준다", async () => {
+    // 대표님 채널은 수익이 난다. 지금 쓰는 그림 모델(`flux1-dev`)은 상업 이용이
+    // 막혀 있는데, **서버는 그걸 알고 보내면서 화면은 한 번도 안 보여 줬다**
+    // (2026-09-03 확인). 나중에 알면 이미 영상에 넣은 뒤다.
+    vi.spyOn(api, "createSceneImage").mockResolvedValue({
+      image_asset_id: "asset_image_1", scene_asset_id: "asset_clip_1", segment_id: "script-2",
+      title: "2번째 장면 그림", prompt: "이렇게 하면 편집이 반으로 줄어요.", seed: 12,
+      commercial_use_is_unrestricted: false,
+    } as never);
+
+    render(<SceneImageStudio projectId="project_a" gap={gap} />);
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
+
+    expect(await screen.findByText(/수익 내는 영상에는 쓸 수 없어요/)).toBeVisible();
+  });
+
+  it("상업 이용을 알 수 없으면 모른다고 말한다 — 괜찮다고 하지 않는다", async () => {
+    vi.spyOn(api, "createSceneImage").mockResolvedValue({
+      image_asset_id: "asset_image_1", scene_asset_id: "asset_clip_1", segment_id: "script-2",
+      title: "2번째 장면 그림", prompt: "이렇게 하면 편집이 반으로 줄어요.", seed: 12,
+      commercial_use_is_unrestricted: null,
+    } as never);
+
+    render(<SceneImageStudio projectId="project_a" gap={gap} />);
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
+
+    expect(await screen.findByText(/확인되지 않았어요/)).toBeVisible();
+  });
+
+  it("상업적으로 써도 되는 그림에는 군더더기 문구를 안 붙인다", async () => {
+    vi.spyOn(api, "createSceneImage").mockResolvedValue({
+      image_asset_id: "asset_image_1", scene_asset_id: "asset_clip_1", segment_id: "script-2",
+      title: "2번째 장면 그림", prompt: "이렇게 하면 편집이 반으로 줄어요.", seed: 12,
+      commercial_use_is_unrestricted: true,
+    } as never);
+
+    render(<SceneImageStudio projectId="project_a" gap={gap} />);
+    fireEvent.click(screen.getByRole("button", { name: "AI 이미지 생성" }));
+
+    await screen.findByRole("img");
+    expect(screen.queryByText(/쓸 수 없어요|확인되지 않았어요/)).toBeNull();
+  });
+
   it("만든 그림을 보여 준다 — 만들었다고 말만 하지 않는다", async () => {
     const created = vi.spyOn(api, "createSceneImage").mockResolvedValue({
       image_asset_id: "asset_image_1", scene_asset_id: "asset_clip_1", segment_id: "script-2",

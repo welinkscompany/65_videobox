@@ -100,6 +100,11 @@ export function SceneImageStudio({
   const [isMaking, setIsMaking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [madeAssetId, setMadeAssetId] = useState<string | null>(null);
+  //: 만든 그림을 **상업적으로 써도 되는지.** `null`이면 모른다는 뜻이다.
+  //: 지금 쓰는 그림 모델(`flux1-dev`)은 상업 이용이 막혀 있는데, 서버는 그걸
+  //: 알고 보내 주면서 화면은 한 번도 안 보여 주고 있었다(2026-09-03 확인).
+  //: 대표님 채널은 수익이 나므로 **모르고 쓰면 안 되는 정보다.**
+  const [commercialUseOk, setCommercialUseOk] = useState<boolean | null | undefined>(undefined);
   const fieldId = `scene-image-${gap.gapSlotId}`;
   // 진짜 동영상(Wan)은 그림과 **같은 설명 칸을 공유한다** -- 같은 장면을
   // 묘사하는 말이라 owner가 두 번 쓸 이유가 없다. 만드는 방식·시간만 다르다
@@ -131,6 +136,7 @@ export function SceneImageStudio({
         vertical,
       });
       setMadeAssetId(made.image_asset_id);
+      setCommercialUseOk(made.commercial_use_is_unrestricted ?? null);
       setStatus("그림을 만들었어요.");
       // 자산이 생긴 것과 그 장면이 채워진 것은 다른 일이다. 초안 준비를 다시
       // 돌려야 공백 목록이 바뀌므로, 만든 쪽이 그 사실을 부모에게 알린다 —
@@ -257,6 +263,21 @@ export function SceneImageStudio({
         {isMaking ? "이미지 생성 중" : "AI 이미지 생성"}
       </Button>
       {status ? <p role="status">{status}</p> : null}
+      {/* 만든 그림을 어디까지 쓸 수 있는지 **그림 옆에서** 말한다. 나중에
+          알면 이미 영상에 넣은 뒤다. 모르면 모른다고 말하고 아는 척하지
+          않는다 -- 괜찮다고 잘못 말하는 쪽이 훨씬 나쁘다. */}
+      {madeAssetId && commercialUseOk === false ? (
+        <p role="status">
+          이 그림은 <strong>수익 내는 영상에는 쓸 수 없어요.</strong> 지금 쓰는 그림
+          모델이 그렇게 정해 두었어요. 연습용·비공개 영상에는 괜찮아요.
+        </p>
+      ) : null}
+      {madeAssetId && commercialUseOk === null ? (
+        <p role="status">
+          이 그림을 수익 내는 영상에 써도 되는지 <strong>확인되지 않았어요.</strong>
+          쓰시기 전에 한 번 확인해 주세요.
+        </p>
+      ) : null}
       {madeAssetId ? (
         <img
           src={api.assetContentUrl(projectId, madeAssetId)}
