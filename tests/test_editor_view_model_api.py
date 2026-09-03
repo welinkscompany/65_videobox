@@ -61,7 +61,7 @@ def test_explicit_session_manifest_has_authoritative_typed_editor_contract(tmp_p
     assert body["tracks"][0]["track_type"] == "narration"
     assert body["tracks"][0]["clips"][0]["media_controls"] == {"volume": 0.8}
     assert body["tracks"][1]["clips"][0]["expected_content_sha256"] == "b" * 64
-    assert body["captions"] == [{"segment_id": "segment-1", "caption_id": "caption-segment-1-0", "placement_id": "caption:caption-segment-1-0", "text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "style": {"font_family": "Pretendard", "font_size_px": 48, "text_color": "#FFFFFFFF", "outline_color": "#000000FF", "outline_width_px": 3, "background_color": "#00000000", "position_x_percent": 50, "position_y_percent": 88, "horizontal_align": "center", "safe_area_enabled": True, "shadow_blur_px": 0}}]
+    assert body["captions"] == [{"segment_id": "segment-1", "caption_id": "caption-segment-1-0", "placement_id": "caption:caption-segment-1-0", "text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "style": {"font_family": "Pretendard", "font_size_px": 48, "text_color": "#FFFFFFFF", "outline_color": "#000000FF", "outline_width_px": 3, "background_color": "#00000000", "position_x_percent": 50, "position_y_percent": 88, "horizontal_align": "center", "safe_area_enabled": True, "shadow_blur_px": 0, "bold": False, "italic": False, "letter_spacing_px": 0}}]
     assert body["gap_slots"][0]["gap_id"] == "gap-1"
     assert body["source_status"] == {"status": "current", "source_session_id": session_id, "source_session_revision": 1}
     assert body["audition"]["asset_urls"]["asset-narration-1"].endswith("/assets/asset-narration-1/content")
@@ -101,6 +101,12 @@ def test_caption_style_patch_projects_exact_segment_style_into_playback_manifest
         "horizontal_align": "left",
         "safe_area_enabled": False,
         "shadow_blur_px": 6,
+        # 2026-09-03 owner 지적으로 더한 칸이다. 기본값이 아닌 값을 써서
+        # 왕복(저장 -> 편집본 -> 완성 계획서 읽기 전부)이 실제로 이 값을
+        # 옮기는지 재게 한다 -- 전부 기본값이면 빠뜨려도 시험이 못 잡는다.
+        "bold": True,
+        "italic": True,
+        "letter_spacing_px": 12,
     }
 
     saved = client.patch(

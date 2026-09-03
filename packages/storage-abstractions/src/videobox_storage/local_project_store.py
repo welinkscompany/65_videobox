@@ -34,6 +34,7 @@ from videobox_storage.sqlite_schema import (
     HERMES_CAPABILITY_LEDGER_SCHEMA_STATEMENT,
     PROJECT_SCHEMA_STATEMENTS,
 )
+from videobox_domain_models.caption_style import CaptionStyle
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_domain_models.yujin_creator_proposals import (
     CaptionTextParameters,
@@ -296,9 +297,19 @@ def _session_matches_yujin_b4_command(
             for item in targets
         )
     if command_kind == "set_caption_style":
+        # 유진이 보낸 칸(11개, `yujin_creator_proposals.EditorCaptionStyle`
+        # 고정 스키마)과 세션에 저장된 칸을 그냥 비교하면 안 맞는다 -- 저장은
+        # `CaptionStyle.from_dict(...).to_dict()`를 거쳐 굵게·기울임·자간
+        # 기본값(2026-09-03 추가)까지 채워서 14개가 되기 때문이다. 원문
+        # 그대로 대조하면 유진이 자막 모양을 바꿀 때마다 매번 증명 불일치로
+        # 막힌다 -- 나중에 칸이 늘 때마다 반복될 함정이라 **양쪽 다 같은
+        # 정규화를 거쳐** 비교한다.
+        try:
+            expected_style = CaptionStyle.from_dict(controls.get("style")).to_dict()
+        except (TypeError, ValueError):
+            return False
         return any(
-            _json_plain_value(item.get("caption_style"))
-            == _json_plain_value(controls.get("style"))
+            _json_plain_value(item.get("caption_style")) == _json_plain_value(expected_style)
             for item in targets
         )
     if command_kind == "apply_tts_candidate":
