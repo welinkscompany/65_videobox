@@ -134,3 +134,33 @@ describe("간격과 글자는 한 척도에서만 나온다", () => {
     });
   }
 });
+
+describe("대화상자 밖에서도 단추가 브라우저 기본 테두리로 새지 않는다", () => {
+  // 2026-09-04 실측: Radix Dialog/Popover는 `document.body`의 직계 자식으로
+  // 포털되어 `.vb-product-shell` 조상이 없다. `ghost`·`secondary`·
+  // `destructive`·`link`는 그 조상에 건 border 리셋이 아예 없어서, "유진에게
+  // 제목 추천받기" 목록을 열면 브라우저 기본 2px outset 테두리와 회색
+  // 배경이 그대로 보였다. `:where(...)`로 특정도 0인 백스톱을 셸 밖에도
+  // 두어 고쳤다 -- `.vb-editor-assets__tab` 같은 기존 테두리 스타일은
+  // 특정도가 더 높아 그대로 이긴다(product-shell.css의 관련 주석 참고).
+  const VARIANTS = ["default", "outline", "ghost", "secondary", "destructive", "link"] as const;
+
+  it("여섯 변형 전부 :where() 백스톱이 border:0을 건다", () => {
+    for (const variant of VARIANTS) {
+      const pattern = new RegExp(
+        `:where\\([^)]*\\[data-variant="${variant}"\\][^)]*\\)\\s*\\{[^}]*border:\\s*0`,
+      );
+      expect(productShellCss, `${variant} 변형에 :where() 백스톱이 없다`).toMatch(pattern);
+    }
+  });
+
+  it("그 백스톱 규칙은 .vb-product-shell 조상을 요구하지 않는다", () => {
+    // `:where(...)` 앞에 `.vb-product-shell`이 붙으면 포털 밖(대화상자 등)에는
+    // 다시 안 닿는다 -- 이번에 고친 결함이 그대로 되돌아온다.
+    const whereRules = productShellCss.match(/[^\n{}]*:where\([^)]*data-variant[^)]*\)[^{]*\{[^}]*\}/g) ?? [];
+    expect(whereRules.length).toBeGreaterThan(0);
+    for (const rule of whereRules) {
+      expect(rule, `${rule} 앞에 .vb-product-shell 조상 스코프가 있다`).not.toMatch(/\.vb-product-shell\s+:where/);
+    }
+  });
+});
