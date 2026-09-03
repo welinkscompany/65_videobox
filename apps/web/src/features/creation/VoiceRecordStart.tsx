@@ -62,6 +62,11 @@ export function VoiceRecordStart({
   disabled?: boolean;
 }) {
   const [recording, setRecording] = useState(false);
+  // 이미 녹음돼 있는 파일을 고르는 길. 마이크 녹음과 짝인 `SourceVideoStart.tsx`는
+  // 처음부터 파일 선택만 있었는데, 여기는 마이크 녹음만 있고 **파일을 고르는
+  // 자리가 없었다** -- `upload()`는 이미 어떤 File이든 받는데 부르는 자리가
+  // 하나뿐이었다(owner 지적 2026-09-03: "내가 녹음 한 파일을 업로드하면").
+  const [file, setFile] = useState<File | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [heard, setHeard] = useState<SourceVoiceStart | null>(null);
@@ -114,6 +119,16 @@ export function VoiceRecordStart({
 
   function stopRecording() {
     recorderRef.current?.stop();
+  }
+
+  async function readFile() {
+    if (isReading) return;
+    if (!file) {
+      setError("녹음 파일을 먼저 골라 주세요.");
+      return;
+    }
+    setError(null);
+    void upload(file);
   }
 
   function toggleExcluded(segmentIndex: number) {
@@ -191,6 +206,21 @@ export function VoiceRecordStart({
         </Button>
       )}
       {recording ? <p role="status">녹음 중이에요. 다 말씀하셨으면 대본 녹음 마치기를 눌러 주세요.</p> : null}
+      {/* 이미 녹음해 둔 파일이 있으면 마이크로 다시 읽을 필요가 없다. */}
+      <p>이미 녹음해 둔 파일이 있으면 그대로 올려도 돼요.</p>
+      <label htmlFor="source-voice-file">녹음 파일 선택</label>
+      <p id="source-voice-file-help">WAV · MP3 · M4A · OGG · WEBM · 128MB 이하</p>
+      <Input
+        id="source-voice-file"
+        type="file"
+        accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm"
+        aria-describedby="source-voice-file-help"
+        disabled={disabled || isReading || recording}
+        onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(null); }}
+      />
+      <Button type="button" disabled={disabled || isReading || recording} onClick={() => void readFile()}>
+        {isReading ? "받아쓰는 중이에요" : "파일에서 대본 만들기"}
+      </Button>
       {isReading ? <p role="status">녹음 길이에 따라 몇 분 걸릴 수 있어요. 이 화면을 열어 둔 채 기다려 주세요.</p> : null}
       {error ? <p role="alert">{error}</p> : null}
     </section>

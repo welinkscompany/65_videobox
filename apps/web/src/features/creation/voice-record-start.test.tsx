@@ -107,6 +107,31 @@ describe("목소리 녹음으로 시작", () => {
     expect(screen.queryByRole("region", { name: "다시 들어볼 구간" })).toBeNull();
   });
 
+  it("이미 녹음해 둔 파일을 올려도 같은 길로 대본을 만든다", async () => {
+    // 2026-09-03 owner 지적: "내가 녹음 한 파일을 업로드하면 자동으로 음성을
+    // 읽어서 자막으로 깔아주는 이 방식도 있어야하는 기준이야." `upload()`는
+    // 이미 어떤 File이든 받았지만 부르는 자리가 마이크 녹음 하나뿐이었다 --
+    // 짝인 `SourceVideoStart.tsx`는 처음부터 파일 선택이 있었다.
+    vi.spyOn(api, "uploadSourceVoice").mockResolvedValue(heard);
+    render(<VoiceRecordStart projectId="project_1" onReady={vi.fn()} />);
+
+    const file = new File(["audio"], "내레이션.wav", { type: "audio/wav" });
+    fireEvent.change(screen.getByLabelText("녹음 파일 선택"), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole("button", { name: "파일에서 대본 만들기" }));
+
+    const script = await screen.findByLabelText("대본으로 쓸 글");
+    expect(script).toHaveValue("오늘은 라면을 끓여볼게요. 뜨거운 물을 준비해요.");
+    expect(api.uploadSourceVoice).toHaveBeenCalledWith("project_1", file);
+  });
+
+  it("파일을 고르지 않고 누르면 먼저 고르라고 말한다", async () => {
+    render(<VoiceRecordStart projectId="project_1" onReady={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "파일에서 대본 만들기" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("녹음 파일을 먼저 골라 주세요");
+  });
+
   it("마이크 권한이 없으면 이유를 말한다", async () => {
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
