@@ -757,8 +757,17 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       </div>
       <div data-timeline-track data-testid="timeline-track" onPointerCancel={cancelPointerDraft} onPointerMove={movePointerDraft} onPointerUp={endPointerDraft} style={{ position: "relative" }}>
       <div aria-label="고정 트랙" role="list">
-        {TIMELINE_LANES.map((lane) => <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative" }}>
-          <span>{laneLabel[lane]}</span>
+        {/* **클립 위에 떠 있어야 한다.** 클립 층은 트랙 전체를 `inset: 0`으로
+            덮는데(아래 `타임라인 클립`), 이 줄이 그 아래 깔려 있어서 0초에서
+            시작하는 클립이 있으면 트랙 이름과 잠금·눈·음소거가 **통째로
+            가려졌다** -- 보이지도 않고 눌리지도 않았다(2026-09-03 실측: 트랙
+            버튼 13개 전부, 누르면 클립이 대신 선택됐다).
+
+            빈 자리는 그대로 통과시킨다. 안 그러면 이 줄이 트랙 폭 전체를
+            차지해서 이번엔 클립을 못 누른다. 이 파일이 클립 안 손잡이에
+            쓰는 방식과 같다. */}
+        {TIMELINE_LANES.map((lane) => <div key={lane} aria-label={laneLabel[lane]} role="listitem" style={{ height: `${LANE_HEIGHT_PX}px`, borderTop: "1px solid currentColor", position: "relative", zIndex: 1, pointerEvents: "none" }}>
+          <span style={{ pointerEvents: "auto" }}>{laneLabel[lane]}</span>
           {/* **잠금 · 눈 · 음소거**(`capcut-observed` 기록 §2: "트랙마다 왼쪽에
               잠금 · 눈 · 음소거 · `···`"). 셋의 성격이 다르다 --
               **잠금**은 화면 안에서만 쓰는 것이라 여기 상태로 끝나고(새로고침하면
@@ -768,6 +777,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           <button
             type="button"
             data-native-control="timeline-lane-lock"
+            style={{ pointerEvents: "auto" }}
             aria-label={`${laneLabel[lane]} 트랙 잠금`}
             aria-pressed={lockedLanes.has(lane)}
             onClick={() => toggleLaneLock(lane)}
@@ -779,6 +789,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           {HIDEABLE_LANES.has(lane) ? <button
             type="button"
             data-native-control="timeline-lane-hidden"
+            style={{ pointerEvents: "auto" }}
             aria-label={`${laneLabel[lane]} 트랙 숨기기`}
             aria-pressed={hiddenLanes.has(lane)}
             disabled={!onUpdateTrackStates || isSaving}
@@ -789,6 +800,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           {MUTABLE_LANES.has(lane) ? <button
             type="button"
             data-native-control="timeline-lane-muted"
+            style={{ pointerEvents: "auto" }}
             aria-label={`${laneLabel[lane]} 트랙 음소거`}
             aria-pressed={mutedLanes.has(lane)}
             disabled={!onUpdateTrackStates || isSaving}

@@ -563,6 +563,26 @@ describe("TimelineDock", () => {
     expect(screen.getByRole("group", { name: "타임라인 클립" })).not.toBe(laneList);
   });
 
+  it("트랙 이름과 잠금·눈·음소거가 클립에 가리지 않는다", () => {
+    // **2026-09-03 실측:** 클립 층은 트랙 전체를 `inset: 0`으로 덮는다. 고정 트랙
+    // 줄이 그 아래 깔려 있어서, 0초에서 시작하는 클립이 있으면 트랙 이름과 버튼이
+    // 통째로 가려졌다 -- 클립 배경이 불투명이라 **보이지도 않고**, 누르면 버튼이
+    // 아니라 **클립이 선택됐다**(브라우저에서 트랙 버튼 13개 전부 확인).
+    //
+    // jsdom은 자리를 계산하지 않아 "가려졌다"를 직접 잴 수 없다. 그래서 가리지
+    // 않게 하는 두 조건을 지킨다: 클립 층보다 위에 있을 것, 그리고 빈 자리는
+    // 통과시켜 이번엔 반대로 클립을 못 누르는 일이 없을 것.
+    render(<TimelineDock view={view} viewportWidthPx={400} />);
+
+    const laneRow = screen.getByRole("list", { name: "고정 트랙" }).children[0] as HTMLElement;
+    expect(Number(laneRow.style.zIndex)).toBeGreaterThan(0);
+    expect(laneRow.style.pointerEvents).toBe("none");
+
+    for (const name of ["내레이션 트랙 잠금", "내레이션 트랙 음소거"]) {
+      expect(screen.getByRole("button", { name }).style.pointerEvents).toBe("auto");
+    }
+  });
+
   it("locks a track so its clips cannot be trimmed or moved until unlocked again", () => {
     // owner 지시 2026-08-22: 트랙 잠금이 있어야 한다. 이 잠금은 세션 동안만 유지되고
     // (새로고침하면 풀림), 눌린 트랙의 자르기·순서 바꾸기·이동 버튼을 막는다.
