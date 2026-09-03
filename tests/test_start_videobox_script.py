@@ -334,6 +334,50 @@ def test_a_missing_voice_program_does_not_block_videobox(tmp_path: Path) -> None
     assert _voice_step(result)["status"] == "skipped"
 
 
+def test_the_launcher_parses_under_windows_powershell_5(tmp_path: Path) -> None:
+    """**아이콘은 Windows PowerShell 5.1로 켜진다.** 거기서 못 읽는 문법을 쓰면 안 된다.
+
+    5.1에는 `?.`(null-conditional)나 `??` 같은 PowerShell 7 문법이 없다. 하나만
+    써도 **파일 전체가 파싱 단계에서 죽어** 스크립트가 한 줄도 안 돈다. 실제로
+    한 번 그렇게 됐는데, 다른 시험들은 "출력이 비었다"로만 나와서 원인을
+    안 짚어 줬다. 그래서 파싱만 따로 본다 -- 실패하면 원인이 이름에 적혀 있다.
+    """
+    for script in (LAUNCHER, SHORTCUT_SCRIPT):
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                "$e = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile("
+                f"'{script}', [ref]$null, [ref]$e); "
+                "if ($e.Count) { $e | ForEach-Object { $_.Message }; exit 1 }",
+            ],
+            capture_output=True, text=True, encoding="utf-8", timeout=120,
+        )
+        assert result.returncode == 0, f"{script.name}: {result.stdout}{result.stderr}"
+
+
+def test_a_voice_program_that_cannot_be_started_does_not_block_videobox(tmp_path: Path) -> None:
+    """**켜다 실패해도 아이콘은 VideoBox를 켠다.**
+
+    이 스크립트는 `ErrorActionPreference = Stop`이라, 목소리 켜는 줄을 감싸지
+    않으면 거기서 난 오류가 **아이콘 전체를 죽인다** -- 화면도 안 열린다.
+    실패를 만들려고 실행 파일 이름을 없는 것으로 준다.
+    """
+    voice_script = tmp_path / "목소리.ps1"
+    voice_script.write_text("exit 0", encoding="utf-8-sig")
+
+    with _answering_server() as uri:
+        result = _run(tmp_path, uri=uri, extra=[
+            "-SkipBrowser",
+            "-VoiceScript", str(voice_script),
+            "-VoiceUri", "http://127.0.0.1:9/health",
+            "-VoiceHostExecutable", "이런실행파일은없다.exe",
+        ])
+
+    payload = json.loads(result.stdout[result.stdout.index("{"):])
+    assert payload["overall"] == "ready", payload
+    assert _voice_step(result)["status"] == "skipped", payload
+
+
 def test_the_voice_program_is_not_started_twice(tmp_path: Path) -> None:
     """이미 켜져 있으면 또 켜지 않는다 -- 두 번 켜면 같은 포트를 다투다 죽는다."""
     with _answering_server() as uri:

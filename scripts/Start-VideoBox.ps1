@@ -30,6 +30,8 @@ param(
     [ValidateRange(0, 600)]
     [int]$VoiceTimeoutSec = 40,
     [string]$VoiceScript = "",
+    # 비워 두면 pwsh -> powershell 순서로 알아서 찾는다. 시험이 바꿔 끼운다.
+    [string]$VoiceHostExecutable = "",
     [string]$DockerExecutable = "docker",
     [string]$DockerDesktopExecutable = "",
     [string]$OwnerReadyScript = "",
@@ -206,26 +208,49 @@ else {
 
 # 4-B. 목소리 프로그램을 켠다(내 목소리 더빙용).
 #
-# **여기서 실패해도 VideoBox는 계속 켠다.** 자막·편집·완성본은 목소리 없이도
-# 다 되고, 더빙만 화면에서 "목소리 프로그램을 켜 주세요"라고 말한다. 그것 하나
-# 때문에 아이콘이 아무것도 안 켜 주면 훨씬 나쁘다.
+# **여기서 무엇이 잘못돼도 VideoBox는 계속 켠다.** 자막·편집·완성본은 목소리
+# 없이도 다 되고, 더빙만 화면에서 "목소리 프로그램을 켜 주세요"라고 말한다.
+# 그것 하나 때문에 아이콘이 아무것도 안 켜 주면 훨씬 나쁘다.
 if ($SkipVoice) {
-    Add-Step -Id "voice" -Status "skipped" -Summary "목소리 프로그램은 켜지 않았어요." -Evidence @{ started = $false }
+    Add-Step -Id "voice" -Status "skipped" -Summary "목소리 프로그램은 켜지 않았어요." -Evidence @{ started_by_us = $false }
 } elseif (Test-VoiceAnswering) {
     # 이미 켜져 있으면 또 켜지 않는다 -- 두 번 켜면 같은 포트를 다투다 죽는다.
-    Add-Step -Id "voice" -Status "pass" -Summary "목소리 프로그램이 이미 켜져 있어요." -Evidence @{ started_by_us = $false }
+    Add-Step -Id "voice" -Status "pass" -Summary "목소리 프로그램이 이미 켜져 있어요." -Evidence @{ started_by_us = $false; ready = $true }
 } elseif (-not (Test-Path -LiteralPath $VoiceScript)) {
     Add-Step -Id "voice" -Status "skipped" -Summary "목소리 프로그램이 없어요. 더빙 말고는 다 쓸 수 있어요." -Evidence @{ found = $false }
 } else {
-    Start-Process -FilePath "pwsh" -ArgumentList @("-NoExit", "-NoProfile", "-File", $VoiceScript) -WindowStyle Minimized | Out-Null
-    # 모델을 싣는 데 시간이 걸린다. 여기서 오래 붙들면 화면이 늦게 열리므로
-    # 짧게만 기다리고, 못 기다렸어도 계속 간다 -- 뒤늦게 켜지면 그대로 쓰인다.
-    if (Wait-Until -Condition { Test-VoiceAnswering } -Seconds $VoiceTimeoutSec) {
+    # 켜는 일을 통째로 감싼다. 이 스크립트는 `ErrorActionPreference = Stop`이라,
+    # 감싸지 않으면 PowerShell을 못 찾는 기계에서 **목소리 하나 때문에 아이콘이
+    # 아무것도 안 켜 준다** -- 바로 위 주석이 하지 말자고 한 그 일이다.
+    $voiceStarted = $false
+    $voiceReason = ""
+    try {
+        # `?.`를 쓰지 않는다 -- 이 스크립트는 Windows PowerShell 5.1에서도 돌아야
+        # 하는데 거기서는 구문 오류라 **파일 전체가 안 읽힌다.**
+        $voiceHost = ""
+        foreach ($candidate in @($VoiceHostExecutable, "pwsh", "powershell")) {
+            if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+            $found = Get-Command $candidate -ErrorAction SilentlyContinue
+            if ($found) { $voiceHost = $found.Source; break }
+            # 일부러 지정했는데 없으면 조용히 다른 것으로 넘어가지 않는다.
+            if ($candidate -eq $VoiceHostExecutable) { throw "'$candidate'을(를) 찾지 못했어요." }
+        }
+        if (-not $voiceHost) { throw "PowerShell을 찾지 못했어요." }
+        Start-Process -FilePath $voiceHost -ArgumentList @("-NoExit", "-NoProfile", "-File", $VoiceScript) -WindowStyle Minimized | Out-Null
+        $voiceStarted = $true
+    } catch {
+        $voiceReason = $_.Exception.Message
+    }
+
+    if (-not $voiceStarted) {
+        Add-Step -Id "voice" -Status "skipped" -Summary "목소리 프로그램을 켜지 못했어요. 더빙 말고는 다 쓸 수 있어요." -Evidence @{ started_by_us = $false; reason = $voiceReason }
+    } elseif (Wait-Until -Condition { Test-VoiceAnswering } -Seconds $VoiceTimeoutSec) {
+        # 모델을 싣는 데 시간이 걸린다. 여기서 오래 붙들면 화면이 늦게 열린다.
         Add-Step -Id "voice" -Status "pass" -Summary "내 목소리로 더빙할 준비가 됐어요." -Evidence @{ started_by_us = $true; ready = $true }
     } else {
         # `pass`로 둔다. **VideoBox는 멀쩡히 켜졌기 때문이다** -- 여기서 fail을
-        # 내면 전체가 `blocked`가 되어 아이콘이 실패한 것처럼 보인다.
-        # 아직 준비 안 됐다는 것은 문구로 말한다.
+        # 내면 전체가 `blocked`가 되어 아이콘이 실패한 것처럼 보인다. 아직
+        # 준비 안 됐다는 것은 문구와 `ready = $false`로 말한다.
         Add-Step -Id "voice" -Status "pass" -Summary "목소리 프로그램을 켜는 중이에요. 더빙은 조금 뒤에 눌러 주세요." -Evidence @{ started_by_us = $true; ready = $false; waited_sec = $VoiceTimeoutSec }
     }
 }
