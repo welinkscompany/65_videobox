@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react";
 import { Captions, Clapperboard, Music, Shuffle, Type, type LucideIcon } from "lucide-react";
 
 import { api } from "../../../api";
@@ -8,6 +8,7 @@ import { assetPreferenceChoice, canonicalPreferenceTag, useDirectorPreferences }
 import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind, type EditorAssetOrientation } from "./editorAssetProjection";
 import { writeAssetDrag } from "./assetDragPayload";
 import { AddMediaFiles } from "../../media/AddMediaFiles";
+import { ingestFilesIntoProject, ingestOutcomeMessage } from "../../media/ingestFilesIntoProject";
 import { VoiceMaterialPanel } from "../../media/VoiceMaterialPanel";
 import { ImportFromFootageInbox } from "../../media/ImportFromFootageInbox";
 import { LibraryPickerDialog } from "./LibraryPickerDialog";
@@ -215,7 +216,37 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const excludedCreators = taste.preferences.exclude_creator;
   const excludedTags = taste.preferences.exclude_tag;
 
-  return <section className="vb-editor-assets" aria-label="편집기 미디어">
+  /** **탐색기에서 파일을 끌어다 놓는 자리(2026-09-04).** owner 지적: "캣컵은
+   *  드래그앤 드롭도 다 되는데, 우리는 그것도 아무것도 안되고". 확인해 보니
+   *  자료 카드를 타임라인으로 끄는 것은 있었고, 없던 것은 **바깥 파일**이었다 --
+   *  `dataTransfer.files`를 읽는 자리가 저장소 전체에 0곳이었다.
+   *  올리는 절차는 이미 있으므로(`ingestFilesIntoProject`) 부르는 자리만 만든다.
+   *
+   *  `types`로 파일 여부를 먼저 가르는 이유: 타임라인으로 자산 카드를 끄는 기존
+   *  동작과 부딪히면 안 된다. 파일이 아니면 손대지 않고 그대로 흘려보낸다. */
+  const [dropBusy, setDropBusy] = useState(false);
+  const [dropMessage, setDropMessage] = useState<string | null>(null);
+  const carriesFiles = (transfer: DataTransfer | null): boolean =>
+    Boolean(transfer && Array.from(transfer.types ?? []).includes("Files"));
+  async function onFilesDropped(event: ReactDragEvent<HTMLElement>) {
+    if (!projectId || !carriesFiles(event.dataTransfer)) return;
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length === 0) return;
+    event.preventDefault();
+    setDropBusy(true);
+    setDropMessage(null);
+    const outcome = await ingestFilesIntoProject(files, projectId, `drop-${projectId}-${files.length}`);
+    setDropBusy(false);
+    setDropMessage(ingestOutcomeMessage(outcome));
+    if (outcome.succeeded > 0) await onMediaAdded?.();
+  }
+
+  return <section
+    aria-label="편집기 미디어"
+    className="vb-editor-assets"
+    onDragOver={(event) => { if (carriesFiles(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
+    onDrop={(event) => { void onFilesDropped(event); }}
+  >
     {/* 캡컷과 같은 자리의 최상위 탭. 가진 것만 둔다 -- 자세한 이유는 `LeftPane` 주석.
         승인 2026-08-30(버튼 단위 벤치마킹 2단계)로 이 탭은 이제 편집기 맨 위,
         패널 바깥에서도 그릴 수 있다(`renderPaneTabs={false}` + `pane`/`onPaneChange`
@@ -308,6 +339,9 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
     {removeMessage ? <p className="vb-editor-assets__detail" role="status">{removeMessage}</p> : null}
+    {/* 끌어다 놓은 결과를 말한다. 조용히 삼키면 올라갔는지 알 수 없다. */}
+    {dropBusy ? <p className="vb-editor-assets__detail" role="status">파일을 올리는 중이에요.</p> : null}
+    {dropMessage ? <p className="vb-editor-assets__detail" role="status">{dropMessage}</p> : null}
     {taste.error ? <p className="vb-editor-assets__detail" role="status">{taste.error}</p> : null}
     {tasteReady && (excludedCreators.length || excludedTags.length) ? (
       <div className="vb-editor-assets__taste" role="group" aria-label="유진이 빼 둔 것">
