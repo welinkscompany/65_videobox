@@ -1,5 +1,7 @@
 # 인계 — 자막 서식 · 목소리 파일 업로드 · UX 실측 점검 (2026-09-04)
 
+**대체됨:** `docs/handoffs/2026-09-04-capcut-parity-autonomous-run.ko.md`
+
 앞 인계: `2026-09-03-voice-cloned-dubbing-end-to-end.ko.md`
 
 ## 한 줄
