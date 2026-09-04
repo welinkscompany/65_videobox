@@ -7,6 +7,7 @@ import math
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from stat import S_ISREG
 from typing import Any, Iterable
 
 from videobox_storage.library_user_asset_store import (
@@ -248,7 +249,10 @@ class MediaLibraryStore:
         for row in rows:
             item = self._normalize_asset_row(row)
             path = Path(str(item["path"]))
-            item["verified"] = bool(path.is_file() and self._is_currently_verified(path, str(item["sha256"])))
+            # `is_file()`을 앞에 두지 않는다 -- `_is_currently_verified`가 이미
+            # `stat()` 한 번으로 파일 여부까지 답한다. 여기서 한 번 더 물으면
+            # 자산마다 9p 마운트를 한 번 더 건너간다(130개에 275ms, 2026-09-04 실측).
+            item["verified"] = self._is_currently_verified(path, str(item["sha256"]))
             # A physically present but checksum-invalid asset is unavailable to
             # preview/apply; recovery UI can still inspect the row.
             item["available"] = item["verified"]
@@ -823,12 +827,21 @@ class MediaLibraryStore:
             pass
 
     def _is_currently_verified(self, path: Path, expected_sha256: str) -> bool:
+        # **자산 하나에 파일 호출 한 번(2026-09-04).** owner가 "영상 불러오는것
+        # 조차도 느리고"라고 했고, 재 보니 `GET /api/media-library/assets`가
+        # 2.5초였다. 컨테이너의 `/videobox-data`는 Windows `D:\`의 9p 마운트라
+        # 파일 메타데이터 호출 하나하나가 느리다. 자산 130개 기준 실측:
+        #   stat 290ms / is_file 275ms / resolve 1157ms = 합계 ~1722ms.
+        #
+        # `resolve()`는 **캐시 키를 만드는 데만** 썼는데 제일 비쌌다. 여기 경로는
+        # 우리 DB가 준 것이고 sha256도 키에 함께 들어가므로 심볼릭 링크를 풀 이유가
+        # 없다 -- 같은 파일이 두 경로로 들어와도 캐시 항목이 둘이 될 뿐이고, 바이트
+        # 검사는 그대로 한다. `is_file()`도 `stat()`이 이미 답을 갖고 있다.
         try:
             stat = path.stat()
-            if not path.is_file():
+            if not S_ISREG(stat.st_mode):
                 return False
-            resolved_path = str(path.resolve())
-            key = (resolved_path, stat.st_size, stat.st_mtime_ns, expected_sha256)
+            key = (str(path), stat.st_size, stat.st_mtime_ns, expected_sha256)
             cached = self._verification_cache.get(key)
             if cached is not None:
                 return cached
