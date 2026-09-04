@@ -4,7 +4,7 @@ import { Button } from "../../../components/ui/button";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls, type VoiceSampleChoice } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
-import { rippleDisplayDurationSec } from "../inspector/rippleDuration";
+import { SpeedField } from "./SpeedField";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
 
@@ -18,7 +18,7 @@ type SelectedSegment = Readonly<{
   draftApplied: boolean;
   transitionIn?: Readonly<{ type: string; durationSec: number }> | null;
   ttsReplacement?: Readonly<{ candidateId: string; assetId: string }> | null;
-  ripplePlaybackRate?: 1 | 1.5 | 2;
+  ripplePlaybackRate?: number;
 }>;
 
 export type RightDockProps = Readonly<{
@@ -36,7 +36,7 @@ export type RightDockProps = Readonly<{
   /** 이미 옮겨 둔 언어들. */
   translatedLanguages?: readonly string[];
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
-  onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>;
+  onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: number }) => void | Promise<void>;
   onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>;
 }>;
 
@@ -74,7 +74,7 @@ export function RightDock({
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
   const inspectorGroups = [
     { id: "media", label: "영상·소리", target: inspectorTargets.find((target) => target.kind === "media") },
-    { id: "caption", label: "자막", target: inspectorTargets.find((target) => target.kind === "caption") },
+    { id: "caption", label: "캡션", target: inspectorTargets.find((target) => target.kind === "caption") },
     { id: "overlay", label: "화면 요소", target: inspectorTargets.find((target) => target.kind === "overlay") },
   ] as const;
 
@@ -83,30 +83,22 @@ export function RightDock({
       <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
         <h2>편집 항목</h2>
         {selectedSegment ? <p>{selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초 구간</p> : <p>선택한 구간이 없어요.</p>}
-        {selectedSegment && onSetSegmentRippleSpeed ? <div role="group" aria-label="장면 길이">
-          <p>장면 길이</p>
-          {([1, 1.5, 2] as const).map((rate) => <Button
-            aria-pressed={(selectedSegment.ripplePlaybackRate ?? 1) === rate}
+        {/* **캡컷 `속도` 속성과 같은 모양(owner 지시 2026-09-04).** 캡컷은
+            `속도 x`와 `기간 s`를 나란히 두고 연동한다. 우리는 `장면 길이`라는
+            다른 이름에 단추 셋(`기본`·`1.5배`·`2배`)뿐이라 1.25배를 쓸 방법이
+            없었다 -- 엔진은 처음부터 0.25~4를 감당했는데(`_atempo_chain`) 화면과
+            검증만 좁혀 놨던 것이다.
+
+            `기간`이 읽기 전용인 이유: 길이를 직접 고치는 것은 구간 자르기이고
+            그 자리가 따로 있다. 여기서 둘 다 고치게 하면 같은 값을 두 곳에서
+            바꾸게 된다. 캡컷은 양쪽 다 입력칸이지만 우리는 자르기 UI가 별도다. */}
+        {selectedSegment && onSetSegmentRippleSpeed ? <div className="vb-speed-field" role="group" aria-label="속도 조정">
+          <SpeedField
             disabled={inspectorDisabled}
-            key={rate}
-            onClick={() => void onSetSegmentRippleSpeed({ segmentId: selectedSegment.segmentId, rate })}
-            type="button"
-            variant="outline"
-          >{rate === 1 ? "기본" : `${rate}배`}</Button>)}
-          {/* **바뀐 길이를 여기서 말한다(2026-09-04).** owner 지시 "속도는
-              캡컷이랑 동일하게" -- 캡컷은 `속도 x`와 `기간 s`를 나란히 두고
-              연동한다. 처음엔 이 표시를 인스펙터 `속도` 칸에 붙였는데
-              **틀린 자리였다**: 그 칸은 `media_controls.speed`라 원본을 얼마나
-              먹는지만 바꾸고 장면 슬롯은 그대로 둔다. 장면 길이를 실제로
-              바꾸는 것은 여기(리플 배속)다. */}
-          {(() => {
-            const next = rippleDisplayDurationSec({
-              displayedSec: selectedSegment.endSec - selectedSegment.startSec,
-              currentRate: selectedSegment.ripplePlaybackRate ?? 1,
-              nextRate: selectedSegment.ripplePlaybackRate ?? 1,
-            });
-            return next === null ? null : <p className="vb-inspector__derived" role="status">{`지금 ${next.toFixed(1)}초`}</p>;
-          })()}
+            displayedSec={selectedSegment.endSec - selectedSegment.startSec}
+            onCommit={(rate) => void onSetSegmentRippleSpeed({ segmentId: selectedSegment.segmentId, rate })}
+            rate={selectedSegment.ripplePlaybackRate ?? 1}
+          />
         </div> : null}
         {selectedSegment && onPreviewSelectedRange ? <Button
           type="button"

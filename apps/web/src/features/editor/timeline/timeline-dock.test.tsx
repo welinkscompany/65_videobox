@@ -161,7 +161,12 @@ describe("TimelineDock", () => {
 
     expect(onUpdatePlacements).toHaveBeenCalledWith({ changes: [{ placementId: "broll:b-1", kind: "broll", startSec: 5.04, endSec: 9.04 }] });
   });
-  it("selects narration clips with Enter and Space before exposing mutation controls", () => {
+  /** **스페이스는 더 이상 고르기가 아니다**(owner 지적, 2026-09-05). 장면 칸이
+   *  `<button>`이라 스페이스를 자기가 먹었고, 그래서 장면을 한 번 고르면
+   *  타임라인에서 스페이스를 눌러도 재생/정지가 안 됐다. 편집기 타임라인에서
+   *  스페이스는 재생/정지가 업계 표준이고 캡컷도 그렇다 --
+   *  `preview/preview-stage.test.tsx`가 그쪽을 지킨다. 고르기는 클릭과 Enter다. */
+  it("selects narration clips with Enter, leaving Space to play and pause", () => {
     render(<TimelineDock view={twoNarrationView} viewportWidthPx={400} />);
 
     const firstClip = timelineClipSelection("n-1");
@@ -174,8 +179,19 @@ describe("TimelineDock", () => {
     secondClip.focus();
     expect(secondClip).toHaveFocus();
     fireEvent.keyDown(secondClip, { key: " " });
+    // 고른 장면이 그대로다 -- 스페이스는 재생 쪽으로 지나간다.
+    expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "내레이션 2번째 장면, 1초부터 시작 자르기" })).toBeNull();
+    fireEvent.keyDown(secondClip, { key: "Enter" });
     expect(screen.getByRole("button", { name: "내레이션 2번째 장면, 1초부터 시작 자르기" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" })).toBeNull();
+  });
+
+  it("marks the timeline as a surface where the space bar plays", () => {
+    // 표시가 사라지면 스페이스가 다시 안 먹는다 -- 읽는 곳은
+    // `preview/preview-stage.tsx` 한 곳뿐이라 여기서 못박아 둔다.
+    render(<TimelineDock view={twoNarrationView} viewportWidthPx={400} />);
+
+    expect(screen.getByRole("region", { name: "타임라인" })).toHaveAttribute("data-timeline-surface", "true");
   });
 
   it("keeps the selection button separate from narration mutation buttons", () => {
@@ -495,7 +511,7 @@ describe("TimelineDock", () => {
     expect(screen.getByLabelText("눈금 0초")).toBeInTheDocument();
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
     expect(screen.getByText("미디어 공백: asset_required")).toBeInTheDocument();
-    expect(screen.getByText("현재 자막: 첫 자막")).toBeInTheDocument();
+    expect(screen.getByText("현재 캡션: 첫 자막")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (0초)" )).toBeInTheDocument();
   });
 
@@ -609,7 +625,7 @@ describe("TimelineDock", () => {
   it("offers eye and mute only on the tracks where they would do something", () => {
     // `capcut-observed` 기록 §2는 트랙마다 잠금·눈·음소거를 그리지만, 우리는
     // **뜻이 있는 것만** 그린다(기록 §4: "띠에 없는 기능의 자리를 만들지
-    // 않는다"). 자막 트랙 음소거는 눌러도 아무 일도 안 일어나고, 서버도
+    // 않는다"). 캡션 트랙 음소거는 눌러도 아무 일도 안 일어나고, 서버도
     // 그 조합을 422로 거절한다(`track_states.py`).
     render(<TimelineDock view={view} viewportWidthPx={400} onUpdateTrackStates={vi.fn()} />);
 
@@ -617,8 +633,8 @@ describe("TimelineDock", () => {
     expect(screen.getByRole("button", { name: "영상 트랙 음소거" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "내레이션 트랙 음소거" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "내레이션 트랙 숨기기" })).toBeNull();
-    expect(screen.getByRole("button", { name: "자막 트랙 숨기기" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "자막 트랙 음소거" })).toBeNull();
+    expect(screen.getByRole("button", { name: "캡션 트랙 숨기기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "캡션 트랙 음소거" })).toBeNull();
     expect(screen.queryByRole("button", { name: "배경 음악 트랙 숨기기" })).toBeNull();
   });
 

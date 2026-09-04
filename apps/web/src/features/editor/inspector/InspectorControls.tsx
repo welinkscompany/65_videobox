@@ -128,7 +128,7 @@ const defaultStyle: EditorCaptionStyle = {
   letterSpacingPx: 0,
 };
 const partialFieldLabels: Readonly<Record<string, string>> = {
-  caption: "자막",
+  caption: "캡션",
   cut_action: "컷 판단",
   broll: "B-roll",
   visual_overlay: "화면 요소",
@@ -478,7 +478,7 @@ export function InspectorControls({
               })}
               type="button"
             >
-              구간 중간에서 나누기
+              구간 중간에서 분할
             </Button>
             <Button
               disabled={disabled || !selectedSegment.nextSegmentId}
@@ -689,7 +689,7 @@ export function InspectorControls({
 
                       장면 길이를 실제로 바꾸는 것은 **다른 명령**이다 --
                       `set_segment_ripple_playback_rate`(`editing_session.py:611`)이고
-                      화면에서는 `RightDock`의 `장면 길이` 단추 셋이 그것이다.
+                      화면에서는 `RightDock`의 `속도` 칸이 그것이다.
                       길이 표시는 그쪽에 있어야 한다. */}
                   {/* 숏폼에서는 같은 배속을 클립마다 반복해서 건다. 숫자칸만
                       두면 그때마다 지우고 다시 쳐야 한다. 자주 쓰는 값만
@@ -930,7 +930,7 @@ export function InspectorControls({
       ) : null}
 
       {target?.kind === "caption" ? (
-        <div className="vb-inspector-tabs" role="tablist" aria-label="자막 조정 항목">
+        <div className="vb-inspector-tabs" role="tablist" aria-label="캡션 조정 항목">
           {CAPTION_TAB_ORDER.map((tab) => (
             <Button
               key={tab}
@@ -948,7 +948,7 @@ export function InspectorControls({
 
       {target?.kind === "caption" && captionTab === "style" ? (
         <fieldset>
-          <legend>자막 스타일</legend>
+          <legend>캡션 스타일</legend>
           {projectId ? <CaptionPresetPicker
             projectId={projectId}
             /* 지금 잡아 놓은 모양 **전부**를 CaptionStyle 정본 이름으로 넘긴다.
@@ -1007,7 +1007,7 @@ export function InspectorControls({
               남기고 있었다. 즉 어느 길에서도 아무 일이 없는 칸이었다. 값 자체는
               저장된 것을 그대로 들고 다닌다. */}
           <Button disabled={disabled} onClick={() => emit({ kind: "preflight-caption-style", segmentIds: [target.segmentId], scope: "current_caption", style: captionStyle })} type="button">
-            자막 스타일 저장
+            캡션 스타일 저장
           </Button>
         </fieldset>
       ) : null}
@@ -1020,7 +1020,7 @@ export function InspectorControls({
           겁난다. 되돌려도 번역은 지워지지 않고 그대로 남는다. */}
       {target?.kind === "caption" && captionTab === "language" ? (
         <fieldset>
-          <legend>자막 언어</legend>
+          <legend>캡션 언어</legend>
           <div className="vb-caption-languages">
             <Button
               aria-pressed={!captionLanguage}

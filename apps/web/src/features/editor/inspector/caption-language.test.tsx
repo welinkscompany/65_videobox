@@ -12,7 +12,7 @@ import { InspectorControls, type InspectorAction } from "./InspectorControls";
 const captionTarget = {
   id: "caption:segment_001",
   kind: "caption",
-  label: "자막",
+  label: "캡션",
   segmentId: "segment_001",
   fields: ["style"],
   style: {
@@ -47,7 +47,7 @@ function renderControls(props: Partial<Parameters<typeof InspectorControls>[0]> 
   return onAction;
 }
 
-describe("자막 언어", () => {
+describe("캡션 언어", () => {
   it("아직 안 옮긴 언어는 누르면 번역한다", () => {
     const onAction = renderControls();
 

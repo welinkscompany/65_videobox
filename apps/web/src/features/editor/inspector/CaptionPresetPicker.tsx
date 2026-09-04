@@ -158,13 +158,13 @@ export function CaptionPresetPicker({
   if (!ready) return null;
   return (
     <section className="vb-caption-presets" aria-labelledby="caption-presets-heading">
-      <h3 id="caption-presets-heading">자막 모양</h3>
+      <h3 id="caption-presets-heading">캡션 모양</h3>
       {error ? <p role="status">{error}</p> : null}
       {currentStyle ? <Button type="button" variant="outline" onClick={() => void keepCurrent()}>이 모양 저장해 두기</Button> : null}
       {visible.length ? visible.map((preset) => {
         const loved = favourites.includes(preset.preset_id);
         return (
-          <article key={preset.preset_id} aria-label={`${preset.name} 자막 모양`}>
+          <article key={preset.preset_id} aria-label={`${preset.name} 캡션 모양`}>
             <strong>{preset.name}</strong>
             {!loved && recents.includes(preset.preset_id) ? <span>최근에 썼어요</span> : null}
             <Button type="button" variant="outline" onClick={() => void apply(preset)}>
@@ -181,7 +181,7 @@ export function CaptionPresetPicker({
             ) : null}
           </article>
         );
-      }) : <p>아직 저장된 자막 모양이 없어요.</p>}
+      }) : <p>아직 저장된 캡션 모양이 없어요.</p>}
     </section>
   );
 }

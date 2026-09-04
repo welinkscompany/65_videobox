@@ -21,7 +21,7 @@ const inspector = readFileSync(resolve(process.cwd(), "src/features/editor/inspe
  *  장면이 짧아진 게 아니었다. 내 손으로 만든 숫자가 내 가정을 확인해 줬다.
  *
  *  장면 길이를 실제로 바꾸는 것은 `set_segment_ripple_playback_rate`이고
- *  화면에서는 `RightDock`의 `장면 길이` 단추 셋이다. 표시는 그쪽에만 둔다. */
+ *  화면에서는 `RightDock`의 `속도` 칸이다. 표시는 그쪽에만 둔다. */
 describe("장면 길이 표시는 길이를 실제로 바꾸는 자리에만 둔다", () => {
   it("인스펙터 속도 칸은 장면 길이를 말하지 않는다", () => {
     // 이 칸은 `media_controls.speed`라 장면 슬롯을 안 바꾼다.

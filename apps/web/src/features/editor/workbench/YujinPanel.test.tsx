@@ -58,7 +58,7 @@ describe("YujinPanel", () => {
     for (const label of [
       "이 장면에 어울리는 B-roll 추천해 줘",
       "현재 편집 흐름 점검해 줘",
-      "자막을 더 간결하게 다듬어 줘",
+      "캡션을 더 간결하게 다듬어 줘",
       "세로 영상용으로 바꿀 부분 찾아 줘",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeVisible();

@@ -16,7 +16,7 @@ describe("PreviewStage", () => {
     expect(screen.getByLabelText("편집본 미리보기")).toHaveAttribute("src", "/api/exact.mp4");
     expect(screen.getByLabelText("편집본 미리보기")).not.toHaveAttribute("autoplay");
     expect(container.querySelectorAll("video, audio")).toHaveLength(1);
-    expect(screen.getByText(/자막은 영상에 포함되어 재생됩니다/)).toBeInTheDocument();
+    expect(screen.getByText(/캡션은 영상에 포함되어 재생됩니다/)).toBeInTheDocument();
     expect(container.querySelector(".vb-preview-stage__caption-overlay")).toBeNull();
   });
 
@@ -43,17 +43,17 @@ describe("PreviewStage", () => {
     expect(container.querySelector(".vb-preview-stage__burned-caption")).toBeNull();
     const status = container.querySelector(".vb-preview-stage__status");
     expect(status).not.toBeNull();
-    expect(status).toHaveTextContent("자막은 영상에 포함되어 재생됩니다");
+    expect(status).toHaveTextContent("캡션은 영상에 포함되어 재생됩니다");
     expect(status).toHaveTextContent("타임라인 0.0초");
   });
 
   it("announces the active burned caption from the actual player time without rendering a second visual caption", () => {
     const { container } = render(<PreviewStage {...current} />);
     const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
-    expect(screen.getByRole("status", { name: "현재 자막" })).toHaveTextContent("첫 번째 안내 자막");
+    expect(screen.getByRole("status", { name: "현재 캡션" })).toHaveTextContent("첫 번째 안내 자막");
     Object.defineProperty(media, "currentTime", { configurable: true, writable: true, value: 3.5 });
     fireEvent.timeUpdate(media);
-    expect(screen.getByRole("status", { name: "현재 자막" })).toHaveTextContent("두 번째 안내 자막");
+    expect(screen.getByRole("status", { name: "현재 캡션" })).toHaveTextContent("두 번째 안내 자막");
     expect(container.querySelector(".vb-preview-stage__caption-overlay")).toBeNull();
     expect(container.querySelector(".vb-preview-stage__caption-transcript")).toHaveClass("vb-preview-stage__visually-hidden");
   });
@@ -431,6 +431,46 @@ describe("PreviewStage", () => {
 
     expect(pause).toHaveBeenCalledTimes(1);
     expect(media.currentTime).toBe(7.5);
+  });
+
+  it("still plays when the space bar is pressed on a timeline clip (owner report)", () => {
+    // owner: "타임라인에서 스페이스바를 누르면 멈춰야 되는데, 그것도 안되고".
+    // 장면 칸이 `<button>`이라 아래의 "단추 위에서는 가로채지 않는다" 규칙에
+    // 그대로 걸렸다 -- 장면을 한 번 고르면(포커스가 그 단추에 남는다) 스페이스가
+    // 영영 안 먹는다. 편집기 타임라인에서 스페이스는 재생/정지가 업계 표준이고
+    // 캡컷도 그렇다. 그래서 타임라인 면만 예외로 둔다.
+    render(<PreviewStage {...current} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const play = vi.spyOn(media, "play").mockResolvedValue(undefined);
+    Object.defineProperty(media, "paused", { configurable: true, value: true });
+
+    const timeline = document.createElement("section");
+    timeline.setAttribute("data-timeline-surface", "true");
+    const clip = document.createElement("button");
+    timeline.append(clip);
+    document.body.append(timeline);
+    fireEvent.keyDown(clip, { key: " " });
+
+    expect(play).toHaveBeenCalledTimes(1);
+    timeline.remove();
+  });
+
+  it("still respects a text field that happens to sit inside the timeline", () => {
+    // 타임라인 예외가 입력칸까지 삼키면 이름을 못 고친다.
+    render(<PreviewStage {...current} />);
+    const media = screen.getByLabelText("편집본 미리보기") as HTMLVideoElement;
+    const play = vi.spyOn(media, "play").mockResolvedValue(undefined);
+    Object.defineProperty(media, "paused", { configurable: true, value: true });
+
+    const timeline = document.createElement("section");
+    timeline.setAttribute("data-timeline-surface", "true");
+    const field = document.createElement("input");
+    timeline.append(field);
+    document.body.append(timeline);
+    fireEvent.keyDown(field, { key: " " });
+
+    expect(play).not.toHaveBeenCalled();
+    timeline.remove();
   });
 
   it("leaves the space bar alone while the creator is typing or on a control", () => {

@@ -34,7 +34,7 @@ export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSn
       <h3 id="saved-formats-heading">저장한 포맷</h3>
       {templates.length ? (
         // 크기·음악 표시가 약속처럼 읽히지 않게, 실제로 바뀌는 것을 먼저 말한다.
-        <p>적용하면 자막 모양만 바뀌어요. 화면 크기와 음악은 그대로예요.</p>
+        <p>적용하면 캡션 모양만 바뀌어요. 화면 크기와 음악은 그대로예요.</p>
       ) : null}
       {message ? <p role="status">{message}</p> : null}
       {templates.length ? templates.map((template) => (
@@ -50,7 +50,7 @@ export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSn
             variant="outline"
             onClick={() => onApply((template.caption_style ?? {}) as CaptionStyleSnapshot)}
           >
-            {`${template.name} 자막 모양 적용`}
+            {`${template.name} 캡션 모양 적용`}
           </Button>
         </article>
       )) : <p>아직 저장한 포맷이 없어요. 마음에 든 완성본에서 저장해 보세요.</p>}

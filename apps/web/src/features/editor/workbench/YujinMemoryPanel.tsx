@@ -11,7 +11,7 @@ const categoryLabels: Record<
   string
 > = {
   pacing: "편집 템포",
-  caption: "자막",
+  caption: "캡션",
   audio: "음악과 소리",
   tone: "영상 분위기",
   workflow: "작업 방식",

@@ -22,7 +22,20 @@ from videobox_core_engine.overlay_shapes import (  # noqa: F401
 )
 
 MIN_SEGMENT_DURATION_SEC = 0.2
-RIPPLE_PLAYBACK_RATES = frozenset({1.0, 1.5, 2.0})
+# **리플 배속 허용 범위(owner 지시 2026-09-04, "속도는 캡컷이랑 동일하게 맞춰").**
+# 예전에는 `frozenset({1.0, 1.5, 2.0})` 셋뿐이라 1.25배를 쓸 방법이 없었다.
+# 캡컷 `속도`는 숫자칸이라 임의 배속을 받는다.
+#
+# 이 범위는 **렌더가 실제로 낼 수 있는 것**에서 왔다 -- `_atempo_chain`이
+# "허용 범위(0.25~4)"를 명시하고 그 범위를 `atempo` 단계로 쪼개 처리한다
+# (`ffmpeg_final_renderer.py:92`). 너무 짧아지는 장면은 아래
+# `MIN_SEGMENT_DURATION_SEC`이 따로 막는다. 즉 엔진은 처음부터 이 범위를
+# 감당하게 만들어져 있었고 검증만 셋으로 좁혀 놨던 것이다.
+#
+# **유진 스키마는 안 넓힌다.** `set_scene_speed`는 `enum: [1, 1.5, 2]`로 좁게
+# 둔다 -- 사람이 고르는 것과 AI가 제안하는 것의 범위가 같을 이유가 없다.
+MIN_RIPPLE_PLAYBACK_RATE = 0.25
+MAX_RIPPLE_PLAYBACK_RATE = 4.0
 MAX_TIMELINE_UNDO_EVENTS = 10
 MAX_TIMELINE_AUDIT_EVENTS = 100
 FIXED_TIMELINE_TRACK_ROLES = ("narration", "broll", "bgm", "sfx", "overlay")
@@ -193,6 +206,22 @@ def _source_slices(segment: dict[str, Any], *, fallback_offset: float | None = N
         if normalized:
             return normalized
     return [{"segment_id": str(segment.get("segment_id") or ""), "source_offset_sec": float(segment.get("source_offset_sec", fallback_offset or 0.0)), "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0))}]
+
+
+def _has_explicit_source_slices(segment: dict[str, Any]) -> bool:
+    """`_source_slices`가 저장된 원본 좌표를 돌려주는지, 폴백을 타는지 가른다.
+
+    폴백은 현재 표시 길이를 원본인 척 돌려준다. 배속처럼 표시 길이를 바꾸는
+    연산은 그 차이를 알아야 한다."""
+    raw = segment.get("source_slices")
+    if not isinstance(raw, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and str(item.get("segment_id") or "")
+        and float(item.get("duration_sec", 0.0)) > 0
+        for item in raw
+    )
 
 
 def _source_slice_basis(*, session: dict[str, Any], segment: dict[str, Any], fallback_offset: float | None = None) -> list[dict[str, float | str]]:
@@ -617,16 +646,24 @@ def set_segment_ripple_playback_rate(*, session: dict[str, Any], segment_id: str
     delta.  The materializer turns the durable rate into renderer instructions.
     """
     requested_rate = float(rate)
-    if not isfinite(requested_rate) or requested_rate not in RIPPLE_PLAYBACK_RATES:
+    if not isfinite(requested_rate) or not (MIN_RIPPLE_PLAYBACK_RATE <= requested_rate <= MAX_RIPPLE_PLAYBACK_RATE):
         raise ValueError("segment_ripple_playback_rate_invalid")
 
     updated = deepcopy(session)
     index = _segment_index(session=updated, segment_id=segment_id)
     segment = updated["segments"][index]
+    previous_rate = float(segment.get("ripple_playback_rate", 1.0))
     source_duration = sum(
         float(source_slice["duration_sec"])
         for source_slice in _source_slices(segment)
     )
+    if not _has_explicit_source_slices(segment):
+        # 폴백은 원본이 아니라 **지금 보이는 길이**를 돌려준다. 거기엔 앞서 건
+        # 배속이 이미 반영돼 있어서 그대로 나누면 배속이 곱해진다 -- 5초 장면을
+        # 1.5배로 두고 이어서 2배로 두면 2.5초가 아니라 1.67초가 됐다
+        # (2026-09-05 실기 검증). 캡컷의 `속도`는 절대값이므로, 앞 배속을
+        # 되돌려 원본 길이를 복원한 다음 나눈다.
+        source_duration *= previous_rate
     display_duration = source_duration / requested_rate
     if display_duration < MIN_SEGMENT_DURATION_SEC:
         raise ValueError("segment_ripple_playback_rate_below_minimum_duration")
@@ -634,7 +671,6 @@ def set_segment_ripple_playback_rate(*, session: dict[str, Any], segment_id: str
     previous_start = float(segment["start_sec"])
     previous_duration = float(segment["end_sec"]) - previous_start
     delta = previous_duration - display_duration
-    previous_rate = float(segment.get("ripple_playback_rate", 1.0))
     # Window offsets are displayed-time coordinates.  Keep them aligned with
     # the same source moments after a speed change; otherwise captions and
     # scene-attached media still last four seconds over a two-second scene.

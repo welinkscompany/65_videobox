@@ -18,7 +18,7 @@ const master: VariantProjection = {
   safeArea: "표시 안 함",
   crop: "전체 화면",
   focalPoint: { x: 0.5, y: 0.5 },
-  captionLayout: "마스터 자막",
+  captionLayout: "마스터 캡션",
   lockedFields: [],
   conflicts: [],
   ownsAudio: true,

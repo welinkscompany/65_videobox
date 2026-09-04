@@ -93,7 +93,7 @@ describe("buildQualityFollowUps", () => {
     });
 
     expect(followUps).toEqual([
-      "1번 장면 자막을 더 짧게 다듬어 줘",
+      "1번 장면 캡션을 더 짧게 다듬어 줘",
       "1번 장면을 1.5배로 빠르게 해 줘",
       "1번 장면 흔들린 화면을 잡아 줘",
     ]);

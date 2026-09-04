@@ -19,7 +19,10 @@ describe("RightDock", () => {
     expect(screen.getByRole("region", { name: "편집 항목" })).toBeInTheDocument();
   });
 
-  it("offers only the approved shortform scene lengths for the selected scene", () => {
+  /** 단추 셋(`기본`·`1.5배`·`2배`)이던 자리를 캡컷과 같은 `속도 x` 숫자 칸으로
+   *  바꿨다(owner 지시 2026-09-04 "속도는 캡컷이랑 동일하게 맞춰"). 칸 자체의 시험은
+   *  `speed-field.test.tsx`에 있고, 여기서는 도크가 그 칸을 실제로 걸어 두는지만 본다. */
+  it("lets the creator type any speed CapCut allows for the selected scene", () => {
     const onSetSegmentRippleSpeed = vi.fn();
     render(<RightDock
       selectedSegment={{
@@ -29,12 +32,12 @@ describe("RightDock", () => {
       onSetSegmentRippleSpeed={onSetSegmentRippleSpeed}
     />);
 
-    const speed = screen.getByRole("group", { name: "장면 길이" });
-    expect(speed).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "1.5배" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "2배" })).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(screen.getByRole("button", { name: "2배" }));
-    expect(onSetSegmentRippleSpeed).toHaveBeenCalledWith({ segmentId: "segment-2", rate: 2 });
+    expect(screen.getByRole("group", { name: "속도 조정" })).toBeInTheDocument();
+    const speed = screen.getByRole("spinbutton", { name: "속도" });
+    expect(speed).toHaveValue(1.5);
+    fireEvent.change(speed, { target: { value: "1.25" } });
+    fireEvent.blur(speed);
+    expect(onSetSegmentRippleSpeed).toHaveBeenCalledWith({ segmentId: "segment-2", rate: 1.25 });
   });
 
   it("offers a selected scene preview without changing the timeline", () => {
@@ -52,13 +55,13 @@ describe("RightDock", () => {
     render(<RightDock
       inspectorTargets={[
         { id: "media-1", kind: "media", label: "영상", mediaKind: "broll", segmentId: "segment-1", fields: [], assetId: "asset-1", controls: {}, clearOnly: false },
-        { id: "caption-1", kind: "caption", label: "자막", segmentId: "segment-1", fields: ["style"], style: {} as never },
+        { id: "caption-1", kind: "caption", label: "캡션", segmentId: "segment-1", fields: ["style"], style: {} as never },
         { id: "overlay-1", kind: "overlay", overlayKind: "shape", label: "화면 요소", segmentId: "segment-1", fields: [], value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" } },
       ]}
     />);
 
     expect(screen.getByRole("button", { name: "영상·소리" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "자막" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "캡션" })).toBeVisible();
     expect(screen.getByRole("button", { name: "화면 요소" })).toBeVisible();
   });
 });

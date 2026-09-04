@@ -19,7 +19,7 @@ describe("saved format picker", () => {
     const onApply = vi.fn();
     render(<SavedFormatPicker onApply={onApply} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "내 브이로그 포맷 자막 모양 적용" }));
+    fireEvent.click(await screen.findByRole("button", { name: "내 브이로그 포맷 캡션 모양 적용" }));
 
     expect(onApply).toHaveBeenCalledWith({ font_size: 48, text_color: "#FFFFFF" });
   });
@@ -39,7 +39,7 @@ describe("saved format picker", () => {
     render(<SavedFormatPicker onApply={vi.fn()} />);
 
     expect(
-      await screen.findByText("적용하면 자막 모양만 바뀌어요. 화면 크기와 음악은 그대로예요."),
+      await screen.findByText("적용하면 캡션 모양만 바뀌어요. 화면 크기와 음악은 그대로예요."),
     ).toBeVisible();
   });
 

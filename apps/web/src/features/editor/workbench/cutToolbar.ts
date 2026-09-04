@@ -46,7 +46,7 @@ const disabled = (label: string, hint: string): CutTool => ({ enabled: false, la
 
 /** 아직 아무것도 계산되기 전의 상태. 키 처리기가 첫 렌더 전에 참조할 수 있다. */
 export const EMPTY_CUT_TOOLS: CutToolbarState = {
-  split: disabled("나누기", ""),
+  split: disabled("분할", ""),
   join: disabled("앞과 붙이기", ""),
   drop: disabled("빼기", ""),
   copyToNext: disabled("다음 장면에도", ""),
@@ -69,7 +69,7 @@ export function cutToolbarState({
   if (!selected) {
     const pickFirst = "아래 타임라인에서 장면을 먼저 고르세요.";
     return {
-      split: disabled("나누기", pickFirst),
+      split: disabled("분할", pickFirst),
       join: disabled("앞과 붙이기", pickFirst),
       drop: disabled("빼기", pickFirst),
       copyToNext: disabled("다음 장면에도", pickFirst),
@@ -89,8 +89,8 @@ export function cutToolbarState({
 
   return {
     split: splittable
-      ? { enabled: true, label: "나누기", hint: "재생 위치에서 두 장면으로 나눕니다. (Ctrl+B)", action: { kind: "split-narration", segmentId: selected.segmentId, splitSec: playheadSec } }
-      : disabled("나누기", "재생 위치를 고른 장면 안으로 옮기세요. 그 자리에서 나눕니다."),
+      ? { enabled: true, label: "분할", hint: "재생 위치에서 두 장면으로 나눕니다. (Ctrl+B)", action: { kind: "split-narration", segmentId: selected.segmentId, splitSec: playheadSec } }
+      : disabled("분할", "재생 위치를 고른 장면 안으로 옮기세요. 그 자리에서 나눕니다."),
     join: previous
       ? { enabled: true, label: "앞과 붙이기", hint: "앞 장면과 하나로 합칩니다.", action: { kind: "merge-narration", leftSegmentId: previous.segmentId, rightSegmentId: selected.segmentId } }
       : disabled("앞과 붙이기", "첫 장면 앞에는 붙일 것이 없습니다."),

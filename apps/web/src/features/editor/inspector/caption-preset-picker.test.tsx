@@ -9,7 +9,7 @@ const presets = [
   { preset_id: "builtin:highlight", name: "Highlight", scope: "built_in", style: { font_size: 52 } },
 ] as never;
 
-describe("자막 모양 고르기", () => {
+describe("캡션 모양 고르기", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(api.api, "listRecentEditorPresetIds").mockResolvedValue([] as never);
@@ -69,7 +69,7 @@ describe("자막 모양 고르기", () => {
 
     render(<CaptionPresetPicker projectId="project-a" onApply={vi.fn()} />);
 
-    expect(await screen.findByText("아직 저장된 자막 모양이 없어요.")).toBeVisible();
+    expect(await screen.findByText("아직 저장된 캡션 모양이 없어요.")).toBeVisible();
   });
 
   it("최근에 쓴 모양을 즐겨찾기 바로 아래에 보여준다", async () => {

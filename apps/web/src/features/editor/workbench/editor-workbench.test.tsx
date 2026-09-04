@@ -806,7 +806,7 @@ describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    for (const name of ["실행 취소", "다시 실행", "나누기", "앞과 붙이기", "빼기", "다음 장면에도", "세부 정보"]) {
+    for (const name of ["실행 취소", "다시 실행", "분할", "앞과 붙이기", "빼기", "다음 장면에도", "세부 정보"]) {
       expect(screen.getByRole("button", { name })).toBeVisible();
     }
     // 승인 2026-08-30(버튼 단위 벤치마킹 2단계) -- 미디어는 이제 콘텐츠 탭이다.

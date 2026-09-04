@@ -7,7 +7,7 @@ import type { VariantProjection } from "./variantProjection";
 const master: VariantProjection = {
   variantId: "master", label: "마스터", kind: "master", aspectRatio: "16:9", playheadSec: 2,
   durationSec: 10, safeArea: "표시 안 함", crop: "전체 화면", focalPoint: { x: 0.5, y: 0.5 },
-  captionLayout: "마스터 자막", lockedFields: [], conflicts: [], ownsAudio: true,
+  captionLayout: "마스터 캡션", lockedFields: [], conflicts: [], ownsAudio: true,
 };
 const vertical: VariantProjection = { ...master, variantId: "vertical", label: "세로", kind: "vertical_full", aspectRatio: "9:16", ownsAudio: false };
 

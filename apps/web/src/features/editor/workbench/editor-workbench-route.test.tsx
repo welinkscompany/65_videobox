@@ -140,7 +140,7 @@ const inspectorSession = (revision: number) => ({
   redo_count: 1,
   segments: [
     {
-      segment_id: "segment-1", start_sec: 0, end_sec: 1, caption_text: "연결 자막",
+      segment_id: "segment-1", start_sec: 0, end_sec: 1, caption_text: "연결 캡션",
       cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [],
       music_override: null, sfx_override: null, tts_replacement: null, caption_style: inspectorStyle,
     },
@@ -196,7 +196,7 @@ function inspectorManifest(revision: number, fixture: InspectorFixture = "narrat
     ],
     captions: fixture === "caption" ? [{
       segment_id: "segment-1", caption_id: "caption-1", placement_id: "caption:segment-1",
-      text: "연결 자막", start_sec: 0, end_sec: 1, style: inspectorStyle,
+      text: "연결 캡션", start_sec: 0, end_sec: 1, style: inspectorStyle,
     }] : [],
   };
 }
@@ -2307,8 +2307,8 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
     fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "새 자막" } });
+    fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
 
     await waitFor(() => expect(update).toHaveBeenCalledWith("project-a", "session-a", "segment-1", { caption_text: "새 자막", expected_revision: 4 }));
     await expectEditorRevision(5);
@@ -2329,8 +2329,8 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
     expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "새 자막" } });
+    fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
 
     expect(await screen.findByText("다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(update).toHaveBeenCalledTimes(1);
@@ -2519,7 +2519,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(7);
     await openInspector();
 
-    fireEvent.click(screen.getByRole("button", { name: "구간 중간에서 나누기" }));
+    fireEvent.click(screen.getByRole("button", { name: "구간 중간에서 분할" }));
     await waitFor(() => expect(split).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
       expected_revision: 7,
       split_sec: 0.5,
@@ -2740,7 +2740,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.queryByLabelText(/자막 시작|자막 종료/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("글자 크기"), { target: { value: "32" } });
     fireEvent.change(screen.getByLabelText("가로 정렬"), { target: { value: "left" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 스타일 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "캡션 스타일 저장" }));
 
     await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-a", "session-a", {
       expected_revision: 7,
@@ -2864,7 +2864,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
     const result = screen.getByText("다시 만든 항목").closest("dl");
     expect(result).toHaveTextContent("완료");
-    expect(result).toHaveTextContent("자막, 배경 음악");
+    expect(result).toHaveTextContent("캡션, 배경 음악");
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -2899,7 +2899,7 @@ describe("EditorWorkbenchRoute", () => {
 
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
-    expect(screen.getByText("다시 만든 항목").closest("dl")).toHaveTextContent("자막, 배경 음악");
+    expect(screen.getByText("다시 만든 항목").closest("dl")).toHaveTextContent("캡션, 배경 음악");
 
     fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
     await expectEditorRevision(8);
@@ -3571,7 +3571,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const cards = await screen.findByRole("group", { name: "추천 후보" });
     expect(cards.textContent).not.toContain("metadata");
-    expect(within(cards).getByText("자막과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.")).toBeVisible();
+    expect(within(cards).getByText("캡션과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.")).toBeVisible();
   });
 
   it("lists the words a candidate actually matched, instead of only the first one", async () => {
@@ -3587,7 +3587,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     await openYujin();
 
-    expect(await screen.findByText("자막과 겹치는 말: 바다, 하늘")).toBeVisible();
+    expect(await screen.findByText("캡션과 겹치는 말: 바다, 하늘")).toBeVisible();
   });
 
   it("calls a b-roll candidate B-roll, not just media", async () => {
@@ -4774,7 +4774,7 @@ describe("EditorWorkbenchRoute", () => {
 
 describe("부분 재생성 표시", () => {
   it("영향 범위와 결과를 내부 값이 아니라 창작자 언어로 말한다", () => {
-    expect(affectedAreaLabel("subtitle render")).toBe("자막 입히기");
+    expect(affectedAreaLabel("subtitle render")).toBe("캡션 입히기");
     expect(affectedAreaLabel("capcut export")).toBe("CapCut 내보내기");
     expect(affectedAreaLabel("segment copy")).toBe("장면 대본");
     // 모르는 값이 와도 영어 원값을 그대로 내보내지 않는다.

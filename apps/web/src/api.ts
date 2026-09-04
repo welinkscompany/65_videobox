@@ -620,7 +620,7 @@ type RevisionedEditingSessionMutation = {
 
 export type SegmentSplitRequest = RevisionedEditingSessionMutation & { split_sec: number };
 export type SegmentBoundsRequest = RevisionedEditingSessionMutation & { start_sec: number; end_sec: number };
-export type SegmentRipplePlaybackRateRequest = RevisionedEditingSessionMutation & { rate: 1 | 1.5 | 2 };
+export type SegmentRipplePlaybackRateRequest = RevisionedEditingSessionMutation & { rate: number };
 export type SegmentOrderRequest = RevisionedEditingSessionMutation & {
   segment_ids: string[];
   bounds_by_id?: Record<string, { start_sec: number; end_sec: number }>;

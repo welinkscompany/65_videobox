@@ -746,7 +746,7 @@ describe("AppRouter URL ownership", () => {
     // 이 시험이 지키는 것은 "편집기가 한 번만 마운트된 채 segment가 바뀐다"이지
     // 자막칸이 기본 화면에 있는 것이 아니었으므로, 탭을 한 번 열고 그대로 본다.
     fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
-    expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
+    expect(screen.getByLabelText("segment-1 캡션 텍스트")).toBeVisible();
     // 유진 대화창은 2026-08-30 후속으로 도크와 무관한 독립 패널이 됐다
     // (owner: "우리 유진 대화창도 캡컷처럼 해도 되", `docs/reference/capcut-observed-2026-08-22.ko.md`
     // §7) -- 화면 구석의 알약 버튼으로 연다.
@@ -756,9 +756,9 @@ describe("AppRouter URL ownership", () => {
     timeline.scrollLeft = 47;
 
     await act(async () => { await router.navigate({ to: "/projects/$projectId/$section", params: { projectId: "project_a", section: "editor" }, search: { session_id: "session-a", segment_id: "segment-2" } as never }); });
-    expect(await screen.findByLabelText("segment-2 자막 텍스트")).toBeVisible();
+    expect(await screen.findByLabelText("segment-2 캡션 텍스트")).toBeVisible();
     await act(async () => { await router.navigate({ to: "/projects/$projectId/$section", params: { projectId: "project_a", section: "editor" }, search: { session_id: "session-a", segment_id: "segment-1" } as never }); });
-    expect(await screen.findByLabelText("segment-1 자막 텍스트")).toBeVisible();
+    expect(await screen.findByLabelText("segment-1 캡션 텍스트")).toBeVisible();
 
     expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(preview);

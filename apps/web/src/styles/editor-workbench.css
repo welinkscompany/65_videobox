@@ -578,3 +578,12 @@
    단추라도 있는 편이 낫다(없으면 고장인지 내 잘못인지 모른다, 2026-09-04). */
 .vb-preview-stage__playback[data-idle="true"] { opacity: .55; }
 .vb-preview-stage__playback[data-idle="true"] output { color: var(--vb-muted); font-size: var(--vb-text-sm); }
+
+/* 캡컷 `속도` 속성 칸(2026-09-04). 캡컷은 `속도 x`와 `기간 s`를 세로로 쌓고
+   이름·입력칸·단위를 세 칸으로 정렬한다. `1fr`이 아니라 고정 이름 폭을 쓰는
+   이유: 두 줄의 입력칸 왼쪽 모서리가 어긋나면 연동돼 보이지 않는다. */
+.vb-speed-field { display: grid; gap: var(--vb-space-1); }
+.vb-speed-field__row { display: grid; grid-template-columns: 2.5rem 1fr 1rem; align-items: center; gap: var(--vb-space-2); }
+.vb-speed-field__row > span:first-child { color: var(--vb-muted); font-size: var(--vb-text-sm); }
+.vb-speed-field__unit { color: var(--vb-muted); font-size: var(--vb-text-sm); }
+.vb-speed-field__hint { margin: 0; color: var(--vb-danger, #f0616d); font-size: var(--vb-text-xs); }

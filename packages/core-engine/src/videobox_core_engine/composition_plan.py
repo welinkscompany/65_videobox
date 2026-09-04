@@ -12,6 +12,7 @@ from math import isfinite
 from typing import Any, Iterable
 
 from videobox_core_engine.caption_translation import caption_text_for_language
+from videobox_core_engine.editing_session import MAX_RIPPLE_PLAYBACK_RATE, MIN_RIPPLE_PLAYBACK_RATE
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.transitions import normalize_transition
 
@@ -20,12 +21,14 @@ COMPOSITION_VERSION = "videobox_composition_v1"
 DEFAULT_OUTPUT_WIDTH = 1080
 DEFAULT_OUTPUT_HEIGHT = 1920
 _SUPPORTED_TRACKS = frozenset({"narration", "broll", "bgm", "sfx", "overlay"})
-_RIPPLE_PLAYBACK_RATES = frozenset({1.0, 1.5, 2.0})
+# 값을 여기 또 적지 않는다 -- 예전에는 이 파일과 `editing_session.py`가 각자
+# `frozenset`을 갖고 있어서, 한쪽만 고치면 **저장은 되는데 렌더가 거부하는**
+# 상태가 된다(2026-09-04에 범위를 넓히며 하나로 모았다).
 
 
 def _ripple_playback_rate(segment: dict[str, Any]) -> float:
     rate = _number(segment.get("ripple_playback_rate", 1.0))
-    if rate not in _RIPPLE_PLAYBACK_RATES:
+    if not (MIN_RIPPLE_PLAYBACK_RATE <= rate <= MAX_RIPPLE_PLAYBACK_RATE):
         raise ValueError("composition_plan_invalid_ripple_playback_rate")
     return rate
 

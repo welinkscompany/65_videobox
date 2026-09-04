@@ -88,7 +88,7 @@ type EditorWorkbenchProps = Readonly<{
   onUndo?: () => void | Promise<void>;
   onRedo?: () => void | Promise<void>;
   onTrimNarration?: (input: NarrationTrim) => void | Promise<void>;
-  onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: 1 | 1.5 | 2 }) => void | Promise<void>;
+  onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: number }) => void | Promise<void>;
   onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>;
   /** 편집기 안에서 미디어를 더한 뒤 목록을 다시 읽게 한다. */
   onMediaAdded?: () => void | Promise<void>;
@@ -579,7 +579,7 @@ function EditorWorkbenchInstance({
     safeArea: "표시 안 함",
     crop: "전체 화면",
     focalPoint: { x: 0.5, y: 0.5 },
-    captionLayout: "마스터 자막",
+    captionLayout: "마스터 캡션",
     lockedFields: [],
     conflicts: [],
     ownsAudio: true,

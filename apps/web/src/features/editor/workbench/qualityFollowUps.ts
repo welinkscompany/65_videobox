@@ -72,7 +72,7 @@ export function buildQualityFollowUps(
     suggestions.push(`${scene} 색감을 따뜻하게 바꿔 줘`);
   }
   if (caption && caption.text.trim().length > LONG_CAPTION_CHARS) {
-    suggestions.push(`${scene} 자막을 더 짧게 다듬어 줘`);
+    suggestions.push(`${scene} 캡션을 더 짧게 다듬어 줘`);
   }
   if (caption && caption.endSec - caption.startSec > LONG_SCENE_SEC) {
     suggestions.push(`${scene}을 1.5배로 빠르게 해 줘`);

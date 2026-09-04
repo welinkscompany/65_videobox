@@ -83,7 +83,7 @@ function controlSummary(controls: Readonly<Record<string, unknown>>) {
     if (name === "fade_in_sec") return `시작 전환 ${value}초`;
     if (name === "fade_out_sec") return `끝 전환 ${value}초`;
     if (name === "text") return "문구 변경";
-    if (name === "style") return "자막 모양 변경";
+    if (name === "style") return "캡션 모양 변경";
     if (name === "candidate_id") return "승인한 음성";
     if (name === "overlay_kind") return "오버레이 변경";
     return null;

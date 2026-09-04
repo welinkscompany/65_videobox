@@ -77,7 +77,7 @@ describe("InspectorControls", () => {
 
     expect(onAction).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /자동.*적용/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "구간 중간에서 나누기" }));
+    fireEvent.click(screen.getByRole("button", { name: "구간 중간에서 분할" }));
     fireEvent.click(screen.getByRole("button", { name: "다음 구간과 합치기" }));
     fireEvent.change(screen.getByLabelText("선택 구간 처리"), { target: { value: "remove" } });
     expect(onAction).toHaveBeenCalledTimes(2);
@@ -134,7 +134,7 @@ describe("InspectorControls", () => {
       />,
     );
 
-    expect(screen.getByLabelText("자막")).toBeChecked();
+    expect(screen.getByLabelText("캡션")).toBeChecked();
     expect(screen.getByLabelText("배경 음악")).toBeChecked();
     fireEvent.click(screen.getByLabelText("B-roll"));
     fireEvent.click(screen.getByLabelText("효과음"));
@@ -701,7 +701,7 @@ describe("InspectorControls", () => {
         fields: ["style"],
         id: "caption:current",
         kind: "caption",
-        label: "연결 자막",
+        label: "연결 캡션",
         segmentId: "segment-internal-current",
         style,
       },
@@ -713,17 +713,17 @@ describe("InspectorControls", () => {
     // 기본은 스타일 탭이다 -- 글꼴·색·위치가 바로 보여야 방금까지 하던 조정을
     // 잇는다. 번역·더빙 칸은 아직 안 보인다.
     expect(screen.getByText("글꼴")).toBeVisible();
-    expect(screen.queryByText("자막 언어")).not.toBeInTheDocument();
+    expect(screen.queryByText("캡션 언어")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "번역·더빙" }));
 
-    expect(screen.getByText("자막 언어")).toBeVisible();
+    expect(screen.getByText("캡션 언어")).toBeVisible();
     expect(screen.queryByText("글꼴")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "스타일" }));
 
     expect(screen.getByText("글꼴")).toBeVisible();
-    expect(screen.queryByText("자막 언어")).not.toBeInTheDocument();
+    expect(screen.queryByText("캡션 언어")).not.toBeInTheDocument();
   });
 
   it("saves the complete current caption style without exposing independent timing", () => {
@@ -732,7 +732,7 @@ describe("InspectorControls", () => {
         fields: ["style"],
         id: "caption:current",
         kind: "caption",
-        label: "연결 자막",
+        label: "연결 캡션",
         segmentId: "segment-internal-current",
         style,
       },
@@ -742,7 +742,7 @@ describe("InspectorControls", () => {
     expect(screen.queryByText(/voice|effect|keyframe|mask|transition/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("글자 크기"), { target: { value: "32" } });
     fireEvent.change(screen.getByLabelText("가로 정렬"), { target: { value: "left" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 스타일 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "캡션 스타일 저장" }));
 
     expect(onAction).toHaveBeenLastCalledWith({
       kind: "preflight-caption-style",

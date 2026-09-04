@@ -39,7 +39,7 @@ const laneLabel: Readonly<Record<TimelineLane, string>> = {
   bgm: "배경 음악",
   sfx: "효과음",
   overlay: "오버레이",
-  caption: "자막",
+  caption: "캡션",
 };
 
 type TrimNarration = Readonly<{ segmentId: string; startSec: number; endSec: number }>;
@@ -722,6 +722,10 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
   return <section
     aria-label="타임라인"
     className="vb-editor-workbench__timeline"
+    /* 스페이스는 이 면 안에서 재생/정지다 -- 장면 칸이 `<button>`이라 미리보기의
+       "단추 위에서는 가로채지 않는다" 규칙에 걸려서 안 먹었다(owner 지적).
+       읽는 곳은 `preview/preview-stage.tsx` 한 곳뿐이다. */
+    data-timeline-surface="true"
     data-scroll-owner="timeline"
     data-pixels-per-second={formatSeconds(state.pixelsPerSecond)}
     data-viewport-start-seconds={formatSeconds(state.viewportStartSec)}
@@ -736,7 +740,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         스크롤 안에 숨어 있었다 -- 자리가 모자란 게 아니라 글자가 먹고 있었다. */}
     <div className="vb-editor-workbench__timeline-head">
       <h2>타임라인</h2>
-      <p>{view.tracks.length}개 트랙 · {view.captions.length}개 자막 · {view.gaps.length}개 미디어 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
+      <p>{view.tracks.length}개 트랙 · {view.captions.length}개 캡션 · {view.gaps.length}개 미디어 공백 · {sourceStatusLabel[view.source.status] ?? "최신 여부 확인 중"}</p>
       {/* 조작 설명 한 줄을 뺐다(owner 지시 2026-08-22: 설명 문장을 키워드로).
           클릭해서 재생 위치를 보는 것은 타임라인이면 다 그렇고, 화살표·Home·End는
           눌러 보면 안다. 캡컷 타임라인에도 이런 안내가 없다. */}
@@ -869,7 +873,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         className="vb-timeline-clip__select"
         onClick={(event) => { event.stopPropagation(); selectClip(rect, event.shiftKey); }}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
+          // 스페이스는 여기서 처리하지 않는다 -- 편집기 타임라인에서 스페이스는
+          // 재생/정지다(owner 지적). 고르기는 클릭과 Enter로 한다.
+          if (event.key !== "Enter") return;
           event.preventDefault();
           event.stopPropagation();
           selectClip(rect, event.shiftKey);
@@ -917,7 +923,7 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
         한 줄씩 차지하면 눈금과 트랙이 밀려 스크롤 안으로 들어간다. */}
     <div className="vb-editor-workbench__timeline-foot">
       {visibleGaps.map((gap) => <p key={gap.gapId}>미디어 공백: {gap.reason}</p>)}
-      {caption ? <p>현재 자막: {caption.text}</p> : <p>현재 자막 없음</p>}
+      {caption ? <p>현재 캡션: {caption.text}</p> : <p>현재 캡션 없음</p>}
       {selectedPlacementIds.length > 1 ? <p>선택한 독립 항목: {selectedPlacementIds.length}개</p> : null}
       {/* §10.13: the snap target id is an internal key (caption:<segment>:start)
           and meant nothing to the owner. The kind and the time are the parts that

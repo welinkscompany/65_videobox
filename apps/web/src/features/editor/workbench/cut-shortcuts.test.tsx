@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { cutShortcutFor } from "./cutShortcuts";
 
 const tools = {
-  split: { enabled: true, label: "나누기", hint: "", action: { kind: "split-narration", segmentId: "s2", splitSec: 8 } },
+  split: { enabled: true, label: "분할", hint: "", action: { kind: "split-narration", segmentId: "s2", splitSec: 8 } },
   join: { enabled: true, label: "앞과 붙이기", hint: "", action: { kind: "merge-narration", leftSegmentId: "s1", rightSegmentId: "s2" } },
   drop: { enabled: true, label: "빼기", hint: "", action: { kind: "set-cut-action", segmentId: "s2", cutAction: "remove" } },
 } as const;
 
 const locked = {
-  split: { enabled: false, label: "나누기", hint: "", action: null },
+  split: { enabled: false, label: "분할", hint: "", action: null },
   join: { enabled: false, label: "앞과 붙이기", hint: "", action: null },
   drop: { enabled: false, label: "빼기", hint: "", action: null },
 } as const;

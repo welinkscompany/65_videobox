@@ -24,8 +24,8 @@ describe("VariantServerControls", () => {
     expect(screen.getByText("서버 변형 버전 3")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));
     fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));
-    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
-    fireEvent.click(screen.getByRole("button", { name: "크롭·자막 잠금" }));
+    fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "크롭·캡션 잠금" }));
 
     expect(onMaterialize).toHaveBeenCalledWith(variant);
     expect(onPatch).toHaveBeenNthCalledWith(1, variant, {

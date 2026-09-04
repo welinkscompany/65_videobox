@@ -36,7 +36,7 @@ const registry: readonly YujinStarter[] = [
   },
   {
     id: "caption-tighten",
-    label: "자막을 더 간결하게 다듬어 줘",
+    label: "캡션을 더 간결하게 다듬어 줘",
     surfaces: ["edit"],
     selections: ["none", "segment"],
     blockers: [],

@@ -191,7 +191,7 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
     .map((caption) => ({
       id: `caption:${caption.captionId ?? caption.segmentId}`,
       kind: "caption" as const,
-      label: "연결 자막",
+      label: "연결 캡션",
       segmentId: selectedSegmentId,
       fields: ["style"] as const,
       style: caption.style,

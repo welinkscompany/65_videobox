@@ -99,7 +99,7 @@ describe("cut toolbar", () => {
     expect(cutToolbarState({ clips, selectedSegmentId: "s1", playheadSec: 2 }).join.hint).toContain("첫 장면");
   });
 
-  it("opens 나누기 from a single timeline click inside a clip", () => {
+  it("opens 분할 from a single timeline click inside a clip", () => {
     // 2026-08-17 실제 앱에서 확인: 눈금 7초를 눌렀는데 5~7초 장면이 골라져
     // `나누기`가 영영 잠겨 있었다. 재생 위치가 있는 곳의 장면이 골라져야
     // 한 번의 동작으로 나눌 수 있다.

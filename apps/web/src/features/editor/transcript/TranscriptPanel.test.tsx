@@ -26,7 +26,7 @@ describe("TranscriptPanel", () => {
     const onSelectSegment = vi.fn();
     render(<TranscriptPanel entries={entries} playbackSec={0} selectedSegmentId="segment-1" onSelectSegment={onSelectSegment} onSeek={vi.fn()} />);
 
-    const editor = screen.getByRole("textbox", { name: "segment-1 자막 텍스트" });
+    const editor = screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" });
     fireEvent.keyDown(editor, { key: "ArrowDown", isComposing: true });
     expect(onSelectSegment).not.toHaveBeenCalled();
     fireEvent.keyDown(editor, { key: "ArrowDown" });
@@ -37,8 +37,8 @@ describe("TranscriptPanel", () => {
     const onSaveCaption = vi.fn();
     render(<TranscriptPanel entries={entries} playbackSec={0} selectedSegmentId="segment-1" onSelectSegment={vi.fn()} onSeek={vi.fn()} onSaveCaption={onSaveCaption} />);
 
-    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "수정한 자막" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "수정한 자막" } });
+    fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
 
     expect(onSaveCaption).toHaveBeenCalledWith({ segmentId: "segment-1", text: "수정한 자막" });
   });
@@ -50,8 +50,8 @@ describe("TranscriptPanel", () => {
     render(<TranscriptPanel entries={entries} isSaving onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={0} selectedSegmentId="segment-1" />);
 
     const rowButtons = entries.map((entry) => screen.getByRole("button", { name: `${entry.text} 대본 선택` }));
-    const editor = screen.getByRole("textbox", { name: "segment-1 자막 텍스트" });
-    const saveButton = screen.getByRole("button", { name: "자막 저장" });
+    const editor = screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" });
+    const saveButton = screen.getByRole("button", { name: "캡션 저장" });
     rowButtons.forEach((button) => expect(button).toBeDisabled());
     expect(editor).toBeDisabled();
     expect(saveButton).toBeDisabled();

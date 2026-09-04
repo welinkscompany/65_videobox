@@ -32,8 +32,8 @@ export function VariantServerControls({
     <div className="vb-editor-variants__server-actions">
       <Button type="button" variant="outline" disabled={busy || hasConflicts} onClick={() => void onMaterialize(variant)}>{label} 변형 준비</Button>
       <Button type="button" variant="outline" disabled={busy} onClick={() => void onPatch(variant, { overrides: { crop: { mode: "creator_adjusted" } } })}>크롭 저장</Button>
-      <Button type="button" variant="outline" disabled={busy} onClick={() => void onPatch(variant, { overrides: { caption: { layout: "creator_adjusted" } } })}>자막 저장</Button>
-      <Button type="button" disabled={busy} onClick={() => void onPatch(variant, { lock_fields: ["crop", "caption"] })}>크롭·자막 잠금</Button>
+      <Button type="button" variant="outline" disabled={busy} onClick={() => void onPatch(variant, { overrides: { caption: { layout: "creator_adjusted" } } })}>캡션 저장</Button>
+      <Button type="button" disabled={busy} onClick={() => void onPatch(variant, { lock_fields: ["crop", "caption"] })}>크롭·캡션 잠금</Button>
       {/* **이 단추가 실제로 하는 일은 "선택을 다시 고르는 것"이 아니라 "전체
           장면으로 되돌리는 것"이다** -- `selected_segment_ids`에 마스터 전체를
           넣는다. 자동 하이라이트(owner 결정 2026-08-28, `highlight_scoring.py`)가

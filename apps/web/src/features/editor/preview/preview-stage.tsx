@@ -201,7 +201,14 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
       if (event.key !== " " || event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target?.isContentEditable) return;
-      if (target?.closest("input, textarea, select, button, [role='button'], [contenteditable='true']")) return;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      // 타임라인은 예외다. 장면 칸이 `<button>`이라 아래 규칙에 걸려서, 장면을
+      // 한 번 고르면(포커스가 그 단추에 남는다) 스페이스가 영영 안 먹었다 --
+      // owner 지적 "타임라인에서 스페이스바를 누르면 멈춰야 되는데, 그것도
+      // 안되고". 편집기 타임라인에서 스페이스는 재생/정지가 업계 표준이고
+      // 캡컷도 그렇다. 위의 입력칸 검사는 이 예외보다 먼저 걸린다.
+      if (!target?.closest("[data-timeline-surface='true']")
+        && target?.closest("button, [role='button']")) return;
       if (!mediaRef.current) return;
       event.preventDefault();
       togglePlayback();
@@ -267,8 +274,8 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         (실시간 타임라인 재생은 별개의 큰 일이라 이번 범위가 아니다.) */}
     {!isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback" data-idle={currentMedia ? undefined : "true"}><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" disabled={!currentMedia} onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" disabled={!currentMedia} onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" disabled={!currentMedia} onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button><button data-native-control="toggle-mute" type="button" disabled={!currentMedia} onClick={() => setMuted((current) => !current)} aria-label={muted ? "음소거 해제" : "음소거"} aria-pressed={muted}>{muted ? "음소거 해제" : "음소거"}</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" disabled={!currentMedia} onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button></div>{currentMedia ? <output aria-live="off">타임라인 {timelineTime.toFixed(1)}{timelineTimeSuffix}</output> : <output aria-live="off">아직 재생할 영상이 없어요</output>}</div>}
     {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">이 화면은 타임라인 {timelineTime.toFixed(1)}초의 모습입니다. 재생 위치는 그보다 바깥에 있어 아직 볼 수 없어요.</p>}
-    {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
-    <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `자막은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${projectIsEmpty ? "아직 넣은 영상이 없어요." : exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
+    {mode.kind === "exact" && <p role="status" aria-label="현재 캡션" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 캡션: ${activeCaption.text}` : "현재 캡션 없음"}</p>}
+    <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `캡션은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${projectIsEmpty ? "아직 넣은 영상이 없어요." : exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
   </section>;
 }
 

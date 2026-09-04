@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
+from videobox_core_engine.editing_session import MAX_RIPPLE_PLAYBACK_RATE, MIN_RIPPLE_PLAYBACK_RATE
 from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_MOTION_SET,
     SHAPE_OVERLAY_MOTIONS,
@@ -1090,7 +1091,11 @@ class SegmentBoundsRequest(BaseModel):
 
 class RipplePlaybackRateRequest(BaseModel):
     expected_revision: int = Field(ge=1)
-    rate: Literal[1.0, 1.5, 2.0]
+    # 화면 `속도` 칸은 캡컷처럼 숫자칸이다(owner 지시 2026-09-04). 여기가
+    # `Literal[1.0, 1.5, 2.0]`으로 남아 있어서 1.25배가 422로 거절됐다
+    # (2026-09-05 실기 검증). 범위는 엔진에서 그대로 읽어 온다 -- 두 벌로
+    # 두면 또 어긋난다.
+    rate: float = Field(ge=MIN_RIPPLE_PLAYBACK_RATE, le=MAX_RIPPLE_PLAYBACK_RATE, allow_inf_nan=False)
 
 
 class SegmentOrderRequest(BaseModel):
@@ -1353,7 +1358,7 @@ class EditingSessionSegmentResponse(BaseModel):
     sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
     caption_style: dict[str, object] | None = None
-    ripple_playback_rate: Literal[1.5, 2.0] | None = Field(default=None, exclude_if=lambda value: value is None)
+    ripple_playback_rate: float | None = Field(default=None, exclude_if=lambda value: value is None)
     # 앞 장면에서 이 장면으로 넘어오는 방법.
     #
     # **안 고른 장면에는 이 칸이 아예 없다**(`source_script_segment_id`와 같은

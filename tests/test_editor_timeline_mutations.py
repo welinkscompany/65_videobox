@@ -120,7 +120,12 @@ def test_ripple_speed_shortens_one_real_editing_session_scene_and_ripples_later_
     ]
 
 
-@pytest.mark.parametrize("rate", [0.0, -1.0, 1.25, 3.0, float("nan")])
+# **1.25와 3.0은 이제 정상이다(2026-09-04).** owner 지시로 리플 배속을 캡컷처럼
+# 숫자칸 범위(0.25~4)로 넓혔다 -- 렌더의 `_atempo_chain`이 처음부터 그 범위를
+# 감당했고 검증만 셋으로 좁혀 놨던 것이다. 여기서 지키는 것은 "렌더가 못 내는
+# 값은 거부한다"이지 특정 세 값이 아니었으므로, 범위 밖만 남긴다.
+# 넓힌 쪽은 `tests/test_ripple_speed_range.py`가 따로 지킨다.
+@pytest.mark.parametrize("rate", [0.0, -1.0, 0.1, 5.0, float("nan")])
 def test_ripple_speed_refuses_an_unsupported_rate_without_mutating_the_session(rate: float) -> None:
     from videobox_core_engine.editing_session import build_editing_session, set_segment_ripple_playback_rate
 
@@ -463,6 +468,34 @@ def test_ripple_speed_api_is_revisioned_and_keeps_the_whole_source_scene(tmp_pat
         json={"rate": 1.5, "expected_revision": saved["session_revision"]},
     )
     assert stale.status_code == 409
+
+
+def test_ripple_speed_api_takes_any_rate_the_renderer_can_produce(tmp_path: Path) -> None:
+    """화면 `속도` 칸은 숫자칸이다 -- API도 셋만 받으면 거기서 막힌다.
+
+    2026-09-05 실기 검증에서 잡았다. 엔진은 0.25~4로 넓혔는데 요청 스키마가
+    `Literal[1.0, 1.5, 2.0]`으로 남아 있어서 1.25배가 422로 거절됐다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Ripple speed range API")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload=_session())
+    client = TestClient(create_app(projects_root=tmp_path))
+    root = f"/api/projects/{project.project_id}/editing-sessions/{saved['session_id']}"
+
+    accepted = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 1.25, "expected_revision": saved["session_revision"]},
+    )
+
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["segments"][1]["ripple_playback_rate"] == 1.25
+
+    # 범위 밖은 여전히 막는다 -- 렌더가 못 내는 값이다.
+    refused = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 9.0, "expected_revision": accepted.json()["session_revision"]},
+    )
+    assert refused.status_code == 422, refused.text
 
 
 def test_merge_api_rejects_removed_child_without_mutating_session(tmp_path: Path) -> None:

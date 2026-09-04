@@ -147,7 +147,7 @@ const affectedAreaLabels: Readonly<Record<string, string>> = {
   "visual overlays": "화면 요소",
   "narration track": "내레이션",
   "timeline preview": "미리보기",
-  "subtitle render": "자막 입히기",
+  "subtitle render": "캡션 입히기",
   "capcut export": "CapCut 내보내기",
 };
 
@@ -167,7 +167,7 @@ export function partialStatusLabel(status: string): string {
 }
 
 const partialFieldLabels: Readonly<Record<string, string>> = {
-  caption: "자막",
+  caption: "캡션",
   cut_action: "컷 판단",
   broll: "영상",
   visual_overlay: "화면 요소",
@@ -1067,7 +1067,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const epoch = routeEpoch.current.value;
     const currentView = state.view;
     captionPreflightInFlight.current = true;
-    setMutation({ isSaving: true, message: "자막 적용 범위를 확인하고 있어요." });
+    setMutation({ isSaving: true, message: "캡션 적용 범위를 확인하고 있어요." });
     try {
       const port = createEditorCommandPort({ projectId, sessionId, expectedRevision: currentView.expectedRevision });
       await port.previewCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style });
@@ -1075,7 +1075,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       captionPreflightInFlight.current = false;
       await commitTimelineMutation((nextPort) => nextPort.setCaptionStyle({ segmentIds: action.segmentIds, scope: action.scope, style: action.style }));
     } catch {
-      if (routeEpoch.current.value === epoch) setMutation({ isSaving: false, message: "자막 모양을 적용할 범위를 확인하지 못했어요." });
+      if (routeEpoch.current.value === epoch) setMutation({ isSaving: false, message: "캡션 모양을 적용할 범위를 확인하지 못했어요." });
     } finally {
       captionPreflightInFlight.current = false;
     }
@@ -1115,7 +1115,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
             !String(segment.caption_translations?.[action.language] ?? "").trim(),
         ).length;
         return missing > 0
-          ? `${missing}개 장면은 옮기지 못했어요. 그 장면은 원래 자막 그대로 나가요. 다시 눌러 주시면 남은 장면만 다시 해 봐요.`
+          ? `${missing}개 장면은 옮기지 못했어요. 그 장면은 원래 캡션 그대로 나가요. 다시 눌러 주시면 남은 장면만 다시 해 봐요.`
           : undefined;
       }
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
@@ -1295,7 +1295,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만드는 중이에요.", busy: true } : current);
     try {
       const result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: "하이라이트 변형을 만들었어요. 자막이 많은 장면 위주로 자동으로 골랐어요 -- 마음에 안 들면 전체 장면으로 되돌릴 수 있어요.", busy: false } : current);
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: "하이라이트 변형을 만들었어요. 캡션이 많은 장면 위주로 자동으로 골랐어요 -- 마음에 안 들면 전체 장면으로 되돌릴 수 있어요.", busy: false } : current);
     } catch {
       if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만들지 못했어요.", busy: false } : current);
     } finally {
@@ -2386,7 +2386,7 @@ function yujinEditingProposalSummary(proposal: YujinEditingProposal, view: Edito
 function yujinEditingOperationSummary(operation: YujinEditingProposal["diff"]["operations"][number]): string {
   if (operation.intent === "set_scene_speed" && typeof operation.rate === "number") return `${operation.rate}배로 속도를 바꿔요.`;
   if (operation.intent === "set_cut_action") return "장면 포함 여부를 바꿔요.";
-  if (operation.intent === "set_caption_text") return "자막을 고쳐요.";
+  if (operation.intent === "set_caption_text") return "캡션을 고쳐요.";
   // 넣는 것과 빼는 것을 한 줄로 뭉치지 않는다. 말로 시킨 편집은 창작자가 `적용`을
   // 누르지 않으므로 **이 줄이 무엇을 했는지 알려 주는 유일한 자리다**(2026-09-01
   // 실사용 확인: "승인된 미디어 배치를 바꿔요"만 보고는 넣었는지 뺐는지 알 수 없었다).
@@ -2472,8 +2472,8 @@ const RANKED_WITHOUT_MATCHING_WORDS = "metadata";
 
 function candidateReason(reasonChips: readonly string[]): string {
   const words = reasonChips.map((chip) => chip.trim()).filter((chip) => chip && chip !== RANKED_WITHOUT_MATCHING_WORDS);
-  if (words.length) return `자막과 겹치는 말: ${words.join(", ")}`;
-  if (reasonChips.includes(RANKED_WITHOUT_MATCHING_WORDS)) return "자막과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.";
+  if (words.length) return `캡션과 겹치는 말: ${words.join(", ")}`;
+  if (reasonChips.includes(RANKED_WITHOUT_MATCHING_WORDS)) return "캡션과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.";
   return "추천 세부 내용을 확인해 주세요.";
 }
 
