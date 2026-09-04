@@ -573,3 +573,8 @@
    문구가 있는데 편집기만 없었다. 색은 이미 있는 강조 토큰만 쓴다. */
 .vb-editor-assets[data-dropping="true"] { outline: 2px dashed var(--vb-accent); outline-offset: -4px; background: var(--vb-accent-bg); }
 .vb-editor-assets[data-dropping="true"]::after { content: "여기에 놓으면 이 프로젝트에 더해져요"; display: block; margin-top: var(--vb-space-2); color: var(--vb-accent); font-size: var(--vb-text-sm); }
+
+/* 재생할 것이 없을 때의 재생줄. 사라지지 않고 남되 조용하다 -- 눌리지 않는
+   단추라도 있는 편이 낫다(없으면 고장인지 내 잘못인지 모른다, 2026-09-04). */
+.vb-preview-stage__playback[data-idle="true"] { opacity: .55; }
+.vb-preview-stage__playback[data-idle="true"] output { color: var(--vb-muted); font-size: var(--vb-text-sm); }
