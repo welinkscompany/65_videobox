@@ -3618,3 +3618,55 @@ def test_yujin_is_handed_the_scene_numbers_instead_of_counting_them(tmp_path: Pa
     assert "1번 장면=seg-aaa" in prompt
     assert "2번 장면=seg-bbb" in prompt
     assert "3번 장면=seg-ccc" in prompt
+
+
+def test_refresh_reports_blocked_analysis_instead_of_crashing(tmp_path: Path, monkeypatch) -> None:
+    """새로고침도 `create`와 같은 말을 해야 한다.
+
+    2026-09-04 역방향 검증(실제 브라우저에서 편집기를 열어 두고)에서 잡았다.
+    편집기가 자동으로 부르는 이 경로가 **500 Internal Server Error**를 냈다:
+
+        POST /api/projects/{id}/director/proposals/{pid}/refresh -> 500
+
+    컨테이너 로그를 보니 `DirectorProposalBlockedError`가 그대로 새어 나왔다.
+    `refresh`는 안에서 `create`를 다시 부르므로(`director_proposal_service.py:151`)
+    같은 예외가 나는데, **`create` 라우터만 그 예외를 409로 옮기고 `refresh`는
+    안 잡았다**(`director_proposals.py:719` vs `:786`).
+
+    `DirectorProposalBlockedError`는 고장이 아니라 **분석이 아직 안 됐다는 안내**다 --
+    `recovery_action`까지 들고 있다. 500으로 새면 화면은 "무언가 터졌다"만 알고
+    창작자에게 무엇을 하라고 말할 수 없다.
+
+    여기서 지키는 것은 **두 경로가 같은 상황에 같은 말을 한다**이다.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "refresh-blocked"}).json()["project_id"]
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "seg", "caption_text": "blocked"}], "history": []},
+    )
+
+    # 막힌 상태에서는 만들기부터 409다 -- 여기까지는 이미 지켜지고 있었다.
+    created = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]})
+    assert created.status_code == 409
+
+    # **진짜 결함은 "있는 제안 + 막힌 분석"이다.** 없는 제안은 KeyError라
+    # 이미 404로 처리된다 -- 그 길로는 재현되지 않는다. 라우터가 이 예외를
+    # 옮기는지를 직접 겨냥한다.
+    from videobox_core_engine.director_proposal_service import DirectorProposalBlockedError, DirectorProposalService
+
+    lifecycle = {"status": "blocked", "analysis_states": ["missing"], "recovery_action": "analyse_or_retry_assets"}
+
+    def blocked(**_kwargs):
+        raise DirectorProposalBlockedError(lifecycle)
+
+    # 서비스는 라우터 안에서 만들어져 `app.state`에 없다 -- 클래스에 건다.
+    monkeypatch.setattr(DirectorProposalService, "refresh", lambda self, **kwargs: blocked())
+
+    response = client.post(f"/api/projects/{project_id}/director/proposals/proposal:any/refresh")
+
+    assert response.status_code == 409, f"막힌 분석에 {response.status_code}가 났다 -- 500이면 화면이 무엇을 하라고 말할 수 없다"
+    assert response.json()["code"] == "director_analysis_blocked"
+    assert response.json()["lifecycle"]["recovery_action"] == "analyse_or_retry_assets"

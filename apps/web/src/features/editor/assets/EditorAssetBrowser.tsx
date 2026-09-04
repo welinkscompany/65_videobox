@@ -217,10 +217,15 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   const excludedTags = taste.preferences.exclude_tag;
 
   /** **탐색기에서 파일을 끌어다 놓는 자리(2026-09-04).** owner 지적: "캣컵은
-   *  드래그앤 드롭도 다 되는데, 우리는 그것도 아무것도 안되고". 확인해 보니
-   *  자료 카드를 타임라인으로 끄는 것은 있었고, 없던 것은 **바깥 파일**이었다 --
-   *  `dataTransfer.files`를 읽는 자리가 저장소 전체에 0곳이었다.
-   *  올리는 절차는 이미 있으므로(`ingestFilesIntoProject`) 부르는 자리만 만든다.
+   *  드래그앤 드롭도 다 되는데, 우리는 그것도 아무것도 안되고".
+   *
+   *  **정정(2026-09-04 갭검증):** 처음엔 "`dataTransfer.files`를 읽는 자리가
+   *  저장소 전체에 0곳"이라고 적었는데 **틀렸다.** 자료실에는 이미 있었다 --
+   *  `features/library/AssetIngestDropzone.tsx`가 안내 문구까지 갖추고 `/library`
+   *  화면에서 돈다. 없던 곳은 **편집기 미디어 패널**이다. owner가 편집 중에
+   *  끌어다 놓으려 한 자리가 여기였다.
+   *
+   *  올리는 절차도 이미 있으므로(`ingestFilesIntoProject`) 부르는 자리만 만든다.
    *
    *  `types`로 파일 여부를 먼저 가르는 이유: 타임라인으로 자산 카드를 끄는 기존
    *  동작과 부딪히면 안 된다. 파일이 아니면 손대지 않고 그대로 흘려보낸다. */

@@ -4,6 +4,7 @@ import { Button } from "../../../components/ui/button";
 import { NativeSelect } from "../../../components/ui/native-select";
 import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls, type VoiceSampleChoice } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
+import { rippleDisplayDurationSec } from "../inspector/rippleDuration";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
 
@@ -92,6 +93,20 @@ export function RightDock({
             type="button"
             variant="outline"
           >{rate === 1 ? "기본" : `${rate}배`}</Button>)}
+          {/* **바뀐 길이를 여기서 말한다(2026-09-04).** owner 지시 "속도는
+              캡컷이랑 동일하게" -- 캡컷은 `속도 x`와 `기간 s`를 나란히 두고
+              연동한다. 처음엔 이 표시를 인스펙터 `속도` 칸에 붙였는데
+              **틀린 자리였다**: 그 칸은 `media_controls.speed`라 원본을 얼마나
+              먹는지만 바꾸고 장면 슬롯은 그대로 둔다. 장면 길이를 실제로
+              바꾸는 것은 여기(리플 배속)다. */}
+          {(() => {
+            const next = rippleDisplayDurationSec({
+              displayedSec: selectedSegment.endSec - selectedSegment.startSec,
+              currentRate: selectedSegment.ripplePlaybackRate ?? 1,
+              nextRate: selectedSegment.ripplePlaybackRate ?? 1,
+            });
+            return next === null ? null : <p className="vb-inspector__derived" role="status">{`지금 ${next.toFixed(1)}초`}</p>;
+          })()}
         </div> : null}
         {selectedSegment && onPreviewSelectedRange ? <Button
           type="button"

@@ -785,6 +785,17 @@ def build_director_proposals_router(
     def refresh(project_id: str, proposal_id: str) -> dict:
         try:
             return payload(project_id, service.refresh(project_id=project_id, proposal_id=proposal_id))
+        except DirectorProposalBlockedError as exc:
+            # **`create`와 같은 말을 한다(2026-09-04).** `refresh`는 안에서 `create`를
+            # 다시 부르므로(`director_proposal_service.py:151`) 같은 예외가 나는데,
+            # 위 `create` 라우터만 이걸 409로 옮기고 여기는 안 잡았다 -- 편집기가
+            # 자동으로 부르는 이 경로가 **500 Internal Server Error**를 냈다
+            # (2026-09-04 역방향 검증, 실제 브라우저에서 확인).
+            #
+            # 이 예외는 고장이 아니라 "분석이 아직 안 됐다"는 안내다 --
+            # `recovery_action`까지 들고 있다. 500으로 새면 화면은 "무언가 터졌다"만
+            # 알고 창작자에게 무엇을 하라고 말할 수 없다.
+            return JSONResponse(status_code=409, content={"code": "director_analysis_blocked", "lifecycle": exc.lifecycle})
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
