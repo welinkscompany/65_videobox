@@ -9,8 +9,11 @@ export type AuditionRequest = Readonly<{ requestId: number; source: AuditionSour
 export type PreviewCaption = Readonly<{ text: string; startSec: number; endSec: number }>;
 type MediaNode = HTMLVideoElement | HTMLAudioElement;
 
-export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, auditionRequest, onRefresh, playbackSec, onPlaybackTimeChange, fps, loopRange, durationSec }: {
+export function PreviewStage({ expectedRevision, exactPreview, captions = [], sources, auditionRequest, onRefresh, playbackSec, onPlaybackTimeChange, fps, loopRange, durationSec, projectIsEmpty = false }: {
   expectedRevision: number;
+  /** 타임라인에 아직 아무것도 없는가. 참이면 미리보기 자리에 실패 대신 다음에
+   *  할 일을 안내한다 -- 갓 만든 프로젝트의 첫인상이 오류가 되지 않게. */
+  projectIsEmpty?: boolean;
   exactPreview: ExactPreviewInput;
   captions?: readonly PreviewCaption[];
   sources: readonly AuditionSource[];
@@ -245,12 +248,21 @@ export function PreviewStage({ expectedRevision, exactPreview, captions = [], so
         // 발견) -- `muted` state와 아래 음소거 단추로 되살렸다.
         ? <audio ref={mediaRef as RefObject<HTMLAudioElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" muted={muted} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />
         : <video ref={mediaRef as RefObject<HTMLVideoElement>} aria-label={mediaLabel} src={currentMedia.url} preload="metadata" playsInline muted={muted} onLoadedMetadata={(event) => checkAuditionVideo(event.currentTarget)} onTimeUpdate={(event) => updateTimeline(event.currentTarget)} onSeeking={(event) => updateTimeline(event.currentTarget)} onSeeked={(event) => updateTimeline(event.currentTarget)} />)}
-      {!currentMedia && <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>}
+      {/* **아직 아무것도 안 넣었으면 실패라고 말하지 않는다(2026-09-04).**
+          owner가 제일 먼저 막힌 자리다 -- "처음에 뭘 어떤걸 눌러야할지도
+          모르겠고". 갓 만든 프로젝트를 열면 첫 화면이 "미리보기를 만들지
+          못했어요"를 두 번 말했다. 백엔드가 빈 타임라인의 미리보기를 `failed`로
+          표시하기 때문인데, **빈 프로젝트를 그리는 데 실패한 게 아니라 그릴 것이
+          아직 없는 것**이다. 첫인상이 오류면 "내가 뭘 잘못했나"부터 생각하게 된다.
+          진짜 실패는 그대로 실패라고 말한다 -- 안내가 고장까지 덮으면 안 된다. */}
+      {!currentMedia && (projectIsEmpty
+        ? <div className="vb-preview-stage__empty"><strong>여기에 영상이 나와요</strong><p>왼쪽 <b>미디어</b>에서 파일을 더하면 이 자리에 보여요.</p></div>
+        : <div className="vb-preview-stage__empty"><strong>{exact.label}</strong><p>{exact.copy}</p><button data-native-control="refresh-exact" type="button" onClick={() => void refresh()} disabled={!onRefresh || refreshing}>{refreshing ? "미리보기 요청 중" : "미리보기 새로 만들기"}</button>{refreshError && <p role="alert">{refreshError}</p>}</div>)}
     </div>
     {currentMedia && !isImageAudition && !visibleAuditionIssue && <div className="vb-preview-stage__playback"><div className="vb-preview-stage__transport"><button data-native-control="step-back" type="button" onClick={() => stepFrame(-1)} aria-label="이전 프레임">◀｜</button><button data-native-control="toggle-playback" type="button" onClick={togglePlayback} aria-label="재생 또는 일시정지">재생 / 일시정지</button><button data-native-control="step-forward" type="button" onClick={() => stepFrame(1)} aria-label="다음 프레임">｜▶</button><button data-native-control="toggle-mute" type="button" onClick={() => setMuted((current) => !current)} aria-label={muted ? "음소거 해제" : "음소거"} aria-pressed={muted}>{muted ? "음소거 해제" : "음소거"}</button>{loopRange && <button data-native-control="toggle-repeat" type="button" onClick={() => setRepeating((current) => !current)} aria-label="선택한 장면 반복" aria-pressed={repeating}>반복</button>}<button data-native-control="toggle-fullscreen" type="button" onClick={toggleFullscreen} aria-label="미리보기 전체화면" aria-pressed={isFullscreen}>전체화면</button></div><output aria-live="off">타임라인 {timelineTime.toFixed(1)}{timelineTimeSuffix}</output></div>}
     {showsADifferentMoment && <p role="status" aria-label="미리보기 위치 안내" aria-live="polite" className="vb-preview-stage__elsewhere">이 화면은 타임라인 {timelineTime.toFixed(1)}초의 모습입니다. 재생 위치는 그보다 바깥에 있어 아직 볼 수 없어요.</p>}
     {mode.kind === "exact" && <p role="status" aria-label="현재 자막" aria-live="polite" aria-atomic="true" className="vb-preview-stage__caption-transcript vb-preview-stage__visually-hidden">{activeCaption ? `현재 자막: ${activeCaption.text}` : "현재 자막 없음"}</p>}
-    <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `자막은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
+    <p role="status" aria-live="polite" className="vb-preview-stage__status">{mode.kind === "exact" ? `자막은 영상에 포함되어 재생됩니다. ${exact.copy} 타임라인 ${timelineTime.toFixed(1)}초` : mode.kind === "audition" ? isImageAudition ? "소스 이미지 미리보기" : `소스 미리보기 · 타임라인 ${timelineTime.toFixed(1)}초` : `${projectIsEmpty ? "아직 넣은 영상이 없어요." : exact.copy} 타임라인 ${timelineTime.toFixed(1)}초`}</p>
   </section>;
 }
 
