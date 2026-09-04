@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -19,7 +19,10 @@ from videobox_api.models import (
     RenameProjectRequest,
     WorkspaceNextActionResponse,
 )
+from videobox_api.principal import get_principal
+from videobox_domain_models.entitlements import can
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.principal import Principal
 from videobox_storage.local_project_store import LocalProjectStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -60,8 +63,27 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             return max(untimestamped_active, key=lambda job: str(job.get("job_id") or ""))
         return max(final_jobs, key=_job_temporal_key)
 
+    def _require(principal: Principal, capability: str) -> None:
+        """능력 확인을 지나간다.
+
+        `can`은 지금 언제나 참이라 이 함수는 아무도 막지 않는다. 그럼에도
+        호출을 남겨 두는 이유는, 나중에 요금제가 생겼을 때 라우터를 다시
+        고치지 않고 `entitlements.can` 한 곳만 고치면 되게 하기 위해서다.
+        부품만 만들어 두고 부르는 자리를 안 만들면 조용히 낡는다
+        (`videobox-parts-exist-but-nothing-calls-them`).
+        """
+        if not can(principal, capability):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="capability_not_allowed",
+            )
+
     @router.post("/api/projects", status_code=status.HTTP_201_CREATED)
-    def create_project(payload: CreateProjectRequest) -> ProjectResponse:
+    def create_project(
+        payload: CreateProjectRequest,
+        principal: Principal = Depends(get_principal),
+    ) -> ProjectResponse:
+        _require(principal, "project.create")
         project = store.bootstrap_project(name=payload.name)
         return ProjectResponse(
             project_id=project.project_id,
@@ -71,7 +93,11 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
         )
 
     @router.get("/api/projects")
-    def list_projects(include_archived: bool = False) -> ProjectListResponse:
+    def list_projects(
+        include_archived: bool = False,
+        principal: Principal = Depends(get_principal),
+    ) -> ProjectListResponse:
+        _require(principal, "project.list")
         projects = store.list_projects(include_archived=include_archived)
         return ProjectListResponse(
             projects=[
