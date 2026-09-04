@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Captions, Clapperboard, Music, Shuffle, type LucideIcon } from "lucide-react";
 
 import { api } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -95,11 +96,13 @@ export type LeftPane = "media" | "audio" | "transcript" | "transition";
  *  실측: 왼쪽 도크는 보이는 높이 **137px**인데 내용이 **1,608px**이었다 --
  *  **11.7배 스크롤**. 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이 세로로
  *  더 쌓여 있었기 때문이다. 캡컷 왼쪽 패널은 고른 탭의 내용만 보여 준다. */
-export const editorAssetPanes: readonly Readonly<{ pane: LeftPane; label: string }>[] = [
-  { pane: "media", label: "미디어" },
-  { pane: "audio", label: "오디오" },
-  { pane: "transcript", label: "자막" },
-  { pane: "transition", label: "전환" },
+/* 아이콘이 붙은 이유: 캡컷 왼쪽 띠는 72px 폭이라 글자만으로는 `미디어`조차
+   줄바꿈된다. 아이콘 + 10px 라벨이 캡컷 실측 구성이다(2026-09-04). */
+export const editorAssetPanes: readonly Readonly<{ pane: LeftPane; label: string; icon: LucideIcon }>[] = [
+  { pane: "media", label: "미디어", icon: Clapperboard },
+  { pane: "audio", label: "오디오", icon: Music },
+  { pane: "transcript", label: "자막", icon: Captions },
+  { pane: "transition", label: "전환", icon: Shuffle },
 ];
 
 const paneKinds: Readonly<Record<"media" | "audio", readonly EditorAssetKind[]>> = {

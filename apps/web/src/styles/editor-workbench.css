@@ -54,7 +54,40 @@
    확대·트랙 잠금 조작 위를 그대로 덮는 걸 실측으로 확인했다(패널과
    타임라인 영역이 275px 겹침). 이 줄 기준으로 옮기면 타임라인과 절대
    안 겹친다. */
+/* 본문이 가로 배치가 된 이유: 왼쪽 세로 띠와 패널 묶음이 나란히 서야 한다.
+   띠는 폭 고정(72px), 패널 묶음이 남는 폭을 다 쓴다. */
+.vb-editor-workbench__body { display: flex; gap: var(--vb-space-2); }
+.vb-editor-workbench__panels { flex: 1; }
 .vb-editor-workbench__body, .vb-editor-workbench__panels { position: relative; min-width:0; min-height:0; height:100%; max-height:100%; overflow:hidden; }
+/* **왼쪽 세로 아이콘 띠(계획서 3단계).** 캡컷 실측: 폭 72px, 항목 62px 간격,
+   아이콘 + 10px 라벨. 예전엔 이 탭들이 위쪽 도구줄에 가로로 있었는데, 가로 탭은
+   가로 폭을 쓰고 편집기에서 모자란 건 세로다 -- 패널이 보이는 높이의 2.42배로
+   쌓여 스크롤이 났다. 이동을 세로로 빼면 그 높이가 통째로 살아난다. */
+.vb-editor-workbench__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vb-space-1);
+  width: 72px;
+  flex: 0 0 72px;
+  overflow-y: auto;
+  padding: var(--vb-space-2) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--vb-radius-md);
+  background: var(--card);
+}
+/* 아이콘 위·라벨 아래로 쌓는다. `data-multiline`으로 껍데기의 32px 고정 높이를
+   푼 상태라(`product-shell.css`) 두 줄이 안 잘린다. */
+.vb-editor-workbench__rail-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--vb-space-1);
+  padding: var(--vb-space-2) var(--vb-space-1);
+  border-radius: var(--vb-radius-sm);
+}
+.vb-editor-workbench__rail-tab svg { width: 1.25rem; height: 1.25rem; }
+.vb-editor-workbench__rail-label { font-size: var(--vb-text-xs); line-height: 1.2; text-align: center; }
 .vb-editor-workbench__dock { min-width:0; min-height:0; max-height:100%; height:100%; overflow: auto; padding: var(--vb-space-3); }
 .vb-editor-workbench__summary { padding-block: var(--vb-space-2); border-bottom: 1px solid var(--border); }
 .vb-editor-workbench__summary textarea { width: 100%; min-height: 5rem; margin-block: var(--vb-space-2); }

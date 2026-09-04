@@ -767,13 +767,24 @@ describe("편집 툴바 — 승인 기록 2026-08-20 항목 2", () => {
     render(<EditorWorkbench view={view} />);
     await screen.findByRole("region", { name: "편집 작업판" });
 
-    const filled = toolbarButtons()
+    // **지키는 원칙은 그대로다**(승인 2026-08-20 항목 2): 채운 주황은 열린 도크
+    // 하나만 가져가고 나머지는 조용하다. 2026-09-04에 패널 탭이 도구줄에서
+    // 왼쪽 세로 띠로 옮겨가면서(계획서 3단계) **자리만 바뀌었다** -- 그래서
+    // 도구줄은 이제 하나도 안 채워져 있어야 하고, 채운 하나는 띠에 있다.
+    const filledInToolbar = toolbarButtons()
+      .filter((button) => button.className.includes("bg-primary"))
+      .map((button) => button.textContent);
+    expect(filledInToolbar, "도구줄 단추가 강조를 가져갔다").toEqual([]);
+
+    const rail = document.querySelector(".vb-editor-workbench__rail");
+    if (!rail) throw new Error("왼쪽 세로 띠를 찾지 못했다");
+    const filledInRail = Array.from(rail.querySelectorAll("button"))
       .filter((button) => button.className.includes("bg-primary"))
       .map((button) => button.textContent);
 
     // 넓은 화면에서 왼쪽 재료 열은 기본으로 펴져 있다(owner 승인 2026-08-17).
-    // 그 하나만 강조를 가져가고, 나머지 일곱 개는 조용하다.
-    expect(filled).toEqual(["미디어"]);
+    // 그 하나만 강조를 가져가고 나머지 띠 항목은 조용하다.
+    expect(filledInRail).toEqual(["미디어"]);
   });
 
   it("열려 있는 도크만 강조를 가져간다 — 그것이 '선택된 항목'이다", async () => {

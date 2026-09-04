@@ -634,9 +634,6 @@ function EditorWorkbenchInstance({
           닫기만 했고, 실제 탭(미디어/오디오/자막/전환)은 패널을 연 뒤에야
           보였다 -- `EditorAssetBrowser`가 이미 그 탭을 옳게 만들어 뒀으므로
           (`renderPaneTabs`) 그 자리를 여기로 옮긴다. */}
-      <div className="vb-editor-workbench__panes" role="tablist" aria-label="왼쪽 패널">
-        {editorAssetPanes.map((item) => <Button key={item.pane} ref={item.pane === leftPane ? leftTriggerRef : undefined} type="button" variant={leftShowing && leftPane === item.pane ? "default" : "outline"} size="sm" role="tab" aria-selected={leftShowing && leftPane === item.pane} onClick={() => openLeftPane(item.pane)}>{item.label}</Button>)}
-      </div>
       <Button ref={rightTriggerRef} type="button" variant={rightShowing ? "default" : "outline"} size="icon" title="세부 정보 — 고른 장면의 속성" aria-pressed={rightShowing} onClick={() => openRightPane()}><PanelRight aria-hidden="true" /><span className="sr-only">세부 정보</span></Button>
       {/* **내보내기를 편집기 안에서 연다(owner 지시 2026-08-27).**
           > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
@@ -658,6 +655,37 @@ function EditorWorkbenchInstance({
       <Button type="button" variant="outline" size="icon" title="내보내기 — 완성본 만들기" onClick={() => setExportOpen(true)}><Upload aria-hidden="true" /><span className="sr-only">내보내기</span></Button>
     </div></header>
     <div ref={bodyRef} className="vb-editor-workbench__body" data-scroll-owner="panels">
+      {/* **왼쪽 세로 아이콘 띠(계획서 3단계).** 예전엔 이 탭들이 위쪽 도구줄에
+          가로로 있었다(2026-08-30). 가로 탭은 가로 폭을 쓰는데 편집기에서
+          모자란 건 세로다 -- 패널 내용이 보이는 높이의 2.42배로 쌓여 스크롤이
+          났다(2026-09-04 실측). 캡컷은 이동을 72px 세로 띠로 빼서 패널 높이를
+          통째로 살린다. owner가 "스크롤 내리지 말고 탭으로 정리하라"고 한 것의
+          구조적 해답이다.
+
+          `ResizablePanelGroup` **밖에** 두는 이유: 띠는 폭이 고정이라 크기
+          조절에 끼면 사용자가 줄일 수 있게 되고, 그러면 라벨이 잘린다.
+
+          **좁은 화면(`drawer`)에서도 그린다.** 처음엔 넓은 모드에만 뒀다가
+          좁은 화면에서 이동 수단이 통째로 사라졌다(시험 14건이 잡았다) --
+          예전 가로 탭은 도구줄에 있어서 모든 모드에 있었다. 띠는 72px이라
+          좁은 화면에서도 감당된다. */}
+      <nav className="vb-editor-workbench__rail" role="tablist" aria-label="왼쪽 패널">
+        {editorAssetPanes.map((item) => {
+          const active = leftShowing && leftPane === item.pane;
+          const Icon = item.icon;
+          return <Button
+            aria-selected={active}
+            className="vb-editor-workbench__rail-tab"
+            data-multiline="true"
+            key={item.pane}
+            onClick={() => openLeftPane(item.pane)}
+            ref={item.pane === leftPane ? leftTriggerRef : undefined}
+            role="tab"
+            type="button"
+            variant={active ? "default" : "ghost"}
+          ><Icon aria-hidden="true" /><span className="vb-editor-workbench__rail-label">{item.label}</span></Button>;
+        })}
+      </nav>
       {layout.mode !== "drawer" ? <ResizablePanelGroup orientation="horizontal" className="vb-editor-workbench__panels">
         {leftVisible && <><ResizablePanel panelRef={leftPanelRef} defaultSize={`${ui.leftSize}px`} minSize="220px" onResize={(size) => setUi((current) => ({ ...current, leftSize: persistedPanelPixels(size, 220, current.leftSize) }))}>{dock("left")}</ResizablePanel><ResizableHandle aria-label="왼쪽 패널 크기 조절" onKeyDown={(event) => handleKey(event, "left")} /></>}
         <ResizablePanel minSize={layout.previewMinPx} className="vb-editor-workbench__stage-panel"><div className="vb-editor-workbench__preview" data-scroll-owner="preview" data-preview-min-width={layout.previewMinPx}>{stage}</div></ResizablePanel>
