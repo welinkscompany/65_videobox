@@ -242,6 +242,12 @@ export function InspectorControls({
   // Both rode in the command port from the start with no screen offering
   // them. Phone B-roll is routinely too long and too loud.
   const [speed, setSpeed] = useState(1);
+  /** 배속을 걸었을 때 이 장면이 몇 초가 되는지. 엔진이 쓰는 식과 같다 --
+   *  `display_duration = source_duration / rate` (`editing_session.py:630`).
+   *  고른 장면이 없거나 배속이 0 이하면 보여 줄 것이 없다. */
+  const speedAdjustedDurationSec = selectedSegment && speed > 0
+    ? (selectedSegment.endSec - selectedSegment.startSec) / speed
+    : null;
   const [fit, setFit] = useState<"fit" | "crop">("fit");
   const [volume, setVolume] = useState(1);
   // 색감. 안 고른 상태는 `none`이고, 저장할 때 `null`로 바뀐다.
@@ -677,6 +683,20 @@ export function InspectorControls({
                     {`${target.label} 재생 속도`}
                     <Input disabled={disabled} max="4" min="0.25" onChange={(event) => setSpeed(numberValue(event.target.value, speed))} step="0.05" type="number" value={speed} />
                   </label>
+                  {/* **바뀐 길이를 같이 보여 준다(owner 지시 2026-09-04, "속도는
+                      캡컷이랑 동일하게 맞춰").** 캡컷 `속도` 속성은 `속도 x`와
+                      `기간 s`를 나란히 두고 연동한다. 우리 엔진은 이미 그렇게
+                      동작하는데(`set_segment_ripple_playback_rate`가 `end_sec`를
+                      바꾸고 뒤 장면을 당긴다) **화면만 그 결과를 안 말했다** --
+                      배속을 걸고 나서 장면이 몇 초가 되는지 알 수 없었다.
+                      읽기 전용인 이유: 길이를 직접 고치는 것은 구간 자르기이고
+                      그 자리가 따로 있다. 여기서 둘 다 고치게 하면 같은 값을
+                      두 곳에서 바꾸게 된다. */}
+                  {speedAdjustedDurationSec !== null ? (
+                    <p className="vb-inspector__derived" role="status">
+                      {`장면 길이 ${speedAdjustedDurationSec.toFixed(1)}초`}
+                    </p>
+                  ) : null}
                   {/* 숏폼에서는 같은 배속을 클립마다 반복해서 건다. 숫자칸만
                       두면 그때마다 지우고 다시 쳐야 한다. 자주 쓰는 값만
                       버튼으로 두고, 그 밖의 값은 여전히 숫자칸으로 넣는다 --

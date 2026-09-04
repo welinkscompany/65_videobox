@@ -563,3 +563,7 @@
 .vb-inspector-fold > summary { cursor: pointer; padding: var(--vb-space-2) 0; font-weight: 700; font-size: var(--vb-text-sm); color: var(--vb-muted); }
 .vb-inspector-fold[open] > summary { color: var(--vb-text); }
 .vb-inspector-fold > fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: var(--vb-space-2); }
+
+/* 값에서 따라 나오는 숫자(배속을 걸었을 때의 장면 길이 등). 창작자가 고치는
+   값이 아니라 결과라서 조용한 색으로 둔다 -- 입력칸처럼 보이면 눌러 보게 된다. */
+.vb-inspector__derived { margin: 0; color: var(--vb-muted); font-size: var(--vb-text-sm); }
