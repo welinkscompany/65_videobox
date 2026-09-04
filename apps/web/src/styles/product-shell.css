@@ -2,7 +2,11 @@ body:has(.vb-product-shell) { margin: 0; }
 /* 띠 높이를 값 하나로 둔다. 편집판이 `100svh`에서 이걸 빼서 제 높이를 잡는데,
    좁은 화면에서 띠가 두 줄이 되면 숫자를 박아 둔 쪽이 어긋난다 -- 실제로 375px에서
    페이지가 32px 밀려났다(2026-08-21 재서 확인). */
-.vb-product-shell { --vb-top-bar-h: 4.25rem; min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; flex-direction: column; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); }
+/* `font-size`를 여기서 못박는 이유: 캡컷은 화면 대부분이 14px인데 우리는 아무도
+   크기를 안 정한 글자가 브라우저 기본 16px로 나왔다(2026-09-04 실측). 척도를
+   캡컷에 맞추면서 기본값도 본문 크기로 내린다 -- 이걸 빼면 토큰만 작아지고
+   상속으로 그려지는 글자는 그대로 커서 화면이 더 어긋난다. */
+.vb-product-shell { --vb-top-bar-h: 4.25rem; min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; flex-direction: column; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); font-size: var(--vb-text-md); }
 [data-vb-desktop-shell] { min-width:0; box-sizing:border-box; overflow-x:hidden; }
 @media (min-width: 1024px) { [data-vb-desktop-shell] { min-width:1280px; min-height:800px; height:100vh; overflow:hidden; } }
 .vb-product-main { min-width:0; min-height:0; flex:1; overflow:hidden; }.vb-product-content { width:100%; max-width:1200px; min-height:0; margin: 0 auto; padding: var(--vb-space-7) clamp(var(--vb-space-4),3vw,var(--vb-space-8)); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }
@@ -197,7 +201,16 @@ body:has(.vb-product-shell) { margin: 0; }
    선언 자체를 무효로 만들어 초기값(0)으로 떨어진다 -- 그래서 이 화면의
    모든 default·outline 버튼이 모서리 없이 각지게 그려지고 있었다
    (2026-08-30, 캡컷 버튼 단위 벤치마킹 중 실측으로 발견). */
-.vb-product-shell [data-slot=button] { min-height:32px; }
+/* 캡컷은 단추 높이가 **32px 하나**다(2026-09-04 실측 — 15개가 정확히 32).
+   우리는 28·29·32·36·52가 뒤섞여 있었다. `min-height`만으로는 shadcn이 거는
+   `h-9`(36px)를 못 줄인다 -- 실제 높이를 못박아야 한다. 이 선택자는 (0,2,0)이라
+   `.h-9`(0,1,0)를 이긴다. 아이콘 단추는 정사각형이라 따로 준다. */
+.vb-product-shell [data-slot=button] { min-height:32px; height:32px; }
+.vb-product-shell [data-slot=button][data-size="icon"],
+.vb-product-shell [data-slot=button][data-size="icon-sm"] { width:32px; height:32px; padding:0; }
+/* 줄이 넘어가는 단추(카드형·설명이 붙은 것)는 고정 높이를 풀어 준다 --
+   안 그러면 글자가 잘린다(`.vb-footage-source`에서 실제로 잘렸다). */
+.vb-product-shell [data-slot=button][data-multiline="true"] { height:auto; }
 .vb-product-shell [data-slot=button][data-variant="default"] { border-radius:var(--vb-radius-md); }
 .vb-product-shell [data-slot=button][data-variant="outline"] { border:0; box-shadow:0 0 0 1px var(--vb-control-ring); border-radius:var(--vb-radius-md); }
 /* `ghost`·`secondary`·`destructive`·`link`는 위 두 줄(`default`/`outline`)과

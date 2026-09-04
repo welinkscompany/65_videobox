@@ -124,12 +124,16 @@ describe("가상 묶음 미리보기 안내가 척도 밖으로 작아지지 않
  * 전에도 이미 12px 잘려 있었고(상자 54 / 내용 64) 도입이 그 격차를 21px로
  * 넓혔다. 고정 높이를 풀어야 열두 칸 전부가 안 잘린다. */
 describe("촬영본 한 칸이 내용에 맞춰 늘어난다", () => {
-  // 한 칸짜리 `.vb-footage-source{height:auto}`로는 안 된다 -- shadcn `Button`이
-  // 같이 거는 `.h-9`가 특정도는 같고(0,1,0) 번들에서 더 뒤에 실려 이긴다.
-  // 실기계에서 계산값이 그대로 36px인 것을 확인했다. 부모를 앞에 붙여야 이긴다.
-  it(".vb-footage-source가 .h-9를 이기는 무게로 고정 높이를 푼다", () => {
-    const rule = footageCss.match(/\.vb-footage-source-row\s+\.vb-footage-source\{[^}]*\}/)?.[0]
-    expect(rule, "부모를 앞에 붙인 .vb-footage-source 규칙을 못 찾았다").toBeDefined()
-    expect(rule).toMatch(/height:\s*auto/)
+  // **특정도로 풀지 않는다.** 처음엔 부모를 앞에 붙여 무게를 올렸는데, 껍데기가
+  // 단추 높이를 32px로 통일하자 특정도가 같아져(둘 다 0,2,0) 순서로 밀렸고
+  // 열두 칸이 다시 잘렸다(2026-09-04 실측 54/30). 다음 변경에 또 지지 않도록
+  // JSX에서 `data-multiline`을 달아 껍데기가 스스로 고정 높이를 풀게 한다.
+  it("촬영본 칸이 data-multiline으로 고정 높이를 푼다", () => {
+    const jsx = readFileSync(resolve(process.cwd(), "src/features/footage/FootageSourceList.tsx"), "utf8")
+    expect(jsx, "촬영본 칸에 data-multiline이 없다").toContain('data-multiline="true"')
+  })
+
+  it("껍데기가 data-multiline 단추의 고정 높이를 풀어 준다", () => {
+    expect(productShellCss).toMatch(/\[data-multiline="true"\]\s*\{[^}]*height:\s*auto/)
   })
 })

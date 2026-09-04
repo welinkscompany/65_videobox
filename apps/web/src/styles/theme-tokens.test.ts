@@ -213,3 +213,50 @@ describe("완성본 아래 두 묶음이 다닥다닥 붙지 않는다", () => {
     expect(rule).toMatch(/box-sizing:\s*border-box/)
   })
 })
+
+describe("글자·단추 척도를 캡컷 실측값에 맞춘다", () => {
+  // 2026-09-04, owner 승인(`decisions/2026-09-04-capcut-shell-with-my-assets.ko.md`).
+  // 캡컷 편집기를 실제로 열어 재 보니 기준 12px에 본문 14px·설명 12px·띠 라벨
+  // 10px이었고, 버튼은 **15개가 정확히 32px**이었다. 우리는 기준 16px에 버튼이
+  // 28·29·32·36·52로 뒤섞여 있었다 -- owner가 "글자가 커서 버튼이 다 커지고
+  // 어거지로 우겨넣게 된다"고 한 게 이 차이다.
+  //
+  // **`:root`의 font-size는 건드리지 않는다.** 척도가 rem이라 기준을 12px로
+  // 내리면 `--vb-space-*`와 Tailwind `--spacing`까지 25% 줄어든다. 캡컷은 기준만
+  // 12px이고 본문은 14px이라 그 방식이 아니다. 척도 자체를 캡컷 픽셀값에 맞춘다.
+  const uiSystemCss = readFileSync(resolve(process.cwd(), "src/ui-system.css"), "utf8")
+  const scale: ReadonlyArray<readonly [string, string]> = [
+    ["--vb-text-xs", "0.625rem"],  // 10px — 세로 띠 라벨·배지
+    ["--vb-text-sm", "0.75rem"],   // 12px — 설명·메타·격자 라벨
+    ["--vb-text-md", "0.875rem"],  // 14px — 본문·항목 이름 (캡컷에서 제일 많음)
+    ["--vb-text-lg", "1rem"],      // 16px — 패널 제목
+    ["--vb-text-xl", "1.25rem"],   // 20px — 구역 제목
+    ["--vb-text-2xl", "1.75rem"],  // 28px — 화면 제목
+    ["--vb-text-3xl", "2.5rem"],   // 40px — 홍보 문구
+  ]
+
+  for (const [token, value] of scale) {
+    it(`${token}가 ${value}다`, () => {
+      // 정규식 대신 그대로 찾는다 — 값에 `.`이 있어 escape가 헷갈린다.
+      expect(uiSystemCss).toContain(token + ": " + value + ";")
+    })
+  }
+
+  it("기준 글자를 rem 척도째로 줄이지 않는다", () => {
+    // `:root { font-size: 12px }`를 넣으면 여백까지 딸려 줄어든다.
+    expect(uiSystemCss).not.toMatch(/:root\s*\{[^}]*font-size:\s*12px/)
+  })
+
+  it("화면 기본 글자가 본문 척도(14px)다", () => {
+    const rule = productShellCss.match(/\.vb-product-shell\s*\{[^}]*\}/)?.[0]
+    expect(rule, ".vb-product-shell 규칙을 못 찾았다").toBeDefined()
+    expect(rule).toMatch(/font-size:\s*var\(--vb-text-md\)/)
+  })
+
+  it("단추 높이가 32px 하나로 통일된다", () => {
+    // 캡컷은 15개가 정확히 32였다. shadcn `h-9`(36px)를 이겨야 하므로
+    // `.vb-product-shell [data-slot=button]`(0,2,0)로 건다.
+    const rule = productShellCss.match(/\.vb-product-shell \[data-slot=button\]\s*\{[^}]*height:\s*32px[^}]*\}/)
+    expect(rule, "단추 높이 32px 규칙을 못 찾았다").not.toBeNull()
+  })
+})

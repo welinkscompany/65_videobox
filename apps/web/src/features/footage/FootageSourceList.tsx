@@ -11,7 +11,10 @@ export function FootageSourceList({ assets, selectedIds, onSelect }: Props) {
         const filename = String(asset.user_metadata?.filename ?? asset.library_asset_id);
         const duration = asset.duration_seconds ?? Number(asset.technical_metadata?.duration_seconds ?? 0);
         return <div key={asset.library_asset_id} className="vb-footage-source-row">
-          <Button type="button" variant="ghost" className="vb-footage-source" aria-pressed={selectedIds.includes(asset.library_asset_id)} onClick={(event) => onSelect(asset, event.shiftKey)}>
+          {/* `data-multiline`: 이 칸은 그림·파일이름·길이·`자료실에서 보기`가 여러 줄로
+              들어가서 단추 기본 높이(32px)에 가두면 내용이 잘린다. 껍데기의 고정 높이를
+              푸는 고리다(`product-shell.css`의 `[data-multiline="true"]`). */}
+          <Button type="button" data-multiline="true" variant="ghost" className="vb-footage-source" aria-pressed={selectedIds.includes(asset.library_asset_id)} onClick={(event) => onSelect(asset, event.shiftKey)}>
             <span className="vb-footage-source__thumb">{asset.thumbnail_url ? <img src={asset.thumbnail_url} alt="" /> : <span aria-hidden="true">▶</span>}</span>
             <span className="vb-footage-source__copy"><strong>{filename}</strong><small>{formatTime(duration)} · 원본 유지</small></span>
           </Button>

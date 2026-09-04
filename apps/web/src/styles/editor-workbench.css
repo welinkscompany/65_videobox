@@ -36,19 +36,14 @@
    적었더니 높이만 줄고 안쪽 여백과 글씨는 그대로여서, 실측하니 36px이 35px이
    된 게 전부였다(2026-09-01 브라우저에서 확인). 무게를 맞춰야 이긴다 --
    이 파일이 `product-shell.css`보다 나중에 읽히므로 같은 무게면 여기가 이긴다. */
+/* 2026-09-04: 캡컷 편집기를 재 보니 도구줄 아이콘 단추가 **전부 32×32**였고
+   글자 단추도 32였다(간격 4~8px). 여기만 28px로 따로 놀 이유가 없어져서
+   껍데기와 같은 32로 맞춘다 -- owner가 "버튼 크기가 제각각"이라고 한 것을
+   없애는 게 이번 목적이다. 줄이 넘어가는 단추는 `data-multiline`으로 푼다. */
 .vb-product-shell .vb-editor-workbench [data-slot="button"] {
-  height: auto;
-  min-height: 1.75rem;
   padding: var(--vb-space-1) var(--vb-space-2);
   font-size: var(--vb-text-sm);
   font-weight: 500;
-}
-.vb-product-shell .vb-editor-workbench [data-slot="button"][data-size="icon"],
-.vb-product-shell .vb-editor-workbench [data-slot="button"][data-size="icon-sm"] {
-  width: 1.75rem;
-  height: 1.75rem;
-  min-height: 0;
-  padding: 0;
 }
 .vb-editor-workbench [data-slot="button"] svg { width: 1rem; height: 1rem; }
 /* `position: relative`는 아래 `.vb-yujin-panel`이 이 영역(미리보기·도크

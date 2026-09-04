@@ -86,13 +86,25 @@
   --vb-space-8: 2.5rem;
   /* 글자 크기 척도. 같은 이유로 15가지가 쓰이고 있었다 --
      0.68·0.7·0.72·0.75·0.78rem처럼 붙어 있어 서로 구분되지 않았다. */
-  --vb-text-xs: 0.75rem;
-  --vb-text-sm: 0.85rem;
-  --vb-text-md: 0.95rem;
-  --vb-text-lg: 1.1rem;
-  --vb-text-xl: 1.25rem;
-  --vb-text-2xl: 1.65rem;
-  --vb-text-3xl: 2.35rem;
+  /* 2026-09-04: 캡컷 편집기를 실제로 열어 재고 그 픽셀값에 맞췄다
+     (owner 승인 `decisions/2026-09-04-capcut-shell-with-my-assets.ko.md`).
+     캡컷 실측 — 기준 12px, 본문 14px(제일 많음, 63곳), 설명·메타 12px(39곳),
+     세로 띠 라벨 10px, 패널 제목 16px, 구역 제목 20px, 화면 제목 28px.
+
+     **`:root`의 `font-size`는 건드리지 않는다.** 이 척도가 rem이라 기준을
+     12px로 내리면 `--vb-space-*`와 Tailwind `--spacing`까지 25% 줄어든다 --
+     캡컷은 기준만 12px이고 본문은 오히려 14px이라 그 방식이 아니다. 기준은
+     16px에 두고 척도 자체를 캡컷 픽셀값으로 옮긴다.
+
+     owner가 "글자 크기가 너무 커서 버튼이 다 커지고 어거지로 우겨넣게 된다"고
+     한 것이 이 차이였다. */
+  --vb-text-xs: 0.625rem;   /* 10px — 세로 띠 라벨·배지 */
+  --vb-text-sm: 0.75rem;    /* 12px — 설명·메타·격자 라벨 */
+  --vb-text-md: 0.875rem;   /* 14px — 본문·항목 이름 */
+  --vb-text-lg: 1rem;       /* 16px — 패널 제목 */
+  --vb-text-xl: 1.25rem;    /* 20px — 구역 제목 */
+  --vb-text-2xl: 1.75rem;   /* 28px — 화면 제목 */
+  --vb-text-3xl: 2.5rem;    /* 40px — 홍보 문구 */
   --background: #0F0F11;
   --foreground: #F2F2F3;
   --card: #202024;
