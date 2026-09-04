@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Textarea } from "../../../components/ui/textarea";
-import { CaptionLane } from "./CaptionLane";
 import { activeSegmentIdAt } from "./playbackNavigation";
 import { visibleTranscriptWindow, type TranscriptEntry } from "./transcriptProjection";
 
@@ -48,21 +47,24 @@ export function TranscriptPanel({
     }
   };
   return <>
-    <section aria-label="대본" className="vb-editor-workbench__summary">
-      <h2>대본</h2>
+    <section aria-label="캡션" className="vb-editor-workbench__summary">
+      <h2>캡션</h2>
       {visibleEntries.length ? <ol>
         {visibleEntries.map((entry) => <li key={entry.segmentId}>
-          <Button aria-current={entry.segmentId === activeSegmentId ? "true" : undefined} aria-label={`${entry.text} 대본 선택`} disabled={isSaving} onClick={() => select(entry)} type="button">
+          <Button aria-current={entry.segmentId === activeSegmentId ? "true" : undefined} aria-label={`${entry.text} 캡션 선택`} disabled={isSaving} onClick={() => select(entry)} type="button">
             {entry.text} · {seconds(entry.startSec)}–{seconds(entry.endSec)}
           </Button>
         </li>)}
-      </ol> : <p>연결된 대본이 없습니다.</p>}
+      </ol> : <p>아직 캡션이 없어요.</p>}
+      {/* 시간을 여기서 못 고치는 이유를 한 줄로 말한다. 예전에는 이 안내가
+          아래에 붙은 요약 절(`CaptionLane`)에 있었는데, 그 절은 바로 위 목록이
+          이미 보여 주는 것을 한 벌 더 쌓고 있었다 -- 안내만 남기고 걷어냈다. */}
+      <p>캡션 시간은 연결된 내레이션 구간을 따릅니다.</p>
       {selectedEntry ? <>
         <label htmlFor="vb-transcript-caption">캡션 텍스트</label>
         <Textarea aria-label={`${selectedEntry.segmentId} 캡션 텍스트`} disabled={isSaving} id="vb-transcript-caption" onChange={(event) => { if (!isSaving) setDraft(event.target.value); }} onKeyDown={handleEditorKeyDown} value={draft} />
         <Button disabled={isSaving || !onSaveCaption || draft === selectedEntry.text} onClick={() => onSaveCaption?.({ segmentId: selectedEntry.segmentId, text: draft })} type="button">캡션 저장</Button>
       </> : null}
     </section>
-    <CaptionLane entries={entries} selectedSegmentId={currentSegmentId} />
   </>;
 }

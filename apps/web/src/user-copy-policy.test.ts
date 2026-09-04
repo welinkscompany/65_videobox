@@ -68,7 +68,9 @@ const previouslyCoveredUiFiles = [
   "features/editor/inspector/InspectorControls.tsx",
   "features/editor/preview/preview-stage.tsx",
   "features/editor/timeline/TimelineDock.tsx",
-  "features/editor/transcript/CaptionLane.tsx",
+  // "features/editor/transcript/CaptionLane.tsx"는 2026-09-05에 걷어냈다 --
+  // 조작이 하나도 없는 요약이었고 바로 위 목록이 이미 같은 것을 보여 줬다.
+  // 남은 안내 한 줄은 "TranscriptPanel.tsx"로 옮겼다(이미 이 목록에 있다).
   "features/editor/transcript/TranscriptPanel.tsx",
   "features/editor/workbench/EditorWorkbench.tsx",
   "features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx",

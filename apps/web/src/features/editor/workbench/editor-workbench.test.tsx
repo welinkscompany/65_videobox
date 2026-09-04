@@ -369,16 +369,16 @@ describe("EditorWorkbench", () => {
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0 });
 
     fireEvent.click(clipSelectionButton("n-2"));
-    expect(screen.getByRole("button", { name: "둘째 자막 대본 선택" })).toHaveAttribute("aria-current", "true");
-    fireEvent.click(screen.getByRole("button", { name: "첫 자막 대본 선택" }));
+    expect(screen.getByRole("button", { name: "둘째 자막 캡션 선택" })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(screen.getByRole("button", { name: "첫 자막 캡션 선택" }));
     expect(clipSelectionButton("n-1")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
-    fireEvent.click(screen.getByRole("button", { name: "둘째 자막 대본 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "둘째 자막 캡션 선택" }));
     expect(player.currentTime).toBe(1);
-    fireEvent.click(screen.getByRole("button", { name: "첫 자막 대본 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "첫 자막 캡션 선택" }));
     fireEvent.click(clipSelectionButton("n-2"));
     rendered.rerender(<EditorWorkbench view={{ ...transcriptView, expectedRevision: 2, tracks: [{ ...transcriptView.tracks[0], clips: [transcriptView.tracks[0].clips[0]] }], captions: [transcriptView.captions[0]] }} />);
-    expect(screen.getByRole("button", { name: "첫 자막 대본 선택" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "첫 자막 캡션 선택" })).not.toHaveAttribute("aria-current");
   });
 
   it("seeks the preview and selects the segment when an independent B-roll clip is clicked", () => {
@@ -403,7 +403,7 @@ describe("EditorWorkbench", () => {
     // 자막은 이제 `자막` 탭에 있다(2026-08-27). 지키려는 것은 "B-roll 클립을 눌러도
     // 그 장면의 대본이 함께 골라진다"이므로 탭을 열어 그대로 확인한다.
     fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
-    expect(screen.getByRole("button", { name: "둘째 자막 대본 선택" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "둘째 자막 캡션 선택" })).toHaveAttribute("aria-current", "true");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "5");
   });
 

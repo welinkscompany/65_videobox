@@ -2306,7 +2306,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
     expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
-    fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "원래 자막 캡션 선택" }));
     fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "새 자막" } });
     fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
 

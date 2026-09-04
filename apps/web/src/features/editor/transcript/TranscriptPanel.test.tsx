@@ -11,12 +11,27 @@ const entries = [
 ] as const;
 
 describe("TranscriptPanel", () => {
+  /** 이 판은 왼쪽 띠의 `캡션` 탭이다. 스스로를 `대본`이라 부르고 있었고, 그
+   *  아래에 조작이 하나도 없는 요약(`N개 연결 캡션`·`선택한 캡션: …`)을 한 벌
+   *  더 쌓고 있었다 -- 바로 위 목록이 이미 보여 주는 것이다. owner 지적
+   *  ("어거지로 우겨넣게 되고")에 해당한다. 캡컷 캡션 패널은 목록과 편집칸뿐이다. */
+  it("names itself after the tab it lives in and does not repeat the list as a summary", () => {
+    render(<TranscriptPanel entries={entries} playbackSec={0} selectedSegmentId="segment-1" />);
+
+    expect(screen.getByRole("region", { name: "캡션" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "연결 캡션" })).toBeNull();
+    expect(screen.queryByText(/개 연결 캡션/)).toBeNull();
+    expect(screen.queryByText(/^선택한 캡션:/)).toBeNull();
+    // 안내 한 줄은 남는다 -- 캡션 시간을 왜 못 고치는지 여기서만 말한다.
+    expect(screen.getByText("캡션 시간은 연결된 내레이션 구간을 따릅니다.")).toBeInTheDocument();
+  });
+
   it("selects and seeks the same segment from the transcript row", () => {
     const onSelectSegment = vi.fn();
     const onSeek = vi.fn();
     render(<TranscriptPanel entries={entries} playbackSec={0} selectedSegmentId={null} onSelectSegment={onSelectSegment} onSeek={onSeek} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 자막 대본 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "두 번째 자막 캡션 선택" }));
 
     expect(onSelectSegment).toHaveBeenCalledWith("segment-2");
     expect(onSeek).toHaveBeenCalledWith(2);
@@ -49,7 +64,7 @@ describe("TranscriptPanel", () => {
     const onSaveCaption = vi.fn();
     render(<TranscriptPanel entries={entries} isSaving onSaveCaption={onSaveCaption} onSeek={onSeek} onSelectSegment={onSelectSegment} playbackSec={0} selectedSegmentId="segment-1" />);
 
-    const rowButtons = entries.map((entry) => screen.getByRole("button", { name: `${entry.text} 대본 선택` }));
+    const rowButtons = entries.map((entry) => screen.getByRole("button", { name: `${entry.text} 캡션 선택` }));
     const editor = screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" });
     const saveButton = screen.getByRole("button", { name: "캡션 저장" });
     rowButtons.forEach((button) => expect(button).toBeDisabled());
@@ -76,7 +91,7 @@ describe("TranscriptPanel", () => {
   it("does not mark an older selection as current while playback is in a narration gap", () => {
     render(<TranscriptPanel entries={[{ segmentId: "segment-1", startSec: 0, endSec: 1, text: "첫 자막" }, { segmentId: "segment-2", startSec: 2, endSec: 3, text: "둘째 자막" }]} playbackSec={1.5} selectedSegmentId="segment-1" onSelectSegment={vi.fn()} onSeek={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "첫 자막 대본 선택" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("button", { name: "둘째 자막 대본 선택" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "첫 자막 캡션 선택" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("button", { name: "둘째 자막 캡션 선택" })).not.toHaveAttribute("aria-current");
   });
 });
