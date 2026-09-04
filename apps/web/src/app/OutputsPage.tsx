@@ -31,6 +31,8 @@ type OutputState = {
   review: ReviewSnapshot | null;
   approval: ReviewApproval | null;
   subtitle: SubtitleJob | null;
+  // 자막 실패 이유는 `SubtitleJob`이 아니라 **작업 기록**에 있다.
+  subtitleRecord: JobRecord | null;
   finalJobs: JobRecord[];
   finalJob: JobRecord | null;
   finalRender: FinalRenderJob | null;
@@ -108,13 +110,27 @@ const STALE_OUTPUT_REASONS: ReadonlyArray<readonly [string, string]> = [
 ];
 
 export function finalRenderFailureMessage(reason: string | null | undefined) {
+  return outputFailureMessage(reason, "완성본을 만들지 못했어요.");
+}
+
+/** 자막과 CapCut 초안도 같은 실패를 낸다. 한 화면에서 어떤 칸은 이유를 말하고
+ *  어떤 칸은 안 말하면 그게 더 헷갈린다 -- 기본 문구만 다르고 사유 표는 같이 쓴다. */
+export function subtitleFailureMessage(reason: string | null | undefined) {
+  return outputFailureMessage(reason, "자막을 만들지 못했어요.");
+}
+
+export function capcutDraftFailureMessage(reason: string | null | undefined) {
+  return outputFailureMessage(reason, "CapCut 초안을 만들지 못했어요.");
+}
+
+function outputFailureMessage(reason: string | null | undefined, fallback: string) {
   const trimmed = reason?.trim();
-  if (!trimmed) return "완성본을 만들지 못했어요.";
+  if (!trimmed) return fallback;
   const mapped = FINAL_RENDER_FAILURES[trimmed];
   if (mapped) return mapped;
   if (trimmed.startsWith("stale_output_asset")) {
     const detail = trimmed.slice("stale_output_asset".length).replace(/^:\s*/, "");
-      // 사유는 문장이라 낱말이 가운데 오기도 한다("materialized source is
+    // 사유는 문장이라 낱말이 가운데 오기도 한다("materialized source is
     // missing or unavailable") -- 앞머리 대신 포함으로 맞춘다. 목록은 위에서부터
     // 보므로 더 구체적인 것을 먼저 적는다.
     const known = STALE_OUTPUT_REASONS.find(([needle]) => detail.includes(needle));
@@ -122,7 +138,7 @@ export function finalRenderFailureMessage(reason: string | null | undefined) {
     // 확실하니 그만큼은 말한다 -- 코드를 그대로 띄우지는 않는다.
     return known?.[1] ?? "만들려는 사이에 무언가 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요.";
   }
-  return "완성본을 만들지 못했어요.";
+  return fallback;
 }
 
 function exactPreviewDescription(state: ExactPreviewState | undefined) {
@@ -365,6 +381,8 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [errorProjectId, setErrorProjectId] = useState<string | null>(null);
   const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [subtitleErrorProjectId, setSubtitleErrorProjectId] = useState<string | null>(null);
+  // 서버가 시작 자체를 거절했을 때의 이유. 그런 실패는 작업이 안 생긴다.
+  const [subtitleRejectedReason, setSubtitleRejectedReason] = useState<string | null>(null);
   const [isRenderingFinal, setIsRenderingFinal] = useState(false);
   const [finalErrorProjectId, setFinalErrorProjectId] = useState<string | null>(null);
   // 서버가 **시작 자체를 거절**했을 때의 이유. 그런 실패는 작업이 아예 안
@@ -391,6 +409,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [isSavingVerdict, setIsSavingVerdict] = useState(false);
   const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
+  const [capcutRejectedReason, setCapcutRejectedReason] = useState<string | null>(null);
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
   const [capcutHandoffErrorProjectId, setCapcutHandoffErrorProjectId] = useState<string | null>(null);
   const [variantOptions, setVariantOptions] = useState<{ variant_id: string; kind: string }[]>([]);
@@ -496,6 +515,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         review,
         approval,
         subtitle,
+        subtitleRecord,
         finalJobs,
         finalJob,
         finalRender,
@@ -723,6 +743,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     subtitleRequestProjectId.current = submissionProjectId;
     setIsRenderingSubtitle(true);
     setSubtitleErrorProjectId(null);
+    setSubtitleRejectedReason(null);
     try {
       const result = await api.renderSubtitle(submissionProjectId, { timeline_job_id: timelineJob.job_id });
       try {
@@ -738,8 +759,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
         await refresh();
       }
-    } catch {
+    } catch (error) {
       if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (error instanceof ApiRequestError && error.detail) setSubtitleRejectedReason(error.detail);
       const latestState = await refresh();
       if (
         submissionEpoch === subtitleSubmissionEpoch.current &&
@@ -870,6 +892,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     capcutInFlightTimelineKey.current = timelineKey;
     setIsExportingCapcutDraft(true);
     setCapcutErrorProjectId(null);
+    setCapcutRejectedReason(null);
     try {
       const result = await api.startCapcutDraftExport(submissionProjectId, { timeline_job_id: timelineJob.job_id });
       try {
@@ -885,8 +908,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
         await refresh();
       }
-    } catch {
+    } catch (error) {
       if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (error instanceof ApiRequestError && error.detail) setCapcutRejectedReason(error.detail);
       const latestState = await refresh();
       if (
         submissionEpoch === capcutSubmissionEpoch.current &&
@@ -1003,7 +1027,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       <Card>
         <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
-          {subtitleError ? <p>자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {subtitleError ? <p>{subtitleFailureMessage(subtitleRejectedReason ?? currentState?.subtitleRecord?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 자막을 만들 수 있어요.</p> : null}
           <Button disabled={!canRenderSubtitle || isRenderingCurrentSubtitle} onClick={() => void handleRenderSubtitle()}>{isRenderingCurrentSubtitle ? "자막 만드는 중" : "자막 만들기"}</Button>
@@ -1071,7 +1095,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       <Card>
         <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비되었어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? "CapCut 초안을 만들지 못했어요." : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
         <CardContent>
-          {capcutError ? <p>CapCut 초안을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {capcutError ? <p>{capcutDraftFailureMessage(capcutRejectedReason ?? capcutDraft?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 CapCut 초안을 만들 수 있어요.</p> : null}
           {hasPendingCapcut ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}

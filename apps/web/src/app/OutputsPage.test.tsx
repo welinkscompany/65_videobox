@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api, ApiRequestError } from "../api";
-import { finalRenderFailureMessage, OutputsPage } from "./OutputsPage";
+import { capcutDraftFailureMessage, finalRenderFailureMessage, OutputsPage, subtitleFailureMessage } from "./OutputsPage";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -259,6 +259,22 @@ describe("OutputsPage", () => {
 
     await waitFor(() => expect(renderSubtitle).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText("자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument());
+  });
+
+  /** **이유를 담아 두고 곧바로 `refresh()`를 부른다.** 초기화를 그 refresh
+   *  안에 두면 방금 담은 이유가 지워진다 -- 실제로 한 번 그렇게 넣었다가
+   *  잡았다. 초기화는 **누를 때** 한 번만 한다. */
+  it("서버가 자막 시작을 곧바로 거절하면 그 이유를 그 자리에서 말한다", async () => {
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "renderSubtitle").mockRejectedValue(
+      new ApiRequestError("stale_output_asset: editing session revision changed", 409, "/jobs/subtitle-render"),
+    );
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "자막 만들기" }));
+
+    expect(await screen.findByText(/편집본이 그 사이에 바뀌었어요/)).toBeVisible();
   });
 
   it("keeps subtitle failure recoverable until the user explicitly tries again", async () => {
@@ -2186,6 +2202,17 @@ describe("완성본 실패 이유", () => {
     const message = finalRenderFailureMessage("stale_output_asset: something new from the engine");
     expect(message).toContain("바뀌었");
     expect(message).not.toContain("stale_output_asset");
+  });
+
+  /** 자막과 CapCut 초안도 같은 실패를 낸다. 완성본만 고치면 **같은 화면에서
+   *  어떤 칸은 이유를 말하고 어떤 칸은 안 말한다** -- 창작자에게는 그게 더
+   *  헷갈린다. 기본 문구만 각자 다르고 사유 표는 하나를 같이 쓴다. */
+  it("자막과 CapCut 초안도 같은 사유 표를 쓴다", () => {
+    expect(subtitleFailureMessage("stale_output_asset: editing session revision changed")).toContain("편집본");
+    expect(subtitleFailureMessage(null)).toBe("자막을 만들지 못했어요.");
+    expect(capcutDraftFailureMessage("stale_output_asset: content SHA-256 changed")).toContain("파일");
+    expect(capcutDraftFailureMessage("CapCut draft export freshness changed")).toBe("CapCut 초안을 만들지 못했어요.");
+    expect(capcutDraftFailureMessage(null)).toBe("CapCut 초안을 만들지 못했어요.");
   });
 
   it("모르는 코드는 원래 쓰던 한 줄로 돌아간다", () => {
