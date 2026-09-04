@@ -567,3 +567,9 @@
 /* 값에서 따라 나오는 숫자(배속을 걸었을 때의 장면 길이 등). 창작자가 고치는
    값이 아니라 결과라서 조용한 색으로 둔다 -- 입력칸처럼 보이면 눌러 보게 된다. */
 .vb-inspector__derived { margin: 0; color: var(--vb-muted); font-size: var(--vb-text-sm); }
+
+/* **끌어오면 받는다고 말한다(2026-09-04).** 드롭은 되는데 화면에 단서가 하나도
+   없어서 owner가 "드래그앤드롭이 안 된다"고 느낄 자리였다. 자료실 쪽에는 안내
+   문구가 있는데 편집기만 없었다. 색은 이미 있는 강조 토큰만 쓴다. */
+.vb-editor-assets[data-dropping="true"] { outline: 2px dashed var(--vb-accent); outline-offset: -4px; background: var(--vb-accent-bg); }
+.vb-editor-assets[data-dropping="true"]::after { content: "여기에 놓으면 이 프로젝트에 더해져요"; display: block; margin-top: var(--vb-space-2); color: var(--vb-accent); font-size: var(--vb-text-sm); }

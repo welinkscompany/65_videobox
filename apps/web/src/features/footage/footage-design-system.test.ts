@@ -137,3 +137,20 @@ describe("촬영본 한 칸이 내용에 맞춰 늘어난다", () => {
     expect(productShellCss).toMatch(/\[data-multiline="true"\]\s*\{[^}]*height:\s*auto/)
   })
 })
+
+/* 2026-09-04 코드리뷰·역방향 검증이 같이 잡았다. 껍데기가 단추 높이를 32px로
+ * 못박으면서(`product-shell.css`) `.vb-footage-segment`도 32px가 됐는데, 이 칸은
+ * 93px짜리 트랙을 `align-items:stretch`로 채우던 것이라 **61px가 빈 채로 남았다**
+ * (실측: 트랙 93px, 장면 칸 32px, 차지 비율 34%).
+ *
+ * 잘리지는 않았다 -- 리뷰는 두 줄이 잘릴 것으로 봤지만 `<strong>`과 `<small>`이
+ * 한 줄로 들어가 내용은 30px였다. 그래서 **잘림이 아니라 배치 회귀**다.
+ *
+ * 촬영본 소스 칸(`.vb-footage-source`)과 같은 처방이다 -- 특정도로 싸우지 않고
+ * `data-multiline`으로 껍데기가 스스로 고정 높이를 풀게 한다. */
+describe("장면 타임라인 칸이 트랙을 채운다", () => {
+  it("장면 칸이 data-multiline으로 고정 높이를 푼다", () => {
+    const jsx = readFileSync(resolve(process.cwd(), "src/features/footage/SceneTimeline.tsx"), "utf8")
+    expect(jsx, "장면 칸에 data-multiline이 없다 -- 32px 알약으로 쪼그라든다").toContain('data-multiline="true"')
+  })
+})

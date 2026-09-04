@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react";
 import { Captions, Clapperboard, Music, Shuffle, Type, type LucideIcon } from "lucide-react";
 
 import { api } from "../../../api";
@@ -229,6 +229,12 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
    *
    *  `types`로 파일 여부를 먼저 가르는 이유: 타임라인으로 자산 카드를 끄는 기존
    *  동작과 부딪히면 안 된다. 파일이 아니면 손대지 않고 그대로 흘려보낸다. */
+  // **드롭마다 키가 달라야 한다.** 처음엔 로 만들었는데,
+  // 같은 개수를 다시 떨어뜨리면 키가 같아 서버가 거부하고(같은 키 + 다른 바이트는
+  // 거부하는 계약이다) **다시 시도해도 영원히 실패했다**. 옆 가
+  // 쓰는 것과 같은 카운터를 둔다.
+  const dropRequestId = useRef(0);
+  const [dropping, setDropping] = useState(false);
   const [dropBusy, setDropBusy] = useState(false);
   const [dropMessage, setDropMessage] = useState<string | null>(null);
   const carriesFiles = (transfer: DataTransfer | null): boolean =>
@@ -240,7 +246,8 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     event.preventDefault();
     setDropBusy(true);
     setDropMessage(null);
-    const outcome = await ingestFilesIntoProject(files, projectId, `drop-${projectId}-${files.length}`);
+    dropRequestId.current += 1;
+    const outcome = await ingestFilesIntoProject(files, projectId, `drop-${projectId}-${dropRequestId.current}-${Date.now()}`);
     setDropBusy(false);
     setDropMessage(ingestOutcomeMessage(outcome));
     if (outcome.succeeded > 0) await onMediaAdded?.();
@@ -249,13 +256,21 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   return <section
     aria-label="편집기 미디어"
     className="vb-editor-assets"
-    onDragOver={(event) => { if (carriesFiles(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
-    onDrop={(event) => { void onFilesDropped(event); }}
+    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false); }}
+    onDragOver={(event) => { if (carriesFiles(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropping(true); } }}
+    data-dropping={dropping ? "true" : undefined}
+    onDrop={(event) => { setDropping(false); void onFilesDropped(event); }}
   >
     {/* 캡컷과 같은 자리의 최상위 탭. 가진 것만 둔다 -- 자세한 이유는 `LeftPane` 주석.
         승인 2026-08-30(버튼 단위 벤치마킹 2단계)로 이 탭은 이제 편집기 맨 위,
         패널 바깥에서도 그릴 수 있다(`renderPaneTabs={false}` + `pane`/`onPaneChange`
         제어) -- 그때는 여기서 중복해서 그리지 않는다. */}
+    {/* **탭과 무관하게 말한다.** 드롭 자리는 패널 전체라 어느 탭에서 떨어뜨려도
+        올라간다 -- 예전엔 이 문구가 미디어/오디오 분기 안에 있어서 텍스트·캡션·전환
+        탭에서 떨어뜨리면 **올라가는데 아무 말도 안 했다**(조용히 삼킴). */}
+    {/* 끌어다 놓은 결과를 말한다. 조용히 삼키면 올라갔는지 알 수 없다. */}
+    {dropBusy ? <p className="vb-editor-assets__detail" role="status">파일을 올리는 중이에요.</p> : null}
+    {dropMessage ? <p className="vb-editor-assets__detail" role="status">{dropMessage}</p> : null}
     {renderPaneTabs ? <div className="vb-editor-assets__panes" role="tablist" aria-label="왼쪽 패널">
       {editorAssetPanes.filter((item) => item.pane !== "transcript" || transcript).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
     </div> : null}
@@ -344,9 +359,6 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
     {removeMessage ? <p className="vb-editor-assets__detail" role="status">{removeMessage}</p> : null}
-    {/* 끌어다 놓은 결과를 말한다. 조용히 삼키면 올라갔는지 알 수 없다. */}
-    {dropBusy ? <p className="vb-editor-assets__detail" role="status">파일을 올리는 중이에요.</p> : null}
-    {dropMessage ? <p className="vb-editor-assets__detail" role="status">{dropMessage}</p> : null}
     {taste.error ? <p className="vb-editor-assets__detail" role="status">{taste.error}</p> : null}
     {tasteReady && (excludedCreators.length || excludedTags.length) ? (
       <div className="vb-editor-assets__taste" role="group" aria-label="유진이 빼 둔 것">
