@@ -322,9 +322,21 @@
    방식과 같다(URL이 아니라 표기가 필요한지가 창작자에게 필요한 것이다). */
 .vb-editor-assets__cards--grid .vb-editor-assets__card:not(.vb-editor-assets__card--row) .vb-editor-assets__taste > p,
 .vb-editor-assets__cards--grid .vb-editor-assets__card:not(.vb-editor-assets__card--row) .vb-editor-assets__license { display: none; }
+/* 라벨을 눈에서만 감춘다(2026-09-04). 캡컷은 검색창 위에 제목을 안 두고 안내
+   문구를 칸 안에 넣는다 -- 우리 라벨은 세로 20px를 먹으면서 칸 안 문구와 같은
+   말을 되풀이했다. 읽어 주는 기계에는 그대로 남긴다. */
 .vb-editor-assets__search-label { display: grid; gap: var(--vb-space-1); font-size: var(--vb-text-sm); font-weight: 700; }
+.vb-editor-assets__search-label > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .vb-editor-assets__search { min-width: 0; width: 100%; padding: var(--vb-space-2) var(--vb-space-2); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--vb-radius-sm); background: var(--background); }
 .vb-editor-assets__filters, .vb-editor-assets__actions, .vb-editor-assets__taste { display: flex; flex-wrap: wrap; gap: var(--vb-space-2); }
+/* **좁히는 줄 셋을 한 줄로 흘린다(2026-09-04).** 종류·화면 방향·보기 방식이
+   각자 한 줄씩 32px를 차지해 96px였다. 캡컷은 좁히는 것을 **칩 한 줄**로 두고
+   넘치면 가로로 흘린다. 셋을 한 묶음으로 감싸 같은 줄에서 흐르게 하면 293px
+   폭에서 두 줄 안에 들어간다. 묶음(`role="group"`)은 그대로 둔다 -- 읽어 주는
+   기계에는 "화면 방향"과 "보기 방식"이 여전히 구분돼야 한다. */
+   `display:contents`는 쓰지 않는다 -- 브라우저에 따라 `role="group"`을 접근성
+   트리에서 지운다. 묶음을 그대로 두고 흐르게만 한다. */
+.vb-editor-assets__narrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--vb-space-1) var(--vb-space-2); }
 .vb-editor-assets__taste { align-items: center; }
 .vb-editor-assets__taste > p { flex: 1 1 100%; }
 .vb-editor-assets__filter { padding: var(--vb-space-1) var(--vb-space-2); border: 1px solid var(--border); border-radius: 999px; color: var(--foreground); background: var(--background); }
@@ -536,3 +548,18 @@
 .vb-voice-list { display: grid; gap: var(--vb-space-1); }
 .vb-voice-list li { display: flex; align-items: center; gap: var(--vb-space-1); }
 .vb-voice-list li input { flex: 1 1 auto; }
+
+/* 캡컷 `텍스트` 패널: 전체 폭 단추 둘. 세부 조정은 오른쪽 속성 패널이 맡는다. */
+.vb-editor-assets__text-pane { display: flex; flex-direction: column; gap: var(--vb-space-2); }
+.vb-editor-assets__hint { margin: 0; color: var(--vb-muted); font-size: var(--vb-text-sm); line-height: 1.45; }
+/* 미디어 찾기와 무관한 곁가지(원본 확인·미디어 분석)를 접어 둔 자리.
+   기본이 접힘이라 자산 격자가 화면을 쓴다 -- 펴면 예전과 같다. */
+.vb-editor-assets__aside > summary { cursor: pointer; padding: var(--vb-space-2) 0; color: var(--vb-muted); font-size: var(--vb-text-sm); }
+.vb-editor-assets__aside[open] > summary { color: var(--vb-text); }
+
+/* 속성 패널에서 매번 쓰지 않는 묶음을 접어 두는 자리(2026-09-04). 캡컷 속성
+   패널은 고른 갈래 하나만 보여 준다 -- 우리는 전부 펼쳐 두어 오른쪽 칸이
+   보이는 높이의 4.25배(1840px)였다. `<summary>`가 원래 `<legend>` 자리를 맡는다. */
+.vb-inspector-fold > summary { cursor: pointer; padding: var(--vb-space-2) 0; font-weight: 700; font-size: var(--vb-text-sm); color: var(--vb-muted); }
+.vb-inspector-fold[open] > summary { color: var(--vb-text); }
+.vb-inspector-fold > fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: var(--vb-space-2); }

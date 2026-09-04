@@ -1175,9 +1175,14 @@ export function InspectorControls({
         </fieldset>
       ) : null}
 
+      {/* **접어 둔다(2026-09-04).** 체크상자 일곱과 단추 둘로 468px를 늘 차지했는데
+          부분 재생성은 매 편집마다 쓰는 것이 아니다. 오른쪽 칸이 보이는 높이의
+          4.25배(1840px)가 된 데 이 묶음이 가장 컸다 -- owner가 "스크롤 밑으로
+          때려박아 놨다"고 한 자리다. 캡컷 속성 패널은 고른 갈래 하나만 보여 준다.
+          지우지 않고 기본만 접는다. */}
       {partialRegeneration && selectedSegment ? (
+        <details className="vb-inspector-fold"><summary>부분 재생성</summary>
         <fieldset>
-          <legend>부분 재생성</legend>
           {partialRegeneration.fields.map((field) => <label key={field}>
             <Input
               checked={selectedPartialFields.includes(field)}
@@ -1193,6 +1198,7 @@ export function InspectorControls({
           <Button disabled={disabled || !partialRegeneration.canRun || !preparedFieldsMatch || !preparedSegmentMatches} onClick={() => partialAction("partial-run")} type="button">부분 재생성 실행</Button>
           <Button disabled={disabled || !partialRegeneration.canResume} onClick={() => partialAction("partial-resume")} type="button">이전 결과 열기</Button>
         </fieldset>
+        </details>
       ) : null}
     </section>
   );

@@ -745,7 +745,7 @@ describe("AppRouter URL ownership", () => {
     // **갱신 이유(2026-08-27).** 자막은 캡컷 `텍스트` 자리처럼 왼쪽 탭이 됐다.
     // 이 시험이 지키는 것은 "편집기가 한 번만 마운트된 채 segment가 바뀐다"이지
     // 자막칸이 기본 화면에 있는 것이 아니었으므로, 탭을 한 번 열고 그대로 본다.
-    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
+    fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
     expect(screen.getByLabelText("segment-1 자막 텍스트")).toBeVisible();
     // 유진 대화창은 2026-08-30 후속으로 도크와 무관한 독립 패널이 됐다
     // (owner: "우리 유진 대화창도 캡컷처럼 해도 되", `docs/reference/capcut-observed-2026-08-22.ko.md`

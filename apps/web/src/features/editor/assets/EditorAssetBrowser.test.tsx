@@ -657,9 +657,9 @@ describe("왼쪽 도크는 캡컷처럼 최상위 탭으로 갈린다", () => {
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
 
     const panes = screen.getByRole("tablist", { name: "왼쪽 패널" });
-    expect(Array.from(panes.querySelectorAll('[role="tab"]')).map((tab) => tab.textContent?.trim())).toEqual(["미디어", "오디오", "전환"]);
+    expect(Array.from(panes.querySelectorAll('[role="tab"]')).map((tab) => tab.textContent?.trim())).toEqual(["미디어", "오디오", "텍스트", "전환"]);
     // 없는 것은 탭도 만들지 않는다.
-    for (const absent of ["스티커", "효과", "필터"]) {
+    for (const absent of ["스티커", "효과", "필터", "대본"]) {
       expect(screen.queryByRole("tab", { name: absent })).toBeNull();
     }
   });
@@ -709,11 +709,11 @@ describe("왼쪽 도크는 한 번에 하나만 보여 준다", () => {
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" transcript={<p>대본 자리</p>} />);
 
     const panes = screen.getByRole("tablist", { name: "왼쪽 패널" });
-    expect(Array.from(panes.querySelectorAll('[role="tab"]')).map((tab) => tab.textContent?.trim())).toEqual(["미디어", "오디오", "자막", "전환"]);
+    expect(Array.from(panes.querySelectorAll('[role="tab"]')).map((tab) => tab.textContent?.trim())).toEqual(["미디어", "오디오", "텍스트", "캡션", "전환"]);
     // 미디어 탭에서는 대본이 같이 쌓이지 않는다 -- 이것이 11.7배 스크롤의 원인이었다.
     expect(screen.queryByText("대본 자리")).toBeNull();
 
-    fireEvent.click(screen.getByRole("tab", { name: "자막" }));
+    fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
     expect(screen.getByText("대본 자리")).toBeVisible();
     // 자막 탭에서는 미디어 카드가 섞이지 않는다.
     expect(screen.queryByRole("heading", { name: "제품 사진" })).toBeNull();
@@ -722,12 +722,17 @@ describe("왼쪽 도크는 한 번에 하나만 보여 준다", () => {
   it("자막을 주지 않으면 그 탭도 만들지 않는다", () => {
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" />);
 
-    expect(screen.queryByRole("tab", { name: "자막" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "캡션" })).toBeNull();
   });
 
   it("소스 확인은 미디어 탭 안에 둔다", () => {
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" sourceCheck={<p>소스 자리</p>} />);
 
+    // **접혀 있다(2026-09-04).** 이 곁가지는 미디어를 *찾는* 일과 무관한데 자산
+    // 격자 밑에 늘 펼쳐져 미디어 패널 1047px 중 284px를 차지했다. 지우지 않고
+    // 기본을 접었다 -- 지키는 것은 그대로다: 미디어 탭 안에만 있고, 펴면 쓴다.
+    expect(screen.getByText("소스 자리")).not.toBeVisible();
+    fireEvent.click(screen.getByText("원본 확인"));
     expect(screen.getByText("소스 자리")).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
     expect(screen.queryByText("소스 자리")).toBeNull();
@@ -738,6 +743,10 @@ describe("왼쪽 도크는 한 번에 하나만 보여 준다", () => {
     // `소스 확인`과 같은 패턴(`sourceCheck`)으로 `analysisPanel`을 받는다.
     render(<EditorAssetBrowser cards={cards as never} target={null as never} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={vi.fn()} projectId="project-a" analysisPanel={<p>분석 자리</p>} />);
 
+    // 소스 확인과 같은 이유로 접혀 있다(2026-09-04). 지키는 것은 그대로다 --
+    // 미디어 탭 안에만 있고, 펴면 쓸 수 있다.
+    expect(screen.getByText("분석 자리")).not.toBeVisible();
+    fireEvent.click(screen.getByText("미디어 분석"));
     expect(screen.getByText("분석 자리")).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
     expect(screen.queryByText("분석 자리")).toBeNull();

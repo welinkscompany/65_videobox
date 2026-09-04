@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Captions, Clapperboard, Music, Shuffle, type LucideIcon } from "lucide-react";
+import { Captions, Clapperboard, Music, Shuffle, Type, type LucideIcon } from "lucide-react";
 
 import { api } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -87,8 +87,18 @@ type Props = Readonly<{
  *
  *  **가진 것만 탭으로 둔다.** 스티커·효과·필터는 우리에게 없으므로 탭도 만들지
  *  않는다 -- 없는 기능의 자리를 흉내 내면 배치가 거짓말을 한다(owner 결정 2026-08-27).
- *  텍스트는 자막이 대신하고 있어 이번 범위에서 뺐다. */
-export type LeftPane = "media" | "audio" | "transcript" | "transition";
+ *
+ *  2026-09-04: `텍스트`를 갈랐다. 캡컷을 실제로 열어 재 보니 `텍스트`(화면 위
+ *  글자)와 `캡션`(말자막)이 완전히 별개 탭이었다. 우리는 `explanation-card`
+ *  오버레이로 화면 위 글자를 이미 끝까지 만들 수 있는데(`port.applyOverlay`)
+ *  왼쪽에 그 자리가 없어서 자막 안에 숨어 있었다. */
+/** 캡컷 왼쪽 띠와 같은 갈래다(2026-09-04 실측). 캡컷은 열둘이지만 우리는 범위
+ *  안의 여섯만 쓴다 -- 템플릿·요소·편집효과·필터·브랜드 키트·플러그인은
+ *  안 만든다(`decisions/2026-08-30`, `CLAUDE.md` §2.1).
+ *
+ *  `transcript`가 `캡션`으로 이름을 바꾼 이유: 캡컷은 **`텍스트`(화면 위 글자)와
+ *  `캡션`(말자막)을 완전히 분리**한다. 우리는 둘을 `자막` 하나로 뭉쳐 놨었다. */
+export type LeftPane = "media" | "audio" | "text" | "transcript" | "transition";
 
 /** **한 번에 하나만 보여 준다(owner 지시 2026-08-27).**
  *  > "지금 사진 부분이 스크롤이 너무 길다고, 여길 뭔가 정리를 해야지"
@@ -101,7 +111,12 @@ export type LeftPane = "media" | "audio" | "transcript" | "transition";
 export const editorAssetPanes: readonly Readonly<{ pane: LeftPane; label: string; icon: LucideIcon }>[] = [
   { pane: "media", label: "미디어", icon: Clapperboard },
   { pane: "audio", label: "오디오", icon: Music },
-  { pane: "transcript", label: "자막", icon: Captions },
+  { pane: "text", label: "텍스트", icon: Type },
+  { pane: "transcript", label: "캡션", icon: Captions },
+  // `대본`은 아직 넣지 않는다. 캡컷의 `대본`은 "대본을 고치면 영상이 고쳐지는"
+  // 기능인데 우리에겐 없고, 우리 `이야기` 내용을 옮기는 것은 계획서 5단계다.
+  // 지금 탭만 만들면 대본을 붙여넣은 뒤 갈 곳이 없는 막다른 자리가 된다
+  // (`decisions/2026-08-30` -- 없는 기능 버튼은 안 만든다).
   { pane: "transition", label: "전환", icon: Shuffle },
 ];
 
@@ -209,6 +224,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
       {editorAssetPanes.filter((item) => item.pane !== "transcript" || transcript).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
     </div> : null}
     {pane === "transition" ? <TransitionPane target={transitionTarget} disabled={isSaving} onInspectorAction={onInspectorAction} />
+      : pane === "text" ? <TextPane target={target} disabled={isSaving} onInspectorAction={onInspectorAction} />
       : pane === "transcript" ? transcript : <>
     <div className="vb-editor-assets__controls">
       {/* **편집기를 떠나지 않고 미디어를 더한다(owner 승인 2026-08-27).**
@@ -271,6 +287,9 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
 
           이름에서 `필터`를 뺐다 -- 캡컷 탭은 그냥 명사다. 화면 방향은 탭이 아니라
           **고른 탭 안에서 더 좁히는 것**이라 한 단 아래로 내렸다. */}
+      {/* 좁히는 것 셋을 한 묶음으로 흘린다(2026-09-04) -- 각자 한 줄씩 32px를
+          먹어 96px였다. 캡컷은 좁히는 것을 칩 한 줄로 둔다. */}
+      <div className="vb-editor-assets__narrow">
       <div className="vb-editor-assets__tabs" role="tablist" aria-label="미디어 종류">
         {paneFilters[pane === "audio" ? "audio" : "media"].map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__tab" type="button" role="tab" aria-selected={type === filter.type} onClick={() => setType(filter.type)}>{filter.label}</Button>)}
       </div>
@@ -284,6 +303,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
       <div className="vb-editor-assets__filters" role="group" aria-label="보기 방식">
         <Button variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
         <Button variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
+      </div>
       </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
@@ -481,8 +501,16 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     ) : null}
     {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 미디어가 없어요.</p> : null}
     {/* 원본만 확인하는 자리. 미디어를 다루는 탭 안에 두어야 찾을 수 있다. */}
-    {pane === "media" ? sourceCheck : null}
-    {pane === "media" ? analysisPanel : null}
+    {/* **접어 둔다(2026-09-04).** 이 둘은 미디어를 *찾는* 일과 무관한데 자산 격자
+        밑에 늘 펼쳐져 있어서 왼쪽 패널 1047px 중 284px(소스 확인 90 + 분석 194)을
+        차지했다 -- 캡컷 미디어 패널에는 이런 게 없다. 지우지는 않는다(쓰는
+        기능이다). 기본을 접어 두고 필요할 때 펴게 한다. */}
+    {pane === "media" && sourceCheck ? <details className="vb-editor-assets__aside">
+      <summary>원본 확인</summary>{sourceCheck}
+    </details> : null}
+    {pane === "media" && analysisPanel ? <details className="vb-editor-assets__aside">
+      <summary>미디어 분석</summary>{analysisPanel}
+    </details> : null}
     </>}
   </section>;
 }
@@ -493,6 +521,45 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
  *  패널이 이미 갖고 있었다. 캡컷은 이것을 **왼쪽 패널 탭**에 두므로 자리만 옮겼다
  *  (owner 결정 2026-08-27 "있는 것만 자리 맞추기"). 오른쪽 속성 패널의 것은 그대로
  *  둔다 -- 거기서 길이까지 조절하는 사람이 있고, 없애는 것은 별도 결정이다. */
+/** 캡컷 `텍스트` 패널. 실측(2026-09-04)하니 `머리글 추가` / `본문 추가` 두 개의
+ *  전체 폭 단추가 전부였고, 고른 뒤 세부 조정은 **오른쪽 속성 패널**에서 한다.
+ *
+ *  우리도 `explanation-card` 오버레이로 화면 위 글자를 이미 끝까지 만들 수 있다
+ *  (`port.applyOverlay`, `EditorWorkbenchRoute.tsx:1122`). 없던 것은 **왼쪽에서
+ *  더하는 자리**뿐이라 그것만 만든다 -- 새 기능이 아니라 부르는 자리다.
+ *
+ *  글자를 여기서 입력받지 않는 이유: 캡컷도 단추만 누르면 기본 글자가 얹히고
+ *  고치는 것은 속성 패널이다. 두 곳에서 고치게 하면 어느 쪽이 정본인지 흐려진다. */
+function TextPane({
+  target,
+  disabled,
+  onInspectorAction,
+}: {
+  target: EditorAssetTarget | null;
+  disabled: boolean;
+  onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+}) {
+  const segmentId = target?.segmentId ?? null;
+  const add = (kind: "머리글" | "본문") => {
+    if (!segmentId || !onInspectorAction) return;
+    const text = kind === "머리글" ? "머리글" : "본문";
+    void onInspectorAction({
+      kind: "save-overlay",
+      overlayKind: "explanation-card",
+      segmentId,
+      title: kind === "머리글" ? text : "",
+      body: kind === "본문" ? text : "",
+      text,
+    });
+  };
+  return <div className="vb-editor-assets__text-pane">
+    <p className="vb-editor-assets__target">{target ? targetLabel(target) : "글자를 얹을 장면을 먼저 선택하세요."}</p>
+    <Button type="button" variant="outline" disabled={disabled || !segmentId} onClick={() => add("머리글")}>머리글 추가</Button>
+    <Button type="button" variant="outline" disabled={disabled || !segmentId} onClick={() => add("본문")}>본문 추가</Button>
+    <p className="vb-editor-assets__hint">얹은 뒤 글자·크기·자리는 오른쪽 세부 정보에서 고쳐요.</p>
+  </div>;
+}
+
 function TransitionPane({
   target,
   disabled,
