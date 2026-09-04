@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import { api } from "../api";
+import { api, ApiRequestError } from "../api";
 import { finalRenderFailureMessage, OutputsPage } from "./OutputsPage";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
@@ -621,6 +621,29 @@ describe("OutputsPage", () => {
     expect(await screen.findByText("완성본을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(screen.getByText("완성본이 최신 편집본과 달라요.")).toBeVisible();
     expect(screen.queryByLabelText("완성본 재생")).not.toBeInTheDocument();
+  });
+
+  /** **곧바로 거절당한 경우가 빠져 있었다.** 화면은 실패한 작업의
+   *  `error_message`만 읽는데, 서버가 시작 자체를 거절하면 그 작업이 아예
+   *  안 생긴다. 그 catch가 예외를 통째로 버려서 이유가 사라졌다 -- 계획서
+   *  §7이 적어 둔 그 상황이다("진짜 이유는 API에만 있었다"). */
+  it("서버가 시작을 곧바로 거절하면 그 이유를 그 자리에서 말한다", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "startFinalRender").mockRejectedValue(
+      new ApiRequestError("stale_output_asset: subtitle freshness changed", 409, "/jobs/final-render"),
+    );
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-current-timeline", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-current.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByLabelText("완성본 재생")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "완성본 만들기" }));
+
+    expect(await screen.findByText(/자막을 먼저 만든/)).toBeVisible();
   });
 
   it("shows a final request error when refresh only returns the same current artifact", async () => {
@@ -2141,6 +2164,28 @@ describe("완성본 실패 이유", () => {
     // 실제로 겪은 실패다. 백엔드는 이유를 알고 있었고, 화면은 `완성본을
     // 만들지 못했어요`만 말할 수 있었다 -- 정작 필요한 동작은 클릭 한 번이었다.
     expect(finalRenderFailureMessage("final_output_requires_review_approval")).toContain("검토");
+  });
+
+  /** 계획서(§7)가 지목한 그 실패다. 엔진은 `stale_output_asset: subtitle
+   *  freshness changed`처럼 **코드 뒤에 사유를 붙여** 보내는데, 화면 표는
+   *  정확히 일치할 때만 옮겨 적고 있었다 -- 그래서 이 무리 전체가 "완성본을
+   *  만들지 못했어요" 한 줄로 뭉개졌고, 정작 필요한 동작(자막 먼저 만들기)은
+   *  화면 어디에도 안 나왔다. */
+  it("무엇이 낡아서 막힌 것인지 그 자리에서 말한다", () => {
+    expect(finalRenderFailureMessage("stale_output_asset: subtitle freshness changed")).toContain("자막");
+    expect(finalRenderFailureMessage("stale_output_asset: subtitle session revision changed")).toContain("자막");
+    expect(finalRenderFailureMessage("stale_output_asset: review freshness changed")).toContain("검토");
+    expect(finalRenderFailureMessage("stale_output_asset: editing session revision changed")).toContain("편집본");
+    expect(finalRenderFailureMessage("stale_output_asset: content SHA-256 changed")).toContain("파일");
+    expect(finalRenderFailureMessage("stale_output_asset: materialized source is missing or unavailable")).toContain("파일");
+  });
+
+  it("모르는 사유가 붙어 와도 낡았다는 것까지는 말한다", () => {
+    // 사유는 엔진이 늘리는 자리다. 새 사유가 와도 "무언가 낡았다"는 것은
+    // 확실하니, 아무 말도 못 하는 것보다 그만큼은 말한다.
+    const message = finalRenderFailureMessage("stale_output_asset: something new from the engine");
+    expect(message).toContain("바뀌었");
+    expect(message).not.toContain("stale_output_asset");
   });
 
   it("모르는 코드는 원래 쓰던 한 줄로 돌아간다", () => {

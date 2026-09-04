@@ -13,6 +13,7 @@ import {
   type SubtitleJob,
   type TimelineJob,
   type VariantRenderItem,
+  ApiRequestError,
 } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -91,9 +92,37 @@ const FINAL_RENDER_FAILURES: Record<string, string> = {
   draft_bundle_gap_blocks_final_and_capcut_output: "장면이 비어 있는 구간이 있어요. 그 구간에 영상을 넣은 뒤 다시 만들어 주세요.",
 };
 
+/** 무엇이 낡아서 막혔는지. 엔진은 `stale_output_asset: <사유>` 한 코드에 여러
+ *  사유를 실어 보낸다(`output_source_verifier.py`) -- 정확히 일치하는 표로는
+ *  이 무리를 통째로 놓친다. 사유는 앞에서부터 맞춰 본다. */
+const STALE_OUTPUT_REASONS: ReadonlyArray<readonly [string, string]> = [
+  ["subtitle", "편집을 고친 뒤 자막을 다시 만들지 않았어요. 자막을 먼저 만든 다음 완성본을 만들어 주세요."],
+  ["review", "편집을 고친 뒤 검토를 다시 하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요."],
+  ["editing session", "편집본이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요."],
+  ["timeline is not the active", "지금 편집본이 아닌 다른 편집본으로 만들려고 했어요. 화면을 새로 고쳐 주세요."],
+  ["content SHA-256", "쓰던 파일이 바뀌었어요. 그 파일을 다시 넣은 뒤 만들어 주세요."],
+  ["media revision", "쓰던 파일이 바뀌었어요. 그 파일을 다시 넣은 뒤 만들어 주세요."],
+  ["missing or unavailable", "쓰던 파일을 찾지 못했어요. 그 파일이 자리에 있는지 확인해 주세요."],
+  ["asset identity", "쓰던 파일이 다른 것으로 바뀌었어요. 그 파일을 다시 넣어 주세요."],
+  ["variant", "가로세로 변형본이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요."],
+];
+
 export function finalRenderFailureMessage(reason: string | null | undefined) {
-  const mapped = reason ? FINAL_RENDER_FAILURES[reason.trim()] : undefined;
-  return mapped ?? "완성본을 만들지 못했어요.";
+  const trimmed = reason?.trim();
+  if (!trimmed) return "완성본을 만들지 못했어요.";
+  const mapped = FINAL_RENDER_FAILURES[trimmed];
+  if (mapped) return mapped;
+  if (trimmed.startsWith("stale_output_asset")) {
+    const detail = trimmed.slice("stale_output_asset".length).replace(/^:\s*/, "");
+      // 사유는 문장이라 낱말이 가운데 오기도 한다("materialized source is
+    // missing or unavailable") -- 앞머리 대신 포함으로 맞춘다. 목록은 위에서부터
+    // 보므로 더 구체적인 것을 먼저 적는다.
+    const known = STALE_OUTPUT_REASONS.find(([needle]) => detail.includes(needle));
+    // 사유는 엔진이 늘리는 자리다. 모르는 사유라도 **무언가 낡았다**는 것은
+    // 확실하니 그만큼은 말한다 -- 코드를 그대로 띄우지는 않는다.
+    return known?.[1] ?? "만들려는 사이에 무언가 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요.";
+  }
+  return "완성본을 만들지 못했어요.";
 }
 
 function exactPreviewDescription(state: ExactPreviewState | undefined) {
@@ -338,6 +367,10 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [subtitleErrorProjectId, setSubtitleErrorProjectId] = useState<string | null>(null);
   const [isRenderingFinal, setIsRenderingFinal] = useState(false);
   const [finalErrorProjectId, setFinalErrorProjectId] = useState<string | null>(null);
+  // 서버가 **시작 자체를 거절**했을 때의 이유. 그런 실패는 작업이 아예 안
+  // 생기므로 `finalRender.error_message`에 남지 않는다 -- 예전에는 catch가
+  // 예외를 통째로 버려서 화면이 "완성본을 만들지 못했어요"밖에 못 했다.
+  const [finalRejectedReason, setFinalRejectedReason] = useState<string | null>(null);
   const [formatName, setFormatName] = useState("");
   const [formatSavedProjectId, setFormatSavedProjectId] = useState<string | null>(null);
   const [isSavingFormat, setIsSavingFormat] = useState(false);
@@ -794,6 +827,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     finalInFlightTimelineKey.current = timelineKey;
     setIsRenderingFinal(true);
     setFinalErrorProjectId(null);
+    setFinalRejectedReason(null);
     try {
       const result = await api.startFinalRender(submissionProjectId, { timeline_job_id: timelineJob.job_id });
       try {
@@ -809,8 +843,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
         await refresh();
       }
-    } catch {
+    } catch (error) {
       if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (error instanceof ApiRequestError && error.detail) setFinalRejectedReason(error.detail);
       const latestState = await refresh();
       if (
         submissionEpoch === finalSubmissionEpoch.current &&
@@ -980,7 +1015,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       <Card>
         <CardHeader><CardTitle>완성본</CardTitle><CardDescription>{currentFinal ? "완성본을 확인할 수 있어요." : staleFinal ? "완성본이 최신 편집본과 달라요." : finalRender?.status === "failed" ? finalRenderFailureMessage(finalRender?.error_message) : hasPendingFinal ? "완성본을 만드는 중이에요." : timelineJob ? "현재 편집본의 완성본을 만들 수 있어요." : "아직 완성본이 없어요."}</CardDescription></CardHeader>
         <CardContent>
-          {finalError ? <p>{finalRenderFailureMessage(finalRender?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {finalError ? <p>{finalRenderFailureMessage(finalRejectedReason ?? finalRender?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
           {currentFinal && finalRender.render?.has_sound === false ? <p>완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.</p> : null}
