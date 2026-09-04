@@ -337,3 +337,18 @@ body:has(.vb-product-shell) { margin: 0; }
   .vb-top-bar__breadcrumb { flex:1 1 8rem; max-width:none; }
   .vb-top-bar__project [data-slot=button] { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
   .vb-top-bar__stages { order:1; flex:1 0 100%; } }
+
+/* **카드를 조용하게(2026-09-04).** owner: "인터페이스 들이 너무 복잡하고 헷깔려".
+   첫 화면을 재 보니 누를 것 112개 중 **102개가 카드 안 단추**였다(34카드 × 3).
+   캡컷 `최근 프로젝트` 카드는 단추가 0개다.
+
+   **길은 안 없앤다.** 카드의 두 링크는 목적이 다르다 -- 이름은 프로젝트를 여는
+   문이고 `다음 할 일`은 `/plan`·`/review`로 가는 유일한 길이다. 없애면 그 화면에
+   갈 방법이 사라진다(예전에 시도했다가 시험 셋이 막았다). 그래서 `···`만 숨긴다.
+
+   `opacity`로 숨기는 이유: `display:none`이나 `visibility:hidden`은 **탭 순서에서
+   빼 버려** 키보드로는 영영 못 쓰는 기능이 된다. 초점이 오면 다시 보인다. */
+.vb-catalog-card__more { opacity: 0; transition: opacity .12s ease; }
+.vb-catalog-card:hover .vb-catalog-card__more,
+.vb-catalog-card:focus-within .vb-catalog-card__more { opacity: 1; }
+.vb-catalog-card__more:focus-visible { opacity: 1; }
