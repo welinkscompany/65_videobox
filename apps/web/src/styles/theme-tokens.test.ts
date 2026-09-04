@@ -179,3 +179,37 @@ describe("실행 취소·자르기 도구 여섯 개가 다닥다닥 붙지 않�
     expect(rule).toMatch(/gap:\s*var\(--vb-space-\d\)/);
   });
 });
+
+describe("완성본 아래 두 묶음이 다닥다닥 붙지 않는다", () => {
+  // 2026-09-04 실측(`my-project`에 실제로 완성본을 구워 놓고 잼): 완성본이
+  // 있어야만 나오는 두 묶음(`.vb-final-verdict`·`.vb-final-format`)에 CSS가
+  // 하나도 없었다. 둘 다 그냥 `display:block`으로 떨어져 자식이 세로로 쌓이는데
+  // 사이 간격이 **0px**이었다 -- 좋아요(y 2422, 높이 36)와 아쉬워요(y 2458)가
+  // 정확히 맞닿아 있었다. 어제 고친 `.vb-timeline-edit-toolbar`와 같은 결함이다.
+  it(".vb-final-verdict가 세로 묶음과 척도 간격을 건다", () => {
+    const rule = productShellCss.match(/\.vb-final-verdict[^{}]*\{[^}]*\}/)?.[0]
+    expect(rule, ".vb-final-verdict 규칙을 못 찾았다").toBeDefined()
+    expect(rule).toMatch(/display:\s*(inline-)?flex|display:\s*grid/)
+    expect(rule).toMatch(/gap:\s*var\(--vb-space-\d\)/)
+  })
+
+  it(".vb-final-format이 세로 묶음과 척도 간격을 건다", () => {
+    const rule = productShellCss.match(/\.vb-final-format[^{}]*\{[^}]*\}/)?.[0]
+    expect(rule, ".vb-final-format 규칙을 못 찾았다").toBeDefined()
+    expect(rule).toMatch(/display:\s*(inline-)?flex|display:\s*grid/)
+    expect(rule).toMatch(/gap:\s*var\(--vb-space-\d\)/)
+  })
+
+  // 같은 자리에서 잰 별개의 결함: 포맷 이름 입력칸이 제 칸을 **26px 넘어갔다**.
+  // 이 빌드는 Tailwind Preflight를 안 쓰므로 `box-sizing`이 문서 전체에서
+  // `content-box`였다 -- shadcn `Input`의 `w-full`(100% = 229.8px)에 좌우 안쪽
+  // 여백 24px와 테두리 2px가 그대로 더해져 255.8px가 됐다(칸은 230px).
+  // owner가 2026-09-04에 전역 `border-box` 도입을 선택했다. 그 규칙이 사라지면
+  // 74곳의 `Input`/`Textarea`가 다시 제 칸을 넘치므로 여기서 지킨다.
+  it("문서 전체가 border-box로 잰다", () => {
+    const uiSystemCss = readFileSync(resolve(process.cwd(), "src/ui-system.css"), "utf8")
+    const rule = uiSystemCss.match(/\*,\s*::before,\s*::after\s*\{[^}]*\}/)?.[0]
+    expect(rule, "전역 box-sizing 규칙을 못 찾았다").toBeDefined()
+    expect(rule).toMatch(/box-sizing:\s*border-box/)
+  })
+})

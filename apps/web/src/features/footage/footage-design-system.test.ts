@@ -102,3 +102,34 @@ describe("촬영본 화면은 창작자의 말로 말한다", () => {
     });
   }
 });
+
+/* 2026-09-04 실측(촬영본 하나를 실제로 분석·묶고 미리보기까지 눌러서 잼):
+ * `.vb-footage-sequence__preview-status`("단일 원본 미리보기 준비됨")에 CSS가
+ * 하나도 없었다. `<small>`이라 부모(`.vb-footage-sequence`, `--vb-text-xs`=12px)에서
+ * 한 번 더 줄어 **10px**로 나왔고 -- 이 화면 척도의 제일 작은 칸보다도 작다 --
+ * 색도 `--foreground`(흰색) 그대로였다. 바로 옆 같은 성격의 안내문
+ * `.vb-footage-disclaimer`는 `--vb-muted` + `--vb-text-xs`로 돼 있다. 같은 무늬로 맞춘다. */
+describe("가상 묶음 미리보기 안내가 척도 밖으로 작아지지 않는다", () => {
+  it(".vb-footage-sequence__preview-status가 척도 글자크기와 muted 색을 건다", () => {
+    const rule = footageCss.match(/\.vb-footage-sequence__preview-status\s*\{[^}]*\}/)?.[0]
+    expect(rule, ".vb-footage-sequence__preview-status 규칙을 못 찾았다").toBeDefined()
+    expect(rule).toMatch(/font-size:\s*var\(--vb-text-(xs|sm)\)/)
+    expect(rule).toMatch(/color:\s*var\(--vb-muted\)/)
+  })
+})
+
+/* 2026-09-04: 촬영본 한 칸(`.vb-footage-source`)은 shadcn `Button`이라 `h-9`(36px)이
+ * 같이 걸리는데, 안에는 그림·파일이름·길이·`자료실에서 보기`가 여러 줄로 들어간다.
+ * 실측하니 내용 55px이 상자 36px에 갇혀 잘리고 있었다. 전역 `border-box` 도입
+ * 전에도 이미 12px 잘려 있었고(상자 54 / 내용 64) 도입이 그 격차를 21px로
+ * 넓혔다. 고정 높이를 풀어야 열두 칸 전부가 안 잘린다. */
+describe("촬영본 한 칸이 내용에 맞춰 늘어난다", () => {
+  // 한 칸짜리 `.vb-footage-source{height:auto}`로는 안 된다 -- shadcn `Button`이
+  // 같이 거는 `.h-9`가 특정도는 같고(0,1,0) 번들에서 더 뒤에 실려 이긴다.
+  // 실기계에서 계산값이 그대로 36px인 것을 확인했다. 부모를 앞에 붙여야 이긴다.
+  it(".vb-footage-source가 .h-9를 이기는 무게로 고정 높이를 푼다", () => {
+    const rule = footageCss.match(/\.vb-footage-source-row\s+\.vb-footage-source\{[^}]*\}/)?.[0]
+    expect(rule, "부모를 앞에 붙인 .vb-footage-source 규칙을 못 찾았다").toBeDefined()
+    expect(rule).toMatch(/height:\s*auto/)
+  })
+})

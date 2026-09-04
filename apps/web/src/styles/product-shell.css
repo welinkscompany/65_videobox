@@ -139,6 +139,18 @@ body:has(.vb-product-shell) { margin: 0; }
    들어온다(2026-08-29). 4칸을 그대로 두면 칸마다 169px대로 눌려 완성본 카드의
    영상·문구가 넘친다(실측 확인) -- 페이지 전용 4칸을 팝업 안에서만 1칸으로 줄인다. */
 .vb-export-dialog .vb-outputs-grid { grid-template-columns:1fr; }
+/* 완성본이 실제로 있어야만 나오는 두 묶음이라 이름만 보는 감사에서 계속
+   빠져 있었다. 2026-09-04에 `my-project`에 완성본을 실제로 구워 놓고 재 보니
+   둘 다 CSS가 하나도 없어 `display:block`으로 떨어졌고, 자식 사이 간격이
+   **0px**이었다 -- `이 완성본 좋아요`(y 2422, 높이 36)와 `이 완성본
+   아쉬워요`(y 2458)가 정확히 맞닿아 있었다. 어제 고친
+   `.vb-timeline-edit-toolbar`와 같은 결함이고, 같은 무늬(세로 묶음 + 척도
+   간격)로 맞춘다. */
+.vb-final-verdict, .vb-final-format { display:flex; flex-direction:column; align-items:flex-start; gap: var(--vb-space-2); }
+/* 같은 자리에서 나온 별개의 결함이었다: 포맷 이름 입력칸이 제 칸을 26px
+   넘어갔다. 원인은 이 화면이 아니라 문서 전체의 `box-sizing`이라
+   `ui-system.css`의 전역 `border-box`가 없앤다(owner 승인 2026-09-04) --
+   여기에 따로 둘 규칙이 없다. */
 .vb-output-video { display:block; width:100%; max-width:100%; height:auto; max-height:18rem; object-fit:contain; border-radius: var(--vb-radius-sm); background:var(--vb-canvas); }
 .vb-outputs h1, .vb-creation-interview h1, .vb-media-library h2, .vb-project-archive h2 { margin: 0; font-size: clamp(var(--vb-text-xl),2.4vw,var(--vb-text-2xl)); letter-spacing:-.03em; }
 .vb-outputs p, .vb-creation-interview p, .vb-media-library > p, .vb-project-archive p { margin: 0; color:var(--vb-muted); line-height:1.55; }
