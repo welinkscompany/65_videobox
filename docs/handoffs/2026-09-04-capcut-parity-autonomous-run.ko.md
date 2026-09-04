@@ -1,5 +1,7 @@
 # 인계 — 캡컷 대조 조사와 자율 구현 (2026-09-04)
 
+**대체됨:** `docs/handoffs/2026-09-05-overnight-capcut-parity-and-verification.ko.md`
+
 앞 인계: `2026-09-04-caption-formatting-and-ux-sweep.ko.md`
 
 ## 한 줄

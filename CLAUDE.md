@@ -55,7 +55,7 @@
 | 운영 규정 SSOT | `docs/development-fast-path.ko.md` `## 10` |
 | 최상위 구현 계획 | `docs/implementation-plan.ko.md` |
 | 디자인 승인 기록 | `docs/decisions/` |
-| **최신 세션 인계** | `docs/handoffs/2026-09-04-capcut-parity-autonomous-run.ko.md` |
+| **최신 세션 인계** | `docs/handoffs/2026-09-05-overnight-capcut-parity-and-verification.ko.md` |
 
 승인된 시각 결정은 `docs/decisions/`에 있다. 전부 명시 승인이고 재승인 없이 바꾸지 않는다.
 **가장 나중 것부터 읽어라** — 옛 문서로 판단하면 틀린다.
