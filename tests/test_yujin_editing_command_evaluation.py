@@ -292,3 +292,47 @@ def test_the_prompt_tells_yujin_the_current_caption_size_and_not_to_ask() -> Non
     prompt = str(runtime.request["prompt"])
     assert "41px" in prompt
     assert "되묻지 말고" in prompt
+
+
+def test_the_prompt_does_not_teach_yujin_to_refuse_a_feature_we_just_built() -> None:
+    """거절 예시가 **방금 만든 기능**을 가리키던 것 (2026-09-06).
+
+    "지금 대화 편집으로는 자막 글꼴을 바꿀 수 없어요" -- 이 문장이 예시로
+    들어 있었는데 2026-09-05에 글꼴을, 2026-09-06에 크기를 지원 목록에 넣었다.
+    **같은 함정에 두 번 걸렸다**(2026-09-01에는 색감이 그랬다).
+
+    거절 예시는 **안 만들기로 명시 결정된 것**이어야 한다
+    (`decisions/2026-09-01-capcut-ai-feature-triage.ko.md`: 전문 색보정 넷).
+    """
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="아무거나",
+        context=YujinEditingContext(session_id="s", session_revision=1, segment_ids=("scene-1",)),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    # 지원하는 기능을 "못 한다"고 가르치지 않는다.
+    assert "자막 글꼴을 바꿀 수 없어요" not in prompt
+    assert "색감 보정을 지원하지 않아요" not in prompt
+
+
+def test_the_prompt_says_which_intent_trims_a_scene() -> None:
+    """이름만 늘어놓으면 무엇을 하는 항목인지 모른다 (2026-09-06 실측).
+
+    "이 장면 앞부분 3초 잘라줘"에 유진이 `set_scene_speed`(배속)를 골랐다.
+    자르기는 `set_segment_bounds`인데 이름에서 그것을 읽어 내지 못했다.
+    """
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="앞부분 잘라줘",
+        context=YujinEditingContext(session_id="s", session_revision=1, segment_ids=("scene-1",)),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "잘라줘" in prompt.split("set_segment_bounds")[1][:120]

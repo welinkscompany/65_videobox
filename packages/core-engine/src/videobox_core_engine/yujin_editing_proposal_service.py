@@ -222,19 +222,31 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
     #
     # **예시를 갈아 끼웠다(2026-09-01).** 예전 예시는 "색감 보정을 지원하지
     # 않아요"였는데 그날 색감(`set_scene_look`)을 지원 목록에 넣었다 -- 그대로
-    # 두면 방금 만든 기능을 거절하라고 가르치는 예시가 된다. 실제로 허용 intent
-    # 밖에 있고 앞으로도 그럴 것(자막 글꼴은 오른쪽 패널의 자막 설정이다)으로 바꾼다.
+    # 두면 방금 만든 기능을 거절하라고 가르치는 예시가 된다.
+    #
+    # **또 갈아 끼웠다(2026-09-06).** 그때 고른 예시가 "자막 글꼴은 못 바꾼다"
+    # 였는데 2026-09-05에 글꼴을, 2026-09-06에 크기를 지원 목록에 넣었다 --
+    # **같은 함정에 두 번 걸렸다.** 주석에 "앞으로도 그럴 것"이라고 적어 둔 것이
+    # 무색해졌다. 그래서 이번에는 **안 만들기로 명시 결정된 것**을 고른다
+    # (`decisions/2026-09-01-capcut-ai-feature-triage.ko.md`: 전문 색보정 넷은
+    # 만들지 않는다). 이 예시를 바꿀 일이 생기면 그 결정부터 다시 봐라.
     no_proposal_example = {
         "schema_version": "videobox.yujin-editing-response.v1",
-        "reply_text": "지금 대화 편집으로는 자막 글꼴을 바꿀 수 없어요. 오른쪽 패널의 자막 설정에서 직접 골라 주세요.",
+        "reply_text": "지금 대화 편집으로는 밝기·대비 같은 전문 색보정을 할 수 없어요. 장면 색감은 골라 드릴 수 있어요.",
         "proposal": None,
     }
     return (
         "너는 VideoBox의 편집안 작성기다. 이 요청은 저장·실행·적용이 아닌 검토용 후보만 만든다. "
         "반드시 JSON 객체 하나만 출력하고 Markdown, 코드 블록, 설명문을 섞지 마라. "
         "proposal 안에는 현재 장면 ID만 쓰고, base_session_revision은 아래 값과 정확히 같아야 한다. "
-        "허용 intent는 set_scene_speed, set_segment_bounds, set_cut_action, reorder_segments, "
-        "set_caption_font, "
+        # **이름만 늘어놓으면 무엇을 하는 항목인지 모른다.** "이 장면 앞부분 3초
+        # 잘라줘"에 유진이 `set_scene_speed`(배속)를 골랐다 -- 자르기는
+        # `set_segment_bounds`인데 이름에서 그것을 읽어 내지 못한 것이다
+        # (2026-09-06 실측). 헷갈리기 쉬운 것에만 뜻을 붙인다.
+        "허용 intent는 set_scene_speed(배속), "
+        "set_segment_bounds(장면의 시작·끝 시각을 옮긴다 -- \"앞부분 3초 잘라줘\"가 이것이다), "
+        "set_cut_action(장면을 쓸지 뺄지), reorder_segments(장면 순서), "
+        "set_caption_font(자막 글꼴·크기), "
         "set_caption_text, set_scene_look, set_picture_cleanup, set_sound_cleanup, set_scene_transform, "
         "apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
