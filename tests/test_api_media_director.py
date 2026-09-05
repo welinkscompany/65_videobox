@@ -3670,3 +3670,67 @@ def test_refresh_reports_blocked_analysis_instead_of_crashing(tmp_path: Path, mo
     assert response.status_code == 409, f"막힌 분석에 {response.status_code}가 났다 -- 500이면 화면이 무엇을 하라고 말할 수 없다"
     assert response.json()["code"] == "director_analysis_blocked"
     assert response.json()["lifecycle"]["recovery_action"] == "analyse_or_retry_assets"
+
+
+def test_yujin_can_pick_a_video_from_the_library_not_only_music(tmp_path) -> None:
+    """유진이 자료실 **영상**을 못 골랐다 (2026-09-05 실측).
+
+    "도시 거리 걷는 영상 깔아줘"라고 했더니 `music-lost-in-city`를 골랐다 --
+    **음악이다.** 자료실 후보를 음악과 효과음만 훑고 있어서 고를 영상이 하나도
+    없었고, 이름이 비슷한 음악을 집은 것이다.
+
+    자료실 촬영본은 색인이 장소·시간·날씨를 한국어로 적어 두므로 고를 근거가
+    이미 있었다. 훑지 않았을 뿐이다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+    searched: list[tuple[str, str]] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        searched.append((query, media_type))
+        if media_type != "broll":
+            return []
+        return [{
+            "library_asset_id": "user_4d888ec18e7b400dbcd",
+            "asset_id": "user_4d888ec18e7b400dbcd", "media_type": "broll",
+            "description": "도시 거리. 건물, 인도, 길, 사람이 지나가는 낮 풍경",
+            "duration_seconds": 11.4, "score": 0.83,
+        }]
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="library video reach")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search,
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "도시 거리 걷는 영상 깔아줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    # 영상도 같이 훑는다.
+    assert ("도시 거리 걷는 영상 깔아줘", "broll") in searched
+    prompt = seen_prompts[-1]
+    # 그 영상이 고를 수 있는 목록에 들어간다 -- 설명과 함께.
+    assert "user_4d888ec18e7b400dbcd" in prompt
+    assert "도시 거리" in prompt

@@ -264,7 +264,11 @@ def build_director_proposals_router(
         낫다.
         """
         asset_id = str(operation.get("asset_id") or "")
-        if not asset_id.startswith("pack:") or library_store is None:
+        # 꾸러미 자산은 `pack:`, owner가 직접 넣은 것은 `user_`로 시작한다.
+        # 영상 후보가 들어오면서 뒤쪽도 지나가야 한다 -- 자료실 촬영본은 전부
+        # `user_`다. 넓히지 않으면 유진이 고른 영상이 자료실 id 그대로 저장되고
+        # 렌더러가 찾지 못한다.
+        if not asset_id.startswith(("pack:", "user_")) or library_store is None:
             return operation
         result = materialize_library_asset(
             library_store=library_store, materializer=materializer,
@@ -309,7 +313,11 @@ def build_director_proposals_router(
         대화 편집이 통째로 멈추면 안 된다.
         """
         found: list[dict] = []
-        for media_type in ("music", "sfx"):
+        # **영상도 함께 훑는다**(2026-09-05). 음악·효과음만 훑던 동안 "도시 거리
+        # 걷는 영상 깔아줘"에 유진이 `music-lost-in-city`를 골랐다 -- 고를 영상이
+        # 후보에 하나도 없으니 이름이 비슷한 음악을 집은 것이다. 자료실 촬영본은
+        # 색인이 장소·시간·날씨를 한국어로 적어 두므로 고를 근거가 이미 있다.
+        for media_type in ("music", "sfx", "broll"):
             matches: list[dict] = []
             if library_search is not None:
                 try:
@@ -334,7 +342,7 @@ def build_director_proposals_router(
                     "asset_id": library_asset_id,
                     # 자료실은 `music`이라 부르고 편집본은 `bgm`이라 부른다.
                     # 검증기가 보는 이름으로 맞춰 준다.
-                    "asset_type": "bgm" if media_type == "music" else "sfx",
+                    "asset_type": {"music": "bgm", "sfx": "sfx", "broll": "broll_video"}[media_type],
                     "label": _library_label(match),
                 })
         return found
