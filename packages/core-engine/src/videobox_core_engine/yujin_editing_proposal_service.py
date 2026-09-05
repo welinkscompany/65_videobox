@@ -7,6 +7,7 @@ import json
 import re
 
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
+from videobox_core_engine.transitions import TRANSITION_CATALOG
 from videobox_core_engine.filters import FILTER_CATALOG
 from videobox_domain_models.caption_fonts import caption_font_catalog
 from videobox_domain_models.caption_style import (
@@ -34,6 +35,8 @@ _EDITING_OPERATION_SCHEMA = {
         # 크기만 싣는다. 둘 다 안 실으면 검증이 막는다.
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_font"}, "family": {"type": "string"}, "size_px": {"type": "integer", "minimum": MIN_CAPTION_FONT_SIZE_PX, "maximum": MAX_CAPTION_FONT_SIZE_PX}}, "required": ["intent"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_look"}, "segment_id": {"type": "string"}, "look": {"enum": sorted(FILTER_CATALOG)}}, "required": ["intent", "segment_id", "look"]},
+        # 전환은 **이 장면으로 넘어올 때** 쓴다. `transition_type: null`이면 뺀다.
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_transition"}, "segment_id": {"type": "string"}, "transition_type": {"type": ["string", "null"], "enum": [*sorted(TRANSITION_CATALOG), None]}, "duration_sec": {"type": "number", "minimum": 0.1, "maximum": 5}}, "required": ["intent", "segment_id"]},
         # 켜고 끄는 것들. **말한 것만 실으라고** 하려고 required를 최소로 둔다 --
         # "흔들림만 잡아 줘"에 노이즈 값까지 채우게 하면 이미 켜 둔 것을 끈다.
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_picture_cleanup"}, "segment_id": {"type": "string"}, "stabilize": {"type": "boolean"}, "reduce_noise": {"type": "boolean"}}, "required": ["intent", "segment_id"]},
@@ -85,6 +88,20 @@ def _scene_look_catalogue(context: YujinEditingContext) -> str:
     return (
         f"고를 수 있는 색감: {looks}. "
         f"색감은 화면이 깔린 장면에만 걸 수 있다 -- 그런 장면: {', '.join(context.segment_ids_with_broll)}."
+    )
+
+
+def _scene_transition_catalogue() -> str:
+    """고를 수 있는 전환. **이름을 지어내지 못하게** 표를 그대로 준다.
+
+    색감과 같은 이유다 -- 표에 없는 이름은 렌더러가 조용히 넘기고, 창작자는
+    "골랐는데 아무 일도 안 일어났다"를 본다.
+    """
+    names = ", ".join(f"{key}({value['label']})" for key, value in sorted(TRANSITION_CATALOG.items()))
+    return (
+        f"고를 수 있는 전환: {names}. "
+        "전환은 **그 장면으로 넘어올 때** 걸리므로 뒤쪽 장면의 segment_id를 쓴다. "
+        "빼려면 transition_type을 null로 둔다."
     )
 
 
@@ -249,6 +266,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "set_caption_font(자막 글꼴·크기), "
         "set_caption_text(자막 글), set_scene_look(색감), set_picture_cleanup(손떨림·화면 노이즈), "
         "set_sound_cleanup(소리 크기 맞추기·잡음 줄이기), set_scene_transform(확대·위치·기울이기), "
+        "set_scene_transition(장면이 넘어올 때의 전환 -- \"전환 넣어줘\"가 이것이다), "
         "apply_media(영상·음악·효과음을 깐다), "
         "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
@@ -271,12 +289,17 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_caption_catalogue(context, instruction)} "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
+        f"{_scene_transition_catalogue()} "
         f"{_caption_font_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
         # 그 장면에 음악·효과음이 있어야 한다.
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "
         "둘 다 화면이 깔린 장면에만 걸 수 있다. 소리 크기 맞추기·잡음 줄이기는 set_sound_cleanup이며 "
-        "그 장면에 깔린 음악(bgm)이나 효과음(sfx)을 media_type으로 지목해야 한다. "
+        "그 장면에 깔린 음악(bgm)이나 효과음(sfx)을 media_type으로 지목해야 한다 -- "
+        # **asset_id를 찾아 헤매지 않게 못박는다**(2026-09-06 실측). "음악 소리
+        # 크기 좀 맞춰줘"에 유진이 "깔린 음악의 asset_id를 모른다"며 되물었다.
+        # 소리 정리는 이미 깔린 것에 거는 일이라 무엇이 깔렸는지 알 필요가 없다.
+        "**asset_id는 싣지 않는다**(무엇이 깔렸는지 몰라도 된다). "
         # **켜고 끄는 칸을 하나도 안 실으면 거절된다**(2026-09-06 실측:
         # "음악 소리 크기 좀 맞춰줘"가 `invalid_editing_response`였다). JSON
         # 스키마는 required에 못 적는 조건이라 -- 둘 중 하나만 있으면 되므로 --

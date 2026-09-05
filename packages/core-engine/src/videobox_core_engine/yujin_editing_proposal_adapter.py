@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from videobox_core_engine.filters import FILTER_TYPES
+from videobox_core_engine.transitions import TRANSITION_CATALOG
 from videobox_domain_models.caption_fonts import is_installed_caption_font
 from videobox_domain_models.yujin_editing_proposals import (
     ApplyMediaOperation,
@@ -17,6 +18,7 @@ from videobox_domain_models.yujin_editing_proposals import (
     SetCaptionFontOperation,
     SetPictureCleanupOperation,
     SetSceneLookOperation,
+    SetSceneTransitionOperation,
     SetSceneTransformOperation,
     SetSoundCleanupOperation,
     YujinEditingProposal,
@@ -173,6 +175,12 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
         if key in operation_targets:
             return "duplicate_conflicting_operation"
         operation_targets.add(key)
+        if isinstance(operation, SetSceneTransitionOperation):
+            # 지어낸 전환 이름은 여기서 막는다 -- 색감과 같은 이유다. 렌더러는
+            # 표에 없는 이름을 조용히 넘기고, 창작자는 "골랐는데 아무 일도 안
+            # 일어났다"를 본다.
+            if operation.transition_type is not None and operation.transition_type not in TRANSITION_CATALOG:
+                return "scene_transition_not_available"
         if isinstance(operation, SetSceneLookOperation):
             if operation.look not in FILTER_TYPES:
                 return "scene_look_not_available"

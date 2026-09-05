@@ -101,6 +101,21 @@ class SetSceneLookOperation(_SegmentOperation):
     look: str = Field(min_length=1, max_length=64)
 
 
+class SetSceneTransitionOperation(_SegmentOperation):
+    """이 장면으로 **넘어올 때** 쓸 전환.
+
+    `type`이 `Literal`이 아닌 이유는 색감(`set_scene_look`)과 같다 -- 고를 수
+    있는 표(`TRANSITION_CATALOG`)는 core-engine에 있고, domain-models가 그것을
+    베끼면 두 벌이 갈라진다. 목록 대조는 검증기에서 한다.
+
+    `None`은 "전환을 뺀다"는 뜻이다.
+    """
+
+    intent: Literal["set_scene_transition"]
+    transition_type: str | None = Field(default=None, min_length=1, max_length=64)
+    duration_sec: float | None = Field(default=None, gt=0, le=5)
+
+
 class SetPictureCleanupOperation(_SegmentOperation):
     """흔들림 보정·화면 노이즈 줄이기. 켜고 끄는 것뿐이다.
 
@@ -175,6 +190,7 @@ YujinEditingOperation = Annotated[
     | SetCaptionTextOperation
     | SetCaptionFontOperation
     | SetSceneLookOperation
+    | SetSceneTransitionOperation
     | SetPictureCleanupOperation
     | SetSoundCleanupOperation
     | SetSceneTransformOperation
@@ -208,6 +224,7 @@ __all__ = [
     "SetPictureCleanupOperation",
     "SetSceneLookOperation",
     "SetSceneTransformOperation",
+    "SetSceneTransitionOperation",
     "SetSoundCleanupOperation",
     "SetSceneSpeedOperation",
     "SetSegmentBoundsOperation",

@@ -874,6 +874,7 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
         RemoveMediaOperation,
         ReorderSegmentsOperation,
         SetCaptionFontOperation,
+        SetSceneTransitionOperation,
         SetCaptionTextOperation,
         SetCutActionOperation,
         SetPictureCleanupOperation,
@@ -926,6 +927,17 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
                 style["font_size_px"] = operation.size_px
             working = update_caption_style(
                 session=working, style=style, scope="whole_project", segment_ids=[],
+            )
+        elif isinstance(operation, SetSceneTransitionOperation):
+            # 화면이 쓰는 것과 **같은 함수**다. 전환 값은 들어오는 쪽 장면에
+            # 실린다(그 함수의 머리말 참고) -- 두 벌로 적으면 한쪽만 고쳐진다.
+            working = update_segment_transition(
+                session=working, segment_id=operation.segment_id,
+                transition=(
+                    None if operation.transition_type is None
+                    else {"type": operation.transition_type, "chosen_by": "yujin",
+                          **({"duration_sec": operation.duration_sec} if operation.duration_sec else {})}
+                ),
             )
         elif isinstance(operation, SetSceneLookOperation):
             # 손떨림·노이즈·변형과 **같은 자리**에 얹는다(전부 그 장면 B-roll의
