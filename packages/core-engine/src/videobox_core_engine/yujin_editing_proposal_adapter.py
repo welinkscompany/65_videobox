@@ -65,6 +65,10 @@ class YujinEditingContext:
     #: 유진은 이 언어로 보고 이 언어를 고친다 -- 보는 것과 고치는 것이 달라지면
     #: 창작자 눈에는 아무 일도 안 일어난 것처럼 보인다.
     caption_language: str | None = None
+    #: 지금 자막 글자 크기(px). **이걸 안 알려 주면 "더 크게"에 되묻는다** --
+    #: 창작자는 px 숫자를 모르는데 유진이 "크기를 알려주세요"라고 답했다
+    #: (2026-09-06 실측). 어디서 출발해 올릴지 알아야 알아서 올릴 수 있다.
+    caption_font_size_px: int | None = None
 
 
 @dataclass(frozen=True)

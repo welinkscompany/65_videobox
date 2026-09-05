@@ -266,3 +266,29 @@ def test_the_catalogue_names_a_video_the_way_apply_media_wants_it() -> None:
     prompt = str(runtime.request["prompt"])
     assert "user_city_street(broll," in prompt
     assert "broll_video" not in prompt
+
+
+def test_the_prompt_tells_yujin_the_current_caption_size_and_not_to_ask() -> None:
+    """"더 크게"에 유진이 px 숫자를 되물었다 (2026-09-06 실측).
+
+    > "자막 글꼴 좀 더 큰 걸로 바꿔줘"
+    > → "크기를 알려주세요. 현재 글꼴은 설정되어 있지 않아서..."
+
+    **창작자는 px 숫자를 모른다.** 되묻는 순간 말로 고치는 길이 막힌 것과 같다.
+    지금 크기를 알려 주고, 정도만 말하면 알아서 옮기라고 못박는다.
+    """
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="자막 좀 더 크게",
+        context=YujinEditingContext(
+            session_id="session-1", session_revision=3, segment_ids=("scene-1",),
+            caption_font_size_px=41,
+        ),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "41px" in prompt
+    assert "되묻지 말고" in prompt

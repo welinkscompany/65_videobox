@@ -25,6 +25,7 @@ from videobox_core_engine.yujin_local_conversation import (
 from videobox_core_engine.yujin_editing_proposal_adapter import YujinEditingContext
 from videobox_core_engine.yujin_editing_proposal_service import YujinEditingProposalService
 from videobox_core_engine.editing_session import apply_yujin_editing_proposal
+from videobox_domain_models.caption_style import DEFAULT_CAPTION_FONT_SIZE_PX
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_core_engine.director_proposals import proposal_to_payload
 from videobox_core_engine.yujin_creator_proposal_adapter import variant_patch_from_yujin_candidate
@@ -181,6 +182,20 @@ def _library_mime_type(path) -> str | None:
     import mimetypes
 
     return mimetypes.guess_type(str(path))[0]
+
+
+def _current_caption_font_size(session: dict) -> int:
+    """지금 자막 글자 크기. 한 번도 안 고쳤으면 기본값이다.
+
+    유진에게 이 값을 줘야 "더 크게"에 되묻지 않는다 -- 창작자는 px 숫자를
+    모른다(2026-09-06 실측: 유진이 "크기를 알려주세요"라고 답했다).
+    """
+    style = session.get("caption_style")
+    if isinstance(style, dict):
+        value = style.get("font_size_px")
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+    return DEFAULT_CAPTION_FONT_SIZE_PX
 
 
 def _library_label(match: dict) -> str:
@@ -400,6 +415,8 @@ def build_director_proposals_router(
             # 창작자가 보고 있는 언어로 보여 주고, 적용도 그 언어에 한다 --
             # 보는 것과 고치는 것이 다르면 눈에는 아무 일도 안 일어난다.
             caption_language=str(session.get("caption_language") or "") or None,
+            # 지금 자막 크기. 없으면 아직 한 번도 안 고친 편집본이라 기본값이다.
+            caption_font_size_px=_current_caption_font_size(session),
             captions=tuple(
                 (str(item["segment_id"]), text)
                 for item in session.get("segments", [])

@@ -88,7 +88,7 @@ def _scene_look_catalogue(context: YujinEditingContext) -> str:
     )
 
 
-def _caption_font_catalogue() -> str:
+def _caption_font_catalogue(context: YujinEditingContext | None = None) -> str:
     """모델이 고를 수 있는 글꼴 이름을 알 방법이 이것뿐이다.
 
     색감·자산 목록과 같은 이유다 -- 목록 없이는 이름을 지어낼 수밖에 없고,
@@ -106,7 +106,13 @@ def _caption_font_catalogue() -> str:
         "글꼴은 편집본 전체에 걸린다 -- set_caption_font에는 장면 번호를 싣지 않는다. "
         # **크기만 바꾸는 길을 열어 둔다**(2026-09-06). 이 말이 없으면 "글꼴 좀 더
         # 큰 걸로"에 유진이 되묻는다 -- 화면에서는 되는 일인데도.
-        f"글자 크기는 size_px로 바꾼다({MIN_CAPTION_FONT_SIZE_PX}~{MAX_CAPTION_FONT_SIZE_PX}, 지금 기본은 {DEFAULT_CAPTION_FONT_SIZE_PX}). "
+        f"지금 자막 글자 크기는 {(context.caption_font_size_px if context and context.caption_font_size_px else DEFAULT_CAPTION_FONT_SIZE_PX)}px이고 "
+        f"size_px로 바꾼다({MIN_CAPTION_FONT_SIZE_PX}~{MAX_CAPTION_FONT_SIZE_PX}). "
+        # **되묻지 말라고 못박는다.** 창작자는 px 숫자를 모른다 -- "더 크게"에
+        # "크기를 알려주세요"라고 답하면 말로 고치는 길이 막힌 것과 같다
+        # (2026-09-06 실측).
+        "\"더 크게\"·\"작게\"처럼 정도만 말하면 **되묻지 말고** 지금 값에서 한 단계 "
+        "옮겨라(대략 1.25배, 범위 밖으로 나가면 끝값으로). "
         "\"더 크게\"처럼 크기만 말하면 size_px만 싣고 family는 비운다 -- 이름을 채우면 "
         "창작자가 맞춰 둔 글꼴이 조용히 바뀐다."
     )
@@ -251,7 +257,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_caption_catalogue(context, instruction)} "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
-        f"{_caption_font_catalogue()} "
+        f"{_caption_font_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
         # 그 장면에 음악·효과음이 있어야 한다.
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "
