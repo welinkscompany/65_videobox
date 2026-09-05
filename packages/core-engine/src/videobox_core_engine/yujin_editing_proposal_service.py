@@ -87,7 +87,10 @@ def _scene_look_catalogue(context: YujinEditingContext) -> str:
         return f"고를 수 있는 색감: {looks}. 다만 지금은 화면이 깔린 장면이 없어 색감을 걸 수 없다."
     return (
         f"고를 수 있는 색감: {looks}. "
-        f"색감은 화면이 깔린 장면에만 걸 수 있다 -- 그런 장면: {', '.join(context.segment_ids_with_broll)}."
+        f"색감은 화면이 깔린 장면에만 걸 수 있다 -- 그런 장면: {', '.join(context.segment_ids_with_broll)}. "
+        # **지금 걸린 것도 준다.** 고를 수 있는 목록만 주면 "원래대로 돌려줘"에
+        # "색감이 걸려 있지 않습니다"라고 답한다 -- 걸려 있는데도(2026-09-06 실측).
+        f"지금 색감이 걸린 장면: {', '.join(f'{sid}({look})' for sid, look in context.looks_by_segment) or '없음'}."
     )
 
 

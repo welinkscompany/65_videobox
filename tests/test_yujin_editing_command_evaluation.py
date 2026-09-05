@@ -359,3 +359,27 @@ def test_the_prompt_says_cleanup_operations_need_at_least_one_switch() -> None:
     prompt = str(runtime.request["prompt"])
     assert "바꿀 칸을 적어도 하나 실어야 한다" in prompt
     assert "normalize_loudness" in prompt
+
+
+def test_the_prompt_says_which_looks_are_already_on() -> None:
+    """지금 걸린 색감을 안 알려 주면 유진이 없다고 답한다 (2026-09-06 실측).
+
+    `warm`이 걸린 장면을 두고 "지금 걸린 색감 뭐야? 원래대로 돌려줘"라고 했더니
+    **"현재 장면(1번, 2번)에 색감이 걸려 있지 않습니다"**라고 답했다. 전환과
+    **똑같은 빈틈**이다 -- 고를 수 있는 목록만 주고 지금 걸린 것은 안 줬다.
+    """
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="색감 원래대로 돌려줘",
+        context=YujinEditingContext(
+            session_id="s", session_revision=1, segment_ids=("scene-1",),
+            segment_ids_with_broll=("scene-1",),
+            looks_by_segment=(("scene-1", "warm"),),
+        ),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "지금 색감이 걸린 장면: scene-1(warm)" in prompt

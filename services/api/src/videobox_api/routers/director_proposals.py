@@ -467,6 +467,13 @@ def build_director_proposals_router(
                 if isinstance(item, dict) and isinstance(item.get("transition_in"), dict)
                 and str(item["transition_in"].get("type") or "").strip()
             ),
+            # 지금 걸린 색감. 전환과 같은 이유로 준다.
+            looks_by_segment=tuple(
+                (str(item["segment_id"]), str(((item.get("broll_override") or {}).get("media_controls") or {}).get("filter", {}).get("type") or ""))
+                for item in session.get("segments", [])
+                if isinstance(item, dict)
+                and str(((item.get("broll_override") or {}).get("media_controls") or {}).get("filter", {}).get("type") or "").strip()
+            ),
             segment_ids_with_broll=tuple(
                 str(item["segment_id"])
                 for item in session.get("segments", [])
