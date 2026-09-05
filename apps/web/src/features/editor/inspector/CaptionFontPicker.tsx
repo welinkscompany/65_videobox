@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, type CaptionFont } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { NativeSelect } from "../../../components/ui/native-select";
 import { orderByFavouriteThenRecent } from "../../../lib/pickerOrder";
 
 /** 설치된 글꼴 중에서 고른다.
@@ -81,6 +82,8 @@ export function CaptionFontPicker({
   // 목록을 받아 왔는데 지금 쓰는 글꼴이 그 안에 없다 -- 이 컴퓨터에 그 글꼴이
   // 없다는 뜻이다. 말해 주지 않으면 owner는 완성본을 보고서야 알게 된다.
   const missingHere = fonts.length > 0 && !fonts.some((font) => font.family === value);
+  // 즐겨찾기 단추가 부를 이름. 목록에 없는 글꼴이면 단추 자체를 안 만든다.
+  const chosenFont = visible.find((font) => font.family === value) ?? null;
 
   return (
     <section className="vb-caption-fonts" aria-labelledby="caption-fonts-heading">
@@ -89,38 +92,44 @@ export function CaptionFontPicker({
         <p role="status">지금 쓰는 글꼴이 이 컴퓨터에 없어요. 아래에서 하나 골라 주세요.</p>
       ) : null}
       {error ? <p role="status">{error}</p> : null}
-      <ul>
-        {visible.map((font) => {
-          const loved = favourites.includes(font.family);
-          const chosen = font.family === value;
-          return (
-            <li key={font.family}>
-              <span>{font.label}</span>
-              {font.group ? <span>{font.group}</span> : null}
-              {chosen ? <span>지금 쓰는 글꼴</span> : null}
-              {!loved && recents.includes(font.family) ? <span>최근에 썼어요</span> : null}
-              <Button
-                disabled={disabled}
-                onClick={() => choose(font.family)}
-                type="button"
-                variant="outline"
-              >
-                {`${font.label} 고르기`}
-              </Button>
-              {fonts.length ? (
-                <Button
-                  disabled={disabled}
-                  onClick={() => void toggle(font.family, !loved)}
-                  type="button"
-                  variant="outline"
-                >
-                  {loved ? `${font.label} 즐겨찾기 해제` : `${font.label} 즐겨찾기`}
-                </Button>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+      {/* **드롭다운 하나**(owner 지시 2026-09-04: "글자폰트도 다양한 무료
+          폰트를 드롭다운으로 만들라고 했는데도 무시하고"). 예전에는 글꼴마다
+          `고르기`·`즐겨찾기` 단추가 하나씩 붙어서, 실기에서 글꼴 15개에
+          단추 30개·세로 260px을 먹고 있었다. 캡컷도 글꼴은 드롭다운이다.
+
+          순서(즐겨찾기 → 최근 → 나머지)는 `orderByFavouriteThenRecent`가
+          그대로 정한다 -- 드롭다운 안에서도 자주 쓰는 것이 위에 온다. */}
+      {/* 이름은 위 h3가 이미 `글꼴`이라고 말한다. 숨김 라벨을 또 두면
+          화면 낭독기가 같은 말을 두 번 하고, 시험에서도 어느 쪽인지 못 가린다. */}
+      <div className="vb-caption-fonts__field">
+        <NativeSelect
+          aria-label="글꼴"
+          disabled={disabled}
+          onChange={(event) => choose(event.target.value)}
+          value={value}
+        >
+          {visible.map((font) => (
+            <option key={font.family} value={font.family}>
+              {font.label}
+            </option>
+          ))}
+        </NativeSelect>
+      </div>
+      {/* 즐겨찾기는 **지금 고른 글꼴 하나**에만 붙인다. 목록이 드롭다운으로
+          접히면서 글꼴마다 두던 단추는 갈 자리가 없어졌고, 실제로 즐겨찾기를
+          누르는 순간은 "방금 고른 이것을 다음에도 위에 두고 싶다"일 때다. */}
+      {fonts.length && chosenFont ? (
+        <Button
+          disabled={disabled}
+          onClick={() => void toggle(chosenFont.family, !favourites.includes(chosenFont.family))}
+          type="button"
+          variant="outline"
+        >
+          {favourites.includes(chosenFont.family)
+            ? `${chosenFont.label} 즐겨찾기 해제`
+            : `${chosenFont.label} 즐겨찾기`}
+        </Button>
+      ) : null}
     </section>
   );
 }
