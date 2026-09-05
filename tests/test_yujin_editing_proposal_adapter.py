@@ -155,3 +155,40 @@ def test_scene_look_needs_a_real_look_and_a_scene_that_has_picture() -> None:
     assert interpret_yujin_editing_request(response("seg-2", "warm"), context).reason == "scene_look_needs_broll"
     # 표에 없는 색감은 지어낸 것이다. 그대로 흘러가면 필터 그래프에 들어간다.
     assert interpret_yujin_editing_request(response("seg-1", "teal_dream"), context).reason == "scene_look_not_available"
+
+
+def test_music_and_a_sound_effect_can_land_on_the_same_scene() -> None:
+    """한 장면의 음악과 효과음은 **서로 다른 칸**이다 (2026-09-05 실측).
+
+    "이 장면에 잔잔한 음악이랑 종이 넘기는 효과음 같이 넣어줘"가 통째로
+    거절됐다(`duplicate_conflicting_operation`). 장면만 보고 중복을 판정해서,
+    `apply_media` 두 개가 각각 `music_override`와 `sfx_override`에 들어가는데도
+    같은 것을 두 번 건다고 읽었다. 창작자가 자연스럽게 할 말이다.
+
+    같은 칸을 두 번 거는 것은 그대로 막는다 -- 무엇이 남는지 알 수 없어진다.
+    """
+    both = _response(intent="set_scene_speed", segment_id="scene-1", rate=2)
+    both["proposal"] = {
+        **both["proposal"],  # type: ignore[dict-item]
+        "operations": [
+            {"intent": "apply_media", "segment_id": "scene-1", "media_type": "bgm", "asset_id": "asset-bgm"},
+            {"intent": "apply_media", "segment_id": "scene-1", "media_type": "sfx", "asset_id": "asset-sfx"},
+        ],
+    }
+    context = YujinEditingContext(
+        session_id="session-1", session_revision=7, segment_ids=("scene-1",),
+        approved_asset_ids=("asset-bgm", "asset-sfx"),
+        approved_asset_types=(("asset-bgm", "bgm"), ("asset-sfx", "sfx")),
+    )
+
+    assert interpret_yujin_editing_request(both, context).reason is None
+
+    same_slot_twice = _response(intent="set_scene_speed", segment_id="scene-1", rate=2)
+    same_slot_twice["proposal"] = {
+        **same_slot_twice["proposal"],  # type: ignore[dict-item]
+        "operations": [
+            {"intent": "apply_media", "segment_id": "scene-1", "media_type": "sfx", "asset_id": "asset-sfx"},
+            {"intent": "apply_media", "segment_id": "scene-1", "media_type": "sfx", "asset_id": "asset-bgm"},
+        ],
+    }
+    assert interpret_yujin_editing_request(same_slot_twice, context).reason == "duplicate_conflicting_operation"

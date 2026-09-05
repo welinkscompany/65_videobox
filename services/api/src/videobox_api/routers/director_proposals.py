@@ -462,6 +462,16 @@ def build_director_proposals_router(
             # (`YujinEditingResult.reply_text` 주석 참고) 그대로 두 지 않는다 -- 이
             # 경우엔 `reply_text`가 비어 있으므로 예전 동작(사용자 문장 반사)이
             # 그대로 유지된다(범위는 Task 4와 같이 clarification으로만 좁힌다).
+            if result.status == "rejected":
+                # **거절 사유가 어디에도 안 남았다**(2026-09-05). 화면에는 창작자
+                # 문장을 되비추는 것이 맞지만(위 주석), 그러면 owner도 나도 왜
+                # 막혔는지 알 방법이 없다 -- "음악이랑 효과음 같이 넣어줘"가
+                # 거절된 이유를 좇다가 이 빈자리를 만났다. 창작자 화면은 그대로
+                # 두고 사유만 남긴다.
+                _LOGGER.info(
+                    "유진의 편집 제안을 검증이 막았습니다 (사유=%s, 시킨 말=%r).",
+                    result.reason or "알 수 없음", body.instruction[:120],
+                )
             return {"status": result.status, "reply_text": result.reply_text or body.instruction, "proposal": None}
         revision = store.next_director_proposal_revision(project_id)
         proposal = DirectorProposal(

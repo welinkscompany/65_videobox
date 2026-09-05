@@ -139,7 +139,7 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
     current_segment_ids = set(context.segment_ids)
     if len(current_segment_ids) != len(context.segment_ids) or not current_segment_ids:
         return "invalid_current_context"
-    operation_targets: set[tuple[str, str]] = set()
+    operation_targets: set[tuple[str, ...]] = set()
     for operation in proposal.operations:
         if isinstance(operation, ReorderSegmentsOperation):
             if len(operation.segment_ids) != len(current_segment_ids) or set(operation.segment_ids) != current_segment_ids:
@@ -158,6 +158,14 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
             if operation.segment_id not in current_segment_ids:
                 return "segment_not_current"
             key = (operation.intent, operation.segment_id)
+            # **한 장면의 음악과 효과음은 서로 다른 칸이다.** 장면만 보고
+            # 중복으로 막으면 "이 장면에 잔잔한 음악이랑 종이 넘기는 효과음
+            # 같이 넣어줘"가 통째로 거절된다 -- 2026-09-05에 실제로 그랬고,
+            # 창작자가 자연스럽게 할 말이다. 같은 칸을 두 번 거는 것은 여전히
+            # 막는다(무엇이 남는지 알 수 없어진다).
+            media_type = getattr(operation, "media_type", None)
+            if media_type is not None:
+                key = (operation.intent, operation.segment_id, str(media_type))
         if key in operation_targets:
             return "duplicate_conflicting_operation"
         operation_targets.add(key)
