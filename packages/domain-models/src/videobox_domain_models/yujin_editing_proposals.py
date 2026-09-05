@@ -54,6 +54,21 @@ class ReorderSegmentsOperation(_StrictFrozenModel):
     segment_ids: Annotated[tuple[str, ...], BeforeValidator(_list_to_tuple)] = Field(min_length=1, max_length=256)
 
 
+class SetCaptionFontOperation(_StrictFrozenModel):
+    """자막 글꼴 바꾸기 -- **편집본 전체**에 걸린다(owner 지시 2026-09-05).
+
+    장면 번호를 받지 않는 이유: 자막 모양은 원래 편집본 단위로 걸린다
+    (`update_caption_style`의 `whole_project`). 장면마다 글꼴이 달라지면 한
+    영상 안에서 자막이 춤춘다 -- 그걸 원하는 창작자는 화면에서 직접 고른다.
+
+    `family`가 이 기계에 실제로 있는 글꼴인지는 스키마가 아니라 해석 단계에서
+    본다(`yujin_editing_proposal_service`) -- 목록이 기계마다 다르기 때문이다.
+    """
+
+    intent: Literal["set_caption_font"]
+    family: str = Field(min_length=1, max_length=128)
+
+
 class SetCaptionTextOperation(_SegmentOperation):
     intent: Literal["set_caption_text"]
     text: str = Field(min_length=1, max_length=4096)
@@ -145,6 +160,7 @@ YujinEditingOperation = Annotated[
     | SetCutActionOperation
     | ReorderSegmentsOperation
     | SetCaptionTextOperation
+    | SetCaptionFontOperation
     | SetSceneLookOperation
     | SetPictureCleanupOperation
     | SetSoundCleanupOperation
@@ -175,6 +191,7 @@ __all__ = [
     "ReorderSegmentsOperation",
     "SetCaptionTextOperation",
     "SetCutActionOperation",
+    "SetCaptionFontOperation",
     "SetPictureCleanupOperation",
     "SetSceneLookOperation",
     "SetSceneTransformOperation",

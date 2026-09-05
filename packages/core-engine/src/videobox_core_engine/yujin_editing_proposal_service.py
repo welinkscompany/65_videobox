@@ -8,6 +8,7 @@ import re
 
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.filters import FILTER_CATALOG
+from videobox_domain_models.caption_fonts import caption_font_catalog
 from videobox_core_engine.yujin_editing_proposal_adapter import (
     YujinEditingContext,
     YujinEditingResult,
@@ -23,6 +24,8 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_cut_action"}, "segment_id": {"type": "string"}, "action": {"enum": ["exclude", "restore"]}}, "required": ["intent", "segment_id", "action"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "reorder_segments"}, "segment_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["intent", "segment_ids"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_text"}, "segment_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["intent", "segment_id", "text"]},
+        # 글꼴은 **편집본 전체**에 걸리므로 segment_id를 받지 않는다.
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_font"}, "family": {"type": "string"}}, "required": ["intent", "family"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_look"}, "segment_id": {"type": "string"}, "look": {"enum": sorted(FILTER_CATALOG)}}, "required": ["intent", "segment_id", "look"]},
         # 켜고 끄는 것들. **말한 것만 실으라고** 하려고 required를 최소로 둔다 --
         # "흔들림만 잡아 줘"에 노이즈 값까지 채우게 하면 이미 켜 둔 것을 끈다.
@@ -75,6 +78,25 @@ def _scene_look_catalogue(context: YujinEditingContext) -> str:
     return (
         f"고를 수 있는 색감: {looks}. "
         f"색감은 화면이 깔린 장면에만 걸 수 있다 -- 그런 장면: {', '.join(context.segment_ids_with_broll)}."
+    )
+
+
+def _caption_font_catalogue() -> str:
+    """모델이 고를 수 있는 글꼴 이름을 알 방법이 이것뿐이다.
+
+    색감·자산 목록과 같은 이유다 -- 목록 없이는 이름을 지어낼 수밖에 없고,
+    지어낸 이름은 `caption_font_not_available`로 항상 막힌다. 화면에 보이는
+    한국어 이름표를 같이 줘야 "손글씨로 바꿔 줘"를 옮길 수 있다.
+
+    목록은 **이 기계에 파일이 있는 글꼴만**이다(`caption_font_catalog`).
+    """
+    fonts = caption_font_catalog()
+    if not fonts:
+        return "이 기계에 쓸 수 있는 자막 글꼴이 없어 글꼴은 바꿀 수 없다."
+    names = ", ".join(f"{item['family']}({item['label']}, {item['group']})" for item in fonts)
+    return (
+        f"고를 수 있는 자막 글꼴: {names}. "
+        "글꼴은 편집본 전체에 걸린다 -- set_caption_font에는 장면 번호를 싣지 않는다."
     )
 
 
@@ -188,6 +210,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "반드시 JSON 객체 하나만 출력하고 Markdown, 코드 블록, 설명문을 섞지 마라. "
         "proposal 안에는 현재 장면 ID만 쓰고, base_session_revision은 아래 값과 정확히 같아야 한다. "
         "허용 intent는 set_scene_speed, set_segment_bounds, set_cut_action, reorder_segments, "
+        "set_caption_font, "
         "set_caption_text, set_scene_look, set_picture_cleanup, set_sound_cleanup, set_scene_transform, "
         "apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
@@ -210,6 +233,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_caption_catalogue(context, instruction)} "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
+        f"{_caption_font_catalogue()} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
         # 그 장면에 음악·효과음이 있어야 한다.
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "

@@ -965,6 +965,7 @@ def _editing_follow_ups(operations: tuple[object, ...]) -> list[str]:
         "set_scene_speed": ("원래 속도로 되돌려 볼까요?", "앞뒤 장면도 같은 속도로 맞출까요?", "이 구간만 미리 볼까요?"),
         "apply_media": ("다른 분위기로 찾아볼까요?", "이 장면부터만 바꿀까요?", "효과음도 함께 넣을까요?"),
         "set_scene_look": ("원래 색으로 되돌려 볼까요?", "앞뒤 장면도 같은 색감으로 맞출까요?", "이 구간만 미리 볼까요?"),
+        "set_caption_font": ("다른 글꼴도 보여 드릴까요?", "글자 크기도 같이 맞출까요?", "원래 글꼴로 되돌릴까요?"),
     }.get(intent, ())
     return [item for item in values if item][:3]
 

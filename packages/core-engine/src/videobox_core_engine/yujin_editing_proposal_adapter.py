@@ -10,9 +10,11 @@ from typing import Literal
 from pydantic import ValidationError
 
 from videobox_core_engine.filters import FILTER_TYPES
+from videobox_domain_models.caption_fonts import is_installed_caption_font
 from videobox_domain_models.yujin_editing_proposals import (
     ApplyMediaOperation,
     ReorderSegmentsOperation,
+    SetCaptionFontOperation,
     SetPictureCleanupOperation,
     SetSceneLookOperation,
     SetSceneTransformOperation,
@@ -142,6 +144,15 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
         if isinstance(operation, ReorderSegmentsOperation):
             if len(operation.segment_ids) != len(current_segment_ids) or set(operation.segment_ids) != current_segment_ids:
                 return "reorder_segments_not_current"
+            key = (operation.intent, "all")
+        elif isinstance(operation, SetCaptionFontOperation):
+            # 자막 글꼴은 **편집본 전체**에 걸린다 -- 장면 번호가 없다.
+            # **지어낸 글꼴 이름을 여기서 막는다.** 없는 글꼴은 완성본에서
+            # 조용히 다른 글꼴로 떨어진다 -- 화면의 글꼴 칸이 자유 입력이던
+            # 시절 실제로 겪은 사고이고, 목록이 아니라 **이 기계에 파일이
+            # 있는지**를 보는 것도 같은 이유다(caption_fonts.py 머리말).
+            if not is_installed_caption_font(operation.family):
+                return "caption_font_not_available"
             key = (operation.intent, "all")
         else:
             if operation.segment_id not in current_segment_ids:

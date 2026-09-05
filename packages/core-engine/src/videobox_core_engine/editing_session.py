@@ -873,6 +873,7 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
         ApplyMediaOperation,
         RemoveMediaOperation,
         ReorderSegmentsOperation,
+        SetCaptionFontOperation,
         SetCaptionTextOperation,
         SetCutActionOperation,
         SetPictureCleanupOperation,
@@ -909,6 +910,16 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
             working = update_segment_caption(
                 session=working, segment_id=operation.segment_id, caption_text=operation.text,
                 language=str(working.get("caption_language") or "") or None,
+            )
+        elif isinstance(operation, SetCaptionFontOperation):
+            # **편집본 전체**에 건다. 글꼴만 바꾸고 크기·색은 그대로 둬야 하므로
+            # 지금 스타일 위에 얹는다 -- 통째로 갈아 끼우면 창작자가 맞춰 둔
+            # 나머지가 조용히 기본값으로 돌아간다.
+            current = working.get("caption_style")
+            style = dict(current) if isinstance(current, dict) else {}
+            style["font_family"] = operation.family
+            working = update_caption_style(
+                session=working, style=style, scope="whole_project", segment_ids=[],
             )
         elif isinstance(operation, SetSceneLookOperation):
             # 손떨림·노이즈·변형과 **같은 자리**에 얹는다(전부 그 장면 B-roll의

@@ -13,6 +13,17 @@
       "license_sha256": "c324192c8b3a988bae45a9a7e4ac1258b684739003bda114e0523423440457c9"
     },
     {
+      "family": "Cute Font",
+      "file": "CuteFont-Regular.ttf",
+      "bytes": 1027936,
+      "sha256": "c403227fe6288a8c1423ca48e93fd7efc81e3b81053f7d17adcf659bd95fa4c3",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/cutefont/CuteFont-Regular.ttf",
+      "license": "OFL-1.1",
+      "license_file": "licenses/CuteFont-OFL.txt",
+      "license_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/cutefont/OFL.txt",
+      "license_sha256": "1a2debd5ad8e656b26bb3b29213caa8f7e557a2f31454b11ebb6c3e3b59aa5d4"
+    },
+    {
       "family": "Do Hyeon",
       "file": "DoHyeon-Regular.ttf",
       "bytes": 879764,
@@ -24,6 +35,17 @@
       "license_sha256": "de5ff32211a4340b01477af39ee339d639438955e409f79b666d4b9207f3c92c"
     },
     {
+      "family": "Dokdo",
+      "file": "Dokdo-Regular.ttf",
+      "bytes": 2150860,
+      "sha256": "5b3a3d8d28af31fa9adec3fc5da81a88b52e1ff39ed3930c1db787aa4e79c36d",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/dokdo/Dokdo-Regular.ttf",
+      "license": "OFL-1.1",
+      "license_file": "licenses/Dokdo-OFL.txt",
+      "license_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/dokdo/OFL.txt",
+      "license_sha256": "dcc832bd71ea62cbf97f06327a1b5442905b49ea446801421d71f7d1362db215"
+    },
+    {
       "family": "Gaegu",
       "file": "Gaegu-Regular.ttf",
       "bytes": 3165816,
@@ -33,6 +55,19 @@
       "license_file": "licenses/Gaegu-OFL.txt",
       "license_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/gaegu/OFL.txt",
       "license_sha256": "53a9ce47085d9fef613c7ecb3730dc80d25962510bbea231b89564f58240f251"
+    },
+    {
+      "family": "Gmarket Sans TTF",
+      "file": "GmarketSansTTFMedium.ttf",
+      "bytes": 2417020,
+      "sha256": "c6b9a2c10bfdb55975948ce191f9cf638955b5cfdc99149969add5b579262fc1",
+      "source_url": "https://corp.gmarket.com/fonts/GmarketSansTTF.zip",
+      "source_note": "zip 안의 GmarketSansTTFMedium.ttf. 배포처가 개별 파일 URL을 주지 않는다.",
+      "license": "OFL-1.1",
+      "license_file": "licenses/GmarketSans-OFL.txt",
+      "license_url": "https://corp.gmarket.com/fonts/",
+      "license_note": "zip에 라이선스 문서가 없어 폰트 name table(id 13)의 전문을 꺼내 담았다. 그 전문이 재배포·번들을 명시적으로 허용한다(조건: 라이선스 전문 포함).",
+      "license_sha256": "a069aa0ba2cbd0b977e20c0a403986599bd3e1a8d1576aa6b4a08540a6a4a543"
     },
     {
       "family": "Gothic A1",
@@ -156,6 +191,17 @@
       "license_sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
     },
     {
+      "family": "Poor Story",
+      "file": "PoorStory-Regular.ttf",
+      "bytes": 3966768,
+      "sha256": "831ab87f7b5463f9cd83ac249bf386816f3a478f1d226427c88cac907adb7ee2",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/poorstory/PoorStory-Regular.ttf",
+      "license": "OFL-1.1",
+      "license_file": "licenses/PoorStory-OFL.txt",
+      "license_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/poorstory/OFL.txt",
+      "license_sha256": "39de3de5f1873f89bca4af37823ab22e28e88d0d8f7fe2f07e82e9e6e9bf7b70"
+    },
+    {
       "family": "Pretendard",
       "file": "Pretendard-Regular.otf",
       "bytes": 1574352,
@@ -165,6 +211,17 @@
       "license_file": "licenses/Pretendard-LICENSE.txt",
       "license_url": "https://raw.githubusercontent.com/orioncactus/pretendard/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE",
       "license_sha256": "d31ddd9f2bed32fd7e302a205cf2380ba0de6529152d239ef99cfb6f261bfc04"
+    },
+    {
+      "family": "Single Day",
+      "file": "SingleDay-Regular.ttf",
+      "bytes": 816524,
+      "sha256": "716ff67a4b0675b35c26d60a4bb83173f7d153ab754474ed36c3369593ca1ca8",
+      "source_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/singleday/SingleDay-Regular.ttf",
+      "license": "OFL-1.1",
+      "license_file": "licenses/SingleDay-OFL.txt",
+      "license_url": "https://raw.githubusercontent.com/google/fonts/e1118da94a8cb00cf6d06cdac9ef13eb1e5c6ab7/ofl/singleday/OFL.txt",
+      "license_sha256": "397e83b05703a4240be51e2c3a2be1d0d7693d7a2d8b1ff367c26a2b9afc013e"
     },
     {
       "family": "Song Myung",

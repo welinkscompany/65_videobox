@@ -2402,6 +2402,12 @@ function yujinEditingOperationSummary(operation: YujinEditingProposal["diff"]["o
     const label = typeof operation.look === "string" ? sceneFilterLabel(operation.look) : null;
     return label ? `색감을 ${label} 바꿔요.` : "색감을 바꿔요.";
   }
+  // 글꼴도 코드가 아니라 화면 이름으로 적는다 -- 창작자에게 `Gothic A1`은
+  // 파일 이름이지 글꼴 이름이 아니다. 다만 이름표는 백엔드 목록에 있고 여기서
+  // 부르면 화면이 멈추므로, 이름을 모르면 갈래만 말한다.
+  if (operation.intent === "set_caption_font") {
+    return typeof operation.family === "string" ? `자막 글꼴을 ${operation.family}(으)로 바꿔요.` : "자막 글꼴을 바꿔요.";
+  }
   if (operation.intent === "reorder_segments") return "장면 순서를 바꿔요.";
   return "편집 항목을 바꿔요.";
 }

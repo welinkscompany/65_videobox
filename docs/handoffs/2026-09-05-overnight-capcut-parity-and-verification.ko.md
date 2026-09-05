@@ -332,6 +332,65 @@ owner 지적을 재려고 잴 수 있는 것을 다 쟀는데 **전부 정상**�
 글꼴 파일 안의 이름을 직접 읽어 `family`를 맞췄다(`Gowun Dodum`,
 `Kirang Haerang`처럼 띄어쓰기가 있다) -- 시험이 그것을 검사한다.
 
+## 유진이 글꼴을 고른다 + 글꼴 26개 (owner 지시 2026-09-05)
+
+> "유진이가 폰트, 음악, 효과들 이런 모든것들을 전부 추천해서 자동으로 편집
+> 추천을 할수 있게 해줘"
+
+**먼저 세어 봤다.** 유진이 이미 할 수 있는 것: `apply_media`(B-roll·음악·
+효과음), `set_scene_look`(색감), `set_scene_speed`, `set_cut_action`,
+`set_segment_bounds`, `set_caption_text`, `reorder_segments`,
+`set_picture_cleanup`, `set_sound_cleanup`, `set_scene_transform`,
+`remove_media`. **빈칸은 글꼴 하나뿐이었다** -- 그래서 거기만 채웠다.
+
+`set_caption_font`을 더했다. 다섯 자리를 같이 고쳐야 한 명령이 산다:
+
+| 자리 | 무엇 |
+|---|---|
+| `yujin_editing_proposals.py` | 모델(장면 번호 없음 -- 편집본 전체) |
+| `yujin_editing_proposal_service.py` | JSON 스키마 + **고를 수 있는 글꼴 목록** |
+| `yujin_editing_proposal_adapter.py` | 지어낸 글꼴 이름 거절 |
+| `editing_session.py` | 적용(기존 스타일 위에 글꼴만 얹는다) |
+| `EditorWorkbenchRoute.tsx`·`director_proposals.py` | 화면 문구·후속 질문 |
+
+**목록을 안 주면 그 명령은 죽은 채로 산다.** 이 저장소가 이미 겪은 사고다 --
+`apply_media`가 자산 목록 없이 나갔을 때 유진은 `asset_id`를 지어낼 수밖에
+없었고 검증에서 100% 막혔다(설계상 되는데 실제로는 한 번도 성공 못 함).
+그래서 `_caption_font_catalogue()`로 **이 기계에 파일이 있는 글꼴만** 이름표와
+함께 준다.
+
+### 글꼴 21 → 26개
+
+- **G마켓 산스**: 앞 커밋에서 "근거 부족"으로 뺐다가 owner 지시로 다시 봤다.
+  배포 zip에 라이선스 문서가 없지만 **폰트 파일 안(name table id 13)에 OFL 1.1
+  전문이 들어 있고**, 그 전문이 "본 저작권 안내 및 라이선스 전문을 포함하여
+  다른 소프트웨어와 번들하거나 재배포 또는 판매는 가능합니다"라고 명시한다.
+  그 전문을 꺼내 `licenses/GmarketSans-OFL.txt`로 담아 조건을 지켰다.
+- 손글씨·제목 넷(서툰이야기·싱글데이·독도·귀여운 폰트). **갈래를 세어 보니**
+  본문 아홉·명조 넷·제목 여섯인데 손글씨만 셋이라 거기부터 채웠다.
+- **안 넣은 것:** 스포카 한 산스(굵기 하나 13.4MB), 스타일리시(10.9MB).
+  본문이 이미 아홉이라 용량 대비 값이 낮다.
+
+## 음악 -- 조사만 했다(아직 안 넣음)
+
+owner: "음악도 무료로 찾아서 넣어줘".
+
+**이미 음악 30곡·효과음 100개가 들어 있다**(`starter-v1` 팩, 470MB).
+그런데 **음악 30곡이 전부 게임 음악**이다 -- `8bit-title-screen`,
+`arcade-background`, `grasslands-theme`, `portal`… 전부 OpenGameArt.
+**owner는 셀러 교육 브이로그를 만든다**(1인칭 내레이션 + B-roll).
+쓸 만한 것은 `peaceful-drift`·`mindstream`·`chills` 정도뿐이다.
+
+**여기가 진짜 빈칸이다.** 다만 이 영역엔 문서화된 라이선스 게이트가 있다
+(`docs/starter-media-pack-license-research.ko.md`): CC0 + **raw 재배포 허용**
++ 저작자 명확 + asset page와 파일의 대응 증명 + 증거 HTML 해시.
+**Pixabay·Mixkit은 이미 제외 판정**이다 -- 상업 이용은 되지만 파일 자체를
+재배포하지 못하게 해서, 파일을 내려받게 하는 우리 팩에는 못 쓴다.
+
+**다음 세션이 할 일:** OpenGameArt·Free Music Archive의 CC0 중 브이로그용
+(차분한/lo-fi/어쿠스틱) 곡을 골라 같은 절차로 팩에 더한다. 470MB 팩을
+건드리는 일이라 규모를 owner에게 알리고 시작하는 것이 맞다.
+
 ## 백엔드 빨간불 하나 — **내 변경이 아니다(확정)**
 
 이 세션에서 백엔드 전체를 두 번 돌렸고 **매번 스크립트 계열 시험 하나가
@@ -352,6 +411,27 @@ tests/test_owner_ready_script.py`가 비어 있고 미커밋 변경에도 그 �
 실패 내용은 `owner-ready.ps1 -Mode Smoke -TimeoutSec 1`이 30초 안에 안 끝난
 것이다. PowerShell 시동 자체는 재 보니 **180ms**로 멀쩡했고, 이 기계에는
 컨테이너가 **30개** 떠 있다(내가 이 세션에서 재빌드를 다섯 번 했다).
+
+### 세 번째 실행 뒤 좁혀진 것 (2026-09-05 낮)
+
+`test_owner_ready_script.py`의 smoke 타임아웃이 **연달아 세 번** 실패했다.
+"기계가 느려서"로 넘기지 않고 그 시험이 무엇을 재는지 읽었다: **타임아웃이
+자식 프로세스 트리를 죽이는가**이지 속도가 아니다.
+
+그래서 진짜 스크립트를 같은 인자로 돌려 봤다:
+
+```
+./scripts/owner-ready.ps1 -Mode Smoke -Json -TimeoutSec 1
+→ 2.8초, 종료코드 1, overall_status fail (제대로 끊었다)
+```
+
+**실제 경로는 멀쩡하다.** 시험은 임시 폴더에 **30초 자는 자식을 띄우는 가짜
+smoke 스크립트**를 만들어 그 손자까지 죽는지를 본다 -- 그 환경에서만 30초
+제한을 넘는다. PowerShell 시동은 180ms로 정상이었고, 이 기계엔 컨테이너가
+30개 떠 있다.
+
+즉 **owner가 실제로 쓰는 길에는 영향이 없고**, 손자 프로세스를 죽이는
+구간만 이 기계 상태에서 느리다. 파고들 값이 있으면 거기부터 보면 된다.
 
 **다음 세션에 할 일:** 조용한 기계에서 이 두 시험을 각각 돌려 다시 확인하라.
 거기서도 실패하면 그때는 진짜 결함이니 파라. 기억

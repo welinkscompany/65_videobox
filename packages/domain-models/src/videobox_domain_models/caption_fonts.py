@@ -85,6 +85,25 @@ CAPTION_FONTS: tuple[CaptionFont, ...] = (
     CaptionFont("Gowun Batang", "고운바탕", SERIF, "GowunBatang-Regular.ttf"),
     CaptionFont("Yeon Sung", "연성", DISPLAY, "YeonSung-Regular.ttf"),
     CaptionFont("Kirang Haerang", "기랑해랑", DISPLAY, "KirangHaerang-Regular.ttf"),
+    # **G마켓 산스**(owner 요청 2026-09-05). 앞선 판단에서 "근거가 부족해 안
+    # 넣는다"고 했는데, owner가 "라이선스 확인해서 넣어줘"라고 해서 다시 봤다.
+    # 배포 zip에는 라이선스 문서가 없지만 **폰트 파일 안(name table id 13)에
+    # OFL 1.1 전문이 들어 있고**, 그 전문이 "본 저작권 안내 및 라이선스 전문을
+    # 포함하여 다른 소프트웨어와 번들하거나 재배포 또는 판매는 가능합니다"라고
+    # 명시한다. 그 조건(전문 포함)은 licenses/GmarketSans-OFL.txt로 지킨다.
+    #
+    # 이름에 `TTF`가 붙은 것은 배포자가 그렇게 넣었기 때문이다 -- 파일 안 이름을
+    # 그대로 써야 ASS로 나갈 때 어긋나지 않는다. Medium 한 벌만 넣는다: 굵게는
+    # 자막 스타일의 `bold`가 따로 처리한다.
+    CaptionFont("Gmarket Sans TTF", "G마켓 산스", BODY, "GmarketSansTTFMedium.ttf"),
+    # 손글씨·제목 보강(owner: "다른 무료폰트 많이 쓰는거 몇개 더"). 갈래를 세어
+    # 보니 본문 아홉·명조 넷·제목 여섯인데 **손글씨만 셋**이라 거기부터 채웠다.
+    # 무작정 더 넣지 않은 이유는 용량이다 -- 스포카 한 산스는 굵기 하나가
+    # 13.4MB, 스타일리시는 10.9MB라 본문이 이미 아홉인 지금 값이 낮다.
+    CaptionFont("Poor Story", "서툰이야기", HANDWRITING, "PoorStory-Regular.ttf"),
+    CaptionFont("Single Day", "싱글데이", HANDWRITING, "SingleDay-Regular.ttf"),
+    CaptionFont("Dokdo", "독도", HANDWRITING, "Dokdo-Regular.ttf"),
+    CaptionFont("Cute Font", "귀여운 폰트", DISPLAY, "CuteFont-Regular.ttf"),
 )
 
 # 아무것도 안 골랐을 때 **첫째로 주고 싶은** 글꼴. 예전 기본값 `Arial`은 어디에도
