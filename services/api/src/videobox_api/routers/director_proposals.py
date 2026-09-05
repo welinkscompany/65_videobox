@@ -355,6 +355,13 @@ def build_director_proposals_router(
                     "asset_type": {"music": "bgm", "sfx": "sfx", "broll": "broll_video"}[media_type],
                     "label": _library_label(match),
                 })
+        # 유진에게 실제로 몇 개가 갔는지 남긴다. 이게 없어서 "영상 추천이 안
+        # 된다"의 원인을 세 겹이나 추측으로 좇았다(2026-09-05) -- 검색 함수,
+        # 구간 행, 그리고 세 번째. 종류별 개수 한 줄이면 다음엔 바로 보인다.
+        by_type: dict[str, int] = {}
+        for item in found:
+            by_type[str(item["asset_type"])] = by_type.get(str(item["asset_type"]), 0) + 1
+        _LOGGER.info("유진에게 보낸 자료실 후보: %s", by_type or "없음")
         return found
 
     @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals", status_code=status.HTTP_201_CREATED)

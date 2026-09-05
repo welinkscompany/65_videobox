@@ -235,3 +235,34 @@ def test_the_prompt_says_a_new_sound_can_go_on_an_empty_scene() -> None:
     prompt = str(runtime.request["prompt"])
     assert "빈 장면에도" in prompt
     assert "소리 정리에만" in prompt
+
+
+def test_the_catalogue_names_a_video_the_way_apply_media_wants_it() -> None:
+    """유진에게 영상 후보를 보내 주고도 못 골랐다 (2026-09-05, 마지막 겹).
+
+    자료실 영상 8개가 목록에 실린 것을 로그로 확인했는데도 유진은 "승인된 자산
+    목록에 없습니다"라고 답했다. 목록에 적힌 종류가 `broll_video`인데
+    `apply_media`가 받는 `media_type`은 `broll`이다 -- **다른 이름을 보여 주면
+    모델이 그대로 쓰고 스키마에서 막힌다.**
+
+    음악(bgm)과 효과음(sfx)은 저장 이름과 쓸 이름이 같아서 여태 드러나지 않았다.
+    """
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="도시 거리 걷는 영상 깔아줘",
+        context=YujinEditingContext(
+            session_id="session-1",
+            session_revision=3,
+            segment_ids=("scene-1",),
+            approved_asset_ids=("user_city_street",),
+            approved_asset_types=(("user_city_street", "broll_video"),),
+            approved_asset_labels=(("user_city_street", "도시 거리. 건물, 인도, 사람"),),
+        ),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "user_city_street(broll," in prompt
+    assert "broll_video" not in prompt

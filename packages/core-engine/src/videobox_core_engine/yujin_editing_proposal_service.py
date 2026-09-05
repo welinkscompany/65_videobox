@@ -113,7 +113,13 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
     entries = []
     for asset_id in context.approved_asset_ids[:_ASSET_CATALOGUE_LIMIT]:
         label = labels.get(asset_id, "").strip()
-        kind = asset_types.get(asset_id, "알 수 없음")
+        # **목록에 적는 종류는 `apply_media`의 `media_type`에 그대로 쓸 이름이어야
+        # 한다.** 음악(bgm)과 효과음(sfx)은 둘이 같아서 여태 드러나지 않았는데,
+        # 영상만 저장 이름이 `broll_video`고 써야 할 이름은 `broll`이다. 다른
+        # 이름을 보여 주면 모델이 그대로 쓰고 스키마에서 막힌다 -- 2026-09-05에
+        # 자료실 영상 후보 8개를 보내 주고도 유진이 "승인된 자산 목록에 없다"고
+        # 답한 마지막 겹이 이것이었다.
+        kind = {"broll_video": "broll"}.get(str(asset_types.get(asset_id, "")), asset_types.get(asset_id, "알 수 없음"))
         entries.append(f"{asset_id}({kind}, {label})" if label else f"{asset_id}({kind})")
     if not entries:
         return "승인된 자산이 없다 -- apply_media를 시도하지 마라."
