@@ -168,3 +168,44 @@ lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 �
 - **approved research candidate (30 music / 100 SFX): PASS.** 각 후보는 author page, creator, exact source file, CC0 license, official license evidence hash, commercial/raw redistribution/conversion 판단을 갖췄다. Direct asset URL 130개와 official asset page URL 36개를 2026-07-14 HTTPS HEAD 200으로 다시 확인했다.
 - **starter-v1 research gate (30 music / 100 SFX): GREEN.** 이것은 license/provenance research만 green이라는 뜻이다. 실제 source bytes, duration, codec, converted bytes와 manifest integrity는 아직 검증되지 않았다.
 - 다음 작업은 이 ledger의 approved asset만 대상으로 source download SHA-256 → transcode/probe → evidence text snapshot → manifest build 순서로 진행한다. 이 순서를 건너뛰어 build artifact를 배포하지 않는다.
+
+### 승인 확장 — 브이로그용 SFX (2026-09-05)
+
+**왜 넣나.** 효과음 100개가 전부 게임용이었다 -- 대포·총소리·박쥐날개·보물.
+대표님은 1인칭 내레이션 + B-roll 브이로그를 만든다. 유진에게 "팝 하고 터지는
+짧은 소리 넣어줘"라고 했더니 RPG 폭발음이 나왔는데, 유진 탓이 아니라 **재료가
+그것뿐**이어서였다. 브이로그가 실제로 쓰는 세 가지를 넣는다: 장면 전환음(휙),
+타이핑, 종이.
+
+**기존 것은 아직 빼지 않았다.** 게임 전용을 덜어내는 것은 지금 만들어 둔
+영상이 그 소리를 참조하고 있는지 확인한 뒤에 한다 -- 참조를 끊으면 되돌릴 수 없다.
+
+**묶음 주소 표기.** 이 세 출처는 개별 파일 주소가 없고 zip으로만 받는다.
+`...zip#묶음안/경로.wav`로 적으면 빌더가 그 파일 하나만 꺼내 쓴다. 보관하는
+원본·해시·증거는 전부 **꺼낸 파일**의 것이다.
+
+| asset_id | 제목 — 만든이 | 출처 페이지 · 증거 SHA-256 | 받는 주소 | CC0 | 원본 재배포 | 상업적 사용 | 표기 |
+|---|---|---|---|---|---|---|---|
+| `sfx-swish-1` | Swishes Sound Pack swish-1 — artisticdude | [page](https://opengameart.org/content/swishes-sound-pack) · `565b61c868a7e6baa08945ee502114fa788accf092bef48166bfba4da497e1d9` | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-1.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-2` | Swishes Sound Pack swish-2 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-2.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-3` | Swishes Sound Pack swish-3 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-3.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-4` | Swishes Sound Pack swish-4 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-4.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-5` | Swishes Sound Pack swish-5 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-5.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-6` | Swishes Sound Pack swish-6 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-6.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-7` | Swishes Sound Pack swish-7 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-7.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-8` | Swishes Sound Pack swish-8 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-8.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-9` | Swishes Sound Pack swish-9 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-9.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-10` | Swishes Sound Pack swish-10 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-10.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-11` | Swishes Sound Pack swish-11 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-11.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-12` | Swishes Sound Pack swish-12 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-12.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-13` | Swishes Sound Pack swish-13 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-13.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-typing-slow` | Keyboard Soundpack #1 generated-003_slow.wav — unicaegames | [page](https://opengameart.org/content/keyboard-soundpack-1-typing-and-single-keystrokes) · `58962c9b4dc194070114c4b86475ec2e68751dfcdc1ba6cdbe8a0c9c15511fa3` | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Generated Typing/generated-003_slow.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-typing-medium` | Keyboard Soundpack #1 generated-004_medium.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Generated Typing/generated-004_medium.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-typing-fast` | Keyboard Soundpack #1 generated-005_fast.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Generated Typing/generated-005_fast.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-keypress-1` | Keyboard Soundpack #1 keypress-001.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Single Keys/keypress-001.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-keypress-2` | Keyboard Soundpack #1 keypress-005.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Single Keys/keypress-005.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-keypress-3` | Keyboard Soundpack #1 keypress-010.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Single Keys/keypress-010.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-paper-1` | Various Paper Sound Effects paper_sound_-_1.mp3 — Luckius | [page](https://opengameart.org/content/various-paper-sound-effects) · `721d853b13a449b3cb31375682a9a37b3b65f0d11540af76903575654b7eb482` | [paper_sound_-_1.mp3](https://opengameart.org/sites/default/files/paper_sound_-_1.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+| `sfx-paper-2` | Various Paper Sound Effects paper_sound_-_2.mp3 — Luckius | same page/hash above | [paper_sound_-_2.mp3](https://opengameart.org/sites/default/files/paper_sound_-_2.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+| `sfx-paper-3` | Various Paper Sound Effects paper_sound_-_3.mp3 — Luckius | same page/hash above | [paper_sound_-_3.mp3](https://opengameart.org/sites/default/files/paper_sound_-_3.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+| `sfx-paper-ripped` | Various Paper Sound Effects paper_ripped_-_1.mp3 — Luckius | same page/hash above | [paper_ripped_-_1.mp3](https://opengameart.org/sites/default/files/paper_ripped_-_1.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |

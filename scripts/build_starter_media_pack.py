@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import argparse
+import zipfile
 import hashlib
 import json
 from pathlib import Path
@@ -41,7 +42,15 @@ _SELECTION_TIMESTAMP = "2026-07-14T01:13:16+09:00"
 # 팩 크기 상한(500MiB)에 1.8MB 걸려서 `music-since-2am`(9.8MB)을
 # `music-lofi-again`(2.3MB)으로 한 번 더 바꿨다 -- 상한을 올리지 않았다.
 # 앞 지문: 672dc23e794399edbd1fe2cb81d91eb9d30519eaf9d572b8c3a7a23e0e52d7a8
-_APPROVED_CANDIDATE_FINGERPRINT = "98ba6453c1cb7c4eff07934bfc571867b9af0ba6e186b09e84920f2af35da7b8"
+#
+# 2026-09-05 (두 번째): 브이로그용 효과음 23개를 **더했다**. 효과음 100개가
+# 전부 게임용이라(대포·총소리·박쥐날개) "팝 하고 터지는 소리"에 RPG 폭발음이
+# 나왔다 -- 유진 탓이 아니라 재료가 그것뿐이었다. 장면 전환음(휙) 13개,
+# 타이핑 3개, 키 한 번 3개, 종이 4개. 전부 CC0이고 출처 페이지에서 직접 확인했다.
+# **게임 전용을 빼지는 않았다** -- 지금 만들어 둔 영상이 그 소리를 참조하고
+# 있는지 확인한 뒤에 한다. 그래서 100 → 123이지 교체가 아니다.
+# 앞 지문: 98ba6453c1cb7c4eff07934bfc571867b9af0ba6e186b09e84920f2af35da7b8
+_APPROVED_CANDIDATE_FINGERPRINT = "521c5bf0a5bda4ec3cfb7117ec8395692fe2225d5da6c01e63c74c861d1433ba"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,7 +82,12 @@ def load_approved_candidates(ledger_path: Path) -> list[ApprovedCandidate]:
     for line in text.splitlines():
         if line.startswith("## 승인 후보 — music") or line.startswith("### 승인 확장 — FMA") or line.startswith("### 승인 확장 — OpenGameArt individual music"):
             media_type = "music"
-        elif line.startswith("## 승인 후보 — SFX") or line.startswith("### 승인 확장 — OpenGameArt individual SFX") or line.startswith("### 승인 확장 — RPG"):
+        elif (
+            line.startswith("## 승인 후보 — SFX")
+            or line.startswith("### 승인 확장 — OpenGameArt individual SFX")
+            or line.startswith("### 승인 확장 — RPG")
+            or line.startswith("### 승인 확장 — 브이로그용 SFX")
+        ):
             media_type = "sfx"
         if not line.startswith("| `"):
             continue
@@ -146,12 +160,12 @@ def _various_sound_effects(text: str) -> list[ApprovedCandidate]:
 
 
 def _validate_candidate_set(candidates: list[ApprovedCandidate]) -> None:
-    if len(candidates) != 130:
-        raise ValueError(f"approved release set must contain 130 candidates, got {len(candidates)}")
+    if len(candidates) != 153:
+        raise ValueError(f"approved release set must contain 153 candidates, got {len(candidates)}")
     if sum(candidate.media_type == "music" for candidate in candidates) != 30:
         raise ValueError("approved release set must contain 30 music candidates")
-    if sum(candidate.media_type == "sfx" for candidate in candidates) != 100:
-        raise ValueError("approved release set must contain 100 SFX candidates")
+    if sum(candidate.media_type == "sfx" for candidate in candidates) != 123:
+        raise ValueError("approved release set must contain 123 SFX candidates")
     if len({candidate.asset_id for candidate in candidates}) != len(candidates):
         raise ValueError("approved release set contains duplicate asset IDs")
     if any(not candidate.source_url.startswith("https://") or not candidate.official_url.startswith("https://") for candidate in candidates):
@@ -185,10 +199,34 @@ def build_asset(
     ffprobe_binary: str = "ffprobe",
 ) -> dict[str, object]:
     """Download, transcode, probe and evidence one approved candidate."""
-    source_suffix = Path(urlparse(candidate.source_url).path).suffix or ".source"
-    source_path = Path(source_root) / f"{candidate.asset_id}{source_suffix}"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    download(candidate.source_url, source_path)
+    # **묶음으로만 받을 수 있는 소리가 있다**(2026-09-05). 브이로그에 필요한
+    # 전환음·타이핑·종이 소리는 OpenGameArt에 zip 하나로만 올라와 있다. 주소
+    # 뒤에 `#`로 묶음 안 경로를 적으면 그 파일 하나만 꺼내 쓴다 -- 그렇게 하지
+    # 않으면 ffmpeg가 zip을 소리로 읽으려다 실패한다.
+    #
+    # 꺼낸 뒤로는 개별 파일과 완전히 같은 길을 간다: 보관하는 원본도, 해시도,
+    # 증거도 **꺼낸 파일**의 것이다. 묶음 주소는 증거에 그대로 남아 어느 묶음의
+    # 어느 파일이었는지 되짚을 수 있다.
+    parsed = urlparse(candidate.source_url)
+    archive_member = parsed.fragment or None
+    download_url = candidate.source_url.split("#", 1)[0]
+    source_root_path = Path(source_root)
+    source_root_path.mkdir(parents=True, exist_ok=True)
+    if archive_member:
+        archive_path = source_root_path / Path(urlparse(download_url).path).name
+        # 같은 묶음을 쓰는 자산이 여럿이다. 이미 받았으면 다시 받지 않는다.
+        if not archive_path.is_file() or not archive_path.stat().st_size:
+            download(download_url, archive_path)
+        if not archive_path.is_file() or not archive_path.stat().st_size:
+            raise ValueError(f"download produced no source bytes: {candidate.asset_id}")
+        source_suffix = Path(archive_member).suffix or ".source"
+        source_path = source_root_path / f"{candidate.asset_id}{source_suffix}"
+        with zipfile.ZipFile(archive_path) as bundle:
+            source_path.write_bytes(bundle.read(archive_member))
+    else:
+        source_suffix = Path(parsed.path).suffix or ".source"
+        source_path = source_root_path / f"{candidate.asset_id}{source_suffix}"
+        download(candidate.source_url, source_path)
     if not source_path.is_file() or not source_path.stat().st_size:
         raise ValueError(f"download produced no source bytes: {candidate.asset_id}")
     source_duration_seconds = _probe_duration(source_path, ffprobe_binary=ffprobe_binary)

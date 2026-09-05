@@ -20,11 +20,14 @@ def test_research_ledger_loads_the_exact_approved_release_candidate_set() -> Non
 
     candidates = load_approved_candidates(ledger)
 
-    assert len(candidates) == 130
+    # 2026-09-05: 브이로그용 효과음 23개를 더했다(100 → 123). 게임 전용을
+    # 빼지는 않았다 -- 만들어 둔 영상이 참조하고 있는지 확인한 뒤에 한다.
+    assert len(candidates) == 153
     assert sum(candidate.media_type == "music" for candidate in candidates) == 30
-    assert sum(candidate.media_type == "sfx" for candidate in candidates) == 100
+    assert sum(candidate.media_type == "sfx" for candidate in candidates) == 123
     assert {candidate.asset_id for candidate in candidates} >= {
         "music-mindstream", "music-peaceful-drift", "sfx-power-up-v1", "sfx-various-bangs", "sfx-sea-ship-destroyed",
+        "sfx-swish-1", "sfx-typing-medium", "sfx-keypress-1", "sfx-paper-ripped",
     }
     assert all(candidate.source_url.startswith("https://") for candidate in candidates)
     assert all(candidate.official_url.startswith("https://") for candidate in candidates)
@@ -186,3 +189,55 @@ def test_downloader_identifies_the_release_builder_to_hosts_that_block_default_u
     builder._download("https://files.freemusicarchive.org/track.mp3", tmp_path / "track.mp3")
 
     assert received[0].get_header("User-agent").startswith("VideoBox/")
+
+
+def test_build_asset_takes_one_file_out_of_an_approved_zip(tmp_path: Path) -> None:
+    """묶음으로만 받을 수 있는 소리가 있다 (2026-09-05).
+
+    브이로그에 필요한 전환음·타이핑·종이 소리는 OpenGameArt에 **zip 하나로만**
+    올라와 있다. 지금까지 승인 목록은 전부 개별 파일 주소여서 zip을 받으면
+    ffmpeg가 zip을 소리로 읽으려다 실패한다.
+
+    주소 뒤에 `#`로 묶음 안 경로를 적으면 그 파일 하나만 꺼내 쓴다. 나머지
+    (증거·해시·변환)는 개별 파일과 똑같이 남는다 -- 출처를 덜 남기지 않는다.
+    """
+    import zipfile
+
+    from build_starter_media_pack import ApprovedCandidate, build_asset
+
+    member = tmp_path / "swish-1.wav"
+    with wave.open(str(member), "wb") as stream:
+        stream.setnchannels(1)
+        stream.setsampwidth(2)
+        stream.setframerate(44100)
+        stream.writeframes(b"\0\0" * 22050)
+    archive = tmp_path / "swishes.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.write(member, "swishes/swish-1.wav")
+        bundle.writestr("swishes/readme.txt", "not a sound")
+
+    candidate = ApprovedCandidate(
+        asset_id="sfx-swish-1",
+        media_type="sfx",
+        title="Swish 1",
+        creator="artisticdude",
+        official_url="https://opengameart.org/content/swishes-sound-pack",
+        selection_evidence_sha256="b" * 64,
+        source_url="https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-1.wav",
+    )
+
+    asset = build_asset(
+        candidate,
+        output_root=tmp_path / "pack",
+        source_root=tmp_path / "sources",
+        download=lambda _url, destination: destination.write_bytes(archive.read_bytes()),
+    )
+
+    output = tmp_path / "pack" / asset["pack_path"]
+    assert output.suffix == ".wav"
+    assert asset["duration_seconds"] == 0.5
+    evidence = (tmp_path / "pack" / "evidence" / "sfx-swish-1.txt").read_text(encoding="utf-8")
+    # 묶음 안 어느 파일이었는지까지 남는다.
+    assert "swishes.zip#swishes/swish-1.wav" in evidence
+    # 보관하는 원본은 **꺼낸 파일**이지 묶음 전체가 아니다.
+    assert (tmp_path / "pack" / "source-archive" / "sfx-swish-1.wav").read_bytes() == member.read_bytes()
