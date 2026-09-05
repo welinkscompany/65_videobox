@@ -277,6 +277,15 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "
         "둘 다 화면이 깔린 장면에만 걸 수 있다. 소리 크기 맞추기·잡음 줄이기는 set_sound_cleanup이며 "
         "그 장면에 깔린 음악(bgm)이나 효과음(sfx)을 media_type으로 지목해야 한다. "
+        # **켜고 끄는 칸을 하나도 안 실으면 거절된다**(2026-09-06 실측:
+        # "음악 소리 크기 좀 맞춰줘"가 `invalid_editing_response`였다). JSON
+        # 스키마는 required에 못 적는 조건이라 -- 둘 중 하나만 있으면 되므로 --
+        # 말로 못박는다. 안 적으면 모델이 둘 다 빼고 보내고, 창작자에게는
+        # "안 됐어요"만 남는다.
+        "이 셋(set_picture_cleanup, set_sound_cleanup, set_scene_transform)은 **바꿀 칸을 "
+        "적어도 하나 실어야 한다** -- set_picture_cleanup은 stabilize나 reduce_noise, "
+        "set_sound_cleanup은 normalize_loudness나 denoise, set_scene_transform은 "
+        "scale·offset·rotation 중 하나. 하나도 없으면 아무것도 안 바뀌므로 거절된다. "
         # **어느 장면에 걸 수 있는지 목록으로 준다.** 색감에서 세운 규칙이고,
         # 규칙만 글로 적고 목록을 빼먹으면 모델이 지어내거나 아예 포기한다 --
         # 2026-09-02 실측에서 소리 정리가 그렇게 거절됐다.

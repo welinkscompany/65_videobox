@@ -336,3 +336,26 @@ def test_the_prompt_says_which_intent_trims_a_scene() -> None:
     assert runtime.request is not None
     prompt = str(runtime.request["prompt"])
     assert "잘라줘" in prompt.split("set_segment_bounds")[1][:120]
+
+
+def test_the_prompt_says_cleanup_operations_need_at_least_one_switch() -> None:
+    """켜고 끄는 칸을 하나도 안 실으면 거절된다 (2026-09-06 실측).
+
+    "음악 소리 크기 좀 맞춰줘"가 `invalid_editing_response`로 막혔다.
+    `SetSoundCleanupOperation`은 `normalize_loudness`나 `denoise` 중 하나를
+    요구하는데, **JSON 스키마의 `required`로는 적을 수 없는 조건**이라(둘 중
+    하나만 있으면 된다) 모델이 둘 다 빼고 보냈다. 창작자에게는 "안 됐어요"만
+    남는다.
+    """
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="소리 크기 맞춰줘",
+        context=YujinEditingContext(session_id="s", session_revision=1, segment_ids=("scene-1",)),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "바꿀 칸을 적어도 하나 실어야 한다" in prompt
+    assert "normalize_loudness" in prompt
