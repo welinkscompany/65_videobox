@@ -32,7 +32,16 @@ _LINK = re.compile(r"\]\((https://[^)]+)\)")
 _ASSET_ID = re.compile(r"`([a-z0-9-]+)`")
 _VARIOUS = re.compile(r"`(sfx-various-[a-z0-9-]+)=([^`]+)`")
 _SELECTION_TIMESTAMP = "2026-07-14T01:13:16+09:00"
-_APPROVED_CANDIDATE_FINGERPRINT = "672dc23e794399edbd1fe2cb81d91eb9d30519eaf9d572b8c3a7a23e0e52d7a8"
+# 승인 목록이 몰래 바뀌는 것을 막는 지문이다. **바꿀 때는 반드시 이유를 남긴다.**
+#
+# 2026-09-05: owner 지시로 음악 12곡을 갈아 끼웠다("브이로그용 30곡 찾아서
+# 넣어줘. 게임음악은 다 삭제해"). 뺀 것은 8bit 타이틀·아케이드·초원 테마·
+# 포털처럼 명백한 게임 음악이고, 넣은 것은 같은 규칙(CC0 + raw 재배포 허용)의
+# lo-fi/chill이다. FMA HoliznaCC0 12곡은 원래부터 lo-fi라 그대로 뒀다.
+# 팩 크기 상한(500MiB)에 1.8MB 걸려서 `music-since-2am`(9.8MB)을
+# `music-lofi-again`(2.3MB)으로 한 번 더 바꿨다 -- 상한을 올리지 않았다.
+# 앞 지문: 672dc23e794399edbd1fe2cb81d91eb9d30519eaf9d572b8c3a7a23e0e52d7a8
+_APPROVED_CANDIDATE_FINGERPRINT = "98ba6453c1cb7c4eff07934bfc571867b9af0ba6e186b09e84920f2af35da7b8"
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,7 +334,10 @@ def build_pack(
     source_root: Path,
     download: Callable[[str, Path], None],
     pack_id: str = "starter-v1",
-    version: str = "1.0.0",
+    # **곡이 바뀌면 버전을 올린다.** 같은 버전에 다른 내용이 들어 있으면,
+    # 설치기는 `already_installed`로 건너뛰고 창작자 기계에는 옛 팩이 남는다.
+    # 1.1.0: 게임 음악 12곡을 브이로그용으로 갈아 끼웠다(owner 지시 2026-09-05).
+    version: str = "1.1.0",
     ffmpeg_binary: str = "ffmpeg",
     ffprobe_binary: str = "ffprobe",
 ) -> dict[str, object]:
@@ -373,6 +385,7 @@ def main() -> int:
     parser.add_argument("--ledger", type=Path, default=REPO_ROOT / "docs" / "starter-media-pack-license-research.ko.md")
     parser.add_argument("--output", type=Path, default=REPO_ROOT / "dist" / "starter-media-pack")
     parser.add_argument("--source-cache", type=Path, default=REPO_ROOT / "artifacts" / "starter-media-pack-sources")
+    parser.add_argument("--pack-version", default="1.1.0")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
     args = parser.parse_args()
@@ -382,6 +395,7 @@ def main() -> int:
         output_root=args.output,
         source_root=args.source_cache,
         download=_download,
+        version=args.pack_version,
         ffmpeg_binary=args.ffmpeg,
         ffprobe_binary=args.ffprobe,
     )

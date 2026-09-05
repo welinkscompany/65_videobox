@@ -31,7 +31,6 @@
 | `music-title-x` | Title-X — poinl | [page](https://opengameart.org/content/title-x) · `4359af8045e86b1f34dd8ec3903e61b0969fea138d3967055bdd837193ea52f2` | [gba1complete.mp3](https://opengameart.org/sites/default/files/gba1complete.mp3) | yes | yes | yes | not required; source requests notification only, not a license condition |
 | `music-dialogue` | Dialogue — Umplix | [page](https://opengameart.org/content/dialogue) · `b3eab221be2a3208fefc029b5e6755680f1f2e1ec2666a0b2c5c41771af474cc` | [dialogue.wav](https://opengameart.org/sites/default/files/dialogue.wav) | yes | yes | yes | not required; `Umplix` recommended |
 | `music-mysterious` | Mysterious — nene | [page](https://opengameart.org/content/mysterious) · `3f581ae0c62d2b4ab6ee6b7482e765aa7d50cd267ae12fc3c02c34ba9bcb999b` | [Mysterious.wav](https://opengameart.org/sites/default/files/Mysterious.wav) | yes | yes | yes | not required; `nene` recommended |
-| `music-arcade-background` | arcade background music — aqrezes | [page](https://opengameart.org/content/arcade-background-music) · `4f7d80f475815e03dfb3b3808b2c6d3a24e7be8b0d5e1780d998a6c63172a5a2` | [arcade song.wav](https://opengameart.org/sites/default/files/arcade%20song.wav) | yes | yes | yes | not required; source asks for a project link only |
 
 ### 승인 확장 — FMA HoliznaCC0 개별 tracks
 
@@ -60,17 +59,33 @@
 
 | candidate asset_id | title / creator | official page · evidence SHA-256 | direct source |
 | --- | --- | --- | --- |
-| `music-8bit-title-screen` | 8Bit Title Screen — Joth | [page](https://opengameart.org/content/8bit-title-screen) · `c8d435fe547111f59f77334a804b8f4c3035b71e58902f72f46ddb66a5520eda` | [MP3](https://opengameart.org/sites/default/files/8Bit%20Title%20Screen.mp3) |
-| `music-futuristic-resources` | Futuristic-Resources — section31 | [page](https://opengameart.org/content/futuristic-resources) · `ec72314790b7cfff3b8e109607780928b63d30e44a5d8f38ba0c4cc790891c25` | [OGG](https://opengameart.org/sites/default/files/S31-Futuristic-Resources.ogg) |
-| `music-grasslands-theme` | GrassLands Theme — DST | [page](https://opengameart.org/content/grasslands-theme) · `04008712810d46fa3526537aad0e0319e7f3e36f7b1769052a2c1fd6a479dd04` | [MP3](https://opengameart.org/sites/default/files/DST-GrassLands.mp3) |
-| `music-chase` | Chase — Adiutorium | [page](https://opengameart.org/content/chase-2) · `ee514f159e5f269598e4e7e0839ca046320ba4f9569e8b049867c84f0723cb15` | [MP3](https://opengameart.org/sites/default/files/chase.mp3) |
-| `music-intro` | Intro Music — RonyDkid | [page](https://opengameart.org/content/intro-music-0) · `e209659c60ed5e9769fdb6dc5050286ff9a1fad301f85fe7e6666db60d543639` | [MP3](https://opengameart.org/sites/default/files/game_1.mp3) |
-| `music-portal` | portal — oglsdl | [page](https://opengameart.org/content/portal) · `a561ad4f7d0ec3be07adb886105be94bd15ad292d2cd6e09c0bb4d62364a29cb` | [OGG](https://opengameart.org/sites/default/files/portal_1.ogg) |
-| `music-determination` | Determination — artisticdude | [page](https://opengameart.org/content/determination) · `9153f5076c1b7e48ffe75cc37c7d85dae20aa01de13c136eadb07f960049c750` | [MP3](https://opengameart.org/sites/default/files/determination.mp3) |
-| `music-005` | 005 — Some Weirdo | [page](https://opengameart.org/content/005) · `64b3d5273adbd72b4adaf8ae7e089fe3e3b232e78ece152ead024d5a957b7b11` | [OGG](https://opengameart.org/sites/default/files/005.ogg) |
-| `music-somnium` | Somnium — Adiutorium | [page](https://opengameart.org/content/somnium) · `b4401dc57bcea77cdabe6453fd5abde0c05555fc0c34b01cb0206a721dc3d0d5` | [MP3](https://opengameart.org/sites/default/files/somnium.mp3) |
-| `music-orien` | Orien — Tozan | [page](https://opengameart.org/content/orien) · `363004a16be218b2d2c44d218c97eaf0c518580536acde892db7875a9bd48dce` | [OGG](https://opengameart.org/sites/default/files/orien_2.ogg) |
-| `music-1-minute` | 1 minute. — thisismyusername | [page](https://opengameart.org/content/1-minute) · `390c926460d5fcf5a4479993d4f975cff58802fefdf8c03b8eaa6938ab661571` | [MP3](https://opengameart.org/sites/default/files/1%20minute.mp3) |
+
+### 승인 확장 — OpenGameArt individual music (브이로그용, 2026-09-05)
+
+owner 지시(2026-09-05): "브이로그용 30곡 찾아서 넣어줘. 게임음악은 다 삭제해."
+
+세어 보니 기존 30곡은 **전부 게임 음악이 아니었다** -- FMA HoliznaCC0의
+lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 등).
+그래서 명백한 게임 음악 12곡만 빼고(8bit 타이틀·아케이드·초원 테마·포털…)
+그 자리를 같은 규칙(CC0 + raw 재배포 허용)으로 채웠다.
+
+**곡을 듣고 고른 것이 아니다.** OpenGameArt에서 라이선스가 CC0로 명시된
+음악만 추린 뒤 제목·태그로 골랐다 -- owner가 들어 보고 빼라고 하면 뺀다.
+
+| candidate asset_id | title / creator | official asset page · evidence SHA-256 | source file | commercial | raw redistribute | convert/adapt | attribution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `music-chill-lofi` | Chill Lofi Inspired — omfgdude | [page](https://opengameart.org/content/chill-lofi-inspired) · `dc3f91195a90ad1d24e1a124ca9cdf1b4da8dee5d1672ae9f13b6624b608cd4f` | [source](https://opengameart.org/sites/default/files/ChillLofiR_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `omfgdude` recommended |
+| `music-lofi-compilation` | Lofi Compilation — TAD | [page](https://opengameart.org/content/lofi-compilation) · `1f51ab0e78a63755e8e6584eb95dd19e9c2cf28e902a4b44ac59157bf7a56afe` | [source](https://opengameart.org/sites/default/files/A%20cup%20of%20tea_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `TAD` recommended |
+| `music-apple-cider` | Apple Cider — Zane Little Music | [page](https://opengameart.org/content/apple-cider) · `e1b755fa6d289efbec699095aec4232f04d4944767dccc10e8219f6caaf7f97a` | [source](https://opengameart.org/sites/default/files/apple_cider.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Zane Little Music` recommended |
+| `music-napping-cloud` | Napping on a Cloud — congusbongus | [page](https://opengameart.org/content/napping-on-a-cloud) · `ddd656fe9b296049c88d1dcd6fa212b36f8a07f99535a1ed3ffd6a880a92b9b9` | [source](https://opengameart.org/sites/default/files/napping_on_a_cloud.ogg) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `congusbongus` recommended |
+| `music-calm-loop` | Calm Loop — wipics | [page](https://opengameart.org/content/calm-loop) · `2b1981397965f70b7b7d9a2e8b0eb2042d9aa430ac0bc24b7e0f905a72999ae7` | [source](https://opengameart.org/sites/default/files/Relaxing_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `wipics` recommended |
+| `music-chill-fever` | A Chill Fever — Pro Sensory | [page](https://opengameart.org/content/a-chill-fever-loopable) · `a81fa924820a4f7342e8e230bc2573ba2d3268155cbee66403046143dacc5b64` | [source](https://opengameart.org/sites/default/files/a_chill_fever_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Pro Sensory` recommended |
+| `music-mocha-frapp` | Mocha Frapp — Pro Sensory | [page](https://opengameart.org/content/mocha-frapp) · `7b63c3e43052d426014e3789615e67b4cd63d3bc60cf3217e444df349e032af4` | [source](https://opengameart.org/sites/default/files/mocha_frapp_2.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Pro Sensory` recommended |
+| `music-slow-stride` | Slow Stride — isaiah658 | [page](https://opengameart.org/content/slow-stride) · `7c8ac37890588e38f401e864ec5f40b4fa40517546c24067073fc87771cb4157` | [source](https://opengameart.org/sites/default/files/Slow%20Stride%20Loop.flac) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `isaiah658` recommended |
+| `music-calm-piano` | Calm Piano 1 — cynicmusic | [page](https://opengameart.org/content/calm-piano-1-vaporware) · `54274f92b2fca2a08aab7359c3ca4f79b05e93775b3f5cc4c0ca0268f0664fb0` | [source](https://opengameart.org/sites/default/files/003_Vaporware_2.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `cynicmusic` recommended |
+| `music-calm-ambient` | Calm Ambient 3 — cynicmusic | [page](https://opengameart.org/content/calm-ambient-3-lifewave-2k) · `600a222081b2619cf8736148867cd76bcb2956911234273c4843a1a3dd48fbfd` | [source](https://opengameart.org/sites/default/files/006_lifeWave2k_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `cynicmusic` recommended |
+| `music-lofi-again` | Lofi Again — omfgdude | [page](https://opengameart.org/content/lofi-again) · `c64df46aec7c3d11929f4e9626bb911d0d2a618d3cac7e95bf24466695f73c1b` | [source](https://opengameart.org/sites/default/files/lofiagain.ogg) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `omfgdude` recommended |
+| `music-ambient-relax` | Ambient Relaxing Loop — isaiah658 | [page](https://opengameart.org/content/ambient-relaxing-loop) · `e8ef7e6cab4ad976410fb12708b0f45ca0c269fd87cd9baa1a1f419ce31eb888` | [source](https://opengameart.org/sites/default/files/Ambient-Loop-isaiah658_0.ogg) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `isaiah658` recommended |
 
 ## 승인 후보 — SFX
 

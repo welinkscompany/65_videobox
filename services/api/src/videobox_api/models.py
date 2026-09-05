@@ -1089,6 +1089,17 @@ class SegmentBoundsRequest(BaseModel):
     end_sec: float = Field(gt=0, allow_inf_nan=False)
 
 
+class MediaPackInstallRequest(BaseModel):
+    """데이터 폴더 안의 팩 디렉터리 **이름**만 받는다.
+
+    경로를 그대로 받으면 컨테이너 어디든 읽어 들이는 문이 된다. 이름 하나만
+    받고, 그 이름이 한 조각인지(경로 구분자·상위 이동이 없는지)는 라우터가
+    다시 확인한다.
+    """
+
+    directory_name: str = Field(min_length=1, max_length=128)
+
+
 class RipplePlaybackRateRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     # 화면 `속도` 칸은 캡컷처럼 숫자칸이다(owner 지시 2026-09-04). 여기가

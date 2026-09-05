@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 from typing import Callable
 
@@ -12,13 +13,26 @@ from videobox_api.models import (
     LibraryAudioSearchRequest,
     LibraryFavoriteRequest,
     MaterializeLibraryAssetRequest,
+    MediaPackInstallRequest,
 )
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_core_engine.media_pack_release import ffprobe_media
+from videobox_core_engine.media_pack_service import MediaPackService
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 
 _LOGGER = logging.getLogger(__name__)
+
+def _probe_duration(path: Path) -> float:
+    """오디오 길이(초)만 잰다."""
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        check=True, capture_output=True, text=True,
+    )
+    return float(result.stdout.strip())
+
+
 
 # 장면 분석을 거는 자산 종류. 음악·효과음은 볼 장면이 없다.
 _SCENE_ANALYSED_ASSET_TYPES = frozenset({"broll_video", "raw_video"})
@@ -39,6 +53,57 @@ def build_media_library_router(
             return library_store.install_state()
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
+
+    @router.post("/api/media-library/install")
+    def install_media_pack(payload: MediaPackInstallRequest) -> dict[str, object]:
+        """데이터 폴더에 놓아 둔 미디어 팩을 설치한다.
+
+        **이 자리가 없어서 팩을 갱신할 방법이 아예 없었다**(2026-09-05, owner가
+        음악을 바꿔 달라고 해서 드러났다). 설치기는 처음부터 있었지만 부르는
+        곳이 어디에도 없었고, 최초 설치는 사람이 손으로 한 것이었다.
+
+        **API가 설치해야 하는 이유**: 자산 색인이 SQLite에 있고 그 파일은 이
+        프로세스가 열고 있다. 밖에서 손대면 `readonly database`로 막히고,
+        9p 마운트에서는 더 잘 난다.
+
+        같은 버전이 이미 건강하게 깔려 있으면 설치기가 `already_installed`로
+        답한다 -- **곡을 바꿨다면 버전을 올려야 한다.**
+        """
+        name = payload.directory_name.strip()
+        # 이름 한 조각만 받는다. 경로 구분자나 상위 이동이 섞이면 데이터 폴더
+        # 밖으로 나갈 수 있다.
+        if name in {"", ".", ".."} or "/" in name or "\\" in name or Path(name).name != name:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="pack_directory_invalid")
+        source = (library_store.root.parent / name).resolve()
+        try:
+            source.relative_to(library_store.root.parent.resolve())
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="pack_directory_invalid") from None
+        if not (source / "manifest.json").is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="pack_not_found")
+        service = MediaPackService(
+            user_library_root=library_store.root,
+            library_store=library_store,
+            # 길이는 `ffprobe_media`가 주지 않는다 -- 그건 코덱·비트레이트만 본다.
+            # 따로 재야 한다(`scripts/verify-starter-media-pack.py`와 같은 방식).
+            duration_probe=_probe_duration,
+            media_probe=ffprobe_media,
+        )
+        result = service.install(source)
+        if result.status == "failed":
+            # **이유를 로그에 남긴다.** 응답에는 코드만 나가는데(창작자에게 내부
+            # 메시지를 보이지 않는다), 그것만으로는 무엇이 틀렸는지 아무도 모른다.
+            _LOGGER.warning(
+                "media pack install failed: name=%s code=%s message=%s",
+                name, result.error_code, result.message,
+            )
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=result.error_code or "install_failed")
+        return {
+            "status": result.status,
+            "pack_id": result.pack_id,
+            "version": result.version,
+            "install_state": library_store.install_state(),
+        }
 
     @router.post("/api/media-library/search")
     def search_library_assets(payload: LibraryAudioSearchRequest, request: Request) -> dict[str, object]:
