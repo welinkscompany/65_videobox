@@ -296,8 +296,15 @@ def _build_music_library_hooks(
         if provider is None or not model_name:
             return []
         response = provider.embed(EmbeddingRequest(model_name=model_name, inputs=(query,)))
+        vector = [float(value) for value in response.vectors[0]]
+        # **촬영본은 오디오 색인에 없다.** `find_audio_matches`는 이름 그대로
+        # 음악·효과음 색인이라, 영상을 이 함수로 찾으면 늘 빈손이다 -- 유진에게
+        # 영상 후보를 주기 시작한 첫날 이것 때문에 여전히 음악을 골랐다
+        # (2026-09-05). 화면의 자료실 검색이 갈라 부르는 것과 같게 맞춘다.
+        if media_type == "broll":
+            return library_store.find_footage_matches(query_embedding=vector, limit=limit)
         return library_store.find_audio_matches(
-            query_embedding=[float(value) for value in response.vectors[0]],
+            query_embedding=vector,
             media_type=media_type,
             limit=limit,
         )

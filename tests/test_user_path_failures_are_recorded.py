@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -743,3 +744,47 @@ def test_a_nonsense_log_level_falls_back_instead_of_crashing_startup() -> None:
     finally:
         root.handlers[:] = original_handlers
         root.setLevel(original_level)
+
+
+def test_a_video_search_asks_the_footage_index_not_the_audio_one() -> None:
+    """영상을 오디오 색인에 물어보면 늘 빈손이다 (2026-09-05 실측).
+
+    유진에게 자료실 영상 후보를 주기 시작한 첫날, "도시 거리 걷는 영상 깔아줘"에
+    여전히 `music-lost-in-city`를 골랐다. 후보를 뽑는 자리는 고쳤는데 검색
+    갈고리가 `find_audio_matches`만 불렀다 -- **이름 그대로 음악·효과음
+    색인이라** 촬영본은 한 건도 안 나온다.
+
+    화면의 자료실 검색은 이미 둘을 갈라 부른다. 갈고리도 같게 맞춘다.
+    """
+    from videobox_api.main import _build_music_library_hooks
+
+    asked: list[str] = []
+
+    class _Store:
+        def find_audio_matches(self, **kwargs):
+            asked.append("audio")
+            return []
+
+        def find_footage_matches(self, **kwargs):
+            asked.append("footage")
+            return [{"library_asset_id": "user_1", "description": "도시 거리"}]
+
+    class _Provider:
+        def embed(self, _request):
+            return SimpleNamespace(vectors=[[0.1, 0.2]])
+
+    class _App:
+        class state:
+            media_analysis_embedding_provider = _Provider()
+            media_analysis_profile = {"embedding_model_name": "fixture-embed"}
+
+    search, _resolve = _build_music_library_hooks(
+        library_store=_Store(), project_store=object(), app=_App()
+    )
+
+    assert search("도시 거리 걷는 영상", 8, "broll")
+    assert asked == ["footage"]
+
+    asked.clear()
+    search("잔잔한 음악", 8, "music")
+    assert asked == ["audio"]
