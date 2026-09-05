@@ -32,7 +32,7 @@ _MEDIA_TYPE_WORDS = {"music": "음악", "sfx": "효과음"}
 # was current when they were made, so a format change has to send every asset
 # back through the indexer rather than leaving the library ranked against
 # sentences that no longer exist.
-DESCRIPTION_VERSION = 2
+DESCRIPTION_VERSION = 3
 
 # A fixed template differing by two words leaves every vector nearly parallel:
 # live search put a 보통/보통 track above a 강함/빠름 one for "신나고 빠른
@@ -53,6 +53,70 @@ _PACE_PHRASES = {
     "보통": "일정하게 이어지는 느낌",
     "빠름": "빠르게 몰아치고 활기찬 신나는 느낌",
 }
+# **재서 쓴 문장만으로는 효과음이 서로 구별되지 않는다**(실측 2026-09-05).
+# 세기·밝기·빠르기 세 칸(27가지)에 효과음 100개가 들어가니 폭발음과 버튼음이
+# 거의 같은 문장을 갖는다 -- "팝 하고 터지는 소리"를 찾았을 때 상위 넷의 점수가
+# 0.646086/0.646015/0.646015/0.646015로 사실상 같았고, 1등이 RPG 폭발음이었다.
+#
+# 정체는 이미 이름에 있다(`sfx-various-click`). 창작자는 "딸깍"이라고 찾으므로
+# 흔한 낱말은 한국어 뜻을 같이 적는다. 임베딩 모델이 다국어라(영어 질의가
+# 한국어 설명에 걸리는 것을 실측했다) 영어 낱말 자체도 그냥 두면 도움이 된다.
+_NAME_MEANINGS = {
+    "ambient": "은은하게 깔리는", "amber": "울리는", "bang": "쾅 하는", "bangs": "쾅 하는",
+    "baseballbat": "방망이 치는", "bat": "치는", "bee": "벌 날갯짓", "beep": "삐 소리",
+    "bell": "종소리", "bounce": "통통 튀는", "bouncing": "통통 튀는", "break": "부서지는",
+    "button": "단추 누르는", "calm": "차분한", "cancel": "취소 소리", "cannon": "대포",
+    "chill": "느긋한", "chills": "느긋한", "cider": "청량한", "city": "도시",
+    "classic": "클래식", "click": "딸깍", "cloud": "구름처럼 포근한", "coin": "동전",
+    "crush": "으스러지는", "death": "쓰러지는", "dialogue": "대화", "distant": "멀리서",
+    "door": "문 여닫는", "drift": "흘러가는", "dull": "둔탁한", "explosion": "폭발",
+    "fall": "떨어지는", "fire": "발사", "footstep": "발소리", "footsteps": "발소리",
+    "fox": "여우", "glug": "꿀꺽 마시는", "grass": "풀 스치는", "gunshot": "총소리",
+    "hit": "부딪히는", "hurt": "맞는", "ice": "얼음", "impact": "쿵 부딪히는",
+    "item": "아이템 얻는", "lofi": "로파이", "loop": "반복", "lost": "헤매는",
+    "menu": "메뉴", "message": "알림", "miss": "빗나가는", "moan": "신음",
+    "move": "이동", "movement": "움직임", "mysterious": "신비로운", "napping": "졸린",
+    "nom": "우물우물 먹는", "peaceful": "평온한", "piano": "피아노", "player": "인물",
+    "pop": "팝 하고 터지는", "power": "힘이 차는", "powered": "작동하는",
+    "punch": "주먹질", "relax": "편안한", "rock": "돌", "scooter": "스쿠터",
+    "sea": "바다", "select": "선택 소리", "ship": "배", "slip": "미끄러지는",
+    "slow": "느린", "small": "작은", "spear": "창", "splash": "물 튀는",
+    "splat": "철퍽", "splurt": "쏟아지는", "sproing": "튕기는", "steal": "훔치는",
+    "step": "발소리", "steps": "발소리", "stone": "돌", "stride": "성큼 걷는",
+    "success": "성공 알림", "swim": "헤엄치는", "swish": "휙 스치는",
+    "swoosh": "휙 스치는", "tap": "톡 두드리는", "teleport": "순간이동",
+    "throw": "던지는", "tick": "똑딱", "tom": "북 치는", "treasure": "보물",
+    "vibrophone": "비브라폰", "wall": "벽", "weeds": "풀숲", "whoosh": "휙 스치는",
+}
+
+# 이름 노릇을 못 하는 토막들. 접두사·번호·해시는 뜻이 없고, 넣으면 서로 다른
+# 자산을 다시 비슷하게 만든다 -- 고치려던 것과 같은 문제다.
+_NAME_NOISE = {"sfx", "music", "n", "v", "rpg", "various", "user", "pack", "starter", "x"}
+
+
+def _identity_phrase(asset_name: str | None) -> str:
+    """이름에서 소리의 정체를 뽑는다. 뜻이 없으면 빈 문자열."""
+    if not asset_name:
+        return ""
+    tokens: list[str] = []
+    for raw in str(asset_name).replace("_", "-").replace(" ", "-").lower().split("-"):
+        token = raw.rstrip("0123456789")
+        if len(token) < 2 or token in _NAME_NOISE:
+            continue
+        # 내용 해시처럼 보이면 이름이 아니다.
+        if len(token) > 12 and all(ch in "0123456789abcdef" for ch in token):
+            continue
+        if token not in tokens:
+            tokens.append(token)
+    if not tokens:
+        return ""
+    meanings = [_NAME_MEANINGS[token] for token in tokens if token in _NAME_MEANINGS]
+    english = " ".join(tokens)
+    if meanings:
+        return f" 소리의 정체: {' '.join(dict.fromkeys(meanings))} ({english})."
+    return f" 소리의 정체: {english}."
+
+
 _logger = logging.getLogger(__name__)
 _LENGTH_PHRASES = (
     (2.0, "아주 짧게 한 번 스치는"),
@@ -78,7 +142,7 @@ class LibraryAudioIndexReport:
 
 def build_asset_description(
     *, media_type: str, words: dict[str, str], duration_seconds: float,
-    user_metadata: dict[str, Any] | None = None,
+    user_metadata: dict[str, Any] | None = None, asset_name: str | None = None,
 ) -> str:
     """Write the sentence that gets embedded and searched.
 
@@ -97,6 +161,7 @@ def build_asset_description(
         f"{_BRIGHTNESS_PHRASES[words['밝기']]}, "
         f"{_PACE_PHRASES[words['빠르기']]}."
     )
+    text += _identity_phrase(asset_name)
     metadata = user_metadata or {}
     tags = metadata.get("tags") if isinstance(metadata, dict) else None
     if isinstance(tags, list):
@@ -137,12 +202,11 @@ def index_pending_library_audio(
         getter = getattr(store, "get_audio_descriptor", None)
         if callable(getter):
             existing = getter(library_asset_id=library_asset_id)
-        reusable = bool(
-            existing
-            and str(existing.get("sha256")) == str(asset.get("sha256"))
-            and int(existing.get("description_version", 0)) >= DESCRIPTION_VERSION
-        )
-        if reusable:
+        # **재는 일과 쓰는 일을 따로 판단한다.** 둘을 묶어 두면 문구를 한 줄
+        # 고칠 때마다 자산 130개를 ffmpeg로 다시 재게 된다 -- 파일이 그대로면
+        # 측정값도 그대로다. 판이 올라갔을 때 다시 해야 하는 것은 문장뿐이다.
+        same_file = bool(existing and str(existing.get("sha256")) == str(asset.get("sha256")))
+        if same_file:
             measurements = {
                 "duration_seconds": float(existing["duration_seconds"]),
                 "loudness_rms": float(existing["loudness_rms"]),
@@ -150,7 +214,6 @@ def index_pending_library_audio(
                 "onset_rate_per_second": float(existing["onset_rate_per_second"]),
             }
             words = dict(existing["words"])
-            description = str(existing["description"])
         else:
             try:
                 descriptor = describe(path)
@@ -164,11 +227,15 @@ def index_pending_library_audio(
                 "onset_rate_per_second": descriptor.onset_rate_per_second,
             }
             words = describe_in_creator_language(descriptor)
+        if same_file and int(existing.get("description_version", 0)) >= DESCRIPTION_VERSION:
+            description = str(existing["description"])
+        else:
             description = build_asset_description(
                 media_type=str(asset["media_type"]),
                 words=words,
-                duration_seconds=descriptor.duration_seconds,
+                duration_seconds=float(measurements["duration_seconds"]),
                 user_metadata=dict(asset.get("user_metadata") or {}),
+                asset_name=str(asset.get("asset_id") or ""),
             )
         embedding = _embed(
             description,

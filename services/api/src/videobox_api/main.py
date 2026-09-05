@@ -256,8 +256,13 @@ HERMES_EVENT_PRUNE_INTERVAL_SECONDS = 3600.0
 # searchable without them running anything. A bounded pass keeps a first
 # install of 130 files -- or a big drop of new ones -- from turning startup
 # into a long analysis run; what is left is picked up next minute.
+#
+# 8개/분은 **문구를 고쳤을 때** 너무 느렸다. 자산 130개를 다시 쓰는 데 17분이
+# 걸리고, 그동안 검색은 옛 문장과 새 문장이 섞인 채로 돈다. 색인기가 측정과
+# 문장을 따로 판단하게 바뀌어(파일이 그대로면 ffmpeg를 다시 돌리지 않는다)
+# 판 올림 재색인은 임베딩 한 번씩으로 싸졌다 -- 그 값에 맞춰 넓힌다.
 LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS = 60.0
-LIBRARY_AUDIO_INDEX_BATCH = 8
+LIBRARY_AUDIO_INDEX_BATCH = 32
 
 # 낡은 분석을 한꺼번에 다 걸면 로컬 모델이 동시에 받고 전부 타임아웃한다.
 REANALYSIS_BATCH = 1
