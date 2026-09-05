@@ -32,7 +32,7 @@ _MEDIA_TYPE_WORDS = {"music": "음악", "sfx": "효과음"}
 # was current when they were made, so a format change has to send every asset
 # back through the indexer rather than leaving the library ranked against
 # sentences that no longer exist.
-DESCRIPTION_VERSION = 3
+DESCRIPTION_VERSION = 4
 
 # A fixed template differing by two words leaves every vector nearly parallel:
 # live search put a 보통/보통 track above a 강함/빠름 one for "신나고 빠른
@@ -87,6 +87,12 @@ _NAME_MEANINGS = {
     "swoosh": "휙 스치는", "tap": "톡 두드리는", "teleport": "순간이동",
     "throw": "던지는", "tick": "똑딱", "tom": "북 치는", "treasure": "보물",
     "vibrophone": "비브라폰", "wall": "벽", "weeds": "풀숲", "whoosh": "휙 스치는",
+    # 2026-09-05에 들어온 브이로그용 소리들. **낱말을 같이 넣지 않으면 새로
+    # 넣은 보람이 없다** -- "타자 치는 소리"로 찾았더니 `keypress` 설명이
+    # 영어뿐이라 걸리지 않고, 한국어 "타자"가 야구 타자로 읽혀 야구방망이가
+    # 1등으로 나왔다.
+    "typing": "타자 치는 타이핑 키보드", "keypress": "키 하나 누르는 타자 키보드",
+    "paper": "종이", "ripped": "찢는", "medium": "보통", "fast": "빠른",
 }
 
 # 이름 노릇을 못 하는 토막들. 접두사·번호·해시는 뜻이 없고, 넣으면 서로 다른
