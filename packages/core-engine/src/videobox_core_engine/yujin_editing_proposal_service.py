@@ -312,6 +312,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         # **어느 장면에 걸 수 있는지 목록으로 준다.** 색감에서 세운 규칙이고,
         # 규칙만 글로 적고 목록을 빼먹으면 모델이 지어내거나 아예 포기한다 --
         # 2026-09-02 실측에서 소리 정리가 그렇게 거절됐다.
+        f"지금 전환이 걸린 장면: {', '.join(f'{sid}({kind})' for sid, kind in context.transitions_by_segment) or '없음'}. "
         f"음악이 깔린 장면: {', '.join(context.segment_ids_with_bgm) or '없음'}. "
         f"효과음이 깔린 장면: {', '.join(context.segment_ids_with_sfx) or '없음'}. "
         # **이 두 줄은 소리 정리에만 쓰는 목록이다.** 그 말을 안 적었더니 모델이

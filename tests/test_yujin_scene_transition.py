@@ -121,3 +121,38 @@ def test_the_prompt_lists_the_transitions_it_may_choose() -> None:
     for key in TRANSITION_CATALOG:
         assert key in listed
     assert "넘어올 때" in listed
+
+
+def test_the_prompt_says_which_transitions_are_already_on() -> None:
+    """지금 걸린 전환을 안 알려 주면 유진이 없다고 답한다 (2026-09-06 실측).
+
+    2번 장면에 `fade`가 걸린 상태에서 "방금 넣은 전환 되돌려줘"라고 했더니
+    **"현재 장면 1번과 2번에 전환이 적용되어 있지 않습니다"**라고 답했다.
+    음악·효과음·화면은 이미 목록을 주고 있었는데 전환만 빠져 있었다 --
+    배선하면서 함께 넣지 않은 빈틈이다.
+    """
+    from videobox_core_engine.yujin_editing_proposal_service import YujinEditingProposalService
+
+    captured: dict[str, object] = {}
+
+    class _Runtime:
+        def generate_structured(self, **kwargs):
+            captured["prompt"] = str(kwargs.get("prompt") or "")
+            from videobox_provider_interfaces.llm import StructuredLLMResponse
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "네.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    YujinEditingProposalService(runtime=_Runtime()).create(
+        project_id="p",
+        instruction="방금 넣은 전환 되돌려줘",
+        context=YujinEditingContext(
+            session_id="s", session_revision=3, segment_ids=("seg-1", "seg-2"),
+            transitions_by_segment=(("seg-2", "fade"),),
+        ),
+    )
+
+    prompt = str(captured["prompt"])
+    assert "지금 전환이 걸린 장면: seg-2(fade)" in prompt

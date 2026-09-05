@@ -459,6 +459,14 @@ def build_director_proposals_router(
                 if isinstance(item, dict) and isinstance(item.get("sfx_override"), dict)
                 and str(item["sfx_override"].get("asset_id") or "").strip()
             ),
+            # 지금 걸린 전환. 안 주면 유진이 "전환이 적용되어 있지 않습니다"라고
+            # 답한다 -- 걸려 있는데도(2026-09-06 실측).
+            transitions_by_segment=tuple(
+                (str(item["segment_id"]), str(item["transition_in"].get("type") or ""))
+                for item in session.get("segments", [])
+                if isinstance(item, dict) and isinstance(item.get("transition_in"), dict)
+                and str(item["transition_in"].get("type") or "").strip()
+            ),
             segment_ids_with_broll=tuple(
                 str(item["segment_id"])
                 for item in session.get("segments", [])
