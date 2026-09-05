@@ -59,6 +59,20 @@ describe("자동 캡션", () => {
     expect(await screen.findByText(/받아쓰지 못했어요/)).toBeVisible();
   });
 
+  /** **번역 자막을 보고 있으면 화면이 안 바뀐다**(2026-09-05 코드리뷰가 잡았다).
+   *  받아쓴 말은 **원문**에 들어간다. 창작자가 영어 자막을 보고 있으면 원문이
+   *  바뀌어도 화면에는 영어가 그대로라 "눌렀는데 아무 일도 안 일어났다"가 된다.
+   *  막지는 않는다 -- 원문을 고치는 것은 맞는 동작이다. 대신 **먼저 말한다.** */
+  it("번역을 보고 있으면 원문이 바뀐다는 것을 먼저 말한다", async () => {
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([
+      { asset_id: "asset-1", asset_type: "narration_audio" },
+    ] as never);
+
+    render(<AutoCaptionCard {...props} captionLanguage="en" />);
+
+    expect(await screen.findByText(/원문에 들어가요/)).toBeVisible();
+  });
+
   it("덮어쓴다는 것을 누르기 전에 말한다", async () => {
     vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([
       { asset_id: "asset-1", asset_type: "narration_audio" },
