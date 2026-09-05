@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, type CaptionStyleSnapshot, type FormatTemplate } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { NativeSelect } from "../../../components/ui/native-select";
 
 /** 마음에 들었던 완성본의 포맷을 이 편집본에 입힌다.
  *
@@ -17,6 +18,7 @@ import { Button } from "../../../components/ui/button";
 export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSnapshot) => void }) {
   const [templates, setTemplates] = useState<readonly FormatTemplate[]>([]);
   const [ready, setReady] = useState(false);
+  const [chosenId, setChosenId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,6 +30,9 @@ export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSn
     return () => { active = false; };
   }, []);
 
+  // 드롭다운이 고른 포맷. 안 고르면 첫째다.
+  const chosen = templates.find((template) => template.template_id === chosenId) ?? templates[0] ?? null;
+
   if (!ready) return null;
   return (
     <section className="vb-saved-formats" aria-labelledby="saved-formats-heading">
@@ -37,23 +42,31 @@ export function SavedFormatPicker({ onApply }: { onApply: (style: CaptionStyleSn
         <p>적용하면 캡션 모양만 바뀌어요. 화면 크기와 음악은 그대로예요.</p>
       ) : null}
       {message ? <p role="status">{message}</p> : null}
-      {templates.length ? templates.map((template) => (
-        <article key={template.template_id} aria-label={`${template.name} 포맷`}>
-          <strong>{template.name}</strong>
-          {/* 무엇이 걸려 있는지 미리 말해 준다. 눌러 보고 알게 하지 않는다. */}
-          <span>
-            {template.width && template.height ? `${template.width}×${template.height} · ` : ""}
-            {template.scene_count ? `장면 ${template.scene_count}개` : "장면 정보 없음"}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onApply((template.caption_style ?? {}) as CaptionStyleSnapshot)}
+      {/* **드롭다운 하나**(owner 지시 2026-09-05). 포맷마다 적용 단추가 하나씩
+          붙어서 저장할수록 늘어났다 -- 글꼴·캡션 모양과 같은 구조다. 무엇이
+          걸려 있는지는 **고른 것에 대해** 아래 한 줄로 그대로 말한다. */}
+      {templates.length ? <>
+        <div className="vb-saved-formats__field">
+          <NativeSelect
+            aria-label="저장한 포맷"
+            onChange={(event) => setChosenId(event.target.value)}
+            value={chosen?.template_id ?? ""}
           >
-            {`${template.name} 캡션 모양 적용`}
-          </Button>
-        </article>
-      )) : <p>아직 저장한 포맷이 없어요. 마음에 든 완성본에서 저장해 보세요.</p>}
+            {templates.map((template) => (
+              <option key={template.template_id} value={template.template_id}>{template.name}</option>
+            ))}
+          </NativeSelect>
+        </div>
+        {chosen ? <p>
+          {chosen.width && chosen.height ? `${chosen.width}×${chosen.height} · ` : ""}
+          {chosen.scene_count ? `장면 ${chosen.scene_count}개` : "장면 정보 없음"}
+        </p> : null}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onApply((chosen?.caption_style ?? {}) as CaptionStyleSnapshot)}
+        >고른 포맷의 캡션 모양 적용</Button>
+      </> : <p>아직 저장한 포맷이 없어요. 마음에 든 완성본에서 저장해 보세요.</p>}
     </section>
   );
 }

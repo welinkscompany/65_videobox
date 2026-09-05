@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, type CaptionStyleSnapshot, type EditorPreset } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { NativeSelect } from "../../../components/ui/native-select";
 import { orderByFavouriteThenRecent } from "../../../lib/pickerOrder";
 
 /** 저장된 모양을 화면 값으로 옮긴다.
@@ -82,6 +83,8 @@ export function CaptionPresetPicker({
   const [recents, setRecents] = useState<readonly string[]>([]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 드롭다운이 고른 모양. 안 고르면 목록 맨 위(즐겨찾기 → 최근 순서의 첫째)다.
+  const [chosenId, setChosenId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -155,33 +158,46 @@ export function CaptionPresetPicker({
     recents,
   );
 
+  // 드롭다운이 고른 것. 아직 안 고르면 목록 맨 위(즐겨찾기 → 최근 순서의 첫째)다.
+  const chosen = visible.find((preset) => preset.preset_id === chosenId) ?? visible[0] ?? null;
+
   if (!ready) return null;
   return (
     <section className="vb-caption-presets" aria-labelledby="caption-presets-heading">
       <h3 id="caption-presets-heading">캡션 모양</h3>
       {error ? <p role="status">{error}</p> : null}
       {currentStyle ? <Button type="button" variant="outline" onClick={() => void keepCurrent()}>이 모양 저장해 두기</Button> : null}
-      {visible.length ? visible.map((preset) => {
-        const loved = favourites.includes(preset.preset_id);
-        return (
-          <article key={preset.preset_id} aria-label={`${preset.name} 캡션 모양`}>
-            <strong>{preset.name}</strong>
-            {!loved && recents.includes(preset.preset_id) ? <span>최근에 썼어요</span> : null}
-            <Button type="button" variant="outline" onClick={() => void apply(preset)}>
-              {`${preset.name} 적용`}
-            </Button>
-            {canFavourite(preset.preset_id, projectId) ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void toggle(preset.preset_id, !loved)}
-              >
-                {loved ? `${preset.name} 즐겨찾기 해제` : `${preset.name} 즐겨찾기`}
-              </Button>
-            ) : null}
-          </article>
-        );
-      }) : <p>아직 저장된 캡션 모양이 없어요.</p>}
+      {/* **드롭다운 하나**(owner 지시 2026-09-05: "캡션 모양이랑 저장한 포맷도
+          재서 똑같이 정리해"). 모양마다 `적용`·`즐겨찾기` 단추가 둘씩 붙어
+          있어서 모양을 저장할수록 2N+1로 늘어났다 -- 글꼴에서 15개가 30단추가
+          됐던 것과 같은 구조다. 순서는 `orderByFavouriteThenRecent`가 그대로 정한다. */}
+      {visible.length ? <>
+        <div className="vb-caption-presets__field">
+          <NativeSelect
+            aria-label="캡션 모양"
+            onChange={(event) => setChosenId(event.target.value)}
+            value={chosenId ?? visible[0].preset_id}
+          >
+            {visible.map((preset) => (
+              <option key={preset.preset_id} value={preset.preset_id}>{preset.name}</option>
+            ))}
+          </NativeSelect>
+        </div>
+        {chosen && !favourites.includes(chosen.preset_id) && recents.includes(chosen.preset_id)
+          ? <p>최근에 썼어요</p> : null}
+        <Button type="button" variant="outline" onClick={() => { if (chosen) void apply(chosen); }}>고른 모양 적용</Button>
+        {/* 즐겨찾기는 **고른 모양 하나**에만 붙인다 -- 목록이 접히면서 모양마다
+            두던 단추는 갈 자리가 없어졌다. */}
+        {chosen && canFavourite(chosen.preset_id, projectId) ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void toggle(chosen.preset_id, !favourites.includes(chosen.preset_id))}
+          >
+            {favourites.includes(chosen.preset_id) ? `${chosen.name} 즐겨찾기 해제` : `${chosen.name} 즐겨찾기`}
+          </Button>
+        ) : null}
+      </> : <p>아직 저장된 캡션 모양이 없어요.</p>}
     </section>
   );
 }

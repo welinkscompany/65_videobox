@@ -73,6 +73,18 @@ CAPTION_FONTS: tuple[CaptionFont, ...] = (
     CaptionFont("Nanum Pen", "나눔손글씨 펜", HANDWRITING, "NanumPenScript-Regular.ttf"),
     CaptionFont("Nanum Brush Script", "나눔손글씨 붓", HANDWRITING, "NanumBrushScript-Regular.ttf"),
     CaptionFont("Gaegu", "개구쟁이", HANDWRITING, "Gaegu-Regular.ttf"),
+    # 2026-09-05에 더한 여섯. owner: "글꼴도 더 무료 글꼴 추가해줘. 나눔 폰트,
+    # 지마켓 산스 등등 많잖아." 나눔 셋(고딕·스퀘어·명조)은 이미 위에 있고
+    # apt 꾸러미가 넣는다. **지마켓 산스는 안 넣었다** -- 상업 이용은 되지만
+    # 재배포·임베딩 조항이 배포처에 명시돼 있지 않고 zip으로만 받게 되어 있어,
+    # 이 폴더의 규칙(파일별 sha256 + 라이선스 전문)에 맞출 근거가 부족했다.
+    # 여기 여섯은 기존 열둘과 **같은 출처·같은 커밋**(google/fonts, OFL-1.1)이다.
+    CaptionFont("Gowun Dodum", "고운돋움", BODY, "GowunDodum-Regular.ttf"),
+    CaptionFont("Sunflower", "해바라기", BODY, "Sunflower-Medium.ttf"),
+    CaptionFont("Hahmlet", "함렛", SERIF, "Hahmlet-Variable.ttf"),
+    CaptionFont("Gowun Batang", "고운바탕", SERIF, "GowunBatang-Regular.ttf"),
+    CaptionFont("Yeon Sung", "연성", DISPLAY, "YeonSung-Regular.ttf"),
+    CaptionFont("Kirang Haerang", "기랑해랑", DISPLAY, "KirangHaerang-Regular.ttf"),
 )
 
 # 아무것도 안 골랐을 때 **첫째로 주고 싶은** 글꼴. 예전 기본값 `Arial`은 어디에도

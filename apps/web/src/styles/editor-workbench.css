@@ -508,21 +508,24 @@
    승인된 팔레트 밖의 값을 여기서 새로 만들지 않는다. */
 .vb-inspector__presets { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); margin-top: calc(var(--vb-space-1) * -1); }
 
-/* 글꼴 목록이 스타일 없이 그대로 펼쳐져 있어 항목 하나당 세 줄(이름·고르기·
-   즐겨찾기)씩 쌓이고, 실측 1,350px까지 늘어나 오른쪽 패널 전체 스크롤의
-   절반 넘게를 차지했다. `__history`와 같은 방식(14rem 안에 가두고 자체
-   스크롤)으로 묶고, 항목을 한 줄로 눕힌다. 색·팔레트는 건드리지 않는다. */
-.vb-caption-fonts ul {
-  display: flex;
-  flex-direction: column;
-  gap: var(--vb-space-1);
-  max-height: 14rem;
-  overflow-y: auto;
-  padding: var(--vb-space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--vb-radius-sm);
-}
-.vb-caption-fonts li { display: flex; align-items: center; flex-wrap: wrap; gap: var(--vb-space-1); }
+/* 글꼴·캡션 모양·저장한 포맷은 **같은 무늬**다: 제목 → 드롭다운 → (설명) →
+   단추. 2026-09-05에 셋 다 목록에서 드롭다운으로 바뀌었다(owner 지시).
+
+   `display:grid`로 두는 이유: 기본 `block`이면 `h3`·`p`의 바깥 여백이 그대로
+   쌓여, 내용이 줄었는데도 자리는 오히려 커진다 -- 저장한 포맷을 드롭다운으로
+   바꾼 직후 98px에서 194px로 늘어난 것을 실기에서 보고 잡았다. */
+.vb-caption-fonts,
+.vb-caption-presets,
+.vb-saved-formats { display: grid; gap: var(--vb-space-1); align-content: start; }
+.vb-caption-fonts > h3,
+.vb-caption-presets > h3,
+.vb-saved-formats > h3,
+.vb-caption-fonts > p,
+.vb-caption-presets > p,
+.vb-saved-formats > p { margin: 0; }
+.vb-caption-fonts > p,
+.vb-caption-presets > p,
+.vb-saved-formats > p { color: var(--vb-muted); font-size: var(--vb-text-sm); }
 
 /* 세부 정보 패널의 캡컷식 탭줄(owner 지시 2026-09-02). 왼쪽 자료 도크의
    탭줄(`.vb-editor-assets__tabs`)과 **같은 모양으로 맞춘다** -- 한 화면 안에서
