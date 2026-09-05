@@ -89,3 +89,74 @@ def test_applying_the_font_changes_the_whole_project_not_one_scene() -> None:
 
     assert applied["caption_style"]["font_family"] == family
     assert applied["caption_style"]["font_size_px"] == 41
+
+
+def _size_response(size_px: int) -> dict[str, object]:
+    """**글꼴 이름 없이 크기만** 싣는다 -- "더 큰 걸로"가 딱 이 모양이다."""
+    return {
+        "schema_version": "videobox.yujin-editing-response.v1",
+        "reply_text": "자막을 더 크게 만드는 편집안을 만들었어요.",
+        "proposal": {
+            "proposal_id": "candidate",
+            "base_session_revision": 3,
+            "operations": [{"intent": "set_caption_font", "size_px": size_px}],
+        },
+    }
+
+
+def test_yujin_can_change_only_the_size(tmp_path=None) -> None:
+    """자막 **크기**를 말로 못 바꿨다 (2026-09-06).
+
+    "자막 글꼴 좀 더 큰 걸로 바꿔줘"라고 하니 유진이 되물었다. 화면에는
+    `font_size_px`가 있는데 `set_caption_font`는 `family`만 받았기 때문이다 --
+    창작자가 당연히 할 말인데 말로는 되는 길이 없었다.
+    """
+    accepted = interpret_yujin_editing_request(_size_response(72), _context())
+
+    assert accepted.status == "candidate_only"
+    assert accepted.proposal is not None
+    operation = accepted.proposal.operations[0]
+    assert operation.size_px == 72
+    # **이름은 비운다.** 채우면 창작자가 맞춰 둔 글꼴이 조용히 바뀐다.
+    assert operation.family is None
+
+
+def test_changing_only_the_size_keeps_the_font_the_creator_chose() -> None:
+    session = build_editing_session(
+        project_id="project-1",
+        timeline={"timeline_id": "timeline-1", "tracks": []},
+        segments=[{"segment_id": "seg-1", "start_sec": 0.0, "end_sec": 5.0, "text": "첫 장면"}],
+    )
+    chosen = str(caption_font_catalog()[0]["family"])
+    session = update_caption_style(
+        session=session, style={"font_family": chosen, "font_size_px": 41},
+        scope="whole_project", segment_ids=[],
+    )
+    proposal = interpret_yujin_editing_request(_size_response(72), _context()).proposal
+    assert proposal is not None
+
+    applied = _apply_yujin_editing_operations(session=session, operations=tuple(proposal.operations))
+
+    assert applied["caption_style"]["font_size_px"] == 72
+    assert applied["caption_style"]["font_family"] == chosen
+
+
+def test_an_empty_font_change_is_refused() -> None:
+    """이름도 크기도 없으면 아무것도 안 바뀐다 -- 성공한 척하지 않는다."""
+    empty = {
+        "schema_version": "videobox.yujin-editing-response.v1",
+        "reply_text": "바꿨어요.",
+        "proposal": {
+            "proposal_id": "candidate",
+            "base_session_revision": 3,
+            "operations": [{"intent": "set_caption_font"}],
+        },
+    }
+
+    assert interpret_yujin_editing_request(empty, _context()).reason == "invalid_editing_response"
+
+
+def test_a_size_outside_the_screen_range_is_refused() -> None:
+    """화면이 받는 범위와 같아야 한다 -- 넓히면 렌더에서 터진다."""
+    assert interpret_yujin_editing_request(_size_response(400), _context()).reason == "invalid_editing_response"
+    assert interpret_yujin_editing_request(_size_response(4), _context()).reason == "invalid_editing_response"

@@ -9,6 +9,14 @@ from videobox_domain_models.caption_fonts import default_caption_font_family
 _RGBA = re.compile(r"^#[0-9A-Fa-f]{8}$")
 
 
+#: 자막 기본 글자 크기(px). 유진의 프롬프트가 "지금 기본은 몇인지"를 말해 줘야
+#: 창작자가 "더 크게"라고만 했을 때 어디서 올릴지 안다 -- 그 값을 두 곳에 박으면
+#: 한쪽만 고쳐진다(2026-09-06).
+DEFAULT_CAPTION_FONT_SIZE_PX = 54
+MIN_CAPTION_FONT_SIZE_PX = 12
+MAX_CAPTION_FONT_SIZE_PX = 160
+
+
 @dataclass(frozen=True, slots=True)
 class CaptionStyle:
     # 기본값은 **이 기계에 실제로 있는** 글꼴이어야 한다. 예전 기본값 `Arial`은
@@ -24,7 +32,7 @@ class CaptionStyle:
     # 답은 `lru_cache`에 남아 렌더마다 디스크를 다시 읽지 않는다. 고른 이름이
     # 들어오면 이 함수는 아예 불리지 않는다 -- 남이 고른 것은 고쳐 주지 않는다.
     font_family: str = field(default_factory=default_caption_font_family)
-    font_size_px: int = 54
+    font_size_px: int = DEFAULT_CAPTION_FONT_SIZE_PX
     text_color: str = "#FFFFFFFF"
     outline_color: str = "#000000FF"
     outline_width_px: int = 3
@@ -48,8 +56,10 @@ class CaptionStyle:
         for field_name in ("text_color", "outline_color", "background_color"):
             if not _RGBA.fullmatch(str(getattr(self, field_name))):
                 raise ValueError(f"{field_name} must use #RRGGBBAA.")
-        if not 12 <= self.font_size_px <= 160:
-            raise ValueError("font_size_px must be between 12 and 160.")
+        if not MIN_CAPTION_FONT_SIZE_PX <= self.font_size_px <= MAX_CAPTION_FONT_SIZE_PX:
+            raise ValueError(
+                f"font_size_px must be between {MIN_CAPTION_FONT_SIZE_PX} and {MAX_CAPTION_FONT_SIZE_PX}."
+            )
         if not 0 <= self.outline_width_px <= 12:
             raise ValueError("outline_width_px must be between 0 and 12.")
         # ASS Spacing은 음수를 허용하지만(글자를 좁힌다), 실측 없이 넓혀 두면

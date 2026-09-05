@@ -66,7 +66,20 @@ class SetCaptionFontOperation(_StrictFrozenModel):
     """
 
     intent: Literal["set_caption_font"]
-    family: str = Field(min_length=1, max_length=128)
+    #: 글꼴 이름. **크기만 바꿀 때는 비운다** -- "글꼴 더 큰 걸로"라고만 하면
+    #: 창작자는 지금 글꼴이 무엇인지 말하지 않았고, 여기에 아무 이름이나 채우면
+    #: 맞춰 둔 글꼴이 조용히 바뀐다.
+    family: str | None = Field(default=None, min_length=1, max_length=128)
+    #: 자막 글자 크기(px). 화면이 쓰는 것과 같은 범위다(`CaptionStyle`).
+    #: 2026-09-06까지는 이 칸이 없어서 "글꼴 좀 더 큰 걸로 바꿔줘"에 유진이
+    #: 되물을 수밖에 없었다 -- 화면에서는 되는 일이었다.
+    size_px: int | None = Field(default=None, ge=12, le=160)
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> "SetCaptionFontOperation":
+        if self.family is None and self.size_px is None:
+            raise ValueError("set_caption_font needs a family, a size_px, or both.")
+        return self
 
 
 class SetCaptionTextOperation(_SegmentOperation):

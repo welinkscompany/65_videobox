@@ -917,7 +917,13 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
             # 나머지가 조용히 기본값으로 돌아간다.
             current = working.get("caption_style")
             style = dict(current) if isinstance(current, dict) else {}
-            style["font_family"] = operation.family
+            # 말한 칸만 얹는다. "글꼴 더 큰 걸로"라고만 했는데 글꼴 이름까지
+            # 채우면 창작자가 맞춰 둔 글꼴이 조용히 바뀐다 -- 크기를 더하면서
+            # 생긴 자리다(2026-09-06).
+            if operation.family is not None:
+                style["font_family"] = operation.family
+            if operation.size_px is not None:
+                style["font_size_px"] = operation.size_px
             working = update_caption_style(
                 session=working, style=style, scope="whole_project", segment_ids=[],
             )

@@ -9,6 +9,11 @@ import re
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.filters import FILTER_CATALOG
 from videobox_domain_models.caption_fonts import caption_font_catalog
+from videobox_domain_models.caption_style import (
+    DEFAULT_CAPTION_FONT_SIZE_PX,
+    MAX_CAPTION_FONT_SIZE_PX,
+    MIN_CAPTION_FONT_SIZE_PX,
+)
 from videobox_core_engine.yujin_editing_proposal_adapter import (
     YujinEditingContext,
     YujinEditingResult,
@@ -25,7 +30,9 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "reorder_segments"}, "segment_ids": {"type": "array", "items": {"type": "string"}}}, "required": ["intent", "segment_ids"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_text"}, "segment_id": {"type": "string"}, "text": {"type": "string"}}, "required": ["intent", "segment_id", "text"]},
         # 글꼴은 **편집본 전체**에 걸리므로 segment_id를 받지 않는다.
-        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_font"}, "family": {"type": "string"}}, "required": ["intent", "family"]},
+        # 글꼴 이름과 크기는 **각각 따로** 실을 수 있다 -- "더 큰 걸로"라고만 하면
+        # 크기만 싣는다. 둘 다 안 실으면 검증이 막는다.
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_font"}, "family": {"type": "string"}, "size_px": {"type": "integer", "minimum": MIN_CAPTION_FONT_SIZE_PX, "maximum": MAX_CAPTION_FONT_SIZE_PX}}, "required": ["intent"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_look"}, "segment_id": {"type": "string"}, "look": {"enum": sorted(FILTER_CATALOG)}}, "required": ["intent", "segment_id", "look"]},
         # 켜고 끄는 것들. **말한 것만 실으라고** 하려고 required를 최소로 둔다 --
         # "흔들림만 잡아 줘"에 노이즈 값까지 채우게 하면 이미 켜 둔 것을 끈다.
@@ -96,7 +103,12 @@ def _caption_font_catalogue() -> str:
     names = ", ".join(f"{item['family']}({item['label']}, {item['group']})" for item in fonts)
     return (
         f"고를 수 있는 자막 글꼴: {names}. "
-        "글꼴은 편집본 전체에 걸린다 -- set_caption_font에는 장면 번호를 싣지 않는다."
+        "글꼴은 편집본 전체에 걸린다 -- set_caption_font에는 장면 번호를 싣지 않는다. "
+        # **크기만 바꾸는 길을 열어 둔다**(2026-09-06). 이 말이 없으면 "글꼴 좀 더
+        # 큰 걸로"에 유진이 되묻는다 -- 화면에서는 되는 일인데도.
+        f"글자 크기는 size_px로 바꾼다({MIN_CAPTION_FONT_SIZE_PX}~{MAX_CAPTION_FONT_SIZE_PX}, 지금 기본은 {DEFAULT_CAPTION_FONT_SIZE_PX}). "
+        "\"더 크게\"처럼 크기만 말하면 size_px만 싣고 family는 비운다 -- 이름을 채우면 "
+        "창작자가 맞춰 둔 글꼴이 조용히 바뀐다."
     )
 
 
