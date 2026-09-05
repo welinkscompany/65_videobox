@@ -319,9 +319,15 @@ def build_director_proposals_router(
         # 색인이 장소·시간·날씨를 한국어로 적어 두므로 고를 근거가 이미 있다.
         for media_type in ("music", "sfx", "broll"):
             matches: list[dict] = []
+            # **촬영본 색인은 자산이 아닌 행도 돌려준다.** 영상 한 편을 여러
+            # 구간으로 쪼갠 행에는 `library_asset_id`가 없어 아래에서 걸러진다.
+            # 여덟 개만 뽑으면 그 여덟이 전부 구간일 수 있고, 실제로 그랬다 --
+            # 검색을 고친 뒤에도 유진에게 가는 영상 후보가 0개였다(2026-09-05).
+            # 넉넉히 뽑아 자산인 것만 세고, 개수는 아래에서 다시 맞춘다.
+            wanted = _LIBRARY_SUGGESTION_LIMIT * 3 if media_type == "broll" else _LIBRARY_SUGGESTION_LIMIT
             if library_search is not None:
                 try:
-                    matches = list(library_search(instruction, _LIBRARY_SUGGESTION_LIMIT, media_type) or [])
+                    matches = list(library_search(instruction, wanted, media_type) or [])
                 except Exception:
                     _LOGGER.warning("자료실 의미검색이 막혔습니다. 이름만 보고 고르는 쪽으로 떨어집니다.", exc_info=True)
             if not matches:
@@ -334,10 +340,14 @@ def build_director_proposals_router(
                 # 뜻을 담고 있고, 고르는 쪽은 어차피 말을 이해하는 모델이다.
                 # 순위가 없으니 개수를 조금 넉넉히 준다.
                 matches = _library_assets_by_name(media_type)
+            taken = 0
             for match in matches or []:
                 library_asset_id = str(match.get("library_asset_id") or "")
                 if not library_asset_id:
                     continue
+                if taken >= _LIBRARY_SUGGESTION_LIMIT:
+                    break
+                taken += 1
                 found.append({
                     "asset_id": library_asset_id,
                     # 자료실은 `music`이라 부르고 편집본은 `bgm`이라 부른다.

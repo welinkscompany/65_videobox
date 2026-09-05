@@ -3734,3 +3734,58 @@ def test_yujin_can_pick_a_video_from_the_library_not_only_music(tmp_path) -> Non
     # 그 영상이 고를 수 있는 목록에 들어간다 -- 설명과 함께.
     assert "user_4d888ec18e7b400dbcd" in prompt
     assert "도시 거리" in prompt
+
+
+def test_video_candidates_skip_footage_segments_and_still_fill_up(tmp_path) -> None:
+    """촬영본 색인은 **자산이 아닌 행**도 돌려준다 (2026-09-05 실측).
+
+    영상 한 편을 여러 구간으로 쪼갠 행에는 `library_asset_id`가 없다. 여덟 개만
+    뽑으면 그 여덟이 전부 구간일 수 있고 -- 실제로 그랬다 -- 검색을 고친 뒤에도
+    유진에게 가는 영상 후보가 0개였다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        if media_type != "broll":
+            return []
+        # 앞의 여덟은 구간이라 쓸 수 없다. 그 뒤에 진짜 자산이 온다.
+        rows = [{"source_segment_id": f"seg-{i}", "library_asset_id": None, "description": "조각"} for i in range(8)]
+        rows += [{"library_asset_id": f"user_{i}", "description": f"도시 거리 {i}", "duration_seconds": 9.0} for i in range(3)]
+        return rows[:limit]
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="footage segments")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search,
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "도시 거리 걷는 영상 깔아줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    prompt = seen_prompts[-1]
+    # 구간 여덟에 밀리지 않고 진짜 자산이 후보에 들어간다.
+    assert "user_0" in prompt
+    assert "user_2" in prompt
