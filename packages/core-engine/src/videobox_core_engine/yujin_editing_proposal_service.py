@@ -244,6 +244,12 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         # 2026-09-02 실측에서 소리 정리가 그렇게 거절됐다.
         f"음악이 깔린 장면: {', '.join(context.segment_ids_with_bgm) or '없음'}. "
         f"효과음이 깔린 장면: {', '.join(context.segment_ids_with_sfx) or '없음'}. "
+        # **이 두 줄은 소리 정리에만 쓰는 목록이다.** 그 말을 안 적었더니 모델이
+        # 일반 규칙으로 읽었다 -- 2026-09-05 실측에서 빈 장면에 "휙 하는 효과음
+        # 넣어줘"라고 하면 "먼저 영상이나 배경음악이 깔려 있어야 한다"며 되물었다.
+        # 새 프로젝트의 장면은 대부분 비어 있으므로 사실상 효과음을 못 넣는다.
+        "위 두 줄은 **소리 정리에만** 쓰는 목록이다. 음악이나 효과음을 새로 까는 "
+        "apply_media는 **빈 장면에도 그냥 된다** -- 화면이나 다른 소리가 먼저 있을 필요가 없다. "
         "**창작자가 말한 칸만 싣는다** -- 안 물어본 칸을 채우면 이미 켜 둔 것을 끄게 된다. "
         f"proposal이 있을 때 출력 예시: {json.dumps(success_example, ensure_ascii=False)}. "
         f"proposal이 없을 때 출력 예시: {json.dumps(no_proposal_example, ensure_ascii=False)}. "

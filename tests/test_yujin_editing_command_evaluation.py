@@ -197,3 +197,41 @@ def test_local_command_evaluation_tells_the_runtime_the_exact_candidate_contract
     proposal_schema = schema["properties"]["proposal"]
     assert proposal_schema["properties"]["base_session_revision"]["const"] == 3
     assert proposal_schema["properties"]["operations"]["items"]["oneOf"]
+
+
+def test_the_prompt_says_a_new_sound_can_go_on_an_empty_scene() -> None:
+    """빈 장면에 효과음을 못 넣던 것 (2026-09-05 실측).
+
+    새 세션에서 "장면 바뀔 때 휙 하는 효과음 넣어줘"라고 하면 유진이 **먼저
+    영상이나 배경음악이 깔려 있어야 한다**며 되물었다. 그런 규칙은 검증기에
+    없다 -- 프롬프트가 소리 정리(`set_sound_cleanup`)용 목록 두 줄("음악이 깔린
+    장면: 없음", "효과음이 깔린 장면: 없음")을 보여 주는데, 무엇을 위한
+    목록인지 적지 않아 모델이 **일반 규칙으로 읽었다.**
+
+    새 프로젝트의 장면은 대부분 비어 있으므로 이 오해는 곧 "효과음을 아예 못
+    넣는다"가 된다.
+    """
+    runtime = _CapturingRuntime(_response(operation={
+        "intent": "apply_media", "segment_id": "scene-1", "media_type": "sfx", "asset_id": "approved-sfx-1",
+    }))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="휙 하는 효과음 넣어줘",
+        context=YujinEditingContext(
+            session_id="session-1",
+            session_revision=3,
+            segment_ids=("scene-1",),
+            approved_asset_ids=("approved-sfx-1",),
+            approved_asset_types=(("approved-sfx-1", "sfx"),),
+            # 아무것도 깔려 있지 않은 장면 -- 새 프로젝트의 보통 상태다.
+            segment_ids_with_bgm=(),
+            segment_ids_with_sfx=(),
+            segment_ids_with_broll=(),
+        ),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "빈 장면에도" in prompt
+    assert "소리 정리에만" in prompt
