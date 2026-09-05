@@ -2207,6 +2207,26 @@ describe("완성본 실패 이유", () => {
   /** 자막과 CapCut 초안도 같은 실패를 낸다. 완성본만 고치면 **같은 화면에서
    *  어떤 칸은 이유를 말하고 어떤 칸은 안 말한다** -- 창작자에게는 그게 더
    *  헷갈린다. 기본 문구만 각자 다르고 사유 표는 하나를 같이 쓴다. */
+  /** **카드 제목 옆 설명줄에는 아직 이유가 안 나왔다.** 완성본 카드만
+   *  `finalRenderFailureMessage`를 쓰고 자막·초안 카드는 고정 문구였다 --
+   *  창작자가 먼저 보는 것은 그 줄인데, 거기서는 여전히 "만들지 못했어요"만
+   *  말하고 있었다(2026-09-05 갭검증에서 잡았다).
+   *
+   *  자막 이유는 `SubtitleJob`이 아니라 **작업 기록**에 있다 -- 화면 상태의
+   *  `subtitleRecord`가 그것이다. */
+  it("카드 설명줄도 실패 이유를 말한다", async () => {
+    stubCanonicalSubtitleApi({
+      jobs: [
+        activeTimelineJob,
+        { job_id: "subtitle-failed", project_id: "project_a", job_type: "subtitle_render", status: "failed", input_ref: activeTimelineJob.job_id, output_ref: null, error_message: "stale_output_asset: editing session revision changed", started_at: null, finished_at: null },
+      ] as never,
+    });
+    vi.spyOn(api, "getSubtitle").mockResolvedValue(null as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText(/편집본이 그 사이에 바뀌었어요/)).toBeVisible();
+  });
   it("자막과 CapCut 초안도 같은 사유 표를 쓴다", () => {
     expect(subtitleFailureMessage("stale_output_asset: editing session revision changed")).toContain("편집본");
     expect(subtitleFailureMessage(null)).toBe("자막을 만들지 못했어요.");

@@ -80,12 +80,13 @@
 - `2026-08-29-capcut-full-structure-and-dark-theme.ko.md` — **현행 팔레트는
   다크다**(구현·검증 완료). **메뉴·배치를 캡컷과 끝까지 동일화**(5단계 계획
   완료로 범위 확정).
+- `2026-09-05-one-way-to-start.ko.md` — **시작하는 문은 `+ 새로 만들기` 하나다.**
+  2026-08-28의 지름길 둘을 거둔다 — 셋이 전부 편집기로 가고 있었다.
 - `2026-08-28-home-screen-reversal.ko.md` — **`/`는 이제 항상 `/projects`다**
-  (2026-08-19 결정을 뒤집음). 시작 지름길 둘도 이때 생겼다.
-- ~~`2026-08-27-editor-centered-shell-direction.ko.md`~~ / ~~`2026-08-21-capcut-shell-layout.ko.md`~~
-  — 구조 개편 원안, `2026-08-29`·`2026-08-30`이 전부 완료로 확정(역사 기록)
-- ~~`2026-08-21-editor-back-to-light.ko.md`~~ — `2026-08-29`가 되돌림(역사 기록)
-- ~~`2026-08-05-dashboard-white-orange-direction.ko.md`~~ — 팔레트는 `2026-08-29`로 대체, 구조(3분할 등)만 유효
+  (2026-08-19 결정을 뒤집음). 시작 지름길 둘은 **2026-09-05에 거뒀다**(위 문서).
+- 역사 기록(지금 판단 근거로 쓰지 마라): ~~`2026-08-27-editor-centered-shell`~~,
+  ~~`2026-08-21-capcut-shell-layout`~~, ~~`2026-08-21-editor-back-to-light`~~,
+  ~~`2026-08-05-dashboard-white-orange`~~ — 전부 `2026-08-29`·`2026-08-30`이 대체.
 - `2026-07-20-editor-workbench-visual-approval.ko.md` — 편집 작업판 5개 viewport
 
 ## 2.1 제품 범위 경계

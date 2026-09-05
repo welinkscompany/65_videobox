@@ -162,7 +162,7 @@ describe("AppRouter URL ownership", () => {
     expect(within(menu).getByRole("link", { name: "자료실" })).toBeInTheDocument();
 
     // 시작하는 길은 평소와 **같은 길**이다. 첫 사용자에게만 다른 문을 만들지 않는다.
-    expect(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "+ 새로 만들기" })).toBeInTheDocument();
 
     // 파일 경로를 손으로 적으라고 하지 않는다.
     expect(screen.queryByLabelText(/파일이 있는 곳/)).toBeNull();
@@ -1035,72 +1035,48 @@ describe("AppRouter URL ownership", () => {
     expect(split).not.toHaveBeenCalled();
   });
 
-  it("refreshes the catalog and jumps a newly created named project straight to its editor", async () => {
-    // 캡컷은 이름을 물어도 이야기(대본) 화면을 거치지 않고 바로 편집기로
-    // 들어간다 -- owner 재지시(2026-08-30)로 이 단추도 같은 길을 탄다.
-    const created = { project_id: "project_new", name: "New", status: "active", root_storage_uri: "local://new" };
-    const listProjects = vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
-    vi.spyOn(api, "createProject").mockResolvedValue(created);
-    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_new" } as never);
+  /** **시작하는 문을 하나로 합쳤다**(owner 승인 2026-09-05: "하나로 합치기").
+   *  2026-08-28에 지름길 둘을 더했는데, 재어 보니 **셋이 전부 같은 곳(편집기)으로
+   *  가고 있었다** -- 다른 점은 이름을 지금 쓰느냐 자동으로 붙느냐뿐이었다.
+   *  같은 데로 가는 문이 셋이면 "뭘 눌러야 하지"가 된다(owner 지적). 캡컷도
+   *  첫 화면의 만들기 단추는 하나다.
+   *
+   *  이름은 자동으로 붙이고 나중에 이름 바꾸기로 고친다 -- 그 기능은 이미 있다.
+   *  `내 목소리 등록·클론`은 없애는 게 아니다: 그 단추는 목소리 화면을 열지도
+   *  않았고(이름만 다른 프로젝트를 만들 뿐이었다), 진짜 목소리 등록은 편집기
+   *  왼쪽 `오디오` 탭 안에 이미 있다(`VoiceMaterialPanel`). */
+  it("첫 화면에서 새로 시작하는 문은 하나다", async () => {
+    vi.spyOn(api, "listProjects").mockResolvedValue([]);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
-    fireEvent.click(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" }));
-    fireEvent.change(await screen.findByLabelText("새 프로젝트 이름"), { target: { value: "New" } });
-    fireEvent.click(screen.getByRole("button", { name: "만들기" }));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_new/editor"));
-    expect(createSession).toHaveBeenCalledWith("project_new");
-    expect(router.state.location.search).toMatchObject({ session_id: "session_new" });
-    expect(listProjects).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole("button", { name: "+ 새로 만들기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "빈 편집판으로 바로 시작" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "내 목소리 등록·클론" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "빠르게 시작하기" })).toBeNull();
   });
 
-  it("lets the owner start a second project from a non-empty catalog", async () => {
-    const existing = { project_id: "project_a", name: "A", status: "active", root_storage_uri: "local://a" };
-    const created = { project_id: "project_second", name: "Second", status: "active", root_storage_uri: "local://second" };
-    const listProjects = vi.spyOn(api, "listProjects")
-      .mockResolvedValueOnce([existing])
-      .mockResolvedValueOnce([existing, created]);
+  it("이름을 묻지 않고 곧바로 편집기로 들어간다", async () => {
+    const created = { project_id: "project_one", name: "새 영상 09:30", status: "active", root_storage_uri: "local://one" };
+    vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
     const createProject = vi.spyOn(api, "createProject").mockResolvedValue(created);
-    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_second" } as never);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
-    render(<AppRouter router={router} />);
-
-    fireEvent.click(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" }));
-    fireEvent.change(screen.getByLabelText("새 프로젝트 이름"), { target: { value: "Second" } });
-    fireEvent.click(screen.getByRole("button", { name: "만들기" }));
-
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_second/editor"));
-    expect(createProject).toHaveBeenCalledWith({ name: "Second" });
-    expect(createSession).toHaveBeenCalledWith("project_second");
-    expect(listProjects).toHaveBeenCalledTimes(2);
-  });
-
-  it("says the project was created (not that creation failed) when only opening its editor fails", async () => {
-    // 2026-08-31 코드리뷰 발견: 프로젝트는 서버에 이미 만들어졌는데, 그 다음
-    // 단계(빈 편집 세션 생성)만 실패하면 "프로젝트를 만들지 못했습니다"라는
-    // 일반 문구가 떴다 -- 창작자는 목록에 안 보이는 채로 남은 프로젝트를
-    // 또 만들려고 했다. 이제는 목록을 새로고침하고 사실대로 말한다.
-    const created = { project_id: "project_orphan", name: "Orphan", status: "active", root_storage_uri: "local://orphan" };
-    const listProjects = vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
-    vi.spyOn(api, "createProject").mockResolvedValue(created);
-    vi.spyOn(api, "createBlankEditingSession").mockRejectedValue(new Error("session boom"));
+    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_one" } as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
-    fireEvent.click(await screen.findByRole("button", { name: "+ 새 프로젝트 만들기" }));
-    fireEvent.change(await screen.findByLabelText("새 프로젝트 이름"), { target: { value: "Orphan" } });
-    fireEvent.click(screen.getByRole("button", { name: "만들기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ 새로 만들기" }));
 
-    expect(await screen.findByText("프로젝트는 만들어졌지만 편집기를 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.")).toBeVisible();
-    expect(router.state.location.pathname).toBe("/projects");
-    await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("Orphan")).toBeInTheDocument();
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_one/editor"));
+    expect(router.state.location.search).toMatchObject({ session_id: "session_one" });
+    expect(createSession).toHaveBeenCalledWith("project_one");
+    // 이름은 자동이다 -- 무엇이든 붙되 비어 있지는 않다.
+    expect(createProject).toHaveBeenCalledTimes(1);
+    expect(String(createProject.mock.calls[0][0].name).trim().length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("새 프로젝트 이름")).toBeNull();
   });
 
-  // **2026-08-28, owner 결정: "어떤 방식으로 편집할지" 갈래를 첫 화면에 둔다.**
-  // 이름부터 물어야 하는 위 "+ 새 프로젝트 만들기"와 달리, 이 둘은 이름을
-  // 자동으로 붙이고 바로 목적지로 보낸다.
+  // 이름은 자동으로 붙고 나중에 이름 바꾸기로 고친다 -- 아래 둘이 그 길을 지킨다.
   it("creates a project and jumps straight to a blank editor from the projects catalog", async () => {
     const created = { project_id: "project_blank", name: "새 영상", status: "active", root_storage_uri: "local://blank" };
     vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
@@ -1109,7 +1085,7 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
-    fireEvent.click(await screen.findByRole("button", { name: "빈 편집판으로 바로 시작" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ 새로 만들기" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_blank/editor"));
     expect(createSession).toHaveBeenCalledWith("project_blank");
@@ -1125,46 +1101,9 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
 
     render(<AppRouter router={router} />);
-    fireEvent.click(await screen.findByRole("button", { name: "빈 편집판으로 바로 시작" }));
+    fireEvent.click(await screen.findByRole("button", { name: "+ 새로 만들기" }));
 
     expect(await screen.findByText("프로젝트는 만들어졌지만 편집판을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.")).toBeVisible();
-    expect(router.state.location.pathname).toBe("/projects");
-    await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(2));
-  });
-
-  // 독립 "미디어" 단계 화면이 편집기로 접히면서(2026-09-01) 이 지름길도
-  // `startBlankProject`와 같은 패턴(빈 세션을 만들어 곧바로 편집기로)으로
-  // 바뀌었다 -- 세션 없이 그 단계로만 보내면 편집기의 "아직 편집할 영상이
-  // 없어요" 화면에서 멈춘다(미디어 브라우저가 없다).
-  it("creates a project and opens its editor (media dock default) for voice registration/cloning", async () => {
-    const created = { project_id: "project_voice", name: "내 목소리", status: "active", root_storage_uri: "local://voice" };
-    vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
-    const createProject = vi.spyOn(api, "createProject").mockResolvedValue(created);
-    const createSession = vi.spyOn(api, "createBlankEditingSession").mockResolvedValue({ session_id: "session_voice" } as never);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
-
-    render(<AppRouter router={router} />);
-    fireEvent.click(await screen.findByRole("button", { name: "내 목소리 등록·클론" }));
-
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/project_voice/editor"));
-    expect(createProject).toHaveBeenCalled();
-    expect(createSession).toHaveBeenCalledWith("project_voice");
-    expect(router.state.location.search).toMatchObject({ session_id: "session_voice" });
-  });
-
-  it("says the voice project was created when only opening its editor fails", async () => {
-    // 위 blank-project 경로와 같은 문제(2026-08-31에 이미 겪었다) -- 세션
-    // 생성이 실패해도 프로젝트 자체는 이미 서버에 만들어졌다.
-    const created = { project_id: "project_voice_orphan", name: "내 목소리", status: "active", root_storage_uri: "local://voice-orphan" };
-    const listProjects = vi.spyOn(api, "listProjects").mockResolvedValueOnce([]).mockResolvedValueOnce([created]);
-    vi.spyOn(api, "createProject").mockResolvedValue(created);
-    vi.spyOn(api, "createBlankEditingSession").mockRejectedValue(new Error("session boom"));
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects"] }));
-
-    render(<AppRouter router={router} />);
-    fireEvent.click(await screen.findByRole("button", { name: "내 목소리 등록·클론" }));
-
-    expect(await screen.findByText("프로젝트는 만들어졌지만 등록 화면을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.")).toBeVisible();
     expect(router.state.location.pathname).toBe("/projects");
     await waitFor(() => expect(listProjects).toHaveBeenCalledTimes(2));
   });

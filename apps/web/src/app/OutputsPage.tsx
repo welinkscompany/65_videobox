@@ -1025,7 +1025,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         }} />
       ))}
       <Card>
-        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" || currentState?.subtitleRecord?.status === "failed" ? subtitleFailureMessage(currentState?.subtitleRecord?.error_message) : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {subtitleError ? <p>{subtitleFailureMessage(subtitleRejectedReason ?? currentState?.subtitleRecord?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
@@ -1093,7 +1093,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비되었어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? "CapCut 초안을 만들지 못했어요." : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비되었어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? capcutDraftFailureMessage(capcutDraft?.error_message) : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {capcutError ? <p>{capcutDraftFailureMessage(capcutRejectedReason ?? capcutDraft?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}

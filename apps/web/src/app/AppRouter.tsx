@@ -88,8 +88,8 @@ const indexRoute = createRoute({
   // 예전엔 마지막으로 열었던 프로젝트의 편집기로 조용히 건너뛰었다 -- 캡컷을
   // 근거로 owner가 직접 정한 것이었지만, 다시 보니 "시작하는 자리"가 아예
   // 없어서 owner 스스로도 답답해했다. `/projects`가 이제 그 자리다 -- 이어할
-  // 프로젝트 카드들과, 새로 시작하는 여러 갈래(이야기부터·빈 편집판으로
-  // 바로·목소리부터)를 한 화면에 같이 둔다. 마지막 프로젝트로 빠르게 가는
+  // 프로젝트 카드들과, 새로 시작하는 단추 하나(`+ 새로 만들기`,
+  // 2026-09-05에 셋을 합쳤다)를 한 화면에 둔다. 마지막 프로젝트로 빠르게 가는
   // 길은 없앤 게 아니라 위 띠의 `편집기로 돌아가기` 단추로 옮겨져 있다
   // (`RoutedProductShell`의 `onResumeEditor`, `/library`·`/footage`에서도 보인다).
   beforeLoad: () => { throw redirect({ to: "/projects" }); },
@@ -277,7 +277,6 @@ function ProjectsPage() {
   // 기둥은 곧 위 띠로 바뀌고, 띠는 고르는 것만 맡는다.
   const management = useProjectManagement();
   const [archiveOpen, setArchiveOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
   // **캡컷 홈에도 프로젝트 목록 위에 검색이 있다**(2026-08-22, `capcut-observed`
   // 기록 §1: "프로젝트 목록은 맨 아래. 오른쪽에 검색·보기전환·휴지통·프로젝트
   // 동기화"). 프로젝트가 쌓이면(owner는 지금도 16개) 스크롤로 찾아야 했다.
@@ -292,9 +291,6 @@ function ProjectsPage() {
   const filteredProjects = projectQuery.trim()
     ? projects.filter((project) => project.name.toLowerCase().includes(projectQuery.trim().toLowerCase()))
     : projects;
-  const [newProjectName, setNewProjectName] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
 
   // 보관·영구 삭제는 이제 보관함 패널 하나에서 일어난다. 활성 목록은
   // `router.invalidate()`(각 `*AndRefresh` 함수 안)가 이미 갱신하지만, 보관함
@@ -309,56 +305,12 @@ function ProjectsPage() {
     await archive.load();
   }
 
-  // 캡컷의 "+ 프로젝트 만들기"는 이름을 안 물어도 바로 편집기로 들어간다 --
-  // 이야기(대본) 화면을 거치지 않는다. owner가 이 자리를 그렇게 다시
-  // 지시해(2026-08-30) `startBlankProject`와 같은 길(빈 편집 세션 생성 +
-  // 편집기로 이동)로 바꾼다 -- 다른 점은 자동 이름 대신 여기서 입력받은
-  // 이름을 쓰는 것뿐이다. "이야기부터 정하기"는 이 단추의 몫이 아니게
-  // 됐다(2026-08-28 결정의 이 부분만 뒤집음, `startBlankProject`는 그대로).
-  async function goToNewProject(project: Project) {
-    const session = await api.createBlankEditingSession(project.project_id);
-    await router.options.context.catalog.refresh();
-    await router.invalidate();
-    await navigate({
-      to: "/projects/$projectId/$section",
-      params: { projectId: project.project_id, section: "editor" },
-      search: { session_id: session.session_id },
-    });
-  }
-
-  async function handleCreate(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!newProjectName.trim()) {
-      setCreateError("프로젝트 이름을 입력하세요.");
-      return;
-    }
-    setIsSubmitting(true);
-    setCreateError(null);
-    try {
-      const created = await api.createProject({ name: newProjectName.trim() });
-      try {
-        await goToNewProject(created);
-      } catch {
-        // 프로젝트 자체는 이미 서버에 만들어졌다 -- "만들지 못했다"고 하면
-        // 목록에 안 보이는 채로 남은 프로젝트를 창작자가 또 만들려고 한다.
-        // 목록만 새로고침해 orphan으로 남지 않게 하고, 사실대로 말한다.
-        await router.options.context.catalog.refresh();
-        await router.invalidate();
-        setCreateError("프로젝트는 만들어졌지만 편집기를 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.");
-      }
-    } catch {
-      setCreateError("프로젝트를 만들지 못했습니다.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  // **첫 화면이 "이어하기"와 이름부터 정하는 "새 프로젝트 만들기" 둘뿐이었다
-  // (owner 지적 2026-08-28): "어떤 방식으로 편집할지 결정을 해야 되잖아".**
-  // 대본부터 정하는 길은 위 `handleCreate`(-> 이야기 화면)가 이미 맡는다.
-  // 여기 둘은 그 옆에 나란히 두는 지름길이다 -- 이름을 먼저 안 물어도 되는
-  // 대신 자동으로 이름을 붙이고, 나중에 언제든 이름 바꾸기로 고칠 수 있다.
-  const [quickStartBusy, setQuickStartBusy] = useState<"blank" | "voice" | null>(null);
+  // **시작하는 길은 이 함수 하나다**(owner 승인 2026-09-05: "하나로 합치기").
+  // 캡컷의 "+ 프로젝트 만들기"도 이름을 안 물어보고 바로 편집기로 들어간다.
+  // 예전에는 이름을 묻는 길과 지름길 둘이 나란히 있었는데(2026-08-28),
+  // **셋이 전부 여기로 왔다** -- 다른 점은 이름을 지금 쓰느냐뿐이었다.
+  // 이름은 자동으로 붙이고 나중에 이름 바꾸기로 고친다.
+  const [quickStartBusy, setQuickStartBusy] = useState<"blank" | null>(null);
   const [quickStartError, setQuickStartError] = useState<string | null>(null);
   const autoProjectName = (label: string) =>
     `${label} ${new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}`;
@@ -385,40 +337,7 @@ function ProjectsPage() {
         setQuickStartError("프로젝트는 만들어졌지만 편집판을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.");
       }
     } catch {
-      setQuickStartError("빈 편집판을 열지 못했어요. 다시 시도해 주세요.");
-    } finally {
-      setQuickStartBusy(null);
-    }
-  }
-  // 목소리 등록·클론은 프로젝트 자산이라(§10.15) 프로젝트 없이는 못 한다 --
-  // 대신 눈에 안 띄게 하나 만들고 바로 편집기(미디어 도크가 기본값)로 보낸다.
-  // **독립 "미디어" 단계 화면이 없어지면서(2026-08-27 결정 §순서 2, 실행
-  // 2026-09-01) `startBlankProject`와 같은 패턴으로 바뀌었다** -- 세션 없이
-  // 그 단계로만 보내면 `CanonicalEditorEntry`의 "아직 편집할 영상이 없어요"
-  // 화면에서 멈춘다(미디어 브라우저가 없다). 빈 세션을 직접 만들어 바로
-  // 편집기 미디어 탭으로 들어간다.
-  async function startVoiceCloneProject() {
-    setQuickStartBusy("voice");
-    setQuickStartError(null);
-    try {
-      const created = await api.createProject({ name: autoProjectName("내 목소리") });
-      try {
-        const session = await api.createBlankEditingSession(created.project_id);
-        await router.options.context.catalog.refresh();
-        await router.invalidate();
-        await navigate({
-          to: "/projects/$projectId/$section",
-          params: { projectId: created.project_id, section: "editor" },
-          search: { session_id: session.session_id },
-        });
-      } catch {
-        // 위 두 함수와 같은 이유 -- 프로젝트는 이미 만들어졌다.
-        await router.options.context.catalog.refresh();
-        await router.invalidate();
-        setQuickStartError("프로젝트는 만들어졌지만 등록 화면을 열지 못했어요. 방금 만든 프로젝트에서 이어가 주세요.");
-      }
-    } catch {
-      setQuickStartError("프로젝트를 만들지 못했어요. 다시 시도해 주세요.");
+      setQuickStartError("편집판을 열지 못했어요. 다시 시도해 주세요.");
     } finally {
       setQuickStartBusy(null);
     }
@@ -438,58 +357,24 @@ function ProjectsPage() {
       <h1>프로젝트</h1>
       {/* 새 프로젝트 입력은 **목록 위**에 둔다. 예전에는 카드 6개를 지나 맨 아래로
           스크롤해야 나왔다. */}
-      {isCreating ? (
-        <form className="vb-catalog-form" onSubmit={(event) => void handleCreate(event)}>
-          <label className="grid gap-2 text-sm">
-            새 프로젝트 이름
-            <Input value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} autoFocus />
-          </label>
-          <div className="flex gap-2">
-            <Button disabled={isSubmitting} type="submit">{isSubmitting ? "만드는 중" : "만들기"}</Button>
-            <Button variant="outline" type="button" onClick={() => { setIsCreating(false); setNewProjectName(""); setCreateError(null); }}>취소</Button>
-          </div>
-          {createError ? <p className="text-sm text-destructive" role="alert">{createError}</p> : null}
-        </form>
-      ) : (
-        <div className="vb-catalog-quick-start">
-          <Button type="button" className="vb-catalog-create" onClick={() => setIsCreating(true)}>+ 새 프로젝트 만들기</Button>
-          {/* 캡컷 첫 화면의 진입 카드 자리(owner 캡처 2026-08-29, `2026-08-29-capcut-
-              full-structure-and-dark-theme.ko.md`). **VideoBox에 없는 기능(AI 이미지·
-              동영상 생성 등)의 자리는 흉내 내지 않는다** — 이름부터 안 물어도 되는
-              실제 지름길 둘만 카드로 놓는다(자동으로 이름을 붙이고 바로 해당 화면으로
-              보낸다 — 나중에 언제든 이름 바꾸기로 고칠 수 있다). */}
-          <div className="vb-catalog-entry-cards" role="group" aria-label="빠르게 시작하기">
-            <div className="vb-catalog-entry-card">
-              <Button
-                type="button"
-                variant="outline"
-                className="vb-catalog-entry-card__button"
-                disabled={quickStartBusy !== null}
-                aria-describedby="quick-start-blank-desc"
-                onClick={() => void startBlankProject()}
-              >
-                <Scissors aria-hidden="true" />
-                {quickStartBusy === "blank" ? "편집판을 여는 중" : "빈 편집판으로 바로 시작"}
-              </Button>
-              <p id="quick-start-blank-desc" className="vb-catalog-entry-card__desc">기획 없이 편집기부터 열어요</p>
-            </div>
-            <div className="vb-catalog-entry-card">
-              <Button
-                type="button"
-                variant="outline"
-                className="vb-catalog-entry-card__button"
-                disabled={quickStartBusy !== null}
-                aria-describedby="quick-start-voice-desc"
-                onClick={() => void startVoiceCloneProject()}
-              >
-                <Mic aria-hidden="true" />
-                {quickStartBusy === "voice" ? "준비하는 중" : "내 목소리 등록·클론"}
-              </Button>
-              <p id="quick-start-voice-desc" className="vb-catalog-entry-card__desc">녹음해서 내 목소리로 내레이션해요</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* **시작하는 문은 하나다**(owner 승인 2026-09-05: "하나로 합치기").
+          2026-08-28에 지름길 둘을 나란히 뒀었는데, 재어 보니 **셋이 전부 같은
+          곳(편집기)으로 가고 있었다** -- 다른 점은 이름을 지금 쓰느냐 자동으로
+          붙느냐뿐이었다. 같은 데로 가는 문이 셋이면 "뭘 눌러야 하지"가 된다
+          (owner 지적 2026-09-04). 캡컷도 첫 화면의 만들기 단추는 하나다.
+
+          이름을 안 묻는다 -- 자동으로 붙이고 나중에 이름 바꾸기로 고친다(이미 있다).
+          `내 목소리 등록·클론` 카드는 **자리를 없앤 것이지 기능을 없앤 게 아니다**:
+          그 단추는 목소리 화면을 열지도 않았고(이름만 다른 프로젝트를 만들 뿐이었다),
+          진짜 목소리 등록은 편집기 왼쪽 `오디오` 탭 안에 이미 있다. */}
+      <div className="vb-catalog-quick-start">
+        <Button
+          type="button"
+          className="vb-catalog-create"
+          disabled={quickStartBusy !== null}
+          onClick={() => void startBlankProject()}
+        >{quickStartBusy ? "편집판을 여는 중" : "+ 새로 만들기"}</Button>
+      </div>
       {quickStartError ? <p className="text-sm text-destructive" role="alert">{quickStartError}</p> : null}
       {/* 프로젝트가 하나도 없을 때 격자만 비워 두면 화면이 고장 난 것처럼 보인다.
           예전에는 이 경우 제품 껍데기 밖의 옛 화면으로 빠져나가 **파일 경로를 손으로
