@@ -1040,6 +1040,10 @@ def create_app(
         analysis_service = _UnavailableMediaAnalysisService(store)
         orchestrator.media_analysis_service = analysis_service
         orchestrator.media_analysis_dispatcher = None
+    # 시험이 분석 배차를 붙잡을 자리. `app.state.media_analysis_dispatcher`는
+    # 만들 때 한 번 복사한 값이라, 나중에 갈아 끼워도 실제로 부르는 쪽
+    # (`_schedule_scene_analysis`)은 여전히 orchestrator를 본다.
+    app.state.orchestrator = orchestrator
     app.state.local_runtime_config = resolved_local_runtime_config
     app.state.store = store
     app.state.asset_browser_preview_service = AssetBrowserPreviewService(
@@ -1279,8 +1283,22 @@ def create_app(
             return
         analysis = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
         dispatcher = getattr(orchestrator, "media_analysis_dispatcher", None)
-        if dispatcher is not None:
-            dispatcher(project_id=project_id, analysis_id=analysis["analysis_id"])
+        if dispatcher is None:
+            return
+        # **분석을 요청 안에서 돌리지 않는다**(2026-09-05 실측). 0.2MB짜리 8초
+        # 영상을 프로젝트에 넣는 데 4~6초가 걸렸는데, 그 대부분이 여기서 장면
+        # 분석이 끝나기를 기다리는 시간이었다 -- 이미 들어 있는 자산을 다시
+        # 넣으면 170ms다. 분석 결과(태그)는 유진의 추천에만 쓰이므로 몇 초 뒤에
+        # 붙어도 편집에는 지장이 없다. **거는 것은 위 `enqueue`에서 이미 끝났다.**
+        analysis_id = analysis["analysis_id"]
+
+        def _run() -> None:
+            try:
+                dispatcher(project_id=project_id, analysis_id=analysis_id)
+            except Exception:  # noqa: BLE001 - 뒤에서 도는 일이라 요청을 깨뜨리면 안 된다
+                _LOGGER.exception("장면 분석을 뒤에서 돌리다 실패했다: %s", analysis_id)
+
+        threading.Thread(target=_run, name=f"scene-analysis-{analysis_id}", daemon=True).start()
 
     app.include_router(build_media_library_router(store, resolved_media_library_store, schedule_scene_analysis=_schedule_scene_analysis))
     app.include_router(
