@@ -20,14 +20,22 @@ def test_research_ledger_loads_the_exact_approved_release_candidate_set() -> Non
 
     candidates = load_approved_candidates(ledger)
 
-    # 2026-09-05: 브이로그용 효과음 23개를 더했다(100 → 123). 게임 전용을
-    # 빼지는 않았다 -- 만들어 둔 영상이 참조하고 있는지 확인한 뒤에 한다.
-    assert len(candidates) == 153
+    # 2026-09-05: 브이로그용 효과음 23개를 더했다(100 → 123).
+    # 2026-09-06: 게임 전용 49개를 뺐다(123 → 74). 참조하는 프로젝트가 하나도
+    # 없는 것을 확인한 뒤에 뺐다.
+    assert len(candidates) == 104
     assert sum(candidate.media_type == "music" for candidate in candidates) == 30
-    assert sum(candidate.media_type == "sfx" for candidate in candidates) == 123
+    assert sum(candidate.media_type == "sfx" for candidate in candidates) == 74
     assert {candidate.asset_id for candidate in candidates} >= {
-        "music-mindstream", "music-peaceful-drift", "sfx-power-up-v1", "sfx-various-bangs", "sfx-sea-ship-destroyed",
+        "music-mindstream", "music-peaceful-drift", "sfx-power-up-v1", "sfx-various-bangs",
         "sfx-swish-1", "sfx-typing-medium", "sfx-keypress-1", "sfx-paper-ripped",
+        # 브이로그에도 쓰는 것들은 남는다.
+        "sfx-n4-bell1", "sfx-n4-success", "sfx-various-click", "sfx-various-pop",
+    }
+    # 게임 전용은 하나도 안 남는다.
+    assert not {candidate.asset_id for candidate in candidates} & {
+        "sfx-sea-ship-destroyed", "sfx-n4-gunshot", "sfx-rpg-baseballbat",
+        "sfx-various-batwings", "sfx-various-teleport",
     }
     assert all(candidate.source_url.startswith("https://") for candidate in candidates)
     assert all(candidate.official_url.startswith("https://") for candidate in candidates)

@@ -107,9 +107,6 @@ lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 �
 | `sfx-n4-button` | button.mp3 — n4 | same page/hash | [button_0.mp3](https://opengameart.org/sites/default/files/button_0.mp3) |
 | `sfx-n4-coin1` | coin1.mp3 — n4 | same page/hash | [coin1_0.mp3](https://opengameart.org/sites/default/files/coin1_0.mp3) |
 | `sfx-n4-coin2` | coin2.mp3 — n4 | same page/hash | [coin2_0.mp3](https://opengameart.org/sites/default/files/coin2_0.mp3) |
-| `sfx-n4-explosion` | explosion.mp3 — n4 | same page/hash | [explosion_0.mp3](https://opengameart.org/sites/default/files/explosion_0.mp3) |
-| `sfx-n4-explosion-distant` | explosion_distant.mp3 — n4 | same page/hash | [explosion_distant_0.mp3](https://opengameart.org/sites/default/files/explosion_distant_0.mp3) |
-| `sfx-n4-gunshot` | gunshot.mp3 — n4 | same page/hash | [gunshot_0.mp3](https://opengameart.org/sites/default/files/gunshot_0.mp3) |
 | `sfx-n4-splash1` | splash1.mp3 — n4 | same page/hash | [splash1_0.mp3](https://opengameart.org/sites/default/files/splash1_0.mp3) |
 | `sfx-n4-splash2` | splash2.mp3 — n4 | same page/hash | [splash2_0.mp3](https://opengameart.org/sites/default/files/splash2_0.mp3) |
 | `sfx-n4-success` | success.mp3 — n4 | same page/hash | [success_0.mp3](https://opengameart.org/sites/default/files/success_0.mp3) |
@@ -136,32 +133,15 @@ lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 �
 
 `Spring Spring`의 [official CC0 page](https://opengameart.org/content/various-sound-effects-0) raw HTML SHA-256은 `925a53041ff971e46ad4b5e8ac0857ce753ba0dcad4e6ddf30dac20031f14682`다. 아래 **각 token이 one asset**이며 direct source는 `https://opengameart.org/sites/default/files/<file>`이다. 모든 candidate의 commercial/raw redistribution/conversion=`true`, attribution=`false`다.
 
-`sfx-various-bangs=bangs.wav`, `sfx-various-beep1=beep1.wav`, `sfx-various-big-amber=big_amber.wav`, `sfx-various-break-stone=break_stone.wav`, `sfx-various-bup=bup.wav`, `sfx-various-cannonball-tap=cannonball_tap.wav`, `sfx-various-click=click_1.wav`, `sfx-various-crush=crush.wav`, `sfx-various-death=death_2.wav`, `sfx-various-dull-explosion=dull_explosion.wav`, `sfx-various-fall=fall_0.wav`, `sfx-various-important-item=get_important_item.wav`, `sfx-various-glug=glug.wav`, `sfx-various-moan=moan.wav`, `sfx-various-nom=nom.wav`, `sfx-various-player-hit=player_hit.wav`, `sfx-various-pop=pop.wav`, `sfx-various-powered-door=powered_door.wav`, `sfx-various-weeds=rustling_of_the_weeds.wav`, `sfx-various-scooter=scooter_p.wav`, `sfx-various-small-amber=small_amber.wav`, `sfx-various-rock-impact=small_rock_impact.wav`, `sfx-various-spear=spear.wav`, `sfx-various-steal=steal.wav`, `sfx-various-swim=swim_0.wav`, `sfx-various-tap-stone=tap_stone.wav`, `sfx-various-teleport=teleport_2.wav`, `sfx-various-tick=tick_0.wav`, `sfx-various-uff=uff.wav`, `sfx-various-ambient-impact=snd_ambient_impact1.wav`, `sfx-various-batwings=snd_batwings.wav`, `sfx-various-death1=snd_death1.wav`, `sfx-various-death2=snd_death2.wav`, `sfx-various-fillenergy=snd_fillenergy.wav`, `sfx-various-footsteps=snd_footsteps1.wav`, `sfx-various-fox-footstep=snd_fox_footstep.wav`, `sfx-various-getpowerup=snd_getpowerup.wav`, `sfx-various-menu-move=snd_menu_move.wav`, `sfx-various-menu-select=snd_menu_select.wav`, `sfx-various-npc-message=snd_npc_message.wav`, `sfx-various-slip-ice=snd_slip_on_ice.wav`, `sfx-various-splathit=snd_splathit.wav`, `sfx-various-splat=snd_splat.wav`, `sfx-various-splurt=snd_splurt.wav`, `sfx-various-sproing=snd_sproing.wav`, `sfx-various-throw=snd_throw1.wav`, `sfx-various-treasure=snd_treasure.wav`.
+`sfx-various-bangs=bangs.wav`, `sfx-various-beep1=beep1.wav`, `sfx-various-click=click_1.wav`, `sfx-various-fall=fall_0.wav`, `sfx-various-glug=glug.wav`, `sfx-various-nom=nom.wav`, `sfx-various-pop=pop.wav`, `sfx-various-powered-door=powered_door.wav`, `sfx-various-weeds=rustling_of_the_weeds.wav`, `sfx-various-scooter=scooter_p.wav`, `sfx-various-swim=swim_0.wav`, `sfx-various-tap-stone=tap_stone.wav`, `sfx-various-tick=tick_0.wav`, `sfx-various-ambient-impact=snd_ambient_impact1.wav`, `sfx-various-footsteps=snd_footsteps1.wav`, `sfx-various-menu-move=snd_menu_move.wav`, `sfx-various-menu-select=snd_menu_select.wav`, `sfx-various-npc-message=snd_npc_message.wav`, .
 
 ### 승인 확장 — RPG / battle individual SFX (20)
 
 | candidate asset_id | creator / official page · evidence SHA-256 | direct source |
 | --- | --- | --- |
-| `sfx-rpg-baseballbat` | Delta12 Studio · [RPG Sound Effect Pack](https://opengameart.org/content/rpg-sound-effect-pack) · `e6b3928faa6f503a64336f7655e07855378511abfe5427b14fa01138fa2c8efb` | [baseballbat_1.ogg](https://opengameart.org/sites/default/files/baseballbat_1.ogg) |
-| `sfx-rpg-bee` | same page/hash | [bee_2.ogg](https://opengameart.org/sites/default/files/bee_2.ogg) |
-| `sfx-rpg-bat` | same page/hash | [bat.ogg](https://opengameart.org/sites/default/files/bat.ogg) |
-| `sfx-rpg-cancel` | same page/hash | [cancel_1.ogg](https://opengameart.org/sites/default/files/cancel_1.ogg) |
 | `sfx-rpg-door` | same page/hash | [door_1.ogg](https://opengameart.org/sites/default/files/door_1.ogg) |
-| `sfx-rpg-explosion` | same page/hash | [explosion_5.ogg](https://opengameart.org/sites/default/files/explosion_5.ogg) |
-| `sfx-rpg-explosion1` | same page/hash | [explosion1_3.ogg](https://opengameart.org/sites/default/files/explosion1_3.ogg) |
 | `sfx-rpg-grass` | same page/hash | [grass_1.ogg](https://opengameart.org/sites/default/files/grass_1.ogg) |
-| `sfx-rpg-hurt` | same page/hash | [hurt_1.ogg](https://opengameart.org/sites/default/files/hurt_1.ogg) |
-| `sfx-rpg-item` | same page/hash | [item_1.ogg](https://opengameart.org/sites/default/files/item_1.ogg) |
-| `sfx-rpg-punch` | same page/hash | [punch_1.ogg](https://opengameart.org/sites/default/files/punch_1.ogg) |
 | `sfx-rpg-steps` | same page/hash | [steps_1.ogg](https://opengameart.org/sites/default/files/steps_1.ogg) |
-| `sfx-sea-cannon-fire` | Thimras · [Battle at sea](https://opengameart.org/content/battle-at-sea) · `b0410a3d5da2474d71359d09cefd89b82d70683925353490ec5712992944753f` | [cannon_fire_1.ogg](https://opengameart.org/sites/default/files/cannon_fire_1.ogg) |
-| `sfx-sea-cannon-hit` | same page/hash | [cannon_hit_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_1.ogg) |
-| `sfx-sea-cannon-hit-cannon` | same page/hash | [cannon_hit_cannon_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_cannon_1.ogg) |
-| `sfx-sea-cannon-hit-ship` | same page/hash | [cannon_hit_ship_short.ogg](https://opengameart.org/sites/default/files/cannon_hit_ship_short.ogg) |
-| `sfx-sea-cannon-hit-wall` | same page/hash | [cannon_hit_wall_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_wall_1.ogg) |
-| `sfx-sea-cannon-hit-wall-dry` | same page/hash | [cannon_hit_wall_no_splash.ogg](https://opengameart.org/sites/default/files/cannon_hit_wall_no_splash.ogg) |
-| `sfx-sea-cannon-miss` | same page/hash | [cannon_miss_1.ogg](https://opengameart.org/sites/default/files/cannon_miss_1.ogg) |
-| `sfx-sea-ship-destroyed` | same page/hash | [ship_destroyed_1.ogg](https://opengameart.org/sites/default/files/ship_destroyed_1.ogg) |
 
 ## Gate 판정과 다음 행동
 
@@ -209,3 +189,23 @@ lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 �
 | `sfx-paper-2` | Various Paper Sound Effects paper_sound_-_2.mp3 — Luckius | same page/hash above | [paper_sound_-_2.mp3](https://opengameart.org/sites/default/files/paper_sound_-_2.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
 | `sfx-paper-3` | Various Paper Sound Effects paper_sound_-_3.mp3 — Luckius | same page/hash above | [paper_sound_-_3.mp3](https://opengameart.org/sites/default/files/paper_sound_-_3.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
 | `sfx-paper-ripped` | Various Paper Sound Effects paper_ripped_-_1.mp3 — Luckius | same page/hash above | [paper_ripped_-_1.mp3](https://opengameart.org/sites/default/files/paper_ripped_-_1.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+
+### 승인 축소 — 게임 전용 효과음 49개 제거 (2026-09-06)
+
+owner가 음악에 대해 한 말을 효과음에도 적용했다(위임): "게임음악은 다 삭제해.
+어차피 필요없잖아."
+
+1인칭 내레이션 + B-roll 브이로그에 **대포 8종·총소리·폭발 4종·야구방망이·
+몬스터 피격·박쥐날개·보물·순간이동·신음**은 쓸 자리가 없다. 유진에게 "팝 하고
+터지는 짧은 소리"를 시켰더니 RPG 폭발음이 나온 것도 이 재료들 때문이었다.
+
+**쓸 수 있는 것은 남겼다**(74개): 종 3·단추·성공 알림·동전 2·물 튀는 소리 2·
+북 6·비브라폰 2·딸깍·팝 11·똑딱·삐·메뉴 2·발소리 2·문 2·풀숲·풀 스치는 소리·
+마시는 소리·먹는 소리·스쿠터·헤엄·톡 두드리는 소리·떨어지는 소리·쾅·기운 차는
+소리 3, 그리고 2026-09-05에 넣은 브이로그용 23개(전환음 13·타이핑 3·키 3·종이 4).
+
+**빼기 전에 참조를 확인했다.** 팩 효과음을 가리키는 프로젝트가 하나도 없었다
+(라이브러리 등록부에만 있었다) -- 참조를 끊으면 되돌릴 수 없으므로 이 확인 없이
+빼지 않는다.
+
+123 → 74. 전체 후보는 153 → 104(음악 30 + 효과음 74).

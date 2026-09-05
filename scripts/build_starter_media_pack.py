@@ -50,7 +50,15 @@ _SELECTION_TIMESTAMP = "2026-07-14T01:13:16+09:00"
 # **게임 전용을 빼지는 않았다** -- 지금 만들어 둔 영상이 그 소리를 참조하고
 # 있는지 확인한 뒤에 한다. 그래서 100 → 123이지 교체가 아니다.
 # 앞 지문: 98ba6453c1cb7c4eff07934bfc571867b9af0ba6e186b09e84920f2af35da7b8
-_APPROVED_CANDIDATE_FINGERPRINT = "521c5bf0a5bda4ec3cfb7117ec8395692fe2225d5da6c01e63c74c861d1433ba"
+#
+# 2026-09-06: **게임 전용 효과음 49개를 뺐다**(owner 위임). 음악에 대해 "게임음악은
+# 다 삭제해. 어차피 필요없잖아"라고 한 것과 같은 논리다 -- 1인칭 내레이션 + B-roll
+# 브이로그에 대포·총소리·박쥐날개·몬스터 피격·보물·순간이동은 쓸 자리가 없다.
+# **쓸 수 있는 것은 남겼다**: 종·단추·성공 알림·동전·물 튀는 소리·북·비브라폰·
+# 딸깍·팝·똑딱·삐·메뉴·발소리·문·풀숲·마시는 소리·먹는 소리·스쿠터.
+# 빼기 전에 참조를 확인했다 -- 팩 효과음을 가리키는 프로젝트가 하나도 없었다.
+# 123 → 74. 앞 지문: 521c5bf0a5bda4ec3cfb7117ec8395692fe2225d5da6c01e63c74c861d1433ba
+_APPROVED_CANDIDATE_FINGERPRINT = "9a460eaa8b1333b4ab6aee4b391dee51a38b74532621a1462bc53451d0cae4d2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,12 +168,12 @@ def _various_sound_effects(text: str) -> list[ApprovedCandidate]:
 
 
 def _validate_candidate_set(candidates: list[ApprovedCandidate]) -> None:
-    if len(candidates) != 153:
-        raise ValueError(f"approved release set must contain 153 candidates, got {len(candidates)}")
+    if len(candidates) != 104:
+        raise ValueError(f"approved release set must contain 104 candidates, got {len(candidates)}")
     if sum(candidate.media_type == "music" for candidate in candidates) != 30:
         raise ValueError("approved release set must contain 30 music candidates")
-    if sum(candidate.media_type == "sfx" for candidate in candidates) != 123:
-        raise ValueError("approved release set must contain 123 SFX candidates")
+    if sum(candidate.media_type == "sfx" for candidate in candidates) != 74:
+        raise ValueError("approved release set must contain 74 SFX candidates")
     if len({candidate.asset_id for candidate in candidates}) != len(candidates):
         raise ValueError("approved release set contains duplicate asset IDs")
     if any(not candidate.source_url.startswith("https://") or not candidate.official_url.startswith("https://") for candidate in candidates):
