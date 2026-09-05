@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     CaptionLanguageRequest,
+    CaptionsFromTranscriptRequest,
     DubbingRequest,
     DubbingResultResponse,
     DubbingStartResponse,
@@ -215,6 +216,30 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 proposal_id=payload.proposal_id,
                 candidate_id=payload.candidate_id,
                 language=payload.language,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/captions-from-transcript")
+    def apply_captions_from_transcript(
+        project_id: str,
+        session_id: str,
+        payload: CaptionsFromTranscriptRequest,
+    ) -> EditingSessionResponse:
+        """받아쓴 말을 장면 캡션으로 옮긴다 (캡컷 `자동 캡션`).
+
+        받아쓰기 자체는 `POST /api/projects/{project_id}/jobs/transcription`이
+        이미 하고 있었다. 이 자리가 없어서 그 결과가 캡션이 되지 못했다.
+        """
+        try:
+            result = orchestrator.apply_captions_from_transcript(
+                project_id=project_id,
+                session_id=session_id,
+                transcription_job_id=payload.transcription_job_id,
+                expected_revision=payload.expected_revision,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)

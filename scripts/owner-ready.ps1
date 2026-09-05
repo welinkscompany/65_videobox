@@ -1053,6 +1053,62 @@ if ($Mode -ceq "Start") {
         }
     }
     $serviceNames = @("videobox-postgres", "videobox-workspace")
+    # **목소리 다리를 창 없이 띄운다** (owner 지적 2026-09-05: "이걸 창을
+    # 열어둬야지만 목소리 더빙을 해야되는건 말이 안되잖아").
+    #
+    # 엔진이 호스트에 있는 것 자체는 이유가 있다 -- 컨테이너에 torch와 2GB
+    # 모델을 넣으면 이미지가 3GB 커진다(`decisions/2026-09-03-host-voice-bridge`).
+    # 문제는 띄우는 방식이었다: `start-voice.ps1`이 앞에서 돌며 창을 붙잡았고,
+    # 창을 닫으면 더빙이 죽었다. 이제 VideoBox를 켤 때 숨은 채로 같이 뜬다.
+    #
+    # **이미 떠 있으면 다시 띄우지 않는다.** 두 개가 같은 포트를 잡으면 나중
+    # 것이 죽고, 어느 쪽이 살아 있는지 아무도 모르게 된다.
+    # **더빙이 없어도 VideoBox는 다 쓸 수 있다.** 그래서 여기서 blocked를 내지
+    # 않는다 -- blocked는 전체를 막고 종료 코드까지 바꾸는데, 목소리는 선택
+    # 기능이라 그 무게가 아니다. 사실은 요약에 적는다.
+    $voiceStatus = "pass"
+    $voiceSummary = "목소리 프로그램이 없어 더빙만 쉬어 갑니다. 나머지는 준비됐습니다."
+    $voiceAction = "목소리 더빙을 쓰려면 chatterbox를 설치한 뒤 다시 실행하세요."
+    $voiceEvidence = @{ port = 8199; started = $false }
+    $voiceAlreadyUp = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $probe.Connect("127.0.0.1", 8199)
+        $voiceAlreadyUp = $probe.Connected
+        $probe.Close()
+    } catch { $voiceAlreadyUp = $false }
+    if ($voiceAlreadyUp) {
+        $voiceStatus = "pass"
+        $voiceSummary = "목소리 다리가 이미 준비돼 있습니다."
+        $voiceAction = "추가 조치가 없습니다."
+        $voiceEvidence = @{ port = 8199; started = $true; already_running = $true }
+    } else {
+        $voiceScript = Join-Path $PSScriptRoot "start-voice.ps1"
+        $voiceLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-voice-bridge.log"
+        if (Test-Path $voiceScript) {
+            try {
+                # `-WindowStyle Hidden`이 창을 없앤다. 로그는 파일로 남겨,
+                # 안 될 때 무엇이 문제였는지 볼 자리를 만든다.
+                Start-Process -FilePath "powershell" `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $voiceScript) `
+                    -WindowStyle Hidden `
+                    -RedirectStandardOutput $voiceLog `
+                    -RedirectStandardError ($voiceLog + ".err") | Out-Null
+                $voiceStatus = "pass"
+                $voiceSummary = "목소리 다리를 백그라운드로 켰습니다."
+                $voiceAction = "추가 조치가 없습니다."
+                $voiceEvidence = @{ port = 8199; started = $true; already_running = $false; log = $voiceLog }
+            } catch {
+                $voiceStatus = "pass"
+                $voiceSummary = "목소리 다리를 켜지 못했습니다. 더빙만 쉬어 갑니다."
+                $voiceAction = "목소리 더빙을 쓰려면 로그를 확인한 뒤 다시 실행하세요."
+                $voiceEvidence = @{ port = 8199; started = $false; log = $voiceLog }
+            }
+        }
+    }
+    $checks += New-OwnerReadyResult -Id "voice_bridge" -Status $voiceStatus `
+        -Summary $voiceSummary -Action $voiceAction -Evidence $voiceEvidence
+
     if ($WithYujinMemory) {
         # 게이트웨이가 유진 에이전트와 메모리 어댑터에 의존한다.
         $serviceNames += @("videobox-hermes-yujin", "videobox-hermes-memory-adapter", "videobox-agent-gateway")

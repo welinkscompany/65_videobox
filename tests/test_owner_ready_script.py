@@ -866,6 +866,31 @@ def test_start_runs_only_the_two_base_services_and_waits_for_health(tmp_path: Pa
     assert str(fixture["env_file"]).lower() not in serialized
 
 
+def test_start_brings_up_the_voice_bridge_without_leaving_a_window_open(tmp_path: Path) -> None:
+    """owner 지적(2026-09-05): "이걸 창을 열어둬야지만 목소리 더빙을 해야되는건
+    말이 안되잖아".
+
+    맞는 말이다. 목소리 엔진이 호스트에 있는 것 자체는 이유가 있다 -- 컨테이너에
+    torch와 2GB 모델을 넣으면 이미지가 3GB 커진다(`decisions/2026-09-03-host-voice-bridge`).
+    문제는 **띄우는 방식**이었다: `start-voice.ps1`이 앞에서 돌며 창을 붙잡고,
+    창을 닫으면 더빙이 죽었다.
+
+    이제 VideoBox를 켤 때 **숨은 채로** 같이 뜬다. owner는 아무것도 안 해도 된다.
+    """
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as video_uri:
+        result = _run(fixture, mode="Start", video_uri=video_uri)
+
+    assert result.returncode == 0, _why_it_failed(result)
+    payload = _payload(result)
+    voice = next((row for row in payload["checks"] if row["id"] == "voice_bridge"), None)
+    assert voice is not None, "목소리 다리 결과가 없다"
+    # 이 기계에 목소리 프로그램이 깔려 있는지는 시험이 정할 수 없다. 둘 중
+    # 하나여야 한다: 띄웠거나(pass), 깔린 것이 없어 건너뛰었거나(blocked).
+    assert voice["status"] in {"pass", "blocked"}
+    assert "창" not in json.dumps(voice, ensure_ascii=False), "창을 열어 두라고 하면 안 된다"
+
+
 def test_start_waits_through_the_gateway_502s_that_precede_a_ready_app(tmp_path: Path) -> None:
     """실측(2026-08-17): 재시작 직후 1~3초는 nginx가 502를 돌려주고 4초부터 200이다.
 
@@ -1934,7 +1959,15 @@ def test_open_modes_report_exact_targets_under_whatif_without_launching(
     source = SCRIPT.read_text(encoding="utf-8-sig")
     assert "Start-Process -FilePath $VideoBoxUri.AbsoluteUri" in source
     assert "Start-Process -FilePath $script:capCutExecutable" in source
-    assert "-ArgumentList" not in source
+    # **여는 두 자리에 인자를 싣지 않는다**(`"arguments": 0`이 그 약속이다).
+    #
+    # 예전에는 파일 전체에 `-ArgumentList`가 없어야 한다고 봤는데, 그건 너무
+    # 넓었다 -- 2026-09-05에 목소리 다리를 창 없이 띄우려고 `Start-Process`를
+    # 쓰자 여기서 막혔다. 그건 여는 동작이 아니라 켜는 동작이다.
+    # 지키려는 것은 "브라우저와 캡컷을 인자 없이 연다"이므로 그 자리만 본다.
+    for opener in ("Start-Process -FilePath $VideoBoxUri.AbsoluteUri", "Start-Process -FilePath $script:capCutExecutable"):
+        start = source.find(opener)
+        assert "-ArgumentList" not in source[start:start + 200]
 
 
 def test_yujin_memory_start_installs_profile_before_compose_up() -> None:

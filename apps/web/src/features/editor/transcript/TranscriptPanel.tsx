@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { Button } from "../../../components/ui/button";
 import { Textarea } from "../../../components/ui/textarea";
@@ -17,6 +17,7 @@ export function TranscriptPanel({
   onSeek,
   onSaveCaption,
   isSaving = false,
+  autoCaption,
 }: Readonly<{
   entries: readonly TranscriptEntry[];
   playbackSec: number;
@@ -25,6 +26,9 @@ export function TranscriptPanel({
   onSeek: (seconds: number) => void;
   onSaveCaption?: (input: { segmentId: string; text: string }) => void;
   isSaving?: boolean;
+  /** 캡컷 `자동 캡션` 카드. 프로젝트·세션을 아는 위층이 만들어 넘긴다 --
+   *  이 판은 캡션 목록만 알면 되고 프로젝트 배관은 몰라도 된다. */
+  autoCaption?: ReactNode;
 }>) {
   const activeSegmentId = activeSegmentIdAt(entries, playbackSec);
   const currentSegmentId = selectedSegmentId ?? activeSegmentId;
@@ -56,6 +60,7 @@ export function TranscriptPanel({
           </Button>
         </li>)}
       </ol> : <p>아직 캡션이 없어요.</p>}
+      {autoCaption}
       {/* 시간을 여기서 못 고치는 이유를 한 줄로 말한다. 예전에는 이 안내가
           아래에 붙은 요약 절(`CaptionLane`)에 있었는데, 그 절은 바로 위 목록이
           이미 보여 주는 것을 한 벌 더 쌓고 있었다 -- 안내만 남기고 걷어냈다. */}

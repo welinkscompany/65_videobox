@@ -1982,6 +1982,12 @@ export const api = {
   updateDraftReadinessCandidateRange: (projectId: string, readinessId: string, asset_id: string, start_sec: number, end_sec: number, expected_revision: number) => request<DraftReadiness>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/${encodeURIComponent(readinessId)}/candidates/range`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ asset_id, start_sec, end_sec, expected_revision }) }),
   cancelDraftReadiness: (projectId: string, readinessId: string, expected_revision: number) => request<DraftReadiness>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/${encodeURIComponent(readinessId)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision }) }),
   createAtomicDraftBundle: (projectId: string, payload: AtomicDraftBundleRequest) => request<AtomicDraftBundle>(`/api/projects/${encodeURIComponent(projectId)}/draft-bundles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  // 캡컷 자동 캡션. 받아쓰기는 원래 있던 작업이고, 그 결과를 캡션으로 옮기는
+  // 자리(captions-from-transcript)가 2026-09-05에 생겼다.
+  startTranscription: (projectId: string, body: { narration_asset_id: string }) =>
+    request<{ job_id: string; status: string }>(`/api/projects/${encodeURIComponent(projectId)}/jobs/transcription`, { method: "POST", body: JSON.stringify(body) }),
+  applyCaptionsFromTranscript: (projectId: string, sessionId: string, body: { transcription_job_id: string; expected_revision: number }) =>
+    request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/captions-from-transcript`, { method: "POST", body: JSON.stringify(body) }),
   listDraftNarrationOptions: async (projectId: string): Promise<NarrationOption[]> => (await request<{ assets: NarrationOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration-options`)).assets,
   uploadDraftNarration: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration/upload`, { method: "POST", body: form }); },
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),

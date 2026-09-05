@@ -1119,6 +1119,69 @@ def _write_caption(target: dict[str, Any], text: str, language: str | None) -> N
     }
 
 
+def captions_from_transcript(
+    *,
+    session: dict[str, Any],
+    transcript_segments: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    """받아쓴 말을 장면 캡션으로 옮긴다 — 캡컷 `자동 캡션` 자리.
+
+    부품은 처음부터 다 있었다. 받아쓰기는 시간 구간별 텍스트를 주고, 장면도
+    시간 구간을 갖는다. **그 둘을 잇는 코드만 없었다** -- 받아쓰기 결과는
+    제작 파이프라인의 다음 단계로만 흘렀다.
+
+    규칙 하나: **말이 가장 많이 걸친 장면에 그 말을 준다.** 걸친 말을 양쪽에
+    다 넣으면 같은 문장이 두 번 보이고, 어느 쪽도 지우지 않으면 창작자는
+    지운 말이 왜 남아 있는지 모른다.
+
+    **말이 없는 장면은 건드리지 않는다.** 창작자가 손으로 써 둔 캡션을 빈
+    문자열로 덮으면, 받아쓰기 한 번에 공들여 쓴 말이 사라진다.
+    """
+    lines = [
+        {
+            "start_sec": float(item.get("start_sec", 0.0)),
+            "end_sec": float(item.get("end_sec", 0.0)),
+            "text": str(item.get("text") or "").strip(),
+        }
+        for item in transcript_segments
+        if str(item.get("text") or "").strip()
+    ]
+    if not lines:
+        raise ValueError("transcript_has_no_speech")
+
+    updated = deepcopy(session)
+    segments = [segment for segment in updated.get("segments", []) if isinstance(segment, dict)]
+    # 말한 순서대로 이어 붙인다 -- 받아쓰기가 순서대로 오지 않을 수 있다.
+    lines.sort(key=lambda line: (line["start_sec"], line["end_sec"]))
+
+    collected: dict[str, list[str]] = {}
+    for line in lines:
+        best_id, best_overlap = None, 0.0
+        for segment in segments:
+            start = float(segment.get("start_sec", 0.0))
+            end = float(segment.get("end_sec", 0.0))
+            overlap = min(line["end_sec"], end) - max(line["start_sec"], start)
+            if overlap > best_overlap:
+                best_id, best_overlap = str(segment.get("segment_id") or ""), overlap
+        if best_id:
+            collected.setdefault(best_id, []).append(line["text"])
+
+    if not collected:
+        raise ValueError("transcript_has_no_speech")
+
+    for segment in segments:
+        spoken = collected.get(str(segment.get("segment_id") or ""))
+        if spoken:
+            segment["caption_text"] = " ".join(spoken)
+
+    return _apply_manual_mutation(
+        before=session,
+        updated=updated,
+        mutation_type="captions_from_transcript",
+        segment_id=",".join(sorted(collected)),
+    )
+
+
 def update_segment_caption(
     *,
     session: dict[str, Any],

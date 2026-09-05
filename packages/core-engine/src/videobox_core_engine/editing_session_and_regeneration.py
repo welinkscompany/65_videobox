@@ -43,6 +43,7 @@ from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.editing_session import (
     build_editing_session,
+    captions_from_transcript,
     build_fixed_track_timeline,
     build_selected_range_preview,
     preview_caption_style_scope,
@@ -433,6 +434,32 @@ class EditingSessionRegenerationMixin:
             language=language,
         )
         return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_text", segment_id=segment_id, controls={"text": caption_text})
+
+    def apply_editing_session_captions_from_transcript(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        transcription_job_id: str,
+        expected_revision: int,
+    ) -> dict[str, object]:
+        """받아쓴 말을 장면 캡션으로 옮긴다 -- 캡컷 `자동 캡션` 자리.
+
+        **받아쓰기는 이미 있었다.** 없던 것은 그 결과를 캡션으로 옮기는 자리다.
+        """
+        transcript = self.get_transcription_result(project_id=project_id, job_id=transcription_job_id)
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = captions_from_transcript(
+            session=session,
+            transcript_segments=list(transcript.get("segments") or []),
+        )
+        return self._save_editing_session_with_revision(
+            project_id=project_id,
+            session_id=session_id,
+            session=session,
+            updated_session=updated_session,
+            expected_revision=expected_revision,
+        )
 
     def set_editing_session_caption_translations(
         self,

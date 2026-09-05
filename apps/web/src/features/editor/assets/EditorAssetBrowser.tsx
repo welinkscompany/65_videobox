@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react";
-import { Captions, Clapperboard, Music, Shuffle, Type, type LucideIcon } from "lucide-react";
+import { Captions, Clapperboard, FileText, Music, Shuffle, Type, type LucideIcon } from "lucide-react";
 
 import { api } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -65,6 +65,8 @@ type Props = Readonly<{
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
   /** 대본·자막 편집(캡컷 `텍스트` 자리). 주지 않으면 그 탭도 만들지 않는다. */
   transcript?: ReactNode;
+  /** 대본 자리. 프로젝트 배관을 아는 위층이 만들어 넘긴다. */
+  script?: ReactNode;
   /** 원본만 확인하는 자리. 미디어 탭 안에 둔다. */
   sourceCheck?: ReactNode;
   /** 프로젝트 미디어 분석 상태. 미디어 탭 카드 목록 아래에 둔다(2026-08-27
@@ -99,7 +101,7 @@ type Props = Readonly<{
  *
  *  `transcript`가 `캡션`으로 이름을 바꾼 이유: 캡컷은 **`텍스트`(화면 위 글자)와
  *  `캡션`(말자막)을 완전히 분리**한다. 우리는 둘을 `자막` 하나로 뭉쳐 놨었다. */
-export type LeftPane = "media" | "audio" | "text" | "transcript" | "transition";
+export type LeftPane = "media" | "audio" | "text" | "transcript" | "script" | "transition";
 
 /** **한 번에 하나만 보여 준다(owner 지시 2026-08-27).**
  *  > "지금 사진 부분이 스크롤이 너무 길다고, 여길 뭔가 정리를 해야지"
@@ -114,10 +116,13 @@ export const editorAssetPanes: readonly Readonly<{ pane: LeftPane; label: string
   { pane: "audio", label: "오디오", icon: Music },
   { pane: "text", label: "텍스트", icon: Type },
   { pane: "transcript", label: "캡션", icon: Captions },
-  // `대본`은 아직 넣지 않는다. 캡컷의 `대본`은 "대본을 고치면 영상이 고쳐지는"
-  // 기능인데 우리에겐 없고, 우리 `이야기` 내용을 옮기는 것은 계획서 5단계다.
-  // 지금 탭만 만들면 대본을 붙여넣은 뒤 갈 곳이 없는 막다른 자리가 된다
-  // (`decisions/2026-08-30` -- 없는 기능 버튼은 안 만든다).
+  // **`대본`이 2026-09-05에 생겼다**(계획서 5단계). 위 주석이 경고하던
+  // "붙여넣은 뒤 갈 곳이 없는 막다른 자리"는 `ScriptPane`이 저장 뒤 **다음
+  // 걸음(`이야기 이어서 하기`)**을 같은 자리에서 주는 것으로 푼다.
+  //
+  // 캡컷의 `대본`처럼 "대본을 고치면 영상이 고쳐지는" 기능은 여전히 아니다 --
+  // 대본에서 장면을 만드는 길은 `이야기` 화면이 그대로 맡는다.
+  { pane: "script", label: "대본", icon: FileText },
   { pane: "transition", label: "전환", icon: Shuffle },
 ];
 
@@ -154,7 +159,7 @@ function targetLabel(target: EditorAssetTarget | null): string {
 /** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
 const FIRST_PAGE = 8;
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, sourceCheck, analysisPanel, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, script, sourceCheck, analysisPanel, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
   const [removingCardId, setRemovingCardId] = useState<string | null>(null);
   const [removeMessage, setRemoveMessage] = useState<string | null>(null);
 
@@ -272,10 +277,11 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
     {dropBusy ? <p className="vb-editor-assets__detail" role="status">파일을 올리는 중이에요.</p> : null}
     {dropMessage ? <p className="vb-editor-assets__detail" role="status">{dropMessage}</p> : null}
     {renderPaneTabs ? <div className="vb-editor-assets__panes" role="tablist" aria-label="왼쪽 패널">
-      {editorAssetPanes.filter((item) => item.pane !== "transcript" || transcript).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
+      {editorAssetPanes.filter((item) => (item.pane !== "transcript" || transcript) && (item.pane !== "script" || script)).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
     </div> : null}
     {pane === "transition" ? <TransitionPane target={transitionTarget} disabled={isSaving} onInspectorAction={onInspectorAction} />
       : pane === "text" ? <TextPane target={target} disabled={isSaving} onInspectorAction={onInspectorAction} />
+      : pane === "script" ? script
       : pane === "transcript" ? transcript : <>
     <div className="vb-editor-assets__controls">
       {/* **편집기를 떠나지 않고 미디어를 더한다(owner 승인 2026-08-27).**

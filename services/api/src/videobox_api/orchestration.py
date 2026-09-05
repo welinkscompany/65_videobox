@@ -837,6 +837,16 @@ class ApiOrchestrator:
             language=language,
         )
 
+    def apply_captions_from_transcript(
+        self, *, project_id: str, session_id: str, transcription_job_id: str, expected_revision: int
+    ) -> dict[str, Any]:
+        return self.pipeline.apply_editing_session_captions_from_transcript(
+            project_id=project_id,
+            session_id=session_id,
+            transcription_job_id=transcription_job_id,
+            expected_revision=expected_revision,
+        )
+
     def translate_editing_session_captions(
         self, *, project_id: str, session_id: str, language: str, expected_revision: int, runtime: Any
     ) -> dict[str, Any]:

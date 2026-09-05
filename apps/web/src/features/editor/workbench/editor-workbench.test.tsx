@@ -904,12 +904,18 @@ describe("편집기에서 내보내기", () => {
    *  같다. 검토·출력을 이미 한 화면으로 합친 `ReviewAndOutputPage`를 그대로
    *  재사용해서, 팝업을 열면 검토 내용이 처음부터 같은 다이얼로그 안에 보여야
    *  한다(새 창·새 라우트로 이동하지 않고). */
-  it("내보내기 팝업 안에 검토 화면도 함께 있다", async () => {
+  /** **2026-09-05부터 팝업은 두 단계다**(계획 §7). 열면 먼저 **목적지 목록**이
+   *  나오고, 완성본 만들기와 자세한 상태는 한 겹 뒤에 있다 -- 캡컷과 같은
+   *  무늬다. 검토 화면이 팝업 안에 머문다는 계약은 그대로다. */
+  it("내보내기 팝업은 목적지를 먼저 보여 주고, 자세한 것은 한 겹 뒤에 둔다", async () => {
     render(<EditorWorkbench view={view} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "내보내기" }));
 
     const dialog = await screen.findByRole("dialog", { name: "내보내기" });
+    expect(await within(dialog).findByRole("list", { name: "내보낼 곳" })).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "완성본 만들기와 자세한 상태" }));
     expect(await within(dialog).findByTestId("review-and-output-page")).toBeInTheDocument();
     expect(within(dialog).getByTestId("outputs-page")).toBeInTheDocument();
     // 이 문구가 다시 나타나면 그 링크가 되살아난 것이다 -- 누르면 `/review`로

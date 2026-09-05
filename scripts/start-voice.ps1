@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     내 목소리로 더빙할 수 있게 목소리 프로그램을 켠다.
 
@@ -54,7 +54,10 @@ if (-not (Test-Path $python)) {
 
 $licence = if ($chosen -eq 'chatterbox') { 'MIT (상업적으로 써도 됩니다)' } else { '비상업용' }
 Write-Host "목소리 엔진: $chosen · 라이선스: $licence"
-Write-Host "이 창을 열어 둔 채로 VideoBox에서 `목소리 더빙`을 눌러 주세요."
+# **VideoBox를 켜면 이 스크립트가 창 없이 같이 뜬다**(owner 지적 2026-09-05:
+# "이걸 창을 열어둬야지만 목소리 더빙을 해야되는건 말이 안되잖아").
+# 손으로 켤 때도 있으므로 그 경우의 안내만 남긴다.
+Write-Host "VideoBox를 켜면 이 다리도 저절로 뜹니다. 손으로 켰다면 이 창을 닫지 마세요."
 
 $env:VIDEOBOX_HOST_TTS_ENGINE = $chosen
 # XTTS는 첫 실행에 라이선스 동의를 물어 멈춘다. 미리 동의를 표시해 둔다.

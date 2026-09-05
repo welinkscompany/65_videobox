@@ -28,6 +28,7 @@ import { VariantSelector } from "../variants/VariantSelector";
 import { projectServerVariant, projectVariant, type VariantKind } from "../variants/variantProjection";
 import { VariantServerControls } from "../variants/VariantServerControls";
 import { usePublishShellCanvas } from "../../shell/shellCanvas";
+import { ExportPopover } from "../export/ExportPopover";
 import { ReviewAndOutputPage } from "../../review/ReviewAndOutputPage";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 
@@ -175,6 +176,8 @@ function EditorWorkbenchInstance({
   const [yujinOpen, setYujinOpen] = useState(false);
   const [variantMode, setVariantMode] = useState<VariantKind | "side_by_side">("master");
   const [exportOpen, setExportOpen] = useState(false);
+  // 캡컷처럼 **목적지를 먼저** 보여 주고, 자세한 것은 한 겹 뒤에 둔다.
+  const [exportDetails, setExportDetails] = useState(false);
   const [variantsCollapsed, setVariantsCollapsed] = useState(() => readVariantsCollapsed(view.projectId));
   // 위 띠의 화면 비율 자리는 **이 줄이 채운다**(`features/shell/shellCanvas.tsx`).
   // 껍데기가 직접 물어보게 하지 않는 이유는 그쪽 주석에 적었다. 편집기를 떠나면
@@ -809,7 +812,7 @@ function EditorWorkbenchInstance({
     />
     {/* 팝업은 열었을 때만 그린다 -- 출력 화면은 스스로 상태를 읽으므로, 늘 그려
         두면 편집하는 내내 쓰지도 않을 요청이 돈다. */}
-    <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+    <Dialog open={exportOpen} onOpenChange={(open) => { setExportOpen(open); if (!open) setExportDetails(false); }}>
       <DialogContent className="vb-dialog-content vb-export-dialog">
         <DialogHeader>
           <DialogTitle>내보내기</DialogTitle>
@@ -819,7 +822,8 @@ function EditorWorkbenchInstance({
             장면을 열면(검토 목록의 `편집하기`) 이 편집기 안에서 그 장면을 그대로
             고르고 팝업만 닫는다 -- 라우트를 새로 부르면 세션이 다시 열려
             "편집기를 떠나지 않는다"는 계약이 깨진다. */}
-        {exportOpen ? <ReviewAndOutputPage
+        {exportOpen && !exportDetails ? <ExportPopover projectId={view.projectId} onOpenDetails={() => setExportDetails(true)} /> : null}
+        {exportOpen && exportDetails ? <ReviewAndOutputPage
           projectId={view.projectId}
           onOpenEditor={() => setExportOpen(false)}
           onOpenSegment={({ segmentId }) => {

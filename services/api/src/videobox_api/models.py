@@ -1100,6 +1100,13 @@ class MediaPackInstallRequest(BaseModel):
     directory_name: str = Field(min_length=1, max_length=128)
 
 
+class CaptionsFromTranscriptRequest(BaseModel):
+    """받아쓴 말을 캡션으로 옮길 때 필요한 것 (캡컷 `자동 캡션`)."""
+
+    expected_revision: int = Field(ge=1)
+    transcription_job_id: str = Field(min_length=1, max_length=256)
+
+
 class RipplePlaybackRateRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     # 화면 `속도` 칸은 캡컷처럼 숫자칸이다(owner 지시 2026-09-04). 여기가
