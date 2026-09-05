@@ -23,8 +23,9 @@ describe("product shell", () => {
     // 다시 목록이 되고, 그러면 기둥을 옮긴 뜻이 없다.
     const view = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
 
-    fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
-    const global = screen.getByRole("navigation", { name: "전체 메뉴" });
+    // **2026-09-05부터 전역 목적지는 왼쪽 세로 띠에 상시 보인다**(owner 지시).
+    // 구분은 그대로다 -- 전역은 왼쪽 세로, 프로젝트 단계는 위 띠.
+    const global = screen.getByRole("navigation", { name: "화면 이동" });
     for (const label of ["프로젝트", "자료실", "촬영본 정리"]) {
       expect(within(global).getByRole("link", { name: label })).toBeInTheDocument();
     }
@@ -69,8 +70,8 @@ describe("product shell", () => {
   it("does not render project stages when no project is open", () => {
     render(<ProductShell projectId="" projects={[]} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
 
-    // 갈 수 없는 곳을 띠에 띄워 두면 눌렀을 때 빈 화면이 뜬다. 전체 메뉴는 남는다.
-    expect(screen.getByRole("button", { name: "전체 메뉴" })).toBeInTheDocument();
+    // 갈 수 없는 곳을 띠에 띄워 두면 눌렀을 때 빈 화면이 뜬다. 화면 이동은 남는다.
+    expect(screen.getByRole("navigation", { name: "화면 이동" })).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "프로젝트 단계" })).not.toBeInTheDocument();
   });
 
@@ -225,7 +226,8 @@ describe("product shell", () => {
     render(<AppRouter router={router} />);
 
     await screen.findByRole("navigation", { name: "프로젝트 단계" });
-    fireEvent.click(screen.getByRole("button", { name: "전체 메뉴" }));
+    // 왼쪽 세로 띠에 상시 있으므로 열 필요가 없다. **하나뿐이어야 한다** --
+    // 위 띠의 접힌 메뉴는 이 화면에서 접힌다(같은 기능이 둘이면 안 된다).
     expect(screen.getAllByRole("link", { name: "자료실" })).toHaveLength(1);
     const home = screen.getByTestId("product-home");
     expect(within(home).getByText("편집")).toBeTruthy();

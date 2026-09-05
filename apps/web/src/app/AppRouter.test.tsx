@@ -131,11 +131,11 @@ describe("AppRouter URL ownership", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: [path] }));
     render(<AppRouter router={router} />);
 
-    // 왼쪽 기둥은 없어졌고 전역 목적지는 위 띠의 전체 메뉴 안에 있다
-    // (`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`). 지키는 것은 같다 --
-    // 어느 화면에서든 돌아갈 길이 있어야 한다.
-    fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
-    const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
+    // **돌아갈 길이 왼쪽 세로 띠로 옮겨졌다**(owner 지시 2026-09-05). 2026-08-21에
+    // 기둥을 없애고 위 띠의 접힌 메뉴로 모았었는데, 캡컷과 다시 대조해 보니
+    // 캡컷은 그 자리를 상시 보여 준다. 지키는 것은 처음과 같다 -- 어느 화면에서든
+    // 돌아갈 길이 있어야 한다.
+    const menu = await screen.findByRole("navigation", { name: "화면 이동" });
     expect(within(menu).getByRole("link", { name: "프로젝트" })).toBeInTheDocument();
     expect(within(menu).getByRole("link", { name: "자료실" })).toBeInTheDocument();
 
@@ -157,8 +157,7 @@ describe("AppRouter URL ownership", () => {
     render(<AppRouter router={router} />);
 
     // 껍데기 안이어야 한다 -- 여기가 어디인지, 어디로 갈 수 있는지 보여야 한다.
-    fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
-    const menu = screen.getByRole("navigation", { name: "전체 메뉴" });
+    const menu = await screen.findByRole("navigation", { name: "화면 이동" });
     expect(within(menu).getByRole("link", { name: "자료실" })).toBeInTheDocument();
 
     // 시작하는 길은 평소와 **같은 길**이다. 첫 사용자에게만 다른 문을 만들지 않는다.
@@ -244,8 +243,9 @@ describe("AppRouter URL ownership", () => {
     const assetCard = await screen.findByRole("article", { name: "자산 프로젝트 프로젝트" });
     const newCard = await screen.findByRole("article", { name: "새 프로젝트 프로젝트" });
     // 첫 화면도 앱 안이어야 한다. 예전에는 사이드바가 없어서 프로그램이 아니라
-    // 웹페이지 한 장으로 보였다(2026-08-17 owner 지적).
-    expect(await screen.findByLabelText("전체 메뉴")).toBeInTheDocument();
+    // 웹페이지 한 장으로 보였다(2026-08-17 owner 지적). 2026-09-05부터 그 자리는
+    // 왼쪽 세로 띠다.
+    expect(await screen.findByRole("navigation", { name: "화면 이동" })).toBeInTheDocument();
     // 카드는 우리 내부 단계 이름(`기획`·`자산`)이 아니라, 그 프로젝트가 지금 어떤
     // 상태인지 사람 말로 적는다(§10.13). 2026-08-17 owner 지적.
     expect(draftCard).toHaveTextContent("편집하는 중");
@@ -907,8 +907,9 @@ describe("AppRouter URL ownership", () => {
 
     render(<AppRouter router={router} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "전체 메뉴" }));
-    fireEvent.click(screen.getByRole("button", { name: "설정" }));
+    // 설정도 왼쪽 세로 띠에 있다(2026-09-05). 위 띠의 접힌 메뉴는 그 띠가
+    // 보이는 화면에서 접힌다 -- 같은 기능이 화면에 둘 있으면 안 된다.
+    fireEvent.click(within(await screen.findByRole("navigation", { name: "화면 이동" })).getByRole("button", { name: "설정" }));
 
     await waitFor(() => expect(router.state.location.href).toBe("/settings/general?project_id=project_b"));
     expect(screen.getByRole("button", { name: "B" })).toBeVisible();

@@ -61,6 +61,7 @@ export function TopBar({
   onSelectProject,
   onOpenSettings,
   onNavigateGlobal,
+  hideGlobalMenu = false,
   onResumeEditor,
   children,
 }: {
@@ -86,6 +87,9 @@ export function TopBar({
   onOpenSettings: () => void;
   /** 전역 화면으로 앱 안에서 이동한다. 없으면 주소 링크가 그대로 동작한다. */
   onNavigateGlobal?: (destination: "projects" | "library" | "footage") => void;
+  /** 왼쪽 세로 띠가 같은 자리를 이미 보여 주는 화면에서는 접는다 --
+   *  같은 기능이 화면에 둘 있으면 낭독기가 두 번 읽고, 눌러 보고 다른 것인 줄 안다. */
+  hideGlobalMenu?: boolean;
   /** 마지막으로 편집하던 곳으로 돌아간다. **돌아갈 곳을 모르면 주지 않는다** --
    *  없는 길을 흉내 내면 눌렀을 때 빈 화면이 뜬다. */
   onResumeEditor?: () => void;
@@ -214,7 +218,7 @@ export function TopBar({
         {/* 왼쪽 기둥에 있던 **전체 메뉴 4개**가 여기로 온다. 빼먹으면 내 라이브러리와
             촬영본 정리가 갈 수 없는 곳이 된다 -- 기둥을 없애는 변경에서 가장 흔한 사고다.
             띠에 네 개를 그대로 늘어놓으면 다시 목록이 되므로 한 겹 접어 둔다. */}
-        <div className="vb-top-bar__menu">
+        {hideGlobalMenu ? null : <div className="vb-top-bar__menu">
           <CompactTooltip label="프로젝트와 도구 메뉴 열기">
             <Button type="button" variant="outline" size="icon-sm" className="vb-top-bar__compact-control" aria-expanded={menuOpen} aria-label="전체 메뉴" onClick={() => setMenuOpen((open) => !open)}>
               <Menu aria-hidden="true" />
@@ -256,7 +260,7 @@ export function TopBar({
               </Button>
             </nav>
           ) : null}
-        </div>
+        </div>}
       </div>
     </header>
   </TooltipProvider>;

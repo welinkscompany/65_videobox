@@ -22,6 +22,7 @@ import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { ConversationCleanup } from "../features/settings/ConversationCleanup";
 import { HomeYujinChat } from "../features/home/HomeYujinChat";
 import { StartChooser } from "../features/home/StartChooser";
+import { SideNav } from "../features/shell/SideNav";
 import { TopBar } from "../features/shell/TopBar";
 import { ShellCanvasProvider, useShellCanvas } from "../features/shell/shellCanvas";
 
@@ -83,6 +84,13 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
   // 단계 단추가 켜져 있으면 그것이 곧 "여기가 어디인지"다. 단계가 없는 화면
   // (내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서만 띠가 이름으로 말한다.
   const screenName = section === "home" ? "홈" : section === "create" ? "이야기" : section === "media" ? "미디어" : section === "settings" ? "설정" : section === "library" ? "자료실" : section === "footage" ? "촬영본 정리" : section === "outputs" || section === "timeline" || section === "review" ? "확인과 내보내기" : "편집";
+  // 편집기(그리고 그 안 단계들)에서는 세로 띠를 접는다. 그 자리는 편집 도구 띠 것이다.
+  // `home`이 프로젝트 목록 화면이다(`/projects`) -- 이름이 어긋나 있어 한 번 틀렸다.
+  const sideNavPlace = section === "home" ? "projects"
+    : section === "library" ? "library"
+    : section === "footage" ? "footage"
+    : section === "settings" ? "settings"
+    : null;
   return (
     <div
       className="vb-product-shell"
@@ -109,12 +117,18 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
         onSelectProject={(nextProjectId) => onNavigate(nextProjectId, "editing")}
         onOpenSettings={onOpenSettings}
         onNavigateGlobal={onNavigateGlobal}
+        hideGlobalMenu={sideNavPlace !== null}
         onResumeEditor={onResumeEditor}
       >
         <small className="vb-top-bar__note">{localDeploymentCapabilities.aiExecution === "local" ? "이 기기에서 작업" : "AI 기능 끔"}</small>
         <Dialog open={jobDialogOpen} onOpenChange={setJobDialogOpenSafely}><DialogTrigger asChild><Button variant="outline">작업 상태</Button></DialogTrigger><DialogContent className="vb-dialog-content" showCloseButton={!jobRecoveryBusy} onEscapeKeyDown={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onPointerDownOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }} onInteractOutside={(event) => { if (jobRecoveryBusy) event.preventDefault(); }}><DialogHeader><DialogTitle>작업 상태</DialogTitle><DialogDescription>로컬 작업 상태를 확인하고 실패한 작업을 다시 시작할 수 있어요.</DialogDescription></DialogHeader>{jobDialogOpen ? <HermesYujinStatus /> : null}<JobRecovery projectId={projectId} onBusyChange={setJobRecoveryBusy} /></DialogContent></Dialog>
       </TopBar>
-      <main className="vb-product-main"><div className="vb-product-content">{children}</div></main>
+      {/* **왼쪽 세로 메뉴**(owner 지시 2026-09-05). 편집기에서는 그리지 않는다 --
+          그 자리를 편집 도구 띠가 이미 쓰고 있다(`SideNav` 주석 참고). */}
+      <div className="vb-product-body">
+        {sideNavPlace ? <SideNav current={sideNavPlace} onNavigateGlobal={onNavigateGlobal} onOpenSettings={onOpenSettings} /> : null}
+        <main className="vb-product-main"><div className="vb-product-content">{children}</div></main>
+      </div>
     </div>
   );
 }
