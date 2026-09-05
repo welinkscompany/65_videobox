@@ -146,7 +146,10 @@ def test_usage_scans_direct_editing_session_and_timeline_library_references(tmp_
         "tracks": [{"clips": [{"library_asset_id": item["library_asset_id"]}]}],
     }
 
-    usage = client.get(f"/api/library/assets/{item['library_asset_id']}/usage")
+    # **깊은 검사는 지우기 전에만 한다**(2026-09-05, owner 승인). 화면이 자산을
+    # 열 때마다 부르던 자리라 실측 1.67초였고 프로젝트가 늘수록 늘어났다.
+    # 여기서 지키려는 것 -- 옛 프로젝트의 숨은 참조를 찾아내는 것 -- 은 그대로다.
+    usage = client.get(f"/api/library/assets/{item['library_asset_id']}/usage", params={"deep": "true"})
     assert usage.status_code == 200
     kinds = {(entry["location"]["kind"], entry["location"].get("id")) for entry in usage.json()["locations"]}
     assert ("editing_session", "session-direct") in kinds
@@ -166,7 +169,7 @@ def test_usage_scans_nested_session_json_when_hydration_fails(tmp_path):
     }]
     store.get_editing_session = lambda **_: (_ for _ in ()).throw(KeyError("session unavailable"))
 
-    usage = client.get(f"/api/library/assets/{item['library_asset_id']}/usage")
+    usage = client.get(f"/api/library/assets/{item['library_asset_id']}/usage", params={"deep": "true"})
     assert usage.status_code == 200
     assert any(entry["location"]["kind"] == "editing_session" for entry in usage.json()["locations"])
 

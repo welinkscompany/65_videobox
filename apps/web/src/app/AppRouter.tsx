@@ -9,7 +9,7 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode, useRef } from "react";
 import { Archive, LayoutGrid, List, Mic, Scissors } from "lucide-react";
 
 import { api, type Project, type ProjectWorkspaceSummary } from "../api";
@@ -433,7 +433,8 @@ function ProjectsPage() {
         <p className="vb-catalog-empty">"{projectQuery.trim()}"과 맞는 프로젝트가 없어요.</p>
       ) : (
       <div className={`vb-catalog-grid${viewMode === "list" ? " vb-catalog-grid--list" : ""}`}>
-        {filteredProjects.map((project) => <ProjectCatalogCard
+        {filteredProjects.map((project, index) => <ProjectCatalogCard
+          index={index}
           key={project.project_id}
           project={project}
           onNavigateHref={(href) => void navigate({ href })}
@@ -574,7 +575,7 @@ function projectStateLabel(summary: ProjectWorkspaceSummary): string {
   return summary.state === "blocked" ? byState.blocked : summary.state === "attention" ? byState.attention : byState.ready;
 }
 
-function ProjectCatalogCard({ project, onNavigateHref, onRename }: { project: Project; onNavigateHref?: (href: string) => void; onRename?: (projectId: string, name: string) => void | Promise<void> }) {
+function ProjectCatalogCard({ project, index = 0, onNavigateHref, onRename }: { project: Project; index?: number; onNavigateHref?: (href: string) => void; onRename?: (projectId: string, name: string) => void | Promise<void> }) {
   const [summary, setSummary] = useState<ProjectWorkspaceSummary | null>(null);
   const [summaryError, setSummaryError] = useState(false);
   const [requestNumber, setRequestNumber] = useState(0);
@@ -583,7 +584,29 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename }: { project: Pr
   const [renaming, setRenaming] = useState(false);
   //: 관리 단추(제목 바꾸기)를 접어 둔다. 아래 `···`가 연다.
   const [manageOpen, setManageOpen] = useState(false);
+  // **화면에 보이는 카드만 부른다**(2026-09-05 실측). 카드마다 요약을 부르니
+  // 프로젝트 36개에서 요청이 36개, 첫 요청부터 마지막 응답까지 **1.56초**였다
+  // -- 프로젝트가 늘수록 그대로 늘어난다. 첫 화면에 실제로 보이는 것은
+  // 대여섯 개뿐이다.
+  const cardRef = useRef<HTMLElement | null>(null);
+  // **첫 화면에 들어갈 만큼은 무조건 부른다.** 관찰자에만 기대면 그것이 안
+  // 도는 환경에서 화면이 "상태 확인 중"으로 비어 버린다 -- 실제로 그렇게
+  // 나오는 창에서 확인했다. 열두 개는 어떤 화면에서도 첫 화면을 채운다.
+  const [visible, setVisible] = useState(index < 12);
   useEffect(() => {
+    const element = cardRef.current;
+    // 관찰자를 못 쓰는 환경(옛 브라우저·시험)에서는 그냥 부른다 -- 화면이
+    // 비어 보이는 것이 요청 몇 개보다 나쁘다.
+    if (!element || typeof IntersectionObserver === "undefined") { setVisible(true); return; }
+    // 조금 미리 부른다. 스크롤이 닿는 순간 빈칸이 보이면 그게 더 느리게 느껴진다.
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) { setVisible(true); observer.disconnect(); }
+    }, { rootMargin: "300px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!visible) return;
     let active = true;
     setSummary(null);
     setSummaryError(false);
@@ -596,21 +619,21 @@ function ProjectCatalogCard({ project, onNavigateHref, onRename }: { project: Pr
     // 이름이 바뀌면 요약도 다시 부른다. 카드에 보이는 제목은 목록이 아니라 이
     // 요약에서 오므로, 여기에 `project.name`이 없으면 제목을 바꿔도 카드는 옛
     // 이름을 계속 보여 준다 -- 브라우저에서 실제로 그렇게 나왔다.
-  }, [project.project_id, project.name, requestNumber]);
+  }, [project.project_id, project.name, requestNumber, visible]);
   if (summaryError) {
-    return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+    return <article ref={cardRef} className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
       <h2>{project.name}</h2>
       <p>상태 확인 필요</p>
       <Button type="button" variant="outline" onClick={() => setRequestNumber((value) => value + 1)}>다시 확인</Button>
     </article>;
   }
   if (!summary) {
-    return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+    return <article ref={cardRef} className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
       <h2>{project.name}</h2>
       <p>상태 확인 중</p>
     </article>;
   }
-  return <article className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
+  return <article ref={cardRef} className="vb-catalog-card" aria-label={`${project.name} 프로젝트`}>
     {summary.thumbnail_url ? <img src={summary.thumbnail_url} alt={`${summary.display_name} 대표 이미지`} loading="lazy" /> : null}
     {/* 프로젝트를 고르면 **편집기**다(owner 지적 2026-08-19, 캡컷도 열면 바로
         편집판이다). 아래 단추는 백엔드가 정한 다음 할 일이라 `/plan`·`/review`

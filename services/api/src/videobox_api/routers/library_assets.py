@@ -283,11 +283,23 @@ def build_library_assets_router(
         return {"matches": deduped[:limit], "semantic": semantic}
 
     @router.get("/api/library/assets/{asset_id}/usage")
-    def get_library_asset_usage(asset_id: str) -> dict[str, Any]:
+    def get_library_asset_usage(asset_id: str, deep: bool = False) -> dict[str, Any]:
+        """이 자산을 어디서 쓰고 있나.
+
+        **기본은 빠른 검사다**(명시적 참조만). 화면이 자산을 열 때마다 부르는
+        자리인데, 깊은 검사는 **모든 프로젝트의 자산·편집 세션·타임라인을**
+        읽는다 -- 실측 **1.67초**였고 프로젝트가 늘수록 그대로 늘어난다
+        (2026-09-05, owner: "어느 화면이 느린지 다시 재봐").
+
+        **지우기 전에는 깊게 본다**(`deep=True`). 옛 프로젝트가 쓰고 있는
+        자산을 지우면 되돌릴 수 없다 -- 그 안전장치는 그대로 둔다.
+        """
         asset, builtin = find_asset(asset_id)
         if builtin is not None:
             return {"library_asset_id": asset_id, "locations": []}
         locations = user_asset_store.usage(asset_id)
+        if not deep:
+            return {"library_asset_id": asset_id, "locations": locations}
         # Defensive reverse scan catches older projects/timelines created
         # before explicit global references were introduced.
         for project in getattr(project_store, "list_projects", lambda **_: [])(include_archived=True):
@@ -359,8 +371,11 @@ def build_library_assets_router(
         asset, builtin = find_asset(asset_id)
         if builtin is not None:
             raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable", "library_asset_id": asset_id})
-        if get_library_asset_usage(asset_id)["locations"]:
-            raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": get_library_asset_usage(asset_id)["locations"]})
+        # **여기서는 깊게 본다.** 옛 프로젝트가 쓰고 있는 자산을 지우면
+        # 되돌릴 수 없다 -- 화면이 부르는 빠른 검사와 다른 무게다.
+        deep_usage = get_library_asset_usage(asset_id, deep=True)["locations"]
+        if deep_usage:
+            raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": deep_usage})
         try:
             return {"asset": public_user(user_asset_store.trash_asset(asset_id))}
         except ValueError as exc:
