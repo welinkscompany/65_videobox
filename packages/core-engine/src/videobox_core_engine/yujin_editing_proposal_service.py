@@ -247,8 +247,10 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "set_segment_bounds(장면의 시작·끝 시각을 옮긴다 -- \"앞부분 3초 잘라줘\"가 이것이다), "
         "set_cut_action(장면을 쓸지 뺄지), reorder_segments(장면 순서), "
         "set_caption_font(자막 글꼴·크기), "
-        "set_caption_text, set_scene_look, set_picture_cleanup, set_sound_cleanup, set_scene_transform, "
-        "apply_media, remove_media뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "set_caption_text(자막 글), set_scene_look(색감), set_picture_cleanup(손떨림·화면 노이즈), "
+        "set_sound_cleanup(소리 크기 맞추기·잡음 줄이기), set_scene_transform(확대·위치·기울이기), "
+        "apply_media(영상·음악·효과음을 깐다), "
+        "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
         # 완성본에서 빼는 것이었다. 한국어 "빼다"는 둘 다 되므로 어느 쪽인지를
