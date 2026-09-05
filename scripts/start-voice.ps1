@@ -52,12 +52,31 @@ if (-not (Test-Path $python)) {
     exit 1
 }
 
+# **이미 켜져 있으면 여기서 끝낸다**(owner 지적 2026-09-05: 창이 계속 뜬다).
+#
+# VideoBox를 켜면 `owner-ready.ps1`이 이 다리를 **창 없이** 띄운다. 그런데도
+# 손으로 이 스크립트를 켜면 창이 하나 더 생기고, 그 창을 계속 열어 둬야 하는
+# 줄 알게 된다. 실제로 owner가 그렇게 겪었다 -- 앞선 안내 문구가 "손으로
+# 켰다면 이 창을 닫지 마세요"라고 해서 더 그랬다.
+#
+# 포트가 이미 열려 있으면 **아무것도 띄우지 않고** 그 사실만 말한다.
+$already = $false
+try {
+    $probe = [System.Net.Sockets.TcpClient]::new()
+    $probe.Connect("127.0.0.1", 8199)
+    $already = $probe.Connected
+    $probe.Close()
+} catch { $already = $false }
+if ($already) {
+    Write-Host "목소리 다리는 이미 켜져 있습니다. VideoBox를 켤 때 저절로 뜹니다."
+    Write-Host "이 창은 닫으셔도 됩니다 -- 더빙은 계속 됩니다."
+    exit 0
+}
+
 $licence = if ($chosen -eq 'chatterbox') { 'MIT (상업적으로 써도 됩니다)' } else { '비상업용' }
 Write-Host "목소리 엔진: $chosen · 라이선스: $licence"
-# **VideoBox를 켜면 이 스크립트가 창 없이 같이 뜬다**(owner 지적 2026-09-05:
-# "이걸 창을 열어둬야지만 목소리 더빙을 해야되는건 말이 안되잖아").
-# 손으로 켤 때도 있으므로 그 경우의 안내만 남긴다.
-Write-Host "VideoBox를 켜면 이 다리도 저절로 뜹니다. 손으로 켰다면 이 창을 닫지 마세요."
+Write-Host "보통은 손으로 켜지 않아도 됩니다 -- VideoBox를 켜면 저절로 뜹니다."
+Write-Host "지금은 이 창이 다리를 붙잡고 있으니, 쓰는 동안은 닫지 마세요."
 
 $env:VIDEOBOX_HOST_TTS_ENGINE = $chosen
 # XTTS는 첫 실행에 라이선스 동의를 물어 멈춘다. 미리 동의를 표시해 둔다.
