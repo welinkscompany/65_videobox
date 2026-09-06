@@ -15,7 +15,7 @@ from videobox_core_engine.ass_subtitles import caption_band_px
 from videobox_core_engine.canonical_track import canonical_track_type
 from videobox_core_engine.composition_plan import CompositionPlan
 from videobox_core_engine.filters import filter_chain
-from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.media_controls import normalize_media_controls, PHOTO_MOTIONS, PHOTO_MOTION_STILL
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_warning_notes
 from videobox_core_engine.overlay_shapes import (
@@ -939,7 +939,9 @@ class FfmpegFinalRenderer:
             )
         return chain
 
-    def _photo_motion_chain(self, clip_id: str, duration_sec: float) -> str:
+    def _photo_motion_chain(
+        self, clip_id: str, duration_sec: float, chosen: str | None = None
+    ) -> str:
         """사진 한 장을 은은하게 움직이는 조각. `,`로 시작한다.
 
         **배율을 입력 프레임 번호(`in`)로 센다.** 사진 입력은 `-loop 1`이라 같은
@@ -970,7 +972,11 @@ class FfmpegFinalRenderer:
             (f"{ratio}", centre_x, f"(ih-ih/zoom)*{progress}"),                        # 위→아래
             (f"{ratio}", centre_x, f"(ih-ih/zoom)*(1-{progress})"),                    # 아래→위
         ]
-        zoom_expr, x_expr, y_expr = motions[sum(clip_id.encode()) % len(motions)]
+        # 창작자가 고른 것이 있으면 그것으로. 안 골랐을 때만 클립이 정한다.
+        if chosen == PHOTO_MOTION_STILL:
+            return ""
+        index = PHOTO_MOTIONS.index(chosen) if chosen in PHOTO_MOTIONS else sum(clip_id.encode()) % len(motions)
+        zoom_expr, x_expr, y_expr = motions[index]
         # 확대하면서 뭉개지지 않게 먼저 두 배로 키운다 -- 그림 쪽과 같은 이유다.
         return (
             f",scale={self.video_width * 2}:{self.video_height * 2}"
@@ -1087,7 +1093,9 @@ class FfmpegFinalRenderer:
             # 쓴다(`scene_image_service`). 영상에는 붙이지 않는다: 이미 움직이는
             # 그림을 또 움직이면 흔들린다.
             if (photo_clip_ids or set()) and item.clip_id in (photo_clip_ids or set()):
-                transform += self._photo_motion_chain(item.clip_id, duration_sec)
+                transform += self._photo_motion_chain(
+                    item.clip_id, duration_sec, chosen=controls.get("photo_motion")
+                )
             # 배속을 걸면 원본 창이 **화면에서 차지하는 시간**은 그만큼 줄거나
             # 는다. 아래 loop/pad 판단은 전부 화면 시간 기준이므로 여기서 한 번
             # 환산해 두고 그 값만 쓴다.

@@ -36,6 +36,18 @@ def _bounded(value: object, bounds: tuple[float, float], label: str) -> float:
     return parsed
 
 
+#: 사진 한 장이 움직이는 방식. 여섯은 AI 장면 그림 쪽과 **같은 이름**이다
+#: (`scene_image_service.SCENE_MOTIONS`). 거기서 import하지 않는 것은 그 모듈이
+#: 제공자 인터페이스까지 끌고 오기 때문이다 -- 이 파일은 렌더·API·화면이 모두
+#: 부르는 잎이라 무겁게 만들지 않는다. 두 벌이 어긋나는 것은 사람 기억이 아니라
+#: `test_photo_motion_can_be_chosen.py`가 맞대어 본다.
+#: `still`은 움직이지 않기다. **안 고른 것과는 다르다** -- 안 고르면 클립마다
+#: 알아서 정해지고, `still`은 멈춘다.
+PHOTO_MOTION_STILL = "still"
+PHOTO_MOTIONS = ("zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down")
+PHOTO_MOTION_CHOICES = frozenset(PHOTO_MOTIONS) | {PHOTO_MOTION_STILL}
+
+
 def normalize_media_controls(
     controls: object,
     *,
@@ -137,6 +149,18 @@ def normalize_media_controls(
         chosen_filter = normalize_filter(payload.get("filter"))
         if chosen_filter is not None:
             normalized["filter"] = chosen_filter
+        # 사진이 어떻게 움직일지(2026-09-06 갭검증). 여섯 가지를 만들어 두고
+        # 클립 이름 해시로 **자동 배정**하고 있어서, 창작자가 고르지도 끄지도
+        # 못했다. 색감과 같은 규칙으로 얹는다 -- **안 고른 클립에는 칸 자체를
+        # 안 넣는다.** `still`은 "안 고름"이 아니라 "움직이지 마라"이다.
+        chosen_motion = payload.get("photo_motion")
+        if chosen_motion is not None:
+            motion = str(chosen_motion).strip().lower()
+            if motion not in PHOTO_MOTION_CHOICES:
+                raise ValueError(
+                    f"B-roll photo_motion must be one of {sorted(PHOTO_MOTION_CHOICES)}."
+                )
+            normalized["photo_motion"] = motion
         # Source-window controls come from a selected local asset.  They are
         # distinct from timeline trim and must survive Director apply so both
         # FFmpeg and CapCut read the same original bytes.
