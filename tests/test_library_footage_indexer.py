@@ -276,3 +276,48 @@ def test_replaced_segment_source_fails_closed_before_embedding_or_queue_ack(tmp_
     assert report.failed == ["a.mp4"]
     assert store.saved == []
     assert store.marked == []
+
+
+def test_a_clip_that_always_fails_does_not_starve_the_queue(tmp_path: Path) -> None:
+    """**실패가 줄의 맨 앞을 영원히 차지했다** — 실측 2026-09-06.
+
+    한 바퀴에 두 개만 처리한다(화면 분석이 무겁다). 그런데 실패한 것은 다음
+    바퀴에도 그대로 맨 앞에 다시 온다 -- 성공한 것만 `done`에 들어가기 때문이다.
+    드롭 폴더의 영상 두 개가 계속 실패해서 **자료실 자산 144개가 한 시간 넘게
+    한 번도 차례를 못 받았다.** 사진 문구를 판 3으로 다시 적는 일도 그래서
+    시작조차 못 했다.
+
+    막힌 것을 고치는 것과 별개로, **막힌 것 하나가 전부를 세우면 안 된다.**
+    """
+    good = tmp_path / "good.mp4"
+    good.write_bytes(b"video")
+    pending = [
+        {"content_sha256": "bad1", "filename": "bad1.mp4", "path": str(tmp_path / "gone1.mp4")},
+        {"content_sha256": "bad2", "filename": "bad2.mp4", "path": str(tmp_path / "gone2.mp4")},
+        {"content_sha256": "good", "filename": "good.mp4", "path": str(good)},
+    ]
+    store = _FakeStore(pending)
+
+    report = _run(store, tmp_path, paths=[good], max_clips=2)
+
+    assert report.failed == ["bad1.mp4", "bad2.mp4"]
+    assert report.analyzed == ["good.mp4"], "실패 둘이 자리를 다 먹고 성한 것이 못 돌았다"
+
+
+def test_the_work_per_pass_is_still_bounded(tmp_path: Path) -> None:
+    """굶는 것을 고치면서 한 바퀴가 무한정 길어지면 안 된다.
+
+    화면 분석은 비싸다. **성공을 세는 것**으로 상한을 지키고, 실패는 그보다
+    조금 더 시도해 보되 거기서 끊는다.
+    """
+    clips = []
+    for index in range(20):
+        path = tmp_path / f"clip{index}.mp4"
+        path.write_bytes(f"video{index}".encode())
+        clips.append({"content_sha256": f"sha{index}", "filename": path.name, "path": str(path)})
+    store = _FakeStore(clips)
+
+    report = _run(store, tmp_path, paths=[], max_clips=2)
+
+    assert len(report.analyzed) == 2, report.analyzed
+    assert report.remaining == 18

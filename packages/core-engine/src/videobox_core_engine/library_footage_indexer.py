@@ -37,7 +37,11 @@ _VISION_PROMPT = VISION_ANALYSIS_PROMPT
 
 # 화면 분석은 오디오 측정보다 훨씬 무겁다. 한 번에 처리하는 수를 작게 둬서
 # 영상을 한꺼번에 넣어도 렌더링이 느려지지 않게 한다.
+
 _DEFAULT_MAX_CLIPS = 2
+#: 실패한 것을 건너뛰려면 그만큼 더 들여다봐야 한다. 4배면 계속 실패하는
+#: 파일 몇 개 뒤에 있는 성한 자산이 같은 바퀴에 차례를 받는다.
+_FAILED_ATTEMPT_MULTIPLIER = 4
 
 # owner에게 보여도 되는 갈래만 문장에 넣는다. 나머지는 태그로 저장돼 있어
 # 필요할 때 꺼내 쓸 수 있다.
@@ -117,13 +121,24 @@ def index_pending_library_footage(
     pending = store.list_footage_needing_analysis(
         paths=list(paths), description_version=FOOTAGE_DESCRIPTION_VERSION
     )
-    batch = pending if max_clips is None else pending[:max_clips]
-    report.remaining = len(pending) - len(batch)
+    # **성공을 세어 상한을 지킨다.** 예전에는 앞에서 잘랐는데, 실패한 것은
+    # 다음 바퀴에도 그대로 맨 앞에 다시 온다(성공한 것만 `done`에 들어간다).
+    # 그래서 드롭 폴더의 영상 둘이 계속 실패하자 **자료실 자산 144개가 한 번도
+    # 차례를 못 받았다**(2026-09-06 실측). 막힌 것 하나가 전부를 세우면 안 된다.
+    #
+    # 실패도 값이 든다(무거운 파일을 열어 보다 실패한다). 그래서 시도 자체에도
+    # 상한을 둔다 -- 굶지 않게 하려다 한 바퀴가 무한정 길어지면 안 된다.
+    attempt_budget = len(pending) if max_clips is None else max_clips * _FAILED_ATTEMPT_MULTIPLIER
+    batch = pending if max_clips is None else pending[:attempt_budget]
+    analysed_budget = len(pending) if max_clips is None else max_clips
 
     for clip in batch:
+        if len(report.analyzed) >= analysed_budget:
+            break
         filename = str(clip["filename"])
         path = Path(str(clip["path"]))
         if not path.is_file():
+            _logger.warning("파일이 그 자리에 없습니다: %s (%s)", filename, path)
             report.failed.append(filename)
             continue
         existing = None
@@ -211,6 +226,7 @@ def index_pending_library_footage(
             report.analyzed.append(filename)
             continue
         if vision_provider is None or not vision_model_name:
+            _logger.warning("화면 분석 모델이 없어 설명을 못 만듭니다: %s", filename)
             # 화면 분석 없이는 새 설명을 만들 수 없다. 조용히 성공한 척하지 않는다.
             report.failed.append(filename)
             continue
@@ -225,6 +241,11 @@ def index_pending_library_footage(
                 )
             )
         except Exception:
+            # **이유를 삼키지 않는다.** 자료실 영상 둘이 매 바퀴 실패하는데
+            # 로그에는 "색인하지 못했습니다"뿐이라 무엇이 막는지 알 수 없었다
+            # (2026-09-06 실측). 이 저장소가 관대한 except로 이미 한 번 크게
+            # 헤맸다.
+            _logger.warning("화면 분석이 실패했습니다: %s", filename, exc_info=True)
             report.failed.append(filename)
             continue
 
@@ -257,6 +278,8 @@ def index_pending_library_footage(
         )
         report.analyzed.append(filename)
 
+    # 남은 수는 **성공한 것만** 뺀다. 실패한 것은 다음 바퀴에도 다시 온다.
+    report.remaining = max(0, len(pending) - len(report.analyzed))
     return report
 
 
