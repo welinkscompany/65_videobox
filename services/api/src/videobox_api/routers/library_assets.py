@@ -289,6 +289,35 @@ def build_library_assets_router(
             deduped.append(value)
         return {"matches": deduped[:limit], "semantic": semantic}
 
+    def _without_ghost_projects(locations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """참조 중 **이미 사라진 프로젝트**를 가리키는 것을 걷어낸다.
+
+        프로젝트 목록을 못 읽으면 아무것도 걷지 않는다 -- 목록이 비어 보인다고
+        참조를 지우면 살아 있는 자산을 지우게 된다. 지우는 것은 되돌릴 수 없다.
+        """
+        try:
+            known = {
+                str(project.get("project_id", ""))
+                for project in getattr(project_store, "list_projects", lambda **_: [])(include_archived=True)
+            }
+        except Exception:  # pragma: no cover - 목록을 못 읽으면 그대로 둔다
+            _LOGGER.warning("프로젝트 목록을 못 읽어 유령 참조를 그대로 둡니다", exc_info=True)
+            return locations
+        # **목록이 비어 있는 것은 정상이다** -- 프로젝트를 다 지운 상태다. 처음에
+        # 여기서 그냥 돌아가게 했더니 마지막 프로젝트의 유령이 안 걷혔다. 목록을
+        # 못 읽는 경우는 위에서 예외로 이미 갈랐다.
+        kept, ghosts = [], []
+        for location in locations:
+            (kept if str(location.get("project_id") or "") in known else ghosts).append(location)
+        for ghost in ghosts:
+            reference_id = str(ghost.get("reference_id") or "")
+            if reference_id:
+                try:
+                    user_asset_store.remove_project_reference(reference_id)
+                except Exception:  # pragma: no cover - 못 지워도 세지는 않는다
+                    _LOGGER.warning("유령 참조를 못 지웠습니다: %s", reference_id, exc_info=True)
+        return kept
+
     @router.get("/api/library/assets/{asset_id}/usage")
     def get_library_asset_usage(asset_id: str, deep: bool = False) -> dict[str, Any]:
         """이 자산을 어디서 쓰고 있나.
@@ -307,6 +336,13 @@ def build_library_assets_router(
         locations = user_asset_store.usage(asset_id)
         if not deep:
             return {"library_asset_id": asset_id, "locations": locations}
+        # **없는 프로젝트는 세지 않는다.** 참조 등록부는 프로젝트 폴더가 아니라
+        # 자료실 DB에 있어서, 옛 삭제 경로로 지워진 프로젝트의 참조가 유령으로
+        # 남았다 -- 실측 2026-09-06에 셋이 시험용 자산 열둘을 막고 있었다.
+        #
+        # **못 읽은 프로젝트와는 다르다.** 못 읽은 것은 아래에서 세어 알리고
+        # 막는다(그 판단은 그대로 둔다). 아예 없는 것은 막을 근거가 못 된다.
+        locations = _without_ghost_projects(locations)
         # **못 읽은 프로젝트를 세어 둔다**(코드리뷰 2026-09-06). 아래 훑기는
         # 프로젝트 하나에서 예외가 나면 그 프로젝트를 건너뛰는데, 계속 훑는 것
         # 자체는 맞다 -- 하나를 못 읽는다고 지우기를 통째로 막으면 안 된다.

@@ -64,3 +64,33 @@ def test_a_living_project_still_blocks(tmp_path: Path) -> None:
     client.post(f"/api/library/assets/{asset_id}/materialize", json={"project_id": project_id})
 
     assert client.post(f"/api/library/assets/{asset_id}/trash").status_code == 409
+
+
+def test_a_reference_to_a_project_that_no_longer_exists_is_swept(tmp_path: Path) -> None:
+    """**예전에 지워진 프로젝트도 유령을 남겼다** — 실측 2026-09-06.
+
+    삭제할 때 참조를 걷게 고쳤지만, 그 전에 지워진 프로젝트들의 참조는 이미
+    등록부에 남아 있다. 실제로 셋이 그랬고(2026-09-05 정리 때 지운 것들),
+    그것들이 시험용 자산 열둘을 막고 있었다.
+
+    **없는 프로젝트는 "못 읽은 프로젝트"와 다르다.** 못 읽은 것은 알리고 막아야
+    하지만(그 판단은 그대로 둔다), 아예 없는 것은 세지 않는다.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    asset_id = _library_asset(client, tmp_path, mark=3)
+    project_id = client.post("/api/projects", json={"name": "사라질 프로젝트"}).json()["project_id"]
+    client.post(f"/api/library/assets/{asset_id}/materialize", json={"project_id": project_id})
+
+    # 폴더만 지운다 -- 옛 삭제 경로가 하던 그대로다(참조는 안 걷혔다).
+    import shutil
+
+    folders = [path for path in tmp_path.rglob(project_id) if path.is_dir()]
+    assert folders, f"프로젝트 폴더를 못 찾았다: {project_id}"
+    shutil.rmtree(folders[0])
+
+    response = client.get(f"/api/library/assets/{asset_id}/usage?deep=true")
+    usage = response.json()
+
+    assert response.status_code == 200, usage
+    assert usage["locations"] == [], f"없는 프로젝트가 아직 센다: {usage}"
+    assert client.post(f"/api/library/assets/{asset_id}/trash").status_code == 200
