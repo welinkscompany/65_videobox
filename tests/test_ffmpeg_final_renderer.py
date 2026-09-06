@@ -1601,3 +1601,76 @@ def test_a_photo_in_a_broll_slot_is_stretched_to_fill_the_scene(
     window = command[max(0, photo_input - 6):photo_input]
     assert "-loop" in window, f"사진 입력에 -loop가 없다: {window}"
     assert window[window.index("-loop") + 1] == "1"
+
+
+def test_a_photo_scene_moves_instead_of_standing_still(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """사진 장면이 멈춰 있었다 — owner 요청 2026-09-06.
+
+    > "사진 움직이는 효과도 다양한 형태로 움직이게"
+
+    사진을 장면으로 쓸 수 있게 됐지만(`_looks_like_image`) 화면에는 **정지 그림이
+    11초 동안 그대로** 있었다. 브이로그에서 그건 못 쓴다.
+
+    AI 장면 그림 쪽은 이미 `zoompan`으로 움직인다(`scene_image_service`). 여기도
+    같은 필터를 쓰되, **입력이 `-loop 1`이라 배율을 `in`(입력 프레임 번호) 기준으로
+    센다** -- 그쪽 주석이 기록한 함정이다: 같은 그림이 프레임마다 다시 들어오므로
+    `zoom+step` 꼴은 이어지지 않는다.
+
+    영상 클립에는 붙이지 않는다 -- 이미 움직이는 그림을 또 움직이면 흔들린다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Photo motion")
+    photo = tmp_path / "still.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    video = tmp_path / "moving.mp4"
+    video.write_bytes(bytes(64))
+    photo_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=photo)
+    video_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+
+    timeline = {
+        "timeline_id": "timeline-photo-motion", "project_id": project.project_id,
+        "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [
+            {
+                "clip_id": "c_photo", "clip_type": "broll", "asset_id": photo_asset.asset_id,
+                "asset_uri": photo_asset.storage_uri, "segment_id": "s1",
+                "start_sec": 0.0, "end_sec": 4.0, "media_controls": {},
+            },
+            {
+                "clip_id": "c_video", "clip_type": "broll", "asset_id": video_asset.asset_id,
+                "asset_uri": video_asset.storage_uri, "segment_id": "s2",
+                "start_sec": 4.0, "end_sec": 8.0, "media_controls": {},
+            },
+        ]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    graph = commands[0][commands[0].index("-filter_complex") + 1]
+    photo_chain = next(part for part in graph.split(";") if "v_c_photo" in part)
+    video_chain = next(part for part in graph.split(";") if "v_c_video" in part)
+    assert "zoompan" in photo_chain, f"사진이 멈춰 있다: {photo_chain[:160]}"
+    # **입력 프레임 번호로 센다.** `-loop 1`은 같은 그림을 다시 넣으므로
+    # `zoom+step` 꼴은 프레임 사이에서 안 이어진다.
+    assert "on" in photo_chain or "in" in photo_chain
+    assert "zoompan" not in video_chain, "영상에도 움직임을 붙였다"

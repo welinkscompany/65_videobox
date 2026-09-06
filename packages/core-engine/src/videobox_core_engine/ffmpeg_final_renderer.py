@@ -867,6 +867,42 @@ class FfmpegFinalRenderer:
             )
         return chain
 
+    def _photo_motion_chain(self, clip_id: str, duration_sec: float) -> str:
+        """사진 한 장을 은은하게 움직이는 조각. `,`로 시작한다.
+
+        **배율을 입력 프레임 번호(`in`)로 센다.** 사진 입력은 `-loop 1`이라 같은
+        그림이 프레임마다 다시 들어오고, 그러면 `zoom+step` 꼴은 프레임 사이에서
+        이어지지 않는다 -- `scene_image_service`가 실측으로 기록해 둔 함정이다.
+        거기서는 이미지를 한 프레임만 열고 `zoompan`의 `d`가 시퀀스를 만들게 했지만,
+        여기 입력은 이미 타임라인이 자른 프레임 열이라 `d=1`로 한 장씩 처리하고
+        배율만 진행률로 센다.
+
+        **방향은 클립마다 다르게 하되 같은 편집본에서는 늘 같다.** 무작위로 뽑으면
+        같은 편집본을 두 번 렌더할 때 결과가 달라져 "완성본이 바뀌었다"가 된다 --
+        `clip_id`에서 정해지게 한다.
+        """
+        frames = max(round(max(duration_sec, 0.1) * self.video_fps), 2)
+        span = frames - 1
+        ratio = 1.12
+        step = (ratio - 1.0) / span
+        centre_x, centre_y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        progress = f"(in/{span})"
+        motions = [
+            (f"min(1+{step:.10f}*in,{ratio})", centre_x, centre_y),                    # 서서히 확대
+            (f"max({ratio}-{step:.10f}*in,1.0)", centre_x, centre_y),                  # 서서히 축소
+            (f"{ratio}", f"(iw-iw/zoom)*{progress}", centre_y),                        # 왼→오른쪽
+            (f"{ratio}", f"(iw-iw/zoom)*(1-{progress})", centre_y),                    # 오른→왼쪽
+            (f"{ratio}", centre_x, f"(ih-ih/zoom)*{progress}"),                        # 위→아래
+            (f"{ratio}", centre_x, f"(ih-ih/zoom)*(1-{progress})"),                    # 아래→위
+        ]
+        zoom_expr, x_expr, y_expr = motions[sum(clip_id.encode()) % len(motions)]
+        # 확대하면서 뭉개지지 않게 먼저 두 배로 키운다 -- 그림 쪽과 같은 이유다.
+        return (
+            f",scale={self.video_width * 2}:{self.video_height * 2}"
+            f",zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}'"
+            f":d=1:s={self.video_width}x{self.video_height}:fps={self.video_fps}"
+        )
+
     def _broll_fit_transform(self, controls: dict[str, Any]) -> str:
         """화면 클립을 출력 크기에 맞추는 방법. 전환 양쪽도 **같은 것**을 써야 한다.
 
@@ -940,6 +976,7 @@ class FfmpegFinalRenderer:
         export_overlay_indices: dict[int, int] | None = None,
         track_overlay_indices: dict[str, int] | None = None,
         transition_source_indices: dict[str, TransitionSources] | None = None,
+        photo_clip_ids: set[str] | None = None,
     ) -> str:
         """Build the shared timeline placement graph.
 
@@ -970,6 +1007,12 @@ class FfmpegFinalRenderer:
             duration_sec = item.end_sec - item.start_sec
             controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(duration_sec, 0.001))
             transform = self._broll_fit_transform(controls)
+            # **사진은 가만히 두면 멈춘 그림이다.** 브이로그에서 정지 화면 몇
+            # 초는 못 쓴다 -- AI 장면 그림 쪽이 같은 이유로 이미 zoompan을
+            # 쓴다(`scene_image_service`). 영상에는 붙이지 않는다: 이미 움직이는
+            # 그림을 또 움직이면 흔들린다.
+            if (photo_clip_ids or set()) and item.clip_id in (photo_clip_ids or set()):
+                transform += self._photo_motion_chain(item.clip_id, duration_sec)
             # 배속을 걸면 원본 창이 **화면에서 차지하는 시간**은 그만큼 줄거나
             # 는다. 아래 loop/pad 판단은 전부 화면 시간 기준이므로 여기서 한 번
             # 환산해 두고 그 값만 쓴다.
@@ -1489,6 +1532,10 @@ class FfmpegFinalRenderer:
             export_overlay_indices=export_overlay_indices,
             track_overlay_indices=track_overlay_indices,
             transition_source_indices=transition_source_indices,
+            # 어느 장면이 사진인지 그래프는 모른다 -- 소스 경로를 든 여기서 알려 준다.
+            photo_clip_ids={
+                clip_id for clip_id, path in broll_source_paths.items() if _looks_like_image(path)
+            },
         )
         duration = max(composition_plan.duration_sec, 0.001)
         graph += ";" + self.build_plan_audio_filter_graph(
