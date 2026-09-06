@@ -8,6 +8,7 @@ from typing import Any
 import wave
 
 from pycapcut.audio_segment import AudioSegment
+from pycapcut.keyframe import KeyframeProperty
 from pycapcut.local_materials import AudioMaterial, CropSettings, VideoMaterial
 from pycapcut.script_file import ScriptFile
 from pycapcut.segment import ClipSettings
@@ -19,7 +20,12 @@ from pycapcut import FilterType, TransitionType
 
 from videobox_capcut_export.capcut_looks import capcut_filter_name
 from videobox_core_engine.canonical_track import canonical_track_type
-from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.ffmpeg_final_renderer import _IMAGE_SUFFIXES
+from videobox_core_engine.media_controls import (
+    PHOTO_MOTIONS,
+    PHOTO_MOTION_STILL,
+    normalize_media_controls,
+)
 from videobox_core_engine.transitions import TRANSITION_TYPES, normalize_transition
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_metadata, output_warning_notes
@@ -64,6 +70,87 @@ if set(_CAPCUT_TRANSITION_TYPE_BY_KEY) != set(TRANSITION_TYPES):
         "pycapcut_adapter's transition map is out of sync with "
         "videobox_core_engine.transitions.TRANSITION_CATALOG."
     )
+
+
+# 사진 한 장짜리 장면을 캡컷 초안 안에서 움직이는 값.
+#
+# **완성본 렌더러(`ffmpeg_final_renderer._photo_motion_chain`)와 같은 수를 써야
+# 한다.** 거기는 `ratio = 1.12`로 확대해 놓고 그 여백만큼 훑는다. 두 벌이
+# 어긋나면 캡컷에서 연 그림이 완성본과 다르게 움직인다 --
+# `test_capcut_export_moves_the_photo.py`가 렌더러 원문과 맞대어 본다.
+_PHOTO_MOTION_ZOOM = 1.12
+# 1.12배로 키우면 화면 밖으로 나간 몫이 가로세로 각각 0.12 프레임이고, 가운데에서
+# 한쪽으로 갈 수 있는 최대치는 그 절반이다. 캡컷의 위치 단위는 `화면의 절반`이라
+# (`KeyframeProperty.position_x` 설명) 절반을 다시 두 배로 돌리면 `1.12 - 1`이
+# 그대로 값이 된다.
+_PHOTO_MOTION_PAN = _PHOTO_MOTION_ZOOM - 1.0
+
+#: 움직임 이름 -> (배율 시작·끝, 위치 keyframe 또는 None).
+#:
+#: 방향은 렌더러의 `motions` 배열과 같은 뜻으로 적었다. `pan_left`는 **그림이
+#: 왼쪽으로 흐른다**(렌더러 쪽에서는 잘라내는 창이 오른쪽으로 간다) --
+#: 캡컷 좌표에서는 position_x가 줄어드는 것이 같은 그림이다.
+_PHOTO_MOTION_KEYFRAMES: dict[str, tuple[tuple[float, float], tuple[Any, float, float] | None]] = {
+    "zoom_in": ((1.0, _PHOTO_MOTION_ZOOM), None),
+    "zoom_out": ((_PHOTO_MOTION_ZOOM, 1.0), None),
+    "pan_left": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_x, _PHOTO_MOTION_PAN, -_PHOTO_MOTION_PAN)),
+    "pan_right": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_x, -_PHOTO_MOTION_PAN, _PHOTO_MOTION_PAN)),
+    "pan_up": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_y, -_PHOTO_MOTION_PAN, _PHOTO_MOTION_PAN)),
+    "pan_down": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_y, _PHOTO_MOTION_PAN, -_PHOTO_MOTION_PAN)),
+}
+
+# 전환 표와 같은 이유로 여기서 죽는다: 카탈로그에 움직임을 하나 더하고 이 표를
+# 안 고치면 그 움직임만 캡컷 내보내기에서 조용히 빠진다.
+if set(_PHOTO_MOTION_KEYFRAMES) != set(PHOTO_MOTIONS):
+    raise RuntimeError(
+        "pycapcut_adapter's photo motion map is out of sync with "
+        "videobox_core_engine.media_controls.PHOTO_MOTIONS."
+    )
+
+
+def _looks_like_photo(path: Path) -> bool:
+    """사진인가. 확장자 목록은 렌더러가 갖고 있는 한 벌을 그대로 쓴다
+    (`test_photo_suffixes_are_one_list.py`가 그 한 벌을 지킨다)."""
+    return path.suffix.lower() in _IMAGE_SUFFIXES
+
+
+def _with_photo_motion(
+    segment: VideoSegment,
+    controls: dict[str, Any],
+    *,
+    is_photo: bool,
+    clip_id: str,
+    duration_us: int,
+) -> VideoSegment:
+    """사진 장면이 어떻게 움직일지를 캡컷 키프레임 **두 점**으로 적는다.
+
+    영상에는 걸지 않는다 -- 이미 움직이는 그림을 또 움직이면 흔들린다(렌더러가
+    사진에만 거는 것과 같은 이유다). `still`은 창작자가 "가만히 둬"를 고른
+    것이므로 아무것도 얹지 않는다.
+
+    **안 골랐을 때도 움직인다.** 렌더러는 그때 클립 이름 해시로 방향을 정하고
+    실제로 움직인다 -- 여기서만 멈춰 두면 캡컷으로 넘긴 순간 사진이 멈춘 그림이
+    된다. 같은 해시를 써서 같은 방향을 고른다.
+    """
+    if not is_photo:
+        return segment
+    chosen = str(controls.get("photo_motion") or "")
+    if chosen == PHOTO_MOTION_STILL:
+        return segment
+    motion = (
+        chosen
+        if chosen in _PHOTO_MOTION_KEYFRAMES
+        else PHOTO_MOTIONS[sum(clip_id.encode()) % len(PHOTO_MOTIONS)]
+    )
+    (start_scale, end_scale), pan = _PHOTO_MOTION_KEYFRAMES[motion]
+    end_us = max(duration_us, 1)
+    segment.add_keyframe(KeyframeProperty.uniform_scale, 0, start_scale)
+    segment.add_keyframe(KeyframeProperty.uniform_scale, end_us, end_scale)
+    if pan is not None:
+        axis, start_value, end_value = pan
+        segment.add_keyframe(axis, 0, start_value)
+        segment.add_keyframe(axis, end_us, end_value)
+    return segment
 
 
 def _with_look(segment: VideoSegment, controls: dict[str, Any]) -> VideoSegment:
@@ -512,31 +599,35 @@ class PyCapCutRealExportAdapter:
             raise PyCapCutExportError(
                 f"B-roll source is too short for the requested speed: {resolved.path}."
             )
+        # 사진 장면은 멈춘 그림으로 내보내지 않는다. 어떤 파일이 사진인지는
+        # 소재 경로가 알고 있다(완성본 렌더러도 같은 방법으로 판단한다).
+        is_photo = _looks_like_photo(resolved.path)
+        clip_id = str(clip.get("clip_id") or "")
         elapsed_us = 0
         last_segment: VideoSegment | None = None
         while elapsed_us < needed_duration_us and controls["loop"]:
             segment_duration_us = min(source_available_timeline_us, needed_duration_us - elapsed_us)
             # `speed`를 함께 주면 pycapcut이 target 길이를 source/speed로 다시
             # 계산한다. 그래서 source에 화면 시간 × 배속을 넣는다.
-            segment = _with_look(VideoSegment(
+            segment = _with_photo_motion(_with_look(VideoSegment(
                 material,
                 Timerange(start=placement_start_us + elapsed_us, duration=segment_duration_us),
                 source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
                 speed=speed,
                 volume=volume,
-            ), controls)
+            ), controls), controls, is_photo=is_photo, clip_id=clip_id, duration_us=segment_duration_us)
             script.add_segment(segment, "broll")
             last_segment = segment
             elapsed_us += segment_duration_us
         if not controls["loop"]:
             segment_duration_us = min(source_available_timeline_us, needed_duration_us)
-            last_segment = _with_look(VideoSegment(
+            last_segment = _with_photo_motion(_with_look(VideoSegment(
                 material,
                 Timerange(start=placement_start_us, duration=segment_duration_us),
                 source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
                 speed=speed,
                 volume=volume,
-            ), controls)
+            ), controls), controls, is_photo=is_photo, clip_id=clip_id, duration_us=segment_duration_us)
             script.add_segment(last_segment, "broll")
             elapsed_us = segment_duration_us
         if elapsed_us >= needed_duration_us:
