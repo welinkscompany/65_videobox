@@ -213,15 +213,23 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
         # 답한 마지막 겹이 이것이었다.
         # 사진(`image`)도 화면 자리에 놓이므로 같은 이름으로 적는다
         # (2026-09-06). 저장 이름과 쓸 이름이 다른 것은 이 둘뿐이다.
+        stored_type = str(asset_types.get(asset_id, ""))
         kind = {"broll_video": "broll", "image": "broll"}.get(
-            str(asset_types.get(asset_id, "")), asset_types.get(asset_id, "알 수 없음")
+            stored_type, asset_types.get(asset_id, "알 수 없음")
         )
+        # **사진이라는 것은 따로 말해 준다.** `set_image_overlay`는 사진만 받는데,
+        # 종류를 `broll`로만 적어 두면 유진에게는 영상과 구별할 신호가 없다 --
+        # 고를 근거를 안 주고 틀리면 `media_asset_type_mismatch`로 거절하는 꼴이
+        # 된다(2026-09-06 코드리뷰). `apply_media`에 쓸 이름은 그대로 `broll`이다.
+        if stored_type == "image":
+            kind = f"{kind}·사진"
         entries.append(f"{asset_id}({kind}, {label})" if label else f"{asset_id}({kind})")
     if not entries:
         return "승인된 자산이 없다 -- apply_media를 시도하지 마라."
     return (
         f"승인된 자산: {', '.join(entries)}. "
-        "괄호 안의 이름과 태그를 보고 **장면에 어울리는 것**을 골라라 -- 목록의 첫 번째를 기계적으로 집지 마라."
+        "괄호 안의 이름과 태그를 보고 **장면에 어울리는 것**을 골라라 -- 목록의 첫 번째를 기계적으로 집지 마라. "
+        "`·사진`이 붙은 것만 `set_image_overlay`로 화면 위에 얹을 수 있다."
     )
 
 

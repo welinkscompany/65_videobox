@@ -409,5 +409,9 @@ def test_the_catalogue_names_a_photo_the_way_apply_media_wants_it() -> None:
 
     assert runtime.request is not None
     prompt = str(runtime.request["prompt"])
-    assert "user_photo(broll," in prompt
+    assert "user_photo(broll" in prompt
     assert "user_photo(image" not in prompt
+    # 2026-09-06: 그 이름 뒤에 **사진이라는 표시**를 붙였다. `set_image_overlay`는
+    # 사진만 받는데 종류가 `broll` 하나뿐이면 유진에게 가려낼 신호가 없었다.
+    # `broll`이 앞에 그대로 있으므로 `apply_media`는 예전처럼 통한다.
+    assert "user_photo(broll·사진" in prompt

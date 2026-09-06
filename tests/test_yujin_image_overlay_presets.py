@@ -256,3 +256,27 @@ def test_a_photo_placed_without_presets_shows_up_as_blanks_not_as_defaults() -> 
     )
 
     assert _image_overlays_by_segment(session) == (("seg-1", "asset-photo(-/-/-/-)"),)
+
+
+def test_yujin_can_tell_a_photo_from_a_video_in_the_asset_list() -> None:
+    """유진이 사진을 **가려낼 신호**가 없었다 — 코드리뷰 2026-09-06.
+
+    안내문은 "사진만 얹어라"라고 하는데 자산 목록은 사진을 영상과 똑같이
+    `broll`로 적었다. 고를 근거를 안 주고 틀리면 `media_asset_type_mismatch`로
+    거절하는 꼴이다 -- 이 저장소가 자산 목록 때문에 이미 두 번 겪은 모양이다.
+
+    `apply_media`에 쓸 이름(`broll`)은 그대로 둔다. 그 이름을 바꾸면 2026-09-05에
+    고친 것이 도로 깨진다. 사진이라는 것만 덧붙인다.
+    """
+    from videobox_core_engine.yujin_editing_proposal_service import _approved_asset_catalogue
+
+    catalogue = _approved_asset_catalogue(
+        _context(
+            approved_asset_ids=("asset_photo", "asset_clip"),
+            approved_asset_types=(("asset_photo", "image"), ("asset_clip", "broll_video")),
+            approved_asset_labels=(("asset_photo", "20241208_121938.jpg"), ("asset_clip", "거리 걷기")),
+        )
+    )
+
+    assert "asset_photo(broll·사진" in catalogue, catalogue
+    assert "asset_clip(broll," in catalogue, catalogue

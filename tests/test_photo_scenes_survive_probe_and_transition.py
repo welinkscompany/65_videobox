@@ -72,3 +72,29 @@ def test_a_video_still_reports_its_real_length(tmp_path: Path) -> None:
     duration = FfmpegFinalRenderer(store=None)._probe_media_duration(video)
 
     assert 1.5 < duration < 2.5, duration
+
+
+def test_every_input_decides_photo_ness_the_same_way() -> None:
+    """입력을 다는 자리마다 **같은 함수로** 사진인지 판단하는가.
+
+    전환 입력 두 줄만 `False`로 박혀 있어서 사진 장면의 전환이 조용히 사라졌다.
+    그 두 줄이 다시 굳어도 아무 시험이 안 깨졌다 -- 실제 전환 렌더를 세우려면
+    ffmpeg를 태운 계획 하나를 통째로 만들어야 해서 아무도 안 세웠기 때문이다.
+
+    **이 시험이 지키는 것은 결과가 아니라 모양이다.** 필터가 옳게 그려지는지는
+    못 본다. 다만 "한 자리만 다르게 판단한다"는 이 저장소의 되풀이되는 실패
+    하나는 확실히 잡는다.
+    """
+    import re
+
+    from videobox_core_engine import ffmpeg_final_renderer
+
+    source = Path(ffmpeg_final_renderer.__file__).read_text(encoding="utf-8")
+    appends = re.findall(r"source_paths\.append\(\((.+?)\)\)", source)
+
+    assert len(appends) >= 4, f"입력을 다는 자리를 못 찾았다: {appends}"
+    for arguments in appends:
+        flag = arguments.split(",")[1].strip()
+        assert flag == "is_image" or flag.startswith("_looks_like_image("), (
+            f"사진 여부를 다르게 판단하는 자리가 있다: {arguments}"
+        )
