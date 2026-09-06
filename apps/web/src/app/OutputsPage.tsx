@@ -92,6 +92,10 @@ function deriveExactPreviewState(
 const FINAL_RENDER_FAILURES: Record<string, string> = {
   final_output_requires_review_approval: "검토에서 아직 승인하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요.",
   draft_bundle_gap_blocks_final_and_capcut_output: "장면이 비어 있는 구간이 있어요. 그 구간에 영상을 넣은 뒤 다시 만들어 주세요.",
+  // 빈 편집판에서 바로 누른 경우다. 엔진은 문장으로 보낸다(`local_pipeline`의
+  // 합성 단계) -- 코드가 아니어서 표에 없으면 "완성본을 만들지 못했어요"로
+  // 뭉개졌고, 정작 할 일(영상 넣기)이 화면에서 사라졌다(2026-09-06 실측).
+  "Timeline has no composable clips to render.": "아직 넣은 영상이 없어요. 편집 화면에서 영상이나 사진을 넣은 뒤 다시 만들어 주세요.",
 };
 
 /** 무엇이 낡아서 막혔는지. 엔진은 `stale_output_asset: <사유>` 한 코드에 여러
@@ -1028,7 +1032,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" || currentState?.subtitleRecord?.status === "failed" ? subtitleFailureMessage(currentState?.subtitleRecord?.error_message) : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {subtitleError ? <p>{subtitleFailureMessage(subtitleRejectedReason ?? currentState?.subtitleRecord?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
-          {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
+          {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 자막을 만들 수 있어요.</p> : null}
           <Button disabled={!canRenderSubtitle || isRenderingCurrentSubtitle} onClick={() => void handleRenderSubtitle()}>{isRenderingCurrentSubtitle ? "자막 만드는 중" : "자막 만들기"}</Button>
           {/* Vrew의 "다양한 내보내기"(#14) 참고, owner 요청 2026-08-28: "srt...
@@ -1040,7 +1044,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         <CardHeader><CardTitle>완성본</CardTitle><CardDescription>{currentFinal ? "완성본을 확인할 수 있어요." : staleFinal ? "완성본이 최신 편집본과 달라요." : finalRender?.status === "failed" ? finalRenderFailureMessage(finalRender?.error_message) : hasPendingFinal ? "완성본을 만드는 중이에요." : timelineJob ? "현재 편집본의 완성본을 만들 수 있어요." : "아직 완성본이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {finalError ? <p>{finalRenderFailureMessage(finalRejectedReason ?? finalRender?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
-          {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
+          {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
           {currentFinal && finalRender.render?.has_sound === false ? <p>완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.</p> : null}
           {currentFinal ? <video className="vb-output-video" aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
@@ -1096,7 +1100,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비되었어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? capcutDraftFailureMessage(capcutDraft?.error_message) : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
         <CardContent>
           {capcutError ? <p>{capcutDraftFailureMessage(capcutRejectedReason ?? capcutDraft?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
-          {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
+          {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 CapCut 초안을 만들 수 있어요.</p> : null}
           {hasPendingCapcut ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}
           {capcutDraft?.status === "failed" ? <p>CapCut 초안 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}

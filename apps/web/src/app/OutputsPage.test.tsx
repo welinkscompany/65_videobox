@@ -2196,6 +2196,15 @@ describe("완성본 실패 이유", () => {
     expect(finalRenderFailureMessage("stale_output_asset: materialized source is missing or unavailable")).toContain("파일");
   });
 
+  it("빈 편집판이라 막힌 것이면 무엇을 넣어야 하는지 말한다", () => {
+    // 2026-09-06 실측: `+ 새로 만들기`로 만든 빈 편집판에서 완성본을 누르면
+    // 엔진이 "넣은 것이 없다"고 정확히 말해 주는데, 화면은 "완성본을 만들지
+    // 못했어요"로 뭉개고 있었다. 정작 필요한 동작은 영상을 넣는 것이다.
+    const message = finalRenderFailureMessage("Timeline has no composable clips to render.");
+    expect(message).toContain("영상");
+    expect(message).not.toContain("Timeline");
+  });
+
   it("모르는 사유가 붙어 와도 낡았다는 것까지는 말한다", () => {
     // 사유는 엔진이 늘리는 자리다. 새 사유가 와도 "무언가 낡았다"는 것은
     // 확실하니, 아무 말도 못 하는 것보다 그만큼은 말한다.

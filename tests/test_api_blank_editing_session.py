@@ -76,3 +76,47 @@ def test_a_blank_board_needs_a_real_project(tmp_path: Path) -> None:
     response = client.post("/api/projects/does-not-exist/editing-sessions/blank")
 
     assert response.status_code in {404, 422}, response.text
+
+
+def test_a_blank_board_can_reach_the_finished_video(tmp_path: Path) -> None:
+    """빈 편집판으로 들어온 창작자가 완성본까지 갈 길이 있어야 한다.
+
+    2026-09-06 실측: `+ 새로 만들기`로 들어가면 편집판은 열리는데 내보내기가
+    막다른 길이었다. 빈 편집판은 타임라인을 실제로 만들면서 **그 타임라인을
+    만들었다는 작업 기록만 안 남기고** 있었고, 출력 화면은 그 기록으로
+    "편집본 준비됨"을 판단한다. 부분 재생성은 2026-09-03에 같은 함정을
+    고쳤는데(`editing_session_and_regeneration._record_timeline_build`)
+    빈 편집판 경로가 빠져 있었다.
+    """
+    client, project_id = _client(tmp_path)
+
+    session = client.post(f"/api/projects/{project_id}/editing-sessions/blank").json()
+    timeline_id = session["timeline_id"]
+
+    jobs = client.get(f"/api/projects/{project_id}/jobs").json()["jobs"]
+    builds = [
+        job
+        for job in jobs
+        if job["job_type"] == "timeline_build"
+        and job["output_ref"] == timeline_id
+        and job["status"] == "succeeded"
+    ]
+    assert builds, jobs
+
+    # 사람 게이트는 그대로다 -- 승인 없이는 완성본을 만들지 못한다.
+    approval = client.get(
+        f"/api/projects/{project_id}/review-approvals/timelines/{timeline_id}"
+    ).json()
+    assert approval["review_status"] != "approved"
+    assert approval["source_session_id"] == session["session_id"]
+    assert approval["is_current"] is True
+
+    # 승인하고 나면 완성본 요청이 "그런 작업 없음"으로 튕기지 않는다.
+    assert client.post(
+        f"/api/projects/{project_id}/review-approvals/{builds[0]['job_id']}/approve"
+    ).status_code == 202
+    started = client.post(
+        f"/api/projects/{project_id}/jobs/final-render",
+        json={"timeline_job_id": builds[0]["job_id"]},
+    )
+    assert started.status_code != 404, started.text

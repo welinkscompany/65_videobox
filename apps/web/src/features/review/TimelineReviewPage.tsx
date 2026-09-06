@@ -95,7 +95,15 @@ export function TimelineReviewSections({
     return <section aria-live="polite"><p>검토 내용을 불러오는 중이에요.</p></section>;
   }
   if (state.kind === "no-session") return <ReviewRecovery message="먼저 편집할 초안을 만들어 주세요." onRefresh={refresh} />;
-  if (state.kind === "no-match") return <ReviewRecovery message="현재 편집본과 맞는 검토본이 없어요." onRefresh={refresh} />;
+  // 편집본은 있는데 그것을 만든 기록이 없는 경우다. `다시 확인`은 같은 답만
+  // 되풀이하므로, 무엇을 하면 되는지 말하고 편집으로 돌려보낸다.
+  if (state.kind === "no-match") return <ReviewRecovery
+    message="아직 검토할 편집본이 없어요. 편집 화면에서 장면을 채우고 저장하면 여기에서 완성본을 만들 수 있어요."
+    onRefresh={refresh}
+    editorHref={state.sessionId
+      ? editorSessionHref(state.projectId, state.sessionId)
+      : `/projects/${encodeURIComponent(state.projectId)}/editor`}
+  />;
   if (state.kind === "error") return <ReviewRecovery message="검토 내용을 불러오지 못했어요." onRefresh={refresh} />;
   if (state.kind === "stale") {
     return <ReviewRecovery

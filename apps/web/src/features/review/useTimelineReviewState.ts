@@ -30,7 +30,9 @@ export type TimelineReviewState =
   | TimelineReviewReadyState
   | Readonly<{ kind: "loading"; projectId: string }>
   | Readonly<{ kind: "no-session"; projectId: string }>
-  | Readonly<{ kind: "no-match"; projectId: string }>
+  // 어느 편집본을 보고 있었는지 함께 들고 간다. 이게 없으면 화면이 "없어요"만
+  // 말하고 창작자를 편집으로 돌려보낼 길이 없다.
+  | Readonly<{ kind: "no-match"; projectId: string; sessionId?: string }>
   | Readonly<{ kind: "error"; projectId: string }>
   // 낡은 검토본을 지금 편집본으로 다시 세우려면 어느 편집본인지 알아야 한다.
   // 편집본 자체를 못 읽은 경우에는 없으므로 단추도 그때는 뜨지 않는다.
@@ -140,7 +142,7 @@ export function useTimelineReviewState(projectId: string) {
       }
       const job = selectCurrentTimelineJob(session, jobs);
       if (!job) {
-        setState({ kind: "no-match", projectId: loadProjectId });
+        setState({ kind: "no-match", projectId: loadProjectId, sessionId: session.session_id });
         setData({ ...emptyData, session, jobs });
         return { ...emptyData, session, jobs };
       }

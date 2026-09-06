@@ -149,7 +149,9 @@ describe("TimelineReviewPage", () => {
     vi.mocked(api.getLatestEditingSession).mockResolvedValue(session());
     vi.mocked(api.listJobs).mockResolvedValueOnce([timelineJob("project-a", "timeline-other")]);
     fireEvent.click(screen.getByRole("button", { name: "다시 확인" }));
-    expect(await screen.findByText("현재 편집본과 맞는 검토본이 없어요.")).toBeVisible();
+    expect(await screen.findByText("아직 검토할 편집본이 없어요. 편집 화면에서 장면을 채우고 저장하면 여기에서 완성본을 만들 수 있어요.")).toBeVisible();
+    // 막다른 길을 만들지 않는다: `다시 확인`은 같은 답만 되풀이한다.
+    expect(screen.getByRole("link", { name: "편집으로 돌아가기" })).toHaveAttribute("href", "/projects/project-a/editor?session_id=session-project-a");
 
     vi.mocked(api.listJobs).mockRejectedValueOnce(new Error("offline"));
     fireEvent.click(screen.getByRole("button", { name: "다시 확인" }));

@@ -2789,6 +2789,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline_id=str(session_payload["timeline_id"]),
             session_payload=session_payload,
         )
+        # **타임라인을 만들었다는 기록을 남긴다.**
+        #
+        # 안 남기면 내보내기가 막다른 길이 된다 -- 출력 화면은 `지금 타임라인을
+        # 만든 succeeded timeline_build 작업`이 있어야 "편집본 준비됨"으로 보고,
+        # 완성본 요청도 그 작업을 가리킨다. 빈 편집판은 타임라인을 실제로
+        # 만들면서(`save_timeline_run`) 이 기록만 빠뜨리고 있었고, 그래서
+        # `+ 새로 만들기`로 들어온 창작자는 `완성본 만들기`가 눌리지 않는
+        # 화면을 만났다(2026-09-06 실측). 부분 재생성 경로는 2026-09-03에
+        # 같은 함정을 고쳤다.
+        self._record_timeline_build(project_id=project_id, timeline_id=str(timeline["timeline_id"]))
         return saved
 
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
