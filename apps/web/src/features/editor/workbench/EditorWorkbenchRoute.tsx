@@ -912,28 +912,47 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   // 라이브러리 그림은 아직 이 프로젝트 자산이 아니다. 오버레이는 프로젝트
   // 자산 식별자만 읽으므로 먼저 복사한다. 복사는 내용 해시로 이미 있는 것을
   // 다시 쓰므로, 같은 그림을 여러 장면에 얹어도 사본이 늘지 않는다.
+  // 자료실 그림은 아직 이 프로젝트 자산이 아니다. 얹든 깔든 프로젝트 자산
+  // 식별자로만 부를 수 있으므로 먼저 복사한다. 복사는 내용 해시로 이미 있는
+  // 것을 다시 쓰므로, 같은 사진을 여러 장면에 써도 사본이 늘지 않는다.
+  const resolveProjectPictureId = async (card: EditorAssetCard, isCurrent: () => boolean) => {
+    if (card.assetId) return card.assetId;
+    if (!card.libraryAssetId) throw new Error("asset identifier is missing");
+    const materialized = await api.materializeLibraryAsset(card.libraryAssetId, projectId);
+    if (!isCurrent()) return null;
+    return materialized.asset.asset_id;
+  };
   const applyImageOverlay = (card: EditorAssetCard, segmentId: string) =>
     commitTimelineMutation(async (port, isCurrent) => {
-      let assetId = card.assetId;
-      if (!assetId && card.libraryAssetId) {
-        const materialized = await api.materializeLibraryAsset(card.libraryAssetId, projectId);
-        if (!isCurrent()) return;
-        assetId = materialized.asset.asset_id;
-      }
-      if (!assetId) throw new Error("asset identifier is missing");
+      const assetId = await resolveProjectPictureId(card, isCurrent);
+      if (assetId === null) return;
       return port.applyOverlay({ kind: "image", segmentId, assetId, text: "" });
     });
-  const applyAssetCard = (card: EditorAssetCard, segmentId: string) => card.kind === "broll"
-    ? commitTimelineMutation((port) => port.applyMedia({ kind: "broll", segmentId, assetId: card.assetId }))
-    : commitTimelineMutation(async (port, isCurrent) => {
-      // 그림은 장면을 갈아 끼우지 않고 그 위에 얹는다. 화면에도 `적용` 단추가
-      // 없지만, 이 갈래가 열려 있으면 다른 호출자가 조용히 잘못 들어온다.
-      if (card.kind === "image") throw new Error("pictures are laid over a scene, not applied to it");
+  // 사진을 장면 **화면으로 깐다**(owner 요청 2026-09-06). 위의 `얹기`와 같은
+  // 복사를 지나지만 끝에서 부르는 것은 화면 교체다 -- 렌더러가 사진을
+  // `-loop 1`로 늘리고 움직임(`photo_motion`)을 얹는다. 두 길은 서로를
+  // 대신하지 않는다: 얹기는 장면을 그대로 두고 그 위에 놓는다.
+  const applySceneFromPicture = (card: EditorAssetCard, segmentId: string) =>
+    commitTimelineMutation(async (port, isCurrent) => {
+      const assetId = await resolveProjectPictureId(card, isCurrent);
+      if (assetId === null) return;
+      return port.applyMedia({ kind: "broll", segmentId, assetId });
+    });
+  const applyAssetCard = (card: EditorAssetCard, segmentId: string) => {
+    if (card.kind === "broll") {
+      return commitTimelineMutation((port) => port.applyMedia({ kind: "broll", segmentId, assetId: card.assetId }));
+    }
+    // 사진은 그 장면의 화면이 된다. 위에 얹는 길(`applyImageOverlay`)은 그대로
+    // 살아 있다 -- 둘은 서로를 대신하지 않는다.
+    if (card.kind === "image") return applySceneFromPicture(card, segmentId);
+    const kind = card.kind;
+    return commitTimelineMutation(async (port, isCurrent) => {
       if (!card.libraryAssetId) throw new Error("library asset identifier is missing");
       const materialized = await api.materializeMediaLibraryAsset(card.libraryAssetId, projectId);
       if (!isCurrent()) return;
-      return port.applyMedia({ kind: card.kind, segmentId, assetId: materialized.asset_id });
+      return port.applyMedia({ kind, segmentId, assetId: materialized.asset_id });
     });
+  };
   const activePartial = partial.key === requestKey
     ? partial
     : { key: requestKey, ticket: null, preflight: null, run: null, jobId: null, result: null, isResultOpen: false, message: null };

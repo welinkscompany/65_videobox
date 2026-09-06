@@ -1903,6 +1903,43 @@ describe("EditorWorkbenchRoute", () => {
     }));
   });
 
+  it("copies a shared-library picture into the project and lays it as the scene", async () => {
+    // owner 요청 2026-09-06: 사진도 장면 화면이 된다. 얹는 길과 **같은 복사**를
+    // 지나지만, 끝에서 부르는 것은 오버레이가 아니라 화면 교체다.
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [{
+        library_asset_id: "user_image_1",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "ready",
+        user_metadata: { filename: "바다.png" },
+        thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+        preview_url: "/api/library/assets/user_image_1/preview",
+      }],
+      total: 1,
+    } as never);
+    const materialize = vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({
+      asset: { asset_id: "project-image-9", asset_type: "image", storage_uri: "file:///x.png" },
+      reference: { reference_id: "ref-1", project_id: "project-a", library_asset_id: "user_image_1" },
+    } as never);
+    const applyOverlay = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+    const applyBroll = vi.spyOn(api, "updateEditingSessionBroll").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "바다.png 화면으로 깔기" });
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "바다.png 화면으로 깔기" }));
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("user_image_1", "project-a"));
+    await waitFor(() => expect(applyBroll).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "project-image-9",
+      media_controls: undefined,
+      expected_revision: 1,
+    }));
+    expect(applyOverlay).not.toHaveBeenCalled();
+  });
+
   it("applies B-roll through the current revision fence without materializing it", async () => {
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([broll] as never);
     const materialize = vi.spyOn(api, "materializeMediaLibraryAsset");

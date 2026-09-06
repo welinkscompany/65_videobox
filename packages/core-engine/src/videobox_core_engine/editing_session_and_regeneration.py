@@ -615,7 +615,11 @@ class EditingSessionRegenerationMixin:
         # manual B-roll placement has the same immutable provenance as a
         # Director materialized candidate.
         asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
-        if asset.get("asset_type") != AssetType.BROLL_VIDEO.value:
+        # 사진도 장면 화면이 된다(owner 요청 2026-09-06). 렌더러가 확장자를 보고
+        # `-loop 1`로 늘려 움직임을 얹으므로, 유진이 쓰는 것과 **같은**
+        # `broll_override`에 그대로 실린다 -- 새 칸을 만들 이유가 없다.
+        # 느슨하게 풀지는 않는다: 소리(음악·효과음)는 여기서 계속 막힌다.
+        if asset.get("asset_type") not in {AssetType.BROLL_VIDEO.value, AssetType.IMAGE.value}:
             raise ValueError("asset_missing")
         source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
         if not source.is_file():

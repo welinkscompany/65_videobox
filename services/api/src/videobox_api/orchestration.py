@@ -700,12 +700,23 @@ class ApiOrchestrator:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
         exact_preview = self.get_latest_exact_preview_for_session(project_id=project_id, session_id=session_id)
+
+        def _storage_uri(asset_id: str) -> str | None:
+            # 자산 하나를 못 찾아도 나머지 화면은 그려야 한다 -- 못 찾으면
+            # 지어낸 경로가 그대로 남고, 지금까지와 똑같이 보인다.
+            try:
+                asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+            except Exception:  # noqa: BLE001
+                return None
+            return str(asset.get("storage_uri") or "").strip() or None
+
         return build_editor_playback_manifest(
             project_id=project_id,
             session=session,
             timeline=timeline,
             asset_content_url_prefix=f"/api/projects/{project_id}/assets",
             exact_preview=exact_preview,
+            resolve_asset_uri=_storage_uri,
         )
 
     def _exact_preview_response(self, *, project_id: str, record: dict[str, Any]) -> dict[str, Any]:

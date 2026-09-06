@@ -5,6 +5,7 @@ layer supplies the already project-scoped session and timeline documents.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from fractions import Fraction
 from math import floor
 from typing import Any
@@ -48,6 +49,7 @@ def build_editor_playback_manifest(
     timeline: dict[str, Any],
     asset_content_url_prefix: str,
     exact_preview: dict[str, Any] | None = None,
+    resolve_asset_uri: Callable[[str], str | None] | None = None,
 ) -> dict[str, Any]:
     """Join one explicit session and its matching timeline into a view contract."""
     if str(session.get("project_id")) != project_id or str(timeline.get("project_id")) != project_id:
@@ -75,6 +77,8 @@ def build_editor_playback_manifest(
     export_overlay_track = _export_overlay_track(materialized.get("export_overlays"))
     if export_overlay_track is not None:
         raw_tracks.append(export_overlay_track)
+    if resolve_asset_uri is not None:
+        _fill_placed_asset_sources(raw_tracks, resolve_asset_uri)
     tracks = [contract for item in raw_tracks if (contract := _track_contract(item)) is not None]
     asset_ids = sorted({str(clip["asset_id"]) for track in tracks for clip in track["clips"] if clip.get("asset_id")})
     preview = dict(exact_preview or {"status": "unavailable", "url": None, "source_session_revision": None})
@@ -123,6 +127,39 @@ def build_editor_playback_manifest(
         "audition": {"asset_urls": {asset_id: f"{asset_content_url_prefix}/{asset_id}/content" for asset_id in asset_ids}},
         "exact_preview": preview,
     }
+
+
+def _fill_placed_asset_sources(
+    tracks: list[dict[str, Any]],
+    resolve_asset_uri: Callable[[str], str | None],
+) -> None:
+    """owner가 건 자산의 **실제 원본 경로**를 채운다.
+
+    합성 계획 모듈은 저장소를 모른다. 세션 override에 경로가 없으면
+    `assets/{asset_id}`를 지어내는데(`composition_plan.py`), 자산은 종류별
+    폴더에 **확장자를 달고** 저장되므로 그 경로는 언제나 존재하지 않는다.
+    렌더 경로는 `local_pipeline._resolve_session_clip_sources`가 같은 일을
+    이미 하고 있었지만, **화면이 읽는 이 목록에는 그 단계가 없었다.**
+
+    그 때문에 사진을 장면에 깔면 편집기가 확장자를 못 봐서 사진으로 읽지
+    못했다 -- `사진 움직임` 칸은 확장자로 붙는다(`inspectorRegistry.ts`의
+    `looksLikePhoto`). 깔리기는 하는데 움직임을 고를 자리가 없었다.
+    """
+    resolved: dict[str, str | None] = {}
+    for track in tracks:
+        for clip in track.get("clips", []):
+            if not isinstance(clip, dict):
+                continue
+            asset_id = str(clip.get("asset_id") or "").strip()
+            if not asset_id:
+                continue
+            uri = str(clip.get("asset_uri") or "").strip()
+            if uri and not uri.endswith(f"/assets/{asset_id}"):
+                continue
+            if asset_id not in resolved:
+                resolved[asset_id] = resolve_asset_uri(asset_id)
+            if resolved[asset_id]:
+                clip["asset_uri"] = resolved[asset_id]
 
 
 def _positive_int(value: object, default: int) -> int:

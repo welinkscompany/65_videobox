@@ -57,6 +57,24 @@ const cards: readonly EditorAssetCard[] = [
   },
 ];
 
+/** 자료실 그림 카드. 아직 이 프로젝트 자산이 아니라 `assetId`가 비어 있다. */
+const picture: EditorAssetCard = {
+  id: "library-image:user_image_1",
+  kind: "image",
+  assetId: "",
+  libraryAssetId: "user_image_1",
+  label: "그림",
+  title: "바다.png",
+  durationLabel: "",
+  status: "준비됨",
+  audioPresence: "오디오 없음",
+  license: "내 그림",
+  canApply: true,
+  previewUrl: "/api/library/assets/user_image_1/preview",
+  previewKind: "image",
+  sourceMetadata: { tags: [], source: "미디어", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+};
+
 /** **갱신 이유(2026-08-27).** 왼쪽 도크가 캡컷처럼 `미디어 · 오디오 · 전환`
  *  최상위 탭으로 갈렸다. 아래 시험들은 소리 자산이 **기본 화면에 같이 있다**는
  *  전제로 쓰여 있었는데 그 전제가 바뀌었다. 지키려는 것(줄로 눕는가, 적용이
@@ -188,6 +206,24 @@ describe("EditorAssetBrowser", () => {
     fireEvent.click(screen.getByRole("button", { name: "제품 사진 화면에 얹기" }));
 
     expect(onApplyOverlay).toHaveBeenCalledWith(cards[0], "seg-1");
+  });
+
+  // 사진도 장면 화면이 된다(owner 요청 2026-09-06). 얹는 길은 그대로 두고
+  // **까는 길을 더한다** -- 어느 쪽인지 창작자가 단추 이름만 보고 알아야 한다.
+  it("offers a picture both ways: laying it as the scene and putting it over the scene", () => {
+    const onApply = vi.fn();
+    const onApplyOverlay = vi.fn();
+    render(<EditorAssetBrowser cards={[...cards, picture]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={onApply} onApplyOverlay={onApplyOverlay} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "그림" }));
+    fireEvent.click(screen.getByRole("button", { name: "바다.png 화면으로 깔기" }));
+    fireEvent.click(screen.getByRole("button", { name: "바다.png 화면에 얹기" }));
+
+    expect(onApply).toHaveBeenCalledWith(picture, "seg-1");
+    expect(onApplyOverlay).toHaveBeenCalledWith(picture, "seg-1");
+    // 사진 카드에는 `적용`이 없다. 두 길을 다 열어 놓고 이름이 같은 단추를
+    // 하나 더 두면 어느 쪽인지 눌러 보고 나서야 안다.
+    expect(screen.queryByRole("button", { name: "바다.png 적용" })).toBeNull();
   });
 
   it("offers a picture filter so the shared library's pictures can be narrowed to", () => {

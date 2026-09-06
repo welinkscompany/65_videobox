@@ -528,10 +528,14 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <div className="vb-editor-assets__actions">
             <Button type="button" aria-label={`${card.title} ${previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}`} disabled={!card.previewUrl || previewState?.status === "preparing"} onClick={() => onPreview(card)}>{previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}</Button>
             {previewState?.status === "failed" && onRefreshExactPreview ? <Button type="button" variant="outline" onClick={onRefreshExactPreview}>정확한 미리보기 새로고침</Button> : null}
-            {/* 라이브러리 그림에는 `적용`이 없다. 그건 장면 영상을 갈아 끼우는
-                길인데 그림으로는 할 수 없고, 단추만 두면 눌러 보고 나서야 안다.
-                그림이 장면에 닿는 길은 아래 `화면에 얹기` 하나다. */}
-            {card.kind === "image" ? null : <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>}
+            {/* 사진이 장면에 닿는 길은 **둘**이다(owner 요청 2026-09-06):
+                화면 자체가 되거나(아래 `화면으로 깔기`), 화면 위에 얹히거나
+                (`화면에 얹기`). 사진 카드에서 `적용`이라는 이름을 쓰지 않는
+                이유는 두 길이 나란히 있을 때 그 이름이 어느 쪽인지 말해 주지
+                않기 때문이다 -- 눌러 보고 나서야 알게 된다. */}
+            {card.kind === "image"
+              ? <Button type="button" aria-label={`${card.title} 화면으로 깔기`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>화면으로 깔기</Button>
+              : <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>}
             {/* 이미지만: 장면을 바꾸는 `적용`(B-roll)과 달리, 장면 위에 얹는다.
                 오버레이 endpoint와 렌더는 처음부터 있었는데 이미지를 고를 자리가
                 없었다 -- 자산 목록이 그 선택기다. */}
