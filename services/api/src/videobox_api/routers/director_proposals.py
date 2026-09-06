@@ -332,7 +332,16 @@ def build_director_proposals_router(
         # 걷는 영상 깔아줘"에 유진이 `music-lost-in-city`를 골랐다 -- 고를 영상이
         # 후보에 하나도 없으니 이름이 비슷한 음악을 집은 것이다. 자료실 촬영본은
         # 색인이 장소·시간·날씨를 한국어로 적어 두므로 고를 근거가 이미 있다.
-        for media_type in ("music", "sfx", "broll"):
+        # **사진도 함께 훑는다**(2026-09-06). 사진만 빼 두었더니 "이 장면에 사진
+        # 하나 깔아줘"에 유진이 자료실 **영상**을 골랐다 -- 고를 사진이 후보에
+        # 하나도 없었기 때문이다. 2026-09-05에 영상이 음악에 밀린 그 사고의
+        # 사진판이다.
+        #
+        # 사진에는 아직 의미 색인이 없어(`library_assets.py`가 그 조회를 일부러
+        # 막아 둔다) 아래 검색이 늘 빈손이고 이름 목록 대비책으로 떨어진다.
+        # owner 사진 이름이 `20241208_121938.jpg` 꼴이라 고를 근거는 약하지만,
+        # **후보가 0개라 엉뚱한 종류를 고르는 것보다 낫다.**
+        for media_type in ("music", "sfx", "broll", "image"):
             matches: list[dict] = []
             # **촬영본 색인은 자산이 아닌 행도 돌려준다.** 영상 한 편을 여러
             # 구간으로 쪼갠 행에는 `library_asset_id`가 없어 아래에서 걸러진다.
@@ -367,7 +376,9 @@ def build_director_proposals_router(
                     "asset_id": library_asset_id,
                     # 자료실은 `music`이라 부르고 편집본은 `bgm`이라 부른다.
                     # 검증기가 보는 이름으로 맞춰 준다.
-                    "asset_type": {"music": "bgm", "sfx": "sfx", "broll": "broll_video"}[media_type],
+                    "asset_type": {
+                        "music": "bgm", "sfx": "sfx", "broll": "broll_video", "image": "image",
+                    }[media_type],
                     "label": _library_label(match),
                 })
         # 유진에게 실제로 몇 개가 갔는지 남긴다. 이게 없어서 "영상 추천이 안

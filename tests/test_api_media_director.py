@@ -3789,3 +3789,69 @@ def test_video_candidates_skip_footage_segments_and_still_fill_up(tmp_path) -> N
     # 구간 여덟에 밀리지 않고 진짜 자산이 후보에 들어간다.
     assert "user_0" in prompt
     assert "user_2" in prompt
+
+
+def test_photos_reach_yujin_as_scene_candidates(tmp_path) -> None:
+    """유진에게 사진 후보가 안 갔다 (2026-09-06 실측).
+
+    "이 장면에 사진 하나 깔아줘"라고 했더니 유진이 **자료실 영상**을 골랐다 --
+    고를 사진이 후보에 하나도 없었기 때문이다. 2026-09-05에 영상이 같은 이유로
+    음악에 밀린 그 사고의 사진판이다.
+
+    사진에는 아직 의미 색인이 없어 이름 목록으로 준다(그 대비책은 이미 있다).
+    owner 사진 이름이 `20241208_121938.jpg` 꼴이라 고를 근거는 약하지만,
+    **후보가 0개라 엉뚱한 종류를 고르는 것보다 낫다.**
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+    searched: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    class LibraryStore:
+        root = tmp_path / "library"
+
+        def inspect_active_assets(self):
+            return [
+                {"library_asset_id": "user_photo_1", "asset_id": "20241208_121938.jpg", "media_type": "image"},
+                {"library_asset_id": "user_clip_1", "asset_id": "clip.mp4", "media_type": "broll"},
+            ]
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        searched.append(media_type)
+        return []
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("사진 후보")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search, library_store=LibraryStore(),
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 사진 하나 깔아줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert "image" in searched, f"사진을 훑지 않았다: {searched}"
+    prompt = seen_prompts[-1]
+    assert "user_photo_1" in prompt, "사진이 후보 목록에 없다"
+    # 화면 자리에 놓이므로 목록에도 `broll`로 적힌다 -- 모델이 그대로 쓸 이름이다.
+    assert "user_photo_1(broll" in prompt

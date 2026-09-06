@@ -16,8 +16,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from pathlib import Path
 from typing import Any
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def materialize_library_asset(
@@ -38,11 +42,19 @@ def materialize_library_asset(
     다뤄야 하기 때문이다 -- 화면은 422로 답해야 하고, 편집안 적용은 그 한
     자산만 건너뛰고 나머지를 살릴 수 있어야 한다.
     """
+    # **왜 못 들여왔는지는 남긴다.** `None`만 돌려주면 부르는 쪽도 owner도
+    # 이유를 모른다 -- 2026-09-06에 유진이 고른 자산이 조용히 안 들어와서
+    # 원인을 찾는 데 로그부터 넣어야 했다. 삼키는 것 자체는 맞다(위 머리말).
     try:
         snapshot = library_store.snapshot_verified_asset(library_asset_id=library_asset_id)
     except Exception:
+        _LOGGER.warning("자료실 자산의 검증본을 뜨지 못했습니다 (자산=%s).", library_asset_id, exc_info=True)
         return None
     if snapshot is None:
+        _LOGGER.warning(
+            "자료실에 검증된 자산이 없습니다 (자산=%s) -- 아직 검사 중이거나 손상됐을 수 있습니다.",
+            library_asset_id,
+        )
         return None
     library_asset, snapshot_path = snapshot
     try:
@@ -54,6 +66,7 @@ def materialize_library_asset(
             mime_type=mime_type_for(Path(snapshot_path)),
         )
     except Exception:
+        _LOGGER.warning("자료실 자산을 프로젝트로 옮기지 못했습니다 (자산=%s).", library_asset_id, exc_info=True)
         return None
     finally:
         # 성공하든 실패하든 스냅숏은 지운다. 성공 경로에만 두면 실패했을 때 남는다.
