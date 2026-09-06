@@ -88,3 +88,47 @@ def test_an_unknown_motion_is_read_as_no_motion() -> None:
 
     assert x == "(W-w)/2"
     assert fade == ""
+
+
+def test_a_preset_chosen_in_the_session_survives_all_the_way_to_the_plan() -> None:
+    """고른 값이 **세션에서 렌더 계획까지** 살아 오는가.
+
+    이 저장소가 되풀이한 실패가 있다: 층마다 초록인데 사이에서 값이 조용히
+    떨어진다. 저장 화이트리스트에 새 칸을 안 넣어 그런 적이 있었고
+    (`[[videobox-caption-translation-lives-on-the-session]]`), 부품은 다 있는데
+    부르는 자리가 없어 그런 적도 있다. 그래서 층별 시험 말고 **한 줄로 꿰는**
+    시험을 따로 둔다.
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import build_editing_session, update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[{"segment_id": "segment_001", "text": "사진 하나", "start_sec": 0.0, "end_sec": 3.0}],
+    )
+    updated = update_segment_image_overlay(
+        session=session, segment_id="segment_001", asset_id="asset_photo", text="",
+        vertical="top", horizontal="right", size="small", motion="fade_in",
+    )
+
+    materialized = materialize_editing_session_timeline(timeline={"tracks": []}, editing_session=updated)
+    overlays = [
+        item for item in materialized["export_overlays"]
+        if str(item.get("asset_id") or "") == "asset_photo"
+    ]
+
+    assert overlays, f"사진 오버레이가 계획에 없다: {materialized['export_overlays']}"
+    overlay = overlays[0]
+    assert overlay["vertical"] == "top"
+    assert overlay["horizontal"] == "right"
+    assert overlay["size"] == "small"
+    assert overlay["motion"] == "fade_in"
+
+    scale, x, y, fade = export_image_overlay_geometry(
+        overlay, width=1920, height=1080,
+        start_sec=float(overlay["start_sec"]), end_sec=float(overlay["end_sec"]),
+    )
+    assert x == "W-w-115" and y == "86", (x, y)
+    assert scale.startswith("scale=672:378"), scale
+    assert "alpha=1" in fade
