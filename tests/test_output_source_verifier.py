@@ -294,3 +294,71 @@ def test_output_snapshots_reject_segment_uri_outside_narration_track(tmp_path: P
 
     with pytest.raises(OutputSourceStaleError, match="segment source is only valid for narration"):
         capture_output_source_snapshots(store=store, project_id=project.project_id, timeline=timeline)
+
+
+def test_output_snapshots_let_a_scene_with_no_narration_recording_through(tmp_path: Path) -> None:
+    """녹음이 처음부터 없는 편집본은 `낡은 원본`이 아니다.
+
+    빈 편집판(`+ 새로 만들기`)은 목소리 없이 시작한다. 타임라인 빌더는 그래도
+    장면마다 `local://.../segments/{id}` 꼴의 **가상** 내레이션 클립을 만든다 --
+    편집기의 장면 막대가 그것이다. 가리킬 녹음이 없으면 그 클립은 소리가 아니라
+    자리다. 그것 때문에 완성본 전체가 막히면 owner는 유일한 시작 경로로
+    mp4를 아예 못 낸다(2026-09-06 실측).
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="blank board without narration")
+    footage = tmp_path / "scene.mp4"
+    footage.write_bytes(b"scene bytes")
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=footage)
+    timeline = {
+        "tracks": [
+            {"track_type": "narration", "clips": [{
+                "clip_id": "clip_narration_001",
+                "segment_id": "timeline_001:001",
+                "asset_uri": f"local://projects/{project.project_id}/segments/timeline_001:001",
+                "start_sec": 0,
+                "end_sec": 5,
+            }]},
+            {"track_type": "broll", "clips": [{
+                "clip_id": "clip_broll_001",
+                "asset_id": broll.asset_id,
+                "asset_uri": broll.storage_uri,
+                "start_sec": 0,
+                "end_sec": 5,
+            }]},
+        ],
+    }
+
+    snapshots = capture_output_source_snapshots(store=store, project_id=project.project_id, timeline=timeline)
+
+    # 자리표시 내레이션은 지문을 찍을 원본이 없다. 영상만 울타리 안에 든다.
+    assert [snapshot.asset_id for snapshot in snapshots] == [broll.asset_id]
+
+
+@pytest.mark.parametrize(
+    "lost_identity",
+    ({"expected_content_sha256": "0" * 64}, {"media_revision": "2026-09-06T00:00:00+00:00"}),
+)
+def test_output_snapshots_still_block_a_narration_source_that_went_missing(
+    tmp_path: Path, lost_identity: dict[str, str]
+) -> None:
+    """**없는 것과 잃어버린 것은 다르다.**
+
+    한때 신원이 있었던 흔적(내용 해시·판번호)이 클립에 남아 있는데 지금
+    `narration_source_uri`가 없으면 그건 처음부터 없던 게 아니라 잃어버린
+    것이다. 이 울타리는 그대로 닫혀 있어야 한다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="narration source went missing")
+    timeline = {
+        "tracks": [{"track_type": "narration", "clips": [{
+            "clip_id": "clip_narration_001",
+            "asset_uri": f"local://projects/{project.project_id}/segments/segment-1",
+            "start_sec": 0,
+            "end_sec": 1,
+            **lost_identity,
+        }]}],
+    }
+
+    with pytest.raises(OutputSourceStaleError, match="segment narration source"):
+        capture_output_source_snapshots(store=store, project_id=project.project_id, timeline=timeline)

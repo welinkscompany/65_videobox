@@ -56,3 +56,55 @@ def test_a_blank_session_carries_the_same_shape_the_editor_already_reads() -> No
 def test_a_blank_session_needs_a_project() -> None:
     with pytest.raises(ValueError):
         build_blank_editing_session(project_id="  ")
+
+
+def test_a_scene_with_no_recording_does_not_reach_the_render_as_a_sound_source() -> None:
+    """녹음이 없는 장면 막대는 **소리가 아니라 자리**다.
+
+    빈 편집판에서 시작하면 목소리가 없다. 그래도 타임라인에는 장면마다 가상
+    내레이션 클립이 생긴다(편집기가 그리는 그 막대). 그 막대가 완성본 만드는
+    쪽까지 `읽을 오디오`로 넘어가면 열 수 없는 파일을 찾다가 렌더가 통째로
+    멈춘다. 화면에는 남기고, 완성본 계획에서만 뺀다.
+    """
+    from videobox_core_engine.composition_plan import CompositionPlan
+
+    timeline = {
+        "output": {"width": 1920, "height": 1080, "duration_sec": 5.0},
+        "tracks": [
+            {"track_type": "narration", "track_id": "narration_primary", "clips": [{
+                "clip_id": "clip_narration_001", "segment_id": "timeline_001:001",
+                "asset_uri": "local://projects/p1/segments/timeline_001:001",
+                "start_sec": 0.0, "end_sec": 5.0,
+            }]},
+            {"track_type": "broll", "track_id": "broll_overlay", "clips": [{
+                "clip_id": "clip_broll_001", "segment_id": "timeline_001:001",
+                "asset_id": "asset_scene", "asset_uri": "local://projects/p1/assets/asset_scene",
+                "start_sec": 0.0, "end_sec": 5.0,
+            }]},
+        ],
+    }
+
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+
+    assert [item.track_type for item in plan.items] == ["broll"]
+
+
+def test_a_scene_whose_recording_exists_still_reaches_the_render() -> None:
+    """녹음이 있으면 그 막대는 여전히 소리다. 위 규칙이 목소리를 지우면 안 된다."""
+    from videobox_core_engine.composition_plan import CompositionPlan
+
+    timeline = {
+        "narration_source_uri": "local://projects/p1/assets/asset_narration",
+        "output": {"width": 1920, "height": 1080, "duration_sec": 5.0},
+        "tracks": [
+            {"track_type": "narration", "track_id": "narration_primary", "clips": [{
+                "clip_id": "clip_narration_001", "segment_id": "timeline_001:001",
+                "asset_uri": "local://projects/p1/segments/timeline_001:001",
+                "start_sec": 0.0, "end_sec": 5.0,
+            }]},
+        ],
+    }
+
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+
+    assert [item.track_type for item in plan.items] == ["narration"]

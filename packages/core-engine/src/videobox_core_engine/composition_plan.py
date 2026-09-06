@@ -14,6 +14,7 @@ from typing import Any, Iterable
 from videobox_core_engine.caption_translation import caption_text_for_language
 from videobox_core_engine.editing_session import MAX_RIPPLE_PLAYBACK_RATE, MIN_RIPPLE_PLAYBACK_RATE
 from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.output_source_verifier import is_silent_narration_placeholder
 from videobox_core_engine.transitions import normalize_transition
 
 
@@ -808,6 +809,13 @@ class CompositionPlan:
                 continue
             for index, raw in enumerate(track.get("clips", []) if isinstance(track.get("clips"), list) else []):
                 if not isinstance(raw, dict):
+                    continue
+                if track_type == "narration" and is_silent_narration_placeholder(timeline=timeline, clip=raw):
+                    # 녹음이 처음부터 없는 편집본의 장면 막대다. 편집기에는
+                    # 남겨 두되(빼면 장면을 옮길 손잡이가 사라진다) 완성본
+                    # 계획에는 안 싣는다 -- 실으면 열 수 없는 오디오를 찾다가
+                    # 렌더가 통째로 멈춘다. 판단 기준은 한 곳에만 둔다
+                    # (`output_source_verifier.is_silent_narration_placeholder`).
                     continue
                 gap_slot_id = str(raw.get("gap_slot_id") or "").strip()
                 asset_id = str(raw.get("asset_id") or "").strip()

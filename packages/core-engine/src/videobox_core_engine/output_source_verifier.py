@@ -27,6 +27,31 @@ _ASSET_URI = re.compile(r"^local://projects/(?P<project_id>[^/]+)/assets/(?P<ass
 _SEGMENT_URI = re.compile(r"^local://projects/[^/]+/segments/[^/]+$")
 
 
+def is_silent_narration_placeholder(*, timeline: dict[str, Any], clip: dict[str, Any]) -> bool:
+    """녹음이 처음부터 없는 타임라인의 내레이션 자리표시 클립인가.
+
+    빈 편집판(`+ 새로 만들기`)과 녹음 전 대본 초안은 장면만 있고 목소리가 없다.
+    ``TimelineBuilder``는 그래도 장면마다 ``local://.../segments/{id}`` 꼴의
+    **가상** 내레이션 클립을 만든다 -- 편집기가 그리는 장면 막대가 그것이다.
+    가리킬 녹음이 없으면 그 클립은 소리가 아니라 자리다.
+
+    **없는 것과 낡은 것을 가린다.** 한때 신원이 있었던 흔적(내용 해시나 판번호)이
+    클립에 남아 있으면 처음부터 없던 게 아니라 잃어버린 것이므로 자리표시가
+    아니다 -- 그건 이 울타리가 막아야 할 바로 그 경우다.
+
+    ``capture_output_source_snapshots``와 ``CompositionPlan.from_timeline``이
+    같은 판단을 해야 해서 여기 한 벌만 둔다. 두 벌을 두면 반드시 어긋난다.
+    """
+    if not _SEGMENT_URI.match(str(clip.get("asset_uri") or "")):
+        return False
+    if str(timeline.get("narration_source_uri") or "").strip():
+        return False
+    return not (
+        str(clip.get("expected_content_sha256") or "").strip()
+        or str(clip.get("media_revision") or "").strip()
+    )
+
+
 @dataclass(frozen=True)
 class OutputSourceSnapshot:
     """A verified project-local source that can be rechecked without SQLite."""
@@ -101,6 +126,11 @@ def capture_output_source_snapshots(
         if _SEGMENT_URI.match(uri):
             if track_type != "narration":
                 raise OutputSourceStaleError("segment source is only valid for narration")
+            if is_silent_narration_placeholder(timeline=timeline, clip=clip):
+                # 지킬 원본 바이트가 없다. 지문 찍을 것이 없으니 통과시킨다 --
+                # 소리가 없는 편집본이 완성본을 통째로 막으면 안 된다. 잃어버린
+                # 경우는 위 함수가 걸러 내고 아래에서 그대로 막힌다.
+                continue
             # A virtual narration segment is rendered from this timeline's
             # actual narration source, not from a standalone segment file.
             uri = str(timeline.get("narration_source_uri") or "")
@@ -331,6 +361,7 @@ __all__ = [
     "OutputSourceSnapshot",
     "OutputSourceStaleError",
     "capture_output_source_snapshots",
+    "is_silent_narration_placeholder",
     "verify_output_freshness",
     "verify_output_source_snapshots",
     "verify_output_sources",
