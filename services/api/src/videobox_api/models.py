@@ -652,6 +652,30 @@ class VoiceSampleRenameRequest(BaseModel):
         return self
 
 
+class MyVoiceItemResponse(BaseModel):
+    """`내 자산 > 내 목소리` 한 줄.
+
+    프로젝트를 고르기 전에 열리는 자리라 **어느 프로젝트 것인지**를 함께 준다.
+    저장 위치(`storage_uri`)는 관리 경로 상대값이라 그대로 두되, 화면은
+    `content_url`로 재생한다 -- 파일 경로를 화면 문구로 쓰지 않는다.
+    """
+
+    asset_id: str
+    asset_type: str
+    project_id: str
+    project_name: str
+    display_name: str | None = None
+    created_at: str
+    duration_sec: float | None = None
+    mime_type: str | None = None
+    content_url: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MyVoiceListResponse(BaseModel):
+    voices: list[MyVoiceItemResponse]
+
+
 class YoutubeReferenceImportRequest(BaseModel):
     """owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 본인이
     이미 올린 본인 영상만 대상이라는 전제를 화면 문구가 말한다."""

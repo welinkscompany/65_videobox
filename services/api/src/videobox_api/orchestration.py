@@ -26,6 +26,7 @@ from videobox_provider_interfaces.llm import (
 )
 from videobox_core_engine.audio_export import extract_audio_only
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.mojibake import repair_mojibake_text
 from videobox_core_engine.narration_retake_detection import detect_retake_candidates
 from videobox_core_engine.reference_style_analysis import analyze_color, analyze_pacing
 from videobox_core_engine.youtube_import import YoutubeImportError, download_youtube_video, is_youtube_url
@@ -211,6 +212,37 @@ class ApiOrchestrator:
 
     def list_voice_sample_assets(self, *, project_id: str) -> list[dict[str, Any]]:
         return self.store.list_assets(project_id=project_id, asset_type=AssetType.VOICE_SAMPLE_AUDIO)
+
+    def list_voice_sample_assets_across_projects(
+        self, *, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """모든 프로젝트의 목소리 샘플을 한 목록으로. **읽기만 한다.**
+
+        사이드바 `내 자산 > 내 목소리`는 프로젝트를 고르기 전에 열린다
+        (owner 승인 2026-09-04). 목소리 샘플은 프로젝트마다 따로 있는 sqlite에만
+        있어서 프로젝트 수만큼 요청해야 했다 -- 프로젝트가 30개를 넘었다.
+
+        **얕은 검사다.** 프로젝트 db를 한 번씩 열어 `assets` 표만 읽는다.
+        편집 세션·타임라인은 열지 않는다 -- 자료실 `usage` 깊은 검사가 그것들을
+        전부 읽어 실측 1.67초였고 그래서 얕은 검사와 나뉘었다
+        (`routers/library_assets.py`의 `get_library_asset_usage`).
+
+        프로젝트 하나를 못 읽어도 나머지는 돌려준다 -- 한 프로젝트의 db가
+        깨졌다고 owner의 목소리 목록 전체가 비어 보이면 안 된다
+        (`list_assets_across_projects`가 건너뛴다).
+        """
+        voices = [
+            {**asset, "project_name": repair_mojibake_text(str(asset.get("project_name") or ""))}
+            for asset in self.store.list_assets_across_projects(
+                asset_type=AssetType.VOICE_SAMPLE_AUDIO, include_archived=include_archived
+            )
+        ]
+        # 새로 녹음한 것이 위로. created_at이 같으면 asset_id로 갈라 순서를 고정한다.
+        voices.sort(
+            key=lambda voice: (str(voice.get("created_at") or ""), str(voice.get("asset_id") or "")),
+            reverse=True,
+        )
+        return voices
 
     def list_narration_audio_assets(self, *, project_id: str) -> list[dict[str, Any]]:
         return self.store.list_assets(project_id=project_id, asset_type=AssetType.NARRATION_AUDIO)

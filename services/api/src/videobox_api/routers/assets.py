@@ -25,6 +25,8 @@ from videobox_api.models import (
     BrollAssetRegistrationRequest,
     BrollBatchAssetRegistrationRequest,
     BrowserPreviewResponse,
+    MyVoiceItemResponse,
+    MyVoiceListResponse,
     TTSCandidateListResponse,
     TTSCandidateResponse,
     TTSCandidateRecordResponse,
@@ -56,6 +58,31 @@ def _repaired_asset_response(asset: dict) -> "AssetArchiveItemResponse":
     한쪽만 고치는 사고가 난다 -- 이 저장소가 여러 번 겪은 일이다.
     """
     return AssetArchiveItemResponse(**{**asset, "metadata": repair_mojibake_metadata(asset.get("metadata"))})
+
+
+def _my_voice_response(voice: dict) -> "MyVoiceItemResponse":
+    """`내 자산 > 내 목소리` 한 줄로.
+
+    이름은 `metadata.display_name`에 있고, **없을 수 있다** -- 이름을 안 붙였다고
+    목록에서 빼면 그 녹음은 영원히 못 찾는다. 화면이 그때 파일 이름 대신 쓸 게
+    없으므로 `None`으로 내려보내고 문구는 화면이 정한다.
+    """
+    metadata = repair_mojibake_metadata(voice.get("metadata")) or {}
+    display_name = metadata.get("display_name") if isinstance(metadata, dict) else None
+    project_id = str(voice.get("project_id") or "")
+    asset_id = str(voice.get("asset_id") or "")
+    return MyVoiceItemResponse(
+        asset_id=asset_id,
+        asset_type=str(voice.get("asset_type") or ""),
+        project_id=project_id,
+        project_name=str(voice.get("project_name") or ""),
+        display_name=str(display_name) if display_name else None,
+        created_at=str(voice.get("created_at") or ""),
+        duration_sec=voice.get("duration_sec"),
+        mime_type=voice.get("mime_type"),
+        content_url=f"/api/projects/{project_id}/assets/{asset_id}/content",
+        metadata=metadata if isinstance(metadata, dict) else {},
+    )
 
 
 def build_assets_router(
@@ -272,6 +299,24 @@ def build_assets_router(
         except Exception as exc:
             raise _http_error(exc) from exc
         return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
+
+    @router.get("/api/voices")
+    def list_my_voices(include_archived: bool = False) -> MyVoiceListResponse:
+        """프로젝트를 넘나드는 `내 목소리` 한 목록 (owner 승인 2026-09-04).
+
+        사이드바 `내 자산 > 내 목소리`는 **프로젝트를 고르기 전에** 열리는데,
+        목소리 샘플은 프로젝트마다 따로 있는 sqlite에만 있었다. 화면이
+        프로젝트 수만큼 요청을 던지지 않게 여기서 한 번에 모은다.
+
+        읽기 전용이다 -- 이름 바꾸기·지우기는 그대로 프로젝트 경로를 쓴다.
+        """
+        try:
+            voices = orchestrator.list_voice_sample_assets_across_projects(
+                include_archived=include_archived
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return MyVoiceListResponse(voices=[_my_voice_response(voice) for voice in voices])
 
     @router.patch("/api/projects/{project_id}/assets/voice-sample/{asset_id}")
     def rename_voice_sample(project_id: str, asset_id: str, payload: VoiceSampleRenameRequest) -> AssetArchiveItemResponse:

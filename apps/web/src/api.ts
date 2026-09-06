@@ -897,6 +897,30 @@ export type AssetResponse = {
   /** 목록으로 받을 때 실려 온다. 창작자가 붙인 이름은 `display_name`에 있다. */
   metadata?: Record<string, unknown>;
 };
+
+/**
+ * `내 자산 > 내 목소리` 한 줄 (owner 승인 2026-09-04).
+ *
+ * 목소리 샘플은 프로젝트마다 따로 저장돼 있어서, 프로젝트를 고르기 전에 열리는
+ * 이 목록은 **어느 프로젝트 것인지**를 함께 받는다. 재생은 `content_url`로 한다
+ * -- 저장 위치를 화면 문구로 쓰지 않는다.
+ */
+export type MyVoice = {
+  asset_id: string;
+  asset_type: string;
+  project_id: string;
+  project_name: string;
+  /** 창작자가 붙인 이름. **없을 수 있다** -- 그때 무엇을 보여줄지는 화면이 정한다. */
+  display_name: string | null;
+  created_at: string;
+  duration_sec: number | null;
+  mime_type: string | null;
+  /** `<audio src>`에 그대로 넣으면 된다. */
+  content_url: string;
+  metadata: Record<string, unknown>;
+};
+
+export type MyVoiceListResponse = { voices: MyVoice[] };
 /** 본인 유튜브 영상 하나에서 뽑아낸 것(owner 요청 2026-08-29). 목소리 샘플은
  *  바로 쓸 수 있고, 컷 빠르기·색감은 지금은 **보여주기만** 한다 -- 실제로
  *  자동 컷·색보정에 입히는 건 별도 범위다. */
@@ -2819,6 +2843,20 @@ export const api = {
       `/api/projects/${projectId}/assets/voice-sample`,
     );
     return payload.assets;
+  },
+  /**
+   * `내 자산 > 내 목소리` -- 프로젝트를 넘나드는 목소리 한 목록.
+   *
+   * 이 화면은 **프로젝트를 고르기 전에** 열린다. `listVoiceSamples`를
+   * 프로젝트 수만큼 부르지 말 것 -- 프로젝트가 30개를 넘었고 계속 는다.
+   *
+   * 읽기 전용이다. 이름 바꾸기·지우기는 `renameVoiceSample`·`deleteVoiceSample`로
+   * 하고, 그때는 각 줄의 `project_id`를 함께 넘긴다.
+   */
+  listMyVoices: async (options?: { includeArchived?: boolean }): Promise<MyVoice[]> => {
+    const query = options?.includeArchived ? "?include_archived=true" : "";
+    const payload = await request<MyVoiceListResponse>(`/api/voices${query}`);
+    return payload.voices;
   },
   generateTtsCandidate: (projectId: string, payload: TtsCandidateRequest) =>
     request<TtsCandidateResponse>(`/api/projects/${projectId}/tts-candidates`, {
