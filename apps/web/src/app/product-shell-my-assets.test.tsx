@@ -98,4 +98,18 @@ describe("왼쪽 세로 메뉴의 `내 자산` 구역", () => {
     render(<ProductShell {...base} section="editing" onNavigateGlobal={vi.fn()}>내용</ProductShell>);
     expect(screen.queryByRole("group", { name: "내 자산" })).toBeNull();
   });
+
+  /** **들어갔는데 나올 길이 없으면 안 된다** — 실측 2026-09-07.
+   *
+   *  `내 목소리`로 들어가니 세로 메뉴가 통째로 사라졌다. 화면을 그리는 자리가
+   *  아는 자리 목록에 `voices`를 안 넣어서다. 시험은 전부 초록이었고 브라우저로
+   *  들어가 보고서야 알았다.
+   */
+  it("내 목소리 화면에서도 세로 메뉴가 남는다", () => {
+    render(<ProductShell {...base} section="voices" onNavigateGlobal={vi.fn()}>내용</ProductShell>);
+
+    const group = within(sideNav()).getByRole("group", { name: "내 자산" });
+    expect(within(group).getByRole("link", { name: /^내 목소리/ })).toHaveAttribute("aria-current", "page");
+    expect(within(group).getByRole("link", { name: /^내 영상/ })).toBeVisible();
+  });
 });

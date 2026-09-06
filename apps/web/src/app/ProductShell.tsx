@@ -89,11 +89,14 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
   const display = readSettings();
   // 단계 단추가 켜져 있으면 그것이 곧 "여기가 어디인지"다. 단계가 없는 화면
   // (내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서만 띠가 이름으로 말한다.
-  const screenName = section === "home" ? "홈" : section === "create" ? "이야기" : section === "media" ? "미디어" : section === "settings" ? "설정" : section === "library" ? "자료실" : section === "footage" ? "촬영본 정리" : section === "outputs" || section === "timeline" || section === "review" ? "확인과 내보내기" : "편집";
+  const screenName = section === "home" ? "홈" : section === "create" ? "이야기" : section === "media" ? "미디어" : section === "settings" ? "설정" : section === "library" ? "자료실" : section === "voices" ? "내 목소리" : section === "footage" ? "촬영본 정리" : section === "outputs" || section === "timeline" || section === "review" ? "확인과 내보내기" : "편집";
   // 편집기(그리고 그 안 단계들)에서는 세로 띠를 접는다. 그 자리는 편집 도구 띠 것이다.
   // `home`이 프로젝트 목록 화면이다(`/projects`) -- 이름이 어긋나 있어 한 번 틀렸다.
   const sideNavPlace = section === "home" ? "projects"
     : section === "library" ? "library"
+    // 여기에 안 넣으면 그 화면에서 세로 메뉴가 통째로 사라진다 --
+    // **들어갔는데 나올 길이 없어진다**(2026-09-07에 `내 목소리`가 그랬다).
+    : section === "voices" ? "voices"
     : section === "footage" ? "footage"
     : section === "settings" ? "settings"
     : null;
