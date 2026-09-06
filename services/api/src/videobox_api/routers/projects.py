@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from videobox_api.errors import _http_error
@@ -28,7 +30,7 @@ from videobox_storage.local_project_store import LocalProjectStore
 _LOGGER = logging.getLogger(__name__)
 
 
-def build_projects_router(store: LocalProjectStore) -> APIRouter:
+def build_projects_router(store: LocalProjectStore, user_asset_store: Any | None = None) -> APIRouter:
     router = APIRouter()
 
     def _job_temporal_key(job: dict[str, object]) -> tuple[float, str]:
@@ -173,6 +175,16 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             store.delete_project_permanently(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
+        # **자료실 참조도 같이 걷는다.** 그 등록부는 프로젝트 폴더가 아니라
+        # 자료실 DB에 있어서, 폴더만 지우면 참조가 유령으로 남는다. 그러면
+        # **없는 프로젝트가 자산 정리를 영원히 막는다**(2026-09-06 실측: 방금
+        # 지운 프로젝트 넷이 시험용 자산을 아직 쓴다고 나왔다).
+        #
+        # 쓰고 있는 자산을 못 지우게 막는 판단 자체는 그대로 둔다 -- 지우는 것은
+        # 되돌릴 수 없다. 다만 **막는 근거가 유령이면 안 된다.**
+        if user_asset_store is not None:
+            for reference in user_asset_store.list_project_references(project_id=project_id):
+                user_asset_store.remove_project_reference(str(reference["reference_id"]))
 
     @router.get("/api/projects/{project_id}")
     def get_project(project_id: str) -> ProjectResponse:

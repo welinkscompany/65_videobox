@@ -1247,7 +1247,7 @@ def create_app(
             "projects_root": str(resolved_projects_root.resolve()),
         }
 
-    app.include_router(build_projects_router(store))
+    app.include_router(build_projects_router(store, resolved_media_library_store.user_asset_store))
     app.include_router(
         build_hermes_operations_router(app.state.hermes_operational_status)
     )
