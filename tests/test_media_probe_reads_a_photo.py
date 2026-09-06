@@ -54,3 +54,28 @@ def test_a_video_still_gets_several_frames(tmp_path: Path) -> None:
     result = FFmpegMediaProbe().probe(video)
 
     assert len(result.frames) >= 2, f"영상인데 {len(result.frames)}장뿐이다"
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg가 없으면 잴 수 없다")
+def test_a_png_photo_also_yields_a_frame(tmp_path: Path) -> None:
+    """**png는 길이가 0이라 그림을 한 장도 안 뽑았다** — 실측 2026-09-06.
+
+    위 시험이 jpg만 밟아서 못 봤다. jpg는 ffprobe에 `0.040000`을 주는데 png는
+    `N/A`(0.0)를 준다. 프레임 뽑는 자리가 `길이 <= 0`이면 곧바로 빈손으로
+    돌아오므로, **사진 한 장짜리 갈래에 닿지도 못했다.**
+
+    도는 컨테이너에서 대표님 png 사진 하나가 매 바퀴 색인에 실패하고 있었다.
+    사진에는 잴 길이가 없는 것이 정상이지 실패가 아니다.
+    """
+    photo = tmp_path / "still.png"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=864x1184:duration=1",
+         "-frames:v", "1", str(photo)],
+        check=True,
+    )
+
+    result = FFmpegMediaProbe().probe(photo)
+
+    assert result.width == 864
+    assert result.height == 1184
+    assert len(result.frames) >= 1, "png 사진에서 그림을 한 장도 못 뽑았다"

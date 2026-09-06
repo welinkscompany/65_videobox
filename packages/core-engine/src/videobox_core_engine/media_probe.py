@@ -145,7 +145,15 @@ class FFmpegMediaProbe:
         return (0.0, *cuts, duration)
 
     def _extract_representative_frames(self, path: Path, duration: float, long_edge_px: int) -> tuple[RepresentativeFrame, ...]:
-        if duration <= 0:
+        # **길이 0은 "볼 것이 없다"가 아니라 "사진이다"이다**(2026-09-06 실측).
+        # ffprobe는 png에 길이를 안 준다(`N/A` -> 0.0). 여기서 곧바로 돌아서면
+        # 아래 사진 갈래에 닿지도 못하고, 시각 모델에 보낼 그림이 없어 색인이
+        # 매 바퀴 조용히 실패한다 -- 도는 컨테이너에서 owner png 사진 하나가
+        # 실제로 그러고 있었다.
+        #
+        # jpg는 `0.040000`을 줘서 통과했다. **그래서 jpg만 밟은 시험이 이걸
+        # 못 봤다.** 사진 갈래는 아래에서 `-ss` 없이 처음을 그대로 읽는다.
+        if duration < 0:
             return ()
         # **사진은 그림이 한 장뿐이다**(2026-09-06). 아래 시각 나누기는 영상만
         # 가정한다 -- 사진은 길이가 0.04초쯤이라 그 안을 `-ss`로 찾다 빈손이
