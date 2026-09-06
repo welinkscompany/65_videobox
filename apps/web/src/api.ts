@@ -677,9 +677,16 @@ export type ExplanationCardRequest = RevisionedEditingSessionMutation & {
   text: string;
 } & OptionalYujinCandidateAttestation;
 
+// 사진 오버레이. 자리·크기·움직임은 도형과 **같은 프리셋**을 쓰고 넷 다
+// **선택**이다 -- 안 보내면 이 기능이 생기기 전과 똑같이 저장된다
+// (`models.ImageOverlayRequest`). 그래서 화면도 안 고른 값을 채워 보내지 않는다.
 export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
   text: string;
+  vertical?: "top" | "middle" | "bottom";
+  horizontal?: "left" | "center" | "right";
+  size?: "small" | "medium" | "large";
+  motion?: ShapeOverlayMotion;
 } & (
   | { proposal_id: string; candidate_id: string }
   | { proposal_id?: never; candidate_id?: never }

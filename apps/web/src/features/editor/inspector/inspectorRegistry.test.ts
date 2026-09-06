@@ -31,6 +31,9 @@ const view = {
       trackId: "overlay", role: "overlay", clips: [
         { clipId: "explanation-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "explanation_card", overlayPayload: { title: "제목", body: "본문", text: "설명" } },
         { clipId: "image-1", segmentId: "segment-1", type: "overlay", assetId: "asset-image", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "stale-asset", text: "이미지 설명" } },
+        // 프리셋을 고른 사진. 안 고른 사진(`image-1`)과 나란히 둔다 -- 둘을 같은
+        // 값으로 읽으면 화면에서 "안 고름"이 사라진다.
+        { clipId: "image-2", segmentId: "segment-2", type: "overlay", assetId: "asset-image-2", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-image-2", text: "", vertical: "top", horizontal: "left", size: "small", motion: "slide_in_left" } },
         { clipId: "table-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "table_overlay", overlayPayload: { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" } },
         { clipId: "shape-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "shape_overlay", overlayPayload: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large" } },
         { clipId: "unsupported-overlay", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: null },
@@ -109,6 +112,22 @@ describe("projectInspectorTargets", () => {
     });
   });
 
+  // 사진 오버레이의 자리·크기·움직임(owner 요청 2026-09-06). 도형과 **같은 어휘**를
+  // 쓴다 -- 백엔드도 `overlay_shapes`의 목록을 그대로 본떴다.
+  it("reads the picture overlay presets the owner already chose", () => {
+    const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-2" });
+
+    expect(targets).toContainEqual({
+      id: "overlay:image-2",
+      kind: "overlay",
+      label: "이미지",
+      segmentId: "segment-2",
+      overlayKind: "image",
+      fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+      value: { assetId: "asset-image-2", text: "", vertical: "top", horizontal: "left", size: "small", motion: "slide_in_left" },
+    });
+  });
+
   it("projects only the three supported overlay variants with their typed fields", () => {
     const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-1" });
 
@@ -127,8 +146,10 @@ describe("projectInspectorTargets", () => {
       label: "이미지",
       segmentId: "segment-1",
       overlayKind: "image",
-      fields: ["assetId", "text"],
-      value: { assetId: "asset-image", text: "이미지 설명" },
+      fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+      // 안 고른 프리셋은 `null`이다. 기본값으로 좁히면 화면이 owner가 고르지도
+      // 않은 자리·크기·움직임을 저장마다 실어 보낸다.
+      value: { assetId: "asset-image", text: "이미지 설명", vertical: null, horizontal: null, size: null, motion: null },
     });
     expect(targets).toContainEqual({
       id: "overlay:table-1",

@@ -230,6 +230,39 @@ describe("EditorCommandPort", () => {
     expect(api.updateEditingSessionCaptionStyle).toHaveBeenCalledWith("p", "s", expect.objectContaining({ expected_revision: 7, segment_ids: ["seg"] }));
   });
 
+  // 사진도 도형과 같은 프리셋 넷을 보낸다. **안 고른 값은 아예 안 싣는다** --
+  // API가 그 셋을 선택으로 받고, 빈칸을 기본값으로 채우면 owner가 고르지 않은
+  // 자리·움직임이 저장된다(`models.ImageOverlayRequest`).
+  it("sends only the picture overlay presets the owner actually chose", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.applyOverlay({ kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품", size: "large" });
+    expect(api.updateEditingSessionImageOverlay).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-image",
+      text: "제품",
+      size: "large",
+      expected_revision: 7,
+    });
+    // 열쇠 자체가 없어야 한다. `undefined`로 실어 보내면 위 비교는 통과하는데
+    // 백엔드가 보는 요청은 달라진다.
+    expect(Object.keys(api.updateEditingSessionImageOverlay.mock.lastCall?.[3] ?? {}))
+      .toEqual(["asset_id", "text", "size", "expected_revision"]);
+
+    await port.applyOverlay({
+      kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품",
+      vertical: "top", horizontal: "left", size: "small", motion: "slide_in_left",
+    });
+    expect(api.updateEditingSessionImageOverlay).toHaveBeenLastCalledWith("p", "s", "seg", {
+      asset_id: "asset-image",
+      text: "제품",
+      vertical: "top",
+      horizontal: "left",
+      size: "small",
+      motion: "slide_in_left",
+      expected_revision: 7,
+    });
+  });
+
   it("routes a static shape overlay through its own revisioned endpoints", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
     await port.applyOverlay({ kind: "shape", segmentId: "seg", shape: "highlight_box", vertical: "top", horizontal: "right", size: "small" });

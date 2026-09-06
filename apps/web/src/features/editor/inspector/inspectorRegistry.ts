@@ -5,7 +5,7 @@ type MediaKind = "broll" | "bgm" | "sfx";
 export type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "fit" | "normalizeLoudness" | "denoise" | "stabilize" | "reduceNoise" | "preservePitch" | "zoom" | "positionXPercent" | "positionYPercent" | "rotationDeg";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
-type ImageField = "assetId" | "text";
+type ImageField = "assetId" | "text" | "vertical" | "horizontal" | "size" | "motion";
 type TableField = "columns" | "rows" | "text";
 type ShapeField = "shape" | "vertical" | "horizontal" | "size" | "motion";
 
@@ -74,6 +74,23 @@ export const SHAPE_OVERLAY_MOTION_CHOICES = Object.keys(SHAPE_OVERLAY_MOTION_LAB
 export type ShapeOverlayVertical = "top" | "middle" | "bottom";
 export type ShapeOverlayHorizontal = "left" | "center" | "right";
 export type ShapeOverlaySize = "small" | "medium" | "large";
+
+// 자리와 크기의 화면 문구. **도형과 사진이 같은 목록을 쓴다** -- 백엔드도
+// `overlay_shapes.py`의 목록 하나를 둘이 나눠 쓰므로, 화면에서만 두 벌로
+// 갈라지면 같은 것을 두 이름으로 부르게 된다.
+export const OVERLAY_VERTICAL_LABELS: Readonly<Record<ShapeOverlayVertical, string>> = {
+  top: "위", middle: "가운데", bottom: "아래",
+};
+export const OVERLAY_HORIZONTAL_LABELS: Readonly<Record<ShapeOverlayHorizontal, string>> = {
+  left: "왼쪽", center: "가운데", right: "오른쪽",
+};
+export const OVERLAY_SIZE_LABELS: Readonly<Record<ShapeOverlaySize, string>> = {
+  small: "작게", medium: "보통", large: "크게",
+};
+
+export const OVERLAY_VERTICAL_CHOICES = Object.keys(OVERLAY_VERTICAL_LABELS) as readonly ShapeOverlayVertical[];
+export const OVERLAY_HORIZONTAL_CHOICES = Object.keys(OVERLAY_HORIZONTAL_LABELS) as readonly ShapeOverlayHorizontal[];
+export const OVERLAY_SIZE_CHOICES = Object.keys(OVERLAY_SIZE_LABELS) as readonly ShapeOverlaySize[];
 export type ShapeOverlayValue = Readonly<{
   shape: ShapeOverlayShape;
   vertical: ShapeOverlayVertical;
@@ -82,13 +99,27 @@ export type ShapeOverlayValue = Readonly<{
   motion: ShapeOverlayMotion;
 }>;
 
+// 사진 오버레이의 자리·크기·움직임(owner 요청 2026-09-06 "사진을 우리 영상 위에도
+// 얹어서 움직이게"). 어휘는 도형과 같다.
+//
+// **도형과 달리 안 고른 상태가 있다.** 백엔드는 넷을 선택으로 받고, 안 준 값은
+// 열쇠 자체를 안 적는다(`editing_session.update_segment_image_overlay`). 화면이
+// 빈칸을 기본값으로 채워 보내면, 자산 목록의 `화면에 얹기`나 유진이 프리셋 없이
+// 얹어 둔 사진이 owner가 아무것도 안 골랐는데 움직이기 시작한다.
+export type ImageOverlayPresets = Readonly<{
+  vertical: ShapeOverlayVertical | null;
+  horizontal: ShapeOverlayHorizontal | null;
+  size: ShapeOverlaySize | null;
+  motion: ShapeOverlayMotion | null;
+}>;
+
 export type InspectorTarget =
   | Readonly<{ id: string; kind: "media"; label: string; segmentId: string; mediaKind: MediaKind; fields: readonly MediaField[]; assetId: string; controls: EditorControls; clearOnly: boolean }>
   | Readonly<{ id: string; kind: "caption"; label: string; segmentId: string; fields: readonly CaptionField[]; style: EditorCaptionStyle }>
   // `isNew`: 이 장면에 아직 없는 오버레이의 빈 편집 자리다. 저장은 백엔드
   // upsert가 그대로 만들어 주고, 아직 없는 것에는 `지우기`를 보이지 않는다.
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "explanation-card"; fields: readonly ExplanationCardField[]; value: Readonly<{ title: string; body: string; text: string }>; isNew?: boolean }>
-  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }>; isNew?: boolean }>
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }> & ImageOverlayPresets; isNew?: boolean }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }>; isNew?: boolean }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "shape"; fields: readonly ShapeField[]; value: ShapeOverlayValue; isNew?: boolean }>;
 
@@ -166,6 +197,28 @@ export function shapeMotion(value: unknown): ShapeOverlayMotion {
   return SHAPE_OVERLAY_MOTION_CHOICES.find((choice) => choice === value) ?? "none";
 }
 
+/** 저장된 사진 프리셋을 읽는다. 없거나 모르는 값은 **안 고름(`null`)**이다 --
+ *  도형처럼 기본값으로 좁히면 "안 고름"이 화면에서 사라지고, 다음 저장이
+ *  owner가 고르지 않은 값을 실어 보낸다. */
+//
+//  `가운데`·`그대로`는 값을 안 준 것과 완성본이 같다. 그래서 화면에서 둘을
+//  구별하지 않는다 -- 색감·전환 목록이 이미 같은 방식이다(`sceneFilters.ts`).
+const IMAGE_OVERLAY_UNSET_EQUIVALENT: ReadonlySet<string> = new Set(["middle", "center", "none"]);
+
+function optionalChoice<T extends string>(value: unknown, choices: readonly T[]): T | null {
+  if (typeof value === "string" && IMAGE_OVERLAY_UNSET_EQUIVALENT.has(value)) return null;
+  return choices.find((choice) => choice === value) ?? null;
+}
+
+export function imageOverlayPresets(payload: Readonly<Record<string, unknown>>): ImageOverlayPresets {
+  return {
+    vertical: optionalChoice(payload.vertical, OVERLAY_VERTICAL_CHOICES),
+    horizontal: optionalChoice(payload.horizontal, OVERLAY_HORIZONTAL_CHOICES),
+    size: optionalChoice(payload.size, OVERLAY_SIZE_CHOICES),
+    motion: optionalChoice(payload.motion, SHAPE_OVERLAY_MOTION_CHOICES),
+  };
+}
+
 export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ view: EditorViewModel; selectedSegmentId: string | null }>): readonly InspectorTarget[] {
   if (!selectedSegmentId) return [];
 
@@ -206,8 +259,8 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         value: { title: stringValue(payload.title), body: stringValue(payload.body), text: stringValue(payload.text) },
       }];
       if (clip.overlayType === "image_overlay") return [{
-        id: `overlay:${clip.clipId}`, kind: "overlay", label: "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text"],
-        value: { assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text) },
+        id: `overlay:${clip.clipId}`, kind: "overlay", label: "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+        value: { assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text), ...imageOverlayPresets(payload) },
       }];
       if (clip.overlayType === "table_overlay") return [{
         id: `overlay:${clip.clipId}`, kind: "overlay", label: "표", segmentId: selectedSegmentId, overlayKind: "table", fields: ["columns", "rows", "text"],

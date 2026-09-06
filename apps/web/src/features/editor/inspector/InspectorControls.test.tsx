@@ -858,13 +858,13 @@ describe("InspectorControls", () => {
     {
       label: "이미지",
       target: {
-        fields: ["assetId", "text"],
+        fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
         id: "overlay:image",
         kind: "overlay",
         label: "이미지",
         overlayKind: "image",
         segmentId: "segment-internal-current",
-        value: { assetId: "asset-internal-image", text: "이미지 설명" },
+        value: { assetId: "asset-internal-image", text: "이미지 설명", vertical: null, horizontal: null, size: null, motion: null },
       } satisfies InspectorTarget,
       expected: {
         assetId: "asset-internal-image",
@@ -938,6 +938,78 @@ describe("InspectorControls", () => {
       text: "새 설명",
       title: "새 제목",
     });
+  });
+
+  // 사진 오버레이의 자리·크기·움직임(owner 요청 2026-09-06). 백엔드와 렌더러는
+  // 이미 넷을 받는데 고르는 자리가 화면에 없었다.
+  const pictureTarget = {
+    fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+    id: "overlay:image",
+    kind: "overlay",
+    label: "이미지",
+    overlayKind: "image",
+    segmentId: "segment-internal-current",
+    value: { assetId: "asset-internal-image", text: "", vertical: null, horizontal: null, size: null, motion: null },
+  } satisfies InspectorTarget;
+
+  it("lets the owner place and move a picture with the same words as a shape", () => {
+    const onAction = renderControls({ target: pictureTarget });
+
+    // 도형이 쓰는 문구 그대로다 -- 같은 것을 두 이름으로 부르지 않는다.
+    fireEvent.change(screen.getByLabelText("세로 위치"), { target: { value: "top" } });
+    fireEvent.change(screen.getByLabelText("가로 위치"), { target: { value: "left" } });
+    fireEvent.change(screen.getByLabelText("크기"), { target: { value: "small" } });
+    fireEvent.change(screen.getByLabelText("움직임"), { target: { value: "slide_in_left" } });
+    fireEvent.click(screen.getByRole("button", { name: "이미지 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      assetId: "asset-internal-image",
+      kind: "save-overlay",
+      overlayKind: "image",
+      segmentId: "segment-internal-current",
+      text: "",
+      vertical: "top",
+      horizontal: "left",
+      size: "small",
+      motion: "slide_in_left",
+    });
+    // 화면 문구는 쉬운 말만(§10.13). 좌표·초를 넣는 칸도 없다.
+    expect(screen.queryByRole("option", { name: /alpha|fade|keyframe|opacity|motion/i })).toBeNull();
+    expect(screen.queryByLabelText(/초|시간|좌표/)).toBeNull();
+  });
+
+  it("does not send a preset the owner never chose for a picture", () => {
+    const onAction = renderControls({ target: pictureTarget });
+
+    // 넷 다 "고르지 않음"에서 시작한다. 손대지 않은 저장은 그림을 옮기지 않는다.
+    expect((screen.getByLabelText("세로 위치") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("움직임") as HTMLSelectElement).value).toBe("");
+
+    fireEvent.change(screen.getByLabelText("크기"), { target: { value: "large" } });
+    fireEvent.click(screen.getByRole("button", { name: "이미지 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      assetId: "asset-internal-image",
+      kind: "save-overlay",
+      overlayKind: "image",
+      segmentId: "segment-internal-current",
+      text: "",
+      size: "large",
+    });
+  });
+
+  it("starts the picture pickers from what was already saved", () => {
+    renderControls({
+      target: {
+        ...pictureTarget,
+        value: { assetId: "asset-internal-image", text: "", vertical: "bottom", horizontal: "right", size: "medium", motion: "fade_in" },
+      },
+    });
+
+    expect((screen.getByLabelText("세로 위치") as HTMLSelectElement).value).toBe("bottom");
+    expect((screen.getByLabelText("가로 위치") as HTMLSelectElement).value).toBe("right");
+    expect((screen.getByLabelText("크기") as HTMLSelectElement).value).toBe("medium");
+    expect((screen.getByLabelText("움직임") as HTMLSelectElement).value).toBe("fade_in");
   });
 
   // 정지 도형("여기를 보세요"). 자유 좌표 대신 프리셋 선택지만 준다 --

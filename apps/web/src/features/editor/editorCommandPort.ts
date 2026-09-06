@@ -7,7 +7,9 @@ type MediaCommand = Readonly<{ kind: MediaKind; segmentId: string; assetId: stri
 type CandidateAttestation = Readonly<{ proposalId: string; candidateId: string }>;
 type OverlayApply =
   | Readonly<{ kind: "explanation-card"; segmentId: string; title: string; body: string; text: string; attestation?: CandidateAttestation }>
-  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; attestation?: CandidateAttestation }>
+  // 사진의 자리·크기·움직임은 도형과 같은 프리셋이고 **넷 다 선택**이다.
+  // 안 고른 것은 요청에 열쇠 자체를 싣지 않는다(`ImageOverlayPresets` 설명 참고).
+  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom"; horizontal?: "left" | "center" | "right"; size?: "small" | "medium" | "large"; motion?: ShapeOverlayMotion; attestation?: CandidateAttestation }>
   | Readonly<{ kind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string; attestation?: CandidateAttestation }>
   // 정지 도형과 아이콘. 유진 attestation 경로는 이번 범위에서 열지 않는다(화면 수동 얹기만).
   | Readonly<{ kind: "shape"; segmentId: string; shape: ShapeOverlayShape; vertical: "top" | "middle" | "bottom"; horizontal: "left" | "center" | "right"; size: "small" | "medium" | "large"; motion: ShapeOverlayMotion }>;
@@ -105,6 +107,18 @@ function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["s
   return { font_family: style.fontFamily, font_size_px: style.fontSizePx, text_color: style.textColor, outline_color: style.outlineColor, outline_width_px: style.outlineWidthPx, background_color: style.backgroundColor, position_x_percent: style.positionXPercent, position_y_percent: style.positionYPercent, horizontal_align: style.horizontalAlign, safe_area_enabled: style.safeAreaEnabled, shadow_blur_px: style.shadowBlurPx, bold: style.bold, italic: style.italic, letter_spacing_px: style.letterSpacingPx };
 }
 
+/** 고른 사진 프리셋만 골라낸다. **안 고른 것은 열쇠 자체를 안 싣는다** --
+ *  `undefined`로 실으면 여기 비교는 통과하는데 요청 본문이 달라지고, 백엔드는
+ *  "안 보냄"과 "보냄"을 다르게 저장한다. */
+function chosenImagePresets(input: Readonly<{
+  vertical?: string; horizontal?: string; size?: string; motion?: string;
+}>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries({ vertical: input.vertical, horizontal: input.horizontal, size: input.size, motion: input.motion })
+      .filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== null),
+  );
+}
+
 export function createEditorCommandPort(context: Context, commandApi: EditorCommandApi = api): EditorCommandPort {
   const { projectId, sessionId, expectedRevision } = context;
   const revise = { expected_revision: expectedRevision };
@@ -149,7 +163,7 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     applyMedia,
     updateMediaControls: applyMedia,
     clearMedia: ({ kind, segmentId }) => kind === "broll" ? commandApi.clearEditingSessionBrollOverride(projectId, sessionId, segmentId, expectedRevision) : kind === "bgm" ? commandApi.clearEditingSessionMusicOverride(projectId, sessionId, segmentId, expectedRevision) : commandApi.clearEditingSessionSfxOverride(projectId, sessionId, segmentId, expectedRevision),
-    applyOverlay: (input) => input.kind === "explanation-card" ? commandApi.updateEditingSessionExplanationCard(projectId, sessionId, input.segmentId, { title: input.title, body: input.body, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ExplanationCardRequest) : input.kind === "image" ? commandApi.updateEditingSessionImageOverlay(projectId, sessionId, input.segmentId, { asset_id: input.assetId, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ImageOverlayRequest) : input.kind === "shape" ? commandApi.updateEditingSessionShapeOverlay(projectId, sessionId, input.segmentId, { shape: input.shape, vertical: input.vertical, horizontal: input.horizontal, size: input.size, motion: input.motion, ...revise }) : commandApi.updateEditingSessionTableOverlay(projectId, sessionId, input.segmentId, { columns: input.columns, rows: input.rows, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as TableOverlayRequest),
+    applyOverlay: (input) => input.kind === "explanation-card" ? commandApi.updateEditingSessionExplanationCard(projectId, sessionId, input.segmentId, { title: input.title, body: input.body, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ExplanationCardRequest) : input.kind === "image" ? commandApi.updateEditingSessionImageOverlay(projectId, sessionId, input.segmentId, { asset_id: input.assetId, text: input.text, ...chosenImagePresets(input), ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as ImageOverlayRequest) : input.kind === "shape" ? commandApi.updateEditingSessionShapeOverlay(projectId, sessionId, input.segmentId, { shape: input.shape, vertical: input.vertical, horizontal: input.horizontal, size: input.size, motion: input.motion, ...revise }) : commandApi.updateEditingSessionTableOverlay(projectId, sessionId, input.segmentId, { columns: input.columns, rows: input.rows, text: input.text, ...(input.attestation ? { proposal_id: input.attestation.proposalId, candidate_id: input.attestation.candidateId } : {}), ...revise } as TableOverlayRequest),
     clearOverlay: (input) => input.kind === "explanation-card" ? commandApi.removeEditingSessionExplanationCard(projectId, sessionId, input.segmentId, expectedRevision) : input.kind === "image" ? commandApi.removeEditingSessionImageOverlay(projectId, sessionId, input.segmentId, expectedRevision) : input.kind === "shape" ? commandApi.removeEditingSessionShapeOverlay(projectId, sessionId, input.segmentId, expectedRevision) : commandApi.removeEditingSessionTableOverlay(projectId, sessionId, input.segmentId, expectedRevision),
     applyTtsCandidate: ({ segmentId, candidateId, assetId, attestation }) => commandApi.updateEditingSessionTtsReplacement(projectId, sessionId, segmentId, { recommendation_id: candidateId, asset_id: assetId, ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as TtsReplacementRequest),
     clearTtsCandidate: ({ segmentId }) => commandApi.clearEditingSessionTtsReplacement(projectId, sessionId, segmentId, expectedRevision),

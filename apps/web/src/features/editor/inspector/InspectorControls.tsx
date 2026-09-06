@@ -16,7 +16,20 @@ import {
   SCENE_TRANSITION_DURATION_RANGE_SEC,
   SCENE_TRANSITION_NONE,
 } from "./sceneTransitions";
-import { SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type InspectorTarget, type MediaField, type ShapeOverlayValue } from "./inspectorRegistry";
+import { OVERLAY_HORIZONTAL_CHOICES, OVERLAY_HORIZONTAL_LABELS, OVERLAY_SIZE_CHOICES, OVERLAY_SIZE_LABELS, OVERLAY_VERTICAL_CHOICES, OVERLAY_VERTICAL_LABELS, SHAPE_OVERLAY_CHOICES, SHAPE_OVERLAY_LABELS, SHAPE_OVERLAY_MOTION_CHOICES, SHAPE_OVERLAY_MOTION_LABELS, shapeMotion, shapeValue, type ImageOverlayPresets, type InspectorTarget, type MediaField, type ShapeOverlayValue } from "./inspectorRegistry";
+
+// 사진 오버레이에서 "아직 안 골랐다"를 나타내는 자리. 고르지 않으면 요청에
+// 열쇠 자체가 실리지 않고, 렌더는 예전처럼 화면 가운데에 가득 얹는다.
+//
+// 그래서 이 자리의 이름표는 "고르지 않음"이 아니라 **그때 실제로 보이는 모습**을
+// 말한다 -- 가운데·화면 가득·그대로. 안 고른 것과 가운데를 고른 것은 완성본이
+// 같으므로 화면에서 둘을 구별하지 않는다(색감 목록이 이미 같은 방식이다).
+const IMAGE_PRESET_UNSET = "";
+
+/** 고른 값을 프리셋 목록과 대조한다. 목록 밖이면 안 고른 것으로 본다. */
+function pickPreset<T extends string>(value: string, choices: readonly T[]): T | null {
+  return choices.find((choice) => choice === value) ?? null;
+}
 
 // 배속 버튼에 올릴 값. `media_controls.py`의 `SPEED_RANGE`(0.25~4.0) 안에서
 // 숏폼에 실제로 자주 쓰는 것만 골랐다. 여기 없는 값은 숫자칸으로 넣는다.
@@ -40,7 +53,8 @@ export type InspectorAction =
   // 목소리 더빙. **옮겨 둔 자막을 대본으로 쓴다** -- 그래서 번역이 먼저다.
   | Readonly<{ kind: "dub-narration"; language: string; voiceSampleAssetId: string | null }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
-  | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string }>
+  // 사진의 자리·크기·움직임은 도형과 같은 프리셋이고, **고른 것만 실린다.**
+  | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom"; horizontal?: "left" | "center" | "right"; size?: "small" | "medium" | "large"; motion?: ShapeOverlayValue["motion"] }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
   // 정지 도형("여기를 보세요"). 프리셋만 보낸다 -- 자유 좌표는 범위 밖이다.
   | Readonly<{ kind: "save-overlay"; overlayKind: "shape"; segmentId: string; shape: ShapeOverlayValue["shape"]; vertical: ShapeOverlayValue["vertical"]; horizontal: ShapeOverlayValue["horizontal"]; size: ShapeOverlayValue["size"]; motion: ShapeOverlayValue["motion"] }>
@@ -293,6 +307,11 @@ export function InspectorControls({
   const [shapeOverlay, setShapeOverlay] = useState<ShapeOverlayValue>({
     shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none",
   });
+  // 사진의 자리·크기·움직임. 도형과 달리 **안 고른 상태(`null`)가 있다** --
+  // 저장된 대로 시작하므로 손대지 않은 저장이 사진을 옮기지 않는다.
+  const [imagePresets, setImagePresets] = useState<ImageOverlayPresets>({
+    vertical: null, horizontal: null, size: null, motion: null,
+  });
   const [selectedPartialFields, setSelectedPartialFields] = useState<readonly string[]>(() =>
     partialRegeneration?.defaultFields ?? partialRegeneration?.fields ?? [],
   );
@@ -380,6 +399,11 @@ export function InspectorControls({
         setTableRows(target.value.rows.map((row) => row.join(" | ")).join("\n"));
       } else if (target.overlayKind === "shape") {
         setShapeOverlay(target.value);
+      } else if (target.overlayKind === "image") {
+        setImagePresets({
+          vertical: target.value.vertical, horizontal: target.value.horizontal,
+          size: target.value.size, motion: target.value.motion,
+        });
       }
     }
   }, [targetIdentity]);
@@ -1115,6 +1139,54 @@ export function InspectorControls({
               <label>표 행<Textarea disabled={disabled} onChange={(event) => setTableRows(event.target.value)} value={tableRows} /></label>
             </>
           ) : null}
+          {/* 사진을 장면 위에 얹는 자리(owner 요청 2026-09-06 "사진을 우리 영상
+              위에도 얹어서 움직이게"). 어휘는 도형과 **같은 목록**을 쓴다 --
+              백엔드도 `overlay_shapes`의 목록 하나를 둘이 나눠 쓴다.
+              고르지 않은 칸은 요청에 싣지 않는다: 자산 목록의 `화면에 얹기`로
+              방금 얹은 사진이 아무것도 안 골랐는데 움직이면 안 된다. */}
+          {target.overlayKind === "image" ? (
+            <>
+              <p>장면 위에 사진을 얹어요. 고르지 않으면 화면 가운데에 가득 얹혀요.</p>
+              <label>
+                세로 위치
+                <NativeSelect aria-label="세로 위치" disabled={disabled} onChange={(event) => setImagePresets((current) => ({ ...current, vertical: pickPreset(event.target.value, OVERLAY_VERTICAL_CHOICES) }))} value={imagePresets.vertical ?? IMAGE_PRESET_UNSET}>
+                  <option value={IMAGE_PRESET_UNSET}>{OVERLAY_VERTICAL_LABELS.middle}</option>
+                  {OVERLAY_VERTICAL_CHOICES.filter((choice) => choice !== "middle").map((choice) => (
+                    <option key={choice} value={choice}>{OVERLAY_VERTICAL_LABELS[choice]}</option>
+                  ))}
+                </NativeSelect>
+              </label>
+              <label>
+                가로 위치
+                <NativeSelect aria-label="가로 위치" disabled={disabled} onChange={(event) => setImagePresets((current) => ({ ...current, horizontal: pickPreset(event.target.value, OVERLAY_HORIZONTAL_CHOICES) }))} value={imagePresets.horizontal ?? IMAGE_PRESET_UNSET}>
+                  <option value={IMAGE_PRESET_UNSET}>{OVERLAY_HORIZONTAL_LABELS.center}</option>
+                  {OVERLAY_HORIZONTAL_CHOICES.filter((choice) => choice !== "center").map((choice) => (
+                    <option key={choice} value={choice}>{OVERLAY_HORIZONTAL_LABELS[choice]}</option>
+                  ))}
+                </NativeSelect>
+              </label>
+              <label>
+                크기
+                {/* 크기는 안 고르면 화면 가득이다 -- 도형과 달리 `보통`과 다른
+                    모습이라 이 자리에 제 이름표가 필요하다. */}
+                <NativeSelect aria-label="크기" disabled={disabled} onChange={(event) => setImagePresets((current) => ({ ...current, size: pickPreset(event.target.value, OVERLAY_SIZE_CHOICES) }))} value={imagePresets.size ?? IMAGE_PRESET_UNSET}>
+                  <option value={IMAGE_PRESET_UNSET}>화면 가득</option>
+                  {OVERLAY_SIZE_CHOICES.map((choice) => (
+                    <option key={choice} value={choice}>{OVERLAY_SIZE_LABELS[choice]}</option>
+                  ))}
+                </NativeSelect>
+              </label>
+              <label>
+                움직임
+                <NativeSelect aria-label="움직임" disabled={disabled} onChange={(event) => setImagePresets((current) => ({ ...current, motion: pickPreset(event.target.value, SHAPE_OVERLAY_MOTION_CHOICES) }))} value={imagePresets.motion ?? IMAGE_PRESET_UNSET}>
+                  <option value={IMAGE_PRESET_UNSET}>{SHAPE_OVERLAY_MOTION_LABELS.none}</option>
+                  {SHAPE_OVERLAY_MOTION_CHOICES.filter((choice) => choice !== "none").map((choice) => (
+                    <option key={choice} value={choice}>{SHAPE_OVERLAY_MOTION_LABELS[choice]}</option>
+                  ))}
+                </NativeSelect>
+              </label>
+            </>
+          ) : null}
           {/* 도형·아이콘: "여기를 보세요"용 강조 상자·밑줄과 화살표 등.
               자유 좌표 대신 프리셋만 준다 -- 좌표를 찍는 편집기와 키프레임은
               계획서 §4 범위 밖이다. 아이콘도 같은 위치·크기 프리셋을 쓴다.
@@ -1172,7 +1244,17 @@ export function InspectorControls({
             disabled={disabled || (target.overlayKind === "image" && !target.value.assetId)}
             onClick={() => {
               if (target.overlayKind === "explanation-card") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, title: overlayTitle, body: overlayBody, text: overlayText });
-              else if (target.overlayKind === "image") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, assetId: target.value.assetId, text: overlayText });
+              // 고른 프리셋만 싣는다. 빈칸을 기본값으로 채우면 owner가 고르지도
+              // 않은 자리·크기·움직임이 저장된다(`ImageOverlayRequest`는 넷을
+              // 선택으로 받는다).
+              else if (target.overlayKind === "image") emit({
+                kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId,
+                assetId: target.value.assetId, text: overlayText,
+                ...(imagePresets.vertical ? { vertical: imagePresets.vertical } : {}),
+                ...(imagePresets.horizontal ? { horizontal: imagePresets.horizontal } : {}),
+                ...(imagePresets.size ? { size: imagePresets.size } : {}),
+                ...(imagePresets.motion ? { motion: imagePresets.motion } : {}),
+              });
               else if (target.overlayKind === "shape") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, ...shapeOverlay });
               else emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, columns: parseColumns(tableColumns), rows: parseRows(tableRows), text: overlayText });
             }}

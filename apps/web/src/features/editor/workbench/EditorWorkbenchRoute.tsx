@@ -1120,7 +1120,15 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       }
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
-      if (action.overlayKind === "image") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text });
+      // 사진의 자리·크기·움직임은 **고른 것만** 넘긴다. 안 고른 칸을 채우면
+      // owner가 고르지 않은 값이 저장된다(`ImageOverlayRequest`는 넷을 선택으로 받는다).
+      if (action.overlayKind === "image") return port.applyOverlay({
+        kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text,
+        ...(action.vertical ? { vertical: action.vertical } : {}),
+        ...(action.horizontal ? { horizontal: action.horizontal } : {}),
+        ...(action.size ? { size: action.size } : {}),
+        ...(action.motion ? { motion: action.motion } : {}),
+      });
       if (action.overlayKind === "shape") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, shape: action.shape, vertical: action.vertical, horizontal: action.horizontal, size: action.size, motion: action.motion });
       return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, columns: action.columns, rows: action.rows, text: action.text });
     });
