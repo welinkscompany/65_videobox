@@ -43,6 +43,12 @@ from videobox_storage.timeline_clip_source_resolution import (
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 
 
+#: 사진이 화면을 채울 수 있는 시간. 실제 길이가 아니라 **모자라지 않다**는 뜻이다.
+#: `math.inf`를 쓰지 않는 것은 이 값이 `min()`을 거쳐 필터 문자열로 흘러가기
+#: 때문이다 -- `inf`가 한 번이라도 새면 ffmpeg가 못 읽는 필터가 나온다.
+_STILL_SOURCE_SECONDS = 24 * 60 * 60.0
+
+
 def _looks_like_image(path: Path) -> bool:
     return path.suffix.lower() in _IMAGE_SUFFIXES
 
@@ -1585,8 +1591,11 @@ class FfmpegFinalRenderer:
             # 자세한 이유는 `single_thread_source_indices` 참고.
             single_thread_source_indices.add(len(source_paths))
             single_thread_source_indices.add(len(source_paths) + 1)
-            source_paths.append((outgoing, False, False))
-            source_paths.append((incoming, False, False))
+            # 사진이면 여기도 `-loop 1`이어야 한다. `False`로 박아 두었더니 한
+            # 장짜리 스트림을 잘라 쓰게 되어 **사진 장면의 전환이 조용히 사라졌다.**
+            # 장면 입력 쪽(`_looks_like_image(source)`)과 판단이 달랐던 자리다.
+            source_paths.append((outgoing, _looks_like_image(outgoing), False))
+            source_paths.append((incoming, _looks_like_image(incoming), False))
         export_overlay_indices: dict[int, int] = {}
         for overlay_index, overlay in enumerate(composition_plan.export_overlays):
             asset_uri = str(overlay.get("asset_uri") or "")
@@ -1806,6 +1815,19 @@ class FfmpegFinalRenderer:
             return None
 
     def _probe_media_duration(self, path: Path) -> float:
+        """이 원본이 화면을 채울 수 있는 시간.
+
+        **사진에는 잴 길이가 없다.** ffprobe에 png를 물으면 `N/A`를 준다(호스트
+        8.1.1, 컨테이너 7.1.5 둘 다 실측) -- 그대로 두면 `float()`가 실패해 렌더가
+        통째로 멈춘다. jpg는 `0.040000`을 줘서 죽지는 않았고, **그래서 이 결함이
+        사진 기능을 넣고도 한동안 안 보였다.**
+
+        사진은 `-loop 1`이라 장면이 요구하는 만큼 늘어난다. 그래서 "얼마든지"를
+        돌려준다 -- 영상에 걸리는 "원본이 장면보다 짧다" 검사가 사진에는 걸리지
+        않아야 맞다.
+        """
+        if _looks_like_image(path):
+            return _STILL_SOURCE_SECONDS
         try:
             result = subprocess.run(
                 [
