@@ -45,6 +45,14 @@ class KeywordBrollRecommender(RecommendationProvider):
     def recommend(self, request: RecommendationRequest) -> list[RecommendationCandidate]:
         guardrail = get_recommendation_guardrail(request.recommendation_type.value)
         results: list[RecommendationCandidate] = []
+        # **낱말이 안 맞을 때 장면마다 다른 것을 준다**(2026-09-06 실측). 겹치는
+        # 낱말이 없으면 모든 자산이 같은 점수(0.18)를 받는데, 첫 자산이 이긴 뒤로는
+        # `0.18 > 0.18`이 거짓이라 그 자리가 영영 안 바뀐다. 장면마다 같은 계산을
+        # 하니 **다섯 장면이 전부 같은 촬영본**이 됐다 -- 넷을 넣어 두었는데도.
+        # 브이로그에서 같은 화면 11초는 못 쓴다.
+        #
+        # 낱말이 맞을 때의 선택은 건드리지 않는다. 맞는 것이 있으면 그것이 이긴다.
+        fallback_turn = 0
         for segment in request.segments:
             segment_tokens = _tokenize(str(segment.get("text", "")))
             best_asset: dict[str, Any] | None = None
@@ -57,14 +65,21 @@ class KeywordBrollRecommender(RecommendationProvider):
                     | {str(tag).lower() for tag in metadata.get("tags", [])}
                 )
                 overlap = sorted(segment_tokens & asset_tokens)
-                score = round(min(0.98, 0.3 + len(overlap) * 0.2), 2) if overlap else 0.18
+                # **낱말이 하나도 안 맞는 자산은 후보로 세지 않는다.** 예전에는
+                # 그런 자산에도 0.18을 줬는데, 초기값 0.15보다 커서 **첫 자산이
+                # 곧바로 이기고** 그 뒤로는 `0.18 > 0.18`이 거짓이라 자리가 영영
+                # 안 바뀌었다. 아래 돌려쓰기가 한 번도 실행되지 않은 이유다.
+                if not overlap:
+                    continue
+                score = round(min(0.98, 0.3 + len(overlap) * 0.2), 2)
                 if score > best_score:
                     best_asset = asset
                     best_score = score
                     best_overlap = overlap
             if best_asset is None and request.assets:
-                best_asset = request.assets[0]
-                best_score = 0.22
+                best_asset = request.assets[fallback_turn % len(request.assets)]
+                best_score = 0.18
+                fallback_turn += 1
             results.append(
                 RecommendationCandidate(
                     target_segment_id=str(segment["segment_id"]),
