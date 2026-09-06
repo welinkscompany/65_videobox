@@ -383,7 +383,9 @@ def build_pack(
     # **곡이 바뀌면 버전을 올린다.** 같은 버전에 다른 내용이 들어 있으면,
     # 설치기는 `already_installed`로 건너뛰고 창작자 기계에는 옛 팩이 남는다.
     # 1.1.0: 게임 음악 12곡을 브이로그용으로 갈아 끼웠다(owner 지시 2026-09-05).
-    version: str = "1.1.0",
+    # 1.2.0: 브이로그용 효과음 23개를 더했다(전환음 13·타이핑 3·키 3·종이 4).
+    # 1.3.0: 게임 전용 효과음 49개를 뺐다(2026-09-06) — 104개가 지금 승인 집합이다.
+    version: str = "1.3.0",
     ffmpeg_binary: str = "ffmpeg",
     ffprobe_binary: str = "ffprobe",
 ) -> dict[str, object]:
@@ -431,7 +433,7 @@ def main() -> int:
     parser.add_argument("--ledger", type=Path, default=REPO_ROOT / "docs" / "starter-media-pack-license-research.ko.md")
     parser.add_argument("--output", type=Path, default=REPO_ROOT / "dist" / "starter-media-pack")
     parser.add_argument("--source-cache", type=Path, default=REPO_ROOT / "artifacts" / "starter-media-pack-sources")
-    parser.add_argument("--pack-version", default="1.1.0")
+    parser.add_argument("--pack-version", default="1.3.0")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
     args = parser.parse_args()

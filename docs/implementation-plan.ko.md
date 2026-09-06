@@ -513,6 +513,12 @@ VideoBox 내부 완성이나 MP4 출력을 막지 않는다.
 - 원본/자동/수정 비교
 - 수정 이력 저장
 - 부분 재생성
+- 배속(`속도`) — 길이·자막·자산이 함께 따라오고 뒤 장면을 당긴다(ripple)
+- 장면 전환
+- 색감
+- 흔들림 보정(영상)·소리 정리(오디오)
+- 화면 변형(확대·위치·회전)
+- 유진에게 말해서 하는 편집 — 2026-09-01부터 확인 클릭 없이 바로 적용된다(§23.3 머리말)
 
 오픈소스 편집기 반입 시점도 함께 고정한다.
 
@@ -1364,7 +1370,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `[~] 진행 중 (in progress, 2026-07-20)`: 외부 생성 모델 provider를 퇴역 중이다. key router·web credential CRUD UI·provider/domain/core module을 삭제하고, 새 project와 다시 여는 기존 SQLite project 모두에서 퇴역 credential table을 제거한다. public provider credential path와 provider transport는 없으며, local-only 실패는 deterministic fallback 또는 사람 검수로 끝난다. 단, 통합 API 파일의 과거 fallback 전용 테스트 삭제와 full backend 재검증은 아직 남아 있다.
 - `[x] 완료 (done)`: 2026-07-19 Hermes Agent 공식 문서와 release를 확인했다. 공식 quickstart/configuration은 `hermes model`의 **OpenAI Codex → ChatGPT OAuth device-code login**을 지원한다고 명시한다. 첫 설치는 signed release tag `v2026.7.7.2`의 annotated tag `b7751df34688835a108e0d630f3495fc11f3df79`와 peeled commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`으로 pin한다. 근거: <https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/>, <https://hermes-agent.nousresearch.com/docs/user-guide/configuration/>, <https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.7.2>.
 - `[x] 완료 (done)`: `videobox-hermes-agent` pre-auth container를 official amd64 digest `sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a`로 기동했다. Compose profile은 `hermes-preauth`이며, `network_mode: none`, host port 없음, VideoBox DB/media/snapshot mount 없음, 전용 scratch `videobox_hermes_preauth_state:/opt/data`, read-only root, `cap_drop: ALL`, `no-new-privileges`, bounded `local` log를 확인했다. 이 scratch volume은 훗날 OAuth state volume과 절대 재사용하지 않는다. official s6 supervisor의 state ownership·supervise lock을 위한 최소 예외로 `CHOWN`, `DAC_OVERRIDE`, `SETGID`, `SETUID`만 다시 더한다. 이 네 capability는 PID 1 supervisor에만 남고 실제 CMD는 UID `10000`/`hermes`, `CapEff=0`으로 실행됨을 runtime에서 확인했다. `hermes --version`은 `v0.18.2 (2026.7.7.2) · upstream 9de9c25f`를 반환했고 scratch state에는 `auth.json`과 `.env`가 없다.
-- `[ ] 미완료 (pending)`: 유진 profile, Hermes→VideoBox API 권한중개, egress allowlist gateway, OAuth login, mem0, 편집 mutation은 아직 만들지 않았다. 이 계획의 각 gate를 통과하기 전에는 이 범위를 추가하지 않는다.
+- `[ ] 미완료 (pending)`: Hermes→VideoBox API 권한중개, egress allowlist gateway, OAuth login은 아직 만들지 않았다. 이 계획의 각 gate를 통과하기 전에는 이 범위를 추가하지 않는다.
+- `[x] 완료 (done)`: 이 항목에 함께 적혀 있던 **유진 profile·mem0·편집 mutation은 그 뒤에 만들어졌다.** 유진은 로컬 qwen을 두뇌로 대화하고, 편집 mutation은 `services/api/src/videobox_api/routers/director_proposals.py`의 apply 라우트(`POST /api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals/{proposal_id}/apply` → `apply_yujin_editing_proposal`)로 실제 세션을 고친다. live Mem0는 2026-08-08 owner 승인으로 연결됐고 경계는 `CLAUDE.md` §6 / `docs/development-fast-path.ko.md` §10.14에 있다. **이 세 가지를 "아직 없다"는 근거로 쓰지 마라.**
 
 이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 외부 fallback보다 우선한다. provider 전략 문서는 현재 local-only 결정으로 갱신됐으며 외부 생성 모델 provider의 credential·key pool·router는 제거했다. 정적 검사와 실제 runtime 모두 external provider call `0`을 유지해야 하며, 외부 fallback 경로를 되살리는 구현은 허용하지 않는다.
 
@@ -1394,6 +1401,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 6. `[ ] 미완료 (pending)`: signer는 아직 어떤 VideoBox API route나 Hermes container에도 배포하지 않는다. owner-authorized revoke writer/source, signing secret delivery·rotation·key lifecycle, gateway audit 및 실제 gateway-only route/network는 아직 없다. Hermes가 self-mint하거나 shared signing key를 받는 설계는 금지한다.
 
 ### 23.3 [ ] 미완료 (pending) — 유진 profile, prompt와 업무 영역
+
+**2026-09-01 갱신 — 아래 "제안만 하고 직접 편집은 금지"는 `docs/decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`가 뒤집었다.** 유진에게 말한 편집은 이제 확인 클릭 없이 바로 적용되고(`director_proposals.py`의 apply 라우트), 안전장치는 확인 클릭이 아니라 **되돌리기**다. 아래 문단과 표는 그 결정 이전의 첫 slice 계약이니 현재 동작 설명으로 쓰지 마라. 나머지 거부 범위(DB/SQL·filesystem·shell·renderer·CapCut·raw HTTP·credential)는 그대로 유효하다.
 
 첫 slice의 에이전트는 **유진 (Yujin), `yujin-video-director`** 하나로 고정한다. 유진은 대화 요약, 사용자가 명시적으로 선택한 한 project의 상태 설명, action 없는 approval request 제안만 한다. VideoBox는 영상 편집·검수·CapCut 인계에 집중하며, 대본·제목·썸네일·추천 영상의 생성 또는 제안은 현재 제품 범위 밖으로 차단한다. 영상·자막·소리·전환의 근거 없는 품질 주장, DB/SQL, filesystem, shell, renderer, CapCut, raw HTTP, credential, 직접 편집·render·export는 금지한다. 화면 문구는 유진의 짧고 행동 중심적인 안내를 유지한다.
 

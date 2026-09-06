@@ -145,9 +145,15 @@ lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 �
 
 ## Gate 판정과 다음 행동
 
-- **approved research candidate (30 music / 100 SFX): PASS.** 각 후보는 author page, creator, exact source file, CC0 license, official license evidence hash, commercial/raw redistribution/conversion 판단을 갖췄다. Direct asset URL 130개와 official asset page URL 36개를 2026-07-14 HTTPS HEAD 200으로 다시 확인했다.
-- **starter-v1 research gate (30 music / 100 SFX): GREEN.** 이것은 license/provenance research만 green이라는 뜻이다. 실제 source bytes, duration, codec, converted bytes와 manifest integrity는 아직 검증되지 않았다.
+- **approved research candidate (당시 30 music / 100 SFX): PASS.** 각 후보는 author page, creator, exact source file, CC0 license, official license evidence hash, commercial/raw redistribution/conversion 판단을 갖췄다. Direct asset URL 130개와 official asset page URL 36개를 2026-07-14 HTTPS HEAD 200으로 다시 확인했다.
+- **starter-v1 research gate (당시 30 music / 100 SFX): GREEN.** 이것은 license/provenance research만 green이라는 뜻이다. 실제 source bytes, duration, codec, converted bytes와 manifest integrity는 아직 검증되지 않았다.
 - 다음 작업은 이 ledger의 approved asset만 대상으로 source download SHA-256 → transcode/probe → evidence text snapshot → manifest build 순서로 진행한다. 이 순서를 건너뛰어 build artifact를 배포하지 않는다.
+
+**위 두 줄의 숫자는 2026-07-14 시점이다. 지금 승인 집합은 104개(음악 30 /
+효과음 74)다.** 이 판정 뒤에 아래 두 절이 집합을 바꿨다 — 2026-09-05에 브이로그용
+23개를 넣었고(130 → 153), 2026-09-06에 게임 전용 49개를 뺐다(153 → 104).
+빌더가 이 숫자를 강제한다(`scripts/build_starter_media_pack.py`의
+`_validate_candidate_set`: 104 / 음악 30 / 효과음 74) — 여기 표와 어긋나면 빌드가 멈춘다.
 
 ### 승인 확장 — 브이로그용 SFX (2026-09-05)
 
