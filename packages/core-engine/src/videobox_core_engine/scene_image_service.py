@@ -47,6 +47,18 @@ _SCENE_FPS = 30
 #: 12%면 화면이 움직인다는 건 보이되 어지럽지 않다.
 _ZOOM_RATIO = 1.12
 
+#: 정지 화면을 움직이는 방법. owner 요청(2026-09-06): "사진 움직이는 효과도
+#: 다양한 형태로 움직이게".
+#:
+#: 2026-08-28에는 **줌만** 있었고, 코드리뷰가 "팬·줌(Ken Burns)"이라는 표현이
+#: 과장이라고 바로잡았다 -- `x`/`y`가 화면 중앙에 고정돼 실제 팬이 없었다.
+#: 여기서 좌우·상하로 실제로 움직이는 넷을 더한다.
+#:
+#: **팬은 확대한 상태에서만 움직일 수 있다.** 배율 1.0이면 크롭 창이 그림과
+#: 같은 크기라 옮길 자리가 없다 -- 그래서 팬은 `_ZOOM_RATIO`로 고정해 두고
+#: 창을 옮긴다.
+SCENE_MOTIONS = ("zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down")
+
 
 @dataclass(slots=True, frozen=True)
 class SceneImageGenerationError(Exception):
@@ -82,12 +94,17 @@ class SceneImageService:
         vertical: bool = False,
         duration_sec: float = _DEFAULT_SCENE_SECONDS,
         gap_slot_id: str | None = None,
+        motion: str | None = None,
     ) -> dict[str, Any]:
         cleaned = (prompt or "").strip()
         if not cleaned:
             raise SceneImageGenerationError("scene_image_prompt_empty", "invalid")
         if not (segment_id or "").strip():
             raise SceneImageGenerationError("scene_image_segment_missing", "invalid")
+        # 모르는 이름은 여기서 거절한다. 조용히 멈춘 화면을 내보내면 창작자가
+        # 완성본을 보고서야 안다.
+        if motion is not None and motion not in SCENE_MOTIONS:
+            raise ValueError(f"unknown scene motion: {motion}")
         width, height = _PORTRAIT if vertical else _LANDSCAPE
         image_prompt = self._image_prompt(project_id=project_id, written=cleaned, vertical=vertical)
         # 씨앗을 고정하면 "다시 만들기"가 같은 그림을 돌려주는 -- 아무것도 안 하는
@@ -136,6 +153,7 @@ class SceneImageService:
                 self._still_to_clip(
                     still=still, target=clip, width=width, height=height,
                     duration_sec=max(float(duration_sec), 0.5) + _SCENE_HEADROOM_SECONDS,
+                    motion=motion,
                 )
                 scene_asset = self.store.register_asset(
                     project_id=project_id,
@@ -197,7 +215,10 @@ class SceneImageService:
                 code if code in {"blocked", "timeout", "failed"} else "failed",
             ) from exc
 
-    def _still_to_clip(self, *, still: Path, target: Path, width: int, height: int, duration_sec: float) -> None:
+    def _still_to_clip(
+        self, *, still: Path, target: Path, width: int, height: int, duration_sec: float,
+        motion: str | None = None,
+    ) -> None:
         """정지 화면을 그 길이만큼의 mp4로. 소리 트랙은 만들지 않는다 --
         무음 B-roll은 이미 다루고 있고, 빈 소리를 실으면 섞을 때 한 겹이 는다.
 
@@ -215,17 +236,35 @@ class SceneImageService:
         """
         total_frames = max(round(duration_sec * _SCENE_FPS), 1)
         step = (_ZOOM_RATIO - 1.0) / total_frames
-        # 매번 같은 방향으로 움직이면 장면들이 다 똑같아 보인다 -- 줄어들지
-        # 늘어나는지를 씨앗과 별개로 매번 무작위로 고른다.
-        zoom_expr = (
-            f"min(zoom+{step:.10f},{_ZOOM_RATIO})" if secrets.choice([True, False])
-            else f"if(eq(on,0),{_ZOOM_RATIO},max(zoom-{step:.10f},1.0))"
-        )
+        # 매번 같은 방향으로 움직이면 장면들이 다 똑같아 보인다 -- 고르지 않았으면
+        # 여섯 가지 중 하나를 씨앗과 별개로 매번 무작위로 뽑는다.
+        chosen = motion or secrets.choice(list(SCENE_MOTIONS))
+        centre_x, centre_y = "iw/2-(iw/zoom/2)", "ih/2-(ih/zoom/2)"
+        if chosen == "zoom_in":
+            zoom_expr, x_expr, y_expr = f"min(zoom+{step:.10f},{_ZOOM_RATIO})", centre_x, centre_y
+        elif chosen == "zoom_out":
+            zoom_expr = f"if(eq(on,0),{_ZOOM_RATIO},max(zoom-{step:.10f},1.0))"
+            x_expr, y_expr = centre_x, centre_y
+        else:
+            # **팬은 확대한 상태에서 창을 옮기는 것이다.** 배율이 1.0이면 크롭
+            # 창이 그림과 같은 크기라 옮길 자리가 없다 -- 그래서 배율을 고정해
+            # 두고 `x`/`y`만 움직인다. `on/총프레임`이 0→1로 가므로 진행률이 곧
+            # 위치가 된다.
+            zoom_expr = f"{_ZOOM_RATIO}"
+            span_x, span_y = "(iw-iw/zoom)", "(ih-ih/zoom)"
+            progress = f"(on/{max(total_frames - 1, 1)})"
+            moves = {
+                "pan_right": (f"{span_x}*{progress}", centre_y),
+                "pan_left": (f"{span_x}*(1-{progress})", centre_y),
+                "pan_down": (centre_x, f"{span_y}*{progress}"),
+                "pan_up": (centre_x, f"{span_y}*(1-{progress})"),
+            }
+            x_expr, y_expr = moves[chosen]
         zoompan = (
             f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
             f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
             f"scale={width * 2}:{height * 2},"
-            f"zoompan=z='{zoom_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"zoompan=z='{zoom_expr}':x='{x_expr}':y='{y_expr}':"
             f"d={total_frames}:s={width}x{height}:fps={_SCENE_FPS},format=yuv420p"
         )
         command = [

@@ -150,16 +150,20 @@ def test_the_clip_is_not_a_frozen_still_it_zooms(tmp_path: Path, zooms_in: bool)
     범위 밖이다. 첫 프레임과 끝 프레임을 뽑아 SSIM으로 비교한다. 완전히
     같으면(1.0) 예전처럼 멈춰 있는 것이고, 줌이 실제로 이어졌다면 확실히 갈라진다.
 
-    방향(확대/축소)은 `secrets.choice`로 매번 무작위라 고정하지 않으면 이 시험이
-    두 갈래 중 하나만(대략 절반의 확률로) 실제로 확인하게 된다 -- 두 방향 모두
+    방향(확대/축소)은 고르지 않으면 매번 무작위라, 고정하지 않으면 이 시험이 두
+    갈래 중 하나만(대략 절반의 확률로) 실제로 확인하게 된다 -- 두 방향 모두
     파라미터로 고정해서 둘 다 잰다.
+
+    **2026-09-06: 고정하는 방법이 바뀌었다.** 예전에는 `secrets.choice`를 True/
+    False로 가로챘는데, 움직임이 여섯 가지가 되면서 그 자리가 문자열을 돌려주게
+    됐다. 이제는 `motion` 인자로 곧장 고른다 -- 가로채기보다 정직하다.
     """
     service, store, project_id = _service(tmp_path)
 
-    with patch("videobox_core_engine.scene_image_service.secrets.choice", return_value=zooms_in):
-        service.generate_scene_image(
-            project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1", duration_sec=3.0,
-        )
+    service.generate_scene_image(
+        project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1", duration_sec=3.0,
+        motion="zoom_in" if zooms_in else "zoom_out",
+    )
 
     clip = next(
         item for item in store.list_assets(project_id=project_id)
@@ -336,3 +340,45 @@ def test_without_any_writer_a_korean_line_is_refused_before_the_gpu_wakes_up(tmp
 
     assert exc.value.code == "invalid"
     assert str(exc.value) == "scene_image_prompt_needs_english"
+
+
+@pytest.mark.parametrize(
+    "motion", ["zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down"]
+)
+def test_a_still_can_move_in_six_different_ways(tmp_path: Path, motion: str) -> None:
+    """owner 요청(2026-09-06): "사진 움직이는 효과도 다양한 형태로 움직이게".
+
+    2026-08-28에는 **줌만** 넣었고, 코드리뷰가 "팬·줌"이라는 표현이 과장이라고
+    바로잡았다 -- `x`/`y`가 화면 중앙에 고정돼 실제 팬이 없었다. 이제 좌우·상하로
+    실제로 움직이는 네 가지를 더한다.
+
+    첫 프레임과 끝 프레임을 SSIM으로 비교해 실제로 달라지는지 본다. 멈춰 있으면
+    1.0에 붙는다.
+    """
+    service, store, project_id = _service(tmp_path)
+
+    service.generate_scene_image(
+        project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1",
+        duration_sec=3.0, motion=motion,
+    )
+
+    clip = next(
+        item for item in store.list_assets(project_id=project_id)
+        if item["asset_type"] == AssetType.BROLL_VIDEO.value
+    )
+    clip_path = store.resolve_storage_uri(project_id=project_id, storage_uri=str(clip["storage_uri"]))
+
+    all_value = _first_last_frame_ssim(clip_path)
+
+    assert all_value < 0.999, f"{motion}인데 멈춰 있다 (SSIM {all_value})"
+
+
+def test_an_unknown_motion_is_refused_instead_of_silently_freezing(tmp_path: Path) -> None:
+    """모르는 이름은 거절한다 -- 조용히 멈춘 화면을 내보내면 창작자가 나중에 안다."""
+    service, store, project_id = _service(tmp_path)
+
+    with pytest.raises(ValueError):
+        service.generate_scene_image(
+            project_id=project_id, prompt="해 뜨는 바다", segment_id="script-1",
+            duration_sec=3.0, motion="spin-around-nope",
+        )
