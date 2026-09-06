@@ -1471,13 +1471,61 @@ def remove_segment_explanation_card(
     )
 
 
+# 사진 오버레이도 도형과 **같은 프리셋 어휘**를 쓴다(owner 요청 2026-09-06,
+# "사진을 우리 영상 위에도 얹어서 움직이게").
+#
+# 목록을 새로 만들지 않고 `overlay_shapes`의 것을 그대로 본뜬다 -- 사본을 두면
+# 화면·API·렌더가 서로 다른 목록을 보게 되고, 도형에서 이미 그 값을 치렀다.
+# 승인 범위도 도형과 같다(2026-08-20 승인 5항): 오버레이 하나가 등장·퇴장·이동
+# 하는 정도까지이고 자유 좌표·초 단위·키프레임은 밖이다.
+_IMAGE_OVERLAY_PRESET_VALUES: dict[str, frozenset[str]] = {
+    "vertical": SHAPE_OVERLAY_VERTICALS,
+    "horizontal": SHAPE_OVERLAY_HORIZONTALS,
+    "size": SHAPE_OVERLAY_SIZES,
+    "motion": SHAPE_OVERLAY_MOTION_SET,
+}
+
+
 def update_segment_image_overlay(
     *,
     session: dict[str, Any],
     segment_id: str,
     asset_id: str,
     text: str,
+    vertical: str | None = None,
+    horizontal: str | None = None,
+    size: str | None = None,
+    motion: str | None = None,
 ) -> dict[str, Any]:
+    """사진 오버레이를 얹는다. 프리셋 넷은 **선택**이다.
+
+    안 준 값은 열쇠 자체를 **안 적는다**. 빈칸을 기본값으로 채워 넣으면 이 기능이
+    생기기 전에 저장된 오버레이와 자국이 달라지고, 사진 오버레이를 프리셋 없이
+    부르는 자리가 파이프라인·유진 경로에 여럿 있다 -- 거기서 owner는 아무것도
+    안 바꿨는데 그림이 움직인 것을 보게 된다. 없는 열쇠를 '정중앙·안 움직임'으로
+    읽는 것은 렌더 쪽 몫이며, 도형의 `canonical_shape_overlay_motion`이 이미
+    같은 방식으로 관대하다.
+
+    준 값은 반대로 **거절**한다. 오타를 조용히 기본값으로 좁히면 owner는 고른
+    것이 왜 안 되는지 알 수 없다.
+    """
+    presets = {
+        "vertical": vertical,
+        "horizontal": horizontal,
+        "size": size,
+        "motion": motion,
+    }
+    normalized_presets: dict[str, str] = {}
+    for field_name, raw_value in presets.items():
+        if raw_value is None:
+            continue
+        normalized = str(raw_value).strip().lower()
+        allowed = _IMAGE_OVERLAY_PRESET_VALUES[field_name]
+        if normalized not in allowed:
+            raise ValueError(
+                f"image overlay {field_name} must be one of {sorted(allowed)}: {normalized!r}"
+            )
+        normalized_presets[field_name] = normalized
     return _upsert_segment_overlay(
         session=session,
         segment_id=segment_id,
@@ -1486,6 +1534,7 @@ def update_segment_image_overlay(
             "overlay_type": "image_overlay",
             "asset_id": asset_id.strip(),
             "text": text.strip(),
+            **normalized_presets,
         },
         mutation_type="image_overlay_update",
     )

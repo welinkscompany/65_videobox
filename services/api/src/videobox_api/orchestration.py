@@ -1269,6 +1269,12 @@ class ApiOrchestrator:
         segment_id: str,
         asset_id: str,
         text: str,
+        # 프리셋 넷은 선택이다. `None`이 "안 고름"이고, 그때는 이 기능이 생기기
+        # 전과 똑같이 저장된다 -- 여기서 기본값을 채우면 그 구분이 사라진다.
+        vertical: str | None = None,
+        horizontal: str | None = None,
+        size: str | None = None,
+        motion: str | None = None,
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
@@ -1279,6 +1285,10 @@ class ApiOrchestrator:
             segment_id=segment_id,
             asset_id=asset_id,
             text=text,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+            motion=motion,
             expected_revision=expected_revision,
             proposal_id=proposal_id,
             candidate_id=candidate_id,

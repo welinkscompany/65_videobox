@@ -23012,6 +23012,96 @@ def test_editing_session_api_can_clear_image_and_table_overlays(tmp_path: Path) 
     assert payload["history"][-1]["mutation_type"] == "table_overlay_remove"
 
 
+def test_editing_session_api_can_place_and_move_an_image_overlay(tmp_path: Path) -> None:
+    """사진도 도형과 같은 프리셋으로 자리·크기·움직임을 받는다.
+
+    owner 요청(2026-09-06) "사진을 우리 영상 위에도 얹어서 움직이게". 화면에서 고른
+    값이 세션까지 닿아야 렌더가 읽을 수 있다 -- 이 저장소는 "부품은 있는데 부르는
+    자리가 없다"에 여러 번 걸렸으므로 endpoint부터 저장까지 한 번에 밟는다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "small",
+            "motion": "slide_in_right",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    overlay = saved.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["overlay_type"] == "image_overlay"
+    assert (overlay["vertical"], overlay["horizontal"]) == ("top", "right")
+    assert (overlay["size"], overlay["motion"]) == ("small", "slide_in_right")
+    assert saved.json()["history"][-1]["mutation_type"] == "image_overlay_update"
+
+    # 프리셋 밖 값은 저장 전에 거절된다 -- 자유 좌표·초 단위는 승인 범위 밖이다.
+    for outside_the_presets in (
+        {"vertical": "37%"},
+        {"horizontal": "12px"},
+        {"size": "huge"},
+        {"motion": "spin"},
+        {"motion": "0.4s ease-in"},
+    ):
+        rejected = client.patch(
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+            json={
+                "asset_id": "asset_image_001",
+                "text": "Exterior reference image",
+                "expected_revision": 2,
+                **outside_the_presets,
+            },
+        )
+        assert rejected.status_code == 422, outside_the_presets
+
+
+def test_editing_session_api_image_overlay_without_presets_stays_as_it_was(tmp_path: Path) -> None:
+    """프리셋을 안 보내면 이 기능이 생기기 전과 같은 자국이 남는다.
+
+    옛 화면이 보내던 요청이 그대로 통해야 하고, 안 보낸 값이 열쇠로 채워지면
+    렌더가 정중앙이 아닌 자리로 읽을 수 있다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "image_overlay",
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+        }
+    ]
+
+
 def test_editing_session_api_can_set_and_clear_a_shape_overlay(tmp_path: Path) -> None:
     """정지 도형(강조 상자·밑줄)은 다른 오버레이와 같은 endpoint 체계를 탄다."""
     app = create_app(projects_root=tmp_path)

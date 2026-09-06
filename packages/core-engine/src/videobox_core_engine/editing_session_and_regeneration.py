@@ -935,6 +935,12 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         asset_id: str,
         text: str,
+        # 프리셋 넷은 선택이다. 유진 경로를 비롯해 프리셋 없이 부르는 자리가
+        # 여럿이라, `None`은 끝까지 `None`으로 넘겨 도메인이 열쇠를 안 적게 한다.
+        vertical: str | None = None,
+        horizontal: str | None = None,
+        size: str | None = None,
+        motion: str | None = None,
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
@@ -955,6 +961,10 @@ class EditingSessionRegenerationMixin:
             segment_id=segment_id,
             asset_id=asset_id,
             text=text,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+            motion=motion,
         )
         # Existing legacy sessions can still contain assetless cards.  A real
         # project asset, however, becomes a renderable source and must carry a

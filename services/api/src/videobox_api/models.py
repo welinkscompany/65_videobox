@@ -1209,11 +1209,40 @@ class ExplanationCardRequest(OptionalYujinCandidateAttestation):
 
 
 class ImageOverlayRequest(BaseModel):
+    """사진 오버레이. 자리·크기·움직임은 도형과 **같은 프리셋**만 받는다.
+
+    owner 요청(2026-09-06) "사진을 우리 영상 위에도 얹어서 움직이게". 승인 범위는
+    도형과 같다(2026-08-20 승인 5항) -- 오버레이 하나가 등장·퇴장·이동하는
+    정도까지이고, 자유 좌표(px/%)나 초 단위 시간은 받지 않는다. 받기 시작하면
+    그게 곧 승인 범위 밖인 키프레임 편집기다.
+
+    넷 다 **안 보내도 된다.** 안 보내면 이 기능이 생기기 전과 똑같이 저장되고,
+    옛 화면이 보내던 요청도 그대로 통한다.
+    """
+
     expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
     text: str = ""
+    vertical: Literal["top", "middle", "bottom"] | None = None
+    horizontal: Literal["left", "center", "right"] | None = None
+    size: Literal["small", "medium", "large"] | None = None
+    motion: str | None = None
     proposal_id: str | None = Field(default=None, min_length=1, max_length=256)
     candidate_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @field_validator("motion")
+    @classmethod
+    def validate_image_overlay_motion(cls, value: str | None) -> str | None:
+        # 안 보낸 것과 목록에 없는 이름은 다르다. 앞은 그대로 두고 뒤는 거절한다 --
+        # 오타를 조용히 `그대로`로 좁히면 owner는 고른 것이 왜 안 되는지 모른다.
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if normalized not in SHAPE_OVERLAY_MOTION_SET:
+            raise ValueError(
+                f"motion must be one of {list(SHAPE_OVERLAY_MOTIONS)}: {value!r}"
+            )
+        return normalized
 
     @model_validator(mode="after")
     def validate_image_overlay(self) -> "ImageOverlayRequest":

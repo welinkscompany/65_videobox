@@ -610,6 +610,72 @@ def _icon_overlay_filter(
     )
 
 
+#: 사진이 화면에서 차지하는 비율. 도형 표(`_SHAPE_OVERLAY_SIZE_FRACTIONS`)를 쓰지
+#: 않는다 -- 그건 강조 상자·밑줄용이라 `large`도 화면의 0.6이다. 사진은 그 자체가
+#: 볼거리라 같은 이름이 더 커야 한다.
+_IMAGE_OVERLAY_SIZE_FRACTIONS = {"small": 0.35, "medium": 0.55, "large": 0.80}
+
+
+def export_image_overlay_geometry(
+    overlay: dict[str, Any], *, width: int, height: int, start_sec: float, end_sec: float
+) -> tuple[str, str, str, str]:
+    """사진 오버레이의 `(크기 필터, 가로 식, 세로 식, 흐림 필터)`.
+
+    **두 렌더 경로가 이 하나를 쓴다.** 각자 계산하면 같은 사진이 미리보기와
+    완성본에서 다른 자리에 온다 -- 이 저장소가 이미 두 번 밟은 자리다.
+
+    고르지 않은 값은 **payload에 아예 없다**(부분적으로만 채워져 올 수 있다).
+    그래서 넷을 따로따로 본다. 넷 다 없으면 예전 필터와 글자까지 같다.
+
+    자리 식은 `overlay` 필터가 아는 이름(`W`·`H`는 바탕, `w`·`h`는 얹는 그림)으로
+    쓴다. 사진 크기는 비율에 따라 달라져 여기서 픽셀로 못 박을 수 없다.
+    """
+    size = str(overlay.get("size") or "").strip().lower()
+    fraction = _IMAGE_OVERLAY_SIZE_FRACTIONS.get(size)
+    box_width = round(width * fraction) if fraction else width
+    box_height = round(height * fraction) if fraction else height
+    # `decrease`라 칸보다 큰 쪽만 줄어든다 -- 사진 비율은 그대로다.
+    scale = f"scale={box_width}:{box_height}:force_original_aspect_ratio=decrease"
+
+    margin_x, margin_y = round(width * 0.06), round(height * 0.08)
+    horizontal = str(overlay.get("horizontal") or "").strip().lower()
+    vertical = str(overlay.get("vertical") or "").strip().lower()
+    x = (
+        str(margin_x) if horizontal == "left"
+        else f"W-w-{margin_x}" if horizontal == "right"
+        else "(W-w)/2"
+    )
+    y = (
+        str(margin_y) if vertical == "top"
+        else f"H-h-{margin_y}" if vertical == "bottom"
+        else "(H-h)/2"
+    )
+
+    motion = canonical_shape_overlay_motion(overlay.get("motion"))
+    window = _shape_motion_sec(motion, start_sec=start_sec, end_sec=end_sec) if motion != "none" else 0.0
+    if motion == "none" or window <= 0:
+        return scale, x, y, ""
+    span = _motion_number(window)
+    if motion in {"slide_in_left", "slide_in_right"}:
+        appearing = f"clip((t-{_motion_number(start_sec)})/{span},0,1)"
+        # 쉼표가 든 식은 따옴표로 묶어야 ffmpeg가 옵션 구분자로 읽지 않는다.
+        # `({x})` 괄호도 필수다 -- `W-w-115`를 괄호 없이 빼면 부호가 뒤집힌다.
+        if motion == "slide_in_left":
+            return scale, f"'({x})-(1-{appearing})*(({x})+w)'", y, ""
+        return scale, f"'({x})+(1-{appearing})*(W-({x}))'", y, ""
+    # `fade=alpha=1`은 알파가 있는 화소 꼴에서만 듣는다. 사진(jpg)에는 알파가
+    # 없어서 `format=yuva420p`를 앞에 안 붙이면 **ffmpeg는 성공하는데 화면은
+    # 그대로다** -- 이 저장소가 가장 싫어하는 종류의 실패다.
+    parts = [""]
+    if motion in {"fade_in", "fade_in_out"}:
+        parts.append(f"fade=t=in:st={_motion_number(start_sec)}:d={span}:alpha=1")
+    if motion in {"fade_out", "fade_in_out"}:
+        parts.append(
+            f"fade=t=out:st={_motion_number(max(start_sec, end_sec - window))}:d={span}:alpha=1"
+        )
+    return scale, x, y, ",format=yuva420p," + ",".join(parts[1:])
+
+
 def export_overlay_shape_filters(
     overlay: dict[str, Any],
     *,
@@ -1141,12 +1207,19 @@ class FfmpegFinalRenderer:
             source_index = export_overlay_indices[overlay_index]
             label = f"export_overlay_{overlay_index}"
             next_canvas = f"canvas_export_{overlay_index}"
+            # 자리·크기·움직임은 내보내기 경로와 **같은 함수**로 정한다.
+            scale, overlay_x, overlay_y, fade = export_image_overlay_geometry(
+                dict(overlay), width=self.video_width, height=self.video_height,
+                start_sec=start_sec, end_sec=end_sec,
+            )
             filters.append(
                 f"[{source_index}:v]trim=duration={end_sec - start_sec},setpts=PTS-STARTPTS,"
-                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
-                f"setpts=PTS+{start_sec}/TB[{label}]"
+                f"{scale}{fade},setpts=PTS+{start_sec}/TB[{label}]"
             )
-            filters.append(f"[{canvas}][{label}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:repeatlast=0[{next_canvas}]")
+            filters.append(
+                f"[{canvas}][{label}]overlay=x={overlay_x}:y={overlay_y}:"
+                f"eof_action=pass:repeatlast=0[{next_canvas}]"
+            )
             canvas = next_canvas
         # 자막은 ASS로, 글줄 오버레이는 drawtext로 그려서 두 필터는 서로를 모른다.
         # 자막이 먹는 띠를 여기서 받아 카드가 그 위를 밟지 않게 한다.
@@ -1912,7 +1985,7 @@ class FfmpegFinalRenderer:
         captions: list[dict[str, Any]] | None = None,
     ) -> Path:
         text_filters: list[str] = []
-        image_overlays: list[tuple[Path, float, float]] = []
+        image_overlays: list[tuple[Path, float, float, dict[str, Any]]] = []
         for overlay in overlays:
             overlay_type = str(overlay.get("overlay_type") or "").strip().lower()
             start_sec = float(overlay.get("start_sec") or 0.0)
@@ -1925,9 +1998,10 @@ class FfmpegFinalRenderer:
                 if not asset_uri and asset_id:
                     asset_uri = f"local://projects/{project_id}/assets/{asset_id}"
                 if asset_uri:
-                    image_overlays.append(
-                        (self._resolve_generic_asset_uri(project_id=project_id, asset_uri=asset_uri), start_sec, end_sec)
-                    )
+                    image_overlays.append((
+                        self._resolve_generic_asset_uri(project_id=project_id, asset_uri=asset_uri),
+                        start_sec, end_sec, overlay,
+                    ))
             # 정지 도형과 아이콘. 둘 다 이어붙는 단일 필터이므로 같은 사슬에 싣는다.
             # 글줄 검사보다 앞에 있어야 한다 -- 글줄이 없는 도형 장면이 글꼴 없는
             # 환경에서 막히면 안 된다(아이콘은 자기 글꼴을 스스로 확인한다).
@@ -1960,11 +2034,11 @@ class FfmpegFinalRenderer:
             return video_path
         overlaid_path = work_dir / "broll_with_overlays.mp4"
         command = [self.ffmpeg_binary, "-y", "-i", str(video_path)]
-        for image_path, _start_sec, _end_sec in image_overlays:
+        for image_path, _start_sec, _end_sec, _overlay in image_overlays:
             command += ["-loop", "1", "-i", str(image_path)]
         current_label = "[0:v]"
         filter_parts: list[str] = []
-        for index, (_image_path, start_sec, end_sec) in enumerate(image_overlays, start=1):
+        for index, (_image_path, start_sec, end_sec, overlay) in enumerate(image_overlays, start=1):
             next_label = f"[overlay_{index}]"
             # **그래프 경로와 같은 크기로 맞춘다**(코드리뷰 2026-09-06). 여기에만
             # `scale`이 없어서 같은 사진이 미리보기에서는 화면에 맞게 줄고
@@ -1972,12 +2046,13 @@ class FfmpegFinalRenderer:
             # 완성본에서 잘리거나 작아진다. 도형 오버레이는 두 경로가 함수 하나를
             # 공유해서 이 문제가 없었다.
             scaled = f"[scaled_{index}]"
-            filter_parts.append(
-                f"[{index}:v]scale={self.video_width}:{self.video_height}"
-                f":force_original_aspect_ratio=decrease{scaled}"
+            scale, overlay_x, overlay_y, fade = export_image_overlay_geometry(
+                overlay, width=self.video_width, height=self.video_height,
+                start_sec=start_sec, end_sec=end_sec,
             )
+            filter_parts.append(f"[{index}:v]{scale}{fade}{scaled}")
             filter_parts.append(
-                f"{current_label}{scaled}overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:"
+                f"{current_label}{scaled}overlay=x={overlay_x}:y={overlay_y}:"
                 f"enable='between(t,{start_sec},{end_sec})':eof_action=repeat:shortest=1{next_label}"
             )
             current_label = next_label

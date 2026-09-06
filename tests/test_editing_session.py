@@ -1179,6 +1179,158 @@ def test_update_segment_image_overlay_records_history() -> None:
     assert updated["history"][-1]["mutation_type"] == "image_overlay_update"
 
 
+def test_update_segment_image_overlay_accepts_the_same_presets_as_shapes() -> None:
+    """사진도 도형과 같은 프리셋으로 자리·크기·움직임을 받는다.
+
+    owner가 2026-09-06에 요청한 것은 "사진을 우리 영상 위에도 얹어서 움직이게"다.
+    도형이 이미 같은 어휘를 쓰고 있으므로 목록을 새로 만들지 않고 그대로 본뜬다 --
+    사본을 만들면 화면·API·렌더가 서로 다른 목록을 보게 된다.
+    """
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    placed = update_segment_image_overlay(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+        vertical="top",
+        horizontal="right",
+        size="small",
+        motion="slide_in_left",
+    )
+
+    assert placed["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "image_overlay",
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "small",
+            "motion": "slide_in_left",
+        }
+    ]
+    assert placed["history"][-1]["mutation_type"] == "image_overlay_update"
+
+    # 다시 저장하면 쌓이지 않고 바뀐다 -- 도형과 같은 upsert다.
+    moved = update_segment_image_overlay(
+        session=placed,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+        vertical="bottom",
+        horizontal="left",
+        size="large",
+        motion="fade_in_out",
+    )
+    overlay = moved["segments"][0]["visual_overlays"][0]
+    assert len(moved["segments"][0]["visual_overlays"]) == 1
+    assert (overlay["vertical"], overlay["horizontal"]) == ("bottom", "left")
+    assert (overlay["size"], overlay["motion"]) == ("large", "fade_in_out")
+
+
+def test_update_segment_image_overlay_without_presets_stays_as_it_was() -> None:
+    """프리셋을 안 주면 이 기능이 생기기 전과 **글자 하나까지 같은** 자국을 남긴다.
+
+    사진 오버레이를 프리셋 없이 부르는 자리가 파이프라인·유진 경로에 여럿 있다.
+    빈 열쇠를 채워 넣기 시작하면 렌더가 '정중앙'이 아닌 자리로 읽을 수 있고,
+    그러면 owner는 아무것도 안 바꿨는데 그림이 움직인 것을 보게 된다.
+    """
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_image_overlay(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "image_overlay",
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+        }
+    ]
+
+
+def test_update_segment_image_overlay_rejects_values_outside_the_presets() -> None:
+    """자유 좌표·초 단위·키프레임은 승인 범위 밖이다(2026-08-20 승인 5항).
+
+    오타를 조용히 기본값으로 좁히지 않는다 -- 고른 것이 왜 안 되는지 owner가
+    알 수 없게 된다.
+    """
+    import pytest
+
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    for bad in (
+        {"vertical": "37%"},
+        {"vertical": "centre"},
+        {"horizontal": "12px"},
+        {"size": "huge"},
+        {"size": "120%"},
+        {"motion": "spin"},
+        {"motion": "0.4s ease-in"},
+    ):
+        with pytest.raises(ValueError):
+            update_segment_image_overlay(
+                session=session,
+                segment_id="seg_001",
+                asset_id="asset_image_001",
+                text="Exterior reference image",
+                **bad,
+            )
+
+
 def test_update_segment_table_overlay_records_history() -> None:
     from videobox_core_engine.editing_session import build_editing_session
     from videobox_core_engine.editing_session import update_segment_table_overlay
