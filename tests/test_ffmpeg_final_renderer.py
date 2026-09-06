@@ -1540,3 +1540,64 @@ def test_broll_placement_chain_rotates_before_it_zooms_and_pans(tmp_path: Path) 
     # 당겨 버린다 -- 위치를 옮겨도 아무 일도 안 일어나는 화면이 된다(2026-09-01
     # 실측). 양쪽으로 밀 수 있어야 하므로 밀 거리의 두 배를 더한다.
     assert r"pad=max(iw\,2160):max(ih\,2880)" in panned
+
+
+def test_a_photo_in_a_broll_slot_is_stretched_to_fill_the_scene(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """사진을 장면으로 쓸 수 있어야 한다 — owner 요청 2026-09-06.
+
+    > "사진을 넣는것도 우리 자산으로 만들어서 영상으로 천천히 슬로우 모션같은
+    > 효과로 만들어도 되는거지?"
+
+    지금은 안 됐다. B-roll 입력은 `is_image`가 **False로 박혀 있어서**
+    (`source_paths.append((source, False, should_loop))`) ffmpeg가 사진을 영상으로
+    읽으려 하고, `-loop 1`이 안 붙어 한 프레임만 나온다. 사진을 다루는 코드는
+    이미 있었다 -- 오버레이 경로에서만 쓰고 있었다.
+
+    owner의 사진 56장이 자료실에 들어와 있다. 장면 자리에 놓을 수 있어야 한다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Photo scene")
+    photo = tmp_path / "shot.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=photo)
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+
+    timeline = {
+        "timeline_id": "timeline-photo", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 5.0,
+            "media_controls": {},
+        }]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    command = commands[0]
+    photo_input = command.index(str(photo.resolve())) if str(photo.resolve()) in command else None
+    if photo_input is None:
+        # 자산은 프로젝트 폴더로 복사된다 -- 그 경로를 찾는다.
+        photo_input = next(i for i, part in enumerate(command) if part.endswith(".jpg"))
+    # `-loop 1`이 그 입력 **앞에** 붙어야 사진이 장면 길이만큼 늘어난다.
+    window = command[max(0, photo_input - 6):photo_input]
+    assert "-loop" in window, f"사진 입력에 -loop가 없다: {window}"
+    assert window[window.index("-loop") + 1] == "1"

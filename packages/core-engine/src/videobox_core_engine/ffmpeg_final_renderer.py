@@ -38,6 +38,15 @@ from videobox_storage.timeline_clip_source_resolution import (
 )
 
 
+#: 사진으로 다루는 확장자. 세 곳(오버레이 둘, 장면 하나)이 같은 목록을 봐야
+#: 한다 -- 두 벌로 적으면 한쪽만 고쳐진다.
+_IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+
+
+def _looks_like_image(path: Path) -> bool:
+    return path.suffix.lower() in _IMAGE_SUFFIXES
+
+
 class FinalRenderError(RuntimeError):
     pass
 
@@ -1386,7 +1395,7 @@ class FfmpegFinalRenderer:
                 source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=item.asset_uri)
                 if not source.is_file():
                     raise FinalRenderError(f"Exact preview source is missing: '{source}'. Restore or re-import it and retry.")
-                is_image = source.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+                is_image = _looks_like_image(source)
                 if not is_image and not self._has_visual_stream(source):
                     raise FinalRenderError("Exact preview overlay source must be a local image or video. Restore it and retry.")
                 track_overlay_indices[item.clip_id] = len(source_paths)
@@ -1424,7 +1433,11 @@ class FfmpegFinalRenderer:
             # `clip_id`가 겹치면 안전하게 끈다 -- 위 `broll_clip_id_counts` 참고.
             if item.track_type == "broll" and item.source_in_sec > 0 and broll_clip_id_counts.get(item.clip_id, 0) == 1:
                 fast_seek_offsets[len(source_paths)] = item.source_in_sec
-            source_paths.append((source, False, should_loop))
+            # **사진도 장면이 될 수 있다**(owner 요청 2026-09-06). 여기서
+            # `is_image`가 False로 박혀 있어서 ffmpeg가 사진을 영상으로 읽으려
+            # 했고, `-loop 1`이 안 붙어 한 프레임만 나왔다. 사진을 다루는 코드는
+            # 이미 있었다 -- 오버레이 경로에서만 쓰고 있었을 뿐이다.
+            source_paths.append((source, _looks_like_image(source), should_loop))
         # 전환은 두 클립의 원본을 **한 번 더** 읽는다.
         #
         # 필터그래프에서 입력 하나는 한 번만 쓸 수 있다. 이미 배치에 쓴
@@ -1470,7 +1483,7 @@ class FfmpegFinalRenderer:
             if not source.is_file():
                 raise FinalRenderError("Exact preview export overlay source is missing. Restore it and retry.")
             export_overlay_indices[overlay_index] = len(source_paths)
-            source_paths.append((source, source.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}, False))
+            source_paths.append((source, _looks_like_image(source), False))
         graph = self.build_plan_filter_graph(
             composition_plan=composition_plan, source_indices=source_indices,
             export_overlay_indices=export_overlay_indices,
