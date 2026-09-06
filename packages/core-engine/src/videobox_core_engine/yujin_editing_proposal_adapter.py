@@ -208,8 +208,18 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
             if operation.asset_id not in set(context.approved_asset_ids):
                 return "media_asset_not_approved"
             asset_types = dict(context.approved_asset_types)
-            expected_asset_type = {"broll": "broll_video", "bgm": "bgm", "sfx": "sfx"}[operation.media_type]
-            if asset_types and asset_types.get(operation.asset_id) != expected_asset_type:
+            # **사진도 화면 자리에 놓인다**(owner 요청 2026-09-06). 영상과 같은
+            # `broll_override`에 실리고, 다른 점은 렌더러가 `-loop 1`로 늘리고
+            # 움직임을 얹는다는 것뿐이다. 그래서 새 낱말을 만들지 않는다 --
+            # 창작자가 "이 사진 깔아줘"라고 할 때 유진이 굳이 다른 말을 골라야
+            # 할 이유가 없다.
+            #
+            # **느슨하게 푸는 것이 아니다.** 음악을 화면 자리에 놓는 것은 여전히
+            # 막힌다(그 반대도).
+            expected_asset_types = {
+                "broll": {"broll_video", "image"}, "bgm": {"bgm"}, "sfx": {"sfx"},
+            }[operation.media_type]
+            if asset_types and asset_types.get(operation.asset_id) not in expected_asset_types:
                 return "media_asset_type_mismatch"
     return None
 

@@ -157,7 +157,11 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
         # 이름을 보여 주면 모델이 그대로 쓰고 스키마에서 막힌다 -- 2026-09-05에
         # 자료실 영상 후보 8개를 보내 주고도 유진이 "승인된 자산 목록에 없다"고
         # 답한 마지막 겹이 이것이었다.
-        kind = {"broll_video": "broll"}.get(str(asset_types.get(asset_id, "")), asset_types.get(asset_id, "알 수 없음"))
+        # 사진(`image`)도 화면 자리에 놓이므로 같은 이름으로 적는다
+        # (2026-09-06). 저장 이름과 쓸 이름이 다른 것은 이 둘뿐이다.
+        kind = {"broll_video": "broll", "image": "broll"}.get(
+            str(asset_types.get(asset_id, "")), asset_types.get(asset_id, "알 수 없음")
+        )
         entries.append(f"{asset_id}({kind}, {label})" if label else f"{asset_id}({kind})")
     if not entries:
         return "승인된 자산이 없다 -- apply_media를 시도하지 마라."

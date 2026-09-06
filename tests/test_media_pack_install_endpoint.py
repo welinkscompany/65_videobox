@@ -16,29 +16,11 @@
 
 from __future__ import annotations
 
-import json
-import shutil
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-
-
-def _pack(root: Path, *, version: str = "9.9.9") -> Path:
-    """작은 팩 하나. 실제 오디오가 필요하므로 기존 팩에서 한 자산만 빌려 온다."""
-    source = Path("dist/starter-media-pack")
-    if not (source / "manifest.json").exists():
-        return Path()
-    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-    asset = manifest["assets"][0]
-    directory = root / "small-pack"
-    (directory / "assets").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source / asset["path"], directory / asset["path"])
-    manifest["assets"] = [asset]
-    manifest["version"] = version
-    (directory / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-    return directory
 
 
 def test_install_refuses_a_directory_outside_the_data_folder(tmp_path: Path) -> None:

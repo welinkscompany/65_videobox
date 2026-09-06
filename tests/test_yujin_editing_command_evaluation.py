@@ -383,3 +383,31 @@ def test_the_prompt_says_which_looks_are_already_on() -> None:
     assert runtime.request is not None
     prompt = str(runtime.request["prompt"])
     assert "지금 색감이 걸린 장면: scene-1(warm)" in prompt
+
+
+def test_the_catalogue_names_a_photo_the_way_apply_media_wants_it() -> None:
+    """사진도 화면 자리 이름으로 적어야 한다 (2026-09-06).
+
+    2026-09-05에 영상이 같은 함정에 걸렸다 -- 목록에 `broll_video`라고 적혀 있는데
+    `apply_media`가 받는 이름은 `broll`이라, 유진이 목록을 보고도 "승인된 자산
+    목록에 없습니다"라고 답했다. 사진(`image`)도 똑같다.
+
+    **목록에 적는 종류는 모델이 그대로 쓸 이름이어야 한다.**
+    """
+    runtime = _CapturingRuntime(_response(operation=None))
+
+    YujinEditingProposalService(runtime=runtime).create(
+        project_id="evaluation-project",
+        instruction="이 사진 깔아줘",
+        context=YujinEditingContext(
+            session_id="session-1", session_revision=3, segment_ids=("scene-1",),
+            approved_asset_ids=("user_photo",),
+            approved_asset_types=(("user_photo", "image"),),
+            approved_asset_labels=(("user_photo", "해질녘 바다 사진"),),
+        ),
+    )
+
+    assert runtime.request is not None
+    prompt = str(runtime.request["prompt"])
+    assert "user_photo(broll," in prompt
+    assert "user_photo(image" not in prompt
