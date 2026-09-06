@@ -116,7 +116,7 @@ describe("YujinStarters", () => {
     expect(within(group).getByRole("button", { name: "다른 예시" })).toBeVisible();
     expect(within(group).getByRole("button", { name: "전체 보기" })).toBeVisible();
 
-    fireEvent.click(within(group).getByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" }));
+    fireEvent.click(within(group).getByRole("button", { name: "이 장면에 어울리는 영상 추천해 줘" }));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: "broll-recommendation" }));
 
     fireEvent.click(within(group).getByRole("button", { name: "전체 보기" }));

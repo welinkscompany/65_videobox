@@ -52,9 +52,9 @@ export type ProjectEditorAssetsInput = Readonly<{
 }>;
 
 const brollLabels: Readonly<Record<string, string>> = {
-  broll_video: "영상 B-roll",
-  broll_image: "이미지 B-roll",
-  broll_audio: "오디오 B-roll",
+  broll_video: "영상",
+  broll_image: "그림",
+  broll_audio: "오디오",
 };
 
 function brollPreviewKind(assetType: string): EditorAssetPreviewKind {
@@ -139,8 +139,8 @@ function projectBroll(projectId: string, asset: BrollAsset, index: number): Edit
     id: `broll:${asset.asset_id}`,
     kind: "broll",
     assetId: asset.asset_id,
-    label: brollLabels[asset.asset_type] ?? "기타 B-roll",
-    title: metadataTitle || `B-roll ${index + 1}`,
+    label: brollLabels[asset.asset_type] ?? "기타 자료",
+    title: metadataTitle || `자료 ${index + 1}`,
     // Intake writes `duration_sec`.  `duration_seconds` is the media-pack
     // field and never appears on project b-roll, so reading it always
     // produced "길이 정보 없음".

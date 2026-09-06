@@ -136,7 +136,7 @@ describe("InspectorControls", () => {
 
     expect(screen.getByLabelText("캡션")).toBeChecked();
     expect(screen.getByLabelText("배경 음악")).toBeChecked();
-    fireEvent.click(screen.getByLabelText("B-roll"));
+    fireEvent.click(screen.getByLabelText("영상"));
     fireEvent.click(screen.getByLabelText("효과음"));
     fireEvent.click(screen.getByLabelText("화면 요소"));
     expect(onAction).not.toHaveBeenCalled();
@@ -158,7 +158,7 @@ describe("InspectorControls", () => {
       fields: ["inSec", "outSec"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     };
@@ -171,15 +171,15 @@ describe("InspectorControls", () => {
     );
 
     // B-roll is silent by default, so the audio fades stay hidden.
-    expect(screen.queryByLabelText("B-roll 페이드 인")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("영상 페이드 인")).not.toBeInTheDocument();
     // Task 24: the recommendation puts a window here; this is where it is corrected.
-    const start = screen.getByLabelText("B-roll 쓸 구간 시작") as HTMLInputElement;
-    const end = screen.getByLabelText("B-roll 쓸 구간 끝") as HTMLInputElement;
+    const start = screen.getByLabelText("영상 쓸 구간 시작") as HTMLInputElement;
+    const end = screen.getByLabelText("영상 쓸 구간 끝") as HTMLInputElement;
     expect([start.value, end.value]).toEqual(["8", "13"]);
 
     fireEvent.change(start, { target: { value: "20" } });
     fireEvent.change(end, { target: { value: "26.5" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith({
       kind: "save-media",
       mediaKind: "broll",
@@ -189,7 +189,7 @@ describe("InspectorControls", () => {
       controls: { crop: "center", speed: 1.2, inSec: 20, outSec: 26.5 },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 지우기" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 지우기" }));
     expect(onAction).toHaveBeenLastCalledWith({
       kind: "clear-media",
       mediaKind: "broll",
@@ -253,17 +253,17 @@ describe("InspectorControls", () => {
       fields: ["fit", "speed"],
       id: "clip:broll-fit",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     };
 
     render(<InspectorControls onAction={onAction} selectedSegment={{ cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-internal-current", startSec: 1 }} target={broll} />);
 
-    const select = screen.getByRole("combobox", { name: "B-roll 화면 맞춤" });
+    const select = screen.getByRole("combobox", { name: "영상 화면 맞춤" });
     expect(select).toHaveValue("crop");
     fireEvent.change(select, { target: { value: "fit" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith({
       kind: "save-media",
       mediaKind: "broll",
@@ -286,7 +286,7 @@ describe("InspectorControls", () => {
       fields: ["speed", "preservePitch"],
       id: "clip:broll-pitch",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-pitch",
     };
@@ -295,13 +295,13 @@ describe("InspectorControls", () => {
     const toggle = screen.getByRole("checkbox", { name: "속도를 바꿔도 목소리 높낮이 그대로 두기" });
     expect(toggle).toBeChecked();
 
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
       controls: expect.objectContaining({ preservePitch: true }),
     }));
 
     fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
       controls: expect.objectContaining({ preservePitch: false }),
     }));
@@ -316,23 +316,23 @@ describe("InspectorControls", () => {
     const broll: InspectorTarget = {
       assetId: "asset-tabs", clearOnly: false, controls: {},
       fields: ["fit", "zoom", "speed", "preservePitch", "volume", "preserveSourceAudio", "filter", "stabilize"],
-      id: "clip:broll-tabs", kind: "media", label: "B-roll", mediaKind: "broll", segmentId: "segment-tabs",
+      id: "clip:broll-tabs", kind: "media", label: "영상", mediaKind: "broll", segmentId: "segment-tabs",
     };
 
     render(<InspectorControls onAction={onAction} selectedSegment={segment} target={broll} />);
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["화면", "소리", "속도", "보정"]);
     // 처음에는 화면 탭이다. 다른 탭의 칸은 아직 안 보인다.
-    expect(screen.getByLabelText("B-roll 크기")).toBeVisible();
-    expect(screen.queryByLabelText("B-roll 재생 속도")).toBeNull();
+    expect(screen.getByLabelText("영상 크기")).toBeVisible();
+    expect(screen.queryByLabelText("영상 재생 속도")).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "속도" }));
-    expect(screen.getByLabelText("B-roll 재생 속도")).toBeVisible();
-    expect(screen.queryByLabelText("B-roll 크기")).toBeNull();
+    expect(screen.getByLabelText("영상 재생 속도")).toBeVisible();
+    expect(screen.queryByLabelText("영상 크기")).toBeNull();
 
     // **저장 단추는 탭 밖에 있다.** 탭 안에 두면 어느 탭에서 눌렀느냐에 따라
     // 저장되는 것이 다른 것처럼 읽힌다 -- 실제로는 늘 전부 저장된다.
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: "save-media",
       // 지금 안 보이는 탭의 값도 같이 실린다.
@@ -369,14 +369,14 @@ describe("InspectorControls", () => {
       fields: ["stabilize"],
       id: "clip:broll-stabilize",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     };
 
     const rendered = render(<InspectorControls onAction={onAction} selectedSegment={segment} target={broll} />);
     fireEvent.click(screen.getByRole("checkbox", { name: "흔들린 화면 잡아주기" }));
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: "save-media", mediaKind: "broll", controls: expect.objectContaining({ stabilize: true }),
     }));
@@ -502,7 +502,7 @@ describe("InspectorControls", () => {
       fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     };
@@ -514,7 +514,7 @@ describe("InspectorControls", () => {
       />,
     );
 
-    const save = screen.getByRole("button", { name: "B-roll 설정 저장" });
+    const save = screen.getByRole("button", { name: "영상 설정 저장" });
     expect(save).toBeEnabled();
 
     openInspectorTab("소리");
@@ -538,7 +538,7 @@ describe("InspectorControls", () => {
       fields: ["inSec", "outSec", "speed", "volume", "fadeInSec", "fadeOutSec"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     };
@@ -550,8 +550,8 @@ describe("InspectorControls", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("B-roll 서서히 나타나기"), { target: { value: "0.75" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.change(screen.getByLabelText("영상 서서히 나타나기"), { target: { value: "0.75" } });
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
 
     const sent = onAction.mock.calls.at(-1)?.[0];
     expect(sent.controls.fadeInSec).toBe(0.75);
@@ -570,7 +570,7 @@ describe("InspectorControls", () => {
       fields: ["inSec", "outSec", "speed", "volume"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     };
@@ -582,9 +582,9 @@ describe("InspectorControls", () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("B-roll 쓸 구간 끝"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("영상 쓸 구간 끝"), { target: { value: "4" } });
 
-    expect(screen.getByRole("button", { name: "B-roll 설정 저장" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "영상 설정 저장" })).toBeDisabled();
   });
 
   it("lets the creator keep a clip's own sound, which is what makes 소리 크기 mean anything", () => {
@@ -600,7 +600,7 @@ describe("InspectorControls", () => {
       fields: ["inSec", "outSec", "speed", "volume", "preserveSourceAudio"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     };
@@ -616,7 +616,7 @@ describe("InspectorControls", () => {
     const toggle = screen.getByLabelText("이 영상의 원래 소리도 함께 쓰기");
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
 
     expect(onAction).toHaveBeenLastCalledWith({
       assetId: "asset-internal-broll",
@@ -1217,7 +1217,7 @@ describe("InspectorControls", () => {
       fields: ["speed", "volume", "filter"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     } as const;
@@ -1231,8 +1231,8 @@ describe("InspectorControls", () => {
     );
 
     openInspectorTab("보정");
-    fireEvent.change(screen.getByLabelText("B-roll 색감"), { target: { value: "vintage" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.change(screen.getByLabelText("영상 색감"), { target: { value: "vintage" } });
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
 
     expect(onAction.mock.calls[0][0].controls.filter).toEqual({ type: "vintage" });
   });
@@ -1247,7 +1247,7 @@ describe("InspectorControls", () => {
       fields: ["filter"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     } as const;
@@ -1261,7 +1261,7 @@ describe("InspectorControls", () => {
     );
 
     openInspectorTab("보정");
-    expect(screen.getByLabelText("B-roll 색감")).toHaveValue("warm");
+    expect(screen.getByLabelText("영상 색감")).toHaveValue("warm");
   });
 
   it("turning a look off sends null, not the word none", async () => {
@@ -1273,7 +1273,7 @@ describe("InspectorControls", () => {
       fields: ["filter"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     } as const;
@@ -1287,8 +1287,8 @@ describe("InspectorControls", () => {
     );
 
     openInspectorTab("보정");
-    fireEvent.change(screen.getByLabelText("B-roll 색감"), { target: { value: "none" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.change(screen.getByLabelText("영상 색감"), { target: { value: "none" } });
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
 
     expect(onAction.mock.calls[0][0].controls.filter).toBeNull();
   });
@@ -1303,7 +1303,7 @@ describe("InspectorControls", () => {
       fields: ["speed", "volume", "filter"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     } as const;
@@ -1332,7 +1332,7 @@ describe("InspectorControls", () => {
       fields: ["inSec", "outSec", "speed", "volume"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     } as const;
@@ -1346,10 +1346,10 @@ describe("InspectorControls", () => {
     );
 
     openInspectorTab("속도");
-    fireEvent.change(screen.getByLabelText("B-roll 재생 속도"), { target: { value: "1.5" } });
+    fireEvent.change(screen.getByLabelText("영상 재생 속도"), { target: { value: "1.5" } });
     openInspectorTab("소리");
-    fireEvent.change(screen.getByLabelText("B-roll 소리 크기"), { target: { value: "0.3" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.change(screen.getByLabelText("영상 소리 크기"), { target: { value: "0.3" } });
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
 
     expect(onAction).toHaveBeenCalledTimes(1);
     const sent = onAction.mock.calls[0][0];
@@ -1372,7 +1372,7 @@ describe("InspectorControls", () => {
       fields: ["speed", "volume"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     } as const;
@@ -1386,13 +1386,13 @@ describe("InspectorControls", () => {
     );
 
     openInspectorTab("속도");
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 2배속" }));
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 2배속" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
 
     expect(onAction.mock.calls[0][0].controls.speed).toBe(2);
     // 버튼은 숫자칸을 대신하는 게 아니라 같이 움직인다. 어긋나면 화면이
     // 보여 주는 값과 저장되는 값이 달라진다.
-    expect((screen.getByLabelText("B-roll 재생 속도") as HTMLInputElement).value).toBe("2");
+    expect((screen.getByLabelText("영상 재생 속도") as HTMLInputElement).value).toBe("2");
   });
 
   it("shows which speed is currently chosen", async () => {
@@ -1405,7 +1405,7 @@ describe("InspectorControls", () => {
       fields: ["speed", "volume"],
       id: "clip:broll",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       mediaKind: "broll",
       segmentId: "segment-internal-current",
     } as const;
@@ -1419,8 +1419,8 @@ describe("InspectorControls", () => {
     );
 
     openInspectorTab("속도");
-    expect(screen.getByRole("button", { name: "B-roll 0.5배속" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "B-roll 2배속" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "영상 0.5배속" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "영상 2배속" })).toHaveAttribute("aria-pressed", "false");
   });
 
   // 사진 움직임(2026-09-06). 여섯 가지를 만들어 두고 클립 이름으로 자동
@@ -1431,12 +1431,12 @@ describe("InspectorControls", () => {
     const broll: InspectorTarget = {
       assetId: "asset-photo", clearOnly: false, controls: {},
       fields: ["photoMotion"],
-      id: "clip:broll-motion", kind: "media", label: "B-roll", mediaKind: "broll", segmentId: "segment-motion",
+      id: "clip:broll-motion", kind: "media", label: "영상", mediaKind: "broll", segmentId: "segment-motion",
     };
 
     render(<InspectorControls onAction={onAction} selectedSegment={segment} target={broll} />);
 
-    const select = screen.getByLabelText("B-roll 사진 움직임");
+    const select = screen.getByLabelText("영상 사진 움직임");
     // §10.13: `zoom_in` 같은 코드는 화면에 안 나온다.
     expect(select.textContent).not.toContain("zoom_in");
     expect([...select.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
@@ -1445,20 +1445,20 @@ describe("InspectorControls", () => {
     ]);
 
     // 안 고른 채로 저장하면 `null`이 간다 -- 서버는 그 칸을 아예 안 적는다.
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
       controls: expect.objectContaining({ photoMotion: null }),
     }));
 
     fireEvent.change(select, { target: { value: "pan_left" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
       controls: expect.objectContaining({ photoMotion: "pan_left" }),
     }));
 
     // **`움직이지 않기`는 안 고름이 아니다.** 둘을 뭉치면 끌 방법이 없어진다.
     fireEvent.change(select, { target: { value: "still" } });
-    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "영상 설정 저장" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
       controls: expect.objectContaining({ photoMotion: "still" }),
     }));
@@ -1469,11 +1469,11 @@ describe("InspectorControls", () => {
     const broll: InspectorTarget = {
       assetId: "asset-photo-on", clearOnly: false, controls: { photoMotion: "zoom_out" },
       fields: ["photoMotion"],
-      id: "clip:broll-motion-on", kind: "media", label: "B-roll", mediaKind: "broll", segmentId: "segment-motion-on",
+      id: "clip:broll-motion-on", kind: "media", label: "영상", mediaKind: "broll", segmentId: "segment-motion-on",
     };
 
     render(<InspectorControls onAction={vi.fn()} selectedSegment={segment} target={broll} />);
 
-    expect(screen.getByLabelText("B-roll 사진 움직임")).toHaveValue("zoom_out");
+    expect(screen.getByLabelText("영상 사진 움직임")).toHaveValue("zoom_out");
   });
 });

@@ -22,7 +22,7 @@ const USAGE_STORAGE_KEY = "videobox.yujin.starter-usage.v1";
 const registry: readonly YujinStarter[] = [
   {
     id: "broll-recommendation",
-    label: "이 장면에 어울리는 B-roll 추천해 줘",
+    label: "이 장면에 어울리는 영상 추천해 줘",
     surfaces: ["edit"],
     selections: ["none", "segment"],
     blockers: [],
@@ -158,7 +158,7 @@ const registry: readonly YujinStarter[] = [
   },
   {
     id: "assets-missing-broll",
-    label: "부족한 B-roll 자산을 찾아 줘",
+    label: "부족한 영상 자산을 찾아 줘",
     surfaces: ["assets"],
     selections: ["asset", "none"],
     blockers: ["needs_assets"],

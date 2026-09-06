@@ -10,7 +10,7 @@ describe("editor asset projection", () => {
       libraryAssets: [{ library_asset_id: "bgm-1", asset_id: "starter-bgm", media_type: "music", duration_seconds: 12, version: "v1", verified: true, available: true, tags: [], source: "Starter", creator: "Creator", official_license_url: "https://license.invalid", attribution_required: false, attribution_text: "" }],
     });
 
-    expect(cards.map((card) => [card.kind, card.label, card.canApply])).toEqual([["broll", "이미지 B-roll", true], ["bgm", "배경 음악", true]]);
+    expect(cards.map((card) => [card.kind, card.label, card.canApply])).toEqual([["broll", "그림", true], ["bgm", "배경 음악", true]]);
     expect(cards[0].status).toBe("준비됨 · 검토 불필요");
   });
 
@@ -62,8 +62,8 @@ describe("editor asset projection", () => {
 
     expect(card).toMatchObject({
       kind: "broll",
-      label: "기타 B-roll",
-      title: "B-roll 1",
+      label: "기타 자료",
+      title: "자료 1",
       durationLabel: "길이 확인 중",
       status: "확인 중 · 검토 필요",
       canApply: false,
@@ -89,10 +89,10 @@ describe("editor asset projection", () => {
     });
 
     expect(cards.slice(0, 4).map((card) => [card.id, card.label, card.status])).toEqual([
-      ["broll:video-1", "영상 B-roll", "확인 중 · 검토 필요"],
-      ["broll:audio-1", "오디오 B-roll", "확인 중 · 검토 불필요"],
-      ["broll:unknown-1", "이미지 B-roll", "확인 중 · 검토 상태 확인 중"],
-      ["broll:unknown-2", "이미지 B-roll", "확인 중 · 검토 상태 확인 중"],
+      ["broll:video-1", "영상", "확인 중 · 검토 필요"],
+      ["broll:audio-1", "오디오", "확인 중 · 검토 불필요"],
+      ["broll:unknown-1", "그림", "확인 중 · 검토 상태 확인 중"],
+      ["broll:unknown-2", "그림", "확인 중 · 검토 상태 확인 중"],
     ]);
     expect(cards.slice(4)).toEqual([
       expect.objectContaining({ id: "library:music-1", assetId: "starter-music", libraryAssetId: "music-1", previewUrl: "/api/media-library/assets/music-1/preview", canApply: true, license: "라이선스: https://license.invalid/music · 출처 표기 필요: Creator 표기" }),
@@ -316,6 +316,6 @@ describe("thumbnails on b-roll cards", () => {
       libraryAssets: [],
     });
 
-    expect(cards.map((card) => card.title)).toEqual(["B-roll 1"]);
+    expect(cards.map((card) => card.title)).toEqual(["자료 1"]);
   });
 });

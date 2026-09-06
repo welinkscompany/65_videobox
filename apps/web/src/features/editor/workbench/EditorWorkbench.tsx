@@ -843,7 +843,7 @@ function EditorWorkbenchInstance({
 function auditionRoleLabel(role: EditorViewModel["tracks"][number]["role"]): string {
   const labels: Record<string, string> = {
     narration: "내레이션",
-    broll: "B-roll",
+    broll: "영상",
     bgm: "배경 음악",
     sfx: "효과음",
     overlay: "화면 표시",

@@ -2664,7 +2664,7 @@ describe("EditorWorkbenchRoute", () => {
   });
 
   it.each([
-    { fixture: "broll" as const, label: "B-roll 지우기", endpoint: "broll" as const },
+    { fixture: "broll" as const, label: "영상 지우기", endpoint: "broll" as const },
     { fixture: "bgm" as const, label: "배경 음악 지우기", endpoint: "bgm" as const },
     { fixture: "sfx" as const, label: "효과음 지우기", endpoint: "sfx" as const },
   ])("clears the selected $fixture target with the current revision", async ({ endpoint, fixture, label }) => {
@@ -3644,7 +3644,7 @@ describe("EditorWorkbenchRoute", () => {
     await openYujin();
 
     const cards = await screen.findByRole("group", { name: "추천 후보" });
-    expect(cards.textContent).toContain("P01-B-01 · B-roll");
+    expect(cards.textContent).toContain("P01-B-01 · 영상");
   });
 
   it("fills every empty scene in one press, as one edit the creator can undo once", async () => {
@@ -4176,11 +4176,11 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
     await openYujin();
 
-    const starter = await screen.findByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" });
+    const starter = await screen.findByRole("button", { name: "이 장면에 어울리는 영상 추천해 줘" });
     fireEvent.click(starter);
 
     const composer = screen.getByRole("textbox", { name: "유진에게 요청하기" });
-    expect(composer).toHaveValue("이 장면에 어울리는 B-roll 추천해 줘");
+    expect(composer).toHaveValue("이 장면에 어울리는 영상 추천해 줘");
     expect(composer).toHaveFocus();
     expect(createConversation).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();

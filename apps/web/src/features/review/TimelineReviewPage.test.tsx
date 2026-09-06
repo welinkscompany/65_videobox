@@ -217,7 +217,7 @@ describe("TimelineReviewPage", () => {
     expect(await screen.findByText("검토 화면의 소리를 확인해 주세요.")).toBeVisible();
     expect(screen.queryByText("타임라인의 이전 소리 설명")).toBeNull();
     expect(screen.getAllByText("둘째 장면을 더 잘 보여줘요.")).toHaveLength(1);
-    expect(screen.getAllByText("종류: B-roll")).toHaveLength(1);
+    expect(screen.getAllByText("종류: 영상")).toHaveLength(1);
     expect(screen.getAllByText("대상: 2번째 장면 · 둘째 장면")).toHaveLength(1);
     expect(screen.getByText("대상: 1번째 장면 · 첫 장면")).toBeVisible();
     expect(screen.getAllByText("편집본·검토 화면에서 확인")).toHaveLength(2);

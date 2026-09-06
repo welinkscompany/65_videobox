@@ -216,7 +216,7 @@ function recommendationTypeLabel(type: string) {
     case "broll":
     case "b_roll":
     case "video":
-      return "B-roll";
+      return "영상";
     case "music":
     case "bgm":
     case "background_music":

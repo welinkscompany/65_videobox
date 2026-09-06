@@ -10,7 +10,7 @@ const assetCards = [{
   id: "broll:image-1",
   kind: "broll" as const,
   assetId: "image-1",
-  label: "이미지 B-roll",
+  label: "그림",
   title: "제품 사진",
   durationLabel: "4초",
   status: "준비됨 · 검토 불필요",
@@ -185,7 +185,7 @@ describe("EditorWorkbench", () => {
 
   it("uses audio elements for both B-roll audio and library audio cards", async () => {
     const audioCards = [
-      { ...assetCards[0], id: "broll:audio-1", assetId: "audio-1", title: "현장 오디오", label: "오디오 B-roll", previewUrl: "/api/projects/project-a/assets/audio-1/content", previewKind: "audio" as const },
+      { ...assetCards[0], id: "broll:audio-1", assetId: "audio-1", title: "현장 오디오", label: "오디오", previewUrl: "/api/projects/project-a/assets/audio-1/content", previewKind: "audio" as const },
       { ...assetCards[0], id: "library:bgm-1", assetId: "starter-bgm", libraryAssetId: "bgm-1", title: "배경 음악 1", label: "배경 음악", previewUrl: "/api/media-library/assets/bgm-1/preview", previewKind: "audio" as const },
     ];
     const { container } = render(<EditorWorkbench view={view} assetCards={audioCards} />);
@@ -202,7 +202,7 @@ describe("EditorWorkbench", () => {
   it("prepares project video before handing its URL to the single PreviewStage player", async () => {
     let resolvePreview!: (url: string) => void;
     const prepared = new Promise<string>((resolve) => { resolvePreview = resolve; });
-    const video = { ...assetCards[0], id: "broll:video-1", assetId: "video-1", title: "HEVC 영상", label: "영상 B-roll", previewKind: "video" as const, requiresBrowserPreviewPreparation: true };
+    const video = { ...assetCards[0], id: "broll:video-1", assetId: "video-1", title: "HEVC 영상", label: "영상", previewKind: "video" as const, requiresBrowserPreviewPreparation: true };
     const onPrepareAssetPreview = vi.fn(() => prepared);
     const { container } = render(<EditorWorkbench view={view} assetCards={[video]} onPrepareAssetPreview={onPrepareAssetPreview} />);
 

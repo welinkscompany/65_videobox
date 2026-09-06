@@ -51,7 +51,7 @@ describe("projectInspectorTargets", () => {
     expect(targets).toContainEqual({
       id: "clip:broll-1",
       kind: "media",
-      label: "B-roll",
+      label: "영상",
       segmentId: "segment-1",
       mediaKind: "broll",
       // Task 24: B-roll gets the source window, not the audio fades. Which
@@ -263,5 +263,16 @@ describe("projectInspectorTargets", () => {
     // 원본을 영상으로 바꿔도 **이미 고른 값이 있으면** 칸이 남는다 -- 아니면
     // 되돌릴 자리가 없어진다.
     expect(brollFieldsOf(withClip("/library/seaside.mp4", { photoMotion: "pan_up" }))).toContain("photoMotion");
+  });
+
+  // owner 승인 2026-09-06: 조정 칸 이름이 전부 `B-roll ...`로 떠 있었다. 이 저장소는
+  // 같은 트랙을 자료실·타임라인·유진 요약에서 이미 `영상`이라 부른다
+  // (`TimelineDock.tsx`, `EditorAssetBrowser.tsx`, `EditorWorkbenchRoute.tsx`).
+  // `development-fast-path.ko.md` §10.13 -- 화면 글자에 개발 용어를 쓰지 않는다.
+  it("names the b-roll clip 영상 on screen, not B-roll", () => {
+    const target = projectInspectorTargets({ view, selectedSegmentId: "segment-1" })
+      .find((item) => item.id === "clip:broll-1");
+
+    expect(target?.label).toBe("영상");
   });
 });

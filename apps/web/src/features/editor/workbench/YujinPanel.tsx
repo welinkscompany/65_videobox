@@ -51,15 +51,16 @@ function previewVerb(kind: RightDockCandidate["sourceMediaKind"]): string {
   return kind === "bgm" || kind === "sfx" ? "미리 듣기" : "미리 보기";
 }
 
-// `broll`/`broll_video`는 "B-roll"로 쓴다 -- `EditorWorkbench.tsx`의
-// `auditionRoleLabel`과 `inspectorRegistry.ts`의 `mediaLabels`가 이미 같은
-// 트랙을 그렇게 부르고, 실제 화면에도 그 글자가 뜬다("B-roll 1 항상 쓰기").
-// 예전엔 여기만 "영상"이라 같은 대상이 패널마다 다른 이름으로 보였다.
+// `broll`/`broll_video`는 화면에서 "영상"으로 쓴다(owner 승인 2026-09-06).
+// 한동안 이 패널만 "영상"이고 나머지가 "B-roll"이라 같은 대상이 패널마다 다른
+// 이름으로 보였는데, `development-fast-path.ko.md` §10.13에 맞춰 반대로 맞췄다 --
+// `EditorWorkbench.tsx`의 `auditionRoleLabel`과 `inspectorRegistry.ts`의
+// `mediaLabels`도 이제 "영상"이다. 코드 안 이름(`broll`)은 그대로다.
 function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
   return {
     raw_video: "원본 영상",
-    broll: "B-roll",
-    broll_video: "B-roll",
+    broll: "영상",
+    broll_video: "영상",
     image: "이미지",
     bgm: "배경 음악",
     sfx: "효과음",
@@ -448,7 +449,7 @@ export function YujinPanel({
     </div>
     <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
     <div ref={composerContainerRef}>
-      <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
+      <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 영상을 추천해 줘" />
     </div>
     <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
     {onCreateEditingProposal && messages.some((message) => message.role === "assistant")

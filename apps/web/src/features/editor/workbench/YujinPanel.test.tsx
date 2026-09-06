@@ -56,19 +56,19 @@ describe("YujinPanel", () => {
 
     expect(screen.getByRole("group", { name: "대화 스타터" })).toBeInTheDocument();
     for (const label of [
-      "이 장면에 어울리는 B-roll 추천해 줘",
+      "이 장면에 어울리는 영상 추천해 줘",
       "현재 편집 흐름 점검해 줘",
       "캡션을 더 간결하게 다듬어 줘",
       "세로 영상용으로 바꿀 부분 찾아 줘",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeVisible();
     }
-    const starter = screen.getByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" });
+    const starter = screen.getByRole("button", { name: "이 장면에 어울리는 영상 추천해 줘" });
     expect(starter).toBeVisible();
 
     fireEvent.click(starter);
 
-    expect(onDraftChange).toHaveBeenCalledWith("이 장면에 어울리는 B-roll 추천해 줘");
+    expect(onDraftChange).toHaveBeenCalledWith("이 장면에 어울리는 영상 추천해 줘");
     expect(onSendMessage).not.toHaveBeenCalled();
     expect(onStart).not.toHaveBeenCalled();
     expect(onManualEdit).not.toHaveBeenCalled();
@@ -181,7 +181,7 @@ describe("YujinPanel", () => {
   it("disables conversation starters when the composer is disabled", () => {
     renderOpen({ composerDisabled: true });
 
-    expect(screen.getByRole("button", { name: "이 장면에 어울리는 B-roll 추천해 줘" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "이 장면에 어울리는 영상 추천해 줘" })).toBeDisabled();
   });
 
   it("re-asks by itself when the recommendation goes stale while the creator is looking at it", async () => {
@@ -711,7 +711,7 @@ describe("추천 후보", () => {
     });
 
     expect(screen.getByText("첫 장면을 산책 영상으로 채웁니다.")).toBeVisible();
-    expect(screen.getByText("B-roll")).toBeVisible();
+    expect(screen.getByText("영상")).toBeVisible();
     // 내부 세그먼트 식별자는 owner에게 뜻이 없다. 화면에는 나오지 않아야 한다.
     expect(screen.queryAllByText("segment-1")).toHaveLength(0);
     expect(screen.getByText("화면 채우기")).toBeVisible();

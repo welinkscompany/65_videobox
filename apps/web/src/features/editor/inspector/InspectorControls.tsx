@@ -145,7 +145,7 @@ const defaultStyle: EditorCaptionStyle = {
 const partialFieldLabels: Readonly<Record<string, string>> = {
   caption: "캡션",
   cut_action: "컷 판단",
-  broll: "B-roll",
+  broll: "영상",
   visual_overlay: "화면 요소",
   music: "배경 음악",
   sfx: "효과음",

@@ -170,7 +170,7 @@ function brollFieldsFor(clip: Readonly<{ assetUri: string | null; controls: Edit
   return looksLikePhoto(clip.assetUri) || clip.controls.photoMotion ? brollPhotoFields : brollFields;
 }
 
-const mediaLabels = { broll: "B-roll", bgm: "배경 음악", sfx: "효과음" } as const;
+const mediaLabels = { broll: "영상", bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {
   return role === "broll" || role === "bgm" || role === "sfx";
