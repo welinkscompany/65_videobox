@@ -15,7 +15,7 @@ import { createEditorCommandPort, type EditorCommandPort } from "../editorComman
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
-import { sceneFilterLabel } from "../inspector/sceneFilters";
+import { yujinEditingOperationSummary } from "./yujinEditingSummary";
 import { sceneLabelsBySegmentId, sceneNumbersBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
 import { EditorWorkbench } from "./EditorWorkbench";
@@ -2389,35 +2389,6 @@ function yujinEditingProposalSummary(proposal: YujinEditingProposal, view: Edito
   const before = formatSeconds(end - start);
   const after = formatSeconds((end - start) / speed.rate);
   return `${sceneNumber}번 장면 · ${before}초 → ${after}초`;
-}
-
-function yujinEditingOperationSummary(operation: YujinEditingProposal["diff"]["operations"][number]): string {
-  if (operation.intent === "set_scene_speed" && typeof operation.rate === "number") return `${operation.rate}배로 속도를 바꿔요.`;
-  if (operation.intent === "set_cut_action") return "장면 포함 여부를 바꿔요.";
-  if (operation.intent === "set_caption_text") return "캡션을 고쳐요.";
-  // 넣는 것과 빼는 것을 한 줄로 뭉치지 않는다. 말로 시킨 편집은 창작자가 `적용`을
-  // 누르지 않으므로 **이 줄이 무엇을 했는지 알려 주는 유일한 자리다**(2026-09-01
-  // 실사용 확인: "승인된 미디어 배치를 바꿔요"만 보고는 넣었는지 뺐는지 알 수 없었다).
-  if (operation.intent === "apply_media" || operation.intent === "remove_media") {
-    const what = operation.media_type === "bgm" ? "배경 음악" : operation.media_type === "sfx" ? "효과음" : "영상";
-    return operation.intent === "apply_media" ? `골라 둔 ${what}을 넣어요.` : `넣어 둔 ${what}을 빼요.`;
-  }
-  if (operation.intent === "set_segment_bounds") return "장면 길이를 조정해요.";
-  // 색감은 코드가 아니라 화면에 쓰는 이름으로 적는다(§10.13). 목록에 없는
-  // 코드는 검증기가 막으므로 여기 오지 않지만, 와도 코드를 그대로 내보이지
-  // 않는다 -- 창작자에게 `vintage`는 아무 뜻이 없다.
-  if (operation.intent === "set_scene_look") {
-    const label = typeof operation.look === "string" ? sceneFilterLabel(operation.look) : null;
-    return label ? `색감을 ${label} 바꿔요.` : "색감을 바꿔요.";
-  }
-  // 글꼴도 코드가 아니라 화면 이름으로 적는다 -- 창작자에게 `Gothic A1`은
-  // 파일 이름이지 글꼴 이름이 아니다. 다만 이름표는 백엔드 목록에 있고 여기서
-  // 부르면 화면이 멈추므로, 이름을 모르면 갈래만 말한다.
-  if (operation.intent === "set_caption_font") {
-    return typeof operation.family === "string" ? `자막 글꼴을 ${operation.family}(으)로 바꿔요.` : "자막 글꼴을 바꿔요.";
-  }
-  if (operation.intent === "reorder_segments") return "장면 순서를 바꿔요.";
-  return "편집 항목을 바꿔요.";
 }
 
 function yujinEditingProposalPreviewTarget(proposal: YujinEditingProposal, view: EditorViewModel): { segmentId: string; startSec: number; endSec: number } | null {

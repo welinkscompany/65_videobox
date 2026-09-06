@@ -198,6 +198,27 @@ def _current_caption_font_size(session: dict) -> int:
     return DEFAULT_CAPTION_FONT_SIZE_PX
 
 
+def _image_overlays_by_segment(session: dict) -> tuple[tuple[str, str], ...]:
+    """지금 영상 **위에 얹혀 있는** 사진과 그 프리셋.
+
+    전환·색감과 같은 이유로 준다: 고를 수 있는 목록만 주고 지금 걸린 것을 안
+    주면 "사진 좀 위로 올려줘"에 유진이 "얹은 사진이 없습니다"라고 답한다.
+
+    안 걸린 프리셋은 `-`로 적는다. 빈칸을 기본값 이름으로 채우면 유진이 창작자가
+    고른 적 없는 자리를 고른 것으로 읽는다.
+    """
+    found: list[tuple[str, str]] = []
+    for segment in session.get("segments", []):
+        if not isinstance(segment, dict) or not segment.get("segment_id"):
+            continue
+        for overlay in segment.get("visual_overlays") or []:
+            if not isinstance(overlay, dict) or overlay.get("overlay_type") != "image_overlay":
+                continue
+            presets = "/".join(str(overlay.get(key) or "-") for key in ("vertical", "horizontal", "size", "motion"))
+            found.append((str(segment["segment_id"]), f"{str(overlay.get('asset_id') or '')}({presets})"))
+    return tuple(found)
+
+
 def _library_label(match: dict) -> str:
     """자료실 후보 하나를 **고를 수 있는 말**로. 이름이 아니라 설명이 온다.
 
@@ -492,6 +513,9 @@ def build_director_proposals_router(
                 and isinstance(item.get("broll_override"), dict)
                 and str(item["broll_override"].get("asset_id") or "").strip()
             ),
+            # 지금 얹힌 사진. 전환·색감과 같은 이유로 준다 -- 목록과 지금 걸린
+            # 값은 한 쌍이고, 한쪽만 주면 되돌리는 말이 막힌다.
+            image_overlays_by_segment=_image_overlays_by_segment(session),
         )
         result = YujinEditingProposalService(request.app.state.local_only_runtime_service_factory(store)).create(
             project_id=project_id, instruction=body.instruction, context=context

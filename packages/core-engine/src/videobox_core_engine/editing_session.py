@@ -871,9 +871,11 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
     """Return a session copy with validated AI editing operations applied."""
     from videobox_domain_models.yujin_editing_proposals import (
         ApplyMediaOperation,
+        RemoveImageOverlayOperation,
         RemoveMediaOperation,
         ReorderSegmentsOperation,
         SetCaptionFontOperation,
+        SetImageOverlayOperation,
         SetSceneTransitionOperation,
         SetCaptionTextOperation,
         SetCutActionOperation,
@@ -965,6 +967,23 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
             working = _merge_audio_media_controls(
                 session=working, segment_id=operation.segment_id, field=field, changes=changes
             )
+        elif isinstance(operation, SetImageOverlayOperation):
+            # 화면이 쓰는 것과 **같은 함수**다. 안 준 프리셋은 그 함수가 열쇠
+            # 자체를 안 적어서, 프리셋 없이 얹어 둔 옛 오버레이와 자국이 같다.
+            working = update_segment_image_overlay(
+                session=working,
+                segment_id=operation.segment_id,
+                asset_id=operation.asset_id,
+                # 사진 오버레이의 `text`는 화면에서도 비워 두고 부르는 자리가
+                # 있다(`ImageOverlayRequest.text`의 기본값이 빈 글이다).
+                text="",
+                vertical=operation.vertical,
+                horizontal=operation.horizontal,
+                size=operation.size,
+                motion=operation.motion,
+            )
+        elif isinstance(operation, RemoveImageOverlayOperation):
+            working = remove_segment_image_overlay(session=working, segment_id=operation.segment_id)
         elif isinstance(operation, ApplyMediaOperation):
             if operation.media_type == "broll":
                 working = update_segment_broll_override(

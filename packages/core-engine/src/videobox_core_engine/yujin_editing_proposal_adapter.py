@@ -10,12 +10,19 @@ from typing import Literal
 from pydantic import ValidationError
 
 from videobox_core_engine.filters import FILTER_TYPES
+from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_HORIZONTALS,
+    SHAPE_OVERLAY_MOTION_SET,
+    SHAPE_OVERLAY_SIZES,
+    SHAPE_OVERLAY_VERTICALS,
+)
 from videobox_core_engine.transitions import TRANSITION_CATALOG
 from videobox_domain_models.caption_fonts import is_installed_caption_font
 from videobox_domain_models.yujin_editing_proposals import (
     ApplyMediaOperation,
     ReorderSegmentsOperation,
     SetCaptionFontOperation,
+    SetImageOverlayOperation,
     SetPictureCleanupOperation,
     SetSceneLookOperation,
     SetSceneTransitionOperation,
@@ -25,6 +32,17 @@ from videobox_domain_models.yujin_editing_proposals import (
     YujinEditingResponse,
 )
 
+
+#: 사진 오버레이가 고를 수 있는 값. **여기에 사본을 두지 않는다** --
+#: `overlay_shapes`가 유일한 출처이고, 편집 세션(`_IMAGE_OVERLAY_PRESET_VALUES`)과
+#: 화면(`ImageOverlayRequest`)도 같은 표를 본다. 한 벌이 갈라지면 유진이 고른
+#: 값이 렌더에서 조용히 사라진다.
+_IMAGE_OVERLAY_PRESETS: dict[str, frozenset[str]] = {
+    "vertical": SHAPE_OVERLAY_VERTICALS,
+    "horizontal": SHAPE_OVERLAY_HORIZONTALS,
+    "size": SHAPE_OVERLAY_SIZES,
+    "motion": SHAPE_OVERLAY_MOTION_SET,
+}
 
 _MAX_PAYLOAD_BYTES = 32_768
 _UNSAFE_TERMS = (
@@ -81,6 +99,12 @@ class YujinEditingContext:
     #: 창작자는 px 숫자를 모르는데 유진이 "크기를 알려주세요"라고 답했다
     #: (2026-09-06 실측). 어디서 출발해 올릴지 알아야 알아서 올릴 수 있다.
     caption_font_size_px: int | None = None
+    #: 지금 영상 **위에 얹혀 있는** 사진과 그 프리셋. 전환·색감과 **똑같은
+    #: 빈틈**을 막는다: 고를 수 있는 목록만 주고 지금 걸린 것을 안 주면
+    #: "사진 좀 위로 올려줘"·"사진 빼줘"에 유진이 "얹은 사진이 없습니다"라고
+    #: 답한다 -- 얹혀 있는데도. 값은 사람이 읽는 한 줄이다
+    #: (`asset-1(bottom/right/small/fade_in)`).
+    image_overlays_by_segment: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -204,6 +228,21 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
             available = context.segment_ids_with_bgm if operation.media_type == "bgm" else context.segment_ids_with_sfx
             if operation.segment_id not in set(available):
                 return "sound_cleanup_needs_media"
+        if isinstance(operation, SetImageOverlayOperation):
+            # **지어낸 프리셋 이름은 여기서 막는다** -- 전환·색감과 같은 자리다.
+            # 조용히 기본값으로 좁히면 창작자는 고른 것이 왜 안 되는지 모른다.
+            for field_name, allowed in _IMAGE_OVERLAY_PRESETS.items():
+                chosen = getattr(operation, field_name)
+                if chosen is not None and str(chosen).strip().lower() not in allowed:
+                    return "image_overlay_preset_not_available"
+            if operation.asset_id not in set(context.approved_asset_ids):
+                return "media_asset_not_approved"
+            asset_types = dict(context.approved_asset_types)
+            # **사진만 얹는다.** 영상·음악을 이 자리에 실으면 렌더러가 한 장짜리
+            # 그림으로 읽어 아무것도 안 그린다 -- `apply_media`가 종류를 가리는
+            # 것과 같은 이유다.
+            if asset_types and asset_types.get(operation.asset_id) != "image":
+                return "media_asset_type_mismatch"
         if isinstance(operation, ApplyMediaOperation):
             if operation.asset_id not in set(context.approved_asset_ids):
                 return "media_asset_not_approved"

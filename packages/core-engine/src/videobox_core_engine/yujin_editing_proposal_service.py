@@ -7,6 +7,12 @@ import json
 import re
 
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
+from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_HORIZONTALS,
+    SHAPE_OVERLAY_MOTIONS,
+    SHAPE_OVERLAY_SIZES,
+    SHAPE_OVERLAY_VERTICALS,
+)
 from videobox_core_engine.transitions import TRANSITION_CATALOG
 from videobox_core_engine.filters import FILTER_CATALOG
 from videobox_domain_models.caption_fonts import caption_font_catalog
@@ -42,6 +48,11 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_picture_cleanup"}, "segment_id": {"type": "string"}, "stabilize": {"type": "boolean"}, "reduce_noise": {"type": "boolean"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_sound_cleanup"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["bgm", "sfx"]}, "normalize_loudness": {"type": "boolean"}, "denoise": {"type": "boolean"}}, "required": ["intent", "segment_id", "media_type"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_transform"}, "segment_id": {"type": "string"}, "zoom": {"type": "number"}, "position_x_percent": {"type": "number"}, "position_y_percent": {"type": "number"}, "rotation_deg": {"type": "number"}}, "required": ["intent", "segment_id"]},
+        # 사진을 영상 **위에** 얹는다. 프리셋 넷은 전부 선택이다 -- 창작자가
+        # 말한 것만 싣게 하려고 required에 안 적는다(빈칸을 채우면 이미 맞춰 둔
+        # 자리가 조용히 움직인다).
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_image_overlay"}, "segment_id": {"type": "string"}, "asset_id": {"type": "string"}, "vertical": {"enum": sorted(SHAPE_OVERLAY_VERTICALS)}, "horizontal": {"enum": sorted(SHAPE_OVERLAY_HORIZONTALS)}, "size": {"enum": sorted(SHAPE_OVERLAY_SIZES)}, "motion": {"enum": list(SHAPE_OVERLAY_MOTIONS)}}, "required": ["intent", "segment_id", "asset_id"]},
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_image_overlay"}, "segment_id": {"type": "string"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "apply_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}, "asset_id": {"type": "string"}}, "required": ["intent", "segment_id", "media_type", "asset_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}}, "required": ["intent", "segment_id", "media_type"]},
     ]
@@ -105,6 +116,49 @@ def _scene_transition_catalogue() -> str:
         f"고를 수 있는 전환: {names}. "
         "전환은 **그 장면으로 넘어올 때** 걸리므로 뒤쪽 장면의 segment_id를 쓴다. "
         "빼려면 transition_type을 null로 둔다."
+    )
+
+
+#: 프리셋 값에 붙일 한국어 이름표. 값 자체는 `overlay_shapes`가 원본이고
+#: 여기서는 **부르는 말만** 붙인다 -- "오른쪽 아래에 작게"를 `right`/`bottom`/
+#: `small`로 옮기려면 모델이 그 말과 값을 이어야 한다. 값 목록을 여기에 다시
+#: 적지 않는 이유는 색감·전환과 같다: 사본이 갈라진다.
+_IMAGE_OVERLAY_PRESET_LABELS: dict[str, str] = {
+    "top": "위", "middle": "가운데", "bottom": "아래",
+    "left": "왼쪽", "center": "가운데", "right": "오른쪽",
+    "small": "작게", "medium": "보통", "large": "크게",
+    "none": "안 움직임", "fade_in": "서서히 나타남", "fade_out": "서서히 사라짐",
+    "fade_in_out": "나타났다 사라짐",
+    "slide_in_left": "왼쪽에서 미끄러져 들어옴", "slide_in_right": "오른쪽에서 미끄러져 들어옴",
+}
+
+
+def _image_overlay_catalogue(context: YujinEditingContext) -> str:
+    """사진을 영상 **위에** 얹는 말. 고를 수 있는 값과 **지금 얹힌 것**을 함께 준다.
+
+    목록만 주면 "사진 좀 위로 올려줘"·"사진 빼줘"에 유진이 "얹은 사진이
+    없습니다"라고 답한다 -- 전환·색감이 정확히 그렇게 틀렸다(2026-09-06 실측).
+    둘은 한 쌍이다.
+
+    승인 범위는 도형과 같다(2026-08-20 승인 5항): 이름 붙은 프리셋만이고
+    좌표·초 단위는 없다. 그래서 "3초 뒤에", "왼쪽에서 120px" 같은 말은 못
+    받는다고 미리 알려 준다 -- 안 알려 주면 지어내고, 지어낸 값은 거절된다.
+    """
+    def _named(values: object) -> str:
+        return ", ".join(f"{value}({_IMAGE_OVERLAY_PRESET_LABELS.get(value, value)})" for value in values)  # type: ignore[union-attr]
+
+    return (
+        "사진을 **영상 위에 얹는** 것은 set_image_overlay다(장면 화면 자체를 사진으로 까는 "
+        "apply_media와 다른 일이다). asset_id는 승인된 자산 중 **사진**만 쓴다. "
+        f"세로 자리 vertical: {_named(sorted(SHAPE_OVERLAY_VERTICALS))}. "
+        f"가로 자리 horizontal: {_named(sorted(SHAPE_OVERLAY_HORIZONTALS))}. "
+        f"크기 size: {_named(sorted(SHAPE_OVERLAY_SIZES))}. "
+        f"움직임 motion: {_named(SHAPE_OVERLAY_MOTIONS)}. "
+        "넷은 **말한 것만 싣는다** -- 안 물어본 칸을 채우면 이미 맞춰 둔 자리가 조용히 움직인다. "
+        "좌표(px·%)나 초 단위 시간은 받지 않는다 -- 이 이름들 말고는 없다. "
+        "얹은 사진을 빼는 것은 remove_image_overlay다. "
+        # **지금 얹힌 것도 준다.** 목록과 한 쌍이다.
+        f"지금 사진이 얹힌 장면: {', '.join(f'{sid}={info}' for sid, info in context.image_overlays_by_segment) or '없음'}."
     )
 
 
@@ -275,6 +329,8 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "set_sound_cleanup(소리 크기 맞추기·잡음 줄이기), set_scene_transform(확대·위치·기울이기), "
         "set_scene_transition(장면이 넘어올 때의 전환 -- \"전환 넣어줘\"가 이것이다), "
         "apply_media(영상·음악·효과음을 깐다), "
+        "set_image_overlay(사진을 영상 **위에** 얹는다 -- \"사진 오른쪽 아래에 작게 띄워줘\"가 이것이다), "
+        "remove_image_overlay(얹은 사진을 뺀다), "
         "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
@@ -298,6 +354,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_scene_look_catalogue(context)} "
         f"{_scene_transition_catalogue()} "
         f"{_caption_font_catalogue(context)} "
+        f"{_image_overlay_catalogue(context)} "
         # 이 셋도 화면이 깔린 장면에만 걸 수 있다(색감과 같은 이유). 소리 정리는
         # 그 장면에 음악·효과음이 있어야 한다.
         "손떨림 보정·화면 노이즈는 set_picture_cleanup, 확대·위치·기울이기는 set_scene_transform이고 "

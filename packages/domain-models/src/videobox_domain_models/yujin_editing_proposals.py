@@ -171,6 +171,38 @@ class SetSceneTransformOperation(_SegmentOperation):
         return self
 
 
+class SetImageOverlayOperation(_SegmentOperation):
+    """사진을 영상 **위에** 얹는다. 자리·크기·움직임은 이름 붙은 프리셋만이다.
+
+    `apply_media`(사진을 장면 화면으로 *깐다*)와 다른 일이다 -- 이건 이미 있는
+    화면 위에 작게 얹는 것이고, 화면이 쓰는 `ImageOverlayRequest`와 같은 자리로
+    간다(`update_segment_image_overlay`).
+
+    넷이 `Literal`이 아니라 `str | None`인 이유는 색감·전환과 같다: 고를 수 있는
+    목록의 원본은 core-engine(`overlay_shapes`)에 있고, domain-models가 그것을
+    베끼면 두 벌이 갈라진다. 목록 대조는 검증기에서 한다.
+
+    **넷 다 선택이다.** 안 준 값은 열쇠 자체를 안 적어서, 프리셋 없이 얹어 둔
+    옛 오버레이와 자국이 같게 남는다(`update_segment_image_overlay` 머리말).
+
+    승인 범위는 도형과 같다(2026-08-20 승인 5항): 좌표(px/%)·초 단위·키프레임은
+    밖이다. 그래서 여기에 그런 칸을 더하지 않는다.
+    """
+
+    intent: Literal["set_image_overlay"]
+    asset_id: str = Field(min_length=1, max_length=256)
+    vertical: str | None = Field(default=None, min_length=1, max_length=32)
+    horizontal: str | None = Field(default=None, min_length=1, max_length=32)
+    size: str | None = Field(default=None, min_length=1, max_length=32)
+    motion: str | None = Field(default=None, min_length=1, max_length=32)
+
+
+class RemoveImageOverlayOperation(_SegmentOperation):
+    """얹어 둔 사진을 뺀다. 거는 말만 있으면 되돌리는 길이 막힌다."""
+
+    intent: Literal["remove_image_overlay"]
+
+
 class ApplyMediaOperation(_SegmentOperation):
     intent: Literal["apply_media"]
     media_type: Literal["broll", "bgm", "sfx"]
@@ -194,6 +226,8 @@ YujinEditingOperation = Annotated[
     | SetPictureCleanupOperation
     | SetSoundCleanupOperation
     | SetSceneTransformOperation
+    | SetImageOverlayOperation
+    | RemoveImageOverlayOperation
     | ApplyMediaOperation
     | RemoveMediaOperation,
     Field(discriminator="intent"),
@@ -216,11 +250,13 @@ class YujinEditingResponse(_StrictFrozenModel):
 
 __all__ = [
     "ApplyMediaOperation",
+    "RemoveImageOverlayOperation",
     "RemoveMediaOperation",
     "ReorderSegmentsOperation",
     "SetCaptionTextOperation",
     "SetCutActionOperation",
     "SetCaptionFontOperation",
+    "SetImageOverlayOperation",
     "SetPictureCleanupOperation",
     "SetSceneLookOperation",
     "SetSceneTransformOperation",
