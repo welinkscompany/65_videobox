@@ -129,10 +129,68 @@ def a_picture_gets_made_for_a_scene() -> None:
     check("만든 그림을 화면이 다시 볼 수 있는가", head[:4] == bytes([0x89, 0x50, 0x4E, 0x47]), repr(head))
 
 
+# --- 2026-09-06: 사진을 진짜 소재로 만든 뒤의 확인 -------------------------
+# 층별 시험이 초록인데 기능이 안 도는 것을 이날 두 번 겪었다. 여기서는 도는
+# 컨테이너에 대고 **결과**를 묻는다.
+
+
+def photos_are_described_as_photos() -> None:
+    """자료실이 사진을 사진이라 부르는가.
+
+    색인 판 2까지는 사진을 "가로 영상"이라고 적었다. 판 3에서 길이로 가르게
+    했으니 재배포 뒤 다시 적혀야 한다.
+    """
+    code, body = call("GET", "/api/library/assets?media_type=image&limit=200")
+    assets = body.get("assets") or body.get("items") or []
+    described = [
+        str(item.get("description") or item.get("machine_metadata", {}).get("description") or "")
+        for item in assets
+    ]
+    described = [text for text in described if text]
+    photos = [text for text in described if text.startswith(("가로 사진", "세로 사진", "정사각 사진"))]
+    check(
+        "사진을 사진이라 적는가",
+        bool(described) and len(photos) == len(described),
+        f"설명 {len(described)}개 중 사진 문구 {len(photos)}개" if described else f"설명이 없다({code}, 자산 {len(assets)}개)",
+    )
+
+
+def a_photo_search_returns_photos() -> None:
+    """사진을 찾으면 사진이 오는가. 종류를 안 대던 때는 촬영본 20개가 왔다."""
+    code, body = call("GET", "/api/library/search?q=%EB%B0%94%EB%8B%A4&media_type=image&limit=10")
+    matches = body.get("matches") or []
+    kinds = {str(item.get("media_type") or "") for item in matches}
+    check(
+        "사진 검색에 사진만 오는가",
+        code == 200 and bool(matches) and kinds <= {"image"},
+        f"{code} {len(matches)}건, 종류 {sorted(kinds)}",
+    )
+    semantic = [item for item in matches if item.get("semantic_match")]
+    check(
+        "그 검색이 뜻으로도 찾는가",
+        bool(semantic),
+        f"뜻으로 찾은 것 {len(semantic)}건 (0이면 임베딩 모델이 안 떠 있을 수 있다)",
+    )
+
+
+def yujin_knows_which_assets_are_photos() -> None:
+    """유진에게 가는 자산 목록이 사진을 가려내 주는가.
+
+    `set_image_overlay`는 사진만 받는데 종류를 `broll` 하나로만 적으면 유진에게는
+    영상과 구별할 신호가 없다. 화면 위에 얹으라고 시켜 놓고 거절하는 꼴이 된다.
+    """
+    code, body = call("GET", f"/api/projects/{PROJECT}/director/proposals/context")
+    if code != 200:
+        check("유진이 사진을 가려낼 수 있는가", False, f"이 경로로는 못 물었다({code}) -- 대화로 확인 필요")
+        return
+    text = json.dumps(body, ensure_ascii=False)
+    check("유진이 사진을 가려낼 수 있는가", "·사진" in text, text[:200])
 
 
 for step in (health, upload_ceiling, failure_reason_reaches_the_screen, yujin_sees_the_project,
-             a_picture_gets_made_for_a_scene, memory_round_trip):
+             a_picture_gets_made_for_a_scene, memory_round_trip,
+             photos_are_described_as_photos, a_photo_search_returns_photos,
+             yujin_knows_which_assets_are_photos):
     try:
         step()
     except Exception as error:  # noqa: BLE001 - 한 자리가 막혀도 나머지는 잰다
