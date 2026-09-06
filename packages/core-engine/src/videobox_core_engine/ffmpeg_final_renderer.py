@@ -881,7 +881,10 @@ class FfmpegFinalRenderer:
         같은 편집본을 두 번 렌더할 때 결과가 달라져 "완성본이 바뀌었다"가 된다 --
         `clip_id`에서 정해지게 한다.
         """
-        frames = max(round(max(duration_sec, 0.1) * self.video_fps), 2)
+        # `video_fps`는 `30`일 수도 `"30000/1001"`일 수도 있다 -- 곱하기 전에
+        # 초당 프레임 수로 환산한다. 이미 있는 `_frame_seconds`가 그 계산을
+        # 하고 있으므로 그 역수를 쓴다(두 벌로 적으면 한쪽만 고쳐진다).
+        frames = max(round(max(duration_sec, 0.1) / self._frame_seconds()), 2)
         span = frames - 1
         ratio = 1.12
         step = (ratio - 1.0) / span

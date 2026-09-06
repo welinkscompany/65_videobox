@@ -1674,3 +1674,56 @@ def test_a_photo_scene_moves_instead_of_standing_still(
     # `zoom+step` 꼴은 프레임 사이에서 안 이어진다.
     assert "on" in photo_chain or "in" in photo_chain
     assert "zoompan" not in video_chain, "영상에도 움직임을 붙였다"
+
+
+def test_photo_motion_survives_a_fractional_frame_rate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`video_fps`가 `"30000/1001"`이면 렌더가 통째로 죽었다 (실기 2026-09-06).
+
+    > `can't multiply sequence by non-int of type 'float'`
+
+    움직임 사슬이 `duration_sec * self.video_fps`로 프레임 수를 셌는데, 그 값은
+    **`30`일 수도 문자열 `"30000/1001"`일 수도 있다** -- 필드 선언이 `int | str`이고
+    `_frame_seconds()`가 이미 그 두 가지를 다루고 있었다. 시험은 기본값(30)만
+    써서 통과했고 실기에서 죽었다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("NTSC photo")
+    photo = tmp_path / "still.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=photo)
+    renderer = FfmpegFinalRenderer(store=store, video_fps="30000/1001")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+
+    timeline = {
+        "timeline_id": "timeline-ntsc", "project_id": project.project_id,
+        "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1",
+            "start_sec": 0.0, "end_sec": 4.0, "media_controls": {},
+        }]}],
+    }
+
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    graph = commands[0][commands[0].index("-filter_complex") + 1]
+    assert "zoompan" in graph
