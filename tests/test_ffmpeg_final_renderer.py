@@ -1727,3 +1727,48 @@ def test_photo_motion_survives_a_fractional_frame_rate(
 
     graph = commands[0][commands[0].index("-filter_complex") + 1]
     assert "zoompan" in graph
+
+
+def test_a_photo_overlay_is_the_same_size_in_both_render_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """같은 사진이 미리보기와 완성본에서 **다른 크기**로 나왔다 (코드리뷰 2026-09-06).
+
+    렌더 경로가 둘인데 사진을 다르게 다뤘다:
+    - 그래프 경로: `scale=W:H:force_original_aspect_ratio=decrease` 뒤에 얹는다
+      -- 화면 안에 들어오도록 줄인다
+    - 내보내기 경로: **scale이 없다** -- 원본 픽셀 그대로 얹는다
+
+    창작자가 미리보기에서 맞춰 놓은 그림이 완성본에서 잘리거나 작아진다. 도형
+    오버레이는 두 경로가 함수 하나를 공유해서 이 문제가 없다.
+    """
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store, overlay_font_file=OVERLAY_FONT)
+    photo = tmp_path / "shot.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    captured: list[list[str]] = []
+
+    monkeypatch.setattr(
+        FfmpegFinalRenderer, "_run",
+        lambda _self, command: (captured.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(
+        FfmpegFinalRenderer, "_resolve_generic_asset_uri", lambda _self, **_kwargs: photo
+    )
+
+    renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=[{
+            "overlay_type": "image_overlay",
+            "asset_uri": f"local://projects/project_001/assets/{photo.name}",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+        }],
+        work_dir=tmp_path,
+    )
+
+    assert captured, "오버레이 렌더가 돌지 않았다"
+    graph = captured[0][captured[0].index("-filter_complex") + 1]
+    # 그래프 경로와 **같은 방식으로** 화면 안에 들어오게 줄인다.
+    assert "force_original_aspect_ratio=decrease" in graph, f"사진을 원본 크기로 얹는다: {graph[:200]}"

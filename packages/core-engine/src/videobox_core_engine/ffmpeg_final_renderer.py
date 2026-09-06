@@ -1966,8 +1966,18 @@ class FfmpegFinalRenderer:
         filter_parts: list[str] = []
         for index, (_image_path, start_sec, end_sec) in enumerate(image_overlays, start=1):
             next_label = f"[overlay_{index}]"
+            # **그래프 경로와 같은 크기로 맞춘다**(코드리뷰 2026-09-06). 여기에만
+            # `scale`이 없어서 같은 사진이 미리보기에서는 화면에 맞게 줄고
+            # 완성본에서는 원본 픽셀 그대로 얹혔다 -- 창작자가 맞춰 놓은 그림이
+            # 완성본에서 잘리거나 작아진다. 도형 오버레이는 두 경로가 함수 하나를
+            # 공유해서 이 문제가 없었다.
+            scaled = f"[scaled_{index}]"
             filter_parts.append(
-                f"{current_label}[{index}:v]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:"
+                f"[{index}:v]scale={self.video_width}:{self.video_height}"
+                f":force_original_aspect_ratio=decrease{scaled}"
+            )
+            filter_parts.append(
+                f"{current_label}{scaled}overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:"
                 f"enable='between(t,{start_sec},{end_sec})':eof_action=repeat:shortest=1{next_label}"
             )
             current_label = next_label
