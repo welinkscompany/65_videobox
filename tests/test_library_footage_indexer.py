@@ -321,3 +321,50 @@ def test_the_work_per_pass_is_still_bounded(tmp_path: Path) -> None:
 
     assert len(report.analyzed) == 2, report.analyzed
     assert report.remaining == 18
+
+
+def test_a_photo_is_described_as_a_photo_not_a_video(tmp_path: Path) -> None:
+    """**사진에게 "이 영상을 분석해라"라고 묻고 있었다** — 실측 2026-09-06.
+
+    도는 컨테이너에서 사진 설명을 읽어 보니 요약이 `"이 영상은 낮 시간대 일본의
+    한 도시 거리..."`로 시작했다. 앞에 붙는 `가로 사진.`은 고쳤지만 **모델이 쓴
+    문장 자체**는 여전히 영상이라고 말한다.
+
+    유진이 장면마다 자산을 고를 때 대조하는 것이 이 문장이다. 대본에 "사진"이
+    나올 때 겹칠 수가 없고, 창작자가 읽어도 어느 쪽인지 헷갈린다.
+    """
+    store = _FakeStore(_pending(tmp_path))
+    vision = _Vision()
+    seen: list[str] = []
+
+    class _Recording(_Vision):
+        def analyze_images(self, request):
+            seen.append(str(request.prompt))
+            return super().analyze_images(request)
+
+    class _StillProbe:
+        def probe(self, _path):
+            class _Still(_ProbeResult):
+                duration_sec = 0.0
+            return _Still()
+
+    _run(store, tmp_path, media_probe=_StillProbe(), vision_provider=_Recording())
+
+    assert seen, "화면 분석을 아예 안 불렀다"
+    assert "사진" in seen[0], f"사진에게 영상이라고 물었다: {seen[0]}"
+    assert "영상" not in seen[0], seen[0]
+
+
+def test_a_video_is_still_asked_about_as_a_video(tmp_path: Path) -> None:
+    """사진 쪽을 고치면서 영상 질문이 바뀌면 안 된다."""
+    store = _FakeStore(_pending(tmp_path))
+    seen: list[str] = []
+
+    class _Recording(_Vision):
+        def analyze_images(self, request):
+            seen.append(str(request.prompt))
+            return super().analyze_images(request)
+
+    _run(store, tmp_path, vision_provider=_Recording())
+
+    assert seen and "영상" in seen[0], seen

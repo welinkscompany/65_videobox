@@ -18,7 +18,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-from videobox_core_engine.media_analysis import FIXED_VISION_RESPONSE_SCHEMA, VISION_ANALYSIS_PROMPT
+from videobox_core_engine.media_analysis import (
+    FIXED_VISION_RESPONSE_SCHEMA,
+    STILL_VISION_ANALYSIS_PROMPT,
+    VISION_ANALYSIS_PROMPT,
+)
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
 from videobox_provider_interfaces.vision import VisionAnalysisRequest
 
@@ -26,7 +30,7 @@ _logger = logging.getLogger(__name__)
 
 # 문장 형식을 바꾸면 올린다. 저장된 벡터는 그때의 문장을 가리키므로, 형식이
 # 바뀌면 전부 다시 색인해야 검색이 실제 문장과 맞는다.
-FOOTAGE_DESCRIPTION_VERSION = 3
+FOOTAGE_DESCRIPTION_VERSION = 4
 
 # 실제로 색인해 보니 요약과 태그가 전부 영어로 나왔다. owner는 우리말로 찾고,
 # 이 문장은 화면에 그대로 보일 수 있다. 같은 언어끼리 맞출 때 점수도 높다 --
@@ -235,7 +239,14 @@ def index_pending_library_footage(
             response = vision_provider.analyze_images(
                 VisionAnalysisRequest(
                     model_name=str(vision_model_name),
-                    prompt=_VISION_PROMPT,
+                    # **사진에게는 사진이라고 묻는다.** 길이로 가른다 --
+                    # `build_footage_description`이 앞머리를 정하는 기준과 같은
+                    # 값을 쓴다(두 벌로 적으면 한쪽만 고쳐진다).
+                    prompt=(
+                        STILL_VISION_ANALYSIS_PROMPT
+                        if float(getattr(probe, "duration_sec", 0.0) or 0.0) <= _STILL_MAX_SECONDS
+                        else _VISION_PROMPT
+                    ),
                     images=tuple(frame.data for frame in probe.frames),
                     response_schema=FIXED_VISION_RESPONSE_SCHEMA,
                 )
