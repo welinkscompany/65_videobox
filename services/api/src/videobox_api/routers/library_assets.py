@@ -238,14 +238,15 @@ def build_library_assets_router(
         provider = getattr(request.app.state, "media_analysis_embedding_provider", None)
         model_name = (getattr(request.app.state, "media_analysis_profile", None) or {}).get("embedding_model_name")
         semantic = False
-        # 그림에는 아직 색인이 없다. 음원 색인에 물어보면 조용히 0건이 돌아와
-        # 우연히 정직해지는데, 색인이 생기는 날 그 우연이 깨진다. 여기서 막는다.
-        if kind is LibraryMediaType.IMAGE:
-            provider = None
+        # **그 "색인이 생기는 날"이 왔다**(2026-09-06). 예전 주석은 그림에 색인이
+        # 없어서 음원 색인에 물으면 우연히 0건이 돌아온다고, 그 우연이 깨질 날을
+        # 대비해 여기서 막아 두었다. 이제 사진도 촬영본 색인(`footage_index`)에
+        # 들어간다 -- 둘 다 화면 자산이라 같은 색인이 맡는다. 그래서 사진 질의도
+        # 그 색인으로 보낸다.
         if provider is not None and model_name:
             try:
                 vector = [float(value) for value in provider.embed(EmbeddingRequest(model_name=model_name, inputs=(q.strip(),))).vectors[0]]
-                if kind is LibraryMediaType.BROLL:
+                if kind in {LibraryMediaType.BROLL, LibraryMediaType.IMAGE}:
                     semantic_matches = media_library_store.find_footage_matches(query_embedding=vector, orientation=orientation, limit=limit)
                 else:
                     semantic_matches = media_library_store.find_audio_matches(query_embedding=vector, media_type=kind.value, limit=limit)
