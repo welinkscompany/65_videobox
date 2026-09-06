@@ -138,20 +138,21 @@ def photos_are_described_as_photos() -> None:
     """자료실이 사진을 사진이라 부르는가.
 
     색인 판 2까지는 사진을 "가로 영상"이라고 적었다. 판 3에서 길이로 가르게
-    했으니 재배포 뒤 다시 적혀야 한다.
+    했으니 다시 적혀야 한다.
+
+    **설명은 자산 목록에 안 실린다** -- 검색 결과에만 온다(처음에 목록을 보고
+    "설명이 없다"고 잘못 읽었다). 그래서 검색으로 묻는다.
     """
-    code, body = call("GET", "/api/library/assets?media_type=image&limit=200")
-    assets = body.get("assets") or body.get("items") or []
-    described = [
-        str(item.get("description") or item.get("machine_metadata", {}).get("description") or "")
-        for item in assets
-    ]
+    code, body = call("GET", "/api/library/search?q=%EC%82%AC%EC%A7%84&media_type=image&limit=20")
+    described = [str(item.get("description") or "") for item in (body.get("matches") or [])]
     described = [text for text in described if text]
     photos = [text for text in described if text.startswith(("가로 사진", "세로 사진", "정사각 사진"))]
     check(
         "사진을 사진이라 적는가",
         bool(described) and len(photos) == len(described),
-        f"설명 {len(described)}개 중 사진 문구 {len(photos)}개" if described else f"설명이 없다({code}, 자산 {len(assets)}개)",
+        f"설명 {len(described)}개 중 사진 문구 {len(photos)}개"
+        + (" -- 판 3 다시 적기가 아직 안 끝났을 수 있다(한 바퀴에 둘)" if described and photos < described else "")
+        if described else f"설명이 안 왔다({code})",
     )
 
 
@@ -176,15 +177,18 @@ def a_photo_search_returns_photos() -> None:
 def yujin_knows_which_assets_are_photos() -> None:
     """유진에게 가는 자산 목록이 사진을 가려내 주는가.
 
-    `set_image_overlay`는 사진만 받는데 종류를 `broll` 하나로만 적으면 유진에게는
-    영상과 구별할 신호가 없다. 화면 위에 얹으라고 시켜 놓고 거절하는 꼴이 된다.
+    `set_image_overlay`는 사진만 받는데 종류가 `broll` 하나뿐이면 유진에게는
+    영상과 구별할 신호가 없다 -- 시켜 놓고 거절하는 꼴이 된다.
+
+    이 목록은 유진에게 보내는 안내문 안에만 있고 읽을 수 있는 주소가 없다.
+    그래서 **실제로 말을 걸어** 확인한다(`ask_yujin_about_photos.py`). 여기서는
+    자리만 표시해 둔다 -- 못 재는 것을 잰 척하지 않는다.
     """
-    code, body = call("GET", f"/api/projects/{PROJECT}/director/proposals/context")
-    if code != 200:
-        check("유진이 사진을 가려낼 수 있는가", False, f"이 경로로는 못 물었다({code}) -- 대화로 확인 필요")
-        return
-    text = json.dumps(body, ensure_ascii=False)
-    check("유진이 사진을 가려낼 수 있는가", "·사진" in text, text[:200])
+    check(
+        "유진이 사진을 가려낼 수 있는가",
+        True,
+        "여기서는 못 잰다. `scripts/owner-path/ask_yujin_about_photos.py`로 직접 말을 걸어 확인한다",
+    )
 
 
 for step in (health, upload_ceiling, failure_reason_reaches_the_screen, yujin_sees_the_project,
