@@ -84,6 +84,16 @@ class DirectorProposalService:
             if asset_type in {"music", "bgm", "sfx"}:
                 required = ("mood", "energy", "genre", "recommended_use") if asset_type in {"music", "bgm"} else ("action_event", "intensity", "recommended_use")
                 return metadata.get("canonical_metadata_indexed") is True and all(metadata.get(field) not in (None, "") for field in required)
+            # **사진에는 화면 분석 기록이 생길 수 없다.** 그 분석은 영상에만
+            # 예약된다(`routers/media_library.py`, `routers/library_assets.py`).
+            # 그런데 여기서 모든 화면 자산에 그 기록을 요구해서, 사진은 유진의
+            # 후보에 **영원히 못 들어갔다** -- 프로젝트에 사진밖에 없으면 후보가
+            # 통째로 비어 "분석을 다시 하라"까지 났다(2026-09-06 전수 조사).
+            #
+            # 사진은 자료실 색인이 이미 설명해 두었고 렌더러도 장면으로 그릴 수
+            # 있다. 파일이 있으면 쓸 수 있다 -- 위에서 이미 확인했다.
+            if asset_type == "image":
+                return True
             analysis = analyses.get(str(item["asset_id"]))
             if not (analysis and analysis.get("status") == "succeeded" and not analysis.get("cancel_requested")):
                 return False
@@ -289,7 +299,8 @@ class DirectorProposalService:
     def _rankable_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
         metadata = dict(asset.get("metadata") or {})
         asset_type = str(asset.get("asset_type") or "")
-        media_type = {"broll_video": "broll", "music": "bgm", "bgm": "bgm", "sfx": "sfx"}.get(asset_type, metadata.get("media_type", "broll"))
+        # 사진도 화면 자리에 놓이므로 `broll`로 센다 -- 추천기·화면이 쓰는 이름이다.
+        media_type = {"broll_video": "broll", "image": "broll", "music": "bgm", "bgm": "bgm", "sfx": "sfx"}.get(asset_type, metadata.get("media_type", "broll"))
         # 이름을 함께 넘긴다. 없으면 `media_ranking`이 파일 이름으로 떨어진다 --
         # 카드에 코드만 뜨면 owner가 무엇을 고르는지 알 수 없다(2026-08-19).
         return {**metadata, "storage_uri": str(asset.get("storage_uri") or ""), "asset_id": asset["asset_id"], "media_type": media_type, "source_kind": asset.get("source_kind", "local_file"), "availability": metadata.get("availability", "available"), "review_status": metadata.get("review_status", "approved"), "license": metadata.get("license", "valid"), "license_policy": metadata.get("license_policy"), "warning_provenance": metadata.get("warning_provenance", ()), "content_sha256": sha256_file(self.store.resolve_storage_uri(project_id=asset["project_id"], storage_uri=str(asset["storage_uri"]))), "media_revision": str(asset.get("created_at") or ""), "preview_uri": metadata.get("preview_uri")}

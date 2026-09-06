@@ -98,3 +98,36 @@ def test_every_input_decides_photo_ness_the_same_way() -> None:
         assert flag == "is_image" or flag.startswith("_looks_like_image("), (
             f"사진 여부를 다르게 판단하는 자리가 있다: {arguments}"
         )
+
+
+def test_the_old_path_refuses_a_photo_scene_instead_of_hanging(tmp_path: Path) -> None:
+    """옛 concat 경로는 사진을 **정지 그림으로** 낸다 -- 그마저도 jpg면 안 끝난다.
+
+    실측 2026-09-06: `-stream_loop -1`만 걸고 `-loop 1`을 안 붙이면 jpg 입력이
+    30초가 지나도 안 끝나고 48바이트짜리 깨진 파일이 남는다(png는 정상).
+
+    이 경로는 전환·색감·손떨림·트랙 상태에 대해 **일부러 멈춘다** -- 그쪽 기능이
+    조용히 사라진 mp4를 내는 것보다 낫기 때문이다. 그 목록에 사진만 빠져 있었다.
+    지금은 제품에서 이 경로에 닿지 않지만, 이 목록은 "닿을 때를 대비한 것"이다.
+    """
+    import pytest as _pytest
+
+    from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError
+
+    photo = tmp_path / "scene.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    timeline = {
+        "tracks": [
+            {
+                "track_type": "broll",
+                "clips": [{"clip_id": "c1", "asset_uri": f"file://{photo.as_posix()}", "start_sec": 0.0, "end_sec": 3.0}],
+            }
+        ]
+    }
+
+    with _pytest.raises(FinalRenderError) as caught:
+        FfmpegFinalRenderer(store=None).render_timeline_to_mp4(
+            project_id="p1", timeline=timeline, output_path=tmp_path / "out.mp4"
+        )
+
+    assert "composition plan" in str(caught.value).lower(), caught.value

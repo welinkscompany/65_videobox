@@ -2200,6 +2200,21 @@ class FfmpegFinalRenderer:
                 "Track hide/mute renders only from the composition plan. "
                 "Pass composition_plan to render this timeline."
             )
+        # **사진 장면이 그 다섯째다.** 이 경로의 `_extract_segment`는 `-loop 1`을
+        # 안 붙이고 zoompan도 안 건다 -- 사진은 멈춘 그림으로 나오고, jpg면
+        # 아예 안 끝난다(실측 2026-09-06: `-stream_loop -1`만 걸린 jpg 입력이
+        # 30초 뒤에도 안 끝나고 48바이트 깨진 파일이 남았다. png는 정상이라
+        # **jpg만 걸리는** 쪽이다).
+        if any(
+            _looks_like_image(Path(str(clip.get("asset_uri") or "")))
+            for track in timeline.get("tracks", []) if isinstance(track, dict)
+            if str(track.get("track_type") or "") in {"broll", "overlay"}
+            for clip in (track.get("clips") or []) if isinstance(clip, dict)
+        ):
+            raise FinalRenderError(
+                "Photo scenes render only from the composition plan. "
+                "Pass composition_plan to render this timeline."
+            )
         verify_output_sources(
             store=self.store, project_id=project_id, timeline=timeline,
             hash_cache=self._output_source_hash_cache,
