@@ -10,6 +10,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from videobox_core_engine.filters import FILTER_TYPES
+from videobox_core_engine.media_controls import PHOTO_MOTION_CHOICES
 from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_HORIZONTALS,
     SHAPE_OVERLAY_MOTION_SET,
@@ -23,6 +24,7 @@ from videobox_domain_models.yujin_editing_proposals import (
     ReorderSegmentsOperation,
     SetCaptionFontOperation,
     SetImageOverlayOperation,
+    SetPhotoMotionOperation,
     SetPictureCleanupOperation,
     SetSceneLookOperation,
     SetSceneTransitionOperation,
@@ -83,6 +85,10 @@ class YujinEditingContext:
     #: 않습니다"라고 답했다. 고를 수 있는 목록만 주고 **지금 걸린 것**은
     #: 안 줬기 때문이다.
     looks_by_segment: tuple[tuple[str, str], ...] = ()
+    #: 지금 사진 움직임이 걸린 장면과 그 종류. 색감·전환과 **같은 이유**로 준다 --
+    #: 목록과 지금 걸린 값은 한 쌍이고, 한쪽만 주면 "원래대로 돌려줘"가 막힌다.
+    #: 여기 없는 장면은 "안 고름"이며, 그건 클립마다 알아서 움직인다는 뜻이다.
+    photo_motions_by_segment: tuple[tuple[str, str], ...] = ()
     #: 지금 음악·효과음이 깔려 있는 장면들. 소리 정리는 깔린 것 위에 거는 것이라
     #: 없는 장면에는 걸 수 없다 -- 색감이 화면을 요구하는 것과 같은 이유다.
     segment_ids_with_bgm: tuple[str, ...] = ()
@@ -218,6 +224,14 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
         if isinstance(operation, SetSceneLookOperation):
             if operation.look not in FILTER_TYPES:
                 return "scene_look_not_available"
+            if operation.segment_id not in set(context.segment_ids_with_broll):
+                return "scene_look_needs_broll"
+        if isinstance(operation, SetPhotoMotionOperation):
+            # 지어낸 움직임 이름은 여기서 막는다 -- 색감·전환과 같은 이유다.
+            # `normalize_media_controls`도 막지만 거기까지 가면 창작자는
+            # "적용하지 못했어요"만 본다.
+            if operation.motion not in PHOTO_MOTION_CHOICES:
+                return "photo_motion_not_available"
             if operation.segment_id not in set(context.segment_ids_with_broll):
                 return "scene_look_needs_broll"
         if isinstance(operation, (SetPictureCleanupOperation, SetSceneTransformOperation)):

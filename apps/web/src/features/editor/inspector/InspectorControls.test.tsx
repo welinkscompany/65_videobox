@@ -1422,4 +1422,58 @@ describe("InspectorControls", () => {
     expect(screen.getByRole("button", { name: "B-roll 0.5배속" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "B-roll 2배속" })).toHaveAttribute("aria-pressed", "false");
   });
+
+  // 사진 움직임(2026-09-06). 여섯 가지를 만들어 두고 클립 이름으로 자동
+  // 배정하고 있어서 창작자가 고르지도 끄지도 못했다.
+  it("lets the creator choose how a photo moves, and keeps 'not chosen' out of the save", () => {
+    const onAction = vi.fn();
+    const segment = { cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-motion", startSec: 1 };
+    const broll: InspectorTarget = {
+      assetId: "asset-photo", clearOnly: false, controls: {},
+      fields: ["photoMotion"],
+      id: "clip:broll-motion", kind: "media", label: "B-roll", mediaKind: "broll", segmentId: "segment-motion",
+    };
+
+    render(<InspectorControls onAction={onAction} selectedSegment={segment} target={broll} />);
+
+    const select = screen.getByLabelText("B-roll 사진 움직임");
+    // §10.13: `zoom_in` 같은 코드는 화면에 안 나온다.
+    expect(select.textContent).not.toContain("zoom_in");
+    expect([...select.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
+      "알아서 움직이기", "천천히 다가가기", "천천히 멀어지기",
+      "왼쪽으로 흐르기", "오른쪽으로 흐르기", "위로 흐르기", "아래로 흐르기", "움직이지 않기",
+    ]);
+
+    // 안 고른 채로 저장하면 `null`이 간다 -- 서버는 그 칸을 아예 안 적는다.
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      controls: expect.objectContaining({ photoMotion: null }),
+    }));
+
+    fireEvent.change(select, { target: { value: "pan_left" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      controls: expect.objectContaining({ photoMotion: "pan_left" }),
+    }));
+
+    // **`움직이지 않기`는 안 고름이 아니다.** 둘을 뭉치면 끌 방법이 없어진다.
+    fireEvent.change(select, { target: { value: "still" } });
+    fireEvent.click(screen.getByRole("button", { name: "B-roll 설정 저장" }));
+    expect(onAction).toHaveBeenLastCalledWith(expect.objectContaining({
+      controls: expect.objectContaining({ photoMotion: "still" }),
+    }));
+  });
+
+  it("shows the motion that is already on so it can be changed back", () => {
+    const segment = { cutAction: "keep", endSec: 5, nextSegmentId: null, segmentId: "segment-motion-on", startSec: 1 };
+    const broll: InspectorTarget = {
+      assetId: "asset-photo-on", clearOnly: false, controls: { photoMotion: "zoom_out" },
+      fields: ["photoMotion"],
+      id: "clip:broll-motion-on", kind: "media", label: "B-roll", mediaKind: "broll", segmentId: "segment-motion-on",
+    };
+
+    render(<InspectorControls onAction={vi.fn()} selectedSegment={segment} target={broll} />);
+
+    expect(screen.getByLabelText("B-roll 사진 움직임")).toHaveValue("zoom_out");
+  });
 });

@@ -7,6 +7,7 @@ import json
 import re
 
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
+from videobox_core_engine.media_controls import PHOTO_MOTION_CHOICES, PHOTO_MOTION_LABELS
 from videobox_core_engine.overlay_shapes import (
     SHAPE_OVERLAY_HORIZONTALS,
     SHAPE_OVERLAY_MOTIONS,
@@ -41,6 +42,9 @@ _EDITING_OPERATION_SCHEMA = {
         # 크기만 싣는다. 둘 다 안 실으면 검증이 막는다.
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_caption_font"}, "family": {"type": "string"}, "size_px": {"type": "integer", "minimum": MIN_CAPTION_FONT_SIZE_PX, "maximum": MAX_CAPTION_FONT_SIZE_PX}}, "required": ["intent"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_look"}, "segment_id": {"type": "string"}, "look": {"enum": sorted(FILTER_CATALOG)}}, "required": ["intent", "segment_id", "look"]},
+        # 사진 한 장이 **어떻게** 움직일지. `still`도 고르는 값이다("가만히 둬") --
+        # 안 고르면 클립마다 알아서 정해지므로 둘을 같은 것으로 다루지 않는다.
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_photo_motion"}, "segment_id": {"type": "string"}, "motion": {"enum": sorted(PHOTO_MOTION_CHOICES)}}, "required": ["intent", "segment_id", "motion"]},
         # 전환은 **이 장면으로 넘어올 때** 쓴다. `transition_type: null`이면 뺀다.
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_transition"}, "segment_id": {"type": "string"}, "transition_type": {"type": ["string", "null"], "enum": [*sorted(TRANSITION_CATALOG), None]}, "duration_sec": {"type": "number", "minimum": 0.1, "maximum": 5}}, "required": ["intent", "segment_id"]},
         # 켜고 끄는 것들. **말한 것만 실으라고** 하려고 required를 최소로 둔다 --
@@ -102,6 +106,27 @@ def _scene_look_catalogue(context: YujinEditingContext) -> str:
         # **지금 걸린 것도 준다.** 고를 수 있는 목록만 주면 "원래대로 돌려줘"에
         # "색감이 걸려 있지 않습니다"라고 답한다 -- 걸려 있는데도(2026-09-06 실측).
         f"지금 색감이 걸린 장면: {', '.join(f'{sid}({look})' for sid, look in context.looks_by_segment) or '없음'}."
+    )
+
+
+def _photo_motion_catalogue(context: YujinEditingContext) -> str:
+    """사진이 어떻게 움직일지. **목록과 지금 걸린 값을 한 쌍으로** 준다.
+
+    색감에서 세운 규칙 그대로다 -- 고를 수 있는 목록만 주면 "원래대로 돌려줘"에
+    "걸린 게 없습니다"라고 답한다(2026-09-06 실측, 전환·색감 둘 다 그랬다).
+
+    **"안 고름"과 `still`을 갈라 말해 준다.** 안 고르면 클립마다 알아서 움직이고,
+    `still`은 멈춘다. 안 갈라 주면 "가만히 둬"를 "아무것도 안 함"으로 옮긴다.
+    """
+    motions = ", ".join(f"{key}({PHOTO_MOTION_LABELS[key]})" for key in sorted(PHOTO_MOTION_CHOICES))
+    if not context.segment_ids_with_broll:
+        return f"고를 수 있는 사진 움직임: {motions}. 다만 지금은 화면이 깔린 장면이 없어 걸 수 없다."
+    return (
+        f"사진 한 장짜리 장면이 어떻게 움직일지는 set_photo_motion으로 고른다. "
+        f"고를 수 있는 값: {motions}. "
+        f"still은 '움직이지 마라'는 뜻이고, 아무것도 안 고른 장면은 알아서 움직인다 -- 둘은 다르다. "
+        f"화면이 깔린 장면에만 걸 수 있다. "
+        f"지금 움직임이 걸린 장면: {', '.join(f'{sid}({motion})' for sid, motion in context.photo_motions_by_segment) or '없음'}."
     )
 
 
@@ -334,6 +359,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "set_cut_action(장면을 쓸지 뺄지), reorder_segments(장면 순서), "
         "set_caption_font(자막 글꼴·크기), "
         "set_caption_text(자막 글), set_scene_look(색감), set_picture_cleanup(손떨림·화면 노이즈), "
+        "set_photo_motion(사진이 어떻게 움직일지 -- \"사진 천천히 확대해줘\", \"사진 좀 가만히 둬\"가 이것이다), "
         "set_sound_cleanup(소리 크기 맞추기·잡음 줄이기), set_scene_transform(확대·위치·기울이기), "
         "set_scene_transition(장면이 넘어올 때의 전환 -- \"전환 넣어줘\"가 이것이다), "
         "apply_media(영상·음악·효과음을 깐다), "
@@ -360,6 +386,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         f"{_caption_catalogue(context, instruction)} "
         f"{_approved_asset_catalogue(context)} "
         f"{_scene_look_catalogue(context)} "
+        f"{_photo_motion_catalogue(context)} "
         f"{_scene_transition_catalogue()} "
         f"{_caption_font_catalogue(context)} "
         f"{_image_overlay_catalogue(context)} "

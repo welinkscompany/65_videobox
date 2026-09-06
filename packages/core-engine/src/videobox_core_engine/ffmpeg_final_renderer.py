@@ -139,6 +139,10 @@ def _uses_plan_only_picture_controls(media_controls: object) -> bool:
         return False
     if media_controls.get("filter") or media_controls.get("stabilize") or media_controls.get("reduce_noise"):
         return True
+    # 사진 움직임은 `build_plan_filter_graph`만 그린다. `still`은 legacy 경로에서도
+    # 결과가 같으므로(거기선 어차피 안 움직인다) 막지 않는다 -- 고른 방향만 막는다.
+    if str(media_controls.get("photo_motion") or "") not in ("", PHOTO_MOTION_STILL):
+        return True
     # 변형은 기본값이 0이 아니라 `zoom: 1.0`이라 "손댔는가"를 참·거짓으로 물을
     # 수 없다. 기본값과 다른지로 판단한다.
     for field, default in (("zoom", 1.0), ("position_x_percent", 0.0), ("position_y_percent", 0.0), ("rotation_deg", 0.0)):

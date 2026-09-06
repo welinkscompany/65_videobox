@@ -12,6 +12,7 @@
  */
 
 import type { YujinEditingProposal } from "../../../api";
+import { photoMotionLabel } from "../inspector/photoMotions";
 import { sceneFilterLabel } from "../inspector/sceneFilters";
 import { sceneTransitionLabel } from "../inspector/sceneTransitions";
 import {
@@ -54,6 +55,10 @@ export function yujinEditingOperationSummary(operation: YujinEditingOperation): 
   if (operation.intent === "set_scene_look") {
     const looked = typeof operation.look === "string" ? sceneFilterLabel(operation.look) : null;
     return looked ? `색감을 ${looked} 바꿔요.` : "색감을 바꿔요.";
+  }
+  if (operation.intent === "set_photo_motion") {
+    const moved = typeof operation.motion === "string" ? photoMotionLabel(operation.motion) : null;
+    return moved ? `사진을 ${moved}로 바꿔요.` : "사진 움직임을 바꿔요.";
   }
   if (operation.intent === "set_caption_font") {
     return typeof operation.family === "string" ? `자막 글꼴을 ${operation.family}(으)로 바꿔요.` : "자막 글꼴을 바꿔요.";

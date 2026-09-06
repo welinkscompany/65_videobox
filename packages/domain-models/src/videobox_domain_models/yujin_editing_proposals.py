@@ -101,6 +101,22 @@ class SetSceneLookOperation(_SegmentOperation):
     look: str = Field(min_length=1, max_length=64)
 
 
+class SetPhotoMotionOperation(_SegmentOperation):
+    """사진 한 장이 **어떻게** 움직일지 고른다.
+
+    `motion`이 `Literal`이 아닌 이유는 색감(`set_scene_look`)과 같다 -- 고를 수
+    있는 표(`media_controls.PHOTO_MOTION_CHOICES`)는 core-engine에 있고,
+    domain-models가 그것을 베끼면 두 벌이 갈라진다. 목록 대조는 검증기에서 한다.
+
+    `still`("움직이지 않기")도 고르는 값이다 -- **안 고른 것과 다르다.** 안 고르면
+    클립마다 알아서 정해지고, `still`은 멈춘다. 그래서 "가만히 둬"를 "안 고름"으로
+    옮기지 않는다.
+    """
+
+    intent: Literal["set_photo_motion"]
+    motion: str = Field(min_length=1, max_length=64)
+
+
 class SetSceneTransitionOperation(_SegmentOperation):
     """이 장면으로 **넘어올 때** 쓸 전환.
 
@@ -222,6 +238,7 @@ YujinEditingOperation = Annotated[
     | SetCaptionTextOperation
     | SetCaptionFontOperation
     | SetSceneLookOperation
+    | SetPhotoMotionOperation
     | SetSceneTransitionOperation
     | SetPictureCleanupOperation
     | SetSoundCleanupOperation
@@ -257,6 +274,7 @@ __all__ = [
     "SetCutActionOperation",
     "SetCaptionFontOperation",
     "SetImageOverlayOperation",
+    "SetPhotoMotionOperation",
     "SetPictureCleanupOperation",
     "SetSceneLookOperation",
     "SetSceneTransformOperation",

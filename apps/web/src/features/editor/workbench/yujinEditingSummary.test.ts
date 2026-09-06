@@ -28,6 +28,16 @@ describe("유진이 한 일 한 줄", () => {
       .toBe("장면 넘기기를 왼쪽으로 쓸어내기(으)로 바꿔요.");
   });
 
+  it("사진 움직임도 화면에 쓰는 이름으로 말한다", () => {
+    expect(summary({ intent: "set_photo_motion", segment_id: "s1", motion: "pan_left" }))
+      .toBe("사진을 왼쪽으로 흐르기로 바꿔요.");
+    expect(summary({ intent: "set_photo_motion", segment_id: "s1", motion: "still" }))
+      .toBe("사진을 움직이지 않기로 바꿔요.");
+    // 모르는 값이 와도 코드를 그대로 보여 주지 않는다.
+    expect(summary({ intent: "set_photo_motion", segment_id: "s1", motion: "spin" }))
+      .toBe("사진 움직임을 바꿔요.");
+  });
+
   it("다듬기와 화면 맞춤도 제 이름이 있다", () => {
     expect(summary({ intent: "set_picture_cleanup", segment_id: "s1" })).toBe("화면을 다듬어요.");
     expect(summary({ intent: "set_sound_cleanup", segment_id: "s1" })).toBe("소리를 다듬어요.");

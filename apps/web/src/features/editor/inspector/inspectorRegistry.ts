@@ -2,7 +2,7 @@ import type { ShapeOverlayMotion, ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 
 type MediaKind = "broll" | "bgm" | "sfx";
-export type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "fit" | "normalizeLoudness" | "denoise" | "stabilize" | "reduceNoise" | "preservePitch" | "zoom" | "positionXPercent" | "positionYPercent" | "rotationDeg";
+export type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "photoMotion" | "fit" | "normalizeLoudness" | "denoise" | "stabilize" | "reduceNoise" | "preservePitch" | "zoom" | "positionXPercent" | "positionYPercent" | "rotationDeg";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
 type ImageField = "assetId" | "text" | "vertical" | "horizontal" | "size" | "motion";
@@ -153,6 +153,23 @@ const bgmFields = ["fadeInSec", "fadeOutSec", "ducking", "gainDb", "normalizeLou
 // `stabilize`(손떨림 보정)는 화면이 있는 클립에만. 캡컷 동영상 탭 대조로
 // 2026-09-01에 들어왔다 -- FFmpeg `deshake`(단일 패스)라 렌더가 안 느려진다.
 const brollFields = ["inSec", "outSec", "speed", "volume", "preserveSourceAudio", "fadeInSec", "fadeOutSec", "filter", "fit", "stabilize", "reduceNoise", "preservePitch", "zoom", "positionXPercent", "positionYPercent", "rotationDeg"] as const;
+// 사진 움직임은 **사진 한 장짜리 클립에만** 붙인다. 영상 클립에 붙이면 아무
+// 일도 안 하는 칸이 되고, 창작자는 "골랐는데 왜 안 되지"를 본다 -- 렌더러도
+// 같은 기준(파일 확장자)으로 사진인지 가른다(`_looks_like_image`).
+const PHOTO_SUFFIXES = [".jpg", ".jpeg", ".png", ".webp", ".bmp"] as const;
+const brollPhotoFields = [...brollFields, "photoMotion"] as const;
+
+function looksLikePhoto(assetUri: string | null | undefined): boolean {
+  const uri = (assetUri ?? "").split("?")[0].toLowerCase();
+  return PHOTO_SUFFIXES.some((suffix) => uri.endsWith(suffix));
+}
+
+// 사진이 아니어도 **이미 고른 값이 있으면** 칸을 보여 준다. 안 그러면 원본을
+// 영상으로 바꾼 순간 고른 움직임이 화면에서 사라지고, 되돌릴 자리가 없어진다.
+function brollFieldsFor(clip: Readonly<{ assetUri: string | null; controls: EditorControls }>): readonly MediaField[] {
+  return looksLikePhoto(clip.assetUri) || clip.controls.photoMotion ? brollPhotoFields : brollFields;
+}
+
 const mediaLabels = { broll: "B-roll", bgm: "배경 음악", sfx: "효과음" } as const;
 
 function isMediaKind(role: EditorViewModel["tracks"][number]["role"]): role is MediaKind {
@@ -233,7 +250,7 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         label: mediaLabels[mediaKind],
         segmentId: selectedSegmentId,
         mediaKind,
-        fields: mediaKind === "broll" ? brollFields : mediaKind === "bgm" ? bgmFields : mediaFields,
+        fields: mediaKind === "broll" ? brollFieldsFor(clip) : mediaKind === "bgm" ? bgmFields : mediaFields,
         assetId: clip.assetId!,
         controls: clip.controls,
         clearOnly: false,

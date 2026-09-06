@@ -242,4 +242,26 @@ describe("projectInspectorTargets", () => {
 
     expect(targets.filter((target) => target.id.startsWith("overlay-new:"))).toEqual([]);
   });
+
+  // 사진 움직임은 **사진 한 장짜리 클립에만** 붙는다. 영상에 붙이면 아무 일도
+  // 안 하는 칸이 되고, 창작자는 "골랐는데 왜 안 되지"를 본다.
+  it("offers photo motion only where a photo is actually placed", () => {
+    const withClip = (assetUri: string | null, controls: Record<string, unknown> = {}) => ({
+      ...view,
+      tracks: view.tracks.map((track) => track.role === "broll"
+        ? { ...track, clips: track.clips.map((clip) => ({ ...clip, assetUri, controls })) }
+        : track),
+    }) as EditorViewModel;
+    const brollFieldsOf = (candidate: EditorViewModel) => {
+      const target = projectInspectorTargets({ view: candidate, selectedSegmentId: "segment-1" })
+        .find((item) => item.id === "clip:broll-1");
+      return target && target.kind === "media" ? [...target.fields] : [];
+    };
+
+    expect(brollFieldsOf(withClip("/library/aurora-01.JPG"))).toContain("photoMotion");
+    expect(brollFieldsOf(withClip("/library/seaside.mp4"))).not.toContain("photoMotion");
+    // 원본을 영상으로 바꿔도 **이미 고른 값이 있으면** 칸이 남는다 -- 아니면
+    // 되돌릴 자리가 없어진다.
+    expect(brollFieldsOf(withClip("/library/seaside.mp4", { photoMotion: "pan_up" }))).toContain("photoMotion");
+  });
 });

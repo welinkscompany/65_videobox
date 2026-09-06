@@ -506,6 +506,14 @@ def build_director_proposals_router(
                 if isinstance(item, dict)
                 and str(((item.get("broll_override") or {}).get("media_controls") or {}).get("filter", {}).get("type") or "").strip()
             ),
+            # 지금 걸린 사진 움직임. 색감과 같은 이유로 준다 -- 목록과 지금 걸린
+            # 값은 한 쌍이고, 한쪽만 주면 "원래대로 돌려줘"가 막힌다.
+            photo_motions_by_segment=tuple(
+                (str(item["segment_id"]), str(((item.get("broll_override") or {}).get("media_controls") or {}).get("photo_motion") or ""))
+                for item in session.get("segments", [])
+                if isinstance(item, dict)
+                and str(((item.get("broll_override") or {}).get("media_controls") or {}).get("photo_motion") or "").strip()
+            ),
             segment_ids_with_broll=tuple(
                 str(item["segment_id"])
                 for item in session.get("segments", [])
@@ -1068,6 +1076,7 @@ def _editing_follow_ups(operations: tuple[object, ...]) -> list[str]:
         "apply_media": ("다른 분위기로 찾아볼까요?", "이 장면부터만 바꿀까요?", "효과음도 함께 넣을까요?"),
         "set_scene_look": ("원래 색으로 되돌려 볼까요?", "앞뒤 장면도 같은 색감으로 맞출까요?", "이 구간만 미리 볼까요?"),
         "set_caption_font": ("다른 글꼴도 보여 드릴까요?", "글자 크기도 같이 맞출까요?", "원래 글꼴로 되돌릴까요?"),
+        "set_photo_motion": ("반대 방향으로 움직여 볼까요?", "이 장면 사진은 가만히 둘까요?", "이 구간만 미리 볼까요?"),
     }.get(intent, ())
     return [item for item in values if item][:3]
 

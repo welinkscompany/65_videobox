@@ -724,6 +724,37 @@ def test_ai_scene_look_refuses_a_scene_with_no_picture_under_it() -> None:
         apply_yujin_editing_proposal(session=session, proposal=proposal)
 
 
+def test_ai_photo_motion_lands_beside_the_look_and_keeps_the_rest() -> None:
+    """사진 움직임도 색감과 **같은 자리**다 -- 그 장면 B-roll의 조정값.
+
+    원본 신원(해시·판)을 같이 실어야 출력 검증이 그 장면을 "바뀐 원본"으로 읽지
+    않는다. 색감·손떨림·변형이 전부 지나는 함정이라 같은 함수를 쓴다.
+    """
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001",
+        "expected_content_sha256": "d" * 64,
+        "media_revision": "broll-r11",
+        "media_controls": {"fit": "crop", "filter": {"type": "warm", "chosen_by": "owner"}},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "motion", "base_session_revision": 1,
+        "operations": [{"intent": "set_photo_motion", "segment_id": "seg_001", "motion": "still"}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    override = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")["broll_override"]
+
+    assert override["media_controls"]["photo_motion"] == "still"
+    assert override["expected_content_sha256"] == "d" * 64
+    assert override["media_revision"] == "broll-r11"
+    # 고른 것은 움직임뿐이다. 같이 저장돼 있던 색감을 조용히 되돌리지 않는다.
+    assert override["media_controls"]["filter"] == {"type": "warm", "chosen_by": "owner"}
+    assert override["media_controls"]["fit"] == "crop"
+
+
 def test_ai_picture_cleanup_changes_only_what_the_creator_asked_for() -> None:
     """**말한 칸만 바꾼다.** owner가 "흔들림만 잡아 줘"라고 하면 노이즈 설정은
     그대로여야 한다.

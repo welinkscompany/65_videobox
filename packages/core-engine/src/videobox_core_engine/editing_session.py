@@ -879,6 +879,7 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
         SetSceneTransitionOperation,
         SetCaptionTextOperation,
         SetCutActionOperation,
+        SetPhotoMotionOperation,
         SetPictureCleanupOperation,
         SetSceneLookOperation,
         SetSceneTransformOperation,
@@ -948,6 +949,14 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
             working = _merge_broll_media_controls(
                 session=working, segment_id=operation.segment_id,
                 changes={"filter": {"type": operation.look, "chosen_by": "yujin"}},
+            )
+        elif isinstance(operation, SetPhotoMotionOperation):
+            # 색감과 **같은 자리**다(그 장면 B-roll의 조정값). 색감처럼 `chosen_by`를
+            # 달지 않는 이유는 렌더러가 읽는 모양이 문자열 하나이기 때문이다 --
+            # 여기서 dict로 실으면 `normalize_media_controls`가 거절한다.
+            working = _merge_broll_media_controls(
+                session=working, segment_id=operation.segment_id,
+                changes={"photo_motion": operation.motion},
             )
         elif isinstance(operation, (SetPictureCleanupOperation, SetSceneTransformOperation)):
             # 색감과 같은 자리에 얹는다 -- 전부 그 장면 B-roll의 조정값이다.

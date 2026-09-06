@@ -75,3 +75,118 @@ def test_the_two_motion_lists_have_not_drifted() -> None:
     from videobox_core_engine.scene_image_service import SCENE_MOTIONS
 
     assert PHOTO_MOTIONS == SCENE_MOTIONS
+
+
+# --- 엔진 위 층: 화면과 유진 ------------------------------------------------
+#
+# 엔진이 값을 받는 것은 절반이다. 이 저장소가 되풀이한 사고 그대로 -- 조정 칸
+# 하나를 더하면 손댈 자리가 일곱이고, 그중 둘은 전체 pytest에서만 걸린다.
+
+
+def test_the_editor_screen_can_read_a_clip_that_chose_a_motion() -> None:
+    """**응답 모델이 `extra="forbid"`다.** 여기 칸이 없으면 한 번 고른 클립의
+    편집기 화면이 통째로 안 열린다 -- 조용히 빠지는 게 아니라 응답이 터진다
+    (2026-09-01에 손떨림 보정으로 실제로 겪었다).
+    """
+    from videobox_api.models import EditorMediaControlsResponse
+
+    assert EditorMediaControlsResponse(photo_motion="pan_left").photo_motion == "pan_left"
+
+
+def test_the_save_request_carries_the_chosen_motion() -> None:
+    """화면이 보낸 값이 저장까지 간다. 명령 포트에서 빠뜨리면 "저장했어요"까지
+    떠 놓고 값만 사라진다(색감이 2026-08-23에 그랬다).
+    """
+    from videobox_core_engine.editing_session import update_segment_broll_override
+
+    session = {
+        "session_revision": 1,
+        "segments": [{
+            "segment_id": "seg_001", "start_sec": 0.0, "end_sec": 4.0,
+            "broll_override": {"asset_id": "broll_001"},
+        }],
+    }
+
+    saved = update_segment_broll_override(
+        session=session, segment_id="seg_001", asset_id="broll_001",
+        media_controls={"photo_motion": "zoom_out"},
+    )
+
+    controls = saved["segments"][0]["broll_override"]["media_controls"]
+    assert controls["photo_motion"] == "zoom_out"
+
+
+def _yujin_payload(motion: str, segment_id: str = "seg_001") -> dict:
+    return {
+        "schema_version": "videobox.yujin-editing-response.v1",
+        "reply_text": "사진 움직임을 바꿔 볼게요.",
+        "proposal": {
+            "proposal_id": "motion",
+            "base_session_revision": 1,
+            "operations": [{"intent": "set_photo_motion", "segment_id": segment_id, "motion": motion}],
+        },
+    }
+
+
+def _yujin_context():
+    from videobox_core_engine.yujin_editing_proposal_adapter import YujinEditingContext
+
+    return YujinEditingContext(
+        session_id="s", session_revision=1, segment_ids=("seg_001",),
+        segment_ids_with_broll=("seg_001",),
+    )
+
+
+def test_yujin_can_ask_for_a_motion() -> None:
+    from videobox_core_engine.yujin_editing_proposal_adapter import interpret_yujin_editing_request
+
+    result = interpret_yujin_editing_request(_yujin_payload("pan_right"), _yujin_context())
+
+    assert result.status == "candidate_only"
+    assert result.proposal is not None
+    assert result.proposal.operations[0].motion == "pan_right"
+
+
+def test_yujin_cannot_make_up_a_motion() -> None:
+    """지어낸 이름은 검증기가 막는다 -- 색감·전환과 같은 자리다."""
+    from videobox_core_engine.yujin_editing_proposal_adapter import interpret_yujin_editing_request
+
+    result = interpret_yujin_editing_request(_yujin_payload("spin"), _yujin_context())
+
+    assert result.status == "rejected"
+    assert result.reason == "photo_motion_not_available"
+
+
+def test_yujin_cannot_move_a_photo_that_is_not_there() -> None:
+    """화면이 안 깔린 장면에는 걸 수 없다 -- 색감과 같은 이유다."""
+    from videobox_core_engine.yujin_editing_proposal_adapter import (
+        YujinEditingContext,
+        interpret_yujin_editing_request,
+    )
+
+    empty = YujinEditingContext(session_id="s", session_revision=1, segment_ids=("seg_001",))
+    result = interpret_yujin_editing_request(_yujin_payload("pan_right"), empty)
+
+    assert result.status == "rejected"
+    assert result.reason == "scene_look_needs_broll"
+
+
+def test_the_prompt_gives_both_the_list_and_what_is_already_on() -> None:
+    """**목록과 지금 걸린 값은 한 쌍이다.** 목록만 주면 "원래대로 돌려줘"에
+    "걸린 게 없습니다"라고 답한다 -- 전환·색감 둘 다 그랬다(2026-09-06 실측).
+    """
+    from videobox_core_engine.yujin_editing_proposal_service import _editing_prompt
+    from videobox_core_engine.yujin_editing_proposal_adapter import YujinEditingContext
+
+    prompt = _editing_prompt(
+        instruction="사진 천천히 확대해줘",
+        context=YujinEditingContext(
+            session_id="s", session_revision=1, segment_ids=("seg_001",),
+            segment_ids_with_broll=("seg_001",),
+            photo_motions_by_segment=(("seg_001", "zoom_in"),),
+        ),
+    )
+
+    assert "set_photo_motion" in prompt
+    assert "천천히 다가가기" in prompt, "코드만 주면 '천천히 확대'를 못 옮긴다"
+    assert "지금 움직임이 걸린 장면: seg_001(zoom_in)" in prompt

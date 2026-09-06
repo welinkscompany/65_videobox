@@ -47,6 +47,24 @@ PHOTO_MOTION_STILL = "still"
 PHOTO_MOTIONS = ("zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down")
 PHOTO_MOTION_CHOICES = frozenset(PHOTO_MOTIONS) | {PHOTO_MOTION_STILL}
 
+#: 창작자에게 보여 줄 이름. **`zoom_in` 같은 코드를 화면에 쓰지 않는다**(§10.13).
+#: 색감(`filters.py`의 `FILTER_CATALOG`)과 같은 방식으로 여기 한 벌만 두고,
+#: 화면 목록(`apps/web/.../inspector/photoMotions.ts`)과 유진에게 주는 표가
+#: 둘 다 이것을 따른다. 두 벌이 갈라지는 것은
+#: `tests/test_photo_motion_catalog_matches_the_screen.py`가 맞대어 본다.
+#:
+#: 이름은 **보이는 대로** 붙였다. `pan_left`는 크롭 창이 오른쪽으로 가는 것이라
+#: 그림이 왼쪽으로 흐른다(`_photo_motion_chain`의 배열 순서와 같은 순서다).
+PHOTO_MOTION_LABELS: dict[str, str] = {
+    "zoom_in": "천천히 다가가기",
+    "zoom_out": "천천히 멀어지기",
+    "pan_left": "왼쪽으로 흐르기",
+    "pan_right": "오른쪽으로 흐르기",
+    "pan_up": "위로 흐르기",
+    "pan_down": "아래로 흐르기",
+    PHOTO_MOTION_STILL: "움직이지 않기",
+}
+
 
 def normalize_media_controls(
     controls: object,

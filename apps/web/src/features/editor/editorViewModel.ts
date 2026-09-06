@@ -3,6 +3,8 @@ import type { EditorMediaControls, EditorPlaybackManifest } from "../../api";
 export type EditorControls = Readonly<{
   /** 색감(`sceneFilters.ts`). 안 고르면 아예 없는 칸이다. */
   filter?: Readonly<{ type: string; chosen_by?: string }> | null;
+  /** 사진 움직임(`photoMotions.ts`). 색감과 같이 안 고르면 아예 없는 칸이다. */
+  photoMotion?: string | null;
   volume?: number;
   crop?: string;
   speed?: number;
@@ -52,6 +54,7 @@ function controls(value: EditorMediaControls): EditorControls {
     // 여기 안 실으면 **저장은 되는데 화면이 되읽지 못한다** -- 2026-08-23에
     // 자막 숨김에서 똑같은 자리를 빠뜨렸다.
     filter: value.filter,
+    photoMotion: value.photo_motion,
     volume: value.volume,
     crop: value.crop,
     speed: value.speed,

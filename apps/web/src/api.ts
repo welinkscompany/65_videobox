@@ -529,6 +529,10 @@ export type CaptionFontLibrary = {
 export type EditorMediaControls = {
   /** 색감(`filters.py`). 안 고르면 아예 없는 칸이다. */
   filter?: { type: string; chosen_by?: string } | null;
+  /** 사진 한 장이 **어떻게** 움직일지(`photoMotions.ts`). 색감과 같은 규칙으로
+   *  안 고르면 아예 없는 칸이고, 그때는 클립마다 알아서 움직인다.
+   *  `still`은 "안 고름"이 아니라 "움직이지 마라"이다. */
+  photo_motion?: string | null;
   volume?: number;
   crop?: string;
   speed?: number;

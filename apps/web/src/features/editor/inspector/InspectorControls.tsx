@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { CaptionStyleScope } from "../../../api";
+import { PHOTO_MOTION_CHOICES, PHOTO_MOTION_NONE } from "./photoMotions";
 import { SCENE_FILTER_CHOICES, SCENE_FILTER_NONE } from "./sceneFilters";
 import { Button } from "../../../components/ui/button";
 import { CaptionFontPicker } from "./CaptionFontPicker";
@@ -260,6 +261,10 @@ export function InspectorControls({
   const [volume, setVolume] = useState(1);
   // 색감. 안 고른 상태는 `none`이고, 저장할 때 `null`로 바뀐다.
   const [look, setLook] = useState<string>(SCENE_FILTER_NONE);
+  // 사진 움직임. 색감과 같은 규칙이다 -- 안 고른 상태(`auto`)는 저장할 때
+  // `null`로 바뀌고, 서버는 그 칸을 아예 안 적는다. **`still`(움직이지 않기)과
+  // 다르다** -- 안 고르면 장면마다 알아서 움직인다.
+  const [photoMotion, setPhotoMotion] = useState<string>(PHOTO_MOTION_NONE);
   // 말할 때 음악이 비켜서기(덕킹). 렌더러는 처음부터 이걸 할 수 있었는데
   // 켜고 끄는 자리가 화면에 없었다.
   const [ducking, setDucking] = useState(false);
@@ -374,6 +379,7 @@ export function InspectorControls({
       setFit(target.controls.fit ?? "fit");
       setVolume(target.controls.volume ?? 1);
       setLook(target.controls.filter?.type ?? SCENE_FILTER_NONE);
+      setPhotoMotion(target.controls.photoMotion ?? PHOTO_MOTION_NONE);
       setDucking(target.controls.ducking ?? false);
       setPreserveSourceAudio(target.controls.preserveSourceAudio ?? false);
       setNormalizeLoudness(target.controls.normalizeLoudness ?? false);
@@ -788,6 +794,26 @@ export function InspectorControls({
                   <Input disabled={disabled} max="2" min="0" onChange={(event) => setVolume(numberValue(event.target.value, volume))} step="0.05" type="number" value={volume} />
                 </label>
               ) : null}
+              {/* 사진 움직임(`photoMotions.ts`). 사진 한 장짜리 클립에만 붙는다
+                  (`inspectorRegistry.brollFieldsFor`). **`알아서 움직이기`와
+                  `움직이지 않기`를 갈라 둔다** -- 하나로 뭉치면 끌 방법이 없다. */}
+              {showMediaField("photoMotion") ? (
+                <label>
+                  {`${target.label} 사진 움직임`}
+                  <NativeSelect
+                    aria-label={`${target.label} 사진 움직임`}
+                    disabled={disabled}
+                    onChange={(event) => setPhotoMotion(event.target.value)}
+                    value={photoMotion}
+                  >
+                    <option value={PHOTO_MOTION_NONE}>알아서 움직이기</option>
+                    {PHOTO_MOTION_CHOICES.map((choice) => (
+                      <option key={choice.value} value={choice.value}>{choice.label}</option>
+                    ))}
+                  </NativeSelect>
+                  <small>안 고르면 장면마다 알아서 움직입니다.</small>
+                </label>
+              ) : null}
               {/* 색감(`sceneFilters.ts`). 만든 여섯 개만 보여 준다 -- 캡컷 필터
                   탭의 이름표는 캡컷 서버 자원이라 우리 렌더러가 못 그린다. */}
               {showMediaField("filter") ? (
@@ -928,6 +954,7 @@ export function InspectorControls({
                     ...(target.fields.includes("fit") ? { fit } : {}),
                     ...(target.fields.includes("volume") ? { volume } : {}),
                     ...(target.fields.includes("filter") ? { filter: look === SCENE_FILTER_NONE ? null : { type: look } } : {}),
+                    ...(target.fields.includes("photoMotion") ? { photoMotion: photoMotion === PHOTO_MOTION_NONE ? null : photoMotion } : {}),
                     ...(target.fields.includes("ducking") ? { ducking } : {}),
                     ...(target.fields.includes("preserveSourceAudio") ? { preserveSourceAudio } : {}),
                     ...(target.fields.includes("normalizeLoudness") ? { normalizeLoudness } : {}),

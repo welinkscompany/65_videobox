@@ -85,6 +85,9 @@ function mediaControls(value: EditorControls | undefined): BrollOverrideRequest[
     // 화면에서 고르고 "저장했어요"까지 떴는데 값이 이 자리에서 조용히
     // 버려졌다. 실제 화면에서 눌러 보고 찾았다.
     filter: value.filter,
+    // 사진 움직임. 색감과 **같은 함정**을 지난다 -- 여기 없으면 화면에서 고르고
+    // "저장했어요"까지 떠도 이 자리에서 조용히 버려진다.
+    photo_motion: value.photoMotion,
     loop: value.loop,
     pad: value.pad,
     trim_start_sec: value.trimStartSec,
