@@ -545,6 +545,29 @@ curl -s http://127.0.0.1:5173/health
 남아 있다(2026-08-05자 `_intake_probe.mp4` 31MB). 코드에도 이력에도 이 이름이 없어
 과거 수동 시험의 잔재로 보이지만, 확정하지 않았다.
 
+### 10.16.1 `snapshot/`은 지우지 마라 — 제품이 해시로 검증한다 (2026-09-06 사고)
+
+찌꺼기를 정리하다 `snapshot/smoke_sources/`를 지웠다. **같은 파일이
+`runtime/smoke_sources/`에 sha256까지 똑같이 있어서** 안전한 중복이라고 판단했다.
+
+바로 다음 시작에서 API가 뜨지 못했다:
+
+```
+ValueError: container mode requires a verified container snapshot:
+    verified container snapshot hash mismatch
+```
+
+`snapshot/container-migration-manifest.json`은 **이관 전 기록이 아니라 살아 있는
+검증 대장**이다. 제품이 시작할 때 그 안의 `file_hashes` 49개를 하나씩 대조하고,
+하나라도 없거나 다르면 컨테이너 모드를 거절한다. 내용이 어디 또 있느냐와
+무관하다 -- **그 자리에 그 해시로 있어야 한다.**
+
+`runtime/`에서 되돌려 3개를 복구하고 49개 전부 OK를 확인했다.
+
+**교훈: "같은 내용이 다른 곳에도 있다"는 지워도 된다는 뜻이 아니다.** 그 파일을
+**이름과 자리로** 확인하는 코드가 있는지부터 봐라. 스냅숏·매니페스트·증거처럼
+"대장" 성격인 것은 특히 그렇다.
+
 ### 10.16 `artifacts/` 정리 기준 (owner 승인, 2026-08-09)
 
 CLAUDE.md §5에 있던 세부를 이리로 옮겼다(2026-08-16). 진입점은 짧게 유지한다.
