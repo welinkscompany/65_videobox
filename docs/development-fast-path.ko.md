@@ -545,6 +545,20 @@ curl -s http://127.0.0.1:5173/health
 남아 있다(2026-08-05자 `_intake_probe.mp4` 31MB). 코드에도 이력에도 이 이름이 없어
 과거 수동 시험의 잔재로 보이지만, 확정하지 않았다.
 
+### 10.19 설치형(Tauri)에 남은 걸림돌 — Smart App Control
+
+`decisions/2026-08-30-installed-desktop-shell-tauri.ko.md`로 착수가 승인됐고
+빌드·설치·실행 검증까지 끝났다(`apps/desktop/README.md`).
+
+**남은 것은 코드로 못 고친다.** clean 빌드에서는 Windows Smart App Control이
+다시 막는 것을 2026-08-31에 확인했다 -- OS 보안 정책이라 owner 판단이 필요하다.
+그 전에 "저번엔 안 막혔다"고 판단한 적이 있는데 **빌드 캐시 때문**이었다.
+
+아이콘은 아직 임시다.
+
+(이 세부는 `CLAUDE.md`에 있었다. 진입점이 길이 상한을 넘어 2026-09-06에 이리로
+옮겼다 -- 진입점은 짧게 유지한다.)
+
 ### 10.16.1 `snapshot/`은 지우지 마라 — 제품이 해시로 검증한다 (2026-09-06 사고)
 
 찌꺼기를 정리하다 `snapshot/smoke_sources/`를 지웠다. **같은 파일이

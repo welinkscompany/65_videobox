@@ -63,22 +63,18 @@
 - `2026-09-01-yujin-chat-applies-edits-directly.ko.md` — **유진에게 말한 편집은
   바로 적용된다.** 없앤 클릭 대신 되돌리기가 지킨다.
 - `2026-09-02-video-translator-step-{one-captions,two-dubbing}.ko.md` /
-  `2026-09-03-host-voice-bridge.ko.md` — **동영상 번역기.** 자막(원본은 남긴다) +
-  창작자 목소리 더빙. 엔진은 호스트에 있고 `scripts/start-voice.ps1`로 켠다.
+  `2026-09-03-host-voice-bridge.ko.md` — **동영상 번역기.** 자막(원본 유지) +
+  목소리 더빙. 엔진은 호스트에 있고 `scripts/start-voice.ps1`로 켠다.
 - `2026-09-01-capcut-ai-feature-triage.ko.md` — 캡컷 AI 기능 열둘 중 **무엇을
-  안 만드는지**. 색보정 넷과 `AI 스타일`은 안 만든다. 이때 "다음 큰 것"으로
-  꼽았던 동영상 번역기는 **2026-09-03에 끝났다**(위 자막·더빙 결정 셋과
-  `handoffs/2026-09-03-voice-cloned-dubbing-end-to-end.ko.md`).
+  안 만드는지**. 색보정 넷과 `AI 스타일`은 안 만든다. 이때 "다음 큰 것"이던
+  동영상 번역기는 **2026-09-03에 끝났다**(위 결정 셋).
 - `2026-08-30-capcut-button-level-parity.ko.md` — 버튼 구성·배치·크기까지
-  벤치마킹. 없는 기능 버튼은 안 만든다.
+  벤치마킹. 없는 기능의 버튼은 안 만든다.
 - `2026-08-30-installed-desktop-shell-tauri.ko.md` — **설치형(Tauri) 착수
-  승인.** 아래 두 문서의 "설치형 보류"를 뒤집는다. 빌드·설치·실행 검증
-  완료(`apps/desktop/README.md`) — **clean 빌드에서는 Windows Smart App
-  Control이 다시 막는 것을 2026-08-31에 확인**(OS 보안 정책이라 코드로
-  못 고침, owner 판단 필요), 아이콘은 임시.
+  승인.** 아래 두 문서의 "설치형 보류"를 뒤집는다. 남은 걸림돌은
+  `development-fast-path.ko.md` §10.19.
 - `2026-08-29-ai-video-naming-and-packaging-followups.ko.md` — AI 영상 생성은
-  **로컬 비디오 모델**(방향만, 구현 미착수). "미디어"는 **전체 메뉴(공용
-  라이브러리)만 "자료실"로** — 단계·도크 탭은 그대로.
+  **로컬 비디오 모델**(방향만). "미디어"는 **전체 메뉴만 "자료실"로**.
 - `2026-08-29-capcut-full-structure-and-dark-theme.ko.md` — **현행 팔레트는
   다크다**(구현·검증 완료). **메뉴·배치를 캡컷과 끝까지 동일화**(5단계 계획
   완료로 범위 확정).
@@ -86,14 +82,12 @@
   2026-08-28의 지름길 둘을 거둔다 — 셋이 전부 편집기로 가고 있었다.
 - `2026-09-04-capcut-shell-with-my-assets.ko.md` — **제품 방향: 캡컷 껍데기 + 내
   자산.** 화면을 만들 때 "이게 내 자산을 다시 쓰기 쉽게 하는가"를 먼저 묻는다.
-  `속도`는 캡컷과 동일하게(엔진은 이미 같고 남은 건 화면), 사이드바에 `내 자산`
-  구역. 결제·다중사용자는 여전히 범위 밖이다(이 문서는 §6 승인이 아니다).
+  결제·다중사용자는 여전히 범위 밖이다.
 - `2026-08-28-home-screen-reversal.ko.md` — **`/`는 이제 항상 `/projects`다**
   (2026-08-19 결정을 뒤집음). 시작 지름길 둘은 **2026-09-05에 거뒀다**(위 문서).
-- 역사 기록(지금 판단 근거로 쓰지 마라): ~~`2026-08-27-editor-centered-shell`~~,
-  ~~`2026-08-21-capcut-shell-layout`~~, ~~`2026-08-21-editor-back-to-light`~~,
-  ~~`2026-08-05-dashboard-white-orange`~~ — 전부 `2026-08-29`·`2026-08-30`이 대체.
-- `2026-07-20-editor-workbench-visual-approval.ko.md` — 편집 작업판 5개 viewport
+- 역사 기록(판단 근거로 쓰지 마라): `2026-08-27-editor-centered-shell`,
+  `2026-08-21-*`, `2026-08-05-dashboard-white-orange` — `08-29`·`08-30`이 대체.
+- `2026-07-20-editor-workbench-visual-approval.ko.md` — 작업판 5개 viewport
 
 ## 2.1 제품 범위 경계
 
