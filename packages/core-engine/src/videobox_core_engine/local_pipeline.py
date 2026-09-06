@@ -203,6 +203,7 @@ from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder,
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_core_engine.transcript_alignment import HeuristicTranscriptAligner, TranscriptAligner
+from videobox_core_engine.broll_scene_candidates import list_scene_candidate_assets
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -1236,7 +1237,8 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 segment_analysis_job_id=segment_analysis_job_id,
             )
-            assets = self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
+            # 사진도 장면이 될 수 있다 -- 자리를 하나로 모았다(2026-09-06).
+            assets = list_scene_candidate_assets(store=self.store, project_id=project_id)
         except Exception as exc:
             self.store.update_job(
                 project_id=project_id,

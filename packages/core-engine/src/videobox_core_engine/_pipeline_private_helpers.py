@@ -72,6 +72,7 @@ from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder,
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_core_engine.transcript_alignment import HeuristicTranscriptAligner, TranscriptAligner
+from videobox_core_engine.broll_scene_candidates import list_scene_candidate_assets
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -941,7 +942,7 @@ class _PipelinePrivateHelpersMixin:
                 project_id=project_id,
                 recommendation_type=RecommendationType.BROLL,
                 segments=segments_to_regenerate,
-                assets=self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO),
+                assets=list_scene_candidate_assets(store=self.store, project_id=project_id),
             )
         )
         for candidate in candidates:
