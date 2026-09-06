@@ -389,6 +389,38 @@ class LibraryUserAssetStore:
                 (library_asset_id,),
             ).fetchall()
             managed_paths = [str(row["managed_relative_path"]), *[str(item["managed_relative_path"]) for item in derivative_rows]]
+            # **버린 자산은 그 파생물도 같이 버린다.** 촬영본 등록·잘라 둔 구간·
+            # 제안이 `ON DELETE RESTRICT`로 걸려 있어서, 휴지통에 넣은 자산도
+            # 영영 못 지웠다 -- 실측 2026-09-06에 껍데기 12개 중 6개가 여기서
+            # 막혔고, API는 그것을 **500으로** 냈다.
+            #
+            # **버리지 않은 자산은 그대로 막힌다.** 그 막음은 잘라 둔 구간이
+            # 허공을 가리키는 것을 막으려고 있다 -- 없애는 게 아니라 "이미 버린
+            # 것"으로 좁히는 것이다.
+            if str(row["lifecycle"]) == LibraryAssetLifecycle.TRASHED.value:
+                try:
+                    source_ids = [
+                        str(item["source_id"])
+                        for item in connection.execute(
+                            "SELECT source_id FROM library_footage_sources WHERE library_asset_id = ?",
+                            (library_asset_id,),
+                        ).fetchall()
+                    ]
+                except sqlite3.OperationalError:
+                    # 촬영본 표가 아예 없는 자료실도 있다 -- 그러면 파생물도 없다.
+                    source_ids = []
+                for source_id in source_ids:
+                    for table in ("footage_proposal_segments", "footage_proposals", "library_source_segments"):
+                        try:
+                            connection.execute(f"DELETE FROM {table} WHERE source_id = ?", (source_id,))
+                        except sqlite3.OperationalError:
+                            # 그 표가 없는 옛 자료실도 있다 -- 없으면 지울 것도 없다.
+                            pass
+                    connection.execute("DELETE FROM library_footage_sources WHERE source_id = ?", (source_id,))
+                try:
+                    connection.execute("DELETE FROM footage_index WHERE library_asset_id = ?", (library_asset_id,))
+                except sqlite3.OperationalError:
+                    pass
             connection.execute("DELETE FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,))
             connection.commit()
         except Exception:

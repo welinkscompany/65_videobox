@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import mimetypes
 from pathlib import Path
 import subprocess
@@ -471,6 +472,14 @@ def build_library_assets_router(
             user_asset_store.permanently_delete_asset(asset_id)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": user_asset_store.usage(asset_id)}) from exc
+        except sqlite3.IntegrityError as exc:
+            # **막는 것을 500으로 내지 않는다.** 잘라 둔 구간이 딸린 자산은 못
+            # 지우는 것이 맞지만, 창작자에게 "서버 오류"만 보이면 왜 안 되는지
+            # 알 수 없다(2026-09-06 실측: 휴지통 비우기가 절반 500이었다).
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "asset_has_derived_footage", "library_asset_id": asset_id},
+            ) from exc
         # The row is gone only after the guard/transaction succeeds.  Cleanup
         # is then best-effort and limited to the managed root; a stale file is
         # harmless to the authority, while a path outside this root is never
