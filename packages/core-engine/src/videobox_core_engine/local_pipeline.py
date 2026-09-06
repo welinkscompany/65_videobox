@@ -268,8 +268,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         tts_provider: Any | None = None,
         transcript_aligner: TranscriptAligner | None = None,
         auto_approve_segment_review: bool = False,
+        library_store: Any | None = None,
     ) -> None:
         self.store = store
+        # 자료실 색인이 적어 둔 설명을 장면 후보에 실어 주는 데만 쓴다
+        # (`broll_scene_candidates`). 없으면 후보는 그대로 나오고 설명만 빠진다.
+        self.library_store = library_store
         # Owner decision (2026-08-05, Task 21): defaults to False so existing
         # blocking-behavior tests are unaffected unless a caller opts in.
         self.auto_approve_segment_review = auto_approve_segment_review
@@ -1238,7 +1242,10 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 segment_analysis_job_id=segment_analysis_job_id,
             )
             # 사진도 장면이 될 수 있다 -- 자리를 하나로 모았다(2026-09-06).
-            assets = list_scene_candidate_assets(store=self.store, project_id=project_id)
+            assets = list_scene_candidate_assets(
+                store=self.store, project_id=project_id,
+                library_store=getattr(self, "library_store", None),
+            )
         except Exception as exc:
             self.store.update_job(
                 project_id=project_id,

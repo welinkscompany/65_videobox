@@ -942,7 +942,10 @@ class _PipelinePrivateHelpersMixin:
                 project_id=project_id,
                 recommendation_type=RecommendationType.BROLL,
                 segments=segments_to_regenerate,
-                assets=list_scene_candidate_assets(store=self.store, project_id=project_id),
+                assets=list_scene_candidate_assets(
+                    store=self.store, project_id=project_id,
+                    library_store=getattr(self, "library_store", None),
+                ),
             )
         )
         for candidate in candidates:

@@ -86,3 +86,53 @@ def test_generated_scene_clips_are_not_offered_twice(tmp_path: Path) -> None:
     assets = list_scene_candidate_assets(store=store, project_id=project.project_id)
 
     assert [str(item.get("asset_type")) for item in assets] == [AssetType.BROLL_VIDEO.value]
+
+
+def test_scene_candidates_carry_the_library_description(tmp_path: Path) -> None:
+    """자동편집이 사진을 **뜻으로** 고를 수 있어야 한다 — owner 요청 2026-09-06.
+
+    > "유진이가 알아서 자동편집할때도 적용되도록 해야되"
+
+    추천기(`KeywordBrollRecommender`)는 자산 `metadata`의 `title`·`tags`와 대본
+    낱말이 겹치는지만 본다. owner 사진에는 그 둘이 비어 있어(`20241208_121938.jpg`)
+    늘 겹침 0 -- 뜻과 상관없이 돌려쓰기로만 뽑혔다.
+
+    자료실 색인이 그 사진을 이미 한국어로 설명해 두었다("바다가 보이는 창가…").
+    그 글을 후보에 실어 주면 추천이 뜻으로 돈다. **새 색인을 만드는 게 아니라
+    이미 있는 것을 잇는 것이다.**
+    """
+    from videobox_core_engine.broll_scene_candidates import list_scene_candidate_assets
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("설명 잇기")
+    photo = tmp_path / "shot.jpg"
+    photo.write_bytes(bytes(64))
+    store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.IMAGE, source_path=photo,
+        metadata={"source_library_asset_id": "user_photo"},
+    )
+
+    class _Library:
+        def describe_assets(self, *, library_asset_ids):
+            assert list(library_asset_ids) == ["user_photo"]
+            return {"user_photo": "가로 사진. 바다가 보이는 창가, 노을, 바다."}
+
+    assets = list_scene_candidate_assets(
+        store=store, project_id=project.project_id, library_store=_Library()
+    )
+
+    metadata = dict(assets[0].get("metadata") or {})
+    joined = " ".join(str(tag) for tag in (metadata.get("tags") or []))
+    assert "바다" in joined or "바다" in str(metadata.get("title") or ""), metadata
+
+
+def test_candidates_still_work_without_a_library(tmp_path: Path) -> None:
+    """자료실을 못 읽어도 후보는 나온다 -- 설명이 없을 뿐이다."""
+    from videobox_core_engine.broll_scene_candidates import list_scene_candidate_assets
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project_id = _project_with(store, tmp_path)
+
+    assets = list_scene_candidate_assets(store=store, project_id=project_id, library_store=None)
+
+    assert len(assets) == 2

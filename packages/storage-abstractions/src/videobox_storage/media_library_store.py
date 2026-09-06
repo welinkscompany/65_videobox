@@ -608,6 +608,38 @@ class MediaLibraryStore:
         item["embedding"] = json.loads(str(raw)) if raw else None
         return item
 
+    def describe_assets(self, *, library_asset_ids: list[str]) -> dict[str, str]:
+        """자료실 자산 각각을 색인이 뭐라고 적어 두었는지.
+
+        자동편집 추천은 자산 이름과 태그로만 고른다. owner 사진 이름은
+        `20241208_121938.jpg`라 뜻이 없다 -- 색인이 이미 적어 둔 한국어 설명을
+        후보에 실어 주면 그 추천이 뜻으로 돈다(`broll_scene_candidates`).
+
+        구간이 여럿인 자산은 **가장 긴 설명 하나만** 준다. 여러 줄을 이어 붙이면
+        어떤 자산이든 낱말이 많아져 늘 이기기 때문이다.
+        """
+        wanted = [str(value) for value in library_asset_ids if str(value or "")]
+        if not wanted:
+            return {}
+        placeholders = ",".join("?" for _ in wanted)
+        connection = self._connection()
+        try:
+            rows = connection.execute(
+                f"""SELECT library_asset_id, description FROM footage_index
+                     WHERE library_asset_id IN ({placeholders})
+                       AND description IS NOT NULL AND description <> ''""",
+                tuple(wanted),
+            ).fetchall()
+        finally:
+            connection.close()
+        best: dict[str, str] = {}
+        for row in rows:
+            asset_id = str(row["library_asset_id"])
+            description = str(row["description"])
+            if len(description) > len(best.get(asset_id, "")):
+                best[asset_id] = description
+        return best
+
     def find_footage_matches(
         self, *, query_embedding: list[float], orientation: str | None = None,
         media_type: str | None = None, limit: int = 10,

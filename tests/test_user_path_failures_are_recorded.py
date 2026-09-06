@@ -788,3 +788,49 @@ def test_a_video_search_asks_the_footage_index_not_the_audio_one() -> None:
     asked.clear()
     search("잔잔한 음악", 8, "music")
     assert asked == ["audio"]
+
+
+def test_a_photo_search_asks_the_footage_index_too() -> None:
+    """유진의 사진 후보가 이름 목록으로 떨어졌다 (2026-09-06).
+
+    owner 요청: "사진 의미검색도 ... 유진이가 알아서 자동편집할때도 적용되도록".
+
+    사진 색인이 생긴 뒤에도 이 갈고리는 `find_audio_matches`에 물었다 -- 사진은
+    거기 없으니 늘 빈손이고, 유진은 이름 목록(`20241208_121938.jpg`)만 보고
+    "어떤 사진인지 알려주세요"라고 되묻는다.
+
+    사진도 촬영본 색인에 있으므로 그쪽으로 보낸다. **종류를 대서** 촬영본이
+    섞이지 않게 한다.
+    """
+    from videobox_api.main import _build_music_library_hooks
+
+    asked: list[tuple[str, str | None]] = []
+
+    class _Store:
+        def find_audio_matches(self, **kwargs):
+            asked.append(("audio", str(kwargs.get("media_type"))))
+            return []
+
+        def find_footage_matches(self, **kwargs):
+            asked.append(("footage", kwargs.get("media_type")))
+            return [{"library_asset_id": "user_photo", "description": "바다가 보이는 창가"}]
+
+    class _Provider:
+        def embed(self, _request):
+            return SimpleNamespace(vectors=[[0.1, 0.2]])
+
+    class _App:
+        class state:
+            media_analysis_embedding_provider = _Provider()
+            media_analysis_profile = {"embedding_model_name": "fixture-embed"}
+
+    search, _resolve = _build_music_library_hooks(
+        library_store=_Store(), project_store=object(), app=_App()
+    )
+
+    assert search("바다가 보이는 사진", 8, "image")
+    assert asked == [("footage", "image")], f"사진을 엉뚱한 색인에 물었다: {asked}"
+
+    asked.clear()
+    search("도시 거리", 8, "broll")
+    assert asked == [("footage", "broll")]

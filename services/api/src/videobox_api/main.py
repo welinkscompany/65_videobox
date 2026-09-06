@@ -301,8 +301,13 @@ def _build_music_library_hooks(
         # 음악·효과음 색인이라, 영상을 이 함수로 찾으면 늘 빈손이다 -- 유진에게
         # 영상 후보를 주기 시작한 첫날 이것 때문에 여전히 음악을 골랐다
         # (2026-09-05). 화면의 자료실 검색이 갈라 부르는 것과 같게 맞춘다.
-        if media_type == "broll":
-            return library_store.find_footage_matches(query_embedding=vector, limit=limit)
+        # **사진도 촬영본 색인에 있다**(2026-09-06). 둘 다 화면 자산이라 한 색인이
+        # 맡는다. 종류를 대서 사진을 물었을 때 촬영본이 섞이지 않게 한다 --
+        # 안 대면 사진 후보 자리에 영상이 온다.
+        if media_type in {"broll", "image"}:
+            return library_store.find_footage_matches(
+                query_embedding=vector, media_type=media_type, limit=limit
+            )
         return library_store.find_audio_matches(
             query_embedding=vector,
             media_type=media_type,
@@ -977,6 +982,7 @@ def create_app(
     )
     pipeline = LocalPipelineRunner(
         store,
+        library_store=resolved_media_library_store,
         segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
         broll_recommender=LocalOnlyKeywordBrollRecommender(runtime_service=runtime_service),
         music_recommender=LocalOnlyMusicRecommender(
