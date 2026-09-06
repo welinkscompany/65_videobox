@@ -283,6 +283,14 @@ class MediaLibraryStore:
                     ORDER BY a.library_asset_id""",
                 (int(description_version),),
             ).fetchall()
+            # **사진도 이 색인이 맡는다**(owner 요청 2026-09-06: "사진 의미검색도
+            # 만들어줘"). 사진도 화면 자산이고, `footage_index`가 이미 사진을
+            # 받을 수 있다 -- `start_sec`/`end_sec`는 NULL이고 `duration_seconds`는
+            # 0이다. 무엇보다 **유진의 `broll` 후보가 이미 이 색인을 본다**:
+            # 별도 테이블을 만들면 찾기·추천·명령 배선을 전부 다시 해야 한다.
+            #
+            # 소리는 `library_audio_indexer`가 맡는다 -- 두 색인이 같은 자산을
+            # 두고 다투지 않게 여기서는 화면 자산만 본다.
             user_rows = connection.execute(
                 """SELECT u.library_asset_id, u.media_type, u.content_sha256,
                           u.managed_relative_path, u.user_json,
@@ -490,7 +498,8 @@ class MediaLibraryStore:
             user_rows = connection.execute(
                 """SELECT library_asset_id, content_sha256, managed_relative_path, user_json
                    FROM library_user_assets
-                   WHERE origin = 'user' AND lifecycle = 'ready' AND media_type = 'broll'"""
+                   WHERE origin = 'user' AND lifecycle = 'ready'
+                     AND media_type IN ('broll', 'image')"""
             ).fetchall()
         finally:
             connection.close()

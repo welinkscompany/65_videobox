@@ -2483,6 +2483,27 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
                 json.dumps(segments, ensure_ascii=True),
             ),
         )
+        # **대본을 고치고 다시 분석할 수 있어야 한다**(실측 2026-09-06).
+        # 장면 id는 매번 `seg_001`부터 다시 세는데 저장이 순수 INSERT라
+        # 두 번째 분석이 `segments_pkey` 충돌로 500을 냈다. 막으려던 것이
+        # 아니었다 -- 파일 산출물 쪽은 오히려 재실행을 전제한다
+        # (`segment_analysis_002.json`처럼 실행마다 새 파일을 만든다).
+        #
+        # **이번 분석에 없는 옛 장면은 지운다.** 장면이 다섯에서 셋으로 줄면
+        # `seg_004`·`seg_005`가 남아 다음 타임라인에 옛 대사가 섞인다.
+        # **먼저 지우고 다시 넣는다.** `ON CONFLICT`를 쓰지 않는 이유는 두 엔진의
+        # 기본키가 다르기 때문이다 -- SQLite는 `segment_id` 하나, Postgres는
+        # `(project_id, segment_id)`라 충돌 대상 문법이 갈린다. 지우고 넣으면
+        # 두 곳에서 똑같이 돌고, "재분석은 장면 집합을 갈아 끼운다"는 뜻도 코드에
+        # 그대로 드러난다.
+        for stale in self.list_segments(project_id=project_id):
+            stale_id = str(stale.get("segment_id") or "")
+            if stale_id:
+                self._execute(
+                    project_id,
+                    "DELETE FROM segments WHERE project_id = ? AND segment_id = ?",
+                    (project_id, stale_id),
+                )
         for index, segment in enumerate(segments, start=1):
             segment_metadata = {
                 "transcript_id": transcript_id,
