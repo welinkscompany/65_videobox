@@ -112,23 +112,77 @@ def test_a_preset_chosen_in_the_session_survives_all_the_way_to_the_plan() -> No
         vertical="top", horizontal="right", size="small", motion="fade_in",
     )
 
-    materialized = materialize_editing_session_timeline(timeline={"tracks": []}, editing_session=updated)
-    overlays = [
-        item for item in materialized["export_overlays"]
-        if str(item.get("asset_id") or "") == "asset_photo"
+    # **`project_id`를 반드시 넣는다.** 안 넣으면 자산 주소가 안 만들어져
+    # 오버레이가 다른 갈래(글줄용)로 새고, 제품이 실제로 지나는 길을 안 밟는다 --
+    # 이 시험이 처음에 그래서 초록이었다(2026-09-06 실측으로 잡음).
+    materialized = materialize_editing_session_timeline(
+        timeline={"tracks": []}, editing_session=updated, project_id="project_001"
+    )
+    overlay_clips = [
+        clip
+        for track in materialized["tracks"] if track.get("track_type") == "overlay"
+        for clip in (track.get("clips") or [])
+        if str(clip.get("asset_id") or "") == "asset_photo"
     ]
 
-    assert overlays, f"사진 오버레이가 계획에 없다: {materialized['export_overlays']}"
-    overlay = overlays[0]
+    assert overlay_clips, f"사진 오버레이가 계획에 없다: {materialized['tracks']}"
+    overlay = dict(overlay_clips[0].get("overlay_payload") or {})
     assert overlay["vertical"] == "top"
     assert overlay["horizontal"] == "right"
     assert overlay["size"] == "small"
     assert overlay["motion"] == "fade_in"
 
+    # 시각은 클립에, 프리셋은 payload에 있다.
     scale, x, y, fade = export_image_overlay_geometry(
         overlay, width=1920, height=1080,
-        start_sec=float(overlay["start_sec"]), end_sec=float(overlay["end_sec"]),
+        start_sec=float(overlay_clips[0]["start_sec"]), end_sec=float(overlay_clips[0]["end_sec"]),
     )
     assert x == "W-w-115" and y == "86", (x, y)
     assert scale.startswith("scale=672:378"), scale
     assert "alpha=1" in fade
+
+
+def test_the_overlay_track_honours_the_presets_too(tmp_path) -> None:
+    """**제품이 실제로 지나는 길은 오버레이 트랙이다** — 실측 2026-09-06.
+
+    세션에 얹은 사진은 자산 주소가 있으면 `export_overlays`가 아니라 **오버레이
+    트랙**으로 간다. 그 트랙을 그리는 자리는 프리셋을 안 보고 화면 크기로
+    가운데에 얹는다 -- 고른 자리·크기·움직임이 완성본에서 통째로 무시됐다.
+
+    이 저장소가 되풀이한 "렌더 경로가 둘"이다. 앞 시험이 `project_id`를 빼서
+    다른 갈래로 새는 바람에 초록이었다.
+    """
+    from videobox_core_engine.composition_plan import CompositionItem, CompositionPlan
+    from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+
+    item = CompositionItem(
+        clip_id="session-overlay-s1-0-0", track_type="overlay",
+        start_sec=1.0, end_sec=4.0, source_in_sec=0.0, source_out_sec=3.0,
+        asset_uri="local://projects/p1/assets/asset_photo", asset_id="asset_photo",
+        overlay_type="image_overlay",
+        overlay_payload={
+            "overlay_type": "image_overlay", "asset_id": "asset_photo",
+            "vertical": "top", "horizontal": "right", "size": "small", "motion": "fade_in",
+        },
+    )
+    plan = CompositionPlan(
+        width=1920, height=1080, fps_num=30, fps_den=1,
+        sample_aspect_ratio="1:1", rotation=0, items=(item,),
+    )
+
+    renderer = FfmpegFinalRenderer(store=None)
+    graph = renderer.build_plan_filter_graph(
+        composition_plan=plan, source_indices={"session-overlay-s1-0-0": 1},
+        track_overlay_indices={"session-overlay-s1-0-0": 1},
+    )
+
+    # 기대값은 렌더러가 쓰는 화면 크기에서 뽑는다 -- 숫자를 손으로 박으면
+    # 기본 해상도가 바뀔 때 멀쩡한 코드가 빨개진다.
+    expected_scale, expected_x, expected_y, expected_fade = export_image_overlay_geometry(
+        dict(item.overlay_payload), width=renderer.video_width, height=renderer.video_height,
+        start_sec=item.start_sec, end_sec=item.end_sec,
+    )
+    assert expected_scale in graph, graph
+    assert f"overlay=x={expected_x}:y={expected_y}" in graph, graph
+    assert "alpha=1" in expected_fade and "alpha=1" in graph, graph
+    assert "overlay=(W-w)/2:(H-h)/2" not in graph, "가운데 고정이 그대로 남아 있다"

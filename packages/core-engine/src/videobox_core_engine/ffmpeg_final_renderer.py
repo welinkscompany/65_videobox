@@ -1207,13 +1207,24 @@ class FfmpegFinalRenderer:
             index = track_overlay_indices[item.clip_id]
             label = f"track_overlay_{ordinal}"
             next_canvas = f"canvas_track_overlay_{ordinal}"
+            # **제품이 실제로 지나는 길이 여기다.** 세션에 얹은 사진은 자산 주소가
+            # 있으면 `export_overlays`가 아니라 이 트랙으로 온다. 여기가 프리셋을
+            # 안 보고 화면 크기로 가운데에 얹고 있어서, 고른 자리·크기·움직임이
+            # 완성본에서 통째로 무시됐다(2026-09-06 실측). 자리 계산은 다른 두
+            # 경로와 **같은 함수**를 쓴다.
+            scale, overlay_x, overlay_y, fade = export_image_overlay_geometry(
+                dict(item.overlay_payload or {}),
+                width=self.video_width, height=self.video_height,
+                start_sec=item.start_sec, end_sec=item.end_sec,
+            )
             filters.append(
                 f"[{index}:v]trim=start={item.source_in_sec}:end={item.source_out_sec},setpts=PTS-STARTPTS,"
-                f"scale={self.video_width}:{self.video_height}:force_original_aspect_ratio=decrease,"
+                f"{scale}{fade},"
                 f"setsar={sar},setpts=PTS+{item.start_sec}/TB[{label}]"
             )
             filters.append(
-                f"[{canvas}][{label}]overlay=(W-w)/2:(H-h)/2:eof_action=pass:repeatlast=0[{next_canvas}]"
+                f"[{canvas}][{label}]overlay=x={overlay_x}:y={overlay_y}:"
+                f"eof_action=pass:repeatlast=0[{next_canvas}]"
             )
             canvas = next_canvas
         for overlay_index, overlay in enumerate(composition_plan.export_overlays):
