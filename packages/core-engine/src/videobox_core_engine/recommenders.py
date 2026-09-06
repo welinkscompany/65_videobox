@@ -20,6 +20,36 @@ def _tokenize(text: str) -> set[str]:
     return {token.strip(".,!?").lower() for token in text.split() if token.strip(".,!?")}
 
 
+def _is_hangul(token: str) -> bool:
+    return any("가" <= character <= "힣" for character in token)
+
+
+def _matching_words(segment_tokens: set[str], asset_tokens: set[str]) -> list[str]:
+    """대본 낱말과 자산 낱말 중 **뜻이 같은 것**을 고른다.
+
+    똑같은 낱말만 세면 한국어가 거의 안 맞는다 -- 대본은 `바다가`인데 자료실
+    설명은 `바다`다. 조사가 붙었을 뿐 같은 말이다. 그래서 한글 낱말은 **한쪽이
+    다른 쪽으로 시작하면** 맞은 것으로 센다.
+
+    영어는 예전 그대로 정확히 맞을 때만 센다 -- `in`이 `internal`을 맞히면
+    아무 대본이나 아무 자산에 붙는다. 한글은 조사가 뒤에 붙는 구조라 앞쪽이
+    같으면 같은 말일 확률이 훨씬 높다.
+
+    돌려주는 것은 **짧은 쪽**이다. 창작자에게 보여 줄 이유는 `바다가`보다
+    `바다`가 낫다.
+    """
+    matched: set[str] = set(segment_tokens & asset_tokens)
+    for segment_token in segment_tokens:
+        if not _is_hangul(segment_token) or len(segment_token) < 2:
+            continue
+        for asset_token in asset_tokens:
+            if len(asset_token) < 2 or not _is_hangul(asset_token):
+                continue
+            if segment_token.startswith(asset_token) or asset_token.startswith(segment_token):
+                matched.add(min(segment_token, asset_token, key=len))
+    return sorted(matched)
+
+
 def _normalize_boolish(value: object) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"", "0", "false", "no", "off"}
@@ -60,11 +90,18 @@ class KeywordBrollRecommender(RecommendationProvider):
             best_overlap: list[str] = []
             for asset in request.assets:
                 metadata = asset.get("metadata", {}) or {}
-                asset_tokens = (
-                    _tokenize(str(metadata.get("title", "")))
-                    | {str(tag).lower() for tag in metadata.get("tags", [])}
+                # **태그도 낱말로 쪼갠다.** 예전에는 통째로 집합에 넣어서, 자료실
+                # 설명 한 문장을 태그로 실었더니 낱말이 하나도 안 맞았다 --
+                # 사진이 뜻이 아니라 돌려쓰기 차례로만 뽑히던 이유다(2026-09-06
+                # 코드리뷰). 여러 낱말이 든 태그는 이 쪼개기 전에도 이미 안 맞고
+                # 있었다.
+                asset_tokens = _tokenize(
+                    " ".join(
+                        [str(metadata.get("title", ""))]
+                        + [str(tag) for tag in metadata.get("tags", [])]
+                    )
                 )
-                overlap = sorted(segment_tokens & asset_tokens)
+                overlap = _matching_words(segment_tokens, asset_tokens)
                 # **낱말이 하나도 안 맞는 자산은 후보로 세지 않는다.** 예전에는
                 # 그런 자산에도 0.18을 줬는데, 초기값 0.15보다 커서 **첫 자산이
                 # 곧바로 이기고** 그 뒤로는 `0.18 > 0.18`이 거짓이라 자리가 영영
