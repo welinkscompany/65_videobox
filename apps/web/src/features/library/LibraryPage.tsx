@@ -14,7 +14,7 @@ function fileType(file: File): LibraryMediaType | null {
   if (file.type.startsWith("audio/") || /\.(mp3|wav|m4a|ogg|flac|aac)$/.test(name)) return name.includes("sfx") || name.includes("effect") ? "sfx" : "music";
   // `.webp`는 영상 `.webm`과 한 글자 차이다. 위의 영상 판정이 먼저 지나가므로
   // 여기서 잡아도 안전하다.
-  if (file.type.startsWith("image/") || /\.(png|jpg|jpeg|webp)$/.test(name)) return "image";
+  if (file.type.startsWith("image/") || /\.(png|jpg|jpeg|webp|bmp)$/.test(name)) return "image";
   return null;
 }
 

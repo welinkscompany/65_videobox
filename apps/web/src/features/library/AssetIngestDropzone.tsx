@@ -3,7 +3,10 @@ import { useRef } from "react";
 export function AssetIngestDropzone({ onFiles }: { onFiles: (files: File[]) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const accept = ".mp4,.mov,.m4v,.webm,.mp3,.wav,.m4a,.ogg,.flac,.png,.jpg,.jpeg,.webp";
+    // 렌더러가 그릴 수 있는 사진은 전부 받는다 -- 안 받으면 owner는 그 파일을
+  // **넣을 수조차 없다**. 네 목록이 어긋나는 것은
+  // `tests/test_photo_suffixes_are_one_list.py`가 잡는다.
+  const accept = ".mp4,.mov,.m4v,.webm,.mp3,.wav,.m4a,.ogg,.flac,.png,.jpg,.jpeg,.webp,.bmp";
   const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     onFiles(Array.from(event.target.files ?? []));
     event.currentTarget.value = "";
