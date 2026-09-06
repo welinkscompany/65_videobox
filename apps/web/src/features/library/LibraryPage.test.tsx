@@ -35,10 +35,11 @@ beforeEach(() => {
 });
 
 /** 분류를 고르는 자리는 왼쪽 목록 하나다(2026-08-23). 목록 단추는 이름 옆에
- *  개수를 함께 그리므로 이름 앞부분으로 찾는다. */
+ *  개수를 함께 그리므로 이름 뒤에 개수만 오는 것으로 찾는다 -- 앞부분만 보면
+ *  `음악`이 `음악·효과음`까지 함께 집어 둘 다 찾는다. */
 function chooseCategory(label: string): HTMLElement {
   const sidebar = screen.getByTestId("library-sidebar");
-  const button = within(sidebar).getByRole("button", { name: new RegExp(`^${label}`) });
+  const button = within(sidebar).getByRole("button", { name: new RegExp(`^${label}(\\s|$)`) });
   fireEvent.click(button);
   return button;
 }
@@ -67,8 +68,10 @@ describe("LibraryPage", () => {
     await screen.findAllByText("walk.mp4");
 
     const sidebar = screen.getByTestId("library-sidebar");
-    for (const label of ["전체", "영상", "음악", "효과음", "그림", "즐겨찾기", "휴지통"]) {
-      expect(within(sidebar).getByRole("button", { name: new RegExp(`^${label}`) })).toBeInTheDocument();
+    // `음악·효과음`은 `내 자산` 구역이 여는 넓은 자리다(2026-09-04 §2) --
+    // `전체`처럼 아래 두 줄을 함께 담는다. 목록은 여전히 여기 하나다.
+    for (const label of ["전체", "영상", "음악·효과음", "음악", "효과음", "그림", "즐겨찾기", "휴지통"]) {
+      expect(within(sidebar).getByRole("button", { name: new RegExp(`^${label}(\\s|$)`) })).toBeInTheDocument();
     }
     // 고르는 자리는 이 목록 하나뿐이다.
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
@@ -426,5 +429,64 @@ describe("LibraryPage", () => {
 
     expect(await screen.findByTestId("library-preview-player")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
+  });
+});
+
+/** **`내 자산` 구역이 여는 자료실**(owner 승인 2026-09-04 §2, 착수 2026-09-07).
+ *
+ *  새 화면을 만들지 않고 이 화면을 종류를 정한 채로 연다. 승인된 구조의
+ *  `음악·효과음`은 한 자리라서 자료실에도 그 한 자리가 있어야 한다 -- 없으면
+ *  세로 메뉴에서 누른 뒤 여기서 아무것도 눌린 것처럼 보이지 않는다.
+ */
+describe("자료실의 `음악·효과음` 갈래", () => {
+  it("음악과 효과음을 한 자리에서 함께 보여 준다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [
+        asset({ library_asset_id: "m1", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "calm.mp3" } }),
+        asset({ library_asset_id: "s1", media_type: "sfx", mime_type: "audio/wav", user_metadata: { filename: "door.wav" } }),
+        asset({ library_asset_id: "b1", media_type: "broll", user_metadata: { filename: "walk.mp4" } }),
+      ],
+      total: 3,
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+
+    expect(chooseCategory("음악·효과음")).toHaveAttribute("aria-pressed", "true");
+    expect((await screen.findAllByText("calm.mp3")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("door.wav").length).toBeGreaterThan(0);
+    expect(screen.queryByText("walk.mp4")).toBeNull();
+  });
+
+  /** 좁혀서 여는 것이 검색을 나쁘게 만들면 안 된다. `음악`만 골랐을 때 돌던
+   *  의미검색이 `음악·효과음`에서 조용히 단어 매칭으로 떨어지면, owner는
+   *  추천이 갑자기 나빠진 이유를 알 수 없다. */
+  it("의미검색을 음악과 효과음 양쪽에 함께 묻는다", async () => {
+    const search = vi.spyOn(api, "searchLibraryAssets").mockImplementation(async (_query, mediaType) => ({
+      matches: [{ ...asset({ library_asset_id: `${mediaType}_1`, media_type: mediaType, user_metadata: { filename: `${mediaType}.mp3` } }), score: 0.9, reason: "묘사 일치", semantic_match: true }],
+      semantic: true,
+    }));
+    render(<LibraryPage />);
+    chooseCategory("음악·효과음");
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "잔잔한" } });
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith("잔잔한", "music", undefined));
+    expect(search).toHaveBeenCalledWith("잔잔한", "sfx", undefined);
+    expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("뜻으로 찾음");
+  });
+
+  it("세로 메뉴가 정해 준 갈래로 열린다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [
+        asset({ library_asset_id: "m1", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "calm.mp3" } }),
+        asset({ library_asset_id: "b1", media_type: "broll", user_metadata: { filename: "walk.mp4" } }),
+      ],
+      total: 2,
+    });
+    render(<LibraryPage initialFilter="audio" />);
+
+    expect((await screen.findAllByText("calm.mp3")).length).toBeGreaterThan(0);
+    const sidebar = screen.getByTestId("library-sidebar");
+    expect(within(sidebar).getByRole("button", { name: /^음악·효과음/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(sidebar).getByRole("button", { name: /^전체/ })).toHaveAttribute("aria-pressed", "false");
   });
 });

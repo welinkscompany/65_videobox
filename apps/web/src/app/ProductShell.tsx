@@ -16,7 +16,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from "../components/ui/c
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { localDeploymentCapabilities } from "./deploymentCapabilities";
-import { resolveProjectStage, type NavigationContext, type WorkspaceSection } from "./routeManifest";
+import { resolveProjectStage, type LibraryKind, type NavigationContext, type WorkspaceSection } from "./routeManifest";
 import { JobRecovery } from "../features/jobs/JobRecovery";
 import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { ConversationCleanup } from "../features/settings/ConversationCleanup";
@@ -54,8 +54,12 @@ export type ProductShellProps = {
   onOpenSettings: () => void;
   navigation?: NavigationContext;
   onBack?: () => void;
-  /** 전역 화면으로 앱 안에서 이동한다. 없으면 링크가 페이지를 통째로 새로 연다. */
-  onNavigateGlobal?: (destination: "projects" | "library" | "footage") => void;
+  /** 전역 화면으로 앱 안에서 이동한다. 없으면 링크가 페이지를 통째로 새로 연다.
+   *  두 번째 인자는 세로 메뉴 `내 자산` 구역이 자료실을 **어떤 갈래로** 열지 말한다. */
+  onNavigateGlobal?: (destination: "projects" | "library" | "footage", kind?: LibraryKind) => void;
+  /** 자료실을 갈래로 열었으면 그 갈래. 세로 메뉴가 **한 자리만** 지금 자리로
+   *  표시하기 위해 필요하다 -- 주소가 알고 라우터가 넘겨 준다. */
+  assetKind?: LibraryKind | null;
   /** 마지막으로 편집하던 곳으로 돌아간다. 돌아갈 곳을 모르면 넘기지 않는다. */
   onResumeEditor?: () => void;
   children: ReactNode;
@@ -69,7 +73,7 @@ export function ProductShell(props: ProductShellProps) {
   return <ShellCanvasProvider><ProductShellFrame {...props} /></ShellCanvasProvider>;
 }
 
-function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSettings, onNavigateGlobal, onResumeEditor, navigation, onBack, children }: ProductShellProps) {
+function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSettings, onNavigateGlobal, onResumeEditor, navigation, onBack, assetKind = null, children }: ProductShellProps) {
   const canvas = useShellCanvas();
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [jobRecoveryBusy, setJobRecoveryBusy] = useState(false);
@@ -126,7 +130,7 @@ function ProductShellFrame({ projectId, projects, section, onNavigate, onOpenSet
       {/* **왼쪽 세로 메뉴**(owner 지시 2026-09-05). 편집기에서는 그리지 않는다 --
           그 자리를 편집 도구 띠가 이미 쓰고 있다(`SideNav` 주석 참고). */}
       <div className="vb-product-body">
-        {sideNavPlace ? <SideNav current={sideNavPlace} onNavigateGlobal={onNavigateGlobal} onOpenSettings={onOpenSettings} /> : null}
+        {sideNavPlace ? <SideNav current={sideNavPlace} assetKind={assetKind} onNavigateGlobal={onNavigateGlobal} onOpenSettings={onOpenSettings} /> : null}
         <main className="vb-product-main"><div className="vb-product-content">{children}</div></main>
       </div>
     </div>

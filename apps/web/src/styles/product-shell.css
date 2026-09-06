@@ -377,6 +377,35 @@ body:has(.vb-product-shell) { margin: 0; }
   font-weight: 600;
   box-shadow: inset 2px 0 0 var(--vb-accent);
 }
+/* **`내 자산` 구역**(owner 승인 2026-09-04 §2). 캡컷의 `AI로 만들기` 자리다.
+   위 세 줄과 한 칸 띄워 둔다 -- 붙여 두면 자료실의 갈래가 아니라 자료실과
+   나란한 다른 곳으로 읽힌다. */
+.vb-side-nav__group { display: flex; flex-direction: column; gap: var(--vb-space-1); margin-top: var(--vb-space-3); }
+.vb-side-nav__group-label {
+  margin: 0 0 var(--vb-space-1) var(--vb-space-2);
+  color: var(--vb-muted);
+  font-size: var(--vb-text-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* 아직 못 쓰는 자리. **흐리게만 두지 않는다** -- 흐린 것은 "지금 안 눌린다"는
+   뜻이지 "아직 없다"는 뜻이 아니라서, 글자로 함께 말한다. */
+.vb-side-nav__item--waiting { cursor: default; opacity: 0.65; }
+.vb-side-nav__item--waiting:hover { background: none; color: var(--vb-muted); }
+.vb-side-nav__waiting-badge {
+  margin-left: auto;
+  padding: 0 var(--vb-space-1);
+  border-radius: var(--vb-radius-sm);
+  background: var(--vb-panel-alt);
+  color: var(--vb-muted);
+  font-size: var(--vb-text-xs);
+}
+.vb-side-nav__note {
+  margin: 0 var(--vb-space-2);
+  color: var(--vb-muted);
+  font-size: var(--vb-text-sm);
+  line-height: 1.4;
+}
 /* 설정은 아래로 민다 -- 자주 가는 곳이 위, 어쩌다 가는 곳이 아래(캡컷과 같다). */
 .vb-side-nav__item--settings { margin-top: auto; }
 /* 좁은 화면에서는 아이콘만 남긴다. 접어서 없애지 않는 이유: 없애면 자료실과
@@ -385,4 +414,9 @@ body:has(.vb-product-shell) { margin: 0; }
   .vb-side-nav { width: auto; }
   .vb-side-nav__item { justify-content: center; padding: 0 var(--vb-space-2); }
   .vb-side-nav__item > span { display: none; }
+  /* 아이콘만 남는 폭에서는 구역 이름표와 안내 문구도 함께 접는다 -- 글자만
+     남기면 아이콘 줄보다 넓어져 띠가 다시 벌어진다. */
+  .vb-side-nav__group-label,
+  .vb-side-nav__note,
+  .vb-side-nav__waiting-badge { display: none; }
 }

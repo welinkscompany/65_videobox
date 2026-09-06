@@ -1,7 +1,7 @@
 import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { ChevronLeft, ClipboardCheck, Menu, Scissors, Settings as SettingsIcon, Video } from "lucide-react";
 
-import { type NavigationContext } from "../../app/routeManifest";
+import { type LibraryKind, type NavigationContext } from "../../app/routeManifest";
 import { Button } from "../../components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../components/ui/tooltip";
 import { shellCanvasLabel, type ShellCanvas } from "./shellCanvas";
@@ -86,7 +86,10 @@ export function TopBar({
   onSelectProject: (projectId: string) => void;
   onOpenSettings: () => void;
   /** 전역 화면으로 앱 안에서 이동한다. 없으면 주소 링크가 그대로 동작한다. */
-  onNavigateGlobal?: (destination: "projects" | "library" | "footage") => void;
+  // 두 번째 인자(`자료실` 갈래)는 세로 메뉴의 `내 자산` 구역만 쓴다. 여기서는
+  // 넘기지 않는다 -- 전체 메뉴는 접힌 상태에서 **갈 곳**만 말하고, 갈래는
+  // 자료실에 들어가서 고른다.
+  onNavigateGlobal?: (destination: "projects" | "library" | "footage", kind?: LibraryKind) => void;
   /** 왼쪽 세로 띠가 같은 자리를 이미 보여 주는 화면에서는 접는다 --
    *  같은 기능이 화면에 둘 있으면 낭독기가 두 번 읽고, 눌러 보고 다른 것인 줄 안다. */
   hideGlobalMenu?: boolean;

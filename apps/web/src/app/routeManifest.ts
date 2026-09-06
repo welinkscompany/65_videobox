@@ -36,6 +36,32 @@ export function resolveGlobalLocation(destination: GlobalDestination) {
 }
 
 /**
+ * `내 자산` 구역이 여는 자료실 갈래다(owner 승인 2026-09-04 §2).
+ *
+ * **새 화면을 만들지 않는다.** 자료실(`/library`)이 이미 종류로 거를 수 있고
+ * 의미검색·휴지통·사용처 검사가 전부 거기 붙어 있다. 그래서 이 값은 새 주소가
+ * 아니라 자료실을 **어떤 갈래로 열지**만 말한다.
+ *
+ * `audio`는 `음악`과 `효과음`을 함께 여는 한 자리다 -- 승인된 구조가
+ * `음악·효과음` 한 줄이기 때문이다. 자료실 분류 목록에도 같은 한 줄이 있다.
+ *
+ * 주소는 사람이 북마크하는 계약이라 값은 ASCII로 적는다.
+ */
+export const libraryKinds = ["broll", "audio"] as const;
+
+export type LibraryKind = (typeof libraryKinds)[number];
+
+export function resolveLibraryKind(kind: LibraryKind) {
+  return `${resolveGlobalLocation("library")}?kind=${kind}`;
+}
+
+/** 주소에 적힌 갈래를 읽는다. 모르는 값이면 갈래 없이 자료실 전체다 --
+ *  오래된 북마크나 손으로 고친 주소로 화면이 비지 않게 한다. */
+export function parseLibraryKind(value: unknown): LibraryKind | null {
+  return libraryKinds.includes(value as LibraryKind) ? (value as LibraryKind) : null;
+}
+
+/**
  * 단계마다 **실제로 내보내는 주소**다. 주소는 사람이 북마크하고 되돌아오는
  * 계약이라 이번 정리에서 바꾸지 않았다 -- 바꾸는 것은 코드가 쓰는 말이지
  * 주소가 아니다. 새 이름(`/plan`·`/assets`·`/edit`·`/output`)은 계속 **들어오는**

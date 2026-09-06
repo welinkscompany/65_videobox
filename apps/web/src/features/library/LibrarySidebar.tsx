@@ -1,6 +1,6 @@
 import type { LibraryAssetLifecycle, LibraryMediaType } from "../../api";
 
-export type LibraryFilter = LibraryMediaType | "all" | "favorites" | "trash";
+export type LibraryFilter = LibraryMediaType | "all" | "audio" | "favorites" | "trash";
 
 // **분류 목록은 여기 하나뿐이다**(owner 결정 2026-08-23).
 //
@@ -13,9 +13,18 @@ export type LibraryFilter = LibraryMediaType | "all" | "favorites" | "trash";
 // 2026-08-23에 한 번 반대로 정리했다가 되돌렸다 -- 그때는 여기서 종류 넷을
 // 빼고 결과 영역 탭을 남겼는데, 그건 캡컷과 반대 방향이었고 `전체`가 두 군데
 // 남아 둘 다 "선택됨"으로 보이는 상태가 됐다.
+//
+// `음악·효과음`은 **넓은 자리**다. `전체`처럼 아래 두 줄을 함께 담는다 --
+// 2026-08-23에 문제가 됐던 것은 넓은 자리가 아니라 **같은 것을 두 목록에서**
+// 물어 둘 다 선택돼 보인 것이었다. 목록은 여전히 여기 하나다.
+//
+// 이 줄이 필요한 이유: 세로 메뉴 `내 자산` 구역이 승인된 구조대로
+// `음악·효과음` 한 자리다(owner 승인 2026-09-04 §2). 그 자리를 눌러 왔는데
+// 여기에 대응하는 줄이 없으면 아무것도 안 눌린 것처럼 보인다.
 const filters: Array<{ key: LibraryFilter; label: string }> = [
   { key: "all", label: "전체" },
   { key: "broll", label: "영상" },
+  { key: "audio", label: "음악·효과음" },
   { key: "music", label: "음악" },
   { key: "sfx", label: "효과음" },
   { key: "image", label: "그림" },

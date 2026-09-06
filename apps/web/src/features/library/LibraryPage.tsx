@@ -23,16 +23,21 @@ function fileDisplayName(file: File): string {
   return relativePath || file.name;
 }
 
+/** `음악·효과음`은 소리 자산 둘을 함께 담는 한 자리다 -- 세로 메뉴
+ *  `내 자산` 구역의 승인된 구조가 한 줄이기 때문이다(owner 승인 2026-09-04 §2). */
+const AUDIO_KINDS: readonly LibraryMediaType[] = ["music", "sfx"];
+
 function matchesFilter(asset: LibraryAsset, filter: LibraryFilter) {
   if (filter === "all") return asset.lifecycle !== "trashed";
   if (filter === "trash") return asset.lifecycle === "trashed";
   if (filter === "favorites") return Boolean(asset.user_metadata?.favorite);
+  if (filter === "audio") return AUDIO_KINDS.includes(asset.media_type) && asset.lifecycle !== "trashed";
   return asset.media_type === filter && asset.lifecycle !== "trashed";
 }
 
-export function LibraryPage() {
+export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter } = {}) {
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
-  const [activeFilter, setActiveFilter] = useState<LibraryFilter>("all");
+  const [activeFilter, setActiveFilter] = useState<LibraryFilter>(initialFilter ?? "all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<LibraryAsset | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,11 +62,24 @@ export function LibraryPage() {
       // 그림도 이 길로 보낸다. 그림에는 의미 색인이 없어 서버가 `semantic:
       // false`를 돌려주고, 배지가 `단어로만 찾음`으로 정직하게 뜬다. 목록
       // 검색으로 돌리면 어느 방식으로 찾았는지 아예 말하지 못한다.
-      const semanticEligible = Boolean(search.trim()) && (activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image");
+      //
+      // `음악·효과음`은 종류 둘을 함께 여는 자리라 **양쪽에 함께 묻는다.**
+      // 좁혀서 여는 문이 검색을 나쁘게 만들면 안 된다 -- `음악`만 골랐을 때
+      // 돌던 의미검색이 여기서 조용히 단어 매칭으로 떨어지면, 추천이 갑자기
+      // 나빠진 이유를 알 수 없다. 서버는 종류를 하나만 받는다(`media_type`은
+      // 필수) -- 그래서 한 번이 아니라 두 번 묻는다.
+      const searchKinds: LibraryMediaType[] = activeFilter === "audio" ? [...AUDIO_KINDS]
+        : activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image" ? [activeFilter]
+        : [];
+      const semanticEligible = Boolean(search.trim()) && searchKinds.length > 0;
       let nextAssets: LibraryAsset[];
       if (semanticEligible) {
-        const result = await api.searchLibraryAssets(search.trim(), activeFilter as LibraryMediaType, undefined);
+        const responses = await Promise.all(searchKinds.map((kind) => api.searchLibraryAssets(search.trim(), kind, undefined)));
         if (currentEpoch !== epoch.current) return;
+        const result = {
+          matches: responses.flatMap((response) => response.matches).sort((left, right) => Number(right.score ?? 0) - Number(left.score ?? 0)),
+          semantic: responses.some((response) => response.semantic),
+        };
         // 촬영본 색인 조각(자산 아닌 행, id 없음)과 중복 행은 이 화면이 다룰 수
         // 없다 -- 남겨 두면 목록·미리보기·React key가 전부 흔들린다.
         const seenIds = new Set<string>();
@@ -91,11 +109,16 @@ export function LibraryPage() {
     } finally { if (currentEpoch === epoch.current) setLoading(false); }
   }, [activeFilter, search]);
   useEffect(() => { const timer = window.setTimeout(() => void load(), search ? 180 : 0); return () => window.clearTimeout(timer); }, [load, search]);
+  // 이미 자료실에 있는 채로 세로 메뉴에서 다른 갈래를 누르면 주소만 바뀐다.
+  // 그때도 목록이 따라와야 한다 -- 안 따라오면 눌렀는데 아무 일도 안 일어난다.
+  // 여기서 고른 분류는 주소를 고치지 않으므로, 이 효과가 그것을 되돌리지 않는다.
+  useEffect(() => { if (initialFilter) setActiveFilter(initialFilter); }, [initialFilter]);
 
   const visible = useMemo(() => assets.filter((asset) => matchesFilter(asset, activeFilter)), [assets, activeFilter]);
   const counts = useMemo(() => ({
     all: assets.filter((item) => item.lifecycle !== "trashed").length,
     broll: assets.filter((item) => item.media_type === "broll" && item.lifecycle !== "trashed").length,
+    audio: assets.filter((item) => AUDIO_KINDS.includes(item.media_type) && item.lifecycle !== "trashed").length,
     music: assets.filter((item) => item.media_type === "music" && item.lifecycle !== "trashed").length,
     sfx: assets.filter((item) => item.media_type === "sfx" && item.lifecycle !== "trashed").length,
     image: assets.filter((item) => item.media_type === "image" && item.lifecycle !== "trashed").length,

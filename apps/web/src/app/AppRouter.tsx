@@ -27,11 +27,14 @@ import { HomePage, ProductShell, SettingsPage, type ProductShellProps } from "./
 import { resolveLastValidProjectId } from "./projectSelection";
 import { readableMoment } from "./readableMoment";
 import {
+  parseLibraryKind,
   parseWorkspaceLocation,
   resolveNavigationContext,
   resolveGlobalLocation,
+  resolveLibraryKind,
   resolveProjectStage,
   resolveWorkspaceLocation,
+  type LibraryKind,
   type ProjectStage,
   type WorkspaceSection,
 } from "./routeManifest";
@@ -228,8 +231,10 @@ function RoutedProductShell(props: ProductShellProps) {
   };
   // 전역 메뉴는 맨 `<a href>`라 페이지를 통째로 새로 열었고, 그때 앱 이력이 날아가
   // `이전 화면` 단추가 사라졌다(owner 신고 2026-08-27, 실측 확인). 라우터로 옮긴다.
-  const onNavigateGlobal = (destination: "projects" | "library" | "footage") =>
-    void navigate({ href: resolveGlobalLocation(destination) });
+  // 세로 메뉴 `내 자산` 구역은 같은 자료실을 **갈래를 정한 채로** 연다
+  // (owner 승인 2026-09-04 §2). 새 주소가 아니라 `/library`에 갈래만 붙는다.
+  const onNavigateGlobal = (destination: "projects" | "library" | "footage", kind?: LibraryKind) =>
+    void navigate({ href: kind ? resolveLibraryKind(kind) : resolveGlobalLocation(destination) });
   // 편집기로 돌아가는 길(owner 결정 2026-08-27). 마지막으로 연 프로젝트를 이미
   // 기억하고 있으므로(`lastProjectKey`) 그걸 그대로 쓴다. **모르면 주지 않는다** --
   // 없는 길을 흉내 내면 눌렀을 때 빈 화면이 뜬다.
@@ -529,20 +534,28 @@ function ProjectsPage() {
  * 프로젝트에 매이지 않는 화면이므로 `projectId`는 비워 둔다 -- `ProductShell`이
  * `hasProject`로 그 경우를 이미 다룬다(프로젝트 단계 메뉴를 숨긴다).
  */
-function GlobalShell({ section, children }: { section: "library" | "footage"; children: ReactNode }) {
+function GlobalShell({ section, assetKind = null, children }: { section: "library" | "footage"; assetKind?: LibraryKind | null; children: ReactNode }) {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
   return <RoutedProductShell
     projectId=""
     projects={projects}
     section={section}
+    assetKind={assetKind}
     onNavigate={(nextProjectId, nextSection) => void navigate({ to: resolveWorkspaceLocation(nextProjectId, nextSection) })}
     onOpenSettings={() => void navigate({ to: "/settings/general" })}
   >{children}</RoutedProductShell>;
 }
 
+/** 자료실은 하나다. `내 자산` 구역이 그 화면을 **갈래를 정한 채로** 여는
+ *  것뿐이고(owner 승인 2026-09-04 §2), 갈래는 주소에 남아 북마크된다.
+ *  모르는 갈래는 갈래 없음으로 읽어 화면이 비지 않게 한다. */
 function LibraryPage() {
-  return <GlobalShell section="library"><PersonalLibraryPage /></GlobalShell>;
+  const routeSearch = useRouterState({ select: (routerState) => routerState.location.search }) as { kind?: unknown };
+  const kind = parseLibraryKind(routeSearch.kind);
+  return <GlobalShell section="library" assetKind={kind}>
+    <PersonalLibraryPage initialFilter={kind === "broll" ? "broll" : kind === "audio" ? "audio" : undefined} />
+  </GlobalShell>;
 }
 
 function FootagePage() {
