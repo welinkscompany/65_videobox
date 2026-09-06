@@ -117,3 +117,25 @@ def test_asking_for_everything_still_works(tmp_path: Path) -> None:
     both = store.find_footage_matches(query_embedding=vector, limit=10)
 
     assert {str(m["library_asset_id"]) for m in both} == {"user_clip", "user_photo"}
+
+
+def test_a_photo_is_described_as_a_photo_not_a_video() -> None:
+    """설명이 사진을 "영상"이라고 불렀다 (실기 2026-09-06).
+
+    > "가로 **영상**. 일본식 라멘과 볶음밥이 담긴 접시가 나…"
+
+    이 문장은 **화면에 그대로 보이고 검색에도 걸린다**(그 함수 머리말이 그렇게
+    적어 두었다). 창작자가 "사진 찾아줘"라고 물을 때 "영상"이라고 적힌 글에
+    걸리면 어느 쪽인지 알 수 없다.
+    """
+    from videobox_core_engine.library_footage_indexer import build_footage_description
+
+    photo = build_footage_description(
+        summary="바다가 보이는 창가", layers={}, width=2048, height=1152, duration_seconds=0.0,
+    )
+    clip = build_footage_description(
+        summary="바다가 보이는 창가", layers={}, width=2048, height=1152, duration_seconds=11.4,
+    )
+
+    assert photo.startswith("가로 사진."), photo
+    assert clip.startswith("가로 영상."), clip

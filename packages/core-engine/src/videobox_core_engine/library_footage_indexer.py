@@ -26,7 +26,7 @@ _logger = logging.getLogger(__name__)
 
 # 문장 형식을 바꾸면 올린다. 저장된 벡터는 그때의 문장을 가리키므로, 형식이
 # 바뀌면 전부 다시 색인해야 검색이 실제 문장과 맞는다.
-FOOTAGE_DESCRIPTION_VERSION = 2
+FOOTAGE_DESCRIPTION_VERSION = 3
 
 # 실제로 색인해 보니 요약과 태그가 전부 영어로 나왔다. owner는 우리말로 찾고,
 # 이 문장은 화면에 그대로 보일 수 있다. 같은 언어끼리 맞출 때 점수도 높다 --
@@ -61,16 +61,27 @@ class LibraryFootageIndexReport:
     remaining: int = 0
 
 
+#: 이보다 짧으면 사진으로 부른다. `media_probe`가 쓰는 것과 같은 경계다 --
+#: 사진을 ffprobe로 재면 길이가 0이 아니라 한 프레임 길이로 나온다.
+_STILL_MAX_SECONDS = 0.5
+
+
 def build_footage_description(
     *, summary: str, layers: dict[str, Any], width: int, height: int,
-    user_metadata: dict[str, Any] | None = None,
+    user_metadata: dict[str, Any] | None = None, duration_seconds: float = 0.0,
 ) -> str:
     """검색되는 문장을 만든다.
 
     화면에 그대로 보여도 되는 우리말이어야 한다. 방향은 모델이 짐작한 태그가
     아니라 실제 화면 크기에서 나온다 -- 숏폼을 만들 때는 예/아니오 문제다.
+
+    **사진은 사진이라고 부른다**(2026-09-06). 사진이 이 색인에 들어오면서
+    "가로 영상. 일본식 라멘과 볶음밥이…"처럼 적혔다. 이 문장은 화면에 그대로
+    보이고 검색에도 걸리므로, 창작자가 "사진 찾아줘"라고 물을 때 어느 쪽인지
+    알 수 없게 된다.
     """
     orientation = "가로" if int(width) >= int(height) else "세로"
+    kind = "사진" if float(duration_seconds) <= _STILL_MAX_SECONDS else "영상"
     words: list[str] = []
     for layer, _ in _DESCRIBED_LAYERS:
         values = layers.get(layer)
@@ -81,7 +92,7 @@ def build_footage_description(
         if word not in unique:
             unique.append(word)
     tail = f" {', '.join(unique)}." if unique else ""
-    text = f"{orientation} 영상. {summary.strip()}{tail}"
+    text = f"{orientation} {kind}. {summary.strip()}{tail}"
     metadata = user_metadata or {}
     tags = metadata.get("tags") if isinstance(metadata, dict) else None
     if isinstance(tags, list):
@@ -225,6 +236,7 @@ def index_pending_library_footage(
             width=int(probe.width),
             height=int(probe.height),
             user_metadata=dict(clip.get("user_metadata") or {}),
+            duration_seconds=float(probe.duration_sec or 0.0),
         )
         store.save_footage_descriptor(
             content_sha256=str(clip["content_sha256"]),
