@@ -22,14 +22,14 @@ import { HermesYujinStatus } from "../features/jobs/HermesYujinStatus";
 import { ConversationCleanup } from "../features/settings/ConversationCleanup";
 import { HomeYujinChat } from "../features/home/HomeYujinChat";
 import { StartChooser } from "../features/home/StartChooser";
-import { SideNav } from "../features/shell/SideNav";
+import { SideNav, type SideNavDestination } from "../features/shell/SideNav";
 import { TopBar } from "../features/shell/TopBar";
 import { ShellCanvasProvider, useShellCanvas } from "../features/shell/shellCanvas";
 
 // 프로젝트에 매이지 않는 전역 목적지도 껍데기 안에서 그린다(owner 지적
 // 2026-08-19). 띠가 **어느 화면인지** 말해야 하므로 이름을 따로 갖는다 --
 // `home`으로 뭉뚱그리면 라이브러리에서도 `홈`이라고 나온다.
-type ShellSection = WorkspaceSection | "media" | "outputs" | "library" | "footage";
+type ShellSection = WorkspaceSection | "media" | "outputs" | "library" | "footage" | "voices";
 type SettingsSection = "general" | "appearance" | "ai-privacy" | "voice" | "output" | "conversations";
 type SettingsState = { compact: boolean; reducedMotion: boolean };
 const settingsKey = "videobox.settings";
@@ -56,7 +56,9 @@ export type ProductShellProps = {
   onBack?: () => void;
   /** 전역 화면으로 앱 안에서 이동한다. 없으면 링크가 페이지를 통째로 새로 연다.
    *  두 번째 인자는 세로 메뉴 `내 자산` 구역이 자료실을 **어떤 갈래로** 열지 말한다. */
-  onNavigateGlobal?: (destination: "projects" | "library" | "footage", kind?: LibraryKind) => void;
+  // 갈 곳 목록을 손으로 두 벌 적지 않는다 -- `SideNav`가 가진 이름을 쓴다.
+  // 네 군데에 손으로 적혀 있었고, `내 목소리`를 더할 때 세 곳이 어긋났다.
+  onNavigateGlobal?: (destination: SideNavDestination, kind?: LibraryKind) => void;
   /** 자료실을 갈래로 열었으면 그 갈래. 세로 메뉴가 **한 자리만** 지금 자리로
    *  표시하기 위해 필요하다 -- 주소가 알고 라우터가 넘겨 준다. */
   assetKind?: LibraryKind | null;

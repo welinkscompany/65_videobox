@@ -1,4 +1,7 @@
-export const globalDestinations = ["projects", "library", "footage", "settings"] as const;
+//: `voices`는 `내 자산 > 내 목소리`다. 자료실 갈래가 아니라 **자기 주소**인
+//: 이유는 목소리가 자료실에 없기 때문이다 -- 프로젝트에 묶여 있고, 프로젝트를
+//: 넘나드는 목록은 `GET /api/voices`가 따로 준다(2026-09-07).
+export const globalDestinations = ["projects", "library", "footage", "voices", "settings"] as const;
 
 export type GlobalDestination = (typeof globalDestinations)[number];
 

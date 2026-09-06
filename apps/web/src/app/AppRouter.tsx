@@ -18,6 +18,7 @@ import { Input } from "../components/ui/input";
 import { CreationInterview } from "../features/creation/CreationInterview";
 import { DraftGapMedia } from "../features/media/DraftGapMedia";
 import { LibraryPage as PersonalLibraryPage } from "../features/library/LibraryPage";
+import { MyVoicesPage } from "../features/voices/MyVoicesPage";
 import { FootageOrganizerPage } from "../features/footage/FootageOrganizerPage";
 import { ProjectTitleDialog } from "../features/projects/ProjectTitleDialog";
 import { useProjectManagement } from "../features/projects/projectManagement";
@@ -143,6 +144,12 @@ const libraryRoute = createRoute({
   component: LibraryPage,
 });
 
+const voicesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/voices",
+  component: VoicesPage,
+});
+
 const footageRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/footage",
@@ -199,7 +206,7 @@ const settingsRoute = createRoute({
   component: SettingsRoutePage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, previewShareRoute, libraryRoute, footageRoute, workspaceRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, previewShareRoute, libraryRoute, voicesRoute, footageRoute, workspaceRoute, settingsRoute]);
 
 export function createAppRouter(
   catalog = new ProjectCatalog(),
@@ -233,7 +240,7 @@ function RoutedProductShell(props: ProductShellProps) {
   // `이전 화면` 단추가 사라졌다(owner 신고 2026-08-27, 실측 확인). 라우터로 옮긴다.
   // 세로 메뉴 `내 자산` 구역은 같은 자료실을 **갈래를 정한 채로** 연다
   // (owner 승인 2026-09-04 §2). 새 주소가 아니라 `/library`에 갈래만 붙는다.
-  const onNavigateGlobal = (destination: "projects" | "library" | "footage", kind?: LibraryKind) =>
+  const onNavigateGlobal = (destination: "projects" | "library" | "footage" | "voices", kind?: LibraryKind) =>
     void navigate({ href: kind ? resolveLibraryKind(kind) : resolveGlobalLocation(destination) });
   // 편집기로 돌아가는 길(owner 결정 2026-08-27). 마지막으로 연 프로젝트를 이미
   // 기억하고 있으므로(`lastProjectKey`) 그걸 그대로 쓴다. **모르면 주지 않는다** --
@@ -534,7 +541,7 @@ function ProjectsPage() {
  * 프로젝트에 매이지 않는 화면이므로 `projectId`는 비워 둔다 -- `ProductShell`이
  * `hasProject`로 그 경우를 이미 다룬다(프로젝트 단계 메뉴를 숨긴다).
  */
-function GlobalShell({ section, assetKind = null, children }: { section: "library" | "footage"; assetKind?: LibraryKind | null; children: ReactNode }) {
+function GlobalShell({ section, assetKind = null, children }: { section: "library" | "footage" | "voices"; assetKind?: LibraryKind | null; children: ReactNode }) {
   const projects = rootRoute.useLoaderData() as Project[];
   const navigate = useNavigate();
   return <RoutedProductShell
@@ -560,6 +567,11 @@ function LibraryPage() {
 
 function FootagePage() {
   return <GlobalShell section="footage"><FootageOrganizerPage /></GlobalShell>;
+}
+
+/** 목소리는 자료실에 없다 -- 프로젝트에 묶여 있어서 자기 화면이 필요하다. */
+function VoicesPage() {
+  return <GlobalShell section="voices"><MyVoicesPage /></GlobalShell>;
 }
 
 function GlobalDestinationPage({ testId, title, description, readiness }: { testId: string; title: string; description: string; readiness: string }) {

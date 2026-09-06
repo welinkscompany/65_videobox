@@ -37,7 +37,7 @@ describe("왼쪽 세로 메뉴의 `내 자산` 구역", () => {
 
     const group = within(sideNav()).getByRole("group", { name: "내 자산" });
     expect(within(group).getByRole("link", { name: /^내 영상/ })).toBeVisible();
-    expect(within(group).getByRole("button", { name: /^내 목소리/ })).toBeVisible();
+    expect(within(group).getByRole("link", { name: /^내 목소리/ })).toBeVisible();
     expect(within(group).getByRole("link", { name: /^음악·효과음/ })).toBeVisible();
   });
 
@@ -78,21 +78,20 @@ describe("왼쪽 세로 메뉴의 `내 자산` 구역", () => {
     expect(within(sideNav()).getByRole("link", { name: "자료실" })).not.toHaveAttribute("aria-current");
   });
 
-  /** **눌렀는데 아무 일도 안 일어난다**가 이 저장소가 어제 고친 결함이다.
-   *  목소리 보관함 뒷단은 아직 다른 사람이 만들고 있으므로, 자리는 두되
-   *  못 쓴다는 것을 창작자 말로 먼저 말한다. */
-  it("내 목소리는 아직 못 쓴다는 것을 눌러 보기 전에 말한다", () => {
+  /** 2026-09-07에 목소리 보관함이 생겨 `준비 중` 자리가 진짜 문이 됐다.
+   *  옛 시험은 `준비 중` 표시와 "아직 준비 중이에요" 안내를 지키고 있었다 --
+   *  그 자리를 이제 **목소리 화면으로 간다**로 바꾼다. 뜻은 같다: 눌렀는데
+   *  아무 일도 안 일어나면 안 된다. */
+  it("내 목소리를 누르면 목소리 보관함으로 간다", () => {
     const onNavigateGlobal = vi.fn();
     render(<ProductShell {...base} section="library" onNavigateGlobal={onNavigateGlobal}>내용</ProductShell>);
 
     const group = within(sideNav()).getByRole("group", { name: "내 자산" });
-    const voice = within(group).getByRole("button", { name: /^내 목소리/ });
-    expect(voice).toHaveAttribute("aria-disabled", "true");
-    expect(within(voice).getByText("준비 중")).toBeVisible();
+    const voice = within(group).getByRole("link", { name: /^내 목소리/ });
+    expect(voice).toHaveAttribute("href", "/voices");
 
     fireEvent.click(voice);
-    expect(onNavigateGlobal).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent("아직 준비 중이에요");
+    expect(onNavigateGlobal).toHaveBeenCalledWith("voices");
   });
 
   it("편집기에서는 내 자산 구역도 함께 접힌다", () => {

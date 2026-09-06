@@ -1,7 +1,7 @@
 import { useState, type MouseEvent } from "react";
 import { Clapperboard, FolderOpen, Library, Mic, Music, Settings, Video } from "lucide-react";
 
-import { resolveLibraryKind, type LibraryKind } from "../../app/routeManifest";
+import { resolveGlobalLocation, resolveLibraryKind, type LibraryKind } from "../../app/routeManifest";
 import { Button } from "../../components/ui/button";
 
 /** 왼쪽 세로 메뉴 — 화면을 옮기는 자리 (owner 지시 2026-09-05).
@@ -19,7 +19,7 @@ import { Button } from "../../components/ui/button";
  *  오디오·텍스트·캡션·전환)가 이미 쓰고 있고, 캡컷도 편집기에서는 화면 이동
  *  메뉴를 접는다. 두 줄이 나란히 서면 어느 쪽이 이동인지 알 수 없다.
  */
-export type SideNavDestination = "projects" | "library" | "footage";
+export type SideNavDestination = "projects" | "library" | "footage" | "voices";
 
 const ITEMS: ReadonlyArray<readonly [SideNavDestination, string, typeof FolderOpen]> = [
   ["projects", "프로젝트", FolderOpen],
@@ -51,10 +51,6 @@ const ASSET_ITEMS: ReadonlyArray<readonly [LibraryKind, string, typeof FolderOpe
   ["audio", "음악·효과음", Music],
 ];
 
-/** 목소리 보관함 뒷단은 아직 만드는 중이다. 자리는 승인된 구조대로 두되
- *  **못 쓴다는 것을 눌러 보기 전에 말한다** -- 아무 일도 안 일어나는 단추가
- *  이 저장소가 이미 한 번 고친 결함이다. 개발 용어는 쓰지 않는다(`§8`). */
-const VOICE_NOTE = "내 목소리 보관함은 아직 준비 중이에요. 준비되면 여기에서 바로 열 수 있어요.";
 
 /** 평범한 왼쪽 클릭만 가로챈다. 주소는 남겨 둔다 -- 북마크하고 새 창으로
  *  열 수 있어야 한다. 앱 안에서 옮기지 않으면 페이지가 통째로 새로 열리고,
@@ -79,7 +75,6 @@ export function SideNav({
   onNavigateGlobal?: (destination: SideNavDestination, kind?: LibraryKind) => void;
   onOpenSettings: () => void;
 }) {
-  const [voiceNoteOpen, setVoiceNoteOpen] = useState(false);
   return (
     <nav aria-label="화면 이동" className="vb-side-nav">
       {ITEMS.map(([destination, label, Icon]) => (
@@ -120,18 +115,20 @@ export function SideNav({
             <span>{label}</span>
           </a>
         ))}
-        <Button
-          aria-disabled="true"
-          className="vb-side-nav__item vb-side-nav__item--waiting"
-          onClick={() => setVoiceNoteOpen(true)}
-          type="button"
-          variant="ghost"
+        <a
+          aria-current={current === "voices" ? "page" : undefined}
+          className="vb-side-nav__item"
+          href={resolveGlobalLocation("voices")}
+          onClick={(event) => {
+            if (!onNavigateGlobal) return;
+            if (!isPlainLeftClick(event)) return;
+            event.preventDefault();
+            onNavigateGlobal("voices");
+          }}
         >
           <Mic aria-hidden="true" />
           <span>내 목소리</span>
-          <small className="vb-side-nav__waiting-badge">준비 중</small>
-        </Button>
-        {voiceNoteOpen ? <p className="vb-side-nav__note" role="status">{VOICE_NOTE}</p> : null}
+        </a>
       </div>
       {/* 설정은 주소가 아니라 서랍이라 단추다. 아래로 밀어 두는 것은 캡컷과
           같은 무늬다 -- 자주 가는 곳이 위, 어쩌다 가는 곳이 아래. */}
