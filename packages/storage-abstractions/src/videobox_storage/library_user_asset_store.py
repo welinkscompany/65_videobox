@@ -410,7 +410,17 @@ class LibraryUserAssetStore:
                     # 촬영본 표가 아예 없는 자료실도 있다 -- 그러면 파생물도 없다.
                     source_ids = []
                 for source_id in source_ids:
-                    for table in ("footage_proposal_segments", "footage_proposals", "library_source_segments"):
+                    # **차례가 중요하다.** 뒤엣것이 앞엣것을 `RESTRICT`로 붙잡고
+                    # 있어서 순서를 바꾸면 못 지운다. 가상 시퀀스는 원본을,
+                    # 제안 구간은 잘라 둔 구간을 붙잡는다 -- 실측 2026-09-07에
+                    # 이 둘을 빼먹어 자산 다섯이 계속 막혔다.
+                    for table in (
+                        "library_virtual_sequence_items",
+                        "library_virtual_sequences",
+                        "footage_proposal_segments",
+                        "footage_proposals",
+                        "library_source_segments",
+                    ):
                         try:
                             connection.execute(f"DELETE FROM {table} WHERE source_id = ?", (source_id,))
                         except sqlite3.OperationalError:

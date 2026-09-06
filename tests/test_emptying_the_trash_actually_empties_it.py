@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from videobox_domain_models.footage_organizer import VirtualSequenceItem
 from videobox_storage.footage_organizer_store import FootageOrganizerStore
 from videobox_storage.media_library_store import MediaLibraryStore
 
@@ -64,3 +65,43 @@ def test_an_asset_still_in_use_is_still_protected(tmp_path: Path) -> None:
 
     with pytest.raises((sqlite3.IntegrityError, ValueError)):
         store.user_asset_store.permanently_delete_asset("asset-live")
+
+
+def test_a_trashed_asset_with_proposals_also_goes(tmp_path: Path) -> None:
+    """**제안까지 딸린 자산은 아직도 안 지워졌다** — 실측 2026-09-07.
+
+    앞 고침으로 잘라 둔 구간은 같이 버려지게 됐는데, 도는 컨테이너에서 다시
+    비워 보니 다섯이 여전히 막혔다. 그 다섯에는 **제안**(`footage_proposals`)이
+    붙어 있고, 제안 구간이 잘라 둔 구간을 `RESTRICT`로 붙잡고 있다.
+
+    지우는 차례가 중요하다: 제안 -> 잘라 둔 구간 -> 원본 등록.
+    """
+    store = MediaLibraryStore(tmp_path / "library")
+    _asset(store, "asset-proposed", "3" * 64)
+    organizer = FootageOrganizerStore(tmp_path / "library")
+    source = organizer.register_source(
+        source_id="source-proposed", source_sha256="3" * 64, library_asset_id="asset-proposed"
+    )
+    segment = organizer.create_source_segment(source_id=source.source_id, start_sec=0.0, end_sec=1.0)
+    organizer.create_proposal(
+        source_id=source.source_id, source_sha256="3" * 64, segments=[segment]
+    )
+    # **가상 시퀀스까지 있어야 실물과 같은 모양이다.** 도는 컨테이너에서 막힌
+    # 다섯에는 이것도 붙어 있었고, 그게 원본을 `RESTRICT`로 붙잡고 있었다.
+    organizer.create_virtual_sequence(
+        source_id=source.source_id,
+        items=[
+            VirtualSequenceItem(
+                item_id="vitem-1", source_segment_id=segment.segment_id, item_order=1,
+                source_id=source.source_id, source_sha256="3" * 64,
+            )
+        ],
+    )
+    store.user_asset_store.trash_asset("asset-proposed")
+
+    store.user_asset_store.permanently_delete_asset("asset-proposed")
+
+    assert not [
+        item for item in store.user_asset_store.list_assets()
+        if item.library_asset_id == "asset-proposed"
+    ]
