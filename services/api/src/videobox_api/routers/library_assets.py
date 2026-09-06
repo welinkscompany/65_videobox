@@ -300,6 +300,13 @@ def build_library_assets_router(
         locations = user_asset_store.usage(asset_id)
         if not deep:
             return {"library_asset_id": asset_id, "locations": locations}
+        # **못 읽은 프로젝트를 세어 둔다**(코드리뷰 2026-09-06). 아래 훑기는
+        # 프로젝트 하나에서 예외가 나면 그 프로젝트를 건너뛰는데, 계속 훑는 것
+        # 자체는 맞다 -- 하나를 못 읽는다고 지우기를 통째로 막으면 안 된다.
+        # 잘못은 **못 읽었다는 사실을 안 알리는 것**이었다: 그 프로젝트의
+        # 사용처가 조용히 0건이 되고, 화면은 "안 쓰는 자산"이라 말하고, 창작자가
+        # 쓰고 있는 자산을 지운다. 지우면 되돌릴 수 없다.
+        unreadable: list[str] = []
         # Defensive reverse scan catches older projects/timelines created
         # before explicit global references were introduced.
         for project in getattr(project_store, "list_projects", lambda **_: [])(include_archived=True):
@@ -363,8 +370,14 @@ def build_library_assets_router(
                         locations.append({"project_id": project_id, "location": location})
                         existing_location_keys.add(location_key)
             except Exception:
+                _LOGGER.warning(
+                    "자산 사용처를 훑다가 프로젝트 하나를 읽지 못했습니다 "
+                    "(프로젝트=%s, 자산=%s). 이 프로젝트는 '확인 못 함'으로 보고합니다.",
+                    project_id, asset_id, exc_info=True,
+                )
+                unreadable.append(project_id)
                 continue
-        return {"library_asset_id": asset_id, "locations": locations}
+        return {"library_asset_id": asset_id, "locations": locations, "unreadable_projects": unreadable}
 
     @router.post("/api/library/assets/{asset_id}/trash")
     def trash_library_asset(asset_id: str) -> dict[str, Any]:
@@ -373,9 +386,19 @@ def build_library_assets_router(
             raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable", "library_asset_id": asset_id})
         # **여기서는 깊게 본다.** 옛 프로젝트가 쓰고 있는 자산을 지우면
         # 되돌릴 수 없다 -- 화면이 부르는 빠른 검사와 다른 무게다.
-        deep_usage = get_library_asset_usage(asset_id, deep=True)["locations"]
+        scan = get_library_asset_usage(asset_id, deep=True)
+        deep_usage = scan["locations"]
         if deep_usage:
             raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": deep_usage})
+        # **확인 못 한 것은 "안 쓴다"가 아니다.** 프로젝트 하나를 못 읽어 그
+        # 사용처가 0건이 된 상태에서 목록이 비었다고 지우면, 쓰고 있는 자산이
+        # 사라지고 되돌릴 수 없다. 막는 쪽이 맞다 -- 창작자는 다시 눌러 볼 수
+        # 있지만 지워진 자산은 못 되돌린다.
+        if scan.get("unreadable_projects"):
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "usage_scan_incomplete", "unreadable_projects": scan["unreadable_projects"]},
+            )
         try:
             return {"asset": public_user(user_asset_store.trash_asset(asset_id))}
         except ValueError as exc:
