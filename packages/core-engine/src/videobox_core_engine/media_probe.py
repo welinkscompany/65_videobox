@@ -12,6 +12,9 @@ from typing import Iterable
 # 여섯 장이면 이미지만으로 300초를 넘어서, 거기에 13갈래 출력이 얹히면 어떤
 # 타임아웃으로도 끝나지 않았다. 장면 경계는 ffmpeg가 따로 계산하므로 프레임을
 # 줄여도 구간 추천은 그대로다.
+#: 이보다 짧으면 "사진 한 장"으로 다룬다. 사진을 ffprobe로 재면 길이가 0이
+#: 아니라 한 프레임 길이(0.04초쯤)로 나오기 때문에 `duration <= 0`으로는 못 가른다.
+_STILL_MAX_SECONDS = 0.5
 MAX_FRAMES = 3
 MAX_LONG_EDGE_PX = 768
 MAX_FRAME_BYTES = 1_500_000
@@ -144,14 +147,27 @@ class FFmpegMediaProbe:
     def _extract_representative_frames(self, path: Path, duration: float, long_edge_px: int) -> tuple[RepresentativeFrame, ...]:
         if duration <= 0:
             return ()
-        # Evenly distributed stills are deterministic and deliberately bounded.  Scene-aware
-        # providers can later refine `scene_boundaries` without expanding this extraction budget.
-        timestamps = [duration * (index + 0.5) / MAX_FRAMES for index in range(MAX_FRAMES)]
+        # **사진은 그림이 한 장뿐이다**(2026-09-06). 아래 시각 나누기는 영상만
+        # 가정한다 -- 사진은 길이가 0.04초쯤이라 그 안을 `-ss`로 찾다 빈손이
+        # 되고, 시각 모델에 보낼 그림이 하나도 없어 색인이 조용히 실패한다.
+        # 실측: 2048×1152 사진에서 프레임 0개.
+        #
+        # 길이가 한 프레임 남짓이면 시각을 세지 않고 처음을 그대로 읽는다.
+        if duration <= _STILL_MAX_SECONDS:
+            # **`-ss`를 아예 빼야 한다.** 입력 앞의 `-ss 0.000`도 사진에서는
+            # 하나뿐인 프레임을 지나쳐 ffmpeg가 0바이트를 돌려준다(직접 확인함:
+            # 종료 코드는 0이라 실패로도 안 보인다). `None`이면 아래에서 뺀다.
+            timestamps = [None]
+        else:
+            # Evenly distributed stills are deterministic and deliberately bounded.  Scene-aware
+            # providers can later refine `scene_boundaries` without expanding this extraction budget.
+            timestamps = [duration * (index + 0.5) / MAX_FRAMES for index in range(MAX_FRAMES)]
         raw_frames: list[bytes] = []
         for timestamp in timestamps:
+            seek = [] if timestamp is None else ["-ss", f"{timestamp:.3f}"]
             try:
                 completed = subprocess.run(
-                    [self.ffmpeg_binary, "-v", "error", "-ss", f"{timestamp:.3f}", "-i", str(path), "-frames:v", "1", "-vf", f"scale='if(gte(iw,ih),{MAX_LONG_EDGE_PX},-2)':'if(gte(iw,ih),-2,{MAX_LONG_EDGE_PX})'", "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
+                    [self.ffmpeg_binary, "-v", "error", *seek, "-i", str(path), "-frames:v", "1", "-vf", f"scale='if(gte(iw,ih),{MAX_LONG_EDGE_PX},-2)':'if(gte(iw,ih),-2,{MAX_LONG_EDGE_PX})'", "-q:v", "4", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
                     capture_output=True, timeout=SUBPROCESS_TIMEOUT_SECONDS, check=False,
                 )
             except (OSError, subprocess.TimeoutExpired):
