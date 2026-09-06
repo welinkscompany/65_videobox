@@ -247,7 +247,13 @@ def build_library_assets_router(
             try:
                 vector = [float(value) for value in provider.embed(EmbeddingRequest(model_name=model_name, inputs=(q.strip(),))).vectors[0]]
                 if kind in {LibraryMediaType.BROLL, LibraryMediaType.IMAGE}:
-                    semantic_matches = media_library_store.find_footage_matches(query_embedding=vector, orientation=orientation, limit=limit)
+                    # **물은 종류만 준다.** 사진과 촬영본이 같은 색인에 있어서,
+                    # 안 가리면 사진을 찾는데 영상이 나온다(2026-09-06 실측: 결과
+                    # 20개가 전부 촬영본이었다).
+                    semantic_matches = media_library_store.find_footage_matches(
+                        query_embedding=vector, orientation=orientation,
+                        media_type=kind.value, limit=limit,
+                    )
                 else:
                     semantic_matches = media_library_store.find_audio_matches(query_embedding=vector, media_type=kind.value, limit=limit)
                 for value in semantic_matches:

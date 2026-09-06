@@ -609,8 +609,16 @@ class MediaLibraryStore:
         return item
 
     def find_footage_matches(
-        self, *, query_embedding: list[float], orientation: str | None = None, limit: int = 10
+        self, *, query_embedding: list[float], orientation: str | None = None,
+        media_type: str | None = None, limit: int = 10,
     ) -> list[dict[str, Any]]:
+        """뜻이 가까운 화면 자산. `media_type`을 대면 그 종류만.
+
+        **사진과 촬영본이 같은 색인에 있다**(둘 다 화면 자산이라 의도한 것이다).
+        그래서 찾을 때는 창작자가 물은 종류를 줘야 한다 -- 2026-09-06에 사진을
+        찾았더니 결과 20개가 전부 촬영본이었다. 종류를 안 대면 둘 다 준다:
+        유진의 화면 후보는 사진과 영상을 함께 본다.
+        """
         query = tuple(float(value) for value in query_embedding)
         if not query or not all(math.isfinite(value) for value in query):
             raise ValueError("query_embedding must contain finite values")
@@ -630,7 +638,17 @@ class MediaLibraryStore:
         parameters: tuple[Any, ...] = ()
         if orientation is not None:
             sql += " AND f.orientation = ?"
-            parameters = (orientation,)
+            parameters = (*parameters, orientation)
+        if media_type is not None:
+            # 종류는 자료실 등록부에 있다 -- 색인 자체는 화면 자산을 한 벌로
+            # 다루므로 여기서 join해 가른다. 구간(`source_segment_id`)은 부모
+            # 자산의 종류를 따른다.
+            sql += """ AND EXISTS (
+                    SELECT 1 FROM library_user_assets u
+                     WHERE u.library_asset_id = f.library_asset_id
+                       AND u.media_type = ?
+                )"""
+            parameters = (*parameters, media_type)
         connection = self._connection()
         try:
             rows = connection.execute(sql, parameters).fetchall()

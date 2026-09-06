@@ -68,3 +68,52 @@ def test_music_is_not_swept_into_the_footage_index(tmp_path: Path) -> None:
     pending = store.list_footage_needing_analysis(paths=[], description_version=1)
 
     assert "user_song" not in {str(item.get("library_asset_id")) for item in pending}
+
+
+def test_a_photo_search_does_not_return_footage(tmp_path: Path) -> None:
+    """사진을 찾는데 촬영본이 나왔다 (실기 2026-09-06).
+
+    `/api/library/search?media_type=image`가 `semantic: true`로 돌면서 결과 20개를
+    돌려줬는데 **전부 촬영본**이었다. 사진과 촬영본이 같은 색인(`footage_index`)에
+    있는 것은 의도이지만(둘 다 화면 자산), 찾을 때는 창작자가 물은 종류를 줘야 한다.
+    """
+    store = _store_with(tmp_path, {
+        "user_clip": ("clip.mp4", b"a synthetic clip"),
+        "user_photo": ("shot.jpg", b"a synthetic photo"),
+    })
+    vector = [1.0, 0.0]
+    for asset_id, sha in (("user_clip", hashlib.sha256(b"a synthetic clip").hexdigest()),
+                          ("user_photo", hashlib.sha256(b"a synthetic photo").hexdigest())):
+        store.save_footage_descriptor(
+            content_sha256=sha, library_asset_id=asset_id,
+            filename=f"{asset_id}.bin", duration_seconds=0.0, width=100, height=100,
+            tags={}, description=f"{asset_id} 설명",
+            embedding=vector, description_version=1,
+        )
+
+    photos = store.find_footage_matches(query_embedding=vector, media_type="image", limit=10)
+    clips = store.find_footage_matches(query_embedding=vector, media_type="broll", limit=10)
+
+    assert {str(m["library_asset_id"]) for m in photos} == {"user_photo"}
+    assert {str(m["library_asset_id"]) for m in clips} == {"user_clip"}
+
+
+def test_asking_for_everything_still_works(tmp_path: Path) -> None:
+    """종류를 안 대면 둘 다 준다 -- 유진의 화면 후보는 사진과 영상을 함께 본다."""
+    store = _store_with(tmp_path, {
+        "user_clip": ("clip.mp4", b"a synthetic clip"),
+        "user_photo": ("shot.jpg", b"a synthetic photo"),
+    })
+    vector = [1.0, 0.0]
+    for asset_id, sha in (("user_clip", hashlib.sha256(b"a synthetic clip").hexdigest()),
+                          ("user_photo", hashlib.sha256(b"a synthetic photo").hexdigest())):
+        store.save_footage_descriptor(
+            content_sha256=sha, library_asset_id=asset_id,
+            filename=f"{asset_id}.bin", duration_seconds=0.0, width=100, height=100,
+            tags={}, description=f"{asset_id} 설명",
+            embedding=vector, description_version=1,
+        )
+
+    both = store.find_footage_matches(query_embedding=vector, limit=10)
+
+    assert {str(m["library_asset_id"]) for m in both} == {"user_clip", "user_photo"}
