@@ -105,3 +105,36 @@ def test_a_trashed_asset_with_proposals_also_goes(tmp_path: Path) -> None:
         item for item in store.user_asset_store.list_assets()
         if item.library_asset_id == "asset-proposed"
     ]
+
+
+def test_a_trashed_asset_with_an_approved_proposal_also_goes(tmp_path: Path) -> None:
+    """**세 번째 층이 있었다** — 실측 2026-09-07.
+
+    앞의 두 고침 뒤에도 넷이 남았다. 실물을 다시 훑으니 **승인된 제안**이 만드는
+    색인 큐(`footage_segment_index_queue`)가 더 붙잡고 있었다. 구간 단위 색인
+    행(`footage_index.source_segment_id`)도 같은 자리를 붙잡으므로 함께 걷는다.
+
+    같은 자리를 세 번 고쳤다. **매번 "고쳤다"고 생각했고 매번 시험은 초록이었다**
+    -- 실물 자료에서 붙잡는 자리를 전부 세는 것 말고는 방법이 없었다.
+    """
+    store = MediaLibraryStore(tmp_path / "library")
+    _asset(store, "asset-approved", "4" * 64)
+    organizer = FootageOrganizerStore(tmp_path / "library")
+    source = organizer.register_source(
+        source_id="source-approved", source_sha256="4" * 64, library_asset_id="asset-approved"
+    )
+    segment = organizer.create_source_segment(source_id=source.source_id, start_sec=0.0, end_sec=1.0)
+    proposal = organizer.create_proposal(
+        source_id=source.source_id, source_sha256="4" * 64, segments=[segment]
+    )
+    organizer.approve_proposal_atomically(
+        proposal_id=proposal.proposal_id, expected_revision=proposal.revision
+    )
+    store.user_asset_store.trash_asset("asset-approved")
+
+    store.user_asset_store.permanently_delete_asset("asset-approved")
+
+    assert not [
+        item for item in store.user_asset_store.list_assets()
+        if item.library_asset_id == "asset-approved"
+    ]

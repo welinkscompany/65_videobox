@@ -410,6 +410,30 @@ class LibraryUserAssetStore:
                     # 촬영본 표가 아예 없는 자료실도 있다 -- 그러면 파생물도 없다.
                     source_ids = []
                 for source_id in source_ids:
+                    # 구간을 가리키는 것부터 걷는다. 승인된 제안은 색인 큐와
+                    # 구간 단위 색인 행을 만드는데, 그 둘이 잘라 둔 구간을
+                    # 붙잡는다 -- **같은 자리를 세 번 고치고서야 다 찾았다**
+                    # (2026-09-07). 매번 시험은 초록이었고, 실물 자료에서
+                    # 붙잡는 자리를 전부 세는 것 말고는 방법이 없었다.
+                    segment_ids = []
+                    try:
+                        segment_ids = [
+                            str(item["segment_id"])
+                            for item in connection.execute(
+                                "SELECT segment_id FROM library_source_segments WHERE source_id = ?",
+                                (source_id,),
+                            ).fetchall()
+                        ]
+                    except sqlite3.OperationalError:
+                        pass
+                    for segment_id in segment_ids:
+                        for table in ("footage_segment_index_queue", "footage_index"):
+                            try:
+                                connection.execute(
+                                    f"DELETE FROM {table} WHERE source_segment_id = ?", (segment_id,)
+                                )
+                            except sqlite3.OperationalError:
+                                pass
                     # **차례가 중요하다.** 뒤엣것이 앞엣것을 `RESTRICT`로 붙잡고
                     # 있어서 순서를 바꾸면 못 지운다. 가상 시퀀스는 원본을,
                     # 제안 구간은 잘라 둔 구간을 붙잡는다 -- 실측 2026-09-07에
