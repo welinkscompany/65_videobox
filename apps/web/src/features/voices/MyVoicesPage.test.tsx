@@ -67,4 +67,54 @@ describe("내 목소리", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
+
+  it("지우기는 한 번 더 묻고, 그때서야 그 프로젝트로 보낸다", async () => {
+    // 목소리는 지우면 파일까지 사라진다(`_store_media_analysis.py`의
+    // `delete_asset`은 행을 지우고 `path.unlink()`까지 한다). 휴지통이 없으니
+    // 한 번 눌러서 사라지면 안 된다.
+    const remove = vi.fn(async () => undefined);
+    render(<MyVoicesPage listVoices={async () => [voice()]} deleteVoice={remove} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /차분한 목소리 지우기/ }));
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.getByText(/되돌릴 수 없어요/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /차분한 목소리 정말 지우기/ }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("project-1", "asset_voice_1"));
+  });
+
+  it("그대로 두기를 누르면 안 지운다", async () => {
+    const remove = vi.fn(async () => undefined);
+    render(<MyVoicesPage listVoices={async () => [voice()]} deleteVoice={remove} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /차분한 목소리 지우기/ }));
+    fireEvent.click(screen.getByRole("button", { name: "그대로 두기" }));
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.queryByText(/되돌릴 수 없어요/)).not.toBeInTheDocument();
+  });
+
+  it("지운 뒤에는 목록을 다시 읽는다", async () => {
+    const remove = vi.fn(async () => undefined);
+    const listVoices = vi.fn().mockResolvedValueOnce([voice()]).mockResolvedValue([]);
+    render(<MyVoicesPage listVoices={listVoices} deleteVoice={remove} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /차분한 목소리 지우기/ }));
+    fireEvent.click(screen.getByRole("button", { name: /차분한 목소리 정말 지우기/ }));
+
+    expect(await screen.findByText(/아직 녹음한 목소리가 없어요/)).toBeInTheDocument();
+    expect(listVoices).toHaveBeenCalledTimes(2);
+  });
+
+  it("못 지우면 왜 안 됐는지 말하고 목록을 비우지 않는다", async () => {
+    // **조용히 사라지면 안 된다.** 실패했는데 줄이 없어지면 지워진 줄 안다.
+    const remove = vi.fn(async () => { throw new Error("boom"); });
+    render(<MyVoicesPage listVoices={async () => [voice()]} deleteVoice={remove} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /차분한 목소리 지우기/ }));
+    fireEvent.click(screen.getByRole("button", { name: /차분한 목소리 정말 지우기/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/지우지 못했어요/);
+    expect(screen.getByText("차분한 목소리")).toBeInTheDocument();
+  });
 });
