@@ -904,6 +904,11 @@ def create_app(
     agent_gateway_service_token: str | None = None,
     agent_gateway_http_client_factory=None,
     live_smoke_root_attestation_secret: str | None = None,
+    # 경로로 등록하는 문(§1-1 봉쇄)이 `projects_root`·드롭 폴더 밖에서 추가로
+    # 받아 줄 폴더. 화면에 노출된 문에는 안 쓴다 -- 신뢰된, 인 프로세스로만
+    # `create_app`을 부르는 도구(`scripts/owner_sample_edit_package.py`가
+    # 실제 owner 샘플 영상 폴더를 넘기는 것처럼)를 위한 자리다.
+    additional_asset_source_roots: tuple[Path, ...] | None = None,
 ) -> FastAPI:
     configure_logging()
     # 설정이 살아 있다는 것을 로그만 보고 알 수 있게 한다. 실패 경로를
@@ -1372,7 +1377,9 @@ def create_app(
             # 경로로 등록하는 문이 프로젝트 밖에서 받아 줄 폴더 (코드리뷰
             # 2026-09-07). 자료실 경로 문과 같은 드롭 폴더 하나만 준다 --
             # 그 문의 이유(§1-1)와 같다: 넓게 열어 두는 것보다 안 켜진 것이 안전하다.
-            allowed_source_roots=tuple(root for root in (media_inbox_watch_path,) if root is not None),
+            allowed_source_roots=tuple(
+                root for root in (media_inbox_watch_path, *(additional_asset_source_roots or ())) if root is not None
+            ),
         )
     )
     app.include_router(build_media_analysis_router(store, orchestrator.media_analysis_service, orchestrator.media_analysis_dispatcher))

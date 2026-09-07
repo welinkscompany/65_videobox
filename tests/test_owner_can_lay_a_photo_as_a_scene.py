@@ -25,8 +25,13 @@ from videobox_storage.local_project_store import LocalProjectStore
 
 
 def _create_timeline_session(client: TestClient, tmp_path: Path) -> tuple[str, str]:
-    narration = tmp_path / "narration.wav"
-    script = tmp_path / "script.txt"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 이 도우미를 부르는 곳은 모두 `create_app(projects_root=
+    # tmp_path / "projects")`를 쓰므로 여기서도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    narration = projects_root / "narration.wav"
+    script = projects_root / "script.txt"
     narration.write_bytes(b"narration")
     script.write_text("One sentence.", encoding="utf-8")
     project_id = client.post("/api/projects", json={"name": "사진 장면"}).json()["project_id"]

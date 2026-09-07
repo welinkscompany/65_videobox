@@ -469,6 +469,11 @@ def _build_preview_proofs_unfenced(
 ) -> dict[str, Any]:
 
     projects_root = Path(projects_root)
+    # 경로 등록 문은 이제 `projects_root`와 드롭 폴더 밖을 거절한다(§1-1 봉쇄,
+    # 코드리뷰 2026-09-07). 이 스크립트는 owner의 실제 샘플 영상 폴더(`sample_dir`,
+    # `projects_root` 밖)를 그대로 등록해야 하므로, 신뢰된 인 프로세스 도구만 쓰는
+    # `additional_asset_source_roots`로 그 폴더를 명시적으로 허용한다.
+    additional_asset_source_roots = tuple({path.parent for path in sources.values()})
     app = create_app(
         projects_root=projects_root,
         asset_browser_preview_probe=FFprobeBrowserPreviewProbe(ffprobe_binary=ffprobe_binary),
@@ -476,6 +481,7 @@ def _build_preview_proofs_unfenced(
             ffmpeg_binary=ffmpeg_binary,
             timeout_seconds=PREVIEW_RENDER_TIMEOUT_SECONDS,
         ),
+        additional_asset_source_roots=additional_asset_source_roots,
     )
     api_import_log = [{"method": "POST", "path": "/api/projects"}]
     previews: dict[str, dict[str, Any]] = {}

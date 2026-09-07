@@ -118,11 +118,15 @@ def test_style_still_matches_the_topic_word_when_the_written_script_never_repeat
 
 
 def test_recommends_the_most_recently_registered_voice_sample(tmp_path: Path) -> None:
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
     with _client(tmp_path) as client:
         project_id = client.post("/api/projects", json={"name": "Voice Draft"}).json()["project_id"]
-        first_sample = tmp_path / "voice-a.wav"
+        first_sample = projects_root / "voice-a.wav"
         first_sample.write_bytes(b"voice a")
-        second_sample = tmp_path / "voice-b.wav"
+        second_sample = projects_root / "voice-b.wav"
         second_sample.write_bytes(b"voice b")
         client.post(
             f"/api/projects/{project_id}/assets/voice-sample",

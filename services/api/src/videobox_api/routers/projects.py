@@ -411,22 +411,27 @@ def build_projects_router(store: LocalProjectStore, user_asset_store: Any | None
         """
         try:
             job = store.get_job(project_id=project_id, job_id=job_id)
-        except KeyError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="job_not_found",
-            ) from exc
         except Exception as exc:
             # **없는 프로젝트를 500으로 내지 않는다.** 로컬 저장소는 프로젝트마다
             # sqlite 파일이 따로라, 없는 프로젝트를 물으면 `KeyError`가 아니라
             # "파일을 못 연다"가 난다. 그걸 그대로 내면 부르는 쪽은 "서버가 고장
             # 났다"로 읽고 재시도하거나 사람을 부른다 -- 실제로는 그냥 없는 것이다.
+            #
+            # **프로젝트가 있는지부터 본다** -- `project_id`의 모양이 잘못된
+            # 경우(§1-4 화이트리스트)도 `store.get_job`에서 `KeyError`가 나서,
+            # 예외 종류만으로는 "이 프로젝트에 그 job이 없다"와 "이 project_id
+            # 자체가 없다"를 가를 수 없다(코드리뷰 2026-09-07).
             try:
                 store.get_project(project_id=project_id)
             except Exception:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="project_not_found",
+                ) from exc
+            if isinstance(exc, KeyError):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="job_not_found",
                 ) from exc
             raise _http_error(exc) from exc
         return JobRecordResponse(**job)

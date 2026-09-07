@@ -190,6 +190,7 @@ def test_a_dropped_clip_that_cannot_be_queued_is_recorded(
 
 def test_a_batch_import_that_analyses_fewer_files_than_it_registered_says_so(
     caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
 ) -> None:
     """한 번에 가져오기에서 분석 예약이 실패한 파일은 `failures`에도 안 들어가
     화면상 성공과 구분되지 않았다. 태그가 안 붙은 촬영본은 검색에서 없는 것이 된다."""
@@ -218,12 +219,16 @@ def test_a_batch_import_that_analyses_fewer_files_than_it_registered_says_so(
             return {"assets": [_asset("a1"), _asset("a2")], "failures": []}
 
     app = FastAPI()
-    app.include_router(build_assets_router(_Orchestrator(), object()))
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 이 가짜 스토어도 그 속성을 갖춰야 한다. 이 시험이 재는
+    # 것은 분석 예약 실패 로깅이라, 경로는 이 스토어의 `projects_root` 안에
+    # 둔다.
+    app.include_router(build_assets_router(_Orchestrator(), SimpleNamespace(projects_root=tmp_path)))
 
     with caplog.at_level(logging.WARNING):
         response = TestClient(app).post(
             "/api/projects/p1/assets/broll-video/batch",
-            json={"source_paths": ["one.mp4", "two.mp4"]},
+            json={"source_paths": [str(tmp_path / "one.mp4"), str(tmp_path / "two.mp4")]},
         )
 
     # 등록은 그대로 성공이고 `failures`도 늘어나지 않는다 -- 자산은 실제로 들어왔다.
