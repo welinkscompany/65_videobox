@@ -69,12 +69,16 @@ def test_workspace_owns_api_and_web_mounts_without_host_or_docker_access() -> No
     #
     # 둘 다 쓰기가 필요하다 -- 처리한 원본과 자산 가치가 없는 것을 옮긴다.
     # **지우지는 않는다**(owner가 보고 지운다).
+    #
+    # **필수(`:?`)로 두지 않는다.** 그렇게 했더니 compose를 렌더하는 자리마다
+    # 한꺼번에 멈췄다(규약 시험 넷·시작 스크립트 확인·정적 검증기). 안 정하면
+    # 이미 있는 드롭 폴더로 떨어지고, 실제 값은 `.env.container`가 준다.
     assert workspace["volumes"] == [
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync:/videobox-drive-sync",
-        "${VIDEOBOX_OWNER_DROP_ROOT:?set VIDEOBOX_OWNER_DROP_ROOT in .env.container}:/videobox-drop",
-        "${VIDEOBOX_OWNER_DROP_REJECT_ROOT:?set VIDEOBOX_OWNER_DROP_REJECT_ROOT in .env.container}:/videobox-drop-reject",
+        "${VIDEOBOX_OWNER_DROP_ROOT:-${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync}:/videobox-drop",
+        "${VIDEOBOX_OWNER_DROP_REJECT_ROOT:-${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync-reject}:/videobox-drop-reject",
         "videobox_model_cache:/opt/models",
     ]
     assert workspace["environment"]["HF_HOME"] == "/opt/models"
