@@ -189,6 +189,13 @@ def _archive_original(source: Path, archive_root: Path, source_hash: str) -> Non
     shutil.move(str(source), str(filed))
 
 
+
+def _archive_duplicate(source: Path, config: "MediaInboxConfig", source_hash: str) -> None:
+    """이미 가진 내용의 원본을 치운다. 보관함이 없으면 그대로 둔다 -- 지우지 않는다."""
+    if config.archive_root is not None:
+        _archive_original(source, config.archive_root, source_hash)
+
+
 def _reject_original(source: Path, reject_root: Path | None, source_hash: str) -> None:
     """자산 가치가 없다고 본 파일을 `불필요`로 옮긴다.
 
@@ -237,14 +244,20 @@ def _take_sorted_drop(
         result = _ingest_sorted(config, ingest_store, library_root, source, source_hash, decision)
     except LibraryIngestIdempotencyConflict:
         # 같은 내용이 이미 자료실에 **다른 종류로** 있다. owner가 손으로 고쳐
-        # 둔 것일 수 있으니 덮어쓰지 않는다 -- 이미 가진 것이므로 `불필요`로.
-        _reject_original(source, config.reject_root, source_hash)
+        # 둔 것일 수 있으니 덮어쓰지 않는다.
+        _archive_duplicate(source, config, source_hash)
         report.duplicates.append(source.name)
         return
     if result.get("duplicate"):
-        # 이미 자료실에 같은 내용이 있다 -- 결정 문서가 정한 "자산 가치가 없는
-        # 것" 셋 중 하나다. 보관함이 아니라 `불필요`로 보낸다.
-        _reject_original(source, config.reject_root, source_hash)
+        # **이미 가진 것은 "쓸모없는 것"이 아니라 "이미 가져간 것"이다.**
+        #
+        # 처음엔 `불필요`로 보냈다(결정 문서도 그렇게 적었다). 실기에서 owner가
+        # 넣은 영상이 그리로 갔는데 그 영상은 **자료실에 멀쩡히 들어가 있었다**
+        # -- 옛 감시기가 먼저 가져간 것이었다. `불필요`를 열면 "버릴 것"과
+        # "이미 잘 들어간 것"이 섞여 owner가 지우려다 멈칫한다.
+        #
+        # 보관함이 그 뜻을 이미 갖고 있다: 처리 끝난 원본.
+        _archive_duplicate(source, config, source_hash)
         report.duplicates.append(source.name)
         return
     if config.archive_root is not None:

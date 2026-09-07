@@ -115,7 +115,16 @@ def test_originals_are_archived_and_rejects_are_moved_not_deleted(tmp_path: Path
     assert sorted(path.name for path in reject.iterdir()) == ["깨진영상.mp4", "메모.txt"]
 
 
-def test_content_we_already_have_goes_to_the_reject_folder(tmp_path: Path) -> None:
+def test_content_we_already_have_is_filed_not_rejected(tmp_path: Path) -> None:
+    """**이미 가진 것은 "쓸모없는 것"이 아니라 "이미 가져간 것"이다** (2026-09-07).
+
+    처음엔 중복을 `불필요`로 보냈다. 실기에서 owner가 넣은 영상이 그리로 갔는데,
+    그 영상은 **자료실에 멀쩡히 들어가 있었다** -- 옛 감시기가 먼저 가져간
+    것이었다. `불필요`를 열면 "버릴 것"과 "이미 잘 들어간 것"이 섞여, owner가
+    지우려다 멈칫하게 된다.
+
+    보관함이 그 뜻을 이미 갖고 있다: **처리 끝난 원본.** 중복도 그렇다.
+    """
     config, _roots, archive, reject = _sorted_config(tmp_path)
     config.watch_path.mkdir(parents=True, exist_ok=True)
     _ffmpeg("-f", "lavfi", "-i", "testsrc=size=320x240:rate=15:duration=2",
@@ -129,7 +138,12 @@ def test_content_we_already_have_goes_to_the_reject_folder(tmp_path: Path) -> No
 
     assert second.duplicates == ["촬영본-복사본.mp4"]
     assert second.moved == []
-    assert [path.name for path in reject.iterdir()] == ["촬영본-복사본.mp4"]
+    # 버릴 것이 없으면 `불필요` 폴더는 아예 안 생긴다 -- 빈 폴더를 미리 만들어
+    # owner를 헷갈리게 하지 않는다.
+    assert not reject.exists() or [path.name for path in reject.iterdir()] == []
+    assert sorted(path.name for path in archive.iterdir()) == [
+        "촬영본-복사본.mp4", "촬영본.mp4",
+    ]
 
 
 def test_a_second_pass_does_not_re_ingest_what_it_already_took(tmp_path: Path) -> None:
