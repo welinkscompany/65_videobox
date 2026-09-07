@@ -62,6 +62,16 @@ class _DerivativeToolUnavailable(RuntimeError):
 #: 리눅스 컨테이너에서 이런 값은 `is_absolute()`가 거짓이라 상대 경로로 오해된다.
 _ANOTHER_OS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
 
+#: "절대 경로인가"를 물을 때 쓰는 클래스. **실제로는 `Path`다** -- 이름을 따로
+#: 둔 이유는 시험이 이 자리만 `PurePosixPath`로 바꿔 끼워 "리눅스 컨테이너에서
+#: 도는 상황"을 윈도우 pytest에서도 실제 라우트로 재게 하기 위해서다
+#: (2026-09-07 코드리뷰). **정규식(`_ANOTHER_OS_PATH`)만 mock하면 안 된다** --
+#: 아래 문의 `source.is_absolute()`도 윈도우에서는 `C:\...`를 절대 경로로
+#: 보므로, 모양 판정만 흉내 내면 진짜로 지워진 방어를 시험이 못 잡는다(뒤에
+#: 오는 컨테이너 안 경로 확인이 우연히 같은 403을 내서 초록으로 위장한다).
+#: 제품 코드는 절대 이 상수를 안 바꾼다.
+_NATIVE_PATH = Path
+
 
 def _looks_like_another_os_path(raw: str) -> bool:
     """이 값이 **다른 운영체제의** 절대 경로인가.
@@ -79,7 +89,7 @@ def _looks_like_another_os_path(raw: str) -> bool:
     value = raw.strip()
     if not _ANOTHER_OS_PATH.match(value):
         return False
-    return not Path(value).is_absolute()
+    return not _NATIVE_PATH(value).is_absolute()
 
 
 def _inside_any(candidate: Path, roots: tuple[Path, ...]) -> bool:
@@ -290,9 +300,12 @@ def build_library_assets_router(
                     "visible_roots": [str(root) for root in roots],
                 },
             )
-        if not source.is_absolute():
+        if not _NATIVE_PATH(payload.source_path).is_absolute():
             # 여기까지 왔으면 진짜 상대 경로다. API 프로세스의 현재 폴더 기준으로
             # 풀리는데, "볼 수 없는 경로"라고 하면 없는 마운트 문제를 찾으러 간다.
+            # 위 분기와 같은 `_NATIVE_PATH`를 쓴다 -- 시험이 리눅스를 흉내 낼 때
+            # 이 판정도 같이 흉내 나야, 위 분기를 지웠을 때 이 자리가 우연히
+            # 같은 결과(403)를 내며 결함을 가리지 않는다.
             raise HTTPException(status_code=422, detail="source_path_must_be_absolute")
         try:
             source = source.resolve()

@@ -12,12 +12,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_api.routers import library_assets as library_assets_module
 from videobox_api.routers.library_assets import _ANOTHER_OS_PATH, _inside_any
 from videobox_domain_models.jobs import JobStatus, JobType
 
@@ -251,6 +252,29 @@ def test_a_host_path_shape_is_recognised_so_it_is_not_called_relative() -> None:
         assert _ANOTHER_OS_PATH.match(value), value
     for value in ("/videobox-drop/x.png", "x.png", "./x.png", "/tmp/a"):
         assert not _ANOTHER_OS_PATH.match(value), value
+
+
+def test_a_windows_path_is_rejected_as_not_visible_when_running_like_linux(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """어제 결함의 재발 방지 장치 (코드리뷰 2026-09-07).
+
+    위 시험은 모양 판정만 잰다. **라우트를 통째로 재는 시험이 하나도 없어서**
+    `_looks_like_another_os_path`가 부르는 그 17줄을 통째로 지워도 15개가
+    그대로 초록이었다. `library_assets._NATIVE_PATH`를 `PurePosixPath`로
+    바꿔 끼워 "리눅스 컨테이너에서 도는 상황"을 실제 라우트로 재현한다 --
+    정규식만 mock하지 않는다.
+    """
+
+    monkeypatch.setattr(library_assets_module, "_NATIVE_PATH", PurePosixPath)
+
+    reply = client.post(
+        "/api/library/ingest-path",
+        json={"media_type": "image", "source_path": "C:\\Users\\x.png", "idempotency_key": "win:1"},
+    )
+
+    assert reply.status_code == 403, reply.text
+    assert reply.json()["detail"]["reason"] == "source_path_not_visible"
 
 
 def test_a_relative_path_is_told_apart_from_an_invisible_one(client: TestClient) -> None:
