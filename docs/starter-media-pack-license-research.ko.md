@@ -1,12 +1,11 @@
 # Starter media pack — 공식 라이선스 조사 ledger
 
-> **주의 (2026-09-07 전체 점검).** 이 파일은 사람이 읽는 조사 기록이 아니라 **빌더가 직접 읽는 원장**이다
+> **주의.** 이 파일은 사람이 읽는 조사 기록이 아니라 **빌더가 직접 읽는 원장**이다
 > (`scripts/build_starter_media_pack.py` `load_approved_candidates`, 기본 `--ledger`). 표 줄의 `same page/hash`는
-> **바로 위 표 줄**의 저작자·페이지·해시를 물려받는다. 2026-09-06에 RPG 표의 앞 줄들을 지우면서 `sfx-rpg-door`·
-> `sfx-rpg-grass`·`sfx-rpg-steps` 셋이 그 위 표(`sfx-pop10`)의 **`cogitollc / pop-sounds`를 물려받게 됐고**, 설치된
-> 1.3.0 팩 `LICENSES.md:74-76`에 그렇게 찍혔다. 맞는 값은 `Delta12 Studio · RPG Sound Effect Pack`
-> (1.2.0 증거 파일, 커밋 `f5ca1b6f1`의 지워진 줄). **행을 고치면 빌더의 `_APPROVED_CANDIDATE_FINGERPRINT`도 같이
-> 바뀌어야 하므로 이 점검에서는 행을 건드리지 않았다.** 고치는 순서는 최신 인계 문서에 있다.
+> **바로 위 표 줄**의 저작자·페이지·해시를 물려받는다 -- 표 경계를 안 가리고 문서 순서로 물려받으므로, 어떤
+> 표든 첫 줄을 지우면 다음 줄이 그 위 **다른 표**의 값을 물려받게 된다(2026-09-06에 실제로 그렇게 됐고
+> 2026-09-07에 바로잡았다 -- `sfx-rpg-door` 행 참고). **행을 고치면 빌더의 `_APPROVED_CANDIDATE_FINGERPRINT`도
+> 같이 다시 고정해야 한다.**
 
 
 > SSOT: Starter Media Pack Task 5 Step 1의 후보별 라이선스 판단과 evidence snapshot이다. 이 문서는 **실제 pack manifest도, pack release 승인도 아니다.** 각 후보는 실제 download 후 SHA-256·duration·FFmpeg/ffprobe format 검증을 통과해야만 manifest asset이 될 수 있다.
@@ -138,17 +137,17 @@ lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 �
 | `sfx-pop9` | pop9.ogg — cogitollc | same page/hash | [pop9.ogg](https://opengameart.org/sites/default/files/pop9.ogg) |
 | `sfx-pop10` | pop10.ogg — cogitollc | same page/hash | [pop10.ogg](https://opengameart.org/sites/default/files/pop10.ogg) |
 
-### 승인 확장 — Various Sound Effects (47 individual WAV)
+### 승인 확장 — Various Sound Effects (18 individual WAV)
 
 `Spring Spring`의 [official CC0 page](https://opengameart.org/content/various-sound-effects-0) raw HTML SHA-256은 `925a53041ff971e46ad4b5e8ac0857ce753ba0dcad4e6ddf30dac20031f14682`다. 아래 **각 token이 one asset**이며 direct source는 `https://opengameart.org/sites/default/files/<file>`이다. 모든 candidate의 commercial/raw redistribution/conversion=`true`, attribution=`false`다.
 
 `sfx-various-bangs=bangs.wav`, `sfx-various-beep1=beep1.wav`, `sfx-various-click=click_1.wav`, `sfx-various-fall=fall_0.wav`, `sfx-various-glug=glug.wav`, `sfx-various-nom=nom.wav`, `sfx-various-pop=pop.wav`, `sfx-various-powered-door=powered_door.wav`, `sfx-various-weeds=rustling_of_the_weeds.wav`, `sfx-various-scooter=scooter_p.wav`, `sfx-various-swim=swim_0.wav`, `sfx-various-tap-stone=tap_stone.wav`, `sfx-various-tick=tick_0.wav`, `sfx-various-ambient-impact=snd_ambient_impact1.wav`, `sfx-various-footsteps=snd_footsteps1.wav`, `sfx-various-menu-move=snd_menu_move.wav`, `sfx-various-menu-select=snd_menu_select.wav`, `sfx-various-npc-message=snd_npc_message.wav`, .
 
-### 승인 확장 — RPG / battle individual SFX (20)
+### 승인 확장 — RPG / battle individual SFX (3)
 
 | candidate asset_id | creator / official page · evidence SHA-256 | direct source |
 | --- | --- | --- |
-| `sfx-rpg-door` | same page/hash | [door_1.ogg](https://opengameart.org/sites/default/files/door_1.ogg) |
+| `sfx-rpg-door` | Delta12 Studio · [RPG Sound Effect Pack](https://opengameart.org/content/rpg-sound-effect-pack) · `e6b3928faa6f503a64336f7655e07855378511abfe5427b14fa01138fa2c8efb` | [door_1.ogg](https://opengameart.org/sites/default/files/door_1.ogg) |
 | `sfx-rpg-grass` | same page/hash | [grass_1.ogg](https://opengameart.org/sites/default/files/grass_1.ogg) |
 | `sfx-rpg-steps` | same page/hash | [steps_1.ogg](https://opengameart.org/sites/default/files/steps_1.ogg) |
 

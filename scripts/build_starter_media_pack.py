@@ -58,7 +58,12 @@ _SELECTION_TIMESTAMP = "2026-07-14T01:13:16+09:00"
 # 딸깍·팝·똑딱·삐·메뉴·발소리·문·풀숲·마시는 소리·먹는 소리·스쿠터.
 # 빼기 전에 참조를 확인했다 -- 팩 효과음을 가리키는 프로젝트가 하나도 없었다.
 # 123 → 74. 앞 지문: 521c5bf0a5bda4ec3cfb7117ec8395692fe2225d5da6c01e63c74c861d1433ba
-_APPROVED_CANDIDATE_FINGERPRINT = "9a460eaa8b1333b4ab6aee4b391dee51a38b74532621a1462bc53451d0cae4d2"
+#
+# 2026-09-07: 개수는 그대로(74 SFX), 값만 고쳤다. 2026-09-06에 RPG 표의 앞
+# 줄을 지우면서 `sfx-rpg-door`가 그 위 표(`cogitollc / pop-sounds`)를
+# 물려받게 됐던 것을 원장에서 바로잡았다(§1-2). 앞 지문:
+# 9a460eaa8b1333b4ab6aee4b391dee51a38b74532621a1462bc53451d0cae4d2
+_APPROVED_CANDIDATE_FINGERPRINT = "4aa236c65e0d6c366e5dffa73253ca1a13b3d98b2fb7e18c8a49bf84f755231a"
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,7 +390,10 @@ def build_pack(
     # 1.1.0: 게임 음악 12곡을 브이로그용으로 갈아 끼웠다(owner 지시 2026-09-05).
     # 1.2.0: 브이로그용 효과음 23개를 더했다(전환음 13·타이핑 3·키 3·종이 4).
     # 1.3.0: 게임 전용 효과음 49개를 뺐다(2026-09-06) — 104개가 지금 승인 집합이다.
-    version: str = "1.3.0",
+    # 1.3.1: `sfx-rpg-door`·`sfx-rpg-grass`·`sfx-rpg-steps` 셋의 저작자 표기를
+    # 바로잡았다(2026-09-07) — 개수는 그대로, 표기만 `cogitollc / pop-sounds`에서
+    # `Delta12 Studio / RPG Sound Effect Pack`으로.
+    version: str = "1.3.1",
     ffmpeg_binary: str = "ffmpeg",
     ffprobe_binary: str = "ffprobe",
 ) -> dict[str, object]:
@@ -433,7 +441,7 @@ def main() -> int:
     parser.add_argument("--ledger", type=Path, default=REPO_ROOT / "docs" / "starter-media-pack-license-research.ko.md")
     parser.add_argument("--output", type=Path, default=REPO_ROOT / "dist" / "starter-media-pack")
     parser.add_argument("--source-cache", type=Path, default=REPO_ROOT / "artifacts" / "starter-media-pack-sources")
-    parser.add_argument("--pack-version", default="1.3.0")
+    parser.add_argument("--pack-version", default="1.3.1")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
     args = parser.parse_args()
