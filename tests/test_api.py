@@ -5339,7 +5339,9 @@ def test_segment_analysis_endpoint_marks_job_failed_on_unexpected_runtime_failur
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == "segment analyzer exploded"
+    # `_http_error`의 분류 안 된 분기는 고정 코드만 낸다(코드리뷰 2026-09-07) --
+    # 원문은 서버 로그로만 간다. 잡 기록의 `error_message`(아래)는 그대로 원문을 남긴다.
+    assert response.json()["detail"] == {"reason": "internal_error", "error_code": "RuntimeError"}
     jobs_response = client.get(f"/api/projects/{project_id}/jobs")
     assert jobs_response.status_code == 200
     segment_jobs = [
