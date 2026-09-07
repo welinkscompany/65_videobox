@@ -117,9 +117,13 @@ def test_script_draft_rejects_empty_script_and_alignment_identity_mismatch() -> 
 
 
 def test_script_draft_api_persists_provisional_metadata_after_store_reload(tmp_path: Path) -> None:
-    script_path = tmp_path / "script.txt"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    script_path = projects_root / "script.txt"
     script_path.write_text("첫 문장입니다.\n\n둘째 문장입니다.", encoding="utf-8")
-    app = create_app(projects_root=tmp_path / "projects")
+    app = create_app(projects_root=projects_root)
     with TestClient(app) as client:
         project_id = client.post("/api/projects", json={"name": "Script Draft"}).json()["project_id"]
         asset_response = client.post(
@@ -162,11 +166,15 @@ def test_store_does_not_add_script_metadata_to_a_legacy_editing_session(tmp_path
 
 
 def test_script_draft_api_rejects_unknown_or_non_script_asset(tmp_path: Path) -> None:
-    source_path = tmp_path / "video.mp4"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    source_path = projects_root / "video.mp4"
     source_path.write_bytes(b"not-a-video")
-    empty_script_path = tmp_path / "empty-script.txt"
+    empty_script_path = projects_root / "empty-script.txt"
     empty_script_path.write_text(" \n\t", encoding="utf-8")
-    app = create_app(projects_root=tmp_path / "projects")
+    app = create_app(projects_root=projects_root)
     with TestClient(app) as client:
         project_id = client.post("/api/projects", json={"name": "Script Draft"}).json()["project_id"]
         missing = client.post(f"/api/projects/{project_id}/editing-sessions/from-script", json={"script_asset_id": "missing"})
@@ -223,9 +231,13 @@ def test_aligned_script_draft_transition_survives_store_update_and_reload(tmp_pa
 
 
 def test_script_draft_alignment_api_updates_persisted_session_and_exposes_stale_source_ids(tmp_path: Path) -> None:
-    script_path = tmp_path / "script.txt"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    script_path = projects_root / "script.txt"
     script_path.write_text("첫 문장입니다. 둘째 문장입니다.", encoding="utf-8")
-    app = create_app(projects_root=tmp_path / "projects")
+    app = create_app(projects_root=projects_root)
     with TestClient(app) as client:
         project_id = client.post("/api/projects", json={"name": "Script Draft Alignment"}).json()["project_id"]
         asset = client.post(f"/api/projects/{project_id}/assets/script-document", json={"source_path": str(script_path)}).json()
@@ -251,9 +263,13 @@ def test_script_draft_alignment_api_updates_persisted_session_and_exposes_stale_
 
 
 def test_script_draft_alignment_api_rejects_stale_revision_without_replacing_timing_or_stale_contract(tmp_path: Path) -> None:
-    script_path = tmp_path / "script.txt"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    script_path = projects_root / "script.txt"
     script_path.write_text("첫 문장입니다.", encoding="utf-8")
-    app = create_app(projects_root=tmp_path / "projects")
+    app = create_app(projects_root=projects_root)
     with TestClient(app) as client:
         project_id = client.post("/api/projects", json={"name": "Script Draft Stale"}).json()["project_id"]
         asset = client.post(f"/api/projects/{project_id}/assets/script-document", json={"source_path": str(script_path)}).json()
@@ -275,9 +291,13 @@ def test_script_draft_alignment_api_rejects_stale_revision_without_replacing_tim
 
 
 def test_script_draft_alignment_api_rejects_empty_overlap_and_non_positive_bounds(tmp_path: Path) -> None:
-    script_path = tmp_path / "script.txt"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    script_path = projects_root / "script.txt"
     script_path.write_text("첫 문장입니다. 둘째 문장입니다.", encoding="utf-8")
-    app = create_app(projects_root=tmp_path / "projects")
+    app = create_app(projects_root=projects_root)
     with TestClient(app) as client:
         project_id = client.post("/api/projects", json={"name": "Script Draft Invalid Alignment"}).json()["project_id"]
         asset = client.post(f"/api/projects/{project_id}/assets/script-document", json={"source_path": str(script_path)}).json()

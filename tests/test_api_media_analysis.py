@@ -108,10 +108,14 @@ def test_default_app_does_not_fabricate_media_analysis_provider(tmp_path: Path) 
 
 
 def test_no_provider_retry_stays_visibly_blocked(tmp_path: Path) -> None:
-    app = create_app(projects_root=tmp_path / "projects")
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    app = create_app(projects_root=projects_root)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "blocked"}).json()["project_id"]
-    source = tmp_path / "source.mp4"
+    source = projects_root / "source.mp4"
     source.write_bytes(b"video")
     asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": []}).json()
     analysis = client.post(f"/api/projects/{project_id}/media-analysis", json={"asset_id": asset["asset_id"]}).json()
@@ -123,11 +127,12 @@ def test_no_provider_retry_stays_visibly_blocked(tmp_path: Path) -> None:
 
 def test_startup_recovers_orphaned_analysis_and_dispatches_injected_worker(tmp_path: Path) -> None:
     projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
     first_vision = FakeVision()
     first = create_app(projects_root=projects_root, vision_provider=first_vision, media_probe=FakeProbe(), allow_test_media_analysis_providers=True)
     client = TestClient(first)
     project_id = client.post("/api/projects", json={"name": "restart"}).json()["project_id"]
-    source = tmp_path / "source.mp4"
+    source = projects_root / "source.mp4"
     source.write_bytes(b"video")
     asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": []}).json()
     job = first.state.media_analysis_service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
@@ -145,10 +150,14 @@ def test_startup_recovers_orphaned_analysis_and_dispatches_injected_worker(tmp_p
 def test_poller_retries_due_analysis_after_fake_clock_advances(tmp_path: Path) -> None:
     clock = FakeClock()
     vision = FlakyVision()
-    app = create_app(projects_root=tmp_path / "projects", vision_provider=vision, media_probe=FakeProbe(), analysis_clock=clock, media_analysis_poll_interval_seconds=0.01, allow_test_media_analysis_providers=True)
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    app = create_app(projects_root=projects_root, vision_provider=vision, media_probe=FakeProbe(), analysis_clock=clock, media_analysis_poll_interval_seconds=0.01, allow_test_media_analysis_providers=True)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "retry"}).json()["project_id"]
-    source = tmp_path / "source.mp4"
+    source = projects_root / "source.mp4"
     source.write_bytes(b"video")
     asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": []}).json()
     job = app.state.media_analysis_service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
@@ -159,12 +168,15 @@ def test_poller_retries_due_analysis_after_fake_clock_advances(tmp_path: Path) -
 
 
 def test_recursive_broll_import_is_sorted_and_returns_analysis_jobs(tmp_path: Path) -> None:
-    media = tmp_path / "media"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    media = projects_root / "media"
     (media / "nested").mkdir(parents=True)
     (media / "z.mp4").write_bytes(b"same")
     (media / "nested" / "a.mp4").write_bytes(b"different")
     fake_vision = FakeVision()
-    client = TestClient(create_app(projects_root=tmp_path / "projects", vision_provider=fake_vision, media_probe=FakeProbe(), allow_test_media_analysis_providers=True))
+    client = TestClient(create_app(projects_root=projects_root, vision_provider=fake_vision, media_probe=FakeProbe(), allow_test_media_analysis_providers=True))
     assert client.app.state.media_analysis_vision_provider is fake_vision
     project_id = client.post("/api/projects", json={"name": "analysis"}).json()["project_id"]
 
@@ -187,10 +199,14 @@ def test_recursive_broll_import_is_sorted_and_returns_analysis_jobs(tmp_path: Pa
 
 
 def test_manual_review_preserves_fixed_layers_and_updates_asset_tags(tmp_path: Path) -> None:
-    app = create_app(projects_root=tmp_path / "projects")
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    app = create_app(projects_root=projects_root)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "review"}).json()["project_id"]
-    source = tmp_path / "source.mp4"
+    source = projects_root / "source.mp4"
     source.write_bytes(b"video")
     asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": ["기존 메타"]}).json()
     store = app.state.store
@@ -210,25 +226,35 @@ def test_manual_review_preserves_fixed_layers_and_updates_asset_tags(tmp_path: P
 
 
 def test_batch_keeps_successful_assets_and_returns_per_file_failures(tmp_path: Path) -> None:
-    source = tmp_path / "good.mp4"
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다. "없는 파일"도 그 안의 경로로
+    # 줘야 (지어낸) 경로가 아니라 "존재하지 않음" 사유로 실패한다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    source = projects_root / "good.mp4"
     source.write_bytes(b"good")
-    client = TestClient(create_app(projects_root=tmp_path / "projects", vision_provider=FakeVision(), media_probe=FakeProbe(), allow_test_media_analysis_providers=True))
+    missing = projects_root / "missing.mp4"
+    client = TestClient(create_app(projects_root=projects_root, vision_provider=FakeVision(), media_probe=FakeProbe(), allow_test_media_analysis_providers=True))
     project_id = client.post("/api/projects", json={"name": "partial"}).json()["project_id"]
-    response = client.post(f"/api/projects/{project_id}/assets/broll-video/batch", json={"source_paths": [str(source), str(tmp_path / "missing.mp4")], "tags": []})
+    response = client.post(f"/api/projects/{project_id}/assets/broll-video/batch", json={"source_paths": [str(source), str(missing)], "tags": []})
     assert response.status_code == 201, response.text
     assert len(response.json()["assets"]) == 1
-    assert response.json()["failures"] == [{"source_path": str((tmp_path / "missing.mp4").resolve()), "reason": "source file does not exist"}]
+    assert response.json()["failures"] == [{"source_path": str(missing.resolve()), "reason": "source file does not exist"}]
 
 
 def test_list_reports_queue_position_only_for_active_jobs_and_preview_is_unavailable_before_result(tmp_path: Path) -> None:
-    app = create_app(projects_root=tmp_path / "projects", vision_provider=FakeVision(), media_probe=FakeProbe(), allow_test_media_analysis_providers=True)
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    app = create_app(projects_root=projects_root, vision_provider=FakeVision(), media_probe=FakeProbe(), allow_test_media_analysis_providers=True)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "queue"}).json()["project_id"]
-    source = tmp_path / "source.mp4"
+    source = projects_root / "source.mp4"
     source.write_bytes(b"video")
     asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": []}).json()
     first = app.state.media_analysis_service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
-    other_source = tmp_path / "other.mp4"
+    other_source = projects_root / "other.mp4"
     other_source.write_bytes(b"other")
     other_asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(other_source), "tags": []}).json()
     second = app.state.store.create_media_analysis(project_id=project_id, asset_id=other_asset["asset_id"], idempotency_key="second", cache_key="second")
@@ -250,11 +276,12 @@ def test_list_reports_queue_position_only_for_active_jobs_and_preview_is_unavail
 
 def test_analysis_persists_selected_profile_scene_windows_and_embeddings_across_restart(tmp_path: Path) -> None:
     projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
     embedding = FakeEmbedding()
     app = create_app(projects_root=projects_root, vision_provider=FakeVision(), embedding_provider=embedding, media_probe=FakeProbe(), media_analysis_profile={"vision_model_name": "vision-local", "embedding_model_name": "embed-local"}, allow_test_media_analysis_providers=True)
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "durable-profile"}).json()["project_id"]
-    source = tmp_path / "source.mp4"
+    source = projects_root / "source.mp4"
     source.write_bytes(b"video")
     asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": []}).json()
     job = app.state.media_analysis_service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
@@ -273,14 +300,18 @@ def test_analysis_persists_selected_profile_scene_windows_and_embeddings_across_
 
 
 def test_explicit_local_profile_preflights_exact_loopback_and_wires_real_provider(tmp_path: Path) -> None:
+    # 경로로 등록하는 문은 `projects_root` 밖의 경로를 거절한다(코드리뷰
+    # 2026-09-07) -- 시험 조각도 그 안에 둔다.
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
     http_client = LocalProfileHTTPClient()
-    app = create_app(projects_root=tmp_path / "projects", enable_local_media_analysis=True, media_analysis_http_client=http_client, media_probe=LocalProfileProbe())
+    app = create_app(projects_root=projects_root, enable_local_media_analysis=True, media_analysis_http_client=http_client, media_probe=LocalProfileProbe())
     assert isinstance(app.state.media_analysis_vision_provider, LMStudioVisionProvider)
     assert app.state.media_analysis_service.profile.vision_model_name == "vision-local"
     assert app.state.media_analysis_service.profile.embedding_model_name == "embed-local"
     client = TestClient(app)
     project_id = client.post("/api/projects", json={"name": "runtime"}).json()["project_id"]
-    source = tmp_path / "source.mp4"
+    source = projects_root / "source.mp4"
     source.write_bytes(b"video")
     asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": []}).json()
     job = app.state.media_analysis_service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])

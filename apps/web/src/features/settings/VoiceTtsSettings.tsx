@@ -573,9 +573,15 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
             className="rounded-md border bg-background px-3 py-2"
             disabled={isBusy || loadState !== "ready"}
             onChange={(event) => setLocalPath(event.target.value)}
-            placeholder="예: D:\voices\my-voice.wav"
+            placeholder="함께 보는 폴더 안의 경로"
             value={localPath}
           />
+          {/* 아무 경로나 받지 않는다(코드리뷰 2026-09-07) -- 함께 보는 폴더
+              밖의 경로는 거절된다. "음성 파일 업로드"가 대부분의 경우에 더
+              간단하다. */}
+          <span className="text-xs text-muted-foreground">
+            함께 보는 폴더 밖의 경로는 추가되지 않아요. 안 되면 아래 업로드를 써 주세요.
+          </span>
         </label>
         <Button disabled={isBusy || loadState !== "ready" || !localPath.trim()} onClick={() => void registerLocalPath()} type="button">
           {actionName === "register" ? "추가하는 중" : "이 위치로 추가"}

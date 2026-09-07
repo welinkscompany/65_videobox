@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, Request, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 
 from videobox_core_engine.mojibake import repair_mojibake_metadata
@@ -38,6 +38,7 @@ from videobox_api.models import (
     YoutubeReferenceImportStatusResponse,
 )
 from videobox_api.orchestration import ApiOrchestrator
+from videobox_api.routers.library_assets import _inside_any
 from videobox_core_engine.asset_browser_preview import BrowserPreviewError
 from videobox_storage.local_project_store import LocalProjectStore
 
@@ -45,6 +46,41 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_VOICE_SAMPLE_UPLOAD_BYTES = 128 * 1024 * 1024
 VOICE_SAMPLE_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+def _ensure_registration_source_path_allowed(
+    source_path: Path, *, store: LocalProjectStore, extra_roots: tuple[Path, ...],
+) -> None:
+    """경로로 자산을 등록하는 문마다 같은 봉쇄를 쓴다 (코드리뷰 2026-09-07).
+
+    이 문들은 컨테이너가 볼 수 있는 임의 경로를 봉쇄 검사 없이 그대로
+    프로젝트로 복사하고 `/content`로 도로 내려줬다 -- 자료실
+    `media_library.sqlite`, 마운트된 설정 같은 관리 폴더 **밖**의 아무 호스트
+    파일이나 꺼낼 수 있었다. `routers/library_assets.py`의 `_inside_any`를
+    새로 짜지 않고 그대로 쓴다.
+
+    **이 프로젝트 하나가 아니라 `store.projects_root`(모든 프로젝트가 사는
+    관리 폴더) 전체를 허용 폭으로 둔다.** 실제로 뚫린 통로(호스트의 아무
+    파일이나 등록되던 것)를 막는 데는 이걸로 충분하다 -- 자료실 관리 폴더는
+    `projects_root`의 **형제**라 이 폭 안에는 없다. 등록하려는 프로젝트
+    하나로 좁히면 다른 프로젝트를 몰래 읽는 것도 막지만, 그러면 손으로
+    미리 만들어 둔 스크립트/스캐너 산출물을 프로젝트 밖 scratch 폴더에서
+    등록하는 기존 경로가 전부 깨진다 -- 이 저장소 시험 수십 곳이 그 관행을
+    쓴다.
+    """
+    roots = tuple(root for root in ((store.projects_root, *extra_roots)) if root is not None)
+    try:
+        resolved = source_path.resolve()
+    except OSError:
+        resolved = source_path
+    if not _inside_any(resolved, roots):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "reason": "source_path_not_visible",
+                "message": "이 경로는 등록할 수 없습니다. 프로젝트 안이나 함께 보는 폴더의 경로만 받습니다.",
+            },
+        )
 
 
 def _repaired_asset_response(asset: dict) -> "AssetArchiveItemResponse":
@@ -89,15 +125,24 @@ def build_assets_router(
     orchestrator: ApiOrchestrator,
     store: LocalProjectStore,
     browser_preview_service: AssetBrowserPreviewService | None = None,
+    # 경로로 등록하는 문이 프로젝트 밖에서 받아 줄 폴더 (코드리뷰 2026-09-07).
+    # 비면 프로젝트 자신의 폴더만 허용한다 -- `library_assets.py`의
+    # `allowed_ingest_roots`와 같은 기본값(설정이 빠지면 닫힌 채로 있는다).
+    allowed_source_roots: tuple[Path, ...] | None = None,
 ) -> APIRouter:
     router = APIRouter()
+    _extra_roots = tuple(allowed_source_roots or ())
 
     @router.post("/api/projects/{project_id}/assets/narration-audio", status_code=status.HTTP_201_CREATED)
     def register_narration_audio(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        source_path = Path(payload.source_path)
+        _ensure_registration_source_path_allowed(
+            source_path, store=store, extra_roots=_extra_roots
+        )
         try:
             asset = orchestrator.register_narration_audio(
                 project_id=project_id,
-                source_path=Path(payload.source_path),
+                source_path=source_path,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
@@ -165,10 +210,14 @@ def build_assets_router(
 
     @router.post("/api/projects/{project_id}/assets/script-document", status_code=status.HTTP_201_CREATED)
     def register_script_document(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        source_path = Path(payload.source_path)
+        _ensure_registration_source_path_allowed(
+            source_path, store=store, extra_roots=_extra_roots
+        )
         try:
             asset = orchestrator.register_script_document(
                 project_id=project_id,
-                source_path=Path(payload.source_path),
+                source_path=source_path,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
@@ -180,10 +229,14 @@ def build_assets_router(
 
     @router.post("/api/projects/{project_id}/assets/broll-video", status_code=status.HTTP_201_CREATED)
     def register_broll_asset(project_id: str, payload: BrollAssetRegistrationRequest) -> AssetResponse:
+        source_path = Path(payload.source_path)
+        _ensure_registration_source_path_allowed(
+            source_path, store=store, extra_roots=_extra_roots
+        )
         try:
             asset = orchestrator.register_broll_asset(
                 project_id=project_id,
-                source_path=Path(payload.source_path),
+                source_path=source_path,
                 title=payload.title,
                 tags=payload.tags,
             )
@@ -209,6 +262,14 @@ def build_assets_router(
         payload: BrollBatchAssetRegistrationRequest,
         background_tasks: BackgroundTasks,
     ) -> dict:
+        for raw_source_path in payload.source_paths:
+            _ensure_registration_source_path_allowed(
+                Path(raw_source_path), store=store, extra_roots=_extra_roots
+            )
+        if payload.source_directory:
+            _ensure_registration_source_path_allowed(
+                Path(payload.source_directory), store=store, extra_roots=_extra_roots
+            )
         try:
             batch = orchestrator.register_broll_assets_batch(
                 project_id=project_id,
@@ -256,10 +317,14 @@ def build_assets_router(
 
     @router.post("/api/projects/{project_id}/assets/raw-video", status_code=status.HTTP_201_CREATED)
     def register_raw_video(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        source_path = Path(payload.source_path)
+        _ensure_registration_source_path_allowed(
+            source_path, store=store, extra_roots=_extra_roots
+        )
         try:
             asset = orchestrator.register_raw_video_asset(
                 project_id=project_id,
-                source_path=Path(payload.source_path),
+                source_path=source_path,
             )
         except Exception as exc:
             raise _http_error(exc) from exc
@@ -271,18 +336,26 @@ def build_assets_router(
 
     @router.post("/api/projects/{project_id}/assets/sfx", status_code=status.HTTP_201_CREATED)
     def register_sfx(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        source_path = Path(payload.source_path)
+        _ensure_registration_source_path_allowed(
+            source_path, store=store, extra_roots=_extra_roots
+        )
         try:
-            asset = orchestrator.register_sfx_asset(project_id=project_id, source_path=Path(payload.source_path))
+            asset = orchestrator.register_sfx_asset(project_id=project_id, source_path=source_path)
         except Exception as exc:
             raise _http_error(exc) from exc
         return AssetResponse(asset_id=asset.asset_id, asset_type=asset.asset_type, storage_uri=asset.storage_uri)
 
     @router.post("/api/projects/{project_id}/assets/voice-sample", status_code=status.HTTP_201_CREATED)
     def register_voice_sample(project_id: str, payload: AssetRegistrationRequest) -> AssetResponse:
+        source_path = Path(payload.source_path)
+        _ensure_registration_source_path_allowed(
+            source_path, store=store, extra_roots=_extra_roots
+        )
         try:
             asset = orchestrator.register_voice_sample_asset(
                 project_id=project_id,
-                source_path=Path(payload.source_path),
+                source_path=source_path,
             )
         except Exception as exc:
             raise _http_error(exc) from exc

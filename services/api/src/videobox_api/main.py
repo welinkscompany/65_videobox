@@ -1364,7 +1364,17 @@ def create_app(
     app.include_router(build_creation_briefs_router(orchestrator))
     app.include_router(build_draft_readiness_router(orchestrator))
     app.include_router(build_atomic_draft_bundles_router(orchestrator))
-    app.include_router(build_assets_router(orchestrator, store, app.state.asset_browser_preview_service))
+    app.include_router(
+        build_assets_router(
+            orchestrator,
+            store,
+            app.state.asset_browser_preview_service,
+            # 경로로 등록하는 문이 프로젝트 밖에서 받아 줄 폴더 (코드리뷰
+            # 2026-09-07). 자료실 경로 문과 같은 드롭 폴더 하나만 준다 --
+            # 그 문의 이유(§1-1)와 같다: 넓게 열어 두는 것보다 안 켜진 것이 안전하다.
+            allowed_source_roots=tuple(root for root in (media_inbox_watch_path,) if root is not None),
+        )
+    )
     app.include_router(build_media_analysis_router(store, orchestrator.media_analysis_service, orchestrator.media_analysis_dispatcher))
     app.include_router(build_jobs_router(orchestrator))
     app.include_router(build_timeline_router(orchestrator))
