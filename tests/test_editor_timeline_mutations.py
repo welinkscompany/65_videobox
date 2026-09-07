@@ -828,3 +828,77 @@ def test_ai_sound_cleanup_lands_on_the_media_the_creator_named() -> None:
     assert segment["music_override"]["media_controls"]["normalize_loudness"] is True
     # 효과음은 손대지 않았다.
     assert not (segment["sfx_override"].get("media_controls") or {}).get("normalize_loudness")
+
+
+def test_a_rebuilt_timeline_does_not_place_two_clips_on_the_same_stretch() -> None:
+    """장면을 쪼갠 뒤 편집판을 다시 지으면 4~8초에 조각이 **두 번** 놓였다 — 실측 2026-09-07.
+
+    캡컷 초안이 `New segment overlaps with existing segment
+    [start: 4000000, end: 8000000]`으로 죽었다. 편집판 자체는 깨끗했다
+    (겹치는 클립 없음) -- 겹침은 세션을 입히는 이 자리에서 생겼다.
+
+    다시 지은 편집판은 **세션 좌표**로 온다: 쪼갠 뒤 생긴 `..__split_2`가
+    클립의 `segment_id`로 그대로 박혀 있다. 그런데 그 세션 조각의
+    `source_slices`는 쪼개기 **전** 이름(부모)을 가리킨다. 그래서
+    부모 클립이 두 자리로 투영되고, 자식 클립은 짝을 못 찾아 원본 그대로
+    통과한다 -- 같은 4~8초에 둘.
+
+    한 장면짜리나 쪼개기 없는 시험은 이걸 못 잡는다.
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import split_segment
+
+    project_id = "project_001"
+    session = _session()
+    session["project_id"] = project_id
+    session["session_id"] = "session_001"
+    session["segments"] = [
+        {
+            "segment_id": "timeline_001:001",
+            "caption_text": "",
+            "start_sec": 0.0,
+            "end_sec": 8.0,
+            "cut_action": "keep",
+            "review_required": True,
+            "broll_override": {"asset_id": "photo_one"},
+            "music_override": None,
+            "sfx_override": None,
+            "visual_overlays": [],
+        }
+    ]
+    session = split_segment(session=session, segment_id="timeline_001:001", split_sec=4.0)
+    left_id, right_id = [segment["segment_id"] for segment in session["segments"][:2]]
+    session["segments"][1]["broll_override"] = {"asset_id": "photo_two"}
+
+    # 다시 지은 편집판 -- 장면마다 클립이 하나씩, 이름은 **지금** 세션 조각 이름이다.
+    timeline = {
+        "project_id": project_id,
+        "timeline_id": "timeline_002",
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [
+                    {"clip_id": "clip_narration_001", "segment_id": left_id, "start_sec": 0.0, "end_sec": 4.0},
+                    {"clip_id": "clip_narration_002", "segment_id": right_id, "start_sec": 4.0, "end_sec": 8.0},
+                ],
+            },
+            {
+                "track_type": "broll",
+                "clips": [
+                    {"clip_id": "clip_broll_001", "segment_id": left_id, "asset_id": "photo_one", "start_sec": 0.0, "end_sec": 4.0},
+                    {"clip_id": "clip_broll_002", "segment_id": right_id, "asset_id": "photo_two", "start_sec": 4.0, "end_sec": 8.0},
+                ],
+            },
+        ],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=session, project_id=project_id
+    )
+
+    for track in materialized["tracks"]:
+        placed = sorted(
+            ((clip["start_sec"], clip["end_sec"], clip["clip_id"]) for clip in track["clips"]),
+        )
+        for earlier, later in zip(placed, placed[1:]):
+            assert earlier[1] <= later[0], (track["track_type"], placed)

@@ -294,6 +294,27 @@ def materialize_editing_session_timeline(
             == _number(caption.get("end_sec")) - _number(caption.get("start_sec"))
         )
 
+    removed_segment_ids = {
+        segment_id for segment_id, segment in segments.items()
+        if str(segment.get("cut_action") or "keep") == "remove"
+    }
+    # **다시 지은 편집판은 세션 좌표로 온다.** 장면을 쪼갠 뒤 편집판을 다시
+    # 지으면 클립의 `segment_id`가 **지금** 세션 조각 이름(`..__split_2`)이다.
+    # 그런데 그 조각의 `source_slices`는 쪼개기 전 부모를 가리키므로,
+    # 부모 클립이 자식 자리까지 투영되고 자식 클립은 짝을 못 찾아 원본
+    # 그대로 통과한다 -- 같은 구간에 조각이 둘 놓인다(2026-09-07 실측,
+    # 캡컷 초안이 `SegmentOverlap`으로 죽었다). 어느 트랙의 어느 조각이
+    # 자기 이름표를 이미 들고 있는지 먼저 적어 둔다.
+    session_bound_clip_ids_by_track: dict[str, set[str]] = {}
+    for track in source_tracks:
+        bound_track_type = str(track.get("track_type") or "").strip().lower()
+        for raw_clip in track.get("clips", []) if isinstance(track.get("clips"), list) else []:
+            if not isinstance(raw_clip, dict):
+                continue
+            bound_id = str(raw_clip.get("segment_id") or "")
+            if bound_id in segments:
+                session_bound_clip_ids_by_track.setdefault(bound_track_type, set()).add(bound_id)
+
     tracks: dict[str, list[dict[str, Any]]] = {}
     track_ids: dict[str, str] = {}
     used_track_ids: set[str] = set()
@@ -358,6 +379,37 @@ def materialize_editing_session_timeline(
                 continue
             source_id = str(raw.get("segment_id") or "")
             targets = source_targets.get(source_id)
+            bound_ids = session_bound_clip_ids_by_track.get(track_type, frozenset())
+            if targets is not None and source_id in bound_ids:
+                # 부모도 자식도 **각자 자기 클립을 이미 갖고 있다면**, 부모
+                # 클립을 자식 자리에까지 투영하지 않는다. 그 자리는 자식의
+                # 클립이 채운다. (합치기는 이 규칙에 걸리지 않는다 -- 합쳐진
+                # 조각에 들어오는 옛 이름은 세션 조각이 아니라서 `bound_ids`에
+                # 없다.)
+                targets = [
+                    target for target in targets
+                    if str(target[0].get("segment_id") or "") == source_id
+                    or str(target[0].get("segment_id") or "") not in bound_ids
+                ]
+                if not targets:
+                    continue
+            elif targets is None and source_id in segments:
+                if source_id in removed_segment_ids:
+                    continue
+                # 짝 없는 자식 클립. 자기 조각의 자리에 그대로 놓되, 그 조각에
+                # 걸린 세션 덮어쓰기(교체된 사진·음악 등)는 똑같이 존중한다.
+                own_segment = segments[source_id]
+                own_rate = _ripple_playback_rate(own_segment)
+                own_duration = _number(raw.get("end_sec")) - _number(raw.get("start_sec"))
+                targets = [(
+                    own_segment,
+                    {
+                        "segment_id": source_id,
+                        "source_offset_sec": 0.0,
+                        "duration_sec": own_duration * own_rate,
+                    },
+                    _number(own_segment.get("start_sec")),
+                )]
             if targets is None:
                 if source_id in removed_source_ids:
                     continue
@@ -441,10 +493,6 @@ def materialize_editing_session_timeline(
                     clips.append(clip)
         if clips:
             tracks[track_type] = clips
-    removed_segment_ids = {
-        segment_id for segment_id, segment in segments.items()
-        if str(segment.get("cut_action") or "keep") == "remove"
-    }
     export_overlays: list[dict[str, Any]] = []
     for overlay_index, raw_overlay in enumerate(timeline.get("export_overlays", [])):
         if not isinstance(raw_overlay, dict):

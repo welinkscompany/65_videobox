@@ -101,3 +101,15 @@ def test_a_lost_recording_is_still_refused(tmp_path: Path) -> None:
             project_id=project.project_id, timeline=timeline,
             drafts_root=tmp_path / "drafts", draft_name="lost-recording-draft",
         )
+
+
+# 여기 있던 `test_two_photo_scenes_do_not_collide`를 지웠다(2026-09-07).
+#
+# **초록인데 아무것도 안 지키는 시험이었다.** 실제 겹침은 캡컷 어댑터가 아니라
+# **세션을 편집판에 입히는 자리**에서 생겼는데, 그 시험은 편집판을 손으로 만들어
+# 어댑터에 바로 넣어서 그 자리를 지나가지 않았다 -- 고치기 전에도 통과했고
+# 고친 뒤에도 통과했다.
+#
+# 그 결함을 지키는 시험은 `tests/test_editor_timeline_mutations.py`의
+# `test_a_rebuilt_timeline_does_not_place_two_clips_on_the_same_stretch`에 있다.
+# 진짜 `split_segment`를 거쳐 세션 좌표로 편집판을 다시 짓는다.
