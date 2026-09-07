@@ -99,14 +99,19 @@ export function InfographicPanel({ onMade }: { onMade?: () => void }) {
         onClick={() => setRows([...rows, { ...EMPTY_ROW }])}>숫자 한 줄 더하기</Button>
     </div>
 
-    {styles.length > 0 ? <label className="vb-infographic__field">
+    {/* **고르는 자리는 native `<select>`가 아니다.** 자료실 거르개·보기 방식과
+        같은 눌림 단추 줄을 쓴다 -- `task22-parity-owners.test.ts`가 native 컨트롤을
+        허용 목록으로 잡고 있고, 결 고르기에는 native여야 할 이유가 없다.
+        셋뿐이라 펼치는 것보다 늘어놓는 편이 고르기도 쉽다. */}
+    {styles.length > 0 ? <div className="vb-infographic__field" role="group" aria-label="그림의 결">
       <span>그림의 결</span>
-      <select className="vb-infographic__style" value={style} disabled={busy}
-        onChange={(event) => setStyle(event.target.value)}>
-        {styles.map((item) => <option key={item.key} value={item.key}>{item.korean_name}</option>)}
-      </select>
+      <div className="vb-infographic__styles">
+        {styles.map((item) => <Button key={item.key} type="button" variant="ghost"
+          className="vb-infographic__style" aria-pressed={style === item.key}
+          disabled={busy} onClick={() => setStyle(item.key)}>{item.korean_name}</Button>)}
+      </div>
       <span className="vb-infographic__hint">{styles.find((item) => item.key === style)?.direction ?? ""}</span>
-    </label> : null}
+    </div> : null}
 
     <Button type="button" disabled={!ready} onClick={make} className="vb-infographic__make">
       {busy ? "그리는 중입니다… 1~2분 걸립니다" : "인포그래픽 만들기"}

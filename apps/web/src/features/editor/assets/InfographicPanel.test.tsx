@@ -27,7 +27,7 @@ function madeResult(overrides: Partial<InfographicResult> = {}): InfographicResu
 /** 결 목록이 실려 온 뒤라야 "지금 걸린 결"이 정해진다 -- 그 전에 누르면 결이
  *  빈 채로 나간다. 화면이 실제로 밟는 순서와 같게 기다린다. */
 async function readyThenFill() {
-  await waitFor(() => expect(screen.getByRole("option", { name: "어두운 유리" })).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole("button", { name: "어두운 유리" })).toBeTruthy());
   fireEvent.change(screen.getByPlaceholderText("스마트스토어 판매 수수료 구조"), { target: { value: "수수료 구조" } });
   fireEvent.change(screen.getByLabelText("1번째 이름"), { target: { value: "네이버 결제 수수료" } });
   fireEvent.change(screen.getByLabelText("1번째 값"), { target: { value: "3.4" } });
@@ -47,8 +47,21 @@ describe("InfographicPanel", () => {
 
   it("고를 수 있는 결을 서버에서 받아 온다 — 화면이 이름을 베껴 적지 않는다", async () => {
     render(<InfographicPanel />);
-    await waitFor(() => expect(screen.getByRole("option", { name: "어두운 유리" })).toBeTruthy());
-    expect(screen.getByRole("option", { name: "잡지 편집" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "어두운 유리" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "잡지 편집" })).toBeTruthy();
+    // **목록과 "지금 걸린 것"은 한 쌍이다.** 걸린 것을 안 보여 주면 되돌릴 수 없다.
+    expect(screen.getByRole("button", { name: "어두운 유리" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "잡지 편집" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("다른 결로 바꾸면 그 결로 보낸다", async () => {
+    const create = vi.spyOn(api, "createInfographic").mockResolvedValue(madeResult());
+    render(<InfographicPanel />);
+    await readyThenFill();
+    fireEvent.click(screen.getByRole("button", { name: "잡지 편집" }));
+    make();
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][0].style).toBe("editorial");
   });
 
   it("적어 준 숫자를 그대로 보낸다", async () => {
@@ -67,7 +80,7 @@ describe("InfographicPanel", () => {
 
   it("주제나 숫자가 없으면 만들 수 없다 — 2분 기다린 뒤 실패하는 것보다 낫다", async () => {
     render(<InfographicPanel />);
-    await waitFor(() => expect(screen.getByRole("option", { name: "어두운 유리" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "어두운 유리" })).toBeTruthy());
     expect(screen.getByRole("button", { name: "인포그래픽 만들기" })).toHaveProperty("disabled", true);
   });
 
