@@ -345,3 +345,50 @@ def test_a_scene_that_fails_still_moves_the_progress_along(tmp_path: Path) -> No
     )
 
     assert seen, "실패만 있었는데 진행이 한 번도 안 움직였다"
+
+
+def test_a_host_bridge_that_is_not_answering_fails_the_scene_instead_of_swapping_engines(
+    tmp_path: Path,
+) -> None:
+    """안 켜져 있으면 **조용히 다른 엔진으로 대신 읽지 않는다** (코드리뷰
+    2026-09-07). 기억 문서가 지키기로 한 약속인데 이걸 재는 시험이 하나도
+    없었다 -- `test_tts_provider_selection.py`는 host_bridge를 안 재고,
+    `test_host_tts_bridge.py`는 팩토리를 안 거치고, 이 파일의 다른 시험은
+    전부 `_SpokenLength` 가짜를 심는다. 실제 `HostTTSBridgeProvider`를 쓰고
+    네트워크만 `URLError`로 흉내 낸다.
+    """
+    from urllib.error import URLError
+
+    from videobox_provider_interfaces.host_tts_bridge_provider import HostTTSBridgeProvider
+
+    def _bridge_is_down(request: object, timeout: float) -> bytes:
+        raise URLError("connection refused")
+
+    provider = HostTTSBridgeProvider(http_client=_bridge_is_down)
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        tts_provider=provider,
+        tts_engine_config=TTSEngineConfig(enabled=True, engine="host_bridge"),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "다리 꺼짐"}).json()["project_id"]
+    session_id = client.post(f"/api/projects/{project_id}/editing-sessions/blank").json()["session_id"]
+    voice_sample = client.post(
+        f"/api/projects/{project_id}/assets/voice-sample/upload",
+        files={"file": ("내목소리.wav", b"RIFF" + b"\0" * 64, "audio/wav")},
+    )
+    assert voice_sample.status_code == 201, voice_sample.text
+    before = _translate(client, project_id, session_id, "Hello there", tmp_path / "projects")
+
+    response = _dub(
+        client, project_id, session_id, language="en",
+        expected_revision=before["session_revision"],
+        voice_sample_asset_id=voice_sample.json()["asset_id"],
+    )
+
+    assert response["status"] == "succeeded", response.get("error_detail")
+    # 어떤 장면도 교체되지 않았다 -- 다리가 죽었다고 다른 목소리가 대신 읽으면 안 된다.
+    assert response["result"]["dubbed_scene_count"] == 0
+    assert "목소리를 만들지 못했어요" in response["result"]["dubbing_notice"]
+    session = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}").json()
+    assert session["segments"][0]["tts_replacement"] is None

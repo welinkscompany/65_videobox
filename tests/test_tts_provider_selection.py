@@ -31,3 +31,21 @@ def test_an_engine_name_nobody_implements_is_refused_at_configuration_time() -> 
     # 렌더 도중이 아니라 설정할 때 걸려야 고칠 수 있다.
     with pytest.raises(ValueError, match="chatterbox"):
         TTSEngineConfig(enabled=True, engine="voicebox")
+
+
+def test_host_bridge_builds_the_bridge_provider_and_nothing_else() -> None:
+    """호스트 목소리 다리를 골랐으면 정말 그 provider가 나와야 한다 (코드리뷰
+    2026-09-07). 이 팩토리 분기를 재는 시험이 하나도 없었다 -- 안 켜면 조용히
+    기계 목소리(espeak/chatterbox)로 대신 읽는 회귀가 나도 아무도 몰랐다.
+    """
+    from videobox_provider_interfaces.host_tts_bridge_provider import HostTTSBridgeProvider
+
+    provider = _build_tts_provider(
+        TTSEngineConfig(enabled=True, engine="host_bridge", language="ko", host_bridge_base_url="http://127.0.0.1:8199")
+    )
+
+    assert isinstance(provider, HostTTSBridgeProvider)
+    assert provider.provider_name == "host_bridge"
+    # base_url을 그대로 전달한다 -- 다른 엔진의 기본값으로 슬쩍 바뀌면 다리가
+    # 안 켜져 있을 때 엉뚱한 주소에 물으며 실패 이유가 헷갈린다.
+    assert provider.base_url == "http://127.0.0.1:8199"
