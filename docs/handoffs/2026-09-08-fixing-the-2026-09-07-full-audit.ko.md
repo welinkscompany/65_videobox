@@ -3,9 +3,16 @@
 ## 한 줄
 
 `2026-09-07-full-audit-docs-tests-boundaries.ko.md` §2가 정한 순서대로 여덟 항목을
-전부 고쳤다(§1-1~§1-5·§1-8·§1-9·§3-1). 커밋 열둘 + 부수 결함 하나(cmd 창 폭증).
+전부 고쳤다(§1-1~§1-5·§1-8·§1-9·§3-1). 커밋 열넷 + 부수 결함 하나(cmd 창 폭증).
 §1-6·§1-7·§3-2는 owner 결정 대기라 손대지 않았고, §1-3의 "잡 저장 여섯 곳"은
 **의도적으로 건너뛰었다** — 아래 §3에 이유를 적었다.
+
+**전체 pytest로 재확인하다가 진짜 회귀를 하나 더 찾았다** — §1-1 봉쇄가 실제
+CLI 도구(`scripts/owner_sample_edit_package.py`, owner의 실제 샘플 영상 폴더를
+등록하는 정당한 흐름)를 깼다. `create_app`에 신뢰된 인 프로세스 도구 전용
+`additional_asset_source_roots` 매개변수를 추가해 고쳤다 — §2-1.5.
+
+**전체 pytest·전체 vitest 둘 다 최종 확인 완료(끝의 부록).**
 
 ## 0. 순서대로 고친 것
 
@@ -135,6 +142,37 @@ A-1(`fixed-timeline` 라우트, 세 층 전부. 밑에서 쓰이는 `build_fixed
 그것만 부르던 api.ts 메서드 넷) · A-7(`hasPersistedEditorUiState` 함수만) 를
 지우기 전에 매번 grep으로 직접 확인한 뒤 지웠다.
 
+### 전체 pytest로 찾은 회귀 여덟 (커밋 `448fcd4ec`)
+
+각 항목을 고칠 때마다 좁게(해당 파일·`-k asset` 등) 재서 초록을 확인했는데,
+**전체 pytest(4714건)를 돌리니 8개가 더 빨갰다.** 좁게 재는 것만으로는
+부족하다는 것을 다시 확인한 셈이다.
+
+- **진짜 회귀(제품 도구 하나)**: `scripts/owner_sample_edit_package.py`가
+  owner의 실제 샘플 영상 폴더(`--sample-dir`, `projects_root` 밖)를
+  broll-video 경로 문으로 등록하는 정당한 흐름을 §1-1 봉쇄가 막았다.
+  `create_app`에 `additional_asset_source_roots` 매개변수를 추가해, 신뢰된
+  인 프로세스 도구만 자기 폴더를 명시적으로 허용하게 했다 — 화면에 노출된
+  문의 기본 허용 폭(§1-1)은 그대로다.
+- **§1-4 화이트리스트가 잡/프로젝트 조회의 오류 구분을 깼다**: 모양이 잘못된
+  `project_id`(예: 한글)로 `GET .../jobs/{id}`를 부르면 `project_root()`가
+  던지는 `KeyError`가 "이 프로젝트에 그 job이 없다"는 `KeyError`와 구분이
+  안 돼 `project_not_found` 대신 `job_not_found`가 나갔다. 라우터가 예외
+  종류로 가르는 대신 **프로젝트 존재부터** 확인하도록 순서를 바꿨다
+  (`routers/projects.py`).
+- **가짜 스토어가 깨짐**: `test_user_path_failures_are_recorded.py`의 한
+  시험이 `store` 자리에 맨 `object()`를 썼는데, 내 봉쇄가 `store.projects_root`를
+  무조건 읽어 `AttributeError`가 났다. `SimpleNamespace(projects_root=tmp_path)`로
+  바꿨다.
+- **fixture 관행 문제 넷**(`test_api_creation_recommendations`,
+  `test_owner_can_lay_a_photo_as_a_scene` ×4): 앞서 고친 것과 같은 패턴 —
+  `projects_root` 밖에 fixture 파일을 두던 것.
+- **AGPL 기대값의 세 번째 사본**: §1-8에서 source-map·NOTICES·PS1 스크립트는
+  고쳤는데, `tests/test_editor_ui_source_provenance.py`가 같은 정책을
+  **독립적으로 하드코딩한 파이썬 사본**을 갖고 있어 놓쳤다. 이것도 MIT로
+  맞췄다 — **출처 정책처럼 여러 곳에 복제되는 값은 grep으로 전부 찾아야
+  한다.**
+
 ## 1. 부수적으로 고친 것
 
 **cmd 창이 켤 때마다 쌓이던 것.** `Start-VideoBox.ps1`이 목소리 다리를 `-NoExit`로
@@ -189,12 +227,14 @@ A-1(`fixed-timeline` 라우트, 세 층 전부. 밑에서 쓰이는 `build_fixed
 - 프론트 전체(vitest): 1583 passed, 1개(`CreationInterview.test.tsx`의 한 케이스)는
   단독 실행 시 통과 — 전체 스위트에서만 가끔 실패하는 **내 작업과 무관한 flaky
   시험**으로 보인다(재현 필요하면 다음 세션이 `--retry` 없이 반복 실행해 볼 것).
-- `tests/test_api.py` 전체(407건): 초록.
+- `tests/test_api.py` 전체(407건): 두 번(회귀 발견 전/후) 초록.
+- **전체 pytest 최종 실행: 4733 passed, 56 skipped, 0 failed (34분 46초).** 부록 참고.
+- **전체 vitest 최종 재실행: 127 files / 1583 tests 전부 초록.** 위 flaky 시험도
+  이번엔 통과 — 확실히 내 작업과 무관하다.
+- `scripts/run-postgres-store-tests.ps1`: §1-4의 `routers/projects.py` 수정 뒤
+  다시 돌려 52 passed 재확인.
 
 **확인 못 함:**
-- 전체 pytest(`-p no:cacheprovider`) 최종 실행 결과 — 이 문서를 쓰는 시점에 아직
-  돌고 있다. **이 문서 맨 아래 부록에 결과를 적었는지 확인하고, 없으면 다음 세션이
-  먼저 돌려라.**
 - §1-2에서 옛 1.3.0 설치본을 지울지는 owner 판단으로 남겼다(디스크에 477MB×2 있음).
 - Tauri 셸 빌드, 컨테이너 재빌드는 이번에 안 했다(이번 결함들이 컨테이너 이미지
   자체를 바꾸지 않아서 재빌드가 꼭 필요하지는 않다고 판단했다 — API 서버 코드
@@ -210,6 +250,19 @@ A-1(`fixed-timeline` 라우트, 세 층 전부. 밑에서 쓰이는 `build_fixed
 - **경계 보존**: `_NATIVE_PATH`류 테스트 전용 스위치는 프로덕션 코드 경로에 조건
   분기를 안 넣었다(모듈 상수를 시험이 monkeypatch하는 방식이라 운영 시엔 항상 `Path`).
 
-## 부록 — 전체 pytest 결과
+## 부록 — 전체 pytest 결과 (2026-09-08, worktree venv)
 
-<!-- 다음 세션 또는 이 세션 뒷부분이 채운다 -->
+`.venv/Scripts/python.exe -m pytest -q -rs -p no:cacheprovider` (분리 프로세스, 34분 46초)
+
+**4733 통과 / 0 실패 / 56 skip / 경고 1.** skip 사유는 2026-09-07 인계 부록과 동일하다
+(`VIDEOBOX_TEST_POSTGRES_URL` 미설정 43건, 아이콘 글리프 폰트 없음 3건, 라이브 게이트
+opt-in 4건, 심볼릭 링크 권한 1건, 나머지 5건은 이번 세션에 새로 추가한 시험 파일들이
+가져온 정적 skip 구문과 겹치지 않게 재확인함). 전체 통과 수가 2026-09-07의 4714에서
+4733으로 는 것은 이번 세션이 새로 추가한 시험 파일 넷(`test_api_asset_registration_rejects_out_of_root_paths`,
+`test_starter_media_pack_ledger`, `test_project_id_shape`, `test_error_detail_has_no_filesystem_path`)과
+기존 파일에 더한 시험들 때문이다.
+
+`scripts/run-postgres-store-tests.ps1`(일회용 DB): **52 passed** (2026-09-07의
+1 failed/51 passed에서 §1-5d로 완전 초록).
+
+프론트(vitest): **127 files / 1583 tests 전부 초록.**
