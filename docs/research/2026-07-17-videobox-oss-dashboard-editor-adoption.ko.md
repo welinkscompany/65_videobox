@@ -1,5 +1,13 @@
 # VideoBox OSS 대시보드·편집기 도입 조사
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 2026-07-17 조사 스냅숏이다. §2 "확인한 사실"은 전부 그날 값이고 지금은 다 뒤집혔다.
+> 지금 맞는 문서: `docs/handoffs/2026-07-17-videobox-oss-dashboard-editor-adoption-plan-closeout.ko.md`, 반입 기록 `docs/oss/editor-ui-source-map.json`.
+> 지금 거짓인 문장 셋:
+> 1. "상태: 조사 완료, 구현 미착수" — 22 Task가 닫혔다(`apps/web/src/features/editor/{timeline,preview,inspector,workbench,transcript}`).
+> 2. "App.tsx 4,190줄 … router, Tailwind, 공통 UI kit가 없다" — 그 파일들은 없고 TanStack Router·Tailwind 4·`components/ui/` 20개가 있다.
+> 3. "우측: 루미 / 추천 / 속성" — 이름은 유진이다(`features/editor/workbench/YujinPanel.tsx`). "루미"는 `user-copy-policy.test.ts`에서 금지어다.
+
+
 **조사일:** 2026-07-17
 **상태:** 조사 완료, 구현 미착수
 **대상:** shadcn-admin, shadcn/ui, OpenCut, OpenCut classic, Opencast Editor, Supabase Studio

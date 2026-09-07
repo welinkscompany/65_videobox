@@ -1,5 +1,10 @@
 # VideoBox SaaS 확장 설계 노트
 
+> **역사 기록 (2026-09-07 전체 점검에서 표시).** 2026-07-02 설계 노트다. 결제·다중사용자·SaaS는
+> `docs/decisions/2026-09-04-capcut-shell-with-my-assets.ko.md`로 범위 밖이 확정됐다. 권고한 `queued/canceled` 상태값,
+> `workspace_id`, capability flag 넷, `storage_kind`는 채택되지 않았다(코드 0건). 현행 경계는 `docs/implementation-plan.ko.md` §4·§8.4.
+
+
 ## 제품 방향
 
 VideoBox는 초기에는 로컬 우선 애플리케이션으로 구현하되, 나중에 SaaS 기반 모델로 확장할 때 전체를 갈아엎지 않도록 코어 엔진, 데이터 모델, 작업 모델, provider 인터페이스를 SaaS 확장 가능 구조로 설계한다.

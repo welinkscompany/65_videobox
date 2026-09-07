@@ -1,5 +1,14 @@
 # Starter media pack — 공식 라이선스 조사 ledger
 
+> **주의 (2026-09-07 전체 점검).** 이 파일은 사람이 읽는 조사 기록이 아니라 **빌더가 직접 읽는 원장**이다
+> (`scripts/build_starter_media_pack.py` `load_approved_candidates`, 기본 `--ledger`). 표 줄의 `same page/hash`는
+> **바로 위 표 줄**의 저작자·페이지·해시를 물려받는다. 2026-09-06에 RPG 표의 앞 줄들을 지우면서 `sfx-rpg-door`·
+> `sfx-rpg-grass`·`sfx-rpg-steps` 셋이 그 위 표(`sfx-pop10`)의 **`cogitollc / pop-sounds`를 물려받게 됐고**, 설치된
+> 1.3.0 팩 `LICENSES.md:74-76`에 그렇게 찍혔다. 맞는 값은 `Delta12 Studio · RPG Sound Effect Pack`
+> (1.2.0 증거 파일, 커밋 `f5ca1b6f1`의 지워진 줄). **행을 고치면 빌더의 `_APPROVED_CANDIDATE_FINGERPRINT`도 같이
+> 바뀌어야 하므로 이 점검에서는 행을 건드리지 않았다.** 고치는 순서는 최신 인계 문서에 있다.
+
+
 > SSOT: Starter Media Pack Task 5 Step 1의 후보별 라이선스 판단과 evidence snapshot이다. 이 문서는 **실제 pack manifest도, pack release 승인도 아니다.** 각 후보는 실제 download 후 SHA-256·duration·FFmpeg/ffprobe format 검증을 통과해야만 manifest asset이 될 수 있다.
 
 ## 조사 기준

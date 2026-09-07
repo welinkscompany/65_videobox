@@ -1,5 +1,15 @@
 # VideoBox 개발 컨텍스트
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 2026-07-14 시점 컨텍스트다. 통째로 현행 근거로 쓰지 않는다.
+> 지금 맞는 문서: `CLAUDE.md` §2·§3, `docs/development-fast-path.ko.md` §10·§11, 최신 인계 문서.
+> 지금 거짓인 문장 셋:
+> 1. "Local Media Director … production 구현은 시작 전이다" — 구현돼 있다(`routers/director_proposals.py:414,566,581`,
+>    `packages/core-engine/.../director_proposal_service.py`).
+> 2. "현재 코드의 Gemini 자동 fallback, 외부 HTTP(S) runtime 허용" — 둘 다 없다. gemini는 소스 0건, `lm_studio.py:23,77-90`이
+>    `127.0.0.1`·`host.docker.internal`만 허용한다.
+> 3. "text-only Qwen adapter" — 비전·임베딩 경로가 따로 있다(`vision.py`, `embeddings.py`).
+
+
 > 이 문서는 현재 브랜치의 작업 맥락과 우선순위를 요약하는 보조 컨텍스트 문서다. 현재 authoritative 상태/next slice 판단은 `docs/development-status-2026-06-29.ko.md`의 `## 235`와 `docs/implementation-plan.ko.md`의 `## 22`를 기준으로 본다. 최신 재개 절차는 `docs/handoffs/2026-07-14-local-media-director-plan-closeout.ko.md`에 있다.
 
 ## 폴더 역할

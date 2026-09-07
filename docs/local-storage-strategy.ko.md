@@ -1,5 +1,17 @@
 # VideoBox 로컬 저장 전략
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 이 문서의 "SQLite 확정" 설계는 뒤집혔다.
+> 지금 맞는 문서: `docs/development-fast-path.ko.md` §10·§11, `compose.yaml`, 코드 원본
+> `packages/storage-abstractions/src/videobox_storage/sqlite_schema.py`·`postgres_schema.py`.
+> 지금 거짓인 문장 셋:
+> 1. "SQLite + 파일시스템 하이브리드로 간다"(§2) — 제품(컨테이너)은 PostgreSQL이다.
+>    `services/api/src/videobox_api/main.py:957-985`가 DB 주소 없으면 기동을 거부한다.
+> 2. "프로젝트별 SQLite 파일 `projects/<id>/db/project.sqlite`"(§7) — Postgres 모드는 DB 하나에
+>    `(project_id, id)` 복합 키다(`postgres_schema.py:11-52`).
+> 3. "`project.json`"(§4 트리) — 만들어지지 않는다(`local_project_store.py` `_create_project_layout`).
+> 그 밖에 job 타입 `tts_generation`·컬럼 `settings_json`·`preview_v001.mp4` 예시도 코드와 다르다.
+
+
 ## 1. 목적
 
 이 문서는 VideoBox의 로컬 우선 저장 전략을 확정하기 위한 기준 문서다.

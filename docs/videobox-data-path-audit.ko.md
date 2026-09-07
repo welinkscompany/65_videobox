@@ -1,5 +1,14 @@
 # VideoBox 데이터 경로 전수조사 (2026-08-08)
 
+> **2026-09-07 전체 점검 정정.** 2026-08-10 실측이다. §4-②·③의 "환경변수 누락"은 그 뒤 compose에 들어가 닫혔다.
+> 지금 거짓인 문장 셋:
+> 1. 감시 폴더 기본값 `G:\내 드라이브\100_videobox` — 지금은 `~/OneDrive/#_videobox`(`settings.py:38`, 결정 2026-09-07),
+>    컨테이너는 `/videobox-drop`(`compose.yaml:95`).
+> 2. "컨테이너에 `VIDEOBOX_MEDIA_INBOX_*`가 하나도 없다 … 감시 스레드가 꺼져 있다" — `compose.yaml:89,95,102`에 있고 기본 켜짐.
+> 3. "`VIDEOBOX_MEDIA_ANALYSIS_ENABLED`도 compose에 빠져 있다" — `compose.yaml:83`에 있다.
+> 줄번호(`postgres_project_store.py:112`, `local_project_store.py:523/631`, `main.py:530-565`)도 어긋난다 — 함수 이름으로 찾아라.
+
+
 > **해결됨 (2026-08-10, owner 지시).** 데이터 폴더 세 벌을
 > **`20_project\65_videobox-project` 한 곳으로 합쳤다.** 아래 §5의 결정 1·2가 이걸로 닫혔다.
 >

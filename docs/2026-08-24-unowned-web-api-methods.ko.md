@@ -1,5 +1,14 @@
 # 화면이 부르지 않는 웹 API 분류 — 2026-08-24
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 2026-08-31 `4ea1bcbd1`이 이 표의 상당수를 실제로 지우거나 배선했다.
+> 지금 맞는 것: 코드 자체(`apps/web/src/api.ts` 213개 메서드, 직접 호출 없는 것 10개) — 최신 인계 문서의 §5 참조.
+> 지금 거짓인 문장 셋:
+> 1. `listSceneImages`·`getFootageProposal` "화면에 붙일 것" — 둘 다 `api.ts`에서 삭제됐다(백엔드 문은 시험으로 살아 있음).
+> 2. `listDirectorMessages`·`prepareDirectorMessage`·`applyDirectorProposal`·`getDirectorProposal` "지울 것" — 남아 있고 시험이 붙어 있다.
+> 3. `approveReviewRecommendation` "그대로 둘 것" — 삭제됐다. `permanentDeleteLibraryAsset`은 화면에 배선됐다(`LibraryPreviewPane.tsx:34`).
+> 경로 받는 프로젝트 자산 등록 "지울 것"은 **다시 결정할 일**이다 — 자료실 쪽 경로 문이 09-07에 열렸다.
+
+
 ## 결론
 
 `apps/web/src/api.ts`의 `api` 객체 메서드 **196개**를 TypeScript 구문으로 다시 셌다.

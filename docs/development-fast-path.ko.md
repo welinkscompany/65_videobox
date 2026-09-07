@@ -309,11 +309,12 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
    `FOOTAGE_DESCRIPTION_VERSION`(`library_footage_indexer.py`). 같은 파일을 이름만
    바꿔 다시 넣어도 재분석하지 않는다.
 3. **설명 문장 형식을 바꾸면 버전만 올린다.** 저장된 벡터는 그때의 문장을 가리키므로,
-   버전을 올리면 전부 자동 재색인된다. 유지보수 루프가 1분마다 부른다(오디오 8개,
-   촬영본 2개) — 화면 분석이 무거우므로 한 번에 처리하는 수를 작게 둔다.
+   버전을 올리면 전부 자동 재색인된다. 유지보수 루프가 1분마다 부른다(오디오 32개 —
+   `main.py` `LIBRARY_AUDIO_INDEX_BATCH`, 8개/분은 너무 느렸다 —, 촬영본 2개) — 화면 분석이 무거우므로 한 번에 처리하는 수를 작게 둔다.
 4. **모델에 한국어로 답하라고 명시한다.** 안 하면 영어로 나오고, 언어가 어긋나면 검색
-   점수가 0.52~0.59로 떨어진다(우리말끼리는 0.63~0.70). 두 색인기와 프로젝트 분석이
-   `VISION_ANALYSIS_PROMPT` 하나를 공유한다.
+   점수가 0.52~0.59로 떨어진다(우리말끼리는 0.63~0.70). 촬영본 색인기와 프로젝트 분석이
+   `VISION_ANALYSIS_PROMPT`(영상)와 `STILL_VISION_ANALYSIS_PROMPT`(정지 이미지, 2026-09-06)를
+   공유한다(`media_analysis.py:33,42`). 오디오 색인기에는 비전 프롬프트가 없다.
 5. **설명 문장이 획일적이면 검색이 사실상 무작위가 된다.** 고정 틀로 두 단어만 다르게
    하면 벡터가 거의 평행해진다 — 실제로 "신나고 빠른 음악"에 보통/보통 곡이 1등이었고
    2등과 0.002 차였다. 측정값마다 다른 표현을 써야 한다.
@@ -337,8 +338,11 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
    VideoBox 유진의 기억은 `videobox-hermes-memory-adapter`가
    `videobox-hermes-provider-egress`를 통해 Mem0에 연결한다. 승인 배경은
    유진의 로컬 기억이 한 번에 5개·각 280자로 제한돼 실제 사용에 부족했기 때문이다.
-   **이 경로로 owner의 영상 기획과 대화 내용이 외부로 나간다.** 이 사실을 문서에서
-   숨기지 않는다. 아래 경계는 조항 1의 "보안 gateway가 아니다"라는 전제 위에서 읽는다.
+   **기본값은 자체 호스팅이다(`VIDEOBOX_MEM0_MODE=local`, 2026-08-08 전환)** — 로컬 qwen +
+   파일 qdrant, 이 컴퓨터 밖으로 나가는 것이 없다(`compose.hermes-yujin.yaml`,
+   `hermes_memory_adapter.py` `build_memory_adapter_from_environment`). **`MEM0_API_KEY`를 채우면
+   그때만 호스팅 Mem0로 나가고 owner의 기획·대화 문구가 외부로 간다.** 이 사실을 문서에서
+   숨기지 않는다(2026-09-07 점검에서 정정 — 그 전엔 "항상 나간다"로 적혀 있었다). 아래 경계는 조항 1의 "보안 gateway가 아니다"라는 전제 위에서 읽는다.
 
    - 어댑터는 `videobox-hermes-memory-network`와 `videobox-hermes-provider-egress`에만
      붙는다. VideoBox data, media mount, PostgreSQL, `videobox-internal`,
@@ -352,9 +356,10 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
    - 원본 영상, 자산 파일, 대본 파일, 프로젝트 경로, 프로젝트 식별자는 나가지 않는다.
    - **로컬이 기억의 원본이고 Mem0는 검색·순위만 맡는다.** 조회 시 로컬 기록을 먼저 읽고,
      게이트웨이가 돌려준 항목 중 **로컬과 정확히 일치하는 것만** 채택한다
-     (`yujin_memory_service.py:181` `if exact not in local: continue`).
+     (`yujin_memory_service.py:207` `if exact not in local: continue`).
      따라서 외부가 기억을 **주입할 수 없다.** 이 대조를 제거하지 않는다.
-   - `MEM0_API_KEY`가 비어 있으면 어댑터는 뜨더라도 Mem0로 나가지 않는다.
+   - `MEM0_API_KEY`가 비어 있으면 어댑터는 **로컬 모드로 돈다** — 밖으로 나가지 않고 기억은
+     그대로 동작한다. 키도 없고 mode도 `local`이 아니면 그때만 provider가 없다.
    - **조회 폴백이 있다(owner 판단 2026-08-31).** 게이트웨이가 없거나 이번
      호출이 실패하면 `retrieve_approved_memories()`가 로컬에 저장된 승인
      기억을 저장 순서 그대로(뜻 기반 순위 없이) 돌려준다
@@ -387,7 +392,9 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
 2-C. **대본에 맞춘 이미지 생성 경로 — owner 승인 (2026-08-20).** workspace 컨테이너가
    호스트의 ComfyUI(`host.docker.internal:8188`)에 연결한다. 승인 배경은 owner가
    **대본의 각 장면에 맞는 그림을 만들어 자산 공백을 채우기를** 원하기 때문이다.
-   지금은 그 자리에 "장면을 보여 줄 영상이 없어요"만 남고 owner가 손으로 채운다.
+   (승인 당시 배경: 그 자리에 "장면을 보여 줄 영상이 없어요"만 남았었다. **2026-08-21에
+   만들었다** — `routers/scene_images.py`, `apps/web/src/features/media/SceneImageStudio.tsx`,
+   provider `comfyui_image_generation.py`. 2026-09-07 점검에서 정정.)
 
    - **이 경로로 나가는 것은 이 컴퓨터 밖으로 나가지 않는다.** `host.docker.internal`은
      도커 호스트, 즉 같은 기계다. 2-B와 같은 성격이고 조항 1의 provider egress와 다르다.
@@ -402,12 +409,17 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
    하드웨어가 아니라 라이선스였다. 디스크의 유일한 이미지 모델이 **FLUX.1-dev
    (비상업)**인데 이 제품의 용도는 수익 유튜브다. 따라서:
 
-   - **상업 이용이 허용된 모델만 쓴다.** 확보 대상은 `FLUX.1-schnell`(Apache-2.0).
+   - **2026-08-21 owner 결정으로 아래 두 줄은 바뀌었다:** `flux1-dev`로 간다. 라이선스 책임은
+     owner가 진다. 코드는 막지 않고 어느 쪽을 쓰는지만 보고한다(`settings.py`
+     `commercial_use_is_unrestricted`, compose 기본 `VIDEOBOX_IMAGE_MODEL_NAME=flux1-dev.safetensors`).
+     2026-09-07 점검에서 정정.
+   - ~~**상업 이용이 허용된 모델만 쓴다.** 확보 대상은 `FLUX.1-schnell`(Apache-2.0).~~
    - 모델 이름을 설정에서 바꿀 수 있게 만든다면, **비상업 모델이 들어왔을 때
      조용히 돌아가게 두지 않는다.** 라이선스는 실행 중에 눈에 보이지 않는 종류의
      제약이라, 사람이 기억하는 것에 맡기면 반드시 새어 나간다.
 
-   **아직 재지 않은 것 (승인과 별개로 남는다).**
+   **재지 않았던 것 — 2026-08-21에 쟀다(fp8, 1920×1080 한 장 약 24초;
+   `docs/handoffs/2026-08-21-videobox-scene-images-and-the-donkey.ko.md`). 아래는 그 전 메모다.**
 
    - 장당 생성 시간과 실제 VRAM 점유. `FLUX.1-schnell`을 확보한 뒤 ComfyUI 단독으로
      먼저 잰다. **LM Studio(유진의 두뇌)를 켜 둔 채로** 재야 한다 — 내리고 재면

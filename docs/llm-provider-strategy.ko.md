@@ -1,5 +1,13 @@
 # VideoBox LLM Provider 전략
 
+> **2026-09-07 전체 점검 정정.** 큰 틀(로컬 전용 LLM, 외부 LLM provider 퇴역)은 맞다. 다음 둘이 지금 다르다:
+> 1. §5 "ComfyUI는 그림 한 경로에만" — **장면 동영상 생성**도 ComfyUI다(`comfyui_video_generation.py`, `routers/scene_videos.py`,
+>    `compose.yaml` `VIDEOBOX_VIDEO_GENERATION_BASE_URL`, owner 결정 2026-08-29).
+> 2. §5 "mem0는 현재 runtime 범위 밖" — 안에 있다. 자체 호스팅으로 2026-08-08 승인·배선(`yujin_memory_service.py`,
+>    `compose.hermes-yujin.yaml` `videobox-hermes-memory-adapter`). SaaS auth/billing·direct OAuth만 범위 밖이 맞다.
+> 덧: "외부 생성 provider 코드·경로 제거"는 **LLM 한정**이다. TTS의 gTTS/ElevenLabs 코드는 남아 있고 기본 꺼짐(`provider_factories.py:40,44`).
+
+
 ## 1. 현재 운영 결정
 
 VideoBox의 자동 LLM runtime은 **로컬 Qwen만** 사용한다.

@@ -1,5 +1,9 @@
 # VideoBox SaaS Expansion Design Notes
 
+> **Historical (marked in the 2026-09-07 audit).** Design note from 2026-07-02. Billing, multi-user and SaaS are out of scope per
+> `docs/decisions/2026-09-04-capcut-shell-with-my-assets.ko.md`. See the Korean file for details; current boundary is `docs/implementation-plan.ko.md` §4/§8.4.
+
+
 ## Product Direction
 
 VideoBox is implemented as a local-first application in the early phase, but its core engine, data model, job model, and provider interfaces must be designed so the product can later expand into a SaaS-backed model without a full rewrite.

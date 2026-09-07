@@ -1,5 +1,16 @@
 # VideoBox 오픈소스 리서치 및 범위 축소 문서
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 구현 전(2026-06-27) 기술 선택 기록이다. 채택 판단 여럿이 실제와 다르게 갔다.
+> 지금 맞는 문서: `docs/implementation-plan.ko.md` §4·§8, 의존성은 `requirements-runtime.txt`·`requirements-container.txt`.
+> 지금 거짓인 문장 셋:
+> 1. "WhisperX 채택"(§B) — 실제 STT는 faster-whisper(`packages/provider-interfaces/.../faster_whisper_stt.py`). whisperx는 0건.
+> 2. "PySceneDetect·sentence-transformers 채택"(§C·§D) — 둘 다 없다. 장면 감지는 ffmpeg 필터(`auto_cut.py:31`),
+>    임베딩은 LM Studio HTTP(`lm_studio.py` `LMStudioEmbeddingProvider`).
+> 3. "생성형 이미지/비디오 자동 제작 제외"(§N) — 2026-08 이후 로컬 ComfyUI로 들어왔다
+>    (`routers/scene_images.py`, `scene_videos.py`, 결정 `2026-08-29-ai-video-naming-and-packaging-followups`).
+> Voicebox "제한 범위 채택"(§H)도 없다 — 목소리는 chatterbox 호스트 브리지(`2026-09-03-host-voice-bridge`).
+
+
 ## 1. 목적
 
 이 문서는 VideoBox 구현 전에 다음을 확정하기 위한 문서다.

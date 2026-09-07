@@ -1,5 +1,9 @@
 # BrollBox 재사용 감사 문서
 
+> **역사 기록 (2026-09-07 전체 점검에서 표시).** 2026-07-02 시점 사전 감사다. 거짓 문장은 없지만 현행 판단 근거로 쓰지 않는다.
+> 현행 재사용 게이트는 `docs/implementation-plan.ko.md` §8.1, 파일별 결과는 `docs/oss-adoption-map.ko.md`(머리의 정정 포함).
+
+
 ## 목적
 
 기존 `brollbox-master`에서 VideoBox 개발에 재사용할 수 있는 코드, 설계 아이디어, 운영 자산을 선별한다.

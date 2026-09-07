@@ -1,5 +1,9 @@
 # VideoBox 실행용 구현 계획서
 
+> **읽기 전에 (2026-09-07 전체 점검).** 현재 상태는 `CLAUDE.md` §2의 `최신 세션 인계` 줄이 가리키는
+> 문서 기준이다. 아래 머리말 8단락은 2026-08-04까지의 기록이고, §12·§13은 과거 기록이다. §4·§8.5·§23의
+> 낡은 문장에는 이번 점검이 `→ 2026-09-07 점검:` 표시를 달아 뒀다. 표시가 없는 §23 항목은 코드로 다시 확인하라.
+
 > **2026-08-04 Task 23D / Task 23 final automated closeout:** Task 23D sanitized Hermes readiness와 Task 23 전체 자동화 gate를 닫았다. 실제 Smoke는 six-gate **6/6 pass** 뒤 자격증명 부재를 숨기지 않고 예상 exit `2`, `credential_blocked`, `live_canary_status=not_run`, provider/network call `0`으로 기록했다. receipt 보완 뒤 owner-ready **112 passed**, 전체 Python **2960 passed, 48 skipped, warning 1**을 통과했고, 직전 통합 감사의 전체 frontend **52 files / 733 passed**, production build, full isolated Chromium E2E **35/35**, provenance/UI-system, focused network guard, static/non-live script 결과도 유지된다. r4 artifact **8**, controls **6/6**, Range `206`, HEVC H264/yuv420p proxy와 현재 사용자 sample **5/5 name+size+SHA**도 read-only로 다시 확인했다. 최종 독립 spec/plan/gap, quality, reverse-runtime review는 보완 뒤 모두 **C0/I0/M0 APPROVE**다. quality review의 receipt concurrency/full-SHA/Unicode control/partial-temp cleanup 네 Minor는 TDD로 보완했다. Task 23 production 진행률은 **4/4 (100.0%)**, 잔여 **0.0%**, current authoritative status는 `§322`다. 과거 `9/22 (40.9%)`는 historical/deprecated이며 current가 아니다. 사람의 시각·청취·취향·권리·게시·Task 9 acceptance, 인증된 provider/live Mem0, 현재 CapCut Desktop edit/export는 별도이고 통과로 주장하지 않는다. review hardening commit `24a8e24184109250050e9190020ff126d7619290`까지 upstream에 push했다.
 > **2026-08-03 Task 23C closeout:** 사용자 원본 5개를 바꾸지 않고 실제 r4 package를 끝까지 생성했다. 선택 H264/HEVC는 공개 local API로 격리 복사되어 source/copy SHA가 일치했고 둘 다 Range `206`, HEVC는 H264/yuv420p proxy였다. B-roll/BGM/SFX/caption/TTS/overlay와 exact/final/SRT/timeline/session/CapCut/checklist를 artifact 8개로 연결했으며 독립 reverse audit와 원본 5개 hash+size 재검사도 통과했다. `external_provider_calls=0`이고 사람 승인·권리·Desktop 편집/export·자동 apply·memory write는 모두 false다. 관련 focused backend는 **326 passed, warning 1**이며 전체 Python/frontend/build/E2E/provenance와 사람/CapCut Desktop acceptance는 실행하지 않았다. Task 23 production 진행률은 **3/4 (75.0%)**, 잔여 **25.0%**, current authoritative status는 `§321`, closeout handoff는 `docs/handoffs/2026-08-03-videobox-task23c-owner-sample-edit-package-closeout.ko.md`다. 다음 goal은 **23D Hermes readiness smoke**다.
 > **2026-08-03 Task 23B closeout:** 안전한 owner 진입점 `scripts/owner-ready.ps1`을 TDD로 완료했다. 기본 `Check`는 read-only이고, `Start`는 base service 두 개만, `Smoke`는 기존 non-live/static verifier 여섯 개만, `Open`/`OpenCapCut`은 명시 모드에서만 동작한다. 실제 Check는 현재 `.env.container` 부재를 정확히 `blocked`로 안내했고 실제 Smoke는 6/6 pass, 외부 provider call 0이었다. 전용 테스트 **25 passed**, 관련 Hermes/Compose 계약 **142 passed, 1 skipped**다. Task 23 production 진행률은 **2/4 (50.0%)**, 잔여 **50.0%**이며 current authoritative status는 `§320`, closeout handoff는 `docs/handoffs/2026-08-03-videobox-task23b-owner-one-click-closeout.ko.md`다. 다음 goal은 **23C 사용자 샘플 repeatable edit package**다.
@@ -80,7 +84,9 @@
 
 ### 제외
 
-- 실시간 멀티트랙 편집 UI
+- 실시간 멀티트랙 편집 UI (→ 2026-09-07 점검: 실물은 **역할 고정 6줄 타임라인**이 잠금·숨김·음소거·끌기·
+  트림까지 있다 — `apps/web/src/features/editor/timeline/TimelineDock.tsx:772`, `timeline-geometry.ts:3`.
+  자유 트랙 추가는 없다. 이 문장과 실물의 거리를 owner가 확인해야 한다)
 - 결제/계정 체계 전체
 - 멀티유저 협업
 - 클라우드 렌더 팜
@@ -146,7 +152,8 @@
 **(a) 캡컷 내보내기에는 실제로 얹을 수 있다.** 우리가 만드는 것은 캡컷 편집 파일이고,
 그 파일은 이름표만 있으면 된다 — 그리는 것은 캡컷이 한다. 다만 지금
 `packages/capcut-export/src/videobox_capcut_export/pycapcut_adapter.py`는 전환·효과·필터를
-**하나도 붙이지 않는다.** 붙이려면 그 어댑터에 실제로 넣어야 한다.
+**하나도 붙이지 않았다(2026-08-21 당시).** → 2026-09-07 점검: 지금은 붙인다 —
+`pycapcut_adapter.py` `_CAPCUT_TRANSITION_TYPE_BY_KEY`, §4.1.2.
 
 **여기에도 함정이 하나 있다 — 전환 1,137개 중 985개가 캡컷 유료 항목이다.** 무료
 사용자의 캡컷에서 어떻게 보이는지는 확인하지 않았다. 붙일 것을 고른다면 `is_vip`가
@@ -156,7 +163,8 @@
 아니라, **캡컷 사용자가 실제로 무엇을 기대하는지**를 읽는 자료다.
 
 장면 전환이 그 예다. ffmpeg에는 `xfade` 필터가 있어서 우리가 직접 만들 수 있다
-(현재 저장소에 `xfade`를 쓰는 코드는 **없다** — 전환은 아직 구현돼 있지 않다).
+(2026-08-21 당시엔 없었다. → 2026-09-07 점검: 지금은 `transitions.py`·`ffmpeg_final_renderer.py`가
+`xfade`를 쓴다 — §4.1.2).
 그런데 만든다면 **1,137개가 아니라 자주 쓰는 몇 개면 된다.** 이 목록의 값어치는
 "몇 개를 만들까"가 아니라 "어느 이름이 익숙한가"에 있다.
 
@@ -581,7 +589,11 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - editing session 생성/조회/수정 API와 partial regeneration request contract가 이미 들어가 있다
 - 이 구간은 2026-06-29 시점 스냅샷이며, 최신 검증 기준은 아래 2026-07-01 체크포인트를 따른다
 
-현재 기준으로 아직 비어 있는 핵심 범위:
+현재 기준으로 아직 비어 있는 핵심 범위 (→ 2026-09-07 점검: **아래 넷은 전부 만들어졌다.** 부분 재생성은 실제
+잡으로 돈다(`editing_session_and_regeneration.py:687-737`, 실행부 `_pipeline_private_helpers.py:618`), 세션 수정은
+타임라인 재작성과 출력 신선도 게이트로 이어진다(`editing_transactions.py:46`, `output_source_verifier.py:295`),
+오버레이는 설명 카드·이미지·표·도형 4종으로 갈라졌다(`routers/editing_session.py:736-899`), TTS 교체는
+`tts-replacement` PATCH/DELETE(`:961,985`)로 세션에서 다룬다):
 
 - partial regeneration의 실제 job 실행 연결
 - 편집 세션 수정 결과를 timeline 재작성 또는 후속 생성 단계에 반영하는 규칙
@@ -1367,7 +1379,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `[ ] 미완료 (pending)`: 아직 시작하지 않았거나, 명시적 gate가 남은 항목이다.
 - `[!] BLOCKED`: 외부 사실·권한·승인 근거가 없어 구현을 시작하지 않는 항목이다.
 - `[x] 완료 (done)`: Hermes가 올라갈 Compose/PostgreSQL/snapshot/runtime 기준선과 실제 두 장면 current-revision MP4 재생 경로를 고정했다. Task 9 사람/환경 acceptance와 CapCut Desktop evidence의 완료 상태는 이 항목으로 바꾸지 않는다.
-- `[~] 진행 중 (in progress, 2026-07-20)`: 외부 생성 모델 provider를 퇴역 중이다. key router·web credential CRUD UI·provider/domain/core module을 삭제하고, 새 project와 다시 여는 기존 SQLite project 모두에서 퇴역 credential table을 제거한다. public provider credential path와 provider transport는 없으며, local-only 실패는 deterministic fallback 또는 사람 검수로 끝난다. 단, 통합 API 파일의 과거 fallback 전용 테스트 삭제와 full backend 재검증은 아직 남아 있다.
+- `[~] 진행 중 (in progress, 2026-07-20)`: 외부 생성 모델 provider를 퇴역 중이다. key router·web credential CRUD UI·provider/domain/core module을 삭제하고, 새 project와 다시 여는 기존 SQLite project 모두에서 퇴역 credential table을 제거한다. public provider credential path와 provider transport는 없으며, local-only 실패는 deterministic fallback 또는 사람 검수로 끝난다. 단, 통합 API 파일의 과거 fallback 전용 테스트 삭제와 full backend 재검증은 아직 남아 있다. → 2026-09-07 점검:
+  **끝났다.** `tests/`·소스에 gemini 0건(`__pycache__` 찌꺼기만), `tests/test_provider_retirement_contract.py`가 퇴역을 지킨다.
 - `[x] 완료 (done)`: 2026-07-19 Hermes Agent 공식 문서와 release를 확인했다. 공식 quickstart/configuration은 `hermes model`의 **OpenAI Codex → ChatGPT OAuth device-code login**을 지원한다고 명시한다. 첫 설치는 signed release tag `v2026.7.7.2`의 annotated tag `b7751df34688835a108e0d630f3495fc11f3df79`와 peeled commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`으로 pin한다. 근거: <https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/>, <https://hermes-agent.nousresearch.com/docs/user-guide/configuration/>, <https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.7.2>.
 - `[x] 완료 (done)`: `videobox-hermes-agent` pre-auth container를 official amd64 digest `sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a`로 기동했다. Compose profile은 `hermes-preauth`이며, `network_mode: none`, host port 없음, VideoBox DB/media/snapshot mount 없음, 전용 scratch `videobox_hermes_preauth_state:/opt/data`, read-only root, `cap_drop: ALL`, `no-new-privileges`, bounded `local` log를 확인했다. 이 scratch volume은 훗날 OAuth state volume과 절대 재사용하지 않는다. official s6 supervisor의 state ownership·supervise lock을 위한 최소 예외로 `CHOWN`, `DAC_OVERRIDE`, `SETGID`, `SETUID`만 다시 더한다. 이 네 capability는 PID 1 supervisor에만 남고 실제 CMD는 UID `10000`/`hermes`, `CapEff=0`으로 실행됨을 runtime에서 확인했다. `hermes --version`은 `v0.18.2 (2026.7.7.2) · upstream 9de9c25f`를 반환했고 scratch state에는 `auth.json`과 `.env`가 없다.
 - `[ ] 미완료 (pending)`: Hermes→VideoBox API 권한중개, egress allowlist gateway, OAuth login은 아직 만들지 않았다. 이 계획의 각 gate를 통과하기 전에는 이 범위를 추가하지 않는다.
@@ -1388,7 +1401,9 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 
 1. `[x] 완료 (done)`: `videobox-api`와 `videobox-web` service를 retire하고, 하나의 `videobox-workspace` image가 Python API, compiled Web static artifact, FFmpeg, Node development toolchain을 함께 가진다. host에는 `127.0.0.1:${VIDEOBOX_WEB_PORT:-5173}:8080` 하나만 노출한다. API는 UID 10001의 `127.0.0.1:8000`만 listen하고, Web proxy는 UID 10002와 scrubbed DB environment로 실행한다. Docker Desktop의 published loopback port 제약으로 workspace는 `videobox-edge`와 internal DB network를 모두 가진다. 이는 Web/API의 Docker-level mount namespace 분리를 포기하는 사용자 승인 workspace tradeoff이며, Windows bind mount permission만으로 Web data 불가를 절대 보장한다고 주장하지 않는다. PID 1은 두 worker를 fork한 직후 `CapPrm`·`CapEff`를 0으로 drop하고, 실제 runtime에서 PID 1·API·Web 모두 capability 0과 `NoNewPrivs=1`을 확인했다.
 2. `[x] 완료 (done)`: PostgreSQL은 `65_videobox` 내부 전용 companion service로 유지한다. database volume `65_videobox_videobox_postgres_data`와 current `runtime/`·read-only verified `snapshot/` mount를 그대로 재사용하며, DB port는 host에 열지 않았다. 이는 workspace 한 개에서 개발·운영한다는 기준을 지키면서 DB lifecycle/data integrity를 app process restart와 분리하기 위한 최소 예외다.
-3. `[x] 완료 (done)`: workspace는 Docker socket, host bridge, CapCut mount, Hermes OAuth credential volume을 받지 않는다. inspect에서 `Privileged=false`, device 0, Docker socket mount 0을 확인했다. Gemini/OAuth/Hermes provider environment도 workspace에 없으며, `videobox-hermes-agent`의 pre-auth `network_mode: none`·no-VideoBox-data boundary는 유지한다. 실제 Hermes runtime을 workspace process로 합치면 DB/media/process environment 격리가 사라지므로, Agent Gateway·network split gate 전에는 합치지 않는다.
+3. `[x] 완료 (done)`: workspace는 Docker socket, host bridge, CapCut mount, Hermes OAuth credential volume을 받지 않는다. inspect에서 `Privileged=false`, device 0, Docker socket mount 0을 확인했다. Gemini/OAuth/Hermes provider environment도 workspace에 없으며, `videobox-hermes-agent`의 pre-auth `network_mode: none`·no-VideoBox-data boundary는 유지한다. 실제 Hermes runtime을 workspace process로 합치면 DB/media/process environment 격리가 사라지므로, Agent Gateway·network split gate 전에는 합치지 않는다. → 2026-09-07 점검: **"host bridge를 받지 않는다"는 낡았다.**
+   workspace는 LM Studio(1234)·목소리(8199)·CapCut(8200)·인포그래픽(8201) 브리지 주소를 받는다(`compose.yaml:79,124,165,169`,
+   `§10.14` 2-B/2-C 승인). Docker socket 부분만 여전히 참.
 4. `[x] 완료 (done)`: compose contract는 exact project name, service 수(`videobox-workspace`, `videobox-postgres`), loopback-only web port, DB/data/snapshot mount ownership, source-built artifact와 local-only/Gemini-0/OAuth-disabled boundary를 검증한다. 기존 project data에서 workspace health/web UI를 확인했고, `b-roll-smoke-test` current final-render content는 proxy를 통해 `206`, `video/mp4`, Range response로 재생 가능함을 확인했다. internal peer의 direct `:8000` API access는 차단되고 `:8080` proxy health만 통과했다. 그 뒤 legacy API/Web containers를 `remove-orphans`로 정리했다.
 
 ### 23.2 [~] 진행 중 (in progress) — 서비스 identity와 VideoBox 권한중개
@@ -1397,8 +1412,11 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 2. internal network만으로 권한을 인정하지 않는다. Hermes는 audience=`videobox-api`, operation·project allowlist, expiry·rotation·revocation·replay 방지를 포함한 짧은 수명 service capability로만 VideoBox API를 호출한다.
 3. 모든 handler는 최종 `(principal, project_id, operation)`을 검사한다. 초기 `get_project_status`는 명시적으로 선택한 한 project의 allowlisted read model만 반환하며 project list, global job, raw script/caption/media path/voice/transcript/PII를 반환하지 않는다. 단일 local owner MVP만 범위에 넣고 multi-user SaaS auth는 별도 slice다.
 4. `[x] 완료 (done)`: `GET /internal/hermes/projects/{project_id}/status`의 conditional read-only contract와 **durable consume/replay ledger**를 구현했다. default VideoBox에는 route가 없고, 명시적으로 주입한 verifier를 `create_app`이 project store에 bind할 때만 strict `HS256` key-id, issuer/principal/audience/operation/project/5분 TTL/JTI를 검사한다. JTI는 `(project_id, jti)` ledger에 원자적으로 consume되어 API restart 뒤에도 replay를 거부하며, persisted revoked JTI도 거부한다. `(project_id, expires_at)` index와 decision commit 뒤 purge로 만료 record를 정리하고, ledger 오류는 raw DB detail 없이 generic `503 hermes_capability_unavailable`으로 fail-closed한다. SQLite restart·two-independent-connection duplicate winner와 별도 임시 PostgreSQL 16 integration의 consume/replay/revoke·expiry purge·two-worker duplicate winner를 검증했다. verifier 단독 unit harness의 process-local replay/revocation은 배포 경로가 아니며, 실제 route에서는 durable callback이 없으면 배포하지 않는다. 반환 field는 `project_id`, `name`, `status`, `updated_at`, `has_editing_session`, `latest_session_revision`뿐이며 `root_storage_uri`, media/script/caption/voice/transcript, project list와 job은 없다.
-5. `[x] 완료 (done, static contract only, 2026-07-20)`: canonical Python static authority contract와 Compose extension을 field-by-field로 대조했다. issuer owner는 `gateway-only`, issuance는 `false`, signing secret delivery와 ordinary `/api/*` path는 `forbidden`이며, named future gateway service/network는 현재 Compose에 존재하지 않는다. 기존 `LocalProjectStore.revoke_hermes_capability`는 durable revoke **storage primitive**로만 명시하고, owner-authorized revoke writer는 `not_deployed`로 고정했다. default `create_app`에는 Hermes capability/revoke/issue route가 없고, 기존 conditional status route만 durable `consume_hermes_capability` boundary를 사용한다. Hermes pre-auth는 계속 `network_mode: none`이며 이 계약은 service, route, network, signer 또는 secret을 만들지 않는다.
-6. `[ ] 미완료 (pending)`: signer는 아직 어떤 VideoBox API route나 Hermes container에도 배포하지 않는다. owner-authorized revoke writer/source, signing secret delivery·rotation·key lifecycle, gateway audit 및 실제 gateway-only route/network는 아직 없다. Hermes가 self-mint하거나 shared signing key를 받는 설계는 금지한다.
+5. `[x] 완료 (done, static contract only, 2026-07-20)`: canonical Python static authority contract와 Compose extension을 field-by-field로 대조했다. issuer owner는 `gateway-only`, issuance는 `false`, signing secret delivery와 ordinary `/api/*` path는 `forbidden`이며, named future gateway service/network는 현재 Compose에 존재하지 않는다(→ 2026-09-07 점검: 지금은 있다 —
+   `compose.hermes-yujin.yaml` `videobox-agent-gateway`·`videobox-agent-gateway-api-network`). 기존 `LocalProjectStore.revoke_hermes_capability`는 durable revoke **storage primitive**로만 명시하고, owner-authorized revoke writer는 `not_deployed`로 고정했다. default `create_app`에는 Hermes capability/revoke/issue route가 없고, 기존 conditional status route만 durable `consume_hermes_capability` boundary를 사용한다. Hermes pre-auth는 계속 `network_mode: none`이며 이 계약은 service, route, network, signer 또는 secret을 만들지 않는다.
+6. `[~] 진행 중 (2026-09-07 점검 갱신)`: signer는 **gateway에 배포됐다**(`services/agent-gateway/src/videobox_agent_gateway/context_capabilities.py`
+   `YujinCapabilityIssuer`, Ed25519; VideoBox API 쪽은 검증자만 `main.py:1312`). 아직 없는 것: owner-authorized revoke writer, key rotation, gateway audit.
+   옛 문장: signer는 아직 어떤 VideoBox API route나 Hermes container에도 배포하지 않는다. owner-authorized revoke writer/source, signing secret delivery·rotation·key lifecycle, gateway audit 및 실제 gateway-only route/network는 아직 없다. Hermes가 self-mint하거나 shared signing key를 받는 설계는 금지한다.
 
 ### 23.3 [ ] 미완료 (pending) — 유진 profile, prompt와 업무 영역
 
@@ -1479,8 +1497,11 @@ owner 결정으로 유진의 1차 대화 route를 **로컬 LLM**으로 바꾼다
 **유지하는 경계 — 개정으로 완화하지 않는다:**
 
 - 유진은 DB, filesystem, shell, renderer, CapCut, raw HTTP, credential에 접근하지 않는다
-- 편집 mutation은 계속 사람 승인 게이트를 거친다. 대화의 "네"는 승인이 아니다
-- 대본·제목·썸네일·추천 영상 생성은 계속 제품 범위 밖이다 (`S-3` 별도 결정 전까지)
+- 편집 mutation은 계속 사람 승인 게이트를 거친다. 대화의 "네"는 승인이 아니다 (→ 2026-09-01 결정
+  `yujin-chat-applies-edits-directly`로 바뀜: 말하면 바로 적용되고 되돌리기가 지킨다)
+- 대본·제목·썸네일·추천 영상 생성은 계속 제품 범위 밖이다 (`S-3` 별도 결정 전까지) (→ 2026-08-16 owner 해제:
+  대본·제목은 허용, `test_yujin_local_conversation.py::test_script_and_title_requests_are_not_blocked_since_the_owner_lifted_it`.
+  썸네일 이미지 생성·추천 영상만 아직 막는다)
 - 모델 출력은 untrusted proposal이며 policy middleware가 매 tool call마다 권한을 재검사한다
 - VideoBox project·editing·asset·conversation DB가 계속 SSOT다. 모델 출력은 SSOT가 아니다
 - provider 전환은 항상 명시적이고 ledger에 기록한다. 조용한 대체나 자동 fallback은 금지다
@@ -1512,13 +1533,14 @@ Slice 5(Task 12–14)에 있다.
 - `yujin_provider_adapter.py`가 로컬/`gpt-5.4`/`gpt-5.4-mini`를 같은 인터페이스 뒤에 두고,
   전환이 항상 명시적으로 기록되며(`switch_history`), 미구성 GPT provider는 로컬로 조용히
   넘어가지 않고 `blocked`로 끝나는 것을 실제 LM Studio로 확인했다
-- **아직 안 된 것:** 이 로컬 경로가 실제 채팅 UI(`EditorWorkbenchRoute`의 유진 대화창)에는
+- **(→ 2026-08-08에 해소됨 — `§10.14` 2-B, `compose.hermes-yujin.yaml`. 화면의 유진 대화는 지금 로컬 경로
+  `director_proposals.py:774` `local_only_runtime_service_factory`를 쓴다. 2026-09-07 점검 표시.)** 당시 안 된 것: 이 로컬 경로가 실제 채팅 UI(`EditorWorkbenchRoute`의 유진 대화창)에는
   연결되지 않았다. 그 UI는 지금 `HermesRunService`→`AgentGatewayClient`→(배포 안 된)
   `videobox-agent-gateway`에만 물려 있어 실제로는 항상 "유진의 답을 받지 못했어요"로
   끝난다. `HermesRunService`에 로컬 폴백을 추가할지, 별도 로컬 전용 엔드포인트를 만들지는
   아직 결정하지 않았다 — capability-token/reservation 계약을 잘못 재구현할 위험 때문에
   무인 세션 중 서둘러 정하지 않기로 했다
-- 컨테이너→호스트 네트워크 경로(`§10.14` 대상)도 아직 안 열었다. 지금 실제로 동작을
+- (→ 2026-08-08에 열림 — `compose.yaml` `VIDEOBOX_LOCAL_RUNTIME_BASE_URL=host.docker.internal:1234`) 당시: 컨테이너→호스트 네트워크 경로(`§10.14` 대상)도 아직 안 열었다. 지금 실제로 동작을
   확인한 경로는 호스트 네이티브 dev 서버(`scripts/run_api.py`)뿐이다
 
 근거: `docs/superpowers/plans/2026-08-05-videobox-owner-usable-recovery.md` Task 13·14,
@@ -1537,7 +1559,10 @@ Slice 5(Task 12–14)에 있다.
 - `[x] 완료 (done, 2026-07-20)`: first read-only workflow의 declarative transition, immutable static proposal/approval-card/preflight를 고정했다. chat 긍정 문구는 승인 신호가 아니며 card는 built-in prompt/no-skill manifest, project/conversation/run/proposal scope, base revision, change summary, rights blocker, expiry를 digest-bound로 묶는다. reject·expire·stale·권한 부족 및 recorded approval 모두 side effect 0·nonexecuting이며 pending→applied는 이 slice에서 거부한다.
 - `[x] 완료 (done, 2026-07-19)`: 실제 provider 호출 전의 offline synthetic evidence intake contract를 구현했다. 이는 real owner authentication/consent issuance·provider gateway가 아니라 fixture-only preparation이다. immutable grant는 opaque owner/grant ref, pinned corpus SHA, exact synthetic provider/runtime, scope, UTC expiry와 capture/token/latency budget을 묶고, preflight는 side effect `0`로 stable allow/deny를 낸다. accept는 journal·OS advisory lock 아래 전용 accepted-intake evidence sink와 redacted tamper-evident intake audit을 one-to-one으로 복구한다. marked intake sink의 mutation은 gateway의 private in-process writer capability만 허용하며, 외부에는 read verification만 보인다. 이 경계는 hostile in-process code 보안이 아니라 ordinary application code의 bypass 방지 contract다. 일반 parent evidence ledger는 pre-gate/offline test evidence일 뿐 intake grant/audit/budget를 우회하거나 intake sink를 막지 않는다. 정상 writable 경로의 accepted/denied는 `offline_evidence_only` audit으로 남고 route를 활성화하지 않는다. audit/lock I/O 불가는 audit을 억지로 만들지 않고 non-authorizing fail-closed로 끝난다. raw capture/credential/path/media와 plain owner/grant ref는 audit에 넣지 않는다. crash/interruption 뒤 retry는 journaled prepared time·grant binding을 재검증해 audit/evidence pair만 복구하며, 새 provider 실행이나 expiry 우회가 아니다. 실제 identity issuer, consent UI, retention/size cap, network gateway와 provider call은 계속 미완료다.
 
-### 23.5 [ ] 미완료 (pending) — mem0와 기록 보존
+### 23.5 [~] 진행 중 (2026-09-07 점검 갱신) — mem0와 기록 보존
+
+> 됨: 자체 호스팅 Mem0(2026-08-08, `compose.hermes-yujin.yaml` `videobox-hermes-memory-adapter`), 승인 저장·검색·삭제 문
+> (`routers/yujin_memory.py`), 로컬 대조·조회 폴백(`yujin_memory_service.py:194,207`). 안 됨: TTL·retention·암호화 요건.
 
 mem0는 유진의 선택적 보조기억이다. tenant/project namespace, opt-in, TTL·retention·size cap, encryption, retrieval provenance, 사용자 clear-memory/delete/forget 경로를 둔다. token, approval, VideoBox project/editing/asset/conversation SSOT, hidden instruction은 저장·검색·복원하지 않는다. mem0 장애는 대화를 막지 않고 장기 기억 없이 계속하며 audit에만 기록한다.
 

@@ -1,5 +1,14 @@
 # 캡컷 1:1 대조 점검표 (2026-09-04)
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 2026-09-04 실측 기록이다. "우리" 열은 전부 그날 값이다.
+> 지금 맞는 문서: `docs/capcut-gap-2026-09-05.ko.md`(머리의 09-07 정정 포함), 결정 `2026-09-05-one-way-to-start`.
+> 지금 거짓인 문장 셋:
+> 1. "왼쪽이 가로 탭 4개(미디어·오디오·자막·전환)" — 세로 띠 6탭이다(`features/editor/assets/EditorAssetBrowser.tsx:115-128`).
+> 2. "캡컷은 패널을 접을 수 있다 … 우리에겐 없다" — `EditorWorkbench.tsx` `toggleDock`으로 접힌다.
+> 3. "시작 경로 3개 병렬", "`AppRouter.tsx:318 goToNewProject`" — 시작 문은 `startBlankProject` 하나다(`AppRouter.tsx:334`).
+> 재생줄 미렌더(:140)·`dataTransfer.files` 0곳(:141)·글꼴 15개(:142)도 09-04~05에 고쳐졌다.
+
+
 owner 지시로 만든 점검표다. **고치기 전에 먼저 무엇이 얼마나 다른지 재는 것**이
 목적이고, 순서는 owner가 이 표를 보고 정한다.
 

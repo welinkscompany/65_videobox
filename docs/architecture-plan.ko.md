@@ -1,5 +1,16 @@
 # VideoBox 아키텍처 계획서
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 계층 구조·패키지 경계·timeline JSON 원칙은 아직 맞다.
+> 지금 맞는 문서: `docs/implementation-plan.ko.md` §4·§8, `docs/development-fast-path.ko.md` §10.
+> 지금 거짓인 문장 셋:
+> 1. "`LLMTaskRouter` 뒤에서만 호출"(§9) — 그런 클래스는 없다. 실제는
+>    `packages/core-engine/src/videobox_core_engine/local_only_runtime.py:29` `LocalOnlyStructuredRuntime`, `local_only` 고정.
+> 2. "클라우드 provider는 fallback"(§9) — 폴백이 없다. 로컬이 실패하면 오류로 멈춘다(`local_only_runtime.py:44-78`).
+> 3. "컨테이너는 선택적 도구로만 사용한다"(§13) — 컨테이너 스택이 유일한 실행 경로다(`scripts/owner-ready.ps1`, `main.py:957-966`).
+> 그 밖에 Job 상태 `queued`/`canceled`(실제 `pending/running/succeeded/failed`), Project의 `owner_id`/`workspace_id`(없음),
+> 자산 종류 `overlay_template`(없음, 대신 `script_document`·`generated_tts_audio`)도 코드와 다르다.
+
+
 ## 1. 목적
 
 이 문서는 VideoBox의 기술 아키텍처 경계를 명확히 정의하기 위한 기준 문서다.

@@ -1,5 +1,14 @@
 # 캡컷 전면 채택 + 우리 자산 얹기 — 최종 계획서 (2026-09-04)
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** §8 묶음 대부분이 09-05~07에 실행됐는데 본문은 09-04 그대로다.
+> 지금 맞는 문서: `docs/capcut-gap-2026-09-05.ko.md`(머리의 09-07 정정 포함), 결정 `docs/decisions/2026-09-05-one-way-to-start.ko.md`.
+> 지금 거짓인 문장 셋:
+> 1. "현재 `dataTransfer.files` 0곳"(:283) — 붙어 있다(`EditorAssetBrowser.tsx:251`).
+> 2. "지금 `{1.0, 1.5, 2.0}` 고정"(:319) — 09-05에 0.25~4.0으로 넓혔다(`editing_session.py` `MIN/MAX_RIPPLE_PLAYBACK_RATE`).
+> 3. "`AppRouter.tsx:318 goToNewProject`"(:280) — 그 함수는 없다. 시작 문은 `startBlankProject`다.
+> "카드마다 `검토하기`/`계속 만들기`"(:108)도 지금 화면에는 없다.
+
+
 owner 지시로 **로그인 직후 첫 화면부터** 캡컷 전체를 조사하고, 우리 시스템을
 어떻게 다시 짤지 적은 계획서다. 앞선 두 문서(`capcut-parity-audit`,
 `capcut-parity-plan`)를 대체한다.

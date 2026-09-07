@@ -1,5 +1,14 @@
 # 캡컷 온라인 전수 조사와 적용·완성 계획서 (2026-09-04)
 
+> **낡았다 (2026-09-07 전체 점검에서 표시).** 같은 날 `capcut-full-adoption-plan-2026-09-04.ko.md`가 대체했고 그것도 대부분 실행됐다.
+> 지금 맞는 문서: `docs/capcut-gap-2026-09-05.ko.md`(머리의 09-07 정정 포함).
+> 지금 거짓인 문장 셋:
+> 1. "우리는 배속이 길이를 안 바꾼다"(§5.2·§12-1) — 엔진은 처음부터 리플이다(`core-engine/.../editing_session.py` `set_segment_ripple_playback_rate`).
+> 2. "`캡션 파일 업로드`(.srt 이미 지원)" — SRT는 **내보내기**만 있다(`routers/outputs.py:111-128`). 가져오기는 백엔드부터 없다.
+> 3. "글꼴 15개" — 26개다(`packages/domain-models/.../caption_fonts.py`).
+> 재생줄 미렌더·`dataTransfer.files` 0곳·`goToNewProject`·가로 탭 4개도 지금은 다르다.
+
+
 owner 지시로 캡컷 온라인 편집기를 **직접 조작하며 버튼·기능을 하나씩 확인**하고,
 그것을 **우리 시스템에 어떻게 적용해 완성할지까지** 적은 계획서다.
 

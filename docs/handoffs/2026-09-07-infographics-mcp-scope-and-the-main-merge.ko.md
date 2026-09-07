@@ -1,3 +1,5 @@
+**대체됨:** `docs/handoffs/2026-09-07-full-audit-docs-tests-boundaries.ko.md` (같은 날 두 번째 인계 — 전체 중간 점검)
+
 # 인계 — 인포그래픽, MCP 범위 다시 정하기, main 병합 (2026-09-07)
 
 ## 한 줄
