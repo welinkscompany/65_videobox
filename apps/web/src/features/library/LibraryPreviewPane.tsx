@@ -1,8 +1,21 @@
 import { useEffect, useState } from "react";
-import { api, type LibraryAsset, type LibraryUsage } from "../../api";
+import { api, type LibraryAsset, type LibraryMediaType, type LibraryUsage } from "../../api";
 import { resolveProjectStage } from "../../app/routeManifest";
 
 function filename(asset: LibraryAsset) { return String(asset.user_metadata?.filename ?? asset.asset_id ?? asset.library_asset_id); }
+
+const KIND_LABELS: Record<string, string> = { broll: "영상", image: "그림", music: "음악", sfx: "효과음" };
+
+/**
+ * 종류를 잘못 갈랐을 때 옮겨 갈 수 있는 곳 (owner 결정 2026-09-07).
+ *
+ * 자산을 한 폴더에 넣으면 VideoBox가 내용을 보고 가른다. 음악과 효과음은
+ * 길이로 가르므로 경계 근처에서 틀리고, 정지 화면은 영상과 헷갈린다.
+ * 고치는 이 길이 그 결정의 조건이었다 -- 없으면 기능을 낼 수 없다.
+ *
+ * 갈래를 넘는 수정은 없다. 소리를 그림이라 부르면 미리보기가 빈 그림을 그린다.
+ */
+const KIND_SWAP: Partial<Record<string, LibraryMediaType>> = { music: "sfx", sfx: "music", broll: "image", image: "broll" };
 
 export function LibraryPreviewPane({ asset, onChanged }: { asset: LibraryAsset | null; onChanged?: () => void }) {
   const [usage, setUsage] = useState<LibraryUsage | null>(null); const [busy, setBusy] = useState(false);
@@ -19,7 +32,9 @@ export function LibraryPreviewPane({ asset, onChanged }: { asset: LibraryAsset |
   async function trash() { if (blocked) return; setBusy(true); try { await api.trashLibraryAsset(assetId); onChanged?.(); } finally { setBusy(false); } }
   async function restore() { setBusy(true); try { await api.restoreLibraryAsset(assetId); onChanged?.(); } finally { setBusy(false); } }
   async function permanentlyDelete() { setBusy(true); try { await api.permanentDeleteLibraryAsset(assetId); onChanged?.(); } finally { setBusy(false); setConfirmPermanentDelete(false); } }
-  return <aside className="vb-library-preview" data-testid="library-preview" aria-label="미디어 미리보기"><div className="vb-library-preview__heading"><p className="vb-eyebrow">미리보기</p><h2>{name}</h2>{isVideo && asset.lifecycle !== "trashed" ? <a className="vb-action-link" href={`/footage?library_asset_id=${encodeURIComponent(asset.library_asset_id)}`}>구간 정리하기</a> : null}</div><div className="vb-library-preview__player" data-testid="library-preview-player">{asset.lifecycle === "trashed" ? <p>휴지통에 있는 미디어</p> : isPicture ? <img src={asset.preview_url ?? api.libraryAssetPreviewUrl(asset.library_asset_id)} alt={name} /> : isAudio ? <audio controls preload="metadata" src={asset.preview_url ?? api.libraryAssetPreviewUrl(asset.library_asset_id)} /> : <video controls preload="metadata" src={asset.preview_url ?? api.libraryAssetPreviewUrl(asset.library_asset_id)} />}</div><dl className="vb-library-metadata"><div><dt>종류</dt><dd>{asset.media_type === "broll" ? "영상" : asset.media_type === "music" ? "음악" : asset.media_type === "image" ? "그림" : "효과음"}</dd></div><div><dt>상태</dt><dd>{asset.lifecycle === "ready" ? "준비됨" : asset.lifecycle === "needs_attention" ? "확인 필요" : asset.lifecycle === "processing" ? "분석 중" : "휴지통"}</dd></div>{asset.machine_metadata?.description ? <div><dt>분석</dt><dd>{String(asset.machine_metadata.description)}</dd></div> : null}</dl>{usage && usage.locations.length > 0 ? <div className="vb-library-usage" role="status"><strong>사용 중인 위치</strong><ul>{usage.locations.map((location, index) => {
+  const swapTo = asset.origin === "builtin" ? undefined : KIND_SWAP[asset.media_type];
+  async function correctKind(next: LibraryMediaType) { setBusy(true); try { await api.correctLibraryAssetMediaType(assetId, next); onChanged?.(); } finally { setBusy(false); } }
+  return <aside className="vb-library-preview" data-testid="library-preview" aria-label="미디어 미리보기"><div className="vb-library-preview__heading"><p className="vb-eyebrow">미리보기</p><h2>{name}</h2>{isVideo && asset.lifecycle !== "trashed" ? <a className="vb-action-link" href={`/footage?library_asset_id=${encodeURIComponent(asset.library_asset_id)}`}>구간 정리하기</a> : null}</div><div className="vb-library-preview__player" data-testid="library-preview-player">{asset.lifecycle === "trashed" ? <p>휴지통에 있는 미디어</p> : isPicture ? <img src={asset.preview_url ?? api.libraryAssetPreviewUrl(asset.library_asset_id)} alt={name} /> : isAudio ? <audio controls preload="metadata" src={asset.preview_url ?? api.libraryAssetPreviewUrl(asset.library_asset_id)} /> : <video controls preload="metadata" src={asset.preview_url ?? api.libraryAssetPreviewUrl(asset.library_asset_id)} />}</div><dl className="vb-library-metadata"><div><dt>종류</dt><dd>{KIND_LABELS[asset.media_type] ?? asset.media_type}</dd></div><div><dt>상태</dt><dd>{asset.lifecycle === "ready" ? "준비됨" : asset.lifecycle === "needs_attention" ? "확인 필요" : asset.lifecycle === "processing" ? "분석 중" : "휴지통"}</dd></div>{asset.machine_metadata?.description ? <div><dt>분석</dt><dd>{String(asset.machine_metadata.description)}</dd></div> : null}</dl>{swapTo && asset.lifecycle !== "trashed" ? <p className="vb-library-kind-fix-row"><button data-native-control="library-correct-media-type" type="button" className="vb-library-kind-fix" onClick={() => void correctKind(swapTo)} disabled={busy} aria-label={`${name}을(를) ${KIND_LABELS[swapTo]}으로 옮기기`}>{KIND_LABELS[swapTo]}으로 옮기기</button></p> : null}{usage && usage.locations.length > 0 ? <div className="vb-library-usage" role="status"><strong>사용 중인 위치</strong><ul>{usage.locations.map((location, index) => {
       const label = String(location.location.label ?? location.location.kind ?? "프로젝트");
       // 어느 프로젝트인지 알면 그 프로젝트의 자산 화면으로 바로 보낸다. 위치를
       // 알려주면서 갈 길은 안 주면 owner가 다시 찾아 헤맨다.

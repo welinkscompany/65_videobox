@@ -2189,6 +2189,17 @@ export const api = {
     request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/trash`, { method: "POST" }),
   restoreLibraryAsset: (libraryAssetId: string) =>
     request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/restore`, { method: "POST" }),
+  /**
+   * 잘못 갈린 종류를 고친다 (owner 결정 2026-09-07).
+   *
+   * 한 폴더에 넣은 것을 VideoBox가 내용을 보고 가르기 때문에, 고치는 이 길이
+   * 그 결정의 조건이었다. 음악↔효과음, 영상↔그림만 오갈 수 있다.
+   */
+  correctLibraryAssetMediaType: (libraryAssetId: string, mediaType: LibraryMediaType) =>
+    request<{ asset: LibraryAsset }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/media-type`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ media_type: mediaType }) },
+    ),
   permanentDeleteLibraryAsset: (libraryAssetId: string) =>
     request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/permanent`, { method: "DELETE" }),
   libraryAssetPreviewUrl: (libraryAssetId: string) =>

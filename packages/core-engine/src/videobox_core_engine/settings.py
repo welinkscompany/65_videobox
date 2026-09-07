@@ -22,15 +22,26 @@ def resolve_user_library_root() -> Path:
     return DEFAULT_PROJECTS_ROOT.parent / "videobox-user-library"
 
 
-DEFAULT_MEDIA_INBOX_WATCH_PATH = Path(r"G:\내 드라이브\100_videobox")
+#: owner가 자산을 넣는 **한 폴더**. owner 결정 2026-09-07
+#: (`docs/decisions/2026-09-07-one-drop-folder-sorted-for-me.ko.md`):
+#: 종류별로 나눠 넣지 않고 여기 하나에만 넣으면 VideoBox가 내용을 보고 가른다.
+#: 구글 드라이브(`G:`)에서 원드라이브로 옮긴 이유는 `G:`가 스트리밍 드라이브라
+#: Docker가 마운트하면 빈 폴더로 보이기 때문이다(같은 사실이 `compose.yaml`
+#: 주석에도 있다). 원드라이브는 파일이 디스크에 실제로 있다.
+DEFAULT_MEDIA_INBOX_WATCH_PATH = Path(r"C:\Users\atgro\OneDrive\#_videobox")
+
+#: 자산 가치가 없다고 본 파일이 가는 곳. **지우지 않고 옮기기만 한다** --
+#: owner가 직접 보고 지운다(2026-09-07 결정).
+MEDIA_INBOX_REJECT_FOLDER_NAME = "불필요"
 
 
 def resolve_media_inbox_watch_path() -> Path | None:
-    """Resolve the folder VideoBox watches for footage moved in from outside.
+    """Resolve the one folder VideoBox watches for assets dropped in from outside.
 
-    Owner decision (2026-08-05): the watched folder is whatever a Google
-    Drive desktop client happens to sync to disk. VideoBox has no Drive API
-    dependency and does not know it is watching a cloud-synced folder --
+    Owner decision (2026-08-05, still true): the watched folder is whatever a
+    desktop sync client happens to mirror to disk. VideoBox has no Drive or
+    OneDrive API dependency and does not know it is watching a cloud-synced
+    folder --
     that ignorance is what keeps this off implementation-plan.ko.md's
     "no Google Sheets/Drive coupling" ban. Returns None (watching disabled)
     if explicitly cleared via VIDEOBOX_MEDIA_INBOX_WATCH_PATH="".
@@ -51,9 +62,20 @@ def resolve_media_inbox_library_root() -> Path:
     return Path(configured) if configured else resolve_user_library_root() / "media-inbox"
 
 
-#: 음악과 효과음이 들어오는 폴더 이름. owner 결정 (2026-08-10): 종류는 폴더로
-#: 나눈다 -- 한 폴더에 다 넣고 프로그램이 내용을 보고 판단하는 방식은 틀릴 수
-#: 있어 채택하지 않았다.
+#: 음악과 효과음이 들어오던 **옛** 폴더 이름.
+#:
+#: 2026-08-10 결정은 "종류는 폴더로 나눈다"였다 -- 한 폴더에 다 넣고 프로그램이
+#: 내용을 보고 판단하는 방식은 틀릴 수 있다는 이유였다.
+#: **owner가 2026-09-07에 그 판단을 뒤집었다**
+#: (`docs/decisions/2026-09-07-one-drop-folder-sorted-for-me.ko.md`):
+#: 폴더 넷을 기억하고 골라 넣는 것보다, 틀리면 자료실에서 고치는 쪽이 낫다 --
+#: 특히 휴대폰에서 넣을 때. 지금 자산이 들어오는 정식 경로는
+#: `DEFAULT_MEDIA_INBOX_WATCH_PATH` 한 폴더이고, 종류는
+#: `videobox_core_engine.media_inbox_sorter`가 ffprobe로 가른다.
+#:
+#: 이 이름들은 **라이브러리 자리 이름으로 계속 쓰인다**(`owner-audio/music`,
+#: `owner-audio/sfx`). 폴더를 새로 만들지는 않지만(`main.py`), owner의 옛
+#: 폴더가 아직 남아 있으면 그 안의 파일은 그대로 받아들인다.
 OWNER_AUDIO_WATCH_FOLDER_NAMES: dict[str, str] = {
     "music": "새 음악",
     "sfx": "새 효과음",
@@ -73,6 +95,60 @@ def resolve_owner_audio_watch_paths(video_watch_path: Path | None) -> dict[str, 
         media_type: video_watch_path.parent / folder_name
         for media_type, folder_name in OWNER_AUDIO_WATCH_FOLDER_NAMES.items()
     }
+
+
+#: 처리가 끝난 원본이 가는 곳.
+MEDIA_INBOX_ARCHIVE_FOLDER_NAME = "자산화_완료"
+
+
+def resolve_media_inbox_archive_path(watch_path: Path | None, *, sorting: bool) -> Path | None:
+    """처리 끝난 원본을 옮겨 둘 보관함.
+
+    **한 폴더 모드에서는 넣는 폴더 안에 둔다.** 옛 배치에서는 넣는 폴더가
+    `.../새 영상` 같은 하위 폴더라 형제로 두면 같은 마운트 안이었다. 지금은 넣는
+    폴더 자체가 마운트 뿌리(`/videobox-drop`)라, 형제로 두면 컨테이너의 읽기
+    전용 루트(`/자산화_완료`)를 가리켜 **첫 원본부터 옮기기가 실패한다.**
+
+    안에 둬도 다시 집어 들지 않는다 -- `run_inbox_cycle`이 보관함 아래 파일을
+    후보에서 먼저 뺀다.
+    `VIDEOBOX_OWNER_DROP_ARCHIVE_PATH=""`로 비우면 보관하지 않는다.
+    """
+    if "VIDEOBOX_OWNER_DROP_ARCHIVE_PATH" in os.environ:
+        configured = os.environ["VIDEOBOX_OWNER_DROP_ARCHIVE_PATH"].strip()
+        return Path(configured) if configured else None
+    if watch_path is None:
+        return None
+    parent = watch_path if sorting else watch_path.parent
+    return parent / MEDIA_INBOX_ARCHIVE_FOLDER_NAME
+
+
+def resolve_media_inbox_reject_path(watch_path: Path | None) -> Path | None:
+    """자산 가치가 없다고 본 파일을 옮겨 둘 폴더 (owner 결정 2026-09-07).
+
+    **넣는 폴더 밖에 둔다.** 안에 두면 owner가 확인하기 전에 다음 바퀴가 자기가
+    내보낸 파일을 다시 집어 든다(보관함과 달리 이건 owner가 들여다볼 자리다).
+    컨테이너에서는 `compose.yaml`이 따로 마운트한 자리를
+    `VIDEOBOX_OWNER_DROP_REJECT_PATH`로 준다.
+    `VIDEOBOX_OWNER_DROP_REJECT_PATH=""`로 비우면 옮기지 않고 그대로 둔다.
+    """
+    if "VIDEOBOX_OWNER_DROP_REJECT_PATH" in os.environ:
+        configured = os.environ["VIDEOBOX_OWNER_DROP_REJECT_PATH"].strip()
+        return Path(configured) if configured else None
+    if watch_path is None:
+        return None
+    return watch_path.parent / MEDIA_INBOX_REJECT_FOLDER_NAME
+
+
+def resolve_media_inbox_sorting_enabled() -> bool:
+    """한 폴더에 넣으면 내용을 보고 가르는가 (owner 결정 2026-09-07).
+
+    기본값이 켜짐이다 -- 이게 owner가 승인한 동작이다. 끄면 옛 동작(감시 폴더가
+    영상만 받는다)으로 돌아간다.
+    """
+    raw = os.environ.get("VIDEOBOX_MEDIA_INBOX_SORT_BY_CONTENT", "").strip().lower()
+    if not raw:
+        return True
+    return raw in {"1", "true", "yes", "on"}
 
 
 def resolve_owner_audio_library_root() -> Path:

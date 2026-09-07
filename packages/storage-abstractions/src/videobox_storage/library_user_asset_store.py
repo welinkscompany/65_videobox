@@ -317,6 +317,42 @@ class LibraryUserAssetStore:
         finally:
             connection.close()
 
+    def update_media_type(self, library_asset_id: str, media_type: LibraryMediaType | str) -> LibraryUserAsset:
+        """종류를 고친다 (owner 결정 2026-09-07).
+
+        한 폴더에 넣은 것을 프로그램이 내용을 보고 가르기 때문에, **틀린 것을
+        고치는 길**이 그 결정의 조건이었다. 특히 음악↔효과음은 길이로 가르므로
+        경계 근처에서 틀린다.
+
+        `managed_relative_path`는 **그대로 둔다.** 그 경로에 종류 이름이 들어
+        있지만(`assets/<종류>/<앞두자>/<해시>`), 어디까지나 이름일 뿐이고 파일을
+        찾는 일은 `resolve_managed_path`가 설정된 뿌리들을 훑어 해시로 확인해서
+        한다. 바이트를 옮기면 옮기는 도중에 잃을 수 있고, 얻는 것은 보기 좋은
+        경로뿐이다.
+
+        붙어 있는 ingest 기록도 같이 고친다. 안 고치면 owner가 고쳐 놓은 자산과
+        같은 파일을 다시 넣었을 때 ingest가 종류 충돌로 막힌다.
+        """
+        target = LibraryMediaType(media_type)
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin assets cannot be reclassified")
+            connection.execute("UPDATE library_user_assets SET media_type = ?, updated_at = ? WHERE library_asset_id = ?", (target.value, _now(), library_asset_id))
+            connection.execute("UPDATE library_ingest_items SET media_type = ? WHERE library_asset_id = ?", (target.value, library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
     def update_technical_metadata(self, library_asset_id: str, technical_metadata_patch: Mapping[str, Any]) -> LibraryUserAsset:
         connection = self._connection()
         try:

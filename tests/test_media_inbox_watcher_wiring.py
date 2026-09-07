@@ -24,6 +24,9 @@ def _clear_media_inbox_watch_environment(monkeypatch) -> None:
         "VIDEOBOX_MEDIA_INBOX_WATCH_PATH",
         "VIDEOBOX_MEDIA_INBOX_LIBRARY_ROOT",
         "VIDEOBOX_OWNER_AUDIO_LIBRARY_ROOT",
+        "VIDEOBOX_MEDIA_INBOX_SORT_BY_CONTENT",
+        "VIDEOBOX_OWNER_DROP_REJECT_PATH",
+        "VIDEOBOX_OWNER_DROP_ARCHIVE_PATH",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -72,6 +75,11 @@ def test_enabled_watcher_thread_copy_only_registers_a_real_file_end_to_end(tmp_p
     background thread to copy it through the global ingest service -- mirrors
     the real Drive-mirror startup path without deleting the cloud source."""
     _clear_media_inbox_watch_environment(monkeypatch)
+    # **옛 길을 그대로 시험한다.** 2026-09-07부터 넣는 폴더는 내용을 보고
+    # 가르는 한 폴더가 기본이고, 그 길에서는 여기 쓰는 합성 바이트가 미디어가
+    # 아니라 "불필요"로 간다. 이 시험이 지키는 계약은 종류를 폴더로 나누던
+    # 옛 길이므로 그 길을 명시적으로 켠다.
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_SORT_BY_CONTENT", "0")
     watch_dir = tmp_path / "drive-folder"
     watch_dir.mkdir()
     library_dir = tmp_path / "library"
@@ -101,6 +109,11 @@ def test_enabled_watcher_thread_copy_only_registers_a_real_file_end_to_end(tmp_p
 
 def test_watcher_asset_is_previewable_through_global_library_api(tmp_path: Path, monkeypatch) -> None:
     _clear_media_inbox_watch_environment(monkeypatch)
+    # **옛 길을 그대로 시험한다.** 2026-09-07부터 넣는 폴더는 내용을 보고
+    # 가르는 한 폴더가 기본이고, 그 길에서는 여기 쓰는 합성 바이트가 미디어가
+    # 아니라 "불필요"로 간다. 이 시험이 지키는 계약은 종류를 폴더로 나누던
+    # 옛 길이므로 그 길을 명시적으로 켠다.
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_SORT_BY_CONTENT", "0")
     watch_dir = tmp_path / "drive-folder"
     watch_dir.mkdir()
     library_dir = tmp_path / "library"
@@ -135,6 +148,11 @@ def test_music_and_effects_get_their_own_watched_folders(tmp_path: Path, monkeyp
     from videobox_core_engine.media_inbox import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 
     _clear_media_inbox_watch_environment(monkeypatch)
+    # **옛 길을 그대로 시험한다.** 2026-09-07부터 넣는 폴더는 내용을 보고
+    # 가르는 한 폴더가 기본이고, 그 길에서는 여기 쓰는 합성 바이트가 미디어가
+    # 아니라 "불필요"로 간다. 이 시험이 지키는 계약은 종류를 폴더로 나누던
+    # 옛 길이므로 그 길을 명시적으로 켠다.
+    monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_SORT_BY_CONTENT", "0")
     drive_sync = tmp_path / "drive-sync"
     monkeypatch.setenv("VIDEOBOX_DATA_ROOT", str(tmp_path / "projects"))
     monkeypatch.setenv("VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED", "1")

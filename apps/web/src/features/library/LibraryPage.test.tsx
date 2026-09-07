@@ -489,4 +489,44 @@ describe("자료실의 `음악·효과음` 갈래", () => {
     expect(within(sidebar).getByRole("button", { name: /^음악·효과음/ })).toHaveAttribute("aria-pressed", "true");
     expect(within(sidebar).getByRole("button", { name: /^전체/ })).toHaveAttribute("aria-pressed", "false");
   });
+
+  /**
+   * owner 결정 2026-09-07: 자산을 한 폴더에 넣으면 VideoBox가 내용을 보고
+   * 가른다. 음악과 효과음은 길이로 가르므로 경계 근처에서 틀린다 -- 결정
+   * 문서는 **고칠 수 있을 것**을 조건으로 달았다. 화면에 그 길이 없으면
+   * 이 기능은 낼 수 없다.
+   */
+  it("잘못 갈린 음악을 화면에서 효과음으로 옮긴다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [asset({ library_asset_id: "m1", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "딸깍.wav" } })],
+      total: 1,
+    });
+    vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "m1", locations: [] });
+    const correct = vi.spyOn(api, "correctLibraryAssetMediaType").mockResolvedValue({
+      asset: asset({ library_asset_id: "m1", media_type: "sfx" }),
+    });
+    render(<LibraryPage initialFilter="audio" />);
+
+    const rows = await screen.findByTestId("library-audio-rows");
+    fireEvent.click(within(rows).getAllByText("딸깍.wav")[0]);
+    const preview = screen.getByTestId("library-preview");
+    fireEvent.click(within(preview).getByRole("button", { name: /효과음으로 옮기기/ }));
+
+    await waitFor(() => expect(correct).toHaveBeenCalledWith("m1", "sfx"));
+  });
+
+  it("소리를 그림이라 부를 길은 주지 않는다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [asset({ library_asset_id: "m2", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "브금.mp3" } })],
+      total: 1,
+    });
+    vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "m2", locations: [] });
+    render(<LibraryPage initialFilter="audio" />);
+
+    const rows = await screen.findByTestId("library-audio-rows");
+    fireEvent.click(within(rows).getAllByText("브금.mp3")[0]);
+    const preview = screen.getByTestId("library-preview");
+    expect(within(preview).queryByRole("button", { name: /그림으로 옮기기/ })).toBeNull();
+    expect(within(preview).getByRole("button", { name: /효과음으로 옮기기/ })).toBeInTheDocument();
+  });
 });

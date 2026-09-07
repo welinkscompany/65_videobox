@@ -109,6 +109,9 @@ from videobox_core_engine.settings import (
     resolve_media_inbox_watch_enabled,
     resolve_media_inbox_watch_interval_seconds,
     resolve_media_inbox_watch_path,
+    resolve_media_inbox_archive_path,
+    resolve_media_inbox_reject_path,
+    resolve_media_inbox_sorting_enabled,
     resolve_owner_audio_library_root,
     resolve_owner_audio_watch_paths,
     resolve_projects_root,
@@ -745,6 +748,13 @@ async def _media_analysis_lifespan(app: FastAPI):
             # (`scan_inbox_candidates`가 빈 목록을 돌려준다). owner가 이름을
             # 정확히 맞춰 폴더를 만들어야만 동작한다는 뜻이라, 여기서 만들어
             # 둔다. 이미 있으면 아무 일도 하지 않는다.
+            #
+            # 옛 종류별 폴더는 만들지 않는다(`create_watch_path=False`) --
+            # owner는 2026-09-07부터 폴더 하나에만 넣는다. 빈 폴더를 원드라이브에
+            # 새로 만들어 두면 "여기 넣어도 되나"를 다시 헷갈리게 한다.
+            if not watch_config.create_watch_path:
+                if not watch_config.watch_path.is_dir():
+                    continue
             try:
                 watch_config.watch_path.mkdir(parents=True, exist_ok=True)
             except OSError:
@@ -1140,15 +1150,32 @@ def create_app(
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()
     resolved_owner_audio_library_root = resolve_owner_audio_library_root()
     app.state.media_inbox_watch_enabled = resolve_media_inbox_watch_enabled()
-    # A sibling of the watched folder, so when that folder is a mirrored Drive
-    # folder the owner sees imported footage move from one Drive subfolder to
-    # another instead of vanishing.  All three watched folders share it,
-    # because all three are siblings.
-    media_inbox_archive_root = (
-        media_inbox_watch_path.parent / "자산화_완료"
-        if media_inbox_watch_path is not None
-        else None
+    # Inside (or beside) the watched folder, so when that folder is a mirrored
+    # cloud folder the owner sees imported footage move from one subfolder to
+    # another instead of vanishing.  Every watched folder shares it.
+    #
+    # 한 폴더 모드에서는 **넣는 폴더 안**이다. 넣는 폴더가 곧 마운트 뿌리라
+    # 형제로 두면 컨테이너의 읽기 전용 루트를 가리켜 옮기기가 전부 실패한다.
+    media_inbox_sorting_enabled = resolve_media_inbox_sorting_enabled()
+    media_inbox_archive_root = resolve_media_inbox_archive_path(
+        media_inbox_watch_path, sorting=media_inbox_sorting_enabled
     )
+    # 자산 가치가 없다고 본 것이 가는 곳. 보관함과 달리 **넣는 폴더 밖**이다 --
+    # owner가 들여다볼 자리라, 안에 두면 확인하기 전에 다음 바퀴가 다시 집어
+    # 든다. 컨테이너에서는 `compose.yaml`이 따로 마운트한 자리를 넘겨준다.
+    media_inbox_reject_root = resolve_media_inbox_reject_path(media_inbox_watch_path)
+    app.state.media_inbox_reject_root = media_inbox_reject_root
+    app.state.media_inbox_sorting_enabled = media_inbox_sorting_enabled
+    app.state.media_inbox_archive_root = media_inbox_archive_root
+    # 종류별로 바이트가 사는 자리. 한군데 섞으면 촬영본 색인이 음원을 영상으로
+    # 알고 화면 분석을 시도한다. 그림은 화면에서 올리는 길과 같은 자리를 쓴다.
+    media_inbox_sorted_library_roots = {
+        "broll": resolved_media_inbox_library_root,
+        "image": user_library_root,
+        "music": resolved_owner_audio_library_root / "music",
+        "sfx": resolved_owner_audio_library_root / "sfx",
+    }
+    app.state.media_inbox_sorted_library_roots = media_inbox_sorted_library_roots
     app.state.media_inbox_watch_config = (
         MediaInboxConfig(
             watch_path=media_inbox_watch_path,
@@ -1157,13 +1184,21 @@ def create_app(
             copy_only=True,
             ingest_store=resolved_media_library_store.user_asset_store,
             media_type="broll",
+            # owner 결정 2026-09-07: 자산은 한 폴더에 넣고 VideoBox가 내용을 보고
+            # 가른다. 끄면 이 폴더는 옛날처럼 영상만 받는다.
+            sort_by_content=media_inbox_sorting_enabled,
+            sorted_library_roots=media_inbox_sorted_library_roots if media_inbox_sorting_enabled else {},
+            reject_root=media_inbox_reject_root if media_inbox_sorting_enabled else None,
         )
         if media_inbox_watch_path is not None
         else None
     )
-    # 음악과 효과음은 각자의 폴더로 들어오고, 어느 폴더였는지가 곧 종류다
-    # (owner 결정 2026-08-10). 라이브러리 자리도 촬영본과 나눠 둔다 -- 한군데
-    # 섞이면 촬영본 색인이 음원을 영상으로 알고 화면 분석을 시도한다.
+    # 음악과 효과음이 각자의 폴더로 들어오던 **옛** 길이다 (2026-08-10 결정).
+    # 2026-09-07에 owner가 한 폴더로 바꿨지만, 옛 폴더에 아직 파일이 남아 있을
+    # 수 있어 감시는 그대로 둔다. 다만 **폴더를 새로 만들지는 않는다**
+    # (`create_watch_path=False`) -- owner는 이제 폴더 하나만 쓴다.
+    # 라이브러리 자리는 촬영본과 계속 나눠 둔다 -- 한군데 섞이면 촬영본 색인이
+    # 음원을 영상으로 알고 화면 분석을 시도한다.
     app.state.owner_audio_library_root = resolved_owner_audio_library_root
     app.state.owner_audio_library_roots = {
         media_type: resolved_owner_audio_library_root / media_type
@@ -1178,6 +1213,7 @@ def create_app(
             copy_only=True,
             ingest_store=resolved_media_library_store.user_asset_store,
             media_type=media_type,
+            create_watch_path=not media_inbox_sorting_enabled,
         )
         for media_type, watch_path in sorted(
             resolve_owner_audio_watch_paths(media_inbox_watch_path).items()

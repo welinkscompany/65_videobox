@@ -1443,6 +1443,15 @@ class MaterializeLibraryAssetRequest(BaseModel):
     project_id: str
 
 
+class CorrectLibraryAssetMediaTypeRequest(BaseModel):
+    """자료실에서 종류를 고친다 (owner 결정 2026-09-07).
+
+    한 폴더에 넣은 것을 내용으로 가르는 이상 틀린 것을 고치는 길이 있어야 한다.
+    """
+
+    media_type: str = Field(min_length=1, max_length=32)
+
+
 class MediaInboxImportRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
 

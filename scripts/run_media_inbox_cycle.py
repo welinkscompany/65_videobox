@@ -24,7 +24,15 @@ for src_path in (
     sys.path.insert(0, str(src_path))
 
 from videobox_core_engine.media_inbox import MediaInboxConfig, run_inbox_cycle, scan_inbox_candidates
-from videobox_core_engine.settings import resolve_media_inbox_library_root, resolve_media_inbox_watch_path
+from videobox_core_engine.settings import (
+    resolve_media_inbox_library_root,
+    resolve_media_inbox_reject_path,
+    resolve_media_inbox_sorting_enabled,
+    resolve_media_inbox_watch_path,
+    resolve_owner_audio_library_root,
+    resolve_user_library_root,
+)
+from videobox_storage.library_user_asset_store import LibraryUserAssetStore
 
 
 def main() -> None:
@@ -41,17 +49,48 @@ def main() -> None:
         print("Watching disabled (VIDEOBOX_MEDIA_INBOX_WATCH_PATH=\"\").")
         return
 
+    # 앱이 배선하는 것과 **같은 설정**을 만든다. 예전에는 여기서 옛 설정을
+    # 손으로 만들어서, 이 스크립트로 돌리면 앱과 다르게 동작했다 -- 지금은 넣는
+    # 폴더가 영상 말고도 다 받는 한 폴더라 그 차이가 파일을 잃는 차이가 된다.
+    sorting = resolve_media_inbox_sorting_enabled()
+    user_library_root = resolve_user_library_root()
+    owner_audio_library_root = resolve_owner_audio_library_root()
+    reject_root = resolve_media_inbox_reject_path(watch_path) if sorting else None
+    config = MediaInboxConfig(
+        watch_path=watch_path,
+        library_root=library_root,
+        archive_root=watch_path.parent / "자산화_완료",
+        copy_only=True,
+        ingest_store=LibraryUserAssetStore(user_library_root),
+        media_type="broll",
+        sort_by_content=sorting,
+        sorted_library_roots={
+            "broll": library_root,
+            "image": user_library_root,
+            "music": owner_audio_library_root / "music",
+            "sfx": owner_audio_library_root / "sfx",
+        }
+        if sorting
+        else {},
+        reject_root=reject_root,
+    )
+    print(f"sort_by_content: {sorting}")
+    print(f"reject_root:  {reject_root}")
+
     if args.dry_run:
-        candidates = scan_inbox_candidates(watch_path)
+        candidates = scan_inbox_candidates(
+            watch_path, accepted_extensions=None if sorting else config.accepted_extensions
+        )
         print(f"{len(candidates)} candidate file(s):")
         for candidate in candidates:
             print(f"  {candidate}")
         return
 
-    report = run_inbox_cycle(MediaInboxConfig(watch_path=watch_path, library_root=library_root))
+    report = run_inbox_cycle(config)
     print(f"moved:      {report.moved}")
     print(f"duplicates: {report.duplicates}")
     print(f"skipped:    {report.skipped}")
+    print(f"rejected:   {report.rejected}")
     print(f"failed:     {report.failed}")
 
 

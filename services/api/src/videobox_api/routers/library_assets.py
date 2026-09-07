@@ -21,7 +21,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
-from videobox_api.models import MaterializeLibraryAssetRequest
+from videobox_api.models import CorrectLibraryAssetMediaTypeRequest, MaterializeLibraryAssetRequest
 from videobox_core_engine.library_ingest import LibraryIngestIdempotencyConflict, LibraryIngestService
 from videobox_core_engine.library_usage import scan_library_asset_usage
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
@@ -35,6 +35,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 DERIVATIVE_VERSION = "v2"
+
+#: 고칠 수 있는 갈래. 같은 갈래 안에서만 종류를 바꾼다 (owner 결정 2026-09-07).
+#: 갈래를 넘으면 파일과 화면이 어긋난다 -- 그림 자리에 소리가 들어가면
+#: 미리보기가 빈 그림을 그리고, 영상 자리에 소리가 들어가면 촬영본 색인이
+#: 음원의 화면을 분석하려 든다.
+_MEDIA_TYPE_GROUPS: dict[LibraryMediaType, str] = {
+    LibraryMediaType.MUSIC: "audio",
+    LibraryMediaType.SFX: "audio",
+    LibraryMediaType.BROLL: "visual",
+    LibraryMediaType.IMAGE: "visual",
+}
 
 
 class _DerivativeToolUnavailable(RuntimeError):
@@ -447,6 +458,34 @@ def build_library_assets_router(
             return {"asset": public_user(user_asset_store.trash_asset(asset_id))}
         except ValueError as exc:
             raise HTTPException(status_code=409, detail={"code": "asset_referenced", "locations": user_asset_store.usage(asset_id)}) from exc
+
+    @router.patch("/api/library/assets/{asset_id}/media-type")
+    def correct_library_asset_media_type(
+        asset_id: str, payload: CorrectLibraryAssetMediaTypeRequest
+    ) -> dict[str, Any]:
+        """잘못 갈린 종류를 owner가 고친다 (owner 결정 2026-09-07).
+
+        `docs/decisions/2026-09-07-one-drop-folder-sorted-for-me.ko.md`가 이
+        길을 조건으로 달았다 -- 한 폴더에 넣은 것을 프로그램이 내용으로 가르니
+        틀리는 일이 생기고, 고칠 수 없으면 그 기능을 낼 수 없다.
+
+        **같은 갈래 안에서만 고친다.** 음악↔효과음(길이로 갈라서 경계에서
+        틀린다), 영상↔그림(정지 화면이라 헷갈린다). 소리를 그림이라 부르는 것은
+        고치기가 아니라 파일과 화면이 어긋나는 고장이다 -- 그림 자리에 소리가
+        들어가면 미리보기가 빈 그림을 그린다.
+        """
+        asset, builtin = find_asset(asset_id)
+        if builtin is not None:
+            raise HTTPException(status_code=409, detail={"code": "builtin_asset_immutable"})
+        try:
+            target = LibraryMediaType(payload.media_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="media_type_unknown") from exc
+        if _MEDIA_TYPE_GROUPS[target] != _MEDIA_TYPE_GROUPS[asset.media_type]:
+            raise HTTPException(status_code=422, detail="media_type_group_mismatch")
+        if target is asset.media_type:
+            return {"asset": public_user(asset)}
+        return {"asset": public_user(user_asset_store.update_media_type(asset_id, target))}
 
     @router.post("/api/library/assets/{asset_id}/restore")
     def restore_library_asset(asset_id: str) -> dict[str, Any]:
