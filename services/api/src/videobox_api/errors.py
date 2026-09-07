@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException, status
 
 from videobox_core_engine.reference_style_analysis import ReferenceStyleAnalysisError
 from videobox_core_engine.youtube_import import YoutubeImportError
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _http_error(exc: Exception) -> HTTPException:
@@ -26,9 +30,23 @@ def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, ValueError) and str(exc) == "asset_missing":
         return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="asset_missing")
     if isinstance(exc, FileNotFoundError):
-        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        # **날 예외 문구를 밖으로 내지 않는다.** 컨테이너 절대 경로가
+        # `/videobox-data/projects/...`처럼 그대로 응답에 실려 나갔다(코드리뷰
+        # 2026-09-07). `library_assets.py`가 이미 쓰는 관례와 같다 -- 원문은
+        # 서버 로그에만, 응답은 고정 코드만.
+        _LOGGER.warning("asset_file_missing: %s", exc, exc_info=True)
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"reason": "asset_file_missing", "error_code": type(exc).__name__},
+        )
     if isinstance(exc, LookupError | KeyError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, ValueError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+    # 여기 오는 것은 분류 안 된 예외다 -- ffmpeg stderr, 파일 권한 오류 등
+    # 무엇이 실려 있을지 모른다. 위와 같은 이유로 원문은 로그로만 보낸다.
+    _LOGGER.warning("internal_error: %s", exc, exc_info=True)
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={"reason": "internal_error", "error_code": type(exc).__name__},
+    )

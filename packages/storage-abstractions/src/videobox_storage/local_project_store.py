@@ -500,6 +500,14 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
     )
 
 
+#: 실제로 만들어지는 project_id의 모양(`_new_project_id`, 소문자·숫자·하이픈)보다
+#: 조금 넓게 잡았다 -- 대문자·밑줄을 쓴 옛 식별자나 손으로 넘긴 값도 있을 수
+#: 있어서다. **경로 구분자(`/`, `\`)와 `.`은 여기 없다** -- `..`이 여길 통과하면
+#: `project_root("..")`가 `projects/`(부모 폴더)를 가리켜, 프로젝트 삭제와 겹치면
+#: 그 폴더 전체가 `rmtree`될 수 있다(코드리뷰 2026-09-07, §1-1의 방어 심층이기도 하다).
+_PROJECT_ID_SHAPE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
 class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMixin):
     def __init__(
         self,
@@ -728,6 +736,12 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
         return all_jobs
 
     def project_root(self, project_id: str) -> Path:
+        if not _PROJECT_ID_SHAPE.match(project_id):
+            # `%2e%2e`(`..`)가 여기까지 오면 `projects/`(부모 폴더)를 가리킨다 --
+            # 존재하지 않는 프로젝트와 같은 값(`KeyError`)으로 답한다. 모양이
+            # 이상하다고 따로 알려 주면 부르는 쪽에게 "어떤 값이 통과하는지"
+            # 찔러 볼 자리를 준다.
+            raise KeyError(project_id)
         return self.projects_root / "projects" / project_id
 
     def _reconcile_batch_director_operations(self) -> None:
