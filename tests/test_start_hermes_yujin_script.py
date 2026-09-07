@@ -48,6 +48,11 @@ def _env_text(*extra_lines: str) -> str:
     lines = [
         "POSTGRES_PASSWORD=static-postgres-password",
         "VIDEOBOX_CONTAINER_DATA_ROOT=D:/videobox-static-data",
+        # compose가 `:?`로 요구하는 값은 여기에도 있어야 한다 -- 없으면 시작
+        # 스크립트의 확인 단계가 그대로 멈춘다. 자산 드롭 폴더 둘을 더하면서
+        # 이 가짜 설정을 안 고쳐 이 시험이 빨개졌다(2026-09-07).
+        "VIDEOBOX_OWNER_DROP_ROOT=D:/videobox-static-drop",
+        "VIDEOBOX_OWNER_DROP_REJECT_ROOT=D:/videobox-static-drop-reject",
         "BASE_GATEWAY_USERNAME=valid-dummy-user",
         "HERMES_YUJIN_GATEWAY_USERNAME=${BASE_GATEWAY_USERNAME}",
         f"HERMES_YUJIN_GATEWAY_PASSWORD={VALID_PASSWORD}",
