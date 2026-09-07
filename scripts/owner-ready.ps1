@@ -1109,6 +1109,49 @@ if ($Mode -ceq "Start") {
     $checks += New-OwnerReadyResult -Id "voice_bridge" -Status $voiceStatus `
         -Summary $voiceSummary -Action $voiceAction -Evidence $voiceEvidence
 
+    # **캡컷 다리도 같이 켠다** (owner 승인 2026-09-07: "캡컷 넘기기 다리 만들어줘").
+    # 캡컷 프로젝트 폴더는 이 컴퓨터에 있고 컨테이너는 못 본다. 목소리 다리와
+    # 똑같은 이유·똑같은 방식이라 여기 나란히 둔다 -- 한 단계를 고칠 때 옆
+    # 단계를 같이 보라는 그 자리다.
+    #
+    # 캡컷 넘기기가 없어도 VideoBox는 다 쓸 수 있다(선택적 호환 경로,
+    # `implementation-plan.ko.md` §4). 그래서 blocked를 내지 않는다.
+    $capcutStatus = "pass"
+    $capcutSummary = "캡컷 다리를 켜지 못했습니다. 캡컷으로 넘기기만 쉬어 갑니다."
+    $capcutAction = "캡컷으로 넘기려면 로그를 확인한 뒤 다시 실행하세요."
+    $capcutEvidence = @{ port = 8200; started = $false }
+    $capcutAlreadyUp = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $probe.Connect("127.0.0.1", 8200)
+        $capcutAlreadyUp = $probe.Connected
+        $probe.Close()
+    } catch { $capcutAlreadyUp = $false }
+    if ($capcutAlreadyUp) {
+        $capcutSummary = "캡컷 다리가 이미 준비돼 있습니다."
+        $capcutAction = "추가 조치가 없습니다."
+        $capcutEvidence = @{ port = 8200; started = $true; already_running = $true }
+    } else {
+        $capcutScript = Join-Path $PSScriptRoot "start-capcut.ps1"
+        $capcutLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-capcut-bridge.log"
+        if (Test-Path $capcutScript) {
+            try {
+                Start-Process -FilePath "powershell" `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $capcutScript) `
+                    -WindowStyle Hidden `
+                    -RedirectStandardOutput $capcutLog `
+                    -RedirectStandardError ($capcutLog + ".err") | Out-Null
+                $capcutSummary = "캡컷 다리를 백그라운드로 켰습니다."
+                $capcutAction = "추가 조치가 없습니다."
+                $capcutEvidence = @{ port = 8200; started = $true; already_running = $false; log = $capcutLog }
+            } catch {
+                $capcutEvidence = @{ port = 8200; started = $false; log = $capcutLog }
+            }
+        }
+    }
+    $checks += New-OwnerReadyResult -Id "capcut_bridge" -Status $capcutStatus `
+        -Summary $capcutSummary -Action $capcutAction -Evidence $capcutEvidence
+
     if ($WithYujinMemory) {
         # 게이트웨이가 유진 에이전트와 메모리 어댑터에 의존한다.
         $serviceNames += @("videobox-hermes-yujin", "videobox-hermes-memory-adapter", "videobox-agent-gateway")

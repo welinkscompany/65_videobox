@@ -1484,6 +1484,54 @@ describe("OutputsPage", () => {
     expect(screen.queryByRole("button", { name: "CapCut에 등록" })).not.toBeInTheDocument();
   });
 
+  it("says how to switch the CapCut bridge on instead of offering a press that cannot work", async () => {
+    // **"눌렀는데 아무 일도 안 일어난다"를 막는 자리.** 캡컷 폴더는 이 컴퓨터에
+    // 있고 컨테이너는 못 본다. 준비가 안 됐으면 서버가 무엇을 하면 되는지
+    // 문장으로 돌려주고, 화면은 그걸 그대로 옮기며 단추를 잠근다.
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], source_session_id: "session-a", source_session_revision: 7, is_current: true,
+        handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+      },
+    } as never);
+    const registerCapcutDraftHandoff = vi.spyOn(api, "registerCapcutDraftHandoff");
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue({
+      status: "failed", is_supported: false, project_root_path: "", project_root_exists: false, write_access: false,
+      recovery_message: "캡컷으로 넘기는 준비가 아직 안 됐어요. 바탕화면의 VideoBox 시작 아이콘을 다시 실행해 주세요.",
+      checked_at: "2026-09-07T09:01:00Z",
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("캡컷으로 넘기는 준비가 아직 안 됐어요. 바탕화면의 VideoBox 시작 아이콘을 다시 실행해 주세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "CapCut에 등록" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "CapCut에 등록" }));
+    await Promise.resolve();
+    expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
+  });
+
+  it("shows where the registered draft landed so the owner knows what to open in CapCut", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], source_session_id: "session-a", source_session_revision: 7, is_current: true,
+        handoff: {
+          status: "ready", source_file_uri: "local://draft-current.zip", reused: false,
+          registered_project_path: "C:/Users/atgro/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_002",
+        },
+      },
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText(
+      "CapCut에서 열 자리: C:/Users/atgro/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_002",
+    )).toBeVisible();
+  });
+
   it("shows another durable CapCut registration as in progress without issuing a duplicate POST", async () => {
     const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
     stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });

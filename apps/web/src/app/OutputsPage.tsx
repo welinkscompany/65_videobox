@@ -737,6 +737,14 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const canRegisterCapcutHandoff = Boolean(
     currentCapcutDraft && capcutDraft?.export && capcutHandoff?.status !== "ready" && !capcutHandoffInProgress,
   );
+  /** 지금 누르면 못 넘긴다는 것을 **누르기 전에** 알 수 있으면, 그 이유를 그대로 쓴다.
+   *
+   * 서버 진단(`/api/capcut/handoff-diagnostics`)은 이제 컨테이너 안이 아니라
+   * 이 컴퓨터의 캡컷 다리에게 물어본 결과를 돌려준다. 준비가 안 됐으면 무엇을
+   * 하면 되는지까지 문장으로 온다 -- 화면이 그걸 지어내지 않고 옮기기만 한다. */
+  const capcutHandoffBlockedReason = currentState?.diagnostics && currentState.diagnostics.status !== "ready"
+    ? currentState.diagnostics.recovery_message ?? "지금은 CapCut으로 넘길 수 없어요. 잠시 후 다시 확인해 주세요."
+    : null;
   const handleRenderSubtitle = async () => {
     const submissionProjectId = projectId;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !canRenderSubtitle || isRenderingCurrentSubtitle) return;
@@ -1108,15 +1116,22 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           {currentCapcutDraft && capcutDraft.export ? <p>로컬 저장 위치: {capcutDraft.export.file_uri}</p> : null}
           {currentCapcutDraft && capcutDraft.export?.notes.length ? <p>일부 효과는 CapCut에서 확인해 주세요.</p> : null}
           {capcutHandoff?.status === "ready" ? <p>{capcutHandoff.reused ? "기존 CapCut 등록 정보를 다시 사용해요." : "CapCut 등록 상태가 준비되었어요."}</p> : null}
+          {/* **어디에 들어갔는지 자리를 그대로 보여 준다.** 등록만 됐다고 하고
+              자리를 안 알려 주면 owner는 CapCut에서 어느 것을 열어야 하는지 모른다. */}
+          {capcutHandoff?.status === "ready" && capcutHandoff.registered_project_path ? <p>CapCut에서 열 자리: {capcutHandoff.registered_project_path}</p> : null}
           {capcutHandoffInProgress ? <p>CapCut 등록이 진행 중이에요. 잠시 후 상태를 다시 확인해 주세요.</p> : null}
           {capcutHandoff?.status === "failed" ? <p>CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {capcutHandoffError ? <p>CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.</p> : null}
           {currentCapcutDraft ? <p>실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.</p> : null}
-          {currentState?.diagnostics && !currentState.diagnostics.is_supported ? <p>이 기기의 CapCut 연결 상태를 확인해 주세요.</p> : null}
+          {/* **무엇을 하면 되는지 서버가 말한 그대로 보여 준다.** 예전에는 "연결
+              상태를 확인해 주세요"라고만 했는데, 그 말로는 owner가 할 수 있는
+              일이 없었다. 지금은 진단이 캡컷 다리에게 직접 물어보고 이유를
+              돌려준다 -- 다리가 꺼졌으면 켜는 법까지 이 줄에 담겨 온다. */}
+          {capcutHandoffBlockedReason ? <p>{capcutHandoffBlockedReason}</p> : null}
           {currentState?.diagnostics ? <p>CapCut 연결 상태는 준비 여부만 표시하며, 실제 Desktop 완료를 뜻하지 않아요.</p> : null}
           {!currentState?.diagnostics ? <p>CapCut 연결 상태는 지금 확인할 수 없어요. 잠시 후 다시 확인해 주세요.</p> : null}
           <Button disabled={!canExportCapcutDraft || isExportingCurrentCapcutDraft} onClick={() => void handleExportCapcutDraft()}>{isExportingCurrentCapcutDraft ? "CapCut 초안 만드는 중" : capcutDraft?.status === "failed" || capcutError ? "CapCut 초안 다시 만들기" : "CapCut 초안 만들기"}</Button>
-          {canRegisterCapcutHandoff ? <Button variant="outline" disabled={isRegisteringCurrentCapcutHandoff} onClick={() => void handleRegisterCapcutHandoff()}>{isRegisteringCurrentCapcutHandoff ? "CapCut 등록 중" : capcutHandoff?.status === "failed" || capcutHandoffError ? "CapCut 등록 다시 시도" : "CapCut에 등록"}</Button> : null}
+          {canRegisterCapcutHandoff ? <Button variant="outline" disabled={isRegisteringCurrentCapcutHandoff || capcutHandoffBlockedReason !== null} onClick={() => void handleRegisterCapcutHandoff()}>{isRegisteringCurrentCapcutHandoff ? "CapCut 등록 중" : capcutHandoff?.status === "failed" || capcutHandoffError ? "CapCut 등록 다시 시도" : "CapCut에 등록"}</Button> : null}
         </CardContent>
       </Card>
     </div>

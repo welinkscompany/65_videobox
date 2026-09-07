@@ -54,10 +54,27 @@ def test_workspace_owns_api_and_web_mounts_without_host_or_docker_access() -> No
     # widening to arbitrary host paths -- and it is writable because the watcher
     # files each original into a sibling folder once it has been imported, which
     # is how the owner can see what was already taken.
+    #
+    # **자산을 넣는 한 폴더 둘은 데이터 뿌리 밖이다**(owner 승인 2026-09-07,
+    # `decisions/2026-09-07-one-drop-folder-sorted-for-me.ko.md`). 여기가 넓힘을
+    # 정당화하라고 있는 자리이므로 근거를 적는다:
+    #
+    # owner가 **휴대폰에서도** 자산을 넣겠다고 했고, 그러려면 클라우드가 동기화
+    # 하는 폴더여야 한다. 원드라이브는 파일을 디스크에 실제로 두므로 Docker가
+    # 읽을 수 있다(구글 드라이브 `G:`는 스트리밍이라 빈 폴더로 보인다).
+    #
+    # 두 자리를 따로 두는 이유는 감시기가 하위 폴더까지 훑기 때문이다
+    # (`media_inbox.py`의 `rglob`). 버리는 자리를 감시 폴더 안에 두면 옮긴
+    # 파일을 다음 바퀴에 다시 읽어 영원히 맴돈다.
+    #
+    # 둘 다 쓰기가 필요하다 -- 처리한 원본과 자산 가치가 없는 것을 옮긴다.
+    # **지우지는 않는다**(owner가 보고 지운다).
     assert workspace["volumes"] == [
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime:/videobox-data",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/snapshot:/videobox-snapshot:ro",
         "${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync:/videobox-drive-sync",
+        "${VIDEOBOX_OWNER_DROP_ROOT:?set VIDEOBOX_OWNER_DROP_ROOT in .env.container}:/videobox-drop",
+        "${VIDEOBOX_OWNER_DROP_REJECT_ROOT:?set VIDEOBOX_OWNER_DROP_REJECT_ROOT in .env.container}:/videobox-drop-reject",
         "videobox_model_cache:/opt/models",
     ]
     assert workspace["environment"]["HF_HOME"] == "/opt/models"

@@ -30,6 +30,7 @@ from videobox_core_engine.transitions import TRANSITION_TYPES, normalize_transit
 from videobox_core_engine.output_source_verifier import is_silent_narration_placeholder, OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_metadata, output_warning_notes
 import json
+from videobox_capcut_export.host_paths import CapCutHostPathMap, rewrite_draft_for_host
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_storage.timeline_clip_source_resolution import (
     TimelineClipSourceError,
@@ -216,6 +217,9 @@ class PyCapCutRealExportAdapter:
     video_fps: int = 30
     ffmpeg_binary: str = "ffmpeg"
     render_timeout_seconds: int = 1800
+    #: 컨테이너 경로를 이 컴퓨터 경로로 옮겨 적는 대응표. `None`이면 만들 때
+    #: 환경변수(`VIDEOBOX_CAPCUT_HOST_PATH_MAP`)에서 읽는다. 코드에 박지 않는다.
+    host_path_map: CapCutHostPathMap | None = None
 
     def export_timeline(
         self,
@@ -310,6 +314,16 @@ class PyCapCutRealExportAdapter:
             content = json.loads(content_path.read_text(encoding="utf-8"))
             content["videobox_output_metadata"] = metadata
             content_path.write_text(json.dumps(content, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        # **소재 경로를 이 컴퓨터의 경로로 옮겨 적는다.** 여기까지 초안에 적힌
+        # 경로는 이 프로세스가 보는 경로(컨테이너면 `/videobox-data/...`)이고,
+        # 윈도우 캡컷은 그걸 못 읽는다. 대응표가 비어 있으면 아무것도 안 바꾼다.
+        #
+        # 저장이 **다 끝난 뒤** 한 번만 한다 -- 중간에 바꾸면 pycapcut이 다시
+        # 열어 볼 때 없는 파일을 보게 된다.
+        rewrite_draft_for_host(
+            draft_path,
+            self.host_path_map if self.host_path_map is not None else CapCutHostPathMap.from_environment(),
+        )
         warnings.extend(note for note in output_warning_notes(timeline) if note not in warnings)
         return CapCutDraftExportResult(draft_path=draft_path, capcut_compatibility_warnings=warnings)
 
