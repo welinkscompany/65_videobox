@@ -846,15 +846,21 @@ class _LazyLocalRuntime:
     **하나만 짓는다.** 매번 지으면 요청마다 transport가 새로 생긴다.
     """
 
-    __slots__ = ("_build", "_runtime")
+    __slots__ = ("_build", "_lock", "_runtime")
 
     def __init__(self, *, build: Callable[[], Any]) -> None:
         self._build = build
+        self._lock = threading.Lock()
         self._runtime: Any = None
 
     def generate_structured(self, **kwargs: Any) -> Any:
         if self._runtime is None:
-            self._runtime = self._build()
+            # 화면 요청은 스레드풀에서 돈다. 잠그지 않으면 첫 요청 둘이 나란히
+            # 들어왔을 때 런타임을 둘 짓고 하나를 버린다 -- "하나만 짓는다"가
+            # 주석에만 있는 말이 된다.
+            with self._lock:
+                if self._runtime is None:
+                    self._runtime = self._build()
         return self._runtime.generate_structured(**kwargs)
 
 
@@ -1435,15 +1441,21 @@ def create_app(
             managed_root=user_library_root,
             managed_roots=resolved_library_asset_managed_roots,
             schedule_scene_analysis=_schedule_scene_analysis,
-            # **경로로 넣는 문이 받아 줄 폴더** (owner 결정 2026-09-07).
-            # 드롭 폴더와 자료실 관리 폴더뿐이다 -- 둘 다 호스트가 함께 보는
-            # 자리라, 밖에서 부르는 쪽이 파일을 두고 경로만 넘길 수 있다.
-            # 자료 폴더 전체를 열지 않는 것은, 그러면 자료실이 임의 파일 읽기
-            # 창구가 되기 때문이다.
+            # **경로로 넣는 문이 받아 줄 폴더는 드롭 폴더 하나다** (owner 결정
+            # 2026-09-07, 코드리뷰로 2026-09-07 좁힘).
+            #
+            # 처음엔 자료실 관리 폴더(`user_library_root`)도 넣었다. **그게
+            # 결함이었다** -- 그 폴더에는 자료실 자신의 `media_library.sqlite`와
+            # `format_templates.sqlite`가 들어 있다. 그걸 자산으로 등록한 뒤
+            # `/preview`로 도로 받으면, 자료실 전체 목록·출처·메타데이터가
+            # 그대로 나간다. 내가 주석에 "자료 폴더 전체를 열면 임의 파일 읽기
+            # 창구가 된다"고 써 놓고 자료실 안에서 정확히 그걸 했다.
+            #
+            # **곁들여 풀린 것:** 그 폴더는 항상 있는 값이라, 넣어 두면
+            # "설정이 비면 닫힌다"는 기본값이 실물에서 **절대 안 닿는다**. 빼니까
+            # 드롭 폴더만 남고, 그건 꺼질 수 있는 값이라 그 기본값이 살아난다.
             allowed_ingest_roots=tuple(
-                root
-                for root in (media_inbox_watch_path, user_library_root)
-                if root is not None
+                root for root in (media_inbox_watch_path,) if root is not None
             ),
         )
     )

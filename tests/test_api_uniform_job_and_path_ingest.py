@@ -203,6 +203,61 @@ def test_an_unknown_media_type_is_refused(client: TestClient, tmp_path: Path) ->
     assert reply.json()["detail"] == "media_type_invalid"
 
 
+def test_the_library_own_database_cannot_be_read_back_through_this_door(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """**코드리뷰가 잡은 결함이다 (2026-09-07).**
+
+    처음엔 자료실 관리 폴더도 받아 줄 폴더에 넣었다. 그 폴더에는 자료실 자신의
+    `media_library.sqlite`가 들어 있다. 그걸 자산으로 등록한 뒤 `/preview`로 도로
+    받으면 **자료실 전체 목록·출처·메타데이터가 그대로 나간다.**
+
+    내가 주석에 "자료 폴더 전체를 열면 임의 파일 읽기 창구가 된다"고 써 놓고
+    자료실 안에서 정확히 그걸 했다. 받아 줄 폴더는 **주고받는 자리**여야지
+    저장소 자신이 사는 자리면 안 된다.
+    """
+
+    library_root = Path(client.app.state.library_ingest_service.managed_root)
+    database = library_root / "media_library.sqlite"
+    assert database.is_file(), "이 시험이 겨눈 파일이 없다 -- 이름이 바뀌었는지 보라"
+
+    reply = client.post(
+        "/api/library/ingest-path",
+        json={
+            "media_type": "image",
+            "source_path": str(database),
+            "idempotency_key": "leak:1",
+        },
+    )
+    assert reply.status_code == 403, "자료실 자신의 저장소를 자산으로 넣을 수 있다"
+    assert reply.json()["detail"]["reason"] == "source_path_not_visible"
+
+
+def test_a_relative_path_is_told_apart_from_an_invisible_one(client: TestClient) -> None:
+    """상대 경로는 API 프로세스의 현재 폴더 기준으로 풀린다. "볼 수 없는
+    경로"라고 하면 부르는 쪽이 없는 마운트 문제를 찾으러 간다."""
+
+    reply = client.post(
+        "/api/library/ingest-path",
+        json={"media_type": "image", "source_path": "그림.png", "idempotency_key": "rel:1"},
+    )
+    assert reply.status_code == 422
+    assert reply.json()["detail"] == "source_path_must_be_absolute"
+
+
+def test_a_job_asked_for_under_a_project_that_is_not_there_is_not_a_server_fault(
+    client: TestClient,
+) -> None:
+    """**코드리뷰가 잡았다.** 로컬 저장소는 프로젝트마다 sqlite가 따로라, 없는
+    프로젝트를 물으면 `KeyError`가 아니라 "파일을 못 연다"가 나고 500이 됐다.
+    부르는 쪽은 그걸 "서버 고장"으로 읽고 재시도하거나 사람을 부른다 -- 실제로는
+    그냥 없는 것이다."""
+
+    reply = client.get("/api/projects/없는프로젝트/jobs/transcription_job_001")
+    assert reply.status_code == 404, f"500이 나갔다: {reply.text[:200]}"
+    assert reply.json()["detail"] == "project_not_found"
+
+
 def test_with_no_visible_folder_configured_nothing_is_accepted(tmp_path: Path) -> None:
     """**설정이 빠지면 닫힌 채로 있어야 한다.**
 

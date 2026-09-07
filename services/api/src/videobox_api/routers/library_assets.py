@@ -248,12 +248,30 @@ def build_library_assets_router(
             raise HTTPException(status_code=422, detail="media_type_invalid") from exc
         roots = tuple(allowed_ingest_roots or ())
         source = Path(payload.source_path)
+        if not source.is_absolute():
+            # 상대 경로는 API 프로세스의 현재 폴더 기준으로 풀린다. 지금도 닫혀
+            # 있지만("볼 수 없는 경로"로 걸린다), 그 문구는 부르는 쪽을 없는
+            # 마운트 문제로 보내 헛돌게 한다. 갈라서 말한다.
+            raise HTTPException(status_code=422, detail="source_path_must_be_absolute")
+        try:
+            source = source.resolve()
+        except OSError:
+            raise HTTPException(status_code=422, detail="source_path_unreadable") from None
         if not _inside_any(source, roots):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={
                     "reason": "source_path_not_visible",
                     "message": "컨테이너가 볼 수 없는 경로입니다. 함께 보는 폴더 안에 두고 그 경로를 주세요.",
+                    # **볼 수 있는 폴더를 같이 낸다.** 안 알려 주면 부르는 쪽은
+                    # 어디에 파일을 둬야 하는지 알 방법이 없다.
+                    #
+                    # 코드리뷰(2026-09-07)가 "호스트 계정 이름이 샌다"고 짚었다.
+                    # 맞는 지적인데 그대로 둔다 -- 제품은 컨테이너로 도니까 이 값은
+                    # `/videobox-drop`이고, 계정 이름이 보이는 것은 개발자가 손으로
+                    # 띄웠을 때뿐이다. 그리고 이 API에는 애초에 로그인이 없다.
+                    # 같은 사람으로 도는 호출자에게 그 사람 이름을 숨기는 대신,
+                    # 꼭 필요한 정보를 안 주는 쪽이 더 나쁘다.
                     "visible_roots": [str(root) for root in roots],
                 },
             )
@@ -270,9 +288,22 @@ def build_library_assets_router(
                 provenance=payload.provenance or {},
             )
         except LibraryIngestIdempotencyConflict as exc:
-            raise HTTPException(status_code=409, detail="idempotency_key_conflict") from exc
+            # 같은 열쇠에 다른 바이트인지, 같은 바이트에 다른 종류인지를 갈라
+            # 말한다 -- 기계가 부르는 문이라 재시도 방법이 서로 다르다.
+            raise HTTPException(
+                status_code=409,
+                detail={"reason": "idempotency_conflict", "message": str(exc)},
+            ) from exc
         except Exception as exc:
-            raise _http_error(exc) from exc
+            # **날 예외 문구를 밖으로 내지 않는다.** `[Errno 13] Permission denied:
+            # '/videobox-data/videobox-user-library/.staging/...'` 같은 것이 그대로
+            # 나가면 관리 폴더 구조가 드러난다. multipart 쪽이 이미 같은 이유로
+            # 종류 이름만 낸다.
+            _LOGGER.warning("경로로 자료실에 넣지 못했습니다: %s", exc, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail={"reason": "ingest_failed", "error_code": type(exc).__name__},
+            ) from exc
 
     @router.get("/api/library/assets")
     def list_library_assets(
