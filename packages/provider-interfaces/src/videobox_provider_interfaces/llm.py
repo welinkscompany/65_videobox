@@ -21,6 +21,10 @@ class LLMTaskType(str, Enum):
     SCRIPT_DRAFT = "script_draft"
     # 자막을 다른 언어로 옮긴다. 원본은 그대로 두고 나란히 쌓는다.
     CAPTION_TRANSLATION = "caption_translation"
+    # 인포그래픽 한 장을 HTML로 쓴다. **대본보다 훨씬 길다** -- 로컬 런타임
+    # 기본 상한 30초로는 모자라서 이 일만 따로 상한을 준다
+    # (`infographic_service`, 2026-09-07 실측).
+    INFOGRAPHIC_HTML = "infographic_html"
 
 
 @dataclass(slots=True, frozen=True)

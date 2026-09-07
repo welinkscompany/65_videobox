@@ -427,6 +427,65 @@ class SourceVoiceStartResponse(BaseModel):
     retake_candidates: list[RetakeCandidateResponse]
 
 
+class InfographicFactRequest(BaseModel):
+    """그림에 들어갈 숫자 하나. **여기 없는 숫자는 그림에 못 들어간다** --
+    `infographic_brief.check_infographic_html`이 대조한다."""
+
+    label: str = Field(min_length=1, max_length=80)
+    value: float
+    unit: str = Field(default="", max_length=12)
+    note: str = Field(default="", max_length=120)
+
+    @field_validator("value")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not isfinite(value):
+            raise ValueError("infographic_fact_value_must_be_finite")
+        return value
+
+
+class InfographicCreateRequest(BaseModel):
+    """인포그래픽 한 장. 자료실 `그림`으로 들어간다.
+
+    숫자를 **손으로 주게 한 것**이 핵심이다. 모델에게 숫자까지 맡기면 그럴듯한
+    거짓말을 만든다 -- 2026-09-07 실측에서 실제로 `100,000원 판매 시` 예시를
+    통째로 지어냈다.
+    """
+
+    topic: str = Field(min_length=1, max_length=200)
+    # 여덟 개를 넘기면 1920x1080 안에 다 못 들어간다. 화면 가까운 쪽에서 막는다.
+    facts: list[InfographicFactRequest] = Field(min_length=1, max_length=8)
+    style: str | None = None
+    title: str | None = Field(default=None, max_length=120)
+
+
+class InfographicResponse(BaseModel):
+    library_asset_id: str | None = None
+    title: str
+    style: str
+    #: 몇 판 만에 나왔는지. 2면 한 번 고쳐 낸 것이다.
+    attempts: int
+    #: 고치라고 되돌려 준 것들. 화면이 "무엇을 고쳤는지" 보여 줄 수 있다.
+    corrected: list[str] = Field(default_factory=list)
+    #: **아직 남은 아쉬운 점.** 비어 있어야 정상이다.
+    remaining_problems: list[str] = Field(default_factory=list)
+    #: 자료실 등록이 실패했으면 그 이유. 그림 자체는 만들어졌다.
+    library_error: str | None = None
+
+
+class InfographicStyleResponse(BaseModel):
+    key: str
+    korean_name: str
+    direction: str
+
+
+class InfographicStyleListResponse(BaseModel):
+    """고를 수 있는 결. **지금 걸린 것**이 따로 없는 목록이라 값 하나만 낸다 --
+    그림은 매번 새로 만드는 것이지 지금 걸려 있는 상태가 아니다."""
+
+    styles: list[InfographicStyleResponse]
+
+
 class SceneImageCreateRequest(BaseModel):
     """대본의 한 장면에 얹을 그림 하나. §10.14 조항 2-C."""
 

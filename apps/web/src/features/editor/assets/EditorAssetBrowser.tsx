@@ -11,6 +11,7 @@ import { AddMediaFiles } from "../../media/AddMediaFiles";
 import { ingestFilesIntoProject, ingestOutcomeMessage } from "../../media/ingestFilesIntoProject";
 import { VoiceMaterialPanel } from "../../media/VoiceMaterialPanel";
 import { ImportFromFootageInbox } from "../../media/ImportFromFootageInbox";
+import { InfographicPanel } from "./InfographicPanel";
 import { LibraryPickerDialog } from "./LibraryPickerDialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
 import { DEFAULT_SCENE_TRANSITION_DURATION_SEC, SCENE_TRANSITION_CHOICES } from "../inspector/sceneTransitions";
@@ -206,6 +207,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
   // 만큼만 보여 주고 나머지는 눌러서 편다.
   const [shown, setShown] = useState(FIRST_PAGE);
   const [narrationOpen, setNarrationOpen] = useState(false);
+  const [infographicOpen, setInfographicOpen] = useState(false);
   const [footageOpen, setFootageOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const visibleCards = matchingCards.slice(0, shown);
@@ -301,6 +303,14 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           패널은 **미디어 화면이 쓰는 것을 그대로** 쓴다. */}
         <Button type="button" variant="outline" className="vb-editor-assets__narration" onClick={() => setNarrationOpen(true)}>내레이션</Button>
         <Button type="button" variant="outline" className="vb-editor-assets__footage" onClick={() => setFootageOpen(true)}>촬영본</Button>
+        {/* **인포그래픽(owner 지시 2026-09-07).**
+            > "인포그래픽 만들기 기능을 편집기화면에 붙여줘야 할거 같은데"
+
+            인포그래픽은 결국 `그림` 자산 하나라 여기가 맞는 자리다 -- 왼쪽 띠에
+            일곱 번째 탭을 새로 만들지 않았다(캡컷에 없는 탭을 늘리지 않는다).
+            내레이션과 같은 이유로 팝업이다: 숫자를 여러 줄 적어야 해서 220~400px
+            도크에 밀어 넣으면 답답하다. */}
+        <Button type="button" variant="outline" className="vb-editor-assets__infographic" onClick={() => setInfographicOpen(true)}>인포그래픽</Button>
         {/* **라이브러리에서 가져오기(owner 승인, 재설계안 §1.3).**
             여러 프로젝트가 함께 쓰는 `/library`는 지금 편집 중인 프로젝트에
             속하지 않는다 -- 그래서 편집기 안으로 통째로 접지 않고, "고르기"
@@ -316,6 +326,15 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
               <DialogDescription>따로 모아 둔 영상에서 골라 이 프로젝트로 가져옵니다.</DialogDescription>
             </DialogHeader>
             <ImportFromFootageInbox projectId={projectId} onImported={onMediaAdded} />
+          </DialogContent>
+        </Dialog>
+        <Dialog open={infographicOpen} onOpenChange={setInfographicOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader>
+              <DialogTitle>인포그래픽 만들기</DialogTitle>
+              <DialogDescription>숫자를 적어 주면 그림 한 장으로 만들어 자료실에 넣습니다.</DialogDescription>
+            </DialogHeader>
+            <InfographicPanel onMade={onMediaAdded} />
           </DialogContent>
         </Dialog>
         <Dialog open={narrationOpen} onOpenChange={setNarrationOpen}>

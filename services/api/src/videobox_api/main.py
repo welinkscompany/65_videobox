@@ -53,6 +53,11 @@ from videobox_api.routers.hermes_conversation import build_hermes_conversation_r
 from videobox_api.routers.hermes_operations import build_hermes_operations_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
+from dataclasses import replace
+
+from videobox_core_engine.infographic_host_bridge import InfographicHostBridge
+from videobox_core_engine.infographic_service import InfographicService
+from videobox_api.routers.infographics import build_infographics_router
 from videobox_api.routers.scene_images import build_scene_images_router
 from videobox_api.routers.scene_videos import build_scene_videos_router
 from videobox_api.routers.script_drafts import build_script_drafts_router
@@ -104,6 +109,7 @@ from videobox_core_engine.settings import (
     resolve_image_generation_config,
     resolve_video_generation_config,
     resolve_container_snapshot_root,
+    resolve_infographic_timeout_seconds,
     resolve_local_runtime_config,
     resolve_media_inbox_library_root,
     resolve_media_inbox_watch_enabled,
@@ -1115,6 +1121,17 @@ def create_app(
     app.state.script_draft_writer = script_draft_writer or ScriptDraftWriter(
         runtime_service=runtime_service
     )
+    # 인포그래픽 전용 런타임. **상한만 늘린 같은 로컬 모델이다** -- 나가는 곳은
+    # 그대로라 §10.14 조항 2-B의 경계는 변하지 않는다. 공용 런타임의 30초로는
+    # 이 일이 매번 실패한다(한 판 63~115초, 2026-09-07 실측).
+    infographic_runtime_service = build_local_only_runtime_service(
+        store=store,
+        local_runtime_config=replace(
+            resolved_local_runtime_config,
+            timeout_seconds=resolve_infographic_timeout_seconds(),
+        ),
+        local_http_client=urlopen,
+    )
     app.state.build_local_only_runtime_service = build_local_only_runtime_service
     app.state.local_only_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
@@ -1129,6 +1146,18 @@ def create_app(
         store=resolved_media_library_store.user_asset_store,
         managed_root=user_library_root,
         probe_metadata=FFmpegMediaProbe().probe_metadata,
+    )
+    # 인포그래픽 한 장. **런타임을 따로 만든다** -- 이 일은 한 판에 63~115초라
+    # (2026-09-07 실측) 공용 런타임의 30초 상한으로는 매번 실패한다. 상한만 다르고
+    # 나가는 곳은 같은 로컬 모델이다(§10.14 조항 2-B 그대로).
+    #
+    # 다리(`VIDEOBOX_INFOGRAPHIC_BRIDGE_URL`)가 없으면 `None`이 아니라 다리 없는
+    # 서비스를 둔다 -- 그래야 화면이 "크롬 다리를 켜 주세요"라는 정확한 이유를
+    # 받는다. 서비스 자체를 없애면 "기능이 없다"로만 보인다.
+    app.state.infographic_service = InfographicService(
+        runtime_service=infographic_runtime_service,
+        bridge=InfographicHostBridge.from_environment(),
+        library_ingest=app.state.library_ingest_service,
     )
     # `scene_image_service`와 같은 이유 -- 켜지 않았으면 `None`이다. owner 결정
     # 2026-08-29(2회차, "원래 만든거외에 별도로 만들자"): 이 서비스는
@@ -1384,6 +1413,7 @@ def create_app(
         )
     )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
+    app.include_router(build_infographics_router())
     app.include_router(build_scene_images_router(store))
     app.include_router(build_scene_videos_router(store))
     app.include_router(build_script_drafts_router())

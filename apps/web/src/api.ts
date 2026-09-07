@@ -54,6 +54,20 @@ export type SourceVoiceStart = { asset_id: string; script_text: string; spoken_s
 /** 만든 장면 그림. `commercial_use_is_unrestricted`가 `null`이면 **모른다**는 뜻이다 --
  *  아는 척하지 않는다(§10.14 2-C). */
 export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; image_prompt?: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
+export type InfographicStyle = { key: string; korean_name: string; direction: string };
+export type InfographicFact = { label: string; value: number; unit?: string; note?: string };
+export type InfographicRequest = { topic: string; facts: InfographicFact[]; style?: string | null; title?: string | null };
+export type InfographicResult = {
+  library_asset_id: string | null;
+  title: string;
+  style: string;
+  attempts: number;
+  corrected: string[];
+  /** 아직 남은 아쉬운 점. 비어 있어야 정상이다. */
+  remaining_problems: string[];
+  library_error: string | null;
+};
+
 export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
 /** 진짜 동영상(Wan). `SceneImageRequest`와 별개 경로다(owner 결정 2026-08-29 2회차,
  *  "원래 만든거외에 별도로 만들자") -- 정지 이미지+zoompan은 그대로 두고 이 자리가
@@ -2025,6 +2039,12 @@ export const api = {
     request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/captions-from-transcript`, { method: "POST", body: JSON.stringify(body) }),
   listDraftNarrationOptions: async (projectId: string): Promise<NarrationOption[]> => (await request<{ assets: NarrationOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration-options`)).assets,
   uploadDraftNarration: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration/upload`, { method: "POST", body: form }); },
+  /** 고를 수 있는 인포그래픽 결. **화면이 이름을 베껴 적지 않는다** -- 두 벌을
+   *  두면 한 벌이 조용히 낡는다. */
+  listInfographicStyles: () => request<{ styles: InfographicStyle[] }>("/api/library/infographic-styles"),
+  /** 인포그래픽 한 장. **한 판에 1~2분 걸린다**(2026-09-07 실측) -- 부르는 쪽이
+   *  기다리는 동안 화면에 상태를 말하고 두 번 눌리지 않게 막아야 한다. */
+  createInfographic: (payload: InfographicRequest) => request<InfographicResult>("/api/library/infographics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   startSceneVideo: (projectId: string, payload: SceneVideoRequest) => request<SceneVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getSceneVideoStatus: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}`),

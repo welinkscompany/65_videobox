@@ -1152,6 +1152,48 @@ if ($Mode -ceq "Start") {
     $checks += New-OwnerReadyResult -Id "capcut_bridge" -Status $capcutStatus `
         -Summary $capcutSummary -Action $capcutAction -Evidence $capcutEvidence
 
+    # **그림 다리도 같이 켠다** (owner 지시 2026-09-07: "그래 해봐. 그리고 괜찮으면
+    # 우리 시스템에 적용하자"). 컨테이너 안에는 브라우저가 없고, 이 컴퓨터에는
+    # 크롬이 이미 있다. 목소리(8199)·캡컷(8200)과 똑같은 이유·똑같은 방식이라
+    # 여기 나란히 둔다 -- 한 단계를 고칠 때 옆 단계를 같이 보라는 그 자리다.
+    #
+    # 인포그래픽이 없어도 VideoBox는 다 쓸 수 있다. 그래서 blocked를 내지 않는다.
+    $infographicStatus = "pass"
+    $infographicSummary = "그림 다리를 켜지 못했습니다. 인포그래픽 만들기만 쉬어 갑니다."
+    $infographicAction = "인포그래픽을 만들려면 로그를 확인한 뒤 다시 실행하세요."
+    $infographicEvidence = @{ port = 8201; started = $false }
+    $infographicAlreadyUp = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $probe.Connect("127.0.0.1", 8201)
+        $infographicAlreadyUp = $probe.Connected
+        $probe.Close()
+    } catch { $infographicAlreadyUp = $false }
+    if ($infographicAlreadyUp) {
+        $infographicSummary = "그림 다리가 이미 준비돼 있습니다."
+        $infographicAction = "추가 조치가 없습니다."
+        $infographicEvidence = @{ port = 8201; started = $true; already_running = $true }
+    } else {
+        $infographicScript = Join-Path $PSScriptRoot "start-infographic.ps1"
+        $infographicLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-infographic-bridge.log"
+        if (Test-Path $infographicScript) {
+            try {
+                Start-Process -FilePath "powershell" `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $infographicScript) `
+                    -WindowStyle Hidden `
+                    -RedirectStandardOutput $infographicLog `
+                    -RedirectStandardError ($infographicLog + ".err") | Out-Null
+                $infographicSummary = "그림 다리를 백그라운드로 켰습니다."
+                $infographicAction = "추가 조치가 없습니다."
+                $infographicEvidence = @{ port = 8201; started = $true; already_running = $false; log = $infographicLog }
+            } catch {
+                $infographicEvidence = @{ port = 8201; started = $false; log = $infographicLog }
+            }
+        }
+    }
+    $checks += New-OwnerReadyResult -Id "infographic_bridge" -Status $infographicStatus `
+        -Summary $infographicSummary -Action $infographicAction -Evidence $infographicEvidence
+
     if ($WithYujinMemory) {
         # 게이트웨이가 유진 에이전트와 메모리 어댑터에 의존한다.
         $serviceNames += @("videobox-hermes-yujin", "videobox-hermes-memory-adapter", "videobox-agent-gateway")

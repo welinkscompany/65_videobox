@@ -353,6 +353,24 @@
 .vb-editor-assets__transitions { display: grid; gap: var(--vb-space-1); }
 .vb-editor-assets__add-row { display: flex; flex-wrap: wrap; gap: var(--vb-space-1); margin-bottom: var(--vb-space-2); }
 .vb-editor-assets__add-row > * { flex: 1 1 auto; }
+
+/* 인포그래픽 만들기 팝업 (owner 지시 2026-09-07). 숫자를 여러 줄 적는 자리라
+   도크가 아니라 팝업이다. 값은 전부 승인된 척도 토큰만 쓴다 -- 임의의 숫자를
+   쓰면 여백이 다시 스물한 가지가 된다(`ui-system.css` 여백 척도 주석). */
+.vb-infographic { display: grid; gap: var(--vb-space-4); }
+.vb-infographic__field { display: grid; gap: var(--vb-space-2); }
+.vb-infographic__field > span:first-child { font-size: var(--vb-text-sm); color: var(--vb-muted); }
+.vb-infographic__facts { display: grid; gap: var(--vb-space-2); }
+/* 이름은 넓게, 값과 단위는 좁게. 단위는 `%`·`원`처럼 짧다. */
+.vb-infographic__fact { display: grid; grid-template-columns: 2fr 1fr 0.8fr auto; gap: var(--vb-space-2); align-items: center; }
+.vb-infographic__hint { margin: 0; font-size: var(--vb-text-sm); color: var(--vb-muted); }
+.vb-infographic__style { padding: var(--vb-space-2); border: 1px solid var(--border); border-radius: var(--vb-radius-md); background: var(--vb-panel); color: var(--vb-text); font: inherit; }
+.vb-infographic__make { justify-self: start; }
+.vb-infographic__failed { margin: 0; color: var(--vb-accent); font-size: var(--vb-text-sm); }
+.vb-infographic__made { display: grid; gap: var(--vb-space-1); padding: var(--vb-space-3); border: 1px solid var(--vb-border); border-radius: var(--vb-radius-md); background: var(--vb-panel-alt); }
+.vb-infographic__made p { margin: 0; font-size: var(--vb-text-sm); }
+/* 아쉬운 점은 눈에 띄어야 한다 -- 안 보이면 다 된 줄 알고 영상에 넣는다. */
+.vb-infographic__warning { margin: 0; color: var(--vb-accent); font-size: var(--vb-text-sm); }
 .vb-editor-assets__tabs { display: flex; gap: var(--vb-space-1); border-bottom: 1px solid var(--border); margin-bottom: var(--vb-space-2); }
 .vb-editor-assets__tab {
   padding: var(--vb-space-2) var(--vb-space-3);

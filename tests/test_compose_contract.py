@@ -3,6 +3,9 @@ import re
 
 import yaml
 
+from videobox_core_engine.infographic_host_bridge import BRIDGE_PORT
+from videobox_core_engine.infographic_service import TOTAL_BUDGET_SECONDS
+
 
 ROOT = Path(__file__).parents[1]
 
@@ -372,6 +375,47 @@ def test_the_proxy_waits_longer_than_the_app_spends_making_a_picture() -> None:
     assert int(proxy.group(1)) > app_seconds, (
         f"nginx는 {proxy.group(1)}초에 끊는데 앱은 {app_seconds}초까지 기다린다; "
         "화면은 우리 문구 대신 프록시의 504를 본다"
+    )
+
+
+def test_the_proxy_waits_longer_than_making_an_infographic_takes() -> None:
+    """인포그래픽 한 판이 63~115초다(2026-09-07 실측). 두 판을 돌 수도 있다.
+
+    **그림 한 장(위 시험)과 정확히 같은 자리다.** 이 저장소의 시험은 전부
+    FastAPI를 직접 부르고 프록시를 한 번도 안 지나므로, 여기서 두 값을 맞대 보지
+    않으면 아무도 안 본다 -- 업로드 1MB 벽이 그렇게 숨어 있었다.
+
+    `InfographicService`가 시계를 보고 예산을 넘을 것 같으면 한 판 더 돌지
+    않는다. 그 예산이 프록시 안에 들어와야 한다.
+    """
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    environment = compose["services"]["videobox-workspace"]["environment"]
+    declared = str(environment["VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS"])
+    per_attempt = int(re.search(r":-(\d+)}", declared).group(1))
+
+    config = (ROOT / "docker/workspace-nginx.conf").read_text(encoding="utf-8")
+    proxy = int(re.search(r"proxy_read_timeout\s+(\d+)s\s*;", config).group(1))
+    assert TOTAL_BUDGET_SECONDS < proxy, (
+        f"인포그래픽은 {TOTAL_BUDGET_SECONDS}초까지 기다리는데 nginx는 {proxy}초에 끊는다"
+    )
+    # 한 판 상한이 예산의 절반을 넘으면 두 판째는 애초에 못 돈다 -- 그러면
+    # 되돌이가 문서에만 있는 것이 된다.
+    assert per_attempt * 2 <= TOTAL_BUDGET_SECONDS, (
+        f"한 판 상한 {per_attempt}초로는 두 판이 예산 {TOTAL_BUDGET_SECONDS}초에 안 들어간다"
+    )
+
+
+def test_the_infographic_path_may_only_reach_this_machine() -> None:
+    """§10.14 조항 2-C가 허용한 것은 이 기계에서 도는 다리뿐이다. compose 한 줄로
+    밖으로 나갈 수 있으면 그 조항은 문서에만 있는 것이 된다.
+
+    `InfographicHostBridge._endpoint`가 요청 직전에 다시 막지만, **거절당하는 값이
+    기본값으로 적혀 있으면 기능이 그냥 안 돈다** -- 여기서 먼저 잡는다.
+    """
+    compose = yaml.safe_load((ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    environment = compose["services"]["videobox-workspace"]["environment"]
+    assert environment["VIDEOBOX_INFOGRAPHIC_BRIDGE_URL"] == (
+        f"${{VIDEOBOX_INFOGRAPHIC_BRIDGE_URL:-http://host.docker.internal:{BRIDGE_PORT}}}"
     )
 
 

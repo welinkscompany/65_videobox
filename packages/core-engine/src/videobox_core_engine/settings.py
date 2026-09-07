@@ -337,6 +337,21 @@ def resolve_video_generation_config() -> "VideoGenerationConfig":
     )
 
 
+#: 인포그래픽 한 판을 기다려 줄 시간. 실측 63~115초라 100초로는 아슬아슬하다.
+#: 위로는 `InfographicService.TOTAL_BUDGET_SECONDS`(300초)와 nginx 330초가 있다 --
+#: **두 판이 이 상한에 다 닿아도** 예산 안에 들어와야 하므로 그 절반이 천장이다.
+DEFAULT_INFOGRAPHIC_TIMEOUT_SECONDS = 140
+
+
+def resolve_infographic_timeout_seconds() -> int:
+    """인포그래픽 HTML 한 판을 기다려 줄 시간. 공용 런타임(30초)과 따로 둔다 --
+    같이 올리면 대화·추천처럼 빨라야 하는 일까지 느린 실패를 오래 기다린다."""
+
+    return _environment_positive_int(
+        "VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS", DEFAULT_INFOGRAPHIC_TIMEOUT_SECONDS
+    )
+
+
 def resolve_local_runtime_config() -> "LocalOpenAICompatibleRuntimeConfig":
     """Resolve the local LM Studio runtime config for callers that pass none.
 
