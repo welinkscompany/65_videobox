@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import argparse
+import zipfile
 import hashlib
 import json
 from pathlib import Path
@@ -32,7 +33,32 @@ _LINK = re.compile(r"\]\((https://[^)]+)\)")
 _ASSET_ID = re.compile(r"`([a-z0-9-]+)`")
 _VARIOUS = re.compile(r"`(sfx-various-[a-z0-9-]+)=([^`]+)`")
 _SELECTION_TIMESTAMP = "2026-07-14T01:13:16+09:00"
-_APPROVED_CANDIDATE_FINGERPRINT = "672dc23e794399edbd1fe2cb81d91eb9d30519eaf9d572b8c3a7a23e0e52d7a8"
+# 승인 목록이 몰래 바뀌는 것을 막는 지문이다. **바꿀 때는 반드시 이유를 남긴다.**
+#
+# 2026-09-05: owner 지시로 음악 12곡을 갈아 끼웠다("브이로그용 30곡 찾아서
+# 넣어줘. 게임음악은 다 삭제해"). 뺀 것은 8bit 타이틀·아케이드·초원 테마·
+# 포털처럼 명백한 게임 음악이고, 넣은 것은 같은 규칙(CC0 + raw 재배포 허용)의
+# lo-fi/chill이다. FMA HoliznaCC0 12곡은 원래부터 lo-fi라 그대로 뒀다.
+# 팩 크기 상한(500MiB)에 1.8MB 걸려서 `music-since-2am`(9.8MB)을
+# `music-lofi-again`(2.3MB)으로 한 번 더 바꿨다 -- 상한을 올리지 않았다.
+# 앞 지문: 672dc23e794399edbd1fe2cb81d91eb9d30519eaf9d572b8c3a7a23e0e52d7a8
+#
+# 2026-09-05 (두 번째): 브이로그용 효과음 23개를 **더했다**. 효과음 100개가
+# 전부 게임용이라(대포·총소리·박쥐날개) "팝 하고 터지는 소리"에 RPG 폭발음이
+# 나왔다 -- 유진 탓이 아니라 재료가 그것뿐이었다. 장면 전환음(휙) 13개,
+# 타이핑 3개, 키 한 번 3개, 종이 4개. 전부 CC0이고 출처 페이지에서 직접 확인했다.
+# **게임 전용을 빼지는 않았다** -- 지금 만들어 둔 영상이 그 소리를 참조하고
+# 있는지 확인한 뒤에 한다. 그래서 100 → 123이지 교체가 아니다.
+# 앞 지문: 98ba6453c1cb7c4eff07934bfc571867b9af0ba6e186b09e84920f2af35da7b8
+#
+# 2026-09-06: **게임 전용 효과음 49개를 뺐다**(owner 위임). 음악에 대해 "게임음악은
+# 다 삭제해. 어차피 필요없잖아"라고 한 것과 같은 논리다 -- 1인칭 내레이션 + B-roll
+# 브이로그에 대포·총소리·박쥐날개·몬스터 피격·보물·순간이동은 쓸 자리가 없다.
+# **쓸 수 있는 것은 남겼다**: 종·단추·성공 알림·동전·물 튀는 소리·북·비브라폰·
+# 딸깍·팝·똑딱·삐·메뉴·발소리·문·풀숲·마시는 소리·먹는 소리·스쿠터.
+# 빼기 전에 참조를 확인했다 -- 팩 효과음을 가리키는 프로젝트가 하나도 없었다.
+# 123 → 74. 앞 지문: 521c5bf0a5bda4ec3cfb7117ec8395692fe2225d5da6c01e63c74c861d1433ba
+_APPROVED_CANDIDATE_FINGERPRINT = "9a460eaa8b1333b4ab6aee4b391dee51a38b74532621a1462bc53451d0cae4d2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +90,12 @@ def load_approved_candidates(ledger_path: Path) -> list[ApprovedCandidate]:
     for line in text.splitlines():
         if line.startswith("## 승인 후보 — music") or line.startswith("### 승인 확장 — FMA") or line.startswith("### 승인 확장 — OpenGameArt individual music"):
             media_type = "music"
-        elif line.startswith("## 승인 후보 — SFX") or line.startswith("### 승인 확장 — OpenGameArt individual SFX") or line.startswith("### 승인 확장 — RPG"):
+        elif (
+            line.startswith("## 승인 후보 — SFX")
+            or line.startswith("### 승인 확장 — OpenGameArt individual SFX")
+            or line.startswith("### 승인 확장 — RPG")
+            or line.startswith("### 승인 확장 — 브이로그용 SFX")
+        ):
             media_type = "sfx"
         if not line.startswith("| `"):
             continue
@@ -137,12 +168,12 @@ def _various_sound_effects(text: str) -> list[ApprovedCandidate]:
 
 
 def _validate_candidate_set(candidates: list[ApprovedCandidate]) -> None:
-    if len(candidates) != 130:
-        raise ValueError(f"approved release set must contain 130 candidates, got {len(candidates)}")
+    if len(candidates) != 104:
+        raise ValueError(f"approved release set must contain 104 candidates, got {len(candidates)}")
     if sum(candidate.media_type == "music" for candidate in candidates) != 30:
         raise ValueError("approved release set must contain 30 music candidates")
-    if sum(candidate.media_type == "sfx" for candidate in candidates) != 100:
-        raise ValueError("approved release set must contain 100 SFX candidates")
+    if sum(candidate.media_type == "sfx" for candidate in candidates) != 74:
+        raise ValueError("approved release set must contain 74 SFX candidates")
     if len({candidate.asset_id for candidate in candidates}) != len(candidates):
         raise ValueError("approved release set contains duplicate asset IDs")
     if any(not candidate.source_url.startswith("https://") or not candidate.official_url.startswith("https://") for candidate in candidates):
@@ -176,10 +207,34 @@ def build_asset(
     ffprobe_binary: str = "ffprobe",
 ) -> dict[str, object]:
     """Download, transcode, probe and evidence one approved candidate."""
-    source_suffix = Path(urlparse(candidate.source_url).path).suffix or ".source"
-    source_path = Path(source_root) / f"{candidate.asset_id}{source_suffix}"
-    source_path.parent.mkdir(parents=True, exist_ok=True)
-    download(candidate.source_url, source_path)
+    # **묶음으로만 받을 수 있는 소리가 있다**(2026-09-05). 브이로그에 필요한
+    # 전환음·타이핑·종이 소리는 OpenGameArt에 zip 하나로만 올라와 있다. 주소
+    # 뒤에 `#`로 묶음 안 경로를 적으면 그 파일 하나만 꺼내 쓴다 -- 그렇게 하지
+    # 않으면 ffmpeg가 zip을 소리로 읽으려다 실패한다.
+    #
+    # 꺼낸 뒤로는 개별 파일과 완전히 같은 길을 간다: 보관하는 원본도, 해시도,
+    # 증거도 **꺼낸 파일**의 것이다. 묶음 주소는 증거에 그대로 남아 어느 묶음의
+    # 어느 파일이었는지 되짚을 수 있다.
+    parsed = urlparse(candidate.source_url)
+    archive_member = parsed.fragment or None
+    download_url = candidate.source_url.split("#", 1)[0]
+    source_root_path = Path(source_root)
+    source_root_path.mkdir(parents=True, exist_ok=True)
+    if archive_member:
+        archive_path = source_root_path / Path(urlparse(download_url).path).name
+        # 같은 묶음을 쓰는 자산이 여럿이다. 이미 받았으면 다시 받지 않는다.
+        if not archive_path.is_file() or not archive_path.stat().st_size:
+            download(download_url, archive_path)
+        if not archive_path.is_file() or not archive_path.stat().st_size:
+            raise ValueError(f"download produced no source bytes: {candidate.asset_id}")
+        source_suffix = Path(archive_member).suffix or ".source"
+        source_path = source_root_path / f"{candidate.asset_id}{source_suffix}"
+        with zipfile.ZipFile(archive_path) as bundle:
+            source_path.write_bytes(bundle.read(archive_member))
+    else:
+        source_suffix = Path(parsed.path).suffix or ".source"
+        source_path = source_root_path / f"{candidate.asset_id}{source_suffix}"
+        download(candidate.source_url, source_path)
     if not source_path.is_file() or not source_path.stat().st_size:
         raise ValueError(f"download produced no source bytes: {candidate.asset_id}")
     source_duration_seconds = _probe_duration(source_path, ffprobe_binary=ffprobe_binary)
@@ -325,7 +380,12 @@ def build_pack(
     source_root: Path,
     download: Callable[[str, Path], None],
     pack_id: str = "starter-v1",
-    version: str = "1.0.0",
+    # **곡이 바뀌면 버전을 올린다.** 같은 버전에 다른 내용이 들어 있으면,
+    # 설치기는 `already_installed`로 건너뛰고 창작자 기계에는 옛 팩이 남는다.
+    # 1.1.0: 게임 음악 12곡을 브이로그용으로 갈아 끼웠다(owner 지시 2026-09-05).
+    # 1.2.0: 브이로그용 효과음 23개를 더했다(전환음 13·타이핑 3·키 3·종이 4).
+    # 1.3.0: 게임 전용 효과음 49개를 뺐다(2026-09-06) — 104개가 지금 승인 집합이다.
+    version: str = "1.3.0",
     ffmpeg_binary: str = "ffmpeg",
     ffprobe_binary: str = "ffprobe",
 ) -> dict[str, object]:
@@ -373,6 +433,7 @@ def main() -> int:
     parser.add_argument("--ledger", type=Path, default=REPO_ROOT / "docs" / "starter-media-pack-license-research.ko.md")
     parser.add_argument("--output", type=Path, default=REPO_ROOT / "dist" / "starter-media-pack")
     parser.add_argument("--source-cache", type=Path, default=REPO_ROOT / "artifacts" / "starter-media-pack-sources")
+    parser.add_argument("--pack-version", default="1.3.0")
     parser.add_argument("--ffmpeg", default="ffmpeg")
     parser.add_argument("--ffprobe", default="ffprobe")
     args = parser.parse_args()
@@ -382,6 +443,7 @@ def main() -> int:
         output_root=args.output,
         source_root=args.source_cache,
         download=_download,
+        version=args.pack_version,
         ffmpeg_binary=args.ffmpeg,
         ffprobe_binary=args.ffprobe,
     )

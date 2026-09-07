@@ -330,6 +330,170 @@ def test_free_form_chat_uses_yujin_persona_via_shared_local_conversation_service
     assert runtime.calls[0]["task_type"] == LLMTaskType.YUJIN_CONVERSATION
 
 
+def test_thumbnail_prompt_request_carries_project_title_script_and_captions(tmp_path: Path) -> None:
+    """owner 승인(2026-08-19): 썸네일 프롬프트 추천은 프로젝트 맥락(제목·대본·
+    장면 자막)을 근거로 해야 한다. 화면이 실제로 쓰는 이 로컬 대화 경로에서
+    그 맥락이 모델 프롬프트에 실리는지 잰다."""
+    from fastapi.testclient import TestClient
+    from videobox_api.main import create_app
+
+    class RecordingRuntime:
+        routing_mode = "local_only"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def generate_structured(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+
+            class _Response:
+                output_data = {"reply": "1. A cozy morning commute ..."}
+
+            return _Response()
+
+    runtime = RecordingRuntime()
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "출근 브이로그"}).json()["project_id"]
+    app.state.store.create_creation_brief(
+        project_id=project_id,
+        script_filename="script.txt",
+        script_text="아침 여섯 시에 일어나 지하철로 출근하는 하루",
+        idempotency_key="thumbnail-context-brief",
+        capability_profile={},
+    )
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-1", "caption_text": "아직 어두운 방"},
+                {"segment_id": "seg-2", "caption_text": "지하철 승강장"},
+            ],
+            "history": [],
+        },
+    )
+    conversation = client.post(f"/api/projects/{project_id}/director/conversations", json={"session_id": session["session_id"]}).json()
+    url = f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages"
+
+    response = client.post(url, json={
+        "session_id": session["session_id"],
+        "client_message_id": "thumbnail-1",
+        "text": "썸네일 만들 프롬프트 추천해 줘",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["metadata"].get("status") != "blocked"
+    assert len(runtime.calls) == 1
+    prompt = str(runtime.calls[0]["prompt"])
+    assert "출근 브이로그" in prompt
+    assert "아침 여섯 시에 일어나 지하철로 출근하는 하루" in prompt
+    assert "아직 어두운 방" in prompt
+    assert "지하철 승강장" in prompt
+
+
+def test_editing_requests_also_carry_project_title_script_and_captions(tmp_path: Path) -> None:
+    """맥락은 썸네일 요청에만 실렸다. 그래서 편집 화면에서 "이 장면에 어울리는
+    B-roll 추천해 줘"라고 물으면 유진이 *지금 열어 놓고 있는* 영상을 두고
+    "영상의 분위기나 주제를 알려주시면"이라고 되물었다(2026-08-20 실측).
+    편집 요청도 같은 프로젝트 사실을 근거로 답해야 한다."""
+    from fastapi.testclient import TestClient
+    from videobox_api.main import create_app
+
+    class RecordingRuntime:
+        routing_mode = "local_only"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def generate_structured(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+
+            class _Response:
+                output_data = {"reply": "이 장면에는 ..."}
+
+            return _Response()
+
+    runtime = RecordingRuntime()
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "가을 오름"}).json()["project_id"]
+    app.state.store.create_creation_brief(
+        project_id=project_id,
+        script_filename="script.txt",
+        script_text="붉게 물든 단풍과 푸른 하늘이 어우러진 제주 오름",
+        idempotency_key="edit-context-brief",
+        capability_profile={},
+    )
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-1", "caption_text": "낙엽이 흩날리는 흙길"},
+                {"segment_id": "seg-2", "caption_text": "멀리 보이는 바다"},
+            ],
+            "history": [],
+        },
+    )
+    conversation = client.post(f"/api/projects/{project_id}/director/conversations", json={"session_id": session["session_id"]}).json()
+    url = f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages"
+
+    for index, text in enumerate((
+        "이 장면에 어울리는 B-roll 추천해 줘",
+        "첫 장면 자막을 더 간결하게 다듬어 줘",
+    )):
+        response = client.post(url, json={
+            "session_id": session["session_id"],
+            "client_message_id": f"edit-{index}",
+            "text": text,
+        })
+        assert response.status_code == 200
+        prompt = str(runtime.calls[index]["prompt"])
+        assert "가을 오름" in prompt, text
+        assert "붉게 물든 단풍과 푸른 하늘이 어우러진 제주 오름" in prompt, text
+        assert "낙엽이 흩날리는 흙길" in prompt, text
+        assert "멀리 보이는 바다" in prompt, text
+        # 썸네일 안내는 썸네일 요청에만 실린다 -- 맥락을 넓혀도 그건 그대로다.
+        assert "프롬프트 5개" not in prompt, text
+
+
+def test_thumbnail_prompt_request_survives_a_project_with_no_script_or_captions(tmp_path: Path) -> None:
+    """맥락이 비어 있어도(대본 없음·자막 없음) 추천 자체는 되어야 한다."""
+    from fastapi.testclient import TestClient
+    from videobox_api.main import create_app
+
+    class RecordingRuntime:
+        routing_mode = "local_only"
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def generate_structured(self, **kwargs: object) -> object:
+            self.calls.append(kwargs)
+
+            class _Response:
+                output_data = {"reply": "1. A bold close-up ..."}
+
+            return _Response()
+
+    runtime = RecordingRuntime()
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: runtime)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "빈 프로젝트"}).json()["project_id"]
+    session = app.state.store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    conversation = client.post(f"/api/projects/{project_id}/director/conversations", json={"session_id": session["session_id"]}).json()
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/conversations/{conversation['conversation_id']}/messages",
+        json={"session_id": session["session_id"], "client_message_id": "thumbnail-empty-1", "text": "썸네일 만들 프롬프트 추천해 줘"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assistant_message"]["text"] == "1. A bold close-up ..."
+    assert len(runtime.calls) == 1
+
+
 def test_free_form_chat_blocks_restricted_intent_without_calling_local_model(tmp_path: Path) -> None:
     """The deterministic policy guard from yujin_local_conversation.py must
     apply here too -- restricted intents never reach the model."""

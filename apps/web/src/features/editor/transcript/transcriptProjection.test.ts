@@ -23,7 +23,7 @@ describe("transcript projection", () => {
     ]);
   });
   it("limits a 1,000-row transcript to the requested mounted window", () => {
-    const entries = Array.from({ length: 1000 }, (_, index) => ({ segmentId: `s-${index}`, text: "자막", startSec: index, endSec: index + 1 }));
+    const entries = Array.from({ length: 1000 }, (_, index) => ({ segmentId: `s-${index}`, text: "캡션", startSec: index, endSec: index + 1 }));
     expect(visibleTranscriptWindow(entries, 500, 120)).toHaveLength(120);
   });
 });

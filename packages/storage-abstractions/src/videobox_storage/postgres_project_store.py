@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 import shutil
@@ -8,6 +9,7 @@ from typing import Any, Callable, Sequence
 
 import psycopg
 
+from videobox_domain_models.assets import AssetType
 from videobox_domain_models.projects import ProjectRecord, ProjectStatus
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.postgres_compat import translate_sql
@@ -122,6 +124,46 @@ class PostgresProjectStore(LocalProjectStore):
 
     def _connection(self, project_id: str) -> _PostgresConnection:
         return _PostgresConnection(self.database_url)
+
+    def list_assets_across_projects(
+        self, *, asset_type: AssetType, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """모든 프로젝트에서 한 종류의 자산만. **postgres에서는 질의 하나다.**
+
+        부모 구현은 프로젝트마다 있는 sqlite 파일을 하나씩 연다. 여기서는 그
+        파일들이 진실이 아니다 -- 컨테이너는 postgres로 돌고, 그 폴더의 sqlite는
+        비어 있거나 낡았다. **덮어쓰지 않았더니 목소리 다섯 개가 있는데 목록이
+        0개였다**(2026-09-07 실측: `/api/voices`가 200에 빈 목록).
+
+        부모의 성능 걱정(프로젝트 수만큼 db 열기)도 여기서는 없다 -- 자산과
+        프로젝트가 한 db에 있어 join 한 번이면 끝난다.
+        """
+        connection = self._connection("")
+        try:
+            rows = connection.execute(
+                """
+                SELECT a.asset_id, a.project_id, a.asset_type, a.storage_uri, a.source_kind,
+                       a.mime_type, a.duration_sec, a.metadata_json, a.created_at,
+                       p.name AS project_name, p.status AS project_status
+                  FROM assets a
+                  JOIN projects p ON p.project_id = a.project_id
+                 WHERE a.asset_type = ?
+                 ORDER BY a.created_at ASC
+                """,
+                (asset_type.value,),
+            ).fetchall()
+        finally:
+            connection.close()
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = dict(row)
+            status = str(payload.pop("project_status", "") or "")
+            if not include_archived and status == ProjectStatus.ARCHIVED.value:
+                continue
+            payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
+            payload["project_name"] = str(payload.get("project_name") or "")
+            items.append(payload)
+        return items
 
     def _batch_destination_is_registered(self, project_id: str, destination: Path, digest: str) -> bool:
         """Use PostgreSQL, not a copied SQLite snapshot, for crash recovery truth."""

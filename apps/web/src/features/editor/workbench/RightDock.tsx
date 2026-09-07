@@ -1,318 +1,141 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "../../../components/ui/button";
-import { Input } from "../../../components/ui/input";
 import { NativeSelect } from "../../../components/ui/native-select";
-import { Textarea } from "../../../components/ui/textarea";
-import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls } from "../inspector/InspectorControls";
+import { InspectorControls, type ApprovedTtsCandidate, type InspectorAction, type PartialRegenerationControls, type VoiceSampleChoice } from "../inspector/InspectorControls";
 import type { InspectorTarget } from "../inspector/inspectorRegistry";
-import type { RightDockCandidate, RightDockConversationScroll, RightDockMemory, RightDockMessage, RightDockProposal, YujinRunState } from "./rightDockTypes";
-import { YujinMemoryPanel } from "./YujinMemoryPanel";
+import { SpeedField } from "./SpeedField";
 
 export type { InspectorTarget } from "../inspector/inspectorRegistry";
-
-const staleProposalMessage = "편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.";
 
 type SelectedSegment = Readonly<{
   segmentId: string;
   startSec: number;
   endSec: number;
   nextSegmentId: string | null;
+  previousSegmentId?: string | null;
   cutAction: string;
   draftApplied: boolean;
+  transitionIn?: Readonly<{ type: string; durationSec: number }> | null;
   ttsReplacement?: Readonly<{ candidateId: string; assetId: string }> | null;
+  ripplePlaybackRate?: number;
 }>;
 
 export type RightDockProps = Readonly<{
   /** 저장된 자막 모양을 읽으려면 필요하다. 없으면 그 절만 빠진다. */
   projectId?: string;
-  state?: "script_required" | "idle" | "analysis_running" | "proposal_ready" | "applying" | "blocked" | "error";
-  draft: string;
-  onDraftChange: (draft: string) => void;
-  messages?: readonly RightDockMessage[];
-  proposal?: RightDockProposal | null;
-  runState?: YujinRunState;
-  selectedCandidateIds?: readonly string[];
-  onSelectedCandidateIdsChange?: (candidateIds: readonly string[]) => void;
-  conversationScroll?: RightDockConversationScroll;
-  memory?: RightDockMemory;
-  onConversationScrollChange?: (scroll: RightDockConversationScroll) => void;
   selectedSegment?: SelectedSegment;
   inspectorTargets?: readonly InspectorTarget[];
   inspectorDisabled?: boolean;
   partialRegeneration?: PartialRegenerationControls;
   loadApprovedTtsCandidates?: (segmentId: string) => Promise<readonly ApprovedTtsCandidate[]>;
+  loadVoiceSamples?: () => Promise<readonly VoiceSampleChoice[]>;
   ttsCandidateScopeKey?: string;
+  /** 지금 완성본에 실리는 자막 언어. `null`이면 원본(한국어). */
+  captionLanguage?: string | null;
+  /** 이미 옮겨 둔 언어들. */
+  translatedLanguages?: readonly string[];
   onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
-  composerDisabled?: boolean;
-  onSendMessage?: (draft: string) => void | Promise<void>;
-  onApplyProposal?: (proposalId: string, candidateIds: readonly string[]) => void | Promise<void>;
-  onRefreshProposal?: () => void | Promise<void>;
-  onManualEdit?: () => void;
-  onPreviewCandidate?: (candidate: RightDockCandidate) => void;
-  onStart?: () => void | Promise<void>;
-  /** 추천 시작이 거절된 이유. 다시 누를 수 있는 상태로 함께 보인다. */
-  startFailure?: string | null;
-  onRetryMessage?: () => void | Promise<void>;
-  onCancelRun?: () => void | Promise<void>;
-  onRetryRun?: () => void | Promise<void>;
-  retryAfterSeconds?: number | null;
+  onSetSegmentRippleSpeed?: (input: { segmentId: string; rate: number }) => void | Promise<void>;
+  onPreviewSelectedRange?: (input: { segmentId: string; startSec: number; endSec: number }) => void | Promise<void>;
 }>;
 
+/** 이 도크는 이제 `속성` 하나뿐이다(2026-08-30 두 차례 후속). 유진 대화는
+ *  `YujinPanel.tsx`로 빠진 지 오래고(owner: "우리 유진 대화창도 캡컷처럼
+ *  해도 되"), 추천 후보까지 같은 이유로 그리로 옮겼다 — owner: "캡컷도
+ *  화면공간이 필요해서 버튼들을 엄청 작게 만들었어. 그래서 나도 캡컷을
+ *  벤치마킹하라고 한거잖아"(`docs/reference/capcut-observed-2026-08-22.ko.md`
+ *  §7: 캡컷은 제안 카드를 EditPilot 대화 안에 둔다, 별도 탭이 아니다).
+ *  탭이 하나만 남으면 탭 줄 자체가 의미 없다 -- 그냥 내용을 바로 그린다. */
 export function RightDock({
   projectId,
-  state = "idle",
-  draft,
-  onDraftChange,
-  messages = [],
-  proposal = null,
-  runState = { kind: "idle" },
-  selectedCandidateIds,
-  onSelectedCandidateIdsChange,
-  conversationScroll = { key: "default", top: 0, pinnedToBottom: true },
-  memory,
-  onConversationScrollChange,
   selectedSegment,
   inspectorTargets = [],
   inspectorDisabled = false,
   partialRegeneration,
   loadApprovedTtsCandidates,
+  loadVoiceSamples,
   ttsCandidateScopeKey,
+  captionLanguage = null,
+  translatedLanguages = [],
   onInspectorAction,
-  composerDisabled = false,
-  onSendMessage,
-  onApplyProposal,
-  onRefreshProposal,
-  onManualEdit,
-  onPreviewCandidate,
-  onStart,
-  startFailure = null,
-  onRetryMessage,
-  onCancelRun,
-  onRetryRun,
-  retryAfterSeconds = null,
+  onSetSegmentRippleSpeed,
+  onPreviewSelectedRange,
 }: RightDockProps) {
-  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [selectedInspectorTargetId, setSelectedInspectorTargetId] = useState<string | null>(null);
   const inspectorTargetIdentity = inspectorTargets.map((target) => target.id).join("|");
-  const [retryRemaining, setRetryRemaining] = useState(0);
-  const historyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSelectedInspectorTargetId((current) => inspectorTargets.some((target) => target.id === current)
       ? current
       : inspectorTargets[0]?.id ?? null);
   }, [inspectorTargetIdentity, inspectorTargets]);
-  useEffect(() => {
-    setRetryRemaining(Math.max(0, retryAfterSeconds ?? 0));
-  }, [retryAfterSeconds]);
-  useEffect(() => {
-    if (retryRemaining <= 0) return;
-    const timer = window.setTimeout(() => setRetryRemaining((seconds) => Math.max(0, seconds - 1)), 1000);
-    return () => window.clearTimeout(timer);
-  }, [retryRemaining]);
-  useLayoutEffect(() => {
-    const history = historyRef.current;
-    if (!history) return;
-    history.scrollTop = conversationScroll.pinnedToBottom
-      ? history.scrollHeight
-      : conversationScroll.top;
-  }, [conversationScroll.key, conversationScroll.pinnedToBottom, conversationScroll.top, messages]);
 
-  const proposalIsReady = proposal?.status === "ready";
-  const proposalIsCurrent = proposalIsReady
-    && proposal.baseSessionRevision === proposal.currentRevision;
-  // 편집본이 앞서 나가면 이 추천은 적용할 수 없다. 그 사실을 말하지 않으면
-  // 적용 단추가 이유 없이 꺼져 있는 것처럼만 보인다.
-  const proposalIsOutOfDate = Boolean(
-    proposal && proposal.baseSessionRevision !== proposal.currentRevision,
-  );
-  const activeCandidateIds = selectedCandidateIds
-    ?? (proposal?.candidates[0] ? [proposal.candidates[0].candidateId] : []);
-  const selectedCandidatesAreActionable = Boolean(
-    proposalIsCurrent
-    && activeCandidateIds.length === 1
-    && proposal?.candidates.some((candidate) => (
-      candidate.candidateId === activeCandidateIds[0]
-      && candidate.actionable
-      && candidate.availability === "actionable"
-      && candidate.reviewStatus === "approved"
-    )),
-  );
   const selectedInspectorTarget = inspectorTargets.find((target) => target.id === selectedInspectorTargetId) ?? null;
-  const canSend = Boolean(!composerDisabled && onSendMessage && draft.trim());
-  const submit = () => { if (canSend) void onSendMessage?.(draft.trim()); };
-  const runStatusAnnouncement = runState.kind === "complete"
-    ? "유진 답변을 받았어요."
-    : runState.kind === "unavailable"
-    ? `${runState.message} 수동 편집을 계속할 수 있어요.`
-    : null;
-  const recommendationCandidates = proposal?.candidates.filter((candidate) => !candidate.readOnlyFinding) ?? [];
-  const readOnlyFindings = proposal?.candidates.filter((candidate) => candidate.readOnlyFinding) ?? [];
+  const inspectorGroups = [
+    { id: "media", label: "영상·소리", target: inspectorTargets.find((target) => target.kind === "media") },
+    { id: "caption", label: "캡션", target: inspectorTargets.find((target) => target.kind === "caption") },
+    { id: "overlay", label: "화면 요소", target: inspectorTargets.find((target) => target.kind === "overlay") },
+  ] as const;
 
   return <div className="vb-editor-right-dock">
-    <section aria-label="유진" className="vb-editor-workbench__summary">
-      <h2>유진</h2>
-      {runStatusAnnouncement ? <p role="status" aria-live="polite" aria-atomic="true" aria-label="유진 대화 상태" className="sr-only">{runStatusAnnouncement}</p> : null}
-      {runState.kind === "complete" && runState.syncWarning
-        ? <p aria-label="대화 저장 상태" className="vb-editor-right-dock__sync-warning">{runState.syncWarning}</p>
-        : null}
-      {(runState.kind === "streaming" || runState.kind === "unavailable") && runState.cancelWarning
-        ? <p role="status" className="vb-editor-right-dock__sync-warning">{runState.cancelWarning}</p>
-        : null}
-      {state === "blocked" || state === "error" || runState.kind === "unavailable" ? <div className="vb-editor-right-dock__fallback"><p>{runState.kind === "unavailable" ? runState.message : proposalIsOutOfDate ? staleProposalMessage : "유진의 답을 받지 못했어요."}</p>{proposal && onRefreshProposal ? <Button type="button" onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}{onManualEdit ? <Button type="button" onClick={onManualEdit}>유진 없이 계속 편집</Button> : null}</div> : null}
-      {startFailure ? <p role="alert" className="vb-editor-right-dock__sync-warning">{startFailure}</p> : null}
-      {state === "idle" && !proposal && onStart ? <Button type="button" onClick={() => void onStart()}>유진에게 추천받기</Button> : null}
-      <div
-        ref={historyRef}
-        role="log"
-        aria-label="유진 대화"
-        aria-busy={runState.kind === "streaming"}
-        className="vb-editor-right-dock__history"
-        tabIndex={0}
-        onScroll={(event) => {
-          const history = event.currentTarget;
-          onConversationScrollChange?.({
-            key: conversationScroll.key,
-            top: history.scrollTop,
-            pinnedToBottom: history.scrollHeight - history.clientHeight - history.scrollTop <= 4,
-          });
-        }}
-      >
-        {messages.length ? messages.map((message) => <article key={message.id}><p><strong>{message.role === "user" ? "나" : "유진"}</strong> {message.text}</p></article>) : <p>유진 대화는 아직 시작하지 않았어요.</p>}
-      </div>
-      <label htmlFor="vb-eugene-request">유진에게 요청하기</label>
-      <Textarea id="vb-eugene-request" disabled={composerDisabled} value={draft} onChange={(event) => onDraftChange(event.target.value)} placeholder="예: 이 구간에 어울리는 B-roll을 추천해 줘" />
-      <Button type="button" disabled={!canSend} onClick={submit}>요청 보내기</Button>
-      {onCancelRun
-        ? <Button type="button" onClick={() => void onCancelRun()}>답변 중단</Button>
-        : null}
-      {runState.kind === "unavailable" && runState.retryable && onRetryRun
-        ? <Button type="button" onClick={() => void onRetryRun()}>같은 요청 다시 보내기</Button>
-        : null}
-
-    </section>
-
-    <section aria-label="추천" className="vb-editor-workbench__summary">
-      <h2>추천</h2>
-      {proposal ? <div aria-label="제안 편집본">
-        <p>{`제안 기준 편집본 ${proposal.baseSessionRevision}`}</p>
-        <p>{`현재 편집본 ${proposal.currentRevision}`}</p>
-        {matchModeLabel(proposal.matchMode) ? <p>{matchModeLabel(proposal.matchMode)}</p> : null}
-        {proposalIsOutOfDate && state !== "blocked" && state !== "error" ? <>
-          <p role="status">{staleProposalMessage}</p>
-          {onRefreshProposal ? <Button type="button" disabled={state === "analysis_running" || state === "applying"} onClick={() => void onRefreshProposal()}>지금 편집본으로 다시 추천받기</Button> : null}
-        </> : null}
-      </div> : null}
-      {recommendationCandidates.length ? <div role="radiogroup" aria-label="추천 후보">
-        {recommendationCandidates.map((candidate) => {
-          const candidateDeclaresActionable = candidate.actionable === undefined
-            ? proposalIsReady
-            : (
-              candidate.actionable
-              && candidate.availability === "actionable"
-              && candidate.reviewStatus === "approved"
-            );
-          const candidateIsActionable = Boolean(
-            proposalIsCurrent
-            && candidateDeclaresActionable,
-          );
-          return <article key={candidate.candidateId}>
-            <label><Input
-              type="radio"
-              name="vb-eugene-candidate"
-              aria-label={`${candidate.visibleReferenceCode} 선택`}
-              checked={activeCandidateIds.includes(candidate.candidateId)}
-              disabled={!candidateIsActionable}
-              onChange={() => {
-                if (candidateIsActionable) onSelectedCandidateIdsChange?.([candidate.candidateId]);
-              }}
-            />{candidate.visibleReferenceCode} · {mediaKindLabel(candidate.sourceMediaKind)}</label>
-            <p>{candidate.previewSummary}</p>
-            <p>{`후보 상태: ${candidateDeclaresActionable ? "적용 가능" : "수동 적용"}`}</p>
-            <dl>
-              <dt>미디어</dt><dd>{mediaKindLabel(candidate.sourceMediaKind)}</dd>
-              <dt>적용 설정</dt><dd>{controlSummary(candidate.supportedControls ?? {})}</dd>
-            </dl>
-            {candidateIsActionable && candidate.previewUrl && onPreviewCandidate ? <Button type="button" aria-label={`${candidate.visibleReferenceCode} ${previewVerb(candidate.sourceMediaKind)}`} onClick={() => onPreviewCandidate(candidate)}>{previewVerb(candidate.sourceMediaKind)}</Button> : null}
-          </article>;
-        })}
-      </div> : <p>아직 추천이 없어요. 직접 편집을 계속하거나 유진에게 요청할 수 있어요.</p>}
-      {proposal && proposalIsReady && onApplyProposal ? <Button type="button" disabled={state === "applying" || !selectedCandidatesAreActionable} onClick={() => void onApplyProposal(proposal.proposalId, activeCandidateIds)}>선택한 추천 적용</Button> : null}
-    </section>
-
-    {memory ? <YujinMemoryPanel memory={memory} /> : null}
-
-    {readOnlyFindings.length ? <section aria-label="검사 결과" className="vb-editor-workbench__summary">
-      <h2>검사 결과</h2>
-      {readOnlyFindings.map((finding) => <article key={finding.candidateId}>
-        {finding.supportedControls.check === "timeline_gaps"
-          ? <p>{`빈 구간 ${String(finding.supportedControls.gap_count ?? 0)}개`}</p>
-          : null}
-      </article>)}
-    </section> : null}
-
     <section className="vb-editor-workbench__summary">
-      <Button type="button" aria-expanded={inspectorOpen} onClick={() => setInspectorOpen((open) => !open)}>{inspectorOpen ? "편집 항목 닫기" : "편집 항목 열기"}</Button>
-      {inspectorOpen ? <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
+      <div role="region" aria-label="편집 항목" className="vb-editor-right-dock__inspector">
         <h2>편집 항목</h2>
         {selectedSegment ? <p>{selectedSegment.startSec.toFixed(2)}–{selectedSegment.endSec.toFixed(2)}초 구간</p> : <p>선택한 구간이 없어요.</p>}
+        {/* **캡컷 `속도` 속성과 같은 모양(owner 지시 2026-09-04).** 캡컷은
+            `속도 x`와 `기간 s`를 나란히 두고 연동한다. 우리는 `장면 길이`라는
+            다른 이름에 단추 셋(`기본`·`1.5배`·`2배`)뿐이라 1.25배를 쓸 방법이
+            없었다 -- 엔진은 처음부터 0.25~4를 감당했는데(`_atempo_chain`) 화면과
+            검증만 좁혀 놨던 것이다.
+
+            `기간`이 읽기 전용인 이유: 길이를 직접 고치는 것은 구간 자르기이고
+            그 자리가 따로 있다. 여기서 둘 다 고치게 하면 같은 값을 두 곳에서
+            바꾸게 된다. 캡컷은 양쪽 다 입력칸이지만 우리는 자르기 UI가 별도다. */}
+        {selectedSegment && onSetSegmentRippleSpeed ? <div className="vb-speed-field" role="group" aria-label="속도 조정">
+          <SpeedField
+            disabled={inspectorDisabled}
+            displayedSec={selectedSegment.endSec - selectedSegment.startSec}
+            onCommit={(rate) => void onSetSegmentRippleSpeed({ segmentId: selectedSegment.segmentId, rate })}
+            rate={selectedSegment.ripplePlaybackRate ?? 1}
+          />
+        </div> : null}
+        {selectedSegment && onPreviewSelectedRange ? <Button
+          type="button"
+          variant="outline"
+          disabled={inspectorDisabled}
+          onClick={() => void onPreviewSelectedRange({
+            segmentId: selectedSegment.segmentId,
+            startSec: selectedSegment.startSec,
+            endSec: selectedSegment.endSec,
+          })}
+        >선택 구간 미리보기</Button> : null}
+        {inspectorTargets.length > 0 ? <div role="group" aria-label="편집 항목 종류 바로가기">
+          {inspectorGroups.map((group) => <Button
+            key={group.id}
+            aria-pressed={selectedInspectorTarget?.kind === group.id}
+            disabled={inspectorDisabled || !group.target}
+            onClick={() => { if (group.target) setSelectedInspectorTargetId(group.target.id); }}
+            type="button"
+            variant="outline"
+          >{group.label}</Button>)}
+        </div> : null}
         {inspectorTargets.length > 1 ? <label>편집 대상<NativeSelect aria-label="편집 대상" value={selectedInspectorTargetId ?? ""} onChange={(event) => setSelectedInspectorTargetId(event.target.value)}>{inspectorTargets.map((target) => <option key={target.id} value={target.id}>{target.label}</option>)}</NativeSelect></label> : null}
-        {!inspectorTargets.length ? <p>현재 편집 명령이 지원하는 항목만 표시됩니다.</p> : null}
+        {!inspectorTargets.length ? <p>이 명령이 다루는 항목 없음</p> : null}
         {onInspectorAction ? <InspectorControls
           disabled={inspectorDisabled}
           loadApprovedTtsCandidates={loadApprovedTtsCandidates}
+          loadVoiceSamples={loadVoiceSamples}
           onAction={onInspectorAction}
           partialRegeneration={partialRegeneration}
           projectId={projectId}
           selectedSegment={selectedSegment ?? null}
+          captionLanguage={captionLanguage}
           target={selectedInspectorTarget}
+          translatedLanguages={translatedLanguages}
           ttsCandidateScopeKey={ttsCandidateScopeKey}
         /> : null}
-      </div> : null}
+      </div>
     </section>
   </div>;
-}
-
-
-// 백엔드가 내는 값은 `semantic` / `word` 원값이다. 모르는 값이면 아무 말도
-// 하지 않는다 -- 지어내는 것보다 침묵이 낫다.
-const matchModeWords: Readonly<Record<string, string>> = {
-  semantic: "뜻으로 찾음",
-  word: "단어로만 찾음",
-};
-
-function matchModeLabel(mode: string | undefined): string | null {
-  return mode ? matchModeWords[mode] ?? null : null;
-}
-
-// 소리만 있는 추천은 듣는 것이고 영상·이미지는 보는 것이다. 하나로 뭉뚱그리면
-// owner는 영상 추천에 "미리 듣기"라고 적힌 단추를 누르게 된다.
-function previewVerb(kind: RightDockCandidate["sourceMediaKind"]): string {
-  return kind === "bgm" || kind === "sfx" ? "미리 듣기" : "미리 보기";
-}
-
-function mediaKindLabel(kind: RightDockCandidate["sourceMediaKind"]) {
-  return {
-    raw_video: "원본 영상",
-    broll_video: "영상",
-    image: "이미지",
-    bgm: "배경 음악",
-    sfx: "효과음",
-  }[kind] ?? "미디어";
-}
-
-function controlSummary(controls: Readonly<Record<string, unknown>>) {
-  const labels = Object.entries(controls).map(([name, value]) => {
-    if (name === "fit") return value === "crop" ? "화면 채우기" : "화면 안에 맞추기";
-    if (name === "volume") return `음량 ${value}`;
-    if (name === "fade_in_sec") return `시작 전환 ${value}초`;
-    if (name === "fade_out_sec") return `끝 전환 ${value}초`;
-    if (name === "text") return "문구 변경";
-    if (name === "style") return "자막 모양 변경";
-    if (name === "candidate_id") return "승인한 음성";
-    if (name === "overlay_kind") return "오버레이 변경";
-    return null;
-  }).filter((value): value is string => value !== null);
-  return labels.join(", ") || "기본 설정";
 }

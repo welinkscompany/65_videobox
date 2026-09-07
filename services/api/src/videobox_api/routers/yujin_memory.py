@@ -199,8 +199,11 @@ def build_yujin_memory_router(store, memory_service=None) -> APIRouter:
                 status_code=503, detail="memory_save_unavailable"
             ) from error
         except MemoryStoreUnavailable as error:
+            # 꺼져 있는 것은 실패가 아니다. 화면이 `켜 주세요`와 `다시 눌러
+            # 주세요`를 갈라 말할 수 있도록 이름을 그대로 흘려보낸다.
             raise HTTPException(
-                status_code=503, detail="memory_save_unavailable"
+                status_code=503,
+                detail="memory_not_configured" if str(error) == "memory_not_configured" else "memory_save_unavailable",
             ) from error
 
     @router.delete(
@@ -229,7 +232,8 @@ def build_yujin_memory_router(store, memory_service=None) -> APIRouter:
             ) from error
         except MemoryStoreUnavailable as error:
             raise HTTPException(
-                status_code=503, detail="memory_delete_unavailable"
+                status_code=503,
+                detail="memory_not_configured" if str(error) == "memory_not_configured" else "memory_delete_unavailable",
             ) from error
 
     return router

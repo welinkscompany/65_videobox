@@ -123,6 +123,35 @@ def test_review_snapshot_splits_applied_and_pending_recommendations(tmp_path: Pa
     assert snapshot["timeline_id"] == "timeline_001"
 
 
+def test_review_state_persists_exact_output_variant_lineage(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Variant Review Lineage Project")
+    store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "project_id": project.project_id,
+            "tracks": [],
+            "review_flags": [],
+        },
+    )
+
+    saved = store.save_review_state(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        status="approved",
+        source_session_id="session-1",
+        source_session_revision=4,
+        source_variant_id="vertical-full",
+        source_variant_revision=7,
+    )
+
+    assert saved["source_session_id"] == "session-1"
+    assert saved["source_session_revision"] == 4
+    assert saved["source_variant_id"] == "vertical-full"
+    assert saved["source_variant_revision"] == 7
+
+
 def test_review_snapshot_uses_trimmed_broll_type_for_default_provider_trace(
     tmp_path: Path,
 ) -> None:

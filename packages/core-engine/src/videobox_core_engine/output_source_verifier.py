@@ -27,6 +27,31 @@ _ASSET_URI = re.compile(r"^local://projects/(?P<project_id>[^/]+)/assets/(?P<ass
 _SEGMENT_URI = re.compile(r"^local://projects/[^/]+/segments/[^/]+$")
 
 
+def is_silent_narration_placeholder(*, timeline: dict[str, Any], clip: dict[str, Any]) -> bool:
+    """녹음이 처음부터 없는 타임라인의 내레이션 자리표시 클립인가.
+
+    빈 편집판(`+ 새로 만들기`)과 녹음 전 대본 초안은 장면만 있고 목소리가 없다.
+    ``TimelineBuilder``는 그래도 장면마다 ``local://.../segments/{id}`` 꼴의
+    **가상** 내레이션 클립을 만든다 -- 편집기가 그리는 장면 막대가 그것이다.
+    가리킬 녹음이 없으면 그 클립은 소리가 아니라 자리다.
+
+    **없는 것과 낡은 것을 가린다.** 한때 신원이 있었던 흔적(내용 해시나 판번호)이
+    클립에 남아 있으면 처음부터 없던 게 아니라 잃어버린 것이므로 자리표시가
+    아니다 -- 그건 이 울타리가 막아야 할 바로 그 경우다.
+
+    ``capture_output_source_snapshots``와 ``CompositionPlan.from_timeline``이
+    같은 판단을 해야 해서 여기 한 벌만 둔다. 두 벌을 두면 반드시 어긋난다.
+    """
+    if not _SEGMENT_URI.match(str(clip.get("asset_uri") or "")):
+        return False
+    if str(timeline.get("narration_source_uri") or "").strip():
+        return False
+    return not (
+        str(clip.get("expected_content_sha256") or "").strip()
+        or str(clip.get("media_revision") or "").strip()
+    )
+
+
 @dataclass(frozen=True)
 class OutputSourceSnapshot:
     """A verified project-local source that can be rechecked without SQLite."""
@@ -37,7 +62,10 @@ class OutputSourceSnapshot:
     expected_media_revision: str | None
 
 
-def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: dict[str, Any]) -> tuple[OutputSourceSnapshot, ...]:
+def capture_output_source_snapshots(
+    *, store: Any, project_id: str, timeline: dict[str, Any],
+    hash_cache: dict[tuple[Path, int], str] | None = None,
+) -> tuple[OutputSourceSnapshot, ...]:
     """Snapshot every concrete project asset consumed by the composition.
 
     A persisted expected SHA/revision is validated when present, but cannot be
@@ -45,9 +73,40 @@ def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: di
     current SHA and revision for every project asset in tracks and export
     overlays so final publication cannot make an output from replaced bytes
     observable merely because an older timeline lacks Task-11 identity fields.
+
+    ``hash_cache`` is an optional, caller-owned ``(path, mtime_ns) -> sha256``
+    cache (same shape as ``FfmpegFinalRenderer._stream_probe_cache``). A
+    changed file always changes mtime, so a cache hit is exactly as trustworthy
+    as a fresh read. Omit it (default) and this hashes fresh every call, same
+    as before. This hashing is unrelated to (and on top of) the exact-preview
+    pipeline's own hash pass over the same files (``local_pipeline.py``'s
+    ``_exact_preview_asset_hash_cache``) -- the two do not share a cache.
+
+    2026-08-28: a single ``render_exact_preview_to_mp4`` call was measured
+    hashing the same handful of project-local sources here in ~3.2s with no
+    cache, ~2.5s of which was one real (546MB) source's first full read.
+    Passing ``FfmpegFinalRenderer._output_source_hash_cache`` in only helps
+    *within* one such call right now -- ``render_exact_preview_to_mp4``
+    builds its proxy renderer with ``dataclasses.replace(self, ...)``, and
+    `replace()` re-runs every ``init=False`` field's ``default_factory``,
+    so this cache (and the pre-existing ``_stream_probe_cache``) starts
+    empty again on every render. Making it survive across renders needs a
+    separate fix to that construction, not this function.
+
+    A cheap ``(size, mtime_ns)`` recheck runs after every item is hashed (see
+    the loop over ``stat_by_path`` below). 2026-08-28 code review: this used
+    to be a second full re-hash of every source via ``verify_output_source_snapshots``
+    called right after this function, removed as "zero elapsed time, zero
+    protection" -- that reasoning didn't hold for a multi-item timeline,
+    since this loop hashes item 1, then spends real time (up to several
+    seconds for a large later source) hashing items 2..N before a second
+    pass would reach item 1 again, leaving a real window where item 1 could
+    be swapped without being caught. A stat comparison after each hash
+    catches that same window for a fraction of a full re-hash's cost.
     """
     root = store.project_root(project_id).resolve()
     digests_by_path: dict[Path, str] = {}
+    stat_by_path: dict[Path, tuple[int, int]] = {}
     snapshots: dict[Path, OutputSourceSnapshot] = {}
     inputs: list[tuple[str, dict[str, Any]]] = []
     for track in timeline.get("tracks", []):
@@ -67,6 +126,11 @@ def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: di
         if _SEGMENT_URI.match(uri):
             if track_type != "narration":
                 raise OutputSourceStaleError("segment source is only valid for narration")
+            if is_silent_narration_placeholder(timeline=timeline, clip=clip):
+                # 지킬 원본 바이트가 없다. 지문 찍을 것이 없으니 통과시킨다 --
+                # 소리가 없는 편집본이 완성본을 통째로 막으면 안 된다. 잃어버린
+                # 경우는 위 함수가 걸러 내고 아래에서 그대로 막힌다.
+                continue
             # A virtual narration segment is rendered from this timeline's
             # actual narration source, not from a standalone segment file.
             uri = str(timeline.get("narration_source_uri") or "")
@@ -120,18 +184,33 @@ def capture_output_source_snapshots(*, store: Any, project_id: str, timeline: di
             raise OutputSourceStaleError("materialized source is not project-local") from exc
         if not path.is_file():
             raise OutputSourceStaleError("materialized source is missing")
-        actual_digest = _sha256_streaming(path, digests_by_path)
+        actual_digest = _cached_or_streamed_sha256(path, digests_by_path, hash_cache)
         if expected and actual_digest != expected:
             raise OutputSourceStaleError("content SHA-256 changed")
         actual_revision = str(asset.get("created_at") or "")
         if expected_revision and actual_revision != expected_revision:
             raise OutputSourceStaleError("media revision changed")
+        # 이 항목을 해시한 "직후" 상태를 남긴다. 뒤에 오는 항목들을 재는 동안
+        # (큰 파일이면 몇 초씩) 이 파일이 바뀌어도, 전체 순회가 끝난 뒤 한 번 더
+        # 값싸게(전체 재해시가 아니라 stat 하나로) 검사해서 잡는다.
+        try:
+            after_hash_stat = path.stat()
+        except OSError as exc:
+            raise OutputSourceStaleError("materialized source is missing") from exc
+        stat_by_path[path] = (after_hash_stat.st_size, after_hash_stat.st_mtime_ns)
         snapshots[path] = OutputSourceSnapshot(
             path=path,
             expected_content_sha256=expected or actual_digest,
             asset_id=asset_id,
             expected_media_revision=expected_revision or actual_revision,
         )
+    for checked_path, (expected_size, expected_mtime_ns) in stat_by_path.items():
+        try:
+            recheck_stat = checked_path.stat()
+        except OSError as exc:
+            raise OutputSourceStaleError("materialized source is missing") from exc
+        if (recheck_stat.st_size, recheck_stat.st_mtime_ns) != (expected_size, expected_mtime_ns):
+            raise OutputSourceStaleError("content SHA-256 changed")
     return tuple(snapshots.values())
 
 
@@ -155,11 +234,27 @@ def verify_output_source_snapshots(
                 raise OutputSourceStaleError("media revision changed")
 
 
-def verify_output_sources(*, store: Any, project_id: str, timeline: dict[str, Any]) -> None:
-    """Verify all materialized timeline sources before output work begins."""
-    verify_output_source_snapshots(capture_output_source_snapshots(
-        store=store, project_id=project_id, timeline=timeline,
-    ))
+def verify_output_sources(
+    *, store: Any, project_id: str, timeline: dict[str, Any],
+    hash_cache: dict[tuple[Path, int], str] | None = None,
+) -> None:
+    """Verify all materialized timeline sources before output work begins.
+
+    2026-08-28: this used to call ``verify_output_source_snapshots`` right
+    after ``capture_output_source_snapshots`` with zero elapsed time in
+    between -- capture already raises ``OutputSourceStaleError`` on any
+    expected-vs-actual sha mismatch while it hashes, so re-hashing the same
+    bytes microseconds later could only ever agree with itself. Measured on
+    my-project: that immediate re-verify cost ~2.3s of a ~5.5s call for no
+    protection. The real "capture, do work, then recheck" fence this file
+    also provides is unaffected -- it lives at its own call sites
+    (``local_pipeline.py``), which capture before work and call
+    ``verify_output_source_snapshots`` again afterward, when real time (and
+    therefore real risk of the file changing) has actually elapsed.
+    """
+    capture_output_source_snapshots(
+        store=store, project_id=project_id, timeline=timeline, hash_cache=hash_cache,
+    )
 
 
 def _sha256_streaming(path: Path, digests_by_path: dict[Path, str]) -> str:
@@ -176,7 +271,28 @@ def _sha256_streaming(path: Path, digests_by_path: dict[Path, str]) -> str:
     return value
 
 
-def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline: dict[str, Any], subtitle: dict[str, Any] | None = None, review: dict[str, Any] | None = None) -> None:
+def _cached_or_streamed_sha256(
+    path: Path, digests_by_path: dict[Path, str], hash_cache: dict[tuple[Path, int], str] | None,
+) -> str:
+    """As ``_sha256_streaming``, but backed by an optional caller-owned
+    ``(path, mtime_ns)`` cache that can outlive a single call (see
+    ``capture_output_source_snapshots``)."""
+    if hash_cache is None:
+        return _sha256_streaming(path, digests_by_path)
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return _sha256_streaming(path, digests_by_path)
+    key = (path, mtime_ns)
+    cached = hash_cache.get(key)
+    if cached is not None:
+        return cached
+    digest = _sha256_streaming(path, digests_by_path)
+    hash_cache[key] = digest
+    return digest
+
+
+def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline: dict[str, Any], subtitle: dict[str, Any] | None = None, review: dict[str, Any] | None = None, variant: dict[str, Any] | None = None) -> None:
     """Reject stale output dependencies before an artifact is reused/exported."""
     if editing_session is not None:
         current_session_id = str(editing_session.get("session_id") or "")
@@ -193,6 +309,12 @@ def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline:
             raise OutputSourceStaleError("editing session revision is unstamped")
         if int(expected_revision) != current_revision:
             raise OutputSourceStaleError("editing session revision changed")
+    timeline_has_variant_identity = bool(
+        timeline.get("source_variant_id")
+        or timeline.get("source_variant_revision") is not None
+    )
+    if timeline_has_variant_identity and variant is None:
+        raise OutputSourceStaleError("variant identity is unstamped")
     for name, artifact in (("review", review), ("subtitle", subtitle)):
         if artifact is not None:
             if not bool(artifact.get("is_current", True)):
@@ -208,12 +330,38 @@ def verify_output_freshness(*, editing_session: dict[str, Any] | None, timeline:
                 artifact_revision = artifact.get("source_session_revision")
                 if artifact_revision is None or int(artifact_revision) != current_revision:
                     raise OutputSourceStaleError(f"{name} session revision changed")
+    if variant is not None:
+        expected_variant_id = str(timeline.get("source_variant_id") or "")
+        expected_variant_revision = timeline.get("source_variant_revision")
+        current_variant_id = str(variant.get("variant_id") or "")
+        current_variant_revision = variant.get("variant_revision")
+        if not expected_variant_id or expected_variant_revision is None:
+            raise OutputSourceStaleError("variant identity is unstamped")
+        if expected_variant_id != current_variant_id:
+            raise OutputSourceStaleError("variant changed")
+        if int(expected_variant_revision) != int(current_variant_revision or 0):
+            raise OutputSourceStaleError("variant revision changed")
+        if (
+            str(variant.get("source_session_id") or "")
+            != str(timeline.get("source_session_id") or "")
+            or int(variant.get("source_session_revision") or 0)
+            != int(timeline.get("source_session_revision") or 0)
+        ):
+            raise OutputSourceStaleError("variant source lineage changed")
+        if editing_session is not None and (
+            str(variant.get("source_session_id") or "")
+            != str(editing_session.get("session_id") or "")
+            or int(variant.get("source_session_revision") or 0)
+            != int(editing_session.get("session_revision") or 0)
+        ):
+            raise OutputSourceStaleError("variant source session changed")
 
 
 __all__ = [
     "OutputSourceSnapshot",
     "OutputSourceStaleError",
     "capture_output_source_snapshots",
+    "is_silent_narration_placeholder",
     "verify_output_freshness",
     "verify_output_source_snapshots",
     "verify_output_sources",

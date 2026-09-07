@@ -89,19 +89,92 @@ services:
       VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED: ${VIDEOBOX_MEDIA_INBOX_WATCH_ENABLED:-1}
       # A subfolder, so the archive folder VideoBox files originals into lands
       # beside it inside the same mount: .../새 영상 -> .../자산화_완료.
-      VIDEOBOX_MEDIA_INBOX_WATCH_PATH: /videobox-drive-sync/새 영상
+      # owner는 이제 **한 폴더**에 넣는다 -- 종류는 VideoBox가 내용을 보고
+      # 가른다(owner 승인 2026-09-07). 2026-08-10의 "폴더로 나눈다"를 뒤집은 것이라
+      # `settings.py`의 옛 주석도 그 결정을 가리킨다.
+      VIDEOBOX_MEDIA_INBOX_WATCH_PATH: /videobox-drop
+      # 자산 가치가 없는 것이 가는 자리. 같은 원드라이브 안이라 owner가 바로 본다.
+      #
+      # **감시 폴더 밖에 둔다.** 감시기는 `rglob`으로 하위 폴더까지 훑으므로
+      # (`media_inbox.py:65`), 안에 두면 옮긴 파일을 다음 바퀴에 다시 읽어
+      # 영원히 맴돈다.
+      VIDEOBOX_OWNER_DROP_REJECT_PATH: /videobox-drop-reject
       VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS: ${VIDEOBOX_MEDIA_INBOX_WATCH_INTERVAL_SECONDS:-30}
       # The root filesystem stays read-only, so model weights need their own
       # writable home.  Keeping it off /tmp avoids re-downloading on restart and
       # keeps weights out of the owner's project data.
       HF_HOME: /opt/models
       XDG_CACHE_HOME: /opt/models
+      # 대본에 맞춘 그림 만들기. ComfyUI는 호스트에서 돈다 -- 컨테이너 안의
+      # 127.0.0.1은 컨테이너라서 loopback 기본값으로는 아무 데도 닿지 않는다.
+      # LM Studio와 같은 성격의 host bridge이고, owner가 2026-08-20에 이 한 경로만
+      # 승인했다 (`docs/development-fast-path.ko.md` §10.14 조항 2-C).
+      # 내레이션 목소리. `espeak`는 이미지에 들어 있어 설치가 필요 없고 밖으로
+      # 나가지 않지만 **목소리를 복제하지는 못한다** -- 기계 목소리다.
+      # 창작자 목소리로 더빙하려면 `chatterbox`(MIT)를 설치하고 이 줄만 바꾼다.
+      VIDEOBOX_TTS_ENABLED: ${VIDEOBOX_TTS_ENABLED:-1}
+      # 기본은 **창작자 목소리**(`host_bridge`)다. 목소리 엔진은 이 컴퓨터에
+      # 있고 `scripts/start-voice.ps1`로 켠다(그림 생성이 ComfyUI를 부르는 것과
+      # 같은 방식, owner 승인 2026-09-02).
+      #
+      # 안 켜져 있으면 더빙이 **"목소리 프로그램을 켜 주세요"라고 말하고 멈춘다.**
+      # 조용히 기계 목소리로 대신 읽지 않는다 -- 내 목소리인 줄 알고 내보내는
+      # 것이 못 만드는 것보다 나쁘다. 기계 목소리로 쓰려면 `espeak`로 바꾼다.
+      VIDEOBOX_TTS_ENGINE: ${VIDEOBOX_TTS_ENGINE:-host_bridge}
+      VIDEOBOX_TTS_BRIDGE_URL: ${VIDEOBOX_TTS_BRIDGE_URL:-http://host.docker.internal:8199}
+      VIDEOBOX_TTS_LANGUAGE: ${VIDEOBOX_TTS_LANGUAGE:-ko}
+      VIDEOBOX_IMAGE_GENERATION_ENABLED: ${VIDEOBOX_IMAGE_GENERATION_ENABLED:-1}
+      VIDEOBOX_IMAGE_GENERATION_BASE_URL: ${VIDEOBOX_IMAGE_GENERATION_BASE_URL:-http://host.docker.internal:8188}
+      # 디스크에 있는 유일한 이미지 모델이다. 상업 이용이 열린 모델이 아니며
+      # (`flux1-dev`), owner가 2026-08-21에 그걸 알고 이걸로 가기로 했다.
+      # 이름을 바꾸면 `ImageGenerationConfig`가 어느 쪽인지 스스로 말한다.
+      VIDEOBOX_IMAGE_MODEL_NAME: ${VIDEOBOX_IMAGE_MODEL_NAME:-flux1-dev.safetensors}
+      # 실측(2026-08-21, RTX 5090): bf16은 22GB라 안 들어가고 fp8은 절반이다.
+      VIDEOBOX_IMAGE_WEIGHT_DTYPE: ${VIDEOBOX_IMAGE_WEIGHT_DTYPE:-fp8_e4m3fn}
+      VIDEOBOX_IMAGE_STEPS: ${VIDEOBOX_IMAGE_STEPS:-20}
+      # 한 장이 22~24초다. 그림 요청은 한 번에 끝나는 요청이라 이 값보다 nginx가
+      # 더 오래 기다려야 한다 -- `tests/test_compose_contract.py`가 지킨다.
+      VIDEOBOX_IMAGE_TIMEOUT_SECONDS: ${VIDEOBOX_IMAGE_TIMEOUT_SECONDS:-300}
+      # 장면에 진짜 동영상(Wan). owner 결정 2026-08-29(2회차) -- 로컬 비디오
+      # 모델로 간다. 같은 host bridge, 같은 ComfyUI 인스턴스를 쓴다.
+      # 실측(RTX 5090): 1920x1080·81프레임·20스텝이 약 18분 걸린다 -- 이 요청은
+      # 비동기(`job_id` 폴링)라 nginx 타임아웃과 무관하다.
+      VIDEOBOX_VIDEO_GENERATION_ENABLED: ${VIDEOBOX_VIDEO_GENERATION_ENABLED:-1}
+      VIDEOBOX_VIDEO_GENERATION_BASE_URL: ${VIDEOBOX_VIDEO_GENERATION_BASE_URL:-http://host.docker.internal:8188}
+      VIDEOBOX_VIDEO_MODEL_NAME: ${VIDEOBOX_VIDEO_MODEL_NAME:-wan2.1_t2v_1.3B_fp16.safetensors}
+      VIDEOBOX_VIDEO_CLIP_NAME: ${VIDEOBOX_VIDEO_CLIP_NAME:-umt5_xxl_fp16.safetensors}
+      VIDEOBOX_VIDEO_VAE_NAME: ${VIDEOBOX_VIDEO_VAE_NAME:-wan_2.1_vae.safetensors}
+      VIDEOBOX_VIDEO_WEIGHT_DTYPE: ${VIDEOBOX_VIDEO_WEIGHT_DTYPE:-default}
+      # 코드리뷰(2026-08-30)로 잡힌 결함 -- 화질 단계(preview/standard/full)가
+      # 생기면서 실제 생성은 이 값이 아니라 단계별 고정 스텝 수를 쓴다. 이
+      # 줄은 이제 실제 생성에 아무 영향이 없다(VideoGenerationConfig.steps
+      # 참고) -- 화질을 조정하려면 화면의 화질 선택을 쓴다.
+      VIDEOBOX_VIDEO_STEPS: ${VIDEOBOX_VIDEO_STEPS:-20}
+      # 백그라운드 작업 안에서 도는 값이라 nginx 타임아웃과 다르다 -- 실측치(약
+      # 18분)에 여유를 둔다.
+      VIDEOBOX_VIDEO_TIMEOUT_SECONDS: ${VIDEOBOX_VIDEO_TIMEOUT_SECONDS:-1800}
       # Draft export for CapCut.  Size is configurable because the owner shoots
       # 1920x1080 and also needs a vertical canvas for shortform.
       VIDEOBOX_CAPCUT_ENABLED: ${VIDEOBOX_CAPCUT_ENABLED:-1}
       VIDEOBOX_CAPCUT_WIDTH: ${VIDEOBOX_CAPCUT_WIDTH:-1920}
       VIDEOBOX_CAPCUT_HEIGHT: ${VIDEOBOX_CAPCUT_HEIGHT:-1080}
       VIDEOBOX_CAPCUT_FPS: ${VIDEOBOX_CAPCUT_FPS:-30}
+      # **캡컷으로 넘기는 다리.** 캡컷 프로젝트 폴더는 이 컴퓨터에 있고 컨테이너는
+      # 못 본다. 목소리(8199)·그림(8188)과 같은 방식으로 호스트 서비스를 부른다.
+      # 켜는 법: `scripts/start-capcut.ps1` (VideoBox를 켜면 자동으로 함께 켜진다).
+      VIDEOBOX_CAPCUT_BRIDGE_URL: ${VIDEOBOX_CAPCUT_BRIDGE_URL:-http://host.docker.internal:8200}
+      # **인포그래픽을 그리는 다리.** 컨테이너 안에는 브라우저가 없다. 이 컴퓨터에
+      # 이미 있는 크롬을 부른다 -- 캡컷(8200) 옆자리인 8201이다.
+      # 켜는 법: `scripts/start-infographic.ps1` (VideoBox를 켜면 함께 켜진다).
+      VIDEOBOX_INFOGRAPHIC_BRIDGE_URL: ${VIDEOBOX_INFOGRAPHIC_BRIDGE_URL:-http://host.docker.internal:8201}
+      # 인포그래픽 HTML 한 판을 기다려 줄 시간. 공용 런타임(30초)과 따로 둔다 --
+      # 실측 63~115초라 공용 상한으로는 매번 실패한다.
+      VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS: ${VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS:-140}
+      # 초안에 적히는 소재 경로를 **이 컴퓨터의 경로**로 옮겨 적는 대응표.
+      # `/videobox-data`는 아래 volumes의 bind mount와 같은 폴더다 -- 같은 파일을
+      # 서로 다른 이름으로 부르고 있을 뿐이라 이름만 바꿔 주면 캡컷이 다 찾는다.
+      # 코드에 박지 않는다. 자리를 옮기면 `.env.container` 한 줄만 바꾸면 된다.
+      VIDEOBOX_CAPCUT_HOST_PATH_MAP: ${VIDEOBOX_CAPCUT_HOST_PATH_MAP:-/videobox-data=${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/runtime}
       # Owner decision (2026-08-05, Task 21, Option A): place everything
       # automatically; review the actual result afterward rather than
       # gating approval on a confidence heuristic before anything renders.
@@ -114,6 +187,24 @@ services:
       # needs write access -- read-only would leave every file re-imported
       # on every pass.
       - ${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync:/videobox-drive-sync
+      # owner가 자산을 넣는 한 폴더(owner 승인 2026-09-07,
+      # `decisions/2026-09-07-one-drop-folder-sorted-for-me.ko.md`). 원드라이브라
+      # 휴대폰에서 넣은 것도 여기로 내려온다.
+      #
+      # **구글 드라이브가 아니라 원드라이브인 이유**: `G:`는 스트리밍 드라이브라
+      # Docker가 마운트하면 빈 폴더로 보인다(위 감시 폴더 주석과 같은 이유).
+      # 원드라이브는 파일이 디스크에 실제로 있다 -- 표본 200개 중 클라우드에만
+      # 있는 것이 0개였다(2026-09-07 실측).
+      #
+      # 쓰기가 필요하다: 처리한 원본을 옮기고, 자산 가치가 없는 것을 `불필요`로
+      # 옮긴다. **지우지는 않는다** -- owner가 보고 지운다.
+      # **필수로 두지 않는다.** `:?`로 두었더니 compose를 렌더하는 자리마다
+      # (규약 시험 넷, 시작 스크립트 확인, 정적 검증기) 한꺼번에 멈췄다 --
+      # 같은 누락을 하루에 세 번 했다(2026-09-07). 실제 값은
+      # `.env.container`가 준다. 안 정하면 이미 있는 드롭 폴더로 떨어진다.
+      - ${VIDEOBOX_OWNER_DROP_ROOT:-${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync}:/videobox-drop
+      # 자산 가치가 없는 것이 가는 자리. **감시 폴더 밖**이라야 다시 안 읽힌다.
+      - ${VIDEOBOX_OWNER_DROP_REJECT_ROOT:-${VIDEOBOX_CONTAINER_DATA_ROOT:?set VIDEOBOX_CONTAINER_DATA_ROOT in .env.container}/drive-sync-reject}:/videobox-drop-reject
       - videobox_model_cache:/opt/models
     depends_on:
       videobox-postgres:
@@ -145,7 +236,7 @@ services:
   # VideoBox data, DB, API, or host bridge access.  A later egress-gateway
   # slice must be complete before an interactive `hermes model` OAuth login.
   videobox-hermes-agent:
-    image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
+    image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-preauth]
     command: ["sleep", "infinity"]
     network_mode: none
@@ -176,7 +267,7 @@ services:
   # Interactive OAuth state is isolated from the pre-auth scratch volume and
   # from every VideoBox data, DB, API, and host mount.
   videobox-hermes-oauth-bootstrap:
-    image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
+    image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-oauth-bootstrap]
     command: ["sleep", "infinity"]
     volumes:
@@ -205,7 +296,7 @@ services:
   # VideoBox data, DB, API, or internal networks. Platform-only provider
   # configuration stays in the official Hermes dashboard.
   videobox-hermes-dashboard:
-    image: nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787
+    image: nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09
     profiles: [hermes-dashboard]
     command: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--insecure", "--no-open"]
     ports:

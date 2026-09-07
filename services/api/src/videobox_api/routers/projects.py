@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, status
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -14,18 +17,75 @@ from videobox_api.models import (
     JobRecordWithProjectResponse,
     ProjectListResponse,
     ProjectResponse,
+    ProjectWorkspaceSummaryResponse,
+    RenameProjectRequest,
+    WorkspaceNextActionResponse,
 )
+from videobox_api.principal import get_principal
+from videobox_domain_models.entitlements import can
 from videobox_domain_models.jobs import JobStatus, JobType
+from videobox_domain_models.principal import Principal
 from videobox_storage.local_project_store import LocalProjectStore
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def build_projects_router(store: LocalProjectStore) -> APIRouter:
+def build_projects_router(store: LocalProjectStore, user_asset_store: Any | None = None) -> APIRouter:
     router = APIRouter()
 
+    def _job_temporal_key(job: dict[str, object]) -> tuple[float, str]:
+        """Order output jobs by recorded timestamps, never list position."""
+        for field in ("updated_at", "finished_at", "started_at", "created_at"):
+            value = job.get(field)
+            if value is None:
+                continue
+            try:
+                parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=UTC)
+                return (parsed.timestamp(), str(job.get("job_id") or ""))
+            except (TypeError, ValueError, OverflowError):
+                continue
+        return (float("-inf"), str(job.get("job_id") or ""))
+
+    def _latest_final_job(jobs: list[dict[str, object]]) -> dict[str, object] | None:
+        final_jobs = [job for job in jobs if str(job.get("job_type")) == JobType.FINAL_RENDER]
+        if not final_jobs:
+            return None
+        # A retry can be claimed before the worker has populated timestamps.
+        # Its active lifecycle state is stronger evidence than an older
+        # terminal result, so keep the card on the retry/status action.
+        untimestamped_active = [
+            job
+            for job in final_jobs
+            if str(job.get("status")) in {JobStatus.PENDING, JobStatus.RUNNING}
+            and _job_temporal_key(job)[0] == float("-inf")
+        ]
+        if untimestamped_active:
+            return max(untimestamped_active, key=lambda job: str(job.get("job_id") or ""))
+        return max(final_jobs, key=_job_temporal_key)
+
+    def _require(principal: Principal, capability: str) -> None:
+        """능력 확인을 지나간다.
+
+        `can`은 지금 언제나 참이라 이 함수는 아무도 막지 않는다. 그럼에도
+        호출을 남겨 두는 이유는, 나중에 요금제가 생겼을 때 라우터를 다시
+        고치지 않고 `entitlements.can` 한 곳만 고치면 되게 하기 위해서다.
+        부품만 만들어 두고 부르는 자리를 안 만들면 조용히 낡는다
+        (`videobox-parts-exist-but-nothing-calls-them`).
+        """
+        if not can(principal, capability):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="capability_not_allowed",
+            )
+
     @router.post("/api/projects", status_code=status.HTTP_201_CREATED)
-    def create_project(payload: CreateProjectRequest) -> ProjectResponse:
+    def create_project(
+        payload: CreateProjectRequest,
+        principal: Principal = Depends(get_principal),
+    ) -> ProjectResponse:
+        _require(principal, "project.create")
         project = store.bootstrap_project(name=payload.name)
         return ProjectResponse(
             project_id=project.project_id,
@@ -35,7 +95,11 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
         )
 
     @router.get("/api/projects")
-    def list_projects(include_archived: bool = False) -> ProjectListResponse:
+    def list_projects(
+        include_archived: bool = False,
+        principal: Principal = Depends(get_principal),
+    ) -> ProjectListResponse:
+        _require(principal, "project.list")
         projects = store.list_projects(include_archived=include_archived)
         return ProjectListResponse(
             projects=[
@@ -47,6 +111,31 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
                 )
                 for project in projects
             ]
+        )
+
+    @router.patch("/api/projects/{project_id}")
+    def rename_project(project_id: str, payload: RenameProjectRequest) -> ProjectResponse:
+        """Rename the project. No `expected_revision` here on purpose.
+
+        Every endpoint in this repo that carries one guards a row that
+        actually has a `revision` column (creation briefs, draft readiness,
+        editing sessions). The `projects` table has no such column, and its
+        two existing mutations -- archive and restore -- guard nothing
+        either. Inventing a counter for this one field would mean a schema
+        migration on both SQLite and Postgres to protect a single-user,
+        local-first tool from a lost update it cannot really have. Left out
+        deliberately; add it with the rest of the table if projects ever gain
+        concurrent writers.
+        """
+        try:
+            project = store.rename_project(project_id=project_id, name=payload.name)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return ProjectResponse(
+            project_id=project["project_id"],
+            name=project["name"],
+            status=project["status"],
+            root_storage_uri=project["root_storage_uri"],
         )
 
     @router.post("/api/projects/{project_id}/archive")
@@ -86,6 +175,16 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             store.delete_project_permanently(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
+        # **자료실 참조도 같이 걷는다.** 그 등록부는 프로젝트 폴더가 아니라
+        # 자료실 DB에 있어서, 폴더만 지우면 참조가 유령으로 남는다. 그러면
+        # **없는 프로젝트가 자산 정리를 영원히 막는다**(2026-09-06 실측: 방금
+        # 지운 프로젝트 넷이 시험용 자산을 아직 쓴다고 나왔다).
+        #
+        # 쓰고 있는 자산을 못 지우게 막는 판단 자체는 그대로 둔다 -- 지우는 것은
+        # 되돌릴 수 없다. 다만 **막는 근거가 유령이면 안 된다.**
+        if user_asset_store is not None:
+            for reference in user_asset_store.list_project_references(project_id=project_id):
+                user_asset_store.remove_project_reference(str(reference["reference_id"]))
 
     @router.get("/api/projects/{project_id}")
     def get_project(project_id: str) -> ProjectResponse:
@@ -143,6 +242,145 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
             asset_gap_count=len(gaps) if isinstance(gaps, list) else 0,
         )
 
+    @router.get("/api/projects/{project_id}/workspace-summary")
+    def get_workspace_summary(project_id: str) -> ProjectWorkspaceSummaryResponse:
+        """Return the project card's single, store-backed source of truth.
+
+        A missing latest session is an ordinary first-visit state.  Any other
+        read failure is deliberately surfaced instead of becoming an empty
+        project that sends the creator back to project creation.
+        """
+        try:
+            project = store.get_project(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        try:
+            jobs = store.list_jobs(project_id=project_id)
+            try:
+                session = store.get_latest_editing_session(project_id=project_id)
+            except KeyError:
+                session = None
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="workspace_summary_unavailable",
+                ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="workspace_summary_unavailable",
+            ) from exc
+
+        finished = sum(
+            1
+            for job in jobs
+            if str(job.get("job_type")) == JobType.FINAL_RENDER
+            and str(job.get("status")) == JobStatus.SUCCEEDED
+        )
+        latest_final = _latest_final_job(jobs)
+        gaps = session.get("gap_slots") if isinstance(session, dict) else None
+        timeline_review_status: str | None = None
+        if isinstance(session, dict) and session.get("timeline_id"):
+            timeline_id = str(session["timeline_id"])
+            # 아직 첫 초안을 만들지 않은 세션(빈 편집판 `blank:...`, 붙여넣은
+            # 대본으로 여는 `script_draft:...`)은 `timelines` 행이 아예 없다 --
+            # 검토를 받을 대상이 아직 없는 정상 상태다. 실제 타임라인을 만드는
+            # 경로(`save_timeline_run`, atomic draft bundle)는 전부 검토 행도
+            # 같은 호출에서 함께 만든다 -- 타임라인은 있는데 검토 행이 없으면
+            # 그건 진짜 자료 문제(예: 두 기록 사이 비정상 종료)다. 한 번의
+            # LEFT JOIN 조회로 세 경우(없음/있고 검토도 있음/있는데 검토만
+            # 없음)를 한 번에 가른다 -- 카탈로그 카드마다 부르는 자리라 조회를
+            # 두 번으로 나누지 않는다.
+            try:
+                review = store.get_review_state_if_timeline_started(
+                    project_id=project_id,
+                    timeline_id=timeline_id,
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="workspace_summary_unavailable",
+                ) from exc
+            if isinstance(review, dict):
+                timeline_review_status = str(review.get("status") or "").strip().lower() or None
+
+        if session is None:
+            current_stage = "plan"
+            state = "ready"
+            action_label = "계속 만들기"
+        elif timeline_review_status == "blocked":
+            current_stage = "review"
+            state = "blocked"
+            action_label = "검토 문제 해결"
+        elif latest_final is not None and str(latest_final.get("status")) == JobStatus.FAILED:
+            current_stage = "output"
+            state = "attention"
+            action_label = "출력 다시 시도"
+        elif latest_final is not None and str(latest_final.get("status")) in {"pending", "running"}:
+            current_stage = "output"
+            state = "attention"
+            action_label = "출력 상태 보기"
+        elif latest_final is not None and str(latest_final.get("status")) == JobStatus.SUCCEEDED:
+            current_stage = "output"
+            state = "ready"
+            action_label = "완성본 보기"
+        elif isinstance(gaps, list) and gaps:
+            current_stage = "assets"
+            state = "attention"
+            action_label = "자산 준비"
+        elif timeline_review_status in {"draft", "pending", "review"}:
+            current_stage = "review"
+            state = "ready"
+            action_label = "검토하기"
+        elif timeline_review_status in {"approved", "succeeded"}:
+            current_stage = "output"
+            state = "ready"
+            action_label = "완성본 만들기"
+        else:
+            current_stage = "edit"
+            state = "ready"
+            action_label = "계속 편집"
+
+        thumbnail_url: str | None = None
+        try:
+            assets = store.list_assets(project_id=project_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="workspace_summary_unavailable",
+            ) from exc
+        for asset in assets:
+            metadata = asset.get("metadata") if isinstance(asset, dict) else None
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("thumbnail_uri") or metadata.get("thumbnail_url"):
+                thumbnail_url = (
+                    f"/api/projects/{project_id}/assets/{asset['asset_id']}/thumbnail"
+                )
+                break
+
+        timestamps = [str(project.get("updated_at") or "")]
+        if isinstance(session, dict) and session.get("updated_at"):
+            timestamps.append(str(session["updated_at"]))
+        if latest_final and latest_final.get("finished_at"):
+            timestamps.append(str(latest_final["finished_at"]))
+        updated_at = max(timestamps)
+        return ProjectWorkspaceSummaryResponse(
+            project_id=project_id,
+            display_name=str(project["name"]),
+            updated_at=updated_at,
+            current_stage=current_stage,
+            state=state,
+            thumbnail_url=thumbnail_url,
+            finished_video_count=finished,
+            next_action=WorkspaceNextActionResponse(
+                label=action_label,
+                href=f"/projects/{project_id}/{current_stage}",
+            ),
+        )
+
     @router.get("/api/projects/{project_id}/jobs")
     def list_project_jobs(project_id: str) -> JobListResponse:
         try:
@@ -150,6 +388,48 @@ def build_projects_router(store: LocalProjectStore) -> APIRouter:
         except Exception as exc:
             raise _http_error(exc) from exc
         return JobListResponse(jobs=[JobRecordResponse(**job) for job in jobs])
+
+    @router.get("/api/projects/{project_id}/jobs/{job_id}")
+    def get_project_job(project_id: str, job_id: str) -> JobRecordResponse:
+        """**잡 하나를 종류와 상관없이 같은 모양으로 답한다.**
+
+        이 문이 없어서 상태를 묻는 주소가 열세 가지로 갈라져 있었다
+        (`/jobs/transcription/{id}`, `/timelines/{id}`, `/final-renders/{id}`,
+        `/exact-previews/{id}` …). 밖에서 부르는 쪽이 그 열세 가지를 다 알아야
+        했고, 그건 복잡함을 떠넘기는 것이다
+        (owner 결정 2026-09-07, `docs/videobox-mcp-scope.ko.md` §2).
+
+        **종류별 문을 대체하지 않는다.** 저쪽은 결과까지 같이 준다 -- 타임라인
+        내용, 완성본 경로 같은 것. 여기는 **상태만** 준다. 진행 중인지 물을 때
+        여기로 오고, 끝난 뒤 결과를 가져갈 때 저기로 간다.
+
+        **여기서 못 보는 것이 있다.** `jobs` 표에 행을 남기는 열네 가지만 보인다
+        (`JobType`). 더빙·유튜브 학습은 메모리에만 있고(`orchestration.py`,
+        일부러 그렇게 뒀다), 유진 실행은 SSE로 흐르며, 장면 그림·대본 초안·
+        인포그래픽·자동 컷은 잡 없이 요청 안에서 끝난다. 그 종류를 물으면
+        404가 나가는데, 그건 정직한 답이다 -- **여기 없는 것을 있는 척하지 않는다.**
+        """
+        try:
+            job = store.get_job(project_id=project_id, job_id=job_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="job_not_found",
+            ) from exc
+        except Exception as exc:
+            # **없는 프로젝트를 500으로 내지 않는다.** 로컬 저장소는 프로젝트마다
+            # sqlite 파일이 따로라, 없는 프로젝트를 물으면 `KeyError`가 아니라
+            # "파일을 못 연다"가 난다. 그걸 그대로 내면 부르는 쪽은 "서버가 고장
+            # 났다"로 읽고 재시도하거나 사람을 부른다 -- 실제로는 그냥 없는 것이다.
+            try:
+                store.get_project(project_id=project_id)
+            except Exception:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="project_not_found",
+                ) from exc
+            raise _http_error(exc) from exc
+        return JobRecordResponse(**job)
 
     @router.get("/api/jobs")
     def list_all_jobs() -> AllJobsResponse:

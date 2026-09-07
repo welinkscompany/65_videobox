@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import socket
 import inspect
 import os
@@ -44,6 +45,13 @@ def _allow_live_lmstudio(request: pytest.FixtureRequest, address: object) -> boo
     )
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "docs_only: documentation contract tests that must not import or patch the API runtime",
+    )
+
+
 class _DeterministicOfflineRuntime:
     def generate_structured(self, **_: object) -> object:
         raise LLMProviderError(
@@ -56,6 +64,8 @@ class _DeterministicOfflineRuntime:
 
 @pytest.fixture(autouse=True)
 def _replace_live_llm_runtime(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> None:
+    if request.node.get_closest_marker("docs_only") is not None:
+        return
     import videobox_api.main as api_main
 
     def build_deterministic_runtime(**_: object) -> _DeterministicOfflineRuntime:
@@ -155,3 +165,20 @@ def _overlay_font_for_tests() -> None:
         if Path(candidate).is_file():
             os.environ["VIDEOBOX_OVERLAY_FONT"] = candidate
             return
+
+
+def wait_for(predicate, *, timeout_seconds: float = 5.0, interval_seconds: float = 0.01) -> None:
+    """조건이 될 때까지 기다린다. **뒤에서 도는 패스를 고정 sleep으로 기다리지 마라.**
+
+    전체 스위트(3,600개)를 함께 돌리는 동안에는 백그라운드 패스가 정해진 시간 안에
+    못 도는 때가 있다. `time.sleep(0.4)` 뒤에 바로 단정하던 테스트들이 그래서 실행
+    때마다 **번갈아 가며 하나씩** 깨졌다 -- 제품 결함이 아니라 기다리는 방법의
+    문제였다. 2026-08-18에 네 번 돌려 세 번 서로 다른 테스트가 이 이유로 깨졌다.
+
+    조건이 되면 바로 끝나므로 평소에는 오히려 빠르다.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval_seconds)

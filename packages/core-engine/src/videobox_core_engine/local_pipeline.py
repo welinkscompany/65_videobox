@@ -39,9 +39,20 @@ from videobox_capcut_export import CapCutExportAdapter
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.capcut_handoff import CapCutHandoffError, CapCutHandoffService
 from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
-from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
+from videobox_core_engine.ffmpeg_final_renderer import (
+    FinalRenderError,
+    FfmpegFinalRenderer,
+    rendered_audio_has_sound,
+)
+from videobox_core_engine.render_quality_facts import composition_quality_facts
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+from videobox_capcut_export.adapter import dropped_track_types
+from videobox_core_engine.track_states import apply_track_states_to_timeline, normalize_track_states
+from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
+from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
+from videobox_core_engine.editing_session import project_yujin_editing_proposal
+from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
 from videobox_storage.timeline_clip_source_resolution import TimelineClipSourceError, resolve_generic_asset_uri
 from videobox_core_engine.output_source_verifier import (
     OutputSourceStaleError,
@@ -50,6 +61,8 @@ from videobox_core_engine.output_source_verifier import (
     verify_output_source_snapshots,
 )
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
+from videobox_core_engine.audio_descriptors import probe_duration_seconds
+from videobox_core_engine.dubbing import DubbedTake, apply_dubbing_fit, plan_dubbing_fit
 from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 
@@ -168,6 +181,7 @@ from videobox_core_engine.editing_session import (
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
+from videobox_core_engine.blank_editing_session import build_blank_editing_session, build_blank_timeline_payload
 from videobox_core_engine.script_draft_session import (
     apply_narration_alignment_to_script_draft,
     build_provisional_script_draft_session,
@@ -189,6 +203,7 @@ from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder,
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_core_engine.transcript_alignment import HeuristicTranscriptAligner, TranscriptAligner
+from videobox_core_engine.broll_scene_candidates import list_scene_candidate_assets
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -253,8 +268,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         tts_provider: Any | None = None,
         transcript_aligner: TranscriptAligner | None = None,
         auto_approve_segment_review: bool = False,
+        library_store: Any | None = None,
     ) -> None:
         self.store = store
+        # 자료실 색인이 적어 둔 설명을 장면 후보에 실어 주는 데만 쓴다
+        # (`broll_scene_candidates`). 없으면 후보는 그대로 나오고 설명만 빠진다.
+        self.library_store = library_store
         # Owner decision (2026-08-05, Task 21): defaults to False so existing
         # blocking-behavior tests are unaffected unless a caller opts in.
         self.auto_approve_segment_review = auto_approve_segment_review
@@ -284,6 +303,25 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         # should run implicitly for callers/tests that don't opt in.
         self.tts_provider = tts_provider
         self.transcript_aligner = transcript_aligner or HeuristicTranscriptAligner()
+        # (경로, mtime_ns) → sha256. `FfmpegFinalRenderer._stream_probe_cache`와 같은
+        # 이유다 -- exact-preview 요청 하나가 같은 자산을 지문 계산·소스 스냅샷 두
+        # 자리에서 다시 잰다(2026-08-28 실측: my-project 18개 자산, 자리당 ~4.6초).
+        # `_revalidate_exact_preview_source_snapshots`는 여기서 뺀다 -- 그건 읽는
+        # 그 순간의 경합까지 잡으려고 일부러 매번 새로 읽는 자리다.
+        self._exact_preview_asset_hash_cache: dict[tuple[str, int], str] = {}
+
+    def _cached_sha256_file(self, path: Path) -> str:
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError:
+            return sha256_file(path)
+        key = (str(path), mtime_ns)
+        cached = self._exact_preview_asset_hash_cache.get(key)
+        if cached is not None:
+            return cached
+        digest = sha256_file(path)
+        self._exact_preview_asset_hash_cache[key] = digest
+        return digest
 
     def build_composition_plan(
         self, *, timeline: dict[str, Any], editing_session: dict[str, Any] | None = None,
@@ -388,7 +426,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     source = resolve_generic_asset_uri(
                         store=self.store, project_id=project_id, asset_uri=str(item.asset_uri or "")
                     )
-                used_asset_sha256[identity] = sha256_file(source) if source.is_file() else f"missing:{identity}"
+                used_asset_sha256[identity] = self._cached_sha256_file(source) if source.is_file() else f"missing:{identity}"
             except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
                 # A request still gets a durable, fenced generation so the
                 # worker can report an explicit recoverable failed state.
@@ -404,7 +442,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 identity = f"export_overlay:{asset_id or index}"
                 try:
                     source = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
-                    used_asset_sha256[identity] = sha256_file(source) if source.is_file() else f"missing:{identity}"
+                    used_asset_sha256[identity] = self._cached_sha256_file(source) if source.is_file() else f"missing:{identity}"
                 except (KeyError, OSError, ValueError, TimelineClipSourceError):
                     used_asset_sha256[identity] = f"missing:{identity}"
             resolved_overlays.append(normalized)
@@ -444,7 +482,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     )
                 if not path.is_file():
                     raise FileNotFoundError(path)
-                expected_by_path[path.resolve()] = sha256_file(path)
+                expected_by_path[path.resolve()] = self._cached_sha256_file(path)
             for overlay in plan.export_overlays:
                 asset_uri = str(overlay.get("asset_uri") or "")
                 asset_id = str(overlay.get("asset_id") or "")
@@ -455,14 +493,99 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 path = resolve_generic_asset_uri(store=self.store, project_id=project_id, asset_uri=asset_uri)
                 if not path.is_file():
                     raise FileNotFoundError(path)
-                expected_by_path[path.resolve()] = sha256_file(path)
+                expected_by_path[path.resolve()] = self._cached_sha256_file(path)
             timeline_path = self.store.project_root(project_id) / "timelines" / f"{session['timeline_id']}.json"
             if not timeline_path.is_file():
                 raise FileNotFoundError(timeline_path)
-            expected_by_path[timeline_path.resolve()] = sha256_file(timeline_path)
+            expected_by_path[timeline_path.resolve()] = self._cached_sha256_file(timeline_path)
         except (KeyError, OSError, ValueError, TimelineClipSourceError, FinalRenderError):
             return None
         return expected_by_path
+
+    def _proposal_preview_inputs(self, *, project_id: str, session_id: str, proposal_id: str) -> tuple[dict[str, Any], dict[str, Any], CompositionPlan, str]:
+        """Build the proposed timeline in memory; never persist it as an edit."""
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        proposal = self.store.get_director_proposal(project_id, proposal_id)
+        if proposal.source_session_id != session_id or int(proposal.base_session_revision) != int(session["session_revision"]):
+            raise ValueError("editing_proposal_needs_refresh")
+        operations = proposal.diff.get("operations") if hasattr(proposal.diff, "get") else None
+        if not isinstance(operations, (list, tuple)):
+            raise ValueError("editing_proposal_operations_required")
+        projected = project_yujin_editing_proposal(session=session, proposal=YujinEditingProposal.model_validate({
+            "proposal_id": proposal_id, "base_session_revision": proposal.base_session_revision, "operations": [dict(item) for item in operations],
+        }))
+        source_timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+        timeline = materialize_editing_session_timeline(timeline=source_timeline, editing_session=projected, project_id=project_id)
+        plan = self.build_composition_plan(timeline=source_timeline, editing_session=projected, project_id=project_id)
+        # Include byte identities in the durable cache key: a changed approved
+        # asset must neither reuse nor expose an old proposal-result proxy.
+        snapshots = self._capture_exact_preview_source_snapshots(project_id=project_id, session=session, timeline=timeline, plan=plan)
+        used_asset_sha256 = {str(path): digest for path, digest in (snapshots or {}).items()}
+        fingerprint = fingerprint_exact_preview(plan=plan, session_captions=plan.captions, used_asset_sha256=used_asset_sha256, overlay_inputs=plan.export_overlays, settings={"proposal_id": proposal_id, "canvas": plan.canonical_dict()["canvas"]})
+        return session, timeline, plan, fingerprint
+
+    def start_proposal_preview(self, *, project_id: str, session_id: str, proposal_id: str) -> dict[str, Any]:
+        self.store.recover_inherited_proposal_preview_claims(
+            project_id=project_id, process_epoch=str(self.store.proposal_preview_process_epoch),
+        )
+        self.store.recover_stale_proposal_preview_claims(project_id=project_id)
+        self._best_effort_cleanup_proposal_previews(project_id=project_id)
+        session, _timeline, _plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=session_id, proposal_id=proposal_id)
+        return self.store.begin_proposal_preview(project_id=project_id, session_id=session_id, proposal_id=proposal_id, expected_revision=int(session["session_revision"]), fingerprint=fingerprint)
+
+    def run_proposal_preview(self, *, project_id: str, generation_id: str) -> None:
+        record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        owner = f"proposal-preview-worker:{self.store.proposal_preview_process_epoch}:{uuid.uuid4().hex}"
+        if not self.store.claim_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner): return
+        try:
+            session, timeline, plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=str(record["session_id"]), proposal_id=str(record["proposal_id"]))
+            if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]):
+                self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_fingerprint_changed"); return
+            snapshots = self._capture_exact_preview_source_snapshots(project_id=project_id, session=session, timeline=timeline, plan=plan)
+            with tempfile.TemporaryDirectory(prefix="videobox_proposal_preview_") as raw_dir:
+                raw = Path(raw_dir); ass = raw / "captions.ass"; output = raw / "proposal-preview.mp4"
+                ass.write_text(render_editing_session_ass({"caption_style": session.get("caption_style") or {}, "segments": [{"caption_text": cue.text, "caption_style": cue.style, "start_sec": cue.start_sec, "end_sec": cue.end_sec} for cue in plan.captions]}, video_width=plan.width, video_height=plan.height), encoding="utf-8")
+                self.final_renderer.render_exact_preview_to_mp4(project_id=project_id, composition_plan=plan, timeline_context=timeline, output_path=output, subtitle_ass_path=ass)
+                revalidation = self._revalidate_exact_preview_source_snapshots(snapshots)
+                if not revalidation.is_current:
+                    self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="publish_revalidation_failed"); return
+                self.store.finish_proposal_preview(project_id=project_id, generation_id=generation_id, fingerprint=fingerprint, artifact_path=output, owner_token=owner, source_fence_result=revalidation.is_current, source_fence=lambda _connection: revalidation.still_matches())
+        except Exception as exc:
+            self.store.fail_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner, error_message=str(exc))
+        finally:
+            self._best_effort_cleanup_proposal_previews(project_id=project_id)
+
+    def _best_effort_cleanup_proposal_previews(self, *, project_id: str) -> None:
+        try:
+            self.store.cleanup_proposal_preview_artifacts(
+                project_id=project_id, keep_last=5, orphan_older_than_seconds=300,
+            )
+        except Exception:
+            return
+
+    def get_proposal_preview_status(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
+        record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        if record["state"] in {"pending", "running"}:
+            # A creator may poll this route alone for the rest of a preview's
+            # life -- the preview UI never re-issues the POST after the first
+            # call. If the API process restarts (or a worker thread just
+            # dies) while a render is in flight, only these two fences here
+            # can ever retire it, so run them on every non-terminal read, not
+            # just on ``start``. Gated to pending/running: the succeeded
+            # content route can be polled many times per playback (range
+            # requests), and neither fence touches a terminal row anyway.
+            self.store.recover_inherited_proposal_preview_claims(
+                project_id=project_id, process_epoch=str(self.store.proposal_preview_process_epoch),
+            )
+            self.store.recover_stale_proposal_preview_claims(project_id=project_id)
+            record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        if record["state"] in {"pending", "running", "succeeded"}:
+            try:
+                session, _timeline, _plan, fingerprint = self._proposal_preview_inputs(project_id=project_id, session_id=str(record["session_id"]), proposal_id=str(record["proposal_id"]))
+                if int(session["session_revision"]) != int(record["expected_revision"]) or fingerprint != str(record["fingerprint"]): self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="read_revalidation_failed"); record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+            except Exception:
+                self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="source_unavailable"); record = self.store.get_proposal_preview(project_id=project_id, generation_id=generation_id)
+        return record
 
     @staticmethod
     def _revalidate_exact_preview_source_snapshots(
@@ -776,6 +899,89 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             return {**self._asset_payload(asset), **candidate}
         return self._asset_payload(asset)
 
+    def generate_dubbed_take(
+        self,
+        *,
+        project_id: str,
+        segment_id: str,
+        text: str,
+        language: str,
+        target_duration_sec: float,
+        voice_sample_asset_id: str | None = None,
+    ) -> DubbedTake:
+        """한 장면을 그 언어로 읽어 장면 길이에 맞춘다.
+
+        못 맞췄으면 `candidate`가 `None`이고 **`fit.reason`에 왜인지가 들어 있다** --
+        부르는 쪽이 창작자에게 "번역을 줄여라"인지 "늘려라"인지 말해 줘야 한다.
+
+        `voice_sample_asset_id`가 **없어도 된다.** 목소리를 복제하는 엔진
+        (`chatterbox`)은 샘플이 필요하지만, 복제하지 않는 엔진(`espeak`)은 필요
+        없다. 필수로 두면 복제 안 하는 엔진에서 쓸 일 없는 샘플을 올리게 만든다.
+
+        못 맞춘 장면에 억지로 소리를 넣지 않는 이유는 `dubbing.py` 첫머리에 있다.
+        """
+        if self.tts_provider is None:
+            raise RuntimeError(
+                "TTS synthesis is not configured. Enable TTSEngineConfig and install the "
+                "matching engine package (see requirements-runtime.txt)."
+            )
+        voice_sample_path = ""
+        if voice_sample_asset_id:
+            voice_sample_asset = self.store.get_asset(project_id=project_id, asset_id=voice_sample_asset_id)
+            if voice_sample_asset["asset_type"] != AssetType.VOICE_SAMPLE_AUDIO.value:
+                raise ValueError("generate_dubbed_take requires a voice_sample_audio asset.")
+            voice_sample_path = str(
+                self.store.resolve_storage_uri(
+                    project_id=project_id, storage_uri=voice_sample_asset["storage_uri"]
+                )
+            )
+
+        with tempfile.TemporaryDirectory(prefix="videobox_dub_") as raw_work_dir:
+            work_dir = Path(raw_work_dir)
+            spoken_path = work_dir / "spoken.wav"
+            self.tts_provider.synthesize(
+                TTSRequest(
+                    text=text,
+                    voice_sample_uri=voice_sample_path,
+                    output_path=spoken_path,
+                    target_duration_sec=target_duration_sec,
+                    language=language,
+                )
+            )
+            fit = plan_dubbing_fit(
+                actual_duration_sec=probe_duration_seconds(spoken_path),
+                target_duration_sec=target_duration_sec,
+            )
+            if not fit.fitted:
+                return DubbedTake(candidate=None, fit=fit)
+            # 길이가 이미 딱 맞아도 한 번 통과시킨다 -- `-t`로 못박아야 완성본에서
+            # 몇 밀리초씩 어긋나 쌓이지 않는다.
+            fitted_path = work_dir / "fitted.wav"
+            apply_dubbing_fit(source=spoken_path, destination=fitted_path, fit=fit)
+            acceptance = assess_tts_audio(path=fitted_path, target_duration_sec=target_duration_sec)
+            asset = self.store.register_asset(
+                project_id=project_id,
+                asset_type=AssetType.GENERATED_TTS_AUDIO,
+                source_path=fitted_path,
+                metadata={
+                    "provider_name": getattr(self.tts_provider, "provider_name", "unknown"),
+                    "source_text": text,
+                    # 이 소리가 **무엇을 읽은 것인지** 남긴다. 나중에 자막을 고치고
+                    # 다시 더빙할 때 어느 것이 낡았는지 이걸로 안다.
+                    "dubbing_language": language,
+                    "dubbing_speed": round(fit.speed, 6),
+                    "dubbing_pad_sec": round(fit.pad_sec, 6),
+                },
+            )
+        candidate = self.store.save_tts_candidate(
+            project_id=project_id,
+            segment_id=segment_id,
+            asset_id=asset.asset_id,
+            source_text=text,
+            acceptance=acceptance,
+        )
+        return DubbedTake(candidate={**self._asset_payload(asset), **candidate}, fit=fit)
+
     def register_sfx_asset(self, *, project_id: str, source_path: Path) -> dict[str, Any]:
         asset = self.store.register_asset(
             project_id=project_id,
@@ -1035,7 +1241,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 segment_analysis_job_id=segment_analysis_job_id,
             )
-            assets = self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO)
+            # 사진도 장면이 될 수 있다 -- 자리를 하나로 모았다(2026-09-06).
+            assets = list_scene_candidate_assets(
+                store=self.store, project_id=project_id,
+                library_store=getattr(self, "library_store", None),
+            )
         except Exception as exc:
             self.store.update_job(
                 project_id=project_id,
@@ -1385,6 +1595,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline_applied_recommendations=deepcopy(timeline_applied_recommendations),
             timeline_pending_recommendations=deepcopy(timeline_pending_recommendations),
             timeline_review_flags=timeline_review_flags,
+            source_variant_id=(
+                str(timeline.get("source_variant_id"))
+                if timeline.get("source_variant_id")
+                else None
+            ),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
         snapshot["review_status"] = timeline["review_status"]
         current_review_status = _canonical_runtime_review_status(
@@ -1554,6 +1774,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 str(session["session_id"]) if session is not None else None
             ),
             source_session_revision=source_session_revision,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def reopen_timeline_review(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1564,6 +1790,12 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             project_id=project_id,
             timeline_id=str(timeline["timeline_id"]),
             status=status,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def start_subtitle_render(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
@@ -1776,10 +2008,32 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 timeline_id=str(timeline["timeline_id"]),
             )
+            # 눈·음소거를 실어 준다. **이 길은 저장된 타임라인을 받는다** --
+            # 초안 경로와 달리 `materialize`를 거치지 않아 `track_states`가
+            # 없었고, 그래서 어댑터의 판단이 아무 데서도 걸리지 않았다
+            # (2026-08-23). 어댑터만 고치고 여기를 빠뜨려 놓고 고쳤다고 적었다.
+            editing_session = self._editing_session_for_output_timeline(
+                project_id=project_id,
+                timeline=timeline,
+            )
+            if editing_session is not None:
+                apply_track_states_to_timeline(
+                    timeline=timeline,
+                    states=normalize_track_states(editing_session.get("track_states")),
+                )
+            # 자막을 실을지는 **한 번 정해서 둘 다에 같은 값을 넘긴다.** 어댑터만
+            # 걸러 두면 payload는 "자막 없음"인데 아래 안내문은 "자막 붙음"이라고
+            # 말한다 -- 같은 내보내기 안에서 두 곳이 서로 다른 말을 하게 된다
+            # (2026-08-23 코드리뷰 지적).
+            capcut_subtitle_file_uri = (
+                None
+                if "caption" in dropped_track_types(timeline)
+                else (latest_subtitle["file_uri"] if latest_subtitle else None)
+            )
             export_payload = self.capcut_exporter.build_payload(
                 project_id=project_id,
                 timeline=timeline,
-                subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
+                subtitle_file_uri=capcut_subtitle_file_uri,
             )
         except Exception as exc:
             failed_job = self.store.update_job(
@@ -1800,7 +2054,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 timeline=timeline,
                 output_target=JobType.CAPCUT_EXPORT.value,
-                subtitle_file_uri=latest_subtitle["file_uri"] if latest_subtitle else None,
+                subtitle_file_uri=capcut_subtitle_file_uri,
             )
         except Exception as exc:
             failed_job = self.store.update_job(
@@ -1843,6 +2097,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
 
     def get_capcut_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        # 다른 종류의 job_id가 들어오면 여기서 멈춘다. 완성본 job_id를 주면 그
+        # mp4를 CapCut 매니페스트로 읽으려 들었고, 사용자는 무슨 일인지 알 수 없는
+        # 디코딩 오류를 받았다. 완성본은 `get_final_render_result`가 읽는다.
+        if str(job.get("job_type")) != JobType.CAPCUT_EXPORT.value:
+            raise KeyError(f"CapCut draft export not found: {job_id}")
         export = self.store.get_export_run(project_id=project_id, export_id=job["output_ref"])
         return {"job_id": job["job_id"], "status": job["status"], "export": export}
 
@@ -1881,6 +2140,185 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             if should_start:
                 self._final_render_worker_claims.add(worker_key)
         return {"job_id": job["job_id"], "status": job["status"], "should_start": should_start}
+
+    def _materialize_variant_for_output(
+        self, *, project_id: str, session_id: str, variant_id: str
+    ) -> dict[str, Any]:
+        variant = OutputVariant.model_validate(
+            {
+                key: value
+                for key, value in self.store.get_output_variant(project_id=project_id, variant_id=variant_id).items()
+                if key not in {"project_id", "created_at", "updated_at"}
+            }
+        )
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        if session_id != variant.source_session_id:
+            raise VariantInvariantError("variant_session_mismatch")
+        current_revision = int(session.get("session_revision") or 0)
+        if current_revision != variant.source_session_revision:
+            raise VariantInvariantError("stale_master_revision")
+        derived = materialize_variant(
+            variant,
+            session.get("segments", []),
+            master_session_revision=current_revision,
+        )
+        try:
+            existing = self.store.get_variant_materialization(
+                project_id=project_id,
+                variant_id=variant_id,
+                source_variant_revision=derived.source_variant_revision,
+            )
+            timeline_id = str(existing["timeline_id"])
+        except KeyError:
+            master_timeline = self.store.get_timeline_run(
+                project_id=project_id,
+                timeline_id=str(session.get("timeline_id") or ""),
+            )
+            timeline_payload = {
+                key: value
+                for key, value in master_timeline.items()
+                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary"}
+            }
+            timeline_payload.update(
+                {
+                    "source_variant_id": derived.source_variant_id,
+                    "source_variant_revision": derived.source_variant_revision,
+                    "source_session_id": derived.source_session_id,
+                    "source_session_revision": derived.source_session_revision,
+                    "segments": list(derived.segments),
+                    "tracks": list(master_timeline.get("tracks", [])),
+                }
+            )
+            timeline = self.store.save_timeline_run(
+                project_id=project_id,
+                output_mode=variant.kind,
+                source_session_id=derived.source_session_id,
+                source_session_revision=derived.source_session_revision,
+                timeline_payload=timeline_payload,
+            )
+            timeline_id = str(timeline["timeline_id"])
+            self.store.save_variant_materialization(
+                project_id=project_id,
+                variant_id=variant_id,
+                source_session_id=derived.source_session_id,
+                source_session_revision=derived.source_session_revision,
+                source_variant_revision=derived.source_variant_revision,
+                timeline_id=timeline_id,
+                segments=derived.segments,
+            )
+        self._sync_approved_variant_review(
+            project_id=project_id,
+            source_timeline_id=str(session.get("timeline_id") or ""),
+            timeline_id=timeline_id,
+            source_session_id=derived.source_session_id,
+            source_session_revision=derived.source_session_revision,
+            source_variant_id=derived.source_variant_id,
+            source_variant_revision=derived.source_variant_revision,
+        )
+        timeline_job_id = next(
+            (
+                str(job["job_id"])
+                for job in self.store.list_jobs(project_id=project_id)
+                if str(job.get("job_type")) == JobType.TIMELINE_BUILD.value
+                and str(job.get("output_ref") or "") == timeline_id
+                and str(job.get("status")) == JobStatus.SUCCEEDED.value
+            ),
+            None,
+        )
+        if timeline_job_id is None:
+            timeline_job = self.store.create_job(
+                project_id=project_id,
+                job_type=JobType.TIMELINE_BUILD,
+                input_ref=f"variant:{variant_id}:{derived.source_variant_revision}",
+                status=JobStatus.RUNNING,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=timeline_job["job_id"],
+                status=JobStatus.SUCCEEDED,
+                output_ref=timeline_id,
+            )
+            timeline_job_id = str(timeline_job["job_id"])
+        return {"timeline_id": timeline_id, "timeline_job_id": timeline_job_id, "variant": variant}
+
+    def _sync_approved_variant_review(
+        self,
+        *,
+        project_id: str,
+        source_timeline_id: str,
+        timeline_id: str,
+        source_session_id: str,
+        source_session_revision: int,
+        source_variant_id: str,
+        source_variant_revision: int,
+    ) -> None:
+        """Keep reused variant materializations aligned with an approved master."""
+        try:
+            source_review = self.store.get_review_state(
+                project_id=project_id,
+                timeline_id=source_timeline_id,
+            )
+        except KeyError:
+            return
+        if str(source_review.get("status")) != "approved":
+            return
+        self.store.save_review_state(
+            project_id=project_id,
+            timeline_id=timeline_id,
+            status="approved",
+            source_session_id=source_session_id,
+            source_session_revision=source_session_revision,
+            source_variant_id=source_variant_id,
+            source_variant_revision=source_variant_revision,
+        )
+
+    def start_variant_renders(
+        self, *, project_id: str, session_id: str, variant_ids: list[str]
+    ) -> dict[str, Any]:
+        selected_ids = list(variant_ids)
+        if not selected_ids:
+            selected_ids = [
+                str(item["variant_id"])
+                for item in self.store.ensure_output_variants(project_id=project_id, session_id=session_id)
+                if str(item.get("kind")) in {"horizontal", "vertical_full"}
+            ]
+        items: list[dict[str, Any]] = []
+        for variant_id in selected_ids:
+            try:
+                materialized = self._materialize_variant_for_output(
+                    project_id=project_id, session_id=session_id, variant_id=variant_id
+                )
+                render_job = self.start_final_render_job(
+                    project_id=project_id,
+                    timeline_job_id=materialized["timeline_job_id"],
+                )
+                items.append(
+                    {
+                        "variant_id": variant_id,
+                        "variant_kind": materialized["variant"].kind,
+                        "timeline_id": materialized["timeline_id"],
+                        "timeline_job_id": materialized["timeline_job_id"],
+                        "job_id": render_job["job_id"],
+                        "status": render_job["status"],
+                        "should_start": render_job["should_start"],
+                    }
+                )
+            except Exception as exc:
+                if variant_id.endswith("highlight") or variant_id == "vertical_highlight":
+                    continue
+                items.append(
+                    {
+                        "variant_id": variant_id,
+                        "status": "failed",
+                        "error_code": str(exc),
+                        "should_start": False,
+                    }
+                )
+        return {
+            "project_id": project_id,
+            "status": "accepted" if any(item["status"] != "failed" for item in items) else "failed",
+            "items": items,
+        }
 
     def release_final_render_worker(
         self,
@@ -1971,6 +2409,14 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                         project_id=project_id, job_id=job["job_id"], progress_percent=percent
                     ),
                 )
+                # 완성본에 들을 만한 소리가 담겼는지 여기서 잰다. 만들어진 파일에
+                # 대한 질문이라 렌더러 인터페이스를 거치지 않는다 — 대역 렌더러를
+                # 쓰는 호출부가 깨지면 안 된다. 재지 못하면 None이라 아무것도
+                # 주장하지 않는다.
+                has_sound = rendered_audio_has_sound(
+                    render_output_path,
+                    ffmpeg_binary=getattr(self.final_renderer, "ffmpeg_binary", "ffmpeg"),
+                )
                 # The renderer can run for minutes.  Re-check both the durable
                 # session/review contract and the *materialized* override inputs
                 # before an output file becomes a final-render export.
@@ -2030,14 +2476,36 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     )
                     return True
 
+                is_derived_variant_timeline = bool(timeline.get("source_variant_id"))
                 persisted = self.store.save_final_render(
                     project_id=project_id,
                     timeline_id=str(timeline["timeline_id"]),
                     source_output_path=render_output_path,
-                    source_session_id=str(editing_session["session_id"]) if editing_session is not None else None,
-                    source_session_revision=int(editing_session["session_revision"]) if editing_session is not None else None,
-                    source_session_absent=editing_session is None,
+                    # A derived variant deliberately has the master editing
+                    # session as its source lineage, but it is not itself the
+                    # session's timeline_id. The publish CAS therefore must
+                    # not compare the derived timeline to the master session
+                    # row; review/source fences above still bind the variant
+                    # to that exact session and revision.
+                    source_session_id=(
+                        None
+                        if is_derived_variant_timeline or editing_session is None
+                        else str(editing_session["session_id"])
+                    ),
+                    source_session_revision=(
+                        None
+                        if is_derived_variant_timeline or editing_session is None
+                        else int(editing_session["session_revision"])
+                    ),
+                    source_session_absent=is_derived_variant_timeline or editing_session is None,
                     source_fence=final_source_fence,
+                    # 이 완성본이 어땠는지 남긴다. 소리가 실렸는지는 만들어진
+                    # 파일에서만 알 수 있고, 나머지는 합성 계획에서 바로 나온다.
+                    # 재 두지 않으면 나중에 "지난 영상들보다 나은가"를 물을 수 없다.
+                    metadata={
+                        **composition_quality_facts(composition_plan),
+                        **({"has_sound": has_sound} if has_sound is not None else {}),
+                    },
                 )
             self.store.update_job(
                 project_id=project_id,
@@ -2067,10 +2535,14 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
 
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        # 실패한 이유는 job 행에 이미 적혀 있었다. 여기서 빼고 내보내는 바람에
+        # 화면은 `완성본을 만들지 못했어요`밖에 말할 수 없었다 -- 실제 원인이
+        # 검토 승인 한 번인 경우까지 포함해서.
+        failure = job.get("error_message") or None
         if not job["output_ref"]:
-            return {"job_id": job["job_id"], "status": job["status"], "render": None}
+            return {"job_id": job["job_id"], "status": job["status"], "render": None, "error_message": failure}
         render = self.store.get_final_render_export(project_id=project_id, export_id=job["output_ref"])
-        return {"job_id": job["job_id"], "status": job["status"], "render": render}
+        return {"job_id": job["job_id"], "status": job["status"], "render": render, "error_message": failure}
 
     def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         """Synchronous convenience wrapper: create the job and run it to completion
@@ -2296,6 +2768,39 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 job_id=str(job["job_id"]),
             )
 
+    def create_blank_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        """기획을 통과하지 않고 편집기를 연다 -- 캡컷의 빈 편집판.
+
+        `create_editing_session`은 기획 산출물을, `create_script_draft_editing_session`은
+        대본을 요구한다. 둘 다 없이 편집기를 열 길이 없어서 owner가 잠긴 문을 만났다.
+        """
+        # 타임라인을 **먼저** 만든다. 편집기는 세션과 그 짝이 되는 타임라인이
+        # 둘 다 있어야 재생 목록을 만들 수 있고, 없으면 화면이 열리지 않는다.
+        timeline = self.store.save_timeline_run(
+            project_id=project_id,
+            output_mode="landscape",
+            timeline_payload=build_blank_timeline_payload(),
+        )
+        session_payload = build_blank_editing_session(
+            project_id=project_id, timeline_id=str(timeline["timeline_id"])
+        )
+        saved = self.store.save_editing_session(
+            project_id=project_id,
+            timeline_id=str(session_payload["timeline_id"]),
+            session_payload=session_payload,
+        )
+        # **타임라인을 만들었다는 기록을 남긴다.**
+        #
+        # 안 남기면 내보내기가 막다른 길이 된다 -- 출력 화면은 `지금 타임라인을
+        # 만든 succeeded timeline_build 작업`이 있어야 "편집본 준비됨"으로 보고,
+        # 완성본 요청도 그 작업을 가리킨다. 빈 편집판은 타임라인을 실제로
+        # 만들면서(`save_timeline_run`) 이 기록만 빠뜨리고 있었고, 그래서
+        # `+ 새로 만들기`로 들어온 창작자는 `완성본 만들기`가 눌리지 않는
+        # 화면을 만났다(2026-09-06 실측). 부분 재생성 경로는 2026-09-03에
+        # 같은 함정을 고쳤다.
+        self._record_timeline_build(project_id=project_id, timeline_id=str(timeline["timeline_id"]))
+        return saved
+
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
         asset = self.store.get_asset(project_id=project_id, asset_id=script_asset_id)
         if str(asset.get("asset_type")) != AssetType.SCRIPT_DOCUMENT.value:
@@ -2338,6 +2843,16 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
     def _editing_session_for_output_timeline(
         self, *, project_id: str, timeline: dict[str, Any]
     ) -> dict[str, Any] | None:
+        source_variant_id = str(timeline.get("source_variant_id") or "")
+        source_session_id = str(timeline.get("source_session_id") or "")
+        if source_variant_id and source_session_id:
+            try:
+                return self.store.get_editing_session(
+                    project_id=project_id,
+                    session_id=source_session_id,
+                )
+            except KeyError:
+                return None
         try:
             session = self.store.get_latest_editing_session(project_id=project_id)
         except KeyError:
@@ -2351,12 +2866,30 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         timeline_id = str(timeline.get("timeline_id") or "")
         if not timeline_id:
             return
-        try:
-            active_session = self.store.get_latest_editing_session(project_id=project_id)
-        except KeyError:
-            active_session = None
-        if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
-            raise OutputSourceStaleError("timeline is not the active editing session output")
+        source_variant_id = str(timeline.get("source_variant_id") or "")
+        variant: dict[str, Any] | None = None
+        if source_variant_id:
+            source_session_id = str(timeline.get("source_session_id") or "")
+            if not source_session_id:
+                raise OutputSourceStaleError("variant source session is unstamped")
+            try:
+                active_session = self.store.get_editing_session(
+                    project_id=project_id,
+                    session_id=source_session_id,
+                )
+                variant = self.store.get_output_variant(
+                    project_id=project_id,
+                    variant_id=source_variant_id,
+                )
+            except KeyError as exc:
+                raise OutputSourceStaleError("variant identity is unavailable") from exc
+        else:
+            try:
+                active_session = self.store.get_latest_editing_session(project_id=project_id)
+            except KeyError:
+                active_session = None
+            if active_session is not None and str(active_session.get("timeline_id") or "") != timeline_id:
+                raise OutputSourceStaleError("timeline is not the active editing session output")
         try:
             review = self.store.get_review_state(project_id=project_id, timeline_id=timeline_id)
         except KeyError:
@@ -2369,6 +2902,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             timeline=timeline,
             subtitle=subtitle,
             review=review,
+            variant=variant,
         )
 
     def get_capcut_draft_export_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
@@ -2531,4 +3065,3 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             "recovery_message": diagnostics.recovery_message,
             "checked_at": diagnostics.checked_at,
         }
-

@@ -1,0 +1,725 @@
+"""SQLite authority for owner-managed global media assets.
+
+The verified starter-pack tables in :mod:`media_library_store` are immutable
+installation metadata.  This store is deliberately additive and owns the
+copy/ingest lifecycle for user files and explicit project references.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+import json
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import sqlite3
+from typing import Any, Iterable, Mapping
+from uuid import uuid4
+
+from videobox_domain_models.library_assets import (
+    LibraryAssetLifecycle,
+    LibraryAssetOrigin,
+    LibraryMediaType,
+    LibraryUserAsset,
+)
+
+
+LIBRARY_USER_ASSET_SCHEMA = """
+CREATE TABLE IF NOT EXISTS library_user_assets (
+    library_asset_id TEXT PRIMARY KEY,
+    media_type TEXT NOT NULL CHECK (media_type IN ('broll', 'music', 'sfx', 'image')),
+    origin TEXT NOT NULL CHECK (origin IN ('builtin', 'user')),
+    lifecycle TEXT NOT NULL CHECK (lifecycle IN ('processing', 'ready', 'needs_attention', 'trashed')),
+    content_sha256 TEXT NOT NULL UNIQUE,
+    managed_relative_path TEXT NOT NULL,
+    byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+    mime_type TEXT NOT NULL,
+    technical_json TEXT NOT NULL DEFAULT '{}',
+    machine_json TEXT NOT NULL DEFAULT '{}',
+    user_json TEXT NOT NULL DEFAULT '{}',
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    trashed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_library_user_assets_type_lifecycle
+    ON library_user_assets (media_type, lifecycle, updated_at);
+CREATE TABLE IF NOT EXISTS library_asset_derivatives (
+    derivative_id TEXT PRIMARY KEY,
+    library_asset_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    managed_relative_path TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+    mime_type TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (library_asset_id) REFERENCES library_user_assets(library_asset_id) ON DELETE CASCADE,
+    UNIQUE (library_asset_id, kind)
+);
+CREATE TABLE IF NOT EXISTS library_ingest_batches (
+    ingest_batch_id TEXT PRIMARY KEY,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    state TEXT NOT NULL DEFAULT 'processing',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS library_ingest_items (
+    ingest_item_id TEXT PRIMARY KEY,
+    ingest_batch_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    library_asset_id TEXT,
+    filename TEXT NOT NULL,
+    state TEXT NOT NULL,
+    error_code TEXT,
+    content_sha256 TEXT,
+    media_type TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (ingest_batch_id) REFERENCES library_ingest_batches(ingest_batch_id) ON DELETE CASCADE,
+    FOREIGN KEY (library_asset_id) REFERENCES library_user_assets(library_asset_id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_library_ingest_items_batch
+    ON library_ingest_items (ingest_batch_id, created_at);
+CREATE TABLE IF NOT EXISTS library_project_references (
+    reference_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    library_asset_id TEXT NOT NULL,
+    materialized_asset_id TEXT,
+    location_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (library_asset_id) REFERENCES library_user_assets(library_asset_id) ON DELETE RESTRICT,
+    UNIQUE (project_id, library_asset_id, materialized_asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_library_project_references_asset
+    ON library_project_references (library_asset_id, project_id);
+"""
+
+
+def ensure_library_user_asset_schema(connection: sqlite3.Connection) -> None:
+    """Create the additive global-library tables safely on every connection."""
+    connection.executescript(LIBRARY_USER_ASSET_SCHEMA)
+    # Existing owner libraries predate the ingest fingerprint columns.  Keep
+    # startup/retry compatible without requiring a destructive migration.
+    columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_ingest_items)")}
+    if "content_sha256" not in columns:
+        connection.execute("ALTER TABLE library_ingest_items ADD COLUMN content_sha256 TEXT")
+    if "media_type" not in columns:
+        connection.execute("ALTER TABLE library_ingest_items ADD COLUMN media_type TEXT")
+    _widen_media_type_check(connection)
+
+
+def _widen_media_type_check(connection: sqlite3.Connection) -> None:
+    """Let a library made before images accept them.
+
+    SQLite cannot alter a CHECK constraint, so the table is rebuilt.  Without
+    this the screen shows a `그림` tab on an existing library and every drop
+    fails at the database -- exactly the silent lie this repo keeps finding.
+    """
+    definition = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'library_user_assets'"
+    ).fetchone()
+    if definition is None:
+        return
+    sql = str(definition[0] if not isinstance(definition, sqlite3.Row) else definition["sql"])
+    if "'image'" in sql:
+        return
+    widened = LIBRARY_USER_ASSET_SCHEMA.split("CREATE INDEX", 1)[0].replace(
+        "CREATE TABLE IF NOT EXISTS library_user_assets",
+        "CREATE TABLE library_user_assets_migrated",
+    )
+    # Copy by explicit column list: an older library may be missing a column
+    # this schema added later, and `SELECT *` would then shift the values.
+    target_columns = [
+        "library_asset_id", "media_type", "origin", "lifecycle", "content_sha256",
+        "managed_relative_path", "byte_count", "mime_type", "technical_json",
+        "machine_json", "user_json", "provenance_json", "created_at", "updated_at",
+        "trashed_at",
+    ]
+    existing = {str(row[1]) for row in connection.execute("PRAGMA table_info(library_user_assets)")}
+    selected = ", ".join(name if name in existing else "NULL" for name in target_columns)
+    # Derivatives cascade and project references restrict on this table.  With
+    # the guard left on, dropping the old parent would take the owner's
+    # thumbnails with it or refuse outright, so it is off for the swap only.
+    connection.execute("PRAGMA foreign_keys = OFF")
+    # 이 파일은 촬영본 저장소와 함께 쓴다. 그쪽 트리거 열 개가 이 표를
+    # 이름으로 참조하는데, 표를 지웠다가 새 표를 그 이름으로 되돌리는 동안
+    # SQLite가 스키마를 다시 읽으면 **참조가 끊긴 트리거에서 멈춘다**:
+    #   error in trigger footage_sources_require_canonical_asset_insert:
+    #   no such table: main.library_user_assets
+    # 그러면 이관이 매번 롤백하고, 연결을 여는 **모든 호출이 함께 죽는다** --
+    # 2026-08-20에 배포본에서 라이브러리에 아무것도 못 넣게 됐다.
+    # legacy 모드에서는 이름 바꾸기가 트리거 본문을 건드리지도, 검사하지도
+    # 않는다. 바꾼 뒤에는 그 이름이 다시 존재하므로 트리거는 그대로 맞다.
+    connection.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("DROP TABLE IF EXISTS library_user_assets_migrated")
+        # A single statement, so `execute` -- `executescript` would commit the
+        # transaction opened just above and leave the swap half-applied.
+        connection.execute(widened)
+        connection.execute(
+            f"INSERT INTO library_user_assets_migrated ({', '.join(target_columns)}) "
+            f"SELECT {selected} FROM library_user_assets"
+        )
+        connection.execute("DROP TABLE library_user_assets")
+        connection.execute("ALTER TABLE library_user_assets_migrated RENAME TO library_user_assets")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_library_user_assets_type_lifecycle"
+            " ON library_user_assets (media_type, lifecycle, updated_at)"
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.execute("PRAGMA legacy_alter_table = OFF")
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _safe_relative_path(value: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("managed_relative_path is required")
+    normalized = value.replace("\\", "/").strip("/")
+    windows = PureWindowsPath(value)
+    parts = PurePosixPath(normalized).parts
+    if windows.drive or value.startswith(("/", "\\")) or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("managed_relative_path must be a safe relative path")
+    return normalized
+
+
+def _json(value: Mapping[str, Any] | None) -> str:
+    if value is None:
+        return "{}"
+    if not isinstance(value, Mapping):
+        raise ValueError("metadata must be an object")
+    return json.dumps(dict(value), ensure_ascii=False, sort_keys=True)
+
+
+class LibraryUserAssetStore:
+    """Persistent global user-media store backed by one SQLite database."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+        self.database_path = self.root / "media_library.sqlite"
+
+    def register_asset(self, **kwargs: Any) -> LibraryUserAsset:
+        """Insert an asset or return the existing row with the same content hash."""
+        asset = LibraryUserAsset.create(**kwargs)
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM library_user_assets WHERE content_sha256 = ?",
+                (asset.content_sha256,),
+            ).fetchone()
+            if existing is not None:
+                connection.commit()
+                return LibraryUserAsset.from_row(dict(existing))
+            connection.execute(
+                """
+                INSERT INTO library_user_assets (
+                    library_asset_id, media_type, origin, lifecycle, content_sha256,
+                    managed_relative_path, byte_count, mime_type, technical_json,
+                    machine_json, user_json, provenance_json, created_at, updated_at, trashed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    asset.library_asset_id, asset.media_type.value, asset.origin.value,
+                    asset.lifecycle.value, asset.content_sha256, _safe_relative_path(asset.managed_relative_path),
+                    asset.byte_count, asset.mime_type, _json(asset.technical_metadata),
+                    _json(asset.machine_metadata), _json(asset.user_metadata), _json(asset.provenance),
+                    asset.created_at.isoformat(), asset.updated_at.isoformat(),
+                    asset.trashed_at.isoformat() if asset.trashed_at else None,
+                ),
+            )
+            connection.commit()
+            return asset
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    # Explicit name used by ingest/materializer callers.
+    create_asset = register_asset
+
+    def create_user_asset(self, **kwargs: Any) -> LibraryUserAsset:
+        return self.register_asset(**kwargs)
+
+    def get_asset(self, library_asset_id: str) -> LibraryUserAsset | None:
+        connection = self._connection()
+        try:
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+        finally:
+            connection.close()
+        return LibraryUserAsset.from_row(dict(row)) if row is not None else None
+
+    def find_by_content_sha256(self, content_sha256: str) -> LibraryUserAsset | None:
+        connection = self._connection()
+        try:
+            row = connection.execute("SELECT * FROM library_user_assets WHERE content_sha256 = ?", (content_sha256.lower(),)).fetchone()
+        finally:
+            connection.close()
+        return LibraryUserAsset.from_row(dict(row)) if row is not None else None
+
+    # Alias matching content-addressed terminology in the ingest plan.
+    get_by_content_sha256 = find_by_content_sha256
+    find_by_hash = find_by_content_sha256
+
+    def list_assets(
+        self,
+        *,
+        media_type: LibraryMediaType | str | None = None,
+        origin: LibraryAssetOrigin | str | None = None,
+        lifecycle: LibraryAssetLifecycle | str | None = None,
+        include_trashed: bool = False,
+    ) -> list[LibraryUserAsset]:
+        clauses: list[str] = []
+        values: list[Any] = []
+        if media_type is not None:
+            clauses.append("media_type = ?"); values.append(LibraryMediaType(media_type).value)
+        if origin is not None:
+            clauses.append("origin = ?"); values.append(LibraryAssetOrigin(origin).value)
+        if lifecycle is not None:
+            clauses.append("lifecycle = ?"); values.append(LibraryAssetLifecycle(lifecycle).value)
+        elif not include_trashed:
+            clauses.append("lifecycle <> 'trashed'")
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        connection = self._connection()
+        try:
+            rows = connection.execute(f"SELECT * FROM library_user_assets{where} ORDER BY created_at, library_asset_id", values).fetchall()
+        finally:
+            connection.close()
+        return [LibraryUserAsset.from_row(dict(row)) for row in rows]
+
+    def update_lifecycle(self, library_asset_id: str, lifecycle: LibraryAssetLifecycle | str) -> LibraryUserAsset:
+        target = LibraryAssetLifecycle(lifecycle)
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            if target is LibraryAssetLifecycle.TRASHED and str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin assets cannot be trashed")
+            trashed_at = _now() if target is LibraryAssetLifecycle.TRASHED else None
+            connection.execute("UPDATE library_user_assets SET lifecycle = ?, trashed_at = ?, updated_at = ? WHERE library_asset_id = ?", (target.value, trashed_at, _now(), library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
+    def update_media_type(self, library_asset_id: str, media_type: LibraryMediaType | str) -> LibraryUserAsset:
+        """종류를 고친다 (owner 결정 2026-09-07).
+
+        한 폴더에 넣은 것을 프로그램이 내용을 보고 가르기 때문에, **틀린 것을
+        고치는 길**이 그 결정의 조건이었다. 특히 음악↔효과음은 길이로 가르므로
+        경계 근처에서 틀린다.
+
+        `managed_relative_path`는 **그대로 둔다.** 그 경로에 종류 이름이 들어
+        있지만(`assets/<종류>/<앞두자>/<해시>`), 어디까지나 이름일 뿐이고 파일을
+        찾는 일은 `resolve_managed_path`가 설정된 뿌리들을 훑어 해시로 확인해서
+        한다. 바이트를 옮기면 옮기는 도중에 잃을 수 있고, 얻는 것은 보기 좋은
+        경로뿐이다.
+
+        붙어 있는 ingest 기록도 같이 고친다. 안 고치면 owner가 고쳐 놓은 자산과
+        같은 파일을 다시 넣었을 때 ingest가 종류 충돌로 막힌다.
+        """
+        target = LibraryMediaType(media_type)
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin assets cannot be reclassified")
+            connection.execute("UPDATE library_user_assets SET media_type = ?, updated_at = ? WHERE library_asset_id = ?", (target.value, _now(), library_asset_id))
+            connection.execute("UPDATE library_ingest_items SET media_type = ? WHERE library_asset_id = ?", (target.value, library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
+    def update_technical_metadata(self, library_asset_id: str, technical_metadata_patch: Mapping[str, Any]) -> LibraryUserAsset:
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            existing = LibraryUserAsset.from_row(dict(row))
+            merged = {**existing.technical_metadata, **technical_metadata_patch}
+            connection.execute("UPDATE library_user_assets SET technical_json = ?, updated_at = ? WHERE library_asset_id = ?", (_json(merged), _now(), library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
+    def trash_asset(self, library_asset_id: str) -> LibraryUserAsset:
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            refs = connection.execute("SELECT reference_id FROM library_project_references WHERE library_asset_id = ? LIMIT 1", (library_asset_id,)).fetchone()
+            if refs is not None:
+                raise ValueError(f"asset has project reference: {refs[0]}")
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin assets cannot be trashed")
+            now = _now()
+            connection.execute("UPDATE library_user_assets SET lifecycle = 'trashed', trashed_at = ?, updated_at = ? WHERE library_asset_id = ?", (now, now, library_asset_id))
+            updated = connection.execute("SELECT * FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            connection.commit()
+            assert updated is not None
+            return LibraryUserAsset.from_row(dict(updated))
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
+    trash = trash_asset
+
+    def restore_asset(self, library_asset_id: str) -> LibraryUserAsset:
+        asset = self.get_asset(library_asset_id)
+        if asset is None:
+            raise KeyError(library_asset_id)
+        if asset.origin is LibraryAssetOrigin.BUILTIN:
+            raise ValueError("builtin assets cannot be restored")
+        return self.update_lifecycle(library_asset_id, LibraryAssetLifecycle.READY)
+
+    restore = restore_asset
+
+    def permanently_delete_asset(self, library_asset_id: str) -> None:
+        connection = self._connection()
+        managed_paths: list[str] = []
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT origin, lifecycle, managed_relative_path FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,)).fetchone()
+            if row is None:
+                raise KeyError(library_asset_id)
+            if str(row["origin"]) == LibraryAssetOrigin.BUILTIN.value:
+                raise ValueError("builtin assets cannot be permanently deleted")
+            refs = connection.execute("SELECT reference_id FROM library_project_references WHERE library_asset_id = ? LIMIT 1", (library_asset_id,)).fetchone()
+            if refs is not None:
+                raise ValueError(f"asset has project reference: {refs[0]}")
+            derivative_rows = connection.execute(
+                "SELECT managed_relative_path FROM library_asset_derivatives WHERE library_asset_id = ?",
+                (library_asset_id,),
+            ).fetchall()
+            managed_paths = [str(row["managed_relative_path"]), *[str(item["managed_relative_path"]) for item in derivative_rows]]
+            # **버린 자산은 그 파생물도 같이 버린다.** 촬영본 등록·잘라 둔 구간·
+            # 제안이 `ON DELETE RESTRICT`로 걸려 있어서, 휴지통에 넣은 자산도
+            # 영영 못 지웠다 -- 실측 2026-09-06에 껍데기 12개 중 6개가 여기서
+            # 막혔고, API는 그것을 **500으로** 냈다.
+            #
+            # **버리지 않은 자산은 그대로 막힌다.** 그 막음은 잘라 둔 구간이
+            # 허공을 가리키는 것을 막으려고 있다 -- 없애는 게 아니라 "이미 버린
+            # 것"으로 좁히는 것이다.
+            if str(row["lifecycle"]) == LibraryAssetLifecycle.TRASHED.value:
+                try:
+                    source_ids = [
+                        str(item["source_id"])
+                        for item in connection.execute(
+                            "SELECT source_id FROM library_footage_sources WHERE library_asset_id = ?",
+                            (library_asset_id,),
+                        ).fetchall()
+                    ]
+                except sqlite3.OperationalError:
+                    # 촬영본 표가 아예 없는 자료실도 있다 -- 그러면 파생물도 없다.
+                    source_ids = []
+                for source_id in source_ids:
+                    # 구간을 가리키는 것부터 걷는다. 승인된 제안은 색인 큐와
+                    # 구간 단위 색인 행을 만드는데, 그 둘이 잘라 둔 구간을
+                    # 붙잡는다 -- **같은 자리를 세 번 고치고서야 다 찾았다**
+                    # (2026-09-07). 매번 시험은 초록이었고, 실물 자료에서
+                    # 붙잡는 자리를 전부 세는 것 말고는 방법이 없었다.
+                    segment_ids = []
+                    try:
+                        segment_ids = [
+                            str(item["segment_id"])
+                            for item in connection.execute(
+                                "SELECT segment_id FROM library_source_segments WHERE source_id = ?",
+                                (source_id,),
+                            ).fetchall()
+                        ]
+                    except sqlite3.OperationalError:
+                        pass
+                    for segment_id in segment_ids:
+                        for table in ("footage_segment_index_queue", "footage_index"):
+                            try:
+                                connection.execute(
+                                    f"DELETE FROM {table} WHERE source_segment_id = ?", (segment_id,)
+                                )
+                            except sqlite3.OperationalError:
+                                pass
+                    # **차례가 중요하다.** 뒤엣것이 앞엣것을 `RESTRICT`로 붙잡고
+                    # 있어서 순서를 바꾸면 못 지운다. 가상 시퀀스는 원본을,
+                    # 제안 구간은 잘라 둔 구간을 붙잡는다 -- 실측 2026-09-07에
+                    # 이 둘을 빼먹어 자산 다섯이 계속 막혔다.
+                    for table in (
+                        "library_virtual_sequence_items",
+                        "library_virtual_sequences",
+                        "footage_proposal_segments",
+                        "footage_proposals",
+                        "library_source_segments",
+                    ):
+                        try:
+                            connection.execute(f"DELETE FROM {table} WHERE source_id = ?", (source_id,))
+                        except sqlite3.OperationalError:
+                            # 그 표가 없는 옛 자료실도 있다 -- 없으면 지울 것도 없다.
+                            pass
+                    connection.execute("DELETE FROM library_footage_sources WHERE source_id = ?", (source_id,))
+                try:
+                    connection.execute("DELETE FROM footage_index WHERE library_asset_id = ?", (library_asset_id,))
+                except sqlite3.OperationalError:
+                    pass
+            connection.execute("DELETE FROM library_user_assets WHERE library_asset_id = ?", (library_asset_id,))
+            connection.commit()
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+        for relative in managed_paths:
+            self._remove_managed_file(relative)
+
+    permanently_delete = permanently_delete_asset
+
+    def add_project_reference(
+        self,
+        *,
+        project_id: str,
+        library_asset_id: str,
+        location: Mapping[str, Any] | None = None,
+        materialized_asset_id: str | None = None,
+        reference_id: str | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise ValueError("project_id is required")
+        result = {"reference_id": reference_id or f"ref_{uuid4().hex}", "project_id": project_id, "library_asset_id": library_asset_id, "materialized_asset_id": materialized_asset_id, "location": dict(location or {}), "created_at": _now()}
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            asset = connection.execute(
+                "SELECT lifecycle FROM library_user_assets WHERE library_asset_id = ?",
+                (library_asset_id,),
+            ).fetchone()
+            if asset is None:
+                raise KeyError(library_asset_id)
+            if str(asset["lifecycle"]) == LibraryAssetLifecycle.TRASHED.value:
+                raise ValueError("asset_not_ready")
+            existing = connection.execute("SELECT * FROM library_project_references WHERE project_id = ? AND library_asset_id = ? AND materialized_asset_id IS ?", (project_id, library_asset_id, materialized_asset_id)).fetchone()
+            if existing is not None:
+                result = self._reference_row(dict(existing))
+            else:
+                connection.execute("INSERT INTO library_project_references (reference_id, project_id, library_asset_id, materialized_asset_id, location_json, created_at) VALUES (?, ?, ?, ?, ?, ?)", (result["reference_id"], project_id, library_asset_id, materialized_asset_id, _json(result["location"]), result["created_at"]))
+            connection.commit()
+            return result
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
+    add_reference = add_project_reference
+
+    def remove_project_reference(self, reference_id: str) -> None:
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM library_project_references WHERE reference_id = ?", (reference_id,))
+            connection.commit()
+        except Exception:
+            connection.rollback(); raise
+        finally:
+            connection.close()
+
+    remove_reference = remove_project_reference
+
+    def list_project_references(self, *, library_asset_id: str | None = None, project_id: str | None = None) -> list[dict[str, Any]]:
+        clauses: list[str] = []; values: list[Any] = []
+        if library_asset_id is not None: clauses.append("library_asset_id = ?"); values.append(library_asset_id)
+        if project_id is not None: clauses.append("project_id = ?"); values.append(project_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        connection = self._connection()
+        try: rows = connection.execute(f"SELECT * FROM library_project_references{where} ORDER BY created_at, reference_id", values).fetchall()
+        finally: connection.close()
+        return [self._reference_row(dict(row)) for row in rows]
+
+    def usage(self, library_asset_id: str) -> list[dict[str, Any]]:
+        return self.list_project_references(library_asset_id=library_asset_id)
+
+    get_usage = usage
+
+    def create_ingest_batch(self, *, idempotency_key: str, provenance: Mapping[str, Any] | None = None, state: str = "processing") -> dict[str, Any]:
+        now = _now(); batch_id = f"batch_{uuid4().hex}"
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute("SELECT * FROM library_ingest_batches WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+            if existing is not None:
+                connection.commit(); return self._batch_row(dict(existing))
+            connection.execute("INSERT INTO library_ingest_batches VALUES (?, ?, ?, ?, ?, ?)", (batch_id, idempotency_key, _json(provenance), state, now, now))
+            connection.commit()
+            return {"ingest_batch_id": batch_id, "idempotency_key": idempotency_key, "provenance": dict(provenance or {}), "state": state, "created_at": now, "updated_at": now}
+        except Exception:
+            connection.rollback(); raise
+        finally: connection.close()
+
+    def record_ingest_item(self, *, batch_id: str, idempotency_key: str, library_asset_id: str | None, filename: str, state: str, error_code: str | None = None, content_sha256: str | None = None, media_type: str | None = None) -> dict[str, Any]:
+        now = _now(); item_id = f"item_{uuid4().hex}"
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute("SELECT * FROM library_ingest_items WHERE idempotency_key = ?", (idempotency_key,)).fetchone()
+            if existing is not None:
+                existing_hash = str(existing["content_sha256"] or "")
+                existing_type = str(existing["media_type"] or "")
+                if (content_sha256 and existing_hash and content_sha256 != existing_hash) or (media_type and existing_type and media_type != existing_type):
+                    connection.rollback()
+                    raise ValueError("idempotency_key_conflict")
+                connection.commit(); return self._ingest_item_row(dict(existing))
+            connection.execute("INSERT INTO library_ingest_items (ingest_item_id, ingest_batch_id, idempotency_key, library_asset_id, filename, state, error_code, content_sha256, media_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (item_id, batch_id, idempotency_key, library_asset_id, filename, state, error_code, content_sha256, media_type, now, now))
+            connection.commit()
+            return {"ingest_item_id": item_id, "ingest_batch_id": batch_id, "idempotency_key": idempotency_key, "library_asset_id": library_asset_id, "filename": filename, "state": state, "error_code": error_code, "created_at": now, "updated_at": now}
+        except Exception:
+            connection.rollback(); raise
+        finally: connection.close()
+
+    def get_ingest_item(self, idempotency_key: str) -> dict[str, Any] | None:
+        """Return one durable ingest item for response-loss reconciliation."""
+        connection = self._connection()
+        try:
+            row = connection.execute(
+                "SELECT * FROM library_ingest_items WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        finally:
+            connection.close()
+        return self._ingest_item_row(dict(row)) if row is not None else None
+
+    def update_ingest_item(
+        self,
+        *,
+        idempotency_key: str,
+        library_asset_id: str | None = None,
+        state: str | None = None,
+        error_code: str | None = None,
+        content_sha256: str | None = None,
+        media_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Advance an existing item without creating a second retry row."""
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM library_ingest_items WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(idempotency_key)
+            connection.execute(
+                """UPDATE library_ingest_items
+                   SET library_asset_id = COALESCE(?, library_asset_id),
+                       state = COALESCE(?, state), error_code = ?,
+                       content_sha256 = COALESCE(?, content_sha256),
+                       media_type = COALESCE(?, media_type), updated_at = ?
+                   WHERE idempotency_key = ?""",
+                (library_asset_id, state, error_code, content_sha256, media_type, _now(), idempotency_key),
+            )
+            updated = connection.execute(
+                "SELECT * FROM library_ingest_items WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            connection.commit()
+            assert updated is not None
+            return self._ingest_item_row(dict(updated))
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def upsert_derivative(self, *, library_asset_id: str, kind: str, managed_relative_path: str, content_sha256: str, byte_count: int, mime_type: str, metadata: Mapping[str, Any] | None = None, derivative_id: str | None = None) -> dict[str, Any]:
+        if self.get_asset(library_asset_id) is None: raise KeyError(library_asset_id)
+        result = {"derivative_id": derivative_id or f"derivative_{uuid4().hex}", "library_asset_id": library_asset_id, "kind": kind, "managed_relative_path": _safe_relative_path(managed_relative_path), "content_sha256": content_sha256, "byte_count": byte_count, "mime_type": mime_type, "metadata": dict(metadata or {}), "created_at": _now()}
+        connection = self._connection()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute("SELECT * FROM library_asset_derivatives WHERE library_asset_id = ? AND kind = ?", (library_asset_id, kind)).fetchone()
+            if existing is not None:
+                result["derivative_id"] = str(existing["derivative_id"])
+                connection.execute(
+                    "UPDATE library_asset_derivatives SET managed_relative_path = ?, content_sha256 = ?, byte_count = ?, mime_type = ?, metadata_json = ?, created_at = ? WHERE derivative_id = ?",
+                    (result["managed_relative_path"], content_sha256, byte_count, mime_type, _json(result["metadata"]), result["created_at"], result["derivative_id"]),
+                )
+            else:
+                connection.execute("INSERT INTO library_asset_derivatives VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (result["derivative_id"], library_asset_id, kind, result["managed_relative_path"], content_sha256, byte_count, mime_type, _json(result["metadata"]), result["created_at"]))
+            connection.commit(); return result
+        except Exception: connection.rollback(); raise
+        finally: connection.close()
+
+    def _remove_managed_file(self, relative: str) -> None:
+        """Best-effort cleanup for a row-owned file under this store root."""
+        try:
+            base = self.root.resolve()
+            candidate = (base / _safe_relative_path(relative)).resolve()
+            candidate.relative_to(base)
+        except (OSError, ValueError):
+            return
+        try:
+            if candidate.is_file() or candidate.is_symlink():
+                candidate.unlink()
+            parent = candidate.parent
+            while parent != base and parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
+                parent = parent.parent
+        except OSError:
+            # The authority row is already gone.  A locked file is retained
+            # for later operator cleanup; never widen deletion scope.
+            return
+
+    def _assert_no_references(self, library_asset_id: str) -> None:
+        refs = self.list_project_references(library_asset_id=library_asset_id)
+        if refs: raise ValueError(f"asset has project reference: {refs[0]['reference_id']}")
+
+    def _connection(self) -> sqlite3.Connection:
+        self.root.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.database_path, timeout=30.0)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA busy_timeout = 30000")
+        ensure_library_user_asset_schema(connection)
+        return connection
+
+    @staticmethod
+    def _reference_row(row: Mapping[str, Any]) -> dict[str, Any]:
+        row = dict(row); row["location"] = json.loads(str(row.pop("location_json", "{}"))); return row
+
+    @staticmethod
+    def _batch_row(row: Mapping[str, Any]) -> dict[str, Any]:
+        row = dict(row); row["provenance"] = json.loads(str(row.pop("provenance_json", "{}"))); return row
+
+    @staticmethod
+    def _ingest_item_row(row: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(row)
+
+    @staticmethod
+    def _derivative_row(row: Mapping[str, Any]) -> dict[str, Any]:
+        row = dict(row); row["metadata"] = json.loads(str(row.pop("metadata_json", "{}"))); return row

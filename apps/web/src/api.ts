@@ -37,9 +37,62 @@ export type CreateCreationBriefRequest = {
   script_asset_id?: string;
 };
 
-export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { gap_slots?: { gap_slot_id: string; reason: string }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
+export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { script_segments?: { segment_id: string; text: string; start_sec: number; end_sec: number }[]; gap_slots?: { gap_slot_id: string; reason: string; segment_id?: string; target_range?: { start_sec: number; end_sec: number } }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
 export type DraftReadinessRequest = { brief_id: string; narration_choice: { kind: "silent" | "existing" | "source_video"; asset_id?: string }; idempotency_key: string; expected_brief_revision: number; capability?: Record<string, unknown> };
 export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio" };
+/** 찍어 둔 영상으로 시작할 때 돌아오는 것. 올린 영상은 버려지지 않고 `raw_video`
+ *  자산으로 남으므로, `asset_id`는 그대로 내레이션(`source_video`) 선택에 쓴다 --
+ *  그 영상이 곧 본편이다. */
+export type SourceVideoStart = { asset_id: string; script_text: string; spoken_segment_count: number };
+/** 녹음한 목소리만으로 시작할 때 받는 것(owner 요청 2026-08-29). `SourceVideoStart`와
+ *  같은 모양에 다시 들어볼 구간 후보와 구간별 원문을 얹었다 -- 후보를 빼고
+ *  대본을 다시 만들 때 구간을 그대로 이어 붙이기 위해서다(문자열 치환이 아니다). */
+export type RetakeReason = "low_confidence" | "retry_cue" | "retry_cue_precursor";
+export type RetakeCandidate = { segment_index: number; start_sec: number; end_sec: number; text: string; reason: RetakeReason };
+export type SourceVoiceSegment = { segment_index: number; text: string };
+export type SourceVoiceStart = { asset_id: string; script_text: string; spoken_segment_count: number; segments: SourceVoiceSegment[]; retake_candidates: RetakeCandidate[] };
+/** 만든 장면 그림. `commercial_use_is_unrestricted`가 `null`이면 **모른다**는 뜻이다 --
+ *  아는 척하지 않는다(§10.14 2-C). */
+export type SceneImage = { image_asset_id: string; scene_asset_id: string; segment_id: string; title: string; prompt: string; image_prompt?: string; seed: number; elapsed_sec?: number | null; commercial_use_is_unrestricted?: boolean | null };
+export type InfographicStyle = { key: string; korean_name: string; direction: string };
+export type InfographicFact = { label: string; value: number; unit?: string; note?: string };
+export type InfographicRequest = { topic: string; facts: InfographicFact[]; style?: string | null; title?: string | null };
+export type InfographicResult = {
+  library_asset_id: string | null;
+  title: string;
+  style: string;
+  attempts: number;
+  corrected: string[];
+  /** 아직 남은 아쉬운 점. 비어 있어야 정상이다. */
+  remaining_problems: string[];
+  library_error: string | null;
+};
+
+export type SceneImageRequest = { prompt: string; segment_id: string; vertical?: boolean; duration_sec?: number; gap_slot_id?: string | null };
+/** 진짜 동영상(Wan). `SceneImageRequest`와 별개 경로다(owner 결정 2026-08-29 2회차,
+ *  "원래 만든거외에 별도로 만들자") -- 정지 이미지+zoompan은 그대로 두고 이 자리가
+ *  실제 AI 영상 생성을 맡는다. */
+// 코드리뷰(2026-08-30)로 잡힌 결함 -- 이 문자열 목록이 여기 두 곳과 백엔드
+// 두 곳, 총 4곳에 손으로 각각 박혀 있어서 하나를 빠뜨려도 컴파일 오류 없이
+// 조용히 어긋날 수 있었다. 정본은 `scene_video_service.py`의
+// `SceneVideoQuality`고, 여기서는 이 타입 하나로 모아 둔다.
+export type SceneVideoQuality = "preview" | "standard" | "full";
+export type SceneVideoRequest = { prompt: string; segment_id: string; vertical?: boolean; gap_slot_id?: string | null; make_gif?: boolean; quality?: SceneVideoQuality };
+export type SceneVideoStart = { job_id: string; status: "processing" };
+export type SceneVideoResult = { scene_asset_id: string; gif_asset_id: string | null; library_asset_id: string | null; gif_library_asset_id: string | null; library_ingest_error: string | null; gif_library_ingest_error: string | null; segment_id: string; title: string; prompt: string; video_prompt: string; quality: SceneVideoQuality; seed: number; elapsed_sec?: number | null };
+export type SceneVideoStatus = { job_id: string; status: "processing" | "succeeded" | "failed"; result: SceneVideoResult | null; error_detail: string | null };
+/** 유진이 쓴 대본 초안. **확정이 아니다** -- `script_text`는 owner가 고치는 글이고,
+ *  고친 뒤에야 `createCreationBrief`로 넘어간다. */
+export type ScriptDraftScene = { scene_number: number; narration: string; visual: string };
+export type ScriptDraft = { title: string; script_text: string; scenes: ScriptDraftScene[] };
+export type ScriptDraftRequest = { topic: string; duration_sec?: number; scene_count?: number };
+/** 주제 하나로 BGM·이미지 스타일·목소리를 세트로 미리 본다(owner 요청 2026-08-28).
+ *  전부 이미 있는 재료 위에서 고르는 추천이지, 새로 만들어 내는 게 아니다. */
+export type BgmRecommendation = { library_asset_id: string; description: string; duration_seconds: number | null; score: number };
+export type ImageStyleRecommendation = { style_id: string; name: string; prompt_suffix: string; reason: string };
+export type VoiceRecommendation = { asset_id: string | null; filename: string | null; note: string };
+export type CreationRecommendationSet = { bgm: BgmRecommendation[]; image_style: ImageStyleRecommendation; voice: VoiceRecommendation; bgm_semantic: boolean };
+export type CreationRecommendationSetRequest = { topic: string; script_text?: string };
 export type MediaInboxAsset = { filename: string; size_bytes: number };
 export type MediaInboxImport = { asset_id: string; project_id: string; asset_type: string; storage_uri: string };
 export type AtomicDraftBundle = { bundle_id: string; session_id: string; timeline_id: string; timeline_job_id: string; segment_ids: string[]; asset_ids: string[]; clip_ids: string[]; gap_slots: { gap_slot_id: string; reason: string }[]; output_blocked: boolean };
@@ -49,6 +102,16 @@ export type HomeSummary = {
   finished_video_count: number;
   has_draft: boolean;
   asset_gap_count: number;
+};
+export type ProjectWorkspaceSummary = {
+  project_id: string;
+  display_name: string;
+  updated_at: string;
+  current_stage: "plan" | "assets" | "edit" | "review" | "output";
+  state: "ready" | "attention" | "blocked";
+  thumbnail_url: string | null;
+  finished_video_count: number;
+  next_action: { label: string; href: string };
 };
 export type JobRecord = {
   job_id: string;
@@ -82,19 +145,6 @@ export type BrollAsset = {
   created_at: string;
 };
 
-export type BrollBatchImportRequest = {
-  source_paths: string[];
-  source_directory?: string;
-  tags: string[];
-  recursive?: boolean;
-};
-
-export type BrollBatchImportResponse = {
-  assets: BrollAsset[];
-  analysis_jobs: MediaAnalysis[];
-  failures: { source_path: string; reason: string }[];
-};
-
 export type MediaAnalysis = {
   analysis_id: string;
   asset_id: string;
@@ -107,12 +157,16 @@ export type MediaAnalysis = {
   created_at: string;
 };
 
-export type DirectorProposalCreateRequest = { session_id: string; expires_at?: string };
+export type DirectorProposalCreateRequest = { session_id: string; expires_at?: string   /** 방금 한 말. 어떤 종류를 청했는지는 백엔드가 판단한다(규칙을 한 곳에 둔다). */
+  request_text?: string;
+};
 export type DirectorPreferences = { pin_asset?: string[]; exclude_asset?: string[]; exclude_creator?: string[]; exclude_tag?: string[] };
 export type DirectorReference = { reference_code: string; immutable_id: string | { segment_id: string; track_type: string }; source: string };
 export type DirectorCandidate = {
   candidate_id: string;
   visible_reference_code: string;
+  /** 이 추천이 겨냥한 장면. 표시용이라 저장 모델에는 없다(placements가 원본). */
+  target_segment_id?: string | null;
   media_type: string;
   asset_id: string;
   library_asset_id: string | null;
@@ -146,6 +200,17 @@ export type DirectorProposal = {
 };
 export type DirectorProposalPreflight = { proposal_id?: string; status?: string; code?: "stale_proposal"; stale_reasons?: string[]; action?: "refresh"; diff?: DirectorProposalDiff };
 export type ApplyDirectorProposalResponse = EditingSession;
+export type YujinEditingOperation = Record<string, unknown> & { intent: string; segment_id?: string };
+export type YujinEditingProposal = DirectorProposal & { diff: DirectorProposalDiff & { proposal_mode: "yujin_editing_candidate_v1"; operations: YujinEditingOperation[]; follow_up_questions: string[] } };
+export type YujinEditingProposalResult = YujinEditingProposal | { status: "clarification" | "rejected"; reply_text: string; proposal: null };
+export type YujinEditingProposalPreflight = { proposal_id: string; status: "ready"; diff: YujinEditingProposal["diff"] } | { status: "stale"; code: "editing_proposal_needs_refresh"; action: string };
+// The candidate-result MP4 lives in its own namespace from the saved
+// session's exact preview -- it never mutates or reads the session's
+// selected-range state. `status: "stale"` covers both the 409 shapes the
+// backend returns (needs-refresh and the later obsolete/current-fence hit).
+export type YujinEditingProposalPreview =
+  | { status: "pending" | "running" | "succeeded" | "failed"; generationId: string; contentUrl: string | null; errorMessage: string | null }
+  | { status: "stale"; action: string };
 export type DirectorConversation = { conversation_id: string; project_id: string; session_id: string };
 export type DirectorMessage = { message_id: string; conversation_id: string; project_id: string; session_id: string; role: "user" | "assistant" | string; text: string; proposal_id: string | null; metadata: Record<string, unknown>; client_message_id: string | null; created_at: string };
 export type DirectorActionIntent = { action: string; target: DirectorReference; proposal_preflight: Record<string, string | number> | null };
@@ -272,6 +337,8 @@ export type TimelinePayload = {
   pending_recommendations: RecommendationItem[];
   source_session_id?: string | null;
   source_session_revision?: number | null;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
 };
 
 export type TimelineJob = {
@@ -295,6 +362,8 @@ export type SegmentRecord = {
 export type ReviewSnapshot = {
   project_id: string;
   timeline_id: string;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
   review_status: string;
   segments: SegmentRecord[];
   applied_recommendations: RecommendationItem[];
@@ -315,6 +384,22 @@ export type EditingSessionSegment = {
   sfx_override?: Record<string, unknown> | null;
   tts_replacement: Record<string, unknown> | null;
   caption_style?: CaptionStyleSnapshot | null;
+  /** 언어별 자막 번역. 원본(`caption_text`)은 그대로 남는다. */
+  caption_translations?: Record<string, string>;
+  transition_in?: SceneTransition | null;
+  ripple_playback_rate?: 1.5 | 2.0 | null;
+};
+
+/**
+ * 앞 장면에서 이 장면으로 넘어오는 방법.
+ *
+ * `chosen_by`는 **누가 골랐는지**다. 지금은 owner뿐이지만 유진이 골라 주는 것이
+ * 이 제품의 값어치라서 자리를 미리 둔다.
+ */
+export type SceneTransition = {
+  type: string;
+  duration_sec: number;
+  chosen_by?: string;
 };
 
 export type CaptionStyleSnapshot = Record<string, unknown>;
@@ -364,12 +449,53 @@ export type EditingSession = {
   timeline_id: string;
   session_revision: number;
   caption_style?: CaptionStyleSnapshot | null;
+  /** 완성본에 실을 자막 언어. 없으면 원본(한국어)으로 나간다. */
+  caption_language?: string | null;
+
   segments: EditingSessionSegment[];
   history: EditingSessionHistoryEntry[];
   undo_count?: number;
   redo_count?: number;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type DubbingStart = { job_id: string; status: "processing"; total_scene_count: number };
+export type DubbingResult = { dubbed_scene_count: number; dubbing_notice: string | null; session_revision: number };
+export type DubbingStatus = {
+  job_id: string;
+  status: "processing" | "succeeded" | "failed";
+  result: DubbingResult | null;
+  error_detail: string | null;
+  done_scene_count: number;
+  total_scene_count: number;
+};
+
+export type OutputVariant = {
+  variant_id: string;
+  kind: "horizontal" | "vertical_full" | "vertical_highlight";
+  source_session_id: string;
+  source_session_revision: number;
+  variant_revision: number;
+  overrides: {
+    crop: Record<string, unknown> | null;
+    focal: Record<string, unknown> | null;
+    caption: Record<string, unknown> | null;
+    safe_area: Record<string, unknown> | null;
+    audio: Record<string, unknown> | null;
+  };
+  locks: Array<{ field: string; base_master_revision: number }>;
+  conflicts: Array<{ field: string; reason: string; base_master_revision: number; current_master_revision: number }>;
+  selected_segment_ids?: string[] | null;
+  master_segment_ids?: string[] | null;
+};
+
+export type OutputVariantPatch = {
+  overrides?: Partial<OutputVariant["overrides"]>;
+  lock_fields?: string[];
+  unlock_fields?: string[];
+  selected_segment_ids?: string[];
+  resolve_conflicts?: Record<string, "keep_local" | "rebase_master">;
 };
 
 export type EditorPreset = {
@@ -379,13 +505,48 @@ export type EditorPreset = {
   style: CaptionStyleSnapshot;
 };
 
+/** 마음에 든 완성본의 '만드는 방식'. 자막 모양 프리셋보다 넓다 — 화면 크기·호흡·음악까지
+ *  함께 담고, 손으로 만드는 게 아니라 완성본에서 떠낸다. */
+export type FormatTemplate = {
+  template_id: string;
+  name: string;
+  caption_style: Record<string, unknown>;
+  width?: number | null;
+  height?: number | null;
+  average_scene_sec?: number;
+  scene_count?: number;
+  music_asset_id?: string | null;
+  updated_at?: string;
+};
+
 export type EditorFavorite = {
   favorite_id: string;
   favorite_type: "media" | "preset";
 };
 
+/** 고를 수 있는 자막 글꼴 하나. `family`가 완성본에 그대로 나가는 이름이다. */
+export type CaptionFont = {
+  family: string;
+  label: string;
+  group: string;
+};
+
+/** 목록·즐겨찾기·최근을 한 번에 받는다. 나눠 부르면 하나만 실패해도 아무것도 못 고른다. */
+export type CaptionFontLibrary = {
+  fonts: CaptionFont[];
+  default_family: string;
+  favorites: string[];
+  recents: string[];
+};
+
 /** Authoritative, project/session-scoped editor read contract. Times are seconds. */
 export type EditorMediaControls = {
+  /** 색감(`filters.py`). 안 고르면 아예 없는 칸이다. */
+  filter?: { type: string; chosen_by?: string } | null;
+  /** 사진 한 장이 **어떻게** 움직일지(`photoMotions.ts`). 색감과 같은 규칙으로
+   *  안 고르면 아예 없는 칸이고, 그때는 클립마다 알아서 움직인다.
+   *  `still`은 "안 고름"이 아니라 "움직이지 마라"이다. */
+  photo_motion?: string | null;
   volume?: number;
   crop?: string;
   speed?: number;
@@ -400,6 +561,34 @@ export type EditorMediaControls = {
   preserve_source_audio?: boolean;
   in_sec?: number;
   out_sec?: number;
+  /** 소리 정리(오디오 클립). 캡컷 오디오 탭 대조로 들어왔다 -- 캡컷은 유료
+   *  클라우드 AI로 파는데 우리는 FFmpeg 필터 하나씩이다(`loudnorm`·`afftdn`). */
+  normalize_loudness?: boolean;
+  denoise?: boolean;
+  /** 손떨림 보정(영상 클립). FFmpeg `deshake` -- 2-pass `vidstab`이 아니라
+   *  단일 패스라 렌더 시간이 안 늘어난다. */
+  stabilize?: boolean;
+  /** 배속을 걸 때 목소리 높낮이를 그대로 둘지(영상 클립). 캡컷 속도 탭 대조.
+   *  **없으면 유지가 기본**이다 -- 지금까지의 동작이 그것이었다(`atempo`). */
+  /** 화면 노이즈 줄이기(영상 클립). FFmpeg `hqdn3d`. 소리 쪽 `denoise`와
+   *  이름을 나눈다 -- 같은 이름이면 한쪽만 고치는 사고가 난다. */
+  reduce_noise?: boolean;
+  preserve_pitch?: boolean;
+  /** 변형(영상 클립). 캡컷 동영상 탭 `확대·위치·회전` 대조. 클립 전체에 한 번
+   *  걸리는 고정 값이다 -- 임의 키프레임은 계획서가 범위 밖으로 못박았다. */
+  zoom?: number;
+  position_x_percent?: number;
+  position_y_percent?: number;
+  rotation_deg?: number;
+};
+// 유진의 장면 전환 추천 하나. `reason`은 지금 하나뿐이다(`different_broll_asset`)
+// -- 화면이 문구를 정하고, 백엔드가 값을 지어내지 않는다는 걸 지키려고
+// 코드째로 받는다(다른 문구 규칙과 같다, `development-fast-path.ko.md` §10.13).
+export type SceneTransitionSuggestion = {
+  segment_id: string;
+  type: string;
+  duration_sec: number;
+  reason: "different_broll_asset";
 };
 export type EditorPlaybackManifest = {
   project_id: string;
@@ -410,6 +599,9 @@ export type EditorPlaybackManifest = {
   timebase: "seconds";
   fps: { num: number; den: number };
   output: { width: number; height: number; sample_aspect_ratio: string; rotation: number; duration_sec: number };
+  /** 트랙 눈·음소거를 되읽는 단일 자리. 자막 트랙은 `tracks`에 안 실리므로
+   *  트랙마다 붙은 값으로는 자막 숨김을 읽을 수 없다. */
+  track_states?: Record<string, { hidden?: boolean; muted?: boolean }>;
   tracks: Array<{
     track_id: string;
     track_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
@@ -417,12 +609,12 @@ export type EditorPlaybackManifest = {
       clip_id: string; segment_id: string; placement_id?: string | null; clip_type: "narration" | "broll" | "bgm" | "sfx" | "overlay";
       asset_id: string | null; asset_uri: string | null; start_sec: number; end_sec: number;
       media_controls: EditorMediaControls; expected_content_sha256?: string | null; media_revision?: string | null;
-      overlay_type?: "explanation_card" | "image_overlay" | "table_overlay" | null; overlay_payload?: Record<string, unknown>;
+      overlay_type?: "explanation_card" | "image_overlay" | "table_overlay" | "shape_overlay" | null; overlay_payload?: Record<string, unknown>;
     }>;
   }>;
   captions: Array<{
     segment_id: string; caption_id: string; placement_id: string; text: string; start_sec: number; end_sec: number;
-    style: { font_family: string; font_size_px: number; text_color: string; outline_color: string; outline_width_px: number; background_color: string; position_x_percent: number; position_y_percent: number; horizontal_align: "left" | "center" | "right"; safe_area_enabled: boolean; shadow_blur_px: number };
+    style: { font_family: string; font_size_px: number; text_color: string; outline_color: string; outline_width_px: number; background_color: string; position_x_percent: number; position_y_percent: number; horizontal_align: "left" | "center" | "right"; safe_area_enabled: boolean; shadow_blur_px: number; bold: boolean; italic: boolean; letter_spacing_px: number };
   }>;
   gap_slots: Array<{ gap_id: string; segment_id: string; start_sec: number; end_sec: number; reason: string }>;
   source_status: { status: "current" | "stale"; source_session_id?: string | null; source_session_revision?: number | null };
@@ -446,12 +638,20 @@ type RevisionedEditingSessionMutation = {
 
 export type SegmentSplitRequest = RevisionedEditingSessionMutation & { split_sec: number };
 export type SegmentBoundsRequest = RevisionedEditingSessionMutation & { start_sec: number; end_sec: number };
+export type SegmentRipplePlaybackRateRequest = RevisionedEditingSessionMutation & { rate: number };
 export type SegmentOrderRequest = RevisionedEditingSessionMutation & {
   segment_ids: string[];
   bounds_by_id?: Record<string, { start_sec: number; end_sec: number }>;
 };
 export type TimelinePlacementPatchRequest = RevisionedEditingSessionMutation & {
   changes: Array<{ placement_id: string; kind: "broll" | "bgm" | "sfx" | "overlay" | "caption"; start_sec: number; end_sec: number }>;
+};
+/** 트랙 눈·음소거. **보낸 것이 곧 전체 상태다**(조각 병합이 아니다).
+ *
+ *  트랙마다 뜻이 있는 값만 서버가 받는다 -- 자막 트랙 음소거처럼 눌러도 아무
+ *  일도 안 일어날 조합은 422로 거절된다(`track_states.py`). */
+export type TrackStatesPatchRequest = RevisionedEditingSessionMutation & {
+  track_states: Record<string, { hidden?: boolean; muted?: boolean }>;
 };
 export type FixedTimeline = {
   tracks: Array<{ role: "narration" | "broll" | "bgm" | "sfx" | "overlay"; clips: Record<string, unknown>[] }>;
@@ -466,10 +666,17 @@ export type SelectedRangePreview = {
 
 export type CaptionOverrideRequest = RevisionedEditingSessionMutation & {
   caption_text: string;
+  /** 지금 화면에 보이는 자막의 언어. 주면 그 번역을 고치고 원본은 그대로 둔다. */
+  language?: string | null;
 } & OptionalYujinCandidateAttestation;
 
 export type CutActionOverrideRequest = RevisionedEditingSessionMutation & {
   cut_action: string;
+};
+
+export type SegmentTransitionRequest = RevisionedEditingSessionMutation & {
+  /** `null`이면 전환을 끈다. */
+  transition: SceneTransition | null;
 };
 
 export type BrollOverrideRequest = RevisionedEditingSessionMutation & {
@@ -488,9 +695,16 @@ export type ExplanationCardRequest = RevisionedEditingSessionMutation & {
   text: string;
 } & OptionalYujinCandidateAttestation;
 
+// 사진 오버레이. 자리·크기·움직임은 도형과 **같은 프리셋**을 쓰고 넷 다
+// **선택**이다 -- 안 보내면 이 기능이 생기기 전과 똑같이 저장된다
+// (`models.ImageOverlayRequest`). 그래서 화면도 안 고른 값을 채워 보내지 않는다.
 export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
   text: string;
+  vertical?: "top" | "middle" | "bottom";
+  horizontal?: "left" | "center" | "right";
+  size?: "small" | "medium" | "large";
+  motion?: ShapeOverlayMotion;
 } & (
   | { proposal_id: string; candidate_id: string }
   | { proposal_id?: never; candidate_id?: never }
@@ -501,6 +715,62 @@ export type TableOverlayRequest = RevisionedEditingSessionMutation & {
   rows: string[][];
   text: string;
 } & OptionalYujinCandidateAttestation;
+
+// 정지 도형과 아이콘("여기를 보세요"). 프리셋만 있다 -- 자유 좌표·애니메이션은
+// 범위 밖이다. 아이콘 목록은 백엔드 `overlay_shapes`와 같아야 한다: 화면이
+// 보내는 이름을 렌더가 모르면 저장은 되는데 아무것도 그려지지 않는다.
+export type ShapeOverlayShape =
+  | "highlight_box"
+  | "underline"
+  | "icon_arrow_up"
+  | "icon_arrow_down"
+  | "icon_arrow_left"
+  | "icon_arrow_right"
+  | "icon_arrow_up_left"
+  | "icon_arrow_up_right"
+  | "icon_arrow_down_left"
+  | "icon_arrow_down_right"
+  | "icon_circle"
+  | "icon_check"
+  | "icon_x"
+  | "icon_star"
+  | "icon_warning"
+  | "icon_pointer"
+  | "icon_triangle"
+  | "icon_diamond"
+  | "icon_lightbulb"
+  | "icon_search"
+  | "icon_question"
+  | "icon_exclamation"
+  | "icon_lock"
+  | "icon_clock"
+  | "icon_calendar"
+  | "icon_location"
+  | "icon_heart"
+  | "icon_thumb_up"
+  | "icon_money"
+  | "icon_trend_up"
+  | "icon_trend_down"
+  | "icon_cart";
+
+// 표시가 등장·퇴장·이동하는 방식(2026-08-20 승인 5항). 프리셋만 있다 -- 시간이나
+// 좌표를 보내기 시작하면 그게 곧 승인 범위 밖인 키프레임 편집기다. 목록은 백엔드
+// `overlay_shapes`와 같아야 한다.
+export type ShapeOverlayMotion =
+  | "none"
+  | "fade_in"
+  | "fade_out"
+  | "fade_in_out"
+  | "slide_in_left"
+  | "slide_in_right";
+
+export type ShapeOverlayRequest = RevisionedEditingSessionMutation & {
+  shape: ShapeOverlayShape;
+  vertical: "top" | "middle" | "bottom";
+  horizontal: "left" | "center" | "right";
+  size: "small" | "medium" | "large";
+  motion: ShapeOverlayMotion;
+};
 
 export type TtsReplacementRequest = RevisionedEditingSessionMutation & {
   recommendation_id: string;
@@ -627,6 +897,8 @@ export type ReviewApproval = {
   updated_at: string;
   source_session_id: string | null;
   source_session_revision: number | null;
+  source_variant_id?: string | null;
+  source_variant_revision?: number | null;
   is_current: boolean;
   invalidated_at: string | null;
   invalidated_reason: string | null;
@@ -636,7 +908,43 @@ export type AssetResponse = {
   asset_id: string;
   asset_type: string;
   storage_uri: string;
+  /** 목록으로 받을 때 실려 온다. 창작자가 붙인 이름은 `display_name`에 있다. */
+  metadata?: Record<string, unknown>;
 };
+
+/**
+ * `내 자산 > 내 목소리` 한 줄 (owner 승인 2026-09-04).
+ *
+ * 목소리 샘플은 프로젝트마다 따로 저장돼 있어서, 프로젝트를 고르기 전에 열리는
+ * 이 목록은 **어느 프로젝트 것인지**를 함께 받는다. 재생은 `content_url`로 한다
+ * -- 저장 위치를 화면 문구로 쓰지 않는다.
+ */
+export type MyVoice = {
+  asset_id: string;
+  asset_type: string;
+  project_id: string;
+  project_name: string;
+  /** 창작자가 붙인 이름. **없을 수 있다** -- 그때 무엇을 보여줄지는 화면이 정한다. */
+  display_name: string | null;
+  created_at: string;
+  duration_sec: number | null;
+  mime_type: string | null;
+  /** `<audio src>`에 그대로 넣으면 된다. */
+  content_url: string;
+  metadata: Record<string, unknown>;
+};
+
+export type MyVoiceListResponse = { voices: MyVoice[] };
+/** 본인 유튜브 영상 하나에서 뽑아낸 것(owner 요청 2026-08-29). 목소리 샘플은
+ *  바로 쓸 수 있고, 컷 빠르기·색감은 지금은 **보여주기만** 한다 -- 실제로
+ *  자동 컷·색보정에 입히는 건 별도 범위다. */
+export type ReferencePacing = { average_clip_duration_sec: number; clip_count: number; shortest_clip_sec: number; longest_clip_sec: number };
+export type ReferenceColor = { average_brightness: number; average_colorfulness: number; warm_cool_bias: number; sample_count: number };
+export type YoutubeReferenceImport = { voice_sample_asset_id: string; pacing: ReferencePacing; color: ReferenceColor };
+/** 비동기로 바뀌었다(owner 결정 2026-08-29, 2회차) -- 요청은 바로 이걸 받고,
+ *  실제 결과는 `job_id`로 상태를 물어서 받는다. */
+export type YoutubeReferenceImportStart = { job_id: string; status: "processing" };
+export type YoutubeReferenceImportStatus = { job_id: string; status: "processing" | "succeeded" | "failed"; result: YoutubeReferenceImport | null; error_detail: string | null };
 
 export type AssetRegistrationRequest = {
   source_path: string;
@@ -670,6 +978,123 @@ export type MediaLibraryInstallState = {
   status: "not_installed" | "installed" | "degraded";
   installed_asset_count: number;
 };
+
+export type LibraryMediaType = "broll" | "music" | "sfx" | "image";
+export type LibraryAssetLifecycle = "processing" | "ready" | "needs_attention" | "trashed";
+export type LibraryAssetOrigin = "builtin" | "user";
+
+/** Public, path-safe representation returned by the personal library API. */
+export type LibraryAsset = {
+  library_asset_id: string;
+  asset_id?: string | null;
+  media_type: LibraryMediaType;
+  origin: LibraryAssetOrigin;
+  lifecycle: LibraryAssetLifecycle;
+  content_sha256?: string | null;
+  byte_count?: number | null;
+  mime_type?: string | null;
+  managed_relative_path?: string | null;
+  technical_metadata?: Record<string, unknown>;
+  machine_metadata?: Record<string, unknown>;
+  user_metadata?: Record<string, unknown>;
+  duration_seconds?: number | null;
+  tags?: string[];
+  verified?: boolean;
+  available?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  trashed_at?: string | null;
+  preview_url?: string | null;
+  thumbnail_url?: string | null;
+  waveform_url?: string | null;
+};
+
+export type LibraryAssetListResponse = { assets: LibraryAsset[]; total: number };
+
+export type FootageSegment = {
+  segment_id: string;
+  source_segment_id: string;
+  source_sha256: string;
+  start_sec: number;
+  end_sec: number;
+  machine_fields: Record<string, unknown>;
+  confirmed_fields: Record<string, unknown>;
+};
+export type FootageProposal = {
+  proposal_id: string;
+  source_id: string;
+  source_sha256: string;
+  status: "draft" | "approved" | "rejected" | "stale";
+  revision: number;
+  confirmed_fields: Record<string, unknown>;
+  machine_fields: Record<string, unknown>;
+  segments: FootageSegment[];
+};
+export type FootageProposalPreview = {
+  status: "ready";
+  proposal_id: string;
+  revision: number;
+  source_id: string;
+  preview_url: string;
+  segments: FootageSegment[];
+};
+export type YujinFootageOperation =
+  | { intent: "split_by_scene"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "select_process"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }>; process_label: string }
+  | { intent: "exclude_quality"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }>; quality_evidence: string[] }
+  | { intent: "combine_similar"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "select_vertical"; segment_ids: string[]; ranges: Array<{ start_sec: number; end_sec: number }> }
+  | { intent: "target_duration"; target_duration_sec: number };
+export type YujinFootageInterpretation =
+  | { status: "candidate_only"; reply_text: string; candidate: { source_id: string; source_sha256: string; proposal_id: string; base_revision: number; requires_approval: true; operations: YujinFootageOperation[] }; preview: { status: "ready"; preview_url: string; ranges: Array<[number, number]> } }
+  | { status: "clarification"; clarification: string }
+  | { status: "rejected"; rejection_reason: string | null };
+export type FootageSequenceItem = {
+  item_id: string;
+  source_segment_id: string;
+  source_id?: string;
+  source_sha256?: string;
+  item_order: number;
+  start_sec: number | null;
+  end_sec: number | null;
+};
+export type FootageSequenceSource = { source_id: string; source_sha256: string; library_asset_id?: string | null };
+export type FootageSequence = {
+  sequence_id: string;
+  source_id: string;
+  source_sha256: string;
+  sources?: FootageSequenceSource[];
+  name: string;
+  revision: number;
+  items: FootageSequenceItem[];
+};
+export type FootageSequencePreview = {
+  status: "ready";
+  sequence_id: string;
+  revision: number;
+  preview_url: string | null;
+  preview_items: Array<{ item_id: string; source_id: string; source_sha256: string; preview_url: string }>;
+  items: FootageSequenceItem[];
+};
+export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string; semantic_match?: boolean };
+export type LibraryUsageLocation = {
+  project_id?: string | null;
+  materialized_asset_id?: string | null;
+  reference_id?: string | null;
+  location: Record<string, unknown>;
+};
+export type LibraryUsage = { library_asset_id: string; locations: LibraryUsageLocation[] };
+export type LibraryIngestItem = {
+  filename?: string | null;
+  /** Client-only label/key used to preserve folder context and retry identity. */
+  display_filename?: string | null;
+  retry_key?: string | null;
+  idempotency_key?: string;
+  library_asset_id?: string | null;
+  state: LibraryAssetLifecycle | "duplicate";
+  error_code?: string | null;
+};
+export type LibraryIngestBatch = { ingest_batch_id: string; items: LibraryIngestItem[]; partial: boolean };
 
 export type TtsCandidateResponse = AssetResponse & {
   candidate_id?: string | null;
@@ -706,6 +1131,13 @@ export type FinalRenderArtifact = {
   source_session_id?: string | null;
   source_session_revision?: number | null;
   is_current?: boolean;
+  /** 렌더가 실제로 잰 값. 재지 못했으면 없다 — 그때는 경고하지 않는다. */
+  has_sound?: boolean | null;
+  /** 기계가 잰 것. 사람 판단(owner_verdict)과 섞지 않는다. */
+  quality_facts?: Record<string, unknown>;
+  owner_verdict?: "good" | "bad" | null;
+  owner_verdict_note?: string | null;
+  owner_verdict_at?: string | null;
 };
 
 export type FinalRenderJob = {
@@ -715,10 +1147,29 @@ export type FinalRenderJob = {
   error_message?: string | null;
 };
 
-export type RegisteredAsset = {
-  asset_id: string;
-  asset_type: string;
-  storage_uri: string;
+// owner 요청(2026-08-28): 프리뷰 공유 링크. 토큰은 생성 응답에서만 나온다 —
+// 목록 조회에는 다시 싣지 않는다(재발급 창구로 쓰지 못하게).
+export type PreviewShareCreated = {
+  share_id: string;
+  token: string;
+  url: string;
+};
+
+export type VariantRenderItem = {
+  variant_id: string;
+  variant_kind?: string | null;
+  timeline_id?: string | null;
+  timeline_job_id?: string | null;
+  job_id?: string | null;
+  status: string;
+  error_code?: string | null;
+  content_url?: string | null;
+};
+
+export type VariantRenderBatch = {
+  project_id: string;
+  status: string;
+  items: VariantRenderItem[];
 };
 
 export type CapCutDraftExportArtifact = {
@@ -796,16 +1247,31 @@ export class CapcutDraftHandoffInProgressError extends Error {
   }
 }
 
+// 서버가 붙여 보낸 이유(`detail`). 예전에는 상태 코드만 남기고 버려서, 화면은
+// 무엇이 잘못됐든 한 문장으로만 말할 수 있었다 -- 켜지 않은 기능과 실패한 호출이
+// 같은 말을 했다. 기존 `catch`는 그대로 돈다: 여전히 Error다.
+export class ApiRequestError extends Error {
+  constructor(readonly detail: string | null, readonly status: number, path: string) {
+    super(`Request failed: ${path} (${status})`);
+    this.name = "ApiRequestError";
+  }
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
   if (!response.ok) {
-    if (response.status === 409) {
-      const payload = (await response.json()) as { latest_session?: T };
-      if (payload.latest_session !== undefined) {
-        throw new ApiConflictError(payload.latest_session, path);
-      }
+    // 본문은 한 번만 읽을 수 있다. 409 검사와 이유 읽기가 같은 읽기를 나눠 쓴다.
+    const body = await response.text().catch(() => "");
+    let payload: { latest_session?: T; detail?: unknown } | null = null;
+    try {
+      payload = body ? JSON.parse(body) as { latest_session?: T; detail?: unknown } : null;
+    } catch {
+      payload = null;
     }
-    throw new Error(`Request failed: ${path} (${response.status})`);
+    if (response.status === 409 && payload?.latest_session !== undefined) {
+      throw new ApiConflictError(payload.latest_session, path);
+    }
+    throw new ApiRequestError(typeof payload?.detail === "string" ? payload.detail : null, response.status, path);
   }
   // 204에는 본문이 없다. 읽으려 들면 성공한 요청이 실패로 보인다 -- 대화
   // 삭제가 실제로는 지워졌는데 화면은 "지우지 못했어요"를 띄웠다.
@@ -1225,6 +1691,100 @@ async function createDirectorProposalRequest(path: string, payload: DirectorProp
   return (await response.json()) as DirectorProposal;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseYujinEditingProposalResult(value: unknown): YujinEditingProposalResult {
+  if (!isRecord(value)) throw new Error("yujin_editing_proposal_invalid");
+  if (value.proposal === null) {
+    if ((value.status !== "clarification" && value.status !== "rejected") || typeof value.reply_text !== "string") {
+      throw new Error("yujin_editing_proposal_invalid");
+    }
+    return value as YujinEditingProposalResult;
+  }
+  const diff = value.diff;
+  if (
+    typeof value.proposal_id !== "string" || typeof value.revision_code !== "string"
+    || !Number.isSafeInteger(value.revision) || !Number.isSafeInteger(value.base_session_revision)
+    || !Number.isSafeInteger(value.asset_index_revision) || typeof value.source_session_id !== "string"
+    || typeof value.status !== "string" || !Array.isArray(value.target_segment_ids)
+    || !Array.isArray(value.source_script_segment_ids) || !Array.isArray(value.candidates)
+    || !isRecord(diff) || diff.proposal_mode !== "yujin_editing_candidate_v1"
+    || !Array.isArray(diff.operations) || !diff.operations.every((operation) => isRecord(operation) && typeof operation.intent === "string")
+    || !Array.isArray(diff.follow_up_questions) || diff.follow_up_questions.length > 3
+    || !diff.follow_up_questions.every((question) => typeof question === "string" && question.trim().length > 0)
+  ) {
+    throw new Error("yujin_editing_proposal_invalid");
+  }
+  return value as YujinEditingProposal;
+}
+
+async function preflightYujinEditingProposalRequest(path: string): Promise<YujinEditingProposalPreflight> {
+  const response = await fetch(path, { method: "POST", credentials: "same-origin", redirect: "error" });
+  const payload = await response.json().catch(() => null);
+  if (response.status === 409 && isRecord(payload) && payload.code === "editing_proposal_needs_refresh" && typeof payload.action === "string") {
+    return { status: "stale", code: "editing_proposal_needs_refresh", action: payload.action };
+  }
+  if (!response.ok) throw new Error(`Request failed: ${path} (${response.status})`);
+  if (!isRecord(payload) || typeof payload.proposal_id !== "string" || payload.status !== "ready" || !isRecord(payload.diff)) {
+    throw new Error("yujin_editing_proposal_preflight_invalid");
+  }
+  const proposal = parseYujinEditingProposalResult({
+    proposal_id: payload.proposal_id,
+    revision_code: "validated",
+    revision: 0,
+    base_session_revision: 0,
+    asset_index_revision: 0,
+    source_session_id: "validated",
+    target_segment_ids: [],
+    source_script_segment_ids: [],
+    status: "ready",
+    diff: payload.diff,
+    expires_at: null,
+    candidates: [],
+  });
+  if ("proposal" in proposal) throw new Error("yujin_editing_proposal_preflight_invalid");
+  return { proposal_id: payload.proposal_id, status: "ready", diff: proposal.diff };
+}
+
+async function createYujinEditingProposalRequest(path: string, payload: { instruction: string }): Promise<YujinEditingProposalResult> {
+  const result = await request<unknown>(path, {
+    method: "POST", credentials: "same-origin", redirect: "error",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return parseYujinEditingProposalResult(result);
+}
+
+function parseYujinEditingProposalPreviewResponse(status: number, payload: unknown): YujinEditingProposalPreview {
+  if (status === 409 && isRecord(payload) && payload.code === "editing_proposal_needs_refresh" && typeof payload.action === "string") {
+    return { status: "stale", action: payload.action };
+  }
+  if (
+    !isRecord(payload) || typeof payload.generation_id !== "string"
+    || (payload.status !== "pending" && payload.status !== "running" && payload.status !== "succeeded" && payload.status !== "failed")
+    || (payload.content_url !== null && typeof payload.content_url !== "string")
+    || (payload.error_message !== null && typeof payload.error_message !== "string")
+  ) {
+    throw new Error("yujin_editing_proposal_preview_invalid");
+  }
+  return { status: payload.status, generationId: payload.generation_id, contentUrl: payload.content_url, errorMessage: payload.error_message };
+}
+
+async function startYujinEditingProposalPreviewRequest(path: string): Promise<YujinEditingProposalPreview> {
+  const response = await fetch(path, { method: "POST", credentials: "same-origin", redirect: "error" });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok && response.status !== 409) throw new Error(`Request failed: ${path} (${response.status})`);
+  return parseYujinEditingProposalPreviewResponse(response.status, payload);
+}
+
+async function getYujinEditingProposalPreviewStatusRequest(path: string): Promise<YujinEditingProposalPreview> {
+  const response = await fetch(path, { method: "GET", credentials: "same-origin", redirect: "error" });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok && response.status !== 409) throw new Error(`Request failed: ${path} (${response.status})`);
+  return parseYujinEditingProposalPreviewResponse(response.status, payload);
+}
+
 async function openHermesRunEventsRequest(
   projectId: string,
   conversationId: string,
@@ -1471,9 +2031,32 @@ export const api = {
   updateDraftReadinessCandidateRange: (projectId: string, readinessId: string, asset_id: string, start_sec: number, end_sec: number, expected_revision: number) => request<DraftReadiness>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/${encodeURIComponent(readinessId)}/candidates/range`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ asset_id, start_sec, end_sec, expected_revision }) }),
   cancelDraftReadiness: (projectId: string, readinessId: string, expected_revision: number) => request<DraftReadiness>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/${encodeURIComponent(readinessId)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision }) }),
   createAtomicDraftBundle: (projectId: string, payload: AtomicDraftBundleRequest) => request<AtomicDraftBundle>(`/api/projects/${encodeURIComponent(projectId)}/draft-bundles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  // 캡컷 자동 캡션. 받아쓰기는 원래 있던 작업이고, 그 결과를 캡션으로 옮기는
+  // 자리(captions-from-transcript)가 2026-09-05에 생겼다.
+  startTranscription: (projectId: string, body: { narration_asset_id: string }) =>
+    request<{ job_id: string; status: string }>(`/api/projects/${encodeURIComponent(projectId)}/jobs/transcription`, { method: "POST", body: JSON.stringify(body) }),
+  applyCaptionsFromTranscript: (projectId: string, sessionId: string, body: { transcription_job_id: string; expected_revision: number }) =>
+    request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/captions-from-transcript`, { method: "POST", body: JSON.stringify(body) }),
   listDraftNarrationOptions: async (projectId: string): Promise<NarrationOption[]> => (await request<{ assets: NarrationOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration-options`)).assets,
   uploadDraftNarration: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration/upload`, { method: "POST", body: form }); },
+  /** 고를 수 있는 인포그래픽 결. **화면이 이름을 베껴 적지 않는다** -- 두 벌을
+   *  두면 한 벌이 조용히 낡는다. */
+  listInfographicStyles: () => request<{ styles: InfographicStyle[] }>("/api/library/infographic-styles"),
+  /** 인포그래픽 한 장. **한 판에 1~2분 걸린다**(2026-09-07 실측) -- 부르는 쪽이
+   *  기다리는 동안 화면에 상태를 말하고 두 번 눌리지 않게 막아야 한다. */
+  createInfographic: (payload: InfographicRequest) => request<InfographicResult>("/api/library/infographics", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  createSceneImage: (projectId: string, payload: SceneImageRequest) => request<SceneImage>(`/api/projects/${encodeURIComponent(projectId)}/scene-images`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  startSceneVideo: (projectId: string, payload: SceneVideoRequest) => request<SceneVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getSceneVideoStatus: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}`),
+  cancelSceneVideo: (projectId: string, jobId: string) => request<SceneVideoStatus>(`/api/projects/${encodeURIComponent(projectId)}/scene-videos/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
+  createScriptDraft: (projectId: string, payload: ScriptDraftRequest) => request<ScriptDraft>(`/api/projects/${encodeURIComponent(projectId)}/script-drafts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  createCreationRecommendationSet: (projectId: string, payload: CreationRecommendationSetRequest) => request<CreationRecommendationSet>(`/api/projects/${encodeURIComponent(projectId)}/creation-recommendations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   uploadDraftBroll: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<{ asset_id: string; asset_type: string; scan_status: string }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/broll/upload`, { method: "POST", body: form }); },
+  /** 올린 영상에서 말을 받아써 대본으로 돌려준다. 받아쓰기가 이 요청 **안에서**
+   *  끝나므로 10분짜리 영상이면 몇 분이 걸린다 -- 부르는 쪽이 기다리는 동안
+   *  화면에 상태를 말하고 두 번 눌리지 않게 막아야 한다. */
+  uploadSourceVideo: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<SourceVideoStart>(`/api/projects/${encodeURIComponent(projectId)}/source-video/upload`, { method: "POST", body: form }); },
+  uploadSourceVoice: (projectId: string, file: File) => { const form = new FormData(); form.append("file", file); return request<SourceVoiceStart>(`/api/projects/${encodeURIComponent(projectId)}/source-voice/upload`, { method: "POST", body: form }); },
   reloadDirectorSession: (projectId: string, sessionId: string) =>
     request<DirectorReloadState>(`/api/projects/${projectId}/director/sessions/${sessionId}/reload`),
   listDirectorConversations: (projectId: string) =>
@@ -1541,6 +2124,16 @@ export const api = {
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}`),
   preflightDirectorProposal: (projectId: string, proposalId: string) =>
     preflightDirectorProposalRequest(`/api/projects/${projectId}/director/proposals/${proposalId}/preflight`),
+  createYujinEditingProposal: (projectId: string, sessionId: string, payload: { instruction: string }) =>
+    createYujinEditingProposalRequest(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals`, payload),
+  preflightYujinEditingProposal: (projectId: string, sessionId: string, proposalId: string) =>
+    preflightYujinEditingProposalRequest(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/preflight`),
+  applyYujinEditingProposal: (projectId: string, sessionId: string, proposalId: string, payload: { expected_revision: number }) =>
+    request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/apply`, { method: "POST", credentials: "same-origin", redirect: "error", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  startYujinEditingProposalPreview: (projectId: string, sessionId: string, proposalId: string) =>
+    startYujinEditingProposalPreviewRequest(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/yujin-editing-proposals/${encodeURIComponent(proposalId)}/preview`),
+  getYujinEditingProposalPreviewStatus: (projectId: string, generationId: string) =>
+    getYujinEditingProposalPreviewStatusRequest(`/api/projects/${encodeURIComponent(projectId)}/proposal-previews/${encodeURIComponent(generationId)}`),
   refreshDirectorProposal: (projectId: string, proposalId: string) =>
     request<DirectorProposal>(`/api/projects/${projectId}/director/proposals/${proposalId}/refresh`, { method: "POST" }),
   getDirectorPreferences: (projectId: string) => request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`),
@@ -1548,12 +2141,6 @@ export const api = {
     request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   getMediaLibraryInstallState: () => request<MediaLibraryInstallState>("/api/media-library/install-state"),
   listMediaLibraryAssets: () => request<{ assets: MediaLibraryAsset[] }>("/api/media-library/assets"),
-  listMediaLibraryFavorites: () => request<{ asset_ids: string[] }>("/api/media-library/favorites"),
-  listRecentMediaLibraryAssetIds: () => request<{ asset_ids: string[] }>("/api/media-library/recent"),
-  setMediaLibraryFavorite: (libraryAssetId: string, enabled: boolean) =>
-    request<{ asset_ids: string[] }>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
-    }),
   listProjectMediaLibraryFavorites: (projectId: string) =>
     request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/favorites`),
   listProjectRecentMediaLibraryAssetIds: (projectId: string) =>
@@ -1566,12 +2153,89 @@ export const api = {
     request<AssetResponse>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
     }),
+  materializeLibraryAsset: (libraryAssetId: string, projectId: string) =>
+    request<{ asset: AssetResponse; reference: { reference_id: string; project_id: string; library_asset_id: string; materialized_asset_id?: string | null } }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),
+      }),
+  removeLibraryReference: (libraryAssetId: string, referenceId: string) =>
+    request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/references/${encodeURIComponent(referenceId)}`, { method: "DELETE" }),
   mediaLibraryPreviewUrl: (libraryAssetId: string) =>
     `/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
+  listLibraryAssets: (params: { mediaType?: LibraryMediaType; q?: string; includeTrashed?: boolean; limit?: number } = {}, signal?: AbortSignal) => {
+    const query = new URLSearchParams();
+    if (params.mediaType) query.set("media_type", params.mediaType);
+    if (params.q?.trim()) query.set("q", params.q.trim());
+    if (params.includeTrashed) query.set("include_trashed", "true");
+    if (params.limit !== undefined) query.set("limit", String(params.limit));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    return request<LibraryAssetListResponse>(`/api/library/assets${suffix}`, { signal });
+  },
+  proposeFootage: (payload: { library_asset_id: string; idempotency_key: string; analysis?: Record<string, unknown> }) =>
+    request<FootageProposal>("/api/footage/proposals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  interpretYujinFootageProposal: (proposalId: string, payload: { instruction: string }) =>
+    request<YujinFootageInterpretation>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/yujin/interpret`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  editFootageProposal: (proposalId: string, payload: { operation: "move_boundary" | "split" | "merge" | "exclude" | "confirm"; expected_revision: number; segment_id?: string; segment_ids?: string[]; boundary_sec?: number; split_sec?: number; fields?: Record<string, unknown> }) =>
+    request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  previewFootageProposal: (proposalId: string, payload: { expected_revision: number }) =>
+    request<FootageProposalPreview>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/preview`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  cancelFootageProposal: (proposalId: string) => request<{ status: "cancelled"; proposal_id: string; revision: number }>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/cancel`, { method: "POST" }),
+  approveFootageProposal: (proposalId: string, payload: { expected_revision: number; idempotency_key: string }) =>
+    request<FootageProposal>(`/api/footage/proposals/${encodeURIComponent(proposalId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  createFootageSequence: (payload: { source_id: string; name?: string; items: Array<{ source_segment_id: string; source_id?: string; item_order: number; start_sec?: number; end_sec?: number }>; idempotency_key?: string }) =>
+    request<FootageSequence>("/api/footage/sequences", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getFootageSequence: (sequenceId: string) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}`),
+  listApprovedFootageSequences: () => request<{ sequences: FootageSequence[] }>("/api/footage/sequences?status=approved"),
+  reorderFootageSequence: (sequenceId: string, payload: { expected_revision: number; item_ids: string[] }) =>
+    request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/reorder`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  previewFootageSequence: (sequenceId: string) => request<FootageSequencePreview>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/preview`, { method: "POST" }),
+  cancelFootageSequence: (sequenceId: string) => request<{ status: "cancelled"; sequence_id: string; revision: number }>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/cancel`, { method: "POST" }),
+  approveFootageSequence: (sequenceId: string, payload: { idempotency_key: string }) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  searchLibraryAssets: (query: string, mediaType: LibraryMediaType, signal?: AbortSignal) =>
+    request<{ matches: LibrarySearchMatch[]; semantic: boolean }>(
+      `/api/library/search?q=${encodeURIComponent(query)}&media_type=${encodeURIComponent(mediaType)}`,
+      { signal },
+    ),
+  ingestLibraryAssets: (files: File[], mediaType: LibraryMediaType, idempotencyKey?: string, signal?: AbortSignal) => {
+    const body = new FormData();
+    files.forEach((file) => body.append("files", file, file.name));
+    body.append("media_type", mediaType);
+    if (idempotencyKey) body.append("idempotency_key", idempotencyKey);
+    return request<LibraryIngestBatch>("/api/library/ingest", { method: "POST", body, signal });
+  },
+  getLibraryAssetUsage: (libraryAssetId: string, signal?: AbortSignal) =>
+    request<LibraryUsage>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/usage`, { signal }),
+  trashLibraryAsset: (libraryAssetId: string) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/trash`, { method: "POST" }),
+  restoreLibraryAsset: (libraryAssetId: string) =>
+    request<{ asset: LibraryAsset }>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/restore`, { method: "POST" }),
+  /**
+   * 잘못 갈린 종류를 고친다 (owner 결정 2026-09-07).
+   *
+   * 한 폴더에 넣은 것을 VideoBox가 내용을 보고 가르기 때문에, 고치는 이 길이
+   * 그 결정의 조건이었다. 음악↔효과음, 영상↔그림만 오갈 수 있다.
+   */
+  correctLibraryAssetMediaType: (libraryAssetId: string, mediaType: LibraryMediaType) =>
+    request<{ asset: LibraryAsset }>(
+      `/api/library/assets/${encodeURIComponent(libraryAssetId)}/media-type`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ media_type: mediaType }) },
+    ),
+  permanentDeleteLibraryAsset: (libraryAssetId: string) =>
+    request<void>(`/api/library/assets/${encodeURIComponent(libraryAssetId)}/permanent`, { method: "DELETE" }),
+  libraryAssetPreviewUrl: (libraryAssetId: string) =>
+    `/api/library/assets/${encodeURIComponent(libraryAssetId)}/preview`,
   listEditorPresets: (projectId: string) =>
     request<EditorPreset[]>(`/api/projects/${projectId}/editor-library/presets`),
   listEditorFavorites: (projectId: string) =>
     request<EditorFavorite[]>(`/api/projects/${projectId}/editor-library/favorites`),
+  // 백엔드에 이미 있던 저장 경로다. 부르는 화면이 없어서 프리셋 목록이 내장 둘로
+  // 고정돼 있었고, 그래서 즐겨찾기가 걸 수 있는 것이 하나도 없었다.
+  saveEditorPreset: (projectId: string, presetId: string, payload: Readonly<{ name: string; style: Record<string, unknown>; global_scope?: boolean }>) =>
+    request<EditorPreset>(`/api/projects/${projectId}/editor-library/presets/${presetId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   listRecentEditorPresetIds: (projectId: string) =>
     request<string[]>(`/api/projects/${projectId}/editor-library/recent-presets`),
   markRecentEditorPreset: (projectId: string, presetId: string) =>
@@ -1591,6 +2255,19 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
+  // 글꼴은 프로젝트가 아니라 사람에게 붙는다 -- 다음 영상은 보통 새 프로젝트다.
+  // 그래서 주소에 프로젝트가 없다. 저장한 포맷과 같은 자리다.
+  listCaptionFonts: () => request<CaptionFontLibrary>("/api/caption-fonts"),
+  toggleCaptionFontFavorite: (family: string, enabled: boolean) =>
+    request<{ favorites: string[] }>(`/api/caption-fonts/${encodeURIComponent(family)}/favorite`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+  markRecentCaptionFont: (family: string) =>
+    request<{ recents: string[] }>(`/api/caption-fonts/${encodeURIComponent(family)}/recent`, {
+      method: "PUT",
+    }),
   createProject: (payload: { name: string }) =>
     request<Project>("/api/projects", {
       method: "POST",
@@ -1605,7 +2282,12 @@ export const api = {
     );
     return payload.projects;
   },
-  getProject: (projectId: string) => request<Project>(`/api/projects/${projectId}`),
+  renameProject: (projectId: string, name: string) =>
+    request<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
   archiveProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/archive`, { method: "POST" }),
   restoreProject: (projectId: string) => request<Project>(`/api/projects/${encodeURIComponent(projectId)}/restore`, { method: "POST" }),
   deleteProjectPermanently: async (projectId: string): Promise<void> => {
@@ -1615,18 +2297,6 @@ export const api = {
     const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}?confirm=true`, { method: "DELETE" });
     if (!response.ok) throw new Error(`Request failed: /api/projects/${projectId} (${response.status})`);
   },
-  registerNarrationAudio: (projectId: string, payload: { source_path: string }) =>
-    request<RegisteredAsset>(`/api/projects/${projectId}/assets/narration-audio`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  registerScriptDocument: (projectId: string, payload: { source_path: string }) =>
-    request<RegisteredAsset>(`/api/projects/${projectId}/assets/script-document`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
   listMediaInboxAssets: async (): Promise<MediaInboxAsset[]> =>
     (await request<{ assets: MediaInboxAsset[] }>("/api/media-inbox/assets")).assets,
   importMediaInboxAsset: (projectId: string, filename: string) =>
@@ -1644,21 +2314,6 @@ export const api = {
     );
     return payload.assets;
   },
-  importBrollBatch: async (
-    projectId: string,
-    payload: BrollBatchImportRequest,
-  ): Promise<BrollBatchImportResponse> => {
-    return request<BrollBatchImportResponse>(
-      `/api/projects/${projectId}/assets/broll-video/batch`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      },
-    );
-  },
   listJobs: async (projectId: string): Promise<JobRecord[]> => {
     const payload = await request<{ jobs: JobRecord[] }>(`/api/projects/${projectId}/jobs`);
     return payload.jobs;
@@ -1667,6 +2322,8 @@ export const api = {
   // pins to the job dialog. One call keeps the home visit cheap.
   getHomeSummary: (projectId: string): Promise<HomeSummary> =>
     request<HomeSummary>(`/api/projects/${encodeURIComponent(projectId)}/home-summary`),
+  getProjectWorkspaceSummary: (projectId: string): Promise<ProjectWorkspaceSummary> =>
+    request<ProjectWorkspaceSummary>(`/api/projects/${encodeURIComponent(projectId)}/workspace-summary`),
   listAllJobs: async (): Promise<JobRecordWithProject[]> => {
     const payload = await request<{ jobs: JobRecordWithProject[] }>("/api/jobs");
     return payload.jobs;
@@ -1699,19 +2356,40 @@ export const api = {
     request<ReviewSnapshot>(`/api/projects/${projectId}/review-snapshots/${jobId}`),
   getReviewApproval: (projectId: string, timelineId: string) =>
     request<ReviewApproval>(`/api/projects/${projectId}/review-approvals/timelines/${timelineId}`),
-  approveReviewRecommendation: (
-    projectId: string,
-    jobId: string,
-    recommendationId: string,
-  ) =>
-    request<ReviewSnapshot>(
-      `/api/projects/${projectId}/review-snapshots/${jobId}/recommendations/${recommendationId}/approve`,
-      {
-        method: "POST",
-      },
-    ),
   getEditingSession: (projectId: string, sessionId: string) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}`),
+  /** 기획을 통과하지 않고 편집기를 여는 길(캡컷의 빈 편집판). */
+  createBlankEditingSession: (projectId: string) =>
+    request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/blank`, { method: "POST" }),
+  listOutputVariants: (projectId: string, sessionId: string) =>
+    request<{ variants: OutputVariant[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants?session_id=${encodeURIComponent(sessionId)}`,
+    ),
+  createOutputVariant: (projectId: string, payload: { source_session_id: string; kind: "vertical_highlight"; variant_id?: string }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  patchOutputVariant: (projectId: string, variantId: string, payload: { expected_variant_revision: number; patch: OutputVariantPatch }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  rebaseOutputVariant: (projectId: string, variantId: string, payload: { new_master_revision: number; changed_fields: string[] }) =>
+    request<{ variant: OutputVariant }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/rebase`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  materializeOutputVariant: (projectId: string, variantId: string, payload: { expected_master_session_revision?: number }) =>
+    request<{ materialization: { timeline_id: string; source_session_id: string; source_session_revision: number; source_variant_id: string; source_variant_revision: number } }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/materialize`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  startVariantRenders: (projectId: string, payload: { session_id: string; variant_ids?: string[] }) =>
+    request<VariantRenderBatch>(
+      `/api/projects/${encodeURIComponent(projectId)}/variant-renders`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
   getLatestEditingSession: async (projectId: string): Promise<EditingSession | null> => {
     const response = await fetch(`/api/projects/${projectId}/editing-sessions/latest`, undefined);
     if (response.status === 404) {
@@ -1729,10 +2407,10 @@ export const api = {
   retryMediaAnalysis: (projectId: string, analysisId: string) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/retry`, { method: "POST" }),
   reviewMediaAnalysis: (projectId: string, analysisId: string, tags: Record<string, string[]>) => request<MediaAnalysis>(`/api/projects/${projectId}/media-analysis/${analysisId}/review`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }) }),
   mediaAnalysisPreview: (projectId: string, assetId: string) => request<{ analysis_id: string; preview: unknown }>(`/api/projects/${projectId}/assets/${assetId}/analysis-preview`),
-  getEditingSessionFixedTimeline: (projectId: string, sessionId: string) =>
-    request<FixedTimeline>(`/api/projects/${projectId}/editing-sessions/${sessionId}/fixed-timeline`),
   getEditorPlaybackManifest: (projectId: string, sessionId: string) =>
     request<EditorPlaybackManifest>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/playback-manifest`),
+  getSceneTransitionSuggestions: (projectId: string, sessionId: string) =>
+    request<{ suggestions: SceneTransitionSuggestion[] }>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/transition-suggestions`),
   startExactPreview: (projectId: string, sessionId: string, payload: { expected_revision: number; start_sec?: number; end_sec?: number }) =>
     request<ExactPreviewResponse>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/exact-preview`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
@@ -1753,12 +2431,20 @@ export const api = {
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/bounds`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
+  updateEditingSessionSegmentRipplePlaybackRate: (projectId: string, sessionId: string, segmentId: string, payload: SegmentRipplePlaybackRateRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/ripple-playback-rate`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
   reorderEditingSessionSegments: (projectId: string, sessionId: string, payload: SegmentOrderRequest) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/segment-order`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
   updateEditingSessionTimelinePlacements: (projectId: string, sessionId: string, payload: TimelinePlacementPatchRequest) =>
     request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/timeline-placements`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  updateEditingSessionTrackStates: (projectId: string, sessionId: string, payload: TrackStatesPatchRequest) =>
+    request<EditingSession>(`/api/projects/${projectId}/editing-sessions/${sessionId}/track-states`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     }),
   undoEditingSession: (projectId: string, sessionId: string, expectedRevision: number) =>
@@ -1787,6 +2473,41 @@ export const api = {
       `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style`,
       { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
+  /** 자막을 고른 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다. */
+  translateEditingSessionCaptions: (
+    projectId: string,
+    sessionId: string,
+    payload: { expected_revision: number; language: string },
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-translations`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  /** 더빙을 **걸어 두기만** 한다. 장면당 13초라 긴 영상은 한 요청에 못 끝낸다
+   *  -- 스물세 장면이면 프록시가 끊는다. 진행은 아래 상태 조회로 본다. */
+  startEditingSessionDubbing: (
+    projectId: string,
+    sessionId: string,
+    payload: { expected_revision: number; language: string; voice_sample_asset_id?: string | null },
+  ) =>
+    request<DubbingStart>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/dubbing`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  getEditingSessionDubbingStatus: (projectId: string, sessionId: string, jobId: string) =>
+    request<DubbingStatus>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/dubbing/${jobId}`,
+    ),
+  /** 어느 자막으로 내보낼지 고른다. `language: null`이면 원본으로 되돌린다. */
+  updateEditingSessionCaptionLanguage: (
+    projectId: string,
+    sessionId: string,
+    payload: { expected_revision: number; language: string | null },
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-language`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
   updateEditingSessionCaption: (
     projectId: string,
     sessionId: string,
@@ -1811,6 +2532,22 @@ export const api = {
   ) =>
     request<EditingSession>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/cut-action`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  updateEditingSessionSegmentTransition: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: SegmentTransitionRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/transition`,
       {
         method: "PATCH",
         headers: {
@@ -1983,6 +2720,34 @@ export const api = {
         method: "DELETE",
       },
     ),
+  updateEditingSessionShapeOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    payload: ShapeOverlayRequest,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/shape-overlay`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    ),
+  removeEditingSessionShapeOverlay: (
+    projectId: string,
+    sessionId: string,
+    segmentId: string,
+    expectedRevision: number,
+  ) =>
+    request<EditingSession>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/segments/${segmentId}/shape-overlay?expected_revision=${expectedRevision}`,
+      {
+        method: "DELETE",
+      },
+    ),
   updateEditingSessionTtsReplacement: (
     projectId: string,
     sessionId: string,
@@ -2045,6 +2810,13 @@ export const api = {
     request<PartialRegenerationJob>(`/api/projects/${projectId}/partial-regenerations/${jobId}`),
   getSubtitle: (projectId: string, jobId: string) =>
     request<SubtitleJob>(`/api/projects/${projectId}/subtitles/${jobId}`),
+  // `getPreview`/`getExport`는 화면에서 안 부른다(2026-08-31 확인) -- 실제
+  // 폴링은 `listJobs`로 전부 처리한다. 그래도 지운 적이 있다가 되돌린 전례가
+  // 있다 -- 예전 정리에서 짝을 이루던 mutation 두 개는 뺐지만 이 둘은 읽기
+  // 전용 "호환 판독기"로 일부러 남겼고, `task22-parity-owners.test.ts`가
+  // 그걸 이름으로 고정해 지킨다. 다시 지우기 전에 그 테스트와 이유부터
+  // 확인할 것(위에서 빠진 그 mutation 이름을 여기 다시 적지 말 것 -- 같은
+  // 테스트가 main.tsx에서 닿는 소스에 그 이름이 나오는지도 스캔한다).
   getPreview: (projectId: string, jobId: string) =>
     request<PreviewJob>(`/api/projects/${projectId}/previews/${jobId}`),
   getExport: (projectId: string, jobId: string) =>
@@ -2065,11 +2837,57 @@ export const api = {
       body: payload,
     });
   },
+  startYoutubeReferenceStyleImport: (projectId: string, url: string) =>
+    request<YoutubeReferenceImportStart>(`/api/projects/${projectId}/reference-style/from-youtube`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    }),
+  getYoutubeReferenceStyleImportStatus: (projectId: string, jobId: string) =>
+    request<YoutubeReferenceImportStatus>(`/api/projects/${projectId}/reference-style/from-youtube/${jobId}`),
+  listNarrationAudio: async (projectId: string): Promise<AssetResponse[]> => {
+    const payload = await request<{ assets: AssetResponse[] }>(
+      `/api/projects/${projectId}/assets/narration-audio`,
+    );
+    return payload.assets;
+  },
+  uploadNarrationAudio: (projectId: string, file: File) => {
+    const payload = new FormData();
+    payload.append("file", file);
+    return request<AssetResponse>(`/api/projects/${projectId}/assets/narration-audio/upload`, {
+      method: "POST",
+      body: payload,
+    });
+  },
+  /** 목소리에 이름을 붙인다. 목소리가 여럿이면 이름이 없으면 고를 수가 없다. */
+  renameVoiceSample: (projectId: string, assetId: string, displayName: string) =>
+    request<AssetResponse>(`/api/projects/${projectId}/assets/voice-sample/${assetId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: displayName }),
+    }),
+  /** 잘못 녹음한 목소리를 지운다. */
+  deleteVoiceSample: (projectId: string, assetId: string) =>
+    request<void>(`/api/projects/${projectId}/assets/voice-sample/${assetId}`, { method: "DELETE" }),
   listVoiceSamples: async (projectId: string): Promise<AssetResponse[]> => {
     const payload = await request<{ assets: AssetResponse[] }>(
       `/api/projects/${projectId}/assets/voice-sample`,
     );
     return payload.assets;
+  },
+  /**
+   * `내 자산 > 내 목소리` -- 프로젝트를 넘나드는 목소리 한 목록.
+   *
+   * 이 화면은 **프로젝트를 고르기 전에** 열린다. `listVoiceSamples`를
+   * 프로젝트 수만큼 부르지 말 것 -- 프로젝트가 30개를 넘었고 계속 는다.
+   *
+   * 읽기 전용이다. 이름 바꾸기·지우기는 `renameVoiceSample`·`deleteVoiceSample`로
+   * 하고, 그때는 각 줄의 `project_id`를 함께 넘긴다.
+   */
+  listMyVoices: async (options?: { includeArchived?: boolean }): Promise<MyVoice[]> => {
+    const query = options?.includeArchived ? "?include_archived=true" : "";
+    const payload = await request<MyVoiceListResponse>(`/api/voices${query}`);
+    return payload.voices;
   },
   generateTtsCandidate: (projectId: string, payload: TtsCandidateRequest) =>
     request<TtsCandidateResponse>(`/api/projects/${projectId}/tts-candidates`, {
@@ -2102,6 +2920,8 @@ export const api = {
     request<AssetBrowserPreview>(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/browser-preview`, { credentials: "same-origin", redirect: "error", signal }),
   assetThumbnailUrl: (projectId: string, assetId: string) =>
     `/api/projects/${projectId}/assets/${assetId}/thumbnail`,
+  assetWaveformUrl: (projectId: string, assetId: string) =>
+    `/api/projects/${projectId}/assets/${assetId}/waveform`,
   startFinalRender: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(`/api/projects/${projectId}/jobs/final-render`, {
       method: "POST",
@@ -2112,6 +2932,27 @@ export const api = {
     }),
   getFinalRender: (projectId: string, jobId: string) =>
     request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}`),
+  // owner 요청(2026-08-28): 프리뷰 공유 링크 — 토큰 링크 방식 승인.
+  createPreviewShare: (projectId: string, jobId: string) =>
+    request<PreviewShareCreated>(`/api/projects/${projectId}/final-renders/${jobId}/share`, {
+      method: "POST",
+    }),
+  revokePreviewShare: (projectId: string, shareId: string) =>
+    request<{ revoked: boolean }>(`/api/projects/${projectId}/preview-shares/${shareId}/revoke`, {
+      method: "POST",
+    }),
+  listFormatTemplates: async (): Promise<FormatTemplate[]> =>
+    (await request<{ templates: FormatTemplate[] }>("/api/format-templates")).templates,
+  saveFormatTemplate: (projectId: string, payload: { name: string; session_id: string }) =>
+    request<FormatTemplate>(`/api/projects/${projectId}/format-templates`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
+  // 적용은 자막 모양만 바꾼다. 화면 크기·음악은 기록으로만 보여 준다 —
+  // 크기를 바꾸는 검증된 경로가 없어서 `keep_output_size` 옵션을 약속에서 뺐다.
+  recordFinalRenderVerdict: (projectId: string, jobId: string, payload: { verdict: "good" | "bad"; note?: string }) =>
+    request<FinalRenderJob>(`/api/projects/${projectId}/final-renders/${jobId}/verdict`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    }),
   startCapcutDraftExport: (projectId: string, payload: OutputJobRequest) =>
     request<{ job_id: string; status: string }>(
       `/api/projects/${projectId}/jobs/capcut-draft-export`,

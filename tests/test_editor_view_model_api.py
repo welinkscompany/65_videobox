@@ -61,7 +61,7 @@ def test_explicit_session_manifest_has_authoritative_typed_editor_contract(tmp_p
     assert body["tracks"][0]["track_type"] == "narration"
     assert body["tracks"][0]["clips"][0]["media_controls"] == {"volume": 0.8}
     assert body["tracks"][1]["clips"][0]["expected_content_sha256"] == "b" * 64
-    assert body["captions"] == [{"segment_id": "segment-1", "caption_id": "caption-segment-1-0", "placement_id": "caption:caption-segment-1-0", "text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "style": {"font_family": "Arial", "font_size_px": 48, "text_color": "#FFFFFFFF", "outline_color": "#000000FF", "outline_width_px": 3, "background_color": "#00000000", "position_x_percent": 50, "position_y_percent": 88, "horizontal_align": "center", "safe_area_enabled": True, "shadow_blur_px": 0}}]
+    assert body["captions"] == [{"segment_id": "segment-1", "caption_id": "caption-segment-1-0", "placement_id": "caption:caption-segment-1-0", "text": "안녕하세요", "start_sec": 0.0, "end_sec": 2.0, "style": {"font_family": "Pretendard", "font_size_px": 48, "text_color": "#FFFFFFFF", "outline_color": "#000000FF", "outline_width_px": 3, "background_color": "#00000000", "position_x_percent": 50, "position_y_percent": 88, "horizontal_align": "center", "safe_area_enabled": True, "shadow_blur_px": 0, "bold": False, "italic": False, "letter_spacing_px": 0}}]
     assert body["gap_slots"][0]["gap_id"] == "gap-1"
     assert body["source_status"] == {"status": "current", "source_session_id": session_id, "source_session_revision": 1}
     assert body["audition"]["asset_urls"]["asset-narration-1"].endswith("/assets/asset-narration-1/content")
@@ -101,6 +101,12 @@ def test_caption_style_patch_projects_exact_segment_style_into_playback_manifest
         "horizontal_align": "left",
         "safe_area_enabled": False,
         "shadow_blur_px": 6,
+        # 2026-09-03 owner 지적으로 더한 칸이다. 기본값이 아닌 값을 써서
+        # 왕복(저장 -> 편집본 -> 완성 계획서 읽기 전부)이 실제로 이 값을
+        # 옮기는지 재게 한다 -- 전부 기본값이면 빠뜨려도 시험이 못 잡는다.
+        "bold": True,
+        "italic": True,
+        "letter_spacing_px": 12,
     }
 
     saved = client.patch(
@@ -215,6 +221,44 @@ def test_overlay_patches_roundtrip_through_content_windows_and_typed_manifest(tm
     assert all(track["track_type"] != "overlay" for track in final_manifest.json()["tracks"])
 
 
+def test_shape_overlay_patch_reaches_the_typed_playback_manifest(tmp_path) -> None:
+    """저장된 정지 도형은 화면(manifest)에도 보여야 한다.
+
+    manifest의 오버레이 허용 목록에 빠지면 저장은 되는데 편집 화면에는 영영
+    나타나지 않는다 -- "부품은 있는데 부르는 자리가 없다"의 재판이다.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/segment-1/shape-overlay",
+        json={
+            "shape": "underline",
+            "vertical": "bottom",
+            "horizontal": "center",
+            "size": "large",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+
+    manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest",
+    )
+    assert manifest.status_code == 200
+    shape_clip = next(
+        clip
+        for track in manifest.json()["tracks"]
+        if track["track_type"] == "overlay"
+        for clip in track["clips"]
+    )
+    assert shape_clip["overlay_type"] == "shape_overlay"
+    assert shape_clip["overlay_payload"]["shape"] == "underline"
+    assert shape_clip["overlay_payload"]["vertical"] == "bottom"
+    assert shape_clip["overlay_payload"]["horizontal"] == "center"
+    assert shape_clip["overlay_payload"]["size"] == "large"
+
+
 def test_manifest_never_substitutes_latest_session_and_is_project_isolated(tmp_path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project_id, other_project_id, session_id = _manifest_fixture(client, tmp_path)
@@ -241,6 +285,113 @@ def test_timeline_placement_patch_reappears_in_the_authoritative_manifest(tmp_pa
     assert broll["placement_id"] == "broll:clip-broll-1"
     assert broll["start_sec"] == 0.5005
     assert broll["end_sec"] == 1.5015
+
+
+def test_a_hidden_track_stays_in_the_manifest_but_leaves_the_render(tmp_path) -> None:
+    # 캡컷 타임라인의 눈(`capcut-observed` 기록 §2). 숨긴 트랙은 **타임라인에는
+    # 남아야** 한다 -- 목록에서 사라지면 화면에서 다시 켤 방법이 없다. 빠지는
+    # 것은 결과물 쪽이다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"broll": {"hidden": True}}},
+    )
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["session_revision"] == 2
+    store = LocalProjectStore(tmp_path)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    assert session["track_states"] == {"broll": {"hidden": True}}
+    assert manifest.status_code == 200
+    body = manifest.json()
+    # 숨겼어도 트랙은 목록에 남는다 -- 사라지면 화면에서 다시 켤 수 없다.
+    assert any(track["track_type"] == "broll" for track in body["tracks"])
+    # 되읽는 자리는 `track_states` 하나다. 트랙마다 싣지 않는다 -- 자막 트랙은
+    # 이 목록에 아예 안 실려서, 두 출처를 두면 자막만 못 읽는 상태가 된다.
+    assert body["track_states"] == {"broll": {"hidden": True}}
+
+    # 결과물에서는 빠진다 -- 세션이 만드는 합성계획에 그 트랙이 없다.
+    from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+    timeline = store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=session, project_id=project_id)
+    assert "broll" not in {item.track_type for item in CompositionPlan.from_timeline(timeline=materialized).items}
+
+
+def test_track_states_patch_mutes_without_removing_the_clip(tmp_path) -> None:
+    # 음소거는 소리만 끈다. 클립이 사라지면 그림까지 사라진다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"broll": {"muted": True}}},
+    )
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert saved.status_code == 200, saved.text
+    broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")
+    assert broll["clips"], "음소거가 클립을 지우면 안 된다"
+
+
+def test_track_states_patch_refuses_a_flag_that_would_do_nothing(tmp_path) -> None:
+    # 자막 트랙 음소거처럼 뜻이 없는 조합은 조용히 버리지 않고 거절한다 --
+    # 조용히 버리면 "켰고 저장도 됐는데 결과는 그대로"가 된다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"caption": {"muted": True}}},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "track_states_muted_unsupported" in response.text
+
+
+def test_a_chosen_look_comes_back_out_of_the_manifest(tmp_path) -> None:
+    # 색감을 고르면 화면이 그것을 **되읽어야** 한다. 응답 모델이
+    # `extra="forbid"`라 `filter` 칸이 없으면 조용히 빠지는 게 아니라 응답이
+    # 통째로 터진다 -- 그래서 여기서 실물 응답으로 확인한다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+    store = LocalProjectStore(tmp_path)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    timeline_id = str(session["timeline_id"])
+    timeline = store.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+    # 실제 저장 경로와 같게 정규화해서 넣는다 -- 재생 목록은 검사기가 아니라
+    # 저장된 것을 그대로 싣는 자리다.
+    from videobox_core_engine.media_controls import normalize_media_controls
+    stored = normalize_media_controls({"fit": "crop", "filter": {"type": "vintage"}}, media_kind="broll", duration_sec=2.0)
+    for track in timeline["tracks"]:
+        if track["track_type"] == "broll":
+            track["clips"][0]["media_controls"] = stored
+    store.update_timeline_run(project_id=project_id, timeline_id=timeline_id, timeline_payload=timeline)
+
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert manifest.status_code == 200, manifest.text
+    broll = next(track for track in manifest.json()["tracks"] if track["track_type"] == "broll")
+    assert broll["clips"][0]["media_controls"]["filter"] == {"type": "vintage", "chosen_by": "owner"}
+
+
+def test_track_states_patch_refuses_a_misspelled_flag_instead_of_saving_nothing(tmp_path) -> None:
+    # pydantic 기본값이면 오타 난 키가 조용히 버려져 빈 dict로 코어에 닿는다.
+    # 그러면 코어의 "뜻 없는 값은 거절한다"가 안 걸리고, 200에 revision까지
+    # 올라가는데 저장된 건 없다 -- 저장했다고 믿게 만드는 가장 나쁜 실패다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    response = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"broll": {"hiden": True}}},
+    )
+
+    assert response.status_code == 422, response.text
+    session = LocalProjectStore(tmp_path).get_editing_session(project_id=project_id, session_id=session_id)
+    assert session["session_revision"] == 1, "거절했으면 편집본이 앞으로 가면 안 된다"
 
 
 def test_manifest_marks_old_timeline_source_stale_and_separates_stale_final(tmp_path) -> None:

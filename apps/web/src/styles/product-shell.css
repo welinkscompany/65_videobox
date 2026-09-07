@@ -1,38 +1,422 @@
-body:has(.vb-product-shell) { margin:0; }
-.vb-product-shell { min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); }
-/* The canonical Sidebar uses utility classes for its desktop gap. Keep a small
-   product-owned fallback so the port remains visible when Tailwind's scanner
-   has not emitted the responsive utility in a Vite development build. */
-@media (min-width: 768px) {
-  [data-slot="sidebar-wrapper"] > [data-slot="sidebar"] { display:block !important; }
-  [data-slot="sidebar-wrapper"] > [data-slot="sidebar"] > [data-slot="sidebar-container"].vb-product-sidebar { display:flex !important; }
-  .vb-product-shell > [data-slot="sidebar"][data-state="collapsed"] { flex:0 0 4rem !important; width:4rem !important; }
+body:has(.vb-product-shell) { margin: 0; }
+/* 띠 높이를 값 하나로 둔다. 편집판이 `100svh`에서 이걸 빼서 제 높이를 잡는데,
+   좁은 화면에서 띠가 두 줄이 되면 숫자를 박아 둔 쪽이 어긋난다 -- 실제로 375px에서
+   페이지가 32px 밀려났다(2026-08-21 재서 확인). */
+/* `font-size`를 여기서 못박는 이유: 캡컷은 화면 대부분이 14px인데 우리는 아무도
+   크기를 안 정한 글자가 브라우저 기본 16px로 나왔다(2026-09-04 실측). 척도를
+   캡컷에 맞추면서 기본값도 본문 크기로 내린다 -- 이걸 빼면 토큰만 작아지고
+   상속으로 그려지는 글자는 그대로 커서 화면이 더 어긋난다. */
+.vb-product-shell { --vb-top-bar-h: 4.25rem; min-width:0; width:100%; flex:1; min-height: 100svh; display: flex; flex-direction: column; background: var(--vb-panel); color: var(--vb-text); font-family:var(--vb-font); font-size: var(--vb-text-md); }
+[data-vb-desktop-shell] { min-width:0; box-sizing:border-box; overflow-x:hidden; }
+@media (min-width: 1024px) { [data-vb-desktop-shell] { min-width:1280px; min-height:800px; height:100vh; overflow:hidden; } }
+.vb-product-main { min-width:0; min-height:0; flex:1; overflow:hidden; }.vb-product-content { width:100%; max-width:1200px; min-height:0; margin: 0 auto; padding: var(--vb-space-7) clamp(var(--vb-space-4),3vw,var(--vb-space-8)); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }
+/* 스크롤은 여기, 폭이 안 잡힌 `.vb-product-main`에서 한다 -- `.vb-product-content`가
+   직접 스크롤하면(예전처럼) 스크롤바가 1200px짜리 가운데 정렬 상자의 오른쪽
+   끝에 붙어서, 창이 그보다 넓을 때 스크롤바와 진짜 창 가장자리 사이에 빈
+   칸이 생긴다(2026-08-30, owner가 설치형 셸에서 직접 보고 발견 -- 브라우저
+   탭에서도 창 폭이 1200px보다 넓으면 똑같이 재현됨, 셸만의 문제가 아니었다).
+   편집기 화면은 예외다 -- 그 화면은 폭이 안 잡히고(`max-width:none`) 자기
+   안에서 따로 스크롤하므로 그대로 `overflow:hidden`으로 둔다. */
+.vb-product-main:not(:has(.vb-editor-workbench)) { overflow-y:auto; }
+.vb-product-main, .vb-product-content { min-width:0; box-sizing:border-box; }
+@media (min-width:1600px) { .vb-product-content { max-width:1600px; } }
+.vb-dialog-content { width:min(35rem, calc(100vw - 2rem)); max-width:calc(100vw - 2rem); max-height:70vh; overflow-y:auto; box-sizing:border-box; padding: var(--vb-space-6); }
+.vb-job-dialog { width:100%; box-sizing:border-box; }.vb-job-row { overflow-wrap:anywhere; }.vb-job-row > span, .vb-job-row > strong { min-width:0; }
+.vb-eyebrow { color:var(--vb-accent); font-size: var(--vb-text-sm); font-weight:700; margin: 0 0 var(--vb-space-2); }.vb-home h1, .vb-settings h1 { margin: var(--vb-space-1) 0 var(--vb-space-2); font-size: clamp(var(--vb-text-2xl),3vw,var(--vb-text-3xl)); letter-spacing:-.04em; }.vb-home>div:first-child>p:not(.vb-eyebrow), .vb-settings>p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }.vb-home-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap: var(--vb-space-4); margin-top: var(--vb-space-7); }.vb-home-grid [data-slot=card] { display:flex; min-height:14rem; justify-content:space-between; border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); }.vb-home-grid [data-slot=card-header], .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-5); }.vb-home-grid [data-slot=card-title] { font-weight:700; }.vb-home-grid [data-slot=card-description] { margin-top: var(--vb-space-2); color:var(--vb-muted); line-height:1.55; }.vb-product-shell [data-slot=button][data-variant="default"] { border:0; border-radius: var(--vb-radius-md); background:var(--primary); color:var(--primary-foreground); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; font-weight:650; }.vb-product-shell [data-slot=button][data-variant="outline"] { border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); color:var(--vb-text); padding: var(--vb-space-2) var(--vb-space-3); cursor:pointer; font:inherit; }.vb-home-chat { margin-top: var(--vb-space-7); max-width:52rem; border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); padding: var(--vb-space-5); }.vb-home-chat h2 { margin: 0 0 var(--vb-space-3); font-size: var(--vb-text-lg); font-weight:700; }.vb-home-chat label { display:block; margin: var(--vb-space-3) 0 var(--vb-space-1); font-size: var(--vb-text-md); color:var(--vb-muted); }.vb-home-chat textarea { width:100%; min-height:4.5rem; border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); padding: var(--vb-space-2) var(--vb-space-3); font:inherit; background:var(--vb-canvas); color:var(--vb-text); }.vb-home-chat-history { display:flex; flex-direction:column; gap: var(--vb-space-2); max-height:16rem; overflow-y:auto; }.vb-home-chat-history p { margin: 0; line-height:1.55; }.vb-home-chat-history article p strong { margin-right: var(--vb-space-2); color:var(--vb-accent); }.vb-home-chat > p { color:var(--vb-muted); margin: 0; }.vb-product-shell[data-compact="true"] .vb-product-content { padding: var(--vb-space-3) var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid { gap: var(--vb-space-2); margin-top: var(--vb-space-4); }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card] { min-height:10rem; }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-header], .vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-content] { padding: var(--vb-space-3); }.vb-product-shell[data-reduced-motion="true"] *, .vb-product-shell[data-reduced-motion="true"] *::before, .vb-product-shell[data-reduced-motion="true"] *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }.vb-settings { max-width:42rem; }.vb-setting-control { display:flex; align-items:center; gap: var(--vb-space-2); margin-top: var(--vb-space-4); border:1px solid var(--vb-border); background:var(--vb-panel); border-radius: var(--vb-radius-md); padding: var(--vb-space-4); }.vb-setting-note { color:var(--vb-muted); font-size: var(--vb-text-md); }
+/* 목소리 화면은 설정에서 자산 단계로 옮겨 왔다. 설정에서는 `.vb-settings`가 42rem으로
+   폭을 잡아 줬는데 자산 화면은 1440px까지 넓어서, 입력과 선택 상자가 화면 끝까지
+   늘어나 읽기 어려웠다. 여기서 같은 폭을 다시 잡아 준다. */
+.vb-voice-workspace { max-width:42rem; }
+/* 페이지 여백과 최대 폭은 **껍데기(`.vb-product-content`)가 정한다.** 여기서 다시
+   걸면 두 벌이 겹쳐 제목이 왼쪽에서 80px, 위에서 91px까지 밀렸다 -- 같은 값
+   (32px·40px)이 두 번 걸린 것이다(2026-08-19 재서 확인). 화면마다 다시 적지 않는다. */
+.vb-catalog { min-width:0; }
+.vb-catalog h1 { margin: var(--vb-space-1) 0 var(--vb-space-2); font-size: clamp(var(--vb-text-2xl),3vw,var(--vb-text-3xl)); letter-spacing:-.04em; }
+.vb-catalog > p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }
+.vb-catalog-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(14rem,1fr)); gap: var(--vb-space-4); margin-top: var(--vb-space-7); }
+.vb-catalog-card { height:auto; min-height:6rem; padding: var(--vb-space-5); border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); font-weight:700; font-size: var(--vb-text-lg); white-space:normal; transition:border-color .15s ease, box-shadow .15s ease; }
+.vb-catalog-card:hover { border-color:var(--vb-accent); box-shadow:0 2px 6px color-mix(in srgb, var(--vb-text) 8%, transparent); background:var(--vb-panel); }
+/* 대표 이미지가 있는 카드와 없는 카드가 섞여 높이가 들쭉날쭉했다(2026-08-17 owner
+   지적). 이미지 자리를 늘 같은 크기로 잡고, 단추를 아래로 밀어 줄을 맞춘다. */
+.vb-catalog-card { display:flex; flex-direction:column; }
+.vb-catalog-card img { width:100%; height:9rem; object-fit:cover; border-radius: var(--vb-radius-md); background:color-mix(in srgb, var(--vb-text) 6%, transparent); }
+.vb-catalog-card > [data-slot=button], .vb-catalog-card > a { margin-top: auto; }
+.vb-catalog-card__finished { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); font-weight:500; }
+/* 캡컷 카드의 `용량 | 길이` 자리. 상태·날짜·완성본 수 세 줄을 한 줄로 합쳤다.
+   조용해야 한다 -- 이름과 다음 할 일 단추가 카드에서 눈에 들어와야 한다. */
+.vb-catalog-card__meta { margin: var(--vb-space-1) 0; color:var(--vb-muted); font-size: var(--vb-text-sm); }
+.vb-catalog-empty { margin: var(--vb-space-4) 0 0; color:var(--vb-muted); font-size: var(--vb-text-md); }
+/* 캡컷 홈의 프로젝트 목록 검색·보기전환(2026-08-22, `capcut-observed` 기록 §1). */
+.vb-catalog-controls { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-4); margin-top: var(--vb-space-4); flex-wrap:wrap; }
+.vb-catalog-search { display:block; max-width: 20rem; flex:1 1 16rem; }
+.vb-catalog-view-toggle { display:flex; gap: var(--vb-space-2); flex:0 0 auto; }
+/* **줄 보기.** 카드 컴포넌트는 그대로 두고 배치만 바꾼다 -- 새 카드 모양을 따로
+   만들면 관리 단추 접기 같은 동작을 두 벌 유지해야 한다. `.vb-catalog-card`는
+   기본이 세로 flex이므로 여기서만 가로로 뒤집는다. */
+.vb-catalog-grid--list { grid-template-columns: 1fr; gap: var(--vb-space-2); }
+.vb-catalog-grid--list .vb-catalog-card { flex-direction:row; align-items:center; gap: var(--vb-space-4); min-height:0; padding: var(--vb-space-3) var(--vb-space-4); }
+.vb-catalog-grid--list .vb-catalog-card img { width:3.5rem; height:3.5rem; flex:0 0 auto; }
+.vb-catalog-grid--list .vb-catalog-card h2 { margin:0; }
+.vb-catalog-grid--list .vb-catalog-card__meta { margin:0; }
+.vb-catalog-grid--list .vb-catalog-card > [data-slot=button], .vb-catalog-grid--list .vb-catalog-card > a { margin-top:0; margin-left:auto; flex:0 0 auto; }
+.vb-catalog-grid--list .vb-catalog-card__more { flex:0 0 auto; }
+.vb-catalog-grid--list .vb-catalog-card__manage { margin-top:0; flex:0 0 auto; }
+/* 보관·영구 삭제는 프로젝트를 여는 일보다 훨씬 드물게 하는 일이다. 카드에서
+   가장 눈에 띄는 자리는 `편집기 열기`와 다음 할 일이 계속 갖고, 관리는 그
+   아래 한 줄에 작게 둔다. 자리를 나눠 무게도 나눈다. */
+/* `display:flex`는 브라우저 기본 `[hidden] { display:none }`을 이긴다. 그래서
+   `hidden`을 붙여도 화면에서는 그대로 보인다 -- 2026-08-22에 이걸로 한 번 속았다.
+   시험은 jsdom이라 CSS를 안 그리므로 통과했고, **화면을 캡처해서야 보였다.**
+   `.클래스[hidden]`은 `.클래스`보다 선택자가 한 겹 더 있어서 세기로 이긴다.
+   순서가 아니라 세기다 -- 아래로 옮겨도 결과는 같다. */
+.vb-catalog-card__manage[hidden] { display:none; }
+.vb-catalog-card__manage { display:flex; flex-wrap:wrap; gap: var(--vb-space-2); margin-top: var(--vb-space-2); }
+.vb-catalog-card__manage [data-slot=button] { font-size: var(--vb-text-sm); font-weight:500; height:auto; padding: var(--vb-space-1) var(--vb-space-3); }
+/* 보관함은 목록 아래에 접어 둔다. 늘 펴 두면 살아 있는 프로젝트와 보관한
+   프로젝트가 한 화면에서 섞여 보인다. */
+.vb-catalog-archive { margin-top: var(--vb-space-7); display:grid; gap: var(--vb-space-3); justify-items:start; }
+.vb-catalog-archive-list { display:grid; gap: var(--vb-space-2); width:100%; max-width:32rem; }
+.vb-catalog-archive-list p { margin:0; color:var(--vb-muted); font-size: var(--vb-text-sm); }
+.vb-catalog-archive-row { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); padding: var(--vb-space-2) var(--vb-space-3); border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); }
+/* 카드 제목은 편집기로 가는 링크인데 규칙이 없어서 브라우저 기본 파란 밑줄이
+   나왔다 -- 승인 팔레트에 없는 색이다. 색을 바꾸는 게 아니라, 팔레트가
+   닿지 않던 자리에 입힌다. */
+.vb-catalog-card h2 a { color:var(--vb-text); text-decoration:none; }
+.vb-catalog-card h2 a:hover, .vb-catalog-card h2 a:focus-visible { color:var(--vb-accent); text-decoration:underline; }
+.vb-home-next { display:grid; grid-template-columns:minmax(0,1fr) auto; gap: var(--vb-space-3) var(--vb-space-5); align-items:center; margin-top: var(--vb-space-6); padding: var(--vb-space-4) var(--vb-space-5); border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); }
+.vb-home-next .vb-eyebrow { margin: 0; }
+.vb-action-link { display:inline-flex; width:max-content; align-items:center; color:var(--vb-accent); font-weight:650; text-decoration:underline; text-underline-offset:.18em; }
+.vb-catalog [data-slot=button][data-variant="outline"] { border-color:var(--vb-border); }
+/* **캡컷 홈의 `+ 프로젝트 만들기` 띠**(owner 지시 2026-08-22: "캡컷과 완전 비슷하게").
+   캡컷은 홈 가운데 맨 위에 이 단추 하나를 가로로 꽉 차게 둔다. 다음에 할 일이
+   하나로 보이는 것이 요점이다 -- owner가 우리 화면에서 막혔던 지점의 정반대다.
+
+   **2026-08-22의 "카드 여러 개를 두지 않는다"는 이 단추 자체에는 여전히
+   맞다** -- 이야기부터 시작하는 대표 진입로는 하나뿐이다. 다만 그 판단은
+   "우리 갈래가 전부 같은 화면(이야기 정하기)으로 간다"는 전제 위에 있었다.
+   **2026-09-05에 다시 하나가 됐다**(owner 승인, `2026-09-05-one-way-to-start`).
+   한동안 그 옆에 지름길 카드 둘을 뒀는데, 재어 보니 셋이 전부 같은 화면
+   (편집기)으로 가고 있었다 -- 진짜 지름길이 아니었다. */
+.vb-catalog-create {
+  margin-top: var(--vb-space-6);
+  width: 100%;
+  min-height: 5rem;
+  font-size: var(--vb-text-lg);
+  font-weight: 600;
+  border-radius: var(--vb-radius-md);
 }
-.vb-product-sidebar { width: 16rem; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--vb-border); background: var(--vb-canvas); padding: 1rem; transition: width .2s ease; }
-.is-collapsed .vb-product-sidebar { width: 4.5rem; overflow: hidden; }.is-collapsed .vb-product-sidebar span, .is-collapsed .vb-product-sidebar p, .is-collapsed .vb-product-sidebar small { display:none; }
-.vb-shell-brand { display:flex; align-items:center; gap:.55rem; font-weight:750; font-size:1.1rem; padding:.5rem; }.vb-shell-brand svg { color:var(--vb-accent); }
-.vb-project-switcher { border:1px solid var(--vb-border); background:var(--vb-panel); border-radius:.75rem; padding:.6rem; margin:1rem 0; }.vb-project-switcher p { margin:0 0 .4rem; color:var(--vb-muted); font-size:.75rem; }.vb-project-switcher button { width:100%; border:0; border-radius:.45rem; background:transparent; text-align:left; padding:.45rem; color:inherit; cursor:pointer; }.vb-project-switcher button[aria-pressed=true] { background:var(--accent); color:var(--vb-accent); font-weight:650; }
-.vb-product-nav [data-sidebar="menu"] { list-style:none; margin:0; padding:0; }.vb-product-nav [data-sidebar="menu-button"] { width:100%; border:0; border-radius:.55rem; padding:.6rem .7rem; color:var(--vb-muted); background:transparent; cursor:pointer; text-align:left; font:inherit; }.vb-product-nav [data-sidebar="menu-button"][data-active="true"] { background:var(--accent); color:var(--vb-accent); font-weight:650; }.vb-sidebar-footer { margin-top:auto; display:grid; gap:.35rem; }.vb-sidebar-footer button { border:0; background:transparent; cursor:pointer; text-align:left; font:inherit; }.vb-sidebar-footer small { color:var(--vb-muted); padding:.2rem .7rem; }
-.vb-product-main { min-width:0; flex:1; }.vb-product-header { position:sticky; top:0; z-index:5; height:4.25rem; display:flex; align-items:center; gap:.85rem; padding:0 1.5rem; border-bottom:1px solid var(--vb-border); background:color-mix(in srgb, var(--vb-panel) 92%, transparent); backdrop-filter:blur(12px); }.vb-product-header div { flex:1; }.vb-product-header p { margin:0; color:var(--vb-muted); font-size:.75rem; }.vb-product-header strong { font-size:.9rem; }.vb-product-content { max-width:1200px; margin:0 auto; padding:2rem clamp(1rem,3vw,2.5rem); }.vb-product-content:has(.vb-editor-workbench) { width:100%; max-width:none; box-sizing:border-box; }.vb-mobile-menu { display:none; }
-.vb-eyebrow { color:var(--vb-accent); font-size:.8rem; font-weight:700; margin:0 0 .5rem; }.vb-home h1, .vb-settings h1 { margin:.1rem 0 .5rem; font-size:clamp(1.65rem,3vw,2.35rem); letter-spacing:-.04em; }.vb-home>div:first-child>p:not(.vb-eyebrow), .vb-settings>p:not(.vb-eyebrow) { color:var(--vb-muted); max-width:40rem; line-height:1.6; }.vb-home-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1rem; margin-top:2rem; }.vb-home-grid [data-slot=card] { display:flex; min-height:14rem; justify-content:space-between; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 4%, transparent); }.vb-home-grid [data-slot=card-header], .vb-home-grid [data-slot=card-content] { padding:1.25rem; }.vb-home-grid [data-slot=card-title] { font-weight:700; }.vb-home-grid [data-slot=card-description] { margin-top:.5rem; color:var(--vb-muted); line-height:1.55; }.vb-product-shell [data-slot=button][data-variant="default"] { border:0; border-radius:.55rem; background:var(--primary); color:var(--primary-foreground); padding:.55rem .8rem; cursor:pointer; font:inherit; font-weight:650; }.vb-product-shell [data-slot=button][data-variant="outline"] { border:1px solid var(--vb-border); border-radius:.55rem; background:var(--vb-panel); color:var(--vb-text); padding:.5rem .75rem; cursor:pointer; font:inherit; }.vb-home-chat { margin-top:2rem; max-width:52rem; border:1px solid var(--vb-border); border-radius:1rem; background:var(--vb-panel); padding:1.25rem; }.vb-home-chat h2 { margin:0 0 .75rem; font-size:1.05rem; font-weight:700; }.vb-home-chat label { display:block; margin:.75rem 0 .35rem; font-size:.9rem; color:var(--vb-muted); }.vb-home-chat textarea { width:100%; min-height:4.5rem; border:1px solid var(--vb-border); border-radius:.6rem; padding:.6rem .7rem; font:inherit; background:var(--vb-canvas); color:var(--vb-text); }.vb-home-chat-history { display:flex; flex-direction:column; gap:.6rem; max-height:16rem; overflow-y:auto; }.vb-home-chat-history p { margin:0; line-height:1.55; }.vb-home-chat-history article p strong { margin-right:.4rem; color:var(--vb-accent); }.vb-home-chat > p { color:var(--vb-muted); margin:0; }.vb-product-shell[data-compact="true"] .vb-product-content { padding:.75rem 1rem; }.vb-product-shell[data-compact="true"] .vb-home-grid { gap:.6rem; margin-top:1rem; }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card] { min-height:10rem; }.vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-header], .vb-product-shell[data-compact="true"] .vb-home-grid [data-slot=card-content] { padding:.8rem; }.vb-product-shell[data-reduced-motion="true"] *, .vb-product-shell[data-reduced-motion="true"] *::before, .vb-product-shell[data-reduced-motion="true"] *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }.vb-settings { max-width:42rem; }.vb-setting-control { display:flex; align-items:center; gap:.6rem; margin-top:1rem; border:1px solid var(--vb-border); background:var(--vb-panel); border-radius:.75rem; padding:1rem; }.vb-setting-note { color:var(--vb-muted); font-size:.9rem; }
+.vb-catalog-quick-start { display:flex; flex-direction:column; }
+.vb-catalog-recent-heading { margin: var(--vb-space-6) 0 0; font-size: var(--vb-text-lg); font-weight:700; }
 .vb-mobile-scrim { display:none; }
-@media (max-width: 767px) { [data-slot="sidebar"][data-mobile="true"] { display:flex !important; position:fixed !important; inset:0 auto 0 0 !important; flex-direction:column; width:min(18rem,85vw) !important; height:100svh !important; max-height:100svh; overflow:hidden !important; } [data-slot="sidebar"][data-mobile="true"][data-state="open"] { left:0 !important; transform:translateX(0) !important; } [data-slot="sidebar"][data-mobile="true"] > div { display:flex; height:100%; min-height:0; flex:1 1 auto; flex-direction:column; } [data-slot="sidebar"][data-mobile="true"] [data-sidebar="header"], [data-slot="sidebar"][data-mobile="true"] [data-sidebar="footer"] { flex:0 0 auto; } [data-slot="sidebar"][data-mobile="true"] [data-sidebar="content"] { flex:1 1 auto; min-height:0; overflow-y:auto; } .vb-mobile-menu { display:inline-flex; }.vb-collapse { display:none; }.vb-product-header { padding:0 1rem; }.vb-product-content { padding:1.25rem 1rem; }.vb-home-grid { grid-template-columns:1fr; } }
+@media (max-width: 767px) { .vb-product-content { padding: var(--vb-space-5) var(--vb-space-4); }.vb-home-grid { grid-template-columns:1fr; } }
 
 /* 아래 일곱 화면은 클래스만 붙어 있고 규칙이 없어서 브라우저 기본 스타일로
    그려지고 있었다. 승인된 토큰만 쓰고 새 색을 만들지 않는다. */
-.vb-outputs, .vb-creation-interview, .vb-media-library, .vb-project-archive { display:grid; gap:1rem; max-width:52rem; }
-.vb-outputs h1, .vb-creation-interview h1, .vb-media-library h2, .vb-project-archive h2 { margin:0; font-size:clamp(1.25rem,2.4vw,1.65rem); letter-spacing:-.03em; }
-.vb-outputs p, .vb-creation-interview p, .vb-media-library > p, .vb-project-archive p { margin:0; color:var(--vb-muted); line-height:1.55; }
-.vb-outputs section, .vb-outputs article, .vb-creation-interview section, .vb-media-library article, .vb-project-archive article { border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); padding:1rem; display:grid; gap:.5rem; }
+.vb-review-page { display:grid; gap: var(--vb-space-4); max-width:64rem; }
+/* grid는 자식을 열 폭에 맞춰 늘린다. 그래서 `검토 다시 열기` 같은 단추가 64rem을
+   가로질러, 글 한 줄짜리 동작이 화면을 가로지르는 띠처럼 보였다. 단추만 제 크기로
+   돌린다 -- 장면 목록 같은 블록은 폭을 그대로 써야 하므로 전체에 걸지 않는다. */
+.vb-review-page > [data-slot=button],
+.vb-project-archive > [data-slot=button],
+.vb-conversation-cleanup > [data-slot=button] { justify-self:start; }
+.vb-project-action-error { margin: var(--vb-space-2) 0 0; color:var(--destructive); font-size: var(--vb-text-sm); line-height:1.4; }
+.vb-outputs, .vb-creation-interview, .vb-media-library, .vb-project-archive { display:grid; gap: var(--vb-space-4); max-width:52rem; }
+.vb-outputs { max-width:none; }
+.vb-outputs-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap: var(--vb-space-3); }
+.vb-outputs-grid [data-slot=card] { min-width:0; min-height:0; }
+/* `.vb-outputs`가 내보내기 팝업(`.vb-export-dialog`, 35rem 폭) 안에도 그대로
+   들어온다(2026-08-29). 4칸을 그대로 두면 칸마다 169px대로 눌려 완성본 카드의
+   영상·문구가 넘친다(실측 확인) -- 페이지 전용 4칸을 팝업 안에서만 1칸으로 줄인다. */
+.vb-export-dialog .vb-outputs-grid { grid-template-columns:1fr; }
+/* 완성본이 실제로 있어야만 나오는 두 묶음이라 이름만 보는 감사에서 계속
+   빠져 있었다. 2026-09-04에 `my-project`에 완성본을 실제로 구워 놓고 재 보니
+   둘 다 CSS가 하나도 없어 `display:block`으로 떨어졌고, 자식 사이 간격이
+   **0px**이었다 -- `이 완성본 좋아요`(y 2422, 높이 36)와 `이 완성본
+   아쉬워요`(y 2458)가 정확히 맞닿아 있었다. 어제 고친
+   `.vb-timeline-edit-toolbar`와 같은 결함이고, 같은 무늬(세로 묶음 + 척도
+   간격)로 맞춘다. */
+.vb-final-verdict, .vb-final-format { display:flex; flex-direction:column; align-items:flex-start; gap: var(--vb-space-2); }
+/* 같은 자리에서 나온 별개의 결함이었다: 포맷 이름 입력칸이 제 칸을 26px
+   넘어갔다. 원인은 이 화면이 아니라 문서 전체의 `box-sizing`이라
+   `ui-system.css`의 전역 `border-box`가 없앤다(owner 승인 2026-09-04) --
+   여기에 따로 둘 규칙이 없다. */
+.vb-output-video { display:block; width:100%; max-width:100%; height:auto; max-height:18rem; object-fit:contain; border-radius: var(--vb-radius-sm); background:var(--vb-canvas); }
+.vb-outputs h1, .vb-creation-interview h1, .vb-media-library h2, .vb-project-archive h2 { margin: 0; font-size: clamp(var(--vb-text-xl),2.4vw,var(--vb-text-2xl)); letter-spacing:-.03em; }
+.vb-outputs p, .vb-creation-interview p, .vb-media-library > p, .vb-project-archive p { margin: 0; color:var(--vb-muted); line-height:1.55; }
+.vb-outputs section, .vb-outputs article, .vb-creation-interview section, .vb-media-library article, .vb-project-archive article { border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); padding: var(--vb-space-4); display:grid; gap: var(--vb-space-2); }
+/* `.vb-output-readiness`의 `<ol>`이 스타일 없이 그대로 있어서 각 줄의
+   `<strong>편집본</strong><span>준비 필요</span>`가 "편집본준비 필요"처럼
+   붙어 읽혔다. 목록 자체 여백과 줄 안 간격만 준다. */
+.vb-output-readiness ol { list-style:none; margin:0; padding:0; display:grid; gap: var(--vb-space-2); }
+.vb-output-readiness li { display:flex; align-items:center; flex-wrap:wrap; gap: var(--vb-space-2); }
+/* `.vb-home-grid`(3열 고정 grid, 홈 카드 3장 전용)를 좁은 카드 안 버튼 두 개
+   줄에도 그대로 썼더니 `minmax(0,1fr)`가 칸을 글자 폭보다 좁게 눌러서
+   버튼 두 개가 서로 겹쳐 보였다("가로·세로 출력 만들기력 상태 다시
+   확인"). 폭에 따라 줄바꿈하는 별도 클래스로 뗀다. */
+.vb-output-actions { display:flex; flex-wrap:wrap; gap: var(--vb-space-3); }
 .vb-media-library article strong { font-weight:650; }
 .vb-media-library audio { width:100%; max-width:28rem; }
-.vb-media-library__filters { display:flex; flex-wrap:wrap; gap:.5rem; }
-.vb-settings-nav { display:flex; flex-wrap:wrap; gap:.5rem; margin-bottom:1rem; }
-.vb-editor-assets__orientation { display:inline-flex; align-items:center; gap:.3rem; border:1px solid var(--vb-border); border-radius:999px; padding:.1rem .55rem; font-size:.75rem; color:var(--vb-muted); background:var(--vb-canvas); }
-.vb-editor-right-dock__sync-warning { border:1px solid var(--vb-accent); border-radius:.6rem; background:var(--vb-accent-bg); padding:.6rem .75rem; display:grid; gap:.45rem; }
-.vb-editor-right-dock__sync-warning p { margin:0; line-height:1.5; }
-.vb-conversation-cleanup { display:grid; gap:.75rem; margin-top:1rem; }
-.vb-conversation-cleanup h2 { margin:0; font-size:1.05rem; font-weight:700; }
-.vb-conversation-cleanup > p { margin:0; color:var(--vb-muted); }
-.vb-conversation-cleanup article { display:flex; align-items:center; justify-content:space-between; gap:.75rem; border:1px solid var(--vb-border); border-radius:.75rem; background:var(--vb-panel); padding:.75rem 1rem; }
-.vb-conversation-cleanup article p { margin:0; }
+.vb-media-library__grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap: var(--vb-space-3); min-width:0; }
+.vb-media-library__grid article { min-width:0; min-height:0; padding: var(--vb-space-3); overflow:hidden; }
+.vb-media-library__grid audio { max-width:100%; }
+.vb-media-library__grid img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; border-radius: var(--vb-radius-sm); background:var(--vb-canvas); }
+.vb-media-library__filters [aria-pressed="true"] { background:var(--primary); color:var(--primary-foreground); border-color:var(--primary); }
+.vb-media-project-card { display:grid; gap: var(--vb-space-2); min-width:0; padding: 0; overflow:hidden; border:1px solid var(--vb-border); border-radius: var(--vb-radius-lg); background:var(--vb-panel); box-shadow:0 1px 2px color-mix(in srgb, var(--vb-text) 5%, transparent); }
+.vb-media-project-card [data-slot=card-header] { display:grid; gap: var(--vb-space-1); padding: var(--vb-space-3) var(--vb-space-4) var(--vb-space-1); }
+.vb-media-project-card [data-slot=card-content] { display:grid; gap: var(--vb-space-1); padding: 0 var(--vb-space-4) var(--vb-space-4); }
+.vb-media-project-card [data-slot=card-description] { color:var(--vb-muted); }
+.vb-media-library__filters { display:flex; flex-wrap:wrap; gap: var(--vb-space-2); }
+.vb-media-library__toolbar { display:flex; flex-wrap:wrap; align-items:center; gap: var(--vb-space-2) var(--vb-space-3); }
+.vb-media-library__toolbar label { color:var(--vb-muted); font-size: var(--vb-text-sm); }
+.vb-media-library__toolbar [data-slot=input] { flex:1 1 12rem; max-width:20rem; }
+.vb-settings-nav { display:flex; flex-wrap:wrap; gap: var(--vb-space-2); margin-bottom: var(--vb-space-4); }
+.vb-editor-assets__orientation { display:inline-flex; align-items:center; gap: var(--vb-space-1); border:1px solid var(--vb-border); border-radius:999px; padding: var(--vb-space-1) var(--vb-space-2); font-size: var(--vb-text-xs); color:var(--vb-muted); background:var(--vb-canvas); }
+.vb-editor-right-dock__sync-warning { border:1px solid var(--vb-accent); border-radius: var(--vb-radius-md); background:var(--vb-accent-bg); padding: var(--vb-space-2) var(--vb-space-3); display:grid; gap: var(--vb-space-2); }
+.vb-editor-right-dock__sync-warning p { margin: 0; line-height:1.5; }
+.vb-conversation-cleanup { display:grid; gap: var(--vb-space-3); margin-top: var(--vb-space-4); }
+.vb-conversation-cleanup h2 { margin: 0; font-size: var(--vb-text-lg); font-weight:700; }
+.vb-conversation-cleanup > p { margin: 0; color:var(--vb-muted); }
+.vb-conversation-cleanup article { display:flex; align-items:center; justify-content:space-between; gap: var(--vb-space-3); border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background:var(--vb-panel); padding: var(--vb-space-3) var(--vb-space-4); }
+.vb-conversation-cleanup article p { margin: 0; }
+
+/* Intranet DS normalization for the product shell and catalog.
+   `--radius-2xl`는 정의된 적이 없다 -- 셋으로 줄인 반지름 척도
+   (`--vb-radius-sm/md/lg`, ui-system.css:19-21, owner 결정 2026-08-27)로
+   정리하면서 이 두 줄만 옛 이름 그대로 남았다. 정의 안 된 var()는 그
+   선언 자체를 무효로 만들어 초기값(0)으로 떨어진다 -- 그래서 이 화면의
+   모든 default·outline 버튼이 모서리 없이 각지게 그려지고 있었다
+   (2026-08-30, 캡컷 버튼 단위 벤치마킹 중 실측으로 발견). */
+/* 캡컷은 단추 높이가 **32px 하나**다(2026-09-04 실측 — 15개가 정확히 32).
+   우리는 28·29·32·36·52가 뒤섞여 있었다. `min-height`만으로는 shadcn이 거는
+   `h-9`(36px)를 못 줄인다 -- 실제 높이를 못박아야 한다. 이 선택자는 (0,2,0)이라
+   `.h-9`(0,1,0)를 이긴다. 아이콘 단추는 정사각형이라 따로 준다. */
+.vb-product-shell [data-slot=button] { min-height:32px; height:32px; }
+.vb-product-shell [data-slot=button][data-size="icon"],
+.vb-product-shell [data-slot=button][data-size="icon-sm"] { width:32px; height:32px; padding:0; }
+/* 줄이 넘어가는 단추(카드형·설명이 붙은 것)는 고정 높이를 풀어 준다 --
+   안 그러면 글자가 잘린다(`.vb-footage-source`에서 실제로 잘렸다). */
+.vb-product-shell [data-slot=button][data-multiline="true"] { height:auto; }
+.vb-product-shell [data-slot=button][data-variant="default"] { border-radius:var(--vb-radius-md); }
+.vb-product-shell [data-slot=button][data-variant="outline"] { border:0; box-shadow:0 0 0 1px var(--vb-control-ring); border-radius:var(--vb-radius-md); }
+/* `ghost`·`secondary`·`destructive`·`link`는 위 두 줄(`default`/`outline`)과
+   달리 border를 지우는 규칙이 어디에도 없었다. Tailwind 쪽 클래스도
+   `hover:bg-*`만 걸고 바탕 상태의 border는 안 건드리므로, 브라우저가 그리는
+   `<button>` 기본 테두리(2px outset)와 회색 배경이 그대로 남는다 -- 대화상자
+   안에서 "유진에게 제목 추천받기" 목록을 열어 실측(2026-09-04)했을 때
+   중간 회색 배경(브라우저 기본 buttonface)에 흰 outset 테두리로 나왔다.
+
+   그리고 이 넷은 **셸 범위를 안 건다.** Radix `Dialog`/`Popover`/드롭다운은
+   `document.body`의 직계 자식으로 포털되어 `.vb-product-shell` 조상이
+   아예 없다 -- 그 안의 버튼은 위 두 줄을 포함해 `.vb-product-shell`로
+   시작하는 어떤 규칙도 못 받는다. 새 규칙만 더하고 기존 두 줄은 그대로
+   둔다(그 자리는 이미 잘 동작한다 -- 굳이 셸 범위를 걷어내 다른 무엇이
+   깨지는지 오늘 밤 확인 못 할 위험을 지지 않는다).
+
+   `:where(...)`로 감싸 이 규칙의 특정도를 0으로 만든다 -- 그냥 붙였으면
+   속성 선택자 둘(0,2,0)이 `.vb-editor-assets__tab`·`.vb-inspector-tabs__tab`·
+   `.vb-editor-assets__filter` 같은 한 칸짜리 클래스 규칙(0,1,0)을 **이겨서
+   그 탭 밑줄·필터 테두리를 지워 버렸을 것**이다(둘 다 `variant="ghost"`를
+   쓴다). `:where()`는 그런 기존 스타일이 하나라도 있으면 항상 진다 --
+   여기서 채우는 것은 **아무 규칙도 없어서** 브라우저 기본값이 새던 자리뿐이다. */
+:where([data-slot=button][data-variant="ghost"], [data-slot=button][data-variant="link"]) { border:0; background-color:transparent; }
+:where([data-slot=button][data-variant="secondary"], [data-slot=button][data-variant="destructive"]) { border:0; }
+/* `default`·`outline`은 셸 범위 규칙(위 189~190행)이 이미 border를 지운다 --
+   `.vb-product-shell [data-slot=button][data-variant="..."]`이 특정도
+   (0,3,0)라 이 `:where()` 백스톱(특정도 0)보다 항상 이긴다. 다만 그 규칙도
+   **셸 조상이 있을 때만** 걸린다 -- 대화상자 안 "저장"(default) 버튼도
+   흰 2px outset 테두리가 그대로 나왔다(2026-09-04 실측). 셸 밖(포털)에서만
+   이 백스톱이 대신 채운다. */
+:where([data-slot=button][data-variant="default"], [data-slot=button][data-variant="outline"]) { border:0; }
+.vb-product-shell :where(button,a,input,textarea,select):focus-visible { outline:0; box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 30%,transparent); }
+/* `size-4`/`size-9`류 번호 척도 유틸리티(shadcn 기본 버튼 아이콘 크기)가
+   이 빌드에서 한 번도 컴파일된 적이 없다 -- 컴파일된 CSS 전체를 뒤져도
+   `size-4`·`h-9`·`gap-2` 같은 문자열이 아예 없다(2026-08-30 실측,
+   `document.styleSheets` 직접 조회). 그래서 `.vb-catalog` 안 아이콘
+   단추는 안에 든 SVG가 원본 크기(24px)로 그대로 나왔다 -- 캡컷 첫 화면의
+   컴팩트한 아이콘 줄과 크기가 안 맞았다. 에디터 툴바에는 이미 같은
+   문제를 겪고 고친 자리가 있다(`.vb-editor-workbench__toolbar
+   [data-slot="button"] svg`, `editor-workbench.css`) -- 같은 값(1rem)으로
+   맞춘다. **이 빌드 전체의 번호 척도 유틸리티가 죽어 있다는 것은 훨씬
+   큰 별도 조사거리다 -- 여기서는 이 화면의 아이콘 단추만 고친다.** */
+.vb-catalog [data-slot=button] svg { width:1rem; height:1rem; }
+/* 같은 이유로 `size-9`도 안 먹어서 아이콘 단추 셋(보기전환 둘·보관함)이
+   서로 다른 크기로 나왔다(48x40 / 40x32, 2026-08-30 실측) -- 캡컷 첫
+   화면의 아이콘 줄은 전부 같은 크기다. 정사각형 하나로 맞춘다. */
+.vb-catalog [data-slot=button][data-size="icon"] { width:2rem; padding:0; }
+/* 위 `min-height:32px` 일반 규칙이 속성 선택자를 써서 특정도가
+   `.vb-catalog-create`(클래스 하나)보다 높다 -- 그래서 캡컷 첫 화면의
+   큰 CTA 배너를 흉내 낸 `min-height: 5rem`(아래 90행대)이 실제로는 한
+   번도 반영되지 않고 이 32px로 조용히 눌려 있었다(2026-08-30 실측).
+   같은 속성 선택자를 얹어 특정도를 맞추고, 위치를 뒤에 둬 이긴다. */
+.vb-product-shell [data-slot=button].vb-catalog-create { min-height:5rem; border-radius:var(--vb-radius-md); }
+.vb-catalog { width:100%; box-sizing:border-box; min-width:0; overflow-x:hidden; }
+@media (min-width:1600px) { .vb-catalog { max-width:1600px; } }
+.vb-catalog-grid { min-width:0; }
+.vb-catalog-card { box-sizing:border-box; min-width:0; overflow-wrap:anywhere; border:0; border-radius:var(--vb-radius-lg); box-shadow:0 0 0 1px var(--vb-surface-ring); }
+.vb-catalog-card:hover { border:0; box-shadow:0 0 0 1px var(--vb-accent); }
+
+
+/* 캡컷 배치의 위 띠 — owner 승인 2026-08-21
+   docs/decisions/2026-08-21-capcut-shell-layout.ko.md
+
+   왼쪽 기둥이 하던 일을 한 줄로 받는다. 폭을 먹던 것이 높이를 먹게 되는데,
+   편집기는 가로가 아쉬운 화면이라 대체로 이득이다. */
+/* 껍데기가 세로로 쌓이므로 띠는 줄어들지 않아야 한다 -- `flex-shrink`가 열려
+   있으면 편집 화면처럼 아래가 꽉 찬 곳에서 띠가 눌린다. */
+.vb-top-bar { display:flex; align-items:center; gap: var(--vb-space-4); min-height:3.25rem; flex:0 0 auto;
+  padding: var(--vb-space-2) var(--vb-space-4); border-bottom:1px solid var(--vb-border);
+  background: var(--vb-panel); }
+.vb-top-bar__project { position:relative; flex:0 0 auto; }
+/* 프로젝트는 **지금 것만** 보인다. 왼쪽 기둥에서는 29개가 펼쳐져 가운데를 다 먹었다. */
+.vb-top-bar__switcher { position:absolute; z-index:20; top:calc(100% + var(--vb-space-1)); left:0;
+  display:grid; gap: var(--vb-space-1); min-width:14rem; max-height:18rem; overflow-y:auto;
+  padding: var(--vb-space-2); border:1px solid var(--vb-border); border-radius: var(--vb-radius-md);
+  background: var(--vb-panel); box-shadow:0 8px 24px color-mix(in srgb, var(--vb-text) 12%, transparent); }
+.vb-top-bar__stages { display:flex; align-items:center; gap: var(--vb-space-2); flex:1 1 auto; min-width:0; overflow-x:auto; }
+.vb-top-bar__end { display:flex; align-items:center; gap: var(--vb-space-2); flex:0 0 auto; margin-left:auto; }
+/* 기둥 머리의 이름표가 이리로 왔다. 캡컷도 로고를 왼쪽 끝에 둔다. */
+.vb-top-bar__brand { display:flex; align-items:center; gap: var(--vb-space-2); flex:0 0 auto; font-weight:750; font-size: var(--vb-text-md); }
+.vb-top-bar__brand { color:inherit; text-decoration:none; }
+.vb-top-bar__brand svg { flex:0 0 auto; width:1.25rem; height:1.25rem; color:var(--vb-accent); }
+/* 도구·이동 단추는 본문 주요 행동보다 조밀하게 쓰되, 색·중요도는 기존 규칙을
+   그대로 따른다. 주요 행동은 이 클래스를 받지 않아 읽기 쉬운 크기를 유지한다. */
+.vb-top-bar__compact-control[data-slot=button] { min-width:2rem; min-height:2rem; padding-inline:var(--vb-space-2); }
+.vb-top-bar__breadcrumb { display:flex; align-items:center; gap:var(--vb-space-1); min-width:0; max-width:24rem; overflow:hidden; color:var(--vb-muted); font-size:var(--vb-text-xs); white-space:nowrap; }
+.vb-top-bar__breadcrumb-item { display:inline-flex; align-items:center; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.vb-top-bar__breadcrumb-item:not(:last-child)::after { content:"/"; margin-left:var(--vb-space-1); color:var(--vb-muted); }
+.vb-top-bar__breadcrumb a { min-width:0; overflow:hidden; text-overflow:ellipsis; color:inherit; text-decoration:none; }
+.vb-top-bar__breadcrumb a:hover, .vb-top-bar__breadcrumb a:focus-visible { color:var(--vb-accent); text-decoration:underline; }
+/* 단계가 없는 화면(내 라이브러리·촬영본 정리·설정·프로젝트 목록)에서만 나온다.
+   단계가 보일 때는 켜진 단추가 이미 같은 말을 하고 있다. */
+.vb-top-bar__screen { flex:1 1 auto; min-width:0; font-size: var(--vb-text-md); font-weight:650; }
+.vb-top-bar__note { color:var(--vb-muted); font-size: var(--vb-text-xs); white-space:nowrap; }
+/* 캡컷 위 툴바의 화면 비율 자리. **테두리가 있어도 단추가 아니다** -- 우리는 여기서
+   비율을 고르지 않고 지금 만드는 모양을 말하기만 한다(`shellCanvas.tsx`에 이유).
+   그래서 색은 승인된 `--vb-muted` 그대로 두고 강조색을 쓰지 않는다. 강조색을 주면
+   눌러야 하는 것처럼 보이고, owner를 막았던 문제가 띠에서 되풀이된다. */
+.vb-top-bar__canvas { color:var(--vb-muted); font-size: var(--vb-text-xs); white-space:nowrap;
+  flex:0 0 auto; padding: var(--vb-space-1) var(--vb-space-2); border:1px solid var(--vb-border);
+  border-radius: var(--vb-radius-sm); font-variant-numeric: tabular-nums; }
+.vb-top-bar__stages [data-slot=button] { gap: var(--vb-space-2); white-space:nowrap; }
+.vb-top-bar__stages svg { flex:0 0 auto; width:1rem; height:1rem; }
+.vb-top-bar__menu { position:relative; flex:0 0 auto; }
+.vb-top-bar__menu-list { position:absolute; z-index:20; top:calc(100% + var(--vb-space-1)); right:0;
+  display:grid; gap: var(--vb-space-1); min-width:12rem; padding: var(--vb-space-2);
+  border:1px solid var(--vb-border); border-radius: var(--vb-radius-md); background: var(--vb-panel);
+  box-shadow:0 8px 24px color-mix(in srgb, var(--vb-text) 12%, transparent); }
+.vb-top-bar__menu-list a { display:flex; min-height:40px; align-items:center; gap: var(--vb-space-2); border:1px solid transparent; border-radius: var(--vb-radius-md); padding: var(--vb-space-2) var(--vb-space-3); color:var(--vb-text); text-decoration:none; font:inherit; }
+.vb-top-bar__menu-list a:hover, .vb-top-bar__menu-list a:focus-visible { border-color:var(--vb-accent-border); background:var(--vb-accent-bg); color:var(--vb-accent); }
+.vb-top-bar__menu-list [data-slot=button] { justify-content:flex-start; }
+/* 좁은 화면에서는 띠가 한 줄에 다 못 들어간다. 지우는 대신 글자를 접고 단계를
+   제 줄로 내린다. 한 줄에 밀어 넣었더니 375px에서 단계 칸이 **32px로 눌려**
+   네 단추가 사실상 못 누르는 상태가 됐다(2026-08-21 브라우저에서 재서 확인).
+   기둥 시절에는 이 폭에서 Sheet가 그 일을 했으므로, 여기서 잃으면 안 된다. */
+@media (max-width: 767px) { .vb-product-shell { --vb-top-bar-h: 6.25rem; }
+  .vb-top-bar { flex-wrap:wrap; gap: var(--vb-space-2); padding: var(--vb-space-2); }
+  /* 화면 비율도 여기서는 접는다. 좁은 화면의 띠는 이미 두 줄이고 높이가
+     `--vb-top-bar-h: 6.25rem`으로 못박혀 있는데, 첫 줄에 글자를 더 얹으면 한 줄이
+     더 생겨 **편집판 높이 계산이 어긋난다** -- 2026-08-21에 실제로 32px 밀린 적이
+     있다. 비율은 캡컷이 그것을 보여 주는 넓은 화면에서만 말한다. */
+  .vb-top-bar__brand span, .vb-top-bar__note, .vb-top-bar__canvas { display:none; }
+  .vb-top-bar__compact-control[data-slot=button] { min-width:2.25rem; min-height:2.25rem; }
+  .vb-top-bar__breadcrumb { flex:1 1 8rem; max-width:none; }
+  .vb-top-bar__project [data-slot=button] { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+  .vb-top-bar__stages { order:1; flex:1 0 100%; } }
+
+/* **카드를 조용하게(2026-09-04).** owner: "인터페이스 들이 너무 복잡하고 헷깔려".
+   첫 화면을 재 보니 누를 것 112개 중 **102개가 카드 안 단추**였다(34카드 × 3).
+   캡컷 `최근 프로젝트` 카드는 단추가 0개다.
+
+   **길은 안 없앤다.** 카드의 두 링크는 목적이 다르다 -- 이름은 프로젝트를 여는
+   문이고 `다음 할 일`은 `/plan`·`/review`로 가는 유일한 길이다. 없애면 그 화면에
+   갈 방법이 사라진다(예전에 시도했다가 시험 셋이 막았다). 그래서 `···`만 숨긴다.
+
+   `opacity`로 숨기는 이유: `display:none`이나 `visibility:hidden`은 **탭 순서에서
+   빼 버려** 키보드로는 영영 못 쓰는 기능이 된다. 초점이 오면 다시 보인다. */
+.vb-catalog-card__more { opacity: 0; transition: opacity .12s ease; }
+.vb-catalog-card:hover .vb-catalog-card__more,
+.vb-catalog-card:focus-within .vb-catalog-card__more { opacity: 1; }
+.vb-catalog-card__more:focus-visible { opacity: 1; }
+
+/* **왼쪽 세로 메뉴**(owner 지시 2026-09-05: "왼쪽 세로 메뉴 만들어").
+   2026-08-21에 없앤 기둥을 캡컷 재대조 뒤 다시 세운다 -- 캡컷은 첫 화면 왼쪽에
+   메뉴를 상시 보여 주는데 우리는 접힌 `전체 메뉴` 하나뿐이었다.
+
+   편집기에서는 그리지 않는다(`ProductShell`이 정한다). 그 자리는 편집 도구
+   띠가 쓰고, 두 줄이 나란히 서면 어느 쪽이 화면 이동인지 알 수 없다. */
+.vb-product-body { display: flex; min-width: 0; min-height: 0; flex: 1; }
+.vb-side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vb-space-1);
+  padding: var(--vb-space-3) var(--vb-space-2);
+  width: 11rem;
+  flex: none;
+  border-right: 1px solid var(--border);
+  background: var(--vb-panel);
+  box-sizing: border-box;
+}
+.vb-side-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--vb-space-2);
+  min-height: 36px;
+  padding: 0 var(--vb-space-2);
+  border-radius: var(--vb-radius-sm);
+  color: var(--vb-muted);
+  font-size: var(--vb-text-md);
+  text-decoration: none;
+  justify-content: flex-start;
+  width: 100%;
+}
+.vb-side-nav__item:hover { background: var(--vb-panel-alt); color: var(--vb-text); }
+/* 지금 있는 자리. 색만으로 말하지 않는다 -- 왼쪽 선을 같이 둔다. */
+.vb-side-nav__item[aria-current="page"] {
+  background: var(--vb-panel-alt);
+  color: var(--vb-text);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--vb-accent);
+}
+/* **`내 자산` 구역**(owner 승인 2026-09-04 §2). 캡컷의 `AI로 만들기` 자리다.
+   위 세 줄과 한 칸 띄워 둔다 -- 붙여 두면 자료실의 갈래가 아니라 자료실과
+   나란한 다른 곳으로 읽힌다. */
+.vb-side-nav__group { display: flex; flex-direction: column; gap: var(--vb-space-1); margin-top: var(--vb-space-3); }
+.vb-side-nav__group-label {
+  margin: 0 0 var(--vb-space-1) var(--vb-space-2);
+  color: var(--vb-muted);
+  font-size: var(--vb-text-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* 아직 못 쓰는 자리. **흐리게만 두지 않는다** -- 흐린 것은 "지금 안 눌린다"는
+   뜻이지 "아직 없다"는 뜻이 아니라서, 글자로 함께 말한다. */
+.vb-side-nav__item--waiting { cursor: default; opacity: 0.65; }
+.vb-side-nav__item--waiting:hover { background: none; color: var(--vb-muted); }
+.vb-side-nav__waiting-badge {
+  margin-left: auto;
+  padding: 0 var(--vb-space-1);
+  border-radius: var(--vb-radius-sm);
+  background: var(--vb-panel-alt);
+  color: var(--vb-muted);
+  font-size: var(--vb-text-xs);
+}
+.vb-side-nav__note {
+  margin: 0 var(--vb-space-2);
+  color: var(--vb-muted);
+  font-size: var(--vb-text-sm);
+  line-height: 1.4;
+}
+/* 설정은 아래로 민다 -- 자주 가는 곳이 위, 어쩌다 가는 곳이 아래(캡컷과 같다). */
+.vb-side-nav__item--settings { margin-top: auto; }
+/* 좁은 화면에서는 아이콘만 남긴다. 접어서 없애지 않는 이유: 없애면 자료실과
+   촬영본이 다시 갈 수 없는 곳이 된다. */
+@media (max-width: 1023px) {
+  .vb-side-nav { width: auto; }
+  .vb-side-nav__item { justify-content: center; padding: 0 var(--vb-space-2); }
+  .vb-side-nav__item > span { display: none; }
+  /* 아이콘만 남는 폭에서는 구역 이름표와 안내 문구도 함께 접는다 -- 글자만
+     남기면 아이콘 줄보다 넓어져 띠가 다시 벌어진다. */
+  .vb-side-nav__group-label,
+  .vb-side-nav__note,
+  .vb-side-nav__waiting-badge { display: none; }
+}

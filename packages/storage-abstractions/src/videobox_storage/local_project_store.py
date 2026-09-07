@@ -55,6 +55,8 @@ from videobox_storage._store_yujin_memory import (
     YUJIN_MEMORY_STORE_CLAIM_LEASE_SECONDS,
     YujinMemoryMixin,
 )
+from videobox_storage._store_output_variants import OutputVariantMixin
+from videobox_storage._store_preview_shares import PreviewShareMixin
 
 _LOGGER = logging.getLogger(__name__)
 from videobox_core_engine.creation_interview import (
@@ -294,9 +296,29 @@ def _session_matches_yujin_b4_command(
             for item in targets
         )
     if command_kind == "set_caption_style":
+        # 유진이 보낸 칸(11개, `yujin_creator_proposals.EditorCaptionStyle`
+        # 고정 스키마)과 세션에 저장된 칸을 **통째로** 맞대면 안 된다. 굵게·
+        # 기울임·자간(2026-09-03 추가)처럼 유진이 모르는 칸이 CaptionStyle
+        # 정본에 늘어나면, 저장은 이제 그런 칸까지 갖고 있는데 유진의 제안은
+        # 여전히 11개뿐이다. 전체를 맞대면 두 가지 함정이 번갈아 온다:
+        # 원문 그대로 대조하면 유진이 뭘 바꿔도 매번 증명 불일치가 나고,
+        # 양쪽을 정규화(기본값 채우기)해서 맞대면 이번엔 **저장 쪽이 실제로
+        # 창작자가 정한 굵게·자간을 유진 제안 적용 한 번에 기본값으로
+        # 지워야만** 증명이 통과한다 -- 유진이 자막 색 하나만 바꾸려다
+        # 창작자가 방금 켠 굵게를 조용히 꺼 버리는 것이다.
+        #
+        # 그래서 **유진이 보낸 칸만** 대조한다. 저장 쪽에 유진이 모르는 칸이
+        # 남아 있어도(창작자가 직접 정한 값을 그대로 지켰다는 뜻) 상관없다 --
+        # 유진이 실제로 제안한 것이 그대로 반영됐는지만 증명하면 된다.
+        submitted_style = controls.get("style")
+        if not isinstance(submitted_style, Mapping):
+            return False
         return any(
-            _json_plain_value(item.get("caption_style"))
-            == _json_plain_value(controls.get("style"))
+            isinstance(item.get("caption_style"), Mapping)
+            and all(
+                _json_plain_value(item["caption_style"].get(key)) == _json_plain_value(value)
+                for key, value in submitted_style.items()
+            )
             for item in targets
         )
     if command_kind == "apply_tts_candidate":
@@ -478,7 +500,7 @@ def _timeline_summary_json(payload: dict[str, Any]) -> str:
     )
 
 
-class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMixin):
+class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMixin):
     def __init__(
         self,
         projects_root: Path,
@@ -492,6 +514,7 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         # workers lease this epoch, which lets startup reclaim a recent dead
         # process without weakening the generation/owner publish fence.
         self.exact_preview_process_epoch = uuid.uuid4().hex
+        self.proposal_preview_process_epoch = uuid.uuid4().hex
         # Deliberately injectable only for deterministic failure-contract tests.
         # Production callers leave this unset; it is never a runtime provider hook.
         self._atomic_bundle_fault_hook = atomic_bundle_fault_hook
@@ -567,6 +590,79 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
                 items.append(dict(row))
         return items
 
+    def list_assets_across_projects(
+        self, *, asset_type: AssetType, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """모든 프로젝트에서 한 종류의 자산만 모아 온다. **읽기만 한다.**
+
+        프로젝트마다 sqlite가 따로 있어서, 프로젝트를 고르기 전에 열리는 화면
+        (`내 자산 > 내 목소리`)은 이 길이 없으면 프로젝트 수만큼 요청해야 한다.
+
+        **`_connection`을 쓰지 않는 이유가 성능이다.** 그쪽은 열 때마다 스키마
+        전체와 마이그레이션 보정을 다시 돌린다. 처음에 `list_projects` +
+        `list_assets`로 짰더니 실측이 **프로젝트 30개 0.32초, 300개 3.6초**였다.
+        여기는 프로젝트 db를 **한 번만** 열어서 프로젝트 행과 자산 행을 같이
+        읽는다 -- 같은 기계에서 **30개 0.05초, 300개 0.52초**(약 6.5배 빠름).
+        쓰지 않으므로 마이그레이션이 필요 없다 -- `assets`는 최초 생성 스키마에
+        있는 표다.
+
+        깊은 검사가 아니다. 편집 세션·타임라인은 열지 않는다.
+        """
+        projects_directory = self.projects_root / "projects"
+        if not projects_directory.exists():
+            return []
+        items: list[dict[str, Any]] = []
+        for project_directory in sorted(projects_directory.iterdir()):
+            database_path = project_directory / "db" / "project.sqlite"
+            if not project_directory.is_dir() or not database_path.exists():
+                continue
+            try:
+                connection = sqlite3.connect(database_path, timeout=5.0)
+            except sqlite3.Error:
+                continue
+            connection.row_factory = sqlite3.Row
+            try:
+                tables = {
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('projects', 'assets')"
+                    ).fetchall()
+                }
+                # bootstrap_project은 파일을 먼저 만들고 스키마를 나중에 커밋한다.
+                # 그 짧은 순간을 손상으로 보지 않고 다음 조회에서 다시 본다.
+                if {"projects", "assets"} - tables:
+                    continue
+                project_row = connection.execute(
+                    "SELECT project_id, name, status FROM projects LIMIT 1"
+                ).fetchone()
+                if project_row is None:
+                    continue
+                if not include_archived and str(project_row["status"]) == ProjectStatus.ARCHIVED.value:
+                    continue
+                rows = connection.execute(
+                    """
+                    SELECT asset_id, project_id, asset_type, storage_uri, source_kind, mime_type,
+                           duration_sec, metadata_json, created_at
+                    FROM assets
+                    WHERE asset_type = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (asset_type.value,),
+                ).fetchall()
+            except sqlite3.Error:
+                # 프로젝트 하나를 못 읽어도 나머지는 돌려준다 -- 목록 전체가
+                # 비어 보이면 owner는 자산이 사라진 줄 안다.
+                continue
+            finally:
+                connection.close()
+            project_name = str(project_row["name"] or "")
+            for row in rows:
+                payload = dict(row)
+                payload["metadata"] = json.loads(payload.pop("metadata_json") or "{}")
+                payload["project_name"] = project_name
+                items.append(payload)
+        return items
+
     def archive_project(self, *, project_id: str) -> dict[str, Any]:
         """Hide a project from the default list without touching its data
         (F-5). Reversible via restore_project -- §10.12.3's
@@ -576,6 +672,26 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
 
     def restore_project(self, *, project_id: str) -> dict[str, Any]:
         return self._set_project_status(project_id=project_id, status=ProjectStatus.DRAFT)
+
+    def rename_project(self, *, project_id: str, name: str) -> dict[str, Any]:
+        """Change only what the owner reads: the display name.
+
+        `project_id` and `root_storage_uri` deliberately stay put. They are
+        the on-disk directory and the address every already-made asset and
+        finished video points at -- moving them each time a title is edited
+        would orphan the work that was already done. So a title stays
+        editable forever while the storage layout stays stable.
+        """
+        display_name = name.strip()
+        if not display_name:
+            raise ValueError("project_name_required")
+        self.get_project(project_id=project_id)  # raises KeyError if missing, on either backend
+        self._execute(
+            project_id,
+            "UPDATE projects SET name = ?, updated_at = ? WHERE project_id = ?",
+            (display_name, self._now_iso(), project_id),
+        )
+        return self.get_project(project_id=project_id)
 
     def delete_project_permanently(self, *, project_id: str) -> None:
         """Irreversibly remove a project's directory (its DB, assets,
@@ -940,6 +1056,160 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
             raise KeyError(f"Exact preview not found: {generation_id}")
         return self._exact_preview_row(dict(row))
 
+    def begin_proposal_preview(self, *, project_id: str, session_id: str, proposal_id: str, expected_revision: int, fingerprint: str) -> dict[str, Any]:
+        """Create/coalesce a proposal-result preview in its own durable namespace."""
+        cache_key = "proposal-preview:" + hashlib.sha256(
+            f"{proposal_id}:{session_id}:{expected_revision}:{fingerprint}".encode()
+        ).hexdigest()
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            session = connection.execute("SELECT session_revision FROM editing_sessions WHERE project_id = ? AND session_id = ?", (project_id, session_id)).fetchone()
+            if session is None:
+                raise KeyError(f"Editing session not found: {session_id}")
+            if int(session["session_revision"]) != expected_revision:
+                raise EditingSessionRevisionConflict("proposal preview session revision is stale")
+            existing = connection.execute("""SELECT * FROM proposal_preview_renders WHERE project_id = ? AND session_id = ? AND proposal_id = ? AND cache_key = ? AND state IN ('pending', 'running', 'succeeded') ORDER BY created_at DESC LIMIT 1""", (project_id, session_id, proposal_id, cache_key)).fetchone()
+            if existing is not None:
+                connection.commit(); return self._exact_preview_row(dict(existing))
+            now = self._now_iso()
+            generation_id = f"proposal_preview_{uuid.uuid4().hex}"
+            connection.execute("""INSERT INTO proposal_preview_renders (generation_id, project_id, session_id, proposal_id, expected_revision, cache_key, fingerprint, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""", (generation_id, project_id, session_id, proposal_id, expected_revision, cache_key, fingerprint, now, now))
+            row = connection.execute("SELECT * FROM proposal_preview_renders WHERE generation_id = ?", (generation_id,)).fetchone()
+            connection.commit(); return self._exact_preview_row(dict(row))
+        except Exception:
+            if connection.in_transaction: connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def claim_proposal_preview(self, *, project_id: str, generation_id: str, owner_token: str) -> bool:
+        return self._proposal_preview_update(project_id=project_id, generation_id=generation_id, owner_token=owner_token, state="running")
+
+    def fail_proposal_preview(self, *, project_id: str, generation_id: str, owner_token: str, error_message: str) -> bool:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("UPDATE proposal_preview_renders SET state = 'failed', error_message = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?", (error_message[:1000], self._now_iso(), project_id, generation_id, owner_token)); connection.commit(); return cursor.rowcount == 1
+        finally: connection.close()
+
+    def mark_proposal_preview_stale(self, *, project_id: str, generation_id: str, reason: str) -> bool:
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("UPDATE proposal_preview_renders SET state = 'obsolete', invalidated_reason = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state IN ('pending', 'running', 'succeeded')", (reason, self._now_iso(), project_id, generation_id)); connection.commit(); return cursor.rowcount == 1
+        finally: connection.close()
+
+    def _proposal_preview_update(self, *, project_id: str, generation_id: str, owner_token: str, state: str) -> bool:
+        if not owner_token: raise ValueError("proposal_preview_claim_token_required")
+        connection = self._connection(project_id)
+        try:
+            now = self._now_iso()
+            cursor = connection.execute("UPDATE proposal_preview_renders SET state = ?, claim_token = ?, claimed_at = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'pending'", (state, owner_token, now, now, project_id, generation_id)); connection.commit(); return cursor.rowcount == 1
+        finally: connection.close()
+
+    def finish_proposal_preview(self, *, project_id: str, generation_id: str, fingerprint: str, artifact_path: Path, owner_token: str, source_fence: Callable[[sqlite3.Connection], bool] | None = None, source_fence_result: bool | None = None) -> bool:
+        """Stage bytes first, then atomically publish only through the durable fence."""
+        if not owner_token: raise ValueError("proposal_preview_claim_token_required")
+        if not artifact_path.is_file(): raise FileNotFoundError(artifact_path)
+        destination = self.project_root(project_id) / "derived" / "proposal_previews"; destination.mkdir(parents=True, exist_ok=True)
+        temporary = destination / f".pp-{generation_id.rsplit('_', 1)[-1][-8:]}-{uuid.uuid4().hex[:6]}.tmp"
+        shutil.copyfile(artifact_path, temporary)
+        published: Path | None = None
+        connection: sqlite3.Connection | None = None
+        try:
+            connection = self._connection(project_id)
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM proposal_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, generation_id)).fetchone()
+            current = connection.execute("SELECT session_revision FROM editing_sessions WHERE project_id = ? AND session_id = ?", (project_id, str(row["session_id"]))).fetchone() if row else None
+            source_current = (source_fence_result is None or bool(source_fence_result)) and (source_fence is None or bool(source_fence(connection)))
+            if row is not None and not source_current:
+                connection.execute("UPDATE proposal_preview_renders SET state = 'obsolete', invalidated_reason = 'publish_source_fence_failed', updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?", (self._now_iso(), project_id, generation_id, owner_token)); connection.commit(); return False
+            if row is None or str(row["state"]) != "running" or str(row["claim_token"] or "") != owner_token or str(row["fingerprint"]) != fingerprint or current is None or int(current["session_revision"]) != int(row["expected_revision"]) or not source_current:
+                if row is not None and current is not None and int(current["session_revision"]) != int(row["expected_revision"]):
+                    connection.execute("UPDATE proposal_preview_renders SET state = 'obsolete', invalidated_reason = 'session_revision_changed', updated_at = ? WHERE project_id = ? AND generation_id = ?", (self._now_iso(), project_id, generation_id))
+                    connection.commit()
+                else:
+                    connection.rollback()
+                return False
+            published = destination / f"{generation_id}.mp4"
+            temporary.replace(published)
+            cursor = connection.execute("UPDATE proposal_preview_renders SET state = 'succeeded', artifact_uri = ?, updated_at = ? WHERE project_id = ? AND generation_id = ? AND state = 'running' AND claim_token = ?", (self._path_to_uri(project_id, published), self._now_iso(), project_id, generation_id, owner_token))
+            if cursor.rowcount != 1:
+                connection.rollback(); published.unlink(missing_ok=True); return False
+            connection.commit(); return True
+        except Exception:
+            if connection is not None and connection.in_transaction: connection.rollback()
+            if published is not None: published.unlink(missing_ok=True)
+            raise
+        finally:
+            temporary.unlink(missing_ok=True)
+            if connection is not None: connection.close()
+
+    def get_proposal_preview(self, *, project_id: str, generation_id: str) -> dict[str, Any]:
+        row = self._fetchone(project_id, "SELECT * FROM proposal_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, generation_id))
+        if row is None: raise KeyError(f"Proposal preview not found: {generation_id}")
+        return self._exact_preview_row(dict(row))
+
+    def recover_stale_proposal_preview_claims(self, *, project_id: str, older_than_seconds: float = 900) -> int:
+        """Retire both a worker that died mid-render and a row whose worker
+        thread never even started (the process died right after ``pending``
+        was written, before any claim). Neither is reachable through the
+        restart-epoch fence, since that only rewrites ``running`` rows owned
+        by a stale process token -- an unclaimed ``pending`` row has none."""
+        cutoff = (self._clock() - timedelta(seconds=older_than_seconds)).isoformat()
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("""UPDATE proposal_preview_renders SET state = 'failed', error_message = 'stale_running_claim', updated_at = ? WHERE project_id = ? AND state = 'running' AND claimed_at < ?""", (self._now_iso(), project_id, cutoff))
+            pending_cursor = connection.execute("""UPDATE proposal_preview_renders SET state = 'failed', error_message = 'stale_pending_claim', updated_at = ? WHERE project_id = ? AND state = 'pending' AND created_at < ?""", (self._now_iso(), project_id, cutoff))
+            connection.commit()
+            return cursor.rowcount + pending_cursor.rowcount
+        finally:
+            connection.close()
+
+    def recover_inherited_proposal_preview_claims(self, *, project_id: str, process_epoch: str) -> int:
+        if not process_epoch:
+            raise ValueError("proposal_preview_process_epoch_required")
+        connection = self._connection(project_id)
+        try:
+            cursor = connection.execute("""UPDATE proposal_preview_renders SET state = 'failed', error_message = 'process_restarted', updated_at = ? WHERE project_id = ? AND state = 'running' AND (claim_token IS NULL OR claim_token NOT LIKE ?)""", (self._now_iso(), project_id, f"proposal-preview-worker:{process_epoch}:%"))
+            connection.commit()
+            return cursor.rowcount
+        finally:
+            connection.close()
+
+    def cleanup_proposal_preview_artifacts(self, *, project_id: str, keep_last: int = 5, orphan_older_than_seconds: float = 300) -> int:
+        """Prune proposal-preview terminal rows and renderer-owned orphans only."""
+        rows = self._fetchall(project_id, "SELECT generation_id, artifact_uri FROM proposal_preview_renders WHERE project_id = ? AND state IN ('obsolete', 'failed') ORDER BY updated_at DESC", (project_id,))
+        removed = 0
+        for row in rows[max(keep_last, 0):]:
+            uri = row["artifact_uri"]
+            if uri:
+                self.resolve_storage_uri(project_id=project_id, storage_uri=str(uri)).unlink(missing_ok=True)
+            self._execute(project_id, "DELETE FROM proposal_preview_renders WHERE project_id = ? AND generation_id = ?", (project_id, str(row["generation_id"])))
+            removed += 1
+        preview_root = self.project_root(project_id) / "derived" / "proposal_previews"
+        if not preview_root.is_dir():
+            return removed
+        referenced = {self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["artifact_uri"])).resolve() for row in self._fetchall(project_id, "SELECT artifact_uri FROM proposal_preview_renders WHERE project_id = ? AND artifact_uri IS NOT NULL", (project_id,))}
+        active_generation_ids = {str(row["generation_id"]) for row in self._fetchall(project_id, "SELECT generation_id FROM proposal_preview_renders WHERE project_id = ? AND state IN ('pending', 'running')", (project_id,))}
+        root = preview_root.resolve()
+        cutoff = self._clock().timestamp() - orphan_older_than_seconds
+        for candidate in preview_root.iterdir():
+            try:
+                resolved = candidate.resolve()
+                if not _is_relative_to(resolved, root) or resolved in referenced or not candidate.is_file():
+                    continue
+                if not ((candidate.name.startswith("proposal_preview_") and candidate.suffix == ".mp4") or candidate.name.startswith(".proposal_preview_") or candidate.name.startswith(".pp-")):
+                    continue
+                if any(candidate.name == f"{generation_id}.mp4" or candidate.name.startswith(f".{generation_id}.") or candidate.name.startswith(f".pp-{generation_id.rsplit('_', 1)[-1][-8:]}-") for generation_id in active_generation_ids):
+                    continue
+                if candidate.stat().st_mtime > cutoff:
+                    continue
+                candidate.unlink()
+                removed += 1
+            except OSError:
+                continue
+        return removed
+
     def get_latest_exact_preview(self, *, project_id: str, session_id: str) -> dict[str, Any] | None:
         row = self._fetchone(
             project_id,
@@ -1118,6 +1388,11 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
 
     def thumbnail_storage_path(self, *, project_id: str, asset_id: str) -> Path:
         return self.project_root(project_id) / "derived" / "thumbnails" / f"{asset_id}.jpg"
+
+    def waveform_storage_path(self, *, project_id: str, asset_id: str) -> Path:
+        # 썸네일 옆에 둔다. 둘 다 원본에서 다시 만들 수 있는 파생물이라 같은
+        # `derived/` 아래에 있어야 정리 규칙(§10.16)이 함께 적용된다.
+        return self.project_root(project_id) / "derived" / "waveforms" / f"{asset_id}.png"
 
     def thumbnail_storage_uri(self, *, project_id: str, asset_id: str) -> str:
         return self._path_to_uri(project_id, self.thumbnail_storage_path(project_id=project_id, asset_id=asset_id))
@@ -1521,6 +1796,43 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
             return None
 
     @staticmethod
+    def _pair_broll_with_segments(
+        *,
+        segments: list[dict[str, Any]],
+        playable_broll: list[tuple[dict[str, Any], float]],
+    ) -> list[tuple[dict[str, Any], tuple[dict[str, Any], float]]]:
+        """어느 장면에 무엇을 붙일지 정한다.
+
+        촬영본은 어느 장면 것인지 아무도 적어 두지 않았으므로 **순서**가 유일한
+        규칙이었고, 그래서 오래도록 `zip(segments, playable_broll)` 한 줄이었다.
+
+        만든 그림은 다르다 -- 3번째 장면을 보고 만든 그림은 3번째 장면 것이다
+        (`scene_image_service.py`가 `scene_segment_id`를 적어 둔다). 짝이 정해진
+        것이 먼저 자리를 잡고, 나머지가 남은 자리를 앞에서부터 채운다.
+
+        짝이 있다고 적혀 있는데 그 장면이 사라졌으면(대본을 고치면 그렇게 된다)
+        **버리지 않고** 짝 없는 것과 똑같이 취급한다. 만든 것이 조용히 없어지면
+        owner는 어디로 갔는지 알 수 없다.
+        """
+        segment_index = {str(segment["segment_id"]): index for index, segment in enumerate(segments)}
+        pinned: dict[int, tuple[dict[str, Any], float]] = {}
+        unpinned: list[tuple[dict[str, Any], float]] = []
+        for item, duration_sec in playable_broll:
+            wanted = str((item.get("metadata") or {}).get("scene_segment_id") or "")
+            index = segment_index.get(wanted)
+            if index is None or index in pinned:
+                unpinned.append((item, duration_sec))
+                continue
+            pinned[index] = (item, duration_sec)
+        remaining = iter(unpinned)
+        paired: list[tuple[dict[str, Any], tuple[dict[str, Any], float]]] = []
+        for index, segment in enumerate(segments):
+            chosen = pinned.get(index) or next(remaining, None)
+            if chosen is not None:
+                paired.append((segment, chosen))
+        return paired
+
+    @staticmethod
     def _candidate_range_is_usable(candidate: dict[str, Any], duration_sec: float) -> bool:
         target_range = candidate.get("target_range") or {}
         try:
@@ -1635,7 +1947,9 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         playable_broll = [(item, self._probe_playable_broll_duration(project_id=project_id, asset=item)) for item in assets if item["asset_type"] == AssetType.BROLL_VIDEO.value]
         playable_broll = [(item, duration_sec) for item, duration_sec in playable_broll if duration_sec is not None]
         broll = []
-        for index, (segment, (item, duration_sec)) in enumerate(zip(segments, playable_broll)):
+        for index, (segment, (item, duration_sec)) in enumerate(
+            self._pair_broll_with_segments(segments=segments, playable_broll=playable_broll)
+        ):
             # Task 23: a ten-minute take is not usable from its first five
             # seconds, so pick a settled scene window when analysis found one.
             # Falls back to the head of the clip for unanalyzed footage.
@@ -2242,6 +2556,27 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
                 json.dumps(segments, ensure_ascii=True),
             ),
         )
+        # **대본을 고치고 다시 분석할 수 있어야 한다**(실측 2026-09-06).
+        # 장면 id는 매번 `seg_001`부터 다시 세는데 저장이 순수 INSERT라
+        # 두 번째 분석이 `segments_pkey` 충돌로 500을 냈다. 막으려던 것이
+        # 아니었다 -- 파일 산출물 쪽은 오히려 재실행을 전제한다
+        # (`segment_analysis_002.json`처럼 실행마다 새 파일을 만든다).
+        #
+        # **이번 분석에 없는 옛 장면은 지운다.** 장면이 다섯에서 셋으로 줄면
+        # `seg_004`·`seg_005`가 남아 다음 타임라인에 옛 대사가 섞인다.
+        # **먼저 지우고 다시 넣는다.** `ON CONFLICT`를 쓰지 않는 이유는 두 엔진의
+        # 기본키가 다르기 때문이다 -- SQLite는 `segment_id` 하나, Postgres는
+        # `(project_id, segment_id)`라 충돌 대상 문법이 갈린다. 지우고 넣으면
+        # 두 곳에서 똑같이 돌고, "재분석은 장면 집합을 갈아 끼운다"는 뜻도 코드에
+        # 그대로 드러난다.
+        for stale in self.list_segments(project_id=project_id):
+            stale_id = str(stale.get("segment_id") or "")
+            if stale_id:
+                self._execute(
+                    project_id,
+                    "DELETE FROM segments WHERE project_id = ? AND segment_id = ?",
+                    (project_id, stale_id),
+                )
         for index, segment in enumerate(segments, start=1):
             segment_metadata = {
                 "transcript_id": transcript_id,
@@ -3083,6 +3418,12 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
             status="blocked" if review_flags else "draft",
             source_session_id=session_id,
             source_session_revision=session_revision,
+            source_variant_id=(str(timeline.get("source_variant_id")) if timeline.get("source_variant_id") else None),
+            source_variant_revision=(
+                int(timeline["source_variant_revision"])
+                if timeline.get("source_variant_revision") is not None
+                else None
+            ),
         )
 
     def save_review_state(
@@ -3093,6 +3434,8 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         status: str,
         source_session_id: str | None = None,
         source_session_revision: int | None = None,
+        source_variant_id: str | None = None,
+        source_variant_revision: int | None = None,
     ) -> dict[str, Any]:
         if status not in {"draft", "blocked", "approved"}:
             raise ValueError(f"Unsupported review status: {status}")
@@ -3134,14 +3477,18 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
                 approved_at,
                 updated_at,
                 source_session_id,
-                source_session_revision
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                source_session_revision,
+                source_variant_id,
+                source_variant_revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(timeline_id) DO UPDATE SET
                 status = excluded.status,
                 approved_at = excluded.approved_at,
                 updated_at = excluded.updated_at,
                 source_session_id = excluded.source_session_id,
                 source_session_revision = excluded.source_session_revision,
+                source_variant_id = excluded.source_variant_id,
+                source_variant_revision = excluded.source_variant_revision,
                 is_current = 1,
                 invalidated_at = NULL,
                 invalidated_reason = NULL
@@ -3154,6 +3501,8 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
                 updated_at,
                 source_session_id,
                 source_session_revision,
+                source_variant_id,
+                source_variant_revision,
             ),
         )
         self.clear_operator_guidance(project_id=project_id, timeline_id=timeline_id)
@@ -4125,11 +4474,49 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         candidate["operator_review_status"] = normalized_decision
         return candidate
 
+    def get_review_state_if_timeline_started(
+        self, *, project_id: str, timeline_id: str
+    ) -> dict[str, Any] | None:
+        """Tell "no timeline yet" apart from "timeline exists, review missing".
+
+        `get_review_state` alone can't -- it raises `KeyError` either way.
+        This answers both in one query, since the caller sits on a hot path.
+
+        A session's `timeline_id` legitimately has no `timelines` row yet
+        for two real, current product paths: a blank pre-draft session
+        (`blank_editing_session.py`) and a pasted-script draft session
+        (`script_draft_session.py`) -- neither has produced a real timeline
+        to review, so this returns `None`. Every path that DOES write a
+        `timelines` row (`save_timeline_run`, the atomic draft bundle) also
+        writes its `review_approvals` row in the same call; a `timelines`
+        row existing with no matching review row is a genuine data
+        inconsistency, and this raises `KeyError` for that, same as
+        `get_review_state` does.
+        """
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT t.timeline_id, t.project_id, r.status, r.approved_at, r.updated_at, r.source_session_id, r.source_session_revision, r.source_variant_id, r.source_variant_revision, r.is_current, r.invalidated_at, r.invalidated_reason
+            FROM timelines t
+            LEFT JOIN review_approvals r ON r.project_id = t.project_id AND r.timeline_id = t.timeline_id
+            WHERE t.project_id = ? AND t.timeline_id = ?
+            """,
+            (project_id, timeline_id),
+        )
+        if row is None:
+            return None
+        if row["status"] is None:
+            raise KeyError(f"Review state not found: {timeline_id}")
+        payload = dict(row)
+        payload["status"] = str(payload.get("status") or "").strip().lower()
+        payload["is_current"] = bool(payload.get("is_current"))
+        return payload
+
     def get_review_state(self, *, project_id: str, timeline_id: str) -> dict[str, Any]:
         row = self._fetchone(
             project_id,
             """
-            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT timeline_id, project_id, status, approved_at, updated_at, source_session_id, source_session_revision, source_variant_id, source_variant_revision, is_current, invalidated_at, invalidated_reason
             FROM review_approvals
             WHERE project_id = ? AND timeline_id = ?
             """,
@@ -4501,6 +4888,7 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         source_session_revision: int | None = None,
         source_session_absent: bool = False,
         source_fence: Callable[[sqlite3.Connection], bool] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Publish a final MP4 only while its durable source lineage is current.
 
@@ -4600,7 +4988,7 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
                     "final_render",
                     file_uri,
                     "succeeded",
-                    json.dumps({}, ensure_ascii=True),
+                    json.dumps(metadata or {}, ensure_ascii=True),
                     created_at,
                     source_session_id,
                     source_session_revision,
@@ -4626,7 +5014,7 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         row = self._fetchone(
             project_id,
             """
-            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
+            SELECT export_id, project_id, timeline_id, export_type, file_uri, status, metadata_json, created_at, source_session_id, source_session_revision, is_current, invalidated_at, invalidated_reason
             FROM exports
             WHERE project_id = ? AND export_id = ?
             """,
@@ -4637,6 +5025,18 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
+        try:
+            metadata = json.loads(row["metadata_json"] or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        has_sound = metadata.get("has_sound")
+        verdict = metadata.get("owner_verdict")
+        # 잰 지표와 owner 판단을 갈라서 돌려준다. 기계가 잰 것과 사람이 정한 것을
+        # 섞으면 나중에 무엇을 근거로 배웠는지 알 수 없다.
+        quality_facts = {
+            key: value for key, value in metadata.items()
+            if key not in {"owner_verdict", "owner_verdict_note", "owner_verdict_at"}
+        }
         return {
             "export_id": row["export_id"],
             "timeline_id": row["timeline_id"],
@@ -4649,7 +5049,54 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
             "is_current": bool(row["is_current"]),
             "invalidated_at": row["invalidated_at"],
             "invalidated_reason": row["invalidated_reason"],
+            # 옛 완성본은 잰 적이 없다. 그때는 None으로 두어 화면이 경고하지 않는다.
+            "has_sound": bool(has_sound) if isinstance(has_sound, bool) else None,
+            "quality_facts": quality_facts,
+            # 판단하지 않은 것과 나쁘다는 것은 다르다.
+            "owner_verdict": str(verdict) if isinstance(verdict, str) and verdict else None,
+            "owner_verdict_note": metadata.get("owner_verdict_note") or None,
+            "owner_verdict_at": metadata.get("owner_verdict_at") or None,
         }
+
+    def record_final_render_verdict(
+        self,
+        *,
+        project_id: str,
+        export_id: str,
+        verdict: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """완성본에 대한 owner의 판단을 그 완성본 옆에 남긴다.
+
+        기계가 잰 지표만으로는 "좋은 영상"을 배울 수 없다. 이 라벨이 학습 재료다.
+        렌더 기록을 지우거나 덮어쓰지 않고 metadata에 얹기만 한다.
+        """
+        allowed = {"good", "bad"}
+        if verdict not in allowed:
+            raise ValueError(f"final_render_verdict must be one of {sorted(allowed)}")
+        connection = self._connection(project_id)
+        try:
+            row = connection.execute(
+                "SELECT metadata_json FROM exports WHERE project_id = ? AND export_id = ?",
+                (project_id, export_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Export not found: {export_id}")
+            try:
+                metadata = json.loads(row["metadata_json"] or "{}")
+            except json.JSONDecodeError:
+                metadata = {}
+            metadata["owner_verdict"] = verdict
+            metadata["owner_verdict_note"] = (note or "").strip() or None
+            metadata["owner_verdict_at"] = self._now_iso()
+            connection.execute(
+                "UPDATE exports SET metadata_json = ? WHERE project_id = ? AND export_id = ?",
+                (json.dumps(metadata, ensure_ascii=True), project_id, export_id),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        return {"export_id": export_id, "owner_verdict": verdict}
 
     def save_capcut_draft_export(
         self,
@@ -7329,7 +7776,13 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         file_path = self.resolve_storage_uri(project_id=project_id, storage_uri=str(row["file_uri"]))
         if not file_path.exists():
             raise KeyError(f"Export artifact missing: {export_id}")
-        payload = json.loads(file_path.read_text(encoding="utf-8"))
+        # 이 함수는 CapCut 초안처럼 JSON 매니페스트를 담은 출력만 읽는다. 완성본은
+        # mp4라 텍스트로 읽으면 디코딩이 깨지고, 그 오류가 그대로 사용자에게
+        # 나갔다. 완성본 행은 `get_final_render_export`가 따로 읽는다.
+        try:
+            payload = json.loads(file_path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise KeyError(f"Export is not a readable manifest: {export_id}") from exc
         payload["provider_trace"] = payload.get("provider_trace") or build_provider_trace(final_provider="static_fallback")
         payload["metadata"] = json.loads(row["metadata_json"] or "{}")
         payload["created_at"] = row["created_at"]
@@ -7402,6 +7855,8 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         timeline_review_flags: list[dict[str, Any]],
         timeline_applied_recommendations: list[dict[str, Any]] | None = None,
         timeline_pending_recommendations: list[dict[str, Any]] | None = None,
+        source_variant_id: str | None = None,
+        source_variant_revision: int | None = None,
     ) -> dict[str, Any]:
         if timeline_applied_recommendations is not None or timeline_pending_recommendations is not None:
             applied_candidates: list[dict[str, Any]] = []
@@ -7497,6 +7952,8 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         return {
             "project_id": project_id,
             "timeline_id": timeline_id,
+            "source_variant_id": source_variant_id,
+            "source_variant_revision": source_variant_revision,
             "review_status": review_status,
             "segments": segments,
             "applied_recommendations": applied,
@@ -8095,6 +8552,7 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
             self._ensure_director_hermes_run_context_columns(connection)
             self._ensure_creation_brief_columns(connection)
             self._ensure_exact_preview_columns(connection)
+            self._ensure_proposal_preview_columns(connection)
             self._ensure_artifact_freshness_triggers(connection)
             connection.commit()
             connection.row_factory = sqlite3.Row
@@ -8162,6 +8620,11 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(exact_preview_renders)").fetchall()}
         if columns and "duration_sec" not in columns:
             connection.execute("ALTER TABLE exact_preview_renders ADD COLUMN duration_sec REAL")
+
+    def _ensure_proposal_preview_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(proposal_preview_renders)").fetchall()}
+        if columns and "claimed_at" not in columns:
+            connection.execute("ALTER TABLE proposal_preview_renders ADD COLUMN claimed_at TEXT")
 
     def _ensure_director_message_metadata_column(self, connection: sqlite3.Connection) -> None:
         columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(director_messages)").fetchall()}
@@ -8406,6 +8869,12 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
                 ):
                     if column not in existing:
                         connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            review_columns = {
+                str(row[1]) for row in connection.execute("PRAGMA table_info(review_approvals)").fetchall()
+            }
+            for column, declaration in (("source_variant_id", "TEXT"), ("source_variant_revision", "INTEGER")):
+                if column not in review_columns:
+                    connection.execute(f"ALTER TABLE review_approvals ADD COLUMN {column} {declaration}")
             for statement in ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS:
                 connection.execute(statement)
             if owns_transaction:
@@ -8622,6 +9091,12 @@ class LocalProjectStore(YujinMemoryMixin, MediaAnalysisMixin, HermesCapabilityMi
             "narration_alignment_required",
             "stale_proposal_source_script_segment_ids",
             "output_freshness",
+            # 트랙 눈·음소거. 켠 적이 없으면 아예 없는 칸이라 옛 저장분도
+            # 그대로 읽힌다(`track_states.py`가 없는 값을 "전부 기본"으로 본다).
+            "track_states",
+            # 완성본에 실을 자막 언어. 고른 적이 없으면 없는 칸이고, 그때는
+            # 원본(한국어)으로 나간다.
+            "caption_language",
         ):
             if key in session_payload:
                 payload[key] = session_payload[key]

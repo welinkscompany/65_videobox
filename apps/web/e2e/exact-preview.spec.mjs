@@ -91,6 +91,129 @@ async function openEditor(page, state) {
   await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
 }
 
+async function ensureDockOpen(page, name) {
+  const workbench = page.getByRole("region", { name: "편집 작업판" });
+  await expect.poll(async () => Number(await workbench.getAttribute("data-available-workbench-width"))).toBeGreaterThan(0);
+  if (await page.getByRole("complementary", { name }).count()) return;
+  await page.getByRole("button", { name }).click();
+}
+
+test("a bigger screen never shrinks the preview, and extra screen height goes to the timeline", async ({ page }) => {
+  const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
+  const measure = () => page.evaluate(() => {
+    const video = document.querySelector(".vb-preview-stage__media-shell video");
+    const shell = document.querySelector(".vb-preview-stage__media-shell");
+    const timeline = document.querySelector(".vb-editor-workbench__timeline");
+    if (!video || !shell || !timeline) throw new Error("preview or timeline is missing");
+    return {
+      videoHeight: video.getBoundingClientRect().height,
+      shellHeight: shell.getBoundingClientRect().height,
+      timelineHeight: timeline.getBoundingClientRect().height,
+    };
+  });
+  const at = async (width, height) => {
+    await page.setViewportSize({ width, height });
+    await expect.poll(async () => (await measure()).videoHeight).toBeGreaterThan(0);
+    return measure();
+  };
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openEditor(page, state);
+  await expect.poll(() => page.locator(".vb-preview-stage__media-shell video").evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+
+  // 같은 높이에서 폭만 넓힌다. 타임라인이 먹는 높이는 폭과 아무 상관이 없어야
+  // 하는데, 예전에는 1499px를 경계로 상한이 두 벌이라 1600x900이 1440x900보다
+  // 미리보기를 107px 작게 그렸다. 옛 가드는 1440x900과 1920x**1080**만 비교해서
+  // 늘어난 화면 높이에 가려 이걸 놓쳤다 -- 높이를 고정해야 보인다.
+  const sameHeight = [await measure(), await at(1500, 900), await at(1600, 900), await at(1920, 900)];
+  for (const wider of sameHeight.slice(1)) expect(wider.videoHeight).toBeCloseTo(sameHeight[0].videoHeight, 0);
+
+  // 화면이 높아지면 미리보기는 줄지 않고, 늘어난 높이는 타임라인이 가져간다
+  // (owner 승인 2026-08-17: 캡컷처럼 아래쪽을 타임라인이 쓴다).
+  const medium = sameHeight[0];
+  const fullHd = await at(1920, 1080);
+  expect(fullHd.videoHeight).toBeGreaterThanOrEqual(medium.videoHeight);
+  expect(fullHd.timelineHeight).toBeGreaterThan(medium.timelineHeight);
+
+  // 2026-08-15에 출력 변형을 접어 미리보기 판을 되찾았을 때 넣은 줄이다. 그때는
+  // `400px`라는 숫자로 적었는데, 타임라인이 아래쪽을 넉넉히 쓰게 되자 그 숫자가
+  // 승인된 정책보다 먼저 걸렸다. 지키려는 것은 숫자가 아니라 **미리보기가 여전히
+  // 작업판에서 가장 큰 한 칸**이라는 것이다. 승인된 하한(화면 면적 20.8%)은 아래
+  // `whole timeline` 가드가 실제 면적으로 잰다.
+  const workbenchHeight = await page.locator(".vb-editor-workbench").evaluate((node) => node.getBoundingClientRect().height);
+  expect(fullHd.shellHeight).toBeGreaterThan(workbenchHeight / 3);
+
+  // 폰에서도 **둘 다 보여야 한다.** 2026-08-17에 타임라인 상한을 40vh로 올렸을 때
+  // 390x844에서 타임라인이 364px를 먹고 미리보기 영상이 **0px**가 됐다 -- 단위
+  // 테스트도 스냅샷도 초록이었다. 그 스냅샷은 미리보기가 빈 상태라 영상이 없었고,
+  // 그래서 무너질 것이 없었다. 실제 영상을 올려놓고 높이를 재야 보인다.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toBeVisible();
+  await expect(page.locator(".vb-preview-stage__media-shell video")).toHaveCount(1);
+  await expect.poll(async () => (await measure()).videoHeight).toBeGreaterThan(0);
+  const phone = await measure();
+  expect(phone.videoHeight).toBeGreaterThan(40);
+  expect(phone.timelineHeight).toBeGreaterThan(150);
+  // 40px는 넉넉해서 고른 값이 아니라 **지금 실제로 나오는 값(약 60px)** 아래에
+  // 둔 선이다. 390px에서는 미리보기 판의 글자 줄 여섯 개가 줄바꿈되면서 292px짜리
+  // 판에서 230px를 가져간다 -- 남은 자리가 그것뿐이다. 이걸 더 키우려면 그 글자
+  // 줄들을 좁은 화면에서 어떻게 접을지 정해야 하고, 그건 owner 판단이다.
+  // 여기서 지키는 것은 "0px로 무너지지 않는다"이다.
+});
+
+test("a Full HD screen shows the whole timeline without hiding it in its own scroll, and still keeps the approved preview size", async ({ page }) => {
+  const state = {
+    current: manifest({
+      tracks: [
+        { track_id: "narration", track_type: "narration", clips: [{ clip_id: "n1", segment_id: "segment-1", clip_type: "narration", asset_id: "a1", asset_uri: "local://a1", start_sec: 0, end_sec: 6, media_controls: {} }, { clip_id: "n2", segment_id: "segment-2", clip_type: "narration", asset_id: "a1", asset_uri: "local://a1", start_sec: 6, end_sec: 12, media_controls: {} }] },
+        { track_id: "broll", track_type: "broll", clips: [{ clip_id: "b1", segment_id: "segment-1", clip_type: "broll", asset_id: "a2", asset_uri: "local://a2", start_sec: 1, end_sec: 5, media_controls: {} }] },
+      ],
+    }),
+    retryBodies: [],
+  };
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await openEditor(page, state);
+  await expect.poll(() => page.locator(".vb-preview-stage__media-shell video").evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
+
+  const seen = await page.evaluate(() => {
+    const timeline = document.querySelector(".vb-editor-workbench__timeline");
+    const video = document.querySelector(".vb-preview-stage__media-shell video").getBoundingClientRect();
+    return {
+      hidden: timeline.scrollHeight - timeline.clientHeight,
+      areaPercent: (video.width * video.height) / (window.innerWidth * window.innerHeight) * 100,
+    };
+  });
+
+  // owner가 2026-08-17에 승인한 것은 "타임라인을 아래쪽으로 넉넉히"였다. 그때 든
+  // 이유가 이것이다 -- **눈금과 트랙이 자체 스크롤 안에 숨는다.** 숨은 픽셀이 0이어야
+  // 승인한 것이 실제로 된 것이다.
+  expect(seen.hidden).toBeLessThanOrEqual(1);
+  // 같은 승인문이 감수 사항으로 "미리보기 세로 공간이 줄어든다"를 적었고, 조건은
+  // 하나였다 -- **예전 8.5% 수준으로 되돌아가지 않는다.** 2026-07-22에 되찾은
+  // 수준이 화면 면적의 20.8%이므로 그것을 바닥으로 둔다.
+  expect(seen.areaPercent).toBeGreaterThanOrEqual(20.8);
+
+  // **두 도크를 다 편 상태도 잰다.** 오른쪽까지 열면 미리보기 폭이 320px 줄어
+  // 면적이 확 떨어진다 -- 여기서는 18.9%로 위의 20.8% 아래다.
+  //
+  // 그래서 위 하한을 낮추지 않았고, 타임라인을 도로 줄이지도 않았다. 둘은 이
+  // 조합에서 **동시에 만족시킬 수 없다**: 1920x1080에서 오른쪽 도크가 폭을 가져가면
+  // "눈금과 트랙이 다 보인다"와 "면적 20.8%"가 서로를 배제한다.
+  //
+  // 20.8%는 2026-07-22에 **기본 배치에서** 되찾은 값이고, 오른쪽 도크를 여는 것은
+  // 창작자가 미리보기 폭을 참고 패널과 바꾸겠다고 고른 것이다. 그 선택까지 같은
+  // 하한으로 묶으면 승인문이 실제로 정한 것보다 좁게 잠근다. 승인문이 건 조건은
+  // 하나였다 -- **예전 8.5% 수준으로 되돌아가지 않을 것.** 그것을 지킨다.
+  await ensureDockOpen(page, "세부 정보");
+  await expect(page.getByRole("region", { name: "편집 작업판" })).toHaveAttribute("data-editor-density", "desktop-both");
+  const bothDocks = await page.evaluate(() => {
+    const video = document.querySelector(".vb-preview-stage__media-shell video").getBoundingClientRect();
+    return (video.width * video.height) / (window.innerWidth * window.innerHeight) * 100;
+  });
+  expect(bothDocks).toBeGreaterThanOrEqual(15);
+});
+
 test("current exact proxy plays a valid local MP4, requests bytes, and maps a native seek to the timeline", async ({ page }) => {
   const state = { current: manifest(), retryBodies: [], rangeRequests: [] };
   await openEditor(page, state);
@@ -103,10 +226,48 @@ test("current exact proxy plays a valid local MP4, requests bytes, and maps a na
   await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_METADATA)).toBe(true);
   await expect.poll(() => video.evaluate((node) => node.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA)).toBe(true);
   await expect.poll(() => video.evaluate((node) => node.duration)).toBeGreaterThan(1);
+  const previewGeometry = await page.evaluate(() => {
+    const preview = document.querySelector(".vb-editor-workbench__preview");
+    const media = document.querySelector(".vb-preview-stage__media-shell");
+    const video = document.querySelector(".vb-preview-stage__media-shell video");
+    const box = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return { top: rect.top, height: rect.height, scrollHeight: node.scrollHeight };
+    };
+    if (!preview || !media || !video) throw new Error("preview geometry nodes are missing");
+    const mediaBox = media.getBoundingClientRect();
+    const videoBox = video.getBoundingClientRect();
+    return {
+      previewClientHeight: preview.clientHeight,
+      previewScrollHeight: preview.scrollHeight,
+      mediaClientHeight: media.clientHeight,
+      videoWidth: videoBox.width,
+      videoHeight: videoBox.height,
+      videoTop: videoBox.top,
+      videoBottom: videoBox.bottom,
+      mediaTop: mediaBox.top,
+      mediaBottom: mediaBox.bottom,
+      workbench: box(".vb-editor-workbench"),
+      toolbar: box(".vb-editor-workbench__toolbar"),
+      body: box(".vb-editor-workbench__body"),
+      variants: box(".vb-editor-variants"),
+      timeline: box(".vb-editor-workbench__timeline"),
+      panels: box(".vb-editor-workbench__panels"),
+      stagePanel: box(".vb-editor-workbench__stage-panel"),
+      stage: box(".vb-preview-stage"),
+    };
+  });
+  expect(previewGeometry.previewScrollHeight).toBeLessThanOrEqual(previewGeometry.previewClientHeight + 1);
+  expect(previewGeometry.mediaClientHeight).toBeGreaterThan(0);
+  expect(previewGeometry.videoWidth).toBeGreaterThan(0);
+  expect(previewGeometry.videoHeight).toBeGreaterThanOrEqual(120);
+  expect(previewGeometry.videoTop).toBeGreaterThanOrEqual(previewGeometry.mediaTop - 1);
+  expect(previewGeometry.videoBottom).toBeLessThanOrEqual(previewGeometry.mediaBottom + 1);
   // A real user gesture calls the component's native HTMLMediaElement.play()
   // path, avoiding an autoplay-policy bypass in the test harness.
   const playbackButton = page.getByRole("button", { name: "재생 또는 일시정지" });
-  await playbackButton.scrollIntoViewIfNeeded();
   await expect.poll(() => page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY)));
   }))).toBeGreaterThanOrEqual(0);
@@ -118,7 +279,9 @@ test("current exact proxy plays a valid local MP4, requests bytes, and maps a na
   expect(state.rangeRequests).toContainEqual(expect.stringMatching(/^bytes=\d+-/));
   await video.evaluate((node) => { node.currentTime = 1.5; });
   await expect.poll(() => video.evaluate((node) => node.currentTime)).toBeCloseTo(1.5, 1);
-  await expect(page.getByText("타임라인 3.5초", { exact: true })).toBeVisible();
+  // 재생 위치와 전체 길이를 함께 보여 준다. 전체 길이는 출력 형식에 따라 붙으므로
+  // 위치 값만 완전하게 지킨다.
+  await expect(page.locator(".vb-preview-stage__playback output")).toContainText("타임라인 3.5");
   await expect(page.locator("audio, video")).toHaveCount(1);
 });
 
@@ -166,8 +329,12 @@ test("audition replaces the exact player without autoplay and can return to exac
   };
   await openEditor(page, state);
 
-  await page.getByRole("button", { name: "B-roll · segment-1 원본 열기" }).click();
-  const audition = page.getByLabel("B-roll · segment-1 소스 미리보기");
+  // 이 테스트가 지키는 것은 **원본 미리보기가 편집본 플레이어를 대체하고 다시
+  // 돌아오는가**다. 미디어 열을 여는 클릭은 그 원본 버튼에 닿기 위한 수단이었는데,
+  // 이제 그 열은 기본으로 펴져 있다 -- 누르면 오히려 닫혀 버튼이 사라진다.
+  await expect(page.getByRole("complementary", { name: "미디어" })).toBeVisible();
+  await page.getByRole("button", { name: "B-roll · 1번째 장면 원본 열기" }).click();
+  const audition = page.getByLabel("B-roll · 1번째 장면 소스 미리보기");
   await expect(audition).toHaveCount(1);
   await expect(audition).not.toHaveAttribute("autoplay");
   await expect(audition).toHaveJSProperty("autoplay", false);

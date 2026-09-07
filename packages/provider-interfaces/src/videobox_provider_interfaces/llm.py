@@ -13,6 +13,18 @@ class LLMTaskType(str, Enum):
     ALIGNMENT_REVIEW = "alignment_review"
     OPERATOR_COPY = "operator_copy"
     YUJIN_CONVERSATION = "yujin_conversation"
+    # 대본 한 줄을 그림 만드는 프로그램이 알아듣는 영어 묘사로 바꾼다.
+    # 한국어를 그대로 넣으면 전혀 다른 그림이 나온다 -- 2026-08-21 실측.
+    SCENE_IMAGE_PROMPT = "scene_image_prompt"
+    # 주제 한 줄에서 대본 초안을 쓴다. **구조화 출력으로만 부른다** --
+    # 자유형 대화로 물으면 생각 과정이 영어로 새어 나온다(2026-08-21 실측).
+    SCRIPT_DRAFT = "script_draft"
+    # 자막을 다른 언어로 옮긴다. 원본은 그대로 두고 나란히 쌓는다.
+    CAPTION_TRANSLATION = "caption_translation"
+    # 인포그래픽 한 장을 HTML로 쓴다. **대본보다 훨씬 길다** -- 로컬 런타임
+    # 기본 상한 30초로는 모자라서 이 일만 따로 상한을 준다
+    # (`infographic_service`, 2026-09-07 실측).
+    INFOGRAPHIC_HTML = "infographic_html"
 
 
 @dataclass(slots=True, frozen=True)

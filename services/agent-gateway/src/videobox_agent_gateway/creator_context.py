@@ -131,6 +131,7 @@ class SupportedControl(_StrictModel):
         "voice",
         "overlay",
         "output_check",
+        "output_variant",
     ]
     mode: Literal["recommendation_only", "read_only"]
 
@@ -169,7 +170,14 @@ class GatewayCreatorContext(_StrictModel):
         max_length=5,
     )
     timeline_summary: TimelineSummary
-    supported_controls: tuple[SupportedControl, ...] = Field(max_length=7)
+    supported_controls: tuple[SupportedControl, ...] = Field(max_length=8)
+    current_surface: Literal["plan", "assets", "footage", "edit", "review", "output"] = "edit"
+    selection_kind: Literal["none", "segment", "asset", "proposal", "variant"] = "none"
+    master_session_id: str | None = Field(default=None, min_length=1, max_length=256)
+    master_session_revision: int | None = Field(default=None, ge=1, strict=True)
+    variant_id: str | None = Field(default=None, min_length=1, max_length=256)
+    variant_kind: Literal["horizontal", "vertical_full", "vertical_highlight"] | None = None
+    variant_revision: int | None = Field(default=None, ge=1, strict=True)
 
     @field_validator("memories")
     @classmethod
@@ -372,8 +380,20 @@ class CreatorContextLedger:
 
 
 def canonical_context_json(context: GatewayCreatorContext) -> str:
+    payload = context.model_dump(mode="json")
+    for field, default in (
+        ("current_surface", "edit"),
+        ("selection_kind", "none"),
+        ("master_session_id", None),
+        ("master_session_revision", None),
+        ("variant_id", None),
+        ("variant_kind", None),
+        ("variant_revision", None),
+    ):
+        if payload.get(field) == default:
+            payload.pop(field, None)
     return json.dumps(
-        context.model_dump(mode="json"),
+        payload,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,

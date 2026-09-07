@@ -1,0 +1,12 @@
+{
+  "name": "videobox-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "VideoBox native window shell (Tauri) — points at the owner-ready container stack.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

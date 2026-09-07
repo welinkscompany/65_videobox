@@ -118,6 +118,50 @@ describe("VoiceTtsSettings", () => {
     expect(generate).not.toHaveBeenCalled();
   });
 
+  /** 목소리는 지우면 **되돌릴 길이 없다.** 이름 칸과 버튼이 줄줄이 붙어 있어
+   *  옆줄을 누르기 쉬운데, 한 번 눌렀다고 바로 지우면 60초를 다시 읽어야 한다. */
+  it("지우기는 한 번 더 묻고, 그대로 두기를 고르면 지우지 않는다", async () => {
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([
+      { asset_id: "sample_secret_one", asset_type: "voice_sample_audio", storage_uri: "local://voice/one.wav" },
+    ]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+    const remove = vi.spyOn(api, "deleteVoiceSample").mockResolvedValue(undefined);
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 1 지우기" }));
+    expect(screen.getByText("정말 지울까요? 되돌릴 수 없어요.")).toBeVisible();
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "그대로 두기" }));
+    await waitFor(() => expect(screen.queryByText("정말 지울까요? 되돌릴 수 없어요.")).toBeNull());
+    expect(remove).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 1 지우기" }));
+    fireEvent.click(screen.getByRole("button", { name: "내 목소리 1 정말 지우기" }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith("project-a", "sample_secret_one"));
+  });
+
+  /** 창작자가 붙인 이름이 있으면 **목록과 고르는 칸이 같은 이름**을 보여야 한다. */
+  it("붙인 이름이 있으면 목록과 고르는 칸이 같은 이름을 보여 준다", async () => {
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([
+      {
+        asset_id: "sample_secret_one",
+        asset_type: "voice_sample_audio",
+        storage_uri: "local://voice/one.wav",
+        metadata: { display_name: "노마드루이스 목소리" },
+      },
+    ]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
+    expect(screen.getByLabelText("노마드루이스 목소리 이름")).toBeVisible();
+    expect(screen.getByRole("option", { name: "노마드루이스 목소리" })).toBeVisible();
+  });
+
   it("blocks sample mutations and reload until the initial project read is ready", async () => {
     const initialSamples = deferred<Awaited<ReturnType<typeof api.listVoiceSamples>>>();
     const initialSession = deferred<Awaited<ReturnType<typeof api.getLatestEditingSession>>>();
@@ -195,6 +239,66 @@ describe("VoiceTtsSettings", () => {
     await waitFor(() => expect(listVoiceSamples).toHaveBeenCalledTimes(4));
     expect(screen.getAllByText("내 목소리 1").length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toMatch(/sample_secret|segment_secret|session-project/);
+  });
+
+  /** owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 목소리는
+   *  실제로 등록되고(목록에 반영), 컷 빠르기·색감은 참고용 숫자로만 보여준다. */
+  it("유튜브 링크로 목소리를 가져오면 목록에 반영되고 컷 빠르기·색감을 보여준다", async () => {
+    const listVoiceSamples = vi.spyOn(api, "listVoiceSamples")
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        { asset_id: "sample_from_youtube", asset_type: "voice_sample_audio", storage_uri: "local://voice/youtube.wav" },
+      ]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+    // 비동기로 바뀌었다(owner 결정 2026-08-29, 2회차) -- 시작 요청은 job_id만
+    // 받고, 화면은 그 job_id로 상태를 물어서 결과를 받는다.
+    const startImport = vi.spyOn(api, "startYoutubeReferenceStyleImport").mockResolvedValue({
+      job_id: "job-1",
+      status: "processing",
+    });
+    vi.spyOn(api, "getYoutubeReferenceStyleImportStatus").mockResolvedValue({
+      job_id: "job-1",
+      status: "succeeded",
+      error_detail: null,
+      result: {
+        voice_sample_asset_id: "sample_from_youtube",
+        pacing: { average_clip_duration_sec: 2.4, clip_count: 5, shortest_clip_sec: 1.1, longest_clip_sec: 4.2 },
+        color: { average_brightness: 150, average_colorfulness: 30, warm_cool_bias: 12, sample_count: 8 },
+      },
+    });
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    expect(await screen.findByText("저장한 내 목소리 0개")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("내 유튜브 영상 링크"), {
+      target: { value: "https://youtu.be/dQw4w9WgXcQ" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "유튜브 링크로 배우기" }));
+
+    await waitFor(() => expect(startImport).toHaveBeenCalledWith("project-a", "https://youtu.be/dQw4w9WgXcQ"));
+    expect(await screen.findByText("저장한 내 목소리 1개")).toBeVisible();
+    expect(await screen.findByText(/컷 빠르기: 평균 2\.4초마다 전환/)).toBeVisible();
+    expect(screen.getByText(/색감: 밝기 150\/255, 따뜻한 톤/)).toBeVisible();
+    expect(listVoiceSamples).toHaveBeenCalled();
+  });
+
+  it("유튜브 링크를 가져오지 못하면 이유를 말하고 목록은 그대로 둔다", async () => {
+    vi.spyOn(api, "listVoiceSamples").mockResolvedValue([]);
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(editingSession("project-a"));
+    // 유튜브가 아닌 링크는 다운로드를 걸기 전에 백엔드가 바로 거절한다
+    // (`start_youtube_reference_style_import`의 `is_youtube_url` 확인).
+    vi.spyOn(api, "startYoutubeReferenceStyleImport").mockRejectedValue(new Error("not youtube"));
+
+    render(<VoiceTtsSettings projectId="project-a" />);
+
+    await screen.findByText("저장한 내 목소리 0개");
+    fireEvent.change(screen.getByLabelText("내 유튜브 영상 링크"), {
+      target: { value: "https://vimeo.com/12345" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "유튜브 링크로 배우기" }));
+
+    expect(await screen.findByText(/본인이 올린 유튜브 영상 주소가 맞는지/)).toBeVisible();
+    expect(screen.getByText("저장한 내 목소리 0개")).toBeVisible();
   });
 
   it("keeps the newest A candidate read when an older A success arrives after A to B to A", async () => {

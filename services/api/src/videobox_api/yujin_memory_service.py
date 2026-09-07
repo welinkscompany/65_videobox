@@ -126,14 +126,17 @@ class YujinMemoryService:
         conversation_id: str,
         query: str,
     ) -> tuple[UserApprovedPreference, ...]:
-        if self._gateway is None:
-            return ()
         if not is_yujin_memory_retrieval_query_safe(query):
             return ()
         bounded_query = query.strip()[:280]
         if not bounded_query:
             return ()
+        rows: list[dict] = []
+        result: GatewayMemorySearchResult | None = None
         try:
+            # 이 안에서 실패하는 모든 것(DB 읽기든 게이트웨이 호출이든)은
+            # 같은 하나의 예산 안에서 끝나야 한다 -- 둘로 쪼개면 최악의 경우
+            # 지연이 두 배가 된다.
             async with asyncio.timeout(_RETRIEVAL_TIMEOUT_SECONDS):
                 rows = await asyncio.to_thread(
                     self._store.list_yujin_memory_retrieval_rows,
@@ -147,38 +150,51 @@ class YujinMemoryService:
                 )
                 if not local:
                     return ()
-                raw = await self._gateway.search_memory(
-                    GatewayMemorySearchRequest(
-                        query=bounded_query,
-                        limit=_RETRIEVAL_LIMIT,
+                # 게이트웨이가 아예 없으면(설정 안 됨) 순위를 매길 검색 자체가
+                # 없다. 예전엔 여기서 빈 결과를 돌려줘 owner가 기억을 승인해
+                # 뒀어도 유진이 처음 만난 사람처럼 대화했다 -- 로컬 원본은 늘
+                # 그대로 있으니, 뜻으로 고르지 못할 뿐 **아예 안 꺼내는 것보다는
+                # 낫다**는 owner 판단(2026-08-31)으로 이 폴백을 넣는다. 순위는
+                # 저장 순서(`list_yujin_memory_retrieval_rows`가 이미 정렬해
+                # 준 순서)를 그대로 쓴다 -- 뜻 기반 순위가 아니라는 것을 스스로
+                # 부풀리지 않는다.
+                if self._gateway is not None:
+                    raw = await self._gateway.search_memory(
+                        GatewayMemorySearchRequest(
+                            query=bounded_query,
+                            limit=_RETRIEVAL_LIMIT,
+                        )
                     )
-                )
-                payload = (
-                    raw.model_dump(mode="python")
-                    if hasattr(raw, "model_dump")
-                    else raw
-                )
-                if (
-                    isinstance(payload, dict)
-                    and isinstance(payload.get("memories"), list)
-                ):
-                    payload = {
-                        **payload,
-                        "memories": tuple(payload["memories"]),
-                    }
-                result = GatewayMemorySearchResult.model_validate(payload)
+                    payload = (
+                        raw.model_dump(mode="python")
+                        if hasattr(raw, "model_dump")
+                        else raw
+                    )
+                    if (
+                        isinstance(payload, dict)
+                        and isinstance(payload.get("memories"), list)
+                    ):
+                        payload = {
+                            **payload,
+                            "memories": tuple(payload["memories"]),
+                        }
+                    result = GatewayMemorySearchResult.model_validate(payload)
         except asyncio.CancelledError:
             raise
         except Exception:
-            # 조회 실패와 "기억이 원래 없음"이 화면에서 똑같이 보인다. 빈 결과를
-            # 돌려주는 동작은 그대로 두되, 왜 비었는지는 남긴다.
+            # 조회 실패와 "기억이 원래 없음"이 화면에서 똑같이 보인다. 로컬
+            # 원본은 있으니(위에서 `local`이 비었으면 이미 돌아갔다) 저장
+            # 순서 폴백으로 내려간다 -- 위 주석과 같은 이유.
             _LOGGER.warning(
-                "유진 기억 조회가 실패해 빈 결과를 돌려줍니다 (project=%s, conversation=%s).",
+                "유진 기억 조회가 실패해 저장 순서 폴백으로 돌려줍니다 (project=%s, conversation=%s).",
                 project_id,
                 conversation_id,
                 exc_info=True,
             )
-            return ()
+            return self._cap_preferences(self._local_fallback_order(rows))
+
+        if result is None:
+            return self._cap_preferences(self._local_fallback_order(rows))
 
         matched: dict[tuple[str, str], UserApprovedPreference] = {}
         for item in result.memories:
@@ -196,10 +212,17 @@ class YujinMemoryService:
                 category=item.category,
                 text=item.text,
             )
+        return self._cap_preferences(
+            matched[key] for key in sorted(matched)
+        )
+
+    @staticmethod
+    def _cap_preferences(
+        preferences,
+    ) -> tuple[UserApprovedPreference, ...]:
         output: list[UserApprovedPreference] = []
         total = 0
-        for key in sorted(matched):
-            item = matched[key]
+        for item in preferences:
             if len(output) >= _RETRIEVAL_LIMIT:
                 break
             next_total = total + len(item.text)
@@ -208,6 +231,32 @@ class YujinMemoryService:
             output.append(item)
             total = next_total
         return tuple(output)
+
+    @staticmethod
+    def _local_fallback_order(rows):
+        """뜻 기반 순위가 없을 때 쓸 순서.
+
+        `list_yujin_memory_retrieval_rows`가 이미 project_id로 걸러서(SQL의
+        `WHERE project_id = ?`) `category, proposed_text, candidate_id` 순으로
+        정렬해 돌려준다 -- 새 검색을 또 만들지 않고 그 순서를 그대로 쓴다.
+        승인·저장 상태 확인은 `_eligible_local_memories`와 같은 기준이다(한쪽만
+        확인이 아니라 저장 폴백에서도 owner가 승인한 것만 나가야 한다).
+        """
+        for row in rows if isinstance(rows, (list, tuple)) else ():
+            if not isinstance(row, dict):
+                continue
+            if row.get("status") != "approved" or row.get("storage_status") != "stored":
+                continue
+            try:
+                text = str(row["text"])
+                category = row["category"]
+            except (KeyError, TypeError):
+                continue
+            yield UserApprovedPreference(
+                kind="user_approved_preference",
+                category=category,
+                text=text,
+            )
 
     @staticmethod
     def _eligible_local_memories(
@@ -228,9 +277,11 @@ class YujinMemoryService:
             # 소속·승인 확인을 먼저 한다. 걸러 낼 줄까지 "읽지 못했다"고
             # 세면 기록이 시끄러워진다. 두 조건을 모두 통과해야 채택되는
             # 것은 그대로다.
+            # 대화는 가리지 않는다 -- 기억은 대화보다 오래 산다. 프로젝트와
+            # 승인·저장 상태는 그대로 본다: 이 대조가 게이트웨이가 돌려준 항목
+            # 중 owner가 실제로 승인한 것만 채택하게 만드는 문이다(CLAUDE.md §6).
             if (
                 row.get("project_id") != project_id
-                or row.get("conversation_id") != conversation_id
                 or row.get("status") != "approved"
                 or row.get("storage_status") != "stored"
             ):
@@ -284,8 +335,10 @@ class YujinMemoryService:
             return current
         if current["storage_status"] == "deleted":
             raise ValueError("memory_candidate_deleted")
+        # 켜져 있지 않은 것과 부르다 실패한 것은 owner가 할 일이 다르다.
+        # 하나는 켜는 일이고 하나는 다시 눌러 보는 일이다 -- 이름을 나눈다.
         if self._gateway is None:
-            raise MemoryStoreUnavailable("memory_store_unavailable")
+            raise MemoryStoreUnavailable("memory_not_configured")
         claim_token = "claim-" + hashlib.sha256(uuid.uuid4().bytes).hexdigest()
         claim = self._store.claim_yujin_memory_store(
             project_id=project_id,
@@ -378,8 +431,9 @@ class YujinMemoryService:
             project_id=project_id,
             candidate_id=candidate_id,
         )
+        # 위와 같은 이유로 같은 이름을 쓴다.
         if self._gateway is None:
-            raise MemoryStoreUnavailable("memory_delete_unavailable")
+            raise MemoryStoreUnavailable("memory_not_configured")
         try:
             delete_state = (
                 self._store.mark_yujin_memory_delete_call_started(

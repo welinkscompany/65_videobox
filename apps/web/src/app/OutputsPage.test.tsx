@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
-import { api } from "../api";
-import { OutputsPage } from "./OutputsPage";
+import { api, ApiRequestError } from "../api";
+import { capcutDraftFailureMessage, finalRenderFailureMessage, OutputsPage, subtitleFailureMessage } from "./OutputsPage";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -170,6 +170,11 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(api.getSubtitle).toHaveBeenCalledWith("project_a", "subtitle-current"));
     expect(await screen.findByText("자막이 준비되었어요.")).toBeVisible();
     expect(renderSubtitle).toHaveBeenCalledTimes(1);
+    // owner 요청(2026-08-28): "srt... 내보내기". 준비된 자막 옆에 실제로
+    // 내려받는 문이 보여야 한다.
+    expect(screen.getByRole("link", { name: "SRT 자막 파일 내려받기" })).toHaveAttribute(
+      "href", "/api/projects/project_a/subtitles/subtitle-current/content",
+    );
   });
 
   it("does not present a subtitle from an older session revision as current", async () => {
@@ -254,6 +259,22 @@ describe("OutputsPage", () => {
 
     await waitFor(() => expect(renderSubtitle).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText("자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument());
+  });
+
+  /** **이유를 담아 두고 곧바로 `refresh()`를 부른다.** 초기화를 그 refresh
+   *  안에 두면 방금 담은 이유가 지워진다 -- 실제로 한 번 그렇게 넣었다가
+   *  잡았다. 초기화는 **누를 때** 한 번만 한다. */
+  it("서버가 자막 시작을 곧바로 거절하면 그 이유를 그 자리에서 말한다", async () => {
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "renderSubtitle").mockRejectedValue(
+      new ApiRequestError("stale_output_asset: editing session revision changed", 409, "/jobs/subtitle-render"),
+    );
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "자막 만들기" }));
+
+    expect(await screen.findByText(/편집본이 그 사이에 바뀌었어요/)).toBeVisible();
   });
 
   it("keeps subtitle failure recoverable until the user explicitly tries again", async () => {
@@ -568,6 +589,11 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(api.getFinalRender).toHaveBeenCalledWith("project_a", "final-current-timeline"));
     expect(await screen.findByLabelText("완성본 재생")).toHaveAttribute("src", "/api/projects/project_a/final-renders/final-current-timeline/content");
     expect(startFinalRender).toHaveBeenCalledTimes(1);
+    // owner 요청(2026-08-28): "오디오만... 내보내기". 완성본 옆에 실제로
+    // 내려받는 문이 보여야 한다.
+    expect(screen.getByRole("link", { name: "오디오만 내려받기" })).toHaveAttribute(
+      "href", "/api/projects/project_a/final-renders/final-current-timeline/audio-content",
+    );
   });
 
   it("reconciles a rejected final request from authoritative current state before showing an error", async () => {
@@ -613,6 +639,29 @@ describe("OutputsPage", () => {
     expect(screen.queryByLabelText("완성본 재생")).not.toBeInTheDocument();
   });
 
+  /** **곧바로 거절당한 경우가 빠져 있었다.** 화면은 실패한 작업의
+   *  `error_message`만 읽는데, 서버가 시작 자체를 거절하면 그 작업이 아예
+   *  안 생긴다. 그 catch가 예외를 통째로 버려서 이유가 사라졌다 -- 계획서
+   *  §7이 적어 둔 그 상황이다("진짜 이유는 API에만 있었다"). */
+  it("서버가 시작을 곧바로 거절하면 그 이유를 그 자리에서 말한다", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "startFinalRender").mockRejectedValue(
+      new ApiRequestError("stale_output_asset: subtitle freshness changed", 409, "/jobs/final-render"),
+    );
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-current-timeline", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-current.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByLabelText("완성본 재생")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "완성본 만들기" }));
+
+    expect(await screen.findByText(/자막을 먼저 만든/)).toBeVisible();
+  });
+
   it("shows a final request error when refresh only returns the same current artifact", async () => {
     stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
     vi.spyOn(api, "startFinalRender").mockRejectedValue(new Error("offline before server"));
@@ -629,6 +678,158 @@ describe("OutputsPage", () => {
 
     expect(await screen.findByText("완성본을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(api.listJobs).toHaveBeenCalledTimes(2);
+  });
+
+  it("warns when the finished video carries no sound", async () => {
+    // 무음 완성본이 아무 말 없이 나가던 문제. 렌더가 실제로 잰 결과가
+    // "소리 없음"이면 내보내기 전에 화면에서 알려야 한다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-silent", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-silent.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true, has_sound: false,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.")).toBeVisible();
+  });
+
+  it("stays quiet about sound when the render carries sound or was not measured", async () => {
+    // 재는 데 실패했을 때 경고를 띄우면 멀쩡한 완성본을 의심하게 된다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-unmeasured", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-unmeasured.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByLabelText("완성본 재생")).toBeVisible();
+    expect(screen.queryByText("완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.")).not.toBeInTheDocument();
+  });
+
+  it("lets the owner say a finished video was good, and remembers it", async () => {
+    // 자기개선의 재료는 기계가 잰 지표 + 사람의 판단이다. 판단을 받을 자리가
+    // 화면에 없으면 라벨이 영영 쌓이지 않는다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    const artifact = {
+      export_id: "final-judged", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+      status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true, has_sound: true,
+    };
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({ job_id: currentFinalJob.job_id, status: "succeeded", render: artifact });
+    const verdict = vi.spyOn(api, "recordFinalRenderVerdict").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: { ...artifact, owner_verdict: "good" },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "이 완성본 좋아요" }));
+
+    await waitFor(() => expect(verdict).toHaveBeenCalledWith("project_a", currentFinalJob.job_id, { verdict: "good" }));
+    expect(await screen.findByText("좋았다고 기록했어요.")).toBeVisible();
+  });
+
+  it("lets the owner make a preview share link for a colleague and shows the url", async () => {
+    // owner 요청(2026-08-28): 프리뷰 공유 링크. 동료가 앱 없이 이 링크만으로 완성본을
+    // 볼 수 있어야 하니, 만든 뒤에는 화면에 그 주소가 그대로 보여야 한다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-shared", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const createPreviewShare = vi.spyOn(api, "createPreviewShare").mockResolvedValue({
+      share_id: "preview-share-1", token: "opaque-token-abc", url: "/preview/opaque-token-abc",
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" }));
+
+    await waitFor(() => expect(createPreviewShare).toHaveBeenCalledWith("project_a", currentFinalJob.job_id));
+    const link = await screen.findByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`);
+    expect(link).toBeVisible();
+  });
+
+  it("lets the owner revoke a preview share link -- code review found no way to take one back", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-shared", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "createPreviewShare").mockResolvedValue({
+      share_id: "preview-share-1", token: "opaque-token-abc", url: "/preview/opaque-token-abc",
+    });
+    const revokePreviewShare = vi.spyOn(api, "revokePreviewShare").mockResolvedValue({ revoked: true });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" }));
+    await screen.findByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`);
+
+    fireEvent.click(screen.getByRole("button", { name: "이 링크 취소하기" }));
+
+    await waitFor(() => expect(revokePreviewShare).toHaveBeenCalledWith("project_a", "preview-share-1"));
+    expect(await screen.findByText("이 링크를 취소했어요. 더 이상 열리지 않아요.")).toBeVisible();
+    expect(screen.queryByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`)).not.toBeInTheDocument();
+  });
+
+  it("saves the format of a video the owner liked, under a name they chose", async () => {
+    // 자동 제작은 "어떻게 만들지"를 여기서 가져간다. 마음에 든 완성본을 봤을 때가
+    // 그 포맷을 남길 유일한 순간이다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-liked", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://f.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const save = vi.spyOn(api, "saveFormatTemplate").mockResolvedValue({
+      template_id: "format_template_1", name: "내 브이로그 포맷", caption_style: {},
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("포맷 이름"), { target: { value: "내 브이로그 포맷" } });
+    fireEvent.click(screen.getByRole("button", { name: "이 포맷 저장하기" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith("project_a", { name: "내 브이로그 포맷", session_id: "session-a" }));
+    expect(await screen.findByText("포맷을 저장했어요. 다음 영상에서 편집 화면의 저장한 포맷에서 고를 수 있어요.")).toBeVisible();
+  });
+
+  it("will not save a format without a name a person can recognize", async () => {
+    // 이름 없는 포맷이 쌓이면 다음 영상에서 무엇을 고를지 알 수 없다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-liked", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://f.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const save = vi.spyOn(api, "saveFormatTemplate");
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await screen.findByLabelText("포맷 이름");
+    fireEvent.click(screen.getByRole("button", { name: "이 포맷 저장하기" }));
+
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("keeps the judgement buttons away from a video that is not current", async () => {
+    // 낡은 완성본을 평가하면 어느 편집본에 대한 판단인지 알 수 없어진다.
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-stale", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://stale.mp4",
+        status: "succeeded", source_session_id: "session-old", source_session_revision: 3, is_current: false,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    await screen.findByText("완성본이 최신 편집본과 달라요.");
+    expect(screen.queryByRole("button", { name: "이 완성본 좋아요" })).not.toBeInTheDocument();
   });
 
   it("accepts a rejected final request only when refresh finds a new running job", async () => {
@@ -1283,6 +1484,54 @@ describe("OutputsPage", () => {
     expect(screen.queryByRole("button", { name: "CapCut에 등록" })).not.toBeInTheDocument();
   });
 
+  it("says how to switch the CapCut bridge on instead of offering a press that cannot work", async () => {
+    // **"눌렀는데 아무 일도 안 일어난다"를 막는 자리.** 캡컷 폴더는 이 컴퓨터에
+    // 있고 컨테이너는 못 본다. 준비가 안 됐으면 서버가 무엇을 하면 되는지
+    // 문장으로 돌려주고, 화면은 그걸 그대로 옮기며 단추를 잠근다.
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], source_session_id: "session-a", source_session_revision: 7, is_current: true,
+        handoff: { status: "pending", source_file_uri: "local://draft-current.zip", reused: false },
+      },
+    } as never);
+    const registerCapcutDraftHandoff = vi.spyOn(api, "registerCapcutDraftHandoff");
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue({
+      status: "failed", is_supported: false, project_root_path: "", project_root_exists: false, write_access: false,
+      recovery_message: "캡컷으로 넘기는 준비가 아직 안 됐어요. 바탕화면의 VideoBox 시작 아이콘을 다시 실행해 주세요.",
+      checked_at: "2026-09-07T09:01:00Z",
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("캡컷으로 넘기는 준비가 아직 안 됐어요. 바탕화면의 VideoBox 시작 아이콘을 다시 실행해 주세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "CapCut에 등록" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "CapCut에 등록" }));
+    await Promise.resolve();
+    expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
+  });
+
+  it("shows where the registered draft landed so the owner knows what to open in CapCut", async () => {
+    const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
+    vi.spyOn(api, "getCapcutDraftExport").mockResolvedValue({
+      job_id: currentCapcutJob.job_id, status: "succeeded", export: {
+        export_id: "capcut-current", timeline_id: "timeline-a", export_type: "capcut_draft", file_uri: "local://draft-current.zip", status: "succeeded", notes: [], source_session_id: "session-a", source_session_revision: 7, is_current: true,
+        handoff: {
+          status: "ready", source_file_uri: "local://draft-current.zip", reused: false,
+          registered_project_path: "C:/Users/atgro/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_002",
+        },
+      },
+    } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText(
+      "CapCut에서 열 자리: C:/Users/atgro/AppData/Local/CapCut/User Data/Projects/com.lveditor.draft/videobox-export_002",
+    )).toBeVisible();
+  });
+
   it("shows another durable CapCut registration as in progress without issuing a duplicate POST", async () => {
     const currentCapcutJob = { ...capcutJob, input_ref: "timeline-current", job_id: "capcut-current-timeline" };
     stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentCapcutJob] as never });
@@ -1687,6 +1936,53 @@ describe("OutputsPage", () => {
     expect(registerCapcutDraftHandoff).not.toHaveBeenCalled();
   });
 
+  it("constrains a playable final video to its output card", async () => {
+    stubCanonicalSubtitleApi({ reviewStatus: "approved", jobs: [activeTimelineJob, { ...finalJob, input_ref: "timeline-current" }] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: finalJob.job_id, status: "succeeded", render: {
+      export_id: "final-current", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4", status: "succeeded", is_current: true,
+      source_session_id: "session-a", source_session_revision: 7,
+      },
+    });
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    expect(await screen.findByLabelText("완성본 재생")).toHaveClass("vb-output-video");
+  });
+
+  it("shows an ordered readiness checklist with a resolving action when output is blocked", async () => {
+    stubReadOnlyOutputApi();
+    const onOpenEditor = vi.fn();
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={onOpenEditor} />);
+
+    const checklist = await screen.findByRole("region", { name: "출력 준비 체크리스트" });
+    expect(checklist).toBeVisible();
+    expect(screen.getByRole("list", { name: "출력 준비 단계" })).toBeVisible();
+    expect(within(checklist).getByText("편집본")).toBeVisible();
+    expect(within(checklist).getByText("준비 필요")).toBeVisible();
+    expect(within(checklist).getByText("검토")).toBeVisible();
+    expect(within(checklist).getByText("승인 필요")).toBeVisible();
+    expect(within(checklist).getByText("출력")).toBeVisible();
+    expect(within(checklist).getByText("앞 단계 완료 필요")).toBeVisible();
+    expect(within(checklist).queryByText("편집본을 먼저 준비해 주세요.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "편집 화면 열기" }));
+    expect(onOpenEditor).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "자막 만들기" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "완성본 만들기" })).toBeDisabled();
+  });
+
+  it("uses keyword statuses when the draft and review are ready but output still waits", async () => {
+    stubCanonicalSubtitleApi({ reviewFlags: [{ code: "review_required", segment_id: "segment-a", message: "확인이 필요해요." }] });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    const checklist = await screen.findByRole("region", { name: "출력 준비 체크리스트" });
+    expect(within(checklist).getByText("준비됨")).toBeVisible();
+    expect(within(checklist).getByText("승인됨")).toBeVisible();
+    expect(within(checklist).getByText("앞 단계 완료 필요")).toBeVisible();
+    expect(within(checklist).queryByText("현재 편집본이 준비되었어요.")).not.toBeInTheDocument();
+    expect(within(checklist).queryByText("현재 편집본 검토가 승인되었어요.")).not.toBeInTheDocument();
+  });
+
   it("fails closed when the active session lookup fails", async () => {
     stubReadOnlyOutputApi();
     vi.spyOn(api, "getLatestEditingSession").mockRejectedValue(new Error("offline"));
@@ -1924,5 +2220,81 @@ describe("OutputsPage", () => {
 
     expect(await screen.findByText("미리보기가 최신 편집본과 달라요.")).toBeVisible();
     expect(document.body).not.toHaveTextContent("/exact-previews/");
+  });
+});
+
+describe("완성본 실패 이유", () => {
+  it("검토 승인이 없어서 막힌 것이면 그렇게 말한다", () => {
+    // 실제로 겪은 실패다. 백엔드는 이유를 알고 있었고, 화면은 `완성본을
+    // 만들지 못했어요`만 말할 수 있었다 -- 정작 필요한 동작은 클릭 한 번이었다.
+    expect(finalRenderFailureMessage("final_output_requires_review_approval")).toContain("검토");
+  });
+
+  /** 계획서(§7)가 지목한 그 실패다. 엔진은 `stale_output_asset: subtitle
+   *  freshness changed`처럼 **코드 뒤에 사유를 붙여** 보내는데, 화면 표는
+   *  정확히 일치할 때만 옮겨 적고 있었다 -- 그래서 이 무리 전체가 "완성본을
+   *  만들지 못했어요" 한 줄로 뭉개졌고, 정작 필요한 동작(자막 먼저 만들기)은
+   *  화면 어디에도 안 나왔다. */
+  it("무엇이 낡아서 막힌 것인지 그 자리에서 말한다", () => {
+    expect(finalRenderFailureMessage("stale_output_asset: subtitle freshness changed")).toContain("자막");
+    expect(finalRenderFailureMessage("stale_output_asset: subtitle session revision changed")).toContain("자막");
+    expect(finalRenderFailureMessage("stale_output_asset: review freshness changed")).toContain("검토");
+    expect(finalRenderFailureMessage("stale_output_asset: editing session revision changed")).toContain("편집본");
+    expect(finalRenderFailureMessage("stale_output_asset: content SHA-256 changed")).toContain("파일");
+    expect(finalRenderFailureMessage("stale_output_asset: materialized source is missing or unavailable")).toContain("파일");
+  });
+
+  it("빈 편집판이라 막힌 것이면 무엇을 넣어야 하는지 말한다", () => {
+    // 2026-09-06 실측: `+ 새로 만들기`로 만든 빈 편집판에서 완성본을 누르면
+    // 엔진이 "넣은 것이 없다"고 정확히 말해 주는데, 화면은 "완성본을 만들지
+    // 못했어요"로 뭉개고 있었다. 정작 필요한 동작은 영상을 넣는 것이다.
+    const message = finalRenderFailureMessage("Timeline has no composable clips to render.");
+    expect(message).toContain("영상");
+    expect(message).not.toContain("Timeline");
+  });
+
+  it("모르는 사유가 붙어 와도 낡았다는 것까지는 말한다", () => {
+    // 사유는 엔진이 늘리는 자리다. 새 사유가 와도 "무언가 낡았다"는 것은
+    // 확실하니, 아무 말도 못 하는 것보다 그만큼은 말한다.
+    const message = finalRenderFailureMessage("stale_output_asset: something new from the engine");
+    expect(message).toContain("바뀌었");
+    expect(message).not.toContain("stale_output_asset");
+  });
+
+  /** 자막과 CapCut 초안도 같은 실패를 낸다. 완성본만 고치면 **같은 화면에서
+   *  어떤 칸은 이유를 말하고 어떤 칸은 안 말한다** -- 창작자에게는 그게 더
+   *  헷갈린다. 기본 문구만 각자 다르고 사유 표는 하나를 같이 쓴다. */
+  /** **카드 제목 옆 설명줄에는 아직 이유가 안 나왔다.** 완성본 카드만
+   *  `finalRenderFailureMessage`를 쓰고 자막·초안 카드는 고정 문구였다 --
+   *  창작자가 먼저 보는 것은 그 줄인데, 거기서는 여전히 "만들지 못했어요"만
+   *  말하고 있었다(2026-09-05 갭검증에서 잡았다).
+   *
+   *  자막 이유는 `SubtitleJob`이 아니라 **작업 기록**에 있다 -- 화면 상태의
+   *  `subtitleRecord`가 그것이다. */
+  it("카드 설명줄도 실패 이유를 말한다", async () => {
+    stubCanonicalSubtitleApi({
+      jobs: [
+        activeTimelineJob,
+        { job_id: "subtitle-failed", project_id: "project_a", job_type: "subtitle_render", status: "failed", input_ref: activeTimelineJob.job_id, output_ref: null, error_message: "stale_output_asset: editing session revision changed", started_at: null, finished_at: null },
+      ] as never,
+    });
+    vi.spyOn(api, "getSubtitle").mockResolvedValue(null as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText(/편집본이 그 사이에 바뀌었어요/)).toBeVisible();
+  });
+  it("자막과 CapCut 초안도 같은 사유 표를 쓴다", () => {
+    expect(subtitleFailureMessage("stale_output_asset: editing session revision changed")).toContain("편집본");
+    expect(subtitleFailureMessage(null)).toBe("자막을 만들지 못했어요.");
+    expect(capcutDraftFailureMessage("stale_output_asset: content SHA-256 changed")).toContain("파일");
+    expect(capcutDraftFailureMessage("CapCut draft export freshness changed")).toBe("CapCut 초안을 만들지 못했어요.");
+    expect(capcutDraftFailureMessage(null)).toBe("CapCut 초안을 만들지 못했어요.");
+  });
+
+  it("모르는 코드는 원래 쓰던 한 줄로 돌아간다", () => {
+    // 영어 코드가 화면에 그대로 나가는 것보다 덜 구체적인 편이 낫다.
+    expect(finalRenderFailureMessage("something_new_from_the_engine")).toBe("완성본을 만들지 못했어요.");
+    expect(finalRenderFailureMessage(null)).toBe("완성본을 만들지 못했어요.");
   });
 });

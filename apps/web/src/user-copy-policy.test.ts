@@ -58,7 +58,6 @@ const uiFiles = discoverUiFiles();
 
 const previouslyCoveredUiFiles = [
   "ErrorBoundary.tsx",
-  "ProjectOnboarding.tsx",
   "app/AppRouter.tsx",
   "app/OutputsPage.tsx",
   "app/ProductShell.tsx",
@@ -69,7 +68,9 @@ const previouslyCoveredUiFiles = [
   "features/editor/inspector/InspectorControls.tsx",
   "features/editor/preview/preview-stage.tsx",
   "features/editor/timeline/TimelineDock.tsx",
-  "features/editor/transcript/CaptionLane.tsx",
+  // "features/editor/transcript/CaptionLane.tsx"는 2026-09-05에 걷어냈다 --
+  // 조작이 하나도 없는 요약이었고 바로 위 목록이 이미 같은 것을 보여 줬다.
+  // 남은 안내 한 줄은 "TranscriptPanel.tsx"로 옮겼다(이미 이 목록에 있다).
   "features/editor/transcript/TranscriptPanel.tsx",
   "features/editor/workbench/EditorWorkbench.tsx",
   "features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx",
@@ -78,7 +79,10 @@ const previouslyCoveredUiFiles = [
   "features/jobs/JobRecovery.tsx",
   "features/jobs/HermesYujinStatus.tsx",
   "features/media/DraftGapMedia.tsx",
-  "features/media/MediaWorkspacePage.tsx",
+  // "features/media/MediaWorkspacePage.tsx"는 2026-09-01에 편집기로 접혀
+  // 없어졌다 -- 그 화면의 문구를 그리던 자리는 이제
+  // "features/media/MediaAnalysisStatusPanel.tsx"다(자동 발견 대상이라
+  // 이 손으로 적은 목록에 다시 넣을 필요는 없다).
   "features/review/TimelineReviewPage.tsx",
   "features/settings/VoiceTtsSettings.tsx",
 ];

@@ -1,0 +1,165 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { api, type LibraryAsset, type LibraryIngestItem, type LibraryMediaType } from "../../api";
+import { AssetIngestDropzone } from "./AssetIngestDropzone";
+import { IngestJobTable } from "./IngestJobTable";
+import { LibraryPreviewPane } from "./LibraryPreviewPane";
+import { LibraryResults } from "./LibraryResults";
+import { LibrarySidebar, type LibraryFilter } from "./LibrarySidebar";
+import "./library.css";
+
+function fileType(file: File): LibraryMediaType | null {
+  const name = file.name.toLowerCase();
+  if (file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|avi|mkv)$/.test(name)) return "broll";
+  if (file.type.startsWith("audio/") || /\.(mp3|wav|m4a|ogg|flac|aac)$/.test(name)) return name.includes("sfx") || name.includes("effect") ? "sfx" : "music";
+  // `.webp`는 영상 `.webm`과 한 글자 차이다. 위의 영상 판정이 먼저 지나가므로
+  // 여기서 잡아도 안전하다.
+  if (file.type.startsWith("image/") || /\.(png|jpg|jpeg|webp|bmp)$/.test(name)) return "image";
+  return null;
+}
+
+function fileDisplayName(file: File): string {
+  const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath?.trim();
+  return relativePath || file.name;
+}
+
+/** `음악·효과음`은 소리 자산 둘을 함께 담는 한 자리다 -- 세로 메뉴
+ *  `내 자산` 구역의 승인된 구조가 한 줄이기 때문이다(owner 승인 2026-09-04 §2). */
+const AUDIO_KINDS: readonly LibraryMediaType[] = ["music", "sfx"];
+
+function matchesFilter(asset: LibraryAsset, filter: LibraryFilter) {
+  if (filter === "all") return asset.lifecycle !== "trashed";
+  if (filter === "trash") return asset.lifecycle === "trashed";
+  if (filter === "favorites") return Boolean(asset.user_metadata?.favorite);
+  if (filter === "audio") return AUDIO_KINDS.includes(asset.media_type) && asset.lifecycle !== "trashed";
+  return asset.media_type === filter && asset.lifecycle !== "trashed";
+}
+
+export function LibraryPage({ initialFilter }: { initialFilter?: LibraryFilter } = {}) {
+  const [assets, setAssets] = useState<LibraryAsset[]>([]);
+  const [activeFilter, setActiveFilter] = useState<LibraryFilter>(initialFilter ?? "all");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<LibraryAsset | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [ingestItems, setIngestItems] = useState<LibraryIngestItem[]>([]);
+  // 종류 탭 + 검색어일 때만 의미검색이 돈다. 어느 방식으로 찾았는지는 말한다.
+  const [searchMode, setSearchMode] = useState<"semantic" | "word" | null>(null);
+  const failedFiles = useRef(new Map<string, File>());
+  const epoch = useRef(0);
+  // A cross-entry link (e.g. from the footage organizer) names the asset it
+  // wants selected. Only the first successful load honors it, so a later
+  // reload never overrides a choice the owner made in the meantime.
+  const requestedAssetId = useRef<string | null>(new URLSearchParams(window.location.search).get("library_asset_id"));
+
+  const load = useCallback(async () => {
+    const currentEpoch = ++epoch.current;
+    setLoading(true); setError(null);
+    try {
+      // 종류 탭을 고르고 검색하면 의미검색(`/api/library/search`)을 부른다.
+      // 이 엔드포인트는 백엔드에 있었는데 부르는 화면이 없어 검색이 언제나
+      // 단어 매칭이었다. 종류가 없는 탭(전체·즐겨찾기·휴지통)은 목록 검색 그대로다.
+      // 그림도 이 길로 보낸다. 그림에는 의미 색인이 없어 서버가 `semantic:
+      // false`를 돌려주고, 배지가 `단어로만 찾음`으로 정직하게 뜬다. 목록
+      // 검색으로 돌리면 어느 방식으로 찾았는지 아예 말하지 못한다.
+      //
+      // `음악·효과음`은 종류 둘을 함께 여는 자리라 **양쪽에 함께 묻는다.**
+      // 좁혀서 여는 문이 검색을 나쁘게 만들면 안 된다 -- `음악`만 골랐을 때
+      // 돌던 의미검색이 여기서 조용히 단어 매칭으로 떨어지면, 추천이 갑자기
+      // 나빠진 이유를 알 수 없다. 서버는 종류를 하나만 받는다(`media_type`은
+      // 필수) -- 그래서 한 번이 아니라 두 번 묻는다.
+      const searchKinds: LibraryMediaType[] = activeFilter === "audio" ? [...AUDIO_KINDS]
+        : activeFilter === "broll" || activeFilter === "music" || activeFilter === "sfx" || activeFilter === "image" ? [activeFilter]
+        : [];
+      const semanticEligible = Boolean(search.trim()) && searchKinds.length > 0;
+      let nextAssets: LibraryAsset[];
+      if (semanticEligible) {
+        const responses = await Promise.all(searchKinds.map((kind) => api.searchLibraryAssets(search.trim(), kind, undefined)));
+        if (currentEpoch !== epoch.current) return;
+        const result = {
+          matches: responses.flatMap((response) => response.matches).sort((left, right) => Number(right.score ?? 0) - Number(left.score ?? 0)),
+          semantic: responses.some((response) => response.semantic),
+        };
+        // 촬영본 색인 조각(자산 아닌 행, id 없음)과 중복 행은 이 화면이 다룰 수
+        // 없다 -- 남겨 두면 목록·미리보기·React key가 전부 흔들린다.
+        const seenIds = new Set<string>();
+        const usable = result.matches.filter((match) => {
+          const identity = String(match.library_asset_id ?? "");
+          if (!identity || seenIds.has(identity)) return false;
+          seenIds.add(identity);
+          return true;
+        });
+        nextAssets = usable;
+        // 배지는 화면에 실제로 남은 행 기준으로 말한다. 의미검색이 돌았어도
+        // 남은 행이 전부 단어 매칭이면 `뜻으로 찾음`은 거짓말이다.
+        setSearchMode(result.semantic && usable.some((match) => match.semantic_match) ? "semantic" : "word");
+      } else {
+        const result = await api.listLibraryAssets({ includeTrashed: activeFilter === "trash", q: search || undefined, limit: 500 });
+        if (currentEpoch !== epoch.current) return;
+        nextAssets = result.assets;
+        setSearchMode(null);
+      }
+      setAssets(nextAssets);
+      const requestedId = requestedAssetId.current;
+      requestedAssetId.current = null;
+      const requested = requestedId ? nextAssets.find((item) => item.library_asset_id === requestedId) : null;
+      setSelected((previous) => requested ?? (previous ? nextAssets.find((item) => item.library_asset_id === previous.library_asset_id) ?? null : nextAssets[0] ?? null));
+    } catch {
+      if (currentEpoch === epoch.current) setError("자료실을 불러오지 못했어요.");
+    } finally { if (currentEpoch === epoch.current) setLoading(false); }
+  }, [activeFilter, search]);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), search ? 180 : 0); return () => window.clearTimeout(timer); }, [load, search]);
+  // 이미 자료실에 있는 채로 세로 메뉴에서 다른 갈래를 누르면 주소만 바뀐다.
+  // 그때도 목록이 따라와야 한다 -- 안 따라오면 눌렀는데 아무 일도 안 일어난다.
+  // 여기서 고른 분류는 주소를 고치지 않으므로, 이 효과가 그것을 되돌리지 않는다.
+  useEffect(() => { if (initialFilter) setActiveFilter(initialFilter); }, [initialFilter]);
+
+  const visible = useMemo(() => assets.filter((asset) => matchesFilter(asset, activeFilter)), [assets, activeFilter]);
+  const counts = useMemo(() => ({
+    all: assets.filter((item) => item.lifecycle !== "trashed").length,
+    broll: assets.filter((item) => item.media_type === "broll" && item.lifecycle !== "trashed").length,
+    audio: assets.filter((item) => AUDIO_KINDS.includes(item.media_type) && item.lifecycle !== "trashed").length,
+    music: assets.filter((item) => item.media_type === "music" && item.lifecycle !== "trashed").length,
+    sfx: assets.filter((item) => item.media_type === "sfx" && item.lifecycle !== "trashed").length,
+    image: assets.filter((item) => item.media_type === "image" && item.lifecycle !== "trashed").length,
+    favorites: assets.filter((item) => Boolean(item.user_metadata?.favorite)).length,
+    trash: assets.filter((item) => item.lifecycle === "trashed").length,
+  }), [assets]);
+
+  async function ingest(files: File[]) {
+    const groups = new Map<LibraryMediaType, File[]>();
+    const retryKeys = new Map<File, string>();
+    files.forEach((file, index) => retryKeys.set(file, `${fileDisplayName(file)}#${index}`));
+    const rejected: LibraryIngestItem[] = [];
+    files.forEach((file) => { const type = fileType(file); if (!type) { const retryKey = retryKeys.get(file)!; failedFiles.current.set(retryKey, file); rejected.push({ filename: file.name, display_filename: fileDisplayName(file), retry_key: retryKey, state: "needs_attention", error_code: "unsupported_media" }); } else groups.set(type, [...(groups.get(type) ?? []), file]); });
+    setIngestItems(rejected);
+    const results: LibraryIngestItem[] = [...rejected];
+    await Promise.all([...groups.entries()].map(async ([type, grouped]) => {
+      const idempotencyKey = `drop-${Date.now()}-${type}`;
+      try {
+        const response = await api.ingestLibraryAssets(grouped, type, idempotencyKey);
+        results.push(...response.items.map((item, index) => {
+          const file = grouped[index];
+          const retryKey = file ? retryKeys.get(file)! : item.retry_key ?? item.filename ?? `${type}-${index}`;
+          if (item.state === "needs_attention" && file) failedFiles.current.set(retryKey, file);
+          return { ...item, display_filename: file ? fileDisplayName(file) : item.display_filename ?? item.filename, retry_key: retryKey };
+        }));
+      } catch {
+        results.push(...grouped.map((file) => { const retryKey = retryKeys.get(file)!; failedFiles.current.set(retryKey, file); return { filename: file.name, display_filename: fileDisplayName(file), retry_key: retryKey, state: "needs_attention" as const, error_code: "network_error" }; }));
+      }
+    }));
+    setIngestItems(results);
+    await load();
+  }
+
+  async function retry(retryKey: string) {
+    const file = failedFiles.current.get(retryKey);
+    if (file) await ingest([file]);
+  }
+
+  function selectFilter(filter: LibraryFilter) { setActiveFilter(filter); if (filter === "trash") setSelected(null); }
+  return <main className="vb-library-page" data-testid="library-workspace" data-layout="three-pane">{/* 2026-08-19: 자체 메뉴 줄을 뺐다. 이 화면이 대시보드 껍데기 안으로 들어가면서
+    좌측 메뉴가 늘 함께 있고, 여기 것과 **같은 링크 네 개가 두 벌**이 됐다.
+    owner가 "좌측 메뉴는 그대로 두라"고 한 뒤의 정리다. */}
+<span data-testid="global-library-page" className="sr-only">자료실</span><LibrarySidebar activeFilter={activeFilter} onFilter={selectFilter} counts={counts} status={assets.some((item) => item.lifecycle === "needs_attention") ? "needs_attention" : "all"} /><section className="vb-library-main"><AssetIngestDropzone onFiles={(files) => void ingest(files)} /><IngestJobTable items={ingestItems} onRetry={(filename) => void retry(filename)} /><LibraryResults assets={visible} activeFilter={activeFilter} search={search} onSearch={setSearch} selectedId={selected?.library_asset_id} onSelect={setSelected} loading={loading} error={error} searchMode={searchMode} /></section><LibraryPreviewPane asset={selected} onChanged={() => void load()} /></main>;
+}

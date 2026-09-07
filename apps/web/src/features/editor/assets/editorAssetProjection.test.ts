@@ -10,7 +10,7 @@ describe("editor asset projection", () => {
       libraryAssets: [{ library_asset_id: "bgm-1", asset_id: "starter-bgm", media_type: "music", duration_seconds: 12, version: "v1", verified: true, available: true, tags: [], source: "Starter", creator: "Creator", official_license_url: "https://license.invalid", attribution_required: false, attribution_text: "" }],
     });
 
-    expect(cards.map((card) => [card.kind, card.label, card.canApply])).toEqual([["broll", "이미지 B-roll", true], ["bgm", "배경 음악", true]]);
+    expect(cards.map((card) => [card.kind, card.label, card.canApply])).toEqual([["broll", "그림", true], ["bgm", "배경 음악", true]]);
     expect(cards[0].status).toBe("준비됨 · 검토 불필요");
   });
 
@@ -62,11 +62,11 @@ describe("editor asset projection", () => {
 
     expect(card).toMatchObject({
       kind: "broll",
-      label: "기타 B-roll",
-      title: "B-roll 1",
-      durationLabel: "길이 정보 없음",
+      label: "기타 자료",
+      title: "자료 1",
+      durationLabel: "길이 확인 중",
       status: "확인 중 · 검토 필요",
-      canApply: true,
+      canApply: false,
       previewUrl: "/api/projects/p/assets/other-1/content",
     });
     expect(filterEditorAssets([card], { type: "broll", query: "현장" })).toEqual([card]);
@@ -89,10 +89,10 @@ describe("editor asset projection", () => {
     });
 
     expect(cards.slice(0, 4).map((card) => [card.id, card.label, card.status])).toEqual([
-      ["broll:video-1", "영상 B-roll", "확인 중 · 검토 필요"],
-      ["broll:audio-1", "오디오 B-roll", "확인 중 · 검토 불필요"],
-      ["broll:unknown-1", "이미지 B-roll", "확인 중 · 검토 상태 확인 중"],
-      ["broll:unknown-2", "이미지 B-roll", "확인 중 · 검토 상태 확인 중"],
+      ["broll:video-1", "영상", "확인 중 · 검토 필요"],
+      ["broll:audio-1", "오디오", "확인 중 · 검토 불필요"],
+      ["broll:unknown-1", "그림", "확인 중 · 검토 상태 확인 중"],
+      ["broll:unknown-2", "그림", "확인 중 · 검토 상태 확인 중"],
     ]);
     expect(cards.slice(4)).toEqual([
       expect.objectContaining({ id: "library:music-1", assetId: "starter-music", libraryAssetId: "music-1", previewUrl: "/api/media-library/assets/music-1/preview", canApply: true, license: "라이선스: https://license.invalid/music · 출처 표기 필요: Creator 표기" }),
@@ -152,6 +152,17 @@ describe("intake facts on b-roll cards", () => {
 
     expect(card.durationLabel).not.toBe("길이 정보 없음");
     expect(card.durationLabel).toContain("12");
+  });
+
+  it("keeps a pending length honest while intake metadata is incomplete", () => {
+    const [card] = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [broll({ title: "분석 대기 영상", analysis_status: "pending" })],
+      libraryAssets: [],
+    });
+
+    expect(card.durationLabel).toBe("길이 확인 중");
+    expect(card.status).toContain("준비 중");
   });
 
   it("surfaces orientation so vertical footage is pickable for shortform", () => {
@@ -225,5 +236,86 @@ describe("thumbnails on b-roll cards", () => {
     });
 
     expect(card.thumbnailUrl).toBeUndefined();
+  });
+
+  it("keeps in-app gap placeholders out of the pickable materials", () => {
+    // 초안이 빈 자리를 표시하려고 넣는 자산이다. 저장소가 `in_app_only`로
+    // 표시하고 렌더 입력에서도 빼는데, 목록에만 남아 "B-roll 1" 같은 이름과
+    // 0초로 보였다. 고를 수 있는 재료처럼 보이면 owner가 그걸 고르게 된다.
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [
+        { asset_id: "asset_gap_placeholder_1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: { gap_slot_id: "gap-broll-1", label: "자산이 필요한 임시 장면", in_app_only: true, duration_sec: 0 } },
+        { asset_id: "real-1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: { title: "카페", duration_sec: 4 } },
+      ],
+      libraryAssets: [],
+    });
+
+    expect(cards.map((card) => card.assetId)).toEqual(["real-1"]);
+  });
+
+  it("brings the shared library's pictures in as pickable cards", () => {
+    // 라이브러리 그림은 아직 프로젝트 자산이 아니다. 카드가 라이브러리 쪽
+    // 식별자만 들고 오고, 얹을 때 프로젝트로 복사된다.
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [],
+      libraryAssets: [],
+      libraryImageAssets: [{
+        library_asset_id: "user_image_1",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "ready",
+        mime_type: "image/png",
+        user_metadata: { filename: "바다.png" },
+        preview_url: "/api/library/assets/user_image_1/preview",
+        thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+      }],
+    });
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0].kind).toBe("image");
+    // 얹기 단추는 이 칸을 보고 나타난다.
+    expect(cards[0].previewKind).toBe("image");
+    expect(cards[0].libraryAssetId).toBe("user_image_1");
+    expect(cards[0].title).toBe("바다.png");
+    expect(cards[0].canApply).toBe(true);
+    expect(cards[0].thumbnailUrl).toBe("/api/library/assets/user_image_1/thumbnail");
+    // 그림에는 길이가 없다. `길이 정보 없음`으로 물어볼 것이 아니다.
+    expect(cards[0].durationLabel).toBe("");
+    expect(filterEditorAssets(cards, { type: "image", query: "" })).toHaveLength(1);
+    expect(filterEditorAssets(cards, { type: "broll", query: "" })).toHaveLength(0);
+  });
+
+  it("leaves a trashed library picture out of the pickable materials", () => {
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [],
+      libraryAssets: [],
+      libraryImageAssets: [{
+        library_asset_id: "user_image_gone",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "trashed",
+        user_metadata: { filename: "지운그림.png" },
+      }],
+    });
+
+    expect(cards).toEqual([]);
+  });
+
+  it("numbers the remaining materials without counting the hidden placeholders", () => {
+    // 자리표시를 빼기만 하고 번호를 원래 순번으로 두면 "B-roll 2"로 시작해
+    // owner가 앞의 하나를 잃어버렸다고 읽는다.
+    const cards = projectEditorAssets({
+      projectId: "p",
+      brollAssets: [
+        { asset_id: "asset_gap_placeholder_1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: { in_app_only: true } },
+        { asset_id: "real-1", asset_type: "broll_video", storage_uri: "x", created_at: "now", metadata: {} },
+      ],
+      libraryAssets: [],
+    });
+
+    expect(cards.map((card) => card.title)).toEqual(["자료 1"]);
   });
 });

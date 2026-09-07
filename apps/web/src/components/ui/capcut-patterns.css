@@ -1,0 +1,405 @@
+/* 캡컷 전체에 반복되는 무늬를 공용 부품으로 뽑아 놓은 스타일시트다.
+   근거: `docs/capcut-full-adoption-plan-2026-09-04.ko.md` §6(실측 치수)·§7(무늬 목록),
+   승인 기록 `docs/decisions/2026-09-04-capcut-shell-with-my-assets.ko.md`.
+
+   지키는 것 셋:
+
+   1. **색·간격·글자·모서리는 토큰에서만 꺼낸다.** 팔레트는 승인 대상이라
+      (`CLAUDE.md` §6) 여기서 새 색을 만들지 않는다.
+   2. **단추 높이 32px를 새로 만들지 않는다.** `product-shell.css`가 이미
+      `[data-slot=button]`에 32px를 못박아 놨다. 여기 부품들은 그 자리를
+      침범하지 않으려고 `data-slot=button`을 달지 않는 대신, 브라우저 기본
+      단추 테두리(outset 2px)를 스스로 지운다 -- 이 빌드는 Tailwind
+      Preflight를 안 쓰기 때문에 아무도 안 지우면 그대로 보인다
+      (`theme-tokens.test.ts`의 "대화상자 밖에서도 ..." 항목이 같은 사고 기록).
+   3. **높이만 px 날값을 쓴다.** 캡컷에서 실제로 잰 컨트롤 높이(검색 34,
+      칩 28)라 척도로 환산하면 값이 달라진다. `product-shell.css`가 32px를
+      적어 둔 것과 같은 방식이다. 간격·글자·모서리는 전부 토큰이다. */
+
+/* ── 공통: 브라우저 기본 단추 모양 지우기 ─────────────────────────── */
+.vb-choice-card__trigger,
+.vb-value-row,
+.vb-browse-section__see-all,
+.vb-browse-section__next,
+.vb-search-chips__chip,
+.vb-media-card {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vb-choice-card__trigger:focus-visible,
+.vb-value-row:focus-visible,
+.vb-browse-section__see-all:focus-visible,
+.vb-browse-section__next:focus-visible,
+.vb-search-chips__chip:focus-visible,
+.vb-media-card:focus-visible,
+.vb-number-field__slider:focus-visible,
+.vb-number-field__input:focus-visible,
+.vb-search-chips__input:focus-visible {
+  outline: 2px solid var(--vb-accent);
+  outline-offset: 2px;
+}
+
+/* ── 1. 아코디언 카드 (캡컷 `캡션` 패널) ──────────────────────────── */
+/* 캡컷: 카드 폭 = 패널 전체, 아이콘·제목·설명이 가운데 정렬, 누르면 그 카드
+   **안에서** 라벨+드롭다운+생성 단추가 열린다. 다른 카드로 안 넘어간다. */
+.vb-choice-card {
+  border: 1px solid var(--vb-border);
+  border-radius: var(--vb-radius-md);
+  background: var(--vb-panel-alt);
+  overflow: hidden;
+}
+
+.vb-choice-card[data-expanded="true"] {
+  border-color: var(--vb-accent-border);
+}
+
+.vb-choice-card__trigger {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--vb-space-2);
+  padding: var(--vb-space-5) var(--vb-space-4);
+  text-align: center;
+}
+
+.vb-choice-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vb-text);
+}
+
+.vb-choice-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vb-space-2);
+  font-size: var(--vb-text-md);
+  font-weight: 650;
+  color: var(--vb-text);
+}
+
+.vb-choice-card__badge {
+  border-radius: var(--vb-radius-sm);
+  background: var(--vb-accent-bg);
+  color: var(--vb-accent);
+  padding: 0 var(--vb-space-1);
+  font-size: var(--vb-text-xs);
+  font-weight: 700;
+}
+
+.vb-choice-card__description {
+  font-size: var(--vb-text-sm);
+  line-height: 1.5;
+  color: var(--vb-muted);
+}
+
+.vb-choice-card__body {
+  display: grid;
+  gap: var(--vb-space-3);
+  border-top: 1px solid var(--vb-border);
+  padding: var(--vb-space-4);
+}
+
+.vb-choice-card__body[hidden] {
+  display: none;
+}
+
+/* ── 2. 값 보이는 행 + `›` (캡컷 속성 패널) ───────────────────────── */
+.vb-value-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--vb-space-3);
+  border-radius: var(--vb-radius-sm);
+  padding: var(--vb-space-2) var(--vb-space-3);
+}
+
+.vb-value-row:hover:not([disabled]) {
+  background: var(--vb-panel-alt);
+}
+
+.vb-value-row[disabled] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.vb-value-row__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--vb-muted);
+}
+
+.vb-value-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--vb-text-md);
+  color: var(--vb-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vb-value-row__value {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--vb-text-sm);
+  color: var(--vb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vb-value-row__chevron {
+  flex: 0 0 auto;
+  color: var(--vb-faint);
+  font-size: var(--vb-text-md);
+  line-height: 1;
+}
+
+/* ── 3. 구역 제목 + `모두 보기` + 가로 스크롤 격자 ────────────────── */
+/* 캡컷 `전환`·`필터`·`오디오`가 전부 이 무늬다. **세로로 안 쌓는다** --
+   한 줄만 보이고 오른쪽 `▸`로 더 본다. */
+.vb-browse-section {
+  display: grid;
+  gap: var(--vb-space-2);
+}
+
+.vb-browse-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vb-space-3);
+}
+
+.vb-browse-section__title {
+  margin: 0;
+  font-size: var(--vb-text-md);
+  font-weight: 700;
+  color: var(--vb-text);
+}
+
+.vb-browse-section__see-all {
+  border-radius: var(--vb-radius-sm);
+  padding: 0 var(--vb-space-1);
+  font-size: var(--vb-text-sm);
+  color: var(--vb-muted);
+}
+
+.vb-browse-section__see-all:hover {
+  color: var(--vb-text);
+}
+
+.vb-browse-section__viewport {
+  position: relative;
+}
+
+.vb-browse-section__track {
+  display: flex;
+  gap: var(--vb-space-2);
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+
+.vb-browse-section__track::-webkit-scrollbar {
+  display: none;
+}
+
+.vb-browse-section__track > * {
+  flex: 0 0 auto;
+}
+
+/* 캡컷의 `▸`는 격자 오른쪽 끝에 겹쳐 뜨는 동그란 단추다. */
+.vb-browse-section__next {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--vb-radius-sm);
+  background: var(--vb-panel);
+  box-shadow: 0 0 0 1px var(--vb-control-ring);
+  color: var(--vb-text);
+  font-size: var(--vb-text-sm);
+  line-height: 1;
+}
+
+/* ── 4. 검색 + 칩 한 줄 (캡컷 `오디오` 패널) ──────────────────────── */
+.vb-search-chips {
+  display: grid;
+  gap: var(--vb-space-2);
+}
+
+.vb-search-chips__search {
+  display: flex;
+  align-items: center;
+  gap: var(--vb-space-2);
+}
+
+/* 캡컷 실측: 검색 입력 높이 34. */
+.vb-search-chips__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  border: 0;
+  box-shadow: 0 0 0 1px var(--vb-control-ring);
+  border-radius: var(--vb-radius-md);
+  background: var(--vb-canvas);
+  color: var(--vb-text);
+  padding: 0 var(--vb-space-3);
+  font: inherit;
+  font-size: var(--vb-text-md);
+}
+
+.vb-search-chips__input::placeholder {
+  color: var(--vb-faint);
+}
+
+.vb-search-chips__chips {
+  display: flex;
+  gap: var(--vb-space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.vb-search-chips__chips::-webkit-scrollbar {
+  display: none;
+}
+
+/* 캡컷 실측: 칩 높이 20~32. 알약 모양이라 모서리만 토큰의 `sm`을 쓰지 않고
+   완전한 알약(999px)으로 둔다 -- `theme-tokens.test.ts`가 999는 예외로 둔다. */
+.vb-search-chips__chip {
+  flex: 0 0 auto;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: var(--vb-panel-alt);
+  color: var(--vb-muted);
+  padding: 0 var(--vb-space-3);
+  font-size: var(--vb-text-sm);
+  white-space: nowrap;
+}
+
+.vb-search-chips__chip[aria-selected="true"] {
+  background: var(--vb-accent-bg);
+  color: var(--vb-accent);
+}
+
+/* ── 5. 슬라이더 + 숫자칸 + 단위 ──────────────────────────────────── */
+/* 캡컷 `불투명도 ──●── 100 %`, `속도 [ ]x`, `기간 [19.9]s`.
+   키프레임 `◇` 자리는 **안 만든다** -- 임의 키프레임은 범위 밖이다
+   (`CLAUDE.md` §2.1). */
+.vb-number-field {
+  display: grid;
+  gap: var(--vb-space-1);
+}
+
+.vb-number-field__label {
+  font-size: var(--vb-text-sm);
+  color: var(--vb-muted);
+}
+
+.vb-number-field__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--vb-space-3);
+}
+
+.vb-number-field__slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--vb-accent);
+}
+
+.vb-number-field__box {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--vb-space-1);
+  height: 30px;
+  border-radius: var(--vb-radius-sm);
+  background: var(--vb-panel-alt);
+  padding: 0 var(--vb-space-2);
+}
+
+.vb-number-field__input {
+  width: 3.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--vb-text);
+  font: inherit;
+  font-size: var(--vb-text-md);
+  text-align: right;
+}
+
+.vb-number-field__unit {
+  font-size: var(--vb-text-sm);
+  color: var(--vb-muted);
+}
+
+/* ── 6. 버튼 없는 카드 (캡컷 `최근 프로젝트`) ─────────────────────── */
+/* 카드 안에 단추를 **하나도 두지 않는다**. 카드 자체가 열리는 자리다 --
+   캡컷 첫 화면이 그렇고, 지금 우리 화면이 카드마다 단추를 달아 놔서
+   누를 것이 22개가 됐다(계획서 §8-3). */
+.vb-media-card {
+  display: grid;
+  gap: var(--vb-space-2);
+  width: 100%;
+  border-radius: var(--vb-radius-md);
+  padding: 0;
+}
+
+.vb-media-card__thumb {
+  position: relative;
+  border-radius: var(--vb-radius-md);
+  background: var(--vb-preview);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+}
+
+.vb-media-card__image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+/* 길이 배지는 썸네일 **위에 겹친다**(캡컷: 왼쪽 아래). */
+.vb-media-card__duration {
+  position: absolute;
+  left: var(--vb-space-2);
+  bottom: var(--vb-space-2);
+  border-radius: var(--vb-radius-sm);
+  background: color-mix(in srgb, var(--vb-canvas) 75%, transparent);
+  color: var(--vb-text);
+  padding: 0 var(--vb-space-1);
+  font-size: var(--vb-text-sm);
+  line-height: 1.6;
+}
+
+.vb-media-card__title {
+  font-size: var(--vb-text-md);
+  color: var(--vb-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vb-media-card__meta {
+  font-size: var(--vb-text-sm);
+  color: var(--vb-muted);
+}

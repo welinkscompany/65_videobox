@@ -1,0 +1,54 @@
+/* `LibraryPickerDialog` 전용 배치. `/library` 자체 화면(`library.css`)의 3단
+ * 그리드는 건드리지 않는다 -- 이 팝업은 도크 폭(220~400px)이 아니라 대화상자
+ * 폭에서 열리지만, 그래도 `LibrarySidebar`+`LibraryResults`를 나란히 두면
+ * `/library`가 쓰는 좌우 폭(사이드바 240px 안팎)보다 좁아 필터 글자가 눌린다.
+ * 그래서 `/library`처럼 좌우 2단이 아니라 필터를 위, 목록을 아래로 쌓는다 --
+ * `LibraryPreviewPane`(3번째 단)은 애초에 이 팝업에 넣지 않으므로 2단이 아니라
+ * 필터 줄 + 목록만 있으면 된다. */
+.vb-library-picker {
+  width: min(560px, 92vw);
+  max-width: 92vw;
+}
+
+.vb-library-picker__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 60vh;
+  overflow: hidden;
+}
+
+/* 재사용한 `LibrarySidebar`는 세로 목록(`vb-library-filter-list`)을 그린다.
+ * 팝업에서는 세로 공간이 아까우므로 필터 줄만 가로로 눕힌다 -- 컴포넌트 내부
+ * 마크업은 그대로 두고 바깥 배치만 바꾼다. */
+.vb-library-picker__body .vb-library-sidebar {
+  flex: 0 0 auto;
+  border-right: none;
+  padding-bottom: 0;
+}
+
+.vb-library-picker__body .vb-library-sidebar__heading {
+  display: none;
+}
+
+.vb-library-picker__body .vb-library-filter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.vb-library-picker__body .vb-library-sidebar__status {
+  display: none;
+}
+
+.vb-library-picker__body .vb-library-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.vb-library-picker__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}

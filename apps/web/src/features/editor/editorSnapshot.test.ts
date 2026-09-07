@@ -72,6 +72,9 @@ describe("joinEditorSnapshot", () => {
       undoCount: 3,
       redoCount: 1,
       updatedAt: "2026-07-23T12:34:56Z",
+      // 자막 언어를 고른 적이 없는 편집본이다 -- 원본(한국어)으로 나간다.
+      captionLanguage: null,
+      translatedLanguages: [],
       segments: [{
         segmentId: "segment-a",
         cutAction: "keep",
@@ -89,6 +92,8 @@ describe("joinEditorSnapshot", () => {
           mediaRevision: null,
           controls: { gainDb: -3, fadeInSec: 0.1, fadeOutSec: 0.2, ducking: false },
         },
+        // 전환을 안 고른 장면. 안 고른 것과 "없음"을 구별하지 않는다.
+        transitionIn: null,
         ttsReplacement: null,
       }],
     });

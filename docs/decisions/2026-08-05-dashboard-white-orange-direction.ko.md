@@ -1,6 +1,10 @@
 # 대시보드 화이트·오렌지 방향 승인 기록
 
-- 결정 상태: **approved**
+> **2026-08-29 갱신: 아래 팔레트 표는 `2026-08-29-capcut-full-structure-and-dark-theme.ko.md`로
+> 대체됐다(다크 테마로 전환).** 강조색(`#C2410C`)과 구조(3분할, 그리드 등)는 그대로
+> 유효하다. 역사 기록으로 남기고 지우지 않는다.
+
+- 결정 상태: **superseded (팔레트만) — see 2026-08-29**
 - 결정 시각: 2026-08-05
 - 승인자: owner
 - 시안: `docs/prototypes/2026-08-05-dashboard-direction/editor-workbench.html`

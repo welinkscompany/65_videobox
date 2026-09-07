@@ -12,6 +12,10 @@ param(
     [Uri]$LocalModelApiUri = "http://127.0.0.1:1234/api/v1/models",
     [ValidateRange(1, 180)]
     [int]$TimeoutSec = 30,
+    # Rebuild the workspace image from this exact worktree before starting it.
+    # Container actions remain centralized here so the served frontend cannot
+    # silently drift from the source that was just verified.
+    [switch]$Rebuild,
     [string]$EnvFile = "",
     [string]$PythonExecutable = "",
     [string]$DockerExecutable = "docker",
@@ -119,28 +123,41 @@ function Invoke-CapturedProcess {
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $processInfo
         if (-not $process.Start()) {
-            return [pscustomobject]@{ ExitCode = 127; StdOut = "" }
+            return [pscustomobject]@{ ExitCode = 127; StdOut = ""; StdErr = "" }
         }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($CommandTimeoutSec * 1000)) {
+            $treeKillSucceeded = $false
+            # PowerShell 7/.NET exposes Kill(Boolean), which terminates the
+            # complete child tree without starting a second process.  Prefer it
+            # so timeout handling stays within the bounded smoke budget.
+            try {
+                $process.Kill($true)
+                $treeKillSucceeded = $true
+            }
+            catch { }
             if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
                 try {
-                    $taskKillInfo = New-Object System.Diagnostics.ProcessStartInfo
-                    $taskKillInfo.FileName = Join-Path $env:SystemRoot "System32\taskkill.exe"
-                    $taskKillInfo.Arguments = "/PID $($process.Id) /T /F"
-                    $taskKillInfo.UseShellExecute = $false
-                    $taskKillInfo.RedirectStandardOutput = $true
-                    $taskKillInfo.RedirectStandardError = $true
-                    $taskKillInfo.CreateNoWindow = $true
-                    $taskKill = New-Object System.Diagnostics.Process
-                    $taskKill.StartInfo = $taskKillInfo
-                    if ($taskKill.Start()) {
-                        if (-not $taskKill.WaitForExit(2000)) {
-                            try { $taskKill.Kill() } catch { }
+                    if (-not $treeKillSucceeded) {
+                        $taskKillInfo = New-Object System.Diagnostics.ProcessStartInfo
+                        $taskKillInfo.FileName = Join-Path $env:SystemRoot "System32\taskkill.exe"
+                        $taskKillInfo.Arguments = "/PID $($process.Id) /T /F"
+                        $taskKillInfo.UseShellExecute = $false
+                        $taskKillInfo.RedirectStandardOutput = $true
+                        $taskKillInfo.RedirectStandardError = $true
+                        $taskKillInfo.CreateNoWindow = $true
+                        $taskKill = New-Object System.Diagnostics.Process
+                        $taskKill.StartInfo = $taskKillInfo
+                        if ($taskKill.Start()) {
+                            # taskkill /T /F is already forceful; use a short
+                            # settle window to preserve the timeout contract.
+                            if (-not $taskKill.WaitForExit(250)) {
+                                try { $taskKill.Kill() } catch { }
+                            }
                         }
+                        $taskKill.Dispose()
                     }
-                    $taskKill.Dispose()
                 }
                 catch { }
             }
@@ -148,23 +165,29 @@ function Invoke-CapturedProcess {
                 if (-not $process.HasExited) { $process.Kill() }
             }
             catch { }
-            try { [void]$process.WaitForExit(2000) } catch { }
+            try { [void]$process.WaitForExit(250) } catch { }
             try { $process.StandardOutput.Dispose() } catch { }
             try { $process.StandardError.Dispose() } catch { }
             $process.Dispose()
-            return [pscustomobject]@{ ExitCode = 124; StdOut = "" }
+            # 시간 초과. 124는 "빌드가 틀렸다"가 아니라 "시계가 짧았다"는 뜻이다.
+            return [pscustomobject]@{ ExitCode = 124; StdOut = ""; StdErr = "TIMEOUT: the command was still running when the budget ran out." }
         }
         $stdout = [string]$stdoutTask.GetAwaiter().GetResult()
-        [void]$stderrTask.GetAwaiter().GetResult()
+        # stderr를 읽어 놓고 버리고 있었다. docker build는 진행과 오류를 여기로
+        # 내보내므로, 버리면 실패했을 때 볼 것이 하나도 남지 않는다.
+        $stderr = [string]$stderrTask.GetAwaiter().GetResult()
         $exitCode = $process.ExitCode
         $process.Dispose()
         if ($stdout.Length -gt 4096) {
             $stdout = $stdout.Substring(0, 4096)
         }
-        return [pscustomobject]@{ ExitCode = $exitCode; StdOut = $stdout }
+        if ($stderr.Length -gt 4096) {
+            $stderr = $stderr.Substring($stderr.Length - 4096)
+        }
+        return [pscustomobject]@{ ExitCode = $exitCode; StdOut = $stdout; StdErr = $stderr }
     }
     catch {
-        return [pscustomobject]@{ ExitCode = 127; StdOut = "" }
+        return [pscustomobject]@{ ExitCode = 127; StdOut = ""; StdErr = "" }
     }
 }
 
@@ -998,7 +1021,179 @@ if ($Mode -ceq "Start") {
     if ($actualComposeStatus -cne "pass") {
         Write-OwnerReadyPayload -Checks $checks
     }
+    if ($Rebuild -and -not $PSBoundParameters.ContainsKey("WhatIf")) {
+        # 화면 묶음을 처음부터 다시 만드는 빌드는 분 단위다. 캐시가 살아 있을 때만
+        # 빠르다. 2026-08-20에 이 둘을 같은 180초로 재다가 **181초짜리 멀쩡한
+        # 빌드가 잘려 거짓 FAIL**이 났다 -- 손으로 같은 명령을 돌리면 성공했다.
+        # 거짓 FAIL은 다음 사람이 진짜 실패와 구분할 수 없어서 더 나쁘다.
+        $rebuildResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 900)) -Arguments @(
+            @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("build", "--pull=false", "videobox-workspace")
+        )
+        $rebuildStatus = if ($rebuildResult.ExitCode -eq 0) { "pass" } else { "fail" }
+        # 실패 안내가 "빌드 로그를 확인하세요"인데 로그를 아무 데도 안 남기면 그
+        # 안내는 빈말이다. 실패했을 때만, 끝부분만 남긴다.
+        $rebuildLogPath = $null
+        if ($rebuildStatus -cne "pass") {
+            try {
+                [void](New-Item -ItemType Directory -Force -Path $ReceiptRoot -ErrorAction Stop)
+                $rebuildLogPath = Join-Path $ReceiptRoot "rebuild-failure.log"
+                $rebuildLogText = @($rebuildResult.StdOut, $rebuildResult.StdErr) -join "`n"
+                $rebuildLogLines = @($rebuildLogText -split "`r?`n")
+                if ($rebuildLogLines.Count -gt 200) { $rebuildLogLines = $rebuildLogLines[-200..-1] }
+                Set-Content -LiteralPath $rebuildLogPath -Value ($rebuildLogLines -join [Environment]::NewLine) -Encoding utf8
+            }
+            catch { $rebuildLogPath = $null }
+        }
+        $checks += New-OwnerReadyResult -Id "rebuild" -Status $rebuildStatus `
+            -Summary $(if ($rebuildStatus -ceq "pass") { "현재 소스에서 VideoBox 이미지를 다시 만들었습니다." } else { "현재 소스에서 VideoBox 이미지를 다시 만들지 못했습니다." }) `
+            -Action $(if ($rebuildStatus -ceq "pass") { "이 이미지로 VideoBox를 시작합니다." } elseif ($rebuildResult.ExitCode -eq 124) { "빌드가 아직 도는 중에 시간이 다 됐습니다. -TimeoutSec을 늘려 다시 시도하세요." } else { "남겨 둔 빌드 기록을 확인하세요." }) `
+            -Evidence @{ rebuilt = ($rebuildStatus -ceq "pass"); source = "current_worktree"; rebuild_log = $rebuildLogPath; timed_out = ($rebuildResult.ExitCode -eq 124) }
+        if ($rebuildStatus -cne "pass") {
+            Write-OwnerReadyPayload -Checks $checks
+        }
+    }
     $serviceNames = @("videobox-postgres", "videobox-workspace")
+    # **목소리 다리를 창 없이 띄운다** (owner 지적 2026-09-05: "이걸 창을
+    # 열어둬야지만 목소리 더빙을 해야되는건 말이 안되잖아").
+    #
+    # 엔진이 호스트에 있는 것 자체는 이유가 있다 -- 컨테이너에 torch와 2GB
+    # 모델을 넣으면 이미지가 3GB 커진다(`decisions/2026-09-03-host-voice-bridge`).
+    # 문제는 띄우는 방식이었다: `start-voice.ps1`이 앞에서 돌며 창을 붙잡았고,
+    # 창을 닫으면 더빙이 죽었다. 이제 VideoBox를 켤 때 숨은 채로 같이 뜬다.
+    #
+    # **이미 떠 있으면 다시 띄우지 않는다.** 두 개가 같은 포트를 잡으면 나중
+    # 것이 죽고, 어느 쪽이 살아 있는지 아무도 모르게 된다.
+    # **더빙이 없어도 VideoBox는 다 쓸 수 있다.** 그래서 여기서 blocked를 내지
+    # 않는다 -- blocked는 전체를 막고 종료 코드까지 바꾸는데, 목소리는 선택
+    # 기능이라 그 무게가 아니다. 사실은 요약에 적는다.
+    $voiceStatus = "pass"
+    $voiceSummary = "목소리 프로그램이 없어 더빙만 쉬어 갑니다. 나머지는 준비됐습니다."
+    $voiceAction = "목소리 더빙을 쓰려면 chatterbox를 설치한 뒤 다시 실행하세요."
+    $voiceEvidence = @{ port = 8199; started = $false }
+    $voiceAlreadyUp = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $probe.Connect("127.0.0.1", 8199)
+        $voiceAlreadyUp = $probe.Connected
+        $probe.Close()
+    } catch { $voiceAlreadyUp = $false }
+    if ($voiceAlreadyUp) {
+        $voiceStatus = "pass"
+        $voiceSummary = "목소리 다리가 이미 준비돼 있습니다."
+        $voiceAction = "추가 조치가 없습니다."
+        $voiceEvidence = @{ port = 8199; started = $true; already_running = $true }
+    } else {
+        $voiceScript = Join-Path $PSScriptRoot "start-voice.ps1"
+        $voiceLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-voice-bridge.log"
+        if (Test-Path $voiceScript) {
+            try {
+                # `-WindowStyle Hidden`이 창을 없앤다. 로그는 파일로 남겨,
+                # 안 될 때 무엇이 문제였는지 볼 자리를 만든다.
+                Start-Process -FilePath "powershell" `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $voiceScript) `
+                    -WindowStyle Hidden `
+                    -RedirectStandardOutput $voiceLog `
+                    -RedirectStandardError ($voiceLog + ".err") | Out-Null
+                $voiceStatus = "pass"
+                $voiceSummary = "목소리 다리를 백그라운드로 켰습니다."
+                $voiceAction = "추가 조치가 없습니다."
+                $voiceEvidence = @{ port = 8199; started = $true; already_running = $false; log = $voiceLog }
+            } catch {
+                $voiceStatus = "pass"
+                $voiceSummary = "목소리 다리를 켜지 못했습니다. 더빙만 쉬어 갑니다."
+                $voiceAction = "목소리 더빙을 쓰려면 로그를 확인한 뒤 다시 실행하세요."
+                $voiceEvidence = @{ port = 8199; started = $false; log = $voiceLog }
+            }
+        }
+    }
+    $checks += New-OwnerReadyResult -Id "voice_bridge" -Status $voiceStatus `
+        -Summary $voiceSummary -Action $voiceAction -Evidence $voiceEvidence
+
+    # **캡컷 다리도 같이 켠다** (owner 승인 2026-09-07: "캡컷 넘기기 다리 만들어줘").
+    # 캡컷 프로젝트 폴더는 이 컴퓨터에 있고 컨테이너는 못 본다. 목소리 다리와
+    # 똑같은 이유·똑같은 방식이라 여기 나란히 둔다 -- 한 단계를 고칠 때 옆
+    # 단계를 같이 보라는 그 자리다.
+    #
+    # 캡컷 넘기기가 없어도 VideoBox는 다 쓸 수 있다(선택적 호환 경로,
+    # `implementation-plan.ko.md` §4). 그래서 blocked를 내지 않는다.
+    $capcutStatus = "pass"
+    $capcutSummary = "캡컷 다리를 켜지 못했습니다. 캡컷으로 넘기기만 쉬어 갑니다."
+    $capcutAction = "캡컷으로 넘기려면 로그를 확인한 뒤 다시 실행하세요."
+    $capcutEvidence = @{ port = 8200; started = $false }
+    $capcutAlreadyUp = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $probe.Connect("127.0.0.1", 8200)
+        $capcutAlreadyUp = $probe.Connected
+        $probe.Close()
+    } catch { $capcutAlreadyUp = $false }
+    if ($capcutAlreadyUp) {
+        $capcutSummary = "캡컷 다리가 이미 준비돼 있습니다."
+        $capcutAction = "추가 조치가 없습니다."
+        $capcutEvidence = @{ port = 8200; started = $true; already_running = $true }
+    } else {
+        $capcutScript = Join-Path $PSScriptRoot "start-capcut.ps1"
+        $capcutLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-capcut-bridge.log"
+        if (Test-Path $capcutScript) {
+            try {
+                Start-Process -FilePath "powershell" `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $capcutScript) `
+                    -WindowStyle Hidden `
+                    -RedirectStandardOutput $capcutLog `
+                    -RedirectStandardError ($capcutLog + ".err") | Out-Null
+                $capcutSummary = "캡컷 다리를 백그라운드로 켰습니다."
+                $capcutAction = "추가 조치가 없습니다."
+                $capcutEvidence = @{ port = 8200; started = $true; already_running = $false; log = $capcutLog }
+            } catch {
+                $capcutEvidence = @{ port = 8200; started = $false; log = $capcutLog }
+            }
+        }
+    }
+    $checks += New-OwnerReadyResult -Id "capcut_bridge" -Status $capcutStatus `
+        -Summary $capcutSummary -Action $capcutAction -Evidence $capcutEvidence
+
+    # **그림 다리도 같이 켠다** (owner 지시 2026-09-07: "그래 해봐. 그리고 괜찮으면
+    # 우리 시스템에 적용하자"). 컨테이너 안에는 브라우저가 없고, 이 컴퓨터에는
+    # 크롬이 이미 있다. 목소리(8199)·캡컷(8200)과 똑같은 이유·똑같은 방식이라
+    # 여기 나란히 둔다 -- 한 단계를 고칠 때 옆 단계를 같이 보라는 그 자리다.
+    #
+    # 인포그래픽이 없어도 VideoBox는 다 쓸 수 있다. 그래서 blocked를 내지 않는다.
+    $infographicStatus = "pass"
+    $infographicSummary = "그림 다리를 켜지 못했습니다. 인포그래픽 만들기만 쉬어 갑니다."
+    $infographicAction = "인포그래픽을 만들려면 로그를 확인한 뒤 다시 실행하세요."
+    $infographicEvidence = @{ port = 8201; started = $false }
+    $infographicAlreadyUp = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $probe.Connect("127.0.0.1", 8201)
+        $infographicAlreadyUp = $probe.Connected
+        $probe.Close()
+    } catch { $infographicAlreadyUp = $false }
+    if ($infographicAlreadyUp) {
+        $infographicSummary = "그림 다리가 이미 준비돼 있습니다."
+        $infographicAction = "추가 조치가 없습니다."
+        $infographicEvidence = @{ port = 8201; started = $true; already_running = $true }
+    } else {
+        $infographicScript = Join-Path $PSScriptRoot "start-infographic.ps1"
+        $infographicLog = Join-Path ([System.IO.Path]::GetTempPath()) "videobox-infographic-bridge.log"
+        if (Test-Path $infographicScript) {
+            try {
+                Start-Process -FilePath "powershell" `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $infographicScript) `
+                    -WindowStyle Hidden `
+                    -RedirectStandardOutput $infographicLog `
+                    -RedirectStandardError ($infographicLog + ".err") | Out-Null
+                $infographicSummary = "그림 다리를 백그라운드로 켰습니다."
+                $infographicAction = "추가 조치가 없습니다."
+                $infographicEvidence = @{ port = 8201; started = $true; already_running = $false; log = $infographicLog }
+            } catch {
+                $infographicEvidence = @{ port = 8201; started = $false; log = $infographicLog }
+            }
+        }
+    }
+    $checks += New-OwnerReadyResult -Id "infographic_bridge" -Status $infographicStatus `
+        -Summary $infographicSummary -Action $infographicAction -Evidence $infographicEvidence
+
     if ($WithYujinMemory) {
         # 게이트웨이가 유진 에이전트와 메모리 어댑터에 의존한다.
         $serviceNames += @("videobox-hermes-yujin", "videobox-hermes-memory-adapter", "videobox-agent-gateway")
@@ -1034,7 +1229,12 @@ if ($Mode -ceq "Start") {
             Write-OwnerReadyPayload -Checks $checks
         }
     }
-    $upResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec $TimeoutSec -Arguments @(
+    # **시작에도 넉넉한 바닥이 필요하다.** 바로 위 재빌드는 2026-08-20에 이걸
+    # 고쳤는데 시작 단계는 기본값 30초 그대로였다. 새로 만든 이미지로 컨테이너를
+    # 다시 세울 때는 30초를 넘기고, 그러면 명령이 잘려 **거짓 FAIL**이 난다 --
+    # 2026-09-03에 실제로 그랬다(FAIL이 뜬 40초 뒤 컨테이너는 healthy였다).
+    # 거짓 FAIL은 다음 사람이 진짜 실패와 구분할 수 없어서 더 나쁘다.
+    $upResult = Invoke-CapturedProcess -FilePath $DockerExecutable -CommandTimeoutSec ([Math]::Max($TimeoutSec, 300)) -Arguments @(
         @("compose") + $composeFileArguments + @("--env-file", $EnvFile) + $composeProfileArguments + @("up", "-d") + $serviceNames
     )
     if ($upResult.ExitCode -ne 0) {
@@ -1047,9 +1247,17 @@ if ($Mode -ceq "Start") {
     $healthUri = [Uri]::new($VideoBoxUri, "/health")
     $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSec)
     $health = [pscustomobject]@{ State = "blocked"; StatusCode = 0 }
+    # 시작 직후에는 게이트웨이가 앱보다 먼저 뜬다. 실측(2026-08-17): 1~3초는 502,
+    # 4초부터 200. 이 구간의 502를 '실패'로 보고 루프를 빠져나오는 바람에 재빌드할
+    # 때마다 `[FAIL]`이 떴고, 확인해 보면 매번 healthy였다. **거짓 실패는 불편해서가
+    # 아니라 진짜 실패와 똑같이 생겨서 사람이 FAIL을 무시하게 만들기 때문에 위험하다.**
+    # 아직 안 뜬 것과 잘못된 것은 다르다 -- 앞의 것만 기다린다.
+    $warmingUpCodes = @(502, 503, 504)
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         $health = Invoke-LoopbackProbe -Uri $healthUri -RequireHealthJson
-        if ($health.State -ceq "pass" -or $health.State -ceq "fail") { break }
+        if ($health.State -ceq "pass") { break }
+        $stillWarmingUp = $health.State -ceq "blocked" -or ($warmingUpCodes -contains [int]$health.StatusCode)
+        if (-not $stillWarmingUp) { break }
         Start-Sleep -Milliseconds 250
     }
     if ($health.State -ceq "pass") {
@@ -1161,12 +1369,33 @@ if ($Mode -ceq "Smoke") {
     )
     $checks = @()
     $receiptChecks = @()
+    $smokeTimedOut = $false
     foreach ($definition in $definitions) {
         $scriptPath = Join-Path $PSScriptRoot $definition.File
         $relativeScriptPath = "scripts/$($definition.File)"
         $exitCode = 127
         $stdout = ""
         $preScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
+        if ($smokeTimedOut) {
+            # A timed-out verifier is a hard stop for the smoke lane.  Record
+            # the remaining checks as fail-closed without launching more child
+            # processes; this keeps the bounded-timeout contract meaningful.
+            $status = "fail"
+            $action = "이전 검증기 타임아웃으로 후속 검증을 건너뛰었습니다."
+            $checks += New-OwnerReadyResult -Id $definition.Id -Status $status `
+                -Summary "이전 검증기 타임아웃으로 후속 검증을 건너뛰었습니다." `
+                -Action $action `
+                -Evidence @{ live = $false; static_only = ($definition.Arguments -contains "-StaticOnly"); raw_output_recorded = $false }
+            $receiptChecks += [ordered]@{
+                id = $definition.Id
+                mode = $definition.ReceiptMode
+                status = $status
+                marker = "invalid"
+                script_sha256 = $preScriptSha256
+                action = $action
+            }
+            continue
+        }
         $preTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
             "ls-files", "--error-unmatch", "--", $relativeScriptPath
         )
@@ -1184,6 +1413,9 @@ if ($Mode -ceq "Smoke") {
             $child = Invoke-CapturedProcess -FilePath $powerShellExecutable -Arguments $arguments -CommandTimeoutSec $TimeoutSec
             $exitCode = $child.ExitCode
             $stdout = $child.StdOut
+        }
+        if ($exitCode -eq 124) {
+            $smokeTimedOut = $true
         }
         $postScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
         $postTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
@@ -1243,19 +1475,24 @@ if ($Mode -ceq "Smoke") {
         $scriptPath = Join-Path $PSScriptRoot $definition.File
         $relativeScriptPath = "scripts/$($definition.File)"
         $currentScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
-        $currentTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-            "ls-files", "--error-unmatch", "--", $relativeScriptPath
-        )
-        $currentUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-            "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
-        )
-        $currentEvidenceValid = (
-            $headStable -and
-            $currentTrackedResult.ExitCode -eq 0 -and
-            $currentUnchangedResult.ExitCode -eq 0 -and
-            $currentScriptSha256 -ne "unavailable" -and
-            $currentScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
-        )
+        if ($smokeTimedOut -and $index -gt 0) {
+            $currentEvidenceValid = $false
+        }
+        else {
+            $currentTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                "ls-files", "--error-unmatch", "--", $relativeScriptPath
+            )
+            $currentUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
+            )
+            $currentEvidenceValid = (
+                $headStable -and
+                $currentTrackedResult.ExitCode -eq 0 -and
+                $currentUnchangedResult.ExitCode -eq 0 -and
+                $currentScriptSha256 -ne "unavailable" -and
+                $currentScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
+            )
+        }
         if (-not $currentEvidenceValid) {
             $checks[$index].status = "fail"
             $checks[$index].summary = "로컬 검증 항목을 확인하지 못했습니다."
@@ -1325,19 +1562,24 @@ if ($Mode -ceq "Smoke") {
             $scriptPath = Join-Path $PSScriptRoot $definition.File
             $relativeScriptPath = "scripts/$($definition.File)"
             $publishScriptSha256 = Get-ScriptSha256 -LiteralPath $scriptPath
-            $publishTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-                "ls-files", "--error-unmatch", "--", $relativeScriptPath
-            )
-            $publishUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
-                "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
-            )
-            $publishEvidenceValid = (
-                $publishHeadStable -and
-                $publishTrackedResult.ExitCode -eq 0 -and
-                $publishUnchangedResult.ExitCode -eq 0 -and
-                $publishScriptSha256 -ne "unavailable" -and
-                $publishScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
-            )
+            if ($smokeTimedOut -and $index -gt 0) {
+                $publishEvidenceValid = $false
+            }
+            else {
+                $publishTrackedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                    "ls-files", "--error-unmatch", "--", $relativeScriptPath
+                )
+                $publishUnchangedResult = Invoke-CapturedProcess -FilePath $GitExecutable -Arguments @(
+                    "diff", "--quiet", $baselineCommit, "--", $relativeScriptPath
+                )
+                $publishEvidenceValid = (
+                    $publishHeadStable -and
+                    $publishTrackedResult.ExitCode -eq 0 -and
+                    $publishUnchangedResult.ExitCode -eq 0 -and
+                    $publishScriptSha256 -ne "unavailable" -and
+                    $publishScriptSha256 -ceq [string]$receiptChecks[$index]["script_sha256"]
+                )
+            }
             if (-not $publishEvidenceValid) {
                 $checks[$index].status = "fail"
                 $checks[$index].summary = "로컬 검증 항목을 확인하지 못했습니다."

@@ -104,7 +104,9 @@ def test_stale_review_blocks_output_until_reapproval_restores_current_freshness(
     runner = LocalPipelineRunner(store)
 
     assert store.get_review_state(project_id=project.project_id, timeline_id=timeline["timeline_id"])["is_current"] is False
-    with pytest.raises(ValueError, match="explicit approval"):
+    # 게이트가 영어 문장 대신 코드를 던진다 -- 문장은 화면이 creator 문구로
+    # 옮길 방법이 없어서, 완성본이 실패해도 이유가 owner에게 못 갔다.
+    with pytest.raises(ValueError, match="final_output_requires_review_approval"):
         runner.start_subtitle_render(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
 
     approved = runner.approve_timeline_review(project_id=project.project_id, timeline_job_id=timeline_job["job_id"])
@@ -407,6 +409,29 @@ def test_caption_style_scope_rules_resolve_snapshots_without_changing_default_fo
     changed = update_caption_style(session=session, style={"text_color": "#00FF00FF"}, scope="current_caption", segment_ids=["b"])
     assert changed["caption_style"]["text_color"] == "#FFFFFFFF"
     assert changed["segments"][1]["caption_style"]["text_color"] == "#00FF00FF"
+
+
+def test_project_caption_style_undo_and_redo_restore_the_root_style_snapshot() -> None:
+    from videobox_core_engine.editing_session import redo, undo, update_caption_style
+
+    session = {
+        "caption_style": {"font_size_px": 48, "text_color": "#FFFFFFFF"},
+        "session_revision": 1,
+        "segments": [{"segment_id": "a"}],
+        "history": [],
+    }
+
+    changed = update_caption_style(
+        session=session,
+        style={"font_size_px": 64, "text_color": "#00FF00FF"},
+        scope="project_default",
+        segment_ids=[],
+    )
+    reverted = undo(session=changed)
+    restored = redo(session=reverted)
+
+    assert reverted["caption_style"] == session["caption_style"]
+    assert restored["caption_style"] == changed["caption_style"]
 
 
 def test_partial_regeneration_conflict_returns_latest_manual_caption_and_style_without_stale_timeline_save() -> None:
@@ -955,7 +980,7 @@ def test_partial_music_and_sfx_fade_updates_preserve_audio_controls_and_asset_id
         "asset_uri": "local://projects/project_001/assets/music_001",
         "expected_content_sha256": "a" * 64,
         "media_revision": "music-r2",
-        "media_controls": {"gain_db": -8.0, "fade_in_sec": 1.0, "fade_out_sec": 0.75, "ducking": True},
+        "media_controls": {"gain_db": -8.0, "fade_in_sec": 1.0, "fade_out_sec": 0.75, "ducking": True, "normalize_loudness": False, "denoise": False},
     }
     sfx_override = dict(updated["segments"][0]["sfx_override"])
     assert sfx_override.pop("source_action_id").startswith("action:sfx_override:")
@@ -964,7 +989,7 @@ def test_partial_music_and_sfx_fade_updates_preserve_audio_controls_and_asset_id
         "asset_uri": "local://projects/project_001/assets/sfx_001",
         "expected_content_sha256": "b" * 64,
         "media_revision": "sfx-r3",
-        "media_controls": {"gain_db": -3.0, "fade_in_sec": 0.3, "fade_out_sec": 0.5, "ducking": False},
+        "media_controls": {"gain_db": -3.0, "fade_in_sec": 0.3, "fade_out_sec": 0.5, "ducking": False, "normalize_loudness": False, "denoise": False},
     }
 
 
@@ -1152,6 +1177,158 @@ def test_update_segment_image_overlay_records_history() -> None:
         }
     ]
     assert updated["history"][-1]["mutation_type"] == "image_overlay_update"
+
+
+def test_update_segment_image_overlay_accepts_the_same_presets_as_shapes() -> None:
+    """사진도 도형과 같은 프리셋으로 자리·크기·움직임을 받는다.
+
+    owner가 2026-09-06에 요청한 것은 "사진을 우리 영상 위에도 얹어서 움직이게"다.
+    도형이 이미 같은 어휘를 쓰고 있으므로 목록을 새로 만들지 않고 그대로 본뜬다 --
+    사본을 만들면 화면·API·렌더가 서로 다른 목록을 보게 된다.
+    """
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    placed = update_segment_image_overlay(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+        vertical="top",
+        horizontal="right",
+        size="small",
+        motion="slide_in_left",
+    )
+
+    assert placed["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "image_overlay",
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "small",
+            "motion": "slide_in_left",
+        }
+    ]
+    assert placed["history"][-1]["mutation_type"] == "image_overlay_update"
+
+    # 다시 저장하면 쌓이지 않고 바뀐다 -- 도형과 같은 upsert다.
+    moved = update_segment_image_overlay(
+        session=placed,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+        vertical="bottom",
+        horizontal="left",
+        size="large",
+        motion="fade_in_out",
+    )
+    overlay = moved["segments"][0]["visual_overlays"][0]
+    assert len(moved["segments"][0]["visual_overlays"]) == 1
+    assert (overlay["vertical"], overlay["horizontal"]) == ("bottom", "left")
+    assert (overlay["size"], overlay["motion"]) == ("large", "fade_in_out")
+
+
+def test_update_segment_image_overlay_without_presets_stays_as_it_was() -> None:
+    """프리셋을 안 주면 이 기능이 생기기 전과 **글자 하나까지 같은** 자국을 남긴다.
+
+    사진 오버레이를 프리셋 없이 부르는 자리가 파이프라인·유진 경로에 여럿 있다.
+    빈 열쇠를 채워 넣기 시작하면 렌더가 '정중앙'이 아닌 자리로 읽을 수 있고,
+    그러면 owner는 아무것도 안 바꿨는데 그림이 움직인 것을 보게 된다.
+    """
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_image_overlay(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Exterior reference image",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "image_overlay",
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+        }
+    ]
+
+
+def test_update_segment_image_overlay_rejects_values_outside_the_presets() -> None:
+    """자유 좌표·초 단위·키프레임은 승인 범위 밖이다(2026-08-20 승인 5항).
+
+    오타를 조용히 기본값으로 좁히지 않는다 -- 고른 것이 왜 안 되는지 owner가
+    알 수 없게 된다.
+    """
+    import pytest
+
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_image_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    for bad in (
+        {"vertical": "37%"},
+        {"vertical": "centre"},
+        {"horizontal": "12px"},
+        {"size": "huge"},
+        {"size": "120%"},
+        {"motion": "spin"},
+        {"motion": "0.4s ease-in"},
+    ):
+        with pytest.raises(ValueError):
+            update_segment_image_overlay(
+                session=session,
+                segment_id="seg_001",
+                asset_id="asset_image_001",
+                text="Exterior reference image",
+                **bad,
+            )
 
 
 def test_update_segment_table_overlay_records_history() -> None:
@@ -2792,3 +2969,161 @@ def test_broll_override_keeps_the_source_window_the_inspector_sends() -> None:
     assert (controls["in_sec"], controls["out_sec"]) == (20.0, 26.5)
     # B-roll stays silent unless the owner opts in, so the default must not flip.
     assert controls["preserve_source_audio"] is False
+
+
+def test_update_and_remove_segment_shape_overlay_record_history() -> None:
+    """정지 도형(강조 상자·밑줄)은 다른 오버레이와 같은 upsert 체계를 탄다."""
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import remove_segment_shape_overlay
+    from videobox_core_engine.editing_session import update_segment_shape_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    updated = update_segment_shape_overlay(
+        session=session,
+        segment_id="seg_001",
+        shape="highlight_box",
+        vertical="top",
+        horizontal="left",
+        size="small",
+    )
+
+    assert updated["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "highlight_box",
+            "vertical": "top",
+            "horizontal": "left",
+            "size": "small",
+            # 움직임을 고르지 않으면 `그대로`다. 승인 기록 5항이 정한 기본값이며,
+            # 렌더는 이 값에서 예전과 똑같은 필터를 낸다.
+            "motion": "none",
+        }
+    ]
+    assert updated["history"][-1]["mutation_type"] == "shape_overlay_update"
+
+    # 같은 장면에 다시 저장하면 도형이 쌓이지 않고 바뀐다 -- upsert다.
+    replaced = update_segment_shape_overlay(
+        session=updated,
+        segment_id="seg_001",
+        shape="underline",
+        vertical="bottom",
+        horizontal="center",
+        size="large",
+    )
+    assert replaced["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "underline",
+            "vertical": "bottom",
+            "horizontal": "center",
+            "size": "large",
+            "motion": "none",
+        }
+    ]
+
+    removed = remove_segment_shape_overlay(session=replaced, segment_id="seg_001")
+    assert removed["segments"][0]["visual_overlays"] == []
+    assert removed["history"][-1]["mutation_type"] == "shape_overlay_remove"
+
+
+def test_update_segment_shape_overlay_rejects_values_outside_the_presets() -> None:
+    """도형·위치·크기는 프리셋만 받는다. 자유 좌표는 이번 범위 밖이다."""
+    import pytest
+
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_shape_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    for bad in (
+        {"shape": "arrow", "vertical": "top", "horizontal": "left", "size": "small"},
+        {"shape": "highlight_box", "vertical": "37%", "horizontal": "left", "size": "small"},
+        {"shape": "highlight_box", "vertical": "top", "horizontal": "12px", "size": "small"},
+        {"shape": "highlight_box", "vertical": "top", "horizontal": "left", "size": "huge"},
+        # 움직임도 프리셋만 받는다. 임의 키프레임은 이번 범위 밖이다.
+        {
+            "shape": "highlight_box", "vertical": "top", "horizontal": "left",
+            "size": "small", "motion": "spin",
+        },
+        {
+            "shape": "highlight_box", "vertical": "top", "horizontal": "left",
+            "size": "small", "motion": "0.4s ease-in",
+        },
+    ):
+        with pytest.raises(ValueError):
+            update_segment_shape_overlay(session=session, segment_id="seg_001", **bad)
+
+
+def test_shape_overlay_remembers_how_it_should_appear_and_leave() -> None:
+    """고른 움직임이 저장되고, 다시 저장하면 바뀐다.
+
+    화면에서 고른 것이 렌더까지 닿으려면 여기 저장돼야 한다 -- 이 저장소는
+    "부품은 있는데 부르는 자리가 없다"에 여러 번 걸렸다.
+    """
+    from videobox_core_engine.editing_session import build_editing_session
+    from videobox_core_engine.editing_session import update_segment_shape_overlay
+
+    session = build_editing_session(
+        project_id="project_001",
+        timeline={"timeline_id": "timeline_001"},
+        segments=[
+            {
+                "segment_id": "seg_001",
+                "text": "Keep this",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "review_required": False,
+                "cleanup_decision": "keep",
+            }
+        ],
+    )
+
+    appearing = update_segment_shape_overlay(
+        session=session,
+        segment_id="seg_001",
+        shape="icon_arrow_right",
+        vertical="middle",
+        horizontal="right",
+        size="medium",
+        motion="fade_in",
+    )
+    assert appearing["segments"][0]["visual_overlays"][0]["motion"] == "fade_in"
+
+    sliding = update_segment_shape_overlay(
+        session=appearing,
+        segment_id="seg_001",
+        shape="icon_arrow_right",
+        vertical="middle",
+        horizontal="right",
+        size="medium",
+        motion="slide_in_left",
+    )
+    assert sliding["segments"][0]["visual_overlays"][0]["motion"] == "slide_in_left"
+    assert len(sliding["segments"][0]["visual_overlays"]) == 1

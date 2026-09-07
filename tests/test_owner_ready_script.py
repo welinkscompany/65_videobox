@@ -4,6 +4,7 @@ import codecs
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -488,7 +489,7 @@ def _connection_classification_map(script: Path, names: tuple[str, ...]) -> dict
         timeout=10,
         check=False,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     return dict(line.split("=", 1) for line in result.stdout.splitlines())
 
 
@@ -500,7 +501,7 @@ def test_default_check_is_read_only_sanitized_and_classifies_protected_residue(t
         result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["schema_version"] == "videobox-owner-ready-v1"
     assert payload["mode"] == "Check"
     assert payload["overall_status"] == "pass"
@@ -843,7 +844,7 @@ def test_start_runs_only_the_two_base_services_and_waits_for_health(tmp_path: Pa
         result = _run(fixture, mode="Start", video_uri=video_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["mode"] == "Start"
     assert payload["overall_status"] == "pass"
     started = next(row for row in payload["checks"] if row["id"] == "start")
@@ -863,6 +864,76 @@ def test_start_runs_only_the_two_base_services_and_waits_for_health(tmp_path: Pa
     serialized = json.dumps(payload).lower()
     assert "do-not-print" not in serialized
     assert str(fixture["env_file"]).lower() not in serialized
+
+
+def test_start_brings_up_the_voice_bridge_without_leaving_a_window_open(tmp_path: Path) -> None:
+    """owner 지적(2026-09-05): "이걸 창을 열어둬야지만 목소리 더빙을 해야되는건
+    말이 안되잖아".
+
+    맞는 말이다. 목소리 엔진이 호스트에 있는 것 자체는 이유가 있다 -- 컨테이너에
+    torch와 2GB 모델을 넣으면 이미지가 3GB 커진다(`decisions/2026-09-03-host-voice-bridge`).
+    문제는 **띄우는 방식**이었다: `start-voice.ps1`이 앞에서 돌며 창을 붙잡고,
+    창을 닫으면 더빙이 죽었다.
+
+    이제 VideoBox를 켤 때 **숨은 채로** 같이 뜬다. owner는 아무것도 안 해도 된다.
+    """
+    fixture = _fixture_repository(tmp_path)
+    with _health_server() as video_uri:
+        result = _run(fixture, mode="Start", video_uri=video_uri)
+
+    assert result.returncode == 0, _why_it_failed(result)
+    payload = _payload(result)
+    voice = next((row for row in payload["checks"] if row["id"] == "voice_bridge"), None)
+    assert voice is not None, "목소리 다리 결과가 없다"
+    # 이 기계에 목소리 프로그램이 깔려 있는지는 시험이 정할 수 없다. 둘 중
+    # 하나여야 한다: 띄웠거나(pass), 깔린 것이 없어 건너뛰었거나(blocked).
+    assert voice["status"] in {"pass", "blocked"}
+    assert "창" not in json.dumps(voice, ensure_ascii=False), "창을 열어 두라고 하면 안 된다"
+
+
+def test_start_waits_through_the_gateway_502s_that_precede_a_ready_app(tmp_path: Path) -> None:
+    """실측(2026-08-17): 재시작 직후 1~3초는 nginx가 502를 돌려주고 4초부터 200이다.
+
+    프로브가 첫 502를 '실패'로 보고 대기 루프를 즉시 빠져나오는 바람에, 재빌드할 때마다
+    `[FAIL]`이 떴고 확인해 보면 매번 healthy였다. **거짓 실패가 위험한 이유는 불편해서가
+    아니라, 진짜 실패와 똑같이 생겨서 사람이 FAIL을 무시하도록 길들이기 때문이다.**
+    """
+    attempts: list[str] = []
+
+    class WarmingUpHandler(BaseHTTPRequestHandler):
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+        def do_GET(self) -> None:  # noqa: N802 - stdlib callback
+            attempts.append(self.path)
+            if len(attempts) <= 3:
+                self.send_response(502)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            body = b'{"status":"ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), WarmingUpHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        fixture = _fixture_repository(tmp_path)
+        result = _run(fixture, mode="Start", video_uri=f"http://127.0.0.1:{server.server_port}")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    payload = _payload(result)
+    started = next(row for row in payload["checks"] if row["id"] == "start")
+    assert started["status"] == "pass", started
+    assert started["evidence"]["health_status_code"] == 200
+    # 포기하지 않고 다시 물어봤다는 증거.
+    assert len(attempts) > 3
 
 
 def test_start_validates_the_actual_env_without_output_before_compose_up(tmp_path: Path) -> None:
@@ -909,7 +980,7 @@ def test_smoke_runs_exact_static_non_live_scripts_and_writes_sanitized_receipt(t
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["mode"] == "Smoke"
     assert payload["overall_status"] == "pass"
     assert payload["readiness_status"] == "local_ready"
@@ -1037,7 +1108,7 @@ def test_receipt_temp_writer_creates_exclusive_unique_files(tmp_path: Path) -> N
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     payload = json.loads(result.stdout)
     assert payload["first"] != payload["second"]
     assert payload["first_text"] == "first"
@@ -1081,7 +1152,7 @@ def test_receipt_temp_writer_removes_partial_file_after_write_failure(tmp_path: 
         check=False,
     )
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert result.stdout.strip() == "0"
 
 
@@ -1092,7 +1163,7 @@ def test_smoke_dashboard_accepts_only_an_unfollowed_same_loopback_login_redirect
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["dashboard_status"] == "ready"
     assert payload["readiness_status"] == "local_ready"
     assert requests == ["/"]
@@ -1375,7 +1446,7 @@ def test_smoke_credential_classifier_accepts_safe_literal_and_comment_forms(
 
     payload = _payload(result)
     serialized = result.stdout + result.stderr + _smoke_receipt_text(fixture)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
     assert replacement not in serialized
@@ -1410,6 +1481,31 @@ def test_smoke_credential_classifier_rejects_non_utf8_bom_encodings(
     assert str(fixture["env_file"]) not in serialized
 
 
+
+def _why_it_failed(result: subprocess.CompletedProcess[str]) -> str:
+    """실패했을 때 **무엇이** 실패했는지 말한다.
+
+    2026-08-20 전체 실행에서 이 파일의 한 건이 깨졌는데, 단정문이 `stderr`만
+    보여 줬고 그 값은 비어 있었다. 정작 단서(어느 검사가 fail인지)는 stdout의
+    JSON에 있었고, 그걸 보려고 출력 파일을 따로 뒤져야 했다. 재현이 안 되는
+    실패일수록 **한 번 볼 때 다 보여야** 한다.
+    """
+    detail = [f"exit={result.returncode}"]
+    if result.stderr.strip():
+        detail.append(f"stderr={result.stderr.strip()[:500]}")
+    try:
+        payload = json.loads(result.stdout.splitlines()[-1])
+    except (ValueError, IndexError):
+        detail.append(f"stdout={result.stdout.strip()[-500:]}")
+        return " | ".join(detail)
+    failed = [
+        f"{check.get('id')}({check.get('status')}): {check.get('summary')}"
+        for check in payload.get("checks", [])
+        if check.get("status") != "pass"
+    ]
+    detail.append(f"failed checks={failed}" if failed else f"payload={payload}")
+    return " | ".join(detail)
+
 def test_smoke_credential_classifier_accepts_strict_utf8_bom(tmp_path: Path) -> None:
     fixture = _fixture_repository(tmp_path)
     env_text = _valid_env_text(fixture["data_root"])
@@ -1418,7 +1514,7 @@ def test_smoke_credential_classifier_accepts_strict_utf8_bom(tmp_path: Path) -> 
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
 
@@ -1431,7 +1527,7 @@ def test_smoke_credential_classifier_ignores_optional_mem0_key(tmp_path: Path) -
         result = _run(fixture, mode="Smoke", hermes_uri=hermes_uri)
 
     payload = _payload(result)
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
     assert "MEM0_API_KEY" not in result.stdout
@@ -1490,7 +1586,7 @@ def test_smoke_credential_values_and_metadata_never_leave_process(tmp_path: Path
     payload = _payload(result)
     receipt_text = _smoke_receipt_text(fixture)
     serialized = result.stdout + result.stderr + receipt_text
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, _why_it_failed(result)
     assert payload["credential_status"] == "present_unverified"
     assert payload["readiness_status"] == "local_ready"
     assert str(fixture["env_file"]) not in serialized
@@ -1863,7 +1959,15 @@ def test_open_modes_report_exact_targets_under_whatif_without_launching(
     source = SCRIPT.read_text(encoding="utf-8-sig")
     assert "Start-Process -FilePath $VideoBoxUri.AbsoluteUri" in source
     assert "Start-Process -FilePath $script:capCutExecutable" in source
-    assert "-ArgumentList" not in source
+    # **여는 두 자리에 인자를 싣지 않는다**(`"arguments": 0`이 그 약속이다).
+    #
+    # 예전에는 파일 전체에 `-ArgumentList`가 없어야 한다고 봤는데, 그건 너무
+    # 넓었다 -- 2026-09-05에 목소리 다리를 창 없이 띄우려고 `Start-Process`를
+    # 쓰자 여기서 막혔다. 그건 여는 동작이 아니라 켜는 동작이다.
+    # 지키려는 것은 "브라우저와 캡컷을 인자 없이 연다"이므로 그 자리만 본다.
+    for opener in ("Start-Process -FilePath $VideoBoxUri.AbsoluteUri", "Start-Process -FilePath $script:capCutExecutable"):
+        start = source.find(opener)
+        assert "-ArgumentList" not in source[start:start + 200]
 
 
 def test_yujin_memory_start_installs_profile_before_compose_up() -> None:
@@ -1883,3 +1987,73 @@ def test_yujin_memory_start_installs_profile_before_compose_up() -> None:
 
     guard = source.rfind("if ($WithYujinMemory)", 0, installer)
     assert guard != -1, "프로필 설치는 -WithYujinMemory 일 때만 실행해야 한다"
+
+
+def test_the_rebuild_budget_fits_a_cold_image_build() -> None:
+    """재빌드를 180초로 묶어 두면 **멀쩡한 빌드가 거짓 FAIL로 뜬다.**
+
+    2026-08-20에 실제로 겪었다. 화면 코드를 고친 뒤 재빌드하니 09:33:34에 시작해
+    09:36:35에 끝났다 -- **181초**, 제한시간 180초 바로 위다. 손으로 같은
+    `docker compose build`를 돌리면 성공한다. 즉 빌드는 멀쩡했고 시계만 짧았다.
+
+    화면 묶음을 처음부터 다시 만드는 빌드는 원래 분 단위다. 캐시가 살아 있을
+    때만 빠르다. 그 두 경우를 같은 잣대로 재면 안 된다.
+
+    거짓 FAIL이 더 나쁜 이유는 다음 사람이 **진짜 실패와 구분할 수 없기**
+    때문이다 -- 이 저장소는 "FAIL이 뜨면 진짜 실패"를 전제로 검증을 쌓아 왔다.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    rebuild_budget = re.search(
+        r"rebuildResult = Invoke-CapturedProcess[^\n]*CommandTimeoutSec \(\[Math\]::Max\(\$TimeoutSec, (\d+)\)\)",
+        script,
+    )
+
+    assert rebuild_budget is not None, "재빌드 제한시간을 찾지 못했다"
+    assert int(rebuild_budget.group(1)) >= 900, (
+        "재빌드 제한시간이 차가운 빌드보다 짧다. 실측 181초짜리 빌드가 180초 벽에 잘려 "
+        "거짓 FAIL이 났다."
+    )
+
+
+def test_starting_the_stack_gets_the_same_generous_budget_as_the_rebuild() -> None:
+    """재빌드만 고치고 **바로 옆 시작 단계는 30초 그대로 두었다.**
+
+    2026-09-03에 실제로 겪었다. 재빌드는 통과했는데 그 다음 `compose up -d`가
+    30초 벽에 잘려 `[FAIL] VideoBox 서비스를 시작하지 못했습니다.`가 떴다 --
+    그런데 40초 뒤 컨테이너는 healthy였고 화면은 200을 돌려줬다. 즉 시작은
+    멀쩡했고 시계만 짧았다.
+
+    새로 만든 이미지로 컨테이너를 다시 세우는 일은 원래 30초를 넘긴다. 이미
+    떠 있는 스택을 확인만 할 때나 빠르다. 그 두 경우를 같은 잣대로 재면 안 된다
+    -- 바로 위 재빌드가 같은 이유로 이미 한 번 고쳐졌다.
+
+    거짓 FAIL이 더 나쁜 이유는 다음 사람이 **진짜 실패와 구분할 수 없기** 때문이다.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    up_budget = re.search(
+        r"upResult = Invoke-CapturedProcess.*CommandTimeoutSec \(\[Math\]::Max\(\$TimeoutSec, (\d+)\)\)",
+        script,
+    )
+
+    assert up_budget is not None, (
+        "시작 제한시간이 `[Math]::Max`로 바닥을 두고 있지 않다. 기본값 30초로 두면 "
+        "재빌드 직후 컨테이너를 다시 세울 때 잘려 거짓 FAIL이 난다."
+    )
+    assert int(up_budget.group(1)) >= 300, (
+        "시작 제한시간이 컨테이너를 다시 세우는 시간보다 짧다."
+    )
+
+
+def test_a_failed_rebuild_keeps_the_log_it_tells_the_owner_to_read() -> None:
+    """실패 안내는 "Docker 빌드 로그를 확인하세요"인데 **로그를 아무 데도 안 남겼다.**
+
+    2026-08-20에 재빌드가 실패했을 때 원인을 알아내려고 같은 명령을 손으로 다시
+    돌려야 했다. 안내가 가리키는 것을 스스로 남기지 않으면 그 안내는 빈말이다.
+    """
+    script = SCRIPT.read_text(encoding="utf-8")
+    start = script.index("$rebuildResult = Invoke-CapturedProcess")
+    rebuild_block = script[start : script.index("-Evidence @{ rebuilt", start) + 400]
+
+    assert "rebuild_log" in rebuild_block, (
+        "재빌드가 실패해도 로그가 근거로 남지 않는다. 실패 원인을 다음 사람이 볼 수 있어야 한다."
+    )

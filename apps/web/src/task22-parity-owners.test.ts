@@ -86,8 +86,8 @@ const nativeControlAllowlist = {
     reason: "Media audition transport directly coordinates the owned audio and video elements.",
   },
   "features/editor/preview/preview-stage.tsx": {
-    controls: ["button:audition-source", "button:refresh-exact", "button:return-exact", "button:toggle-playback"],
-    reason: "The one-player preview transport directly owns playback and audition state.",
+    controls: ["button:refresh-exact", "button:return-exact", "button:step-back", "button:step-forward", "button:toggle-fullscreen", "button:toggle-mute", "button:toggle-playback", "button:toggle-repeat"],
+    reason: "The one-player preview transport directly owns playback and audition state, including frame stepping, scene repeat, and stage fullscreen.",
   },
   "features/editor/timeline/TimelineDock.tsx": {
     controls: [
@@ -95,11 +95,62 @@ const nativeControlAllowlist = {
       "button:placement-trim-end",
       "button:placement-trim-start",
       "button:timeline-clip-select",
+      "button:timeline-fit",
+      "button:timeline-lane-hidden",
+      "button:timeline-lane-lock",
+      "button:timeline-lane-muted",
       "button:timeline-reorder",
+      "button:timeline-scrub",
       "button:timeline-trim-end",
       "button:timeline-trim-start",
+      "button:timeline-zoom-in",
+      "button:timeline-zoom-out",
     ],
-    reason: "Timeline drag, trim, and keyboard interaction requires direct pointer and focus ownership.",
+    reason: "Timeline drag, trim, zoom, keyboard interaction, and the per-lane lock/eye/mute toggles require direct pointer and focus ownership.",
+  },
+  "features/footage/SceneTimeline.tsx": {
+    controls: ["button:footage-playhead"],
+    reason: "The footage playhead is a keyboard-focusable native timeline control owned by the scene timeline.",
+  },
+  "features/library/LibrarySidebar.tsx": {
+    controls: ["button:library-filter"],
+    reason: "The library sidebar owns the six native filter controls used to switch the visible asset lifecycle and media type.",
+  },
+  "features/media/NarrationAudioSection.tsx": {
+    controls: ["input:narration-audio-input"],
+    reason: "Putting narration into a project needs the platform file picker; the visible trigger stays an owned Button.",
+  },
+  "features/media/AddMediaFiles.tsx": {
+    controls: ["input:editor-media-file-input"],
+    reason: "The editor media dock owns a hidden file input so its picker trigger can be a compact button in a narrow column.",
+  },
+  "features/library/AssetIngestDropzone.tsx": {
+    controls: ["button:asset-file-add", "button:asset-folder-add", "input:asset-file-input", "input:asset-folder-input"],
+    reason: "The library ingest surface owns the hidden file and folder inputs and their explicit picker triggers.",
+  },
+  "features/library/AudioAssetRows.tsx": {
+    controls: ["button:audio-favorite", "button:audio-play"],
+    reason: "Audio rows own the explicit audition and favorite controls for each library asset.",
+  },
+  "features/library/IngestJobTable.tsx": {
+    controls: ["button:ingest-retry"],
+    reason: "The ingest result table owns its explicit retry action for failed asset registration.",
+  },
+  "features/library/LibraryResults.tsx": {
+    controls: ["input:library-search"],
+    reason: "The library result pane owns its search field; picking a media type belongs to the one sidebar list beside it.",
+  },
+  "app/OutputsPage.tsx": {
+    controls: ["input:output-variant-select", "input:preview-share-url"],
+    reason: "The outputs surface owns the explicit variant selection controls before a render request is submitted, and the read-only share-link field it shows after creating one (select-to-copy, not a form input).",
+  },
+  "features/library/LibraryPreviewPane.tsx": {
+    controls: ["button:library-correct-media-type", "button:library-permanent-delete", "button:library-permanent-delete-confirm", "button:library-restore", "button:library-trash"],
+    reason: "The library preview pane owns the explicit restore, trash, and two-stage permanent-delete lifecycle actions for a trashed asset, plus the kind correction the owner needs because VideoBox now sorts one drop folder by content (owner decision 2026-09-07).",
+  },
+  "features/media/SceneImageStudio.tsx": {
+    controls: ["input:scene-video-make-gif"],
+    reason: "The scene video studio owns a simple checkbox toggle for whether the AI video generation run should also produce a GIF.",
   },
 } as const;
 
@@ -206,13 +257,20 @@ describe("Task 22 canonical production owners", () => {
 
   it("keeps every retained workspace section on its canonical component owner", () => {
     const router = readFileSync(resolve(sourceRoot, "app/AppRouter.tsx"), "utf8");
+    // 지키는 것은 **어느 화면이 그 일의 주인인가**다. 라우터가 주소 글자 대신
+    // 단계 이름으로 갈라지게 바뀌었으므로(옛 주소는 `parseWorkspaceLocation`이
+    // 단계로 옮겨 준다) 문지기 쪽 글자만 새 이름으로 맞춘다. 주인 화면은 그대로다.
     const owners = [
-      [/normalizedSection === "home"/, /<HomePage\b/],
-      [/normalizedSection === "create"/, /<CreationInterview\b/],
-      [/normalizedSection === "media"/, /<MediaWorkspacePage\b/],
-      [/normalizedSection === "outputs"/, /<OutputsPage\b/],
-      [/normalizedSection === "timeline" \|\| normalizedSection === "review"/, /<TimelineReviewPage\b/],
-      [/section === "editor"/, /<EditorWorkbenchRoute\b/],
+      [/section === "home"/, /<HomePage\b/],
+      [/stage === "plan"/, /<CreationInterview\b/],
+      // 독립 "미디어" 단계 화면은 편집기 도크로 접혔다(2026-09-01, 2026-08-27
+      // 결정 §순서 2 실행) -- 이 stage에는 이제 `DraftGapMedia`(갭 채우기
+      // 흐름) 하나만 남는다.
+      [/stage === "assets"/, /<DraftGapMedia\b/],
+      // 검토와 출력은 한 단계로 합쳐졌다. 라우터가 가리키는 소유자는 둘을 담는
+      // 화면 하나이고, 두 주소 모두 그 화면을 그린다.
+      [/stage === "review" \|\| stage === "output"/, /<ReviewAndOutputPage\b/],
+      [/stage === "edit"/, /<EditorWorkbenchRoute\b/],
     ] as const;
 
     for (const [routeGuard, owner] of owners) {
@@ -242,17 +300,20 @@ describe("Task 22 canonical production owners", () => {
   it("keeps every Task 22 parity row mapped to a canonical route, component test, and E2E owner", () => {
     const router = readFileSync(resolve(sourceRoot, "app/AppRouter.tsx"), "utf8");
     const shell = readFileSync(resolve(sourceRoot, "app/ProductShell.tsx"), "utf8");
+    const editorAdapters = readFileSync(resolve(sourceRoot, "features/editor/workbench/editorWorkbenchReadOnlyAdapters.tsx"), "utf8");
     const rows = [
       {
         capability: "project create/select and source ingest",
-        ownerSource: router, owner: /normalizedSection === "create"[\s\S]{0,360}<CreationInterview\b/,
-        componentEvidence: [["project-onboarding.test.tsx", "registers narration plus script from local paths"], ["features/creation/CreationInterview.test.tsx", "uploads a supported creator script"]],
+        ownerSource: router, owner: /stage === "plan"[\s\S]{0,360}<CreationInterview\b/,
+        componentEvidence: [["app/AppRouter.test.tsx", "첫 설치에서도 제품 화면으로 맞이하고, 파일 경로를 묻지 않는다"], ["features/creation/CreationInterview.test.tsx", "uploads a supported creator script"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "ready-assets approval uses returned IDs"],
       },
       {
+        // 독립 "미디어" 단계 화면이 편집기 도크로 접히면서(2026-09-01) 이 능력의
+        // 주인이 라우터 stage 분기가 아니라 편집기 왼쪽 도크 어댑터로 옮겨 갔다.
         capability: "media list and recovery",
-        ownerSource: router, owner: /normalizedSection === "media"[\s\S]{0,1000}<MediaWorkspacePage\b/,
-        componentEvidence: [["features/media/MediaWorkspacePage.test.tsx", "supports cancel, retry, and review"]],
+        ownerSource: editorAdapters, owner: /analysisPanel=\{<MediaAnalysisStatusPanel\b/,
+        componentEvidence: [["features/media/MediaAnalysisStatusPanel.test.tsx", "멈추기·다시 분석하기·태그 확인을 부르고 목록을 다시 읽는다"]],
         e2eEvidence: ["media-recovery.spec.mjs", "recovers local analysis with authoritative refreshes"],
       },
       {
@@ -263,19 +324,19 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         capability: "script draft and atomic creation",
-        ownerSource: router, owner: /normalizedSection === "create"[\s\S]{0,360}<CreationInterview\b/,
+        ownerSource: router, owner: /stage === "plan"[\s\S]{0,360}<CreationInterview\b/,
         componentEvidence: [["features/creation/CreationInterview.test.tsx", "requires an explicit creator confirmation"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "gap-only approval preserves returned gap IDs"],
       },
       {
         capability: "timeline and review",
-        ownerSource: router, owner: /normalizedSection === "timeline" \|\| normalizedSection === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        ownerSource: router, owner: /stage === "review" \|\| stage === "output"[\s\S]{0,500}<ReviewAndOutputPage\b/,
         componentEvidence: [["features/review/TimelineReviewPage.test.tsx", "links an exact segment to the pinned editor"]],
         e2eEvidence: ["review-to-editor.spec.mjs", "opens the pinned editor"],
       },
       {
         capability: "editor workbench",
-        ownerSource: router, owner: /section === "editor"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
+        ownerSource: router, owner: /stage === "edit"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
         componentEvidence: [["features/editor/workbench/editor-workbench-route.test.tsx", "publishes nothing until the matching manifest and session arrive together"]],
         e2eEvidence: ["exact-preview.spec.mjs", "current exact proxy plays a valid local MP4"],
       },
@@ -287,7 +348,7 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         capability: "canonical outputs",
-        ownerSource: router, owner: /normalizedSection === "outputs"[\s\S]{0,360}<OutputsPage\b/,
+        ownerSource: router, owner: /stage === "review" \|\| stage === "output"[\s\S]{0,360}<ReviewAndOutputPage\b/,
         componentEvidence: [["app/OutputsPage.test.tsx", "owns the current exact-preview reference"]],
         e2eEvidence: ["z-script-first-vertical.spec.mjs", "current-revision playback and CapCut smoke"],
       },
@@ -310,9 +371,14 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "project create and source ingest",
         ownerSource: router,
-        owner: /normalizedSection === "create"[\s\S]{0,360}<CreationInterview\b/,
+        owner: /stage === "plan"[\s\S]{0,360}<CreationInterview\b/,
         componentEvidence: [
-          ["project-onboarding.test.tsx", "keeps the created project and retries only the failed narration ingest"],
+          // 옛 시작 화면(파일 경로를 손으로 적게 하던 것)은 2026-08-21에 없앴다.
+          // 프로젝트를 만드는 일은 이제 목록 화면 하나가 맡는다.
+          // "+ 새 프로젝트 만들기"는 2026-08-30 owner 재지시로 더 이상 이 plan
+          // 단계를 거치지 않고 편집기로 바로 간다 -- 이 경로(직접 URL 진입)가
+          // CreationInterview가 여전히 살아 있다는 증거다.
+          ["app/AppRouter.test.tsx", "renders the durable Eugene creation interview at the routed create leaf"],
           ["features/creation/CreationInterview.test.tsx", "keeps a failed durable answer on the same question with an actionable retry"],
           ["app/AppRouter.test.tsx", "does not let a late A workspace response overwrite the currently routed B workspace"],
         ],
@@ -320,11 +386,11 @@ describe("Task 22 canonical production owners", () => {
       },
       {
         route: "media",
-        ownerSource: router,
-        owner: /normalizedSection === "media"[\s\S]{0,1000}<MediaWorkspacePage\b/,
+        ownerSource: editorAdapters,
+        owner: /analysisPanel=\{<MediaAnalysisStatusPanel\b/,
         componentEvidence: [
-          ["features/media/MediaWorkspacePage.test.tsx", "shows loading, empty, failure, and refresh recovery"],
-          ["features/media/MediaWorkspacePage.test.tsx", "discards late project A results after switching to project B"],
+          ["features/media/MediaAnalysisStatusPanel.test.tsx", "확인할 분석이 없으면 아무것도 그리지 않는다"],
+          ["features/media/MediaAnalysisStatusPanel.test.tsx", "프로젝트가 바뀌면 늦게 도착한 이전 프로젝트 결과를 버린다"],
         ],
         e2eEvidence: ["media-recovery.spec.mjs", "recovers local analysis with authoritative refreshes"],
       },
@@ -341,7 +407,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "timeline and review",
         ownerSource: router,
-        owner: /normalizedSection === "timeline" \|\| normalizedSection === "review"[\s\S]{0,500}<TimelineReviewPage\b/,
+        owner: /stage === "review" \|\| stage === "output"[\s\S]{0,500}<ReviewAndOutputPage\b/,
         componentEvidence: [
           ["features/review/TimelineReviewPage.test.tsx", "shows no-session, no-exact-match, load error, and an explicit successful refresh"],
           ["features/review/TimelineReviewPage.test.tsx", "fences a late project A detail response after switching to B"],
@@ -351,7 +417,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "editor",
         ownerSource: router,
-        owner: /section === "editor"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
+        owner: /stage === "edit"[\s\S]{0,400}<EditorWorkbenchRoute\b/,
         componentEvidence: [
           ["features/editor/workbench/editor-workbench-route.test.tsx", "publishes nothing until the matching manifest and session arrive together"],
           ["features/editor/workbench/editor-workbench-route.test.tsx", "keeps the manifest editor usable when an asset list fails and gives contained retry-safe guidance"],
@@ -372,7 +438,7 @@ describe("Task 22 canonical production owners", () => {
       {
         route: "outputs",
         ownerSource: router,
-        owner: /normalizedSection === "outputs"[\s\S]{0,360}<OutputsPage\b/,
+        owner: /stage === "review" \|\| stage === "output"[\s\S]{0,360}<ReviewAndOutputPage\b/,
         componentEvidence: [
           ["app/OutputsPage.test.tsx", "keeps a failed status read recoverable without offering output mutations"],
           ["app/OutputsPage.test.tsx", "does not let a delayed project A status response replace project B"],

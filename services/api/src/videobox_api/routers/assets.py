@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 import threading
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, File, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, File, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 
+from videobox_core_engine.mojibake import repair_mojibake_metadata
 from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService, AssetBrowserPreviewUnsupported
 from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
 from videobox_api.models import (
+    VoiceSampleRenameRequest,
     AssetArchiveItemResponse,
     AssetListResponse,
     AssetRegistrationRequest,
@@ -22,11 +25,17 @@ from videobox_api.models import (
     BrollAssetRegistrationRequest,
     BrollBatchAssetRegistrationRequest,
     BrowserPreviewResponse,
+    MyVoiceItemResponse,
+    MyVoiceListResponse,
     TTSCandidateListResponse,
     TTSCandidateResponse,
     TTSCandidateRecordResponse,
     TTSCandidateRequest,
     TTSListeningReviewRequest,
+    YoutubeReferenceImportRequest,
+    YoutubeReferenceImportResponse,
+    YoutubeReferenceImportStartResponse,
+    YoutubeReferenceImportStatusResponse,
 )
 from videobox_api.orchestration import ApiOrchestrator
 from videobox_core_engine.asset_browser_preview import BrowserPreviewError
@@ -36,6 +45,44 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_VOICE_SAMPLE_UPLOAD_BYTES = 128 * 1024 * 1024
 VOICE_SAMPLE_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+def _repaired_asset_response(asset: dict) -> "AssetArchiveItemResponse":
+    """자산 한 건을 화면이 읽을 모양으로. 깨진 한글 이름은 여기서 되살린다.
+
+    2026-08-20에 한 묶음으로 들어온 촬영본이 `02-µµ½Ã-Àú³á`처럼 저장돼 있어서
+    **화면에도 그대로 깨져 보였다.** 자산 이름을 바꾸는 길이 제품에 없으므로
+    저장을 고치는 대신 읽을 때 되살린다(`mojibake.py` -- 되살릴 수 있을 때만 손댄다).
+
+    세 목록(내레이션·촬영본·목소리)이 **같은 함수를 쓴다.** 세 벌로 적으면
+    한쪽만 고치는 사고가 난다 -- 이 저장소가 여러 번 겪은 일이다.
+    """
+    return AssetArchiveItemResponse(**{**asset, "metadata": repair_mojibake_metadata(asset.get("metadata"))})
+
+
+def _my_voice_response(voice: dict) -> "MyVoiceItemResponse":
+    """`내 자산 > 내 목소리` 한 줄로.
+
+    이름은 `metadata.display_name`에 있고, **없을 수 있다** -- 이름을 안 붙였다고
+    목록에서 빼면 그 녹음은 영원히 못 찾는다. 화면이 그때 파일 이름 대신 쓸 게
+    없으므로 `None`으로 내려보내고 문구는 화면이 정한다.
+    """
+    metadata = repair_mojibake_metadata(voice.get("metadata")) or {}
+    display_name = metadata.get("display_name") if isinstance(metadata, dict) else None
+    project_id = str(voice.get("project_id") or "")
+    asset_id = str(voice.get("asset_id") or "")
+    return MyVoiceItemResponse(
+        asset_id=asset_id,
+        asset_type=str(voice.get("asset_type") or ""),
+        project_id=project_id,
+        project_name=str(voice.get("project_name") or ""),
+        display_name=str(display_name) if display_name else None,
+        created_at=str(voice.get("created_at") or ""),
+        duration_sec=voice.get("duration_sec"),
+        mime_type=voice.get("mime_type"),
+        content_url=f"/api/projects/{project_id}/assets/{asset_id}/content",
+        metadata=metadata if isinstance(metadata, dict) else {},
+    )
 
 
 def build_assets_router(
@@ -54,6 +101,62 @@ def build_assets_router(
             )
         except Exception as exc:
             raise _http_error(exc) from exc
+        return AssetResponse(
+            asset_id=asset.asset_id,
+            asset_type=asset.asset_type,
+            storage_uri=asset.storage_uri,
+        )
+
+    @router.get("/api/projects/{project_id}/assets/narration-audio")
+    def list_narration_audio_assets(project_id: str) -> AssetListResponse:
+        """넣는 길만 있고 보는 길이 없으면 잘못 넣은 것을 영영 모른다.
+
+        2026-08-16에 완성본이 완전 무음으로 나갔는데, 내레이션이 무음 파일이라는 것을
+        화면 어디에서도 확인할 수 없었다.
+        """
+        try:
+            assets = orchestrator.list_narration_audio_assets(project_id=project_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
+
+    @router.post("/api/projects/{project_id}/assets/narration-audio/upload", status_code=status.HTTP_201_CREATED)
+    async def upload_narration_audio(
+        project_id: str,
+        file: UploadFile = File(...),
+    ) -> AssetResponse:
+        """음성 샘플은 파일을 바로 올릴 수 있는데 내레이션만 경로를 타이핑해야 했다."""
+        filename = Path(file.filename or "").name
+        suffix = Path(filename).suffix.lower()
+        if not filename or suffix not in {".wav", ".mp3", ".m4a", ".webm", ".ogg", ".flac"}:
+            raise _http_error(ValueError("Narration must be an audio file with a supported extension."))
+        staged_path = (
+            store.project_root(project_id)
+            / "tmp"
+            / "narration_uploads"
+            / f".n{uuid4().hex[:8]}{suffix}"
+        )
+        try:
+            staged_path.parent.mkdir(parents=True, exist_ok=True)
+            total_bytes = 0
+            with staged_path.open("wb") as staged_file:
+                while chunk := await file.read(VOICE_SAMPLE_UPLOAD_CHUNK_BYTES):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_VOICE_SAMPLE_UPLOAD_BYTES:
+                        raise ValueError("Narration upload exceeds the 128 MiB limit.")
+                    staged_file.write(chunk)
+            # 빈 파일을 받아 두면 무음 완성본이 다시 나간다.
+            if total_bytes == 0:
+                raise ValueError("Narration upload is empty.")
+            asset = orchestrator.register_narration_audio(
+                project_id=project_id,
+                source_path=staged_path,
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        finally:
+            await file.close()
+            staged_path.unlink(missing_ok=True)
         return AssetResponse(
             asset_id=asset.asset_id,
             asset_type=asset.asset_type,
@@ -98,7 +201,7 @@ def build_assets_router(
             assets = orchestrator.list_broll_assets(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+        return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
 
     @router.post("/api/projects/{project_id}/assets/broll-video/batch", status_code=status.HTTP_201_CREATED)
     def register_broll_assets_batch(
@@ -195,7 +298,54 @@ def build_assets_router(
             assets = orchestrator.list_voice_sample_assets(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
-        return AssetListResponse(assets=[AssetArchiveItemResponse(**asset) for asset in assets])
+        return AssetListResponse(assets=[_repaired_asset_response(asset) for asset in assets])
+
+    @router.get("/api/voices")
+    def list_my_voices(include_archived: bool = False) -> MyVoiceListResponse:
+        """프로젝트를 넘나드는 `내 목소리` 한 목록 (owner 승인 2026-09-04).
+
+        사이드바 `내 자산 > 내 목소리`는 **프로젝트를 고르기 전에** 열리는데,
+        목소리 샘플은 프로젝트마다 따로 있는 sqlite에만 있었다. 화면이
+        프로젝트 수만큼 요청을 던지지 않게 여기서 한 번에 모은다.
+
+        읽기 전용이다 -- 이름 바꾸기·지우기는 그대로 프로젝트 경로를 쓴다.
+        """
+        try:
+            voices = orchestrator.list_voice_sample_assets_across_projects(
+                include_archived=include_archived
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return MyVoiceListResponse(voices=[_my_voice_response(voice) for voice in voices])
+
+    @router.patch("/api/projects/{project_id}/assets/voice-sample/{asset_id}")
+    def rename_voice_sample(project_id: str, asset_id: str, payload: VoiceSampleRenameRequest) -> AssetArchiveItemResponse:
+        """목소리에 이름을 붙인다.
+
+        목소리가 여럿이면(채널마다 다른 목소리를 쓸 수 있다) **이름이 없으면
+        고를 수가 없다** -- 저장 위치 끝의 해시로는 어느 것이 어느 목소리인지
+        알 수 없다.
+        """
+        try:
+            asset = orchestrator.rename_voice_sample_asset(
+                project_id=project_id, asset_id=asset_id, display_name=payload.display_name.strip(),
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return _repaired_asset_response(asset)
+
+    @router.delete(
+        "/api/projects/{project_id}/assets/voice-sample/{asset_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+    )
+    def delete_voice_sample(project_id: str, asset_id: str) -> Response:
+        """목소리를 지운다. 잘못 녹음한 것을 남겨 두면 고를 때마다 헷갈린다."""
+        try:
+            orchestrator.delete_voice_sample_asset(project_id=project_id, asset_id=asset_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @router.post("/api/projects/{project_id}/assets/voice-sample/upload", status_code=status.HTTP_201_CREATED)
     async def upload_voice_sample(
@@ -239,6 +389,36 @@ def build_assets_router(
             asset_type=asset.asset_type,
             storage_uri=asset.storage_uri,
         )
+
+    @router.post("/api/projects/{project_id}/reference-style/from-youtube", status_code=status.HTTP_202_ACCEPTED)
+    def start_youtube_reference_style_import(
+        project_id: str, payload: YoutubeReferenceImportRequest, background_tasks: BackgroundTasks,
+    ) -> YoutubeReferenceImportStartResponse:
+        """owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?"
+
+        **비동기로 바뀌었다(owner 결정 2026-08-29, 2회차).** 다운로드·오디오
+        추출·컷/색감 분석을 합치면 긴 영상에서는 nginx 프록시 330초 타임아웃보다
+        오래 걸릴 수 있어, 이 요청은 작업만 걸어 두고 바로 202로 돌아온다.
+        실제 진행 상황은 `GET .../from-youtube/{job_id}`로 확인한다.
+        """
+        try:
+            started = orchestrator.start_youtube_reference_style_import(project_id=project_id, url=payload.url)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        background_tasks.add_task(
+            orchestrator.run_youtube_reference_style_import_job,
+            project_id=project_id, job_id=started["job_id"], url=payload.url,
+        )
+        return YoutubeReferenceImportStartResponse(**started)
+
+    @router.get("/api/projects/{project_id}/reference-style/from-youtube/{job_id}")
+    def get_youtube_reference_style_import(project_id: str, job_id: str) -> YoutubeReferenceImportStatusResponse:
+        try:
+            job = orchestrator.get_youtube_reference_style_import_job(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        result = YoutubeReferenceImportResponse(**job["result"]) if job["result"] is not None else None
+        return YoutubeReferenceImportStatusResponse(job_id=job["job_id"], status=job["status"], result=result, error_detail=job["error_detail"])
 
     @router.post("/api/projects/{project_id}/tts-candidates", status_code=status.HTTP_201_CREATED)
     def generate_tts_candidate(project_id: str, payload: TTSCandidateRequest) -> TTSCandidateResponse:
@@ -360,6 +540,46 @@ def build_assets_router(
         if not thumbnail_path.exists():
             raise _http_error(FileNotFoundError(f"No thumbnail generated for asset '{asset_id}'."))
         return FileResponse(thumbnail_path)
+
+    @router.get("/api/projects/{project_id}/assets/{asset_id}/waveform")
+    def get_asset_waveform(project_id: str, asset_id: str) -> FileResponse:
+        """소리 클립 위에 그릴 파형 그림.
+
+        캡컷처럼 타임라인에서 **눈으로** 크고 작은 데를 찾으려면 이 그림이 있어야
+        한다. 만드는 방법은 라이브러리 자산 쪽(`routers/library_assets.py`)과 같은
+        ffmpeg `showwavespic`이다 -- 새 방식을 들이지 않는다.
+
+        한 번 만들고 다시 쓴다. 클립마다, 스크롤마다 ffmpeg를 부르면 타임라인이
+        멈춘다.
+        """
+        try:
+            asset = store.get_asset(project_id=project_id, asset_id=asset_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        target = store.waveform_storage_path(project_id=project_id, asset_id=asset_id)
+        if not target.exists():
+            # 원본 찾기는 저장소가 정본이다. 여기서 uri를 다시 해석하면 같은 규칙이
+            # 두 벌이 된다.
+            source = store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
+            if not source.exists():
+                raise _http_error(FileNotFoundError(f"No source for asset '{asset_id}'."))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            command = [
+                "ffmpeg", "-y", "-v", "error", "-i", str(source),
+                "-filter_complex", "aformat=channel_layouts=mono,showwavespic=s=640x120:colors=orangered",
+                "-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "pipe:1",
+            ]
+            result = subprocess.run(command, capture_output=True, timeout=30, check=False)
+            if result.returncode != 0 or not result.stdout:
+                # 그림이 없다고 편집이 막히면 안 된다. 없으면 없는 대로 넘어간다.
+                raise _http_error(FileNotFoundError(f"No waveform for asset '{asset_id}'."))
+            # 같은 소리를 여러 클립이 쓰면 첫 화면에서 같은 파일을 **동시에** 만들려
+            # 든다(실측: 클립 12개가 자산 2개를 가리켰다). 곧바로 쓰면 반쯤 쓰인
+            # 파일을 옆에서 읽는다. 따로 쓰고 통째로 바꿔 끼운다.
+            staging = target.with_name(f"{target.name}.{uuid4().hex}.part")
+            staging.write_bytes(result.stdout)
+            staging.replace(target)
+        return FileResponse(target, media_type="image/png")
 
     @router.post("/api/projects/{project_id}/jobs/auto-cut-plan")
     def plan_auto_cut(project_id: str, payload: AutoCutPlanRequest) -> AutoCutPlanResponse:

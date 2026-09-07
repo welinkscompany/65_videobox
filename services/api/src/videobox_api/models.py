@@ -4,12 +4,58 @@ from math import isfinite
 from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
+from videobox_core_engine.editing_session import MAX_RIPPLE_PLAYBACK_RATE, MIN_RIPPLE_PLAYBACK_RATE
+from videobox_core_engine.overlay_shapes import (
+    SHAPE_OVERLAY_MOTION_SET,
+    SHAPE_OVERLAY_MOTIONS,
+    SHAPE_OVERLAY_SHAPES,
+    canonical_shape_overlay_shape,
+)
+from videobox_core_engine.scene_video_service import SceneVideoQuality
 from videobox_domain_models.yujin_memory import YujinMemoryCandidate
 
 
 class CreateProjectRequest(BaseModel):
     name: str = Field(min_length=1)
+
+
+class RenameProjectRequest(BaseModel):
+    # `extra="forbid"`: a caller that also sends `status` or `project_id` gets
+    # told, rather than watching the request succeed while those fields were
+    # silently dropped. Only the display name is editable here.
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str = Field(min_length=1, max_length=200)
+
+
+class OutputVariantCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_session_id: str = Field(min_length=1, max_length=256)
+    kind: Literal["vertical_highlight"]
+    variant_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class OutputVariantPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_variant_revision: int = Field(ge=0)
+    patch: dict[str, Any]
+
+
+class OutputVariantRebaseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    new_master_revision: int = Field(ge=1)
+    changed_fields: list[str] = Field(default_factory=list, max_length=32)
+
+
+class OutputVariantMaterializeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_master_session_revision: int | None = Field(default=None, ge=1)
 
 
 class CreationBriefCreateRequest(BaseModel):
@@ -339,6 +385,288 @@ class BrollAssetRegistrationRequest(AssetRegistrationRequest):
     tags: list[str] = Field(default_factory=list)
 
 
+class SourceVideoStartResponse(BaseModel):
+    """찍어 둔 영상으로 시작할 때 화면이 받는 것."""
+
+    asset_id: str
+    script_text: str
+    #: 자막이 어디에 놓일지는 받아쓴 구간이 정한다. 문장만 돌려주면 자막이
+    #: 말한 자리에 안 붙는다.
+    spoken_segment_count: int
+
+
+class RetakeCandidateResponse(BaseModel):
+    """다시 들어볼 구간 하나. owner 요청(2026-08-29): 잘못 발음한 곳을 컷 편집으로
+    날리기 전에, 어디를 왜 후보로 골랐는지부터 말해 줘야 한다."""
+
+    segment_index: int
+    start_sec: float
+    end_sec: float
+    text: str
+    reason: Literal["low_confidence", "retry_cue", "retry_cue_precursor"]
+
+
+class SourceVoiceSegmentResponse(BaseModel):
+    """받아쓴 구간 하나. 화면이 다시 들어볼 후보만 빼고 나머지를 이어 붙여
+    대본을 다시 만들 수 있도록, `script_text`(전체 이어 붙인 글)와 별개로
+    구간 하나하나를 그대로 내려준다 -- 문자열 치환으로 지우면 같은 문장이
+    두 번 나올 때 엉뚱한 곳이 지워질 수 있다."""
+
+    segment_index: int
+    text: str
+
+
+class SourceVoiceStartResponse(BaseModel):
+    """녹음한 목소리만으로 시작할 때 화면이 받는 것 -- `SourceVideoStartResponse`와
+    같은 모양에 다시 들어볼 구간 후보와 구간별 원문을 얹었다."""
+
+    asset_id: str
+    script_text: str
+    spoken_segment_count: int
+    segments: list[SourceVoiceSegmentResponse]
+    retake_candidates: list[RetakeCandidateResponse]
+
+
+class LibraryIngestPathRequest(BaseModel):
+    """이미 디스크에 있는 파일을 **경로로** 자료실에 넣는다.
+
+    바이트를 다시 올리게 하지 않으려는 것이다. 밖에서 부르는 오케스트레이터가
+    PNG·MP4를 만들어 함께 보는 폴더에 두고 경로만 넘긴다
+    (owner 결정 2026-09-07, `docs/videobox-mcp-scope.ko.md` §5-①).
+
+    **이 능력은 이미 쓰이고 있었다** -- 드롭 폴더 정리기·장면 영상·인포그래픽
+    셋이 `LibraryIngestService.ingest`에 경로를 그대로 넘긴다. HTTP 문만 없었다.
+    """
+
+    media_type: str = Field(min_length=1)
+    source_path: str = Field(min_length=1)
+    filename: str | None = Field(default=None, max_length=255)
+    #: 같은 파일을 두 번 넣지 않게 하는 열쇠. 부르는 쪽의 재시도 계약이라 **필수다**
+    #: -- 없으면 재시도가 매번 새 자산을 만든다.
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    provenance: dict[str, Any] | None = None
+
+
+class InfographicFactRequest(BaseModel):
+    """그림에 들어갈 숫자 하나. **여기 없는 숫자는 그림에 못 들어간다** --
+    `infographic_brief.check_infographic_html`이 대조한다."""
+
+    label: str = Field(min_length=1, max_length=80)
+    value: float
+    unit: str = Field(default="", max_length=12)
+    note: str = Field(default="", max_length=120)
+
+    @field_validator("value")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        if not isfinite(value):
+            raise ValueError("infographic_fact_value_must_be_finite")
+        return value
+
+
+class InfographicCreateRequest(BaseModel):
+    """인포그래픽 한 장. 자료실 `그림`으로 들어간다.
+
+    숫자를 **손으로 주게 한 것**이 핵심이다. 모델에게 숫자까지 맡기면 그럴듯한
+    거짓말을 만든다 -- 2026-09-07 실측에서 실제로 `100,000원 판매 시` 예시를
+    통째로 지어냈다.
+    """
+
+    topic: str = Field(min_length=1, max_length=200)
+    # 여덟 개를 넘기면 1920x1080 안에 다 못 들어간다. 화면 가까운 쪽에서 막는다.
+    facts: list[InfographicFactRequest] = Field(min_length=1, max_length=8)
+    style: str | None = None
+    title: str | None = Field(default=None, max_length=120)
+
+
+class InfographicResponse(BaseModel):
+    library_asset_id: str | None = None
+    title: str
+    style: str
+    #: 몇 판 만에 나왔는지. 2면 한 번 고쳐 낸 것이다.
+    attempts: int
+    #: 고치라고 되돌려 준 것들. 화면이 "무엇을 고쳤는지" 보여 줄 수 있다.
+    corrected: list[str] = Field(default_factory=list)
+    #: **아직 남은 아쉬운 점.** 비어 있어야 정상이다.
+    remaining_problems: list[str] = Field(default_factory=list)
+    #: 자료실 등록이 실패했으면 그 이유. 그림 자체는 만들어졌다.
+    library_error: str | None = None
+
+
+class InfographicStyleResponse(BaseModel):
+    key: str
+    korean_name: str
+    direction: str
+
+
+class InfographicStyleListResponse(BaseModel):
+    """고를 수 있는 결. **지금 걸린 것**이 따로 없는 목록이라 값 하나만 낸다 --
+    그림은 매번 새로 만드는 것이지 지금 걸려 있는 상태가 아니다."""
+
+    styles: list[InfographicStyleResponse]
+
+
+class SceneImageCreateRequest(BaseModel):
+    """대본의 한 장면에 얹을 그림 하나. §10.14 조항 2-C."""
+
+    prompt: str = Field(min_length=1)
+    segment_id: str = Field(min_length=1)
+    # 세로가 기본이 되면 F-9가 재발한다 -- 롱폼까지 전부 세로로 렌더된 적이 있다.
+    vertical: bool = False
+    duration_sec: float = Field(default=5.0, gt=0)
+    gap_slot_id: str | None = None
+
+
+class SceneImageResponse(BaseModel):
+    image_asset_id: str
+    scene_asset_id: str
+    segment_id: str
+    title: str
+    #: owner가 쓴 줄. 한국어일 수 있다.
+    prompt: str
+    #: 실제로 그림 모델에 들어간 영어 묘사. 둘이 다를 수 있어 따로 남긴다.
+    image_prompt: str = ""
+    seed: int
+    elapsed_sec: float | None = None
+    # 상업 이용이 열려 있는지. **모르면 `None`이다** -- 아는 척하지 않는다.
+    commercial_use_is_unrestricted: bool | None = None
+
+
+class SceneImageListResponse(BaseModel):
+    images: list[SceneImageResponse]
+
+
+class SceneVideoCreateRequest(BaseModel):
+    """대본의 한 장면에 얹을 짧은 실제 동영상 하나. owner 결정 2026-08-29(2회차) --
+    `SceneImageCreateRequest`(정지 이미지+zoompan)와는 별개 경로다."""
+
+    prompt: str = Field(min_length=1)
+    segment_id: str = Field(min_length=1)
+    vertical: bool = False
+    gap_slot_id: str | None = None
+    make_gif: bool = False
+    #: 빠른 미리보기(owner 요청 2026-08-29, 3회차). 실측: preview는 약 12초,
+    #: full은 약 18~23분(1920x1080·81프레임·20스텝).
+    quality: SceneVideoQuality = "full"
+
+
+class SceneVideoStartResponse(BaseModel):
+    """실측(2026-08-29): 1920x1080·81프레임·20스텝이 5분을 넘겨 nginx 330초
+    타임아웃보다 오래 걸린다 -- 그래서 이 요청은 작업만 걸고 바로 202로 돌아온다."""
+
+    job_id: str
+    status: Literal["processing"]
+
+
+class SceneVideoResult(BaseModel):
+    scene_asset_id: str
+    gif_asset_id: str | None = None
+    #: 자료실(여러 프로젝트가 나눠 쓰는 라이브러리) 등록 결과. owner 요청
+    #: (2026-08-29 3회차) -- 프로젝트 자산과 별개로 검색 가능하게 남긴다.
+    #: 등록에 실패해도 위 프로젝트 자산은 그대로라 `None`일 수 있다.
+    library_asset_id: str | None = None
+    gif_library_asset_id: str | None = None
+    #: 코드리뷰(2026-08-30)로 잡힌 결함 -- 등록 실패가 어디에도 안 남아서
+    #: 왜 안 됐는지 알 방법이 없었다. `library_ingest`가 아예 꺼져 있는
+    #: 정상 상태(`library_asset_id is None`이지만 오류는 아님)와 실제 등록
+    #: 실패를 구분하려면 이 필드가 필요하다.
+    library_ingest_error: str | None = None
+    gif_library_ingest_error: str | None = None
+    segment_id: str
+    title: str
+    prompt: str
+    video_prompt: str = ""
+    quality: SceneVideoQuality = "full"
+    seed: int
+    elapsed_sec: float | None = None
+
+
+class SceneVideoStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["processing", "succeeded", "failed"]
+    result: SceneVideoResult | None = None
+    error_detail: str | None = None
+
+
+class ScriptDraftCreateRequest(BaseModel):
+    """주제 한 줄에서 대본 초안을 받는다.
+
+    길이와 장면 수를 함께 싣는다 -- 60초 다섯 장면과 3분 열 장면은 전혀 다른
+    글이라, 안 물어보면 매번 다른 길이가 돌아온다.
+    """
+
+    topic: str = Field(min_length=1, max_length=500)
+    duration_sec: int = Field(default=60, ge=5, le=1800)
+    scene_count: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("topic")
+    @classmethod
+    def _topic_is_not_blank(cls, value: str) -> str:
+        # 공백만 적어 보내면 모델을 깨우기 전에 막는다.
+        if not value.strip():
+            raise ValueError("topic must not be blank")
+        return value.strip()
+
+
+class ScriptDraftSceneResponse(BaseModel):
+    scene_number: int
+    narration: str
+    #: 그 장면에서 보여 줄 그림. 비어 있을 수 있다.
+    visual: str = ""
+
+
+class ScriptDraftResponse(BaseModel):
+    title: str
+    #: owner가 고칠 글 한 덩이. 장면 줄을 이어 붙인 것이라 둘이 어긋나지 않는다.
+    script_text: str
+    scenes: list[ScriptDraftSceneResponse]
+
+
+class CreationRecommendationSetRequest(BaseModel):
+    """대본을 확정하기 전, 주제 하나로 만들 소재 세트를 미리 본다.
+
+    owner 요청(2026-08-28): "주제 하나로 BGM+이미지스타일+AI보이스까지 세트로
+    추천." `script_text`가 있으면 그걸로(더 정확하게) 찾고, 없으면 `topic`만으로도
+    동작한다 -- 대본이 아직 없는 순간에도 미리 보여 줄 수 있어야 한다.
+    """
+
+    topic: str = Field(min_length=1, max_length=500)
+    script_text: str = Field(default="", max_length=20000)
+
+
+class BgmRecommendationResponse(BaseModel):
+    library_asset_id: str
+    description: str = ""
+    duration_seconds: float | None = None
+    score: float
+
+
+class ImageStyleRecommendationResponse(BaseModel):
+    style_id: str
+    name: str
+    #: 이미지 생성 프롬프트 뒤에 그대로 덧붙이는 영어 키워드. 실제로 적용하는
+    #: 곳(`scene_image_service.py`)은 이번 범위 밖이다 -- 여기는 추천만 한다.
+    prompt_suffix: str
+    reason: str
+
+
+class VoiceRecommendationResponse(BaseModel):
+    asset_id: str | None = None
+    filename: str | None = None
+    #: 등록된 목소리가 없을 때 무엇을 하면 되는지. 화면이 빈 값을 보고 추측하지
+    #: 않도록 말로 준다.
+    note: str
+
+
+class CreationRecommendationSetResponse(BaseModel):
+    bgm: list[BgmRecommendationResponse]
+    image_style: ImageStyleRecommendationResponse
+    voice: VoiceRecommendationResponse
+    #: 임베딩 모델이 없어 BGM 추천이 단어 매칭으로 떨어졌는지. 화면이 "뜻으로
+    #: 찾음" 배지를 거짓으로 달지 않게 한다(`library_assets.py`의 `semantic`과 같은 뜻).
+    bgm_semantic: bool
+
+
 class TTSCandidateRequest(BaseModel):
     segment_text: str = Field(min_length=1)
     voice_sample_asset_id: str = Field(min_length=1)
@@ -391,6 +719,89 @@ class AssetResponse(BaseModel):
     asset_id: str
     asset_type: str
     storage_uri: str
+
+
+class VoiceSampleRenameRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=60)
+
+    @model_validator(mode="after")
+    def validate_display_name(self) -> "VoiceSampleRenameRequest":
+        if not self.display_name.strip():
+            raise ValueError("display_name must not be blank.")
+        return self
+
+
+class MyVoiceItemResponse(BaseModel):
+    """`내 자산 > 내 목소리` 한 줄.
+
+    프로젝트를 고르기 전에 열리는 자리라 **어느 프로젝트 것인지**를 함께 준다.
+    저장 위치(`storage_uri`)는 관리 경로 상대값이라 그대로 두되, 화면은
+    `content_url`로 재생한다 -- 파일 경로를 화면 문구로 쓰지 않는다.
+    """
+
+    asset_id: str
+    asset_type: str
+    project_id: str
+    project_name: str
+    display_name: str | None = None
+    created_at: str
+    duration_sec: float | None = None
+    mime_type: str | None = None
+    content_url: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MyVoiceListResponse(BaseModel):
+    voices: list[MyVoiceItemResponse]
+
+
+class YoutubeReferenceImportRequest(BaseModel):
+    """owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 본인이
+    이미 올린 본인 영상만 대상이라는 전제를 화면 문구가 말한다."""
+
+    url: str = Field(min_length=1, max_length=2000)
+
+
+class ReferencePacingResponse(BaseModel):
+    """컷 빠르기만 잰 결과다 -- 지금은 화면에 보여주기만 하고, 실제 자동 컷
+    설정에 자동으로 먹이지 않는다(전역 설정이라 프로젝트별로 못 바꾼다)."""
+
+    average_clip_duration_sec: float
+    clip_count: int
+    shortest_clip_sec: float
+    longest_clip_sec: float
+
+
+class ReferenceColorResponse(BaseModel):
+    """색감만 잰 결과다 -- 전문 색보정은 이 제품 범위 밖이라(CLAUDE.md §2.1)
+    실제로 입히지 않는다. 숫자만 보여준다."""
+
+    average_brightness: float
+    average_colorfulness: float
+    warm_cool_bias: float
+    sample_count: int
+
+
+class YoutubeReferenceImportResponse(BaseModel):
+    voice_sample_asset_id: str
+    pacing: ReferencePacingResponse
+    color: ReferenceColorResponse
+
+
+class YoutubeReferenceImportStartResponse(BaseModel):
+    """`from-youtube`를 걸면 바로 이걸 받는다(owner 결정 2026-08-29: 비동기로).
+
+    실제 결과는 `job_id`로 상태 확인 endpoint를 불러 받는다."""
+
+    job_id: str
+    status: Literal["processing"]
+
+
+class YoutubeReferenceImportStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["processing", "succeeded", "failed"]
+    result: YoutubeReferenceImportResponse | None = None
+    error_detail: str | None = None
 
 
 class BrowserPreviewResponse(BaseModel):
@@ -519,6 +930,26 @@ class HomeSummaryResponse(BaseModel):
     asset_gap_count: int
 
 
+class WorkspaceNextActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    label: str = Field(min_length=1)
+    href: str = Field(min_length=1)
+
+
+class ProjectWorkspaceSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    project_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    updated_at: str = Field(min_length=1)
+    current_stage: Literal["plan", "assets", "edit", "review", "output"]
+    state: Literal["ready", "attention", "blocked"]
+    thumbnail_url: str | None = None
+    finished_video_count: int = Field(ge=0)
+    next_action: WorkspaceNextActionResponse
+
+
 class JobRecordWithProjectResponse(JobRecordResponse):
     project_name: str
 
@@ -548,6 +979,19 @@ class BuildTimelineRequest(BaseModel):
 
 class OutputJobRequest(BaseModel):
     timeline_job_id: str = Field(min_length=1)
+
+
+class VariantRenderRequest(BaseModel):
+    session_id: str = Field(min_length=1)
+    variant_ids: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("variant_ids")
+    @classmethod
+    def variant_ids_are_unique(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized) or len(set(normalized)) != len(normalized):
+            raise ValueError("variant_ids_must_be_unique")
+        return normalized
 
 
 class CreateEditingSessionRequest(BaseModel):
@@ -605,9 +1049,76 @@ class OptionalYujinCandidateAttestation(BaseModel):
         return self
 
 
+class CaptionTranslationRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    language: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_language(self) -> "CaptionTranslationRequest":
+        if self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
+
+
+class DubbingStartResponse(BaseModel):
+    job_id: str
+    status: Literal["processing"]
+    #: 이 언어로 더빙할 장면 수. 화면이 "3/12 장면"처럼 보여 줄 수 있다.
+    total_scene_count: int
+
+
+class DubbingResultResponse(BaseModel):
+    dubbed_scene_count: int
+    dubbing_notice: str | None = None
+    session_revision: int
+
+
+class DubbingStatusResponse(BaseModel):
+    job_id: str
+    status: Literal["processing", "succeeded", "failed"]
+    result: DubbingResultResponse | None = None
+    error_detail: str | None = None
+    done_scene_count: int = 0
+    total_scene_count: int = 0
+
+
+class DubbingRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    language: str = Field(min_length=1)
+    #: 목소리를 복제하는 엔진에만 필요하다. 복제하지 않는 엔진은 없어도 된다.
+    voice_sample_asset_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_language(self) -> "DubbingRequest":
+        if self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
+
+
+class CaptionLanguageRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    #: `None`이면 원본(한국어)으로 되돌린다 -- 번역은 지우지 않는다.
+    language: str | None = None
+
+    @model_validator(mode="after")
+    def validate_language(self) -> "CaptionLanguageRequest":
+        if self.language is not None and self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
+
+
 class CaptionOverrideRequest(OptionalYujinCandidateAttestation):
     expected_revision: int = Field(ge=1)
     caption_text: str = Field(min_length=1)
+    #: 지금 화면에 보이는 자막의 언어. 주면 **그 번역을 고치고 원본은 안 건드린다.**
+    #: 없으면 원본을 고친다(유진이 고치는 길이 그렇다).
+    language: str | None = None
+
+    @model_validator(mode="after")
+    def validate_caption_language(self) -> "CaptionOverrideRequest":
+        if self.language is not None and self.language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {self.language}")
+        return self
 
     @model_validator(mode="after")
     def validate_caption_text(self) -> "CaptionOverrideRequest":
@@ -636,6 +1147,18 @@ class CutActionOverrideRequest(BaseModel):
             raise ValueError("cut_action must be one of: keep, remove, trim.")
         self.cut_action = cut_action
         return self
+
+
+class SegmentTransitionRequest(BaseModel):
+    """이 장면으로 넘어올 때 쓸 전환.
+
+    ``transition``이 ``None``이거나 ``{"type": "none"}``이면 전환을 끈다.
+    실제 허용 값 검사는 `videobox_core_engine.transitions`가 한 벌만 갖는다 --
+    여기서 목록을 또 적으면 두 벌이 어긋난다.
+    """
+
+    expected_revision: int = Field(ge=1)
+    transition: dict[str, object] | None = None
 
 
 class BrollOverrideRequest(BaseModel):
@@ -669,6 +1192,33 @@ class SegmentBoundsRequest(BaseModel):
     end_sec: float = Field(gt=0, allow_inf_nan=False)
 
 
+class MediaPackInstallRequest(BaseModel):
+    """데이터 폴더 안의 팩 디렉터리 **이름**만 받는다.
+
+    경로를 그대로 받으면 컨테이너 어디든 읽어 들이는 문이 된다. 이름 하나만
+    받고, 그 이름이 한 조각인지(경로 구분자·상위 이동이 없는지)는 라우터가
+    다시 확인한다.
+    """
+
+    directory_name: str = Field(min_length=1, max_length=128)
+
+
+class CaptionsFromTranscriptRequest(BaseModel):
+    """받아쓴 말을 캡션으로 옮길 때 필요한 것 (캡컷 `자동 캡션`)."""
+
+    expected_revision: int = Field(ge=1)
+    transcription_job_id: str = Field(min_length=1, max_length=256)
+
+
+class RipplePlaybackRateRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+    # 화면 `속도` 칸은 캡컷처럼 숫자칸이다(owner 지시 2026-09-04). 여기가
+    # `Literal[1.0, 1.5, 2.0]`으로 남아 있어서 1.25배가 422로 거절됐다
+    # (2026-09-05 실기 검증). 범위는 엔진에서 그대로 읽어 온다 -- 두 벌로
+    # 두면 또 어긋난다.
+    rate: float = Field(ge=MIN_RIPPLE_PLAYBACK_RATE, le=MAX_RIPPLE_PLAYBACK_RATE, allow_inf_nan=False)
+
+
 class SegmentOrderRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     segment_ids: list[str] = Field(min_length=1)
@@ -692,6 +1242,27 @@ class TimelinePlacementChangeRequest(BaseModel):
 class TimelinePlacementPatchRequest(BaseModel):
     expected_revision: int = Field(ge=1)
     changes: list[TimelinePlacementChangeRequest] = Field(min_length=1)
+
+
+class TrackStateRequest(BaseModel):
+    """한 트랙의 눈·음소거. 그 트랙에 뜻이 없는 값은 코어가 거절한다.
+
+    `extra="forbid"`가 **꼭 필요하다.** pydantic 기본값(`ignore`)이면 오타 난
+    키(`hiden`)가 조용히 버려져 빈 dict로 코어에 닿는다 -- 코어의 "뜻 없는
+    값은 거절한다"가 영영 안 걸리고, 200에 revision까지 올라가는데 저장된 건
+    없다(2026-08-23 코드리뷰에서 발견).
+    """
+
+    hidden: bool | None = None
+    muted: bool | None = None
+    model_config = {"extra": "forbid"}
+
+
+class TrackStatesPatchRequest(BaseModel):
+    """트랙 눈·음소거 전체. 보낸 것이 곧 전체 상태다(조각 병합 아님)."""
+
+    expected_revision: int = Field(ge=1)
+    track_states: dict[str, TrackStateRequest]
 
 
 class EditingSessionRevisionRequest(BaseModel):
@@ -741,11 +1312,40 @@ class ExplanationCardRequest(OptionalYujinCandidateAttestation):
 
 
 class ImageOverlayRequest(BaseModel):
+    """사진 오버레이. 자리·크기·움직임은 도형과 **같은 프리셋**만 받는다.
+
+    owner 요청(2026-09-06) "사진을 우리 영상 위에도 얹어서 움직이게". 승인 범위는
+    도형과 같다(2026-08-20 승인 5항) -- 오버레이 하나가 등장·퇴장·이동하는
+    정도까지이고, 자유 좌표(px/%)나 초 단위 시간은 받지 않는다. 받기 시작하면
+    그게 곧 승인 범위 밖인 키프레임 편집기다.
+
+    넷 다 **안 보내도 된다.** 안 보내면 이 기능이 생기기 전과 똑같이 저장되고,
+    옛 화면이 보내던 요청도 그대로 통한다.
+    """
+
     expected_revision: int = Field(ge=1)
     asset_id: str = Field(min_length=1)
     text: str = ""
+    vertical: Literal["top", "middle", "bottom"] | None = None
+    horizontal: Literal["left", "center", "right"] | None = None
+    size: Literal["small", "medium", "large"] | None = None
+    motion: str | None = None
     proposal_id: str | None = Field(default=None, min_length=1, max_length=256)
     candidate_id: str | None = Field(default=None, min_length=1, max_length=256)
+
+    @field_validator("motion")
+    @classmethod
+    def validate_image_overlay_motion(cls, value: str | None) -> str | None:
+        # 안 보낸 것과 목록에 없는 이름은 다르다. 앞은 그대로 두고 뒤는 거절한다 --
+        # 오타를 조용히 `그대로`로 좁히면 owner는 고른 것이 왜 안 되는지 모른다.
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if normalized not in SHAPE_OVERLAY_MOTION_SET:
+            raise ValueError(
+                f"motion must be one of {list(SHAPE_OVERLAY_MOTIONS)}: {value!r}"
+            )
+        return normalized
 
     @model_validator(mode="after")
     def validate_image_overlay(self) -> "ImageOverlayRequest":
@@ -762,6 +1362,45 @@ class ImageOverlayRequest(BaseModel):
             if not self.proposal_id or not self.candidate_id:
                 raise ValueError("proposal_id and candidate_id must not be blank.")
         return self
+
+
+class ShapeOverlayRequest(BaseModel):
+    """정지 도형·아이콘("여기를 보세요"). 프리셋만 받는다 -- 자유 좌표는 계획서 §4가
+    범위 밖으로 못박았다.
+
+    `motion`은 2026-08-20 승인(5항)으로 열린 **등장·퇴장·이동**이다. 여기서도
+    프리셋만 받는다: 초 단위 시간이나 좌표를 받기 시작하면 그게 곧 승인 범위 밖인
+    키프레임 편집기다.
+
+    고를 수 있는 이름은 `overlay_shapes`가 정한 목록 하나뿐이다. 여기에 사본을
+    적어 두면 렌더가 그리는 목록과 화면이 보내는 목록이 조용히 갈라진다.
+    """
+
+    expected_revision: int = Field(ge=1)
+    shape: str
+    vertical: Literal["top", "middle", "bottom"]
+    horizontal: Literal["left", "center", "right"]
+    size: Literal["small", "medium", "large"]
+    # 안 보내면 `그대로`. 이 기능이 생기기 전 화면이 보내던 요청이 그대로 통한다.
+    motion: str = "none"
+
+    @field_validator("shape")
+    @classmethod
+    def validate_shape(cls, value: str) -> str:
+        normalized = canonical_shape_overlay_shape(value)
+        if normalized not in SHAPE_OVERLAY_SHAPES:
+            raise ValueError(f"shape must be one of {sorted(SHAPE_OVERLAY_SHAPES)}: {value!r}")
+        return normalized
+
+    @field_validator("motion")
+    @classmethod
+    def validate_motion(cls, value: str) -> str:
+        normalized = str(value or "none").strip().lower()
+        if normalized not in SHAPE_OVERLAY_MOTION_SET:
+            raise ValueError(
+                f"motion must be one of {list(SHAPE_OVERLAY_MOTIONS)}: {value!r}"
+            )
+        return normalized
 
 
 class TableOverlayRequest(OptionalYujinCandidateAttestation):
@@ -853,6 +1492,12 @@ class PartialRegenerationJobResponse(StartJobResponse):
 class EditingSessionSegmentResponse(BaseModel):
     segment_id: str
     caption_text: str
+    # 언어별 번역. 원본(`caption_text`)은 그대로 두고 나란히 쌓인다.
+    #
+    # **번역이 없으면 칸 자체를 안 보낸다.** 빈 칸이라도 늘 실으면 번역을 한 번도
+    # 안 쓴 프로젝트의 응답까지 모양이 바뀌고, 저장 파일과 응답을 그대로 맞대는
+    # 창작 흐름 점검이 어긋난다(2026-09-02 전체 pytest가 이걸 잡았다).
+    caption_translations: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
     start_sec: float
     end_sec: float
     cut_action: str
@@ -863,11 +1508,27 @@ class EditingSessionSegmentResponse(BaseModel):
     sfx_override: dict[str, object] | None = None
     tts_replacement: dict[str, object] | None = None
     caption_style: dict[str, object] | None = None
+    ripple_playback_rate: float | None = Field(default=None, exclude_if=lambda value: value is None)
+    # 앞 장면에서 이 장면으로 넘어오는 방법.
+    #
+    # **안 고른 장면에는 이 칸이 아예 없다**(`source_script_segment_id`와 같은
+    # 방식). 늘 실어 보내면 전환을 안 쓰는 장면의 응답 모양까지 바뀌고,
+    # 실제로 그 모양을 그대로 비교하던 시험 둘이 깨졌다.
+    transition_in: dict[str, object] | None = Field(default=None, exclude_if=lambda value: value is None)
     source_script_segment_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class MaterializeLibraryAssetRequest(BaseModel):
     project_id: str
+
+
+class CorrectLibraryAssetMediaTypeRequest(BaseModel):
+    """자료실에서 종류를 고친다 (owner 결정 2026-09-07).
+
+    한 폴더에 넣은 것을 내용으로 가르는 이상 틀린 것을 고치는 길이 있어야 한다.
+    """
+
+    media_type: str = Field(min_length=1, max_length=32)
 
 
 class MediaInboxImportRequest(BaseModel):
@@ -920,6 +1581,12 @@ class EditingSessionResponse(BaseModel):
     timeline_id: str
     session_revision: int
     caption_style: dict[str, object] | None = None
+    # 완성본에 실을 자막 언어. 없으면 원본(한국어)으로 나간다.
+    caption_language: str | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: 이번 요청에서 목소리를 바꾼 장면 수. 더빙 요청에만 실린다.
+    dubbed_scene_count: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    #: 못 넣은 장면이 있으면 그 사정을 창작자 말로. 전부 됐으면 안 실린다.
+    dubbing_notice: str | None = Field(default=None, exclude_if=lambda value: value is None)
     segments: list[EditingSessionSegmentResponse]
     history: list[EditingSessionHistoryEntryResponse] = Field(default_factory=list)
     undo_count: int = 0
@@ -960,6 +1627,27 @@ class EditorMediaControlsResponse(BaseModel):
     preserve_source_audio: bool | None = None
     in_sec: float | None = Field(default=None, ge=0)
     out_sec: float | None = Field(default=None, gt=0)
+    # 색감(`filters.py`). 이 모델은 `extra="forbid"`라 여기 없으면 색감이 실린
+    # 클립의 응답이 통째로 터진다 -- 조용히 빠지는 게 아니다.
+    filter: dict[str, str] | None = None
+    # 사진 한 장이 **어떻게** 움직일지(2026-09-06). 바로 위 경고가 가리키는
+    # 자리다 -- 색감과 같은 규칙으로 "안 고르면 칸이 없는" 값이라, 여기 안 적으면
+    # 한 번 고른 클립의 편집기 화면이 통째로 안 열린다.
+    photo_motion: str | None = None
+    # 캡컷 대조로 들어온 것들(2026-09-01). **바로 위 경고가 가리키는 자리가
+    # 여기다** -- `normalize_media_controls`에 칸을 늘리면 이 모델도 같이
+    # 늘려야 한다. 2026-09-01에 손떨림 보정을 넣으면서 실제로 빠뜨렸고,
+    # 그 클립의 설정을 한 번 저장한 뒤로는 편집기 화면이 통째로 안 열렸다.
+    # 화면·단위 테스트로는 안 잡히고 전체 pytest에서만 나왔다.
+    normalize_loudness: bool | None = None
+    denoise: bool | None = None
+    stabilize: bool | None = None
+    reduce_noise: bool | None = None
+    preserve_pitch: bool | None = None
+    zoom: float | None = None
+    position_x_percent: float | None = None
+    position_y_percent: float | None = None
+    rotation_deg: float | None = None
     model_config = {"extra": "forbid"}
 
 
@@ -975,7 +1663,7 @@ class EditorClipResponse(BaseModel):
     media_controls: EditorMediaControlsResponse
     expected_content_sha256: str | None = None
     media_revision: str | None = None
-    overlay_type: Literal["explanation_card", "image_overlay", "table_overlay"] | None = None
+    overlay_type: Literal["explanation_card", "image_overlay", "table_overlay", "shape_overlay"] | None = None
     overlay_payload: dict[str, object] = Field(default_factory=dict)
 
 
@@ -983,6 +1671,8 @@ class EditorTrackResponse(BaseModel):
     track_id: str
     track_type: Literal["narration", "broll", "bgm", "sfx", "overlay"]
     clips: list[EditorClipResponse]
+    # 눈·음소거는 여기 싣지 않는다. 화면은 맨 위 `track_states` 하나만 읽는다
+    # (자막 트랙은 이 목록에 아예 안 실려 트랙 쪽으로는 못 읽는다).
 
 
 class EditorCaptionStyleResponse(BaseModel):
@@ -997,6 +1687,9 @@ class EditorCaptionStyleResponse(BaseModel):
     horizontal_align: Literal["left", "center", "right"]
     safe_area_enabled: bool
     shadow_blur_px: int = Field(ge=0)
+    bold: bool = False
+    italic: bool = False
+    letter_spacing_px: int = Field(ge=-80, le=80, default=0)
     model_config = {"extra": "forbid"}
 
 
@@ -1076,6 +1769,9 @@ class EditorPlaybackManifestResponse(BaseModel):
     fps: EditorFpsResponse
     output: EditorOutputResponse
     tracks: list[EditorTrackResponse]
+    # 눈·음소거를 되읽는 단일 자리. 자막 트랙은 `tracks`에 안 실리므로
+    # 트랙마다 붙은 값만으로는 자막 숨김을 읽을 수 없다(`track_states.py`).
+    track_states: dict[str, dict[str, bool]] = {}
     captions: list[EditorCaptionResponse]
     gap_slots: list[EditorGapSlotResponse]
     source_status: EditorSourceStatusResponse
@@ -1174,6 +1870,8 @@ class TimelinePayloadResponse(BaseModel):
     created_at: str | None = None
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
 
 
 class TimelineJobResponse(StartJobResponse):
@@ -1183,6 +1881,8 @@ class TimelineJobResponse(StartJobResponse):
 class ReviewSnapshotResponse(BaseModel):
     project_id: str
     timeline_id: str
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
     review_status: str
     segments: list[SegmentAnalysisRecord]
     applied_recommendations: list[RecommendationItemResponse]
@@ -1205,6 +1905,8 @@ class ReviewApprovalResponse(BaseModel):
     updated_at: str
     source_session_id: str | None = None
     source_session_revision: int | None = None
+    source_variant_id: str | None = None
+    source_variant_revision: int | None = None
     is_current: bool = True
     invalidated_at: str | None = None
     invalidated_reason: str | None = None
@@ -1230,6 +1932,27 @@ class PreviewArtifactResponse(BaseModel):
 
 class PreviewJobResponse(StartJobResponse):
     preview: PreviewArtifactResponse
+
+
+class PreviewShareCreateResponse(BaseModel):
+    """owner 요청(2026-08-28): 프리뷰 공유 링크. 토큰은 이 응답에서만 나온다 --
+    이후 목록(`PreviewShareSummaryResponse`)에는 다시 싣지 않는다."""
+
+    share_id: str
+    token: str
+    url: str
+
+
+class PreviewShareStatusResponse(BaseModel):
+    status: Literal["active"]
+
+
+class PreviewShareSummaryResponse(BaseModel):
+    share_id: str
+    project_id: str
+    export_id: str
+    created_at: str
+    revoked_at: str | None = None
 
 
 class ExportArtifactResponse(BaseModel):
@@ -1268,10 +1991,42 @@ class FinalRenderArtifactResponse(BaseModel):
     is_current: bool = True
     invalidated_at: str | None = None
     invalidated_reason: str | None = None
+    # 렌더가 실제로 잰 결과. 재지 못했거나 옛 완성본이면 None이고, 그때 화면은
+    # 소리에 대해 아무 말도 하지 않는다.
+    has_sound: bool | None = None
+    # 기계가 잰 것(quality_facts)과 사람이 정한 것(owner_verdict)을 갈라서 싣는다.
+    # 나중에 무엇을 근거로 배웠는지 구분할 수 있어야 한다.
+    quality_facts: dict[str, Any] = Field(default_factory=dict)
+    owner_verdict: str | None = None
+    owner_verdict_note: str | None = None
+    owner_verdict_at: str | None = None
+
+
+class FinalRenderVerdictRequest(BaseModel):
+    verdict: Literal["good", "bad"]
+    note: str | None = None
 
 
 class FinalRenderJobResponse(StartJobResponse):
     render: FinalRenderArtifactResponse | None = None
+    error_message: str | None = None
+
+
+class VariantRenderItemResponse(BaseModel):
+    variant_id: str
+    variant_kind: str | None = None
+    timeline_id: str | None = None
+    timeline_job_id: str | None = None
+    job_id: str | None = None
+    status: str
+    error_code: str | None = None
+    content_url: str | None = None
+
+
+class VariantRenderBatchResponse(BaseModel):
+    project_id: str
+    status: str
+    items: list[VariantRenderItemResponse]
 
 
 class CapCutDraftExportArtifactResponse(BaseModel):
@@ -1365,6 +2120,86 @@ class SubtitleArtifactResponse(BaseModel):
 
 class SubtitleJobResponse(StartJobResponse):
     subtitle: SubtitleArtifactResponse
+
+
+class FootageProposalCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    library_asset_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+    analysis: dict[str, Any] | None = None
+
+
+class YujinFootageInterpretRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    instruction: str = Field(min_length=1, max_length=2_048)
+    response: dict[str, Any] | str | None = None
+
+
+class FootageProposalEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: Literal["move_boundary", "split", "merge", "exclude", "confirm"]
+    expected_revision: int = Field(ge=1)
+    segment_id: str | None = Field(default=None, min_length=1)
+    segment_ids: list[str] = Field(default_factory=list)
+    boundary_sec: float | None = None
+    split_sec: float | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class FootageRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+
+
+class FootageApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class VirtualSequenceItemRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_segment_id: str = Field(min_length=1)
+    source_id: str | None = Field(default=None, min_length=1)
+    item_order: int = Field(ge=1)
+    start_sec: float | None = None
+    end_sec: float | None = None
+
+
+class VirtualSequenceCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_id: str = Field(min_length=1)
+    name: str = ""
+    items: list[VirtualSequenceItemRequest] = Field(min_length=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
+
+
+class VirtualSequenceReorderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_revision: int = Field(ge=1)
+    item_ids: list[str] = Field(min_length=1)
+
+
+class VirtualSequenceApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    idempotency_key: str = Field(min_length=1, max_length=256)
+
+
+class FootageDerivativeRenderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_kind: Literal["proposal", "sequence"]
+    source_id: str = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=256)
 
 
 PartialRegenerationJobResponse.model_rebuild()

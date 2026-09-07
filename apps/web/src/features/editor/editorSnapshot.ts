@@ -1,4 +1,4 @@
-import type { EditingSession, EditorPlaybackManifest } from "../../api";
+import type { EditingSession, EditorPlaybackManifest, SceneTransition } from "../../api";
 import { VideoBoxEditorAdapter, type EditorControls, type EditorViewModel } from "./editorViewModel";
 
 export type EditorSessionMedia = Readonly<{
@@ -22,13 +22,25 @@ export type EditorSessionSnapshot = Readonly<{
   undoCount: number;
   redoCount: number;
   updatedAt: string | null;
+  /** 완성본에 실리는 자막 언어. `null`이면 원본(한국어). */
+  captionLanguage: string | null;
+  /** 이미 옮겨 둔 언어들. 하나라도 옮긴 장면이 있으면 그 언어가 들어온다. */
+  translatedLanguages: readonly string[];
   segments: ReadonlyArray<Readonly<{
     segmentId: string;
     cutAction: string;
     bgm: EditorSessionMedia | null;
     sfx: EditorSessionMedia | null;
+    /** 앞 장면에서 이 장면으로 넘어오는 방법. 안 골랐으면 null. */
+    transitionIn: EditorSessionTransition | null;
+    ripplePlaybackRate?: number;
     ttsReplacement: EditorSessionTtsReplacement | null;
   }>>;
+}>;
+
+export type EditorSessionTransition = Readonly<{
+  type: string;
+  durationSec: number;
 }>;
 
 export type EditorSnapshot = Readonly<{
@@ -69,6 +81,16 @@ function ttsReplacement(value: Record<string, unknown> | null | undefined): Edit
   return candidateId && assetId ? { candidateId, assetId } : null;
 }
 
+function transition(value: SceneTransition | null | undefined): EditorSessionTransition | null {
+  const type = stringOrNull(value?.type);
+  // `none`은 "전환 없음"이다. 값이 아예 없는 것과 화면에서 구별하지 않는다.
+  if (!type || type === "none") return null;
+  return {
+    type,
+    durationSec: typeof value?.duration_sec === "number" ? value.duration_sec : 0.5,
+  };
+}
+
 export function joinEditorSnapshot(
   manifest: EditorPlaybackManifest,
   editingSession: EditingSession,
@@ -97,11 +119,22 @@ export function joinEditorSnapshot(
       undoCount: editingSession.undo_count ?? 0,
       redoCount: editingSession.redo_count ?? 0,
       updatedAt: editingSession.updated_at ?? null,
+      captionLanguage: editingSession.caption_language ?? null,
+      // 장면마다 따로 셀 것이 아니라 **하나라도 있으면 고를 수 있는 언어**다.
+      // 반쯤 번역된 상태에서도 고를 수 있어야 한다 -- 나머지 장면은 원문으로
+      // 메워져 나가고, 다시 누르면 빠진 장면만 옮긴다.
+      translatedLanguages: [...new Set(
+        editingSession.segments.flatMap((segment) => Object.entries(segment.caption_translations ?? {})
+          .filter(([, text]) => String(text ?? "").trim().length > 0)
+          .map(([code]) => code)),
+      )],
       segments: editingSession.segments.map((segment) => ({
         segmentId: segment.segment_id,
         cutAction: segment.cut_action,
         bgm: media(segment.music_override),
         sfx: media(segment.sfx_override),
+        transitionIn: transition(segment.transition_in),
+        ...(segment.ripple_playback_rate ? { ripplePlaybackRate: segment.ripple_playback_rate } : {}),
         ttsReplacement: ttsReplacement(segment.tts_replacement),
       })),
     },

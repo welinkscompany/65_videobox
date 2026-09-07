@@ -1,10 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from videobox_api.errors import _http_error
 from videobox_api.models import (
+    CaptionLanguageRequest,
+    CaptionsFromTranscriptRequest,
+    DubbingRequest,
+    DubbingResultResponse,
+    DubbingStartResponse,
+    DubbingStatusResponse,
+    CaptionTranslationRequest,
     NarrationRecordingSyncRequest,
     BrollOverrideRequest,
     CaptionOverrideRequest,
@@ -12,6 +19,7 @@ from videobox_api.models import (
     CreateEditingSessionRequest,
     CreateScriptDraftEditingSessionRequest,
     CutActionOverrideRequest,
+    SegmentTransitionRequest,
     EditingSessionResponse,
     EditorPlaybackManifestResponse,
     EditingSessionRevisionRequest,
@@ -23,13 +31,16 @@ from videobox_api.models import (
     PartialRegenerationRequest,
     PartialRegenerationResponse,
     SegmentBoundsRequest,
+    RipplePlaybackRateRequest,
     SegmentMergeRequest,
     SegmentOrderRequest,
     SegmentSplitRequest,
     SelectedRangePreviewRequest,
+    ShapeOverlayRequest,
     TableOverlayRequest,
     TimelinePayloadResponse,
     TimelinePlacementPatchRequest,
+    TrackStatesPatchRequest,
     TTSReplacementRequest,
     VisualOverlayRequest,
 )
@@ -61,6 +72,15 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 project_id=project_id,
                 timeline_job_id=payload.timeline_job_id,
             )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/blank", status_code=status.HTTP_201_CREATED)
+    def create_blank_editing_session(project_id: str) -> EditingSessionResponse:
+        """기획을 통과하지 않고 편집기를 여는 길(캡컷의 빈 편집판)."""
+        try:
+            result = orchestrator.create_blank_editing_session(project_id=project_id)
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
@@ -136,6 +156,14 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditorPlaybackManifestResponse(**result)
 
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/transition-suggestions")
+    def get_scene_transition_suggestions(project_id: str, session_id: str) -> dict[str, object]:
+        try:
+            suggestions = orchestrator.suggest_scene_transitions(project_id=project_id, session_id=session_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return {"suggestions": suggestions}
+
     @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/fixed-timeline")
     def get_editing_session_fixed_timeline(project_id: str, session_id: str) -> dict[str, object]:
         try:
@@ -187,9 +215,121 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 expected_revision=payload.expected_revision,
                 proposal_id=payload.proposal_id,
                 candidate_id=payload.candidate_id,
+                language=payload.language,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/captions-from-transcript")
+    def apply_captions_from_transcript(
+        project_id: str,
+        session_id: str,
+        payload: CaptionsFromTranscriptRequest,
+    ) -> EditingSessionResponse:
+        """받아쓴 말을 장면 캡션으로 옮긴다 (캡컷 `자동 캡션`).
+
+        받아쓰기 자체는 `POST /api/projects/{project_id}/jobs/transcription`이
+        이미 하고 있었다. 이 자리가 없어서 그 결과가 캡션이 되지 못했다.
+        """
+        try:
+            result = orchestrator.apply_captions_from_transcript(
+                project_id=project_id,
+                session_id=session_id,
+                transcription_job_id=payload.transcription_job_id,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations")
+    def translate_editing_session_captions(
+        request: Request, project_id: str, session_id: str, payload: CaptionTranslationRequest
+    ) -> EditingSessionResponse:
+        """자막을 골라 준 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다."""
+        try:
+            result = orchestrator.translate_editing_session_captions(
+                project_id=project_id,
+                session_id=session_id,
+                language=payload.language,
+                expected_revision=payload.expected_revision,
+                runtime=request.app.state.local_only_runtime_service_factory(store),
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.post(
+        "/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def start_dubbing(
+        project_id: str, session_id: str, payload: DubbingRequest, background_tasks: BackgroundTasks,
+    ) -> DubbingStartResponse:
+        """더빙을 걸어 두고 바로 돌아온다. 진행 상황은 `GET .../dubbing/{job_id}`.
+
+        **비동기여야 한다.** 장면당 13초가 걸려서(2026-09-03 실측) 스물세 장면이면
+        nginx 330초 벽에 부딪힌다 -- 창작자의 실제 영상은 그보다 훨씬 길다.
+        유튜브 학습을 비동기로 바꾼 것과 같은 이유이고 같은 방식이다.
+        """
+        try:
+            started = orchestrator.start_dubbing(
+                project_id=project_id,
+                session_id=session_id,
+                language=payload.language,
+                voice_sample_asset_id=payload.voice_sample_asset_id,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            # 편집본이 그 사이 바뀌었다. **52분을 돌리기 전에** 말해 준다.
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        background_tasks.add_task(
+            orchestrator.run_dubbing_job,
+            project_id=project_id, session_id=session_id, job_id=started["job_id"],
+            language=payload.language, expected_revision=payload.expected_revision,
+            voice_sample_asset_id=payload.voice_sample_asset_id,
+        )
+        return DubbingStartResponse(**started)
+
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/dubbing/{job_id}")
+    def get_dubbing_job(project_id: str, session_id: str, job_id: str) -> DubbingStatusResponse:
+        del session_id
+        try:
+            job = orchestrator.get_dubbing_job(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return DubbingStatusResponse(
+            **{**job, "result": DubbingResultResponse(**job["result"]) if job["result"] else None}
+        )
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/caption-language")
+    def patch_editing_session_caption_language(
+        project_id: str, session_id: str, payload: CaptionLanguageRequest
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.set_caption_language(
+                project_id=project_id,
+                session_id=session_id,
+                language=payload.language,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
@@ -230,6 +370,24 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/ripple-playback-rate")
+    def patch_editing_session_segment_ripple_playback_rate(project_id: str, session_id: str, segment_id: str, payload: RipplePlaybackRateRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.set_editing_session_segment_ripple_playback_rate(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                rate=payload.rate,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
     @router.put("/api/projects/{project_id}/editing-sessions/{session_id}/segment-order")
     def put_editing_session_segment_order(project_id: str, session_id: str, payload: SegmentOrderRequest) -> EditingSessionResponse:
         try:
@@ -246,6 +404,28 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
     def patch_editing_session_timeline_placements(project_id: str, session_id: str, payload: TimelinePlacementPatchRequest) -> EditingSessionResponse:
         try:
             result = orchestrator.update_editing_session_timeline_placements(project_id=project_id, session_id=session_id, changes=[item.model_dump() for item in payload.changes], expected_revision=payload.expected_revision)
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/track-states")
+    def patch_editing_session_track_states(project_id: str, session_id: str, payload: TrackStatesPatchRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_editing_session_track_states(
+                project_id=project_id,
+                session_id=session_id,
+                # 보내지 않은 칸(`None`)은 "그 값은 말하지 않았다"이므로 뺀다 --
+                # `False`로 바꿔 보내면 코어가 뜻 없는 조합을 거절할 수 없다.
+                states={
+                    kind: {field: value for field, value in state.model_dump().items() if value is not None}
+                    for kind, state in payload.track_states.items()
+                },
+                expected_revision=payload.expected_revision,
+            )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
         except ValueError as exc:
@@ -295,6 +475,29 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/transition")
+    def patch_editing_session_segment_transition(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: SegmentTransitionRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_transition(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                transition=payload.transition,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
@@ -589,6 +792,10 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 segment_id=segment_id,
                 asset_id=payload.asset_id,
                 text=payload.text,
+                vertical=payload.vertical,
+                horizontal=payload.horizontal,
+                size=payload.size,
+                motion=payload.motion,
                 expected_revision=payload.expected_revision,
                 proposal_id=payload.proposal_id,
                 candidate_id=payload.candidate_id,
@@ -653,6 +860,51 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
     ) -> EditingSessionResponse:
         try:
             result = orchestrator.remove_segment_table_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                expected_revision=expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/shape-overlay")
+    def patch_editing_session_shape_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        payload: ShapeOverlayRequest,
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.update_segment_shape_overlay(
+                project_id=project_id,
+                session_id=session_id,
+                segment_id=segment_id,
+                shape=payload.shape,
+                vertical=payload.vertical,
+                horizontal=payload.horizontal,
+                size=payload.size,
+                motion=payload.motion,
+                expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.delete("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/shape-overlay")
+    def delete_editing_session_shape_overlay(
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        expected_revision: int = Query(ge=1),
+    ) -> EditingSessionResponse:
+        try:
+            result = orchestrator.remove_segment_shape_overlay(
                 project_id=project_id,
                 session_id=session_id,
                 segment_id=segment_id,

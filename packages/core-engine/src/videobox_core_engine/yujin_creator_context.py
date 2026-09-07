@@ -42,7 +42,7 @@ _ASSET_KINDS = frozenset(
         "generated_tts_audio",
     }
 )
-_CONTROLS = (
+_BASE_CONTROLS = (
     SupportedControl(kind="bgm", mode="recommendation_only"),
     SupportedControl(kind="broll", mode="recommendation_only"),
     SupportedControl(kind="caption", mode="recommendation_only"),
@@ -74,6 +74,8 @@ def build_yujin_creator_context(
     session_id: str,
     expected_session_revision: int,
     selected_segment_id: str | None = None,
+    current_surface: str = "edit",
+    selected_variant_id: str | None = None,
     playback_builder: Callable[..., dict[str, Any]] = build_editor_playback_manifest,
 ) -> YujinCreatorContext:
     """Read a project-scoped snapshot and return only allowlisted scalar data."""
@@ -159,6 +161,21 @@ def build_yujin_creator_context(
         segment_ids=segment_ids,
         assets=assets,
     )
+    variant: dict[str, Any] | None = None
+    if selected_variant_id is not None:
+        try:
+            variant = store.get_output_variant(  # type: ignore[attr-defined]
+                project_id=project_id,
+                variant_id=selected_variant_id,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError):
+            raise YujinCreatorContextError("creator_context_variant_not_current") from None
+        if (
+            str(variant.get("project_id") or "") != project_id
+            or str(variant.get("source_session_id") or "") != session_id
+            or int(variant.get("source_session_revision") or 0) != session_revision
+        ):
+            raise YujinCreatorContextError("creator_context_variant_not_current")
     if (
         _positive_revision(session_after.get("session_revision"))
         != session_revision
@@ -217,7 +234,19 @@ def build_yujin_creator_context(
         media_candidates=candidates,
         approved_tts_candidates=approved_tts_before,
         timeline_summary=timeline_summary,
-        supported_controls=_CONTROLS,
+        supported_controls=(
+            _BASE_CONTROLS
+            + (SupportedControl(kind="output_variant", mode="recommendation_only"),)
+            if variant is not None
+            else _BASE_CONTROLS
+        ),
+        current_surface=current_surface,  # type: ignore[arg-type]
+        selection_kind="variant" if variant is not None else ("segment" if normalized_selection is not None else "none"),
+        master_session_id=session_id,
+        master_session_revision=session_revision,
+        variant_id=str(variant["variant_id"]) if variant is not None else None,
+        variant_kind=str(variant["kind"]) if variant is not None else None,  # type: ignore[arg-type]
+        variant_revision=int(variant["variant_revision"]) if variant is not None else None,
     )
     return _fit_context(context)
 

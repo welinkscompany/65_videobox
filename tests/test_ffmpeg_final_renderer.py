@@ -11,6 +11,9 @@ from videobox_core_engine.ffmpeg_final_renderer import (
     FinalRenderError,
 )
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.editing_session import build_editing_session, update_segment_image_overlay
+from videobox_core_engine.overlay_shapes import SHAPE_OVERLAY_ICON_GLYPHS, font_supports_glyph
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.timeline_clip_source_resolution import ResolvedClipSource
@@ -28,6 +31,24 @@ _FONT_CANDIDATES = (
     r"C:\Windows\Fonts\malgun.ttf",
 )
 OVERLAY_FONT = next((path for path in _FONT_CANDIDATES if Path(path).is_file()), None)
+
+# 아이콘 오버레이는 글자 하나를 그린다. 그 글자를 전부 가진 글꼴이라야 검사가
+# 의미 있다 -- 나눔고딕에는 없는 기호가 있어 후보를 따로 고른다.
+_ICON_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+    r"C:\Windows\Fonts\seguisym.ttf",
+    r"C:\Windows\Fonts\DejaVuSans.ttf",
+)
+ICON_FONT = next(
+    (
+        path
+        for path in _ICON_FONT_CANDIDATES
+        if Path(path).is_file()
+        and all(font_supports_glyph(path, glyph) for glyph in SHAPE_OVERLAY_ICON_GLYPHS.values())
+    ),
+    None,
+)
 
 
 def test_final_renderer_rejects_post_materialization_content_mutation_before_ffmpeg(
@@ -92,6 +113,7 @@ def test_the_render_command_caps_filter_threads_not_just_the_encoder(
         lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
     )
     monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
     monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
     monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
 
@@ -183,6 +205,242 @@ def test_export_overlay_blocks_a_missing_font_before_starting_ffmpeg(tmp_path: P
             project_id="project_001",
             video_path=tmp_path / "video.mp4",
             overlays=[{"text": "Visible message", "start_sec": 0.0, "end_sec": 1.0}],
+            work_dir=tmp_path,
+        )
+
+
+@pytest.mark.skipif(OVERLAY_FONT is None, reason="no font available to draw a text overlay")
+def test_apply_export_overlays_draws_table_structure_in_the_legacy_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """렌더 경로가 둘이다: composition plan 그래프뿐 아니라 이 legacy 경로도
+    표의 열·행을 실제로 그려야 한다. 예전에는 `text`만 그렸다."""
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store, overlay_font_file=OVERLAY_FONT)
+    captured: list[list[str]] = []
+
+    def fake_run(self: FfmpegFinalRenderer, command: list[str]) -> subprocess.CompletedProcess:
+        captured.append(command)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", fake_run)
+
+    result = renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=[{
+            "overlay_type": "table_overlay",
+            "columns": ["항목", "값"],
+            "rows": [["길이", "10초"]],
+            "text": "요약표",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+        }],
+        work_dir=tmp_path,
+    )
+
+    assert result != tmp_path / "video.mp4"
+    assert captured, "the overlay render command never ran"
+    filter_graph = captured[0][captured[0].index("-filter_complex") + 1]
+    assert "항목 | 값" in filter_graph
+    assert "길이 | 10초" in filter_graph
+    assert "요약표" in filter_graph
+    assert filter_graph.index("항목 | 값") < filter_graph.index("길이 | 10초")
+
+
+def test_apply_export_overlays_draws_static_shapes_in_the_legacy_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """렌더 경로가 둘이다: 그래프 경로뿐 아니라 이 legacy 경로도 정지 도형을
+    drawbox로 그려야 한다. 도형은 글줄이 아니므로 글꼴 없이도 그려진다."""
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(
+        store=store, overlay_font_file=str(tmp_path / "no-font-anywhere.ttf")
+    )
+    captured: list[list[str]] = []
+
+    def fake_run(self: FfmpegFinalRenderer, command: list[str]) -> subprocess.CompletedProcess:
+        captured.append(command)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", fake_run)
+
+    result = renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=[
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "highlight_box",
+                "vertical": "middle",
+                "horizontal": "right",
+                "size": "medium",
+                "start_sec": 0.0,
+                "end_sec": 1.5,
+            },
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "underline",
+                "vertical": "bottom",
+                "horizontal": "center",
+                "size": "small",
+                "start_sec": 2.0,
+                "end_sec": 3.0,
+            },
+        ],
+        work_dir=tmp_path,
+    )
+
+    assert result != tmp_path / "video.mp4"
+    assert captured, "the overlay render command never ran"
+    filter_graph = captured[0][captured[0].index("-filter_complex") + 1]
+    assert filter_graph.count("drawbox=") == 2
+    assert "between(t,0.0,1.5)" in filter_graph
+    assert "between(t,2.0,3.0)" in filter_graph
+    assert "t=fill" in filter_graph
+    assert "drawtext" not in filter_graph
+
+
+def _capture_export_overlay_filter_graph(
+    renderer: FfmpegFinalRenderer,
+    *,
+    overlays: list[dict[str, object]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> str:
+    captured: list[list[str]] = []
+
+    def fake_run(self: FfmpegFinalRenderer, command: list[str]) -> subprocess.CompletedProcess:
+        captured.append(command)
+        return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(FfmpegFinalRenderer, "_run", fake_run)
+    renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=overlays,
+        work_dir=tmp_path,
+    )
+    assert captured, "the overlay render command never ran"
+    return captured[0][captured[0].index("-filter_complex") + 1]
+
+
+@pytest.mark.skipif(ICON_FONT is None, reason="no font carrying the icon glyphs is available")
+def test_apply_export_overlays_draws_icon_overlays_in_the_legacy_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """화살표 같은 아이콘은 drawbox로 못 그린다(사각형만 그린다).
+
+    새 필터 체계를 만들지 않고 이미 있는 drawtext 경로를 그대로 쓴다 -- 크기는
+    3단이 fontsize로, 위치는 9칸이 기존 x/y 식으로 간다.
+    """
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path),
+        overlay_font_file=ICON_FONT,
+        video_width=1280,
+        video_height=720,
+    )
+
+    filter_graph = _capture_export_overlay_filter_graph(
+        renderer,
+        overlays=[{
+            "overlay_type": "shape_overlay",
+            "shape": "icon_arrow_right",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "medium",
+            "start_sec": 1.0,
+            "end_sec": 2.0,
+        }],
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    assert "drawtext=" in filter_graph
+    assert "text='→'" in filter_graph
+    assert "fontsize=187" in filter_graph
+    assert "x=w-text_w-77:y=(h-text_h)/2" in filter_graph
+    assert "between(t,1.0,2.0)" in filter_graph
+    # 아이콘은 도형이 아니다: drawbox로 사각형을 덧그리면 안 된다.
+    assert "drawbox=" not in filter_graph
+    # 글줄 오버레이의 검은 상자·아래 정렬은 아이콘에 딸려오지 않는다.
+    assert "box=1" not in filter_graph
+
+
+@pytest.mark.skipif(ICON_FONT is None, reason="no font carrying the icon glyphs is available")
+def test_both_render_paths_place_the_same_icon_at_the_same_spot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """이 저장소가 같은 함정에 여러 번 걸렸다: 렌더 경로가 둘이다.
+
+    두 경로가 같은 아이콘을 같은 자리·같은 크기로 그리지 않으면, 미리보기에서
+    맞춰 놓은 위치가 완성본에서 어긋난다.
+    """
+    from videobox_core_engine.composition_plan import CompositionPlan
+
+    overlay = {
+        "overlay_type": "shape_overlay",
+        "shape": "icon_arrow_down_left",
+        "vertical": "top",
+        "horizontal": "left",
+        "size": "large",
+        "start_sec": 0.5,
+        "end_sec": 3.25,
+    }
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path),
+        overlay_font_file=ICON_FONT,
+        video_width=1080,
+        video_height=1920,
+    )
+
+    legacy_graph = _capture_export_overlay_filter_graph(
+        renderer, overlays=[dict(overlay)], tmp_path=tmp_path, monkeypatch=monkeypatch
+    )
+    plan_graph = renderer.build_plan_filter_graph(
+        composition_plan=CompositionPlan.from_timeline(timeline={
+            "output": {"width": 1080, "height": 1920},
+            "tracks": [],
+            "export_overlays": [dict(overlay)],
+        }),
+        source_indices={},
+    )
+
+    placement = "text='↙':x=65:y=154:fontsize=691"
+    assert placement in legacy_graph
+    assert placement in plan_graph
+    assert "enable='between(t,0.5,3.25)'" in legacy_graph
+    assert "enable='between(t,0.5,3.25)'" in plan_graph
+
+
+def test_icon_overlay_fails_closed_when_the_font_cannot_draw_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """글꼴이 없으면 조용히 두부(빈 상자)를 그리지 않고 멈춘다.
+
+    빈 상자가 그려진 완성본은 성공으로 끝나기 때문에 owner가 알아채지 못한다.
+    """
+    import videobox_core_engine.overlay_shapes as overlay_shapes
+
+    monkeypatch.setattr(overlay_shapes, "ICON_FONT_FALLBACKS", ())
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path), overlay_font_file=str(tmp_path / "no-font-anywhere.ttf")
+    )
+    overlays = [{
+        "overlay_type": "shape_overlay",
+        "shape": "icon_arrow_right",
+        "vertical": "middle",
+        "horizontal": "center",
+        "size": "medium",
+        "start_sec": 0.0,
+        "end_sec": 1.0,
+    }]
+
+    with pytest.raises(FinalRenderError, match="Overlay font"):
+        renderer._apply_export_overlays(
+            project_id="project_001",
+            video_path=tmp_path / "video.mp4",
+            overlays=overlays,
             work_dir=tmp_path,
         )
 
@@ -358,19 +616,43 @@ def test_render_timeline_materializes_image_overlay_during_its_window(tmp_path: 
     image_file = tmp_path / "yellow_overlay.png"
     _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=yellow:s=80x60", "-frames:v", "1", str(image_file)])
     image_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.IMAGE, source_path=image_file)
-    timeline = {
+    source_timeline = {
+        "project_id": project.project_id,
+        "timeline_id": "timeline_image_overlay",
         "narration_source_uri": narration_asset.storage_uri,
-        "export_overlays": [{
-            "overlay_type": "visual_overlay",
-            "asset_id": image_asset.asset_id,
-            "start_sec": 1.0,
-            "end_sec": 3.0,
-        }],
         "tracks": [
-            {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
-            {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 4.0}]},
+            {"track_type": "narration", "clips": [
+                {"segment_id": "scene-before", "asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 0.0, "end_sec": 1.0},
+                {"segment_id": "scene-overlay", "asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 1.0, "end_sec": 3.0},
+                {"segment_id": "scene-after", "asset_uri": f"local://projects/{project.project_id}/assets/{narration_asset.asset_id}", "start_sec": 3.0, "end_sec": 4.0},
+            ]},
+            {"track_type": "broll", "clips": [
+                {"segment_id": "scene-before", "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 1.0},
+                {"segment_id": "scene-overlay", "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 1.0, "end_sec": 3.0},
+                {"segment_id": "scene-after", "asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 3.0, "end_sec": 4.0},
+            ]},
         ],
     }
+    editing_session = build_editing_session(
+        project_id=project.project_id,
+        timeline=source_timeline,
+        segments=[
+            {"segment_id": "scene-before", "text": "앞", "start_sec": 0.0, "end_sec": 1.0},
+            {"segment_id": "scene-overlay", "text": "오버레이", "start_sec": 1.0, "end_sec": 3.0},
+            {"segment_id": "scene-after", "text": "뒤", "start_sec": 3.0, "end_sec": 4.0},
+        ],
+    )
+    editing_session = update_segment_image_overlay(
+        session=editing_session,
+        segment_id="scene-overlay",
+        asset_id=image_asset.asset_id,
+        text="Overlay proof",
+    )
+    timeline = materialize_editing_session_timeline(
+        timeline=source_timeline,
+        editing_session=editing_session,
+        project_id=project.project_id,
+    )
     output_path = tmp_path / "image_overlay.mp4"
 
     FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
@@ -587,3 +869,906 @@ def _frame_rgb(video_path: Path, *, at_sec: float, width: int, height: int) -> b
     assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
     assert len(result.stdout) == width * height * 3
     return result.stdout
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-16: 완성본 오디오가 음악 구간 길이(5초)로 잘린 채 20초 영상이 성공(0)
+# 처리된 실사례. 컨테이너 프로세스 상한(128) 근처에서 ffmpeg 스레드 생성이
+# 조용히 실패하면 브랜치 하나만 일찍 끝난 채 출력이 나올 수 있다. 대책 둘 --
+# 디코더까지 스레드 상한을 지키게 하고, 오디오가 짧게 나온 출력은 내보내기
+# 전에 실패로 돌린다.
+# ---------------------------------------------------------------------------
+
+
+def _tiny_plan_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, renderer: FfmpegFinalRenderer, store: LocalProjectStore, project_id: str, commands: list[list[str]]) -> None:
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 5.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    timeline = {
+        "timeline_id": "timeline-decoder-threads", "project_id": project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 5.0,
+            "media_controls": {},
+        }]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+
+def test_every_input_is_decoder_thread_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """인코더·필터만 묶으면 입력 6개짜리 렌더에서 디코더들이 호스트 CPU 수만큼
+    스레드를 잡는다. 모든 `-i` 앞에 상한이 붙어야 한다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("DecoderThreads")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    _tiny_plan_render(tmp_path, monkeypatch, renderer, store, project.project_id, commands)
+
+    command = commands[0]
+    cap = str(renderer.encoder_thread_limit())
+    for index, token in enumerate(command):
+        if token != "-i":
+            continue
+        window = command[max(0, index - 6):index]
+        assert "-threads" in window and window[window.index("-threads") + 1] == cap, (
+            f"input at position {index} has no decoder thread cap: {window}"
+        )
+
+
+def test_a_render_whose_audio_comes_out_short_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """오디오가 타임라인보다 짧게 나온 출력은 성공으로 내보내지 않는다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("ShortAudio")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    # 20초 계획인데 오디오 스트림이 5초로 끝난 상황.
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 5.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    timeline = {
+        "timeline_id": "timeline-short-audio", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 20.0,
+            "media_controls": {"loop": True},
+        }]}],
+    }
+    with pytest.raises(FinalRenderError, match="audio"):
+        renderer._render_composition_plan_to_mp4(
+            project_id=project.project_id,
+            composition_plan=renderer.extract_composition_plan(timeline=timeline),
+            timeline_context=timeline,
+            output_path=tmp_path / "out.mp4",
+            subtitle_file_path=None,
+            subtitle_ass_path=None,
+            proxy_profile=False,
+        )
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg is required")
+def test_final_render_audio_spans_the_timeline_when_music_covers_one_segment(tmp_path: Path) -> None:
+    """음악이 첫 구간에만 있어도 완성본 오디오는 타임라인 전체를 덮어야 한다.
+    2026-08-16 실사례에서는 20초 영상에 5초 소리만 담긴 채 성공 처리됐다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("PartialMusic")
+    video = tmp_path / "src.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=15",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(video),
+    ], check=True, capture_output=True)
+    music = tmp_path / "bgm.wav"
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+        "-ac", "2", "-ar", "48000", str(music),
+    ], check=True, capture_output=True)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    bgm = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=music)
+    timeline = {
+        "timeline_id": "timeline-partial-music", "project_id": project.project_id,
+        "output": {"width": 320, "height": 240},
+        "tracks": [
+            {"track_id": "v", "track_type": "broll", "clips": [{
+                "clip_id": "b1", "clip_type": "broll", "asset_id": broll.asset_id,
+                "asset_uri": broll.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 4.0,
+                "media_controls": {},
+            }]},
+            {"track_id": "m", "track_type": "bgm", "clips": [{
+                "clip_id": "m1", "clip_type": "bgm", "asset_id": bgm.asset_id,
+                "asset_uri": bgm.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 1.0,
+                "media_controls": {},
+            }]},
+        ],
+    }
+    output_path = tmp_path / "out.mp4"
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15)
+    # 실제 파이프라인과 같은 경로(계획 기반)로 태운다.
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id, timeline=timeline, output_path=output_path,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+    )
+    probe = subprocess.run([
+        "ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", str(output_path),
+    ], capture_output=True, text=True, check=True)
+    assert float(probe.stdout.strip()) == pytest.approx(4.0, abs=0.5)
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_rendered_audio_has_sound_separates_a_silent_track_from_an_audible_one(tmp_path: Path) -> None:
+    # 오디오 스트림이 20초로 멀쩡히 있어도 내용이 무음일 수 있다. 길이만 보던
+    # 검사로는 구분되지 않아 완전 무음 완성본이 그대로 나갔다.
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store)
+    silent = tmp_path / "silent.mp4"
+    audible = tmp_path / "audible.mp4"
+    for path, source in ((silent, "anullsrc=r=48000:cl=stereo"), (audible, "sine=frequency=440:r=48000")):
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", source, "-t", "1", "-c:a", "aac", str(path)],
+            capture_output=True, text=True, check=True,
+        )
+
+    assert renderer.rendered_audio_has_sound(silent) is False
+    assert renderer.rendered_audio_has_sound(audible) is True
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_a_render_that_cannot_be_measured_claims_nothing_about_its_sound(tmp_path: Path) -> None:
+    # 재지 못한 것과 소리가 없는 것은 다르다. 섞으면 멀쩡한 완성본에 경고가 붙는다.
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store)
+    not_media = tmp_path / "not-media.mp4"
+    not_media.write_bytes(b"this is not a video")
+
+    assert renderer.rendered_audio_has_sound(not_media) is None
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.parametrize("soundless_first", [False, True])
+def test_segment_render_survives_a_soundless_broll_between_sound_kept_brolls(tmp_path: Path, soundless_first: bool) -> None:
+    """`원본 소리 살리기`를 켰는데 원본에 오디오 스트림이 아예 없어도 렌더가 막히면 안 된다.
+
+    무음 원본이 섞이면 조각마다 스트림 구성이 달라진다. concat은 **첫 조각**의
+    스트림 구성을 기준으로 삼으므로, 무음 조각이 앞에 오면 뒤 조각의 소리가
+    통째로 사라지거나 `[1:a]` 믹스가 잡을 스트림이 없어 막힌다. 켠 사람은
+    잘못한 게 없다 -- 무음 원본은 무음을 실어 주면 된다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="soundless broll must not block")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    sound_broll_file = tmp_path / "sound-broll.mp4"
+    _generate([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=15:d=1",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1",
+        "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(sound_broll_file),
+    ])
+    soundless_broll_file = tmp_path / "soundless-broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:r=15:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(soundless_broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    sound_broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=sound_broll_file)
+    soundless_broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=soundless_broll_file)
+    output = tmp_path / "soundless-mixed.mp4"
+
+    FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+        project_id=project.project_id,
+        output_path=output,
+        timeline={"narration_source_uri": narration.storage_uri, "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+            {"track_type": "broll", "clips": (
+                [
+                    {"asset_uri": soundless_broll.storage_uri, "start_sec": 0.0, "end_sec": 1.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                    {"asset_uri": sound_broll.storage_uri, "start_sec": 1.0, "end_sec": 2.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                ]
+                if soundless_first
+                else [
+                    {"asset_uri": sound_broll.storage_uri, "start_sec": 0.0, "end_sec": 1.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                    {"asset_uri": soundless_broll.storage_uri, "start_sec": 1.0, "end_sec": 2.0, "media_controls": {"preserve_source_audio": True, "loop": False}},
+                ]
+            )},
+        ]},
+    )
+
+    peak = probe_audio_peak_dbfs(output)
+    assert peak is not None and peak > -30.0, "내레이션 소리가 완성본에 남아 있어야 한다"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_plan_render_survives_a_soundless_broll_with_source_audio_kept(tmp_path: Path) -> None:
+    """계획 기반 경로도 같은 함정을 밟는다 -- 렌더 경로가 둘이라는 걸 잊지 마라.
+
+    그래프가 무음 원본의 `[N:a]`를 참조하면 ffmpeg가 통째로 실패한다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="plan path soundless broll")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    soundless_broll_file = tmp_path / "soundless-broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=green:s=320x240:r=15:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(soundless_broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=soundless_broll_file)
+    output = tmp_path / "plan-soundless.mp4"
+    timeline = {
+        "timeline_id": "timeline-plan-soundless", "project_id": project.project_id,
+        "narration_source_uri": narration.storage_uri,
+        "output": {"width": 320, "height": 240},
+        "tracks": [
+            {"track_id": "n", "track_type": "narration", "clips": [{
+                "clip_id": "n1", "clip_type": "narration", "asset_id": narration.asset_id,
+                "asset_uri": narration.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 2.0,
+            }]},
+            {"track_id": "b", "track_type": "broll", "clips": [{
+                "clip_id": "b1", "clip_type": "broll", "asset_id": broll.asset_id,
+                "asset_uri": broll.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 2.0,
+                "media_controls": {"preserve_source_audio": True, "loop": False},
+            }]},
+        ],
+    }
+    renderer = FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15)
+
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id, timeline=timeline, output_path=output,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+    )
+
+    peak = probe_audio_peak_dbfs(output)
+    assert peak is not None and peak > -30.0, "내레이션 소리가 완성본에 남아 있어야 한다"
+
+
+def test_every_amix_line_in_the_renderer_keeps_normalize_off() -> None:
+    """`amix`는 기본으로 입력 수만큼 나눈다(normalize=1). 같은 함정에 이미
+    세 번 걸렸다 -- 새 믹스 자리가 또 잊지 못하게 소스에서 직접 잰다.
+    ffmpeg 없는 기계에서도 도는 가드다."""
+    import inspect
+
+    from videobox_core_engine import ffmpeg_final_renderer as module
+
+    offenders = [
+        line.strip()
+        for line in inspect.getsource(module).splitlines()
+        if "amix=inputs" in line and "normalize=0" not in line
+    ]
+
+    assert offenders == []
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.skipif(OVERLAY_FONT is None, reason="no usable overlay font on this machine")
+def test_export_overlays_do_not_break_the_kept_broll_source_audio(tmp_path: Path) -> None:
+    """자막 카드(오버레이)를 얹는 재인코딩이 `-an`으로 돌아서, 오버레이가 하나라도
+    있으면 `원본 소리 살리기` 믹스가 잡을 `[1:a]`가 사라져 렌더가 통째로 막혔다.
+    소리는 오버레이를 얹기 **전** 이어붙인 파일에서 가져와야 한다."""
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="overlay must not eat broll audio")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:a", "pcm_s16le", str(narration_file)])
+    sound_broll_file = tmp_path / "sound-broll.mp4"
+    _generate([
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x240:r=15:d=2",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=2",
+        "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(sound_broll_file),
+    ])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=sound_broll_file)
+    output = tmp_path / "overlay-and-source-audio.mp4"
+
+    FfmpegFinalRenderer(
+        store=store, video_width=320, video_height=240, video_fps=15, overlay_font_file=OVERLAY_FONT,
+    ).render_timeline_to_mp4(
+        project_id=project.project_id,
+        output_path=output,
+        timeline={
+            "narration_source_uri": narration.storage_uri,
+            "export_overlays": [{"overlay_type": "explanation_card", "text": "설명 카드", "start_sec": 0.2, "end_sec": 1.2}],
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+                {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"preserve_source_audio": True, "loop": False}}]},
+            ],
+        },
+    )
+
+    peak = probe_audio_peak_dbfs(output)
+    assert peak is not None and peak > -30.0, "살려 둔 B-roll 소리가 완성본에 남아 있어야 한다"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+@pytest.mark.parametrize("ducking", [False, True])
+def test_adding_bgm_does_not_quiet_the_narration_in_the_segment_path(tmp_path: Path, ducking: bool) -> None:
+    """음악을 깔았다고 **내레이션이 작아지면 안 된다.**
+
+    `amix`는 기본으로 입력 수만큼 나눈다(normalize=1). 조각 이어붙이기 경로의
+    음악 믹스에는 `normalize=0`이 없어서, 무음 음악을 깔아도 말소리가 6dB
+    내려갔다. 같은 함정에 이미 두 번 걸렸다 -- 이번이 세 번째 자리다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name=f"bgm must not duck narration ducking={ducking}")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    # 음악은 **무음**으로 둔다. 그래야 완성본 음량 변화가 오직 섞는 방식 때문임을 안다.
+    bgm_file = tmp_path / "silent-bgm.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "2", "-c:a", "pcm_s16le", str(bgm_file)])
+    broll_file = tmp_path / "backdrop.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=gray:s=320x240:r=15:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    bgm = store.register_asset(project_id=project.project_id, asset_type=AssetType.BGM, source_path=bgm_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+
+    def render(with_bgm: bool, name: str) -> Path:
+        output = tmp_path / name
+        tracks: list[dict] = [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"loop": False}}]},
+        ]
+        if with_bgm:
+            tracks.append({"track_type": "bgm", "clips": [{
+                "asset_uri": bgm.storage_uri, "start_sec": 0.0, "end_sec": 2.0,
+                "media_controls": {"ducking": ducking},
+            }]})
+        FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+            project_id=project.project_id, output_path=output,
+            timeline={"narration_source_uri": narration.storage_uri, "tracks": tracks},
+        )
+        return output
+
+    without = probe_audio_peak_dbfs(render(False, "no-bgm.mp4"))
+    with_bgm = probe_audio_peak_dbfs(render(True, "with-bgm.mp4"))
+
+    assert without is not None and with_bgm is not None
+    # 소리를 더했으니 조용해질 리가 없다. 측정 오차만 감안한다.
+    assert with_bgm >= without - 1.0
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_adding_sfx_does_not_quiet_the_narration_in_the_segment_path(tmp_path: Path) -> None:
+    """효과음도 같다 -- 더한 것이지 나머지를 줄인 게 아니다."""
+    from videobox_core_engine.ffmpeg_final_renderer import probe_audio_peak_dbfs
+
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="sfx must not duck narration")
+    narration_file = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=2", "-c:a", "pcm_s16le", str(narration_file)])
+    sfx_file = tmp_path / "silent-sfx.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "1", "-c:a", "pcm_s16le", str(sfx_file)])
+    broll_file = tmp_path / "backdrop.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=gray:s=320x240:r=15:d=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(broll_file)])
+    narration = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_file)
+    sfx = store.register_asset(project_id=project.project_id, asset_type=AssetType.SFX, source_path=sfx_file)
+    broll = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_file)
+
+    def render(with_sfx: bool, name: str) -> Path:
+        output = tmp_path / name
+        tracks: list[dict] = [
+            {"track_type": "narration", "clips": [{"asset_uri": narration.storage_uri, "start_sec": 0.0, "end_sec": 2.0}]},
+            {"track_type": "broll", "clips": [{"asset_uri": broll.storage_uri, "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"loop": False}}]},
+        ]
+        if with_sfx:
+            tracks.append({"track_type": "sfx", "clips": [{
+                "asset_uri": sfx.storage_uri, "start_sec": 0.5, "end_sec": 1.5, "media_controls": {},
+            }]})
+        FfmpegFinalRenderer(store=store, video_width=320, video_height=240, video_fps=15).render_timeline_to_mp4(
+            project_id=project.project_id, output_path=output,
+            timeline={"narration_source_uri": narration.storage_uri, "tracks": tracks},
+        )
+        return output
+
+    without = probe_audio_peak_dbfs(render(False, "no-sfx.mp4"))
+    with_sfx = probe_audio_peak_dbfs(render(True, "with-sfx.mp4"))
+
+    assert without is not None and with_sfx is not None
+    assert with_sfx >= without - 1.0
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-27: owner가 실제 프로젝트에서 컷 하나 바꾸는 데 21초가 걸린다고
+# 신고했다. 서버 기록으로 실측했고(created_at→updated_at), B-roll 원본이
+# 494초짜리였다. `build_plan_filter_graph`는 `trim=start=X:end=Y` **필터**로
+# 자르는데, 필터 트림은 입력을 처음부터 디코딩한 뒤 버린다 -- X초까지 읽고
+# 버리는 시간이 고스란히 렌더 시간에 얹힌다. `-ss`를 `-i` **앞에** 두면
+# (입력 탐색) 그 낭비가 사라진다. 반복 재생(loop) 클립은 건드리지 않는다 --
+# 그 경우는 이미 있던 검증된 경로이고, `-ss`와 `-stream_loop`를 함께 쓰는
+# 조합은 새로 검증이 필요해 이번 범위 밖이다.
+# ---------------------------------------------------------------------------
+
+
+def test_broll_source_uses_fast_seek_before_decoding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """자르는 시작점까지 디코딩해서 버리지 않는다 -- `-ss`를 `-i` 앞에 둔다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("FastSeek")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    # 원본이 494초짜리라는 실제 신고 사례를 그대로 쓴다.
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_audio_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    timeline = {
+        "timeline_id": "timeline-fast-seek", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 1.5,
+            "source_in_sec": 7.5, "source_out_sec": 9.0,
+            "media_controls": {},
+        }]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    command = commands[0]
+    i_index = command.index("-i")
+    window = command[max(0, i_index - 6):i_index]
+    # 컨테이너의 실제 ffmpeg로 실측·검증한 조합이다(픽셀·오디오 PCM까지 동일,
+    # 500초 원본에서 3초를 뽑는 데 1.56초 → 0.11초로 14배 빨라졌다).
+    # `-copyts`가 원래 타임스탬프를 보존하므로 **trim 필터는 한 글자도 안
+    # 바꾼다** -- 잘라내는 지점이 절대 시각 그대로라 어긋날 여지가 없다.
+    assert "-ss" in window, f"-ss가 -i 앞에 없다: {window}"
+    assert float(window[window.index("-ss") + 1]) == pytest.approx(7.5)
+    assert "-copyts" in window, f"-copyts가 -i 앞에 없다: {window}"
+    filter_index = command.index("-filter_complex")
+    graph = command[filter_index + 1]
+    assert "trim=start=7.5:end=9.0" in graph, graph
+
+
+def test_fast_seek_is_disabled_when_two_broll_items_share_a_clip_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`split_segment` 직후 두 조각이 합쳐지기 전까지 **같은 clip_id**를 그대로
+    쓴다. `source_indices`는 clip_id로 찾으므로 나중 항목이 앞 항목의 색인을
+    덮어쓴다 -- 실측으로 걸린 회귀다(`test_split_merge_and_reorder_...`가 픽셀로
+    잡았다). 겹치면 빠른 탐색을 끈다: 두 clip_id 모두 `-ss`가 없어야 한다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("FastSeekCollision")
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 64)
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    monkeypatch.setattr(
+        FfmpegFinalRenderer, "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 494.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_audio_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+    # 같은 clip_id("c1")를 쓰는 두 조각. source_in_sec가 서로 다르다 -- 실제
+    # split 직후 모양 그대로다.
+    timeline = {
+        "timeline_id": "timeline-fast-seek-collision", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [
+            {"clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id, "asset_uri": asset.storage_uri,
+             "segment_id": "s1", "start_sec": 0.0, "end_sec": 2.0, "source_in_sec": 0.0, "source_out_sec": 2.0, "media_controls": {}},
+            {"clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id, "asset_uri": asset.storage_uri,
+             "segment_id": "s2", "start_sec": 2.0, "end_sec": 4.0, "source_in_sec": 7.5, "source_out_sec": 9.5, "media_controls": {}},
+        ]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    command = commands[0]
+    assert "-ss" not in command, f"clip_id가 겹치는데 -ss가 붙었다: {command}"
+    assert "-copyts" not in command
+
+
+def test_audio_cleanup_chain_stays_empty_until_the_owner_turns_a_filter_on() -> None:
+    """캡컷 오디오 탭 대조로 들어온 둘(owner 승인 2026-09-01).
+
+    기본값에서 필터가 하나라도 붙으면 **아무것도 안 고른 편집본이 바뀐다.**
+    이 저장소가 이미 한 번 겪은 함정이라(색감 `filter` 칸) 여기서 못박는다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import _audio_cleanup_chain
+
+    assert _audio_cleanup_chain({"normalize_loudness": False, "denoise": False}) == ""
+    assert _audio_cleanup_chain({}) == ""
+    # 잡음을 먼저 걷고 음량을 맞춘다. 반대로 하면 loudnorm이 잡음까지 포함한
+    # 크기로 맞춰서, 잡음을 지운 결과가 목표보다 조용해진다.
+    assert _audio_cleanup_chain({"denoise": True, "normalize_loudness": True}) == ",afftdn,loudnorm=I=-16:TP=-1.5:LRA=11"
+    assert _audio_cleanup_chain({"denoise": True}) == ",afftdn"
+    assert _audio_cleanup_chain({"normalize_loudness": True}) == ",loudnorm=I=-16:TP=-1.5:LRA=11"
+
+
+def test_broll_transform_puts_stabilisation_before_the_size_fit(tmp_path: Path) -> None:
+    """`deshake`는 흔들린 만큼 화면을 밀어 가장자리를 비운다.
+
+    원본 해상도에서 먼저 걸어야 뒤의 `scale`·`crop`이 그 빈 자리를 함께
+    처리한다 -- 순서를 뒤집으면 출력 크기에 맞춘 그림이 다시 밀리면서 검은
+    테두리가 남는다.
+    """
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), video_width=1920, video_height=1080)
+
+    plain = renderer._broll_fit_transform({"fit": "fit"})
+    assert "deshake" not in plain
+
+    for fit_mode in ("fit", "crop"):
+        stabilised = renderer._broll_fit_transform({"fit": fit_mode, "stabilize": True})
+        assert stabilised.startswith("deshake,"), stabilised
+        assert stabilised.index("deshake") < stabilised.index("scale=")
+
+
+def test_legacy_path_refuses_a_stabilised_clip_instead_of_dropping_it(tmp_path: Path) -> None:
+    """렌더 경로가 둘인데 `deshake`는 그래프 쪽에만 붙는다.
+
+    legacy 경로의 `_extract_segment`는 자기 `scale/crop` 사슬을 따로 만들어서,
+    켜 둔 보정이 **조용히 사라진 mp4**가 나온다. 색감(`filter`)이 이미 같은
+    이유로 여기서 멈추고 있었다 -- 손떨림 보정도 같은 자리에서 멈춰야 한다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="stabilise-guard")
+    timeline = {
+        "tracks": [
+            {"track_type": "broll", "clips": [{
+                "asset_uri": "asset://missing", "start_sec": 0.0, "end_sec": 1.0,
+                "media_controls": {"stabilize": True},
+            }]},
+        ],
+    }
+
+    with pytest.raises(FinalRenderError, match="composition_plan"):
+        FfmpegFinalRenderer(store=store).render_timeline_to_mp4(
+            project_id=project.project_id, timeline=timeline, output_path=tmp_path / "out.mp4"
+        )
+
+
+def test_plan_only_picture_controls_survive_a_session_with_junk_in_it() -> None:
+    """저장된 편집본에서 오는 값이라 **숫자가 아닐 수 있다.**
+
+    손으로 고쳤거나 옛 판에서 온 세션에 문자열이 들어 있으면, 여기서
+    `ValueError`가 나서 "렌더가 왜 안 되는지" 대신 엉뚱한 오류가 뜬다.
+    읽을 수 없는 값은 손대지 않은 것으로 본다 -- legacy 경로가 원래 그렇게
+    동작했으므로 못 읽어서 막지 않는 것이 새로운 손실은 아니다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import _uses_plan_only_picture_controls
+
+    assert _uses_plan_only_picture_controls(None) is False
+    assert _uses_plan_only_picture_controls({}) is False
+    assert _uses_plan_only_picture_controls({"zoom": 1.0, "rotation_deg": 0.0}) is False
+    assert _uses_plan_only_picture_controls({"zoom": "아주 크게"}) is False
+    assert _uses_plan_only_picture_controls({"zoom": 1.5}) is True
+    assert _uses_plan_only_picture_controls({"rotation_deg": -10.0}) is True
+    assert _uses_plan_only_picture_controls({"reduce_noise": True}) is True
+    assert _uses_plan_only_picture_controls({"filter": {"type": "warm"}}) is True
+
+
+def test_speed_audio_chain_only_lifts_the_pitch_when_the_owner_turns_preservation_off() -> None:
+    """캡컷 속도 탭 대조(owner 승인 2026-09-01).
+
+    기본은 지금까지의 동작 그대로여야 한다 -- `atempo`는 길이만 바꾸고 높낮이는
+    안 건드린다. 이 기본값이 뒤집히면 예전에 저장한 배속 클립의 소리가 편집기를
+    여는 것만으로 달라진다.
+    """
+    from videobox_core_engine.ffmpeg_final_renderer import _atempo_chain, _speed_audio_chain
+
+    assert _speed_audio_chain(2.0, {}) == _atempo_chain(2.0)
+    assert _speed_audio_chain(2.0, {"preserve_pitch": True}) == _atempo_chain(2.0)
+    # 껐을 때는 표본율을 바꿔 빨리 감은 테이프 소리를 낸다. 출력 표본율로
+    # 되돌리지 않으면 이 조각만 다른 표본율로 남아 뒤의 믹스에서 어긋난다.
+    assert _speed_audio_chain(2.0, {"preserve_pitch": False}) == "asetrate=96000,aresample=48000"
+    assert _speed_audio_chain(0.5, {"preserve_pitch": False}) == "asetrate=24000,aresample=48000"
+
+
+def test_broll_placement_chain_stays_empty_until_the_owner_moves_something(tmp_path: Path) -> None:
+    """변형(캡컷 동영상 탭 `확대·위치·회전`, owner 승인 2026-09-01).
+
+    손대지 않은 클립에 사슬이 하나라도 붙으면 **아무것도 안 고른 편집본이
+    바뀐다.** 이 저장소가 색감 칸에서 이미 겪은 함정이라 여기서 못박는다.
+    """
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), video_width=1080, video_height=1920)
+
+    assert renderer._broll_placement_chain({}) == ""
+    assert renderer._broll_placement_chain({"zoom": 1.0, "position_x_percent": 0.0, "position_y_percent": 0.0, "rotation_deg": 0.0}) == ""
+    # 손대지 않은 클립은 화면 맞춤 사슬만 남는다.
+    assert renderer._broll_fit_transform({"fit": "fit"}).count("crop=") == 0
+
+
+def test_broll_placement_chain_rotates_before_it_zooms_and_pans(tmp_path: Path) -> None:
+    """회전을 먼저 걸어야 그 뒤의 확대가 회전으로 생긴 검은 모서리를 밀어낸다.
+
+    줄이는 쪽(`zoom < 1`)에는 `pad`가 반드시 있어야 한다 -- 화면보다 작아진
+    그림에 `crop`을 걸면 잘라낼 자리가 모자라 ffmpeg가 통째로 거절한다.
+    """
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), video_width=1080, video_height=1920)
+
+    chain = renderer._broll_placement_chain({"zoom": 2.0, "rotation_deg": 15.0})
+    assert chain.index("rotate=") < chain.index("scale=iw*2.0")
+    assert chain.index("scale=iw*2.0") < chain.index("crop=1080:1920")
+
+    shrunk = renderer._broll_placement_chain({"zoom": 0.5})
+    assert r"pad=max(iw\,1080):max(ih\,1920)" in shrunk
+    assert shrunk.index("pad=") < shrunk.index("crop=")
+
+    # 위치는 화면 크기의 백분율이다. 오른쪽·아래가 양수라 화면 좌표와 방향이 같다.
+    panned = renderer._broll_placement_chain({"position_x_percent": 50.0, "position_y_percent": -25.0})
+    assert "crop=1080:1920:(iw-1080)/2-540:(ih-1920)/2+480" in panned
+    # **밀어낼 자리를 먼저 만든다.** 화면 크기까지만 채우면 확대하지 않은 그림은
+    # 딱 화면만 해서 잘라낼 여유가 없고, ffmpeg가 crop 위치를 조용히 화면 안으로
+    # 당겨 버린다 -- 위치를 옮겨도 아무 일도 안 일어나는 화면이 된다(2026-09-01
+    # 실측). 양쪽으로 밀 수 있어야 하므로 밀 거리의 두 배를 더한다.
+    assert r"pad=max(iw\,2160):max(ih\,2880)" in panned
+
+
+def test_a_photo_in_a_broll_slot_is_stretched_to_fill_the_scene(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """사진을 장면으로 쓸 수 있어야 한다 — owner 요청 2026-09-06.
+
+    > "사진을 넣는것도 우리 자산으로 만들어서 영상으로 천천히 슬로우 모션같은
+    > 효과로 만들어도 되는거지?"
+
+    지금은 안 됐다. B-roll 입력은 `is_image`가 **False로 박혀 있어서**
+    (`source_paths.append((source, False, should_loop))`) ffmpeg가 사진을 영상으로
+    읽으려 하고, `-loop 1`이 안 붙어 한 프레임만 나온다. 사진을 다루는 코드는
+    이미 있었다 -- 오버레이 경로에서만 쓰고 있었다.
+
+    owner의 사진 56장이 자료실에 들어와 있다. 장면 자리에 놓을 수 있어야 한다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Photo scene")
+    photo = tmp_path / "shot.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=photo)
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+
+    timeline = {
+        "timeline_id": "timeline-photo", "project_id": project.project_id, "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1", "start_sec": 0.0, "end_sec": 5.0,
+            "media_controls": {},
+        }]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    command = commands[0]
+    photo_input = command.index(str(photo.resolve())) if str(photo.resolve()) in command else None
+    if photo_input is None:
+        # 자산은 프로젝트 폴더로 복사된다 -- 그 경로를 찾는다.
+        photo_input = next(i for i, part in enumerate(command) if part.endswith(".jpg"))
+    # `-loop 1`이 그 입력 **앞에** 붙어야 사진이 장면 길이만큼 늘어난다.
+    window = command[max(0, photo_input - 6):photo_input]
+    assert "-loop" in window, f"사진 입력에 -loop가 없다: {window}"
+    assert window[window.index("-loop") + 1] == "1"
+
+
+def test_a_photo_scene_moves_instead_of_standing_still(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """사진 장면이 멈춰 있었다 — owner 요청 2026-09-06.
+
+    > "사진 움직이는 효과도 다양한 형태로 움직이게"
+
+    사진을 장면으로 쓸 수 있게 됐지만(`_looks_like_image`) 화면에는 **정지 그림이
+    11초 동안 그대로** 있었다. 브이로그에서 그건 못 쓴다.
+
+    AI 장면 그림 쪽은 이미 `zoompan`으로 움직인다(`scene_image_service`). 여기도
+    같은 필터를 쓰되, **입력이 `-loop 1`이라 배율을 `in`(입력 프레임 번호) 기준으로
+    센다** -- 그쪽 주석이 기록한 함정이다: 같은 그림이 프레임마다 다시 들어오므로
+    `zoom+step` 꼴은 이어지지 않는다.
+
+    영상 클립에는 붙이지 않는다 -- 이미 움직이는 그림을 또 움직이면 흔들린다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("Photo motion")
+    photo = tmp_path / "still.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    video = tmp_path / "moving.mp4"
+    video.write_bytes(bytes(64))
+    photo_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=photo)
+    video_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=video)
+    renderer = FfmpegFinalRenderer(store=store)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+
+    timeline = {
+        "timeline_id": "timeline-photo-motion", "project_id": project.project_id,
+        "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [
+            {
+                "clip_id": "c_photo", "clip_type": "broll", "asset_id": photo_asset.asset_id,
+                "asset_uri": photo_asset.storage_uri, "segment_id": "s1",
+                "start_sec": 0.0, "end_sec": 4.0, "media_controls": {},
+            },
+            {
+                "clip_id": "c_video", "clip_type": "broll", "asset_id": video_asset.asset_id,
+                "asset_uri": video_asset.storage_uri, "segment_id": "s2",
+                "start_sec": 4.0, "end_sec": 8.0, "media_controls": {},
+            },
+        ]}],
+    }
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    graph = commands[0][commands[0].index("-filter_complex") + 1]
+    photo_chain = next(part for part in graph.split(";") if "v_c_photo" in part)
+    video_chain = next(part for part in graph.split(";") if "v_c_video" in part)
+    assert "zoompan" in photo_chain, f"사진이 멈춰 있다: {photo_chain[:160]}"
+    # **입력 프레임 번호로 센다.** `-loop 1`은 같은 그림을 다시 넣으므로
+    # `zoom+step` 꼴은 프레임 사이에서 안 이어진다.
+    assert "on" in photo_chain or "in" in photo_chain
+    assert "zoompan" not in video_chain, "영상에도 움직임을 붙였다"
+
+
+def test_photo_motion_survives_a_fractional_frame_rate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`video_fps`가 `"30000/1001"`이면 렌더가 통째로 죽었다 (실기 2026-09-06).
+
+    > `can't multiply sequence by non-int of type 'float'`
+
+    움직임 사슬이 `duration_sec * self.video_fps`로 프레임 수를 셌는데, 그 값은
+    **`30`일 수도 문자열 `"30000/1001"`일 수도 있다** -- 필드 선언이 `int | str`이고
+    `_frame_seconds()`가 이미 그 두 가지를 다루고 있었다. 시험은 기본값(30)만
+    써서 통과했고 실기에서 죽었다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("NTSC photo")
+    photo = tmp_path / "still.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=photo)
+    renderer = FfmpegFinalRenderer(store=store, video_fps="30000/1001")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        FfmpegFinalRenderer,
+        "_run",
+        lambda _self, command: (commands.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_media_duration", lambda _self, _path: 30.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_probe_audio_stream_duration", lambda _self, _path: 999.0)
+    monkeypatch.setattr(FfmpegFinalRenderer, "_has_visual_stream", lambda _self, _path: True)
+    monkeypatch.setattr("videobox_core_engine.ffmpeg_final_renderer.verify_output_sources", lambda **_kwargs: None)
+
+    timeline = {
+        "timeline_id": "timeline-ntsc", "project_id": project.project_id,
+        "output": {"width": 1920, "height": 1080},
+        "tracks": [{"track_id": "t", "track_type": "broll", "clips": [{
+            "clip_id": "c1", "clip_type": "broll", "asset_id": asset.asset_id,
+            "asset_uri": asset.storage_uri, "segment_id": "s1",
+            "start_sec": 0.0, "end_sec": 4.0, "media_controls": {},
+        }]}],
+    }
+
+    renderer._render_composition_plan_to_mp4(
+        project_id=project.project_id,
+        composition_plan=renderer.extract_composition_plan(timeline=timeline),
+        timeline_context=timeline,
+        output_path=tmp_path / "out.mp4",
+        subtitle_file_path=None,
+        subtitle_ass_path=None,
+        proxy_profile=False,
+    )
+
+    graph = commands[0][commands[0].index("-filter_complex") + 1]
+    assert "zoompan" in graph
+
+
+def test_a_photo_overlay_is_the_same_size_in_both_render_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """같은 사진이 미리보기와 완성본에서 **다른 크기**로 나왔다 (코드리뷰 2026-09-06).
+
+    렌더 경로가 둘인데 사진을 다르게 다뤘다:
+    - 그래프 경로: `scale=W:H:force_original_aspect_ratio=decrease` 뒤에 얹는다
+      -- 화면 안에 들어오도록 줄인다
+    - 내보내기 경로: **scale이 없다** -- 원본 픽셀 그대로 얹는다
+
+    창작자가 미리보기에서 맞춰 놓은 그림이 완성본에서 잘리거나 작아진다. 도형
+    오버레이는 두 경로가 함수 하나를 공유해서 이 문제가 없다.
+    """
+    store = LocalProjectStore(tmp_path)
+    renderer = FfmpegFinalRenderer(store=store, overlay_font_file=OVERLAY_FONT)
+    photo = tmp_path / "shot.jpg"
+    photo.write_bytes(bytes([255, 216, 255]) + bytes(64))
+    captured: list[list[str]] = []
+
+    monkeypatch.setattr(
+        FfmpegFinalRenderer, "_run",
+        lambda _self, command: (captured.append(command) or subprocess.CompletedProcess(command, 0, "", "")),
+    )
+    monkeypatch.setattr(
+        FfmpegFinalRenderer, "_resolve_generic_asset_uri", lambda _self, **_kwargs: photo
+    )
+
+    renderer._apply_export_overlays(
+        project_id="project_001",
+        video_path=tmp_path / "video.mp4",
+        overlays=[{
+            "overlay_type": "image_overlay",
+            "asset_uri": f"local://projects/project_001/assets/{photo.name}",
+            "start_sec": 0.0,
+            "end_sec": 1.0,
+        }],
+        work_dir=tmp_path,
+    )
+
+    assert captured, "오버레이 렌더가 돌지 않았다"
+    graph = captured[0][captured[0].index("-filter_complex") + 1]
+    # 그래프 경로와 **같은 방식으로** 화면 안에 들어오게 줄인다.
+    assert "force_original_aspect_ratio=decrease" in graph, f"사진을 원본 크기로 얹는다: {graph[:200]}"

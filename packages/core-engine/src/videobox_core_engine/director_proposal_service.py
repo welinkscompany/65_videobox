@@ -63,7 +63,13 @@ class DirectorProposalService:
         self.embedding_provider = embedding_provider
         self.embedding_model_name = embedding_model_name
 
-    def create(self, *, project_id: str, session_id: str, expires_at: str | None = None) -> DirectorProposal:
+    def create(self, *, project_id: str, session_id: str, expires_at: str | None = None, media_types: tuple[str, ...] | None = None) -> DirectorProposal:
+        """`media_types`가 오면 그 종류만 순위에 올린다.
+
+        2026-08-19 owner 지적: "음악 추천해 줘"라고 했는데 후보에는 영상만 왔다.
+        무엇을 청했는지가 후보에 닿지 않으면 대화로 편집한다는 말이 성립하지 않는다.
+        **`None`이면 좁히지 않는다** -- 넘겨짚어 거르면 있는 후보가 사라진다.
+        """
         snapshot = self.store.read_director_proposal_snapshot(project_id=project_id, session_id=session_id)
         session = snapshot["session"]
         analyses = {str(item["asset_id"]): item for item in snapshot["analyses"]}
@@ -78,6 +84,16 @@ class DirectorProposalService:
             if asset_type in {"music", "bgm", "sfx"}:
                 required = ("mood", "energy", "genre", "recommended_use") if asset_type in {"music", "bgm"} else ("action_event", "intensity", "recommended_use")
                 return metadata.get("canonical_metadata_indexed") is True and all(metadata.get(field) not in (None, "") for field in required)
+            # **사진에는 화면 분석 기록이 생길 수 없다.** 그 분석은 영상에만
+            # 예약된다(`routers/media_library.py`, `routers/library_assets.py`).
+            # 그런데 여기서 모든 화면 자산에 그 기록을 요구해서, 사진은 유진의
+            # 후보에 **영원히 못 들어갔다** -- 프로젝트에 사진밖에 없으면 후보가
+            # 통째로 비어 "분석을 다시 하라"까지 났다(2026-09-06 전수 조사).
+            #
+            # 사진은 자료실 색인이 이미 설명해 두었고 렌더러도 장면으로 그릴 수
+            # 있다. 파일이 있으면 쓸 수 있다 -- 위에서 이미 확인했다.
+            if asset_type == "image":
+                return True
             analysis = analyses.get(str(item["asset_id"]))
             if not (analysis and analysis.get("status") == "succeeded" and not analysis.get("cancel_requested")):
                 return False
@@ -87,6 +103,13 @@ class DirectorProposalService:
         if not assets:
             states = sorted({str(item.get("status") or "unavailable") for item in snapshot["analyses"]})
             raise DirectorProposalBlockedError({"status": "blocked", "analysis_states": states or ["missing"], "recovery_action": "analyse_or_retry_assets"})
+        # 종류를 좁히는 것은 **`blocked` 검사 뒤**다. 앞에 두었더니 음악이 없는
+        # 프로젝트에 음악을 청했을 때 "분석을 다시 하라"는 오류가 났다 --
+        # 분석은 멀쩡하고 그 종류가 없을 뿐이다. 없으면 빈 추천으로 돌려주고
+        # 화면이 "아직 추천이 없어요"라고 말하게 둔다(2026-08-19 실제로 409였다).
+        if media_types:
+            wanted = set(media_types)
+            assets = [asset for asset in assets if str(asset.get("media_type")) in wanted]
         preferences = snapshot["preferences"]
         candidates = []
         placement_targets: dict[str, str] = {}
@@ -165,6 +188,24 @@ class DirectorProposalService:
                 )
             )
         for candidate in candidates:
+            if candidate.media_type == "output_variant":
+                try:
+                    variant = self.store.get_output_variant(
+                        project_id=project_id,
+                        variant_id=str(candidate.canonical_metadata.get("variant_id") or ""),
+                    )
+                    if (
+                        int(variant.get("variant_revision") or 0)
+                        != int(proposal.diff.get("base_variant_revision") or 0)
+                        or str(variant.get("source_session_id") or "")
+                        != proposal.source_session_id
+                        or int(variant.get("source_session_revision") or 0)
+                        != proposal.base_session_revision
+                    ):
+                        reasons.append("variant_revision")
+                except (KeyError, TypeError, ValueError):
+                    reasons.append("variant_missing")
+                continue
             try:
                 asset = self.store.get_asset(project_id=project_id, asset_id=candidate.asset_id)
                 source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
@@ -239,6 +280,15 @@ class DirectorProposalService:
             )
             return assets, WORD_MATCH
         score_by_asset_id = {str(match["asset_id"]): float(match["score"]) for match in matches}
+        # 0건이거나, 돌아온 점수가 **지금 순위에 올릴 자산과 하나도 겹치지
+        # 않으면** 의미 점수는 하나도 안 붙는다. 실제 순위는 전부 단어 매칭이
+        # 정하는데 그걸 `뜻으로 찾음`이라고 말하면 화면이 거짓말을 한다.
+        if not any(str(asset.get("asset_id")) in score_by_asset_id for asset in assets):
+            _logger.info(
+                "Semantic lookup contributed no scores for project %s; ranking is lexical.",
+                project_id,
+            )
+            return assets, WORD_MATCH
         return [
             {**asset, "semantic_score": score_by_asset_id[str(asset["asset_id"])]}
             if str(asset.get("asset_id")) in score_by_asset_id
@@ -249,5 +299,8 @@ class DirectorProposalService:
     def _rankable_asset(self, asset: dict[str, Any]) -> dict[str, Any]:
         metadata = dict(asset.get("metadata") or {})
         asset_type = str(asset.get("asset_type") or "")
-        media_type = {"broll_video": "broll", "music": "bgm", "bgm": "bgm", "sfx": "sfx"}.get(asset_type, metadata.get("media_type", "broll"))
-        return {**metadata, "asset_id": asset["asset_id"], "media_type": media_type, "source_kind": asset.get("source_kind", "local_file"), "availability": metadata.get("availability", "available"), "review_status": metadata.get("review_status", "approved"), "license": metadata.get("license", "valid"), "license_policy": metadata.get("license_policy"), "warning_provenance": metadata.get("warning_provenance", ()), "content_sha256": sha256_file(self.store.resolve_storage_uri(project_id=asset["project_id"], storage_uri=str(asset["storage_uri"]))), "media_revision": str(asset.get("created_at") or ""), "preview_uri": metadata.get("preview_uri")}
+        # 사진도 화면 자리에 놓이므로 `broll`로 센다 -- 추천기·화면이 쓰는 이름이다.
+        media_type = {"broll_video": "broll", "image": "broll", "music": "bgm", "bgm": "bgm", "sfx": "sfx"}.get(asset_type, metadata.get("media_type", "broll"))
+        # 이름을 함께 넘긴다. 없으면 `media_ranking`이 파일 이름으로 떨어진다 --
+        # 카드에 코드만 뜨면 owner가 무엇을 고르는지 알 수 없다(2026-08-19).
+        return {**metadata, "storage_uri": str(asset.get("storage_uri") or ""), "asset_id": asset["asset_id"], "media_type": media_type, "source_kind": asset.get("source_kind", "local_file"), "availability": metadata.get("availability", "available"), "review_status": metadata.get("review_status", "approved"), "license": metadata.get("license", "valid"), "license_policy": metadata.get("license_policy"), "warning_provenance": metadata.get("warning_provenance", ()), "content_sha256": sha256_file(self.store.resolve_storage_uri(project_id=asset["project_id"], storage_uri=str(asset["storage_uri"]))), "media_revision": str(asset.get("created_at") or ""), "preview_uri": metadata.get("preview_uri")}

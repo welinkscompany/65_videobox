@@ -708,6 +708,96 @@ def test_materialized_gap_slot_follows_its_visible_placeholder_after_session_rel
     assert gap["source_segment_id"] == "script-1"
 
 
+def test_materialized_gap_slot_disappears_when_session_broll_override_fills_it() -> None:
+    timeline = {
+        "tracks": [{
+            "track_type": "broll",
+            "clips": [{
+                "clip_id": "gap-placeholder",
+                "segment_id": "source-gap",
+                "gap_slot_id": "gap-1",
+                "asset_id": "asset_gap_placeholder_1",
+                "asset_uri": "local://gap-placeholder",
+                "start_sec": 0,
+                "end_sec": 2,
+            }],
+        }],
+        "gap_slots": [{
+            "gap_slot_id": "gap-1",
+            "segment_id": "source-gap",
+            "target_range": {"start_sec": 0, "end_sec": 2},
+            "reason": "missing_broll",
+        }],
+    }
+    session = {
+        "segments": [{
+            "segment_id": "source-gap",
+            "start_sec": 0,
+            "end_sec": 2,
+            "source_offset_sec": 0,
+            "cut_action": "keep",
+            "broll_override": {
+                "asset_id": "real-video",
+                "asset_uri": "local://real-video",
+                "media_controls": {"loop": True},
+            },
+        }],
+    }
+
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=session)
+
+    assert materialized["gap_slots"] == []
+    assert [clip["asset_id"] for track in materialized["tracks"] for clip in track["clips"]] == ["real-video"]
+
+
+def test_composition_plan_excludes_in_app_gap_placeholder_from_ffmpeg_inputs() -> None:
+    timeline = {
+        "tracks": [
+            {"track_type": "narration", "clips": [{
+                "clip_id": "narration",
+                "segment_id": "segment-1",
+                "asset_uri": "local://narration",
+                "start_sec": 0,
+                "end_sec": 2,
+            }]},
+            {"track_type": "broll", "clips": [{
+                "clip_id": "gap-placeholder",
+                "segment_id": "segment-1",
+                "gap_slot_id": "gap-1",
+                "asset_id": "asset_gap_placeholder_1",
+                "asset_uri": "local://gap-placeholder.svg",
+                "start_sec": 0,
+                "end_sec": 2,
+            }]},
+        ],
+        "gap_slots": [{"gap_slot_id": "gap-1", "segment_id": "segment-1", "target_range": {"start_sec": 0, "end_sec": 2}}],
+    }
+
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+
+    assert [(item.track_type, item.clip_id) for item in plan.items] == [("narration", "narration")]
+    assert plan.duration_sec == 2
+
+
+def test_composition_plan_does_not_silently_drop_broll_with_an_untrusted_gap_marker() -> None:
+    timeline = {
+        "tracks": [{"track_type": "broll", "clips": [{
+            "clip_id": "real-broll",
+            "segment_id": "segment-1",
+            "gap_slot_id": "gap-1",
+            "asset_id": "real-video",
+            "asset_uri": "local://real-video.mp4",
+            "start_sec": 0,
+            "end_sec": 2,
+        }]}],
+        "gap_slots": [{"gap_slot_id": "gap-1", "segment_id": "segment-1", "target_range": {"start_sec": 0, "end_sec": 2}}],
+    }
+
+    plan = CompositionPlan.from_timeline(timeline=timeline)
+
+    assert [(item.track_type, item.clip_id) for item in plan.items] == [("broll", "real-broll")]
+
+
 def test_current_session_remove_cut_removes_all_segment_media_and_caption() -> None:
     base = {"tracks": [
         {"track_type": "narration", "clips": [{"clip_id": "n", "segment_id": "s1", "asset_uri": "local://n", "start_sec": 0, "end_sec": 1}]},

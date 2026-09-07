@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
@@ -26,6 +27,28 @@ class _FakeStore:
 
     def save_footage_descriptor(self, **kwargs) -> None:
         self.saved.append(kwargs)
+
+
+class _SegmentStore(_FakeStore):
+    def __init__(self, pending: list[dict]) -> None:
+        super().__init__(pending)
+        self.marked: list[str] = []
+
+    def get_footage_descriptor(self, *, content_sha256: str):
+        return {
+            "content_sha256": content_sha256,
+            "filename": "canonical.mp4",
+            "duration_seconds": 1.0,
+            "width": 1920,
+            "height": 1080,
+            "tags": {},
+            "description": "가로 영상. 저장된 장면.",
+            "embedding": None,
+            "description_version": FOOTAGE_DESCRIPTION_VERSION,
+        }
+
+    def mark_footage_segment_indexed(self, *, source_segment_id: str) -> None:
+        self.marked.append(source_segment_id)
 
 
 class _Frame:
@@ -189,3 +212,159 @@ def test_the_model_is_asked_for_korean_so_search_and_screen_get_korean(tmp_path:
     _run(store, tmp_path, vision_provider=_RecordingVision())
 
     assert seen and "한국어" in seen[0]
+
+
+def test_user_confirmed_footage_tags_are_added_to_machine_description(tmp_path: Path) -> None:
+    store = _FakeStore([{
+        **_pending(tmp_path)[0],
+        "library_asset_id": "user:broll-a",
+        "user_metadata": {"title": "출근길", "tags": ["차량", "이동"]},
+    }])
+
+    _run(store, tmp_path)
+
+    saved = store.saved[0]
+    assert "차량" in saved["description"] and "이동" in saved["description"]
+    assert saved["tags"]["layers"]["place"] == ["실내 수영장"]
+
+
+def test_pending_embedding_reuses_saved_footage_analysis_without_vision(tmp_path: Path) -> None:
+    class _Store(_FakeStore):
+        def get_footage_descriptor(self, *, content_sha256: str):
+            assert content_sha256 == "abc"
+            return {
+                "content_sha256": "abc", "filename": "a.mp4", "duration_seconds": 29.1,
+                "width": 1920, "height": 1080,
+                "tags": {"layers": {"place": ["저장된 장소"]}},
+                "description": "가로 영상. 저장된 장소.",
+                "embedding": None, "description_version": FOOTAGE_DESCRIPTION_VERSION,
+            }
+
+    store = _Store(_pending(tmp_path))
+    report = _run(
+        store, tmp_path, vision_provider=_Vision(fail=True),
+        embedding_provider=_Embeddings(),
+    )
+
+    assert report.analyzed == ["a.mp4"]
+    assert report.failed == []
+    assert store.saved[0]["description"] == "가로 영상. 저장된 장소."
+
+
+def test_replaced_segment_source_fails_closed_before_embedding_or_queue_ack(tmp_path: Path) -> None:
+    path = tmp_path / "a.mp4"
+    path.write_bytes(b"replacement bytes")
+    canonical_sha = hashlib.sha256(b"canonical bytes").hexdigest()
+    store = _SegmentStore([{
+        "content_sha256": "derived-index-key",
+        "source_sha256": canonical_sha,
+        "source_segment_id": "segment-1",
+        "is_segment": True,
+        "filename": path.name,
+        "path": str(path),
+    }])
+
+    report = _run(
+        store,
+        tmp_path,
+        vision_provider=None,
+        vision_model_name=None,
+        embedding_provider=_Embeddings(),
+    )
+
+    assert report.analyzed == []
+    assert report.failed == ["a.mp4"]
+    assert store.saved == []
+    assert store.marked == []
+
+
+def test_a_clip_that_always_fails_does_not_starve_the_queue(tmp_path: Path) -> None:
+    """**실패가 줄의 맨 앞을 영원히 차지했다** — 실측 2026-09-06.
+
+    한 바퀴에 두 개만 처리한다(화면 분석이 무겁다). 그런데 실패한 것은 다음
+    바퀴에도 그대로 맨 앞에 다시 온다 -- 성공한 것만 `done`에 들어가기 때문이다.
+    드롭 폴더의 영상 두 개가 계속 실패해서 **자료실 자산 144개가 한 시간 넘게
+    한 번도 차례를 못 받았다.** 사진 문구를 판 3으로 다시 적는 일도 그래서
+    시작조차 못 했다.
+
+    막힌 것을 고치는 것과 별개로, **막힌 것 하나가 전부를 세우면 안 된다.**
+    """
+    good = tmp_path / "good.mp4"
+    good.write_bytes(b"video")
+    pending = [
+        {"content_sha256": "bad1", "filename": "bad1.mp4", "path": str(tmp_path / "gone1.mp4")},
+        {"content_sha256": "bad2", "filename": "bad2.mp4", "path": str(tmp_path / "gone2.mp4")},
+        {"content_sha256": "good", "filename": "good.mp4", "path": str(good)},
+    ]
+    store = _FakeStore(pending)
+
+    report = _run(store, tmp_path, paths=[good], max_clips=2)
+
+    assert report.failed == ["bad1.mp4", "bad2.mp4"]
+    assert report.analyzed == ["good.mp4"], "실패 둘이 자리를 다 먹고 성한 것이 못 돌았다"
+
+
+def test_the_work_per_pass_is_still_bounded(tmp_path: Path) -> None:
+    """굶는 것을 고치면서 한 바퀴가 무한정 길어지면 안 된다.
+
+    화면 분석은 비싸다. **성공을 세는 것**으로 상한을 지키고, 실패는 그보다
+    조금 더 시도해 보되 거기서 끊는다.
+    """
+    clips = []
+    for index in range(20):
+        path = tmp_path / f"clip{index}.mp4"
+        path.write_bytes(f"video{index}".encode())
+        clips.append({"content_sha256": f"sha{index}", "filename": path.name, "path": str(path)})
+    store = _FakeStore(clips)
+
+    report = _run(store, tmp_path, paths=[], max_clips=2)
+
+    assert len(report.analyzed) == 2, report.analyzed
+    assert report.remaining == 18
+
+
+def test_a_photo_is_described_as_a_photo_not_a_video(tmp_path: Path) -> None:
+    """**사진에게 "이 영상을 분석해라"라고 묻고 있었다** — 실측 2026-09-06.
+
+    도는 컨테이너에서 사진 설명을 읽어 보니 요약이 `"이 영상은 낮 시간대 일본의
+    한 도시 거리..."`로 시작했다. 앞에 붙는 `가로 사진.`은 고쳤지만 **모델이 쓴
+    문장 자체**는 여전히 영상이라고 말한다.
+
+    유진이 장면마다 자산을 고를 때 대조하는 것이 이 문장이다. 대본에 "사진"이
+    나올 때 겹칠 수가 없고, 창작자가 읽어도 어느 쪽인지 헷갈린다.
+    """
+    store = _FakeStore(_pending(tmp_path))
+    vision = _Vision()
+    seen: list[str] = []
+
+    class _Recording(_Vision):
+        def analyze_images(self, request):
+            seen.append(str(request.prompt))
+            return super().analyze_images(request)
+
+    class _StillProbe:
+        def probe(self, _path):
+            class _Still(_ProbeResult):
+                duration_sec = 0.0
+            return _Still()
+
+    _run(store, tmp_path, media_probe=_StillProbe(), vision_provider=_Recording())
+
+    assert seen, "화면 분석을 아예 안 불렀다"
+    assert "사진" in seen[0], f"사진에게 영상이라고 물었다: {seen[0]}"
+    assert "영상" not in seen[0], seen[0]
+
+
+def test_a_video_is_still_asked_about_as_a_video(tmp_path: Path) -> None:
+    """사진 쪽을 고치면서 영상 질문이 바뀌면 안 된다."""
+    store = _FakeStore(_pending(tmp_path))
+    seen: list[str] = []
+
+    class _Recording(_Vision):
+        def analyze_images(self, request):
+            seen.append(str(request.prompt))
+            return super().analyze_images(request)
+
+    _run(store, tmp_path, vision_provider=_Recording())
+
+    assert seen and "영상" in seen[0], seen

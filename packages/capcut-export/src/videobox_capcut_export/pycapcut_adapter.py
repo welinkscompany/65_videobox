@@ -8,6 +8,7 @@ from typing import Any
 import wave
 
 from pycapcut.audio_segment import AudioSegment
+from pycapcut.keyframe import KeyframeProperty
 from pycapcut.local_materials import AudioMaterial, CropSettings, VideoMaterial
 from pycapcut.script_file import ScriptFile
 from pycapcut.segment import ClipSettings
@@ -15,12 +16,21 @@ from pycapcut.text_segment import TextBackground, TextBorder, TextSegment, TextS
 from pycapcut.time_util import Timerange
 from pycapcut.track import TrackType
 from pycapcut.video_segment import VideoSegment
+from pycapcut import FilterType, TransitionType
 
+from videobox_capcut_export.capcut_looks import capcut_filter_name
 from videobox_core_engine.canonical_track import canonical_track_type
-from videobox_core_engine.media_controls import normalize_media_controls
-from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
+from videobox_core_engine.ffmpeg_final_renderer import _IMAGE_SUFFIXES
+from videobox_core_engine.media_controls import (
+    PHOTO_MOTIONS,
+    PHOTO_MOTION_STILL,
+    normalize_media_controls,
+)
+from videobox_core_engine.transitions import TRANSITION_TYPES, normalize_transition
+from videobox_core_engine.output_source_verifier import is_silent_narration_placeholder, OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_metadata, output_warning_notes
 import json
+from videobox_capcut_export.host_paths import CapCutHostPathMap, rewrite_draft_for_host
 from videobox_domain_models.caption_style import CaptionStyle
 from videobox_storage.timeline_clip_source_resolution import (
     TimelineClipSourceError,
@@ -30,6 +40,131 @@ from videobox_storage.timeline_clip_source_resolution import (
 )
 
 _MICROSECONDS_PER_SECOND = 1_000_000
+
+# 우리 여섯(실제로는 여덟, 방향 짝 포함) 전환 이름을 캡컷 무료 전환으로 옮긴다.
+#
+# **이 대응은 이름으로만 골랐다 — 실제로 캡컷에서 눈으로 확인하지 않았다.**
+# `implementation-plan.ko.md` §4.1.1이 이미 경고한 그대로다: 전환 1,137개
+# 중 985개가 유료라 무료 152개 안에서 골라야 안전하고, 그 무료 목록의
+# 이름은 전부 중국어라(`Cutout_Flip`처럼 영어인 것도 소수 있지만 우리
+# 여섯과 안 겹친다) "이름이 뜻하는 움직임"으로만 짝지었다. `fade`/`wipeleft`/
+# `wiperight`는 이름이 사실상 직역이라 확신이 높고, `slideup`/`slidedown`/
+# `circleopen`은 상대적으로 확신이 낮다 — 실제로 캡컷을 열어 봐야 안다
+# (`docs/handoffs/2026-08-22-videobox-scene-transitions-and-the-frame-rate-trap.ko.md`
+# 가 "생김새 판단은 owner 몫이다"라고 이미 적어 둔 것과 같은 이유).
+_CAPCUT_TRANSITION_TYPE_BY_KEY: dict[str, TransitionType] = {
+    "fade": TransitionType["叠化"],  # 겹쳐 넘기기(dissolve/cross-fade)
+    "fadeblack": TransitionType["闪黑"],  # 검게 지나가기(flash to black)
+    "dissolve": TransitionType["色彩溶解"],  # 알갱이로 흩어지며 녹아 넘기기
+    "wipeleft": TransitionType["向左擦除"],  # 왼쪽으로 쓸어내기 — 이름이 직역
+    "wiperight": TransitionType["向右擦除"],  # 오른쪽으로 쓸어내기 — 이름이 직역
+    "slideup": TransitionType["向上"],  # 위쪽 방향(정확한 밀기 여부 미확인)
+    "slidedown": TransitionType["向下"],  # 아래쪽 방향(정확한 밀기 여부 미확인)
+    "circleopen": TransitionType["圆形遮罩"],  # 원형으로 열리는 마스크
+}
+
+# 위 대응이 우리 전환 카탈로그와 정확히 짝을 이루는지 부팅 시점에 확인한다.
+# 카탈로그에 새 값을 추가하고 여기를 안 고치면, 그 전환은 화면·렌더러에는
+# 있는데 캡컷 내보내기에서만 조용히 빠진다 — 그 대신 지금 확실하게 죽는다.
+if set(_CAPCUT_TRANSITION_TYPE_BY_KEY) != set(TRANSITION_TYPES):
+    raise RuntimeError(
+        "pycapcut_adapter's transition map is out of sync with "
+        "videobox_core_engine.transitions.TRANSITION_CATALOG."
+    )
+
+
+# 사진 한 장짜리 장면을 캡컷 초안 안에서 움직이는 값.
+#
+# **완성본 렌더러(`ffmpeg_final_renderer._photo_motion_chain`)와 같은 수를 써야
+# 한다.** 거기는 `ratio = 1.12`로 확대해 놓고 그 여백만큼 훑는다. 두 벌이
+# 어긋나면 캡컷에서 연 그림이 완성본과 다르게 움직인다 --
+# `test_capcut_export_moves_the_photo.py`가 렌더러 원문과 맞대어 본다.
+_PHOTO_MOTION_ZOOM = 1.12
+# 1.12배로 키우면 화면 밖으로 나간 몫이 가로세로 각각 0.12 프레임이고, 가운데에서
+# 한쪽으로 갈 수 있는 최대치는 그 절반이다. 캡컷의 위치 단위는 `화면의 절반`이라
+# (`KeyframeProperty.position_x` 설명) 절반을 다시 두 배로 돌리면 `1.12 - 1`이
+# 그대로 값이 된다.
+_PHOTO_MOTION_PAN = _PHOTO_MOTION_ZOOM - 1.0
+
+#: 움직임 이름 -> (배율 시작·끝, 위치 keyframe 또는 None).
+#:
+#: 방향은 렌더러의 `motions` 배열과 같은 뜻으로 적었다. `pan_left`는 **그림이
+#: 왼쪽으로 흐른다**(렌더러 쪽에서는 잘라내는 창이 오른쪽으로 간다) --
+#: 캡컷 좌표에서는 position_x가 줄어드는 것이 같은 그림이다.
+_PHOTO_MOTION_KEYFRAMES: dict[str, tuple[tuple[float, float], tuple[Any, float, float] | None]] = {
+    "zoom_in": ((1.0, _PHOTO_MOTION_ZOOM), None),
+    "zoom_out": ((_PHOTO_MOTION_ZOOM, 1.0), None),
+    "pan_left": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_x, _PHOTO_MOTION_PAN, -_PHOTO_MOTION_PAN)),
+    "pan_right": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_x, -_PHOTO_MOTION_PAN, _PHOTO_MOTION_PAN)),
+    "pan_up": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_y, -_PHOTO_MOTION_PAN, _PHOTO_MOTION_PAN)),
+    "pan_down": ((_PHOTO_MOTION_ZOOM, _PHOTO_MOTION_ZOOM), (KeyframeProperty.position_y, _PHOTO_MOTION_PAN, -_PHOTO_MOTION_PAN)),
+}
+
+# 전환 표와 같은 이유로 여기서 죽는다: 카탈로그에 움직임을 하나 더하고 이 표를
+# 안 고치면 그 움직임만 캡컷 내보내기에서 조용히 빠진다.
+if set(_PHOTO_MOTION_KEYFRAMES) != set(PHOTO_MOTIONS):
+    raise RuntimeError(
+        "pycapcut_adapter's photo motion map is out of sync with "
+        "videobox_core_engine.media_controls.PHOTO_MOTIONS."
+    )
+
+
+def _looks_like_photo(path: Path) -> bool:
+    """사진인가. 확장자 목록은 렌더러가 갖고 있는 한 벌을 그대로 쓴다
+    (`test_photo_suffixes_are_one_list.py`가 그 한 벌을 지킨다)."""
+    return path.suffix.lower() in _IMAGE_SUFFIXES
+
+
+def _with_photo_motion(
+    segment: VideoSegment,
+    controls: dict[str, Any],
+    *,
+    is_photo: bool,
+    clip_id: str,
+    duration_us: int,
+) -> VideoSegment:
+    """사진 장면이 어떻게 움직일지를 캡컷 키프레임 **두 점**으로 적는다.
+
+    영상에는 걸지 않는다 -- 이미 움직이는 그림을 또 움직이면 흔들린다(렌더러가
+    사진에만 거는 것과 같은 이유다). `still`은 창작자가 "가만히 둬"를 고른
+    것이므로 아무것도 얹지 않는다.
+
+    **안 골랐을 때도 움직인다.** 렌더러는 그때 클립 이름 해시로 방향을 정하고
+    실제로 움직인다 -- 여기서만 멈춰 두면 캡컷으로 넘긴 순간 사진이 멈춘 그림이
+    된다. 같은 해시를 써서 같은 방향을 고른다.
+    """
+    if not is_photo:
+        return segment
+    chosen = str(controls.get("photo_motion") or "")
+    if chosen == PHOTO_MOTION_STILL:
+        return segment
+    motion = (
+        chosen
+        if chosen in _PHOTO_MOTION_KEYFRAMES
+        else PHOTO_MOTIONS[sum(clip_id.encode()) % len(PHOTO_MOTIONS)]
+    )
+    (start_scale, end_scale), pan = _PHOTO_MOTION_KEYFRAMES[motion]
+    end_us = max(duration_us, 1)
+    segment.add_keyframe(KeyframeProperty.uniform_scale, 0, start_scale)
+    segment.add_keyframe(KeyframeProperty.uniform_scale, end_us, end_scale)
+    if pan is not None:
+        axis, start_value, end_value = pan
+        segment.add_keyframe(axis, 0, start_value)
+        segment.add_keyframe(axis, end_us, end_value)
+    return segment
+
+
+def _with_look(segment: VideoSegment, controls: dict[str, Any]) -> VideoSegment:
+    """고른 색감을 캡컷 쪽 이름표로 얹는다.
+
+    **B-roll 조각을 만드는 자리가 둘이다**(이어 붙이는 쪽과 한 번만 놓는 쪽).
+    이 저장소는 그런 짝을 한쪽만 고쳐 같은 결함을 두 번 낸 적이 있어서,
+    얹는 일을 여기 한 군데로 모아 둔다.
+    """
+    name = capcut_filter_name(controls)
+    if name is not None:
+        segment.add_filter(FilterType[name])
+    return segment
 
 
 class PyCapCutExportError(RuntimeError):
@@ -59,6 +194,13 @@ def _seconds_to_us(seconds: float) -> int:
     return int(round(seconds * _MICROSECONDS_PER_SECOND))
 
 
+def _clip_playback_rate(clip: dict[str, Any]) -> float:
+    rate = float(clip.get("playback_rate", 1.0))
+    if not math.isfinite(rate) or rate <= 0:
+        raise PyCapCutExportError("CapCut clip playback_rate must be a positive finite number.")
+    return rate
+
+
 @dataclass(slots=True)
 class PyCapCutRealExportAdapter:
     """Generates a real, CapCut-openable draft folder from a VideoBox timeline.
@@ -75,6 +217,9 @@ class PyCapCutRealExportAdapter:
     video_fps: int = 30
     ffmpeg_binary: str = "ffmpeg"
     render_timeout_seconds: int = 1800
+    #: 컨테이너 경로를 이 컴퓨터 경로로 옮겨 적는 대응표. `None`이면 만들 때
+    #: 환경변수(`VIDEOBOX_CAPCUT_HOST_PATH_MAP`)에서 읽는다. 코드에 박지 않는다.
+    host_path_map: CapCutHostPathMap | None = None
 
     def export_timeline(
         self,
@@ -88,8 +233,11 @@ class PyCapCutRealExportAdapter:
     ) -> CapCutDraftExportResult:
         verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
         narration_clips, broll_clips, bgm_clips, sfx_clips = self._collect_clips(timeline)
-        if not narration_clips:
-            raise PyCapCutExportError("Timeline has no narration clips to export.")
+        # **목소리 없는 편집본은 정상이다.** 사진과 영상만으로 만들고 나중에
+        # 더빙을 붙이거나 자막만으로 낼 수 있다. 빈 초안만 막는다 -- 그것이
+        # 이 울타리가 원래 막으려던 것이다.
+        if not narration_clips and not broll_clips:
+            raise PyCapCutExportError("Timeline has no clips to export.")
 
         from pycapcut.draft_folder import DraftFolder
 
@@ -135,8 +283,15 @@ class PyCapCutRealExportAdapter:
                 clip=clip,
                 silence_path=silence_path,
             )
+        previous_broll_segment: VideoSegment | None = None
         for clip in broll_clips:
-            self._add_broll_segment(script=script, project_id=project_id, clip=clip)
+            previous_broll_segment = self._add_broll_segment(
+                script=script,
+                project_id=project_id,
+                clip=clip,
+                previous_segment=previous_broll_segment,
+                warnings=warnings,
+            )
         for clip in bgm_clips:
             self._add_bgm_segment(script=script, project_id=project_id, clip=clip, warnings=warnings)
         for clip in sfx_clips:
@@ -159,6 +314,16 @@ class PyCapCutRealExportAdapter:
             content = json.loads(content_path.read_text(encoding="utf-8"))
             content["videobox_output_metadata"] = metadata
             content_path.write_text(json.dumps(content, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        # **소재 경로를 이 컴퓨터의 경로로 옮겨 적는다.** 여기까지 초안에 적힌
+        # 경로는 이 프로세스가 보는 경로(컨테이너면 `/videobox-data/...`)이고,
+        # 윈도우 캡컷은 그걸 못 읽는다. 대응표가 비어 있으면 아무것도 안 바꾼다.
+        #
+        # 저장이 **다 끝난 뒤** 한 번만 한다 -- 중간에 바꾸면 pycapcut이 다시
+        # 열어 볼 때 없는 파일을 보게 된다.
+        rewrite_draft_for_host(
+            draft_path,
+            self.host_path_map if self.host_path_map is not None else CapCutHostPathMap.from_environment(),
+        )
         warnings.extend(note for note in output_warning_notes(timeline) if note not in warnings)
         return CapCutDraftExportResult(draft_path=draft_path, capcut_compatibility_warnings=warnings)
 
@@ -172,7 +337,13 @@ class PyCapCutRealExportAdapter:
         border_red, border_green, border_blue, border_alpha = style.rgba_floats(style.outline_color)
         background_red, background_green, background_blue, background_alpha = style.rgba_floats(style.background_color)
         alignment = {"left": 0, "center": 1, "right": 2}[style.horizontal_align]
-        capcut_style = TextStyle(size=style.font_size_px / 6, color=(red, green, blue), align=alignment, auto_wrapping=True)
+        capcut_style = TextStyle(
+            size=style.font_size_px / 6, color=(red, green, blue), align=alignment, auto_wrapping=True,
+            bold=style.bold, italic=style.italic,
+            # pycapcut이 안에서 0.05를 곱해 CapCut 자체 단위로 맞춘다(주석 "定义与CapCut中一致") --
+            # 여기서 미리 나누지 않는다. 나누면 두 번 줄어든다.
+            letter_spacing=style.letter_spacing_px,
+        )
         border = TextBorder(color=(border_red, border_green, border_blue), alpha=border_alpha, width=style.outline_width_px * 10)
         background = None
         if background_alpha:
@@ -194,10 +365,19 @@ class PyCapCutRealExportAdapter:
         broll_clips: list[dict[str, Any]] = []
         bgm_clips: list[dict[str, Any]] = []
         sfx_clips: list[dict[str, Any]] = []
+        # 꺼 둔 레인은 초안에 싣지 않는다(`videobox_capcut_export.adapter`의
+        # `dropped_track_types`가 규칙을 갖고 있다). 여기가 **대표가 실제로 여는
+        # 초안**을 만드는 자리라, 이걸 빠뜨리면 화면에서 뺀 영상이 캡컷에서
+        # 되살아난다.
+        from videobox_capcut_export.adapter import dropped_track_types
+
+        dropped = dropped_track_types(timeline)
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
             track_type = canonical_track_type(track.get("track_type"))
+            if track_type in dropped:
+                continue
             clips = track.get("clips", [])
             if not isinstance(clips, list):
                 continue
@@ -206,7 +386,15 @@ class PyCapCutRealExportAdapter:
                 key=lambda clip: float(clip.get("start_sec", 0.0)),
             )
             if track_type == "narration":
-                narration_clips.extend(valid_clips)
+                # **소리가 아니라 자리인 클립은 뺀다.** 빈 편집판에는 목소리
+                # 원본이 없는데 장면마다 가상 내레이션 클립이 생긴다 -- 편집기가
+                # 그리는 장면 막대다. 그걸 소리로 읽으려 해서 캡컷 초안이
+                # 통째로 실패했다(2026-09-07 실측). 완성본 경로는 어젯밤 같은
+                # 판단으로 고쳤다 -- **판단을 두 벌 두지 않는다.**
+                narration_clips.extend(
+                    clip for clip in valid_clips
+                    if not is_silent_narration_placeholder(timeline=timeline, clip=clip)
+                )
             elif track_type == "broll":
                 broll_clips.extend(valid_clips)
             elif track_type == "bgm":
@@ -232,6 +420,7 @@ class PyCapCutRealExportAdapter:
             raise PyCapCutExportError(str(exc)) from exc
         material = AudioMaterial(str(resolved.path))
         placement_start_us = _seconds_to_us(float(clip["start_sec"]))
+        playback_rate = _clip_playback_rate(clip)
         target_duration_us = _seconds_to_us(
             resolved.target_duration_sec
             if resolved.target_duration_sec is not None
@@ -241,7 +430,11 @@ class PyCapCutRealExportAdapter:
             source_duration_us = _seconds_to_us(resolved.trim_duration_sec)
         else:
             source_duration_us = material.duration
-        natural_duration_us = min(source_duration_us, material.duration, target_duration_us)
+        natural_duration_us = min(
+            source_duration_us,
+            material.duration,
+            round(target_duration_us * playback_rate),
+        )
         source_timerange = Timerange(
             start=_seconds_to_us(resolved.trim_start_sec),
             duration=natural_duration_us,
@@ -250,9 +443,10 @@ class PyCapCutRealExportAdapter:
             material,
             Timerange(start=placement_start_us, duration=natural_duration_us),
             source_timerange=source_timerange,
+            speed=playback_rate,
         )
         script.add_segment(segment, "voiceover")
-        padding_duration_us = target_duration_us - natural_duration_us
+        padding_duration_us = target_duration_us - round(natural_duration_us / playback_rate)
         if padding_duration_us <= 0:
             return
         if silence_path is None:
@@ -293,9 +487,10 @@ class PyCapCutRealExportAdapter:
                 if resolved.trim_duration_sec is not None
                 else material_duration_us
             )
+            playback_rate = _clip_playback_rate(clip)
             required_duration_us = max(
                 required_duration_us,
-                target_duration_us - min(source_duration_us, target_duration_us),
+                target_duration_us - min(target_duration_us, round(source_duration_us / playback_rate)),
             )
         return required_duration_us
 
@@ -326,7 +521,55 @@ class PyCapCutRealExportAdapter:
                 remaining -= chunk_size
         return material_path
 
-    def _add_broll_segment(self, *, script: ScriptFile, project_id: str, clip: dict[str, Any]) -> None:
+    @staticmethod
+    def _normalize_export_transition(clip: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            return normalize_transition(clip.get("transition"))
+        except ValueError as exc:
+            raise PyCapCutExportError(f"Invalid scene transition on clip: {exc}") from exc
+
+    def _add_broll_segment(
+        self,
+        *,
+        script: ScriptFile,
+        project_id: str,
+        clip: dict[str, Any],
+        previous_segment: VideoSegment | None,
+        warnings: list[str],
+    ) -> VideoSegment | None:
+        """B-roll 조각 하나를 초안에 놓고, 이 조각의 **마지막** 세그먼트를
+        돌려준다 — 다음 조각이 전환을 실어 오면 그 전환을 붙일 자리가
+        이것이기 때문이다(`add_transition`은 pycapcut 쪽에서 "앞 조각"에
+        건다. 우리 데이터 모델은 반대로 "들어오는 쪽"에 싣는다 -- 방향이
+        엇갈려서 여기서 뒤집는다).
+        """
+        transition = self._normalize_export_transition(clip)
+        if transition is not None:
+            if previous_segment is None:
+                # 첫 B-roll 조각이라 전환을 걸 앞 조각이 없다. 화면·렌더러
+                # 에서는 있을 수 있는 값이 이 자리에는 표현할 수 없다는 것을
+                # 조용히 넘기지 않는다.
+                warnings.append(
+                    "a scene transition on the first B-roll clip cannot be represented in CapCut export; skipped"
+                )
+            else:
+                previous_segment.add_transition(
+                    _CAPCUT_TRANSITION_TYPE_BY_KEY[transition["type"]],
+                    duration=_seconds_to_us(transition["duration_sec"]),
+                )
+                # `script.add_segment`는 소재 등록(`materials.transitions`)을
+                # **넣는 그 순간**의 `segment.transition` 값만 보고 한다. 앞
+                # 조각은 이미 놓인 뒤라 그때는 전환이 없었다 -- 지금 뒤늦게
+                # 붙였으니 등록도 직접 해야 한다. 안 하면 세그먼트 쪽
+                # `extra_material_refs`는 채워지는데 초안 어디에도 그 전환의
+                # 실제 정의(`materials.transitions`)가 없어 캡컷이 못 연다.
+                if previous_segment.transition not in script.materials:
+                    script.materials.transitions.append(previous_segment.transition)
+                # 이름으로만 고른 대응이라 실제 캡컷에서 확인 안 됨을 매번 남긴다
+                # (모듈 docstring의 `_CAPCUT_TRANSITION_TYPE_BY_KEY` 설명 참고).
+                warnings.append(
+                    "scene transitions are exported by name match only; verify how each looks in CapCut"
+                )
         resolved = resolve_broll_clip_source(store=self.store, project_id=project_id, clip=clip)
         target_duration_sec = (
             resolved.target_duration_sec
@@ -370,29 +613,50 @@ class PyCapCutRealExportAdapter:
         # PyCapCut rejects a source timerange longer than a material. Keep
         # each source pass editable and use a project-local black pad when
         # looping is intentionally disabled.
+        #
+        # 배속은 **원본 시간과 화면 시간의 환산비**다. 아래 루프는 화면 시간으로
+        # 세므로, 원본이 화면에서 얼마나 버티는지로 한 번 바꿔 두고 그 값으로
+        # 자른다. 둘을 섞어 재면 배속을 걸었을 때 길이가 어긋난다.
+        speed = float(controls["speed"]) * _clip_playback_rate(clip)
+        volume = float(controls["volume"])
+        source_available_timeline_us = int(source_available_us / speed)
+        if source_available_timeline_us <= 0:
+            raise PyCapCutExportError(
+                f"B-roll source is too short for the requested speed: {resolved.path}."
+            )
+        # 사진 장면은 멈춘 그림으로 내보내지 않는다. 어떤 파일이 사진인지는
+        # 소재 경로가 알고 있다(완성본 렌더러도 같은 방법으로 판단한다).
+        is_photo = _looks_like_photo(resolved.path)
+        clip_id = str(clip.get("clip_id") or "")
         elapsed_us = 0
+        last_segment: VideoSegment | None = None
         while elapsed_us < needed_duration_us and controls["loop"]:
-            segment_duration_us = min(source_available_us, needed_duration_us - elapsed_us)
-            segment = VideoSegment(
+            segment_duration_us = min(source_available_timeline_us, needed_duration_us - elapsed_us)
+            # `speed`를 함께 주면 pycapcut이 target 길이를 source/speed로 다시
+            # 계산한다. 그래서 source에 화면 시간 × 배속을 넣는다.
+            segment = _with_photo_motion(_with_look(VideoSegment(
                 material,
                 Timerange(start=placement_start_us + elapsed_us, duration=segment_duration_us),
-                source_timerange=Timerange(start=source_start_us, duration=segment_duration_us),
-            )
+                source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
+                speed=speed,
+                volume=volume,
+            ), controls), controls, is_photo=is_photo, clip_id=clip_id, duration_us=segment_duration_us)
             script.add_segment(segment, "broll")
+            last_segment = segment
             elapsed_us += segment_duration_us
         if not controls["loop"]:
-            segment_duration_us = min(source_available_us, needed_duration_us)
-            script.add_segment(
-                VideoSegment(
-                    material,
-                    Timerange(start=placement_start_us, duration=segment_duration_us),
-                    source_timerange=Timerange(start=source_start_us, duration=segment_duration_us),
-                ),
-                "broll",
-            )
+            segment_duration_us = min(source_available_timeline_us, needed_duration_us)
+            last_segment = _with_photo_motion(_with_look(VideoSegment(
+                material,
+                Timerange(start=placement_start_us, duration=segment_duration_us),
+                source_timerange=Timerange(start=source_start_us, duration=round(segment_duration_us * speed)),
+                speed=speed,
+                volume=volume,
+            ), controls), controls, is_photo=is_photo, clip_id=clip_id, duration_us=segment_duration_us)
+            script.add_segment(last_segment, "broll")
             elapsed_us = segment_duration_us
         if elapsed_us >= needed_duration_us:
-            return
+            return last_segment
         if not controls["pad"]:
             raise PyCapCutExportError(
                 "B-roll source is shorter than its timeline window. Enable loop or pad to preserve timeline duration."
@@ -402,14 +666,16 @@ class PyCapCutRealExportAdapter:
         pad_material = VideoMaterial(
             str(self._create_black_pad_material(project_id=project_id, duration_us=pad_source_duration_us))
         )
-        script.add_segment(
-            VideoSegment(
-                pad_material,
-                Timerange(start=placement_start_us + elapsed_us, duration=padding_duration_us),
-                source_timerange=Timerange(start=0, duration=padding_duration_us),
-            ),
-            "broll",
+        # 정지 프레임을 흉내 내는 검은 패드다 -- 다음 조각과 시간상 바로
+        # 맞닿는 것은 실제 B-roll 조각이 아니라 이 패드이므로, 다음 전환은
+        # (있다면) 이 패드에 걸어야 한다.
+        pad_segment = VideoSegment(
+            pad_material,
+            Timerange(start=placement_start_us + elapsed_us, duration=padding_duration_us),
+            source_timerange=Timerange(start=0, duration=padding_duration_us),
         )
+        script.add_segment(pad_segment, "broll")
+        return pad_segment
 
     def _broll_crop_settings(self, *, path: Path, fit: str) -> CropSettings:
         if fit == "fit":
@@ -484,9 +750,10 @@ class PyCapCutRealExportAdapter:
         material = AudioMaterial(str(path))
         placement_start_us = _seconds_to_us(float(clip.get("start_sec", 0.0)))
         needed_duration_us = _seconds_to_us(float(clip.get("end_sec", 0.0)) - float(clip.get("start_sec", 0.0)))
-        source_duration_us = min(needed_duration_us, material.duration) or material.duration
+        playback_rate = _clip_playback_rate(clip)
+        source_duration_us = min(round(needed_duration_us * playback_rate), material.duration) or material.duration
         controls = normalize_media_controls(clip.get("media_controls"), media_kind="audio", duration_sec=max(needed_duration_us / _MICROSECONDS_PER_SECOND, 0.001))
-        segment = AudioSegment(material, Timerange(start=placement_start_us, duration=needed_duration_us), source_timerange=Timerange(start=0, duration=source_duration_us), volume=10 ** (controls["gain_db"] / 20))
+        segment = AudioSegment(material, Timerange(start=placement_start_us, duration=needed_duration_us), source_timerange=Timerange(start=0, duration=source_duration_us), speed=playback_rate, volume=10 ** (controls["gain_db"] / 20))
         if controls["fade_in_sec"] or controls["fade_out_sec"]:
             segment.add_fade(_seconds_to_us(controls["fade_in_sec"]), _seconds_to_us(controls["fade_out_sec"]))
         if controls["ducking"]:

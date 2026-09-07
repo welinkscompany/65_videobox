@@ -224,19 +224,62 @@ test("manages voice samples and TTS listening review at the canonical settings r
       return;
     }
 
+    // 목소리 화면이 자산 단계로 옮겨오면서 자산 화면 자신의 조회가 함께 실린다.
+    // 전부 로컬 조회이고, 이 spec이 지키려는 것은 **바깥 provider를 부르지 않는 것**이다.
+    if (method === "GET" && path === "/api/media-inbox/assets") {
+      await route.fulfill(json({ assets: [] }));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/assets/broll-video`) {
+      await route.fulfill(json({ assets: [] }));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/media-analysis`) {
+      await route.fulfill(json({ items: [] }));
+      return;
+    }
+    if (method === "GET" && path === `/api/projects/${projectId}/assets/narration-audio`) {
+      await route.fulfill(json({ assets: [] }));
+      return;
+    }
+    if (method === "GET" && path === "/api/library/assets") {
+      await route.fulfill(json({ assets: [], total: 0 }));
+      return;
+    }
+    if (method === "GET" && path === "/api/media-library/assets") {
+      await route.fulfill(json({ assets: [] }));
+      return;
+    }
+    if (method === "GET" && path === "/api/media-library/install-state") {
+      await route.fulfill(json({ installed: false, missing_asset_ids: [], asset_ids: [] }));
+      return;
+    }
+    if (method === "GET" && path.endsWith("/media-library/recent")) {
+      await route.fulfill(json({ asset_ids: [] }));
+      return;
+    }
+    if (method === "GET" && path.endsWith("/media-library/favorites")) {
+      await route.fulfill(json({ asset_ids: [] }));
+      return;
+    }
+
     unexpectedApiCalls.push({ method, path });
     await route.fulfill(json({ detail: "unexpected E2E API request" }, 501));
   });
 
+  // 목소리 만들기는 2026-08-16에 설정에서 자산 단계의 `내레이션`으로 옮겼다.
+  // 옛 설정 주소는 살아 있고 길만 알려 준다.
   await page.goto("/settings/voice");
-
   await expect(page).toHaveURL(/\/settings\/voice$/);
-  await expect(page.getByRole("heading", { name: "내 목소리", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "내레이션 열기" })).toBeVisible();
+
+  await page.goto(`/projects/${projectId}/assets`);
+  await page.getByRole("tab", { name: "내레이션" }).click();
   await expect(page.getByRole("region", { name: "내 목소리와 읽어보기 후보" })).toBeVisible();
   await expect(page.getByText("저장한 내 목소리 1개")).toBeVisible();
 
-  await page.getByLabel("음성 파일의 로컬 경로").fill("  D:\\voices\\registered.wav  ");
-  await page.getByRole("button", { name: "로컬 경로로 추가" }).click();
+  await page.getByLabel("음성 파일이 있는 곳").fill("  D:\\voices\\registered.wav  ");
+  await page.getByRole("button", { name: "이 위치로 추가" }).click();
   await expect(page.getByText("저장한 내 목소리 2개")).toBeVisible();
 
   await page.getByLabel("음성 파일 업로드").setInputFiles({
@@ -278,17 +321,28 @@ test("manages voice samples and TTS listening review at the canonical settings r
   await expect(page.getByRole("button", { name: /자동.*적용|적용/ })).toHaveCount(0);
 
   await page.reload();
-  await expect(page).toHaveURL(/\/settings\/voice$/);
+  await expect(page).toHaveURL(/\/assets$/);
+  // 새로고침하면 자산 화면은 첫 탭으로 돌아온다. 내레이션을 다시 골라야 한다.
+  await page.getByRole("tab", { name: "내레이션" }).click();
   await expect(page.getByText("저장한 내 목소리 3개")).toBeVisible();
   await page.getByLabel("후보를 만들 구간").selectOption(activeSegmentId);
   await expect(page.getByText("후보 1 · 청취 승인됨")).toBeVisible();
   await expect(page.getByText("후보 2 · 청취 거부됨")).toBeVisible();
 
   const visibleCopy = await page.locator("body").innerText();
-  const accessibilityCopy = await page.locator("body").ariaSnapshot();
+  // `ariaSnapshot()`에는 링크의 href도 덤프한다. 테스트용 project id가 URL에
+  // 들어가는 것은 화면이나 보조기기 이름 누출이 아니므로, URL 문자열 대신 실제
+  // 접근성 이름을 만드는 속성·연결 텍스트만 검사한다.
+  const accessibleLabels = await page.locator("[aria-label], [aria-labelledby], img[alt]").evaluateAll((nodes) => nodes.map((node) => {
+    const labelledBy = node.getAttribute("aria-labelledby");
+    const labelledByText = labelledBy
+      ? labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? "").join(" ")
+      : "";
+    return [node.getAttribute("aria-label") ?? "", labelledByText, node.getAttribute("alt") ?? ""].join(" ");
+  }).join("\n"));
   expect(visibleCopy).not.toMatch(internalIdPattern);
-  expect(accessibilityCopy).not.toMatch(internalIdPattern);
-  expect(unexpectedApiCalls).toEqual([]);
+  expect(accessibleLabels).not.toMatch(internalIdPattern);
+  expect(unexpectedApiCalls.map((call) => `${call.method} ${call.path}`).join(" | ")).toBe("");
   expect(
     apiRequests.filter(({ path }) => new RegExp(
       ["provider", "hermes", "mem0", "openai", ["ge", "mini"].join(""), "elevenlabs"].join("|"),

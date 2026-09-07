@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from videobox_storage.media_library_store import MediaLibraryStore
+from videobox_domain_models.library_assets import LibraryAssetLifecycle
 
 
 def _store(tmp_path: Path) -> MediaLibraryStore:
@@ -106,6 +107,33 @@ def test_footage_without_an_embedding_stays_pending(tmp_path: Path) -> None:
     stored = store.get_footage_descriptor(content_sha256=hashlib.sha256(b"aaaa").hexdigest())
     assert stored["tags"]["place"] == ["수영장"]
     assert [item["filename"] for item in store.list_footage_needing_analysis(paths=[path])] == ["a.mp4"]
+
+
+def test_ready_user_footage_is_pending_and_user_tags_survive_reindex(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    payload = b"owner footage"
+    relative = Path("assets/broll/owner.mp4")
+    path = tmp_path / "library" / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    asset = store.register_user_asset(
+        library_asset_id="user:broll-owner", media_type="broll", origin="user",
+        lifecycle=LibraryAssetLifecycle.READY, content_sha256=hashlib.sha256(payload).hexdigest(),
+        managed_relative_path=relative.as_posix(), byte_count=len(payload), mime_type="video/mp4",
+        user_metadata={"title": "출근길", "tags": ["차량", "이동"]},
+    )
+
+    pending = store.list_footage_needing_analysis(paths=[])
+
+    assert [item["content_sha256"] for item in pending] == [asset.content_sha256]
+    assert pending[0]["library_asset_id"] == asset.library_asset_id
+    assert pending[0]["user_metadata"] == {"title": "출근길", "tags": ["차량", "이동"]}
+
+    _save(store, path, payload, description="가로 영상. 출근길. 차량, 이동.", embedding=[1.0, 0.0])
+    assert store.list_footage_needing_analysis(paths=[]) == []
+    assert store.user_asset_store.get_asset(asset.library_asset_id).user_metadata == {
+        "title": "출근길", "tags": ["차량", "이동"]
+    }
 
 
 def test_search_ranks_footage_and_can_ask_for_one_orientation(tmp_path: Path) -> None:

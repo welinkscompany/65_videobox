@@ -15,7 +15,7 @@ if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
 $composePath = Join-Path $RepositoryRoot "compose.yaml"
 $overlayPath = Join-Path $RepositoryRoot "compose.hermes-yujin.yaml"
 . (Join-Path $PSScriptRoot "hermes-yujin-environment-contract.ps1")
-$expectedImage = "nousresearch/hermes-agent@sha256:ad79951c26b7707c8c651f30780338d4f9bb17ddca19f6ea78eb27cbf83a3787"
+$expectedImage = "nousresearch/hermes-agent@sha256:3811ed13da874fba2ac99b6d492db9a203d34cb6dccf90d886948c00d0ccec09"
 $gatewayApiNetwork = "videobox-agent-gateway-api-network"
 $hermesNetwork = "videobox-agent-gateway-network"
 $providerNetwork = "videobox-hermes-provider-egress"

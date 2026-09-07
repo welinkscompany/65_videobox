@@ -1,9 +1,43 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from "react";
+import { Captions, Clapperboard, FileText, Music, Shuffle, Type, type LucideIcon } from "lucide-react";
 
+import { api } from "../../../api";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
 import { assetPreferenceChoice, canonicalPreferenceTag, useDirectorPreferences } from "./directorPreferences";
 import { filterEditorAssets, type EditorAssetCard, type EditorAssetKind, type EditorAssetOrientation } from "./editorAssetProjection";
+import { writeAssetDrag } from "./assetDragPayload";
+import { AddMediaFiles } from "../../media/AddMediaFiles";
+import { ingestFilesIntoProject, ingestOutcomeMessage } from "../../media/ingestFilesIntoProject";
+import { VoiceMaterialPanel } from "../../media/VoiceMaterialPanel";
+import { ImportFromFootageInbox } from "../../media/ImportFromFootageInbox";
+import { InfographicPanel } from "./InfographicPanel";
+import { LibraryPickerDialog } from "./LibraryPickerDialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../../components/ui/dialog";
+import { DEFAULT_SCENE_TRANSITION_DURATION_SEC, SCENE_TRANSITION_CHOICES } from "../inspector/sceneTransitions";
+import type { InspectorAction } from "../inspector/InspectorControls";
+
+/** 고른 보기 방식을 기억한다. 프로젝트 목록의 `videobox.catalog.view-mode`와
+ *  같은 방어적 패턴 -- 브라우저가 저장을 막아도(사생활 모드 등) 조용히 기본값.
+ *
+ *  **기본값이 `list`인 이유**: 지금까지의 모양이 그것이다. 캡컷은 격자로 열지만,
+ *  기본값을 바꾸면 쓰던 사람의 화면이 어느 날 갑자기 달라진다. 격자는 골라서
+ *  켜는 쪽으로 둔다. */
+const assetViewModeStorageKey = "videobox.editor-assets.view-mode";
+function readAssetViewMode(): "grid" | "list" {
+  try {
+    return window.localStorage.getItem(assetViewModeStorageKey) === "grid" ? "grid" : "list";
+  } catch {
+    return "list";
+  }
+}
+function writeAssetViewMode(mode: "grid" | "list"): void {
+  try {
+    window.localStorage.setItem(assetViewModeStorageKey, mode);
+  } catch {
+    // 보기 방식은 화면 전용이라 최선만 한다.
+  }
+}
 
 type EditorAssetTarget = Readonly<{
   segmentId: string;
@@ -19,18 +53,97 @@ type Props = Readonly<{
   isSaving: boolean;
   onPreview: (card: EditorAssetCard) => void;
   onApply: (card: EditorAssetCard, segmentId: string) => void;
+  /** 이미지 카드를 장면 위에 오버레이로 얹는다. 없으면 그 단추만 빠진다. */
+  onApplyOverlay?: (card: EditorAssetCard, segmentId: string) => void;
   previewStates?: Readonly<Record<string, EditorAssetPreviewState>>;
   onRefreshExactPreview?: () => void;
   /** 있으면 "항상 쓰기 / 쓰지 않기"를 저장한다. 없으면 그 절만 빠진다. */
   projectId?: string;
+  /** 편집기 안에서 미디어를 더한 뒤 목록을 다시 읽게 한다. */
+  onMediaAdded?: () => void | Promise<void>;
+  /** 전환을 걸 대상. 캡컷처럼 왼쪽 `전환` 탭에서 고른다. */
+  transitionTarget?: Readonly<{ segmentId: string; hasPrevious: boolean }> | null;
+  onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+  /** 대본·자막 편집(캡컷 `텍스트` 자리). 주지 않으면 그 탭도 만들지 않는다. */
+  transcript?: ReactNode;
+  /** 대본 자리. 프로젝트 배관을 아는 위층이 만들어 넘긴다. */
+  script?: ReactNode;
+  /** 원본만 확인하는 자리. 미디어 탭 안에 둔다. */
+  sourceCheck?: ReactNode;
+  /** 프로젝트 미디어 분석 상태. 미디어 탭 카드 목록 아래에 둔다(2026-08-27
+   *  결정 §순서 2 — 독립 "미디어" 화면의 유일한 고유 기능이라 편집기로 옮겼다). */
+  analysisPanel?: ReactNode;
+  /** 최상위 탭을 여기서 대신 관리하는 부모가 있으면 준다(승인 2026-08-30
+   *  버튼 단위 벤치마킹 2단계) -- 캡컷은 이 탭이 편집기 맨 위, 패널
+   *  바깥에 늘 떠 있다. 주지 않으면 이 컴포넌트가 예전처럼 자기 상태로
+   *  탭을 관리한다(단독 시험·다른 자리에서 재사용할 때를 위한 대비책). */
+  pane?: LeftPane;
+  onPaneChange?: (pane: LeftPane) => void;
+  /** 부모가 이미 같은 탭을 최상위에 그리고 있으면 여기서 또 그리지 않는다
+   *  (기본값 `true` — 안 주면 예전처럼 이 컴포넌트가 직접 그린다). */
+  renderPaneTabs?: boolean;
 }>;
 
-const filters: readonly Readonly<{ type: "all" | EditorAssetKind; label: string }>[] = [
-  { type: "all", label: "전체" },
-  { type: "broll", label: "영상" },
-  { type: "bgm", label: "음악" },
-  { type: "sfx", label: "효과음" },
+/** 캡컷 왼쪽 패널은 `미디어 · 오디오 · 텍스트 · 스티커 · 효과 · 전환 · 필터`가
+ *  **최상위 탭**이다(공식 매뉴얼, 2026-08-27 확인). 우리는 영상·음악·효과음·그림이
+ *  한 줄에 섞여 있었고 **전환은 오른쪽 속성 패널 안**에 있었다 -- 6종을 다 만들어
+ *  놓고도 캡컷을 아는 사람이 왼쪽에서 찾으면 없었다.
+ *
+ *  **가진 것만 탭으로 둔다.** 스티커·효과·필터는 우리에게 없으므로 탭도 만들지
+ *  않는다 -- 없는 기능의 자리를 흉내 내면 배치가 거짓말을 한다(owner 결정 2026-08-27).
+ *
+ *  2026-09-04: `텍스트`를 갈랐다. 캡컷을 실제로 열어 재 보니 `텍스트`(화면 위
+ *  글자)와 `캡션`(말자막)이 완전히 별개 탭이었다. 우리는 `explanation-card`
+ *  오버레이로 화면 위 글자를 이미 끝까지 만들 수 있는데(`port.applyOverlay`)
+ *  왼쪽에 그 자리가 없어서 자막 안에 숨어 있었다. */
+/** 캡컷 왼쪽 띠와 같은 갈래다(2026-09-04 실측). 캡컷은 열둘이지만 우리는 범위
+ *  안의 여섯만 쓴다 -- 템플릿·요소·편집효과·필터·브랜드 키트·플러그인은
+ *  안 만든다(`decisions/2026-08-30`, `CLAUDE.md` §2.1).
+ *
+ *  `transcript`가 `캡션`으로 이름을 바꾼 이유: 캡컷은 **`텍스트`(화면 위 글자)와
+ *  `캡션`(말자막)을 완전히 분리**한다. 우리는 둘을 `자막` 하나로 뭉쳐 놨었다. */
+export type LeftPane = "media" | "audio" | "text" | "transcript" | "script" | "transition";
+
+/** **한 번에 하나만 보여 준다(owner 지시 2026-08-27).**
+ *  > "지금 사진 부분이 스크롤이 너무 길다고, 여길 뭔가 정리를 해야지"
+ *
+ *  실측: 왼쪽 도크는 보이는 높이 **137px**인데 내용이 **1,608px**이었다 --
+ *  **11.7배 스크롤**. 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이 세로로
+ *  더 쌓여 있었기 때문이다. 캡컷 왼쪽 패널은 고른 탭의 내용만 보여 준다. */
+/* 아이콘이 붙은 이유: 캡컷 왼쪽 띠는 72px 폭이라 글자만으로는 `미디어`조차
+   줄바꿈된다. 아이콘 + 10px 라벨이 캡컷 실측 구성이다(2026-09-04). */
+export const editorAssetPanes: readonly Readonly<{ pane: LeftPane; label: string; icon: LucideIcon }>[] = [
+  { pane: "media", label: "미디어", icon: Clapperboard },
+  { pane: "audio", label: "오디오", icon: Music },
+  { pane: "text", label: "텍스트", icon: Type },
+  { pane: "transcript", label: "캡션", icon: Captions },
+  // **`대본`이 2026-09-05에 생겼다**(계획서 5단계). 위 주석이 경고하던
+  // "붙여넣은 뒤 갈 곳이 없는 막다른 자리"는 `ScriptPane`이 저장 뒤 **다음
+  // 걸음(`이야기 이어서 하기`)**을 같은 자리에서 주는 것으로 푼다.
+  //
+  // 캡컷의 `대본`처럼 "대본을 고치면 영상이 고쳐지는" 기능은 여전히 아니다 --
+  // 대본에서 장면을 만드는 길은 `이야기` 화면이 그대로 맡는다.
+  { pane: "script", label: "대본", icon: FileText },
+  { pane: "transition", label: "전환", icon: Shuffle },
 ];
+
+const paneKinds: Readonly<Record<"media" | "audio", readonly EditorAssetKind[]>> = {
+  media: ["broll", "image"],
+  audio: ["bgm", "sfx"],
+};
+
+const paneFilters: Readonly<Record<"media" | "audio", readonly Readonly<{ type: "all" | EditorAssetKind; label: string }>[]>> = {
+  media: [
+    { type: "all", label: "전체" },
+    { type: "broll", label: "영상" },
+    { type: "image", label: "그림" },
+  ],
+  audio: [
+    { type: "all", label: "전체" },
+    { type: "bgm", label: "음악" },
+    { type: "sfx", label: "효과음" },
+  ],
+};
 
 const orientationFilters: readonly { value: "all" | EditorAssetOrientation; label: string }[] = [
   { value: "all", label: "모든 방향" },
@@ -44,30 +157,233 @@ function targetLabel(target: EditorAssetTarget | null): string {
     : "적용할 내레이션 구간을 먼저 선택하세요.";
 }
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, previewStates = {}, onRefreshExactPreview, projectId }: Props) {
+/** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
+const FIRST_PAGE = 8;
+
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, script, sourceCheck, analysisPanel, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
+  const [removingCardId, setRemovingCardId] = useState<string | null>(null);
+  const [removeMessage, setRemoveMessage] = useState<string | null>(null);
+
+  async function removeFromProject(card: EditorAssetCard) {
+    const sourceLibraryAssetId = card.sourceMetadata.brollMetadata?.source_library_asset_id;
+    if (typeof sourceLibraryAssetId !== "string" || !sourceLibraryAssetId || !projectId) return;
+    setRemovingCardId(card.id);
+    setRemoveMessage(null);
+    try {
+      const usage = await api.getLibraryAssetUsage(sourceLibraryAssetId);
+      const reference = usage.locations.find((location) => location.project_id === projectId && location.materialized_asset_id === card.assetId);
+      if (!reference?.reference_id) {
+        setRemoveMessage("프로젝트 참조 위치를 찾지 못했어요. 자료실에서 상태를 확인해 주세요.");
+        return;
+      }
+      await api.removeLibraryReference(sourceLibraryAssetId, reference.reference_id);
+      await onMediaAdded?.();
+    } catch {
+      setRemoveMessage("지금은 뺄 수 없어요. 다시 시도해 주세요.");
+    } finally {
+      setRemovingCardId(null);
+    }
+  }
   const [query, setQuery] = useState("");
   const [type, setType] = useState<"all" | EditorAssetKind>("all");
+  const [uncontrolledPane, setUncontrolledPane] = useState<LeftPane>("media");
+  const pane = controlledPane ?? uncontrolledPane;
+  const setPane = onPaneChange ?? setUncontrolledPane;
   const [orientation, setOrientation] = useState<"all" | EditorAssetOrientation>("all");
-  const visibleCards = filterEditorAssets(cards, { type, query, orientation });
+  // 캡컷 미디어 탭 대조(2026-09-01). 도크가 좁아 카드를 한 줄에 하나씩 쌓으면
+  // 열 개를 보려고 계속 굴려야 한다 -- 격자로 두면 한눈에 훑을 수 있다.
+  // 소리 자산은 이미 줄로 그리고 있으므로(`--row`) 격자는 보는 것에만 건다.
+  const [viewMode, setViewMode] = useState<"grid" | "list">(readAssetViewMode);
+  const chooseViewMode = (mode: "grid" | "list") => { setViewMode(mode); writeAssetViewMode(mode); };
+  // 탭이 먼저 갈라 놓고, 그 안에서 종류·검색·방향으로 좁힌다. 캡컷도 미디어 탭과
+  // 오디오 탭이 서로 다른 목록이다.
+  const paneCards = pane !== "media" && pane !== "audio" ? [] : cards.filter((card) => paneKinds[pane].includes(card.kind));
+  const matchingCards = filterEditorAssets(paneCards, { type, query, orientation });
+  // owner: "자산 내역에 스크롤이 엄청 길다니까."
+  //
+  // 카드 한 장에 썸네일·제목·설명·태그·단추가 다 들어간다. 맞는 것을 전부 그리면
+  // 자산이 늘어나는 만큼 스크롤이 길어지고, 아래쪽 카드는 아무도 못 본다.
+  // **찾는 것은 위의 검색과 필터가 하는 일이다** -- 목록은 한 화면에서 훑을 수 있는
+  // 만큼만 보여 주고 나머지는 눌러서 편다.
+  const [shown, setShown] = useState(FIRST_PAGE);
+  const [narrationOpen, setNarrationOpen] = useState(false);
+  const [infographicOpen, setInfographicOpen] = useState(false);
+  const [footageOpen, setFootageOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const visibleCards = matchingCards.slice(0, shown);
+  const hiddenCount = matchingCards.length - visibleCards.length;
+  // 검색·필터를 바꾸면 다시 처음부터 본다. 안 그러면 조건을 좁혔는데도 앞서 펼친
+  // 만큼 그대로 길게 남는다.
+  useEffect(() => { setShown(FIRST_PAGE); }, [type, query, orientation, pane]);
+  // 탭을 바꾸면 앞 탭에서 좁혀 둔 종류가 남으면 안 된다 -- `음악`을 고른 채
+  // 미디어 탭으로 가면 아무것도 안 나온다.
+  useEffect(() => { setType("all"); }, [pane]);
   const taste = useDirectorPreferences(projectId);
   const tasteReady = Boolean(projectId) && taste.ready;
   const excludedCreators = taste.preferences.exclude_creator;
   const excludedTags = taste.preferences.exclude_tag;
 
-  return <section className="vb-editor-assets" aria-label="편집기 자산">
+  /** **탐색기에서 파일을 끌어다 놓는 자리(2026-09-04).** owner 지적: "캣컵은
+   *  드래그앤 드롭도 다 되는데, 우리는 그것도 아무것도 안되고".
+   *
+   *  **정정(2026-09-04 갭검증):** 처음엔 "`dataTransfer.files`를 읽는 자리가
+   *  저장소 전체에 0곳"이라고 적었는데 **틀렸다.** 자료실에는 이미 있었다 --
+   *  `features/library/AssetIngestDropzone.tsx`가 안내 문구까지 갖추고 `/library`
+   *  화면에서 돈다. 없던 곳은 **편집기 미디어 패널**이다. owner가 편집 중에
+   *  끌어다 놓으려 한 자리가 여기였다.
+   *
+   *  올리는 절차도 이미 있으므로(`ingestFilesIntoProject`) 부르는 자리만 만든다.
+   *
+   *  `types`로 파일 여부를 먼저 가르는 이유: 타임라인으로 자산 카드를 끄는 기존
+   *  동작과 부딪히면 안 된다. 파일이 아니면 손대지 않고 그대로 흘려보낸다. */
+  // **드롭마다 키가 달라야 한다.** 처음엔 로 만들었는데,
+  // 같은 개수를 다시 떨어뜨리면 키가 같아 서버가 거부하고(같은 키 + 다른 바이트는
+  // 거부하는 계약이다) **다시 시도해도 영원히 실패했다**. 옆 가
+  // 쓰는 것과 같은 카운터를 둔다.
+  const dropRequestId = useRef(0);
+  const [dropping, setDropping] = useState(false);
+  const [dropBusy, setDropBusy] = useState(false);
+  const [dropMessage, setDropMessage] = useState<string | null>(null);
+  const carriesFiles = (transfer: DataTransfer | null): boolean =>
+    Boolean(transfer && Array.from(transfer.types ?? []).includes("Files"));
+  async function onFilesDropped(event: ReactDragEvent<HTMLElement>) {
+    if (!projectId || !carriesFiles(event.dataTransfer)) return;
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length === 0) return;
+    event.preventDefault();
+    setDropBusy(true);
+    setDropMessage(null);
+    dropRequestId.current += 1;
+    const outcome = await ingestFilesIntoProject(files, projectId, `drop-${projectId}-${dropRequestId.current}-${Date.now()}`);
+    setDropBusy(false);
+    setDropMessage(ingestOutcomeMessage(outcome));
+    if (outcome.succeeded > 0) await onMediaAdded?.();
+  }
+
+  return <section
+    aria-label="편집기 미디어"
+    className="vb-editor-assets"
+    onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false); }}
+    onDragOver={(event) => { if (carriesFiles(event.dataTransfer)) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDropping(true); } }}
+    data-dropping={dropping ? "true" : undefined}
+    onDrop={(event) => { setDropping(false); void onFilesDropped(event); }}
+  >
+    {/* 캡컷과 같은 자리의 최상위 탭. 가진 것만 둔다 -- 자세한 이유는 `LeftPane` 주석.
+        승인 2026-08-30(버튼 단위 벤치마킹 2단계)로 이 탭은 이제 편집기 맨 위,
+        패널 바깥에서도 그릴 수 있다(`renderPaneTabs={false}` + `pane`/`onPaneChange`
+        제어) -- 그때는 여기서 중복해서 그리지 않는다. */}
+    {/* **탭과 무관하게 말한다.** 드롭 자리는 패널 전체라 어느 탭에서 떨어뜨려도
+        올라간다 -- 예전엔 이 문구가 미디어/오디오 분기 안에 있어서 텍스트·캡션·전환
+        탭에서 떨어뜨리면 **올라가는데 아무 말도 안 했다**(조용히 삼킴). */}
+    {/* 끌어다 놓은 결과를 말한다. 조용히 삼키면 올라갔는지 알 수 없다. */}
+    {dropBusy ? <p className="vb-editor-assets__detail" role="status">파일을 올리는 중이에요.</p> : null}
+    {dropMessage ? <p className="vb-editor-assets__detail" role="status">{dropMessage}</p> : null}
+    {renderPaneTabs ? <div className="vb-editor-assets__panes" role="tablist" aria-label="왼쪽 패널">
+      {editorAssetPanes.filter((item) => (item.pane !== "transcript" || transcript) && (item.pane !== "script" || script)).map((item) => <Button key={item.pane} variant="ghost" className="vb-editor-assets__pane-tab" type="button" role="tab" aria-selected={pane === item.pane} onClick={() => setPane(item.pane)}>{item.label}</Button>)}
+    </div> : null}
+    {pane === "transition" ? <TransitionPane target={transitionTarget} disabled={isSaving} onInspectorAction={onInspectorAction} />
+      : pane === "text" ? <TextPane target={target} disabled={isSaving} onInspectorAction={onInspectorAction} />
+      : pane === "script" ? script
+      : pane === "transcript" ? transcript : <>
     <div className="vb-editor-assets__controls">
+      {/* **편집기를 떠나지 않고 미디어를 더한다(owner 승인 2026-08-27).**
+          2026-08-27에 재 보니 편집기 안에는 미디어를 더할 길이 아예 없었다 --
+          파일 입력도, 미디어 화면으로 나가는 링크조차 없었다. 쓰려면 위 띠에서
+          미디어 단계를 눌러 화면을 떠나야 한다는 것을 스스로 알아내야 했다.
+          올리는 절차는 미디어 화면과 **같은 조각**을 쓴다(두 벌로 적지 않는다). */}
+      {projectId ? <div className="vb-editor-assets__add-row" role="group" aria-label="미디어 더하기">
+        <AddMediaFiles projectId={projectId} onAdded={onMediaAdded} />
+      {/* **내레이션은 팝업으로 연다(owner 승인 2026-08-27).**
+          > "이걸 캡컷처럼 편집기 기반처럼 쉽게 확인하도록 팝업으로 만든다던지"
+
+          내레이션도 영상·음악·효과음과 같은 미디어인데(`VoiceMaterialPanel` 주석)
+          그 자리가 미디어 화면에만 있어서, 편집하다 목소리를 넣으려면 화면을
+          떠나야 했다. 다만 이 도크는 220~400px이라 목소리 등록·후보 생성·청취
+          승인까지 넣으면 답답하다. 그래서 도크에 밀어 넣지 않고 팝업으로 연다.
+          패널은 **미디어 화면이 쓰는 것을 그대로** 쓴다. */}
+        <Button type="button" variant="outline" className="vb-editor-assets__narration" onClick={() => setNarrationOpen(true)}>내레이션</Button>
+        <Button type="button" variant="outline" className="vb-editor-assets__footage" onClick={() => setFootageOpen(true)}>촬영본</Button>
+        {/* **인포그래픽(owner 지시 2026-09-07).**
+            > "인포그래픽 만들기 기능을 편집기화면에 붙여줘야 할거 같은데"
+
+            인포그래픽은 결국 `그림` 자산 하나라 여기가 맞는 자리다 -- 왼쪽 띠에
+            일곱 번째 탭을 새로 만들지 않았다(캡컷에 없는 탭을 늘리지 않는다).
+            내레이션과 같은 이유로 팝업이다: 숫자를 여러 줄 적어야 해서 220~400px
+            도크에 밀어 넣으면 답답하다. */}
+        <Button type="button" variant="outline" className="vb-editor-assets__infographic" onClick={() => setInfographicOpen(true)}>인포그래픽</Button>
+        {/* **라이브러리에서 가져오기(owner 승인, 재설계안 §1.3).**
+            여러 프로젝트가 함께 쓰는 `/library`는 지금 편집 중인 프로젝트에
+            속하지 않는다 -- 그래서 편집기 안으로 통째로 접지 않고, "고르기"
+            슬라이스 하나만 팝업으로 연다. 팝업 내부는 `/library`가 쓰는
+            `LibrarySidebar`·`LibraryResults`를 그대로 재사용한다
+            (`LibraryPickerDialog.tsx` 주석 참고). */}
+        <Button type="button" variant="outline" className="vb-editor-assets__library" onClick={() => setLibraryOpen(true)}>자료실에서 가져오기</Button>
+        <LibraryPickerDialog open={libraryOpen} onOpenChange={setLibraryOpen} projectId={projectId} onImported={onMediaAdded} />
+        <Dialog open={footageOpen} onOpenChange={setFootageOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader>
+              <DialogTitle>촬영본 가져오기</DialogTitle>
+              <DialogDescription>따로 모아 둔 영상에서 골라 이 프로젝트로 가져옵니다.</DialogDescription>
+            </DialogHeader>
+            <ImportFromFootageInbox projectId={projectId} onImported={onMediaAdded} />
+          </DialogContent>
+        </Dialog>
+        <Dialog open={infographicOpen} onOpenChange={setInfographicOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader>
+              <DialogTitle>인포그래픽 만들기</DialogTitle>
+              <DialogDescription>숫자를 적어 주면 그림 한 장으로 만들어 자료실에 넣습니다.</DialogDescription>
+            </DialogHeader>
+            <InfographicPanel onMade={onMediaAdded} />
+          </DialogContent>
+        </Dialog>
+        <Dialog open={narrationOpen} onOpenChange={setNarrationOpen}>
+          <DialogContent className="vb-dialog-content">
+            <DialogHeader>
+              <DialogTitle>내레이션</DialogTitle>
+              <DialogDescription>내 목소리로 대본을 읽어 만들고, 들어 본 뒤 고릅니다.</DialogDescription>
+            </DialogHeader>
+            <VoiceMaterialPanel projectId={projectId} />
+          </DialogContent>
+        </Dialog>
+      </div> : null}
       <label className="vb-editor-assets__search-label">
-        <span>자산 검색</span>
-        <Input className="vb-editor-assets__search" type="search" aria-label="자산 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <span>미디어 검색</span>
+        {/* **빈 칸에 힌트를 넣는다**(2026-08-22, `capcut-observed` 기록 §5 "공통 생김새":
+            캡컷은 모든 탭 검색창에 지금 뭘 찾을 수 있는지 안내 문구를 넣는다). 우리
+            칸은 비어 있었다 -- 무엇을 검색할 수 있는지 눌러 보기 전엔 알 수 없었다. */}
+        <Input className="vb-editor-assets__search" type="search" aria-label="미디어 검색" placeholder="영상 · 음악 · 효과음 · 그림 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       </label>
-      <div className="vb-editor-assets__filters" role="group" aria-label="자산 유형 필터">
-        {filters.map((filter) => <Button key={filter.type} className="vb-editor-assets__filter" type="button" aria-pressed={type === filter.type} onClick={() => setType(filter.type)}>{filter.label} 필터</Button>)}
+      {/* **캡컷처럼 탭 줄로 바꿨다(owner 지시 2026-08-22).**
+          > "캡컷은 대부분 메뉴들을 탭으로 정리해서 깔끔하게 만들었어"
+
+          앞서는 알약 여덟 개(`전체 필터`·`영상 필터`···`세로 필터`)가 한꺼번에 펼쳐져
+          있었다. 캡컷 편집기는 `미디어·오디오·텍스트·스티커···`를 **탭 한 줄**로 두고
+          고른 탭의 내용만 아래에 보여 준다.
+
+          이름에서 `필터`를 뺐다 -- 캡컷 탭은 그냥 명사다. 화면 방향은 탭이 아니라
+          **고른 탭 안에서 더 좁히는 것**이라 한 단 아래로 내렸다. */}
+      {/* 좁히는 것 셋을 한 묶음으로 흘린다(2026-09-04) -- 각자 한 줄씩 32px를
+          먹어 96px였다. 캡컷은 좁히는 것을 칩 한 줄로 둔다. */}
+      <div className="vb-editor-assets__narrow">
+      <div className="vb-editor-assets__tabs" role="tablist" aria-label="미디어 종류">
+        {paneFilters[pane === "audio" ? "audio" : "media"].map((filter) => <Button key={filter.type} variant="ghost" className="vb-editor-assets__tab" type="button" role="tab" aria-selected={type === filter.type} onClick={() => setType(filter.type)}>{filter.label}</Button>)}
       </div>
-      <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향 필터">
-        {orientationFilters.map((filter) => <Button key={filter.value} className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label} 필터</Button>)}
+      <div className="vb-editor-assets__filters" role="group" aria-label="화면 방향">
+        {orientationFilters.map((filter) => <Button key={filter.value} variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={orientation === filter.value} onClick={() => setOrientation(filter.value)}>{filter.label}</Button>)}
+      </div>
+      {/* 보기 방식(캡컷 미디어 탭 대조, 2026-09-01). 백엔드가 필요 없다 --
+          같은 목록을 다른 모양으로 그리기만 한다. 프로젝트 목록의 같은 전환과
+          문구를 맞춘다("격자로 보기" / "줄로 보기") -- 한 제품 안에서 같은
+          동작에 다른 이름을 붙이지 않는다. */}
+      <div className="vb-editor-assets__filters" role="group" aria-label="보기 방식">
+        <Button variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={viewMode === "grid"} onClick={() => chooseViewMode("grid")}>격자로 보기</Button>
+        <Button variant="ghost" className="vb-editor-assets__filter" type="button" aria-pressed={viewMode === "list"} onClick={() => chooseViewMode("list")}>줄로 보기</Button>
+      </div>
       </div>
     </div>
     <p className="vb-editor-assets__target" role="status">{targetLabel(target)}</p>
+    {removeMessage ? <p className="vb-editor-assets__detail" role="status">{removeMessage}</p> : null}
     {taste.error ? <p className="vb-editor-assets__detail" role="status">{taste.error}</p> : null}
     {tasteReady && (excludedCreators.length || excludedTags.length) ? (
       <div className="vb-editor-assets__taste" role="group" aria-label="유진이 빼 둔 것">
@@ -100,13 +416,26 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
         ))}
       </div>
     ) : null}
-    <div className="vb-editor-assets__cards">
+    <div className={`vb-editor-assets__cards${viewMode === "grid" ? " vb-editor-assets__cards--grid" : ""}`}>
       {visibleCards.map((card) => {
         const applyDisabled = target === null || isSaving || !card.canApply;
         const previewState = previewStates[card.id];
         const choice = assetPreferenceChoice(taste.preferences, card.assetId);
         const creator = card.sourceMetadata.creator.trim();
-        return <article key={card.id} className="vb-editor-assets__card">
+        // 캡컷처럼 끌어다 놓을 수 있게 한다. `적용` 단추는 그대로 둔다 --
+        // 끌기가 안 되는 환경(키보드만 쓰는 경우 포함)에서도 길이 있어야 한다.
+        // **소리는 줄로, 보는 것은 격자로**(`capcut-observed` 기록 §5 오디오:
+        // "오른쪽은 격자가 아니라 목록이다 -- 앨범 그림 + 곡명 + `아티스트 ·
+        // 길이`"). 음악·효과음은 썸네일이 없어 카드로 그리면 글자만 든 빈
+        // 상자가 되고, 효과음 100개를 한 화면에서 훑을 수가 없다. 카드를 새로
+        // 만들지 않고 **같은 `article`을 가로로 눕힌다** -- 적용·미리듣기·취향
+        // 단추가 전부 그대로 살아 있어야 하고, 두 벌을 유지하면 한쪽만 고치는
+        // 사고가 난다.
+        const isSound = card.kind === "bgm" || card.kind === "sfx";
+        return <article key={card.id} className={`vb-editor-assets__card${isSound ? " vb-editor-assets__card--row" : ""}`}
+          draggable
+          onDragStart={(event) => writeAssetDrag(event.dataTransfer, card.id)}
+          title="타임라인의 장면 위로 끌어다 놓을 수 있어요">
           {card.thumbnailUrl ? (
             <img
               className="vb-editor-assets__thumb"
@@ -114,16 +443,32 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
               alt={`${card.title} 미리 이미지`}
               loading="lazy"
             />
+          ) : isSound ? (
+            // 캡컷 오디오 줄의 앨범 그림 자리. 우리 자산에는 그림이 없으므로
+            // 파형 모양을 그려 **줄마다 눈에 걸리는 것**을 둔다(라이브러리
+            // 화면의 `vb-library-waveform`과 같은 방식).
+            <span className="vb-editor-assets__wave" aria-hidden="true">
+              {Array.from({ length: 14 }, (_, index) => <i key={index} style={{ height: `${24 + ((index * 17) % 48)}%` }} />)}
+            </span>
           ) : null}
           <h3 className="vb-editor-assets__title">{card.title}</h3>
           <p className="vb-editor-assets__summary">
             {card.label} · {card.durationLabel}
             {card.orientation ? <> · <span className="vb-editor-assets__orientation">{card.orientation}</span></> : null}
           </p>
-          <p className="vb-editor-assets__detail">{card.status}</p>
-          <p className="vb-editor-assets__detail">{card.audioPresence}</p>
-          <p className="vb-editor-assets__detail">{card.license}</p>
-          <p className="vb-editor-assets__reason">직접 선택한 자산</p>
+          {/* 상태와 **출처 표기 여부**는 권리 정보라 줄로 눕혀도 감추지 않는다 --
+              음악·효과음이 바로 그게 걸리는 자산이다. 다만 줄에서는 `라이선스:
+              {긴 URL} · 출처 표기 불필요` 전체를 그리면 URL이 세 줄로 감겨
+              줄이 카드보다 길어졌다(2026-08-23 실측 325px). 창작자에게 필요한
+              것은 URL이 아니라 **표기가 필요한지**이므로, 줄에서는 짧은 쪽만
+              보이고 URL을 포함한 전체 문구는 `title`로 남긴다. */}
+          <p className="vb-editor-assets__detail vb-editor-assets__status">{card.status}</p>
+          <p className="vb-editor-assets__detail vb-editor-assets__audio-presence">{card.audioPresence}</p>
+          <p className="vb-editor-assets__detail vb-editor-assets__license">{card.license}</p>
+          <p className="vb-editor-assets__detail vb-editor-assets__attribution" title={card.license}>
+            {card.sourceMetadata.attributionRequired ? "출처 표기 필요" : "출처 표기 불필요"}
+          </p>
+          <p className="vb-editor-assets__reason">직접 선택한 미디어</p>
           {previewState?.status === "preparing" ? <p role="status">원본 미리보기를 준비하고 있어요</p> : null}
           {previewState?.status === "failed" ? <p role="alert">원본 미리보기를 준비하지 못했어요. 편집과 적용은 계속할 수 있어요.</p> : null}
           <p className="vb-editor-assets__card-target">{targetLabel(target)}</p>
@@ -134,7 +479,7 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
                   ? "유진이 먼저 고려해요."
                   : choice === "never"
                     ? "유진이 추천에서 빼요."
-                    : "유진에게 이 자산을 어떻게 다룰지 알려 줄 수 있어요."}
+                    : "유진에게 이 미디어를 어떻게 다룰지 알려 줄 수 있어요."}
               </p>
               <Button
                 className="vb-editor-assets__filter"
@@ -202,11 +547,122 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
           <div className="vb-editor-assets__actions">
             <Button type="button" aria-label={`${card.title} ${previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}`} disabled={!card.previewUrl || previewState?.status === "preparing"} onClick={() => onPreview(card)}>{previewState?.status === "failed" ? "다시 준비" : "원본 미리보기"}</Button>
             {previewState?.status === "failed" && onRefreshExactPreview ? <Button type="button" variant="outline" onClick={onRefreshExactPreview}>정확한 미리보기 새로고침</Button> : null}
-            <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>
+            {/* 사진이 장면에 닿는 길은 **둘**이다(owner 요청 2026-09-06):
+                화면 자체가 되거나(아래 `화면으로 깔기`), 화면 위에 얹히거나
+                (`화면에 얹기`). 사진 카드에서 `적용`이라는 이름을 쓰지 않는
+                이유는 두 길이 나란히 있을 때 그 이름이 어느 쪽인지 말해 주지
+                않기 때문이다 -- 눌러 보고 나서야 알게 된다. */}
+            {card.kind === "image"
+              ? <Button type="button" aria-label={`${card.title} 화면으로 깔기`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>화면으로 깔기</Button>
+              : <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>}
+            {/* 이미지만: 장면을 바꾸는 `적용`(B-roll)과 달리, 장면 위에 얹는다.
+                오버레이 endpoint와 렌더는 처음부터 있었는데 이미지를 고를 자리가
+                없었다 -- 자산 목록이 그 선택기다. */}
+            {onApplyOverlay && card.previewKind === "image" ? (
+              <Button type="button" aria-label={`${card.title} 화면에 얹기`} disabled={applyDisabled} onClick={() => target && onApplyOverlay(card, target.segmentId)}>화면에 얹기</Button>
+            ) : null}
+            {/* 독립 "미디어" 화면(2026-08-27 결정으로 편집기에 접힘, 2026-09-01
+                실행)의 유일한 고유 동작 중 하나. 라이브러리에서 들여온 프로젝트
+                소속 영상만 뺄 수 있다 -- 프로젝트 전용 업로드는 원본에서도
+                못 뺐다(`source_library_asset_id` 없음 = 버튼 자체가 안 뜬다). */}
+            {typeof card.sourceMetadata.brollMetadata?.source_library_asset_id === "string" && card.sourceMetadata.brollMetadata.source_library_asset_id ? (
+              <Button type="button" variant="outline" disabled={removingCardId !== null} aria-label={`${card.title} 프로젝트에서 빼기`} onClick={() => void removeFromProject(card)}>
+                {removingCardId === card.id ? "빼는 중" : "프로젝트에서 빼기"}
+              </Button>
+            ) : null}
           </div>
         </article>;
       })}
     </div>
-    {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 자산이 없어요.</p> : null}
+    {hiddenCount > 0 ? (
+      <Button type="button" variant="outline" className="vb-editor-assets__more" onClick={() => setShown((count) => count + FIRST_PAGE)}>
+        {`${hiddenCount}개 더 보기`}
+      </Button>
+    ) : null}
+    {visibleCards.length === 0 ? <p className="vb-editor-assets__empty">일치하는 미디어가 없어요.</p> : null}
+    {/* 원본만 확인하는 자리. 미디어를 다루는 탭 안에 두어야 찾을 수 있다. */}
+    {/* **접어 둔다(2026-09-04).** 이 둘은 미디어를 *찾는* 일과 무관한데 자산 격자
+        밑에 늘 펼쳐져 있어서 왼쪽 패널 1047px 중 284px(소스 확인 90 + 분석 194)을
+        차지했다 -- 캡컷 미디어 패널에는 이런 게 없다. 지우지는 않는다(쓰는
+        기능이다). 기본을 접어 두고 필요할 때 펴게 한다. */}
+    {pane === "media" && sourceCheck ? <details className="vb-editor-assets__aside">
+      <summary>원본 확인</summary>{sourceCheck}
+    </details> : null}
+    {pane === "media" && analysisPanel ? <details className="vb-editor-assets__aside">
+      <summary>미디어 분석</summary>{analysisPanel}
+    </details> : null}
+    </>}
   </section>;
+}
+
+/** 앞 장면에서 이 장면으로 넘어오는 방법을 고른다.
+ *
+ *  **기능을 새로 만들지 않았다.** 6종과 저장 명령(`set-transition`)은 오른쪽 속성
+ *  패널이 이미 갖고 있었다. 캡컷은 이것을 **왼쪽 패널 탭**에 두므로 자리만 옮겼다
+ *  (owner 결정 2026-08-27 "있는 것만 자리 맞추기"). 오른쪽 속성 패널의 것은 그대로
+ *  둔다 -- 거기서 길이까지 조절하는 사람이 있고, 없애는 것은 별도 결정이다. */
+/** 캡컷 `텍스트` 패널. 실측(2026-09-04)하니 `머리글 추가` / `본문 추가` 두 개의
+ *  전체 폭 단추가 전부였고, 고른 뒤 세부 조정은 **오른쪽 속성 패널**에서 한다.
+ *
+ *  우리도 `explanation-card` 오버레이로 화면 위 글자를 이미 끝까지 만들 수 있다
+ *  (`port.applyOverlay`, `EditorWorkbenchRoute.tsx:1122`). 없던 것은 **왼쪽에서
+ *  더하는 자리**뿐이라 그것만 만든다 -- 새 기능이 아니라 부르는 자리다.
+ *
+ *  글자를 여기서 입력받지 않는 이유: 캡컷도 단추만 누르면 기본 글자가 얹히고
+ *  고치는 것은 속성 패널이다. 두 곳에서 고치게 하면 어느 쪽이 정본인지 흐려진다. */
+function TextPane({
+  target,
+  disabled,
+  onInspectorAction,
+}: {
+  target: EditorAssetTarget | null;
+  disabled: boolean;
+  onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+}) {
+  const segmentId = target?.segmentId ?? null;
+  const add = (kind: "머리글" | "본문") => {
+    if (!segmentId || !onInspectorAction) return;
+    const text = kind === "머리글" ? "머리글" : "본문";
+    void onInspectorAction({
+      kind: "save-overlay",
+      overlayKind: "explanation-card",
+      segmentId,
+      title: kind === "머리글" ? text : "",
+      body: kind === "본문" ? text : "",
+      text,
+    });
+  };
+  return <div className="vb-editor-assets__text-pane">
+    <p className="vb-editor-assets__target">{target ? targetLabel(target) : "글자를 얹을 장면을 먼저 선택하세요."}</p>
+    <Button type="button" variant="outline" disabled={disabled || !segmentId} onClick={() => add("머리글")}>머리글 추가</Button>
+    <Button type="button" variant="outline" disabled={disabled || !segmentId} onClick={() => add("본문")}>본문 추가</Button>
+    <p className="vb-editor-assets__hint">얹은 뒤 글자·크기·자리는 오른쪽 세부 정보에서 고쳐요.</p>
+  </div>;
+}
+
+function TransitionPane({
+  target,
+  disabled,
+  onInspectorAction,
+}: {
+  target?: Readonly<{ segmentId: string; hasPrevious: boolean }> | null;
+  disabled: boolean;
+  onInspectorAction?: (action: InspectorAction) => void | Promise<void>;
+}) {
+  if (!target) return <p className="vb-editor-assets__empty">장면을 먼저 고르면 넘어오는 방법을 고를 수 있어요.</p>;
+  if (!target.hasPrevious) return <p className="vb-editor-assets__empty">첫 장면에는 넘어올 앞 장면이 없어요.</p>;
+  const apply = (value: string | null) => onInspectorAction?.({
+    kind: "set-transition",
+    segmentId: target.segmentId,
+    transition: value === null ? null : { type: value, durationSec: DEFAULT_SCENE_TRANSITION_DURATION_SEC },
+  });
+  return <div className="vb-editor-assets__transitions">
+    <p className="vb-editor-assets__detail">고른 장면으로 넘어올 때의 모습입니다.</p>
+    <Button type="button" variant="outline" disabled={disabled || !onInspectorAction} onClick={() => void apply(null)}>바로 넘기기 적용</Button>
+    {SCENE_TRANSITION_CHOICES.map((choice) => (
+      <Button key={choice.value} type="button" variant="outline" disabled={disabled || !onInspectorAction} onClick={() => void apply(choice.value)}>
+        {`${choice.label} 적용`}
+      </Button>
+    ))}
+  </div>;
 }

@@ -74,7 +74,9 @@ _PRIVATE_KEY_PEM = re.compile(
 
 
 class _StrictFrozenModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
+    )
 
 
 def _bounded_utf8(value: str, *, limit: int, label: str) -> str:
@@ -164,6 +166,16 @@ class OverlayTarget(_TargetWithSegment):
 
 class OutputCheckTarget(_StrictFrozenModel):
     track_id: Literal["output-primary"]
+
+
+class OutputVariantTarget(_StrictFrozenModel):
+    variant_id: str = Field(min_length=1, max_length=256)
+    track_id: Literal["output-variant"]
+
+    @field_validator("variant_id")
+    @classmethod
+    def variant_id_fits_utf8(cls, value: str) -> str:
+        return _validated_model_id(value, label="variant_id")
 
 
 class _Parameters(_StrictFrozenModel):
@@ -320,6 +332,66 @@ class OutputCheckParameters(_Parameters):
     check: Literal["timeline_gaps"]
 
 
+class VariantCropParameters(_Parameters):
+    action: Literal["set_crop"]
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def crop_stays_in_frame(self):
+        if self.x + self.width > 1 or self.y + self.height > 1:
+            raise ValueError("variant_crop_out_of_bounds")
+        return self
+
+
+class VariantFocalParameters(_Parameters):
+    action: Literal["set_focal"]
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
+class VariantCaptionLayoutParameters(_Parameters):
+    action: Literal["set_caption_layout"]
+    layout: Literal["top", "center", "bottom"]
+    max_lines: int = Field(ge=1, le=3)
+    font_scale: float = Field(ge=0.75, le=1.5)
+
+
+class VariantSafeAreaParameters(_Parameters):
+    action: Literal["set_safe_area"]
+    top_percent: int = Field(ge=0, le=40)
+    right_percent: int = Field(ge=0, le=40)
+    bottom_percent: int = Field(ge=0, le=40)
+    left_percent: int = Field(ge=0, le=40)
+
+    @model_validator(mode="after")
+    def safe_area_leaves_renderable_frame(self):
+        if self.left_percent + self.right_percent >= 100:
+            raise ValueError("variant_safe_area_horizontal_empty")
+        if self.top_percent + self.bottom_percent >= 100:
+            raise ValueError("variant_safe_area_vertical_empty")
+        return self
+
+
+class VariantAudioCorrectionParameters(_Parameters):
+    action: Literal["correct_audio"]
+    gain_db: float = Field(ge=-12, le=12)
+    fade_in_sec: float = Field(ge=0, le=10)
+    fade_out_sec: float = Field(ge=0, le=10)
+
+
+VariantParameters = Annotated[
+    VariantCropParameters
+    | VariantFocalParameters
+    | VariantCaptionLayoutParameters
+    | VariantSafeAreaParameters
+    | VariantAudioCorrectionParameters,
+    Field(discriminator="action"),
+]
+
+
 class _Operation(_StrictFrozenModel):
     operation_id: str = Field(min_length=1, max_length=256)
     preview_summary: str = Field(min_length=1, max_length=512)
@@ -387,6 +459,13 @@ class OutputCheckOperation(_Operation):
     requires_materialization: Literal[False]
 
 
+class OutputVariantOperation(_Operation):
+    kind: Literal["output_variant"]
+    target: OutputVariantTarget
+    parameters: VariantParameters
+    requires_materialization: Literal[False]
+
+
 YujinOperation = Annotated[
     BrollOperation
     | BgmOperation
@@ -394,7 +473,8 @@ YujinOperation = Annotated[
     | CaptionOperation
     | VoiceOperation
     | OverlayOperation
-    | OutputCheckOperation,
+    | OutputCheckOperation
+    | OutputVariantOperation,
     Field(discriminator="kind"),
 ]
 
@@ -404,6 +484,8 @@ class YujinProposal(_StrictFrozenModel):
     base_revision: str = Field(min_length=1, max_length=768)
     title: str = Field(min_length=1, max_length=256)
     rationale: str = Field(min_length=1, max_length=1024)
+    variant_id: str | None = Field(default=None, min_length=1, max_length=256)
+    base_variant_revision: int | None = Field(default=None, ge=1)
     operations: tuple[YujinOperation, ...] = Field(min_length=1, max_length=16)
 
     @field_validator("proposal_id")
@@ -427,11 +509,31 @@ class YujinProposal(_StrictFrozenModel):
             raise ValueError("unsafe_proposal_rationale")
         return bounded
 
+    @field_validator("variant_id")
+    @classmethod
+    def variant_id_fits_utf8(cls, value: str | None) -> str | None:
+        return (
+            _validated_model_id(value, label="variant_id")
+            if value is not None
+            else None
+        )
+
     @model_validator(mode="after")
     def unique_operation_ids(self):
         operation_ids = [operation.operation_id for operation in self.operations]
         if len(operation_ids) != len(set(operation_ids)):
             raise ValueError("duplicate_operation_id")
+        has_variant_operation = any(
+            operation.kind == "output_variant" for operation in self.operations
+        )
+        if has_variant_operation and (
+            self.variant_id is None or self.base_variant_revision is None
+        ):
+            raise ValueError("variant_identity_required")
+        if not has_variant_operation and (
+            self.variant_id is not None or self.base_variant_revision is not None
+        ):
+            raise ValueError("variant_identity_without_variant_operation")
         return self
 
 
@@ -482,6 +584,7 @@ def validate_yujin_creator_response(
         "voice": "recommendation_only",
         "overlay": "recommendation_only",
         "output_check": "read_only",
+        "output_variant": "recommendation_only",
     }
     expected_tracks = {
         "broll": "video-primary",
@@ -491,6 +594,7 @@ def validate_yujin_creator_response(
         "voice": "voice-primary",
         "overlay": "video-overlay",
         "output_check": "output-primary",
+        "output_variant": "output-variant",
     }
     compatible_media = {
         "broll": {"raw_video", "broll_video", "image"},
@@ -508,6 +612,21 @@ def validate_yujin_creator_response(
         if controls.get(operation.kind) != expected_modes[operation.kind]:
             raise ValueError("proposal_operation_unsupported")
         target = operation.target
+        if operation.kind == "output_variant":
+            if (
+                context.current_surface not in {"edit", "review", "output"}
+                or context.selection_kind != "variant"
+                or context.master_session_id != context.session_id
+                or context.master_session_revision != context.session_revision
+                or context.variant_id is None
+                or context.variant_kind is None
+                or context.variant_revision is None
+                or proposal.variant_id != context.variant_id
+                or proposal.base_variant_revision != context.variant_revision
+                or target.variant_id != context.variant_id
+            ):
+                raise ValueError("proposal_variant_identity_not_current")
+            continue
         if operation.kind in segment_required and target.segment_id not in segment_ids:
             raise ValueError("proposal_target_segment_not_current")
         if operation.kind in script_required and (

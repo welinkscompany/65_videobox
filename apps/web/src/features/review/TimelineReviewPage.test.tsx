@@ -70,6 +70,7 @@ const approval = (projectId = "project-a", timelineId = "timeline-a", status = "
   review_status: status,
   approved_at: status === "approved" ? "2026-07-23T00:02:00Z" : null,
   updated_at: "2026-07-23T00:02:00Z",
+  source_session_id: `session-${projectId}`,
   source_session_revision: 4,
   is_current: true,
   invalidated_at: null,
@@ -89,7 +90,6 @@ describe("TimelineReviewPage", () => {
     const onOpenSegment = vi.fn();
     const approveTimeline = vi.spyOn(api, "approveTimeline");
     const reopenTimeline = vi.spyOn(api, "reopenTimeline");
-    const approveRecommendation = vi.spyOn(api, "approveReviewRecommendation");
     render(<TimelineReviewPage projectId="project-a" onOpenSegment={onOpenSegment} />);
 
     expect(screen.getByText("검토 내용을 불러오는 중이에요.")).toBeVisible();
@@ -112,7 +112,6 @@ describe("TimelineReviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "검토 승인" }));
     await waitFor(() => expect(approveTimeline).toHaveBeenCalledWith("project-a", "job-project-a"));
     // Recommendation approve/reject stays out of scope for now.
-    expect(approveRecommendation).not.toHaveBeenCalled();
     expect(reopenTimeline).not.toHaveBeenCalled();
   });
 
@@ -150,7 +149,9 @@ describe("TimelineReviewPage", () => {
     vi.mocked(api.getLatestEditingSession).mockResolvedValue(session());
     vi.mocked(api.listJobs).mockResolvedValueOnce([timelineJob("project-a", "timeline-other")]);
     fireEvent.click(screen.getByRole("button", { name: "다시 확인" }));
-    expect(await screen.findByText("현재 편집본과 맞는 검토본이 없어요.")).toBeVisible();
+    expect(await screen.findByText("아직 검토할 편집본이 없어요. 편집 화면에서 장면을 채우고 저장하면 여기에서 완성본을 만들 수 있어요.")).toBeVisible();
+    // 막다른 길을 만들지 않는다: `다시 확인`은 같은 답만 되풀이한다.
+    expect(screen.getByRole("link", { name: "편집으로 돌아가기" })).toHaveAttribute("href", "/projects/project-a/editor?session_id=session-project-a");
 
     vi.mocked(api.listJobs).mockRejectedValueOnce(new Error("offline"));
     fireEvent.click(screen.getByRole("button", { name: "다시 확인" }));
@@ -166,7 +167,9 @@ describe("TimelineReviewPage", () => {
     vi.mocked(api.getReviewApproval).mockResolvedValue({ ...approval(), is_current: false, invalidated_reason: "edited" });
     render(<TimelineReviewPage projectId="project-a" />);
 
-    expect(await screen.findByText("이 검토본은 현재 편집본과 맞지 않아요. 다시 확인해 주세요.")).toBeVisible();
+    expect(await screen.findByText("이 검토본은 현재 편집본과 맞지 않아요. 현재 편집본으로 다시 만들어 주세요.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "현재 편집본으로 검토본 다시 만들기" })).toBeVisible();
+    expect(screen.getByRole("link", { name: "편집으로 돌아가기" })).toHaveAttribute("href", "/projects/project-a/editor?session_id=session-project-a");
     expect(screen.queryByRole("button", { name: "검토 승인" })).toBeNull();
   });
 
@@ -178,8 +181,8 @@ describe("TimelineReviewPage", () => {
     const refreshReview = vi.spyOn(api, "refreshReviewForCurrentEdit").mockResolvedValue({ ...approval(), review_status: "draft" });
     render(<TimelineReviewPage projectId="project-a" />);
 
-    expect(await screen.findByText("이 검토본은 현재 편집본과 맞지 않아요. 다시 확인해 주세요.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "검토 다시 받기" }));
+    expect(await screen.findByText("편집이 바뀌어서 이 검토본은 현재 편집본과 맞지 않아요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "현재 편집본으로 검토본 다시 만들기" }));
 
     await waitFor(() => expect(refreshReview).toHaveBeenCalledWith("project-a", "session-project-a"));
     expect(await screen.findByRole("heading", { name: "영상 검토" })).toBeVisible();
@@ -191,7 +194,7 @@ describe("TimelineReviewPage", () => {
     vi.spyOn(api, "refreshReviewForCurrentEdit").mockRejectedValue(new Error("offline"));
     render(<TimelineReviewPage projectId="project-a" />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "검토 다시 받기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "현재 편집본으로 검토본 다시 만들기" }));
 
     expect(await screen.findByText("검토본을 다시 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.")).toBeVisible();
   });
@@ -211,13 +214,12 @@ describe("TimelineReviewPage", () => {
         review_flags: [{ code: " AUDIO-CHECK ", segment_id: "segment-1", message: "타임라인의 이전 소리 설명" }],
       },
     });
-    const approveRecommendation = vi.spyOn(api, "approveReviewRecommendation");
     render(<TimelineReviewPage projectId="project-a" />);
 
     expect(await screen.findByText("검토 화면의 소리를 확인해 주세요.")).toBeVisible();
     expect(screen.queryByText("타임라인의 이전 소리 설명")).toBeNull();
     expect(screen.getAllByText("둘째 장면을 더 잘 보여줘요.")).toHaveLength(1);
-    expect(screen.getAllByText("종류: B-roll")).toHaveLength(1);
+    expect(screen.getAllByText("종류: 영상")).toHaveLength(1);
     expect(screen.getAllByText("대상: 2번째 장면 · 둘째 장면")).toHaveLength(1);
     expect(screen.getByText("대상: 1번째 장면 · 첫 장면")).toBeVisible();
     expect(screen.getAllByText("편집본·검토 화면에서 확인")).toHaveLength(2);
@@ -225,14 +227,12 @@ describe("TimelineReviewPage", () => {
     // Blockers are present, so approval is offered but held shut.
     expect(screen.getByRole("button", { name: "검토 승인" })).toBeDisabled();
     expect(screen.queryByRole("button", { name: /검토 다시 열기|이 추천 승인/ })).toBeNull();
-    expect(approveRecommendation).not.toHaveBeenCalled();
   });
 
   it("keeps an already approved review read-only and calls no mutation endpoint", async () => {
     vi.mocked(api.getReviewApproval).mockResolvedValue(approval("project-a", "timeline-a", "approved"));
     const approveTimeline = vi.spyOn(api, "approveTimeline");
     const reopenTimeline = vi.spyOn(api, "reopenTimeline");
-    const approveRecommendation = vi.spyOn(api, "approveReviewRecommendation");
     render(<TimelineReviewPage projectId="project-a" />);
 
     expect(await screen.findByText("현재 편집본의 검토가 승인되었어요.")).toBeVisible();
@@ -242,7 +242,6 @@ describe("TimelineReviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "검토 다시 열기" }));
     await waitFor(() => expect(reopenTimeline).toHaveBeenCalledWith("project-a", "job-project-a"));
     expect(approveTimeline).not.toHaveBeenCalled();
-    expect(approveRecommendation).not.toHaveBeenCalled();
   });
 
   it("fences a late project A detail response after switching to B", async () => {
@@ -275,13 +274,11 @@ describe("TimelineReviewPage", () => {
       recommendation_type: "music",
       reason: "검토 화면의 충돌 설명",
     }]));
-    const approveRecommendation = vi.spyOn(api, "approveReviewRecommendation");
     render(<TimelineReviewPage projectId="project-a" />);
 
     expect(await screen.findByText("같은 추천의 내용이 서로 달라 안전하게 표시할 수 없어요. 다시 확인해 주세요.")).toBeVisible();
     expect(screen.queryByText("타임라인의 충돌 설명")).toBeNull();
     expect(screen.queryByText("검토 화면의 충돌 설명")).toBeNull();
     expect(screen.queryByRole("button", { name: "이 추천 승인" })).toBeNull();
-    expect(approveRecommendation).not.toHaveBeenCalled();
   });
 });

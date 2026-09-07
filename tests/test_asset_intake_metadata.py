@@ -14,6 +14,8 @@ import pytest
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_storage.local_project_store import LocalProjectStore
 
+from conftest import wait_for
+
 
 def _write_video(path: Path, *, size: str, with_audio: bool, duration: int = 2) -> Path:
     command = ["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc=duration={duration}:size={size}:rate=15"]
@@ -249,6 +251,6 @@ def test_the_running_app_refills_missing_media_facts_without_being_asked(
     )
     app.state.store.bootstrap_project("영상 정보")
     with TestClient(app):
-        time.sleep(0.4)
+        wait_for(lambda: bool(calls))
 
     assert calls, "빠진 영상 정보를 찾는 패스가 돌지 않았다"

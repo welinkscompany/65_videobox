@@ -12,9 +12,14 @@ import {
   type ReviewSnapshot,
   type SubtitleJob,
   type TimelineJob,
+  type VariantRenderItem,
+  ApiRequestError,
 } from "../api";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { VariantOutputCard } from "../features/outputs/VariantOutputCard";
+import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
 
 type ExactPreviewState = "current" | "pending" | "running" | "failed" | "stale" | "unavailable" | "unknown";
 
@@ -26,6 +31,8 @@ type OutputState = {
   review: ReviewSnapshot | null;
   approval: ReviewApproval | null;
   subtitle: SubtitleJob | null;
+  // 자막 실패 이유는 `SubtitleJob`이 아니라 **작업 기록**에 있다.
+  subtitleRecord: JobRecord | null;
   finalJobs: JobRecord[];
   finalJob: JobRecord | null;
   finalRender: FinalRenderJob | null;
@@ -77,6 +84,65 @@ function deriveExactPreviewState(
     Boolean(manifest.exact_preview.url) &&
     manifest.exact_preview.artifact_revision === session.session_revision
   ) ? "current" : "stale";
+}
+
+// 백엔드가 실패 이유를 코드로 보내 준다. 옮길 문구가 없는 코드는 그대로
+// 흘려보내지 않고 원래 쓰던 한 줄로 돌아간다 -- 화면에 영어를 띄우느니
+// 덜 구체적인 편이 낫다.
+const FINAL_RENDER_FAILURES: Record<string, string> = {
+  final_output_requires_review_approval: "검토에서 아직 승인하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요.",
+  draft_bundle_gap_blocks_final_and_capcut_output: "장면이 비어 있는 구간이 있어요. 그 구간에 영상을 넣은 뒤 다시 만들어 주세요.",
+  // 빈 편집판에서 바로 누른 경우다. 엔진은 문장으로 보낸다(`local_pipeline`의
+  // 합성 단계) -- 코드가 아니어서 표에 없으면 "완성본을 만들지 못했어요"로
+  // 뭉개졌고, 정작 할 일(영상 넣기)이 화면에서 사라졌다(2026-09-06 실측).
+  "Timeline has no composable clips to render.": "아직 넣은 영상이 없어요. 편집 화면에서 영상이나 사진을 넣은 뒤 다시 만들어 주세요.",
+};
+
+/** 무엇이 낡아서 막혔는지. 엔진은 `stale_output_asset: <사유>` 한 코드에 여러
+ *  사유를 실어 보낸다(`output_source_verifier.py`) -- 정확히 일치하는 표로는
+ *  이 무리를 통째로 놓친다. 사유는 앞에서부터 맞춰 본다. */
+const STALE_OUTPUT_REASONS: ReadonlyArray<readonly [string, string]> = [
+  ["subtitle", "편집을 고친 뒤 자막을 다시 만들지 않았어요. 자막을 먼저 만든 다음 완성본을 만들어 주세요."],
+  ["review", "편집을 고친 뒤 검토를 다시 하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요."],
+  ["editing session", "편집본이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요."],
+  ["timeline is not the active", "지금 편집본이 아닌 다른 편집본으로 만들려고 했어요. 화면을 새로 고쳐 주세요."],
+  ["content SHA-256", "쓰던 파일이 바뀌었어요. 그 파일을 다시 넣은 뒤 만들어 주세요."],
+  ["media revision", "쓰던 파일이 바뀌었어요. 그 파일을 다시 넣은 뒤 만들어 주세요."],
+  ["missing or unavailable", "쓰던 파일을 찾지 못했어요. 그 파일이 자리에 있는지 확인해 주세요."],
+  ["asset identity", "쓰던 파일이 다른 것으로 바뀌었어요. 그 파일을 다시 넣어 주세요."],
+  ["variant", "가로세로 변형본이 그 사이에 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요."],
+];
+
+export function finalRenderFailureMessage(reason: string | null | undefined) {
+  return outputFailureMessage(reason, "완성본을 만들지 못했어요.");
+}
+
+/** 자막과 CapCut 초안도 같은 실패를 낸다. 한 화면에서 어떤 칸은 이유를 말하고
+ *  어떤 칸은 안 말하면 그게 더 헷갈린다 -- 기본 문구만 다르고 사유 표는 같이 쓴다. */
+export function subtitleFailureMessage(reason: string | null | undefined) {
+  return outputFailureMessage(reason, "자막을 만들지 못했어요.");
+}
+
+export function capcutDraftFailureMessage(reason: string | null | undefined) {
+  return outputFailureMessage(reason, "CapCut 초안을 만들지 못했어요.");
+}
+
+function outputFailureMessage(reason: string | null | undefined, fallback: string) {
+  const trimmed = reason?.trim();
+  if (!trimmed) return fallback;
+  const mapped = FINAL_RENDER_FAILURES[trimmed];
+  if (mapped) return mapped;
+  if (trimmed.startsWith("stale_output_asset")) {
+    const detail = trimmed.slice("stale_output_asset".length).replace(/^:\s*/, "");
+    // 사유는 문장이라 낱말이 가운데 오기도 한다("materialized source is
+    // missing or unavailable") -- 앞머리 대신 포함으로 맞춘다. 목록은 위에서부터
+    // 보므로 더 구체적인 것을 먼저 적는다.
+    const known = STALE_OUTPUT_REASONS.find(([needle]) => detail.includes(needle));
+    // 사유는 엔진이 늘리는 자리다. 모르는 사유라도 **무언가 낡았다**는 것은
+    // 확실하니 그만큼은 말한다 -- 코드를 그대로 띄우지는 않는다.
+    return known?.[1] ?? "만들려는 사이에 무언가 바뀌었어요. 화면을 새로 고친 뒤 다시 만들어 주세요.";
+  }
+  return fallback;
 }
 
 function exactPreviewDescription(state: ExactPreviewState | undefined) {
@@ -278,18 +344,84 @@ function needsCapcutHandoffFailureFallback(
   return !hasDurableProgress;
 }
 
-export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; onOpenEditor: () => void }) {
+/** 검토 화면과 한 단계로 합쳐질 때, 그쪽이 이미 읽은 값을 받아 쓰기 위한 창구.
+ *
+ * 주지 않으면(단독으로 쓸 때) 지금까지처럼 이 화면이 직접 읽는다. 주면 편집본·
+ * 작업 목록·타임라인·검토본·승인 기록을 다시 묻지 않는다 -- 한 화면에서 같은 것을
+ * 두 번 물으면 요청이 두 배가 될 뿐 아니라 두 영역이 서로 다른 사실을 볼 수 있다.
+ */
+export type SharedTimelineRead = Readonly<{
+  session: EditingSession | null;
+  jobs: readonly JobRecord[];
+  job: JobRecord | null;
+  timeline: TimelineJob | null;
+  review: ReviewSnapshot | null;
+  approval: ReviewApproval | null;
+}>;
+
+export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, reviewInline = false }: {
+  projectId: string;
+  onOpenEditor: () => void;
+  shared?: SharedTimelineRead;
+  onSharedRefresh?: () => Promise<SharedTimelineRead>;
+  /** 이 화면 위에 검토 내용이 이미 같은 화면·같은 팝업 안에 보이고 있는가.
+   *  `ReviewAndOutputPage`가 그 경우 이 값을 준다 -- 그때는 체크리스트의
+   *  "검토" 항목이 통째로 `/review`로 이동시키는 링크를 내지 않는다. 승인
+   *  전이라는 사실 자체는 여전히 보여준다.
+   *
+   *  실측(2026-08-30, 브라우저)으로 확인된 것도 이 값으로 함께 고친다 --
+   *  이 값이 참이면 위(`TimelineReviewSections`)가 이미 이 화면의 `<h1>`과
+   *  전체 aria-live 알림을 맡고 있으므로, 여기서 또 `<h1>`·`aria-live`를
+   *  내면 한 화면에 최상위 제목·알림 영역이 두 벌 생긴다. */
+  reviewInline?: boolean;
+}) {
+  // `reviewInline`일 때는 `TimelineReviewSections`가 이미 이 화면의 <h1>과
+  // aria-live 알림을 맡는다 -- 그 아래 절은 <h2>로 내려가고, 알림 영역은
+  // 중복해서 만들지 않는다.
+  const HeadingTag = reviewInline ? "h2" : "h1";
+  const pageLiveRegion = reviewInline ? undefined : "polite";
   const [state, setState] = useState<OutputState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorProjectId, setErrorProjectId] = useState<string | null>(null);
   const [isRenderingSubtitle, setIsRenderingSubtitle] = useState(false);
   const [subtitleErrorProjectId, setSubtitleErrorProjectId] = useState<string | null>(null);
+  // 서버가 시작 자체를 거절했을 때의 이유. 그런 실패는 작업이 안 생긴다.
+  const [subtitleRejectedReason, setSubtitleRejectedReason] = useState<string | null>(null);
   const [isRenderingFinal, setIsRenderingFinal] = useState(false);
   const [finalErrorProjectId, setFinalErrorProjectId] = useState<string | null>(null);
+  // 서버가 **시작 자체를 거절**했을 때의 이유. 그런 실패는 작업이 아예 안
+  // 생기므로 `finalRender.error_message`에 남지 않는다 -- 예전에는 catch가
+  // 예외를 통째로 버려서 화면이 "완성본을 만들지 못했어요"밖에 못 했다.
+  const [finalRejectedReason, setFinalRejectedReason] = useState<string | null>(null);
+  const [formatName, setFormatName] = useState("");
+  const [formatSavedProjectId, setFormatSavedProjectId] = useState<string | null>(null);
+  const [isSavingFormat, setIsSavingFormat] = useState(false);
+  // owner 요청(2026-08-28): 프리뷰 공유 링크. 프로젝트별로 기억해 다른 프로젝트로
+  // 넘어가면 앞서 만든 링크가 남아 보이지 않게 한다.
+  const [previewShareProjectId, setPreviewShareProjectId] = useState<string | null>(null);
+  const [previewShareUrl, setPreviewShareUrl] = useState<string | null>(null);
+  const [previewShareId, setPreviewShareId] = useState<string | null>(null);
+  const [isCreatingPreviewShare, setIsCreatingPreviewShare] = useState(false);
+  const [previewShareErrorProjectId, setPreviewShareErrorProjectId] = useState<string | null>(null);
+  // 코드리뷰로 발견(2026-08-28): 만드는 단추만 있고 되돌리는 단추가 없었다 --
+  // 토큰 하나가 인증 전부인 기능이라, 취소할 길이 만드는 길만큼 중요하다.
+  const [isRevokingPreviewShare, setIsRevokingPreviewShare] = useState(false);
+  const [previewShareRevoked, setPreviewShareRevoked] = useState(false);
+  // 판단은 프로젝트별로 기억한다. 프로젝트를 바꾸면 앞 프로젝트의 안내가 남으면 안 된다.
+  const [verdictProjectId, setVerdictProjectId] = useState<string | null>(null);
+  const [verdictSaved, setVerdictSaved] = useState<"good" | "bad" | null>(null);
+  const [isSavingVerdict, setIsSavingVerdict] = useState(false);
   const [isExportingCapcutDraft, setIsExportingCapcutDraft] = useState(false);
   const [capcutErrorProjectId, setCapcutErrorProjectId] = useState<string | null>(null);
+  const [capcutRejectedReason, setCapcutRejectedReason] = useState<string | null>(null);
   const [isRegisteringCapcutHandoff, setIsRegisteringCapcutHandoff] = useState(false);
   const [capcutHandoffErrorProjectId, setCapcutHandoffErrorProjectId] = useState<string | null>(null);
+  const [variantOptions, setVariantOptions] = useState<{ variant_id: string; kind: string }[]>([]);
+  const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
+  const [variantItems, setVariantItems] = useState<VariantRenderItem[]>([]);
+  const [confirmedVariantIds, setConfirmedVariantIds] = useState<string[]>([]);
+  const [isRenderingVariants, setIsRenderingVariants] = useState(false);
+  const [variantError, setVariantError] = useState(false);
   const requestEpoch = useRef(0);
   const subtitleSubmissionEpoch = useRef(0);
   const finalSubmissionEpoch = useRef(0);
@@ -304,8 +436,18 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const capcutInFlightTimelineKey = useRef<string | null>(null);
   const capcutHandoffInFlightJobKey = useRef<string | null>(null);
   currentProjectId.current = projectId;
+  // `shared`는 읽을 때마다 새 객체다. 이걸 `refresh`의 의존성에 두면 새 값이
+  // 올 때마다 `refresh`가 다시 만들어지고, 그 effect가 또 읽어서 끝없이 돈다.
+  // 읽기는 `onSharedRefresh`(안정적)로만 걸고 값 자체는 ref로 본다.
+  const sharedRef = useRef(shared);
+  sharedRef.current = shared;
+  // CapCut 상태는 검토 쪽 승인 여부와 무관하다 -- `shared`가 새로 채워질
+  // 때마다(`reuseShared: true`로 다시 도는 재동기화, 511행 effect 주석 참고)
+  // 다시 물을 이유가 없다. 실측(2026-08-30)으로 한 화면에서 이 호출이
+  // 두 번 나가는 것을 확인했다. 프로젝트를 바꾸면 캐시를 버린다.
+  const diagnosticsRef = useRef<{ projectId: string; value: CapCutHandoffDiagnostics | null } | null>(null);
 
-  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null }) => {
+  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null; reuseShared?: boolean }) => {
     const refreshProjectId = projectId;
     const epoch = requestEpoch.current + 1;
     requestEpoch.current = epoch;
@@ -314,14 +456,26 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setIsLoading(true);
     setErrorProjectId(null);
     try {
-      const [session, jobs] = await Promise.all([
-        api.getLatestEditingSession(refreshProjectId),
-        options?.jobs ? Promise.resolve(options.jobs) : api.listJobs(refreshProjectId),
-      ]);
+      // 합쳐진 화면에서는 검토 쪽이 이미 읽은 값을 그대로 쓴다. 그쪽 refresh가
+      // 읽은 값을 돌려주므로, prop이 다시 내려오길 기다리지 않고 바로 이어서
+      // 판단할 수 있다.
+      // 처음 그릴 때는 검토 쪽이 이미 읽은 값을 그대로 쓴다(`reuseShared`).
+      // 다시 읽는 것은 이 화면이 무언가를 바꾼 뒤뿐이고, 그때만 공유 읽기를 부른다.
+      const sharedRead = onSharedRefresh && !options?.reuseShared
+        ? await onSharedRefresh()
+        : sharedRef.current ?? null;
+      const [session, jobs] = sharedRead
+        ? [sharedRead.session, options?.jobs ?? [...sharedRead.jobs]]
+        : await Promise.all([
+          api.getLatestEditingSession(refreshProjectId),
+          options?.jobs ? Promise.resolve(options.jobs) : api.listJobs(refreshProjectId),
+        ]);
       if (!isCurrentRequest()) return;
-      const timelineJob = session
-        ? mostRecentJob(jobs.filter((job) => job.status === "succeeded" && job.output_ref === session.timeline_id), "timeline_build")
-        : null;
+      const timelineJob = sharedRead
+        ? sharedRead.job
+        : session
+          ? mostRecentJob(jobs.filter((job) => job.status === "succeeded" && job.output_ref === session.timeline_id), "timeline_build")
+          : null;
       const subtitleRecord = timelineJob ? mostRecentJob(jobs, "subtitle_render", timelineJob.job_id) : null;
       const finalJobs = timelineJob ? jobs.filter((job) => job.job_type === "final_render" && job.input_ref === timelineJob.job_id) : [];
       const finalJob = timelineJob ? mostRecentJob(finalJobs, "final_render") : mostRecentJob(jobs, "final_render");
@@ -329,9 +483,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       const capcutJob = timelineJob ? mostRecentJob(capcutJobs, "capcut_draft_export") : null;
       let exactPreviewReadFailed = false;
       const [timeline, review, approval, subtitle, finalRender, capcutDraft, diagnostics, playbackManifest] = await Promise.all([
-        timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
-        timelineJob ? api.getReviewSnapshot(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
-        timelineJob && session ? api.getReviewApproval(refreshProjectId, session.timeline_id) : Promise.resolve(null),
+        sharedRead ? Promise.resolve(sharedRead.timeline) : timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
+        sharedRead ? Promise.resolve(sharedRead.review) : timelineJob ? api.getReviewSnapshot(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
+        sharedRead ? Promise.resolve(sharedRead.approval) : timelineJob && session ? api.getReviewApproval(refreshProjectId, session.timeline_id) : Promise.resolve(null),
         options?.subtitle && session && options.subtitle.subtitle.timeline_id === session.timeline_id
           ? Promise.resolve(options.subtitle)
           : subtitleRecord ? api.getSubtitle(refreshProjectId, subtitleRecord.job_id) : Promise.resolve(null),
@@ -341,7 +495,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         options?.capcutDraft && capcutJob && options.capcutDraft.job_id === capcutJob.job_id
           ? Promise.resolve(options.capcutDraft)
           : capcutJob ? api.getCapcutDraftExport(refreshProjectId, capcutJob.job_id) : Promise.resolve(null),
-        api.getCapcutHandoffDiagnostics().catch(() => null),
+        options?.reuseShared && diagnosticsRef.current?.projectId === refreshProjectId
+          ? Promise.resolve(diagnosticsRef.current.value)
+          : api.getCapcutHandoffDiagnostics().catch(() => null),
         session
           ? api.getEditorPlaybackManifest(refreshProjectId, session.session_id).catch(() => {
             exactPreviewReadFailed = true;
@@ -350,6 +506,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           : Promise.resolve(null),
       ]);
       if (!isCurrentRequest()) return;
+      diagnosticsRef.current = { projectId: refreshProjectId, value: diagnostics };
       setSubtitleErrorProjectId(null);
       setFinalErrorProjectId(null);
       setCapcutErrorProjectId(null);
@@ -362,6 +519,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         review,
         approval,
         subtitle,
+        subtitleRecord,
         finalJobs,
         finalJob,
         finalRender,
@@ -380,8 +538,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     } finally {
       if (isCurrentRequest()) setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, onSharedRefresh]);
 
+  const variantSession = state?.projectId === projectId ? state.session : null;
   useEffect(() => {
     subtitleSubmissionEpoch.current += 1;
     finalSubmissionEpoch.current += 1;
@@ -402,7 +561,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     setCapcutErrorProjectId(null);
     setIsRegisteringCapcutHandoff(false);
     setCapcutHandoffErrorProjectId(null);
-    void refresh();
+    void refresh({ reuseShared: true });
     return () => {
       requestEpoch.current += 1;
       subtitleSubmissionEpoch.current += 1;
@@ -410,7 +569,33 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       capcutSubmissionEpoch.current += 1;
       capcutHandoffSubmissionEpoch.current += 1;
     };
-  }, [refresh]);
+    // 합쳐진 화면에서는 검토 쪽 읽기가 끝나 `shared`가 채워질 때 다시 그린다.
+    // 그 값 없이 먼저 그리면 아직 아무것도 없는 상태만 보인다.
+  }, [refresh, shared]);
+
+  useEffect(() => {
+    let active = true;
+    setVariantOptions([]);
+    setSelectedVariantIds([]);
+    setVariantItems([]);
+    setConfirmedVariantIds([]);
+    setVariantError(false);
+    if (!variantSession) return () => { active = false; };
+    void api.listOutputVariants(projectId, variantSession.session_id).then((result) => {
+      if (!active) return;
+      try {
+        if (!active) return;
+        const options = result.variants
+          .filter((variant) => variant.kind === "horizontal" || variant.kind === "vertical_full" || variant.kind === "vertical_highlight")
+          .map((variant) => ({ variant_id: variant.variant_id, kind: variant.kind }));
+        setVariantOptions(options);
+        setSelectedVariantIds(options.filter((variant) => variant.kind !== "vertical_highlight").map((variant) => variant.variant_id));
+      } catch { if (active) setVariantError(true); }
+    }).catch(() => {
+      if (active) setVariantError(true);
+    });
+    return () => { active = false; };
+  }, [projectId, variantSession?.session_id]);
 
   const currentState = state?.projectId === projectId ? state : null;
   const hasError = errorProjectId === projectId;
@@ -422,8 +607,50 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const capcutError = capcutErrorProjectId === projectId;
   const isRegisteringCurrentCapcutHandoff = isRegisteringCapcutHandoff && capcutHandoffRequestProjectId.current === projectId;
   const capcutHandoffError = capcutHandoffErrorProjectId === projectId;
-  if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live="polite"><p>출력 상태를 불러오는 중이에요.</p></section>;
-  if (hasError) return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page"><h1>출력</h1><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
+  const handleRenderVariants = async (requestedVariantIds = selectedVariantIds) => {
+    const session = currentState?.session;
+    if (!session || !requestedVariantIds.length || isRenderingVariants) return;
+    setIsRenderingVariants(true);
+    setVariantError(false);
+    try {
+      const result = await api.startVariantRenders(projectId, { session_id: session.session_id, variant_ids: requestedVariantIds });
+      setVariantItems((current) => mergeVariantRenderItems(current, result.items, requestedVariantIds));
+      setConfirmedVariantIds([]);
+      const jobs = await api.listJobs(projectId);
+      const reconciled = await Promise.all(result.items.map(async (item) => {
+        const job = jobs.find((candidate) => candidate.job_id === item.job_id);
+        if (!job || !item.job_id) return item;
+        try {
+          const final = await api.getFinalRender(projectId, item.job_id);
+          return { ...item, status: final.status, error_code: final.status === "failed" ? "renderer_failed" : item.error_code };
+        } catch {
+          return item;
+        }
+      }));
+      setVariantItems((current) => mergeVariantRenderItems(current, reconciled, requestedVariantIds));
+    } catch {
+      setVariantError(true);
+    } finally {
+      setIsRenderingVariants(false);
+    }
+  };
+  const handleRefreshVariants = async () => {
+    const jobs = await api.listJobs(projectId).catch(() => [] as JobRecord[]);
+    const next = await Promise.all(variantItems.map(async (item) => {
+      if (!item.job_id) return item;
+      const job = jobs.find((candidate) => candidate.job_id === item.job_id);
+      if (!job) return item;
+      try {
+        const final = await api.getFinalRender(projectId, item.job_id);
+        return { ...item, status: final.status };
+      } catch {
+        return item;
+      }
+    }));
+    setVariantItems(next);
+  };
+  if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live={pageLiveRegion}><p>출력 상태를 불러오는 중이에요.</p></section>;
+  if (hasError) return <section className="vb-outputs" aria-live={pageLiveRegion} data-testid="outputs-page"><HeadingTag>출력</HeadingTag><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
 
   const timelineJob = currentState?.timelineJob;
   const currentSession = currentState?.session;
@@ -451,6 +678,31 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const finalJob = currentState?.finalJob;
   const hasPendingFinal = currentState?.finalJobs.some((job) => job.status === "pending" || job.status === "running") === true;
   const canRenderFinal = canRenderSubtitle && !hasPendingFinal;
+  const hasCurrentEditingDraft = Boolean(
+    currentSession && timelineJob && currentState?.timeline &&
+    currentSession.project_id === projectId &&
+    currentState.timeline.timeline.project_id === projectId &&
+    currentState.timeline.timeline.timeline_id === currentSession.timeline_id &&
+    currentState.timeline.timeline.source_session_id === currentSession.session_id &&
+    currentState.timeline.timeline.source_session_revision === currentSession.session_revision,
+  );
+  const hasCurrentReviewIdentity = Boolean(
+    currentState?.review && currentState.approval && currentSession && timelineJob &&
+    currentSession.project_id === projectId &&
+    currentState.review.project_id === projectId &&
+    currentState.review.timeline_id === currentSession.timeline_id &&
+    currentState.approval.project_id === projectId &&
+    currentState.approval.timeline_id === currentSession.timeline_id &&
+    currentState.approval.source_session_id === currentSession.session_id &&
+    currentState.approval.source_session_revision === currentSession.session_revision,
+  );
+  const reviewApproved = Boolean(
+    hasCurrentReviewIdentity &&
+    currentState?.review?.review_status === "approved" &&
+    currentState.approval?.review_status === "approved" &&
+    currentState.approval.is_current === true,
+  );
+  const outputBlocked = !canRenderSubtitle;
   const subtitle = currentState?.subtitle;
   const currentSubtitle = subtitle?.status === "succeeded" && subtitle.subtitle?.status === "succeeded" && currentSession != null && (
     currentSession.project_id === projectId &&
@@ -485,6 +737,14 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
   const canRegisterCapcutHandoff = Boolean(
     currentCapcutDraft && capcutDraft?.export && capcutHandoff?.status !== "ready" && !capcutHandoffInProgress,
   );
+  /** 지금 누르면 못 넘긴다는 것을 **누르기 전에** 알 수 있으면, 그 이유를 그대로 쓴다.
+   *
+   * 서버 진단(`/api/capcut/handoff-diagnostics`)은 이제 컨테이너 안이 아니라
+   * 이 컴퓨터의 캡컷 다리에게 물어본 결과를 돌려준다. 준비가 안 됐으면 무엇을
+   * 하면 되는지까지 문장으로 온다 -- 화면이 그걸 지어내지 않고 옮기기만 한다. */
+  const capcutHandoffBlockedReason = currentState?.diagnostics && currentState.diagnostics.status !== "ready"
+    ? currentState.diagnostics.recovery_message ?? "지금은 CapCut으로 넘길 수 없어요. 잠시 후 다시 확인해 주세요."
+    : null;
   const handleRenderSubtitle = async () => {
     const submissionProjectId = projectId;
     if (currentProjectId.current !== submissionProjectId || !timelineJob || !canRenderSubtitle || isRenderingCurrentSubtitle) return;
@@ -495,6 +755,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     subtitleRequestProjectId.current = submissionProjectId;
     setIsRenderingSubtitle(true);
     setSubtitleErrorProjectId(null);
+    setSubtitleRejectedReason(null);
     try {
       const result = await api.renderSubtitle(submissionProjectId, { timeline_job_id: timelineJob.job_id });
       try {
@@ -510,8 +771,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
         await refresh();
       }
-    } catch {
+    } catch (error) {
       if (submissionEpoch !== subtitleSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (error instanceof ApiRequestError && error.detail) setSubtitleRejectedReason(error.detail);
       const latestState = await refresh();
       if (
         submissionEpoch === subtitleSubmissionEpoch.current &&
@@ -521,6 +783,70 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
       ) setSubtitleErrorProjectId(submissionProjectId);
     } finally {
       if (submissionEpoch === subtitleSubmissionEpoch.current && currentProjectId.current === submissionProjectId) setIsRenderingSubtitle(false);
+    }
+  };
+  // 자동 제작은 "어떻게 만들지"를 이 포맷에서 가져간다. 마음에 든 완성본을 본
+  // 순간이 그것을 남길 유일한 때다.
+  const handleSaveFormat = async () => {
+    const submissionProjectId = projectId;
+    const name = formatName.trim();
+    // 이름 없는 포맷이 쌓이면 다음 영상에서 무엇을 고를지 알 수 없다.
+    if (!name || !currentSession?.session_id || isSavingFormat) return;
+    setIsSavingFormat(true);
+    try {
+      await api.saveFormatTemplate(submissionProjectId, { name, session_id: currentSession.session_id });
+      if (currentProjectId.current !== submissionProjectId) return;
+      setFormatSavedProjectId(submissionProjectId);
+      setFormatName("");
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsSavingFormat(false);
+    }
+  };
+  // 기계가 잰 지표만으로는 무엇이 좋은 영상인지 배울 수 없다. 이 판단이 라벨이다.
+  const handleVerdict = async (verdict: "good" | "bad") => {
+    const submissionProjectId = projectId;
+    if (!finalRender?.job_id || isSavingVerdict) return;
+    setIsSavingVerdict(true);
+    try {
+      await api.recordFinalRenderVerdict(submissionProjectId, finalRender.job_id, { verdict });
+      if (currentProjectId.current !== submissionProjectId) return;
+      setVerdictProjectId(submissionProjectId);
+      setVerdictSaved(verdict);
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsSavingVerdict(false);
+    }
+  };
+  // owner 요청(2026-08-28): 프리뷰 공유 링크 — 토큰 링크 방식 승인. 이 앱은
+  // 지금까지 인증이 전혀 없었다는 점을 밝혀 둔다. 링크 하나가 이 완성본 하나에만 닿는다.
+  const handleCreatePreviewShare = async () => {
+    const submissionProjectId = projectId;
+    if (!finalRender?.job_id || isCreatingPreviewShare) return;
+    setIsCreatingPreviewShare(true);
+    setPreviewShareErrorProjectId(null);
+    try {
+      const created = await api.createPreviewShare(submissionProjectId, finalRender.job_id);
+      if (currentProjectId.current !== submissionProjectId) return;
+      setPreviewShareProjectId(submissionProjectId);
+      setPreviewShareUrl(`${window.location.origin}${created.url}`);
+      setPreviewShareId(created.share_id);
+      setPreviewShareRevoked(false);
+    } catch {
+      if (currentProjectId.current !== submissionProjectId) return;
+      setPreviewShareErrorProjectId(submissionProjectId);
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsCreatingPreviewShare(false);
+    }
+  };
+  const handleRevokePreviewShare = async () => {
+    const submissionProjectId = projectId;
+    if (!previewShareId || isRevokingPreviewShare) return;
+    setIsRevokingPreviewShare(true);
+    try {
+      await api.revokePreviewShare(submissionProjectId, previewShareId);
+      if (currentProjectId.current !== submissionProjectId) return;
+      setPreviewShareRevoked(true);
+    } finally {
+      if (currentProjectId.current === submissionProjectId) setIsRevokingPreviewShare(false);
     }
   };
   const handleRenderFinal = async () => {
@@ -535,6 +861,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     finalInFlightTimelineKey.current = timelineKey;
     setIsRenderingFinal(true);
     setFinalErrorProjectId(null);
+    setFinalRejectedReason(null);
     try {
       const result = await api.startFinalRender(submissionProjectId, { timeline_job_id: timelineJob.job_id });
       try {
@@ -550,8 +877,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
         await refresh();
       }
-    } catch {
+    } catch (error) {
       if (submissionEpoch !== finalSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (error instanceof ApiRequestError && error.detail) setFinalRejectedReason(error.detail);
       const latestState = await refresh();
       if (
         submissionEpoch === finalSubmissionEpoch.current &&
@@ -576,6 +904,7 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     capcutInFlightTimelineKey.current = timelineKey;
     setIsExportingCapcutDraft(true);
     setCapcutErrorProjectId(null);
+    setCapcutRejectedReason(null);
     try {
       const result = await api.startCapcutDraftExport(submissionProjectId, { timeline_job_id: timelineJob.job_id });
       try {
@@ -591,8 +920,9 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
         await refresh();
       }
-    } catch {
+    } catch (error) {
       if (submissionEpoch !== capcutSubmissionEpoch.current || currentProjectId.current !== submissionProjectId) return;
+      if (error instanceof ApiRequestError && error.detail) setCapcutRejectedReason(error.detail);
       const latestState = await refresh();
       if (
         submissionEpoch === capcutSubmissionEpoch.current &&
@@ -646,9 +976,31 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
     }
   };
 
-  return <section className="vb-outputs" aria-live="polite" data-testid="outputs-page">
-    <div><p className="vb-eyebrow">출력</p><h1>완성본과 CapCut 초안</h1><p>현재 승인된 편집본의 자막, 완성본, CapCut 초안을 여기에서 만들 수 있어요.</p></div>
-    <div className="vb-home-grid">
+  return <section className="vb-outputs" aria-live={pageLiveRegion} data-testid="outputs-page">
+    <div><p className="vb-eyebrow">출력</p><HeadingTag>완성본과 CapCut 초안</HeadingTag><p>승인된 편집본 · 자막 · 완성본 · CapCut 초안</p></div>
+    {outputBlocked ? <section aria-label="출력 준비 체크리스트" className="vb-output-readiness">
+      <h2>출력 준비 체크리스트</h2>
+      <ol aria-label="출력 준비 단계">
+        <li>
+          <strong>편집본</strong>
+          <span>{hasCurrentEditingDraft ? "준비됨" : "준비 필요"}</span>
+          {!hasCurrentEditingDraft ? <Button variant="outline" onClick={onOpenEditor}>편집 화면 열기</Button> : null}
+        </li>
+        <li>
+          <strong>검토</strong>
+          <span>{reviewApproved ? "승인됨" : "승인 필요"}</span>
+          {/* 검토가 이미 이 화면 위에 함께 보이고 있으면(`ReviewAndOutputPage`)
+              따로 이동할 곳이 없다 -- 위로 올라가면 그 내용이 이미 있다.
+              단독으로 쓰일 때만 `/review`로 안내한다. */}
+          {!reviewApproved && hasCurrentEditingDraft && !reviewInline ? <a className="vb-action-link" href={`/projects/${encodeURIComponent(projectId)}/review`}>검토 화면 열기</a> : null}
+        </li>
+        <li>
+          <strong>출력</strong>
+          <span>{canRenderSubtitle ? "자막과 완성본을 만들 수 있어요." : "앞 단계 완료 필요"}</span>
+        </li>
+      </ol>
+    </section> : null}
+    <div className="vb-home-grid vb-outputs-grid">
       <Card>
         <CardHeader><CardTitle>편집본 미리보기</CardTitle><CardDescription>{exactPreviewDescription(currentState?.exactPreviewState)}</CardDescription></CardHeader>
         <CardContent>
@@ -657,21 +1009,95 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" ? "자막을 만들지 못했어요." : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>가로·세로 출력</CardTitle><CardDescription>{variantRenderSummary(variantItems)}</CardDescription></CardHeader>
         <CardContent>
-          {subtitleError ? <p>자막을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
-          {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
+          <p>성공한 출력은 서로 독립적으로 재생하고, 실패한 출력만 다시 만들 수 있어요.</p>
+          {variantError ? <p role="status">출력 변형 상태를 확인하지 못했어요.</p> : null}
+          {variantOptions.map((option) => (
+              <label key={option.variant_id}>
+                <input
+                  data-native-control="output-variant-select"
+                type="checkbox"
+                checked={selectedVariantIds.includes(option.variant_id)}
+                onChange={() => setSelectedVariantIds((current) => current.includes(option.variant_id) ? current.filter((id) => id !== option.variant_id) : [...current, option.variant_id])}
+              /> {variantLabel(option.kind)}
+            </label>
+          ))}
+          <div className="vb-output-actions">
+            <Button disabled={!currentState?.session || !selectedVariantIds.length || isRenderingVariants} onClick={() => void handleRenderVariants()}>{isRenderingVariants ? "출력 만드는 중" : "가로·세로 출력 만들기"}</Button>
+            <Button variant="outline" disabled={!variantItems.length} onClick={() => void handleRefreshVariants()}>출력 상태 다시 확인</Button>
+          </div>
+        </CardContent>
+      </Card>
+      {variantItems.map((item) => (
+        <VariantOutputCard key={item.variant_id} projectId={projectId} item={item} confirmed={confirmedVariantIds.includes(item.variant_id)} onConfirm={() => setConfirmedVariantIds((current) => current.includes(item.variant_id) ? current : [...current, item.variant_id])} onRetry={() => {
+          setSelectedVariantIds([item.variant_id]);
+          setConfirmedVariantIds((current) => current.filter((id) => id !== item.variant_id));
+          void handleRenderVariants([item.variant_id]);
+        }} />
+      ))}
+      <Card>
+        <CardHeader><CardTitle>자막</CardTitle><CardDescription>{currentSubtitle ? "자막이 준비되었어요." : staleSubtitle ? "자막이 최신 편집본과 달라요." : currentState?.subtitle?.status === "failed" || currentState?.subtitleRecord?.status === "failed" ? subtitleFailureMessage(currentState?.subtitleRecord?.error_message) : timelineJob ? "현재 편집본의 자막을 만들 수 있어요." : "아직 자막이 없어요."}</CardDescription></CardHeader>
+        <CardContent>
+          {subtitleError ? <p>{subtitleFailureMessage(subtitleRejectedReason ?? currentState?.subtitleRecord?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 자막을 만들 수 있어요.</p> : null}
           <Button disabled={!canRenderSubtitle || isRenderingCurrentSubtitle} onClick={() => void handleRenderSubtitle()}>{isRenderingCurrentSubtitle ? "자막 만드는 중" : "자막 만들기"}</Button>
+          {/* Vrew의 "다양한 내보내기"(#14) 참고, owner 요청 2026-08-28: "srt...
+              내보내기". 이미 디스크에 있던 .srt 파일을 내려받는 문 하나만 연다. */}
+          {currentSubtitle && subtitle ? <a className="vb-action-link" download href={`/api/projects/${encodeURIComponent(projectId)}/subtitles/${encodeURIComponent(subtitle.job_id)}/content`}>SRT 자막 파일 내려받기</a> : null}
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>완성본</CardTitle><CardDescription>{currentFinal ? "완성본을 확인할 수 있어요." : staleFinal ? "완성본이 최신 편집본과 달라요." : finalRender?.status === "failed" ? "완성본을 만들지 못했어요." : hasPendingFinal ? "완성본을 만드는 중이에요." : timelineJob ? "현재 편집본의 완성본을 만들 수 있어요." : "아직 완성본이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>완성본</CardTitle><CardDescription>{currentFinal ? "완성본을 확인할 수 있어요." : staleFinal ? "완성본이 최신 편집본과 달라요." : finalRender?.status === "failed" ? finalRenderFailureMessage(finalRender?.error_message) : hasPendingFinal ? "완성본을 만드는 중이에요." : timelineJob ? "현재 편집본의 완성본을 만들 수 있어요." : "아직 완성본이 없어요."}</CardDescription></CardHeader>
         <CardContent>
-          {finalError ? <p>완성본을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
-          {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
+          {finalError ? <p>{finalRenderFailureMessage(finalRejectedReason ?? finalRender?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
-          {currentFinal ? <video aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
+          {currentFinal && finalRender.render?.has_sound === false ? <p>완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.</p> : null}
+          {currentFinal ? <video className="vb-output-video" aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
+          {/* Vrew의 "다양한 내보내기"(#14) 참고, owner 요청 2026-08-28: "오디오만...
+              내보내기". 완성본 mp4에서 그때그때 오디오만 뽑는다(새 렌더 아님). */}
+          {currentFinal ? <a className="vb-action-link" download href={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/audio-content`}>오디오만 내려받기</a> : null}
+          {/* Vrew #15 "프리뷰 공유" 참고, owner 요청(2026-08-28): 동료에게 링크로
+              중간 공유. 토큰 하나가 이 완성본 하나에만 닿는다 — 앱에 로그인이 없어도
+              그 사람은 이 링크로만 영상을 볼 수 있다. */}
+          {currentFinal ? <div className="vb-preview-share">
+            <Button disabled={isCreatingPreviewShare} onClick={() => void handleCreatePreviewShare()}>{isCreatingPreviewShare ? "공유 링크 만드는 중" : "동료에게 공유 링크 만들기"}</Button>
+            {previewShareErrorProjectId === projectId ? <p>공유 링크를 만들지 못했어요. 다시 시도해 주세요.</p> : null}
+            {previewShareProjectId === projectId && previewShareUrl ? (
+              previewShareRevoked ? (
+                <p>이 링크를 취소했어요. 더 이상 열리지 않아요.</p>
+              ) : (
+                <p>
+                  동료에게 이 링크를 보내 주세요: <input data-native-control="preview-share-url" readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} />
+                  {" "}
+                  <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "이 링크 취소하기"}</Button>
+                </p>
+              )
+            ) : null}
+          </div> : null}
+          {currentFinal ? <div className="vb-final-verdict">
+            {/* 낡은 완성본은 평가하지 않는다. 어느 편집본에 대한 판단인지 알 수 없어진다. */}
+            {verdictProjectId === projectId && verdictSaved
+              ? <p>{verdictSaved === "good" ? "좋았다고 기록했어요." : "아쉬웠다고 기록했어요."}</p>
+              : <p>이 완성본이 어땠는지 남겨 주시면 다음 추천이 좋아져요.</p>}
+            <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("good")}>이 완성본 좋아요</Button>
+            <Button disabled={isSavingVerdict} onClick={() => void handleVerdict("bad")}>이 완성본 아쉬워요</Button>
+          </div> : null}
+          {currentFinal ? <div className="vb-final-format">
+            {formatSavedProjectId === projectId
+              ? <p>포맷을 저장했어요. 다음 영상에서 편집 화면의 저장한 포맷에서 고를 수 있어요.</p>
+              : <p>이 영상처럼 만들고 싶으면 포맷으로 저장해 두세요.</p>}
+            <label htmlFor="format-template-name">포맷 이름</label>
+            <Input
+              id="format-template-name"
+              value={formatName}
+              placeholder="예: 내 브이로그 포맷"
+              onChange={(event) => setFormatName(event.target.value)}
+            />
+            <Button disabled={isSavingFormat} onClick={() => void handleSaveFormat()}>이 포맷 저장하기</Button>
+          </div> : null}
           {staleFinal ? <p>편집에서 새 완성본 만들기를 실행해 주세요.</p> : null}
           {finalRender?.status === "failed" ? <p>완성본 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
           {hasPendingFinal ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}
@@ -679,10 +1105,10 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
         </CardContent>
       </Card>
       <Card>
-        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비되었어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? "CapCut 초안을 만들지 못했어요." : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
+        <CardHeader><CardTitle>CapCut 초안</CardTitle><CardDescription>{currentCapcutDraft ? "CapCut 초안이 준비되었어요." : staleCapcutDraft ? "CapCut 초안이 최신 편집본과 달라요." : capcutDraft?.status === "failed" ? capcutDraftFailureMessage(capcutDraft?.error_message) : hasPendingCapcut ? "CapCut 초안을 만드는 중이에요." : timelineJob ? "현재 편집본의 CapCut 초안을 만들 수 있어요." : "아직 CapCut 초안이 없어요."}</CardDescription></CardHeader>
         <CardContent>
-          {capcutError ? <p>CapCut 초안을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
-          {!timelineJob ? <p>먼저 편집 화면에서 현재 초안을 준비해 주세요.</p> : null}
+          {capcutError ? <p>{capcutDraftFailureMessage(capcutRejectedReason ?? capcutDraft?.error_message)} 편집 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
+          {!timelineJob ? <p>편집 화면에서 장면을 채우고 저장하면 여기에서 만들 수 있어요.</p> : null}
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 CapCut 초안을 만들 수 있어요.</p> : null}
           {hasPendingCapcut ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}
           {capcutDraft?.status === "failed" ? <p>CapCut 초안 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
@@ -690,18 +1116,25 @@ export function OutputsPage({ projectId, onOpenEditor }: { projectId: string; on
           {currentCapcutDraft && capcutDraft.export ? <p>로컬 저장 위치: {capcutDraft.export.file_uri}</p> : null}
           {currentCapcutDraft && capcutDraft.export?.notes.length ? <p>일부 효과는 CapCut에서 확인해 주세요.</p> : null}
           {capcutHandoff?.status === "ready" ? <p>{capcutHandoff.reused ? "기존 CapCut 등록 정보를 다시 사용해요." : "CapCut 등록 상태가 준비되었어요."}</p> : null}
+          {/* **어디에 들어갔는지 자리를 그대로 보여 준다.** 등록만 됐다고 하고
+              자리를 안 알려 주면 owner는 CapCut에서 어느 것을 열어야 하는지 모른다. */}
+          {capcutHandoff?.status === "ready" && capcutHandoff.registered_project_path ? <p>CapCut에서 열 자리: {capcutHandoff.registered_project_path}</p> : null}
           {capcutHandoffInProgress ? <p>CapCut 등록이 진행 중이에요. 잠시 후 상태를 다시 확인해 주세요.</p> : null}
           {capcutHandoff?.status === "failed" ? <p>CapCut 등록을 완료하지 못했어요. 상태를 확인한 뒤 다시 시도해 주세요.</p> : null}
           {capcutHandoffError ? <p>CapCut 등록 상태를 확인하지 못했어요. 상태를 다시 확인한 뒤 시도해 주세요.</p> : null}
           {currentCapcutDraft ? <p>실제 CapCut Desktop에서 열기와 가져오기는 별도로 확인해야 해요.</p> : null}
-          {currentState?.diagnostics && !currentState.diagnostics.is_supported ? <p>이 기기의 CapCut 연결 상태를 확인해 주세요.</p> : null}
+          {/* **무엇을 하면 되는지 서버가 말한 그대로 보여 준다.** 예전에는 "연결
+              상태를 확인해 주세요"라고만 했는데, 그 말로는 owner가 할 수 있는
+              일이 없었다. 지금은 진단이 캡컷 다리에게 직접 물어보고 이유를
+              돌려준다 -- 다리가 꺼졌으면 켜는 법까지 이 줄에 담겨 온다. */}
+          {capcutHandoffBlockedReason ? <p>{capcutHandoffBlockedReason}</p> : null}
           {currentState?.diagnostics ? <p>CapCut 연결 상태는 준비 여부만 표시하며, 실제 Desktop 완료를 뜻하지 않아요.</p> : null}
           {!currentState?.diagnostics ? <p>CapCut 연결 상태는 지금 확인할 수 없어요. 잠시 후 다시 확인해 주세요.</p> : null}
           <Button disabled={!canExportCapcutDraft || isExportingCurrentCapcutDraft} onClick={() => void handleExportCapcutDraft()}>{isExportingCurrentCapcutDraft ? "CapCut 초안 만드는 중" : capcutDraft?.status === "failed" || capcutError ? "CapCut 초안 다시 만들기" : "CapCut 초안 만들기"}</Button>
-          {canRegisterCapcutHandoff ? <Button variant="outline" disabled={isRegisteringCurrentCapcutHandoff} onClick={() => void handleRegisterCapcutHandoff()}>{isRegisteringCurrentCapcutHandoff ? "CapCut 등록 중" : capcutHandoff?.status === "failed" || capcutHandoffError ? "CapCut 등록 다시 시도" : "CapCut에 등록"}</Button> : null}
+          {canRegisterCapcutHandoff ? <Button variant="outline" disabled={isRegisteringCurrentCapcutHandoff || capcutHandoffBlockedReason !== null} onClick={() => void handleRegisterCapcutHandoff()}>{isRegisteringCurrentCapcutHandoff ? "CapCut 등록 중" : capcutHandoff?.status === "failed" || capcutHandoffError ? "CapCut 등록 다시 시도" : "CapCut에 등록"}</Button> : null}
         </CardContent>
       </Card>
     </div>
-    <div className="vb-home-grid"><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></div>
+    <div className="vb-output-actions"><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></div>
   </section>;
 }

@@ -25,6 +25,7 @@ class JobType(StrEnum):
     CAPCUT_EXPORT = "capcut_export"
     FINAL_RENDER = "final_render"
     CAPCUT_DRAFT_EXPORT = "capcut_draft_export"
+    SCENE_VIDEO_GENERATION = "scene_video_generation"
 
 
 class JobStatus(StrEnum):

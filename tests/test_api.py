@@ -211,6 +211,72 @@ def test_build_targeted_segments_matches_trimmed_request_segment_ids() -> None:
     ]
 
 
+def test_build_targeted_segments_keeps_a_valid_shape_overlay() -> None:
+    """정지 도형은 글·자산이 없어도 유효하다. 미리보기 목록이 이걸 거르면
+    부분 재생성이 이 장면의 도형을 건드린다는 사실이 owner에게 안 보인다."""
+    from videobox_api.main import _build_targeted_segments
+
+    shape_overlay = {
+        "overlay_type": "shape_overlay",
+        "shape": "underline",
+        "vertical": "bottom",
+        "horizontal": "center",
+        "size": "large",
+    }
+    targeted_segments = _build_targeted_segments(
+        {
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Office overview.",
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [shape_overlay, {"overlay_type": "shape_overlay", "shape": "arrow"}],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ]
+        },
+        ["seg_001"],
+    )
+
+    assert targeted_segments[0]["visual_overlays"] == [shape_overlay]
+
+
+def test_build_targeted_segments_keeps_a_valid_icon_overlay() -> None:
+    """아이콘도 글·자산이 없다. 여기서 걸러지면 부분 재생성 미리보기에서
+    이 장면의 화살표가 조용히 사라진다."""
+    from videobox_api.main import _build_targeted_segments
+
+    icon_overlay = {
+        "overlay_type": "shape_overlay",
+        "shape": "icon_arrow_right",
+        "vertical": "middle",
+        "horizontal": "right",
+        "size": "medium",
+    }
+    targeted_segments = _build_targeted_segments(
+        {
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "Office overview.",
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [icon_overlay, {"overlay_type": "shape_overlay", "shape": "icon_rocket"}],
+                    "music_override": None,
+                    "tts_replacement": None,
+                }
+            ]
+        },
+        ["seg_001"],
+    )
+
+    assert targeted_segments[0]["visual_overlays"] == [icon_overlay]
+
+
 def test_partial_regeneration_helper_matches_trimmed_source_segment_ids() -> None:
     class _FakeStore:
         def list_segments(self, *, project_id: str) -> list[dict[str, object]]:
@@ -2732,6 +2798,8 @@ def test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case
             timeline_applied_recommendations: list[dict[str, object]],
             timeline_pending_recommendations: list[dict[str, object]],
             timeline_review_flags: list[dict[str, object]],
+            source_variant_id: str | None,
+            source_variant_revision: int | None,
         ) -> dict[str, object]:
             assert project_id == "project_001"
             assert timeline_id == "timeline_001"
@@ -2739,6 +2807,8 @@ def test_local_pipeline_review_snapshot_reuses_persisted_guidance_for_mixed_case
             assert timeline_applied_recommendations == []
             assert timeline_pending_recommendations == []
             assert timeline_review_flags == []
+            assert source_variant_id is None
+            assert source_variant_revision is None
             return {
                 "project_id": project_id,
                 "timeline_id": timeline_id,
@@ -4693,6 +4763,337 @@ def test_home_summary_reports_what_the_home_cards_claim(tmp_path: Path) -> None:
 
     assert filled["finished_video_count"] == 1, filled
     assert filled["has_draft"] is True, filled
+
+
+def test_workspace_summary_is_authoritative_for_an_empty_project(tmp_path: Path) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Workspace summary"}).json()["project_id"]
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["project_id"] == project_id
+    assert payload["display_name"] == "Workspace summary"
+    assert payload["updated_at"]
+    assert payload["current_stage"] == "plan"
+    assert payload["state"] == "ready"
+    assert payload["thumbnail_url"] is None
+    assert payload["finished_video_count"] == 0
+    assert payload["next_action"] == {
+        "label": "계속 만들기",
+        "href": f"/projects/{project_id}/plan",
+    }
+
+
+def test_workspace_summary_fails_closed_when_latest_session_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Unreadable workspace"}).json()["project_id"]
+
+    def fail_latest(*, project_id: str) -> dict[str, object]:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(app.state.store, "get_latest_editing_session", fail_latest)
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "workspace_summary_unavailable"
+    assert "current_stage" not in response.json()
+
+
+@pytest.mark.parametrize(
+    ("job_status", "expected_state", "expected_label"),
+    [
+        (JobStatus.FAILED.value, "attention", "출력 다시 시도"),
+        (JobStatus.RUNNING.value, "attention", "출력 상태 보기"),
+        (JobStatus.SUCCEEDED.value, "ready", "완성본 보기"),
+    ],
+)
+def test_workspace_summary_output_state_overrides_asset_gaps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    job_status: str,
+    expected_state: str,
+    expected_label: str,
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Output state"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-output",
+        session_payload={"segments": [], "history": [], "gap_slots": [{"gap_slot_id": "gap-1"}]},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state_if_timeline_started",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [{
+            "job_id": "final-render-new",
+            "project_id": project_id,
+            "job_type": JobType.FINAL_RENDER.value,
+            "status": job_status,
+            "started_at": "2026-08-12T01:00:00+00:00",
+            "finished_at": "2026-08-12T01:01:00+00:00" if job_status != JobStatus.RUNNING.value else None,
+        }],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == expected_state
+    assert payload["next_action"]["label"] == expected_label
+    assert payload["next_action"]["href"] == f"/projects/{project_id}/output"
+
+
+def test_workspace_summary_selects_latest_final_render_by_timestamp_not_job_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Latest output"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-latest",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state_if_timeline_started",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [
+            {
+                "job_id": "final-render-a",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.SUCCEEDED.value,
+                "started_at": "2026-08-12T02:00:00+00:00",
+                "finished_at": "2026-08-12T02:01:00+00:00",
+            },
+            {
+                "job_id": "final-render-z",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.FAILED.value,
+                "started_at": "2026-08-12T01:00:00+00:00",
+                "finished_at": "2026-08-12T01:01:00+00:00",
+            },
+        ],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == "ready"
+    assert payload["next_action"]["label"] == "완성본 보기"
+
+
+def test_workspace_summary_pending_retry_without_timestamps_supersedes_older_failed_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Pending retry"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-pending",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state_if_timeline_started",
+        lambda *, project_id, timeline_id: {"status": "draft"},
+    )
+    monkeypatch.setattr(
+        store,
+        "list_jobs",
+        lambda *, project_id: [
+            {
+                "job_id": "final-render-old",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.FAILED.value,
+                "started_at": "2026-08-12T01:00:00+00:00",
+                "finished_at": "2026-08-12T01:01:00+00:00",
+            },
+            {
+                "job_id": "final-render-retry",
+                "project_id": project_id,
+                "job_type": JobType.FINAL_RENDER.value,
+                "status": JobStatus.PENDING.value,
+                "started_at": None,
+                "finished_at": None,
+            },
+        ],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "output"
+    assert payload["state"] == "attention"
+    assert payload["next_action"] == {
+        "label": "출력 상태 보기",
+        "href": f"/projects/{project_id}/output",
+    }
+
+
+def test_workspace_summary_treats_a_pre_draft_session_as_ordinary_edit_state(
+    tmp_path: Path,
+) -> None:
+    # A session whose `timeline_id` has no matching `timelines` row is the
+    # ordinary "blank" pre-first-draft state (`local_project_store.py`'s
+    # `save_editing_session` binds a session without ever creating a timeline
+    # or review row). It used to be indistinguishable from real data
+    # corruption because `get_review_state` raises the same `KeyError`
+    # either way, which broke the catalog card for any project sitting in
+    # this completely normal, common state -- fixed 2026-08-23.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Pre-draft session"}).json()["project_id"]
+    app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="blank:no-timeline-yet",
+        session_payload={"segments": [], "history": []},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "edit"
+    assert payload["state"] == "ready"
+
+
+def test_workspace_summary_fails_closed_when_a_real_timelines_row_has_no_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unlike the pre-draft case above, every real store path that writes a
+    # `timelines` row also writes its `review_approvals` row right alongside
+    # it (`save_timeline_run` calls `save_review_state` itself; the
+    # atomic-bundle path inserts both in the same transaction) -- so this
+    # exact state can't be reached through the public store API in a test.
+    # It's still a real crash-consistency gap (the two writes aren't atomic
+    # with each other), so the endpoint must keep failing closed for it;
+    # simulate it directly rather than skip the guarantee.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Missing review"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-orphaned",
+        session_payload={"segments": [], "history": []},
+    )
+
+    def missing_review(*, project_id: str, timeline_id: str) -> dict[str, object]:
+        raise KeyError(f"Review state not found: {timeline_id}")
+
+    monkeypatch.setattr(store, "get_review_state_if_timeline_started", missing_review)
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == "workspace_summary_unavailable"
+
+
+def test_workspace_summary_treats_a_pasted_script_draft_session_as_ordinary_edit_state(
+    tmp_path: Path,
+) -> None:
+    # `create_script_draft_editing_session` (packages/core-engine/src/
+    # videobox_core_engine/local_pipeline.py) saves a session whose
+    # `timeline_id` is `script_draft:{asset_id}` without ever calling
+    # `save_timeline_run` -- pasting a script to start editing is a real,
+    # currently-used feature that produces exactly this "no timelines row
+    # yet" shape, same as the blank-session case, but with a different ID
+    # prefix. The fix must not be narrowed to only recognize `blank:`.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Script draft"}).json()["project_id"]
+    app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="script_draft:asset-1",
+        session_payload={"segments": [], "history": []},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "edit"
+    assert payload["state"] == "ready"
+
+
+def test_workspace_summary_surfaces_blocked_review_as_review_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Blocked review"}).json()["project_id"]
+    store = app.state.store
+    store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-blocked",
+        session_payload={"segments": [], "history": []},
+    )
+    monkeypatch.setattr(
+        store,
+        "get_review_state_if_timeline_started",
+        lambda *, project_id, timeline_id: {"status": "blocked"},
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["current_stage"] == "review"
+    assert payload["state"] == "blocked"
+    assert payload["next_action"] == {
+        "label": "검토 문제 해결",
+        "href": f"/projects/{project_id}/review",
+    }
+
+
+def test_workspace_summary_exposes_store_backed_thumbnail_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Thumbnail"}).json()["project_id"]
+    monkeypatch.setattr(
+        app.state.store,
+        "list_assets",
+        lambda *, project_id: [{
+            "asset_id": "broll-cover",
+            "metadata": {"thumbnail_uri": "local://projects/thumbnail/derived/thumbnails/broll-cover.jpg"},
+        }],
+    )
+
+    response = client.get(f"/api/projects/{project_id}/workspace-summary")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["thumbnail_url"] == f"/api/projects/{project_id}/assets/broll-cover/thumbnail"
 
 
 def test_project_creation_endpoint_returns_local_storage_metadata(tmp_path) -> None:
@@ -7834,6 +8235,68 @@ def test_output_jobs_ignore_stale_truthy_blocker_shapes_on_approved_timeline(tmp
     assert subtitle_result.status_code == 200
     assert preview_result.status_code == 200
     assert export_result.status_code == 200
+
+
+def test_the_verdict_route_refuses_a_word_it_cannot_count_later(tmp_path: Path) -> None:
+    # 아무 문자열이나 받으면 "좋았던 영상이 몇 개인가"를 물을 수 없다.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Verdict Route"}).json()["project_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/final-renders/final_render_job_001/verdict",
+        json={"verdict": "아주좋음"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_the_verdict_route_reports_a_render_that_has_no_video_yet(tmp_path: Path) -> None:
+    # 아직 만들어지지도 않은 완성본에 판단을 붙일 수는 없다.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "Verdict Missing"}).json()["project_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/final-renders/final_render_job_001/verdict",
+        json={"verdict": "good"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_capcut_export_result_rejects_a_job_that_is_not_a_capcut_export(tmp_path: Path) -> None:
+    # 이 경로는 CapCut 초안 결과만 돌려준다. 다른 종류의 job_id를 주면 예전에는
+    # 그 산출물을 JSON 매니페스트로 읽으려 들었고, 완성본(mp4)을 주면
+    # "'utf-8' codec can't decode byte" 오류가 그대로 사용자에게 나갔다.
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    timeline_payload = client.get(f"/api/projects/{project_id}/timelines/{timeline_job_id}").json()["timeline"]
+    timeline_path = tmp_path / "projects" / project_id / "timelines" / f'{timeline_payload["timeline_id"]}.json'
+    persisted_timeline = json.loads(timeline_path.read_text(encoding="utf-8"))
+    persisted_timeline["review_flags"] = []
+    persisted_timeline["pending_recommendations"] = []
+    timeline_path.write_text(json.dumps(persisted_timeline, indent=2), encoding="utf-8")
+    LocalProjectStore(tmp_path).save_review_state(
+        project_id=project_id,
+        timeline_id=str(timeline_payload["timeline_id"]),
+        status="approved",
+    )
+    subtitle_response = client.post(
+        f"/api/projects/{project_id}/jobs/subtitle-render",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    assert subtitle_response.status_code == 202
+    subtitle_job_id = subtitle_response.json()["job_id"]
+    assert client.get(f"/api/projects/{project_id}/subtitles/{subtitle_job_id}").status_code == 200
+
+    result = client.get(f"/api/projects/{project_id}/exports/{subtitle_job_id}")
+
+    assert result.status_code == 404
+    detail = str(result.json()["detail"])
+    assert "codec" not in detail and "JSON" not in detail
 
 
 def test_reopening_approved_review_ignores_stale_truthy_blocker_shapes_and_returns_draft(
@@ -14322,6 +14785,44 @@ def test_caption_style_api_preflight_then_mutation_is_revisioned_and_persisted(t
     assert response.json()["session_revision"] == session["session_revision"] + 1
     assert response.json()["segments"][0]["caption_style"]["text_color"] == "#00FF00FF"
     assert client.get(f"/api/projects/{project_id}/editing-sessions/{session['session_id']}").json()["segments"][0]["caption_style"]["font_size_px"] == 64
+
+
+def test_project_caption_style_api_undo_redo_persists_and_rehydrates_manifest(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+    session = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    ).json()
+    original_style = session["caption_style"]
+    changed = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/caption-style",
+        json={
+            "expected_revision": session["session_revision"],
+            "scope": "project_default",
+            "segment_ids": [],
+            "style": {"text_color": "#00FF00FF", "font_size_px": 64},
+        },
+    ).json()
+
+    undone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo",
+        json={"expected_revision": changed["session_revision"]},
+    ).json()
+    assert undone["caption_style"] == original_style
+    assert client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    ).json()["caption_style"] == original_style
+
+    redone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/redo",
+        json={"expected_revision": undone["session_revision"]},
+    ).json()
+    manifest = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/playback-manifest"
+    ).json()
+    assert redone["caption_style"]["text_color"] == "#00FF00FF"
+    assert manifest["captions"][0]["style"]["text_color"] == "#00FF00FF"
 
 
 def test_caption_style_api_rejects_stale_revision_without_mutating_session(tmp_path: Path) -> None:
@@ -22511,6 +23012,246 @@ def test_editing_session_api_can_clear_image_and_table_overlays(tmp_path: Path) 
     assert payload["history"][-1]["mutation_type"] == "table_overlay_remove"
 
 
+def test_editing_session_api_can_place_and_move_an_image_overlay(tmp_path: Path) -> None:
+    """사진도 도형과 같은 프리셋으로 자리·크기·움직임을 받는다.
+
+    owner 요청(2026-09-06) "사진을 우리 영상 위에도 얹어서 움직이게". 화면에서 고른
+    값이 세션까지 닿아야 렌더가 읽을 수 있다 -- 이 저장소는 "부품은 있는데 부르는
+    자리가 없다"에 여러 번 걸렸으므로 endpoint부터 저장까지 한 번에 밟는다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "small",
+            "motion": "slide_in_right",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    overlay = saved.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["overlay_type"] == "image_overlay"
+    assert (overlay["vertical"], overlay["horizontal"]) == ("top", "right")
+    assert (overlay["size"], overlay["motion"]) == ("small", "slide_in_right")
+    assert saved.json()["history"][-1]["mutation_type"] == "image_overlay_update"
+
+    # 프리셋 밖 값은 저장 전에 거절된다 -- 자유 좌표·초 단위는 승인 범위 밖이다.
+    for outside_the_presets in (
+        {"vertical": "37%"},
+        {"horizontal": "12px"},
+        {"size": "huge"},
+        {"motion": "spin"},
+        {"motion": "0.4s ease-in"},
+    ):
+        rejected = client.patch(
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+            json={
+                "asset_id": "asset_image_001",
+                "text": "Exterior reference image",
+                "expected_revision": 2,
+                **outside_the_presets,
+            },
+        )
+        assert rejected.status_code == 422, outside_the_presets
+
+
+def test_editing_session_api_image_overlay_without_presets_stays_as_it_was(tmp_path: Path) -> None:
+    """프리셋을 안 보내면 이 기능이 생기기 전과 같은 자국이 남는다.
+
+    옛 화면이 보내던 요청이 그대로 통해야 하고, 안 보낸 값이 열쇠로 채워지면
+    렌더가 정중앙이 아닌 자리로 읽을 수 있다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "image_overlay",
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+        }
+    ]
+
+
+def test_editing_session_api_can_set_and_clear_a_shape_overlay(tmp_path: Path) -> None:
+    """정지 도형(강조 상자·밑줄)은 다른 오버레이와 같은 endpoint 체계를 탄다."""
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "highlight_box",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "medium",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "highlight_box",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "medium",
+            # 움직임을 안 보내면 `그대로`. 예전 화면이 보내던 요청이 그대로 통한다.
+            "motion": "none",
+        }
+    ]
+    assert saved.json()["history"][-1]["mutation_type"] == "shape_overlay_update"
+
+    # 프리셋 밖 값은 저장 전에 거절된다 -- 자유 좌표는 이번 범위 밖이다.
+    rejected = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "arrow",
+            "vertical": "top",
+            "horizontal": "right",
+            "size": "medium",
+            "expected_revision": 2,
+        },
+    )
+    assert rejected.status_code == 422
+
+    cleared = client.delete(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        params={"expected_revision": 2},
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["segments"][0]["visual_overlays"] == []
+    assert cleared.json()["history"][-1]["mutation_type"] == "shape_overlay_remove"
+
+
+def test_editing_session_api_can_set_an_icon_shape_overlay(tmp_path: Path) -> None:
+    """아이콘(화살표 등)은 기존 정지 도형과 같은 endpoint·같은 프리셋을 탄다."""
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "icon_arrow_right",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "large",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["segments"][0]["visual_overlays"] == [
+        {
+            "overlay_type": "shape_overlay",
+            "shape": "icon_arrow_right",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "large",
+            "motion": "none",
+        }
+    ]
+
+    # 목록에 없는 아이콘은 저장 전에 거절된다.
+    rejected = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "icon_rocket",
+            "vertical": "middle",
+            "horizontal": "right",
+            "size": "large",
+            "expected_revision": 2,
+        },
+    )
+    assert rejected.status_code == 422
+
+
+def test_editing_session_api_can_choose_how_a_shape_overlay_appears(tmp_path: Path) -> None:
+    """표시가 등장·퇴장·이동하는 방식도 같은 endpoint로 저장된다.
+
+    승인 범위는 프리셋까지다 -- 임의 키프레임이나 초 단위 시간 값은 받지 않는다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    saved = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+        json={
+            "shape": "highlight_box",
+            "vertical": "middle",
+            "horizontal": "center",
+            "size": "medium",
+            "motion": "fade_in_out",
+            "expected_revision": 1,
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["segments"][0]["visual_overlays"][0]["motion"] == "fade_in_out"
+
+    for outside_the_presets in ("spin", "0.4s ease-in", "keyframe"):
+        rejected = client.patch(
+            f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/shape-overlay",
+            json={
+                "shape": "highlight_box",
+                "vertical": "middle",
+                "horizontal": "center",
+                "size": "medium",
+                "motion": outside_the_presets,
+                "expected_revision": 2,
+            },
+        )
+        assert rejected.status_code == 422, outside_the_presets
+
+
 def test_editing_session_api_visual_overlay_patch_preserves_existing_explanation_overlay(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path)
     client = TestClient(app)
@@ -26387,6 +27128,52 @@ def test_provider_trace_audit_endpoint_deduplicates_repeated_unpersisted_review_
         if entry["artifact_type"] == "review_guidance_attempt"
     ]
     assert len(attempt_entries) == 1
+
+
+def test_the_narration_a_project_is_carrying_can_be_listed(tmp_path: Path) -> None:
+    """내레이션은 넣을 수만 있고 **볼 수가 없었다.**
+
+    2026-08-16에 완성본이 완전 무음(-91dB)으로 나갔는데, 내레이션이 무음 파일이라는
+    것을 화면 어디에서도 확인할 방법이 없었다. 넣는 길만 있고 보는 길이 없으면
+    잘못 넣은 것을 영영 모른다.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "내레이션 목록"}).json()["project_id"]
+    source = tmp_path / "narration.wav"
+    source.write_bytes(b"RIFFnarration-audio")
+
+    empty = client.get(f"/api/projects/{project_id}/assets/narration-audio")
+    registered = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio",
+        json={"source_path": str(source)},
+    )
+    listed = client.get(f"/api/projects/{project_id}/assets/narration-audio")
+
+    assert empty.status_code == 200
+    assert empty.json()["assets"] == []
+    assert registered.status_code == 201
+    assert [item["asset_id"] for item in listed.json()["assets"]] == [registered.json()["asset_id"]]
+
+
+def test_narration_upload_registers_project_owned_audio_and_rejects_empty_files(tmp_path: Path) -> None:
+    # 경로를 타이핑하게 하면 owner는 탐색기에서 경로를 복사해 와야 한다.
+    # 음성 샘플은 이미 파일을 바로 올릴 수 있는데 내레이션만 그럴 수 없었다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "내레이션 업로드"}).json()["project_id"]
+
+    uploaded = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio/upload",
+        files={"file": ("내 내레이션.wav", b"RIFFnarration", "audio/wav")},
+    )
+    empty = client.post(
+        f"/api/projects/{project_id}/assets/narration-audio/upload",
+        files={"file": ("empty.wav", b"", "audio/wav")},
+    )
+
+    assert uploaded.status_code == 201
+    assert uploaded.json()["asset_type"] == "narration_audio"
+    # 빈 파일을 받아 두면 무음 완성본이 다시 나간다.
+    assert empty.status_code == 400
 
 
 def test_voice_sample_upload_registers_project_owned_audio_and_rejects_empty_files(tmp_path: Path) -> None:

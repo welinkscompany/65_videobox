@@ -15,6 +15,63 @@ const firstBrief = {
 };
 
 describe("CreationInterview", () => {
+  it("shows a saved draft resume action and supported file guidance before starting another brief", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(firstBrief);
+    render(<CreationInterview projectId="project_1" />);
+
+    expect(await screen.findByRole("button", { name: "초안 이어서 하기" })).toBeVisible();
+    cleanup();
+    window.localStorage.clear();
+    render(<CreationInterview projectId="project_1" />);
+    // **갱신 이유(2026-08-22).** 구분자만 바뀌었다(`,` -> `·`) -- owner 지시로
+    // 설명 문장을 키워드로 옮기는 중이다. 지키려는 것은 "어떤 파일을 고를 수
+    // 있는지 화면이 말한다"이지 쉼표가 아니다.
+    expect(screen.getByText(/TXT · MD · SRT/)).toBeVisible();
+    expect(screen.getByLabelText("대본 파일 선택")).toBeVisible();
+  });
+
+  it("clears the previous project's brief before loading a reused route", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    const getBrief = vi.spyOn(api, "getCreationBrief").mockImplementation(async (projectId) => (
+      projectId === "project_1"
+        ? firstBrief
+        : { ...firstBrief, brief_id: "brief_2", project_id: "project_2", script_text: "두 번째 프로젝트 대본" }
+    ));
+    const view = render(<CreationInterview projectId="project_1" />);
+    await screen.findByText("누구에게 보여줄까요?");
+
+    window.localStorage.setItem("videobox.creation-brief.project_2", "brief_2");
+    view.rerender(<CreationInterview projectId="project_2" />);
+    expect(screen.queryByText("누구에게 보여줄까요?")).not.toBeInTheDocument();
+    expect(screen.getByText("새 프로젝트의 기획을 불러오는 중이에요.")).toBeVisible();
+    expect(getBrief).toHaveBeenCalledWith("project_2", "brief_2");
+    await screen.findByText("누구에게 보여줄까요?");
+    expect(screen.queryByText("신제품을 소개합니다.")).not.toBeInTheDocument();
+  });
+
+  it("resets the orientation choice when a reused creation route changes projects", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const ready = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: {} } as never;
+    const readyB = { readiness_id: "readiness_2", brief_id: "brief_2", status: "ready", revision: 1, result: {} } as never;
+    vi.spyOn(api, "getCreationBrief").mockImplementation(async (projectId) => projectId === "project_1"
+      ? approved
+      : { ...approved, brief_id: "brief_2", project_id: "project_2" });
+    vi.spyOn(api, "getDraftReadiness").mockImplementation(async (projectId) => projectId === "project_1" ? ready : readyB);
+    const view = render(<CreationInterview projectId="project_1" />);
+    const orientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
+    fireEvent.click(orientation);
+    expect(orientation).toBeChecked();
+
+    window.localStorage.setItem("videobox.creation-brief.project_2", "brief_2");
+    window.localStorage.setItem("videobox.draft-readiness.project_2", "readiness_2");
+    view.rerender(<CreationInterview projectId="project_2" />);
+    const nextOrientation = await screen.findByLabelText("숏폼(세로)으로 만들기");
+    expect(nextOrientation).not.toBeChecked();
+  });
+
   it("starts a project-scoped Eugene interview from pasted script and saves the resulting brief id for refresh resume", async () => {
     const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue(firstBrief);
     render(<CreationInterview projectId="project_1" />);
@@ -212,7 +269,7 @@ describe("CreationInterview", () => {
     const start = vi.spyOn(api, "startDraftReadiness").mockResolvedValue({ readiness_id: "ready_1", status: "needs_assets", revision: 1, result: { gap_slots: [{ gap_slot_id: "gap-1", reason: "영상이 없어요." }] } } as never);
     render(<CreationInterview projectId="project_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "무음으로 초안 준비" }));
-    await screen.findByText("추가 자산이 필요해요");
+    await screen.findByText("추가 미디어가 필요해요");
     expect(start).toHaveBeenCalledWith("project_1", expect.objectContaining({ brief_id: "brief_1", narration_choice: { kind: "silent" }, expected_brief_revision: 5 }));
   });
 
@@ -304,6 +361,34 @@ describe("CreationInterview", () => {
     await waitFor(() => expect(retry).toHaveBeenLastCalledWith("project_1", "readiness_b", 4));
     await waitFor(() => expect(screen.getByLabelText("빈 구간을 남긴 채 편집용 초안을 만들겠습니다")).not.toBeChecked());
     expect(screen.getByRole("button", { name: "빈 구간 포함 초안 만들기" })).toBeDisabled();
+  });
+
+  it("surfaces retry and cancel readiness failures instead of leaving an unhandled rejection", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const failed = { readiness_id: "readiness_1", brief_id: "brief_1", status: "failed", revision: 3, result: null } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(failed);
+    vi.spyOn(api, "retryDraftReadiness").mockRejectedValue(new Error("conflict"));
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "다시 준비" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("다시 준비하지 못했습니다");
+  });
+
+  it("surfaces candidate skip failures in the readiness workspace", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_1");
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    const ready = { readiness_id: "readiness_1", brief_id: "brief_1", status: "ready", revision: 3, result: { broll_candidates: [{ asset_id: "asset_1", label: "제품 장면", target_range: { start_sec: 0, end_sec: 2 } }] } } as never;
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue(approved);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(ready);
+    vi.spyOn(api, "updateDraftReadinessCandidate").mockRejectedValue(new Error("conflict"));
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "제품 장면 건너뛰기" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("장면을 건너뛰지 못했습니다");
   });
 
   it("saves each B-roll candidate's chosen seconds with the current readiness revision", async () => {
@@ -418,5 +503,122 @@ describe("CreationInterview", () => {
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia: vi.fn().mockResolvedValue(stream) } }); vi.stubGlobal("MediaRecorder", Recorder);
     const view = render(<CreationInterview projectId="project_1" />); fireEvent.click(await screen.findByRole("button", { name: "마이크로 녹음 시작" })); await waitFor(() => expect(stop).not.toHaveBeenCalled()); view.unmount();
     expect(stop).toHaveBeenCalled(); expect(upload).not.toHaveBeenCalled();
+  });
+
+  /** 찍어 둔 영상으로 시작하는 길이 **기존 기획 흐름으로 이어지는지**를 본다.
+   *
+   *  이 저장소가 반복해 온 실패가 "부품은 있는데 부르는 자리가 없다"이고,
+   *  그 다음 단계가 "부르긴 하는데 그 다음으로 안 이어진다"이다. 받아쓰기만
+   *  되고 그 영상이 내레이션으로 안 이어지면 owner는 자기가 올린 본편을 두고
+   *  무음 초안을 만들게 된다. */
+  it("영상에서 받아쓴 대본으로 기획을 열고, 그 영상을 내레이션으로도 이어 준다", async () => {
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    vi.spyOn(api, "uploadSourceVideo").mockResolvedValue({ asset_id: "raw_video_1", script_text: "받아쓴 대본", spoken_segment_count: 2 });
+    // 올린 영상은 프로젝트 자산으로 남으므로 서버 후보 목록에도 들어온다.
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([{ asset_id: "raw_video_1", asset_type: "raw_video" }]);
+    const create = vi.spyOn(api, "createCreationBrief").mockResolvedValue(approved);
+    const startDraft = vi.spyOn(api, "startDraftReadiness").mockResolvedValue({ readiness_id: "readiness_1", brief_id: "brief_1", status: "planning", revision: 1, result: null });
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.change(screen.getByLabelText("찍어 둔 영상 선택"), { target: { files: [new File(["v"], "본편.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "영상에서 대본 만들기" }));
+
+    const edited = await screen.findByLabelText("영상에서 받아쓴 대본");
+    fireEvent.change(edited, { target: { value: "고쳐 쓴 대본" } });
+    fireEvent.click(screen.getByRole("button", { name: "이 대본으로 기획 시작" }));
+
+    // 받아쓴 글이 아니라 **owner가 고친 글**로 기획이 열려야 한다.
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0][1]).toMatchObject({ script_text: "고쳐 쓴 대본" });
+
+    // 그 영상이 곧 본편이다. 내레이션으로 고를 수 있어야 한다.
+    fireEvent.click(await screen.findByRole("button", { name: "영상 소리로 초안 준비" }));
+    await waitFor(() => expect(startDraft).toHaveBeenCalled());
+    expect(startDraft.mock.calls[0][1]).toMatchObject({ narration_choice: { kind: "source_video", asset_id: "raw_video_1" } });
+  });
+
+  it("새로 고쳐도 올려 둔 영상을 내레이션 후보로 다시 찾아 준다", async () => {
+    // 이 되짚기는 **이미 있던 동작**을 고정한다(승인되면 서버에서 후보를 다시
+    // 읽는 효과가 이미 걸려 있다). 찍어 둔 영상 길이 생기면서 이 경로가 처음으로
+    // 실제 쓰임을 갖게 됐으므로 -- 그 전에는 `raw_video` 후보를 만들 방법이
+    // 아예 없었다 -- 조용히 끊기지 않게 여기서 붙잡아 둔다.
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue({ ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([{ asset_id: "raw_video_1", asset_type: "raw_video" }]);
+    render(<CreationInterview projectId="project_1" />);
+
+    expect(await screen.findByRole("button", { name: "영상 소리로 초안 준비" })).toBeVisible();
+  });
+
+  /** 빈 장면 자동 채우기(owner 요청 2026-08-29): "내 비롤에 ai 영상도 같이
+   *  붙여서 자동화를 만드는거야." 브롤이 안 닿은 장면마다 owner가 일일이
+   *  "그림 만들기"를 누르지 않아도, 한 번에 순서대로 다 채워야 한다. */
+  it("빈 장면 모두 AI로 채우기를 누르면 브롤이 못 채운 장면을 순서대로 다 채운다", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_gap");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue({ ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([]);
+
+    const scriptSegments = [
+      { segment_id: "seg-1", text: "첫 장면 대사", start_sec: 0, end_sec: 2 },
+      { segment_id: "seg-2", text: "둘째 장면 대사", start_sec: 2, end_sec: 4 },
+    ];
+    const withTwoGaps = {
+      readiness_id: "readiness_gap", brief_id: "brief_1", status: "needs_assets", revision: 3,
+      result: {
+        script_segments: scriptSegments,
+        gap_slots: [
+          { gap_slot_id: "gap-1", reason: "장면에 넣을 영상이 없어요.", segment_id: "seg-1", target_range: { start_sec: 0, end_sec: 2 } },
+          { gap_slot_id: "gap-2", reason: "장면에 넣을 영상이 없어요.", segment_id: "seg-2", target_range: { start_sec: 2, end_sec: 4 } },
+        ],
+      },
+    } as never;
+    const withOneGap = { ...withTwoGaps, revision: 4, result: { script_segments: scriptSegments, gap_slots: [withTwoGaps.result.gap_slots[1]] } } as never;
+    const ready = { readiness_id: "readiness_gap", brief_id: "brief_1", status: "ready", revision: 5, result: { script_segments: scriptSegments, gap_slots: [] } } as never;
+
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue(withTwoGaps);
+    const createSceneImage = vi.spyOn(api, "createSceneImage").mockResolvedValue({
+      image_asset_id: "img-1", scene_asset_id: "scene-1", segment_id: "seg-1", title: "t", prompt: "p", seed: 1,
+    });
+    const retry = vi.spyOn(api, "retryDraftReadiness")
+      .mockResolvedValueOnce({ readiness_id: "readiness_gap", brief_id: "brief_1", status: "planning", revision: 4, result: null })
+      .mockResolvedValueOnce({ readiness_id: "readiness_gap", brief_id: "brief_1", status: "planning", revision: 5, result: null });
+    const complete = vi.spyOn(api, "completeDraftReadiness")
+      .mockResolvedValueOnce(withOneGap)
+      .mockResolvedValueOnce(ready);
+
+    render(<CreationInterview projectId="project_1" />);
+
+    const fillButton = await screen.findByRole("button", { name: "빈 장면 모두 AI로 채우기" });
+    fireEvent.click(fillButton);
+
+    await waitFor(() => expect(createSceneImage).toHaveBeenCalledTimes(2));
+    // 첫 번째는 첫 장면(seg-1), 두 번째는 남은 장면(seg-2) -- 순서대로다.
+    expect(createSceneImage.mock.calls[0][1]).toMatchObject({ segment_id: "seg-1", gap_slot_id: "gap-1", prompt: "첫 장면 대사" });
+    expect(createSceneImage.mock.calls[1][1]).toMatchObject({ segment_id: "seg-2", gap_slot_id: "gap-2", prompt: "둘째 장면 대사" });
+    expect(retry).toHaveBeenCalledTimes(2);
+    expect(complete).toHaveBeenCalledTimes(2);
+
+    await screen.findByText("AI 그림으로 2개 장면을 채웠어요.");
+    // 다 채워졌으니 더 채울 빈 장면 단추는 사라진다.
+    expect(screen.queryByRole("button", { name: "빈 장면 모두 AI로 채우기" })).not.toBeInTheDocument();
+  });
+
+  it("브롤이 못 채운 장면이 없으면 자동 채우기 단추가 보이지 않는다", async () => {
+    window.localStorage.setItem("videobox.creation-brief.project_1", "brief_1");
+    window.localStorage.setItem("videobox.draft-readiness.project_1", "readiness_no_gap");
+    vi.spyOn(api, "getCreationBrief").mockResolvedValue({ ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([]);
+    vi.spyOn(api, "getDraftReadiness").mockResolvedValue({
+      readiness_id: "readiness_no_gap", brief_id: "brief_1", status: "needs_assets", revision: 2,
+      // segment_id 없는 공백은 AI로 못 채우는 자리다(예: 대본 자체가 비어 있는
+      // 경우) -- 이런 자리만 있으면 자동 채우기 단추를 보여주지 않는다.
+      result: { gap_slots: [{ gap_slot_id: "gap-1", reason: "대본이 비어 있어요." }] },
+    } as never);
+
+    render(<CreationInterview projectId="project_1" />);
+
+    await screen.findByText("대본이 비어 있어요.");
+    expect(screen.queryByRole("button", { name: "빈 장면 모두 AI로 채우기" })).not.toBeInTheDocument();
   });
 });

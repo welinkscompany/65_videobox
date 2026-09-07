@@ -98,6 +98,133 @@ def test_final_render_allows_a_new_job_for_a_different_timeline_or_terminal_fail
     assert retried["job_id"] != first["job_id"]
 
 
+def test_variant_render_route_returns_independent_itemized_statuses(monkeypatch) -> None:
+    class VariantBatchOrchestrator:
+        def start_variant_renders(self, **_kwargs):
+            return {
+                "project_id": "project-a",
+                "items": [
+                    {
+                        "variant_id": "horizontal",
+                        "variant_kind": "horizontal",
+                        "timeline_id": "timeline-horizontal",
+                        "timeline_job_id": "timeline-job-horizontal",
+                        "job_id": "final-horizontal",
+                        "status": "running",
+                        "should_start": False,
+                    },
+                    {
+                        "variant_id": "vertical-full",
+                        "variant_kind": "vertical_full",
+                        "timeline_id": "timeline-vertical",
+                        "timeline_job_id": "timeline-job-vertical",
+                        "job_id": "final-vertical",
+                        "status": "failed",
+                        "error_code": "renderer_unavailable",
+                        "should_start": False,
+                    },
+                ],
+            }
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from videobox_api.routers.outputs import build_outputs_router
+
+    app = FastAPI()
+    app.include_router(build_outputs_router(VariantBatchOrchestrator()))
+    response = TestClient(app).post(
+        "/api/projects/project-a/variant-renders",
+        json={"session_id": "session-a", "variant_ids": ["horizontal", "vertical-full"]},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["items"][0]["status"] == "running"
+    assert response.json()["items"][1]["status"] == "failed"
+
+
+def test_pipeline_materializes_default_variants_and_reuses_their_render_jobs(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("variant render batch")
+    timeline_job_id = _ready_timeline_job(store, project.project_id, suffix="variant-batch")
+    session = store.get_latest_editing_session(project_id=project.project_id)
+    store.ensure_output_variants(project_id=project.project_id, session_id=session["session_id"])
+    pipeline = LocalPipelineRunner(store, final_renderer=object())
+
+    first = pipeline.start_variant_renders(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_ids=[],
+    )
+    second = pipeline.start_variant_renders(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_ids=[item["variant_id"] for item in first["items"]],
+    )
+
+    assert {item.get("variant_kind") for item in first["items"]} == {"horizontal", "vertical_full"}, first
+    assert {item["job_id"] for item in first["items"]} == {item["job_id"] for item in second["items"]}
+    assert len([
+        job for job in store.list_jobs(project_id=project.project_id)
+        if job["job_type"] == JobType.TIMELINE_BUILD.value and str(job["input_ref"]).startswith("variant:")
+    ]) == 2
+
+
+def test_pipeline_reused_variant_materialization_inherits_newly_approved_master_review(tmp_path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("variant review propagation")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        source_session_revision=1,
+        timeline_payload={"review_flags": [], "pending_recommendations": [], "tracks": [], "segments": []},
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [], "history": []},
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="draft",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+    variants = store.ensure_output_variants(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    )
+    pipeline = LocalPipelineRunner(store, final_renderer=object())
+
+    first = pipeline._materialize_variant_for_output(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_id=variants[0]["variant_id"],
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="approved",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+
+    batch = pipeline.start_variant_renders(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_ids=[variants[0]["variant_id"]],
+    )
+
+    assert batch["items"][0]["timeline_id"] == first["timeline_id"]
+    review = store.get_review_state(
+        project_id=project.project_id,
+        timeline_id=first["timeline_id"],
+    )
+    assert review["status"] == "approved"
+    assert review["source_variant_id"] == variants[0]["variant_id"]
+    assert review["source_variant_revision"] == 1
+
+
 def test_final_render_route_starts_one_worker_when_the_active_job_is_reused(monkeypatch) -> None:
     class ReusingOrchestrator:
         def __init__(self) -> None:

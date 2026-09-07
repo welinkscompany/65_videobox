@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from videobox_core_engine.editing_session import apply_yujin_editing_proposal
+
 from copy import deepcopy
 from pathlib import Path
 
@@ -59,6 +61,85 @@ def _session() -> dict:
         ],
         "history": [],
     }
+
+
+def test_ripple_speed_shortens_one_real_editing_session_scene_and_ripples_later_scenes() -> None:
+    """배속은 trim이 아니다. 만든 세션의 원본 말은 남기고 표시 길이만 줄인다."""
+    from videobox_core_engine.editing_session import (
+        build_editing_session,
+        redo,
+        set_segment_ripple_playback_rate,
+        undo,
+    )
+
+    source_timeline = {"timeline_id": "timeline_ripple", "tracks": []}
+    session = build_editing_session(
+        project_id="project_ripple",
+        timeline=source_timeline,
+        segments=[
+            {"segment_id": "scene-1", "text": "첫 장면", "start_sec": 0.0, "end_sec": 4.0},
+            {"segment_id": "scene-2", "text": "둘째 장면", "start_sec": 4.0, "end_sec": 8.0},
+            {"segment_id": "scene-3", "text": "셋째 장면", "start_sec": 8.0, "end_sec": 12.0},
+        ],
+    )
+
+    doubled = set_segment_ripple_playback_rate(
+        session=session,
+        segment_id="scene-2",
+        rate=2.0,
+    )
+
+    first, second, third = doubled["segments"]
+    assert (first["start_sec"], first["end_sec"]) == (0.0, 4.0)
+    assert (second["start_sec"], second["end_sec"]) == (4.0, 6.0)
+    assert (third["start_sec"], third["end_sec"]) == (6.0, 10.0)
+    assert second["ripple_playback_rate"] == 2.0
+    # source_slices는 말과 영상의 원본 4초를 가리킨다. 이걸 2초로 자르면
+    # "속도를 올린다"가 아니라 "뒤 절반을 버린다"가 된다.
+    assert second["source_slices"] == [{
+        "segment_id": "scene-2", "source_offset_sec": 0.0, "duration_sec": 4.0,
+    }]
+    assert doubled["history"][-1]["mutation_type"] == "segment_ripple_speed_update"
+
+    restored = set_segment_ripple_playback_rate(
+        session=doubled,
+        segment_id="scene-2",
+        rate=1.0,
+    )
+    assert [(item["start_sec"], item["end_sec"]) for item in restored["segments"]] == [
+        (0.0, 4.0), (4.0, 8.0), (8.0, 12.0),
+    ]
+
+    undone = undo(session=doubled)
+    redone = redo(session=undone)
+    assert [(item["start_sec"], item["end_sec"]) for item in undone["segments"]] == [
+        (0.0, 4.0), (4.0, 8.0), (8.0, 12.0),
+    ]
+    assert [(item["start_sec"], item["end_sec"]) for item in redone["segments"]] == [
+        (0.0, 4.0), (4.0, 6.0), (6.0, 10.0),
+    ]
+
+
+# **1.25와 3.0은 이제 정상이다(2026-09-04).** owner 지시로 리플 배속을 캡컷처럼
+# 숫자칸 범위(0.25~4)로 넓혔다 -- 렌더의 `_atempo_chain`이 처음부터 그 범위를
+# 감당했고 검증만 셋으로 좁혀 놨던 것이다. 여기서 지키는 것은 "렌더가 못 내는
+# 값은 거부한다"이지 특정 세 값이 아니었으므로, 범위 밖만 남긴다.
+# 넓힌 쪽은 `tests/test_ripple_speed_range.py`가 따로 지킨다.
+@pytest.mark.parametrize("rate", [0.0, -1.0, 0.1, 5.0, float("nan")])
+def test_ripple_speed_refuses_an_unsupported_rate_without_mutating_the_session(rate: float) -> None:
+    from videobox_core_engine.editing_session import build_editing_session, set_segment_ripple_playback_rate
+
+    session = build_editing_session(
+        project_id="project_ripple",
+        timeline={"timeline_id": "timeline_ripple", "tracks": []},
+        segments=[{"segment_id": "scene-1", "text": "첫 장면", "start_sec": 0.0, "end_sec": 4.0}],
+    )
+
+    with pytest.raises(ValueError, match="segment_ripple_playback_rate_invalid"):
+        set_segment_ripple_playback_rate(session=session, segment_id="scene-1", rate=rate)
+
+    assert session["segments"][0].get("ripple_playback_rate") is None
+    assert session["history"] == []
 
 
 def test_split_enforces_minimum_duration_and_preserves_editable_identity_and_lineage() -> None:
@@ -363,6 +444,60 @@ def test_timeline_mutation_api_is_revisioned_and_selected_preview_returns_only_f
     assert preview.json()["captions"][0]["segment_id"] == "seg_001"
 
 
+def test_ripple_speed_api_is_revisioned_and_keeps_the_whole_source_scene(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Ripple speed API")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload=_session())
+    client = TestClient(create_app(projects_root=tmp_path))
+    root = f"/api/projects/{project.project_id}/editing-sessions/{saved['session_id']}"
+
+    response = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 2.0, "expected_revision": saved["session_revision"]},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["session_revision"] == saved["session_revision"] + 1
+    assert [(item["start_sec"], item["end_sec"]) for item in body["segments"]] == [
+        (0.0, 2.0), (2.0, 3.0), (3.0, 5.0),
+    ]
+    assert body["segments"][1]["ripple_playback_rate"] == 2.0
+    stale = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 1.5, "expected_revision": saved["session_revision"]},
+    )
+    assert stale.status_code == 409
+
+
+def test_ripple_speed_api_takes_any_rate_the_renderer_can_produce(tmp_path: Path) -> None:
+    """화면 `속도` 칸은 숫자칸이다 -- API도 셋만 받으면 거기서 막힌다.
+
+    2026-09-05 실기 검증에서 잡았다. 엔진은 0.25~4로 넓혔는데 요청 스키마가
+    `Literal[1.0, 1.5, 2.0]`으로 남아 있어서 1.25배가 422로 거절됐다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Ripple speed range API")
+    saved = store.save_editing_session(project_id=project.project_id, timeline_id="timeline_001", session_payload=_session())
+    client = TestClient(create_app(projects_root=tmp_path))
+    root = f"/api/projects/{project.project_id}/editing-sessions/{saved['session_id']}"
+
+    accepted = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 1.25, "expected_revision": saved["session_revision"]},
+    )
+
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["segments"][1]["ripple_playback_rate"] == 1.25
+
+    # 범위 밖은 여전히 막는다 -- 렌더가 못 내는 값이다.
+    refused = client.patch(
+        f"{root}/segments/seg_002/ripple-playback-rate",
+        json={"rate": 9.0, "expected_revision": accepted.json()["session_revision"]},
+    )
+    assert refused.status_code == 422, refused.text
+
+
 def test_merge_api_rejects_removed_child_without_mutating_session(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Removed child merge")
@@ -427,3 +562,343 @@ def test_structural_timeline_regeneration_is_an_explicit_supported_output_step()
 
     assert request["fields"] == ["timeline_structure"]
     assert request["downstream_steps"] == ["timeline_build"]
+
+
+def test_ai_editing_proposal_is_one_undoable_transaction() -> None:
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+    from videobox_core_engine.editing_session import undo
+
+    proposal = YujinEditingProposal.model_validate({"proposal_id": "p", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "seg_001", "rate": 2}, {"intent": "set_caption_text", "segment_id": "seg_001", "text": "새 자막"}]})
+    applied = apply_yujin_editing_proposal(session=_session(), proposal=proposal)
+
+    assert len(applied["undo_stack"]) == 1
+    assert applied["segments"][0]["caption_text"] == "새 자막"
+    assert undo(session=applied)["redo_stack"]
+
+
+def test_ai_editing_proposal_projection_changes_speed_without_mutating_session_metadata() -> None:
+    from videobox_core_engine.editing_session import project_yujin_editing_proposal
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["end_sec"] = 4.0
+    session["segments"][1]["start_sec"] = 4.0
+    session["segments"][1]["end_sec"] = 6.0
+    session["segments"][2]["start_sec"] = 6.0
+    session["segments"][2]["end_sec"] = 8.0
+    session["output_freshness"] = {"preview": {"is_current": True}}
+    session["undo_stack"] = [{"event": "before"}]
+    session["redo_stack"] = [{"event": "after"}]
+    before = deepcopy(session)
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "speed-preview",
+        "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_speed", "segment_id": "seg_001", "rate": 2}],
+    })
+
+    projected = project_yujin_editing_proposal(session=session, proposal=proposal)
+
+    assert before["segments"][0]["end_sec"] == 4.0
+    assert projected["segments"][0]["end_sec"] == 2.0
+    assert projected["segments"][1]["start_sec"] == 2.0
+    assert projected["session_revision"] == before["session_revision"]
+    assert projected["output_freshness"] == before["output_freshness"]
+    assert projected["history"] == before["history"]
+    assert projected["undo_stack"] == before["undo_stack"]
+    assert projected["redo_stack"] == before["redo_stack"]
+    assert session == before
+
+
+def test_ai_editing_proposal_projection_composes_media_removal_and_reorder_without_metadata_changes() -> None:
+    from videobox_core_engine.editing_session import project_yujin_editing_proposal
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["output_freshness"] = {"preview": {"is_current": True}}
+    session["undo_stack"] = [{"event": "before"}]
+    session["redo_stack"] = [{"event": "after"}]
+    before = deepcopy(session)
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "media-reorder-preview",
+        "base_session_revision": 1,
+        "operations": [
+            {"intent": "apply_media", "segment_id": "seg_002", "media_type": "sfx", "asset_id": "sfx_002"},
+            {"intent": "remove_media", "segment_id": "seg_001", "media_type": "broll"},
+            {"intent": "reorder_segments", "segment_ids": ["seg_003", "seg_001", "seg_002"]},
+        ],
+    })
+
+    projected = project_yujin_editing_proposal(session=session, proposal=proposal)
+
+    assert [item["segment_id"] for item in projected["segments"]] == ["seg_003", "seg_001", "seg_002"]
+    assert projected["segments"][1]["broll_override"] is None
+    assert projected["segments"][2]["sfx_override"]["asset_id"] == "sfx_002"
+    for field in ("session_revision", "output_freshness", "history", "undo_stack", "redo_stack"):
+        assert projected[field] == before[field]
+    assert session == before
+
+
+def test_ai_editing_proposal_composes_every_supported_edit_without_extra_undo_events() -> None:
+    """유진의 여러 편집은 중간 상태를 남기지 않고 한 번에 되돌려져야 한다."""
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "all-edits",
+        "base_session_revision": 1,
+        "operations": [
+            {"intent": "set_segment_bounds", "segment_id": "seg_001", "start_sec": 0.0, "end_sec": 1.5},
+            {"intent": "set_cut_action", "segment_id": "seg_001", "action": "exclude"},
+            {"intent": "set_caption_text", "segment_id": "seg_001", "text": "다듬은 첫 문장"},
+            {"intent": "apply_media", "segment_id": "seg_001", "media_type": "bgm", "asset_id": "music_002"},
+            {"intent": "remove_media", "segment_id": "seg_001", "media_type": "broll"},
+            {"intent": "reorder_segments", "segment_ids": ["seg_003", "seg_001", "seg_002"]},
+        ],
+    })
+
+    applied = apply_yujin_editing_proposal(session=_session(), proposal=proposal)
+
+    assert [item["segment_id"] for item in applied["segments"]] == ["seg_003", "seg_001", "seg_002"]
+    edited = next(item for item in applied["segments"] if item["segment_id"] == "seg_001")
+    assert edited["cut_action"] == "remove"
+    assert edited["caption_text"] == "다듬은 첫 문장"
+    assert edited["music_override"]["asset_id"] == "music_002"
+    assert edited["broll_override"] is None
+    assert len(applied["undo_stack"]) == 1
+
+
+def test_ai_scene_look_keeps_the_source_identity_it_paints_over() -> None:
+    """말로 색감 바꾸기(2026-09-01). owner가 시켜 본 흐름 중 하나다.
+
+    `update_segment_broll_override`는 덮어쓰기라 지금 값을 통째로 다시 실어야
+    한다. 원본 신원(해시·판)을 안 실으면 출력 검증이 그 장면을 "바뀐 원본"으로
+    읽어서, 색만 바꿨는데 완성본이 낡았다고 나온다.
+    """
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001",
+        "expected_content_sha256": "a" * 64,
+        "media_revision": "broll-r7",
+        "media_controls": {"fit": "crop", "speed": 1.5},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "look",
+        "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_look", "segment_id": "seg_001", "look": "warm"}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    override = next(item for item in applied["segments"] if item["segment_id"] == "seg_001")["broll_override"]
+
+    assert override["asset_id"] == "broll_001"
+    assert override["expected_content_sha256"] == "a" * 64
+    assert override["media_revision"] == "broll-r7"
+    # 고른 것은 색감뿐이다. 같이 저장돼 있던 값을 조용히 되돌리지 않는다.
+    assert override["media_controls"]["fit"] == "crop"
+    assert override["media_controls"]["speed"] == 1.5
+    # 누가 골랐는지 남는다 -- 유진이 고른 것을 되돌리거나 설명하려면 출처가 있어야 한다.
+    assert override["media_controls"]["filter"] == {"type": "warm", "chosen_by": "yujin"}
+    assert len(applied["undo_stack"]) == 1
+
+
+def test_ai_scene_look_refuses_a_scene_with_no_picture_under_it() -> None:
+    """검증기가 먼저 막지만(`scene_look_needs_broll`) 여기서도 한 번 더 막는다.
+
+    이 함수는 미리보기 투영에서도 불리고, 그 경로가 검증기를 안 지나는 날이
+    올 수 있다. 그때 조용히 아무 일도 안 일어나는 것보다 멈추는 게 낫다.
+    """
+    import pytest as _pytest
+
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][1]["broll_override"] = None
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "look",
+        "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_look", "segment_id": "seg_002", "look": "mono"}],
+    })
+
+    with _pytest.raises(ValueError, match="scene_look_needs_broll"):
+        apply_yujin_editing_proposal(session=session, proposal=proposal)
+
+
+def test_ai_photo_motion_lands_beside_the_look_and_keeps_the_rest() -> None:
+    """사진 움직임도 색감과 **같은 자리**다 -- 그 장면 B-roll의 조정값.
+
+    원본 신원(해시·판)을 같이 실어야 출력 검증이 그 장면을 "바뀐 원본"으로 읽지
+    않는다. 색감·손떨림·변형이 전부 지나는 함정이라 같은 함수를 쓴다.
+    """
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001",
+        "expected_content_sha256": "d" * 64,
+        "media_revision": "broll-r11",
+        "media_controls": {"fit": "crop", "filter": {"type": "warm", "chosen_by": "owner"}},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "motion", "base_session_revision": 1,
+        "operations": [{"intent": "set_photo_motion", "segment_id": "seg_001", "motion": "still"}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    override = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")["broll_override"]
+
+    assert override["media_controls"]["photo_motion"] == "still"
+    assert override["expected_content_sha256"] == "d" * 64
+    assert override["media_revision"] == "broll-r11"
+    # 고른 것은 움직임뿐이다. 같이 저장돼 있던 색감을 조용히 되돌리지 않는다.
+    assert override["media_controls"]["filter"] == {"type": "warm", "chosen_by": "owner"}
+    assert override["media_controls"]["fit"] == "crop"
+
+
+def test_ai_picture_cleanup_changes_only_what_the_creator_asked_for() -> None:
+    """**말한 칸만 바꾼다.** owner가 "흔들림만 잡아 줘"라고 하면 노이즈 설정은
+    그대로여야 한다.
+
+    2026-09-02에 음악에서 똑같은 사고를 겪었다 -- 안 물어본 자리를 채우다가
+    이미 켜 둔 것을 덮어썼다. 그래서 이 의도들의 칸은 전부 선택이고, 온 것만
+    합친다.
+    """
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001",
+        "expected_content_sha256": "c" * 64,
+        "media_revision": "broll-r9",
+        "media_controls": {"fit": "crop", "reduce_noise": True, "speed": 1.5},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "cleanup", "base_session_revision": 1,
+        "operations": [{"intent": "set_picture_cleanup", "segment_id": "seg_001", "stabilize": True}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    controls = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")["broll_override"]["media_controls"]
+
+    assert controls["stabilize"] is True
+    # 안 물어본 칸은 그대로다.
+    assert controls["reduce_noise"] is True
+    assert controls["fit"] == "crop"
+    assert controls["speed"] == 1.5
+
+
+def test_ai_scene_transform_keeps_the_source_identity_like_the_look_does() -> None:
+    """변형도 색감과 **같은 함수**를 지난다 -- 원본 신원을 안 실으면 출력 검증이
+    그 장면을 "바뀐 원본"으로 읽는다."""
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    session["segments"][0]["broll_override"] = {
+        "asset_id": "broll_001", "expected_content_sha256": "d" * 64,
+        "media_revision": "broll-r3", "media_controls": {"fit": "fit"},
+    }
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "transform", "base_session_revision": 1,
+        "operations": [{"intent": "set_scene_transform", "segment_id": "seg_001", "zoom": 1.4, "rotation_deg": 8.0}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    override = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")["broll_override"]
+
+    assert override["expected_content_sha256"] == "d" * 64
+    assert override["media_controls"]["zoom"] == 1.4
+    assert override["media_controls"]["rotation_deg"] == 8.0
+    # 말하지 않은 위치는 기본값 그대로다.
+    assert override["media_controls"]["position_x_percent"] == 0.0
+
+
+def test_ai_sound_cleanup_lands_on_the_media_the_creator_named() -> None:
+    """음악과 효과음은 다른 자리다. `media_type`으로 지목한 쪽만 바뀐다."""
+    from videobox_domain_models.yujin_editing_proposals import YujinEditingProposal
+
+    session = _session()
+    proposal = YujinEditingProposal.model_validate({
+        "proposal_id": "sound", "base_session_revision": 1,
+        "operations": [{"intent": "set_sound_cleanup", "segment_id": "seg_001", "media_type": "bgm", "normalize_loudness": True}],
+    })
+
+    applied = apply_yujin_editing_proposal(session=session, proposal=proposal)
+    segment = next(s for s in applied["segments"] if s["segment_id"] == "seg_001")
+
+    assert segment["music_override"]["media_controls"]["normalize_loudness"] is True
+    # 효과음은 손대지 않았다.
+    assert not (segment["sfx_override"].get("media_controls") or {}).get("normalize_loudness")
+
+
+def test_a_rebuilt_timeline_does_not_place_two_clips_on_the_same_stretch() -> None:
+    """장면을 쪼갠 뒤 편집판을 다시 지으면 4~8초에 조각이 **두 번** 놓였다 — 실측 2026-09-07.
+
+    캡컷 초안이 `New segment overlaps with existing segment
+    [start: 4000000, end: 8000000]`으로 죽었다. 편집판 자체는 깨끗했다
+    (겹치는 클립 없음) -- 겹침은 세션을 입히는 이 자리에서 생겼다.
+
+    다시 지은 편집판은 **세션 좌표**로 온다: 쪼갠 뒤 생긴 `..__split_2`가
+    클립의 `segment_id`로 그대로 박혀 있다. 그런데 그 세션 조각의
+    `source_slices`는 쪼개기 **전** 이름(부모)을 가리킨다. 그래서
+    부모 클립이 두 자리로 투영되고, 자식 클립은 짝을 못 찾아 원본 그대로
+    통과한다 -- 같은 4~8초에 둘.
+
+    한 장면짜리나 쪼개기 없는 시험은 이걸 못 잡는다.
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import split_segment
+
+    project_id = "project_001"
+    session = _session()
+    session["project_id"] = project_id
+    session["session_id"] = "session_001"
+    session["segments"] = [
+        {
+            "segment_id": "timeline_001:001",
+            "caption_text": "",
+            "start_sec": 0.0,
+            "end_sec": 8.0,
+            "cut_action": "keep",
+            "review_required": True,
+            "broll_override": {"asset_id": "photo_one"},
+            "music_override": None,
+            "sfx_override": None,
+            "visual_overlays": [],
+        }
+    ]
+    session = split_segment(session=session, segment_id="timeline_001:001", split_sec=4.0)
+    left_id, right_id = [segment["segment_id"] for segment in session["segments"][:2]]
+    session["segments"][1]["broll_override"] = {"asset_id": "photo_two"}
+
+    # 다시 지은 편집판 -- 장면마다 클립이 하나씩, 이름은 **지금** 세션 조각 이름이다.
+    timeline = {
+        "project_id": project_id,
+        "timeline_id": "timeline_002",
+        "tracks": [
+            {
+                "track_type": "narration",
+                "clips": [
+                    {"clip_id": "clip_narration_001", "segment_id": left_id, "start_sec": 0.0, "end_sec": 4.0},
+                    {"clip_id": "clip_narration_002", "segment_id": right_id, "start_sec": 4.0, "end_sec": 8.0},
+                ],
+            },
+            {
+                "track_type": "broll",
+                "clips": [
+                    {"clip_id": "clip_broll_001", "segment_id": left_id, "asset_id": "photo_one", "start_sec": 0.0, "end_sec": 4.0},
+                    {"clip_id": "clip_broll_002", "segment_id": right_id, "asset_id": "photo_two", "start_sec": 4.0, "end_sec": 8.0},
+                ],
+            },
+        ],
+    }
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=session, project_id=project_id
+    )
+
+    for track in materialized["tracks"]:
+        placed = sorted(
+            ((clip["start_sec"], clip["end_sec"], clip["clip_id"]) for clip in track["clips"]),
+        )
+        for earlier, later in zip(placed, placed[1:]):
+            assert earlier[1] <= later[0], (track["track_type"], placed)

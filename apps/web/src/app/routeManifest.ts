@@ -1,20 +1,194 @@
+//: `voices`는 `내 자산 > 내 목소리`다. 자료실 갈래가 아니라 **자기 주소**인
+//: 이유는 목소리가 자료실에 없기 때문이다 -- 프로젝트에 묶여 있고, 프로젝트를
+//: 넘나드는 목록은 `GET /api/voices`가 따로 준다(2026-09-07).
+export const globalDestinations = ["projects", "library", "footage", "voices", "settings"] as const;
+
+export type GlobalDestination = (typeof globalDestinations)[number];
+
+export const projectStages = ["plan", "assets", "edit", "review", "output"] as const;
+
+export type ProjectStage = (typeof projectStages)[number];
+
+/**
+ * These are the route names owned by the pre-workspace-overhaul shell. Keep
+ * them as an input compatibility contract while new navigation uses stages.
+ */
 export const workspaceSections = ["home", "create", "timeline", "review", "editing", "settings", "media", "outputs"] as const;
 
 export type WorkspaceSection = (typeof workspaceSections)[number];
 
-export function resolveWorkspaceLocation(projectId: string, section: WorkspaceSection = "home") {
+const legacyStageAliases: Readonly<Record<string, { stage: ProjectStage; legacy: boolean }>> = {
+  plan: { stage: "plan", legacy: false },
+  assets: { stage: "assets", legacy: false },
+  edit: { stage: "edit", legacy: false },
+  review: { stage: "review", legacy: false },
+  output: { stage: "output", legacy: false },
+  home: { stage: "plan", legacy: true },
+  create: { stage: "plan", legacy: true },
+  media: { stage: "assets", legacy: true },
+  editing: { stage: "edit", legacy: true },
+  editor: { stage: "edit", legacy: true },
+  timeline: { stage: "review", legacy: true },
+  outputs: { stage: "output", legacy: true },
+};
+
+export function resolveGlobalLocation(destination: GlobalDestination) {
+  // Settings currently has a sectioned owner, so keep the global destination
+  // useful by resolving it to the existing general settings entry point.
+  return destination === "settings" ? "/settings/general" : `/${destination}`;
+}
+
+/**
+ * `내 자산` 구역이 여는 자료실 갈래다(owner 승인 2026-09-04 §2).
+ *
+ * **새 화면을 만들지 않는다.** 자료실(`/library`)이 이미 종류로 거를 수 있고
+ * 의미검색·휴지통·사용처 검사가 전부 거기 붙어 있다. 그래서 이 값은 새 주소가
+ * 아니라 자료실을 **어떤 갈래로 열지**만 말한다.
+ *
+ * `audio`는 `음악`과 `효과음`을 함께 여는 한 자리다 -- 승인된 구조가
+ * `음악·효과음` 한 줄이기 때문이다. 자료실 분류 목록에도 같은 한 줄이 있다.
+ *
+ * 주소는 사람이 북마크하는 계약이라 값은 ASCII로 적는다.
+ */
+export const libraryKinds = ["broll", "audio"] as const;
+
+export type LibraryKind = (typeof libraryKinds)[number];
+
+export function resolveLibraryKind(kind: LibraryKind) {
+  return `${resolveGlobalLocation("library")}?kind=${kind}`;
+}
+
+/** 주소에 적힌 갈래를 읽는다. 모르는 값이면 갈래 없이 자료실 전체다 --
+ *  오래된 북마크나 손으로 고친 주소로 화면이 비지 않게 한다. */
+export function parseLibraryKind(value: unknown): LibraryKind | null {
+  return libraryKinds.includes(value as LibraryKind) ? (value as LibraryKind) : null;
+}
+
+/**
+ * 단계마다 **실제로 내보내는 주소**다. 주소는 사람이 북마크하고 되돌아오는
+ * 계약이라 이번 정리에서 바꾸지 않았다 -- 바꾸는 것은 코드가 쓰는 말이지
+ * 주소가 아니다. 새 이름(`/plan`·`/assets`·`/edit`·`/output`)은 계속 **들어오는**
+ * 주소로 읽힌다(`legacyStageAliases`).
+ */
+const stageAddresses: Readonly<Record<ProjectStage, string>> = {
+  plan: "create",
+  assets: "media",
+  edit: "editor",
+  review: "review",
+  output: "outputs",
+};
+
+/** 우리 코드가 프로젝트 화면 링크를 만들 때 쓰는 **하나뿐인** 함수다. */
+export function resolveProjectStage(projectId: string, stage: ProjectStage) {
+  return `/projects/${encodeURIComponent(projectId)}/${stageAddresses[stage]}`;
+}
+
+/**
+ * 껍데기(`ProductShell`/`TopBar`)와 `EditorWorkbenchRoute`는 아직 옛 이름으로
+ * 말한다. 그 경계에서만 쓰는 어댑터다 -- **새 코드는 `resolveProjectStage`를 쓴다.**
+ * `home`은 단계가 아니라 프로젝트 첫 화면이라 여기에만 있다.
+ */
+export function resolveWorkspaceLocation(projectId: string, section: WorkspaceSection) {
   const canonicalSection = section === "editing" ? "editor" : section;
   return `/projects/${encodeURIComponent(projectId)}/${canonicalSection}`;
 }
 
-export function isWorkspaceSection(value: string): value is WorkspaceSection {
-  return (workspaceSections as readonly string[]).includes(value);
+export function isProjectStage(value: string): value is ProjectStage {
+  return (projectStages as readonly string[]).includes(value);
 }
 
-export function parseWorkspaceLocation(pathname: string): { projectId: string; section: WorkspaceSection } | null {
+export type ParsedWorkspaceLocation = {
+  projectId: string;
+  stage: ProjectStage;
+  legacy: boolean;
+};
+
+export type NavigationCrumb = { label: string; href?: string };
+
+export type NavigationContext = {
+  screenName: string;
+  fallbackHref: string;
+  crumbs: readonly NavigationCrumb[];
+};
+
+export function parseWorkspaceLocation(pathname: string): ParsedWorkspaceLocation | null {
   const match = /^\/projects\/([^/]+)\/([^/]+)$/.exec(pathname);
   if (!match) return null;
-  const section = match[2] === "editor" ? "editing" : match[2];
-  if (!isWorkspaceSection(section)) return null;
-  return { projectId: decodeURIComponent(match[1]), section };
+  if (!Object.prototype.hasOwnProperty.call(legacyStageAliases, match[2])) return null;
+  const resolved = legacyStageAliases[match[2]];
+  return { projectId: decodeURIComponent(match[1]), ...resolved };
+}
+
+/**
+ * 화면이 스스로 URL을 조립하지 않게 현재 위치와, 브라우저 이력이 없을 때 쓸
+ * 안전한 이전 목적지를 한 곳에서 정한다. 이력은 실제로 사용자가 온 길을 가장
+ * 잘 아니까 라우터가 먼저 쓰고, 이 값은 직접 주소로 들어온 경우의 대체다.
+ */
+export function resolveNavigationContext({
+  pathname,
+  projectName,
+}: {
+  pathname: string;
+  projectName?: string;
+}): NavigationContext {
+  if (pathname === "/library") {
+    return {
+      // 전체 메뉴의 공용 라이브러리만 새 이름이다(owner 결정 2026-08-29) --
+      // 프로젝트 단계·편집기 도크의 "미디어"는 그대로 둔다.
+      screenName: "자료실",
+      fallbackHref: resolveGlobalLocation("projects"),
+      crumbs: [{ label: "프로젝트", href: resolveGlobalLocation("projects") }, { label: "자료실" }],
+    };
+  }
+  if (pathname === "/footage") {
+    return {
+      screenName: "촬영본 정리",
+      fallbackHref: resolveGlobalLocation("library"),
+      crumbs: [{ label: "자료실", href: resolveGlobalLocation("library") }, { label: "촬영본 정리" }],
+    };
+  }
+  if (pathname.startsWith("/settings/")) {
+    return {
+      screenName: "설정",
+      fallbackHref: resolveGlobalLocation("projects"),
+      crumbs: [{ label: "프로젝트", href: resolveGlobalLocation("projects") }, { label: "설정" }],
+    };
+  }
+
+  const parsed = parseWorkspaceLocation(pathname);
+  if (parsed) {
+    const pathSegments = pathname.split("/");
+    const currentSegment = pathSegments[pathSegments.length - 1];
+    const screenName = parsed.stage === "plan" ? "이야기"
+      : parsed.stage === "assets" ? "미디어"
+        : parsed.stage === "edit" ? "편집"
+          : "확인과 내보내기";
+    // 돌아갈 곳은 **한 단계 앞**이다. 앞 단계를 새 이름으로 적어야 이 표가
+    // 무엇을 말하는지 읽힌다 -- 주소는 `resolveProjectStage`가 정한다.
+    // `edit`의 앞은 예전엔 `assets`(미디어 단계)였지만, 그 화면이 편집기로
+    // 접히며 `assets` URL 자체가 이제 edit로 리다이렉트된다(`workspaceRoute`
+    // beforeLoad) -- 그대로 두면 "뒤로"가 스스로에게 되돌아오는 루프가 된다.
+    // 2026-09-01, `docs/decisions/2026-08-30-capcut-button-level-parity.ko.md`
+    // 9단계.
+    const fallbackHref = parsed.stage === "plan"
+      ? currentSegment === "home" ? resolveGlobalLocation("projects") : resolveWorkspaceLocation(parsed.projectId, "home")
+      : parsed.stage === "assets" ? resolveProjectStage(parsed.projectId, "plan")
+        : parsed.stage === "edit" ? resolveProjectStage(parsed.projectId, "plan")
+          : resolveProjectStage(parsed.projectId, "edit");
+    return {
+      screenName,
+      fallbackHref,
+      crumbs: [
+        { label: "프로젝트", href: resolveGlobalLocation("projects") },
+        { label: projectName ?? "프로젝트", href: resolveWorkspaceLocation(parsed.projectId, "home") },
+        { label: screenName },
+      ],
+    };
+  }
+
+  return {
+    screenName: "프로젝트",
+    fallbackHref: resolveGlobalLocation("projects"),
+    crumbs: [{ label: "프로젝트" }],
+  };
 }

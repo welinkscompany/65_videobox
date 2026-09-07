@@ -8,5 +8,34 @@
       "Edit(./.tmp-real-video-dogfood/**)",
       "Edit(./apps/web/.tmp-real-video-dogfood/**)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "방금 고친 파일을 지키는 장치 확인",
+            "timeout": 180,
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; for p in \"$VIDEOBOX_GUARD_PYTHON\" \"$d/.venv/Scripts/python.exe\" \"$d/.venv/bin/python\"; do [ -x \"$p\" ] && exec \"$p\" \"$d/scripts/guard_router.py\" --hook post-tool-use; done; echo '{\"systemMessage\":\"guard_router: no .venv python found - nothing was checked\"}'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "statusMessage": "이번에 바뀐 파일 전체를 지키는 장치 확인",
+            "timeout": 1800,
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-$PWD}\"; for p in \"$VIDEOBOX_GUARD_PYTHON\" \"$d/.venv/Scripts/python.exe\" \"$d/.venv/bin/python\"; do [ -x \"$p\" ] && exec \"$p\" \"$d/scripts/guard_router.py\" --hook stop; done; echo '{\"systemMessage\":\"guard_router: no .venv python found - nothing was checked\"}'"
+          }
+        ]
+      }
+    ]
   }
 }

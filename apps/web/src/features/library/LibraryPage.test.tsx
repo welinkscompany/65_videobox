@@ -1,0 +1,532 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { api, type LibraryAsset } from "../../api";
+import { LibraryPage } from "./LibraryPage";
+
+function asset(overrides: Partial<LibraryAsset> = {}): LibraryAsset {
+  return {
+    library_asset_id: "user_asset_1",
+    media_type: "broll",
+    origin: "user",
+    lifecycle: "ready",
+    content_sha256: "a".repeat(64),
+    byte_count: 1200,
+    mime_type: "video/mp4",
+    managed_relative_path: "assets/a.mp4",
+    technical_metadata: { duration_seconds: 12.5, width: 1920, height: 1080 },
+    machine_metadata: { description: "도시를 걷는 장면" },
+    user_metadata: { filename: "walk.mp4", tags: ["도시"] },
+    created_at: "2026-08-12T00:00:00Z",
+    updated_at: "2026-08-12T00:00:00Z",
+    trashed_at: null,
+    preview_url: "/api/library/assets/user_asset_1/preview",
+    thumbnail_url: "/api/library/assets/user_asset_1/thumbnail",
+    waveform_url: "/api/library/assets/user_asset_1/waveform",
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [asset()], total: 1 });
+  vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "user_asset_1", locations: [] });
+  vi.spyOn(api, "ingestLibraryAssets").mockResolvedValue({ ingest_batch_id: "batch_1", partial: false, items: [] });
+});
+
+/** 분류를 고르는 자리는 왼쪽 목록 하나다(2026-08-23). 목록 단추는 이름 옆에
+ *  개수를 함께 그리므로 이름 뒤에 개수만 오는 것으로 찾는다 -- 앞부분만 보면
+ *  `음악`이 `음악·효과음`까지 함께 집어 둘 다 찾는다. */
+function chooseCategory(label: string): HTMLElement {
+  const sidebar = screen.getByTestId("library-sidebar");
+  const button = within(sidebar).getByRole("button", { name: new RegExp(`^${label}(\\s|$)`) });
+  fireEvent.click(button);
+  return button;
+}
+
+describe("LibraryPage", () => {
+  it("keeps the desktop library bounded to three panes and a center scroll region", async () => {
+    render(<LibraryPage />);
+    expect(screen.getByTestId("library-workspace")).toHaveAttribute("data-layout", "three-pane");
+    expect(screen.getByTestId("library-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("library-results")).toBeInTheDocument();
+    expect(screen.getByTestId("library-preview")).toBeInTheDocument();
+    expect(screen.getByTestId("library-results-scroll")).toHaveAttribute("data-bounded", "true");
+    expect((await screen.findAllByText("walk.mp4")).length).toBeGreaterThan(0);
+  });
+
+  it("picks a category from one sidebar list, with no second row asking the same thing", async () => {
+    // `capcut-observed` 기록 §5: "탭을 누르면 **왼쪽에 분류 목록, 오른쪽에
+    // 격자**가 나온다" -- 캡컷은 왼쪽 목록 하나로 고르고 격자 위에 같은 것을
+    // 다시 묻지 않는다. 그 왼쪽 목록도 `가져오기 · 내 보관함 · 음악 · 사운드
+    // 효과`처럼 종류와 보관 상태를 한 줄에 섞어 둔다(§5 오디오).
+    //
+    // 2026-08-23에 한 번 반대로 정리했다 -- 사이드바에서 종류를 빼고 결과
+    // 영역 탭을 남겼는데, `전체`가 두 군데에 남아 **둘 다 동시에 "선택됨"으로
+    // 보이는** 상태가 됐다. owner 결정으로 왼쪽 하나에 합쳤다.
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+
+    const sidebar = screen.getByTestId("library-sidebar");
+    // `음악·효과음`은 `내 자산` 구역이 여는 넓은 자리다(2026-09-04 §2) --
+    // `전체`처럼 아래 두 줄을 함께 담는다. 목록은 여전히 여기 하나다.
+    for (const label of ["전체", "영상", "음악·효과음", "음악", "효과음", "그림", "즐겨찾기", "휴지통"]) {
+      expect(within(sidebar).getByRole("button", { name: new RegExp(`^${label}(\\s|$)`) })).toBeInTheDocument();
+    }
+    // 고르는 자리는 이 목록 하나뿐이다.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
+  it("shows only 24 results in the bounded center and marks the chosen category", async () => {
+    const many = Array.from({ length: 40 }, (_, index) => asset({
+      library_asset_id: `asset_${index}`,
+      user_metadata: { filename: `clip-${index}.mp4`, tags: [] },
+    }));
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: many, total: many.length });
+    render(<LibraryPage />);
+    expect((await screen.findAllByTestId("library-asset-card"))).toHaveLength(24);
+    // 분류 목록은 진짜 `<button>`이라 키보드 조작은 브라우저가 맡는다. 여기서는
+    // 고른 것이 눌린 상태로 남는지만 본다.
+    expect(chooseCategory("음악")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("searches by meaning when a media type is chosen, and says which way it found things", async () => {
+    // `/api/library/search`(의미검색)는 백엔드에 있는데 부르는 화면이 하나도
+    // 없었다 -- 검색은 언제나 단어 매칭이었다. 종류 탭을 고르고 검색하면
+    // 의미검색을 부르고, 어느 방식으로 찾았는지 말한다.
+    const search = vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [
+        { ...asset({ library_asset_id: "match_1", user_metadata: { filename: "calm-walk.mp4", tags: [] } }), score: 0.9, reason: "묘사 일치", semantic_match: true },
+        // 촬영본 색인 조각(자산 아님)은 이 화면이 다룰 수 없어 걸러야 한다.
+        { library_asset_id: null, score: 0.8, semantic_match: true } as never,
+        // 같은 자산이 두 번 오면 한 번만 그린다 -- React key가 겹친다.
+        { ...asset({ library_asset_id: "match_1", user_metadata: { filename: "calm-walk.mp4", tags: [] } }), score: 0.5, semantic_match: true },
+      ],
+      semantic: true,
+    });
+    render(<LibraryPage />);
+    chooseCategory("영상");
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "차분한 산책" } });
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith("차분한 산책", "broll", undefined));
+    expect((await screen.findAllByText("calm-walk.mp4")).length).toBeGreaterThan(0);
+    // 조각 행은 걸러지고, 중복 자산은 카드 하나만 남는다.
+    expect(screen.getAllByTestId("library-asset-card")).toHaveLength(1);
+    expect(screen.getByRole("status", { name: "찾은 방식" })).toHaveTextContent("뜻으로 찾음");
+  });
+
+  it("says when a search fell back to word matching", async () => {
+    vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [{ ...asset(), score: 0.5, reason: "파일명 또는 분석 메타데이터 일치" }],
+      semantic: false,
+    });
+    render(<LibraryPage />);
+    chooseCategory("영상");
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "걷기" } });
+
+    expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
+  });
+
+  it("does not claim meaning-based results when every semantic row was unusable", async () => {
+    // 의미검색이 돌았어도(semantic: true) 남은 행이 전부 단어 매칭이면
+    // `뜻으로 찾음` 배지는 거짓말이다 -- 실제로 걸러 낸 뒤 기준으로 말한다.
+    vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [
+        { ...asset(), score: 0.5, reason: "파일명 또는 분석 메타데이터 일치" },
+        { library_asset_id: null, score: 0.9, semantic_match: true } as never,
+      ],
+      semantic: true,
+    });
+    render(<LibraryPage />);
+    chooseCategory("영상");
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "노을" } });
+
+    expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("단어로만 찾음");
+  });
+
+  it("reconciles a mixed drop and keeps a failed item visible", async () => {
+    vi.mocked(api.ingestLibraryAssets)
+      .mockResolvedValueOnce({ ingest_batch_id: "batch_b", partial: false, items: [{ filename: "clip.mp4", state: "ready", library_asset_id: "new_clip" }] })
+      .mockResolvedValueOnce({ ingest_batch_id: "batch_a", partial: true, items: [{ filename: "song.mp3", state: "needs_attention", error_code: "unsupported_media" }] });
+    render(<LibraryPage />);
+    const dropzone = screen.getByTestId("library-dropzone");
+    const files = [
+      new File(["video"], "clip.mp4", { type: "video/mp4" }),
+      new File(["audio"], "song.mp3", { type: "audio/mpeg" }),
+    ];
+    await act(async () => {
+      fireEvent.drop(dropzone, { dataTransfer: { files } });
+    });
+    expect(await screen.findByText("song.mp3")).toBeInTheDocument();
+    expect(screen.getByText(/주의가 필요한 항목/)).toBeInTheDocument();
+    expect(api.ingestLibraryAssets).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("clip.mp4")).toBeInTheDocument();
+  });
+
+  it("offers folder addition and uploads the selected nested files", async () => {
+    render(<LibraryPage />);
+    const folderInput = screen.getByTestId("library-folder-input");
+    expect(screen.getByRole("button", { name: "폴더 추가" })).toBeVisible();
+    expect(folderInput).toHaveAttribute("webkitdirectory");
+    expect(folderInput).toHaveAttribute("multiple");
+
+    const first = new File(["video"], "clip.mp4", { type: "video/mp4" });
+    const second = new File(["audio"], "music.mp3", { type: "audio/mpeg" });
+    Object.defineProperty(first, "webkitRelativePath", { value: "촬영본/clip.mp4" });
+    Object.defineProperty(second, "webkitRelativePath", { value: "음악/music.mp3" });
+    await act(async () => {
+      fireEvent.change(folderInput, { target: { files: [first, second] } });
+    });
+
+    expect(api.ingestLibraryAssets).toHaveBeenCalledTimes(2);
+    expect(api.ingestLibraryAssets).toHaveBeenCalledWith([first], "broll", expect.any(String));
+    expect(api.ingestLibraryAssets).toHaveBeenCalledWith([second], "music", expect.any(String));
+  });
+
+  it("keeps same-named files from different folders independently retryable", async () => {
+    vi.mocked(api.ingestLibraryAssets)
+      .mockResolvedValueOnce({ ingest_batch_id: "batch", partial: true, items: [
+        { filename: "clip.mp4", state: "needs_attention", error_code: "network_error" },
+        { filename: "clip.mp4", state: "needs_attention", error_code: "network_error" },
+      ] })
+      .mockResolvedValue({ ingest_batch_id: "retry", partial: false, items: [{ filename: "clip.mp4", state: "ready", library_asset_id: "retry-asset" }] });
+    render(<LibraryPage />);
+    const first = new File(["first"], "clip.mp4", { type: "video/mp4" });
+    const second = new File(["second"], "clip.mp4", { type: "video/mp4" });
+    Object.defineProperty(first, "webkitRelativePath", { value: "첫번째/clip.mp4" });
+    Object.defineProperty(second, "webkitRelativePath", { value: "두번째/clip.mp4" });
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("library-folder-input"), { target: { files: [first, second] } });
+    });
+    const retryButtons = await screen.findAllByRole("button", { name: "다시 시도" });
+    fireEvent.click(retryButtons[0]);
+    await waitFor(() => expect(api.ingestLibraryAssets).toHaveBeenCalledTimes(2));
+    expect(api.ingestLibraryAssets).toHaveBeenNthCalledWith(2, [first], "broll", expect.any(String));
+  });
+
+  // 독립 "미디어" 단계 화면이 편집기로 접히면서(2026-09-01) 이 링크의 목적지도
+  // 편집기로 바뀌었다 -- 그 도크가 이미 미디어 탭 기본값이다.
+  it("takes the owner from a usage location straight to that project's editor", async () => {
+    vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
+      library_asset_id: "user_asset_1",
+      locations: [
+        { project_id: "project_1", location: { kind: "timeline", id: "timeline_1", label: "프로젝트 편집본" } },
+        // 프로젝트를 특정할 수 없는 위치는 지금처럼 글자로만 남는다.
+        { location: { kind: "derived_sequence", id: "seq_1", label: "묶음" } },
+      ],
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+
+    const entry = await screen.findByRole("link", { name: "프로젝트 편집본 편집기에서 열기" });
+    expect(entry).toHaveAttribute("href", "/projects/project_1/editor");
+    expect(screen.getByText("묶음")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "묶음 편집기에서 열기" })).toBeNull();
+  });
+
+  it("previews an asset and blocks trash when the usage endpoint reports a location", async () => {
+    vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({
+      library_asset_id: "user_asset_1",
+      locations: [{ project_id: "project_1", location: { kind: "timeline", id: "timeline_1", label: "프로젝트 편집본" } }],
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+    expect(await screen.findByTestId("library-preview-player")).toBeInTheDocument();
+    expect(await screen.findByText(/사용 중인 위치/)).toBeInTheDocument();
+    const trash = screen.getByRole("button", { name: "휴지통으로 이동" });
+    expect(trash).toBeDisabled();
+    expect(screen.getByText(/프로젝트 편집본/)).toBeInTheDocument();
+  });
+
+  it("has one primary action in the dropzone and can restore a trashed asset", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [asset({ lifecycle: "trashed" })], total: 1 });
+    vi.spyOn(api, "restoreLibraryAsset").mockResolvedValue({ asset: asset({ lifecycle: "ready" }) });
+    render(<LibraryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /휴지통/ }));
+    expect((await screen.findAllByText("walk.mp4")).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /파일 추가/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "복원" }));
+    await waitFor(() => expect(api.restoreLibraryAsset).toHaveBeenCalledWith("user_asset_1"));
+  });
+
+  it("permanently deletes a trashed asset only after a second confirm", async () => {
+    // 되돌릴 수 없는 동작이라 프로젝트 영구 삭제와 같은 2단계 확인을 거친다
+    // (`app/AppRouter.tsx`의 `deleteConfirm`). 백엔드는 이미 있었는데
+    // (`permanentDeleteLibraryAsset`) 이 화면에 부르는 단추가 없었다.
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [asset({ lifecycle: "trashed" })], total: 1 });
+    const permanentDelete = vi.spyOn(api, "permanentDeleteLibraryAsset").mockResolvedValue(undefined);
+    render(<LibraryPage />);
+    fireEvent.click(screen.getByRole("button", { name: /휴지통/ }));
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByRole("button", { name: "walk.mp4 영구 삭제" }));
+
+    expect(permanentDelete).not.toHaveBeenCalled();
+    const confirmButton = await screen.findByRole("button", { name: /영구 삭제 · 한 번 더 확인할게요/ });
+    fireEvent.click(confirmButton);
+    await waitFor(() => expect(permanentDelete).toHaveBeenCalledWith("user_asset_1"));
+  });
+
+  it("offers a footage-organizer entry for the selected video, and none for audio", async () => {
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+
+    const entry = await screen.findByRole("link", { name: "구간 정리하기" });
+    expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
+    cleanup();
+
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [asset({ media_type: "music", user_metadata: { filename: "bgm.mp3" } })], total: 1 });
+    const audioView = render(<LibraryPage />);
+    await audioView.findAllByText("bgm.mp3");
+    fireEvent.click(audioView.getByRole("button", { name: "bgm.mp3 미리 듣기" }));
+    expect(await audioView.findByTestId("library-preview-player")).toBeInTheDocument();
+    expect(audioView.queryByRole("link", { name: "구간 정리하기" })).toBeNull();
+  });
+
+  it("offers a footage-organizer entry directly on each video card, without changing the current selection", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({
+      assets: [asset(), asset({ library_asset_id: "user_asset_2", user_metadata: { filename: "second.mp4" } })],
+      total: 2,
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("second.mp4");
+    // 두 번째 자산을 먼저 선택해 둔다.
+    fireEvent.click(screen.getByRole("article", { name: "second.mp4" }));
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+
+    // 첫 번째 카드(선택되지 않은 카드)의 링크는 여전히 보이고, 클릭해도 선택은 안 바뀐다.
+    const firstCard = screen.getByRole("article", { name: "walk.mp4" });
+    const entry = within(firstCard).getByRole("link", { name: "walk.mp4 구간 정리하기" });
+    expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
+
+    fireEvent.click(entry);
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+  });
+
+  it("does not let the card's select-on-Enter handler swallow keyboard activation of its crosslink", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({
+      assets: [asset(), asset({ library_asset_id: "user_asset_2", user_metadata: { filename: "second.mp4" } })],
+      total: 2,
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("second.mp4");
+    fireEvent.click(screen.getByRole("article", { name: "second.mp4" }));
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+
+    // 선택되지 않은 첫 카드(walk.mp4)의 링크에서 Enter를 누른다. 카드의
+    // onSelect(Enter/Space) 핸들러로 전파됐다면 선택이 walk.mp4로 바뀐다 --
+    // 링크는 네이티브 <a>라 실제로는 이동해야 할 키 입력이다.
+    const firstCard = screen.getByRole("article", { name: "walk.mp4" });
+    const entry = within(firstCard).getByRole("link", { name: "walk.mp4 구간 정리하기" });
+    fireEvent.keyDown(entry, { key: "Enter", code: "Enter" });
+
+    expect(screen.getByRole("heading", { name: "second.mp4" })).toBeInTheDocument();
+  });
+
+  it("keeps the selected video's crosslink reachable after switching to the music tab (the video card disappears from that tab)", async () => {
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+    fireEvent.click(screen.getByTestId("library-asset-card"));
+    expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
+
+    chooseCategory("음악");
+
+    // walk.mp4는 여전히 선택된 채 미리보기에 남아 있지만, 음악 탭에는 그 영상의
+    // 카드가 없다 -- 미리보기 패널의 링크가 유일한 경로여야 한다.
+    expect(screen.queryByTestId("library-asset-card")).toBeNull();
+    expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
+    const entry = screen.getByRole("link", { name: "구간 정리하기" });
+    expect(entry).toHaveAttribute("href", "/footage?library_asset_id=user_asset_1");
+  });
+
+  // 사진·일러스트를 여러 프로젝트가 나눠 쓰는 자리 (owner 승인 2026-08-20).
+  function imageAsset(overrides: Partial<LibraryAsset> = {}): LibraryAsset {
+    return asset({
+      library_asset_id: "user_image_1",
+      media_type: "image",
+      mime_type: "image/png",
+      managed_relative_path: "assets/image/aa/aa.png",
+      technical_metadata: {},
+      machine_metadata: {},
+      user_metadata: { filename: "바다.png", tags: [] },
+      preview_url: "/api/library/assets/user_image_1/preview",
+      thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+      // 그림에는 소리가 없다. 서버도 이 칸을 안 내려보낸다.
+      waveform_url: undefined,
+      ...overrides,
+    });
+  }
+
+  it("accepts pictures instead of turning them away as an unsupported file", async () => {
+    render(<LibraryPage />);
+    const png = new File(["p"], "바다.png", { type: "image/png" });
+    const jpg = new File(["j"], "노을.JPG", { type: "" });
+    const webp = new File(["w"], "로고.webp", { type: "image/webp" });
+
+    await act(async () => {
+      fireEvent.change(screen.getByTestId("library-folder-input"), { target: { files: [png, jpg, webp] } });
+    });
+
+    expect(api.ingestLibraryAssets).toHaveBeenCalledWith([png, jpg, webp], "image", expect.any(String));
+    expect(screen.queryByText(/다시 시도/)).toBeNull();
+  });
+
+  it("gives pictures their own tab and shows them as thumbnails, not as sound rows", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [imageAsset()], total: 1 });
+    render(<LibraryPage />);
+    await screen.findAllByText("바다.png");
+
+    chooseCategory("그림");
+    const card = await screen.findByRole("article", { name: "바다.png" });
+    expect(within(card).getByRole("presentation")).toHaveAttribute("src", "/api/library/assets/user_image_1/thumbnail");
+    // 구간 정리는 영상에만 있는 길이다. 그림에 붙이면 열어 봐야 아무것도 없다.
+    expect(within(card).queryByRole("link", { name: /구간 정리하기/ })).toBeNull();
+    expect(screen.queryByTestId("library-audio-rows")).toBeNull();
+  });
+
+  it("shows a picture as a picture, and never as an empty sound player", async () => {
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets: [imageAsset()], total: 1 });
+    vi.mocked(api.getLibraryAssetUsage).mockResolvedValue({ library_asset_id: "user_image_1", locations: [] });
+    render(<LibraryPage />);
+    await screen.findAllByText("바다.png");
+    fireEvent.click(screen.getByRole("article", { name: "바다.png" }));
+
+    const player = await screen.findByTestId("library-preview-player");
+    expect(player.querySelector("audio")).toBeNull();
+    expect(player.querySelector("video")).toBeNull();
+    expect(player.querySelector("img")).toHaveAttribute("src", "/api/library/assets/user_image_1/preview");
+    // 종류 칸이 `효과음`으로 떨어지지 않는지 본다 -- 옛 갈래의 마지막 칸이었다.
+    const preview = screen.getByTestId("library-preview");
+    expect([...preview.querySelectorAll("dd")].map((node) => node.textContent)).toContain("그림");
+    expect(within(preview).queryByRole("link", { name: "구간 정리하기" })).toBeNull();
+  });
+
+  it("says plainly that pictures are only found by word, because nothing reads them yet", async () => {
+    // 그림에는 의미 색인이 없다. `뜻으로 찾음`이라고 하면 거짓말이다.
+    const search = vi.spyOn(api, "searchLibraryAssets").mockResolvedValue({
+      matches: [{ ...imageAsset(), score: 1, reason: "파일명 또는 분석 메타데이터 일치" }],
+      semantic: false,
+    });
+    render(<LibraryPage />);
+    chooseCategory("그림");
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "바다" } });
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith("바다", "image", undefined));
+    expect(await screen.findByLabelText("찾은 방식")).toHaveTextContent("단어로만 찾음");
+  });
+
+  it("preselects the video asset a footage-organizer link named in the URL", async () => {
+    window.history.replaceState({}, "", "/library?library_asset_id=user_asset_1");
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({
+      assets: [asset({ library_asset_id: "user_asset_0", user_metadata: { filename: "first.mp4" } }), asset()],
+      total: 2,
+    });
+
+    render(<LibraryPage />);
+
+    expect(await screen.findByTestId("library-preview-player")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "walk.mp4" })).toBeInTheDocument();
+  });
+});
+
+/** **`내 자산` 구역이 여는 자료실**(owner 승인 2026-09-04 §2, 착수 2026-09-07).
+ *
+ *  새 화면을 만들지 않고 이 화면을 종류를 정한 채로 연다. 승인된 구조의
+ *  `음악·효과음`은 한 자리라서 자료실에도 그 한 자리가 있어야 한다 -- 없으면
+ *  세로 메뉴에서 누른 뒤 여기서 아무것도 눌린 것처럼 보이지 않는다.
+ */
+describe("자료실의 `음악·효과음` 갈래", () => {
+  it("음악과 효과음을 한 자리에서 함께 보여 준다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [
+        asset({ library_asset_id: "m1", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "calm.mp3" } }),
+        asset({ library_asset_id: "s1", media_type: "sfx", mime_type: "audio/wav", user_metadata: { filename: "door.wav" } }),
+        asset({ library_asset_id: "b1", media_type: "broll", user_metadata: { filename: "walk.mp4" } }),
+      ],
+      total: 3,
+    });
+    render(<LibraryPage />);
+    await screen.findAllByText("walk.mp4");
+
+    expect(chooseCategory("음악·효과음")).toHaveAttribute("aria-pressed", "true");
+    expect((await screen.findAllByText("calm.mp3")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("door.wav").length).toBeGreaterThan(0);
+    expect(screen.queryByText("walk.mp4")).toBeNull();
+  });
+
+  /** 좁혀서 여는 것이 검색을 나쁘게 만들면 안 된다. `음악`만 골랐을 때 돌던
+   *  의미검색이 `음악·효과음`에서 조용히 단어 매칭으로 떨어지면, owner는
+   *  추천이 갑자기 나빠진 이유를 알 수 없다. */
+  it("의미검색을 음악과 효과음 양쪽에 함께 묻는다", async () => {
+    const search = vi.spyOn(api, "searchLibraryAssets").mockImplementation(async (_query, mediaType) => ({
+      matches: [{ ...asset({ library_asset_id: `${mediaType}_1`, media_type: mediaType, user_metadata: { filename: `${mediaType}.mp3` } }), score: 0.9, reason: "묘사 일치", semantic_match: true }],
+      semantic: true,
+    }));
+    render(<LibraryPage />);
+    chooseCategory("음악·효과음");
+    fireEvent.change(screen.getByLabelText("검색"), { target: { value: "잔잔한" } });
+
+    await waitFor(() => expect(search).toHaveBeenCalledWith("잔잔한", "music", undefined));
+    expect(search).toHaveBeenCalledWith("잔잔한", "sfx", undefined);
+    expect(await screen.findByRole("status", { name: "찾은 방식" })).toHaveTextContent("뜻으로 찾음");
+  });
+
+  it("세로 메뉴가 정해 준 갈래로 열린다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [
+        asset({ library_asset_id: "m1", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "calm.mp3" } }),
+        asset({ library_asset_id: "b1", media_type: "broll", user_metadata: { filename: "walk.mp4" } }),
+      ],
+      total: 2,
+    });
+    render(<LibraryPage initialFilter="audio" />);
+
+    expect((await screen.findAllByText("calm.mp3")).length).toBeGreaterThan(0);
+    const sidebar = screen.getByTestId("library-sidebar");
+    expect(within(sidebar).getByRole("button", { name: /^음악·효과음/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(sidebar).getByRole("button", { name: /^전체/ })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  /**
+   * owner 결정 2026-09-07: 자산을 한 폴더에 넣으면 VideoBox가 내용을 보고
+   * 가른다. 음악과 효과음은 길이로 가르므로 경계 근처에서 틀린다 -- 결정
+   * 문서는 **고칠 수 있을 것**을 조건으로 달았다. 화면에 그 길이 없으면
+   * 이 기능은 낼 수 없다.
+   */
+  it("잘못 갈린 음악을 화면에서 효과음으로 옮긴다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [asset({ library_asset_id: "m1", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "딸깍.wav" } })],
+      total: 1,
+    });
+    vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "m1", locations: [] });
+    const correct = vi.spyOn(api, "correctLibraryAssetMediaType").mockResolvedValue({
+      asset: asset({ library_asset_id: "m1", media_type: "sfx" }),
+    });
+    render(<LibraryPage initialFilter="audio" />);
+
+    const rows = await screen.findByTestId("library-audio-rows");
+    fireEvent.click(within(rows).getAllByText("딸깍.wav")[0]);
+    const preview = screen.getByTestId("library-preview");
+    fireEvent.click(within(preview).getByRole("button", { name: /효과음으로 옮기기/ }));
+
+    await waitFor(() => expect(correct).toHaveBeenCalledWith("m1", "sfx"));
+  });
+
+  it("소리를 그림이라 부를 길은 주지 않는다", async () => {
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [asset({ library_asset_id: "m2", media_type: "music", mime_type: "audio/mpeg", user_metadata: { filename: "브금.mp3" } })],
+      total: 1,
+    });
+    vi.spyOn(api, "getLibraryAssetUsage").mockResolvedValue({ library_asset_id: "m2", locations: [] });
+    render(<LibraryPage initialFilter="audio" />);
+
+    const rows = await screen.findByTestId("library-audio-rows");
+    fireEvent.click(within(rows).getAllByText("브금.mp3")[0]);
+    const preview = screen.getByTestId("library-preview");
+    expect(within(preview).queryByRole("button", { name: /그림으로 옮기기/ })).toBeNull();
+    expect(within(preview).getByRole("button", { name: /효과음으로 옮기기/ })).toBeInTheDocument();
+  });
+});

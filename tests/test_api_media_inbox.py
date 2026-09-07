@@ -78,6 +78,21 @@ def test_returns_404_for_a_missing_library_file(tmp_path: Path, monkeypatch) -> 
     assert response.json()["detail"] == "media_inbox_asset_missing"
 
 
+def test_retries_are_idempotent_for_the_same_library_bytes(tmp_path: Path, monkeypatch) -> None:
+    client, project_id = _make_app_and_project(tmp_path, monkeypatch)
+    library_root = tmp_path / "library"
+    library_root.mkdir()
+    (library_root / "clip.mp4").write_bytes(b"library footage")
+
+    first = client.post(f"/api/projects/{project_id}/media-inbox/import", json={"filename": "clip.mp4"})
+    second = client.post(f"/api/projects/{project_id}/media-inbox/import", json={"filename": "clip.mp4"})
+
+    assert first.status_code == second.status_code == 201
+    assert first.json()["asset_id"] == second.json()["asset_id"]
+    listed = client.get(f"/api/projects/{project_id}/assets/broll-video").json()["assets"]
+    assert len(listed) == 1
+
+
 def test_rejects_a_path_traversal_filename(tmp_path: Path, monkeypatch) -> None:
     client, project_id = _make_app_and_project(tmp_path, monkeypatch)
 

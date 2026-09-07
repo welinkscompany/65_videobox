@@ -32,6 +32,9 @@ from videobox_provider_interfaces.faster_whisper_stt import (
 )
 from videobox_provider_interfaces.tts import TTSProvider, TTSRequest, TTSResult
 from videobox_provider_interfaces.visual_generation import (
+    GeneratedSceneImage,
+    SceneImageProvider,
+    SceneImageRequest,
     VisualGenerationProvider,
     VisualGenerationRequest,
     VisualGenerationResponse,
@@ -72,6 +75,9 @@ __all__ = [
     "TTSProvider",
     "TTSRequest",
     "TTSResult",
+    "GeneratedSceneImage",
+    "SceneImageProvider",
+    "SceneImageRequest",
     "VisualGenerationProvider",
     "VisualGenerationRequest",
     "VisualGenerationResponse",

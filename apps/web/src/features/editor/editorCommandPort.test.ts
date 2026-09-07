@@ -3,12 +3,12 @@ import type { EditorCommandApi } from "./editorCommandPort";
 import { createEditorCommandPort } from "./editorCommandPort";
 
 const api = {
-  splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), reorderEditingSessionSegments: vi.fn(), updateEditingSessionTimelinePlacements: vi.fn(),
+  splitEditingSessionSegment: vi.fn(), mergeEditingSessionSegments: vi.fn(), updateEditingSessionSegmentBounds: vi.fn(), updateEditingSessionSegmentRipplePlaybackRate: vi.fn(), reorderEditingSessionSegments: vi.fn(), updateEditingSessionTimelinePlacements: vi.fn(),
   undoEditingSession: vi.fn(), redoEditingSession: vi.fn(), updateEditingSessionCutAction: vi.fn(),
   updateEditingSessionBroll: vi.fn(), clearEditingSessionBrollOverride: vi.fn(), updateEditingSessionMusicOverride: vi.fn(), clearEditingSessionMusicOverride: vi.fn(), updateEditingSessionSfxOverride: vi.fn(), clearEditingSessionSfxOverride: vi.fn(),
-  updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(),
+  updateEditingSessionExplanationCard: vi.fn(), removeEditingSessionExplanationCard: vi.fn(), updateEditingSessionImageOverlay: vi.fn(), removeEditingSessionImageOverlay: vi.fn(), updateEditingSessionTableOverlay: vi.fn(), removeEditingSessionTableOverlay: vi.fn(), updateEditingSessionShapeOverlay: vi.fn(), removeEditingSessionShapeOverlay: vi.fn(),
   updateEditingSessionTtsReplacement: vi.fn(), clearEditingSessionTtsReplacement: vi.fn(),
-  updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(),
+  updateEditingSessionCaption: vi.fn(), updateEditingSessionCaptionStyle: vi.fn(), previewEditingSessionCaptionStyleScope: vi.fn(),
 } satisfies EditorCommandApi;
 
 describe("EditorCommandPort", () => {
@@ -26,6 +26,24 @@ describe("EditorCommandPort", () => {
       bounds_by_id: { seg: { start_sec: 0, end_sec: 1 }, next: { start_sec: 1, end_sec: 2 } },
       expected_revision: 7,
     });
+  });
+
+  it("sends the selected scene's ripple speed with the current revision", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.setSegmentRippleSpeed({ segmentId: "seg", rate: 2 });
+
+    expect(api.updateEditingSessionSegmentRipplePlaybackRate).toHaveBeenCalledWith(
+      "p", "s", "seg", { rate: 2, expected_revision: 7 },
+    );
+  });
+
+  it("previews the caption style scope with the current revision", async () => {
+    vi.mocked(api.previewEditingSessionCaptionStyleScope).mockResolvedValue({ affected_segment_ids: ["seg", "next"] });
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await expect(port.previewCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 28, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 2, backgroundColor: "#0000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } })).resolves.toEqual({ affected_segment_ids: ["seg", "next"] });
+    expect(api.previewEditingSessionCaptionStyleScope).toHaveBeenCalledWith("p", "s", expect.objectContaining({ segment_ids: ["seg"], scope: "current_caption", expected_revision: 7 }));
   });
 
   it("sends the complete layout when reordering narration", async () => {
@@ -96,6 +114,59 @@ describe("EditorCommandPort", () => {
     );
   });
 
+  it("carries every B-roll control it was given, so a save cannot silently reset one", async () => {
+    // 2026-08-18: 이 함수가 실어 보내는 키가 정해져 있어서 **목록에 없는 값은
+    // 저장할 때마다 사라졌다.** 서버는 없는 키를 기본값으로 되돌리므로,
+    // 인스펙터에서 배속만 고쳐 저장해도 `자체 소리 살리기`가 꺼지고 앞부분
+    // 잘라내기가 0으로 돌아간다. 지금 데이터가 전부 기본값이라 눈에 안 띌 뿐이다.
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.updateMediaControls({
+      kind: "broll",
+      segmentId: "seg",
+      assetId: "asset-b",
+      controls: { speed: 2, volume: 0.5, preserveSourceAudio: true, loop: false, pad: true, trimStartSec: 1.5, fit: "crop" },
+    });
+
+    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-b",
+      media_controls: {
+        speed: 2,
+        volume: 0.5,
+        preserve_source_audio: true,
+        loop: false,
+        pad: true,
+        trim_start_sec: 1.5,
+        fit: "crop",
+      },
+      expected_revision: 7,
+    });
+  });
+
+  it("carries the chosen look to the server, and carries turning it off too", async () => {
+    // 2026-08-23: 화면에 색감을 붙이고 여기 목록에 넣는 것을 빠뜨렸다. 고르고
+    // 저장하면 "저장했어요"까지 뜨는데 값은 이 자리에서 조용히 버려졌다 --
+    // 바로 위 주석이 경고하던 그 사고를 그대로 냈다.
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.updateMediaControls({
+      kind: "broll", segmentId: "seg", assetId: "asset-b",
+      controls: { filter: { type: "vintage" } },
+    });
+    expect(api.updateEditingSessionBroll).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-b", media_controls: { filter: { type: "vintage" } }, expected_revision: 7,
+    });
+
+    // 끄는 것도 실려야 한다. `null`은 "없앤다"이고 `undefined`("말하지 않았다")와
+    // 다르다 -- 걸러지면 켠 색감을 영영 못 끈다.
+    await port.updateMediaControls({
+      kind: "broll", segmentId: "seg", assetId: "asset-b", controls: { filter: null },
+    });
+    expect(api.updateEditingSessionBroll).toHaveBeenLastCalledWith("p", "s", "seg", {
+      asset_id: "asset-b", media_controls: { filter: null }, expected_revision: 7,
+    });
+  });
+
   it("serializes authoritative BGM and SFX fade controls without replacing hidden gain or ducking", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
 
@@ -124,16 +195,86 @@ describe("EditorCommandPort", () => {
     });
   });
 
+  it("sends bold, italic, and letter spacing with the caption style request", async () => {
+    // 2026-09-03 owner 지적으로 굵게·기울임·자간 칸을 만들었는데, 화면 상태는
+    // 바뀌어도 **저장 요청 만드는 자리(`captionStyle` 변환 함수)가 그 셋을
+    // 빠뜨리고 있었다** -- 실기계에서 체크박스를 눌러 보니 보낸 요청에 아예
+    // 안 실렸다. `expect.objectContaining`으로는 이 결함을 못 잡는다.
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+    const update = vi.mocked(api.updateEditingSessionCaptionStyle).mockResolvedValue({} as never);
+
+    await port.setCaptionStyle({
+      segmentIds: ["seg"], scope: "current_caption",
+      style: {
+        fontFamily: "Pretendard", fontSizePx: 30, textColor: "#fff", outlineColor: "#000",
+        outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90,
+        horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0,
+        bold: true, italic: true, letterSpacingPx: 18,
+      },
+    });
+
+    expect(update).toHaveBeenCalledWith("p", "s", expect.objectContaining({
+      style: expect.objectContaining({ bold: true, italic: true, letter_spacing_px: 18 }),
+    }));
+  });
+
   it("uses only supported discriminated overlays and caption endpoints", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
     await port.applyOverlay({ kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품" });
     await port.clearOverlay({ kind: "table", segmentId: "seg" });
     await port.setCaptionText({ segmentId: "seg", text: "새 자막" });
-    await port.setCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 30, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0 } });
+    await port.setCaptionStyle({ segmentIds: ["seg"], scope: "current_caption", style: { fontFamily: "Pretendard", fontSizePx: 30, textColor: "#fff", outlineColor: "#000", outlineWidthPx: 1, backgroundColor: "#00000000", positionXPercent: 50, positionYPercent: 90, horizontalAlign: "center", safeAreaEnabled: true, shadowBlurPx: 0, bold: false, italic: false, letterSpacingPx: 0 } });
     expect(api.updateEditingSessionImageOverlay).toHaveBeenCalledWith("p", "s", "seg", { asset_id: "asset-image", text: "제품", expected_revision: 7 });
     expect(api.removeEditingSessionTableOverlay).toHaveBeenCalledWith("p", "s", "seg", 7);
     expect(api.updateEditingSessionCaption).toHaveBeenCalledWith("p", "s", "seg", { caption_text: "새 자막", expected_revision: 7 });
     expect(api.updateEditingSessionCaptionStyle).toHaveBeenCalledWith("p", "s", expect.objectContaining({ expected_revision: 7, segment_ids: ["seg"] }));
+  });
+
+  // 사진도 도형과 같은 프리셋 넷을 보낸다. **안 고른 값은 아예 안 싣는다** --
+  // API가 그 셋을 선택으로 받고, 빈칸을 기본값으로 채우면 owner가 고르지 않은
+  // 자리·움직임이 저장된다(`models.ImageOverlayRequest`).
+  it("sends only the picture overlay presets the owner actually chose", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.applyOverlay({ kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품", size: "large" });
+    expect(api.updateEditingSessionImageOverlay).toHaveBeenCalledWith("p", "s", "seg", {
+      asset_id: "asset-image",
+      text: "제품",
+      size: "large",
+      expected_revision: 7,
+    });
+    // 열쇠 자체가 없어야 한다. `undefined`로 실어 보내면 위 비교는 통과하는데
+    // 백엔드가 보는 요청은 달라진다.
+    expect(Object.keys(api.updateEditingSessionImageOverlay.mock.lastCall?.[3] ?? {}))
+      .toEqual(["asset_id", "text", "size", "expected_revision"]);
+
+    await port.applyOverlay({
+      kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품",
+      vertical: "top", horizontal: "left", size: "small", motion: "slide_in_left",
+    });
+    expect(api.updateEditingSessionImageOverlay).toHaveBeenLastCalledWith("p", "s", "seg", {
+      asset_id: "asset-image",
+      text: "제품",
+      vertical: "top",
+      horizontal: "left",
+      size: "small",
+      motion: "slide_in_left",
+      expected_revision: 7,
+    });
+  });
+
+  it("routes a static shape overlay through its own revisioned endpoints", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+    await port.applyOverlay({ kind: "shape", segmentId: "seg", shape: "highlight_box", vertical: "top", horizontal: "right", size: "small" });
+    await port.clearOverlay({ kind: "shape", segmentId: "seg" });
+    expect(api.updateEditingSessionShapeOverlay).toHaveBeenCalledWith("p", "s", "seg", {
+      shape: "highlight_box",
+      vertical: "top",
+      horizontal: "right",
+      size: "small",
+      expected_revision: 7,
+    });
+    expect(api.removeEditingSessionShapeOverlay).toHaveBeenCalledWith("p", "s", "seg", 7);
   });
 
   it("forwards paired server attestation only for an attested image overlay command", async () => {

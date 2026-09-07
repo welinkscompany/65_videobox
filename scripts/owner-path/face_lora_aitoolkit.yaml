@@ -1,0 +1,104 @@
+# 대표님 얼굴 LoRA — ai-toolkit 설정
+#
+# **왜 ComfyUI가 아니라 여기인가.** 2026-08-22에 ComfyUI 내장 학습 노드로 다섯 번
+# 실패했다. 메모리를 넘긴 뒤에도 **한 단계에 149초, 1600단계면 65시간**이었다.
+# 원인은 그 노드가 12B 모델을 fp32로 통째로 올리는 것이다(48GB). 자세한 실측은
+# `train_face_lora.py` 주석에 있다.
+#
+# ai-toolkit은 fp8로 양자화해 학습한다(`quantize: true`). 24GB 카드용 예제가
+# 딸려 있고 우리는 32GB다.
+#
+# 돌리는 법:
+#   1) 한 번만: .venv/Scripts/python.exe scripts/owner-path/convert_flux_for_aitoolkit.py
+#   2) cd C:\Users\atgro\Documents\ai-toolkit
+#      .venv\Scripts\python.exe run.py <이 파일의 경로>
+---
+job: extension
+config:
+  name: "videobox-owner-face"
+  process:
+    - type: 'sd_trainer'
+      training_folder: "output"
+      device: cuda:0
+      # 프롬프트에서 얼굴을 부르는 열쇠. ComfyUI 쪽 스크립트와 **같은 낱말**을 쓴다.
+      # 다르면 나중에 어느 쪽으로 불러야 하는지 알 수 없게 된다.
+      trigger_word: "ohwnrface"
+      network:
+        type: "lora"
+        linear: 16
+        linear_alpha: 16
+      save:
+        dtype: float16
+        save_every: 250
+        max_step_saves_to_keep: 4
+        push_to_hub: false
+      datasets:
+        # **원본이 아니라 잘라 둔 사본을 쓴다.** 원본은 가로 1024인데 세로가
+        # 1822까지 섞여 있어서 크기가 제각각이다. `train_face_lora.py`가 가운데를
+        # 정사각형으로 잘라 만들어 둔다.
+        - folder_path: "D:\\AI_Workspace_louis_office_50\\10_workspace\\65_videobox\\.worktrees\\videobox-container-compatibility\\scripts\\owner-path\\.prepared-face-photos"
+          caption_ext: "txt"
+          caption_dropout_rate: 0.05
+          shuffle_tokens: false
+          cache_latents_to_disk: true
+          # **실측에 맞춘다(2026-08-22 3차).** 잘라 낸 얼굴이 424~768px이고
+          # 가운데값이 448px이다. 768로 잡으면 대부분이 늘어나고, 늘린 흐릿한
+          # 얼굴로는 배울 게 없다 -- 2차가 안 닮은 이유가 이것이었다.
+          resolution: [ 448 ]
+      train:
+        batch_size: 1
+        # **1000에서 2000으로 올렸다(2026-08-22, 첫 학습이 안 닮은 뒤).**
+        # 첫 판은 18장 x 1000단계였고 owner가 `전혀 안 닮았는데`라고 했다. 원인의
+        # 대부분은 사진이었지만(가운데를 잘라 얼굴이 화면의 20%도 안 됐다) 단계 수도
+        # 모자랐다 -- 얼굴 LoRA의 보통 기준이 **사진 한 장당 100단계**다.
+        # 지금은 13장이니 1300이 하한이고, 여유를 둬서 2000으로 잡는다.
+        # 250단계마다 저장하므로 **더 돌린다고 손해가 아니다** -- 중간 것 중에서 고른다.
+        steps: 2000
+        gradient_accumulation_steps: 1
+        train_unet: true
+        train_text_encoder: false
+        gradient_checkpointing: true
+        noise_scheduler: "flowmatch"
+        optimizer: "adamw8bit"
+        lr: 1e-4
+        ema_config:
+          use_ema: true
+          ema_decay: 0.99
+        dtype: bf16
+      model:
+        # 우리가 이미 가진 24GB를 변환해 쓴다. 다시 받지 않는다.
+        name_or_path: "C:/Users/atgro/Documents/ai-toolkit/models/flux1-dev-diffusers"
+        # `extras_name_or_path`는 쓰지 않는다 -- 글자 이해기·토크나이저·스케줄러까지
+        # 전부 위 폴더 안에 있다. 변환 스크립트가 로컬 파일과 **잠기지 않은** 저장소
+        # (`openai/clip-vit-large-patch14`, `google/t5-v1_1-xxl`)만으로 만들었다.
+        is_flux: true
+        quantize: true
+      sample:
+        sampler: "flowmatch"
+        sample_every: 250
+        sample_start_step: 0
+        width: 1024
+        height: 1024
+        # **썸네일에 실제로 쓸 문장으로 뽑는다.** 예제에 있던 곰·기타 같은 문장은
+        # 지웠다 -- 250단계마다 보는 그림이 우리가 쓸 그림이어야 고를 수 있다.
+        # 한국어를 넣으면 당나귀가 나온다(2026-08-21 실측). 영어로 적는다.
+        prompts:
+          # **얼굴이 화면을 채우는 문장만 쓴다.** 2차까지는 `무대에서 마이크를 들고`
+          # 같은 문장을 썼는데, 얼굴이 손톱만 하게 나와서 **닮았는지 판단할 수도
+          # 없고 썸네일로 쓸 수도 없었다.**
+          #
+          # owner가 원하는 것은 썸네일이다 -- 가까이, 밝게, 또렷하게.
+          - "close-up portrait photo of [trigger], korean man, head and shoulders, warm confident smile, smooth clear skin, youthful, soft key light, shallow depth of field, sharp focus on eyes, clean bright background, 85mm lens"
+          # **어두운 그림은 뽑지 않는다(owner 지시 2026-08-22).** 앞서 `dramatic side
+          # lighting, dark background`로 뽑았더니 얼굴이 어둡게 깔려 썸네일로 못 쓴다.
+          - "close-up portrait photo of [trigger], korean man, looking straight at camera, confident expression, smooth clear skin, youthful, bright even lighting, light grey background, crisp and clean, youtube thumbnail"
+          - "portrait photo of [trigger], korean man, wearing a dark suit jacket, arms crossed, smooth clear skin, youthful, professional studio lighting, plain grey background, sharp detail"
+          - "close-up photo of [trigger], korean man, neutral expression, smooth clear skin, youthful, even soft lighting, plain white background, passport style, very sharp facial detail"
+        neg: ""
+        seed: 42
+        walk_seed: true
+        guidance_scale: 4
+        sample_steps: 20
+meta:
+  name: "[name]"
+  version: '1.0'

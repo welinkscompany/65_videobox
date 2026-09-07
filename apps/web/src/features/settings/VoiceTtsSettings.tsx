@@ -5,14 +5,47 @@ import {
   type AssetResponse,
   type EditingSessionSegment,
   type TtsCandidateRecord,
+  type YoutubeReferenceImport,
 } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { NativeSelect } from "../../components/ui/native-select";
+import { recordingHint, useVoiceRecorder } from "./useVoiceRecorder";
+import { pollJobUntilTerminal } from "../../lib/pollJob";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type ActionToken = { epoch: number; name: string };
 type LoadToken = { epoch: number; key: string };
+
+// 유튜브 학습이 비동기로 바뀌면서(owner 결정 2026-08-29, 2회차) 화면이 결과를
+// 직접 기다리지 않고 물어서 받는다. 2초 간격 300회 = 최대 10분 -- 백엔드
+// 다운로드 한도(600초)와 맞춘다.
+const YOUTUBE_IMPORT_POLL_INTERVAL_MS = 2000;
+const YOUTUBE_IMPORT_POLL_MAX_ATTEMPTS = 300;
+
+async function pollYoutubeImportUntilDone(
+  projectId: string,
+  jobId: string,
+  isStillRelevant: () => boolean,
+): Promise<YoutubeReferenceImport> {
+  const outcome = await pollJobUntilTerminal(
+    () => api.getYoutubeReferenceStyleImportStatus(projectId, jobId),
+    { intervalMs: YOUTUBE_IMPORT_POLL_INTERVAL_MS, maxAttempts: YOUTUBE_IMPORT_POLL_MAX_ATTEMPTS, isStillRelevant },
+  );
+  if (outcome.kind === "succeeded") return outcome.result;
+  if (outcome.kind === "cancelled") throw new Error("youtube_import_cancelled");
+  if (outcome.kind === "timed_out") throw new Error("youtube_import_timed_out");
+  throw new Error(outcome.error_detail ?? "youtube_import_failed");
+}
+
+/** 화면에 보일 목소리 이름. 붙인 이름이 있으면 그것, 없으면 순번.
+ *
+ *  읽는 자리를 하나로 둔다 -- 목록과 고르는 칸이 다른 이름을 보이면
+ *  창작자는 어느 것을 고른 건지 알 수 없다. */
+function voiceName(sample: AssetResponse, index: number): string {
+  const named = String((sample.metadata?.display_name as string | undefined) ?? "").trim();
+  return named || `내 목소리 ${index + 1}`;
+}
 
 function candidateStatus(candidate: TtsCandidateRecord) {
   if (candidate.technical_status !== "accepted") return "사용할 수 없음";
@@ -23,6 +56,13 @@ function candidateStatus(candidate: TtsCandidateRecord) {
 
 export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   const [samples, setSamples] = useState<AssetResponse[]>([]);
+  const recorder = useVoiceRecorder();
+  const stopRecording = recorder.stop;
+  //: 저장에 실패한 녹음. **버리지 않고 들고 있는다** -- 녹음은 다시 만들 수
+  //: 없다. "다시 시도해 주세요"라고 말해 놓고 시도할 것을 버리면 안 된다.
+  const [unsavedRecording, setUnsavedRecording] = useState<File | null>(null);
+  //: 지우기를 한 번 더 묻는 자리. 목소리는 지우면 되돌릴 길이 없다.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [segments, setSegments] = useState<EditingSessionSegment[]>([]);
   const [candidates, setCandidates] = useState<TtsCandidateRecord[]>([]);
   const [selectedSampleId, setSelectedSampleId] = useState("");
@@ -30,6 +70,9 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   const [localPath, setLocalPath] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadInputVersion, setUploadInputVersion] = useState(0);
+  // 본인 유튜브 영상으로 목소리·스타일 배우기(owner 요청 2026-08-29).
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeImportResult, setYoutubeImportResult] = useState<YoutubeReferenceImport | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [candidateLoadState, setCandidateLoadState] = useState<LoadState>("idle");
   const [actionName, setActionName] = useState<string | null>(null);
@@ -139,6 +182,8 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
     setActionName(null);
     setMessage(null);
     setActionError(null);
+    setYoutubeUrl("");
+    setYoutubeImportResult(null);
     void loadSettings(projectId, epoch);
   }, [projectId]);
 
@@ -191,6 +236,76 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
     }
   }
 
+  async function saveRecording() {
+    const file = (await stopRecording()) ?? unsavedRecording;
+    if (!file) return;
+    const token = beginAction("record");
+    // **녹음을 들고 있는다.** 여기서 그냥 돌아가면 방금 읽은 60초가 사라진다.
+    if (!token) {
+      setUnsavedRecording(file);
+      return;
+    }
+    const expectedProjectId = projectId;
+    try {
+      try {
+        await api.uploadVoiceSample(expectedProjectId, file);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) {
+          // 들고 있으니 진짜로 "다시 시도"가 된다. 안 들고 있으면 이 말은
+          // 거짓말이다 -- 다시 눌러 봐야 처음부터 읽어야 한다.
+          setUnsavedRecording(file);
+          setActionError("녹음한 목소리를 저장하지 못했어요. 아래 `다시 저장해 보기`를 눌러 주세요.");
+        }
+        return;
+      }
+      setUnsavedRecording(null);
+      if (!isCurrent(token.epoch, expectedProjectId)) return;
+      await refreshSamples(expectedProjectId, token.epoch).catch(() => undefined);
+      if (isCurrent(token.epoch, expectedProjectId)) setMessage("녹음한 목소리를 저장했어요.");
+    } finally {
+      finishAction(token);
+    }
+  }
+
+  async function renameSample(assetId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const token = beginAction("rename");
+    if (!token) return;
+    const expectedProjectId = projectId;
+    try {
+      try {
+        await api.renameVoiceSample(expectedProjectId, assetId, trimmed);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) setActionError("이름을 바꾸지 못했어요.");
+        return;
+      }
+      await refreshSamples(expectedProjectId, token.epoch).catch(() => undefined);
+      if (isCurrent(token.epoch, expectedProjectId)) setMessage("이름을 바꿨어요.");
+    } finally {
+      finishAction(token);
+    }
+  }
+
+  async function removeSample(assetId: string) {
+    setConfirmingDeleteId(null);
+    const token = beginAction("delete");
+    if (!token) return;
+    const expectedProjectId = projectId;
+    try {
+      try {
+        await api.deleteVoiceSample(expectedProjectId, assetId);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) setActionError("목소리를 지우지 못했어요.");
+        return;
+      }
+      await refreshSamples(expectedProjectId, token.epoch).catch(() => undefined);
+      if (isCurrent(token.epoch, expectedProjectId)) setMessage("목소리를 지웠어요.");
+    } finally {
+      finishAction(token);
+    }
+  }
+
   async function uploadSelectedFile() {
     if (loadState !== "ready" || !uploadFile) return;
     const token = beginAction("upload");
@@ -218,6 +333,47 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
       }
       if (isCurrent(token.epoch, expectedProjectId)) {
         setMessage("내 목소리 파일을 추가했어요.");
+      }
+    } finally {
+      finishAction(token);
+    }
+  }
+
+  async function importFromYoutube() {
+    const url = youtubeUrl.trim();
+    if (loadState !== "ready" || !url) return;
+    const token = beginAction("youtube-import");
+    if (!token) return;
+    const expectedProjectId = projectId;
+    setYoutubeImportResult(null);
+    try {
+      let result: YoutubeReferenceImport;
+      try {
+        // 비동기로 바뀌었다(owner 결정 2026-08-29, 2회차) -- 다운로드·오디오
+        // 추출·컷/색감 분석을 합치면 긴 영상에서 nginx 330초 타임아웃보다
+        // 오래 걸릴 수 있어, 요청 자체는 바로 돌아오고 여기서 상태를 물어본다.
+        const started = await api.startYoutubeReferenceStyleImport(expectedProjectId, url);
+        if (isCurrent(token.epoch, expectedProjectId)) setMessage("영상을 내려받고 분석하는 중이에요. 시간이 걸릴 수 있어요…");
+        result = await pollYoutubeImportUntilDone(expectedProjectId, started.job_id, () => isCurrent(token.epoch, expectedProjectId));
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) {
+          setActionError("이 링크에서 목소리를 가져오지 못했어요. 본인이 올린 유튜브 영상 주소가 맞는지 확인해 주세요.");
+        }
+        return;
+      }
+      if (!isCurrent(token.epoch, expectedProjectId)) return;
+      setYoutubeUrl("");
+      setYoutubeImportResult(result);
+      try {
+        await refreshSamples(expectedProjectId, token.epoch);
+      } catch {
+        if (isCurrent(token.epoch, expectedProjectId)) {
+          setActionError("목소리는 저장됐지만 목록을 새로 불러오지 못했어요. 목록 새로고침으로 확인해 주세요.");
+        }
+        return;
+      }
+      if (isCurrent(token.epoch, expectedProjectId)) {
+        setMessage("유튜브 영상에서 목소리를 가져왔어요.");
       }
     } finally {
       finishAction(token);
@@ -307,8 +463,16 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
   const selectedSegment = segments.find((segment) => segment.segment_id === selectedSegmentId) ?? null;
   const isBusy = actionName !== null;
 
+  // 루트가 `vb-setting-control`이었다 -- 설정 화면의 **한 줄짜리 행** 스타일
+  // (`display:flex; align-items:center`)이다. 화면 전체가 그 한 줄에 눌려 제목
+  // 글자가 세로로 한 자씩 쌓였다. 자산 단계로 옮기고 **캡처해 보고서야** 보였다:
+  // 글자·제목 단계·가로 넘침을 다 재도 이건 안 잡힌다.
+  //
+  // 폭도 정해 준다. 설정 화면은 `.vb-settings`가 42rem으로 잡아 줬는데 자산 화면은
+  // 1440px까지 넓어서, 입력과 단추가 화면 끝까지 늘어나 읽기 어려웠다.
+  // `justify-items-start`가 없으면 grid가 자식을 열 폭에 맞춰 전부 늘린다.
   return (
-    <section aria-label="내 목소리와 읽어보기 후보" className="vb-setting-control">
+    <section aria-label="내 목소리와 읽어보기 후보" className="vb-voice-workspace grid gap-4 justify-items-start">
       <h2>내 목소리 샘플</h2>
       <p className="vb-setting-note">이 기기에 있는 본인 음성만 추가해 주세요.</p>
       {loadState === "loading" || loadState === "idle" ? <p className="text-sm text-muted-foreground">음성 설정을 불러오는 중이에요.</p> : null}
@@ -324,12 +488,70 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         <>
           <p>{`저장한 내 목소리 ${samples.length}개`}</p>
           <Button disabled={isBusy} onClick={() => void reloadSamples()} type="button">목록 새로고침</Button>
+          {/* 버튼 하나로 녹음한다(창작자 요청 2026-09-03). 길이를 같이 보여
+              주는 것이 중요하다 -- 목소리 복제는 참조가 짧으면 안 닮는데,
+              몇 초를 읽었는지 안 보이면 "짧아서"인 줄 모르고 포기한다. */}
+          <div className="vb-voice-recorder">
+            {recorder.state === "recording" ? (
+              <>
+                <Button disabled={isBusy} onClick={() => void saveRecording()} type="button">녹음 멈추고 저장</Button>
+                <span aria-live="polite">{recordingHint(recorder.seconds)}</span>
+              </>
+            ) : (
+              <Button disabled={isBusy} onClick={() => void recorder.start()} type="button">내 목소리 녹음하기</Button>
+            )}
+            {recorder.state === "denied" ? <p>마이크를 쓸 수 없어요. 브라우저에서 마이크를 허용해 주세요.</p> : null}
+            {recorder.state === "unsupported" ? <p>이 브라우저에서는 녹음할 수 없어요. 음성 파일로 올려 주세요.</p> : null}
+            {/* 저장에 실패한 녹음이 아직 여기 있다. 다시 읽을 필요 없다. */}
+            {unsavedRecording && recorder.state !== "recording" ? (
+              <Button disabled={isBusy} onClick={() => void saveRecording()} type="button">다시 저장해 보기</Button>
+            ) : null}
+          </div>
           {samples.length === 0 ? <p className="text-sm text-muted-foreground">아직 저장한 목소리가 없어요.</p> : (
-            <ul>
-              {samples.map((sample, index) => <li key={sample.asset_id}>{`내 목소리 ${index + 1}`}</li>)}
+            <ul className="vb-voice-list">
+              {samples.map((sample, index) => (
+                <li key={sample.asset_id}>
+                  {/* 이름을 붙일 수 있어야 관리가 된다 -- 유튜브 채널이 여럿이면
+                      목소리도 여럿이고, `내 목소리 3`으로는 어느 것이 어느
+                      채널인지 알 수 없다. */}
+                  <Input
+                    aria-label={`${voiceName(sample, index)} 이름`}
+                    defaultValue={voiceName(sample, index)}
+                    disabled={isBusy}
+                    onBlur={(event) => {
+                      if (event.target.value.trim() !== voiceName(sample, index)) {
+                        void renameSample(sample.asset_id, event.target.value);
+                      }
+                    }}
+                  />
+                  {/* 한 번 더 묻는다. 목소리는 지우면 **되돌릴 길이 없고**,
+                      이름 칸과 버튼이 줄줄이 붙어 있어 옆줄을 누르기 쉽다. */}
+                  {confirmingDeleteId === sample.asset_id ? (
+                    <>
+                      <span>정말 지울까요? 되돌릴 수 없어요.</span>
+                      <Button
+                        aria-label={`${voiceName(sample, index)} 정말 지우기`}
+                        disabled={isBusy}
+                        onClick={() => void removeSample(sample.asset_id)}
+                        type="button"
+                        variant="outline"
+                      >지웁니다</Button>
+                      <Button disabled={isBusy} onClick={() => setConfirmingDeleteId(null)} type="button">그대로 두기</Button>
+                    </>
+                  ) : (
+                    <Button
+                      aria-label={`${voiceName(sample, index)} 지우기`}
+                      disabled={isBusy}
+                      onClick={() => setConfirmingDeleteId(sample.asset_id)}
+                      type="button"
+                      variant="outline"
+                    >지우기</Button>
+                  )}
+                </li>
+              ))}
             </ul>
           )}
-          <label className="grid gap-2 text-sm">
+          <label className="grid w-full gap-2 text-sm">
             <span>후보에 사용할 목소리</span>
             <NativeSelect
               aria-label="후보에 사용할 목소리"
@@ -338,13 +560,13 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
               value={selectedSampleId}
             >
               {samples.length === 0 ? <option value="">먼저 목소리를 추가해 주세요</option> : null}
-              {samples.map((sample, index) => <option key={sample.asset_id} value={sample.asset_id}>{`내 목소리 ${index + 1}`}</option>)}
+              {samples.map((sample, index) => <option key={sample.asset_id} value={sample.asset_id}>{voiceName(sample, index)}</option>)}
             </NativeSelect>
           </label>
         </>
       ) : null}
       <div>
-        <label className="grid gap-2 text-sm">
+        <label className="grid w-full gap-2 text-sm">
           <span>음성 파일이 있는 곳</span>
           <Input
             aria-label="음성 파일이 있는 곳"
@@ -360,7 +582,7 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
         </Button>
       </div>
       <div>
-        <label className="grid gap-2 text-sm">
+        <label className="grid w-full gap-2 text-sm">
           <span>음성 파일 업로드</span>
           <Input
             key={uploadInputVersion}
@@ -376,11 +598,37 @@ export function VoiceTtsSettings({ projectId }: { projectId: string }) {
           {actionName === "upload" ? "업로드하는 중" : "파일 업로드"}
         </Button>
       </div>
+      {/* owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 본인이
+          올린 본인 영상만 대상이라는 전제를 문구로 분명히 한다 -- 확인할 방법이
+          없어서 화면 문구가 그 책임을 owner에게 남긴다. */}
+      <div>
+        <label className="grid w-full gap-2 text-sm">
+          <span>내 유튜브 영상 링크</span>
+          <Input
+            aria-label="내 유튜브 영상 링크"
+            className="rounded-md border bg-background px-3 py-2"
+            disabled={isBusy || loadState !== "ready"}
+            onChange={(event) => setYoutubeUrl(event.target.value)}
+            placeholder="본인이 올린 유튜브 영상 주소만 입력해 주세요"
+            value={youtubeUrl}
+          />
+        </label>
+        <Button disabled={isBusy || loadState !== "ready" || !youtubeUrl.trim()} onClick={() => void importFromYoutube()} type="button">
+          {actionName === "youtube-import" ? "영상에서 가져오는 중" : "유튜브 링크로 배우기"}
+        </Button>
+        <p className="vb-setting-note">목소리는 바로 후보 만들기에 쓸 수 있어요. 컷 빠르기·색감은 참고용으로 보여만 드려요 -- 실제 편집에 자동으로 입히지 않아요.</p>
+        {youtubeImportResult ? (
+          <section aria-label="유튜브 영상에서 배운 스타일">
+            <p>{`컷 빠르기: 평균 ${youtubeImportResult.pacing.average_clip_duration_sec.toFixed(1)}초마다 전환 (장면 ${youtubeImportResult.pacing.clip_count}개, 가장 짧은 구간 ${youtubeImportResult.pacing.shortest_clip_sec.toFixed(1)}초 · 가장 긴 구간 ${youtubeImportResult.pacing.longest_clip_sec.toFixed(1)}초)`}</p>
+            <p>{`색감: 밝기 ${youtubeImportResult.color.average_brightness.toFixed(0)}/255, ${youtubeImportResult.color.warm_cool_bias > 0 ? "따뜻한" : youtubeImportResult.color.warm_cool_bias < 0 ? "차가운" : "중립적인"} 톤`}</p>
+          </section>
+        ) : null}
+      </div>
 
       <h2>문장별 읽어보기 후보</h2>
       <p className="vb-setting-note">구간을 직접 고른 뒤 후보를 만들고 들어 보세요. 청취 결정만으로 편집본은 바뀌지 않아요.</p>
       {loadState === "ready" && segments.length === 0 ? <p className="text-sm text-muted-foreground">먼저 편집 초안을 만들어 주세요.</p> : null}
-      <label className="grid gap-2 text-sm">
+      <label className="grid w-full gap-2 text-sm">
         <span>후보를 만들 구간</span>
         <NativeSelect
           aria-label="후보를 만들 구간"

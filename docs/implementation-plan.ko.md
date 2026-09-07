@@ -26,7 +26,7 @@
 
 - 로컬 우선 구현
 - SaaS 확장 가능 구조
-- 직접 풀 편집기 대신 설명형 영상용 경량 후편집기 + CapCut handoff 중심
+- 설명형 영상 제작을 VideoBox 안에서 끝내는 creator-complete MP4-first 경량 편집기 + 선택적 CapCut 호환 경로
 - 자동 최종본보다 자동 초안 생성 우선
 - 나레이션 + 참고 문서 + B-roll 추천 흐름을 첫 구현 대상으로 선택
 
@@ -51,8 +51,10 @@
 - 설명형 비주얼 계획
 - timeline JSON
 - 1차 playable local preview artifact
-- 경량 후편집 가능한 draft state
-- CapCut export 결과
+- creator-complete 편집 가능한 draft state
+- 컷·자막·B-roll·음악·효과음이 반영된 가로·세로 연결 변형
+- review 결과와 최종 MP4 출력
+- 선택적 CapCut 호환 결과
 
 ## 4. MVP 범위
 
@@ -70,22 +72,185 @@
 - 간단한 설명형 오버레이 계획
 - timeline JSON 생성
 - preview 렌더
-- 경량 후편집기
-- CapCut export
-- review용 기본 화면
+- creator-complete MP4-first 경량 편집기
+- 컷·자막·B-roll·음악·효과음 편집
+- 가로·세로 연결 변형
+- review와 최종 MP4 출력
+- 선택적 CapCut 호환 결과
 
 ### 제외
 
-- 풀 자체 편집기
 - 실시간 멀티트랙 편집 UI
 - 결제/계정 체계 전체
 - 멀티유저 협업
 - 클라우드 렌더 팜
-- 고급 생성형 애니메이션
-- 고급 모션그래픽 편집
+- 고급 생성형 애니메이션과 고급 모션그래픽 편집
+
+### 4.1 캡컷과의 관계 — owner 확정 (2026-08-21)
+
+이 절이 없어서 그동안 **"캡컷에 있으니 넣자"가 근거가 되지 못했다.** owner가
+2026-08-21에 범위를 이렇게 확정했다.
+
+> "아예 디자인을 나는 캡컷과 거의 동일하게 하고 고급기능을 뺀 나머지 기능도
+> 캡컷을 벤치마킹하고, 다만 우리는 ai 를 붙여서 쉽게 편집을 할수 있고,
+> 그 자산이 본인이 찍은 비롤 + 본인 음성 등등 이라는거야."
+
+| | 방침 |
+|---|---|
+| 생김새 | **캡컷과 거의 동일하게.** 껍데기 배치는 `decisions/2026-08-21-capcut-shell-layout.ko.md` |
+| 기능 | **캡컷을 벤치마킹한다.** 고급 기능만 뺀다 |
+| 빼는 것 | 멀티캠, 임의 키프레임, 전문 색보정, 고급 마스크 — 위 `제외` 목록 그대로 |
+
+**따라서 "캡컷에 있다"는 이제 검토 근거가 된다.** 다만 자동 채택은 아니다 —
+고급 기능 목록에 걸리는지 먼저 보고, 아니면 만들 대상으로 올린다.
+
+#### 4.1.1 `pycapcut`의 효과 목록 — 조사 기록 (2026-08-21)
+
+> **2026-08-22 후속:** owner가 이 목록을 보고 **전환부터** 만들기로 정했고, 그
+> 작업은 끝났다 — `xfade` 여섯 개다(§4.1.2). 아래 1,137이라는 숫자는 여전히
+> **구현 대상이 아니라 조사 기록**이다.
+
+**이 절은 조사 기록이다. 구현 지시가 아니다.** 무엇을 만들지는 owner가 따로 정한다.
+여기 적힌 숫자를 보고 전환·필터를 만들기 시작하지 마라.
+
+`pycapcut==0.0.3`은 이미 의존성에 있다(`requirements-runtime.txt`, `requirements-container.txt`).
+그 안에 캡컷의 효과 이름표가 열거형으로 통째로 들어 있다. 설치본에서 직접 세었다.
+
+| 열거형 | 개수 | 그중 캡컷 유료(`is_vip`) |
+|---|---|---|
+| `TransitionType` (장면 전환) | 1,137 | **985** |
+| `VideoSceneEffectType` (화면 효과) | 1,583 | **1,269** |
+| `FilterType` (필터) | 454 | **342** |
+| `VideoCharacterEffectType` (인물 효과) | 254 | — |
+| `IntroType` · `OutroType` (등장·퇴장) | 251 · 219 | — |
+| `TextIntro` · `TextOutro` · `TextLoopAnim` (글자) | 182 · 100 · 81 | — |
+| `AudioSceneEffectType` (소리 효과) | 213 | — |
+| `FontType` (글꼴) | 348 | — |
+| `MaskType` (마스크) | 6 | — |
+
+**결정적으로, 이건 효과가 아니라 이름표다.** 열거형 항목 하나를 열어 보면 들어 있는
+것이 이게 전부다.
+
+```
+{'name': 'Cutout Flip', 'is_vip': False, 'resource_id': '7387771481670816257',
+ 'effect_id': '7387771481670816257', 'md5': '290a8f067f8039b1060df3d1e8d07ca0',
+ 'default_duration': 800000, 'is_overlap': True}
+```
+
+`resource_id`와 `md5`는 **캡컷이 자기 서버에서 받아 둔 자원을 찾는 열쇠**다. 픽셀도,
+셰이더도, 필터 수식도 없다. **우리 ffmpeg 렌더러는 이것으로 아무것도 그릴 수 없다.**
+그러므로 이 1,137개를 우리 완성본 MP4에 그대로 가져오는 길은 없다.
+
+##### 그래서 두 갈래로만 쓴다
+
+**(a) 캡컷 내보내기에는 실제로 얹을 수 있다.** 우리가 만드는 것은 캡컷 편집 파일이고,
+그 파일은 이름표만 있으면 된다 — 그리는 것은 캡컷이 한다. 다만 지금
+`packages/capcut-export/src/videobox_capcut_export/pycapcut_adapter.py`는 전환·효과·필터를
+**하나도 붙이지 않는다.** 붙이려면 그 어댑터에 실제로 넣어야 한다.
+
+**여기에도 함정이 하나 있다 — 전환 1,137개 중 985개가 캡컷 유료 항목이다.** 무료
+사용자의 캡컷에서 어떻게 보이는지는 확인하지 않았다. 붙일 것을 고른다면 `is_vip`가
+`False`인 152개 안에서 고르는 것이 안전하다.
+
+**(b) 우리 편집기에는 무엇을 만들지 정하는 근거로만 쓴다.** 목록 자체를 가져오는 게
+아니라, **캡컷 사용자가 실제로 무엇을 기대하는지**를 읽는 자료다.
+
+장면 전환이 그 예다. ffmpeg에는 `xfade` 필터가 있어서 우리가 직접 만들 수 있다
+(현재 저장소에 `xfade`를 쓰는 코드는 **없다** — 전환은 아직 구현돼 있지 않다).
+그런데 만든다면 **1,137개가 아니라 자주 쓰는 몇 개면 된다.** 이 목록의 값어치는
+"몇 개를 만들까"가 아니라 "어느 이름이 익숙한가"에 있다.
+
+**§4의 `제외` 목록은 그대로다.** 고급 마스크가 여기 `MaskType` 6개로 들어 있다고
+해서 범위가 열리지 않는다. 이 절은 범위를 넓히지 않는다.
+
+#### 4.1.2 장면 전환 — 만든 것 (2026-08-22)
+
+캡컷 왼쪽 패널의 없는 넷(스티커·효과·전환·필터) 가운데 **전환**을 만들었다.
+세부와 함정은 `handoffs/2026-08-22-videobox-scene-transitions-and-the-frame-rate-trap.ko.md`.
+
+**처음엔 여섯 개, 2026-08-23에 방향 짝(`wiperight`·`slidedown`) 추가로 여덟 개다.**
+ffmpeg `xfade`가 직접 그려 주는 것 중 생김새 갈래가 겹치지 않게 골랐다(반대 방향은
+겹치는 게 아니라 반대라는 이유로 짝만 추가, `transitions.py` 주석 참고).
+
+| 값 | 화면 문구 | 갈래 |
+|---|---|---|
+| `fade` | 서서히 겹치기 | 겹침 |
+| `fadeblack` | 검게 저물기 | 겹침 |
+| `dissolve` | 흩어지며 넘기기 | 겹침 |
+| `wipeleft` | 왼쪽으로 쓸어내기 | 쓸기 |
+| `wiperight` | 오른쪽으로 쓸어내기 | 쓸기 |
+| `slideup` | 위로 밀어올리기 | 밀기 |
+| `slidedown` | 아래로 밀어내리기 | 밀기 |
+| `circleopen` | 원으로 열기 | 모양 |
+
+**전체 길이는 움직이지 않는다.** 이 저장소의 렌더러는 concat이 아니라 캔버스
+오버레이 모델이라, 전환을 들어오는 클립의 첫 구간 안에만 얹고 앞 장면의 **남은
+원본**을 빌려 쓴다. 전체 길이·자막 위치가 그대로다.
+
+**2026-08-31에 남은 둘을 채웠다:**
+- **화면에서 전환 길이 조절**: 속성 패널의 "앞 장면에서 넘어오기"에 초 단위
+  칸이 생겼다(`InspectorControls.tsx`). 범위는 백엔드와 같은 0.1~2.0초.
+- **CapCut 내보내기에 얹기**: `pycapcut_adapter.py`가 이제 전환을 이름으로
+  대응해 붙인다(`fade→叠化`, `wipeleft→向左擦除` 등, `_CAPCUT_TRANSITION_TYPE_BY_KEY`
+  참고). **이 대응은 이름으로만 골랐고 실제 캡컷 화면으로 확인하지 않았다** —
+  특히 `slideup`/`slidedown`/`circleopen`은 확신이 낮다. pycapcut은 전환을
+  "앞 조각"에 걸므로(우리 모델은 "들어오는 쪽") 어댑터가 방향을 뒤집고,
+  먼저 놓인 조각에 나중에 전환을 붙이는 순서라 소재 등록도 직접 다시
+  해야 했다(자동 등록은 `add_segment` 호출 시점의 값만 본다).
+
+**2026-08-31에 유진 추천도 채웠다(owner: "너가 할수 있는거 먼저 진행해줘").**
+`suggest_scene_transitions()`(`transitions.py`)는 신호 하나만 본다 — **앞 장면과
+이 장면의 B-roll 자산이 다른가.** 다르면 `fade`를 추천하고, 이미 전환이 있거나
+B-roll 신호가 없으면 아무 말도 하지 않는다. **대본 내용·움직임 방향·음악
+분위기는 안 본다** — 그래서 `wipeleft`/`slideup` 같은 방향 있는 전환은 이
+v1에서 절대 추천하지 않는다. 화면은 `GET .../transition-suggestions`로 받고,
+"적용"은 owner가 쓰는 것과 **같은** `PATCH .../segments/{id}/transition`
+엔드포인트를 `chosen_by: "yujin"`으로 부른다 — 새 적용 경로를 만들지 않았다.
+기존 `DirectorCandidate` 추천 파이프라인(자산 배치)에 끼워 넣지 않고 이렇게
+따로 둔 이유: 그 모델은 `asset_id`가 필수라 자산 없는 전환 추천을 넣으려면
+그 파이프라인 전체를 흔들어야 했다.
+
+### 4.2 차별점은 자산이 아니라 **고르는 일**이다 — owner 정정 (2026-08-21)
+
+처음에 "본인이 찍은 B-roll과 본인 목소리를 쓴다"를 차별점으로 적었다가 owner가
+바로잡았다.
+
+> "캡컷도 본인 비롤 영상을 업로드 할수 있는데, 우리 차별성은 유진이가 대본에
+> 있는 내용에서 영상, 음악, 효과음 등등을 추천해준다는거잖아."
+
+**맞다. 자산을 가진 것은 차별점이 아니다.** 캡컷도 올린다. 다른 것은 이쪽이다 —
+**대본을 읽고 장면마다 어떤 영상·음악·효과음을 쓸지 유진이 골라 준다.**
+
+캡컷에서 그 일은 전부 사람이 한다. 장면마다 라이브러리를 뒤져서 고르고, 길이를
+맞추고, 음량을 잡는다. 편집 시간의 대부분이 거기 있다.
+
+**2026-08-22 owner가 한 겹 더 날카롭게 했다 — 이유가 취향이 아니라 계정이다.**
+
+> "우리 장점은 누구나 만드는 영상이 아니라, 자신만의 비롤 영상으로 ai 영상이 아니라
+> 본인만의 자산으로 만든 영상이라서 유튜브에 계정정지를 당할 사유가 없다는 거야"
+
+**이건 "더 예쁘다"가 아니라 "안 잘린다"는 이야기다.** 유튜브는 생성물로 대량 제작한
+채널을 제재하고, 캡컷 스톡·템플릿으로 만든 영상은 남들 것과 그림이 겹친다. 본인이
+찍은 촬영본으로 만든 영상에는 그 사유가 없다.
+
+**그래서 유진의 일은 "고르기"이되, 고르는 대상이 본인 자산이라는 점이 핵심이다.**
+둘을 떼면 뜻이 무너진다 — 스톡에서 골라 주는 것이었으면 캡컷과 같아지고, 고르는
+일이 없으면 그냥 폴더 업로드다. **고르기 + 본인 자산, 둘이 한 문장이다.**
+
+이 문장은 owner가 외부 강의에서 이 제품을 소개할 때 쓸 말이기도 하다. 화면 배치를
+캡컷과 똑같이 맞추는 이유도 여기에 붙는다 — 처음 본 사람이 설명 없이 쓸 수 있어야
+한다(`docs/decisions/2026-08-21-capcut-shell-layout.ko.md`).
+
+이 판단이 실무에 미치는 영향:
+
+- **추천·색인·의미검색은 부수 기능이 아니라 제품의 중심이다.** `media_ranking.py`,
+  `recommenders.py`, `library_*_indexer.py`가 그 자리다. 이것들이 사이드바 한 줄로만
+  노출돼 있다면 그건 배치가 제품을 잘못 말하고 있는 것이다.
+- **기능을 견줄 때 기준이 둘이다.** "캡컷에 있는가"와 "유진이 대신 해 줄 수 있는가".
+  뒤쪽이 우리 쪽 값어치이므로, 같은 기능이라도 **사람이 고르게 만들면 절반만 만든 것**이다.
+- 전문 색보정(advanced grading)과 고급 마스크(advanced masks)
+- 임의 키프레임(arbitrary keyframes)과 멀티캠(multicam)
 - 복잡한 오디오 믹싱 콘솔
-- 색보정 툴 전체
-- 자유곡선 키프레임 시스템
 - 완전 자동 최종본 보장
 
 ## 5. 마일스톤
@@ -164,13 +329,14 @@
 
 - preview 렌더
 - 자막 파일 생성
-- CapCut export
+- 가로·세로 연결 변형의 최종 MP4 출력
+- 필요할 때만 선택적 CapCut 호환 결과 생성
 
 완료 기준:
 
 - 실제 검수 가능한 결과물이 출력됨
 
-### Milestone 6. 경량 후편집기
+### Milestone 6. creator-complete 경량 편집기
 
 목표:
 
@@ -186,11 +352,13 @@
 - 원본/자동/수정 결과 비교
 - 수정 이력 저장
 - 부분 재생성 실행
-- CapCut handoff 전 최종 정리
+- 가로·세로 연결 변형 검토와 최종 MP4 출력
+- 필요할 때만 선택적 CapCut 호환 결과 생성
 
 완료 기준:
 
-- 사용자가 VideoBox 안에서 초안을 직접 다듬고, 설명형 영상 후편집을 끝낸 뒤 export 또는 handoff 할 수 있음
+- 사용자가 VideoBox 안에서 컷·자막·B-roll·음악·효과음을 직접 다듬고, 연결된 가로·세로 변형을
+  검토한 뒤 최종 MP4까지 출력할 수 있음
 
 ## 6. 권장 개발 순서
 
@@ -205,10 +373,10 @@
 9. timeline builder 구현
 10. TTS provider 연결
 11. preview renderer 구현
-12. CapCut export adapter 구현
-13. 경량 후편집 데이터 모델/API 구현
-14. 경량 후편집 UI 구현
-15. 필요한 경우 CapCut handoff 보강
+12. VideoBox 최종 MP4 renderer 구현
+13. creator-complete 편집 데이터 모델/API 구현
+14. creator-complete 편집 UI 구현
+15. 선택적 CapCut 호환 경로 보강
 
 ## 7. 기술 선택 초안
 
@@ -220,8 +388,8 @@
 - 비전/자산 분석: OpenCV + 자산 메타데이터 인덱싱
 - 데이터 저장: 로컬 DB 우선
 - UI: React + TypeScript 기반 로컬 우선 web review dashboard
-- 편집 셸: 오픈소스 편집기 구조를 선별 반입한 React + TypeScript 기반 경량 후편집기
-- export 대상: CapCut
+- 편집 셸: 오픈소스 편집기 구조를 선별 반입한 React + TypeScript 기반 creator-complete 경량 편집기
+- export 대상: VideoBox 최종 MP4; CapCut 호환은 선택적
 
 ### 7.1. 웹 대시보드 표시 언어 기준
 
@@ -252,7 +420,7 @@
 
 재사용 우선순위:
 
-1. CapCut export
+1. VideoBox 최종 MP4 출력
 2. auto cut
 3. transcribe/alignment 아이디어
 4. script matching 구조
@@ -310,31 +478,26 @@
 4. `execution/match_script.py`의 scene split 흐름
 5. `execution/search_broll.py`의 scoring 축
 
-## 8.4 경량 후편집기 반영 원칙
+## 8.4 creator-complete MP4-first 경량 편집기 반영 원칙
 
-경량 후편집기는 이제 선택 사항이 아니라 설명형 영상용 핵심 범위로 본다.
-다만 다음 선은 계속 지킨다.
+creator-complete MP4-first 경량 편집기는 설명형 영상의 컷, 자막, B-roll, 음악, 효과음, 연결된 가로·세로
+변형, 검토와 최종 MP4 출력까지 VideoBox 안에서 끝내는 핵심 범위다. CapCut은 필수 후편집
+단계가 아니라 선택적 호환·비상 경로로만 유지한다.
 
-- 풀 NLE를 직접 구현하지 않는다
-- 설명형 영상 초안을 빠르게 고치는 데 필요한 편집만 넣는다
-- 세그먼트, 자막, 추천 자산, 설명 자산 중심으로 편집 범위를 제한한다
-- 고급 모션그래픽, 색보정, 오디오 믹싱, 자유 키프레임은 현재 범위에서 제외한다
+다음은 명시적인 비목표다.
 
-편집기에 무언가를 넣을지는 **목록이 아니라 이 질문으로 판단한다.**
+- 전문 색보정(advanced grading)
+- 고급 마스크(advanced masks)
+- 임의 키프레임(arbitrary keyframes)
+- 멀티캠(multicam)
+- 고급 모션그래픽, 실시간 멀티트랙 합성, 복잡한 오디오 믹싱
 
-> **CapCut으로 넘겨도 되는 일인가?**
-> 넘겨도 되면 넣지 않는다. 넘기기 전에 초안이 말이 되게 만드는 데 필요한 것만 넣는다.
-
-내보내기가 CapCut으로 이어져 있으므로 정교한 작업은 그쪽에서 하면 된다. VideoBox가
-CapCut을 이기려 할 이유가 없고, 그 시간은 유진·자동 초안처럼 CapCut이 못 하는 것에
-쓰는 편이 낫다. 2026-08-08에 B-roll 재생 속도와 소리 크기를 추가한 것도 이 기준으로
-판단했다 — 폰 촬영본이 너무 길고 시끄러우면 **초안 자체가 말이 안 되기** 때문이다.
-
-**들이지 않는 것은 그대로다:** 색보정, 오디오 믹싱, 자유 키프레임, 고급 모션그래픽,
-멀티트랙 합성, 마스킹.
+이 선 안에서 세그먼트, 자막, 추천 자산과 설명 자산을 빠르게 고치고, 사용자가 미리보기와
+명시적 적용을 거쳐 검토한 뒤 MP4를 출력한다. CapCut 호환은 필요할 때만 별도로 생성하며
+VideoBox 내부 완성이나 MP4 출력을 막지 않는다.
 
 아래는 현재 들어와 있는 조작이다. **고정 목록이 아니라 현황이므로**, 늘릴 때는 이
-목록을 고치는 대신 위 질문에 답한다.
+목록을 고치는 대신 위 경계와 명시적 적용 승인 기준을 따른다.
 
 - 컷 유지/삭제
 - 컷 경계 미세 조정
@@ -350,6 +513,12 @@ CapCut을 이기려 할 이유가 없고, 그 시간은 유진·자동 초안처
 - 원본/자동/수정 비교
 - 수정 이력 저장
 - 부분 재생성
+- 배속(`속도`) — 길이·자막·자산이 함께 따라오고 뒤 장면을 당긴다(ripple)
+- 장면 전환
+- 색감
+- 흔들림 보정(영상)·소리 정리(오디오)
+- 화면 변형(확대·위치·회전)
+- 유진에게 말해서 하는 편집 — 2026-09-01부터 확인 클릭 없이 바로 적용된다(§23.3 머리말)
 
 오픈소스 편집기 반입 시점도 함께 고정한다.
 
@@ -361,9 +530,9 @@ CapCut을 이기려 할 이유가 없고, 그 시간은 유진·자동 초안처
 
 ### 8.4.1 OpenCut 및 음성 제작 후속 판단 게이트
 
-- OpenCut은 현재 통째 도입·임베드·제품 의존성 후보가 아니다. 현행판은 재작성 중이고 classic은 archived 상태이므로, VideoBox의 FFmpeg preview·CapCut draft·editing-session SSOT를 대체하지 않는다.
+- OpenCut은 현재 통째 도입·임베드·제품 의존성 후보가 아니다. 현행판은 재작성 중이고 classic은 archived 상태이므로, VideoBox의 FFmpeg preview·선택적 CapCut 호환 artifact·editing-session SSOT를 대체하지 않는다.
 - 향후 timeline patch API와 FFmpeg preview 계약이 안정된 뒤에만 OpenCut을 다시 분석한다. 그때도 기본값은 코드 반입이 아니라 drag/trim, snapping, ripple, waveform, rational time 같은 UX interaction의 독립 재구현이다.
-- 재분석 gate는 실제 Editor API/headless 상태, 라이선스·의존성 SBOM, 보안, canonical timeline round-trip, CapCut export 영향, GPU fallback을 포함한다.
+- 재분석 gate는 실제 Editor API/headless 상태, 라이선스·의존성 SBOM, 보안, canonical timeline round-trip, 선택적 CapCut 호환 영향, GPU fallback을 포함한다.
 - Voice Capture & Narration은 별도 후속 slice다. 브라우저 녹음과 파일 업로드를 narration asset으로 정규화하고, local STT 전사·대본 정렬·자막 생성을 연결한다.
 - voice sample 기반 TTS/voice cloning은 전사와 분리한다. 명시적 opt-in, 원본·전사·샘플의 삭제/보관 정책, preview→apply→undo, review/approval gate를 별도 설계·검증하기 전에는 자동 사용하지 않는다.
 
@@ -386,7 +555,7 @@ Local Media Director 18개 Task와 editing-session revision, source provenance, 
 5. `Opencast Editor`: transcript/subtitle/waveform/cut interaction을 Apache-2.0 attribution과 함께 source-derived behavioral adaptation한다.
 6. `Supabase Studio`: 프로젝트 계층, settings IA, mobile navigation을 `reference only`로 사용한다.
 
-OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT와 Opencast Redux/MUI/full snapshot API/player fork/browser waveform decode는 반입하지 않는다. Supabase source도 직접 복사하지 않는다. editing-session, revision, FFmpeg, PyCapCut, output-source verifier는 계속 authoritative하다.
+OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT와 Opencast Redux/MUI/full snapshot API/player fork/browser waveform decode는 반입하지 않는다. Supabase source도 직접 복사하지 않는다. editing-session, revision, FFmpeg, VideoBox MP4 renderer, 선택적 CapCut 호환 adapter와 output-source verifier는 계속 authoritative하다.
 
 새 shell은 local/cloud capability slot을 갖지만 실제 SaaS auth/team/billing과 Hermes agent/container는 이번 22개 Task에 넣지 않는다. Slice 0 Task 1은 기존 Yujin copy를 closeout하고 project/section 선택, Director 수동 fallback, current/stale preview·output, settings의 legacy baseline을 고정했다. Task 11의 다섯 viewport 시각 prototype은 2026-07-22 사용자 승인을 받았다. Task 14 pure time-scale/geometry/snapping/hit-test, Task 15 read-only UI navigation/performance, Task 16 narration trim/reorder mutation, Task 17 독립 multi-lane placement 편집, Task 18 segment-linked 대본/자막·실제 player 동기화와 caption 시간 권한 보완, Task 19 editor asset browser/safe preview/apply, Task 20 persistent Eugene/typed Inspector, Task 21 release hardening, Task 22 parity/legacy removal/release audit은 기술 closeout했다. Task 19 이후에도 Route-owned truth, PreviewStage 단일 surface, current-revision command fence, manual fallback을 유지하며 source copy/API expansion은 하지 않았다. 다음 goal은 사용자 원본 샘플을 이용한 owner dogfood와 별도 Task 9 사람/환경 acceptance다. browser source audition은 실제 합성 preview가 아니며, current revision의 정확한 미리보기는 기존 FFmpeg composition path를 재사용한 freshness-bound proxy artifact로 고정한다. caption timing은 현 backend 권한에 맞춰 segment-linked로 제한한다.
 
@@ -407,7 +576,7 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 확인된 사실:
 
 - 로컬 프로젝트, 자산 등록, job 저장, timeline 저장, review 상태 저장 구조는 이미 코드와 테스트로 검증되어 있다
-- transcript alignment, segment analysis, B-roll 추천, 음악 추천, timeline 생성, review approval, subtitle render, preview render, CapCut export 흐름이 이미 연결돼 있다
+- transcript alignment, segment analysis, B-roll 추천, 음악 추천, timeline 생성, review approval, subtitle render, preview render, VideoBox MP4 출력과 선택적 CapCut 호환 흐름이 이미 연결돼 있다
 - 로컬 우선 LLM runtime은 `Local Qwen -> Gemini fallback` 구조로 이미 들어가 있다
 - editing session 생성/조회/수정 API와 partial regeneration request contract가 이미 들어가 있다
 - 이 구간은 2026-06-29 시점 스냅샷이며, 최신 검증 기준은 아래 2026-07-01 체크포인트를 따른다
@@ -446,11 +615,11 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - ambiguous 구간을 자동 삭제하지 않고 review 대상으로 보냄
 - TTS도 자동 전면 대체하지 않고 review 기반 후보로만 적용
 
-### 9.3 CapCut export 의존
+### 9.3 선택적 CapCut 호환 의존
 
 위험:
 
-- CapCut 구조 변경 가능성
+- CapCut 호환 구조 변경 가능성
 
 대응:
 
@@ -464,15 +633,16 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 
 대응:
 
-- 첫 구현은 나레이션 기반 초안 생성기 + 설명형 영상용 경량 후편집기로 고정
+- 첫 구현은 나레이션 기반 초안 생성기 + creator-complete 경량 편집기로 고정한다. 전문 색보정,
+  고급 마스크, 임의 키프레임, 멀티캠과 고급 모션그래픽은 계속 제외한다.
 
 ## 10. 예상 개발 기간
 
 가정:
 
 - 1인 중심 개발
-- 직접 편집기 제외
-- CapCut export 중심
+- creator-complete 경량 편집기 중심
+- VideoBox 최종 MP4 출력 중심, CapCut 호환은 선택적
 - 첫 장르는 나레이션/설명형 영상
 
 ### 기술 검증 프로토타입
@@ -486,8 +656,8 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - 제한적 TTS 실험
 - B-roll 추천 기본형
 - timeline JSON
-- preview 또는 export 일부
-- 경량 후편집기 설계 일부
+- preview와 최종 MP4 출력 일부
+- creator-complete 경량 편집기 설계 일부
 
 ### MVP
 
@@ -499,8 +669,9 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - ingest
 - 추천
 - preview
-- CapCut export
-- 경량 후편집기 기본형
+- creator-complete 경량 편집기 기본형
+- 가로·세로 연결 변형과 최종 MP4 출력
+- 선택적 CapCut 호환 결과
 
 ### 실사용 v1
 
@@ -511,7 +682,7 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - 긴 영상 안정화
 - 자산 재사용성 향상
 - shortform 후보 개선
-- 경량 후편집기 안정화
+- creator-complete 경량 편집기 안정화
 - 오류 처리와 운영성 강화
 
 ## 11. 착수 전 확인 사항
@@ -525,6 +696,8 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 
 ## 12. 2026-07-01 현재 구현 체크포인트
 
+> **과거 기록/역사적 진단이며 현재 목표가 아님:** 이 절의 구현·회귀·CapCut 호환 세부는 당시 검증 증거를 보존하기 위한 기록이다. 현재 범위와 우선순위는 §2, §4, §8.4의 creator-complete 경량 편집기 및 VideoBox 최종 MP4 출력을 따른다.
+
 ### 2026-07-11 production-readiness blocker slice 1 authoritative checkpoint
 
 이번 checkpoint는 `docs/superpowers/plans/2026-07-11-production-readiness-blocker-slice-1.md`의 9개 Task와 여섯 blocker 계약을 기준으로 한다. 2026-07-11 현재 HEAD `f02dde1` 이후 worktree 변경까지 포함한 검증 결과는 아래와 같다.
@@ -533,9 +706,9 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 | --- | --- |
 | 빈 첫 화면 | 프로젝트 생성 뒤 narration/script ingest를 독립 실행한다. 하나가 실패해도 생성된 프로젝트와 다른 ingest 성공은 유지하고 실패한 항목만 다시 등록한다. `project-onboarding.test.tsx`가 create/ingest와 failure/retry를 검증한다. |
 | assetless BGM | 실물 `selected_asset_id` 없는 mood recommendation은 metadata로만 남고 BGM clip 또는 `music/suggested` URI를 만들지 않는다. |
-| nullable output | failed final render/real CapCut draft는 nullable artifact와 error message를 반환하며 UI는 error card, retry, ErrorBoundary로 복구한다. |
+| nullable output | failed final render/선택적 CapCut 호환 artifact는 nullable artifact와 error message를 반환하며 UI는 error card, retry, ErrorBoundary로 복구한다. |
 | partial caption | partial regeneration candidate의 `caption_segments`가 승인 후 SRT에 쓰이고 final renderer에는 그 timeline의 최신 SRT가 전달된다. |
-| short source duration | FFmpeg는 short B-roll을 loop하고 audio를 `apad/trim`한다. real CapCut draft는 B-roll repetition과 project-local persistent WAV silence segment로 source를 늘리지 않고 target window를 채운다. |
+| short source duration | FFmpeg는 short B-roll을 loop하고 audio를 `apad/trim`한다. 선택적 CapCut 호환 artifact도 B-roll repetition과 project-local persistent WAV silence segment로 source를 늘리지 않고 target window를 채운다. |
 | export overlays | FFmpeg는 text 및 image overlay를 실제 frame에 materialize하고, real CapCut draft는 text track과 image video track/material을 가진다. |
 
 검증 증거:
@@ -580,10 +753,10 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 - preview renderer도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 selected narration source를 유지하는 계약
 - preview renderer도 applied recommendation의 legacy/mixed-case `recommendation_type` TTS shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 selected narration source를 유지하는 계약
 - preview renderer도 applied TTS recommendation의 `target_segment_id`에 whitespace가 섞인 stale shape여도 trimmed segment id 기준으로 selected narration source를 유지하는 계약
-- CapCut export adapter도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 segment-level narration source override를 유지하는 계약
-- CapCut export adapter도 applied recommendation의 legacy/mixed-case `recommendation_type` TTS shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 segment-level narration source override를 유지하는 계약
-- CapCut export adapter도 applied TTS recommendation의 `target_segment_id`에 whitespace가 섞인 stale shape여도 trimmed segment id 기준으로 segment-level narration source override를 유지하는 계약
-- CapCut export adapter도 applied recommendation의 `auto_apply_allowed="true"` / `review_required="false"` legacy string false shape를 canonical bool로 해석해 segment-level narration source override를 유지하는 계약
+- VideoBox MP4/CapCut compatibility adapter도 applied recommendation의 `recommendation_type`에 whitespace가 섞인 stale TTS shape여도 canonical recommendation type 기준으로 segment-level narration source override를 유지하는 계약
+- VideoBox MP4/CapCut compatibility adapter도 applied recommendation의 legacy/mixed-case `recommendation_type` TTS shape를 raw casing 그대로 비교하지 않고 canonical lowercase type 기준으로 segment-level narration source override를 유지하는 계약
+- VideoBox MP4/CapCut compatibility adapter도 applied TTS recommendation의 `target_segment_id`에 whitespace가 섞인 stale shape여도 trimmed segment id 기준으로 segment-level narration source override를 유지하는 계약
+- VideoBox MP4/CapCut compatibility adapter도 applied recommendation의 `auto_apply_allowed="true"` / `review_required="false"` legacy string false shape를 canonical bool로 해석해 segment-level narration source override를 유지하는 계약
 - partial regeneration runtime의 `tts_refresh`도 source timeline `applied_recommendations`에 legacy/mixed-case `recommendation_type` stale approved TTS shape가 남아 있어도 canonical lowercase type 기준으로 기존 recommendation을 교체해 새 manual TTS selection truth를 유지하는 계약
 - partial regeneration runtime의 `tts_refresh`도 source timeline `applied_recommendations`의 `target_segment_id`에 whitespace가 섞인 stale approved TTS shape가 남아 있어도 trimmed segment id 기준으로 기존 recommendation을 교체해 새 manual TTS selection truth를 유지하는 계약
 - rule-based music recommender도 segment payload의 `review_required="false"` legacy string false shape를 canonical bool로 해석해 실제 review blocker가 없는 segment를 neutral-bed fallback branch로 오판하지 않는 계약
@@ -697,7 +870,7 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
   - partial regeneration candidate `partial_regeneration_job_006`
   - candidate review snapshot 조회 성공
   - candidate approve 성공
-  - subtitle / preview / CapCut export 성공
+  - subtitle / preview / MP4 및 선택적 CapCut 호환 출력 성공
 - partial regeneration start response prediction symmetry regressions
   - clean scope start prediction `1 passed`
   - blocked scope start prediction `1 passed`
@@ -825,6 +998,8 @@ OpenCut EditorCore, IndexedDB/OPFS, browser renderer/export, WASM, browser STT�
 
 ## 13. 다음 실제 작업
 
+> **과거 기록/역사적 진단이며 현재 목표가 아님:** 이 절과 §§14–22의 closeout·handoff·CapCut 호환 진단은 당시 운영 검증을 보존하기 위한 기록이다. 현재 목표는 VideoBox MP4-first creator editor와 선택적 CapCut 호환이다.
+
 ### 2026-07-11 기준
 
 production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smoke·SSOT 갱신까지 완료했다. 다음 goal은 새 기능을 넓히기보다 아래 중 하나를 좁게 선택한다.
@@ -910,8 +1085,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - output operator copy prompt도 non-list stale `tracks[].clips` 값을 실제 clip count처럼 세지 않고 건너뛰어, approved preview/export 경로가 valid track summary prompt surface만 유지하도록 정리했다
 - preview renderer도 non-list stale `tracks[].clips` 값을 track summary나 narration source list로 순회하지 않고 건너뛰어, approved preview visible surface가 valid track summary/input만 유지하도록 정리했다
 - preview renderer도 `tracks[].clips` list 안의 stale non-dict entry를 실제 clip처럼 세거나 narration source surface로 순회하지 않도록 정리해, approved preview visible surface가 canonical clip input만 유지하도록 맞췄다
-- CapCut export adapter도 non-list stale `tracks[].clips` 값을 voiceover/video/audio segment source처럼 순회하지 않고 건너뛰어, approved export surface가 valid track input만 유지하도록 정리했다
-- CapCut export adapter도 `tracks[].clips` list 안의 stale non-dict entry를 voiceover/video/audio segment source처럼 순회하지 않도록 정리해, approved export surface가 canonical clip input만 기준으로 manifest를 만들게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter도 non-list stale `tracks[].clips` 값을 voiceover/video/audio segment source처럼 순회하지 않고 건너뛰어, approved export surface가 valid track input만 유지하도록 정리했다
+- VideoBox MP4/CapCut compatibility adapter도 `tracks[].clips` list 안의 stale non-dict entry를 voiceover/video/audio segment source처럼 순회하지 않도록 정리해, approved export surface가 canonical clip input만 기준으로 manifest를 만들게 맞췄다
 - subtitle render의 timeline segment read-path도 non-list stale `tracks[].clips` 값을 subtitle segment source처럼 순회하지 않고 건너뛰어, approved subtitle output이 valid track input만 기준으로 segment order를 잡도록 정리했다
 - review approval의 TTS apply read-path도 stale non-dict `tracks` entry를 target narration track처럼 읽지 않고 건너뛰어, approved narration asset swap이 valid narration track input에만 적용되도록 정리했다
 - review approval의 TTS apply read-path도 stale non-dict `clips` entry를 target narration clip처럼 읽지 않고 건너뛰어, approved narration asset swap이 valid narration clip input에만 적용되도록 정리했다
@@ -939,17 +1114,17 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - recommendation/timeline/review snapshot API response normalization도 `payload.selected_asset_uri`의 whitespace stale shape를 trim 기준으로 정리해, TTS approval/output과 review/output read surface가 canonical selected asset uri 기준을 유지하게 맞췄다
 - recommendation/timeline/review snapshot API response normalization도 `recommendation_type` 없는 stale `pending_recommendations`/`applied_recommendations` row를 valid recommendation처럼 surface하지 않고 건너뛰어, review/output read surface가 canonical recommendation identity/type/segment 기준만 유지하게 맞췄다
 - preview renderer의 approved TTS narration source surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, TTS approval/output preview visible surface가 canonical selected narration uri 기준을 유지하게 맞췄다
-- CapCut export adapter의 approved TTS voiceover `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, TTS approval/output export payload surface가 canonical selected narration uri 기준을 유지하게 맞췄다
-- CapCut export adapter의 B-roll `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, export payload surface가 canonical asset uri 기준을 유지하게 맞췄다
-- CapCut export adapter의 subtitle `source_uri` surface도 whitespace stale subtitle file uri를 trim 기준으로 정리해, export payload surface가 canonical subtitle uri 기준을 유지하게 맞췄다
-- CapCut export adapter의 top-level `subtitle_file_uri` surface도 whitespace stale subtitle file uri를 trim 기준으로 정리해, export payload metadata surface가 canonical subtitle uri 기준을 유지하게 맞췄다
-- CapCut export adapter의 overlay `track_name` / `overlay_type` surface도 whitespace stale overlay type을 trim 기준으로 정리해, export payload text-track surface가 canonical overlay type 기준을 유지하게 맞췄다
-- CapCut export adapter의 overlay `text` surface도 whitespace stale text를 trim 기준으로 정리해, export payload text-track surface가 canonical overlay copy 기준을 유지하게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter의 approved TTS voiceover `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, TTS approval/output export payload surface가 canonical selected narration uri 기준을 유지하게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter의 B-roll `source_uri` surface도 whitespace stale `asset_uri`를 trim 기준으로 정리해, export payload surface가 canonical asset uri 기준을 유지하게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter의 subtitle `source_uri` surface도 whitespace stale subtitle file uri를 trim 기준으로 정리해, export payload surface가 canonical subtitle uri 기준을 유지하게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter의 top-level `subtitle_file_uri` surface도 whitespace stale subtitle file uri를 trim 기준으로 정리해, export payload metadata surface가 canonical subtitle uri 기준을 유지하게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter의 overlay `track_name` / `overlay_type` surface도 whitespace stale overlay type을 trim 기준으로 정리해, export payload text-track surface가 canonical overlay type 기준을 유지하게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter의 overlay `text` surface도 whitespace stale text를 trim 기준으로 정리해, export payload text-track surface가 canonical overlay copy 기준을 유지하게 맞췄다
 - subtitle render의 timeline segment order read-path도 `track_type` 없는 stale minimal-dict `tracks` entry를 실제 subtitle source track처럼 읽지 않도록 정리해, approved subtitle output이 canonical track input만 기준으로 세그먼트 순서를 잡게 맞췄다
 - subtitle render의 timeline segment order read-path도 supported set 밖의 stale unknown `track_type`를 subtitle source track처럼 읽지 않도록 정리해, approved subtitle output이 canonical runtime track type만 기준으로 세그먼트 순서를 잡게 맞췄다
 - output operator copy prompt의 track summary도 supported set 밖의 stale unknown `track_type`를 valid runtime track summary처럼 노출하지 않도록 정리해, approved preview/export guidance가 canonical runtime track type만 기준으로 요약을 만들게 맞췄다
 - preview renderer의 track summary / payload read-path도 supported set 밖의 stale unknown `track_type`를 valid runtime track surface처럼 노출하지 않도록 정리해, approved preview visible surface가 canonical runtime track type만 기준으로 요약을 만들게 맞췄다
-- CapCut export adapter의 export payload / track read-path도 supported set 밖의 stale unknown `track_type`를 valid export track surface처럼 노출하지 않도록 정리해, approved export payload가 canonical runtime track type만 기준으로 manifest를 만들게 맞췄다
+- VideoBox MP4/CapCut compatibility adapter의 export payload / track read-path도 supported set 밖의 stale unknown `track_type`를 valid export track surface처럼 노출하지 않도록 정리해, approved export payload가 canonical runtime track type만 기준으로 manifest를 만들게 맞췄다
 - partial regeneration `music_refresh`가 whitespace stale source `segment_id`를 가진 segment도 다시 선택하도록 `local_pipeline` source-segment match를 trim 기준으로 맞췄다
 - 같은 slice에서 `timeline_builder` dict segment payload도 `segment_id`를 trim해 refreshed recommendation과 segment lookup이 서로 다른 id 기준으로 어긋나지 않게 정리했다
 - partial regeneration `overlay_refresh`도 whitespace stale existing overlay `segment_id`를 targeted full refresh 범위에서 정확히 교체하도록 overlay segment match를 trim 기준으로 맞췄다
@@ -964,10 +1139,10 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - timeline builder의 applied recommendation surface도 legacy `" TTS_REPLACEMENT "` 같은 mixed-case stale `recommendation_type`를 canonical lowercase type으로 정리해 approved TTS read-path truth와 builder output surface가 같은 기준을 유지하게 정리했다
 - preview renderer도 whitespace stale narration clip `segment_id`를 trimmed TTS recommendation과 같은 기준으로 맞춰 approved narration source가 preview에 정확히 반영되게 정리했다
 - preview renderer의 narration sources HTML surface도 narration clip `segment_id`를 trim 기준으로 맞춰 approved TTS preview surface가 canonical segment id를 유지하게 정리했다
-- CapCut export adapter도 whitespace stale narration clip `segment_id`를 trimmed TTS recommendation과 같은 기준으로 맞춰 approved narration source가 export에 정확히 반영되게 정리했다
-- CapCut export adapter의 voiceover segment surface도 narration clip `segment_id`를 trim 기준으로 맞춰 export payload 자체가 canonical segment id를 유지하게 정리했다
-- CapCut export adapter의 broll sequential-fill grouping도 `segment_id`를 trim 기준으로 맞춰 padded/raw id가 섞인 같은 세그먼트가 하나의 window로 유지되게 정리했다
-- CapCut export adapter도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 approved narration/TTS voiceover track을 놓치지 않게 정리했다
+- VideoBox MP4/CapCut compatibility adapter도 whitespace stale narration clip `segment_id`를 trimmed TTS recommendation과 같은 기준으로 맞춰 approved narration source가 export에 정확히 반영되게 정리했다
+- VideoBox MP4/CapCut compatibility adapter의 voiceover segment surface도 narration clip `segment_id`를 trim 기준으로 맞춰 export payload 자체가 canonical segment id를 유지하게 정리했다
+- VideoBox MP4/CapCut compatibility adapter의 broll sequential-fill grouping도 `segment_id`를 trim 기준으로 맞춰 padded/raw id가 섞인 같은 세그먼트가 하나의 window로 유지되게 정리했다
+- VideoBox MP4/CapCut compatibility adapter도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 approved narration/TTS voiceover track을 놓치지 않게 정리했다
 - preview renderer도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 narration sources surface가 비지 않게 정리했다
 - preview renderer의 track summary HTML surface도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 정리해 visible output surface가 raw stale 값을 그대로 노출하지 않게 정리했다
 - review recommendation approval mutation도 legacy `" NARRATION "` 같은 mixed-case stale `track_type`를 canonical lowercase track type으로 읽어 approved TTS narration clip 적용이 실패하지 않게 정리했다
@@ -997,7 +1172,7 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - timeline summary의 `pending_recommendation_count`도 raw stale list 길이가 아니라 canonical blocking pending recommendation 기준으로 계산하도록 맞춰, unknown junk recommendation이 persisted summary blocker count를 부풀리지 않게 정리했다
 - timeline summary의 `track_count`도 raw stale list 길이가 아니라 canonical runtime `track_type` 기준으로 계산하도록 맞춰, unknown junk track이 persisted summary output count를 부풀리지 않게 정리했다
 - timeline summary의 `applied_recommendation_count`도 raw stale list 길이가 아니라 canonical runtime recommendation type 기준으로 계산하도록 맞춰, unknown junk applied recommendation이 persisted summary output count를 부풀리지 않게 정리했다
-- CapCut export metadata의 `track_count`도 raw stale list 길이가 아니라 canonical runtime `track_type` 기준으로 계산하도록 맞춰, unknown junk track이 persisted export metadata count를 부풀리지 않게 정리했다
+- 선택적 CapCut 호환 metadata의 `track_count`도 raw stale list 길이가 아니라 canonical runtime `track_type` 기준으로 계산하도록 맞춰, unknown junk track이 persisted export metadata count를 부풀리지 않게 정리했다
 - preview summary의 `clip_group_count`도 raw stale list 길이가 아니라 canonical runtime `track_type` 기준으로 계산하도록 맞춰, unknown junk clip group이 persisted preview summary count를 부풀리지 않게 정리했다
 - output operator copy prompt의 `pending_recommendations.recommendation_type` surface도 legacy `" TTS_REPLACEMENT "` 같은 mixed-case stale type을 canonical lowercase type으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 recommendation type 기준을 유지하게 정리했다
 - output operator copy prompt의 `pending_recommendations.target_segment_id` surface도 whitespace stale segment id를 trim 기준으로 정리해 preview/export guidance prompt가 review guidance 및 output truth와 같은 canonical segment id 기준을 유지하게 정리했다
@@ -1032,7 +1207,7 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - 대시보드 화이트톤 리디자인은 post-MVP polish로 보류하고, 현재는 기능 완결과 검증 속도를 우선한다
 - 저장된 컬러 방향은 `white / gray / light orange` 기반의 밝은 무채색 톤으로 유지하고, 실제 적용은 MVP 사용 피드백 이후 최소 범위로 진행한다
 - 후속 적용 순서는 `token/semantic color 정리 -> layout contrast 재점검 -> component skin 최소 치환`으로 제한해, MVP 기능 검증이 끝나기 전에는 실제 UI 리디자인 작업을 시작하지 않는다
-- CapCut export와 review/output 계약은 계속 유지한다
+- 선택적 CapCut 호환과 review/output 계약은 계속 유지한다
 - TTS, editing session, review 상태 계약은 서로 따로 놀지 않도록 같은 증거 기준으로 검증해야 한다
 - 단, 최종 운영 마감 점검에서는 focused와 representative smoke가 green이어도 broader full backend regression이 red면 운영 완료로 닫지 않는다
 - 현재 최신 운영 점검 결과는 `full-suite only red 1개`가 남아 있으므로, 다음 실제 작업은 새 기능 추가가 아니라 그 경계 1개를 좁히는 안정화 복귀다
@@ -1077,11 +1252,11 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - VideoBox는 원본 `draft_content.json` artifact를 수정하지 않고, Windows `%LOCALAPPDATA%\\CapCut\\User Data\\Projects\\com.lveditor.draft\\videobox-<export_id>`에 별도 registered copy를 만든다.
 - 지원 탐지는 `%LOCALAPPDATA%\\CapCut\\Apps` 아래의 `CapCut.exe`와 위 local project root가 모두 존재하고 쓰기 가능한 경우로 제한한다. 미설치, project root 미생성, 쓰기 권한 거부는 추측하지 않고 각각 한글 복구 안내를 반환한다.
 - 동일 export 재시도는 완전한 등록 copy를 재사용한다. 불완전한 충돌 copy는 새 임시 폴더 copy 후 교체하며, copy 실패 시 임시 폴더를 정리해 원본 artifact를 보존한다.
-- CapCut export API는 `handoff.status`, source artifact URI, registered project path, 오류 사유, 등록 시각, reused 여부를 영속화한다. 웹 출력 패널은 `CapCut에 열기 준비`, 등록 경로, 실패 사유, `CapCut 등록 다시 시도`를 새로고침 뒤에도 표시한다.
+- 선택적 CapCut 호환 API는 `handoff.status`, source artifact URI, registered project path, 오류 사유, 등록 시각, reused 여부를 영속화한다. 웹 출력 패널은 `CapCut에 열기 준비`, 등록 경로, 실패 사유, `CapCut 등록 다시 시도`를 새로고침 뒤에도 표시한다.
 - 실제 Windows CapCut Desktop에서 `videobox-handoff-loop-20260712`을 검색해 열었다. CapCut detail path는 `C:\\Users\\atgro\\AppData\\Local\\CapCut\\User Data\\Projects\\com.lveditor.draft\\videobox-handoff-loop-20260712`이고, 수동 폴더 복사 없이 10분 타임라인, 한국어 자막, 오디오 트랙이 열렸다. 같은 registration을 두 번 호출해 첫 호출 `reused=False`, 두 번째 호출 `reused=True`도 확인했다.
 - 최신 검증: Python 3.12 backend `693 passed`, frontend `99 passed`, production build 성공. artifacts는 Git에 포함하지 않는다.
 
-## 20. 2026-07-13 CapCut handoff diagnostics closeout
+## 20. 2026-07-13 선택적 CapCut 호환 diagnostics closeout
 
 - `GET /api/capcut/handoff-diagnostics`는 project/export/source draft를 변경하거나 CapCut을 실행하지 않고 현재 Windows handoff 준비 상태만 반환한다. 권한 검증은 즉시 삭제되는 temporary file probe로 실제 쓰기 가능 여부를 확인한다.
 - response는 선택된 최고 버전 `CapCut.exe` 설치 경로와 버전, 예상 local project root, root 존재, 쓰기 권한, `ready`/`failed`, 한글 복구 안내, 검사 시각을 포함한다.
@@ -1195,7 +1370,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 - `[~] 진행 중 (in progress, 2026-07-20)`: 외부 생성 모델 provider를 퇴역 중이다. key router·web credential CRUD UI·provider/domain/core module을 삭제하고, 새 project와 다시 여는 기존 SQLite project 모두에서 퇴역 credential table을 제거한다. public provider credential path와 provider transport는 없으며, local-only 실패는 deterministic fallback 또는 사람 검수로 끝난다. 단, 통합 API 파일의 과거 fallback 전용 테스트 삭제와 full backend 재검증은 아직 남아 있다.
 - `[x] 완료 (done)`: 2026-07-19 Hermes Agent 공식 문서와 release를 확인했다. 공식 quickstart/configuration은 `hermes model`의 **OpenAI Codex → ChatGPT OAuth device-code login**을 지원한다고 명시한다. 첫 설치는 signed release tag `v2026.7.7.2`의 annotated tag `b7751df34688835a108e0d630f3495fc11f3df79`와 peeled commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`으로 pin한다. 근거: <https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/>, <https://hermes-agent.nousresearch.com/docs/user-guide/configuration/>, <https://github.com/NousResearch/hermes-agent/releases/tag/v2026.7.7.2>.
 - `[x] 완료 (done)`: `videobox-hermes-agent` pre-auth container를 official amd64 digest `sha256:3db34ce19adfa080736a2a3feb0316dbcccc588faa9afe7fd8ae1c03b4f1a53a`로 기동했다. Compose profile은 `hermes-preauth`이며, `network_mode: none`, host port 없음, VideoBox DB/media/snapshot mount 없음, 전용 scratch `videobox_hermes_preauth_state:/opt/data`, read-only root, `cap_drop: ALL`, `no-new-privileges`, bounded `local` log를 확인했다. 이 scratch volume은 훗날 OAuth state volume과 절대 재사용하지 않는다. official s6 supervisor의 state ownership·supervise lock을 위한 최소 예외로 `CHOWN`, `DAC_OVERRIDE`, `SETGID`, `SETUID`만 다시 더한다. 이 네 capability는 PID 1 supervisor에만 남고 실제 CMD는 UID `10000`/`hermes`, `CapEff=0`으로 실행됨을 runtime에서 확인했다. `hermes --version`은 `v0.18.2 (2026.7.7.2) · upstream 9de9c25f`를 반환했고 scratch state에는 `auth.json`과 `.env`가 없다.
-- `[ ] 미완료 (pending)`: 유진 profile, Hermes→VideoBox API 권한중개, egress allowlist gateway, OAuth login, mem0, 편집 mutation은 아직 만들지 않았다. 이 계획의 각 gate를 통과하기 전에는 이 범위를 추가하지 않는다.
+- `[ ] 미완료 (pending)`: Hermes→VideoBox API 권한중개, egress allowlist gateway, OAuth login은 아직 만들지 않았다. 이 계획의 각 gate를 통과하기 전에는 이 범위를 추가하지 않는다.
+- `[x] 완료 (done)`: 이 항목에 함께 적혀 있던 **유진 profile·mem0·편집 mutation은 그 뒤에 만들어졌다.** 유진은 로컬 qwen을 두뇌로 대화하고, 편집 mutation은 `services/api/src/videobox_api/routers/director_proposals.py`의 apply 라우트(`POST /api/projects/{project_id}/editing-sessions/{session_id}/yujin-editing-proposals/{proposal_id}/apply` → `apply_yujin_editing_proposal`)로 실제 세션을 고친다. live Mem0는 2026-08-08 owner 승인으로 연결됐고 경계는 `CLAUDE.md` §6 / `docs/development-fast-path.ko.md` §10.14에 있다. **이 세 가지를 "아직 없다"는 근거로 쓰지 마라.**
 
 이 절은 Hermes 범위에서 `docs/llm-provider-strategy.ko.md`의 과거 외부 fallback보다 우선한다. provider 전략 문서는 현재 local-only 결정으로 갱신됐으며 외부 생성 모델 provider의 credential·key pool·router는 제거했다. 정적 검사와 실제 runtime 모두 external provider call `0`을 유지해야 하며, 외부 fallback 경로를 되살리는 구현은 허용하지 않는다.
 
@@ -1225,6 +1401,8 @@ production-readiness blocker slice 1의 9개 Task는 구현·회귀·600초 smok
 6. `[ ] 미완료 (pending)`: signer는 아직 어떤 VideoBox API route나 Hermes container에도 배포하지 않는다. owner-authorized revoke writer/source, signing secret delivery·rotation·key lifecycle, gateway audit 및 실제 gateway-only route/network는 아직 없다. Hermes가 self-mint하거나 shared signing key를 받는 설계는 금지한다.
 
 ### 23.3 [ ] 미완료 (pending) — 유진 profile, prompt와 업무 영역
+
+**2026-09-01 갱신 — 아래 "제안만 하고 직접 편집은 금지"는 `docs/decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`가 뒤집었다.** 유진에게 말한 편집은 이제 확인 클릭 없이 바로 적용되고(`director_proposals.py`의 apply 라우트), 안전장치는 확인 클릭이 아니라 **되돌리기**다. 아래 문단과 표는 그 결정 이전의 첫 slice 계약이니 현재 동작 설명으로 쓰지 마라. 나머지 거부 범위(DB/SQL·filesystem·shell·renderer·CapCut·raw HTTP·credential)는 그대로 유효하다.
 
 첫 slice의 에이전트는 **유진 (Yujin), `yujin-video-director`** 하나로 고정한다. 유진은 대화 요약, 사용자가 명시적으로 선택한 한 project의 상태 설명, action 없는 approval request 제안만 한다. VideoBox는 영상 편집·검수·CapCut 인계에 집중하며, 대본·제목·썸네일·추천 영상의 생성 또는 제안은 현재 제품 범위 밖으로 차단한다. 영상·자막·소리·전환의 근거 없는 품질 주장, DB/SQL, filesystem, shell, renderer, CapCut, raw HTTP, credential, 직접 편집·render·export는 금지한다. 화면 문구는 유진의 짧고 행동 중심적인 안내를 유지한다.
 
@@ -1261,6 +1439,18 @@ Agent Gateway는 run ownership, context filtering, tool allowlist, idempotency, 
 > "유진의 자유 대화를 Qwen으로 대체하지 않는다"는 제약을 **로컬 우선 방침으로 대체한다.**
 > 개정 범위와 유지 경계는 `23.3B`에 적는다. 4항의 나머지 제약(대본·썸네일·추천 영상 생성
 > `disabled`, compression 결과 비신뢰, SSOT 불변)은 그대로 유지한다.
+
+> **2026-08-16 owner 재개정 — 대본·제목은 풀렸다.**
+> 위 줄의 "대본 생성 `disabled`"는 더 이상 유효하지 않다
+> (`docs/decisions/2026-08-16-autonomous-creator-loop-scope-expansion.ko.md` B).
+> 유진은 **대본과 제목을 쓰고 제안할 수 있다.** 썸네일·추천 영상 자동 생성,
+> DB·shell·filesystem·credential 접근, owner 확정 없는 제작은 그대로 막혀 있다.
+>
+> 이 개정은 **2026-08-19까지 코드에 닿지 않았다.** 문서는 "허용"인데 유진이는
+> 계속 거절했고, 사람이 다시 발견해야 했다. 지금은
+> `tests/test_yujin_local_conversation.py`의
+> `test_script_and_title_requests_are_not_blocked_since_the_owner_lifted_it`이
+> 이 결정이 코드에 남아 있는지 지킨다.
 
 유진의 주 대화/창작 route와 로컬 보조 route는 같은 agent로 위장하거나 자동 fallback하지 않는다. profile·모델·prompt·skill·route 결정은 모두 run ledger에 남기고, provider 변경은 별도 gate로 처리한다.
 

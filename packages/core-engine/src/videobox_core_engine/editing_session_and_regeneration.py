@@ -7,6 +7,10 @@ import json
 import tempfile
 import warnings
 
+from videobox_core_engine.caption_translation import (
+    SUPPORTED_CAPTION_LANGUAGES,
+    apply_caption_translations,
+)
 from videobox_core_engine.canonical_boolish import (
     normalize_strict_boolish as _normalize_runtime_boolish,
 )
@@ -39,6 +43,7 @@ from videobox_core_engine.ffmpeg_auto_cut_executor import FfmpegAutoCutExecutor
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.editing_session import (
     build_editing_session,
+    captions_from_transcript,
     build_fixed_track_timeline,
     build_selected_range_preview,
     preview_caption_style_scope,
@@ -54,10 +59,13 @@ from videobox_core_engine.editing_session import (
     clear_segment_tts_replacement,
     remove_segment_explanation_card,
     remove_segment_image_overlay,
+    remove_segment_shape_overlay,
     remove_segment_table_overlay,
     select_segment_tts_replacement,
     set_segment_bounds,
+    set_segment_ripple_playback_rate,
     set_timeline_placement_overrides,
+    set_track_states,
     split_segment,
     undo,
     update_segment_explanation_card,
@@ -65,8 +73,10 @@ from videobox_core_engine.editing_session import (
     update_segment_broll_override,
     update_segment_caption,
     update_segment_cut_action,
+    update_segment_transition,
     update_segment_music_override,
     update_segment_sfx_override,
+    update_segment_shape_overlay,
     update_segment_table_overlay,
     update_segment_visual_overlay,
 )
@@ -332,6 +342,17 @@ class EditingSessionRegenerationMixin:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_segment_bounds(session=session, segment_id=segment_id, start_sec=start_sec, end_sec=end_sec), expected_revision=expected_revision)
 
+    def set_editing_session_segment_ripple_playback_rate(self, *, project_id: str, session_id: str, segment_id: str, rate: float, expected_revision: int) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated = set_segment_ripple_playback_rate(session=session, segment_id=segment_id, rate=rate)
+        return self._save_editing_session_with_revision(
+            project_id=project_id,
+            session_id=session_id,
+            session=session,
+            updated_session=updated,
+            expected_revision=expected_revision,
+        )
+
     def reorder_editing_session_segments(self, *, project_id: str, session_id: str, segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=reorder_segments(session=session, segment_ids=segment_ids, bounds_by_id=bounds_by_id), expected_revision=expected_revision)
@@ -347,6 +368,17 @@ class EditingSessionRegenerationMixin:
         previous = session.get("timeline_placement_overrides") if isinstance(session.get("timeline_placement_overrides"), dict) else {}
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_timeline_placement_overrides(session=session, overrides={**previous, **normalized}), expected_revision=expected_revision)
 
+    def update_editing_session_track_states(self, *, project_id: str, session_id: str, states: dict[str, Any], expected_revision: int) -> dict[str, Any]:
+        """트랙 눈·음소거를 통째로 바꾼다(`track_states.py`).
+
+        조각 병합이 아니라 **보낸 것이 곧 전체**다 -- 트랙이 여섯 개뿐이고,
+        화면이 늘 여섯 개의 현재 상태를 알고 있어서 부분 갱신이 얻는 게 없다.
+        """
+        from videobox_core_engine.track_states import normalize_track_states
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        normalized = normalize_track_states(states)
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_track_states(session=session, states=normalized), expected_revision=expected_revision)
+
     def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=undo(session=session), expected_revision=expected_revision)
@@ -357,9 +389,31 @@ class EditingSessionRegenerationMixin:
 
     def update_editing_session_caption_style(self, *, project_id: str, session_id: str, style: dict[str, Any], scope: str, segment_ids: list[str], expected_revision: int, proposal_id: str | None = None, candidate_id: str | None = None) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        updated = update_caption_style(session=session, style=style, scope=scope, segment_ids=segment_ids)
         target_segment_id = segment_ids[0] if len(segment_ids) == 1 else ""
+        write_style = style
+        if proposal_id is not None and candidate_id is not None and target_segment_id:
+            # **유진이 제안한 열한 칸만 덮어쓴다.** 유진의 제안 스키마
+            # (`yujin_creator_proposals.EditorCaptionStyle`)는 굵게·기울임·
+            # 자간(2026-09-03 추가)을 모른다. 그대로 통째로 덮으면
+            # `CaptionStyle.from_dict`가 그 세 칸을 기본값(꺼짐)으로 채워서,
+            # 창작자가 방금 세부 정보 칸에서 켜 둔 굵게·자간이 유진의 사소한
+            # 색 제안 하나에 조용히 지워진다. 유진이 관여하는 칸만 새 값으로
+            # 바꾸고 나머지는 지금 저장된 값을 그대로 들고 간다 -- 수동 편집은
+            # 매번 전체 칸을 보내므로 이 자리를 안 타서 영향이 없다.
+            current_style = self._current_caption_style(session=session, segment_id=target_segment_id)
+            if current_style is not None:
+                write_style = {**current_style, **style}
+        updated = update_caption_style(session=session, style=write_style, scope=scope, segment_ids=segment_ids)
         return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_style", segment_id=target_segment_id, controls={"scope": scope, "style": style})
+
+    @staticmethod
+    def _current_caption_style(*, session: dict[str, Any], segment_id: str) -> dict[str, Any] | None:
+        """이 장면에 지금 저장된 자막 모양. 없으면 `None`(뒤덮을 것이 없다)."""
+        for segment in session.get("segments", []):
+            if isinstance(segment, dict) and str(segment.get("segment_id")) == segment_id:
+                current = segment.get("caption_style")
+                return dict(current) if isinstance(current, dict) else None
+        return None
     def update_editing_session_segment_caption(
         self,
         *,
@@ -370,14 +424,140 @@ class EditingSessionRegenerationMixin:
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
+        language: str | None = None,
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = update_segment_caption(
             session=session,
             segment_id=segment_id,
             caption_text=caption_text,
+            language=language,
         )
         return self._save_yujin_b4_command_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision, proposal_id=proposal_id, candidate_id=candidate_id, command_kind="set_caption_text", segment_id=segment_id, controls={"text": caption_text})
+
+    def apply_editing_session_captions_from_transcript(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        transcription_job_id: str,
+        expected_revision: int,
+    ) -> dict[str, object]:
+        """받아쓴 말을 장면 캡션으로 옮긴다 -- 캡컷 `자동 캡션` 자리.
+
+        **받아쓰기는 이미 있었다.** 없던 것은 그 결과를 캡션으로 옮기는 자리다.
+        """
+        transcript = self.get_transcription_result(project_id=project_id, job_id=transcription_job_id)
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = captions_from_transcript(
+            session=session,
+            transcript_segments=list(transcript.get("segments") or []),
+        )
+        return self._save_editing_session_with_revision(
+            project_id=project_id,
+            session_id=session_id,
+            session=session,
+            updated_session=updated_session,
+            expected_revision=expected_revision,
+        )
+
+    def set_editing_session_caption_translations(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        language: str,
+        texts_by_segment: dict[str, str],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """번역을 세션에 적고, 그 언어를 출력 자막으로 고른다.
+
+        저장과 고르기를 한 번에 하는 이유: 번역을 만들어 두고 고르지 않으면
+        완성본이 그대로라서 "번역이 안 됐다"로 보인다. 되돌리기는 한 번이면 된다.
+        """
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = apply_caption_translations(
+            session=session, language=language, texts_by_segment=texts_by_segment
+        )
+        updated_session["caption_language"] = language
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=updated_session, expected_revision=expected_revision,
+        )
+
+    def set_editing_session_caption_language(
+        self, *, project_id: str, session_id: str, language: str | None, expected_revision: int
+    ) -> dict[str, Any]:
+        """어느 자막으로 내보낼지 고른다. `None`이면 원본(한국어)."""
+        if language is not None and language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {language}")
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = deepcopy(session)
+        if language:
+            updated_session["caption_language"] = language
+        else:
+            updated_session.pop("caption_language", None)
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=updated_session, expected_revision=expected_revision,
+        )
+
+    def _record_timeline_build(self, *, project_id: str, timeline_id: str) -> None:
+        """이 타임라인을 만들었다는 기록을 남긴다. 이미 있으면 그대로 둔다.
+
+        출력 화면은 `지금 타임라인을 만든 succeeded timeline_build 작업`이 있어야
+        "편집본 준비됨"으로 본다. 타임라인을 새로 낸 경로가 이 기록을 안 남기면
+        창작자는 완성본을 만들 길이 없다.
+        """
+        existing = any(
+            str(item.get("job_type")) == JobType.TIMELINE_BUILD.value
+            and str(item.get("output_ref") or "") == timeline_id
+            and str(item.get("status")) == JobStatus.SUCCEEDED.value
+            for item in self.store.list_jobs(project_id=project_id)
+        )
+        if existing:
+            return
+        build_job = self.store.create_job(
+            project_id=project_id,
+            job_type=JobType.TIMELINE_BUILD,
+            input_ref=timeline_id,
+            status=JobStatus.RUNNING,
+        )
+        self.store.update_job(
+            project_id=project_id,
+            job_id=build_job["job_id"],
+            status=JobStatus.SUCCEEDED,
+            output_ref=timeline_id,
+        )
+
+    def set_editing_session_dubbed_takes(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        selections: dict[str, tuple[str, str]],
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """더빙한 장면들을 **한 번에** 세션에 건다. `{장면: (후보, 소리)}`.
+
+        장면마다 따로 저장하지 않는 이유: 스무 장면을 더빙하면 되돌리기를 스무 번
+        눌러야 원래대로 돌아간다. 자막 번역과 같은 규칙이다 -- 한 번에 건 것은
+        한 번에 풀린다.
+        """
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = deepcopy(session)
+        for segment in updated_session.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            selection = selections.get(str(segment.get("segment_id") or ""))
+            if selection is None:
+                continue
+            recommendation_id, asset_id = selection
+            segment["tts_replacement"] = {"recommendation_id": recommendation_id, "asset_id": asset_id}
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=updated_session, expected_revision=expected_revision,
+        )
 
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.store.get_editing_session(project_id=project_id, session_id=session_id)
@@ -402,6 +582,23 @@ class EditingSessionRegenerationMixin:
         )
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
 
+    def update_editing_session_segment_transition(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        transition: dict[str, Any] | None,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_transition(
+            session=session,
+            segment_id=segment_id,
+            transition=transition,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+
     def update_editing_session_segment_broll_override(
         self,
         *,
@@ -418,7 +615,11 @@ class EditingSessionRegenerationMixin:
         # manual B-roll placement has the same immutable provenance as a
         # Director materialized candidate.
         asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
-        if asset.get("asset_type") != AssetType.BROLL_VIDEO.value:
+        # 사진도 장면 화면이 된다(owner 요청 2026-09-06). 렌더러가 확장자를 보고
+        # `-loop 1`로 늘려 움직임을 얹으므로, 유진이 쓰는 것과 **같은**
+        # `broll_override`에 그대로 실린다 -- 새 칸을 만들 이유가 없다.
+        # 느슨하게 풀지는 않는다: 소리(음악·효과음)는 여기서 계속 막힌다.
+        if asset.get("asset_type") not in {AssetType.BROLL_VIDEO.value, AssetType.IMAGE.value}:
             raise ValueError("asset_missing")
         source = self.store.resolve_storage_uri(project_id=project_id, storage_uri=str(asset["storage_uri"]))
         if not source.is_file():
@@ -524,6 +725,16 @@ class EditingSessionRegenerationMixin:
                 },
             )
             partial_regeneration_id = str(persisted["partial_regeneration_id"])
+            # **새 타임라인을 만들었다고 작업 기록에도 남긴다.**
+            #
+            # 안 남기면 출력 화면이 "편집본 준비 필요"에서 멈춘다 -- 그 화면은
+            # `지금 타임라인을 만든 timeline_build 작업`을 찾는데, 부분 재생성은
+            # 자기 기록만 남기고 있었다. 그러면 창작자는 편집 화면에서
+            # "편집 화면에서 준비해 주세요"라는 막다른 말을 본다(2026-09-03 실측).
+            #
+            # 타임라인은 실제로 만들어졌으니 그렇게 적는 것이 사실에 맞다.
+            # 출력 변형 경로도 같은 일을 한다(`local_pipeline.py`의 변형 빌드).
+            self._record_timeline_build(project_id=project_id, timeline_id=published_timeline_id)
             self.store.update_job(
                 project_id=project_id,
                 job_id=job["job_id"],
@@ -728,6 +939,12 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         asset_id: str,
         text: str,
+        # 프리셋 넷은 선택이다. 유진 경로를 비롯해 프리셋 없이 부르는 자리가
+        # 여럿이라, `None`은 끝까지 `None`으로 넘겨 도메인이 열쇠를 안 적게 한다.
+        vertical: str | None = None,
+        horizontal: str | None = None,
+        size: str | None = None,
+        motion: str | None = None,
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
@@ -748,6 +965,10 @@ class EditingSessionRegenerationMixin:
             segment_id=segment_id,
             asset_id=asset_id,
             text=text,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+            motion=motion,
         )
         # Existing legacy sessions can still contain assetless cards.  A real
         # project asset, however, becomes a renderable source and must carry a
@@ -898,6 +1119,46 @@ class EditingSessionRegenerationMixin:
     ) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         updated_session = remove_segment_table_overlay(
+            session=session,
+            segment_id=segment_id,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+
+    def update_editing_session_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        shape: str,
+        vertical: str,
+        horizontal: str,
+        size: str,
+        motion: str = "none",
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = update_segment_shape_overlay(
+            session=session,
+            segment_id=segment_id,
+            shape=shape,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+            motion=motion,
+        )
+        return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=updated_session, expected_revision=expected_revision)
+
+    def remove_editing_session_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        updated_session = remove_segment_shape_overlay(
             session=session,
             segment_id=segment_id,
         )

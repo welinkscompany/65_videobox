@@ -30,6 +30,8 @@ def _build_review_snapshot_response(result: dict) -> ReviewSnapshotResponse:
     return ReviewSnapshotResponse(
         project_id=result["project_id"],
         timeline_id=result["timeline_id"],
+        source_variant_id=result.get("source_variant_id"),
+        source_variant_revision=result.get("source_variant_revision"),
         review_status=result["review_status"],
         segments=[SegmentAnalysisRecord(**item) for item in result["segments"]],
         applied_recommendations=[
@@ -59,8 +61,12 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             timeline_id=result["timeline_id"], project_id=result["project_id"], review_status=result["status"],
             approved_at=result.get("approved_at"), updated_at=result["updated_at"],
             source_session_id=result.get("source_session_id"),
-            source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
-            invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
+            source_session_revision=result.get("source_session_revision"),
+            source_variant_id=result.get("source_variant_id"),
+            source_variant_revision=result.get("source_variant_revision"),
+            is_current=result.get("is_current", True),
+            invalidated_at=result.get("invalidated_at"),
+            invalidated_reason=result.get("invalidated_reason"),
         )
 
     @router.get("/api/projects/{project_id}/review-snapshots/{job_id}")
@@ -116,8 +122,12 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             approved_at=result["approved_at"],
             updated_at=result["updated_at"],
             source_session_id=result.get("source_session_id"),
-            source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
-            invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
+            source_session_revision=result.get("source_session_revision"),
+            source_variant_id=result.get("source_variant_id"),
+            source_variant_revision=result.get("source_variant_revision"),
+            is_current=result.get("is_current", True),
+            invalidated_at=result.get("invalidated_at"),
+            invalidated_reason=result.get("invalidated_reason"),
         )
 
     @router.post(
@@ -145,6 +155,7 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             updated_at=result["updated_at"],
             source_session_id=result.get("source_session_id"),
             source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
+            source_variant_id=result.get("source_variant_id"), source_variant_revision=result.get("source_variant_revision"),
             invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
         )
 
@@ -161,8 +172,12 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             approved_at=result["approved_at"],
             updated_at=result["updated_at"],
             source_session_id=result.get("source_session_id"),
-            source_session_revision=result.get("source_session_revision"), is_current=result.get("is_current", True),
-            invalidated_at=result.get("invalidated_at"), invalidated_reason=result.get("invalidated_reason"),
+            source_session_revision=result.get("source_session_revision"),
+            source_variant_id=result.get("source_variant_id"),
+            source_variant_revision=result.get("source_variant_revision"),
+            is_current=result.get("is_current", True),
+            invalidated_at=result.get("invalidated_at"),
+            invalidated_reason=result.get("invalidated_reason"),
         )
 
     return router

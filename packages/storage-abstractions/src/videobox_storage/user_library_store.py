@@ -85,6 +85,41 @@ class UserLibraryStore:
     def list_recent_preset_ids(self, *, project_id: str) -> list[str]:
         return list(self._read()["projects"].get(project_id, {}).get("recent_preset_ids", []))
 
+    # -- 글꼴 -------------------------------------------------------------
+    #
+    # 자막 모양의 즐겨찾기·최근은 프로젝트 안에 들어 있다. 글꼴은 그러지
+    # 않는다. 글꼴은 프로젝트마다 다른 물건이 아니라 사람이 늘 쓰는 것이고,
+    # 다음 영상은 보통 새 프로젝트다 -- 프로젝트에 매달면 매번 다시 담아야
+    # 한다. 저장한 포맷(`format_template_store`)이 같은 이유로 이미 사용자
+    # 단위다.
+    #
+    # 그래서 기존 `toggle_favorite`·`mark_recent_preset`을 억지로 넓히지
+    # 않았다. 그쪽은 `favorite_id`가 `project:`/`pack:`으로 시작하기를
+    # 요구하고, 최근 목록은 자막 프리셋이 실제로 있는지까지 확인한다.
+    # 글꼴 이름은 둘 다 통과할 수 없다.
+
+    def toggle_favorite_font(self, *, family: str, enabled: bool) -> list[str]:
+        data = self._read()
+        current = [item for item in data.setdefault("favorite_fonts", []) if item != family]
+        if enabled:
+            current.append(family)
+        data["favorite_fonts"] = current
+        self._write(data)
+        return list(current)
+
+    def list_favorite_fonts(self) -> list[str]:
+        return list(self._read().get("favorite_fonts", []))
+
+    def mark_recent_font(self, *, family: str) -> list[str]:
+        data = self._read()
+        previous = [item for item in data.setdefault("recent_font_families", []) if item != family]
+        data["recent_font_families"] = [family, *previous][:10]
+        self._write(data)
+        return list(data["recent_font_families"])
+
+    def list_recent_font_families(self) -> list[str]:
+        return list(self._read().get("recent_font_families", []))
+
     def _read(self) -> dict[str, Any]:
         if not self.path.exists():
             return {"global_presets": {}, "projects": {}}

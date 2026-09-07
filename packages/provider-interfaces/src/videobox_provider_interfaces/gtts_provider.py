@@ -27,7 +27,7 @@ class GTTSProvider:
 
         request.output_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            gTTS(text=request.text, lang=self.language).save(str(request.output_path))
+            gTTS(text=request.text, lang=request.language or self.language).save(str(request.output_path))
         except Exception as exc:
             raise TTSSynthesisError(f"gTTS synthesis failed: {exc}") from exc
         return TTSResult(output_uri=str(request.output_path), provider_name=self.provider_name)

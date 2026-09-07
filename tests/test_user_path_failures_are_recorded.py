@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -561,6 +562,66 @@ def test_the_readiness_probe_says_why_it_answered_no(
     assert len(reported) == 1, "준비 확인 실패가 매번 찍히거나 아예 안 찍혔다"
 
 
+def test_a_stale_check_that_cannot_read_one_asset_still_checks_the_rest(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """낡은 분석을 다시 걸기 전에 캐시 열쇠를 계산하는데, 자산 하나의 원본을
+    못 읽으면 그 자산만 조용히 건너뛰고 아무 기록도 남기지 않았다. 그 자산은
+    캐시 열쇠 없이 매번 이 자리를 지나가므로, 태그가 옛 언어로 남아도 이유를
+    알 방법이 없었다."""
+    import asyncio
+
+    from videobox_api.main import _poll_media_analysis
+
+    class _Service:
+        profile = None
+
+        @staticmethod
+        def cache_key(**_kwargs):
+            return "current-key"
+
+    class _Store:
+        @staticmethod
+        def list_projects():
+            return [{"project_id": "p1"}]
+
+        @staticmethod
+        def recover_orphaned_media_analysis_jobs(*, project_id: str):
+            return []
+
+        @staticmethod
+        def list_assets(*, project_id: str):
+            return [
+                {"asset_id": "asset-1", "storage_uri": "local://ok.mp4"},
+                {"asset_id": "asset-2", "storage_uri": "local://missing.mp4"},
+            ]
+
+        @staticmethod
+        def resolve_storage_uri(*, project_id: str, storage_uri: str):
+            if storage_uri == "local://missing.mp4":
+                raise RuntimeError("source file is gone")
+            return __file__
+
+        @staticmethod
+        def list_media_analysis(*, project_id: str):
+            return []
+
+    class _App:
+        class state:
+            store = _Store()
+            media_analysis_service = _Service()
+            media_analysis_dispatcher = staticmethod(lambda **_kwargs: None)
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(_poll_media_analysis(_App(), recover_running=True))
+
+    reported = [
+        record for record in caplog.records if "source file is gone" in str(record.exc_info)
+    ]
+    assert reported, "자산 하나의 캐시 열쇠 계산 실패가 기록되지 않았다"
+    assert "asset-2" in reported[0].getMessage()
+
+
 def test_every_user_path_swallow_point_carries_a_logger() -> None:
     """네 지점이 로거를 갖고 있는지 파일 단위로 잠근다. 하나가 조용히 빠지면
     다시 "왜 안 되는지 모르겠다"로 돌아간다."""
@@ -683,3 +744,93 @@ def test_a_nonsense_log_level_falls_back_instead_of_crashing_startup() -> None:
     finally:
         root.handlers[:] = original_handlers
         root.setLevel(original_level)
+
+
+def test_a_video_search_asks_the_footage_index_not_the_audio_one() -> None:
+    """영상을 오디오 색인에 물어보면 늘 빈손이다 (2026-09-05 실측).
+
+    유진에게 자료실 영상 후보를 주기 시작한 첫날, "도시 거리 걷는 영상 깔아줘"에
+    여전히 `music-lost-in-city`를 골랐다. 후보를 뽑는 자리는 고쳤는데 검색
+    갈고리가 `find_audio_matches`만 불렀다 -- **이름 그대로 음악·효과음
+    색인이라** 촬영본은 한 건도 안 나온다.
+
+    화면의 자료실 검색은 이미 둘을 갈라 부른다. 갈고리도 같게 맞춘다.
+    """
+    from videobox_api.main import _build_music_library_hooks
+
+    asked: list[str] = []
+
+    class _Store:
+        def find_audio_matches(self, **kwargs):
+            asked.append("audio")
+            return []
+
+        def find_footage_matches(self, **kwargs):
+            asked.append("footage")
+            return [{"library_asset_id": "user_1", "description": "도시 거리"}]
+
+    class _Provider:
+        def embed(self, _request):
+            return SimpleNamespace(vectors=[[0.1, 0.2]])
+
+    class _App:
+        class state:
+            media_analysis_embedding_provider = _Provider()
+            media_analysis_profile = {"embedding_model_name": "fixture-embed"}
+
+    search, _resolve = _build_music_library_hooks(
+        library_store=_Store(), project_store=object(), app=_App()
+    )
+
+    assert search("도시 거리 걷는 영상", 8, "broll")
+    assert asked == ["footage"]
+
+    asked.clear()
+    search("잔잔한 음악", 8, "music")
+    assert asked == ["audio"]
+
+
+def test_a_photo_search_asks_the_footage_index_too() -> None:
+    """유진의 사진 후보가 이름 목록으로 떨어졌다 (2026-09-06).
+
+    owner 요청: "사진 의미검색도 ... 유진이가 알아서 자동편집할때도 적용되도록".
+
+    사진 색인이 생긴 뒤에도 이 갈고리는 `find_audio_matches`에 물었다 -- 사진은
+    거기 없으니 늘 빈손이고, 유진은 이름 목록(`20241208_121938.jpg`)만 보고
+    "어떤 사진인지 알려주세요"라고 되묻는다.
+
+    사진도 촬영본 색인에 있으므로 그쪽으로 보낸다. **종류를 대서** 촬영본이
+    섞이지 않게 한다.
+    """
+    from videobox_api.main import _build_music_library_hooks
+
+    asked: list[tuple[str, str | None]] = []
+
+    class _Store:
+        def find_audio_matches(self, **kwargs):
+            asked.append(("audio", str(kwargs.get("media_type"))))
+            return []
+
+        def find_footage_matches(self, **kwargs):
+            asked.append(("footage", kwargs.get("media_type")))
+            return [{"library_asset_id": "user_photo", "description": "바다가 보이는 창가"}]
+
+    class _Provider:
+        def embed(self, _request):
+            return SimpleNamespace(vectors=[[0.1, 0.2]])
+
+    class _App:
+        class state:
+            media_analysis_embedding_provider = _Provider()
+            media_analysis_profile = {"embedding_model_name": "fixture-embed"}
+
+    search, _resolve = _build_music_library_hooks(
+        library_store=_Store(), project_store=object(), app=_App()
+    )
+
+    assert search("바다가 보이는 사진", 8, "image")
+    assert asked == [("footage", "image")], f"사진을 엉뚱한 색인에 물었다: {asked}"
+
+    asked.clear()
+    search("도시 거리", 8, "broll")
+    assert asked == [("footage", "broll")]

@@ -1,392 +1,67 @@
-import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { RightDock } from "./RightDock";
-import type { RightDockProposal } from "./rightDockTypes";
 
 afterEach(cleanup);
 
-const proposal: RightDockProposal = {
-  proposalId: "proposal-1",
-  status: "ready",
-  baseSessionRevision: 7,
-  currentRevision: 7,
-  candidates: [
-    {
-      candidateId: "candidate-1", visibleReferenceCode: "B-001", mediaType: "broll", previewUrl: null,
-      kind: "broll", sourceMediaKind: "broll_video", targetSegmentId: "segment-1",
-      previewSummary: "첫 장면을 산책 영상으로 채웁니다.", supportedControls: { fit: "crop" },
-      availability: "actionable", reviewStatus: "approved", actionable: true,
-    },
-    {
-      candidateId: "candidate-2", visibleReferenceCode: "B-002", mediaType: "broll", previewUrl: null,
-      kind: "broll", sourceMediaKind: "raw_video", targetSegmentId: "segment-1",
-      previewSummary: "첫 장면을 원본 영상으로 채웁니다.", supportedControls: { fit: "fit" },
-      availability: "actionable", reviewStatus: "approved", actionable: true,
-    },
-  ],
-} as const;
-
-function PersistentDock() {
-  const [draft, setDraft] = useState("");
-  const [selectedCandidateIds, setSelectedCandidateIds] = useState<readonly string[]>(["candidate-1"]);
-  const [conversationScroll, setConversationScroll] = useState({ key: "route-a", top: 0, pinnedToBottom: true });
-  return <RightDock
-    draft={draft}
-    onDraftChange={setDraft}
-    proposal={proposal}
-    messages={[
-      { id: "user-1", role: "user", text: "B-roll을 추천해 줘" },
-      { id: "assistant-1", role: "assistant", text: "두 가지를 준비했어요." },
-    ]}
-    selectedCandidateIds={selectedCandidateIds}
-    onSelectedCandidateIdsChange={setSelectedCandidateIds}
-    conversationScroll={conversationScroll}
-    onConversationScrollChange={setConversationScroll}
-    inspectorTargets={[{ id: "segment-1", label: "세그먼트 1", kind: "caption" }]}
-  />;
-}
-
+/** 이 도크는 이제 `속성` 하나뿐이다(2026-08-30 두 차례 후속: 유진 대화와
+ *  추천 후보 둘 다 `YujinPanel`로 빠졌다 --
+ *  `docs/reference/capcut-observed-2026-08-22.ko.md` §7,
+ *  `YujinPanel.test.tsx` 참고). 탭 줄 자체가 없으니 내용이 바로 보인다. */
 describe("RightDock", () => {
-  it("preserves the composer, selected candidate, and conversation scroll while Inspector opens and closes", () => {
-    render(<PersistentDock />);
-    const composer = screen.getByLabelText("유진에게 요청하기");
-    const history = screen.getByRole("log", { name: "유진 대화" });
-    fireEvent.change(composer, { target: { value: "다음 추천도 보여 줘" } });
-    fireEvent.click(screen.getByRole("radio", { name: "B-002 선택" }));
-    Object.defineProperty(history, "scrollTop", { configurable: true, writable: true, value: 72 });
+  it("shows the selected clip's properties directly, with no tabs to switch", () => {
+    render(<RightDock
+      inspectorTargets={[{ id: "segment-1", label: "세그먼트 1", kind: "caption" }]}
+    />);
 
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    expect(screen.queryByRole("tab")).toBeNull();
     expect(screen.getByRole("region", { name: "편집 항목" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 닫기" }));
-
-    expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("다음 추천도 보여 줘");
-    expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
-    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
   });
 
-  it("is a controlled adapter for candidate selection and restored conversation scroll", () => {
-    const onSelectedCandidateIdsChange = vi.fn();
-    const onConversationScrollChange = vi.fn();
-    const rendered = render(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      proposal={proposal}
-      selectedCandidateIds={["candidate-2"]}
-      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
-      conversationScroll={{ key: "route-a", top: 83, pinnedToBottom: false }}
-      onConversationScrollChange={onConversationScrollChange}
-    />);
-
-    expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
-    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(83);
-    fireEvent.click(screen.getByRole("radio", { name: "B-001 선택" }));
-    expect(onSelectedCandidateIdsChange).toHaveBeenCalledWith(["candidate-1"]);
-    expect(screen.getByRole("radio", { name: "B-002 선택" })).toBeChecked();
-
-    rendered.rerender(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      proposal={proposal}
-      selectedCandidateIds={["candidate-1"]}
-      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
-      conversationScroll={{ key: "route-a", top: 12, pinnedToBottom: false }}
-      onConversationScrollChange={onConversationScrollChange}
-    />);
-    expect(screen.getByRole("radio", { name: "B-001 선택" })).toBeChecked();
-    expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(12);
-  });
-
-  it("keeps manual editing available without clearing unavailable history", () => {
-    const onManualEdit = vi.fn();
+  /** 단추 셋(`기본`·`1.5배`·`2배`)이던 자리를 캡컷과 같은 `속도 x` 숫자 칸으로
+   *  바꿨다(owner 지시 2026-09-04 "속도는 캡컷이랑 동일하게 맞춰"). 칸 자체의 시험은
+   *  `speed-field.test.tsx`에 있고, 여기서는 도크가 그 칸을 실제로 걸어 두는지만 본다. */
+  it("lets the creator type any speed CapCut allows for the selected scene", () => {
+    const onSetSegmentRippleSpeed = vi.fn();
     render(<RightDock
-      state="blocked"
-      runState={{ kind: "unavailable", message: "유진의 답을 받지 못했어요." }}
-      draft=""
-      onDraftChange={vi.fn()}
-      onManualEdit={onManualEdit}
-      messages={[{ id: "user-1", role: "user", text: "요청 내용" }]}
-    />);
-
-    expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeInTheDocument();
-    expect(screen.getByText("요청 내용")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "유진 없이 계속 편집" }));
-    expect(onManualEdit).toHaveBeenCalledOnce();
-    expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeInTheDocument();
-    expect(screen.getByText("요청 내용")).toBeInTheDocument();
-  });
-
-  it("announces only terminal state and never turns streamed token updates into live announcements", () => {
-    const rendered = render(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      messages={[{ id: "assistant-1", role: "assistant", text: "첫" }]}
-      runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "첫" }}
-    />);
-
-    expect(screen.getByRole("log", { name: "유진 대화" })).not.toHaveAttribute("aria-live");
-    expect(screen.queryByRole("status")).toBeNull();
-
-    rendered.rerender(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      messages={[{ id: "assistant-1", role: "assistant", text: "첫 답" }]}
-      runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "첫 답" }}
-    />);
-    expect(screen.queryByRole("status")).toBeNull();
-
-    rendered.rerender(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      messages={[{ id: "assistant-1", role: "assistant", text: "첫 답" }]}
-      runState={{ kind: "complete", runId: "run-1" }}
-    />);
-    expect(screen.getByRole("status")).toHaveTextContent("유진 답변을 받았어요.");
-    expect(screen.getAllByRole("status")).toHaveLength(1);
-
-    rendered.rerender(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      messages={[{ id: "assistant-1", role: "assistant", text: "첫 답" }]}
-      runState={{ kind: "unavailable", message: "유진의 답을 받지 못했어요." }}
-    />);
-    expect(screen.getByRole("status")).toHaveTextContent("유진의 답을 받지 못했어요.");
-    expect(screen.getAllByRole("status")).toHaveLength(1);
-  });
-
-  it("announces completion once while showing a later durable sync warning outside the live region", async () => {
-    const rendered = render(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      messages={[{ id: "assistant-1", role: "assistant", text: "완료된 답" }]}
-      runState={{ kind: "streaming", runId: "run-1", routeEpoch: 1, text: "완료된 답" }}
-    />);
-    const announcements: string[] = [];
-    let previousAnnouncement = "";
-    const observer = new MutationObserver(() => {
-      const announcement = rendered.container
-        .querySelector('[role="status"]')
-        ?.textContent
-        ?.trim() ?? "";
-      if (announcement && announcement !== previousAnnouncement) {
-        announcements.push(announcement);
-        previousAnnouncement = announcement;
-      }
-    });
-    observer.observe(rendered.container, {
-      childList: true,
-      characterData: true,
-      subtree: true,
-    });
-
-    rendered.rerender(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      messages={[{ id: "assistant-1", role: "assistant", text: "완료된 답" }]}
-      runState={{ kind: "complete", runId: "run-1" }}
-    />);
-    await waitFor(() => expect(announcements).toEqual(["유진 답변을 받았어요."]));
-
-    rendered.rerender(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      messages={[{ id: "assistant-1", role: "assistant", text: "완료된 답" }]}
-      runState={{
-        kind: "complete",
-        runId: "run-1",
-        syncWarning: "대화 저장 상태를 확인하지 못했어요.",
+      selectedSegment={{
+        segmentId: "segment-2", startSec: 4, endSec: 8, nextSegmentId: "segment-3",
+        cutAction: "keep", draftApplied: false, ripplePlaybackRate: 1.5,
       }}
+      onSetSegmentRippleSpeed={onSetSegmentRippleSpeed}
     />);
 
-    expect(screen.getByRole("status")).toHaveTextContent("유진 답변을 받았어요.");
-    expect(screen.getByRole("status")).not.toHaveTextContent("대화 저장 상태");
-    expect(screen.getByText("대화 저장 상태를 확인하지 못했어요.")).toBeVisible();
-    await Promise.resolve();
-    observer.disconnect();
-    expect(announcements).toEqual(["유진 답변을 받았어요."]);
+    expect(screen.getByRole("group", { name: "속도 조정" })).toBeInTheDocument();
+    const speed = screen.getByRole("spinbutton", { name: "속도" });
+    expect(speed).toHaveValue(1.5);
+    fireEvent.change(speed, { target: { value: "1.25" } });
+    fireEvent.blur(speed);
+    expect(onSetSegmentRippleSpeed).toHaveBeenCalledWith({ segmentId: "segment-2", rate: 1.25 });
   });
 
-  it("never mounts an audio or video player and only exposes explicit apply for a ready proposal", () => {
-    const onApplyProposal = vi.fn();
-    const { container } = render(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      proposal={proposal}
-      selectedCandidateIds={["candidate-1"]}
-      onSelectedCandidateIdsChange={vi.fn()}
-      onApplyProposal={onApplyProposal}
-    />);
-
-    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
-    expect(onApplyProposal).toHaveBeenCalledWith("proposal-1", ["candidate-1"]);
-  });
-
-  it("shows typed media details without mutation and disables stale or deferred choices", () => {
-    const onApplyProposal = vi.fn();
-    const onSelectedCandidateIdsChange = vi.fn();
-    const stale: RightDockProposal = {
-      ...proposal,
-      baseSessionRevision: 6,
-      currentRevision: 7,
-      candidates: [
-        proposal.candidates[0],
-        {
-          ...proposal.candidates[1],
-          candidateId: "deferred-image",
-          visibleReferenceCode: "B-003",
-          sourceMediaKind: "image",
-          availability: "candidate_only",
-          reviewStatus: "pending",
-          actionable: false,
-        },
-      ],
-    };
-
-    const { container } = render(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      proposal={stale}
-      selectedCandidateIds={["candidate-1"]}
-      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
-      onApplyProposal={onApplyProposal}
-    />);
-
-    expect(screen.getByText("첫 장면을 산책 영상으로 채웁니다.")).toBeVisible();
-    expect(screen.getByText("영상")).toBeVisible();
-    // 내부 세그먼트 식별자는 owner에게 뜻이 없다. 화면에는 나오지 않아야 한다.
-    expect(screen.queryAllByText("segment-1")).toHaveLength(0);
-    expect(screen.getByText("화면 채우기")).toBeVisible();
-    expect(screen.getByText("제안 기준 편집본 6")).toBeVisible();
-    expect(screen.getByText("현재 편집본 7")).toBeVisible();
-    expect(screen.getByText("후보 상태: 적용 가능")).toBeVisible();
-    expect(screen.getByText("후보 상태: 수동 적용")).toBeVisible();
-    expect(screen.getByRole("radio", { name: "B-003 선택" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
-    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
-    expect(onSelectedCandidateIdsChange).not.toHaveBeenCalled();
-    expect(onApplyProposal).not.toHaveBeenCalled();
-  });
-
-  it("shows candidate-only references without preview, materialize, or apply controls", () => {
-    const onPreviewCandidate = vi.fn();
-    const onApplyProposal = vi.fn();
-    const candidateOnly: RightDockProposal = {
-      proposalId: "candidate-only-proposal",
-      status: "candidate_only",
-      baseSessionRevision: 7,
-      currentRevision: 7,
-      candidates: [{
-        candidateId: "candidate-only-1",
-        visibleReferenceCode: "P01-B-01",
-        mediaType: "broll",
-        previewUrl: "https://must-not-preview.invalid/candidate.mp4",
-        kind: "broll",
-        sourceMediaKind: "image",
-        targetSegmentId: "segment-1",
-        previewSummary: "이미지는 아직 직접 적용할 수 없습니다.",
-        supportedControls: {},
-        availability: "candidate_only",
-        reviewStatus: "pending",
-        actionable: false,
-      }],
-    };
-
-    const { container } = render(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      proposal={candidateOnly}
-      selectedCandidateIds={["candidate-only-1"]}
-      onSelectedCandidateIdsChange={vi.fn()}
-      onPreviewCandidate={onPreviewCandidate}
-      onApplyProposal={onApplyProposal}
-    />);
-
-    expect(screen.getByRole("radio", { name: "P01-B-01 선택" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "P01-B-01 미리 보기" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "선택한 추천 적용" })).toBeNull();
-    expect(container.querySelectorAll("audio, video")).toHaveLength(0);
-    expect(onPreviewCandidate).not.toHaveBeenCalled();
-    expect(onApplyProposal).not.toHaveBeenCalled();
-  });
-
-  it("keeps output findings separate and never selectable or applicable", () => {
-    const mixed: RightDockProposal = {
-      ...proposal,
-      candidates: [
-        proposal.candidates[0],
-        {
-          candidateId: "finding-gaps",
-          visibleReferenceCode: "P01-CHECK-01",
-          mediaType: "output_check",
-          previewUrl: null,
-          kind: "output_check",
-          sourceMediaKind: "output_check",
-          targetSegmentId: "",
-          previewSummary: "미디어, 미리보기, 내보내기 준비가 모두 끝났습니다.",
-          supportedControls: { check: "timeline_gaps", gap_count: 2 },
-          availability: "read_only",
-          reviewStatus: "not_applicable",
-          actionable: false,
-          readOnlyFinding: true,
-        },
-      ],
-    };
-    const onApplyProposal = vi.fn();
-    const onSelectedCandidateIdsChange = vi.fn();
-
+  it("offers a selected scene preview without changing the timeline", () => {
+    const onPreviewSelectedRange = vi.fn();
     render(<RightDock
-      draft=""
-      onDraftChange={vi.fn()}
-      proposal={mixed}
-      selectedCandidateIds={[]}
-      onSelectedCandidateIdsChange={onSelectedCandidateIdsChange}
-      onApplyProposal={onApplyProposal}
+      selectedSegment={{ segmentId: "segment-2", startSec: 4, endSec: 8, nextSegmentId: null, cutAction: "keep", draftApplied: false }}
+      onPreviewSelectedRange={onPreviewSelectedRange}
     />);
 
-    const finding = screen.getByRole("region", { name: "검사 결과" });
-    expect(finding).toHaveTextContent("빈 구간 2개");
-    expect(finding).not.toHaveTextContent("미디어, 미리보기, 내보내기 준비가 모두 끝났습니다.");
-    expect(screen.queryByRole("radio", { name: "P01-CHECK-01 선택" })).toBeNull();
-    expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
-    expect(onSelectedCandidateIdsChange).not.toHaveBeenCalled();
-    expect(onApplyProposal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "선택 구간 미리보기" }));
+    expect(onPreviewSelectedRange).toHaveBeenCalledWith({ segmentId: "segment-2", startSec: 4, endSec: 8 });
   });
-});
 
-describe("찾은 방식 표시", () => {
-  function renderWithMode(matchMode: string | undefined) {
-    return render(<RightDock
-      draft=""
-      onDraftChange={() => {}}
-      proposal={{ ...proposal, matchMode } as never}
-      messages={[]}
-      selectedCandidateIds={[]}
-      onSelectedCandidateIdsChange={() => {}}
-      conversationScroll={{ key: "k", top: 0, pinnedToBottom: true }}
-      onConversationScrollChange={() => {}}
-      inspectorTargets={[]}
+  it("offers keyword shortcuts for video, captions, and screen elements", () => {
+    render(<RightDock
+      inspectorTargets={[
+        { id: "media-1", kind: "media", label: "영상", mediaKind: "broll", segmentId: "segment-1", fields: [], assetId: "asset-1", controls: {}, clearOnly: false },
+        { id: "caption-1", kind: "caption", label: "캡션", segmentId: "segment-1", fields: ["style"], style: {} as never },
+        { id: "overlay-1", kind: "overlay", overlayKind: "shape", label: "화면 요소", segmentId: "segment-1", fields: [], value: { shape: "highlight_box", vertical: "middle", horizontal: "center", size: "medium", motion: "none" } },
+      ]}
     />);
-  }
 
-  it("단어로만 찾았으면 그 사실을 말한다", () => {
-    // 임베딩 조회가 실패하면 조용히 단어 매칭으로 떨어졌다. 추천이 갑자기
-    // 나빠져도 owner는 원인을 알 수 없었다.
-    renderWithMode("word");
-
-    expect(screen.getByText("단어로만 찾음")).toBeVisible();
-  });
-
-  it("뜻으로 찾았으면 그렇게 말한다", () => {
-    renderWithMode("semantic");
-
-    expect(screen.getByText("뜻으로 찾음")).toBeVisible();
-  });
-
-  it("모르면 지어내지 않는다", () => {
-    renderWithMode(undefined);
-
-    expect(screen.queryByText(/찾음/)).toBeNull();
+    expect(screen.getByRole("button", { name: "영상·소리" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "캡션" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "화면 요소" })).toBeVisible();
   });
 });

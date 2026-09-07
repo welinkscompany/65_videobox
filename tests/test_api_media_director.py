@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +18,7 @@ from videobox_domain_models.director_proposals import DirectorCandidate, Directo
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.yujin_creator_context import UserApprovedPreference
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
 from videobox_provider_interfaces.llm import StructuredLLMResponse
 
@@ -27,6 +29,563 @@ def test_director_route_surface_has_no_external_provider_dependency() -> None:
 
     retired_provider = "g" + "emini"
     assert retired_provider not in source.lower()
+
+
+def test_yujin_editing_proposal_is_read_only_until_apply(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.", "proposal": {"proposal_id": "fixture", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2}]}},
+                raw_text="{}", metadata={},
+            )
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "editing candidate"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [
+                {"segment_id": "scene-1", "start_sec": 0, "end_sec": 4},
+                {"segment_id": "scene-2", "start_sec": 4, "end_sec": 12},
+            ],
+            "history": [],
+        },
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "두 번째 장면을 두 배로 빠르게 하고 자막도 맞춰줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "ready"
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"])["session_revision"] == session["session_revision"]
+    proposal_id = response.json()["proposal_id"]
+    store.update_editing_session(project_id=project_id, session_id=session["session_id"], session_payload=session)
+
+    stale = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals/{proposal_id}/preflight"
+    )
+
+    assert stale.status_code == 409
+    assert stale.json()["action"] == "새 편집안을 받아 보세요."
+
+
+def test_yujin_editing_proposal_preview_creates_a_durable_preview_without_mutating_the_session(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture", raw_text="{}", metadata={},
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.", "proposal": {
+                    "proposal_id": "preview", "base_session_revision": 1,
+                    "operations": [{"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2}],
+                }},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "editing proposal preview"}).json()["project_id"]
+    timeline = store.save_timeline_run(
+        project_id=project_id, output_mode="review", source_session_revision=1,
+        timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 12}, "tracks": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [
+            {"segment_id": "scene-1", "start_sec": 0, "end_sec": 4},
+            {"segment_id": "scene-2", "start_sec": 4, "end_sec": 12},
+        ], "history": []},
+    )
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "둘째 장면을 빠르게"}).json()
+    before = store.get_editing_session(project_id=project_id, session_id=session["session_id"])
+
+    response = client.post(f"{root}/yujin-editing-proposals/{proposal['proposal_id']}/preview")
+
+    assert response.status_code == 202, response.text
+    assert response.json()["generation_id"].startswith("proposal_preview_")
+    assert response.json()["status"] in {"pending", "running", "failed"}
+    assert store.get_editing_session(project_id=project_id, session_id=session["session_id"]) == before
+
+
+def test_yujin_editing_proposal_preview_recovers_a_running_claim_from_a_previous_process(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("proposal preview restart recovery")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [], "history": []},
+    )
+    record = store.begin_proposal_preview(
+        project_id=project.project_id, session_id=session["session_id"], proposal_id="proposal",
+        expected_revision=session["session_revision"], fingerprint="f" * 64,
+    )
+    assert store.claim_proposal_preview(
+        project_id=project.project_id, generation_id=record["generation_id"],
+        owner_token="proposal-preview-worker:previous-process:worker",
+    )
+
+    recovered = LocalProjectStore(tmp_path / "projects")
+    assert recovered.recover_inherited_proposal_preview_claims(
+        project_id=project.project_id,
+        process_epoch="new-process",
+    ) == 1
+
+    failed = recovered.get_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"])
+    assert failed["state"] == "failed"
+    assert failed["error_message"] == "process_restarted"
+    retried = recovered.begin_proposal_preview(
+        project_id=project.project_id, session_id=session["session_id"], proposal_id="proposal",
+        expected_revision=session["session_revision"], fingerprint="f" * 64,
+    )
+    assert retried["generation_id"] != record["generation_id"]
+    assert retried["state"] == "pending"
+
+
+def _proposal_preview_scene_speed_runtime() -> object:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture", raw_text="{}", metadata={},
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.", "proposal": {
+                    "proposal_id": "preview", "base_session_revision": 1,
+                    "operations": [{"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2}],
+                }},
+            )
+    return EditingRuntime()
+
+
+def _start_a_real_proposal_preview(client: TestClient, store: LocalProjectStore, project_id: str) -> tuple[str, str]:
+    timeline = store.save_timeline_run(
+        project_id=project_id, output_mode="review", source_session_revision=1,
+        timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 12}, "tracks": []},
+    )
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [
+            {"segment_id": "scene-1", "start_sec": 0, "end_sec": 4},
+            {"segment_id": "scene-2", "start_sec": 4, "end_sec": 12},
+        ], "history": []},
+    )
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "둘째 장면을 빠르게"}).json()
+    started = client.post(f"{root}/yujin-editing-proposals/{proposal['proposal_id']}/preview")
+    assert started.status_code == 202, started.text
+    return session["session_id"], started.json()["generation_id"]
+
+
+def test_yujin_editing_proposal_preview_status_polling_alone_recovers_a_running_claim_after_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker can die mid-render *after* the API process that started it has
+    already restarted (new store, new process epoch). The only thing the
+    creator does afterwards is poll the status GET -- never POST again. If
+    the GET route never re-runs the restart fence, this ``running`` row
+    (owned by a process that no longer exists) is stuck forever."""
+    monkeypatch.setattr(LocalPipelineRunner, "run_proposal_preview", lambda self, **kwargs: None)
+    projects_root = tmp_path / "projects"
+    app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "proposal preview poll-only running recovery"}).json()["project_id"]
+    _session_id, generation_id = _start_a_real_proposal_preview(client, store, project_id)
+    assert store.get_proposal_preview(project_id=project_id, generation_id=generation_id)["state"] == "pending"
+    assert store.claim_proposal_preview(
+        project_id=project_id, generation_id=generation_id,
+        owner_token="proposal-preview-worker:dead-process:worker",
+    )
+
+    # A brand-new API process attaches to the same project directory. It
+    # never calls the preview POST route again -- only GET polling follows.
+    restarted_app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    restarted_client = TestClient(restarted_app)
+
+    response = restarted_client.get(f"/api/projects/{project_id}/proposal-previews/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] not in {"pending", "running"}
+
+
+def test_yujin_editing_proposal_preview_status_polling_alone_recovers_an_aged_orphan_pending_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the process dies after the ``pending`` DB row is created but before
+    any worker thread claims it, the row never reaches ``running`` and the
+    restart-epoch fence never sees it. GET polling alone must still retire
+    it once it is old enough to be unambiguously orphaned."""
+    monkeypatch.setattr(LocalPipelineRunner, "run_proposal_preview", lambda self, **kwargs: None)
+    projects_root = tmp_path / "projects"
+    app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "proposal preview poll-only pending recovery"}).json()["project_id"]
+    _session_id, generation_id = _start_a_real_proposal_preview(client, store, project_id)
+    assert store.get_proposal_preview(project_id=project_id, generation_id=generation_id)["state"] == "pending"
+    store._execute(
+        project_id,
+        "UPDATE proposal_preview_renders SET created_at = ? WHERE generation_id = ?",
+        ("2020-01-01T00:00:00+00:00", generation_id),
+    )
+
+    restarted_app = create_app(projects_root=projects_root, local_only_runtime_service_factory=lambda _: _proposal_preview_scene_speed_runtime())
+    restarted_client = TestClient(restarted_app)
+
+    response = restarted_client.get(f"/api/projects/{project_id}/proposal-previews/{generation_id}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] not in {"pending", "running"}
+
+
+def test_yujin_editing_proposal_preview_reports_a_concurrent_session_conflict_as_creator_safe_409(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(provider_name="local", model_name="fixture", raw_text="{}", metadata={}, output_data={
+                "schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.",
+                "proposal": {"proposal_id": "race", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2}]},
+            })
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app, raise_server_exceptions=False)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "proposal preview revision race"}).json()["project_id"]
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []})
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "미리보기"}).json()
+
+    original = LocalPipelineRunner.start_proposal_preview
+    def race_revision(runner, **kwargs):
+        store.update_editing_session(project_id=project_id, session_id=session["session_id"], session_payload=session, expected_revision=1)
+        return original(runner, **kwargs)
+    monkeypatch.setattr(LocalPipelineRunner, "start_proposal_preview", race_revision)
+
+    response = client.post(f"{root}/yujin-editing-proposals/{proposal['proposal_id']}/preview")
+
+    assert response.status_code == 409
+    assert response.json() == {"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."}
+
+
+def test_proposal_preview_cleanup_keeps_only_its_retained_terminal_records_and_never_touches_exact_or_source_files(tmp_path: Path) -> None:
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("proposal preview cleanup")
+    session = store.save_editing_session(project_id=project.project_id, timeline_id="timeline", session_payload={"segments": [], "history": []})
+    source = store.project_root(project.project_id) / "inputs" / "raw_video" / "source.mp4"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"source")
+    exact = store.project_root(project.project_id) / "derived" / "exact_previews" / "exact_preview_keep.mp4"
+    exact.parent.mkdir(parents=True, exist_ok=True)
+    exact.write_bytes(b"exact")
+    records = []
+    for proposal_id in ("old", "middle", "new"):
+        record = store.begin_proposal_preview(project_id=project.project_id, session_id=session["session_id"], proposal_id=proposal_id, expected_revision=1, fingerprint=(proposal_id[0] * 64))
+        assert store.claim_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"], owner_token=f"owner-{proposal_id}")
+        rendered = tmp_path / f"{proposal_id}.mp4"
+        rendered.write_bytes(proposal_id.encode())
+        assert store.finish_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"], fingerprint=record["fingerprint"], artifact_path=rendered, owner_token=f"owner-{proposal_id}")
+        assert store.mark_proposal_preview_stale(project_id=project.project_id, generation_id=record["generation_id"], reason="test")
+        records.append(record)
+    store._execute(project.project_id, "UPDATE proposal_preview_renders SET updated_at = ? WHERE generation_id = ?", ("2020-01-01T00:00:00+00:00", records[0]["generation_id"]))
+    store._execute(project.project_id, "UPDATE proposal_preview_renders SET updated_at = ? WHERE generation_id = ?", ("2021-01-01T00:00:00+00:00", records[1]["generation_id"]))
+    orphan = store.project_root(project.project_id) / "derived" / "proposal_previews" / "proposal_preview_orphan.mp4"
+    orphan.write_bytes(b"orphan")
+    os.utime(orphan, (0, 0))
+
+    removed = store.cleanup_proposal_preview_artifacts(project_id=project.project_id, keep_last=1, orphan_older_than_seconds=0)
+
+    assert removed == 3
+    assert store.get_proposal_preview(project_id=project.project_id, generation_id=records[2]["generation_id"])["state"] == "obsolete"
+    for record in records[:2]:
+        with pytest.raises(KeyError):
+            store.get_proposal_preview(project_id=project.project_id, generation_id=record["generation_id"])
+        assert not (store.project_root(project.project_id) / "derived" / "proposal_previews" / f"{record['generation_id']}.mp4").exists()
+    assert exact.read_bytes() == b"exact"
+    assert source.read_bytes() == b"source"
+    assert not orphan.exists()
+
+
+def test_yujin_editing_proposal_preview_status_refuses_a_stale_source_session(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture", raw_text="{}", metadata={},
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.", "proposal": {
+                    "proposal_id": "stale-preview", "base_session_revision": 1,
+                    "operations": [{"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2}],
+                }},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "stale proposal preview"}).json()["project_id"]
+    timeline = store.save_timeline_run(project_id=project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 4}, "tracks": []})
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []})
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "첫 장면을 빠르게"}).json()
+    record = LocalPipelineRunner(store).start_proposal_preview(project_id=project_id, session_id=session["session_id"], proposal_id=proposal["proposal_id"])
+    assert store.claim_proposal_preview(project_id=project_id, generation_id=record["generation_id"], owner_token="test-worker")
+    rendered = tmp_path / "proposal-preview.mp4"
+    rendered.write_bytes(b"synthetic-preview")
+    store.update_editing_session(project_id=project_id, session_id=session["session_id"], session_payload=session, expected_revision=1)
+    assert not store.finish_proposal_preview(project_id=project_id, generation_id=record["generation_id"], fingerprint=record["fingerprint"], artifact_path=rendered, owner_token="test-worker", source_fence_result=True)
+    assert not (store.project_root(project_id) / "derived" / "proposal_previews" / f"{record['generation_id']}.mp4").exists()
+
+    stale = client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}")
+    stale_content = client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}/content")
+
+    assert stale.status_code == 409
+    assert stale.json() == {"code": "editing_proposal_needs_refresh", "action": "새 편집안을 받아 보세요."}
+    assert stale_content.status_code == 409
+    assert stale_content.json() == stale.json()
+
+
+def test_yujin_editing_proposal_preview_refuses_an_asset_changed_during_render(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(provider_name="local", model_name="fixture", raw_text="{}", metadata={}, output_data={
+                "schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.",
+                "proposal": {"proposal_id": "asset-stale", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2}]},
+            })
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "asset stale proposal preview"}).json()["project_id"]
+    source = tmp_path / "source.mp4"; source.write_bytes(b"before-render")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    timeline = store.save_timeline_run(project_id=project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 4}, "tracks": [{"track_type": "broll", "clips": [{"clip_id": "b1", "asset_id": asset.asset_id, "asset_uri": asset.storage_uri, "start_sec": 0, "end_sec": 4}]}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []})
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "첫 장면을 빠르게"}).json()
+
+    class MutatingRenderer:
+        def render_exact_preview_to_mp4(self, **kwargs):
+            kwargs["output_path"].write_bytes(b"synthetic-mp4")
+            store.resolve_storage_uri(project_id=project_id, storage_uri=asset.storage_uri).write_bytes(b"changed-during-render")
+
+    pipeline = LocalPipelineRunner(store, final_renderer=MutatingRenderer())
+    record = pipeline.start_proposal_preview(project_id=project_id, session_id=session["session_id"], proposal_id=proposal["proposal_id"])
+    pipeline.run_proposal_preview(project_id=project_id, generation_id=record["generation_id"])
+
+    assert store.get_proposal_preview(project_id=project_id, generation_id=record["generation_id"])["state"] == "obsolete"
+    assert not (store.project_root(project_id) / "derived" / "proposal_previews" / f"{record['generation_id']}.mp4").exists()
+    assert client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}").status_code == 409
+    assert client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}/content").status_code == 409
+
+
+def test_yujin_editing_proposal_preview_content_serves_synthetic_mp4_only_while_current(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(provider_name="local", model_name="fixture", raw_text="{}", metadata={}, output_data={
+                "schema_version": "videobox.yujin-editing-response.v1", "reply_text": "편집안을 준비했어요.",
+                "proposal": {"proposal_id": "success-preview", "base_session_revision": 1, "operations": [{"intent": "set_scene_speed", "segment_id": "scene-1", "rate": 2}]},
+            })
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app); store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "success proposal preview"}).json()["project_id"]
+    timeline = store.save_timeline_run(project_id=project_id, output_mode="review", source_session_revision=1, timeline_payload={"output": {"width": 1280, "height": 720, "duration_sec": 4}, "tracks": []})
+    session = store.save_editing_session(project_id=project_id, timeline_id=timeline["timeline_id"], session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []})
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "첫 장면을 빠르게"}).json()
+
+    class SyntheticRenderer:
+        def render_exact_preview_to_mp4(self, **kwargs): kwargs["output_path"].write_bytes(b"synthetic-mp4")
+
+    pipeline = LocalPipelineRunner(store, final_renderer=SyntheticRenderer())
+    record = pipeline.start_proposal_preview(project_id=project_id, session_id=session["session_id"], proposal_id=proposal["proposal_id"])
+    pipeline.run_proposal_preview(project_id=project_id, generation_id=record["generation_id"])
+
+    content = client.get(f"/api/projects/{project_id}/proposal-previews/{record['generation_id']}/content")
+    assert store.get_proposal_preview(project_id=project_id, generation_id=record["generation_id"])["state"] == "succeeded"
+    assert content.status_code == 200 and content.headers["content-type"] == "video/mp4" and content.content == b"synthetic-mp4"
+
+
+def test_yujin_editing_proposal_apply_uses_the_common_undo_and_redo_history(tmp_path: Path) -> None:
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={
+                    "schema_version": "videobox.yujin-editing-response.v1",
+                    "reply_text": "편집안을 준비했어요.",
+                    "proposal": {"proposal_id": "apply-history", "base_session_revision": 1, "operations": [
+                        {"intent": "set_scene_speed", "segment_id": "scene-2", "rate": 2},
+                        {"intent": "set_caption_text", "segment_id": "scene-2", "text": "다듬은 자막"},
+                    ]},
+                }, raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "editing apply history"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [
+            {"segment_id": "scene-1", "caption_text": "첫 장면", "start_sec": 0, "end_sec": 4, "cut_action": "keep", "review_required": False},
+            {"segment_id": "scene-2", "caption_text": "둘째 장면", "start_sec": 4, "end_sec": 12, "cut_action": "keep", "review_required": False},
+        ], "history": []},
+    )
+    root = f"/api/projects/{project_id}/editing-sessions/{session['session_id']}"
+    proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": "둘째 장면을 빠르게 하고 자막을 고쳐줘"}).json()
+
+    applied = client.post(
+        f"{root}/yujin-editing-proposals/{proposal['proposal_id']}/apply",
+        json={"expected_revision": session["session_revision"]},
+    )
+
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["undo_count"] == 1
+    assert applied.json()["segments"][1]["caption_text"] == "다듬은 자막"
+    undone = client.post(f"{root}/undo", json={"expected_revision": applied.json()["session_revision"]})
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["redo_count"] == 1
+    redone = client.post(f"{root}/redo", json={"expected_revision": undone.json()["session_revision"]})
+    assert redone.status_code == 200, redone.text
+    later_manual_edit = client.patch(
+        f"{root}/segments/scene-2/caption",
+        json={"caption_text": "수동 자막", "expected_revision": redone.json()["session_revision"]},
+    )
+    assert later_manual_edit.status_code == 200, later_manual_edit.text
+    assert later_manual_edit.json()["redo_count"] == 0
+
+
+def test_yujin_editing_proposal_refuses_an_unapproved_media_asset(tmp_path: Path) -> None:
+    class EditingRuntime:
+        asset_id = "pending-bgm"
+
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={
+                    "schema_version": "videobox.yujin-editing-response.v1",
+                    "reply_text": "음악을 골랐어요.",
+                    "proposal": {
+                        "proposal_id": "unapproved-media",
+                        "base_session_revision": 1,
+                        "operations": [{
+                            "intent": "apply_media", "segment_id": "scene-1",
+                                "media_type": "bgm", "asset_id": self.asset_id,
+                        }],
+                    },
+                },
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "unapproved editing asset"}).json()["project_id"]
+    source = tmp_path / "pending.mp3"
+    source.write_bytes(b"pending-media")
+    pending_asset = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.BGM,
+        source_path=source,
+        metadata={"review_status": "pending"},
+    )
+    EditingRuntime.asset_id = pending_asset.asset_id
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 음악을 넣어줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json() == {"status": "rejected", "reply_text": "이 장면에 음악을 넣어줘", "proposal": None}
+
+
+def test_yujin_editing_clarification_shows_what_yujin_actually_asked(tmp_path: Path) -> None:
+    """Task 4 (2026-08-26 계획서)로 잡힌 결함 -- 모호한 요청에 유진이 실제로
+    되물은 말(`reply_text`)이 있는데도, 이 문이 사용자가 방금 쓴 문장을
+    그대로 돌려주고 있었다. 유진이 무엇을 더 물었는지 화면에서 한 번도
+    보이지 않았다."""
+    class EditingRuntime:
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={
+                    "schema_version": "videobox.yujin-editing-response.v1",
+                    "reply_text": "어느 장면을 더 짧게 할지 콕 집어 말씀해 주시겠어요?",
+                    "proposal": None,
+                },
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "ambiguous editing request"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면을 더 짧게 해줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json() == {
+        "status": "clarification",
+        "reply_text": "어느 장면을 더 짧게 할지 콕 집어 말씀해 주시겠어요?",
+        "proposal": None,
+    }
+
+
+def test_yujin_editing_proposal_refuses_an_approved_asset_of_the_wrong_media_type(tmp_path: Path) -> None:
+    class EditingRuntime:
+        asset_id = "approved-but-wrong-kind"
+
+        def generate_structured(self, **_kwargs):
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={
+                    "schema_version": "videobox.yujin-editing-response.v1",
+                    "reply_text": "음악을 골랐어요.",
+                    "proposal": {"proposal_id": "wrong-media-kind", "base_session_revision": 1, "operations": [{
+                        "intent": "apply_media", "segment_id": "scene-1", "media_type": "bgm", "asset_id": self.asset_id,
+                    }]},
+                }, raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "wrong editing asset type"}).json()["project_id"]
+    source = tmp_path / "approved-broll.mp4"
+    source.write_bytes(b"approved-broll")
+    approved_broll = store.register_asset(
+        project_id=project_id,
+        asset_type=AssetType.BROLL_VIDEO,
+        source_path=source,
+        metadata={"review_status": "approved"},
+    )
+    EditingRuntime.asset_id = approved_broll.asset_id
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 음악을 넣어줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["status"] == "rejected"
+    assert response.json()["proposal"] is None
 
 
 def test_generalized_yujin_direct_apply_and_batch_remain_forbidden(
@@ -708,6 +1267,125 @@ def test_non_image_yujin_terminal_attestation_rejects_substituted_controls(
     accepted = client.patch(route, json=exact)
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["session_revision"] == 2
+
+
+def test_applying_a_yujin_caption_style_candidate_keeps_fields_yujin_does_not_know_about(
+    tmp_path: Path,
+) -> None:
+    """2026-09-04 코드리뷰로 잡힘.
+
+    유진의 자막 모양 제안 스키마(`yujin_creator_proposals.EditorCaptionStyle`)는
+    열한 칸뿐이라 굵게·기울임·자간(2026-09-03 추가)을 모른다. 세션 저장은
+    `CaptionStyle.from_dict(...)`가 빠진 칸을 기본값(꺼짐)으로 채우므로,
+    창작자가 세부 정보 칸에서 직접 켠 굵게·자간이 유진의 사소한 색 제안 하나에
+    조용히 지워질 뻔했다 -- 셋 다 독립 리뷰 각도에서 잡아냈다.
+
+    이 시험은 창작자가 먼저 굵게·자간을 켠 상태에서 유진의(그 칸을 모르는)
+    제안을 적용해도 그 값이 그대로 남는 것을 지킨다.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "attested caption style merge"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={
+            "segments": [{
+                "segment_id": "seg",
+                "caption_text": "기존 자막",
+                "start_sec": 0.0,
+                "end_sec": 1.0,
+                "cut_action": "keep",
+                "review_required": False,
+                # 창작자가 직접 켠 값 -- 유진은 이 두 칸을 모른다.
+                "caption_style": {
+                    "font_family": "Pretendard",
+                    "font_size_px": 42,
+                    "text_color": "#FFFFFFFF",
+                    "outline_color": "#000000FF",
+                    "outline_width_px": 2,
+                    "background_color": "#00000000",
+                    "position_x_percent": 50,
+                    "position_y_percent": 88,
+                    "horizontal_align": "center",
+                    "safe_area_enabled": True,
+                    "shadow_blur_px": 0,
+                    "bold": True,
+                    "italic": False,
+                    "letter_spacing_px": 18,
+                },
+            }],
+            "history": [],
+        },
+    )
+    yujin_style = {
+        "font_family": "Pretendard",
+        "font_size_px": 64,
+        "text_color": "#00FF00FF",
+        "outline_color": "#000000FF",
+        "outline_width_px": 2,
+        "background_color": "#00000000",
+        "position_x_percent": 50,
+        "position_y_percent": 88,
+        "horizontal_align": "center",
+        "safe_area_enabled": True,
+        "shadow_blur_px": 0,
+    }
+    candidate = DirectorCandidate(
+        candidate_id="attested-caption-style-merge",
+        visible_reference_code="P00-CAPTION-STYLE-MERGE-01",
+        media_type="caption",
+        asset_id="attested-caption-style-merge",
+        library_asset_id=None,
+        reason_chips=("caption_style",),
+        scores={},
+        availability="actionable",
+        review_status="approved",
+        preview_uri=None,
+        controls={"scope": "current_caption", "style": yujin_style},
+        expected_content_sha256=None,
+        media_revision="control-r1",
+        canonical_metadata={
+            "schema_version": "videobox.yujin-response.v1",
+            "proposal_kind": "caption",
+            "yujin_actionable_operation": True,
+            "command_kind": "set_caption_style",
+            "target_segment_id": "seg",
+            "requires_materialization": False,
+        },
+    )
+    proposal = _save_generalized_yujin_proposal(
+        store=store,
+        project_id=project_id,
+        session_id=session["session_id"],
+        session_revision=session["session_revision"],
+        proposal_id="attested-caption-style-merge-proposal",
+        candidates=(candidate,),
+    )
+    base = f"/api/projects/{project_id}"
+    assert client.post(f"{base}/director/proposals/{proposal.proposal_id}/preflight").status_code == 200
+
+    applied = client.patch(
+        f"{base}/editing-sessions/{session['session_id']}/caption-style",
+        json={
+            "scope": "current_caption",
+            "segment_ids": ["seg"],
+            "style": yujin_style,
+            "expected_revision": 1,
+            "proposal_id": proposal.proposal_id,
+            "candidate_id": candidate.candidate_id,
+        },
+    )
+
+    assert applied.status_code == 200, applied.text
+    stored_style = applied.json()["segments"][0]["caption_style"]
+    # 유진이 제안한 칸은 새 값으로 바뀐다.
+    assert stored_style["font_size_px"] == 64
+    assert stored_style["text_color"] == "#00FF00FF"
+    # 유진이 모르는 칸은 창작자가 정한 값 그대로 남는다 -- 기본값으로 지워지지 않는다.
+    assert stored_style["bold"] is True
+    assert stored_style["letter_spacing_px"] == 18
 
 
 @pytest.mark.parametrize(
@@ -2250,6 +2928,46 @@ def test_batch_apply_materializes_two_candidates_and_consumes_one_proposal_in_on
     assert len(store.list_assets(project_id=project_id)) == 2
 
 
+def test_one_undo_takes_back_every_scene_a_batch_apply_filled(tmp_path: Path) -> None:
+    """화면이 여러 후보를 한 번에 고르게 되면, 되돌리기도 한 번이어야 한다.
+
+    빈 구간 열두 개를 채운 뒤 실행 취소를 열두 번 눌러야 한다면 그건 고친 게 아니다.
+    `batch-apply`는 한 번의 CAS 쓰기라 기록도 하나이며, 그 성질을 여기서 못박는다.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "batch undo"}).json()["project_id"]
+    source = tmp_path / "undo.mp4"; source.write_bytes(b"batch-undo-broll")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source, metadata={"review_status": "approved"})
+    digest = sha256(source.read_bytes()).hexdigest()
+    analysis = store.create_media_analysis(project_id=project_id, asset_id=asset.asset_id, idempotency_key=f"{digest}:local", cache_key="undo")
+    claim = store.claim_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"]); assert claim
+    store.complete_media_analysis(project_id=project_id, analysis_id=analysis["analysis_id"], expected_attempt=claim["attempt"], result={"frames": [{"summary": "undo"}]})
+    session = store.save_editing_session(project_id=project_id, timeline_id="timeline", session_payload={"segments": [
+        {"segment_id": "seg-1", "caption_text": "first", "start_sec": 0.0, "end_sec": 2.0, "cut_action": "keep", "review_required": False},
+        {"segment_id": "seg-2", "caption_text": "second", "start_sec": 2.0, "end_sec": 4.0, "cut_action": "keep", "review_required": False},
+    ], "history": []})
+    proposal = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]}).json()
+    selected = [item["candidate_id"] for item in proposal["candidates"] if item["candidate_id"].split(":")[1] in {"seg-1", "seg-2"}]
+    assert len(selected) == 2
+
+    applied = client.post(f"/api/projects/{project_id}/director/proposals/{proposal['proposal_id']}/batch-apply", json={
+        "candidate_ids": selected, "expected_revision": session["session_revision"],
+    }).json()
+    assert {segment["segment_id"] for segment in applied["segments"] if segment.get("broll_override")} == {"seg-1", "seg-2"}
+    assert applied["undo_count"] == 1
+
+    undone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo",
+        json={"expected_revision": applied["session_revision"]},
+    )
+
+    assert undone.status_code == 200, undone.text
+    assert [segment.get("broll_override") for segment in undone.json()["segments"]] == [None, None]
+    assert undone.json()["undo_count"] == 0
+
+
 def test_batch_apply_source_failure_leaves_session_proposal_and_assets_clean(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path / "projects"); client = TestClient(app); store = app.state.store
     project_id = client.post("/api/projects", json={"name": "batch rollback"}).json()["project_id"]
@@ -2554,3 +3272,586 @@ def test_screen_chat_route_carries_owner_approved_memory_into_the_prompt(tmp_pat
     assert response.status_code == 200, response.text
     assert CapturingRuntime.prompts, "the local runtime was never called"
     assert "자막은 두 줄 이내를 선호합니다." in CapturingRuntime.prompts[0]
+
+
+def test_owner_uploaded_media_counts_as_approved_for_a_spoken_placement(tmp_path: Path) -> None:
+    """말로 음악·효과음을 넣는 길이 **한 번도 열린 적이 없었다.**
+
+    이 자리만 "`review_status`가 있고 approved일 때"로 읽고 있었는데, owner가
+    자기 컴퓨터에서 넣은 파일에는 검토 표시가 애초에 안 붙는다. 그래서 승인
+    목록이 늘 비었고, 프롬프트에 "승인된 자산이 없다 -- apply_media를 시도하지
+    마라"가 실려 유진이 규칙대로 거절했다(2026-09-01 실사용에서 확인).
+
+    저장소의 관례는 **없으면 승인**이다(`media_ranking.py`,
+    `director_proposal_service.py`). 게이트를 여는 것이 아니라 비어 있는 것과
+    거절된 것을 가르는 것이라, 명시적으로 거절된 자산은 그대로 빠져야 한다.
+    """
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "spoken placement"}).json()["project_id"]
+    source = tmp_path / "music.wav"
+    source.write_bytes(b"owner music")
+    rejected_source = tmp_path / "rejected.wav"
+    rejected_source.write_bytes(b"rejected music")
+    plain = store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=source)
+    rejected = store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=rejected_source)
+    store.update_asset_metadata(project_id=project_id, asset_id=rejected.asset_id, metadata_patch={"review_status": "rejected"})
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 배경 음악을 넣어 줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert seen_prompts, "유진에게 아무것도 안 물었다"
+    prompt = seen_prompts[-1]
+    # 검토 표시가 없는 owner 파일은 고를 수 있어야 한다.
+    assert plain.asset_id in prompt, "검토 표시 없는 자산이 승인 목록에서 빠졌다"
+    # 명시적으로 거절한 것은 그대로 빠진다 -- 게이트를 연 것이 아니다.
+    assert rejected.asset_id not in prompt, "거절한 자산이 승인 목록에 들어왔다"
+    assert "승인된 자산이 없다" not in prompt
+
+
+def test_yujin_is_told_what_each_asset_is_not_just_its_id(tmp_path: Path) -> None:
+    """**고를 근거를 준다.** id만으로는 아무것도 고를 수 없다.
+
+    실측(2026-09-01): 장면을 바꿔도, "슬프고 잔잔한"·"신나고 빠른"처럼 분위기를
+    지정해도 유진은 **늘 같은 자산 하나**를 집었다. 당연했다 -- 프롬프트에 실린
+    것이 `asset_x(bgm)`뿐이라 고를 정보가 없었기 때문이다. 고르는 일이 이
+    제품의 차별점인데(`implementation-plan` §4.2) 그 자리에서 아무것도 고르지
+    않고 있었다.
+
+    새로 읽어 오는 값이 아니다 -- `list_assets`가 `metadata`를 통째로 돌려주고
+    있었고, 프롬프트를 만들면서 그걸 버리고 있었을 뿐이다.
+    """
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "asset labels"}).json()["project_id"]
+    calm = tmp_path / "calm.wav"
+    calm.write_bytes(b"calm music")
+    asset = store.register_asset(project_id=project_id, asset_type=AssetType.BGM, source_path=calm)
+    store.update_asset_metadata(
+        project_id=project_id, asset_id=asset.asset_id,
+        metadata_patch={"title": "새벽-잔잔한-피아노", "tags": ["차분", "잔잔"], "duration_sec": 42.0},
+    )
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+
+    client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 배경 음악을 넣어 줘"},
+    )
+
+    prompt = seen_prompts[-1]
+    assert "새벽-잔잔한-피아노" in prompt, "창작자가 붙인 이름이 유진에게 안 갔다"
+    assert "차분" in prompt and "잔잔" in prompt, "태그가 유진에게 안 갔다"
+    assert "42초" in prompt, "길이가 유진에게 안 갔다"
+    # 목록만 주고 끝내면 첫 번째를 기계적으로 집는다 -- 무엇을 하라고 말해 준다.
+    assert "어울리는 것" in prompt
+
+
+def test_yujin_can_pick_from_the_library_the_owner_sees(tmp_path: Path) -> None:
+    """owner 지시(2026-09-02): "유진이 자료실도 볼 수 있게 해줘".
+
+    실측(2026-09-01)에서 편집기 오디오 탭에는 음악 8곡이 보이는데 유진에게 가는
+    것은 **1곡**이었다 -- 유진과 owner가 다른 선반을 보고 있었다. `apply_media`가
+    프로젝트 자산만 봤기 때문이다.
+
+    자료실을 통째로 읽히지 않는다. **owner가 쓰는 것과 같은 의미검색**으로 추린
+    위쪽만 준다 -- 고르는 일을 잘하려면 목록이 아니라 추린 것을 봐야 하고,
+    음악 30곡·효과음 100개를 다 실으면 목록이 본문보다 길어진다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+    searched: list[tuple[str, str]] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        searched.append((query, media_type))
+        if media_type != "music":
+            return []
+        return [{
+            "library_asset_id": "pack:starter-v1:music-005",
+            "asset_id": "music-005", "media_type": "music",
+            "description": "잔잔한 피아노 인트로", "words": ["차분", "잔잔"],
+            "duration_seconds": 192.0, "score": 0.91,
+        }]
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="library reach")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search,
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 잔잔한 배경 음악을 넣어 줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    # 창작자가 한 말 그대로 자료실을 찾는다 -- 음악과 효과음 둘 다.
+    assert ("이 장면에 어울리는 잔잔한 배경 음악을 넣어 줘", "music") in searched
+    assert any(media_type == "sfx" for _, media_type in searched)
+    prompt = seen_prompts[-1]
+    # 자료실 곡이 고를 수 있는 목록에 들어간다.
+    assert "pack:starter-v1:music-005" in prompt
+    # **이름이 아니라 설명이 간다.** 자료실 파일 이름(`music-005`)에는 뜻이 없고,
+    # 색인이 만들어 둔 설명이 owner가 검색할 때 걸리는 바로 그 글이다.
+    assert "잔잔한 피아노 인트로" in prompt
+    assert "192초" in prompt
+
+
+def test_a_library_pick_is_brought_into_the_project_before_it_is_applied(tmp_path: Path) -> None:
+    """편집본은 **프로젝트 자산만** 가리킬 수 있다.
+
+    유진이 고른 자료실 id(`pack:...`)를 그대로 저장하면 렌더러가 파일을 못 찾는다.
+    화면에서 자료실 곡을 적용할 때와 같은 경로로 들여오고(라이선스 기록까지 함께
+    복사된다) 프로젝트 자산 id로 바꿔 준 뒤에 적용해야 한다.
+    """
+    from videobox_core_engine.library_materialization import materialize_library_asset
+
+    calls: list[str] = []
+
+    class Materializer:
+        def materialize_verified_library_snapshot(self, **kwargs):
+            calls.append(str(kwargs["library_asset_id"]))
+            return {"asset_id": "asset_brought_in"}
+
+    removed: list[object] = []
+
+    class LibraryStore:
+        def snapshot_verified_asset(self, *, library_asset_id):
+            return ({"sha256": "x"}, tmp_path / "snap.ogg")
+
+        def remove_verified_snapshot(self, path):
+            removed.append(path)
+
+    result = materialize_library_asset(
+        library_store=LibraryStore(), materializer=Materializer(),
+        project_id="p", library_asset_id="pack:starter-v1:music-005",
+        mime_type_for=lambda path: "audio/ogg",
+    )
+
+    assert result == {"asset_id": "asset_brought_in"}
+    assert calls == ["pack:starter-v1:music-005"]
+    # 스냅숏은 성공해도 지운다 -- 성공 경로에만 두면 실패했을 때 남는다.
+    assert removed
+
+
+def test_a_library_snapshot_is_cleaned_up_even_when_bringing_it_in_fails(tmp_path: Path) -> None:
+    """실패해도 임시 파일을 남기지 않는다. 그리고 터뜨리지 않고 None을 준다 --
+    부르는 두 자리가 실패를 다르게 다뤄야 하기 때문이다."""
+    from videobox_core_engine.library_materialization import materialize_library_asset
+
+    removed: list[object] = []
+
+    class Materializer:
+        def materialize_verified_library_snapshot(self, **_kwargs):
+            raise ValueError("library_snapshot_changed")
+
+    class LibraryStore:
+        def snapshot_verified_asset(self, *, library_asset_id):
+            return ({"sha256": "x"}, tmp_path / "snap.ogg")
+
+        def remove_verified_snapshot(self, path):
+            removed.append(path)
+
+    result = materialize_library_asset(
+        library_store=LibraryStore(), materializer=Materializer(),
+        project_id="p", library_asset_id="pack:starter-v1:music-005",
+        mime_type_for=lambda path: "audio/ogg",
+    )
+
+    assert result is None
+    assert removed, "실패했는데 스냅숏이 남았다"
+
+
+def test_the_library_is_still_reachable_without_the_semantic_index(tmp_path: Path) -> None:
+    """임베딩 모델이 안 올라와 있어도 자료실은 보여야 한다.
+
+    이 owner의 LM Studio에는 지금 임베딩 모델이 없어서 `find_audio_matches`가
+    503이다(2026-09-02 실측). 거기서 멈추면 자료실을 열어 준 것이 화면에서는
+    아무 일도 안 일어난 것과 같다 -- 이 저장소가 "완료"라고 부르지 않는 상태다.
+
+    이름을 그대로 준다. 자료실 이름은 `music-peaceful-drift`처럼 뜻을 담고 있고,
+    고르는 쪽은 어차피 말을 이해하는 모델이다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    class LibraryStore:
+        def inspect_active_assets(self):
+            return [
+                {"library_asset_id": "pack:starter-v1:music-peaceful-drift", "asset_id": "music-peaceful-drift", "media_type": "music", "duration_seconds": 128.0},
+                {"library_asset_id": "pack:starter-v1:sfx-click", "asset_id": "sfx-click", "media_type": "sfx", "duration_seconds": 0.4},
+            ]
+
+    def failing_search(query, limit, media_type="music"):
+        raise RuntimeError("library_search_unavailable")
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="no embeddings")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(),
+        library_store=LibraryStore(), library_search=failing_search,
+    ))
+
+    response = TestClient(app).post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 어울리는 잔잔한 배경 음악을 넣어 줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    prompt = seen_prompts[-1]
+    # 검색이 통째로 터져도 자료실 곡이 고를 수 있는 목록에 들어간다.
+    assert "pack:starter-v1:music-peaceful-drift" in prompt
+    assert "music-peaceful-drift" in prompt
+    assert "pack:starter-v1:sfx-click" in prompt
+
+
+def test_yujin_is_handed_the_scene_numbers_instead_of_counting_them(tmp_path: Path) -> None:
+    """**번호를 세어 주지 않으면 유진이 세고, 틀린다.**
+
+    실측(2026-09-02): id를 나열만 한 채 "2번 장면에 음악을 넣어 줘"라고 했더니
+    **3번 장면**에 넣었다. 완성본을 뽑아 보고서야 2번 장면이 무음인 것으로
+    드러났다 -- 세션만 봤으면 "음악이 붙었다"로 보였을 종류의 결함이다.
+
+    창작자는 늘 번호로 부르고 화면도 `2번 장면`으로 쓴다. 자리를 세는 일을
+    모델에게 시킬 이유가 없다.
+    """
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    app = create_app(projects_root=tmp_path / "projects", local_only_runtime_service_factory=lambda _: EditingRuntime())
+    client = TestClient(app)
+    store = app.state.store
+    project_id = client.post("/api/projects", json={"name": "scene numbers"}).json()["project_id"]
+    session = store.save_editing_session(
+        project_id=project_id, timeline_id="timeline",
+        session_payload={"segments": [
+            {"segment_id": "seg-aaa", "start_sec": 0, "end_sec": 4},
+            {"segment_id": "seg-bbb", "start_sec": 4, "end_sec": 8},
+            {"segment_id": "seg-ccc", "start_sec": 8, "end_sec": 12},
+        ], "history": []},
+    )
+
+    client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "2번 장면에 배경 음악을 넣어 줘"},
+    )
+
+    prompt = seen_prompts[-1]
+    assert "1번 장면=seg-aaa" in prompt
+    assert "2번 장면=seg-bbb" in prompt
+    assert "3번 장면=seg-ccc" in prompt
+
+
+def test_refresh_reports_blocked_analysis_instead_of_crashing(tmp_path: Path, monkeypatch) -> None:
+    """새로고침도 `create`와 같은 말을 해야 한다.
+
+    2026-09-04 역방향 검증(실제 브라우저에서 편집기를 열어 두고)에서 잡았다.
+    편집기가 자동으로 부르는 이 경로가 **500 Internal Server Error**를 냈다:
+
+        POST /api/projects/{id}/director/proposals/{pid}/refresh -> 500
+
+    컨테이너 로그를 보니 `DirectorProposalBlockedError`가 그대로 새어 나왔다.
+    `refresh`는 안에서 `create`를 다시 부르므로(`director_proposal_service.py:151`)
+    같은 예외가 나는데, **`create` 라우터만 그 예외를 409로 옮기고 `refresh`는
+    안 잡았다**(`director_proposals.py:719` vs `:786`).
+
+    `DirectorProposalBlockedError`는 고장이 아니라 **분석이 아직 안 됐다는 안내**다 --
+    `recovery_action`까지 들고 있다. 500으로 새면 화면은 "무언가 터졌다"만 알고
+    창작자에게 무엇을 하라고 말할 수 없다.
+
+    여기서 지키는 것은 **두 경로가 같은 상황에 같은 말을 한다**이다.
+    """
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "refresh-blocked"}).json()["project_id"]
+    session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "seg", "caption_text": "blocked"}], "history": []},
+    )
+
+    # 막힌 상태에서는 만들기부터 409다 -- 여기까지는 이미 지켜지고 있었다.
+    created = client.post(f"/api/projects/{project_id}/director/proposals", json={"session_id": session["session_id"]})
+    assert created.status_code == 409
+
+    # **진짜 결함은 "있는 제안 + 막힌 분석"이다.** 없는 제안은 KeyError라
+    # 이미 404로 처리된다 -- 그 길로는 재현되지 않는다. 라우터가 이 예외를
+    # 옮기는지를 직접 겨냥한다.
+    from videobox_core_engine.director_proposal_service import DirectorProposalBlockedError, DirectorProposalService
+
+    lifecycle = {"status": "blocked", "analysis_states": ["missing"], "recovery_action": "analyse_or_retry_assets"}
+
+    def blocked(**_kwargs):
+        raise DirectorProposalBlockedError(lifecycle)
+
+    # 서비스는 라우터 안에서 만들어져 `app.state`에 없다 -- 클래스에 건다.
+    monkeypatch.setattr(DirectorProposalService, "refresh", lambda self, **kwargs: blocked())
+
+    response = client.post(f"/api/projects/{project_id}/director/proposals/proposal:any/refresh")
+
+    assert response.status_code == 409, f"막힌 분석에 {response.status_code}가 났다 -- 500이면 화면이 무엇을 하라고 말할 수 없다"
+    assert response.json()["code"] == "director_analysis_blocked"
+    assert response.json()["lifecycle"]["recovery_action"] == "analyse_or_retry_assets"
+
+
+def test_yujin_can_pick_a_video_from_the_library_not_only_music(tmp_path) -> None:
+    """유진이 자료실 **영상**을 못 골랐다 (2026-09-05 실측).
+
+    "도시 거리 걷는 영상 깔아줘"라고 했더니 `music-lost-in-city`를 골랐다 --
+    **음악이다.** 자료실 후보를 음악과 효과음만 훑고 있어서 고를 영상이 하나도
+    없었고, 이름이 비슷한 음악을 집은 것이다.
+
+    자료실 촬영본은 색인이 장소·시간·날씨를 한국어로 적어 두므로 고를 근거가
+    이미 있었다. 훑지 않았을 뿐이다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+    searched: list[tuple[str, str]] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        searched.append((query, media_type))
+        if media_type != "broll":
+            return []
+        return [{
+            "library_asset_id": "user_4d888ec18e7b400dbcd",
+            "asset_id": "user_4d888ec18e7b400dbcd", "media_type": "broll",
+            "description": "도시 거리. 건물, 인도, 길, 사람이 지나가는 낮 풍경",
+            "duration_seconds": 11.4, "score": 0.83,
+        }]
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="library video reach")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search,
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "도시 거리 걷는 영상 깔아줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    # 영상도 같이 훑는다.
+    assert ("도시 거리 걷는 영상 깔아줘", "broll") in searched
+    prompt = seen_prompts[-1]
+    # 그 영상이 고를 수 있는 목록에 들어간다 -- 설명과 함께.
+    assert "user_4d888ec18e7b400dbcd" in prompt
+    assert "도시 거리" in prompt
+
+
+def test_video_candidates_skip_footage_segments_and_still_fill_up(tmp_path) -> None:
+    """촬영본 색인은 **자산이 아닌 행**도 돌려준다 (2026-09-05 실측).
+
+    영상 한 편을 여러 구간으로 쪼갠 행에는 `library_asset_id`가 없다. 여덟 개만
+    뽑으면 그 여덟이 전부 구간일 수 있고 -- 실제로 그랬다 -- 검색을 고친 뒤에도
+    유진에게 가는 영상 후보가 0개였다.
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        if media_type != "broll":
+            return []
+        # 앞의 여덟은 구간이라 쓸 수 없다. 그 뒤에 진짜 자산이 온다.
+        rows = [{"source_segment_id": f"seg-{i}", "library_asset_id": None, "description": "조각"} for i in range(8)]
+        rows += [{"library_asset_id": f"user_{i}", "description": f"도시 거리 {i}", "duration_seconds": 9.0} for i in range(3)]
+        return rows[:limit]
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project(name="footage segments")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search,
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "도시 거리 걷는 영상 깔아줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    prompt = seen_prompts[-1]
+    # 구간 여덟에 밀리지 않고 진짜 자산이 후보에 들어간다.
+    assert "user_0" in prompt
+    assert "user_2" in prompt
+
+
+def test_photos_reach_yujin_as_scene_candidates(tmp_path) -> None:
+    """유진에게 사진 후보가 안 갔다 (2026-09-06 실측).
+
+    "이 장면에 사진 하나 깔아줘"라고 했더니 유진이 **자료실 영상**을 골랐다 --
+    고를 사진이 후보에 하나도 없었기 때문이다. 2026-09-05에 영상이 같은 이유로
+    음악에 밀린 그 사고의 사진판이다.
+
+    사진에는 아직 의미 색인이 없어 이름 목록으로 준다(그 대비책은 이미 있다).
+    owner 사진 이름이 `20241208_121938.jpg` 꼴이라 고를 근거는 약하지만,
+    **후보가 0개라 엉뚱한 종류를 고르는 것보다 낫다.**
+    """
+    from fastapi import FastAPI
+
+    from videobox_api.routers.director_proposals import build_director_proposals_router
+
+    seen_prompts: list[str] = []
+    searched: list[str] = []
+
+    class EditingRuntime:
+        def generate_structured(self, **kwargs):
+            seen_prompts.append(str(kwargs.get("prompt") or ""))
+            return StructuredLLMResponse(
+                provider_name="local", model_name="fixture",
+                output_data={"schema_version": "videobox.yujin-editing-response.v1", "reply_text": "확인했어요.", "proposal": None},
+                raw_text="{}", metadata={},
+            )
+
+    class LibraryStore:
+        root = tmp_path / "library"
+
+        def inspect_active_assets(self):
+            return [
+                {"library_asset_id": "user_photo_1", "asset_id": "20241208_121938.jpg", "media_type": "image"},
+                {"library_asset_id": "user_clip_1", "asset_id": "clip.mp4", "media_type": "broll"},
+            ]
+
+    def library_search(query: str, limit: int, media_type: str = "music"):
+        searched.append(media_type)
+        return []
+
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("사진 후보")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="timeline",
+        session_payload={"segments": [{"segment_id": "scene-1", "start_sec": 0, "end_sec": 4}], "history": []},
+    )
+    app = FastAPI()
+    app.state.local_only_runtime_service_factory = lambda _store: EditingRuntime()
+    app.include_router(build_director_proposals_router(
+        store, orchestrator=SimpleNamespace(), library_search=library_search, library_store=LibraryStore(),
+    ))
+    client = TestClient(app)
+
+    response = client.post(
+        f"/api/projects/{project.project_id}/editing-sessions/{session['session_id']}/yujin-editing-proposals",
+        json={"instruction": "이 장면에 사진 하나 깔아줘"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert "image" in searched, f"사진을 훑지 않았다: {searched}"
+    prompt = seen_prompts[-1]
+    assert "user_photo_1" in prompt, "사진이 후보 목록에 없다"
+    # 화면 자리에 놓이므로 목록에도 `broll`로 적힌다 -- 모델이 그대로 쓸 이름이다.
+    assert "user_photo_1(broll" in prompt

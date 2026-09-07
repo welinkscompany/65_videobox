@@ -1,16 +1,41 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any
+from typing import Any, Mapping
 from datetime import UTC, datetime
 from math import isfinite
 import uuid
 
 from videobox_domain_models.caption_style import CaptionStyle
+from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.media_controls import normalize_media_controls
+from videobox_core_engine.transitions import normalize_transition
 from videobox_core_engine.editing_transactions import apply_user_transaction
+# 도형 프리셋 목록은 여기서 다시 정의하지 않고 그대로 가져다 쓴다. 예전 이름을
+# 그대로 두어 이 모듈에서 가져다 쓰던 곳은 손대지 않아도 된다.
+from videobox_core_engine.overlay_shapes import (  # noqa: F401
+    SHAPE_OVERLAY_HORIZONTALS,
+    SHAPE_OVERLAY_MOTION_SET,
+    SHAPE_OVERLAY_SHAPES,
+    SHAPE_OVERLAY_SIZES,
+    SHAPE_OVERLAY_VERTICALS,
+)
 
 MIN_SEGMENT_DURATION_SEC = 0.2
+# **리플 배속 허용 범위(owner 지시 2026-09-04, "속도는 캡컷이랑 동일하게 맞춰").**
+# 예전에는 `frozenset({1.0, 1.5, 2.0})` 셋뿐이라 1.25배를 쓸 방법이 없었다.
+# 캡컷 `속도`는 숫자칸이라 임의 배속을 받는다.
+#
+# 이 범위는 **렌더가 실제로 낼 수 있는 것**에서 왔다 -- `_atempo_chain`이
+# "허용 범위(0.25~4)"를 명시하고 그 범위를 `atempo` 단계로 쪼개 처리한다
+# (`ffmpeg_final_renderer.py:92`). 너무 짧아지는 장면은 아래
+# `MIN_SEGMENT_DURATION_SEC`이 따로 막는다. 즉 엔진은 처음부터 이 범위를
+# 감당하게 만들어져 있었고 검증만 셋으로 좁혀 놨던 것이다.
+#
+# **유진 스키마는 안 넓힌다.** `set_scene_speed`는 `enum: [1, 1.5, 2]`로 좁게
+# 둔다 -- 사람이 고르는 것과 AI가 제안하는 것의 범위가 같을 이유가 없다.
+MIN_RIPPLE_PLAYBACK_RATE = 0.25
+MAX_RIPPLE_PLAYBACK_RATE = 4.0
 MAX_TIMELINE_UNDO_EVENTS = 10
 MAX_TIMELINE_AUDIT_EVENTS = 100
 FIXED_TIMELINE_TRACK_ROLES = ("narration", "broll", "bgm", "sfx", "overlay")
@@ -181,6 +206,22 @@ def _source_slices(segment: dict[str, Any], *, fallback_offset: float | None = N
         if normalized:
             return normalized
     return [{"segment_id": str(segment.get("segment_id") or ""), "source_offset_sec": float(segment.get("source_offset_sec", fallback_offset or 0.0)), "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0))}]
+
+
+def _has_explicit_source_slices(segment: dict[str, Any]) -> bool:
+    """`_source_slices`가 저장된 원본 좌표를 돌려주는지, 폴백을 타는지 가른다.
+
+    폴백은 현재 표시 길이를 원본인 척 돌려준다. 배속처럼 표시 길이를 바꾸는
+    연산은 그 차이를 알아야 한다."""
+    raw = segment.get("source_slices")
+    if not isinstance(raw, list):
+        return False
+    return any(
+        isinstance(item, dict)
+        and str(item.get("segment_id") or "")
+        and float(item.get("duration_sec", 0.0)) > 0
+        for item in raw
+    )
 
 
 def _source_slice_basis(*, session: dict[str, Any], segment: dict[str, Any], fallback_offset: float | None = None) -> list[dict[str, float | str]]:
@@ -420,7 +461,7 @@ def _content_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
         "start_offset_sec": 0.0,
         "duration_sec": float(segment.get("end_sec", 0.0)) - float(segment.get("start_sec", 0.0)),
         "source_segment_id": str(segment.get("segment_id") or ""),
-        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
+        **{key: deepcopy(segment.get(key)) for key in ("caption_text", "caption_translations", "caption_style", "review_required", "visual_overlays", "tts_replacement")},
     }]
 
 
@@ -596,6 +637,76 @@ def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: f
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_bounds_update", segment_id=segment_id)
 
 
+def set_segment_ripple_playback_rate(*, session: dict[str, Any], segment_id: str, rate: float) -> dict[str, Any]:
+    """Retime one visible scene without trimming its narrative source.
+
+    `set_segment_bounds` deliberately changes the source window.  A shortform
+    speed command has the opposite contract: it keeps that whole window,
+    shortens the displayed time, and moves only later scenes by the resulting
+    delta.  The materializer turns the durable rate into renderer instructions.
+    """
+    requested_rate = float(rate)
+    if not isfinite(requested_rate) or not (MIN_RIPPLE_PLAYBACK_RATE <= requested_rate <= MAX_RIPPLE_PLAYBACK_RATE):
+        raise ValueError("segment_ripple_playback_rate_invalid")
+
+    updated = deepcopy(session)
+    index = _segment_index(session=updated, segment_id=segment_id)
+    segment = updated["segments"][index]
+    previous_rate = float(segment.get("ripple_playback_rate", 1.0))
+    source_duration = sum(
+        float(source_slice["duration_sec"])
+        for source_slice in _source_slices(segment)
+    )
+    if not _has_explicit_source_slices(segment):
+        # 폴백은 원본이 아니라 **지금 보이는 길이**를 돌려준다. 거기엔 앞서 건
+        # 배속이 이미 반영돼 있어서 그대로 나누면 배속이 곱해진다 -- 5초 장면을
+        # 1.5배로 두고 이어서 2배로 두면 2.5초가 아니라 1.67초가 됐다
+        # (2026-09-05 실기 검증). 캡컷의 `속도`는 절대값이므로, 앞 배속을
+        # 되돌려 원본 길이를 복원한 다음 나눈다.
+        source_duration *= previous_rate
+    display_duration = source_duration / requested_rate
+    if display_duration < MIN_SEGMENT_DURATION_SEC:
+        raise ValueError("segment_ripple_playback_rate_below_minimum_duration")
+
+    previous_start = float(segment["start_sec"])
+    previous_duration = float(segment["end_sec"]) - previous_start
+    delta = previous_duration - display_duration
+    # Window offsets are displayed-time coordinates.  Keep them aligned with
+    # the same source moments after a speed change; otherwise captions and
+    # scene-attached media still last four seconds over a two-second scene.
+    window_scale = previous_rate / requested_rate
+    for field in ("media_windows", "media_window_basis", "content_windows"):
+        windows = segment.get(field)
+        if not isinstance(windows, list):
+            continue
+        for window in windows:
+            if not isinstance(window, dict):
+                continue
+            for key in ("start_offset_sec", "duration_sec"):
+                if key in window:
+                    window[key] = float(window[key]) * window_scale
+    if "media_window_basis_offset_sec" in segment:
+        segment["media_window_basis_offset_sec"] = float(segment["media_window_basis_offset_sec"]) * window_scale
+    segment["end_sec"] = previous_start + display_duration
+    if requested_rate == 1.0:
+        segment.pop("ripple_playback_rate", None)
+    else:
+        segment["ripple_playback_rate"] = requested_rate
+    # A ripple edit must not reflow any earlier scene.  Subsequent scenes keep
+    # their own duration (and their own rate) but move by the exact shrink/grow
+    # delta, preserving deliberate later gaps if the source had them.
+    for later_segment in updated["segments"][index + 1 :]:
+        later_segment["start_sec"] = float(later_segment["start_sec"]) - delta
+        later_segment["end_sec"] = float(later_segment["end_sec"]) - delta
+    _validate_segment_bounds(segments=updated["segments"])
+    return _record_undoable_mutation(
+        before=session,
+        updated=updated,
+        mutation_type="segment_ripple_speed_update",
+        segment_id=segment_id,
+    )
+
+
 def reorder_segments(*, session: dict[str, Any], segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None = None) -> dict[str, Any]:
     updated = deepcopy(session)
     existing = {str(segment.get("segment_id")): segment for segment in updated.get("segments", []) if isinstance(segment, dict)}
@@ -627,6 +738,27 @@ def set_timeline_placement_overrides(*, session: dict[str, Any], overrides: dict
     )
 
 
+def set_track_states(*, session: dict[str, Any], states: dict[str, dict[str, bool]]) -> dict[str, Any]:
+    """트랙 눈·음소거를 세션에 남긴다(`track_states.py`).
+
+    되돌리기 대상이다 -- 결과물이 달라지는 편집이므로, 실수로 트랙을 통째로
+    숨겨 놓고 왜 안 보이는지 찾아 헤매는 일이 없어야 한다.
+    """
+    updated = deepcopy(session)
+    if states:
+        updated["track_states"] = deepcopy(states)
+    else:
+        # 전부 기본으로 돌아왔으면 칸 자체를 지운다 -- 한 번도 안 건드린
+        # 세션과 같은 모양이 되도록(`normalize_track_states`와 같은 규칙).
+        updated.pop("track_states", None)
+    return _record_undoable_mutation(
+        before=session,
+        updated=updated,
+        mutation_type="track_state_update",
+        segment_id=",".join(sorted(states)),
+    )
+
+
 def undo(*, session: dict[str, Any]) -> dict[str, Any]:
     undo_stack = list(deepcopy(session.get("undo_stack", [])))
     if not undo_stack:
@@ -640,6 +772,11 @@ def undo(*, session: dict[str, Any]) -> dict[str, Any]:
             updated.pop("timeline_placement_overrides", None)
         else:
             updated["timeline_placement_overrides"] = deepcopy(inverse["timeline_placement_overrides"])
+    if "caption_style" in inverse:
+        if inverse["caption_style"] is None:
+            updated.pop("caption_style", None)
+        else:
+            updated["caption_style"] = deepcopy(inverse["caption_style"])
     updated["undo_stack"] = undo_stack
     updated["redo_stack"] = list(deepcopy(session.get("redo_stack", []))) + [event]
     history = list(deepcopy(session.get("history", [])))
@@ -664,6 +801,11 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
             updated.pop("timeline_placement_overrides", None)
         else:
             updated["timeline_placement_overrides"] = deepcopy(forward["timeline_placement_overrides"])
+    if "caption_style" in forward:
+        if forward["caption_style"] is None:
+            updated.pop("caption_style", None)
+        else:
+            updated["caption_style"] = deepcopy(forward["caption_style"])
     updated["redo_stack"] = redo_stack
     updated["undo_stack"] = (list(deepcopy(session.get("undo_stack", []))) + [event])[-MAX_TIMELINE_UNDO_EVENTS:]
     history = list(deepcopy(session.get("history", [])))
@@ -673,6 +815,260 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
     revision = int(session.get("session_revision") or 1) + 1
     updated["output_freshness"] = {kind: {"source_session_revision": revision, "is_current": False, "invalidated_at": now, "invalidated_reason": "redo"} for kind in ("review", "subtitle", "preview", "final", "capcut")}
     return updated
+
+
+def _merge_broll_media_controls(*, session: dict[str, Any], segment_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """그 장면 B-roll의 조정값 몇 개만 바꾼다. 나머지는 그대로 둔다.
+
+    `update_segment_broll_override`는 덮어쓰기라 지금 값을 통째로 다시 실어야
+    한다 -- 원본 신원(해시·판)을 안 실으면 출력 검증이 그 장면을 "바뀐 원본"으로
+    읽는다. 색감·손떨림·변형이 전부 같은 함정을 지나므로 한 자리에 모은다.
+    """
+    existing = next(
+        (
+            segment.get("broll_override")
+            for segment in session.get("segments", [])
+            if isinstance(segment, dict) and str(segment.get("segment_id")) == segment_id
+        ),
+        None,
+    )
+    if not isinstance(existing, dict) or not str(existing.get("asset_id") or "").strip():
+        raise ValueError("scene_look_needs_broll")
+    controls = dict(existing.get("media_controls") or {})
+    controls.update(changes)
+    for field in ("expected_content_sha256", "media_revision"):
+        if existing.get(field):
+            controls[field] = existing[field]
+    return update_segment_broll_override(
+        session=session, segment_id=segment_id, asset_id=str(existing["asset_id"]), media_controls=controls
+    )
+
+
+def _merge_audio_media_controls(*, session: dict[str, Any], segment_id: str, field: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """그 장면 음악·효과음의 소리 정리 값만 바꾼다. 위와 같은 이유로 통째로 다시 싣는다."""
+    existing = next(
+        (
+            segment.get(field)
+            for segment in session.get("segments", [])
+            if isinstance(segment, dict) and str(segment.get("segment_id")) == segment_id
+        ),
+        None,
+    )
+    if not isinstance(existing, dict) or not str(existing.get("asset_id") or "").strip():
+        raise ValueError("sound_cleanup_needs_media")
+    controls = dict(existing.get("media_controls") or {})
+    controls.update(changes)
+    for key in ("expected_content_sha256", "media_revision"):
+        if existing.get(key):
+            controls[key] = existing[key]
+    updater = update_segment_music_override if field == "music_override" else update_segment_sfx_override
+    return updater(
+        session=session, segment_id=segment_id, asset_id=str(existing["asset_id"]), media_controls=controls
+    )
+
+
+def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tuple[object, ...]) -> dict[str, Any]:
+    """Return a session copy with validated AI editing operations applied."""
+    from videobox_domain_models.yujin_editing_proposals import (
+        ApplyMediaOperation,
+        RemoveImageOverlayOperation,
+        RemoveMediaOperation,
+        ReorderSegmentsOperation,
+        SetCaptionFontOperation,
+        SetImageOverlayOperation,
+        SetSceneTransitionOperation,
+        SetCaptionTextOperation,
+        SetCutActionOperation,
+        SetPhotoMotionOperation,
+        SetPictureCleanupOperation,
+        SetSceneLookOperation,
+        SetSceneTransformOperation,
+        SetSoundCleanupOperation,
+        SetSegmentBoundsOperation,
+        SetSceneSpeedOperation,
+    )
+
+    working = deepcopy(session)
+    for operation in operations:
+        if isinstance(operation, SetSceneSpeedOperation):
+            working = set_segment_ripple_playback_rate(
+                session=working, segment_id=operation.segment_id, rate=float(operation.rate)
+            )
+        elif isinstance(operation, SetSegmentBoundsOperation):
+            working = set_segment_bounds(
+                session=working,
+                segment_id=operation.segment_id,
+                start_sec=operation.start_sec,
+                end_sec=operation.end_sec,
+            )
+        elif isinstance(operation, SetCutActionOperation):
+            working = update_segment_cut_action(
+                session=working,
+                segment_id=operation.segment_id,
+                cut_action={"exclude": "remove", "restore": "keep"}[operation.action],
+            )
+        elif isinstance(operation, SetCaptionTextOperation):
+            # **창작자가 보고 있던 언어를 고친다.** 유진에게도 그 언어로 보여
+            # 줬으므로 고치는 자리도 같아야 한다 -- 영어를 보며 "짧게 줄여 줘"라고
+            # 했는데 한국어가 고쳐지면 창작자 눈에는 아무 일도 안 일어난다.
+            working = update_segment_caption(
+                session=working, segment_id=operation.segment_id, caption_text=operation.text,
+                language=str(working.get("caption_language") or "") or None,
+            )
+        elif isinstance(operation, SetCaptionFontOperation):
+            # **편집본 전체**에 건다. 글꼴만 바꾸고 크기·색은 그대로 둬야 하므로
+            # 지금 스타일 위에 얹는다 -- 통째로 갈아 끼우면 창작자가 맞춰 둔
+            # 나머지가 조용히 기본값으로 돌아간다.
+            current = working.get("caption_style")
+            style = dict(current) if isinstance(current, dict) else {}
+            # 말한 칸만 얹는다. "글꼴 더 큰 걸로"라고만 했는데 글꼴 이름까지
+            # 채우면 창작자가 맞춰 둔 글꼴이 조용히 바뀐다 -- 크기를 더하면서
+            # 생긴 자리다(2026-09-06).
+            if operation.family is not None:
+                style["font_family"] = operation.family
+            if operation.size_px is not None:
+                style["font_size_px"] = operation.size_px
+            working = update_caption_style(
+                session=working, style=style, scope="whole_project", segment_ids=[],
+            )
+        elif isinstance(operation, SetSceneTransitionOperation):
+            # 화면이 쓰는 것과 **같은 함수**다. 전환 값은 들어오는 쪽 장면에
+            # 실린다(그 함수의 머리말 참고) -- 두 벌로 적으면 한쪽만 고쳐진다.
+            working = update_segment_transition(
+                session=working, segment_id=operation.segment_id,
+                transition=(
+                    None if operation.transition_type is None
+                    else {"type": operation.transition_type, "chosen_by": "yujin",
+                          **({"duration_sec": operation.duration_sec} if operation.duration_sec else {})}
+                ),
+            )
+        elif isinstance(operation, SetSceneLookOperation):
+            # 손떨림·노이즈·변형과 **같은 자리**에 얹는다(전부 그 장면 B-roll의
+            # 조정값이다). 병합과 원본 신원 보존은 한 함수가 맡는다 -- 두 벌이면
+            # 한쪽만 고쳐진다.
+            working = _merge_broll_media_controls(
+                session=working, segment_id=operation.segment_id,
+                changes={"filter": {"type": operation.look, "chosen_by": "yujin"}},
+            )
+        elif isinstance(operation, SetPhotoMotionOperation):
+            # 색감과 **같은 자리**다(그 장면 B-roll의 조정값). 색감처럼 `chosen_by`를
+            # 달지 않는 이유는 렌더러가 읽는 모양이 문자열 하나이기 때문이다 --
+            # 여기서 dict로 실으면 `normalize_media_controls`가 거절한다.
+            working = _merge_broll_media_controls(
+                session=working, segment_id=operation.segment_id,
+                changes={"photo_motion": operation.motion},
+            )
+        elif isinstance(operation, (SetPictureCleanupOperation, SetSceneTransformOperation)):
+            # 색감과 같은 자리에 얹는다 -- 전부 그 장면 B-roll의 조정값이다.
+            changes = {
+                field: value
+                for field, value in operation.model_dump(exclude={"intent", "segment_id"}).items()
+                if value is not None
+            }
+            working = _merge_broll_media_controls(session=working, segment_id=operation.segment_id, changes=changes)
+        elif isinstance(operation, SetSoundCleanupOperation):
+            field = "music_override" if operation.media_type == "bgm" else "sfx_override"
+            changes = {
+                key: value
+                for key, value in operation.model_dump(exclude={"intent", "segment_id", "media_type"}).items()
+                if value is not None
+            }
+            working = _merge_audio_media_controls(
+                session=working, segment_id=operation.segment_id, field=field, changes=changes
+            )
+        elif isinstance(operation, SetImageOverlayOperation):
+            # 화면이 쓰는 것과 **같은 함수**다. 안 준 프리셋은 그 함수가 열쇠
+            # 자체를 안 적어서, 프리셋 없이 얹어 둔 옛 오버레이와 자국이 같다.
+            working = update_segment_image_overlay(
+                session=working,
+                segment_id=operation.segment_id,
+                asset_id=operation.asset_id,
+                # 사진 오버레이의 `text`는 화면에서도 비워 두고 부르는 자리가
+                # 있다(`ImageOverlayRequest.text`의 기본값이 빈 글이다).
+                text="",
+                vertical=operation.vertical,
+                horizontal=operation.horizontal,
+                size=operation.size,
+                motion=operation.motion,
+            )
+        elif isinstance(operation, RemoveImageOverlayOperation):
+            working = remove_segment_image_overlay(session=working, segment_id=operation.segment_id)
+        elif isinstance(operation, ApplyMediaOperation):
+            if operation.media_type == "broll":
+                working = update_segment_broll_override(
+                    session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
+                )
+            elif operation.media_type == "bgm":
+                working = update_segment_music_override(
+                    session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
+                )
+            else:
+                working = update_segment_sfx_override(
+                    session=working, segment_id=operation.segment_id, asset_id=operation.asset_id
+                )
+        elif isinstance(operation, RemoveMediaOperation):
+            if operation.media_type == "broll":
+                working = clear_segment_broll_override(session=working, segment_id=operation.segment_id)
+            elif operation.media_type == "bgm":
+                working = clear_segment_music_override(session=working, segment_id=operation.segment_id)
+            else:
+                working = clear_segment_sfx_override(session=working, segment_id=operation.segment_id)
+        elif isinstance(operation, ReorderSegmentsOperation):
+            by_id = {
+                str(segment["segment_id"]): segment
+                for segment in working.get("segments", [])
+                if isinstance(segment, dict)
+            }
+            cursor = min(float(segment.get("start_sec", 0.0)) for segment in by_id.values())
+            bounds_by_id: dict[str, dict[str, float]] = {}
+            for segment_id in operation.segment_ids:
+                segment = by_id[segment_id]
+                duration = float(segment["end_sec"]) - float(segment["start_sec"])
+                bounds_by_id[segment_id] = {"start_sec": cursor, "end_sec": cursor + duration}
+                cursor += duration
+            working = reorder_segments(
+                session=working, segment_ids=list(operation.segment_ids), bounds_by_id=bounds_by_id
+            )
+        else:
+            raise ValueError("editing_proposal_operation_not_supported")
+    return working
+
+
+def project_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -> dict[str, Any]:
+    """Project a validated AI proposal without changing session metadata or undo state."""
+    operations = tuple(getattr(proposal, "operations", ()))
+    if not operations:
+        raise ValueError("editing_proposal_operations_required")
+    projected = _apply_yujin_editing_operations(session=session, operations=operations)
+    for field in ("session_revision", "output_freshness", "history", "undo_stack", "redo_stack"):
+        if field in session:
+            projected[field] = deepcopy(session[field])
+        else:
+            projected.pop(field, None)
+    return projected
+
+
+def apply_yujin_editing_proposal(*, session: dict[str, Any], proposal: object) -> dict[str, Any]:
+    """Apply validated AI operations as exactly one existing user transaction."""
+    operations = tuple(getattr(proposal, "operations", ()))
+    if not operations:
+        raise ValueError("editing_proposal_operations_required")
+    affected = [str(item.segment_id) for item in operations if hasattr(item, "segment_id")]
+    from videobox_domain_models.yujin_editing_proposals import ReorderSegmentsOperation
+
+    for operation in operations:
+        if isinstance(operation, ReorderSegmentsOperation):
+            affected.extend(operation.segment_ids)
+    affected = list(dict.fromkeys(affected))
+
+    def mutate(draft: dict[str, Any]) -> None:
+        projected = _apply_yujin_editing_operations(session=draft, operations=operations)
+        draft["segments"] = projected["segments"]
+
+    return apply_user_transaction(
+        session=session, label="유진 편집안 적용", affected_segment_ids=affected, mutate=mutate,
+        mutation_type="yujin_editing_proposal",
+    )
 
 
 def record_non_undoable_operation(*, session: dict[str, Any], operation_type: str) -> dict[str, Any]:
@@ -757,12 +1153,99 @@ def update_caption_style(*, session: dict[str, Any], style: dict[str, Any], scop
     return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_style_update", segment_id=",".join(target_ids))
 
 
+def _write_caption(target: dict[str, Any], text: str, language: str | None) -> None:
+    """원본 자리에 쓸지, 그 언어 번역 자리에 쓸지 한 곳에서 정한다."""
+    if language is None:
+        target["caption_text"] = text
+        return
+    translations = target.get("caption_translations")
+    target["caption_translations"] = {
+        **(translations if isinstance(translations, Mapping) else {}),
+        language: text,
+    }
+
+
+def captions_from_transcript(
+    *,
+    session: dict[str, Any],
+    transcript_segments: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    """받아쓴 말을 장면 캡션으로 옮긴다 — 캡컷 `자동 캡션` 자리.
+
+    부품은 처음부터 다 있었다. 받아쓰기는 시간 구간별 텍스트를 주고, 장면도
+    시간 구간을 갖는다. **그 둘을 잇는 코드만 없었다** -- 받아쓰기 결과는
+    제작 파이프라인의 다음 단계로만 흘렀다.
+
+    규칙 하나: **말이 가장 많이 걸친 장면에 그 말을 준다.** 걸친 말을 양쪽에
+    다 넣으면 같은 문장이 두 번 보이고, 어느 쪽도 지우지 않으면 창작자는
+    지운 말이 왜 남아 있는지 모른다.
+
+    **말이 없는 장면은 건드리지 않는다.** 창작자가 손으로 써 둔 캡션을 빈
+    문자열로 덮으면, 받아쓰기 한 번에 공들여 쓴 말이 사라진다.
+    """
+    lines = [
+        {
+            "start_sec": float(item.get("start_sec", 0.0)),
+            "end_sec": float(item.get("end_sec", 0.0)),
+            "text": str(item.get("text") or "").strip(),
+        }
+        for item in transcript_segments
+        if str(item.get("text") or "").strip()
+    ]
+    if not lines:
+        raise ValueError("transcript_has_no_speech")
+
+    updated = deepcopy(session)
+    segments = [segment for segment in updated.get("segments", []) if isinstance(segment, dict)]
+    # 말한 순서대로 이어 붙인다 -- 받아쓰기가 순서대로 오지 않을 수 있다.
+    lines.sort(key=lambda line: (line["start_sec"], line["end_sec"]))
+
+    collected: dict[str, list[str]] = {}
+    for line in lines:
+        best_id, best_overlap = None, 0.0
+        for segment in segments:
+            start = float(segment.get("start_sec", 0.0))
+            end = float(segment.get("end_sec", 0.0))
+            overlap = min(line["end_sec"], end) - max(line["start_sec"], start)
+            if overlap > best_overlap:
+                best_id, best_overlap = str(segment.get("segment_id") or ""), overlap
+        if best_id:
+            collected.setdefault(best_id, []).append(line["text"])
+
+    if not collected:
+        raise ValueError("transcript_has_no_speech")
+
+    for segment in segments:
+        spoken = collected.get(str(segment.get("segment_id") or ""))
+        if spoken:
+            segment["caption_text"] = " ".join(spoken)
+
+    return _apply_manual_mutation(
+        before=session,
+        updated=updated,
+        mutation_type="captions_from_transcript",
+        segment_id=",".join(sorted(collected)),
+    )
+
+
 def update_segment_caption(
     *,
     session: dict[str, Any],
     segment_id: str,
     caption_text: str,
+    language: str | None = None,
 ) -> dict[str, Any]:
+    """자막을 고친다. `language`를 주면 **그 언어 번역을 고치고 원본은 안 건드린다.**
+
+    언어를 받는 이유: 창작자가 영어 자막을 보면서 고치면 화면에 보이는 것과
+    저장되는 곳이 같아야 한다. 안 그러면 **한국어 원본이 영어로 덮여 사라지고**,
+    정작 완성본에 나가는 영어는 그대로다 -- 2026-09-03에 실제로 그랬다.
+
+    유진이 고치는 길은 언어를 안 준다. 유진은 한국어 원문을 보고 말하므로
+    원본을 고치는 것이 맞다.
+    """
+    if language is not None and language not in SUPPORTED_CAPTION_LANGUAGES:
+        raise ValueError(f"Unsupported caption language: {language}")
     updated = deepcopy(session)
     normalized_caption = caption_text.strip()
     matched = False
@@ -771,7 +1254,7 @@ def update_segment_caption(
             continue
         containing_segment_id = str(segment.get("segment_id") or "")
         if containing_segment_id == segment_id:
-            segment["caption_text"] = normalized_caption
+            _write_caption(segment, normalized_caption, language)
             matched = True
         content_windows = segment.get("content_windows")
         if not isinstance(content_windows, list):
@@ -782,10 +1265,10 @@ def update_segment_caption(
             source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
             if source_segment_id != segment_id:
                 continue
-            window["caption_text"] = normalized_caption
+            _write_caption(window, normalized_caption, language)
             matched = True
     if matched:
-        return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_update", segment_id=segment_id, extra={"caption_text": normalized_caption})
+        return _apply_manual_mutation(before=session, updated=updated, mutation_type="caption_update", segment_id=segment_id, extra={"caption_text": normalized_caption, **({"language": language} if language else {})})
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -802,6 +1285,39 @@ def update_segment_cut_action(
             continue
         segment["cut_action"] = normalized_cut_action
         return _apply_manual_mutation(before=session, updated=updated, mutation_type="cut_action_update", segment_id=segment_id, extra={"cut_action": normalized_cut_action})
+    raise KeyError(f"Segment not found in editing session: {segment_id}")
+
+
+def update_segment_transition(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+    transition: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """이 장면으로 **넘어올 때** 쓸 전환을 정한다.
+
+    값을 들어오는 쪽 장면에 싣는 이유는 경계가 그 장면의 시작 시각 하나로
+    정해지기 때문이다. 앞 장면에 실으면 장면을 지우거나 순서를 바꿀 때
+    전환이 어느 경계 것이었는지 알 수 없게 된다.
+
+    첫 장면에도 저장은 된다. 앞에 붙은 장면이 없으면 렌더러가 조용히 넘긴다
+    (`build_plan_filter_graph`) -- 저장을 거절하면 순서를 바꿔 두 번째로
+    내려온 순간 owner가 다시 골라야 한다.
+    """
+    normalized = normalize_transition(transition)
+    updated = deepcopy(session)
+    for segment in updated.get("segments", []):
+        if str(segment.get("segment_id")) != segment_id:
+            continue
+        if normalized is None:
+            segment.pop("transition_in", None)
+        else:
+            segment["transition_in"] = normalized
+        return _apply_manual_mutation(
+            before=session, updated=updated, mutation_type="transition_update",
+            segment_id=segment_id,
+            extra={"transition": normalized["type"] if normalized else "none"},
+        )
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
@@ -983,13 +1499,61 @@ def remove_segment_explanation_card(
     )
 
 
+# 사진 오버레이도 도형과 **같은 프리셋 어휘**를 쓴다(owner 요청 2026-09-06,
+# "사진을 우리 영상 위에도 얹어서 움직이게").
+#
+# 목록을 새로 만들지 않고 `overlay_shapes`의 것을 그대로 본뜬다 -- 사본을 두면
+# 화면·API·렌더가 서로 다른 목록을 보게 되고, 도형에서 이미 그 값을 치렀다.
+# 승인 범위도 도형과 같다(2026-08-20 승인 5항): 오버레이 하나가 등장·퇴장·이동
+# 하는 정도까지이고 자유 좌표·초 단위·키프레임은 밖이다.
+_IMAGE_OVERLAY_PRESET_VALUES: dict[str, frozenset[str]] = {
+    "vertical": SHAPE_OVERLAY_VERTICALS,
+    "horizontal": SHAPE_OVERLAY_HORIZONTALS,
+    "size": SHAPE_OVERLAY_SIZES,
+    "motion": SHAPE_OVERLAY_MOTION_SET,
+}
+
+
 def update_segment_image_overlay(
     *,
     session: dict[str, Any],
     segment_id: str,
     asset_id: str,
     text: str,
+    vertical: str | None = None,
+    horizontal: str | None = None,
+    size: str | None = None,
+    motion: str | None = None,
 ) -> dict[str, Any]:
+    """사진 오버레이를 얹는다. 프리셋 넷은 **선택**이다.
+
+    안 준 값은 열쇠 자체를 **안 적는다**. 빈칸을 기본값으로 채워 넣으면 이 기능이
+    생기기 전에 저장된 오버레이와 자국이 달라지고, 사진 오버레이를 프리셋 없이
+    부르는 자리가 파이프라인·유진 경로에 여럿 있다 -- 거기서 owner는 아무것도
+    안 바꿨는데 그림이 움직인 것을 보게 된다. 없는 열쇠를 '정중앙·안 움직임'으로
+    읽는 것은 렌더 쪽 몫이며, 도형의 `canonical_shape_overlay_motion`이 이미
+    같은 방식으로 관대하다.
+
+    준 값은 반대로 **거절**한다. 오타를 조용히 기본값으로 좁히면 owner는 고른
+    것이 왜 안 되는지 알 수 없다.
+    """
+    presets = {
+        "vertical": vertical,
+        "horizontal": horizontal,
+        "size": size,
+        "motion": motion,
+    }
+    normalized_presets: dict[str, str] = {}
+    for field_name, raw_value in presets.items():
+        if raw_value is None:
+            continue
+        normalized = str(raw_value).strip().lower()
+        allowed = _IMAGE_OVERLAY_PRESET_VALUES[field_name]
+        if normalized not in allowed:
+            raise ValueError(
+                f"image overlay {field_name} must be one of {sorted(allowed)}: {normalized!r}"
+            )
+        normalized_presets[field_name] = normalized
     return _upsert_segment_overlay(
         session=session,
         segment_id=segment_id,
@@ -998,6 +1562,7 @@ def update_segment_image_overlay(
             "overlay_type": "image_overlay",
             "asset_id": asset_id.strip(),
             "text": text.strip(),
+            **normalized_presets,
         },
         mutation_type="image_overlay_update",
     )
@@ -1048,6 +1613,69 @@ def remove_segment_table_overlay(
         segment_id=segment_id,
         overlay_type="table_overlay",
         mutation_type="table_overlay_remove",
+    )
+
+
+# 정지 도형·아이콘("여기를 보세요")의 프리셋. 자유 좌표는 계획서 §4가 범위 밖으로
+# 못박았고 지금도 그렇다. 목록은 `overlay_shapes`가 유일한 출처다 -- 여기에 사본을
+# 두었더니 화면·API·렌더가 서로 다른 목록을 보게 됐다.
+#
+# 2026-08-20: **등장·퇴장·이동만** 승인 범위 안으로 들어왔다(승인 기록 5항).
+# 프리셋 몇 가지이고, 타임라인에 점을 찍는 편집기가 아니다.
+
+
+def update_segment_shape_overlay(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+    shape: str,
+    vertical: str,
+    horizontal: str,
+    size: str,
+    motion: str = "none",
+) -> dict[str, Any]:
+    normalized = {
+        "shape": shape.strip().lower(),
+        "vertical": vertical.strip().lower(),
+        "horizontal": horizontal.strip().lower(),
+        "size": size.strip().lower(),
+        # 안 보내면 `그대로`다. 이 기능이 생기기 전 화면이 보내던 요청도 그대로 통한다.
+        "motion": (motion or "none").strip().lower(),
+    }
+    allowed = {
+        "shape": SHAPE_OVERLAY_SHAPES,
+        "vertical": SHAPE_OVERLAY_VERTICALS,
+        "horizontal": SHAPE_OVERLAY_HORIZONTALS,
+        "size": SHAPE_OVERLAY_SIZES,
+        # 오타를 조용히 `그대로`로 좁히지 않는다 -- 고른 것이 왜 안 되는지
+        # owner가 알 수 없게 된다. 읽는 쪽(`canonical_shape_overlay_motion`)만
+        # 관대하다.
+        "motion": SHAPE_OVERLAY_MOTION_SET,
+    }
+    for field_name, values in allowed.items():
+        if normalized[field_name] not in values:
+            raise ValueError(
+                f"shape overlay {field_name} must be one of {sorted(values)}: {normalized[field_name]!r}"
+            )
+    return _upsert_segment_overlay(
+        session=session,
+        segment_id=segment_id,
+        overlay_type="shape_overlay",
+        overlay_payload={"overlay_type": "shape_overlay", **normalized},
+        mutation_type="shape_overlay_update",
+    )
+
+
+def remove_segment_shape_overlay(
+    *,
+    session: dict[str, Any],
+    segment_id: str,
+) -> dict[str, Any]:
+    return _remove_segment_overlay(
+        session=session,
+        segment_id=segment_id,
+        overlay_type="shape_overlay",
+        mutation_type="shape_overlay_remove",
     )
 
 

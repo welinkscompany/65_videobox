@@ -2,3 +2,6 @@ test-results/
 playwright-report/
 blob-report/
 e2e/snapshots/product-shell-mobile-menu-open.png
+
+# 화면 캡처용 임시 스크립트 (커밋하지 않는다)
+.tmp-*.mjs

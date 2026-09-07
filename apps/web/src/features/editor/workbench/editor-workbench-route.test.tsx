@@ -140,7 +140,7 @@ const inspectorSession = (revision: number) => ({
   redo_count: 1,
   segments: [
     {
-      segment_id: "segment-1", start_sec: 0, end_sec: 1, caption_text: "연결 자막",
+      segment_id: "segment-1", start_sec: 0, end_sec: 1, caption_text: "연결 캡션",
       cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [],
       music_override: null, sfx_override: null, tts_replacement: null, caption_style: inspectorStyle,
     },
@@ -196,7 +196,7 @@ function inspectorManifest(revision: number, fixture: InspectorFixture = "narrat
     ],
     captions: fixture === "caption" ? [{
       segment_id: "segment-1", caption_id: "caption-1", placement_id: "caption:segment-1",
-      text: "연결 자막", start_sec: 0, end_sec: 1, style: inspectorStyle,
+      text: "연결 캡션", start_sec: 0, end_sec: 1, style: inspectorStyle,
     }] : [],
   };
 }
@@ -252,6 +252,10 @@ const music = {
   attribution_required: false,
   attribution_text: "",
 };
+
+// 추천 카드 이름 앞에는 이제 **장면**이 붙는다(`2번째 장면 · 자막 첫머리 — 자산이름 선택`).
+// 아래 픽스처들이 확인하는 것은 장면 이름이 아니라 뒤쪽 후보이므로, 이름의 끝만 맞춘다.
+const endingWith = (text: string) => (name: string) => name.endsWith(text);
 
 const directorProposal = (proposalId = "proposal-1") => ({
   proposal_id: proposalId,
@@ -386,16 +390,33 @@ function pointer(target: Element, type: string, clientX: number) {
 }
 
 async function openAssetBrowser() {
-  fireEvent.click(await screen.findByRole("button", { name: "자산과 대본" }));
-  return screen.findByRole("dialog", { name: "자산과 대본" });
+  // 승인 2026-08-30(버튼 단위 벤치마킹 2단계) -- 미디어는 이제 편집기 맨 위의
+  // 콘텐츠 탭(`role="tab"`)이다. 예전 아이콘 단추(`role="button"`)가 아니다.
+  fireEvent.click(await screen.findByRole("tab", { name: "미디어" }));
+  return screen.findByRole("dialog", { name: "미디어" });
+}
+
+/** 캡컷식 최상위 탭 분리(2026-08-27) 뒤 음악·효과음은 `오디오` 탭에 있다.
+ *  도크를 여는 단추와 이름이 겹치지 않는다 -- 그쪽은 `button`, 이쪽은 `tab`이다. */
+function openAudioPane() {
+  fireEvent.click(screen.getByRole("tab", { name: "오디오" }));
 }
 
 async function openInspector() {
   fireEvent.click(await findClipSelectionButton("n-1"));
-  fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-  await screen.findByRole("dialog", { name: "유진과 편집 항목" });
-  fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+  fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+  await screen.findByRole("dialog", { name: "세부 정보" });
   return screen.findByRole("region", { name: "편집 항목" });
+}
+
+/** 유진 대화창은 2026-08-30 후속으로 속성/추천 도크에서 완전히 빠져
+ *  독립된 떠있는 패널이 됐다(owner 지시: "우리 유진 대화창도 캡컷처럼
+ *  해도 되" -- 캡컷 EditPilot과 같은 자리, `docs/reference/capcut-observed-2026-08-22.ko.md`
+ *  §7). 도크와 무관하게 화면 구석의 알약 버튼을 눌러 연다. 이미 열려
+ *  있으면(같은 시험 안에서 두 번 부르는 경우) 아무 일도 하지 않는다. */
+async function openYujin() {
+  if (screen.queryByRole("region", { name: "유진" })) return;
+  fireEvent.click(await screen.findByRole("button", { name: "유진" }));
 }
 
 describe("EditorWorkbenchRoute", () => {
@@ -404,11 +425,17 @@ describe("EditorWorkbenchRoute", () => {
     vi.spyOn(api, "getEditingSession").mockImplementation(
       (projectId, sessionId) => Promise.resolve(editingSession(projectId, sessionId)) as never,
     );
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [] });
     vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
     vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
     vi.spyOn(api, "listJobs").mockResolvedValue([]);
     vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
     vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    // 2026-09-01부터 보낸 말은 곧바로 편집 해석을 한 번 거친다. 편집 이야기가
+    // 아닌 시험이 네트워크를 타지 않도록 "편집안 없음"을 기본값으로 둔다 --
+    // 편집을 재는 시험은 아래에서 각자 다시 덮어쓴다.
+    vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({ status: "clarification", reply_text: "", proposal: null });
   });
 
   it("accepts a local-first exchange as a memory source", async () => {
@@ -465,7 +492,8 @@ describe("EditorWorkbenchRoute", () => {
       <EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />,
     );
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     const panel = await screen.findByRole("region", { name: "유진 기억" });
     fireEvent.change(within(panel).getByLabelText("기억 종류"), {
       target: { value: "caption" },
@@ -542,8 +570,9 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -659,8 +688,9 @@ describe("EditorWorkbenchRoute", () => {
       api.listYujinMemoryCandidates,
     ).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -778,8 +808,9 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -810,6 +841,7 @@ describe("EditorWorkbenchRoute", () => {
 
     expect(vi.mocked(api.listYujinMemoryCandidates).mock.calls)
       .toHaveLength(listCallsBeforeLateResult);
+    await openYujin();
     const currentPanel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -856,8 +888,9 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     const player = screen.getByRole("region", { name: "미리보기" });
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -906,8 +939,9 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.scroll(history);
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
 
     expect(await screen.findByText("저장됨")).toBeVisible();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop)
@@ -971,8 +1005,9 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1044,8 +1079,9 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1093,8 +1129,9 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1147,8 +1184,9 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1214,8 +1252,9 @@ describe("EditorWorkbenchRoute", () => {
       resolveListA([memoryCandidate()]);
     });
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     expect(await screen.findByRole(
       "region", { name: "유진 기억" },
     )).not.toHaveTextContent("빠른 컷 편집을 선호합니다.");
@@ -1243,6 +1282,7 @@ describe("EditorWorkbenchRoute", () => {
       api, "approveYujinMemoryCandidate",
     ).mockReturnValue(approvePromise as never);
     const store = vi.spyOn(api, "storeYujinMemoryCandidate");
+    await openYujin();
     const routePanel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1339,8 +1379,9 @@ describe("EditorWorkbenchRoute", () => {
     );
     await expectEditorRevision(1);
     fireEvent.click(screen.getByRole(
-      "button", { name: "유진과 편집 항목" },
+      "button", { name: "세부 정보" },
     ));
+    await openYujin();
     const panel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1367,6 +1408,7 @@ describe("EditorWorkbenchRoute", () => {
       });
     });
 
+    await openYujin();
     const currentPanel = await screen.findByRole(
       "region", { name: "유진 기억" },
     );
@@ -1397,8 +1439,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.click(await screen.findByRole("radio", { name: `P01-${kind.toUpperCase()}-01 선택` }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    fireEvent.click(await screen.findByRole("radio", { name: endingWith(`P01-${kind.toUpperCase()}-01 선택`) }));
     const applyButton = screen.getByRole("button", { name: "선택한 추천 적용" });
     fireEvent.click(applyButton);
     fireEvent.click(applyButton);
@@ -1457,8 +1500,9 @@ describe("EditorWorkbenchRoute", () => {
 
       render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
       await expectEditorRevision(1);
-      fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-      fireEvent.click(await screen.findByRole("radio", { name: "P01-CAPTION-STYLE-01 선택" }));
+      fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+      await openYujin();
+      fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-CAPTION-STYLE-01 선택") }));
       fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
       await waitFor(() => expect(command).toHaveBeenCalledWith(
@@ -1502,8 +1546,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "P01-TABLE-01 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-TABLE-01 선택") }));
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
     await waitFor(() => expect(command).toHaveBeenCalledWith(
@@ -1562,8 +1607,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    const radio = await screen.findByRole("radio", { name: `P01-${kind.toUpperCase()}-01 선택` });
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const radio = await screen.findByRole("radio", { name: endingWith(`P01-${kind.toUpperCase()}-01 선택`) });
     fireEvent.click(radio);
 
     expect(radio).toBeDisabled();
@@ -1593,8 +1639,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    const candidate = await screen.findByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" });
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const candidate = await screen.findByRole("radio", { name: endingWith("P01-CAPTION-TEXT-01 선택") });
     fireEvent.click(candidate);
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
@@ -1619,8 +1666,9 @@ describe("EditorWorkbenchRoute", () => {
     const caption = vi.spyOn(api, "updateEditingSessionCaption");
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "P01-CAPTION-TEXT-01 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-CAPTION-TEXT-01 선택") }));
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(api.preflightDirectorProposal).toHaveBeenCalledTimes(1));
 
@@ -1668,7 +1716,8 @@ describe("EditorWorkbenchRoute", () => {
     const timeline = screen.getByTestId("timeline-track");
     const preview = screen.getByRole("region", { name: "미리보기" });
     await waitFor(() => expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true"));
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(await screen.findByLabelText("유진에게 요청하기"), { target: { value: "작성 중인 요청" } });
     fireEvent.click(clipSelectionButton("n-1"));
     timeline.scrollLeft = 31;
@@ -1749,6 +1798,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
+    openAudioPane();
     expect(await screen.findByRole("button", { name: "배경 음악 1 적용" })).toBeEnabled();
     fireEvent.click(clipSelectionButton("n-1"));
     const applyButton = screen.getByRole("button", { name: "배경 음악 1 적용" });
@@ -1779,6 +1829,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
+    openAudioPane();
     await screen.findByRole("button", { name: "배경 음악 1 적용" });
     fireEvent.click(clipSelectionButton("n-1"));
     fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 적용" }));
@@ -1788,6 +1839,105 @@ describe("EditorWorkbenchRoute", () => {
     expect(updateSfx).not.toHaveBeenCalled();
     expect(updateBroll).not.toHaveBeenCalled();
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  });
+
+  // 이미지 오버레이 endpoint와 렌더는 처음부터 있었는데 화면에 부르는 자리가
+  // 없었다. 자산 목록의 이미지 카드가 그 선택기다.
+  it("lays an image asset over the selected scene through the image overlay command", async () => {
+    const imageAsset = {
+      asset_id: "image-1",
+      asset_type: "broll_image",
+      storage_uri: "file:///image-1.png",
+      created_at: "2026-08-20T00:00:00Z",
+      metadata: { title: "제품 사진", analysis_status: "succeeded", review_required: false },
+    };
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([imageAsset] as never);
+    const applyOverlay = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "제품 사진 화면에 얹기" });
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "제품 사진 화면에 얹기" }));
+
+    await waitFor(() => expect(applyOverlay).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "image-1",
+      text: "",
+      expected_revision: 1,
+    }));
+  });
+
+  it("copies a shared-library picture into the project before laying it over the scene", async () => {
+    // 라이브러리 그림은 프로젝트 자산이 아니라서 오버레이가 부를 식별자가
+    // 없다. 먼저 프로젝트로 복사하고, 그 결과 자산으로 얹는다 -- 이미 있는
+    // 이미지 오버레이 경로를 그대로 쓴다.
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [{
+        library_asset_id: "user_image_1",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "ready",
+        user_metadata: { filename: "바다.png" },
+        thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+        preview_url: "/api/library/assets/user_image_1/preview",
+      }],
+      total: 1,
+    } as never);
+    const materialize = vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({
+      asset: { asset_id: "project-image-9", asset_type: "image", storage_uri: "file:///x.png" },
+      reference: { reference_id: "ref-1", project_id: "project-a", library_asset_id: "user_image_1" },
+    } as never);
+    const applyOverlay = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "바다.png 화면에 얹기" });
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "바다.png 화면에 얹기" }));
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("user_image_1", "project-a"));
+    await waitFor(() => expect(applyOverlay).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "project-image-9",
+      text: "",
+      expected_revision: 1,
+    }));
+  });
+
+  it("copies a shared-library picture into the project and lays it as the scene", async () => {
+    // owner 요청 2026-09-06: 사진도 장면 화면이 된다. 얹는 길과 **같은 복사**를
+    // 지나지만, 끝에서 부르는 것은 오버레이가 아니라 화면 교체다.
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [{
+        library_asset_id: "user_image_1",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "ready",
+        user_metadata: { filename: "바다.png" },
+        thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+        preview_url: "/api/library/assets/user_image_1/preview",
+      }],
+      total: 1,
+    } as never);
+    const materialize = vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({
+      asset: { asset_id: "project-image-9", asset_type: "image", storage_uri: "file:///x.png" },
+      reference: { reference_id: "ref-1", project_id: "project-a", library_asset_id: "user_image_1" },
+    } as never);
+    const applyOverlay = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+    const applyBroll = vi.spyOn(api, "updateEditingSessionBroll").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    await screen.findByRole("button", { name: "바다.png 화면으로 깔기" });
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "바다.png 화면으로 깔기" }));
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("user_image_1", "project-a"));
+    await waitFor(() => expect(applyBroll).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "project-image-9",
+      media_controls: undefined,
+      expected_revision: 1,
+    }));
+    expect(applyOverlay).not.toHaveBeenCalled();
   });
 
   it("applies B-roll through the current revision fence without materializing it", async () => {
@@ -1842,6 +1992,7 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await openAssetBrowser();
+    openAudioPane();
     await screen.findByRole("button", { name: "배경 음악 1 적용" });
     fireEvent.click(clipSelectionButton("n-1"));
     fireEvent.click(screen.getByRole("button", { name: "배경 음악 1 적용" }));
@@ -1864,7 +2015,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
 
     await expectEditorRevision(1);
-    expect(await screen.findByText("일부 자산을 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.")).toBeVisible();
+    expect(await screen.findByText("일부 미디어를 불러오지 못했어요. 편집은 계속할 수 있어요. 잠시 후 다시 확인해 주세요.")).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
 
@@ -1904,7 +2055,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
 
     pointer(trim, "pointerdown", 100);
     expect(update).not.toHaveBeenCalled();
@@ -1924,6 +2075,75 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(2);
   });
 
+  it("unmounts the invalidated exact-preview video as soon as a mutation starts", async () => {
+    let resolveUpdate!: (value: unknown) => void;
+    const current = {
+      ...narrationManifest(1),
+      exact_preview: {
+        status: "succeeded",
+        url: "/api/projects/project-a/exact-previews/exact-1/content",
+        source_session_id: "session-a",
+        source_session_revision: 1,
+        artifact_revision: 1,
+        timeline_start_sec: 0,
+        timeline_end_sec: 5,
+      },
+    };
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValueOnce(current as never);
+    mockEditingSessionRevisions(1);
+    const update = vi.spyOn(api, "updateEditingSessionSegmentBounds")
+      .mockImplementation(() => {
+        expect(screen.queryByLabelText("편집본 미리보기")).toBeNull();
+        return new Promise((resolve) => { resolveUpdate = resolve; }) as never;
+      });
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    expect(screen.getByLabelText("편집본 미리보기")).toBeVisible();
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+
+    await waitFor(() => expect(resolveUpdate).toBeDefined());
+    expect(update).toHaveBeenCalledOnce();
+    expect(screen.queryByLabelText("편집본 미리보기")).toBeNull();
+  });
+
+  it("previews only the selected scene range before starting the exact render", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValueOnce(narrationManifest(1) as never);
+    mockEditingSessionRevisions(1);
+    const selectedRange = vi.spyOn(api, "previewEditingSessionSelectedRange").mockResolvedValue({ start_sec: 1, end_sec: 3, captions: [], overlays: [], fixed_timeline: true } as never);
+    const exactPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await openInspector();
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "선택 구간 미리보기" }));
+
+    await waitFor(() => expect(selectedRange).toHaveBeenCalledWith("project-a", "session-a", { start_sec: 0, end_sec: 5 }));
+    await waitFor(() => expect(exactPreview).toHaveBeenCalledWith("project-a", "session-a", { expected_revision: 1, start_sec: 0, end_sec: 5 }));
+  });
+
+  it("shows a recoverable message when selected scene preview fails", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValueOnce(narrationManifest(1) as never);
+    mockEditingSessionRevisions(1);
+    vi.spyOn(api, "previewEditingSessionSelectedRange").mockRejectedValue(new Error("preview unavailable"));
+    vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await openInspector();
+    fireEvent.click(clipSelectionButton("n-1"));
+    fireEvent.click(screen.getByRole("button", { name: "선택 구간 미리보기" }));
+
+    expect(await screen.findByText("선택 구간 미리보기를 만들지 못했어요. 최신 편집본을 확인해 주세요.")).toBeVisible();
+  });
+
   it("automatically starts a new preview after a successful edit instead of waiting for a manual click (F-4)", async () => {
     let resolveUpdate!: (value: unknown) => void;
     vi.spyOn(api, "getEditorPlaybackManifest")
@@ -1936,10 +2156,13 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
 
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
@@ -1951,6 +2174,130 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(2);
 
     await waitFor(() => expect(startPreview).toHaveBeenCalledWith("project-a", "session-a", { expected_revision: 2 }));
+  });
+
+  it("does not automatically queue a full exact render after editing a long project", async () => {
+    const longManifest = (revision: number) => ({
+      ...narrationManifest(revision),
+      output: { ...narrationManifest(revision).output, duration_sec: 494.8 },
+    });
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(longManifest(1) as never)
+      .mockResolvedValueOnce(longManifest(2) as never);
+    mockEditingSessionRevisions(1, 2);
+    vi.spyOn(api, "updateEditingSessionSegmentBounds").mockResolvedValue({} as never);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+
+    await expectEditorRevision(2);
+    expect(startPreview).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "미리보기 새로 만들기" })).toBeEnabled();
+  });
+
+  it("fails closed when mutation rehydration returns mismatched manifest and session revisions", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(2) as never);
+    mockEditingSessionRevisions(1, 3);
+    vi.spyOn(api, "updateEditingSessionSegmentBounds").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+
+    expect(await screen.findByText("최신 편집 상태가 일치하지 않아요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
+  });
+
+  it("fails closed when mutation rehydration returns a matching pair for a different route", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(manifest("other-project", "other-session") as never);
+    const sessions = vi.mocked(api.getEditingSession);
+    sessions.mockReset()
+      .mockResolvedValueOnce(editingSession("project-a", "session-a", 1) as never)
+      .mockResolvedValueOnce(editingSession("other-project", "other-session", 1) as never);
+    vi.spyOn(api, "updateEditingSessionSegmentBounds").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+
+    expect(await screen.findByText("최신 편집 상태가 일치하지 않아요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
+  });
+
+  it("fails closed when an ordinary preview refresh returns mismatched revisions", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(1) as never)
+      .mockResolvedValueOnce(narrationManifest(2) as never);
+    mockEditingSessionRevisions(1, 3);
+    vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
+
+    expect(await screen.findByText("편집 세션 정보가 일치하지 않아요. 다시 열어 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
+  });
+
+  it("opening the editor makes a preview instead of showing an empty stage", async () => {
+    // owner가 사무실에서 편집기를 보고 "완전 캡컷과 다른데"라고 했다. 그 인상의
+    // 한 몫이 **열면 비어 있는 미리보기**였다 -- 예전에는 편집을 한 번 해야
+    // 생겼고, 그전까지는 `아직 편집본 미리보기가 없어요`와 단추뿐이었다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    mockEditingSessionRevisions(1);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+
+    await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
+    expect(startPreview).toHaveBeenCalledWith("project-a", "session-a", { expected_revision: 1 });
+  });
+
+  it("opening the same editing draft does not queue a second preview", async () => {
+    // 편집 뒤의 생성은 mutation 쪽이 맡는다. 여는 쪽까지 판수를 따라가면 편집할
+    // 때마다 두 곳이 같은 일을 시킨다 -- 실측으로 확인하고 열쇠를 편집본 하나로 좁혔다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    mockEditingSessionRevisions(1);
+    const startPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
+
+    // 편집본을 다시 읽어도(폴링·되돌리기 등) 또 시키지 않는다.
+    await act(async () => { await Promise.resolve(); });
+    expect(startPreview).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the manual preview button as a fallback when the automatic refresh fails", async () => {
@@ -1965,14 +2312,18 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
 
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
+    await waitFor(() => expect(resolveUpdate).toBeDefined());
     resolveUpdate({});
     await expectEditorRevision(2);
 
@@ -1989,11 +2340,12 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(4);
-    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
-    expect(await screen.findByRole("dialog", { name: "자산과 대본" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "원래 자막 대본 선택" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
+    expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
+    fireEvent.click(screen.getByRole("button", { name: "원래 자막 캡션 선택" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "새 자막" } });
+    fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
 
     await waitFor(() => expect(update).toHaveBeenCalledWith("project-a", "session-a", "segment-1", { caption_text: "새 자막", expected_revision: 4 }));
     await expectEditorRevision(5);
@@ -2011,10 +2363,11 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(4);
-    fireEvent.click(screen.getByRole("button", { name: "자산과 대본" }));
-    expect(await screen.findByRole("dialog", { name: "자산과 대본" })).toBeVisible();
-    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 자막 텍스트" }), { target: { value: "새 자막" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 저장" }));
+    fireEvent.click(screen.getByRole("tab", { name: "미디어" }));
+    expect(await screen.findByRole("dialog", { name: "미디어" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "캡션" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "segment-1 캡션 텍스트" }), { target: { value: "새 자막" } });
+    fireEvent.click(screen.getByRole("button", { name: "캡션 저장" }));
 
     expect(await screen.findByText("다른 변경이 먼저 저장됐어요. 최신 내용을 확인한 뒤 다시 시도해 주세요.")).toBeVisible();
     expect(update).toHaveBeenCalledTimes(1);
@@ -2037,7 +2390,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2065,7 +2418,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const control = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
 
     pointer(control, "pointerdown", 0);
     expect(reorder).not.toHaveBeenCalled();
@@ -2096,7 +2449,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    const trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2105,6 +2458,30 @@ describe("EditorWorkbenchRoute", () => {
     expect(update).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when both a mutation attempt and its authoritative refresh fail", async () => {
+    vi.spyOn(api, "getEditorPlaybackManifest")
+      .mockResolvedValueOnce(narrationManifest(5) as never)
+      .mockRejectedValueOnce(new Error("refresh offline"));
+    const sessions = vi.mocked(api.getEditingSession);
+    sessions.mockReset()
+      .mockResolvedValueOnce(editingSession("project-a", "session-a", 5) as never)
+      .mockRejectedValueOnce(new Error("refresh offline"));
+    vi.spyOn(api, "updateEditingSessionSegmentBounds").mockRejectedValue(new Error("mutation offline"));
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(5);
+    fireEvent.click(clipSelectionButton("n-1"));
+    const track = screen.getByTestId("timeline-track");
+    vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
+    const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    pointer(trim, "pointerdown", 100);
+    pointer(trim, "pointermove", 200);
+    pointer(trim, "pointerup", 200);
+
+    expect(await screen.findByText("최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
   });
 
   it("routes toolbar undo and redo through the current revision and refreshes after each command", async () => {
@@ -2179,7 +2556,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(7);
     await openInspector();
 
-    fireEvent.click(screen.getByRole("button", { name: "구간 중간에서 나누기" }));
+    fireEvent.click(screen.getByRole("button", { name: "구간 중간에서 분할" }));
     await waitFor(() => expect(split).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
       expected_revision: 7,
       split_sec: 0.5,
@@ -2263,6 +2640,9 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
     await openInspector();
+    // 청취 승인 음성은 이제 부를 때만 부른다 -- 편집기를 여는 것만으로 조회가
+    // 나가지 않게 하기 위해서다.
+    fireEvent.click(screen.getByRole("button", { name: "승인한 음성 불러오기" }));
     expect(await screen.findByRole("option", { name: "승인 후보 1 · 승인된 음성" })).toBeVisible();
     expect(screen.queryByText("승인 전 음성")).toBeNull();
 
@@ -2284,7 +2664,7 @@ describe("EditorWorkbenchRoute", () => {
   });
 
   it.each([
-    { fixture: "broll" as const, label: "B-roll 지우기", endpoint: "broll" as const },
+    { fixture: "broll" as const, label: "영상 지우기", endpoint: "broll" as const },
     { fixture: "bgm" as const, label: "배경 음악 지우기", endpoint: "bgm" as const },
     { fixture: "sfx" as const, label: "효과음 지우기", endpoint: "sfx" as const },
   ])("clears the selected $fixture target with the current revision", async ({ endpoint, fixture, label }) => {
@@ -2341,7 +2721,41 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
       asset_id: `asset-${fixture}`,
       expected_revision: 7,
-      media_controls: { ducking: true, fade_in_sec: 1.25, fade_out_sec: 0.75, gain_db: -8 },
+      // 갱신 이유(2026-09-01): 소리 정리 둘(캡컷 오디오 탭 대조)이 붙었다.
+      // 이 시험이 지키는 것은 **화면에 없는 값이 저장에서 사라지지 않는가**이고,
+      // 새 둘도 정확히 그 대상이라 여기 같이 실려야 맞다.
+      media_controls: { ducking: true, fade_in_sec: 1.25, fade_out_sec: 0.75, gain_db: -8, normalize_loudness: false, denoise: false },
+    }));
+    expect(saveBgm.mock.calls.length + saveSfx.mock.calls.length).toBe(1);
+    await expectEditorRevision(8);
+  });
+
+  it.each([
+    { fixture: "bgm" as const, label: "배경 음악", saveEndpoint: "bgm" as const },
+    { fixture: "sfx" as const, label: "효과음", saveEndpoint: "sfx" as const },
+  ])("routes the $fixture loudness slider into the saved gain_db request body", async ({ fixture, label, saveEndpoint }) => {
+    // 슬라이더 오른쪽 끝(크게)은 +6dB다. 화면 조작이 emit을 지나 실제 요청
+    // body의 gain_db까지 닿는지 본다. 렌더 반영은 백엔드 테스트 몫이다.
+    vi.mocked(api.getEditorPlaybackManifest)
+      .mockResolvedValueOnce(inspectorManifest(7, fixture) as never)
+      .mockResolvedValueOnce(inspectorManifest(8, fixture) as never);
+    vi.mocked(api.getEditingSession)
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    const saveBgm = vi.spyOn(api, "updateEditingSessionMusicOverride").mockResolvedValue({} as never);
+    const saveSfx = vi.spyOn(api, "updateEditingSessionSfxOverride").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.change(screen.getByLabelText(`${label} 소리 크기`), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: `${label} 설정 저장` }));
+
+    const save = saveEndpoint === "bgm" ? saveBgm : saveSfx;
+    await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: `asset-${fixture}`,
+      expected_revision: 7,
+      media_controls: { ducking: true, fade_in_sec: 0.5, fade_out_sec: 1, gain_db: 6, normalize_loudness: false, denoise: false },
     }));
     expect(saveBgm.mock.calls.length + saveSfx.mock.calls.length).toBe(1);
     await expectEditorRevision(8);
@@ -2355,6 +2769,7 @@ describe("EditorWorkbenchRoute", () => {
       .mockResolvedValueOnce(inspectorSession(7) as never)
       .mockResolvedValueOnce(inspectorSession(8) as never);
     const save = vi.spyOn(api, "updateEditingSessionCaptionStyle").mockResolvedValue({} as never);
+    const preflight = vi.spyOn(api, "previewEditingSessionCaptionStyleScope").mockResolvedValue({ affected_segment_ids: ["segment-1"] });
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
@@ -2362,8 +2777,14 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.queryByLabelText(/자막 시작|자막 종료/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("글자 크기"), { target: { value: "32" } });
     fireEvent.change(screen.getByLabelText("가로 정렬"), { target: { value: "left" } });
-    fireEvent.click(screen.getByRole("button", { name: "자막 스타일 저장" }));
+    fireEvent.click(screen.getByRole("button", { name: "캡션 스타일 저장" }));
 
+    await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-a", "session-a", {
+      expected_revision: 7,
+      scope: "current_caption",
+      segment_ids: ["segment-1"],
+      style: { ...inspectorStyle, font_size_px: 32, horizontal_align: "left" },
+    }));
     await waitFor(() => expect(save).toHaveBeenCalledWith("project-a", "session-a", {
       expected_revision: 7,
       scope: "current_caption",
@@ -2480,7 +2901,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
     const result = screen.getByText("다시 만든 항목").closest("dl");
     expect(result).toHaveTextContent("완료");
-    expect(result).toHaveTextContent("자막, 배경 음악");
+    expect(result).toHaveTextContent("캡션, 배경 음악");
     expect(run).toHaveBeenCalledTimes(1);
   });
 
@@ -2515,7 +2936,7 @@ describe("EditorWorkbenchRoute", () => {
 
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
     expect(await screen.findByText("현재 편집본과 맞는 이전 결과를 열었어요.")).toBeVisible();
-    expect(screen.getByText("다시 만든 항목").closest("dl")).toHaveTextContent("자막, 배경 음악");
+    expect(screen.getByText("다시 만든 항목").closest("dl")).toHaveTextContent("캡션, 배경 음악");
 
     fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
     await expectEditorRevision(8);
@@ -2801,7 +3222,7 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(3);
     await act(async () => { resolvePreflight(partialPreflight); });
 
-    fireEvent.click(screen.getByRole("button", { name: "편집 항목 열기" }));
+    openInspector();
     const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
     expect(runButton).toBeDisabled();
     fireEvent.click(runButton);
@@ -2869,7 +3290,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(api.preflightDirectorProposal).toHaveBeenCalledTimes(1));
 
@@ -2902,7 +3324,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(7);
     fireEvent.click(screen.getByRole("button", { name: "실행 취소" }));
     await waitFor(() => expect(api.undoEditingSession).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     const apply = await screen.findByRole("button", { name: "선택한 추천 적용" });
 
     expect(apply).toBeDisabled();
@@ -2931,7 +3354,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     let track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    let trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    let trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2944,7 +3367,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(clipSelectionButton("n-1"));
     track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
-    trim = screen.getByRole("button", { name: "n-1 시작 자르기" });
+    trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
     pointer(trim, "pointerdown", 100);
     pointer(trim, "pointermove", 200);
     pointer(trim, "pointerup", 200);
@@ -2994,7 +3417,7 @@ describe("EditorWorkbenchRoute", () => {
     render(<Harness />);
     await expectEditorRevision(1);
     fireEvent.click(clipSelectionButton("n-1"));
-    const reorder = screen.getByRole("button", { name: "n-1 순서 바꾸기" });
+    const reorder = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
     fireEvent.keyDown(reorder, { key: "ArrowRight" });
     await waitFor(() => expect(screen.getByText("변경 내용을 저장하고 있어요.")).toBeVisible());
 
@@ -3023,6 +3446,9 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    // 편집기를 열면 미리보기를 한 번 만든다 -- 빈 화면으로 열리지 않게. 이 시험이
+    // 재는 것은 **편집 뒤**의 생성이므로, 화면이 다 뜬 뒤부터 다시 센다.
+    vi.mocked(api.startExactPreview).mockClear();
     fireEvent.click(screen.getByRole("button", { name: "미리보기 새로 만들기" }));
     await waitFor(() => expect(startPreview).toHaveBeenCalledTimes(1));
 
@@ -3087,19 +3513,188 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     expect(await screen.findByText("한 가지를 골랐어요.")).toBeVisible();
-    expect(screen.getByRole("button", { name: "P01-B-01 미리 보기" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "P01-B-01 미리 보기" }));
+    await openYujin();
+    expect(screen.getByRole("button", { name: endingWith("P01-B-01 미리 보기") })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: endingWith("P01-B-01 미리 보기") }));
     expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
     expect(document.querySelectorAll(".vb-editor-right-dock audio, .vb-editor-right-dock video")).toHaveLength(0);
 
     vi.spyOn(api, "reloadDirectorSession").mockRejectedValueOnce(new Error("blocked"));
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.click(await screen.findByRole("button", { name: "유진 없이 계속 편집" }));
-    expect(await screen.findByRole("button", { name: "자산과 대본" })).toBeVisible();
+    expect(await screen.findByRole("tab", { name: "미디어" })).toBeVisible();
+  });
+
+  it("names the scene each candidate targets, in words the creator already reads elsewhere", async () => {
+    // 2026-08-20 owner 실측: 추천 카드 열세 개가 전부 `20260612_091959 · 미디어`.
+    // 서버는 후보마다 다른 `target_segment_id`를 실어 보내고 화면 코드도 그것을
+    // 받는데 **카드가 한 번도 쓰지 않았다.** 장면 번호는 타임라인 순서를 따르고
+    // (`EditorWorkbench`의 미리 듣기 이름과 같은 규칙), 자막이 있으면 그 첫머리를
+    // 함께 적어 사람이 아는 말로 부른다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({
+      ...twoNarrationManifest(1),
+      captions: [
+        { segment_id: "segment-2", caption_id: "caption-2", placement_id: "caption:segment-2", text: "오름에 올라 바다를 봅니다. 두 번째 문장은 잘립니다.", start_sec: 1, end_sec: 2, style: captionManifest(1).captions[0].style },
+        { segment_id: "segment-1", caption_id: "caption-1", placement_id: "caption:segment-1", text: "안녕하세요, 제주입니다", start_sec: 0, end_sec: 1, style: captionManifest(1).captions[0].style },
+      ],
+    } as never);
+    const proposal = directorProposal();
+    proposal.target_segment_ids = ["segment-1", "segment-2"];
+    proposal.candidates.push({
+      ...proposal.candidates[0],
+      candidate_id: "candidate-2",
+      target_segment_id: "segment-2",
+      canonical_metadata: { display_name: "20260612_091959" },
+    } as never);
+    proposal.candidates[0] = {
+      ...proposal.candidates[0],
+      target_segment_id: "segment-1",
+      canonical_metadata: { display_name: "20260612_091959" },
+    } as never;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+
+    expect(await screen.findByRole("checkbox", { name: "1번째 장면 · 안녕하세요, 제주입니다 — 20260612_091959 선택" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "2번째 장면 · 오름에 올라 바다를 봅니다 — 20260612_091959 선택" })).toBeInTheDocument();
+  });
+
+  it("says only the scene number when that scene has no caption yet", async () => {
+    // 자막이 없으면 첫머리도 없다. 그때는 번호와 시작 시각만 말한다 --
+    // 타임라인 클립이 이미 그렇게 부른다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(twoNarrationManifest(1) as never);
+    const proposal = directorProposal();
+    proposal.candidates[0] = { ...proposal.candidates[0], target_segment_id: "segment-2" } as never;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+
+    expect(await screen.findByRole("checkbox", { name: "2번째 장면 · 1초부터 — P01-B-01 선택" })).toBeInTheDocument();
+  });
+
+  it("never prints the ranker's internal word on a card, and says the same thing in Korean", async () => {
+    // 2026-08-20 실화면: 카드 열세 개가 전부 `metadata`를 이유로 달고 있었다.
+    // 자막과 겹치는 말이 하나도 없을 때 순위 매기기가 남기는 표시인데, 그 표시가
+    // 그대로 창작자 화면에 나갔다(§10.13 위반).
+    const proposal = directorProposal();
+    proposal.candidates[0] = { ...proposal.candidates[0], reason_chips: ["metadata"] } as never;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+
+    const cards = await screen.findByRole("group", { name: "추천 후보" });
+    expect(cards.textContent).not.toContain("metadata");
+    expect(within(cards).getByText("캡션과 겹치는 말은 없어요. 영상 길이와 내용을 보고 골랐어요.")).toBeVisible();
+  });
+
+  it("lists the words a candidate actually matched, instead of only the first one", async () => {
+    const proposal = directorProposal();
+    proposal.candidates[0] = { ...proposal.candidates[0], reason_chips: ["바다", "하늘"] } as never;
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+
+    expect(await screen.findByText("캡션과 겹치는 말: 바다, 하늘")).toBeVisible();
+  });
+
+  it("calls a b-roll candidate B-roll, not just media", async () => {
+    // `media_type`은 `broll`인데 화면 사전에는 `broll_video`만 있어서, 모든
+    // B-roll 후보가 `· 미디어`로 떨어졌다. 이름표 자체는 2026-08-31에
+    // "영상"에서 "B-roll"로 통일했다(`EditorWorkbench.tsx`의
+    // `auditionRoleLabel`·`inspectorRegistry.ts`의 `mediaLabels`와 맞춤 --
+    // 같은 자산이 패널마다 다른 이름으로 보이던 것을 없앴다).
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: directorProposal(), references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+
+    const cards = await screen.findByRole("group", { name: "추천 후보" });
+    expect(cards.textContent).toContain("P01-B-01 · 영상");
+  });
+
+  it("fills every empty scene in one press, as one edit the creator can undo once", async () => {
+    // 2026-08-20 owner 실측: 빈 구간 열두 개면 고르기·적용을 열두 번 반복해야 했다.
+    // `batch-apply`는 처음부터 여러 후보를 받아 **한 번의 CAS 쓰기**로 적용한다 --
+    // 되돌리기 기록도 하나다. 없던 것은 여러 개를 고를 화면뿐이었다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(twoNarrationManifest(1) as never);
+    const proposal = directorProposal();
+    proposal.target_segment_ids = ["segment-1", "segment-2"];
+    proposal.candidates[0] = { ...proposal.candidates[0], target_segment_id: "segment-1" } as never;
+    proposal.candidates.push({
+      ...proposal.candidates[0],
+      candidate_id: "candidate-2",
+      visible_reference_code: "P01-B-02",
+      target_segment_id: "segment-2",
+    } as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal, references: [],
+    } as never);
+    const preflight = vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    fireEvent.click(await screen.findByRole("button", { name: "장면마다 하나씩 모두 고르기" }));
+    fireEvent.click(await screen.findByRole("button", { name: "고른 추천 2개 적용" }));
+
+    await waitFor(() => expect(preflight).toHaveBeenCalledTimes(1));
+    expect(batchApply).toHaveBeenCalledTimes(1);
+    expect(batchApply).toHaveBeenCalledWith("project-a", "proposal-1", { candidate_ids: ["candidate-1", "candidate-2"], expected_revision: 1 });
+  });
+
+  it("keeps a Yujin-run recommendation on one pick, because the server refuses a batch of those", async () => {
+    // `reject_yujin_direct_apply`가 422로 막는다. 고를 수는 있는데 적용이 거절되는
+    // 화면을 만들지 않는다.
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: yujinMediaProposal(), references: [],
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+
+    expect(await screen.findByRole("radio", { name: endingWith("P01-BROLL-01 선택") })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "장면마다 하나씩 모두 고르기" })).toBeNull();
   });
 
   it("preflights then batch-applies only the current route proposal after navigation", async () => {
@@ -3113,7 +3708,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-b", "proposal-session-b"));
     expect(batchApply).toHaveBeenCalledWith("project-b", "proposal-session-b", { candidate_ids: ["candidate-1"], expected_revision: 1 });
@@ -3136,15 +3732,16 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     expect(screen.getByText(`${kind} 추천 세부 내용`)).toBeVisible();
-    expect(screen.getByRole("radio", { name: `${proposal.candidates[0].visible_reference_code} 선택` })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: endingWith(`${proposal.candidates[0].visible_reference_code} 선택`) })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
     expect(preflight).not.toHaveBeenCalled();
     expect(materialize).not.toHaveBeenCalled();
     expect(apply).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("radio", { name: `${proposal.candidates[0].visible_reference_code} 선택` }));
+    fireEvent.click(screen.getByRole("radio", { name: endingWith(`${proposal.candidates[0].visible_reference_code} 선택`) }));
     const button = screen.getByRole("button", { name: "선택한 추천 적용" });
     expect(button).toBeEnabled();
     fireEvent.click(button);
@@ -3187,10 +3784,11 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
 
     const reference = proposal.candidates[0].visible_reference_code;
-    fireEvent.click(screen.getByRole("button", { name: `${reference} ${verb}` }));
+    fireEvent.click(screen.getByRole("button", { name: endingWith(`${reference} ${verb}`) }));
 
     await waitFor(() => expect(
       document.querySelector<HTMLMediaElement>(".vb-preview-stage audio, .vb-preview-stage video")?.getAttribute("src"),
@@ -3215,21 +3813,31 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
+    // preflight가 stale을 돌려주면 막힌 상태가 되고, "다시 추천받기"는
+    // (추천 탭 자신의 것과 별개로) `유진` 탭의 막힘 대체 화면에도 있다 --
+    // 지금 막힌 것은 그쪽이다.
+    await openYujin();
     const again = await screen.findByRole("button", { name: "지금 편집본으로 다시 추천받기" });
     fireEvent.click(again);
 
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("project-a", "proposal-1"));
+    await openYujin();
     expect(await screen.findByRole("button", { name: "선택한 추천 적용" })).toBeVisible();
     await waitFor(() => expect(
       screen.queryByRole("button", { name: "지금 편집본으로 다시 추천받기" }),
     ).toBeNull());
   });
 
-  it("says why an out-of-date recommendation cannot be applied and offers a fresh one", async () => {
-    // 적용 단추가 이유 없이 꺼져 있는 것처럼 보이던 자리다.
+  it("re-asks by itself when the recommendation is out of date and the creator is looking at it", async () => {
+    // 예전에는 죽은 카드와 `다시 추천받기` 단추만 남았고, 창작자가 그걸 눈치채고
+    // 눌러야 대화가 이어졌다. 편집을 몇 번만 해도 매번 그렇게 된다.
+    //
+    // 편집본이 바뀌면 추천이 무효가 되는 것은 백엔드가 여러 겹으로 지키는 계약이라
+    // 그대로 둔다. 바뀐 것은 **그다음**이다 -- 도크가 보이면 대신 물어본다.
     vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(7) as never);
     vi.mocked(api.getEditingSession).mockResolvedValue(inspectorSession(7) as never);
     vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
@@ -3241,11 +3849,9 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
 
-    expect(await screen.findByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요.")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "지금 편집본으로 다시 추천받기" }));
-
+    // 누르지 않았는데 스스로 다시 물어본다.
     await waitFor(() => expect(refresh).toHaveBeenCalledWith("project-a", "proposal-1"));
     await waitFor(() => expect(
       screen.queryByText("편집본이 바뀌어서 이 추천은 그대로 적용할 수 없어요."),
@@ -3264,7 +3870,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
 
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
     expect(materialize).not.toHaveBeenCalled();
@@ -3287,9 +3894,10 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
 
-    expect(screen.getByRole("radio", { name: `${proposal.candidates[0].visible_reference_code} 선택` })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: endingWith(`${proposal.candidates[0].visible_reference_code} 선택`) })).toBeDisabled();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeDisabled();
     expect(materialize).not.toHaveBeenCalled();
     expect(batchApply).not.toHaveBeenCalled();
@@ -3312,8 +3920,9 @@ describe("EditorWorkbenchRoute", () => {
     const apply = vi.spyOn(api, "updateEditingSessionBroll");
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "P01-BROLL-01 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-BROLL-01 선택") }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(materialize).toHaveBeenCalledTimes(1));
 
@@ -3335,10 +3944,12 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "P01-BROLL-01 선택" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-BROLL-01 선택") }));
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
+    await openYujin();
     expect(await screen.findByRole("button", { name: "유진 없이 계속 편집" })).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
     expect(apply).not.toHaveBeenCalled();
@@ -3353,7 +3964,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     expect(createConversation).not.toHaveBeenCalled();
     expect(createProposal).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
 
     await waitFor(() => expect(createConversation).toHaveBeenCalledWith("project-a", { session_id: "session-a" }));
@@ -3361,6 +3973,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(createProposal).toHaveBeenCalledWith("project-a", { session_id: "session-a" });
     expect(createProposal).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toBeEnabled();
+    await openYujin();
     expect(screen.getByRole("button", { name: "선택한 추천 적용" })).toBeEnabled();
   });
 
@@ -3380,9 +3993,10 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
 
-    expect(await screen.findByRole("button", { name: "P01-B-01 미리 보기" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: endingWith("P01-B-01 미리 보기") })).toBeVisible();
   });
 
   // 서버가 "촬영본 분석이 안 끝나 추천을 만들 수 없다"고 409로 답해도 화면은
@@ -3397,17 +4011,18 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.click(await screen.findByRole("button", { name: "유진에게 추천받기" }));
 
-    expect(await screen.findByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeVisible();
+    expect(await screen.findByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 미디어 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeVisible();
 
     const retry = screen.getByRole("button", { name: "유진에게 추천받기" });
     expect(retry).toBeEnabled();
     fireEvent.click(retry);
 
     await waitFor(() => expect(createProposal).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 자산 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("촬영본 확인이 아직 끝나지 않아서 추천을 만들 수 없어요. 미디어 화면에서 확인한 뒤 다시 눌러 주세요.")).toBeNull());
   });
 
   it("does not repeat an explicit apply while its preflight and batch apply are in flight", async () => {
@@ -3421,7 +4036,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     const apply = await screen.findByRole("button", { name: "선택한 추천 적용" });
     fireEvent.click(apply);
     fireEvent.click(apply);
@@ -3458,11 +4074,13 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     const workbench = screen.getByRole("region", { name: "편집 작업판" });
     const timeline = screen.getByTestId("timeline-track");
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     const composer = await screen.findByLabelText("유진에게 요청하기");
     fireEvent.change(composer, { target: { value: "작성 중인 요청" } });
     fireEvent.click(clipSelectionButton("n-2"));
     timeline.scrollLeft = 37;
+    await openYujin();
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
 
     await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
@@ -3470,6 +4088,7 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
     expect(screen.getByTestId("timeline-track")).toBe(timeline);
     expect(screen.getByTestId("timeline-track").scrollLeft).toBe(37);
+    await openYujin();
     expect(screen.getByLabelText("유진에게 요청하기")).toHaveValue("작성 중인 요청");
     expect(clipSelectionButton("n-2")).toHaveAttribute("aria-pressed", "true");
     await expectEditorRevision(1);
@@ -3507,16 +4126,14 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    const workbench = screen.getByRole("region", { name: "편집 작업판" });
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
 
     await waitFor(() => expect(manifestLoad).toHaveBeenCalledTimes(2));
     expect(sessionLoad).toHaveBeenCalledTimes(2);
-    expect(await screen.findByRole("button", { name: "유진 없이 계속 편집" })).toBeVisible();
-    expect(screen.getByText("최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
-    expect(screen.getByRole("region", { name: "편집 작업판" })).toBe(workbench);
-    await expectEditorRevision(1);
+    expect(await screen.findByText("최신 편집 내용을 불러오지 못했어요. 새로고침한 뒤 다시 시도해 주세요.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "편집 작업판" })).toBeNull();
   });
 
   it("projects persisted Director rows as ordered flat bubbles without adjacent pairing", async () => {
@@ -3534,11 +4151,41 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
 
     const rows = Array.from((await screen.findByRole("log", { name: "유진 대화" })).querySelectorAll("article"))
       .map((row) => row.textContent);
     expect(rows).toEqual(["나 첫 요청", "나 동시 요청", "유진 첫 답", "유진 둘째 답"]);
+  });
+
+  it("fills a Yujin starter through the route without creating, sending, proposing, or applying", async () => {
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: null,
+      messages: [],
+      proposal: null,
+      references: [],
+    } as never);
+    const createConversation = vi.spyOn(api, "createDirectorConversation");
+    const send = vi.spyOn(api, "sendDirectorMessage");
+    const createProposal = vi.spyOn(api, "createDirectorProposal");
+    const batchApply = vi.spyOn(api, "batchApplyDirectorProposal");
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+
+    const starter = await screen.findByRole("button", { name: "이 장면에 어울리는 영상 추천해 줘" });
+    fireEvent.click(starter);
+
+    const composer = screen.getByRole("textbox", { name: "유진에게 요청하기" });
+    expect(composer).toHaveValue("이 장면에 어울리는 영상 추천해 줘");
+    expect(composer).toHaveFocus();
+    expect(createConversation).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(createProposal).not.toHaveBeenCalled();
+    expect(batchApply).not.toHaveBeenCalled();
   });
 
   it("sends a message and shows the persisted Yujin reply from the local endpoint", async () => {
@@ -3557,7 +4204,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<StrictMode><EditorWorkbenchRoute projectId="project-a" sessionId="session-a" /></StrictMode>);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "장면을 설명해 줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
@@ -3572,6 +4220,198 @@ describe("EditorWorkbenchRoute", () => {
     expect(composer).toBeEnabled();
     expect(clipSelectionButton("n-1")).toBeEnabled();
   });
+
+  // owner 2026-09-01: "바로 적용하자". 예전에는 이 시험이 정반대를 재고 있었다 --
+  // 보낸 말로는 편집안조차 만들지 않는다는 것. 부품은 전부 있었고 대화가 그 경로를
+  // 부르지 않았을 뿐이라, owner는 말로 컷 편집이 되는 것을 한 번도 볼 수 없었다.
+  // `decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`
+  it("applies the edit the creator spoke, without a second and third click", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000009");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValue({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "두 번째 장면을 빠르게", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000009", created_at: "1" },
+        assistant_message: { message_id: "assistant-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "속도를 조절할게요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+      },
+    } as never);
+    const createEditingProposal = vi.spyOn(api, "createYujinEditingProposal").mockResolvedValue({
+      proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+      source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+    } as never);
+    const preflight = vi.spyOn(api, "preflightYujinEditingProposal").mockResolvedValue({
+      proposal_id: "yujin-edit-1", status: "ready",
+      diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+    } as never);
+    const applyEditingProposal = vi.spyOn(api, "applyYujinEditingProposal").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    await screen.findByText("속도를 조절할게요.");
+    await waitFor(() => expect(applyEditingProposal).toHaveBeenCalledWith("project-a", "session-a", "yujin-edit-1", { expected_revision: 1 }));
+    expect(createEditingProposal).toHaveBeenCalledWith("project-a", "session-a", { instruction: "두 번째 장면을 빠르게" });
+    // 낡은 편집본 위에 적용하지 않는다 -- 클릭 대신 이것이 지킨다.
+    expect(preflight).toHaveBeenCalledWith("project-a", "session-a", "yujin-edit-1");
+    // 무엇이 바뀌었는지 화면에 남는다. 조용히 바뀌는 타임라인은 되돌리기가
+    // 있어도 무엇을 되돌릴지 알 수 없어 나쁜 화면이다.
+    expect(await screen.findByText("2배로 속도를 바꿔요.")).toBeVisible();
+  });
+
+  // 유진이 편집안을 못 만들었을 때 다시 시켜 보는 자리. 자동 해석은 "편집 요청이
+  // 아니다"로 조용히 끝나고(`clarification`), 단추는 그대로 남는다.
+  it("keeps the manual retry button for a message the automatic pass could not turn into an edit", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000002");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValueOnce({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "두 번째 장면을 빠르게", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000002", created_at: "1" },
+        assistant_message: { message_id: "assistant-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "속도를 조절할 수 있어요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+      },
+    } as never).mockResolvedValueOnce({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit-next", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "세 번째 장면도 다듬어 줘", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000002", created_at: "3" },
+        assistant_message: { message_id: "assistant-edit-next", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "세 번째 장면도 확인할게요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "4" },
+      },
+    } as never);
+    const applyEditingProposal = vi.spyOn(api, "applyYujinEditingProposal").mockResolvedValue({} as never);
+    // 보낸 말의 자동 해석은 "편집안 없음"으로 끝난다. 그 다음 손으로 누른
+    // 해석에서만 편집안이 나온다 -- 같은 말에도 모델은 다르게 답한다.
+    const createEditingProposal = vi.spyOn(api, "createYujinEditingProposal")
+      .mockResolvedValueOnce({ status: "clarification", reply_text: "어느 장면인지 알려 주세요.", proposal: null })
+      .mockResolvedValue({
+        proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+        source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+        diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+      } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    await screen.findByText("속도를 조절할 수 있어요.");
+
+    await waitFor(() => expect(createEditingProposal).toHaveBeenCalledTimes(1));
+    expect(applyEditingProposal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "이 대화로 편집안 만들기" }));
+    await screen.findByText("편집안을 준비했어요.");
+
+    await screen.findByText("편집안을 준비했어요.");
+    expect(createEditingProposal).toHaveBeenCalledWith("project-a", "session-a", { instruction: "두 번째 장면을 빠르게" });
+    fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
+    expect(await screen.findByRole("dialog", { name: "편집안" })).toHaveTextContent("2배로 속도를 바꿔요.");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    fireEvent.change(composer, { target: { value: "세 번째 장면도 다듬어 줘" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+
+    // 새 요청은 이전 지시에서 나온 후보를 지운다.
+    await waitFor(() => expect(screen.queryByText("편집안을 준비했어요.")).toBeNull());
+    // 그리고 **그 메시지도 자동 해석을 거친다.** 화면에 후보가 떠 있던 상태에서
+    // 보낸 메시지를 보내기 이전 값으로 막으면 첫 메시지만 조용히 빠진다 --
+    // 사람이 재현하기 어려운 종류의 결함이다.
+    await waitFor(() => expect(createEditingProposal).toHaveBeenCalledTimes(3));
+    expect(createEditingProposal).toHaveBeenLastCalledWith("project-a", "session-a", { instruction: "세 번째 장면도 다듬어 줘" });
+  });
+
+  // 후보 결과 미리보기(Task 3). 2026-08-26까지 `이 구간 미리보기`는 **저장된
+  // 편집본**을 보여 줬다 -- 창작자는 바뀐 결과를 봤다고 믿었지만 실제로는 바뀌기
+  // 전 영상을 본 것이다. 적용 전에는 저장을 건드리는 어떤 호출도 하지 않는다.
+  async function openEditingProposalDialog() {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("00000000-0000-4000-8000-000000000003");
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [], proposal: null, references: [],
+    } as never);
+    vi.spyOn(api, "sendDirectorMessage").mockResolvedValue({
+      kind: "exchange",
+      exchange: {
+        user_message: { message_id: "user-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "user", text: "두 번째 장면을 빠르게", proposal_id: null, metadata: {}, client_message_id: "00000000-0000-4000-8000-000000000003", created_at: "1" },
+        assistant_message: { message_id: "assistant-edit", conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a", role: "assistant", text: "속도를 조절할 수 있어요.", proposal_id: null, metadata: {}, client_message_id: null, created_at: "2" },
+      },
+    } as never);
+    // 보낸 말의 자동 해석은 여기서 "편집안 없음"으로 끝난다. 이 시험이 재는 것은
+    // **손으로 만든 편집안의 미리보기**이므로 그 경로만 남긴다.
+    vi.spyOn(api, "createYujinEditingProposal")
+      .mockResolvedValueOnce({ status: "clarification", reply_text: "어느 장면인지 알려 주세요.", proposal: null })
+      .mockResolvedValue({
+        proposal_id: "yujin-edit-1", revision_code: "YE01", revision: 1, base_session_revision: 1, asset_index_revision: 0,
+        source_session_id: "session-a", target_segment_ids: ["segment-2"], source_script_segment_ids: [], status: "ready", expires_at: null, candidates: [],
+        diff: { proposal_mode: "yujin_editing_candidate_v1", operations: [{ intent: "set_scene_speed", segment_id: "segment-2", rate: 2 }], follow_up_questions: [] },
+      } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
+    const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
+    fireEvent.change(composer, { target: { value: "두 번째 장면을 빠르게" } });
+    fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
+    await screen.findByText("속도를 조절할 수 있어요.");
+    // 자동 해석이 먼저 끝나야 손으로 누른 해석이 편집안을 받는다.
+    await waitFor(() => expect(vi.mocked(api.createYujinEditingProposal)).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "이 대화로 편집안 만들기" }));
+    await screen.findByText("편집안을 준비했어요.");
+    fireEvent.click(screen.getByRole("button", { name: "편집안 보기" }));
+    return screen.getByRole("dialog", { name: "편집안" });
+  }
+
+  it("shows the candidate result and never touches the saved session before apply", async () => {
+    const selectedRange = vi.spyOn(api, "previewEditingSessionSelectedRange").mockResolvedValue({} as never);
+    const exactPreview = vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+    const startProposalPreview = vi.spyOn(api, "startYujinEditingProposalPreview")
+      .mockResolvedValue({ status: "pending", generationId: "proposal-preview-1", contentUrl: null, errorMessage: null });
+    const proposalPreviewStatus = vi.spyOn(api, "getYujinEditingProposalPreviewStatus")
+      .mockResolvedValueOnce({ status: "running", generationId: "proposal-preview-1", contentUrl: null, errorMessage: null })
+      .mockResolvedValue({ status: "succeeded", generationId: "proposal-preview-1", contentUrl: "/api/projects/project-a/proposal-previews/proposal-preview-1/content", errorMessage: null });
+
+    const dialog = await openEditingProposalDialog();
+    // 편집기를 열면 편집본 미리보기를 한 번 만든다. 이 시험이 재는 것은 **누른 뒤**다.
+    exactPreview.mockClear();
+    fireEvent.click(within(dialog).getByRole("button", { name: "이 구간 미리보기" }));
+
+    expect(await screen.findByText("편집안 미리보기를 만들고 있어요.")).toBeVisible();
+    expect(await screen.findByLabelText("편집안 미리보기", {}, { timeout: 8_000 })).toHaveAttribute(
+      "src",
+      "/api/projects/project-a/proposal-previews/proposal-preview-1/content",
+    );
+    expect(startProposalPreview).toHaveBeenCalledWith("project-a", "session-a", "yujin-edit-1");
+    expect(proposalPreviewStatus).toHaveBeenCalledWith("project-a", "proposal-preview-1");
+    // 핵심 안전 성질: 적용 전 저장 변경 호출 0.
+    expect(selectedRange).not.toHaveBeenCalled();
+    expect(exactPreview).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("refuses to show a stale candidate result and tells the creator what to do", async () => {
+    const selectedRange = vi.spyOn(api, "previewEditingSessionSelectedRange").mockResolvedValue({} as never);
+    vi.spyOn(api, "startExactPreview").mockResolvedValue({} as never);
+    vi.spyOn(api, "startYujinEditingProposalPreview")
+      .mockResolvedValue({ status: "stale", action: "새 편집안을 받아 보세요." });
+
+    const dialog = await openEditingProposalDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "이 구간 미리보기" }));
+
+    expect(await screen.findByText("편집본이 바뀌었어요. 새 편집안을 받아 보세요.")).toBeVisible();
+    expect(screen.queryByLabelText("편집안 미리보기")).toBeNull();
+    expect(selectedRange).not.toHaveBeenCalled();
+  }, 15_000);
 
   it("aborts an in-flight local send on explicit cancel and keeps manual editing enabled", async () => {
     let sendSignal!: AbortSignal;
@@ -3588,7 +4428,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "취소할 요청" } },
@@ -3627,7 +4468,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "늦게 끝날 요청" } },
@@ -3635,6 +4477,7 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(releaseSend).toBeTypeOf("function"));
 
+    await openYujin();
     fireEvent.click(screen.getByRole("button", { name: "선택한 추천 적용" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith(
       "project-a",
@@ -3674,7 +4517,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "다시 시도할 요청" } },
@@ -3719,7 +4563,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(
       await screen.findByRole("textbox", { name: "유진에게 요청하기" }),
       { target: { value: "곧 오래될 요청" } },
@@ -3764,7 +4609,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "데이터베이스 삭제해줘" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
 
@@ -3787,7 +4633,8 @@ describe("EditorWorkbenchRoute", () => {
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "보존할 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
@@ -3797,7 +4644,8 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.getByText("남아 있는 대화")).toBeVisible();
     expect(clipSelectionButton("n-1")).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "유진 없이 계속 편집" }));
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     expect(screen.getByText("유진의 답을 받지 못했어요.")).toBeVisible();
     expect(screen.getByText("남아 있는 대화")).toBeVisible();
     expect(createProposal).not.toHaveBeenCalled();
@@ -3826,10 +4674,13 @@ describe("EditorWorkbenchRoute", () => {
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
     const player = screen.getByRole("region", { name: "미리보기" });
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     const composer = await screen.findByRole("textbox", { name: "유진에게 요청하기" });
     fireEvent.change(composer, { target: { value: "작성 중" } });
-    fireEvent.click(screen.getByRole("radio", { name: "P01-B-02 선택" }));
+    await openYujin();
+    fireEvent.click(screen.getByRole("checkbox", { name: endingWith("P01-B-02 선택") }));
+    await openYujin();
     const history = screen.getByRole("log", { name: "유진 대화" });
     Object.defineProperties(history, {
       scrollHeight: { configurable: true, value: 200 },
@@ -3837,15 +4688,20 @@ describe("EditorWorkbenchRoute", () => {
       scrollTop: { configurable: true, writable: true, value: 72 },
     });
     fireEvent.scroll(history);
+    // 2026-08-30 후속(owner: "우리 유진 대화창도 캡컷처럼 해도 되")으로
+    // 유진 패널은 오른쪽 도크(서랍)와 완전히 독립됐다 -- 서랍을 닫아도
+    // 유진 대화는 그대로 남아 있다(도크와 무관하게 화면 구석에 뜨는
+    // 자리이기 때문). `docs/reference/capcut-observed-2026-08-22.ko.md` §7.
     fireEvent.click(screen.getByRole("button", { name: "닫기" }));
-    expect(screen.queryByRole("log", { name: "유진 대화" })).toBeNull();
+    expect(screen.getByRole("log", { name: "유진 대화" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
-    expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("작성 중");
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    expect(screen.getByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("작성 중");
     expect(screen.getByText("요청")).toBeVisible();
     expect(screen.getByText("답변")).toBeVisible();
-    expect(screen.getByRole("radio", { name: "P01-B-02 선택" })).toBeChecked();
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop).toBe(72);
+    await openYujin();
+    expect(screen.getByRole("checkbox", { name: endingWith("P01-B-02 선택") })).toBeChecked();
     expect(screen.getByRole("region", { name: "미리보기" })).toBe(player);
     expect(document.querySelectorAll(".vb-preview-stage")).toHaveLength(1);
   });
@@ -3858,16 +4714,19 @@ describe("EditorWorkbenchRoute", () => {
     }) as never);
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 초안" } });
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(1);
+    await openYujin();
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("");
     fireEvent.change(screen.getByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "B 초안" } });
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
+    await openYujin();
     expect(await screen.findByRole("textbox", { name: "유진에게 요청하기" })).toHaveValue("A 초안");
   });
 
@@ -3884,7 +4743,8 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
@@ -3924,7 +4784,8 @@ describe("EditorWorkbenchRoute", () => {
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(1);
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(await screen.findByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "A 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(sendSignalA).not.toBeUndefined());
@@ -3933,7 +4794,8 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(1);
     expect(sendSignalA.aborted).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: "유진과 편집 항목" }));
+    fireEvent.click(screen.getByRole("button", { name: "세부 정보" }));
+    await openYujin();
     fireEvent.change(screen.getByRole("textbox", { name: "유진에게 요청하기" }), { target: { value: "B 요청" } });
     fireEvent.click(screen.getByRole("button", { name: "요청 보내기" }));
     await waitFor(() => expect(sendSignalB).not.toBeUndefined());
@@ -3949,7 +4811,7 @@ describe("EditorWorkbenchRoute", () => {
 
 describe("부분 재생성 표시", () => {
   it("영향 범위와 결과를 내부 값이 아니라 창작자 언어로 말한다", () => {
-    expect(affectedAreaLabel("subtitle render")).toBe("자막 입히기");
+    expect(affectedAreaLabel("subtitle render")).toBe("캡션 입히기");
     expect(affectedAreaLabel("capcut export")).toBe("CapCut 내보내기");
     expect(affectedAreaLabel("segment copy")).toBe("장면 대본");
     // 모르는 값이 와도 영어 원값을 그대로 내보내지 않는다.
@@ -3957,5 +4819,42 @@ describe("부분 재생성 표시", () => {
 
     expect(partialStatusLabel("succeeded")).toBe("완료");
     expect(partialStatusLabel("failed")).toBe("실패");
+  });
+});
+
+describe("서버 출력 변형 연결", () => {
+  it("loads a server variant and sends explicit patch/materialize commands", async () => {
+    const variant = {
+      variant_id: "vertical-full",
+      kind: "vertical_full",
+      source_session_id: "session-a",
+      source_session_revision: 1,
+      variant_revision: 3,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [],
+      conflicts: [],
+    };
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [variant] } as never);
+    const patch = vi.spyOn(api, "patchOutputVariant").mockResolvedValue({ variant: { ...variant, variant_revision: 4, overrides: { ...variant.overrides, crop: { mode: "creator_adjusted" } } } } as never);
+    const materialize = vi.spyOn(api, "materializeOutputVariant").mockResolvedValue({ materialization: { timeline_id: "timeline-variant", source_session_id: "session-a", source_session_revision: 1, source_variant_id: "vertical-full", source_variant_revision: 4 } } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    fireEvent.click(screen.getByRole("button", { name: "출력 변형 펼치기" }));
+    fireEvent.click(screen.getByRole("tab", { name: "세로" }));
+    expect(await screen.findByText("서버 변형 버전 3")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "크롭 저장" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledWith("project-a", "vertical-full", expect.objectContaining({ expected_variant_revision: 3 })));
+    fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("project-a", "vertical-full", { expected_master_session_revision: 1 }));
   });
 });

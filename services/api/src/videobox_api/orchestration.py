@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+import logging
 from urllib.request import urlopen
+from uuid import uuid4
 
+from videobox_core_engine.caption_translation_service import CaptionTranslationService
+from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
+from videobox_core_engine.dubbing import DubbingFit, dubbing_lines, unfitted_scene_message
+from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
     LocalOnlyStructuredRuntime,
@@ -17,7 +24,12 @@ from videobox_provider_interfaces.llm import (
     StructuredLLMProvider,
     StructuredLLMResponse,
 )
+from videobox_core_engine.audio_export import extract_audio_only
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.mojibake import repair_mojibake_text
+from videobox_core_engine.narration_retake_detection import detect_retake_candidates
+from videobox_core_engine.reference_style_analysis import analyze_color, analyze_pacing
+from videobox_core_engine.youtube_import import YoutubeImportError, download_youtube_video, is_youtube_url
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -104,6 +116,9 @@ def build_local_only_runtime_service(
     )
 
 
+_LOGGER = logging.getLogger(__name__)
+
+
 class ApiOrchestrator:
     def __init__(
         self, store: LocalProjectStore, *, pipeline: LocalPipelineRunner | None = None,
@@ -114,6 +129,24 @@ class ApiOrchestrator:
         # This is intentionally a provider-neutral local planning seam. No
         # LLM/provider transport is constructed for an interview.
         self.creation_interview_runtime = creation_interview_runtime or DeterministicCreationInterviewRuntime()
+        # 유튜브 학습 작업 상태(owner 결정 2026-08-29: "비동기로 바꾼다").
+        # 다운로드·오디오 추출·컷/색감 분석을 합치면 nginx 프록시의 330초
+        # 타임아웃보다 오래 걸릴 수 있어 요청 하나 안에서 동기로 끝내지 않는다.
+        # **메모리에만 있다** -- 이 작업은 재시도해도 비용이 크지 않은 일회성
+        # 가져오기라, 재시작 사이 생존이 필요한 진짜 작업 큐(`MediaAnalysisService`가
+        # 쓰는 SQLite claim 방식)를 새로 만들 만큼 값이 크지 않다고 판단했다.
+        # 서버가 재시작되면 진행 중이던 작업은 사라지고 owner가 다시 시도해야
+        # 한다 -- 그 트레이드오프를 감수한다.
+        self._youtube_import_jobs: dict[str, dict[str, Any]] = {}
+        self._youtube_import_jobs_lock = threading.Lock()
+        # 더빙도 같은 이유로 비동기다. **장면당 13초**가 걸려서(2026-09-03 실측,
+        # chatterbox) 스물세 장면이면 nginx 330초 벽에 부딪힌다. 창작자의 실제
+        # 영상은 그보다 훨씬 길다 -- 8분짜리면 백 장면이 넘는다.
+        #
+        # 유튜브 학습과 똑같이 메모리에만 둔다. 다시 눌러도 되는 일이라
+        # 재시작 사이 살아남을 진짜 작업 큐를 새로 만들 값어치는 없다.
+        self._dubbing_jobs: dict[str, dict[str, Any]] = {}
+        self._dubbing_jobs_lock = threading.Lock()
 
     def create_creation_brief(self, **kwargs: Any) -> dict[str, Any]:
         return self.pipeline.create_creation_brief(runtime=self.creation_interview_runtime, **kwargs)
@@ -179,6 +212,40 @@ class ApiOrchestrator:
 
     def list_voice_sample_assets(self, *, project_id: str) -> list[dict[str, Any]]:
         return self.store.list_assets(project_id=project_id, asset_type=AssetType.VOICE_SAMPLE_AUDIO)
+
+    def list_voice_sample_assets_across_projects(
+        self, *, include_archived: bool = False
+    ) -> list[dict[str, Any]]:
+        """모든 프로젝트의 목소리 샘플을 한 목록으로. **읽기만 한다.**
+
+        사이드바 `내 자산 > 내 목소리`는 프로젝트를 고르기 전에 열린다
+        (owner 승인 2026-09-04). 목소리 샘플은 프로젝트마다 따로 있는 sqlite에만
+        있어서 프로젝트 수만큼 요청해야 했다 -- 프로젝트가 30개를 넘었다.
+
+        **얕은 검사다.** 프로젝트 db를 한 번씩 열어 `assets` 표만 읽는다.
+        편집 세션·타임라인은 열지 않는다 -- 자료실 `usage` 깊은 검사가 그것들을
+        전부 읽어 실측 1.67초였고 그래서 얕은 검사와 나뉘었다
+        (`routers/library_assets.py`의 `get_library_asset_usage`).
+
+        프로젝트 하나를 못 읽어도 나머지는 돌려준다 -- 한 프로젝트의 db가
+        깨졌다고 owner의 목소리 목록 전체가 비어 보이면 안 된다
+        (`list_assets_across_projects`가 건너뛴다).
+        """
+        voices = [
+            {**asset, "project_name": repair_mojibake_text(str(asset.get("project_name") or ""))}
+            for asset in self.store.list_assets_across_projects(
+                asset_type=AssetType.VOICE_SAMPLE_AUDIO, include_archived=include_archived
+            )
+        ]
+        # 새로 녹음한 것이 위로. created_at이 같으면 asset_id로 갈라 순서를 고정한다.
+        voices.sort(
+            key=lambda voice: (str(voice.get("created_at") or ""), str(voice.get("asset_id") or "")),
+            reverse=True,
+        )
+        return voices
+
+    def list_narration_audio_assets(self, *, project_id: str) -> list[dict[str, Any]]:
+        return self.store.list_assets(project_id=project_id, asset_type=AssetType.NARRATION_AUDIO)
 
     def register_sfx_asset(self, *, project_id: str, source_path: Path) -> RegisteredAsset:
         asset = self.pipeline.register_sfx_asset(project_id=project_id, source_path=source_path)
@@ -285,6 +352,105 @@ class ApiOrchestrator:
             storage_uri=asset["storage_uri"],
         )
 
+    def rename_voice_sample_asset(self, *, project_id: str, asset_id: str, display_name: str) -> dict[str, Any]:
+        """목소리에 이름을 붙인다. 목소리 자산이 아니면 거절한다."""
+        asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+        if str(asset.get("asset_type") or "") != AssetType.VOICE_SAMPLE_AUDIO.value:
+            raise ValueError("rename_voice_sample_asset requires a voice_sample_audio asset.")
+        return self.store.update_asset_metadata(
+            project_id=project_id, asset_id=asset_id, metadata_patch={"display_name": display_name},
+        )
+
+    def delete_voice_sample_asset(self, *, project_id: str, asset_id: str) -> None:
+        """목소리를 지운다. **목소리 자산만** 지운다 -- 자산 id를 잘못 넘겨
+        내레이션이나 촬영본이 사라지면 되돌릴 길이 없다."""
+        asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+        if str(asset.get("asset_type") or "") != AssetType.VOICE_SAMPLE_AUDIO.value:
+            raise ValueError("delete_voice_sample_asset requires a voice_sample_audio asset.")
+        self.store.delete_asset(project_id=project_id, asset_id=asset_id)
+
+    def start_youtube_reference_style_import(self, *, project_id: str, url: str) -> dict[str, Any]:
+        """유튜브 학습을 **바로 시작만** 하고 돌아온다(owner 결정 2026-08-29).
+
+        실제 다운로드·분석은 `run_youtube_reference_style_import_job`이 백그라운드에서
+        한다 -- 그래야 nginx 프록시 330초 타임아웃보다 오래 걸리는 긴 영상도
+        요청 자체는 즉시 끝난다. 주소 형식만 여기서 먼저 확인해 owner가 바로
+        고칠 수 있는 실수(유튜브 링크가 아님)는 기다리게 하지 않는다.
+        """
+        if not is_youtube_url(url):
+            raise YoutubeImportError("youtube_url_invalid")
+        job_id = uuid4().hex
+        with self._youtube_import_jobs_lock:
+            self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "processing", "result": None, "error_detail": None}
+        return {"job_id": job_id, "status": "processing"}
+
+    def run_youtube_reference_style_import_job(self, *, project_id: str, job_id: str, url: str) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        try:
+            result = self.import_reference_style_from_youtube(project_id=project_id, url=url)
+            with self._youtube_import_jobs_lock:
+                self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "succeeded", "result": result, "error_detail": None}
+        except Exception as exc:
+            with self._youtube_import_jobs_lock:
+                self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "failed", "result": None, "error_detail": str(exc)}
+
+    def get_youtube_reference_style_import_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        with self._youtube_import_jobs_lock:
+            job = self._youtube_import_jobs.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            raise KeyError("youtube_import_job_not_found")
+        return {"job_id": job_id, "status": job["status"], "result": job["result"], "error_detail": job["error_detail"]}
+
+    def import_reference_style_from_youtube(self, *, project_id: str, url: str) -> dict[str, Any]:
+        """본인 유튜브 영상 하나에서 목소리 샘플과 편집 스타일 리포트를 함께 뽑는다.
+
+        owner 요청(2026-08-29): "내 유튜브 영상 있는걸로 학습은 안돼?" 영상을
+        두 번 받지 않는다 -- 한 번 내려받고, 그 파일에서 소리(목소리 샘플로
+        등록)와 그림(컷 빠르기·색감 분석)을 같이 뽑는다. 내려받은 영상 자체는
+        프로젝트 자산으로 남기지 않는다 -- 이번 요청은 "이 영상을 소재로 쓰겠다"가
+        아니라 "이 영상에서 스타일만 배우겠다"였다.
+
+        **동기 버전은 그대로 남긴다** -- `run_youtube_reference_style_import_job`이
+        이 메서드를 그대로 부른다. 실제 무거운 일은 전부 여기 있다.
+        """
+        staging_dir = self.store.project_root(project_id) / "staging"
+        video_path: Path | None = None
+        try:
+            video_path = download_youtube_video(url, staging_dir)
+            audio_path = video_path.with_suffix(".reference-audio.m4a")
+            ffmpeg_binary = getattr(self.pipeline.final_renderer, "ffmpeg_binary", "ffmpeg")
+            ffprobe_binary = getattr(self.pipeline.final_renderer, "ffprobe_binary", "ffprobe")
+            extract_audio_only(
+                source_video_path=video_path, destination_audio_path=audio_path,
+                ffmpeg_binary=ffmpeg_binary,
+            )
+            voice_asset = self.register_voice_sample_asset(project_id=project_id, source_path=audio_path)
+            pacing = analyze_pacing(video_path, ffmpeg_binary=ffmpeg_binary, ffprobe_binary=ffprobe_binary)
+            color = analyze_color(video_path, ffmpeg_binary=ffmpeg_binary)
+            return {
+                "voice_sample_asset_id": voice_asset.asset_id,
+                "pacing": {
+                    "average_clip_duration_sec": pacing.average_clip_duration_sec,
+                    "clip_count": pacing.clip_count,
+                    "shortest_clip_sec": pacing.shortest_clip_sec,
+                    "longest_clip_sec": pacing.longest_clip_sec,
+                },
+                "color": {
+                    "average_brightness": color.average_brightness,
+                    "average_colorfulness": color.average_colorfulness,
+                    "warm_cool_bias": color.warm_cool_bias,
+                    "sample_count": color.sample_count,
+                },
+            }
+        finally:
+            if video_path is not None:
+                video_path.unlink(missing_ok=True)
+                audio_candidate = video_path.with_suffix(".reference-audio.m4a")
+                # 오디오는 목소리 샘플로 이미 프로젝트 저장소에 복사됐다 -- 스테이징
+                # 사본은 남겨 둘 이유가 없다.
+                if audio_candidate.is_file() and audio_candidate != video_path:
+                    audio_candidate.unlink(missing_ok=True)
+
     def generate_tts_replacement_candidate(
         self,
         *,
@@ -342,6 +508,39 @@ class ApiOrchestrator:
             project_id=project_id,
             raw_video_asset_id=raw_video_asset_id,
         )
+
+    def transcribe_source_video(self, *, project_id: str, asset_id: str) -> dict[str, Any]:
+        """올린 영상에서 말을 받아써 **대본으로 쓸 글**까지 돌려준다.
+
+        `start_transcription`은 주소만 돌려주고 글을 버린다. 화면은 그 글을 보여
+        주고 대본으로 삼아야 하므로 여기서 함께 꺼낸다. 받아쓰기는 자산 종류를
+        가리지 않아 영상 파일에도 그대로 돈다.
+        """
+        started = self.pipeline.start_transcription(project_id=project_id, narration_asset_id=asset_id)
+        return self.pipeline.get_transcription_result(project_id=project_id, job_id=started["job_id"])
+
+    def transcribe_source_voice(self, *, project_id: str, asset_id: str) -> dict[str, Any]:
+        """녹음한 목소리만으로 시작하는 길(owner 요청 2026-08-29).
+
+        `transcribe_source_video`와 받아쓰는 방식은 완전히 같다 -- 받아쓰기는
+        영상이든 순수 음성이든 가리지 않는다. 다른 것은 여기서 그 결과 위에
+        "다시 들어볼 구간"까지 같이 골라 준다는 점이다
+        (`narration_retake_detection.detect_retake_candidates`). **조용히
+        지우지 않는다** -- 후보만 얹어 돌려주고, 뺄지는 화면에서 owner가 고른다.
+        """
+        transcription = self.transcribe_source_video(project_id=project_id, asset_id=asset_id)
+        candidates = detect_retake_candidates(transcription.get("segments") or [])
+        transcription["retake_candidates"] = [
+            {
+                "segment_index": candidate.segment_index,
+                "start_sec": candidate.start_sec,
+                "end_sec": candidate.end_sec,
+                "text": candidate.text,
+                "reason": candidate.reason,
+            }
+            for candidate in candidates
+        ]
+        return transcription
 
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
         result = self.pipeline.start_transcription(
@@ -447,6 +646,9 @@ class ApiOrchestrator:
     def create_editing_session(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.create_editing_session(project_id=project_id, timeline_job_id=timeline_job_id)
 
+    def create_blank_editing_session(self, *, project_id: str) -> dict[str, Any]:
+        return self.pipeline.create_blank_editing_session(project_id=project_id)
+
     def create_script_draft_editing_session(self, *, project_id: str, script_asset_id: str) -> dict[str, Any]:
         return self.pipeline.create_script_draft_editing_session(project_id=project_id, script_asset_id=script_asset_id)
 
@@ -512,6 +714,12 @@ class ApiOrchestrator:
     def get_editing_session(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         return self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
 
+    def suggest_scene_transitions(self, *, project_id: str, session_id: str) -> list[dict[str, Any]]:
+        from videobox_core_engine.transitions import suggest_scene_transitions
+
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return suggest_scene_transitions(session.get("segments", []))
+
     def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
         return self.pipeline.get_latest_editing_session(project_id=project_id)
 
@@ -524,12 +732,23 @@ class ApiOrchestrator:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         timeline = self.store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
         exact_preview = self.get_latest_exact_preview_for_session(project_id=project_id, session_id=session_id)
+
+        def _storage_uri(asset_id: str) -> str | None:
+            # 자산 하나를 못 찾아도 나머지 화면은 그려야 한다 -- 못 찾으면
+            # 지어낸 경로가 그대로 남고, 지금까지와 똑같이 보인다.
+            try:
+                asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
+            except Exception:  # noqa: BLE001
+                return None
+            return str(asset.get("storage_uri") or "").strip() or None
+
         return build_editor_playback_manifest(
             project_id=project_id,
             session=session,
             timeline=timeline,
             asset_content_url_prefix=f"/api/projects/{project_id}/assets",
             exact_preview=exact_preview,
+            resolve_asset_uri=_storage_uri,
         )
 
     def _exact_preview_response(self, *, project_id: str, record: dict[str, Any]) -> dict[str, Any]:
@@ -608,11 +827,23 @@ class ApiOrchestrator:
     def set_editing_session_segment_bounds(self, *, project_id: str, session_id: str, segment_id: str, start_sec: float, end_sec: float, expected_revision: int) -> dict[str, Any]:
         return self.pipeline.set_editing_session_segment_bounds(project_id=project_id, session_id=session_id, segment_id=segment_id, start_sec=start_sec, end_sec=end_sec, expected_revision=expected_revision)
 
+    def set_editing_session_segment_ripple_playback_rate(self, *, project_id: str, session_id: str, segment_id: str, rate: float, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.set_editing_session_segment_ripple_playback_rate(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            rate=rate,
+            expected_revision=expected_revision,
+        )
+
     def reorder_editing_session_segments(self, *, project_id: str, session_id: str, segment_ids: list[str], bounds_by_id: dict[str, dict[str, float]] | None, expected_revision: int) -> dict[str, Any]:
         return self.pipeline.reorder_editing_session_segments(project_id=project_id, session_id=session_id, segment_ids=segment_ids, bounds_by_id=bounds_by_id, expected_revision=expected_revision)
 
     def update_editing_session_timeline_placements(self, *, project_id: str, session_id: str, changes: list[dict[str, object]], expected_revision: int) -> dict[str, Any]:
         return self.pipeline.update_editing_session_timeline_placements(project_id=project_id, session_id=session_id, changes=changes, expected_revision=expected_revision)
+
+    def update_editing_session_track_states(self, *, project_id: str, session_id: str, states: dict[str, Any], expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_track_states(project_id=project_id, session_id=session_id, states=states, expected_revision=expected_revision)
 
     def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
         return self.pipeline.undo_editing_session(project_id=project_id, session_id=session_id, expected_revision=expected_revision)
@@ -636,6 +867,7 @@ class ApiOrchestrator:
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
+        language: str | None = None,
     ) -> dict[str, Any]:
         return self.pipeline.update_editing_session_segment_caption(
             project_id=project_id,
@@ -645,6 +877,236 @@ class ApiOrchestrator:
             expected_revision=expected_revision,
             proposal_id=proposal_id,
             candidate_id=candidate_id,
+            language=language,
+        )
+
+    def apply_captions_from_transcript(
+        self, *, project_id: str, session_id: str, transcription_job_id: str, expected_revision: int
+    ) -> dict[str, Any]:
+        return self.pipeline.apply_editing_session_captions_from_transcript(
+            project_id=project_id,
+            session_id=session_id,
+            transcription_job_id=transcription_job_id,
+            expected_revision=expected_revision,
+        )
+
+    def translate_editing_session_captions(
+        self, *, project_id: str, session_id: str, language: str, expected_revision: int, runtime: Any
+    ) -> dict[str, Any]:
+        """장면 자막을 로컬 모델로 옮겨 원본 옆에 쌓고, 그 언어로 고른다.
+
+        **이미 번역해 둔 장면은 다시 부르지 않는다.** 자막 하나를 고친 뒤 다시
+        누르면 고친 장면만 새로 번역된다 -- 마흔 장면을 통째로 다시 돌리면
+        기다리는 시간도 길고, 이미 손본 번역까지 모델이 갈아치운다.
+        """
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        pending: list[tuple[str, str]] = []
+        for segment in session.get("segments", []):
+            if not isinstance(segment, dict):
+                continue
+            if str(segment.get("cut_action") or "keep") == "remove":
+                continue
+            text = str(segment.get("caption_text") or "").strip()
+            if not text:
+                continue
+            existing = segment.get("caption_translations")
+            if isinstance(existing, dict) and str(existing.get(language) or "").strip():
+                continue
+            pending.append((str(segment.get("segment_id") or ""), text))
+        texts_by_segment = (
+            CaptionTranslationService(runtime=runtime).translate(
+                project_id=project_id, language=language, captions=pending
+            )
+            if pending
+            else {}
+        )
+        return self.pipeline.set_editing_session_caption_translations(
+            project_id=project_id, session_id=session_id, language=language,
+            texts_by_segment=texts_by_segment, expected_revision=expected_revision,
+        )
+
+    def start_dubbing(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        language: str,
+        expected_revision: int,
+        voice_sample_asset_id: str | None = None,
+    ) -> dict[str, Any]:
+        """더빙을 **시작만** 하고 돌아온다. 실제 작업은 백그라운드에서 한다.
+
+        장면당 13초가 걸려서(2026-09-03 실측) 스물세 장면이면 nginx 330초 벽에
+        부딪힌다. 창작자의 실제 영상은 그보다 훨씬 길다. 유튜브 학습을 비동기로
+        바꾼 것과 같은 이유이고, 같은 방식을 쓴다.
+
+        언어가 틀린 것처럼 **바로 알 수 있는 실수**는 여기서 먼저 막는다 --
+        기다리게 한 뒤 알려 줄 이유가 없다.
+        """
+        if language not in SUPPORTED_CAPTION_LANGUAGES:
+            raise ValueError(f"Unsupported caption language: {language}")
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        # **편집본이 그 사이 바뀌었으면 여기서 막는다.** 안 막으면 52분을 다
+        # 돌린 뒤 저장할 때 충돌로 통째로 버려진다 -- 창작자는 목소리가 다
+        # 만들어진 줄 알고 기다린 뒤에야 안다.
+        if int(session.get("session_revision") or 1) != expected_revision:
+            raise EditingSessionConflict(session)
+        total = len(dubbing_lines(editing_session=session, language=language))
+        job_id = uuid4().hex
+        with self._dubbing_jobs_lock:
+            self._dubbing_jobs[job_id] = {
+                "project_id": project_id, "status": "processing", "result": None,
+                "error_detail": None, "done_scene_count": 0, "total_scene_count": total,
+            }
+        return {"job_id": job_id, "status": "processing", "total_scene_count": total}
+
+    def run_dubbing_job(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        job_id: str,
+        language: str,
+        expected_revision: int,
+        voice_sample_asset_id: str | None = None,
+    ) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        def progress(done: int) -> None:
+            with self._dubbing_jobs_lock:
+                job = self._dubbing_jobs.get(job_id)
+                if job is not None:
+                    job["done_scene_count"] = done
+        try:
+            result = self.dub_editing_session(
+                project_id=project_id, session_id=session_id, language=language,
+                expected_revision=expected_revision,
+                voice_sample_asset_id=voice_sample_asset_id, on_progress=progress,
+            )
+            with self._dubbing_jobs_lock:
+                job = self._dubbing_jobs.get(job_id) or {}
+                self._dubbing_jobs[job_id] = {
+                    **job, "project_id": project_id, "status": "succeeded",
+                    "result": {
+                        "dubbed_scene_count": result.get("dubbed_scene_count"),
+                        "dubbing_notice": result.get("dubbing_notice"),
+                        "session_revision": result.get("session_revision"),
+                    },
+                    "error_detail": None,
+                }
+        except Exception as exc:  # noqa: BLE001
+            with self._dubbing_jobs_lock:
+                job = self._dubbing_jobs.get(job_id) or {}
+                self._dubbing_jobs[job_id] = {
+                    **job, "project_id": project_id, "status": "failed",
+                    "result": None, "error_detail": str(exc),
+                }
+
+    def get_dubbing_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        with self._dubbing_jobs_lock:
+            job = self._dubbing_jobs.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            raise KeyError("dubbing_job_not_found")
+        return {
+            "job_id": job_id, "status": job["status"], "result": job["result"],
+            "error_detail": job["error_detail"],
+            "done_scene_count": job.get("done_scene_count", 0),
+            "total_scene_count": job.get("total_scene_count", 0),
+        }
+
+    def dub_editing_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        language: str,
+        expected_revision: int,
+        voice_sample_asset_id: str | None = None,
+        on_progress: Any = None,
+    ) -> dict[str, Any]:
+        """옮겨 둔 자막을 그 언어 목소리로 읽혀 내레이션을 바꾼다.
+
+        **대본은 1단계가 만든 번역을 그대로 쓴다.** 따로 번역하면 화면의 자막과
+        들리는 말이 어긋나고, 창작자가 자막을 고쳐도 목소리는 옛말을 계속 읽는다.
+
+        길이가 안 맞는 장면은 건너뛰고 **원래 목소리를 그대로 둔다** -- 무엇을
+        못 넣었는지는 `dubbing_notice`로 화면에 그대로 말해 준다.
+        """
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        lines = dubbing_lines(editing_session=session, language=language)
+        selections: dict[str, tuple[str, str]] = {}
+        fits: list[tuple[str, DubbingFit]] = []
+        for line in lines:
+            try:
+                take = self.pipeline.generate_dubbed_take(
+                    project_id=project_id,
+                    segment_id=line.segment_id,
+                    text=line.text,
+                    language=language,
+                    target_duration_sec=line.target_duration_sec,
+                    voice_sample_asset_id=voice_sample_asset_id,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # **한 장면이 죽어도 나머지를 살린다.** 목소리 복제는 장면당 20초가
+                # 넘게 걸려서, 스무 장면 중 열여덟째가 실패했다고 앞의 것을 전부
+                # 버리면 몇 분이 통째로 날아간다(코드리뷰 2026-09-02).
+                _LOGGER.warning(
+                    "dubbing take failed for segment %s: %s", line.segment_id, exc
+                )
+                fits.append((
+                    line.segment_id,
+                    DubbingFit(False, line.target_duration_sec, 0.0, 1.0, reason="engine_failed"),
+                ))
+                # 실패한 장면도 **지나간 장면이다.** 안 세면 진행 표시가 거기서
+                # 멈춰서 창작자는 더빙이 죽은 줄 안다.
+                if on_progress is not None:
+                    on_progress(len(selections) + len(fits))
+                continue
+            if take.candidate is None:
+                fits.append((line.segment_id, take.fit))
+                if on_progress is not None:
+                    on_progress(len(selections) + len(fits))
+                continue
+            selections[line.segment_id] = (
+                str(take.candidate["candidate_id"]), str(take.candidate["asset_id"])
+            )
+            if on_progress is not None:
+                # 스무 장면이면 사 분이 넘는다. 어디까지 왔는지 말해 줘야 한다.
+                on_progress(len(selections) + len(fits))
+        result = self.pipeline.set_editing_session_dubbed_takes(
+            project_id=project_id, session_id=session_id,
+            selections=selections, expected_revision=expected_revision,
+        )
+        if selections:
+            # **세션에 걸어 두는 것만으로는 완성본이 안 바뀐다.**
+            # 내레이션을 실제로 갈아 끼우는 것은 타임라인이고, 세션의 선택이
+            # 타임라인에 닿으려면 이 저장소가 이미 쓰는 부분 재생성을 지나야 한다
+            # (`tts_replacement` -> `tts_refresh` + `timeline_build`).
+            #
+            # 2026-09-02에 이 줄이 없어서 다섯 장면을 더빙하고 렌더까지 성공했는데
+            # **완성본이 이전 파일과 바이트까지 같았다.** 손으로 음성을 고르는
+            # 기존 경로도 같은 길을 지난다 -- 새 길을 내지 않고 그 길을 쓴다.
+            self.pipeline.start_editing_session_partial_regeneration(
+                project_id=project_id,
+                session_id=session_id,
+                segment_ids=sorted(selections),
+                fields=["tts_replacement"],
+                expected_revision=int(result["session_revision"]),
+            )
+            result = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        # 못 넣은 장면을 **사유별로** 말해 준다. "줄여라"와 "늘려라"는 창작자가
+        # 할 일이 다르고, "목소리를 못 만들었다"는 아예 다른 이야기다.
+        return {
+            **result,
+            "dubbed_scene_count": len(selections),
+            "dubbing_notice": unfitted_scene_message(fits),
+        }
+
+    def set_caption_language(
+        self, *, project_id: str, session_id: str, language: str | None, expected_revision: int
+    ) -> dict[str, Any]:
+        return self.pipeline.set_editing_session_caption_language(
+            project_id=project_id, session_id=session_id, language=language,
+            expected_revision=expected_revision,
         )
 
     def update_segment_cut_action(
@@ -661,6 +1123,23 @@ class ApiOrchestrator:
             session_id=session_id,
             segment_id=segment_id,
             cut_action=cut_action,
+            expected_revision=expected_revision,
+        )
+
+    def update_segment_transition(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        transition: dict[str, Any] | None,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_transition(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            transition=transition,
             expected_revision=expected_revision,
         )
 
@@ -833,6 +1312,12 @@ class ApiOrchestrator:
         segment_id: str,
         asset_id: str,
         text: str,
+        # 프리셋 넷은 선택이다. `None`이 "안 고름"이고, 그때는 이 기능이 생기기
+        # 전과 똑같이 저장된다 -- 여기서 기본값을 채우면 그 구분이 사라진다.
+        vertical: str | None = None,
+        horizontal: str | None = None,
+        size: str | None = None,
+        motion: str | None = None,
         expected_revision: int,
         proposal_id: str | None = None,
         candidate_id: str | None = None,
@@ -843,6 +1328,10 @@ class ApiOrchestrator:
             segment_id=segment_id,
             asset_id=asset_id,
             text=text,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+            motion=motion,
             expected_revision=expected_revision,
             proposal_id=proposal_id,
             candidate_id=candidate_id,
@@ -897,6 +1386,46 @@ class ApiOrchestrator:
         expected_revision: int,
     ) -> dict[str, Any]:
         return self.pipeline.remove_editing_session_segment_table_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            expected_revision=expected_revision,
+        )
+
+    def update_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        shape: str,
+        vertical: str,
+        horizontal: str,
+        size: str,
+        motion: str = "none",
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        return self.pipeline.update_editing_session_segment_shape_overlay(
+            project_id=project_id,
+            session_id=session_id,
+            segment_id=segment_id,
+            shape=shape,
+            vertical=vertical,
+            horizontal=horizontal,
+            size=size,
+            motion=motion,
+            expected_revision=expected_revision,
+        )
+
+    def remove_segment_shape_overlay(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        segment_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        return self.pipeline.remove_editing_session_segment_shape_overlay(
             project_id=project_id,
             session_id=session_id,
             segment_id=segment_id,
@@ -1034,6 +1563,11 @@ class ApiOrchestrator:
     def start_final_render_job(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.start_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id)
 
+    def start_variant_renders(self, *, project_id: str, session_id: str, variant_ids: list[str]) -> dict[str, Any]:
+        return self.pipeline.start_variant_renders(
+            project_id=project_id, session_id=session_id, variant_ids=variant_ids
+        )
+
     def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         self.pipeline.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
 
@@ -1045,6 +1579,22 @@ class ApiOrchestrator:
 
     def get_final_render_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_final_render_result(project_id=project_id, job_id=job_id)
+
+    # owner 요청(2026-08-28): 프리뷰 공유 링크 -- 토큰 링크 방식 승인. 이 앱은
+    # 지금까지 인증이 전혀 없었다는 점을 밝혀 둔다. 아래 넷은 store에 그대로 위임한다.
+    def create_preview_share(self, *, project_id: str, export_id: str) -> dict[str, Any]:
+        return self.store.create_preview_share(project_id=project_id, export_id=export_id)
+
+    def get_preview_share(self, *, token: str) -> dict[str, Any] | None:
+        return self.store.get_preview_share_by_token(token=token)
+
+    def revoke_preview_share(self, *, project_id: str, share_id: str) -> None:
+        self.store.revoke_preview_share(project_id=project_id, share_id=share_id)
+
+    def list_preview_shares_for_render(
+        self, *, project_id: str, export_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self.store.list_preview_shares(project_id=project_id, export_id=export_id)
 
     def start_capcut_draft_export(self, *, project_id: str, timeline_job_id: str) -> dict[str, Any]:
         return self.pipeline.start_capcut_draft_export(project_id=project_id, timeline_job_id=timeline_job_id)

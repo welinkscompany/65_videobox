@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from typing import Any
 import asyncio
 import base64
 import binascii
@@ -24,7 +26,7 @@ from videobox_api.orchestration import (
     build_local_only_runtime_service,
 )
 from videobox_api.asset_browser_preview_service import AssetBrowserPreviewService
-from videobox_api.provider_factories import _build_pycapcut_exporter, _build_stt_provider, _build_tts_provider
+from videobox_api.provider_factories import _build_pycapcut_exporter, _build_scene_image_provider, _build_scene_video_provider, _build_stt_provider, _build_tts_provider
 from videobox_api.response_normalizers import (
     _build_preflight_review_prediction,
     _build_targeted_segments,
@@ -38,18 +40,37 @@ from videobox_api.routers.atomic_draft_bundles import build_atomic_draft_bundles
 from videobox_api.routers.editing_session import build_editing_session_router
 from videobox_api.routers.director_proposals import build_director_proposals_router
 from videobox_api.routers.editor_library import build_editor_library_router
+from videobox_api.routers.caption_fonts import build_caption_fonts_router
 from videobox_api.routers.jobs import build_jobs_router
 from videobox_api.routers.live_smoke_attestation import build_live_smoke_attestation_router
 from videobox_api.routers.media_inbox import build_media_inbox_router
 from videobox_api.routers.media_library import build_media_library_router
+from videobox_api.routers.format_templates import build_format_templates_router
+from videobox_api.routers.library_assets import build_library_assets_router
 from videobox_api.routers.media_analysis import build_media_analysis_router
 from videobox_api.routers.outputs import build_outputs_router
+from videobox_api.routers.creation_recommendations import build_creation_recommendations_router
+from videobox_api.routers.preview_shares import build_preview_shares_router
 from videobox_api.routers.hermes_conversation import build_hermes_conversation_router
 from videobox_api.routers.hermes_operations import build_hermes_operations_router
 from videobox_api.routers.projects import build_projects_router
 from videobox_api.routers.review import build_review_router
+from dataclasses import replace
+
+from videobox_core_engine.infographic_host_bridge import InfographicHostBridge
+from videobox_core_engine.infographic_service import InfographicService
+from videobox_api.routers.infographics import build_infographics_router
+from videobox_api.routers.scene_images import build_scene_images_router
+from videobox_api.routers.scene_videos import build_scene_videos_router
+from videobox_api.routers.script_drafts import build_script_drafts_router
+from videobox_core_engine.scene_image_prompt import SceneImagePromptWriter
+from videobox_core_engine.script_draft_writer import ScriptDraftWriter
+from videobox_core_engine.scene_image_service import SceneImageService
+from videobox_core_engine.scene_video_service import SceneVideoService
 from videobox_api.routers.timeline import build_timeline_router
 from videobox_api.routers.yujin_memory import build_yujin_memory_router
+from videobox_api.routers.footage_organizer import build_footage_organizer_router
+from videobox_api.routers.output_variants import build_output_variants_router
 from videobox_core_engine.auto_cut import AutoCutPlanner
 from videobox_core_engine.asset_browser_preview import FFmpegBrowserPreviewRenderer, FFprobeBrowserPreviewProbe
 from videobox_core_engine.creation_interview import CreationInterviewRuntime, DeterministicCreationInterviewRuntime
@@ -60,6 +81,8 @@ from videobox_core_engine.local_pipeline import (
 )
 from videobox_core_engine.library_audio_indexer import index_pending_library_audio
 from videobox_core_engine.library_footage_indexer import index_pending_library_footage
+from videobox_core_engine.library_ingest import LibraryIngestService
+from videobox_core_engine.library_media_facts import library_assets_needing_media_facts, record_library_media_facts
 from videobox_core_engine.media_inbox import AUDIO_EXTENSIONS, MediaInboxConfig, run_inbox_watcher_loop
 from videobox_core_engine.owner_audio_library import register_owner_audio_library
 from videobox_core_engine.media_analysis import MediaAnalysisService, assets_needing_reanalysis
@@ -72,9 +95,12 @@ from videobox_core_engine.recommenders import LocalOnlyKeywordBrollRecommender, 
 from videobox_core_engine.review_guidance import LocalFirstReviewGuidanceBuilder
 from videobox_core_engine.script_scene_planner import LocalFirstSegmentAnalyzer
 from videobox_core_engine.settings import (
+    resolve_tts_engine_config,
     DEFAULT_PROJECTS_ROOT,
     AutoCutConfig,
     CapCutDraftExportConfig,
+    ImageGenerationConfig,
+    VideoGenerationConfig,
     LocalOpenAICompatibleRuntimeConfig,
     TTSEngineConfig,
     WhisperSTTConfig,
@@ -82,12 +108,18 @@ from videobox_core_engine.settings import (
     resolve_capcut_draft_export_config,
     resolve_database_url,
     resolve_enable_local_media_analysis,
+    resolve_image_generation_config,
+    resolve_video_generation_config,
     resolve_container_snapshot_root,
+    resolve_infographic_timeout_seconds,
     resolve_local_runtime_config,
     resolve_media_inbox_library_root,
     resolve_media_inbox_watch_enabled,
     resolve_media_inbox_watch_interval_seconds,
     resolve_media_inbox_watch_path,
+    resolve_media_inbox_archive_path,
+    resolve_media_inbox_reject_path,
+    resolve_media_inbox_sorting_enabled,
     resolve_owner_audio_library_root,
     resolve_owner_audio_watch_paths,
     resolve_projects_root,
@@ -95,6 +127,7 @@ from videobox_core_engine.settings import (
     resolve_whisper_stt_config,
 )
 from videobox_core_engine.container_snapshot import ContainerSnapshotError, verify_container_snapshot
+from videobox_storage.format_template_store import FormatTemplateStore
 from videobox_storage.local_project_store import LocalProjectStore, sha256_file
 from videobox_storage.media_library_store import MediaLibraryStore
 from videobox_storage.postgres_project_store import PostgresProjectStore
@@ -234,8 +267,13 @@ HERMES_EVENT_PRUNE_INTERVAL_SECONDS = 3600.0
 # searchable without them running anything. A bounded pass keeps a first
 # install of 130 files -- or a big drop of new ones -- from turning startup
 # into a long analysis run; what is left is picked up next minute.
+#
+# 8개/분은 **문구를 고쳤을 때** 너무 느렸다. 자산 130개를 다시 쓰는 데 17분이
+# 걸리고, 그동안 검색은 옛 문장과 새 문장이 섞인 채로 돈다. 색인기가 측정과
+# 문장을 따로 판단하게 바뀌어(파일이 그대로면 ffmpeg를 다시 돌리지 않는다)
+# 판 올림 재색인은 임베딩 한 번씩으로 싸졌다 -- 그 값에 맞춰 넓힌다.
 LIBRARY_AUDIO_INDEX_INTERVAL_SECONDS = 60.0
-LIBRARY_AUDIO_INDEX_BATCH = 8
+LIBRARY_AUDIO_INDEX_BATCH = 32
 
 # 낡은 분석을 한꺼번에 다 걸면 로컬 모델이 동시에 받고 전부 타임아웃한다.
 REANALYSIS_BATCH = 1
@@ -244,6 +282,11 @@ REANALYSIS_BATCH = 1
 # 달리 ffprobe 한 번은 싸지만, 촬영본이 쌓인 프로젝트에서 한 패스가 길어지지
 # 않게 색인·재분석과 같은 방식으로 끊는다.
 BROLL_MEDIA_FACTS_BACKFILL_BATCH = 4
+
+# 같은 이유로 개인 라이브러리 broll도 다시 잰다. library_ingest.py의 probe_metadata는
+# ingest 시점 1회뿐이라 실패하면 영구히 정보 없이 남는다(위 broll 백필과 달리 이
+# 대응물이 없었다 -- wave2-* 4개가 이 gap으로 계속 "길이 정보 없음"이었다).
+LIBRARY_MEDIA_FACTS_BACKFILL_BATCH = 4
 
 
 def _build_music_library_hooks(
@@ -256,7 +299,7 @@ def _build_music_library_hooks(
     라이브러리에서 아무거나 집어 주는 것보다 낫다.
     """
 
-    def search(query: str, limit: int) -> list[dict[str, object]]:
+    def search(query: str, limit: int, media_type: str = "music") -> list[dict[str, object]]:
         provider = getattr(app.state, "media_analysis_embedding_provider", None)
         model_name = (getattr(app.state, "media_analysis_profile", None) or {}).get(
             "embedding_model_name"
@@ -264,9 +307,21 @@ def _build_music_library_hooks(
         if provider is None or not model_name:
             return []
         response = provider.embed(EmbeddingRequest(model_name=model_name, inputs=(query,)))
+        vector = [float(value) for value in response.vectors[0]]
+        # **촬영본은 오디오 색인에 없다.** `find_audio_matches`는 이름 그대로
+        # 음악·효과음 색인이라, 영상을 이 함수로 찾으면 늘 빈손이다 -- 유진에게
+        # 영상 후보를 주기 시작한 첫날 이것 때문에 여전히 음악을 골랐다
+        # (2026-09-05). 화면의 자료실 검색이 갈라 부르는 것과 같게 맞춘다.
+        # **사진도 촬영본 색인에 있다**(2026-09-06). 둘 다 화면 자산이라 한 색인이
+        # 맡는다. 종류를 대서 사진을 물었을 때 촬영본이 섞이지 않게 한다 --
+        # 안 대면 사진 후보 자리에 영상이 온다.
+        if media_type in {"broll", "image"}:
+            return library_store.find_footage_matches(
+                query_embedding=vector, media_type=media_type, limit=limit
+            )
         return library_store.find_audio_matches(
-            query_embedding=[float(value) for value in response.vectors[0]],
-            media_type="music",
+            query_embedding=vector,
+            media_type=media_type,
             limit=limit,
         )
 
@@ -419,6 +474,36 @@ def _backfill_broll_media_facts(app: FastAPI) -> None:
             )
 
 
+def _backfill_library_media_facts(app: FastAPI) -> None:
+    """등록 때 ffprobe가 실패한 개인 라이브러리 broll의 길이·크기·오디오를 나중에 채운다.
+
+    `_backfill_broll_media_facts`의 라이브러리 버전이다. 라이브러리는 프로젝트에
+    묶이지 않으므로(전역 1개) project 순회가 없다.
+    """
+    media_library_store = getattr(app.state, "media_library_store", None)
+    probe = getattr(app.state, "media_analysis_probe", None)
+    roots = getattr(app.state, "library_asset_managed_roots", None)
+    if media_library_store is None or probe is None or not roots:
+        return
+    user_asset_store = media_library_store.user_asset_store
+    try:
+        recovered = [
+            pending["library_asset_id"]
+            for pending in library_assets_needing_media_facts(
+                store=user_asset_store, limit=LIBRARY_MEDIA_FACTS_BACKFILL_BATCH
+            )
+            if record_library_media_facts(store=user_asset_store, roots=roots, probe=probe, **pending)
+        ]
+    except Exception:
+        _LOGGER.warning(
+            "빠진 라이브러리 영상 정보를 다시 채우지 못했습니다.",
+            exc_info=True,
+        )
+        return
+    if recovered:
+        _LOGGER.info("빠져 있던 라이브러리 영상 정보 %d건을 채웠습니다.", len(recovered))
+
+
 def _recover_in_process_jobs(app: FastAPI) -> None:
     """A restart kills the daemon threads these jobs run on, but leaves their
     rows saying `running`. The owner sees a spinner that never stops, and
@@ -460,6 +545,13 @@ async def _poll_media_analysis(app: FastAPI, *, recover_running: bool) -> None:
                             profile=service.profile,
                         )
                     except Exception:
+                        _LOGGER.warning(
+                            "자산의 현재 캐시 열쇠를 계산하지 못했습니다 (project=%s, asset=%s). "
+                            "이번 회차에는 낡음 여부를 판단할 수 없어 다시 걸리지 않습니다.",
+                            project_id,
+                            asset_id,
+                            exc_info=True,
+                        )
                         continue
                 stale = assets_needing_reanalysis(
                     store=store,
@@ -627,6 +719,7 @@ async def _media_analysis_lifespan(app: FastAPI):
                     await asyncio.to_thread(_index_library_audio, app)
                     await asyncio.to_thread(_index_library_footage, app)
                     await asyncio.to_thread(_backfill_broll_media_facts, app)
+                    await asyncio.to_thread(_backfill_library_media_facts, app)
                 if loop_clock.time() >= next_prune_at:
                     # Book the next run before the prune can raise. Otherwise a
                     # failing prune keeps the old deadline and retries on every
@@ -663,6 +756,13 @@ async def _media_analysis_lifespan(app: FastAPI):
             # (`scan_inbox_candidates`가 빈 목록을 돌려준다). owner가 이름을
             # 정확히 맞춰 폴더를 만들어야만 동작한다는 뜻이라, 여기서 만들어
             # 둔다. 이미 있으면 아무 일도 하지 않는다.
+            #
+            # 옛 종류별 폴더는 만들지 않는다(`create_watch_path=False`) --
+            # owner는 2026-09-07부터 폴더 하나에만 넣는다. 빈 폴더를 원드라이브에
+            # 새로 만들어 두면 "여기 넣어도 되나"를 다시 헷갈리게 한다.
+            if not watch_config.create_watch_path:
+                if not watch_config.watch_path.is_dir():
+                    continue
             try:
                 watch_config.watch_path.mkdir(parents=True, exist_ok=True)
             except OSError:
@@ -735,6 +835,35 @@ class _UnavailableMediaAnalysisService:
         return self.store.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
 
 
+class _LazyLocalRuntime:
+    """처음 부를 때 로컬 런타임을 짓는다.
+
+    인포그래픽은 대부분의 세션에서 한 번도 안 불린다. 그런데 상한이 달라서
+    공용 런타임을 못 쓴다. 화면을 여는 것만으로 provider를 짓지 않는다는 규정
+    (`tests/test_local_media_ai_providers.py`)을 지키면서 그 둘을 같이 만족시키는
+    방법이 이것이다.
+
+    **하나만 짓는다.** 매번 지으면 요청마다 transport가 새로 생긴다.
+    """
+
+    __slots__ = ("_build", "_lock", "_runtime")
+
+    def __init__(self, *, build: Callable[[], Any]) -> None:
+        self._build = build
+        self._lock = threading.Lock()
+        self._runtime: Any = None
+
+    def generate_structured(self, **kwargs: Any) -> Any:
+        if self._runtime is None:
+            # 화면 요청은 스레드풀에서 돈다. 잠그지 않으면 첫 요청 둘이 나란히
+            # 들어왔을 때 런타임을 둘 짓고 하나를 버린다 -- "하나만 짓는다"가
+            # 주석에만 있는 말이 된다.
+            with self._lock:
+                if self._runtime is None:
+                    self._runtime = self._build()
+        return self._runtime.generate_structured(**kwargs)
+
+
 def create_app(
     *,
     projects_root: Path | None = None,
@@ -743,6 +872,12 @@ def create_app(
     whisper_stt_config: WhisperSTTConfig | None = None,
     capcut_draft_export_config: CapCutDraftExportConfig | None = None,
     tts_engine_config: TTSEngineConfig | None = None,
+    image_generation_config: ImageGenerationConfig | None = None,
+    scene_image_provider=None,
+    scene_image_prompt_writer=None,
+    video_generation_config: VideoGenerationConfig | None = None,
+    scene_video_provider=None,
+    script_draft_writer=None,
     capcut_handoff_service=None,
     local_only_runtime_service_factory=None,
     stt_provider=None,
@@ -750,6 +885,8 @@ def create_app(
     final_renderer=None,
     pycapcut_exporter=None,
     media_library_store: MediaLibraryStore | None = None,
+    footage_detector=None,
+    footage_derivative_renderer=None,
     vision_provider=None,
     embedding_provider=None,
     media_probe=None,
@@ -878,12 +1015,21 @@ def create_app(
     resolved_capcut_draft_export_config = (
         capcut_draft_export_config or resolve_capcut_draft_export_config()
     )
-    resolved_tts_engine_config = tts_engine_config or TTSEngineConfig()
+    resolved_tts_engine_config = tts_engine_config or resolve_tts_engine_config()
+    resolved_image_generation_config = image_generation_config or resolve_image_generation_config()
+    resolved_scene_image_provider = scene_image_provider or _build_scene_image_provider(
+        resolved_image_generation_config
+    )
+    resolved_video_generation_config = video_generation_config or resolve_video_generation_config()
+    resolved_scene_video_provider = scene_video_provider or _build_scene_video_provider(
+        resolved_video_generation_config
+    )
     _music_library_search, _music_project_asset = _build_music_library_hooks(
         library_store=resolved_media_library_store, project_store=store, app=app
     )
     pipeline = LocalPipelineRunner(
         store,
+        library_store=resolved_media_library_store,
         segment_analyzer=LocalFirstSegmentAnalyzer(runtime_service=runtime_service),
         broll_recommender=LocalOnlyKeywordBrollRecommender(runtime_service=runtime_service),
         music_recommender=LocalOnlyMusicRecommender(
@@ -959,6 +1105,10 @@ def create_app(
         analysis_service = _UnavailableMediaAnalysisService(store)
         orchestrator.media_analysis_service = analysis_service
         orchestrator.media_analysis_dispatcher = None
+    # 시험이 분석 배차를 붙잡을 자리. `app.state.media_analysis_dispatcher`는
+    # 만들 때 한 번 복사한 값이라, 나중에 갈아 끼워도 실제로 부르는 쪽
+    # (`_schedule_scene_analysis`)은 여전히 orchestrator를 본다.
+    app.state.orchestrator = orchestrator
     app.state.local_runtime_config = resolved_local_runtime_config
     app.state.store = store
     app.state.asset_browser_preview_service = AssetBrowserPreviewService(
@@ -977,6 +1127,49 @@ def create_app(
     app.state.whisper_stt_config = resolved_whisper_stt_config
     app.state.capcut_draft_export_config = resolved_capcut_draft_export_config
     app.state.tts_engine_config = resolved_tts_engine_config
+    app.state.image_generation_config = resolved_image_generation_config
+    # 켜지 않았으면 `None`이다. 라우터가 그것을 "꺼져 있다"로 답하고, 화면은
+    # 꺼진 것과 고장 난 것을 구분할 수 있다 (§10.14 2-C).
+    app.state.scene_image_service = (
+        SceneImageService(
+            store=store,
+            provider=resolved_scene_image_provider,
+            # 유진이 대본 한 줄을 영어 묘사로 다시 쓴다. 없으면 한국어 요청을
+            # 거절한다 -- 그대로 넣으면 24초 뒤에 엉뚱한 그림이 나온다.
+            prompt_writer=scene_image_prompt_writer
+            or SceneImagePromptWriter(runtime_service=runtime_service),
+        )
+        if resolved_scene_image_provider is not None
+        else None
+    )
+    app.state.video_generation_config = resolved_video_generation_config
+    # `scene_video_service`의 실제 구성은 `library_ingest_service`가 만들어진
+    # 뒤로 미룬다(아래) -- 자료실 등록(owner 요청 2026-08-29 3회차)을 넣으려면
+    # 그 서비스가 먼저 있어야 한다.
+    # 유진이 주제 한 줄에서 대본 초안을 쓴다. 첫 화면의 네 번째 길이 이것을 부른다.
+    # `SceneImageService`와 달리 켜고 끄는 설정이 없다 -- 부르는 곳이 유진의 두뇌
+    # 하나뿐이고, 그 두뇌는 이미 대화·추천·장면 계획이 모두 쓰고 있다.
+    app.state.script_draft_writer = script_draft_writer or ScriptDraftWriter(
+        runtime_service=runtime_service
+    )
+    # 인포그래픽 전용 런타임. **상한만 늘린 같은 로컬 모델이다** -- 나가는 곳은
+    # 그대로라 §10.14 조항 2-B의 경계는 변하지 않는다. 공용 런타임의 30초로는
+    # 이 일이 매번 실패한다(한 판 63~115초, 2026-09-07 실측).
+    #
+    # **처음 부를 때 만든다.** 여기서 바로 만들면 `create_app`이 런타임을 두 번
+    # 짓게 되고, `test_local_media_ai_providers.py`의 울타리가 그걸 잡는다. 그
+    # 울타리는 옳다 -- 화면을 여는 것만으로 provider를 짓지 않는다는 규정이고,
+    # 인포그래픽은 대부분의 세션에서 한 번도 안 불린다.
+    infographic_runtime_service = _LazyLocalRuntime(
+        build=lambda: build_local_only_runtime_service(
+            store=store,
+            local_runtime_config=replace(
+                resolved_local_runtime_config,
+                timeout_seconds=resolve_infographic_timeout_seconds(),
+            ),
+            local_http_client=urlopen,
+        )
+    )
     app.state.build_local_only_runtime_service = build_local_only_runtime_service
     app.state.local_only_runtime_service_factory = runtime_service_factory
     app.state.local_http_client = urlopen
@@ -985,31 +1178,94 @@ def create_app(
     app.state.final_renderer = pipeline.final_renderer
     app.state.user_library_store = user_library_store
     app.state.media_library_store = resolved_media_library_store
+    # User media is copied into the global library root and gets one durable
+    # ingest/idempotency authority shared by PC and Drive mirror imports.
+    app.state.library_ingest_service = LibraryIngestService(
+        store=resolved_media_library_store.user_asset_store,
+        managed_root=user_library_root,
+        probe_metadata=FFmpegMediaProbe().probe_metadata,
+    )
+    # 인포그래픽 한 장. **런타임을 따로 만든다** -- 이 일은 한 판에 63~115초라
+    # (2026-09-07 실측) 공용 런타임의 30초 상한으로는 매번 실패한다. 상한만 다르고
+    # 나가는 곳은 같은 로컬 모델이다(§10.14 조항 2-B 그대로).
+    #
+    # 다리(`VIDEOBOX_INFOGRAPHIC_BRIDGE_URL`)가 없으면 `None`이 아니라 다리 없는
+    # 서비스를 둔다 -- 그래야 화면이 "크롬 다리를 켜 주세요"라는 정확한 이유를
+    # 받는다. 서비스 자체를 없애면 "기능이 없다"로만 보인다.
+    app.state.infographic_service = InfographicService(
+        runtime_service=infographic_runtime_service,
+        bridge=InfographicHostBridge.from_environment(),
+        library_ingest=app.state.library_ingest_service,
+    )
+    # `scene_image_service`와 같은 이유 -- 켜지 않았으면 `None`이다. owner 결정
+    # 2026-08-29(2회차, "원래 만든거외에 별도로 만들자"): 이 서비스는
+    # `SceneImageService`와 별개다. `library_ingest`(owner 요청 2026-08-29
+    # 3회차, "이렇게 생성된것도 우리 자산으로 들어가도록")는 위 서비스가 이미
+    # 있어야 해서 이 자리로 옮겼다.
+    app.state.scene_video_service = (
+        SceneVideoService(
+            store=store,
+            provider=resolved_scene_video_provider,
+            prompt_writer=scene_image_prompt_writer
+            or SceneImagePromptWriter(runtime_service=runtime_service),
+            library_ingest=app.state.library_ingest_service,
+        )
+        if resolved_scene_video_provider is not None
+        else None
+    )
     media_inbox_watch_path = resolve_media_inbox_watch_path()
     resolved_media_inbox_library_root = resolve_media_inbox_library_root()
     resolved_owner_audio_library_root = resolve_owner_audio_library_root()
     app.state.media_inbox_watch_enabled = resolve_media_inbox_watch_enabled()
-    # A sibling of the watched folder, so when that folder is a mirrored Drive
-    # folder the owner sees imported footage move from one Drive subfolder to
-    # another instead of vanishing.  All three watched folders share it,
-    # because all three are siblings.
-    media_inbox_archive_root = (
-        media_inbox_watch_path.parent / "자산화_완료"
-        if media_inbox_watch_path is not None
-        else None
+    # Inside (or beside) the watched folder, so when that folder is a mirrored
+    # cloud folder the owner sees imported footage move from one subfolder to
+    # another instead of vanishing.  Every watched folder shares it.
+    #
+    # 한 폴더 모드에서는 **넣는 폴더 안**이다. 넣는 폴더가 곧 마운트 뿌리라
+    # 형제로 두면 컨테이너의 읽기 전용 루트를 가리켜 옮기기가 전부 실패한다.
+    media_inbox_sorting_enabled = resolve_media_inbox_sorting_enabled()
+    media_inbox_archive_root = resolve_media_inbox_archive_path(
+        media_inbox_watch_path, sorting=media_inbox_sorting_enabled
     )
+    # 자산 가치가 없다고 본 것이 가는 곳. 보관함과 달리 **넣는 폴더 밖**이다 --
+    # owner가 들여다볼 자리라, 안에 두면 확인하기 전에 다음 바퀴가 다시 집어
+    # 든다. 컨테이너에서는 `compose.yaml`이 따로 마운트한 자리를 넘겨준다.
+    media_inbox_reject_root = resolve_media_inbox_reject_path(media_inbox_watch_path)
+    app.state.media_inbox_reject_root = media_inbox_reject_root
+    app.state.media_inbox_sorting_enabled = media_inbox_sorting_enabled
+    app.state.media_inbox_archive_root = media_inbox_archive_root
+    # 종류별로 바이트가 사는 자리. 한군데 섞으면 촬영본 색인이 음원을 영상으로
+    # 알고 화면 분석을 시도한다. 그림은 화면에서 올리는 길과 같은 자리를 쓴다.
+    media_inbox_sorted_library_roots = {
+        "broll": resolved_media_inbox_library_root,
+        "image": user_library_root,
+        "music": resolved_owner_audio_library_root / "music",
+        "sfx": resolved_owner_audio_library_root / "sfx",
+    }
+    app.state.media_inbox_sorted_library_roots = media_inbox_sorted_library_roots
     app.state.media_inbox_watch_config = (
         MediaInboxConfig(
             watch_path=media_inbox_watch_path,
             library_root=resolved_media_inbox_library_root,
             archive_root=media_inbox_archive_root,
+            copy_only=True,
+            ingest_store=resolved_media_library_store.user_asset_store,
+            media_type="broll",
+            # owner 결정 2026-09-07: 자산은 한 폴더에 넣고 VideoBox가 내용을 보고
+            # 가른다. 끄면 이 폴더는 옛날처럼 영상만 받는다.
+            sort_by_content=media_inbox_sorting_enabled,
+            sorted_library_roots=media_inbox_sorted_library_roots if media_inbox_sorting_enabled else {},
+            reject_root=media_inbox_reject_root if media_inbox_sorting_enabled else None,
         )
         if media_inbox_watch_path is not None
         else None
     )
-    # 음악과 효과음은 각자의 폴더로 들어오고, 어느 폴더였는지가 곧 종류다
-    # (owner 결정 2026-08-10). 라이브러리 자리도 촬영본과 나눠 둔다 -- 한군데
-    # 섞이면 촬영본 색인이 음원을 영상으로 알고 화면 분석을 시도한다.
+    # 음악과 효과음이 각자의 폴더로 들어오던 **옛** 길이다 (2026-08-10 결정).
+    # 2026-09-07에 owner가 한 폴더로 바꿨지만, 옛 폴더에 아직 파일이 남아 있을
+    # 수 있어 감시는 그대로 둔다. 다만 **폴더를 새로 만들지는 않는다**
+    # (`create_watch_path=False`) -- owner는 이제 폴더 하나만 쓴다.
+    # 라이브러리 자리는 촬영본과 계속 나눠 둔다 -- 한군데 섞이면 촬영본 색인이
+    # 음원을 영상으로 알고 화면 분석을 시도한다.
     app.state.owner_audio_library_root = resolved_owner_audio_library_root
     app.state.owner_audio_library_roots = {
         media_type: resolved_owner_audio_library_root / media_type
@@ -1021,6 +1277,10 @@ def create_app(
             library_root=resolved_owner_audio_library_root / media_type,
             archive_root=media_inbox_archive_root,
             accepted_extensions=AUDIO_EXTENSIONS,
+            copy_only=True,
+            ingest_store=resolved_media_library_store.user_asset_store,
+            media_type=media_type,
+            create_watch_path=not media_inbox_sorting_enabled,
         )
         for media_type, watch_path in sorted(
             resolve_owner_audio_watch_paths(media_inbox_watch_path).items()
@@ -1090,7 +1350,7 @@ def create_app(
             "projects_root": str(resolved_projects_root.resolve()),
         }
 
-    app.include_router(build_projects_router(store))
+    app.include_router(build_projects_router(store, resolved_media_library_store.user_asset_store))
     app.include_router(
         build_hermes_operations_router(app.state.hermes_operational_status)
     )
@@ -1112,8 +1372,14 @@ def create_app(
     app.include_router(
         build_director_proposals_router(
             store,
+            orchestrator=orchestrator,
             embedding_provider=app.state.media_analysis_embedding_provider,
             embedding_model_name=(app.state.media_analysis_profile or {}).get("embedding_model_name"),
+            # 유진이 자료실까지 보게 한다(owner 지시 2026-09-02). 이 둘이 없으면
+            # 유진은 예전처럼 프로젝트 안 자산만 본다 -- 실측(2026-09-01)에서
+            # owner에게는 음악 8곡이 보이는데 유진에게는 1곡만 가고 있었다.
+            library_store=resolved_media_library_store,
+            library_search=_music_library_search,
         )
     )
     app.include_router(
@@ -1126,9 +1392,91 @@ def create_app(
             build_hermes_conversation_router(app.state.hermes_run_service)
         )
     app.include_router(build_editor_library_router(user_library_store))
-    app.include_router(build_media_library_router(store, resolved_media_library_store))
+    app.include_router(build_caption_fonts_router(user_library_store))
+    def _schedule_scene_analysis(project_id: str, asset_id: str) -> None:
+        """자산이 프로젝트에 들어온 순간 장면 분석을 건다. 이 함수가 없으면
+        라이브러리에서 넣은 촬영본은 아무도 분석을 걸지 않아 유진의 추천이
+        영원히 409로 막힌다 -- 뒤에서 도는 재분석 작업자는 **한 번도 분석하지
+        않은 자산은 일부러 건너뛴다.**
+        """
+        service = getattr(orchestrator, "media_analysis_service", None)
+        if service is None:
+            return
+        analysis = service.enqueue_analysis(project_id=project_id, asset_id=asset_id)
+        dispatcher = getattr(orchestrator, "media_analysis_dispatcher", None)
+        if dispatcher is None:
+            return
+        # **분석을 요청 안에서 돌리지 않는다**(2026-09-05 실측). 0.2MB짜리 8초
+        # 영상을 프로젝트에 넣는 데 4~6초가 걸렸는데, 그 대부분이 여기서 장면
+        # 분석이 끝나기를 기다리는 시간이었다 -- 이미 들어 있는 자산을 다시
+        # 넣으면 170ms다. 분석 결과(태그)는 유진의 추천에만 쓰이므로 몇 초 뒤에
+        # 붙어도 편집에는 지장이 없다. **거는 것은 위 `enqueue`에서 이미 끝났다.**
+        analysis_id = analysis["analysis_id"]
+
+        def _run() -> None:
+            try:
+                dispatcher(project_id=project_id, analysis_id=analysis_id)
+            except Exception:  # noqa: BLE001 - 뒤에서 도는 일이라 요청을 깨뜨리면 안 된다
+                _LOGGER.exception("장면 분석을 뒤에서 돌리다 실패했다: %s", analysis_id)
+
+        threading.Thread(target=_run, name=f"scene-analysis-{analysis_id}", daemon=True).start()
+
+    app.include_router(build_media_library_router(store, resolved_media_library_store, schedule_scene_analysis=_schedule_scene_analysis))
+    app.include_router(
+        build_footage_organizer_router(
+            media_library_store=resolved_media_library_store,
+            detector=footage_detector,
+            derivative_renderer=footage_derivative_renderer,
+            yujin_runtime_service=runtime_service,
+        )
+    )
+    resolved_library_asset_managed_roots = tuple(dict.fromkeys((user_library_root, resolved_media_inbox_library_root, resolved_owner_audio_library_root, *(resolved_owner_audio_library_root / media_type for media_type in resolve_owner_audio_watch_paths(media_inbox_watch_path)))))
+    app.state.library_asset_managed_roots = resolved_library_asset_managed_roots
+    app.include_router(
+        build_library_assets_router(
+            project_store=store,
+            media_library_store=resolved_media_library_store,
+            user_asset_store=resolved_media_library_store.user_asset_store,
+            ingest_service=app.state.library_ingest_service,
+            managed_root=user_library_root,
+            managed_roots=resolved_library_asset_managed_roots,
+            schedule_scene_analysis=_schedule_scene_analysis,
+            # **경로로 넣는 문이 받아 줄 폴더는 드롭 폴더 하나다** (owner 결정
+            # 2026-09-07, 코드리뷰로 2026-09-07 좁힘).
+            #
+            # 처음엔 자료실 관리 폴더(`user_library_root`)도 넣었다. **그게
+            # 결함이었다** -- 그 폴더에는 자료실 자신의 `media_library.sqlite`와
+            # `format_templates.sqlite`가 들어 있다. 그걸 자산으로 등록한 뒤
+            # `/preview`로 도로 받으면, 자료실 전체 목록·출처·메타데이터가
+            # 그대로 나간다. 내가 주석에 "자료 폴더 전체를 열면 임의 파일 읽기
+            # 창구가 된다"고 써 놓고 자료실 안에서 정확히 그걸 했다.
+            #
+            # **곁들여 풀린 것:** 그 폴더는 항상 있는 값이라, 넣어 두면
+            # "설정이 비면 닫힌다"는 기본값이 실물에서 **절대 안 닿는다**. 빼니까
+            # 드롭 폴더만 남고, 그건 꺼질 수 있는 값이라 그 기본값이 살아난다.
+            allowed_ingest_roots=tuple(
+                root for root in (media_inbox_watch_path,) if root is not None
+            ),
+        )
+    )
+    # 포맷은 프로젝트가 아니라 사용자에게 붙는다 — 다음 영상은 보통 새 프로젝트다.
+    app.state.format_template_store = FormatTemplateStore(user_library_root)
+    app.include_router(
+        build_format_templates_router(
+            orchestrator=orchestrator, template_store=app.state.format_template_store
+        )
+    )
     app.include_router(build_media_inbox_router(orchestrator, resolved_media_inbox_library_root))
+    app.include_router(build_infographics_router())
+    app.include_router(build_scene_images_router(store))
+    app.include_router(build_scene_videos_router(store))
+    app.include_router(build_script_drafts_router())
+    app.include_router(
+        build_creation_recommendations_router(store=store, media_library_store=resolved_media_library_store)
+    )
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
+    app.include_router(build_preview_shares_router(orchestrator))
+    app.include_router(build_output_variants_router(store))
 
     return app

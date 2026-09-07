@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from videobox_api.main import create_app
+
+
+def test_formats_start_empty_and_are_shared_across_projects(tmp_path: Path) -> None:
+    # 포맷은 프로젝트가 아니라 사용자에게 붙는다. 새 프로젝트를 열어도 같은 목록이다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    client.post("/api/projects", json={"name": "첫 프로젝트"})
+    client.post("/api/projects", json={"name": "둘째 프로젝트"})
+
+    response = client.get("/api/format-templates")
+
+    assert response.status_code == 200
+    assert response.json() == {"templates": []}
+
+
+def test_saving_a_format_from_a_session_that_does_not_exist_is_reported(tmp_path: Path) -> None:
+    # 없는 편집본에서 포맷을 뽑을 수는 없다. 조용히 빈 포맷을 만들면 나중에
+    # 그걸 적용했을 때 아무 일도 안 일어난다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "포맷"}).json()["project_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "내 포맷", "session_id": "session_missing"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_format_needs_a_name(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "포맷"}).json()["project_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "", "session_id": "session_a"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_saving_and_applying_a_format_round_trips_onto_the_session(tmp_path: Path) -> None:
+    """저장한 포맷을 실제로 적용하는 왕복이 한 번은 성공해야 한다.
+
+    기존 테스트는 404·422만 확인해서 전부 초록인 채로 적용이 **항상 500**이었다 --
+    라우터가 자막 스타일 갱신에 없는 scope(`all`)와 `segment_ids=None`을 넘기고
+    있었고, 성공 경로를 밟는 테스트가 하나도 없어 아무도 몰랐다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "포맷 왕복"}).json()["project_id"]
+    timeline = app.state.store.save_timeline_run(
+        project_id=project_id,
+        output_mode="landscape",
+        timeline_payload={"output": {"width": 1920, "height": 1080}, "tracks": []},
+    )
+    saved_session = app.state.store.save_editing_session(
+        project_id=project_id,
+        timeline_id=timeline["timeline_id"],
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-1", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "안녕"},
+                {"segment_id": "seg-2", "start_sec": 2.0, "end_sec": 4.0, "caption_text": "하세요"},
+            ],
+            "history": [],
+            # 편집본은 CaptionStyle 정본 이름(`font_size_px`)을 쓴다. 프리셋의
+            # 짧은 이름(`font_size`)과 다르다 -- 그걸 넣으면 적용이 400이 된다.
+            "caption_style": {"font_size_px": 42, "text_color": "#FFFFFFFF", "font_family": "Noto Sans KR"},
+        },
+    )
+    session_id = saved_session["session_id"]
+
+    save = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "내 포맷", "session_id": session_id},
+    )
+    assert save.status_code == 201, save.text
+    template_id = save.json()["template_id"]
+
+    apply = client.post(
+        f"/api/projects/{project_id}/format-templates/{template_id}/apply",
+        json={"session_id": session_id, "expected_revision": int(saved_session["session_revision"])},
+    )
+
+    assert apply.status_code == 200, apply.text
+    applied_session = apply.json()["session"]
+    assert applied_session["caption_style"]["font_size_px"] == 42
+    # 장면까지 같은 모양이어야 한다. 세션 값만 바꾸면 화면이 장면 스타일을 이긴다.
+    assert all(segment["caption_style"]["font_size_px"] == 42 for segment in applied_session["segments"])
+
+
+def test_applying_a_format_with_no_caption_style_does_not_wipe_hand_tuned_captions(tmp_path: Path) -> None:
+    """자막 모양이 비어 있는 포맷을 적용하면 `CaptionStyle.from_dict({})`가
+    기본값을 만들어, 장면마다 손본 모양까지 전부 기본값으로 덮어썼다.
+    입힐 모양이 없으면 입히지 말고 그렇게 말해야 한다."""
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "빈 포맷"}).json()["project_id"]
+    timeline = app.state.store.save_timeline_run(
+        project_id=project_id, output_mode="landscape",
+        timeline_payload={"output": {"width": 1920, "height": 1080}, "tracks": []},
+    )
+    # 자막 모양이 어디에도 없는 편집본에서 포맷을 뜬다 -- 포맷의 모양이 {}가 된다.
+    unstyled_session = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg-a", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "모양 없음"}], "history": []},
+    )
+    template_id = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "빈 포맷", "session_id": unstyled_session["session_id"]},
+    ).json()["template_id"]
+    # 손본 모양이 있는 편집본에 그 빈 포맷을 적용해 본다.
+    tuned_session = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg-1", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "손본 자막", "caption_style": {"font_size_px": 30}}], "history": []},
+    )
+
+    apply = client.post(
+        f"/api/projects/{project_id}/format-templates/{template_id}/apply",
+        json={"session_id": tuned_session["session_id"], "expected_revision": int(tuned_session["session_revision"])},
+    )
+
+    assert apply.status_code == 400, apply.text
+    # 손본 장면 모양은 그대로여야 한다.
+    current = app.state.store.get_editing_session(project_id=project_id, session_id=tuned_session["session_id"])
+    assert current["segments"][0]["caption_style"] == {"font_size_px": 30}
+
+
+def test_applying_a_landscape_format_leaves_a_vertical_video_vertical(tmp_path: Path) -> None:
+    """적용은 자막 모양만 바꾼다 — 화면 크기는 약속에서 뺐다.
+
+    예전 모델의 `keep_output_size`는 라우터가 계산 결과를 버려서 no-op이었다.
+    크기를 실제로 바꾸는 검증된 경로가 없으니, 받는 척하는 옵션을 없애고
+    세로 영상이 세로로 남는 것을 여기서 못박는다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "크기 약속"}).json()["project_id"]
+    landscape = app.state.store.save_timeline_run(
+        project_id=project_id, output_mode="landscape",
+        timeline_payload={"output": {"width": 1920, "height": 1080}, "tracks": []},
+    )
+    styled = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=landscape["timeline_id"],
+        session_payload={
+            "segments": [{"segment_id": "seg-1", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "가로"}],
+            "history": [],
+            "caption_style": {"font_size_px": 42},
+        },
+    )
+    template_id = client.post(
+        f"/api/projects/{project_id}/format-templates",
+        json={"name": "가로 포맷", "session_id": styled["session_id"]},
+    ).json()["template_id"]
+    vertical = app.state.store.save_timeline_run(
+        project_id=project_id, output_mode="vertical",
+        timeline_payload={"output": {"width": 1080, "height": 1920}, "tracks": []},
+    )
+    vertical_session = app.state.store.save_editing_session(
+        project_id=project_id, timeline_id=vertical["timeline_id"],
+        session_payload={
+            "segments": [{"segment_id": "seg-v", "start_sec": 0.0, "end_sec": 2.0, "caption_text": "세로"}],
+            "history": [],
+        },
+    )
+
+    apply = client.post(
+        f"/api/projects/{project_id}/format-templates/{template_id}/apply",
+        json={
+            "session_id": vertical_session["session_id"],
+            "expected_revision": int(vertical_session["session_revision"]),
+        },
+    )
+
+    assert apply.status_code == 200, apply.text
+    assert apply.json()["session"]["caption_style"]["font_size_px"] == 42
+    # 완성본이 실제로 읽는 곳은 타임라인이다. 세로가 세로로 남아야 한다.
+    current_timeline = app.state.store.get_timeline_run(
+        project_id=project_id, timeline_id=vertical["timeline_id"]
+    )
+    assert current_timeline["output"] == {"width": 1080, "height": 1920}
+    current_session = app.state.store.get_editing_session(
+        project_id=project_id, session_id=vertical_session["session_id"]
+    )
+    assert "output" not in current_session
+
+
+def test_applying_a_format_nobody_saved_is_reported(tmp_path: Path) -> None:
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id = client.post("/api/projects", json={"name": "포맷"}).json()["project_id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/format-templates/format_template_missing/apply",
+        json={"session_id": "session_a", "expected_revision": 1},
+    )
+
+    assert response.status_code == 404

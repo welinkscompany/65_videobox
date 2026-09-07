@@ -15,8 +15,25 @@ from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_
 from videobox_core_engine.ffmpeg_final_renderer import FinalRenderError, FfmpegFinalRenderer
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError
+from videobox_core_engine.overlay_shapes import SHAPE_OVERLAY_ICON_GLYPHS, font_supports_glyph
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_domain_models.assets import AssetType
+
+# 아이콘 오버레이는 글자 하나를 그린다. 그 글자를 전부 가진 글꼴이라야 검사가 선다.
+ICON_FONT = next(
+    (
+        path
+        for path in (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+            r"C:\Windows\Fonts\seguisym.ttf",
+            r"C:\Windows\Fonts\DejaVuSans.ttf",
+        )
+        if Path(path).is_file()
+        and all(font_supports_glyph(path, glyph) for glyph in SHAPE_OVERLAY_ICON_GLYPHS.values())
+    ),
+    None,
+)
 
 
 class _SteppingClock:
@@ -307,6 +324,151 @@ def test_plan_renderer_draws_assetless_export_text_overlay_from_canonical_plan(t
     assert "between(t,1.0,2.0)" in graph
 
 
+def test_plan_renderer_draws_table_overlay_structure_not_only_its_summary(tmp_path: Path) -> None:
+    """표 오버레이는 열·행이 실제로 화면에 그려져야 한다.
+
+    화면과 백엔드는 columns/rows를 저장해 왔지만 렌더는 `text`만 그려서,
+    owner가 넣은 표가 미리보기·완성본 어디에도 나오지 않았다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [{
+            "overlay_type": "table_overlay",
+            "columns": ["항목", "값"],
+            "rows": [["길이", "10초"], ["장면", "3개"]],
+            "text": "요약표",
+            "start_sec": 1,
+            "end_sec": 2,
+        }],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert "항목 | 값" in graph
+    assert "길이 | 10초" in graph
+    assert "장면 | 3개" in graph
+    # 기존에 보이던 설명은 계속 보인다 -- 구조를 그리면서 문구를 조용히 빼지 않는다.
+    assert "요약표" in graph
+    # 표는 위에서 아래로 읽힌다: 머리글이 첫 줄이다.
+    assert graph.index("항목 | 값") < graph.index("길이 | 10초") < graph.index("장면 | 3개")
+
+
+def test_plan_renderer_draws_explanation_card_title_and_body_with_its_text(tmp_path: Path) -> None:
+    """설명 카드의 제목·본문이 함께 그려져야 한다.
+
+    렌더가 `text or title or body` 중 첫 값만 그려서, owner가 넣은 제목과
+    본문이 설명(text)에 가려 한 번도 화면에 나오지 않았다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [{
+            "overlay_type": "explanation_card",
+            "title": "제목 줄",
+            "body": "본문 줄",
+            "text": "설명 줄",
+            "start_sec": 1,
+            "end_sec": 2,
+        }],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert "제목 줄" in graph
+    assert "본문 줄" in graph
+    assert "설명 줄" in graph
+    assert graph.index("제목 줄") < graph.index("본문 줄") < graph.index("설명 줄")
+
+
+def test_plan_renderer_draws_static_shape_overlays_from_canonical_plan(tmp_path: Path) -> None:
+    """정지 도형(강조 상자·밑줄)은 그래프 경로에서 drawbox로 그려진다.
+
+    글줄이 아니라 도형이므로 drawtext(글꼴 필요)를 타지 않는다 -- 글꼴이 없는
+    환경에서도 도형만 있는 장면은 렌더돼야 한다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "highlight_box",
+                "vertical": "top",
+                "horizontal": "left",
+                "size": "small",
+                "start_sec": 1,
+                "end_sec": 2,
+            },
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "underline",
+                "vertical": "bottom",
+                "horizontal": "center",
+                "size": "large",
+                "start_sec": 3,
+                "end_sec": 4,
+            },
+        ],
+    })
+    renderer = FfmpegFinalRenderer(
+        store=LocalProjectStore(tmp_path),
+        overlay_font_file=str(tmp_path / "no-font-anywhere.ttf"),
+    )
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert graph.count("drawbox=") == 2
+    assert "between(t,1.0,2.0)" in graph
+    assert "between(t,3.0,4.0)" in graph
+    # 밑줄은 채워진 띠, 강조 상자는 테두리만이다.
+    assert "t=fill" in graph
+    # 도형에는 글줄이 없다: drawtext가 나타나면 글꼴 없는 환경이 통째로 막힌다.
+    assert "drawtext" not in graph
+
+
+@pytest.mark.skipif(ICON_FONT is None, reason="no font carrying the icon glyphs is available")
+def test_plan_renderer_draws_icon_overlays_from_canonical_plan(tmp_path: Path) -> None:
+    """화살표 등 아이콘은 그래프 경로에서도 그려진다.
+
+    drawbox는 사각형만 그린다. 아이콘은 같은 프리셋(9칸 위치·3단 크기)을 그대로
+    쓰면서 이미 있는 drawtext 경로로 글자 하나를 그려 그 구멍을 메운다.
+    """
+    plan = CompositionPlan.from_timeline(timeline={
+        "output": {"width": 1280, "height": 720}, "tracks": [],
+        "export_overlays": [
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "icon_arrow_right",
+                "vertical": "middle",
+                "horizontal": "right",
+                "size": "medium",
+                "start_sec": 1,
+                "end_sec": 2,
+            },
+            {
+                "overlay_type": "shape_overlay",
+                "shape": "underline",
+                "vertical": "bottom",
+                "horizontal": "center",
+                "size": "large",
+                "start_sec": 3,
+                "end_sec": 4,
+            },
+        ],
+    })
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path), overlay_font_file=ICON_FONT)
+
+    graph = renderer.build_plan_filter_graph(composition_plan=plan, source_indices={})
+
+    assert "text='→':x=w-text_w-77:y=(h-text_h)/2:fontsize=187" in graph
+    assert "enable='between(t,1.0,2.0)'" in graph
+    # 아이콘을 더해도 기존 도형은 그대로 drawbox로 그려진다.
+    assert graph.count("drawbox=") == 1
+    assert "between(t,3.0,4.0)" in graph
+    # 글줄 오버레이의 검은 상자는 아이콘에 딸려오지 않는다.
+    assert "box=1" not in graph
+
+
 def test_plan_renderer_fails_closed_when_track_overlay_source_cannot_be_resolved(tmp_path: Path) -> None:
     plan = CompositionPlan.from_timeline(timeline={
         "output": {"duration_sec": 1},
@@ -344,7 +506,7 @@ def test_plan_audio_ducks_bgm_against_the_mixed_full_narration_track(tmp_path: P
     ]})
     graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_audio_filter_graph(composition_plan=plan, source_indices={"n1": 0, "n2": 1, "bgm": 2})
 
-    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_mix]" in graph
+    assert "[a_n1][a_n2]amix=inputs=2:duration=longest:normalize=0[narration_mix]" in graph
     assert "[narration_mix]asplit=2[narration_final][narration_sidechain]" in graph
     assert "[a_bgm][narration_sidechain]sidechaincompress" in graph
 
@@ -364,10 +526,50 @@ def test_plan_audio_ducking_splits_the_single_narration_mix_before_final_mix(tmp
         composition_plan=plan, source_indices={"n1": 0, "n2": 1, "bgm": 2}
     )
 
-    assert "[a_n1][a_n2]amix=inputs=2:duration=longest[narration_mix]" in graph
+    assert "[a_n1][a_n2]amix=inputs=2:duration=longest:normalize=0[narration_mix]" in graph
     assert "[narration_mix]asplit=2[narration_final][narration_sidechain]" in graph
     assert "[a_bgm][narration_sidechain]sidechaincompress=threshold=0.05:ratio=8[duck_bgm]" in graph
     assert "[narration_final][duck_bgm]amix=inputs=2:duration=longest" in graph
+
+
+def test_plan_audio_narration_mix_does_not_divide_by_clip_count(tmp_path: Path) -> None:
+    # 내레이션 클립이 둘로 잘렸다고 목소리가 절반이 되면 안 된다. `amix`는
+    # 기본으로 입력 수만큼 나눈다(normalize=1) -- 같은 함정에 이미 두 번 걸렸다.
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [
+        {"track_type": "narration", "clips": [
+            {"clip_id": "n1", "asset_uri": "local://n1", "start_sec": 0, "end_sec": 1},
+            {"clip_id": "n2", "asset_uri": "local://n2", "start_sec": 1, "end_sec": 2},
+        ]},
+    ]})
+
+    graph = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path)).build_plan_audio_filter_graph(
+        composition_plan=plan, source_indices={"n1": 0, "n2": 1}
+    )
+
+    assert "amix=inputs=2:duration=longest:normalize=0[narration_mix]" in graph
+
+
+def test_plan_audio_graph_skips_source_audio_for_soundless_brolls(tmp_path: Path) -> None:
+    # `원본 소리 살리기`를 켰는데 원본에 오디오 스트림이 없으면, 없는 `[N:a]`를
+    # 그래프에 넣는 순간 ffmpeg가 통째로 실패한다. 무음 원본은 건너뛴다 --
+    # 어차피 실을 소리가 없으니 결과는 같다.
+    plan = CompositionPlan.from_timeline(timeline={"tracks": [
+        {"track_type": "narration", "clips": [{"clip_id": "n1", "asset_uri": "local://n1", "start_sec": 0, "end_sec": 2}]},
+        {"track_type": "broll", "clips": [{
+            "clip_id": "b1", "asset_uri": "local://b1", "start_sec": 0, "end_sec": 2,
+            "media_controls": {"loop": False, "preserve_source_audio": True},
+        }]},
+    ]})
+    renderer = FfmpegFinalRenderer(store=LocalProjectStore(tmp_path))
+
+    with_audio = renderer.build_plan_audio_filter_graph(composition_plan=plan, source_indices={"n1": 0, "b1": 1})
+    without_audio = renderer.build_plan_audio_filter_graph(
+        composition_plan=plan, source_indices={"n1": 0, "b1": 1}, soundless_source_clip_ids={"b1"}
+    )
+
+    assert "[1:a]" in with_audio
+    assert "[1:a]" not in without_audio
+    assert "amix=inputs=1" in without_audio or "[narration_mix]" in without_audio
 
 
 @pytest.mark.skipif(

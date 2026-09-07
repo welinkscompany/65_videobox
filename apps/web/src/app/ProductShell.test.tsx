@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryHistory } from "@tanstack/react-router";
 
 import { api } from "../api";
 import { AppRouter, createAppRouter, ProjectCatalog } from "./AppRouter";
 import { HomePage, ProductShell, SettingsPage } from "./ProductShell";
+import { VoiceMaterialPanel } from "../features/media/VoiceMaterialPanel";
+import { usePublishShellCanvas } from "../features/shell/shellCanvas";
 
 beforeEach(() => { vi.stubGlobal("scrollTo", vi.fn()); vi.stubGlobal("PointerEvent", MouseEvent); vi.stubGlobal("matchMedia", (query: string) => ({ matches: false, media: query, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false })); vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
@@ -15,6 +17,87 @@ const projects = [
 ];
 
 describe("product shell", () => {
+  it("separates the four global destinations from the four project stages", () => {
+    // 둘 다 위 띠로 왔지만 **구분은 그대로**다 -- 전역 목적지는 한 겹 접힌 메뉴
+    // 안에, 프로젝트 단계는 띠 위에 펼쳐져 있다. 넷을 그대로 늘어놓으면 띠가
+    // 다시 목록이 되고, 그러면 기둥을 옮긴 뜻이 없다.
+    const view = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
+
+    // **2026-09-05부터 전역 목적지는 왼쪽 세로 띠에 상시 보인다**(owner 지시).
+    // 구분은 그대로다 -- 전역은 왼쪽 세로, 프로젝트 단계는 위 띠.
+    const global = screen.getByRole("navigation", { name: "화면 이동" });
+    for (const label of ["프로젝트", "자료실", "촬영본 정리"]) {
+      expect(within(global).getByRole("link", { name: label })).toBeInTheDocument();
+    }
+    // 넷째는 설정이다. 화면 안에서 여는 것이라 주소가 아니라 단추로 그린다.
+    expect(within(global).getByRole("button", { name: "설정" })).toBeInTheDocument();
+
+    // "미디어" 단계 단추는 없다(2026-09-01) -- 독립 화면이 편집기 도크로
+    // 접히면서 따로 갈 화면이 아니게 됐다. 편집기를 열면 그 도크가 이미
+    // 미디어 탭 기본값이다.
+    const stages = screen.getByRole("navigation", { name: "프로젝트 단계" });
+    expect(within(stages).getAllByRole("button")).toHaveLength(3);
+    for (const label of ["편집", "이야기", "확인과 내보내기"]) {
+      expect(within(stages).getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(within(stages).queryByRole("button", { name: "미디어" })).not.toBeInTheDocument();
+    expect(view.container.querySelectorAll("main")).toHaveLength(1);
+  });
+
+  it("says what shape the open draft makes, and forgets it on the way out", () => {
+    // 캡컷 위 툴바의 **화면 비율** 자리다. 띠는 이 값을 스스로 불러오지 않는다 --
+    // 껍데기가 프로젝트마다 무언가를 더 물어보면 화면마다 요청이 한 번씩 늘고,
+    // 이 껍데기는 작업 목록조차 다이얼로그를 열 때만 부르도록 못박혀 있다.
+    // 대신 **아는 화면이 알려 준다.** 알려 준 화면을 떠나면 비워야 한다 -- 안 그러면
+    // 내 라이브러리에서도 아까 그 초안의 비율이 띠에 남는다.
+    function Publisher({ canvas }: { canvas: { width: number; height: number } | null }) {
+      usePublishShellCanvas(canvas);
+      return <p>본문</p>;
+    }
+    const shell = (canvas: { width: number; height: number } | null) => (
+      <ProductShell projectId="first" projects={projects as never} section="editing" onNavigate={vi.fn()} onOpenSettings={vi.fn()}>
+        <Publisher canvas={canvas} />
+      </ProductShell>
+    );
+
+    const view = render(shell({ width: 1080, height: 1920 }));
+    expect(screen.getByText("세로 9:16")).toBeInTheDocument();
+
+    view.rerender(shell(null));
+    expect(screen.queryByText(/\d+:\d+/)).not.toBeInTheDocument();
+  });
+
+  it("does not render project stages when no project is open", () => {
+    render(<ProductShell projectId="" projects={[]} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>본문</p></ProductShell>);
+
+    // 갈 수 없는 곳을 띠에 띄워 두면 눌렀을 때 빈 화면이 뜬다. 화면 이동은 남는다.
+    expect(screen.getByRole("navigation", { name: "화면 이동" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "프로젝트 단계" })).not.toBeInTheDocument();
+  });
+
+  it("keeps dashboard copy in creator language", () => {
+    const { container } = render(<ProductShell projectId="first" projects={projects as never} section="home" onNavigate={vi.fn()} onOpenSettings={vi.fn()}><p>영상</p></ProductShell>);
+    const copy = container.textContent ?? "";
+    for (const prohibited of ["provider", "runtime", "fallback", "loopback", "API key", "model", "context", "revision", "pipeline", "job"]) {
+      expect(copy.toLowerCase()).not.toContain(prohibited.toLowerCase());
+    }
+  });
+
+  it("gives every project stage an icon in the top bar", async () => {
+    // 앞부분(아이콘)은 그대로 지킨다. 뒷부분이던 "프로젝트 관리 동작은 한 겹 더
+    // 들어가 있다"는 기둥의 스위처 이야기였고, 관리는 `프로젝트` 화면으로 옮겼다
+    // (owner 결정 2026-08-21). 거기 시험이 지킨다.
+    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
+    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
+    render(<AppRouter router={router} />);
+
+    const navigation = await screen.findByRole("navigation", { name: "프로젝트 단계" });
+    expect(within(navigation).getAllByRole("button")).toHaveLength(3);
+    for (const label of ["편집", "이야기", "확인과 내보내기"]) {
+      expect(within(navigation).getByRole("button", { name: label }).querySelector("svg")).toBeTruthy();
+    }
+  });
+
   it("opens the current-project recovery surface only when the user asks for job status", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
     const getYujinStatus = vi.spyOn(api, "getHermesYujinStatus").mockResolvedValue({
@@ -122,38 +205,19 @@ describe("product shell", () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
-  it("starts collapsed only for the canonical editor and allows an explicit reopen", async () => {
-    vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue({ project_id: "first", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1, timeline_version: "v1", timebase: "seconds", fps: { num: 30, den: 1 }, output: { width: 1080, height: 1920, sample_aspect_ratio: "1:1", rotation: 0, duration_sec: 1 }, tracks: [], captions: [], gap_slots: [], source_status: { status: "current", source_session_id: "session-a", source_session_revision: 1 }, audition: { asset_urls: {} }, exact_preview: { status: "unavailable", url: null, source_session_id: "session-a", source_session_revision: 1 } } as never);
-    vi.spyOn(api, "getEditingSession").mockResolvedValue({
-      project_id: "first", session_id: "session-a", timeline_id: "timeline-a", session_revision: 1,
-      segments: [], history: [],
-    } as never);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/editor?session_id=session-a"] }));
-    render(<AppRouter router={router} />);
-    await screen.findByRole("region", { name: "편집 작업판" });
-    const sidebar = document.querySelector('[data-slot="sidebar"]');
-    expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    fireEvent.click(screen.getByRole("button", { name: "사이드바 접기" }));
-    expect(sidebar).toHaveAttribute("data-state", "expanded");
-
-    await router.navigate({ to: "/projects/first/home" });
-    await screen.findByTestId("product-home");
-    await router.navigate({ to: "/projects/first/editor", search: { session_id: "session-a" } });
-    await screen.findByRole("region", { name: "편집 작업판" });
-    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
-  });
-
+  // **독립 "미디어" 단계 화면이 편집기로 접혔다**(2026-09-01) -- 그 URL은
+  // 이제 편집기로 리다이렉트되므로, "홈 화면 밖에서는 셸이 하나뿐인가"를
+  // 편집기(도크가 미디어 탭 기본값)에서 확인한다.
   it("keeps a single '새 영상 만들기' entry point outside the home screen (F-7)", async () => {
     vi.spyOn(api, "listProjects").mockResolvedValue(projects);
-    vi.spyOn(api, "listBrollAssets").mockResolvedValue([]);
-    vi.spyOn(api, "listMediaAnalysis").mockResolvedValue({ items: [] });
+    vi.spyOn(api, "getLatestEditingSession").mockResolvedValue(null as never);
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/media"] }));
     render(<AppRouter router={router} />);
 
-    await screen.findByTestId("media-workspace-page");
+    await screen.findByRole("button", { name: "빈 편집판으로 시작" });
 
-    expect(screen.getAllByRole("button", { name: "새 영상 만들기" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "편집" })).toBeInTheDocument();
+    expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 
   it("shows creator navigation, a project switcher, and an action-only home", async () => {
@@ -161,54 +225,20 @@ describe("product shell", () => {
     const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
     render(<AppRouter router={router} />);
 
-    await screen.findByRole("navigation", { name: "영상 제작" });
-    expect(screen.getAllByRole("button", { name: "새 영상 만들기" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("작업 중인 초안 계속하기")).toBeTruthy();
-    expect(screen.getByText("최근 완성본")).toBeTruthy();
+    await screen.findByRole("navigation", { name: "프로젝트 단계" });
+    // 왼쪽 세로 띠에 상시 있으므로 열 필요가 없다. **하나뿐이어야 한다** --
+    // 위 띠의 접힌 메뉴는 이 화면에서 접힌다(같은 기능이 둘이면 안 된다).
+    expect(screen.getAllByRole("link", { name: "자료실" })).toHaveLength(1);
+    const home = screen.getByTestId("product-home");
+    expect(within(home).getByText("편집")).toBeTruthy();
+    expect(within(home).getByText("완성본")).toBeTruthy();
     expect(screen.queryByText(/provider|job metric/i)).toBeNull();
 
+    // 띠는 **지금 프로젝트만** 보여 준다. 기둥에서는 29개가 한꺼번에 펼쳐져 있었다.
+    expect(screen.queryByRole("button", { name: "두 번째 영상" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "첫 번째 영상" }));
     fireEvent.click(screen.getByRole("button", { name: "두 번째 영상" }));
-    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/second/home"));
-  });
-
-  it("archives a project from the switcher after a confirm step, and it drops off the list (F-5)", async () => {
-    vi.spyOn(api, "listProjects")
-      .mockResolvedValueOnce(projects)
-      .mockResolvedValueOnce([projects[0]]);
-    const archiveProject = vi.spyOn(api, "archiveProject").mockResolvedValue({ ...projects[1], status: "archived" });
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
-    render(<AppRouter router={router} />);
-    await screen.findByRole("navigation", { name: "영상 제작" });
-
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관하기" }));
-    expect(archiveProject).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 보관 확인" }));
-
-    await waitFor(() => expect(archiveProject).toHaveBeenCalledWith("second"));
-    await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
-  });
-
-  it("requires two separate confirmations before permanently deleting a project", async () => {
-    vi.spyOn(api, "listProjects")
-      .mockResolvedValueOnce(projects)
-      .mockResolvedValueOnce([projects[0]]);
-    const deleteProjectPermanently = vi.spyOn(api, "deleteProjectPermanently").mockResolvedValue(undefined);
-    const router = createAppRouter(new ProjectCatalog(), createMemoryHistory({ initialEntries: ["/projects/first/home"] }));
-    render(<AppRouter router={router} />);
-    await screen.findByRole("navigation", { name: "영상 제작" });
-
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 완전 삭제" }));
-    expect(deleteProjectPermanently).not.toHaveBeenCalled();
-    expect(screen.getByText(/되돌릴 수 없어요/)).toBeVisible();
-
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 삭제 1차 확인" }));
-    expect(deleteProjectPermanently).not.toHaveBeenCalled();
-    expect(screen.getByText(/한 번 더 확인/)).toBeVisible();
-
-    fireEvent.click(screen.getByRole("button", { name: "두 번째 영상 영구 삭제" }));
-
-    await waitFor(() => expect(deleteProjectPermanently).toHaveBeenCalledWith("second"));
-    await waitFor(() => expect(screen.queryByRole("button", { name: /두 번째 영상/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(router.state.location.pathname).toBe("/projects/second/editor"));
   });
 
   it("persists a working appearance setting and only exposes local privacy choices", async () => {
@@ -254,12 +284,12 @@ describe("product shell", () => {
         })
         : sessionB
     ));
-    const view = render(<SettingsPage projectId="first" section="voice" onNavigate={vi.fn()} />);
+    const view = render(<VoiceMaterialPanel projectId="first" />);
     await screen.findByText("저장한 내 목소리 1개");
     const pathA = screen.getByLabelText("음성 파일이 있는 곳");
     fireEvent.change(pathA, { target: { value: "D:\\voices\\project-a.wav" } });
 
-    view.rerender(<SettingsPage projectId="second" section="voice" onNavigate={vi.fn()} />);
+    view.rerender(<VoiceMaterialPanel projectId="second" />);
 
     const pathB = screen.getByLabelText("음성 파일이 있는 곳");
     expect(pathA).not.toBeInTheDocument();
@@ -268,56 +298,6 @@ describe("product shell", () => {
     expect(pathB).toBeDisabled();
     expect(screen.queryByText("A 프로젝트 문장")).not.toBeInTheDocument();
     expect(screen.queryByText("저장한 내 목소리 1개")).not.toBeInTheDocument();
-  });
-});
-
-describe("archived projects", () => {
-  it("lets the owner see archived projects and put one back", async () => {
-    // Task 32: archiving removed a project from the sidebar with no way back.
-    // The restore endpoint existed the whole time; nothing called it.
-    const onRestoreProject = vi.fn();
-    const onLoadArchivedProjects = vi.fn().mockResolvedValue(undefined);
-    render(
-      <ProductShell
-        projectId="project-a"
-        projects={[{ project_id: "project-a", name: "살아있는 프로젝트", status: "draft" } as never]}
-        archive={{
-          archivedProjects: [{ project_id: "project-b", name: "보관한 프로젝트", status: "archived" } as never],
-          load: onLoadArchivedProjects,
-          restore: onRestoreProject,
-        }}
-        section="home"
-        onNavigate={vi.fn()}
-        onOpenSettings={vi.fn()}
-      >
-        <p>본문</p>
-      </ProductShell>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
-    expect(onLoadArchivedProjects).toHaveBeenCalled();
-    expect(await screen.findByText("보관한 프로젝트")).toBeVisible();
-
-    fireEvent.click(screen.getByRole("button", { name: "보관한 프로젝트 되돌리기" }));
-    expect(onRestoreProject).toHaveBeenCalledWith("project-b");
-  });
-
-  it("says so when the archive is empty instead of showing nothing", async () => {
-    render(
-      <ProductShell
-        projectId="project-a"
-        projects={[{ project_id: "project-a", name: "살아있는 프로젝트", status: "draft" } as never]}
-        archive={{ archivedProjects: [], load: vi.fn().mockResolvedValue(undefined), restore: vi.fn() }}
-        section="home"
-        onNavigate={vi.fn()}
-        onOpenSettings={vi.fn()}
-      >
-        <p>본문</p>
-      </ProductShell>,
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "보관함 보기" }));
-    expect(await screen.findByText("보관한 프로젝트가 없어요.")).toBeVisible();
   });
 });
 
@@ -349,11 +329,31 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByText("완성한 영상이 3개 있어요.")).toBeVisible();
-    expect(screen.getByText("이어서 편집할 작업이 있어요.")).toBeVisible();
-    expect(screen.getByText("채울 자리가 2곳 남았어요.")).toBeVisible();
+    expect(await screen.findByText("3개")).toBeVisible();
+    expect(screen.getAllByText("초안 있음").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("부족 2곳").length).toBeGreaterThan(0);
     expect(summary).toHaveBeenCalledTimes(1);
     expect(listJobs).not.toHaveBeenCalled();
+  });
+
+  it("says the current status once per fact, not repeated across a keyword line, a checklist, and a card", async () => {
+    // Home used to say "초안 있음" up to three times (a keyword line under
+    // "다음 할 일", a checklist item, and the 편집 card) and put the same
+    // "편집 계속하기" text on both a heading and the button right under it.
+    vi.spyOn(api, "getHomeSummary").mockResolvedValue({
+      finished_video_count: 3, has_draft: true, asset_gap_count: 2,
+    } as never);
+
+    render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
+
+    await screen.findByText("3개");
+    expect(screen.getAllByText("초안 있음")).toHaveLength(1);
+    expect(screen.getAllByText("부족 2곳")).toHaveLength(1);
+    expect(screen.getAllByText("3개")).toHaveLength(1);
+    // `편집 계속하기`는 없어졌다. 첫 화면이 이제 **들어가는 길을 고르게** 하고,
+    // 만들던 것이 있으면 그 자리에 `만들던 영상 이어서`가 온다
+    // (owner 지시 2026-08-21, Vrew 방식). 사실을 한 번씩만 말하는 규칙은 그대로다.
+    expect(screen.getAllByText("만들던 영상 이어서")).toHaveLength(1);
   });
 
   it("says so plainly when the project is still empty", async () => {
@@ -363,9 +363,9 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByText("아직 완성한 영상이 없어요.")).toBeVisible();
-    expect(screen.getByText("아직 시작한 작업이 없어요.")).toBeVisible();
-    expect(screen.getByText("필요한 자산이 모두 준비됐어요.")).toBeVisible();
+    expect(await screen.findByText("0개")).toBeVisible();
+    expect(screen.getAllByText("초안 없음").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("준비 완료").length).toBeGreaterThan(0);
   });
 
   it("keeps the cards usable when the summary cannot be read", async () => {
@@ -375,8 +375,14 @@ describe("home dashboard", () => {
 
     render(<HomePage projectId="project-a" onNavigate={vi.fn()} />);
 
-    expect(await screen.findByRole("button", { name: "출력 확인" })).toBeVisible();
+    // 상태 카드에서 단추를 뗐다 -- 각 화면으로 가는 길은 왼쪽 메뉴에 이미 있고,
+    // 첫 화면에 "다음에 할 일"로 보이는 것이 늘어나는 게 owner를 막던 원인이었다.
+    // 여기서 지키는 것은 그대로다: 못 읽었다고 **없는 상태를 단정하지 않고**,
+    // 다시 확인할 길이 남아 있어야 한다.
+    expect(await screen.findByRole("button", { name: "상태 다시 확인" })).toBeVisible();
     expect(screen.queryByText("아직 완성한 영상이 없어요.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "상태 다시 확인" }));
+    expect(api.getHomeSummary).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -449,25 +455,22 @@ describe("settings that cannot do what they offered", () => {
     expect(screen.queryByRole("button", { name: "저장공간" })).toBeNull();
     expect(screen.queryByRole("button", { name: /저장 공간 알림/ })).toBeNull();
   });
-});
 
-describe("사이드바 손잡이", () => {
-  it("가져온 부품의 영어 문구 대신 우리 문구를 쓴다", () => {
-    // shadcn 원본은 "Toggle Sidebar"를 넣는다. 원본 파일은 출처 핀이 걸려
-    // 있어 고칠 수 없으므로, 호출부에서 덮어쓴 것이 유지되는지 잠근다.
-    render(
-      <ProductShell
-        projectId="project-a"
-        projects={[{ project_id: "project-a", name: "프로젝트", status: "draft" } as never]}
-        section="home"
-        onNavigate={vi.fn()}
-        onOpenSettings={vi.fn()}
-      >
-        <p>본문</p>
-      </ProductShell>,
-    );
+  it("says so when a setting cannot be kept, instead of failing silently", () => {
+    // 저장소가 막혀 있으면(사생활 모드·용량 초과) 토글은 켜진 것처럼 보이는데
+    // 다시 켜면 원래대로다. 이번 켬은 유지하되, 저장되지 않았다는 사실을 말한다.
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota exceeded");
+    });
+    render(<SettingsPage section="appearance" onNavigate={vi.fn()} projectId="project-a" />);
 
-    expect(screen.getByRole("button", { name: "화면 목록 접기" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Toggle Sidebar/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /조밀한 화면/ }));
+
+    expect(setItem).toHaveBeenCalled();
+    // 이번 세션에는 적용된다.
+    expect(screen.getByRole("button", { name: /조밀한 화면: 켜짐/ })).toBeVisible();
+    // 그리고 저장되지 않았다는 것을 숨기지 않는다.
+    // 실패 문구는 다음 행동을 안내한다(§10.13) -- 결과만 알리고 끝내지 않는다.
+    expect(screen.getByRole("status")).toHaveTextContent("설정을 이 기기에 저장하지 못했어요. 브라우저 저장 공간을 확인한 뒤 다시 눌러 주세요.");
   });
 });

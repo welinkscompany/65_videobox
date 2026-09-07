@@ -17,14 +17,48 @@ def test_normalized_media_controls_validate_audio_and_broll_contracts() -> None:
         duration_sec=4.0,
     )
 
-    assert audio == {"gain_db": -6.0, "fade_in_sec": 0.5, "fade_out_sec": 0.75, "ducking": True}
+    assert audio == {
+        "gain_db": -6.0,
+        "fade_in_sec": 0.5,
+        "fade_out_sec": 0.75,
+        "ducking": True,
+        # 캡컷 오디오 탭 대조로 들어온 둘(2026-09-01). 기본값 False가
+        # "손대지 않음"이고, 그때 렌더러는 필터를 안 더한다.
+        "normalize_loudness": False,
+        "denoise": False,
+    }
     assert broll == {
         "fit": "crop",
         "loop": True,
         "pad": False,
         "trim_start_sec": 0.25,
         "preserve_source_audio": False,
+        # 화면 페이드(디졸브). 소리 페이드와 이름은 같지만 종류가 다르다 --
+        # 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
+        "fade_in_sec": 0.0,
+        "fade_out_sec": 0.0,
+        # 손대지 않은 배속·음량. 2026-08-18까지 이 둘은 여기서 조용히
+        # 버려졌고, 화면 입력이 결과에 닿지 않았다.
+        "speed": 1.0,
+        "volume": 1.0,
+        # 손떨림 보정(캡컷 동영상 탭 대조, 2026-09-01).
+        "stabilize": False,
+        "reduce_noise": False,
+        # 배속에 목소리 높낮이를 딸려 보낼지. 기본이 켜짐인 유일한 스위치다 --
+        # 지금까지의 동작이 유지였다(`atempo`).
+        "preserve_pitch": True,
+        # 변형(캡컷 동영상 탭 `확대·위치·회전`). 손대지 않음이 기본값이다.
+        "zoom": 1.0,
+        "position_x_percent": 0.0,
+        "position_y_percent": 0.0,
+        "rotation_deg": 0.0,
     }
+    cleaned_audio = normalize_media_controls(
+        {"normalize_loudness": True, "denoise": True}, media_kind="audio", duration_sec=4.0,
+    )
+    assert cleaned_audio["normalize_loudness"] is True
+    assert cleaned_audio["denoise"] is True
+    assert normalize_media_controls({"stabilize": True}, media_kind="broll", duration_sec=4.0)["stabilize"] is True
     with pytest.raises(ValueError, match="fade"):
         normalize_media_controls({"fade_in_sec": 3.0, "fade_out_sec": 2.0}, media_kind="audio", duration_sec=4.0)
     with pytest.raises(ValueError, match="fit"):
@@ -74,6 +108,22 @@ def test_timeline_builder_carries_manual_media_controls_to_renderable_clips() ->
         "pad": True,
         "trim_start_sec": 0.5,
         "preserve_source_audio": False,
+        # 화면 페이드(디졸브). 소리 페이드와 이름은 같지만 종류가 다르다 --
+        # 겹쳐 놓은 두 클립에서 위에 걸면 아래가 비친다.
+        "fade_in_sec": 0.0,
+        "fade_out_sec": 0.0,
+        "speed": 1.0,
+        "volume": 1.0,
+        "stabilize": False,
+        "reduce_noise": False,
+        # 배속에 목소리 높낮이를 딸려 보낼지. 기본이 켜짐인 유일한 스위치다 --
+        # 지금까지의 동작이 유지였다(`atempo`).
+        "preserve_pitch": True,
+        # 변형(캡컷 동영상 탭 `확대·위치·회전`). 손대지 않음이 기본값이다.
+        "zoom": 1.0,
+        "position_x_percent": 0.0,
+        "position_y_percent": 0.0,
+        "rotation_deg": 0.0,
     }
 
 

@@ -37,6 +37,7 @@ const jobTypeCopy: Record<string, string> = {
   capcut_export: "이전 CapCut 내보내기",
   final_render: "완성본 만들기",
   capcut_draft_export: "CapCut 초안 만들기",
+  scene_video_generation: "AI 장면 영상 만들기",
 };
 
 const jobStatusCopy: Record<string, string> = {
@@ -77,6 +78,11 @@ function newestRetryableJobKeys(jobs: VisibleJob[]) {
       .filter(canRetryJob)
       .map((job) => `${job.project_id}:${job.job_id}`),
   );
+}
+
+function formatJobTime(value: string | null) {
+  if (!value) return null;
+  return value.replace("T", " ").replace(/Z$/, "").slice(0, 16);
 }
 
 export function JobRecovery({
@@ -207,7 +213,8 @@ export function JobRecovery({
       aria-label="작업 복구"
       data-project-id={projectId}
       data-testid="job-recovery"
-      className="grid min-w-80 gap-3 p-2"
+      data-vb-job-dialog="true"
+      className="vb-job-dialog grid min-w-0 gap-3 p-2"
     >
       <div className="flex gap-2">
         <Button type="button" size="sm" aria-pressed={scope === "current"} variant={scope === "current" ? "default" : "outline"} onClick={() => setScope("current")}>
@@ -224,10 +231,15 @@ export function JobRecovery({
       {currentState?.jobs.map((job) => {
         const key = `${job.project_id}:${job.job_id}`;
         return (
-          <article key={key} className="grid gap-1 rounded-md border p-2">
+          <article key={key} data-vb-job-row="true" data-testid={`job-row-${job.job_id}`} className="vb-job-row grid min-w-0 gap-1 rounded-md border p-2">
             {scope === "global" && job.project_name ? <strong>{job.project_name}</strong> : null}
-            <span>{jobTypeCopy[job.job_type] ?? "기타 작업"}</span>
+            <strong>{jobTypeCopy[job.job_type] ?? "기타 작업"}</strong>
             <span>{jobStatusCopy[job.status] ?? "상태를 확인하고 있어요"}</span>
+            {typeof job.progress_percent === "number" ? <span>{job.progress_percent}% {job.status === "succeeded" ? "완료" : "진행 중"}</span> : null}
+            {formatJobTime(job.started_at) ? <span>시작 {formatJobTime(job.started_at)}</span> : null}
+            {formatJobTime(job.finished_at) ? <span>완료 {formatJobTime(job.finished_at)}</span> : null}
+            {job.status === "failed" ? <span role="status">실패했어요. 원래 화면에서 다시 실행해 주세요.</span> : null}
+            {job.status === "blocked" && job.error_message ? <span role="alert">{job.error_message}</span> : null}
             {job.status === "blocked"
               ? <span>자동 재시도 대신 원래 화면에서 직접 다시 실행해 주세요.</span>
               : null}

@@ -5,6 +5,7 @@ layer supplies the already project-scoped session and timeline documents.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from fractions import Fraction
 from math import floor
 from typing import Any
@@ -16,6 +17,7 @@ from videobox_core_engine.composition_plan import (
     materialize_editing_session_timeline,
 )
 from videobox_core_engine.timeline_placements import placement_id
+from videobox_core_engine.track_states import normalize_track_states
 
 
 DEFAULT_FPS_NUM = 30
@@ -47,6 +49,7 @@ def build_editor_playback_manifest(
     timeline: dict[str, Any],
     asset_content_url_prefix: str,
     exact_preview: dict[str, Any] | None = None,
+    resolve_asset_uri: Callable[[str], str | None] | None = None,
 ) -> dict[str, Any]:
     """Join one explicit session and its matching timeline into a view contract."""
     if str(session.get("project_id")) != project_id or str(timeline.get("project_id")) != project_id:
@@ -74,6 +77,8 @@ def build_editor_playback_manifest(
     export_overlay_track = _export_overlay_track(materialized.get("export_overlays"))
     if export_overlay_track is not None:
         raw_tracks.append(export_overlay_track)
+    if resolve_asset_uri is not None:
+        _fill_placed_asset_sources(raw_tracks, resolve_asset_uri)
     tracks = [contract for item in raw_tracks if (contract := _track_contract(item)) is not None]
     asset_ids = sorted({str(clip["asset_id"]) for track in tracks for clip in track["clips"] if clip.get("asset_id")})
     preview = dict(exact_preview or {"status": "unavailable", "url": None, "source_session_revision": None})
@@ -95,6 +100,11 @@ def build_editor_playback_manifest(
             "duration_sec": _duration_seconds(output, tracks, segments),
         },
         "tracks": tracks,
+        # 눈·음소거의 **되읽는 자리는 여기 하나다**(`track_states.py`). 트랙마다
+        # 실은 값만으로는 자막을 못 읽는다 -- 자막 트랙은 위 `tracks`에 아예
+        # 안 실리기 때문이다(자기 필드가 따로 있다). 그래서 화면이 자막
+        # 숨김을 되읽지 못해 새로고침하면 꺼진 것처럼 보였다.
+        "track_states": normalize_track_states(session.get("track_states")),
         "captions": [
             {
                 "segment_id": str(segment["segment_id"]),
@@ -117,6 +127,39 @@ def build_editor_playback_manifest(
         "audition": {"asset_urls": {asset_id: f"{asset_content_url_prefix}/{asset_id}/content" for asset_id in asset_ids}},
         "exact_preview": preview,
     }
+
+
+def _fill_placed_asset_sources(
+    tracks: list[dict[str, Any]],
+    resolve_asset_uri: Callable[[str], str | None],
+) -> None:
+    """owner가 건 자산의 **실제 원본 경로**를 채운다.
+
+    합성 계획 모듈은 저장소를 모른다. 세션 override에 경로가 없으면
+    `assets/{asset_id}`를 지어내는데(`composition_plan.py`), 자산은 종류별
+    폴더에 **확장자를 달고** 저장되므로 그 경로는 언제나 존재하지 않는다.
+    렌더 경로는 `local_pipeline._resolve_session_clip_sources`가 같은 일을
+    이미 하고 있었지만, **화면이 읽는 이 목록에는 그 단계가 없었다.**
+
+    그 때문에 사진을 장면에 깔면 편집기가 확장자를 못 봐서 사진으로 읽지
+    못했다 -- `사진 움직임` 칸은 확장자로 붙는다(`inspectorRegistry.ts`의
+    `looksLikePhoto`). 깔리기는 하는데 움직임을 고를 자리가 없었다.
+    """
+    resolved: dict[str, str | None] = {}
+    for track in tracks:
+        for clip in track.get("clips", []):
+            if not isinstance(clip, dict):
+                continue
+            asset_id = str(clip.get("asset_id") or "").strip()
+            if not asset_id:
+                continue
+            uri = str(clip.get("asset_uri") or "").strip()
+            if uri and not uri.endswith(f"/assets/{asset_id}"):
+                continue
+            if asset_id not in resolved:
+                resolved[asset_id] = resolve_asset_uri(asset_id)
+            if resolved[asset_id]:
+                clip["asset_uri"] = resolved[asset_id]
 
 
 def _positive_int(value: object, default: int) -> int:
@@ -146,7 +189,7 @@ def _track_contract(track: dict[str, Any]) -> dict[str, Any] | None:
         if not isinstance(controls, dict):
             raise ValueError("editor_manifest_invalid_media_controls")
         if clip_type == "overlay":
-            if raw.get("overlay_type") not in {"explanation_card", "image_overlay", "table_overlay"}:
+            if raw.get("overlay_type") not in {"explanation_card", "image_overlay", "table_overlay", "shape_overlay"}:
                 raise ValueError("editor_manifest_unsupported_overlay_subtype")
             if not isinstance(raw.get("overlay_payload"), dict):
                 raise ValueError("editor_manifest_invalid_overlay_payload")
@@ -161,6 +204,12 @@ def _track_contract(track: dict[str, Any]) -> dict[str, Any] | None:
             "overlay_type": raw.get("overlay_type") if clip_type == "overlay" else None,
             "overlay_payload": dict(raw.get("overlay_payload") or {}) if clip_type == "overlay" and isinstance(raw.get("overlay_payload"), dict) else {},
         })
+    # 눈·음소거는 **트랙마다 싣지 않는다.** 화면은 맨 위 `track_states` 하나만
+    # 읽는다(자막 트랙은 여기 `tracks`에 아예 안 실려서 트랙 쪽으로는 못 읽는다).
+    # 한 사실에 출처를 둘 두면 반드시 어긋난다.
+    #
+    # **숨겨도 목록에서 빼지 않는다** -- 빼면 화면에 트랙이 없어져 다시 켤
+    # 방법이 사라진다. 결과물에서 빼는 것은 `CompositionPlan.from_timeline`이 맡는다.
     return {"track_id": str(track.get("track_id") or "track"), "track_type": track_type, "clips": clips}
 
 
@@ -177,7 +226,7 @@ def _export_overlay_track(raw_overlays: object) -> dict[str, Any] | None:
             else "table_overlay" if raw_type in {"table_card", "table_overlay"}
             else raw_type
         )
-        if overlay_type not in {"explanation_card", "image_overlay", "table_overlay"}:
+        if overlay_type not in {"explanation_card", "image_overlay", "table_overlay", "shape_overlay"}:
             continue
         payload = dict(raw)
         payload["overlay_type"] = overlay_type

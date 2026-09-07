@@ -11,9 +11,31 @@ def _words(value: object) -> set[str]:
     words = set(str(value or "").lower().replace(",", " ").split())
     return words | {_SYNONYMS.get(word, word) for word in words}
 
+def _display_name(asset: dict[str, Any]) -> str | None:
+    """카드에 보일 이름. **코드는 사람이 고르는 근거가 못 된다.**
+
+    2026-08-19에 owner 화면의 후보 일곱 개가 전부 `P08-B-01 · 미디어`였다.
+    이름이 없으면 파일 이름이라도 준다 -- 빈칸은 고를 수 없다.
+    """
+    for key in ("display_name", "title", "name"):
+        value = asset.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    uri = asset.get("storage_uri") or asset.get("preview_uri")
+    if isinstance(uri, str) and uri.strip():
+        tail = uri.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        if tail:
+            return tail
+    return None
+
+
 def _canonical_metadata(asset: dict[str, Any]) -> dict[str, object]:
     keys = ("mood", "energy", "genre", "vocal_presence", "recommended_use", "duration_sec", "license") if _media_type(asset) == "bgm" else ("action_event", "intensity", "mood", "recommended_use", "duration_sec", "license")
-    return {key: asset.get(key) for key in keys if asset.get(key) is not None}
+    metadata: dict[str, object] = {key: asset.get(key) for key in keys if asset.get(key) is not None}
+    name = _display_name(asset)
+    if name is not None:
+        metadata["display_name"] = name
+    return metadata
 
 def _media_type(asset: dict[str, Any]) -> str:
     return "bgm" if str(asset.get("media_type") or "").lower() in {"music", "bgm"} else str(asset.get("media_type") or "broll").lower()

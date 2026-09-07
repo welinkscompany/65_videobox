@@ -11,6 +11,8 @@ from videobox_storage.sqlite_schema import (
 _PROJECT_SCOPED_IDENTIFIERS = {
     "assets": "asset_id",
     "editing_sessions": "session_id",
+    "output_variants": "variant_id",
+    "variant_materializations": "materialization_id",
     "exports": "export_id",
     "jobs": "job_id",
     "preview_renders": "preview_id",
@@ -183,6 +185,8 @@ POSTGRES_MIGRATION_STATEMENTS = (
             ("invalidated_reason", "TEXT"),
         )
     ),
+    "ALTER TABLE review_approvals ADD COLUMN IF NOT EXISTS source_variant_id TEXT",
+    "ALTER TABLE review_approvals ADD COLUMN IF NOT EXISTS source_variant_revision INTEGER",
     *ARTIFACT_SOURCE_SESSION_BACKFILL_STATEMENTS,
     "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_token TEXT",
     "ALTER TABLE exports ADD COLUMN IF NOT EXISTS handoff_claim_job_id TEXT",

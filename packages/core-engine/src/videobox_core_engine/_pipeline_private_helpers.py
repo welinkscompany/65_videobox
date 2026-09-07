@@ -72,6 +72,7 @@ from videobox_core_engine.review_guidance import HeuristicReviewGuidanceBuilder,
 from videobox_core_engine.script_scene_planner import HeuristicSegmentAnalyzer, SegmentAnalyzer
 from videobox_core_engine.timeline_builder import TimelineBuilder
 from videobox_core_engine.transcript_alignment import HeuristicTranscriptAligner, TranscriptAligner
+from videobox_core_engine.broll_scene_candidates import list_scene_candidate_assets
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_domain_models.recommendations import RecommendationType
@@ -91,6 +92,22 @@ from videobox_core_engine._pipeline_shared_helpers import (
     _runtime_pending_recommendation_identity_key,
 )
 
+
+
+def _timeline_output_settings(timeline: dict[str, Any]) -> dict[str, Any]:
+    """타임라인이 말하는 화면 크기. 안 적혀 있으면 아무것도 안 준다.
+
+    옛 타임라인은 `output` 대신 낱개 칸(`video_width`/`video_height`)으로 적었다
+    -- 계획을 만드는 자리가 둘 다 읽으므로 여기서도 둘 다 챙긴다. 안 적힌 것을
+    지어내지는 않는다. 기본값은 계획 쪽이 정한다.
+    """
+    output = timeline.get("output")
+    if isinstance(output, dict) and output:
+        return {"output": dict(output)}
+    width, height = timeline.get("video_width"), timeline.get("video_height")
+    if width and height:
+        return {"output": {"width": int(width), "height": int(height)}}
+    return {}
 
 class _PipelinePrivateHelpersMixin:
     def _is_valid_project_audio_recommendation_uri(self, asset_id: str, expected_type: str, uri: str, project_id: str) -> bool:
@@ -229,7 +246,9 @@ class _PipelinePrivateHelpersMixin:
             timeline_id=str(timeline["timeline_id"]),
         )
         if review_state["status"] != "approved" or not bool(review_state.get("is_current", True)):
-            raise ValueError("Timeline requires explicit approval before preview, subtitle, or export.")
+            # 코드로 던진다. 문장으로 던지면 화면이 그것을 creator 문구로
+            # 옮길 방법이 없어서, 영어 문장이 그대로 나가거나 아무것도 안 나간다.
+            raise ValueError("final_output_requires_review_approval")
 
     def _ensure_timeline_has_no_blockers(self, timeline: dict[str, Any]) -> None:
         review_flags, pending_recommendations = self._normalized_timeline_blockers(timeline)
@@ -751,6 +770,11 @@ class _PipelinePrivateHelpersMixin:
         timeline_payload = {
             "project_id": timeline.project_id,
             "narration_source_uri": timeline.narration_source_uri,
+            # **화면 크기를 잃지 마라.** 다시 만든 타임라인에 이걸 안 실었더니
+            # 완성본 계획이 세로 기본값(1080x1920)으로 떨어졌다 -- 가로로 연
+            # 편집본이 세로 mp4로 나왔다(2026-09-06 실측). 대표님은 가로 영상을
+            # 만든다.
+            **_timeline_output_settings(source_timeline),
             "tracks": [
                 {
                     "track_id": track.track_id,
@@ -939,7 +963,10 @@ class _PipelinePrivateHelpersMixin:
                 project_id=project_id,
                 recommendation_type=RecommendationType.BROLL,
                 segments=segments_to_regenerate,
-                assets=self.store.list_assets(project_id=project_id, asset_type=AssetType.BROLL_VIDEO),
+                assets=list_scene_candidate_assets(
+                    store=self.store, project_id=project_id,
+                    library_store=getattr(self, "library_store", None),
+                ),
             )
         )
         for candidate in candidates:

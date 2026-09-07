@@ -31,7 +31,6 @@
 | `music-title-x` | Title-X — poinl | [page](https://opengameart.org/content/title-x) · `4359af8045e86b1f34dd8ec3903e61b0969fea138d3967055bdd837193ea52f2` | [gba1complete.mp3](https://opengameart.org/sites/default/files/gba1complete.mp3) | yes | yes | yes | not required; source requests notification only, not a license condition |
 | `music-dialogue` | Dialogue — Umplix | [page](https://opengameart.org/content/dialogue) · `b3eab221be2a3208fefc029b5e6755680f1f2e1ec2666a0b2c5c41771af474cc` | [dialogue.wav](https://opengameart.org/sites/default/files/dialogue.wav) | yes | yes | yes | not required; `Umplix` recommended |
 | `music-mysterious` | Mysterious — nene | [page](https://opengameart.org/content/mysterious) · `3f581ae0c62d2b4ab6ee6b7482e765aa7d50cd267ae12fc3c02c34ba9bcb999b` | [Mysterious.wav](https://opengameart.org/sites/default/files/Mysterious.wav) | yes | yes | yes | not required; `nene` recommended |
-| `music-arcade-background` | arcade background music — aqrezes | [page](https://opengameart.org/content/arcade-background-music) · `4f7d80f475815e03dfb3b3808b2c6d3a24e7be8b0d5e1780d998a6c63172a5a2` | [arcade song.wav](https://opengameart.org/sites/default/files/arcade%20song.wav) | yes | yes | yes | not required; source asks for a project link only |
 
 ### 승인 확장 — FMA HoliznaCC0 개별 tracks
 
@@ -60,17 +59,33 @@
 
 | candidate asset_id | title / creator | official page · evidence SHA-256 | direct source |
 | --- | --- | --- | --- |
-| `music-8bit-title-screen` | 8Bit Title Screen — Joth | [page](https://opengameart.org/content/8bit-title-screen) · `c8d435fe547111f59f77334a804b8f4c3035b71e58902f72f46ddb66a5520eda` | [MP3](https://opengameart.org/sites/default/files/8Bit%20Title%20Screen.mp3) |
-| `music-futuristic-resources` | Futuristic-Resources — section31 | [page](https://opengameart.org/content/futuristic-resources) · `ec72314790b7cfff3b8e109607780928b63d30e44a5d8f38ba0c4cc790891c25` | [OGG](https://opengameart.org/sites/default/files/S31-Futuristic-Resources.ogg) |
-| `music-grasslands-theme` | GrassLands Theme — DST | [page](https://opengameart.org/content/grasslands-theme) · `04008712810d46fa3526537aad0e0319e7f3e36f7b1769052a2c1fd6a479dd04` | [MP3](https://opengameart.org/sites/default/files/DST-GrassLands.mp3) |
-| `music-chase` | Chase — Adiutorium | [page](https://opengameart.org/content/chase-2) · `ee514f159e5f269598e4e7e0839ca046320ba4f9569e8b049867c84f0723cb15` | [MP3](https://opengameart.org/sites/default/files/chase.mp3) |
-| `music-intro` | Intro Music — RonyDkid | [page](https://opengameart.org/content/intro-music-0) · `e209659c60ed5e9769fdb6dc5050286ff9a1fad301f85fe7e6666db60d543639` | [MP3](https://opengameart.org/sites/default/files/game_1.mp3) |
-| `music-portal` | portal — oglsdl | [page](https://opengameart.org/content/portal) · `a561ad4f7d0ec3be07adb886105be94bd15ad292d2cd6e09c0bb4d62364a29cb` | [OGG](https://opengameart.org/sites/default/files/portal_1.ogg) |
-| `music-determination` | Determination — artisticdude | [page](https://opengameart.org/content/determination) · `9153f5076c1b7e48ffe75cc37c7d85dae20aa01de13c136eadb07f960049c750` | [MP3](https://opengameart.org/sites/default/files/determination.mp3) |
-| `music-005` | 005 — Some Weirdo | [page](https://opengameart.org/content/005) · `64b3d5273adbd72b4adaf8ae7e089fe3e3b232e78ece152ead024d5a957b7b11` | [OGG](https://opengameart.org/sites/default/files/005.ogg) |
-| `music-somnium` | Somnium — Adiutorium | [page](https://opengameart.org/content/somnium) · `b4401dc57bcea77cdabe6453fd5abde0c05555fc0c34b01cb0206a721dc3d0d5` | [MP3](https://opengameart.org/sites/default/files/somnium.mp3) |
-| `music-orien` | Orien — Tozan | [page](https://opengameart.org/content/orien) · `363004a16be218b2d2c44d218c97eaf0c518580536acde892db7875a9bd48dce` | [OGG](https://opengameart.org/sites/default/files/orien_2.ogg) |
-| `music-1-minute` | 1 minute. — thisismyusername | [page](https://opengameart.org/content/1-minute) · `390c926460d5fcf5a4479993d4f975cff58802fefdf8c03b8eaa6938ab661571` | [MP3](https://opengameart.org/sites/default/files/1%20minute.mp3) |
+
+### 승인 확장 — OpenGameArt individual music (브이로그용, 2026-09-05)
+
+owner 지시(2026-09-05): "브이로그용 30곡 찾아서 넣어줘. 게임음악은 다 삭제해."
+
+세어 보니 기존 30곡은 **전부 게임 음악이 아니었다** -- FMA HoliznaCC0의
+lo-fi/chill 12곡이 이미 들어 있었다(`Ocean Memory Lo-Fi Chill` 앨범 등).
+그래서 명백한 게임 음악 12곡만 빼고(8bit 타이틀·아케이드·초원 테마·포털…)
+그 자리를 같은 규칙(CC0 + raw 재배포 허용)으로 채웠다.
+
+**곡을 듣고 고른 것이 아니다.** OpenGameArt에서 라이선스가 CC0로 명시된
+음악만 추린 뒤 제목·태그로 골랐다 -- owner가 들어 보고 빼라고 하면 뺀다.
+
+| candidate asset_id | title / creator | official asset page · evidence SHA-256 | source file | commercial | raw redistribute | convert/adapt | attribution |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `music-chill-lofi` | Chill Lofi Inspired — omfgdude | [page](https://opengameart.org/content/chill-lofi-inspired) · `dc3f91195a90ad1d24e1a124ca9cdf1b4da8dee5d1672ae9f13b6624b608cd4f` | [source](https://opengameart.org/sites/default/files/ChillLofiR_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `omfgdude` recommended |
+| `music-lofi-compilation` | Lofi Compilation — TAD | [page](https://opengameart.org/content/lofi-compilation) · `1f51ab0e78a63755e8e6584eb95dd19e9c2cf28e902a4b44ac59157bf7a56afe` | [source](https://opengameart.org/sites/default/files/A%20cup%20of%20tea_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `TAD` recommended |
+| `music-apple-cider` | Apple Cider — Zane Little Music | [page](https://opengameart.org/content/apple-cider) · `e1b755fa6d289efbec699095aec4232f04d4944767dccc10e8219f6caaf7f97a` | [source](https://opengameart.org/sites/default/files/apple_cider.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Zane Little Music` recommended |
+| `music-napping-cloud` | Napping on a Cloud — congusbongus | [page](https://opengameart.org/content/napping-on-a-cloud) · `ddd656fe9b296049c88d1dcd6fa212b36f8a07f99535a1ed3ffd6a880a92b9b9` | [source](https://opengameart.org/sites/default/files/napping_on_a_cloud.ogg) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `congusbongus` recommended |
+| `music-calm-loop` | Calm Loop — wipics | [page](https://opengameart.org/content/calm-loop) · `2b1981397965f70b7b7d9a2e8b0eb2042d9aa430ac0bc24b7e0f905a72999ae7` | [source](https://opengameart.org/sites/default/files/Relaxing_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `wipics` recommended |
+| `music-chill-fever` | A Chill Fever — Pro Sensory | [page](https://opengameart.org/content/a-chill-fever-loopable) · `a81fa924820a4f7342e8e230bc2573ba2d3268155cbee66403046143dacc5b64` | [source](https://opengameart.org/sites/default/files/a_chill_fever_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Pro Sensory` recommended |
+| `music-mocha-frapp` | Mocha Frapp — Pro Sensory | [page](https://opengameart.org/content/mocha-frapp) · `7b63c3e43052d426014e3789615e67b4cd63d3bc60cf3217e444df349e032af4` | [source](https://opengameart.org/sites/default/files/mocha_frapp_2.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Pro Sensory` recommended |
+| `music-slow-stride` | Slow Stride — isaiah658 | [page](https://opengameart.org/content/slow-stride) · `7c8ac37890588e38f401e864ec5f40b4fa40517546c24067073fc87771cb4157` | [source](https://opengameart.org/sites/default/files/Slow%20Stride%20Loop.flac) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `isaiah658` recommended |
+| `music-calm-piano` | Calm Piano 1 — cynicmusic | [page](https://opengameart.org/content/calm-piano-1-vaporware) · `54274f92b2fca2a08aab7359c3ca4f79b05e93775b3f5cc4c0ca0268f0664fb0` | [source](https://opengameart.org/sites/default/files/003_Vaporware_2.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `cynicmusic` recommended |
+| `music-calm-ambient` | Calm Ambient 3 — cynicmusic | [page](https://opengameart.org/content/calm-ambient-3-lifewave-2k) · `600a222081b2619cf8736148867cd76bcb2956911234273c4843a1a3dd48fbfd` | [source](https://opengameart.org/sites/default/files/006_lifeWave2k_0.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `cynicmusic` recommended |
+| `music-lofi-again` | Lofi Again — omfgdude | [page](https://opengameart.org/content/lofi-again) · `c64df46aec7c3d11929f4e9626bb911d0d2a618d3cac7e95bf24466695f73c1b` | [source](https://opengameart.org/sites/default/files/lofiagain.ogg) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `omfgdude` recommended |
+| `music-ambient-relax` | Ambient Relaxing Loop — isaiah658 | [page](https://opengameart.org/content/ambient-relaxing-loop) · `e8ef7e6cab4ad976410fb12708b0f45ca0c269fd87cd9baa1a1f419ce31eb888` | [source](https://opengameart.org/sites/default/files/Ambient-Loop-isaiah658_0.ogg) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `isaiah658` recommended |
 
 ## 승인 후보 — SFX
 
@@ -92,9 +107,6 @@
 | `sfx-n4-button` | button.mp3 — n4 | same page/hash | [button_0.mp3](https://opengameart.org/sites/default/files/button_0.mp3) |
 | `sfx-n4-coin1` | coin1.mp3 — n4 | same page/hash | [coin1_0.mp3](https://opengameart.org/sites/default/files/coin1_0.mp3) |
 | `sfx-n4-coin2` | coin2.mp3 — n4 | same page/hash | [coin2_0.mp3](https://opengameart.org/sites/default/files/coin2_0.mp3) |
-| `sfx-n4-explosion` | explosion.mp3 — n4 | same page/hash | [explosion_0.mp3](https://opengameart.org/sites/default/files/explosion_0.mp3) |
-| `sfx-n4-explosion-distant` | explosion_distant.mp3 — n4 | same page/hash | [explosion_distant_0.mp3](https://opengameart.org/sites/default/files/explosion_distant_0.mp3) |
-| `sfx-n4-gunshot` | gunshot.mp3 — n4 | same page/hash | [gunshot_0.mp3](https://opengameart.org/sites/default/files/gunshot_0.mp3) |
 | `sfx-n4-splash1` | splash1.mp3 — n4 | same page/hash | [splash1_0.mp3](https://opengameart.org/sites/default/files/splash1_0.mp3) |
 | `sfx-n4-splash2` | splash2.mp3 — n4 | same page/hash | [splash2_0.mp3](https://opengameart.org/sites/default/files/splash2_0.mp3) |
 | `sfx-n4-success` | success.mp3 — n4 | same page/hash | [success_0.mp3](https://opengameart.org/sites/default/files/success_0.mp3) |
@@ -121,35 +133,85 @@
 
 `Spring Spring`의 [official CC0 page](https://opengameart.org/content/various-sound-effects-0) raw HTML SHA-256은 `925a53041ff971e46ad4b5e8ac0857ce753ba0dcad4e6ddf30dac20031f14682`다. 아래 **각 token이 one asset**이며 direct source는 `https://opengameart.org/sites/default/files/<file>`이다. 모든 candidate의 commercial/raw redistribution/conversion=`true`, attribution=`false`다.
 
-`sfx-various-bangs=bangs.wav`, `sfx-various-beep1=beep1.wav`, `sfx-various-big-amber=big_amber.wav`, `sfx-various-break-stone=break_stone.wav`, `sfx-various-bup=bup.wav`, `sfx-various-cannonball-tap=cannonball_tap.wav`, `sfx-various-click=click_1.wav`, `sfx-various-crush=crush.wav`, `sfx-various-death=death_2.wav`, `sfx-various-dull-explosion=dull_explosion.wav`, `sfx-various-fall=fall_0.wav`, `sfx-various-important-item=get_important_item.wav`, `sfx-various-glug=glug.wav`, `sfx-various-moan=moan.wav`, `sfx-various-nom=nom.wav`, `sfx-various-player-hit=player_hit.wav`, `sfx-various-pop=pop.wav`, `sfx-various-powered-door=powered_door.wav`, `sfx-various-weeds=rustling_of_the_weeds.wav`, `sfx-various-scooter=scooter_p.wav`, `sfx-various-small-amber=small_amber.wav`, `sfx-various-rock-impact=small_rock_impact.wav`, `sfx-various-spear=spear.wav`, `sfx-various-steal=steal.wav`, `sfx-various-swim=swim_0.wav`, `sfx-various-tap-stone=tap_stone.wav`, `sfx-various-teleport=teleport_2.wav`, `sfx-various-tick=tick_0.wav`, `sfx-various-uff=uff.wav`, `sfx-various-ambient-impact=snd_ambient_impact1.wav`, `sfx-various-batwings=snd_batwings.wav`, `sfx-various-death1=snd_death1.wav`, `sfx-various-death2=snd_death2.wav`, `sfx-various-fillenergy=snd_fillenergy.wav`, `sfx-various-footsteps=snd_footsteps1.wav`, `sfx-various-fox-footstep=snd_fox_footstep.wav`, `sfx-various-getpowerup=snd_getpowerup.wav`, `sfx-various-menu-move=snd_menu_move.wav`, `sfx-various-menu-select=snd_menu_select.wav`, `sfx-various-npc-message=snd_npc_message.wav`, `sfx-various-slip-ice=snd_slip_on_ice.wav`, `sfx-various-splathit=snd_splathit.wav`, `sfx-various-splat=snd_splat.wav`, `sfx-various-splurt=snd_splurt.wav`, `sfx-various-sproing=snd_sproing.wav`, `sfx-various-throw=snd_throw1.wav`, `sfx-various-treasure=snd_treasure.wav`.
+`sfx-various-bangs=bangs.wav`, `sfx-various-beep1=beep1.wav`, `sfx-various-click=click_1.wav`, `sfx-various-fall=fall_0.wav`, `sfx-various-glug=glug.wav`, `sfx-various-nom=nom.wav`, `sfx-various-pop=pop.wav`, `sfx-various-powered-door=powered_door.wav`, `sfx-various-weeds=rustling_of_the_weeds.wav`, `sfx-various-scooter=scooter_p.wav`, `sfx-various-swim=swim_0.wav`, `sfx-various-tap-stone=tap_stone.wav`, `sfx-various-tick=tick_0.wav`, `sfx-various-ambient-impact=snd_ambient_impact1.wav`, `sfx-various-footsteps=snd_footsteps1.wav`, `sfx-various-menu-move=snd_menu_move.wav`, `sfx-various-menu-select=snd_menu_select.wav`, `sfx-various-npc-message=snd_npc_message.wav`, .
 
 ### 승인 확장 — RPG / battle individual SFX (20)
 
 | candidate asset_id | creator / official page · evidence SHA-256 | direct source |
 | --- | --- | --- |
-| `sfx-rpg-baseballbat` | Delta12 Studio · [RPG Sound Effect Pack](https://opengameart.org/content/rpg-sound-effect-pack) · `e6b3928faa6f503a64336f7655e07855378511abfe5427b14fa01138fa2c8efb` | [baseballbat_1.ogg](https://opengameart.org/sites/default/files/baseballbat_1.ogg) |
-| `sfx-rpg-bee` | same page/hash | [bee_2.ogg](https://opengameart.org/sites/default/files/bee_2.ogg) |
-| `sfx-rpg-bat` | same page/hash | [bat.ogg](https://opengameart.org/sites/default/files/bat.ogg) |
-| `sfx-rpg-cancel` | same page/hash | [cancel_1.ogg](https://opengameart.org/sites/default/files/cancel_1.ogg) |
 | `sfx-rpg-door` | same page/hash | [door_1.ogg](https://opengameart.org/sites/default/files/door_1.ogg) |
-| `sfx-rpg-explosion` | same page/hash | [explosion_5.ogg](https://opengameart.org/sites/default/files/explosion_5.ogg) |
-| `sfx-rpg-explosion1` | same page/hash | [explosion1_3.ogg](https://opengameart.org/sites/default/files/explosion1_3.ogg) |
 | `sfx-rpg-grass` | same page/hash | [grass_1.ogg](https://opengameart.org/sites/default/files/grass_1.ogg) |
-| `sfx-rpg-hurt` | same page/hash | [hurt_1.ogg](https://opengameart.org/sites/default/files/hurt_1.ogg) |
-| `sfx-rpg-item` | same page/hash | [item_1.ogg](https://opengameart.org/sites/default/files/item_1.ogg) |
-| `sfx-rpg-punch` | same page/hash | [punch_1.ogg](https://opengameart.org/sites/default/files/punch_1.ogg) |
 | `sfx-rpg-steps` | same page/hash | [steps_1.ogg](https://opengameart.org/sites/default/files/steps_1.ogg) |
-| `sfx-sea-cannon-fire` | Thimras · [Battle at sea](https://opengameart.org/content/battle-at-sea) · `b0410a3d5da2474d71359d09cefd89b82d70683925353490ec5712992944753f` | [cannon_fire_1.ogg](https://opengameart.org/sites/default/files/cannon_fire_1.ogg) |
-| `sfx-sea-cannon-hit` | same page/hash | [cannon_hit_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_1.ogg) |
-| `sfx-sea-cannon-hit-cannon` | same page/hash | [cannon_hit_cannon_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_cannon_1.ogg) |
-| `sfx-sea-cannon-hit-ship` | same page/hash | [cannon_hit_ship_short.ogg](https://opengameart.org/sites/default/files/cannon_hit_ship_short.ogg) |
-| `sfx-sea-cannon-hit-wall` | same page/hash | [cannon_hit_wall_1.ogg](https://opengameart.org/sites/default/files/cannon_hit_wall_1.ogg) |
-| `sfx-sea-cannon-hit-wall-dry` | same page/hash | [cannon_hit_wall_no_splash.ogg](https://opengameart.org/sites/default/files/cannon_hit_wall_no_splash.ogg) |
-| `sfx-sea-cannon-miss` | same page/hash | [cannon_miss_1.ogg](https://opengameart.org/sites/default/files/cannon_miss_1.ogg) |
-| `sfx-sea-ship-destroyed` | same page/hash | [ship_destroyed_1.ogg](https://opengameart.org/sites/default/files/ship_destroyed_1.ogg) |
 
 ## Gate 판정과 다음 행동
 
-- **approved research candidate (30 music / 100 SFX): PASS.** 각 후보는 author page, creator, exact source file, CC0 license, official license evidence hash, commercial/raw redistribution/conversion 판단을 갖췄다. Direct asset URL 130개와 official asset page URL 36개를 2026-07-14 HTTPS HEAD 200으로 다시 확인했다.
-- **starter-v1 research gate (30 music / 100 SFX): GREEN.** 이것은 license/provenance research만 green이라는 뜻이다. 실제 source bytes, duration, codec, converted bytes와 manifest integrity는 아직 검증되지 않았다.
+- **approved research candidate (당시 30 music / 100 SFX): PASS.** 각 후보는 author page, creator, exact source file, CC0 license, official license evidence hash, commercial/raw redistribution/conversion 판단을 갖췄다. Direct asset URL 130개와 official asset page URL 36개를 2026-07-14 HTTPS HEAD 200으로 다시 확인했다.
+- **starter-v1 research gate (당시 30 music / 100 SFX): GREEN.** 이것은 license/provenance research만 green이라는 뜻이다. 실제 source bytes, duration, codec, converted bytes와 manifest integrity는 아직 검증되지 않았다.
 - 다음 작업은 이 ledger의 approved asset만 대상으로 source download SHA-256 → transcode/probe → evidence text snapshot → manifest build 순서로 진행한다. 이 순서를 건너뛰어 build artifact를 배포하지 않는다.
+
+**위 두 줄의 숫자는 2026-07-14 시점이다. 지금 승인 집합은 104개(음악 30 /
+효과음 74)다.** 이 판정 뒤에 아래 두 절이 집합을 바꿨다 — 2026-09-05에 브이로그용
+23개를 넣었고(130 → 153), 2026-09-06에 게임 전용 49개를 뺐다(153 → 104).
+빌더가 이 숫자를 강제한다(`scripts/build_starter_media_pack.py`의
+`_validate_candidate_set`: 104 / 음악 30 / 효과음 74) — 여기 표와 어긋나면 빌드가 멈춘다.
+
+### 승인 확장 — 브이로그용 SFX (2026-09-05)
+
+**왜 넣나.** 효과음 100개가 전부 게임용이었다 -- 대포·총소리·박쥐날개·보물.
+대표님은 1인칭 내레이션 + B-roll 브이로그를 만든다. 유진에게 "팝 하고 터지는
+짧은 소리 넣어줘"라고 했더니 RPG 폭발음이 나왔는데, 유진 탓이 아니라 **재료가
+그것뿐**이어서였다. 브이로그가 실제로 쓰는 세 가지를 넣는다: 장면 전환음(휙),
+타이핑, 종이.
+
+**기존 것은 아직 빼지 않았다.** 게임 전용을 덜어내는 것은 지금 만들어 둔
+영상이 그 소리를 참조하고 있는지 확인한 뒤에 한다 -- 참조를 끊으면 되돌릴 수 없다.
+
+**묶음 주소 표기.** 이 세 출처는 개별 파일 주소가 없고 zip으로만 받는다.
+`...zip#묶음안/경로.wav`로 적으면 빌더가 그 파일 하나만 꺼내 쓴다. 보관하는
+원본·해시·증거는 전부 **꺼낸 파일**의 것이다.
+
+| asset_id | 제목 — 만든이 | 출처 페이지 · 증거 SHA-256 | 받는 주소 | CC0 | 원본 재배포 | 상업적 사용 | 표기 |
+|---|---|---|---|---|---|---|---|
+| `sfx-swish-1` | Swishes Sound Pack swish-1 — artisticdude | [page](https://opengameart.org/content/swishes-sound-pack) · `565b61c868a7e6baa08945ee502114fa788accf092bef48166bfba4da497e1d9` | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-1.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-2` | Swishes Sound Pack swish-2 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-2.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-3` | Swishes Sound Pack swish-3 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-3.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-4` | Swishes Sound Pack swish-4 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-4.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-5` | Swishes Sound Pack swish-5 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-5.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-6` | Swishes Sound Pack swish-6 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-6.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-7` | Swishes Sound Pack swish-7 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-7.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-8` | Swishes Sound Pack swish-8 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-8.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-9` | Swishes Sound Pack swish-9 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-9.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-10` | Swishes Sound Pack swish-10 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-10.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-11` | Swishes Sound Pack swish-11 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-11.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-12` | Swishes Sound Pack swish-12 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-12.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-swish-13` | Swishes Sound Pack swish-13 — artisticdude | same page/hash above | [swishes.zip](https://opengameart.org/sites/default/files/swishes.zip#swishes/swish-13.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `artisticdude` recommended |
+| `sfx-typing-slow` | Keyboard Soundpack #1 generated-003_slow.wav — unicaegames | [page](https://opengameart.org/content/keyboard-soundpack-1-typing-and-single-keystrokes) · `58962c9b4dc194070114c4b86475ec2e68751dfcdc1ba6cdbe8a0c9c15511fa3` | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Generated Typing/generated-003_slow.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-typing-medium` | Keyboard Soundpack #1 generated-004_medium.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Generated Typing/generated-004_medium.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-typing-fast` | Keyboard Soundpack #1 generated-005_fast.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Generated Typing/generated-005_fast.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-keypress-1` | Keyboard Soundpack #1 keypress-001.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Single Keys/keypress-001.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-keypress-2` | Keyboard Soundpack #1 keypress-005.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Single Keys/keypress-005.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-keypress-3` | Keyboard Soundpack #1 keypress-010.wav — unicaegames | same page/hash above | [keyboard.zip](https://opengameart.org/sites/default/files/unicae_games_keyboard_soundpack_1_0.zip#Single Keys/keypress-010.wav) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `unicaegames` recommended |
+| `sfx-paper-1` | Various Paper Sound Effects paper_sound_-_1.mp3 — Luckius | [page](https://opengameart.org/content/various-paper-sound-effects) · `721d853b13a449b3cb31375682a9a37b3b65f0d11540af76903575654b7eb482` | [paper_sound_-_1.mp3](https://opengameart.org/sites/default/files/paper_sound_-_1.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+| `sfx-paper-2` | Various Paper Sound Effects paper_sound_-_2.mp3 — Luckius | same page/hash above | [paper_sound_-_2.mp3](https://opengameart.org/sites/default/files/paper_sound_-_2.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+| `sfx-paper-3` | Various Paper Sound Effects paper_sound_-_3.mp3 — Luckius | same page/hash above | [paper_sound_-_3.mp3](https://opengameart.org/sites/default/files/paper_sound_-_3.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+| `sfx-paper-ripped` | Various Paper Sound Effects paper_ripped_-_1.mp3 — Luckius | same page/hash above | [paper_ripped_-_1.mp3](https://opengameart.org/sites/default/files/paper_ripped_-_1.mp3) | yes (CC0) | yes (CC0) | yes (CC0) | not required; `Luckius` recommended |
+
+### 승인 축소 — 게임 전용 효과음 49개 제거 (2026-09-06)
+
+owner가 음악에 대해 한 말을 효과음에도 적용했다(위임): "게임음악은 다 삭제해.
+어차피 필요없잖아."
+
+1인칭 내레이션 + B-roll 브이로그에 **대포 8종·총소리·폭발 4종·야구방망이·
+몬스터 피격·박쥐날개·보물·순간이동·신음**은 쓸 자리가 없다. 유진에게 "팝 하고
+터지는 짧은 소리"를 시켰더니 RPG 폭발음이 나온 것도 이 재료들 때문이었다.
+
+**쓸 수 있는 것은 남겼다**(74개): 종 3·단추·성공 알림·동전 2·물 튀는 소리 2·
+북 6·비브라폰 2·딸깍·팝 11·똑딱·삐·메뉴 2·발소리 2·문 2·풀숲·풀 스치는 소리·
+마시는 소리·먹는 소리·스쿠터·헤엄·톡 두드리는 소리·떨어지는 소리·쾅·기운 차는
+소리 3, 그리고 2026-09-05에 넣은 브이로그용 23개(전환음 13·타이핑 3·키 3·종이 4).
+
+**빼기 전에 참조를 확인했다.** 팩 효과음을 가리키는 프로젝트가 하나도 없었다
+(라이브러리 등록부에만 있었다) -- 참조를 끊으면 되돌릴 수 없으므로 이 확인 없이
+빼지 않는다.
+
+123 → 74. 전체 후보는 153 → 104(음악 30 + 효과음 74).

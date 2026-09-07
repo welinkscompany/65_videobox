@@ -466,7 +466,8 @@ PROJECT_SCHEMA_STATEMENTS = (
         status TEXT NOT NULL,
         approved_at TEXT,
         updated_at TEXT NOT NULL,
-        source_session_revision INTEGER, is_current INTEGER NOT NULL DEFAULT 1,
+        source_session_revision INTEGER, source_variant_id TEXT, source_variant_revision INTEGER,
+        is_current INTEGER NOT NULL DEFAULT 1,
         invalidated_at TEXT, invalidated_reason TEXT
     )
     """,
@@ -571,6 +572,57 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS output_variants (
+        variant_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK(kind IN ('horizontal', 'vertical_full', 'vertical_highlight')),
+        source_session_id TEXT NOT NULL,
+        source_session_revision INTEGER NOT NULL,
+        variant_revision INTEGER NOT NULL DEFAULT 1,
+        overrides_json TEXT NOT NULL DEFAULT '{}',
+        locks_json TEXT NOT NULL DEFAULT '[]',
+        conflicts_json TEXT NOT NULL DEFAULT '[]',
+        selected_segment_ids_json TEXT,
+        master_segment_ids_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(project_id, variant_id),
+        UNIQUE(project_id, source_session_id, kind)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS variant_materializations (
+        materialization_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        variant_id TEXT NOT NULL,
+        source_session_id TEXT NOT NULL,
+        source_session_revision INTEGER NOT NULL,
+        source_variant_revision INTEGER NOT NULL,
+        timeline_id TEXT NOT NULL,
+        segments_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(project_id, variant_id, source_variant_revision)
+    )
+    """,
+    """
+    -- owner 요청(2026-08-28): 프리뷰 공유 링크 -- 토큰 링크 방식 승인. 이 앱은
+    -- 지금까지 인증이 전혀 없었다는 점을 밝혀 둔다. token은 credential이라
+    -- UNIQUE로 잡아 두고, 조회는 token만으로 가능해야 하니 project_id를 조건에
+    -- 걸지 않는다(별도 인덱스로 빠르게 찾는다).
+    CREATE TABLE IF NOT EXISTS preview_shares (
+        share_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        export_id TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_preview_shares_token ON preview_shares(token)
+    """,
+    """
     CREATE TABLE IF NOT EXISTS director_hermes_run_events (
         project_id TEXT NOT NULL,
         run_id TEXT NOT NULL,
@@ -612,6 +664,29 @@ PROJECT_SCHEMA_STATEMENTS = (
     """
     CREATE INDEX IF NOT EXISTS idx_exact_preview_current
     ON exact_preview_renders (project_id, session_id, cache_key, state, updated_at)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS proposal_preview_renders (
+        generation_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        proposal_id TEXT NOT NULL,
+        expected_revision INTEGER NOT NULL,
+        cache_key TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        state TEXT NOT NULL,
+        artifact_uri TEXT,
+        claim_token TEXT,
+        claimed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        invalidated_reason TEXT,
+        error_message TEXT
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_proposal_preview_current
+    ON proposal_preview_renders (project_id, session_id, proposal_id, cache_key, state, updated_at)
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_hermes_capability_ledger_expiry

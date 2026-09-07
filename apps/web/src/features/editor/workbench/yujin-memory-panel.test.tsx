@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RightDock } from "./RightDock";
+import { YujinPanel } from "./YujinPanel";
 
 afterEach(cleanup);
 
@@ -31,9 +31,15 @@ const memoryCallbacks = () => ({
   onDelete: vi.fn(),
 });
 
-function renderDock(memory: Record<string, unknown>) {
+// 기억 패널은 `YujinPanel` 안, 대화 다음 자리에 있다(따로 탭이 아니다 --
+// 기억 후보는 그 대화에서 나온다). 2026-08-30 후속으로 유진 대화 자체가
+// `RightDock`에서 완전히 빠져 독립 패널이 됐다(`docs/reference/capcut-observed-2026-08-22.ko.md`
+// §7) -- 이 파일은 이제 그 패널을 직접 연다.
+function renderPanel(memory: Record<string, unknown>) {
   return render(
-    <RightDock
+    <YujinPanel
+      open
+      onOpenChange={vi.fn()}
       draft=""
       onDraftChange={vi.fn()}
       onSendMessage={vi.fn()}
@@ -44,9 +50,6 @@ function renderDock(memory: Record<string, unknown>) {
         top: 64,
         pinnedToBottom: false,
       }}
-      inspectorTargets={[
-        { id: "segment-1", label: "장면 1", kind: "caption" },
-      ]}
     />,
   );
 }
@@ -54,7 +57,7 @@ function renderDock(memory: Record<string, unknown>) {
 describe("Yujin memory panel", () => {
   it("has one separate explicit typed producer and never fires it automatically", () => {
     const callbacks = memoryCallbacks();
-    renderDock({
+    renderPanel({
       candidates: [],
       loadError: null,
       ...callbacks,
@@ -86,7 +89,7 @@ describe("Yujin memory panel", () => {
 
   it("requires explicit approve-and-store or reject and renders no source/provider data", () => {
     const callbacks = memoryCallbacks();
-    renderDock({
+    renderPanel({
       candidates: [pending],
       loadError: null,
       ...callbacks,
@@ -113,7 +116,7 @@ describe("Yujin memory panel", () => {
 
   it("shows controlled saving, stored, failed retry, and delete states", () => {
     const callbacks = memoryCallbacks();
-    const rendered = renderDock({
+    const rendered = renderPanel({
       candidates: [{ ...pending, action: "saving" }],
       loadError: null,
       ...callbacks,
@@ -128,7 +131,9 @@ describe("Yujin memory panel", () => {
     )).toBeVisible();
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -154,7 +159,9 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onStore).toHaveBeenCalledWith("memory-1");
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -175,7 +182,9 @@ describe("Yujin memory panel", () => {
     )).toBeNull();
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -200,7 +209,9 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onStore).toHaveBeenCalledWith("memory-1");
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -222,7 +233,9 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onDelete).toHaveBeenCalledWith("memory-1");
 
     rendered.rerender(
-      <RightDock
+      <YujinPanel
+        open
+        onOpenChange={vi.fn()}
         draft=""
         onDraftChange={vi.fn()}
         memory={{
@@ -247,26 +260,20 @@ describe("Yujin memory panel", () => {
     expect(callbacks.onDelete).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps candidate and conversation usable across Inspector and memory failure", () => {
+  it("keeps candidate and conversation usable when memory fails to load", () => {
     const callbacks = memoryCallbacks();
-    renderDock({
+    renderPanel({
       candidates: [pending],
       loadError: "기억을 불러오지 못했어요.",
       ...callbacks,
     });
-    fireEvent.click(screen.getByRole(
-      "button", { name: "편집 항목 열기" },
-    ));
-    fireEvent.click(screen.getByRole(
-      "button", { name: "편집 항목 닫기" },
-    ));
 
-    expect(screen.getByRole("region", { name: "유진 기억" }))
-      .toHaveTextContent("빠른 컷 편집을 선호합니다.");
     expect(screen.getByRole("log", { name: "유진 대화" }).scrollTop)
       .toBe(64);
     expect(screen.getByLabelText("유진에게 요청하기")).toBeEnabled();
     expect(screen.getByRole("button", { name: "요청 보내기" }))
       .toBeDisabled();
+    expect(screen.getByRole("region", { name: "유진 기억" }))
+      .toHaveTextContent("빠른 컷 편집을 선호합니다.");
   });
 });

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 import re
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from videobox_core_engine.settings import AutoCutConfig
 
@@ -114,6 +115,118 @@ class AutoCutPlanner:
                 continue
             kept.append(segment)
         return kept
+
+    def build_footage_suggestions(
+        self,
+        *,
+        total_duration: float,
+        scene_timestamps: Iterable[float] = (),
+        black_regions: Iterable[Mapping[str, Any]] = (),
+        static_windows: Iterable[Mapping[str, Any]] = (),
+        audio_windows: Iterable[Mapping[str, Any]] = (),
+        analysis_windows: Iterable[Mapping[str, Any]] = (),
+    ) -> list[dict[str, Any]]:
+        """Turn independent measurements into bounded, reviewable windows.
+
+        This is deliberately a pure operation.  It only creates references to
+        the source timeline; it never edits an editing session or source file.
+        Invalid/non-finite measurements are ignored and all resulting bounds
+        are clamped to the measured duration.
+        """
+        try:
+            duration = float(total_duration)
+        except (TypeError, ValueError):
+            return []
+        if not math.isfinite(duration) or duration <= 0:
+            return []
+
+        scenes = sorted({point for point in self._finite_points(scene_timestamps) if 0 < point < duration})
+        black = self._normalize_windows(black_regions, duration)
+        static = self._normalize_windows(static_windows, duration)
+        audio = self._normalize_windows(audio_windows, duration)
+        analysis = self._normalize_windows(analysis_windows, duration)
+
+        boundaries = {0.0, duration, *scenes}
+        for windows in (black, static, audio, analysis):
+            for start, end in windows:
+                boundaries.update((start, end))
+        ordered = sorted(boundaries)
+        suggestions: list[dict[str, Any]] = []
+        labels = {
+            "scene_change": "장면이 바뀐 지점이에요",
+            "black_screen": "검은 화면이 감지됐어요",
+            "static_scene": "화면 변화가 거의 없어요",
+            "audio_activity": "소리가 있는 구간이에요",
+            "analysis_window": "분석된 구간이에요",
+        }
+        for start, end in zip(ordered, ordered[1:]):
+            if end <= start:
+                continue
+            reasons: list[str] = []
+            if any(math.isclose(start, point, abs_tol=1e-6) for point in scenes):
+                reasons.append("scene_change")
+            if self._overlaps((start, end), black):
+                reasons.append("black_screen")
+            if self._overlaps((start, end), static):
+                reasons.append("static_scene")
+            if self._overlaps((start, end), audio):
+                reasons.append("audio_activity")
+            if self._overlaps((start, end), analysis):
+                reasons.append("analysis_window")
+            suggestions.append(
+                {
+                    "start_sec": round(start, 6),
+                    "end_sec": round(end, 6),
+                    "reason_codes": reasons,
+                    "reason_labels": [labels[reason] for reason in reasons],
+                }
+            )
+        return suggestions
+
+    # A descriptive alias keeps callers independent from the auto-cut name.
+    suggest_footage_segments = build_footage_suggestions
+
+    @staticmethod
+    def _finite_points(values: Iterable[float]) -> list[float]:
+        result: list[float] = []
+        for value in values:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(number):
+                result.append(number)
+        return result
+
+    @classmethod
+    def _normalize_windows(
+        cls, values: Iterable[Any], duration: float
+    ) -> list[tuple[float, float]]:
+        result: list[tuple[float, float]] = []
+        for raw in values:
+            if isinstance(raw, Mapping):
+                start_value = raw.get("start_sec", raw.get("start", 0.0))
+                end_value = raw.get("end_sec", raw.get("end", 0.0))
+            elif isinstance(raw, (tuple, list)) and len(raw) >= 2:
+                start_value, end_value = raw[0], raw[1]
+            else:
+                continue
+            try:
+                start = float(start_value)
+                end = float(end_value)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(start) or not math.isfinite(end):
+                continue
+            start, end = max(0.0, start), min(duration, end)
+            if end > start:
+                result.append((round(start, 6), round(end, 6)))
+        return result
+
+    @staticmethod
+    def _overlaps(window: tuple[float, float], candidates: Iterable[tuple[float, float]]) -> bool:
+        start, end = window
+        return any(start < candidate_end and end > candidate_start for candidate_start, candidate_end in candidates)
 
     def _build_cut_points(
         self,

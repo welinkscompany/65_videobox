@@ -17,6 +17,8 @@ from __future__ import annotations
 import inspect
 import time
 
+from conftest import wait_for
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -55,13 +57,28 @@ def test_a_failing_prune_does_not_fall_back_to_running_every_second(
 
     monkeypatch.setattr(api_main, "_prune_hermes_run_events", failing_prune)
 
+    # 정비 고리가 실제로 몇 바퀴 돌았는지 센다. `_recover_hermes_runs`는 매 바퀴
+    # 맨 앞에서 돌므로 바퀴 수와 같다.
+    loops = 0
+    original_recover = api_main._recover_hermes_runs
+
+    async def counting_recover(app_ref):
+        nonlocal loops
+        loops += 1
+        await original_recover(app_ref)
+
+    monkeypatch.setattr(api_main, "_recover_hermes_runs", counting_recover)
+
     app = api_main.create_app(
         projects_root=tmp_path / "projects",
         media_analysis_poll_interval_seconds=0.01,
     )
     with TestClient(app):
-        # Long enough for many passes at a 10 ms cadence.
-        time.sleep(0.6)
+        # 여기서 지키는 것은 **실패한 정비가 다시 안 걸린다**는 상한이다. 시간만
+        # 기다리면 부하가 걸린 날 한 바퀴도 안 돈 채로 통과할 수 있다 -- 아무 일도
+        # 없었던 것을 "다시 안 걸렸다"로 읽는 셈이다. 그래서 **정비 고리가 실제로
+        # 여러 바퀴 돈 것**을 먼저 확인하고, 그 동안 실패한 쪽이 1회인지 본다.
+        wait_for(lambda: loops >= 3)
 
     assert calls == 1, f"a failing prune ran {calls} times instead of keeping its schedule"
 
@@ -92,7 +109,7 @@ def test_a_failing_maintenance_pass_says_why_and_keeps_running(
             media_analysis_poll_interval_seconds=0.01,
         )
         with TestClient(app):
-            time.sleep(0.3)
+            wait_for(lambda: calls > 1)
 
     assert calls > 1, f"작업자가 첫 실패에서 멈췄습니다 (calls={calls})"
 
@@ -126,6 +143,6 @@ def test_the_analysis_cache_is_actually_pruned(tmp_path, monkeypatch: pytest.Mon
     )
     app.state.store.bootstrap_project("보관 정리")
     with TestClient(app):
-        time.sleep(0.4)
+        wait_for(lambda: bool(pruned))
 
     assert pruned, "analysis cache retention never ran"

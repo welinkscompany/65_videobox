@@ -1,15 +1,52 @@
+# Docker ignore rules are not gitignore rules. A bare entry here is anchored at
+# the build-context root and `*` never crosses `/`, so `__pycache__` only ever
+# matched the single directory at the root -- every nested one rode into the
+# image. Measured 2026-08-20 on a real owner context: 175 `__pycache__` paths
+# (23MB) plus the whole 224MB `artifacts/` tree, and each of those lands twice,
+# once in `COPY . .` and once in the `chown -R /app` layer above it.
+# Anything that has to match at any depth is written with a leading `**/`.
+# `docker/agent-gateway.Dockerfile.dockerignore` already got this right; this
+# file did not.
+
+# Version control and sibling worktrees
 .git
 .worktrees
-.venv
-node_modules
-apps/web/node_modules
-__pycache__
-.pytest_cache
-test-results
-playwright-report
+
+# Python environments, bytecode and tool caches
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Node dependency trees. The web bundle is built in its own stage, which
+# installs from the lockfile instead of copying an installed tree.
+**/node_modules
+
+# Test and browser-tool output
+**/test-results
+**/playwright-report
+.playwright-cli
+
+# Host-side only, and already the case before this change. The OSS provenance
+# guards read `docs/oss/*` from the worktree, never from the image, and
+# `external/` is vendored reference source. `THIRD_PARTY_NOTICES.md` is not
+# listed here and stays in the image. Both entries are deliberately left
+# root-anchored: a package that ships its own `docs/` directory should keep it.
 docs
 external
-*.sqlite
-*.mp4
-*.wav
-*.mp3
+
+# Regenerable working output. `CLAUDE.md` §5 and fast-path §10.16 already treat
+# this tree as rebuildable, and nothing inside the container reads it -- the
+# owner-ready receipt under `artifacts/owner-ready` is written by the host
+# PowerShell script (`scripts/owner-ready.ps1`), never by the image. Root-
+# anchored on purpose: `RESEARCH/*/artifacts/` is a checked-in claim ledger.
+artifacts
+
+# Large local media and databases, at any depth. No tracked file in this
+# repository uses these extensions; they only ever appear as working output.
+**/*.sqlite
+**/*.mp4
+**/*.wav
+**/*.mp3

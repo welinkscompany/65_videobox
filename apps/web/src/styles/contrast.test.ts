@@ -26,36 +26,38 @@ function contrastRatio(hexA: string, hexB: string): number {
   return (lighter + 0.05) / (darker + 0.05)
 }
 
-// docs/decisions/2026-08-05-dashboard-white-orange-direction.ko.md
+// docs/decisions/2026-08-29-capcut-full-structure-and-dark-theme.ko.md
 const APPROVED = {
-  canvas: "#FAFAFA",
-  panel: "#FFFFFF",
-  border: "#EAEAEC",
-  borderStrong: "#DCDCE0",
-  text: "#1C1C1E",
-  muted: "#6E6E73",
-  faint: "#727279",
-  accent: "#C2410C",
-  accentBg: "#FFF1E7",
-  accentBorder: "#F5C9AC",
-  preview: "#18181B",
-  success: "#15803D",
-  successBg: "#ECFDF3",
+  canvas: "#0F0F11",
+  panel: "#18181B",
+  panelAlt: "#202024",
+  border: "#2E2E33",
+  borderStrong: "#3D3D44",
+  text: "#F2F2F3",
+  muted: "#A3A3AC",
+  faint: "#8A8A93",
+  accent: "#EA580C",
+  accentBg: "#3A1F0F",
+  accentBorder: "#7A3D18",
+  preview: "#0B0B0C",
+  success: "#4ADE80",
+  successBg: "#0F2A18",
 }
 
-describe("approved white-orange palette contrast", () => {
+describe("approved dark palette contrast", () => {
   it("only uses hex values recorded in the approval doc (no invented values)", () => {
     expect(readToken("--vb-canvas")).toBe(APPROVED.canvas)
     expect(readToken("--vb-panel")).toBe(APPROVED.panel)
+    expect(readToken("--vb-panel-alt")).toBe(APPROVED.panelAlt)
     expect(readToken("--vb-border")).toBe(APPROVED.border)
+    expect(readToken("--vb-border-strong")).toBe(APPROVED.borderStrong)
     expect(readToken("--vb-text")).toBe(APPROVED.text)
     expect(readToken("--vb-muted")).toBe(APPROVED.muted)
-    expect(readToken("--vb-accent")).toBe(APPROVED.accent)
-    expect(readToken("--vb-preview")).toBe(APPROVED.preview)
-    expect(readToken("--vb-border-strong")).toBe(APPROVED.borderStrong)
     expect(readToken("--vb-faint")).toBe(APPROVED.faint)
+    expect(readToken("--vb-accent")).toBe(APPROVED.accent)
     expect(readToken("--vb-accent-bg")).toBe(APPROVED.accentBg)
     expect(readToken("--vb-accent-border")).toBe(APPROVED.accentBorder)
+    expect(readToken("--vb-preview")).toBe(APPROVED.preview)
     expect(readToken("--vb-success")).toBe(APPROVED.success)
     expect(readToken("--vb-success-bg")).toBe(APPROVED.successBg)
   })
@@ -72,12 +74,43 @@ describe("approved white-orange palette contrast", () => {
     expect(contrastRatio(APPROVED.faint, APPROVED.panel)).toBeGreaterThanOrEqual(4.5)
   })
 
-  it("accent text/focus colour on panel clears 3:1 (non-text) and 4.5:1 (as text)", () => {
+  it("accent text/focus colour on panel clears 4.5:1", () => {
     const ratio = contrastRatio(APPROVED.accent, APPROVED.panel)
     expect(ratio).toBeGreaterThanOrEqual(4.5)
   })
 
   it("success state text on its own background clears 4.5:1", () => {
     expect(contrastRatio(APPROVED.success, APPROVED.successBg)).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+// docs/decisions/2026-08-29-capcut-full-structure-and-dark-theme.ko.md
+//
+// 이전엔 편집 화면만 어두웠다가(2026-08-20) owner가 되돌렸다(2026-08-21). 이번
+// 결정은 그 범위를 넘어 **`:root` 팔레트 자체**를 다크로 바꿨다 -- 화면마다
+// 다른 벌을 쓰지 않는다는 원칙(2026-08-21이 지킨 것)은 그대로 유지한 채, 그
+// 한 벌의 값 자체를 다크로 바꾼 것이다.
+describe("전체 화면이 다크다 — owner 결정 2026-08-29", () => {
+  it("편집 화면 전용 색 블록을 따로 두지 않는다", () => {
+    // 두 벌을 두면 한쪽이 조용히 낡는다는 교훈(2026-08-21)이 여전히 적용된다.
+    expect(uiSystemCss).not.toContain('[data-shell-section="editing"] {')
+    expect(uiSystemCss).not.toContain(".vb-editor-workbench {")
+  })
+
+  it("옛 흰 팔레트 값이 :root에 남아 있지 않다", () => {
+    for (const stale of [
+      "--vb-canvas: #FAFAFA",
+      "--vb-panel: #FFFFFF",
+      "--vb-accent: #C2410C",
+      "--vb-text: #1C1C1E",
+    ]) {
+      expect(uiSystemCss).not.toContain(stale)
+    }
+  })
+
+  it("미리보기 무대는 패널보다 한 단계 더 어둡다", () => {
+    const previewLum = relativeLuminance(APPROVED.preview)
+    const panelLum = relativeLuminance(APPROVED.panel)
+    expect(previewLum).toBeLessThan(panelLum)
   })
 })

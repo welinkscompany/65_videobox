@@ -25,8 +25,31 @@ def split_script_units(script_text: str) -> list[str]:
             continue
         protected = _protect_abbreviations(stripped)
         parts = re.split(r"(?<=[.!?])\s+", protected)
-        units.extend([part.strip() for part in parts if part.strip()])
+        units.extend(_rejoin_list_markers([part.strip() for part in parts if part.strip()]))
     return [_restore_abbreviations(unit) for unit in units]
+
+
+# `1.` `2.` 처럼 **번호만 남은 조각**. 뒤 문장에 붙는 이름표이지 문장이 아니다.
+_LIST_MARKER_PATTERN = re.compile(r"^\d{1,2}[.)]$")
+
+
+def _rejoin_list_markers(parts: list[str]) -> list[str]:
+    """번호 목록의 번호를 그것이 가리키는 문장에 도로 붙인다.
+
+    문장 나누기는 마침표 뒤에서 자르는데, 번호 매긴 대본(`1. 첫 장면.`)은 번호
+    뒤에도 마침표가 있어 **번호가 문장 하나로** 떨어졌다. 유진에게 대본을 써
+    달라고 하면 이 꼴로 주기 때문에, 다섯 문장짜리 대본이 열세 장면이 되고
+    그중 다섯은 자막이 `1`~`5`인 빈 장면이었다(2026-08-20 실측).
+
+    번호만 있는 조각만 붙인다. `총 3.`처럼 앞에 말이 붙은 것은 그대로 문장이다.
+    """
+    rejoined: list[str] = []
+    for part in parts:
+        if rejoined and _LIST_MARKER_PATTERN.match(rejoined[-1]):
+            rejoined[-1] = f"{rejoined[-1]} {part}"
+            continue
+        rejoined.append(part)
+    return rejoined
 
 
 def _protect_abbreviations(value: str) -> str:

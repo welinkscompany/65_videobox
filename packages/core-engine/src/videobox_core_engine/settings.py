@@ -22,15 +22,33 @@ def resolve_user_library_root() -> Path:
     return DEFAULT_PROJECTS_ROOT.parent / "videobox-user-library"
 
 
-DEFAULT_MEDIA_INBOX_WATCH_PATH = Path(r"G:\내 드라이브\100_videobox")
+#: owner가 자산을 넣는 **한 폴더**. owner 결정 2026-09-07
+#: (`docs/decisions/2026-09-07-one-drop-folder-sorted-for-me.ko.md`):
+#: 종류별로 나눠 넣지 않고 여기 하나에만 넣으면 VideoBox가 내용을 보고 가른다.
+#: 구글 드라이브(`G:`)에서 원드라이브로 옮긴 이유는 `G:`가 스트리밍 드라이브라
+#: Docker가 마운트하면 빈 폴더로 보이기 때문이다(같은 사실이 `compose.yaml`
+#: 주석에도 있다). 원드라이브는 파일이 디스크에 실제로 있다.
+#:
+#: **사람 이름을 박지 않는다.** 이 값은 컨테이너에서 늘 환경변수로 덮이지만
+#: (`compose.yaml`의 `VIDEOBOX_MEDIA_INBOX_WATCH_PATH`), 기본값에 계정 이름이
+#: 들어 있으면 다른 컴퓨터에서 켰을 때 남의 폴더를 가리킨다. 옛 값도 같은
+#: 모양이었다(구글 드라이브 letter + 사람 폴더).
+#:
+#: 그래서 기본은 **집 폴더 기준 상대 자리**다. 실제 자리는 설정이 정한다.
+DEFAULT_MEDIA_INBOX_WATCH_PATH = Path.home() / "OneDrive" / "#_videobox"
+
+#: 자산 가치가 없다고 본 파일이 가는 곳. **지우지 않고 옮기기만 한다** --
+#: owner가 직접 보고 지운다(2026-09-07 결정).
+MEDIA_INBOX_REJECT_FOLDER_NAME = "불필요"
 
 
 def resolve_media_inbox_watch_path() -> Path | None:
-    """Resolve the folder VideoBox watches for footage moved in from outside.
+    """Resolve the one folder VideoBox watches for assets dropped in from outside.
 
-    Owner decision (2026-08-05): the watched folder is whatever a Google
-    Drive desktop client happens to sync to disk. VideoBox has no Drive API
-    dependency and does not know it is watching a cloud-synced folder --
+    Owner decision (2026-08-05, still true): the watched folder is whatever a
+    desktop sync client happens to mirror to disk. VideoBox has no Drive or
+    OneDrive API dependency and does not know it is watching a cloud-synced
+    folder --
     that ignorance is what keeps this off implementation-plan.ko.md's
     "no Google Sheets/Drive coupling" ban. Returns None (watching disabled)
     if explicitly cleared via VIDEOBOX_MEDIA_INBOX_WATCH_PATH="".
@@ -51,9 +69,20 @@ def resolve_media_inbox_library_root() -> Path:
     return Path(configured) if configured else resolve_user_library_root() / "media-inbox"
 
 
-#: 음악과 효과음이 들어오는 폴더 이름. owner 결정 (2026-08-10): 종류는 폴더로
-#: 나눈다 -- 한 폴더에 다 넣고 프로그램이 내용을 보고 판단하는 방식은 틀릴 수
-#: 있어 채택하지 않았다.
+#: 음악과 효과음이 들어오던 **옛** 폴더 이름.
+#:
+#: 2026-08-10 결정은 "종류는 폴더로 나눈다"였다 -- 한 폴더에 다 넣고 프로그램이
+#: 내용을 보고 판단하는 방식은 틀릴 수 있다는 이유였다.
+#: **owner가 2026-09-07에 그 판단을 뒤집었다**
+#: (`docs/decisions/2026-09-07-one-drop-folder-sorted-for-me.ko.md`):
+#: 폴더 넷을 기억하고 골라 넣는 것보다, 틀리면 자료실에서 고치는 쪽이 낫다 --
+#: 특히 휴대폰에서 넣을 때. 지금 자산이 들어오는 정식 경로는
+#: `DEFAULT_MEDIA_INBOX_WATCH_PATH` 한 폴더이고, 종류는
+#: `videobox_core_engine.media_inbox_sorter`가 ffprobe로 가른다.
+#:
+#: 이 이름들은 **라이브러리 자리 이름으로 계속 쓰인다**(`owner-audio/music`,
+#: `owner-audio/sfx`). 폴더를 새로 만들지는 않지만(`main.py`), owner의 옛
+#: 폴더가 아직 남아 있으면 그 안의 파일은 그대로 받아들인다.
 OWNER_AUDIO_WATCH_FOLDER_NAMES: dict[str, str] = {
     "music": "새 음악",
     "sfx": "새 효과음",
@@ -73,6 +102,60 @@ def resolve_owner_audio_watch_paths(video_watch_path: Path | None) -> dict[str, 
         media_type: video_watch_path.parent / folder_name
         for media_type, folder_name in OWNER_AUDIO_WATCH_FOLDER_NAMES.items()
     }
+
+
+#: 처리가 끝난 원본이 가는 곳.
+MEDIA_INBOX_ARCHIVE_FOLDER_NAME = "자산화_완료"
+
+
+def resolve_media_inbox_archive_path(watch_path: Path | None, *, sorting: bool) -> Path | None:
+    """처리 끝난 원본을 옮겨 둘 보관함.
+
+    **한 폴더 모드에서는 넣는 폴더 안에 둔다.** 옛 배치에서는 넣는 폴더가
+    `.../새 영상` 같은 하위 폴더라 형제로 두면 같은 마운트 안이었다. 지금은 넣는
+    폴더 자체가 마운트 뿌리(`/videobox-drop`)라, 형제로 두면 컨테이너의 읽기
+    전용 루트(`/자산화_완료`)를 가리켜 **첫 원본부터 옮기기가 실패한다.**
+
+    안에 둬도 다시 집어 들지 않는다 -- `run_inbox_cycle`이 보관함 아래 파일을
+    후보에서 먼저 뺀다.
+    `VIDEOBOX_OWNER_DROP_ARCHIVE_PATH=""`로 비우면 보관하지 않는다.
+    """
+    if "VIDEOBOX_OWNER_DROP_ARCHIVE_PATH" in os.environ:
+        configured = os.environ["VIDEOBOX_OWNER_DROP_ARCHIVE_PATH"].strip()
+        return Path(configured) if configured else None
+    if watch_path is None:
+        return None
+    parent = watch_path if sorting else watch_path.parent
+    return parent / MEDIA_INBOX_ARCHIVE_FOLDER_NAME
+
+
+def resolve_media_inbox_reject_path(watch_path: Path | None) -> Path | None:
+    """자산 가치가 없다고 본 파일을 옮겨 둘 폴더 (owner 결정 2026-09-07).
+
+    **넣는 폴더 밖에 둔다.** 안에 두면 owner가 확인하기 전에 다음 바퀴가 자기가
+    내보낸 파일을 다시 집어 든다(보관함과 달리 이건 owner가 들여다볼 자리다).
+    컨테이너에서는 `compose.yaml`이 따로 마운트한 자리를
+    `VIDEOBOX_OWNER_DROP_REJECT_PATH`로 준다.
+    `VIDEOBOX_OWNER_DROP_REJECT_PATH=""`로 비우면 옮기지 않고 그대로 둔다.
+    """
+    if "VIDEOBOX_OWNER_DROP_REJECT_PATH" in os.environ:
+        configured = os.environ["VIDEOBOX_OWNER_DROP_REJECT_PATH"].strip()
+        return Path(configured) if configured else None
+    if watch_path is None:
+        return None
+    return watch_path.parent / MEDIA_INBOX_REJECT_FOLDER_NAME
+
+
+def resolve_media_inbox_sorting_enabled() -> bool:
+    """한 폴더에 넣으면 내용을 보고 가르는가 (owner 결정 2026-09-07).
+
+    기본값이 켜짐이다 -- 이게 owner가 승인한 동작이다. 끄면 옛 동작(감시 폴더가
+    영상만 받는다)으로 돌아간다.
+    """
+    raw = os.environ.get("VIDEOBOX_MEDIA_INBOX_SORT_BY_CONTENT", "").strip().lower()
+    if not raw:
+        return True
+    return raw in {"1", "true", "yes", "on"}
 
 
 def resolve_owner_audio_library_root() -> Path:
@@ -181,6 +264,91 @@ def resolve_whisper_stt_config() -> "WhisperSTTConfig":
         device=_environment_text("VIDEOBOX_STT_DEVICE", defaults.device),
         compute_type=_environment_text("VIDEOBOX_STT_COMPUTE_TYPE", defaults.compute_type),
         language=_environment_text("VIDEOBOX_STT_LANGUAGE", defaults.language or "") or None,
+    )
+
+
+def resolve_tts_engine_config() -> "TTSEngineConfig":
+    """내레이션 엔진을 환경에서 읽는다. 안 주면 꺼진 채로 둔다.
+
+    위 resolver들과 같은 이유다: 컨테이너는 `create_app`을 인자 없이 부르므로
+    여기서 읽지 않으면 어떤 설정도 컨테이너에 닿지 않는다.
+
+    **엔진을 바꾸는 것은 코드가 아니라 설정이다.** 목소리 복제(`chatterbox`)를
+    쓰려면 그 패키지를 설치하고 `VIDEOBOX_TTS_ENGINE`만 바꾸면 된다 -- 부르는
+    자리는 그대로다.
+    """
+    defaults = TTSEngineConfig()
+    return TTSEngineConfig(
+        enabled=_environment_flag("VIDEOBOX_TTS_ENABLED"),
+        engine=_environment_text("VIDEOBOX_TTS_ENGINE", defaults.engine),
+        language=_environment_text("VIDEOBOX_TTS_LANGUAGE", defaults.language),
+        elevenlabs_api_key=_environment_text("VIDEOBOX_TTS_ELEVENLABS_API_KEY", ""),
+        elevenlabs_voice_id=_environment_text("VIDEOBOX_TTS_ELEVENLABS_VOICE_ID", ""),
+        host_bridge_base_url=_environment_text(
+            "VIDEOBOX_TTS_BRIDGE_URL", defaults.host_bridge_base_url
+        ),
+    )
+
+
+def resolve_image_generation_config() -> "ImageGenerationConfig":
+    """Resolve the ComfyUI image path for callers that pass none.
+
+    Same reason as the two resolvers above: the container runs
+    `uvicorn ... create_app --factory`, so the factory gets no arguments and
+    would otherwise always take the loopback default -- which inside the
+    container is the container, exactly the mistake clause 2-B had to fix for
+    the chat route (`docs/development-fast-path.ko.md` §10.14).
+
+    `enabled` defaults to False here, not to the dataclass default: a
+    `create_app()` caller that does not opt in (the whole test suite) must
+    never construct a transport that reaches for a real ComfyUI.
+    """
+    defaults = ImageGenerationConfig()
+    return ImageGenerationConfig(
+        enabled=_environment_flag("VIDEOBOX_IMAGE_GENERATION_ENABLED"),
+        base_url=_environment_text("VIDEOBOX_IMAGE_GENERATION_BASE_URL", defaults.base_url),
+        model_name=_environment_text("VIDEOBOX_IMAGE_MODEL_NAME", defaults.model_name),
+        weight_dtype=_environment_text("VIDEOBOX_IMAGE_WEIGHT_DTYPE", defaults.weight_dtype),
+        steps=_environment_positive_int("VIDEOBOX_IMAGE_STEPS", defaults.steps),
+        timeout_seconds=_environment_positive_int(
+            "VIDEOBOX_IMAGE_TIMEOUT_SECONDS", defaults.timeout_seconds
+        ),
+    )
+
+
+def resolve_video_generation_config() -> "VideoGenerationConfig":
+    """`resolve_image_generation_config`와 같은 이유로 존재한다 -- 컨테이너
+    팩토리 호출은 인자를 안 받으므로 여기서 환경변수를 읽는다.
+
+    `enabled`는 기본이 꺼짐이다(2026-08-29 조사: 텍스트 인코더·VAE 미비로
+    아직 못 돈다) -- 값이 있어도 켜는 것은 별도 결정이다."""
+    defaults = VideoGenerationConfig()
+    return VideoGenerationConfig(
+        enabled=_environment_flag("VIDEOBOX_VIDEO_GENERATION_ENABLED"),
+        base_url=_environment_text("VIDEOBOX_VIDEO_GENERATION_BASE_URL", defaults.base_url),
+        model_name=_environment_text("VIDEOBOX_VIDEO_MODEL_NAME", defaults.model_name),
+        clip_name=_environment_text("VIDEOBOX_VIDEO_CLIP_NAME", defaults.clip_name),
+        vae_name=_environment_text("VIDEOBOX_VIDEO_VAE_NAME", defaults.vae_name),
+        weight_dtype=_environment_text("VIDEOBOX_VIDEO_WEIGHT_DTYPE", defaults.weight_dtype),
+        steps=_environment_positive_int("VIDEOBOX_VIDEO_STEPS", defaults.steps),
+        timeout_seconds=_environment_positive_int(
+            "VIDEOBOX_VIDEO_TIMEOUT_SECONDS", defaults.timeout_seconds
+        ),
+    )
+
+
+#: 인포그래픽 한 판을 기다려 줄 시간. 실측 63~115초라 100초로는 아슬아슬하다.
+#: 위로는 `InfographicService.TOTAL_BUDGET_SECONDS`(300초)와 nginx 330초가 있다 --
+#: **두 판이 이 상한에 다 닿아도** 예산 안에 들어와야 하므로 그 절반이 천장이다.
+DEFAULT_INFOGRAPHIC_TIMEOUT_SECONDS = 140
+
+
+def resolve_infographic_timeout_seconds() -> int:
+    """인포그래픽 HTML 한 판을 기다려 줄 시간. 공용 런타임(30초)과 따로 둔다 --
+    같이 올리면 대화·추천처럼 빨라야 하는 일까지 느린 실패를 오래 기다린다."""
+
+    return _environment_positive_int(
+        "VIDEOBOX_INFOGRAPHIC_TIMEOUT_SECONDS", DEFAULT_INFOGRAPHIC_TIMEOUT_SECONDS
     )
 
 
@@ -295,9 +463,18 @@ class TTSEngineConfig:
     elevenlabs_voice_id: str = ""
     local_xtts_model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2"
     local_xtts_use_gpu: bool = False
+    chatterbox_use_gpu: bool = False
+    #: `host_bridge`가 부를 곳. 컨테이너에서는 `host.docker.internal`이 이 컴퓨터다.
+    host_bridge_base_url: str = "http://127.0.0.1:8199"
 
     def __post_init__(self) -> None:
-        valid_engines = {"gtts", "elevenlabs", "local_xtts"}
+        # `local_xtts`도 목소리를 복제하지만 Coqui CPML은 **비상업용**이다. 이 제품으로
+        # 매출을 내려면 `chatterbox`(Resemble AI, MIT, 한국어 지원)를 쓴다.
+        # 기능 차이가 아니라 라이선스 때문에 갈린다.
+        # `espeak`는 설치가 거의 없고 밖으로 나가지 않아 **더빙을 오늘 써 볼 수
+        # 있게 하는 자리**다. 다만 목소리를 복제하지는 못한다 -- 창작자 목소리로
+        # 더빙하려면 `chatterbox`를 설치하고 여기만 바꾸면 된다.
+        valid_engines = {"gtts", "elevenlabs", "local_xtts", "chatterbox", "espeak", "host_bridge"}
         if self.engine not in valid_engines:
             raise ValueError(f"tts_engine_config.engine must be one of {sorted(valid_engines)}.")
         if not self.language.strip():
@@ -354,3 +531,123 @@ class AutoCutConfig:
             raise ValueError("auto_cut.static_duration must be greater than zero.")
         if self.merge_threshold < 0:
             raise ValueError("auto_cut.merge_threshold must not be negative.")
+
+
+# 상업 이용이 열려 있는지 아는 모델만 여기 적는다. 모르는 이름은 `None`이다 --
+# 지어내지 않는다. 라이선스는 실행 중에 눈에 보이지 않는 제약이라, 사람이 기억하는
+# 것에 맡기면 반드시 새어 나간다 (§10.14 조항 2-C).
+_UNRESTRICTED_IMAGE_MODELS = frozenset({"flux1-schnell.safetensors", "flux1-schnell-fp8.safetensors"})
+_NON_COMMERCIAL_IMAGE_MODELS = frozenset({"flux1-dev.safetensors", "flux1-dev-fp8.safetensors"})
+
+
+@dataclass(slots=True, frozen=True)
+class ImageGenerationConfig:
+    """대본에 맞춰 그림을 만드는 경로. owner 승인 2026-08-20 (§10.14 조항 2-C).
+
+    ComfyUI는 OpenAI 모양이 아니라서 2-B의 provider를 재사용할 수 없다
+    (`POST /prompt` 그래프 JSON → `/history` 폴링 → `/view` 회수).
+    """
+
+    enabled: bool = True
+    base_url: str = "http://127.0.0.1:8188"
+    model_name: str = "flux1-dev.safetensors"
+    # 실측(2026-08-21, RTX 5090): bf16은 22GB라 여유 10.7GB에 안 들어간다. fp8로 실으면
+    # 절반이 되어 **LM Studio를 켜 둔 채로** 1920x1080이 24초다. 기본값이 곧 그 실측이다.
+    weight_dtype: str = "fp8_e4m3fn"
+    steps: int = 20
+    guidance: float = 3.5
+    timeout_seconds: int = 600
+
+    # 2-B와 같은 방식으로 묶는다. 설정 한 줄로 밖에 나갈 수 있으면 그 조항은
+    # 문서에만 있는 것이 된다. `host.docker.internal`은 같은 기계다.
+    _CONTAINER_BASE_URL = "http://host.docker.internal:8188"
+
+    def __post_init__(self) -> None:
+        if self.base_url not in ("http://127.0.0.1:8188", self._CONTAINER_BASE_URL):
+            raise ValueError(
+                "image_generation_config.base_url must be exactly "
+                "http://127.0.0.1:8188, or "
+                f"{self._CONTAINER_BASE_URL} when running in the container."
+            )
+        if not self.model_name.strip():
+            raise ValueError("image_generation_config.model_name must not be blank.")
+        if not self.weight_dtype.strip():
+            raise ValueError("image_generation_config.weight_dtype must not be blank.")
+        for name, value in (("steps", self.steps), ("timeout_seconds", self.timeout_seconds)):
+            if value <= 0:
+                raise ValueError(f"image_generation_config.{name} must be greater than zero.")
+
+    @property
+    def commercial_use_is_unrestricted(self) -> bool | None:
+        """상업 이용이 열려 있는가. **모르면 `None`** -- 아는 척하지 않는다.
+
+        막지는 않는다. owner가 2026-08-21에 `flux1-dev`로 가겠다고 결정했고 라이선스는
+        본인이 맡는다고 했다. 다만 어느 쪽을 쓰고 있는지는 스스로 말할 수 있어야 한다.
+        """
+        name = self.model_name.strip()
+        if name in _UNRESTRICTED_IMAGE_MODELS:
+            return True
+        if name in _NON_COMMERCIAL_IMAGE_MODELS:
+            return False
+        return None
+
+
+@dataclass(slots=True, frozen=True)
+class VideoGenerationConfig:
+    """대본 장면에 짧은 실제 동영상을 만드는 경로. owner 결정 2026-08-29
+    (`docs/decisions/2026-08-29-ai-video-naming-and-packaging-followups.ko.md`) --
+    클라우드 API가 아니라 로컬 비디오 모델(ComfyUI 확장)로 간다.
+
+    **아직 실행할 수 없다.** 2026-08-29 조사로 Wan 체크포인트는 있지만 텍스트
+    인코더(`umt5_xxl_fp16.safetensors`)가 중단된 다운로드(`.part`)이고 Wan 전용
+    VAE가 아예 없다 -- 둘 다 owner 승인 후 받아야 한다. `enabled` 기본값이
+    `False`인 이유도 그것이다. 값을 미리 정의해 두는 것은 그래프·서비스 코드를
+    지금 짜고 테스트할 수 있게 하기 위해서다(2-C처럼 provider가 준비되면
+    설정 한 줄로 켠다).
+    """
+
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:8188"
+    model_name: str = "wan2.1_t2v_1.3B_fp16.safetensors"
+    clip_name: str = "umt5_xxl_fp16.safetensors"
+    #: Wan 전용 VAE. 2026-08-29 기준 owner 기계에 없다 -- 받으면 실제 파일명으로 맞춘다.
+    vae_name: str = "wan_2.1_vae.safetensors"
+    weight_dtype: str = "default"
+    #: 코드리뷰(2026-08-30)로 잡힌 결함 -- 화질 단계(preview/standard/full,
+    #: `scene_video_service.py`)가 생기면서 실제 생성은 이 값이 아니라 매
+    #: 요청의 `SceneVideoRequest.steps`(단계별 고정값)를 쓴다. 이 필드와
+    #: `VIDEOBOX_VIDEO_STEPS` 환경변수는 **이제 실제 생성에 아무 영향이
+    #: 없다** -- 데이터클래스 검증(양수 확인)과 기존 테스트 호환을 위해서만
+    #: 남겨 뒀다. `length_frames`도 같은 이유로 죽었다.
+    steps: int = 20
+    #: 커뮤니티에서 흔히 쓰는 값이다. **실측 전이라 owner 기계에서 첫 실행 뒤
+    #: 조정이 필요할 수 있다** -- `weight_dtype`처럼 확정된 값이 아니다.
+    cfg: float = 5.0
+    #: (length - 1)이 4의 배수여야 한다. 81 = 24fps에서 약 3.3초.
+    #: 위 `steps`와 같은 이유로 실제 생성에는 쓰이지 않는다 -- 화질 단계마다
+    #: `scene_video_service.py`의 고정값(_PREVIEW_LENGTH_FRAMES 등)을 쓴다.
+    length_frames: int = 81
+    fps: float = 24.0
+    timeout_seconds: int = 900
+
+    _CONTAINER_BASE_URL = "http://host.docker.internal:8188"
+
+    def __post_init__(self) -> None:
+        if self.base_url not in ("http://127.0.0.1:8188", self._CONTAINER_BASE_URL):
+            raise ValueError(
+                "video_generation_config.base_url must be exactly "
+                "http://127.0.0.1:8188, or "
+                f"{self._CONTAINER_BASE_URL} when running in the container."
+            )
+        for name, value in (
+            ("model_name", self.model_name), ("clip_name", self.clip_name), ("vae_name", self.vae_name),
+        ):
+            if not value.strip():
+                raise ValueError(f"video_generation_config.{name} must not be blank.")
+        if (self.length_frames - 1) % 4 != 0:
+            raise ValueError("video_generation_config.length_frames must satisfy (length - 1) % 4 == 0.")
+        for name, value in (
+            ("steps", self.steps), ("length_frames", self.length_frames), ("timeout_seconds", self.timeout_seconds),
+        ):
+            if value <= 0:
+                raise ValueError(f"video_generation_config.{name} must be greater than zero.")

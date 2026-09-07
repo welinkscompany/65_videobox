@@ -345,3 +345,62 @@ def test_alignment_and_stale_are_atomic_when_stale_write_fails(tmp_path, monkeyp
         LocalPipelineRunner(store).apply_script_draft_narration_alignment(project_id=project.project_id, session_id=session["session_id"], expected_revision=1, aligned_segments=[{"source_script_segment_id": "script:script:001", "start_sec": 0.0, "end_sec": 2.0}])
     assert store.get_editing_session(project_id=project.project_id, session_id=session["session_id"])["timing_source"] == "provisional_script"
     assert store.get_director_proposal(project.project_id, proposal.proposal_id).status == "ready"
+
+
+def test_a_photo_can_be_a_candidate_without_a_visual_analysis_run(tmp_path) -> None:
+    """**사진은 유진의 후보에 영원히 못 들어가고 있었다** — 전수 조사 2026-09-06.
+
+    후보 자격이 음악·효과음이 아닌 모든 자산에 "성공한 화면 분석 기록"을
+    요구한다. 그런데 화면 분석은 영상에만 예약된다 -- 사진은 그 기록을 받을
+    길이 자체가 없어 항상 자격 미달이었다.
+
+    프로젝트에 사진밖에 없으면 후보가 통째로 비어 **"분석을 다시 하라"**까지
+    난다. 분석은 멀쩡하고 그 종류가 없을 뿐인데.
+
+    사진은 자료실 색인이 이미 설명해 두었고, 렌더러도 장면으로 그릴 수 있다
+    (`-loop 1`). 같은 자리를 이미 두 번 모았는데(`broll_scene_candidates`)
+    여기가 **세 번째 사본**이었다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("사진 후보")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="t",
+        session_payload={"segments": [{"segment_id": "seg", "caption_text": "바다"}], "history": []},
+    )
+    photo = tmp_path / "sea.jpg"
+    photo.write_bytes(b"photo-bytes")
+    asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.IMAGE, source_path=photo,
+        metadata={"tags": ["바다"], "license": "valid", "review_status": "approved"},
+    )
+
+    proposal = DirectorProposalService(store).create(
+        project_id=project.project_id, session_id=session["session_id"]
+    )
+
+    assert [item.asset_id for item in proposal.candidates] == [asset.asset_id]
+
+
+def test_a_video_still_needs_its_analysis(tmp_path) -> None:
+    """사진을 통과시키면서 영상 검사가 헐거워지면 안 된다.
+
+    영상은 화면 분석 결과로 장면을 고른다. 분석 없이 후보로 올리면 유진이
+    무엇인지 모르는 것을 집는다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project("영상만")
+    session = store.save_editing_session(
+        project_id=project.project_id, timeline_id="t",
+        session_payload={"segments": [{"segment_id": "seg", "caption_text": "바다"}], "history": []},
+    )
+    clip = tmp_path / "sea.mp4"
+    clip.write_bytes(b"clip-bytes")
+    store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=clip,
+        metadata={"tags": ["바다"], "license": "valid", "review_status": "approved"},
+    )
+
+    with pytest.raises(DirectorProposalBlockedError):
+        DirectorProposalService(store).create(
+            project_id=project.project_id, session_id=session["session_id"]
+        )

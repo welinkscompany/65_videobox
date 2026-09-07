@@ -298,6 +298,127 @@ def test_save_capcut_export_metadata_ignores_unknown_track_count(tmp_path: Path)
     assert fetched["metadata"]["track_count"] == 1
 
 
+def test_reading_an_export_run_refuses_a_media_artifact_instead_of_leaking_a_decode_error(
+    tmp_path: Path,
+) -> None:
+    # `get_export_run`은 CapCut 초안처럼 JSON 매니페스트를 담은 출력만 읽는다.
+    # 완성본(mp4)의 export_id가 들어오면 예전에는 그 mp4를 utf-8 텍스트로 읽으려다
+    # "'utf-8' codec can't decode byte" 오류가 그대로 사용자 화면까지 나갔다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Final Render Export Read")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"\x00\x00\x00\x20ftypisom\xd5\xd5\xd5")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+    )
+
+    with pytest.raises(KeyError) as caught:
+        store.get_export_run(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert "codec" not in str(caught.value)
+
+
+def test_a_final_render_remembers_whether_it_had_sound(tmp_path: Path) -> None:
+    # 무음 완성본이 아무 말 없이 나가던 문제. 렌더가 잰 결과를 출력 행에 남겨야
+    # 화면이 owner에게 알릴 수 있다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Silent Final Render")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+        metadata={"has_sound": False},
+    )
+
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["has_sound"] is False
+
+
+def test_the_owner_verdict_on_a_finished_video_is_kept_with_it(tmp_path: Path) -> None:
+    # 기계가 잰 지표만으로는 "좋은 영상"을 배울 수 없다. owner의 판단이 라벨이다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Owner Verdict")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+        metadata={"has_sound": True, "scene_count": 4},
+    )
+
+    store.record_final_render_verdict(
+        project_id=project.project_id,
+        export_id=saved["export_id"],
+        verdict="good",
+        note="음악이 잘 맞았어요",
+    )
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["owner_verdict"] == "good"
+    assert fetched["owner_verdict_note"] == "음악이 잘 맞았어요"
+    # 잰 지표는 판단을 적어도 그대로 남는다. 둘을 함께 봐야 학습 재료가 된다.
+    assert fetched["quality_facts"]["scene_count"] == 4
+
+
+def test_a_finished_video_the_owner_has_not_judged_yet_says_so(tmp_path: Path) -> None:
+    # 판단하지 않은 것과 나쁘다는 것은 다르다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Unjudged")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id, timeline_id="t", source_output_path=rendered, source_session_absent=True,
+    )
+
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["owner_verdict"] is None
+
+
+def test_an_unknown_verdict_word_is_refused(tmp_path: Path) -> None:
+    # 아무 문자열이나 받으면 나중에 세어 볼 수가 없다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Bad Verdict")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id, timeline_id="t", source_output_path=rendered, source_session_absent=True,
+    )
+
+    with pytest.raises(ValueError):
+        store.record_final_render_verdict(
+            project_id=project.project_id, export_id=saved["export_id"], verdict="아주좋음",
+        )
+
+
+def test_a_final_render_saved_before_we_measured_sound_claims_nothing(tmp_path: Path) -> None:
+    # 옛 완성본은 잰 적이 없다. 없는 것을 "소리 없음"으로 읽으면 멀쩡한 완성본에
+    # 경고가 붙는다.
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Legacy Final Render")
+    rendered = tmp_path / "output.mp4"
+    rendered.write_bytes(b"rendered bytes")
+    saved = store.save_final_render(
+        project_id=project.project_id,
+        timeline_id="timeline_001",
+        source_output_path=rendered,
+        source_session_absent=True,
+    )
+
+    fetched = store.get_final_render_export(project_id=project.project_id, export_id=saved["export_id"])
+
+    assert fetched["has_sound"] is None
+
+
 def test_save_preview_run_summary_ignores_unknown_track_clip_group_count(tmp_path: Path) -> None:
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="Preview Summary Count Project")

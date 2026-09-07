@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from videobox_core_engine.settings import CapCutDraftExportConfig, TTSEngineConfig, WhisperSTTConfig
+from videobox_core_engine.settings import CapCutDraftExportConfig, ImageGenerationConfig, TTSEngineConfig, VideoGenerationConfig, WhisperSTTConfig
 from videobox_provider_interfaces.faster_whisper_stt import FasterWhisperSTTProvider
 from videobox_provider_interfaces.stt import MockSTTProvider, STTProvider
 from videobox_storage.local_project_store import LocalProjectStore
@@ -47,10 +47,75 @@ def _build_tts_provider(config: TTSEngineConfig) -> Any | None:
             api_key=config.elevenlabs_api_key,
             voice_id=config.elevenlabs_voice_id,
         )
-    from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
+    if config.engine == "host_bridge":
+        # 목소리 복제 엔진은 이 컴퓨터의 호스트 쪽에 있다. 컨테이너를 3GB 불리지
+        # 않고 이미 있는 것을 쓴다 -- 그림 생성이 ComfyUI를 부르는 것과 같다.
+        from videobox_provider_interfaces.host_tts_bridge_provider import HostTTSBridgeProvider
 
-    return LocalXTTSProvider(
-        model_name=config.local_xtts_model_name,
+        return HostTTSBridgeProvider(
+            base_url=config.host_bridge_base_url,
+            language=config.language,
+        )
+    if config.engine == "espeak":
+        from videobox_provider_interfaces.espeak_tts_provider import EspeakTTSProvider
+
+        return EspeakTTSProvider(language=config.language)
+    if config.engine == "local_xtts":
+        from videobox_provider_interfaces.local_xtts_provider import LocalXTTSProvider
+
+        return LocalXTTSProvider(
+            model_name=config.local_xtts_model_name,
+            language=config.language,
+            use_gpu=config.local_xtts_use_gpu,
+        )
+    from videobox_provider_interfaces.chatterbox_tts_provider import ChatterboxTTSProvider
+
+    return ChatterboxTTSProvider(
         language=config.language,
-        use_gpu=config.local_xtts_use_gpu,
+        device="cuda" if config.chatterbox_use_gpu else "cpu",
+    )
+
+
+def _build_scene_image_provider(config: ImageGenerationConfig) -> Any | None:
+    """켜지 않았으면 아무것도 만들지 않는다.
+
+    켜지 않았는데 provider를 붙여 두면 화면은 "만들 수 있다"고 보이고 누르는 순간
+    실패한다. 켜진 것과 꺼진 것을 화면이 구분할 수 있어야 한다 (§10.14 2-C).
+    """
+    if not config.enabled:
+        return None
+    from videobox_provider_interfaces.comfyui_image_generation import (
+        ComfyUIHTTPTransport,
+        ComfyUIImageGenerationProvider,
+    )
+
+    return ComfyUIImageGenerationProvider(
+        transport=ComfyUIHTTPTransport(base_url=config.base_url),
+        config=config,
+    )
+
+
+def _build_scene_video_provider(config: VideoGenerationConfig) -> Any | None:
+    """`_build_scene_image_provider`와 같은 이유 -- 켜지 않았으면 아무것도
+    안 만든다. owner 결정 2026-08-29(2회차, "원래 만든거외에 별도로 만들자") --
+    이 provider는 `SceneVideoService`(정지 이미지+zoompan과는 별개 경로)에만 쓰인다."""
+    if not config.enabled:
+        return None
+    from videobox_provider_interfaces.comfyui_image_generation import ComfyUIHTTPTransport
+    from videobox_provider_interfaces.comfyui_video_generation import (
+        ComfyUIExecutionTracker,
+        ComfyUIVideoGenerationProvider,
+    )
+
+    transport = ComfyUIHTTPTransport(base_url=config.base_url)
+    return ComfyUIVideoGenerationProvider(
+        transport=transport,
+        config=config,
+        # 취소 TOCTOU 경합 수정(코드리뷰 2026-08-30) -- 실시간 실행 상태를
+        # 받아 `/queue` 스냅샷의 시차 없이 취소를 판단한다. 매 취소 시도마다
+        # 새로 만든다(그 생성 하나의 생명주기만 추적하면 되고, 오래 떠 있는
+        # 연결 하나를 여러 생성이 나눠 쓰다 서로 헷갈릴 이유가 없다).
+        execution_tracker_factory=lambda: ComfyUIExecutionTracker(
+            ws_url=transport.websocket_endpoint("/ws"),
+        ),
     )

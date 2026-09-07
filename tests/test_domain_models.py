@@ -12,7 +12,10 @@ def test_project_record_uses_local_first_defaults() -> None:
     project = ProjectRecord.create(name="Demo Project")
 
     assert project.status is ProjectStatus.DRAFT
-    assert project.root_storage_uri == "local://projects/demo-project"
+    # 식별자 뒤에는 짧은 무작위가 항상 붙는다. 이름만으로 만들면 이름이 다른
+    # 프로젝트끼리 겹쳐 조용히 섞였다 (`tests/test_project_id_never_collides.py`).
+    assert project.project_id.startswith("demo-project-")
+    assert project.root_storage_uri == f"local://projects/{project.project_id}"
 
 
 def test_asset_record_supports_voice_sample_audio() -> None:

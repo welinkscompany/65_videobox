@@ -9,6 +9,8 @@ import wave
 import pytest
 
 from videobox_capcut_export.pycapcut_adapter import PyCapCutExportError, PyCapCutRealExportAdapter
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+from videobox_core_engine.editing_session import build_editing_session
 from videobox_domain_models.assets import AssetType
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError
@@ -38,10 +40,39 @@ def test_export_timeline_maps_editing_session_caption_style_to_real_capcut_text_
     narration_path = tmp_path / "narration.wav"
     _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_path)])
     narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    source_timeline = {
+        "project_id": project.project_id,
+        "timeline_id": "timeline_caption_style",
+        "narration_source_uri": narration_asset.storage_uri,
+        "tracks": [{"track_type": "narration", "clips": [{
+            "segment_id": "seg_001", "asset_uri": f"local://projects/{project.project_id}/segments/seg_001",
+            "start_sec": 0.0, "end_sec": 2.0,
+        }]}],
+    }
+    editing_session = build_editing_session(
+        project_id=project.project_id,
+        timeline=source_timeline,
+        segments=[{"segment_id": "seg_001", "text": "CAPTION STYLE", "start_sec": 0.2, "end_sec": 1.5}],
+    )
+    editing_session["caption_style"] = {
+        "font_size_px": 64,
+        "text_color": "#00FF00FF",
+        "outline_width_px": 3,
+        "background_color": "#000000AA",
+        "shadow_blur_px": 2,
+        "bold": True,
+        "italic": True,
+        "letter_spacing_px": 12,
+    }
+    materialized = materialize_editing_session_timeline(
+        timeline=source_timeline,
+        editing_session=editing_session,
+        project_id=project.project_id,
+    )
     result = PyCapCutRealExportAdapter(store=store).export_timeline(
         project_id=project.project_id,
-        timeline={"narration_source_uri": narration_asset.storage_uri, "tracks": [{"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]}]},
-        editing_session={"caption_style": {"font_size_px": 64, "text_color": "#00FF00FF", "outline_width_px": 3, "background_color": "#000000AA", "shadow_blur_px": 2}, "segments": [{"caption_text": "CAPTION STYLE", "start_sec": 0.2, "end_sec": 1.5}]},
+        timeline=materialized,
+        editing_session=editing_session,
         drafts_root=tmp_path / "drafts",
         draft_name="styled-caption",
     )
@@ -51,6 +82,13 @@ def test_export_timeline_maps_editing_session_caption_style_to_real_capcut_text_
     material = next(item for item in content["materials"]["texts"] if "CAPTION STYLE" in item["content"])
     assert captions[0]["target_timerange"] == {"start": 200_000, "duration": 1_300_000}
     assert '"color": [0.0, 1.0, 0.0]' in material["content"]
+    # 굵게·기울임·자간(owner 지적 2026-09-03)도 pycapcut의 TextStyle이 그대로
+    # 받는다 -- 렌더용 ASS 경로와 같은 CaptionStyle 필드 이름을 쓴다.
+    assert '"bold": true' in material["content"]
+    assert '"italic": true' in material["content"]
+    # `letter_spacing`은 `content` 안이 아니라 소재 딕셔너리의 형제 칸이다
+    # (pycapcut이 안에서 0.05를 곱해 자기 단위로 맞춘다: 12 * 0.05 = 0.6).
+    assert material["letter_spacing"] == pytest.approx(0.6)
     assert "shadow_blur_px is not supported by CapCut export" in result.capcut_compatibility_warnings
 
 
@@ -239,12 +277,17 @@ def test_export_timeline_writes_a_real_capcut_draft(tmp_path: Path) -> None:
     assert "Overlay draft proof" in json.dumps(json.loads(draft_content.read_text(encoding="utf-8")), ensure_ascii=False)
 
 
-def test_export_timeline_requires_narration_clips(tmp_path: Path) -> None:
+def test_export_timeline_requires_some_clips(tmp_path: Path) -> None:
+    """**목소리가 없다고 막지는 않는다**(2026-09-07). 사진과 영상만으로 만들고
+    나중에 더빙을 붙이거나 자막만으로 낼 수 있다 -- 빈 편집판으로 시작하면 목소리
+    원본이 아예 없다. 이 울타리가 원래 막으려던 것은 **빈 초안**이므로 그것만
+    막는다. 옛 이름은 `..._requires_narration_clips`였다.
+    """
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="CapCut Export Rejection Project")
     adapter = PyCapCutRealExportAdapter(store=store)
 
-    with pytest.raises(PyCapCutExportError, match="narration"):
+    with pytest.raises(PyCapCutExportError, match="no clips"):
         adapter.export_timeline(
             project_id=project.project_id,
             timeline={"tracks": []},
@@ -473,3 +516,153 @@ def test_real_capcut_draft_preserves_broll_trim_crop_loop_pad_and_audio_controls
     assert tracks["bgm"][0]["volume"] == pytest.approx(0.25 * 10 ** (-6 / 20))
     assert tracks["bgm"][0]["extra_material_refs"]
     assert "ducking is not natively supported by CapCut draft export; apply it in CapCut after import" in result.capcut_compatibility_warnings
+
+
+def test_real_capcut_draft_carries_broll_speed_and_volume(tmp_path: Path) -> None:
+    """편집 초안도 최종 렌더와 **같은** 배속·음량을 들고 가야 한다.
+
+    두 경로가 갈리면 owner는 캡컷에서 열었을 때 다른 영상을 보게 된다.
+    CapCut 초안은 배속·음량을 직접 지원하므로 경고로 넘기지 않고 실제로 싣는다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Speed Contract")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll_path = tmp_path / "speed_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=6:size=240x320:rate=15", str(broll_path)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+
+    result = PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
+        project_id=project.project_id,
+        timeline={
+            "narration_source_uri": narration_asset.storage_uri,
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]},
+                {"track_type": "broll", "clips": [{"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"speed": 2.0, "volume": 0.5, "loop": False, "preserve_source_audio": True}}]},
+            ],
+        },
+        drafts_root=tmp_path / "drafts",
+        draft_name="speed-contract",
+        editing_session={"caption_style": {}, "segments": []},
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    tracks = {track["name"]: track["segments"] for track in content["tracks"]}
+    segment = tracks["broll"][0]
+    # 2배속으로 타임라인 2초를 채우려면 원본 4초를 먹는다.
+    assert segment["source_timerange"]["duration"] == 4_000_000
+    assert segment["target_timerange"]["duration"] == 2_000_000
+    assert segment["volume"] == pytest.approx(0.5)
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_real_capcut_draft_carries_the_scene_transition_on_the_prior_broll_segment(tmp_path: Path) -> None:
+    """`implementation-plan.ko.md` §4.1.2의 "아직 아닌 것" 중 하나 -- 캡컷
+    내보내기에는 전환을 하나도 얹지 않았었다.
+
+    pycapcut은 전환을 **앞 조각**에 건다("转场应当添加在前面的片段上")인데,
+    우리 데이터 모델은 **들어오는 쪽**에 싣는다(`transitions.py`의 주석과
+    `composition_plan.py:862`). 방향이 반대라 어댑터가 뒤집어야 한다 --
+    이 시험은 그 뒤집기가 실제로 되는지 확인한다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Transition Contract")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=4", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll_path = tmp_path / "transition_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=4:size=240x320:rate=15", str(broll_path)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+
+    result = PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
+        project_id=project.project_id,
+        timeline={
+            "narration_source_uri": narration_asset.storage_uri,
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 4.0}]},
+                {"track_type": "broll", "clips": [
+                    {"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"loop": False, "pad": True}},
+                    {"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 2.0, "end_sec": 4.0, "media_controls": {"loop": False, "pad": True}, "transition": {"type": "wipeleft", "duration_sec": 0.3}},
+                ]},
+            ],
+        },
+        drafts_root=tmp_path / "drafts",
+        draft_name="transition-contract",
+        editing_session={"caption_style": {}, "segments": []},
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    transitions = content["materials"]["transitions"]
+    assert len(transitions) == 1
+    assert transitions[0]["name"] == "向左擦除"
+    assert transitions[0]["duration"] == 300_000
+
+    broll_segments = content["tracks"][[track["name"] for track in content["tracks"]].index("broll")]["segments"]
+    first_segment, second_segment = broll_segments[0], broll_segments[1]
+    assert transitions[0]["id"] in first_segment["extra_material_refs"]
+    assert transitions[0]["id"] not in second_segment["extra_material_refs"]
+    assert "scene transitions are exported by name match only; verify how each looks in CapCut" in result.capcut_compatibility_warnings
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_a_transition_on_the_first_broll_clip_warns_instead_of_crashing(tmp_path: Path) -> None:
+    """첫 B-roll 조각에는 전환을 걸 앞 조각이 없다 -- 화면은 이 상태를 막지만
+    (첫 장면에는 넘기기 칸이 아예 안 뜬다), 내보내기는 그 규칙에 기대지 않고
+    스스로도 조용히 넘어가지 않는다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut First Clip Transition")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll_path = tmp_path / "first_clip_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=2:size=240x320:rate=15", str(broll_path)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+
+    result = PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
+        project_id=project.project_id,
+        timeline={
+            "narration_source_uri": narration_asset.storage_uri,
+            "tracks": [
+                {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0.0, "end_sec": 2.0}]},
+                {"track_type": "broll", "clips": [
+                    {"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 2.0, "media_controls": {"loop": False, "pad": True}, "transition": {"type": "fade", "duration_sec": 0.4}},
+                ]},
+            ],
+        },
+        drafts_root=tmp_path / "drafts",
+        draft_name="first-clip-transition",
+        editing_session={"caption_style": {}, "segments": []},
+    )
+
+    content = json.loads((result.draft_path / "draft_content.json").read_text(encoding="utf-8"))
+    assert content["materials"]["transitions"] == []
+    assert "a scene transition on the first B-roll clip cannot be represented in CapCut export; skipped" in result.capcut_compatibility_warnings
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_export_rejects_an_out_of_catalog_transition_type(tmp_path: Path) -> None:
+    """저장 API가 이미 값을 검증하지만(`transitions.py`의 `normalize_transition`),
+    내보내기도 스스로 다시 확인한다 -- 검증되지 않은 값이 다른 경로로 들어와도
+    캡컷이 못 여는 초안을 조용히 만들지 않는다."""
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="CapCut Invalid Transition")
+    narration_path = tmp_path / "narration.wav"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", str(narration_path)])
+    narration_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.NARRATION_AUDIO, source_path=narration_path)
+    broll_path = tmp_path / "invalid_transition_broll.mp4"
+    _generate(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=240x320:rate=15", str(broll_path)])
+    broll_asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=broll_path)
+    timeline = {
+        "narration_source_uri": narration_asset.storage_uri,
+        "tracks": [
+            {"track_type": "narration", "clips": [{"asset_uri": f"local://projects/{project.project_id}/segments/seg_001", "start_sec": 0, "end_sec": 1}]},
+            {"track_type": "broll", "clips": [
+                {"asset_uri": f"local://projects/{project.project_id}/assets/{broll_asset.asset_id}", "start_sec": 0.0, "end_sec": 1.0, "transition": {"type": "not_a_real_transition"}},
+            ]},
+        ],
+    }
+    with pytest.raises(PyCapCutExportError, match="Invalid scene transition"):
+        PyCapCutRealExportAdapter(store=store, video_width=320, video_height=240).export_timeline(
+            project_id=project.project_id, timeline=timeline, drafts_root=tmp_path / "drafts", draft_name="invalid-transition",
+        )

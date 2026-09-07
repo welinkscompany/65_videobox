@@ -49,7 +49,7 @@ class LocalXTTSProvider:
             model.tts_to_file(
                 text=request.text,
                 speaker_wav=str(speaker_wav),
-                language=self.language,
+                language=request.language or self.language,
                 file_path=str(request.output_path),
             )
         except Exception as exc:

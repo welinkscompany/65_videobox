@@ -28,6 +28,20 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("JobRecovery", () => {
+  it("shows bounded job facts and exposes retry only for retryable failures", async () => {
+    vi.mocked(api.listJobs).mockResolvedValue([
+      job({ job_id: "retryable", progress_percent: 42, started_at: "2026-08-11T09:00:00Z", finished_at: null }),
+      job({ job_id: "blocked", status: "blocked", progress_percent: null, error_message: "승인 대기 중", started_at: "2026-08-11T08:00:00Z", finished_at: "2026-08-11T08:01:00Z" }),
+    ]);
+    render(<JobRecovery projectId="project-a" />);
+
+    expect(await screen.findByTestId("job-recovery")).toHaveAttribute("data-vb-job-dialog", "true");
+    expect(screen.getByText("42% 진행 중")).toBeVisible();
+    expect(screen.getByTestId("job-row-retryable")).toHaveTextContent(/시작 2026/);
+    expect(screen.getByText(/승인 대기 중/)).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "다시 실행" })).toHaveLength(1);
+    expect(screen.getByText("자동 재시도 대신 원래 화면에서 직접 다시 실행해 주세요.")).toBeVisible();
+  });
   it("lazily shows current and global work without mutating on mount", async () => {
     render(<JobRecovery projectId="project-a" />);
 

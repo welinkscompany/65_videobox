@@ -74,8 +74,8 @@
       "release": "v1.3.9",
       "commit": "5c41199ea0024a9e0b2cb31735265056e5472d76",
       "license": "SIL OFL-1.1",
-      "license_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE.txt",
-      "notice_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE.txt",
+      "license_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE",
+      "notice_url": "https://github.com/orioncactus/pretendard/blob/5c41199ea0024a9e0b2cb31735265056e5472d76/LICENSE",
       "decision": "locked-binary",
       "materialized": true,
       "upstream_paths": [
@@ -99,7 +99,7 @@
       "upstream_path": "src/components/layout/authenticated-layout.tsx",
       "upstream_sha256": "e3ab0837b3bd3e39153aad8b7b3c07c8fe6768f23bb0dc362ab4a41a5ee6e1ff",
       "path": "apps/web/src/app/ProductShell.tsx",
-      "normalized_sha256": "6cf2b964719867f40621b65cd4a9f2d8acd4d7671a4fd6a278b42fcdf914bb7c",
+      "normalized_sha256": "dbb666af3015530906c25bcb57821b59e9b624ab8db15f0a7eb2fc3e06fb1ee6",
       "test_path": "apps/web/src/app/ProductShell.test.tsx"
     },
     {
@@ -107,7 +107,7 @@
       "upstream_path": "src/components/layout/app-sidebar.tsx",
       "upstream_sha256": "cd363c86fe2e6ad838c013075c51f2c5e7cb61e08082020351c48896c882bc87",
       "path": "apps/web/src/app/ProductShell.tsx",
-      "normalized_sha256": "6cf2b964719867f40621b65cd4a9f2d8acd4d7671a4fd6a278b42fcdf914bb7c",
+      "normalized_sha256": "dbb666af3015530906c25bcb57821b59e9b624ab8db15f0a7eb2fc3e06fb1ee6",
       "test_path": "apps/web/src/app/ProductShell.test.tsx"
     }
   ],

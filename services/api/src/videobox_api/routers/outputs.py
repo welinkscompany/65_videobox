@@ -5,6 +5,7 @@ import threading
 from fastapi import APIRouter, Request, status
 from fastapi.responses import FileResponse
 
+from videobox_core_engine.audio_export import extract_audio_only
 from videobox_api.content_delivery import deliver_file
 from videobox_api.errors import _http_error
 from videobox_api.models import (
@@ -16,7 +17,11 @@ from videobox_api.models import (
     ExportJobResponse,
     FinalRenderArtifactResponse,
     FinalRenderJobResponse,
+    FinalRenderVerdictRequest,
     OutputJobRequest,
+    VariantRenderBatchResponse,
+    VariantRenderItemResponse,
+    VariantRenderRequest,
     ExactPreviewRequestBody,
     ExactPreviewResponse,
     PreviewArtifactResponse,
@@ -101,6 +106,27 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             subtitle=SubtitleArtifactResponse(**result["subtitle"]),
         )
 
+    @router.get("/api/projects/{project_id}/subtitles/{job_id}/content")
+    def get_subtitle_content(project_id: str, job_id: str):
+        """진짜 내려받는 `.srt` 파일 -- 위 엔드포인트는 JSON만 준다(owner 요청 2026-08-28).
+
+        `.srt` 파일 자체는 이미 `save_subtitle_run`이 디스크에 써 두고 있었다 --
+        내려받는 문(엔드포인트)이 없었을 뿐이다. `deliver_file` 대신 `FileResponse`를
+        직접 쓰는 건 파일명을 지정하기 위해서다 -- `deliver_file`은 텍스트류를
+        인라인 대상에 안 넣어서 `download`라는 이름 없는 파일로 받게 된다."""
+        try:
+            result = orchestrator.get_subtitle_result(project_id=project_id, job_id=job_id)
+            if str(result.get("status")) != "succeeded":
+                raise KeyError("subtitle_not_ready")
+            path = orchestrator.store.resolve_storage_uri(
+                project_id=project_id, storage_uri=str(result["subtitle"]["file_uri"])
+            )
+            if not path.is_file():
+                raise KeyError("subtitle_content_missing")
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return FileResponse(path, media_type="application/x-subrip", filename="subtitle.srt")
+
     @router.post("/api/projects/{project_id}/jobs/preview-render", status_code=status.HTTP_202_ACCEPTED)
     def start_preview_render(project_id: str, payload: OutputJobRequest) -> StartJobResponse:
         try:
@@ -179,6 +205,43 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 raise
         return StartJobResponse(**result)
 
+    @router.post("/api/projects/{project_id}/variant-renders", status_code=status.HTTP_202_ACCEPTED)
+    def start_variant_renders(project_id: str, payload: VariantRenderRequest) -> VariantRenderBatchResponse:
+        try:
+            result = orchestrator.start_variant_renders(
+                project_id=project_id,
+                session_id=payload.session_id,
+                variant_ids=payload.variant_ids,
+            )
+            for item in result.get("items", []):
+                if item.get("status") not in {"running", "pending"} or not item.get("should_start"):
+                    continue
+                worker = threading.Thread(
+                    target=orchestrator.run_final_render_job,
+                    kwargs={
+                        "project_id": project_id,
+                        "timeline_job_id": item["timeline_job_id"],
+                        "job": {"job_id": item["job_id"]},
+                    },
+                    daemon=True,
+                )
+                try:
+                    worker.start()
+                except Exception:
+                    orchestrator.release_final_render_worker(
+                        project_id=project_id,
+                        job_id=str(item["job_id"]),
+                    )
+                    item["status"] = "failed"
+                    item["error_code"] = "worker_start_failed"
+            return VariantRenderBatchResponse(
+                project_id=project_id,
+                status=("failed" if result.get("items") and all(item.get("status") == "failed" for item in result["items"]) else "accepted"),
+                items=[VariantRenderItemResponse(**{key: value for key, value in item.items() if key != "should_start"}) for item in result.get("items", [])],
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+
     @router.get("/api/projects/{project_id}/final-renders/{job_id}")
     def get_final_render_result(project_id: str, job_id: str) -> FinalRenderJobResponse:
         try:
@@ -191,6 +254,36 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             job_id=result["job_id"],
             status=result["status"],
             render=FinalRenderArtifactResponse(**result["render"]) if result["render"] else None,
+            error_message=result.get("error_message"),
+        )
+
+    @router.post("/api/projects/{project_id}/final-renders/{job_id}/verdict")
+    def record_final_render_verdict(
+        project_id: str, job_id: str, payload: FinalRenderVerdictRequest
+    ) -> FinalRenderJobResponse:
+        """완성본을 보고 내린 판단을 그 완성본 옆에 남긴다.
+
+        기계가 잰 지표만으로는 무엇이 좋은 영상인지 배울 수 없다.
+        """
+        try:
+            result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+            if not result.get("render"):
+                raise KeyError(f"Final render has no artifact yet: {job_id}")
+            orchestrator.pipeline.store.record_final_render_verdict(
+                project_id=project_id,
+                export_id=result["render"]["export_id"],
+                verdict=payload.verdict,
+                note=payload.note,
+            )
+            result["render"] = orchestrator.pipeline.store.get_final_render_export(
+                project_id=project_id, export_id=result["render"]["export_id"]
+            )
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return FinalRenderJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            render=FinalRenderArtifactResponse(**result["render"]),
         )
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}/content")
@@ -206,6 +299,33 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             return deliver_file(request=request, path=path, media_type="video/mp4")
         except Exception as exc:
             raise _http_error(exc) from exc
+
+    @router.get("/api/projects/{project_id}/final-renders/{job_id}/audio-content")
+    def get_final_render_audio_content(project_id: str, job_id: str, request: Request):
+        """완성본에서 오디오 트랙만 뽑아 내려준다 (owner 요청 2026-08-28: "오디오만... 내보내기").
+
+        새 렌더 job을 만들지 않는다 -- 이미 있는 완성본 mp4에서 `ffmpeg -vn`으로
+        그때그때 뽑고(`audio_export.py`), 옆에 캐시해 다음 요청은 다시 안 돌린다."""
+        try:
+            result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
+            render = result.get("render")
+            if not render or str(result.get("status")) != "succeeded":
+                raise KeyError("final_render_not_ready")
+            video_path = orchestrator.store.resolve_storage_uri(project_id=project_id, storage_uri=str(render["file_uri"]))
+            if not video_path.is_file():
+                raise KeyError("final_render_content_missing")
+            audio_path = video_path.with_name(f"{video_path.stem}.audio-only.m4a")
+            ffmpeg_binary = getattr(orchestrator.pipeline.final_renderer, "ffmpeg_binary", "ffmpeg")
+            extract_audio_only(source_video_path=video_path, destination_audio_path=audio_path, ffmpeg_binary=ffmpeg_binary)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        # 코드리뷰로 발견(2026-08-28): `audio/mp4`는 `deliver_file`의 인라인
+        # 목록에 있어서 `Content-Disposition`을 안 붙인다 -- 재생 링크로는
+        # 맞는 동작이지만, 이 단추는 "내려받기"라 파일 이름이 있어야 한다.
+        # Range 지원(오디오 탐색)은 그대로 두고 이름만 얹는다.
+        response = deliver_file(request=request, path=audio_path, media_type="audio/mp4")
+        response.headers["Content-Disposition"] = f'attachment; filename="{job_id}.m4a"'
+        return response
 
     @router.post("/api/projects/{project_id}/jobs/capcut-draft-export", status_code=status.HTTP_202_ACCEPTED)
     def start_capcut_draft_export(project_id: str, payload: OutputJobRequest) -> StartJobResponse:

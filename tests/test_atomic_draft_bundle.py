@@ -314,6 +314,42 @@ def test_gap_bundle_is_blocked_by_shared_pipeline_before_final_and_capcut(tmp_pa
     assert store.get_job(project_id=project.project_id, job_id=direct_job["job_id"])["status"] == JobStatus.FAILED.value
 
 
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg and ffprobe are required")
+def test_gap_bundle_exact_preview_renders_black_canvas_without_opening_svg_as_video(tmp_path):
+    store = LocalProjectStore(tmp_path / "projects")
+    project = store.bootstrap_project("Gap exact preview")
+    brief, readiness = _ready(store, project.project_id)
+    bundle = store.materialize_atomic_draft_bundle(
+        project_id=project.project_id,
+        brief_id=brief["brief_id"],
+        expected_brief_revision=brief["revision"],
+        readiness_id=readiness["readiness_id"],
+        expected_readiness_revision=readiness["revision"],
+        idempotency_key="gap-exact-preview",
+        allow_placeholder=True,
+    )
+    session = store.get_editing_session(project_id=project.project_id, session_id=bundle["session_id"])
+    pipeline = LocalPipelineRunner(store)
+
+    generation = pipeline.start_exact_preview(
+        project_id=project.project_id,
+        session_id=bundle["session_id"],
+        expected_revision=session["session_revision"],
+    )
+    pipeline.run_exact_preview(project_id=project.project_id, generation_id=generation["generation_id"])
+    result = pipeline.get_exact_preview_status(project_id=project.project_id, generation_id=generation["generation_id"])
+
+    assert result["state"] == "succeeded", result.get("error_message")
+    artifact = store.resolve_storage_uri(project_id=project.project_id, storage_uri=result["artifact_uri"])
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(artifact)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert float(probe.stdout.strip()) > 0
+
+
 def test_each_gap_slot_gets_its_own_labeled_placeholder_clip_at_its_target_range(tmp_path):
     store = LocalProjectStore(tmp_path / "projects"); project = store.bootstrap_project("Multiple gaps")
     brief, readiness = _ready(store, project.project_id)

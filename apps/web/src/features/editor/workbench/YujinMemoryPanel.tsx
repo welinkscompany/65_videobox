@@ -11,7 +11,7 @@ const categoryLabels: Record<
   string
 > = {
   pacing: "편집 템포",
-  caption: "자막",
+  caption: "캡션",
   audio: "음악과 소리",
   tone: "영상 분위기",
   workflow: "작업 방식",
@@ -172,6 +172,11 @@ function MemoryCandidateStatus({
         </Button>
       </div>
     );
+  }
+  // 켜져 있지 않은 것은 실패가 아니다. `저장 다시 시도`를 내주면 owner는 눌러도
+  // 안 되는 단추를 계속 누르게 된다.
+  if (candidate.error === "not_configured") {
+    return <p>기억 기능이 아직 켜져 있지 않아요. 편집과 대화는 그대로 쓸 수 있어요.</p>;
   }
   if (
     candidate.error === "save"
