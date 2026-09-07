@@ -28,7 +28,14 @@ def resolve_user_library_root() -> Path:
 #: 구글 드라이브(`G:`)에서 원드라이브로 옮긴 이유는 `G:`가 스트리밍 드라이브라
 #: Docker가 마운트하면 빈 폴더로 보이기 때문이다(같은 사실이 `compose.yaml`
 #: 주석에도 있다). 원드라이브는 파일이 디스크에 실제로 있다.
-DEFAULT_MEDIA_INBOX_WATCH_PATH = Path(r"C:\Users\atgro\OneDrive\#_videobox")
+#:
+#: **사람 이름을 박지 않는다.** 이 값은 컨테이너에서 늘 환경변수로 덮이지만
+#: (`compose.yaml`의 `VIDEOBOX_MEDIA_INBOX_WATCH_PATH`), 기본값에 계정 이름이
+#: 들어 있으면 다른 컴퓨터에서 켰을 때 남의 폴더를 가리킨다. 옛 값도 같은
+#: 모양이었다(구글 드라이브 letter + 사람 폴더).
+#:
+#: 그래서 기본은 **집 폴더 기준 상대 자리**다. 실제 자리는 설정이 정한다.
+DEFAULT_MEDIA_INBOX_WATCH_PATH = Path.home() / "OneDrive" / "#_videobox"
 
 #: 자산 가치가 없다고 본 파일이 가는 곳. **지우지 않고 옮기기만 한다** --
 #: owner가 직접 보고 지운다(2026-09-07 결정).
