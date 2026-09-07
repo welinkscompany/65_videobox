@@ -277,12 +277,17 @@ def test_export_timeline_writes_a_real_capcut_draft(tmp_path: Path) -> None:
     assert "Overlay draft proof" in json.dumps(json.loads(draft_content.read_text(encoding="utf-8")), ensure_ascii=False)
 
 
-def test_export_timeline_requires_narration_clips(tmp_path: Path) -> None:
+def test_export_timeline_requires_some_clips(tmp_path: Path) -> None:
+    """**목소리가 없다고 막지는 않는다**(2026-09-07). 사진과 영상만으로 만들고
+    나중에 더빙을 붙이거나 자막만으로 낼 수 있다 -- 빈 편집판으로 시작하면 목소리
+    원본이 아예 없다. 이 울타리가 원래 막으려던 것은 **빈 초안**이므로 그것만
+    막는다. 옛 이름은 `..._requires_narration_clips`였다.
+    """
     store = LocalProjectStore(tmp_path)
     project = store.bootstrap_project(name="CapCut Export Rejection Project")
     adapter = PyCapCutRealExportAdapter(store=store)
 
-    with pytest.raises(PyCapCutExportError, match="narration"):
+    with pytest.raises(PyCapCutExportError, match="no clips"):
         adapter.export_timeline(
             project_id=project.project_id,
             timeline={"tracks": []},

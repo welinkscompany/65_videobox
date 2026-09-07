@@ -27,7 +27,7 @@ from videobox_core_engine.media_controls import (
     normalize_media_controls,
 )
 from videobox_core_engine.transitions import TRANSITION_TYPES, normalize_transition
-from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
+from videobox_core_engine.output_source_verifier import is_silent_narration_placeholder, OutputSourceStaleError, verify_output_sources
 from videobox_core_engine.output_warning_provenance import output_metadata, output_warning_notes
 import json
 from videobox_domain_models.caption_style import CaptionStyle
@@ -229,8 +229,11 @@ class PyCapCutRealExportAdapter:
     ) -> CapCutDraftExportResult:
         verify_output_sources(store=self.store, project_id=project_id, timeline=timeline)
         narration_clips, broll_clips, bgm_clips, sfx_clips = self._collect_clips(timeline)
-        if not narration_clips:
-            raise PyCapCutExportError("Timeline has no narration clips to export.")
+        # **목소리 없는 편집본은 정상이다.** 사진과 영상만으로 만들고 나중에
+        # 더빙을 붙이거나 자막만으로 낼 수 있다. 빈 초안만 막는다 -- 그것이
+        # 이 울타리가 원래 막으려던 것이다.
+        if not narration_clips and not broll_clips:
+            raise PyCapCutExportError("Timeline has no clips to export.")
 
         from pycapcut.draft_folder import DraftFolder
 
@@ -369,7 +372,15 @@ class PyCapCutRealExportAdapter:
                 key=lambda clip: float(clip.get("start_sec", 0.0)),
             )
             if track_type == "narration":
-                narration_clips.extend(valid_clips)
+                # **소리가 아니라 자리인 클립은 뺀다.** 빈 편집판에는 목소리
+                # 원본이 없는데 장면마다 가상 내레이션 클립이 생긴다 -- 편집기가
+                # 그리는 장면 막대다. 그걸 소리로 읽으려 해서 캡컷 초안이
+                # 통째로 실패했다(2026-09-07 실측). 완성본 경로는 어젯밤 같은
+                # 판단으로 고쳤다 -- **판단을 두 벌 두지 않는다.**
+                narration_clips.extend(
+                    clip for clip in valid_clips
+                    if not is_silent_narration_placeholder(timeline=timeline, clip=clip)
+                )
             elif track_type == "broll":
                 broll_clips.extend(valid_clips)
             elif track_type == "bgm":
