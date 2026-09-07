@@ -48,6 +48,11 @@ def _render_compose(*, include_yujin: bool) -> dict:
         **os.environ,
         "POSTGRES_PASSWORD": "static-base-password",
         "VIDEOBOX_CONTAINER_DATA_ROOT": "D:/videobox-static-data",
+        # compose가 `:?`로 요구하는 값은 여기에도 있어야 `docker compose config`가
+        # 돈다. 자산 드롭 폴더 둘을 더하면서 이 가짜 설정을 안 고쳐 이 규약
+        # 시험 넷이 한꺼번에 빨개졌다(2026-09-07). 오늘 같은 누락 세 번째다.
+        "VIDEOBOX_OWNER_DROP_ROOT": "D:/videobox-static-drop",
+        "VIDEOBOX_OWNER_DROP_REJECT_ROOT": "D:/videobox-static-drop-reject",
     }
     if include_yujin:
         command.extend(["-f", str(OVERLAY_PATH), "--profile", "hermes-yujin"])
