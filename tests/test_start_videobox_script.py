@@ -389,6 +389,18 @@ def test_the_voice_program_is_not_started_twice(tmp_path: Path) -> None:
     assert step["evidence"]["started_by_us"] is False
 
 
+def test_the_voice_launch_does_not_pin_a_window_open(tmp_path: Path) -> None:
+    """`-NoExit`가 있으면 이미 켜져 있어 `start-voice.ps1`이 바로 끝나도 그 창은
+    안 닫힌 채 하나씩 쌓인다 (owner 실측 2026-09-07: 아이콘을 누를 때마다 창이
+    늘어 약 서른 개가 됐다). 진짜로 다리 노릇을 하는 경로는 `start-voice.ps1`
+    안의 `& $python host_tts_service.py`가 앞을 막아(foreground) 창이 저절로
+    안 닫힌다 -- `-NoExit`는 어느 경로에도 필요 없고, 조기 종료 경로만 창을
+    남긴다.
+    """
+    body = _without_comments(LAUNCHER)
+    assert "-NoExit" not in body
+
+
 def test_the_voice_program_can_be_skipped(tmp_path: Path) -> None:
     with _answering_server() as uri:
         result = _run(tmp_path, uri=uri, extra=["-SkipBrowser", "-SkipVoice"])

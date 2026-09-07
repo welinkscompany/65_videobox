@@ -236,7 +236,12 @@ if ($SkipVoice) {
             if ($candidate -eq $VoiceHostExecutable) { throw "'$candidate'을(를) 찾지 못했어요." }
         }
         if (-not $voiceHost) { throw "PowerShell을 찾지 못했어요." }
-        Start-Process -FilePath $voiceHost -ArgumentList @("-NoExit", "-NoProfile", "-File", $VoiceScript) -WindowStyle Minimized | Out-Null
+        # `-NoExit`를 빼야 한다. 이미 켜져 있어 `start-voice.ps1`이 바로
+        # 끝나는 경로에서는 이 옵션이 창만 남긴다(owner 실측 2026-09-07: 켤
+        # 때마다 하나씩 쌓여 서른 개가 됐다). 실제로 다리 노릇을 하는 경로는
+        # 스크립트 안의 `& $python host_tts_service.py`가 앞을 막아
+        # (foreground) 창이 저절로 안 닫히므로 `-NoExit`가 필요 없다.
+        Start-Process -FilePath $voiceHost -ArgumentList @("-NoProfile", "-File", $VoiceScript) -WindowStyle Minimized | Out-Null
         $voiceStarted = $true
     } catch {
         $voiceReason = $_.Exception.Message
