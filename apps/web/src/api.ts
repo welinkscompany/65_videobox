@@ -2139,16 +2139,7 @@ export const api = {
   getDirectorPreferences: (projectId: string) => request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`),
   updateDirectorPreferences: (projectId: string, payload: DirectorPreferences) =>
     request<DirectorPreferences>(`/api/projects/${projectId}/director/preferences`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
-  getMediaLibraryInstallState: () => request<MediaLibraryInstallState>("/api/media-library/install-state"),
   listMediaLibraryAssets: () => request<{ assets: MediaLibraryAsset[] }>("/api/media-library/assets"),
-  listProjectMediaLibraryFavorites: (projectId: string) =>
-    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/favorites`),
-  listProjectRecentMediaLibraryAssetIds: (projectId: string) =>
-    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/recent`),
-  setProjectMediaLibraryFavorite: (projectId: string, libraryAssetId: string, enabled: boolean) =>
-    request<{ asset_ids: string[] }>(`/api/projects/${projectId}/media-library/assets/${encodeURIComponent(libraryAssetId)}/favorite`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
-    }),
   materializeMediaLibraryAsset: (libraryAssetId: string, projectId: string) =>
     request<AssetResponse>(`/api/media-library/assets/${encodeURIComponent(libraryAssetId)}/materialize`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId }),

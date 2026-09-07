@@ -76,7 +76,6 @@ def build_creation_briefs_router(orchestrator: ApiOrchestrator) -> APIRouter:
         except Exception as exc:
             raise _http_error(exc) from exc
 
-    @router.post("/api/projects/{project_id}/creation-briefs/{brief_id}/questions/{question_id}")
     def answer(project_id: str, brief_id: str, question_id: str, payload: CreationBriefAnswerRequest) -> dict[str, object]:
         try:
             return store.answer_creation_brief_question(

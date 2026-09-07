@@ -172,13 +172,6 @@ def build_media_library_router(
         except Exception as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
 
-    @router.get("/api/media-library/recent")
-    def list_recent_library_usage() -> dict[str, object]:
-        try:
-            return {"asset_ids": library_store.list_recent_usage()}
-        except Exception as exc:
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="library_unavailable") from exc
-
     @router.get("/api/projects/{project_id}/media-library/favorites")
     def list_project_library_favorites(project_id: str) -> dict[str, object]:
         _require_project(project_store, project_id)

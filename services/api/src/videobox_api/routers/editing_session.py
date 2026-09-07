@@ -164,13 +164,6 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return {"suggestions": suggestions}
 
-    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/fixed-timeline")
-    def get_editing_session_fixed_timeline(project_id: str, session_id: str) -> dict[str, object]:
-        try:
-            return orchestrator.get_editing_session_fixed_timeline(project_id=project_id, session_id=session_id)
-        except Exception as exc:
-            raise _http_error(exc) from exc
-
     @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/selected-range-preview")
     def preview_editing_session_selected_range(project_id: str, session_id: str, payload: SelectedRangePreviewRequest) -> dict[str, object]:
         try:

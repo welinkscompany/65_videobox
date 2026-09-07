@@ -44,7 +44,6 @@ from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.editing_session import (
     build_editing_session,
     captions_from_transcript,
-    build_fixed_track_timeline,
     build_selected_range_preview,
     preview_caption_style_scope,
     update_caption_style,
@@ -321,10 +320,6 @@ class EditingSessionRegenerationMixin:
     def preview_editing_session_caption_style_scope(self, *, project_id: str, session_id: str, scope: str, segment_ids: list[str]) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return {"affected_segment_ids": preview_caption_style_scope(session=session, scope=scope, segment_ids=segment_ids)}
-
-    def get_editing_session_fixed_timeline(self, *, project_id: str, session_id: str) -> dict[str, Any]:
-        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
-        return build_fixed_track_timeline(session=session)
 
     def preview_editing_session_selected_range(self, *, project_id: str, session_id: str, start_sec: float, end_sec: float) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)

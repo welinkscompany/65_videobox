@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from videobox_api.errors import _http_error
@@ -99,17 +99,5 @@ def build_format_templates_router(*, orchestrator: Any, template_store: FormatTe
             return {"template_id": template_id, "session": updated}
         except Exception as exc:
             raise _http_error(exc) from exc
-
-    @router.delete(
-        "/api/format-templates/{template_id}",
-        status_code=status.HTTP_204_NO_CONTENT,
-        response_class=Response,
-    )
-    def delete_format_template(template_id: str) -> Response:
-        try:
-            template_store.delete_template(template_id=template_id)
-        except Exception as exc:
-            raise _http_error(exc) from exc
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return router

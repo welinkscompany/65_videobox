@@ -723,9 +723,6 @@ class ApiOrchestrator:
     def get_latest_editing_session(self, *, project_id: str) -> dict[str, Any]:
         return self.pipeline.get_latest_editing_session(project_id=project_id)
 
-    def get_editing_session_fixed_timeline(self, *, project_id: str, session_id: str) -> dict[str, Any]:
-        return self.pipeline.get_editing_session_fixed_timeline(project_id=project_id, session_id=session_id)
-
     def get_editor_playback_manifest(self, *, project_id: str, session_id: str) -> dict[str, Any]:
         from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
 

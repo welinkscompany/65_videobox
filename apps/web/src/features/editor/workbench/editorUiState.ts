@@ -86,15 +86,6 @@ export function readEditorUiState(projectId: string, sessionId: string): EditorW
   }
 }
 
-export function hasPersistedEditorUiState(projectId: string, sessionId: string): boolean {
-  try {
-    return window.localStorage.getItem(editorUiStorageKey(projectId, sessionId)) !== null
-      || window.localStorage.getItem(legacyEditorUiStorageKey) !== null;
-  } catch {
-    return false;
-  }
-}
-
 export function writeEditorUiState(
   projectId: string,
   sessionId: string,
