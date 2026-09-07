@@ -556,7 +556,12 @@ class ImageGenerationConfig:
     weight_dtype: str = "fp8_e4m3fn"
     steps: int = 20
     guidance: float = 3.5
-    timeout_seconds: int = 600
+    # compose.yaml의 VIDEOBOX_IMAGE_TIMEOUT_SECONDS 기본값(300)과 맞춘다
+    # (코드리뷰 2026-09-07, §1-6). env가 없는 자리(compose 없이 직접 띄울 때)에서
+    # 이 기본값이 그대로 쓰이는데, 600은 nginx 프록시의 330초 벽보다 길어서
+    # 항상 타임아웃 안에 못 끝난다. 잡 없이 도는 넷을 잡으로 바꾸는 결정은
+    # owner 결정 대기라 이 기본값만 고친다.
+    timeout_seconds: int = 300
 
     # 2-B와 같은 방식으로 묶는다. 설정 한 줄로 밖에 나갈 수 있으면 그 조항은
     # 문서에만 있는 것이 된다. `host.docker.internal`은 같은 기계다.
