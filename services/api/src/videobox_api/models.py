@@ -427,6 +427,26 @@ class SourceVoiceStartResponse(BaseModel):
     retake_candidates: list[RetakeCandidateResponse]
 
 
+class LibraryIngestPathRequest(BaseModel):
+    """이미 디스크에 있는 파일을 **경로로** 자료실에 넣는다.
+
+    바이트를 다시 올리게 하지 않으려는 것이다. 밖에서 부르는 오케스트레이터가
+    PNG·MP4를 만들어 함께 보는 폴더에 두고 경로만 넘긴다
+    (owner 결정 2026-09-07, `docs/videobox-mcp-scope.ko.md` §5-①).
+
+    **이 능력은 이미 쓰이고 있었다** -- 드롭 폴더 정리기·장면 영상·인포그래픽
+    셋이 `LibraryIngestService.ingest`에 경로를 그대로 넘긴다. HTTP 문만 없었다.
+    """
+
+    media_type: str = Field(min_length=1)
+    source_path: str = Field(min_length=1)
+    filename: str | None = Field(default=None, max_length=255)
+    #: 같은 파일을 두 번 넣지 않게 하는 열쇠. 부르는 쪽의 재시도 계약이라 **필수다**
+    #: -- 없으면 재시도가 매번 새 자산을 만든다.
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    provenance: dict[str, Any] | None = None
+
+
 class InfographicFactRequest(BaseModel):
     """그림에 들어갈 숫자 하나. **여기 없는 숫자는 그림에 못 들어간다** --
     `infographic_brief.check_infographic_html`이 대조한다."""

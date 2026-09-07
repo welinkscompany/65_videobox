@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
+from typing import Any
 import asyncio
 import base64
 import binascii
@@ -833,6 +835,29 @@ class _UnavailableMediaAnalysisService:
         return self.store.get_media_analysis(project_id=project_id, analysis_id=analysis_id)
 
 
+class _LazyLocalRuntime:
+    """처음 부를 때 로컬 런타임을 짓는다.
+
+    인포그래픽은 대부분의 세션에서 한 번도 안 불린다. 그런데 상한이 달라서
+    공용 런타임을 못 쓴다. 화면을 여는 것만으로 provider를 짓지 않는다는 규정
+    (`tests/test_local_media_ai_providers.py`)을 지키면서 그 둘을 같이 만족시키는
+    방법이 이것이다.
+
+    **하나만 짓는다.** 매번 지으면 요청마다 transport가 새로 생긴다.
+    """
+
+    __slots__ = ("_build", "_runtime")
+
+    def __init__(self, *, build: Callable[[], Any]) -> None:
+        self._build = build
+        self._runtime: Any = None
+
+    def generate_structured(self, **kwargs: Any) -> Any:
+        if self._runtime is None:
+            self._runtime = self._build()
+        return self._runtime.generate_structured(**kwargs)
+
+
 def create_app(
     *,
     projects_root: Path | None = None,
@@ -1124,13 +1149,20 @@ def create_app(
     # 인포그래픽 전용 런타임. **상한만 늘린 같은 로컬 모델이다** -- 나가는 곳은
     # 그대로라 §10.14 조항 2-B의 경계는 변하지 않는다. 공용 런타임의 30초로는
     # 이 일이 매번 실패한다(한 판 63~115초, 2026-09-07 실측).
-    infographic_runtime_service = build_local_only_runtime_service(
-        store=store,
-        local_runtime_config=replace(
-            resolved_local_runtime_config,
-            timeout_seconds=resolve_infographic_timeout_seconds(),
-        ),
-        local_http_client=urlopen,
+    #
+    # **처음 부를 때 만든다.** 여기서 바로 만들면 `create_app`이 런타임을 두 번
+    # 짓게 되고, `test_local_media_ai_providers.py`의 울타리가 그걸 잡는다. 그
+    # 울타리는 옳다 -- 화면을 여는 것만으로 provider를 짓지 않는다는 규정이고,
+    # 인포그래픽은 대부분의 세션에서 한 번도 안 불린다.
+    infographic_runtime_service = _LazyLocalRuntime(
+        build=lambda: build_local_only_runtime_service(
+            store=store,
+            local_runtime_config=replace(
+                resolved_local_runtime_config,
+                timeout_seconds=resolve_infographic_timeout_seconds(),
+            ),
+            local_http_client=urlopen,
+        )
     )
     app.state.build_local_only_runtime_service = build_local_only_runtime_service
     app.state.local_only_runtime_service_factory = runtime_service_factory
@@ -1403,6 +1435,16 @@ def create_app(
             managed_root=user_library_root,
             managed_roots=resolved_library_asset_managed_roots,
             schedule_scene_analysis=_schedule_scene_analysis,
+            # **경로로 넣는 문이 받아 줄 폴더** (owner 결정 2026-09-07).
+            # 드롭 폴더와 자료실 관리 폴더뿐이다 -- 둘 다 호스트가 함께 보는
+            # 자리라, 밖에서 부르는 쪽이 파일을 두고 경로만 넘길 수 있다.
+            # 자료 폴더 전체를 열지 않는 것은, 그러면 자료실이 임의 파일 읽기
+            # 창구가 되기 때문이다.
+            allowed_ingest_roots=tuple(
+                root
+                for root in (media_inbox_watch_path, user_library_root)
+                if root is not None
+            ),
         )
     )
     # 포맷은 프로젝트가 아니라 사용자에게 붙는다 — 다음 영상은 보통 새 프로젝트다.

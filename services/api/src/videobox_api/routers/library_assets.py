@@ -21,7 +21,12 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
-from videobox_api.models import CorrectLibraryAssetMediaTypeRequest, MaterializeLibraryAssetRequest
+from videobox_api.errors import _http_error
+from videobox_api.models import (
+    CorrectLibraryAssetMediaTypeRequest,
+    LibraryIngestPathRequest,
+    MaterializeLibraryAssetRequest,
+)
 from videobox_core_engine.library_ingest import LibraryIngestIdempotencyConflict, LibraryIngestService
 from videobox_core_engine.library_usage import scan_library_asset_usage
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
@@ -52,6 +57,29 @@ class _DerivativeToolUnavailable(RuntimeError):
     pass
 
 
+def _inside_any(candidate: Path, roots: tuple[Path, ...]) -> bool:
+    """받아 줄 폴더 **안**인가. 폴더가 하나도 없으면 아무것도 안 받는다.
+
+    캡컷 다리의 `_is_inside`와 같은 규칙인데 **기본값이 반대다.** 저쪽은 폴더를
+    안 주면 전부 받는다(이 컴퓨터에서 손으로 켜는 서비스라 그렇다). 여기는
+    밖에서 부르는 문이라, 설정이 빠지면 **닫힌 채로** 있어야 한다.
+    """
+
+    if not roots:
+        return False
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return False
+    for root in roots:
+        try:
+            resolved.relative_to(root.resolve())
+        except (ValueError, OSError):
+            continue
+        return True
+    return False
+
+
 def build_library_assets_router(
     *,
     project_store: object,
@@ -64,6 +92,9 @@ def build_library_assets_router(
     # 넣는 순간 걸었는데 라이브러리에서 넣는 길만 안 걸어서, 같은 자산이 어느
     # 문으로 들어왔느냐에 따라 유진의 추천이 되기도 하고 영원히 막히기도 했다.
     schedule_scene_analysis: Callable[[str, str], None] | None = None,
+    # **경로로 넣는 문이 받아 줄 폴더.** 비면 그 문은 아무 경로도 안 받는다 --
+    # 열어 둔 채로 기본값을 넓게 잡는 것보다, 안 켜진 것이 안전하다.
+    allowed_ingest_roots: tuple[Path, ...] | None = None,
 ) -> APIRouter:
     router = APIRouter()
     materializer = ProjectAssetMaterializer(project_store)
@@ -189,6 +220,59 @@ def build_library_assets_router(
             "items": items,
             "partial": any(item.get("state") == "needs_attention" for item in items) and any(item.get("state") == "ready" for item in items),
         }
+
+    @router.post("/api/library/ingest-path", status_code=status.HTTP_201_CREATED)
+    def ingest_library_asset_by_path(payload: LibraryIngestPathRequest) -> dict[str, Any]:
+        """디스크에 이미 있는 파일 하나를 **경로로** 자료실에 넣는다.
+
+        `POST /api/library/ingest`(multipart)와 같은 일을 하되 바이트를 다시
+        올리지 않는다. 밖에서 부르는 쪽이 파일을 만들어 함께 보는 폴더에 두고
+        경로만 넘긴다(owner 결정 2026-09-07).
+
+        ## 아무 경로나 받지 않는다
+
+        받아 줄 폴더 안의 경로만 받는다. 컨테이너가 볼 수 있는 것은 자기 자료
+        폴더 전부인데, 밖에서 부르는 쪽이 그 안 아무 데나 읽게 두면 자료실이
+        임의 파일 읽기 창구가 된다. 캡컷 다리가 `--allow-root`로 지키는 것과
+        같은 규칙이다.
+
+        ## **"없는 파일"과 "안 보이는 파일"을 가른다**
+
+        둘을 같은 오류로 내면 부르는 쪽이 파일을 다시 만들며 헛돈다. 호스트
+        경로(`D:` 로 시작하는 윈도우 경로 같은 것)를 그대로 넘겨서 생기는 일이 대부분인데, 그건 파일이 없는
+        것이 아니라 **컨테이너가 그 이름을 모르는 것**이다.
+        """
+        try:
+            resolved_type = LibraryMediaType(payload.media_type)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="media_type_invalid") from exc
+        roots = tuple(allowed_ingest_roots or ())
+        source = Path(payload.source_path)
+        if not _inside_any(source, roots):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "reason": "source_path_not_visible",
+                    "message": "컨테이너가 볼 수 없는 경로입니다. 함께 보는 폴더 안에 두고 그 경로를 주세요.",
+                    "visible_roots": [str(root) for root in roots],
+                },
+            )
+        if not source.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="source_path_not_found")
+        if not source.is_file():
+            raise HTTPException(status_code=422, detail="source_path_not_a_file")
+        try:
+            return ingest_service.ingest(
+                media_type=resolved_type,
+                source=source,
+                filename=payload.filename or source.name,
+                idempotency_key=payload.idempotency_key,
+                provenance=payload.provenance or {},
+            )
+        except LibraryIngestIdempotencyConflict as exc:
+            raise HTTPException(status_code=409, detail="idempotency_key_conflict") from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
 
     @router.get("/api/library/assets")
     def list_library_assets(

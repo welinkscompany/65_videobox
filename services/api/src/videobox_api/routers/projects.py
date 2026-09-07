@@ -389,6 +389,37 @@ def build_projects_router(store: LocalProjectStore, user_asset_store: Any | None
             raise _http_error(exc) from exc
         return JobListResponse(jobs=[JobRecordResponse(**job) for job in jobs])
 
+    @router.get("/api/projects/{project_id}/jobs/{job_id}")
+    def get_project_job(project_id: str, job_id: str) -> JobRecordResponse:
+        """**잡 하나를 종류와 상관없이 같은 모양으로 답한다.**
+
+        이 문이 없어서 상태를 묻는 주소가 열세 가지로 갈라져 있었다
+        (`/jobs/transcription/{id}`, `/timelines/{id}`, `/final-renders/{id}`,
+        `/exact-previews/{id}` …). 밖에서 부르는 쪽이 그 열세 가지를 다 알아야
+        했고, 그건 복잡함을 떠넘기는 것이다
+        (owner 결정 2026-09-07, `docs/videobox-mcp-scope.ko.md` §2).
+
+        **종류별 문을 대체하지 않는다.** 저쪽은 결과까지 같이 준다 -- 타임라인
+        내용, 완성본 경로 같은 것. 여기는 **상태만** 준다. 진행 중인지 물을 때
+        여기로 오고, 끝난 뒤 결과를 가져갈 때 저기로 간다.
+
+        **여기서 못 보는 것이 있다.** `jobs` 표에 행을 남기는 열네 가지만 보인다
+        (`JobType`). 더빙·유튜브 학습은 메모리에만 있고(`orchestration.py`,
+        일부러 그렇게 뒀다), 유진 실행은 SSE로 흐르며, 장면 그림·대본 초안·
+        인포그래픽·자동 컷은 잡 없이 요청 안에서 끝난다. 그 종류를 물으면
+        404가 나가는데, 그건 정직한 답이다 -- **여기 없는 것을 있는 척하지 않는다.**
+        """
+        try:
+            job = store.get_job(project_id=project_id, job_id=job_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="job_not_found",
+            ) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return JobRecordResponse(**job)
+
     @router.get("/api/jobs")
     def list_all_jobs() -> AllJobsResponse:
         jobs = store.list_all_jobs()
