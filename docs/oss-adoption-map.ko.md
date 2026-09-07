@@ -7,8 +7,9 @@
 >    STT는 faster-whisper, 장면 감지는 ffmpeg 필터, 임베딩은 LM Studio. `broll_matcher.py`도 없다(`recommenders.py`·`broll_scene_candidates.py`).
 > 2. "현재 반입물은 비어 있으며 Pretendard도 materialized 하지 않는다" — shadcn 20개·셸 2건·Pretendard가 반입됐다(source map `materialized_files`).
 > 3. Tauri "반입 없음 / reference only" — `apps/desktop/src-tauri/`가 있다(결정 `2026-08-30-installed-desktop-shell-tauri`).
-> 주의: OpenCut 재작성판 "MIT"는 **이 문서가 맞고** 저장소 출처 기록 셋(source map·NOTICES·verify 스크립트)이 AGPL로 틀렸다
-> (고정 커밋 `bab8af8`의 LICENSE는 MIT 본문, 2026-09-07 업스트림 확인).
+> **대체됨:** OpenCut 재작성판이 저장소 출처 기록 셋(source map·NOTICES·verify 스크립트)에 AGPL로 틀리게
+> 찍혀 있던 것을 2026-09-07에 바로잡았다(고정 커밋 `bab8af8`의 LICENSE는 MIT 본문, 업스트림 확인). 이 문서의
+> "MIT" 판단이 맞았다.
 
 
 ## 1. 목적

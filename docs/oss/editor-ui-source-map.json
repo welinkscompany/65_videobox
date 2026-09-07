@@ -28,7 +28,7 @@
       "name": "opencut-current",
       "repository": "OpenCut-app/OpenCut",
       "commit": "bab8af831b354a0b5a98a4a6e818ab7d633b94df",
-      "license": "AGPL-3.0-or-later",
+      "license": "MIT",
       "license_url": "https://github.com/OpenCut-app/OpenCut/blob/bab8af831b354a0b5a98a4a6e818ab7d633b94df/LICENSE",
       "notice_url": "https://github.com/OpenCut-app/OpenCut/blob/bab8af831b354a0b5a98a4a6e818ab7d633b94df/LICENSE",
       "decision": "rejected-runtime",
