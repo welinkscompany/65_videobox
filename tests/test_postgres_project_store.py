@@ -620,7 +620,7 @@ def _seed_yujin_memory_retrieval_parity(
     store: LocalProjectStore,
     *,
     name: str,
-) -> tuple[str, str, list[str]]:
+) -> tuple[str, str, str, list[str]]:
     project = store.bootstrap_project(name)
     project_id = project.project_id
     session = store.save_editing_session(
@@ -815,6 +815,7 @@ def _seed_yujin_memory_retrieval_parity(
     return (
         project_id,
         current_conversation_id,
+        other_conversation_id,
         [project_id, unrelated.project_id],
     )
 
@@ -834,12 +835,13 @@ def test_postgres_yujin_memory_retrieval_rows_match_sqlite_exactly(
         (
             postgres_project_id,
             postgres_conversation_id,
+            postgres_other_conversation_id,
             postgres_project_ids,
         ) = _seed_yujin_memory_retrieval_parity(
             postgres,
             name=f"PostgreSQL Yujin memory D4 {uuid4().hex}",
         )
-        local_project_id, local_conversation_id, _ = (
+        local_project_id, local_conversation_id, _local_other_conversation_id, _ = (
             _seed_yujin_memory_retrieval_parity(
                 local,
                 name=f"SQLite Yujin memory D4 {uuid4().hex}",
@@ -868,6 +870,11 @@ def test_postgres_yujin_memory_retrieval_rows_match_sqlite_exactly(
                 for row in rows
             ]
 
+        # 2026-08-20(`dac11c7dd`)에 `conversation_id` 스코프를 일부러 걷어냈다
+        # -- 대화 A에서 저장한 취향을 대화 B에서 못 꺼내던 것을 고친 것이다
+        # (`_store_yujin_memory.py:536`). 그래서 `other_conversation_id`에 저장한
+        # "다른 대화의 취향입니다."도 같은 프로젝트 안이면 같이 나온다. 순서는
+        # `category, proposed_text, candidate_id`다.
         assert projection(postgres_rows) == projection(local_rows) == [
             {
                 "status": "approved",
@@ -876,6 +883,14 @@ def test_postgres_yujin_memory_retrieval_rows_match_sqlite_exactly(
                 "external_ref": "ext-" + "a" * 64,
                 "text": "자막은 두 줄 이내를 선호합니다.",
                 "category": "caption",
+            },
+            {
+                "status": "approved",
+                "storage_status": "stored",
+                "memory_ref": "memory-other-conversation",
+                "external_ref": "ext-" + "e" * 64,
+                "text": "다른 대화의 취향입니다.",
+                "category": "pacing",
             },
             {
                 "status": "approved",
@@ -889,9 +904,11 @@ def test_postgres_yujin_memory_retrieval_rows_match_sqlite_exactly(
         assert {
             row["project_id"] for row in postgres_rows
         } == {postgres_project_id}
+        # 대화를 안 가리므로 이 프로젝트의 대화 **둘 다**(현재+다른 대화) 나온다
+        # -- 남의 프로젝트 대화는 여전히 안 섞인다(프로젝트 스코프는 그대로다).
         assert {
             row["conversation_id"] for row in postgres_rows
-        } == {postgres_conversation_id}
+        } == {postgres_conversation_id, postgres_other_conversation_id}
         assert postgres.list_yujin_memory_retrieval_rows(
             project_id=postgres_project_id,
             conversation_id="missing",
