@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 import mimetypes
 from pathlib import Path
@@ -55,6 +56,30 @@ _MEDIA_TYPE_GROUPS: dict[LibraryMediaType, str] = {
 
 class _DerivativeToolUnavailable(RuntimeError):
     pass
+
+
+#: 다른 운영체제의 절대 경로. 윈도우 드라이브(`C:\...`, `C:/...`)와 UNC(`\\서버\...`).
+#: 리눅스 컨테이너에서 이런 값은 `is_absolute()`가 거짓이라 상대 경로로 오해된다.
+_ANOTHER_OS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _looks_like_another_os_path(raw: str) -> bool:
+    """이 값이 **다른 운영체제의** 절대 경로인가.
+
+    부르는 쪽이 호스트에서 만든 경로를 그대로 넘기면 이 모양이 된다. 진짜 상대
+    경로와 갈라야 하는 이유는 답이 달라야 하기 때문이다 -- 하나는 "절대 경로로
+    주세요"이고, 하나는 "컨테이너가 그 이름을 모릅니다"다. 둘을 뭉치면 부르는
+    쪽이 고칠 수 없는 것을 고치려 든다.
+
+    **모양만 보고 판단하지 않는다.** 여기가 윈도우면 `C:\\...`는 남의 경로가
+    아니라 이 컴퓨터의 멀쩡한 절대 경로다(개발자가 손으로 띄웠을 때가 그렇다).
+    모양이 맞고 **이 운영체제가 절대 경로로 안 볼 때만** 참이다.
+    """
+
+    value = raw.strip()
+    if not _ANOTHER_OS_PATH.match(value):
+        return False
+    return not Path(value).is_absolute()
 
 
 def _inside_any(candidate: Path, roots: tuple[Path, ...]) -> bool:
@@ -248,10 +273,26 @@ def build_library_assets_router(
             raise HTTPException(status_code=422, detail="media_type_invalid") from exc
         roots = tuple(allowed_ingest_roots or ())
         source = Path(payload.source_path)
+        if _looks_like_another_os_path(payload.source_path):
+            # **호스트 경로를 그대로 넘긴 경우다.** 윈도우 경로는 리눅스
+            # 컨테이너에서 `is_absolute()`가 거짓이라, 그냥 두면 "절대 경로로
+            # 주세요"라는 답이 나간다 -- 부르는 쪽에서는 **이미 절대 경로다.**
+            # 없는 문제를 찾으러 보내는 대신 진짜 사실을 말한다: 컨테이너가
+            # 그 이름을 모른다.
+            #
+            # 2026-09-07 역방향 검증에서 잡혔다. pytest는 윈도우에서 도니까 그
+            # 경로가 절대라서 안 걸렸다 -- **컨테이너로 밟아야 나오는 결함이다.**
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "reason": "source_path_not_visible",
+                    "message": "컨테이너가 볼 수 없는 경로입니다. 함께 보는 폴더 안에 두고 그 경로를 주세요.",
+                    "visible_roots": [str(root) for root in roots],
+                },
+            )
         if not source.is_absolute():
-            # 상대 경로는 API 프로세스의 현재 폴더 기준으로 풀린다. 지금도 닫혀
-            # 있지만("볼 수 없는 경로"로 걸린다), 그 문구는 부르는 쪽을 없는
-            # 마운트 문제로 보내 헛돌게 한다. 갈라서 말한다.
+            # 여기까지 왔으면 진짜 상대 경로다. API 프로세스의 현재 폴더 기준으로
+            # 풀리는데, "볼 수 없는 경로"라고 하면 없는 마운트 문제를 찾으러 간다.
             raise HTTPException(status_code=422, detail="source_path_must_be_absolute")
         try:
             source = source.resolve()

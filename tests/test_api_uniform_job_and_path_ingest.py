@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
-from videobox_api.routers.library_assets import _inside_any
+from videobox_api.routers.library_assets import _ANOTHER_OS_PATH, _inside_any
 from videobox_domain_models.jobs import JobStatus, JobType
 
 
@@ -231,6 +231,26 @@ def test_the_library_own_database_cannot_be_read_back_through_this_door(
     )
     assert reply.status_code == 403, "자료실 자신의 저장소를 자산으로 넣을 수 있다"
     assert reply.json()["detail"]["reason"] == "source_path_not_visible"
+
+
+def test_a_host_path_shape_is_recognised_so_it_is_not_called_relative() -> None:
+    """**역방향 검증이 잡았다 (2026-09-07). pytest만으로는 못 잡는다.**
+
+    제품은 리눅스 컨테이너에서 돈다. 거기서 윈도우 경로는 `is_absolute()`가
+    거짓이라 상대 경로로 오해되고, "절대 경로로 주세요"라는 답이 나갔다 --
+    부르는 쪽에서는 **이미 절대 경로다.** 고칠 수 없는 것을 고치라는 말이다.
+
+    이 시험은 **모양 판정만** 잰다. 라우트로 재려면 리눅스여야 하는데 pytest는
+    윈도우에서 도니까, 거기서는 `C:\\...`가 이 컴퓨터의 멀쩡한 절대 경로다 --
+    그래서 라우트로는 이 컴퓨터에서 아무것도 못 지킨다. 모양 판정만이라도
+    박아 둔다.
+    """
+
+    unc = chr(92) * 2 + "server" + chr(92) + "share" + chr(92) + "x.png"
+    for value in ("C:" + chr(92) + "Users" + chr(92) + "x.png", "C:/Users/x.png", unc):
+        assert _ANOTHER_OS_PATH.match(value), value
+    for value in ("/videobox-drop/x.png", "x.png", "./x.png", "/tmp/a"):
+        assert not _ANOTHER_OS_PATH.match(value), value
 
 
 def test_a_relative_path_is_told_apart_from_an_invisible_one(client: TestClient) -> None:
