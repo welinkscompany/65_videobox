@@ -116,6 +116,17 @@
   URLError를 던지는 가짜 http_client를 꽂은 실제 `HostTTSBridgeProvider`로 더빙 → `dubbing_notice`에 엔진 실패,
   **어떤 장면도 교체되지 않음**을 단언.
 
+**(d) skip이 숨긴 빨간 시험 — Postgres 전용 시험 하나가 2026-08-20부터 빨갛다**
+- **어디** — `tests/test_postgres_project_store.py:822` `test_postgres_yujin_memory_retrieval_rows_match_sqlite_exactly`;
+  구현 `packages/storage-abstractions/src/videobox_storage/_store_yujin_memory.py:530`(두 저장소가 같은 mixin, Postgres 오버라이드 없음).
+- **왜 결함인가** — `scripts/run-postgres-store-tests.ps1`로 돌리면 `1 failed, 51 passed`. 커밋 `dac11c7dd`(08-20, "기억이 만들어진 대화를
+  넘어 살아남게")가 `conversation_id` 스코프를 일부러 걷어냈는데, 이 시험만 옛 기대값(다른 대화의 기억이 안 나와야 함)으로 남았다.
+  기본 회귀에서 `VIDEOBOX_TEST_POSTGRES_URL`이 없어 skip이라 **18일 동안 아무도 몰랐다.** 제품 동작은 두 저장소가 같으니 결함 아님 —
+  결함은 "초록이 Postgres 경로를 한 번도 안 본다"는 것이다.
+- **확인함** — 일회용 DB로 두 번 재현, 두 저장소 결과가 서로 같고 기대값만 다른 것을 traceback으로 확인.
+- **고치는 법** — 시험의 기대값을 SQLite 쪽 현행 동작(다른 대화의 승인 기억도 포함, `category, text` 순)에 맞춘다. 그리고
+  **§2의 매 항목 뒤에 `run-postgres-store-tests.ps1`도 돌려라** — 1-1 봉쇄가 Postgres 스토어 경로에도 걸리는지 이것으로만 잰다.
+
 **(c) 구조적 한계(구멍 아님)** — LM Studio·ComfyUI base_url 허용 목록(`settings.py:394,566,636`)에 특정 문자열을 하나 더
 넣어도 초록. 시험이 예시 URL 거절만 본다. 허용 목록을 모듈 상수로 빼고 "길이 2, hostname ∈ {127.0.0.1, host.docker.internal}"을 단언하면 닫힌다.
 
@@ -164,7 +175,7 @@
 
 1. **1-1 봉쇄** — RED 먼저, `_inside_any` 재사용, 컨테이너에서 역방향. 가장 위험하고 가장 명확하다.
 2. **1-2 원장 복구 + 1.3.1 재빌드** — 대표님 데이터에 이미 들어간 거짓 표기.
-3. **1-5(a)·(b) 시험 둘** — 어제 결함의 재발 방지 장치가 비어 있다. 1-1을 고칠 때 같은 파일이라 같이.
+3. **1-5(a)·(b)·(d) 시험 셋** — 어제 결함의 재발 방지 장치가 비어 있고, Postgres 전용 시험 하나가 18일째 빨갛다. 1-1을 고칠 때 같이.
 4. **1-3 예외 문구** — `_http_error` 한 곳 + 잡 저장 여섯 곳. 1-4 화이트리스트도 여기 묶어 처리.
 5. **1-9 훅 venv** — 5분짜리. 다음 세션들의 가드가 살아난다.
 6. **1-8 출처 기록 셋** — 10분짜리.
@@ -271,4 +282,17 @@ review 추천 approve/reject, `preview-render`·`capcut-export`·`provider-trace
 
 ## 부록 — 전체 pytest 결과 (2026-09-07 저녁, worktree venv)
 
-(아래 줄은 실행이 끝난 뒤 채웠다.)
+`.venv/Scripts/python.exe -m pytest -q -rs -p no:cacheprovider` (분리 프로세스, 32분 20초)
+
+**4714 통과 / 0 실패 / 56 skip / 경고 4.** skip은 초록이 아니라 안 돈 것이다. 사유별:
+
+| 건수 | 사유 | 뜻 |
+|---|---|---|
+| 43 | `VIDEOBOX_TEST_POSTGRES_URL` 미설정 (`test_postgres_project_store.py` 39, `test_postgres_snapshot_import.py` 4) | **제품이 실제로 쓰는 저장소 경로가 기본 회귀에서 한 번도 안 돈다.** `scripts/run-postgres-store-tests.ps1`이 일회용 DB를 띄워 따로 돌린다(스크립트 머리가 이 함정을 그대로 적어 뒀다). §1-1을 고칠 때 Postgres 스토어에도 같은 등록 경로가 있는지 보고 **이 스크립트로도** 초록을 받아라. |
+| 3 | 아이콘 글리프 폰트 없음 (`test_ffmpeg_final_renderer.py` 2, `test_exact_preview_artifact.py` 1) | 윈도우에는 그 폰트가 없어 아이콘 오버레이 렌더 시험이 안 돈다. 컨테이너(리눅스)에서만 실물이 나온다 — §1-5와 같은 종류의 눈먼 자리. |
+| 4 | 라이브 게이트(`VIDEOBOX_RUN_*=1`): 유진 대화·LM Studio·미디어 디렉터 e2e·스타터 팩 e2e | 의도된 opt-in. 릴리스 게이트로만 돈다. |
+| 1 | 이 윈도우 계정이 심볼릭 링크를 못 만든다 (`test_hermes_yujin_profile_distribution.py`) | 환경. 컨테이너에서는 돈다. |
+
+`scripts/run-postgres-store-tests.ps1`(일회용 DB, 30초): **1 failed / 51 passed** — §1-5(d).
+
+정적 집계: `tests/` 안 skip 구문 147곳(`pytest.skip`/`importorskip`/`mark.skip*`), 대부분 위 조건들의 중복이다.
