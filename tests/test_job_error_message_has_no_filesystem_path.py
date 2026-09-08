@@ -7,12 +7,16 @@
 `_http_error`를 안 거친다.
 
 여기서는 파일 경로·ffmpeg/ffprobe 명령 출력을 실제로 담는다고 **직접 확인한**
-세 종류(`FileNotFoundError`·`PermissionError`·`subprocess.CalledProcessError`)만
-고정 문구로 바꾸고, 나머지(코드성 `ValueError`·`RuntimeError`, 그리고 바로 그
-`OSError` 자신 -- 이 저장소 시험 다수가 안전한 설명 문구로 주입 실패를
-흉내 내는 데 쓴다)는 그대로 둔다 -- `test_final_render_publish_fence.py`·
+네 종류(`FileNotFoundError`·`PermissionError`·`subprocess.CalledProcessError`·
+`subprocess.TimeoutExpired`)만 고정 문구로 바꾸고, 나머지(코드성
+`ValueError`·`RuntimeError`, 그리고 바로 그 `OSError` 자신 -- 이 저장소
+시험 다수가 안전한 설명 문구로 주입 실패를 흉내 내는 데 쓴다)는 그대로
+둔다 -- `test_final_render_publish_fence.py`·
 `test_api.py::test_segment_analysis_endpoint_marks_job_failed_on_unexpected_runtime_failure`
 등 기존 시험 스무 개 가까이가 그 정확한 문구를 재기 때문이다.
+
+`test_api_footage_organizer.py`에 이 헬퍼를 쓰는 네 번째 실제 재현 자리가
+하나 더 있다(`error`라는 또 다른 열쇠 이름을 쓰던 촬영본 파생 렌더).
 """
 
 from __future__ import annotations
@@ -51,6 +55,15 @@ def test_a_failed_external_command_becomes_a_fixed_code_not_its_argv_or_stderr()
         output=None,
         stderr=b"D:\\videobox-data\\projects\\x\\y.mp4: No such file or directory",
     )
+
+    message = safe_job_error_message(exc)
+
+    assert message == "external_command_failed"
+    assert "videobox-data" not in message
+
+
+def test_a_timed_out_external_command_becomes_a_fixed_code_not_its_argv() -> None:
+    exc = subprocess.TimeoutExpired(cmd=["ffmpeg", "-i", "D:\\videobox-data\\projects\\x\\y.mp4"], timeout=120)
 
     message = safe_job_error_message(exc)
 

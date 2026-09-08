@@ -18,7 +18,10 @@
 저장소 장애를 흉내 내는 시험 더블이 40건 넘게 있고, 그 문구엔 경로가 없다.
 `FileNotFoundError`·`PermissionError`(둘 다 실제로 `local_pipeline.py`/
 `media_probe.py`가 경로를 실어 던지는 것을 직접 확인함)와
-`subprocess.CalledProcessError`(ffprobe argv에 경로가 그대로 들어감)만 좁혀 잡는다.
+`subprocess.CalledProcessError`·`subprocess.TimeoutExpired`(둘 다
+`str()`이 실행한 명령의 argv를 그대로 담고, `footage_organizer.py`의
+ffmpeg 파생 렌더처럼 그 argv에 호스트 경로가 들어가는 자리가 있다)만
+좁혀 잡는다.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ def safe_job_error_message(exc: BaseException) -> str:
         code = "asset_file_missing"
     elif isinstance(exc, PermissionError):
         code = "asset_file_permission_denied"
-    elif isinstance(exc, subprocess.CalledProcessError):
+    elif isinstance(exc, (subprocess.CalledProcessError, subprocess.TimeoutExpired)):
         code = "external_command_failed"
     else:
         return str(exc)

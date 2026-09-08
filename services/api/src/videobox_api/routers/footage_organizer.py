@@ -36,6 +36,7 @@ from videobox_api.models import (
     VirtualSequenceReorderRequest,
 )
 from videobox_core_engine.footage_organizer import FootageOrganizerService
+from videobox_core_engine.job_error_message import safe_job_error_message
 from videobox_core_engine.yujin_footage_proposal_adapter import (
     interpret_yujin_footage_request,
     is_unsafe_yujin_footage_instruction,
@@ -709,7 +710,10 @@ def _render_derivative(store: FootageOrganizerStore, library: MediaLibraryStore,
         if not any(str(item.get("library_asset_id")) == derived.library_asset_id for item in pending):
             raise RuntimeError("derived_asset_not_queued_for_semantic_index")
     except Exception as exc:  # noqa: BLE001
-        return _finish_job(store.database_path, job_id, "failed", error=str(exc))
+        # 이 자리도 `error_message`·`error_code`와 다른 세 번째 열쇠 이름
+        # (`error`)이라 §1-3 확장의 grep이 놓쳤다(코드리뷰 2026-09-08). ffmpeg가
+        # 시간 초과되면 명령 argv(호스트 경로 포함)가 그대로 문구에 실린다.
+        return _finish_job(store.database_path, job_id, "failed", error=safe_job_error_message(exc))
     return _finish_job(store.database_path, job_id, "succeeded", derived_asset_id=derived.library_asset_id)
 
 

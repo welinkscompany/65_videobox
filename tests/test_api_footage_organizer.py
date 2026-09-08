@@ -561,6 +561,40 @@ def test_explicit_derivative_render_is_independent_and_idempotent(tmp_path: Path
     assert seen_ranges == [(0.0, 4.0)]
 
 
+def test_derivative_render_failure_error_message_has_no_host_path(tmp_path: Path) -> None:
+    """코드리뷰(2026-09-08) -- `_render_derivative`가 `error`라는 열쇠로
+
+    실패 사유를 `_finish_job`에 그대로(`str(exc)`) 넘기고 있었다.
+    `FileNotFoundError`처럼 실제 호스트 경로를 담는 예외면 그대로 새 나갔다.
+    """
+    host_path = Path("D:/videobox-data/projects/secret/assets/take.mp4")
+
+    def failing_renderer(_source: Path, _output: Path, _ranges: list[tuple[float, float]]) -> None:
+        raise FileNotFoundError(host_path)
+
+    client, _library, _digest = _client(tmp_path, renderer=failing_renderer)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-render-fail"},
+    ).json()
+    client.post(
+        f"/api/footage/proposals/{proposed['proposal_id']}/approve",
+        json={"expected_revision": proposed["revision"], "idempotency_key": "approve-render-fail"},
+    )
+
+    rendered = client.post(
+        "/api/footage/derivatives/render",
+        json={"source_kind": "proposal", "source_id": proposed["proposal_id"], "idempotency_key": "render-fail-1"},
+    )
+
+    assert rendered.status_code == 202
+    body = rendered.json()
+    assert body["status"] == "failed"
+    assert body["error_message"] == "asset_file_missing"
+    assert str(host_path) not in body["error_message"]
+    assert "/" not in body["error_message"] and "\\" not in body["error_message"]
+
+
 def test_derivative_renderer_receives_all_approved_ranges_in_order(tmp_path: Path) -> None:
     seen_ranges: list[tuple[float, float]] = []
 
