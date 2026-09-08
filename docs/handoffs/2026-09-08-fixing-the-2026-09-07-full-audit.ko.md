@@ -1,5 +1,11 @@
 # 인계 — 2026-09-07 전체 점검이 찾은 결함 고치기 (2026-09-08)
 
+> **대체됨:** (2026-09-08, 같은 날 두 번째 인계) 이 문서가 owner 결정 대기로
+> 남긴 §1-6·§1-7·§3-2·미디어팩 정리를 owner가 실제로 결정했고, 그 결정대로
+> 처리한 결과는
+> `docs/handoffs/2026-09-08-owner-decided-followups-csrf-async-captions.ko.md`에
+> 있다.
+
 ## 한 줄
 
 `2026-09-07-full-audit-docs-tests-boundaries.ko.md` §2가 정한 순서대로 여덟 항목을
