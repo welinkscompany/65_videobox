@@ -20,6 +20,9 @@ def _built_timeline(tmp_path: Path, *, orientation: str | None):
     narration = runner.register_narration_asset(project_id=project.project_id, source_path=narration_path)
 
     transcription = runner.start_transcription(project_id=project.project_id, narration_asset_id=narration["asset_id"])
+    # 받아쓰기는 2026-09-08부터 잡 생성만 하고 바로 돌아온다(§1-6) -- 이
+    # 시험은 결과가 바로 있다고 가정하므로 배경 작업을 직접 불러 맞춘다.
+    runner.run_transcription_job(project_id=project.project_id, job_id=transcription["job_id"], narration_asset_id=narration["asset_id"])
     analysis = runner.start_segment_analysis(project_id=project.project_id, transcription_job_id=transcription["job_id"], script_asset_id=None)
 
     build_kwargs = {

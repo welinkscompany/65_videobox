@@ -156,6 +156,10 @@ def run_owner_path(
 
     def transcription() -> dict[str, Any]:
         job = runner.start_transcription(project_id=project_id, narration_asset_id=ingest.narration_asset_id)  # type: ignore[attr-defined]
+        # 받아쓰기는 2026-09-08부터 잡 생성만 하고 바로 돌아온다(§1-6, nginx
+        # 330초 벽 회피) -- 이 검증 스크립트는 결과가 바로 있다고 가정하므로
+        # 배경 작업을 직접 불러 맞춘다.
+        runner.run_transcription_job(project_id=project_id, job_id=job["job_id"], narration_asset_id=ingest.narration_asset_id)  # type: ignore[attr-defined]
         result = runner.get_transcription_result(project_id=project_id, job_id=job["job_id"])
         transcription.job_id = job["job_id"]  # type: ignore[attr-defined]
         provider_name = None

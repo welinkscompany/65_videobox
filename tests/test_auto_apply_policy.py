@@ -67,6 +67,9 @@ def _build_and_approve(tmp_path: Path, *, auto_approve_segment_review: bool) -> 
     runner.register_broll_asset(project_id=project.project_id, source_path=_write_broll(tmp_path / "b.mp4"))
 
     transcription_job = runner.start_transcription(project_id=project.project_id, narration_asset_id=narration["asset_id"])
+    # 받아쓰기는 2026-09-08부터 잡 생성만 하고 바로 돌아온다(§1-6) -- 이
+    # 시험은 결과가 바로 있다고 가정하므로 배경 작업을 직접 불러 맞춘다.
+    runner.run_transcription_job(project_id=project.project_id, job_id=transcription_job["job_id"], narration_asset_id=narration["asset_id"])
     analysis_job = runner.start_segment_analysis(project_id=project.project_id, transcription_job_id=transcription_job["job_id"], script_asset_id=script["asset_id"])
     recommendation_job = runner.start_broll_recommendation(project_id=project.project_id, segment_analysis_job_id=analysis_job["job_id"])
     timeline_job = runner.build_timeline(project_id=project.project_id, segment_analysis_job_id=analysis_job["job_id"], recommendation_job_ids=[recommendation_job["job_id"]])

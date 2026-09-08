@@ -521,8 +521,16 @@ class ApiOrchestrator:
         `start_transcription`은 주소만 돌려주고 글을 버린다. 화면은 그 글을 보여
         주고 대본으로 삼아야 하므로 여기서 함께 꺼낸다. 받아쓰기는 자산 종류를
         가리지 않아 영상 파일에도 그대로 돈다.
+
+        이 경로는 원래부터 한 요청 안에서 끝까지 돌던 동기 문이었다(§1-6에서
+        비동기로 바꾼 것은 `POST/GET .../jobs/transcription` 전용 문뿐이다).
+        `start_transcription`이 잡 생성만 하고 바로 돌아오게 바뀐 뒤에도 이
+        경로의 동작을 그대로 지키려면 배경 작업을 여기서 직접 불러 줘야 한다.
         """
         started = self.pipeline.start_transcription(project_id=project_id, narration_asset_id=asset_id)
+        self.pipeline.run_transcription_job(
+            project_id=project_id, job_id=started["job_id"], narration_asset_id=asset_id,
+        )
         return self.pipeline.get_transcription_result(project_id=project_id, job_id=started["job_id"])
 
     def transcribe_source_voice(self, *, project_id: str, asset_id: str) -> dict[str, Any]:
@@ -684,6 +692,9 @@ class ApiOrchestrator:
             raise ValueError("editing_session_has_no_script_segments")
         transcription = self.start_transcription(
             project_id=project_id, narration_asset_id=narration_asset_id
+        )
+        self.pipeline.run_transcription_job(
+            project_id=project_id, job_id=transcription["job_id"], narration_asset_id=narration_asset_id,
         )
         transcript = self.pipeline.store.get_transcript(
             project_id=project_id,
@@ -1140,12 +1151,25 @@ class ApiOrchestrator:
             # 2026-09-02에 이 줄이 없어서 다섯 장면을 더빙하고 렌더까지 성공했는데
             # **완성본이 이전 파일과 바이트까지 같았다.** 손으로 음성을 고르는
             # 기존 경로도 같은 길을 지난다 -- 새 길을 내지 않고 그 길을 쓴다.
-            self.pipeline.start_editing_session_partial_regeneration(
+            # `start_editing_session_partial_regeneration`은 2026-09-08부터
+            # 잡 생성만 하고 바로 돌아온다(§1-6, nginx 330초 벽 회피) -- 실제
+            # 재생성은 `run_partial_regeneration_job`이 배경에서 한다. 여기서
+            # 그 배경 함수를 안 부르면 세션에 선택만 걸리고 타임라인은 그대로
+            # 남는, 2026-09-02에 이미 고쳤던 그 결함이 그대로 되살아난다.
+            started = self.pipeline.start_editing_session_partial_regeneration(
                 project_id=project_id,
                 session_id=session_id,
                 segment_ids=sorted(selections),
                 fields=["tts_replacement"],
                 expected_revision=int(result["session_revision"]),
+            )
+            self.pipeline.run_partial_regeneration_job(
+                project_id=project_id,
+                session_id=session_id,
+                job_id=started["job_id"],
+                session=started["_session"],
+                request=started["_request"],
+                captured_revision=started["_captured_revision"],
             )
             result = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
         # 못 넣은 장면을 **사유별로** 말해 준다. "줄여라"와 "늘려라"는 창작자가
