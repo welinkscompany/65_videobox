@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { voiceFailureMessage } from "./voiceFailureMessage";
 import { voiceSampleLabel } from "./voiceSampleLabel";
 import { dubbingOutcomeMessage, runDubbingWithProgress, type DubbingOutcome } from "./dubbingProgress";
+import { captionTranslationOutcomeMessage, runCaptionTranslationWithProgress, type CaptionTranslationOutcome } from "./captionTranslationProgress";
 
 import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { Button } from "../../../components/ui/button";
@@ -1105,6 +1106,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     // 스무 장면이면 사 분이 넘는다. 다른 편집과 같은 통로로 보내면 "저장하고
     // 있어요"만 뜬 채로 몇 분이 흐르고, 프록시가 먼저 끊는다.
     if (action.kind === "dub-narration") return dubNarration(action);
+    // 자막 번역도 편집본 전체에 걸리고 실측 최악 630초라(2026-09-08, §1-6)
+    // 더빙과 같은 이유로 같은 통로(비동기 폴링)를 쓴다.
+    if (action.kind === "translate-captions") return translateCaptions(action);
     if (action.kind === "partial-preflight") return preflightPartialRegeneration(action);
     if (action.kind === "partial-run") return runPartialRegeneration(action);
     if (action.kind === "partial-resume") return resumePartialRegeneration(action);
@@ -1118,25 +1122,6 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "apply-tts-candidate") return port.applyTtsCandidate({ segmentId: action.segmentId, candidateId: action.candidateId, assetId: action.assetId });
       if (action.kind === "clear-tts-candidate") return port.clearTtsCandidate({ segmentId: action.segmentId });
       if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
-      // 자막 번역은 장면 하나가 아니라 편집본 전체에 걸린다. 다른 편집과
-      // 같은 통로로 보내서 되돌리기·충돌 확인을 그대로 받는다.
-      if (action.kind === "translate-captions") {
-        const translated = await port.translateCaptions({ language: action.language });
-        // **못 옮긴 장면이 있으면 말해 준다.** 안 말하면 그 장면은 원래 자막
-        // 그대로 완성본에 나가는데, 창작자는 다 옮겨진 줄 안다 -- 243장면이면
-        // 스물한 묶음이라 한 묶음만 어긋나도 영어 영상 한가운데 한국어가 뜬다.
-        //
-        // 다시 눌러도 손해가 없다는 것까지 말한다. 이미 옮긴 장면은 건너뛰고
-        // 남은 장면만 다시 시도한다.
-        const missing = translated.segments.filter(
-          (segment) =>
-            String(segment.caption_text ?? "").trim() &&
-            !String(segment.caption_translations?.[action.language] ?? "").trim(),
-        ).length;
-        return missing > 0
-          ? `${missing}개 장면은 옮기지 못했어요. 그 장면은 원래 캡션 그대로 나가요. 다시 눌러 주시면 남은 장면만 다시 해 봐요.`
-          : undefined;
-      }
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
       // 사진의 자리·크기·움직임은 **고른 것만** 넘긴다. 안 고른 칸을 채우면
@@ -1207,6 +1192,38 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       : dubbingOutcomeMessage(outcome);
     // 편집본을 다시 읽고 결과를 알리는 일은 **기존 통로가 이미 한다.**
     // 여기서 서버를 또 건드릴 필요는 없다 -- 더빙은 이미 끝났다.
+    await commitTimelineMutation(async () => message);
+  };
+
+  /** 자막 번역을 걸고, 진행 상황을 화면에 알리고, 끝나면 편집본을 다시 읽는다.
+   *
+   *  더빙과 통로를 나눈 이유가 같다(2026-09-08, §1-6) -- 실측 최악 630초라
+   *  "저장하고 있어요"만 띄운 채로 그 시간을 흘려보내면 창작자는 멈춘 줄 안다.
+   */
+  const translateCaptions = async (action: { language: string }) => {
+    if (!sessionId || !state.session || mutationInFlight.current) return;
+    const epoch = routeEpoch.current.value;
+    const isCurrent = () => routeEpoch.current.value === epoch;
+    mutationInFlight.current = true;
+    setMutation({ isSaving: true, message: "자막을 번역하고 있어요." });
+    let outcome: CaptionTranslationOutcome;
+    try {
+      outcome = await runCaptionTranslationWithProgress({
+        projectId,
+        sessionId,
+        expectedRevision: state.session.expectedRevision,
+        language: action.language,
+        isStillRelevant: isCurrent,
+      });
+    } catch (error) {
+      outcome = { kind: "failed", detail: error instanceof ApiRequestError ? error.detail : null };
+    } finally {
+      mutationInFlight.current = false;
+    }
+    if (!isCurrent()) return;
+    const message = captionTranslationOutcomeMessage(outcome);
+    // 편집본을 다시 읽고 결과를 알리는 일은 **기존 통로가 이미 한다.**
+    // 여기서 서버를 또 건드릴 필요는 없다 -- 번역은 이미 끝났다.
     await commitTimelineMutation(async () => message);
   };
 

@@ -1060,6 +1060,20 @@ class CaptionTranslationRequest(BaseModel):
         return self
 
 
+class CaptionTranslationStartResponse(BaseModel):
+    job_id: str
+    status: Literal["processing"]
+
+
+class CaptionTranslationJobResponse(BaseModel):
+    job_id: str
+    status: Literal["processing", "succeeded", "failed"]
+    #: 성공하면 `EditingSessionResponse`와 같은 모양(`dict`로 실어 나른다 -- 이
+    #: 파일 앞쪽 순서상 그 클래스가 아직 안 나와 순환 참조 없이 여기 둘 수 없다).
+    result: dict[str, Any] | None = None
+    error_detail: str | None = None
+
+
 class DubbingStartResponse(BaseModel):
     job_id: str
     status: Literal["processing"]

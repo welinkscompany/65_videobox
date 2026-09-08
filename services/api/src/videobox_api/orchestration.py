@@ -12,6 +12,7 @@ from videobox_core_engine.caption_translation_service import CaptionTranslationS
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.dubbing import DubbingFit, dubbing_lines, unfitted_scene_message
 from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict
+from videobox_core_engine.job_error_message import safe_job_error_message
 from videobox_core_engine.local_only_runtime import (
     LocalOnlyStructuredGenerationError,
     LocalOnlyStructuredRuntime,
@@ -147,6 +148,11 @@ class ApiOrchestrator:
         # 재시작 사이 살아남을 진짜 작업 큐를 새로 만들 값어치는 없다.
         self._dubbing_jobs: dict[str, dict[str, Any]] = {}
         self._dubbing_jobs_lock = threading.Lock()
+        # 자막 번역도 같은 이유로 비동기다(2026-09-08, §1-6). 실측(2026-09-03)으로
+        # 최악 630초가 걸려 nginx 330초 벽을 넘길 수 있다 -- 더빙과 같은 이유,
+        # 같은 방식(메모리에만 둔 잡 딕셔너리)을 그대로 재사용한다.
+        self._caption_translation_jobs: dict[str, dict[str, Any]] = {}
+        self._caption_translation_jobs_lock = threading.Lock()
 
     def create_creation_brief(self, **kwargs: Any) -> dict[str, Any]:
         return self.pipeline.create_creation_brief(runtime=self.creation_interview_runtime, **kwargs)
@@ -392,7 +398,7 @@ class ApiOrchestrator:
                 self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "succeeded", "result": result, "error_detail": None}
         except Exception as exc:
             with self._youtube_import_jobs_lock:
-                self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "failed", "result": None, "error_detail": str(exc)}
+                self._youtube_import_jobs[job_id] = {"project_id": project_id, "status": "failed", "result": None, "error_detail": safe_job_error_message(exc)}
 
     def get_youtube_reference_style_import_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         with self._youtube_import_jobs_lock:
@@ -922,6 +928,55 @@ class ApiOrchestrator:
             texts_by_segment=texts_by_segment, expected_revision=expected_revision,
         )
 
+    def start_caption_translation(
+        self, *, project_id: str, session_id: str, language: str, expected_revision: int,
+    ) -> dict[str, Any]:
+        """자막 번역을 **시작만** 하고 돌아온다. 실제 작업은 백그라운드에서 한다.
+
+        실측(2026-09-03)으로 장면 하나의 처리 시간이 길어 최악 630초가 걸린다
+        (2026-09-07 전체 점검 §1-6) -- nginx 330초 벽보다 길어서, 자막이 많은
+        편집본은 인라인으로 절대 끝을 못 봤다. 더빙과 같은 이유, 같은 방식이다.
+
+        편집본이 그 사이 바뀌었으면 **여기서 먼저 막는다** -- 630초를 기다린
+        뒤에야 알리지 않는다.
+        """
+        session = self.pipeline.get_editing_session(project_id=project_id, session_id=session_id)
+        if int(session.get("session_revision") or 1) != expected_revision:
+            raise EditingSessionConflict(session)
+        job_id = uuid4().hex
+        with self._caption_translation_jobs_lock:
+            self._caption_translation_jobs[job_id] = {
+                "project_id": project_id, "status": "processing", "result": None, "error_detail": None,
+            }
+        return {"job_id": job_id, "status": "processing"}
+
+    def run_caption_translation_job(
+        self, *, project_id: str, session_id: str, job_id: str, language: str, expected_revision: int, runtime: Any,
+    ) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        try:
+            result = self.translate_editing_session_captions(
+                project_id=project_id, session_id=session_id, language=language,
+                expected_revision=expected_revision, runtime=runtime,
+            )
+            with self._caption_translation_jobs_lock:
+                self._caption_translation_jobs[job_id] = {
+                    "project_id": project_id, "status": "succeeded", "result": result, "error_detail": None,
+                }
+        except Exception as exc:  # noqa: BLE001
+            with self._caption_translation_jobs_lock:
+                self._caption_translation_jobs[job_id] = {
+                    "project_id": project_id, "status": "failed",
+                    "result": None, "error_detail": safe_job_error_message(exc),
+                }
+
+    def get_caption_translation_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
+        with self._caption_translation_jobs_lock:
+            job = self._caption_translation_jobs.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            raise KeyError("caption_translation_job_not_found")
+        return {"job_id": job_id, "status": job["status"], "result": job["result"], "error_detail": job["error_detail"]}
+
     def start_dubbing(
         self,
         *,
@@ -995,7 +1050,7 @@ class ApiOrchestrator:
                 job = self._dubbing_jobs.get(job_id) or {}
                 self._dubbing_jobs[job_id] = {
                     **job, "project_id": project_id, "status": "failed",
-                    "result": None, "error_detail": str(exc),
+                    "result": None, "error_detail": safe_job_error_message(exc),
                 }
 
     def get_dubbing_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:

@@ -460,6 +460,14 @@ export type EditingSession = {
   updated_at?: string | null;
 };
 
+export type CaptionTranslationStart = { job_id: string; status: "processing" };
+export type CaptionTranslationStatus = {
+  job_id: string;
+  status: "processing" | "succeeded" | "failed";
+  result: EditingSession | null;
+  error_detail: string | null;
+};
+
 export type DubbingStart = { job_id: string; status: "processing"; total_scene_count: number };
 export type DubbingResult = { dubbed_scene_count: number; dubbing_notice: string | null; session_revision: number };
 export type DubbingStatus = {
@@ -2464,15 +2472,21 @@ export const api = {
       `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-style`,
       { method: 'PATCH', headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
-  /** 자막을 고른 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다. */
-  translateEditingSessionCaptions: (
+  /** 자막 번역을 **걸어 두기만** 한다. 장면당 처리 시간이 길어 자막이 많으면
+   *  한 요청에 못 끝낸다(2026-09-08, §1-6) -- 프록시가 끊는다. 진행은 아래
+   *  상태 조회로 본다. */
+  startEditingSessionCaptionTranslation: (
     projectId: string,
     sessionId: string,
     payload: { expected_revision: number; language: string },
   ) =>
-    request<EditingSession>(
+    request<CaptionTranslationStart>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-translations`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  getEditingSessionCaptionTranslationStatus: (projectId: string, sessionId: string, jobId: string) =>
+    request<CaptionTranslationStatus>(
+      `/api/projects/${projectId}/editing-sessions/${sessionId}/caption-translations/${jobId}`,
     ),
   /** 더빙을 **걸어 두기만** 한다. 장면당 13초라 긴 영상은 한 요청에 못 끝낸다
    *  -- 스물세 장면이면 프록시가 끊는다. 진행은 아래 상태 조회로 본다. */

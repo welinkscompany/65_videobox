@@ -24,7 +24,7 @@ export type EditorCommandApi = Pick<typeof api,
   "updateEditingSessionShapeOverlay" | "removeEditingSessionShapeOverlay" |
   "updateEditingSessionTtsReplacement" | "clearEditingSessionTtsReplacement" |
   "updateEditingSessionCaption" | "updateEditingSessionCaptionStyle" | "previewEditingSessionCaptionStyleScope" | "updateEditingSessionSegmentTransition" |
-  "translateEditingSessionCaptions" | "updateEditingSessionCaptionLanguage"
+  "updateEditingSessionCaptionLanguage"
 >;
 
 export type EditorCommandPort = Readonly<{
@@ -55,8 +55,9 @@ export type EditorCommandPort = Readonly<{
   setCaptionText(input: { segmentId: string; text: string; language?: string | null; attestation?: CandidateAttestation }): Promise<EditingSession>;
   setCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle; attestation?: CandidateAttestation }): Promise<EditingSession>;
   previewCaptionStyle(input: { segmentIds: string[]; scope: CaptionStyleMutationRequest["scope"]; style: EditorCaptionStyle }): Promise<CaptionStyleScopePreflight>;
-  /** 자막을 그 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다. */
-  translateCaptions(input: { language: string }): Promise<EditingSession>;
+  // 자막 번역은 이 포트에 없다 -- 편집본 전체에 걸리고 실측 최악 630초라
+  // nginx 330초 벽을 넘길 수 있어(2026-09-08, §1-6) 더빙(`dub-narration`)과
+  // 같은 이유로 비동기 전용 통로(`captionTranslationProgress.ts`)를 쓴다.
   /** 어느 자막으로 내보낼지 고른다. `null`이면 원본. */
   setCaptionLanguage(input: { language: string | null }): Promise<EditingSession>;
 }>;
@@ -173,7 +174,6 @@ export function createEditorCommandPort(context: Context, commandApi: EditorComm
     setCaptionText: ({ segmentId, text, language, attestation }) => commandApi.updateEditingSessionCaption(projectId, sessionId, segmentId, { caption_text: text, ...(language ? { language } : {}), ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionOverrideRequest),
     setCaptionStyle: ({ segmentIds, scope, style, attestation }) => commandApi.updateEditingSessionCaptionStyle(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...(attestation ? { proposal_id: attestation.proposalId, candidate_id: attestation.candidateId } : {}), ...revise } as CaptionStyleMutationRequest),
     previewCaptionStyle: ({ segmentIds, scope, style }) => commandApi.previewEditingSessionCaptionStyleScope(projectId, sessionId, { segment_ids: segmentIds, scope, style: captionStyle(style), ...revise } as CaptionStyleMutationRequest),
-    translateCaptions: ({ language }) => commandApi.translateEditingSessionCaptions(projectId, sessionId, { language, ...revise }),
     setCaptionLanguage: ({ language }) => commandApi.updateEditingSessionCaptionLanguage(projectId, sessionId, { language, ...revise }),
   };
 }

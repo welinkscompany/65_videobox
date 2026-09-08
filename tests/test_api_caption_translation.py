@@ -70,6 +70,31 @@ def _session(client: TestClient, project_id: str, session_id: str) -> dict[str, 
     return response.json()
 
 
+def _translate(client: TestClient, project_id: str, session_id: str, **payload: Any) -> dict[str, Any]:
+    """번역을 걸고 끝날 때까지 기다린다.
+
+    자막 번역은 **비동기다**(2026-09-08, §1-6) -- 실측(2026-09-03)으로 장면당
+    처리 시간이 길어 nginx 330초 벽에 부딪힐 수 있다. `TestClient`는 background
+    task를 응답 뒤에 바로 돌리므로, 한 번 물어보면 이미 끝나 있다(더빙 시험과
+    같은 패턴, `test_api_dubbing.py::_dub`).
+    """
+    started = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
+        json=payload,
+    )
+    if started.status_code == 422:
+        return {"_status": 422, **started.json()}
+    assert started.status_code == 202, started.text
+    job_id = started.json()["job_id"]
+    status_response = client.get(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations/{job_id}"
+    )
+    assert status_response.status_code == 200, status_response.text
+    job = status_response.json()
+    assert job["status"] == "succeeded", job
+    return {"_status": 200, **job["result"]}
+
+
 def _write_caption(client: TestClient, project_id: str, session_id: str, text: str) -> dict[str, Any]:
     body = _session(client, project_id, session_id)
     segment_id = body["segments"][0]["segment_id"]
@@ -85,13 +110,9 @@ def test_translating_keeps_the_korean_and_picks_the_new_language(tmp_path: Path)
     client, project_id, session_id, _ = _client(tmp_path)
     before = _write_caption(client, project_id, session_id, "안녕하세요")
 
-    response = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    )
+    body = _translate(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
-    assert response.status_code == 200, response.text
-    body = response.json()
+    assert body["_status"] == 200, body
     assert body["caption_language"] == "en"
     segment = body["segments"][0]
     # 원본이 살아 있어야 되돌릴 수 있다.
@@ -103,10 +124,7 @@ def test_the_choice_can_go_back_to_the_original(tmp_path: Path) -> None:
     """원본으로 되돌려도 **번역은 지우지 않는다** -- 다시 고르면 그대로 나온다."""
     client, project_id, session_id, _ = _client(tmp_path)
     before = _write_caption(client, project_id, session_id, "안녕하세요")
-    translated = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    ).json()
+    translated = _translate(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
 
     response = client.patch(
         f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-language",
@@ -123,16 +141,10 @@ def test_translating_twice_does_not_call_the_model_again(tmp_path: Path) -> None
     """이미 옮겨 둔 장면은 다시 안 부른다 -- 기다림도 길고 손본 번역도 날아간다."""
     client, project_id, session_id, provider = _client(tmp_path)
     before = _write_caption(client, project_id, session_id, "안녕하세요")
-    first = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    ).json()
+    first = _translate(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
     calls_after_first = len(provider.calls)
 
-    client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
-        json={"language": "en", "expected_revision": first["session_revision"]},
-    )
+    _translate(client, project_id, session_id, language="en", expected_revision=first["session_revision"])
 
     assert len(provider.calls) == calls_after_first
 
@@ -141,12 +153,9 @@ def test_an_unknown_language_is_refused(tmp_path: Path) -> None:
     client, project_id, session_id, provider = _client(tmp_path)
     before = _write_caption(client, project_id, session_id, "안녕하세요")
 
-    response = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
-        json={"language": "klingon", "expected_revision": before["session_revision"]},
-    )
+    body = _translate(client, project_id, session_id, language="klingon", expected_revision=before["session_revision"])
 
-    assert response.status_code == 422, response.text
+    assert body["_status"] == 422, body
     assert provider.calls == []
 
 
@@ -159,10 +168,7 @@ def test_editing_while_viewing_english_does_not_destroy_the_korean(tmp_path: Pat
     """
     client, project_id, session_id = _client(tmp_path)[:3]
     before = _write_caption(client, project_id, session_id, "안녕하세요")
-    translated = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    ).json()
+    translated = _translate(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
     segment_id = translated["segments"][0]["segment_id"]
 
     edited = client.patch(
@@ -184,10 +190,7 @@ def test_editing_without_a_language_still_edits_the_original(tmp_path: Path) -> 
     """유진이 고치는 길은 언어를 안 준다 -- 한국어 원문을 보고 말하기 때문이다."""
     client, project_id, session_id = _client(tmp_path)[:3]
     before = _write_caption(client, project_id, session_id, "안녕하세요")
-    translated = client.post(
-        f"/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
-        json={"language": "en", "expected_revision": before["session_revision"]},
-    ).json()
+    translated = _translate(client, project_id, session_id, language="en", expected_revision=before["session_revision"])
     segment_id = translated["segments"][0]["segment_id"]
 
     edited = client.patch(

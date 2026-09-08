@@ -7,6 +7,8 @@ from videobox_api.errors import _http_error
 from videobox_api.models import (
     CaptionLanguageRequest,
     CaptionsFromTranscriptRequest,
+    CaptionTranslationJobResponse,
+    CaptionTranslationStartResponse,
     DubbingRequest,
     DubbingResultResponse,
     DubbingStartResponse,
@@ -240,18 +242,29 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise _http_error(exc) from exc
         return EditingSessionResponse(**result)
 
-    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations")
+    @router.post(
+        "/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
     def translate_editing_session_captions(
-        request: Request, project_id: str, session_id: str, payload: CaptionTranslationRequest
-    ) -> EditingSessionResponse:
-        """자막을 골라 준 언어로 옮겨 원본 옆에 쌓고, 그 언어로 내보내게 고른다."""
+        request: Request,
+        project_id: str,
+        session_id: str,
+        payload: CaptionTranslationRequest,
+        background_tasks: BackgroundTasks,
+    ) -> CaptionTranslationStartResponse:
+        """자막 번역을 걸어 두고 바로 돌아온다. 진행 상황은 `GET .../caption-translations/{job_id}`.
+
+        **비동기여야 한다(2026-09-08, §1-6).** 실측(2026-09-03)으로 장면당 처리
+        시간이 길어 최악 630초가 걸린다 -- nginx 330초 벽보다 길다. 더빙을 비동기로
+        바꾼 것과 같은 이유이고 같은 방식이다.
+        """
         try:
-            result = orchestrator.translate_editing_session_captions(
+            started = orchestrator.start_caption_translation(
                 project_id=project_id,
                 session_id=session_id,
                 language=payload.language,
                 expected_revision=payload.expected_revision,
-                runtime=request.app.state.local_only_runtime_service_factory(store),
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
@@ -259,7 +272,22 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
         except Exception as exc:
             raise _http_error(exc) from exc
-        return EditingSessionResponse(**result)
+        background_tasks.add_task(
+            orchestrator.run_caption_translation_job,
+            project_id=project_id, session_id=session_id, job_id=started["job_id"],
+            language=payload.language, expected_revision=payload.expected_revision,
+            runtime=request.app.state.local_only_runtime_service_factory(store),
+        )
+        return CaptionTranslationStartResponse(**started)
+
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/caption-translations/{job_id}")
+    def get_caption_translation_job(project_id: str, session_id: str, job_id: str) -> CaptionTranslationJobResponse:
+        del session_id
+        try:
+            job = orchestrator.get_caption_translation_job(project_id=project_id, job_id=job_id)
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return CaptionTranslationJobResponse(**job)
 
     @router.post(
         "/api/projects/{project_id}/editing-sessions/{session_id}/dubbing",
