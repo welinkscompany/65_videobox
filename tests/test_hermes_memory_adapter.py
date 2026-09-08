@@ -68,21 +68,124 @@ def test_adapter_adds_only_approved_minimal_payload_without_inference() -> None:
         "memory_ref": "durable-memory-1",
         "event_ref": None,
     }
-    assert provider.calls == [
-        {
-            "messages": [
-                {"role": "user", "content": "빠른 컷을 선호합니다."}
-            ],
-            "user_id": "videobox-owner-v1",
-            "agent_id": "videobox-yujin-v1",
-            "infer": False,
-            "metadata": {
-                "source": "videobox_yujin_approved_v1",
-                "category": "pacing",
-                "external_ref": "ext-" + "a" * 64,
+    # 저장 전에 같은 문장이 이미 있는지 먼저 확인한다(2026-09-08, 중복 저장
+    # 결함 수정) -- 그래서 첫 호출은 search, 그다음이 add다. 이 가짜
+    # provider의 search는 "memory" 필드가 없는 결과를 돌려주므로 중복으로
+    # 안 잡히고 add까지 그대로 이어진다.
+    assert len(provider.calls) == 2
+    search_args, search_kwargs = provider.calls[0]
+    assert search_args == ("빠른 컷을 선호합니다.",)
+    assert search_kwargs["filters"] == {
+        "AND": [
+            {"user_id": "videobox-owner-v1"},
+            {"agent_id": "videobox-yujin-v1"},
+            {
+                "metadata": {
+                    "source": "videobox_yujin_approved_v1",
+                    "category": "pacing",
+                }
             },
+        ]
+    }
+    assert provider.calls[1] == {
+        "messages": [
+            {"role": "user", "content": "빠른 컷을 선호합니다."}
+        ],
+        "user_id": "videobox-owner-v1",
+        "agent_id": "videobox-yujin-v1",
+        "infer": False,
+        "metadata": {
+            "source": "videobox_yujin_approved_v1",
+            "category": "pacing",
+            "external_ref": "ext-" + "a" * 64,
+        },
+    }
+
+
+class _ProviderWithExistingMemory:
+    """search가 이미 같은 문장의 point를 돌려준다 -- add는 절대 불리면 안 된다."""
+
+    def __init__(self, *, existing_text: str, existing_metadata: dict[str, object]) -> None:
+        self._existing_text = existing_text
+        self._existing_metadata = existing_metadata
+        self.add_calls: list[dict[str, object]] = []
+
+    def add(self, **kwargs):
+        self.add_calls.append(kwargs)
+        return {"results": [{"id": "should-not-be-created"}]}
+
+    def search(self, query, **kwargs):
+        return {
+            "results": [
+                {
+                    "id": "durable-memory-already-there",
+                    "memory": self._existing_text,
+                    "metadata": self._existing_metadata,
+                }
+            ]
         }
-    ]
+
+
+def test_adapter_does_not_duplicate_a_memory_that_already_has_the_exact_same_text() -> None:
+    """2026-09-08 실측: 같은 문장이 9번 중복 저장됐다(`infer=False`라 mem0가
+    스스로 못 거른다). 저장 전에 정확히 같은 문장이 있는지 먼저 보고,
+    있으면 새로 안 만들고 그 memory_ref를 그대로 돌려준다."""
+    payload = _payload()
+    provider = _ProviderWithExistingMemory(
+        existing_text=payload["text"],
+        existing_metadata=payload["metadata"],
+    )
+    app = create_memory_adapter_app(
+        provider=provider,
+        service_token="adapter-service-token-with-enough-entropy-456",
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/internal/memory/add",
+            headers={
+                "Authorization": (
+                    "Bearer adapter-service-token-with-enough-entropy-456"
+                )
+            },
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "stored",
+        "memory_ref": "durable-memory-already-there",
+        "event_ref": None,
+    }
+    assert provider.add_calls == []
+
+
+def test_adapter_only_treats_an_exact_text_and_metadata_match_as_a_duplicate() -> None:
+    """비슷한 문장이나 다른 category는 중복이 아니다 -- 정확히 같아야 한다."""
+    payload = _payload()
+    provider = _ProviderWithExistingMemory(
+        existing_text="다른 문장입니다.",  # 텍스트가 다름
+        existing_metadata=payload["metadata"],
+    )
+    app = create_memory_adapter_app(
+        provider=provider,
+        service_token="adapter-service-token-with-enough-entropy-456",
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/internal/memory/add",
+            headers={
+                "Authorization": (
+                    "Bearer adapter-service-token-with-enough-entropy-456"
+                )
+            },
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "stored"
+    assert len(provider.add_calls) == 1  # 진짜 새로 저장했다
 
 
 def test_adapter_keeps_event_id_distinct_from_memory_id() -> None:

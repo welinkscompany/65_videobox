@@ -154,6 +154,54 @@ def _outcome_from_search(
     return MemoryWriteOutcome(status="stored", memory_ref=memory_ref)
 
 
+def _find_duplicate_memory_ref(
+    provider: Any, body: AdapterMemoryWrite
+) -> str | None:
+    """이미 똑같은 문장이 저장돼 있으면 그 memory_ref를, 없으면 `None`을 돌려준다.
+
+    `infer=False`(위 `add`)는 owner가 승인한 문구를 mem0 자신의 LLM이
+    재해석·병합하지 못하게 막는 안전장치라 그대로 둔다 -- 대신 그 대가로
+    mem0 쪽 중복 제거가 통째로 빠지는데, 위 승인 큐에도 같은 문장의 재승인을
+    막는 장치가 없어서 같은 문장이 approve될 때마다 새 point가 쌓였다
+    (2026-09-08 실측: 문장 하나가 9번). **뜻이 비슷한지가 아니라 문장이
+    정확히 같은지만 본다** -- 이 저장소는 기억 판단을 항상 정확히 일치하는
+    것만 채택한다(`yujin_memory_service.py`의 로컬 대조와 같은 원칙).
+    """
+    try:
+        result = provider.search(
+            body.text,
+            filters={
+                "AND": [
+                    {"user_id": body.user_id},
+                    {"agent_id": body.agent_id},
+                    {
+                        "metadata": {
+                            "source": "videobox_yujin_approved_v1",
+                            "category": body.category,
+                        }
+                    },
+                ]
+            },
+            top_k=10,
+            rerank=False,
+        )
+    except Exception:  # noqa: BLE001 -- 중복 확인이 실패해도 저장 자체는 막지 않는다
+        return None
+    rows = result.get("results") if type(result) is dict else result
+    if type(rows) is not list:
+        return None
+    for row in rows:
+        if type(row) is not dict or row.get("memory") != body.text:
+            continue
+        metadata = row.get("metadata")
+        if type(metadata) is not dict or metadata != body.metadata:
+            continue
+        memory_ref = _bounded_ref(row.get("id") or row.get("memory_id"))
+        if memory_ref is not None:
+            return memory_ref
+    return None
+
+
 def create_memory_adapter_app(*, provider, service_token: str) -> FastAPI:
     if not _valid_token(service_token):
         raise ValueError("memory_adapter_service_token_invalid")
@@ -202,6 +250,13 @@ def create_memory_adapter_app(*, provider, service_token: str) -> FastAPI:
             raise HTTPException(
                 status_code=503, detail="memory_adapter_unavailable"
             )
+        duplicate_ref = _find_duplicate_memory_ref(provider, body)
+        if duplicate_ref is not None:
+            # 이미 똑같은 문장이 있다 -- 새 point를 또 안 만들고 있는 것을
+            # 그대로 "저장됨"으로 돌려준다(멱등). `infer=False`라 mem0
+            # 자신은 이 중복을 절대 못 걸러 낸다(위 `_find_duplicate_memory_ref`
+            # 참고).
+            return MemoryWriteOutcome(status="stored", memory_ref=duplicate_ref)
         try:
             result = provider.add(
                 messages=[{"role": "user", "content": body.text}],
