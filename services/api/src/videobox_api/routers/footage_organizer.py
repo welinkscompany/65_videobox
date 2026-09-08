@@ -20,7 +20,7 @@ from urllib.parse import quote
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from videobox_api.content_delivery import deliver_file
 from videobox_api.csrf_guard import require_trusted_origin
@@ -461,14 +461,36 @@ def build_footage_organizer_router(
         return response
 
     @router.post("/api/footage/derivatives/render", status_code=status.HTTP_202_ACCEPTED)
-    def render_derivative(payload: FootageDerivativeRenderRequest) -> dict[str, Any]:
-        return _render_derivative(
-            footage_store,
-            media_library_store,
-            asset_adapter,
-            payload,
-            derivative_renderer,
-        )
+    def render_derivative(payload: FootageDerivativeRenderRequest, background_tasks: BackgroundTasks) -> dict[str, Any]:
+        """촬영본 파생 렌더를 걸어 두고 바로 돌아온다. 진행은 `GET .../derivatives/{job_id}`.
+
+        **비동기여야 한다(2026-09-08, §1-6).** 라벨은 202였지만 실제로는 이
+        핸들러 안에서 ffmpeg 렌더까지 전부 끝내고 있었다.
+        """
+        row, background_args = _start_derivative_render(footage_store, asset_adapter, payload)
+        if background_args is not None:
+            background_tasks.add_task(
+                _run_derivative_render_job,
+                footage_store,
+                media_library_store,
+                derivative_renderer,
+                **background_args,
+            )
+        return row
+
+    @router.get("/api/footage/derivatives/{job_id}")
+    def get_derivative_render_job(job_id: str) -> dict[str, Any]:
+        connection = sqlite3.connect(footage_store.database_path)
+        connection.row_factory = sqlite3.Row
+        try:
+            row = connection.execute(
+                "SELECT * FROM footage_derivative_jobs WHERE job_id = ?", (job_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+        if row is None:
+            raise HTTPException(status_code=404, detail="footage_derivative_job_missing")
+        return dict(row)
 
     return router
 
@@ -637,7 +659,19 @@ def _reorder_sequence(store: FootageOrganizerStore, sequence_id: str, expected_r
     return store.get_virtual_sequence(sequence_id)
 
 
-def _render_derivative(store: FootageOrganizerStore, library: MediaLibraryStore, adapter: _LibraryAssetAdapter, payload: FootageDerivativeRenderRequest, renderer: Callable[[Path, Path, list[tuple[float, float]]], None] | None) -> dict[str, Any]:
+def _start_derivative_render(
+    store: FootageOrganizerStore, adapter: _LibraryAssetAdapter, payload: FootageDerivativeRenderRequest,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """촬영본 파생 렌더를 **시작만** 하고 돌아온다. 실제 ffmpeg 렌더는 백그라운드에서 한다.
+
+    라벨은 202였지만 실제로는 이 자리에서 ffmpeg 렌더까지 전부 끝내고 있었다
+    (2026-09-07 전체 점검 §1-6) -- 더빙·자막 번역·받아쓰기·부분 재생성과 같은
+    이유로 진짜 비동기로 바꾼다.
+
+    두 번째 반환값이 `None`이면 이미 끝난 상태(중복 요청 재생·빠른 검증
+    실패)라 백그라운드에서 더 할 일이 없다는 뜻이다. `None`이 아니면 그
+    안에 `_run_derivative_render_job`이 필요로 하는 인자가 들어 있다.
+    """
     connection = sqlite3.connect(store.database_path)
     connection.row_factory = sqlite3.Row
     try:
@@ -645,7 +679,7 @@ def _render_derivative(store: FootageOrganizerStore, library: MediaLibraryStore,
         if existing is not None:
             if str(existing["source_kind"]) != payload.source_kind or str(existing["source_id"]) != payload.source_id:
                 raise HTTPException(status_code=409, detail="footage_derivative_idempotency_conflict")
-            return dict(existing)
+            return dict(existing), None
         job_id = f"footage_render_job_{uuid4().hex}"
         try:
             connection.execute("INSERT INTO footage_derivative_jobs (job_id, idempotency_key, source_kind, source_id, status, created_at) VALUES (?, ?, ?, ?, 'running', datetime('now'))", (job_id, payload.idempotency_key, payload.source_kind, payload.source_id))
@@ -655,19 +689,19 @@ def _render_derivative(store: FootageOrganizerStore, library: MediaLibraryStore,
             replay = connection.execute("SELECT * FROM footage_derivative_jobs WHERE idempotency_key = ?", (payload.idempotency_key,)).fetchone()
             if replay is None or str(replay["source_kind"]) != payload.source_kind or str(replay["source_id"]) != payload.source_id:
                 raise HTTPException(status_code=409, detail="footage_derivative_idempotency_conflict")
-            return dict(replay)
+            return dict(replay), None
     finally:
         connection.close()
     if payload.source_kind == "proposal":
         source_record = store.get_proposal(payload.source_id)
         if source_record is None or source_record.status.value != "approved":
-            return _finish_job(store.database_path, job_id, "failed", error="footage_proposal_not_approved")
+            return _finish_job(store.database_path, job_id, "failed", error="footage_proposal_not_approved"), None
         source = store.get_source(source_record.source_id)
         ranges = [(segment.start_sec, segment.end_sec) for segment in source_record.segments]
     else:
         source_record = store.get_virtual_sequence(payload.source_id)
         if source_record is None:
-            return _finish_job(store.database_path, job_id, "failed", error="footage_sequence_missing")
+            return _finish_job(store.database_path, job_id, "failed", error="footage_sequence_missing"), None
         approval = sqlite3.connect(store.database_path)
         try:
             approved = approval.execute(
@@ -676,29 +710,56 @@ def _render_derivative(store: FootageOrganizerStore, library: MediaLibraryStore,
         finally:
             approval.close()
         if approved is None:
-            return _finish_job(store.database_path, job_id, "failed", error="footage_sequence_not_approved")
+            return _finish_job(store.database_path, job_id, "failed", error="footage_sequence_not_approved"), None
         if len(source_record.sources) > 1:
-            return _finish_job(store.database_path, job_id, "failed", error="footage_multi_source_derivative_not_supported")
+            return _finish_job(store.database_path, job_id, "failed", error="footage_multi_source_derivative_not_supported"), None
         source = store.get_source(source_record.source_id)
         ranges = [(item.start_sec or 0.0, item.end_sec or 0.0) for item in source_record.items]
     if source is None:
-        return _finish_job(store.database_path, job_id, "failed", error="footage_source_stale")
+        return _finish_job(store.database_path, job_id, "failed", error="footage_source_stale"), None
     asset = adapter.get_verified_asset(library_asset_id=source.library_asset_id)
     if asset is None:
-        return _finish_job(store.database_path, job_id, "failed", error="footage_source_stale")
+        return _finish_job(store.database_path, job_id, "failed", error="footage_source_stale"), None
+    connection = sqlite3.connect(store.database_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        row = connection.execute("SELECT * FROM footage_derivative_jobs WHERE job_id = ?", (job_id,)).fetchone()
+    finally:
+        connection.close()
+    return dict(row), {
+        "job_id": job_id,
+        "source_kind": payload.source_kind,
+        "source_id": payload.source_id,
+        "asset_path": str(asset["path"]),
+        "ranges": ranges,
+    }
+
+
+def _run_derivative_render_job(
+    store: FootageOrganizerStore,
+    library: MediaLibraryStore,
+    renderer: Callable[[Path, Path, list[tuple[float, float]]], None] | None,
+    *,
+    job_id: str,
+    source_kind: str,
+    source_id: str,
+    asset_path: str,
+    ranges: list[tuple[float, float]],
+) -> None:
+    """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
     output_relative = f"derived/footage/{job_id}.mp4"
     output_path = library.root / output_relative
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         if renderer is not None:
-            renderer(Path(str(asset["path"])), output_path, ranges)
+            renderer(Path(asset_path), output_path, ranges)
         else:
-            _default_render(Path(str(asset["path"])), output_path, ranges)
+            _default_render(Path(asset_path), output_path, ranges)
         digest = _sha256(output_path)
         derived = library.user_asset_store.register_asset(
             library_asset_id=f"derived:{job_id}", media_type="broll", origin="user", lifecycle="ready",
             content_sha256=digest, managed_relative_path=output_relative, byte_count=output_path.stat().st_size,
-            mime_type="video/mp4", machine_metadata={"semantic_index_status": "queued", "source_kind": payload.source_kind, "source_id": payload.source_id},
+            mime_type="video/mp4", machine_metadata={"semantic_index_status": "queued", "source_kind": source_kind, "source_id": source_id},
         )
         # The existing maintenance indexer discovers user footage by this
         # durable asset/path identity.  Touch the same pending queue after the
@@ -713,8 +774,9 @@ def _render_derivative(store: FootageOrganizerStore, library: MediaLibraryStore,
         # 이 자리도 `error_message`·`error_code`와 다른 세 번째 열쇠 이름
         # (`error`)이라 §1-3 확장의 grep이 놓쳤다(코드리뷰 2026-09-08). ffmpeg가
         # 시간 초과되면 명령 argv(호스트 경로 포함)가 그대로 문구에 실린다.
-        return _finish_job(store.database_path, job_id, "failed", error=safe_job_error_message(exc))
-    return _finish_job(store.database_path, job_id, "succeeded", derived_asset_id=derived.library_asset_id)
+        _finish_job(store.database_path, job_id, "failed", error=safe_job_error_message(exc))
+        return
+    _finish_job(store.database_path, job_id, "succeeded", derived_asset_id=derived.library_asset_id)
 
 
 def _finish_job(database_path: Path, job_id: str, status_value: str, *, derived_asset_id: str | None = None, error: str | None = None) -> dict[str, Any]:

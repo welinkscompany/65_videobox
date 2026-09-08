@@ -523,6 +523,46 @@ def test_multi_source_sequence_derivative_fails_closed_without_rendering_only_fi
     assert rendered is False
 
 
+def _await_derivative(client: TestClient, started: dict) -> dict:
+    """촬영본 파생 렌더는 걸어 두고 물어서 받는다(2026-09-08, §1-6).
+
+    `TestClient`는 background task를 응답 뒤 바로 돌리므로, 한 번 물어보면
+    이미 끝나 있다(더빙·자막 번역·받아쓰기·부분 재생성 시험과 같은 패턴).
+    """
+    job_id = started["job_id"]
+    status_response = client.get(f"/api/footage/derivatives/{job_id}")
+    assert status_response.status_code == 200, status_response.text
+    return status_response.json()
+
+
+def test_derivative_render_start_response_does_not_carry_the_finished_result(tmp_path: Path) -> None:
+    """§1-6 -- 시작 응답은 진짜로 아직 처리 중이어야 한다.
+
+    라벨만 202였던 옛 코드는 이 응답에 이미 완성된 `derived_asset_id`를
+    실어 보냈다. 그 자리에서 ffmpeg까지 다 끝내고 있었다는 뜻이다.
+    """
+    def renderer(source: Path, output: Path, _ranges: list[tuple[float, float]]) -> None:
+        output.write_bytes(source.read_bytes())
+
+    client, _library, _digest = _client(tmp_path, renderer=renderer)
+    proposed = client.post(
+        "/api/footage/proposals",
+        json={"library_asset_id": "asset-take", "idempotency_key": "proposal-start-shape"},
+    ).json()
+    client.post(
+        f"/api/footage/proposals/{proposed['proposal_id']}/approve",
+        json={"expected_revision": proposed["revision"], "idempotency_key": "approve-start-shape"},
+    )
+
+    started = client.post(
+        "/api/footage/derivatives/render",
+        json={"source_kind": "proposal", "source_id": proposed["proposal_id"], "idempotency_key": "render-start-shape"},
+    ).json()
+
+    assert started["status"] == "running"
+    assert started.get("derived_asset_id") is None
+
+
 def test_explicit_derivative_render_is_independent_and_idempotent(tmp_path: Path) -> None:
     seen_ranges: list[tuple[float, float]] = []
 
@@ -549,9 +589,10 @@ def test_explicit_derivative_render_is_independent_and_idempotent(tmp_path: Path
         json={"source_kind": "proposal", "source_id": proposed["proposal_id"], "idempotency_key": "render-1"},
     )
     assert rendered.status_code == replay.status_code == 202
-    assert rendered.json() == replay.json()
-    assert rendered.json()["status"] == "succeeded"
-    derived_id = rendered.json()["derived_asset_id"]
+    assert rendered.json()["job_id"] == replay.json()["job_id"]
+    finished = _await_derivative(client, rendered.json())
+    assert finished["status"] == "succeeded"
+    derived_id = finished["derived_asset_id"]
     assert derived_id != "asset-take"
     source = library.user_asset_store.get_asset("asset-take")
     assert source is not None and source.content_sha256 == digest
@@ -588,7 +629,7 @@ def test_derivative_render_failure_error_message_has_no_host_path(tmp_path: Path
     )
 
     assert rendered.status_code == 202
-    body = rendered.json()
+    body = _await_derivative(client, rendered.json())
     assert body["status"] == "failed"
     assert body["error_message"] == "asset_file_missing"
     assert str(host_path) not in body["error_message"]
@@ -626,7 +667,8 @@ def test_derivative_renderer_receives_all_approved_ranges_in_order(tmp_path: Pat
         "/api/footage/derivatives/render",
         json={"source_kind": "proposal", "source_id": proposed["proposal_id"], "idempotency_key": "render-multi-range"},
     )
-    assert rendered.status_code == 202 and rendered.json()["status"] == "succeeded"
+    assert rendered.status_code == 202
+    assert _await_derivative(client, rendered.json())["status"] == "succeeded"
     assert seen_ranges == [(0.0, 6.0), (6.0, 12.0), (12.0, 100.0)]
 
 
