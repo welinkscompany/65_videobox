@@ -7,9 +7,14 @@
 결정대로 처리했다. 처리한 뒤 owner가 컨테이너 재시작·나머지 미디어팩 정리·
 독립 코드리뷰·재현 검증을 다시 지시했고(같은 대화, §7), 그 코드리뷰가
 `local_pipeline.py`의 `start_variant_renders`(§1-3 확장 grep이 놓친 세 번째
-leak 자리)를 찾아 같이 고쳤다. 커밋 다섯 + 미디어팩 정리(git 밖, 총
+leak 자리)를 찾아 같이 고쳤다. 이어서 owner가 "추천작업 바로 진행하자"고
+지시해(같은 대화, §10) §1-6 나머지 넷(받아쓰기·부분재생성·촬영본 파생 렌더·
+TTS 후보)의 범위를 owner가 결정한 대로 처리했고, **이걸로 §1-6이 완전히
+닫혔다**(TTS 후보만 owner 판단으로 동기 유지). 커밋 다섯 + §10 커밋 셋
+(받아쓰기·촬영본 파생 렌더·부분 재생성) + 미디어팩 정리(git 밖, 총
 2.9GB) + 컨테이너 재빌드 두 번 + 그 안에서 직접 재현한 확인 셋(§7.3) +
-전체 pytest 두 번(4745→4747, 둘 다 0 failed).
+전체 pytest 두 번(4745→4747, 둘 다 0 failed) + §10 관련 백엔드 재확인
+(468 passed) + 프런트 재확인(130 files/1597 tests).
 
 ## 0. owner 결정 (2026-09-08 대화)
 
@@ -318,6 +323,205 @@ OSError(...)`를 쓰기 때문)과 어긋났다. 문구만 바로잡았다.
 - **경계 보존**: CSRF 방어는 라우터 다섯 곳에 `Depends()`로만 걸었다 — 전역
   미들웨어로 만들지 않았다(다른 GET/조회 문까지 걸릴 위험을 피하려고).
 
+## 10. owner 지시로 §1-6 나머지 넷을 마저 진행 (같은 대화, 이어서) — §1-6 완전히 닫힘
+
+owner: "추천작업 바로 진행하자." (§3에서 "다음 세션이 처리" 로 남겨 뒀던
+받아쓰기·부분재생성·촬영본 파생 렌더·TTS 후보 넷을 가리킴). 이어서 각 항목의
+정확한 범위를 다시 물어 owner가 결정했다(§10.0). **이걸로 §1-6(인라인 동기
+문 다섯 개가 nginx 330초 벽을 넘길 수 있던 문제) 전부가 닫혔다** — 자막
+번역(§3, 지난 라운드)·받아쓰기·촬영본 파생 렌더·부분 재생성 넷이 진짜
+비동기로 바뀌었고, TTS 후보는 owner 판단으로 그대로 뒀다.
+
+### 10.0 owner 결정
+
+| 항목 | 결정 | 근거로 제시한 것 |
+|---|---|---|
+| 받아쓰기(전사) | 전체 비동기 전환 | 12개 백엔드 시험 파일 + 프런트 컴포넌트 하나가 영향받는 큰 작업이라고 미리 알림 |
+| 부분재생성·촬영본 파생 렌더 | 둘 다 새로 설계해서 진행 | 라벨만 202고 실제로는 그 자리에서 다 처리 + 응답까지 조립하던 것 |
+| TTS 후보 생성 | 비동기로 바꾸지 않는다 | 몇 초짜리 짧은 작업이라 폴링으로 바꾸면 흔한(빠른) 경우 체감 속도만 나빠짐 |
+
+### 10.1 받아쓰기(전사) — 예상보다 컸지만 예상대로 끝남
+
+**무엇을** — `jobs.py`의 `POST/GET .../jobs/transcription`는 이미 202 라벨과
+GET 폴링 문을 갖고 있었지만(다른 잡 종류들과 같은 모양), 실제로는
+`orchestrator.start_transcription`이 Whisper 호출까지 그 자리에서 다 하고
+"succeeded"로 끝난 잡만 돌려주고 있었다. `local_pipeline.py`의
+`start_transcription`(잡 생성만, 빠름)과 `run_transcription_job`(실제
+Whisper 호출, 배경)으로 나눴다.
+
+**되짚어 보니 결함 하나를 더 찾았다** — 동기 코드에는 STT 실패를 잡아 잡을
+FAILED로 적는 처리 자체가 없었다. 엔진이 죽으면 잡이 영원히 RUNNING으로
+멈춰 있었다(관찰만 됐지, 화면에 실패로도 안 뜬다). 비동기로 바꾸면서
+`safe_job_error_message`로 안전하게 같이 고쳤다.
+
+**재시도 라우트도 손봤다** — `jobs.py`의 `_RETRY_BACKGROUND_RUNNERS`가
+이제 `final_render`/`capcut_draft_export`와 다른 kwargs 모양(`narration_asset_id`)이
+필요한 `transcription`도 다뤄야 해서, 잡 종류별 kwargs를 만드는
+`_retry_background_kwargs` 헬퍼를 추가했다. 안 했으면 재시도한 잡이 새
+job_id만 받고 영원히 처리 중으로 남았을 것이다 — RED 시험으로 직접 확인.
+
+**"예상했던 blast radius는 문제가 안 됐다"는 처음 판단은 틀렸다 — 전체
+저장소 pytest를 돌려서야 드러났다.** HTTP 레벨(`TestClient`) 시험들은
+정말 문제가 없었지만, `orchestration.py` 안에 **파이프라인의
+`start_transcription`을 직접 불러 결과가 그 자리에서 바로 있다고 가정하던
+내부 합성 흐름 셋**을 grep으로 못 찾았다(§1-6 작업 당시엔 `jobs.py`
+라우터와 프런트만 봤지, `orchestration.py` 자체의 다른 메서드는 안 봤다):
+
+1. `transcribe_source_video`(영상 업로드 → 대본 초안) — `start_transcription`
+   뒤 바로 `get_transcription_result`를 읽고 있었다.
+2. `sync_script_draft_to_narration_recording`(대본 초안을 실제 녹음
+   타이밍에 맞추는 길, 2026-08-29 추가) — `start_transcription` 뒤 바로
+   `store.get_transcript(transcript_id=job["output_ref"])`를 읽고 있었다.
+3. **더빙의 내부 부분 재생성 호출**(`generate_dubbed_take`가 딴 뒤
+   `pipeline.start_editing_session_partial_regeneration`을 부르는 자리) —
+   부분 재생성도 같은 라운드에 비동기로 바뀌면서 똑같은 함정에 빠졌다.
+   **이건 2026-09-02에 이미 한 번 고쳤던 바로 그 결함
+   ("세션에 걸어도 완성본은 안 바뀐다")이 그대로 되살아난 것**이었다 —
+   `run_partial_regeneration_job`을 안 부르면 더빙 선택만 세션에 걸리고
+   타임라인은 안 바뀐다.
+
+전체 pytest에서 **16개**가 이 패턴으로 실패했고(`test_api_source_video_start.py`·
+`test_api_source_voice_start.py`·`test_api_media_director.py`·
+`test_api_dubbing.py`·`test_auto_apply_policy.py`·`test_vertical_composition.py`),
+`scripts/verify_owner_path.py`(실제 STT provider로 owner path를 검증하는
+운영 스크립트, 시험이 아니라 진짜 코드)도 같은 이유로 죽어 있었다
+(`test_owner_path_verifier.py` 경유로 발견). 세 내부 호출부 모두
+"빠른 시작 뒤 바로 배경 함수를 직접 불러 예전 동작(동기)을 그대로 지킨다"로
+고쳤다 — 이 세 경로는 owner가 결정한 §1-6 대상(직통
+`POST/GET .../jobs/transcription` 문, `POST .../partial-regenerations`
+문)이 아니라 **그 위에 얹힌 기존 합성 흐름**이라, 이들까지 비동기로
+다시 설계하는 건 범위 밖으로 판단해 동기 동작을 보존하는 쪽을 택했다
+(다시 열면: 이 셋도 nginx 330초 벽 앞에 그대로 노출돼 있다는 뜻이므로,
+다음에 이 경로들이 실제로 벽에 부딪히면 별도 owner 결정이 필요하다).
+
+**딱 하나 프런트에서 실제로 바꿔야 했던 자리**는
+`apps/web/src/features/editor/transcript/AutoCaptionCard.tsx` — 받아쓰기
+시작 직후 곧바로 `applyCaptionsFromTranscript`를 부르던 것을, 새
+`transcriptionProgress.ts`(같은 폴링 패턴)로 먼저 완료를 기다리게 고쳤다.
+컨테이너 환경에서는 응답 직후 배경 작업이 곧바로 끝난다는 보장이 없어서
+실제로 필요한 수정이었다.
+
+RED: `tests/test_transcription_is_async.py`(정상 흐름·실패 처리·재시도 셋).
+
+### 10.2 촬영본 파생 렌더 — 프런트가 아직 안 부르는 문이라 백엔드만
+
+`POST /api/footage/derivatives/render`는 202 라벨을 달고 있었지만 그 자리에서
+ffmpeg 렌더까지 전부 끝내고 있었다. `_render_derivative`를
+`_start_derivative_render`(멱등성 확인·잡 생성·빠른 검증 -- 승인 여부·다중
+소스 거부 등)와 `_run_derivative_render_job`(실제 ffmpeg 렌더, 배경)으로
+나눴다. **이 잡 종류는 지금까지 조회(GET) 문이 아예 없었다** — 새로
+`GET /api/footage/derivatives/{job_id}`를 만들었다.
+
+`apps/web/src`에서 이 POST 문을 부르는 자리가 **하나도 없었다**(확인함,
+2026-08-31 이후 미배선 상태 그대로) — 백엔드·시험만 고치고 프런트는
+손대지 않았다.
+
+기존 시험 셋이 시작 응답에서 바로 완성된 결과(`status`·`derived_asset_id`)를
+읽고 있어서 새 GET 문으로 폴링하도록 고쳤다(공용 `_await_derivative`
+헬퍼). 시작 응답이 정말 아직 처리 중인지(`status == "running"`,
+`derived_asset_id`가 없음)를 직접 재는 시험도 새로 추가하고 드릴로
+확인했다 — 백그라운드 예약 대신 그 자리에서 동기로 돌리게 임시로 되돌려서
+실제로 빨간불이 뜨는 것을 봤다.
+
+### 10.3 부분 재생성 — 넷 중 가장 컸다, 응답 계약을 다시 설계해야 했다
+
+**무엇을** — `start_editing_session_partial_regeneration`(빠른 부분: 편집본
+조회·판 확인·`build_partial_regeneration_request`·잡 생성만)과
+`run_partial_regeneration_job`(실제 재생성·CAS 충돌 처리·롤백·발행,
+배경)으로 나눴다. CAS 충돌·발행 실패 시의 기존 보정 로직(옛 세션 복원,
+고아 타임라인 폐기, 정리 필요 표시)은 **그대로 두고 위치만 옮겼다** —
+로직 자체는 안 건드렸다.
+
+**핵심 설계 결정: 배경 작업은 더는 예외를 다시 던지지 않는다.** 옛 코드는
+`except Exception: ...; raise`로 정리 후 재던졌고, 그게 라우터의
+`except EditingSessionConflict: return _editing_session_conflict_response(exc)`로
+이어져 "편집본이 바뀌었어요"라는 특별한 응답이 됐다. 배경 작업에는 그
+`raise`를 받을 사람이 없어서(HTTP 요청은 이미 202로 끝났다) 뺐다 — 정리
+로직이 끝난 뒤 잡을 그냥 `FAILED`로 남긴다. 폴링하는 쪽은 "실패"라는
+일반적인 사유만 보게 되고, 예전처럼 "다른 사람이 먼저 바꿨어요"라는 구체적
+안내는 못 받는다 — 이 정도 UX 손실은 이번 변경의 목적(330초 벽 회피)과
+직접 관련 없어 감수했다. 다음에 이걸 다시 열면: 잡 레코드에 "conflict"
+같은 별도 상태 값을 추가해 폴링 쪽이 구분할 수 있게 하는 것을 권한다.
+
+**영향 범위·검토 예측(`targeted_segments`·`affected_output_areas`·
+`predicted_review_status_after_rerun`·`prediction_reasons`)은 이제 시작
+응답이 아니라 GET 폴링이 조립한다** — 성공한 잡을 조회할 때마다 **그
+시점의 최신 편집본**으로 다시 계산한다. 재생성 직후 fresh 세션을 다시
+읽던 옛 동작과 실질적으로 같은 값이 나온다(재생성과 조회 사이 시간차가
+찰나였으니까) — 다만 이제는 정말로 "지금 조회하는 시점"의 값이라는 점이
+다르다. `PartialRegenerationJobResponse` 모델에 그 넷을 추가하고, 기존
+필수 필드(`session_id`·`timeline` 등)는 아직 안 끝난 잡을 표현할 수 있게
+전부 optional로 바꿨다.
+
+**프런트** — `runPartialRegeneration`을 `startPartialRegeneration`(즉시
+완료 기대 안 함)으로 바꾸고 새 `partialRegenerationProgress.ts`(같은
+`pollJobUntilTerminal` 패턴)를 만들었다. 폴링 대상 GET 문
+(`getPartialRegenerationResult`)은 **이미 있었다** — "이전 결과 열기"
+기능이 쓰고 있었다 — 그대로 재사용했다. `activePartial.run`이 들고 있던
+옛 응답 모양(`PartialRegenerationRun`, `delta` 필드 포함)은 어디서도
+화면에 그려지지 않는 것을 직접 확인하고(`activePartial.run`을 읽는
+자리가 코드 전체에 하나도 없었다), `PartialRegenerationJob`(GET이 이미
+쓰던 모양)로 통일해 타입을 단순화했다.
+
+**시험 37개(파이프라인 직접 호출 15개, HTTP 레벨 22개)가 영향받았다** —
+분량이 커서 서브에이전트에게 정확한 계약(무엇이 빠르게 실패하고 무엇이
+배경에서 실패로 바뀌는지)을 자세히 적어 위임했고, 다시 읽고 직접
+재실행해 확인했다. CAS 충돌 시험 셋은 `pytest.raises(EditingSessionConflict)`를
+걷어내고 `store.update_job`이 `FAILED` 상태로 불렸는지 확인하는 것으로
+바꿨다(보정 로직 자체의 검증은 그대로 유지 — 예외가 뜨는지가 아니라 실제
+부작용이 맞는지를 잰다는 게 핵심이었으니 검증의 실질은 안 약해졌다).
+
+RED: `test_derivative_render_start_response_does_not_carry_the_finished_result`류
+(부분재생성·촬영본렌더 각각) + 드릴.
+
+### 10.4 확인함 / 확인 못 함 (§10 한정)
+
+**확인함:**
+- 넷 다 RED→GREEN, 적어도 하나씩은 드릴(백그라운드 예약을 빼고 동기로
+  되돌려 실제로 빨간불이 뜨는 것 확인)까지 직접 돌렸다.
+- `tests/test_api.py`(407) + `tests/test_editing_session.py`(61) 전부
+  초록 — 부분재생성 관련 37개를 고친 서브에이전트의 결과를 내가 직접
+  다시 돌려 재확인했다(위임 결과를 그대로 안 믿음).
+- 프런트 전체(vitest): **130 files / 1597 tests 전부 초록** (파셜리제너레이션
+  진행 헬퍼·시험 추가 포함, 재실행 확인).
+- 촬영본 파생 렌더는 프런트가 안 부르는 문임을 직접 grep으로 확인했다
+  (`apps/web/src`에 `derivatives/render` 호출 0건) — 백엔드만 고친 판단의 근거.
+- **전체 저장소 pytest(4753개)를 실제로 돌려서 §10.1에 적은 회귀 16건을
+  찾았다** — 부분 파일만 골라 돌렸으면 못 봤을 것들이다. 원인 셋
+  (`transcribe_source_video`·`sync_script_draft_to_narration_recording`·
+  더빙의 내부 부분 재생성 호출)을 `orchestration.py`에서 고치고,
+  `scripts/verify_owner_path.py`도 같은 이유로 같이 고쳤다(§10.1 상세).
+  고친 뒤 해당 시험 파일 전부(123개) 재확인, 전체 pytest 재실행 중.
+- postgres 저장소 시험: 첫 실행에서 `Address already in use`로 1건
+  실패했으나 **포트 경합에 의한 일시적 결함으로 확인**(재실행 시
+  52/52 전부 통과) — 내 코드 변경(connection pooling과 무관)이 원인이
+  아님을 확인 후 결함으로 안 올렸다.
+
+**확인 못 함:**
+- 이번 §10 작업 뒤 **컨테이너 재빌드·컨테이너 안 재현 검증은 아직 안
+  했다** — 다음 라운드에서 owner-ready.ps1로 재시작하고 실제로 밟아 볼 것.
+- 부분 재생성의 "conflict를 폴링에서 구분 못 한다"는 의도적 축소는
+  §10.3에 적었다 — 필요하면 다음 세션이 잡 레코드에 상태 구분 값을
+  추가하는 설계를 검토할 것.
+- 회귀 수정 뒤의 **전체 저장소 pytest 재확인 결과**는 이 절 작성 시점에
+  아직 배경에서 도는 중이었다 — 부록에 최종 숫자를 이어 적는다.
+- 전체 저장소 pytest(모든 패키지)와 `scripts/run-postgres-store-tests.ps1`은
+  이 절 작성 시점에 배경에서 아직 돌고 있었다 — 결과는 부록에 이어 적는다.
+
+### 10.5 재사용 게이트 (§10 한정)
+
+- **확인한 재사용 후보**: 더빙의 비동기 잡 패턴을 이번에도 그대로 썼다
+  (자막 번역 라운드에서 이미 확인한 것과 같음). 부분 재생성의 GET 폴링
+  문(`getPartialRegenerationResult`)은 **새로 안 만들고 이미 있던 것**을
+  재사용했다(이전 결과 열기 기능이 쓰던 것).
+- **실제 반영한 항목**: 잡 분할 패턴(시작=빠른 부분, 실행=배경) 넷 다
+  동일하게 적용. 오류 문구 안전화(`safe_job_error_message`)도 새 배경
+  실행기 안에서 재사용.
+- **이번 범위에서 제외한 항목**: TTS 후보 비동기 전환(owner 결정, §10.0).
+  부분 재생성의 conflict 상태 구분(§10.3에 다음 세션 권고로 남김).
+- **경계 보존**: 촬영본 파생 렌더는 프런트가 안 쓰는 문이라 백엔드
+  경계만 지켰다 -- 안 쓰는 프런트 코드를 새로 만들지 않았다.
+
 ## 부록 — 전체 pytest 결과 (2026-09-08, worktree venv, 두 차례)
 
 ### 1차 (§1~§6 완료 뒤)
@@ -359,3 +563,22 @@ OSError(...)`를 쓰기 때문)과 어긋났다. 문구만 바로잡았다.
 **컨테이너 재빌드·실제 확인은 §7.3 참고.** 두 라운드 다 owner-ready.ps1로
 재빌드·재시작한 뒤 실제 돌아가는 컨테이너에서 직접 재현해 확인했다 —
 API 단건이 아니라 여러 단계를 실제로 밟았다(§7.3).
+
+### 3차 (§10 완료 뒤, 회귀 수정 포함)
+
+전체 저장소 pytest를 처음 돌렸을 때 **16개가 실패**했다 — §10.1에 적은
+대로 받아쓰기 비동기 전환이 `orchestration.py`의 내부 합성 흐름 셋을
+못 보고 지나간 진짜 회귀였다. 원인을 셋 다 고치고(`orchestration.py`
+2곳 + `scripts/verify_owner_path.py` 1곳), 영향받은 시험 파일 둘도 같이
+맞췄다(`test_auto_apply_policy.py`·`test_vertical_composition.py`).
+
+고친 뒤 재실행: **4752 통과 / 1 실패(`test_owner_ready_script.py::test_smoke_timeout_kills_the_child_tree_and_returns_bounded_failure`) / 56 skip**
+(3004초). 이 1건은 격리 재실행에서도 그대로 재현되지만, 코드가 아니라
+`-TimeoutSec 1`로 자식 프로세스를 죽이는 타이밍이 기계 상태에 따라
+30초 밖으로 밀리는 **2026-09-02에 이미 bisect로 내 탓이 아님을 증명해
+둔 flaky 시험**이다([[videobox-smoke-timeout-test-fails-by-machine-state]]) —
+이번 §10 변경 파일(`orchestration.py`·`verify_owner_path.py`·시험 둘)과
+전혀 겹치지 않는다.
+
+postgres 저장소 시험은 §10.4에 적은 대로 첫 실행에서 포트 경합으로 1건
+실패했다가 재실행에서 **52/52** 전부 통과했다 — 결함으로 안 올렸다.
