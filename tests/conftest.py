@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC_PATHS = [
     ROOT / "services" / "agent-gateway" / "src",
     ROOT / "services" / "api" / "src",
+    ROOT / "services" / "mcp" / "src",
     ROOT / "packages" / "domain-models" / "src",
     ROOT / "packages" / "storage-abstractions" / "src",
     ROOT / "packages" / "provider-interfaces" / "src",

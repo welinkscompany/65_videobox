@@ -1,0 +1,17 @@
+# MCP(Model Context Protocol) 서버 전용 의존성 (2026-09-08 착수, docs/videobox-mcp-scope.ko.md).
+#
+# `mcp`(공식 SDK, modelcontextprotocol.io, MIT)는 stdio 전송만 쓰는데도 패키지
+# 메타데이터가 starlette>=0.49.1 / uvicorn>=0.31.1을 선언한다 -- 이건 mcp가
+# 내장한 HTTP/SSE 전송(우리는 안 씀)의 요구고, stdio 쪽(`mcp.server.stdio`,
+# `mcp.server.lowlevel`)은 import 시점에 그 버전을 실제로 검사하지 않는다
+# (직접 확인함: FastAPI가 요구하는 옛 starlette==0.38.6/uvicorn==0.30.6로도
+# stdio 모듈 import와 서버 등록이 그대로 동작한다).
+#
+# 그래서 여기서는 FastAPI(`requirements-container.txt`)가 이미 고정한 버전을
+# 다시 못박아 둔다 -- 이 파일을 나중에 설치해도 그 버전이 조용히 올라가지
+# 않게. `pip install -r`가 "ERROR: dependency resolver..." 경고를 찍지만
+# 설치 자체는 끝까지 성공한다(직접 확인함, exit code 0).
+mcp==2.2.0
+starlette==0.38.6
+uvicorn==0.30.6
+httpx==0.28.1
