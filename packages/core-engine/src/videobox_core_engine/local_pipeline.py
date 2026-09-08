@@ -63,6 +63,7 @@ from videobox_core_engine.output_source_verifier import (
 from videobox_core_engine.ass_subtitles import render_editing_session_ass
 from videobox_core_engine.audio_descriptors import probe_duration_seconds
 from videobox_core_engine.dubbing import DubbedTake, apply_dubbing_fit, plan_dubbing_fit
+from videobox_core_engine.job_error_message import safe_job_error_message
 from videobox_core_engine.media_probe import FFmpegMediaProbe
 from videobox_core_engine.thumbnail_generator import ThumbnailGenerationError, generate_video_thumbnail
 
@@ -551,7 +552,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     self.store.mark_proposal_preview_stale(project_id=project_id, generation_id=generation_id, reason="publish_revalidation_failed"); return
                 self.store.finish_proposal_preview(project_id=project_id, generation_id=generation_id, fingerprint=fingerprint, artifact_path=output, owner_token=owner, source_fence_result=revalidation.is_current, source_fence=lambda _connection: revalidation.still_matches())
         except Exception as exc:
-            self.store.fail_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner, error_message=str(exc))
+            self.store.fail_proposal_preview(project_id=project_id, generation_id=generation_id, owner_token=owner, error_message=safe_job_error_message(exc))
         finally:
             self._best_effort_cleanup_proposal_previews(project_id=project_id)
 
@@ -690,7 +691,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     return
         except Exception as exc:
             self.store.fail_exact_preview(
-                project_id=project_id, generation_id=generation_id, owner_token=owner_token, error_message=str(exc)
+                project_id=project_id, generation_id=generation_id, owner_token=owner_token, error_message=safe_job_error_message(exc)
             )
         finally:
             self._best_effort_cleanup_exact_previews(project_id=project_id)
@@ -1164,7 +1165,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         try:
@@ -1178,7 +1179,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -1205,7 +1206,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
@@ -1251,7 +1252,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         try:
@@ -1268,7 +1269,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -1295,7 +1296,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
@@ -1331,7 +1332,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         try:
@@ -1348,7 +1349,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -1375,7 +1376,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
@@ -1661,7 +1662,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 timeline_job_type=str(job.get("job_type") or JobType.TIMELINE_BUILD.value),
                 timeline_id=str(timeline["timeline_id"]),
                 operator_guidance=snapshot["operator_guidance"],
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         if current_operator_guidance_reuse_key is not None:
@@ -1901,7 +1902,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -1934,7 +1935,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -1954,7 +1955,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -1983,7 +1984,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
@@ -2040,7 +2041,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -2061,7 +2062,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -2090,7 +2091,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             raise
         return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
@@ -2518,7 +2519,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,
@@ -2753,7 +2754,7 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 job_id=job["job_id"],
                 status=JobStatus.FAILED,
-                error_message=str(exc),
+                error_message=safe_job_error_message(exc),
             )
             self._save_failed_provider_trace_audit_event(
                 project_id=project_id,

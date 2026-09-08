@@ -776,7 +776,10 @@ def _footage_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=409, detail="footage_already_approved")
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
-    return HTTPException(status_code=500, detail=str(exc))
+    # 분류 안 된 예외다 -- ffmpeg stderr, 파일 권한 오류 등 무엇이 실려 있을지
+    # 모른다(`errors.py::_http_error`가 이미 쓰는 것과 같은 이유). 원문은 로그로만.
+    _LOGGER.warning("footage_internal_error: %s", exc, exc_info=True)
+    return HTTPException(status_code=500, detail={"reason": "internal_error", "error_code": type(exc).__name__})
 
 
 __all__ = ["build_footage_organizer_router"]

@@ -41,6 +41,7 @@ from videobox_api.models import (
     SceneVideoStartResponse,
     SceneVideoStatusResponse,
 )
+from videobox_core_engine.job_error_message import safe_job_error_message
 from videobox_core_engine.scene_video_service import SceneVideoGenerationError
 from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
@@ -223,11 +224,13 @@ def _run_job(
                 job.update({"status": "failed", "result": None, "error_detail": detail})
         _update_job_row(store, project_id, job_id, JobStatus.FAILED, error_message=detail)
     except Exception as exc:  # noqa: BLE001 -- 백그라운드 작업이라 여기서 반드시 잡아야 폴링이 영원히 "처리 중"으로 남지 않는다
+        # 분류 안 된 예외라 파일 경로가 실릴 수 있다 -- safe_job_error_message로 거른다.
+        safe_detail = safe_job_error_message(exc)
         with _jobs_lock:
             job = _jobs.get(job_id)
             if job is not None:
-                job.update({"status": "failed", "result": None, "error_detail": str(exc)})
-        _update_job_row(store, project_id, job_id, JobStatus.FAILED, error_message=str(exc))
+                job.update({"status": "failed", "result": None, "error_detail": safe_detail})
+        _update_job_row(store, project_id, job_id, JobStatus.FAILED, error_message=safe_detail)
 
 
 def _update_job_row(

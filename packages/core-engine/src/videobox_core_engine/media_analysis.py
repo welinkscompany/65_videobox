@@ -14,6 +14,7 @@ from videobox_provider_interfaces.vision import FIXED_VISION_RESPONSE_SCHEMA, Vi
 from videobox_provider_interfaces.embeddings import EmbeddingRequest
 from videobox_provider_interfaces.lm_studio import LMStudioProviderError
 
+from videobox_core_engine.job_error_message import safe_job_error_message
 from videobox_core_engine.media_probe import MediaProbeResult
 from videobox_storage.local_project_store import sha256_file
 
@@ -198,18 +199,22 @@ class MediaAnalysisService:
             if self._cancelled(project_id, analysis_id):
                 return None
             if isinstance(exc, FileNotFoundError):
-                return self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="SOURCE_MISSING", error_message=str(exc))
+                # 이 예외 문구엔 실제 호스트 절대 경로가 그대로 들어 있다
+                # (`f"Analysis source is missing: {source}"`) -- 원문은 로그에만.
+                return self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="SOURCE_MISSING", error_message=safe_job_error_message(exc))
             if isinstance(exc, ValueError) and "ffprobe" in str(exc).lower():
+                # `media_probe.py`가 던지는 것은 고정 영문 문구뿐(경로 없음) -- 그대로 둔다.
                 return self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="PROBE_CORRUPT", error_message=str(exc))
             if isinstance(exc, subprocess.CalledProcessError):
-                return self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="PROBE_CORRUPT", error_message=str(exc))
+                # `str(CalledProcessError)`엔 실행한 명령의 인자(호스트 경로 포함)가 그대로 들어간다.
+                return self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="PROBE_CORRUPT", error_message=safe_job_error_message(exc))
             if isinstance(exc, LMStudioProviderError) and exc.code == "blocked":
                 return self.store.mark_media_analysis_blocked(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="LM_STUDIO_BLOCKED", error_message=str(exc))
             retry_index = attempt - 1
             next_retry = None
             if retry_index < len(RETRY_BACKOFF_SECONDS):
                 next_retry = (self.clock() + timedelta(seconds=RETRY_BACKOFF_SECONDS[retry_index])).isoformat()
-            return self.store.fail_media_analysis(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="MEDIA_ANALYSIS_FAILED", error_message=str(exc), next_retry_at=next_retry)
+            return self.store.fail_media_analysis(project_id=project_id, analysis_id=analysis_id, expected_attempt=attempt, error_code="MEDIA_ANALYSIS_FAILED", error_message=safe_job_error_message(exc), next_retry_at=next_retry)
 
     def _cancelled(self, project_id: str, analysis_id: str) -> bool:
         return bool(self.get_analysis(project_id, analysis_id).get("cancel_requested"))
