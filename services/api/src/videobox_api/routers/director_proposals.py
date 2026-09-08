@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 import asyncio
@@ -9,6 +9,7 @@ from threading import Event, Thread
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 
+from videobox_api.csrf_guard import require_trusted_origin
 from videobox_core_engine.caption_translation import caption_text_for_language
 from videobox_core_engine.director_media_focus import media_focus_for_request
 from videobox_core_engine.library_materialization import materialize_library_asset
@@ -909,7 +910,10 @@ def build_director_proposals_router(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    @router.post("/api/projects/{project_id}/director/proposals/{proposal_id}/apply")
+    @router.post(
+        "/api/projects/{project_id}/director/proposals/{proposal_id}/apply",
+        dependencies=[Depends(require_trusted_origin)],
+    )
     def apply(project_id: str, proposal_id: str, body: ProposalApplyRequest) -> dict:
         try:
             proposal = service.get(project_id=project_id, proposal_id=proposal_id)

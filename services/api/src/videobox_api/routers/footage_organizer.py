@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 import shutil
@@ -19,9 +20,10 @@ from urllib.parse import quote
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from videobox_api.content_delivery import deliver_file
+from videobox_api.csrf_guard import require_trusted_origin
 from videobox_api.models import (
     FootageApprovalRequest,
     FootageDerivativeRenderRequest,
@@ -52,6 +54,8 @@ from videobox_storage.footage_organizer_store import (
     OptimisticRevisionConflict,
 )
 from videobox_storage.media_library_store import MediaLibraryStore
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class _LibraryAssetAdapter:
@@ -209,7 +213,7 @@ def build_footage_organizer_router(
             raise HTTPException(status_code=404, detail="footage_proposal_missing")
         return {"status": "cancelled", "proposal_id": proposal_id, "revision": proposal.revision}
 
-    @router.post("/api/footage/proposals/{proposal_id}/approve")
+    @router.post("/api/footage/proposals/{proposal_id}/approve", dependencies=[Depends(require_trusted_origin)])
     def approve_proposal(proposal_id: str, payload: FootageApprovalRequest) -> dict[str, Any]:
         current = footage_store.get_proposal(proposal_id)
         if current is None:
@@ -381,7 +385,7 @@ def build_footage_organizer_router(
             raise HTTPException(status_code=404, detail="footage_sequence_missing")
         return {"status": "cancelled", "sequence_id": sequence_id, "revision": result.revision}
 
-    @router.post("/api/footage/sequences/{sequence_id}/approve")
+    @router.post("/api/footage/sequences/{sequence_id}/approve", dependencies=[Depends(require_trusted_origin)])
     def approve_sequence(sequence_id: str, payload: VirtualSequenceApprovalRequest) -> dict[str, Any]:
         result = footage_store.get_virtual_sequence(sequence_id)
         if result is None:

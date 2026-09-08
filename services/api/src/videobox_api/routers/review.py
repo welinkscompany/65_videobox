@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
 
+from videobox_api.csrf_guard import require_trusted_origin
 from videobox_api.errors import _http_error
 from videobox_api.models import (
     OperatorGuidanceResponse,
@@ -109,7 +110,11 @@ def build_review_router(orchestrator: ApiOrchestrator) -> APIRouter:
             raise _http_error(exc) from exc
         return _build_review_snapshot_response(result)
 
-    @router.post("/api/projects/{project_id}/review-approvals/{job_id}/approve", status_code=status.HTTP_202_ACCEPTED)
+    @router.post(
+        "/api/projects/{project_id}/review-approvals/{job_id}/approve",
+        status_code=status.HTTP_202_ACCEPTED,
+        dependencies=[Depends(require_trusted_origin)],
+    )
     def approve_review(project_id: str, job_id: str) -> ReviewApprovalResponse:
         try:
             result = orchestrator.approve_timeline_review(project_id=project_id, job_id=job_id)

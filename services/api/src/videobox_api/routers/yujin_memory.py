@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from videobox_api.csrf_guard import require_trusted_origin
 from videobox_api.models import (
     YujinMemoryCandidateCreateRequest,
     YujinMemoryCandidateListResponse,
@@ -145,6 +146,7 @@ def build_yujin_memory_router(store, memory_service=None) -> APIRouter:
     @router.post(
         base + "/{candidate_id}/approve",
         response_model=YujinMemoryCandidateResponse,
+        dependencies=[Depends(require_trusted_origin)],
     )
     def approve_candidate(project_id: str, candidate_id: str) -> dict:
         return transition(
