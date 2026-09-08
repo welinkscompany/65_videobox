@@ -435,41 +435,53 @@ def test_project_caption_style_undo_and_redo_restore_the_root_style_snapshot() -
 
 
 def test_partial_regeneration_conflict_returns_latest_manual_caption_and_style_without_stale_timeline_save() -> None:
-    from videobox_core_engine.editing_session_and_regeneration import EditingSessionConflict, EditingSessionRegenerationMixin
+    from videobox_core_engine.editing_session_and_regeneration import EditingSessionRegenerationMixin
+    from videobox_domain_models.jobs import JobStatus
     from videobox_storage.local_project_store import EditingSessionRevisionConflict
 
     stale = {"session_id": "session_001", "timeline_id": "timeline_001", "session_revision": 1, "segments": [{"segment_id": "seg_001", "caption_text": "old", "caption_style": {"text_color": "#FFFFFFFF"}}], "history": []}
     latest = {**stale, "session_revision": 2, "segments": [{"segment_id": "seg_001", "caption_text": "manual", "caption_style": {"text_color": "#00FF00FF"}}]}
 
     class Store:
-        def __init__(self) -> None: self.calls = 0; self.persisted = None
+        def __init__(self) -> None: self.calls = 0; self.persisted = None; self.update_job_calls: list[dict[str, object]] = []
         def get_editing_session(self, **_: object) -> dict: return latest if self.calls else stale
-        def create_job(self, **_: object) -> dict: return {"job_id": "job_001"}
+        def create_job(self, **kwargs: object) -> dict: return {"job_id": "job_001", "status": kwargs["status"].value}
         def update_editing_session(self, **kwargs: object) -> dict:
             self.calls += 1
             if self.calls == 1: raise EditingSessionRevisionConflict("stale")
             self.persisted = kwargs["session_payload"]
             return {**self.persisted, "updated_at": "now"}
         def save_partial_regeneration_run(self, **kwargs: object) -> dict: return {"partial_regeneration_id": "regen_001"}
-        def update_job(self, **_: object) -> None: pass
+        def update_job(self, **kwargs: object) -> None: self.update_job_calls.append(kwargs)
 
     class Runner(EditingSessionRegenerationMixin):
         def __init__(self) -> None: self.store = Store()
         def _execute_partial_regeneration(self, **_: object) -> dict: return {"timeline_id": "timeline_002", "timeline": {}, "segment_ids": ["seg_001"], "fields": ["caption"], "downstream_steps": []}
 
     runner = Runner()
-    with pytest.raises(EditingSessionConflict) as exc_info:
-        runner.start_editing_session_partial_regeneration(
-            project_id="project_001",
-            session_id="session_001",
-            segment_ids=["seg_001"],
-            fields=["caption"],
-            expected_revision=stale["session_revision"],
-        )
+    started = runner.start_editing_session_partial_regeneration(
+        project_id="project_001",
+        session_id="session_001",
+        segment_ids=["seg_001"],
+        fields=["caption"],
+        expected_revision=stale["session_revision"],
+    )
+    runner.run_partial_regeneration_job(
+        project_id="project_001",
+        session_id="session_001",
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
+    )
 
-    assert exc_info.value.latest_session["segments"][0]["caption_text"] == "manual"
-    assert exc_info.value.latest_session["segments"][0]["caption_style"]["text_color"] == "#00FF00FF"
+    # The CAS conflict now surfaces as a failed background job instead of a
+    # raised exception (nobody is left to catch a re-raise from a background
+    # task) -- the substitute signal is the job ending FAILED with the
+    # conflict's message, and that no stale save ever reached the store.
     assert runner.store.persisted is None
+    assert runner.store.update_job_calls[-1]["status"] is JobStatus.FAILED
+    assert "revision is stale" in str(runner.store.update_job_calls[-1]["error_message"]).lower()
 
 
 def test_partial_regeneration_cas_conflict_discards_pre_published_timeline_and_review(
@@ -523,14 +535,24 @@ def test_partial_regeneration_cas_conflict_discards_pre_published_timeline_and_r
         raise EditingSessionRevisionConflict("stale")
 
     monkeypatch.setattr(store, "update_editing_session", concurrent_edit_then_conflict)
-    with pytest.raises(EditingSessionConflict):
-        runner.start_editing_session_partial_regeneration(
-            project_id=project.project_id,
-            session_id=saved["session_id"],
-            segment_ids=["seg_001"],
-            fields=["caption"],
-            expected_revision=saved["session_revision"],
-        )
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        segment_ids=["seg_001"],
+        fields=["caption"],
+        expected_revision=saved["session_revision"],
+    )
+    # The fast pre-check passes (the session hasn't moved yet); the CAS
+    # conflict only happens once the background job actually tries to
+    # publish, so it surfaces as a failed job rather than a raised exception.
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
+    )
 
     assert store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])["segments"][0]["caption_text"] == "concurrent"
     with pytest.raises(KeyError):
@@ -591,14 +613,24 @@ def test_partial_regeneration_success_publication_failure_compensates_session_ti
 
     monkeypatch.setattr(store, "update_job", fail_only_success_publication)
     monkeypatch.setattr(store, "discard_partial_regeneration_timeline", fail_candidate_cleanup)
-    with pytest.raises(OSError, match="success publication"):
-        runner.start_editing_session_partial_regeneration(
-            project_id=project.project_id,
-            session_id=saved["session_id"],
-            segment_ids=["seg_001"],
-            fields=["caption"],
-            expected_revision=saved["session_revision"],
-        )
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        segment_ids=["seg_001"],
+        fields=["caption"],
+        expected_revision=saved["session_revision"],
+    )
+    # The publication failure happens inside the background job, which no
+    # longer re-raises (nobody is left to catch it) -- it marks the job
+    # FAILED with the compensation trail instead.
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
+    )
 
     recovered = store.get_editing_session(project_id=project.project_id, session_id=saved["session_id"])
     assert recovered["timeline_id"] == source["timeline_id"]
@@ -623,7 +655,15 @@ def test_partial_regeneration_success_publication_failure_compensates_session_ti
         fields=["caption"],
         expected_revision=saved["session_revision"],
     )
-    assert retried["status"] == JobStatus.SUCCEEDED.value
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved["session_id"],
+        job_id=retried["job_id"],
+        session=retried["_session"],
+        request=retried["_request"],
+        captured_revision=retried["_captured_revision"],
+    )
+    assert store.get_job(project_id=project.project_id, job_id=retried["job_id"])["status"] == JobStatus.SUCCEEDED.value
 
 
 def test_save_editing_session_recovers_when_table_is_missing_on_existing_project(tmp_path: Path) -> None:
@@ -1825,6 +1865,14 @@ def test_partial_regeneration_pipeline_keeps_scope_limited_to_selected_segments(
         fields=["caption", "broll"],
         expected_revision=saved_session["session_revision"],
     )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
+    )
     result = runner.get_partial_regeneration_result(
         project_id=project.project_id,
         job_id=started["job_id"],
@@ -1979,6 +2027,14 @@ def test_partial_regeneration_pipeline_runs_broll_refresh_when_no_manual_overrid
         fields=["broll"],
         expected_revision=saved_session["session_revision"],
     )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
+    )
     result = runner.get_partial_regeneration_result(
         project_id=project.project_id,
         job_id=started["job_id"],
@@ -2055,16 +2111,23 @@ def test_partial_regeneration_pipeline_marks_job_failed_when_refresh_step_errors
         },
     )
 
-    import pytest
-
-    with pytest.raises(RuntimeError, match="broll refresh exploded"):
-        runner.start_editing_session_partial_regeneration(
-            project_id=project.project_id,
-            session_id=saved_session["session_id"],
-            segment_ids=["seg_001"],
-            fields=["broll"],
-            expected_revision=saved_session["session_revision"],
-        )
+    started = runner.start_editing_session_partial_regeneration(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        segment_ids=["seg_001"],
+        fields=["broll"],
+        expected_revision=saved_session["session_revision"],
+    )
+    # The refresh step now runs in the background job; it fails the job
+    # instead of raising back through the caller (nobody is left to catch it).
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
+    )
 
     failed_job = store.list_jobs(project_id=project.project_id)[0]
     assert failed_job["job_type"] == "partial_regeneration"
@@ -2170,6 +2233,14 @@ def test_partial_regeneration_pipeline_carries_forward_previous_regeneration_res
         fields=["broll"],
         expected_revision=saved_session["session_revision"],
     )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=first["job_id"],
+        session=first["_session"],
+        request=first["_request"],
+        captured_revision=first["_captured_revision"],
+    )
     after_first = runner.get_editing_session(
         project_id=project.project_id,
         session_id=saved_session["session_id"],
@@ -2187,6 +2258,14 @@ def test_partial_regeneration_pipeline_carries_forward_previous_regeneration_res
         segment_ids=["seg_002"],
         fields=["caption"],
         expected_revision=updated_session["session_revision"],
+    )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=second["job_id"],
+        session=second["_session"],
+        request=second["_request"],
+        captured_revision=second["_captured_revision"],
     )
     first_result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=first["job_id"])
     second_result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=second["job_id"])
@@ -2269,6 +2348,14 @@ def test_partial_regeneration_pipeline_preserves_overlay_shape_when_refreshing_v
         segment_ids=["seg_001"],
         fields=["visual_overlay"],
         expected_revision=saved_session["session_revision"],
+    )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -2383,6 +2470,14 @@ def test_partial_regeneration_pipeline_clears_target_visual_overlays_when_sessio
         segment_ids=["seg_001"],
         fields=["visual_overlay"],
         expected_revision=saved_session["session_revision"],
+    )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -2506,6 +2601,14 @@ def test_partial_regeneration_pipeline_preserves_explanation_overlay_shape(tmp_p
         fields=["explanation_card"],
         expected_revision=saved_session["session_revision"],
     )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
+    )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
     assert result["timeline"]["export_overlays"] == [
@@ -2622,6 +2725,14 @@ def test_partial_regeneration_pipeline_preserves_image_and_table_overlay_shapes(
         segment_ids=["seg_001"],
         fields=["image_overlay", "table_overlay"],
         expected_revision=saved_session["session_revision"],
+    )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -2742,6 +2853,14 @@ def test_partial_regeneration_pipeline_applies_tts_replacement_as_review_blocked
         segment_ids=["seg_001"],
         fields=["tts_replacement"],
         expected_revision=saved_session["session_revision"],
+    )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 
@@ -2875,6 +2994,14 @@ def test_partial_regeneration_pipeline_applies_approved_tts_replacement_to_targe
         segment_ids=["seg_001"],
         fields=["tts_replacement"],
         expected_revision=saved_session["session_revision"],
+    )
+    runner.run_partial_regeneration_job(
+        project_id=project.project_id,
+        session_id=saved_session["session_id"],
+        job_id=started["job_id"],
+        session=started["_session"],
+        request=started["_request"],
+        captured_revision=started["_captured_revision"],
     )
     result = runner.get_partial_regeneration_result(project_id=project.project_id, job_id=started["job_id"])
 

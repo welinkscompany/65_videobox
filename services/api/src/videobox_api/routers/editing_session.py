@@ -641,12 +641,24 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
         request_preview["prediction_reasons"] = prediction_reasons
         return PartialRegenerationResponse(**request_preview)
 
-    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration", status_code=status.HTTP_202_ACCEPTED)
+    @router.post(
+        "/api/projects/{project_id}/editing-sessions/{session_id}/partial-regeneration",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
     def start_editing_session_partial_regeneration(
         project_id: str,
         session_id: str,
         payload: PartialRegenerationRequest,
-    ) -> PartialRegenerationResponse:
+        background_tasks: BackgroundTasks,
+    ) -> PartialRegenerationJobResponse:
+        """부분 재생성을 걸어 두고 바로 돌아온다. 진행은 `GET .../partial-regenerations/{job_id}`.
+
+        **비동기여야 한다(2026-09-08, §1-6).** 라벨은 202였지만 실제로는 이
+        핸들러 안에서 선택한 항목(TTS 후보 생성·촬영본 추천 등)을 전부 처리하고
+        화면에 보여줄 값까지 조립해 돌려주고 있었다 -- 더빙·자막 번역·받아쓰기와
+        같은 이유로 진짜 비동기로 바꾼다. 영향 범위·검토 예측 같은 풍부한 정보는
+        이제 성공한 뒤 폴링 응답에 실린다.
+        """
         try:
             result = orchestrator.start_editing_session_partial_regeneration(
                 project_id=project_id,
@@ -655,36 +667,27 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 fields=payload.fields,
                 expected_revision=payload.expected_revision,
             )
-            session = orchestrator.get_editing_session(project_id=project_id, session_id=session_id)
-            job_result = orchestrator.get_partial_regeneration_result(
-                project_id=project_id,
-                job_id=str(result["job_id"]),
-            )
-            source_timeline = store.get_timeline_run(
-                project_id=project_id,
-                timeline_id=str(job_result["source_timeline_id"]),
-            )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)
         except Exception as exc:
             raise _http_error(exc) from exc
-        result["targeted_segments"] = _build_targeted_segments(
-            session=session,
+        background_tasks.add_task(
+            orchestrator.run_partial_regeneration_job,
+            project_id=project_id,
+            session_id=session_id,
+            job_id=result["job_id"],
+            session=result["_session"],
+            request=result["_request"],
+            captured_revision=result["_captured_revision"],
+        )
+        return PartialRegenerationJobResponse(
+            job_id=result["job_id"],
+            status=result["status"],
+            session_id=result["session_id"],
             segment_ids=result["segment_ids"],
-        )
-        result["affected_output_areas"] = _build_affected_output_areas(result["downstream_steps"])
-        predicted_review_status_after_rerun, prediction_reasons = _build_preflight_review_prediction(
-            source_timeline=source_timeline,
-            targeted_segments=result["targeted_segments"],
             fields=result["fields"],
+            downstream_steps=result["downstream_steps"],
         )
-        result["predicted_review_status_after_rerun"] = predicted_review_status_after_rerun
-        result["prediction_reasons"] = prediction_reasons
-        result["delta"] = {
-            "regenerated_segments": job_result["regenerated_segments"],
-            "timeline_id": job_result["timeline_id"],
-        }
-        return PartialRegenerationResponse(**result)
 
     @router.get("/api/projects/{project_id}/partial-regenerations/{job_id}")
     def get_partial_regeneration_result(project_id: str, job_id: str) -> PartialRegenerationJobResponse:
@@ -694,6 +697,31 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
             return _editing_session_conflict_response(exc)
         except Exception as exc:
             raise _http_error(exc) from exc
+        if result["status"] != "succeeded":
+            # 아직 도는 중이거나 실패했다 -- 풍부한 결과는 없다.
+            return PartialRegenerationJobResponse(
+                job_id=result["job_id"],
+                status=result["status"],
+                segment_ids=result["segment_ids"],
+                fields=result["fields"],
+                downstream_steps=result["downstream_steps"],
+            )
+        # 성공했다 -- §1-6 전에는 시작 응답에 실려 있던 영향 범위·검토 예측을
+        # 여기서 같은 방식(`_build_targeted_segments` 등)으로 조립한다. 지금
+        # 이 시점의 최신 편집본을 본다 -- 재생성 직후와 사실상 같던 옛 동작과
+        # 다르지 않다(그때도 재생성 콜백 뒤에 fresh 세션을 다시 읽었다).
+        session = orchestrator.get_editing_session(project_id=project_id, session_id=str(result["session_id"]))
+        source_timeline = store.get_timeline_run(
+            project_id=project_id,
+            timeline_id=str(result["source_timeline_id"]),
+        )
+        targeted_segments = _build_targeted_segments(session=session, segment_ids=result["segment_ids"])
+        affected_output_areas = _build_affected_output_areas(result["downstream_steps"])
+        predicted_review_status_after_rerun, prediction_reasons = _build_preflight_review_prediction(
+            source_timeline=source_timeline,
+            targeted_segments=targeted_segments,
+            fields=result["fields"],
+        )
         return PartialRegenerationJobResponse(
             job_id=result["job_id"],
             status=result["status"],
@@ -710,6 +738,10 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 **_normalize_timeline_payload_for_response(result["timeline"])
             ),
             created_at=result.get("created_at"),
+            targeted_segments=targeted_segments,
+            affected_output_areas=affected_output_areas,
+            predicted_review_status_after_rerun=predicted_review_status_after_rerun,
+            prediction_reasons=prediction_reasons,
         )
 
     @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/segments/{segment_id}/visual-overlay")

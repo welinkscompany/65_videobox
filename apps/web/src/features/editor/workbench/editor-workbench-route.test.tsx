@@ -78,9 +78,9 @@ function mockEditingSessionRevisions(...revisions: number[]) {
   return load;
 }
 
-async function expectEditorRevision(revision: number) {
+async function expectEditorRevision(revision: number, options?: { timeout?: number }) {
   const workbench = await screen.findByRole("region", { name: "편집 작업판" });
-  await waitFor(() => expect(workbench).toHaveAttribute("data-editor-revision", String(revision)));
+  await waitFor(() => expect(workbench).toHaveAttribute("data-editor-revision", String(revision)), options);
 }
 
 const narrationManifest = (revision: number, startSec = 0) => ({
@@ -212,13 +212,6 @@ const partialPreflight = {
   prediction_reasons: [],
 };
 
-const partialRun = {
-  ...partialPreflight,
-  job_id: "partial-job-1",
-  status: "succeeded",
-  delta: { regenerated_segments: [{ segment_id: "segment-1" }], timeline_id: "timeline-partial-1" },
-};
-
 const partialJob = (sessionUpdatedAt: string) => ({
   job_id: "partial-job-1", status: "succeeded", partial_regeneration_id: "partial-run-1",
   session_id: "session-a", session_updated_at: sessionUpdatedAt,
@@ -227,6 +220,10 @@ const partialJob = (sessionUpdatedAt: string) => ({
   downstream_steps: partialPreflight.downstream_steps,
   regenerated_segments: [{ segment_id: "segment-1" }],
   timeline: {},
+  targeted_segments: partialPreflight.targeted_segments,
+  affected_output_areas: partialPreflight.affected_output_areas,
+  predicted_review_status_after_rerun: partialPreflight.predicted_review_status_after_rerun,
+  prediction_reasons: partialPreflight.prediction_reasons,
 });
 
 const broll = {
@@ -2842,8 +2839,11 @@ describe("EditorWorkbenchRoute", () => {
     await expectEditorRevision(9);
   });
 
-  it("requires impact preflight before one explicit partial run, then resumes only from an explicit result read", async () => {
-    let resolveRun!: (value: typeof partialRun) => void;
+  it("requires impact preflight before one explicit partial run, then resumes only from an explicit result read", { timeout: 20000 }, async () => {
+    // 부분 재생성은 걸어 두고 물어서 받는다(2026-09-08, §1-6) -- `start`는
+    // 즉시 처리 중 응답만 주고, 실제 완료는 `getPartialRegenerationResult`
+    // 폴링으로 받는다(더빙·자막 번역·받아쓰기와 같은 패턴).
+    let resolvePoll!: (value: ReturnType<typeof partialJob>) => void;
     vi.mocked(api.getEditorPlaybackManifest)
       .mockResolvedValueOnce(inspectorManifest(7) as never)
       .mockResolvedValueOnce(inspectorManifest(8) as never);
@@ -2862,9 +2862,13 @@ describe("EditorWorkbenchRoute", () => {
       finished_at: "2026-07-24T00:00:01Z",
     }]);
     const preflight = vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue(partialPreflight as never);
-    const run = vi.spyOn(api, "runPartialRegeneration")
-      .mockImplementation(() => new Promise((resolve) => { resolveRun = resolve; }) as never);
+    const start = vi.spyOn(api, "startPartialRegeneration").mockResolvedValue({
+      job_id: "partial-job-1", status: "running",
+      session_id: "session-a", segment_ids: ["segment-1"], fields: ["caption", "music"],
+      downstream_steps: partialPreflight.downstream_steps,
+    } as never);
     const resume = vi.spyOn(api, "getPartialRegenerationResult")
+      .mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }) as never)
       .mockResolvedValue(partialJob(inspectorSession(8).updated_at) as never);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
@@ -2873,7 +2877,7 @@ describe("EditorWorkbenchRoute", () => {
     const runButton = screen.getByRole("button", { name: "부분 재생성 실행" });
     expect(runButton).toBeDisabled();
     fireEvent.click(runButton);
-    expect(run).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "재생성 범위 미리보기" }));
     await waitFor(() => expect(preflight).toHaveBeenCalledWith("project-a", "session-a", {
@@ -2883,16 +2887,18 @@ describe("EditorWorkbenchRoute", () => {
     await waitFor(() => expect(runButton).toBeEnabled());
     fireEvent.click(runButton);
     fireEvent.click(runButton);
-    await waitFor(() => expect(run).toHaveBeenCalledWith("project-a", "session-a", {
+    await waitFor(() => expect(start).toHaveBeenCalledWith("project-a", "session-a", {
       expected_revision: 7,
       fields: ["caption", "music"],
       segment_ids: ["segment-1"],
     }));
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("다시 만든 항목")).toBeNull();
 
-    await act(async () => { resolveRun(partialRun); });
-    await expectEditorRevision(8);
+    // 첫 폴링(간격만큼 실제로 기다린 뒤)이 걸릴 때까지 기다린 다음, 성공으로 끝낸다.
+    await waitFor(() => expect(resume).toHaveBeenCalledTimes(1), { timeout: 10000 });
+    await act(async () => { resolvePoll(partialJob(inspectorSession(8).updated_at)); });
+    await expectEditorRevision(8, { timeout: 5000 });
     const openResult = screen.getByRole("button", { name: "이전 결과 열기" });
     await waitFor(() => expect(openResult).toBeEnabled());
     const readsBeforeOpen = resume.mock.calls.length;
@@ -2902,7 +2908,7 @@ describe("EditorWorkbenchRoute", () => {
     const result = screen.getByText("다시 만든 항목").closest("dl");
     expect(result).toHaveTextContent("완료");
     expect(result).toHaveTextContent("캡션, 배경 음악");
-    expect(run).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 
   it("recovers the latest succeeded same-session result after a fresh route mount", async () => {
@@ -3096,7 +3102,7 @@ describe("EditorWorkbenchRoute", () => {
       ...partialPreflight,
       segment_ids: ["segment-2"],
     } as never);
-    const run = vi.spyOn(api, "runPartialRegeneration");
+    const run = vi.spyOn(api, "startPartialRegeneration");
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
@@ -3168,7 +3174,7 @@ describe("EditorWorkbenchRoute", () => {
       .mockResolvedValueOnce(inspectorSession(7) as never)
       .mockResolvedValueOnce(inspectorSession(8) as never);
     vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue(partialPreflight as never);
-    const run = vi.spyOn(api, "runPartialRegeneration").mockRejectedValue(error);
+    const run = vi.spyOn(api, "startPartialRegeneration").mockRejectedValue(error);
 
     render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
@@ -3210,7 +3216,7 @@ describe("EditorWorkbenchRoute", () => {
     );
     const preflight = vi.spyOn(api, "previewPartialRegeneration")
       .mockImplementation(() => new Promise((resolve) => { resolvePreflight = resolve; }) as never);
-    const run = vi.spyOn(api, "runPartialRegeneration");
+    const run = vi.spyOn(api, "startPartialRegeneration");
 
     const rendered = render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
     await expectEditorRevision(7);
@@ -3231,7 +3237,7 @@ describe("EditorWorkbenchRoute", () => {
   });
 
   it("ignores an old A partial run completion after route navigation to B", async () => {
-    let resolveRun!: (value: typeof partialRun) => void;
+    let resolveRun!: (value: { job_id: string; status: string; session_id: string; segment_ids: string[]; fields: string[]; downstream_steps: string[] }) => void;
     const manifestLoad = vi.mocked(api.getEditorPlaybackManifest);
     manifestLoad.mockReset().mockImplementation(
       (projectId, sessionId) => Promise.resolve(
@@ -3253,7 +3259,7 @@ describe("EditorWorkbenchRoute", () => {
       }) as never,
     );
     vi.spyOn(api, "previewPartialRegeneration").mockResolvedValue(partialPreflight as never);
-    const run = vi.spyOn(api, "runPartialRegeneration")
+    const run = vi.spyOn(api, "startPartialRegeneration")
       .mockImplementation(() => new Promise((resolve) => { resolveRun = resolve; }) as never);
     const resume = vi.spyOn(api, "getPartialRegenerationResult");
 
@@ -3268,7 +3274,13 @@ describe("EditorWorkbenchRoute", () => {
 
     rendered.rerender(<EditorWorkbenchRoute projectId="project-b" sessionId="session-b" />);
     await expectEditorRevision(3);
-    await act(async () => { resolveRun(partialRun); });
+    await act(async () => {
+      resolveRun({
+        job_id: "partial-job-1", status: "running",
+        session_id: "session-a", segment_ids: ["segment-1"], fields: ["caption", "music"],
+        downstream_steps: partialPreflight.downstream_steps,
+      });
+    });
 
     expect(manifestLoad).toHaveBeenCalledTimes(2);
     expect(resume).not.toHaveBeenCalled();

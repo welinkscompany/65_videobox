@@ -707,7 +707,7 @@ describe("caption style API conflicts", () => {
       "segment_001",
       7,
     );
-    await api.runPartialRegeneration("project_001", "session_001", {
+    await api.startPartialRegeneration("project_001", "session_001", {
       expected_revision: 7,
       segment_ids: ["segment_001"],
       fields: ["caption"],

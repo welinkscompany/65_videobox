@@ -671,6 +671,13 @@ class EditingSessionRegenerationMixin:
         fields: list[str],
         expected_revision: int,
     ) -> dict[str, Any]:
+        """부분 재생성을 **시작만** 하고 돌아온다. 실제 작업은 백그라운드에서 한다.
+
+        선택한 항목(TTS 후보 생성·촬영본 추천 등)에 따라 라벨만 202였지 실제로는
+        그 자리에서 다 처리하고 있었다(2026-09-07 전체 점검 §1-6) -- 더빙·자막
+        번역·받아쓰기와 같은 이유로 진짜 비동기로 바꾼다. 편집본이 그 사이
+        바뀌었으면 여기서 먼저 막는다.
+        """
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         captured_revision = int(session.get("session_revision") or 1)
         if captured_revision != expected_revision:
@@ -686,6 +693,37 @@ class EditingSessionRegenerationMixin:
             input_ref=session_id,
             status=JobStatus.RUNNING,
         )
+        return {
+            "job_id": job["job_id"],
+            "status": job["status"],
+            "session_id": session_id,
+            "segment_ids": request["segment_ids"],
+            "fields": request["fields"],
+            "downstream_steps": request["downstream_steps"],
+            # HTTP 응답엔 안 실린다 -- 백그라운드 실행기에 그대로 넘겨줄
+            # 시작 시점 스냅샷(라우터가 `run_partial_regeneration_job` 호출에
+            # 이 셋을 그대로 넘긴다).
+            "_session": session,
+            "_request": request,
+            "_captured_revision": captured_revision,
+        }
+
+    def run_partial_regeneration_job(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        job_id: str,
+        session: dict[str, Any],
+        request: dict[str, Any],
+        captured_revision: int,
+    ) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다.
+
+        `start_editing_session_partial_regeneration`이 잡을 만들고 돌아온 뒤
+        분리된 나머지 절반이다 -- 실제 재생성·CAS·실패 시 롤백은 그대로다.
+        """
+        job = {"job_id": job_id}
         published_timeline_id: str | None = None
         refreshed_session: dict[str, Any] | None = None
         partial_regeneration_id: str | None = None
@@ -796,18 +834,29 @@ class EditingSessionRegenerationMixin:
                 status=JobStatus.FAILED,
                 error_message=error_message,
             )
-            raise
-        return {
-            "job_id": job["job_id"],
-            "status": JobStatus.SUCCEEDED.value,
-            "session_id": session_id,
-            "segment_ids": request["segment_ids"],
-            "fields": request["fields"],
-            "downstream_steps": request["downstream_steps"],
-        }
+            # 백그라운드 작업이라 여기서 다시 던져도 아무도 안 받는다(더빙·자막
+            # 번역·받아쓰기와 같은 이유) -- 위에서 이미 잡을 FAILED로 남겼다.
 
     def get_partial_regeneration_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        if job["status"] != JobStatus.SUCCEEDED.value:
+            # 아직 도는 중이거나 실패했다 -- `output_ref`가 없어 저장된 실행
+            # 기록을 아직 못 찾는다. 상태만 돌려준다.
+            return {
+                "job_id": job["job_id"],
+                "status": job["status"],
+                "partial_regeneration_id": None,
+                "session_id": None,
+                "session_updated_at": None,
+                "source_timeline_id": None,
+                "timeline_id": None,
+                "segment_ids": [],
+                "fields": [],
+                "downstream_steps": [],
+                "regenerated_segments": [],
+                "timeline": None,
+                "created_at": None,
+            }
         result = self.store.get_partial_regeneration_run(
             project_id=project_id,
             partial_regeneration_id=str(job["output_ref"]),

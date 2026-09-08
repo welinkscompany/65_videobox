@@ -3955,6 +3955,14 @@ def test_partial_regeneration_result_normalizes_legacy_string_false_pending_reco
         project_id=project.project_id,
         timeline_id=source_timeline["timeline_id"],
     )
+    # The GET polling response now re-reads the current editing session to
+    # assemble targeted_segments/prediction fields, so a real session must
+    # exist -- a bare "session_001" string id is no longer enough.
+    editing_session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source_timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001"}], "history": []},
+    )
 
     partial_timeline = {
         "timeline_id": "timeline_candidate_001",
@@ -3991,7 +3999,7 @@ def test_partial_regeneration_result_normalizes_legacy_string_false_pending_reco
         payload={
             "source_timeline_id": source_timeline["timeline_id"],
             "timeline_id": partial_timeline["timeline_id"],
-            "session_id": "session_001",
+            "session_id": editing_session["session_id"],
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
             "downstream_steps": ["caption_refresh", "timeline_build"],
@@ -4004,7 +4012,7 @@ def test_partial_regeneration_result_normalizes_legacy_string_false_pending_reco
     partial_job = store.create_job(
         project_id=project.project_id,
         job_type=JobType.PARTIAL_REGENERATION,
-        input_ref="session_001",
+        input_ref=editing_session["session_id"],
         status=JobStatus.SUCCEEDED,
     )
     store.update_job(
@@ -4106,6 +4114,14 @@ def test_partial_regeneration_result_fills_default_provider_trace_for_applied_re
         project_id=project.project_id,
         timeline_id=source_timeline["timeline_id"],
     )
+    # The GET polling response now re-reads the current editing session to
+    # assemble targeted_segments/prediction fields, so a real session must
+    # exist -- a bare "session_001" string id is no longer enough.
+    editing_session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source_timeline["timeline_id"],
+        session_payload={"segments": [{"segment_id": "seg_001"}], "history": []},
+    )
 
     partial_timeline = {
         "timeline_id": "timeline_candidate_001",
@@ -4141,7 +4157,7 @@ def test_partial_regeneration_result_fills_default_provider_trace_for_applied_re
         payload={
             "source_timeline_id": source_timeline["timeline_id"],
             "timeline_id": partial_timeline["timeline_id"],
-            "session_id": "session_001",
+            "session_id": editing_session["session_id"],
             "segment_ids": ["seg_001"],
             "fields": ["caption"],
             "downstream_steps": ["caption_refresh", "timeline_build"],
@@ -4154,7 +4170,7 @@ def test_partial_regeneration_result_fills_default_provider_trace_for_applied_re
     partial_job = store.create_job(
         project_id=project.project_id,
         job_type=JobType.PARTIAL_REGENERATION,
-        input_ref="session_001",
+        input_ref=editing_session["session_id"],
         status=JobStatus.SUCCEEDED,
     )
     store.update_job(
@@ -15020,7 +15036,7 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
     assert response.status_code == 202
     payload = response.json()
     assert payload["job_id"].startswith("partial_regeneration_job_")
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     assert payload["session_id"] == session_id
     assert payload["segment_ids"] == ["seg_001"]
     assert payload["fields"] == ["broll", "visual_overlay"]
@@ -15029,6 +15045,13 @@ def test_editing_session_api_can_start_partial_regeneration_job(tmp_path: Path) 
         "overlay_refresh",
         "timeline_build",
     ]
+
+    # The 202 response is thin -- the job runs in the background (TestClient
+    # runs it synchronously before control returns here), so completion is
+    # only observable via the polling endpoint.
+    result = client.get(f"/api/projects/{project_id}/partial-regenerations/{payload['job_id']}")
+    assert result.status_code == 200
+    assert result.json()["status"] == "succeeded"
 
 
 def test_editing_session_api_rejects_stale_partial_regeneration_before_creating_job(
@@ -15131,7 +15154,15 @@ def test_editing_session_api_surfaces_draft_prediction_when_starting_partial_reg
     )
 
     assert response.status_code == 202
-    payload = response.json()
+    started_payload = response.json()
+
+    # The prediction fields are now assembled by the polling endpoint once
+    # the background job succeeds, not inline in the 202 start response.
+    result = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{started_payload['job_id']}"
+    )
+    assert result.status_code == 200
+    payload = result.json()
     assert payload["predicted_review_status_after_rerun"] == "draft"
     assert payload["prediction_reasons"] == []
     assert payload["affected_output_areas"] == [
@@ -15182,7 +15213,15 @@ def test_editing_session_api_surfaces_blocked_prediction_when_starting_partial_r
 
     assert broll_response.status_code == 200
     assert response.status_code == 202
-    payload = response.json()
+    started_payload = response.json()
+
+    # See the draft-prediction test above: the prediction fields now live on
+    # the polling response, assembled after the background job succeeds.
+    result = client.get(
+        f"/api/projects/{project_id}/partial-regenerations/{started_payload['job_id']}"
+    )
+    assert result.status_code == 200
+    payload = result.json()
     assert payload["predicted_review_status_after_rerun"] == "blocked"
     assert payload["prediction_reasons"] == [
         "source timeline already has unresolved review blockers that rerun will preserve",
@@ -18943,12 +18982,13 @@ def test_editing_session_api_ignores_nested_segment_id_source_review_flag_when_r
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "draft"
     assert result_payload["timeline"]["review_flags"] == []
     assert result_payload["timeline"]["pending_recommendations"] == []
@@ -19953,12 +19993,13 @@ def test_editing_session_api_ignores_nested_target_segment_id_source_pending_rec
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "draft"
     assert result_payload["timeline"]["pending_recommendations"] == []
     assert result_payload["timeline"]["review_flags"] == []
@@ -20036,12 +20077,13 @@ def test_editing_session_api_ignores_stale_minimal_dict_source_pending_recommend
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "draft"
     assert result_payload["timeline"]["pending_recommendations"] == []
     assert result_payload["timeline"]["review_flags"] == []
@@ -20106,12 +20148,13 @@ def test_editing_session_api_ignores_non_dict_session_segments_in_partial_regene
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "draft"
     assert result_payload["timeline"]["pending_recommendations"] == []
     assert result_payload["timeline"]["review_flags"] == []
@@ -20212,12 +20255,13 @@ def test_editing_session_api_deduplicates_repeated_source_pending_recommendation
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "blocked"
     assert len(result_payload["timeline"]["pending_recommendations"]) == 1
     assert result_payload["timeline"]["review_flags"] == [
@@ -20324,12 +20368,13 @@ def test_editing_session_api_deduplicates_mixed_case_source_pending_recommendati
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "blocked"
     assert len(result_payload["timeline"]["pending_recommendations"]) == 1
     assert result_payload["timeline"]["pending_recommendations"][0]["recommendation_type"] == "tts_replacement"
@@ -20511,12 +20556,13 @@ def test_partial_regeneration_result_preserves_source_pending_recommendation_wit
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "blocked"
     assert result_payload["timeline"]["review_flags"] == [
         {
@@ -20614,12 +20660,13 @@ def test_partial_regeneration_result_marks_review_status_blocked_when_preserved_
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "blocked"
     assert result_payload["timeline"]["pending_recommendations"] == []
     assert result_payload["timeline"]["review_flags"] == [
@@ -20704,12 +20751,13 @@ def test_partial_regeneration_result_marks_review_status_blocked_when_preserved_
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "blocked"
     assert result_payload["timeline"]["pending_recommendations"] == []
     assert result_payload["timeline"]["review_flags"] == [
@@ -20799,7 +20847,12 @@ def test_review_snapshot_deduplicates_preserved_source_review_flags_for_partial_
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
+    result_response = client.get(
+        f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
+    )
+    assert result_response.status_code == 200
+    assert result_response.json()["status"] == "succeeded"
     snapshot_response = client.get(
         f"/api/projects/{project.project_id}/review-snapshots/{payload['job_id']}",
     )
@@ -20885,12 +20938,13 @@ def test_editing_session_api_normalizes_string_false_review_required_when_runnin
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["timeline"]["review_status"] == "draft"
     assert result_payload["timeline"]["pending_recommendations"] == []
     assert result_payload["timeline"]["review_flags"] == []
@@ -20965,12 +21019,13 @@ def test_editing_session_api_normalizes_invalid_cut_action_when_running_partial_
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["regenerated_segments"] == [
         {
             "segment_id": "seg_001",
@@ -21050,12 +21105,13 @@ def test_editing_session_api_normalizes_invalid_target_cut_action_when_running_p
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["regenerated_segments"] == [
         {
             "segment_id": "seg_001",
@@ -21134,12 +21190,13 @@ def test_editing_session_api_matches_trimmed_session_segment_ids_when_running_pa
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["regenerated_segments"] == [
         {
             "segment_id": "seg_001",
@@ -21234,12 +21291,13 @@ def test_editing_session_api_matches_trimmed_source_segment_ids_when_running_par
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["regenerated_segments"] == [
         {
             "segment_id": "seg_001",
@@ -21334,12 +21392,13 @@ def test_editing_session_api_normalizes_invalid_source_cut_action_when_running_p
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     assert result_payload["regenerated_segments"] == [
         {
             "segment_id": "seg_001",
@@ -22092,12 +22151,13 @@ def test_editing_session_api_filters_unknown_overlay_type_when_running_partial_r
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     timeline_path = (
         tmp_path
         / "projects"
@@ -22198,12 +22258,13 @@ def test_editing_session_api_filters_assetless_image_overlay_when_running_partia
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     timeline_path = (
         tmp_path
         / "projects"
@@ -22298,12 +22359,13 @@ def test_editing_session_api_preserves_canonical_table_overlay_when_running_part
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     timeline_path = (
         tmp_path
         / "projects"
@@ -22522,12 +22584,13 @@ def test_editing_session_api_does_not_preserve_unknown_existing_overlay_type_on_
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["status"] == "succeeded"
+    assert payload["status"] == "running"
     result_response = client.get(
         f"/api/projects/{project.project_id}/partial-regenerations/{payload['job_id']}",
     )
     assert result_response.status_code == 200
     result_payload = result_response.json()
+    assert result_payload["status"] == "succeeded"
     timeline_path = (
         tmp_path
         / "projects"

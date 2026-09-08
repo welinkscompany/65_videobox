@@ -46,12 +46,19 @@ def test_partial_regeneration_holds_at_real_script_scale(tmp_path: Path) -> None
                          "timeline_id": timeline["timeline_id"], "segments": segments,
                          "session_revision": 1, "history": [], "undo_stack": [], "redo_stack": []})
 
-    start = time.time()
-    pipeline.start_editing_session_partial_regeneration(
+    # 부분 재생성이 잡(비동기)으로 바뀌었다(2026-09-08, §1-6) -- 실제 무거운
+    # 작업은 이제 `run_partial_regeneration_job`이 한다. 재는 대상도 그쪽이다.
+    started = pipeline.start_editing_session_partial_regeneration(
         project_id=project.project_id, session_id=session["session_id"],
         segment_ids=[s["segment_id"] for s in segments],
         fields=["tts_replacement"],
         expected_revision=int(session["session_revision"]),
+    )
+    start = time.time()
+    pipeline.run_partial_regeneration_job(
+        project_id=project.project_id, session_id=session["session_id"],
+        job_id=started["job_id"], session=started["_session"],
+        request=started["_request"], captured_revision=started["_captured_revision"],
     )
     elapsed = time.time() - start
 

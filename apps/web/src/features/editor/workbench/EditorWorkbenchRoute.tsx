@@ -6,7 +6,8 @@ import { voiceSampleLabel } from "./voiceSampleLabel";
 import { dubbingOutcomeMessage, runDubbingWithProgress, type DubbingOutcome } from "./dubbingProgress";
 import { captionTranslationOutcomeMessage, runCaptionTranslationWithProgress, type CaptionTranslationOutcome } from "./captionTranslationProgress";
 
-import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type PartialRegenerationRun, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { runPartialRegenerationWithProgress, type PartialRegenerationOutcome } from "../partialRegenerationProgress";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
 import { resolveWorkspaceLocation } from "../../../app/routeManifest";
@@ -114,7 +115,7 @@ type PartialState = Readonly<{
   key: string;
   ticket: PartialRegenerationTicket | null;
   preflight: PartialRegenerationPreflight | null;
-  run: PartialRegenerationRun | null;
+  run: PartialRegenerationJob | null;
   jobId: string | null;
   result: PartialRegenerationJob | null;
   isResultOpen: boolean;
@@ -1004,21 +1005,29 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       await commitTimelineMutation(async (_port, isCurrent) => {
         try {
           const ticket = activePartial.ticket!;
-          const result = await api.runPartialRegeneration(projectId, sessionId!, {
-            expected_revision: scope.revision,
-            segment_ids: [scope.segmentId],
-            fields: [...ticket.fields],
+          // 부분 재생성은 **걸어 두고 물어서 받는다**(더빙·자막 번역·받아쓰기와
+          // 같은 이유) -- 선택한 항목에 따라 한 요청에 못 끝낼 수 있다.
+          const outcome: PartialRegenerationOutcome = await runPartialRegenerationWithProgress({
+            projectId,
+            sessionId: sessionId!,
+            payload: {
+              expected_revision: scope.revision,
+              segment_ids: [scope.segmentId],
+              fields: [...ticket.fields],
+            },
+            isStillRelevant: isCurrent,
           });
-          if (!runMatchesPartialRegenerationTicket(ticket, result)) {
+          if (outcome.kind !== "succeeded" || !runMatchesPartialRegenerationTicket(ticket, outcome.result)) {
             throw new Error("partial_regeneration_run_identity_mismatch");
           }
+          const result = outcome.result;
           if (isCurrent()) {
             setPartial({
               key: requestKey,
               ticket: null,
               preflight: null,
               run: result,
-              jobId: result.job_id!.trim(),
+              jobId: result.job_id.trim(),
               result: null,
               isResultOpen: false,
               message: "부분 재생성을 마쳤어요. 이전 결과 열기에서 결과 범위를 확인할 수 있어요.",

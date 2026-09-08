@@ -1492,17 +1492,26 @@ class PartialRegenerationResponse(BaseModel):
 
 
 class PartialRegenerationJobResponse(StartJobResponse):
-    partial_regeneration_id: str
-    session_id: str
+    #: 부분 재생성이 비동기라(2026-09-08, §1-6) 아직 도는 중이거나 실패했으면
+    #: 결과가 없다 -- `GET .../partial-regenerations/{job_id}`로 물어서 받는다.
+    partial_regeneration_id: str | None = None
+    session_id: str | None = None
     session_updated_at: str | None = None
-    source_timeline_id: str
-    timeline_id: str
+    source_timeline_id: str | None = None
+    timeline_id: str | None = None
     segment_ids: list[str] = Field(default_factory=list)
     fields: list[str] = Field(default_factory=list)
     downstream_steps: list[str] = Field(default_factory=list)
     regenerated_segments: list[dict[str, object]] = Field(default_factory=list)
-    timeline: "TimelinePayloadResponse"
+    timeline: "TimelinePayloadResponse | None" = None
     created_at: str | None = None
+    #: 성공했을 때만 채운다 -- 어느 장면이 바뀌었는지, 출력 어디에 영향이
+    #: 가는지, 다시 검토가 필요할지 미리 보여 주는 값들(§1-6 전에는 시작
+    #: 응답에 실려 있었다).
+    targeted_segments: list[dict[str, object]] = Field(default_factory=list)
+    affected_output_areas: list[str] = Field(default_factory=list)
+    predicted_review_status_after_rerun: str = "unknown"
+    prediction_reasons: list[str] = Field(default_factory=list)
 
 
 class EditingSessionSegmentResponse(BaseModel):

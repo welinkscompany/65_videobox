@@ -1282,6 +1282,26 @@ class ApiOrchestrator:
             expected_revision=expected_revision,
         )
 
+    def run_partial_regeneration_job(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        job_id: str,
+        session: dict[str, Any],
+        request: dict[str, Any],
+        captured_revision: int,
+    ) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        self.pipeline.run_partial_regeneration_job(
+            project_id=project_id,
+            session_id=session_id,
+            job_id=job_id,
+            session=session,
+            request=request,
+            captured_revision=captured_revision,
+        )
+
     def get_partial_regeneration_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         return self.pipeline.get_partial_regeneration_result(project_id=project_id, job_id=job_id)
 

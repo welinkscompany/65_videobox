@@ -803,37 +803,37 @@ export type PartialRegenerationPreflight = {
   prediction_reasons: string[];
 };
 
-export type PartialRegenerationDelta = {
-  regenerated_segments: Record<string, unknown>[];
-  timeline_id: string | null;
-};
-
-export type PartialRegenerationRun = {
-  job_id: string | null;
-  status: string | null;
+/** 부분 재생성을 **걸었다는** 응답이다(2026-09-08, §1-6) -- 완성된 결과가
+ *  아니다. `job_id`로 `getPartialRegenerationResult`를 폴링해서 받는다. */
+export type PartialRegenerationStart = {
+  job_id: string;
+  status: string;
   session_id: string | null;
   segment_ids: string[];
   fields: string[];
   downstream_steps: string[];
-  targeted_segments: Record<string, unknown>[];
-  affected_output_areas: string[];
-  delta: PartialRegenerationDelta | null;
 };
 
 export type PartialRegenerationJob = {
   job_id: string;
   status: string;
-  partial_regeneration_id: string;
-  session_id: string;
+  // 부분 재생성이 비동기라(2026-09-08, §1-6) 아직 도는 중이거나 실패했으면
+  // 이 값들이 없다 -- 성공(`status === "succeeded"`)했을 때만 채워진다.
+  partial_regeneration_id: string | null;
+  session_id: string | null;
   session_updated_at?: string | null;
-  source_timeline_id: string;
-  timeline_id: string;
+  source_timeline_id: string | null;
+  timeline_id: string | null;
   segment_ids: string[];
   fields: string[];
   downstream_steps: string[];
   regenerated_segments: Record<string, unknown>[];
-  timeline: TimelinePayload;
+  timeline: TimelinePayload | null;
   created_at?: string | null;
+  targeted_segments: Record<string, unknown>[];
+  affected_output_areas: string[];
+  predicted_review_status_after_rerun: string;
+  prediction_reasons: string[];
 };
 
 export type OutputJobRequest = {
@@ -2802,12 +2802,14 @@ export const api = {
         body: JSON.stringify(payload),
       },
     ),
-  runPartialRegeneration: (
+  // 부분 재생성은 **걸어 두기만** 한다(2026-09-08, §1-6) -- 선택한 항목에
+  // 따라 한 요청에 못 끝낼 수 있다. 진행은 `getPartialRegenerationResult`로 본다.
+  startPartialRegeneration: (
     projectId: string,
     sessionId: string,
     payload: PartialRegenerationRequest,
   ) =>
-    request<PartialRegenerationRun>(
+    request<PartialRegenerationStart>(
       `/api/projects/${projectId}/editing-sessions/${sessionId}/partial-regeneration`,
       {
         method: "POST",
