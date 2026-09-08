@@ -28,11 +28,14 @@ describe("자동 캡션", () => {
     expect(screen.getByRole("button", { name: "말 받아쓰기" })).toBeDisabled();
   });
 
-  it("받아쓰고 그 말을 장면 캡션으로 넣는다", async () => {
+  it("받아쓰고 그 말을 장면 캡션으로 넣는다", { timeout: 20000 }, async () => {
+    // 받아쓰기는 **걸어 두고 물어서 받는다**(2026-09-08, §1-6) -- 더빙·자막
+    // 번역과 같은 이유(Whisper 호출에 시간 제한이 없다).
     vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([
       { asset_id: "asset-1", asset_type: "narration_audio" },
     ] as never);
-    const start = vi.spyOn(api, "startTranscription").mockResolvedValue({ job_id: "job-1", status: "succeeded" } as never);
+    const start = vi.spyOn(api, "startTranscription").mockResolvedValue({ job_id: "job-1", status: "running", transcript_uri: null } as never);
+    const poll = vi.spyOn(api, "getTranscriptionJob").mockResolvedValue({ job_id: "job-1", status: "succeeded", transcript_uri: "local://projects/x/transcripts/job-1" } as never);
     const apply = vi.spyOn(api, "applyCaptionsFromTranscript").mockResolvedValue({ session_revision: 4 } as never);
     const onApplied = vi.fn();
 
@@ -40,14 +43,17 @@ describe("자동 캡션", () => {
     fireEvent.click(await screen.findByRole("button", { name: "말 받아쓰기" }));
 
     await waitFor(() => expect(start).toHaveBeenCalledWith("project-a", { narration_asset_id: "asset-1" }));
+    // 폴링 간격만큼(2초 + 여유) 실제로 기다려야 한다 -- 걸어 두고 물어서 받는 것이
+    // 이 흐름의 요점이라 가짜 타이머로 건너뛰지 않는다.
+    await waitFor(() => expect(poll).toHaveBeenCalledWith("project-a", "job-1"), { timeout: 10000 });
     await waitFor(() => expect(apply).toHaveBeenCalledWith("project-a", "session-1", {
       transcription_job_id: "job-1",
       expected_revision: 3,
-    }));
-    await waitFor(() => expect(onApplied).toHaveBeenCalled());
+    }), { timeout: 10000 });
+    await waitFor(() => expect(onApplied).toHaveBeenCalled(), { timeout: 10000 });
   });
 
-  it("실패하면 무엇이 안 됐는지 그 자리에서 말한다", async () => {
+  it("실패하면 무엇이 안 됐는지 그 자리에서 말한다", { timeout: 20000 }, async () => {
     vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([
       { asset_id: "asset-1", asset_type: "narration_audio" },
     ] as never);
@@ -56,7 +62,20 @@ describe("자동 캡션", () => {
     render(<AutoCaptionCard {...props} />);
     fireEvent.click(await screen.findByRole("button", { name: "말 받아쓰기" }));
 
-    expect(await screen.findByText(/받아쓰지 못했어요/)).toBeVisible();
+    expect(await screen.findByText(/받아쓰지 못했어요/, {}, { timeout: 10000 })).toBeVisible();
+  });
+
+  it("받아쓰기 잡이 실패로 끝나면 그 자리에서 말한다", { timeout: 20000 }, async () => {
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([
+      { asset_id: "asset-1", asset_type: "narration_audio" },
+    ] as never);
+    vi.spyOn(api, "startTranscription").mockResolvedValue({ job_id: "job-1", status: "running", transcript_uri: null } as never);
+    vi.spyOn(api, "getTranscriptionJob").mockResolvedValue({ job_id: "job-1", status: "failed", transcript_uri: null } as never);
+
+    render(<AutoCaptionCard {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "말 받아쓰기" }));
+
+    expect(await screen.findByText(/받아쓰지 못했어요/, {}, { timeout: 10000 })).toBeVisible();
   });
 
   /** **번역 자막을 보고 있으면 화면이 안 바뀐다**(2026-09-05 코드리뷰가 잡았다).

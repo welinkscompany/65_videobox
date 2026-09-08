@@ -549,19 +549,22 @@ class ApiOrchestrator:
         return transcription
 
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
+        """받아쓰기를 **시작만** 하고 돌아온다. 실제 작업은 백그라운드에서 한다.
+
+        Whisper 호출에 시간 제한이 없어 긴 내레이션은 nginx 330초 벽을 넘길 수
+        있다(2026-09-07 전체 점검 §1-6). 자막 번역·더빙과 같은 이유, 같은 방식이다.
+        """
         result = self.pipeline.start_transcription(
             project_id=project_id,
             narration_asset_id=narration_asset_id,
         )
-        transcription = self.pipeline.get_transcription_result(
-            project_id=project_id,
-            job_id=result["job_id"],
+        return {"job_id": result["job_id"], "status": result["status"], "transcript_uri": None}
+
+    def run_transcription_job(self, *, project_id: str, job_id: str, narration_asset_id: str) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        self.pipeline.run_transcription_job(
+            project_id=project_id, job_id=job_id, narration_asset_id=narration_asset_id,
         )
-        return {
-            "job_id": result["job_id"],
-            "status": result["status"],
-            "transcript_uri": transcription["transcript_uri"],
-        }
 
     def get_transcription_job(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         result = self.pipeline.get_transcription_result(project_id=project_id, job_id=job_id)

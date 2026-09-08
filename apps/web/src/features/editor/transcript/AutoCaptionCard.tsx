@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { runTranscriptionWithProgress } from "./transcriptionProgress";
 
 /** 캡컷 캡션 패널의 `자동 캡션` 카드 (계획 §4).
  *
@@ -33,6 +34,10 @@ export function AutoCaptionCard({
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // 받아쓰기가 비동기라(2026-09-08, §1-6) 몇 초가 아니라 몇 분 걸릴 수 있다 --
+  // 그 사이 화면을 떠나면 죽은 컴포넌트에 상태를 쓰지 않게 막는다.
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
 
   useEffect(() => {
     let active = true;
@@ -48,17 +53,32 @@ export function AutoCaptionCard({
     setBusy(true);
     setMessage(null);
     try {
-      const job = await api.startTranscription(projectId, { narration_asset_id: narrationAssetId });
+      // 받아쓰기는 **걸어 두고 물어서 받는다**(더빙·자막 번역과 같은 이유) --
+      // Whisper 호출에 시간 제한이 없어 긴 내레이션은 한 요청에 못 끝낸다.
+      const outcome = await runTranscriptionWithProgress({
+        projectId,
+        narrationAssetId,
+        isStillRelevant: () => mounted.current,
+      });
+      if (!mounted.current) return;
+      if (outcome.kind !== "succeeded") {
+        setMessage(
+          outcome.kind === "timed_out"
+            ? "받아쓰기가 너무 오래 걸려서 기다리기를 멈췄어요. 잠시 뒤 다시 확인해 주세요."
+            : "받아쓰지 못했어요. 잠시 뒤 다시 눌러 주세요.",
+        );
+        return;
+      }
       await api.applyCaptionsFromTranscript(projectId, sessionId, {
-        transcription_job_id: job.job_id,
+        transcription_job_id: outcome.jobId,
         expected_revision: expectedRevision,
       });
       onApplied();
     } catch {
       // 이유를 코드로 던지지 않는다. 다시 눌러 볼 수 있다는 것까지 말한다.
-      setMessage("받아쓰지 못했어요. 잠시 뒤 다시 눌러 주세요.");
+      if (mounted.current) setMessage("받아쓰지 못했어요. 잠시 뒤 다시 눌러 주세요.");
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
 

@@ -959,7 +959,9 @@ class AllJobsResponse(BaseModel):
 
 
 class TranscriptionJobResponse(StartJobResponse):
-    transcript_uri: str
+    #: 받아쓰기가 비동기라(2026-09-08, §1-6) 아직 도는 중이거나 실패했으면
+    #: 대본이 없다 -- `GET .../jobs/transcription/{job_id}`로 물어서 받는다.
+    transcript_uri: str | None = None
 
 
 class StartSegmentAnalysisRequest(BaseModel):

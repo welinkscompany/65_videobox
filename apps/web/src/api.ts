@@ -460,6 +460,8 @@ export type EditingSession = {
   updated_at?: string | null;
 };
 
+export type TranscriptionJobStatus = { job_id: string; status: "running" | "succeeded" | "failed"; transcript_uri: string | null };
+
 export type CaptionTranslationStart = { job_id: string; status: "processing" };
 export type CaptionTranslationStatus = {
   job_id: string;
@@ -2041,8 +2043,12 @@ export const api = {
   createAtomicDraftBundle: (projectId: string, payload: AtomicDraftBundleRequest) => request<AtomicDraftBundle>(`/api/projects/${encodeURIComponent(projectId)}/draft-bundles`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   // 캡컷 자동 캡션. 받아쓰기는 원래 있던 작업이고, 그 결과를 캡션으로 옮기는
   // 자리(captions-from-transcript)가 2026-09-05에 생겼다.
+  // 받아쓰기는 걸어 두기만 한다(2026-09-08, §1-6) -- Whisper 호출에 시간
+  // 제한이 없어 긴 내레이션은 한 요청에 못 끝낸다. 진행은 아래 상태 조회로 본다.
   startTranscription: (projectId: string, body: { narration_asset_id: string }) =>
-    request<{ job_id: string; status: string }>(`/api/projects/${encodeURIComponent(projectId)}/jobs/transcription`, { method: "POST", body: JSON.stringify(body) }),
+    request<TranscriptionJobStatus>(`/api/projects/${encodeURIComponent(projectId)}/jobs/transcription`, { method: "POST", body: JSON.stringify(body) }),
+  getTranscriptionJob: (projectId: string, jobId: string) =>
+    request<TranscriptionJobStatus>(`/api/projects/${encodeURIComponent(projectId)}/jobs/transcription/${encodeURIComponent(jobId)}`),
   applyCaptionsFromTranscript: (projectId: string, sessionId: string, body: { transcription_job_id: string; expected_revision: number }) =>
     request<EditingSession>(`/api/projects/${encodeURIComponent(projectId)}/editing-sessions/${encodeURIComponent(sessionId)}/captions-from-transcript`, { method: "POST", body: JSON.stringify(body) }),
   listDraftNarrationOptions: async (projectId: string): Promise<NarrationOption[]> => (await request<{ assets: NarrationOption[] }>(`/api/projects/${encodeURIComponent(projectId)}/draft-readiness/narration-options`)).assets,

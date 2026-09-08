@@ -1092,40 +1092,70 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         }
 
     def start_transcription(self, *, project_id: str, narration_asset_id: str) -> dict[str, Any]:
+        """받아쓰기를 **시작만** 하고 돌아온다. 실제 Whisper 호출은 백그라운드에서 한다.
+
+        Whisper 호출에 시간 제한이 없어(2026-09-07 전체 점검 §1-6) 긴 내레이션은
+        nginx 330초 벽을 넘길 수 있었다. 자막 번역·더빙과 같은 이유다 -- 다만 이
+        잡은 이미 DB 잡 테이블(`store.create_job`/`update_job`)에 있으므로 그
+        인프라를 그대로 쓴다(더빙처럼 메모리 딕셔너리를 새로 만들지 않는다).
+        """
         job = self.store.create_job(
             project_id=project_id,
             job_type=JobType.TRANSCRIPTION,
             input_ref=narration_asset_id,
             status=JobStatus.RUNNING,
         )
-        asset = self.store.get_asset(project_id=project_id, asset_id=narration_asset_id)
-        asset_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
-        stt_result = self.stt_provider.transcribe(STTRequest(source_path=asset_path))
-        transcript = self.store.save_transcript(
-            project_id=project_id,
-            source_asset_id=narration_asset_id,
-            transcript_text=stt_result.text,
-            segments=[
-                {
-                    "start_sec": segment.start_sec,
-                    "end_sec": segment.end_sec,
-                    "text": segment.text,
-                    "confidence": segment.confidence,
-                }
-                for segment in stt_result.segments
-            ],
-            provider_name=stt_result.provider_name,
-        )
-        self.store.update_job(
-            project_id=project_id,
-            job_id=job["job_id"],
-            status=JobStatus.SUCCEEDED,
-            output_ref=transcript["transcript_id"],
-        )
-        return {"job_id": job["job_id"], "status": JobStatus.SUCCEEDED.value}
+        return {"job_id": job["job_id"], "status": JobStatus.RUNNING.value}
+
+    def run_transcription_job(self, *, project_id: str, job_id: str, narration_asset_id: str) -> None:
+        """백그라운드에서 실제로 돈다. `BackgroundTasks`가 응답을 보낸 뒤 부른다."""
+        try:
+            asset = self.store.get_asset(project_id=project_id, asset_id=narration_asset_id)
+            asset_path = self.store.resolve_storage_uri(project_id=project_id, storage_uri=asset["storage_uri"])
+            stt_result = self.stt_provider.transcribe(STTRequest(source_path=asset_path))
+            transcript = self.store.save_transcript(
+                project_id=project_id,
+                source_asset_id=narration_asset_id,
+                transcript_text=stt_result.text,
+                segments=[
+                    {
+                        "start_sec": segment.start_sec,
+                        "end_sec": segment.end_sec,
+                        "text": segment.text,
+                        "confidence": segment.confidence,
+                    }
+                    for segment in stt_result.segments
+                ],
+                provider_name=stt_result.provider_name,
+            )
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job_id,
+                status=JobStatus.SUCCEEDED,
+                output_ref=transcript["transcript_id"],
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.store.update_job(
+                project_id=project_id,
+                job_id=job_id,
+                status=JobStatus.FAILED,
+                error_message=safe_job_error_message(exc),
+            )
 
     def get_transcription_result(self, *, project_id: str, job_id: str) -> dict[str, Any]:
         job = self.store.get_job(project_id=project_id, job_id=job_id)
+        if job["status"] != JobStatus.SUCCEEDED.value:
+            # 아직 도는 중이거나 실패했다 -- 완성된 대본이 없으니 그 사실만
+            # 돌려준다. `output_ref`가 아직 없어 `get_transcript`를 부르면
+            # `KeyError`가 난다.
+            return {
+                "job_id": job["job_id"],
+                "status": job["status"],
+                "transcript_id": None,
+                "transcript_uri": None,
+                "transcript_text": None,
+                "segments": None,
+            }
         transcript = self.store.get_transcript(project_id=project_id, transcript_id=job["output_ref"])
         return {
             "job_id": job["job_id"],
