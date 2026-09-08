@@ -4,9 +4,12 @@
 
 `2026-09-08-fixing-the-2026-09-07-full-audit.ko.md`가 owner 결정 대기로 남겨 둔
 §1-6·§3-2·미디어팩 정리에 대해 owner가 실제로 결정했고(2026-09-08 대화), 그
-결정대로 처리했다. 커밋 셋 + 미디어팩 정리(git 밖) + 자체 발견 결함 하나(§1-3의
-job-error-message 범위가 21곳이었다는 것을 재확인하며 `orchestration.py`의
-`error_detail=str(exc)` 두 곳도 같이 찾아 고쳤다).
+결정대로 처리했다. 처리한 뒤 owner가 컨테이너 재시작·나머지 미디어팩 정리·
+독립 코드리뷰·재현 검증을 다시 지시했고(같은 대화, §7), 그 코드리뷰가
+`local_pipeline.py`의 `start_variant_renders`(§1-3 확장 grep이 놓친 세 번째
+leak 자리)를 찾아 같이 고쳤다. 커밋 다섯 + 미디어팩 정리(git 밖, 총
+2.9GB) + 컨테이너 재빌드 두 번 + 그 안에서 직접 재현한 확인 셋(§7.3) +
+전체 pytest 두 번(4745→4747, 둘 다 0 failed).
 
 ## 0. owner 결정 (2026-09-08 대화)
 
@@ -161,12 +164,29 @@ owner가 "유지"로 결정했다(§1-1 봉쇄가 이미 들어가 더 위험하
 `media_packs` 테이블에서 `active=1`인 것이 이미 1.3.1이라(2026-09-07에
 활성화), 1.3.0 디렉터리는 정말 안 쓰는 사본이었다.
 
-**추가로 발견한 것, 지우지 않음** — `runtime/videobox-user-library/packs/starter-v1/`
-아래 1.0.0(472MB)·1.1.0(495MB)·1.2.0(501MB)도 활성화 안 된 채 남아 있다
-(합쳐서 약 1.47GB). 그리고 `runtime/starter-media-pack-131`(477MB)도
-`packs/starter-v1/1.3.1`과 별개로 하나 더 있다(diff 안 해 봤지만 이름
-규칙상 같은 내용의 사본일 가능성이 높다). **이번엔 owner가 승인한
-"1.3.0"만 지웠다** — 나머지는 owner 판단으로 남긴다.
+**후속(같은 대화, owner 지시로 마저 지움)** — 1.0.0(472MB)·1.1.0(495MB)·
+1.2.0(501MB)도 `media_packs` 테이블에서 전부 `active=0`인 것을 확인하고
+지웠다. `runtime/starter-media-pack-131`도 `diff -rq`로 `packs/starter-v1/1.3.1`과
+바이트까지 완전히 같은 사본임을 확인하고 지웠다. **총 확보한 디스크:
+약 2.9GB**(1.3.0 중복 955MB + 이번 넷 1.945GB).
+
+지우기 전에 `media_assets` 테이블을 확인해 안전을 검증했다 -- 이 테이블은
+버전마다 행이 남아 있고(`path` 컬럼이 그 버전 디렉터리를 절대경로로 직접
+가리킨다) **지워도 새는 곳 없이 안전한 이유**: (1) 화면·API는 `active=1`인
+버전의 자산만 나열한다(§1-1 이전부터 있던 동작, 이번에 안 건드림) -- 지운
+버전을 owner가 새로 고를 방법 자체가 없다. (2) 자산을 실제 장면에 쓰면
+`library_materialization.py`가 프로젝트 폴더로 파일을 복사해 두므로, 이미
+쓴 프로젝트는 소스 팩 디렉터리가 없어져도 영향받지 않는다. (3)
+`library_project_references`(40건)·`library_favorites`(0건)를 직접 조회해
+지운 버전을 가리키는 참조가 없음을 확인했다. `recent_library_usage`의
+오래된 항목 셋(2026-08-19/20)은 버전 없는 `library_asset_id`만 들고 있어
+그대로 두어도 위험하지 않다(활성 버전에 같은 이름이 없으면 화면에서
+조용히 안 나올 뿐).
+
+**지우지 않은 것** — 지운 버전들의 `media_assets` DB 행 자체(옛 버전 행이
+이제 없는 파일을 가리키는 죽은 참조로 남는다)는 정리하지 않았다. 위 확인대로
+아무것도 그 행을 읽지 않아 당장 위험하지는 않지만, DB 정리는 이번에 owner가
+승인한 범위(폴더 삭제)를 넘는 별도 작업이라 손대지 않았다.
 
 ## 6. 유진 관련 질문 (owner, 2026-09-08 대화)
 
@@ -186,7 +206,66 @@ owner가 "유지"로 결정했다(§1-1 봉쇄가 이미 들어가 더 위험하
 "이 목소리 전사해 줘"라고 말해서 새로 걸게 하려면 새 intent를 설계해야
 한다 — 지금은 없다.
 
-## 7. 확인함 / 확인 못 함
+## 7. owner 지시로 재확인 (같은 대화, 이어서): 재시작·나머지 미디어팩 정리·코드리뷰·실제 확인
+
+owner: "지금 다시 재시작하고, 미디어팩 폴더에 안 쓰는 옛 버전도 삭제하자.
+그리고 재시작후에 지금까지 작업 리뷰 하고 역방향 검증도 다시 진행해줘."
+
+### 7.1. 독립 코드리뷰가 §1-3 확장이 놓친 세 번째 자리를 찾았다
+
+일반 목적 에이전트에게 이 문서 §1~§3의 세 커밋 diff만 따로 검토시켰다(이
+세션 자체의 판단과 별개로 다시 보라는 취지). 결과: **`local_pipeline.py`의
+`start_variant_renders`가 항목별 실패를 `error_message`가 아니라
+`error_code` 열쇠로 정상적인 200 응답(`POST /api/projects/{id}/output-variants/render`,
+`VariantRenderBatchResponse`) 본문에 그대로 실어 나르고 있었다** — §1-3
+확장의 grep이 `error_message=str(exc)`라는 정확한 문구만 찾아서 다른 열쇠
+이름을 쓰는 이 자리를 놓쳤다. `FileNotFoundError`/`CalledProcessError`가
+같은 파일 다른 곳에서 실제로 호스트 경로를 담아 던지는 것을 이미 확인했으니
+같은 위험이 있었다.
+
+**고쳤다** — `safe_job_error_message(exc)`로 바꿨다(같은 헬퍼 재사용, 새
+분류 안 추가). RED: `tests/test_job_error_message_has_no_filesystem_path.py::test_variant_render_batch_item_error_code_has_no_host_path`
+(`_materialize_variant_for_output`를 monkeypatch로 `FileNotFoundError(호스트경로)`를
+던지게 하고, 응답 항목의 `error_code`가 `asset_file_missing`이고 경로가
+없음을 확인) → 드릴(고치기 전으로 되돌려 실제로 경로가 그대로 나오는 것
+확인) → 고정.
+
+리뷰 에이전트가 함께 지적한 사소한 것도 고쳤다: 이 시험 파일의 머리말이
+"그 밖의 `OSError`"도 안전하게 바뀐다고 적어 실제 동작(그 세 종류 **이외의**
+`OSError`는 그대로 둔다 — 이 저장소 시험 다수가 안전한 설명 문구로 `raise
+OSError(...)`를 쓰기 때문)과 어긋났다. 문구만 바로잡았다.
+
+### 7.2. 나머지 옛 미디어팩 버전 정리 (§5에 반영함)
+
+1.0.0·1.1.0·1.2.0·`runtime/starter-media-pack-131`까지 지웠다. 근거와
+안전성 확인은 §5로 옮겨 적었다.
+
+### 7.3. 컨테이너 재시작(재빌드) + 실제 확인 (역방향 검증)
+
+`scripts/owner-ready.ps1 -Mode Start -Rebuild`로 오늘 바뀐 코드 전부를
+반영해 이미지를 다시 만들고 컨테이너를 새로 켰다. 그 뒤 **API를 통해서가
+아니라 실제로 돌아가는 컨테이너 안에서** 세 가지를 직접 재현했다(주소는
+매번 `127.0.0.1:5173`):
+
+- **§1-7 CSRF** — `POST .../review-approvals/.../approve`에 `Origin:
+  https://evil.example`를 실어 보내 **403 `{"reason":"untrusted_origin"}`**
+  확인. Origin 헤더가 없는 요청과 `http://127.0.0.1:5173` Origin의 요청은
+  둘 다 403이 아니라 평소 로직(404, 존재하지 않는 프로젝트라서)까지
+  도달함을 확인. `footage/proposals/.../approve`도 같은 방식으로 403 확인.
+- **§1-3 확장** — 실제 프로젝트를 만들고, 대본 파일을 등록한 뒤 지우고,
+  segment-analysis를 걸어 잡 기록의 `error_message`가 정확히
+  `"asset_file_missing"`이고 컨테이너 절대 경로(`/videobox-data/...`)가
+  전혀 안 실리는 것을 직접 확인.
+- **§1-6 자막 번역** — 실제 프로젝트에 자막을 쓰고 번역을 걸어 **202 +
+  job_id**를 받은 뒤 `GET .../caption-translations/{job_id}`를 두 번
+  물어 `processing`→`succeeded`로 넘어가는 것과, 결과의 번역문("안녕하세요"
+  → "Hello", 실제 로컬 모델이 옮김)이 그대로 담기는 것을 확인.
+
+확인에 쓴 임시 프로젝트 셋(`reverse-check-*`)은 전부 `DELETE
+.../projects/{id}?confirm=true`로 지워 owner의 실제 데이터에 남기지
+않았다.
+
+## 8. 확인함 / 확인 못 함
 
 **확인함:**
 - §1-7: RED→GREEN, 신뢰 Origin·비신뢰 Origin·Origin 없음 세 갈래 전부.
@@ -202,16 +281,29 @@ owner가 "유지"로 결정했다(§1-1 봉쇄가 이미 들어가 더 위험하
 - `scripts/run-postgres-store-tests.ps1`: 이 문서의 모든 변경을 마친 뒤
   **다시 돌려 52 passed 재확인.**
 
+**§7에서 추가로 확인함:**
+- 컨테이너 재빌드·재시작(`owner-ready.ps1 -Mode Start -Rebuild`) **두 번**
+  (§7.1 결함 고치기 전후 각 한 번) — 이번엔 안 미룬다.
+- §1-7·§1-3 확장·§1-6·§7.1을 전부 **실제로 돌아가는 컨테이너 안에서** 직접
+  재현해 확인함(§7.3). API 단건이 아니라 여러 단계(자산 등록→삭제→잡 실행,
+  또는 잡 걸기→폴링→완료)를 실제로 밟았다.
+- 독립 코드리뷰 에이전트에게 세 커밋을 다시 검토시켰다 — 하나 더 찾았고
+  고쳤다(§7.1). 나머지는 문제없음으로 확인됨.
+- 전체 pytest **재실행: 4747 passed, 0 failed, 56 skipped(35분 8초)** —
+  §7.1의 새 시험(`test_variant_render_batch_item_error_code_has_no_host_path`)
+  포함, 회귀 없음.
+- `scripts/run-postgres-store-tests.ps1` **재실행: 52 passed.**
+
 **확인 못 함:**
 - §1-6의 나머지 넷(받아쓰기·부분재생성·TTS 후보·촬영본 파생 렌더) — §3에
   적은 대로 조사만 하고 코드는 안 건드렸다.
-- 컨테이너 재빌드·Tauri 셸 빌드는 이번에도 안 함 — API 코드 변경분은 다음
-  `owner-ready.ps1` 재시작/재빌드 때 자동 반영된다(직전 인계와 같은 판단).
-- `runtime/videobox-user-library/packs/starter-v1/`의 1.0.0·1.1.0·1.2.0
-  (합계 약 1.47GB)과 `runtime/starter-media-pack-131` 중복 여부는 owner
-  판단으로 남겼다(§5).
+- 프런트(vitest)는 이번 §7 라운드에서 다시 돌리지 않았다 — §7.1의 수정이
+  백엔드 전용(`local_pipeline.py`)이고 프런트 파일은 이번 라운드에서 하나도
+  안 바뀌어, 앞서(§8 재사용 게이트 전) 이미 확인한 128 files/1588 tests
+  결과가 여전히 유효하다고 판단했다.
+- Tauri 셸 빌드는 이번에도 안 함 — owner 지시 범위 밖.
 
-## 8. 재사용 게이트 (CLAUDE.md §8.3)
+## 9. 재사용 게이트 (CLAUDE.md §8.3)
 
 - **확인한 재사용 후보**: 더빙의 비동기 잡 패턴(`_dubbing_jobs`/
   `start_dubbing`/`run_dubbing_job`/`get_dubbing_job`, `dubbingProgress.ts`,
@@ -226,7 +318,9 @@ owner가 "유지"로 결정했다(§1-1 봉쇄가 이미 들어가 더 위험하
 - **경계 보존**: CSRF 방어는 라우터 다섯 곳에 `Depends()`로만 걸었다 — 전역
   미들웨어로 만들지 않았다(다른 GET/조회 문까지 걸릴 위험을 피하려고).
 
-## 부록 — 전체 pytest 결과 (2026-09-08, worktree venv)
+## 부록 — 전체 pytest 결과 (2026-09-08, worktree venv, 두 차례)
+
+### 1차 (§1~§6 완료 뒤)
 
 `.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider` (분리 프로세스, 38분 19초)
 
@@ -248,3 +342,20 @@ owner가 "유지"로 결정했다(§1-1 봉쇄가 이미 들어가 더 위험하
 `scripts/run-postgres-store-tests.ps1`(일회용 DB): **52 passed** (변화 없음).
 
 프런트(vitest): **128 files / 1588 tests 전부 초록.**
+
+### 2차 (§7.1이 세 번째 leak 자리를 고친 뒤, owner 지시로 재실행)
+
+`.venv/Scripts/python.exe -m pytest -q -p no:cacheprovider` (분리 프로세스, 35분 8초)
+
+**4747 통과 / 0 실패 / 56 skip.** 4745→4747은 §7.1이 추가한 시험
+(`test_variant_render_batch_item_error_code_has_no_host_path`)과 4745 계산
+당시 기준선 오차 하나 때문이다 — 실패는 전혀 없었다.
+
+`scripts/run-postgres-store-tests.ps1`(일회용 DB): **52 passed** (변화 없음).
+
+프런트(vitest)는 이번 2차에서 다시 돌리지 않았다 — §7.1의 수정이 백엔드
+전용이라 1차 결과(128/1588 초록)가 여전히 유효하다고 판단했다.
+
+**컨테이너 재빌드·실제 확인은 §7.3 참고.** 두 라운드 다 owner-ready.ps1로
+재빌드·재시작한 뒤 실제 돌아가는 컨테이너에서 직접 재현해 확인했다 —
+API 단건이 아니라 여러 단계를 실제로 밟았다(§7.3).

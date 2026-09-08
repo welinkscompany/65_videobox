@@ -2311,7 +2311,10 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                     {
                         "variant_id": variant_id,
                         "status": "failed",
-                        "error_code": str(exc),
+                        # 이 항목은 `_http_error`를 안 거치는 **정상적인 200 응답**의
+                        # 일부로 그대로 나간다(코드리뷰 2026-09-08) -- `error_message`
+                        # 키가 아니라서 §1-3 확장의 grep이 놓쳤다.
+                        "error_code": safe_job_error_message(exc),
                         "should_start": False,
                     }
                 )

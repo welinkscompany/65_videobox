@@ -6,10 +6,11 @@
 인계 §2-1). 그 자리는 DB에 저장된 뒤 **정상적인 200 조회**로 나가므로
 `_http_error`를 안 거친다.
 
-여기서는 파일 경로·ffmpeg/ffprobe 명령 출력을 실제로 담을 수 있는 예외
-종류(`FileNotFoundError`·`PermissionError`·`subprocess.CalledProcessError`·
-그 밖의 `OSError`)만 고정 문구로 바꾸고, 나머지(코드성 `ValueError`·`RuntimeError`
-등)는 그대로 둔다 -- `test_final_render_publish_fence.py`·
+여기서는 파일 경로·ffmpeg/ffprobe 명령 출력을 실제로 담는다고 **직접 확인한**
+세 종류(`FileNotFoundError`·`PermissionError`·`subprocess.CalledProcessError`)만
+고정 문구로 바꾸고, 나머지(코드성 `ValueError`·`RuntimeError`, 그리고 바로 그
+`OSError` 자신 -- 이 저장소 시험 다수가 안전한 설명 문구로 주입 실패를
+흉내 내는 데 쓴다)는 그대로 둔다 -- `test_final_render_publish_fence.py`·
 `test_api.py::test_segment_analysis_endpoint_marks_job_failed_on_unexpected_runtime_failure`
 등 기존 시험 스무 개 가까이가 그 정확한 문구를 재기 때문이다.
 """
@@ -23,6 +24,8 @@ from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
 from videobox_core_engine.job_error_message import safe_job_error_message
+from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_storage.local_project_store import LocalProjectStore
 
 
 def test_a_missing_source_file_error_becomes_a_fixed_code_not_the_real_path() -> None:
@@ -124,3 +127,31 @@ def test_segment_analysis_job_error_message_has_no_host_path_when_the_script_fil
     assert "/" not in error_message and "\\" not in error_message
     # HTTP 응답도 §1-3의 `_http_error`가 이미 지킨다 -- 여기서는 잡 저장부만 잰다.
     assert response.status_code in (404, 500)
+
+
+def test_variant_render_batch_item_error_code_has_no_host_path(tmp_path: Path, monkeypatch) -> None:
+    """`_http_error`도 잡 저장부도 아닌 세 번째 자리 -- 코드리뷰(2026-09-08)가 찾음.
+
+    `start_variant_renders`는 항목별 실패를 `error_message`가 아니라
+    `error_code` 열쇠로 **정상적인 200 응답 본문**에 그대로 실어 나른다.
+    §1-3 확장의 grep(`error_message=str(exc)`)이 다른 열쇠 이름이라 놓쳤다.
+    """
+    store = LocalProjectStore(tmp_path)
+    pipeline = LocalPipelineRunner(store)
+
+    host_path = Path(str(tmp_path)) / "projects" / "secret" / "assets" / "clip.mp4"
+
+    def _boom(self, *, project_id, session_id, variant_id):
+        raise FileNotFoundError(host_path)
+
+    monkeypatch.setattr(LocalPipelineRunner, "_materialize_variant_for_output", _boom)
+
+    result = pipeline.start_variant_renders(
+        project_id="does-not-matter", session_id="does-not-matter", variant_ids=["horizontal"],
+    )
+
+    item = result["items"][0]
+    assert item["status"] == "failed"
+    assert item["error_code"] == "asset_file_missing"
+    assert str(host_path) not in item["error_code"]
+    assert "/" not in item["error_code"] and "\\" not in item["error_code"]
