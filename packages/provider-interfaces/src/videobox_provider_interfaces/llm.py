@@ -25,6 +25,9 @@ class LLMTaskType(str, Enum):
     # 기본 상한 30초로는 모자라서 이 일만 따로 상한을 준다
     # (`infographic_service`, 2026-09-07 실측).
     INFOGRAPHIC_HTML = "infographic_html"
+    # 밤사이 대화 기록을 훑어 owner가 승인할 만한 기억 후보를 뽑는다
+    # (기억 사서, 2026-09-08 착수). 도구 호출 없이 순수 구조화 응답 한 번뿐.
+    MEMORY_LIBRARIAN_DISTILL = "memory_librarian_distill"
 
 
 @dataclass(slots=True, frozen=True)
