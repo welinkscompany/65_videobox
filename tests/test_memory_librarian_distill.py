@@ -153,6 +153,30 @@ def test_a_failed_llm_call_does_not_advance_the_watermark(tmp_path: Path) -> Non
     assert store.list_yujin_memory_candidates(project_id=project_id) == []
 
 
+def test_one_fact_that_just_copies_the_source_text_does_not_sink_the_others(tmp_path: Path) -> None:
+    """실물 확인(2026-09-08)에서 로컬 모델이 원문을 그대로 베껴 냈다 --
+    `yujin_memory_policy.validate_yujin_memory_candidate`가
+    `memory_candidate_full_source_message_forbidden`으로 거절한다. 그
+    사실 하나만 버리고 나머지 진짜 사실은 그대로 살아야 한다."""
+    store = LocalProjectStore(tmp_path, now=lambda: NOW)
+    project_id, session_id, conversation_id = _new_project_with_conversation(store)
+    _exchange(store, project_id=project_id, session_id=session_id, conversation_id=conversation_id,
+              seq=1, user_text="저는 빠른 컷 편집을 좋아해요.")
+    runtime = _FakeRuntime(facts=[
+        {"category": "pacing", "text": "저는 빠른 컷 편집을 좋아해요."},  # 원문 그대로 -- 거절돼야 함
+        {"category": "audio", "text": "음악은 목소리보다 작게 유지함."},  # 진짜 distilled 사실
+    ])
+
+    result = distill_conversation_memories(
+        store, project_id=project_id, conversation_id=conversation_id, runtime=runtime, as_of=NOW,
+    )
+
+    assert result == {"status": "succeeded", "candidates_created": 1}
+    candidates = store.list_yujin_memory_candidates(project_id=project_id)
+    assert len(candidates) == 1
+    assert candidates[0]["category"] == "audio"
+
+
 def test_an_out_of_scope_category_from_the_model_is_dropped_not_stored(tmp_path: Path) -> None:
     """모델이 지어낸 category는 저장하지 않는다 -- 스키마가 받아 주는 다섯 개뿐."""
     store = LocalProjectStore(tmp_path, now=lambda: NOW)

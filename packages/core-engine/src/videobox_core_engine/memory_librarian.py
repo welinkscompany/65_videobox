@@ -54,7 +54,12 @@ _DISTILL_INSTRUCTION = (
     "음악·효과음 크기, 영상 분위기, 작업 방식)을 찾아라. 그 순간에만 해당하는 "
     "일회성 지시(예: '이번 장면만 늘려줘')는 취향이 아니다. 찾은 각 취향을 "
     "{category, text} 형태로 낸다 -- category는 pacing·caption·audio·tone·workflow "
-    "중 하나. 찾은 게 없으면 빈 목록을 낸다. 지어내지 않는다."
+    "중 하나. 찾은 게 없으면 빈 목록을 낸다. 지어내지 않는다.\n\n"
+    "**text는 원문을 그대로 옮기지 않는다.** 창작자가 한 말을 그대로 베끼거나 "
+    "일부만 잘라 붙이면 안 되고, 나중에 다시 볼 때 뜻이 통하는 **일반화된 서술문**으로 "
+    "다시 쓴다. 예를 들어 창작자가 \"컷을 빠르게 넘기는 걸 좋아해요\"라고 했으면 "
+    "text는 \"빠른 컷 편집을 선호함\"처럼 다른 문장으로 쓴다 -- 원문 문장을 "
+    "부분 문자열로도 포함하면 안 된다."
 )
 
 
@@ -175,16 +180,24 @@ def distill_conversation_memories(
             text = str(fact.get("text") or "").strip()
             if category not in _ALLOWED_CATEGORIES or not text:
                 continue
-            store.create_yujin_memory_candidate(
-                project_id=project_id,
-                conversation_id=conversation_id,
-                client_request_id=f"librarian-{conversation_id}-{latest_order}-{index}",
-                source_message_ids=source_message_ids,
-                memory_scope="creator",
-                category=category,
-                proposed_text=text,
-            )
-            created += 1
+            try:
+                store.create_yujin_memory_candidate(
+                    project_id=project_id,
+                    conversation_id=conversation_id,
+                    client_request_id=f"librarian-{conversation_id}-{latest_order}-{index}",
+                    source_message_ids=source_message_ids,
+                    memory_scope="creator",
+                    category=category,
+                    proposed_text=text,
+                )
+                created += 1
+            except ValueError:
+                # 이 사실 하나가 정책을 어겼다(예: 원문을 그대로 베낌,
+                # `yujin_memory_policy.validate_yujin_memory_candidate`) --
+                # 로컬 모델이 가끔 이런다. 한 사실이 나빠도 나머지 진짜
+                # 사실까지 버릴 이유는 없다 -- 더빙이 "한 장면이 죽어도
+                # 나머지를 살린다"고 하는 것과 같은 이유다.
+                continue
     except Exception:
         # 실패한 실행은 워터마크를 안 밀어 준다 -- 다음 실행이 같은 메시지를
         # 다시 시도할 수 있게. 예외 원문은 이 함수 밖(호출부 로그)이 다룬다.
