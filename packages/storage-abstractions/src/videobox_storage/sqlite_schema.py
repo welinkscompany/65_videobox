@@ -417,6 +417,17 @@ PROJECT_SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS yujin_memory_librarian_watermark (
+        project_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        last_message_order INTEGER NOT NULL,
+        last_run_status TEXT NOT NULL,
+        last_run_at TEXT NOT NULL,
+        last_candidates_created INTEGER NOT NULL,
+        PRIMARY KEY (project_id, conversation_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS director_proposal_lifecycle_events (
         event_id INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL,
         status TEXT NOT NULL, reason TEXT, changed_at TEXT NOT NULL

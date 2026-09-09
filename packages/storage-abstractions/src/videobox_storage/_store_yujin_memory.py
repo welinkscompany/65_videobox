@@ -1252,3 +1252,103 @@ class YujinMemoryMixin:
         )
         return [dict(row) for row in rows]
 
+    # -- 기억 사서(memory librarian) -----------------------------------------
+    # `docs/handoffs/2026-09-08-hermes-egress-and-multitrack-plans.ko.md`에서
+    # 이어지는 작업. 대화별로 어디까지 읽었는지(watermark)를 남긴다.
+
+    def list_director_messages_after(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        after_message_order: int,
+    ) -> list[dict[str, Any]]:
+        """`after_message_order`보다 큰 메시지만, 순서대로.
+
+        `list_director_messages`(위)는 표시용이라 `message_order`를 안 준다 --
+        사서는 워터마크를 전진시키려면 그 값이 꼭 있어야 해서 따로 둔다.
+        """
+        rows = self._fetchall(
+            project_id,
+            """
+            SELECT message_id, role, text, message_order, created_at
+            FROM director_messages
+            WHERE project_id = ? AND conversation_id = ? AND message_order > ?
+            ORDER BY message_order
+            """,
+            (project_id, conversation_id, after_message_order),
+        )
+        return [dict(row) for row in rows]
+
+    def get_memory_librarian_watermark(
+        self, *, project_id: str, conversation_id: str
+    ) -> dict[str, Any] | None:
+        """한 번도 안 돌았으면 `None` -- "0부터"와 "실행한 적 없음"을 구분한다."""
+        row = self._fetchone(
+            project_id,
+            """
+            SELECT project_id, conversation_id, last_message_order,
+                   last_run_status, last_run_at, last_candidates_created
+            FROM yujin_memory_librarian_watermark
+            WHERE project_id = ? AND conversation_id = ?
+            """,
+            (project_id, conversation_id),
+        )
+        return dict(row) if row is not None else None
+
+    def record_memory_librarian_run(
+        self,
+        *,
+        project_id: str,
+        conversation_id: str,
+        last_message_order: int,
+        status: Literal["succeeded", "failed", "nothing_new"],
+        candidates_created: int,
+    ) -> dict[str, Any]:
+        """이번 실행 결과로 **통째로 덮어쓴다** -- 이전 실행 숫자를 안 물려받는다.
+
+        Rumi Wiki Librarian이 실제로 겪은 실패(성공 실행이 이전 실행의
+        카운터를 물려받아 마치 자기가 한 것처럼 보임)를 코드로 막는다.
+        모든 종료 경로(성공·실패·새 메시지 없음)에서 호출해야 한다 --
+        그래야 "돌았는데 아무것도 안 함"과 "안 돌았음"이 구분된다.
+        """
+        if status not in ("succeeded", "failed", "nothing_new"):
+            raise ValueError("memory_librarian_run_status_invalid")
+        if candidates_created < 0:
+            raise ValueError("memory_librarian_run_candidates_invalid")
+        connection = self._connection(project_id)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            now = self._now_iso()
+            connection.execute(
+                """
+                INSERT INTO yujin_memory_librarian_watermark (
+                    project_id, conversation_id, last_message_order,
+                    last_run_status, last_run_at, last_candidates_created
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, conversation_id) DO UPDATE SET
+                    last_message_order = excluded.last_message_order,
+                    last_run_status = excluded.last_run_status,
+                    last_run_at = excluded.last_run_at,
+                    last_candidates_created = excluded.last_candidates_created
+                """,
+                (project_id, conversation_id, last_message_order, status, now, candidates_created),
+            )
+            row = connection.execute(
+                """
+                SELECT project_id, conversation_id, last_message_order,
+                       last_run_status, last_run_at, last_candidates_created
+                FROM yujin_memory_librarian_watermark
+                WHERE project_id = ? AND conversation_id = ?
+                """,
+                (project_id, conversation_id),
+            ).fetchone()
+            connection.commit()
+            return dict(row)
+        except Exception:
+            if connection.in_transaction:
+                connection.rollback()
+            raise
+        finally:
+            connection.close()
+
