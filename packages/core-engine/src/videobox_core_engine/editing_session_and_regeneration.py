@@ -49,6 +49,7 @@ from videobox_core_engine.editing_session import (
     update_caption_style,
     build_partial_regeneration_request,
     _equivalent_overlay_types,
+    _iter_matching_overlay_containers,
     clear_segment_broll_override,
     clear_segment_music_override,
     clear_segment_sfx_override,
@@ -219,33 +220,15 @@ class EditingSessionRegenerationMixin:
     def _persist_image_overlay_identity(
         *, updated_session: dict[str, Any], segment_id: str, asset_id: str, identity: dict[str, str],
     ) -> None:
-        has_direct_match = any(
-            isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
-            for segment in updated_session.get("segments", [])
-        )
         matched = False
-        for segment in updated_session.get("segments", []):
-            if not isinstance(segment, dict):
+        for container in _iter_matching_overlay_containers(updated_session, segment_id):
+            overlays = container.get("visual_overlays")
+            if not isinstance(overlays, list):
                 continue
-            containing_segment_id = str(segment.get("segment_id") or "")
-            direct_match = containing_segment_id == segment_id
-            overlay_lists: list[list[Any]] = []
-            if direct_match and isinstance(segment.get("visual_overlays"), list):
-                overlay_lists.append(segment["visual_overlays"])
-            content_windows = segment.get("content_windows")
-            if isinstance(content_windows, list):
-                for window in content_windows:
-                    if not isinstance(window, dict):
-                        continue
-                    source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
-                    visible_match = direct_match if has_direct_match else source_segment_id == segment_id
-                    if visible_match and isinstance(window.get("visual_overlays"), list):
-                        overlay_lists.append(window["visual_overlays"])
-            for overlays in overlay_lists:
-                for overlay in reversed(overlays):
-                    if isinstance(overlay, dict) and str(overlay.get("asset_id") or "") == asset_id:
-                        overlay.update(identity)
-                        matched = True
+            for overlay in reversed(overlays):
+                if isinstance(overlay, dict) and str(overlay.get("asset_id") or "") == asset_id:
+                    overlay.update(identity)
+                    matched = True
         if not matched:
             raise KeyError(f"Image overlay not found in editing session: {segment_id}")
 
@@ -257,37 +240,19 @@ class EditingSessionRegenerationMixin:
 
         이 칸을 안 보낸 요청(옛 화면·유진)이 오버레이를 통째로 다시 쓸 때 이미
         켜 둔 소리 설정을 지우지 않으려면, 새로 쓰기 전에 옛 값을 먼저 봐야
-        한다 -- `_persist_image_overlay_identity`와 같은 찾기 규칙(직속 세그먼트
-        아니면 그 밑 content_windows)을 그대로 따른다.
+        한다 -- 쓰는 자리(`_upsert_segment_overlay` 등)와 같은 찾기 규칙을
+        `_iter_matching_overlay_containers`로 공유한다.
         """
         equivalent = _equivalent_overlay_types("image_overlay")
-        has_direct_match = any(
-            isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
-            for segment in session.get("segments", [])
-        )
-        for segment in session.get("segments", []):
-            if not isinstance(segment, dict):
+        for container in _iter_matching_overlay_containers(session, segment_id):
+            overlays = container.get("visual_overlays")
+            if not isinstance(overlays, list):
                 continue
-            containing_segment_id = str(segment.get("segment_id") or "")
-            direct_match = containing_segment_id == segment_id
-            overlay_lists: list[list[Any]] = []
-            if direct_match and isinstance(segment.get("visual_overlays"), list):
-                overlay_lists.append(segment["visual_overlays"])
-            content_windows = segment.get("content_windows")
-            if isinstance(content_windows, list):
-                for window in content_windows:
-                    if not isinstance(window, dict):
-                        continue
-                    source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
-                    visible_match = direct_match if has_direct_match else source_segment_id == segment_id
-                    if visible_match and isinstance(window.get("visual_overlays"), list):
-                        overlay_lists.append(window["visual_overlays"])
-            for overlays in overlay_lists:
-                for overlay in overlays:
-                    if isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") in equivalent:
-                        value = overlay.get("preserve_source_audio")
-                        if isinstance(value, bool):
-                            return value
+            for overlay in overlays:
+                if isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") in equivalent:
+                    value = overlay.get("preserve_source_audio")
+                    if isinstance(value, bool):
+                        return value
         return None
 
     def _save_editing_session_with_revision(

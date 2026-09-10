@@ -1881,6 +1881,50 @@ def build_partial_regeneration_request(
     }
 
 
+def _iter_matching_overlay_containers(
+    session: dict[str, Any], segment_id: str,
+) -> list[dict[str, Any]]:
+    """`segment_id`에 해당하는 오버레이 컨테이너(직속 세그먼트, 또는 그 밑
+    `content_windows` 안의 창)를 전부 모아서 낸다.
+
+    이 찾기 규칙 하나(직속 세그먼트가 있으면 직속 세그먼트 자신 + 그 세그먼트의
+    모든 창, 없으면 `source_segment_id`가 일치하는 창만)를 오버레이를 쓰는 자리
+    (`_upsert_segment_overlay`, `_remove_segment_overlay`)와 읽는 자리(사진
+    오버레이 정체성 기록, `preserve_source_audio` 조회)가 함께 쓴다. 예전에는
+    이 순회를 세 곳에서 각자 다시 짜고 있었다 -- 세그먼트/`content_windows`
+    중첩 구조가 바뀌면 한 곳이라도 빠뜨리는 순간 소리 없이 데이터가 샌다.
+
+    컨테이너 자체(딕셔너리)를 낸다. `visual_overlays` 값이 아직 list가 아니거나
+    없을 수도 있다 -- 쓰는 자리는 새 list로 갈아 끼우고, 읽는 자리는 각자
+    `isinstance(..., list)`로 걸러야 한다(둘의 필요가 다르기 때문에 여기서
+    미리 걸러주지 않는다).
+    """
+    segments = session.get("segments", [])
+    has_direct_match = any(
+        isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
+        for segment in segments
+    )
+    containers: list[dict[str, Any]] = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        containing_segment_id = str(segment.get("segment_id") or "")
+        direct_match = containing_segment_id == segment_id
+        if direct_match:
+            containers.append(segment)
+        content_windows = segment.get("content_windows")
+        if not isinstance(content_windows, list):
+            continue
+        for window in content_windows:
+            if not isinstance(window, dict):
+                continue
+            source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
+            visible_match = direct_match if has_direct_match else source_segment_id == segment_id
+            if visible_match:
+                containers.append(window)
+    return containers
+
+
 def _upsert_segment_overlay(
     *,
     session: dict[str, Any],
@@ -1890,34 +1934,12 @@ def _upsert_segment_overlay(
     mutation_type: str,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
-    has_direct_match = any(
-        isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
-        for segment in updated.get("segments", [])
-    )
     matched = False
-    for segment in updated.get("segments", []):
-        if not isinstance(segment, dict):
-            continue
-        containing_segment_id = str(segment.get("segment_id") or "")
-        direct_match = containing_segment_id == segment_id
-        if direct_match:
-            segment["visual_overlays"] = _upsert_overlay_list(
-                segment.get("visual_overlays"), overlay_type=overlay_type, overlay_payload=overlay_payload,
-            )
-            matched = True
-        content_windows = segment.get("content_windows")
-        if not isinstance(content_windows, list):
-            continue
-        for window in content_windows:
-            if not isinstance(window, dict):
-                continue
-            source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
-            if (has_direct_match and not direct_match) or (not has_direct_match and source_segment_id != segment_id):
-                continue
-            window["visual_overlays"] = _upsert_overlay_list(
-                window.get("visual_overlays"), overlay_type=overlay_type, overlay_payload=overlay_payload,
-            )
-            matched = True
+    for container in _iter_matching_overlay_containers(updated, segment_id):
+        container["visual_overlays"] = _upsert_overlay_list(
+            container.get("visual_overlays"), overlay_type=overlay_type, overlay_payload=overlay_payload,
+        )
+        matched = True
     if not matched:
         raise KeyError(f"Segment not found in editing session: {segment_id}")
     return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
@@ -1931,34 +1953,12 @@ def _remove_segment_overlay(
     mutation_type: str,
 ) -> dict[str, Any]:
     updated = deepcopy(session)
-    has_direct_match = any(
-        isinstance(segment, dict) and str(segment.get("segment_id") or "") == segment_id
-        for segment in updated.get("segments", [])
-    )
     matched = False
-    for segment in updated.get("segments", []):
-        if not isinstance(segment, dict):
-            continue
-        containing_segment_id = str(segment.get("segment_id") or "")
-        direct_match = containing_segment_id == segment_id
-        if direct_match:
-            segment["visual_overlays"] = _remove_overlay_from_list(
-                segment.get("visual_overlays"), overlay_type=overlay_type,
-            )
-            matched = True
-        content_windows = segment.get("content_windows")
-        if not isinstance(content_windows, list):
-            continue
-        for window in content_windows:
-            if not isinstance(window, dict):
-                continue
-            source_segment_id = str(window.get("source_segment_id") or containing_segment_id)
-            if (has_direct_match and not direct_match) or (not has_direct_match and source_segment_id != segment_id):
-                continue
-            window["visual_overlays"] = _remove_overlay_from_list(
-                window.get("visual_overlays"), overlay_type=overlay_type,
-            )
-            matched = True
+    for container in _iter_matching_overlay_containers(updated, segment_id):
+        container["visual_overlays"] = _remove_overlay_from_list(
+            container.get("visual_overlays"), overlay_type=overlay_type,
+        )
+        matched = True
     if not matched:
         raise KeyError(f"Segment not found in editing session: {segment_id}")
     return _apply_manual_mutation(before=session, updated=updated, mutation_type=mutation_type, segment_id=segment_id, extra={"overlay_type": overlay_type})
