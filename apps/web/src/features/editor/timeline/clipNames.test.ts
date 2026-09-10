@@ -44,4 +44,41 @@ describe("타임라인 막대 이름", () => {
     expect(clipContentLabel({ captionText: "   " })).toBeNull()
     expect(clipContentLabel({ overlayType: "무언가 새로운 것" })).toBeNull()
   })
+
+  it("얹은 것이 영상이면 그림이라 부르지 않는다", () => {
+    // 2026-09-10에 실제 화면에서 `오버레이 1 · 그림`으로 찍혔다 -- 얹은 것은 mp4였다.
+    expect(clipContentLabel({
+      overlayType: "image_overlay",
+      overlayPayload: {},
+      assetUri: "local://projects/p1/assets/asset_1.mp4",
+    })).toBe("영상")
+  })
+
+  it("얹은 것이 사진이면 예전 이름 그대로다", () => {
+    // 지금 쓰는 편집본의 문구가 바뀌면 안 된다.
+    expect(clipContentLabel({
+      overlayType: "image_overlay",
+      overlayPayload: {},
+      assetUri: "local://projects/p1/assets/asset_1.jpg",
+    })).toBe("그림")
+  })
+
+  it("무엇인지 모르면 사진으로 본다", () => {
+    // 확장자가 없는 옛 자산이 있다. 모르는 것을 영상이라 부르면 멀쩡한 문구가 바뀐다.
+    expect(clipContentLabel({
+      overlayType: "image_overlay",
+      overlayPayload: {},
+      assetUri: "local://projects/p1/assets/asset_1",
+    })).toBe("그림")
+  })
+
+  it("창작자가 적은 글이 있으면 그 글이 이긴다", () => {
+    // 종류 이름은 **적을 것이 없을 때의 대비책**이다. 이 순서가 뒤집히면
+    // 창작자가 적은 말이 사라진다.
+    expect(clipContentLabel({
+      overlayType: "image_overlay",
+      overlayPayload: { text: "매대 모습" },
+      assetUri: "local://projects/p1/assets/asset_1.mp4",
+    })).toBe("매대 모습")
+  })
 })

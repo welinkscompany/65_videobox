@@ -826,6 +826,9 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
           captionText: captionsByPlacementId.get(rect.clipId)?.text,
           overlayType: overlayByPlacementId.get(rect.clipId)?.overlayType,
           overlayPayload: overlayByPlacementId.get(rect.clipId)?.overlayPayload,
+          // 얹은 게 사진인지 영상인지는 여기서만 안다 -- 안 넘기면 함수는 고쳐졌는데
+          // 화면은 그대로인 채로 남는다("부품은 있는데 부르는 자리가 없다").
+          assetUri: overlayByPlacementId.get(rect.clipId)?.assetUri,
         });
         const clipDisplayName = formatClipDisplayName(rect.lane, ordinalInLane, displayBounds?.startSec ?? 0, clipContent);
         const clipShortName = formatClipShortName(rect.lane, ordinalInLane, clipContent);
