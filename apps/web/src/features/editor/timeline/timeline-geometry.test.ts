@@ -57,6 +57,55 @@ describe("timeline geometry", () => {
     expect(Object.keys(rect)).toEqual(["clipId", "lane", "x", "y", "width", "height"]);
   });
 
+  // 자유 멀티트랙 Phase 7 -- 줄이 **데이터에서** 온다.
+  //
+  // 지금은 `TIMELINE_LANES` 여섯 개가 코드에 박혀 있어서, 트랙을 추가해도
+  // (Phase 5의 문) 화면에 줄이 안 생긴다. 같은 종류 트랙 둘은 한 줄 안에서
+  // 겹쳐 그려진다.
+  describe("줄을 세션 트랙 목록에서 뽑을 때", () => {
+    const rows = ["narration", "broll", "track-broll-2", "bgm", "sfx", "overlay", "caption"] as const;
+    const viewport = { startSec: 0, endSec: 8, topPx: 0, heightPx: 400 };
+    const scale = { pixelsPerSecond: 100, originSec: 0 };
+
+    it("추가한 트랙의 클립은 그 트랙 줄에 놓인다", () => {
+      const rect = deriveClipRect(
+        { id: "clip-2", lane: "broll", trackId: "track-broll-2", startSec: 0, endSec: 1 },
+        viewport, scale, 30, rows,
+      );
+
+      expect(rect?.y).toBe(60); // rows[2]
+    });
+
+    it("이름표가 없는 클립은 그 종류의 줄에 그대로 놓인다", () => {
+      const rect = deriveClipRect(
+        { id: "clip-1", lane: "broll", startSec: 0, endSec: 1 },
+        viewport, scale, 30, rows,
+      );
+
+      expect(rect?.y).toBe(30); // rows[1]
+    });
+
+    it("모르는 이름표는 작업판을 죽이지 않고 그 종류의 줄로 내린다", () => {
+      // `requireClip`이 모르는 줄에 `RangeError`를 던지면 작업판 **전체**가
+      // 죽는다. 지운 트랙의 이름표가 남아 있는 것만으로 편집기를 못 여는
+      // 상태가 되면 안 된다.
+      const rect = deriveClipRect(
+        { id: "clip-3", lane: "broll", trackId: "track-broll-지워짐", startSec: 0, endSec: 1 },
+        viewport, scale, 30, rows,
+      );
+
+      expect(rect?.y).toBe(30);
+    });
+
+    it("줄 목록을 안 주면 예전 여섯 줄 그대로다", () => {
+      // 지금 있는 편집본은 전부 이 길로 온다 -- 한 픽셀도 움직이면 안 된다.
+      for (const [index, lane] of TIMELINE_LANES.entries()) {
+        const rect = deriveClipRect({ id: `c-${lane}`, lane, startSec: 0, endSec: 1 }, viewport, scale, 30);
+        expect(rect?.y).toBe(index * 30);
+      }
+    });
+  });
+
   it("clips partially visible time geometry to the viewport", () => {
     expect(deriveClipRect(
       { id: "partial", lane: "narration", startSec: 0, endSec: 5 },

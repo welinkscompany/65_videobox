@@ -9,7 +9,12 @@ export type TimelineClip = Readonly<{
   lane: TimelineLane;
   startSec: number;
   endSec: number;
+  /** 어느 트랙 줄인가. 없으면 그 종류(`lane`)의 줄. 자유 멀티트랙 Phase 7. */
+  trackId?: string;
 }>;
+
+/** 화면에 그릴 줄 목록(위에서 아래로). 안 주면 예전 고정 여섯 줄. */
+export type TimelineRowKeys = readonly string[];
 
 export type TimelineViewport = Readonly<{
   startSec: number;
@@ -128,6 +133,7 @@ export function deriveClipRect(
   viewport: TimelineGeometryViewport,
   scale: TimelineScale,
   laneHeightPx: number,
+  rows: TimelineRowKeys = TIMELINE_LANES,
 ): ClipRect | null {
   requireClip(clip);
   requireGeometryViewport(viewport);
@@ -140,7 +146,14 @@ export function deriveClipRect(
     return null;
   }
 
-  const laneIndex = TIMELINE_LANES.indexOf(clip.lane);
+  // 트랙 이름표가 있으면 그 줄, 없거나 **모르는 이름표면 그 종류의 줄**로
+  // 내린다. 지운 트랙의 이름표가 남아 있다는 이유만으로 작업판 전체가
+  // 죽으면 안 된다(`requireClip`은 종류만 검사한다).
+  const labelledIndex = clip.trackId === undefined ? -1 : rows.indexOf(clip.trackId);
+  const laneIndex = labelledIndex === -1 ? rows.indexOf(clip.lane) : labelledIndex;
+  if (laneIndex === -1) {
+    return null;
+  }
   const laneTopPx = laneIndex * laneHeightPx;
   const laneBottomPx = laneTopPx + laneHeightPx;
   const viewportBottomPx = viewport.topPx + viewport.heightPx;
