@@ -172,6 +172,22 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
     def _named(values: object) -> str:
         return ", ".join(f"{value}({_IMAGE_OVERLAY_PRESET_LABELS.get(value, value)})" for value in values)  # type: ignore[union-attr]
 
+    # **지금 얹힌 것이 사진인지 영상인지도 알려 준다**(2026-09-10, 대표님 상시
+    # 지시: 화면에 연 기능은 유진도 같이 연다). 얹는 것 자체는 이미 열렸다
+    # (`_OVERLAYABLE_ASSET_TYPES`). 그런데 이 줄이 종류를 말하지 않으면
+    # "얹은 영상 좀 작게 해줘"에 유진은 얹힌 것이 영상인지 모른 채 답해야
+    # 한다 -- 목록과 지금 걸린 값이 한 쌍이라는 교훈(전환·색감)이 여기도
+    # 그대로 걸린다. 새 저장 칸은 만들지 않는다 -- 이미 컨텍스트가 들고 있는
+    # `approved_asset_types`와 `image_overlays_by_segment`의 asset_id를
+    # 맞대는 것뿐이다.
+    asset_types = dict(context.approved_asset_types)
+
+    def _overlay_entry(segment_id: str, info: str) -> str:
+        asset_id = info.split("(", 1)[0]
+        if "(" in info and asset_types.get(asset_id) == "broll_video":
+            info = info.replace("(", "(video, ", 1)
+        return f"{segment_id}={info}"
+
     return (
         "사진을 **영상 위에 얹는** 것은 set_image_overlay다(장면 화면 자체를 사진으로 까는 "
         "apply_media와 다른 일이다). asset_id는 승인된 자산 중 **사진**만 쓴다. "
@@ -182,8 +198,9 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
         "넷은 **말한 것만 싣는다** -- 안 물어본 칸을 채우면 이미 맞춰 둔 자리가 조용히 움직인다. "
         "좌표(px·%)나 초 단위 시간은 받지 않는다 -- 이 이름들 말고는 없다. "
         "얹은 사진을 빼는 것은 remove_image_overlay다. "
-        # **지금 얹힌 것도 준다.** 목록과 한 쌍이다.
-        f"지금 사진이 얹힌 장면: {', '.join(f'{sid}={info}' for sid, info in context.image_overlays_by_segment) or '없음'}."
+        # **지금 얹힌 것도 준다.** 목록과 한 쌍이다. 얹힌 것이 영상이면
+        # `_overlay_entry`가 그 앞에 `video, `를 심는다.
+        f"지금 얹힌 것: {', '.join(_overlay_entry(sid, info) for sid, info in context.image_overlays_by_segment) or '없음'}."
     )
 
 

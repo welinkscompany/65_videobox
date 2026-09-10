@@ -323,3 +323,43 @@ def test_yujin_can_tell_a_photo_from_a_video_in_the_asset_list() -> None:
 
     assert "asset_photo(broll·사진" in catalogue, catalogue
     assert "asset_clip(broll," in catalogue, catalogue
+
+
+def test_yujin_is_told_whether_the_thing_on_screen_is_a_photo_or_a_video() -> None:
+    """대표님 상시 지시: 화면에 열면 유진도 같이 연다.
+
+    얹는 것은 이미 열렸다(`_OVERLAYABLE_ASSET_TYPES`). 그런데 유진에게
+    "지금 얹혀 있는 것"을 알려 주는 줄(`image_overlays_by_segment`)은 사진과
+    영상을 구별하지 않는다 -- "얹은 영상 작게 해줘"에 유진은 무엇이 얹혀
+    있는지 모른 채 답한다. 목록과 지금 걸린 값은 한 쌍이라는 것을 이
+    저장소는 전환·색감에서 이미 두 번 배웠다.
+
+    판단 근거는 세션이 이미 들고 있는 값 두 개를 맞대는 것뿐이다 --
+    `image_overlays_by_segment`의 asset_id와 `approved_asset_types`.
+    새 저장 칸은 만들지 않는다.
+    """
+    prompt = _editing_prompt(
+        instruction="얹은 영상 좀 작게 해줘",
+        context=_context(
+            approved_asset_ids=("asset-photo", "asset-music", "asset-clip"),
+            approved_asset_types=(
+                ("asset-photo", "image"), ("asset-music", "bgm"), ("asset-clip", "broll_video"),
+            ),
+            image_overlays_by_segment=(("seg-1", "asset-clip(bottom/right/small/fade_in)"),),
+        ),
+    )
+
+    assert "asset-clip(video, bottom/right/small/fade_in)" in prompt, prompt
+
+
+def test_a_photo_overlay_keeps_the_old_wording_with_no_video_signal() -> None:
+    """사진을 얹었을 때는 예전 문구가 그대로다 -- 신호는 영상에만 붙는다."""
+    prompt = _editing_prompt(
+        instruction="사진 좀 위로 올려줘",
+        context=_context(
+            image_overlays_by_segment=(("seg-1", "asset-photo(bottom/right/small/fade_in)"),),
+        ),
+    )
+
+    assert "asset-photo(bottom/right/small/fade_in)" in prompt
+    assert "asset-photo(video," not in prompt
