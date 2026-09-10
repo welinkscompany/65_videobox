@@ -452,6 +452,30 @@ def _clear_windowed_media_override(*, segment: dict[str, Any], field: str) -> No
                     window.pop(field, None)
 
 
+def _effective_media_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
+    """창에 **지금 실제로 렌더되는 것**을 담아서 돌려준다.
+
+    `_media_windows()`만 쓰면 안 되는 이유: 직접 선택(`segment["broll_override"]`
+    등)을 고르는 순간 그 필드는 창에서 지워진다(`_clear_windowed_media_override`).
+    그러니 창 목록만 보면 그 선택이 없는 것처럼 보인다. 렌더는 직접 선택을
+    창보다 먼저 보므로(`composition_plan.py`의 `direct_override` 분기)
+    실제로는 세그먼트 전체에 그 선택이 깔려 있다.
+
+    **합칠 때 이 차이가 데이터를 지웠다**(2026-09-10 발견): 합치기는 직접
+    선택을 지우고 창에 권한을 넘기는데, 접어 넣을 것이 창에 없어서 양쪽
+    선택이 통째로 사라졌다. 그래서 넘기기 전에 여기서 접어 넣는다 --
+    직접 선택은 세그먼트 전체에 걸리므로 모든 창에 같은 값을 쓴다.
+    """
+    windows = _media_windows(segment)
+    for field in ("broll_override", "music_override", "sfx_override"):
+        direct = segment.get(field)
+        if not isinstance(direct, dict):
+            continue
+        for window in windows:
+            window[field] = deepcopy(direct)
+    return windows
+
+
 def _content_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
     """Preserve per-source editorial meaning when a visible segment is merged."""
     raw = segment.get("content_windows")
@@ -548,9 +572,9 @@ def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, ri
     }
     merged["media_lineage"] = _media_lineage(left, right)
     left_duration = float(left["end_sec"]) - float(left["start_sec"])
-    merged["media_windows"] = _media_windows(left) + [
+    merged["media_windows"] = _effective_media_windows(left) + [
         {**window, "start_offset_sec": left_duration + float(window.get("start_offset_sec", 0.0))}
-        for window in _media_windows(right)
+        for window in _effective_media_windows(right)
     ]
     merged["media_window_basis"] = deepcopy(merged["media_windows"])
     merged["media_window_basis_offset_sec"] = 0.0

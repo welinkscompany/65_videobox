@@ -902,3 +902,130 @@ def test_a_rebuilt_timeline_does_not_place_two_clips_on_the_same_stretch() -> No
         )
         for earlier, later in zip(placed, placed[1:]):
             assert earlier[1] <= later[0], (track["track_type"], placed)
+
+
+def test_merging_two_segments_keeps_the_broll_each_one_had() -> None:
+    """장면 둘을 합쳤더니 골라 둔 브롤이 **둘 다 조용히 사라졌다**(2026-09-10
+    자유 멀티트랙 Phase 2 작업 중 발견).
+
+    합치기는 직접 선택을 일부러 지우고 창(`media_windows`)에 권한을 넘긴다 --
+    주석이 그렇게 말하고, 그래야 한쪽 선택이 다른 쪽 구간까지 늘어나지
+    않는다. 그런데 `_media_windows()`는 **이미 있는 창 목록을 그대로**
+    돌려주고, 직접 선택을 고르는 순간 그 필드는 창에서 지워져 있다
+    (`_clear_windowed_media_override`). 그래서 합칠 때 접어 넣을 것이
+    아무 데도 없어 선택이 통째로 없어졌다.
+
+    실제 렌더 경로로 잰다 -- 세션 dict만 보면 "창은 그대로 있다"고 보여서
+    사라진 것을 못 본다.
+    """
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+    from videobox_core_engine.editing_session import (
+        build_editing_session,
+        merge_adjacent_segments,
+        split_segment,
+        update_segment_broll_override,
+    )
+
+    def _broll_clips(session: dict) -> list[tuple[str, float, float]]:
+        materialized = materialize_editing_session_timeline(
+            timeline={"timeline_id": "t", "project_id": "p", "tracks": []},
+            editing_session=session,
+            project_id="p",
+        )
+        return sorted(
+            (str(clip.get("asset_id")), float(clip["start_sec"]), float(clip["end_sec"]))
+            for track in materialized.get("tracks", [])
+            if str(track.get("track_type")) == "broll"
+            for clip in track.get("clips", [])
+        )
+
+    session = build_editing_session(
+        project_id="p",
+        timeline={"timeline_id": "t", "project_id": "p", "tracks": [], "review_flags": [], "pending_recommendations": []},
+        segments=[{
+            "segment_id": "seg_001", "text": "한 장면", "start_sec": 0.0, "end_sec": 8.0,
+            "review_required": False, "cleanup_decision": "keep",
+        }],
+    )
+    session = split_segment(session=session, segment_id="seg_001", split_sec=4.0)
+    left_id, right_id = [segment["segment_id"] for segment in session["segments"]]
+    session = update_segment_broll_override(session=session, segment_id=left_id, asset_id="broll-A")
+    session = update_segment_broll_override(session=session, segment_id=right_id, asset_id="broll-B")
+
+    before = _broll_clips(session)
+    assert before == [("broll-A", 0.0, 4.0), ("broll-B", 4.0, 8.0)]
+
+    merged = merge_adjacent_segments(session=session, left_segment_id=left_id, right_segment_id=right_id)
+
+    # 합쳤다고 고른 것이 없어지면 안 된다. 자리도 그대로여야 한다 --
+    # 한쪽이 8초 전체로 늘어나는 것도 똑같이 틀린 답이다.
+    assert _broll_clips(merged) == before
+
+
+def _merge_fixture():
+    from videobox_core_engine.editing_session import build_editing_session, split_segment
+
+    session = build_editing_session(
+        project_id="p",
+        timeline={"timeline_id": "t", "project_id": "p", "tracks": [], "review_flags": [], "pending_recommendations": []},
+        segments=[{
+            "segment_id": "seg_001", "text": "한 장면", "start_sec": 0.0, "end_sec": 8.0,
+            "review_required": False, "cleanup_decision": "keep",
+        }],
+    )
+    return split_segment(session=session, segment_id="seg_001", split_sec=4.0)
+
+
+def _rendered_clips(session: dict, track_type: str = "broll") -> list[tuple[str, float, float]]:
+    from videobox_core_engine.composition_plan import materialize_editing_session_timeline
+
+    materialized = materialize_editing_session_timeline(
+        timeline={"timeline_id": "t", "project_id": "p", "tracks": []}, editing_session=session, project_id="p",
+    )
+    return sorted(
+        (str(clip.get("asset_id")), float(clip["start_sec"]), float(clip["end_sec"]))
+        for track in materialized.get("tracks", [])
+        if str(track.get("track_type")) == track_type
+        for clip in track.get("clips", [])
+    )
+
+
+@pytest.mark.parametrize("chosen_side", ["left", "right"])
+def test_merging_does_not_stretch_one_sides_broll_over_the_other(chosen_side: str) -> None:
+    """한쪽에만 브롤이 있을 때. 잃어버리는 것도 틀렸지만, 남은 하나를 합친
+    구간 전체(8초)로 늘리는 것도 똑같이 틀렸다 -- 고르지도 않은 구간에
+    영상이 깔린다."""
+    from videobox_core_engine.editing_session import merge_adjacent_segments, update_segment_broll_override
+
+    session = _merge_fixture()
+    left_id, right_id = [segment["segment_id"] for segment in session["segments"]]
+    target = left_id if chosen_side == "left" else right_id
+    session = update_segment_broll_override(session=session, segment_id=target, asset_id="broll-1")
+    expected = _rendered_clips(session)
+
+    merged = merge_adjacent_segments(session=session, left_segment_id=left_id, right_segment_id=right_id)
+
+    assert expected == [("broll-1", 0.0, 4.0)] if chosen_side == "left" else [("broll-1", 4.0, 8.0)]
+    assert _rendered_clips(merged) == expected
+
+
+def test_merging_twice_keeps_every_choice_at_its_own_place() -> None:
+    """합칠 때마다 창 오프셋이 쌓인다. 한 번은 맞고 두 번째에 어긋나는
+    실수가 흔해서 세 조각을 두 번 합쳐 본다."""
+    from videobox_core_engine.editing_session import (
+        merge_adjacent_segments, split_segment, update_segment_broll_override,
+    )
+
+    session = _merge_fixture()
+    session = split_segment(session=session, segment_id=session["segments"][1]["segment_id"], split_sec=6.0)
+    for index, segment in enumerate(list(session["segments"])):
+        session = update_segment_broll_override(session=session, segment_id=segment["segment_id"], asset_id=f"broll-{index}")
+    expected = _rendered_clips(session)
+    assert len(expected) == 3
+
+    ids = [segment["segment_id"] for segment in session["segments"]]
+    merged = merge_adjacent_segments(session=session, left_segment_id=ids[0], right_segment_id=ids[1])
+    ids = [segment["segment_id"] for segment in merged["segments"]]
+    merged = merge_adjacent_segments(session=merged, left_segment_id=ids[0], right_segment_id=ids[1])
+
+    assert _rendered_clips(merged) == expected
