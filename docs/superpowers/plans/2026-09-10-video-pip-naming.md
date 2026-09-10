@@ -231,3 +231,51 @@ def test_yujin_is_told_whether_the_thing_on_screen_is_a_photo_or_a_video() -> No
 영상 신호를 다시 빼 놓고 돌린다. 새 시험이 죽어야 한다. 확인 뒤 되돌린다.
 
 - [ ] **Step 7: 커밋한다**
+
+---
+
+### Task 4: 유진이 읽는 안내문이 스스로 모순되지 않게 한다
+
+**추가 경위:** Task 3 검토에서 나왔다. 계획을 세울 때는 몰랐고, 원인은 이 작업 앞의 커밋 `c43abf4b1`이다.
+
+**Files:**
+- Modify: `packages/core-engine/src/videobox_core_engine/yujin_editing_proposal_service.py:193` (`_image_overlay_catalogue` 안내문)
+- Test: `tests/test_yujin_image_overlay_presets.py`
+
+**Interfaces:**
+- Consumes: 없음
+- Produces: 없음
+
+**배경:**
+유진이 한 번에 읽는 프롬프트 안에 서로 반대되는 두 문장이 있다.
+
+- `:277` (`_approved_asset_catalogue`, 먼저 실린다): "`set_image_overlay`로 화면 위에 얹을 수 있는 것은 **보이는 자산**(사진·영상)뿐이다"
+- `:193` (`_image_overlay_catalogue`, 뒤에 실린다): "asset_id는 승인된 자산 중 **사진**만 쓴다"
+
+영상 오버레이는 `c43abf4b1`로 이미 열렸는데(`_OVERLAYABLE_ASSET_TYPES`) 이 줄만 안 따라갔다. 유진이 뒤 문장을 믿으면 **영상을 얹어 달라는 말을 거절한다** — 백엔드는 받아 주는데도. 이 저장소가 되풀이한 "목록과 안내문은 한 쌍"이고, 대표님 상시 지시("항상 유진이가 같이 실행할수 있게 배선해줘")를 정면으로 어기는 자리다.
+
+- [ ] **Step 1: 실패하는 시험을 쓴다**
+
+`tests/test_yujin_image_overlay_presets.py`에 더한다. `_editing_prompt`(이미 이 파일이 가져다 쓴다)로 **프롬프트 전체**를 만들어, 얹을 수 있는 것에 대해 **서로 반대되는 말이 함께 실리지 않는지** 본다. 두 함수를 따로 재면 이 결함은 안 잡힌다 — 각자는 자기 안에서 일관되기 때문이다.
+
+- [ ] **Step 2: 시험을 돌려 실패를 확인한다**
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/test_yujin_image_overlay_presets.py -q
+```
+
+- [ ] **Step 3: 통과할 만큼만 고친다**
+
+`:193`을 사진·영상 둘 다 받는다는 말로 고친다. 소리(음악·효과음)는 못 얹는다는 것은 **그대로 남겨야** 한다 — 그건 지금도 사실이고 검증이 막는다(`_OVERLAYABLE_ASSET_TYPES`).
+
+- [ ] **Step 4: 시험을 돌려 통과를 확인한다**
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/test_yujin_image_overlay_presets.py tests/test_yujin_can_place_a_photo.py tests/test_yujin_editing_command_evaluation.py tests/test_yujin_editing_proposal_adapter.py -q
+```
+
+- [ ] **Step 5: 변형 탐침**
+
+`:193`을 "사진만"으로 되돌려 놓고 돌린다. 새 시험이 죽어야 한다. 확인 뒤 되돌린다.
+
+- [ ] **Step 6: 커밋한다**
