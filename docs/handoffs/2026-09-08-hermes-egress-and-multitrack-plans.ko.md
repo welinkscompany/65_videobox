@@ -257,3 +257,64 @@ Rumi Wiki Librarian(louis-personal-hermes, 아르고를 벤치마킹해 더 다�
 - **컨테이너 재빌드 뒤 재현 검증**: 이번 검증은 전부 호스트 venv +
   실제 LM Studio로 했다 — 컨테이너 안에서(owner-ready.ps1 재빌드 뒤)는
   아직 안 돌려 봤다.
+
+## 7. "화면 연결 안 된 것" 정리 (2026-09-10)
+
+owner 지시("화면 연결 안 된 것부터 진행하자. 나머지 내가 결정 권한
+위임할테니까 자율모드 개발 시작해")에 따라 백엔드는 있는데 화면에서 못
+부르는 API 목록을 하나씩 검증하며 진행. **절반 가까이가 실제로는 결함이
+아니었다** — 구현 전에 반드시 기존 회귀 시험·커밋 의도를 먼저 확인할 것.
+
+### 7.1 실제로 고친 것 (커밋·push·컨테이너 재검증 완료)
+
+- **촬영본 파생 렌더** (`85445ce74`) — `_start_derivative_render`는
+  있었는데 화면에 "새 클립 파일로 만들기" 버튼이 없었다. 실제 컨테이너에서
+  촬영본 선택→분석→적용→렌더→자료실 등록까지 전부 밟아 확인.
+- **성공 문구 내부 ID 노출 수정** (`4f5d5fb44`) — 검증 중 발견. §8 창작자
+  언어 규정 위반.
+- **완성본 공유 링크 재조회** (`d30681984`) — `listPreviewShares`를
+  2026-08-31 "확인된 대체 완료"(`4ea1bcbd1`)로 지웠지만 실제로는 대체하는
+  곳이 없었다. 새로고침하면 살아있는 공유 링크를 취소할 길이 없어지는
+  진짜 버그. 주소(token)는 보안상 그대로 안 보여주고, 취소 버튼만
+  되살렸다. RED 드릴 + 실제 컨테이너에서 생성→새로고침→취소→재확인까지
+  전체 루프 검증.
+
+### 7.2 확인해 보니 결함이 아니었던 것 (구현하지 않음)
+
+- `POST /api/library/ingest-path` — 사람용 UI가 아니라 외부 스크립트가
+  경로로 자료실에 등록하는 자동화 문(도입 커밋 `f660187f4`에 명시).
+- 검토 화면의 추천 승인/거절(`.../recommendations/{id}/approve|reject`) —
+  `TimelineReviewPage.test.tsx`에 "exposes no mutation action" 회귀 시험이
+  이미 있음(`38b5abc8f`, 2026-07-23). 화면은 의도적으로 읽기 전용이고,
+  해결은 편집기에서 세그먼트를 직접 고치는 것.
+- `format-templates/{id}/apply`(대체된 지 오래) · `.../DELETE`(이미 삭제된
+  죽은 경로) · `media-analysis` POST/단건/provenance(자동 트리거·엔지니어링
+  감사용) · `jobs.py`의 segment-analysis/broll-recommendation/
+  music-recommendation·build-timeline(atomic-draft-bundle 이전 세대) ·
+  scene-images/scene-videos 목록(개별 생성+폴링 UX로 이미 대체) ·
+  `media-library/install`(운영자 전용 문, ingest-path와 같은 패턴) ·
+  `footage/sources/{id}/preview`(이미 `<video src>`로 실제로 불림) ·
+  `preview-render`/`capcut-export`(`task22-parity-owners.test.ts`가 명시적
+  회귀 시험으로 막음, 낡은 App.tsx 셸 잔재) · `provider-traces`(엔지니어링
+  감사용) — 전부 자동화·감사·레거시 문이거나 이미 다른 경로로 연결돼 있음.
+- `media-library/search` — 처음엔 "검색창 자체가 없다"고 보고됐으나 직접
+  확인해 보니 에디터 자산 창에 "미디어 검색" 입력창이 이미 있다
+  (`EditorAssetBrowser.tsx`, `filterEditorAssets`). 다만 **문자열 부분
+  일치**일 뿐, 자기 자산 검색(`/api/library/search`)처럼 "차분한 배경
+  음악" 같은 의미 검색은 아니다 — 버그가 아니라 제품 판단이 필요한
+  UX 일관성 격차라 이번엔 손대지 않음.
+
+### 7.3 남은 것 (다음 세션 우선순위 후보)
+
+- **auto-cut 계획/탐지** (`POST .../jobs/auto-cut-plan`, `.../auto-cut-detect`)
+  — 진짜 빈 자리. `docs/implementation-plan.ko.md` §8의 `execution/auto_cut.py`
+  재사용 항목과 맞물림. 어느 화면에 버튼을 넣을지부터 설계 필요(편집기
+  세그먼트 도구 쪽이 유력).
+- **스톡 자산 의미 검색 vs 문자열 검색 격차** — 위 7.2 참고. 부분 일치로
+  충분한지, `/api/media-library/search`로 바꿀지는 owner 판단 필요.
+- **보너스로 발견한 것**(요청 범위 밖, 조사 중 우연히 나옴): `GET
+  /api/projects/{id}/media-library/{favorites,recent}`와 `GET
+  /api/media-library/install-state`도 화면에서 안 부른다. `a1f025eb9`가
+  "화면이 실제로 부른다"며 남겨 뒀는데, 같은 커밋의 다음 항목(A-6)이 그
+  유일한 호출자(`MediaLibraryBrowser`)를 지워서 그 근거가 지금은 안
+  맞다 — 다음에 이 커밋을 근거로 인용하기 전에 재확인할 것.
