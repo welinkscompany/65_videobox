@@ -537,6 +537,41 @@ describe("CreationInterview", () => {
     expect(startDraft.mock.calls[0][1]).toMatchObject({ narration_choice: { kind: "source_video", asset_id: "raw_video_1" } });
   });
 
+  it("자료실에도 등록됐으면 촬영본 정리로 가는 길을 보여 준다", async () => {
+    // owner 요청(2026-09-10): 찍어 둔 영상을 "촬영본 정리"에서 장면 나누기
+    // (자동 컷)로도 다룰 수 있어야 한다. 자료실 등록이 실패했을 수도 있으니
+    // `library_asset_id`가 있을 때만 이 길을 보여 준다.
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    vi.spyOn(api, "uploadSourceVideo").mockResolvedValue({ asset_id: "raw_video_1", script_text: "받아쓴 대본", spoken_segment_count: 2, library_asset_id: "user_footage_1" });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([{ asset_id: "raw_video_1", asset_type: "raw_video", library_asset_id: "user_footage_1" }]);
+    vi.spyOn(api, "createCreationBrief").mockResolvedValue(approved);
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.change(screen.getByLabelText("찍어 둔 영상 선택"), { target: { files: [new File(["v"], "본편.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "영상에서 대본 만들기" }));
+    await screen.findByLabelText("영상에서 받아쓴 대본");
+    fireEvent.click(screen.getByRole("button", { name: "이 대본으로 기획 시작" }));
+
+    const link = await screen.findByRole("link", { name: "촬영본 정리에서 장면 나누기" });
+    expect(link).toHaveAttribute("href", "/footage?library_asset_id=user_footage_1");
+  });
+
+  it("자료실 등록이 안 됐으면 촬영본 정리로 가는 길을 안 보여 준다", async () => {
+    const approved = { ...firstBrief, questions: [], current_step: 0, status: "approved", revision: 5 };
+    vi.spyOn(api, "uploadSourceVideo").mockResolvedValue({ asset_id: "raw_video_1", script_text: "받아쓴 대본", spoken_segment_count: 2 });
+    vi.spyOn(api, "listDraftNarrationOptions").mockResolvedValue([{ asset_id: "raw_video_1", asset_type: "raw_video" }]);
+    vi.spyOn(api, "createCreationBrief").mockResolvedValue(approved);
+    render(<CreationInterview projectId="project_1" />);
+
+    fireEvent.change(screen.getByLabelText("찍어 둔 영상 선택"), { target: { files: [new File(["v"], "본편.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "영상에서 대본 만들기" }));
+    await screen.findByLabelText("영상에서 받아쓴 대본");
+    fireEvent.click(screen.getByRole("button", { name: "이 대본으로 기획 시작" }));
+
+    await screen.findByRole("button", { name: "영상 소리로 초안 준비" });
+    expect(screen.queryByRole("link", { name: "촬영본 정리에서 장면 나누기" })).toBeNull();
+  });
+
   it("새로 고쳐도 올려 둔 영상을 내레이션 후보로 다시 찾아 준다", async () => {
     // 이 되짚기는 **이미 있던 동작**을 고정한다(승인되면 서버에서 후보를 다시
     // 읽는 효과가 이미 걸려 있다). 찍어 둔 영상 길이 생기면서 이 경로가 처음으로

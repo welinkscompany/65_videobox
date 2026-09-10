@@ -48,13 +48,13 @@ export function SourceVideoStart({
   disabled = false,
 }: {
   projectId: string;
-  onReady: (start: { assetId: string; scriptText: string }) => void;
+  onReady: (start: { assetId: string; scriptText: string; libraryAssetId: string | null }) => void;
   disabled?: boolean;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [isReading, setIsReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [heard, setHeard] = useState<{ assetId: string; scriptText: string } | null>(null);
+  const [heard, setHeard] = useState<{ assetId: string; scriptText: string; libraryAssetId: string | null } | null>(null);
   const [scriptText, setScriptText] = useState("");
 
   async function read() {
@@ -67,7 +67,7 @@ export function SourceVideoStart({
     setIsReading(true);
     try {
       const start = await api.uploadSourceVideo(projectId, file);
-      setHeard({ assetId: start.asset_id, scriptText: start.script_text });
+      setHeard({ assetId: start.asset_id, scriptText: start.script_text, libraryAssetId: start.library_asset_id ?? null });
       setScriptText(start.script_text);
     } catch (caught) {
       setError(messageFor(caught));
@@ -92,7 +92,7 @@ export function SourceVideoStart({
         <Button
           type="button"
           disabled={disabled || !scriptText.trim()}
-          onClick={() => onReady({ assetId: heard.assetId, scriptText: scriptText.trim() })}
+          onClick={() => onReady({ assetId: heard.assetId, scriptText: scriptText.trim(), libraryAssetId: heard.libraryAssetId })}
         >
           이 대본으로 기획 시작
         </Button>

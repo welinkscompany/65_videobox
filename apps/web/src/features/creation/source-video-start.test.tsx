@@ -38,7 +38,22 @@ describe("찍어 둔 영상으로 시작", () => {
     fireEvent.change(edited, { target: { value: "오늘은 새 제품을 소개합니다." } });
     fireEvent.click(screen.getByRole("button", { name: "이 대본으로 기획 시작" }));
 
-    expect(onReady).toHaveBeenCalledWith({ assetId: "asset_1", scriptText: "오늘은 새 제품을 소개합니다." });
+    expect(onReady).toHaveBeenCalledWith({ assetId: "asset_1", scriptText: "오늘은 새 제품을 소개합니다.", libraryAssetId: null });
+  });
+
+  it("자료실에도 같이 등록됐으면 그 연결을 그대로 넘긴다", async () => {
+    // owner 요청(2026-09-10): "촬영본 정리"에서 이 영상의 장면을 나눌 수
+    // 있으려면 자료실 등록 id가 다음 화면까지 살아 있어야 한다.
+    vi.spyOn(api, "uploadSourceVideo").mockResolvedValue({ asset_id: "asset_1", script_text: "오늘은 신제품을 소개합니다.", spoken_segment_count: 3, library_asset_id: "user_abc123" });
+    const onReady = vi.fn();
+    render(<SourceVideoStart projectId="project_1" onReady={onReady} />);
+
+    pick();
+    fireEvent.click(screen.getByRole("button", { name: "영상에서 대본 만들기" }));
+    await screen.findByLabelText("영상에서 받아쓴 대본");
+    fireEvent.click(screen.getByRole("button", { name: "이 대본으로 기획 시작" }));
+
+    expect(onReady).toHaveBeenCalledWith({ assetId: "asset_1", scriptText: "오늘은 신제품을 소개합니다.", libraryAssetId: "user_abc123" });
   });
 
   it("받아쓰는 동안 무엇을 하고 있는지 말하고, 그 사이 다시 눌리지 않는다", async () => {

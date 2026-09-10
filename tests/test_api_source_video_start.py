@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_core_engine.library_ingest import LibraryIngestService
 from videobox_domain_models.assets import AssetType
 from videobox_provider_interfaces.stt import STTProvider, STTRequest, STTResult, STTSegment
 from videobox_storage.local_project_store import LocalProjectStore
@@ -103,6 +104,44 @@ def test_a_file_that_is_not_a_video_is_refused_before_anything_is_stored(tmp_pat
 
     assert response.status_code in {400, 422}
     assert LocalProjectStore(tmp_path).list_assets(project_id=project_id) == []
+
+
+def test_the_video_is_also_registered_as_organizable_footage(tmp_path: Path) -> None:
+    """owner 요청(2026-09-10): 찍어 둔 영상이 "촬영본 정리" 화면에서도 보여야
+    자동 컷(장면 나누기·제외)을 그 화면에서 그대로 쓸 수 있다. 그 화면은
+    `library_asset_id`(자료실) 세계를 읽는데, 지금까지 raw_video는 프로젝트
+    자산 표에만 있어서 안 보였다."""
+    client, project_id = _client(tmp_path)
+
+    body = _upload(client, project_id).json()
+
+    assert body["library_asset_id"]
+    assets = client.get("/api/library/assets", params={"media_type": "broll"}).json()["assets"]
+    assert body["library_asset_id"] in [item["library_asset_id"] for item in assets]
+
+    # 새로고침(= 업로드 응답과 무관하게 다시 조회) 뒤에도 연결이 남아 있어야
+    # "촬영본 정리로 가기" 링크가 다시 뜬다.
+    options = client.get(f"/api/projects/{project_id}/draft-readiness/narration-options").json()
+    reloaded = next(item for item in options["assets"] if item["asset_id"] == body["asset_id"])
+    assert reloaded["library_asset_id"] == body["library_asset_id"]
+
+
+def test_library_registration_failure_does_not_block_the_script(tmp_path: Path, monkeypatch) -> None:
+    """자료실 등록은 덧붙이는 편의고, 대본 만들기가 이미 끝난 핵심 작업이다.
+    자료실 등록이 실패해도 owner의 대본을 막으면 안 된다."""
+    client, project_id = _client(tmp_path)
+
+    def _boom(self: object, **_kwargs: object) -> None:
+        raise RuntimeError("library unavailable")
+
+    # `LibraryIngestService`는 frozen + slots라 인스턴스에 못 덮어쓴다 -- 클래스
+    # 메서드를 바꾼다.
+    monkeypatch.setattr(LibraryIngestService, "ingest", _boom)
+
+    response = _upload(client, project_id)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["library_asset_id"] is None
 
 
 def test_a_video_with_no_speech_says_so_instead_of_making_an_empty_script(tmp_path: Path) -> None:

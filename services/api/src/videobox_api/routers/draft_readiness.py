@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -8,9 +9,12 @@ from fastapi import APIRouter, File, Form, UploadFile, status
 from videobox_api.errors import _http_error
 from videobox_api.models import DraftReadinessCandidateRangeRequest, DraftReadinessCandidateRequest, DraftReadinessCreateRequest, DraftReadinessRevisionRequest, SourceVideoStartResponse, SourceVoiceStartResponse
 from videobox_api.orchestration import ApiOrchestrator
+from videobox_core_engine.library_ingest import LibraryIngestService
 
 MAX_NARRATION_UPLOAD_BYTES = 128 * 1024 * 1024
 NARRATION_UPLOAD_CHUNK_BYTES = 64 * 1024
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class _NoSpeech(ValueError):
@@ -25,8 +29,54 @@ def _no_speech_voice() -> _NoSpeech:
     return _NoSpeech("source_voice_has_no_speech")
 
 
-def build_draft_readiness_router(orchestrator: ApiOrchestrator) -> APIRouter:
+def build_draft_readiness_router(
+    orchestrator: ApiOrchestrator,
+    *,
+    ingest_service: LibraryIngestService | None = None,
+) -> APIRouter:
     router = APIRouter(); store = orchestrator.store
+
+    def _register_source_video_in_library(*, project_id: str, asset_id: str, storage_uri: str, filename: str) -> str | None:
+        """찍어 둔 영상을 "촬영본 정리"에서도 쓸 수 있게 자료실에 같이 넣는다.
+
+        owner 요청(2026-09-10): auto-cut 백엔드가 있었지만 raw_video는 자료실
+        (`촬영본 정리` 화면이 읽는 `library_asset_id` 세계)과 아예 다른 표라서
+        보이지 않았다. 새로 렌더링 파이프라인을 만드는 대신, 이미 있는
+        `LibraryIngestService`(내용 해시 기반, `library_assets.py`가 쓰는 것과
+        같음)로 같은 파일을 등록해 두 세계를 잇는다 -- **원본은 그대로 프로젝트
+        자산으로도 남는다**(대본·내레이션 용도는 안 바뀜).
+
+        등록 실패는 조용히 건너뛴다. 대본 만들기는 이미 끝난 핵심 작업이고,
+        자료실 등록은 덧붙이는 편의다 -- 실패했다고 owner의 대본을 막을 이유가
+        없다.
+        """
+        if ingest_service is None:
+            return None
+        try:
+            resolved_path = store.resolve_storage_uri(project_id=project_id, storage_uri=storage_uri)
+            result = ingest_service.ingest(
+                media_type="broll",
+                source=resolved_path,
+                filename=filename,
+                idempotency_key=f"raw-video-source:{project_id}:{asset_id}",
+                provenance={"source": "raw_video_upload", "project_id": project_id, "project_asset_id": asset_id},
+            )
+            library_asset_id = str(result["library_asset_id"])
+            # 나중에 이 프로젝트를 다시 열었을 때도(`narration_options`)
+            # 연결을 다시 찾을 수 있게 프로젝트 자산 쪽에도 남겨 둔다 -- 이번
+            # 업로드 응답에만 실으면 새로고침한 뒤엔 링크가 사라진다.
+            store.update_asset_metadata(
+                project_id=project_id, asset_id=asset_id,
+                metadata_patch={"library_asset_id": library_asset_id},
+            )
+            return library_asset_id
+        except Exception:
+            _LOGGER.warning(
+                "찍어 둔 영상을 자료실에 등록하지 못했습니다 -- 대본은 그대로 만들어집니다 "
+                "(project=%s, 자산=%s). '촬영본 정리'에서 이 영상을 못 찾을 수 있습니다.",
+                project_id, asset_id, exc_info=True,
+            )
+            return None
 
     @router.post("/api/projects/{project_id}/draft-readiness", status_code=status.HTTP_201_CREATED)
     def start(project_id: str, payload: DraftReadinessCreateRequest) -> dict[str, object]:
@@ -37,7 +87,14 @@ def build_draft_readiness_router(orchestrator: ApiOrchestrator) -> APIRouter:
     def narration_options(project_id: str) -> dict[str, object]:
         try:
             allowed = {"raw_video", "narration_audio"}
-            return {"assets": [{"asset_id": item["asset_id"], "asset_type": item["asset_type"]} for item in store.list_assets(project_id=project_id) if item["asset_type"] in allowed]}
+            return {"assets": [
+                {
+                    "asset_id": item["asset_id"],
+                    "asset_type": item["asset_type"],
+                    "library_asset_id": item.get("metadata", {}).get("library_asset_id"),
+                }
+                for item in store.list_assets(project_id=project_id) if item["asset_type"] in allowed
+            ]}
         except Exception as exc: raise _http_error(exc) from exc
 
     @router.get("/api/projects/{project_id}/draft-readiness/{readiness_id}")
@@ -127,6 +184,13 @@ def build_draft_readiness_router(orchestrator: ApiOrchestrator) -> APIRouter:
                         raise ValueError("source_video_upload_too_large")
                     handle.write(chunk)
             asset = orchestrator.register_raw_video_asset(project_id=project_id, source_path=stage)
+            # 말이 없어 뒤에서 `_no_speech()`로 멈추더라도 영상 자체는 촬영본으로
+            # 쓸모가 있을 수 있다(예: 소리 없는 b-roll) -- 대본 성공 여부와
+            # 무관하게 먼저 등록한다.
+            library_asset_id = _register_source_video_in_library(
+                project_id=project_id, asset_id=asset.asset_id, storage_uri=asset.storage_uri,
+                filename=file.filename or stage.name,
+            )
             heard = orchestrator.transcribe_source_video(project_id=project_id, asset_id=asset.asset_id)
             spoken = [item for item in (heard.get("segments") or []) if str(item.get("text") or "").strip()]
             if not str(heard.get("transcript_text") or "").strip() or not spoken:
@@ -137,6 +201,7 @@ def build_draft_readiness_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 asset_id=asset.asset_id,
                 script_text=str(heard["transcript_text"]).strip(),
                 spoken_segment_count=len(spoken),
+                library_asset_id=library_asset_id,
             )
         except Exception as exc:
             raise _http_error(exc) from exc

@@ -393,6 +393,10 @@ class SourceVideoStartResponse(BaseModel):
     #: 자막이 어디에 놓일지는 받아쓴 구간이 정한다. 문장만 돌려주면 자막이
     #: 말한 자리에 안 붙는다.
     spoken_segment_count: int
+    #: 자료실에도 같은 영상을 등록해 "촬영본 정리"에서 장면을 나눌 수 있게
+    #: 한다(owner 요청 2026-09-10). 등록이 실패해도 대본 만들기 자체는
+    #: 막지 않으므로 없을 수 있다.
+    library_asset_id: str | None = None
 
 
 class RetakeCandidateResponse(BaseModel):

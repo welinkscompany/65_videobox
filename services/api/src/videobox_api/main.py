@@ -1367,7 +1367,7 @@ def create_app(
             )
         )
     app.include_router(build_creation_briefs_router(orchestrator))
-    app.include_router(build_draft_readiness_router(orchestrator))
+    app.include_router(build_draft_readiness_router(orchestrator, ingest_service=app.state.library_ingest_service))
     app.include_router(build_atomic_draft_bundles_router(orchestrator))
     app.include_router(
         build_assets_router(

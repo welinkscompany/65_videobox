@@ -39,11 +39,15 @@ export type CreateCreationBriefRequest = {
 
 export type DraftReadiness = { readiness_id: string; brief_id: string; status: "asset_check" | "planning" | "ready" | "needs_assets" | "failed" | "cancelled"; revision: number; result: { script_segments?: { segment_id: string; text: string; start_sec: number; end_sec: number }[]; gap_slots?: { gap_slot_id: string; reason: string; segment_id?: string; target_range?: { start_sec: number; end_sec: number } }[]; broll_candidates?: { asset_id: string; label: string; target_range: { start_sec: number; end_sec: number }; media_duration_sec?: number | null }[] } | null };
 export type DraftReadinessRequest = { brief_id: string; narration_choice: { kind: "silent" | "existing" | "source_video"; asset_id?: string }; idempotency_key: string; expected_brief_revision: number; capability?: Record<string, unknown> };
-export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio" };
+/** `library_asset_id`는 이 자산이 "촬영본 정리" 화면(자료실)에도 등록됐을
+ *  때만 있다 -- 등록이 실패했거나 이 업로드 전에 만들어진 자산이면 없다. */
+export type NarrationOption = { asset_id: string; asset_type: "raw_video" | "narration_audio"; library_asset_id?: string | null };
 /** 찍어 둔 영상으로 시작할 때 돌아오는 것. 올린 영상은 버려지지 않고 `raw_video`
  *  자산으로 남으므로, `asset_id`는 그대로 내레이션(`source_video`) 선택에 쓴다 --
- *  그 영상이 곧 본편이다. */
-export type SourceVideoStart = { asset_id: string; script_text: string; spoken_segment_count: number };
+ *  그 영상이 곧 본편이다. 같은 영상을 자료실에도 등록해 두면(owner 요청
+ *  2026-09-10) "촬영본 정리"에서 장면을 나눌 수 있다 -- 실패해도 `null`일 뿐
+ *  대본 만들기는 막지 않는다. */
+export type SourceVideoStart = { asset_id: string; script_text: string; spoken_segment_count: number; library_asset_id?: string | null };
 /** 녹음한 목소리만으로 시작할 때 받는 것(owner 요청 2026-08-29). `SourceVideoStart`와
  *  같은 모양에 다시 들어볼 구간 후보와 구간별 원문을 얹었다 -- 후보를 빼고
  *  대본을 다시 만들 때 구간을 그대로 이어 붙이기 위해서다(문자열 치환이 아니다). */

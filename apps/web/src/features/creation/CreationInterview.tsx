@@ -286,7 +286,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
    *  내레이션 후보로도 바로 올려 둔다. 승인 뒤 서버에서 후보를 다시 읽지만, 그
    *  사이 화면에 "무음으로 초안 준비"만 보이면 owner가 그것을 눌러 자기 목소리를
    *  통째로 버리게 된다. */
-  async function startFromFootage({ assetId, scriptText: heard }: { assetId: string; scriptText: string }) {
+  async function startFromFootage({ assetId, scriptText: heard, libraryAssetId }: { assetId: string; scriptText: string; libraryAssetId: string | null }) {
     const trimmed = heard.trim();
     if (!trimmed) return;
     setError(null);
@@ -302,7 +302,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       window.localStorage.removeItem(pendingKey(projectId, "footage"));
       setNarrationOptions((items) => items.some((item) => item.asset_id === assetId)
         ? items
-        : [...items, { asset_id: assetId, asset_type: "raw_video" }]);
+        : [...items, { asset_id: assetId, asset_type: "raw_video", library_asset_id: libraryAssetId }]);
       setBrief(created);
     } catch {
       setError("받아쓴 대본으로 기획을 시작하지 못했습니다. 잠시 뒤 다시 눌러 주세요.");
@@ -681,7 +681,7 @@ export function CreationInterview({ projectId }: { projectId: string }) {
       <h1 id="creation-summary-heading">{brief.status === "approved" ? "기획을 확인했어요" : "기획 요약을 확인해 주세요"}</h1>
       {brief.status === "approved" ? <><p>소리 고르기 · 초안 준비</p>
         {!readiness ? <><Button type="button" disabled={isSaving} onClick={() => void startDraft({ kind: "silent" })}>무음으로 초안 준비</Button>
-          {narrationOptions.filter((item) => item.asset_type === "raw_video").map((item) => <Button key={item.asset_id} type="button" variant="outline" onClick={() => void startDraft({ kind: "source_video", asset_id: item.asset_id })}>영상 소리로 초안 준비</Button>)}
+          {narrationOptions.filter((item) => item.asset_type === "raw_video").map((item) => <span key={item.asset_id}><Button type="button" variant="outline" onClick={() => void startDraft({ kind: "source_video", asset_id: item.asset_id })}>영상 소리로 초안 준비</Button>{item.library_asset_id ? <a className="vb-action-link" href={`/footage?library_asset_id=${encodeURIComponent(item.library_asset_id)}`}>촬영본 정리에서 장면 나누기</a> : null}</span>)}
           {narrationOptions.filter((item) => item.asset_type === "narration_audio").map((item) => <Button key={item.asset_id} type="button" variant="outline" onClick={() => void startDraft({ kind: "existing", asset_id: item.asset_id })}>준비한 내레이션으로 초안 준비</Button>)}
           <label htmlFor="draft-narration-file">내레이션 파일 추가</label><Input id="draft-narration-file" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" onChange={(event) => void uploadNarration(event.target.files?.[0] ?? null)} />
           <Button type="button" variant="outline" disabled={isSaving || recording} onClick={() => void startRecording()}>마이크로 녹음 시작</Button>{recording ? <Button type="button" onClick={stopRecording}>녹음 마치기</Button> : null}{recordingFile && error ? <Button type="button" variant="outline" onClick={() => void uploadNarration(recordingFile)}>녹음 다시 올리기</Button> : null}
