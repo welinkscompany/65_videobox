@@ -911,6 +911,7 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                 horizontal=payload.horizontal,
                 size=payload.size,
                 motion=payload.motion,
+                preserve_source_audio=payload.preserve_source_audio,
                 expected_revision=payload.expected_revision,
                 proposal_id=payload.proposal_id,
                 candidate_id=payload.candidate_id,

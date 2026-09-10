@@ -23167,6 +23167,66 @@ def test_editing_session_api_image_overlay_without_presets_stays_as_it_was(tmp_p
     ]
 
 
+def test_editing_session_api_image_overlay_preserve_source_audio_survives_omission(tmp_path: Path) -> None:
+    """`preserve_source_audio`를 안 보내면 이미 켜 둔 값이 꺼지면 안 된다.
+
+    오늘의 화면과 유진은 이 칸 없이 요청을 보낸다. 빈칸을 기본값(꺼짐)으로
+    덮으면 owner가 켜 둔 "원본 소리 살리기"가 조용히 사라진다 -- 같은 모양의
+    사고가 `apps/web/src/features/editor/editorCommandPort.ts:81`에 기록돼
+    있다. `None`(안 보냄)과 `False`(꺼서 보냄)을 가른다.
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    # (a) 켜서 보내면 저장된다.
+    turned_on = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "preserve_source_audio": True,
+            "expected_revision": 1,
+        },
+    )
+    assert turned_on.status_code == 200, turned_on.text
+    overlay = turned_on.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["preserve_source_audio"] is True
+
+    # (b) 안 보내면 이미 켜 둔 것이 그대로 남는다 -- 옛 화면·유진이 보내는 요청 모양.
+    unspecified = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image, moved",
+            "expected_revision": 2,
+        },
+    )
+    assert unspecified.status_code == 200, unspecified.text
+    overlay = unspecified.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["preserve_source_audio"] is True
+
+    # (c) 꺼서 보내면 꺼진다.
+    turned_off = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image, moved",
+            "preserve_source_audio": False,
+            "expected_revision": 3,
+        },
+    )
+    assert turned_off.status_code == 200, turned_off.text
+    overlay = turned_off.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["preserve_source_audio"] is False
+
+
 def test_editing_session_api_can_set_and_clear_a_shape_overlay(tmp_path: Path) -> None:
     """정지 도형(강조 상자·밑줄)은 다른 오버레이와 같은 endpoint 체계를 탄다."""
     app = create_app(projects_root=tmp_path)

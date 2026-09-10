@@ -1384,6 +1384,12 @@ class ImageOverlayRequest(BaseModel):
     horizontal: Literal["left", "center", "right"] | None = None
     size: Literal["small", "medium", "large"] | None = None
     motion: str | None = None
+    # 얹은 영상의 원본 소리를 완성본에 실을지. b-roll의 같은 칸과 이름이 같다
+    # (`media_controls.py`) -- 개념을 두 벌로 만들지 않는다. 안 보내면(`None`)
+    # 이미 켜 둔 값이 그대로 남는다(엔진 계층에서 처리) -- 오늘의 화면과 유진은
+    # 이 칸 없이 요청을 보내므로, 빈칸을 기본값으로 덮으면 켜 둔 소리가 조용히
+    # 꺼진다.
+    preserve_source_audio: bool | None = None
     proposal_id: str | None = Field(default=None, min_length=1, max_length=256)
     candidate_id: str | None = Field(default=None, min_length=1, max_length=256)
 
