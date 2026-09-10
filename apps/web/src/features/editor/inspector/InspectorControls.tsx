@@ -507,6 +507,22 @@ export function InspectorControls({
     && target.fields.includes(field)
     && mediaFieldTab(field, target.mediaKind) === activeMediaTab;
 
+  // 리뷰 지적(2026-09-11): b-roll 절과 사진 오버레이 절이 같은 문구
+  // "이 영상의 원래 소리도 함께 쓰기"를 글자 그대로 복제하고 있었다.
+  // 두 절은 같은 컴포넌트 렌더의 **서로 배타적인 분기**라서 하나로 묶을 수
+  // 있다 -- 언제 띄우는지(gate)는 호출한 자리에 그대로 두고, 무엇을
+  // 그리는지(마크업)만 여기 한 곳에 둔다.
+  const renderPreserveSourceAudioCheckbox = () => (
+    <label>
+      <Input
+        checked={preserveSourceAudio}
+        disabled={disabled}
+        onChange={(event) => setPreserveSourceAudio(event.target.checked)}
+        type="checkbox"
+      />
+      이 영상의 원래 소리도 함께 쓰기
+    </label>
+  );
 
   return (
     <section aria-label="고른 장면">
@@ -859,17 +875,7 @@ export function InspectorControls({
               {/* 음량 바로 아래. 이게 꺼져 있으면 `소리 크기`는 아무 일도 하지
                   않는다 -- 섞일 소리가 없기 때문이다. §10.13: `소스 오디오` 같은
                   말 대신 무엇을 쓰겠다는 건지로 적는다. */}
-              {showMediaField("preserveSourceAudio") ? (
-                <label>
-                  <Input
-                    checked={preserveSourceAudio}
-                    disabled={disabled}
-                    onChange={(event) => setPreserveSourceAudio(event.target.checked)}
-                    type="checkbox"
-                  />
-                  이 영상의 원래 소리도 함께 쓰기
-                </label>
-              ) : null}
+              {showMediaField("preserveSourceAudio") ? renderPreserveSourceAudioCheckbox() : null}
               {/* 말이 음악에 묻히는 것은 완성본에서 가장 자주 걸리는 문제다.
                   §10.13: `사이드체인`·`덕킹` 같은 말 대신 무슨 일이 일어나는지로
                   적는다. 끄고 켜는 것뿐이므로 숫자를 묻지 않는다. */}
@@ -1243,17 +1249,7 @@ export function InspectorControls({
                   사진에는 소리가 없어 눌러도 아무 일 없는 단추를 두지 않는다.
                   문구·상태 칸은 b-roll `이 영상의 원래 소리도 함께 쓰기`와
                   **완전히 같다** -- 같은 것을 두 이름으로 부르지 않는다. */}
-              {target.fields.includes("preserveSourceAudio") ? (
-                <label>
-                  <Input
-                    checked={preserveSourceAudio}
-                    disabled={disabled}
-                    onChange={(event) => setPreserveSourceAudio(event.target.checked)}
-                    type="checkbox"
-                  />
-                  이 영상의 원래 소리도 함께 쓰기
-                </label>
-              ) : null}
+              {target.fields.includes("preserveSourceAudio") ? renderPreserveSourceAudioCheckbox() : null}
             </>
           ) : null}
           {/* 도형·아이콘: "여기를 보세요"용 강조 상자·밑줄과 화살표 등.

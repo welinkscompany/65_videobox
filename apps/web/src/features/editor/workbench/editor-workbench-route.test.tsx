@@ -152,14 +152,18 @@ const inspectorSession = (revision: number) => ({
   ],
 });
 
-type InspectorFixture = "narration" | "broll" | "bgm" | "sfx" | "caption" | "explanation" | "image" | "table";
+// "image-video" 리뷰 지적(finding 2, 2026-09-11): 얹은 것이 사진이 아니라
+// 영상일 때만 `preserveSourceAudio` 칸이 뜬다(`inspectorRegistry.ts`
+// `isVideoOverlay`) -- 기존 "image" 픽스처는 `.png`라 그 칸이 안 뜬다.
+type InspectorFixture = "narration" | "broll" | "bgm" | "sfx" | "caption" | "explanation" | "image" | "image-video" | "table";
 
 function inspectorManifest(revision: number, fixture: InspectorFixture = "narration") {
   const base = twoNarrationManifest(revision);
   const mediaKind = fixture === "broll" || fixture === "bgm" || fixture === "sfx" ? fixture : null;
+  const isImageOverlay = fixture === "image" || fixture === "image-video";
   const overlayType = fixture === "explanation"
     ? "explanation_card"
-    : fixture === "image"
+    : isImageOverlay
       ? "image_overlay"
       : fixture === "table"
         ? "table_overlay"
@@ -183,14 +187,16 @@ function inspectorManifest(revision: number, fixture: InspectorFixture = "narrat
         track_type: "overlay" as const,
         clips: [{
           clip_id: `${fixture}-1`, segment_id: "segment-1", clip_type: "overlay" as const,
-          asset_id: fixture === "image" ? "asset-image" : null,
-          asset_uri: fixture === "image" ? "file:///asset-image.png" : null,
+          asset_id: isImageOverlay ? "asset-image" : null,
+          asset_uri: fixture === "image" ? "file:///asset-image.png" : fixture === "image-video" ? "file:///asset-image.mp4" : null,
           start_sec: 0, end_sec: 1, media_controls: {}, overlay_type: overlayType,
           overlay_payload: fixture === "explanation"
             ? { title: "제목", body: "본문", text: "설명" }
             : fixture === "image"
               ? { asset_id: "asset-image", text: "이미지 설명" }
-              : { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" },
+              : fixture === "image-video"
+                ? { asset_id: "asset-image", text: "영상 설명", preserve_source_audio: false }
+                : { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" },
         }],
       }] : []),
     ],
@@ -2837,6 +2843,33 @@ describe("EditorWorkbenchRoute", () => {
     const clear = fixture === "explanation" ? clearExplanation : fixture === "image" ? clearImage : clearTable;
     await waitFor(() => expect(clear).toHaveBeenCalledWith("project-a", "session-a", "segment-1", 8));
     await expectEditorRevision(9);
+  });
+
+  // 리뷰 지적(finding 2, 2026-09-11): `preserveSourceAudio` 체크박스를 켜서
+  // 저장했을 때 그 값이 실제로 서버 호출까지 닿는지 아무 시험도 확인하지
+  // 않았다 -- 위 `it.each`의 "image" 픽스처는 사진(`.png`)이라 이 칸 자체가
+  // 안 뜬다. `EditorWorkbenchRoute.tsx`의 디스패처(`action.overlayKind ===
+  // "image"` 분기)를 지나야만 통과하는 시험이다 -- 인스펙터만 렌더하는
+  // `InspectorControls.test.tsx`나 `editorCommandPort.test.ts`는 이 다리를
+  // 밟지 않는다.
+  it("carries the preserve-source-audio checkbox through the video overlay save dispatcher", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockReset()
+      .mockResolvedValueOnce(inspectorManifest(7, "image-video") as never)
+      .mockResolvedValueOnce(inspectorManifest(8, "image-video") as never);
+    vi.mocked(api.getEditingSession).mockReset()
+      .mockResolvedValueOnce(inspectorSession(7) as never)
+      .mockResolvedValueOnce(inspectorSession(8) as never);
+    const saveImage = vi.spyOn(api, "updateEditingSessionImageOverlay").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(7);
+    await openInspector();
+    fireEvent.click(screen.getByRole("checkbox", { name: "이 영상의 원래 소리도 함께 쓰기" }));
+    fireEvent.click(screen.getByRole("button", { name: "얹은 영상 저장" }));
+
+    await waitFor(() => expect(saveImage).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
+      asset_id: "asset-image", expected_revision: 7, text: "영상 설명", preserve_source_audio: true,
+    }));
   });
 
   it("requires impact preflight before one explicit partial run, then resumes only from an explicit result read", { timeout: 20000 }, async () => {
