@@ -1572,37 +1572,73 @@ _IMAGE_OVERLAY_PRESET_VALUES: dict[str, frozenset[str]] = {
 }
 
 
+class _KeepSentinel:
+    """`update_segment_image_overlay`의 프리셋 인자 기본값 전용 파수꾼.
+
+    화면에는 `안 고름`(값을 `None`으로 지워서 보냄)이라는 실제 상태가 있어서
+    "인자를 아예 안 줌"과 "`None`을 줌"을 같은 것으로 접으면 안 된다. 그런데
+    `None`은 이미 파이썬 기본값으로 흔히 쓰이므로, "안 줌"을 나타내려면
+    `None`이 아닌 별도 기본값이 필요하다. 이 클래스의 유일한 인스턴스(`_KEEP`)가
+    그 자리를 채운다 -- 부르는 쪽이 실수로 만들어 낼 수 없도록 모듈 밖에 노출하지
+    않는다.
+    """
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - 디버그 출력용
+        return "_KEEP"
+
+
+_KEEP = _KeepSentinel()
+
+
 def update_segment_image_overlay(
     *,
     session: dict[str, Any],
     segment_id: str,
     asset_id: str,
     text: str,
-    vertical: str | None = None,
-    horizontal: str | None = None,
-    size: str | None = None,
-    motion: str | None = None,
+    vertical: str | None | _KeepSentinel = _KEEP,
+    horizontal: str | None | _KeepSentinel = _KEEP,
+    size: str | None | _KeepSentinel = _KEEP,
+    motion: str | None | _KeepSentinel = _KEEP,
     preserve_source_audio: bool | None = None,
 ) -> dict[str, Any]:
-    """사진 오버레이를 얹는다. 프리셋 넷은 **선택**이다.
+    """사진 오버레이를 얹는다. 프리셋 넷은 각각 **세 상태**를 받는다.
 
-    안 준 값은 열쇠 자체를 **안 적는다**. 빈칸을 기본값으로 채워 넣으면 이 기능이
-    생기기 전에 저장된 오버레이와 자국이 달라지고, 사진 오버레이를 프리셋 없이
-    부르는 자리가 파이프라인·유진 경로에 여럿 있다 -- 거기서 owner는 아무것도
-    안 바꿨는데 그림이 움직인 것을 보게 된다. 없는 열쇠를 '정중앙·안 움직임'으로
-    읽는 것은 렌더 쪽 몫이며, 도형의 `canonical_shape_overlay_motion`이 이미
-    같은 방식으로 관대하다.
+    | 부르는 쪽이 하는 것 | 뜻 |
+    |---|---|
+    | 인자를 아예 안 줌(기본값 `_KEEP`) | 지금 저장된 값을 그대로 둔다 |
+    | `None`을 줌 | 지워서 "안 고름"으로 되돌린다 |
+    | 값을 줌 | 그 값으로 바꾼다 |
 
-    준 값은 반대로 **거절**한다. 오타를 조용히 기본값으로 좁히면 owner는 고른
-    것이 왜 안 되는지 알 수 없다.
+    왜 두 상태(안 줌 vs `None`)로 갈랐는가: 화면에는 `안 고름`(`InspectorControls.tsx`의
+    `IMAGE_PRESET_UNSET`)이라는 실제 상태가 있고, 창작자가 그걸 고르면 화면은
+    그 칸을 빼서 보낸다 -- 이게 지금 "칸 없음"의 뜻이다. 그런데 유진은 프리셋을
+    "말 안 한" 채로 다른 것만 바꿔 달라고 하는 경우가 많고, 그때 "칸 없음"이
+    지금처럼 지움 취급되면 앞서 정한 자리가 조용히 사라진다(owner가 실제로
+    겪은 결함). 같은 신호("칸 없음")가 두 화자에게 반대 뜻이라 하나로 못
+    접는다 -- 그래서 "아예 안 줌"(`_KEEP`, 기본값)과 "`None`을 줌"을 갈랐다.
 
-    `preserve_source_audio`는 **얹은 영상**(이 오버레이 자리는 사진도, 영상도
-    될 수 있다)의 원본 소리를 완성본에 실을지다. 이름은 b-roll의 같은 칸을
-    그대로 빌린다(`media_controls.py`) -- 같은 개념을 두 벌로 만들지 않는다.
-    프리셋 넷과 같은 규칙: 안 주면 열쇠 자체가 없고(무음이던 예전과 자국이
-    같다), 렌더러가 없는 열쇠를 `False`로 읽는다.
+    "지금 값을 그대로 둔다"는 이 함수가 저장된 값을 읽어서 새 payload에
+    다시 심는다는 뜻이다. `_upsert_segment_overlay`가 옛 오버레이를 통째로
+    버리고 새 payload만 남기기 때문에(`_upsert_overlay_list`), 여기서 옮겨
+    심지 않으면 "그대로 둔다"고 해 놓고 실제로는 지워진다. 저장된 값이 아예
+    없으면(프리셋을 한 번도 고른 적 없는 오버레이) 옮길 것도 없다 -- 없는
+    열쇠를 기본값으로 채우면 이 기능이 생기기 전 오버레이의 자국이 바뀐다.
+
+    `None`을 준 경우는 반대로 **거절 없이** 칸을 뺀다 -- 화면의 `안 고름`이
+    이 길로 온다. 값을 준 경우는 그대로 **거절**한다: 오타를 조용히 기본값으로
+    좁히면 owner는 고른 것이 왜 안 되는지 알 수 없다.
+
+    `preserve_source_audio`는 이 세 상태를 쓰지 않는다 -- `False`가 진짜 값이라
+    지울 상태가 없다(건드리지 않음, 2026-09-11). **얹은 영상**(이 오버레이
+    자리는 사진도, 영상도 될 수 있다)의 원본 소리를 완성본에 실을지이며, 이름은
+    b-roll의 같은 칸을 그대로 빌린다(`media_controls.py`). 안 주면(`None`,
+    파이썬 기본값 그대로) 열쇠 자체가 없고(무음이던 예전과 자국이 같다), 렌더러가
+    없는 열쇠를 `False`로 읽는다.
     """
-    presets = {
+    presets: dict[str, str | None | _KeepSentinel] = {
         "vertical": vertical,
         "horizontal": horizontal,
         "size": size,
@@ -1610,7 +1646,18 @@ def update_segment_image_overlay(
     }
     normalized_presets: dict[str, str] = {}
     for field_name, raw_value in presets.items():
+        if raw_value is _KEEP:
+            # 인자를 아예 안 줬다 -- 지금 저장된 값을 그대로 옮긴다. 순회는
+            # `preserve_source_audio`가 쓰는 것과 같은 규칙
+            # (`_iter_matching_overlay_containers`)을 재사용한다.
+            current_value = _current_image_overlay_preset_value(
+                session=session, segment_id=segment_id, field_name=field_name,
+            )
+            if current_value is not None:
+                normalized_presets[field_name] = current_value
+            continue
         if raw_value is None:
+            # 명시적으로 `None` -- 화면의 `안 고름`이 이 길로 온다. 칸을 뺀다.
             continue
         normalized = str(raw_value).strip().lower()
         allowed = _IMAGE_OVERLAY_PRESET_VALUES[field_name]
@@ -1964,6 +2011,32 @@ def _current_image_overlay_preserve_source_audio(
             if isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") in equivalent:
                 value = overlay.get("preserve_source_audio")
                 if isinstance(value, bool):
+                    return value
+    return None
+
+
+def _current_image_overlay_preset_value(
+    *, session: dict[str, Any], segment_id: str, field_name: str,
+) -> str | None:
+    """지금 저장된 사진 오버레이의 프리셋 한 칸(`vertical`/`horizontal`/`size`/
+    `motion`)을 읽는다.
+
+    `update_segment_image_overlay`가 "인자를 아예 안 줌"(세 상태 중 "지금 값
+    유지")을 처리하려면 새로 쓰기 전에 옛 값을 먼저 읽어야 한다 -- 그 함수는
+    오버레이 전체를 다시 쓰므로, 옮겨 심지 않으면 "유지"라 해 놓고 실제로는
+    지워진다. `_current_image_overlay_preserve_source_audio`와 같은 이유·같은
+    찾기 규칙(`_iter_matching_overlay_containers`)을 쓴다 -- 그 순회를 또
+    새로 짜면 이 파일에서만 세 번째, 프로젝트 전체로는 네 번째 사본이 된다.
+    """
+    equivalent = _equivalent_overlay_types("image_overlay")
+    for container in _iter_matching_overlay_containers(session, segment_id):
+        overlays = container.get("visual_overlays")
+        if not isinstance(overlays, list):
+            continue
+        for overlay in overlays:
+            if isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") in equivalent:
+                value = overlay.get(field_name)
+                if isinstance(value, str):
                     return value
     return None
 
