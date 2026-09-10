@@ -1285,6 +1285,40 @@ class TrackStatesPatchRequest(BaseModel):
     track_states: dict[str, TrackStateRequest]
 
 
+class SessionTrackAddRequest(BaseModel):
+    """트랙 한 줄 추가(자유 멀티트랙 Phase 5). 내레이션·자막은 코어가 거절한다."""
+
+    expected_revision: int = Field(ge=1)
+    kind: str = Field(min_length=1)
+    label: str = Field(min_length=1, max_length=60)
+
+
+class SessionTrackRemoveRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
+class SessionTrackReorderRequest(BaseModel):
+    """한 종류 안의 위아래 순서. **앞이 아래, 뒤가 위**이고 같은 트랙들이
+    빠짐없이 그대로 와야 한다(빠뜨리면 코어가 거절한다)."""
+
+    expected_revision: int = Field(ge=1)
+    kind: str = Field(min_length=1)
+    track_ids: list[str] = Field(min_length=1)
+
+
+class SessionTrackResponse(BaseModel):
+    track_id: str
+    label: str
+    kind: str
+    order: int
+    is_timing_anchor: bool
+    source_track_id: str | None = None
+
+
+class SessionTracksResponse(BaseModel):
+    tracks: list[SessionTrackResponse]
+
+
 class EditingSessionRevisionRequest(BaseModel):
     expected_revision: int = Field(ge=1)
 

@@ -42,6 +42,10 @@ from videobox_api.models import (
     TableOverlayRequest,
     TimelinePayloadResponse,
     TimelinePlacementPatchRequest,
+    SessionTrackAddRequest,
+    SessionTrackRemoveRequest,
+    SessionTrackReorderRequest,
+    SessionTracksResponse,
     TrackStatesPatchRequest,
     TTSReplacementRequest,
     VisualOverlayRequest,
@@ -446,6 +450,64 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
                     for kind, state in payload.track_states.items()
                 },
                 expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    # 자유 멀티트랙 Phase 5. **화면은 아직 이 문을 안 쓴다** -- 지금 타임라인은
+    # 트랙 줄이 다섯 개로 박혀 있어 같은 종류 트랙 둘은 한 줄에 겹쳐 그려진다.
+    # 화면은 Phase 7 몫이고, 그때까지 이 문은 API로만 열려 있다.
+    @router.get("/api/projects/{project_id}/editing-sessions/{session_id}/tracks")
+    def list_editing_session_tracks(project_id: str, session_id: str) -> SessionTracksResponse:
+        try:
+            result = orchestrator.list_editing_session_tracks(project_id=project_id, session_id=session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return SessionTracksResponse(**result)
+
+    @router.post("/api/projects/{project_id}/editing-sessions/{session_id}/tracks")
+    def add_editing_session_track(project_id: str, session_id: str, payload: SessionTrackAddRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.add_editing_session_track(
+                project_id=project_id, session_id=session_id,
+                kind=payload.kind, label=payload.label, expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.delete("/api/projects/{project_id}/editing-sessions/{session_id}/tracks/{track_id}")
+    def remove_editing_session_track(project_id: str, session_id: str, track_id: str, payload: SessionTrackRemoveRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.remove_editing_session_track(
+                project_id=project_id, session_id=session_id,
+                track_id=track_id, expected_revision=payload.expected_revision,
+            )
+        except EditingSessionConflict as exc:
+            return _editing_session_conflict_response(exc)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        except Exception as exc:
+            raise _http_error(exc) from exc
+        return EditingSessionResponse(**result)
+
+    @router.patch("/api/projects/{project_id}/editing-sessions/{session_id}/tracks/order")
+    def reorder_editing_session_tracks(project_id: str, session_id: str, payload: SessionTrackReorderRequest) -> EditingSessionResponse:
+        try:
+            result = orchestrator.reorder_editing_session_tracks(
+                project_id=project_id, session_id=session_id, kind=payload.kind,
+                track_ids=list(payload.track_ids), expected_revision=payload.expected_revision,
             )
         except EditingSessionConflict as exc:
             return _editing_session_conflict_response(exc)

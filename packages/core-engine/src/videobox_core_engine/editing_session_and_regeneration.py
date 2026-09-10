@@ -374,6 +374,54 @@ class EditingSessionRegenerationMixin:
         normalized = normalize_track_states(states)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=set_track_states(session=session, states=normalized), expected_revision=expected_revision)
 
+    def list_editing_session_tracks(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        """트랙 목록을 아래→위 순서로 돌려준다(자유 멀티트랙 Phase 5).
+
+        트랙을 저장한 적 없는 세션도 옛 고정 다섯 역할로 답한다 -- 화면이
+        "옛 편집본"과 "새 편집본"을 갈라서 다룰 필요가 없다.
+        """
+        from videobox_core_engine.session_tracks import session_tracks
+
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return {"tracks": [
+            {
+                "track_id": track.track_id, "label": track.label, "kind": track.kind,
+                "order": track.order, "is_timing_anchor": track.is_timing_anchor,
+                "source_track_id": track.source_track_id,
+            }
+            for track in session_tracks(session)
+        ]}
+
+    def add_editing_session_track(self, *, project_id: str, session_id: str, kind: str, label: str, expected_revision: int) -> dict[str, Any]:
+        from videobox_core_engine.session_tracks import add_session_track
+
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=add_session_track(session=session, kind=kind, label=label),
+            expected_revision=expected_revision,
+        )
+
+    def remove_editing_session_track(self, *, project_id: str, session_id: str, track_id: str, expected_revision: int) -> dict[str, Any]:
+        from videobox_core_engine.session_tracks import remove_session_track
+
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=remove_session_track(session=session, track_id=track_id),
+            expected_revision=expected_revision,
+        )
+
+    def reorder_editing_session_tracks(self, *, project_id: str, session_id: str, kind: str, track_ids: list[str], expected_revision: int) -> dict[str, Any]:
+        from videobox_core_engine.session_tracks import reorder_session_tracks
+
+        session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
+        return self._save_editing_session_with_revision(
+            project_id=project_id, session_id=session_id, session=session,
+            updated_session=reorder_session_tracks(session=session, kind=kind, track_ids=track_ids),
+            expected_revision=expected_revision,
+        )
+
     def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
         session = self.store.get_editing_session(project_id=project_id, session_id=session_id)
         return self._save_editing_session_with_revision(project_id=project_id, session_id=session_id, session=session, updated_session=undo(session=session), expected_revision=expected_revision)

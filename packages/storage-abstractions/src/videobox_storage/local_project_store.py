@@ -9111,6 +9111,11 @@ class LocalProjectStore(OutputVariantMixin, PreviewShareMixin, YujinMemoryMixin,
             # 완성본에 실을 자막 언어. 고른 적이 없으면 없는 칸이고, 그때는
             # 원본(한국어)으로 나간다.
             "caption_language",
+            # 트랙 목록(자유 멀티트랙 Phase 5). 고친 적이 없으면 아예 없는
+            # 칸이고, 그때는 옛 고정 다섯 역할로 읽힌다(`session_tracks.py`).
+            # **이 목록에 안 넣으면 저장은 성공했다고 나오는데 값이 사라진다** --
+            # 이 저장소가 이미 자막 언어에서 겪은 함정이다.
+            "tracks",
         ):
             if key in session_payload:
                 payload[key] = session_payload[key]

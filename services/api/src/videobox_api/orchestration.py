@@ -862,6 +862,18 @@ class ApiOrchestrator:
     def update_editing_session_track_states(self, *, project_id: str, session_id: str, states: dict[str, Any], expected_revision: int) -> dict[str, Any]:
         return self.pipeline.update_editing_session_track_states(project_id=project_id, session_id=session_id, states=states, expected_revision=expected_revision)
 
+    def list_editing_session_tracks(self, *, project_id: str, session_id: str) -> dict[str, Any]:
+        return self.pipeline.list_editing_session_tracks(project_id=project_id, session_id=session_id)
+
+    def add_editing_session_track(self, *, project_id: str, session_id: str, kind: str, label: str, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.add_editing_session_track(project_id=project_id, session_id=session_id, kind=kind, label=label, expected_revision=expected_revision)
+
+    def remove_editing_session_track(self, *, project_id: str, session_id: str, track_id: str, expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.remove_editing_session_track(project_id=project_id, session_id=session_id, track_id=track_id, expected_revision=expected_revision)
+
+    def reorder_editing_session_tracks(self, *, project_id: str, session_id: str, kind: str, track_ids: list[str], expected_revision: int) -> dict[str, Any]:
+        return self.pipeline.reorder_editing_session_tracks(project_id=project_id, session_id=session_id, kind=kind, track_ids=track_ids, expected_revision=expected_revision)
+
     def undo_editing_session(self, *, project_id: str, session_id: str, expected_revision: int) -> dict[str, Any]:
         return self.pipeline.undo_editing_session(project_id=project_id, session_id=session_id, expected_revision=expected_revision)
 
