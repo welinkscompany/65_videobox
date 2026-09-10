@@ -492,7 +492,18 @@ def materialize_editing_session_timeline(
                         clip["media_controls"] = controls
                     clips.append(clip)
         if clips:
-            tracks[track_type] = clips
+            # **덮어쓰지 않고 모은다**(2026-09-10, 자유 멀티트랙 Phase 4).
+            # 예전에는 `tracks[track_type] = clips`였다 -- 같은 종류 트랙이
+            # 둘이면 뒤엣것이 앞엣것을 통째로 지웠고, 예외도 경고도 없이
+            # 영상 절반이 사라졌다. 오늘은 `timeline_builder`가 종류당 한
+            # 트랙만 내므로 이 줄은 무동작이지만, Phase 5(트랙 추가 문)가
+            # 생기는 순간 그 형태로 터진다.
+            #
+            # 트랙 정체성(어느 트랙에서 왔는지)은 아직 안 들고 간다 -- 그건
+            # z-order를 어떻게 정할지(지금은 "늦게 시작한 것이 위", 캡컷은
+            # "위 트랙이 위")가 정해져야 의미가 있고, 그건 이미 있는 편집본의
+            # 결과 그림을 바꾸는 owner 결정이다.
+            tracks.setdefault(track_type, []).extend(clips)
     export_overlays: list[dict[str, Any]] = []
     for overlay_index, raw_overlay in enumerate(timeline.get("export_overlays", [])):
         if not isinstance(raw_overlay, dict):
