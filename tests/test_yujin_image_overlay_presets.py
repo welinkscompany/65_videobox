@@ -120,6 +120,49 @@ def test_a_preset_nobody_defined_is_refused_before_it_reaches_the_render() -> No
     assert refused.reason == "image_overlay_preset_not_available"
 
 
+def test_a_video_can_be_laid_over_the_scene_too() -> None:
+    """**영상 위에 영상**(2026-09-10). 여태 이 자리는 사진만 받았다.
+
+    막아 둔 근거는 "영상을 실으면 렌더러가 한 장짜리 그림으로 읽는다"였는데
+    **사실이 아니다.** 렌더러는 `_looks_like_image`로 갈라서 사진에만
+    `-loop 1`을 붙이고(`ffmpeg_final_renderer.py:1692`) 영상은 구간 전체를
+    흘린다(`:1206-1233`). 처음부터 영상을 받을 수 있었다.
+    """
+    accepted = interpret_yujin_editing_request(
+        _response(asset_id="asset-clip", size="small", vertical="top", horizontal="right"),
+        _context(
+            approved_asset_ids=("asset-photo", "asset-music", "asset-clip"),
+            approved_asset_types=(
+                ("asset-photo", "image"), ("asset-music", "bgm"), ("asset-clip", "broll_video"),
+            ),
+        ),
+    )
+
+    assert accepted.status == "candidate_only", accepted.reason
+    assert accepted.proposal is not None
+    assert accepted.proposal.operations[0].asset_id == "asset-clip"
+
+
+def test_the_asset_list_tells_yujin_which_ones_can_be_laid_over() -> None:
+    """목록과 안내문은 한 쌍이다. 영상을 받게 해 놓고 안내문이 "`·사진`이
+    붙은 것만"이라고 말하면 유진은 영상을 안 고른다 -- 이 저장소가 자산
+    목록 때문에 이미 두 번 겪은 모양이다."""
+    from videobox_core_engine.yujin_editing_proposal_service import _approved_asset_catalogue
+
+    catalogue = _approved_asset_catalogue(
+        _context(
+            approved_asset_ids=("asset_photo", "asset_clip", "asset_music"),
+            approved_asset_types=(
+                ("asset_photo", "image"), ("asset_clip", "broll_video"), ("asset_music", "bgm"),
+            ),
+            approved_asset_labels=(),
+        )
+    )
+
+    assert "`·사진`이 붙은 것만" not in catalogue, catalogue
+    assert "소리" in catalogue, "소리만 있는 자산은 못 얹는다는 것을 말해야 한다"
+
+
 def test_music_cannot_be_pasted_on_the_screen_as_a_photo() -> None:
     refused = interpret_yujin_editing_request(
         _response(asset_id="asset-music", vertical="top"), _context()

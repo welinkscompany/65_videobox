@@ -555,10 +555,17 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
             {card.kind === "image"
               ? <Button type="button" aria-label={`${card.title} 화면으로 깔기`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>화면으로 깔기</Button>
               : <Button type="button" aria-label={`${card.title} 적용`} disabled={applyDisabled} onClick={() => target && onApply(card, target.segmentId)}>적용</Button>}
-            {/* 이미지만: 장면을 바꾸는 `적용`(B-roll)과 달리, 장면 위에 얹는다.
-                오버레이 endpoint와 렌더는 처음부터 있었는데 이미지를 고를 자리가
-                없었다 -- 자산 목록이 그 선택기다. */}
-            {onApplyOverlay && card.previewKind === "image" ? (
+            {/* 장면을 바꾸는 `적용`(B-roll)과 달리, 장면 **위에** 얹는다.
+                오버레이 endpoint와 렌더는 처음부터 있었는데 고를 자리가
+                없었다 -- 자산 목록이 그 선택기다.
+
+                **영상도 얹힌다**(2026-09-10). 렌더러는 사진이면 `-loop 1`을
+                붙이고 영상이면 구간 전체를 흘린다
+                (`ffmpeg_final_renderer.py:1546-1559`, `:1692`) -- 처음부터
+                갈라 처리하고 있었고 이 게이트만 사진으로 좁혀 있었다.
+                소리만 있는 자산(`previewKind === "audio"`)은 얹을 것이 없어
+                그대로 뺀다. */}
+            {onApplyOverlay && (card.previewKind === "image" || card.previewKind === "video") ? (
               <Button type="button" aria-label={`${card.title} 화면에 얹기`} disabled={applyDisabled} onClick={() => target && onApplyOverlay(card, target.segmentId)}>화면에 얹기</Button>
             ) : null}
             {/* 독립 "미디어" 화면(2026-08-27 결정으로 편집기에 접힘, 2026-09-01

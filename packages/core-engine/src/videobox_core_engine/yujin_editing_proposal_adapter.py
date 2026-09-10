@@ -35,6 +35,10 @@ from videobox_domain_models.yujin_editing_proposals import (
 )
 
 
+#: 화면 **위에** 얹을 수 있는 자산의 저장 종류. 보이는 것만이다 --
+#: 소리(`bgm`/`sfx`)는 화면에 그릴 것이 없다.
+_OVERLAYABLE_ASSET_TYPES = frozenset({"image", "broll_video"})
+
 #: 사진 오버레이가 고를 수 있는 값. **여기에 사본을 두지 않는다** --
 #: `overlay_shapes`가 유일한 출처이고, 편집 세션(`_IMAGE_OVERLAY_PRESET_VALUES`)과
 #: 화면(`ImageOverlayRequest`)도 같은 표를 본다. 한 벌이 갈라지면 유진이 고른
@@ -252,10 +256,15 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
             if operation.asset_id not in set(context.approved_asset_ids):
                 return "media_asset_not_approved"
             asset_types = dict(context.approved_asset_types)
-            # **사진만 얹는다.** 영상·음악을 이 자리에 실으면 렌더러가 한 장짜리
-            # 그림으로 읽어 아무것도 안 그린다 -- `apply_media`가 종류를 가리는
-            # 것과 같은 이유다.
-            if asset_types and asset_types.get(operation.asset_id) != "image":
+            # **보이는 것만 얹는다 -- 사진과 영상.** 소리만 있는 자산은 화면
+            # 위에 그릴 것이 없다.
+            #
+            # 예전 주석은 "영상을 실으면 렌더러가 한 장짜리 그림으로 읽는다"고
+            # 했는데 **틀렸다**(2026-09-10 확인). 렌더러는 `_looks_like_image`로
+            # 갈라서 사진에만 `-loop 1`을 붙이고(`ffmpeg_final_renderer.py:1692`)
+            # 영상은 `trim=start:end` 구간 전체를 흘린다(`:1206-1233`).
+            # 처음부터 영상을 받을 수 있었다.
+            if asset_types and asset_types.get(operation.asset_id) not in _OVERLAYABLE_ASSET_TYPES:
                 return "media_asset_type_mismatch"
         if isinstance(operation, ApplyMediaOperation):
             if operation.asset_id not in set(context.approved_asset_ids):

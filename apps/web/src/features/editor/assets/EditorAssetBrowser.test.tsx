@@ -226,6 +226,37 @@ describe("EditorAssetBrowser", () => {
     expect(screen.queryByRole("button", { name: "바다.png 적용" })).toBeNull();
   });
 
+  // **영상 위에 영상**(PIP). 렌더러·세션·API는 처음부터 영상 자산을 받는다
+  // (`ffmpeg_final_renderer.py:1546-1559`가 사진이면 `-loop 1`, 영상이면
+  // 구간 전체를 흘린다) -- 화면에서 고를 자리만 없었다. 이 저장소가 반복해서
+  // 밟은 "부품은 있는데 부르는 자리가 없다"의 또 한 건이다.
+  it("offers to lay a video over the scene too, but never a sound-only asset", () => {
+    const clip: EditorAssetCard = {
+      id: "broll:clip-1",
+      kind: "broll",
+      assetId: "clip-1",
+      label: "촬영본",
+      title: "매대 영상",
+      durationLabel: "8초",
+      status: "준비됨",
+      audioPresence: "오디오 있음",
+      license: "프로젝트 로컬 B-roll",
+      canApply: true,
+      previewUrl: "/api/projects/project-a/assets/clip-1/content",
+      previewKind: "video",
+      sourceMetadata: { tags: [], source: "프로젝트 로컬 B-roll", creator: "", officialLicenseUrl: "", attributionRequired: false, attributionText: "" },
+    };
+    const onApplyOverlay = vi.fn();
+    render(<EditorAssetBrowser cards={[...cards, clip]} target={{ segmentId: "seg-1", startSec: 0, endSec: 1 }} isSaving={false} onPreview={vi.fn()} onApply={vi.fn()} onApplyOverlay={onApplyOverlay} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "매대 영상 화면에 얹기" }));
+    expect(onApplyOverlay).toHaveBeenCalledWith(clip, "seg-1");
+
+    // 소리만 있는 자산은 얹을 것이 없다. 단추가 뜨면 눌러 보고 나서야 안다.
+    expect(screen.queryByRole("button", { name: "배경 음악 1 화면에 얹기" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "효과음 1 화면에 얹기" })).toBeNull();
+  });
+
   it("offers a picture filter so the shared library's pictures can be narrowed to", () => {
     const pictureCard: EditorAssetCard = {
       id: "library-image:user_image_1",
