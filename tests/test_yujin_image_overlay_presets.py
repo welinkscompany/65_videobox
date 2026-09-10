@@ -370,9 +370,21 @@ def test_a_photo_overlay_keeps_the_old_wording_with_no_video_signal() -> None:
 def test_yujin_can_turn_on_the_original_sound_when_laying_something_over() -> None:
     """"소리도 켜서 얹어줘" -- Task 4(2026-09-11). 이름은 b-roll과 같은 칸을 그대로
     쓴다(`preserve_source_audio`, `editing_session.py:1582`). 새 칸을 만들지 않는다.
+
+    얹는 것은 **영상**이어야 한다 -- 사진에는 소리 스트림이 없어서
+    `preserve_source_audio=True`가 검증에서 막힌다(리뷰 발견사항 2,
+    2026-09-11, `test_turning_on_the_sound_for_a_photo_is_rejected` 참고).
+    이 시험은 원래 사진 자산(`asset-photo`)으로 돼 있었는데, 그 조합 자체가
+    이 저장소가 막으려는 실수였다.
     """
     accepted = interpret_yujin_editing_request(
-        _response(asset_id="asset-photo", preserve_source_audio=True), _context()
+        _response(asset_id="asset-clip", preserve_source_audio=True),
+        _context(
+            approved_asset_ids=("asset-photo", "asset-music", "asset-clip"),
+            approved_asset_types=(
+                ("asset-photo", "image"), ("asset-music", "bgm"), ("asset-clip", "broll_video"),
+            ),
+        ),
     )
 
     assert accepted.status == "candidate_only", accepted.reason
@@ -384,7 +396,13 @@ def test_yujin_can_turn_on_the_original_sound_when_laying_something_over() -> No
 def test_turning_on_the_sound_actually_reaches_the_stored_overlay() -> None:
     """윗 시험은 명령이 값을 들고 있는지만 잰다 -- 실제로 세션에 닿는지는 따로 잰다."""
     proposal = interpret_yujin_editing_request(
-        _response(asset_id="asset-photo", preserve_source_audio=True), _context()
+        _response(asset_id="asset-clip", preserve_source_audio=True),
+        _context(
+            approved_asset_ids=("asset-photo", "asset-music", "asset-clip"),
+            approved_asset_types=(
+                ("asset-photo", "image"), ("asset-music", "bgm"), ("asset-clip", "broll_video"),
+            ),
+        ),
     ).proposal
     assert proposal is not None
 
@@ -396,6 +414,30 @@ def test_turning_on_the_sound_actually_reaches_the_stored_overlay() -> None:
         if item.get("overlay_type") == "image_overlay"
     )
     assert overlay["preserve_source_audio"] is True
+
+
+def test_turning_on_the_sound_for_a_photo_is_rejected() -> None:
+    """리뷰 발견사항 2(2026-09-11): 사진은 소리 스트림이 없다. 화면은 사진
+    오버레이에 소리 스위치를 아예 숨기므로, 유진이 저장해 버리면 화면에서
+    되돌릴 길이 없는 값이 세션에 남는다. 안내문(`_overlay_entry`)이 이제
+    사진에는 소리 상태를 광고하지 않지만, 유진이 그래도 이 칸을 채워
+    보내는 경우를 대비해 검증 단계에서 한 번 더 막는다.
+    """
+    refused = interpret_yujin_editing_request(
+        _response(asset_id="asset-photo", preserve_source_audio=True), _context()
+    )
+
+    assert refused.status == "rejected"
+    assert refused.reason == "image_overlay_sound_needs_video"
+
+
+def test_turning_off_the_sound_for_a_photo_is_still_allowed() -> None:
+    """끄는 것은 항상 무해하다 -- 거절 대상은 **켜는 것**뿐이다."""
+    accepted = interpret_yujin_editing_request(
+        _response(asset_id="asset-photo", preserve_source_audio=False), _context()
+    )
+
+    assert accepted.status == "candidate_only", accepted.reason
 
 
 def test_not_mentioning_sound_leaves_the_stored_value_alone() -> None:
@@ -463,15 +505,42 @@ def test_the_prompt_tells_yujin_whether_the_overlay_sound_is_on_right_now() -> N
 
     목록만 주고 지금 값을 안 주면 유진은 "소리가 켜져 있지 않습니다"라고
     답한다 -- 켜져 있는데도. 전환·색감·자산 목록과 같은 함정이다.
+
+    얹힌 것은 **영상**으로 등록해야 한다 -- `approved_asset_types`가 없으면
+    (리뷰 발견사항 2 고침 이후) 소리 상태 자체가 안내문에서 빠진다.
     """
     prompt = _editing_prompt(
         instruction="얹은 영상 소리 꺼줘",
         context=_context(
+            approved_asset_ids=("asset-photo", "asset-music", "asset-clip"),
+            approved_asset_types=(
+                ("asset-photo", "image"), ("asset-music", "bgm"), ("asset-clip", "broll_video"),
+            ),
             image_overlays_by_segment=(("seg-1", "asset-clip(bottom/right/small/fade_in, sound on)"),),
         ),
     )
 
     assert "sound on" in prompt
+
+
+def test_the_prompt_never_mentions_sound_for_a_photo_overlay() -> None:
+    """리뷰 발견사항 2(2026-09-11): 사진에는 소리 스위치가 화면에도 없다.
+
+    안내문이 "지금 얹힌 것" 줄에 사진의 소리 상태를 계속 말해 주면, 유진은
+    안내문만 보고도 "사진 소리 켜줘"를 시도할 근거를 얻는다 -- 화면에는
+    없는 조작이다. `sound on`/`sound off` 꼬리 자체가 사진 항목에는
+    붙지 않아야 한다.
+    """
+    prompt = _editing_prompt(
+        instruction="사진 좀 위로 올려줘",
+        context=_context(
+            image_overlays_by_segment=(("seg-1", "asset-photo(bottom/right/small/fade_in, sound off)"),),
+        ),
+    )
+
+    assert "asset-photo(bottom/right/small/fade_in)" in prompt, prompt
+    assert "sound off)" not in prompt, prompt
+    assert "sound on)" not in prompt, prompt
 
 
 def test_the_api_reads_the_sound_state_into_that_field_too() -> None:

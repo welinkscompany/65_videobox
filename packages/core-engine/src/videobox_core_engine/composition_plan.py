@@ -684,14 +684,25 @@ def materialize_editing_session_timeline(
                 if not asset_uri and asset_id and project:
                     asset_uri = f"local://projects/{project}/assets/{asset_id}"
                 if asset_uri:
-                    clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload}
                     # 얹은 영상(PIP)의 원본 소리 켜기. b-roll과 같은 이름
                     # (`preserve_source_audio`)을 렌더러가 읽는 자리(`media_controls`)로
-                    # 옮겨 싣는다 -- **안 고른 오버레이는 열쇠 자체를 안 만든다**,
-                    # 그래야 `CompositionItem.media_controls`의 기본값 `{}`가 그대로
-                    # 남아 `fingerprint_exact_preview`가 안 움직인다.
-                    if "preserve_source_audio" in payload:
-                        clip["media_controls"] = {"preserve_source_audio": bool(payload["preserve_source_audio"])}
+                    # 옮겨 싣는다 -- **기본값(꺼짐)과 다를 때만 열쇠를 만든다**
+                    # (리뷰 발견사항 3, 2026-09-11). 화면은 저장할 때마다 이 칸에
+                    # 명시적 `True`/`False`를 싣는다 -- 소리를 만진 적이 없는
+                    # 오버레이를 다시 저장만 해도 `False`가 찍혀 `_canonical_item`이
+                    # `track_order`를 0일 때 빼는 것과 같은 규칙을 안 따르면
+                    # `fingerprint_exact_preview`가 움직여 캐시된 정확 미리보기가
+                    # 전부 무효가 된다 -- 완성본은 한 글자도 안 바뀌는데도. 지문에
+                    # 실리는 `overlay_payload`에서도 같은 이유로 `False`는 뺀다 --
+                    # `media_controls`만 빼고 `overlay_payload`는 그대로 두면
+                    # 지문이 여전히 움직인다.
+                    preserve_audio = bool(payload.get("preserve_source_audio", False))
+                    overlay_payload = dict(payload)
+                    if not preserve_audio:
+                        overlay_payload.pop("preserve_source_audio", None)
+                    clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": overlay_payload}
+                    if preserve_audio:
+                        clip["media_controls"] = {"preserve_source_audio": True}
                     for key in ("expected_content_sha256", "media_revision"):
                         if payload.get(key):
                             clip[key] = payload[key]

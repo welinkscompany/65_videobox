@@ -185,8 +185,20 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
 
     def _overlay_entry(segment_id: str, info: str) -> str:
         asset_id = info.split("(", 1)[0]
-        if "(" in info and asset_types.get(asset_id) == "broll_video":
-            info = info.replace("(", "(video, ", 1)
+        is_video = asset_types.get(asset_id) == "broll_video"
+        if "(" in info:
+            if is_video:
+                info = info.replace("(", "(video, ", 1)
+            else:
+                # **사진은 소리 스트림이 없다**(리뷰 발견사항 2, 2026-09-11).
+                # 화면 인스펙터도 사진 오버레이에는 소리 스위치를 아예
+                # 숨긴다 -- 유진만 계속 상태를 말해 주면 "사진 소리도
+                # 켜줘"가 저장되는데 화면에는 되돌릴 스위치가 없다. 목록에서
+                # 안 보이는 조작은 유진도 스스로 고르지 않게 된다(전환·색감이
+                # 이미 두 번 겪은 "목록과 현재값은 한 쌍" 교훈과 같은 방향).
+                # 저장 자체는 검증 단계(`yujin_editing_proposal_adapter.py`의
+                # `image_overlay_sound_needs_video`)에서 한 번 더 막는다.
+                info = info.replace(", sound on)", ")").replace(", sound off)", ")")
         return f"{segment_id}={info}"
 
     return (

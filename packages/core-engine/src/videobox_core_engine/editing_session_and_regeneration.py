@@ -48,7 +48,7 @@ from videobox_core_engine.editing_session import (
     preview_caption_style_scope,
     update_caption_style,
     build_partial_regeneration_request,
-    _equivalent_overlay_types,
+    _current_image_overlay_preserve_source_audio,
     _iter_matching_overlay_containers,
     clear_segment_broll_override,
     clear_segment_music_override,
@@ -232,28 +232,13 @@ class EditingSessionRegenerationMixin:
         if not matched:
             raise KeyError(f"Image overlay not found in editing session: {segment_id}")
 
-    @staticmethod
-    def _current_image_overlay_preserve_source_audio(
-        *, session: dict[str, Any], segment_id: str,
-    ) -> bool | None:
-        """지금 저장된 사진 오버레이의 `preserve_source_audio`를 읽는다.
-
-        이 칸을 안 보낸 요청(옛 화면·유진)이 오버레이를 통째로 다시 쓸 때 이미
-        켜 둔 소리 설정을 지우지 않으려면, 새로 쓰기 전에 옛 값을 먼저 봐야
-        한다 -- 쓰는 자리(`_upsert_segment_overlay` 등)와 같은 찾기 규칙을
-        `_iter_matching_overlay_containers`로 공유한다.
-        """
-        equivalent = _equivalent_overlay_types("image_overlay")
-        for container in _iter_matching_overlay_containers(session, segment_id):
-            overlays = container.get("visual_overlays")
-            if not isinstance(overlays, list):
-                continue
-            for overlay in overlays:
-                if isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") in equivalent:
-                    value = overlay.get("preserve_source_audio")
-                    if isinstance(value, bool):
-                        return value
-        return None
+    # `_current_image_overlay_preserve_source_audio`는 여기서 다시 정의하지
+    # 않는다 -- `editing_session.py`가 유일한 출처다(리뷰 발견사항 4,
+    # 2026-09-11). 예전엔 이 클래스에 문자 그대로 같은 함수가 한 벌 더
+    # 있었다 -- 화면 경로(이 파일)와 유진 직접 적용 경로(`editing_session.py`의
+    # `_apply_yujin_editing_operations`)가 각자 자기 사본을 봐서, 둘 중 하나만
+    # 고치면 화면과 유진이 같은 값을 다르게 다루게 될 뻔했다. 위 import에서
+    # 가져온 모듈 함수를 그대로 쓴다.
 
     def _save_editing_session_with_revision(
         self,
@@ -1066,7 +1051,7 @@ class EditingSessionRegenerationMixin:
         resolved_preserve_source_audio = (
             preserve_source_audio
             if preserve_source_audio is not None
-            else self._current_image_overlay_preserve_source_audio(session=session, segment_id=segment_id)
+            else _current_image_overlay_preserve_source_audio(session=session, segment_id=segment_id)
         )
         updated_session = update_segment_image_overlay(
             session=session,

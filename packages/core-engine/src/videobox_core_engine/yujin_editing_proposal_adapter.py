@@ -266,6 +266,17 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
             # 처음부터 영상을 받을 수 있었다.
             if asset_types and asset_types.get(operation.asset_id) not in _OVERLAYABLE_ASSET_TYPES:
                 return "media_asset_type_mismatch"
+            # **사진에는 소리 스트림이 없다** -- 여기서 검증 시점에 한 번 더
+            # 닫는다(리뷰 발견사항 2, 2026-09-11). 안내문(`_overlay_entry`)이
+            # 사진에는 소리 상태를 아예 광고하지 않아 유진이 스스로 이 값을
+            # 고를 일은 드물어졌지만, 광고만 끄면 유진이 안내문을 무시하고
+            # 이 칸을 채워 보낼 가능성까지는 못 막는다. 화면은 사진 오버레이에
+            # 소리 스위치를 아예 숨기므로, 여기를 통과시키면 화면에서 되돌릴
+            # 길이 없는 값이 세션에 남는다("목록과 현재값은 한 쌍" 교훈,
+            # 전환·색감이 이미 두 번 겪었다). 저장을 조용히 고치는 대신
+            # 통째로 거절한다 -- 자리·크기 프리셋을 지어냈을 때와 같은 처리다.
+            if asset_types and operation.preserve_source_audio and asset_types.get(operation.asset_id) != "broll_video":
+                return "image_overlay_sound_needs_video"
         if isinstance(operation, ApplyMediaOperation):
             if operation.asset_id not in set(context.approved_asset_ids):
                 return "media_asset_not_approved"
