@@ -284,14 +284,22 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         value: { title: stringValue(payload.title), body: stringValue(payload.body), text: stringValue(payload.text) },
       }];
       if (clip.overlayType === "image_overlay") {
-        // 얹은 자산이 영상이면 절 이름도 "영상"이다 -- 타임라인 막대가 이미 같은
-        // 규칙(`isVideoAssetUri`)으로 부르고 있다. 조절 칸(`overlayKind: "image"`,
-        // `fields`)은 그대로다 -- 자리·크기·움직임 프리셋은 영상에도 똑같이 쓰인다.
+        // 얹은 자산이 영상이면 절 이름도 그 사실을 말해야 한다 -- 타임라인
+        // 막대가 이미 같은 규칙(`isVideoAssetUri`)으로 "영상"이라 부르고
+        // 있어서다. 다만 장면 자체의 b-roll 클립도 절 이름이 "영상"이라서
+        // (`mediaLabels.broll`, 이 파일 위쪽), 그대로 "영상"을 쓰면 실제
+        // 화면에서 둘이 같은 이름으로 떠 창작자가 어느 쪽인지 못 골랐다
+        // (2026-09-10 실기 재검증에서 발견). "얹은 영상"으로 얹힌 쪽임을
+        // 밝힌다 -- "화면에 얹기"·"화면 위에 얹은 것을 빼요"와 같은 낱말이라
+        // 새 용어가 아니다. 조절 칸(`overlayKind: "image"`, `fields`)은
+        // 그대로다 -- 자리·크기·움직임 프리셋은 영상에도 똑같이 쓰인다.
         const isVideoOverlay = isVideoAssetUri(clip.assetUri);
         // 본문 낱말은 절 제목과 다른 값이다(`bodyNoun` 주석 참고) -- 사진은
-        // "사진", 영상은 "영상". 같은 신호 하나로 둘 다 정한다.
+        // "사진", 영상은 "영상". 절 제목이 "얹은 영상"으로 바뀌어도 본문은
+        // "장면 위에 영상을 얹어요"를 그대로 쓴다("얹은 영상을 얹어요"는
+        // 말이 안 되므로 bodyNoun은 label을 따라가지 않는다).
         return [{
-          id: `overlay:${clip.clipId}`, kind: "overlay", label: isVideoOverlay ? "영상" : "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+          id: `overlay:${clip.clipId}`, kind: "overlay", label: isVideoOverlay ? "얹은 영상" : "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
           value: { assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text), ...imageOverlayPresets(payload) },
           bodyNoun: isVideoOverlay ? "영상" : "사진",
         }];

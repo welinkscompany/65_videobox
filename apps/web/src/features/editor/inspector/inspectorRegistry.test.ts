@@ -286,7 +286,9 @@ describe("projectInspectorTargets", () => {
   // 타임라인 막대는 얹은 영상을 이미 "영상"이라 부른다(`clipNames.ts`,
   // `isVideoAssetUri`). 인스펙터 절 이름이 "이미지"로 남아 있으면 방금 얹은
   // 영상을 조정하려는 창작자가 "이미지"라는 이름을 찾아야 했다.
-  it("얹은 것이 영상이면 절 이름이 영상이다", () => {
+  // 재검증(2026-09-10)에서 "영상"이 자체 b-roll 클립 라벨과 같은 장면에서
+  // 겹치는 것이 실기로 확인돼 "얹은 영상"으로 바꿨다 -- 아래 충돌 테스트 참고.
+  it("얹은 것이 영상이면 절 이름이 얹은 영상이다", () => {
     // 영상을 얹어 놓고 조정하려면 "이미지"를 찾아야 했다.
     // 종류(`overlayKind`)와 조절 칸은 그대로다 -- 자리·크기·움직임은 영상에도 같다.
     const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-3" });
@@ -294,7 +296,7 @@ describe("projectInspectorTargets", () => {
     expect(targets).toContainEqual({
       id: "overlay:image-video-1",
       kind: "overlay",
-      label: "영상",
+      label: "얹은 영상",
       segmentId: "segment-3",
       overlayKind: "image",
       fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
@@ -316,5 +318,45 @@ describe("projectInspectorTargets", () => {
       value: { assetId: "asset-photo", text: "", vertical: null, horizontal: null, size: null, motion: null },
       bodyNoun: "사진",
     });
+  });
+
+  // 실제 화면 재검증(2026-09-10)에서 발견: 장면이 자기 자신의 b-roll 영상과
+  // 그 위에 얹은 영상을 동시에 갖고 있으면 편집 대상 드롭다운에 "영상"이
+  // 둘 나왔다 -- 어느 쪽인지 창작자가 구별할 수 없었다. 기존 단위 테스트는
+  // 각 대상을 따로따로만 확인해서(장면을 분리해 둔 fixture) 이 조립 결과의
+  // 충돌을 못 잡았다. 이 테스트는 한 장면에 둘 다 있는 조립 결과를 만들어
+  // 라벨이 겹치지 않는지 직접 본다 -- 특정 문자열이 아니라 "겹치지 않음"을
+  // 확인해야 같은 종류의 충돌을 다른 조합에서도 잡는다.
+  it("장면에 자체 b-roll 영상과 얹은 영상이 함께 있어도 편집 대상 라벨이 겹치지 않는다", () => {
+    const collidingView = {
+      ...view,
+      tracks: view.tracks.map((track) => {
+        if (track.role === "broll") {
+          return {
+            ...track,
+            clips: [{
+              clipId: "broll-collide-1", segmentId: "segment-collide", type: "broll" as const, assetId: "asset-broll-collide",
+              assetUri: null, startSec: 0, endSec: 1, controls: {},
+            }],
+          };
+        }
+        if (track.role === "overlay") {
+          return {
+            ...track,
+            clips: [{
+              clipId: "image-video-collide-1", segmentId: "segment-collide", type: "overlay" as const, assetId: "asset-video-collide",
+              assetUri: "local://projects/p1/assets/clip_collide.mp4", startSec: 0, endSec: 1, controls: {},
+              overlayType: "image_overlay" as const, overlayPayload: { asset_id: "asset-video-collide", text: "" },
+            }],
+          };
+        }
+        return track;
+      }),
+    } satisfies EditorViewModel;
+
+    const targets = projectInspectorTargets({ view: collidingView, selectedSegmentId: "segment-collide" });
+    const labels = targets.map((target) => target.label);
+
+    expect(new Set(labels).size).toBe(labels.length);
   });
 });
