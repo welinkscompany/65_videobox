@@ -639,6 +639,21 @@ describe("EditorWorkbench", () => {
     expect(screen.getByLabelText("화면 표시 · 1번째 장면 소스 미리보기").tagName).toBe("VIDEO");
   });
 
+  // Task 5: 얹은 것이 영상이면 `overlayType`이 `image_overlay`(사진과 같은 종류)라도
+  // `소스 확인`에 떠야 한다 -- 판정은 오버레이 종류가 아니라 실제 자산 확장자
+  // (`isVideoAssetUri`)로 한다. 사진을 얹었을 때(다음 테스트)는 그대로 안 뜬다.
+  it("얹은 영상은 overlayType이 image_overlay여도 소스 확인에 뜬다", () => {
+    const overlayVideoView = {
+      ...view,
+      playback: { auditionUrls: { "asset-overlay-video": "/api/projects/project-a/assets/asset-overlay-video/content" }, exactPreview: { status: "succeeded", url: "/api/projects/project-a/exact-previews/g4/content", artifactRevision: 1, timelineStartSec: 0, timelineEndSec: 1 } },
+      tracks: [{ trackId: "overlay", role: "overlay", clips: [{ clipId: "clip-overlay-video", segmentId: "segment-overlay-video", type: "overlay", assetId: "asset-overlay-video", assetUri: "assets/overlay-video.mp4", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: {} }] }],
+    } as const;
+    render(<EditorWorkbench view={overlayVideoView} />);
+    openMaterialDock();
+    fireEvent.click(screen.getByRole("button", { name: "화면 표시 · 1번째 장면 원본 열기" }));
+    expect(screen.getByLabelText("화면 표시 · 1번째 장면 소스 미리보기").tagName).toBe("VIDEO");
+  });
+
   it("starts with output variants collapsed, expands on demand, and remembers the choice per project", async () => {
     const { unmount } = render(<EditorWorkbench view={view} />);
     const toggle = screen.getByRole("button", { name: "출력 변형 펼치기" });

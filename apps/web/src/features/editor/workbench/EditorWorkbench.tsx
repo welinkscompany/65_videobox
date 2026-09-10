@@ -15,6 +15,7 @@ import { PreviewStage, type AuditionRequest, type AuditionSource } from "../prev
 import { sceneNumbersBySegmentId } from "../sceneNames";
 import { TimelineDock } from "../timeline/TimelineDock";
 import { activeSegmentIdAt, clampPlaybackSeconds } from "../transcript/playbackNavigation";
+import { isVideoAssetUri } from "../assetKind";
 import { EditorWorkbenchReadOnlyAdapters } from "./editorWorkbenchReadOnlyAdapters";
 import { YujinPanel } from "./YujinPanel";
 import { resolveEditorWorkbenchLayout, timelineHeightLimitsRem, type EditorWorkbenchPersistedState } from "./editorWorkbenchLayout";
@@ -501,7 +502,7 @@ function EditorWorkbenchInstance({
     if (!clip.assetId) return [];
     const url = view.playback.auditionUrls[clip.assetId];
     if (!url) return [];
-    const mediaKind = auditionMediaKind(track.role, clip.overlayType);
+    const mediaKind = auditionMediaKind(track.role, clip.overlayType, clip.assetUri);
     const scene = sceneNumbers.get(clip.segmentId);
     const label = `${auditionRoleLabel(track.role)} · ${scene ? `${scene}번째 장면` : "선택한 장면"}`;
     return mediaKind ? [{ id: clip.clipId, label, url, mediaKind, timelineRange: { startSec: clip.startSec, endSec: clip.endSec } }] : [];
@@ -851,8 +852,13 @@ function auditionRoleLabel(role: EditorViewModel["tracks"][number]["role"]): str
   return labels[role] ?? "미디어";
 }
 
-function auditionMediaKind(role: EditorViewModel["tracks"][number]["role"], overlayType: EditorViewModel["tracks"][number]["clips"][number]["overlayType"]): AuditionSource["mediaKind"] | null {
+function auditionMediaKind(role: EditorViewModel["tracks"][number]["role"], overlayType: EditorViewModel["tracks"][number]["clips"][number]["overlayType"], assetUri: string | null): AuditionSource["mediaKind"] | null {
   if (role === "narration" || role === "bgm" || role === "sfx") return "audio";
   if (role === "broll") return "video";
-  return overlayType === "image_overlay" ? null : "video";
+  if (overlayType !== "image_overlay") return "video";
+  // `image_overlay`는 사진과 영상을 얹었을 때 둘 다 쓰는 오버레이 종류라
+  // 이것만으로는 못 가른다. 실제로 얹힌 자산이 영상인지는 확장자로만 안다
+  // (`isVideoAssetUri`, 이 저장소에서 이 판정을 하는 유일한 자리) -- 사진이면
+  // 재생할 것이 없으니 그대로 `null`(목록에서 빠짐)을 돌려준다.
+  return isVideoAssetUri(assetUri) ? "video" : null;
 }
