@@ -62,6 +62,8 @@ beforeEach(() => {
   vi.spyOn(api, "cancelFootageSequence").mockResolvedValue({ status: "cancelled", sequence_id: "sequence-1", revision: 1 });
   vi.spyOn(api, "approveFootageSequence").mockResolvedValue({ sequence_id: "sequence-1", source_id: "source-1", source_sha256: "a".repeat(64), name: "새 가상 묶음", revision: 1, items: [{ item_id: "item-1", source_segment_id: "source-seg-1", item_order: 1, start_sec: 0, end_sec: 8 }, { item_id: "item-2", source_segment_id: "source-seg-2", item_order: 2, start_sec: 8, end_sec: 20 }] });
   vi.spyOn(api, "getFootageSequence").mockResolvedValue({ sequence_id: "sequence-1", source_id: "source-1", source_sha256: "a".repeat(64), name: "새 가상 묶음", revision: 2, items: [{ item_id: "item-2", source_segment_id: "source-seg-2", item_order: 1, start_sec: 8, end_sec: 20 }, { item_id: "item-1", source_segment_id: "source-seg-1", item_order: 2, start_sec: 0, end_sec: 8 }] });
+  vi.spyOn(api, "renderFootageDerivative").mockResolvedValue({ job_id: "derivative-job-1", idempotency_key: "k", source_kind: "proposal", source_id: "proposal-1", status: "succeeded", derived_asset_id: "derived:derivative-job-1", created_at: "2026-09-10T00:00:00Z" });
+  vi.spyOn(api, "getFootageDerivativeJob").mockResolvedValue({ job_id: "derivative-job-1", idempotency_key: "k", source_kind: "proposal", source_id: "proposal-1", status: "succeeded", derived_asset_id: "derived:derivative-job-1", created_at: "2026-09-10T00:00:00Z" });
 });
 
 describe("FootageOrganizerPage", () => {
@@ -237,5 +239,69 @@ describe("FootageOrganizerPage", () => {
     await waitFor(() => expect(api.getFootageSequence).toHaveBeenCalledWith("sequence-1"));
     fireEvent.click(screen.getByRole("button", { name: "가상 묶음 승인" }));
     await waitFor(() => expect(api.approveFootageSequence).toHaveBeenCalledWith("sequence-1", { idempotency_key: expect.any(String) }));
+  });
+
+  it("only allows rendering a real clip file once the proposal is approved", async () => {
+    render(<FootageOrganizerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
+    fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
+    await screen.findByTestId("scene-timeline");
+
+    expect(screen.getByTestId("footage-render-derivative")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "제안 적용" }));
+    await waitFor(() => expect(api.approveFootageProposal).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("footage-render-derivative")).toBeEnabled());
+
+    fireEvent.click(screen.getByTestId("footage-render-derivative"));
+    await waitFor(() => expect(api.renderFootageDerivative).toHaveBeenCalledWith(
+      expect.objectContaining({ source_kind: "proposal", source_id: "proposal-1" }),
+    ));
+    expect(await screen.findByText(/자료실에 새 클립으로 저장했어요/)).toBeVisible();
+    await waitFor(() => expect(api.listLibraryAssets).toHaveBeenCalledTimes(2)); // 새 자산이 생겼으니 목록도 새로고침한다
+  });
+
+  it("only allows rendering a virtual sequence once it is approved and single-source", async () => {
+    render(<FootageOrganizerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
+    fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
+    await screen.findByTestId("scene-timeline");
+    fireEvent.click(screen.getByRole("button", { name: /거리/ }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "선택 장면으로 가상 묶음 만들기" }));
+    await screen.findByText("새 가상 묶음");
+
+    expect(screen.getByTestId("footage-render-derivative")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "가상 묶음 승인" }));
+    await waitFor(() => expect(api.approveFootageSequence).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId("footage-render-derivative")).toBeEnabled());
+
+    fireEvent.click(screen.getByTestId("footage-render-derivative"));
+    await waitFor(() => expect(api.renderFootageDerivative).toHaveBeenCalledWith(
+      expect.objectContaining({ source_kind: "sequence", source_id: "sequence-1" }),
+    ));
+  });
+
+  it("keeps the derivative button disabled for a multi-source virtual sequence even after approval", async () => {
+    const assets = [
+      asset,
+      { ...asset, library_asset_id: "asset-2", content_sha256: "b".repeat(64), user_metadata: { filename: "short-b.mp4" } },
+    ];
+    const otherProposal = { ...proposal, proposal_id: "proposal-2", source_id: "source-2", source_sha256: "b".repeat(64), segments: [{ ...proposal.segments[0], source_segment_id: "source-seg-2", source_sha256: "b".repeat(64) }] };
+    vi.mocked(api.listLibraryAssets).mockResolvedValue({ assets, total: assets.length });
+    vi.mocked(api.proposeFootage).mockImplementation(async ({ library_asset_id }) => library_asset_id === "asset-2" ? otherProposal : proposal);
+    vi.mocked(api.createFootageSequence).mockResolvedValue({ sequence_id: "multi-sequence", source_id: "source-1", source_sha256: "a".repeat(64), sources: [{ source_id: "source-1", source_sha256: "a".repeat(64) }, { source_id: "source-2", source_sha256: "b".repeat(64) }], name: "선택한 촬영본 가상 묶음", revision: 1, items: [] });
+    vi.mocked(api.approveFootageSequence).mockResolvedValue({ sequence_id: "multi-sequence", source_id: "source-1", source_sha256: "a".repeat(64), sources: [{ source_id: "source-1", source_sha256: "a".repeat(64) }, { source_id: "source-2", source_sha256: "b".repeat(64) }], name: "선택한 촬영본 가상 묶음", revision: 1, items: [] });
+    render(<FootageOrganizerPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /clip\.mp4/ }));
+    fireEvent.click(screen.getByRole("button", { name: "분석 시작" }));
+    await screen.findByTestId("scene-timeline");
+    fireEvent.click(screen.getByRole("button", { name: /short-b\.mp4/ }), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "선택한 촬영본으로 가상 묶음 만들기" }));
+    await waitFor(() => expect(api.createFootageSequence).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "가상 묶음 승인" }));
+    await waitFor(() => expect(api.approveFootageSequence).toHaveBeenCalled());
+
+    // 승인은 됐지만 원본이 둘이라 백엔드가 거절할 조합이다 -- 버튼은 계속 꺼져 있어야 한다.
+    expect(screen.getByTestId("footage-render-derivative")).toBeDisabled();
+    expect(api.renderFootageDerivative).not.toHaveBeenCalled();
   });
 });

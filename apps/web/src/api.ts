@@ -1086,6 +1086,16 @@ export type FootageSequencePreview = {
   preview_items: Array<{ item_id: string; source_id: string; source_sha256: string; preview_url: string }>;
   items: FootageSequenceItem[];
 };
+export type FootageDerivativeJob = {
+  job_id: string;
+  idempotency_key: string;
+  source_kind: "proposal" | "sequence";
+  source_id: string;
+  status: "running" | "succeeded" | "failed";
+  derived_asset_id?: string | null;
+  error_message?: string | null;
+  created_at: string;
+};
 export type LibrarySearchMatch = LibraryAsset & { score?: number; reason?: string; semantic_match?: boolean };
 export type LibraryUsageLocation = {
   project_id?: string | null;
@@ -2196,6 +2206,9 @@ export const api = {
   previewFootageSequence: (sequenceId: string) => request<FootageSequencePreview>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/preview`, { method: "POST" }),
   cancelFootageSequence: (sequenceId: string) => request<{ status: "cancelled"; sequence_id: string; revision: number }>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/cancel`, { method: "POST" }),
   approveFootageSequence: (sequenceId: string, payload: { idempotency_key: string }) => request<FootageSequence>(`/api/footage/sequences/${encodeURIComponent(sequenceId)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  renderFootageDerivative: (payload: { source_kind: "proposal" | "sequence"; source_id: string; idempotency_key: string }) =>
+    request<FootageDerivativeJob>("/api/footage/derivatives/render", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  getFootageDerivativeJob: (jobId: string) => request<FootageDerivativeJob>(`/api/footage/derivatives/${encodeURIComponent(jobId)}`),
   searchLibraryAssets: (query: string, mediaType: LibraryMediaType, signal?: AbortSignal) =>
     request<{ matches: LibrarySearchMatch[]; semantic: boolean }>(
       `/api/library/search?q=${encodeURIComponent(query)}&media_type=${encodeURIComponent(mediaType)}`,
