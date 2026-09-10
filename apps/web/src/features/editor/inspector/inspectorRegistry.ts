@@ -120,7 +120,14 @@ export type InspectorTarget =
   // `isNew`: 이 장면에 아직 없는 오버레이의 빈 편집 자리다. 저장은 백엔드
   // upsert가 그대로 만들어 주고, 아직 없는 것에는 `지우기`를 보이지 않는다.
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "explanation-card"; fields: readonly ExplanationCardField[]; value: Readonly<{ title: string; body: string; text: string }>; isNew?: boolean }>
-  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }> & ImageOverlayPresets; isNew?: boolean }>
+  // `bodyNoun`은 본문 문장("장면 위에 ○○을 얹어요")에 쓰는 낱말이다. `label`(절
+  // 제목)과 따로 둔 이유(재검토 발견 2026-09-10): 사진일 때 제목은 예전부터
+  // "이미지"인데(Task 2 결정, `clipNames.ts`와 짝) 본문은 그보다 더 예전부터
+  // "사진"이었다. 본문이 label을 그대로 쓰면 둘 중 하나가 바뀐다 -- 제목을
+  // 지키면 사진 본문 문구가 바뀌고, 본문을 지키면 영상 제목이 다시 "이미지"로
+  // 돌아간다. 둘 다 같은 신호(`isVideoAssetUri`)에서 나오되 서로 다른 낱말을
+  // 쓸 수 있도록 값을 하나씩 따로 싣는다.
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }> & ImageOverlayPresets; bodyNoun: string; isNew?: boolean }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }>; isNew?: boolean }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "shape"; fields: readonly ShapeField[]; value: ShapeOverlayValue; isNew?: boolean }>;
 
@@ -276,13 +283,19 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         id: `overlay:${clip.clipId}`, kind: "overlay", label: "설명 카드", segmentId: selectedSegmentId, overlayKind: "explanation-card", fields: ["title", "body", "text"],
         value: { title: stringValue(payload.title), body: stringValue(payload.body), text: stringValue(payload.text) },
       }];
-      if (clip.overlayType === "image_overlay") return [{
+      if (clip.overlayType === "image_overlay") {
         // 얹은 자산이 영상이면 절 이름도 "영상"이다 -- 타임라인 막대가 이미 같은
         // 규칙(`isVideoAssetUri`)으로 부르고 있다. 조절 칸(`overlayKind: "image"`,
         // `fields`)은 그대로다 -- 자리·크기·움직임 프리셋은 영상에도 똑같이 쓰인다.
-        id: `overlay:${clip.clipId}`, kind: "overlay", label: isVideoAssetUri(clip.assetUri) ? "영상" : "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
-        value: { assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text), ...imageOverlayPresets(payload) },
-      }];
+        const isVideoOverlay = isVideoAssetUri(clip.assetUri);
+        // 본문 낱말은 절 제목과 다른 값이다(`bodyNoun` 주석 참고) -- 사진은
+        // "사진", 영상은 "영상". 같은 신호 하나로 둘 다 정한다.
+        return [{
+          id: `overlay:${clip.clipId}`, kind: "overlay", label: isVideoOverlay ? "영상" : "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+          value: { assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text), ...imageOverlayPresets(payload) },
+          bodyNoun: isVideoOverlay ? "영상" : "사진",
+        }];
+      }
       if (clip.overlayType === "table_overlay") return [{
         id: `overlay:${clip.clipId}`, kind: "overlay", label: "표", segmentId: selectedSegmentId, overlayKind: "table", fields: ["columns", "rows", "text"],
         value: { columns: stringList(payload.columns), rows: stringRows(payload.rows), text: stringValue(payload.text) },

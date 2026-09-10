@@ -32,11 +32,11 @@ function pickPreset<T extends string>(value: string, choices: readonly T[]): T |
   return choices.find((choice) => choice === value) ?? null;
 }
 
-/** "영상을" / "이미지를"처럼 받침 유무로 목적격 조사를 고른다.
+/** "영상을" / "사진을"처럼 받침 유무로 목적격 조사를 고른다.
  *
- * `target.label`이 "사진"·"영상" 둘 다일 수 있어(최종 리뷰 발견) 문구에
- * 이름을 박아 넣을 수 없다 -- 그렇다고 "{label}을(를)"처럼 조사 둘을
- * 그대로 화면에 보여 주면 owner가 읽는 문장이 어색해진다(§10.13, 쉬운 말). */
+ * `target.bodyNoun`이 "사진"·"영상" 둘 다일 수 있어(최종 리뷰, 재검토 둘 다
+ * 발견) 문구에 이름을 박아 넣을 수 없다 -- 그렇다고 "{noun}을(를)"처럼 조사
+ * 둘을 그대로 화면에 보여 주면 owner가 읽는 문장이 어색해진다(§10.13, 쉬운 말). */
 function withObjectParticle(noun: string): string {
   const lastChar = noun.trim().slice(-1);
   const code = lastChar.codePointAt(0) ?? 0;
@@ -1186,11 +1186,14 @@ export function InspectorControls({
               방금 얹은 사진이 아무것도 안 골랐는데 움직이면 안 된다. */}
           {target.overlayKind === "image" ? (
             <>
-              {/* 이 문단 바로 위 <legend>이 target.label(사진/영상)을 이미
-                  쓰고 있다 -- 같은 패널 안에서 "사진"으로 못 박으면 얹은
-                  것이 영상일 때 제목과 본문이 서로 다른 말을 한다(최종
-                  리뷰 발견). target.label을 그대로 이어 쓴다. */}
-              <p>장면 위에 {withObjectParticle(target.label)} 얹어요. 고르지 않으면 화면 가운데에 가득 얹혀요.</p>
+              {/* 재검토 발견(2026-09-10): 위 <legend>은 target.label(사진일 때
+                  "이미지")을 쓴다. 본문이 label을 그대로 이어 쓰면 사진에서
+                  예전부터 있던 "사진을 얹어요" 문구가 "이미지를 얹어요"로
+                  바뀐다 -- 그건 이 브랜치가 절대 건드리면 안 되는 글자다.
+                  제목과 본문은 같은 신호(registry의 isVideoAssetUri)에서
+                  나오되 서로 다른 낱말을 쓸 수 있어야 해서, registry가
+                  본문 전용 낱말(target.bodyNoun)을 따로 싣는다. */}
+              <p>장면 위에 {withObjectParticle(target.bodyNoun)} 얹어요. 고르지 않으면 화면 가운데에 가득 얹혀요.</p>
               <label>
                 세로 위치
                 <NativeSelect aria-label="세로 위치" disabled={disabled} onChange={(event) => setImagePresets((current) => ({ ...current, vertical: pickPreset(event.target.value, OVERLAY_VERTICAL_CHOICES) }))} value={imagePresets.vertical ?? IMAGE_PRESET_UNSET}>

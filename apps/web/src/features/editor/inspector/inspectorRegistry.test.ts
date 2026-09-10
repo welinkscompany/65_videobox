@@ -130,6 +130,7 @@ describe("projectInspectorTargets", () => {
       overlayKind: "image",
       fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
       value: { assetId: "asset-image-2", text: "", vertical: "top", horizontal: "left", size: "small", motion: "slide_in_left" },
+      bodyNoun: "사진",
     });
   });
 
@@ -155,6 +156,7 @@ describe("projectInspectorTargets", () => {
       // 안 고른 프리셋은 `null`이다. 기본값으로 좁히면 화면이 owner가 고르지도
       // 않은 자리·크기·움직임을 저장마다 실어 보낸다.
       value: { assetId: "asset-image", text: "이미지 설명", vertical: null, horizontal: null, size: null, motion: null },
+      bodyNoun: "사진",
     });
     expect(targets).toContainEqual({
       id: "overlay:table-1",
@@ -297,6 +299,7 @@ describe("projectInspectorTargets", () => {
       overlayKind: "image",
       fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
       value: { assetId: "asset-video", text: "", vertical: null, horizontal: null, size: null, motion: null },
+      bodyNoun: "영상",
     });
   });
 
@@ -311,6 +314,7 @@ describe("projectInspectorTargets", () => {
       overlayKind: "image",
       fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
       value: { assetId: "asset-photo", text: "", vertical: null, horizontal: null, size: null, motion: null },
+      bodyNoun: "사진",
     });
   });
 });

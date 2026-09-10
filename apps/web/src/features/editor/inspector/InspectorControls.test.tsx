@@ -865,6 +865,7 @@ describe("InspectorControls", () => {
         overlayKind: "image",
         segmentId: "segment-internal-current",
         value: { assetId: "asset-internal-image", text: "이미지 설명", vertical: null, horizontal: null, size: null, motion: null },
+        bodyNoun: "사진",
       } satisfies InspectorTarget,
       expected: {
         assetId: "asset-internal-image",
@@ -950,6 +951,7 @@ describe("InspectorControls", () => {
     overlayKind: "image",
     segmentId: "segment-internal-current",
     value: { assetId: "asset-internal-image", text: "", vertical: null, horizontal: null, size: null, motion: null },
+    bodyNoun: "사진",
   } satisfies InspectorTarget;
 
   it("lets the owner place and move a picture with the same words as a shape", () => {
@@ -1016,10 +1018,24 @@ describe("InspectorControls", () => {
   // 본문 첫 줄은 여전히 "사진을 얹어요"였다 -- 한 패널 안에서 두 단어를
   // 쓴 것이다. 얹은 것이 영상일 때 본문도 "영상"이라고 말해야 한다.
   it("본문 문구가 제목(target.label)과 같은 단어를 쓴다 -- 얹은 것이 영상이면", () => {
-    renderControls({ target: { ...pictureTarget, label: "영상" } });
+    renderControls({ target: { ...pictureTarget, label: "영상", bodyNoun: "영상" } });
 
     expect(screen.getByText(/장면 위에 영상을 얹어요/)).toBeTruthy();
     expect(screen.queryByText(/장면 위에 사진을 얹어요/)).toBeNull();
+  });
+
+  // 재검토 발견(2026-09-10): 위 수정이 본문을 target.label로 이었다.
+  // 제목(legend)은 registry에서 사진일 때 "이미지"인데("얹은 것이 영상이면
+  // 절 이름이 영상이다" 테스트 참고), 본문이 label을 그대로 쓰면 사진에서
+  // "장면 위에 이미지를 얹어요"가 되어 예전부터 화면에 있던 "사진을 얹어요"
+  // 문구가 바뀐다. 사진 문구는 글자 하나도 바뀌면 안 된다 -- 제목과 본문은
+  // 같은 신호(isVideoAssetUri)에서 나오되 서로 다른 단어("이미지" 제목 /
+  // "사진" 본문)를 쓸 수 있어야 한다.
+  it("본문 문구는 얹은 것이 사진이면 예전 그대로 '사진을 얹어요'다", () => {
+    renderControls({ target: pictureTarget });
+
+    expect(screen.getByText(/장면 위에 사진을 얹어요/)).toBeTruthy();
+    expect(screen.queryByText(/장면 위에 이미지를 얹어요/)).toBeNull();
   });
 
   // 정지 도형("여기를 보세요"). 자유 좌표 대신 프리셋 선택지만 준다 --
