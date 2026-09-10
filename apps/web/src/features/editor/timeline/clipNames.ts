@@ -1,4 +1,5 @@
 import { SHAPE_OVERLAY_LABELS } from "../inspector/inspectorRegistry";
+import { isVideoAssetUri } from "../assetKind";
 import type { ShapeOverlayShape } from "../../../api";
 
 /** 타임라인 막대에 이름을 짓는 자리.
@@ -20,18 +21,6 @@ export type ClipContentInput = Readonly<{
   overlayPayload?: Readonly<Record<string, unknown>> | null
   assetUri?: string | null
 }>
-
-/** 얹은 자산이 사진이 아니라 영상인지. 확장자가 없거나 모르면 **사진으로 본다** --
- *  모르는 것을 영상이라 부르면 기존 편집본에 이미 찍힌 `그림` 문구가 바뀐다. */
-export function isVideoAssetUri(assetUri: string | null | undefined): boolean {
-  if (!assetUri) return false
-  const dot = assetUri.lastIndexOf(".")
-  if (dot < 0) return false
-  const extension = assetUri.slice(dot + 1).toLowerCase()
-  return VIDEO_EXTENSIONS.has(extension)
-}
-
-const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "m4v", "webm", "mkv", "avi"])
 
 function firstWords(value: string): string {
   // 대본을 번호 목록으로 붙여 넣으면 자막이 `1. 걷는 리듬…`이 된다. 목록 번호를

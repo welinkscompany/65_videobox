@@ -1,5 +1,6 @@
 import type { ShapeOverlayMotion, ShapeOverlayShape } from "../../../api";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
+import { isVideoAssetUri } from "../assetKind";
 
 type MediaKind = "broll" | "bgm" | "sfx";
 export type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "photoMotion" | "fit" | "normalizeLoudness" | "denoise" | "stabilize" | "reduceNoise" | "preservePitch" | "zoom" | "positionXPercent" | "positionYPercent" | "rotationDeg";
@@ -276,7 +277,10 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         value: { title: stringValue(payload.title), body: stringValue(payload.body), text: stringValue(payload.text) },
       }];
       if (clip.overlayType === "image_overlay") return [{
-        id: `overlay:${clip.clipId}`, kind: "overlay", label: "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+        // 얹은 자산이 영상이면 절 이름도 "영상"이다 -- 타임라인 막대가 이미 같은
+        // 규칙(`isVideoAssetUri`)으로 부르고 있다. 조절 칸(`overlayKind: "image"`,
+        // `fields`)은 그대로다 -- 자리·크기·움직임 프리셋은 영상에도 똑같이 쓰인다.
+        id: `overlay:${clip.clipId}`, kind: "overlay", label: isVideoAssetUri(clip.assetUri) ? "영상" : "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
         value: { assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text), ...imageOverlayPresets(payload) },
       }];
       if (clip.overlayType === "table_overlay") return [{

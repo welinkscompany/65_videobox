@@ -34,6 +34,11 @@ const view = {
         // 프리셋을 고른 사진. 안 고른 사진(`image-1`)과 나란히 둔다 -- 둘을 같은
         // 값으로 읽으면 화면에서 "안 고름"이 사라진다.
         { clipId: "image-2", segmentId: "segment-2", type: "overlay", assetId: "asset-image-2", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-image-2", text: "", vertical: "top", horizontal: "left", size: "small", motion: "slide_in_left" } },
+        // 얹은 자산이 사진이 아니라 영상인 경우. 절 이름이 "이미지"로 남아 있으면
+        // 방금 얹은 영상을 조정하려는 창작자가 "이미지"를 찾아야 한다.
+        { clipId: "image-video-1", segmentId: "segment-3", type: "overlay", assetId: "asset-video", assetUri: "local://projects/p1/assets/clip_1.mp4", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-video", text: "" } },
+        // 같은 종류(`image_overlay`)라도 사진이면 예전 이름 그대로여야 한다.
+        { clipId: "image-photo-1", segmentId: "segment-4", type: "overlay", assetId: "asset-photo", assetUri: "local://projects/p1/assets/photo_1.jpg", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-photo", text: "" } },
         { clipId: "table-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "table_overlay", overlayPayload: { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" } },
         { clipId: "shape-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "shape_overlay", overlayPayload: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large" } },
         { clipId: "unsupported-overlay", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: null },
@@ -274,5 +279,38 @@ describe("projectInspectorTargets", () => {
       .find((item) => item.id === "clip:broll-1");
 
     expect(target?.label).toBe("영상");
+  });
+
+  // 타임라인 막대는 얹은 영상을 이미 "영상"이라 부른다(`clipNames.ts`,
+  // `isVideoAssetUri`). 인스펙터 절 이름이 "이미지"로 남아 있으면 방금 얹은
+  // 영상을 조정하려는 창작자가 "이미지"라는 이름을 찾아야 했다.
+  it("얹은 것이 영상이면 절 이름이 영상이다", () => {
+    // 영상을 얹어 놓고 조정하려면 "이미지"를 찾아야 했다.
+    // 종류(`overlayKind`)와 조절 칸은 그대로다 -- 자리·크기·움직임은 영상에도 같다.
+    const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-3" });
+
+    expect(targets).toContainEqual({
+      id: "overlay:image-video-1",
+      kind: "overlay",
+      label: "영상",
+      segmentId: "segment-3",
+      overlayKind: "image",
+      fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+      value: { assetId: "asset-video", text: "", vertical: null, horizontal: null, size: null, motion: null },
+    });
+  });
+
+  it("얹은 것이 사진이면 절 이름은 예전 그대로 이미지다", () => {
+    const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-4" });
+
+    expect(targets).toContainEqual({
+      id: "overlay:image-photo-1",
+      kind: "overlay",
+      label: "이미지",
+      segmentId: "segment-4",
+      overlayKind: "image",
+      fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+      value: { assetId: "asset-photo", text: "", vertical: null, horizontal: null, size: null, motion: null },
+    });
   });
 });
