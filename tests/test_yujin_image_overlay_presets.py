@@ -424,6 +424,32 @@ def test_not_mentioning_sound_leaves_the_stored_value_alone() -> None:
     assert overlay["horizontal"] == "left"
 
 
+def test_turning_off_the_sound_actually_reaches_a_previously_on_overlay() -> None:
+    """`None`(안 말함)과 `False`(꺼 달라고 말함)는 구분돼야 한다 -- 리뷰 지적
+    (2026-09-11). 위 두 시험이 `True`와 `None`만 재서, `is not None`을 진짜값
+    검사(`if operation.preserve_source_audio:`)로 잘못 바꿔도 아무 시험도 안
+    죽는 빈틈이 있었다. 이 시험은 이미 `True`로 저장된 오버레이에 유진이
+    `False`를 명시적으로 보내는 경우를 잰다.
+    """
+    session = update_segment_image_overlay(
+        session=_session(), segment_id="seg-1", asset_id="asset-photo", text="",
+        preserve_source_audio=True,
+    )
+    proposal = interpret_yujin_editing_request(
+        _response(asset_id="asset-photo", preserve_source_audio=False), _context()
+    ).proposal
+    assert proposal is not None
+
+    applied = _apply_yujin_editing_operations(session=session, operations=tuple(proposal.operations))
+
+    overlay = next(
+        item
+        for item in applied["segments"][0]["visual_overlays"]
+        if item.get("overlay_type") == "image_overlay"
+    )
+    assert overlay["preserve_source_audio"] is False
+
+
 def test_the_prompt_tells_yujin_sound_can_be_switched_on_and_off() -> None:
     """안내문을 안 고치면 받을 수 있게 배선해도 유진은 안 고른다 -- 전환·색감·
     자산 목록에서 이미 세 번 겪었다."""
