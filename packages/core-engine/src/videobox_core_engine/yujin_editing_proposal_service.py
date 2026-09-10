@@ -159,7 +159,7 @@ _IMAGE_OVERLAY_PRESET_LABELS: dict[str, str] = {
 
 
 def _image_overlay_catalogue(context: YujinEditingContext) -> str:
-    """사진을 영상 **위에** 얹는 말. 고를 수 있는 값과 **지금 얹힌 것**을 함께 준다.
+    """보이는 자산(사진·영상)을 영상 **위에** 얹는 말. 고를 수 있는 값과 **지금 얹힌 것**을 함께 준다.
 
     목록만 주면 "사진 좀 위로 올려줘"·"사진 빼줘"에 유진이 "얹은 사진이
     없습니다"라고 답한다 -- 전환·색감이 정확히 그렇게 틀렸다(2026-09-06 실측).
@@ -189,7 +189,6 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
         return f"{segment_id}={info}"
 
     return (
-        "사진을 **영상 위에 얹는** 것은 set_image_overlay다(장면 화면 자체를 사진으로 까는 "
         # **여기가 Task 4에서 고친 자리다.** 예전에는 "사진만 쓴다"였는데,
         # 그 근거("영상은 한 장으로 읽힌다")가 사실이 아니라서 영상 오버레이는
         # 이미 열렸다(`_OVERLAYABLE_ASSET_TYPES`, 2026-09-10). 그런데 이 줄만
@@ -198,6 +197,8 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
         # 주는데도 영상을 얹어 달라는 말을 거절한다. 앞 문장과 같은 말
         # "보이는 자산(사진·영상)"을 그대로 써서 두 문장이 같은 목소리로
         # 말하게 한다.
+        "보이는 자산(사진·영상)을 **영상 위에 얹는** 것은 set_image_overlay다(장면 화면 자체를 "
+        "사진이나 영상으로 까는 "
         "apply_media와 다른 일이다). asset_id는 승인된 자산 중 **보이는 자산**(사진·영상)만 "
         "쓴다 -- 소리(음악·효과음)는 못 쓴다. "
         f"세로 자리 vertical: {_named(sorted(SHAPE_OVERLAY_VERTICALS))}. "
@@ -206,7 +207,12 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
         f"움직임 motion: {_named(SHAPE_OVERLAY_MOTIONS)}. "
         "넷은 **말한 것만 싣는다** -- 안 물어본 칸을 채우면 이미 맞춰 둔 자리가 조용히 움직인다. "
         "좌표(px·%)나 초 단위 시간은 받지 않는다 -- 이 이름들 말고는 없다. "
-        "얹은 사진을 빼는 것은 remove_image_overlay다. "
+        # **여기가 최종 리뷰에서 고친 자리다(2026-09-10).** "얹은 사진을 빼는"
+        # 이라고만 하면 "얹은 영상 빼줘"가 remove_image_overlay로 안 이어질
+        # 수 있다 -- 얹는 문장은 고쳤는데 빼는 문장만 사진 전용으로 남아
+        # 있던 결함이다. 얹는 문장과 같은 말 "보이는 자산(사진·영상)"을
+        # 그대로 써서 둘이 같은 규칙을 말하게 한다.
+        "얹은 보이는 자산(사진·영상)을 빼는 것은 remove_image_overlay다. "
         # **지금 얹힌 것도 준다.** 목록과 한 쌍이다. 얹힌 것이 영상이면
         # `_overlay_entry`가 그 앞에 `video, `를 심는다.
         f"지금 얹힌 것: {', '.join(_overlay_entry(sid, info) for sid, info in context.image_overlays_by_segment) or '없음'}."
@@ -268,10 +274,11 @@ def _approved_asset_catalogue(context: YujinEditingContext) -> str:
         kind = {"broll_video": "broll", "image": "broll"}.get(
             stored_type, asset_types.get(asset_id, "알 수 없음")
         )
-        # **사진이라는 것은 따로 말해 준다.** `set_image_overlay`는 사진만 받는데,
-        # 종류를 `broll`로만 적어 두면 유진에게는 영상과 구별할 신호가 없다 --
-        # 고를 근거를 안 주고 틀리면 `media_asset_type_mismatch`로 거절하는 꼴이
-        # 된다(2026-09-06 코드리뷰). `apply_media`에 쓸 이름은 그대로 `broll`이다.
+        # **사진이라는 것은 따로 말해 준다.** `set_image_overlay`는 보이는 자산
+        # (사진·영상)을 다 받지만, 종류를 `broll`로만 적어 두면 유진에게는 사진과
+        # 영상을 구별할 신호가 없다 -- 고를 근거를 안 주고 틀리면
+        # `media_asset_type_mismatch`로 거절하는 꼴이 된다(2026-09-06 코드리뷰).
+        # `apply_media`에 쓸 이름은 그대로 `broll`이다.
         if stored_type == "image":
             kind = f"{kind}·사진"
         entries.append(f"{asset_id}({kind}, {label})" if label else f"{asset_id}({kind})")
@@ -392,8 +399,12 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "set_sound_cleanup(소리 크기 맞추기·잡음 줄이기), set_scene_transform(확대·위치·기울이기), "
         "set_scene_transition(장면이 넘어올 때의 전환 -- \"전환 넣어줘\"가 이것이다), "
         "apply_media(영상·음악·효과음을 깐다), "
-        "set_image_overlay(사진을 영상 **위에** 얹는다 -- \"사진 오른쪽 아래에 작게 띄워줘\"가 이것이다), "
-        "remove_image_overlay(얹은 사진을 뺀다), "
+        # **여기도 최종 리뷰에서 고친 자리다(2026-09-10).** intent 이름 옆의
+        # 짧은 설명이 "사진을...얹는다"라고만 하면, 앞의 자산 목록·아래
+        # `_image_overlay_catalogue`가 영상도 된다고 말해도 이 한 줄이 유진을
+        # 다시 사진 전용으로 되돌린다.
+        "set_image_overlay(사진·영상을 화면 **위에** 얹는다 -- \"사진 오른쪽 아래에 작게 띄워줘\"가 이것이다), "
+        "remove_image_overlay(얹은 사진·영상을 뺀다), "
         "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를

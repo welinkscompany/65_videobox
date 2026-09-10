@@ -32,6 +32,19 @@ function pickPreset<T extends string>(value: string, choices: readonly T[]): T |
   return choices.find((choice) => choice === value) ?? null;
 }
 
+/** "영상을" / "이미지를"처럼 받침 유무로 목적격 조사를 고른다.
+ *
+ * `target.label`이 "사진"·"영상" 둘 다일 수 있어(최종 리뷰 발견) 문구에
+ * 이름을 박아 넣을 수 없다 -- 그렇다고 "{label}을(를)"처럼 조사 둘을
+ * 그대로 화면에 보여 주면 owner가 읽는 문장이 어색해진다(§10.13, 쉬운 말). */
+function withObjectParticle(noun: string): string {
+  const lastChar = noun.trim().slice(-1);
+  const code = lastChar.codePointAt(0) ?? 0;
+  if (code < 0xac00 || code > 0xd7a3) return `${noun}을`; // 한글 음절이 아니면 안전한 쪽으로.
+  const hasBatchim = (code - 0xac00) % 28 !== 0;
+  return hasBatchim ? `${noun}을` : `${noun}를`;
+}
+
 // 배속 버튼에 올릴 값. `media_controls.py`의 `SPEED_RANGE`(0.25~4.0) 안에서
 // 숏폼에 실제로 자주 쓰는 것만 골랐다. 여기 없는 값은 숫자칸으로 넣는다.
 const SPEED_PRESETS = [0.5, 1, 1.5, 2] as const;
@@ -1173,7 +1186,11 @@ export function InspectorControls({
               방금 얹은 사진이 아무것도 안 골랐는데 움직이면 안 된다. */}
           {target.overlayKind === "image" ? (
             <>
-              <p>장면 위에 사진을 얹어요. 고르지 않으면 화면 가운데에 가득 얹혀요.</p>
+              {/* 이 문단 바로 위 <legend>이 target.label(사진/영상)을 이미
+                  쓰고 있다 -- 같은 패널 안에서 "사진"으로 못 박으면 얹은
+                  것이 영상일 때 제목과 본문이 서로 다른 말을 한다(최종
+                  리뷰 발견). target.label을 그대로 이어 쓴다. */}
+              <p>장면 위에 {withObjectParticle(target.label)} 얹어요. 고르지 않으면 화면 가운데에 가득 얹혀요.</p>
               <label>
                 세로 위치
                 <NativeSelect aria-label="세로 위치" disabled={disabled} onChange={(event) => setImagePresets((current) => ({ ...current, vertical: pickPreset(event.target.value, OVERLAY_VERTICAL_CHOICES) }))} value={imagePresets.vertical ?? IMAGE_PRESET_UNSET}>

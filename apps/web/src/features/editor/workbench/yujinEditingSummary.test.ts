@@ -6,21 +6,25 @@ const summary = (operation: Record<string, unknown>) =>
   yujinEditingOperationSummary(operation as never);
 
 describe("유진이 한 일 한 줄", () => {
-  it("사진을 얹으면 고른 것까지 말한다", () => {
+  // operation에는 asset_id만 실리고 사진인지 영상인지는 안 실린다 --
+  // "사진을"로 단정하면 얹은 것이 영상일 때 바로 아래 타임라인 바
+  // ("오버레이 1 · 영상")와 다른 말을 하게 된다(최종 리뷰 발견). 그래서
+  // 이 줄은 명사를 빼고 "골라 둔 것"으로 말한다.
+  it("얹으면 고른 것까지 말한다 (사진인지 영상인지는 여기서 모른다)", () => {
     expect(summary({
       intent: "set_image_overlay", segment_id: "s1", asset_id: "a1",
       vertical: "top", horizontal: "right", size: "small", motion: "fade_in",
-    })).toBe("사진을 화면 위에 얹어요 (위 · 오른쪽 · 작게 · 천천히 나타나기).");
+    })).toBe("골라 둔 것을 화면 위에 얹어요 (위 · 오른쪽 · 작게 · 천천히 나타나기).");
   });
 
   it("안 고른 것은 말하지 않는다", () => {
     expect(summary({ intent: "set_image_overlay", segment_id: "s1", asset_id: "a1" }))
-      .toBe("사진을 화면 위에 얹어요.");
+      .toBe("골라 둔 것을 화면 위에 얹어요.");
   });
 
   it("빼는 것과 넣는 것을 구별한다", () => {
     expect(summary({ intent: "remove_image_overlay", segment_id: "s1" }))
-      .toBe("화면 위에 얹은 사진을 빼요.");
+      .toBe("화면 위에 얹은 것을 빼요.");
   });
 
   it("장면 넘기기는 화면에 쓰는 이름으로 말한다", () => {

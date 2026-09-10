@@ -393,6 +393,14 @@ def test_the_full_prompt_does_not_contradict_itself_about_what_can_be_laid_over(
     # 오버레이 요청을 스스로 거절한다 -- 검증(_OVERLAYABLE_ASSET_TYPES)은
     # 영상을 받아 주는데도.
     assert "승인된 자산 중 **사진**만 쓴다" not in prompt, prompt
-    # 두 안내문이 "보이는 자산(사진·영상)"이라는 같은 말을 **같은 목소리로**
-    # 두 번 해야 한다 -- 앞뒤가 서로 다른 말을 하지 않는다는 뜻이다.
-    assert prompt.count("사진·영상") == 2, prompt
+    # **개수 세기(`count("사진·영상") == 2`)는 최종 리뷰에서 깨졌다** -- 빼는
+    # 문장("얹은 사진을 빼는 것은 remove_image_overlay다")에도 같은 말을
+    # 넣어 고치면서 등장 횟수가 그냥 늘었다. 문구가 하나 더 늘 때마다 다시
+    # 깨지는 숫자 대신, set_image_overlay·remove_image_overlay 두 동작을
+    # 설명하는 문장 중 어느 것도 "사진만" 받는다고 말하지 않는다는 **규칙
+    # 자체**로 잰다.
+    assert "얹는" in prompt and "얹은" in prompt, prompt  # 두 문장 다 실렸는지 먼저 확인
+    for sentence in prompt.split(". "):
+        if "set_image_overlay" in sentence or "remove_image_overlay" in sentence:
+            assert "사진만" not in sentence, sentence
+            assert "얹은 사진을" not in sentence, sentence

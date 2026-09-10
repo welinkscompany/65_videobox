@@ -979,3 +979,42 @@ describe("타임라인 상태 문구", () => {
     expect(screen.queryByText(/stale/)).toBeNull();
   });
 });
+
+describe("얹은 영상 오버레이 클립 이름 (최종 리뷰 발견)", () => {
+  // `clipContentLabel`은 `clipNames.test.ts`에서 함수 단위로는 이미 맞게 시험됐다.
+  // 그런데 화면(TimelineDock.tsx)이 그 함수에 `assetUri`를 실어 보내는 배선
+  // 줄을 지워도 기존 262개 시험이 전부 초록이었다 -- 배선이 실제로 화면까지
+  // 이어지는지를 재는 시험이 하나도 없었기 때문이다. 이 시험이 그 자리를 채운다.
+  it("assetUri가 .mp4로 끝나면 막대 이름이 \"오버레이 1 · 영상\"이다", () => {
+    const videoOverlayView: EditorViewModel = {
+      ...view,
+      tracks: [
+        {
+          trackId: "o",
+          role: "overlay",
+          clips: [{
+            clipId: "o-video",
+            segmentId: "segment-3",
+            type: "overlay",
+            assetId: "asset-video",
+            assetUri: "https://videobox.local/assets/asset-video.mp4",
+            // 기본 뷰포트(viewportWidthPx=400, 초당 100px)로는 0~4초만
+            // 보인다 -- 원래 자리(15~18초)는 화면 밖이라 아예 안 그려진다.
+            startSec: 0,
+            endSec: 3,
+            controls: {},
+            overlayType: "image_overlay",
+            overlayPayload: {},
+          }],
+        },
+      ],
+      captions: [],
+      gaps: [],
+    };
+
+    render(<TimelineDock view={videoOverlayView} viewportWidthPx={400} />);
+
+    expect(screen.getByRole("group", { name: /오버레이 1 · 영상/ })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /오버레이 1 · 그림/ })).toBeNull();
+  });
+});

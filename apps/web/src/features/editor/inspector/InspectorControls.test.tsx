@@ -1012,6 +1012,16 @@ describe("InspectorControls", () => {
     expect((screen.getByLabelText("움직임") as HTMLSelectElement).value).toBe("fade_in");
   });
 
+  // 최종 리뷰 발견: 제목(legend, target.label)은 "영상"으로 고쳤는데
+  // 본문 첫 줄은 여전히 "사진을 얹어요"였다 -- 한 패널 안에서 두 단어를
+  // 쓴 것이다. 얹은 것이 영상일 때 본문도 "영상"이라고 말해야 한다.
+  it("본문 문구가 제목(target.label)과 같은 단어를 쓴다 -- 얹은 것이 영상이면", () => {
+    renderControls({ target: { ...pictureTarget, label: "영상" } });
+
+    expect(screen.getByText(/장면 위에 영상을 얹어요/)).toBeTruthy();
+    expect(screen.queryByText(/장면 위에 사진을 얹어요/)).toBeNull();
+  });
+
   // 정지 도형("여기를 보세요"). 자유 좌표 대신 프리셋 선택지만 준다 --
   // 자유 좌표·키프레임 편집기는 계획서 §4가 범위 밖으로 못박았다.
   it("saves a static shape overlay from preset choices only", () => {

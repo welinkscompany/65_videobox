@@ -69,8 +69,11 @@ export function yujinEditingOperationSummary(operation: YujinEditingOperation): 
     const named = sceneTransitionLabel(typeof transition?.type === "string" ? transition.type : null);
     return `장면 넘기기를 ${named}(으)로 바꿔요.`;
   }
-  if (operation.intent === "set_image_overlay") return `사진을 화면 위에 얹어요${imageOverlayDetail(operation)}.`;
-  if (operation.intent === "remove_image_overlay") return "화면 위에 얹은 사진을 빼요.";
+  // 사진인지 영상인지는 operation에 안 실린다(asset_id뿐) -- 그래서
+  // "사진을"/"영상을"로 못 박지 않고 명사를 뺀다. 잘못 단정하면 바로 아래
+  // 타임라인 바("오버레이 1 · 영상")와 다른 말을 하게 된다(최종 리뷰 발견).
+  if (operation.intent === "set_image_overlay") return `골라 둔 것을 화면 위에 얹어요${imageOverlayDetail(operation)}.`;
+  if (operation.intent === "remove_image_overlay") return "화면 위에 얹은 것을 빼요.";
   if (operation.intent === "set_picture_cleanup") return "화면을 다듬어요.";
   if (operation.intent === "set_sound_cleanup") return "소리를 다듬어요.";
   if (operation.intent === "set_scene_transform") return "화면 맞춤을 바꿔요.";
