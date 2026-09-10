@@ -1,5 +1,7 @@
 # 인계 — owner 결정 뒤 후속 조치: CSRF 방어·자막 번역 비동기화·정리 (2026-09-08, 두 번째)
 
+**대체됨:** `docs/handoffs/2026-09-08-hermes-egress-and-multitrack-plans.ko.md`
+
 ## 한 줄
 
 `2026-09-08-fixing-the-2026-09-07-full-audit.ko.md`가 owner 결정 대기로 남겨 둔
