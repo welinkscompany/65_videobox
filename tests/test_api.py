@@ -23167,6 +23167,87 @@ def test_editing_session_api_image_overlay_without_presets_stays_as_it_was(tmp_p
     ]
 
 
+def test_editing_session_api_image_overlay_preset_distinguishes_absent_null_and_value(
+    tmp_path: Path,
+) -> None:
+    """프리셋 한 칸이 세 상태를 가른다: 칸을 아예 안 보냄(유지) / `null`(지움) / 값(바꿈).
+
+    JSON에서 "칸이 없음"과 "`null`"은 다른 뜻인데, pydantic의 `str | None = None`은
+    이 둘을 하나로 접는다. 라우터가 `model_fields_set` 없이 그냥 필드값만 넘기면,
+    유진처럼 다른 칸만 고치려고 프리셋 칸을 뺀 요청이 앞서 정한 자리를 조용히
+    지워 버린다(2026-09-05 "엔진만 넓히고 스키마를 빼먹은" 사고와 같은 모양).
+    """
+    app = create_app(projects_root=tmp_path)
+    client = TestClient(app)
+    project_id, timeline_job_id = _create_timeline_review_project(client, tmp_path)
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/editing-sessions",
+        json={"timeline_job_id": timeline_job_id},
+    )
+    session_id = create_response.json()["session_id"]
+
+    # 자리를 먼저 잡는다: vertical·horizontal 둘 다 값을 준다.
+    placed = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "vertical": "top",
+            "horizontal": "right",
+            "expected_revision": 1,
+        },
+    )
+    assert placed.status_code == 200, placed.text
+    overlay = placed.json()["segments"][0]["visual_overlays"][0]
+    assert (overlay["vertical"], overlay["horizontal"]) == ("top", "right")
+
+    # (a) vertical 칸을 아예 빼고 horizontal만 다시 보낸다 -- vertical은 유지돼야 한다.
+    kept = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "horizontal": "left",
+            "expected_revision": 2,
+        },
+    )
+    assert kept.status_code == 200, kept.text
+    overlay = kept.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["vertical"] == "top", "칸을 뺀 것뿐인데 지워지면 안 된다"
+    assert overlay["horizontal"] == "left"
+
+    # (b) vertical을 명시적으로 `null`로 보낸다 -- 지워져서 "안 고름"(열쇠 자체가 없음)이 된다.
+    cleared = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "vertical": None,
+            "expected_revision": 3,
+        },
+    )
+    assert cleared.status_code == 200, cleared.text
+    overlay = cleared.json()["segments"][0]["visual_overlays"][0]
+    assert "vertical" not in overlay, "명시적 null은 지워야 한다"
+    assert overlay["horizontal"] == "left"
+
+    # (c) vertical에 값을 보내면 그 값으로 바뀐다.
+    set_again = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/segments/seg_001/image-overlay",
+        json={
+            "asset_id": "asset_image_001",
+            "text": "Exterior reference image",
+            "vertical": "bottom",
+            "expected_revision": 4,
+        },
+    )
+    assert set_again.status_code == 200, set_again.text
+    overlay = set_again.json()["segments"][0]["visual_overlays"][0]
+    assert overlay["vertical"] == "bottom"
+    assert overlay["horizontal"] == "left"
+
+
 def test_editing_session_api_image_overlay_preserve_source_audio_survives_omission(tmp_path: Path) -> None:
     """`preserve_source_audio`를 안 보내면 이미 켜 둔 값이 꺼지면 안 된다.
 

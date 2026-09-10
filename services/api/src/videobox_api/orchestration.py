@@ -1423,12 +1423,11 @@ class ApiOrchestrator:
         segment_id: str,
         asset_id: str,
         text: str,
-        # 프리셋 넷은 선택이다. `None`이 "안 고름"이고, 그때는 이 기능이 생기기
-        # 전과 똑같이 저장된다 -- 여기서 기본값을 채우면 그 구분이 사라진다.
-        vertical: str | None = None,
-        horizontal: str | None = None,
-        size: str | None = None,
-        motion: str | None = None,
+        # 프리셋 넷은 세 상태(유지·지움·바꿈)다. 이 dict에 없는 칸이 "유지"고,
+        # 있는 칸은 값이 `None`이라도 "지움"이다 -- 그래서 개별 `vertical=` 같은
+        # 키워드 인자로 안 받고 dict 그대로 다음 층에 넘긴다. 라우터의
+        # `ImageOverlayRequest.preset_overrides()`가 이 dict를 만든다.
+        preset_overrides: dict[str, str | None] | None = None,
         preserve_source_audio: bool | None = None,
         expected_revision: int,
         proposal_id: str | None = None,
@@ -1440,10 +1439,7 @@ class ApiOrchestrator:
             segment_id=segment_id,
             asset_id=asset_id,
             text=text,
-            vertical=vertical,
-            horizontal=horizontal,
-            size=size,
-            motion=motion,
+            preset_overrides=preset_overrides,
             preserve_source_audio=preserve_source_audio,
             expected_revision=expected_revision,
             proposal_id=proposal_id,

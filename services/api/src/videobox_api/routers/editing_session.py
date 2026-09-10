@@ -901,16 +901,16 @@ def build_editing_session_router(orchestrator: ApiOrchestrator, store: LocalProj
         payload: ImageOverlayRequest,
     ) -> EditingSessionResponse:
         try:
+            # 프리셋 넷은 세 상태(유지·지움·바꿈)를 가른다 -- `payload.vertical`처럼
+            # 필드값만 읽으면 "안 보냄"과 "`null`로 보냄"이 똑같이 `None`이라
+            # 구분이 안 된다(`ImageOverlayRequest.preset_overrides()` 참고).
             result = orchestrator.update_segment_image_overlay(
                 project_id=project_id,
                 session_id=session_id,
                 segment_id=segment_id,
                 asset_id=payload.asset_id,
                 text=payload.text,
-                vertical=payload.vertical,
-                horizontal=payload.horizontal,
-                size=payload.size,
-                motion=payload.motion,
+                preset_overrides=payload.preset_overrides(),
                 preserve_source_audio=payload.preserve_source_audio,
                 expected_revision=payload.expected_revision,
                 proposal_id=payload.proposal_id,

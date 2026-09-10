@@ -1023,12 +1023,15 @@ class EditingSessionRegenerationMixin:
         segment_id: str,
         asset_id: str,
         text: str,
-        # 프리셋 넷은 선택이다. 유진 경로를 비롯해 프리셋 없이 부르는 자리가
-        # 여럿이라, `None`은 끝까지 `None`으로 넘겨 도메인이 열쇠를 안 적게 한다.
-        vertical: str | None = None,
-        horizontal: str | None = None,
-        size: str | None = None,
-        motion: str | None = None,
+        # 프리셋 넷은 세 상태(유지·지움·바꿈)다. 엔진의 `update_segment_image_overlay`가
+        # 이미 이 세 상태를 받는다(모듈 전용 파수꾼 `_KEEP`이 "유지" 기본값) --
+        # 그런데 `_KEEP`은 모듈 밖에 노출되지 않으므로, 여기서도 "유지"를
+        # 흉내 내려고 그 파수꾼을 들여오지 않는다. 대신 `preset_overrides`에
+        # 없는 칸은 아래 `**overrides`에서 아예 키워드 인자로 안 넘어가게 해서
+        # 엔진 쪽 `_KEEP` 기본값이 자연히 적용되게 한다. 유진 경로를 비롯해
+        # 프리셋 없이(빈 dict/`None`으로) 부르는 자리가 여럿이라, 이 방식이면
+        # 그 호출도 그대로 "전부 유지"로 통한다.
+        preset_overrides: dict[str, str | None] | None = None,
         preserve_source_audio: bool | None = None,
         expected_revision: int,
         proposal_id: str | None = None,
@@ -1053,16 +1056,18 @@ class EditingSessionRegenerationMixin:
             if preserve_source_audio is not None
             else _current_image_overlay_preserve_source_audio(session=session, segment_id=segment_id)
         )
+        # `preset_overrides`에 없는 칸은 여기서 키워드 인자 자체를 안 넘긴다 --
+        # 엔진의 `update_segment_image_overlay`가 그 칸의 기본값(모듈 전용 파수꾼
+        # `_KEEP`)으로 "지금 값 유지"를 처리하게 둔다. 이 파일에서 `_KEEP`을
+        # 직접 들여오지 않는 이유는 그 파수꾼이 모듈 밖에 노출되지 않도록
+        # 일부러 설계됐기 때문이다(`editing_session.py`의 `_KeepSentinel` 참고).
         updated_session = update_segment_image_overlay(
             session=session,
             segment_id=segment_id,
             asset_id=asset_id,
             text=text,
-            vertical=vertical,
-            horizontal=horizontal,
-            size=size,
-            motion=motion,
             preserve_source_audio=resolved_preserve_source_audio,
+            **(preset_overrides or {}),
         )
         # Existing legacy sessions can still contain assetless cards.  A real
         # project asset, however, becomes a renderable source and must carry a

@@ -1373,8 +1373,18 @@ class ImageOverlayRequest(BaseModel):
     정도까지이고, 자유 좌표(px/%)나 초 단위 시간은 받지 않는다. 받기 시작하면
     그게 곧 승인 범위 밖인 키프레임 편집기다.
 
-    넷 다 **안 보내도 된다.** 안 보내면 이 기능이 생기기 전과 똑같이 저장되고,
-    옛 화면이 보내던 요청도 그대로 통한다.
+    넷 다 **안 보내도 된다.** 안 보내면 지금 저장된 값이 그대로 남는다(유지).
+    명시적으로 `null`을 보내면 지워서 "안 고름"으로 되돌아간다. 값을 보내면 그
+    값으로 바뀐다 -- 세 상태다.
+
+    JSON에서 "칸이 없음"과 "`null`"은 다른 뜻인데, 이 클래스의 필드 선언
+    (`str | None = None`)만으로는 이 둘을 구분할 수 없다 -- 안 보낸 칸도
+    필드값은 `None`으로 채워지기 때문이다. 그래서 필드값이 아니라
+    `preset_overrides()`가 pydantic v2의 `model_fields_set`(요청 본문에 실제로
+    실려 온 칸 이름의 집합)을 읽어서 세 상태를 가른다. `preset_overrides()`가
+    돌려주는 dict에 없는 칸은 "유지" -- 부르는 쪽(라우터)이 그 칸의 키워드
+    인자 자체를 안 넘기게 해서, 엔진 계층의 `_KEEP` 파수꾼(모듈 밖에 노출되지
+    않는다)이 자연히 제 기본값으로 "유지"를 처리하게 만든다.
     """
 
     expected_revision: int = Field(ge=1)
@@ -1422,6 +1432,23 @@ class ImageOverlayRequest(BaseModel):
             if not self.proposal_id or not self.candidate_id:
                 raise ValueError("proposal_id and candidate_id must not be blank.")
         return self
+
+    def preset_overrides(self) -> dict[str, str | None]:
+        """요청 본문에 실제로 실린 프리셋 칸만 골라 돌려준다.
+
+        `self.vertical`(필드값)만 읽으면 "안 보냄"과 "`null`로 보냄"이 똑같이
+        `None`이라 구분이 안 된다. `model_fields_set`은 pydantic v2가 검증 중
+        실제로 입력에 있었던 칸 이름만 담으므로, 여기 없는 칸은 "유지"고
+        여기 있는 칸은(값이 `None`이라도) "지움" 또는 "바꿈"이다. 라우터는
+        이 dict를 그대로 `**overrides`로 펼쳐서 넘긴다 -- "유지"인 칸은 아예
+        키워드 인자로 넘어가지 않으므로 엔진의 `_KEEP` 기본값이 처리한다.
+        """
+        preset_fields = ("vertical", "horizontal", "size", "motion")
+        return {
+            field_name: getattr(self, field_name)
+            for field_name in preset_fields
+            if field_name in self.model_fields_set
+        }
 
 
 class ShapeOverlayRequest(BaseModel):
