@@ -9,12 +9,23 @@ import uuid
 MAX_USER_UNDO_ACTIONS = 10
 MAX_AUDIT_HISTORY = 100
 
+#: 세션에서 트랙 목록이 사는 자리(자유 멀티트랙 Phase 5). **여기에 둔다** --
+#: `session_tracks.py`에 두면 그쪽이 `editing_session`을 부르고 그쪽이 다시
+#: 이 파일을 불러 순환이 된다. 되돌리기가 담을 열쇠를 이름으로 적는 구조라
+#: 이름이 두 곳에 흩어지면 한쪽만 고쳤을 때 조용히 안 담긴다.
+SESSION_TRACKS_KEY = "tracks"
+
 
 def _snapshot(session: dict[str, Any]) -> dict[str, Any]:
     return {
         "segments": deepcopy(session.get("segments", [])),
         "caption_style": deepcopy(session.get("caption_style")),
         "timeline_placement_overrides": deepcopy(session.get("timeline_placement_overrides")),
+        # 트랙 목록(자유 멀티트랙 Phase 5). **여기에 이름을 안 적으면 트랙
+        # 추가·삭제가 조용히 안 되돌려진다** -- 담을 열쇠를 이름으로 적는
+        # 구조라, 새 열쇠를 넣을 때마다 이 자리를 같이 넓혀야 한다
+        # (`timeline_placement_overrides`를 넣을 때 이미 한 번 그랬다).
+        SESSION_TRACKS_KEY: deepcopy(session.get(SESSION_TRACKS_KEY)),
     }
 
 

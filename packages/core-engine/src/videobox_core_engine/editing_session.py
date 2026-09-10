@@ -10,7 +10,7 @@ from videobox_domain_models.caption_style import CaptionStyle
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.transitions import normalize_transition
-from videobox_core_engine.editing_transactions import apply_user_transaction
+from videobox_core_engine.editing_transactions import SESSION_TRACKS_KEY, apply_user_transaction
 # 도형 프리셋 목록은 여기서 다시 정의하지 않고 그대로 가져다 쓴다. 예전 이름을
 # 그대로 두어 이 모듈에서 가져다 쓰던 곳은 손대지 않아도 된다.
 from videobox_core_engine.overlay_shapes import (  # noqa: F401
@@ -783,6 +783,21 @@ def set_track_states(*, session: dict[str, Any], states: dict[str, dict[str, boo
     )
 
 
+def _restore_session_tracks(updated: dict[str, Any], payload: dict[str, Any]) -> None:
+    """되돌리기·다시하기가 트랙 목록도 같이 되돌린다(자유 멀티트랙 Phase 5).
+
+    **없던 상태로 돌아갈 때는 열쇠를 지운다.** 빈 목록을 남기면 "트랙을 저장한
+    적 없는 세션"과 모양이 달라져서, 옛 고정 다섯 역할로 읽어 주는 길이
+    막힌다.
+    """
+    if SESSION_TRACKS_KEY not in payload:
+        return
+    if payload[SESSION_TRACKS_KEY] is None:
+        updated.pop(SESSION_TRACKS_KEY, None)
+    else:
+        updated[SESSION_TRACKS_KEY] = deepcopy(payload[SESSION_TRACKS_KEY])
+
+
 def undo(*, session: dict[str, Any]) -> dict[str, Any]:
     undo_stack = list(deepcopy(session.get("undo_stack", [])))
     if not undo_stack:
@@ -801,6 +816,7 @@ def undo(*, session: dict[str, Any]) -> dict[str, Any]:
             updated.pop("caption_style", None)
         else:
             updated["caption_style"] = deepcopy(inverse["caption_style"])
+    _restore_session_tracks(updated, inverse)
     updated["undo_stack"] = undo_stack
     updated["redo_stack"] = list(deepcopy(session.get("redo_stack", []))) + [event]
     history = list(deepcopy(session.get("history", [])))
@@ -830,6 +846,7 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
             updated.pop("caption_style", None)
         else:
             updated["caption_style"] = deepcopy(forward["caption_style"])
+    _restore_session_tracks(updated, forward)
     updated["redo_stack"] = redo_stack
     updated["undo_stack"] = (list(deepcopy(session.get("undo_stack", []))) + [event])[-MAX_TIMELINE_UNDO_EVENTS:]
     history = list(deepcopy(session.get("history", [])))
