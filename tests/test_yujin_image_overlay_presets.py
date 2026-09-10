@@ -597,3 +597,50 @@ def test_the_full_prompt_does_not_contradict_itself_about_what_can_be_laid_over(
         if "set_image_overlay" in sentence or "remove_image_overlay" in sentence:
             assert "사진만" not in sentence, sentence
             assert "얹은 사진을" not in sentence, sentence
+
+
+def test_mentioning_only_one_preset_leaves_the_others_the_creator_already_set() -> None:
+    """대표님이 실제로 겪은 결함(Task 4, 2026-09-11). "더 작게 해줘"처럼
+
+    크기만 말하면, 앞서 정한 자리(vertical/horizontal)와 움직임이 조용히
+    지워지면 안 된다.
+
+    Task 1이 엔진에 세 상태(유지·지움·바꿈)를 만든 뒤에도 `SetImageOverlayOperation`은
+    안 말한 칸도 `None`으로 온다 -- 그 `None`을 그대로 `update_segment_image_overlay`에
+    흘리면 이제 "지워라"로 읽혀서, Task 1 이전에는 무해했던 "말 안 함"이
+    Task 1 이후에는 결함을 **더 나쁘게** 만든다.
+    """
+    session = update_segment_image_overlay(
+        session=_session(), segment_id="seg-1", asset_id="asset-photo", text="",
+        vertical="top", horizontal="left", size="large", motion="fade_in",
+    )
+    proposal = interpret_yujin_editing_request(
+        _response(asset_id="asset-photo", size="small"), _context()
+    ).proposal
+    assert proposal is not None
+
+    applied = _apply_yujin_editing_operations(session=session, operations=tuple(proposal.operations))
+
+    overlay = next(
+        item
+        for item in applied["segments"][0]["visual_overlays"]
+        if item.get("overlay_type") == "image_overlay"
+    )
+    assert overlay["size"] == "small", "말한 칸(크기)은 바뀌어야 한다"
+    assert overlay.get("vertical") == "top", "말 안 한 세로 자리가 지워지면 안 된다"
+    assert overlay.get("horizontal") == "left", "말 안 한 가로 자리가 지워지면 안 된다"
+    assert overlay.get("motion") == "fade_in", "말 안 한 움직임이 지워지면 안 된다"
+
+
+def test_the_catalogue_tells_yujin_an_unmentioned_preset_stays_put() -> None:
+    """목록과 안내문은 한 쌍이다 -- 전환·색감·자산 목록에서 이 저장소가 이미
+
+    세 번 겪었다(Task 4, 2026-09-11). 유진이 실제로 "안 고름 = 유지"로
+    동작해도, 안내문이 그걸 말하지 않으면 유진은 여전히 넷을 전부 채워
+    보내려 하거나, "지워지면 어떡하지" 하며 불필요하게 되묻는다.
+    """
+    from videobox_core_engine.yujin_editing_proposal_service import _image_overlay_catalogue
+
+    catalogue = _image_overlay_catalogue(_context())
+
+    assert "말 안 한 칸" in catalogue and "그대로" in catalogue, catalogue

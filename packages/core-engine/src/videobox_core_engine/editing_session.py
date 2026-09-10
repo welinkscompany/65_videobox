@@ -1018,17 +1018,45 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
                 session=working, segment_id=operation.segment_id, field=field, changes=changes
             )
         elif isinstance(operation, SetImageOverlayOperation):
-            # 화면이 쓰는 것과 **같은 함수**다. 안 준 프리셋은 그 함수가 열쇠
-            # 자체를 안 적어서, 프리셋 없이 얹어 둔 옛 오버레이와 자국이 같다.
+            # `update_segment_image_overlay`는 Task 1 뒤로 세 상태(유지·지움·
+            # 바꿈)를 받는다: 인자를 아예 안 주면 유지(`_KEEP` 기본값), `None`을
+            # 주면 지움, 값을 주면 바꿈이다. 그런데 유진의 명령 스키마
+            # (`SetImageOverlayOperation`)에는 그 셋을 가를 길이 없다 -- 넷 다
+            # `str | None`이라 "말 안 함"도 `None`으로 온다(`preset_overrides()`가
+            # 쓰는 `model_fields_set`을 유진의 JSON 응답에는 못 쓴다). 그래서
+            # `operation.vertical` 같은 값을 그대로 아래로 흘리면(예전 코드),
+            # 유진이 크기만 말하고 자리는 말 안 한 순간 그 `None`이 이제
+            # "지워라"로 읽혀서 앞서 정한 자리가 조용히 사라진다 -- 대표님이
+            # 실제로 겪은 결함, Task 1 뒤로는 오히려 더 나빠졌다.
             #
+            # 그래서 여기서 유진의 `None`을 전부 "말 안 함"으로 읽고, 값이 있는
+            # 칸만 골라 kwargs로 만들어 `**`로 펼친다 -- 이러면 안 말한 칸은
+            # 키워드 인자 자체가 안 넘어가서 `_KEEP` 기본값이 적용된다. 화면
+            # 쪽(`editing_session_and_regeneration.py`의 `preset_overrides` 처리)과
+            # 같은 모양이다.
+            #
+            # 유진에게 "이 칸만 콕 집어 안 고름으로 지워라"라고 말할 길은
+            # 일부러 안 만들었다(YAGNI 판단, 보고서 참고) -- 창작자가 실제로
+            # 하는 말("가운데로 되돌려줘")은 값을 대는 말이지 "지워라"가
+            # 아니고, 통째로 되돌리고 싶으면 이미 있는 remove_image_overlay로
+            # 뺐다가 다시 얹으면 된다.
+            preset_overrides = {
+                field_name: value
+                for field_name, value in (
+                    ("vertical", operation.vertical),
+                    ("horizontal", operation.horizontal),
+                    ("size", operation.size),
+                    ("motion", operation.motion),
+                )
+                if value is not None
+            }
             # `preserve_source_audio`는 **먼저 옛 값을 읽어서 채운다**
-            # (Task 4, 2026-09-11) -- 넷과 다른 이유다. `update_segment_image_overlay`는
+            # (Task 4, 2026-09-11, 다른 계획) -- 넷과 다른 이유다. `update_segment_image_overlay`는
             # 오버레이 전체를 다시 쓰므로, 유진이 소리를 말하지 않고 자리만
             # 옮기면 `None`을 그대로 내려보내는 순간 이미 켜 둔 소리가
-            # 빈 열쇠로 사라진다. 넷(자리·크기·움직임)은 처음 얹을 때 안
-            # 고르면 "정중앙·안 움직임"으로 읽혀도 무해하지만, 소리는
-            # 꺼짐/켜짐이 뚜렷한 상태라 조용히 꺼지면 창작자가 알아채기
-            # 어렵다.
+            # 빈 열쇠로 사라진다. `preserve_source_audio`는 `False`가 진짜
+            # 값이라 지울 상태가 없어서(이번 세 상태 계약 밖) 이 방식을
+            # 그대로 둔다 -- 건드리지 않는다.
             resolved_preserve_source_audio = (
                 operation.preserve_source_audio
                 if operation.preserve_source_audio is not None
@@ -1043,11 +1071,8 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
                 # 사진 오버레이의 `text`는 화면에서도 비워 두고 부르는 자리가
                 # 있다(`ImageOverlayRequest.text`의 기본값이 빈 글이다).
                 text="",
-                vertical=operation.vertical,
-                horizontal=operation.horizontal,
-                size=operation.size,
-                motion=operation.motion,
                 preserve_source_audio=resolved_preserve_source_audio,
+                **preset_overrides,
             )
         elif isinstance(operation, RemoveImageOverlayOperation):
             working = remove_segment_image_overlay(session=working, segment_id=operation.segment_id)
