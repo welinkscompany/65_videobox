@@ -190,3 +190,58 @@ def test_one_track_per_kind_keeps_the_exact_preview_fingerprint_byte_identical()
     item = plan.canonical_dict()["items"][0]
 
     assert "track_order" not in item, "트랙이 하나뿐일 때는 지문에 새 필드가 실리면 안 된다"
+
+
+def test_two_tracks_that_reuse_one_clip_id_do_not_shadow_each_other() -> None:
+    """갭2: 렌더러는 **클립 이름으로** 입력을 찾는다
+    (`ffmpeg_final_renderer.py`의 `source_indices[item.clip_id]`). 두 트랙이
+    같은 이름을 쓰면 하나가 다른 하나를 가려서, 엉뚱한 영상이 깔리거나
+    한 쪽이 사라진다.
+
+    이름을 **항상** 바꾸면 안 된다 -- 지금 편집본(트랙 하나)의 이름이 바뀌면
+    미리보기 캐시가 깨진다. 겹칠 때만 구분해야 한다.
+    """
+    timeline = _timeline_with_two_broll_tracks()
+    for track in timeline["tracks"]:
+        track["clips"][0]["clip_id"] = "same-name"
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=_session(), project_id="project_001",
+    )
+    clip_ids = [
+        str(clip.get("clip_id"))
+        for track in materialized.get("tracks", [])
+        if str(track.get("track_type")) == "broll"
+        for clip in track.get("clips", [])
+    ]
+
+    assert len(clip_ids) == 2, "두 클립 다 남아야 한다"
+    assert len(set(clip_ids)) == 2, f"이름이 겹치면 렌더러가 하나를 가린다: {clip_ids}"
+
+
+def test_a_single_track_keeps_its_clip_ids_exactly() -> None:
+    """트랙이 하나뿐이면 이름을 **한 글자도** 바꾸면 안 된다 -- 미리보기 캐시
+    지문이 클립 이름을 먹는다."""
+    timeline = _timeline_with_two_broll_tracks()
+    timeline["tracks"] = timeline["tracks"][:1]
+
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=_session(), project_id="project_001",
+    )
+
+    assert _materialized_clip_ids(materialized) == {"clip-a"}
+
+
+def test_rehydrating_a_plan_keeps_the_two_tracks_apart() -> None:
+    """갭3: 계획에서 타임라인을 되돌릴 때 다시 종류로 접으면 트랙 정체성이
+    또 사라진다 -- Phase 4가 상류에서 지킨 것을 하류가 도로 뭉갠다."""
+    from videobox_core_engine.composition_plan import CompositionPlan
+    from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
+
+    plan = CompositionPlan.from_timeline(timeline=_two_broll_tracks_overlapping())
+    rehydrated = FfmpegFinalRenderer._timeline_from_plan(
+        composition_plan=plan, timeline_context={},
+    )
+
+    broll_tracks = [t for t in rehydrated.get("tracks", []) if str(t.get("track_type")) == "broll"]
+    assert len(broll_tracks) == 2, f"트랙 둘이 하나로 접혔다: {len(broll_tracks)}"

@@ -1413,7 +1413,11 @@ class FfmpegFinalRenderer:
     @staticmethod
     def _timeline_from_plan(*, composition_plan: CompositionPlan, timeline_context: dict[str, Any]) -> dict[str, Any]:
         """Rehydrate only the source-resolution shape from the authoritative plan."""
-        tracks: dict[str, list[dict[str, Any]]] = {}
+        # **종류가 아니라 (종류, 트랙 순서)로 나눈다**(2026-09-10 갭검증).
+        # 예전에는 `setdefault(item.track_type, ...)`라, 상류에서 애써 갈라 둔
+        # 트랙이 여기서 다시 하나로 접혔다. 트랙이 종류당 하나뿐인 지금은
+        # 순서값이 전부 같아 결과가 예전과 똑같다.
+        tracks: dict[tuple[str, int], list[dict[str, Any]]] = {}
         for item in composition_plan.items:
             controls = dict(item.media_controls)
             # Range normalization has already shifted source time exactly once.
@@ -1421,7 +1425,7 @@ class FfmpegFinalRenderer:
             # not consult the mutable timeline again for placement/trim.
             if item.track_type == "broll":
                 controls["in_sec"] = item.source_in_sec
-            tracks.setdefault(item.track_type, []).append({
+            tracks.setdefault((item.track_type, item.track_order), []).append({
                 "clip_id": item.clip_id,
                 "asset_id": item.asset_id,
                 "asset_uri": item.asset_uri,
@@ -1443,7 +1447,7 @@ class FfmpegFinalRenderer:
                 "rotation": composition_plan.rotation,
             },
             "narration_source_uri": timeline_context.get("narration_source_uri"),
-            "tracks": [{"track_type": kind, "clips": clips} for kind, clips in tracks.items()],
+            "tracks": [{"track_type": kind, "clips": clips} for (kind, _order), clips in tracks.items()],
             "export_overlays": [dict(item) for item in composition_plan.export_overlays],
         }
 

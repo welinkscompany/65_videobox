@@ -492,6 +492,24 @@ def materialize_editing_session_timeline(
                         clip["media_controls"] = controls
                     clips.append(clip)
         if clips:
+            # **이름이 겹치면 렌더러가 하나를 가린다**(2026-09-10 갭검증).
+            # 렌더러는 클립 이름으로 입력을 찾으므로(`source_indices[clip_id]`)
+            # 두 트랙이 같은 이름을 쓰면 한 쪽이 조용히 사라진다.
+            #
+            # **겹칠 때만** 구분한다 -- 항상 접미사를 붙이면 지금 편집본(트랙
+            # 하나)의 이름이 바뀌어 미리보기 캐시 지문이 깨진다.
+            source_track_id = str(track.get("track_id") or "").strip() or track_type
+            existing_ids = {str(clip.get("clip_id")) for clip in tracks.get(track_type, [])}
+            for clip in clips:
+                clip_id = str(clip.get("clip_id") or "")
+                if clip_id in existing_ids:
+                    unique_id = f"{clip_id}@{source_track_id}"
+                    suffix = 2
+                    while unique_id in existing_ids:
+                        unique_id = f"{clip_id}@{source_track_id}-{suffix}"
+                        suffix += 1
+                    clip["clip_id"] = unique_id
+                existing_ids.add(str(clip.get("clip_id")))
             # **덮어쓰지 않고 모은다**(2026-09-10, 자유 멀티트랙 Phase 4).
             # 예전에는 `tracks[track_type] = clips`였다 -- 같은 종류 트랙이
             # 둘이면 뒤엣것이 앞엣것을 통째로 지웠고, 예외도 경고도 없이
