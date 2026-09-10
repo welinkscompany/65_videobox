@@ -128,6 +128,7 @@ function stubCanonicalSubtitleApi({
   vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue({
     status: "ready", is_supported: true, project_root_path: "local://capcut", project_root_exists: true, write_access: true, checked_at: "2026-07-23T09:01:00Z",
   });
+  vi.spyOn(api, "listPreviewShares").mockResolvedValue({ shares: [] });
 }
 
 function stubReadOnlyOutputApi() {
@@ -774,6 +775,50 @@ describe("OutputsPage", () => {
     await waitFor(() => expect(revokePreviewShare).toHaveBeenCalledWith("project_a", "preview-share-1"));
     expect(await screen.findByText("이 링크를 취소했어요. 더 이상 열리지 않아요.")).toBeVisible();
     expect(screen.queryByDisplayValue(`${window.location.origin}/preview/opaque-token-abc`)).not.toBeInTheDocument();
+  });
+
+  it("still lets the owner revoke a share made before a page reload, even without its address", async () => {
+    // 새로고침하면 `previewShareId`가 화면 상태에서만 있어서 사라졌었다 --
+    // 목록 조회로 되살려서 주소 없이도 취소는 되게 한다(주소 자체는 보안상
+    // 다시 안 보여준다).
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-shared", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "listPreviewShares").mockResolvedValue({
+      shares: [{ share_id: "preview-share-old", project_id: "project_a", export_id: "final-shared", created_at: "2026-08-01T00:00:00Z", revoked_at: null }],
+    });
+    const revokePreviewShare = vi.spyOn(api, "revokePreviewShare").mockResolvedValue({ revoked: true });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("공유 링크가 활성 상태예요. 주소는 처음 만들 때만 보여드려요.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "이 링크 취소하기" }));
+
+    await waitFor(() => expect(revokePreviewShare).toHaveBeenCalledWith("project_a", "preview-share-old"));
+    expect(await screen.findByText("이 링크를 취소했어요. 더 이상 열리지 않아요.")).toBeVisible();
+  });
+
+  it("does not offer to revoke a share that was already revoked before the reload", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-shared", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final.mp4",
+        status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    vi.spyOn(api, "listPreviewShares").mockResolvedValue({
+      shares: [{ share_id: "preview-share-old", project_id: "project_a", export_id: "final-shared", created_at: "2026-08-01T00:00:00Z", revoked_at: "2026-08-02T00:00:00Z" }],
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    await screen.findByRole("button", { name: "동료에게 공유 링크 만들기" });
+    expect(screen.queryByRole("button", { name: "이 링크 취소하기" })).toBeNull();
+    expect(screen.queryByText("공유 링크가 활성 상태예요. 주소는 처음 만들 때만 보여드려요.")).toBeNull();
   });
 
   it("saves the format of a video the owner liked, under a name they chose", async () => {

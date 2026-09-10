@@ -1175,6 +1175,17 @@ export type PreviewShareCreated = {
   url: string;
 };
 
+// 목록에는 위 토큰이 없다 -- 취소(해제) 여부를 다시 확인하고 취소 버튼을
+// 다시 보여주는 데만 쓴다. 새로고침 뒤에도 주소를 다시 보여줄 수는 없다
+// (의도된 보안 설계, 위 주석과 같은 이유).
+export type PreviewShareSummary = {
+  share_id: string;
+  project_id: string;
+  export_id: string;
+  created_at: string;
+  revoked_at: string | null;
+};
+
 export type VariantRenderItem = {
   variant_id: string;
   variant_kind?: string | null;
@@ -2967,6 +2978,10 @@ export const api = {
     request<{ revoked: boolean }>(`/api/projects/${projectId}/preview-shares/${shareId}/revoke`, {
       method: "POST",
     }),
+  // 새로고침 뒤에도 살아있는 링크를 취소할 수 있어야 한다 -- 화면 상태로만
+  // 들고 있던 share_id는 새로고침에서 사라져 취소할 길이 없어졌었다.
+  listPreviewShares: (projectId: string, jobId: string) =>
+    request<{ shares: PreviewShareSummary[] }>(`/api/projects/${projectId}/final-renders/${jobId}/shares`),
   listFormatTemplates: async (): Promise<FormatTemplate[]> =>
     (await request<{ templates: FormatTemplate[] }>("/api/format-templates")).templates,
   saveFormatTemplate: (projectId: string, payload: { name: string; session_id: string }) =>

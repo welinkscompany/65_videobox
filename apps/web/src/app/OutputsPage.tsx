@@ -433,6 +433,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const capcutRequestProjectId = useRef<string | null>(null);
   const capcutHandoffRequestProjectId = useRef<string | null>(null);
   const finalInFlightTimelineKey = useRef<string | null>(null);
+  const previewShareRehydratedKey = useRef<string | null>(null);
   const capcutInFlightTimelineKey = useRef<string | null>(null);
   const capcutHandoffInFlightJobKey = useRef<string | null>(null);
   currentProjectId.current = projectId;
@@ -598,6 +599,42 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   }, [projectId, variantSession?.session_id]);
 
   const currentState = state?.projectId === projectId ? state : null;
+  // 새로고침해도 살아있는 공유 링크를 취소할 수 있어야 한다 -- `previewShareId`가
+  // 화면 상태로만 있어서 새로고침하면 사라지고, 그러면 취소할 길이 없어졌었다
+  // (2026-08-31 "확인된 대체 완료"로 지웠던 `listPreviewShares`를 되살림, 실제로는
+  // 대체하는 곳이 없었다). 주소(token)는 목록에 없어 다시 보여줄 수는 없다 --
+  // 그건 의도된 보안 설계라 여기서 되돌리지 않는다. 후크 순서 규칙 때문에
+  // 아래쪽 로딩/오류 이른 반환보다 앞에 둔다.
+  useEffect(() => {
+    const rehydrateFinalRender = currentState?.finalRender;
+    const rehydrateSession = currentState?.session;
+    const isRehydratableFinal = rehydrateFinalRender?.status === "succeeded" &&
+      rehydrateFinalRender.render?.is_current === true &&
+      rehydrateSession != null &&
+      rehydrateSession.project_id === projectId &&
+      rehydrateFinalRender.render.timeline_id === rehydrateSession.timeline_id &&
+      rehydrateFinalRender.render.source_session_id === rehydrateSession.session_id &&
+      rehydrateFinalRender.render.source_session_revision === rehydrateSession.session_revision;
+    const jobId = rehydrateFinalRender?.job_id;
+    const rehydrationKey = jobId ? `${projectId}:${jobId}` : null;
+    if (!isRehydratableFinal || !jobId || previewShareRehydratedKey.current === rehydrationKey) return;
+    previewShareRehydratedKey.current = rehydrationKey;
+    let active = true;
+    const rehydrateProjectId = projectId;
+    void api.listPreviewShares(rehydrateProjectId, jobId).then((result) => {
+      if (!active || currentProjectId.current !== rehydrateProjectId) return;
+      const latestActive = [...result.shares]
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .find((share) => !share.revoked_at);
+      if (!latestActive) return;
+      setPreviewShareProjectId(rehydrateProjectId);
+      setPreviewShareId(latestActive.share_id);
+      setPreviewShareRevoked(false);
+    }).catch(() => {
+      // 조용히 건너뛴다 -- 목록을 다시 못 읽어도 "링크 만들기" 자체는 막지 않는다.
+    });
+    return () => { active = false; };
+  }, [projectId, currentState]);
   const hasError = errorProjectId === projectId;
   const isRenderingCurrentSubtitle = isRenderingSubtitle && subtitleRequestProjectId.current === projectId;
   const subtitleError = subtitleErrorProjectId === projectId;
@@ -1065,12 +1102,18 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           {currentFinal ? <div className="vb-preview-share">
             <Button disabled={isCreatingPreviewShare} onClick={() => void handleCreatePreviewShare()}>{isCreatingPreviewShare ? "공유 링크 만드는 중" : "동료에게 공유 링크 만들기"}</Button>
             {previewShareErrorProjectId === projectId ? <p>공유 링크를 만들지 못했어요. 다시 시도해 주세요.</p> : null}
-            {previewShareProjectId === projectId && previewShareUrl ? (
+            {previewShareProjectId === projectId && previewShareId ? (
               previewShareRevoked ? (
                 <p>이 링크를 취소했어요. 더 이상 열리지 않아요.</p>
-              ) : (
+              ) : previewShareUrl ? (
                 <p>
                   동료에게 이 링크를 보내 주세요: <input data-native-control="preview-share-url" readOnly value={previewShareUrl} onFocus={(event) => event.currentTarget.select()} />
+                  {" "}
+                  <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "이 링크 취소하기"}</Button>
+                </p>
+              ) : (
+                <p>
+                  공유 링크가 활성 상태예요. 주소는 처음 만들 때만 보여드려요.
                   {" "}
                   <Button variant="outline" disabled={isRevokingPreviewShare} onClick={() => void handleRevokePreviewShare()}>{isRevokingPreviewShare ? "취소하는 중" : "이 링크 취소하기"}</Button>
                 </p>
