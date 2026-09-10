@@ -68,7 +68,9 @@ export type InspectorAction =
   | Readonly<{ kind: "dub-narration"; language: string; voiceSampleAssetId: string | null }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
   // 사진의 자리·크기·움직임은 도형과 같은 프리셋이고, **고른 것만 실린다.**
-  | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom"; horizontal?: "left" | "center" | "right"; size?: "small" | "medium" | "large"; motion?: ShapeOverlayValue["motion"] }>
+  // `preserveSourceAudio`는 얹은 것이 영상일 때만 실린다(사진 target에는
+  // 이 필드 자체가 없다 -- `target.fields.includes("preserveSourceAudio")`로 가른다).
+  | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom"; horizontal?: "left" | "center" | "right"; size?: "small" | "medium" | "large"; motion?: ShapeOverlayValue["motion"]; preserveSourceAudio?: boolean }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
   // 정지 도형("여기를 보세요"). 프리셋만 보낸다 -- 자유 좌표는 범위 밖이다.
   | Readonly<{ kind: "save-overlay"; overlayKind: "shape"; segmentId: string; shape: ShapeOverlayValue["shape"]; vertical: ShapeOverlayValue["vertical"]; horizontal: ShapeOverlayValue["horizontal"]; size: ShapeOverlayValue["size"]; motion: ShapeOverlayValue["motion"] }>
@@ -423,6 +425,10 @@ export function InspectorControls({
           vertical: target.value.vertical, horizontal: target.value.horizontal,
           size: target.value.size, motion: target.value.motion,
         });
+        // 얹은 것이 영상일 때만 값이 있다(`target.value.preserveSourceAudio`).
+        // b-roll 클립(`kind === "media"`)과 **같은 상태 칸**을 재사용한다 --
+        // 문구·개념이 하나뿐이라 두 번째 체크상자를 만들지 않는다.
+        if (target.value.preserveSourceAudio !== undefined) setPreserveSourceAudio(target.value.preserveSourceAudio);
       }
     }
   }, [targetIdentity]);
@@ -1232,6 +1238,22 @@ export function InspectorControls({
                   ))}
                 </NativeSelect>
               </label>
+              {/* 얹은 것이 영상일 때만 뜬다(`target.fields`가 `image_overlay`
+                  분기에서 이미 사진/영상을 갈라 둔다, `isVideoAssetUri`).
+                  사진에는 소리가 없어 눌러도 아무 일 없는 단추를 두지 않는다.
+                  문구·상태 칸은 b-roll `이 영상의 원래 소리도 함께 쓰기`와
+                  **완전히 같다** -- 같은 것을 두 이름으로 부르지 않는다. */}
+              {target.fields.includes("preserveSourceAudio") ? (
+                <label>
+                  <Input
+                    checked={preserveSourceAudio}
+                    disabled={disabled}
+                    onChange={(event) => setPreserveSourceAudio(event.target.checked)}
+                    type="checkbox"
+                  />
+                  이 영상의 원래 소리도 함께 쓰기
+                </label>
+              ) : null}
             </>
           ) : null}
           {/* 도형·아이콘: "여기를 보세요"용 강조 상자·밑줄과 화살표 등.
@@ -1301,6 +1323,9 @@ export function InspectorControls({
                 ...(imagePresets.horizontal ? { horizontal: imagePresets.horizontal } : {}),
                 ...(imagePresets.size ? { size: imagePresets.size } : {}),
                 ...(imagePresets.motion ? { motion: imagePresets.motion } : {}),
+                // 사진 target에는 이 칸 자체가 없다(`target.fields`) -- 안 실으면
+                // API가 `None`으로 읽어 "이미 켜 둔 값 그대로"로 처리한다.
+                ...(target.fields.includes("preserveSourceAudio") ? { preserveSourceAudio } : {}),
               });
               else if (target.overlayKind === "shape") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, ...shapeOverlay });
               else emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, columns: parseColumns(tableColumns), rows: parseRows(tableRows), text: overlayText });

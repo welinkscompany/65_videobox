@@ -1014,6 +1014,63 @@ describe("InspectorControls", () => {
     expect((screen.getByLabelText("움직임") as HTMLSelectElement).value).toBe("fade_in");
   });
 
+  // Task 3: 얹은 것이 영상이면 b-roll과 **같은 문구**의 원본 소리 칸이 뜬다.
+  // 사진에는 그 칸이 아예 없다 -- 사진에는 소리가 없어 눌러도 아무 일 없는
+  // 단추를 두지 않는다는 저장소 규칙이다.
+  const videoOverlayTarget = {
+    ...pictureTarget,
+    id: "overlay:image-video",
+    label: "얹은 영상",
+    fields: ["assetId", "text", "vertical", "horizontal", "size", "motion", "preserveSourceAudio"],
+    value: { assetId: "asset-internal-video", text: "", vertical: null, horizontal: null, size: null, motion: null, preserveSourceAudio: false },
+    bodyNoun: "영상",
+  } satisfies InspectorTarget;
+
+  it("얹은 영상에는 원본 소리 칸이 뜨고, 얹은 사진에는 안 뜬다", () => {
+    renderControls({ target: videoOverlayTarget });
+    expect(screen.getByLabelText("이 영상의 원래 소리도 함께 쓰기")).toBeTruthy();
+
+    cleanup();
+    renderControls({ target: pictureTarget });
+    expect(screen.queryByLabelText("이 영상의 원래 소리도 함께 쓰기")).toBeNull();
+  });
+
+  it("얹은 영상의 원본 소리를 켜서 저장하면 그 값이 실린다", () => {
+    const onAction = renderControls({ target: videoOverlayTarget });
+
+    fireEvent.click(screen.getByLabelText("이 영상의 원래 소리도 함께 쓰기"));
+    fireEvent.click(screen.getByRole("button", { name: "얹은 영상 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "save-overlay",
+      overlayKind: "image",
+      preserveSourceAudio: true,
+    }));
+  });
+
+  // 손대지 않은 저장이 이미 켜 둔 소리를 조용히 꺼뜨리면 안 된다 -- 저장된
+  // 값(true)에서 화면 상태가 시작해서, 건드리지 않고 저장해도 같은 값(true)이
+  // 실린다. `undefined`(안 보냄)가 아니라 **저장된 값 그대로**를 보내는 것이
+  // 이 화면이 데이터 손실 구멍을 다시 열지 않는 방식이다.
+  it("건드리지 않은 저장은 이미 켜 둔 원본 소리를 그대로 유지한다", () => {
+    const onAction = renderControls({
+      target: { ...videoOverlayTarget, value: { ...videoOverlayTarget.value, preserveSourceAudio: true } },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "얹은 영상 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ preserveSourceAudio: true }));
+  });
+
+  it("사진 target을 저장할 때는 원본 소리 칸 자체를 보내지 않는다", () => {
+    const onAction = renderControls({ target: pictureTarget });
+
+    fireEvent.click(screen.getByRole("button", { name: "이미지 저장" }));
+
+    const sent = onAction.mock.calls.at(-1)?.[0];
+    expect(sent).not.toHaveProperty("preserveSourceAudio");
+  });
+
   // 최종 리뷰 발견: 제목(legend, target.label)은 "영상"으로 고쳤는데
   // 본문 첫 줄은 여전히 "사진을 얹어요"였다 -- 한 패널 안에서 두 단어를
   // 쓴 것이다. 얹은 것이 영상일 때 본문도 "영상"이라고 말해야 한다.

@@ -36,9 +36,14 @@ const view = {
         { clipId: "image-2", segmentId: "segment-2", type: "overlay", assetId: "asset-image-2", assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-image-2", text: "", vertical: "top", horizontal: "left", size: "small", motion: "slide_in_left" } },
         // 얹은 자산이 사진이 아니라 영상인 경우. 절 이름이 "이미지"로 남아 있으면
         // 방금 얹은 영상을 조정하려는 창작자가 "이미지"를 찾아야 한다.
-        { clipId: "image-video-1", segmentId: "segment-3", type: "overlay", assetId: "asset-video", assetUri: "local://projects/p1/assets/clip_1.mp4", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-video", text: "" } },
+        // `preserve_source_audio: true`도 함께 저장돼 있다 -- 화면이 그 값을
+        // 읽어 되돌릴 수 있는지 확인한다(Task 3).
+        { clipId: "image-video-1", segmentId: "segment-3", type: "overlay", assetId: "asset-video", assetUri: "local://projects/p1/assets/clip_1.mp4", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-video", text: "", preserve_source_audio: true } },
         // 같은 종류(`image_overlay`)라도 사진이면 예전 이름 그대로여야 한다.
         { clipId: "image-photo-1", segmentId: "segment-4", type: "overlay", assetId: "asset-photo", assetUri: "local://projects/p1/assets/photo_1.jpg", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-photo", text: "" } },
+        // 소리 칸을 아직 한 번도 켜 본 적 없는 영상 오버레이. `preserve_source_audio`
+        // 키 자체가 없다 -- 렌더러가 무음으로 읽는 것과 같은 자국으로 읽혀야 한다.
+        { clipId: "image-video-2", segmentId: "segment-5", type: "overlay", assetId: "asset-video-2", assetUri: "local://projects/p1/assets/clip_2.mp4", startSec: 0, endSec: 1, controls: {}, overlayType: "image_overlay", overlayPayload: { asset_id: "asset-video-2", text: "" } },
         { clipId: "table-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "table_overlay", overlayPayload: { columns: ["항목", "값"], rows: [["길이", "10초"]], text: "요약표" } },
         { clipId: "shape-1", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: "shape_overlay", overlayPayload: { shape: "underline", vertical: "bottom", horizontal: "center", size: "large" } },
         { clipId: "unsupported-overlay", segmentId: "segment-1", type: "overlay", assetId: null, assetUri: null, startSec: 0, endSec: 1, controls: {}, overlayType: null },
@@ -299,10 +304,42 @@ describe("projectInspectorTargets", () => {
       label: "얹은 영상",
       segmentId: "segment-3",
       overlayKind: "image",
-      fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
-      value: { assetId: "asset-video", text: "", vertical: null, horizontal: null, size: null, motion: null },
+      // 얹은 것이 영상이라 `preserveSourceAudio`가 칸에 있다(Task 3) -- 사진
+      // target(아래)에는 이 이름 자체가 없다.
+      fields: ["assetId", "text", "vertical", "horizontal", "size", "motion", "preserveSourceAudio"],
+      value: { assetId: "asset-video", text: "", vertical: null, horizontal: null, size: null, motion: null, preserveSourceAudio: true },
       bodyNoun: "영상",
     });
+  });
+
+  // Task 3: 얹은 영상에 소리 칸을 켠 적이 없으면(payload에 키 자체가 없음)
+  // 화면은 그것을 꺼짐으로 읽어야 한다 -- 렌더러가 없는 키를 `False`로 읽는
+  // 것과 같은 자국이다(`update_segment_image_overlay` 문서화).
+  it("얹은 영상이 소리 칸을 한 번도 안 켰으면 꺼짐으로 읽는다", () => {
+    const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-5" });
+
+    expect(targets).toContainEqual({
+      id: "overlay:image-video-2",
+      kind: "overlay",
+      label: "얹은 영상",
+      segmentId: "segment-5",
+      overlayKind: "image",
+      fields: ["assetId", "text", "vertical", "horizontal", "size", "motion", "preserveSourceAudio"],
+      value: { assetId: "asset-video-2", text: "", vertical: null, horizontal: null, size: null, motion: null, preserveSourceAudio: false },
+      bodyNoun: "영상",
+    });
+  });
+
+  // Task 3 핵심: 사진에는 소리가 없다 -- 눌러도 아무 일 없는 단추를 두지
+  // 않는다는 저장소 규칙대로, `fields`에 이름 자체가 없어야 한다(단순히
+  // 화면에서 안 그리는 것과는 다르다 -- 화면이 실수로 `target.fields`를
+  // 무시하고 그려도 이 시험이 잡는다).
+  it("얹은 것이 사진이면 원본 소리 칸 이름 자체가 없다", () => {
+    const targets = projectInspectorTargets({ view, selectedSegmentId: "segment-4" });
+    const photoTarget = targets.find((target) => target.id === "overlay:image-photo-1");
+
+    expect(photoTarget?.fields).not.toContain("preserveSourceAudio");
+    expect(photoTarget && "value" in photoTarget ? (photoTarget.value as Record<string, unknown>).preserveSourceAudio : undefined).toBeUndefined();
   });
 
   it("얹은 것이 사진이면 절 이름은 예전 그대로 이미지다", () => {

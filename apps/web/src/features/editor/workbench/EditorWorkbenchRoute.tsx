@@ -1141,6 +1141,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
         ...(action.horizontal ? { horizontal: action.horizontal } : {}),
         ...(action.size ? { size: action.size } : {}),
         ...(action.motion ? { motion: action.motion } : {}),
+        // 사진 target에는 이 칸이 없다(`action.preserveSourceAudio === undefined`) --
+        // 안 실으면 API가 "이미 켜 둔 값 그대로"로 읽는다.
+        ...(action.preserveSourceAudio !== undefined ? { preserveSourceAudio: action.preserveSourceAudio } : {}),
       });
       if (action.overlayKind === "shape") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, shape: action.shape, vertical: action.vertical, horizontal: action.horizontal, size: action.size, motion: action.motion });
       return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, columns: action.columns, rows: action.rows, text: action.text });

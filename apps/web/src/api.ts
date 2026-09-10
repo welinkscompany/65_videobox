@@ -719,6 +719,10 @@ export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   horizontal?: "left" | "center" | "right";
   size?: "small" | "medium" | "large";
   motion?: ShapeOverlayMotion;
+  // 얹은 영상의 원본 소리. b-roll의 같은 칸과 이름이 같다(개념을 두 벌로
+  // 만들지 않는다). 안 보내면(`undefined`) 백엔드가 `None`으로 읽어 이미
+  // 켜 둔 값을 그대로 둔다 -- `false`를 보내는 것과는 다르다.
+  preserve_source_audio?: boolean;
 } & (
   | { proposal_id: string; candidate_id: string }
   | { proposal_id?: never; candidate_id?: never }

@@ -6,7 +6,10 @@ type MediaKind = "broll" | "bgm" | "sfx";
 export type MediaField = "fadeInSec" | "fadeOutSec" | "inSec" | "outSec" | "speed" | "volume" | "ducking" | "preserveSourceAudio" | "gainDb" | "filter" | "photoMotion" | "fit" | "normalizeLoudness" | "denoise" | "stabilize" | "reduceNoise" | "preservePitch" | "zoom" | "positionXPercent" | "positionYPercent" | "rotationDeg";
 type CaptionField = "style";
 type ExplanationCardField = "title" | "body" | "text";
-type ImageField = "assetId" | "text" | "vertical" | "horizontal" | "size" | "motion";
+// `preserveSourceAudio`는 얹은 것이 **영상일 때만** 붙는다(아래 `image_overlay`
+// 분기). 사진에는 소리가 없어 눌러도 아무 일 없는 단추가 된다 -- 타임라인 트랙
+// 단추가 같은 이유로 종류마다 다른 것과 같은 규칙이다.
+type ImageField = "assetId" | "text" | "vertical" | "horizontal" | "size" | "motion" | "preserveSourceAudio";
 type TableField = "columns" | "rows" | "text";
 type ShapeField = "shape" | "vertical" | "horizontal" | "size" | "motion";
 
@@ -127,7 +130,10 @@ export type InspectorTarget =
   // 지키면 사진 본문 문구가 바뀌고, 본문을 지키면 영상 제목이 다시 "이미지"로
   // 돌아간다. 둘 다 같은 신호(`isVideoAssetUri`)에서 나오되 서로 다른 낱말을
   // 쓸 수 있도록 값을 하나씩 따로 싣는다.
-  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string }> & ImageOverlayPresets; bodyNoun: string; isNew?: boolean }>
+  // `preserveSourceAudio`는 얹은 것이 영상일 때만 값이 실린다(사진은 이 키
+  // 자체가 없다) -- 선택으로 둬야 기존 픽스처·사진 target의 값 객체가
+  // 그대로 유지된다.
+  | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "image"; fields: readonly ImageField[]; value: Readonly<{ assetId: string; text: string; preserveSourceAudio?: boolean }> & ImageOverlayPresets; bodyNoun: string; isNew?: boolean }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "table"; fields: readonly TableField[]; value: Readonly<{ columns: string[]; rows: string[][]; text: string }>; isNew?: boolean }>
   | Readonly<{ id: string; kind: "overlay"; label: string; segmentId: string; overlayKind: "shape"; fields: readonly ShapeField[]; value: ShapeOverlayValue; isNew?: boolean }>;
 
@@ -298,9 +304,20 @@ export function projectInspectorTargets({ view, selectedSegmentId }: Readonly<{ 
         // "사진", 영상은 "영상". 절 제목이 "얹은 영상"으로 바뀌어도 본문은
         // "장면 위에 영상을 얹어요"를 그대로 쓴다("얹은 영상을 얹어요"는
         // 말이 안 되므로 bodyNoun은 label을 따라가지 않는다).
+        // `preserveSourceAudio`는 영상일 때만 칸에 넣는다(Task 3) -- 사진에는
+        // 소리가 없어 눌러도 아무 일 없는 단추가 되므로 아예 안 준다. 백엔드가
+        // 안 준 값은 키 자체를 안 적으므로(`update_segment_image_overlay`)
+        // `Boolean(...)`로 읽으면 "저장 전"과 "꺼짐"이 똑같이 무음으로 읽힌다 --
+        // b-roll의 `preserveSourceAudio ?? false`와 같은 규칙이다.
         return [{
-          id: `overlay:${clip.clipId}`, kind: "overlay", label: isVideoOverlay ? "얹은 영상" : "이미지", segmentId: selectedSegmentId, overlayKind: "image", fields: ["assetId", "text", "vertical", "horizontal", "size", "motion"],
-          value: { assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text), ...imageOverlayPresets(payload) },
+          id: `overlay:${clip.clipId}`, kind: "overlay", label: isVideoOverlay ? "얹은 영상" : "이미지", segmentId: selectedSegmentId, overlayKind: "image",
+          fields: isVideoOverlay
+            ? ["assetId", "text", "vertical", "horizontal", "size", "motion", "preserveSourceAudio"]
+            : ["assetId", "text", "vertical", "horizontal", "size", "motion"],
+          value: {
+            assetId: clip.assetId ?? stringValue(payload.asset_id), text: stringValue(payload.text), ...imageOverlayPresets(payload),
+            ...(isVideoOverlay ? { preserveSourceAudio: Boolean(payload.preserve_source_audio) } : {}),
+          },
           bodyNoun: isVideoOverlay ? "영상" : "사진",
         }];
       }
