@@ -1082,9 +1082,13 @@ class FfmpegFinalRenderer:
             f"color=c=black:s={self.video_width}x{self.video_height}:r={self.video_fps}:d={duration}[canvas0]"
         ]
         canvas = "canvas0"
+        # **위 트랙이 위로 간다**(owner 결정 2026-09-10, 캡컷과 같게). 나중에
+        # 얹는 것이 위이므로 트랙 순서가 첫 열쇠다. 트랙이 종류당 하나뿐인
+        # 편집본은 값이 전부 같아서 **예전과 완전히 같은 순서**가 나온다 --
+        # 옛 규칙(늦게 시작한 것이 위)은 같은 트랙 안에서 그대로 남는다.
         broll = sorted(
             (item for item in composition_plan.items if item.track_type == "broll"),
-            key=lambda item: (item.start_sec, item.clip_id),
+            key=lambda item: (item.track_order, item.start_sec, item.clip_id),
         )
         for ordinal, item in enumerate(broll, start=1):
             index = source_indices[item.clip_id]

@@ -777,6 +777,14 @@ class CompositionItem:
     # 앞 장면에서 이 클립으로 넘어오는 방법. **클립 경계에 붙는 값**이라
     # 들어오는 쪽에 싣는다 -- 경계는 이 클립의 시작 시각 하나로 정해진다.
     transition: dict[str, Any] | None = None
+    #: 어느 트랙에서 왔는가 -- **클수록 위로 간다**(owner 결정 2026-09-10:
+    #: 캡컷처럼 위 트랙이 위). 옛 규칙은 "늦게 시작한 것이 위"였는데, 트랙이
+    #: 여럿이 되면 그 규칙으로는 owner가 순서를 손으로 정할 방법이 없다.
+    #:
+    #: **기본값 0은 지문에 안 실린다**(`canonical_dict`) -- 트랙이 종류당
+    #: 하나인 지금 편집본은 값이 전부 0이라, 실으면 캐시된 미리보기가 전부
+    #: 무효가 된다.
+    track_order: int = 0
 
     def clipped(self, *, start_sec: float, end_sec: float) -> "CompositionItem | None":
         left, right = max(self.start_sec, start_sec), min(self.end_sec, end_sec)
@@ -855,12 +863,19 @@ class CompositionPlan:
             for gap in timeline.get("gap_slots", [])
             if isinstance(gap, dict) and str(gap.get("gap_slot_id") or "").strip()
         }
+        # **같은 종류 트랙끼리의 위아래 순서**(owner 결정 2026-09-10: 캡컷처럼
+        # 위 트랙이 위). 목록에서 **나중에 오는 트랙이 위**다. 종류가 다른
+        # 트랙끼리는 이 값으로 겨루지 않는다 -- 오버레이는 이미 브롤 뒤에
+        # 따로 얹히는 별도 단계라 여기 순서와 무관하다.
+        track_order_by_kind: dict[str, int] = {}
         for track in timeline.get("tracks", []):
             if not isinstance(track, dict):
                 continue
             track_type = str(track.get("track_type") or "").strip().lower()
             if track_type not in _SUPPORTED_TRACKS:
                 continue
+            track_order = track_order_by_kind.get(track_type, 0)
+            track_order_by_kind[track_type] = track_order + 1
             # 눈(`track_states.py`). **숨김은 통째로 뺀다.** 음소거는 여기서
             # 손대지 않는다 -- 클립을 빼면 그림까지 사라지고, 음량 제어가
             # 트랙마다 달라 값 하나로는 못 끈다. 렌더러가 맡는다.
@@ -934,6 +949,7 @@ class CompositionPlan:
                     # 전환은 **화면 클립에만** 붙는다. 소리 트랙의 경계에는
                     # 넘길 그림이 없다 -- 조용히 무시하지 않고 아예 안 읽는다.
                     transition=normalize_transition(raw.get("transition")) if track_type == "broll" else None,
+                    track_order=track_order,
                 ))
         # **트랙 순회가 못 잡는 레인이 둘 있다**(`track_states.py`). 자막은 따로
         # 들어오고(`captions=`), 글자 오버레이(설명 카드·표·도형)는 트랙이 아니라
@@ -988,7 +1004,21 @@ class CompositionPlan:
             tuple(overlays), self.version)
 
     def canonical_dict(self) -> dict[str, Any]:
-        return {"version": self.version, "canvas": {"width": self.width, "height": self.height, "fps_num": self.fps_num, "fps_den": self.fps_den, "sample_aspect_ratio": self.sample_aspect_ratio, "rotation": self.rotation}, "items": [asdict(item) for item in self.items], "captions": [asdict(cue) for cue in self.captions], "export_overlays": list(self.export_overlays)}
+        return {"version": self.version, "canvas": {"width": self.width, "height": self.height, "fps_num": self.fps_num, "fps_den": self.fps_den, "sample_aspect_ratio": self.sample_aspect_ratio, "rotation": self.rotation}, "items": [_canonical_item(item) for item in self.items], "captions": [asdict(cue) for cue in self.captions], "export_overlays": list(self.export_overlays)}
+
+
+def _canonical_item(item: "CompositionItem") -> dict[str, Any]:
+    """지문에 실을 모양. **기본값인 새 필드는 뺀다.**
+
+    `canonical_dict()`는 `fingerprint_exact_preview`가 먹는다. 필드를 늘리면서
+    기본값까지 실으면 지금 있는 편집본(트랙이 종류당 하나뿐이라 값이 전부
+    기본값)의 지문이 전부 바뀌어 **캐시된 미리보기가 통째로 무효**가 된다.
+    값이 실제로 기본값과 다를 때만 싣는다.
+    """
+    payload = asdict(item)
+    if payload.get("track_order") == 0:
+        payload.pop("track_order", None)
+    return payload
 
 
 __all__ = [
