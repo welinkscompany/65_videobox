@@ -190,7 +190,16 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
 
     return (
         "사진을 **영상 위에 얹는** 것은 set_image_overlay다(장면 화면 자체를 사진으로 까는 "
-        "apply_media와 다른 일이다). asset_id는 승인된 자산 중 **사진**만 쓴다. "
+        # **여기가 Task 4에서 고친 자리다.** 예전에는 "사진만 쓴다"였는데,
+        # 그 근거("영상은 한 장으로 읽힌다")가 사실이 아니라서 영상 오버레이는
+        # 이미 열렸다(`_OVERLAYABLE_ASSET_TYPES`, 2026-09-10). 그런데 이 줄만
+        # 안 따라가 앞(`_approved_asset_catalogue`)과 뒤(이 함수)가 서로
+        # 반대말을 하고 있었다 -- 유진이 뒤 문장을 믿으면 백엔드는 받아
+        # 주는데도 영상을 얹어 달라는 말을 거절한다. 앞 문장과 같은 말
+        # "보이는 자산(사진·영상)"을 그대로 써서 두 문장이 같은 목소리로
+        # 말하게 한다.
+        "apply_media와 다른 일이다). asset_id는 승인된 자산 중 **보이는 자산**(사진·영상)만 "
+        "쓴다 -- 소리(음악·효과음)는 못 쓴다. "
         f"세로 자리 vertical: {_named(sorted(SHAPE_OVERLAY_VERTICALS))}. "
         f"가로 자리 horizontal: {_named(sorted(SHAPE_OVERLAY_HORIZONTALS))}. "
         f"크기 size: {_named(sorted(SHAPE_OVERLAY_SIZES))}. "

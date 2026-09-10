@@ -363,3 +363,36 @@ def test_a_photo_overlay_keeps_the_old_wording_with_no_video_signal() -> None:
 
     assert "asset-photo(bottom/right/small/fade_in)" in prompt
     assert "asset-photo(video," not in prompt
+
+
+def test_the_full_prompt_does_not_contradict_itself_about_what_can_be_laid_over() -> None:
+    """유진이 한 번에 읽는 프롬프트 안에 서로 반대되는 두 문장이 있었다 (Task 4).
+
+    `_approved_asset_catalogue`(먼저 실린다)는 "얹을 수 있는 것은 보이는 자산
+    (사진·영상)뿐"이라 하고, 바로 뒤에 실리는 `_image_overlay_catalogue`는
+    여전히 "asset_id는 승인된 자산 중 **사진**만 쓴다"고 했다. 영상 오버레이는
+    `c43abf4b1`로 이미 열렸는데(`_OVERLAYABLE_ASSET_TYPES`) 이 줄만 안 따라간
+    것이다 -- 유진이 뒤 문장을 믿으면 백엔드는 받아 주는데도 영상을 얹어
+    달라는 말을 거절한다.
+
+    두 함수를 따로 재면 이 결함은 안 잡힌다 -- 각자는 자기 안에서 일관되기
+    때문이다. 그래서 `_editing_prompt`가 실제로 만드는 **프롬프트 전체**로
+    잰다.
+    """
+    prompt = _editing_prompt(
+        instruction="영상 하나 오른쪽 아래에 작게 얹어줘",
+        context=_context(
+            approved_asset_ids=("asset-photo", "asset-music", "asset-clip"),
+            approved_asset_types=(
+                ("asset-photo", "image"), ("asset-music", "bgm"), ("asset-clip", "broll_video"),
+            ),
+        ),
+    )
+
+    # 옛 문구("승인된 자산 중 **사진**만 쓴다")가 남아 있으면 유진은 영상
+    # 오버레이 요청을 스스로 거절한다 -- 검증(_OVERLAYABLE_ASSET_TYPES)은
+    # 영상을 받아 주는데도.
+    assert "승인된 자산 중 **사진**만 쓴다" not in prompt, prompt
+    # 두 안내문이 "보이는 자산(사진·영상)"이라는 같은 말을 **같은 목소리로**
+    # 두 번 해야 한다 -- 앞뒤가 서로 다른 말을 하지 않는다는 뜻이다.
+    assert prompt.count("사진·영상") == 2, prompt
