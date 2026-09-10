@@ -783,6 +783,67 @@ function Get-LocalModelCheck {
         -Evidence @{ configured_model = $configuredModel; reachable = $true; loaded_llm_models = $loadedLlmKeys }
 }
 
+function Get-LocalEmbeddingModelCheck {
+    # 의미검색(자료실 검색·유진의 브롤·음악 추천)은 **임베딩 모델**이 켜져 있어야
+    # 돈다. 대화 모델과 달리 이건 지금까지 아무도 확인해 주지 않았다 -- 꺼져
+    # 있으면 오류 없이 검색 결과만 조용히 부실해진다.
+    #
+    # **차원이 더 무섭다.** 코드는 로드된 것 중 먼저 나오는 임베딩 모델을 그냥
+    # 집는다(`lm_studio.py:159`). 이 기기에서 nomic(768차원)이 목록상
+    # bge-m3(1024차원)보다 앞이라, nomic을 실수로 같이 켜면 색인 전체와
+    # 어긋난다(2026-09-10 실측: 음원 165건·촬영본 143건이 전부 1024차원).
+    # 예외도 경고도 없이 검색만 엉뚱해진다.
+    $configuredEmbedding = "text-embedding-bge-m3"
+    if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+        try {
+            foreach ($line in [IO.File]::ReadLines((Resolve-Path -LiteralPath $EnvFile).Path)) {
+                if ($line -match '^\s*VIDEOBOX_LOCAL_EMBEDDING_MODEL_NAME\s*=\s*(.+?)\s*$') {
+                    $configuredEmbedding = ([string]$Matches[1]).Trim().Trim('"').Trim("'")
+                }
+            }
+        }
+        catch { }
+    }
+    try {
+        $response = Invoke-RestMethod -Uri $LocalModelApiUri -TimeoutSec 5 -ErrorAction Stop
+    }
+    catch {
+        return New-OwnerReadyResult -Id "local_embedding_model" -Status "blocked" `
+            -Summary "LM Studio가 꺼져 있거나 응답하지 않습니다." `
+            -Action "LM Studio를 켜고 '$configuredEmbedding'을 불러온 뒤 다시 확인하세요." `
+            -Evidence @{ configured_embedding_model = $configuredEmbedding; reachable = $false; selected_embedding_model = $null }
+    }
+    # **순서가 뜻을 갖는다.** 고르는 규칙을 그대로 흉내 낸다 -- 로드된 것 중 먼저 나오는 것.
+    $loadedEmbeddingKeys = @(
+        $response.models |
+            Where-Object { $_.type -eq "embedding" -and $_.loaded_instances.Count -gt 0 } |
+            ForEach-Object { $_.key }
+    )
+    $selected = if ($loadedEmbeddingKeys.Count -gt 0) { $loadedEmbeddingKeys[0] } else { $null }
+    $evidence = @{
+        configured_embedding_model = $configuredEmbedding
+        reachable = $true
+        selected_embedding_model = $selected
+        loaded_embedding_models = $loadedEmbeddingKeys
+    }
+    if ($null -eq $selected) {
+        return New-OwnerReadyResult -Id "local_embedding_model" -Status "blocked" `
+            -Summary "임베딩 모델이 하나도 켜져 있지 않아 의미검색이 돌지 않습니다." `
+            -Action "LM Studio에서 '$configuredEmbedding'을 불러오세요. 자료실 검색과 유진의 영상·음악 추천이 이 모델로 돕니다." `
+            -Evidence $evidence
+    }
+    if ($selected -ne $configuredEmbedding) {
+        return New-OwnerReadyResult -Id "local_embedding_model" -Status "blocked" `
+            -Summary "설정과 다른 임베딩 모델($selected)이 먼저 잡혀 검색 결과가 어긋납니다." `
+            -Action "LM Studio에서 '$selected'을 내리고 '$configuredEmbedding'만 남기세요. 차원이 다르면 오류 없이 검색 결과만 엉뚱해집니다." `
+            -Evidence $evidence
+    }
+    return New-OwnerReadyResult -Id "local_embedding_model" -Status "pass" `
+        -Summary "의미검색이 쓸 임베딩 모델이 켜져 있고 설정과 일치합니다." `
+        -Action "추가 조치가 없습니다." `
+        -Evidence $evidence
+}
+
 function Test-AllowedLoopbackLoginRedirect {
     param([Uri]$SourceUri, [System.Net.Http.HttpResponseMessage]$Response)
     if ([int]$Response.StatusCode -ne 302 -or $null -eq $Response.Headers.Location) {
@@ -995,6 +1056,7 @@ if ($Mode -ceq "Check") {
     $checks += @(Get-ComposeChecks)
     $checks += @(Get-DataRootChecks)
     $checks += Get-LocalModelCheck
+    $checks += Get-LocalEmbeddingModelCheck
     $videoHealthUri = [Uri]::new($VideoBoxUri, "/health")
     $checks += Get-LoopbackCheck -Id "videobox_health" -DisplayName "VideoBox" -Uri $videoHealthUri -RequireHealthJson
     $checks += Get-LoopbackCheck -Id "hermes_dashboard" -DisplayName "Hermes 대시보드" -Uri $HermesDashboardUri -AcceptLoginRedirectAsReachable

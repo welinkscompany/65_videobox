@@ -278,15 +278,27 @@ def _health_server(
 
 
 @contextmanager
-def _local_model_server(*, model_key: str = "qwen3-35b") -> Iterator[str]:
+def _local_model_server(
+    *,
+    model_key: str = "qwen3-35b",
+    embedding_models: tuple[tuple[str, bool], ...] = (("text-embedding-bge-m3", True),),
+) -> Iterator[str]:
     # LM Studio의 실제 `/api/v1/models` 응답 모양을 그대로 흉내 낸다(2026-08-11 실측).
     # `Get-LocalModelCheck`는 `type == "llm"`이고 `loaded_instances`가 비어 있지
     # 않은 항목의 `key`만 후보로 본다.
-    body = json.dumps({
-        "models": [
-            {"type": "llm", "key": model_key, "loaded_instances": [{"id": model_key}]},
-        ]
-    }).encode("utf-8")
+    #
+    # `embedding_models`는 (key, 로드됨) 쌍이고 **순서가 뜻을 갖는다** --
+    # 코드가 로드된 것 중 먼저 나오는 임베딩 모델을 고르기 때문이다
+    # (`lm_studio.py:159`).
+    models: list[dict[str, object]] = [
+        {"type": "llm", "key": model_key, "loaded_instances": [{"id": model_key}]},
+    ]
+    for key, loaded in embedding_models:
+        models.append({
+            "type": "embedding", "key": key,
+            "loaded_instances": [{"id": key}] if loaded else [],
+        })
+    body = json.dumps({"models": models}).encode("utf-8")
     with _health_server(body=body) as uri:
         yield uri
 
@@ -2057,3 +2069,64 @@ def test_a_failed_rebuild_keeps_the_log_it_tells_the_owner_to_read() -> None:
     assert "rebuild_log" in rebuild_block, (
         "재빌드가 실패해도 로그가 근거로 남지 않는다. 실패 원인을 다음 사람이 볼 수 있어야 한다."
     )
+
+
+def test_check_passes_when_the_expected_embedding_model_is_the_loaded_one(tmp_path: Path) -> None:
+    """의미검색(자료실·유진 추천)은 임베딩 모델이 켜져 있어야 돈다. 대화 모델과
+    달리 이건 지금까지 아무도 확인해 주지 않았다 -- 꺼져 있어도 화면은 조용히
+    검색 결과만 부실해진다."""
+    fixture = _fixture_repository(tmp_path)
+    with (
+        _health_server() as video_uri,
+        _health_server() as hermes_uri,
+        _local_model_server() as model_uri,
+    ):
+        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
+
+    payload = _payload(result)
+    row = next(item for item in payload["checks"] if item["id"] == "local_embedding_model")
+    assert row["status"] == "pass"
+    assert row["evidence"]["configured_embedding_model"] == "text-embedding-bge-m3"
+    assert row["evidence"]["selected_embedding_model"] == "text-embedding-bge-m3"
+
+
+def test_check_blocks_when_no_embedding_model_is_loaded(tmp_path: Path) -> None:
+    fixture = _fixture_repository(tmp_path)
+    with (
+        _health_server() as video_uri,
+        _health_server() as hermes_uri,
+        _local_model_server(embedding_models=(("text-embedding-bge-m3", False),)) as model_uri,
+    ):
+        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
+
+    payload = _payload(result)
+    row = next(item for item in payload["checks"] if item["id"] == "local_embedding_model")
+    assert row["status"] == "blocked"
+    assert row["evidence"]["selected_embedding_model"] is None
+    assert "text-embedding-bge-m3" in row["action"]
+
+
+def test_check_blocks_when_another_embedding_model_would_shadow_the_expected_one(tmp_path: Path) -> None:
+    """**차원이 안 맞으면 오류 없이 검색만 엉망이 된다.**
+
+    코드는 로드된 것 중 **먼저 나오는** 임베딩 모델을 그냥 집는다
+    (`lm_studio.py:159`). 실제 기기에서 nomic(768차원)이 목록상 bge-m3(1024차원)
+    보다 앞에 있어서, nomic을 실수로 같이 켜는 순간 색인 전체(음원 165건·촬영본
+    143건, 전부 1024차원)와 어긋난다. 예외도 경고도 없다.
+    """
+    fixture = _fixture_repository(tmp_path)
+    with (
+        _health_server() as video_uri,
+        _health_server() as hermes_uri,
+        _local_model_server(embedding_models=(
+            ("text-embedding-nomic-embed-text-v1.5", True),
+            ("text-embedding-bge-m3", True),
+        )) as model_uri,
+    ):
+        result = _run(fixture, video_uri=video_uri, hermes_uri=hermes_uri, local_model_uri=model_uri)
+
+    payload = _payload(result)
+    row = next(item for item in payload["checks"] if item["id"] == "local_embedding_model")
+    assert row["status"] == "blocked"
+    assert row["evidence"]["selected_embedding_model"] == "text-embedding-nomic-embed-text-v1.5"
+    assert "text-embedding-nomic-embed-text-v1.5" in row["action"]
