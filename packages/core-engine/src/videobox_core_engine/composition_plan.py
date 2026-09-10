@@ -685,6 +685,13 @@ def materialize_editing_session_timeline(
                     asset_uri = f"local://projects/{project}/assets/{asset_id}"
                 if asset_uri:
                     clip = {"clip_id": f"session-overlay-{segment_id}-{window_index}-{ordinal}", "segment_id": segment_id, "asset_id": asset_id, "asset_uri": asset_uri, "start_sec": window_start, "end_sec": window_end, "playback_rate": segment_playback_rate, "overlay_type": str(payload.get("overlay_type") or "visual_overlay"), "overlay_payload": payload}
+                    # 얹은 영상(PIP)의 원본 소리 켜기. b-roll과 같은 이름
+                    # (`preserve_source_audio`)을 렌더러가 읽는 자리(`media_controls`)로
+                    # 옮겨 싣는다 -- **안 고른 오버레이는 열쇠 자체를 안 만든다**,
+                    # 그래야 `CompositionItem.media_controls`의 기본값 `{}`가 그대로
+                    # 남아 `fingerprint_exact_preview`가 안 움직인다.
+                    if "preserve_source_audio" in payload:
+                        clip["media_controls"] = {"preserve_source_audio": bool(payload["preserve_source_audio"])}
                     for key in ("expected_content_sha256", "media_revision"):
                         if payload.get(key):
                             clip[key] = payload[key]

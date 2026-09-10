@@ -1565,6 +1565,7 @@ def update_segment_image_overlay(
     horizontal: str | None = None,
     size: str | None = None,
     motion: str | None = None,
+    preserve_source_audio: bool | None = None,
 ) -> dict[str, Any]:
     """사진 오버레이를 얹는다. 프리셋 넷은 **선택**이다.
 
@@ -1577,6 +1578,12 @@ def update_segment_image_overlay(
 
     준 값은 반대로 **거절**한다. 오타를 조용히 기본값으로 좁히면 owner는 고른
     것이 왜 안 되는지 알 수 없다.
+
+    `preserve_source_audio`는 **얹은 영상**(이 오버레이 자리는 사진도, 영상도
+    될 수 있다)의 원본 소리를 완성본에 실을지다. 이름은 b-roll의 같은 칸을
+    그대로 빌린다(`media_controls.py`) -- 같은 개념을 두 벌로 만들지 않는다.
+    프리셋 넷과 같은 규칙: 안 주면 열쇠 자체가 없고(무음이던 예전과 자국이
+    같다), 렌더러가 없는 열쇠를 `False`로 읽는다.
     """
     presets = {
         "vertical": vertical,
@@ -1595,6 +1602,9 @@ def update_segment_image_overlay(
                 f"image overlay {field_name} must be one of {sorted(allowed)}: {normalized!r}"
             )
         normalized_presets[field_name] = normalized
+    audio_fields: dict[str, bool] = {}
+    if preserve_source_audio is not None:
+        audio_fields["preserve_source_audio"] = bool(preserve_source_audio)
     return _upsert_segment_overlay(
         session=session,
         segment_id=segment_id,
@@ -1604,6 +1614,7 @@ def update_segment_image_overlay(
             "asset_id": asset_id.strip(),
             "text": text.strip(),
             **normalized_presets,
+            **audio_fields,
         },
         mutation_type="image_overlay_update",
     )

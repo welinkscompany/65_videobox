@@ -1380,6 +1380,22 @@ class FfmpegFinalRenderer:
                     )
                 filters.append(f"{source_filter},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
                 labels.append(f"[{label}]")
+            elif item.track_type == "overlay":
+                # 얹은 영상(PIP)의 원본 소리. **기본은 무음**이다 -- b-roll과
+                # 같은 이름(`preserve_source_audio`)을 b-roll과 같은 자리
+                # (`media_controls`)에서 읽는다. 안 켰으면 예전처럼 아무것도
+                # 안 더한다.
+                if not bool(item.media_controls.get("preserve_source_audio", False)):
+                    continue
+                if item.clip_id in soundless_source_clip_ids:
+                    # 얹은 것이 사진일 수도 있다 -- 사진에는 소리 스트림이
+                    # 없다. 없는 `[N:a]`를 그래프에 넣으면 ffmpeg가 통째로
+                    # 실패하므로(b-roll과 같은 사고) 건너뛴다.
+                    continue
+                label = f"a_{item.clip_id}"
+                delay = max(0, round(item.start_sec * 1000))
+                filters.append(f"[{source_indices[item.clip_id]}:a]atrim=start={item.source_in_sec}:end={item.source_out_sec},asetpts=PTS-STARTPTS,adelay={delay}|{delay}[{label}]")
+                labels.append(f"[{label}]")
             elif item.track_type in {"bgm", "sfx"}:
                 controls = normalize_media_controls(item.media_controls, media_kind="audio", duration_sec=max(item.end_sec - item.start_sec, 0.001))
                 label = f"a_{item.clip_id}"
@@ -1554,6 +1570,12 @@ class FfmpegFinalRenderer:
                 is_image = _looks_like_image(source)
                 if not is_image and not self._has_visual_stream(source):
                     raise FinalRenderError("Exact preview overlay source must be a local image or video. Restore it and retry.")
+                if bool(item.media_controls.get("preserve_source_audio", False)) and not self._has_audio_stream(source):
+                    # 원본 소리 살리기를 켰는데 원본에 오디오 스트림이 없다 --
+                    # 사진 오버레이가 대표적이다. b-roll과 같은 판정을 여기서도
+                    # 미리 해 둔다. 안 해 두면 오디오 그래프가 없는 `[N:a]`를
+                    # 그대로 넣어 ffmpeg가 통째로 실패한다.
+                    soundless_source_clip_ids.add(item.clip_id)
                 track_overlay_indices[item.clip_id] = len(source_paths)
                 source_indices[item.clip_id] = len(source_paths)
                 source_paths.append((source, is_image, False))
