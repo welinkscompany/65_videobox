@@ -315,9 +315,56 @@ def materialize_editing_session_timeline(
             if bound_id in segments:
                 session_bound_clip_ids_by_track.setdefault(bound_track_type, set()).add(bound_id)
 
-    tracks: dict[str, list[dict[str, Any]]] = {}
+    # **바구니 열쇠는 (종류, 트랙 이름)이다.** 예전에는 종류 하나였다 -- 그래서
+    # 클립이 "몇 번 트랙 소속"인지 말할 자리가 없었고, Phase 5로 트랙을 추가해도
+    # 올릴 데가 없었다. 이름표가 없는 클립은 그 종류의 **첫 트랙**으로 가므로
+    # 지금 있는 편집본의 결과는 한 글자도 안 바뀐다.
+    tracks: dict[tuple[str, str], list[dict[str, Any]]] = {}
     track_ids: dict[str, str] = {}
     used_track_ids: set[str] = set()
+
+    def materialized_track_id(kind: str) -> str:
+        """그 종류의 **첫 트랙** 이름. 없으면 옛 규칙대로 지어낸다."""
+        existing = track_ids.get(kind)
+        if existing is not None:
+            return existing
+        base = f"track_{kind}"
+        candidate = base
+        suffix = 2
+        while candidate in used_track_ids:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        track_ids[kind] = candidate
+        used_track_ids.add(candidate)
+        return candidate
+
+    # 세션의 트랙 목록(`session_tracks.py`가 쓰는 자리). 이름표를 **알아볼 수
+    # 있는 트랙**의 집합이 여기서 나온다 -- 목록에 없는 이름표는 지운 트랙이나
+    # 옛 흔적이므로 그 종류의 첫 트랙으로 내린다(재료는 장면에 그대로 있으니
+    # 클립이 사라지면 안 된다).
+    registry_kind_by_track_id: dict[str, str] = {}
+    first_registry_track_id_by_kind: dict[str, str] = {}
+    for entry in editing_session.get("tracks", []) if isinstance(editing_session.get("tracks"), list) else []:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = str(entry.get("track_id") or "").strip()
+        entry_kind = str(entry.get("kind") or "").strip().lower()
+        if not entry_id or not entry_kind:
+            continue
+        registry_kind_by_track_id[entry_id] = entry_kind
+        first_registry_track_id_by_kind.setdefault(entry_kind, entry_id)
+
+    def resolve_clip_track_id(kind: str, override: dict[str, Any]) -> str:
+        """클립이 실릴 트랙 이름. 이름표가 없거나 못 알아보면 첫 트랙."""
+        labelled = str(override.get("track_id") or "").strip()
+        if (
+            not labelled
+            or registry_kind_by_track_id.get(labelled) != kind
+            or labelled == first_registry_track_id_by_kind.get(kind)
+        ):
+            return materialized_track_id(kind)
+        return labelled
+
     for track in timeline.get("tracks", []):
         if not isinstance(track, dict):
             continue
@@ -499,7 +546,15 @@ def materialize_editing_session_timeline(
             # **겹칠 때만** 구분한다 -- 항상 접미사를 붙이면 지금 편집본(트랙
             # 하나)의 이름이 바뀌어 미리보기 캐시 지문이 깨진다.
             source_track_id = str(track.get("track_id") or "").strip() or track_type
-            existing_ids = {str(clip.get("clip_id")) for clip in tracks.get(track_type, [])}
+            # 이름 충돌은 **종류 전체**에서 본다. 렌더러는 클립 이름으로 입력을
+            # 찾으므로(`source_indices[clip_id]`) 바구니가 달라도 이름이 같으면
+            # 한 쪽이 가려진다.
+            existing_ids = {
+                str(clip.get("clip_id"))
+                for (bucket_kind, _bucket_id), bucket in tracks.items()
+                if bucket_kind == track_type
+                for clip in bucket
+            }
             for clip in clips:
                 clip_id = str(clip.get("clip_id") or "")
                 if clip_id in existing_ids:
@@ -521,7 +576,7 @@ def materialize_editing_session_timeline(
             # z-order를 어떻게 정할지(지금은 "늦게 시작한 것이 위", 캡컷은
             # "위 트랙이 위")가 정해져야 의미가 있고, 그건 이미 있는 편집본의
             # 결과 그림을 바꾸는 owner 결정이다.
-            tracks.setdefault(track_type, []).extend(clips)
+            tracks.setdefault((track_type, materialized_track_id(track_type)), []).extend(clips)
     export_overlays: list[dict[str, Any]] = []
     for overlay_index, raw_overlay in enumerate(timeline.get("export_overlays", [])):
         if not isinstance(raw_overlay, dict):
@@ -609,7 +664,7 @@ def materialize_editing_session_timeline(
                 for key in ("expected_content_sha256", "media_revision"):
                     if override.get(key):
                         clip[key] = override[key]
-                tracks.setdefault(track_type, []).append(clip)
+                tracks.setdefault((track_type, resolve_clip_track_id(track_type, override)), []).append(clip)
         for window_index, window in enumerate(_segment_content_windows(segment)):
             window_start = start + _number(window.get("start_offset_sec"))
             window_end = min(end, window_start + _number(window.get("duration_sec")))
@@ -633,7 +688,7 @@ def materialize_editing_session_timeline(
                     for key in ("expected_content_sha256", "media_revision"):
                         if payload.get(key):
                             clip[key] = payload[key]
-                    tracks.setdefault("overlay", []).append(clip)
+                    tracks.setdefault(("overlay", materialized_track_id("overlay")), []).append(clip)
                 else:
                     candidate = {
                         **payload,
@@ -695,20 +750,6 @@ def materialize_editing_session_timeline(
                     gap["end_sec"] = gap_end
                 materialized_gaps.append(gap)
 
-    def materialized_track_id(kind: str) -> str:
-        existing = track_ids.get(kind)
-        if existing is not None:
-            return existing
-        base = f"track_{kind}"
-        candidate = base
-        suffix = 2
-        while candidate in used_track_ids:
-            candidate = f"{base}_{suffix}"
-            suffix += 1
-        track_ids[kind] = candidate
-        used_track_ids.add(candidate)
-        return candidate
-
     # 장면의 전환을 그 장면을 **여는** 화면 클립에 싣는다.
     #
     # 장면 하나가 화면 클립 여러 개로 쪼개질 수 있다(override 창, 빈 구간).
@@ -720,7 +761,9 @@ def materialize_editing_session_timeline(
             continue
         opening = min(
             (
-                clip for clip in tracks.get("broll", [])
+                clip
+                for (bucket_kind, _bucket_id), bucket in tracks.items() if bucket_kind == "broll"
+                for clip in bucket
                 if str(clip.get("segment_id") or "") == segment_id
             ),
             key=lambda clip: _number(clip.get("start_sec")),
@@ -731,11 +774,11 @@ def materialize_editing_session_timeline(
 
     materialized["tracks"] = [
         {
-            "track_id": materialized_track_id(kind),
+            "track_id": track_id,
             "track_type": kind,
             "clips": clips,
         }
-        for kind, clips in tracks.items()
+        for (kind, track_id), clips in tracks.items()
         if clips
     ]
     materialized["gap_slots"] = materialized_gaps
