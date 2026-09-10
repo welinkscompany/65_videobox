@@ -67,10 +67,13 @@ export type InspectorAction =
   // 목소리 더빙. **옮겨 둔 자막을 대본으로 쓴다** -- 그래서 번역이 먼저다.
   | Readonly<{ kind: "dub-narration"; language: string; voiceSampleAssetId: string | null }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "explanation-card"; segmentId: string; title: string; body: string; text: string }>
-  // 사진의 자리·크기·움직임은 도형과 같은 프리셋이고, **고른 것만 실린다.**
+  // 사진의 자리·크기·움직임은 도형과 같은 프리셋이고, **넷 다 항상 실린다** --
+  // 화면은 이 넷의 지금 상태(`imagePresets`)를 늘 알고 있어 "말 안 함"이 없다.
+  // 값을 고르면 그 값, 안 고르면 `null`(안 고름으로 되돌린다)이 실린다(Task 2
+  // API 계약의 세 상태 중 "칸 없음"은 이 화면에서 안 쓴다).
   // `preserveSourceAudio`는 얹은 것이 영상일 때만 실린다(사진 target에는
   // 이 필드 자체가 없다 -- `target.fields.includes("preserveSourceAudio")`로 가른다).
-  | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom"; horizontal?: "left" | "center" | "right"; size?: "small" | "medium" | "large"; motion?: ShapeOverlayValue["motion"]; preserveSourceAudio?: boolean }>
+  | Readonly<{ kind: "save-overlay"; overlayKind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom" | null; horizontal?: "left" | "center" | "right" | null; size?: "small" | "medium" | "large" | null; motion?: ShapeOverlayValue["motion"] | null; preserveSourceAudio?: boolean }>
   | Readonly<{ kind: "save-overlay"; overlayKind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string }>
   // 정지 도형("여기를 보세요"). 프리셋만 보낸다 -- 자유 좌표는 범위 밖이다.
   | Readonly<{ kind: "save-overlay"; overlayKind: "shape"; segmentId: string; shape: ShapeOverlayValue["shape"]; vertical: ShapeOverlayValue["vertical"]; horizontal: ShapeOverlayValue["horizontal"]; size: ShapeOverlayValue["size"]; motion: ShapeOverlayValue["motion"] }>
@@ -1194,8 +1197,10 @@ export function InspectorControls({
           {/* 사진을 장면 위에 얹는 자리(owner 요청 2026-09-06 "사진을 우리 영상
               위에도 얹어서 움직이게"). 어휘는 도형과 **같은 목록**을 쓴다 --
               백엔드도 `overlay_shapes`의 목록 하나를 둘이 나눠 쓴다.
-              고르지 않은 칸은 요청에 싣지 않는다: 자산 목록의 `화면에 얹기`로
-              방금 얹은 사진이 아무것도 안 골랐는데 움직이면 안 된다. */}
+              이 저장 단추는 고르지 않은 칸도 `null`로 싣는다(Task 3) -- 그래야
+              한 번 골랐던 자리를 "안 고름"으로 되돌리는 저장이 먹힌다. (자산
+              목록의 `화면에 얹기`로 갓 얹은 사진은 이 단추를 거치지 않으므로
+              칸 자체가 안 실려 "아무것도 안 골랐는데 움직이는" 일은 없다.) */}
           {target.overlayKind === "image" ? (
             <>
               {/* 재검토 발견(2026-09-10): 위 <legend>은 target.label(사진일 때
@@ -1309,16 +1314,18 @@ export function InspectorControls({
             disabled={disabled || (target.overlayKind === "image" && !target.value.assetId)}
             onClick={() => {
               if (target.overlayKind === "explanation-card") emit({ kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId, title: overlayTitle, body: overlayBody, text: overlayText });
-              // 고른 프리셋만 싣는다. 빈칸을 기본값으로 채우면 owner가 고르지도
-              // 않은 자리·크기·움직임이 저장된다(`ImageOverlayRequest`는 넷을
-              // 선택으로 받는다).
+              // 넷 다 **항상** 싣는다 -- 화면에는 "말 안 함"이 없다. owner가
+              // 패널을 보고 저장을 누른 순간 넷 다 의사 표시가 끝난 것이다.
+              // 안 고른 칸을 빼놓으면(예전 방식) 서버는 "말 안 했다"로 읽어
+              // 옛 값을 그대로 지키므로, 안 고름으로 되돌리는 저장이 안 먹힌다
+              // (Task 2 API 계약: 칸 없음=유지, `null`=지움, 값=바꿈).
               else if (target.overlayKind === "image") emit({
                 kind: "save-overlay", overlayKind: target.overlayKind, segmentId: target.segmentId,
                 assetId: target.value.assetId, text: overlayText,
-                ...(imagePresets.vertical ? { vertical: imagePresets.vertical } : {}),
-                ...(imagePresets.horizontal ? { horizontal: imagePresets.horizontal } : {}),
-                ...(imagePresets.size ? { size: imagePresets.size } : {}),
-                ...(imagePresets.motion ? { motion: imagePresets.motion } : {}),
+                vertical: imagePresets.vertical ?? null,
+                horizontal: imagePresets.horizontal ?? null,
+                size: imagePresets.size ?? null,
+                motion: imagePresets.motion ?? null,
                 // 사진 target에는 이 칸 자체가 없다(`target.fields`) -- 안 실으면
                 // API가 `None`으로 읽어 "이미 켜 둔 값 그대로"로 처리한다.
                 ...(target.fields.includes("preserveSourceAudio") ? { preserveSourceAudio } : {}),

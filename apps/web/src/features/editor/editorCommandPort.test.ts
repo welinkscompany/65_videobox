@@ -263,6 +263,28 @@ describe("EditorCommandPort", () => {
     });
   });
 
+  // Task 3(2026-09-11): `null`은 "안 고름으로 지운다"는 뜻이라 `undefined`("말
+  // 안 함")와 다르다 -- 여기서 둘을 같이 걸러내면(예전 버그) 인스펙터가 지우려고
+  // 보낸 값이 이 자리에서 조용히 사라져 owner는 프리셋을 지울 방법이 없어진다.
+  it("lets a picture overlay preset be cleared back to 안 고름 with an explicit null", async () => {
+    const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
+
+    await port.applyOverlay({
+      kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품",
+      vertical: null, horizontal: "left", size: "small", motion: null,
+    });
+
+    expect(api.updateEditingSessionImageOverlay).toHaveBeenLastCalledWith("p", "s", "seg", {
+      asset_id: "asset-image",
+      text: "제품",
+      vertical: null,
+      horizontal: "left",
+      size: "small",
+      motion: null,
+      expected_revision: 7,
+    });
+  });
+
   it("routes a static shape overlay through its own revisioned endpoints", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
     await port.applyOverlay({ kind: "shape", segmentId: "seg", shape: "highlight_box", vertical: "top", horizontal: "right", size: "small" });

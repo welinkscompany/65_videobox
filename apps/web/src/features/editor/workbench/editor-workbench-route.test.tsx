@@ -2829,8 +2829,10 @@ describe("EditorWorkbenchRoute", () => {
         body: "본문", expected_revision: 7, text: "설명", title: "제목",
       }));
     } else if (fixture === "image") {
+      // Task 3: 넷 다 항상 실린다 -- 안 고른 것은 `null`로(손대지 않은 저장).
       await waitFor(() => expect(saveImage).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
         asset_id: "asset-image", expected_revision: 7, text: "이미지 설명",
+        vertical: null, horizontal: null, size: null, motion: null,
       }));
     } else {
       await waitFor(() => expect(saveTable).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
@@ -2867,8 +2869,10 @@ describe("EditorWorkbenchRoute", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "이 영상의 원래 소리도 함께 쓰기" }));
     fireEvent.click(screen.getByRole("button", { name: "얹은 영상 저장" }));
 
+    // Task 3: 넷 다 항상 실린다 -- 프리셋을 안 건드렸으니 전부 `null`(안 고름).
     await waitFor(() => expect(saveImage).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
       asset_id: "asset-image", expected_revision: 7, text: "영상 설명", preserve_source_audio: true,
+      vertical: null, horizontal: null, size: null, motion: null,
     }));
   });
 

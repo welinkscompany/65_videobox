@@ -873,6 +873,11 @@ describe("InspectorControls", () => {
         overlayKind: "image",
         segmentId: "segment-internal-current",
         text: "이미지 설명",
+        // Task 3: 넷 다 항상 실린다 -- 안 고른 것은 `null`로.
+        vertical: null,
+        horizontal: null,
+        size: null,
+        motion: null,
       },
     },
     {
@@ -980,7 +985,11 @@ describe("InspectorControls", () => {
     expect(screen.queryByLabelText(/초|시간|좌표/)).toBeNull();
   });
 
-  it("does not send a preset the owner never chose for a picture", () => {
+  // Task 3(2026-09-11)에서 계약이 바뀌었다: 안 고른 자리는 이제 열쇠를 아예
+  // 빼는 게 아니라 `null`로 싣는다(예전 이름표 "does not send"는 새 계약과
+  // 반대말이 됐다 -- 칸 없음=유지, `null`=지움이 Task 2 API 계약이라, 안 고른
+  // 칸을 안 실으면 화면에서 프리셋을 지울 방법이 없어진다).
+  it("sends every unchosen picture preset as null so a clear always reaches the request", () => {
     const onAction = renderControls({ target: pictureTarget });
 
     // 넷 다 "고르지 않음"에서 시작한다. 손대지 않은 저장은 그림을 옮기지 않는다.
@@ -996,7 +1005,10 @@ describe("InspectorControls", () => {
       overlayKind: "image",
       segmentId: "segment-internal-current",
       text: "",
+      vertical: null,
+      horizontal: null,
       size: "large",
+      motion: null,
     });
   });
 
@@ -1012,6 +1024,35 @@ describe("InspectorControls", () => {
     expect((screen.getByLabelText("가로 위치") as HTMLSelectElement).value).toBe("right");
     expect((screen.getByLabelText("크기") as HTMLSelectElement).value).toBe("medium");
     expect((screen.getByLabelText("움직임") as HTMLSelectElement).value).toBe("fade_in");
+  });
+
+  // Task 3 (2026-09-11): 이미 저장된 자리를 화면에서 "가운데"(안 고름)로 되돌리면
+  // 그 칸은 `null`로 실려야 한다 -- 칸을 아예 안 실으면(예전 방식) 서버는 "말 안
+  // 했다"로 읽어 옛 값을 그대로 지킨다(Task 2 계약). 그러면 창작자는 화면에서
+  // 프리셋을 지울 방법이 없어진다.
+  it("lets the owner clear a saved picture preset back to 안 고름", () => {
+    const onAction = renderControls({
+      target: {
+        ...pictureTarget,
+        value: { assetId: "asset-internal-image", text: "", vertical: "top", horizontal: "left", size: "small", motion: "fade_in" },
+      },
+    });
+
+    // "가운데"는 세로 위치의 안 고름 자리다(옵션 값 자체가 IMAGE_PRESET_UNSET).
+    fireEvent.change(screen.getByLabelText("세로 위치"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "이미지 저장" }));
+
+    expect(onAction).toHaveBeenCalledWith({
+      assetId: "asset-internal-image",
+      kind: "save-overlay",
+      overlayKind: "image",
+      segmentId: "segment-internal-current",
+      text: "",
+      vertical: null,
+      horizontal: "left",
+      size: "small",
+      motion: "fade_in",
+    });
   });
 
   // Task 3: 얹은 것이 영상이면 b-roll과 **같은 문구**의 원본 소리 칸이 뜬다.

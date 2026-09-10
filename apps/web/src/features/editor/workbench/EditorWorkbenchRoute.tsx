@@ -1133,14 +1133,17 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (action.kind === "clear-overlay") return port.clearOverlay({ kind: action.overlayKind, segmentId: action.segmentId });
       if (action.kind === "set-caption-language") return port.setCaptionLanguage({ language: action.language });
       if (action.overlayKind === "explanation-card") return port.applyOverlay({ kind: action.overlayKind, segmentId: action.segmentId, title: action.title, body: action.body, text: action.text });
-      // 사진의 자리·크기·움직임은 **고른 것만** 넘긴다. 안 고른 칸을 채우면
-      // owner가 고르지 않은 값이 저장된다(`ImageOverlayRequest`는 넷을 선택으로 받는다).
+      // 사진의 자리·크기·움직임은 인스펙터가 이미 세 상태(유지/지움/바꿈)로
+      // 갈라 보낸다(Task 3, `InspectorControls.tsx`). 여기서는 그 값을 **그대로
+      // 흘리기만** 한다 -- `? :`(참·거짓) 대신 `!== undefined`로 걸러야 한다.
+      // 참·거짓 판정은 `null`(안 고름으로 지움)까지 거짓으로 보고 빼먹어서,
+      // 인스펙터가 지우려고 보낸 값이 이 다리에서 조용히 사라지는 버그였다.
       if (action.overlayKind === "image") return port.applyOverlay({
         kind: action.overlayKind, segmentId: action.segmentId, assetId: action.assetId, text: action.text,
-        ...(action.vertical ? { vertical: action.vertical } : {}),
-        ...(action.horizontal ? { horizontal: action.horizontal } : {}),
-        ...(action.size ? { size: action.size } : {}),
-        ...(action.motion ? { motion: action.motion } : {}),
+        ...(action.vertical !== undefined ? { vertical: action.vertical } : {}),
+        ...(action.horizontal !== undefined ? { horizontal: action.horizontal } : {}),
+        ...(action.size !== undefined ? { size: action.size } : {}),
+        ...(action.motion !== undefined ? { motion: action.motion } : {}),
         // 사진 target에는 이 칸이 없다(`action.preserveSourceAudio === undefined`) --
         // 안 실으면 API가 "이미 켜 둔 값 그대로"로 읽는다.
         ...(action.preserveSourceAudio !== undefined ? { preserveSourceAudio: action.preserveSourceAudio } : {}),

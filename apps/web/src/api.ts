@@ -710,15 +710,15 @@ export type ExplanationCardRequest = RevisionedEditingSessionMutation & {
 } & OptionalYujinCandidateAttestation;
 
 // 사진 오버레이. 자리·크기·움직임은 도형과 **같은 프리셋**을 쓰고 넷 다
-// **선택**이다 -- 안 보내면 이 기능이 생기기 전과 똑같이 저장된다
-// (`models.ImageOverlayRequest`). 그래서 화면도 안 고른 값을 채워 보내지 않는다.
+// **세 상태**를 받는다(`models.ImageOverlayRequest`) -- 칸 자체가 없으면
+// 지금 저장된 값을 유지, `null`이면 안 고름으로 지움, 값이면 그 값으로 바꿈.
 export type ImageOverlayRequest = RevisionedEditingSessionMutation & {
   asset_id: string;
   text: string;
-  vertical?: "top" | "middle" | "bottom";
-  horizontal?: "left" | "center" | "right";
-  size?: "small" | "medium" | "large";
-  motion?: ShapeOverlayMotion;
+  vertical?: "top" | "middle" | "bottom" | null;
+  horizontal?: "left" | "center" | "right" | null;
+  size?: "small" | "medium" | "large" | null;
+  motion?: ShapeOverlayMotion | null;
   // 얹은 영상의 원본 소리. b-roll의 같은 칸과 이름이 같다(개념을 두 벌로
   // 만들지 않는다). 안 보내면(`undefined`) 백엔드가 `None`으로 읽어 이미
   // 켜 둔 값을 그대로 둔다 -- `false`를 보내는 것과는 다르다.

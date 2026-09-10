@@ -7,11 +7,13 @@ type MediaCommand = Readonly<{ kind: MediaKind; segmentId: string; assetId: stri
 type CandidateAttestation = Readonly<{ proposalId: string; candidateId: string }>;
 type OverlayApply =
   | Readonly<{ kind: "explanation-card"; segmentId: string; title: string; body: string; text: string; attestation?: CandidateAttestation }>
-  // 사진의 자리·크기·움직임은 도형과 같은 프리셋이고 **넷 다 선택**이다.
-  // 안 고른 것은 요청에 열쇠 자체를 싣지 않는다(`ImageOverlayPresets` 설명 참고).
+  // 사진의 자리·크기·움직임은 도형과 같은 프리셋이고 **세 상태**를 받는다
+  // (Task 2 API 계약): 안 보내면(`undefined`) 지금 값 유지, `null`이면
+  // 안 고름으로 지움, 값이면 그 값으로 바꿈. `chosenImagePresets`가 이
+  // 세 상태를 그대로 흘린다 -- `undefined`만 걸러내고 `null`은 통과시킨다.
   // `preserveSourceAudio`도 같은 규칙 -- `undefined`면(사진 target·손대지
   // 않은 저장 모두) 요청에 안 실려서 API가 "이미 켜 둔 값 그대로"로 읽는다.
-  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom"; horizontal?: "left" | "center" | "right"; size?: "small" | "medium" | "large"; motion?: ShapeOverlayMotion; preserveSourceAudio?: boolean; attestation?: CandidateAttestation }>
+  | Readonly<{ kind: "image"; segmentId: string; assetId: string; text: string; vertical?: "top" | "middle" | "bottom" | null; horizontal?: "left" | "center" | "right" | null; size?: "small" | "medium" | "large" | null; motion?: ShapeOverlayMotion | null; preserveSourceAudio?: boolean; attestation?: CandidateAttestation }>
   | Readonly<{ kind: "table"; segmentId: string; columns: string[]; rows: string[][]; text: string; attestation?: CandidateAttestation }>
   // 정지 도형과 아이콘. 유진 attestation 경로는 이번 범위에서 열지 않는다(화면 수동 얹기만).
   | Readonly<{ kind: "shape"; segmentId: string; shape: ShapeOverlayShape; vertical: "top" | "middle" | "bottom"; horizontal: "left" | "center" | "right"; size: "small" | "medium" | "large"; motion: ShapeOverlayMotion }>;
@@ -113,15 +115,17 @@ function captionStyle(style: EditorCaptionStyle): CaptionStyleMutationRequest["s
   return { font_family: style.fontFamily, font_size_px: style.fontSizePx, text_color: style.textColor, outline_color: style.outlineColor, outline_width_px: style.outlineWidthPx, background_color: style.backgroundColor, position_x_percent: style.positionXPercent, position_y_percent: style.positionYPercent, horizontal_align: style.horizontalAlign, safe_area_enabled: style.safeAreaEnabled, shadow_blur_px: style.shadowBlurPx, bold: style.bold, italic: style.italic, letter_spacing_px: style.letterSpacingPx };
 }
 
-/** 고른 사진 프리셋만 골라낸다. **안 고른 것은 열쇠 자체를 안 싣는다** --
- *  `undefined`로 실으면 여기 비교는 통과하는데 요청 본문이 달라지고, 백엔드는
- *  "안 보냄"과 "보냄"을 다르게 저장한다. */
+/** 실제로 말한 사진 프리셋만 골라낸다. **`undefined`("말 안 함")만 열쇠 자체를
+ *  뺀다 -- `null`("안 고름으로 지움")은 그대로 흘려야 한다.** 여기서 `null`까지
+ *  걸러내면(예전 버그) 화면이 지우려고 보낸 값이 이 자리에서 조용히 사라져
+ *  백엔드에는 "말 안 함"으로 도착하고, 그러면 옛 값이 그대로 남아 owner는
+ *  "안 고름"으로 되돌릴 방법이 없어진다(Task 2 API 계약의 세 상태 중 가운데). */
 function chosenImagePresets(input: Readonly<{
-  vertical?: string; horizontal?: string; size?: string; motion?: string;
-}>): Record<string, string> {
+  vertical?: string | null; horizontal?: string | null; size?: string | null; motion?: string | null;
+}>): Record<string, string | null> {
   return Object.fromEntries(
     Object.entries({ vertical: input.vertical, horizontal: input.horizontal, size: input.size, motion: input.motion })
-      .filter((entry): entry is [string, string] => entry[1] !== undefined && entry[1] !== null),
+      .filter((entry): entry is [string, string | null] => entry[1] !== undefined),
   );
 }
 
