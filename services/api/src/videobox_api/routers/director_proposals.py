@@ -207,6 +207,12 @@ def _image_overlays_by_segment(session: dict) -> tuple[tuple[str, str], ...]:
 
     안 걸린 프리셋은 `-`로 적는다. 빈칸을 기본값 이름으로 채우면 유진이 창작자가
     고른 적 없는 자리를 고른 것으로 읽는다.
+
+    **소리 상태도 같은 줄에 싣는다**(Task 4, 2026-09-11). 안 그러면 "얹은 영상
+    소리 꺼줘"에 유진이 "소리가 켜져 있지 않습니다"라고 답한다 -- 켜져
+    있는데도(전환·색감이 이미 두 번 겪은 함정). 렌더러가 없는 열쇠를 `False`로
+    읽는 것과 자국을 맞추려고(`ffmpeg_final_renderer.py`), 저장된 값이 없을
+    때도 `off`로 적는다.
     """
     found: list[tuple[str, str]] = []
     for segment in session.get("segments", []):
@@ -216,7 +222,10 @@ def _image_overlays_by_segment(session: dict) -> tuple[tuple[str, str], ...]:
             if not isinstance(overlay, dict) or overlay.get("overlay_type") != "image_overlay":
                 continue
             presets = "/".join(str(overlay.get(key) or "-") for key in ("vertical", "horizontal", "size", "motion"))
-            found.append((str(segment["segment_id"]), f"{str(overlay.get('asset_id') or '')}({presets})"))
+            sound_state = "on" if bool(overlay.get("preserve_source_audio", False)) else "off"
+            found.append(
+                (str(segment["segment_id"]), f"{str(overlay.get('asset_id') or '')}({presets}, sound {sound_state})")
+            )
     return tuple(found)
 
 

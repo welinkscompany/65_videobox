@@ -284,8 +284,10 @@ def test_the_api_actually_reads_what_is_on_the_screen_into_that_field() -> None:
         motion="fade_in",
     )
 
+    # 소리를 안 골랐으니(Task 4) `off`다 -- 렌더러가 빈 열쇠를 `False`로 읽는
+    # 것과 같은 자국(`ffmpeg_final_renderer.py`의 `preserve_source_audio` 기본값).
     assert _image_overlays_by_segment(session) == (
-        ("seg-1", "asset-photo(bottom/right/small/fade_in)"),
+        ("seg-1", "asset-photo(bottom/right/small/fade_in, sound off)"),
     )
 
 
@@ -298,7 +300,7 @@ def test_a_photo_placed_without_presets_shows_up_as_blanks_not_as_defaults() -> 
         session=_session(), segment_id="seg-1", asset_id="asset-photo", text="",
     )
 
-    assert _image_overlays_by_segment(session) == (("seg-1", "asset-photo(-/-/-/-)"),)
+    assert _image_overlays_by_segment(session) == (("seg-1", "asset-photo(-/-/-/-, sound off)"),)
 
 
 def test_yujin_can_tell_a_photo_from_a_video_in_the_asset_list() -> None:
@@ -363,6 +365,102 @@ def test_a_photo_overlay_keeps_the_old_wording_with_no_video_signal() -> None:
 
     assert "asset-photo(bottom/right/small/fade_in)" in prompt
     assert "asset-photo(video," not in prompt
+
+
+def test_yujin_can_turn_on_the_original_sound_when_laying_something_over() -> None:
+    """"소리도 켜서 얹어줘" -- Task 4(2026-09-11). 이름은 b-roll과 같은 칸을 그대로
+    쓴다(`preserve_source_audio`, `editing_session.py:1582`). 새 칸을 만들지 않는다.
+    """
+    accepted = interpret_yujin_editing_request(
+        _response(asset_id="asset-photo", preserve_source_audio=True), _context()
+    )
+
+    assert accepted.status == "candidate_only", accepted.reason
+    assert accepted.proposal is not None
+    operation = accepted.proposal.operations[0]
+    assert operation.preserve_source_audio is True
+
+
+def test_turning_on_the_sound_actually_reaches_the_stored_overlay() -> None:
+    """윗 시험은 명령이 값을 들고 있는지만 잰다 -- 실제로 세션에 닿는지는 따로 잰다."""
+    proposal = interpret_yujin_editing_request(
+        _response(asset_id="asset-photo", preserve_source_audio=True), _context()
+    ).proposal
+    assert proposal is not None
+
+    applied = _apply_yujin_editing_operations(session=_session(), operations=tuple(proposal.operations))
+
+    overlay = next(
+        item
+        for item in applied["segments"][0]["visual_overlays"]
+        if item.get("overlay_type") == "image_overlay"
+    )
+    assert overlay["preserve_source_audio"] is True
+
+
+def test_not_mentioning_sound_leaves_the_stored_value_alone() -> None:
+    """소리를 말하지 않으면 저장된 값을 안 건드린다 -- `None`은 '고르지 않음'이다.
+
+    이걸 빈칸을 `False`로 채워 넣으면, 소리를 이미 켜 둔 오버레이에 자리만
+    옮겨 달라고 한 창작자가 소리를 잃는다.
+    """
+    session = update_segment_image_overlay(
+        session=_session(), segment_id="seg-1", asset_id="asset-photo", text="",
+        preserve_source_audio=True,
+    )
+    proposal = interpret_yujin_editing_request(
+        _response(asset_id="asset-photo", horizontal="left"), _context()
+    ).proposal
+    assert proposal is not None
+
+    applied = _apply_yujin_editing_operations(session=session, operations=tuple(proposal.operations))
+
+    overlay = next(
+        item
+        for item in applied["segments"][0]["visual_overlays"]
+        if item.get("overlay_type") == "image_overlay"
+    )
+    assert overlay["preserve_source_audio"] is True
+    assert overlay["horizontal"] == "left"
+
+
+def test_the_prompt_tells_yujin_sound_can_be_switched_on_and_off() -> None:
+    """안내문을 안 고치면 받을 수 있게 배선해도 유진은 안 고른다 -- 전환·색감·
+    자산 목록에서 이미 세 번 겪었다."""
+    prompt = _editing_prompt(instruction="사진 좀 얹어줘", context=_context())
+
+    assert "preserve_source_audio" in prompt
+
+
+def test_the_prompt_tells_yujin_whether_the_overlay_sound_is_on_right_now() -> None:
+    """""얹은 영상 소리 꺼줘"가 통하려면 **지금 켜져 있다는 것**이 실려야 한다.
+
+    목록만 주고 지금 값을 안 주면 유진은 "소리가 켜져 있지 않습니다"라고
+    답한다 -- 켜져 있는데도. 전환·색감·자산 목록과 같은 함정이다.
+    """
+    prompt = _editing_prompt(
+        instruction="얹은 영상 소리 꺼줘",
+        context=_context(
+            image_overlays_by_segment=(("seg-1", "asset-clip(bottom/right/small/fade_in, sound on)"),),
+        ),
+    )
+
+    assert "sound on" in prompt
+
+
+def test_the_api_reads_the_sound_state_into_that_field_too() -> None:
+    """윗 시험은 값을 손으로 넣은 것이라, 실제로 읽어 오는지는 못 잰다 --
+    "부품은 있는데 부르는 자리가 없다"는 이 저장소가 반복해서 겪은 함정이다."""
+    from videobox_api.routers.director_proposals import _image_overlays_by_segment
+
+    session = update_segment_image_overlay(
+        session=_session(), segment_id="seg-1", asset_id="asset-photo", text="",
+        preserve_source_audio=True,
+    )
+
+    assert _image_overlays_by_segment(session) == (
+        ("seg-1", "asset-photo(-/-/-/-, sound on)"),
+    )
 
 
 def test_the_full_prompt_does_not_contradict_itself_about_what_can_be_laid_over() -> None:

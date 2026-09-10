@@ -52,10 +52,11 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_picture_cleanup"}, "segment_id": {"type": "string"}, "stabilize": {"type": "boolean"}, "reduce_noise": {"type": "boolean"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_sound_cleanup"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["bgm", "sfx"]}, "normalize_loudness": {"type": "boolean"}, "denoise": {"type": "boolean"}}, "required": ["intent", "segment_id", "media_type"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_scene_transform"}, "segment_id": {"type": "string"}, "zoom": {"type": "number"}, "position_x_percent": {"type": "number"}, "position_y_percent": {"type": "number"}, "rotation_deg": {"type": "number"}}, "required": ["intent", "segment_id"]},
-        # 사진을 영상 **위에** 얹는다. 프리셋 넷은 전부 선택이다 -- 창작자가
-        # 말한 것만 싣게 하려고 required에 안 적는다(빈칸을 채우면 이미 맞춰 둔
-        # 자리가 조용히 움직인다).
-        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_image_overlay"}, "segment_id": {"type": "string"}, "asset_id": {"type": "string"}, "vertical": {"enum": sorted(SHAPE_OVERLAY_VERTICALS)}, "horizontal": {"enum": sorted(SHAPE_OVERLAY_HORIZONTALS)}, "size": {"enum": sorted(SHAPE_OVERLAY_SIZES)}, "motion": {"enum": list(SHAPE_OVERLAY_MOTIONS)}}, "required": ["intent", "segment_id", "asset_id"]},
+        # 사진을 영상 **위에** 얹는다. 프리셋 넷과 소리(Task 4, 2026-09-11)는 전부
+        # 선택이다 -- 창작자가 말한 것만 싣게 하려고 required에 안 적는다(빈칸을
+        # 채우면 이미 맞춰 둔 자리가 조용히 움직인다. 소리도 같다 -- 말 안 하면
+        # 이미 켜 둔 소리를 껐다 켰다 하지 않는다).
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "set_image_overlay"}, "segment_id": {"type": "string"}, "asset_id": {"type": "string"}, "vertical": {"enum": sorted(SHAPE_OVERLAY_VERTICALS)}, "horizontal": {"enum": sorted(SHAPE_OVERLAY_HORIZONTALS)}, "size": {"enum": sorted(SHAPE_OVERLAY_SIZES)}, "motion": {"enum": list(SHAPE_OVERLAY_MOTIONS)}, "preserve_source_audio": {"type": "boolean"}}, "required": ["intent", "segment_id", "asset_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_image_overlay"}, "segment_id": {"type": "string"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "apply_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}, "asset_id": {"type": "string"}}, "required": ["intent", "segment_id", "media_type", "asset_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}}, "required": ["intent", "segment_id", "media_type"]},
@@ -213,8 +214,17 @@ def _image_overlay_catalogue(context: YujinEditingContext) -> str:
         # 있던 결함이다. 얹는 문장과 같은 말 "보이는 자산(사진·영상)"을
         # 그대로 써서 둘이 같은 규칙을 말하게 한다.
         "얹은 보이는 자산(사진·영상)을 빼는 것은 remove_image_overlay다. "
+        # **소리도 켜고 끌 수 있다(Task 4, 2026-09-11).** 얹은 것이 영상이면
+        # 원본 소리를 완성본에 실을지 preserve_source_audio(true/false)로
+        # 고른다 -- b-roll의 같은 칸을 그대로 빌린 것이라 새 낱말이 아니다.
+        # 말 안 하면 지금 값 그대로 둔다(꺼진 소리를 조용히 켜지 않는다).
+        "얹은 것의 원본 소리를 실을지는 preserve_source_audio(true/false)로 고른다 -- "
+        "말하지 않으면 지금 상태 그대로 둔다. "
         # **지금 얹힌 것도 준다.** 목록과 한 쌍이다. 얹힌 것이 영상이면
-        # `_overlay_entry`가 그 앞에 `video, `를 심는다.
+        # `_overlay_entry`가 그 앞에 `video, `를 심고, 소리가 켜져 있는지도
+        # 함께 온다(`sound on`/`sound off`) -- 이게 없으면 "얹은 영상 소리
+        # 꺼줘"에 유진이 "소리가 켜져 있지 않습니다"라고 답한다, 켜져
+        # 있는데도(전환·색감과 같은 함정).
         f"지금 얹힌 것: {', '.join(_overlay_entry(sid, info) for sid, info in context.image_overlays_by_segment) or '없음'}."
     )
 

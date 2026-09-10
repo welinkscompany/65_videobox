@@ -203,6 +203,9 @@ class SetImageOverlayOperation(_SegmentOperation):
 
     승인 범위는 도형과 같다(2026-08-20 승인 5항): 좌표(px/%)·초 단위·키프레임은
     밖이다. 그래서 여기에 그런 칸을 더하지 않는다.
+
+    `preserve_source_audio`(Task 4, 2026-09-11)는 얹은 영상의 원본 소리를 켤지다 --
+    프리셋 넷과 같은 선택 규칙을 따른다.
     """
 
     intent: Literal["set_image_overlay"]
@@ -211,6 +214,11 @@ class SetImageOverlayOperation(_SegmentOperation):
     horizontal: str | None = Field(default=None, min_length=1, max_length=32)
     size: str | None = Field(default=None, min_length=1, max_length=32)
     motion: str | None = Field(default=None, min_length=1, max_length=32)
+    #: 얹은 영상의 원본 소리를 완성본에 실을지(Task 4, 2026-09-11). 이름은
+    #: b-roll과 같은 칸을 그대로 빌린다(`editing_session.py:1582`) -- 같은
+    #: 개념을 두 벌로 만들지 않는다. 프리셋 넷과 같은 규칙: `None`은 '고르지
+    #: 않음'이라 저장된 값을 안 건드리고, 렌더러는 없는 열쇠를 `False`로 읽는다.
+    preserve_source_audio: bool | None = None
 
 
 class RemoveImageOverlayOperation(_SegmentOperation):

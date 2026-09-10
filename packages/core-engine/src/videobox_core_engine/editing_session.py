@@ -1020,6 +1020,22 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
         elif isinstance(operation, SetImageOverlayOperation):
             # 화면이 쓰는 것과 **같은 함수**다. 안 준 프리셋은 그 함수가 열쇠
             # 자체를 안 적어서, 프리셋 없이 얹어 둔 옛 오버레이와 자국이 같다.
+            #
+            # `preserve_source_audio`는 **먼저 옛 값을 읽어서 채운다**
+            # (Task 4, 2026-09-11) -- 넷과 다른 이유다. `update_segment_image_overlay`는
+            # 오버레이 전체를 다시 쓰므로, 유진이 소리를 말하지 않고 자리만
+            # 옮기면 `None`을 그대로 내려보내는 순간 이미 켜 둔 소리가
+            # 빈 열쇠로 사라진다. 넷(자리·크기·움직임)은 처음 얹을 때 안
+            # 고르면 "정중앙·안 움직임"으로 읽혀도 무해하지만, 소리는
+            # 꺼짐/켜짐이 뚜렷한 상태라 조용히 꺼지면 창작자가 알아채기
+            # 어렵다.
+            resolved_preserve_source_audio = (
+                operation.preserve_source_audio
+                if operation.preserve_source_audio is not None
+                else _current_image_overlay_preserve_source_audio(
+                    session=working, segment_id=operation.segment_id
+                )
+            )
             working = update_segment_image_overlay(
                 session=working,
                 segment_id=operation.segment_id,
@@ -1031,6 +1047,7 @@ def _apply_yujin_editing_operations(*, session: dict[str, Any], operations: tupl
                 horizontal=operation.horizontal,
                 size=operation.size,
                 motion=operation.motion,
+                preserve_source_audio=resolved_preserve_source_audio,
             )
         elif isinstance(operation, RemoveImageOverlayOperation):
             working = remove_segment_image_overlay(session=working, segment_id=operation.segment_id)
@@ -1923,6 +1940,32 @@ def _iter_matching_overlay_containers(
             if visible_match:
                 containers.append(window)
     return containers
+
+
+def _current_image_overlay_preserve_source_audio(
+    *, session: dict[str, Any], segment_id: str,
+) -> bool | None:
+    """지금 저장된 사진 오버레이의 `preserve_source_audio`를 읽는다.
+
+    `update_segment_image_overlay`는 오버레이 **전체를 다시 쓴다**
+    (`_upsert_overlay_list`가 옛 것을 지우고 새 payload를 붙인다). 유진이
+    소리를 말하지 않고 자리·크기만 고치면(Task 4, 2026-09-11) 새 payload에는
+    `preserve_source_audio` 열쇠가 아예 없으니, 쓰기 전에 옛 값을 먼저 읽어야
+    이미 켜 둔 소리가 조용히 꺼지지 않는다. `editing_session_and_regeneration.py`의
+    같은 이름 메서드와 같은 이유·같은 찾기 규칙(`_iter_matching_overlay_containers`)을
+    쓴다 -- 그 파일이 이 모듈을 임포트하므로(반대 방향은 순환 임포트) 여기 둔다.
+    """
+    equivalent = _equivalent_overlay_types("image_overlay")
+    for container in _iter_matching_overlay_containers(session, segment_id):
+        overlays = container.get("visual_overlays")
+        if not isinstance(overlays, list):
+            continue
+        for overlay in overlays:
+            if isinstance(overlay, dict) and str(overlay.get("overlay_type") or "") in equivalent:
+                value = overlay.get("preserve_source_audio")
+                if isinstance(value, bool):
+                    return value
+    return None
 
 
 def _upsert_segment_overlay(
