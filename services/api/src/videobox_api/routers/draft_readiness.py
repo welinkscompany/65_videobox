@@ -87,11 +87,15 @@ def build_draft_readiness_router(
     def narration_options(project_id: str) -> dict[str, object]:
         try:
             allowed = {"raw_video", "narration_audio"}
+            # **연결이 있을 때만 칸을 만든다.** 자료실에 등록된 적 없는 자산
+            # (녹음 파일, 이번 변경 이전에 올린 영상)은 예전과 **한 글자도
+            # 다르지 않은** 응답을 받는다 -- 이 저장소가 없는 값은 칸 자체를
+            # 안 만드는 관례를 쓴다(세션 저장 화이트리스트도 같은 방식).
             return {"assets": [
                 {
                     "asset_id": item["asset_id"],
                     "asset_type": item["asset_type"],
-                    "library_asset_id": item.get("metadata", {}).get("library_asset_id"),
+                    **({"library_asset_id": library_asset_id} if (library_asset_id := item.get("metadata", {}).get("library_asset_id")) else {}),
                 }
                 for item in store.list_assets(project_id=project_id) if item["asset_type"] in allowed
             ]}
