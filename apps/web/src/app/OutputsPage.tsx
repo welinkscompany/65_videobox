@@ -20,6 +20,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Input } from "../components/ui/input";
 import { VariantOutputCard } from "../features/outputs/VariantOutputCard";
 import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../features/outputs/variantOutputState";
+// "지금 편집본의 마스터 완성본"을 고르는 판정은 여기서 새로 짜지 않는다 --
+// `ExportPopover`와 같은 규칙 하나를 나눠 쓴다(task-1-report.md 리뷰 코멘트).
+// 이 파일이 원래 규칙의 출처였고, 그 출처가 규칙과 갈라지면 다시 같은 사고가 난다.
+import { isMasterFinalRenderCurrent, selectMasterFinalJob, selectTimelineJob } from "../features/outputs/masterFinalRender";
 
 type ExactPreviewState = "current" | "pending" | "running" | "failed" | "stale" | "unavailable" | "unknown";
 
@@ -284,11 +288,7 @@ function needsFinalFailureFallback(
   const next = captureFinalRecoverySnapshot(state);
   const hasNewCurrentArtifact = (
     state.finalRender?.status === "succeeded" &&
-    state.finalRender.render?.is_current === true &&
-    state.session?.project_id === projectId &&
-    state.finalRender.render.timeline_id === state.session.timeline_id &&
-    state.finalRender.render.source_session_id === state.session.session_id &&
-    state.finalRender.render.source_session_revision === state.session.session_revision &&
+    isMasterFinalRenderCurrent(state.finalRender.render, state.session, projectId) &&
     next.artifactState !== previous.artifactState
   );
   return !(hasNewInFlightJob(state.finalJobs, previous) || hasNewCurrentArtifact);
@@ -472,14 +472,12 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           options?.jobs ? Promise.resolve(options.jobs) : api.listJobs(refreshProjectId),
         ]);
       if (!isCurrentRequest()) return;
-      const timelineJob = sharedRead
-        ? sharedRead.job
-        : session
-          ? mostRecentJob(jobs.filter((job) => job.status === "succeeded" && job.output_ref === session.timeline_id), "timeline_build")
-          : null;
+      const timelineJob = sharedRead ? sharedRead.job : selectTimelineJob(jobs, session);
       const subtitleRecord = timelineJob ? mostRecentJob(jobs, "subtitle_render", timelineJob.job_id) : null;
       const finalJobs = timelineJob ? jobs.filter((job) => job.job_type === "final_render" && job.input_ref === timelineJob.job_id) : [];
-      const finalJob = timelineJob ? mostRecentJob(finalJobs, "final_render") : mostRecentJob(jobs, "final_render");
+      // 이 세션의 타임라인 작업을 못 찾아도(옛 기록 등) 완성본이 있으면 그걸
+      // 준다 -- `selectMasterFinalJob`이 그 폴백까지 포함한 같은 규칙이다.
+      const finalJob = selectMasterFinalJob(jobs, timelineJob?.job_id ?? null);
       const capcutJobs = timelineJob ? jobs.filter((job) => job.job_type === "capcut_draft_export" && job.input_ref === timelineJob.job_id) : [];
       const capcutJob = timelineJob ? mostRecentJob(capcutJobs, "capcut_draft_export") : null;
       let exactPreviewReadFailed = false;
@@ -607,14 +605,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   // 아래쪽 로딩/오류 이른 반환보다 앞에 둔다.
   useEffect(() => {
     const rehydrateFinalRender = currentState?.finalRender;
-    const rehydrateSession = currentState?.session;
+    const rehydrateSession = currentState?.session ?? null;
     const isRehydratableFinal = rehydrateFinalRender?.status === "succeeded" &&
-      rehydrateFinalRender.render?.is_current === true &&
-      rehydrateSession != null &&
-      rehydrateSession.project_id === projectId &&
-      rehydrateFinalRender.render.timeline_id === rehydrateSession.timeline_id &&
-      rehydrateFinalRender.render.source_session_id === rehydrateSession.session_id &&
-      rehydrateFinalRender.render.source_session_revision === rehydrateSession.session_revision;
+      isMasterFinalRenderCurrent(rehydrateFinalRender.render, rehydrateSession, projectId);
     const jobId = rehydrateFinalRender?.job_id;
     const rehydrationKey = jobId ? `${projectId}:${jobId}` : null;
     if (!isRehydratableFinal || !jobId || previewShareRehydratedKey.current === rehydrationKey) return;
@@ -751,12 +744,8 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   );
   const staleSubtitle = subtitle?.status === "succeeded" && Boolean(subtitle.subtitle) && !currentSubtitle;
   const finalRender = currentState?.finalRender;
-  const currentFinal = finalRender?.status === "succeeded" && finalRender.render?.is_current === true && currentSession != null && (
-    currentSession.project_id === projectId &&
-      finalRender.render.timeline_id === currentSession.timeline_id &&
-      finalRender.render.source_session_id === currentSession.session_id &&
-      finalRender.render.source_session_revision === currentSession.session_revision
-  );
+  const currentFinal = finalRender?.status === "succeeded" &&
+    isMasterFinalRenderCurrent(finalRender.render, currentSession ?? null, projectId);
   const staleFinal = finalRender?.status === "succeeded" && Boolean(finalRender.render) && !currentFinal;
   const capcutJobs = currentState?.capcutJobs ?? [];
   const hasPendingCapcut = capcutJobs.some((job) => job.status === "pending" || job.status === "running");

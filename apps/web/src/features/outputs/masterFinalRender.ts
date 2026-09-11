@@ -51,23 +51,38 @@ export function selectTimelineJob(
 }
 
 /** 위 타임라인 작업의 결과물을 가리키는 `final_render` 중 가장 최근 것.
- *  가로·세로 변형본은 `input_ref`가 달라서 여기 걸리지 않는다. */
+ *  가로·세로 변형본은 `input_ref`가 달라서 여기 걸리지 않는다.
+ *
+ *  `timelineJobId`가 없을 때(이 세션의 타임라인 작업을 목록에서 못 찾은
+ *  경우) `null`을 주면 안 된다 -- `OutputsPage.tsx:482`가 같은 상황에서
+ *  `input_ref` 필터 없이 전체 `final_render` 중 최신으로 폴백한다. 여기서
+ *  `null`을 주면 두 화면이 갈라진다: 화면은 완성본을 보여 주는데 내보내기
+ *  팝오버는 "아직 안 만들었다"고 말하는 사고(2026-09-11 리뷰 확인). */
 export function selectMasterFinalJob(
   jobs: readonly JobRecord[],
   timelineJobId: string | null,
 ): JobRecord | null {
-  if (!timelineJobId) return null;
+  if (!timelineJobId) return latestJobOfType(jobs, "final_render");
   return latestJobOfType(jobs, "final_render", timelineJobId);
 }
 
-/** `OutputsPage.tsx`의 `currentFinal`과 같은 값으로 낡음을 잰다. */
+/** `OutputsPage.tsx`의 `currentFinal`과 같은 값으로 낡음을 잰다.
+ *
+ *  `OutputsPage.tsx:754-758`은 네 가지를 본다: `project_id` 일치,
+ *  `timeline_id` 일치, `source_session_id` 일치, `source_session_revision`
+ *  일치. 처음 추출할 때 뒤의 둘만 옮기고 앞의 둘을 빠뜨렸다(2026-09-11
+ *  리뷰 확인) -- 세션 값이 재사용돼 id·리비전만 우연히 같은 낡은 기록을
+ *  "최신"이라 잘못 판단할 수 있었다. */
 export function isMasterFinalRenderCurrent(
   render: FinalRenderArtifact | null | undefined,
-  session: Pick<EditingSession, "session_id" | "session_revision"> | null,
+  session: Pick<EditingSession, "project_id" | "session_id" | "session_revision" | "timeline_id"> | null,
+  projectId: string,
 ): boolean {
   return Boolean(
     render?.is_current === true &&
     session != null &&
+    session.project_id === projectId &&
+    render.timeline_id === session.timeline_id &&
     render.source_session_id === session.session_id &&
     render.source_session_revision === session.session_revision,
   );
@@ -91,7 +106,7 @@ export async function resolveMasterFinalRender(
   if (!finalJob) return { kind: "none" };
   const finalRender = await api.getFinalRender(projectId, finalJob.job_id);
   if (finalRender.status !== "succeeded" || !finalRender.render) return { kind: "none" };
-  return isMasterFinalRenderCurrent(finalRender.render, session)
+  return isMasterFinalRenderCurrent(finalRender.render, session, projectId)
     ? { kind: "ready", jobId: finalJob.job_id }
     : { kind: "stale", jobId: finalJob.job_id };
 }
