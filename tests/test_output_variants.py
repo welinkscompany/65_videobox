@@ -292,3 +292,157 @@ def test_materialization_rejects_unresolved_master_conflicts() -> None:
 
     with pytest.raises(VariantInvariantError, match="unresolved_variant_conflicts"):
         materialize_variant(rebased, _master_segments())
+
+
+def _timed_master_segments() -> list[dict[str, object]]:
+    """장면 셋, 마지막 장면 앞에 **일부러 둔 1초 빈 구간**."""
+    return [
+        {"segment_id": "seg-a", "start_sec": 0.0, "end_sec": 5.0, "source_offset_sec": 0.0},
+        {"segment_id": "seg-b", "start_sec": 5.0, "end_sec": 10.0, "source_offset_sec": 0.0},
+        {"segment_id": "seg-c", "start_sec": 11.0, "end_sec": 16.0, "source_offset_sec": 0.0},
+    ]
+
+
+def test_short_form_picks_are_pulled_forward_into_one_continuous_clip() -> None:
+    """고른 장면을 원본 좌표 그대로 두면 숏폼이 안 짧아진다(2026-09-11 실측).
+
+    길이는 하나도 바뀌지 않고 자리만 앞으로 온다. **원본 좌표
+    (`source_offset_sec`)는 손대지 않는다** -- 그걸 옮기면 같은 자리에서
+    다른 그림이 나온다.
+    """
+    variant = apply_variant_patch(
+        _variant("vertical_highlight"),
+        {"selected_segment_ids": ["seg-b", "seg-c"]},
+        expected_variant_revision=3,
+    )
+
+    materialized = materialize_variant(variant, _timed_master_segments())
+
+    assert [
+        (item["segment_id"], item["start_sec"], item["end_sec"]) for item in materialized.segments
+    ] == [("seg-b", 0.0, 5.0), ("seg-c", 5.0, 10.0)]
+    assert all(item["source_offset_sec"] == 0.0 for item in materialized.segments)
+
+
+def test_reordered_short_form_picks_are_laid_out_in_the_chosen_order() -> None:
+    variant = apply_variant_patch(
+        _variant("vertical_highlight"),
+        {"selected_segment_ids": ["seg-c", "seg-a"]},
+        expected_variant_revision=3,
+    )
+
+    materialized = materialize_variant(variant, _timed_master_segments())
+
+    assert [
+        (item["segment_id"], item["start_sec"], item["end_sec"]) for item in materialized.segments
+    ] == [("seg-c", 0.0, 5.0), ("seg-a", 5.0, 10.0)]
+
+
+@pytest.mark.parametrize("kind", ["horizontal", "vertical_full"])
+def test_full_length_variants_keep_every_master_time_including_gaps(kind: str) -> None:
+    """전체본은 **당겨 붙이지 않는다** -- 같은 이야기, 다른 화면비다.
+
+    빈 구간까지 마스터와 같아야 한다. 당겨 붙이면 11초에서 시작하던 마지막
+    장면이 10초로 와서 마스터와 다른 이야기가 된다.
+    """
+    materialized = materialize_variant(_variant(kind), _timed_master_segments())
+
+    assert [
+        (item["segment_id"], item["start_sec"], item["end_sec"]) for item in materialized.segments
+    ] == [("seg-a", 0.0, 5.0), ("seg-b", 5.0, 10.0), ("seg-c", 11.0, 16.0)]
+
+
+def test_variant_render_session_drops_unpicked_scenes_and_moves_the_kept_ones() -> None:
+    """렌더가 쓰는 편집 세션이 **숏폼의 장면 목록을 따라야** 한다.
+
+    이 투영이 없으면 마스터 세션이 클립·자막을 원본 좌표로 되돌리고 버린
+    장면도 그대로 남는다 -- 2026-09-11에 숏폼이 15.000초로 나온 원인이다.
+    """
+    from videobox_core_engine.output_variants import variant_render_session
+
+    master_session = {
+        "session_id": "session-1",
+        "session_revision": 7,
+        "segments": _timed_master_segments(),
+    }
+    variant = apply_variant_patch(
+        _variant("vertical_highlight"),
+        {"selected_segment_ids": ["seg-b", "seg-c"]},
+        expected_variant_revision=3,
+    )
+    derived = materialize_variant(variant, _timed_master_segments())
+
+    projected = variant_render_session(
+        master_session=master_session,
+        variant_timeline={"segments": list(derived.segments)},
+    )
+
+    assert projected is not None
+    assert projected["session_id"] == "session-1"
+    assert projected["session_revision"] == 7
+    by_id = {str(item["segment_id"]): item for item in projected["segments"]}
+    assert by_id["seg-b"]["start_sec"] == 0.0 and by_id["seg-b"]["end_sec"] == 5.0
+    assert by_id["seg-c"]["start_sec"] == 5.0 and by_id["seg-c"]["end_sec"] == 10.0
+    assert by_id["seg-a"]["cut_action"] == "remove"
+    assert by_id["seg-b"].get("cut_action") != "remove"
+    # 마스터 세션은 건드리지 않는다.
+    assert master_session["segments"][1]["start_sec"] == 5.0
+    assert "cut_action" not in master_session["segments"][0]
+
+
+def test_variant_render_session_returns_the_master_untouched_for_a_full_variant() -> None:
+    """전체본은 목록이 마스터와 같아 투영이 **아무것도 바꾸지 않는다.**"""
+    from videobox_core_engine.output_variants import variant_render_session
+
+    master_session = {
+        "session_id": "session-1",
+        "session_revision": 7,
+        "segments": _timed_master_segments(),
+        "timeline_placement_overrides": {
+            "broll:clip-a": {"placement_id": "broll:clip-a", "kind": "broll", "start_sec": 0.0, "end_sec": 5.0},
+        },
+    }
+    derived = materialize_variant(_variant("vertical_full"), _timed_master_segments())
+
+    projected = variant_render_session(
+        master_session=master_session,
+        variant_timeline={"segments": list(derived.segments)},
+    )
+
+    assert projected == master_session
+    # 손으로 끌어 놓은 자리도 전체본에서는 그대로 살아 있다.
+    assert "timeline_placement_overrides" in (projected or {})
+
+
+def test_short_form_render_session_drops_hand_dragged_master_placements() -> None:
+    """마스터 좌표의 절대 시각은 짧아진 판에서 쓸 수 없다.
+
+    버린 장면의 클립을 가리키는 항목은 `apply_timeline_placement_overrides`가
+    `timeline_placement_unknown`으로 렌더를 통째로 죽이고, 남은 클립을 가리키는
+    항목은 당겨 놓은 클립을 도로 마스터 자리로 되돌린다.
+    """
+    from videobox_core_engine.output_variants import variant_render_session
+
+    master_session = {
+        "session_id": "session-1",
+        "session_revision": 7,
+        "segments": _timed_master_segments(),
+        "timeline_placement_overrides": {
+            "broll:clip-a": {"placement_id": "broll:clip-a", "kind": "broll", "start_sec": 0.0, "end_sec": 5.0},
+        },
+    }
+    variant = apply_variant_patch(
+        _variant("vertical_highlight"),
+        {"selected_segment_ids": ["seg-b", "seg-c"]},
+        expected_variant_revision=3,
+    )
+    derived = materialize_variant(variant, _timed_master_segments())
+
+    projected = variant_render_session(
+        master_session=master_session,
+        variant_timeline={"segments": list(derived.segments)},
+    )
+
+    assert projected is not None
+    assert "timeline_placement_overrides" not in projected
+    assert "timeline_placement_overrides" in master_session

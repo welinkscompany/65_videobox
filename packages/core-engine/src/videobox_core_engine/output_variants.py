@@ -229,6 +229,49 @@ def rebase_variant(
     )
 
 
+def _number(value: object) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _retimed_from_zero(
+    segments: Sequence[Mapping[str, object]],
+) -> tuple[dict[str, object], ...]:
+    """장면들을 0초부터 빈틈 없이 이어 붙인다. **길이는 하나도 안 바꾼다.**
+
+    장면에 **절대 시각**을 들고 있는 칸은 `start_sec`·`end_sec` 둘뿐이다.
+    나머지 시간 칸은 전부 상대값이라 장면을 옮겨도 그대로 따라온다:
+
+    - `source_offset_sec`·`source_slices[].source_offset_sec`/`duration_sec`,
+      `source_slice_window_start_sec` -- **원본 소재 안의 좌표**다. 옮기면
+      다른 장면이 나온다.
+    - `media_windows[].start_offset_sec`·`content_windows[].start_offset_sec`와
+      그 `duration_sec` -- **장면 시작으로부터의 상대값**이다(B-roll·음악·
+      효과음 교체 구간, 자막·오버레이 구간). `materialize_editing_session_timeline`이
+      `start + start_offset_sec`로 다시 놓으므로 저절로 따라온다.
+    - `transition_in`의 길이 -- 경계에 붙는 값이라 절대 시각이 아니다.
+
+    그래서 `reorder_segments`(사람이 장면을 끌어 옮길 때 쓰는 길)도 여기와
+    똑같이 bounds 둘만 다시 쓴다.
+    """
+    retimed: list[dict[str, object]] = []
+    cursor = 0.0
+    for segment in segments:
+        moved = dict(segment)
+        if "start_sec" not in moved or "end_sec" not in moved:
+            # 자리를 안 밝힌 장면에 자리를 지어내지 않는다(시간 없는 fixture 등).
+            retimed.append(moved)
+            continue
+        duration = max(0.0, _number(segment.get("end_sec")) - _number(segment.get("start_sec")))
+        moved["start_sec"] = cursor
+        moved["end_sec"] = cursor + duration
+        cursor += duration
+        retimed.append(moved)
+    return tuple(retimed)
+
+
 def materialize_variant(
     variant: OutputVariant,
     master_segments: Sequence[Mapping[str, object] | object],
@@ -259,6 +302,21 @@ def materialize_variant(
         if missing:
             raise VariantInvariantError("selected_segment_not_in_master")
         segments = tuple(by_id[segment_id] for segment_id in variant.selected_segment_ids)
+        # **고른 장면만 남기고 끝이 아니다 -- 앞으로 당겨 이어 붙여야 한다.**
+        #
+        # 2026-09-11 실물 측정(project-e6c75c36): 유진이 3장면 중 2개를 골랐는데
+        # 나온 mp4가 **15.000초, 완성본과 똑같았다.** 고른 장면이 원본 좌표
+        # (5->10, 10->15)를 그대로 들고 있어서 0->5가 비었고, 그 빈 자리를
+        # **버린 도입부가 그대로 채우고 있었다**(픽셀로 확인). 안 짧아진 숏폼은
+        # 숏폼이 아니다.
+        #
+        # 여기서 하는 이유: 이 함수가 "이 변형본의 장면은 무엇인가"를 정하는
+        # 유일한 자리이고, 그 목록이 payload(`build_variant_timeline_payload`)와
+        # 렌더 세션(`variant_render_session`)으로 그대로 흘러간다. 조립 쪽이나
+        # 합성 계획 쪽에서 당기면 장면에 붙은 것들(자막·B-roll·음악·효과음·
+        # 오버레이)을 옮기는 로직을 한 벌 더 짓게 된다 -- 그 일은 이미
+        # `materialize_editing_session_timeline`이 장면의 `start_sec` 하나로 한다.
+        segments = _retimed_from_zero(segments)
 
     return MaterializedVariant(
         source_session_id=variant.source_session_id,
@@ -376,6 +434,96 @@ def build_variant_timeline_payload(
         }
     )
     return payload
+
+
+def variant_render_session(
+    *,
+    master_session: Mapping[str, object] | None,
+    variant_timeline: Mapping[str, object],
+) -> dict[str, object] | None:
+    """변형본 타임라인을 렌더할 때 쓸 편집 세션. **마스터를 그대로 쓰면 안 된다.**
+
+    2026-09-11 실물 측정에서 숏폼이 완성본과 똑같은 15초로 나온 진짜 원인이
+    여기다. 렌더는 변형본 타임라인을 **마스터 편집 세션으로 다시 반영해서**
+    (`run_final_render_job` -> `materialize_editing_session_timeline`) 화면
+    클립과 자막을 만드는데, 그 세션에는 **버린 장면이 그대로 있다.** 그래서
+    고른 장면은 마스터 좌표로 되돌려지고 버린 장면은 자기 자리에 그대로
+    남는다 -- `payload["segments"]`(고른 장면 목록)를 렌더 경로에서 읽는 곳이
+    한 곳도 없었다. 목록을 적는 것과 결과가 그렇게 되는 것은 다른 주장이다.
+
+    그래서 마스터 세션을 이 변형본의 장면 목록에 맞춰 **투영**한다:
+
+    - 고른 장면: 변형본이 정한 자리(`start_sec`/`end_sec`)로 옮긴다.
+    - 안 고른 장면: `cut_action="remove"`로 표시한다.
+
+    새 기계를 만들지 않고 **편집기의 `장면 빼기`가 이미 쓰는 길**을 그대로
+    쓴다. 그 길이 장면 하나를 뺄 때 거기 붙은 것(자막·B-roll·음악·효과음·
+    오버레이·빈 구간·전환)을 같이 빼고, 남은 장면의 `start_sec`로 전부 다시
+    놓는 일을 이미 한다.
+
+    **전체본(`vertical_full`)은 여기 안 걸린다.** 전체본의 장면 목록은 마스터와
+    구성·순서·시각이 전부 같고(`materialize_variant`가 다르면 거부한다),
+    그러면 아래 대조에서 바뀐 것이 하나도 없어 마스터 세션을 **그대로**
+    돌려준다 -- 같은 이야기, 다른 화면비라는 뜻이 유지된다.
+    """
+    if not isinstance(master_session, Mapping):
+        return None
+    raw_variant_segments = variant_timeline.get("segments")
+    if not isinstance(raw_variant_segments, list) or not raw_variant_segments:
+        return dict(master_session)
+    bounds_by_id: dict[str, tuple[float, float]] = {}
+    order: list[str] = []
+    for segment in raw_variant_segments:
+        if not isinstance(segment, Mapping):
+            return dict(master_session)
+        segment_id = str(segment.get("segment_id") or "").strip()
+        if not segment_id:
+            return dict(master_session)
+        bounds_by_id[segment_id] = (_number(segment.get("start_sec")), _number(segment.get("end_sec")))
+        order.append(segment_id)
+
+    master_segments = master_session.get("segments")
+    if not isinstance(master_segments, list) or not master_segments:
+        return dict(master_session)
+    by_id: dict[str, Mapping[str, object]] = {}
+    for segment in master_segments:
+        if not isinstance(segment, Mapping):
+            return dict(master_session)
+        segment_id = str(segment.get("segment_id") or "").strip()
+        if not segment_id or segment_id in by_id:
+            return dict(master_session)
+        by_id[segment_id] = segment
+    if any(segment_id not in by_id for segment_id in bounds_by_id):
+        return dict(master_session)
+
+    changed = False
+    kept: list[dict[str, object]] = []
+    for segment_id in order:
+        source = deepcopy(dict(by_id[segment_id]))
+        start, end = bounds_by_id[segment_id]
+        if _number(source.get("start_sec")) != start or _number(source.get("end_sec")) != end:
+            changed = True
+        source["start_sec"] = start
+        source["end_sec"] = end
+        kept.append(source)
+    dropped: list[dict[str, object]] = []
+    for segment_id, segment in by_id.items():
+        if segment_id in bounds_by_id:
+            continue
+        changed = True
+        dropped.append({**deepcopy(dict(segment)), "cut_action": "remove"})
+    if not changed:
+        return dict(master_session)
+    projected = dict(master_session)
+    projected["segments"] = [*kept, *dropped]
+    # 손으로 끌어다 놓은 자리(`timeline_placement_overrides`)는 **마스터 좌표의
+    # 절대 시각**이고 클립 이름으로 걸린다. 짧아진 판에서는 그 자리가 더 이상
+    # 없다 -- 버린 장면의 클립을 가리키는 항목은 `timeline_placement_unknown`으로
+    # 렌더를 통째로 죽이고, 남은 클립을 가리키는 항목은 당겨 놓은 클립을 도로
+    # 마스터 자리로 되돌린다. 파생본에서는 걷어 낸다. 마스터 편집본의 값은
+    # 그대로 남아 있다.
+    projected.pop("timeline_placement_overrides", None)
+    return projected
 
 
 def variant_timeline_needs_rebuild(

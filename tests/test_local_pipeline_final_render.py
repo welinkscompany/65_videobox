@@ -11,6 +11,8 @@ from typing import Any
 
 import pytest
 
+from videobox_core_engine.ass_subtitles import render_editing_session_ass
+from videobox_core_engine.composition_plan import materialize_editing_session_timeline
 from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
 from videobox_core_engine.output_variants import MaterializedVariant, build_variant_timeline_payload
@@ -373,6 +375,37 @@ def _ffprobe_dimensions(path: Path) -> tuple[int, int]:
     return int(width_str), int(height_str)
 
 
+def _ffprobe_duration_sec(path: Path) -> float:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "csv=p=0", str(path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    return float(result.stdout.strip())
+
+
+def _average_rgb_at(path: Path, *, at_sec: float) -> tuple[int, int, int]:
+    """그 순간의 화면을 1픽셀로 줄여 평균 색을 잰다.
+
+    장면마다 다른 색을 넣어 두면 **어느 장면이 실제로 그 자리에 있는지**를
+    타임라인 숫자가 아니라 픽셀로 가를 수 있다.
+    """
+    frame = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-ss", str(at_sec), "-i", str(path),
+            "-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo",
+            "-pix_fmt", "rgb24", "pipe:1",
+        ],
+        capture_output=True, timeout=30,
+    )
+    assert frame.returncode == 0, frame.stderr.decode("utf-8", errors="replace")
+    assert len(frame.stdout) >= 3, f"{at_sec}초에서 프레임을 못 뽑았다"
+    return frame.stdout[0], frame.stdout[1], frame.stdout[2]
+
+
 def _black_pixel_fraction(path: Path, *, width: int, height: int, at_sec: float) -> float:
     """실제 프레임 하나를 통째로 읽어 거의 검은 픽셀의 비율을 잰다.
 
@@ -472,6 +505,283 @@ def test_vertical_variant_render_actually_comes_out_vertical_and_not_mostly_blac
         f"세로 완성본 화면의 {black_fraction:.0%}가 검은 띠다 -- 화면 채우기가 "
         "아니라 위아래 패딩으로 나온 것으로 보인다."
     )
+
+
+#: 마지막 장면 앞에 **일부러 둔 빈 구간**. 세션은 장면 사이에 틈을 허용한다
+#: (`_validate_segment_bounds`는 겹침만 막는다) -- 장면 길이를 줄이면 실제로
+#: 생긴다. 이 틈이 있어야 "숏폼은 당겨 붙인다 / 전체본은 그대로 둔다"가 서로
+#: 다른 주장이 된다. 틈이 없으면 전체본을 당겨도 결과가 같아서 시험이 못 잡는다.
+_SCENE_GAP_SEC = 1.0
+
+
+def _three_scene_bounds() -> tuple[tuple[str, str, float, float], ...]:
+    return (
+        ("seg_001", "red", 0.0, 5.0),
+        ("seg_002", "green", 5.0, 10.0),
+        ("seg_003", "blue", 10.0 + _SCENE_GAP_SEC, 15.0 + _SCENE_GAP_SEC),
+    )
+
+
+def _three_scene_short_form_project(store: LocalProjectStore, tmp_path: Path) -> dict[str, Any]:
+    """장면 셋(각 5초, 색이 다름)에 자막이 붙은 판 하나를 세운다."""
+    project = store.bootstrap_project(name="Short form scene pick render")
+    colors = tuple((segment_id, color) for segment_id, color, _start, _end in _three_scene_bounds())
+    bounds = {segment_id: (start, end) for segment_id, _color, start, end in _three_scene_bounds()}
+    assets: dict[str, Any] = {}
+    for segment_id, color in colors:
+        source = tmp_path / f"{segment_id}.mp4"
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=640x360:d=5",
+                "-pix_fmt", "yuv420p", str(source),
+            ],
+            check=True, capture_output=True,
+        )
+        assets[segment_id] = store.register_asset(
+            project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source
+        )
+    master = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "review_flags": [],
+            "pending_recommendations": [],
+            "output": {"width": 1920, "height": 1080},
+            "segments": [
+                {"segment_id": segment_id, "start_sec": bounds[segment_id][0], "end_sec": bounds[segment_id][1]}
+                for segment_id, _color in colors
+            ],
+            "tracks": [
+                {
+                    "track_id": "track_broll",
+                    "track_type": "broll",
+                    "clips": [
+                        {
+                            "clip_id": f"clip_{segment_id}",
+                            "segment_id": segment_id,
+                            "asset_id": assets[segment_id].asset_id,
+                            "asset_uri": assets[segment_id].storage_uri,
+                            "start_sec": bounds[segment_id][0],
+                            "end_sec": bounds[segment_id][1],
+                            "media_controls": {},
+                        }
+                        for segment_id, _color in colors
+                    ],
+                }
+            ],
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=master["timeline_id"],
+        session_payload={
+            "project_id": project.project_id,
+            "timeline_id": master["timeline_id"],
+            # `build_editing_session`이 실제로 쓰는 모양 그대로다 --
+            # `source_offset_sec`/`source_slices`/`content_windows`가 있어야
+            # 원본 좌표가 장면 자리와 독립이다(장면을 옮겨도 같은 그림).
+            "segments": [
+                {
+                    "segment_id": segment_id,
+                    "caption_text": f"장면{index + 1}",
+                    "start_sec": bounds[segment_id][0],
+                    "end_sec": bounds[segment_id][1],
+                    "source_offset_sec": 0.0,
+                    "source_slices": [
+                        {"segment_id": segment_id, "source_offset_sec": 0.0, "duration_sec": 5.0}
+                    ],
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": None,
+                    "visual_overlays": [],
+                    "music_override": None,
+                    "sfx_override": None,
+                    "tts_replacement": None,
+                    "content_windows": [
+                        {
+                            "caption_id": f"caption-{segment_id}",
+                            "start_offset_sec": 0.0,
+                            "duration_sec": 5.0,
+                            "source_segment_id": segment_id,
+                            "caption_text": f"장면{index + 1}",
+                            "review_required": False,
+                            "visual_overlays": [],
+                        }
+                    ],
+                }
+                for index, (segment_id, _color) in enumerate(colors)
+            ],
+            "history": [],
+        },
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=master["timeline_id"],
+        status="draft",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+    store.ensure_output_variants(project_id=project.project_id, session_id=session["session_id"])
+    return {"project_id": project.project_id, "session": session, "master": master}
+
+
+def _render_variant_the_way_the_final_job_does(
+    *, store: LocalProjectStore, project_id: str, session_id: str, variant_id: str, output_path: Path
+) -> dict[str, Any]:
+    """`run_final_render_job`이 렌더 직전에 밟는 순서를 그대로 밟는다.
+
+    세션 조회 -> 세션 반영 -> 합성 계획 -> ffmpeg. 승인·게이트 배관은 다른
+    시험들이 이미 지키므로 여기서는 **실제로 나온 파일**만 본다.
+    """
+    renderer = FfmpegFinalRenderer(store=store)
+    runner = LocalPipelineRunner(store, final_renderer=renderer)
+    materialized = runner._materialize_variant_for_output(
+        project_id=project_id, session_id=session_id, variant_id=variant_id
+    )
+    variant_timeline = store.get_timeline_run(
+        project_id=project_id, timeline_id=materialized["timeline_id"]
+    )
+    editing_session = runner._editing_session_for_output_timeline(
+        project_id=project_id, timeline=variant_timeline
+    )
+    materialized_timeline = materialize_editing_session_timeline(
+        timeline=variant_timeline, editing_session=editing_session, project_id=project_id
+    )
+    plan = runner.build_composition_plan(
+        timeline=variant_timeline, editing_session=editing_session, project_id=project_id
+    )
+    ass_text = render_editing_session_ass(
+        {
+            "caption_style": (editing_session or {}).get("caption_style") or {},
+            "segments": [
+                {
+                    "caption_text": cue.text,
+                    "caption_style": cue.style,
+                    "start_sec": cue.start_sec,
+                    "end_sec": cue.end_sec,
+                }
+                for cue in plan.captions
+            ],
+        },
+        video_width=plan.width,
+        video_height=plan.height,
+    )
+    renderer.render_timeline_to_mp4(
+        project_id=project_id,
+        timeline=materialized_timeline,
+        output_path=output_path,
+        composition_plan=plan,
+    )
+    return {"timeline": variant_timeline, "plan": plan, "ass_text": ass_text}
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_short_form_render_is_actually_shorter_and_moves_its_captions_with_it(
+    tmp_path: Path,
+) -> None:
+    """Task 5 RED: 3장면 중 2장면만 고른 숏폼이 **실제로 짧아야** 한다.
+
+    2026-09-11 실물 측정(project-e6c75c36): 유진이 3장면 중 2개를 골랐는데
+    나온 파일은 **15.000초 -- 완성본과 똑같았다.** 지금까지의 시험은 전부
+    `selected_segment_ids`(장면 목록)만 단언했고, **나온 파일의 길이는 아무도
+    안 쟀다.** 값을 적는 것과 결과가 그렇게 되는 것은 다른 주장이다.
+
+    그래서 이 시험은 세 가지를 **만들어진 mp4**에 대고 잰다:
+    1. 길이가 10초(2장면 x 5초)다 -- 15초가 아니다.
+    2. 0초에 고른 첫 장면(초록)이 있다 -- 버린 장면(빨강)이 아니다.
+    3. 자막이 함께 앞으로 온다 -- 5초 늦은 자막은 숏폼이 아니다.
+    """
+    store = LocalProjectStore(tmp_path)
+    scenario = _three_scene_short_form_project(store, tmp_path)
+    short = store.create_output_variant(
+        project_id=scenario["project_id"],
+        source_session_id=scenario["session"]["session_id"],
+        kind="vertical_highlight",
+        selected_segment_ids=["seg_002", "seg_003"],
+    )
+    assert short["selected_segment_ids"] == ["seg_002", "seg_003"]
+
+    output = tmp_path / "short.mp4"
+    rendered = _render_variant_the_way_the_final_job_does(
+        store=store,
+        project_id=scenario["project_id"],
+        session_id=scenario["session"]["session_id"],
+        variant_id=short["variant_id"],
+        output_path=output,
+    )
+
+    duration = _ffprobe_duration_sec(output)
+    assert duration == pytest.approx(10.0, abs=0.25), (
+        f"숏폼이 안 짧아졌다: {duration:.3f}초 (2장면 x 5초 = 10초여야 한다)"
+    )
+    assert _ffprobe_dimensions(output) == (1080, 1920)
+
+    # 버린 장면(빨강)이 앞에 남아 있지 않은가 -- 픽셀로 가른다.
+    red, green, blue = _average_rgb_at(output, at_sec=1.0)
+    assert green > 100 and red < 80, (
+        f"숏폼 1초 지점이 고른 첫 장면(초록)이 아니다: rgb=({red},{green},{blue}) -- "
+        "버린 도입부가 그대로 앞에 남은 것으로 보인다."
+    )
+    red, green, blue = _average_rgb_at(output, at_sec=6.0)
+    assert blue > 100 and red < 80, (
+        f"숏폼 6초 지점이 고른 둘째 장면(파랑)이 아니다: rgb=({red},{green},{blue})"
+    )
+
+    # 자막도 같이 앞으로 와야 한다. 5초 늦은 자막이면 숏폼이 아니다.
+    cues = [(round(cue.start_sec, 3), round(cue.end_sec, 3), cue.text) for cue in rendered["plan"].captions]
+    assert cues == [(0.0, 5.0, "장면2"), (5.0, 10.0, "장면3")], f"자막 자리가 안 옮겨졌다: {cues}"
+    assert "Dialogue: 0,0:00:00.00,0:00:05.00" in rendered["ass_text"]
+    assert "장면1" not in rendered["ass_text"]
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_vertical_full_render_is_never_retimed_by_the_short_form_fix(tmp_path: Path) -> None:
+    """세로 **전체본**은 당겨 붙이지 않는다 -- 같은 이야기, 다른 화면비다.
+
+    전체본은 마스터와 장면 구성·순서가 완전히 같아야 하고, 다르면
+    `materialize_variant`가 `vertical_full_segment_order_or_membership_changed`로
+    거부한다. 숏폼을 짧게 만드는 고침이 전체본에도 새면 그 뜻이 깨지므로,
+    **나온 파일 길이와 장면 순서를 실제로 잰다.**
+    """
+    store = LocalProjectStore(tmp_path)
+    scenario = _three_scene_short_form_project(store, tmp_path)
+    variants = store.list_output_variants(
+        project_id=scenario["project_id"], session_id=scenario["session"]["session_id"]
+    )
+    vertical_full = next(variant for variant in variants if variant["kind"] == "vertical_full")
+
+    output = tmp_path / "vertical_full.mp4"
+    rendered = _render_variant_the_way_the_final_job_does(
+        store=store,
+        project_id=scenario["project_id"],
+        session_id=scenario["session"]["session_id"],
+        variant_id=vertical_full["variant_id"],
+        output_path=output,
+    )
+
+    duration = _ffprobe_duration_sec(output)
+    expected = 15.0 + _SCENE_GAP_SEC
+    assert duration == pytest.approx(expected, abs=0.25), (
+        f"세로 전체본 길이가 마스터와 달라졌다: {duration:.3f}초 ({expected}초여야 한다)"
+    )
+    assert [segment["segment_id"] for segment in rendered["timeline"]["segments"]] == [
+        "seg_001", "seg_002", "seg_003",
+    ]
+    # **빈 구간까지 그대로다.** 마지막 장면은 11초에서 시작한다 -- 당겨 붙이면
+    # 10초로 오고 그러면 마스터와 다른 이야기가 된다.
+    assert [(segment["start_sec"], segment["end_sec"]) for segment in rendered["timeline"]["segments"]] == [
+        (0.0, 5.0), (5.0, 10.0), (10.0 + _SCENE_GAP_SEC, 15.0 + _SCENE_GAP_SEC),
+    ]
+    # 세 장면이 각자 자기 자리에 그대로 있다 -- 색으로 가른다.
+    assert _average_rgb_at(output, at_sec=1.0)[0] > 100  # 빨강
+    assert _average_rgb_at(output, at_sec=6.0)[1] > 100  # 초록
+    assert _average_rgb_at(output, at_sec=12.0)[2] > 100  # 파랑
+    cues = [(round(cue.start_sec, 3), round(cue.end_sec, 3), cue.text) for cue in rendered["plan"].captions]
+    assert cues == [
+        (0.0, 5.0, "장면1"),
+        (5.0, 10.0, "장면2"),
+        (10.0 + _SCENE_GAP_SEC, 15.0 + _SCENE_GAP_SEC, "장면3"),
+    ]
 
 
 def test_final_render_does_not_publish_when_session_changes_after_last_pipeline_check(tmp_path: Path) -> None:

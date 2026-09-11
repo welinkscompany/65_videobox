@@ -52,6 +52,7 @@ from videobox_core_engine.output_variants import (
     VariantInvariantError,
     build_variant_timeline_payload,
     materialize_variant,
+    variant_render_session,
     variant_timeline_needs_rebuild,
 )
 from videobox_domain_models.output_variants import OutputVariant
@@ -2914,12 +2915,21 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
         source_session_id = str(timeline.get("source_session_id") or "")
         if source_variant_id and source_session_id:
             try:
-                return self.store.get_editing_session(
+                master_session = self.store.get_editing_session(
                     project_id=project_id,
                     session_id=source_session_id,
                 )
             except KeyError:
                 return None
+            # **마스터 세션을 그대로 돌려주면 숏폼이 안 짧아진다.** 이 세션이
+            # 아래 `materialize_editing_session_timeline`에서 클립과 자막을
+            # 다시 놓는 기준이라, 버린 장면이 들어 있으면 그 장면이 완성본에
+            # 그대로 남고 고른 장면도 마스터 좌표로 되돌아간다(2026-09-11 실측,
+            # 2/3 장면을 골랐는데 15.000초가 나왔다). 이 변형본의 장면 목록에
+            # 맞춰 투영해서 넘긴다 -- 전체본은 목록이 마스터와 같아 그대로다.
+            return variant_render_session(
+                master_session=master_session, variant_timeline=timeline
+            )
         try:
             session = self.store.get_latest_editing_session(project_id=project_id)
         except KeyError:
