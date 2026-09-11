@@ -193,6 +193,33 @@ def test_hiding_a_track_is_undoable() -> None:
     assert redo(session=undo(session=hidden))["track_states"] == {"broll": {"hidden": True}}
 
 
+def test_turning_the_last_hidden_track_back_on_actually_clears_the_key() -> None:
+    # 화면은 켜진 것만 담아 보낸다(`TimelineDock.tsx:258-266`) -- 마지막 하나를
+    # 끄면 빈 dict `{}`가 온다. `set_track_states`는 그때 열쇠 자체를 지우려
+    # 하는데, 예전에는 `mutate`가 삭제를 못 옮겨서 숨김이 그대로 남았다.
+    from videobox_core_engine.editing_session import set_track_states
+
+    session = {"session_revision": 1, "segments": [], "history": [], "undo_stack": [], "redo_stack": []}
+    hidden = set_track_states(session=session, states={"broll": {"hidden": True}})
+
+    restored = set_track_states(session=hidden, states={})
+
+    assert "track_states" not in restored
+
+
+def test_turning_off_one_of_two_hidden_tracks_keeps_the_other_hidden() -> None:
+    # 빈 dict가 아닌 경우까지 깨뜨리면 안 된다 -- 남은 트랙이 있으면 그 값만
+    # 반영되던 예전 동작이 그대로 유지되어야 한다.
+    from videobox_core_engine.editing_session import set_track_states
+
+    session = {"session_revision": 1, "segments": [], "history": [], "undo_stack": [], "redo_stack": []}
+    hidden = set_track_states(session=session, states={"broll": {"hidden": True}, "bgm": {"hidden": True}})
+
+    partially_restored = set_track_states(session=hidden, states={"bgm": {"hidden": True}})
+
+    assert partially_restored["track_states"] == {"bgm": {"hidden": True}}
+
+
 def test_undo_after_an_unrelated_edit_does_not_invent_a_track_states_key() -> None:
     # 트랙을 한 번도 숨긴 적 없는 세션에서 다른 편집을 하고 되돌려도
     # `track_states` 열쇠 자체가 생기면 안 된다 -- 없던 상태로 정확히 돌아가야

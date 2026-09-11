@@ -320,6 +320,38 @@ def test_a_hidden_track_stays_in_the_manifest_but_leaves_the_render(tmp_path) ->
     assert "broll" not in {item.track_type for item in CompositionPlan.from_timeline(timeline=materialized).items}
 
 
+def test_turning_the_last_hidden_track_back_on_brings_it_back_in_the_manifest(tmp_path) -> None:
+    # 화면은 눈이 켜진 트랙만 담아 보낸다 -- 마지막 하나를 끄면 `track_states: {}`
+    # 가 실제로 서버에 온다. owner가 숨긴 트랙의 눈을 다시 누르면 200과 오른
+    # revision을 받고도 트랙이 계속 안 보이던 결함을 API 경로로 확인한다.
+    client = TestClient(create_app(projects_root=tmp_path))
+    project_id, _, session_id = _manifest_fixture(client, tmp_path)
+
+    hidden = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 1, "track_states": {"broll": {"hidden": True}}},
+    )
+    restored = client.patch(
+        f"/api/projects/{project_id}/editing-sessions/{session_id}/track-states",
+        json={"expected_revision": 2, "track_states": {}},
+    )
+    manifest = client.get(f"/api/projects/{project_id}/editing-sessions/{session_id}/playback-manifest")
+
+    assert hidden.status_code == 200, hidden.text
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["session_revision"] == 3
+    store = LocalProjectStore(tmp_path)
+    session = store.get_editing_session(project_id=project_id, session_id=session_id)
+    assert "track_states" not in session
+    assert manifest.status_code == 200
+    body = manifest.json()
+    assert body["track_states"] == {}
+    timeline = store.get_timeline_run(project_id=project_id, timeline_id=str(session["timeline_id"]))
+    from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
+    materialized = materialize_editing_session_timeline(timeline=timeline, editing_session=session, project_id=project_id)
+    assert "broll" in {item.track_type for item in CompositionPlan.from_timeline(timeline=materialized).items}
+
+
 def test_track_states_patch_mutes_without_removing_the_clip(tmp_path) -> None:
     # 음소거는 소리만 끈다. 클립이 사라지면 그림까지 사라진다.
     client = TestClient(create_app(projects_root=tmp_path))

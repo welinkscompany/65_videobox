@@ -169,10 +169,20 @@ def _event_snapshot(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def _record_undoable_mutation(*, before: dict[str, Any], updated: dict[str, Any], mutation_type: str, segment_id: str) -> dict[str, Any]:
+    _EXCLUDED_KEYS = {"history", "undo_stack", "redo_stack", "output_freshness"}
+
     def mutate(draft: dict[str, Any]) -> None:
         for key, value in updated.items():
-            if key not in {"history", "undo_stack", "redo_stack", "output_freshness"}:
+            if key not in _EXCLUDED_KEYS:
                 draft[key] = deepcopy(value)
+        # `updated`는 `before`(=session)의 deepcopy에서 시작하므로, `before`에는
+        # 있었는데 `updated`에는 없는 열쇠는 호출자가 일부러 지운 것이다
+        # (`set_track_states`가 "전부 기본"일 때 `track_states`를 pop하는 경우
+        # 등). 위 루프는 있는 값만 옮기고 없는 값은 그냥 안 건드리므로, `draft`가
+        # `before`를 deepcopy한 채로 남아 그 지움이 전파되지 않았다 -- 마지막
+        # 트랙의 눈을 다시 켜도 숨김이 안 풀리던 결함이 이것이었다.
+        for key in before.keys() - updated.keys() - _EXCLUDED_KEYS:
+            draft.pop(key, None)
     return apply_user_transaction(
         session=before, label=mutation_type, affected_segment_ids=[segment_id] if segment_id else [],
         mutate=mutate, mutation_type=mutation_type,
