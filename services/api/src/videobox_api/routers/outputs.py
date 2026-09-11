@@ -68,7 +68,32 @@ def _sanitize_download_stem(raw_name: str) -> str:
     return cleaned[:_DOWNLOAD_STEM_MAX_CHARS]
 
 
-def _final_render_content_disposition(*, project_name: str, fallback: str, suffix: str) -> str:
+#: 가로·세로 변형본이 자기 이름을 갖게 하는 꼬리표. 화면이 쓰는 말과 **같아야**
+#: 한다(`apps/web/src/features/outputs/variantOutputState.ts`의 `variantLabel`) --
+#: 화면에서 `세로 영상 내려받기`를 눌렀는데 다른 말이 붙은 파일이 떨어지면 어느
+#: 것이 어느 것인지 다시 헷갈린다. 완성본(변형 아님)은 꼬리표가 없다.
+#: 한글 꼬리표와, 옛 브라우저용 ASCII 대체 꼬리표가 **쌍**이다. 헤더의 ASCII
+#: `filename=`에는 한글을 실을 수 없어서(latin-1) 둘 다 필요하다 -- 한쪽만
+#: 만들면 한글 꼬리표가 ASCII 이름에 섞여 들어가 서버가 죽는다.
+_OUTPUT_SHAPE_NAMES = {
+    "horizontal": (" 가로 영상", "-horizontal"),
+    "vertical_full": (" 세로 영상", "-vertical"),
+    "vertical_highlight": (" 세로 하이라이트", "-vertical-highlight"),
+}
+
+
+def _output_shape_name(output_mode: object) -> tuple[str, str]:
+    """타임라인의 `output_mode`를 내려받기 이름 꼬리표 쌍으로 옮긴다.
+
+    모르는 값이면 빈 꼬리표다 -- 완성본과 이름이 겹치는 것보다 나쁜 것은
+    내부 용어(`vertical_full` 같은)가 파일 이름으로 대표님께 가는 것이다.
+    """
+    return _OUTPUT_SHAPE_NAMES.get(str(output_mode or ""), ("", ""))
+
+
+def _final_render_content_disposition(
+    *, project_name: str, fallback: str, suffix: str, shape: tuple[str, str] = ("", "")
+) -> str:
     """완성본 내려받기 이름을 만든다.
 
     `job_id`(UUID)만으로는 여러 번 받았을 때 어느 영상인지 구분이 안 돼서
@@ -78,9 +103,10 @@ def _final_render_content_disposition(*, project_name: str, fallback: str, suffi
     후자를 읽어 한글 이름 그대로 받고, 옛 브라우저는 ASCII 대체 이름을 받는다.
     """
     stem = _sanitize_download_stem(project_name)
-    utf8_name = f"{stem}{suffix}" if stem else f"{fallback}{suffix}"
+    shape_utf8, shape_ascii = shape
+    utf8_name = f"{stem}{shape_utf8}{suffix}" if stem else f"{fallback}{shape_utf8}{suffix}"
     ascii_stem = stem.encode("ascii", "ignore").decode("ascii").strip(" .")
-    ascii_name = f"{ascii_stem}{suffix}" if ascii_stem else f"{fallback}{suffix}"
+    ascii_name = f"{ascii_stem or fallback}{shape_ascii}{suffix}"
     return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(utf8_name, safe="")}'
 
 
@@ -359,10 +385,23 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             if not path.is_file(): raise KeyError("final_render_content_missing")
             response = deliver_file(request=request, path=path, media_type="video/mp4")
             project_name = str(orchestrator.store.get_project(project_id=project_id).get("name") or "")
+            # 가로·세로 변형본도 **같은** 주소를 쓰므로(`variantOutputState.ts`)
+            # 어느 모양인지는 타임라인의 `output_mode`에서만 알 수 있다. 이걸 안
+            # 보면 완성본·가로·세로가 전부 한 이름으로 떨어져 서로 덮어쓴다
+            # (2026-09-11 실물에서 잡았다 -- 세 파일이 md5까지 같았다).
+            shape = ("", "")
+            try:
+                timeline_id = str(render.get("timeline_id") or "")
+                if timeline_id:
+                    timeline = orchestrator.store.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+                    shape = _output_shape_name(timeline.get("output_mode"))
+            except Exception:
+                # 모양을 못 읽는다고 내려받기를 막지는 않는다. 이름만 옛날처럼 된다.
+                shape = ("", "")
         except Exception as exc:
             raise _http_error(exc) from exc
         response.headers["Content-Disposition"] = _final_render_content_disposition(
-            project_name=project_name, fallback=job_id, suffix=".mp4",
+            project_name=project_name, fallback=job_id, suffix=".mp4", shape=shape,
         )
         return response
 

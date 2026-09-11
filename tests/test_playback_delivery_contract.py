@@ -11,12 +11,18 @@ from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
 
 
-def _make_final_render_job(store: LocalProjectStore, *, project_id: str, tmp_path: Path):
-    """완성본 job 하나를 실제 저장소 경로에 만든다 -- 여러 시험이 공유하는 셋업."""
-    source = tmp_path / "clip.mp4"
+def _make_final_render_job(
+    store: LocalProjectStore, *, project_id: str, tmp_path: Path, output_mode: str = "review"
+):
+    """완성본 job 하나를 실제 저장소 경로에 만든다 -- 여러 시험이 공유하는 셋업.
+
+    `output_mode`가 가로·세로 변형본을 가른다. 변형본도 같은 `content` 주소를
+    쓰므로(`VariantOutputCard.tsx`) 이름을 가르는 것은 이 값뿐이다.
+    """
+    source = tmp_path / f"clip-{output_mode}.mp4"
     source.write_bytes(b"0123456789")
     timeline = store.save_timeline_run(
-        project_id=project_id, output_mode="review",
+        project_id=project_id, output_mode=output_mode,
         timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": []},
     )
     export = store.save_final_render(project_id=project_id, timeline_id=timeline["timeline_id"], source_output_path=source)
@@ -128,6 +134,35 @@ def test_final_render_content_has_a_download_filename_and_range_playback_still_w
     assert "filename*=UTF-8''" in disposition
     extended_name = unquote(disposition.split("filename*=UTF-8''", 1)[1])
     assert extended_name == "가을 브이로그.mp4"
+
+
+def test_each_shape_downloads_under_its_own_name(tmp_path: Path) -> None:
+    """실물에서 잡았다(2026-09-11): 완성본·가로·세로를 다 내려받으면 **셋 다 같은
+    이름**이라 서로 덮어쓴다.
+
+    `project-e6c75c36`에서 실제로 재 봤다 -- 세 파일이 전부
+    `자동채우기 라이브 검증.mp4`로 떨어졌다. 변형본은 완성본과 **같은** `content`
+    주소를 쓰기 때문에(`variantOutputState.ts`) 이름을 가르는 자리가 서버뿐이다.
+    화면에 내려받기 문을 열어 놓고 이름을 안 가르면 가져가 봐야 못 쓴다.
+
+    이름에 쓰는 말은 화면이 쓰는 말과 같아야 한다(`variantLabel`): `가로 영상`,
+    `세로 영상`, `세로 하이라이트`.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    project = client.post("/api/projects", json={"name": "가을 브이로그"}).json()["project_id"]
+    store = LocalProjectStore(tmp_path)
+
+    def downloaded_name(output_mode: str) -> str:
+        job = _make_final_render_job(store, project_id=project, tmp_path=tmp_path, output_mode=output_mode)
+        response = client.get(f"/api/projects/{project}/final-renders/{job['job_id']}/content")
+        assert response.status_code == 200
+        disposition = response.headers["content-disposition"]
+        return unquote(disposition.split("filename*=UTF-8''", 1)[1])
+
+    assert downloaded_name("review") == "가을 브이로그.mp4"
+    assert downloaded_name("horizontal") == "가을 브이로그 가로 영상.mp4"
+    assert downloaded_name("vertical_full") == "가을 브이로그 세로 영상.mp4"
+    assert downloaded_name("vertical_highlight") == "가을 브이로그 세로 하이라이트.mp4"
 
 
 def test_final_render_content_disposition_caps_an_unbounded_project_name(tmp_path: Path) -> None:
