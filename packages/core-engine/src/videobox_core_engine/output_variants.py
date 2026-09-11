@@ -358,3 +358,33 @@ def build_variant_timeline_payload(
         }
     )
     return payload
+
+
+def variant_timeline_needs_rebuild(
+    *,
+    cached_timeline: Mapping[str, object] | None,
+    fresh_payload: Mapping[str, object],
+) -> bool:
+    """캐시된 변형본 타임라인이 **지금** `build_variant_timeline_payload`가 만드는
+    값과 같은지 본다. 다르면(또는 캐시가 아예 없으면) 다시 만들어야 한다.
+
+    2026-09-11에 실물로 잡힌 결함: `source_variant_revision`이 같으면 캐시를
+    무조건 재사용했다. 그런데 그 캐시는 **조립 로직이 바뀌기 전에** 만들어진
+    타임라인이었다 -- 세로 변형본을 다시 만들어도 옛 1920x1080 타임라인을 계속
+    물고 나왔다(대표님이 `가로·세로 출력 만들기`를 눌러도 안 고쳐지는 걸로
+    보였다).
+
+    "스키마 버전 번호"를 따로 관리하는 대신, **이 함수가 지금 만드는 payload
+    전체**를 캐시된 타임라인과 키 단위로 대조한다. 버전 번호 방식은 다음에
+    `build_variant_timeline_payload`를 고치는 사람이 번호 올리는 걸 잊으면
+    조용히 다시 새는데, 이 방식은 그 사람이 번호를 신경 쓸 필요가 없다 --
+    payload가 만드는 값(`output`·`tracks`·`segments`·식별자 전부)이 뭐든
+    바뀌면 대조에서 자동으로 걸린다. 대가는 매 materialize 호출마다 마스터
+    타임라인을 한 번 더 읽고 payload를 다시 조립하는 것뿐이고, 둘 다 순수
+    계산이라 싸다. 비싼 부분(`save_timeline_run`으로 새 타임라인 행을 쓰는 것,
+    타임라인 빌드 job을 새로 만드는 것)은 여기서 같다고 판정될 때 그대로
+    건너뛴다 -- caching의 실제 값은 그쪽에 있다.
+    """
+    if cached_timeline is None:
+        return True
+    return any(cached_timeline.get(key) != value for key, value in fresh_payload.items())

@@ -276,3 +276,54 @@ def test_materialize_reuses_revision_identity_and_preserves_master_tracks(tmp_pa
         timeline_id=first_materialization["timeline_id"],
     )
     assert derived["tracks"] == [{"track_type": "narration", "clips": [{"clip_id": "clip-1"}]}]
+
+
+def test_materialize_route_rebuilds_a_cache_left_by_the_old_copy_logic(tmp_path: Path) -> None:
+    """이 라우터도 `_materialize_variant_for_output`과 같은 함정에 걸린다.
+
+    2026-09-11 실물 측정(project-e6c75c36): 캔버스 크기 결함을 고친 뒤에도
+    owner의 세로 변형본은 여전히 1920x1080이었다 -- `source_variant_revision`이
+    안 바뀌었으니 `get_variant_materialization`이 옛(버그가 있던) 조립 로직이
+    만든 타임라인을 그대로 돌려줬기 때문이다. 이 라우터(`가로·세로 비교` 준비)와
+    출력 화면 쪽(`local_pipeline._materialize_variant_for_output`) 둘 다 같은
+    `existing is not None`이면 무조건 재사용하는 모양을 갖고 있었다 -- 여기서
+    라우터 쪽을 따로 잰다. 옛 로직이 만들었을 법한(마스터와 같은 가로 크기)
+    타임라인을 캐시 행에 직접 심어 두고 materialize를 호출한다.
+    """
+    client, project_id, session = _client(tmp_path)
+    store = client.app.state.store
+    variants = client.get(
+        f"/api/projects/{project_id}/output-variants",
+        params={"session_id": session["session_id"]},
+    ).json()["variants"]
+    vertical = next(item for item in variants if item["kind"] == "vertical_full")
+
+    stale_timeline = store.save_timeline_run(
+        project_id=project_id,
+        output_mode="review",
+        source_session_id=vertical["source_session_id"],
+        source_session_revision=vertical["source_session_revision"],
+        timeline_payload={"tracks": [], "segments": [], "output": {"width": 1920, "height": 1080}},
+    )
+    store.save_variant_materialization(
+        project_id=project_id,
+        variant_id=vertical["variant_id"],
+        source_session_id=vertical["source_session_id"],
+        source_session_revision=vertical["source_session_revision"],
+        source_variant_revision=vertical["variant_revision"],
+        timeline_id=stale_timeline["timeline_id"],
+        segments=[],
+    )
+
+    response = client.post(
+        f"/api/projects/{project_id}/output-variants/{vertical['variant_id']}/materialize",
+        json={"expected_master_session_revision": vertical["source_session_revision"]},
+    )
+
+    assert response.status_code == 201, response.text
+    materialization = response.json()["materialization"]
+    assert materialization["timeline_id"] != stale_timeline["timeline_id"]
+    rebuilt = store.get_timeline_run(
+        project_id=project_id, timeline_id=materialization["timeline_id"]
+    )
+    assert rebuilt["output"] == {"width": 1080, "height": 1920}

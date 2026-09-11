@@ -16,6 +16,7 @@ from videobox_core_engine.output_variants import (
     build_variant_timeline_payload,
     materialize_variant,
     rebase_variant,
+    variant_timeline_needs_rebuild,
 )
 from videobox_domain_models.output_variants import OutputVariant
 from videobox_storage.local_project_store import (
@@ -189,30 +190,6 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
                 master_session_revision=current_master_revision,
             )
             try:
-                existing = store.get_variant_materialization(
-                    project_id=project_id,
-                    variant_id=variant_id,
-                    source_variant_revision=derived.source_variant_revision,
-                )
-            except KeyError:
-                existing = None
-            if existing is not None:
-                _sync_approved_variant_review(
-                    store,
-                    project_id=project_id,
-                    source_timeline_id=str(session.get("timeline_id") or ""),
-                    timeline_id=str(existing["timeline_id"]),
-                    source_session_id=derived.source_session_id,
-                    source_session_revision=derived.source_session_revision,
-                    source_variant_id=derived.source_variant_id,
-                    source_variant_revision=derived.source_variant_revision,
-                )
-                return {"materialization": {
-                    **existing,
-                    "source_variant_id": derived.source_variant_id,
-                    "source_variant_revision": derived.source_variant_revision,
-                }}
-            try:
                 master_timeline = store.get_timeline_run(
                     project_id=project_id,
                     timeline_id=str(session.get("timeline_id") or ""),
@@ -234,6 +211,43 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
                 "pending_recommendations": list(master_timeline.get("pending_recommendations", []) or []),
                 "applied_recommendations": list(master_timeline.get("applied_recommendations", []) or []),
             })
+            # 캐시(`variant_materializations`)가 있어도 무조건 재사용하지 않는다.
+            # 2026-09-11 실물 측정: `source_variant_revision`이 안 바뀌었다는
+            # 이유로 캐시를 그대로 돌려주면, **옛(버그가 있던) 조립 로직이 만든
+            # 타임라인**을 owner가 버튼을 다시 눌러도 계속 받게 된다. 캐시가
+            # 있으면 지금 payload와 대조하고(`variant_timeline_needs_rebuild`),
+            # 같을 때만 재사용한다.
+            try:
+                existing = store.get_variant_materialization(
+                    project_id=project_id,
+                    variant_id=variant_id,
+                    source_variant_revision=derived.source_variant_revision,
+                )
+                cached_timeline = store.get_timeline_run(
+                    project_id=project_id,
+                    timeline_id=str(existing["timeline_id"]),
+                )
+            except KeyError:
+                existing = None
+                cached_timeline = None
+            if existing is not None and not variant_timeline_needs_rebuild(
+                cached_timeline=cached_timeline, fresh_payload=timeline_payload
+            ):
+                _sync_approved_variant_review(
+                    store,
+                    project_id=project_id,
+                    source_timeline_id=str(session.get("timeline_id") or ""),
+                    timeline_id=str(existing["timeline_id"]),
+                    source_session_id=derived.source_session_id,
+                    source_session_revision=derived.source_session_revision,
+                    source_variant_id=derived.source_variant_id,
+                    source_variant_revision=derived.source_variant_revision,
+                )
+                return {"materialization": {
+                    **existing,
+                    "source_variant_id": derived.source_variant_id,
+                    "source_variant_revision": derived.source_variant_revision,
+                }}
             timeline = store.save_timeline_run(
                 project_id=project_id,
                 output_mode=variant.kind,
@@ -241,6 +255,9 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
                 source_session_revision=derived.source_session_revision,
                 timeline_payload=timeline_payload,
             )
+            # (project_id, variant_id, source_variant_revision)에 ON CONFLICT
+            # DO UPDATE라, 같은 revision에 낡은 행이 이미 있어도 충돌하지 않고
+            # timeline_id·segments만 새 값으로 갈아 끼운다.
             materialization = store.save_variant_materialization(
                 project_id=project_id,
                 variant_id=variant_id,

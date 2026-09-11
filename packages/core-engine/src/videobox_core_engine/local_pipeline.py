@@ -52,6 +52,7 @@ from videobox_core_engine.output_variants import (
     VariantInvariantError,
     build_variant_timeline_payload,
     materialize_variant,
+    variant_timeline_needs_rebuild,
 )
 from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
@@ -2197,40 +2198,58 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             session.get("segments", []),
             master_session_revision=current_revision,
         )
+        master_timeline = self.store.get_timeline_run(
+            project_id=project_id,
+            timeline_id=str(session.get("timeline_id") or ""),
+        )
+        # 마스터 payload를 그대로 베끼면 `output`(캔버스 크기)도 같이 와서
+        # 세로 변형본이 마스터와 같은 1920x1080으로 렌더된다(2026-09-11,
+        # project-e6c75c36에서 완성본·가로·세로 md5가 전부 같았다). `output`은
+        # 마스터 값이 아니라 이 변형본의 `kind`로 다시 정한다 -- 크기 표는
+        # `_ORIENTATION_OUTPUT_SIZES`(이미 build_timeline이 쓰는 것) 하나만 쓴다.
+        # `output_mode`도 같은 이유로 제외한다: 아래 `save_timeline_run`은
+        # `output_mode=variant.kind`를 인자로 받지만, payload에 그 키가
+        # 남아 있으면 store가 dict를 조립할 때 payload의 값이 인자를 덮어
+        # 변형본 타임라인의 output_mode가 늘 마스터의 `review`로 저장됐다
+        # (`local_project_store.save_timeline_run`, `**timeline_payload`가
+        # 뒤에 와서 이긴다). 저장된 값을 실제로 읽어 분기하는 자리는 grep으로
+        # 전부 셌을 때 0곳이다 -- 유일했던 소비자(`outputs.py`의
+        # `_download_shape_for_render`)는 이미 이 문제를 실물에서 겪고
+        # `source_variant_id` 경유로 바꿨다(그 파일의 주석 참고). 나머지는
+        # API/도메인/프런트 스키마의 pass-through 필드 셋뿐이라 값이
+        # 정직해져도 깨지는 소비자가 없다.
+        # 조립은 `build_variant_timeline_payload` 한 곳에서만 한다 -- 편집기의
+        # `가로·세로 비교` 준비 라우터가 **같은 복사 로직을 따로** 갖고 있었고,
+        # 그쪽이 먼저 돌면 틀린 타임라인이 캐시되어 여기 고침이 건너뛰어졌다.
+        timeline_payload = build_variant_timeline_payload(
+            master_timeline=master_timeline, variant_kind=variant.kind, derived=derived,
+        )
+        # 캐시(`variant_materializations`)가 있어도 무조건 재사용하지 않는다.
+        # 2026-09-11 실물 측정: 컨테이너에 Task 1·2 고침을 올린 뒤에도 owner가
+        # 만든 세로 변형본은 여전히 1920x1080이었다 -- `source_variant_revision`이
+        # 안 바뀌어서, **옛(버그가 있던) 조립 로직이 만든 타임라인**을 그대로
+        # 돌려주고 있었다. 캐시가 있으면 지금 payload와 대조하고
+        # (`variant_timeline_needs_rebuild`), 같을 때만 재사용한다 -- 다르면(또는
+        # 캐시된 타임라인 행이 없어졌으면) 새로 만든다.
+        cached_timeline: dict[str, Any] | None = None
+        existing: dict[str, Any] | None = None
         try:
             existing = self.store.get_variant_materialization(
                 project_id=project_id,
                 variant_id=variant_id,
                 source_variant_revision=derived.source_variant_revision,
             )
-            timeline_id = str(existing["timeline_id"])
-        except KeyError:
-            master_timeline = self.store.get_timeline_run(
+            cached_timeline = self.store.get_timeline_run(
                 project_id=project_id,
-                timeline_id=str(session.get("timeline_id") or ""),
+                timeline_id=str(existing["timeline_id"]),
             )
-            # 마스터 payload를 그대로 베끼면 `output`(캔버스 크기)도 같이 와서
-            # 세로 변형본이 마스터와 같은 1920x1080으로 렌더된다(2026-09-11,
-            # project-e6c75c36에서 완성본·가로·세로 md5가 전부 같았다). `output`은
-            # 마스터 값이 아니라 이 변형본의 `kind`로 다시 정한다 -- 크기 표는
-            # `_ORIENTATION_OUTPUT_SIZES`(이미 build_timeline이 쓰는 것) 하나만 쓴다.
-            # `output_mode`도 같은 이유로 제외한다: 아래 `save_timeline_run`은
-            # `output_mode=variant.kind`를 인자로 받지만, payload에 그 키가
-            # 남아 있으면 store가 dict를 조립할 때 payload의 값이 인자를 덮어
-            # 변형본 타임라인의 output_mode가 늘 마스터의 `review`로 저장됐다
-            # (`local_project_store.save_timeline_run`, `**timeline_payload`가
-            # 뒤에 와서 이긴다). 저장된 값을 실제로 읽어 분기하는 자리는 grep으로
-            # 전부 셌을 때 0곳이다 -- 유일했던 소비자(`outputs.py`의
-            # `_download_shape_for_render`)는 이미 이 문제를 실물에서 겪고
-            # `source_variant_id` 경유로 바꿨다(그 파일의 주석 참고). 나머지는
-            # API/도메인/프런트 스키마의 pass-through 필드 셋뿐이라 값이
-            # 정직해져도 깨지는 소비자가 없다.
-            # 조립은 `build_variant_timeline_payload` 한 곳에서만 한다 -- 편집기의
-            # `가로·세로 비교` 준비 라우터가 **같은 복사 로직을 따로** 갖고 있었고,
-            # 그쪽이 먼저 돌면 틀린 타임라인이 캐시되어 여기 고침이 건너뛰어졌다.
-            timeline_payload = build_variant_timeline_payload(
-                master_timeline=master_timeline, variant_kind=variant.kind, derived=derived,
-            )
+        except KeyError:
+            cached_timeline = None
+        if existing is not None and not variant_timeline_needs_rebuild(
+            cached_timeline=cached_timeline, fresh_payload=timeline_payload
+        ):
+            timeline_id = str(existing["timeline_id"])
+        else:
             timeline = self.store.save_timeline_run(
                 project_id=project_id,
                 output_mode=variant.kind,
@@ -2239,6 +2258,9 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 timeline_payload=timeline_payload,
             )
             timeline_id = str(timeline["timeline_id"])
+            # (project_id, variant_id, source_variant_revision)에 ON CONFLICT
+            # DO UPDATE라, 같은 revision에 낡은 행이 이미 있어도 충돌하지 않고
+            # timeline_id·segments만 새 값으로 갈아 끼운다.
             self.store.save_variant_materialization(
                 project_id=project_id,
                 variant_id=variant_id,

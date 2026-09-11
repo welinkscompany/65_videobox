@@ -272,6 +272,94 @@ def test_materialized_variant_timeline_carries_its_own_orientation_output_size(t
     assert vertical_timeline["output"] == {"width": 1080, "height": 1920}
 
 
+def test_materialize_rebuilds_a_cache_left_by_the_old_copy_logic(tmp_path: Path) -> None:
+    """`get_variant_materialization`이 있으면 무조건 재사용하던 문제.
+
+    2026-09-11 실물 측정(project-e6c75c36): Task 1·2가 컨테이너에 올라간 뒤에도
+    `가로·세로 출력 만들기`로 나온 완성본·가로·세로가 셋 다 1920x1080에 md5까지
+    같았다. 원인은 캔버스 크기 결함이 아니라 **캐시**다 -- 이 owner의 변형본은
+    전부 옛(버그가 있던) 조립 로직이 만든 `variant_materializations` 행을 이미
+    갖고 있었고, `_materialize_variant_for_output`은 `source_variant_revision`만
+    맞으면 그 행의 `timeline_id`를 그대로 돌려줬다. 버튼을 다시 눌러도 같은 낡은
+    타임라인만 계속 나왔다.
+
+    이 시험은 그 상태를 그대로 재현한다: 옛 로직이 만들었을 법한(마스터와 같은
+    가로 크기, 화면 채우기로 안 고친 트랙) 타임라인을 만들어 캐시 행에 직접
+    꽂아 두고, 그 다음 materialize를 호출한다. `output`이 이미 맞다는 이유로
+    통과하는 시험(Task 1의 시험)과 달리, **캐시가 있을 때** 다시 만드는지를
+    잰다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Variant stale cache project")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "review_flags": [],
+            "pending_recommendations": [],
+            "tracks": [],
+            "segments": [],
+            "output": {"width": 1920, "height": 1080},
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [], "history": []},
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="draft",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+    variants = store.ensure_output_variants(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    )
+    vertical = next(variant for variant in variants if variant["kind"] == "vertical_full")
+
+    # 옛(버그가 있던) `_materialize_variant_for_output`이 만들었을 타임라인 --
+    # 마스터를 그대로 베껴 캔버스가 1920x1080이다. 이걸 캐시 행에 직접 심어서
+    # "이미 있는 낡은 materialization"을 재현한다.
+    stale_timeline = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+        timeline_payload={
+            "review_flags": [],
+            "pending_recommendations": [],
+            "tracks": [],
+            "segments": [],
+            "output": {"width": 1920, "height": 1080},
+        },
+    )
+    store.save_variant_materialization(
+        project_id=project.project_id,
+        variant_id=vertical["variant_id"],
+        source_session_id=vertical["source_session_id"],
+        source_session_revision=vertical["source_session_revision"],
+        source_variant_revision=vertical["variant_revision"],
+        timeline_id=stale_timeline["timeline_id"],
+        segments=[],
+    )
+
+    runner = LocalPipelineRunner(store, final_renderer=_FakeFinalRenderer())
+    materialized = runner._materialize_variant_for_output(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_id=vertical["variant_id"],
+    )
+
+    rebuilt_timeline = store.get_timeline_run(
+        project_id=project.project_id, timeline_id=materialized["timeline_id"]
+    )
+    assert materialized["timeline_id"] != stale_timeline["timeline_id"]
+    assert rebuilt_timeline["output"] == {"width": 1080, "height": 1920}
+
+
 def _ffprobe_dimensions(path: Path) -> tuple[int, int]:
     result = subprocess.run(
         [
