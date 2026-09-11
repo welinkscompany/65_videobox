@@ -2525,4 +2525,87 @@ describe("완성본 실패 이유", () => {
     expect(finalRenderFailureMessage("something_new_from_the_engine")).toBe("완성본을 만들지 못했어요.");
     expect(finalRenderFailureMessage(null)).toBe("완성본을 만들지 못했어요.");
   });
+
+  /** task-4-brief.md: `handleRenderVariants`가 렌더 도중 실패한 진짜 이유
+   *  (서버의 `error_message`)를 버리고 전부 `renderer_failed`로 찍어서,
+   *  task-3에서 새로 만든 한국어 표(`검토 승인이 필요해요` 등)가 가장 흔한
+   *  실패에서는 한 번도 안 걸렸다. 이 시험은 실제 가로세로 변형본 렌더가
+   *  "검토 승인이 필요하다"는 구체적 이유로 실패했을 때, 화면이 그 구체적
+   *  문장을 보여 주는지를 잰다 -- 뭉개진 일반 문구가 아니라. */
+  it("가로세로 출력이 도중에 실패하면 서버가 보낸 진짜 이유를 보여준다", async () => {
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({
+      variants: [{ variant_id: "variant-h1", kind: "horizontal" }] as never,
+    });
+    vi.spyOn(api, "startVariantRenders").mockResolvedValue({
+      project_id: "project_a",
+      status: "accepted",
+      items: [{ variant_id: "variant-h1", variant_kind: "horizontal", job_id: "variant-job-1", status: "pending", error_code: null }],
+    });
+    vi.mocked(api.listJobs).mockResolvedValue([
+      activeTimelineJob,
+      // `input_ref`는 이 변형본이 파생된 변형 전용 편집판 id다(materialize된
+      // 변형 timeline job) -- 마스터 편집판 job_id("timeline-current")와
+      // 같으면 화면의 마스터 완성본 선택 로직(`selectMasterFinalJob`)이 이
+      // 변형 job을 마스터 완성본으로 잘못 집어서, 변형 카드가 아니라 마스터
+      // 완성본 카드에서 이유가 새어 나와 시험이 가짜로 통과한다.
+      { job_id: "variant-job-1", project_id: "project_a", job_type: "final_render", status: "running", input_ref: "variant-materialized-timeline-1", output_ref: null, error_message: null, started_at: null, finished_at: null },
+    ] as never);
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: "variant-job-1", status: "failed", render: null, error_message: "final_output_requires_review_approval",
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    // 단추는 처음부터 그려지지만 세션·변형 목록이 비동기로 실린 뒤에야
+    // 눌린다 -- `findByRole`은 그려지자마자(비활성 상태에서도) 통과하므로
+    // 눌러도 되는 상태(`toBeEnabled`)까지 따로 기다려야 한다. 안 그러면
+    // 비활성 단추를 눌러 아무 일도 안 일어나는데 시험은 그걸 못 잡는다.
+    const submit = await screen.findByRole("button", { name: "가로·세로 출력 만들기" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    expect(await screen.findByText("검토에서 아직 승인하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요.")).toBeVisible();
+    expect(screen.queryByText("이 출력을 만들지 못했어요.")).not.toBeInTheDocument();
+  });
+
+  /** `handleRefreshVariants`("출력 상태 다시 확인")도 같은 병이었다 --
+   *  진짜 이유는커녕 `error_code`를 아예 옮기지 않아서 방금 실패로 바뀐
+   *  항목은 이유 문장 자체가 안 떴다. */
+  it("출력 상태를 다시 확인했을 때도 진짜 실패 이유를 보여준다", async () => {
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({
+      variants: [{ variant_id: "variant-h1", kind: "horizontal" }] as never,
+    });
+    vi.spyOn(api, "startVariantRenders").mockResolvedValue({
+      project_id: "project_a",
+      status: "accepted",
+      items: [{ variant_id: "variant-h1", variant_kind: "horizontal", job_id: "variant-job-1", status: "pending", error_code: null }],
+    });
+    vi.mocked(api.listJobs).mockResolvedValue([
+      activeTimelineJob,
+      // `input_ref`는 이 변형본이 파생된 변형 전용 편집판 id다(materialize된
+      // 변형 timeline job) -- 마스터 편집판 job_id("timeline-current")와
+      // 같으면 화면의 마스터 완성본 선택 로직(`selectMasterFinalJob`)이 이
+      // 변형 job을 마스터 완성본으로 잘못 집어서, 변형 카드가 아니라 마스터
+      // 완성본 카드에서 이유가 새어 나와 시험이 가짜로 통과한다.
+      { job_id: "variant-job-1", project_id: "project_a", job_type: "final_render", status: "running", input_ref: "variant-materialized-timeline-1", output_ref: null, error_message: null, started_at: null, finished_at: null },
+    ] as never);
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({ job_id: "variant-job-1", status: "running", render: null });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    const submit = await screen.findByRole("button", { name: "가로·세로 출력 만들기" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    await screen.findByTestId("variant-output-variant-h1");
+
+    vi.mocked(api.getFinalRender).mockResolvedValue({
+      job_id: "variant-job-1", status: "failed", render: null, error_message: "final_output_requires_review_approval",
+    });
+    const refreshButton = await screen.findByRole("button", { name: "출력 상태 다시 확인" });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    fireEvent.click(refreshButton);
+
+    expect(await screen.findByText("검토에서 아직 승인하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요.")).toBeVisible();
+  });
 });

@@ -652,7 +652,11 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         if (!job || !item.job_id) return item;
         try {
           const final = await api.getFinalRender(projectId, item.job_id);
-          return { ...item, status: final.status, error_code: final.status === "failed" ? "renderer_failed" : item.error_code };
+          // 서버가 실패 사유를 `error_message`로 보내 준다(routers/outputs.py) --
+          // 그걸 버리고 전부 `renderer_failed`로 찍으면 task-3의 한국어 표가
+          // 가장 흔한 실패(렌더 도중 실패)에서는 죽는다. 서버가 아무 사유도
+          // 안 보낼 때만(사유가 비어 있을 때만) 예전 고정 문구로 되돌아간다.
+          return { ...item, status: final.status, error_code: final.status === "failed" ? (final.error_message || "renderer_failed") : item.error_code };
         } catch {
           return item;
         }
@@ -672,7 +676,10 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       if (!job) return item;
       try {
         const final = await api.getFinalRender(projectId, item.job_id);
-        return { ...item, status: final.status };
+        // 위 `handleRenderVariants`와 같은 병이었다 -- 여기는 `error_code`를
+        // 아예 안 옮겨서 새로 실패로 바뀐 항목은 사유 문장 자체가 안 떴다.
+        // 같은 규칙(서버 사유 우선, 없으면 옛 고정 문구)으로 맞춘다.
+        return { ...item, status: final.status, error_code: final.status === "failed" ? (final.error_message || "renderer_failed") : item.error_code };
       } catch {
         return item;
       }
