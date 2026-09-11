@@ -83,7 +83,7 @@ services:
       # 채워져 있으면 그쪽(호스팅)이 우선한다.
       VIDEOBOX_MEM0_MODE: ${VIDEOBOX_MEM0_MODE:-local}
       VIDEOBOX_MEM0_LOCAL_BASE_URL: ${VIDEOBOX_MEM0_LOCAL_BASE_URL:-http://host.docker.internal:1234/v1}
-      VIDEOBOX_MEM0_LLM_MODEL: ${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.6-35b-a3b}
+      VIDEOBOX_MEM0_LLM_MODEL: ${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.8-27b}
       VIDEOBOX_MEM0_EMBEDDER_MODEL: ${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}
       # 차원이 틀리면 저장소가 조용히 어긋난다. bge-m3 는 1024다.
       VIDEOBOX_MEM0_EMBEDDING_DIMS: ${VIDEOBOX_MEM0_EMBEDDING_DIMS:-1024}

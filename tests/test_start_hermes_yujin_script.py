@@ -159,7 +159,7 @@ def _rendered_model(
                     "VIDEOBOX_MEM0_LOCAL_BASE_URL": (
                         "http://host.docker.internal:1234/v1"
                     ),
-                    "VIDEOBOX_MEM0_LLM_MODEL": "qwen/qwen3.6-35b-a3b",
+                    "VIDEOBOX_MEM0_LLM_MODEL": "qwen/qwen3.8-27b",
                     "VIDEOBOX_MEM0_EMBEDDER_MODEL": "text-embedding-bge-m3",
                     "VIDEOBOX_MEM0_EMBEDDING_DIMS": "1024",
                     "VIDEOBOX_MEM0_STORE_PATH": (

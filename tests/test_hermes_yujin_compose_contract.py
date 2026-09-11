@@ -368,7 +368,7 @@ def test_memory_adapter_is_the_only_mem0_provider_boundary() -> None:
             "http://host.docker.internal:1234/v1}"
         ),
         "VIDEOBOX_MEM0_LLM_MODEL": (
-            "${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.6-35b-a3b}"
+            "${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.8-27b}"
         ),
         "VIDEOBOX_MEM0_EMBEDDER_MODEL": (
             "${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}"
@@ -458,7 +458,7 @@ def test_hermes_runtime_is_pinned_to_the_zero_schema_context_engine() -> None:
         "mcp_servers": {},
         # 두뇌는 이 컴퓨터의 LM Studio 다. provider 키를 함께 적지 않으면 Hermes 가
         # 로그인된 OAuth 제공자로 조용히 넘어간다.
-        "model": {"provider": "lmstudio", "name": "qwen/qwen3.6-35b-a3b"},
+        "model": {"provider": "lmstudio", "name": "qwen/qwen3.8-27b"},
     }
 
 

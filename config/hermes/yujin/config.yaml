@@ -15,4 +15,4 @@ mcp_servers: {}
 # 대시보드의 제공자 선택으로 한다.
 model:
   provider: lmstudio
-  name: qwen/qwen3.6-35b-a3b
+  name: qwen/qwen3.8-27b

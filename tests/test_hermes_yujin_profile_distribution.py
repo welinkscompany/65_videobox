@@ -790,5 +790,5 @@ def test_distributed_profile_pins_the_local_model() -> None:
     # provider 키가 없으면 Hermes 가 로그인된 OAuth 제공자로 조용히 넘어간다.
     assert config["model"] == {
         "provider": "lmstudio",
-        "name": "qwen/qwen3.6-35b-a3b",
+        "name": "qwen/qwen3.8-27b",
     }

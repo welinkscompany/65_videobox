@@ -522,7 +522,7 @@ def _default_provider_factory(api_key: str):
 
 # 이 컴퓨터에서만 도는 기억 저장소의 기본값. 전부 로컬을 가리킨다.
 _LOCAL_MEM0_BASE_URL = "http://host.docker.internal:1234/v1"
-_LOCAL_MEM0_LLM_MODEL = "qwen/qwen3.6-35b-a3b"
+_LOCAL_MEM0_LLM_MODEL = "qwen/qwen3.8-27b"
 _LOCAL_MEM0_EMBEDDER_MODEL = "text-embedding-bge-m3"
 _LOCAL_MEM0_EMBEDDING_DIMS = 1024
 _LOCAL_MEM0_STORE_PATH = "/var/lib/videobox-mem0/qdrant"
