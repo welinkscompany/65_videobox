@@ -3,15 +3,22 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
+import shutil
 import sqlite3
+import subprocess
 from threading import Barrier
 from typing import Any
 
 import pytest
 
+from videobox_core_engine.ffmpeg_final_renderer import FfmpegFinalRenderer
 from videobox_core_engine.local_pipeline import LocalPipelineRunner
+from videobox_core_engine.output_variants import MaterializedVariant, build_variant_timeline_payload
+from videobox_domain_models.assets import AssetType
 from videobox_domain_models.jobs import JobStatus, JobType
 from videobox_storage.local_project_store import LocalProjectStore
+
+FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
 class _FakeFinalRenderer:
@@ -263,6 +270,120 @@ def test_materialized_variant_timeline_carries_its_own_orientation_output_size(t
     )
     assert horizontal_timeline["output"] == {"width": 1920, "height": 1080}
     assert vertical_timeline["output"] == {"width": 1080, "height": 1920}
+
+
+def _ffprobe_dimensions(path: Path) -> tuple[int, int]:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "csv=p=0", str(path),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    width_str, height_str = result.stdout.strip().split(",")
+    return int(width_str), int(height_str)
+
+
+def _black_pixel_fraction(path: Path, *, width: int, height: int, at_sec: float) -> float:
+    """실제 프레임 하나를 통째로 읽어 거의 검은 픽셀의 비율을 잰다.
+
+    타임라인 숫자나 필터 문자열을 읽는 것으로는 이 결함(위아래 검은 띠)을
+    못 잡는다 -- 실제로 뽑은 그림이라야 잡힌다.
+    """
+    frame = subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-ss", str(at_sec), "-i", str(path),
+            "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+        ],
+        capture_output=True, timeout=30,
+    )
+    assert frame.returncode == 0, frame.stderr.decode("utf-8", errors="replace")
+    pixels = frame.stdout
+    assert len(pixels) == width * height * 3
+    total = width * height
+    black = sum(
+        1
+        for index in range(0, len(pixels), 3)
+        if pixels[index] < 16 and pixels[index + 1] < 16 and pixels[index + 2] < 16
+    )
+    return black / total
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_vertical_variant_render_actually_comes_out_vertical_and_not_mostly_black_bars(
+    tmp_path: Path,
+) -> None:
+    """Task 2 RED: 타임라인 `output`이 1080x1920으로 고쳐져도(Task 1), 클립의
+    화면 맞춤(`fit`)이 마스터(가로 캔버스에서 고른 값, 기본은 `fit`=패딩)를
+    그대로 물려받으면 실제 mp4는 가운데 얇은 띠만 그림이고 위아래가 거의 다
+    검은 띠다. **타임라인 숫자가 아니라 실제로 렌더한 mp4를 ffprobe·픽셀로
+    잰다.**
+
+    가로 16:9(640x360) 원본을 1080x1920 세로 캔버스에 `pad`로 넣으면:
+    scale=min(1080/640, 1920/360)=1.6875 → 그림 608px, 남는 1312px(전체의
+    약 68%)이 위아래 검은 띠가 된다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Vertical output pixels")
+    source = tmp_path / "landscape.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=640x360:d=2", "-pix_fmt", "yuv420p", str(source)],
+        check=True, capture_output=True,
+    )
+    asset = store.register_asset(project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source)
+    master_timeline: dict[str, Any] = {
+        "output": {"width": 1920, "height": 1080},
+        "tracks": [
+            {
+                "track_type": "broll",
+                "clips": [
+                    {
+                        "clip_id": "c1",
+                        "asset_id": asset.asset_id,
+                        "asset_uri": asset.storage_uri,
+                        "start_sec": 0.0,
+                        "end_sec": 2.0,
+                        # `fit`을 아예 안 적는다 -- 대표님 실제 편집본 대다수가
+                        # 이 상태다(가로 캔버스에서는 기본값의 차이가 안
+                        # 보이니 안 건드린다). "안 고름"이 이 결함의 실제
+                        # 조건이다.
+                        "media_controls": {},
+                    }
+                ],
+            }
+        ],
+    }
+    derived = MaterializedVariant(
+        source_session_id="session-1",
+        source_session_revision=1,
+        source_variant_id="variant-1",
+        source_variant_revision=1,
+        segments=(),
+    )
+    variant_timeline = build_variant_timeline_payload(
+        master_timeline=master_timeline, variant_kind="vertical_full", derived=derived,
+    )
+    assert variant_timeline["output"] == {"width": 1080, "height": 1920}
+
+    renderer = FfmpegFinalRenderer(store=store)
+    output = tmp_path / "vertical.mp4"
+    plan = renderer.extract_composition_plan(timeline=variant_timeline)
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id,
+        timeline=variant_timeline,
+        output_path=output,
+        composition_plan=plan,
+    )
+
+    width, height = _ffprobe_dimensions(output)
+    assert (width, height) == (1080, 1920), f"완성본 실제 크기가 세로가 아니다: {width}x{height}"
+
+    black_fraction = _black_pixel_fraction(output, width=width, height=height, at_sec=1.0)
+    assert black_fraction < 0.2, (
+        f"세로 완성본 화면의 {black_fraction:.0%}가 검은 띠다 -- 화면 채우기가 "
+        "아니라 위아래 패딩으로 나온 것으로 보인다."
+    )
 
 
 def test_final_render_does_not_publish_when_session_changes_after_last_pipeline_check(tmp_path: Path) -> None:

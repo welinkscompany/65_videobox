@@ -8,6 +8,7 @@ records, leaving approval and materialization persistence to later layers.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 
 from videobox_domain_models.output_variants import (
@@ -270,6 +271,55 @@ _MASTER_ONLY_TIMELINE_KEYS = frozenset(
     {"timeline_id", "project_id", "file_uri", "created_at", "summary", "output", "output_mode"}
 )
 
+#: 세로 변형본 두 종류. 가로(`horizontal`)는 마스터와 캔버스 비율이 같으므로
+#: 여기서 건드릴 이유가 없다.
+_VERTICAL_VARIANT_KINDS = frozenset({"vertical_full", "vertical_highlight"})
+
+
+def _fill_frame_for_vertical_variant(
+    raw_tracks: object, *, variant_kind: str
+) -> list[dict[str, object]]:
+    """세로 변형본의 화면 클립은 **기본이 화면 채우기(crop)여야 한다.**
+
+    2026-09-11 실측(`task-2-brief`): 마스터는 가로 캔버스에서 만들어졌고, 화면
+    맞춤(`media_controls.fit`)의 기본값은 `fit`(=패딩)이다. 그 값을 그대로
+    베끼면 1920×1080 원본을 1080×1920에 `scale=decrease,pad`로 넣게 되고,
+    실측으로 위아래 68%가 검은 띠였다 -- 세로 영상으로 못 쓴다.
+
+    변형본에는 `overrides.crop`·`overrides.focal`(`output_variants.py`
+    domain model)이 있어 나중에 창작자가 자를 자리·중심을 직접 고를 수
+    있지만, **지금은 그 둘을 넣는 화면이 없다.** 그래서 "안 고른 기본값"이
+    실제로 owner가 보는 유일한 경우이고, 그 기본값이 화면 채우기여야 한다 --
+    캡컷 같은 세로 변환 도구들도 기본은 잘라서 채우기다. `overrides.crop`에
+    실제 화면이 생기면, 거기서 고른 자르는 위치·초점을 여기 대신(또는
+    함께) 넣어야 한다 -- 지금은 클립마다 다른 자르는 위치를 표현할 수단이
+    없어 넣지 않는다.
+
+    마스터가 이미 명시적으로 `crop`을 골랐어도 다시 쓰는 것은 안전하다
+    (같은 값). `fit`을 일부러 고른 경우(패딩을 원한 경우)까지는 구분하지
+    않는다 -- 저장된 값만으로는 "창작자가 골랐다"와 "기본값이라 안 보였다"를
+    구분할 수 없고, 세로 변환의 기본 기대는 채우기 쪽이다.
+    """
+    tracks = deepcopy(raw_tracks) if isinstance(raw_tracks, list) else []
+    if variant_kind not in _VERTICAL_VARIANT_KINDS:
+        return tracks
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        if str(track.get("track_type") or "").strip().lower() != "broll":
+            continue
+        clips = track.get("clips")
+        if not isinstance(clips, list):
+            continue
+        for clip in clips:
+            if not isinstance(clip, dict):
+                continue
+            controls = clip.get("media_controls")
+            controls = dict(controls) if isinstance(controls, dict) else {}
+            controls["fit"] = "crop"
+            clip["media_controls"] = controls
+    return tracks
+
 
 def build_variant_timeline_payload(
     *,
@@ -302,7 +352,9 @@ def build_variant_timeline_payload(
             "source_session_id": derived.source_session_id,
             "source_session_revision": derived.source_session_revision,
             "segments": list(derived.segments),
-            "tracks": list(master_timeline.get("tracks", []) or []),
+            "tracks": _fill_frame_for_vertical_variant(
+                master_timeline.get("tracks", []), variant_kind=variant_kind
+            ),
         }
     )
     return payload
