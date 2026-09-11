@@ -281,7 +281,12 @@ def test_creator_skill_tells_yujin_how_to_cut_a_short_form() -> None:
         "`vertical_highlight`",
         "숏폼",
         "장면 전체 목록",
-        "여섯 형태",
+        "일곱 형태",
+        # 이미 있는 숏폼을 다시 만드는 길. 프로필에 없으면 유진은 "편집기 단추를
+        # 쓰세요"로 답하고, 그건 **말로 시킬 수 있어야 한다**는 대표님 상시 지시를
+        # 못 지킨다.
+        "`action: remake_short_form`",
+        "숏폼 다시 만들어 줘",
     ):
         assert required in skill
 

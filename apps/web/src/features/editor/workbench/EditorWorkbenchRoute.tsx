@@ -6,7 +6,7 @@ import { voiceSampleLabel } from "./voiceSampleLabel";
 import { dubbingOutcomeMessage, runDubbingWithProgress, type DubbingOutcome } from "./dubbingProgress";
 import { captionTranslationOutcomeMessage, runCaptionTranslationWithProgress, type CaptionTranslationOutcome } from "./captionTranslationProgress";
 
-import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type PartialRegenerationJob, type PartialRegenerationPreflight, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
+import { ApiConflictError, ApiRequestError, DirectorProposalBlockedError, api, type BrollAsset, type DirectorCandidate, type DirectorMessage, type DirectorProposal, type LibraryAsset, type MediaLibraryAsset, type OutputVariant, type YujinEditingProposalPreview, type OutputVariantPatch, type ShortFormScenePick, type PartialRegenerationJob, type PartialRegenerationPreflight, type SceneTransitionSuggestion, type YujinEditingProposal, type YujinMemoryCandidate, type YujinMemoryCategory, type YujinMemoryStoreResult } from "../../../api";
 import { runPartialRegenerationWithProgress, type PartialRegenerationOutcome } from "../partialRegenerationProgress";
 import { Button } from "../../../components/ui/button";
 import { findLatestSucceededJob } from "../../../lib/formatters";
@@ -17,6 +17,8 @@ import { createEditorCommandPort, type EditorCommandPort } from "../editorComman
 import { joinEditorSnapshot, type EditorSessionSnapshot } from "../editorSnapshot";
 import type { EditorCaptionStyle, EditorControls, EditorViewModel } from "../editorViewModel";
 import type { InspectorAction } from "../inspector/InspectorControls";
+import { shortFormPickNotice } from "../variants/shortFormNotice";
+import { shortFormFailureMessage } from "../../outputs/outputFailureMessages";
 import { yujinEditingOperationSummary } from "./yujinEditingSummary";
 import { sceneLabelsBySegmentId, sceneNumbersBySegmentId } from "../sceneNames";
 import { canRestorePartialRegenerationResult, canRunPartialRegeneration, createPartialRegenerationTicket, PARTIAL_REGENERATION_FIELDS, preflightMatchesPartialRegenerationTicket, runMatchesPartialRegenerationTicket, type PartialRegenerationTicket } from "../partialRegenerationController";
@@ -1355,22 +1357,44 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       if (isCurrent()) variantMutationInFlight.current = false;
     }
   };
-  const createHighlightVariant = async () => {
-    if (variantMutationInFlight.current || !sessionId || activeVariants.some((variant) => variant.kind === "vertical_highlight")) return;
+  /** 숏폼을 만들거나, 이미 있으면 **다시 만든다.**
+   *
+   * 한 편집본에 숏폼은 하나뿐이라(`output_variants`의 유일 제약) 두 번 만들 수
+   * 없고 지우는 문도 없다. 전에는 이 단추가 `이미 있으면 아무것도 안 함`으로
+   * 막혀 있어서, 한 번 쓰면 **아무 설명 없이 죽은 단추**가 됐다(2026-09-11 실물
+   * 확인). 이제 이미 있으면 그 숏폼의 장면을 다시 판단해 갈아 끼운다 -- 되돌리기는
+   * `전체 장면으로 되돌리기`(통째 목록 PATCH)가 그대로 지킨다.
+   */
+  const makeShortForm = async (existing?: OutputVariant) => {
+    if (variantMutationInFlight.current || !sessionId) return;
+    const target = existing ?? activeVariants.find((variant) => variant.kind === "vertical_highlight");
     variantMutationInFlight.current = true;
     const operationId = variantOperationId.current + 1;
     variantOperationId.current = operationId;
     const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
-    setVariants((current) => current.key === requestKey ? { ...current, message: "숏폼을 만드는 중이에요.", busy: true } : current);
+    setVariants((current) => current.key === requestKey ? { ...current, message: target ? "숏폼을 다시 만드는 중이에요." : "숏폼을 만드는 중이에요.", busy: true } : current);
     try {
-      const result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
       // **누가 골랐는지를 서버가 말해 준다**(2026-09-11). 유진이 골랐을 때와
       // 자막 밀도로 내려갔을 때의 문구가 달라야 한다 -- 글자 수로 고른 결과를
       // 유진의 판단이라고 말하는 것이 이 기능에서 제일 나쁜 결과다.
-      const notice = result.scene_pick?.notice ?? "자막이 많은 장면 위주로 자동으로 골랐어요.";
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: `숏폼을 만들었어요. ${notice} 마음에 안 들면 전체 장면으로 되돌릴 수 있어요.`, busy: false } : current);
-    } catch {
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "숏폼을 만들지 못했어요.", busy: false } : current);
+      const result = target
+        ? await api.repickShortFormScenes(projectId, target.variant_id, { expected_variant_revision: target.variant_revision })
+        : await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
+      const message = shortFormPickNotice(result.scene_pick, { remade: Boolean(target) });
+      if (isCurrent()) setVariants((current) => current.key !== requestKey ? current : {
+        ...current,
+        items: current.items.some((item) => item.variant_id === result.variant.variant_id)
+          ? current.items.map((item) => item.variant_id === result.variant.variant_id ? result.variant : item)
+          : [...current.items, result.variant],
+        message,
+        busy: false,
+      });
+    } catch (error) {
+      // 서버가 보내는 사유를 대표님이 할 수 있는 일로 옮긴다. 표는
+      // `outputFailureMessages`에 있는 것을 같이 쓴다 -- 새 표를 만들면 같은
+      // 코드가 화면마다 다른 문장으로 뜬다.
+      const detail = error instanceof ApiRequestError ? error.detail : null;
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: shortFormFailureMessage(detail), busy: false } : current);
     } finally {
       if (isCurrent()) variantMutationInFlight.current = false;
     }
@@ -2134,11 +2158,16 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
             setDirector({ ...activeDirector, state: "blocked" });
             throw new Error("stale director proposal");
           }
+           let appliedScenePick: ShortFormScenePick | undefined;
            if (selectedYujinCandidate && isActionableYujinVariantCandidate(selectedYujinCandidate)) {
-             await api.batchApplyDirectorProposal(projectId, proposalId, {
+             const applied = await api.batchApplyDirectorProposal(projectId, proposalId, {
                candidate_ids: [...candidateIds],
                expected_revision: currentRevision,
              });
+             // 유진에게 "숏폼 다시 만들어줘"라고 말한 경우에만 온다. 그때 장면을
+             // 고른 것은 유진이 채팅에서 본 일부가 아니라 **서버가 판 전체를
+             // 고르게 읽은 판단**이라, 문구가 달라야 한다.
+             appliedScenePick = applied.scene_pick;
            } else if (selectedYujinCandidate && isActionableYujinMediaCandidate(selectedYujinCandidate)) {
             const materialized = await api.materializeDirectorCandidate(
               projectId,
@@ -2163,7 +2192,9 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
               // 안 읽으면 `전체 장면으로 되돌리기`가 낡은 버전을 보내 막힌다.
               setVariantRefresh((current) => ({
                 token: current.token + 1,
-                notice: yujinSceneChangeNotice(selectedYujinCandidate),
+                notice: appliedScenePick
+                  ? shortFormPickNotice(appliedScenePick, { remade: true })
+                  : yujinSceneChangeNotice(selectedYujinCandidate),
               }));
             }
             // **여기서만 완료로 적는다.** 실패는 catch로 빠지므로 이 줄에 왔다는
@@ -2401,7 +2432,8 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     serverVariants={activeVariants}
     onVariantMaterialize={materializeOutputVariant}
     onVariantPatch={patchOutputVariant}
-    onVariantCreateHighlight={createHighlightVariant}
+    onVariantCreateHighlight={() => makeShortForm()}
+    onVariantRemakeShortForm={makeShortForm}
     variantBusy={variants.key === requestKey && variants.busy}
     view={state.view}
     />

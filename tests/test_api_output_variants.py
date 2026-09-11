@@ -24,10 +24,10 @@ class _OfflineProvider:
         raise LLMProviderError(provider_name="local_qwen", message="engine off")
 
 
-def _offline_app(tmp_path: Path, *, name: str = "Output variants API"):
+def _offline_app(tmp_path: Path, *, name: str = "Output variants API", provider: object | None = None):
     app = create_app(
         projects_root=tmp_path / "projects",
-        local_only_runtime_service_factory=_runtime_factory(_OfflineProvider()),
+        local_only_runtime_service_factory=_runtime_factory(provider or _OfflineProvider()),
     )
     return app
 
@@ -354,9 +354,9 @@ def test_materialize_route_rebuilds_a_cache_left_by_the_old_copy_logic(tmp_path:
     assert rebuilt["output"] == {"width": 1080, "height": 1920}
 
 
-def _short_form_project(tmp_path: Path):
+def _short_form_project(tmp_path: Path, *, provider: object | None = None):
     """장면 셋짜리 프로젝트와, 그 위에 만들어진 숏폼(세로 하이라이트) 모양."""
-    app = _offline_app(tmp_path)
+    app = _offline_app(tmp_path, provider=provider)
     client = TestClient(app)
     project = client.post("/api/projects", json={"name": "숏폼 장면 고르기"}).json()
     session = app.state.store.save_editing_session(
@@ -378,8 +378,16 @@ def _short_form_project(tmp_path: Path):
     return app, client, project["project_id"], session, variant
 
 
-def _save_short_form_proposal(app, project_id: str, session: dict, variant: dict, segment_ids: list[str]) -> str:
-    """유진이 실제로 돌려주는 모양 그대로 만들어 저장한다 (파싱 -> 되짚기 -> 저장)."""
+def _save_short_form_proposal(
+    app, project_id: str, session: dict, variant: dict, parameters: dict
+) -> str:
+    """유진이 실제로 돌려주는 모양 그대로 만들어 저장한다 (파싱 -> 되짚기 -> 저장).
+
+    `parameters`를 그대로 받는 이유는 숏폼에 닿는 유진 action이 둘이기 때문이다 --
+    장면을 직접 고르는 `select_segments`와 판 전체를 다시 판단하게 하는
+    `remake_short_form`. 둘이 **같은 적용 경로**를 지나는지 재려면 같은 harness를
+    써야 한다.
+    """
     import json as _json
 
     from videobox_core_engine.yujin_creator_proposal_adapter import (
@@ -444,7 +452,7 @@ def _save_short_form_proposal(app, project_id: str, session: dict, variant: dict
                         "variant_id": str(variant["variant_id"]),
                         "track_id": "output-variant",
                     },
-                    "parameters": {"action": "select_segments", "segment_ids": segment_ids},
+                    "parameters": dict(parameters),
                     "requires_materialization": False,
                     "preview_summary": "숏폼에 넣을 장면 목록",
                 }
@@ -488,7 +496,11 @@ def test_yujin_short_form_cut_applies_through_the_real_apply_route(tmp_path: Pat
     app, client, project_id, session, variant = _short_form_project(tmp_path)
     before = list(variant["selected_segment_ids"] or [])
     proposal_id = _save_short_form_proposal(
-        app, project_id, session, variant, ["seg-hook", "seg-close"]
+        app,
+        project_id,
+        session,
+        variant,
+        {"action": "select_segments", "segment_ids": ["seg-hook", "seg-close"]},
     )
     candidate_id = app.state.store.get_director_proposal(
         project_id=project_id, proposal_id=proposal_id
@@ -688,3 +700,147 @@ def test_a_long_form_does_not_take_its_short_only_from_the_opening(tmp_path: Pat
     assert body["scene_pick"]["scenes_total"] == 243
     assert body["scene_pick"]["scenes_read_by_yujin"] < 243
     assert "전체 243개" in body["scene_pick"]["notice"]
+
+
+# --- 숏폼 다시 만들기 --------------------------------------------------------
+#
+# 2026-09-11 실물 측정: 한 편집본에 숏폼이 한 번 생기면 다시 만들 길이 없었다.
+# `(project_id, source_session_id, kind)` 유일 제약 때문에 두 번째 만들기는
+# `IntegrityError`로 죽어 대표님에게 맨 `Internal Server Error`가 갔고, 지우는
+# 문은 없으며(`delete_output_variant`는 저장소 전체에 0건), 화면 단추는 한 번
+#쓰면 조용히 죽어 있었다.
+#
+# 그래서 "다시 만들기"는 **같은 모양의 장면 목록을 다시 판단해 갈아 끼우는
+# 일**이다 -- 지우고 새로 만드는 것이 아니다. 되돌리기는 이미 있는 통째 목록
+# PATCH(`전체 장면으로 되돌리기`)가 그대로 지킨다.
+
+
+@dataclass
+class _ChangingScenePickProvider:
+    """부를 때마다 다른 장면을 고르는 가짜 심사자.
+
+    **다시 만들기가 실제로 다시 판단하는지**를 재려면 두 번의 답이 달라야 한다.
+    같은 답이면 "다시 골랐다"와 "아무것도 안 했다"를 구분할 수 없다.
+    """
+
+    sweeps: int = 0
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        self.sweeps += 1
+        wanted = "결론입니다" if self.sweeps == 1 else "중간 설명"
+        block = request.prompt.split("고를 장면:", 1)[1]
+        picks = []
+        for line in block.splitlines():
+            stripped = line.strip()
+            if not stripped[:1].isdigit():
+                continue
+            number_text, _, caption = stripped.partition(". ")
+            if wanted in caption:
+                picks.append({"scene": int(number_text), "worth": 5, "why": "conclusion"})
+        output_data = {"schema_version": "videobox.short-form-scene-pick.v1", "picks": picks}
+        return StructuredLLMResponse(
+            provider_name="local_qwen",
+            model_name="Qwen3-32B",
+            output_data=output_data,
+            raw_text=json.dumps(output_data, ensure_ascii=False),
+            metadata={},
+        )
+
+
+def test_a_short_can_be_remade_and_yujin_judges_the_scenes_again(tmp_path: Path) -> None:
+    """대표님이 숏폼을 **다시** 만들 수 있다. 유진이 판을 다시 읽고 목록을 갈아 끼운다."""
+    provider = _ChangingScenePickProvider()
+    app, client, project_id, session, variant = _short_form_project(tmp_path, provider=provider)
+    assert variant["selected_segment_ids"] == ["seg-close"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick",
+        json={"expected_variant_revision": int(variant["variant_revision"])},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["variant"]["selected_segment_ids"] == ["seg-middle"]
+    assert body["variant"]["variant_revision"] == int(variant["variant_revision"]) + 1
+    assert body["scene_pick"]["judged_by"] == "yujin"
+    assert provider.sweeps == 2, "다시 만들기가 유진을 다시 부르지 않으면 다시 판단한 것이 아니다"
+    # 저장된 값까지 본다. 응답만 보면 화면이 받은 것과 저장된 것이 갈릴 수 있다.
+    stored = app.state.store.get_output_variant(
+        project_id=project_id, variant_id=variant["variant_id"]
+    )
+    assert stored["selected_segment_ids"] == ["seg-middle"]
+
+
+def test_remaking_a_short_that_lands_on_the_same_scenes_still_succeeds(tmp_path: Path) -> None:
+    """다시 판단했는데 결과가 같을 수 있다. 그때 대표님에게 오류를 보이지 않는다.
+
+    `apply_variant_patch`는 바뀐 것이 없으면 **버전을 안 올린 그대로** 돌려주고,
+    그 값을 저장소에 그대로 넘기면 `variant_revision_must_advance_by_one`으로
+    422가 난다 -- 판단은 정상이었는데 화면에는 실패로 보인다. 그래서 결과가 같아도
+    버전은 올라간다(`remade_short_form_variant`). 두 쓰는 문(화면 PATCH·유진 제안
+    트랜잭션)이 둘 다 버전 1 증가를 요구하므로, 부르는 쪽마다 따로 판단하게 두면
+    두 경로가 갈린다.
+    """
+    app, client, project_id, session, variant = _short_form_project(tmp_path)
+    before = list(variant["selected_segment_ids"] or [])
+
+    response = client.post(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/repick",
+        json={"expected_variant_revision": int(variant["variant_revision"])},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["variant"]["selected_segment_ids"] == before
+    assert body["variant"]["variant_revision"] == int(variant["variant_revision"]) + 1
+    assert body["scene_pick"]["judged_by"] == "caption_density"
+
+
+def test_a_second_short_tells_the_owner_what_to_do_instead_of_a_bare_500(tmp_path: Path) -> None:
+    """같은 편집본에 숏폼을 두 번 만들려 하면 **할 수 있는 일**을 알려 준다.
+
+    전에는 유일 제약 위반이 아무도 안 잡아서 맨 `Internal Server Error`가 갔다.
+    """
+    app, client, project_id, session, variant = _short_form_project(tmp_path)
+
+    response = client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "short_form_already_exists"
+
+
+def test_yujin_can_remake_the_short_when_the_owner_tells_her_to(tmp_path: Path) -> None:
+    """대표님이 유진에게 "숏폼 다시 만들어줘"라고 말해도 된다.
+
+    채팅으로 `select_segments`를 쓰면 유진은 창작 맥락에 담긴 장면(최대 32개)만
+    보고 고른다 -- 243장면짜리 롱폼에서는 단추 경로(영상 전 구간에서 고르게
+    추린 48개)보다 못한 판단이고, 프로필도 그럴 때는 단추를 쓰라고 안내한다.
+    "단추를 쓰세요"는 **말로 시킬 수 있다**는 요구를 못 지킨다. 그래서
+    `remake_short_form`은 단추와 **같은 판단 쓸기**를 서버에서 돌린다.
+    """
+    provider = _ChangingScenePickProvider()
+    app, client, project_id, session, variant = _short_form_project(tmp_path, provider=provider)
+    assert variant["selected_segment_ids"] == ["seg-close"]
+    proposal_id = _save_short_form_proposal(
+        app, project_id, session, variant, {"action": "remake_short_form"}
+    )
+    candidate_id = app.state.store.get_director_proposal(
+        project_id=project_id, proposal_id=proposal_id
+    ).candidates[0].candidate_id
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply",
+        json={
+            "candidate_ids": [candidate_id],
+            "expected_revision": int(session["session_revision"]),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["variant"]["selected_segment_ids"] == ["seg-middle"]
+    assert body["scene_pick"]["judged_by"] == "yujin"
+    assert provider.sweeps == 2

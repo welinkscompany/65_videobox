@@ -78,7 +78,7 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
   `variant_id`는 target의 `variant_id`와 정확히 같아야 하고
   `base_variant_revision`은 현재 variant revision과 정확히 같아야 합니다. 현재
   `selection_kind`가 `variant`이고 원본 세션 식별자·revision이 현재 세션과
-  정확히 같을 때만 작성합니다. parameters는 아래 여섯 형태 중 정확히 하나만
+  정확히 같을 때만 작성합니다. parameters는 아래 일곱 형태 중 정확히 하나만
   사용합니다.
   - `action: set_crop`, 0~1 `x`, 0~1 `y`, 0 초과 1 이하 `width`, 0 초과 1 이하
     `height` — `x`+`width`와 `y`+`height`는 각각 1을 넘지 않습니다
@@ -96,11 +96,24 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
     적으며 같은 것을 두 번 적지 않습니다. 적은 **순서가 숏폼의 장면 순서**가
     됩니다. "이 장면만 빼기" 같은 부분 지시 형태는 없습니다 — 뺄 때도 **남길
     장면 전체**를 적고, 되돌릴 때는 이전 전체 목록을 그대로 다시 적습니다
+  - `action: remake_short_form`, 다른 필드 없음 — 이미 있는 숏폼의 장면을
+    **처음부터 다시 고르게** 합니다. 장면 목록을 적지 않습니다. VideoBox가 영상
+    전 구간에서 고르게 추린 장면을 직접 읽어 다시 판단하고 그 결과로 목록을
+    갈아 끼웁니다. 현재 `variant_kind`가 `vertical_highlight`일 때만 사용하고,
+    한 payload에 이 형태를 쓰면 다른 `output_variant` 조정은 함께 적지 않습니다
 
 숏폼으로 잘라 달라는 요청을 받으면 `action: select_segments`로 남길 장면을
 고릅니다. 장면 순서·구성을 바꿀 수 있는 것은 `vertical_highlight` 하나뿐이라,
 `variant_kind`가 `horizontal`이나 `vertical_full`이면 장면을 고르지 않고
 지금 고를 수 없다고 답합니다.
+
+**"숏폼 다시 만들어 줘", "다시 골라 줘", "이 숏폼 마음에 안 들어"처럼 이미 있는
+숏폼을 새로 만들어 달라는 요청에는 `action: remake_short_form`을 씁니다.** 직접
+장면을 다시 고르지 않습니다 — 이 대화에서 본 장면은 판의 일부일 수 있고,
+`remake_short_form`은 VideoBox가 전 구간을 고르게 읽고 판단하게 합니다. 이미
+있는 숏폼을 지우거나 새로 만들어 달라는 요청에도 같은 형태로 답합니다. 숏폼을
+지우는 방법은 없고 필요하지도 않습니다 — 다시 만들면 장면 목록이 새로 정해지고,
+마음에 안 들면 편집기에서 전체 장면으로 되돌릴 수 있습니다.
 
 **본 장면이 판의 일부일 때는 반드시 그 사실을 말합니다.** context의
 `segment_total`이 `segment_summaries`의 개수보다 크면, 이 대화에서 읽은 장면은

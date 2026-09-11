@@ -413,13 +413,36 @@ class VariantSegmentSelectionParameters(_Parameters):
         return value
 
 
+class VariantShortFormRemakeParameters(_Parameters):
+    """숏폼을 **다시 만든다.** 장면 목록을 유진이 적지 않는다.
+
+    `select_segments`와 왜 따로 있는가. 채팅으로 장면을 직접 고를 때 유진이 보는
+    것은 창작 맥락의 `segment_summaries`이고 그건 32개에서 잘린다 -- 243장면짜리
+    롱폼에서는 단추 경로(영상 전 구간에서 고르게 추린 48개를 읽는
+    `short_form_scene_pick`)보다 못한 판단이다. 그래서 프로필은 그럴 때 단추를
+    쓰라고 안내해 왔는데, "단추를 쓰세요"는 **말로 시킬 수 있어야 한다**는
+    대표님 상시 지시를 못 지킨다.
+
+    이 action은 그 쓸기를 **서버에서** 돌리게 한다. 유진은 "다시 판단해"라고만
+    말하고, 판을 전부 읽는 일은 단추와 똑같은 코드가 한다. 읽기 전용 검사
+    (`output_check: timeline_gaps`)와 같은 모양이다 -- 결과를 backend가 만든다.
+
+    파라미터가 없는 이유: 목록을 직접 주는 길은 이미 `select_segments`에 있다.
+    둘을 겹치게 하면 "다시 만들기"가 사실은 유진이 눈대중으로 고른 목록인
+    경우가 생기고, 그건 대표님이 구분할 수 없다.
+    """
+
+    action: Literal["remake_short_form"]
+
+
 VariantParameters = Annotated[
     VariantCropParameters
     | VariantFocalParameters
     | VariantCaptionLayoutParameters
     | VariantSafeAreaParameters
     | VariantAudioCorrectionParameters
-    | VariantSegmentSelectionParameters,
+    | VariantSegmentSelectionParameters
+    | VariantShortFormRemakeParameters,
     Field(discriminator="action"),
 ]
 
@@ -658,18 +681,20 @@ def validate_yujin_creator_response(
                 or target.variant_id != context.variant_id
             ):
                 raise ValueError("proposal_variant_identity_not_current")
-            if operation.parameters.action == "select_segments":
+            if operation.parameters.action in {"select_segments", "remake_short_form"}:
                 # 장면 구성을 바꿀 수 있는 모양은 **숏폼(세로 하이라이트)뿐이다.**
                 # 세로 전체본은 `materialize_variant`가
                 # `vertical_full_segment_order_or_membership_changed`로,
                 # `apply_variant_patch`는 `only_vertical_highlight_can_select_segments`로
                 # 거부한다 -- 유진이 그 자리까지 가지 않게 여기서 먼저 막는다.
+                # 다시 만들기(`remake_short_form`)도 결국 같은 목록을 갈아 끼우므로
+                # 같은 경계를 받는다.
                 if context.variant_kind != "vertical_highlight":
                     raise ValueError("proposal_variant_kind_cannot_select_segments")
-                if any(
-                    item not in segment_ids for item in operation.parameters.segment_ids
-                ):
-                    raise ValueError("proposal_target_segment_not_current")
+            if operation.parameters.action == "select_segments" and any(
+                item not in segment_ids for item in operation.parameters.segment_ids
+            ):
+                raise ValueError("proposal_target_segment_not_current")
             continue
         if operation.kind in segment_required and target.segment_id not in segment_ids:
             raise ValueError("proposal_target_segment_not_current")

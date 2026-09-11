@@ -115,6 +115,10 @@ type EditorWorkbenchProps = Readonly<{
   onVariantMaterialize?: (variant: OutputVariant) => void | Promise<void>;
   onVariantPatch?: (variant: OutputVariant, patch: OutputVariantPatch) => void | Promise<void>;
   onVariantCreateHighlight?: () => void | Promise<void>;
+  /** 이미 있는 숏폼의 장면을 다시 판단해 갈아 끼운다. 숏폼은 한 편집본에
+   *  하나뿐이라 두 번 만들 수 없고, 그래서 `만들기` 단추만 있으면 한 번 쓴 뒤
+   *  조용히 죽는다(2026-09-11 실물 확인). */
+  onVariantRemakeShortForm?: (variant: OutputVariant) => void | Promise<void>;
   variantBusy?: boolean;
 }>;
 
@@ -154,6 +158,7 @@ function EditorWorkbenchInstance({
   onVariantMaterialize,
   onVariantPatch,
   onVariantCreateHighlight,
+  onVariantRemakeShortForm,
   variantBusy = false,
 }: EditorWorkbenchProps) {
   const viewRouteKey = `${view.projectId}:${view.sessionId}`;
@@ -755,10 +760,10 @@ function EditorWorkbenchInstance({
       <VariantSelector selected={variantMode} onSelect={setVariantMode} />
       {variantMode === "master" ? <p className="vb-editor-variants__master-note">현재 마스터 편집본을 기준으로 출력 변형을 확인합니다.</p> : <>
         <VariantCompare master={variantMaster} variant={variantPreview} onSeek={seekPlayback} />
-        {serverVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={serverVariant} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onCreateHighlight={onVariantCreateHighlight} /> : null}
+        {serverVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={serverVariant} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onCreateHighlight={onVariantCreateHighlight} onRemakeShortForm={onVariantRemakeShortForm} /> : null}
       </>}
       {showVariantCompare ? <VariantConflictPanel conflicts={variantPreview.conflicts} onKeep={(field) => resolveConflict(field, "keep_local")} onRebase={(field) => resolveConflict(field, "rebase_master")} /> : null}
-      {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} /> : null}</> : null}
+      {highlightVariant && onVariantMaterialize && onVariantPatch ? <VariantServerControls variant={highlightVariant} masterSegmentIds={masterSegmentIds} busy={variantBusy} onMaterialize={onVariantMaterialize} onPatch={onVariantPatch} onRemakeShortForm={onVariantRemakeShortForm} /> : null}</> : null}
     </section>
     <div
       role="separator"

@@ -50,6 +50,28 @@ describe("VariantServerControls", () => {
     expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ kind: "vertical_highlight" }), { selected_segment_ids: ["seg-b", "seg-a"] });
   });
 
+  it("keeps a made short form remakeable instead of leaving a dead button", () => {
+    // 숏폼은 한 편집본에 하나뿐이라(유일 제약) 두 번 만들 수 없다. 전에는
+    // `만들기` 단추가 한 번 쓰이면 조용히 죽어 있었고, 대표님에게는 다시 만들
+    // 길이 아예 없었다. 지우는 문 대신 **다시 판단해 갈아 끼우는** 단추를 둔다.
+    const onRemakeShortForm = vi.fn();
+    const highlight = { ...variant, kind: "vertical_highlight" as const, variant_id: "highlight-1" };
+    render(
+      <VariantServerControls
+        variant={highlight}
+        onMaterialize={vi.fn()}
+        onPatch={vi.fn()}
+        onRemakeShortForm={onRemakeShortForm}
+        masterSegmentIds={["seg-b", "seg-a"]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "숏폼 다시 만들기" }));
+    expect(onRemakeShortForm).toHaveBeenCalledWith(highlight);
+    // 되돌리기는 그대로 있어야 한다 -- 다시 만들기의 안전장치가 그것이다.
+    expect(screen.getByRole("button", { name: "전체 장면으로 되돌리기" })).toBeInTheDocument();
+  });
+
   it("shows the conflict state without hiding server lineage", () => {
     render(<VariantServerControls variant={{ ...variant, conflicts: [{ field: "crop", reason: "master_changed_while_locked", base_master_revision: 4, current_master_revision: 5 }] }} onMaterialize={vi.fn()} onPatch={vi.fn()} />);
     expect(screen.getByText("서버 충돌 1건")).toBeInTheDocument();

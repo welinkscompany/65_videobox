@@ -504,6 +504,15 @@ export type OutputVariant = {
   master_segment_ids?: string[] | null;
 };
 
+/** 숏폼 장면을 **누가** 골랐는지와, 판에서 몇 개를 읽고 골랐는지. 숏폼을 만들 때와
+ *  다시 만들 때 같은 모양으로 온다 -- 화면 문구가 한 곳에서 갈린다. */
+export type ShortFormScenePick = {
+  judged_by: "yujin" | "caption_density";
+  notice: string;
+  scenes_total: number;
+  scenes_read_by_yujin: number;
+};
+
 export type OutputVariantPatch = {
   overrides?: Partial<OutputVariant["overrides"]>;
   lock_fields?: string[];
@@ -2155,8 +2164,11 @@ export const api = {
   ),
   applyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
     request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_ids: payload.candidate_ids, expected_revision: payload.expected_revision }) }),
+  // 변형본(숏폼) 제안을 적용하면 편집본이 아니라 변형본이 돌아온다. 유진에게
+  // "숏폼 다시 만들어줘"라고 말한 경우에는 `scene_pick`도 같이 온다 -- **누가
+  // 골랐는지**를 화면이 그대로 말해야 한다.
   batchApplyDirectorProposal: (projectId: string, proposalId: string, payload: { candidate_ids: string[]; expected_revision: number }) =>
-    request<ApplyDirectorProposalResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/batch-apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+    request<ApplyDirectorProposalResponse & { scene_pick?: ShortFormScenePick }>(`/api/projects/${projectId}/director/proposals/${proposalId}/batch-apply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   materializeDirectorCandidate: (projectId: string, proposalId: string, candidateId: string) =>
     request<AssetResponse>(`/api/projects/${projectId}/director/proposals/${proposalId}/candidates/${encodeURIComponent(candidateId)}/materialize`, { method: "POST" }),
   directorCandidatePreviewUrl: (projectId: string, proposalId: string, candidateId: string) =>
@@ -2408,8 +2420,18 @@ export const api = {
    * 말하면 안 된다(2026-09-11, `short_form_scene_pick.py`).
    */
   createOutputVariant: (projectId: string, payload: { source_session_id: string; kind: "vertical_highlight"; variant_id?: string }) =>
-    request<{ variant: OutputVariant; scene_pick?: { judged_by: "yujin" | "caption_density"; notice: string; scenes_total: number; scenes_read_by_yujin: number } }>(
+    request<{ variant: OutputVariant; scene_pick?: ShortFormScenePick }>(
       `/api/projects/${encodeURIComponent(projectId)}/output-variants`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  /**
+   * 이미 있는 숏폼의 장면을 **다시 판단해** 갈아 끼운다. 새 숏폼을 만들지
+   * 않는다 -- 한 편집본에 숏폼은 하나뿐이고, 두 번째 만들기는 유일 제약에
+   * 걸린다(그때는 서버가 `short_form_already_exists`를 보낸다).
+   */
+  repickShortFormScenes: (projectId: string, variantId: string, payload: { expected_variant_revision?: number }) =>
+    request<{ variant: OutputVariant; scene_pick?: ShortFormScenePick }>(
+      `/api/projects/${encodeURIComponent(projectId)}/output-variants/${encodeURIComponent(variantId)}/repick`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
   patchOutputVariant: (projectId: string, variantId: string, payload: { expected_variant_revision: number; patch: OutputVariantPatch }) =>

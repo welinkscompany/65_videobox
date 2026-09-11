@@ -34,6 +34,13 @@ const FINAL_RENDER_FAILURES: Record<string, string> = {
   // "이 출력을 만들지 못했어요." 한 줄로 뭉갠다 -- 예전에 전부
   // `renderer_failed`로 찍히던 때보다 오히려 할 일이 사라졌다.
   // 그 함수가 만드는 코드는 이 셋이 전부이고, 나머지 예외는 문장 그대로 온다.
+  // 숏폼은 한 편집본에 하나뿐이다(`output_variants`의 유일 제약). 두 번 만들려
+  // 하면 서버가 이 코드를 보낸다 -- 전에는 아무도 안 잡아서 맨
+  // `Internal Server Error`가 그대로 대표님에게 갔다(2026-09-11 실물 재현).
+  // 할 수 있는 일을 말한다: 지우는 것이 아니라 **다시 만드는 것**이다.
+  short_form_already_exists: "이 편집본에는 숏폼이 이미 있어요. 숏폼 다시 만들기를 누르면 장면을 새로 골라 줘요.",
+  // 다시 만들려는데 고를 장면이 하나도 없을 때. 지금 숏폼은 그대로 둔다.
+  short_form_has_no_scene_to_pick: "숏폼에 넣을 장면을 찾지 못했어요. 지금 숏폼은 그대로 뒀어요. 장면을 넣거나 자막을 채운 뒤 다시 해 주세요.",
   asset_file_missing: "쓰던 파일을 찾지 못했어요. 그 파일이 자리에 있는지 확인한 뒤 다시 만들어 주세요.",
   asset_file_permission_denied: "쓰던 파일을 열 수 없었어요. 그 파일이 다른 프로그램에서 열려 있지 않은지 확인한 뒤 다시 만들어 주세요.",
   external_command_failed: "영상을 합치는 도중에 멈췄어요. 다시 만들어 주세요. 그래도 안 되면 쓰던 파일이 온전한지 확인해 주세요.",
@@ -84,6 +91,13 @@ export function subtitleFailureMessage(reason: string | null | undefined) {
 
 export function capcutDraftFailureMessage(reason: string | null | undefined) {
   return outputFailureMessage(reason, "CapCut 초안을 만들지 못했어요.");
+}
+
+/** 숏폼을 만들거나 **다시 만들** 때 실패했을 때(편집기의 `가로·세로 비교` 칸).
+ *  표를 새로 만들지 않고 위 표를 같이 쓴다 -- 같은 코드가 화면마다 다른 문장으로
+ *  뜨는 사고를 막는 것이 이 파일이 있는 이유다. */
+export function shortFormFailureMessage(reason: string | null | undefined) {
+  return outputFailureMessage(reason, "숏폼을 만들지 못했어요.");
 }
 
 /** 가로세로 변형본(`VariantOutputCard`)이 실패했을 때. 표에 없는 코드가 와도

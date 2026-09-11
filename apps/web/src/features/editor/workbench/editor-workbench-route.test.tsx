@@ -5171,6 +5171,47 @@ describe("숏폼 화면 정직성", () => {
     expect(message.textContent ?? "").not.toMatch(/유진/);
   });
 
+  it("이미 만든 숏폼도 다시 만들 수 있다", async () => {
+    // 숏폼은 한 편집본에 하나뿐이라(유일 제약) 두 번 만들 수 없고 지우는 문도
+    // 없다. 전에는 단추가 `이미 있으면 아무것도 안 함`으로 막혀 있어서, 한 번
+    // 쓰면 아무 설명 없이 죽은 단추가 됐다 -- 대표님에게 다시 만들 길이 없었다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    const highlight = {
+      variant_id: "variant-short", kind: "vertical_highlight",
+      source_session_id: "session-a", source_session_revision: 1, variant_revision: 3,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [], conflicts: [], selected_segment_ids: ["seg-a"],
+    };
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [highlight] } as never);
+    const repick = vi.spyOn(api, "repickShortFormScenes").mockResolvedValue({
+      variant: { ...highlight, variant_revision: 4, selected_segment_ids: ["seg-b"] },
+      scene_pick: {
+        judged_by: "yujin", notice: "유진이 전체 장면을 읽고 숏폼에 넣을 장면을 골랐어요.",
+        scenes_total: 3, scenes_read_by_yujin: 3,
+      },
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    if (expand) fireEvent.click(expand);
+    fireEvent.click(await screen.findByRole("button", { name: "숏폼 다시 만들기" }));
+
+    expect(await screen.findByText(/숏폼을 다시 만들었어요/)).toBeVisible();
+    // **새 모양을 만들지 않는다.** 만들려 하면 유일 제약에 걸려 500이 났다.
+    expect(repick).toHaveBeenCalledWith("project-a", "variant-short", {
+      expected_variant_revision: 3,
+    });
+  });
+
   it("채팅으로 고를 때 몇 장면 중 몇 개를 봤는지 말한다", () => {
     // 단추 경로는 영상 전 구간에서 고르게 추린 장면을 읽지만, 채팅 경로는
     // 창작 맥락에 담긴 장면만 본다. 그 차이를 말하지 않으면 대표님이 이걸

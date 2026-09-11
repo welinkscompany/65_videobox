@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -9,6 +10,12 @@ from videobox_api.models import (
     OutputVariantMaterializeRequest,
     OutputVariantPatchRequest,
     OutputVariantRebaseRequest,
+    OutputVariantRepickRequest,
+)
+from videobox_api.short_form_scenes import (
+    remade_short_form_variant,
+    scene_pick_payload,
+    short_form_scene_pick,
 )
 from videobox_core_engine.output_variants import (
     VariantInvariantError,
@@ -19,7 +26,6 @@ from videobox_core_engine.output_variants import (
     rebase_variant,
     variant_timeline_needs_rebuild,
 )
-from videobox_core_engine.short_form_scene_pick import pick_short_form_scenes
 from videobox_domain_models.output_variants import OutputVariant
 from videobox_storage.local_project_store import (
     EditingSessionRevisionConflict,
@@ -103,19 +109,13 @@ def build_output_variants_router(
     def create_variant(project_id: str, request: OutputVariantCreateRequest) -> dict[str, object]:
         try:
             # **숏폼에 넣을 장면은 유진이 고른다**(2026-09-11). 저장소에는 런타임이
-            # 없어서 고르는 일을 여기서 한다. 누가 골랐는지(`judged_by`)를 응답에
-            # 같이 실어 보내는 이유는 화면 문구 때문이다 -- 자막 밀도로 고른 결과를
-            # "유진이 골랐어요"라고 말하면 안 된다.
-            session = store.get_editing_session(
-                project_id=project_id, session_id=request.source_session_id
-            )
-            pick = pick_short_form_scenes(
-                [
-                    segment
-                    for segment in session.get("segments", [])
-                    if isinstance(segment, dict)
-                ],
+            # 없어서 고르는 일을 저장소 밖에서 한다. 누가 골랐는지(`judged_by`)를
+            # 응답에 같이 실어 보내는 이유는 화면 문구 때문이다 -- 자막 밀도로 고른
+            # 결과를 "유진이 골랐어요"라고 말하면 안 된다.
+            pick = short_form_scene_pick(
+                store=store,
                 project_id=project_id,
+                session_id=request.source_session_id,
                 runtime=yujin_runtime_service,
             )
             return {
@@ -126,12 +126,52 @@ def build_output_variants_router(
                     variant_id=request.variant_id,
                     selected_segment_ids=pick.segment_ids,
                 ),
-                "scene_pick": {
-                    "judged_by": pick.judged_by,
-                    "notice": pick.notice,
-                    "scenes_total": pick.scenes_total,
-                    "scenes_read_by_yujin": pick.scenes_read_by_yujin,
-                },
+                "scene_pick": scene_pick_payload(pick),
+            }
+        except sqlite3.IntegrityError as error:
+            # 한 편집본에 숏폼은 하나뿐이다(`output_variants`의
+            # `UNIQUE(project_id, source_session_id, kind)`). 그 위반을 전에는
+            # 아무도 안 잡아서 대표님에게 맨 `Internal Server Error`가 갔다
+            # (2026-09-11 컨테이너에서 재현). PostgreSQL에서도 같은 예외로 온다 --
+            # `postgres_project_store.py:80`이 `psycopg`의 유일 위반을
+            # `sqlite3.IntegrityError`로 옮긴다. **지우는 문을 내는 대신** 이미
+            # 있는 숏폼을 다시 만들라고 알려 준다(`short_form_scenes.py` 머리말).
+            raise HTTPException(status_code=409, detail="short_form_already_exists") from error
+        except Exception as error:
+            _raise_variant_error(error)
+            raise AssertionError("unreachable")
+
+    @router.post("/api/projects/{project_id}/output-variants/{variant_id}/repick")
+    def repick_short_form_route(
+        project_id: str, variant_id: str, request: OutputVariantRepickRequest
+    ) -> dict[str, object]:
+        """숏폼을 **다시 만든다.** 판을 다시 판단해 장면 목록을 갈아 끼운다.
+
+        새 모양을 만들지 않는다 -- 유일 제약 때문에 그럴 수 없고, 지우는 문은
+        "되돌릴 길이 없다"는 문제를 다시 연다(`short_form_scenes.py` 머리말).
+        """
+        try:
+            current = store.get_output_variant(project_id=project_id, variant_id=variant_id)
+            expected = (
+                request.expected_variant_revision
+                if request.expected_variant_revision is not None
+                else int(current["variant_revision"])
+            )
+            updated, pick = remade_short_form_variant(
+                store=store,
+                project_id=project_id,
+                variant_row=current,
+                runtime=yujin_runtime_service,
+                expected_variant_revision=expected,
+            )
+            return {
+                "variant": store.update_output_variant(
+                    project_id=project_id,
+                    variant_id=variant_id,
+                    expected_variant_revision=expected,
+                    variant=updated,
+                ),
+                "scene_pick": scene_pick_payload(pick),
             }
         except Exception as error:
             _raise_variant_error(error)

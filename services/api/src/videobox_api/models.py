@@ -50,6 +50,18 @@ class OutputVariantPatchRequest(BaseModel):
     patch: dict[str, Any]
 
 
+class OutputVariantRepickRequest(BaseModel):
+    """숏폼 다시 만들기. 보낼 것은 "지금 보고 있는 버전"뿐이다.
+
+    장면 목록을 받지 않는다 -- 다시 만들기의 뜻은 **서버가 다시 판단하는 것**이다.
+    목록을 직접 주는 길은 이미 PATCH에 있다(`전체 장면으로 되돌리기`가 쓰는 문).
+    """
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_variant_revision: int | None = Field(default=None, ge=0)
+
+
 class OutputVariantRebaseRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

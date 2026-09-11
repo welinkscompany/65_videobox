@@ -10,6 +10,7 @@ export function VariantServerControls({
   onMaterialize,
   onPatch,
   onCreateHighlight,
+  onRemakeShortForm,
   masterSegmentIds = [],
   busy = false,
 }: Readonly<{
@@ -17,6 +18,10 @@ export function VariantServerControls({
   onMaterialize: (variant: OutputVariant) => void | Promise<void>;
   onPatch: (variant: OutputVariant, patch: OutputVariantPatch) => void | Promise<void>;
   onCreateHighlight?: () => void | Promise<void>;
+  /** 이미 있는 숏폼의 장면을 **다시 판단해** 갈아 끼운다. 숏폼은 한 편집본에
+   *  하나뿐이라(유일 제약) 두 번 만들 수 없고, 지우는 문도 없다 -- 그래서
+   *  `만들기` 단추는 한 번 쓰면 조용히 죽어 있었다. */
+  onRemakeShortForm?: (variant: OutputVariant) => void | Promise<void>;
   masterSegmentIds?: readonly string[];
   busy?: boolean;
 }>) {
@@ -41,7 +46,13 @@ export function VariantServerControls({
           고른 결과가 마음에 안 들 때 쓰는 리셋 단추이지, 순서를 저장하는 단추가
           아니다. 이름이 실제 동작과 달라 헷갈렸던 것을 여기서 바로잡는다. */}
       {variant.kind === "vertical_highlight"
-        ? <Button type="button" variant="outline" disabled={busy || !masterSegmentIds.length} onClick={() => void onPatch(variant, { selected_segment_ids: [...masterSegmentIds] })}>전체 장면으로 되돌리기</Button>
+        ? <>
+          <Button type="button" variant="outline" disabled={busy || !masterSegmentIds.length} onClick={() => void onPatch(variant, { selected_segment_ids: [...masterSegmentIds] })}>전체 장면으로 되돌리기</Button>
+          {/* 다시 만들기는 **새 숏폼을 만들지 않는다** -- 이 숏폼의 장면을 다시
+              골라 갈아 끼운다. 지우는 문을 내지 않은 이유는 되돌릴 길이 없어지기
+              때문이고, 되돌리기는 바로 위 단추(통째 목록 PATCH)가 지킨다. */}
+          {onRemakeShortForm ? <Button type="button" variant="outline" disabled={busy} onClick={() => void onRemakeShortForm(variant)}>숏폼 다시 만들기</Button> : null}
+        </>
         : onCreateHighlight ? <Button type="button" variant="outline" disabled={busy} onClick={() => void onCreateHighlight()}>하이라이트 변형 만들기</Button> : null}
     </div>
   </section>;

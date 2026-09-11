@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import json
+from collections.abc import Mapping
 from threading import Event, Thread
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
@@ -35,6 +36,10 @@ from videobox_core_engine.yujin_creator_proposal_adapter import (
 from videobox_core_engine.output_variants import (
     apply_variant_patch,
     output_variant_from_row,
+)
+from videobox_api.short_form_scenes import (
+    remade_short_form_variant,
+    scene_pick_payload,
 )
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_storage.local_project_store import LocalProjectStore
@@ -993,7 +998,7 @@ def build_director_proposals_router(
             raise HTTPException(status_code=409, detail="session_revision_mismatch") from None
 
     @router.post("/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply")
-    def batch_apply(project_id: str, proposal_id: str, body: ProposalBatchApplyRequest) -> dict:
+    def batch_apply(request: Request, project_id: str, proposal_id: str, body: ProposalBatchApplyRequest) -> dict:
         """Stage all requested bytes, then atomically register and apply them in one CAS write."""
         staged: list[dict] = []
         try:
@@ -1024,14 +1029,38 @@ def build_director_proposals_router(
                     or current.variant_revision != expected_variant_revision
                 ):
                     raise HTTPException(status_code=409, detail="stale_variant_proposal")
-                # 모양 조정(`overrides`)과 숏폼 장면 고르기(`selected_segment_ids`)를
-                # **한 patch로** 합친다. 전에는 `overrides`만 합쳐서, 장면을
-                # 골라 줘도 어디에도 닿지 않았다.
-                updated = apply_variant_patch(
-                    current,
-                    merged_variant_patch_from_yujin_candidates(selected),
-                    expected_variant_revision=expected_variant_revision,
-                )
+                # **"숏폼 다시 만들어줘"는 유진이 목록을 적는 일이 아니다.**
+                # 이 action은 단추와 똑같은 판단 쓸기를 서버에서 돌린다
+                # (`short_form_scenes.remade_short_form_variant`). 채팅 맥락은
+                # 장면을 32개에서 자르므로, 유진이 직접 고르면 롱폼에서 단추보다
+                # 못한 판단이 된다 -- 그 사실을 화면에 말하는 대신 판단 자체를
+                # 같은 코드로 돌린다.
+                if _is_short_form_remake(selected):
+                    if len(selected) != 1:
+                        # 다시 만들기는 장면 목록을 통째로 갈아 끼운다. 같은
+                        # 메시지에 다른 변형 조정이 섞이면 어느 쪽이 최종인지
+                        # 정할 근거가 없다.
+                        raise ValueError("variant_short_form_remake_must_be_alone")
+                    updated, pick = remade_short_form_variant(
+                        store=store,
+                        project_id=project_id,
+                        variant_row=store.get_output_variant(
+                            project_id=project_id, variant_id=variant_id
+                        ),
+                        runtime=request.app.state.local_only_runtime_service_factory(store),
+                        expected_variant_revision=expected_variant_revision,
+                    )
+                    scene_pick: dict | None = scene_pick_payload(pick)
+                else:
+                    # 모양 조정(`overrides`)과 숏폼 장면 고르기(`selected_segment_ids`)를
+                    # **한 patch로** 합친다. 전에는 `overrides`만 합쳐서, 장면을
+                    # 골라 줘도 어디에도 닿지 않았다.
+                    updated = apply_variant_patch(
+                        current,
+                        merged_variant_patch_from_yujin_candidates(selected),
+                        expected_variant_revision=expected_variant_revision,
+                    )
+                    scene_pick = None
                 variant = store.apply_director_variant_proposal_transaction(
                     project_id=project_id,
                     proposal_id=proposal_id,
@@ -1039,7 +1068,12 @@ def build_director_proposals_router(
                     expected_variant_revision=expected_variant_revision,
                     variant=updated,
                 )
-                return {"proposal_id": proposal_id, "status": "applied", "variant": variant}
+                applied: dict = {"proposal_id": proposal_id, "status": "applied", "variant": variant}
+                if scene_pick is not None:
+                    # 누가 골랐는지를 화면에 그대로 넘긴다. 자막 밀도로 내려간
+                    # 결과를 "유진이 골랐어요"라고 말하지 않게 하는 유일한 근거다.
+                    applied["scene_pick"] = scene_pick
+                return applied
             staged, materialized = materializer.stage_batch(project_id=project_id, candidates=selected)
             session = store.get_editing_session(project_id=project_id, session_id=proposal.source_session_id)
             if int(session.get("session_revision") or 1) != body.expected_revision:
@@ -1133,6 +1167,26 @@ def is_yujin_variant_proposal(proposal) -> bool:
         and proposal.diff.get("variant_id") is not None
         and any(candidate.media_type == "output_variant" for candidate in proposal.candidates)
     )
+
+
+def _is_short_form_remake(candidates) -> bool:
+    """유진이 "숏폼 다시 만들어줘"를 시킨 후보인가.
+
+    이 후보의 `controls`에는 장면 목록이 없다 -- 목록은 서버가 판을 다시 읽어
+    만든다(`short_form_scenes.remade_short_form_variant`). 그래서 patch를 만드는
+    `merged_variant_patch_from_yujin_candidates`로 보내면 안 된다.
+    """
+    # `controls`는 저장소를 지나면서 `mappingproxy`로 온다. `dict`로 좁히면
+    # 조용히 안 걸리고, 다시 만들기가 patch 경로로 새어 `variant_action_forbidden`
+    # 422가 난다 -- 실제로 그렇게 한 번 틀렸다.
+    for candidate in candidates:
+        controls = getattr(candidate, "controls", None)
+        if not isinstance(controls, Mapping):
+            continue
+        parameters = controls.get("parameters")
+        if isinstance(parameters, Mapping) and parameters.get("action") == "remake_short_form":
+            return True
+    return False
 
 
 def require_current_yujin_source(*, store, project_id, proposal, candidate) -> None:
