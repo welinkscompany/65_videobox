@@ -106,10 +106,14 @@ export type ShapeOverlayValue = Readonly<{
 // 사진 오버레이의 자리·크기·움직임(owner 요청 2026-09-06 "사진을 우리 영상 위에도
 // 얹어서 움직이게"). 어휘는 도형과 같다.
 //
-// **도형과 달리 안 고른 상태가 있다.** 백엔드는 넷을 선택으로 받고, 안 준 값은
-// 열쇠 자체를 안 적는다(`editing_session.update_segment_image_overlay`). 화면이
-// 빈칸을 기본값으로 채워 보내면, 자산 목록의 `화면에 얹기`나 유진이 프리셋 없이
-// 얹어 둔 사진이 owner가 아무것도 안 골랐는데 움직이기 시작한다.
+// **도형과 달리 안 고른 상태가 있고, 세 상태다**(최종 검토 2026-09-11 정정 --
+// 예전 문구는 "안 준 값은 열쇠 자체를 안 적는다"까지만 말해서 지움과 유지를
+// 구분하지 못했다). 백엔드는 넷을 선택으로 받되 세 상태로 가른다: 칸을 아예
+// 안 보내면 지금 저장된 값을 그대로 두고(유지), 명시적 `null`을 보내면 지워서
+// "안 고름"으로 되돌리고, 값을 보내면 그 값으로 바꾼다
+// (`editing_session.update_segment_image_overlay`). 화면이 안 고른 칸까지
+// 기본값으로 채워 보내면(칸을 실어 보내는 것이니 "유지"가 아니라 "바꿈"이 된다)
+// owner가 아무것도 안 골랐는데 움직이기 시작한다.
 export type ImageOverlayPresets = Readonly<{
   vertical: ShapeOverlayVertical | null;
   horizontal: ShapeOverlayHorizontal | null;

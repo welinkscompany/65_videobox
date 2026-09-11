@@ -1439,9 +1439,17 @@ class ImageOverlayRequest(BaseModel):
         `self.vertical`(필드값)만 읽으면 "안 보냄"과 "`null`로 보냄"이 똑같이
         `None`이라 구분이 안 된다. `model_fields_set`은 pydantic v2가 검증 중
         실제로 입력에 있었던 칸 이름만 담으므로, 여기 없는 칸은 "유지"고
-        여기 있는 칸은(값이 `None`이라도) "지움" 또는 "바꿈"이다. 라우터는
-        이 dict를 그대로 `**overrides`로 펼쳐서 넘긴다 -- "유지"인 칸은 아예
-        키워드 인자로 넘어가지 않으므로 엔진의 `_KEEP` 기본값이 처리한다.
+        여기 있는 칸은(값이 `None`이라도) "지움" 또는 "바꿈"이다.
+
+        (최종 검토 정정 2026-09-11: 예전 문구는 "라우터는 이 dict를 그대로
+        `**overrides`로 펼쳐서 넘긴다"였는데 틀렸다. 라우터
+        (`routers/editing_session.py`)는 이 dict를 `preset_overrides=`
+        **하나의 키워드 인자**로 그대로 넘길 뿐이고, `**` 펼침은 두 층 아래
+        `editing_session_and_regeneration.py`의
+        `update_editing_session_segment_image_overlay`에서 일어난다. 거기서도
+        변수 이름은 `overrides`가 아니라 `preset_overrides`다.) "유지"인 칸은
+        거기서도 아예 키워드 인자로 넘어가지 않으므로 엔진의 `_KEEP` 기본값이
+        처리한다.
         """
         preset_fields = ("vertical", "horizontal", "size", "motion")
         return {

@@ -193,9 +193,12 @@ def test_a_choice_made_on_the_session_survives_all_the_way_to_the_audio_graph() 
 def test_session_layer_only_writes_the_key_when_explicitly_chosen() -> None:
     """`update_segment_image_overlay`도 같은 규칙 -- 안 주면 열쇠 자체가 없다.
 
-    프리셋 넷(`vertical`·`horizontal`·`size`·`motion`)이 이미 이 규칙을 따르고
-    있고, `preserve_source_audio`도 같은 이름을 b-roll에서 그대로 빌려 온
-    개념이니 같은 규칙을 따라야 한다.
+    프리셋 넷(`vertical`·`horizontal`·`size`·`motion`)은 세 상태(유지·지움·
+    바꿈)를 받는 칸이고(`test_overlay_presets_are_not_erased.py`), 여기서
+    보는 건 그중 "유지" 쪽 자국이다. `preserve_source_audio`도 같은 이름을
+    b-roll에서 그대로 빌려 온 개념이니, 안 주면(`None`) 열쇠 자체가 없다는
+    같은 자국을 따라야 한다 -- 다만 `False`가 진짜 값이라 프리셋 넷과 달리
+    지울 상태는 없다(`update_segment_image_overlay` 머리말).
     """
     session = build_editing_session(
         project_id="project_001",

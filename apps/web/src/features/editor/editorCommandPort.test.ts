@@ -230,10 +230,14 @@ describe("EditorCommandPort", () => {
     expect(api.updateEditingSessionCaptionStyle).toHaveBeenCalledWith("p", "s", expect.objectContaining({ expected_revision: 7, segment_ids: ["seg"] }));
   });
 
-  // 사진도 도형과 같은 프리셋 넷을 보낸다. **안 고른 값은 아예 안 싣는다** --
-  // API가 그 셋을 선택으로 받고, 빈칸을 기본값으로 채우면 owner가 고르지 않은
+  // 사진도 도형과 같은 프리셋 넷을 보내되, 세 상태다(최종 검토 2026-09-11
+  // 정정 -- 예전 문구 "안 고른 값은 아예 안 싣는다"는 지움(명시적 `null`)과
+  // 유지(칸 자체를 안 보냄)를 구분하지 못했다). 이 시험은 "손대지 않은 칸은
+  // 아예 안 보낸다"(= 유지) 쪽만 본다 -- 명시적 `null`로 지우는 길은 아래
+  // "lets a picture overlay preset be cleared back to 안 고름" 시험이 잰다.
+  // API가 이 셋을 선택으로 받고, 빈칸을 기본값으로 채우면 owner가 고르지 않은
   // 자리·움직임이 저장된다(`models.ImageOverlayRequest`).
-  it("sends only the picture overlay presets the owner actually chose", async () => {
+  it("omits picture overlay presets the owner did not touch, instead of sending defaults", async () => {
     const port = createEditorCommandPort({ projectId: "p", sessionId: "s", expectedRevision: 7 }, api);
 
     await port.applyOverlay({ kind: "image", segmentId: "seg", assetId: "asset-image", text: "제품", size: "large" });

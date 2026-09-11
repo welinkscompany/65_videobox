@@ -165,6 +165,51 @@ def test_giving_a_value_changes_it() -> None:
     assert overlay["motion"] == "fade_in_out"
 
 
+def test_a_new_asset_over_the_same_scene_inherits_the_old_frame() -> None:
+    """최종 검토 발견 2026-09-11: 프리셋이 있는 장면에 **다른 자산**을 얹어도
+    프리셋은 안 지워진다 -- 그리고 이건 결정된 의도된 동작이다(결함이 아니다).
+
+    엔진은 세그먼트 하나당 이미지 오버레이를 최대 하나만 둔다. 그래서 "이미
+    오버레이가 있는 장면에 새 자산을 얹는다"는 실제로는 "이미 놓인 액자 속
+    그림만 바꾸는" 일이다 -- 그림창(PIP)에서 화면만 바꿔도 액자 위치는 그대로인
+    것과 같은 기대다. 자산 목록의 `화면에 얹기`와 유진 후보 적용, 둘 다 프리셋
+    칸을 아예 안 보내므로 이 길을 그대로 탄다(`InspectorControls.tsx`의 저장
+    단추 주석 참고).
+
+    이 시험은 그 결정을 고정한다. 자산이 바뀌었는데도 프리셋이 남아 있는지,
+    그리고 자산 id 자체는 실제로 바뀌었는지(엔진이 통째로 무시한 게 아닌지)
+    둘 다 본다.
+    """
+    session = _session_with_one_segment()
+
+    placed = update_segment_image_overlay(
+        session=session,
+        segment_id="seg_001",
+        asset_id="asset_image_001",
+        text="Original picture",
+        vertical="bottom",
+        horizontal="right",
+        size="medium",
+        motion="fade_in",
+    )
+
+    # 다른 자산을 프리셋 없이 얹는다 -- 자산 목록 `화면에 얹기`, 유진 후보
+    # 적용이 모두 이렇게 부른다.
+    replaced = update_segment_image_overlay(
+        session=placed,
+        segment_id="seg_001",
+        asset_id="asset_image_002",
+        text="",
+    )
+
+    overlay = replaced["segments"][0]["visual_overlays"][0]
+    assert overlay["asset_id"] == "asset_image_002"
+    assert overlay["vertical"] == "bottom"
+    assert overlay["horizontal"] == "right"
+    assert overlay["size"] == "medium"
+    assert overlay["motion"] == "fade_in"
+
+
 def test_overlay_that_never_chose_a_preset_gets_no_keys() -> None:
     """프리셋을 한 번도 안 고른 오버레이는 열쇠가 안 생긴다(기본값으로 안 채운다).
 

@@ -1027,10 +1027,13 @@ class EditingSessionRegenerationMixin:
         # 이미 이 세 상태를 받는다(모듈 전용 파수꾼 `_KEEP`이 "유지" 기본값) --
         # 그런데 `_KEEP`은 모듈 밖에 노출되지 않으므로, 여기서도 "유지"를
         # 흉내 내려고 그 파수꾼을 들여오지 않는다. 대신 `preset_overrides`에
-        # 없는 칸은 아래 `**overrides`에서 아예 키워드 인자로 안 넘어가게 해서
-        # 엔진 쪽 `_KEEP` 기본값이 자연히 적용되게 한다. 유진 경로를 비롯해
-        # 프리셋 없이(빈 dict/`None`으로) 부르는 자리가 여럿이라, 이 방식이면
-        # 그 호출도 그대로 "전부 유지"로 통한다.
+        # 없는 칸은 아래 `**(preset_overrides or {})`에서 아예 키워드 인자로
+        # 안 넘어가게 해서 엔진 쪽 `_KEEP` 기본값이 자연히 적용되게 한다(최종
+        # 검토 정정 2026-09-11: 예전 주석은 이 변수를 `overrides`라 불렀는데,
+        # 실제 이름은 `preset_overrides`고 `**` 펼침도 라우터가 아니라 바로
+        # 여기서 일어난다). 유진 경로를 비롯해 프리셋 없이(빈 dict/`None`으로)
+        # 부르는 자리가 여럿이라, 이 방식이면 그 호출도 그대로 "전부 유지"로
+        # 통한다.
         preset_overrides: dict[str, str | None] | None = None,
         preserve_source_audio: bool | None = None,
         expected_revision: int,
