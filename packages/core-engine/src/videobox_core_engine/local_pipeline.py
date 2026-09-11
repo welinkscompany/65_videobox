@@ -2205,13 +2205,31 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
                 project_id=project_id,
                 timeline_id=str(session.get("timeline_id") or ""),
             )
+            # 마스터 payload를 그대로 베끼면 `output`(캔버스 크기)도 같이 와서
+            # 세로 변형본이 마스터와 같은 1920x1080으로 렌더된다(2026-09-11,
+            # project-e6c75c36에서 완성본·가로·세로 md5가 전부 같았다). `output`은
+            # 마스터 값이 아니라 이 변형본의 `kind`로 다시 정한다 -- 크기 표는
+            # `_ORIENTATION_OUTPUT_SIZES`(이미 build_timeline이 쓰는 것) 하나만 쓴다.
+            # `output_mode`도 같은 이유로 제외한다: 아래 `save_timeline_run`은
+            # `output_mode=variant.kind`를 인자로 받지만, payload에 그 키가
+            # 남아 있으면 store가 dict를 조립할 때 payload의 값이 인자를 덮어
+            # 변형본 타임라인의 output_mode가 늘 마스터의 `review`로 저장됐다
+            # (`local_project_store.save_timeline_run`, `**timeline_payload`가
+            # 뒤에 와서 이긴다). 저장된 값을 실제로 읽어 분기하는 자리는 grep으로
+            # 전부 셌을 때 0곳이다 -- 유일했던 소비자(`outputs.py`의
+            # `_download_shape_for_render`)는 이미 이 문제를 실물에서 겪고
+            # `source_variant_id` 경유로 바꿨다(그 파일의 주석 참고). 나머지는
+            # API/도메인/프런트 스키마의 pass-through 필드 셋뿐이라 값이
+            # 정직해져도 깨지는 소비자가 없다.
             timeline_payload = {
                 key: value
                 for key, value in master_timeline.items()
-                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary"}
+                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary", "output", "output_mode"}
             }
+            variant_orientation = "landscape" if variant.kind == "horizontal" else "vertical"
             timeline_payload.update(
                 {
+                    "output": dict(self._ORIENTATION_OUTPUT_SIZES[variant_orientation]),
                     "source_variant_id": derived.source_variant_id,
                     "source_variant_revision": derived.source_variant_revision,
                     "source_session_id": derived.source_session_id,

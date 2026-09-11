@@ -204,6 +204,67 @@ def test_variant_final_render_publishes_without_treating_derived_timeline_as_mas
     assert result["render"]["timeline_id"] == materialized["timeline_id"]
 
 
+def test_materialized_variant_timeline_carries_its_own_orientation_output_size(tmp_path: Path) -> None:
+    """세로 변형본이 마스터의 1920x1080을 그대로 물고 오면 안 된다.
+
+    2026-09-11 실물 측정: `project-e6c75c36`의 완성본/가로/세로 변형본이
+    셋 다 1920x1080, md5까지 같았다. 마스터 payload를 베낄 때 `output`이
+    같이 딸려 온 것이 원인이다 -- `_materialize_variant_for_output`은
+    `kind`로 크기를 다시 정해야 한다.
+    """
+    store = LocalProjectStore(tmp_path)
+    project = store.bootstrap_project(name="Variant orientation output project")
+    source = store.save_timeline_run(
+        project_id=project.project_id,
+        output_mode="review",
+        timeline_payload={
+            "review_flags": [],
+            "pending_recommendations": [],
+            "tracks": [],
+            "segments": [],
+            "output": {"width": 1920, "height": 1080},
+        },
+    )
+    session = store.save_editing_session(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        session_payload={"segments": [], "history": []},
+    )
+    store.save_review_state(
+        project_id=project.project_id,
+        timeline_id=source["timeline_id"],
+        status="draft",
+        source_session_id=session["session_id"],
+        source_session_revision=session["session_revision"],
+    )
+    variants = store.ensure_output_variants(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+    )
+    variants_by_kind = {variant["kind"]: variant for variant in variants}
+    runner = LocalPipelineRunner(store, final_renderer=_FakeFinalRenderer())
+
+    horizontal = runner._materialize_variant_for_output(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_id=variants_by_kind["horizontal"]["variant_id"],
+    )
+    vertical = runner._materialize_variant_for_output(
+        project_id=project.project_id,
+        session_id=session["session_id"],
+        variant_id=variants_by_kind["vertical_full"]["variant_id"],
+    )
+
+    horizontal_timeline = store.get_timeline_run(
+        project_id=project.project_id, timeline_id=horizontal["timeline_id"]
+    )
+    vertical_timeline = store.get_timeline_run(
+        project_id=project.project_id, timeline_id=vertical["timeline_id"]
+    )
+    assert horizontal_timeline["output"] == {"width": 1920, "height": 1080}
+    assert vertical_timeline["output"] == {"width": 1080, "height": 1920}
+
+
 def test_final_render_does_not_publish_when_session_changes_after_last_pipeline_check(tmp_path: Path) -> None:
     """The storage publish fence, not a timing assumption, owns the final CAS."""
     class _SessionMutatingPublishStore(LocalProjectStore):
