@@ -323,6 +323,57 @@ def test_explicit_local_profile_preflights_exact_loopback_and_wires_real_provide
     assert any(url.endswith("/chat/completions") for url in http_client.urls)
 
 
+class MismatchedConfiguredModelHTTPClient:
+    """설정한 모델(`configured-text-only`)은 로드돼 있지만 비전이 안 된다 --
+    옛 규칙(첫 비전 모델)으로 물러나는 실제 조건을 흉내 낸다."""
+    def __init__(self) -> None: self.urls: list[str] = []
+    def __call__(self, request, **_kwargs):
+        self.urls.append(request.full_url)
+        if request.full_url.endswith("/api/v1/models"):
+            return FakeHTTPResponse({"models": [
+                {"key": "vision-capable-model", "type": "llm", "loaded_instances": [{"id": "vision-capable-model"}], "capabilities": {"vision": True}},
+                {"key": "configured-text-only", "type": "llm", "loaded_instances": [{"id": "configured-text-only"}], "capabilities": {"vision": False}},
+            ]})
+        raise AssertionError(request.full_url)
+
+
+def test_configured_model_fallback_is_logged_and_recorded_on_the_persisted_analysis_profile(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """설정한 모델이 비전을 못 해서 조용히 다른 모델로 물러날 때, 그 사실이
+    (1) 기동 로그에 남아야 하고 (2) 이 특정 분석이 저장한 프로필에도 남아야
+    한다. 로그는 재시작하면 사라지지만, 분석 프로필은 `/provenance`로 나중에도
+    다시 볼 수 있다 -- "왜 이 결과만 다르지"라는 물음에 그것으로 답한다."""
+    from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir(parents=True, exist_ok=True)
+    http_client = MismatchedConfiguredModelHTTPClient()
+    with caplog.at_level("WARNING"):
+        app = create_app(
+            projects_root=projects_root,
+            local_runtime_config=LocalOpenAICompatibleRuntimeConfig(model_name="configured-text-only"),
+            enable_local_media_analysis=True,
+            media_analysis_http_client=http_client,
+            media_probe=FakeProbe(),
+        )
+
+    fallback_logs = [record.message for record in caplog.records if "configured-text-only" in record.message]
+    assert fallback_logs, "설정한 모델 이름이 로그 어디에도 없다"
+    assert "vision-capable-model" in fallback_logs[0], "실제로 쓴 모델 이름이 같은 줄에 없다"
+
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "fallback"}).json()["project_id"]
+    source = projects_root / "source.mp4"
+    source.write_bytes(b"video")
+    asset = client.post(f"/api/projects/{project_id}/assets/broll-video", json={"source_path": str(source), "tags": []}).json()
+    job = app.state.media_analysis_service.enqueue_analysis(project_id=project_id, asset_id=asset["asset_id"])
+
+    persisted = app.state.store.get_media_analysis_profile(project_id=project_id, analysis_id=job["analysis_id"])
+    assert persisted["configured_model_name"] == "configured-text-only"
+    assert persisted["vision_model_name"] == "vision-capable-model"
+
+
 def test_arbitrary_injected_media_provider_is_rejected_without_test_only_opt_in(tmp_path: Path) -> None:
     external = FakeVision()
     with pytest.raises(ValueError, match="allow_test_media_analysis_providers"):

@@ -86,6 +86,10 @@ class AnalysisProfile:
     quantization: str = "default"
     vision_model_name: str = "local"
     embedding_model_name: str | None = None
+    # `VIDEOBOX_LOCAL_MODEL_NAME`이 가리킨 이름 -- 실제로 쓴 `vision_model_name`과
+    # 대조하면 이 분석 하나가 설정한 모델이 아니라 물러난 모델로 돌았는지 나중에도
+    # 알 수 있다. `cache_key`에는 안 넣는다 -- 캐시 무효화가 아니라 발견용이다.
+    configured_model_name: str | None = None
 
 
 class MediaAnalysisService:
@@ -108,6 +112,23 @@ class MediaAnalysisService:
         canonical = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
+    @staticmethod
+    def _persisted_profile_payload(profile: AnalysisProfile) -> dict[str, Any]:
+        """저장할 프로필 모양. `configured_model_name`이 있을 때만 싣는다 --
+        기존 호출자(`AnalysisProfile()` 기본값, 손으로 만든 `media_analysis_profile`
+        딕셔너리)는 그 필드를 모르므로 계속 `None`이고, 그때까지 저장 모양을
+        두 칸(`vision_model_name`/`embedding_model_name`)으로 유지해야 이미 그
+        모양을 정확히 대조하는 시험(`test_analysis_persists_selected_profile_...`)
+        이 안 깨진다. `capability_profile()`이 실제로 물려준 값이 있을 때만
+        세 번째 칸이 생긴다."""
+        payload: dict[str, Any] = {
+            "vision_model_name": profile.vision_model_name,
+            "embedding_model_name": profile.embedding_model_name,
+        }
+        if profile.configured_model_name is not None:
+            payload["configured_model_name"] = profile.configured_model_name
+        return payload
+
     def enqueue_analysis(self, *, project_id: str, asset_id: str, profile: AnalysisProfile | None = None) -> dict[str, Any]:
         profile = profile or self.profile
         asset = self.store.get_asset(project_id=project_id, asset_id=asset_id)
@@ -116,7 +137,7 @@ class MediaAnalysisService:
         key = self.cache_key(source_sha256=source_sha, profile=profile)
         self.store.record_media_analysis_cache(project_id=project_id, asset_id=asset_id, source_sha256=source_sha, cache_key=key)
         analysis = self.store.create_media_analysis(project_id=project_id, asset_id=asset_id, idempotency_key=f"{source_sha}:{key}", cache_key=key)
-        self.store.record_media_analysis_profile(project_id=project_id, analysis_id=analysis["analysis_id"], profile={"vision_model_name": profile.vision_model_name, "embedding_model_name": profile.embedding_model_name})
+        self.store.record_media_analysis_profile(project_id=project_id, analysis_id=analysis["analysis_id"], profile=self._persisted_profile_payload(profile))
         return analysis
 
     def _profile_for_dispatch(self, *, project_id: str, analysis_id: str) -> dict[str, Any]:
@@ -131,10 +152,7 @@ class MediaAnalysisService:
         try:
             return self.store.get_media_analysis_profile(project_id=project_id, analysis_id=analysis_id)
         except KeyError:
-            profile = {
-                "vision_model_name": self.profile.vision_model_name,
-                "embedding_model_name": self.profile.embedding_model_name,
-            }
+            profile = self._persisted_profile_payload(self.profile)
             self.store.record_media_analysis_profile(project_id=project_id, analysis_id=analysis_id, profile=profile)
             return profile
 

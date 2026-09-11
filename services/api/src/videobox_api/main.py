@@ -1090,6 +1090,20 @@ def create_app(
         capability = transport.capability_profile(configured_model_name=resolved_local_runtime_config.model_name)
         if capability.vision_model_name is None:
             raise ValueError("A loaded LM Studio vision + structured_json model is required.")
+        # 조용한 물러남을 조용하게 두지 않는다. 설정한 모델이 있는데 실제로 쓴
+        # 비전 모델이 다르면, 그 사실을 여기서 기동 로그에 남긴다 -- 로그는
+        # 재시작하면 사라지므로, 분석 하나하나의 프로필에도 같은 값을 남긴다
+        # (`resolved_profile`의 `configured_model_name` -> `AnalysisProfile` ->
+        # `record_media_analysis_profile` -> `/media-analysis/{id}/provenance`).
+        # "왜 이 분석 결과만 다르지"라는 물음에 owner가 나중에 화면에서 답할
+        # 수 있는 쪽은 로그가 아니라 이 저장된 값이다.
+        if capability.configured_model_name is not None and capability.vision_model_name != capability.configured_model_name:
+            _LOGGER.warning(
+                "설정한 로컬 모델(%s)이 아니라 다른 모델(%s)로 영상 분석을 돌립니다 -- "
+                "LM Studio에 설정한 모델이 로드돼 있지 않거나 비전을 지원하지 않습니다.",
+                capability.configured_model_name,
+                capability.vision_model_name,
+            )
         transport.preflight(model_name=capability.vision_model_name, capability="vision")
         resolved_vision_provider = LMStudioVisionProvider(transport=transport)
         if capability.embedding_model_name is not None:
@@ -1099,6 +1113,7 @@ def create_app(
         resolved_profile = {
             "vision_model_name": capability.vision_model_name,
             "embedding_model_name": capability.embedding_model_name,
+            "configured_model_name": capability.configured_model_name,
         }
     if resolved_vision_provider is not None:
         if resolved_media_probe is None:
