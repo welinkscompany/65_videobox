@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import threading
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import FileResponse
@@ -34,6 +36,33 @@ from videobox_api.models import (
     SubtitleJobResponse,
 )
 from videobox_api.orchestration import ApiOrchestrator
+
+# 경로 구분자(`/`, `\`)·따옴표·제어문자(줄바꿈 포함)를 거른다. 프로젝트 이름은
+# 사용자가 짓는 값이라 그대로 헤더에 실으면 HTTP 응답 분할(줄바꿈으로 다른
+# 헤더를 끼워 넣는 공격)이나 Windows 금지 문자 문제로 이어질 수 있다.
+_UNSAFE_DOWNLOAD_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
+
+
+def _sanitize_download_stem(raw_name: str) -> str:
+    """내려받기 파일 이름 밑동을 안전하게 다듬는다. 위험한 글자를 지운 뒤
+    앞뒤 공백·마침표를 정리한다(Windows는 마침표로 끝나는 이름을 못 만든다)."""
+    return _UNSAFE_DOWNLOAD_NAME_CHARS.sub("", raw_name).strip(" .")
+
+
+def _final_render_content_disposition(*, project_name: str, fallback: str, suffix: str) -> str:
+    """완성본 내려받기 이름을 만든다.
+
+    `job_id`(UUID)만으로는 여러 번 받았을 때 어느 영상인지 구분이 안 돼서
+    프로젝트 이름을 쓴다. 헤더 값은 latin-1로만 실을 수 있어 한글 이름을 그대로
+    넣으면 서버가 죽는다 -- 그래서 옛 브라우저용 ASCII `filename=` 대체 이름과
+    RFC 5987 `filename*=UTF-8''...`(퍼센트 인코딩) 둘 다 싣는다. 최신 브라우저는
+    후자를 읽어 한글 이름 그대로 받고, 옛 브라우저는 ASCII 대체 이름을 받는다.
+    """
+    stem = _sanitize_download_stem(project_name)
+    utf8_name = f"{stem}{suffix}" if stem else f"{fallback}{suffix}"
+    ascii_stem = stem.encode("ascii", "ignore").decode("ascii").strip(" .")
+    ascii_name = f"{ascii_stem}{suffix}" if ascii_stem else f"{fallback}{suffix}"
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(utf8_name, safe="")}'
 
 
 def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
@@ -288,7 +317,20 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}/content")
     def get_final_render_content(project_id: str, job_id: str, request: Request):
-        """Project-scoped browser playback for the composited MP4 artifact."""
+        """Project-scoped browser playback for the composited MP4 artifact.
+
+        같은 주소를 화면의 <video> 태그가 재생에도 쓴다(OutputsPage.tsx:1084)와
+        내려받기 단추(`<a download>`, `:1091`)가 함께 쓴다. `video/mp4`는
+        `deliver_file`의 인라인 목록에 있어 원래 `Content-Disposition`이 안
+        붙었고, 그래서 내려받으면 확장자 없는 `content`라는 이름으로 저장됐다
+        (task-3, 2026-09-11).
+
+        `Content-Disposition: attachment`를 얹어도 <video> 재생이 깨지지
+        않는다 -- <video>/<img> 같은 하위 자원 요청은 이 헤더를 무시하고 그대로
+        재생한다(사양이 아니라 실제 크로미움 브라우저로 실측함: 별도 서버 +
+        <video> 태그로 attachment 헤더를 단 mp4가 재생되는 것을 확인). `<a
+        download>`만 이 헤더의 파일 이름을 쓴다.
+        """
         try:
             result = orchestrator.get_final_render_result(project_id=project_id, job_id=job_id)
             render = result.get("render")
@@ -296,9 +338,14 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 raise KeyError("final_render_not_ready")
             path = orchestrator.store.resolve_storage_uri(project_id=project_id, storage_uri=str(render["file_uri"]))
             if not path.is_file(): raise KeyError("final_render_content_missing")
-            return deliver_file(request=request, path=path, media_type="video/mp4")
+            response = deliver_file(request=request, path=path, media_type="video/mp4")
+            project_name = str(orchestrator.store.get_project(project_id=project_id).get("name") or "")
         except Exception as exc:
             raise _http_error(exc) from exc
+        response.headers["Content-Disposition"] = _final_render_content_disposition(
+            project_name=project_name, fallback=job_id, suffix=".mp4",
+        )
+        return response
 
     @router.get("/api/projects/{project_id}/final-renders/{job_id}/audio-content")
     def get_final_render_audio_content(project_id: str, job_id: str, request: Request):

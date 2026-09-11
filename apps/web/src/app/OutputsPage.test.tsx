@@ -611,9 +611,15 @@ describe("OutputsPage", () => {
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
     expect(await screen.findByLabelText("완성본 재생")).toBeVisible();
-    expect(screen.getByRole("link", { name: "완성본 영상 내려받기" })).toHaveAttribute(
+    const downloadLink = screen.getByRole("link", { name: "완성본 영상 내려받기" });
+    expect(downloadLink).toHaveAttribute(
       "href", "/api/projects/project_a/final-renders/final-current-timeline/content",
     );
+    // 코드리뷰로 발견(task-2 이후): href만 보면 `download` 속성이 빠져도 시험이
+    // 안 빨개진다 -- 그러면 이 링크는 그냥 <video>와 똑같이 새 탭에서 재생만
+    // 시키는 평범한 이동 링크가 돼 버린다. `download` 속성이 바로 그 차이를
+    // 만드는 자리라 따로 지킨다.
+    expect(downloadLink).toHaveAttribute("download");
   });
 
   // `ExportPopover`는 낡은 완성본을 조용히 안 준다 -- 링크를 감추고 다시
