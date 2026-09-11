@@ -97,7 +97,7 @@ def build_editor_playback_manifest(
                 output.get("sample_aspect_ratio") or materialized.get("sample_aspect_ratio") or "1:1"
             ),
             "rotation": int(output.get("rotation") or materialized.get("rotation") or 0),
-            "duration_sec": _duration_seconds(output, tracks, segments),
+            "duration_sec": _duration_seconds(tracks, segments),
         },
         "tracks": tracks,
         # 눈·음소거의 **되읽는 자리는 여기 하나다**(`track_states.py`). 트랙마다
@@ -261,9 +261,24 @@ def _gap_contract(gap: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _duration_seconds(output: dict[str, Any], tracks: list[dict[str, Any]], segments: list[Any]) -> float:
-    if output.get("duration_sec") is not None:
-        return float(output["duration_sec"])
+def _duration_seconds(tracks: list[dict[str, Any]], segments: list[Any]) -> float:
+    """**길이는 조각에서 잰다. 저장된 숫자는 안 믿는다.**
+
+    예전에는 타임라인 문서의 `output.duration_sec`이 있으면 그걸 그대로 돌려줬다.
+    그런데 그 값을 **고쳐 주는 자리가 아무 데도 없다** -- 편집(장면 넣기·쪼개기·
+    경계 옮기기·순서 바꾸기·빼기)은 전부 세션에만 쌓이고 타임라인 문서는 처음
+    한 번 저장된 뒤 그대로다. 빈 편집판은 거기에 5.0을 적어 두므로(`blank_
+    editing_session.py`) 빈 편집판에서 시작한 프로젝트는 **영상이 몇 분이든
+    눈금자가 5초**였다(2026-09-12 실측: 120초 세션에서 0~4초만 그려지고 클립
+    열 개 중 둘만 보였다. `전체` 맞추기도 같은 숫자를 써서 빠져나올 길이 없었다).
+
+    완성본 길이는 이미 조각에서 잰다(`CompositionPlan.duration_sec`). 화면만
+    저장된 숫자를 믿어서 **눈금자와 완성본이 서로 다른 길이를 말하고 있었다.**
+    여기서도 재면 둘이 같아지고, 어떤 편집 문을 지나도 어긋날 자리가 없다.
+
+    길이를 저장하는 쪽(모든 편집 문이 값을 같이 고치는 방식)은 고르지 않았다 --
+    문이 여덟 군데가 넘고, 같은 계산이 두 곳에 살면 반드시 어긋난다.
+    """
     endpoints = [float(clip["end_sec"]) for track in tracks for clip in track["clips"]]
     endpoints.extend(float(item.get("end_sec") or 0) for item in segments if isinstance(item, dict))
     return max(endpoints, default=0.0)

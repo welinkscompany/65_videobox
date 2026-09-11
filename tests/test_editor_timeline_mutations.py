@@ -1160,3 +1160,104 @@ def test_merging_twice_keeps_every_choice_at_its_own_place() -> None:
     merged = merge_adjacent_segments(session=merged, left_segment_id=ids[0], right_segment_id=ids[1])
 
     assert _rendered_clips(merged) == expected
+
+
+def test_manifest_length_follows_the_clips_not_the_blank_boards_five_seconds() -> None:
+    """**눈금자 길이는 편집본이 정한다.** 빈 편집판이 적어 둔 5초가 아니다.
+
+    대표님 실제 영상(8분)을 빈 편집판에 깔아 장면 열 개(0~120초)를 만들었는데
+    `playback-manifest`의 `output.duration_sec`이 **5.0**으로 왔다. 눈금자가
+    0~4초만 그려지고 클립 열 개 중 둘만 보였다 -- 120초 세션의 3.9%다.
+    `전체`(맞추기) 단추도 같은 숫자를 쓰므로 **빠져나올 길이 없었다.**
+
+    5.0은 빈 편집판이 타임라인 문서에 적어 둔 값이고(`blank_editing_session.py`),
+    장면을 넣고 쪼개고 경계를 옮겨도 **아무도 그 값을 고치지 않는다** --
+    타임라인 문서는 처음 한 번만 저장되고 이후 편집은 전부 세션에만 쌓인다.
+    그래서 빈 편집판에서 시작한 모든 프로젝트가 5초를 물려받는다.
+
+    길이는 **저장한 값이 아니라 조각에서 잰 값**이어야 한다. 완성본 길이는
+    이미 그렇게 잰다(`CompositionPlan.duration_sec`) -- 화면만 저장된 숫자를
+    믿고 있었고, 그래서 눈금자와 완성본이 서로 다른 길이를 말했다.
+    """
+    from videobox_core_engine.blank_editing_session import (
+        build_blank_editing_session,
+        build_blank_timeline_payload,
+    )
+    from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
+
+    project_id = "project_001"
+    session = build_blank_editing_session(project_id=project_id, timeline_id="timeline_001")
+    session["session_id"] = "session_001"
+    blank_scene = session["segments"][0]
+    # 장면 열 개를 12초씩 -- 대표님이 8분 영상을 깔았을 때 생긴 모양이다.
+    session["segments"] = [
+        {
+            **blank_scene,
+            "segment_id": f"timeline_001:{index + 1:03d}",
+            "caption_text": f"{index + 1}번째 장면",
+            "start_sec": float(index * 12),
+            "end_sec": float((index + 1) * 12),
+            "review_required": False,
+        }
+        for index in range(10)
+    ]
+    timeline = {
+        **build_blank_timeline_payload(),
+        "project_id": project_id,
+        "timeline_id": "timeline_001",
+    }
+
+    manifest = build_editor_playback_manifest(
+        project_id=project_id,
+        session=session,
+        timeline=timeline,
+        asset_content_url_prefix=f"/api/projects/{project_id}/assets",
+    )
+
+    assert len(manifest["captions"]) == 10
+    assert manifest["output"]["duration_sec"] == 120.0
+
+
+def test_manifest_length_shrinks_when_the_stored_number_is_longer_than_the_clips() -> None:
+    """저장된 숫자가 **더 길 때도** 조각을 따른다.
+
+    빈 편집판만 5.0을 적어 두는 게 아니다. 기획을 통과한 타임라인은 원본
+    길이를 적어 두는데, 장면을 빼거나 경계를 줄여도 그 숫자는 그대로다.
+    `max(저장값, 잰 값)`으로 고치면 위 시험은 통과하면서 이쪽이 틀린다 --
+    빼고 나서도 눈금자가 옛 길이를 그려 빈 자리를 끌고 다닌다.
+    """
+    from videobox_core_engine.editor_playback_manifest import build_editor_playback_manifest
+
+    project_id = "project_001"
+    session = {
+        "project_id": project_id,
+        "session_id": "session_001",
+        "timeline_id": "timeline_001",
+        "session_revision": 1,
+        "segments": [
+            {"segment_id": "seg_001", "caption_text": "남긴 장면", "start_sec": 0.0, "end_sec": 8.0, "cut_action": "keep"},
+            {"segment_id": "seg_002", "caption_text": "뺀 장면", "start_sec": 8.0, "end_sec": 300.0, "cut_action": "remove"},
+        ],
+    }
+    timeline = {
+        "project_id": project_id,
+        "timeline_id": "timeline_001",
+        "version": "v001",
+        "fps_num": 30,
+        "fps_den": 1,
+        # 기획이 적어 둔 원본 길이. 장면을 빼도 아무도 이 값을 안 고친다.
+        "output": {"width": 1920, "height": 1080, "duration_sec": 300.0},
+        "tracks": [],
+    }
+
+    manifest = build_editor_playback_manifest(
+        project_id=project_id,
+        session=session,
+        timeline=timeline,
+        asset_content_url_prefix=f"/api/projects/{project_id}/assets",
+    )
+
+    assert [caption["segment_id"] for caption in manifest["captions"]] == ["seg_001"]
+    assert manifest["output"]["duration_sec"] == 8.0
+    # 화면 크기는 여전히 저장된 값에서 온다 -- 세로 숏폼이 이 칸에 걸려 있다.
+    assert (manifest["output"]["width"], manifest["output"]["height"]) == (1920, 1080)
