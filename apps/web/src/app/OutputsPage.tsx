@@ -149,6 +149,14 @@ function outputFailureMessage(reason: string | null | undefined, fallback: strin
   return fallback;
 }
 
+/** 완성본을 만드는 동안 화면이 스스로 상태를 다시 읽는 간격.
+ *
+ * 작업판의 정확한 미리보기(`EditorWorkbenchRoute.tsx:698-711`)는 1200ms를 쓴다 --
+ * 그건 보통 수십 초 안에 끝난다. 완성본은 몇 분이 걸리므로 그렇게 자주 물을
+ * 이유가 없다 -- 서버만 두드리고 화면은 어차피 못 따라간다. 5초면 다 됐을 때
+ * 5초 안에는 알아채면서도, 몇 분짜리 작업 내내 초당 여러 번 묻는 낭비는 없다. */
+const FINAL_RENDER_POLL_INTERVAL_MS = 5000;
+
 function exactPreviewDescription(state: ExactPreviewState | undefined) {
   switch (state) {
     case "current": return "현재 편집본 미리보기가 준비되었어요.";
@@ -393,6 +401,11 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   // 생기므로 `finalRender.error_message`에 남지 않는다 -- 예전에는 catch가
   // 예외를 통째로 버려서 화면이 "완성본을 만들지 못했어요"밖에 못 했다.
   const [finalRejectedReason, setFinalRejectedReason] = useState<string | null>(null);
+  // 완성본을 스스로 다시 확인한 횟수. 값 자체는 안 쓰고 재확인마다 하나씩
+  // 늘려서 "다음 번" 확인을 다시 걸 근거로만 쓴다(`EditorWorkbenchRoute.tsx`의
+  // `refreshToken`과 같은 자리) -- 안 그러면 같은 상태(계속 `running`)에서는
+  // 의존값이 안 바뀌어 딱 한 번만 확인하고 멈춘다.
+  const [finalPollTick, setFinalPollTick] = useState(0);
   const [formatName, setFormatName] = useState("");
   const [formatSavedProjectId, setFormatSavedProjectId] = useState<string | null>(null);
   const [isSavingFormat, setIsSavingFormat] = useState(false);
@@ -436,6 +449,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const previewShareRehydratedKey = useRef<string | null>(null);
   const capcutInFlightTimelineKey = useRef<string | null>(null);
   const capcutHandoffInFlightJobKey = useRef<string | null>(null);
+  // 되돌아온 재확인이 그새 취소된(프로젝트를 바꾼) 자리에 값을 쓰지 않게
+  // 막는 자리 표시. `routeEpoch` 같은 역할을 이 화면 규모에 맞게 한 값으로 한다.
+  const finalPollOperationId = useRef(0);
   currentProjectId.current = projectId;
   // `shared`는 읽을 때마다 새 객체다. 이걸 `refresh`의 의존성에 두면 새 값이
   // 올 때마다 `refresh`가 다시 만들어지고, 그 effect가 또 읽어서 끝없이 돈다.
@@ -638,6 +654,32 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     });
     return () => { active = false; };
   }, [projectId, currentState]);
+  // 만드는 중인 완성본이 있는가. 아래 이른 반환(로딩·오류)보다 앞에 둔다 --
+  // 후크는 조건 없이 매번 불러야 한다(위 주석과 같은 규칙).
+  const hasPendingFinal = currentState?.finalJobs.some((job) => job.status === "pending" || job.status === "running") === true;
+  // 완성본을 만드는 동안 화면이 스스로 상태를 다시 읽는다. **본보기**:
+  // `EditorWorkbenchRoute.tsx:698-711`의 정확한 미리보기 재확인과 같은 모양이다 --
+  // 진행 중일 때만 돌고(`hasPendingFinal`), 끝나거나(성공/실패로 빠짐) 화면을
+  // 떠나면(cleanup의 `clearTimeout`) 멈춘다. 프로젝트가 그새 바뀌어도 낡은
+  // 재확인이 값을 쓰지 못하게 `finalPollOperationId`와 `currentProjectId`로 막는다.
+  useEffect(() => {
+    if (!hasPendingFinal) return;
+    const pollProjectId = projectId;
+    const operationId = finalPollOperationId.current + 1;
+    finalPollOperationId.current = operationId;
+    const poll = window.setTimeout(() => {
+      if (finalPollOperationId.current !== operationId || currentProjectId.current !== pollProjectId) return;
+      void refresh().then(() => {
+        // 재확인 뒤에도 여전히 진행 중이면(`hasPendingFinal`이 안 바뀌면) 이
+        // 값만 바꿔 위 의존값을 다시 트리거한다 -- 그렇지 않으면 상태가 그대로일
+        // 때 이 효과가 다시 안 돌아 딱 한 번 묻고 영원히 멈춰 버린다.
+        if (finalPollOperationId.current === operationId && currentProjectId.current === pollProjectId) {
+          setFinalPollTick((current) => current + 1);
+        }
+      });
+    }, FINAL_RENDER_POLL_INTERVAL_MS);
+    return () => window.clearTimeout(poll);
+  }, [hasPendingFinal, finalPollTick, projectId, refresh]);
   const hasError = errorProjectId === projectId;
   const isRenderingCurrentSubtitle = isRenderingSubtitle && subtitleRequestProjectId.current === projectId;
   const subtitleError = subtitleErrorProjectId === projectId;
@@ -716,7 +758,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     currentState.review.pending_recommendations.length === 0,
   );
   const finalJob = currentState?.finalJob;
-  const hasPendingFinal = currentState?.finalJobs.some((job) => job.status === "pending" || job.status === "running") === true;
+  // `hasPendingFinal`은 후크(폴링 효과) 위해 이 이른 반환들보다 앞에서 이미 구했다.
   const canRenderFinal = canRenderSubtitle && !hasPendingFinal;
   const hasCurrentEditingDraft = Boolean(
     currentSession && timelineJob && currentState?.timeline &&
@@ -1147,8 +1189,17 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           </div> : null}
           {staleFinal ? <p>편집에서 새 완성본 만들기를 실행해 주세요.</p> : null}
           {finalRender?.status === "failed" ? <p>완성본 다시 만들기를 눌러 새 작업을 시작할 수 있어요.</p> : null}
-          {hasPendingFinal ? <p>완료될 때까지 기다린 뒤 상태를 다시 확인해 주세요.</p> : null}
-          <Button disabled={!canRenderFinal || isRenderingCurrentFinal} onClick={() => void handleRenderFinal()}>{isRenderingCurrentFinal ? "완성본 만드는 중" : finalRender?.status === "failed" || finalError ? "완성본 다시 만들기" : "완성본 만들기"}</Button>
+          {/* 화면이 스스로 상태를 다시 읽으므로(위 폴링 효과) "다시 확인해
+              주세요"처럼 직접 누르라는 말은 더는 맞지 않는다 -- 완성되면 이
+              화면이 저절로 바뀐다. */}
+          {hasPendingFinal ? <p>완성되면 화면이 저절로 바뀌어요. 이 화면을 열어 둔 채 기다려 주세요.</p> : null}
+          {/* `isRenderingCurrentFinal`은 누른 직후 요청이 오가는 짧은 순간만
+              참이다(2026-09-11 실측: 1초 안에 꺼짐) -- 그 뒤에도 서버에서는
+              몇 분짜리 렌더가 계속 도는데, 이 값만 보면 단추가 도로
+              "완성본 만들기"로 보여 회색인 채 멈춘 것처럼 보였다. 실제로 도는
+              중인지는 `hasPendingFinal`(작업 목록의 pending/running)이 진짜
+              신호다 -- 둘 중 하나라도 참이면 "만드는 중"으로 보여준다. */}
+          <Button disabled={!canRenderFinal || isRenderingCurrentFinal} onClick={() => void handleRenderFinal()}>{isRenderingCurrentFinal || hasPendingFinal ? "완성본 만드는 중" : finalRender?.status === "failed" || finalError ? "완성본 다시 만들기" : "완성본 만들기"}</Button>
         </CardContent>
       </Card>
       <Card>

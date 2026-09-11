@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { api, ApiRequestError } from "../api";
 import { capcutDraftFailureMessage, finalRenderFailureMessage, OutputsPage, subtitleFailureMessage, type SharedTimelineRead } from "./OutputsPage";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
 const finalJob = {
   job_id: "final-current", project_id: "project_a", job_type: "final_render", status: "succeeded",
@@ -1050,7 +1050,9 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
-    const action = await screen.findByRole("button", { name: "완성본 만들기" });
+    // task-1-brief.md: 이미 도는 중이면 (누른 적이 없어도) 단추가 "완성본
+    // 만들기"로 안 보인다 -- 만드는 중임을 보여준다.
+    const action = await screen.findByRole("button", { name: "완성본 만드는 중" });
     expect(action).toBeDisabled();
     fireEvent.click(action);
     expect(startFinalRender).not.toHaveBeenCalled();
@@ -1077,7 +1079,9 @@ describe("OutputsPage", () => {
 
     render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
 
-    const action = await screen.findByRole("button", { name: "완성본 만들기" });
+    // 더 새 완성본은 이미 성공했어도, 같은 편집본의 옛 요청이 아직 도는
+    // 중이면 여전히 "만드는 중"이다 -- 그새 다 됐다고 단정하지 않는다.
+    const action = await screen.findByRole("button", { name: "완성본 만드는 중" });
     expect(action).toBeDisabled();
     fireEvent.click(action);
     expect(startFinalRender).not.toHaveBeenCalled();
@@ -1217,6 +1221,90 @@ describe("OutputsPage", () => {
     expect(screen.getByRole("button", { name: "완성본 만들기" })).toBeDisabled();
     expect(screen.queryByText("완성본을 만들지 못했어요. 편집 상태를 확인한 뒤 다시 시도해 주세요.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "완성본 만드는 중" })).not.toBeInTheDocument();
+  });
+
+  // task-1-brief.md: 완성본 만들기는 몇 분 걸리는데 화면은 POST 한 번 보내고
+  // 끝이었다 -- 회색 단추와 "완료될 때까지 기다린 뒤 상태를 다시 확인해
+  // 주세요"라는 문구만 있어서 도는 건지 멈춘 건지 알 수 없었다. 아래 두 시험은
+  // 화면이 **스스로** 상태를 다시 읽는지(첫 번째)와, 끝나면 **반드시
+  // 멈추는지**(두 번째)를 각각 확인한다.
+  it("checks the finished-video status on its own while it is still being made", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    const runningFinal = { ...currentFinalJob, job_id: "final-running", status: "running", finished_at: null };
+    const listJobs = vi.mocked(api.listJobs);
+    listJobs
+      .mockResolvedValueOnce([activeTimelineJob] as never)
+      .mockResolvedValue([activeTimelineJob, runningFinal] as never);
+    vi.spyOn(api, "startFinalRender").mockResolvedValue({ job_id: runningFinal.job_id, status: "pending" });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({ job_id: runningFinal.job_id, status: "running", render: null });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    // fake timer 아래에서는 findBy/waitFor가 내부적으로 쓰는 setInterval이
+    // 안 돌아간다 -- 실제 타이머 없이도 끝나는 순수 프로미스 연쇄만 마이크로태스크
+    // 비우기로 흘려보낸다(HermesYujinStatus.test.tsx의 같은 처리를 따른다).
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    fireEvent.click(screen.getByRole("button", { name: "완성본 만들기" }));
+    await act(async () => {
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(screen.getByText("완성본을 만드는 중이에요.")).toBeVisible();
+    const callsRightAfterSubmit = listJobs.mock.calls.length;
+
+    // 아무도 단추를 다시 안 눌렀다 -- 화면이 스스로 다시 물어야 한다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(listJobs.mock.calls.length).toBeGreaterThan(callsRightAfterSubmit);
+  });
+
+  it("stops asking again once the finished video is ready", async () => {
+    vi.useFakeTimers();
+    stubCanonicalSubtitleApi();
+    const runningFinal = { ...currentFinalJob, job_id: "final-running", status: "running", finished_at: null };
+    const succeededFinal = { ...currentFinalJob, job_id: "final-running", status: "succeeded" };
+    const listJobs = vi.mocked(api.listJobs);
+    listJobs
+      .mockResolvedValueOnce([activeTimelineJob] as never)
+      .mockResolvedValueOnce([activeTimelineJob, runningFinal] as never)
+      .mockResolvedValue([activeTimelineJob, succeededFinal] as never);
+    vi.spyOn(api, "startFinalRender").mockResolvedValue({ job_id: runningFinal.job_id, status: "pending" });
+    vi.spyOn(api, "getFinalRender")
+      .mockResolvedValueOnce({ job_id: runningFinal.job_id, status: "running", render: null })
+      .mockResolvedValue({
+        job_id: succeededFinal.job_id, status: "succeeded", render: {
+          export_id: "final-running", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://done.mp4",
+          status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+        },
+      });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    fireEvent.click(screen.getByRole("button", { name: "완성본 만들기" }));
+    await act(async () => {
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    });
+    expect(screen.getByText("완성본을 만드는 중이에요.")).toBeVisible();
+
+    // 폴링 한 번으로 작업이 끝난 것을 알아챈다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(screen.getByLabelText("완성본 재생")).toBeVisible();
+    const callsWhenDone = listJobs.mock.calls.length;
+
+    // 다 된 뒤에도 계속 두드리면 영원히 서버를 부른다 -- 멈춰야 한다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000 * 3);
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect(listJobs.mock.calls.length).toBe(callsWhenDone);
   });
 
   it("starts one CapCut draft export for the approved active timeline and shows its local status", async () => {
