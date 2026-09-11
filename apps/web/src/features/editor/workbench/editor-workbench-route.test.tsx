@@ -120,6 +120,33 @@ const captionManifest = (revision: number, text = "원래 자막") => ({
   }],
 });
 
+// 2026-09-11 실측 결함(Task 1 브리프): `+ 새로 만들기`가 만드는 빈 편집판.
+// 트랙은 0개지만 캡션은 1개 있다 -- 창작자는 화면에서 **트랙이 아니라 캡션
+// 막대**를 눌러 장면을 고른다(`findNarrationOrCaptionBySegment`가 트랙에
+// 없으면 캡션에서 찾는다). segment_id를 "timeline_001:001"로 둔 것은
+// 실측 기록을 그대로 옮긴 것이다.
+const blankManifest = (revision = 1, placementId: string | null = "caption:timeline_001:001") => ({
+  ...manifest("project-a", "session-a"),
+  session_revision: revision,
+  output: { ...manifest("project-a", "session-a").output, duration_sec: 5 },
+  source_status: { status: "current" as const, source_session_id: "session-a", source_session_revision: revision },
+  tracks: [],
+  captions: [{
+    segment_id: "timeline_001:001", caption_id: "caption-1", placement_id: placementId,
+    text: "자막", start_sec: 0, end_sec: 5,
+    style: { font_family: "Pretendard", font_size_px: 42, text_color: "#ffffff", outline_color: "#000000", outline_width_px: 2, background_color: "#00000000", position_x_percent: 50, position_y_percent: 85, horizontal_align: "center" as const, safe_area_enabled: true, shadow_blur_px: 0 },
+  }],
+});
+
+const blankEditingSession = (revision = 1) => ({
+  ...editingSession("project-a", "session-a", revision),
+  segments: [{
+    segment_id: "timeline_001:001", start_sec: 0, end_sec: 5, caption_text: "자막",
+    cut_action: "keep", review_required: false, broll_override: null, visual_overlays: [],
+    music_override: null, sfx_override: null, tts_replacement: null, caption_style: null,
+  }],
+});
+
 const inspectorStyle = {
   font_family: "Pretendard",
   font_size_px: 28,
@@ -1965,6 +1992,66 @@ describe("EditorWorkbenchRoute", () => {
       expected_revision: 1,
     }));
     expect(applyOverlay).not.toHaveBeenCalled();
+  });
+
+  // 2026-09-11 실측 결함(Task 1 브리프)을 그대로 재구성한 회귀 시험이다.
+  // 빈 편집판(트랙 0개, 캡션 1개, 세션 장면 1개 -- `timeline_001:001`,
+  // 0.0~5.0초)을 그리고, 창작자가 아무것도 고르지 않은 채로 자산 카드의
+  // `화면으로 깔기`를 누른다(실측 그대로 -- 클립을 먼저 고르는 절차는 없었다).
+  //
+  // **RED로 확정하지 못했다.** 이 테스트는 현재 코드에서 GREEN이다 --
+  // `commitTimelineMutation`의 네 조건(§용의자 1)도, `target && onApply`
+  // (§용의자 2)도 이 흐름에서 클릭을 버리지 않는다. 이유: 트랙이 비어 있어도
+  // `TimelineDock`이 마운트되며 재생 위치(0초)를 부모로 자동 보고하고
+  // (`TimelineDock.tsx:275-278`), `EditorWorkbench.seekPlayback`이 내레이션이
+  // 없으면 캡션을 장면 경계로 대신 쓴다(`EditorWorkbench.tsx:380-386`) -- 그
+  // 결과 `selectedSegmentId`가 클릭 없이도 캡션의 장면으로 자동 채워진다.
+  // 이 자동 선택 경로, 캡션에 `placement_id`가 없는 경우(타임라인에서 클립
+  // 선택 자체가 불가능해지는 경우), 라이브러리 자산과 프로젝트 자산 양쪽
+  // 모두를 직접 재구성해 확인했지만 전부 GREEN이었다 -- 보고서에 근거를
+  // 남긴다. 이 시험은 **되돌리기 검증용 회귀 고정 장치**로 남긴다: 제품
+  // 코드를 건드리지 않았으니 지금 GREEN인 것이 맞다.
+  it("빈 편집판(트랙 0개)에서 클릭 없이도 자동 선택된 장면에 화면으로 깔기가 API를 부른다", async () => {
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(blankManifest(1, null) as never);
+    vi.mocked(api.getEditingSession).mockImplementation(
+      () => Promise.resolve(blankEditingSession(1)) as never,
+    );
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({
+      assets: [{
+        library_asset_id: "user_image_1",
+        media_type: "image",
+        origin: "user",
+        lifecycle: "ready",
+        user_metadata: { filename: "바다.png" },
+        thumbnail_url: "/api/library/assets/user_image_1/thumbnail",
+        preview_url: "/api/library/assets/user_image_1/preview",
+      }],
+      total: 1,
+    } as never);
+    const materialize = vi.spyOn(api, "materializeLibraryAsset").mockResolvedValue({
+      asset: { asset_id: "project-image-9", asset_type: "image", storage_uri: "file:///x.png" },
+      reference: { reference_id: "ref-1", project_id: "project-a", library_asset_id: "user_image_1" },
+    } as never);
+    const applyBroll = vi.spyOn(api, "updateEditingSessionBroll").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    // 트랙 0개로 비운 뒤에도 편집기가 오류 없이 그려지는지 먼저 확인한다
+    // (브리프 Step 1 지시). 안 그려지면 그것부터가 다른 결함이다.
+    await screen.findByRole("region", { name: "편집 작업판" });
+
+    await openAssetBrowser();
+    const applyButton = await screen.findByRole("button", { name: "바다.png 화면으로 깔기" });
+    // 실측대로 단추는 활성이다 -- 클릭 한 번 없이도 재생 위치 자동 보고가
+    // 캡션을 장면으로 골라 둔다.
+    expect((applyButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(applyButton);
+
+    await waitFor(() => expect(materialize).toHaveBeenCalledWith("user_image_1", "project-a"));
+    await waitFor(() => expect(applyBroll).toHaveBeenCalledWith("project-a", "session-a", "timeline_001:001", {
+      asset_id: "project-image-9",
+      media_controls: undefined,
+      expected_revision: 1,
+    }));
   });
 
   it("applies B-roll through the current revision fence without materializing it", async () => {
