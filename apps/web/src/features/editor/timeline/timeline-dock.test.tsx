@@ -78,8 +78,14 @@ const offsetNarrationView: EditorViewModel = {
   gaps: [],
 };
 
+// **처음 배율이 이제 영상 길이와 화면 폭에서 나온다**(`timelineZoomScale.ts`,
+// 대표님 지시 2026-09-12): 한 화면에 60초, 영상이 그보다 짧으면 영상 전체.
+// 그래서 60초 이하짜리는 처음부터 통째로 한 화면에 들어오고, **뷰포트가 실제로
+// 옆으로 밀리는 일**을 재려면 60초보다 긴 영상이어야 한다. 아래 긴 fixture들이
+// 그 자리다 -- 예전처럼 좁은 폭(200px)을 주는 것으로는 더 이상 만들 수 없다.
 const longNarrationView: EditorViewModel = {
   ...view,
+  output: { ...view.output, durationSec: 120 },
   tracks: [{
     trackId: "long-narration",
     role: "narration",
@@ -89,14 +95,45 @@ const longNarrationView: EditorViewModel = {
       type: "narration" as const,
       assetId: null,
       assetUri: null,
-      startSec: index,
-      endSec: index + 1,
+      startSec: index * 10,
+      endSec: (index + 1) * 10,
       controls: {},
     })),
   }],
   captions: [],
   gaps: [],
 };
+
+/** 옆으로 밀 수 있는 영상 하나. 600px에 240초면 10px/초, 한 화면에 60초다. */
+const scrollableView: EditorViewModel = {
+  ...view,
+  output: { ...view.output, durationSec: 240 },
+  tracks: [{
+    trackId: "n",
+    role: "narration",
+    clips: [{ clipId: "n-1", segmentId: "segment-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 240, controls: {} }],
+  }],
+  captions: [],
+  gaps: [],
+};
+
+/** 옆으로 민 뷰포트에서 0초가 아닌 클립을 자르는 자리. 위와 같은 배율(10px/초)이다. */
+const scrolledOffsetView: EditorViewModel = {
+  ...view,
+  output: { ...view.output, durationSec: 120 },
+  tracks: [{
+    trackId: "n",
+    role: "narration",
+    clips: [{ clipId: "n-offset", segmentId: "segment-offset", type: "narration", assetId: null, assetUri: null, startSec: 30, endSec: 80, controls: {} }],
+  }],
+  captions: [],
+  gaps: [],
+};
+
+/** 20초짜리 `view`를 예전과 같은 100px/초로 그리는 폭. 배율 규칙이 `폭 / 60초`가
+ *  아니라 `폭 / 영상 길이`를 쓰는 구간이라 2000 / 20초 = 100px/초다. 아래 시험들이
+ *  재는 것은 배율이 아니라 좌표 계산이라 그 기준을 그대로 유지한다. */
+const WIDTH_FOR_100_PX_PER_SECOND = 2000;
 
 function timelineClip(clipId: string): HTMLElement {
   const clip = screen.getAllByTestId("timeline-clip").find((item) => item.getAttribute("data-clip-id") === clipId);
@@ -238,7 +275,7 @@ describe("TimelineDock", () => {
 
   it("keeps trim pointer moves local and commits one meaningful frame-aligned result on pointer up", () => {
     const onTrimNarration = vi.fn();
-    render(<TimelineDock onTrimNarration={onTrimNarration} view={view} viewportWidthPx={400} />);
+    render(<TimelineDock onTrimNarration={onTrimNarration} view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} />);
     selectTimelineClip("n-1");
     mockTimelineRect("n-1");
     mockTimelineTrackRect();
@@ -323,10 +360,10 @@ describe("TimelineDock", () => {
 
   it("does not reorder on a stationary press and release in a scrolled virtualized viewport", () => {
     const onReorderNarration = vi.fn();
-    render(<TimelineDock onReorderNarration={onReorderNarration} view={longNarrationView} viewportWidthPx={200} />);
+    render(<TimelineDock onReorderNarration={onReorderNarration} view={longNarrationView} viewportWidthPx={600} />);
     const timeline = screen.getByRole("region", { name: "타임라인" });
     fireEvent.wheel(timeline, { deltaX: 50 });
-    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0.5");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "5");
     selectTimelineClip("long-1");
     mockTimelineTrackRect(40);
 
@@ -356,25 +393,26 @@ describe("TimelineDock", () => {
 
     selectTimelineClip("n-1");
     fireEvent.click(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" }));
-    expect(screen.getByTestId("timeline-clip")).toHaveAttribute("data-selected", "true");
+    expect(timelineClip("n-1")).toHaveAttribute("data-selected", "true");
   });
 
   it("applies trim pointer movement as a relative delta for a nonzero clip in a scrolled viewport", () => {
     const onTrimNarration = vi.fn();
-    render(<TimelineDock onTrimNarration={onTrimNarration} view={offsetNarrationView} viewportWidthPx={400} />);
+    // 10px/초, 한 화면에 60초. 200px를 밀면 20초 옆으로 간다.
+    render(<TimelineDock onTrimNarration={onTrimNarration} view={scrolledOffsetView} viewportWidthPx={600} />);
     const timeline = screen.getByRole("region", { name: "타임라인" });
     fireEvent.wheel(timeline, { deltaX: 200 });
     selectTimelineClip("n-offset");
     mockTimelineRect("n-offset", 140);
     mockTimelineTrackRect(40);
 
-    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 3초부터 시작 자르기" });
+    const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 30초부터 시작 자르기" });
     pointer(control, "pointerdown", 240);
     pointer(control, "pointermove", 340);
     pointer(control, "pointerup", 340);
 
-    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "2");
-    expect(onTrimNarration).toHaveBeenCalledWith({ segmentId: "segment-offset", startSec: 4, endSec: 8 });
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "20");
+    expect(onTrimNarration).toHaveBeenCalledWith({ segmentId: "segment-offset", startSec: 40, endSec: 80 });
   });
 
   it("clamps an end-handle drag outside the track to the timeline duration", () => {
@@ -393,7 +431,7 @@ describe("TimelineDock", () => {
 
   it("shows a local trim draft while moving and restores the original geometry on cancel", () => {
     const onTrimNarration = vi.fn();
-    render(<TimelineDock onTrimNarration={onTrimNarration} view={view} viewportWidthPx={400} />);
+    render(<TimelineDock onTrimNarration={onTrimNarration} view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} />);
     selectTimelineClip("n-1");
     mockTimelineTrackRect();
 
@@ -401,12 +439,13 @@ describe("TimelineDock", () => {
     pointer(control, "pointerdown", 0);
     pointer(control, "pointermove", 200);
     expect(timelineClip("n-1")).toHaveAttribute("data-start-seconds", "2");
-    expect(timelineClip("n-1")).toHaveStyle({ left: "200px", width: "200px" });
+    // 20초가 전부 보이므로 막대가 화면 끝에서 잘리지 않는다: 2~5초 = 300px.
+    expect(timelineClip("n-1")).toHaveStyle({ left: "200px", width: "300px" });
     expect(onTrimNarration).not.toHaveBeenCalled();
 
     pointer(control, "pointercancel", 200);
     expect(timelineClip("n-1")).toHaveAttribute("data-start-seconds", "0");
-    expect(timelineClip("n-1")).toHaveStyle({ left: "0px", width: "400px" });
+    expect(timelineClip("n-1")).toHaveStyle({ left: "0px", width: "500px" });
     expect(onTrimNarration).not.toHaveBeenCalled();
   });
 
@@ -431,10 +470,10 @@ describe("TimelineDock", () => {
 
   it("finishes one long reorder on the stable track after the selected control moves off viewport", () => {
     const onReorderNarration = vi.fn();
-    render(<TimelineDock onReorderNarration={onReorderNarration} view={longNarrationView} viewportWidthPx={200} />);
+    render(<TimelineDock onReorderNarration={onReorderNarration} view={longNarrationView} viewportWidthPx={600} />);
     const timeline = screen.getByRole("region", { name: "타임라인" });
     fireEvent.wheel(timeline, { deltaX: 50 });
-    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0.5");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "5");
     selectTimelineClip("long-1");
     mockTimelineTrackRect();
 
@@ -456,7 +495,7 @@ describe("TimelineDock", () => {
 
   it("cancels a long off-viewport reorder on the stable track and restores the original clip", () => {
     const onReorderNarration = vi.fn();
-    render(<TimelineDock onReorderNarration={onReorderNarration} view={longNarrationView} viewportWidthPx={200} />);
+    render(<TimelineDock onReorderNarration={onReorderNarration} view={longNarrationView} viewportWidthPx={600} />);
     fireEvent.wheel(screen.getByRole("region", { name: "타임라인" }), { deltaX: 50 });
     selectTimelineClip("long-1");
     mockTimelineTrackRect();
@@ -506,13 +545,20 @@ describe("TimelineDock", () => {
     expect(screen.getAllByRole("listitem", { name: /배경 음악/ })).toHaveLength(1);
     expect(screen.getAllByRole("listitem", { name: /효과음/ })).toHaveLength(1);
     expect(screen.getAllByRole("listitem", { name: /오버레이/ })).toHaveLength(1);
-    expect(screen.getByTestId("timeline-clip")).toHaveAttribute("data-clip-id", "n-1");
+    // 20초짜리는 처음 배율에서 통째로 한 화면에 들어온다(`timelineZoomScale.ts`).
+    // "보이는 것만 그린다"는 아래에서 늘린 뒤에 다시 잰다.
+    expect(screen.getAllByTestId("timeline-clip").map((clip) => clip.getAttribute("data-clip-id")).sort())
+      .toEqual(["b-1", "n-1", "o-late"]);
     expect(screen.queryByText("o-late")).toBeNull();
     expect(screen.getByLabelText("눈금 0초")).toBeInTheDocument();
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
     expect(screen.getByText("미디어 공백: asset_required")).toBeInTheDocument();
     expect(screen.getByText("현재 캡션: 첫 자막")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "스냅: 항목 시작 (0초)" )).toBeInTheDocument();
+
+    // 늘리면 보이는 구간이 좁아지고, 그 밖의 막대는 **그려지지도 않는다.**
+    for (let step = 0; step < 8; step += 1) fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    expect(screen.getAllByTestId("timeline-clip").map((clip) => clip.getAttribute("data-clip-id"))).toEqual(["n-1"]);
   });
 
   it("names each clip in plain language instead of exposing its internal clip ID", () => {
@@ -668,7 +714,7 @@ describe("TimelineDock", () => {
   });
 
   it("keeps click and keyboard navigation local while guarding editable targets", () => {
-    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    render(<TimelineDock view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} />);
 
     const timeline = screen.getByRole("region", { name: "타임라인" });
     fireEvent.click(screen.getByRole("listitem", { name: "내레이션" }), { clientX: 200 });
@@ -680,6 +726,7 @@ describe("TimelineDock", () => {
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "20");
     fireEvent.keyDown(timeline, { key: "Home" });
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
+    // 맨 `+`도 그대로 듣는다. 단축키를 더했다고 예전 키를 거두지 않는다.
     fireEvent.keyDown(timeline, { key: "+" });
     expect(timeline).toHaveAttribute("data-pixels-per-second", "125");
 
@@ -758,7 +805,7 @@ describe("TimelineDock", () => {
     // 확대·축소는 `+`/`-` 키로만 됐다. 안내 문구에 적혀 있어도 **눈에 보이는 단추가
     // 없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다(엔진은 다
     // 있는데 부를 자리가 없었다). 키와 단추는 같은 경로를 탄다.
-    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    render(<TimelineDock view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} />);
     const timeline = screen.getByRole("region", { name: "타임라인" });
     expect(timeline).toHaveAttribute("data-pixels-per-second", "100");
 
@@ -772,16 +819,15 @@ describe("TimelineDock", () => {
     // 확대·축소는 한 칸씩만 움직인다. 긴 영상에서 전체를 다시 보려면 축소를
     // 열 번 눌러야 했다 -- 캡컷에는 전체 맞춤이 따로 있다. 확대와 **같은
     // 경로**를 타므로 계산이 두 벌이 되지 않는다.
-    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    render(<TimelineDock view={scrollableView} viewportWidthPx={600} />);
     const timeline = screen.getByRole("region", { name: "타임라인" });
     fireEvent.wheel(timeline, { deltaX: 600 });
-    fireEvent.click(screen.getByRole("button", { name: "타임라인 확대" }));
-    expect(timeline).not.toHaveAttribute("data-viewport-start-seconds", "0");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "60");
 
     fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
 
-    // 20초짜리를 400px에 담으면 초당 20px이고, 왼쪽 끝에서 시작한다.
-    expect(timeline).toHaveAttribute("data-pixels-per-second", "20");
+    // 240초짜리를 600px에 담으면 초당 2.5px이고, 왼쪽 끝에서 시작한다.
+    expect(timeline).toHaveAttribute("data-pixels-per-second", "2.5");
     expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
   });
 
@@ -814,8 +860,8 @@ describe("TimelineDock", () => {
 
     const marker = screen.getByTestId("timeline-playhead");
     expect(marker).toHaveAttribute("data-seconds", "3");
-    // 화면 밖 상태가 아니라 실제 좌표를 갖는다.
-    expect(marker.style.left).toBe("300px");
+    // 화면 밖 상태가 아니라 실제 좌표를 갖는다. 1000px에 20초면 초당 50px이다.
+    expect(marker.style.left).toBe("150px");
   });
 
   it("moves the playhead line together with the position", () => {
@@ -851,7 +897,7 @@ describe("TimelineDock", () => {
     // 클릭만 되던 때는 자를 자리를 찾으려면 찍고 확인하고 다시 찍기를 반복해야
     // 했다. 트림 손잡이와 같은 상대 이동 방식이라 눈금 원점과 무관하게 정확하다.
     const onPlaybackSeek = vi.fn();
-    render(<TimelineDock onPlaybackSeek={onPlaybackSeek} view={view} viewportWidthPx={400} />);
+    render(<TimelineDock onPlaybackSeek={onPlaybackSeek} view={view} viewportWidthPx={WIDTH_FOR_100_PX_PER_SECOND} />);
     const handle = screen.getByRole("button", { name: "재생 위치 끌기" });
 
     pointer(handle, "pointerdown", 100);
@@ -881,37 +927,38 @@ describe("TimelineDock", () => {
   it("follows the playhead past the viewport edge during playback", () => {
     // 확대해 놓고 재생하면 재생 머리가 보이는 구간을 지나쳐 버리는데 타임라인은
     // 그대로였다. 밖에서 온 재생 위치가 구간을 벗어나면 뷰포트가 따라가야 한다.
-    const { rerender } = render(<TimelineDock playbackSec={0} view={view} viewportWidthPx={400} />);
+    const { rerender } = render(<TimelineDock playbackSec={0} view={scrollableView} viewportWidthPx={600} />);
     const timeline = screen.getByRole("region", { name: "타임라인" });
     expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
 
-    // 400px·초당 100px이면 0~4초만 보인다. 5초는 화면 밖이다.
-    rerender(<TimelineDock playbackSec={5} view={view} viewportWidthPx={400} />);
+    // 600px·초당 10px이면 0~60초만 보인다. 70초는 화면 밖이다.
+    rerender(<TimelineDock playbackSec={70} view={scrollableView} viewportWidthPx={600} />);
 
-    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "5");
-    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "5");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "70");
+    expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "70");
   });
 
   it("does not drag a deliberately scrolled viewport back to the resting playhead", () => {
     // 따라가기는 재생 위치가 **움직일 때**만이다. 편집자가 다른 구간을 보려고
     // 옆으로 민 뷰포트를 가만히 있는 재생 머리가 도로 끌어당기면 안 된다.
-    render(<TimelineDock playbackSec={0} view={view} viewportWidthPx={400} />);
+    render(<TimelineDock playbackSec={0} view={scrollableView} viewportWidthPx={600} />);
     const timeline = screen.getByRole("region", { name: "타임라인" });
 
     fireEvent.wheel(timeline, { deltaX: 600 });
 
-    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "6");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "60");
     expect(screen.getByLabelText("재생 위치")).toHaveAttribute("data-seconds", "0");
   });
 
   it("scrolls its local viewport from horizontal wheel pixels and clamps at both bounds", () => {
-    render(<TimelineDock view={view} viewportWidthPx={400} />);
+    render(<TimelineDock view={scrollableView} viewportWidthPx={600} />);
 
     const timeline = screen.getByRole("region", { name: "타임라인" });
     fireEvent.wheel(timeline, { deltaX: 200 });
-    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "2");
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "20");
     fireEvent.wheel(timeline, { deltaX: 10_000 });
-    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "16");
+    // 240초에서 보이는 60초를 뺀 180초가 오른쪽 끝이다.
+    expect(timeline).toHaveAttribute("data-viewport-start-seconds", "180");
     fireEvent.wheel(timeline, { deltaX: -10_000 });
     expect(timeline).toHaveAttribute("data-viewport-start-seconds", "0");
   });
@@ -929,7 +976,7 @@ describe("TimelineDock", () => {
   it("selects only a visible clip and gives the empty timeline an explicit state", () => {
     const { rerender } = render(<TimelineDock view={view} viewportWidthPx={400} />);
     fireEvent.click(timelineClipSelection("n-1"));
-    expect(screen.getByTestId("timeline-clip")).toHaveAttribute("data-selected", "true");
+    expect(timelineClip("n-1")).toHaveAttribute("data-selected", "true");
 
     rerender(<TimelineDock view={{ ...view, tracks: [], captions: [], gaps: [] }} viewportWidthPx={400} />);
     expect(screen.getByText("표시할 타임라인 항목이 없습니다.")).toBeInTheDocument();
@@ -940,7 +987,8 @@ describe("TimelineDock", () => {
 
     expect(screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터" })).toBeInTheDocument();
 
-    fireEvent.wheel(screen.getByRole("region", { name: "타임라인" }), { deltaX: 36_000 });
+    // 800px에 한 화면 60초면 초당 13.333px이다. 4800px를 밀면 360초 옆으로 간다.
+    fireEvent.wheel(screen.getByRole("region", { name: "타임라인" }), { deltaX: 4_800 });
 
     // bulk-100 is the 101st narration clip overall -- it must read "101번째",
     // not renumber back to "1번째" just because it's now the first one
@@ -952,15 +1000,20 @@ describe("TimelineDock", () => {
   it("uses half-open filtering rather than a first-N cap for 1000 clips across a 60-minute fixture", () => {
     render(<TimelineDock view={thousandClipHourView} viewportWidthPx={800} />);
 
-    expect(screen.getAllByTestId("timeline-clip")).toHaveLength(3);
-    expect(screen.getAllByTestId("timeline-clip").map((clip) => clip.getAttribute("data-clip-id"))).toEqual(["bulk-0", "bulk-1", "bulk-2"]);
-    expect(screen.getAllByTestId("timeline-clip").some((clip) => clip.getAttribute("data-clip-id") === "bulk-3")).toBe(false);
+    // 한 화면 60초에 3.6초짜리 막대면 열일곱 개가 걸친다(마지막은 57.6~61.2초).
+    // 1000개 가운데 **보이는 것만** 그려야 한다는 것이 이 시험이 지키는 것이다.
+    const visibleIds = Array.from({ length: 17 }, (_, index) => `bulk-${index}`);
+    expect(screen.getAllByTestId("timeline-clip")).toHaveLength(17);
+    expect(screen.getAllByTestId("timeline-clip").map((clip) => clip.getAttribute("data-clip-id"))).toEqual(visibleIds);
+    expect(screen.getAllByTestId("timeline-clip").some((clip) => clip.getAttribute("data-clip-id") === "bulk-17")).toBe(false);
 
-    fireEvent.wheel(screen.getByRole("region", { name: "타임라인" }), { deltaX: 36_000 });
+    fireEvent.wheel(screen.getByRole("region", { name: "타임라인" }), { deltaX: 4_800 });
 
     const laterClips = screen.getAllByTestId("timeline-clip");
     expect(laterClips.length).toBeLessThanOrEqual(300);
-    expect(laterClips.map((clip) => clip.getAttribute("data-clip-id"))).toEqual(["bulk-100", "bulk-101", "bulk-102"]);
+    expect(laterClips.map((clip) => clip.getAttribute("data-clip-id")))
+      .toEqual(Array.from({ length: 17 }, (_, index) => `bulk-${100 + index}`));
+    // 반열린 구간이다 -- 356.4~360초짜리는 360초에서 끝나므로 안 걸린다.
     expect(laterClips.some((clip) => clip.getAttribute("data-clip-id") === "bulk-99")).toBe(false);
   });
 });
@@ -1016,5 +1069,137 @@ describe("얹은 영상 오버레이 클립 이름 (최종 리뷰 발견)", () =
 
     expect(screen.getByRole("group", { name: /오버레이 1 · 영상/ })).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: /오버레이 1 · 그림/ })).toBeNull();
+  });
+});
+
+// 대표님 실제 영상과 같은 길이(494.837초, 94장면). 여기서 배율을 재야 "긴 영상에서
+// 말이 되는가"를 짐작이 아니라 숫자로 답할 수 있다.
+const ownerLongView: EditorViewModel = {
+  ...view,
+  output: { ...view.output, durationSec: 494.837 },
+  tracks: [{
+    trackId: "owner-narration",
+    role: "narration",
+    clips: Array.from({ length: 94 }, (_, index) => ({
+      clipId: `owner-${index}`,
+      segmentId: `owner-segment-${index}`,
+      type: "narration" as const,
+      assetId: null,
+      assetUri: null,
+      startSec: (index * 494.837) / 94,
+      endSec: ((index + 1) * 494.837) / 94,
+      controls: {},
+    })),
+  }],
+  captions: [],
+  gaps: [],
+};
+
+const fifteenSecondView: EditorViewModel = {
+  ...view,
+  output: { ...view.output, durationSec: 15 },
+  tracks: [{
+    trackId: "short-narration",
+    role: "narration",
+    clips: [{ clipId: "short-1", segmentId: "short-segment-1", type: "narration", assetId: null, assetUri: null, startSec: 0, endSec: 15, controls: {} }],
+  }],
+  captions: [],
+  gaps: [],
+};
+
+function timelinePixelsPerSecond(): number {
+  const value = screen.getByRole("region", { name: "타임라인" }).getAttribute("data-pixels-per-second");
+  return Number(value);
+}
+
+describe("타임라인을 늘리고 줄인다 (대표님 지시 2026-09-12)", () => {
+  it("처음 배율을 영상 길이에서 잡는다 -- 한 화면에 60초, 영상이 더 짧으면 영상 전체", () => {
+    // 예전에는 100px/초로 못박혀 있어서 494초 영상이 49,483px이 됐다. 1200px짜리
+    // 타임라인에 12초만 보였다는 뜻이다.
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    expect(timelinePixelsPerSecond()).toBeCloseTo(20, 6);
+
+    cleanup();
+
+    // 15초짜리에 같은 규칙을 쓰면 영상 전체가 화면을 꽉 채운다. 빈 자리를 그리지 않는다.
+    render(<TimelineDock view={fifteenSecondView} viewportWidthPx={1200} />);
+    expect(timelinePixelsPerSecond()).toBeCloseTo(80, 6);
+  });
+
+  it("타임라인에 초점이 없어도 단축키가 듣는다", () => {
+    // 대표님: "이걸 단축키로 쉽게 늘리고 줄이고를 할수 있어야지". 먼저 타임라인을
+    // 눌러 초점을 맞추라고 하면 "쉽게"가 아니다. 컷 단축키가 이미 창 전체에서
+    // 듣는다(`EditorWorkbench.tsx`) -- 같은 방식이다.
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    expect(timelinePixelsPerSecond()).toBeCloseTo(20, 6);
+
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(25, 6);
+
+    fireEvent.keyDown(window, { key: "-", ctrlKey: true });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(20, 6);
+
+    fireEvent.keyDown(window, { key: "0", ctrlKey: true });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(1200 / 494.837, 6);
+  });
+
+  it("늘려도 보고 있던 지점이 화면에 그대로 남는다", () => {
+    // `zoomAroundAnchor`가 앵커를 받는 이유다. 앵커는 **재생 머리** -- 대표님이
+    // 지금 보고 있는 자리이고, 다음 편집이 일어나는 자리다.
+    render(<TimelineDock playbackSec={30} view={ownerLongView} viewportWidthPx={1200} />);
+    const playhead = () => screen.getByTestId("timeline-playhead").style.left;
+
+    // 30초 × 20px/초 = 600px. 1200px 화면의 한가운데다.
+    expect(playhead()).toBe("600px");
+
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+
+    // 배율은 올라갔는데(가만히 있어서 통과하지 못하게) 재생 머리는 같은 자리에 있다.
+    expect(timelinePixelsPerSecond()).toBeCloseTo(25, 6);
+    expect(playhead()).toBe("600px");
+
+    fireEvent.keyDown(window, { key: "-", ctrlKey: true });
+
+    expect(timelinePixelsPerSecond()).toBeCloseTo(20, 6);
+    expect(playhead()).toBe("600px");
+  });
+
+  it("한계에서 단추와 키가 같은 판단을 한다", () => {
+    // `cutShortcuts.ts`가 정한 규약: "키는 툴바가 정한 것을 그대로 쓴다."
+    // 단추가 잠겼는데 키로는 통하면 화면이 말한 것과 다른 일이 일어난다.
+    render(<TimelineDock view={ownerLongView} viewportWidthPx={1200} />);
+    const zoomIn = () => screen.getByRole("button", { name: "타임라인 확대" });
+    const zoomOut = () => screen.getByRole("button", { name: "타임라인 축소" });
+
+    for (let step = 0; step < 20; step += 1) fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(400, 6);
+    expect(zoomIn()).toBeDisabled();
+    fireEvent.keyDown(window, { key: "=", ctrlKey: true });
+    expect(timelinePixelsPerSecond()).toBeCloseTo(400, 6);
+
+    for (let step = 0; step < 40; step += 1) fireEvent.keyDown(window, { key: "-", ctrlKey: true });
+    // 줄이기를 계속 누르면 `전체 보기`와 **정확히 같은 자리**에 선다. 그 너머는
+    // 빈 자리뿐이라 더 줄일 이유가 없다.
+    expect(timelinePixelsPerSecond()).toBeCloseTo(1200 / 494.837, 6);
+    expect(zoomOut()).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "타임라인 전체 보기" }));
+    expect(timelinePixelsPerSecond()).toBeCloseTo(1200 / 494.837, 6);
+  });
+
+  it("길이가 틀리게 와도 타임라인이 열린다", () => {
+    // 같은 계획의 다른 조각이 고치는 결함 -- 494초 세션의 길이가 5.0으로 온다.
+    // 그 값이 고쳐지기 전에도 배율은 유한해야 한다. 0으로 나누면
+    // `createTimelineNavigation`이 RangeError를 던져 편집기가 통째로 안 열린다.
+    render(<TimelineDock view={{ ...ownerLongView, output: { ...ownerLongView.output, durationSec: 5 } }} viewportWidthPx={1200} />);
+    expect(Number.isFinite(timelinePixelsPerSecond())).toBe(true);
+    expect(timelinePixelsPerSecond()).toBeGreaterThan(0);
+
+    cleanup();
+
+    render(<TimelineDock view={{ ...ownerLongView, output: { ...ownerLongView.output, durationSec: 0 } }} viewportWidthPx={1200} />);
+    expect(timelinePixelsPerSecond()).toBe(100);
+    // 길이를 모르면 전체 보기로 갈 자리도 없다. 단추는 잠겨 있어야 한다 --
+    // 눌러도 아무 일 없는 단추는 "있는데 안 되는 것"보다 나쁘다.
+    expect(screen.getByRole("button", { name: "타임라인 전체 보기" })).toBeDisabled();
   });
 });

@@ -18,6 +18,8 @@ import {
   type TimelineNavigationAction,
   type TimelineNavigationState,
 } from "./timelineNavigation";
+import { fitPixelsPerSecond, initialPixelsPerSecond, pixelsPerSecondBounds } from "./timelineZoomScale";
+import { timelineZoomShortcutFor, type TimelineZoomCommand } from "./timelineZoomShortcuts";
 
 const LANE_HEIGHT_PX = 32;
 /** 눈·음소거를 그릴 트랙. 서버(`track_states.py`)가 받는 것과 같은 갈래이고,
@@ -25,6 +27,11 @@ const LANE_HEIGHT_PX = 32;
 const HIDEABLE_LANES = new Set<TimelineLane>(["broll", "overlay", "caption"]);
 const MUTABLE_LANES = new Set<TimelineLane>(["narration", "broll", "bgm", "sfx"]);
 const SNAP_THRESHOLD_PX = 8;
+/** 한 번에 얼마나 늘리고 줄이는가. `navigationKeyAction`의 기본값과 같은 값이고,
+ *  단추·키·전체 보기가 전부 이 한 값을 본다. */
+const ZOOM_STEP = 1.25;
+/** 부동소수 나머지 때문에 한계 바로 앞에서 단추가 안 잠기는 일을 막는다. */
+const ZOOM_EPSILON = 1e-9;
 
 // Source status describes base-timeline provenance. Session edits are already
 // materialized in this view, so the label must not imply that they are absent.
@@ -198,18 +205,39 @@ function resolveViewportEnd(state: TimelineNavigationState, durationSec: number,
 function navigationReducer(
   state: TimelineNavigationState,
   action: TimelineNavigationAction,
-  options: Readonly<{ durationSec: number; viewportWidthPx: number; fps: EditorViewModel["fps"] }>,
+  options: Readonly<{
+    durationSec: number;
+    viewportWidthPx: number;
+    fps: EditorViewModel["fps"];
+    minPixelsPerSecond?: number;
+    maxPixelsPerSecond?: number;
+  }>,
 ): TimelineNavigationState {
   return reduceTimelineNavigation(state, action, options);
 }
 
 export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, onTrimNarration, onReorderNarration, onUpdatePlacements, onUpdateTrackStates, onSelectSegment, onPlaybackSeek, onDropAsset, selectedSegmentId = null, selectionResetKey = null, playbackSec, isSaving = false, mutationMessage, editToolbar }: Props) {
-  const options = { durationSec: view.output.durationSec, viewportWidthPx, fps: view.fps };
+  // 늘리기·줄이기의 한계는 **영상 길이와 화면 폭에서 나온다.** 줄이기는 영상
+  // 전체가 한 화면에 들어온 자리에서 멈추고, 늘리기는 프레임이 보이는 자리에서
+  // 멈춘다(`timelineZoomScale.ts`).
+  const zoomBounds = pixelsPerSecondBounds({ durationSec: view.output.durationSec, viewportWidthPx });
+  const options = {
+    durationSec: view.output.durationSec,
+    viewportWidthPx,
+    fps: view.fps,
+    minPixelsPerSecond: zoomBounds.min,
+    maxPixelsPerSecond: zoomBounds.max,
+  };
   const [state, dispatch] = useReducer(
     (current: TimelineNavigationState, action: TimelineNavigationAction) => navigationReducer(current, action, options),
     { ...options, playbackSec },
     (initial) => {
-      const navigation = createTimelineNavigation({ durationSec: initial.durationSec, pixelsPerSecond: 100 });
+      // 처음 배율을 영상 길이에서 잡는다(대표님 지시 2026-09-12). 100px/초로
+      // 못박혀 있던 때는 494초 영상이 49,483px이었다.
+      const navigation = createTimelineNavigation({
+        durationSec: initial.durationSec,
+        pixelsPerSecond: initialPixelsPerSecond({ durationSec: initial.durationSec, viewportWidthPx: initial.viewportWidthPx }),
+      });
       return initial.playbackSec === undefined || !Number.isFinite(initial.playbackSec)
         ? navigation
         : reduceTimelineNavigation(navigation, { type: "seek", seconds: initial.playbackSec }, initial);
@@ -345,26 +373,66 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       originSec: state.viewportStartSec,
     }) });
   };
+  // **늘리기·줄이기·전체 보기는 여기 한 표에만 있다.** `cutShortcuts.ts`가 정한
+  // 규약이다 -- "키는 툴바가 정한 것을 그대로 쓴다. 무엇을 할 수 있는지 다시
+  // 계산하지 않는다." 단추의 잠김과 키의 멈춤이 두 곳에서 따로 계산되면, 화면은
+  // 잠겼다는데 키로는 통하는 일이 생긴다.
+  //
+  // 전체 보기가 가는 자리는 **줄이기의 바닥과 같은 값**이다(`zoomBounds.min`).
+  // 그래서 줄이기를 계속 누른 자리와 전체 보기를 누른 자리가 정확히 겹친다.
+  const fitTarget = fitPixelsPerSecond({ durationSec: view.output.durationSec, viewportWidthPx }) === null
+    ? null
+    : zoomBounds.min;
+  const zoomControls: Readonly<Record<TimelineZoomCommand, Readonly<{ enabled: boolean; run: () => void }>>> = {
+    in: {
+      enabled: state.pixelsPerSecond < zoomBounds.max * (1 - ZOOM_EPSILON),
+      run: () => dispatch({ type: "zoom", factor: ZOOM_STEP }),
+    },
+    out: {
+      enabled: state.pixelsPerSecond > zoomBounds.min * (1 + ZOOM_EPSILON),
+      run: () => dispatch({ type: "zoom", factor: 1 / ZOOM_STEP }),
+    },
+    fit: {
+      // 길이를 모르면 갈 자리도 없다. 눌러도 아무 일 없는 단추 대신 잠근다.
+      enabled: fitTarget !== null,
+      run: () => {
+        if (fitTarget === null) return;
+        dispatch({ type: "zoom", pixelsPerSecond: fitTarget, anchorPx: 0 });
+        dispatch({ type: "scroll", seconds: 0 });
+      },
+    },
+  };
+  const runZoom = (command: TimelineZoomCommand) => {
+    const control = zoomControls[command];
+    if (control.enabled) control.run();
+  };
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     const action = navigationKeyAction(event.key, isEditableTarget(event.target), { state, fps: view.fps });
     if (!action) return;
     event.preventDefault();
+    // 맨 `+`/`-`도 **같은 표**를 거친다. 여기서 바로 dispatch하면 한계에서
+    // 단추는 잠겨 있는데 키로는 한 칸 더 가는 어긋남이 생긴다.
+    if (action.type === "zoom") {
+      runZoom(event.key === "+" ? "in" : "out");
+      return;
+    }
     dispatch(action);
   };
-  // 단추도 키와 **같은 경로**를 탄다. 확대 계산을 여기서 다시 쓰면 같은 동작이 두
-  // 벌이 되고, 그중 하나가 조용히 낡는다.
-  const zoom = (key: "+" | "-") => {
-    const action = navigationKeyAction(key, false, { state, fps: view.fps });
-    if (action) dispatch(action);
-  };
-  // 전체 맞춤. 축소를 열 번 누르는 대신 한 번에 처음으로 돌아온다. 확대와 같은
-  // reducer를 타므로 배율 계산이 두 벌이 되지 않는다. 길이가 0이면 나눌 수 없어
-  // 아무 일도 하지 않는다.
-  const fitAll = () => {
-    if (!(view.output.durationSec > 0) || !(viewportWidthPx > 0)) return;
-    dispatch({ type: "zoom", pixelsPerSecond: viewportWidthPx / view.output.durationSec, anchorPx: 0 });
-    dispatch({ type: "scroll", seconds: 0 });
-  };
+  // **단축키는 타임라인에 초점이 없어도 들어야 한다.** 먼저 타임라인을 눌러
+  // 초점을 맞추라고 하면 대표님이 말한 "단축키로 쉽게"가 아니다. 컷 단축키가
+  // 이미 같은 방식으로 창 전체에서 듣는다(`EditorWorkbench.tsx`).
+  const runZoomRef = useRef(runZoom);
+  runZoomRef.current = runZoom;
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      const command = timelineZoomShortcutFor(event, isEditableTarget(event.target));
+      if (!command) return;
+      event.preventDefault();
+      runZoomRef.current(command);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const handleWheel = (event: WheelEvent<HTMLElement>) => {
     if (event.deltaX === 0) return;
     event.preventDefault();
@@ -747,10 +815,11 @@ export function TimelineDock({ clipPictures = new Map(), view, viewportWidthPx, 
       {/* 확대·축소는 `+`/`-` 키로만 됐다. 안내에 적어 두어도 **눈에 보이는 단추가
           없으면 안 쓰는 기능**이다 -- 2026-08-17에 컷 도구가 정확히 그랬다. */}
       {editToolbar}
+      {/* 단추와 키가 **같은 표**를 본다(`zoomControls`). 잠김도 같이 온다. */}
       <span className="vb-editor-workbench__timeline-zoom">
-        <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="- 키" onClick={() => zoom("-")}>−</button>
-        <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="+ 키" onClick={() => zoom("+")}>+</button>
-        <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title="영상 전체가 한 화면에 들어오게" onClick={fitAll}>전체</button>
+        <button data-native-control="timeline-zoom-out" type="button" aria-label="타임라인 축소" title="줄이기 (Ctrl과 - 키)" disabled={!zoomControls.out.enabled} onClick={() => runZoom("out")}>−</button>
+        <button data-native-control="timeline-zoom-in" type="button" aria-label="타임라인 확대" title="늘리기 (Ctrl과 = 키)" disabled={!zoomControls.in.enabled} onClick={() => runZoom("in")}>+</button>
+        <button data-native-control="timeline-fit" type="button" aria-label="타임라인 전체 보기" title="영상 전체가 한 화면에 들어오게 (Ctrl과 0 키)" disabled={!zoomControls.fit.enabled} onClick={() => runZoom("fit")}>전체</button>
       </span>
     </div>
     {/* 캡컷처럼 눈금과 트랙을 한 좌표계에 놓고, 그 위에 재생 위치 선을 관통시킨다.

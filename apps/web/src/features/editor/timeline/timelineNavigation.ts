@@ -37,6 +37,11 @@ export type TimelineNavigationOptions = Readonly<{
   durationSec: number;
   viewportWidthPx: number;
   fps: RationalFps;
+  /** 늘리기·줄이기의 한계. **곱하는 쪽이 막는다** -- 배율은 reducer가 자기
+   *  상태에서 곱하므로(위 주석) 화면 쪽에서 미리 막으면 한 묶음 안에서 두 번
+   *  누른 순간 그 판단이 낡는다. 안 주면 예전처럼 한계가 없다. */
+  minPixelsPerSecond?: number;
+  maxPixelsPerSecond?: number;
 }>;
 
 export type TimelineNavigationKeyboardContext = Readonly<{
@@ -106,6 +111,23 @@ function requireOptions(options: TimelineNavigationOptions): void {
     throw new RangeError("Viewport width must be nonnegative");
   }
   frameToSeconds(0, options.fps);
+}
+
+/** 한계 안으로 접어 넣는다. 넘어선 만큼 버리는 게 아니라 **끝값에 딱 세운다** --
+ *  그래야 늘리기를 계속 눌렀을 때 한계에 정확히 서고, 단추가 잠기는 자리와
+ *  키가 멈추는 자리가 같아진다. */
+function clampPixelsPerSecond(target: number, options: TimelineNavigationOptions): number {
+  let bounded = target;
+  if (options.maxPixelsPerSecond !== undefined) {
+    requirePositive(options.maxPixelsPerSecond, "Maximum pixels per second");
+    bounded = Math.min(bounded, options.maxPixelsPerSecond);
+  }
+  if (options.minPixelsPerSecond !== undefined) {
+    requirePositive(options.minPixelsPerSecond, "Minimum pixels per second");
+    bounded = Math.max(bounded, options.minPixelsPerSecond);
+  }
+  requirePositive(bounded, "Pixels per second");
+  return bounded;
 }
 
 function maximumViewportStart(durationSec: number, viewportWidthPx: number, pixelsPerSecond: number): number {
@@ -206,7 +228,7 @@ export function reduceTimelineNavigation(
       const anchorPx = action.anchorPx ?? timeToPixels(current.playheadSec, scale);
       requirePositive(target, "Pixels per second");
       requireFinite(anchorPx, "Anchor pixel");
-      const nextScale = zoomAroundAnchor(scale, anchorPx, target);
+      const nextScale = zoomAroundAnchor(scale, anchorPx, clampPixelsPerSecond(target, options));
       return {
         ...current,
         pixelsPerSecond: nextScale.pixelsPerSecond,

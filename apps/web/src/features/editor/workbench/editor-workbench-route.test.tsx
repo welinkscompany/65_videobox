@@ -2170,11 +2170,14 @@ describe("EditorWorkbenchRoute", () => {
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     const trim = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 시작 자르기" });
+    // 처음 배율이 영상 길이에서 나오므로(`timelineZoomScale.ts`) 픽셀을 못박지
+    // 않는다. 화면이 쓰는 배율을 읽어 **딱 1초만큼** 민다.
+    const pixelsPerSecond = Number(screen.getByRole("region", { name: "타임라인" }).getAttribute("data-pixels-per-second"));
 
     pointer(trim, "pointerdown", 100);
     expect(update).not.toHaveBeenCalled();
-    pointer(trim, "pointermove", 200);
-    pointer(trim, "pointerup", 200);
+    pointer(trim, "pointermove", 100 + pixelsPerSecond);
+    pointer(trim, "pointerup", 100 + pixelsPerSecond);
 
     await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
     expect(update).toHaveBeenCalledWith("project-a", "session-a", "segment-1", {
@@ -2533,11 +2536,15 @@ describe("EditorWorkbenchRoute", () => {
     const track = screen.getByTestId("timeline-track");
     vi.spyOn(track, "getBoundingClientRect").mockReturnValue({ left: 0 } as DOMRect);
     const control = screen.getByRole("button", { name: "내레이션 1번째 장면, 0초부터 순서 바꾸기" });
+    // 두 번째 장면(1~2초)의 한가운데인 1.5초를 지나야 뒤로 간다. 배율은 화면이
+    // 영상 길이에서 잡으므로 픽셀을 못박지 않고 읽어서 쓴다.
+    const pixelsPerSecond = Number(screen.getByRole("region", { name: "타임라인" }).getAttribute("data-pixels-per-second"));
+    const pastMidpointPx = pixelsPerSecond * 1.75;
 
     pointer(control, "pointerdown", 0);
     expect(reorder).not.toHaveBeenCalled();
-    pointer(control, "pointermove", 200);
-    pointer(control, "pointerup", 200);
+    pointer(control, "pointermove", pastMidpointPx);
+    pointer(control, "pointerup", pastMidpointPx);
 
     await waitFor(() => expect(reorder).toHaveBeenCalledTimes(1));
     expect(reorder).toHaveBeenCalledWith("project-a", "session-a", {
