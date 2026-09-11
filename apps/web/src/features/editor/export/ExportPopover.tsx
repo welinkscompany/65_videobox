@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 
 import { api, type JobRecord } from "../../../api";
 import { Button } from "../../../components/ui/button";
-import { resolveMasterFinalRender, type MasterFinalRenderSelection } from "../../outputs/masterFinalRender";
+import {
+  resolveMasterFinalRender,
+  resolveMasterSubtitle,
+  type MasterFinalRenderSelection,
+  type MasterSubtitleSelection,
+} from "../../outputs/masterFinalRender";
 
 /** 캡컷 `내보내기` 팝오버 (계획 §7·§10 10단계).
  *
@@ -25,12 +30,16 @@ export function ExportPopover({
   /** 2단계 -- 완성본 만들기와 자세한 상태(기존 화면). */
   onOpenDetails: () => void;
 }) {
-  // "지금 편집본의 마스터 완성본"을 고르는 단 하나의 규칙을 쓴다 -- 직접
-  // 가로·세로 변형본 필터나 낡음 확인을 여기서 다시 짜지 않는다. 두 화면이
-  // 서로 다른 파일을 "완성본"이라 부르면 잘못된 파일을 조용히 내려주게 된다
-  // (`masterFinalRender.ts` 주석, task-1-brief.md 참고).
+  // "지금 편집본의 마스터 완성본/자막"을 고르는 단 하나의 규칙을 쓴다 --
+  // 직접 가로·세로 변형본 필터나 낡음 확인을 여기서 다시 짜지 않는다. 두
+  // 화면이 서로 다른 파일을 "완성본"·"자막"이라 부르면 잘못된 파일을
+  // 조용히 내려주게 된다(`masterFinalRender.ts` 주석 참고).
+  //
+  // 자막은 예전에 `job_type === "subtitle_render"` 중 배열의 "마지막
+  // 것"을 그대로 썼다 -- 완성본에서 고친 것과 똑같은 결함이었다
+  // (`input_ref` 필터 없음, 낡음 확인 없음, final-fix-report.md 발견 2).
   const [finalSelection, setFinalSelection] = useState<MasterFinalRenderSelection>({ kind: "none" });
-  const [subtitleJobId, setSubtitleJobId] = useState<string | null>(null);
+  const [subtitleSelection, setSubtitleSelection] = useState<MasterSubtitleSelection>({ kind: "none" });
   const [capcutReady, setCapcutReady] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -42,11 +51,14 @@ export function ExportPopover({
     void Promise.all([api.getLatestEditingSession(projectId), api.listJobs(projectId)])
       .then(async ([session, jobs]) => {
         if (!active) return;
-        setSubtitleJobId(latest(jobs, "subtitle_render")?.job_id ?? null);
         setCapcutReady(Boolean(latest(jobs, "capcut_draft_export")));
-        const selection = await resolveMasterFinalRender(projectId, jobs, session)
-          .catch(() => ({ kind: "none" as const }));
-        if (active) setFinalSelection(selection);
+        const [selection, subtitleResult] = await Promise.all([
+          resolveMasterFinalRender(projectId, jobs, session).catch(() => ({ kind: "none" as const })),
+          resolveMasterSubtitle(projectId, jobs, session).catch(() => ({ kind: "none" as const })),
+        ]);
+        if (!active) return;
+        setFinalSelection(selection);
+        setSubtitleSelection(subtitleResult);
       })
       .catch(() => { /* 목록을 못 읽어도 2단계로는 갈 수 있어야 한다 */ })
       .finally(() => { if (active) setReady(true); });
@@ -79,10 +91,14 @@ export function ExportPopover({
         </li>
         <li>
           <strong>자막 파일</strong>
-          {subtitleJobId ? (
-            <a className="vb-action-link" download href={`${base}/subtitles/${encodeURIComponent(subtitleJobId)}/content`}>
+          {subtitleSelection.kind === "ready" ? (
+            <a className="vb-action-link" download href={`${base}/subtitles/${encodeURIComponent(subtitleSelection.jobId)}/content`}>
               SRT 내려받기
             </a>
+          ) : subtitleSelection.kind === "stale" ? (
+            // 완성본과 같은 말을 한다 -- 낡은 자막을 조용히 안 주고, 감춘 뒤
+            // 다시 만들라고 안내한다(`OutputsPage.tsx`의 `staleSubtitle`와 동일).
+            <p>자막이 최신 편집본과 달라요. 아래에서 새로 만들어 주세요.</p>
           ) : (
             <p>자막을 아직 만들지 않았어요.</p>
           )}

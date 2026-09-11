@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api, type EditingSession, type FinalRenderJob, type JobRecord } from "../../api";
-import { resolveMasterFinalRender } from "./masterFinalRender";
+import { api, type EditingSession, type FinalRenderJob, type JobRecord, type SubtitleJob } from "../../api";
+import { selectCurrentTimelineJob } from "../review/timeline-review-state";
+import { resolveMasterFinalRender, resolveMasterSubtitle, selectTimelineJob } from "./masterFinalRender";
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -131,6 +132,108 @@ describe("마스터 완성본 고르기 -- 링크가 엉뚱한 파일을 주면 
       const result = await resolveMasterFinalRender("project-a", jobs, otherProjectSession);
 
       expect(result).toEqual({ kind: "stale", jobId: "final-master" });
+    });
+  });
+
+  // 2026-09-11 리뷰(final-fix-report.md 발견 1) -- 타임라인 작업을 고르는
+  // 규칙이 여기(`selectTimelineJob`)와 `timeline-review-state.ts`의
+  // `selectCurrentTimelineJob` 둘로 갈라져 있었다. `OutputsPage.tsx`는 합쳐진
+  // 화면에서 항상 후자의 결과(`shared.job`)를 쓰고, `ExportPopover`는 항상
+  // 전자를 쓴다 -- 즉 production 두 화면이 실제로 서로 다른 규칙을 쓰고 있었다.
+  describe("타임라인 작업 고르기 -- ExportPopover와 OutputsPage가 같은 것을 가리켜야 한다", () => {
+    it("finished_at이 아직 없는 succeeded 기록이 있어도 두 화면이 같은 타임라인 작업을 고른다", () => {
+      const session: EditingSession = {
+        session_id: "session-a", project_id: "project-a", timeline_id: "timeline-a", session_revision: 1,
+        segments: [], history: [],
+      };
+      // finished_at이 있는 기록 -- 시작은 더 이르지만 끝난 시각을 확실히 안다.
+      const withFinishedAt: JobRecord = {
+        job_id: "timeline-with-finish", project_id: "project-a", job_type: "timeline_build", status: "succeeded",
+        input_ref: null, output_ref: "timeline-a", error_message: null,
+        started_at: "2026-09-11T00:00:01Z", finished_at: "2026-09-11T00:00:05Z",
+      };
+      // finished_at이 아직 안 채워진(레거시/경합) succeeded 기록 -- started_at만
+      // 보면 더 최근이라 `finished_at ?? started_at` 한 값 비교로는 이게 이긴다.
+      const missingFinishedAt: JobRecord = {
+        job_id: "timeline-missing-finish", project_id: "project-a", job_type: "timeline_build", status: "succeeded",
+        input_ref: null, output_ref: "timeline-a", error_message: null,
+        started_at: "2026-09-11T00:00:10Z", finished_at: null,
+      };
+      const jobs = [withFinishedAt, missingFinishedAt];
+
+      const fromExportPopover = selectTimelineJob(jobs, session);
+      const fromOutputsPage = selectCurrentTimelineJob(session, jobs);
+
+      expect(fromExportPopover?.job_id).toBe(fromOutputsPage?.job_id);
+    });
+  });
+
+  // 2026-09-11 리뷰(final-fix-report.md 발견 2) -- `ExportPopover`의 자막
+  // 링크가 완성본과 똑같은 결함을 그대로 갖고 있었다: `input_ref` 필터도,
+  // 낡음 확인도 없이 "마지막 succeeded 자막 job"을 그대로 내려받기 링크로
+  // 줬다. `resolveMasterFinalRender`와 규칙을 나눠 쓰는 `resolveMasterSubtitle`로
+  // 같은 모양(ready/stale/none)으로 판정한다.
+  describe("마스터 자막 고르기 -- 완성본과 같은 규칙을 나눠 쓴다", () => {
+    const session: EditingSession = {
+      session_id: "session-a", project_id: "project-a", timeline_id: "timeline-a", session_revision: 3,
+      segments: [], history: [],
+    };
+    const timelineJob: JobRecord = {
+      job_id: "timeline-job-a", project_id: "project-a", job_type: "timeline_build", status: "succeeded",
+      input_ref: null, output_ref: "timeline-a", error_message: null,
+      started_at: "2026-09-11T00:00:00Z", finished_at: "2026-09-11T00:00:01Z",
+    };
+    const currentSubtitleJob: JobRecord = {
+      job_id: "subtitle-current", project_id: "project-a", job_type: "subtitle_render", status: "succeeded",
+      input_ref: "timeline-job-a", output_ref: "subtitle-current", error_message: null,
+      started_at: "2026-09-11T00:02:00Z", finished_at: "2026-09-11T00:02:05Z",
+    };
+
+    it("다른 편집본을 가리키는 자막 기록이 시간상 나중이어도 이 편집본의 자막을 준다 (input_ref 필터)", async () => {
+      // 배열 순서상·시각상 모두 "마지막"인 기록이지만 다른(옛) 타임라인
+      // 작업의 자막이다 -- "마지막 것" 규칙이면 이걸 준다.
+      const otherTimelineSubtitleJob: JobRecord = {
+        job_id: "subtitle-other-timeline", project_id: "project-a", job_type: "subtitle_render", status: "succeeded",
+        input_ref: "other-timeline-job", output_ref: "subtitle-other-timeline", error_message: null,
+        started_at: "2026-09-11T00:09:00Z", finished_at: "2026-09-11T00:09:05Z",
+      };
+      const jobs = [timelineJob, currentSubtitleJob, otherTimelineSubtitleJob];
+      vi.spyOn(api, "getSubtitle").mockResolvedValue({
+        job_id: "subtitle-current", status: "succeeded", subtitle: {
+          subtitle_id: "subtitle-current", project_id: "project-a", timeline_id: "timeline-a", format: "srt",
+          file_uri: "local://current.srt", status: "succeeded", notes: [],
+          is_current: true, source_session_id: "session-a", source_session_revision: 3,
+        },
+      } as SubtitleJob);
+
+      const result = await resolveMasterSubtitle("project-a", jobs, session);
+
+      expect(result).toEqual({ kind: "ready", jobId: "subtitle-current" });
+    });
+
+    it("자막을 만든 뒤 편집을 또 고치고 다시 안 만들었으면 낡았다고 본다", async () => {
+      const jobs = [timelineJob, currentSubtitleJob];
+      vi.spyOn(api, "getSubtitle").mockResolvedValue({
+        job_id: "subtitle-current", status: "succeeded", subtitle: {
+          subtitle_id: "subtitle-current", project_id: "project-a", timeline_id: "timeline-a", format: "srt",
+          file_uri: "local://current.srt", status: "succeeded", notes: [],
+          is_current: false, // 편집 후 무효화됨
+          source_session_id: "session-a", source_session_revision: 2, // 렌더 당시 리비전(지금은 3)
+        },
+      } as SubtitleJob);
+
+      const result = await resolveMasterSubtitle("project-a", jobs, session);
+
+      expect(result).toEqual({ kind: "stale", jobId: "subtitle-current" });
+    });
+
+    it("자막을 아직 만들지 않았으면 아무것도 고르지 않는다", async () => {
+      const getSubtitle = vi.spyOn(api, "getSubtitle");
+
+      const result = await resolveMasterSubtitle("project-a", [timelineJob], session);
+
+      expect(result).toEqual({ kind: "none" });
+      expect(getSubtitle).not.toHaveBeenCalled();
     });
   });
 });

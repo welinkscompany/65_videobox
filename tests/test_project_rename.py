@@ -119,6 +119,19 @@ def test_api_rename_refuses_an_empty_name(tmp_path: Path) -> None:
     assert client.get(f"/api/projects/{project_id}").json()["name"] == "첫 영상"
 
 
+def test_api_create_refuses_an_unbounded_name(tmp_path: Path) -> None:
+    """final-fix-report.md 발견 3 -- 만들 때는 이름 길이 상한이 아예 없었다.
+    이름은 나중에 완성본 내려받기 헤더(`Content-Disposition`)에 그대로
+    실리는데, 300자짜리 한글 이름은 헤더를 nginx 기본 버퍼(4k)보다 크게
+    만들어 재생·내려받기를 함께 502로 죽인다. 이름 바꾸기(`RenameProjectRequest`)는
+    이미 `max_length=200`을 두고 있었다 -- 만들 때도 같은 상한을 맞춘다."""
+    client = TestClient(create_app(projects_root=tmp_path))
+
+    response = client.post("/api/projects", json={"name": "가" * 201})
+
+    assert response.status_code == 422
+
+
 def test_api_rename_refuses_unknown_fields(tmp_path: Path) -> None:
     # `project_id`나 `status`를 같이 보내면 조용히 무시하지 않고 거절한다 --
     # 무시하면 부른 쪽은 바뀐 줄 안다.

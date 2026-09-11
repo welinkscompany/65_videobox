@@ -130,6 +130,42 @@ def test_final_render_content_has_a_download_filename_and_range_playback_still_w
     assert extended_name == "가을 브이로그.mp4"
 
 
+def test_final_render_content_disposition_caps_an_unbounded_project_name(tmp_path: Path) -> None:
+    """감사 실측(final-fix-report.md 발견 3): 300자 한글 이름은 2,753자 헤더를
+    만들고, ~430자부터 nginx `proxy_buffer_size`(기본 4k)를 넘겨 재생·내려받기
+    둘 다 502로 죽는다. `TestClient`는 실제 nginx를 지나지 않아(§10 메모) 502
+    자체는 여기서 못 재현하지만, 헤더 길이가 안전 범위 안에 있는지와 퍼센트
+    인코딩이 코드 포인트 중간에서 안 잘렸는지는 여기서 확인할 수 있다.
+
+    `store.bootstrap_project`로 직접 만든다 -- Pydantic 검증(`CreateProjectRequest`)을
+    거치지 않는 경로(이미 만들어진 프로젝트, 마이그레이션 등)로도 긴 이름이
+    들어올 수 있어서, 다듬기 자체가 그 경로와 무관하게 안전해야 한다.
+    """
+    client = TestClient(create_app(projects_root=tmp_path))
+    store = LocalProjectStore(tmp_path)
+    long_name = "가을" * 150  # 300자, 감사에서 쓴 것과 같은 길이
+    project = store.bootstrap_project(long_name)
+    job = _make_final_render_job(store, project_id=project.project_id, tmp_path=tmp_path)
+
+    response = client.get(f"/api/projects/{project.project_id}/final-renders/{job['job_id']}/content")
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+
+    # nginx 기본 proxy_buffer_size(4096바이트)보다 훨씬 작게 -- 다른 응답
+    # 헤더들과 합쳐도 여유가 크게 남는다.
+    assert len(disposition) < 1200, disposition
+
+    encoded = disposition.split("filename*=UTF-8''", 1)[1]
+    # 퍼센트 인코딩을 *자른 뒤* 만들었다면(바이트/문자 수로 자름) 한 글자를
+    # 나타내는 %XX 조각 중간이 끊겨 `unquote`가 대체 문자를 넣거나 예외를
+    # 낸다. `errors="strict"`로 그 자리를 잡는다 -- 코드 포인트 경계에서만
+    # 잘랐다면(원문을 자른 뒤 인코딩) 항상 온전한 문자열로 디코딩된다.
+    decoded = unquote(encoded, errors="strict")
+    assert decoded
+    assert "가을" in decoded
+    assert len(decoded) < len(long_name) + len(".mp4")
+
+
 def test_final_render_content_disposition_strips_unsafe_project_name_characters(tmp_path: Path) -> None:
     """프로젝트 이름에 경로 구분자·따옴표·줄바꿈이 섞여 있어도 안전해야 한다.
 

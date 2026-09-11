@@ -1,4 +1,5 @@
 import { api, type EditingSession, type FinalRenderArtifact, type JobRecord } from "../../api";
+import { selectCurrentTimelineJob } from "../review/timeline-review-state";
 
 /** "지금 편집본의 마스터 완성본"을 고르는 단 하나의 규칙.
  *
@@ -38,16 +39,28 @@ function latestJobOfType(
 }
 
 /** 지금 세션이 가리키는 타임라인을 실제로 만들어 낸 작업. 완성본이 이
- *  작업의 결과물을 가리키는지(`input_ref`)로 마스터인지 변형본인지 가른다. */
+ *  작업의 결과물을 가리키는지(`input_ref`)로 마스터인지 변형본인지 가른다.
+ *
+ *  **2026-09-11 리뷰로 확인된 결함(final-fix-report.md 발견 1)** -- 여기서
+ *  독자적인 규칙(`finished_at ?? started_at` 한 값 비교)을 새로 짰었는데,
+ *  `OutputsPage.tsx`가 합쳐진 화면(`ReviewAndOutputPage`)에서 실제로 쓰는
+ *  값은 `timeline-review-state.ts`의 `selectCurrentTimelineJob`이 고른
+ *  것(`shared.job`)이었다. 둘은 `finished_at`이 비어 있는 `succeeded` 기록
+ *  앞에서 서로 다른 것을 고를 수 있다 -- 뒤엣것은 `project_id` 일치도 보고
+ *  동점이면 `[finished_at, started_at, job_id]` 세 단으로 결정론적으로
+ *  가르지만, 앞엣것은 그 검사와 세 번째 단(job_id)이 없었다.
+ *
+ *  둘 중 `selectCurrentTimelineJob`을 골랐다 -- 원래 규칙의 출처이자(실제
+ *  화면이 이미 그 값으로 돌아가고 있었다), 더 엄격한 상위집합(project_id
+ *  검사 + 결정론적 동점 처리)이기 때문이다. 그래서 새로 짜지 않고 그대로
+ *  위임한다 -- `ExportPopover`와 `OutputsPage`(단독으로 쓰일 때의 폴백
+ *  경로)가 다시 갈라지지 않는다. */
 export function selectTimelineJob(
   jobs: readonly JobRecord[],
-  session: Pick<EditingSession, "timeline_id"> | null,
+  session: Pick<EditingSession, "timeline_id" | "project_id"> | null,
 ): JobRecord | null {
   if (!session) return null;
-  return latestJobOfType(
-    jobs.filter((job) => job.status === "succeeded" && job.output_ref === session.timeline_id),
-    "timeline_build",
-  );
+  return selectCurrentTimelineJob(session, jobs);
 }
 
 /** 위 타임라인 작업의 결과물을 가리키는 `final_render` 중 가장 최근 것.
@@ -66,26 +79,62 @@ export function selectMasterFinalJob(
   return latestJobOfType(jobs, "final_render", timelineJobId);
 }
 
-/** `OutputsPage.tsx`의 `currentFinal`과 같은 값으로 낡음을 잰다.
+/** 자막판 `selectMasterFinalJob` -- `job_type`만 다르고 나머지(입력 참조
+ *  필터, 못 찾았을 때의 폴백)는 완전히 같은 규칙이다(final-fix-report.md
+ *  발견 2). `ExportPopover`가 예전엔 `input_ref` 필터도 없이 "마지막
+ *  succeeded 자막 job"을 그대로 썼다 -- 완성본에서 이미 고친 결함을
+ *  자막에서는 그대로 갖고 있었다. */
+export function selectMasterSubtitleJob(
+  jobs: readonly JobRecord[],
+  timelineJobId: string | null,
+): JobRecord | null {
+  if (!timelineJobId) return latestJobOfType(jobs, "subtitle_render");
+  return latestJobOfType(jobs, "subtitle_render", timelineJobId);
+}
+
+/** "지금 편집본의 것인가"를 재는 값의 모양은 완성본과 자막이 같다 --
+ *  `is_current`, `timeline_id`, `source_session_id`, `source_session_revision`.
+ *  자막 쪽 타입(`SubtitleArtifact`)만 `project_id`를 산출물 자체에 따로
+ *  갖고 있어서, 있으면 그것도 확인하고(완성본 쪽 `FinalRenderArtifact`는
+ *  그 필드가 없어 건너뛴다) 세션의 `project_id`는 항상 확인한다.
  *
- *  `OutputsPage.tsx:754-758`은 네 가지를 본다: `project_id` 일치,
- *  `timeline_id` 일치, `source_session_id` 일치, `source_session_revision`
- *  일치. 처음 추출할 때 뒤의 둘만 옮기고 앞의 둘을 빠뜨렸다(2026-09-11
- *  리뷰 확인) -- 세션 값이 재사용돼 id·리비전만 우연히 같은 낡은 기록을
- *  "최신"이라 잘못 판단할 수 있었다. */
+ *  `OutputsPage.tsx`의 `currentFinal`/`currentSubtitle`과 같은 값으로
+ *  낡음을 잰다(`OutputsPage.tsx:754-758`, `:737-743`) -- 처음 추출할 때
+ *  `project_id`·`timeline_id` 일치를 빠뜨렸었다(2026-09-11 리뷰 확인).
+ *  세션 값이 재사용돼 id·리비전만 우연히 같은 낡은 기록을 "최신"이라
+ *  잘못 판단할 수 있었다. */
+type FreshnessCheckArtifact = Readonly<{
+  is_current?: boolean;
+  timeline_id: string;
+  source_session_id?: string | null;
+  source_session_revision?: number | null;
+  project_id?: string;
+}>;
+
+export function isArtifactCurrent(
+  artifact: FreshnessCheckArtifact | null | undefined,
+  session: Pick<EditingSession, "project_id" | "session_id" | "session_revision" | "timeline_id"> | null,
+  projectId: string,
+): boolean {
+  return Boolean(
+    artifact?.is_current === true &&
+    session != null &&
+    session.project_id === projectId &&
+    (artifact.project_id == null || artifact.project_id === projectId) &&
+    artifact.timeline_id === session.timeline_id &&
+    artifact.source_session_id === session.session_id &&
+    artifact.source_session_revision === session.session_revision,
+  );
+}
+
+/** 옛 이름을 그대로 남긴다 -- `OutputsPage.tsx`가 세 자리에서 이 이름으로
+ *  부른다. 판정 자체는 `isArtifactCurrent`로 옮겼다(자막과 나눠 쓰기 위해). */
 export function isMasterFinalRenderCurrent(
   render: FinalRenderArtifact | null | undefined,
   session: Pick<EditingSession, "project_id" | "session_id" | "session_revision" | "timeline_id"> | null,
   projectId: string,
 ): boolean {
-  return Boolean(
-    render?.is_current === true &&
-    session != null &&
-    session.project_id === projectId &&
-    render.timeline_id === session.timeline_id &&
-    render.source_session_id === session.session_id &&
-    render.source_session_revision === session.session_revision,
-  );
+  return isArtifactCurrent(render, session, projectId);
 }
 
 export type MasterFinalRenderSelection =
@@ -109,4 +158,31 @@ export async function resolveMasterFinalRender(
   return isMasterFinalRenderCurrent(finalRender.render, session, projectId)
     ? { kind: "ready", jobId: finalJob.job_id }
     : { kind: "stale", jobId: finalJob.job_id };
+}
+
+export type MasterSubtitleSelection =
+  | { kind: "ready"; jobId: string }
+  | { kind: "stale"; jobId: string }
+  | { kind: "none" };
+
+/** 자막판 `resolveMasterFinalRender`(final-fix-report.md 발견 2).
+ *
+ *  `ExportPopover.tsx`가 예전엔 자막을 `job_type === "subtitle_render"`
+ *  중 배열의 "마지막 것"으로 골랐다 -- `input_ref` 필터도, 낡음 확인도
+ *  없었다. 완성본에서 이미 고친 바로 그 결함이었다. 여기서 새로 짜지 않고
+ *  `selectTimelineJob`·`selectMasterSubtitleJob`·`isArtifactCurrent`를
+ *  그대로 나눠 쓴다. */
+export async function resolveMasterSubtitle(
+  projectId: string,
+  jobs: readonly JobRecord[],
+  session: EditingSession | null,
+): Promise<MasterSubtitleSelection> {
+  const timelineJob = selectTimelineJob(jobs, session);
+  const subtitleJobRecord = selectMasterSubtitleJob(jobs, timelineJob?.job_id ?? null);
+  if (!subtitleJobRecord) return { kind: "none" };
+  const subtitleJob = await api.getSubtitle(projectId, subtitleJobRecord.job_id);
+  if (subtitleJob.status !== "succeeded" || !subtitleJob.subtitle) return { kind: "none" };
+  return isArtifactCurrent(subtitleJob.subtitle, session, projectId)
+    ? { kind: "ready", jobId: subtitleJobRecord.job_id }
+    : { kind: "stale", jobId: subtitleJobRecord.job_id };
 }

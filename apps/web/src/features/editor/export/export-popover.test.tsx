@@ -126,6 +126,64 @@ describe("내보내기 팝오버", () => {
     expect(screen.queryByRole("link", { name: "MP4 내려받기" })).toBeNull();
   });
 
+  // 2026-09-11 리뷰(final-fix-report.md 발견 2) -- 자막 링크가 완성본과
+  // 똑같은 결함(input_ref 필터 없음, 낡음 확인 없음)을 그대로 갖고 있었다.
+  it("다른 편집본을 가리키는 자막 기록이 시간상 나중이어도 이 편집본의 자막을 준다 (input_ref 필터)", async () => {
+    const currentSubtitleJob = {
+      job_id: "subtitle-current", project_id: "project-a", job_type: "subtitle_render", status: "succeeded",
+      input_ref: "timeline-job-a", output_ref: "subtitle-current", error_message: null,
+      started_at: "2026-09-11T00:02:00Z", finished_at: "2026-09-11T00:02:05Z",
+    };
+    // 배열 순서상·시각상 모두 "마지막"이지만 다른(옛) 타임라인 작업의
+    // 자막이다 -- "마지막 것" 규칙이면 이걸 준다.
+    const otherTimelineSubtitleJob = {
+      job_id: "subtitle-other-timeline", project_id: "project-a", job_type: "subtitle_render", status: "succeeded",
+      input_ref: "other-timeline-job", output_ref: "subtitle-other-timeline", error_message: null,
+      started_at: "2026-09-11T00:09:00Z", finished_at: "2026-09-11T00:09:05Z",
+    };
+    stubSelectionApi({
+      jobs: [timelineJob, masterFinalJob, currentSubtitleJob, otherTimelineSubtitleJob],
+      finalRender: currentMasterRender,
+    });
+    vi.spyOn(api, "getSubtitle").mockResolvedValue({
+      job_id: "subtitle-current", status: "succeeded", subtitle: {
+        subtitle_id: "subtitle-current", project_id: "project-a", timeline_id: "timeline-a", format: "srt",
+        file_uri: "local://current.srt", status: "succeeded", notes: [],
+        is_current: true, source_session_id: "session-a", source_session_revision: 3,
+      },
+    } as never);
+
+    render(<ExportPopover projectId="project-a" onOpenDetails={vi.fn()} />);
+
+    const link = await screen.findByRole("link", { name: "SRT 내려받기" });
+    expect(link.getAttribute("href")).toContain("/subtitles/subtitle-current/content");
+    expect(link.getAttribute("href")).not.toContain("subtitle-other");
+  });
+
+  it("자막이 최신 편집본과 다르면 자막 링크도 감춘다 (완성본과 같은 규칙)", async () => {
+    const oldSubtitleJob = {
+      job_id: "subtitle-old", project_id: "project-a", job_type: "subtitle_render", status: "succeeded",
+      input_ref: "timeline-job-a", output_ref: "subtitle-old", error_message: null,
+      started_at: "2026-09-11T00:02:00Z", finished_at: "2026-09-11T00:02:05Z",
+    };
+    stubSelectionApi({
+      jobs: [timelineJob, masterFinalJob, oldSubtitleJob],
+      finalRender: currentMasterRender,
+    });
+    vi.spyOn(api, "getSubtitle").mockResolvedValue({
+      job_id: "subtitle-old", status: "succeeded", subtitle: {
+        subtitle_id: "subtitle-old", project_id: "project-a", timeline_id: "timeline-a", format: "srt",
+        file_uri: "local://old.srt", status: "succeeded", notes: [],
+        is_current: false, source_session_id: "session-a", source_session_revision: 2, // 지금 세션은 3
+      },
+    } as never);
+
+    render(<ExportPopover projectId="project-a" onOpenDetails={vi.fn()} />);
+
+    expect(await screen.findByText(/자막이 최신 편집본과 달라요/)).toBeVisible();
+    expect(screen.queryByRole("link", { name: "SRT 내려받기" })).toBeNull();
+  });
+
   it("자세한 것은 2단계로 넘긴다", async () => {
     stubSelectionApi({ jobs: [timelineJob, masterFinalJob], finalRender: currentMasterRender });
     const onOpenDetails = vi.fn();

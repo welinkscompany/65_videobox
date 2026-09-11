@@ -39,7 +39,15 @@ function compareTimelineJobs(left: JobRecord, right: JobRecord) {
   return 0;
 }
 
-export function selectCurrentTimelineJob(session: EditingSession, jobs: readonly JobRecord[]): JobRecord | null {
+// `masterFinalRender.ts`의 `selectTimelineJob`이 이 함수를 그대로 위임해
+// 쓴다(2026-09-11 리뷰 확인 -- 두 화면이 타임라인 작업을 서로 다른 규칙으로
+// 골라 다른 완성본/자막을 "지금 것"이라 부르던 사고). 그래서 세션 인자를
+// `EditingSession` 전체가 아니라 실제로 쓰는 두 필드만 받도록 좁혀서, 그
+// 두 필드만 가진 값도(만들어 낸 값 포함) 그대로 넘길 수 있게 한다.
+export function selectCurrentTimelineJob(
+  session: Pick<EditingSession, "project_id" | "timeline_id">,
+  jobs: readonly JobRecord[],
+): JobRecord | null {
   return jobs.reduce<JobRecord | null>((newest, job) => {
     if (
       job.project_id !== session.project_id ||

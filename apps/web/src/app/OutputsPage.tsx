@@ -23,7 +23,7 @@ import { mergeVariantRenderItems, variantLabel, variantRenderSummary } from "../
 // "지금 편집본의 마스터 완성본"을 고르는 판정은 여기서 새로 짜지 않는다 --
 // `ExportPopover`와 같은 규칙 하나를 나눠 쓴다(task-1-report.md 리뷰 코멘트).
 // 이 파일이 원래 규칙의 출처였고, 그 출처가 규칙과 갈라지면 다시 같은 사고가 난다.
-import { isMasterFinalRenderCurrent, selectMasterFinalJob, selectTimelineJob } from "../features/outputs/masterFinalRender";
+import { isArtifactCurrent, isMasterFinalRenderCurrent, selectMasterFinalJob, selectTimelineJob } from "../features/outputs/masterFinalRender";
 
 type ExactPreviewState = "current" | "pending" | "running" | "failed" | "stale" | "unavailable" | "unknown";
 
@@ -479,7 +479,17 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       // 준다 -- `selectMasterFinalJob`이 그 폴백까지 포함한 같은 규칙이다.
       const finalJob = selectMasterFinalJob(jobs, timelineJob?.job_id ?? null);
       const capcutJobs = timelineJob ? jobs.filter((job) => job.job_type === "capcut_draft_export" && job.input_ref === timelineJob.job_id) : [];
-      const capcutJob = timelineJob ? mostRecentJob(capcutJobs, "capcut_draft_export") : null;
+      // `finalJob`과 같은 폴백이 필요하다 -- `selectTimelineJob`이 이제
+      // `project_id`까지 확인하는 규칙으로 위임하면서(발견 1 수정), 세션이
+      // 있는데도 다른 프로젝트를 가리키면 `timelineJob`이 `null`이 될 수
+      // 있다. 여기서 그대로 두면 CapCut 초안을 아예 못 찾아서 "낡음" 판정
+      // 자체가 안 떠, 세션 불일치를 아무 말 없이 감추게 된다(2026-09-11
+      // 회귀 확인). 다만 세션 자체가 아예 없는 읽기전용 화면에서는 폴백하지
+      // 않는다 -- "아직 CapCut 초안이 없어요"가 맞고, 세션 없이 옛 기록을
+      // 아무거나 주워 "낡았다"고 말하면 더 헷갈린다.
+      const capcutJob = timelineJob
+        ? mostRecentJob(capcutJobs, "capcut_draft_export")
+        : session ? mostRecentJob(jobs, "capcut_draft_export") : null;
       let exactPreviewReadFailed = false;
       const [timeline, review, approval, subtitle, finalRender, capcutDraft, diagnostics, playbackManifest] = await Promise.all([
         sharedRead ? Promise.resolve(sharedRead.timeline) : timelineJob ? api.getTimeline(refreshProjectId, timelineJob.job_id) : Promise.resolve(null),
@@ -734,14 +744,12 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   );
   const outputBlocked = !canRenderSubtitle;
   const subtitle = currentState?.subtitle;
-  const currentSubtitle = subtitle?.status === "succeeded" && subtitle.subtitle?.status === "succeeded" && currentSession != null && (
-    currentSession.project_id === projectId &&
-    subtitle.subtitle.project_id === projectId &&
-    subtitle.subtitle.timeline_id === currentSession.timeline_id &&
-    subtitle.subtitle.source_session_id === currentSession.session_id &&
-    subtitle.subtitle.source_session_revision === currentSession.session_revision &&
-    subtitle.subtitle.is_current === true
-  );
+  // `ExportPopover`의 자막 링크와 같은 값으로 낡음을 잰다
+  // (`isArtifactCurrent`, masterFinalRender.ts) -- 각자 새로 짜면 두 화면이
+  // 서로 다른 자막을 "지금 것"이라 부르는 사고가 난다(final-fix-report.md
+  // 발견 2, 완성본에서 이미 겪은 것과 같은 모양).
+  const currentSubtitle = subtitle?.status === "succeeded" && subtitle.subtitle?.status === "succeeded" &&
+    isArtifactCurrent(subtitle.subtitle, currentSession ?? null, projectId);
   const staleSubtitle = subtitle?.status === "succeeded" && Boolean(subtitle.subtitle) && !currentSubtitle;
   const finalRender = currentState?.finalRender;
   const currentFinal = finalRender?.status === "succeeded" &&

@@ -18,7 +18,12 @@ from videobox_domain_models.yujin_memory import YujinMemoryCandidate
 
 
 class CreateProjectRequest(BaseModel):
-    name: str = Field(min_length=1)
+    # `max_length=200`: `RenameProjectRequest.name`과 같은 상한이다(final-fix-report.md
+    # 발견 3). 이름은 나중에 완성본 내려받기의 `Content-Disposition` 헤더에
+    # 퍼센트 인코딩으로 그대로 실린다 -- 한글 한 글자가 인코딩되면 9글자로
+    # 불어나서, 한도가 없으면 300자 이름이 2,753자 헤더를 만들고 nginx 기본
+    # `proxy_buffer_size`(4k)를 넘겨 재생·내려받기를 함께 502로 죽인다.
+    name: str = Field(min_length=1, max_length=200)
 
 
 class RenameProjectRequest(BaseModel):

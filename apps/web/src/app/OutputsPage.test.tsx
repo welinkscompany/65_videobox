@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api, ApiRequestError } from "../api";
-import { capcutDraftFailureMessage, finalRenderFailureMessage, OutputsPage, subtitleFailureMessage } from "./OutputsPage";
+import { capcutDraftFailureMessage, finalRenderFailureMessage, OutputsPage, subtitleFailureMessage, type SharedTimelineRead } from "./OutputsPage";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -639,6 +639,57 @@ describe("OutputsPage", () => {
 
     expect(await screen.findByText("완성본이 최신 편집본과 달라요.")).toBeVisible();
     expect(screen.queryByRole("link", { name: "완성본 영상 내려받기" })).not.toBeInTheDocument();
+  });
+
+  // 2026-09-11 리뷰(final-fix-report.md 발견 1) -- 여기까지의 시험 103개가
+  // 전부 `shared`/`onSharedRefresh` 없이(단독 화면인 척) 렌더링하고 있었다.
+  // 하지만 합쳐진 화면(`ReviewAndOutputPage`)은 항상 그 둘을 넘기고, 그러면
+  // 이 화면은 `selectTimelineJob`(폴백)이 아니라 `shared.job`
+  // (`selectCurrentTimelineJob`이 고른 값)을 그대로 쓴다 -- production이
+  // 실제로 타는 자리를 시험이 하나도 안 밟고 있었다는 뜻이다.
+  it("검토 화면과 합쳐졌을 때(shared)도 완성본을 정확히 찾아 보여준다", async () => {
+    const getLatestEditingSession = vi.spyOn(api, "getLatestEditingSession");
+    const listJobs = vi.spyOn(api, "listJobs");
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(playbackManifest({
+      exactPreview: { status: "unavailable", url: null, source_session_id: "session-a", source_session_revision: 7 },
+    }) as never);
+    vi.spyOn(api, "getCapcutHandoffDiagnostics").mockResolvedValue({
+      status: "ready", is_supported: true, project_root_path: "local://capcut", project_root_exists: true, write_access: true, checked_at: "2026-07-23T09:01:00Z",
+    });
+    vi.spyOn(api, "listPreviewShares").mockResolvedValue({ shares: [] });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-current-timeline", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-current.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+    const shared: SharedTimelineRead = {
+      session: editingSession,
+      jobs: [activeTimelineJob, currentFinalJob],
+      job: activeTimelineJob,
+      timeline: {
+        job_id: activeTimelineJob.job_id, status: "succeeded", timeline: {
+          timeline_id: "timeline-a", project_id: "project_a", version: "v1", output_mode: "short", review_status: "approved",
+          source_session_id: "session-a", source_session_revision: 7, tracks: [], review_flags: [], pending_recommendations: [],
+        },
+      } as never,
+      review: {
+        project_id: "project_a", timeline_id: "timeline-a", review_status: "approved",
+        segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [],
+      } as never,
+      approval: currentApproval,
+    };
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} shared={shared} onSharedRefresh={async () => shared} reviewInline />);
+
+    expect(await screen.findByLabelText("완성본 재생")).toHaveAttribute(
+      "src", "/api/projects/project_a/final-renders/final-current-timeline/content",
+    );
+    const downloadLink = screen.getByRole("link", { name: "완성본 영상 내려받기" });
+    expect(downloadLink).toHaveAttribute("href", "/api/projects/project_a/final-renders/final-current-timeline/content");
+    // 핵심 확인 -- `shared`가 있으면 이 화면은 세션·작업 목록을 다시 읽지
+    // 않는다. 다시 읽으면 그 값이 검토 쪽이 읽은 값과 갈라질 수 있다.
+    expect(getLatestEditingSession).not.toHaveBeenCalled();
+    expect(listJobs).not.toHaveBeenCalled();
   });
 
   it("reconciles a rejected final request from authoritative current state before showing an error", async () => {

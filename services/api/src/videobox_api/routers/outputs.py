@@ -42,11 +42,30 @@ from videobox_api.orchestration import ApiOrchestrator
 # 헤더를 끼워 넣는 공격)이나 Windows 금지 문자 문제로 이어질 수 있다.
 _UNSAFE_DOWNLOAD_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
 
+# 밑동 길이 상한(final-fix-report.md 발견 3, 감사 실측). 한글 한 글자는
+# percent-encoding을 거치면 `%EA%B0%80`처럼 9글자로 불어난다 -- 300자 이름이
+# 2,753자 헤더를 만들고, 약 430자부터 nginx 기본 `proxy_buffer_size`(4k)를
+# 넘겨 재생·내려받기가 함께 502로 죽는다(같은 주소를 <video>가 재생에도
+# 쓴다). `CreateProjectRequest.name`에 `max_length=200`을 뒀지만(같은 커밋),
+# 그건 새로 만드는 프로젝트만 막는다 -- `bootstrap_project`를 직접 부르는
+# 경로(마이그레이션 등)는 Pydantic 검증을 안 거치므로, 실제로 헤더에 싣는
+# 이 자리에서도 다듬는다. 100자면 전부 3바이트 한글이어도 인코딩 후
+# 900자 안팎이라 4096바이트에 넉넉한 여유가 남는다.
+_DOWNLOAD_STEM_MAX_CHARS = 100
+
 
 def _sanitize_download_stem(raw_name: str) -> str:
     """내려받기 파일 이름 밑동을 안전하게 다듬는다. 위험한 글자를 지운 뒤
-    앞뒤 공백·마침표를 정리한다(Windows는 마침표로 끝나는 이름을 못 만든다)."""
-    return _UNSAFE_DOWNLOAD_NAME_CHARS.sub("", raw_name).strip(" .")
+    앞뒤 공백·마침표를 정리하고(Windows는 마침표로 끝나는 이름을 못 만든다)
+    길이를 자른다.
+
+    **길이는 반드시 percent-encoding *전에* 자른다.** 이미 인코딩한
+    문자열(`%EA%B0%80` 같은 조각)을 문자 수로 자르면 한 글자를 나타내는
+    `%XX` 조각 중간이 끊길 수 있다. 여기서는 아직 원문 문자열이고, 파이썬
+    str 슬라이싱은 유니코드 코드 포인트 경계에서만 자르므로(서로게이트 쌍도
+    파이썬 3 str은 코드 포인트 하나로 다룬다) 이 순서면 안전하다."""
+    cleaned = _UNSAFE_DOWNLOAD_NAME_CHARS.sub("", raw_name).strip(" .")
+    return cleaned[:_DOWNLOAD_STEM_MAX_CHARS]
 
 
 def _final_render_content_disposition(*, project_name: str, fallback: str, suffix: str) -> str:
