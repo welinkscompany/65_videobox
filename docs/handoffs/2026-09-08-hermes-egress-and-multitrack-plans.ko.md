@@ -849,3 +849,60 @@ owner가 판단을 위임했고, 조사 결과 §13.1의 걱정 둘 중 하나�
 바꿔도 액자 위치는 그대로인 것과 같은 기대라 그대로 두기로 했다. 고정 시험은
 `tests/test_overlay_presets_are_not_erased.py`의
 `test_a_new_asset_over_the_same_scene_inherits_the_old_frame`.
+
+## 15. 로컬 모델 교체 (2026-09-11) — qwen3.8-27b, 그리고 SSOT
+
+대표님이 새 qwen을 받고 "옛 35b는 지울 거다"라고 했다. LM Studio에 둘 다
+올라가 있었고 설정은 옛 것을 가리키고 있었다.
+
+### 15.1 "한 줄"이 아니라 여섯 곳이었다
+
+기억(`videobox-local-model-swap-is-config-not-code`)이 `.env.container` 한 줄이라고
+적어 두었는데 **틀렸다.** 실제로 센 자리:
+
+| 자리 | 읽는 쪽 |
+|---|---|
+| `.env.container`의 `VIDEOBOX_LOCAL_MODEL_NAME` (gitignore) | VideoBox 코드 + compose 치환 |
+| `compose.hermes-yujin.yaml`의 `VIDEOBOX_MEM0_LLM_MODEL` 기본값 | 기억 어댑터 |
+| `config/hermes/yujin/config.yaml`의 `model.name` | 유진 Hermes 프로필 두뇌 |
+| `hermes_memory_adapter.py`의 `_LOCAL_MEM0_LLM_MODEL` | **제품 코드에 박힌 마지막 기본값** |
+| 계약 시험 셋 | 위를 문자열로 고정 |
+
+넷째는 처음에 못 셌다 — **설정 파일만 훑으면 코드에 박힌 기본값은 안 보인다.**
+한 곳만 바꿨다면 컨테이너로 띄울 때와 어댑터를 직접 부를 때 다른 모델을 썼을 것이다.
+
+### 15.2 왜 환경변수 하나로 다 못 묶었나
+
+`config/hermes/yujin/`은 **읽기 전용 바인드 마운트**이고
+`hermes profile install`이 컨테이너 안에서 복사해 간다. 소유권·내용 종류까지
+`verify-hermes-yujin-profile.ps1`이 검증하는 **배포물**이다. 거기에 env 치환을
+끼우려면 읽기 전용 마운트에 쓰거나 설치 후 볼륨 안을 고쳐야 하는데, 둘 다
+의도된 보안 설계를 거스른다. **그 사슬은 건드리지 않았다.**
+
+### 15.3 대신 한 것
+
+- **compose는 SSOT 환경변수에서 파생한다**:
+  `${VIDEOBOX_MEM0_LLM_MODEL:-${VIDEOBOX_LOCAL_MODEL_NAME:-리터럴}}`.
+  중첩 기본값이 실제로 도는 것을 `docker compose config`로 세 경우 다 확인했다.
+- **갈라짐 울타리**: `tests/test_local_model_name_is_one_value.py`가 compose 기본값·
+  유진 프로필·코드 기본값이 **서로 같은지**만 본다. 값을 안 박았으므로 다음에
+  모델을 또 바꿔도 이 시험은 안 고쳐도 되고, 한 곳만 바꾸면 빨간불이 뜬다.
+- **한 명령**: `scripts/set-local-model.ps1 <모델id>`가 여섯 곳을 한 번에 바꾼다.
+  **LM Studio에 그 모델이 실제로 올라가 있지 않으면 거부한다**(`-Force`로만 통과) --
+  LM Studio는 설정이 틀려도 지금 켜진 모델로 조용히 답하므로, 그 확인이 없으면
+  어긋난 것을 나중에야 알게 된다.
+
+### 15.4 씽킹 모드 — 제품 경로는 안전하다
+
+대표님이 "qwen 씽킹모드가 기본값이라 그럴 수 있다"고 짚었다. 맞다. 저장소에
+`<think>`를 걸러내는 코드는 **하나도 없다.** 그런데 실측해 보니 제품이 쓰는
+길은 전부 안전하다:
+
+| 경로 | 씽킹 유출 |
+|---|---|
+| VideoBox 자체 LLM 호출 | **없음** -- `local_qwen.py`·`lm_studio.py` 둘 다 `response_format: json_schema`를 **항상** 건다 |
+| 유진 대화(Hermes 경유) | **없음** -- 실제 대화로 확인, 답변에 `<think>` 없음 |
+| 스키마 없이 직접 호출 | 나옴 -- 제품 경로가 아니다 |
+
+**다음에 스키마 없는 LLM 호출을 새로 만들면 그때는 걸러내야 한다.**
+지금 없다는 것이지 앞으로도 안전하다는 뜻이 아니다.
