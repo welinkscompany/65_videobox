@@ -48,7 +48,11 @@ from videobox_core_engine.render_quality_facts import composition_quality_facts
 from videobox_core_engine.composition_plan import CompositionPlan, materialize_editing_session_timeline
 from videobox_capcut_export.adapter import dropped_track_types
 from videobox_core_engine.track_states import apply_track_states_to_timeline, normalize_track_states
-from videobox_core_engine.output_variants import VariantInvariantError, materialize_variant
+from videobox_core_engine.output_variants import (
+    VariantInvariantError,
+    build_variant_timeline_payload,
+    materialize_variant,
+)
 from videobox_domain_models.output_variants import OutputVariant
 from videobox_core_engine.exact_preview import ExactPreviewRequest, fingerprint_exact_preview
 from videobox_core_engine.editing_session import project_yujin_editing_proposal
@@ -2221,22 +2225,11 @@ class LocalPipelineRunner(EditingSessionRegenerationMixin, _PipelinePrivateHelpe
             # `source_variant_id` 경유로 바꿨다(그 파일의 주석 참고). 나머지는
             # API/도메인/프런트 스키마의 pass-through 필드 셋뿐이라 값이
             # 정직해져도 깨지는 소비자가 없다.
-            timeline_payload = {
-                key: value
-                for key, value in master_timeline.items()
-                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary", "output", "output_mode"}
-            }
-            variant_orientation = "landscape" if variant.kind == "horizontal" else "vertical"
-            timeline_payload.update(
-                {
-                    "output": dict(self._ORIENTATION_OUTPUT_SIZES[variant_orientation]),
-                    "source_variant_id": derived.source_variant_id,
-                    "source_variant_revision": derived.source_variant_revision,
-                    "source_session_id": derived.source_session_id,
-                    "source_session_revision": derived.source_session_revision,
-                    "segments": list(derived.segments),
-                    "tracks": list(master_timeline.get("tracks", [])),
-                }
+            # 조립은 `build_variant_timeline_payload` 한 곳에서만 한다 -- 편집기의
+            # `가로·세로 비교` 준비 라우터가 **같은 복사 로직을 따로** 갖고 있었고,
+            # 그쪽이 먼저 돌면 틀린 타임라인이 캐시되어 여기 고침이 건너뛰어졌다.
+            timeline_payload = build_variant_timeline_payload(
+                master_timeline=master_timeline, variant_kind=variant.kind, derived=derived,
             )
             timeline = self.store.save_timeline_run(
                 project_id=project_id,

@@ -133,6 +133,35 @@ def test_materialize_writes_derived_timeline_with_full_identity(tmp_path: Path) 
     assert timeline["timeline_id"]
 
 
+def test_materialize_route_gives_each_shape_its_own_canvas(tmp_path: Path) -> None:
+    """**변형본을 만드는 자리가 둘이다.** 여기(편집기의 `가로·세로 비교` 준비)와
+    `local_pipeline._materialize_variant_for_output`(출력 화면의 `가로·세로 출력
+    만들기`)이 같은 복사 로직을 따로 갖고 있었다.
+
+    2026-09-11에 크기 결함을 파이프라인 쪽만 고쳤는데, 이 라우터가 먼저 돌면
+    틀린 크기의 타임라인이 `save_variant_materialization`에 캐시되고 파이프라인은
+    **그걸 재사용한다** -- 고친 것이 조용히 건너뛰어진다. 그래서 두 자리를 한
+    함수로 묶고, 이 시험이 그 자리를 지킨다.
+    """
+    client, project_id, _ = _client(tmp_path)
+    variants = client.get(f"/api/projects/{project_id}/output-variants").json()["variants"]
+    sizes = {}
+    for variant in variants:
+        response = client.post(
+            f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/materialize",
+            json={"expected_master_session_revision": 1},
+        )
+        assert response.status_code == 201, response.text
+        timeline = client.app.state.store.get_timeline_run(
+            project_id=project_id,
+            timeline_id=response.json()["materialization"]["timeline_id"],
+        )
+        sizes[variant["kind"]] = timeline.get("output")
+
+    assert sizes["horizontal"] == {"width": 1920, "height": 1080}
+    assert sizes["vertical_full"] == {"width": 1080, "height": 1920}
+
+
 def test_materialize_carries_current_approved_review_to_variant_timeline(tmp_path: Path) -> None:
     app = create_app(projects_root=tmp_path / "projects")
     client = TestClient(app)

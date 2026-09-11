@@ -248,3 +248,61 @@ def materialize_variant(
         source_variant_revision=variant.variant_revision,
         segments=segments,
     )
+
+
+#: 변형본이 쓸 캔버스 크기. `local_pipeline._ORIENTATION_OUTPUT_SIZES`와 같은
+#: 값이며, 그쪽은 `build_timeline`의 `orientation` 이름(`landscape`/`vertical`)을
+#: 쓰고 여기는 변형본의 `kind`를 쓴다.
+_VARIANT_OUTPUT_SIZES: dict[str, dict[str, int]] = {
+    "horizontal": {"width": 1920, "height": 1080},
+    "vertical_full": {"width": 1080, "height": 1920},
+    "vertical_highlight": {"width": 1080, "height": 1920},
+}
+
+#: 마스터 타임라인에서 **베끼면 안 되는** 키.
+#:
+#: `output`(캔버스 크기)과 `output_mode`가 여기 있는 이유는 2026-09-11에 실물에서
+#: 잡힌 결함 때문이다 -- 마스터를 통째로 베끼는 바람에 세로 변형본이 마스터와
+#: 같은 1920×1080으로 렌더됐고(완성본·가로·세로 md5가 전부 같았다),
+#: `output_mode`는 payload 쪽이 `save_timeline_run`의 인자를 덮어 늘 `review`로
+#: 저장됐다.
+_MASTER_ONLY_TIMELINE_KEYS = frozenset(
+    {"timeline_id", "project_id", "file_uri", "created_at", "summary", "output", "output_mode"}
+)
+
+
+def build_variant_timeline_payload(
+    *,
+    master_timeline: Mapping[str, object],
+    variant_kind: str,
+    derived: MaterializedVariant,
+) -> dict[str, object]:
+    """변형본 타임라인의 payload를 만든다. **이 함수가 유일한 자리다.**
+
+    변형본을 만드는 입구가 둘이다 -- 출력 화면의 `가로·세로 출력 만들기`
+    (`local_pipeline._materialize_variant_for_output`)와 편집기의 `가로·세로 비교`
+    준비(`routers/output_variants.materialize_variant_route`). 둘이 같은 복사
+    로직을 따로 들고 있었고, 2026-09-11에 크기 결함을 한쪽만 고쳤다가 **다른
+    쪽이 먼저 돌면 틀린 타임라인이 캐시되어 고친 것이 건너뛰어지는** 상태가
+    됐다(`save_variant_materialization`을 나중 호출자가 재사용한다).
+
+    이 저장소는 같은 함정에 전에도 걸렸다 -- 렌더 경로가 둘이라 필터를 한 곳만
+    고쳤던 일이 있다. 그래서 두 입구가 이 함수를 부르게 묶는다.
+    """
+    payload: dict[str, object] = {
+        key: value
+        for key, value in master_timeline.items()
+        if key not in _MASTER_ONLY_TIMELINE_KEYS
+    }
+    payload.update(
+        {
+            "output": dict(_VARIANT_OUTPUT_SIZES[variant_kind]),
+            "source_variant_id": derived.source_variant_id,
+            "source_variant_revision": derived.source_variant_revision,
+            "source_session_id": derived.source_session_id,
+            "source_session_revision": derived.source_session_revision,
+            "segments": list(derived.segments),
+            "tracks": list(master_timeline.get("tracks", []) or []),
+        }
+    )
+    return payload

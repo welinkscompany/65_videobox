@@ -13,6 +13,7 @@ from videobox_api.models import (
 from videobox_core_engine.output_variants import (
     VariantInvariantError,
     apply_variant_patch,
+    build_variant_timeline_payload,
     materialize_variant,
     rebase_variant,
 )
@@ -218,19 +219,20 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
                 )
             except KeyError:
                 master_timeline = {}
-            timeline_payload = {
-                key: value
-                for key, value in master_timeline.items()
-                if key not in {"timeline_id", "project_id", "file_uri", "created_at", "summary"}
-            }
+            # 조립은 `build_variant_timeline_payload` 한 곳에서만 한다. 예전에는
+            # 출력 화면 쪽(`local_pipeline._materialize_variant_for_output`)과 여기가
+            # 같은 복사 로직을 따로 들고 있었고, 2026-09-11에 크기 결함을 한쪽만
+            # 고쳤더니 **여기가 먼저 돌면 틀린 타임라인이 캐시되어** 그 고침이
+            # 건너뛰어졌다(`save_variant_materialization`을 나중 호출자가 재사용한다).
+            timeline_payload = build_variant_timeline_payload(
+                master_timeline=master_timeline, variant_kind=variant.kind, derived=derived,
+            )
+            # 이 라우터만 챙기던 것들. 공용 조립은 마스터에 있는 값을 그대로
+            # 물려주므로, 마스터에 없을 때 빈 목록으로 세워 두는 몫만 남는다.
             timeline_payload.update({
-                "source_variant_id": derived.source_variant_id,
-                "source_variant_revision": derived.source_variant_revision,
-                "segments": list(derived.segments),
-                "tracks": list(master_timeline.get("tracks", [])),
-                "review_flags": list(master_timeline.get("review_flags", [])),
-                "pending_recommendations": list(master_timeline.get("pending_recommendations", [])),
-                "applied_recommendations": list(master_timeline.get("applied_recommendations", [])),
+                "review_flags": list(master_timeline.get("review_flags", []) or []),
+                "pending_recommendations": list(master_timeline.get("pending_recommendations", []) or []),
+                "applied_recommendations": list(master_timeline.get("applied_recommendations", []) or []),
             })
             timeline = store.save_timeline_run(
                 project_id=project_id,
