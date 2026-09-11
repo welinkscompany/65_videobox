@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { api, type JobRecord } from "../../../api";
 import { Button } from "../../../components/ui/button";
+import { resolveMasterFinalRender, type MasterFinalRenderSelection } from "../../outputs/masterFinalRender";
 
 /** 캡컷 `내보내기` 팝오버 (계획 §7·§10 10단계).
  *
@@ -24,7 +25,11 @@ export function ExportPopover({
   /** 2단계 -- 완성본 만들기와 자세한 상태(기존 화면). */
   onOpenDetails: () => void;
 }) {
-  const [finalJobId, setFinalJobId] = useState<string | null>(null);
+  // "지금 편집본의 마스터 완성본"을 고르는 단 하나의 규칙을 쓴다 -- 직접
+  // 가로·세로 변형본 필터나 낡음 확인을 여기서 다시 짜지 않는다. 두 화면이
+  // 서로 다른 파일을 "완성본"이라 부르면 잘못된 파일을 조용히 내려주게 된다
+  // (`masterFinalRender.ts` 주석, task-1-brief.md 참고).
+  const [finalSelection, setFinalSelection] = useState<MasterFinalRenderSelection>({ kind: "none" });
   const [subtitleJobId, setSubtitleJobId] = useState<string | null>(null);
   const [capcutReady, setCapcutReady] = useState(false);
   const [ready, setReady] = useState(false);
@@ -34,12 +39,14 @@ export function ExportPopover({
     const latest = (jobs: readonly JobRecord[], jobType: string) => jobs
       .filter((job) => job.job_type === jobType && job.status === "succeeded")
       .slice(-1)[0] ?? null;
-    void api.listJobs(projectId)
-      .then((jobs) => {
+    void Promise.all([api.getLatestEditingSession(projectId), api.listJobs(projectId)])
+      .then(async ([session, jobs]) => {
         if (!active) return;
-        setFinalJobId(latest(jobs, "final_render")?.job_id ?? null);
         setSubtitleJobId(latest(jobs, "subtitle_render")?.job_id ?? null);
         setCapcutReady(Boolean(latest(jobs, "capcut_draft_export")));
+        const selection = await resolveMasterFinalRender(projectId, jobs, session)
+          .catch(() => ({ kind: "none" as const }));
+        if (active) setFinalSelection(selection);
       })
       .catch(() => { /* 목록을 못 읽어도 2단계로는 갈 수 있어야 한다 */ })
       .finally(() => { if (active) setReady(true); });
@@ -53,10 +60,14 @@ export function ExportPopover({
       <ul aria-label="내보낼 곳" className="vb-export-popover__list">
         <li>
           <strong>영상 내려받기</strong>
-          {finalJobId ? (
-            <a className="vb-action-link" download href={`${base}/final-renders/${encodeURIComponent(finalJobId)}/content`}>
+          {finalSelection.kind === "ready" ? (
+            <a className="vb-action-link" download href={`${base}/final-renders/${encodeURIComponent(finalSelection.jobId)}/content`}>
               MP4 내려받기
             </a>
+          ) : finalSelection.kind === "stale" ? (
+            // 낡은 파일은 절대 조용히 안 준다 -- 링크를 감추고 다시 만들라고
+            // 말한다. `완성본 만들기와 자세한 상태`(2단계)가 새로 만드는 자리다.
+            <p>완성본이 최신 편집본과 달라요. 아래에서 새로 만들어 주세요.</p>
           ) : (
             // 준비를 떠넘기지 않는다 -- 무엇이 없어서 못 받는지 말한다.
             <p>완성본을 아직 만들지 않았어요. 아래에서 만들면 여기서 받을 수 있어요.</p>
