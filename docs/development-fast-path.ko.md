@@ -435,6 +435,28 @@ Codex 시절 세션 단절을 메우던 장치이며, 현재 개발 환경에서
 3. OAuth device code, account identity, credential contents, auth state와 memory contents는 source, `.env`, status document, verifier 출력에 기록하지 않는다. 검증은 mount/network/image/user/dependency 같은 경계 정보만 출력한다.
 4. 이 local-MVP 경계는 VideoBox asset/file mutation, Telegram intake, egress gateway, host bridge, CapCut bridge의 활성화 근거가 아니다. 각각은 별도 구현·검증으로 닫는다.
 
+### 10.22 유진의 두뇌(로컬 모델)를 바꾸는 법 (2026-09-11)
+
+**어느 모델을 쓰는지는 `.env.container`의 `VIDEOBOX_LOCAL_MODEL_NAME`이 정한다.**
+문서·코드에 모델 이름을 새로 박지 마라 — 2026-09-11에 실제로 **여섯 곳이
+갈라져 있었다**.
+
+- **바꾸는 법은 한 명령**: `scripts/set-local-model.ps1 <모델id>`. 여섯 곳을 한
+  번에 바꾸고, **LM Studio에 그 모델이 안 올라와 있으면 거부한다**(`-Force`로만
+  통과). LM Studio는 설정이 틀려도 지금 켜진 모델로 조용히 답하므로, 그 확인이
+  없으면 어긋난 것을 한참 뒤에야 안다.
+- **갈라짐 울타리**: `tests/test_local_model_name_is_one_value.py`가 compose
+  기본값·유진 프로필·코드 기본값이 서로 같은지 본다. 값을 안 박았으므로 모델을
+  바꿔도 이 시험은 안 고쳐도 된다.
+- **한 기계에 모델이 여럿 있을 수 있다.** owner가 다른 프로젝트에서 옛 모델을
+  함께 쓰는 기간이 있다. "안 쓰니까 지워도 된다"고 적지 마라.
+- **영상 분석도 설정을 따른다**(2026-09-11 수정). 예전에는 LM Studio에 **먼저
+  올라온** 비전 모델을 집어서, 다른 프로젝트가 옛 모델을 올려 두면 설정과
+  무관하게 그것이 쓰였다. 설정한 모델이 없으면 예전 규칙으로 물러나고, 그
+  사실은 분석마다 남는 기록(`/provenance`)에 실린다.
+- 재부팅 뒤 별도 설정은 필요 없다 — LM Studio의 `justInTimeModelLoading`이
+  이름을 대고 부르는 요청에 맞춰 올려 준다.
+
 ### 10.21 main과 개발선을 다시 벌리지 마라 (owner 결정 2026-09-07)
 
 **2026-09-07에 개발선(`codex/videobox-container-compatibility`)을 main으로 합쳤다.**
