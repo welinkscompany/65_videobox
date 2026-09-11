@@ -58,4 +58,37 @@ describe("VariantOutputCard", () => {
     );
     expect(screen.queryByRole("link", { name: /내려받기/ })).not.toBeInTheDocument();
   });
+
+  // task-3-brief.md: 실패 이유를 서버 코드 그대로("사유:
+  // final_output_requires_review_approval") 찍으면 owner가 할 수 있는 일이
+  // 없다. `OutputsPage.tsx`가 이미 쓰는 한국어 할 일 표를 나눠 써서 같은
+  // 문장이 나와야 한다 -- 표를 두 번째로 만들면 문구가 갈라진다.
+  it("실패한 변형본은 알려진 코드를 owner가 할 수 있는 일로 보여준다", () => {
+    render(
+      <VariantOutputCard
+        projectId="project_a"
+        item={{ variant_id: "vertical", variant_kind: "vertical_full", status: "failed", error_code: "final_output_requires_review_approval" }}
+        onRetry={() => {}}
+      />,
+    );
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("검토");
+    expect(status).not.toHaveTextContent("final_output_requires_review_approval");
+  });
+
+  // 표에 없는 코드가 와도 코드를 그대로 찍지 않는다(옛 결함 재현 금지) --
+  // 동시에 아무 말도 안 하는 것도 아니다. 표가 이미 쓰는 방식(일반화된
+  // 안내 문장)을 그대로 따른다.
+  it("표에 없는 실패 코드는 코드를 그대로 보여주지 않고 안내 문장으로 대신한다", () => {
+    render(
+      <VariantOutputCard
+        projectId="project_a"
+        item={{ variant_id: "vertical", variant_kind: "vertical_full", status: "failed", error_code: "some_never_seen_engine_code" }}
+        onRetry={() => {}}
+      />,
+    );
+    const status = screen.getByRole("status");
+    expect(status).not.toHaveTextContent("some_never_seen_engine_code");
+    expect(status.textContent?.trim()).not.toBe("");
+  });
 });

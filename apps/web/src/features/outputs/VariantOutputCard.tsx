@@ -1,6 +1,7 @@
 import type { VariantRenderItem } from "../../api";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
+import { variantRenderFailureMessage } from "./outputFailureMessages";
 import { isVariantPlayable, variantContentUrl, variantLabel } from "./variantOutputState";
 
 export function VariantOutputCard({
@@ -46,7 +47,12 @@ export function VariantOutputCard({
             "항상 낡음"으로 잘못 나와서 이 기능 자체가 죽는다. */}
         {contentUrl ? <a className="vb-action-link" download href={contentUrl}>{label} 내려받기</a> : null}
         {playable && !confirmed ? <Button variant="outline" onClick={onConfirm}>결과 확인</Button> : null}
-        {item.error_code ? <p role="status">사유: {item.error_code}</p> : null}
+        {/* task-3-brief.md: 서버 코드를 그대로 찍으면("사유:
+            final_output_requires_review_approval") owner가 할 수 있는 일이
+            없었다. `OutputsPage.tsx`가 완성본/자막/CapCut 초안에 쓰던 한국어
+            표를 나눠 써서 같은 방침(모르는 코드도 raw로 보여주지 않고
+            일반화된 안내 문장으로 대신한다)을 따른다. */}
+        {item.error_code ? <p role="status">{variantRenderFailureMessage(item.error_code)}</p> : null}
         {item.status === "failed" ? <Button variant="outline" onClick={onRetry}>이 출력 다시 만들기</Button> : null}
       </CardContent>
     </Card>
