@@ -55,6 +55,13 @@ type Props = Readonly<{
   onApply: (card: EditorAssetCard, segmentId: string) => void;
   /** 이미지 카드를 장면 위에 오버레이로 얹는다. 없으면 그 단추만 빠진다. */
   onApplyOverlay?: (card: EditorAssetCard, segmentId: string) => void;
+  /** **지금 고른 장면에 이미 얹은 사진·영상이 있는가(2026-09-11 실측 결함 수정).**
+   *  장면 하나는 얹은 것을 최대 하나만 갖는다 -- 두 번째를 얹으면 첫 번째가
+   *  아무 말도 없이 사라진다. `화면에 얹기`라는 이름은 "더한다"고 약속하는데
+   *  실제로는 "바꾼다"였다. 이 값이 참이면 모든 카드의 단추 이름이
+   *  `얹은 것 바꾸기`로 바뀐다 -- 새 모달이나 클릭을 더하지 않고 이름만
+   *  사실대로 고친다. 안 주면(기본 `false`) 예전처럼 `화면에 얹기`다. */
+  targetHasOverlay?: boolean;
   previewStates?: Readonly<Record<string, EditorAssetPreviewState>>;
   onRefreshExactPreview?: () => void;
   /** 있으면 "항상 쓰기 / 쓰지 않기"를 저장한다. 없으면 그 절만 빠진다. */
@@ -160,7 +167,7 @@ function targetLabel(target: EditorAssetTarget | null): string {
 /** 한 번에 그리는 카드 수. 한 화면에서 훑을 수 있는 만큼이다. */
 const FIRST_PAGE = 8;
 
-export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, script, sourceCheck, analysisPanel, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
+export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply, onApplyOverlay, targetHasOverlay = false, previewStates = {}, onRefreshExactPreview, projectId, onMediaAdded, transitionTarget, onInspectorAction, transcript, script, sourceCheck, analysisPanel, pane: controlledPane, onPaneChange, renderPaneTabs = true }: Props) {
   const [removingCardId, setRemovingCardId] = useState<string | null>(null);
   const [removeMessage, setRemoveMessage] = useState<string | null>(null);
 
@@ -566,7 +573,12 @@ export function EditorAssetBrowser({ cards, target, isSaving, onPreview, onApply
                 소리만 있는 자산(`previewKind === "audio"`)은 얹을 것이 없어
                 그대로 뺀다. */}
             {onApplyOverlay && (card.previewKind === "image" || card.previewKind === "video") ? (
-              <Button type="button" aria-label={`${card.title} 화면에 얹기`} disabled={applyDisabled} onClick={() => target && onApplyOverlay(card, target.segmentId)}>화면에 얹기</Button>
+              // **이름이 곧 경고다(2026-09-11 실측 결함 수정).** 장면은 얹은 것을
+              // 하나만 갖는다 -- 이미 있는데 또 얹으면 앞의 것이 조용히
+              // 사라진다. `targetHasOverlay`가 참이면 그 사실을 단추 이름이
+              // 미리 말한다. 동작(`onApplyOverlay` 호출)은 그대로다 -- 백엔드가
+              // 이미 upsert이므로 새 확인 창이나 분기를 더하지 않는다.
+              <Button type="button" aria-label={`${card.title} ${targetHasOverlay ? "얹은 것 바꾸기" : "화면에 얹기"}`} disabled={applyDisabled} onClick={() => target && onApplyOverlay(card, target.segmentId)}>{targetHasOverlay ? "얹은 것 바꾸기" : "화면에 얹기"}</Button>
             ) : null}
             {/* 독립 "미디어" 화면(2026-08-27 결정으로 편집기에 접힘, 2026-09-01
                 실행)의 유일한 고유 동작 중 하나. 라이브러리에서 들여온 프로젝트

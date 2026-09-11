@@ -1870,6 +1870,30 @@ describe("EditorWorkbenchRoute", () => {
     }));
   });
 
+  // 실측 결함(2026-09-11): 장면 하나에는 얹은 사진·영상이 최대 하나다. 두 번째를
+  // 얹으면 첫 번째가 아무 말도 없이 사라진다 -- `화면에 얹기`라는 이름은 "더한다"고
+  // 약속하는데 실제로는 "바꾼다". 고른 장면에 이미 얹은 것이 있으면 단추 이름이
+  // 그 사실을 미리 말해야 한다(owner 지시). `inspectorManifest(1, "image")`가
+  // segment-1에 이미 `image_overlay` 클립을 심어 둔 픽스처다.
+  it("장면에 이미 얹은 것이 있으면 단추 이름이 사실대로 바꾸기라고 말한다", async () => {
+    const imageAsset = {
+      asset_id: "image-2",
+      asset_type: "broll_image",
+      storage_uri: "file:///image-2.png",
+      created_at: "2026-08-20T00:00:00Z",
+      metadata: { title: "새 사진", analysis_status: "succeeded", review_required: false },
+    };
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([imageAsset] as never);
+    vi.mocked(api.getEditorPlaybackManifest).mockResolvedValue(inspectorManifest(1, "image") as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await openAssetBrowser();
+    fireEvent.click(await findClipSelectionButton("n-1"));
+
+    expect(await screen.findByRole("button", { name: "새 사진 얹은 것 바꾸기" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "새 사진 화면에 얹기" })).toBeNull();
+  });
+
   it("copies a shared-library picture into the project before laying it over the scene", async () => {
     // 라이브러리 그림은 프로젝트 자산이 아니라서 오버레이가 부를 식별자가
     // 없다. 먼저 프로젝트로 복사하고, 그 결과 자산으로 얹는다 -- 이미 있는

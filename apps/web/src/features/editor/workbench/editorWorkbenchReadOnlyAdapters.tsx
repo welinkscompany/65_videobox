@@ -25,6 +25,15 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedS
     const transitionTarget = selectedSegmentId === null || leftSelectedIndex < 0
       ? null
       : { segmentId: selectedSegmentId, hasPrevious: leftSelectedIndex > 0 };
+    // **"화면에 얹기"가 거짓말이 되는 자리(2026-09-11 실측 결함).** 장면 하나는
+    // 얹은 사진·영상을 최대 하나만 가진다 -- 이미 있는데 또 얹으면 첫 번째가
+    // 아무 말도 없이 사라진다. `view.tracks`는 이 화면이 이미 들고 있는 뷰모델
+    // 데이터라 새로 불러올 것이 없다 -- 매 렌더마다 그 장면의 `overlay` 트랙에
+    // `image_overlay` 클립이 있는지만 다시 센다(오래될 수 없다, 세션이 바뀌면
+    // `view`도 같이 바뀐다). `inspectorRegistry.ts`의 오버레이 판별과 같은 조건
+    // (`role === "overlay"`, `overlayType === "image_overlay"`)이다.
+    const targetHasOverlay = assetTarget !== null && view.tracks.some((track) => track.role === "overlay"
+      && track.clips.some((clip) => clip.segmentId === assetTarget.segmentId && clip.type === "overlay" && clip.overlayType === "image_overlay"));
     // **한 번에 하나만 보여 준다(owner 지시 2026-08-27).**
     // 실측: 이 도크는 보이는 높이 137px인데 내용이 1,608px이었다 -- 11.7배 스크롤.
     // 미디어 아래에 `영상 구성 · 소스 확인 · 대본 · 자막`이 세로로 더 쌓여 있었다.
@@ -36,6 +45,7 @@ export function EditorWorkbenchReadOnlyAdapters({ view, session, dock, selectedS
       cards={assetCards} target={assetTarget} isSaving={isSavingCaption}
       onPreview={onPreviewAsset} onApply={(card, segmentId) => void onApplyAssetCard?.(card, segmentId)}
       onApplyOverlay={onApplyImageOverlay ? (card, segmentId) => void onApplyImageOverlay(card, segmentId) : undefined}
+      targetHasOverlay={targetHasOverlay}
       previewStates={assetPreviewStates} onRefreshExactPreview={onRefreshExactPreview}
       projectId={view.projectId} onMediaAdded={onMediaAdded}
       transitionTarget={transitionTarget} onInspectorAction={onInspectorAction}
