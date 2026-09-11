@@ -37,12 +37,18 @@ YUJIN_PROFILE_PATH = ROOT / "config" / "hermes" / "yujin" / "config.yaml"
 
 
 def _mem0_llm_model_default() -> str:
-    """`${VIDEOBOX_MEM0_LLM_MODEL:-여기}`에서 기본값만 꺼낸다.
+    """`${VIDEOBOX_MEM0_LLM_MODEL:-여기}`에서 **가장 안쪽** 기본값만 꺼낸다.
 
     **서비스 이름을 박아 두지 않는다.** 처음에 `videobox-agent-gateway`라고
     적었다가 `KeyError`로 헛다리를 짚었다 -- 이 값은 기억 어댑터
     (`videobox-hermes-memory-adapter`)가 들고 있다. 서비스가 옮겨 다녀도
     이 시험이 지키려는 것(둘이 같은가)은 그대로여야 한다.
+
+    2026-09-11에 SSOT 작업으로 기본값이 한 겹 더 생겼다
+    (`${VIDEOBOX_MEM0_LLM_MODEL:-${VIDEOBOX_LOCAL_MODEL_NAME:-실제값}}`).
+    껍질이 몇 겹이든 상관없이 **가장 안쪽 리터럴**까지 벗겨야 코드 기본값·
+    유진 두뇌와 같은 자리에서 비교할 수 있다. 겹 수를 세는 것이 목적이 아니라
+    "결국 같은 값을 가리키는가"만 보는 게 목적이라 재귀적으로 벗긴다.
     """
     overlay = yaml.safe_load(OVERLAY_PATH.read_text(encoding="utf-8"))
     holders = [
@@ -51,11 +57,18 @@ def _mem0_llm_model_default() -> str:
         if "VIDEOBOX_MEM0_LLM_MODEL" in (service.get("environment") or {})
     ]
     assert len(holders) == 1, f"기억 모델을 정하는 자리가 하나여야 한다: {[n for n, _ in holders]}"
-    raw = str(holders[0][1])
-    prefix, marker, remainder = raw.partition(":-")
-    assert marker, f"기본값이 없는 모양이다: {raw!r}"
-    assert prefix.startswith("${"), f"예상한 모양이 아니다: {raw!r}"
-    return remainder.rstrip("}")
+    value = str(holders[0][1])
+    original = value
+    while value.startswith("${"):
+        prefix, marker, remainder = value.partition(":-")
+        assert marker, f"기본값이 없는 모양이다: {original!r}"
+        assert prefix.startswith("${"), f"예상한 모양이 아니다: {original!r}"
+        assert remainder.endswith("}"), f"닫는 괄호가 없다: {original!r}"
+        # 바깥 `${...}` 하나에 대응하는 닫는 괄호 딱 하나만 벗긴다. rstrip("}")를
+        # 쓰면 겹친 괄호를 통째로 지워 안쪽 표현이 깨진다 -- 실제로 그렇게
+        # 깨졌다가 이 시험 자체가 잘못된 이유로 빨개진 적이 있다(2026-09-11).
+        value = remainder[:-1]
+    return value
 
 
 def _yujin_profile_model() -> str:

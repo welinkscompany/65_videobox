@@ -367,8 +367,12 @@ def test_memory_adapter_is_the_only_mem0_provider_boundary() -> None:
             "${VIDEOBOX_MEM0_LOCAL_BASE_URL:-"
             "http://host.docker.internal:1234/v1}"
         ),
+        # 모델 이름의 SSOT는 `.env.container`의 VIDEOBOX_LOCAL_MODEL_NAME 하나다.
+        # 기억 추출용 값이 없으면 그 SSOT를 먼저 보고, 그것도 없으면 커밋된
+        # 리터럴로 떨어진다(2026-09-11, `set-local-model.ps1`).
         "VIDEOBOX_MEM0_LLM_MODEL": (
-            "${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.8-27b}"
+            "${VIDEOBOX_MEM0_LLM_MODEL:-${VIDEOBOX_LOCAL_MODEL_NAME:-"
+            "qwen/qwen3.8-27b}}"
         ),
         "VIDEOBOX_MEM0_EMBEDDER_MODEL": (
             "${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}"

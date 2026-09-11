@@ -83,7 +83,12 @@ services:
       # 채워져 있으면 그쪽(호스팅)이 우선한다.
       VIDEOBOX_MEM0_MODE: ${VIDEOBOX_MEM0_MODE:-local}
       VIDEOBOX_MEM0_LOCAL_BASE_URL: ${VIDEOBOX_MEM0_LOCAL_BASE_URL:-http://host.docker.internal:1234/v1}
-      VIDEOBOX_MEM0_LLM_MODEL: ${VIDEOBOX_MEM0_LLM_MODEL:-qwen/qwen3.8-27b}
+      # 모델 이름의 SSOT는 `.env.container`의 VIDEOBOX_LOCAL_MODEL_NAME 하나다
+      # (2026-09-11). 기억 추출 전용 값을 따로 주고 싶으면 VIDEOBOX_MEM0_LLM_MODEL을
+      # 직접 채운다 -- 그게 없으면 SSOT를 보고, 그것도 없으면 커밋된 리터럴로
+      # 떨어진다. `scripts/set-local-model.ps1`이 셋째 자리(커밋 리터럴)까지
+      # 한 번에 맞춘다.
+      VIDEOBOX_MEM0_LLM_MODEL: ${VIDEOBOX_MEM0_LLM_MODEL:-${VIDEOBOX_LOCAL_MODEL_NAME:-qwen/qwen3.8-27b}}
       VIDEOBOX_MEM0_EMBEDDER_MODEL: ${VIDEOBOX_MEM0_EMBEDDER_MODEL:-text-embedding-bge-m3}
       # 차원이 틀리면 저장소가 조용히 어긋난다. bge-m3 는 1024다.
       VIDEOBOX_MEM0_EMBEDDING_DIMS: ${VIDEOBOX_MEM0_EMBEDDING_DIMS:-1024}
