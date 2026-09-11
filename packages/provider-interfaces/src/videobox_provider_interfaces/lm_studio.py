@@ -53,6 +53,11 @@ class LMStudioCapabilityProfile:
     text_model_name: str | None
     embedding_model_name: str | None
     structured_json: bool
+    # `VIDEOBOX_LOCAL_MODEL_NAME`이 가리킨 이름을 그대로 되돌려 준다(안 넘겼으면
+    # `None`). 호출자가 `vision_model_name`과 이 값을 대조하면 설정한 모델이
+    # 실제로 쓰였는지, 아니면 조용히 다른 모델로 물러났는지 알 수 있다 --
+    # 기본값이 있어야 기존 시험이 이 필드 없이도 그대로 통과한다.
+    configured_model_name: str | None = None
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -145,27 +150,44 @@ class LMStudioHTTPTransport:
                 raise
             return self._strict_legacy_loaded_models(timeout_seconds=timeout_seconds)
 
-    def capability_profile(self, *, timeout_seconds: int = 15) -> LMStudioCapabilityProfile:
+    def capability_profile(
+        self, *, timeout_seconds: int = 15, configured_model_name: str | None = None
+    ) -> LMStudioCapabilityProfile:
+        # 지금까지는 "로드된 목록의 첫 비전 모델"만 봤다. LM Studio가
+        # `justInTimeModelLoading`으로 목록 앞쪽 모델을 먼저 올리면, 대표님이
+        # 다른 프로젝트용으로 같이 띄워 둔 옛 모델이 설정과 무관하게 뽑혔다
+        # (2026-09-11 실측 결함). 이제 `configured_model_name`이 올라와 있고
+        # 그 능력이 되면 그것을 먼저 쓰고, 아니면 옛 규칙(첫 번째)으로 물러난다.
+        # 임베딩은 텍스트/비전과 다른 모델(`text-embedding-bge-m3`)이라
+        # `configured_model_name`을 들이밀지 않는다 -- 그대로 첫 번째 규칙만 쓴다.
         selected: dict[str, str | None] = {"vision": None, "text": None, "embedding": None}
+        configured: dict[str, str | None] = {"vision": None, "text": None}
         loaded_models = self._loaded_models(timeout_seconds=timeout_seconds)
         for model_id, model_type, capabilities in loaded_models:
-            if selected["vision"] is None and (
-                (model_type == "llm" and capabilities.get("vision") is True)
-                or (model_type == "legacy" and capabilities.get("vision") is True)
-            ):
+            is_vision = (model_type == "llm" and capabilities.get("vision") is True) or (
+                model_type == "legacy" and capabilities.get("vision") is True
+            )
+            is_text = model_type == "llm" or (model_type == "legacy" and capabilities.get("text") is True)
+            if configured_model_name is not None and model_id == configured_model_name:
+                if is_vision:
+                    configured["vision"] = model_id
+                if is_text:
+                    configured["text"] = model_id
+            if selected["vision"] is None and is_vision:
                 selected["vision"] = model_id
-            if selected["text"] is None and (model_type == "llm" or (model_type == "legacy" and capabilities.get("text") is True)):
+            if selected["text"] is None and is_text:
                 selected["text"] = model_id
             if selected["embedding"] is None and (model_type == "embedding" or (model_type == "legacy" and capabilities.get("embedding") is True)):
                 selected["embedding"] = model_id
         return LMStudioCapabilityProfile(
-            vision_model_name=selected["vision"],
-            text_model_name=selected["text"],
+            vision_model_name=configured["vision"] or selected["vision"],
+            text_model_name=configured["text"] or selected["text"],
             embedding_model_name=selected["embedding"],
             # Native inventory does not prove schema-mode support.  The opt-in
             # live Vision probe validates the fixed JSON schema before evidence
             # is emitted; never infer it from model names or a missing field.
             structured_json=False,
+            configured_model_name=configured_model_name,
         )
 
     def preflight(self, *, model_name: str, capability: str, timeout_seconds: int = 15) -> str:

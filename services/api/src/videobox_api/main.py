@@ -1084,7 +1084,10 @@ def create_app(
             base_url=resolved_local_runtime_config.base_url,
             http_client=media_analysis_http_client,
         )
-        capability = transport.capability_profile()
+        # `VIDEOBOX_LOCAL_MODEL_NAME`이 가리킨 모델을 먼저 본다. 안 그러면
+        # LM Studio에 같이 떠 있는 다른 모델(예: 이전 프로젝트용 옛 모델)이
+        # 목록 순서만으로 뽑힌다 -- 2026-09-11 대표님 기기에서 실제로 겪음.
+        capability = transport.capability_profile(configured_model_name=resolved_local_runtime_config.model_name)
         if capability.vision_model_name is None:
             raise ValueError("A loaded LM Studio vision + structured_json model is required.")
         transport.preflight(model_name=capability.vision_model_name, capability="vision")
