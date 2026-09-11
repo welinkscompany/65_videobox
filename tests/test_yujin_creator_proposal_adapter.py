@@ -255,6 +255,33 @@ def test_short_form_scene_selection_becomes_a_selected_segment_ids_patch() -> No
     assert patch == {"selected_segment_ids": ["segment-1", "segment-3"]}
 
 
+def test_a_chat_scene_selection_carries_how_many_scenes_yujin_actually_saw() -> None:
+    """채팅으로 고를 때 유진은 **판 전체를 보지 않는다.**
+
+    단추 경로(`pick_short_form_scenes`)는 48개를 추려 읽고 그 수를 화면에
+    말하지만, 채팅 경로는 창작 context의 `segment_summaries`만 본다 -- 32개에서
+    잘린다. 그 사실을 후보에 실어 화면까지 보내지 않으면, 롱폼에서 유진이
+    앞부분만 보고 고른 숏폼을 화면이 아무 단서 없이 보여 주게 된다.
+    """
+    context = _short_form_context().model_copy(update={"segment_total": 243})
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        parse_and_project_yujin_creator_output,
+    )
+
+    projection = parse_and_project_yujin_creator_output(
+        _short_form_raw(["segment-1", "segment-3"]),
+        context,
+        revision=1,
+        trusted_project_id="project-1",
+        trusted_run_id="run-short",
+    )
+
+    assert projection.proposal is not None, projection.validation_outcome
+    metadata = projection.proposal.candidates[0].canonical_metadata
+    assert metadata["scenes_read_by_yujin"] == 3
+    assert metadata["scenes_total"] == 243
+
+
 def test_one_message_can_carry_both_a_shape_change_and_a_scene_selection() -> None:
     """적용기는 후보 여럿을 한 patch로 합친다 -- 모양과 장면이 섞여도 한 번에."""
     from videobox_core_engine.yujin_creator_proposal_adapter import (

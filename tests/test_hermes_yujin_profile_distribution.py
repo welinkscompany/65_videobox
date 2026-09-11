@@ -305,6 +305,22 @@ def test_creator_skill_tells_yujin_how_to_cut_a_short_form() -> None:
     assert skill.count("select_segments") == 2
 
 
+def test_creator_skill_tells_yujin_to_admit_she_only_saw_part_of_the_scenes() -> None:
+    """채팅으로 고를 때 유진은 **판 전체를 보지 않는다.**
+
+    창작 context의 `segment_summaries`는 컨텍스트 예산 때문에 잘린다. 프로필이
+    그 사실을 말하라고 하지 않으면, 유진은 롱폼 앞부분만 보고 고른 숏폼을
+    "골랐어요"라고만 답한다 -- 그리고 대표님은 그걸 전 구간 판단으로 읽는다.
+    """
+    skill = (
+        PROFILE_ROOT / "skills" / "videobox-creator" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "`segment_total`" in skill
+    # 유진이 실제로 말해야 하는 문장. 능력이 아니라 **정직함**의 계약이다.
+    assert "일부만" in skill
+
+
 def test_memory_skill_forbids_interactive_capture_and_requires_explicit_approval() -> None:
     skill = (
         PROFILE_ROOT / "skills" / "videobox-memory" / "SKILL.md"

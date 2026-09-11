@@ -231,6 +231,10 @@ def build_yujin_creator_context(
         ),
         selected_segment_id=normalized_selection,
         segment_summaries=segments,
+        # **유진이 본 장면 수(`segment_summaries`)와 판의 장면 수는 다르다.**
+        # 위 `_bounded_segments`가 `MAX_SEGMENTS`에서 자르고 `_fit_context`가 더
+        # 떨어뜨릴 수도 있다. 그 차이를 실어 보내야 화면이 정직하게 말할 수 있다.
+        segment_total=len(raw_segments),
         media_candidates=candidates,
         approved_tts_candidates=approved_tts_before,
         timeline_summary=timeline_summary,

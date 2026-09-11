@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { startTransition, StrictMode, Suspense, useState } from "react";
 
 import { ApiConflictError, DirectorProposalBlockedError, api } from "../../../api";
-import { EditorWorkbenchRoute, affectedAreaLabel, findHermesRunProposalId, partialStatusLabel, prepareProjectAssetBrowserPreview } from "./EditorWorkbenchRoute";
+import { EditorWorkbenchRoute, affectedAreaLabel, findHermesRunProposalId, partialStatusLabel, prepareProjectAssetBrowserPreview, yujinSceneChangeNotice } from "./EditorWorkbenchRoute";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -3857,6 +3857,75 @@ describe("EditorWorkbenchRoute", () => {
     expect(screen.queryByRole("button", { name: "장면마다 하나씩 모두 고르기" })).toBeNull();
   });
 
+  it("유진이 숏폼 장면을 바꾸면 목록을 다시 읽어 되돌리기가 막히지 않는다", async () => {
+    // 유진 편집은 확인 클릭 없이 적용되고 **되돌리기가 유일한 안전장치**다
+    // (owner 결정 2026-09-01). 서버가 그 모양의 버전을 올렸는데 화면이 목록을
+    // 다시 안 읽으면, `전체 장면으로 되돌리기`가 낡은 버전을 보내 막힌다.
+    // 옛 의존값(`refreshToken`)은 **정확 미리보기가 성공한 짧은 영상에서만**
+    // 올라가서 롱폼에서는 영원히 안 올라간다.
+    const shortForm = {
+      variant_id: "variant-short",
+      kind: "vertical_highlight",
+      source_session_id: "session-a",
+      source_session_revision: 1,
+      variant_revision: 3,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [],
+      conflicts: [],
+      selected_segment_ids: ["segment-1"],
+      master_segment_ids: ["segment-1", "segment-2"],
+    };
+    const listVariants = vi.spyOn(api, "listOutputVariants")
+      .mockResolvedValueOnce({ variants: [shortForm] } as never)
+      .mockResolvedValue({ variants: [{ ...shortForm, variant_revision: 4 }] } as never);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({
+      conversation: { conversation_id: "conversation-1", project_id: "project-a", session_id: "session-a" },
+      messages: [],
+      proposal: {
+        ...directorProposal("yujin-short"),
+        diff: { proposal_mode: "yujin_actionable_v1" },
+        candidates: [{
+          ...directorProposal().candidates[0],
+          candidate_id: "candidate-short",
+          visible_reference_code: "P01-SHORT-01",
+          media_type: "output_variant",
+          asset_id: "candidate-short",
+          availability: "actionable",
+          review_status: "approved",
+          preview_uri: null,
+          controls: { kind: "output_variant", parameters: { action: "select_segments", segment_ids: ["segment-1"] } },
+          expected_content_sha256: null,
+          media_revision: "session:session-a:revision:1:assets:1",
+          canonical_metadata: {
+            schema_version: "videobox.yujin-response.v1",
+            proposal_kind: "output_variant",
+            yujin_actionable_variant: true,
+            variant_id: "variant-short",
+            base_variant_revision: 3,
+            variant_kind: "vertical_highlight",
+            scenes_read_by_yujin: 32,
+            scenes_total: 243,
+          },
+        }],
+      },
+      references: [],
+    } as never);
+    vi.spyOn(api, "preflightDirectorProposal").mockResolvedValue({ status: "ready" } as never);
+    vi.spyOn(api, "batchApplyDirectorProposal").mockResolvedValue({} as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await expectEditorRevision(1);
+    await openYujin();
+    fireEvent.click(await screen.findByRole("radio", { name: endingWith("P01-SHORT-01 선택") }));
+    const before = listVariants.mock.calls.length;
+    fireEvent.click(await screen.findByRole("button", { name: "선택한 추천 적용" }));
+
+    // 목록을 다시 읽었는가 -- 이것이 되돌리기가 보내는 버전을 최신으로 만든다.
+    await waitFor(() => expect(listVariants.mock.calls.length).toBeGreaterThan(before));
+    // 그리고 몇 장면을 보고 골랐는지 화면이 말한다.
+    expect(await screen.findByText(/243개 중 32개만/)).toBeVisible();
+  });
+
   it("preflights then batch-applies only the current route proposal after navigation", async () => {
     vi.spyOn(api, "getEditorPlaybackManifest").mockImplementation((projectId, sessionId) => Promise.resolve(manifest(projectId, sessionId)) as never);
     vi.spyOn(api, "reloadDirectorSession").mockImplementation((projectId, sessionId) => Promise.resolve({
@@ -5016,5 +5085,112 @@ describe("서버 출력 변형 연결", () => {
     await waitFor(() => expect(patch).toHaveBeenCalledWith("project-a", "vertical-full", expect.objectContaining({ expected_variant_revision: 3 })));
     fireEvent.click(screen.getByRole("button", { name: "세로 변형 준비" }));
     await waitFor(() => expect(materialize).toHaveBeenCalledWith("project-a", "vertical-full", { expected_master_session_revision: 1 }));
+  });
+
+  it("준비 문구에 내부 식별자를 내보내지 않는다", async () => {
+    // 계획서가 금지한 것이다. 대표님이 `timeline-variant`로 할 수 있는 일이 없다.
+    const variant = {
+      variant_id: "vertical-full",
+      kind: "vertical_full",
+      source_session_id: "session-a",
+      source_session_revision: 1,
+      variant_revision: 3,
+      overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+      locks: [],
+      conflicts: [],
+    };
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [variant] } as never);
+    vi.spyOn(api, "materializeOutputVariant").mockResolvedValue({
+      materialization: {
+        timeline_id: "timeline-variant", source_session_id: "session-a",
+        source_session_revision: 1, source_variant_id: "vertical-full", source_variant_revision: 3,
+      },
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    // 펼침 상태는 화면이 기억한다 -- 앞 시험이 이미 펼쳐 뒀을 수 있다.
+    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    if (expand) fireEvent.click(expand);
+    fireEvent.click(screen.getByRole("tab", { name: "세로" }));
+    fireEvent.click(await screen.findByRole("button", { name: "세로 변형 준비" }));
+
+    expect(await screen.findByText("내보낼 모양을 준비했어요.")).toBeVisible();
+    expect(screen.queryByText(/timeline-variant/)).toBeNull();
+  });
+});
+
+describe("숏폼 화면 정직성", () => {
+  it("서버가 누가 골랐는지 말하지 않으면 유진이 골랐다고 하지 않는다", async () => {
+    // 자막 글자 수로 고른 결과를 유진의 판단이라고 말하는 것이 이 기능에서
+    // 제일 나쁜 결과다. 화면의 **대비 문자열**도 유진을 주장하면 안 된다.
+    vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(narrationManifest(1) as never);
+    vi.spyOn(api, "getEditingSession").mockResolvedValue(editingSession("project-a", "session-a") as never);
+    vi.spyOn(api, "listBrollAssets").mockResolvedValue([] as never);
+    vi.spyOn(api, "listMediaLibraryAssets").mockResolvedValue({ assets: [] } as never);
+    vi.spyOn(api, "listLibraryAssets").mockResolvedValue({ assets: [], total: 0 } as never);
+    vi.spyOn(api, "listJobs").mockResolvedValue([]);
+    vi.spyOn(api, "listTtsCandidates").mockResolvedValue({ candidates: [] });
+    vi.spyOn(api, "listYujinMemoryCandidates").mockResolvedValue([]);
+    vi.spyOn(api, "reloadDirectorSession").mockResolvedValue({ conversation: null, messages: [], proposal: null, references: [] } as never);
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({
+      variants: [{
+        variant_id: "vertical-full", kind: "vertical_full",
+        source_session_id: "session-a", source_session_revision: 1, variant_revision: 1,
+        overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+        locks: [], conflicts: [],
+      }],
+    } as never);
+    // 서버가 `scene_pick`을 안 실어 보낸 경우 -- 화면은 자기 대비 문구를 쓴다.
+    vi.spyOn(api, "createOutputVariant").mockResolvedValue({
+      variant: {
+        variant_id: "variant-short", kind: "vertical_highlight",
+        source_session_id: "session-a", source_session_revision: 1, variant_revision: 1,
+        overrides: { crop: null, focal: null, caption: null, safe_area: null, audio: null },
+        locks: [], conflicts: [],
+      },
+    } as never);
+
+    render(<EditorWorkbenchRoute projectId="project-a" sessionId="session-a" />);
+    await screen.findByRole("region", { name: "편집 작업판" });
+    const expand = screen.queryByRole("button", { name: "출력 변형 펼치기" });
+    if (expand) fireEvent.click(expand);
+    fireEvent.click(screen.getByRole("tab", { name: "세로" }));
+    fireEvent.click(await screen.findByRole("button", { name: "하이라이트 변형 만들기" }));
+
+    const message = await screen.findByText(/숏폼을 만들었어요/);
+    expect(message.textContent ?? "").not.toMatch(/유진/);
+  });
+
+  it("채팅으로 고를 때 몇 장면 중 몇 개를 봤는지 말한다", () => {
+    // 단추 경로는 영상 전 구간에서 고르게 추린 장면을 읽지만, 채팅 경로는
+    // 창작 맥락에 담긴 장면만 본다. 그 차이를 말하지 않으면 대표님이 이걸
+    // 전 구간 판단으로 읽는다.
+    const candidate = {
+      canonical_metadata: { scenes_read_by_yujin: 32, scenes_total: 243 },
+    } as never;
+
+    const notice = yujinSceneChangeNotice(candidate);
+
+    expect(notice).toMatch(/243개 중 32개만/);
+    expect(notice).toMatch(/전체 장면으로 되돌릴 수 있어요/);
+  });
+
+  it("전부 읽었으면 덜 봤다고 말하지 않는다", () => {
+    const notice = yujinSceneChangeNotice(
+      { canonical_metadata: { scenes_read_by_yujin: 5, scenes_total: 5 } } as never,
+    );
+
+    expect(notice).not.toMatch(/개만 보고/);
+    expect(notice).toMatch(/전체 장면으로 되돌릴 수 있어요/);
   });
 });

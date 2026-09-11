@@ -154,10 +154,20 @@ def _density_pick(
     reason: str,
     notice: str,
 ) -> ShortFormScenePick:
+    segment_ids = select_highlight_segment_ids(
+        ordered, max_target_sec=SHORT_FORM_MAX_TARGET_SEC
+    )
+    if len(segment_ids) >= len(ordered):
+        # `select_highlight_segment_ids`는 아무 장면도 점수를 못 받으면(자막이
+        # 하나도 없으면) **전체를 그대로** 돌려준다. 선택 = 전부라 하나도
+        # 안 짧아지는데 "골랐어요"라고 말하면 거짓이다. 안 골랐으면 골랐다고
+        # 말하지 않는다.
+        notice = (
+            "숏폼에 넣을 장면을 고를 근거가 없어서(읽을 자막이 없어요) "
+            "전체 장면을 그대로 뒀어요. 자막을 넣은 뒤 다시 만들어 주세요."
+        )
     return ShortFormScenePick(
-        segment_ids=select_highlight_segment_ids(
-            ordered, max_target_sec=SHORT_FORM_MAX_TARGET_SEC
-        ),
+        segment_ids=segment_ids,
         judged_by="caption_density",
         notice=notice,
         scenes_total=len(ordered),
@@ -177,8 +187,14 @@ def pick_short_form_scenes(
 ) -> ShortFormScenePick:
     """숏폼에 넣을 장면을 고르고, **누가 골랐는지**를 같이 돌려준다."""
 
+    # **대표님이 이미 뺀 장면은 후보가 아니다.** 뺀 장면을 고르면 숏폼이 그
+    # 길이만큼 자리를 내주는데 `composition_plan`이 그 클립을 버려서, 숏폼
+    # 한가운데에 죽은 시간이 생긴다. 안내문의 "전체 N개"도 여기서 함께 줄어든다.
     ordered = [
-        segment for segment in segments if str(segment.get("segment_id") or "").strip()
+        segment
+        for segment in segments
+        if str(segment.get("segment_id") or "").strip()
+        and str(segment.get("cut_action") or "keep") != "remove"
     ]
     if not ordered:
         return ShortFormScenePick(
@@ -277,10 +293,24 @@ def pick_short_form_scenes(
     )
     if read >= len(ordered):
         notice = "유진이 전체 장면을 읽고 숏폼에 넣을 장면을 골랐어요."
-    else:
+    elif len(candidates) >= len(ordered):
+        # 추리기를 **안 한** 판이다(장면이 상한 이하). 덜 읽은 이유는 추리기가
+        # 아니라 한 묶음이 실패한 것이므로 "추렸다"고 말하면 틀린 문장이다.
+        notice = (
+            f"유진이 장면 {read}개를 읽고 숏폼에 넣을 장면을 골랐어요"
+            f"(전체 {len(ordered)}개). 나머지 장면은 확인하지 못했어요."
+        )
+    elif read >= len(candidates):
         notice = (
             f"유진이 영상 전체에서 고르게 추린 장면 {read}개를 읽고 숏폼에 넣을 장면을 "
             f"골랐어요(전체 {len(ordered)}개)."
+        )
+    else:
+        # 추리기도 했고 그중 일부 묶음도 실패한 경우. 둘 다 말한다.
+        notice = (
+            f"유진이 영상 전체에서 고르게 추린 장면 {len(candidates)}개 중 {read}개를 읽고 "
+            f"숏폼에 넣을 장면을 골랐어요(전체 {len(ordered)}개). "
+            "나머지 장면은 확인하지 못했어요."
         )
     return ShortFormScenePick(
         segment_ids=segment_ids,

@@ -145,7 +145,17 @@ class OutputVariantMixin:
         # 넘어온 목록이라도 지금 판에 없는 장면은 버린다 -- `OutputVariant`가
         # 마스터 부분집합을 요구한다.
         picked = tuple(segment_id for segment_id in picked if segment_id in master_ids)
-        selected_segment_ids = picked or select_highlight_segment_ids(master_segments) or None
+        # 대비책도 **대표님이 이미 뺀 장면은 고르지 않는다.** 뺀 장면을 고르면
+        # 숏폼이 그 길이만큼 자리를 내주는데 합성이 그 클립을 버려서 죽은 시간이
+        # 된다(`materialize_variant`가 마지막 그물이지만 여기서 먼저 막는다).
+        playable_master_segments = [
+            segment
+            for segment in master_segments
+            if str(segment.get("cut_action") or "keep") != "remove"
+        ]
+        selected_segment_ids = (
+            picked or select_highlight_segment_ids(playable_master_segments) or None
+        )
         variant = OutputVariant(
             variant_id=variant_id or f"variant-{uuid.uuid4().hex}",
             kind="vertical_highlight",

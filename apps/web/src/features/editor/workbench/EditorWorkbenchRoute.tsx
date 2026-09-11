@@ -271,6 +271,13 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
   const [refreshToken, setRefreshToken] = useState(0);
   const [state, setState] = useState<Readonly<{ key: string; view: EditorViewModel | null; session: EditorSessionSnapshot | null; error: string | null }>>({ key: requestKey, view: null, session: null, error: sessionId ? null : "편집 세션을 찾을 수 없어요. 다시 열어 주세요." });
   const [variants, setVariants] = useState<VariantState>({ key: requestKey, items: [], message: null, busy: false });
+  // 유진이 숏폼 장면을 바꾸면 서버에서 그 모양의 버전이 올라가는데, 목록 effect가
+  // `refreshToken`만 보고 있어서 화면은 낡은 버전을 들고 있었다. 그러면
+  // `전체 장면으로 되돌리기`가 낡은 버전을 보내 409로 막힌다 -- 유진 편집의 유일한
+  // 안전장치가 되돌리기인데 그게 깨진 것이다. `refreshToken`은 **정확 미리보기가
+  // 성공할 때만, 그리고 짧은 영상에서만** 올라가므로 기댈 수 없다. 아래 전환 추천이
+  // 같은 병을 겪고 의존값을 바꾼 것과 같은 처방이다.
+  const [variantRefresh, setVariantRefresh] = useState<{ token: number; notice: string | null }>({ token: 0, notice: null });
   const [transitionSuggestions, setTransitionSuggestions] = useState<Readonly<{ key: string; items: readonly SceneTransitionSuggestion[] }>>({ key: requestKey, items: [] });
   const [assets, setAssets] = useState<AssetState>({ key: requestKey, brollAssets: [], libraryAssets: [], libraryImageAssets: [], error: null });
   /** 편집기 안에서 미디어를 더하면 목록을 다시 읽는다. 더한 것이 바로 안 보이면
@@ -341,6 +348,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     partialInFlight.current = false;
     variantMutationInFlight.current = false;
     setVariants({ key: requestKey, items: [], message: null, busy: false });
+    setVariantRefresh({ token: 0, notice: null });
     mutationInFlight.current = false;
     setMutation({ isSaving: false });
     setDirector(createDirectorState(requestKey, sessionId));
@@ -429,12 +437,12 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const isCurrent = () => active && variantOperationId.current === operationId && routeEpoch.current.key === requestKey;
     void api.listOutputVariants(projectId, sessionId).then((result) => {
       if (!isCurrent()) return;
-      setVariants({ key: requestKey, items: result.variants, message: null, busy: false });
+      setVariants({ key: requestKey, items: result.variants, message: variantRefresh.notice, busy: false });
     }).catch(() => {
       if (isCurrent()) setVariants({ key: requestKey, items: [], message: "출력 변형 서버 상태를 불러오지 못했어요.", busy: false });
     });
     return () => { active = false; };
-  }, [projectId, requestKey, sessionId, refreshToken]);
+  }, [projectId, requestKey, sessionId, refreshToken, variantRefresh]);
   useEffect(() => {
     if (!sessionId) {
       setTransitionSuggestions({ key: requestKey, items: [] });
@@ -1335,12 +1343,14 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const operationId = variantOperationId.current + 1;
     variantOperationId.current = operationId;
     const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
-    setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하는 중이에요.", busy: true } : current);
+    setVariants((current) => current.key === requestKey ? { ...current, message: "내보낼 모양을 준비하는 중이에요.", busy: true } : current);
     try {
       const result = await api.materializeOutputVariant(projectId, variant.variant_id, { expected_master_session_revision: variant.source_session_revision });
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: `출력 변형을 준비했어요. ${result.materialization.timeline_id}`, busy: false } : current);
+      // 내부 식별자(`timeline_id`)를 화면에 내보내지 않는다. 대표님이 그것으로
+      // 할 수 있는 일이 없고, 계획서가 금지한 개발 용어다.
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "내보낼 모양을 준비했어요.", busy: false } : current);
     } catch {
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "출력 변형을 준비하지 못했어요. 충돌과 최신 상태를 확인해 주세요.", busy: false } : current);
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "내보낼 모양을 준비하지 못했어요. 최신 상태를 다시 확인해 주세요.", busy: false } : current);
     } finally {
       if (isCurrent()) variantMutationInFlight.current = false;
     }
@@ -1351,7 +1361,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     const operationId = variantOperationId.current + 1;
     variantOperationId.current = operationId;
     const isCurrent = () => routeEpoch.current.key === requestKey && variantOperationId.current === operationId;
-    setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만드는 중이에요.", busy: true } : current);
+    setVariants((current) => current.key === requestKey ? { ...current, message: "숏폼을 만드는 중이에요.", busy: true } : current);
     try {
       const result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
       // **누가 골랐는지를 서버가 말해 준다**(2026-09-11). 유진이 골랐을 때와
@@ -1360,7 +1370,7 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
       const notice = result.scene_pick?.notice ?? "자막이 많은 장면 위주로 자동으로 골랐어요.";
       if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: `숏폼을 만들었어요. ${notice} 마음에 안 들면 전체 장면으로 되돌릴 수 있어요.`, busy: false } : current);
     } catch {
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만들지 못했어요.", busy: false } : current);
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "숏폼을 만들지 못했어요.", busy: false } : current);
     } finally {
       if (isCurrent()) variantMutationInFlight.current = false;
     }
@@ -2148,6 +2158,14 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
             await api.batchApplyDirectorProposal(projectId, proposalId, { candidate_ids: [...candidateIds], expected_revision: currentRevision });
           }
           if (isCurrentApply()) {
+            if (selectedYujinCandidate && isActionableYujinVariantCandidate(selectedYujinCandidate)) {
+              // 서버가 그 모양의 버전을 올렸으니 목록을 **다시 읽어야** 한다.
+              // 안 읽으면 `전체 장면으로 되돌리기`가 낡은 버전을 보내 막힌다.
+              setVariantRefresh((current) => ({
+                token: current.token + 1,
+                notice: yujinSceneChangeNotice(selectedYujinCandidate),
+              }));
+            }
             // **여기서만 완료로 적는다.** 실패는 catch로 빠지므로 이 줄에 왔다는
             // 것 자체가 성공이다 -- 성공/실패를 따로 판단하지 않는다.
             const completionEntry = buildCompletionEntry(
@@ -2544,6 +2562,25 @@ function isActionableYujinCandidate(candidate: DirectorCandidate) {
   return isActionableYujinVariantCandidate(candidate)
     || isActionableYujinMediaCandidate(candidate)
     || isActionableYujinB4Candidate(candidate);
+}
+
+export function yujinSceneChangeNotice(candidate: DirectorCandidate) {
+  // **채팅으로 고를 때 유진은 판 전체를 보지 않는다.** 단추 경로는 영상 전
+  // 구간에서 고르게 추린 장면을 읽고 그 수를 말해 주지만, 채팅 경로는 유진에게
+  // 보낸 창작 맥락에 담긴 장면만 본다. 몇 개 중 몇 개를 봤는지 말하지 않으면
+  // 대표님이 이것을 전 구간 판단으로 읽게 된다.
+  const base = "유진이 말한 대로 숏폼에 넣을 장면을 바꿨어요.";
+  const undo = "마음에 안 들면 전체 장면으로 되돌릴 수 있어요.";
+  const metadata = candidate.canonical_metadata ?? {};
+  const read = metadata.scenes_read_by_yujin;
+  const total = metadata.scenes_total;
+  if (typeof read !== "number" || typeof total !== "number" || read <= 0 || total <= read) {
+    return `${base} ${undo}`;
+  }
+  return (
+    `${base} 이번에는 유진이 장면 ${total}개 중 ${read}개만 보고 골랐어요. `
+    + `영상 전 구간에서 고르게 보고 고른 결과를 원하면 숏폼 만들기 단추를 써 주세요. ${undo}`
+  );
 }
 
 function isActionableYujinVariantCandidate(candidate: DirectorCandidate) {

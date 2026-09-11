@@ -48,6 +48,14 @@ def test_variant_model_is_strict_and_accepts_only_render_overrides() -> None:
 @pytest.mark.parametrize("kind", ["horizontal", "vertical_full", "vertical_highlight"])
 def test_all_supported_variant_kinds_materialize_with_master_identity(kind: str) -> None:
     variant = _variant(kind)
+    if kind == "vertical_highlight":
+        # 숏폼은 장면 목록 없이는 만들어지지 않는다 -- 목록이 없으면 원본
+        # 전체 길이로 조용히 나가기 때문이다. 신원 확인은 목록을 채워서 한다.
+        variant = apply_variant_patch(
+            variant,
+            {"selected_segment_ids": ["seg-a", "seg-b", "seg-c"]},
+            expected_variant_revision=3,
+        ).model_copy(update={"variant_revision": 3})
 
     materialized = materialize_variant(variant, _master_segments())
 
@@ -336,6 +344,59 @@ def test_reordered_short_form_picks_are_laid_out_in_the_chosen_order() -> None:
     assert [
         (item["segment_id"], item["start_sec"], item["end_sec"]) for item in materialized.segments
     ] == [("seg-c", 0.0, 5.0), ("seg-a", 5.0, 10.0)]
+
+
+def test_a_scene_the_owner_cut_never_takes_time_in_the_short_form() -> None:
+    """뺀 장면이 목록에 들어와도 **자리를 내주지 않는다.**
+
+    `composition_plan`이 `cut_action="remove"` 클립을 버리므로, 자리만 내주면
+    그 길이만큼 숏폼 한가운데에 죽은 시간이 생긴다.
+    """
+    master = [
+        {"segment_id": "seg-a", "start_sec": 0.0, "end_sec": 5.0},
+        {"segment_id": "seg-b", "start_sec": 5.0, "end_sec": 10.0, "cut_action": "remove"},
+        {"segment_id": "seg-c", "start_sec": 10.0, "end_sec": 15.0},
+    ]
+    variant = apply_variant_patch(
+        _variant("vertical_highlight"),
+        {"selected_segment_ids": ["seg-a", "seg-b", "seg-c"]},
+        expected_variant_revision=3,
+    )
+
+    materialized = materialize_variant(variant, master)
+
+    assert [
+        (item["segment_id"], item["start_sec"], item["end_sec"]) for item in materialized.segments
+    ] == [("seg-a", 0.0, 5.0), ("seg-c", 5.0, 10.0)]
+
+
+def test_a_short_form_with_no_scene_list_is_refused_instead_of_running_full_length() -> None:
+    """장면 목록이 없는 숏폼은 **조용히 원본 전체 길이로 나가면 안 된다.**
+
+    옛 변형본 행은 `selected_segment_ids`가 비어 있다. 그대로 두면 "숏폼"이
+    원본과 같은 길이로 나오고 아무도 그 사실을 말하지 않는다.
+    """
+    with pytest.raises(VariantInvariantError, match="vertical_highlight_missing_selected_segments"):
+        materialize_variant(_variant("vertical_highlight"), _master_segments())
+
+
+def test_a_short_form_whose_every_picked_scene_was_cut_is_refused() -> None:
+    master = [{"segment_id": "seg-a", "start_sec": 0.0, "end_sec": 5.0, "cut_action": "remove"}]
+    variant = apply_variant_patch(
+        OutputVariant(
+            variant_id="variant-short",
+            kind="vertical_highlight",
+            source_session_id="session-1",
+            source_session_revision=7,
+            variant_revision=3,
+            master_segment_ids=["seg-a"],
+        ),
+        {"selected_segment_ids": ["seg-a"]},
+        expected_variant_revision=3,
+    )
+
+    with pytest.raises(VariantInvariantError, match="short_form_has_no_playable_segment"):
+        materialize_variant(variant, master)
 
 
 @pytest.mark.parametrize("kind", ["horizontal", "vertical_full"])

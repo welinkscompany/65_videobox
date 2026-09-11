@@ -160,6 +160,10 @@ class GatewayCreatorContext(_StrictModel):
     selected_script_id: str | None = Field(default=None, max_length=256)
     selected_segment_id: str | None = Field(default=None, max_length=256)
     segment_summaries: tuple[SegmentSummary, ...] = Field(max_length=32)
+    #: 판의 전체 장면 수. `segment_summaries`가 32개에서 잘리므로 **유진이 본 수와
+    #: 판의 수는 다르다.** 이 칸을 여기 안 더하면 `extra="forbid"`가 창작 context를
+    #: 통째로 422로 막는다(도메인 모델에만 더해 놓으면 그렇게 된다).
+    segment_total: int = Field(default=0, ge=0, strict=True)
     media_candidates: tuple[MediaCandidateSummary, ...] = Field(max_length=48)
     approved_tts_candidates: tuple[ApprovedTtsCandidateSummary, ...] = Field(
         default=(),

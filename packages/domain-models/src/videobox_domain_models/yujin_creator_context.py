@@ -124,6 +124,11 @@ class YujinCreatorContext(_StrictReadModel):
     selected_script_id: str | None = Field(default=None, max_length=256)
     selected_segment_id: str | None = Field(default=None, max_length=256)
     segment_summaries: tuple[SegmentSummary, ...] = Field(max_length=32)
+    #: 판에 실제로 있는 장면 수. `segment_summaries`는 컨텍스트 예산 때문에 32개에서
+    #: 잘리므로, **유진이 본 장면 수와 판의 장면 수는 다르다.** 그 차이를 싣지
+    #: 않으면 화면이 "유진이 골랐어요"라고만 말하고 유진이 앞부분만 봤다는 사실을
+    #: 아무도 모른다. 기본값 0은 이 값을 안 채운 옛 호출자를 위한 것이다.
+    segment_total: int = Field(default=0, ge=0)
     media_candidates: tuple[MediaCandidateSummary, ...] = Field(max_length=48)
     approved_tts_candidates: tuple[ApprovedTtsCandidateSummary, ...] = Field(
         default=(),

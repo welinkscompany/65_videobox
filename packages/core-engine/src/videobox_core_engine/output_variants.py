@@ -296,12 +296,33 @@ def materialize_variant(
         if ids != variant.master_segment_ids:
             raise VariantInvariantError("vertical_full_segment_order_or_membership_changed")
 
-    if variant.kind == "vertical_highlight" and variant.selected_segment_ids is not None:
-        by_id = {segment_id: segment for segment_id, segment in zip(ids, segments)}
-        missing = set(variant.selected_segment_ids) - set(by_id)
-        if missing:
-            raise VariantInvariantError("selected_segment_not_in_master")
-        segments = tuple(by_id[segment_id] for segment_id in variant.selected_segment_ids)
+    if variant.kind == "vertical_highlight":
+        if variant.selected_segment_ids is None:
+            # **조용히 원본 전체 길이로 내보내지 않는다.** 옛 변형본 행은 이 칸이
+            # 비어 있고, 예전에는 그럴 때 마스터를 그대로 써서 "숏폼"이 원본과
+            # 같은 길이로 나왔다 -- 그리고 아무도 그 사실을 말하지 않았다.
+            # 빈 판(장면 0개)은 속일 것이 없으니 그대로 통과시킨다.
+            if segments:
+                raise VariantInvariantError("vertical_highlight_missing_selected_segments")
+        else:
+            by_id = {segment_id: segment for segment_id, segment in zip(ids, segments)}
+            missing = set(variant.selected_segment_ids) - set(by_id)
+            if missing:
+                raise VariantInvariantError("selected_segment_not_in_master")
+            segments = tuple(by_id[segment_id] for segment_id in variant.selected_segment_ids)
+            # **뺀 장면에는 자리를 내주지 않는다.** `composition_plan`이
+            # `cut_action="remove"` 클립을 버리므로, 자리만 내주면 그 길이만큼
+            # 숏폼 한가운데에 죽은 시간이 생긴다. 고르는 쪽에서도 막지만
+            # (`short_form_scene_pick`), 채팅으로 고른 목록과 옛 변형본 행은
+            # 그 문을 지나지 않는다 -- 구멍이 실제로 생기는 자리는 여기다.
+            playable = tuple(
+                segment
+                for segment in segments
+                if str(segment.get("cut_action") or "keep") != "remove"
+            )
+            if not playable:
+                raise VariantInvariantError("short_form_has_no_playable_segment")
+            segments = playable
         # **고른 장면만 남기고 끝이 아니다 -- 앞으로 당겨 이어 붙여야 한다.**
         #
         # 2026-09-11 실물 측정(project-e6c75c36): 유진이 3장면 중 2개를 골랐는데

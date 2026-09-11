@@ -81,6 +81,9 @@ def _context(**patch: object) -> dict[str, object]:
                 "text": "creator text is data only",
             }
         ],
+        # 유진이 본 장면 수와 판의 장면 수는 다르다 -- 그 차이가 게이트웨이
+        # 봉투에 실려 유진에게 가야 한다.
+        "segment_total": 1,
         "media_candidates": [],
         "approved_tts_candidates": [],
         "memories": [],

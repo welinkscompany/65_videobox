@@ -903,6 +903,20 @@ def _project(
                         if operation.kind == "output_variant"
                         else {}
                     ),
+                    # **채팅으로 숏폼 장면을 고를 때 유진은 판 전체를 보지 않는다.**
+                    # 단추 경로(`short_form_scene_pick`)는 48개를 추려 읽고 그 수를
+                    # 화면에 말하지만, 채팅 경로는 창작 context의 `segment_summaries`
+                    # 만 보고 그건 `MAX_SEGMENTS`에서 잘린다. 몇 개를 봤는지 여기서
+                    # 실어 보내지 않으면 화면이 그 사실을 말할 방법이 없다.
+                    **(
+                        {
+                            "scenes_read_by_yujin": len(context.segment_summaries),
+                            "scenes_total": context.segment_total,
+                        }
+                        if operation.kind == "output_variant"
+                        and getattr(operation.parameters, "action", None) == "select_segments"
+                        else {}
+                    ),
                 },
         )
         )

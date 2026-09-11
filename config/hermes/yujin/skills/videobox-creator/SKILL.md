@@ -102,6 +102,13 @@ proposal의 필드는 정확히 `proposal_id`, `base_revision`, `title`, `ration
 `variant_kind`가 `horizontal`이나 `vertical_full`이면 장면을 고르지 않고
 지금 고를 수 없다고 답합니다.
 
+**본 장면이 판의 일부일 때는 반드시 그 사실을 말합니다.** context의
+`segment_total`이 `segment_summaries`의 개수보다 크면, 이 대화에서 읽은 장면은
+판의 **일부만**입니다. 그럴 때는 장면을 골라 주되 사람이 읽는 답변에 몇 개 중
+몇 개를 읽고 골랐는지 적고, 영상 전 구간에서 고르게 보고 판단한 결과를 원하면
+편집기의 숏폼 만들기 단추를 쓰라고 안내합니다. 읽지 않은 장면을 읽은 것처럼
+말하지 않습니다.
+
 `broll`, `bgm`, `sfx`, `caption`, `voice`, `overlay`, `output_variant` control
 mode는 반드시 `recommendation_only`, `output_check`는 반드시 `read_only`인
 현재 context에서만 작성합니다. target에 다른 kind의 `script_id`, `segment_id`,

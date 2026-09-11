@@ -273,3 +273,111 @@ def test_yujin_reading_and_finding_nothing_is_not_the_same_as_being_off() -> Non
     assert result.fallback_reason == "yujin_found_nothing"
     assert "읽어 봤지만" in result.notice
     assert "유진이 고른" not in result.notice
+
+
+def test_a_scene_the_owner_already_cut_is_never_shown_to_yujin_or_picked() -> None:
+    """뺀 장면을 고르면 숏폼 안에 **그 길이만큼 죽은 시간**이 생긴다.
+
+    `composition_plan`이 `cut_action="remove"` 클립을 버리는데 자리는 이미
+    내줬기 때문이다. 고르는 쪽에서 애초에 안 보여 주는 것이 맞다.
+    """
+
+    segments = [
+        {
+            "segment_id": "seg-cut",
+            "caption_text": "매출이 3배 늘었어요",
+            "start_sec": 0.0,
+            "end_sec": 5.0,
+            "cut_action": "remove",
+        },
+        {
+            "segment_id": "seg-keep",
+            "caption_text": "결론은 이겁니다",
+            "start_sec": 5.0,
+            "end_sec": 10.0,
+        },
+    ]
+    runtime = _JudgeRuntime()
+
+    result = pick_short_form_scenes(segments, project_id="proj-1", runtime=runtime)
+
+    assert "seg-cut" not in result.segment_ids
+    assert "매출이 3배 늘었어요" not in runtime.shown_captions
+    # 안내문의 "전체 N개"도 뺀 장면을 세면 안 된다.
+    assert result.scenes_total == 1
+
+
+def test_a_cut_scene_is_not_picked_by_the_caption_density_fallback_either() -> None:
+    segments = [
+        {
+            "segment_id": "seg-cut",
+            "caption_text": "아주 빽빽하게 말이 많은 장면입니다 정말로",
+            "start_sec": 0.0,
+            "end_sec": 5.0,
+            "cut_action": "remove",
+        },
+        {
+            "segment_id": "seg-keep",
+            "caption_text": "남은 장면",
+            "start_sec": 5.0,
+            "end_sec": 10.0,
+        },
+    ]
+
+    result = pick_short_form_scenes(segments, project_id="proj-1", runtime=None)
+
+    assert "seg-cut" not in result.segment_ids
+    assert result.scenes_total == 1
+
+
+def test_a_fallback_that_kept_every_scene_does_not_say_it_chose() -> None:
+    """자막이 하나도 없으면 밀도 대비책은 **전체를 그대로 돌려준다**.
+
+    선택 = 전부라 하나도 안 짧아지는데 화면이 "자막이 많은 장면 위주로
+    골랐어요"라고 말하면 거짓이다. 안 골랐으면 골랐다고 말하지 않는다.
+    """
+
+    segments = [
+        {"segment_id": "seg-1", "caption_text": "", "start_sec": 0.0, "end_sec": 5.0},
+        {"segment_id": "seg-2", "caption_text": "", "start_sec": 5.0, "end_sec": 10.0},
+    ]
+
+    result = pick_short_form_scenes(segments, project_id="proj-1", runtime=None)
+
+    assert result.segment_ids == ("seg-1", "seg-2")
+    assert "골랐어요" not in result.notice
+    assert "그대로" in result.notice
+
+
+def test_a_failed_batch_is_not_described_as_a_shortlist() -> None:
+    """48개 이하면 추리기를 **안 한다.** 한 묶음이 실패해 덜 읽은 것뿐이다."""
+
+    class _FirstBatchFails:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_structured(self, *, project_id, task_type, prompt, response_schema):
+            self.calls += 1
+            if self.calls == 1:
+                raise LLMProviderError(provider_name="local_qwen", message="한 묶음 실패")
+            output = {
+                "schema_version": "videobox.short-form-scene-pick.v1",
+                "picks": [{"scene": 1, "worth": 5, "why": "conclusion"}],
+            }
+            return StructuredLLMResponse(
+                provider_name="local_qwen",
+                model_name="qwen3-35b",
+                output_data=output,
+                raw_text="{}",
+                metadata={},
+            )
+
+    segments = _long_form(count=2 * JUDGE_BATCH_SIZE)
+    assert len(segments) <= MAX_JUDGED_SCENES
+
+    result = pick_short_form_scenes(segments, project_id="proj-1", runtime=_FirstBatchFails())
+
+    assert result.judged_by == "yujin"
+    assert result.scenes_read_by_yujin == JUDGE_BATCH_SIZE
+    assert "추린" not in result.notice
+    assert "확인하지 못했어요" in result.notice

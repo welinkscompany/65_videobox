@@ -239,6 +239,10 @@ def test_builder_is_bounded_deterministic_and_contains_only_allowlisted_scalars(
     assert first.selected_script_id == "script-a"
     assert first.selected_segment_id == "segment-03"
     assert len(first.segment_summaries) == 32
+    # **유진이 본 장면 수와 판의 전체 장면 수는 다르다.** 이 차이를 안 실어
+    # 보내면 화면이 "유진이 골랐어요"라고만 말하고, 유진이 앞부분만 봤다는
+    # 사실을 아무도 모른다.
+    assert first.segment_total == 40
     assert len(first.media_candidates) <= 48
     assert first.selected_segment_id in {
         item.segment_id for item in first.segment_summaries
