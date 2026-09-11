@@ -597,6 +597,44 @@ describe("OutputsPage", () => {
     );
   });
 
+  // task-2-brief.md: `확인과 내보내기` 화면이 완성본을 재생만 시키고 파일로
+  // 내려주지 않았다 -- owner가 이 화면 하나로 끝내지 못하고 편집기의 이름
+  // 없는 아이콘 단추를 다시 찾아야 했다(`EditorWorkbench.tsx:659`).
+  it("완성본이 최신이면 영상 파일을 내려받는 자리가 있다", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-current-timeline", timeline_id: "timeline-a", export_type: "final_render", file_uri: "local://final-current.mp4", status: "succeeded", source_session_id: "session-a", source_session_revision: 7, is_current: true,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByLabelText("완성본 재생")).toBeVisible();
+    expect(screen.getByRole("link", { name: "완성본 영상 내려받기" })).toHaveAttribute(
+      "href", "/api/projects/project_a/final-renders/final-current-timeline/content",
+    );
+  });
+
+  // `ExportPopover`는 낡은 완성본을 조용히 안 준다 -- 링크를 감추고 다시
+  // 만들라고 말한다(`ExportPopover.tsx:67-70`). 한 화면(내보내기 팝오버 뒤에
+  // 연결된 이 화면)이 반대로 말하면 owner가 낡은 파일을 실수로 받아 간다.
+  it("완성본이 낡았으면 영상 내려받기를 감춘다", async () => {
+    stubCanonicalSubtitleApi({ jobs: [activeTimelineJob, currentFinalJob] as never });
+    vi.spyOn(api, "getFinalRender").mockResolvedValue({
+      job_id: currentFinalJob.job_id, status: "succeeded", render: {
+        export_id: "final-b", timeline_id: "timeline-a", export_type: "final_render",
+        file_uri: "local://final-b.mp4", status: "succeeded",
+        source_session_id: "session-b", source_session_revision: 7, is_current: true,
+      },
+    });
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+
+    expect(await screen.findByText("완성본이 최신 편집본과 달라요.")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "완성본 영상 내려받기" })).not.toBeInTheDocument();
+  });
+
   it("reconciles a rejected final request from authoritative current state before showing an error", async () => {
     stubCanonicalSubtitleApi();
     vi.mocked(api.listJobs)

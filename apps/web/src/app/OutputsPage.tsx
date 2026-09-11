@@ -1082,6 +1082,13 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           {timelineJob && !canRenderSubtitle ? <p>검토 승인과 확인할 항목을 모두 마친 뒤 완성본을 만들 수 있어요.</p> : null}
           {currentFinal && finalRender.render?.has_sound === false ? <p>완성본에 소리가 들어 있지 않아요. 내레이션이나 음악을 넣고 다시 만들어 주세요.</p> : null}
           {currentFinal ? <video className="vb-output-video" aria-label="완성본 재생" controls preload="metadata" src={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>이 브라우저에서는 완성본을 재생할 수 없어요.</video> : null}
+          {/* task-2-brief.md: 이 화면이 완성본을 재생만 시키고 파일로 내려주지
+              않아서, owner가 편집기의 이름 없는 아이콘 단추를 다시 찾아야
+              했다. `currentFinal`은 `ExportPopover`와 같은 규칙
+              (`isMasterFinalRenderCurrent`, masterFinalRender.ts)으로 이미
+              낡음을 걸렀다 -- 낡았으면(`staleFinal`) 이 링크를 안 내서
+              `ExportPopover`가 낡은 파일을 감추는 것과 같은 말을 한다. */}
+          {currentFinal ? <a className="vb-action-link" download href={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/content`}>완성본 영상 내려받기</a> : null}
           {/* Vrew의 "다양한 내보내기"(#14) 참고, owner 요청 2026-08-28: "오디오만...
               내보내기". 완성본 mp4에서 그때그때 오디오만 뽑는다(새 렌더 아님). */}
           {currentFinal ? <a className="vb-action-link" download href={`/api/projects/${encodeURIComponent(projectId)}/final-renders/${encodeURIComponent(finalRender.job_id)}/audio-content`}>오디오만 내려받기</a> : null}
