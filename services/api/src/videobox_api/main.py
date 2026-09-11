@@ -1512,6 +1512,11 @@ def create_app(
     app.include_router(build_review_router(orchestrator))
     app.include_router(build_outputs_router(orchestrator))
     app.include_router(build_preview_shares_router(orchestrator))
-    app.include_router(build_output_variants_router(store))
+    # 숏폼에 넣을 장면을 유진이 고르려면 라우터에 런타임이 있어야 한다
+    # (`short_form_scene_pick`, 2026-09-11). 유진이 대답을 못 하면 자막 밀도로
+    # 내려가되 **그 사실을 응답에 실어** 화면 문구가 갈린다.
+    app.include_router(
+        build_output_variants_router(store, yujin_runtime_service=runtime_service)
+    )
 
     return app

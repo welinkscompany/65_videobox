@@ -117,6 +117,7 @@ class OutputVariantMixin:
         source_session_id: str,
         kind: str,
         variant_id: str | None = None,
+        selected_segment_ids: Sequence[str] | None = None,
     ) -> dict[str, Any]:
         if kind != "vertical_highlight":
             raise ValueError("only_vertical_highlight_can_be_created_explicitly")
@@ -129,9 +130,22 @@ class OutputVariantMixin:
         # **자동 하이라이트(owner 결정 2026-08-28).** 예전에는 여기서
         # `selected_segment_ids`를 비워 뒀고, 그 결과 `materialize_variant`가
         # 전체 장면을 그대로 썼다 -- "하이라이트"라는 이름과 달리 원본 전체였다.
-        # 자막 밀도 휴리스틱으로 바로 골라 준다(`highlight_scoring.py` 참고 --
-        # AI 참여도 예측이 아니라는 한계를 그 파일에 적어 뒀다).
-        selected_segment_ids = select_highlight_segment_ids(master_segments) or None
+        #
+        # **고르는 일은 이제 저장소 밖에서 한다**(2026-09-11). 마케팅용 숏폼
+        # 판단에는 유진이 필요하고 저장소에는 런타임이 없다 -- 부르는 쪽
+        # (`routers/output_variants.py`)이 `short_form_scene_pick`으로 골라
+        # 넘긴다. 여기 남은 자막 밀도 휴리스틱은 **아무도 안 넘겨줬을 때의
+        # 대비책**이고, 그 사실은 라우터가 화면에 말해 준다.
+        picked = tuple(
+            str(segment_id).strip()
+            for segment_id in (selected_segment_ids or ())
+            if str(segment_id).strip()
+        )
+        master_ids = {str(segment["segment_id"]) for segment in master_segments}
+        # 넘어온 목록이라도 지금 판에 없는 장면은 버린다 -- `OutputVariant`가
+        # 마스터 부분집합을 요구한다.
+        picked = tuple(segment_id for segment_id in picked if segment_id in master_ids)
+        selected_segment_ids = picked or select_highlight_segment_ids(master_segments) or None
         variant = OutputVariant(
             variant_id=variant_id or f"variant-{uuid.uuid4().hex}",
             kind="vertical_highlight",

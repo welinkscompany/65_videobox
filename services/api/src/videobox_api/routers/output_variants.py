@@ -19,6 +19,7 @@ from videobox_core_engine.output_variants import (
     rebase_variant,
     variant_timeline_needs_rebuild,
 )
+from videobox_core_engine.short_form_scene_pick import pick_short_form_scenes
 from videobox_domain_models.output_variants import OutputVariant
 from videobox_storage.local_project_store import (
     EditingSessionRevisionConflict,
@@ -79,7 +80,9 @@ def _sync_approved_variant_review(
     )
 
 
-def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
+def build_output_variants_router(
+    store: LocalProjectStore, *, yujin_runtime_service: Any | None = None
+) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/projects/{project_id}/output-variants")
@@ -99,13 +102,36 @@ def build_output_variants_router(store: LocalProjectStore) -> APIRouter:
     )
     def create_variant(project_id: str, request: OutputVariantCreateRequest) -> dict[str, object]:
         try:
+            # **숏폼에 넣을 장면은 유진이 고른다**(2026-09-11). 저장소에는 런타임이
+            # 없어서 고르는 일을 여기서 한다. 누가 골랐는지(`judged_by`)를 응답에
+            # 같이 실어 보내는 이유는 화면 문구 때문이다 -- 자막 밀도로 고른 결과를
+            # "유진이 골랐어요"라고 말하면 안 된다.
+            session = store.get_editing_session(
+                project_id=project_id, session_id=request.source_session_id
+            )
+            pick = pick_short_form_scenes(
+                [
+                    segment
+                    for segment in session.get("segments", [])
+                    if isinstance(segment, dict)
+                ],
+                project_id=project_id,
+                runtime=yujin_runtime_service,
+            )
             return {
                 "variant": store.create_output_variant(
                     project_id=project_id,
                     source_session_id=request.source_session_id,
                     kind=request.kind,
                     variant_id=request.variant_id,
-                )
+                    selected_segment_ids=pick.segment_ids,
+                ),
+                "scene_pick": {
+                    "judged_by": pick.judged_by,
+                    "notice": pick.notice,
+                    "scenes_total": pick.scenes_total,
+                    "scenes_read_by_yujin": pick.scenes_read_by_yujin,
+                },
             }
         except Exception as error:
             _raise_variant_error(error)

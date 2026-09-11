@@ -1354,7 +1354,11 @@ export function EditorWorkbenchRoute({ projectId, sessionId, requestedSegmentId 
     setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만드는 중이에요.", busy: true } : current);
     try {
       const result = await api.createOutputVariant(projectId, { source_session_id: sessionId, kind: "vertical_highlight" });
-      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: "하이라이트 변형을 만들었어요. 캡션이 많은 장면 위주로 자동으로 골랐어요 -- 마음에 안 들면 전체 장면으로 되돌릴 수 있어요.", busy: false } : current);
+      // **누가 골랐는지를 서버가 말해 준다**(2026-09-11). 유진이 골랐을 때와
+      // 자막 밀도로 내려갔을 때의 문구가 달라야 한다 -- 글자 수로 고른 결과를
+      // 유진의 판단이라고 말하는 것이 이 기능에서 제일 나쁜 결과다.
+      const notice = result.scene_pick?.notice ?? "자막이 많은 장면 위주로 자동으로 골랐어요.";
+      if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, items: [...current.items, result.variant], message: `숏폼을 만들었어요. ${notice} 마음에 안 들면 전체 장면으로 되돌릴 수 있어요.`, busy: false } : current);
     } catch {
       if (isCurrent()) setVariants((current) => current.key === requestKey ? { ...current, message: "하이라이트 변형을 만들지 못했어요.", busy: false } : current);
     } finally {

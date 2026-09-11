@@ -2402,8 +2402,13 @@ export const api = {
     request<{ variants: OutputVariant[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/output-variants?session_id=${encodeURIComponent(sessionId)}`,
     ),
+  /**
+   * `scene_pick`은 **누가 골랐는지**를 말한다. 유진이 못 골랐을 때는
+   * `judged_by: "caption_density"`가 오고, 그때 화면이 유진의 판단인 것처럼
+   * 말하면 안 된다(2026-09-11, `short_form_scene_pick.py`).
+   */
   createOutputVariant: (projectId: string, payload: { source_session_id: string; kind: "vertical_highlight"; variant_id?: string }) =>
-    request<{ variant: OutputVariant }>(
+    request<{ variant: OutputVariant; scene_pick?: { judged_by: "yujin" | "caption_density"; notice: string; scenes_total: number; scenes_read_by_yujin: number } }>(
       `/api/projects/${encodeURIComponent(projectId)}/output-variants`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),

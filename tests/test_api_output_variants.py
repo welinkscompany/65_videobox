@@ -1,14 +1,39 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from videobox_api.main import create_app
+from videobox_api.orchestration import LocalOnlyRuntimeService
+from videobox_core_engine.settings import LocalOpenAICompatibleRuntimeConfig
+from videobox_provider_interfaces.llm import (
+    LLMProviderError,
+    StructuredLLMRequest,
+    StructuredLLMResponse,
+)
+
+
+@dataclass
+class _OfflineProvider:
+    """유진이 꺼져 있는 상태. 시험이 기계 상태에 따라 달라지지 않게 못박는다."""
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        raise LLMProviderError(provider_name="local_qwen", message="engine off")
+
+
+def _offline_app(tmp_path: Path, *, name: str = "Output variants API"):
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(_OfflineProvider()),
+    )
+    return app
 
 
 def _client(tmp_path: Path) -> tuple[TestClient, str, dict]:
-    app = create_app(projects_root=tmp_path / "projects")
+    app = _offline_app(tmp_path)
     client = TestClient(app)
     project = client.post("/api/projects", json={"name": "Output variants API"}).json()
     session = app.state.store.save_editing_session(
@@ -56,7 +81,7 @@ def test_create_highlight_auto_selects_dense_caption_segments(tmp_path: Path) ->
     # 해줘." 전에는 만들자마자 `selected_segment_ids`가 비어 있어서 전체 장면이
     # 그대로 하이라이트가 됐다 -- 자막이 빽빽한 장면 위주로 골라서 실제로 원본보다
     # 짧아지는지 확인한다.
-    app = create_app(projects_root=tmp_path / "projects")
+    app = _offline_app(tmp_path)
     client = TestClient(app)
     project = client.post("/api/projects", json={"name": "Auto highlight"}).json()
     session = app.state.store.save_editing_session(
@@ -163,7 +188,7 @@ def test_materialize_route_gives_each_shape_its_own_canvas(tmp_path: Path) -> No
 
 
 def test_materialize_carries_current_approved_review_to_variant_timeline(tmp_path: Path) -> None:
-    app = create_app(projects_root=tmp_path / "projects")
+    app = _offline_app(tmp_path)
     client = TestClient(app)
     project = client.post("/api/projects", json={"name": "Approved variant"}).json()
     store = app.state.store
@@ -240,7 +265,7 @@ def test_patch_stale_variant_revision_does_not_mutate(tmp_path: Path) -> None:
 
 
 def test_materialize_reuses_revision_identity_and_preserves_master_tracks(tmp_path: Path) -> None:
-    app = create_app(projects_root=tmp_path / "projects")
+    app = _offline_app(tmp_path)
     client = TestClient(app)
     project = client.post("/api/projects", json={"name": "Materialization reuse"}).json()
     store = app.state.store
@@ -331,7 +356,7 @@ def test_materialize_route_rebuilds_a_cache_left_by_the_old_copy_logic(tmp_path:
 
 def _short_form_project(tmp_path: Path):
     """장면 셋짜리 프로젝트와, 그 위에 만들어진 숏폼(세로 하이라이트) 모양."""
-    app = create_app(projects_root=tmp_path / "projects")
+    app = _offline_app(tmp_path)
     client = TestClient(app)
     project = client.post("/api/projects", json={"name": "숏폼 장면 고르기"}).json()
     session = app.state.store.save_editing_session(
@@ -493,3 +518,173 @@ def test_yujin_short_form_cut_applies_through_the_real_apply_route(tmp_path: Pat
 
     assert undone.status_code == 200, undone.text
     assert undone.json()["variant"]["selected_segment_ids"] == before
+
+
+# --- 숏폼 장면 고르기: 자막 글자 수가 아니라 유진의 판단 -----------------------
+#
+# 가짜 모델은 `tests/test_api_caption_translation.py`와 같은 틀이다 -- 진짜
+# `LocalOnlyRuntimeService`에 **가짜 provider**를 끼운다. LM Studio가 떠 있든
+# 말든 결과가 같아야 하므로 시험은 절대 진짜 모델을 부르지 않는다.
+
+
+@dataclass
+class _ScenePickProvider:
+    """훅·결론·숫자를 보고 고르는 가짜 심사자. 자막 길이는 보지 않는다."""
+
+    calls: list[StructuredLLMRequest] = field(default_factory=list)
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        self.calls.append(request)
+        block = request.prompt.split("고를 장면:", 1)[1]
+        picks = []
+        for line in block.splitlines():
+            stripped = line.strip()
+            if not stripped[:1].isdigit():
+                continue
+            number_text, _, caption = stripped.partition(". ")
+            if "결론" in caption:
+                picks.append({"scene": int(number_text), "worth": 5, "why": "conclusion"})
+            elif any(character.isdigit() for character in caption):
+                picks.append({"scene": int(number_text), "worth": 4, "why": "number_or_result"})
+        output_data = {"schema_version": "videobox.short-form-scene-pick.v1", "picks": picks}
+        return StructuredLLMResponse(
+            provider_name="local_qwen",
+            model_name="Qwen3-32B",
+            output_data=output_data,
+            raw_text=json.dumps(output_data, ensure_ascii=False),
+            metadata={},
+        )
+
+
+def _runtime_factory(provider: object):
+    def factory(_: object) -> LocalOnlyRuntimeService:
+        return LocalOnlyRuntimeService(
+            local_provider=provider,  # type: ignore[arg-type]
+            local_runtime_config=LocalOpenAICompatibleRuntimeConfig(
+                enabled=True,
+                base_url="http://127.0.0.1:1234/v1",
+                model_name="Qwen3-32B",
+                timeout_seconds=42,
+            ),
+        )
+
+    return factory
+
+
+def test_create_short_form_uses_yujin_judgement_not_caption_length(tmp_path: Path) -> None:
+    """자막이 빽빽한 잡담보다 **짧아도 결론인 장면**을 고른다.
+
+    지금 기준(`len(caption_text) / duration`)이면 잡담이 이긴다. 대표님이 원한
+    것은 마케팅 판단이다 -- 훅, 결론, 숫자·결과가 나오는 대목.
+    """
+    provider = _ScenePickProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "숏폼 고르기"}).json()
+    session = app.state.store.save_editing_session(
+        project_id=project["project_id"],
+        timeline_id="timeline-source",
+        session_payload={
+            "segments": [
+                # 말은 빽빽하지만 알맹이가 없는 장면 -- 밀도로는 1등이다.
+                {"segment_id": "seg-filler", "caption_text": "그래서 뭐 아무튼 저는 그냥 이렇게 저렇게 해봤고요 네 그렇습니다 아시겠죠", "start_sec": 0.0, "end_sec": 2.0},
+                # 자막은 짧지만 결론이다.
+                {"segment_id": "seg-conclusion", "caption_text": "결론은 이겁니다", "start_sec": 2.0, "end_sec": 12.0},
+            ],
+            "history": [],
+        },
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["variant"]["selected_segment_ids"] == ["seg-conclusion"]
+    assert body["scene_pick"]["judged_by"] == "yujin"
+    assert provider.calls, "유진을 부르지도 않고 유진이 골랐다고 하면 안 된다"
+
+
+def test_when_yujin_is_off_the_screen_is_told_it_was_not_her_choice(tmp_path: Path) -> None:
+    """대비책이 **보이는** 대비책인지. 대표님이 유진의 판단이라고 믿는 결과가
+    사실은 글자 수 세기면 그게 제일 나쁘다.
+    """
+    app = _offline_app(tmp_path)
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "유진 꺼짐"}).json()
+    session = app.state.store.save_editing_session(
+        project_id=project["project_id"],
+        timeline_id="timeline-source",
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-filler", "caption_text": "그래서 뭐 아무튼 그냥 이렇게 저렇게 해봤고요 네", "start_sec": 0.0, "end_sec": 2.0},
+                {"segment_id": "seg-conclusion", "caption_text": "결론은 이겁니다", "start_sec": 2.0, "end_sec": 12.0},
+            ],
+            "history": [],
+        },
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert response.status_code == 201, response.text
+    scene_pick = response.json()["scene_pick"]
+    assert scene_pick["judged_by"] == "caption_density"
+    assert scene_pick["scenes_read_by_yujin"] == 0
+    assert "유진이 고른" not in scene_pick["notice"]
+    assert "유진이 전체 장면을 읽고" not in scene_pick["notice"]
+    assert "자막" in scene_pick["notice"]
+
+
+def test_a_long_form_does_not_take_its_short_only_from_the_opening(tmp_path: Path) -> None:
+    """243을 곱해 본다. 지금 컨테이너의 최대 장면 수는 5개라 작은 입력으로는
+    이 기능의 가장 어려운 부분이 시험에 닿지 않는다.
+    """
+    provider = _ScenePickProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "롱폼"}).json()
+    segments = []
+    for index in range(243):
+        if index == 242:
+            caption = "결론은 이겁니다"
+        elif index == 180:
+            caption = "매출이 3배 늘었어요"
+        else:
+            caption = "그래서 말인데요 " * (6 if index < 32 else 1)
+        segments.append({
+            "segment_id": f"timeline_001:{index:03d}",
+            "caption_text": caption,
+            "start_sec": float(index * 5),
+            "end_sec": float(index * 5 + 5),
+        })
+    session = app.state.store.save_editing_session(
+        project_id=project["project_id"],
+        timeline_id="timeline-source",
+        session_payload={"segments": segments, "history": []},
+    )
+
+    response = client.post(
+        f"/api/projects/{project['project_id']}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    picked = body["variant"]["selected_segment_ids"]
+    assert "timeline_001:242" in picked, "결론이 빠지면 마케팅용이 아니다"
+    assert body["scene_pick"]["judged_by"] == "yujin"
+    # 유진이 **전부** 본 것처럼 말하지 않는다.
+    assert body["scene_pick"]["scenes_total"] == 243
+    assert body["scene_pick"]["scenes_read_by_yujin"] < 243
+    assert "전체 243개" in body["scene_pick"]["notice"]

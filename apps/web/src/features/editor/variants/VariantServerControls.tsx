@@ -36,7 +36,8 @@ export function VariantServerControls({
       <Button type="button" disabled={busy} onClick={() => void onPatch(variant, { lock_fields: ["crop", "caption"] })}>크롭·캡션 잠금</Button>
       {/* **이 단추가 실제로 하는 일은 "선택을 다시 고르는 것"이 아니라 "전체
           장면으로 되돌리는 것"이다** -- `selected_segment_ids`에 마스터 전체를
-          넣는다. 자동 하이라이트(owner 결정 2026-08-28, `highlight_scoring.py`)가
+          넣는다. 자동 숏폼 고르기(owner 결정 2026-08-28, 2026-09-11부터는
+          유진이 고른다 -- `short_form_scene_pick.py`)가
           고른 결과가 마음에 안 들 때 쓰는 리셋 단추이지, 순서를 저장하는 단추가
           아니다. 이름이 실제 동작과 달라 헷갈렸던 것을 여기서 바로잡는다. */}
       {variant.kind === "vertical_highlight"
