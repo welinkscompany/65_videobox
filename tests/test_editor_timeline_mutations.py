@@ -142,6 +142,131 @@ def test_ripple_speed_refuses_an_unsupported_rate_without_mutating_the_session(r
     assert session["history"] == []
 
 
+def test_splitting_a_scene_moves_the_broll_start_to_the_split_point() -> None:
+    """긴 영상 하나를 장면마다 나눠 쓰는 길. **쪼갠 뒤 장면은 자기 순간을 가리켜야 한다.**
+
+    2026-09-12 대표님 실제 영상(494.837초) 실측에서 잡힌 결함이다. 자료실 영상을
+    장면에 깔고(`broll_override`) 장면을 94개로 쪼갰더니 **94개 전부가
+    `trim_start_sec: 0.0`**이었다 -- 렌더가 b-roll의 시작점으로 읽는 값이 그것이라,
+    나온 숏폼은 원본 맨 앞 몇 초를 열 번 반복한 영상이었다(픽셀로 확인).
+    `source_slices`·`source_offset_sec`는 정확히 옮겨지는데 렌더는 그것을 안 읽는다.
+
+    직접 선택(`segment["broll_override"]`)과 창(`media_windows`) **둘 다** 봐야
+    한다. 렌더는 직접 선택을 먼저 보고, 합치기는 창에 권한을 넘긴다.
+    """
+    from videobox_core_engine.editing_session import split_segment
+
+    session = {
+        "project_id": "project_001",
+        "timeline_id": "timeline_001",
+        "session_revision": 1,
+        "segments": [
+            {
+                "segment_id": "scene-1",
+                "caption_text": "",
+                "start_sec": 0.0,
+                "end_sec": 20.0,
+                "cut_action": "keep",
+                "review_required": False,
+                "broll_override": {
+                    "asset_id": "asset_long_video",
+                    "media_controls": {"fit": "fit", "loop": True, "trim_start_sec": 0.0},
+                },
+                "visual_overlays": [],
+                "music_override": None,
+                "sfx_override": None,
+                "tts_replacement": None,
+            }
+        ],
+        "history": [],
+        "undo_stack": [],
+        "redo_stack": [],
+    }
+
+    updated = split_segment(session=session, segment_id="scene-1", split_sec=8.0)
+    left, right = updated["segments"]
+
+    assert left["broll_override"]["media_controls"]["trim_start_sec"] == 0.0
+    assert right["broll_override"]["media_controls"]["trim_start_sec"] == 8.0
+
+    # 두 번째 쪼개기는 앞의 이동 위에 쌓인다.
+    again = split_segment(session=updated, segment_id=right["segment_id"], split_sec=14.0)
+    assert [item["broll_override"]["media_controls"]["trim_start_sec"] for item in again["segments"]] == [0.0, 8.0, 14.0]
+
+    # 창에 권한이 있는 편집본도 같이 움직인다.
+    windowed = split_segment(
+        session={
+            **session,
+            "segments": [
+                {
+                    **session["segments"][0],
+                    "broll_override": None,
+                    "media_windows": [
+                        {
+                            "caption_id": "caption-scene-1",
+                            "start_offset_sec": 0.0,
+                            "duration_sec": 20.0,
+                            "broll_override": {
+                                "asset_id": "asset_long_video",
+                                "media_controls": {"fit": "fit", "loop": True, "trim_start_sec": 0.0},
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+        segment_id="scene-1",
+        split_sec=8.0,
+    )
+    assert [
+        item["media_windows"][0]["broll_override"]["media_controls"]["trim_start_sec"]
+        for item in windowed["segments"]
+    ] == [0.0, 8.0]
+
+
+def test_dragging_a_scene_start_later_moves_its_broll_start_by_the_same_amount() -> None:
+    """경계 편집도 쪼개기와 같은 규칙을 따른다 -- 같은 논리가 두 자리에 있다."""
+    from videobox_core_engine.editing_session import set_segment_bounds
+
+    session = {
+        "project_id": "project_001",
+        "timeline_id": "timeline_001",
+        "session_revision": 1,
+        "segments": [
+            {
+                "segment_id": "scene-1",
+                "caption_text": "",
+                "start_sec": 0.0,
+                "end_sec": 20.0,
+                "cut_action": "keep",
+                "review_required": False,
+                "source_slices": [
+                    {"segment_id": "scene-1", "source_offset_sec": 0.0, "duration_sec": 20.0}
+                ],
+                "source_slice_basis": [
+                    {"segment_id": "scene-1", "source_offset_sec": 0.0, "duration_sec": 20.0}
+                ],
+                "source_slice_basis_is_proven": True,
+                "source_slice_window_start_sec": 0.0,
+                "broll_override": {
+                    "asset_id": "asset_long_video",
+                    "media_controls": {"fit": "fit", "loop": True, "trim_start_sec": 0.0},
+                },
+                "visual_overlays": [],
+                "music_override": None,
+                "sfx_override": None,
+                "tts_replacement": None,
+            }
+        ],
+        "history": [],
+        "undo_stack": [],
+        "redo_stack": [],
+    }
+
+    updated = set_segment_bounds(session=session, segment_id="scene-1", start_sec=5.0, end_sec=20.0)
+    assert updated["segments"][0]["broll_override"]["media_controls"]["trim_start_sec"] == 5.0
+
+
 def test_split_enforces_minimum_duration_and_preserves_editable_identity_and_lineage() -> None:
     from videobox_core_engine.editing_session import split_segment
 
@@ -157,9 +282,15 @@ def test_split_enforces_minimum_duration_and_preserves_editable_identity_and_lin
     assert right["segment_id"] != "seg_001"
     assert (left["start_sec"], left["end_sec"]) == (0.0, 1.0)
     assert (right["start_sec"], right["end_sec"]) == (1.0, 2.0)
-    for key in ("caption_text", "broll_override", "music_override", "sfx_override", "tts_replacement", "visual_overlays"):
+    for key in ("caption_text", "music_override", "sfx_override", "tts_replacement", "visual_overlays"):
         assert left[key] == session["segments"][0][key]
         assert right[key] == session["segments"][0][key]
+    # **b-roll은 "무엇을 쓰는가"만 그대로고 "어디서부터"는 움직인다**(2026-09-12).
+    # 오른쪽 조각은 원본의 1초 지점부터 시작해야 한다 -- 예전에는 이 값도 통째로
+    # 복사돼서 쪼갠 장면이 전부 b-roll의 맨 앞을 다시 보여 줬다.
+    assert left["broll_override"] == session["segments"][0]["broll_override"]
+    assert right["broll_override"]["asset_id"] == session["segments"][0]["broll_override"]["asset_id"]
+    assert right["broll_override"]["media_controls"]["trim_start_sec"] == 1.0
     assert left["lineage"]["root_segment_id"] == "seg_001"
     assert right["lineage"]["parent_segment_id"] == "seg_001"
     assert updated["history"][-1]["mutation_type"] == "segment_split"

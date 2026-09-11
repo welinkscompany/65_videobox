@@ -416,12 +416,70 @@ def _media_windows(segment: dict[str, Any]) -> list[dict[str, Any]]:
     }]
 
 
+def _segment_media_source_rate(segment: dict[str, Any]) -> float:
+    """장면 시간 1초가 b-roll 원본을 몇 초 먹는가(리플 배속).
+
+    `composition_plan`이 세션 선택 클립의 원본 소비량을 재는 식과 같다
+    (`(end-start) * speed * playback_rate`). 여기서는 장면 쪽 배속만 보고,
+    클립 자체의 `speed`는 `_advanced_broll_source_start`가 본다.
+    """
+    try:
+        rate = float(segment.get("ripple_playback_rate", 1.0))
+    except (TypeError, ValueError):
+        return 1.0
+    return rate if rate > 0 else 1.0
+
+
+def _advanced_broll_source_start(override: Any, *, by_sec: float) -> Any:
+    """장면 앞을 잘라 낸 만큼 b-roll 시작점도 앞으로 감은 사본을 돌려준다.
+
+    **렌더가 b-roll의 시작점으로 읽는 값은 `media_controls.trim_start_sec`
+    하나뿐이다.** `source_slices`·`source_offset_sec`는 장면이 자기 원본(내레이션)
+    안에서 어디인지를 말할 뿐, 장면에 깔아 놓은 b-roll 자산의 어디를 쓸지는
+    말하지 않는다(`composition_plan`의 세션 선택 클립 분기는 `source_in_sec`을
+    아예 안 싣는다).
+
+    그래서 장면을 쪼개거나 앞 경계를 뒤로 끌면 여기서 같이 감아 줘야 한다.
+    2026-09-12 대표님 실제 영상 실측: 이걸 안 해서 장면 94개가 전부
+    `trim_start_sec: 0.0`이었고, 숏폼은 원본 맨 앞 8초를 열 번 반복한 영상이
+    나왔다. `loop: true`가 기본이라 길이만 맞고 그림은 계속 처음이었다.
+
+    `media_controls`가 아예 없는 선택에도 칸을 만들어 넣는다 -- 없으면 기본값
+    0으로 읽혀 같은 결함이 그대로 남는다.
+
+    앞 경계를 **왼쪽으로** 끌면 `by_sec`이 음수다. 그때는 되감는다. 0보다
+    작아질 수는 없으므로 거기서 멈춘다 -- 원본보다 앞은 없다.
+    """
+    if not isinstance(override, dict) or by_sec == 0:
+        return override
+    raw_controls = override.get("media_controls")
+    controls = dict(raw_controls) if isinstance(raw_controls, dict) else {}
+    try:
+        speed = float(controls.get("speed", 1.0))
+    except (TypeError, ValueError):
+        speed = 1.0
+    if speed <= 0:
+        speed = 1.0
+    try:
+        current = float(controls.get("trim_start_sec", 0.0))
+    except (TypeError, ValueError):
+        current = 0.0
+    moved = current + by_sec * speed
+    if moved < 0:
+        moved = 0.0
+    if moved == current and isinstance(raw_controls, dict) and "trim_start_sec" in raw_controls:
+        return override
+    controls["trim_start_sec"] = moved
+    return {**override, "media_controls": controls}
+
+
 def _slice_media_windows(*, segment: dict[str, Any], start_sec: float, end_sec: float) -> list[dict[str, Any]]:
     """Clip a segment's durable media choices and rebase them to a split child."""
     original_start = float(segment.get("start_sec", 0.0))
     return _slice_media_window_basis(
         windows=_media_windows(segment), leading_trim_sec=0.0,
         duration_sec=end_sec - start_sec, basis_start_sec=start_sec - original_start,
+        media_source_rate=_segment_media_source_rate(segment),
     )
 
 
@@ -434,6 +492,7 @@ def _media_window_basis(segment: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _slice_media_window_basis(
     *, windows: list[dict[str, Any]], leading_trim_sec: float, duration_sec: float, basis_start_sec: float = 0.0,
+    media_source_rate: float = 1.0,
 ) -> list[dict[str, Any]]:
     """Slice immutable per-track media choices and rebase them to a new segment window."""
     selected_start = basis_start_sec + leading_trim_sec
@@ -445,11 +504,18 @@ def _slice_media_window_basis(
         clipped_start, clipped_end = max(selected_start, window_start), min(selected_end, window_end)
         if clipped_end <= clipped_start:
             continue
-        output.append({
+        sliced = {
             **deepcopy(window),
             "start_offset_sec": clipped_start - selected_start,
             "duration_sec": clipped_end - clipped_start,
-        })
+        }
+        # 창 앞을 잘라 낸 만큼 그 창에 걸린 b-roll도 같이 감는다. 소리
+        # (`music_override`/`sfx_override`)에는 시작점 칸 자체가 없다.
+        if isinstance(sliced.get("broll_override"), dict):
+            sliced["broll_override"] = _advanced_broll_source_start(
+                sliced["broll_override"], by_sec=(clipped_start - window_start) * media_source_rate
+            )
+        output.append(sliced)
     return output
 
 
@@ -540,6 +606,13 @@ def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float)
     right["source_slice_basis_is_proven"] = True
     left["source_slice_window_start_sec"] = 0.0
     right["source_slice_window_start_sec"] = 0.0
+    # 오른쪽 조각은 원본의 중간부터 시작한다. 직접 선택(`broll_override`)은
+    # 창보다 먼저 읽히므로(`composition_plan`) 여기서 같이 감지 않으면 쪼갠
+    # 장면 전부가 b-roll의 맨 앞을 다시 보여 준다.
+    right["broll_override"] = _advanced_broll_source_start(
+        right.get("broll_override"),
+        by_sec=(split_sec - start_sec) * _segment_media_source_rate(original),
+    )
     left["media_windows"] = _slice_media_windows(segment=original, start_sec=start_sec, end_sec=split_sec)
     right["media_windows"] = _slice_media_windows(segment=original, start_sec=split_sec, end_sec=end_sec)
     left["content_windows"] = _slice_content_windows(segment=original, start_sec=start_sec, end_sec=split_sec)
@@ -662,8 +735,16 @@ def set_segment_bounds(*, session: dict[str, Any], segment_id: str, start_sec: f
     next_media_offset = previous_media_offset + start_sec - previous_start
     if next_media_offset < 0:
         raise ValueError("segment_media_expansion_outside_window")
+    media_source_rate = _segment_media_source_rate(segment)
+    # 앞 경계를 뒤로 끌면 b-roll 시작점도 그만큼 뒤로 간다 -- 쪼개기와 같은
+    # 규칙이다. 창은 불변 기준(`media_window_basis`)에서 절대값으로 다시
+    # 잘리고, 직접 선택은 지금 값에서 이번 이동분만큼만 더한다.
+    updated["segments"][index]["broll_override"] = _advanced_broll_source_start(
+        segment.get("broll_override"), by_sec=(start_sec - previous_start) * media_source_rate
+    )
     updated["segments"][index]["media_windows"] = _slice_media_window_basis(
         windows=media_basis, leading_trim_sec=next_media_offset, duration_sec=end_sec - start_sec,
+        media_source_rate=media_source_rate,
     )
     updated["segments"][index]["media_window_basis"] = deepcopy(media_basis)
     updated["segments"][index]["media_window_basis_offset_sec"] = next_media_offset
@@ -1436,6 +1517,32 @@ def update_segment_transition(
     raise KeyError(f"Segment not found in editing session: {segment_id}")
 
 
+def _broll_controls_with_default_source_audio(
+    *, session: dict[str, Any], media_controls: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """빈 편집판에 깐 영상은 **자기 소리를 그대로 들려준다.**
+
+    b-roll의 `preserve_source_audio` 기본값은 꺼짐이다. 그 기본값은 "대본 →
+    내레이션"으로 만든 편집본을 전제한다 -- 목소리는 내레이션 트랙에 있고,
+    b-roll은 그 위에 까는 장식이라 자기 소리가 같이 나면 말이 겹친다.
+
+    **빈 편집판(`timing_source == "blank"`)에는 그 내레이션이 없다.** 대표님이
+    `+ 새로 만들기`로 열고 찍어 온 영상을 장면에 까는 길이 그것이고, 그 영상의
+    소리가 곧 말소리다. 2026-09-12 실측: 8분 영상으로 만든 숏폼이
+    `mean_volume -91.0 dB`, 완전한 무음으로 나왔다. 사람이 말하는 영상인데
+    목소리가 없었다.
+
+    **고른 값은 덮지 않는다.** 칸이 이미 있으면(`normalize_media_controls`를
+    한 번이라도 지난 값은 항상 있다) 그대로 둔다 -- 나중에 소리를 끄면 그
+    선택이 다시 켜지지 않는다.
+    """
+    if str(session.get("timing_source") or "").strip() != "blank":
+        return media_controls
+    if isinstance(media_controls, dict) and "preserve_source_audio" in media_controls:
+        return media_controls
+    return {**(media_controls or {}), "preserve_source_audio": True}
+
+
 def update_segment_broll_override(
     *,
     session: dict[str, Any],
@@ -1445,6 +1552,7 @@ def update_segment_broll_override(
 ) -> dict[str, Any]:
     updated = deepcopy(session)
     normalized_asset_id = asset_id.strip()
+    media_controls = _broll_controls_with_default_source_audio(session=session, media_controls=media_controls)
     for segment in updated.get("segments", []):
         if str(segment.get("segment_id")) != segment_id:
             continue

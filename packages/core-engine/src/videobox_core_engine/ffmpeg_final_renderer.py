@@ -13,7 +13,7 @@ from typing import Any, NamedTuple
 
 from videobox_core_engine.ass_subtitles import caption_band_px
 from videobox_core_engine.canonical_track import canonical_track_type
-from videobox_core_engine.composition_plan import CompositionPlan
+from videobox_core_engine.composition_plan import CompositionItem, CompositionPlan
 from videobox_core_engine.filters import filter_chain
 from videobox_core_engine.media_controls import normalize_media_controls, PHOTO_MOTIONS, PHOTO_MOTION_STILL
 from videobox_core_engine.output_source_verifier import OutputSourceStaleError, verify_output_sources
@@ -1558,7 +1558,10 @@ class FfmpegFinalRenderer:
         # `settb`가 프레임률을 지워 xfade가 거부한 것이었다
         # (`_transition_side_filter` 참고). 여기는 예방일 뿐이다.
         single_thread_source_indices: set[int] = set()
-        for item in composition_plan.items:
+        # 되풀이(`loop`)를 켠 b-roll의 시작점이 원본 끝을 넘어선 항목들.
+        # 자리(index)로 적는다 -- 갓 나눈 조각은 `clip_id`가 겹칠 수 있다.
+        looped_source_starts: dict[int, CompositionItem] = {}
+        for item_index, item in enumerate(composition_plan.items):
             if item.track_type == "overlay":
                 # Overlay items are represented in the canonical plan but need
                 # a visual source.  Fail closed rather than silently omit one.
@@ -1589,7 +1592,23 @@ class FfmpegFinalRenderer:
             elif item.track_type == "broll":
                 source = self._resolve_generic_asset_uri(project_id=project_id, asset_uri=str(item.asset_uri or ""))
                 controls = normalize_media_controls(item.media_controls, media_kind="broll", duration_sec=max(item.end_sec - item.start_sec, 0.001))
-                available_source_window = min(self._probe_media_duration(source), item.source_out_sec) - item.source_in_sec
+                media_duration_sec = self._probe_media_duration(source)
+                # **되풀이를 켠 b-roll의 시작점은 원본 길이 안으로 감는다.**
+                # 장면을 쪼개면 b-roll 시작점도 같이 앞으로 간다
+                # (`editing_session._advanced_broll_source_start`). 원본이 장면보다
+                # 짧아 `loop`로 채우던 b-roll은 그 이동이 원본 끝을 넘어설 수 있고,
+                # 넘어서면 아래 검사가 렌더를 통째로 죽였다. 되풀이 중이라면
+                # "원본 끝을 지났다"는 곧 "처음으로 돌아왔다"는 뜻이므로 나머지로
+                # 감는다 -- 3초짜리를 5초 지점부터 쓰면 2초 지점이다.
+                if controls["loop"] and item.source_in_sec >= media_duration_sec > 0:
+                    wrapped_start = item.source_in_sec % media_duration_sec
+                    item = replace(
+                        item,
+                        source_in_sec=wrapped_start,
+                        source_out_sec=wrapped_start + (item.source_out_sec - item.source_in_sec),
+                    )
+                    looped_source_starts[item_index] = item
+                available_source_window = min(media_duration_sec, item.source_out_sec) - item.source_in_sec
                 if available_source_window <= 0:
                     raise FinalRenderError("B-roll source bounds are outside the available media. Adjust trim or source controls.")
                 if available_source_window < item.end_sec - item.start_sec and not controls["loop"] and not controls["pad"]:
@@ -1616,6 +1635,16 @@ class FfmpegFinalRenderer:
             # 했고, `-loop 1`이 안 붙어 한 프레임만 나왔다. 사진을 다루는 코드는
             # 이미 있었다 -- 오버레이 경로에서만 쓰고 있었을 뿐이다.
             source_paths.append((source, _looks_like_image(source), should_loop))
+        if looped_source_starts:
+            # 아래 전환 계산과 필터그래프는 전부 `composition_plan.items`를 읽는다.
+            # 감은 값을 여기서 한 번에 반영해서 **한 곳만** 고친다.
+            composition_plan = replace(
+                composition_plan,
+                items=tuple(
+                    looped_source_starts.get(index, entry)
+                    for index, entry in enumerate(composition_plan.items)
+                ),
+            )
         # 전환은 두 클립의 원본을 **한 번 더** 읽는다.
         #
         # 필터그래프에서 입력 하나는 한 번만 쓸 수 있다. 이미 배치에 쓴

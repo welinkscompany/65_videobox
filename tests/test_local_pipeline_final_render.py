@@ -1132,3 +1132,292 @@ def test_final_render_keeps_windowed_right_caption_style_after_merge(tmp_path: P
     # play resolution; keep the right caption's red color after the merge.
     assert "Style: Segment1,Pretendard,96,&H000000FF" in ass
     assert "Dialogue: 0,0:00:01.00,0:00:02.00,Segment1,,0,0,0,,right" in ass
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-12 대표님 실제 영상(494.837초, 1920x1080) 실측에서 잡힌 결함 셋.
+#
+# 자료실 영상 하나를 빈 편집판 장면에 깔고(`broll_override`) 장면을 94개로
+# 쪼갠 뒤 숏폼을 만들었더니:
+#   1. 그림이 고른 장면이 아니라 **원본 맨 앞 8초의 반복**이었다.
+#   2. 화면의 **68.3%가 검은 띠**였다.
+#   3. `mean_volume -91.0 dB`, 완전한 **무음**이었다.
+#
+# 셋 다 **나온 mp4를 재야** 보인다 -- 세션에 저장된 값은 셋 다 "정상"이었다.
+# 그래서 여기 시험은 실제로 렌더하고 ffprobe·픽셀·dB로 잰다.
+#
+# 원본은 **시각을 색으로 심어** 만든다: T초 화면이 (R,G,B)=(2T, 255-2T, 120).
+# 숏폼 어느 시각의 픽셀을 읽으면 원본 어느 초인지 역산할 수 있다 -- 대표님
+# 영상에 구워진 자막으로 순간을 특정한 것과 같은 방법이다.
+# ---------------------------------------------------------------------------
+
+_REAL_FLOW_SOURCE_SEC = 30.0
+_REAL_FLOW_SCENE_SEC = 10.0
+
+
+def _timecoded_source(path: Path, *, seconds: float = _REAL_FLOW_SOURCE_SEC) -> None:
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-v", "error",
+            "-f", "lavfi", "-i", f"color=c=black:s=32x18:r=30:d={seconds}",
+            "-f", "lavfi", "-i", f"sine=frequency=300:duration={seconds}",
+            "-vf", "geq=r=2*T:g=255-2*T:b=120,scale=1920:1080:flags=neighbor",
+            "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "aac", "-shortest", str(path),
+        ],
+        check=True, capture_output=True,
+    )
+
+
+def _source_second_shown_at(path: Path, *, at_sec: float, width: int, height: int) -> float:
+    """숏폼 `at_sec`의 가운데 픽셀이 가리키는 **원본 초**."""
+    frame = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", str(at_sec), "-i", str(path),
+         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+        capture_output=True, timeout=60,
+    )
+    assert frame.returncode == 0, frame.stderr.decode("utf-8", errors="replace")
+    pixels = frame.stdout
+    assert len(pixels) == width * height * 3
+    index = ((height // 2) * width + width // 2) * 3
+    red, green = pixels[index], pixels[index + 1]
+    return (red + (255 - green)) / 4.0
+
+
+def _band_brightness(path: Path, *, at_sec: float, width: int, height: int) -> tuple[float, float, float]:
+    """위/가운데/아래 가로 띠의 평균 밝기(0~255). 검은 띠는 여기서 0 근처로 나온다."""
+    frame = subprocess.run(
+        ["ffmpeg", "-v", "error", "-ss", str(at_sec), "-i", str(path),
+         "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+        capture_output=True, timeout=60,
+    )
+    assert frame.returncode == 0, frame.stderr.decode("utf-8", errors="replace")
+    pixels = frame.stdout
+    assert len(pixels) == width * height
+    band = height // 4
+
+    def average(top: int, bottom: int) -> float:
+        chunk = pixels[top * width:bottom * width]
+        return sum(chunk) / len(chunk)
+
+    return (
+        average(0, band),
+        average(height // 2 - band // 2, height // 2 + band // 2),
+        average(height - band, height),
+    )
+
+
+def _mean_volume_db(path: Path) -> float:
+    """**소리는 길이가 아니라 음량으로 잰다.** 스트림이 있어도 무음일 수 있다."""
+    result = subprocess.run(
+        ["ffmpeg", "-v", "info", "-i", str(path), "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=120,
+    )
+    for line in result.stderr.splitlines():
+        if "mean_volume:" in line:
+            return float(line.split("mean_volume:")[1].strip().split()[0])
+    raise AssertionError(f"volumedetect가 mean_volume을 안 냈다: {result.stderr[-500:]}")
+
+
+def _render_short_form_from_one_long_video(tmp_path: Path) -> dict[str, Any]:
+    """대표님이 실제로 밟은 길을 그대로 밟고 숏폼 mp4를 돌려준다.
+
+    빈 편집판 -> 자료실 영상을 장면에 깔기 -> 장면 길이를 영상 길이로 ->
+    쪼개기 -> 숏폼 변형본 -> 렌더. 전부 제품 자신의 함수를 쓴다.
+    """
+    from videobox_core_engine import editing_session as session_ops
+    from videobox_core_engine.blank_editing_session import (
+        build_blank_editing_session,
+        build_blank_timeline_payload,
+    )
+    from videobox_core_engine.output_variants import materialize_variant, variant_render_session
+    from videobox_domain_models.output_variants import OutputVariant
+
+    store = LocalProjectStore(tmp_path / "store")
+    project = store.bootstrap_project(name="Real flow short form")
+    source = tmp_path / "long.mp4"
+    _timecoded_source(source)
+    asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source
+    )
+
+    session = build_blank_editing_session(project_id=project.project_id, timeline_id="timeline_001")
+    scene_id = session["segments"][0]["segment_id"]
+    session = session_ops.update_segment_broll_override(
+        session=session, segment_id=scene_id, asset_id=asset.asset_id, media_controls={}
+    )
+    session = session_ops.set_segment_bounds(
+        session=session, segment_id=scene_id, start_sec=0.0, end_sec=_REAL_FLOW_SOURCE_SEC
+    )
+    for cut in (_REAL_FLOW_SCENE_SEC, _REAL_FLOW_SCENE_SEC * 2):
+        target = next(
+            item["segment_id"] for item in session["segments"]
+            if item["start_sec"] < cut < item["end_sec"]
+        )
+        session = session_ops.split_segment(session=session, segment_id=target, split_sec=cut)
+    for segment in session["segments"]:
+        segment["review_required"] = False
+
+    timeline = build_blank_timeline_payload()
+    timeline["timeline_id"] = "timeline_001"
+    timeline["project_id"] = project.project_id
+
+    picked = (session["segments"][0]["segment_id"], session["segments"][2]["segment_id"])
+    variant = OutputVariant(
+        variant_id="variant-1", kind="vertical_highlight", variant_revision=1,
+        source_session_id="editing_session_001",
+        source_session_revision=int(session["session_revision"]),
+        selected_segment_ids=picked,
+    )
+    derived = materialize_variant(variant, session["segments"])
+    variant_timeline = build_variant_timeline_payload(
+        master_timeline=timeline, variant_kind="vertical_highlight", derived=derived,
+    )
+    variant_timeline["timeline_id"] = "timeline_002"
+    variant_timeline["project_id"] = project.project_id
+    render_session = variant_render_session(master_session=session, variant_timeline=variant_timeline)
+
+    renderer = FfmpegFinalRenderer(store=store)
+    runner = LocalPipelineRunner(store, final_renderer=renderer)
+    materialized = materialize_editing_session_timeline(
+        timeline=variant_timeline, editing_session=render_session, project_id=project.project_id,
+    )
+    plan = runner.build_composition_plan(
+        timeline=variant_timeline, editing_session=render_session, project_id=project.project_id,
+    )
+    output = tmp_path / "short.mp4"
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id, timeline=materialized,
+        output_path=output, composition_plan=plan,
+    )
+    width, height = _ffprobe_dimensions(output)
+    return {"output": output, "width": width, "height": height}
+
+
+@pytest.fixture(scope="module")
+def real_flow_short_form(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    if not FFMPEG_AVAILABLE:
+        pytest.skip("ffmpeg/ffprobe not installed on this machine")
+    return _render_short_form_from_one_long_video(tmp_path_factory.mktemp("real_flow"))
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_short_form_shows_each_picked_moment_not_the_start_of_the_source(
+    real_flow_short_form: dict[str, Any],
+) -> None:
+    """**그림이 고른 장면이어야 한다.**
+
+    쪼갠 장면이 `broll_override.media_controls.trim_start_sec`을 안 옮겨서, 고른
+    장면 열 개가 전부 원본 0초부터 다시 시작했다. `loop: true`가 기본이라 길이만
+    맞고 그림은 계속 맨 앞이었다 -- "61초짜리 숏폼"이 사실은 앞 8초의 반복.
+    """
+    output = real_flow_short_form["output"]
+    width, height = real_flow_short_form["width"], real_flow_short_form["height"]
+    # 1번째 장면(원본 0~10초)의 1초 지점 -> 원본 1초.
+    first = _source_second_shown_at(output, at_sec=1.0, width=width, height=height)
+    assert abs(first - 1.0) < 2.0, f"숏폼 1초가 원본 {first:.2f}초를 보여 준다(1초여야 함)"
+    # 3번째 장면(원본 20~30초)의 1초 지점 -> 원본 21초. **여기가 무너졌던 자리다.**
+    second = _source_second_shown_at(
+        output, at_sec=_REAL_FLOW_SCENE_SEC + 1.0, width=width, height=height
+    )
+    assert abs(second - 21.0) < 2.0, (
+        f"숏폼 11초가 원본 {second:.2f}초를 보여 준다(21초여야 함) -- "
+        "쪼갠 장면이 b-roll의 맨 앞을 다시 보여 주고 있다."
+    )
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_short_form_broll_laid_on_a_scene_fills_the_vertical_frame(
+    real_flow_short_form: dict[str, Any],
+) -> None:
+    """**검은 띠가 없어야 한다.**
+
+    `build_variant_timeline_payload`의 화면 채우기는 **마스터 타임라인의 트랙
+    클립**만 고친다. 자료실 영상을 장면에 까는 화면 경로(`broll_override`)로
+    들어온 클립은 렌더 때 세션에서 새로 만들어지므로 그 길을 안 지난다 --
+    대표님 편집본은 트랙이 비어 있어 화면 전체가 이 경로였고, 실측 68.3%가
+    검은 띠였다.
+    """
+    output = real_flow_short_form["output"]
+    width, height = real_flow_short_form["width"], real_flow_short_form["height"]
+    assert (width, height) == (1080, 1920)
+    for at_sec in (1.0, _REAL_FLOW_SCENE_SEC + 1.0):
+        top, middle, bottom = _band_brightness(output, at_sec=at_sec, width=width, height=height)
+        assert top > 16.0 and bottom > 16.0, (
+            f"{at_sec}초에서 위={top:.1f} 가운데={middle:.1f} 아래={bottom:.1f} -- "
+            "위아래가 검은 띠다."
+        )
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_short_form_from_a_talking_video_is_not_silent(
+    real_flow_short_form: dict[str, Any],
+) -> None:
+    """**소리가 들려야 한다.** 스트림이 아니라 음량으로 잰다.
+
+    빈 편집판에는 내레이션 트랙이 없다. 그 판에 깐 영상의 소리가 곧 말소리인데
+    `preserve_source_audio` 기본값이 꺼짐이라 통째로 버려졌다 -- 실측 -91.0 dB.
+    """
+    measured = _mean_volume_db(real_flow_short_form["output"])
+    assert measured > -60.0, f"숏폼이 사실상 무음이다: mean_volume {measured:.1f} dB"
+
+
+@pytest.mark.skipif(not FFMPEG_AVAILABLE, reason="ffmpeg/ffprobe not installed on this machine")
+def test_a_looping_broll_shorter_than_its_scene_still_renders_after_a_split(tmp_path: Path) -> None:
+    """쪼갠 장면의 b-roll 시작점이 원본 끝을 넘어도 렌더는 살아 있어야 한다.
+
+    장식용 짧은 b-roll은 `loop`로 장면을 채운다. 장면을 쪼개면 시작점이 앞으로
+    가는데, 3초짜리 원본을 5초 지점부터 쓰라고 하면 예전 검사가 렌더를 통째로
+    죽였다(`B-roll source bounds are outside the available media`). 되풀이 중에
+    "원본 끝을 지났다"는 곧 "처음으로 돌아왔다"는 뜻이다.
+    """
+    from videobox_core_engine import editing_session as session_ops
+    from videobox_core_engine.blank_editing_session import (
+        build_blank_editing_session,
+        build_blank_timeline_payload,
+    )
+
+    store = LocalProjectStore(tmp_path / "store")
+    project = store.bootstrap_project(name="Short looping broll")
+    source = tmp_path / "decor.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=640x360:r=30:d=3",
+         "-pix_fmt", "yuv420p", str(source)],
+        check=True, capture_output=True,
+    )
+    asset = store.register_asset(
+        project_id=project.project_id, asset_type=AssetType.BROLL_VIDEO, source_path=source
+    )
+    session = build_blank_editing_session(project_id=project.project_id, timeline_id="timeline_001")
+    scene_id = session["segments"][0]["segment_id"]
+    session = session_ops.update_segment_broll_override(
+        session=session, segment_id=scene_id, asset_id=asset.asset_id, media_controls={}
+    )
+    session = session_ops.set_segment_bounds(
+        session=session, segment_id=scene_id, start_sec=0.0, end_sec=10.0
+    )
+    session = session_ops.split_segment(session=session, segment_id=scene_id, split_sec=5.0)
+    for segment in session["segments"]:
+        segment["review_required"] = False
+    assert [
+        segment["broll_override"]["media_controls"]["trim_start_sec"]
+        for segment in session["segments"]
+    ] == [0.0, 5.0]
+
+    timeline = build_blank_timeline_payload()
+    timeline["timeline_id"] = "timeline_001"
+    timeline["project_id"] = project.project_id
+    renderer = FfmpegFinalRenderer(store=store)
+    runner = LocalPipelineRunner(store, final_renderer=renderer)
+    materialized = materialize_editing_session_timeline(
+        timeline=timeline, editing_session=session, project_id=project.project_id,
+    )
+    plan = runner.build_composition_plan(
+        timeline=timeline, editing_session=session, project_id=project.project_id,
+    )
+    output = tmp_path / "out.mp4"
+    renderer.render_timeline_to_mp4(
+        project_id=project.project_id, timeline=materialized,
+        output_path=output, composition_plan=plan,
+    )
+    assert output.stat().st_size > 0

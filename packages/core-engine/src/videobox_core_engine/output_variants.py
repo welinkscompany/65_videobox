@@ -373,6 +373,74 @@ _MASTER_ONLY_TIMELINE_KEYS = frozenset(
 _VERTICAL_VARIANT_KINDS = frozenset({"vertical_full", "vertical_highlight"})
 
 
+def _filled_broll_controls(raw_controls: object) -> dict[str, object]:
+    """화면 채우기로 고친 `media_controls` 사본. 채우기 판단은 **여기 한 곳**이다."""
+    controls = dict(raw_controls) if isinstance(raw_controls, dict) else {}
+    controls["fit"] = "crop"
+    return controls
+
+
+def _is_vertical_output(timeline: Mapping[str, object]) -> bool:
+    """이 타임라인의 캔버스가 세로인가.
+
+    `variant_render_session`은 변형본의 `kind`를 받지 않는다 -- 렌더가 들고 오는
+    것은 타임라인뿐이다. 그 타임라인의 `output`은 `build_variant_timeline_payload`가
+    변형본 종류에 맞춰 박아 넣은 값이므로(마스터 값은 `_MASTER_ONLY_TIMELINE_KEYS`가
+    막는다) 여기서 세로인지 가로인지 읽을 수 있다.
+    """
+    output = timeline.get("output")
+    if not isinstance(output, Mapping):
+        return False
+    try:
+        return int(output["height"]) > int(output["width"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _fill_frame_for_vertical_session(session: dict[str, object]) -> dict[str, object]:
+    """세로 변형본의 **세션 선택 b-roll**도 화면을 채우게 한다.
+
+    2026-09-12 대표님 실제 영상 실측에서 `_fill_frame_for_vertical_variant`(아래)를
+    통과하고도 숏폼의 68.3%가 검은 띠였다. 이유: 그 함수는 **마스터 타임라인의
+    트랙 클립**만 고친다. 그런데 자료실 영상을 장면에 까는 화면 경로는 트랙이
+    아니라 편집 세션의 `broll_override`이고, 그 클립은 렌더 때
+    `materialize_editing_session_timeline`이 **payload를 만든 뒤에** 만들어낸다 --
+    고쳐 놓은 트랙 목록을 아예 안 지나간다. 대표님 편집본은 트랙이 비어 있었으므로
+    화면 전체가 이 경로였다.
+
+    그래서 렌더용 세션을 만드는 **한 자리**(`variant_render_session`)에서 같이
+    고친다. 직접 선택과 창 선택 둘 다 본다 -- 렌더는 직접 선택을 먼저 읽고,
+    합친 장면은 창에 권한이 있다.
+    """
+    segments = session.get("segments")
+    if not isinstance(segments, list):
+        return session
+    filled: list[object] = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            filled.append(segment)
+            continue
+        updated = dict(segment)
+        override = updated.get("broll_override")
+        if isinstance(override, dict):
+            updated["broll_override"] = {**override, "media_controls": _filled_broll_controls(override.get("media_controls"))}
+        for key in ("media_windows", "media_window_basis"):
+            windows = updated.get(key)
+            if not isinstance(windows, list):
+                continue
+            updated[key] = [
+                {**window, "broll_override": {
+                    **window["broll_override"],
+                    "media_controls": _filled_broll_controls(window["broll_override"].get("media_controls")),
+                }}
+                if isinstance(window, dict) and isinstance(window.get("broll_override"), dict)
+                else window
+                for window in windows
+            ]
+        filled.append(updated)
+    return {**session, "segments": filled}
+
+
 def _fill_frame_for_vertical_variant(
     raw_tracks: object, *, variant_kind: str
 ) -> list[dict[str, object]]:
@@ -411,10 +479,7 @@ def _fill_frame_for_vertical_variant(
         for clip in clips:
             if not isinstance(clip, dict):
                 continue
-            controls = clip.get("media_controls")
-            controls = dict(controls) if isinstance(controls, dict) else {}
-            controls["fit"] = "crop"
-            clip["media_controls"] = controls
+            clip["media_controls"] = _filled_broll_controls(clip.get("media_controls"))
     return tracks
 
 
@@ -458,6 +523,26 @@ def build_variant_timeline_payload(
 
 
 def variant_render_session(
+    *,
+    master_session: Mapping[str, object] | None,
+    variant_timeline: Mapping[str, object],
+) -> dict[str, object] | None:
+    """변형본 타임라인을 렌더할 때 쓸 편집 세션.
+
+    두 가지를 한다: 장면 목록을 변형본에 맞춰 **투영**하고(아래 본문),
+    세로 캔버스면 세션 선택 b-roll을 **화면 채우기**로 바꾼다
+    (`_fill_frame_for_vertical_session`). 후자는 전체본(`vertical_full`)에도
+    걸려야 한다 -- 투영이 아무것도 안 바꾸는 경우에도 검은 띠는 생긴다.
+    """
+    projected = _projected_variant_session(
+        master_session=master_session, variant_timeline=variant_timeline
+    )
+    if projected is None or not _is_vertical_output(variant_timeline):
+        return projected
+    return _fill_frame_for_vertical_session(projected)
+
+
+def _projected_variant_session(
     *,
     master_session: Mapping[str, object] | None,
     variant_timeline: Mapping[str, object],
