@@ -15,6 +15,12 @@ MAX_AUDIT_HISTORY = 100
 #: 이름이 두 곳에 흩어지면 한쪽만 고쳤을 때 조용히 안 담긴다.
 SESSION_TRACKS_KEY = "tracks"
 
+#: 트랙 눈·음소거 상태가 사는 자리(`set_track_states`, `editing_session.py:765`).
+#: 그 함수의 docstring이 "되돌리기 대상"이라고 명시하는데 정작 이 스냅샷에
+#: 이름이 빠져 있었다 -- 트랙을 숨기고 Ctrl+Z를 눌러도 숨김이 그대로 남는
+#: 결함이었다. `SESSION_TRACKS_KEY`와 같은 이유로 이름을 상수로 뽑아 둔다.
+SESSION_TRACK_STATES_KEY = "track_states"
+
 
 def _snapshot(session: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -26,6 +32,8 @@ def _snapshot(session: dict[str, Any]) -> dict[str, Any]:
         # 구조라, 새 열쇠를 넣을 때마다 이 자리를 같이 넓혀야 한다
         # (`timeline_placement_overrides`를 넣을 때 이미 한 번 그랬다).
         SESSION_TRACKS_KEY: deepcopy(session.get(SESSION_TRACKS_KEY)),
+        # 트랙 눈·음소거 상태. 위와 같은 이유로 이름을 적어야 담긴다.
+        SESSION_TRACK_STATES_KEY: deepcopy(session.get(SESSION_TRACK_STATES_KEY)),
     }
 
 

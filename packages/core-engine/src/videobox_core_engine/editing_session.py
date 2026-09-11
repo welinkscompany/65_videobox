@@ -10,7 +10,7 @@ from videobox_domain_models.caption_style import CaptionStyle
 from videobox_core_engine.caption_translation import SUPPORTED_CAPTION_LANGUAGES
 from videobox_core_engine.media_controls import normalize_media_controls
 from videobox_core_engine.transitions import normalize_transition
-from videobox_core_engine.editing_transactions import SESSION_TRACKS_KEY, apply_user_transaction
+from videobox_core_engine.editing_transactions import SESSION_TRACK_STATES_KEY, SESSION_TRACKS_KEY, apply_user_transaction
 # 도형 프리셋 목록은 여기서 다시 정의하지 않고 그대로 가져다 쓴다. 예전 이름을
 # 그대로 두어 이 모듈에서 가져다 쓰던 곳은 손대지 않아도 된다.
 from videobox_core_engine.overlay_shapes import (  # noqa: F401
@@ -798,6 +798,26 @@ def _restore_session_tracks(updated: dict[str, Any], payload: dict[str, Any]) ->
         updated[SESSION_TRACKS_KEY] = deepcopy(payload[SESSION_TRACKS_KEY])
 
 
+def _restore_session_track_states(updated: dict[str, Any], payload: dict[str, Any]) -> None:
+    """되돌리기·다시하기가 트랙 눈·음소거도 같이 되돌린다.
+
+    `set_track_states`의 docstring이 "되돌리기 대상"이라고 명시하는데, 스냅샷에
+    이 열쇠가 빠져 있어 실제로는 안 되돌아가던 결함을 고친다. `_restore_session_tracks`와
+    똑같은 모양 -- **없던 상태로 돌아갈 때는 열쇠를 지운다.** 빈 값을 남기면
+    "한 번도 안 건드린 세션"과 모양이 달라져서 `normalize_track_states`와
+    저장 호환성이 깨진다.
+
+    `payload`에 열쇠 자체가 없으면(손으로 만든 옛 스냅샷 dict 등) 아무 것도
+    하지 않는다 -- 무조건 읽으면 그런 dict에서 `KeyError`가 난다.
+    """
+    if SESSION_TRACK_STATES_KEY not in payload:
+        return
+    if payload[SESSION_TRACK_STATES_KEY] is None:
+        updated.pop(SESSION_TRACK_STATES_KEY, None)
+    else:
+        updated[SESSION_TRACK_STATES_KEY] = deepcopy(payload[SESSION_TRACK_STATES_KEY])
+
+
 def undo(*, session: dict[str, Any]) -> dict[str, Any]:
     undo_stack = list(deepcopy(session.get("undo_stack", [])))
     if not undo_stack:
@@ -817,6 +837,7 @@ def undo(*, session: dict[str, Any]) -> dict[str, Any]:
         else:
             updated["caption_style"] = deepcopy(inverse["caption_style"])
     _restore_session_tracks(updated, inverse)
+    _restore_session_track_states(updated, inverse)
     updated["undo_stack"] = undo_stack
     updated["redo_stack"] = list(deepcopy(session.get("redo_stack", []))) + [event]
     history = list(deepcopy(session.get("history", [])))
@@ -847,6 +868,7 @@ def redo(*, session: dict[str, Any]) -> dict[str, Any]:
         else:
             updated["caption_style"] = deepcopy(forward["caption_style"])
     _restore_session_tracks(updated, forward)
+    _restore_session_track_states(updated, forward)
     updated["redo_stack"] = redo_stack
     updated["undo_stack"] = (list(deepcopy(session.get("undo_stack", []))) + [event])[-MAX_TIMELINE_UNDO_EVENTS:]
     history = list(deepcopy(session.get("history", [])))

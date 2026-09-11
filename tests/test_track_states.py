@@ -179,6 +179,38 @@ def test_muting_a_lane_is_carried_to_the_renderer_for_real() -> None:
     assert "narration" in {item.track_type for item in _materialized({"narration": {"muted": True}}).items}
 
 
+def test_hiding_a_track_is_undoable() -> None:
+    # `set_track_states`의 docstring이 "되돌리기 대상"이라고 명시한다 -- 트랙을
+    # 숨기고 Ctrl+Z를 누르면 다시 보여야 한다.
+    from videobox_core_engine.editing_session import redo, set_track_states, undo
+
+    session = {"session_revision": 1, "segments": [], "history": [], "undo_stack": [], "redo_stack": []}
+
+    hidden = set_track_states(session=session, states={"broll": {"hidden": True}})
+
+    assert hidden["track_states"] == {"broll": {"hidden": True}}
+    assert undo(session=hidden).get("track_states") is None
+    assert redo(session=undo(session=hidden))["track_states"] == {"broll": {"hidden": True}}
+
+
+def test_undo_after_an_unrelated_edit_does_not_invent_a_track_states_key() -> None:
+    # 트랙을 한 번도 숨긴 적 없는 세션에서 다른 편집을 하고 되돌려도
+    # `track_states` 열쇠 자체가 생기면 안 된다 -- 없던 상태로 정확히 돌아가야
+    # "한 번도 안 건드린 세션"과 같은 모양이 유지된다.
+    from videobox_core_engine.editing_session import set_timeline_placement_overrides, undo
+
+    session = {
+        "session_revision": 1,
+        "segments": [{"segment_id": "n-1", "start_sec": 0.0, "end_sec": 2.0}],
+        "history": [], "undo_stack": [], "redo_stack": [],
+    }
+    overrides = {"broll:b-1": {"placement_id": "broll:b-1", "kind": "broll", "start_sec": 2.0, "end_sec": 4.0}}
+
+    updated = set_timeline_placement_overrides(session=session, overrides=overrides)
+
+    assert "track_states" not in undo(session=updated)
+
+
 def test_untouched_tracks_are_left_exactly_as_they_were() -> None:
     plain = CompositionPlan.from_timeline(timeline=_timeline())
     stated = CompositionPlan.from_timeline(
