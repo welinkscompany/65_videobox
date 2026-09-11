@@ -179,6 +179,7 @@ def _variant_operation(
             "fade_in_sec": 0.5,
             "fade_out_sec": 0.5,
         },
+        "select_segments": {"segment_ids": ["segment-1"]},
     }[action]
     defaults.update(parameters)
     return {
@@ -210,6 +211,106 @@ def _variant_context(**changes: object) -> YujinCreatorContext:
     }
     defaults.update(changes)
     return _context(**defaults)
+
+
+#: 숏폼 장면 고르기를 재려면 장면이 둘 이상이어야 한다. `_context()`는 하나뿐이다.
+_TWO_SCENES = (
+    {"segment_id": "segment-1", "start_sec": 0.0, "end_sec": 5.0, "text": "첫 장면"},
+    {"segment_id": "segment-2", "start_sec": 5.0, "end_sec": 9.0, "text": "둘째 장면"},
+)
+
+
+def test_short_form_scene_selection_is_a_whole_list_not_a_delta() -> None:
+    """숏폼의 본질은 **어느 장면을 넣을지**인데 기존 다섯은 전부 모양 조정이었다.
+
+    목록을 통째로 받는다. "이 장면 빼/넣어" 형태였으면 되돌리기가 델타의
+    역연산을 알아야 하는데, 순서까지 이 목록이 정하므로 뺀 장면을 **몇 번째로**
+    다시 넣을지가 델타에 남지 않는다. 통째 목록은 이전 목록을 그대로 다시
+    보내는 것 하나로 되돌아간다.
+    """
+    payload = _envelope()
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [
+                _variant_operation(
+                    "select_segments",
+                    segment_ids=["segment-2", "segment-1"],
+                )
+            ],
+        }
+    )
+
+    response = _validate(payload, _variant_context(segment_summaries=_TWO_SCENES))
+
+    assert response.proposal is not None
+    parameters = response.proposal.operations[0].parameters
+    assert parameters.action == "select_segments"
+    assert parameters.segment_ids == ("segment-2", "segment-1")
+
+
+def test_short_form_scene_selection_rejects_a_scene_outside_the_current_context() -> None:
+    payload = _envelope()
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [
+                _variant_operation("select_segments", segment_ids=["segment-9"])
+            ],
+        }
+    )
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(payload, _variant_context(segment_summaries=_TWO_SCENES))
+
+
+def test_short_form_scene_selection_is_rejected_on_a_full_vertical_shape() -> None:
+    """세로 **전체**본은 장면 구성이 바뀌면 안 된다.
+
+    `materialize_variant`가 `vertical_full_segment_order_or_membership_changed`로
+    거부하고 `apply_variant_patch`도 `only_vertical_highlight_can_select_segments`로
+    막는다. 유진이 그 자리까지 가지 않게 스키마에서 먼저 거절한다.
+    """
+    payload = _envelope()
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [
+                _variant_operation("select_segments", segment_ids=["segment-1"])
+            ],
+        }
+    )
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(
+            payload,
+            _variant_context(
+                variant_kind="vertical_full",
+                segment_summaries=_TWO_SCENES,
+            ),
+        )
+
+
+def test_short_form_scene_selection_rejects_a_repeated_scene() -> None:
+    payload = _envelope()
+    payload["proposal"].update(
+        {
+            "variant_id": "variant-vertical",
+            "base_variant_revision": 4,
+            "operations": [
+                _variant_operation(
+                    "select_segments",
+                    segment_ids=["segment-1", "segment-1"],
+                )
+            ],
+        }
+    )
+
+    with pytest.raises((ValidationError, ValueError)):
+        _validate(payload, _variant_context(segment_summaries=_TWO_SCENES))
 
 
 def test_variant_proposal_binds_master_and_variant_revisions() -> None:

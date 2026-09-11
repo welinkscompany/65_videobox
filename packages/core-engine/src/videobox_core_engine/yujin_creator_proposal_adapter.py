@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -79,6 +79,15 @@ def variant_patch_from_yujin_candidate(candidate: DirectorCandidate) -> dict[str
     if not isinstance(parameters, Mapping):
         raise ValueError("variant_parameters_missing")
     action = parameters.get("action")
+    if action == "select_segments":
+        # 숏폼 장면 고르기는 `overrides`(모양 조정)가 아니라 완전히 다른 자리로
+        # 간다. `apply_variant_patch`는 이 키를 세로 하이라이트에서만 받는다.
+        segment_ids = parameters.get("segment_ids")
+        if not isinstance(segment_ids, (list, tuple)) or not segment_ids:
+            raise ValueError("variant_segment_ids_missing")
+        if any(not isinstance(item, str) or not item.strip() for item in segment_ids):
+            raise ValueError("variant_segment_ids_invalid")
+        return {"selected_segment_ids": list(segment_ids)}
     field_by_action = {
         "set_crop": "crop",
         "set_focal": "focal",
@@ -91,6 +100,35 @@ def variant_patch_from_yujin_candidate(candidate: DirectorCandidate) -> dict[str
         raise ValueError("variant_action_forbidden")
     values = {key: value for key, value in parameters.items() if key != "action"}
     return {"overrides": {field: values}}
+
+
+def merged_variant_patch_from_yujin_candidates(
+    candidates: Sequence[DirectorCandidate],
+) -> dict[str, object]:
+    """후보 여럿을 변형본 patch **하나**로 합친다.
+
+    적용 경로는 `apply_variant_patch`를 한 번만 부른다(버전이 1만 올라야
+    하고, 화면의 되돌리기도 그 한 판을 되돌린다). 그래서 합치는 자리가
+    필요하다. 모양 조정은 필드별로 덮어쓰고, 장면 고르기는 한 메시지에
+    **하나만** 받는다 -- 둘이 오면 어느 쪽이 최종인지 정할 근거가 없고,
+    조용히 하나를 버리면 대표님이 못 본 결과가 저장된다.
+    """
+    overrides: dict[str, object] = {}
+    selected: list[str] | None = None
+    for candidate in candidates:
+        patch = variant_patch_from_yujin_candidate(candidate)
+        if "selected_segment_ids" in patch:
+            if selected is not None:
+                raise ValueError("variant_segment_selection_must_be_single")
+            selected = list(patch["selected_segment_ids"])  # type: ignore[arg-type]
+            continue
+        overrides.update(dict(patch["overrides"]))  # type: ignore[arg-type]
+    merged: dict[str, object] = {}
+    if overrides or selected is None:
+        merged["overrides"] = overrides
+    if selected is not None:
+        merged["selected_segment_ids"] = selected
+    return merged
 
 
 def parse_and_project_yujin_creator_output(

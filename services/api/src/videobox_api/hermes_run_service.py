@@ -550,6 +550,49 @@ class HermesRunService:
             raise KeyError("director_hermes_run_missing")
         return run
 
+    def _current_short_form_variant_id(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        session_revision: int,
+    ) -> str | None:
+        """이 세션의 **숏폼(세로 하이라이트) 모양**을 유진의 context에 실어 준다.
+
+        유진의 `output_variant` 동작은 context의 `selection_kind`가 `variant`일
+        때만 통과하는데(`validate_yujin_creator_response`), 여기서 아무것도
+        넘기지 않아 그 조건이 **한 번도 참이 된 적이 없었다** -- 스키마와
+        적용기가 다 있어도 실물에서는 절대 적용될 수 없었다.
+
+        고르는 규칙은 하나다: 지금 마스터 판과 **같은 판**에 붙어 있는 세로
+        하이라이트. 판이 어긋난 것을 넘기면 `build_yujin_creator_context`가
+        `creator_context_variant_not_current`로 죽어 **유진이 아예 대답을 못
+        하게** 된다. 그래서 어긋났으면 그냥 싣지 않는다 -- 숏폼을 못 고를 뿐
+        대화는 계속된다.
+
+        숏폼 모양이 여러 개면 싣지 않는다. 어느 것을 말하는지 정할 근거가
+        없고, 조용히 하나를 고르면 대표님이 안 본 쪽이 바뀐다. (화면은 세션당
+        하나만 만들게 막고 있다 -- `EditorWorkbenchRoute.createHighlightVariant`.)
+        """
+        try:
+            variants = self.store.list_output_variants(  # type: ignore[attr-defined]
+                project_id=project_id,
+                session_id=session_id,
+            )
+        except Exception:  # 조회 실패가 대화를 막지 않는다.
+            return None
+        matches = [
+            item
+            for item in variants or ()
+            if str(item.get("kind") or "") == "vertical_highlight"
+            and str(item.get("source_session_id") or "") == session_id
+            and int(item.get("source_session_revision") or 0) == session_revision
+        ]
+        if len(matches) != 1:
+            return None
+        variant_id = str(matches[0].get("variant_id") or "")
+        return variant_id or None
+
     async def _admit(
         self,
         *,
@@ -572,6 +615,12 @@ class HermesRunService:
                 session_id=session_id,
                 expected_session_revision=expected_session_revision,
                 selected_segment_id=selected_segment_id,
+                selected_variant_id=await asyncio.to_thread(
+                    self._current_short_form_variant_id,
+                    project_id=project_id,
+                    session_id=session_id,
+                    session_revision=expected_session_revision,
+                ),
             )
             async with self._reconciliation_lock:
                 durable = await asyncio.to_thread(
@@ -1454,6 +1503,12 @@ class HermesRunService:
                 session_id=run.session_id,
                 expected_session_revision=run.expected_session_revision,
                 selected_segment_id=run.selected_segment_id,
+                selected_variant_id=await asyncio.to_thread(
+                    self._current_short_form_variant_id,
+                    project_id=run.project_id,
+                    session_id=run.session_id,
+                    session_revision=run.expected_session_revision,
+                ),
             )
             original = run.creator_context
             if (

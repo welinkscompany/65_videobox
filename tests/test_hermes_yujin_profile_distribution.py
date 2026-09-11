@@ -264,6 +264,47 @@ def test_creator_skill_output_variant_names_every_required_action_and_field() ->
         assert required in skill
 
 
+def test_creator_skill_tells_yujin_how_to_cut_a_short_form() -> None:
+    """숏폼은 모양 조정이 아니라 **장면 고르기**다.
+
+    능력이 있어도 프로필에 없으면 유진은 안 고른다 -- Task 1이 방금 고친 것과
+    같은 결함이다. 장면 목록을 **통째로** 준다는 점과, 세로 하이라이트에서만
+    된다는 점을 문자열로 고정한다.
+    """
+    skill = (
+        PROFILE_ROOT / "skills" / "videobox-creator" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for required in (
+        "`action: select_segments`",
+        "`segment_ids`",
+        "`vertical_highlight`",
+        "숏폼",
+        "장면 전체 목록",
+        "여섯 형태",
+    ):
+        assert required in skill
+
+    # 손으로 적은 목록은 스키마가 늘어나면 조용히 낡는다. 스키마에서 직접 읽어
+    # 대조한다 -- action 을 더하거나 이름을 바꾸면서 프로필을 안 고치면 여기서
+    # 걸린다. 등장 횟수까지 세는 이유는 같은 이름이 두 곳에 적혀 있어서
+    # 한 곳만 바뀌면 단순 `in` 검사는 못 잡기 때문이다.
+    from typing import get_args
+
+    from videobox_domain_models.yujin_creator_proposals import VariantParameters
+
+    schema_actions = {
+        get_args(member.model_fields["action"].annotation)[0]
+        for member in get_args(get_args(VariantParameters)[0])
+    }
+    assert "select_segments" in schema_actions
+    for action in schema_actions:
+        assert f"`action: {action}`" in skill, action
+    # 계약 한 줄과, "숏폼으로 잘라 달라면 이걸 쓰라"는 안내 한 줄. 둘 다 있어야
+    # 한다 -- 계약만 있으면 능력이 있는 줄만 알고 언제 쓰는지는 모른다.
+    assert skill.count("select_segments") == 2
+
+
 def test_memory_skill_forbids_interactive_capture_and_requires_explicit_approval() -> None:
     skill = (
         PROFILE_ROOT / "skills" / "videobox-memory" / "SKILL.md"

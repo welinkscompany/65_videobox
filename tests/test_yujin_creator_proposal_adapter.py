@@ -161,6 +161,155 @@ def test_variant_projection_preserves_variant_lineage_in_candidate_dto() -> None
     assert result.proposal.candidates[0].media_type == "output_variant"
 
 
+def _short_form_context() -> YujinCreatorContext:
+    return YujinCreatorContext.model_validate(
+        {
+            **_context().model_dump(mode="python"),
+            "current_surface": "edit",
+            "selection_kind": "variant",
+            "master_session_id": "session-1",
+            "master_session_revision": 7,
+            "variant_id": "variant-short",
+            "variant_kind": "vertical_highlight",
+            "variant_revision": 4,
+            "segment_summaries": (
+                {"segment_id": "segment-1", "start_sec": 0.0, "end_sec": 5.0, "text": "훅"},
+                {"segment_id": "segment-2", "start_sec": 5.0, "end_sec": 9.0, "text": "설명"},
+                {"segment_id": "segment-3", "start_sec": 9.0, "end_sec": 12.0, "text": "결론"},
+            ),
+            "supported_controls": (
+                {"kind": "output_variant", "mode": "recommendation_only"},
+            ),
+        }
+    )
+
+
+def _short_form_raw(segment_ids: list[str]) -> str:
+    payload = {
+        "schema_version": "videobox.yujin-response.v1",
+        "reply_text": "숏폼으로 쓸 장면을 골랐어요.",
+        "proposal": {
+            "proposal_id": "proposal-yujin-short",
+            "base_revision": "session:session-1:revision:7:assets:3",
+            "title": "숏폼 장면 고르기",
+            "rationale": "훅과 결론만 남깁니다.",
+            "variant_id": "variant-short",
+            "base_variant_revision": 4,
+            "operations": [
+                {
+                    "operation_id": "short-form-selection",
+                    "kind": "output_variant",
+                    "target": {
+                        "variant_id": "variant-short",
+                        "track_id": "output-variant",
+                    },
+                    "parameters": {
+                        "action": "select_segments",
+                        "segment_ids": segment_ids,
+                    },
+                    "requires_materialization": False,
+                    "preview_summary": "숏폼에 넣을 장면 목록",
+                }
+            ],
+        },
+    }
+    return (
+        "숏폼으로 쓸 장면을 골랐어요.\n"
+        "```videobox-yujin-response\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+
+
+def _short_form_candidate(segment_ids: list[str]):
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        parse_and_project_yujin_creator_output,
+    )
+
+    projection = parse_and_project_yujin_creator_output(
+        _short_form_raw(segment_ids),
+        _short_form_context(),
+        revision=1,
+        trusted_project_id="project-1",
+        trusted_run_id="run-short",
+    )
+    assert projection.proposal is not None, projection.validation_outcome
+    return projection.proposal.candidates[0]
+
+
+def test_short_form_scene_selection_becomes_a_selected_segment_ids_patch() -> None:
+    """장면 고르기는 `overrides`가 아니라 `selected_segment_ids` 자리로 간다.
+
+    다섯 기존 동작은 전부 `overrides.<필드>`(모양 조정)로 갔다. 장면 구성은
+    `apply_variant_patch`에서 완전히 다른 가지이고, 세로 하이라이트에서만
+    허용된다.
+    """
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        variant_patch_from_yujin_candidate,
+    )
+
+    patch = variant_patch_from_yujin_candidate(
+        _short_form_candidate(["segment-1", "segment-3"])
+    )
+
+    assert patch == {"selected_segment_ids": ["segment-1", "segment-3"]}
+
+
+def test_one_message_can_carry_both_a_shape_change_and_a_scene_selection() -> None:
+    """적용기는 후보 여럿을 한 patch로 합친다 -- 모양과 장면이 섞여도 한 번에."""
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        merged_variant_patch_from_yujin_candidates,
+    )
+
+    crop_projection = _variant_crop_candidate()
+    merged = merged_variant_patch_from_yujin_candidates(
+        [crop_projection, _short_form_candidate(["segment-3"])]
+    )
+
+    assert merged["selected_segment_ids"] == ["segment-3"]
+    assert merged["overrides"]["crop"] == {
+        "x": 0.1,
+        "y": 0.0,
+        "width": 0.8,
+        "height": 1.0,
+    }
+
+
+def _variant_crop_candidate():
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        parse_and_project_yujin_creator_output,
+    )
+
+    payload = json.loads(
+        _short_form_raw(["segment-1"])
+        .split("```videobox-yujin-response\n", 1)[1]
+        .rsplit("\n```", 1)[0]
+    )
+    payload["proposal"]["operations"][0]["operation_id"] = "variant-crop"
+    payload["proposal"]["operations"][0]["parameters"] = {
+        "action": "set_crop",
+        "x": 0.1,
+        "y": 0.0,
+        "width": 0.8,
+        "height": 1.0,
+    }
+    raw = (
+        "숏폼으로 쓸 장면을 골랐어요.\n"
+        "```videobox-yujin-response\n"
+        f"{json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+    projection = parse_and_project_yujin_creator_output(
+        raw,
+        _short_form_context(),
+        revision=1,
+        trusted_project_id="project-1",
+        trusted_run_id="run-crop",
+    )
+    assert projection.proposal is not None, projection.validation_outcome
+    return projection.proposal.candidates[0]
+
+
 def test_exact_trailing_frame_projects_existing_candidate_only_dto() -> None:
     from videobox_core_engine.yujin_creator_proposal_adapter import (
         derive_yujin_persisted_proposal_id,

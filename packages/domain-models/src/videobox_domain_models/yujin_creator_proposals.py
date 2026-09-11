@@ -382,12 +382,44 @@ class VariantAudioCorrectionParameters(_Parameters):
     fade_out_sec: float = Field(ge=0, le=10)
 
 
+class VariantSegmentSelectionParameters(_Parameters):
+    """숏폼에 넣을 장면을 **통째 목록으로** 받는다.
+
+    앞의 다섯은 전부 모양 조정(크롭·초점·자막배치·안전영역·소리)이라 숏폼의
+    본질인 "어느 장면을 넣을지"를 못 정했다.
+
+    "이 장면 빼/넣어"라는 델타가 아니라 통째 목록인 이유는 **되돌리기**다.
+    유진 편집은 확인 클릭 없이 바로 적용되고(2026-09-01 결정) 안전장치가
+    되돌리기 하나뿐인데, 이 목록은 장면 구성뿐 아니라 **순서**까지 정한다
+    (`materialize_variant`가 이 순서대로 장면을 늘어놓는다). 델타에는 뺀
+    장면을 나중에 **몇 번째 자리로** 되돌릴지가 남지 않는다. 통째 목록은
+    이전 목록을 그대로 다시 보내는 것 하나로 원래대로 돌아간다.
+    """
+
+    action: Literal["select_segments"]
+    segment_ids: tuple[str, ...] = Field(min_length=1, max_length=32)
+
+    @field_validator("segment_ids")
+    @classmethod
+    def segment_ids_are_bounded_and_distinct(
+        cls, value: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        for item in value:
+            if not item.strip():
+                raise ValueError("selected_segment_id_required")
+            _bounded_utf8(item, limit=_ID_BYTES, label="target_id")
+        if len(set(value)) != len(value):
+            raise ValueError("duplicate_selected_segment_ids")
+        return value
+
+
 VariantParameters = Annotated[
     VariantCropParameters
     | VariantFocalParameters
     | VariantCaptionLayoutParameters
     | VariantSafeAreaParameters
-    | VariantAudioCorrectionParameters,
+    | VariantAudioCorrectionParameters
+    | VariantSegmentSelectionParameters,
     Field(discriminator="action"),
 ]
 
@@ -626,6 +658,18 @@ def validate_yujin_creator_response(
                 or target.variant_id != context.variant_id
             ):
                 raise ValueError("proposal_variant_identity_not_current")
+            if operation.parameters.action == "select_segments":
+                # 장면 구성을 바꿀 수 있는 모양은 **숏폼(세로 하이라이트)뿐이다.**
+                # 세로 전체본은 `materialize_variant`가
+                # `vertical_full_segment_order_or_membership_changed`로,
+                # `apply_variant_patch`는 `only_vertical_highlight_can_select_segments`로
+                # 거부한다 -- 유진이 그 자리까지 가지 않게 여기서 먼저 막는다.
+                if context.variant_kind != "vertical_highlight":
+                    raise ValueError("proposal_variant_kind_cannot_select_segments")
+                if any(
+                    item not in segment_ids for item in operation.parameters.segment_ids
+                ):
+                    raise ValueError("proposal_target_segment_not_current")
             continue
         if operation.kind in segment_required and target.segment_id not in segment_ids:
             raise ValueError("proposal_target_segment_not_current")

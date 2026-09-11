@@ -212,6 +212,115 @@ def test_context_is_built_before_durable_begin_and_attached_before_dispatch() ->
     assert gateway.prepared[0]["context"]["session_revision"] == 7
 
 
+class _StoreWithShortForm(_Store):
+    """숏폼(세로 하이라이트) 모양이 이미 있는 프로젝트."""
+
+    def __init__(self, order: list[str], *, variants: list[dict]) -> None:
+        super().__init__(order)
+        self.variants = variants
+        self.listed: list[dict] = []
+
+    def list_output_variants(self, **kwargs):
+        self.listed.append(kwargs)
+        return list(self.variants)
+
+
+def _variant_row(kind: str, *, source_session_revision: int = 7) -> dict:
+    return {
+        "variant_id": f"variant-{kind}",
+        "kind": kind,
+        "source_session_id": "session-a",
+        "source_session_revision": source_session_revision,
+        "variant_revision": 2,
+    }
+
+
+def test_creator_context_carries_the_current_short_form_shape() -> None:
+    """유진에게 숏폼을 시키려면 context에 그 모양이 실려 있어야 한다.
+
+    `output_variant` 동작은 `selection_kind == "variant"`일 때만 통과하는데
+    (`validate_yujin_creator_response`), 실행 중인 서비스는 `selected_variant_id`를
+    **한 번도 넘기지 않았다** -- 능력이 있어도 절대 적용될 수 없었다.
+    """
+    order: list[str] = []
+    store = _StoreWithShortForm(
+        order,
+        variants=[_variant_row("horizontal"), _variant_row("vertical_highlight")],
+    )
+    seen: list[object] = []
+
+    def build(**kwargs):
+        seen.append(kwargs.get("selected_variant_id"))
+        return _context_builder(order)(**kwargs)
+
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(order),
+        context_builder=build,
+        capability_verifier=_Verifier(),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="project-a",
+            session_id="session-a",
+            conversation_id="conversation-a",
+            client_message_id="message-a",
+            text="이거 숏폼으로 잘라줘",
+            expected_session_revision=7,
+            selected_segment_id=None,
+        )
+        await run.task
+        await service.shutdown()
+
+    asyncio.run(scenario())
+
+    assert seen[0] == "variant-vertical_highlight"
+
+
+def test_a_short_form_shape_left_on_an_older_master_is_not_attached() -> None:
+    """마스터가 앞서 나가면 그 모양은 싣지 않는다.
+
+    `build_yujin_creator_context`는 판이 어긋난 변형본을 받으면
+    `creator_context_variant_not_current`로 죽는다 -- 그대로 넘기면 **유진이
+    아예 대답을 못 하게** 된다. 여기서 미리 걸러 대화는 계속되게 한다.
+    """
+    order: list[str] = []
+    store = _StoreWithShortForm(
+        order,
+        variants=[_variant_row("vertical_highlight", source_session_revision=6)],
+    )
+    seen: list[object] = []
+
+    def build(**kwargs):
+        seen.append(kwargs.get("selected_variant_id"))
+        return _context_builder(order)(**kwargs)
+
+    service = HermesRunService(
+        store=store,
+        gateway_client=_Gateway(order),
+        context_builder=build,
+        capability_verifier=_Verifier(),
+    )
+
+    async def scenario():
+        run = await service.create_run(
+            project_id="project-a",
+            session_id="session-a",
+            conversation_id="conversation-a",
+            client_message_id="message-a",
+            text="이거 숏폼으로 잘라줘",
+            expected_session_revision=7,
+            selected_segment_id=None,
+        )
+        await run.task
+        await service.shutdown()
+
+    asyncio.run(scenario())
+
+    assert seen[0] is None
+
+
 def test_stale_or_preparation_failure_keeps_prompt_at_zero_and_settles_owned_row() -> None:
     stale_order: list[str] = []
     stale_store = _Store(stale_order)

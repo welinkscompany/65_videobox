@@ -29,9 +29,13 @@ from videobox_core_engine.editing_session import apply_yujin_editing_proposal
 from videobox_domain_models.caption_style import DEFAULT_CAPTION_FONT_SIZE_PX
 from videobox_domain_models.director_proposals import DirectorProposal
 from videobox_core_engine.director_proposals import proposal_to_payload
-from videobox_core_engine.yujin_creator_proposal_adapter import variant_patch_from_yujin_candidate
-from videobox_core_engine.output_variants import apply_variant_patch
-from videobox_domain_models.output_variants import OutputVariant
+from videobox_core_engine.yujin_creator_proposal_adapter import (
+    merged_variant_patch_from_yujin_candidates,
+)
+from videobox_core_engine.output_variants import (
+    apply_variant_patch,
+    output_variant_from_row,
+)
 from videobox_core_engine.project_asset_materializer import ProjectAssetMaterializer
 from videobox_storage.local_project_store import LocalProjectStore
 from videobox_storage.local_project_store import EditingSessionRevisionConflict, sha256_file
@@ -1011,7 +1015,7 @@ def build_director_proposals_router(
                     raise ValueError("variant_candidate_required")
                 variant_id = str(proposal.diff.get("variant_id") or "")
                 expected_variant_revision = int(proposal.diff.get("base_variant_revision") or 0)
-                current = OutputVariant.model_validate(
+                current = output_variant_from_row(
                     store.get_output_variant(project_id=project_id, variant_id=variant_id)
                 )
                 if (
@@ -1020,13 +1024,12 @@ def build_director_proposals_router(
                     or current.variant_revision != expected_variant_revision
                 ):
                     raise HTTPException(status_code=409, detail="stale_variant_proposal")
-                merged_overrides: dict[str, object] = {}
-                for candidate in selected:
-                    candidate_patch = variant_patch_from_yujin_candidate(candidate)
-                    merged_overrides.update(dict(candidate_patch["overrides"]))
+                # 모양 조정(`overrides`)과 숏폼 장면 고르기(`selected_segment_ids`)를
+                # **한 patch로** 합친다. 전에는 `overrides`만 합쳐서, 장면을
+                # 골라 줘도 어디에도 닿지 않았다.
                 updated = apply_variant_patch(
                     current,
-                    {"overrides": merged_overrides},
+                    merged_variant_patch_from_yujin_candidates(selected),
                     expected_variant_revision=expected_variant_revision,
                 )
                 variant = store.apply_director_variant_proposal_transaction(

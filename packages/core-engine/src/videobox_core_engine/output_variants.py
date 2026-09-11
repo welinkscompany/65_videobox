@@ -30,6 +30,24 @@ _PATCH_FIELDS = frozenset(
 )
 
 
+#: 저장소 행에는 있지만 변형본 모델에는 없는 키. 모델이 `extra="forbid"`라
+#: 그냥 넘기면 검증이 깨진다.
+_STORE_ONLY_VARIANT_KEYS = frozenset({"project_id", "created_at", "updated_at"})
+
+
+def output_variant_from_row(row: Mapping[str, object]) -> OutputVariant:
+    """저장소가 돌려준 변형본 한 줄을 도메인 모델로 바꾼다. **이 함수가 유일한 자리다.**
+
+    같은 변환이 두 곳에 있었고 한쪽(유진 제안 적용 경로)은 키를 안 걸러
+    `extra_forbidden`으로 항상 죽었다 -- 유진이 변형본을 고쳐 주면 화면에는
+    "적용하지 못했어요"만 떴다. 이 저장소는 같은 로직이 둘로 갈라져 한쪽만
+    고쳐지는 함정에 전에도 걸렸다(`build_variant_timeline_payload` 머리말).
+    """
+    return OutputVariant.model_validate(
+        {key: value for key, value in row.items() if key not in _STORE_ONLY_VARIANT_KEYS}
+    )
+
+
 @dataclass(frozen=True)
 class MaterializedVariant:
     source_session_id: str

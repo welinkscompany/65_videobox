@@ -327,3 +327,169 @@ def test_materialize_route_rebuilds_a_cache_left_by_the_old_copy_logic(tmp_path:
         project_id=project_id, timeline_id=materialization["timeline_id"]
     )
     assert rebuilt["output"] == {"width": 1080, "height": 1920}
+
+
+def _short_form_project(tmp_path: Path):
+    """장면 셋짜리 프로젝트와, 그 위에 만들어진 숏폼(세로 하이라이트) 모양."""
+    app = create_app(projects_root=tmp_path / "projects")
+    client = TestClient(app)
+    project = client.post("/api/projects", json={"name": "숏폼 장면 고르기"}).json()
+    session = app.state.store.save_editing_session(
+        project_id=project["project_id"],
+        timeline_id="timeline-source",
+        session_payload={
+            "segments": [
+                {"segment_id": "seg-hook", "caption_text": "이것만 보세요", "start_sec": 0.0, "end_sec": 3.0},
+                {"segment_id": "seg-middle", "caption_text": "중간 설명", "start_sec": 3.0, "end_sec": 20.0},
+                {"segment_id": "seg-close", "caption_text": "결론입니다", "start_sec": 20.0, "end_sec": 24.0},
+            ],
+            "history": [],
+        },
+    )
+    variant = client.post(
+        f"/api/projects/{project['project_id']}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    ).json()["variant"]
+    return app, client, project["project_id"], session, variant
+
+
+def _save_short_form_proposal(app, project_id: str, session: dict, variant: dict, segment_ids: list[str]) -> str:
+    """유진이 실제로 돌려주는 모양 그대로 만들어 저장한다 (파싱 -> 되짚기 -> 저장)."""
+    import json as _json
+
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        activate_yujin_media_projection,
+        parse_and_project_yujin_creator_output,
+    )
+    from videobox_domain_models.yujin_creator_context import YujinCreatorContext
+
+    store = app.state.store
+    asset_index_revision = int(store.get_asset_index_revision(project_id))
+    session_revision = int(session["session_revision"])
+    context = YujinCreatorContext.model_validate(
+        {
+            "schema_version": "videobox.yujin-context.v1",
+            "project_id": project_id,
+            "session_id": session["session_id"],
+            "session_revision": session_revision,
+            "asset_index_revision": asset_index_revision,
+            "timeline_id": "timeline-source",
+            "timeline_version": "v001",
+            "segment_summaries": tuple(
+                {
+                    "segment_id": str(item["segment_id"]),
+                    "start_sec": float(item["start_sec"]),
+                    "end_sec": float(item["end_sec"]),
+                    "text": str(item["caption_text"]),
+                }
+                for item in session["segments"]
+            ),
+            "media_candidates": (),
+            "timeline_summary": {
+                "duration_sec": 24.0,
+                "track_count": 1,
+                "clip_count": 3,
+                "gap_count": 0,
+            },
+            "supported_controls": ({"kind": "output_variant", "mode": "recommendation_only"},),
+            "current_surface": "edit",
+            "selection_kind": "variant",
+            "master_session_id": session["session_id"],
+            "master_session_revision": session_revision,
+            "variant_id": str(variant["variant_id"]),
+            "variant_kind": "vertical_highlight",
+            "variant_revision": int(variant["variant_revision"]),
+        }
+    )
+    payload = {
+        "schema_version": "videobox.yujin-response.v1",
+        "reply_text": "숏폼에 쓸 장면을 골랐어요.",
+        "proposal": {
+            "proposal_id": "proposal-short-form",
+            "base_revision": f"session:{session['session_id']}:revision:{session_revision}:assets:{asset_index_revision}",
+            "title": "숏폼 장면 고르기",
+            "rationale": "훅과 결론만 남깁니다.",
+            "variant_id": str(variant["variant_id"]),
+            "base_variant_revision": int(variant["variant_revision"]),
+            "operations": [
+                {
+                    "operation_id": "short-form-selection",
+                    "kind": "output_variant",
+                    "target": {
+                        "variant_id": str(variant["variant_id"]),
+                        "track_id": "output-variant",
+                    },
+                    "parameters": {"action": "select_segments", "segment_ids": segment_ids},
+                    "requires_materialization": False,
+                    "preview_summary": "숏폼에 넣을 장면 목록",
+                }
+            ],
+        },
+    }
+    raw = (
+        "숏폼에 쓸 장면을 골랐어요.\n"
+        "```videobox-yujin-response\n"
+        f"{_json.dumps(payload, ensure_ascii=False)}\n"
+        "```"
+    )
+    projection = parse_and_project_yujin_creator_output(
+        raw,
+        context,
+        revision=1,
+        trusted_project_id=project_id,
+        trusted_run_id="run-short-form",
+    )
+    assert projection.proposal is not None, projection.validation_outcome
+    projection = activate_yujin_media_projection(
+        store=store,
+        project_id=project_id,
+        context=context,
+        projection=projection,
+    )
+    proposal = projection.proposal
+    assert proposal is not None
+    assert proposal.status == "ready", proposal.diff.get("proposal_mode")
+    store.save_director_proposal(project_id, proposal)
+    return proposal.proposal_id
+
+
+def test_yujin_short_form_cut_applies_through_the_real_apply_route(tmp_path: Path) -> None:
+    """유진이 고른 숏폼 장면이 **실제 적용 경로**를 통과해 저장된다.
+
+    이 저장소가 반복해서 겪은 함정이라 화면이 밟는 경로 그대로 잰다 -- 스키마와
+    적용기가 있어도 라우터가 `overrides`만 합치고 있으면 장면 선택은
+    어디에도 닿지 않는다.
+    """
+    app, client, project_id, session, variant = _short_form_project(tmp_path)
+    before = list(variant["selected_segment_ids"] or [])
+    proposal_id = _save_short_form_proposal(
+        app, project_id, session, variant, ["seg-hook", "seg-close"]
+    )
+    candidate_id = app.state.store.get_director_proposal(
+        project_id=project_id, proposal_id=proposal_id
+    ).candidates[0].candidate_id
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply",
+        json={
+            "candidate_ids": [candidate_id],
+            "expected_revision": int(session["session_revision"]),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    applied = response.json()["variant"]
+    assert applied["selected_segment_ids"] == ["seg-hook", "seg-close"]
+    assert applied["variant_revision"] == int(variant["variant_revision"]) + 1
+
+    # 되돌리기 -- 화면의 `전체 장면으로 되돌리기`와 **같은 문**(통째 목록 PATCH)이다.
+    undone = client.patch(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}",
+        json={
+            "expected_variant_revision": applied["variant_revision"],
+            "patch": {"selected_segment_ids": before},
+        },
+    )
+
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["variant"]["selected_segment_ids"] == before

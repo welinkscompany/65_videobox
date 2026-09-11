@@ -76,6 +76,71 @@ def test_vertical_highlight_can_select_and_reorder_master_segments() -> None:
     assert updated.variant_revision == 4
 
 
+def test_yujin_short_form_cut_is_undone_by_resending_the_previous_whole_list() -> None:
+    """유진 편집은 확인 클릭 없이 바로 적용된다 -- 안전장치는 되돌리기 하나다.
+
+    (`docs/decisions/2026-09-01-yujin-chat-applies-edits-directly.ko.md`)
+    그래서 **되돌리기가 깨끗이 되는 모양**으로 장면을 받는다. 통째 목록은
+    이전 목록을 그대로 다시 보내면 장면 구성과 **순서까지** 원래대로 돌아온다.
+    "이 장면 빼"라는 델타였다면 역연산이 "몇 번째 자리에 다시 넣기"인데 그
+    자리 정보가 델타에 없다.
+    """
+    from videobox_core_engine.yujin_creator_proposal_adapter import (
+        variant_patch_from_yujin_candidate,
+    )
+    from videobox_domain_models.director_proposals import DirectorCandidate
+
+    def _yujin_candidate(segment_ids: list[str]) -> DirectorCandidate:
+        return DirectorCandidate(
+            candidate_id="yujin-candidate-short",
+            visible_reference_code="P01-01",
+            media_type="output_variant",
+            asset_id="yujin-candidate-short",
+            library_asset_id=None,
+            reason_chips=("숏폼 장면 고르기",),
+            scores={},
+            availability="actionable",
+            review_status="approved",
+            preview_uri=None,
+            controls={
+                "kind": "output_variant",
+                "target": {"variant_id": "variant-vertical_highlight", "track_id": "output-variant"},
+                "parameters": {"action": "select_segments", "segment_ids": segment_ids},
+                "requires_materialization": False,
+                "preview_summary": "숏폼에 넣을 장면 목록",
+            },
+            expected_content_sha256=None,
+            media_revision="session:session-1:revision:7:assets:3",
+            canonical_metadata={},
+        )
+
+    variant = _variant("vertical_highlight")
+    before = variant.selected_segment_ids or tuple(variant.master_segment_ids or ())
+
+    cut = apply_variant_patch(
+        variant,
+        variant_patch_from_yujin_candidate(_yujin_candidate(["seg-c", "seg-a"])),
+        expected_variant_revision=3,
+    )
+    assert cut.selected_segment_ids == ("seg-c", "seg-a")
+    assert [item["segment_id"] for item in materialize_variant(cut, _master_segments()).segments] == [
+        "seg-c",
+        "seg-a",
+    ]
+
+    restored = apply_variant_patch(
+        cut,
+        {"selected_segment_ids": list(before)},
+        expected_variant_revision=cut.variant_revision,
+    )
+
+    assert restored.selected_segment_ids == before
+    assert [
+        item["segment_id"] for item in materialize_variant(restored, _master_segments()).segments
+    ] == list(before)
+    assert restored.variant_revision == 5
+
+
 @pytest.mark.parametrize("kind", ["horizontal", "vertical_full"])
 @pytest.mark.parametrize(
     "patch",

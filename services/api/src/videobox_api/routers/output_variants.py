@@ -15,6 +15,7 @@ from videobox_core_engine.output_variants import (
     apply_variant_patch,
     build_variant_timeline_payload,
     materialize_variant,
+    output_variant_from_row,
     rebase_variant,
     variant_timeline_needs_rebuild,
 )
@@ -26,13 +27,7 @@ from videobox_storage.local_project_store import (
 
 
 def _domain_variant(row: dict[str, Any]) -> OutputVariant:
-    return OutputVariant.model_validate(
-        {
-            key: value
-            for key, value in row.items()
-            if key not in {"project_id", "created_at", "updated_at"}
-        }
-    )
+    return output_variant_from_row(row)
 
 
 def _raise_variant_error(error: Exception) -> None:
