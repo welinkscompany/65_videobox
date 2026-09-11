@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import threading
 from urllib.parse import quote
@@ -40,6 +41,8 @@ from videobox_api.orchestration import ApiOrchestrator
 # 경로 구분자(`/`, `\`)·따옴표·제어문자(줄바꿈 포함)를 거른다. 프로젝트 이름은
 # 사용자가 짓는 값이라 그대로 헤더에 실으면 HTTP 응답 분할(줄바꿈으로 다른
 # 헤더를 끼워 넣는 공격)이나 Windows 금지 문자 문제로 이어질 수 있다.
+_LOGGER = logging.getLogger(__name__)
+
 _UNSAFE_DOWNLOAD_NAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f\x7f]')
 
 # 밑동 길이 상한(final-fix-report.md 발견 3, 감사 실측). 한글 한 글자는
@@ -82,13 +85,42 @@ _OUTPUT_SHAPE_NAMES = {
 }
 
 
-def _output_shape_name(output_mode: object) -> tuple[str, str]:
-    """타임라인의 `output_mode`를 내려받기 이름 꼬리표 쌍으로 옮긴다.
+def _output_shape_name(variant_kind: object) -> tuple[str, str]:
+    """변형본의 `kind`를 내려받기 이름 꼬리표 쌍으로 옮긴다.
 
     모르는 값이면 빈 꼬리표다 -- 완성본과 이름이 겹치는 것보다 나쁜 것은
     내부 용어(`vertical_full` 같은)가 파일 이름으로 대표님께 가는 것이다.
     """
-    return _OUTPUT_SHAPE_NAMES.get(str(output_mode or ""), ("", ""))
+    return _OUTPUT_SHAPE_NAMES.get(str(variant_kind or ""), ("", ""))
+
+
+def _download_shape_for_render(orchestrator, *, project_id: str, timeline_id: str) -> tuple[str, str]:
+    """이 완성본이 가로·세로 변형본인지 보고 이름 꼬리표를 고른다.
+
+    **운반체는 `source_variant_id`다.** 처음에는 타임라인의 `output_mode`를
+    읽었는데, 파일 저장소로 도는 시험에서는 통과하고 **제품(Postgres)에서는
+    안 통했다** -- 실물에서 재 보니 변형본 타임라인의 `output_mode`가 전부
+    `review`였다(2026-09-11). `source_variant_id`는 실물에서도 제대로 실려 있다.
+
+    실패해도 내려받기를 막지 않는다. 이름이 옛날처럼 될 뿐이다. 다만 **조용히**
+    넘기지는 않는다 -- 처음 이 자리를 조용히 넘겼을 때 시험은 초록인데 제품은
+    안 되는 상태를 한참 못 봤다.
+    """
+    if not timeline_id:
+        return ("", "")
+    try:
+        timeline = orchestrator.store.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
+        variant_id = str(timeline.get("source_variant_id") or "")
+        if not variant_id:
+            return ("", "")
+        variant = orchestrator.store.get_output_variant(project_id=project_id, variant_id=variant_id)
+        return _output_shape_name(variant.get("kind"))
+    except Exception:
+        _LOGGER.warning(
+            "내려받기 이름에 붙일 모양을 못 읽었다 (project=%s timeline=%s). 완성본 이름으로 내보낸다.",
+            project_id, timeline_id, exc_info=True,
+        )
+        return ("", "")
 
 
 def _final_render_content_disposition(
@@ -389,15 +421,9 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
             # 어느 모양인지는 타임라인의 `output_mode`에서만 알 수 있다. 이걸 안
             # 보면 완성본·가로·세로가 전부 한 이름으로 떨어져 서로 덮어쓴다
             # (2026-09-11 실물에서 잡았다 -- 세 파일이 md5까지 같았다).
-            shape = ("", "")
-            try:
-                timeline_id = str(render.get("timeline_id") or "")
-                if timeline_id:
-                    timeline = orchestrator.store.get_timeline_run(project_id=project_id, timeline_id=timeline_id)
-                    shape = _output_shape_name(timeline.get("output_mode"))
-            except Exception:
-                # 모양을 못 읽는다고 내려받기를 막지는 않는다. 이름만 옛날처럼 된다.
-                shape = ("", "")
+            shape = _download_shape_for_render(
+                orchestrator, project_id=project_id, timeline_id=str(render.get("timeline_id") or "")
+            )
         except Exception as exc:
             raise _http_error(exc) from exc
         response.headers["Content-Disposition"] = _final_render_content_disposition(

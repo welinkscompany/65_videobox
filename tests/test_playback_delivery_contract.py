@@ -12,18 +12,23 @@ from videobox_storage.local_project_store import LocalProjectStore
 
 
 def _make_final_render_job(
-    store: LocalProjectStore, *, project_id: str, tmp_path: Path, output_mode: str = "review"
+    store: LocalProjectStore, *, project_id: str, tmp_path: Path, source_variant_id: str | None = None
 ):
     """완성본 job 하나를 실제 저장소 경로에 만든다 -- 여러 시험이 공유하는 셋업.
 
-    `output_mode`가 가로·세로 변형본을 가른다. 변형본도 같은 `content` 주소를
-    쓰므로(`VariantOutputCard.tsx`) 이름을 가르는 것은 이 값뿐이다.
+    가로·세로 변형본이면 타임라인에 `source_variant_id`가 실린다 -- 제품이
+    실제로 그렇게 만든다(`local_pipeline._materialize_variant_for_output`).
+    **`output_mode`로 가르면 안 된다:** 파일 저장소에서는 그 값이 남지만
+    제품(Postgres)에서는 변형본 타임라인도 전부 `review`로 적힌다. 2026-09-11에
+    실물에서 재고 알았다 -- 그 전 판은 이 시험만 초록이고 제품은 안 됐다.
     """
-    source = tmp_path / f"clip-{output_mode}.mp4"
+    source = tmp_path / f"clip-{source_variant_id or 'master'}.mp4"
     source.write_bytes(b"0123456789")
+    payload: dict = {"tracks": [], "review_flags": [], "pending_recommendations": []}
+    if source_variant_id:
+        payload["source_variant_id"] = source_variant_id
     timeline = store.save_timeline_run(
-        project_id=project_id, output_mode=output_mode,
-        timeline_payload={"tracks": [], "review_flags": [], "pending_recommendations": []},
+        project_id=project_id, output_mode="review", timeline_payload=payload,
     )
     export = store.save_final_render(project_id=project_id, timeline_id=timeline["timeline_id"], source_output_path=source)
     job = store.create_job(project_id=project_id, job_type=JobType.FINAL_RENDER, status=JobStatus.SUCCEEDED)
@@ -151,15 +156,30 @@ def test_each_shape_downloads_under_its_own_name(tmp_path: Path) -> None:
     client = TestClient(create_app(projects_root=tmp_path))
     project = client.post("/api/projects", json={"name": "가을 브이로그"}).json()["project_id"]
     store = LocalProjectStore(tmp_path)
+    session = store.save_editing_session(
+        project_id=project, timeline_id="timeline-1",
+        session_payload={"segments": [{"segment_id": "seg-a", "text": "a"}], "history": []},
+    )
+    # 제품이 만드는 그대로: 기본 둘은 저절로 생기고 하이라이트만 따로 만든다.
+    variants = {
+        item["kind"]: item["variant_id"]
+        for item in store.ensure_output_variants(project_id=project, session_id=session["session_id"])
+    }
+    variants["vertical_highlight"] = store.create_output_variant(
+        project_id=project, source_session_id=session["session_id"], kind="vertical_highlight",
+    )["variant_id"]
 
-    def downloaded_name(output_mode: str) -> str:
-        job = _make_final_render_job(store, project_id=project, tmp_path=tmp_path, output_mode=output_mode)
+    def downloaded_name(kind: str | None) -> str:
+        job = _make_final_render_job(
+            store, project_id=project, tmp_path=tmp_path,
+            source_variant_id=variants[kind] if kind else None,
+        )
         response = client.get(f"/api/projects/{project}/final-renders/{job['job_id']}/content")
         assert response.status_code == 200
         disposition = response.headers["content-disposition"]
         return unquote(disposition.split("filename*=UTF-8''", 1)[1])
 
-    assert downloaded_name("review") == "가을 브이로그.mp4"
+    assert downloaded_name(None) == "가을 브이로그.mp4"
     assert downloaded_name("horizontal") == "가을 브이로그 가로 영상.mp4"
     assert downloaded_name("vertical_full") == "가을 브이로그 세로 영상.mp4"
     assert downloaded_name("vertical_highlight") == "가을 브이로그 세로 하이라이트.mp4"
