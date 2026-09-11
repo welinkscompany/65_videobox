@@ -2608,4 +2608,98 @@ describe("완성본 실패 이유", () => {
 
     expect(await screen.findByText("검토에서 아직 승인하지 않았어요. 검토를 마치면 완성본을 만들 수 있어요.")).toBeVisible();
   });
+
+  /** 완성본 카드는 스스로 상태를 다시 읽는데 가로·세로 카드는 `출력 상태
+   *  다시 확인`을 누를 때까지 "출력을 만드는 중이에요."에 얼어 있었다 --
+   *  같은 화면에서 한쪽만 움직인다. 내려받기 문과 한국어 실패 문장이 그
+   *  클릭 전까지 아예 안 나타나니, 그 둘을 만든 이유가 사라진다.
+   *  아래 두 시험은 완성본 재확인과 같은 쌍이다: 스스로 읽는가, 그리고
+   *  끝나면 **반드시 멈추는가**. */
+  function stubPendingVariantRender() {
+    stubCanonicalSubtitleApi();
+    vi.spyOn(api, "listOutputVariants").mockResolvedValue({
+      variants: [{ variant_id: "variant-h1", kind: "horizontal" }] as never,
+    });
+    vi.spyOn(api, "startVariantRenders").mockResolvedValue({
+      project_id: "project_a",
+      status: "accepted",
+      items: [{ variant_id: "variant-h1", variant_kind: "horizontal", job_id: "variant-job-1", status: "pending", error_code: null }],
+    });
+    vi.mocked(api.listJobs).mockResolvedValue([
+      activeTimelineJob,
+      // 마스터 완성본으로 잘못 집히지 않게 `input_ref`를 변형 전용 편집판으로
+      // 둔다(바로 위 두 시험의 같은 주석 참고) -- 그래야 이 시험이 재는 것이
+      // 변형 카드의 자체 재확인뿐이고, 완성본 재확인이 대신 돌아서 가짜로
+      // 통과하지 않는다.
+      { job_id: "variant-job-1", project_id: "project_a", job_type: "final_render", status: "running", input_ref: "variant-materialized-timeline-1", output_ref: null, error_message: null, started_at: null, finished_at: null },
+    ] as never);
+  }
+
+  /** fake timer 아래에서는 findBy/waitFor의 내부 타이머가 안 돈다 --
+   *  순수 프로미스 연쇄만 마이크로태스크 비우기로 흘려보낸다. */
+  const flush = async (times = 8) => {
+    await act(async () => { for (let i = 0; i < times; i += 1) await Promise.resolve(); });
+  };
+
+  it("가로·세로 출력도 아무도 안 눌러도 스스로 상태를 다시 확인한다", async () => {
+    vi.useFakeTimers();
+    stubPendingVariantRender();
+    vi.spyOn(api, "getFinalRender")
+      .mockResolvedValueOnce({ job_id: "variant-job-1", status: "running", render: null })
+      .mockResolvedValue({
+        job_id: "variant-job-1", status: "succeeded", render: {
+          export_id: "variant-job-1", timeline_id: "variant-materialized-timeline-1", export_type: "final_render",
+          file_uri: "local://horizontal.mp4", status: "succeeded", source_session_id: null, source_session_revision: null, is_current: true,
+        },
+      } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await flush(12);
+    const submit = screen.getByRole("button", { name: "가로·세로 출력 만들기" });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await flush(12);
+    expect(screen.getByText("출력을 만드는 중이에요.")).toBeVisible();
+
+    // 아무도 `출력 상태 다시 확인`을 안 눌렀다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+      await flush(6);
+    });
+
+    expect(screen.getByRole("link", { name: "가로 영상 내려받기" })).toBeVisible();
+  });
+
+  it("가로·세로 출력이 다 만들어지면 스스로 묻기를 멈춘다", async () => {
+    vi.useFakeTimers();
+    stubPendingVariantRender();
+    vi.spyOn(api, "getFinalRender")
+      .mockResolvedValueOnce({ job_id: "variant-job-1", status: "running", render: null })
+      .mockResolvedValue({
+        job_id: "variant-job-1", status: "succeeded", render: {
+          export_id: "variant-job-1", timeline_id: "variant-materialized-timeline-1", export_type: "final_render",
+          file_uri: "local://horizontal.mp4", status: "succeeded", source_session_id: null, source_session_revision: null, is_current: true,
+        },
+      } as never);
+
+    render(<OutputsPage projectId="project_a" onOpenEditor={vi.fn()} />);
+    await flush(12);
+    fireEvent.click(screen.getByRole("button", { name: "가로·세로 출력 만들기" }));
+    await flush(12);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+      await flush(6);
+    });
+    expect(screen.getByRole("link", { name: "가로 영상 내려받기" })).toBeVisible();
+    const callsWhenDone = vi.mocked(api.listJobs).mock.calls.length;
+
+    // 다 된 뒤에도 계속 두드리면 영원히 서버를 부른다 -- 이 파일에서 가장
+    // 나쁜 결말이다. 멈춰야 한다.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000 * 4);
+      await flush(6);
+    });
+    expect(vi.mocked(api.listJobs).mock.calls.length).toBe(callsWhenDone);
+  });
 });

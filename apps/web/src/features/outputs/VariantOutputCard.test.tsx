@@ -76,6 +76,33 @@ describe("VariantOutputCard", () => {
     expect(status).not.toHaveTextContent("final_output_requires_review_approval");
   });
 
+  // 엔진은 파일 경로가 섞인 예외를 코드 셋으로 바꿔서 보낸다
+  // (`packages/core-engine/src/videobox_core_engine/job_error_message.py`의
+  // `safe_job_error_message` -- `asset_file_missing`,
+  // `asset_file_permission_denied`, `external_command_failed` 셋이 전부다).
+  // 그 셋이 표에 없어서 "이 출력을 만들지 못했어요."로 뭉개졌고, 정작
+  // owner가 할 일(파일 확인 등)이 화면에서 사라졌다. 예전에는 이 실패가
+  // 통째로 `renderer_failed`로 찍혀서 적어도 "다시 만들어 주세요"는
+  // 있었으니, 이건 되돌아간 것이다.
+  it.each([
+    "asset_file_missing",
+    "asset_file_permission_denied",
+    "external_command_failed",
+  ])("엔진이 안전 문구로 바꿔 보내는 실패 사유(%s)도 다음에 할 일을 말한다", (code) => {
+    render(
+      <VariantOutputCard
+        projectId="project_a"
+        item={{ variant_id: "vertical", variant_kind: "vertical_full", status: "failed", error_code: code }}
+        onRetry={() => {}}
+      />,
+    );
+    const status = screen.getByRole("status");
+    expect(status).not.toHaveTextContent(code);
+    // 뭉개진 한 줄로 떨어지면 다음에 할 일이 없다.
+    expect(status.textContent?.trim()).not.toBe("이 출력을 만들지 못했어요.");
+    expect(status.textContent ?? "").toMatch(/확인|다시/);
+  });
+
   // 표에 없는 코드가 와도 코드를 그대로 찍지 않는다(옛 결함 재현 금지) --
   // 동시에 아무 말도 안 하는 것도 아니다. 표가 이미 쓰는 방식(일반화된
   // 안내 문장)을 그대로 따른다.

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { api } from "../../api";
@@ -11,7 +11,10 @@ beforeEach(() => {
   vi.spyOn(api, "listOutputVariants").mockResolvedValue({ variants: [] } as never);
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 it("asks for the shared editing state once, not once per half of the screen", async () => {
   // 두 영역을 그냥 나란히 놓으면 같은 것을 두 번 묻는다. 요청이 두 배가 될 뿐
@@ -56,4 +59,76 @@ it("has exactly one page-level heading, not one per half", async () => {
   await waitFor(() => expect(screen.getByTestId("outputs-page")).toBeInTheDocument());
 
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+});
+
+/** 완성본을 만드는 동안 화면이 스스로 상태를 다시 읽는다. 그 재확인이 검토
+ *  영역까지 "불러오는 중"으로 되돌리면, 몇 분짜리 완성본을 만드는 내내 화면
+ *  윗부분이 5초마다 접혔다 펴진다(스크롤이 튄다). 하필 그 화면을 계속 열어
+ *  두라고 안내하는 화면이다.
+ *
+ *  **이 시험은 합쳐진 화면으로 그린다.** 기존 재확인 시험들은 `OutputsPage`를
+ *  단독으로(`shared`/`onSharedRefresh` 없이) 그려서 이 경계를 한 번도 안
+ *  지났다 -- 그래서 깜빡임을 못 잡았다. */
+function stubReadyReviewAndRunningFinal() {
+  const session = {
+    session_id: "session-a", project_id: "project-a", timeline_id: "timeline-a",
+    session_revision: 4, segments: [], history: [],
+  };
+  const reviewJob = {
+    job_id: "job-a", project_id: "project-a", job_type: "timeline_build", status: "succeeded",
+    input_ref: "source", output_ref: "timeline-a", error_message: null,
+    started_at: "2026-09-11T00:00:00Z", finished_at: "2026-09-11T00:01:00Z",
+  };
+  const runningFinal = {
+    job_id: "final-a", project_id: "project-a", job_type: "final_render", status: "running",
+    input_ref: "job-a", output_ref: null, error_message: null,
+    started_at: "2026-09-11T00:02:00Z", finished_at: null,
+  };
+  vi.mocked(api.getLatestEditingSession).mockResolvedValue(session as never);
+  vi.mocked(api.listJobs).mockResolvedValue([reviewJob, runningFinal] as never);
+  vi.spyOn(api, "getTimeline").mockResolvedValue({
+    job_id: "job-a", status: "succeeded",
+    timeline: {
+      timeline_id: "timeline-a", project_id: "project-a", version: "v1", output_mode: "review",
+      review_status: "draft", source_session_id: "session-a", source_session_revision: 4,
+      tracks: [], review_flags: [], applied_recommendations: [], pending_recommendations: [],
+    },
+  } as never);
+  vi.spyOn(api, "getReviewSnapshot").mockResolvedValue({
+    project_id: "project-a", timeline_id: "timeline-a", review_status: "draft",
+    segments: [], applied_recommendations: [], pending_recommendations: [], review_flags: [],
+  } as never);
+  vi.spyOn(api, "getReviewApproval").mockResolvedValue({
+    project_id: "project-a", timeline_id: "timeline-a", review_status: "draft",
+    approved_at: null, updated_at: "2026-09-11T00:02:00Z",
+    source_session_id: "session-a", source_session_revision: 4, is_current: true,
+    invalidated_at: null, invalidated_reason: null,
+  } as never);
+  vi.spyOn(api, "getFinalRender").mockResolvedValue({ job_id: "final-a", status: "running", render: null } as never);
+  vi.spyOn(api, "getEditorPlaybackManifest").mockResolvedValue(null as never);
+  vi.spyOn(api, "getSubtitle").mockResolvedValue(null as never);
+}
+
+it("완성본을 만드는 동안 스스로 다시 읽어도 검토 영역이 깜빡이지 않는다", async () => {
+  vi.useFakeTimers();
+  stubReadyReviewAndRunningFinal();
+
+  render(<ReviewAndOutputPage projectId="project-a" onOpenEditor={() => {}} />);
+  // fake timer 아래에서는 findBy/waitFor의 내부 타이머가 안 돈다 --
+  // 마이크로태스크만 비워서 첫 읽기를 끝낸다(OutputsPage.test.tsx의 같은 처리).
+  await act(async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); });
+  expect(screen.getByRole("heading", { level: 1, name: "영상 검토" })).toBeVisible();
+
+  // 두 번째 읽기를 붙잡아 둔다. 붙잡힌 **그 사이에** 화면이 무엇을 보여주는지가
+  // 이 시험이 재는 것이다 -- 실제 서버에서는 그 사이가 수백 밀리초다.
+  vi.mocked(api.getLatestEditingSession).mockImplementationOnce(() => new Promise(() => {}) as never);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  });
+
+  // 재확인이 실제로 나갔는가 -- 이게 없으면 아래 단언이 엉뚱한 이유로 초록이 된다.
+  expect(vi.mocked(api.getLatestEditingSession).mock.calls.length).toBeGreaterThan(1);
+  expect(screen.queryByText("검토 내용을 불러오는 중이에요.")).not.toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "영상 검토" })).toBeVisible();
 });

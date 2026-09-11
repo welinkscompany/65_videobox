@@ -319,7 +319,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   projectId: string;
   onOpenEditor: () => void;
   shared?: SharedTimelineRead;
-  onSharedRefresh?: () => Promise<SharedTimelineRead>;
+  /** `loading: false`면 검토 영역을 "불러오는 중"으로 되돌리지 않고 조용히
+   *  다시 읽는다. 완성본을 만드는 동안 스스로 다시 읽는 자리에서 쓴다. */
+  onSharedRefresh?: (options?: Readonly<{ loading?: boolean }>) => Promise<SharedTimelineRead>;
   /** 이 화면 위에 검토 내용이 이미 같은 화면·같은 팝업 안에 보이고 있는가.
    *  `ReviewAndOutputPage`가 그 경우 이 값을 준다 -- 그때는 체크리스트의
    *  "검토" 항목이 통째로 `/review`로 이동시키는 링크를 내지 않는다. 승인
@@ -383,6 +385,9 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   const [confirmedVariantIds, setConfirmedVariantIds] = useState<string[]>([]);
   const [isRenderingVariants, setIsRenderingVariants] = useState(false);
   const [variantError, setVariantError] = useState(false);
+  // 가로·세로 카드를 스스로 다시 확인한 횟수. `finalPollTick`과 같은 자리이고
+  // 이유도 같다 -- 값 자체는 안 쓰고 "다음 번"을 다시 걸 근거로만 쓴다.
+  const [variantPollTick, setVariantPollTick] = useState(0);
   const requestEpoch = useRef(0);
   const subtitleSubmissionEpoch = useRef(0);
   const finalSubmissionEpoch = useRef(0);
@@ -400,7 +405,14 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   // 되돌아온 재확인이 그새 취소된(프로젝트를 바꾼) 자리에 값을 쓰지 않게
   // 막는 자리 표시. `routeEpoch` 같은 역할을 이 화면 규모에 맞게 한 값으로 한다.
   const finalPollOperationId = useRef(0);
+  // 가로·세로 쪽 재확인도 같은 방어가 필요하다(같은 이유, 다른 흐름이라 값을 나눈다).
+  const variantPollOperationId = useRef(0);
   currentProjectId.current = projectId;
+  // 재확인은 "지금 화면에 있는 카드"를 다시 묻는 것이라 최신 목록이 필요한데,
+  // 그 목록을 의존성에 두면 카드가 바뀔 때마다 함수가 새로 만들어져 타이머가
+  // 계속 다시 걸린다 -- 값은 ref로 본다(위 `sharedRef`와 같은 이유).
+  const variantItemsRef = useRef<VariantRenderItem[]>([]);
+  variantItemsRef.current = variantItems;
   // `shared`는 읽을 때마다 새 객체다. 이걸 `refresh`의 의존성에 두면 새 값이
   // 올 때마다 `refresh`가 다시 만들어지고, 그 effect가 또 읽어서 끝없이 돈다.
   // 읽기는 `onSharedRefresh`(안정적)로만 걸고 값 자체는 ref로 본다.
@@ -412,7 +424,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
   // 두 번 나가는 것을 확인했다. 프로젝트를 바꾸면 캐시를 버린다.
   const diagnosticsRef = useRef<{ projectId: string; value: CapCutHandoffDiagnostics | null } | null>(null);
 
-  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null; reuseShared?: boolean }) => {
+  const refresh = useCallback(async (options?: { jobs?: JobRecord[]; subtitle?: SubtitleJob | null; finalRender?: FinalRenderJob | null; capcutDraft?: CapCutDraftExportJob | null; reuseShared?: boolean; quiet?: boolean }) => {
     const refreshProjectId = projectId;
     const epoch = requestEpoch.current + 1;
     requestEpoch.current = epoch;
@@ -426,8 +438,11 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       // 판단할 수 있다.
       // 처음 그릴 때는 검토 쪽이 이미 읽은 값을 그대로 쓴다(`reuseShared`).
       // 다시 읽는 것은 이 화면이 무언가를 바꾼 뒤뿐이고, 그때만 공유 읽기를 부른다.
+      // `quiet`는 이 화면이 **스스로** 다시 읽는 자리다. 합쳐진 화면
+      // (`ReviewAndOutputPage`)에서는 이 읽기가 검토 영역의 상태이기도 해서,
+      // 그냥 부르면 위쪽 절반이 5초마다 "불러오는 중"으로 접혔다 펴진다.
       const sharedRead = onSharedRefresh && !options?.reuseShared
-        ? await onSharedRefresh()
+        ? await onSharedRefresh(options?.quiet ? { loading: false } : undefined)
         : sharedRef.current ?? null;
       const [session, jobs] = sharedRead
         ? [sharedRead.session, options?.jobs ?? [...sharedRead.jobs]]
@@ -617,7 +632,10 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
     finalPollOperationId.current = operationId;
     const poll = window.setTimeout(() => {
       if (finalPollOperationId.current !== operationId || currentProjectId.current !== pollProjectId) return;
-      void refresh().then(() => {
+      // 조용히 다시 읽는다 -- 합쳐진 화면에서 이 읽기는 검토 영역의 상태이기도
+      // 하다(`useTimelineReviewState`의 `loading: false` 주석). 실패는 여전히
+      // 화면에 나간다.
+      void refresh({ quiet: true }).then(() => {
         // 재확인 뒤에도 여전히 진행 중이면(`hasPendingFinal`이 안 바뀌면) 이
         // 값만 바꿔 위 의존값을 다시 트리거한다 -- 그렇지 않으면 상태가 그대로일
         // 때 이 효과가 다시 안 돌아 딱 한 번 묻고 영원히 멈춰 버린다.
@@ -668,14 +686,20 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
       setIsRenderingVariants(false);
     }
   };
-  const handleRefreshVariants = async () => {
-    const jobs = await api.listJobs(projectId).catch(() => [] as JobRecord[]);
-    const next = await Promise.all(variantItems.map(async (item) => {
+  /** 화면에 있는 가로·세로 카드의 상태를 서버에 다시 묻는다. `출력 상태 다시
+   *  확인` 단추와 아래 자동 재확인이 **같은 함수**를 쓴다 -- 둘이 갈라지면
+   *  단추로 볼 때와 저절로 볼 때 카드 내용이 달라진다. */
+  const refreshVariantStatuses = useCallback(async () => {
+    const refreshProjectId = projectId;
+    const items = variantItemsRef.current;
+    if (!items.length) return;
+    const jobs = await api.listJobs(refreshProjectId).catch(() => [] as JobRecord[]);
+    const next = await Promise.all(items.map(async (item) => {
       if (!item.job_id) return item;
       const job = jobs.find((candidate) => candidate.job_id === item.job_id);
       if (!job) return item;
       try {
-        const final = await api.getFinalRender(projectId, item.job_id);
+        const final = await api.getFinalRender(refreshProjectId, item.job_id);
         // 위 `handleRenderVariants`와 같은 병이었다 -- 여기는 `error_code`를
         // 아예 안 옮겨서 새로 실패로 바뀐 항목은 사유 문장 자체가 안 떴다.
         // 같은 규칙(서버 사유 우선, 없으면 옛 고정 문구)으로 맞춘다.
@@ -684,8 +708,40 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
         return item;
       }
     }));
+    // 그새 프로젝트를 바꿨으면 앞 프로젝트의 결과를 쓰지 않는다.
+    if (currentProjectId.current !== refreshProjectId) return;
     setVariantItems(next);
-  };
+  }, [projectId]);
+  // 가로·세로 카드도 스스로 상태를 다시 확인한다.
+  //
+  // **왜 넣었나.** 완성본 카드만 스스로 갱신되고 가로·세로 카드는 `출력 상태
+  // 다시 확인`을 누를 때까지 "출력을 만드는 중이에요."에 얼어 있었다. 같은
+  // 화면에서 한쪽만 움직이는 것도 이상하지만, 더 나쁜 것은 내려받는 문과
+  // 한국어 실패 문장이 그 클릭 전까지 아예 안 나타난다는 점이다 -- 그 둘을
+  // 만든 이유가 통째로 사라진다.
+  //
+  // **본보기는 바로 위 완성본 재확인 effect다**(`FINAL_RENDER_POLL_INTERVAL_MS`).
+  // 규율도 같다: 진행 중인 카드가 있을 때만 돌고(`hasPendingVariantRender`),
+  // 전부 끝나면 의존값이 거짓이 되어 멈추고, 화면을 떠나면 cleanup이 타이머를
+  // 거두고, 프로젝트가 그새 바뀌면 `variantPollOperationId`/`currentProjectId`가
+  // 낡은 응답을 버린다. 프로젝트를 바꾸면 위 목록 effect가 카드를 비우므로
+  // 조건 자체가 거짓이 된다.
+  const hasPendingVariantRender = variantItems.some((item) => Boolean(item.job_id) && (item.status === "pending" || item.status === "running"));
+  useEffect(() => {
+    if (!hasPendingVariantRender) return;
+    const pollProjectId = projectId;
+    const operationId = variantPollOperationId.current + 1;
+    variantPollOperationId.current = operationId;
+    const poll = window.setTimeout(() => {
+      if (variantPollOperationId.current !== operationId || currentProjectId.current !== pollProjectId) return;
+      void refreshVariantStatuses().then(() => {
+        if (variantPollOperationId.current === operationId && currentProjectId.current === pollProjectId) {
+          setVariantPollTick((current) => current + 1);
+        }
+      });
+    }, FINAL_RENDER_POLL_INTERVAL_MS);
+    return () => window.clearTimeout(poll);
+  }, [hasPendingVariantRender, variantPollTick, projectId, refreshVariantStatuses]);
   if (isLoading && !state && !hasError) return <section className="vb-outputs" aria-live={pageLiveRegion}><p>출력 상태를 불러오는 중이에요.</p></section>;
   if (hasError) return <section className="vb-outputs" aria-live={pageLiveRegion} data-testid="outputs-page"><HeadingTag>출력</HeadingTag><p>출력 상태를 불러오지 못했어요.</p><p>잠시 후 상태를 다시 확인하거나 편집 화면에서 작업을 이어가세요.</p><Button variant="outline" onClick={() => void refresh()}>상태 다시 확인</Button><Button onClick={onOpenEditor}>편집 열기</Button></section>;
 
@@ -1056,7 +1112,7 @@ export function OutputsPage({ projectId, onOpenEditor, shared, onSharedRefresh, 
           ))}
           <div className="vb-output-actions">
             <Button disabled={!currentState?.session || !selectedVariantIds.length || isRenderingVariants} onClick={() => void handleRenderVariants()}>{isRenderingVariants ? "출력 만드는 중" : "가로·세로 출력 만들기"}</Button>
-            <Button variant="outline" disabled={!variantItems.length} onClick={() => void handleRefreshVariants()}>출력 상태 다시 확인</Button>
+            <Button variant="outline" disabled={!variantItems.length} onClick={() => void refreshVariantStatuses()}>출력 상태 다시 확인</Button>
           </div>
         </CardContent>
       </Card>

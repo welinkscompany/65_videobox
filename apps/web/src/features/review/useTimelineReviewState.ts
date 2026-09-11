@@ -117,13 +117,23 @@ export function useTimelineReviewState(projectId: string) {
   }, [projectId]);
 
   /** 읽어 온 값을 **돌려준다.** 출력 쪽은 무언가를 바꾼 직후 새 목록으로 곧바로
-   * 다음 판단을 해야 하는데, prop으로 내려오길 기다리면 그 사이가 비어 어긋난다. */
-  const refresh = useCallback(async (): Promise<TimelineReviewData> => {
+   * 다음 판단을 해야 하는데, prop으로 내려오길 기다리면 그 사이가 비어 어긋난다.
+   *
+   * **`loading: false`는 조용한 다시 읽기다.** 출력 쪽이 완성본을 만드는 동안
+   * 5초마다 스스로 다시 읽는데, 그때마다 검토 영역까지 "불러오는 중"으로
+   * 되돌리면 몇 분 내내 화면 윗부분이 접혔다 펴져 스크롤이 튄다. 처음 읽기는
+   * 그대로 "불러오는 중"을 보여준다 -- 아직 보여줄 것이 없는 것과, 이미 보고
+   * 있는 것을 뒤에서 다시 재는 것은 다른 상황이다.
+   *
+   * **조용한 것은 로딩뿐이다.** 실패·없음·낡음 판정은 조용한 읽기에서도
+   * 그대로 화면에 나간다 -- 실패까지 같이 조용해지면 아무 말 없이 옛 화면이
+   * 남는다. */
+  const refresh = useCallback(async (options?: Readonly<{ loading?: boolean }>): Promise<TimelineReviewData> => {
     const loadProjectId = projectId;
     const epoch = requestEpoch.current + 1;
     requestEpoch.current = epoch;
     const isCurrent = () => currentProjectId.current === loadProjectId && requestEpoch.current === epoch;
-    setState({ kind: "loading", projectId: loadProjectId });
+    if (options?.loading !== false) setState({ kind: "loading", projectId: loadProjectId });
     try {
       const [session, jobs] = await Promise.all([
         api.getLatestEditingSession(loadProjectId),
@@ -146,7 +156,7 @@ export function useTimelineReviewState(projectId: string) {
         setData({ ...emptyData, session, jobs });
         return { ...emptyData, session, jobs };
       }
-      return await loadDetails(session, jobs, job);
+      return await loadDetails(session, jobs, job, options);
     } catch {
       if (isCurrent()) {
         setState({ kind: "error", projectId: loadProjectId });

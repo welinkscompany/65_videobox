@@ -27,6 +27,16 @@ const FINAL_RENDER_FAILURES: Record<string, string> = {
   // 렌더는 시작됐지만 도중에 실패했을 때. 화면이 상태를 다시 물어 알아낸다
   // (`OutputsPage.tsx`의 변형 재확인 로직에서 이 코드를 붙인다).
   renderer_failed: "출력을 만드는 중에 오류가 났어요. 다시 만들어 주세요.",
+  // 엔진이 **안전 문구로 바꿔** 보내는 사유 셋이다
+  // (`packages/core-engine/src/videobox_core_engine/job_error_message.py`의
+  // `safe_job_error_message`). 예외 문구에 호스트 파일 경로나 실행한 명령이
+  // 섞여 나가는 것을 막느라 코드로 바꾸는데, 그 코드가 여기 없으면 화면은
+  // "이 출력을 만들지 못했어요." 한 줄로 뭉갠다 -- 예전에 전부
+  // `renderer_failed`로 찍히던 때보다 오히려 할 일이 사라졌다.
+  // 그 함수가 만드는 코드는 이 셋이 전부이고, 나머지 예외는 문장 그대로 온다.
+  asset_file_missing: "쓰던 파일을 찾지 못했어요. 그 파일이 자리에 있는지 확인한 뒤 다시 만들어 주세요.",
+  asset_file_permission_denied: "쓰던 파일을 열 수 없었어요. 그 파일이 다른 프로그램에서 열려 있지 않은지 확인한 뒤 다시 만들어 주세요.",
+  external_command_failed: "영상을 합치는 도중에 멈췄어요. 다시 만들어 주세요. 그래도 안 되면 쓰던 파일이 온전한지 확인해 주세요.",
 };
 
 /** 무엇이 낡아서 막혔는지. 엔진은 `stale_output_asset: <사유>` 한 코드에 여러
