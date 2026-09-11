@@ -193,6 +193,7 @@ def test_creator_skill_pins_the_exact_envelope_and_all_operation_contracts() -> 
         "voice",
         "overlay",
         "output_check",
+        "output_variant",
         "video-primary",
         "audio-bgm",
         "audio-sfx",
@@ -200,6 +201,7 @@ def test_creator_skill_pins_the_exact_envelope_and_all_operation_contracts() -> 
         "voice-primary",
         "video-overlay",
         "output-primary",
+        "output-variant",
         "recommendation_only",
         "read_only",
         "session:{session_id}:revision:{session_revision}:assets:{asset_index_revision}",
@@ -222,6 +224,44 @@ def test_creator_skill_overlay_variants_name_every_required_strict_field() -> No
     assert "`overlay_kind: explanation_card`, `title`, `body`, `text`" in skill
     assert "`overlay_kind: image`, 현재 context의 image `asset_id`, `text`" in skill
     assert "`overlay_kind: table`, `columns`, `rows`, `text`" in skill
+
+
+def test_creator_skill_output_variant_names_every_required_action_and_field() -> None:
+    """output_variant 는 스키마·적용기가 이미 있는데 프로필에 문장이 0건이었다.
+
+    (`docs/surveys/2026-09-11-yujin-command-gap.ko.md` §2). 다섯 action 각각의
+    필드명·허용값을 다른 kind와 같은 서식으로 고정해 다시 새지 않게 한다.
+    """
+    skill = (
+        PROFILE_ROOT / "skills" / "videobox-creator" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for required in (
+        "output_variant",
+        "output-variant",
+        "variant_id",
+        "base_variant_revision",
+        "`action: set_crop`",
+        "`action: set_focal`",
+        "`action: set_caption_layout`",
+        "`action: set_safe_area`",
+        "`action: correct_audio`",
+        "`x`",
+        "`y`",
+        "`width`",
+        "`height`",
+        "`layout`",
+        "`max_lines`",
+        "`font_scale`",
+        "`top_percent`",
+        "`right_percent`",
+        "`bottom_percent`",
+        "`left_percent`",
+        "`gain_db`",
+        "`fade_in_sec`",
+        "`fade_out_sec`",
+    ):
+        assert required in skill
 
 
 def test_memory_skill_forbids_interactive_capture_and_requires_explicit_approval() -> None:
