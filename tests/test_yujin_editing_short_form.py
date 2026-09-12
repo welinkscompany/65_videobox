@@ -1,4 +1,4 @@
-"""유진 편집 채팅으로 "숏폼 만들어줘"/"다시 만들어줘"/"펼쳐줘"가 되는지.
+"""유진 편집 채팅으로 "숏폼 만들어줘"/"다시 만들어줘"/"펼쳐줘"/"내보내줘"가 되는지.
 
 **이게 실제로 화면이 쓰는 경로다**(2026-09-12 프론트 코드 역추적으로 확인).
 `yujin_creator_proposals.py`/`hermes_run_service.py` 쪽에 같은 이름의 action을
@@ -168,6 +168,7 @@ def test_remake_and_unfold_are_refused_from_chat_when_no_short_form_exists(tmp_p
     for intent, instruction in (
         ("remake_short_form", "숏폼 다시 만들어줘"),
         ("unfold_short_form", "숏폼 펼쳐줘"),
+        ("render_short_form", "숏폼 내보내줘"),
     ):
         provider = _EditingChatProvider(intent=intent)
         app, client, project_id, session = _plain_session_project(tmp_path, provider)
@@ -176,3 +177,91 @@ def test_remake_and_unfold_are_refused_from_chat_when_no_short_form_exists(tmp_p
         proposal = client.post(f"{root}/yujin-editing-proposals", json={"instruction": instruction}).json()
 
         assert "proposal" not in proposal or proposal.get("proposal") is None, (intent, proposal)
+
+
+def test_yujin_can_start_rendering_an_existing_short_form_from_the_real_chat(tmp_path: Path, monkeypatch) -> None:
+    """"숏폼 내보내줘"가 화면의 출력 화면과 **같은 렌더 시작 자리**를 쓴다.
+
+    실제 ffmpeg·자산 파일 없이 라우팅만 재는 시험이라, `orchestrator`의 렌더
+    시작 메서드 둘(`start_variant_renders`/`launch_pending_variant_render_workers`)만
+    가짜로 세운다 -- 렌더 자체(진짜 인코딩)는
+    `tests/test_final_render_idempotency.py`가 이미 잰다.
+    """
+    provider = _EditingChatProvider(intent="render_short_form")
+    app, client, project_id, session, variant = _short_form_project(tmp_path, provider=provider)
+    calls: list[dict] = []
+
+    def _fake_start_variant_renders(*, project_id: str, session_id: str, variant_ids: list[str]) -> dict:
+        calls.append({"project_id": project_id, "session_id": session_id, "variant_ids": variant_ids})
+        return {
+            "project_id": project_id,
+            "status": "accepted",
+            "items": [
+                {
+                    "variant_id": variant_ids[0],
+                    "variant_kind": "vertical_highlight",
+                    "timeline_id": "timeline-fake",
+                    "timeline_job_id": "timeline-job-fake",
+                    "job_id": "final-render-fake",
+                    "status": "running",
+                    "should_start": True,
+                }
+            ],
+        }
+
+    launched: list[list[dict]] = []
+    monkeypatch.setattr(app.state.orchestrator, "start_variant_renders", _fake_start_variant_renders)
+    monkeypatch.setattr(
+        app.state.orchestrator, "launch_pending_variant_render_workers",
+        lambda *, project_id, items: launched.append(items),
+    )
+
+    response = _create_and_apply(client, project_id, session, "숏폼 내보내줘")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "short_form_render_started"
+    assert body["job_id"] == "final-render-fake"
+    assert "출력 화면" in body["notice"]
+    # **변형본을 바꾸지 않는다** -- create/remake/unfold와 달리 render는
+    # `variant`/`scene_pick`을 응답에 안 싣는다(그럴 것이 없다).
+    assert "variant" not in body
+    assert calls == [{"project_id": project_id, "session_id": session["session_id"], "variant_ids": [variant["variant_id"]]}]
+    assert len(launched) == 1
+
+
+def test_rendering_a_short_form_reports_the_real_failure_when_the_render_cannot_start(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """렌더가 못 시작하면(자원 오류 등) 맨 500이 아니라 이유가 담긴 409로 답한다.
+
+    화면 단추 경로(`start_variant_renders`)가 이미 실패 항목을
+    `{"status": "failed", "error_code": ...}`로 돌려주는 계약을 그대로
+    따른다 -- 채팅 경로도 같은 계약을 읽는다.
+    """
+    provider = _EditingChatProvider(intent="render_short_form")
+    app, client, project_id, session, variant = _short_form_project(tmp_path, provider=provider)
+
+    def _failing_start_variant_renders(*, project_id: str, session_id: str, variant_ids: list[str]) -> dict:
+        return {
+            "project_id": project_id,
+            "status": "failed",
+            "items": [
+                {
+                    "variant_id": variant_ids[0],
+                    "status": "failed",
+                    "error_code": "renderer_unavailable",
+                    "should_start": False,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(app.state.orchestrator, "start_variant_renders", _failing_start_variant_renders)
+    monkeypatch.setattr(
+        app.state.orchestrator, "launch_pending_variant_render_workers", lambda *, project_id, items: None,
+    )
+
+    response = _create_and_apply(client, project_id, session, "숏폼 내보내줘")
+
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == "renderer_unavailable"

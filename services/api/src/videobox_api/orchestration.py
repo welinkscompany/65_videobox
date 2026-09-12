@@ -1773,6 +1773,34 @@ class ApiOrchestrator:
             project_id=project_id, session_id=session_id, variant_ids=variant_ids
         )
 
+    def launch_pending_variant_render_workers(self, *, project_id: str, items: list[dict[str, Any]]) -> None:
+        """`start_variant_renders`가 돌려준 항목마다 백그라운드 워커를 켠다.
+
+        **한 자리에 둔다** -- 화면 단추(`routers/outputs.py`)와 유진 채팅
+        (`routers/director_proposals.py`의 "숏폼 내보내줘")가 둘 다 이 일을
+        한다. 갈라 두면 한쪽만 고쳐지는 게 이 저장소가 반복해서 걸린 함정이다
+        (`output_variants.py`의 `build_variant_timeline_payload` 머리말과 같은
+        이유). 시작 못 한 항목은 `items`를 제자리에서 고쳐 실패로 남긴다.
+        """
+        for item in items:
+            if item.get("status") not in {"running", "pending"} or not item.get("should_start"):
+                continue
+            worker = threading.Thread(
+                target=self.run_final_render_job,
+                kwargs={
+                    "project_id": project_id,
+                    "timeline_job_id": item["timeline_job_id"],
+                    "job": {"job_id": item["job_id"]},
+                },
+                daemon=True,
+            )
+            try:
+                worker.start()
+            except Exception:
+                self.release_final_render_worker(project_id=project_id, job_id=str(item["job_id"]))
+                item["status"] = "failed"
+                item["error_code"] = "worker_start_failed"
+
     def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, Any]) -> None:
         self.pipeline.run_final_render_job(project_id=project_id, timeline_job_id=timeline_job_id, job=job)
 

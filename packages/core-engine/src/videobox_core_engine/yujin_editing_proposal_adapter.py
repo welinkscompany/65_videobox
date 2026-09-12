@@ -23,6 +23,7 @@ from videobox_domain_models.yujin_editing_proposals import (
     ApplyMediaOperation,
     CreateShortFormOperation,
     RemakeShortFormOperation,
+    RenderShortFormOperation,
     ReorderSegmentsOperation,
     SetCaptionFontOperation,
     SetImageOverlayOperation,
@@ -125,8 +126,9 @@ class YujinEditingContext:
     image_overlays_by_segment: tuple[tuple[str, str], ...] = ()
     #: 지금 이 편집본에 숏폼(세로 하이라이트)이 **이미 있는가**. "만들어줘"와
     #: "다시 만들어줘"를 유진이 가르는 근거다 -- 목록과 지금 값은 한 쌍이다.
-    #: 여기가 `False`인데 `remake_short_form`/`unfold_short_form`을 쓰면
-    #: 거절되고, `True`인데 `create_short_form`을 쓰면 거절된다.
+    #: 여기가 `False`인데 `remake_short_form`/`unfold_short_form`/
+    #: `render_short_form`을 쓰면 거절되고, `True`인데 `create_short_form`을
+    #: 쓰면 거절된다.
     has_short_form_variant: bool = False
 
 
@@ -204,10 +206,14 @@ def _validate_current_targets(proposal: YujinEditingProposal, context: YujinEdit
         return "invalid_current_context"
     operation_targets: set[tuple[str, ...]] = set()
     for operation in proposal.operations:
-        if isinstance(operation, (CreateShortFormOperation, RemakeShortFormOperation, UnfoldShortFormOperation)):
-            # **셋 다 그릇을 바꾸는 일이지 세그먼트 편집이 아니다.** 같은
-            # 메시지에 다른 편집이 섞이면 어느 것이 최종인지 정할 근거가
-            # 없다 -- 저쪽 시스템(`yujin_creator_proposals.py`)의
+        if isinstance(
+            operation,
+            (CreateShortFormOperation, RemakeShortFormOperation, UnfoldShortFormOperation, RenderShortFormOperation),
+        ):
+            # **넷 다 그릇을 바꾸거나(만들기·다시 만들기·펼치기) 그릇을 그대로
+            # 내보내는(렌더) 일이지 세그먼트 편집이 아니다.** 같은 메시지에
+            # 다른 편집이 섞이면 어느 것이 최종인지 정할 근거가 없다 -- 저쪽
+            # 시스템(`yujin_creator_proposals.py`)의
             # `remake_short_form`/`unfold_to_editing_board`도 같은 규칙이다.
             if len(proposal.operations) != 1:
                 return "short_form_operation_must_be_alone"

@@ -66,11 +66,12 @@ _EDITING_OPERATION_SCHEMA = {
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_image_overlay"}, "segment_id": {"type": "string"}}, "required": ["intent", "segment_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "apply_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}, "asset_id": {"type": "string"}}, "required": ["intent", "segment_id", "media_type", "asset_id"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remove_media"}, "segment_id": {"type": "string"}, "media_type": {"enum": ["broll", "bgm", "sfx"]}}, "required": ["intent", "segment_id", "media_type"]},
-        # 숏폼 셋. 파라미터가 없다 -- 장면 판단은 서버가 화면 단추와 같은
-        # 코드로 다시 돈다(`_short_form_catalogue` 참고).
+        # 숏폼 넷. 파라미터가 없다 -- 장면 판단·렌더 대상은 서버가 화면 단추와
+        # 같은 코드로 다시 돈다(`_short_form_catalogue` 참고).
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "create_short_form"}}, "required": ["intent"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "remake_short_form"}}, "required": ["intent"]},
         {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "unfold_short_form"}}, "required": ["intent"]},
+        {"type": "object", "additionalProperties": False, "properties": {"intent": {"const": "render_short_form"}}, "required": ["intent"]},
     ]
 }
 
@@ -447,7 +448,12 @@ def _short_form_catalogue(context: YujinEditingContext) -> str:
             "'이 숏폼만 따로 편집하고 싶어'·'숏폼 펼쳐줘'처럼 숏폼 자체를 손보려는 "
             "요청에는 unfold_short_form을 쓴다 -- 펼치면 원본과의 연결이 끊기므로 "
             "reply_text에 반드시 '펼치면 독립된 편집본이 되고, 그 뒤 원본을 고쳐도 "
-            "따라오지 않아요.'라고 말한다."
+            "따라오지 않아요.'라고 말한다. "
+            "'숏폼 내보내줘'·'숏폼 완성본 만들어줘'·'숏폼 렌더해줘'처럼 완성본으로 "
+            "뽑아 달라는 요청에는 render_short_form을 쓴다 -- 이 요청 하나로 렌더가 "
+            "끝나지 않는다(분 단위로 걸린다). reply_text는 반드시 '숏폼을 만들고 "
+            "있어요. 출력 화면에서 확인해 주세요.'라고만 답한다 -- 몇 초 걸린다거나 "
+            "다 됐다고 지어 말하지 않는다."
         )
     return (
         "이 편집본에는 아직 숏폼(세로 하이라이트)이 없다. "
@@ -456,8 +462,9 @@ def _short_form_catalogue(context: YujinEditingContext) -> str:
         "구간을 읽고 판단한다). **여기서 '숏폼'은 세로 짧은 영상이지 내레이션 "
         "대본이 아니다** -- reply_text에 대본이나 자막 문구를 새로 지어 쓰지 말고 "
         "'숏폼 영상을 만들어 볼게요' 정도로 짧게만 답한다. remake_short_form과 "
-        "unfold_short_form은 숏폼이 없으면 쓸 수 없다 -- 그 요청을 들으면 아직 "
-        "숏폼이 없다고 답하고 먼저 만들어 주겠다고 답한다(create_short_form)."
+        "unfold_short_form과 render_short_form은 숏폼이 없으면 쓸 수 없다 -- 그 "
+        "요청을 들으면 아직 숏폼이 없다고 답하고 먼저 만들어 주겠다고 답한다"
+        "(create_short_form)."
     )
 
 
@@ -519,7 +526,7 @@ def _editing_prompt(*, instruction: str, context: YujinEditingContext) -> str:
         "remove_image_overlay(얹은 사진·영상을 뺀다), "
         "remove_media(깔아 둔 영상·음악·효과음을 뺀다 -- \"음악 빼줘\"가 이것이다), "
         "create_short_form(숏폼을 처음 만든다), remake_short_form(이미 있는 숏폼을 다시 만든다), "
-        "unfold_short_form(숏폼을 따로 편집할 수 있게 펼친다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
+        "unfold_short_form(숏폼을 따로 편집할 수 있게 펼친다), render_short_form(숏폼을 완성본으로 뽑는다)뿐이다. 요청이 모호하거나 안전한 후보를 만들 수 없으면 proposal은 null로 둔다. "
         # 실사용(2026-09-01)으로 잡힌 결함: "3번째 장면을 빼줘"를 `remove_media`로
         # 읽어 그 장면에 깔아 둔 B-roll만 지웠다. 창작자가 뜻한 것은 장면 자체를
         # 완성본에서 빼는 것이었다. 한국어 "빼다"는 둘 다 되므로 어느 쪽인지를

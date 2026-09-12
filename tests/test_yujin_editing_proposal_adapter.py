@@ -239,9 +239,11 @@ def test_remaking_or_unfolding_a_short_form_that_does_not_exist_is_refused() -> 
 
     remake = interpret_yujin_editing_request(_short_form_response("remake_short_form"), context)
     unfold = interpret_yujin_editing_request(_short_form_response("unfold_short_form"), context)
+    render = interpret_yujin_editing_request(_short_form_response("render_short_form"), context)
 
     assert remake.reason == "short_form_does_not_exist"
     assert unfold.reason == "short_form_does_not_exist"
+    assert render.reason == "short_form_does_not_exist"
 
 
 def test_remaking_an_existing_short_form_by_voice() -> None:
@@ -257,9 +259,22 @@ def test_remaking_an_existing_short_form_by_voice() -> None:
     assert result.proposal.operations[0].intent == "remake_short_form"
 
 
+def test_yujin_can_render_an_existing_short_form_by_voice() -> None:
+    context = YujinEditingContext(
+        session_id="session-1", session_revision=7, segment_ids=("scene-1",),
+        has_short_form_variant=True,
+    )
+
+    result = interpret_yujin_editing_request(_short_form_response("render_short_form"), context)
+
+    assert result.status == "candidate_only", result.reason
+    assert result.proposal is not None
+    assert result.proposal.operations[0].intent == "render_short_form"
+
+
 def test_a_short_form_operation_cannot_be_mixed_with_another_edit() -> None:
-    """만들기·다시 만들기·펼치기는 그릇을 바꾸는 일이라 다른 편집과 섞이면
-    어느 것이 최종인지 정할 근거가 없다."""
+    """만들기·다시 만들기·펼치기·렌더는 그릇을 바꾸거나 그대로 내보내는 일이라
+    다른 편집과 섞이면 어느 것이 최종인지 정할 근거가 없다."""
     mixed = _short_form_response("create_short_form")
     mixed["proposal"] = {
         **mixed["proposal"],  # type: ignore[dict-item]

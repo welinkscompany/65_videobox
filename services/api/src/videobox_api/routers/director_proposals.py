@@ -677,15 +677,16 @@ def build_director_proposals_router(
                 "base_session_revision": proposal.base_session_revision,
                 "operations": [_with_materialized_library_asset(project_id, dict(item)) for item in operations],
             })
-            # **숏폼 셋(만들기·다시 만들기·펼치기)은 세션을 안 건드린다.** 이
-            # 셋은 `output_variant`(별개 자원)를 짓거나 바꾸는 일이라 아래
+            # **숏폼 넷(만들기·다시 만들기·펼치기·렌더)은 세션을 안 건드린다.** 이
+            # 넷은 `output_variant`(별개 자원)를 짓거나 바꾸거나, 그 변형본을
+            # 그대로 렌더 잡으로 내보내는 일이라 아래
             # `apply_yujin_editing_proposal`/`update_editing_session`(편집 세션
             # 문서 자체를 바꾸는 길)로 보내면 안 된다 -- 검증기
             # (`_validate_current_targets`)가 이미 "혼자여야 한다"를 확인했으므로
             # 여기서는 그 사실만 보고 가른다.
             first_intent = editing.operations[0].intent
             if len(editing.operations) == 1 and first_intent in {
-                "create_short_form", "remake_short_form", "unfold_short_form",
+                "create_short_form", "remake_short_form", "unfold_short_form", "render_short_form",
             }:
                 return _apply_short_form_editing_intent(
                     request=request, project_id=project_id, session_id=session_id,
@@ -705,11 +706,13 @@ def build_director_proposals_router(
         *, request: Request, project_id: str, session_id: str, proposal_id: str,
         expected_session_revision: int, intent: str,
     ) -> dict:
-        """편집 채팅에서 "숏폼 만들어줘"/"다시 만들어줘"/"펼쳐줘"를 실행한다.
+        """편집 채팅에서 "숏폼 만들어줘"/"다시 만들어줘"/"펼쳐줘"/"내보내줘"를 실행한다.
 
         **화면 단추와 같은 코드를 부른다** -- 장면 판단은
-        `short_form_scenes.py`가 유일한 자리다(이 파일 머리말). 이 함수가
-        하는 일은 어느 함수를 부를지 가르는 것뿐이다.
+        `short_form_scenes.py`가 유일한 자리이고, 렌더 시작은
+        `orchestrator.start_variant_renders`/`launch_pending_variant_render_workers`가
+        유일한 자리다(이 파일 머리말, `orchestration.py`의 같은 함수 머리말).
+        이 함수가 하는 일은 어느 함수를 부를지 가르는 것뿐이다.
         """
         runtime = request.app.state.local_only_runtime_service_factory(store)
         if intent == "create_short_form":
@@ -733,6 +736,29 @@ def build_director_proposals_router(
             raise HTTPException(status_code=409, detail="short_form_missing")
         variant_id = str(current["variant_id"])
         expected_variant_revision = int(current["variant_revision"])
+        if intent == "render_short_form":
+            # **변형본을 안 바꾼다** -- 렌더는 지금 걸린 모양을 그대로 완성본
+            # MP4로 뽑는 일이라, remake_short_form/unfold_short_form처럼
+            # `apply_director_variant_proposal_transaction`으로 소진할 대상이
+            # 없다. 대신 렌더 잡 자체가 같은 변형본 판(`variant_revision`)에
+            # 대해 이미 CAS로 idempotent하다(`start_final_render_job`이 같은
+            # 입력이면 같은 job을 돌려준다 -- 화면 단추도 이 재사용에 기댄다).
+            # 그래서 이 제안을 별도로 "소진"하지 않아도 두 번 눌러도 안전하다.
+            result = orchestrator.start_variant_renders(
+                project_id=project_id, session_id=session_id, variant_ids=[variant_id],
+            )
+            orchestrator.launch_pending_variant_render_workers(project_id=project_id, items=result.get("items", []))
+            item = result["items"][0] if result.get("items") else None
+            if item is None or item.get("status") == "failed":
+                raise HTTPException(
+                    status_code=409,
+                    detail=str((item or {}).get("error_code") or "short_form_render_failed"),
+                )
+            return {
+                "status": "short_form_render_started",
+                "job_id": item["job_id"],
+                "notice": "숏폼을 만들고 있어요. 출력 화면에서 확인해 주세요.",
+            }
         if intent == "remake_short_form":
             updated_variant, pick = remade_short_form_variant(
                 store=store, project_id=project_id, variant_row=current, runtime=runtime,

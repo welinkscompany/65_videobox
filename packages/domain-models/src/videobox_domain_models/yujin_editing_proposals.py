@@ -295,6 +295,19 @@ class UnfoldShortFormOperation(_StrictFrozenModel):
     intent: Literal["unfold_short_form"]
 
 
+class RenderShortFormOperation(_StrictFrozenModel):
+    """숏폼을 완성본으로 뽑는다. 파라미터 없음(위와 같은 이유 -- 어느 변형본을
+    뽑을지는 서버가 "지금 걸린 숏폼 하나"로 정한다).
+
+    화면의 **출력 화면**과 같은 자리(`POST variant-renders`)를 그대로 불러
+    렌더 잡만 시작시킨다 -- 이 채팅 요청 하나가 렌더 완료까지 붙잡고 있지
+    않는다(렌더는 분 단위다). 진행 상황은 화면의 출력 화면 폴링이 이미
+    보여주므로, 채팅 안에 두 번째 진행률 표시를 만들지 않는다.
+    """
+
+    intent: Literal["render_short_form"]
+
+
 YujinEditingOperation = Annotated[
     SetSceneSpeedOperation
     | SetSegmentBoundsOperation
@@ -314,7 +327,8 @@ YujinEditingOperation = Annotated[
     | RemoveMediaOperation
     | CreateShortFormOperation
     | RemakeShortFormOperation
-    | UnfoldShortFormOperation,
+    | UnfoldShortFormOperation
+    | RenderShortFormOperation,
     Field(discriminator="intent"),
 ]
 
@@ -337,6 +351,7 @@ __all__ = [
     "ApplyMediaOperation",
     "CreateShortFormOperation",
     "RemakeShortFormOperation",
+    "RenderShortFormOperation",
     "UnfoldShortFormOperation",
     "RemoveImageOverlayOperation",
     "RemoveMediaOperation",

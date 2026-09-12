@@ -319,27 +319,9 @@ def build_outputs_router(orchestrator: ApiOrchestrator) -> APIRouter:
                 session_id=payload.session_id,
                 variant_ids=payload.variant_ids,
             )
-            for item in result.get("items", []):
-                if item.get("status") not in {"running", "pending"} or not item.get("should_start"):
-                    continue
-                worker = threading.Thread(
-                    target=orchestrator.run_final_render_job,
-                    kwargs={
-                        "project_id": project_id,
-                        "timeline_job_id": item["timeline_job_id"],
-                        "job": {"job_id": item["job_id"]},
-                    },
-                    daemon=True,
-                )
-                try:
-                    worker.start()
-                except Exception:
-                    orchestrator.release_final_render_worker(
-                        project_id=project_id,
-                        job_id=str(item["job_id"]),
-                    )
-                    item["status"] = "failed"
-                    item["error_code"] = "worker_start_failed"
+            # 유진 채팅("숏폼 내보내줘")도 같은 일을 한다 -- 워커를 켜는 자리는
+            # `orchestrator.launch_pending_variant_render_workers` 한 곳뿐이다.
+            orchestrator.launch_pending_variant_render_workers(project_id=project_id, items=result.get("items", []))
             return VariantRenderBatchResponse(
                 project_id=project_id,
                 status=("failed" if result.get("items") and all(item.get("status") == "failed" for item in result["items"]) else "accepted"),

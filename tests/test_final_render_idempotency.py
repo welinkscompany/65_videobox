@@ -100,6 +100,12 @@ def test_final_render_allows_a_new_job_for_a_different_timeline_or_terminal_fail
 
 def test_variant_render_route_returns_independent_itemized_statuses(monkeypatch) -> None:
     class VariantBatchOrchestrator:
+        def launch_pending_variant_render_workers(self, **_kwargs) -> None:
+            # 두 항목 다 `should_start`가 없으므로(고정값) 이 시험에서는
+            # 아무 워커도 안 켜진다 -- 실제 켜는 것은 `ApiOrchestrator`
+            # 쪽에서 별도로 검증한다.
+            return None
+
         def start_variant_renders(self, **_kwargs):
             return {
                 "project_id": "project-a",
@@ -398,6 +404,63 @@ def test_final_render_route_releases_the_worker_reservation_when_thread_start_fa
         "status": "running",
     }
     assert orchestrator.worker_starts == ["final_render_job_001"]
+
+
+def test_launch_pending_variant_render_workers_starts_only_items_that_should_start(monkeypatch) -> None:
+    """화면 단추와 유진 채팅("숏폼 내보내줘")이 공유하는 한 자리를 직접 잰다.
+
+    `test_variant_render_route_returns_independent_itemized_statuses`는 라우터
+    경유라 이 함수의 세부(어떤 항목만 켜지는지, 실패하면 반환값을 어떻게
+    고치는지)까지는 안 잰다 -- 그 시험의 가짜 orchestrator는 이 함수를 아예
+    안 부르게 no-op으로 세워 뒀다.
+    """
+    class RecordingPipeline:
+        def __init__(self) -> None:
+            self.started: list[str] = []
+            self.released: list[tuple[str, str]] = []
+
+        def run_final_render_job(self, *, project_id: str, timeline_job_id: str, job: dict[str, object]) -> None:
+            self.started.append(str(job["job_id"]))
+
+        def release_final_render_worker(self, *, project_id: str, job_id: str) -> None:
+            self.released.append((project_id, job_id))
+
+    class FailOnceThread:
+        starts = 0
+
+        def __init__(self, *, target, kwargs, **_kwargs) -> None:
+            self.target = target
+            self.kwargs = kwargs
+
+        def start(self) -> None:
+            type(self).starts += 1
+            if type(self).starts == 1:
+                raise RuntimeError("thread start failed")
+            self.target(**self.kwargs)
+
+    import videobox_api.orchestration as orchestration_module
+
+    monkeypatch.setattr(orchestration_module.threading, "Thread", FailOnceThread)
+    pipeline = RecordingPipeline()
+    orchestrator = ApiOrchestrator(store=object(), pipeline=pipeline)  # type: ignore[arg-type]
+    items = [
+        {"timeline_job_id": "tj-skip", "job_id": "job-skip", "status": "failed", "should_start": True},
+        {"timeline_job_id": "tj-fail", "job_id": "job-fail", "status": "running", "should_start": True},
+        {"timeline_job_id": "tj-ok", "job_id": "job-ok", "status": "pending", "should_start": True},
+    ]
+
+    orchestrator.launch_pending_variant_render_workers(project_id="project-a", items=items)
+
+    # 이미 실패로 온 항목은 워커를 켤 이유가 없다 -- `should_start`가 참이어도
+    # `status`가 `running`/`pending`이 아니면 건너뛴다.
+    assert pipeline.started == ["job-ok"]
+    assert items[0]["status"] == "failed"
+    # 첫 번째로 켜려던 항목(`job-fail`)은 스레드 시작 자체가 실패했다 --
+    # 예약을 풀고 실패로 다시 적는다(화면 단추 경로와 같은 규칙).
+    assert items[1]["status"] == "failed"
+    assert items[1]["error_code"] == "worker_start_failed"
+    assert pipeline.released == [("project-a", "job-fail")]
+    assert items[2]["status"] == "pending"
 
 
 def test_api_orchestrator_forwards_final_render_worker_release() -> None:
