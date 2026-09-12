@@ -9,9 +9,12 @@
     고치면 옛 모델과 새 모델을 둘 다 LM Studio에 올려 둬야 하고, 그러면 기계가
     느려진다 -- 이 스크립트가 나오게 된 이유다(2026-09-11).
 
-    이 스크립트는 아래 여섯 자리를 한 번에 맞춘다.
+    이 스크립트는 아래 일곱 자리를 한 번에 맞춘다.
       - .env.container (VIDEOBOX_LOCAL_MODEL_NAME)
       - compose.hermes-yujin.yaml (기억 추출 기본값의 안쪽 리터럴)
+      - compose.yaml (VIDEOBOX_LOCAL_MODEL_NAME의 **커밋된 기본값**) -- 2026-09-12에
+        빠뜨린 것을 발견해 더했다. `.env.container`가 gitignore라 안 세었는데, 같은
+        변수의 기본값이 여기에도 커밋되어 있어서 새로 받은 환경은 이 값으로 뜬다
       - config/hermes/yujin/config.yaml (유진 두뇌)
       - services/agent-gateway/.../hermes_memory_adapter.py (코드에 박힌 마지막 기본값)
       - tests/test_hermes_yujin_compose_contract.py (계약 시험 리터럴 2곳)
@@ -75,6 +78,7 @@ $RepositoryRoot = (Resolve-Path -LiteralPath $RepositoryRoot).Path
 
 $envContainerPath = Join-Path $RepositoryRoot ".env.container"
 $composeOverlayPath = Join-Path $RepositoryRoot "compose.hermes-yujin.yaml"
+$mainComposePath = Join-Path $RepositoryRoot "compose.yaml"
 $yujinConfigPath = Join-Path $RepositoryRoot "config/hermes/yujin/config.yaml"
 $adapterPath = Join-Path $RepositoryRoot "services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py"
 $composeContractTestPath = Join-Path $RepositoryRoot "tests/test_hermes_yujin_compose_contract.py"
@@ -83,6 +87,7 @@ $startScriptTestPath = Join-Path $RepositoryRoot "tests/test_start_hermes_yujin_
 
 foreach ($requiredFile in @(
         $composeOverlayPath,
+        $mainComposePath,
         $yujinConfigPath,
         $adapterPath,
         $composeContractTestPath,
@@ -163,6 +168,16 @@ Set-SingleCaptureReplacement -Path $composeOverlayPath `
     -Pattern 'VIDEOBOX_MEM0_LLM_MODEL: \$\{VIDEOBOX_MEM0_LLM_MODEL:-\$\{VIDEOBOX_LOCAL_MODEL_NAME:-([^}]+)\}\}' `
     -NewValue $ModelId `
     -Description "compose.hermes-yujin.yaml 기억 추출 기본값"
+
+# --- compose.yaml: 두뇌 이름의 커밋된 기본값 ---
+# **이 자리를 처음에 빠뜨렸다(2026-09-12에 발견).** `.env.container`가 gitignore라
+# 안 센 것인데, **같은 변수의 기본값이 compose.yaml에도 커밋되어 있다.** 그래서
+# 2026-09-11에 새 모델로 바꿀 때 여기만 옛 `qwen3-35b`로 남았고, 대표님이 그 모델을
+# 삭제한 뒤에는 **없는 모델**을 가리키게 됐다. 새로 받은 환경은 이 값으로 뜬다.
+Set-SingleCaptureReplacement -Path $mainComposePath `
+    -Pattern 'VIDEOBOX_LOCAL_MODEL_NAME: \$\{VIDEOBOX_LOCAL_MODEL_NAME:-([^}]+)\}' `
+    -NewValue $ModelId `
+    -Description "compose.yaml 두뇌 이름 기본값"
 
 # --- config/hermes/yujin/config.yaml: 유진 두뇌 ---
 Set-SingleCaptureReplacement -Path $yujinConfigPath `

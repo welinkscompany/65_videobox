@@ -33,7 +33,29 @@ import yaml
 
 ROOT = Path(__file__).parents[1]
 OVERLAY_PATH = ROOT / "compose.hermes-yujin.yaml"
+MAIN_COMPOSE_PATH = ROOT / "compose.yaml"
 YUJIN_PROFILE_PATH = ROOT / "config" / "hermes" / "yujin" / "config.yaml"
+
+
+def _innermost_default(value: str) -> str:
+    """`${A:-${B:-실제값}}`에서 **가장 안쪽 리터럴**만 남긴다.
+
+    두 자리(`compose.hermes-yujin.yaml`의 기억 모델, `compose.yaml`의 두뇌 이름)가
+    같은 모양을 쓰므로 **벗기는 규칙은 한 곳에 둔다.** 이 저장소는 2026-09-11에
+    "같은 계산이 두 자리에 살면 어긋난다"는 함정에 하루 세 번 걸렸다 -- 시험 코드도
+    예외가 아니다.
+    """
+    original = value
+    while value.startswith("${"):
+        prefix, marker, remainder = value.partition(":-")
+        assert marker, f"기본값이 없는 모양이다: {original!r}"
+        assert prefix.startswith("${"), f"예상한 모양이 아니다: {original!r}"
+        assert remainder.endswith("}"), f"닫는 괄호가 없다: {original!r}"
+        # 바깥 `${...}` 하나에 대응하는 닫는 괄호 딱 하나만 벗긴다. rstrip("}")를
+        # 쓰면 겹친 괄호를 통째로 지워 안쪽 표현이 깨진다 -- 실제로 그렇게
+        # 깨졌다가 이 시험 자체가 잘못된 이유로 빨개진 적이 있다(2026-09-11).
+        value = remainder[:-1]
+    return value
 
 
 def _mem0_llm_model_default() -> str:
@@ -57,18 +79,7 @@ def _mem0_llm_model_default() -> str:
         if "VIDEOBOX_MEM0_LLM_MODEL" in (service.get("environment") or {})
     ]
     assert len(holders) == 1, f"기억 모델을 정하는 자리가 하나여야 한다: {[n for n, _ in holders]}"
-    value = str(holders[0][1])
-    original = value
-    while value.startswith("${"):
-        prefix, marker, remainder = value.partition(":-")
-        assert marker, f"기본값이 없는 모양이다: {original!r}"
-        assert prefix.startswith("${"), f"예상한 모양이 아니다: {original!r}"
-        assert remainder.endswith("}"), f"닫는 괄호가 없다: {original!r}"
-        # 바깥 `${...}` 하나에 대응하는 닫는 괄호 딱 하나만 벗긴다. rstrip("}")를
-        # 쓰면 겹친 괄호를 통째로 지워 안쪽 표현이 깨진다 -- 실제로 그렇게
-        # 깨졌다가 이 시험 자체가 잘못된 이유로 빨개진 적이 있다(2026-09-11).
-        value = remainder[:-1]
-    return value
+    return _innermost_default(str(holders[0][1]))
 
 
 def _yujin_profile_model() -> str:
@@ -90,6 +101,42 @@ def test_the_code_fallback_matches_the_compose_default() -> None:
     assert _adapter_fallback_model() == _mem0_llm_model_default(), (
         f"코드 기본값({_adapter_fallback_model()})과 compose 기본값"
         f"({_mem0_llm_model_default()})이 서로 다르다"
+    )
+
+
+def _main_compose_local_model_default() -> str:
+    """**네 번째 자리.** `compose.yaml`의 `VIDEOBOX_LOCAL_MODEL_NAME` 기본값.
+
+    이 파일 머리말은 커밋에 있는 자리를 "셋"이라고 세었는데 **하나를 빠뜨렸다.**
+    `.env.container`가 gitignore라 못 본다고 적었지만, **같은 변수의 기본값이
+    `compose.yaml`에도 커밋되어 있다.** 2026-09-12에 대표님이 옛 35b를 삭제한 뒤
+    확인해 보니 이 자리만 `qwen3-35b`, 즉 **이제 없는 모델**을 가리키고 있었다.
+
+    지금까지 안 터진 이유는 `.env.container`가 덮어 왔기 때문이다. 그 파일은
+    커밋되지 않으므로 **새 환경에서는 없는 모델로 떨어진다.** 그 자리 주석도
+    "기본값이 실제 모델명과 어긋나서 override로 메운다"고 스스로 밝히고 있었다 --
+    메우지 말고 맞춰야 한다.
+    """
+    compose = yaml.safe_load(MAIN_COMPOSE_PATH.read_text(encoding="utf-8"))
+    holders = [
+        (name, (service.get("environment") or {})["VIDEOBOX_LOCAL_MODEL_NAME"])
+        for name, service in compose.get("services", {}).items()
+        if "VIDEOBOX_LOCAL_MODEL_NAME" in (service.get("environment") or {})
+    ]
+    assert len(holders) == 1, f"두뇌 이름을 정하는 자리가 하나여야 한다: {[n for n, _ in holders]}"
+    return _innermost_default(str(holders[0][1]))
+
+
+def test_the_main_compose_default_is_the_same_model_as_everything_else() -> None:
+    """`.env.container`가 없으면 여기로 떨어진다 -- 그리고 그 파일은 커밋되지 않는다.
+
+    즉 새로 받은 환경에서 실제로 쓰이는 값은 **이 기본값**이다. 다른 셋과 갈라져
+    있으면 유진이 없는 모델을 부르고, 화면에는 "유진이 지금 도와줄 수 없어요"만
+    뜬다 -- 원인이 설정 한 줄인데 코드를 뒤지게 된다.
+    """
+    assert _main_compose_local_model_default() == _yujin_profile_model(), (
+        f"compose.yaml 기본값({_main_compose_local_model_default()})과 유진의 두뇌"
+        f"({_yujin_profile_model()})가 서로 다른 모델을 가리킨다"
     )
 
 

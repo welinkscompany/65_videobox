@@ -29,6 +29,12 @@ SCRIPT = ROOT / "scripts" / "set-local-model.ps1"
 RELATIVE_FILES = (
     ".env.container",
     "compose.hermes-yujin.yaml",
+    # **2026-09-12에 더했다.** 같은 변수(`VIDEOBOX_LOCAL_MODEL_NAME`)의 기본값이
+    # `compose.yaml`에도 커밋되어 있는데 스크립트도 이 하네스도 그 자리를
+    # 빠뜨렸다. `.env.container`가 gitignore라 "커밋에 있는 자리"를 셋으로만 센
+    # 탓이다 -- 그래서 새 모델로 바꿀 때 여기만 옛 `qwen3-35b`로 남았고, 대표님이
+    # 그 모델을 삭제한 뒤에는 **없는 모델**을 가리키게 됐다.
+    "compose.yaml",
     "config/hermes/yujin/config.yaml",
     "services/agent-gateway/src/videobox_agent_gateway/hermes_memory_adapter.py",
     "tests/test_hermes_yujin_compose_contract.py",
@@ -228,6 +234,11 @@ def test_changes_every_file_it_claims_to_when_the_model_is_loaded(
 
     compose_text = _read(repository, "compose.hermes-yujin.yaml")
     assert nested_default in compose_text
+
+    # `compose.yaml`의 커밋된 기본값. 새로 받은 환경은 `.env.container`가 없어
+    # **이 값으로 뜬다** -- 여기만 안 바뀌면 유진이 없는 모델을 부른다.
+    main_compose_text = _read(repository, "compose.yaml")
+    assert f"VIDEOBOX_LOCAL_MODEL_NAME: ${{VIDEOBOX_LOCAL_MODEL_NAME:-{new_model}}}" in main_compose_text
 
     yujin_config_text = _read(repository, "config/hermes/yujin/config.yaml")
     assert f"name: {new_model}" in yujin_config_text
