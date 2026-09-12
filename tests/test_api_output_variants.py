@@ -1111,3 +1111,299 @@ def test_a_stale_revision_is_refused_before_yujin_is_ever_called(tmp_path: Path)
 
     assert response.status_code == 409, response.text
     assert len(provider.calls) == calls_before, "막을 요청에 유진을 불렀다"
+
+
+# --- 쓸 자리만 나눈다 (대표님 지시 2026-09-12) --------------------------------
+#
+# "그럼 이걸 모두다 안쪼개도 되니까, 마케팅적으로 가장 자극되고 사용할수 있는것만
+# 분석해서 최적화로 쪼개면 되잖아. 굳이 안쓰는걸 다 쪼갤필요는 없잖아"
+#
+# 실측(2026-09-12): 93번 나누기에 마지막 한 번이 298초, 세션 JSON 13.2MB.
+# 그런데 그 94장면 중 숏폼이 쓴 것은 6개였다. 판단은 전사에서 하므로 장면이
+# 필요 없고, 자를 자리에만 경계가 필요하다.
+
+
+@dataclass
+class _OwnerSizedSpreadProvider:
+    """전 구간을 읽고 **한 대목만** 퍼진다고 하는 가짜 유진."""
+
+    calls: list[StructuredLLMRequest] = field(default_factory=list)
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        self.calls.append(request)
+        if "고를 대목:" in request.prompt:
+            lines = [
+                int(line.strip().partition(". ")[0])
+                for line in request.prompt.split("고를 대목:", 1)[1].splitlines()
+                if line.strip()[:1].isdigit()
+            ]
+            output_data = {
+                "thinking": "통념을 뒤집는 첫마디가 손을 멈춘다",
+                "candidates": [{"lines": lines, "reason": "매출 3배라는 결과로 끝까지 붙잡아요"}],
+                "chosen": 1,
+                "schema_version": "videobox.short-form-compose.v1",
+            }
+        else:
+            picks = []
+            for line in request.prompt.split("고를 장면:", 1)[1].splitlines():
+                stripped = line.strip()
+                if not stripped[:1].isdigit():
+                    continue
+                number_text, _, rest = stripped.partition(". ")
+                if "퍼질 한마디" in rest:
+                    picks.append({"scene": int(number_text), "worth": 5})
+            output_data = {"schema_version": "videobox.short-form-spread-scan.v1", "picks": picks}
+        return StructuredLLMResponse(
+            provider_name="local_qwen",
+            model_name="Qwen3-32B",
+            output_data=output_data,
+            raw_text=json.dumps(output_data, ensure_ascii=False),
+            metadata={},
+        )
+
+
+_OWNER_VIDEO_SEC = 494.837
+_OWNER_UTTERANCE_COUNT = 213
+
+
+def _owner_sized_transcript() -> list[dict[str, object]]:
+    """대표님 실제 영상과 같은 규모: 발화 213개, 494.837초."""
+    step = _OWNER_VIDEO_SEC / float(_OWNER_UTTERANCE_COUNT)
+    return [
+        {
+            "start_sec": index * step,
+            "end_sec": (index + 1) * step,
+            "text": (
+                "퍼질 한마디 매출이 3배 올랐어요"
+                if index in (100, 101)
+                # 두 번째 판단이 **다른 자리**를 고를 수 있게 표시를 하나 더 둔다.
+                else "다른 한마디 고객이 답을 알려 줬어요"
+                if index in (20, 21)
+                else f"그냥 설명 {index}입니다"
+            ),
+        }
+        for index in range(_OWNER_UTTERANCE_COUNT)
+    ]
+
+
+def _owner_sized_board(app, project_id: str) -> dict:
+    """제품의 실제 문이 만드는 모양 -- **장면 하나**가 영상 전체다.
+
+    `+ 새로 만들기`(장면 1개) -> 자료실 영상 깔기 -> 장면 길이를 영상 길이로.
+    받아쓰기는 장면을 나누지 않는다(`captions_from_transcript`는 글만 옮긴다).
+    """
+    store = app.state.store
+    store.save_transcript(
+        project_id=project_id,
+        source_asset_id="asset-video",
+        transcript_text="전사",
+        segments=_owner_sized_transcript(),
+    )
+    return store.save_editing_session(
+        project_id=project_id,
+        timeline_id="timeline-source",
+        session_payload={
+            "segments": [
+                {
+                    "segment_id": "seg_001",
+                    "caption_text": "",
+                    "start_sec": 0.0,
+                    "end_sec": _OWNER_VIDEO_SEC,
+                    "source_offset_sec": 0.0,
+                    "cut_action": "keep",
+                    "review_required": False,
+                    "broll_override": {"asset_id": "asset-video"},
+                }
+            ],
+            "history": [],
+            "undo_stack": [],
+            "redo_stack": [],
+        },
+    )
+
+
+def test_a_short_cuts_only_the_places_it_uses_not_the_whole_video(tmp_path: Path) -> None:
+    """대표님 규모(494.837초·발화 213개)에서 **쓸 자리만** 나눈다.
+
+    전에는 이 판에서 고를 장면이 하나뿐이라 "숏폼"이 원본과 같은 494초였고,
+    60초 숏폼을 얻으려면 먼저 93번을 나눠야 했다(마지막 한 번에 298초).
+    """
+    provider = _OwnerSizedSpreadProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "쓸 자리만 나누기"}).json()["project_id"]
+    session = _owner_sized_board(app, project_id)
+    assert len(session["segments"]) == 1
+
+    response = client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["scene_pick"]["judged_by"] == "yujin"
+    # **판이 바뀐 것을 화면에 말해 준다.** 안 말하면 대표님 화면은 장면 하나를
+    # 그대로 보여 주고, 다음 편집이 조용히 충돌한다.
+    assert body["scene_pick"]["board_scenes_cut"] > 0
+    assert "나눴어요" in body["scene_pick"]["notice"]
+
+    board = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    # **93번이 아니다.** 고른 대목마다 양 끝 둘이니 장면은 그만큼만 늘어난다.
+    assert 1 < len(board["segments"]) <= 20, f"너무 많이 나눴다: {len(board['segments'])}"
+    # 판 버전은 **한 번만** 오른다 -- 나누기가 한 덩이라서.
+    assert int(board["session_revision"]) == int(session["session_revision"]) + 1
+    assert len(board["undo_stack"]) == 1, "되돌리기 한 번으로 취소돼야 한다"
+
+    duration_by_id = {
+        str(segment["segment_id"]): float(segment["end_sec"]) - float(segment["start_sec"])
+        for segment in board["segments"]
+    }
+    picked = body["variant"]["selected_segment_ids"]
+    assert picked and set(picked) <= set(duration_by_id)
+    total = sum(duration_by_id[segment_id] for segment_id in picked)
+    assert 8.0 <= total <= 60.0, f"숏폼 길이가 20~60초 범위 밖이다: {total:.2f}초"
+
+    undone = client.post(
+        f"/api/projects/{project_id}/editing-sessions/{session['session_id']}/undo",
+        json={"expected_revision": int(board["session_revision"])},
+    )
+    assert undone.status_code == 200, undone.text
+    restored = undone.json()["session"] if "session" in undone.json() else undone.json()
+    assert len(restored["segments"]) == 1, "한 번 눌러 판이 그대로 돌아와야 한다"
+
+
+def test_remaking_a_short_twice_does_not_cut_the_same_place_again(tmp_path: Path) -> None:
+    """`다시 만들기`를 두 번 눌러도 같은 자리를 두 번 나누지 않는다."""
+    provider = _OwnerSizedSpreadProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "두 번 눌러도"}).json()["project_id"]
+    session = _owner_sized_board(app, project_id)
+
+    created = client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    )
+    assert created.status_code == 201, created.text
+    after_first = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    assert len(after_first["segments"]) > 1, "첫 번째에 자리를 냈어야 두 번째를 잴 수 있다"
+
+    again = _repick(client, project_id, created.json()["variant"])
+
+    after_second = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    assert len(after_second["segments"]) == len(after_first["segments"]), "조각이 늘면 안 된다"
+    assert int(after_second["session_revision"]) == int(after_first["session_revision"])
+    assert again["variant"]["selected_segment_ids"] == created.json()["variant"]["selected_segment_ids"]
+
+
+@dataclass
+class _ShiftingSpreadProvider:
+    """판단마다 **다른 자리**가 퍼진다고 하는 가짜 유진.
+
+    다시 만들기가 새 자리를 나누는지 재려면 두 번의 답이 달라야 한다. 같은
+    답이면 "새 자리를 나눴다"와 "아무것도 안 했다"를 구분할 수 없다.
+    """
+
+    sweeps: int = 0
+
+    def complete_structured(self, request: StructuredLLMRequest) -> StructuredLLMResponse:
+        if "고를 대목:" in request.prompt:
+            self.sweeps += 1
+            lines = [
+                int(line.strip().partition(". ")[0])
+                for line in request.prompt.split("고를 대목:", 1)[1].splitlines()
+                if line.strip()[:1].isdigit()
+            ]
+            output_data = {
+                "thinking": "무엇이 손을 멈추게 하는지 먼저 본다",
+                "candidates": [{"lines": lines, "reason": "인용하고 싶은 한마디예요"}],
+                "chosen": 1,
+                "schema_version": "videobox.short-form-compose.v1",
+            }
+        else:
+            wanted = "퍼질 한마디" if self.sweeps == 0 else "다른 한마디"
+            picks = []
+            for line in request.prompt.split("고를 장면:", 1)[1].splitlines():
+                stripped = line.strip()
+                if not stripped[:1].isdigit():
+                    continue
+                number_text, _, rest = stripped.partition(". ")
+                if wanted in rest:
+                    picks.append({"scene": int(number_text), "worth": 5})
+            output_data = {"schema_version": "videobox.short-form-spread-scan.v1", "picks": picks}
+        return StructuredLLMResponse(
+            provider_name="local_qwen",
+            model_name="Qwen3-32B",
+            output_data=output_data,
+            raw_text=json.dumps(output_data, ensure_ascii=False),
+            metadata={},
+        )
+
+
+def test_yujin_telling_us_to_remake_also_cuts_only_what_it_uses(tmp_path: Path) -> None:
+    """말로 시켜도 같은 일이 일어난다 -- 새 자리를 나누고 그 판 버전으로 옮긴다.
+
+    유진 경로는 제안 수명까지 한 트랜잭션으로 닫는 **다른 문**을 쓴다
+    (`apply_director_variant_proposal_transaction`). 단추만 고치면 이 문이 나누기
+    전 판 버전을 요구해서 조용히 거절한다 -- 같은 로직이 두 자리에 있는 함정이다.
+    """
+    provider = _ShiftingSpreadProvider()
+    app = create_app(
+        projects_root=tmp_path / "projects",
+        local_only_runtime_service_factory=_runtime_factory(provider),
+    )
+    client = TestClient(app)
+    project_id = client.post("/api/projects", json={"name": "말로 시켜 나누기"}).json()["project_id"]
+    session = _owner_sized_board(app, project_id)
+    variant = client.post(
+        f"/api/projects/{project_id}/output-variants",
+        json={"source_session_id": session["session_id"], "kind": "vertical_highlight"},
+    ).json()["variant"]
+    board = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    assert len(board["segments"]) > 1
+
+    proposal_id = _save_short_form_proposal(
+        app, project_id, board, variant, {"action": "remake_short_form"}
+    )
+    candidate_id = app.state.store.get_director_proposal(
+        project_id=project_id, proposal_id=proposal_id
+    ).candidates[0].candidate_id
+
+    response = client.post(
+        f"/api/projects/{project_id}/director/proposals/{proposal_id}/batch-apply",
+        json={
+            "candidate_ids": [candidate_id],
+            "expected_revision": int(board["session_revision"]),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["scene_pick"]["judged_by"] == "yujin"
+    after = app.state.store.get_editing_session(
+        project_id=project_id, session_id=session["session_id"]
+    )
+    # 새 자리를 나눴다 -- 두 번째 판단이 다른 대목을 골랐으니까.
+    assert len(after["segments"]) > len(board["segments"])
+    # 모양이 **지금** 판 버전을 가리켜야 출력이 `stale_master_revision`으로 안 막힌다.
+    assert int(body["variant"]["source_session_revision"]) == int(after["session_revision"])
+    materialized = client.post(
+        f"/api/projects/{project_id}/output-variants/{variant['variant_id']}/materialize",
+        json={"expected_master_session_revision": int(after["session_revision"])},
+    )
+    assert materialized.status_code == 201, materialized.text

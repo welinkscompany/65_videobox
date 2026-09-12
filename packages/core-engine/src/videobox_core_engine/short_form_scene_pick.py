@@ -124,6 +124,14 @@ SHORT_FORM_MAX_TARGET_SEC = 60.0
 #: 유진에게 짜 보라고 할 후보 숏폼 수.
 COMPOSE_CANDIDATES = 3
 
+#: 장면이 대목에 "걸쳤다"고 볼 최소 겹침. **1마이크로초다.**
+#:
+#: 0으로 두면 안 되는 이유: 대목의 끝에서 판을 나누면 왼쪽 조각의 끝이 그
+#: 시각과 float64 오차(494초쯤에서 약 1e-13초)만큼 어긋날 수 있고, 그러면 옆
+#: 장면이 "걸쳤다"로 세어져 숏폼에 조각이 하나 더 붙는다. 1마이크로초는 30fps
+#: 한 프레임(33밀리초)의 3만분의 1이라 진짜 겹침(최소 0.2초)을 놓칠 수 없다.
+_OVERLAP_EPSILON_SEC = 1e-6
+
 #: 훑기 한 호출을 기다리는 **최대** 상한. 실제로 쓰는 값은 예산이 정한다
 #: (`scan_wait_seconds`). **실측으로 정했다**(2026-09-12, 대표님 영상): 묶음이
 #: 34.8~143초에 답하고, 150초 상한에서는 여섯 중 셋이 끊겨 94장면 중 44개만
@@ -196,6 +204,14 @@ class ShortFormScenePick:
     #: (`scene_pick_payload` -> `api.ts` -> `shortFormNotice.ts`).
     #: 유진이 짜기를 못 했으면 `None`이고, 그때 문구가 그 사실을 말한다.
     spread_reason: str | None = None
+    #: 유진이 고른 대목의 **원본 소재 안 구간**. 판을 나눌 자리가 여기서 나온다
+    #: (owner 지시 2026-09-12: "굳이 안쓰는걸 다 쪼갤필요는 없잖아").
+    #: 자막 밀도로 내려간 결과는 대목이 없으니 비어 있다 -- 그때는 나누지 않는다.
+    chosen_source_ranges: tuple[tuple[float, float], ...] = ()
+    #: 숏폼에 쓸 자리를 맞추려고 **판을 몇 군데 나눴는지**. 0이면 판이 안 바뀌었다.
+    #: 화면은 이 값이 0보다 클 때 판을 다시 읽는다 -- 안 읽으면 대표님 화면이
+    #: 나누기 전 판을 보여 주고 다음 편집이 조용히 충돌한다.
+    board_scenes_cut: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -362,12 +378,52 @@ def _segment_ids_for_passages(
             continue
         start, end = _segment_source_bounds(segment)
         for passage in passages:
-            if start < passage.end_sec and end > passage.start_sec:
+            overlap = min(end, passage.end_sec) - max(start, passage.start_sec)
+            if overlap > _OVERLAP_EPSILON_SEC:
                 wanted.add(segment_id)
                 break
     return tuple(
         str(segment["segment_id"]) for segment in segments if str(segment["segment_id"]) in wanted
     )
+
+
+def segment_ids_for_source_ranges(
+    segments: Sequence[Mapping[str, object]],
+    source_ranges: Sequence[tuple[float, float]],
+) -> tuple[str, ...]:
+    """원본 구간들이 걸치는 장면 id. **판 위 시간 순서.**
+
+    나눈 **뒤** 목록을 다시 세는 자리다. 나누기 전과 같은 계산을 쓰지 않으면
+    두 곳이 갈라지므로(이 저장소가 반복해서 걸린 함정) 같은 함수를 통과시킨다.
+    """
+    return _segment_ids_for_passages(
+        segments,
+        [_Passage(start_sec=float(start), end_sec=float(end), text="") for start, end in source_ranges],
+    )
+
+
+def board_times_for_source_times(
+    segments: Sequence[Mapping[str, object]], source_secs: Sequence[float]
+) -> tuple[float, ...]:
+    """원본 소재 안의 시각을 **판 위 시각**으로 옮긴다. 나눌 자리를 만드는 자리다.
+
+    구간을 반열림(`시작 <= 시각 < 끝`)으로 보는 것은 **일부러다.** 이미 경계인
+    시각은 그 경계에서 **시작하는** 장면에 걸리므로 판 위 시각이 그 경계와
+    같아지고, `plan_board_splits`가 "이미 경계"로 보고 건너뛴다. 닫힘으로 보면
+    같은 시각이 왼쪽 조각의 끝으로도 걸려 0.000…초짜리 조각을 만들려 든다.
+
+    마지막 장면의 끝(영상의 끝)은 어디에도 안 걸려 떨어진다 -- 나눌 것이 없는
+    자리라서 맞다.
+    """
+    board_secs: list[float] = []
+    for source_sec in source_secs:
+        value = _number(source_sec)
+        for segment in segments:
+            source_start, source_end = _segment_source_bounds(segment)
+            if source_start <= value < source_end:
+                board_secs.append(_number(segment.get("start_sec")) + (value - source_start))
+                break
+    return tuple(board_secs)
 
 
 def _clamp_to_max_sec(
@@ -405,45 +461,44 @@ def _assemble_within_ceiling(
     priority: Sequence[int],
     *,
     max_target_sec: float,
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], tuple[int, ...]]:
     """중요한 대목부터 담되 **상한을 넘기지 않는다**. 결과는 판 위 시간 순서.
 
-    두 가지를 일부러 이렇게 했다.
+    세 가지를 일부러 이렇게 했다.
 
     1. **담기 전에 본다.** 담고 나서 "넘었나"를 보면 상한이 목표가 된다 --
        2026-09-12 실물에서 60초 "상한"이 61.48초로 나온 이유다.
     2. **안 맞는 대목은 건너뛰고 계속 본다**(`break`가 아니라 `continue`).
        긴 대목 하나가 자리를 못 찾아도 뒤의 짧은 알맹이는 들어갈 수 있다.
+    3. **길이를 대목으로 잰다**(2026-09-12 오후). 예전에는 대목이 걸친 **장면**
+       길이를 더했는데, 장면 하나가 494초인 판(제품의 실제 문이 만드는 모양)에서는
+       첫 대목 하나가 494초를 채워 버려 "숏폼"이 원본과 같은 길이가 됐다. 대목
+       길이로 재면 어느 판에서든 20~60초가 나오고, 그 뒤 **고른 자리만 나누면**
+       장면 경계가 대목에 맞는다.
 
     그리고 덜어낼 때는 **뒤가 아니라 점수 낮은 것**부터다. 뒤에서 자르면 남에게
     보낼 이유가 되는 마지막 한마디가 제일 먼저 사라진다.
+
+    돌려주는 둘째 값은 **담은 대목 번호**(판 위 시간 순서)다. 나눌 자리가
+    여기서 나오므로 부르는 쪽이 같은 계산을 두 번 하지 않게 함께 돌려준다.
     """
-    duration_by_id = {
-        str(segment.get("segment_id") or ""): max(
-            0.0, _number(segment.get("end_sec")) - _number(segment.get("start_sec"))
-        )
-        for segment in segments
-    }
-    selected: set[str] = set()
+    accepted: list[int] = []
     filled = 0.0
     for index in priority:
-        if not 0 <= index < len(passages):
+        if not 0 <= index < len(passages) or index in accepted:
             continue
-        extra = [
-            segment_id
-            for segment_id in _segment_ids_for_passages(segments, [passages[index]])
-            if segment_id not in selected
-        ]
-        if not extra:
+        # 판에 걸치는 장면이 없는 대목은 담지 않는다 -- 담아도 이을 것이 없고
+        # 예산만 먹는다(전사와 판이 어긋난 경우).
+        if not _segment_ids_for_passages(segments, [passages[index]]):
             continue
-        added = sum(duration_by_id.get(segment_id, 0.0) for segment_id in extra)
-        if selected and filled + added > max_target_sec:
+        added = passages[index].duration_sec
+        if accepted and filled + added > max_target_sec:
             continue
-        selected.update(extra)
+        accepted.append(index)
         filled += added
-    return tuple(
-        str(segment["segment_id"]) for segment in segments if str(segment["segment_id"]) in selected
-    )
+    ordered = tuple(sorted(accepted))
+    segment_ids = _segment_ids_for_passages(segments, [passages[index] for index in ordered])
+    return segment_ids, ordered
 
 
 def _scan_schema() -> dict[str, Any]:
@@ -973,7 +1028,7 @@ def pick_short_form_scenes(
     else:
         priority = sorted(scored, key=lambda index: (-scored[index], index))
 
-    segment_ids = _assemble_within_ceiling(
+    segment_ids, accepted_passages = _assemble_within_ceiling(
         ordered, passages, priority, max_target_sec=max_target_sec
     )
     if not segment_ids:
@@ -1017,4 +1072,9 @@ def pick_short_form_scenes(
         scenes_total=len(ordered),
         scenes_read_by_yujin=read_count,
         spread_reason=spread_reason,
+        # **자를 자리.** 부르는 쪽(`short_form_scenes.py`)이 이 구간의 양 끝에서만
+        # 판을 나눈다 -- 안 쓰는 자리는 나누지 않는다(owner 지시 2026-09-12).
+        chosen_source_ranges=tuple(
+            (passages[index].start_sec, passages[index].end_sec) for index in accepted_passages
+        ),
     )

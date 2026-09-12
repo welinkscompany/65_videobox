@@ -283,7 +283,12 @@ class OutputVariantMixin:
                 raise EditingSessionRevisionConflict("output_variant_revision_conflict")
             if (
                 str(current["source_session_id"]) != variant.source_session_id
-                or int(current["source_session_revision"]) != variant.source_session_revision
+                # **판 버전은 앞으로만 간다**(2026-09-12). 전에는 "정확히 같을 때만"
+                # 받았는데, 숏폼이 쓸 자리를 나누면 판 버전이 한 칸 올라간다 --
+                # 그러면 "유진에게 말해서 다시 만들기"가 이 문에서 조용히 422로
+                # 죽었다. 뒤로 가는 것은 여전히 막는다(낡은 모양을 덮어쓰는 일).
+                # `update_output_variant`(단추 경로)가 이미 같은 규칙이다.
+                or int(current["source_session_revision"]) > variant.source_session_revision
                 or str(current["kind"]) != variant.kind
             ):
                 raise ValueError("variant_source_identity_mismatch")

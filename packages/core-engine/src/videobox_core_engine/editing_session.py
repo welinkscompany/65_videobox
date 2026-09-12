@@ -577,17 +577,31 @@ def _slice_content_windows(*, segment: dict[str, Any], start_sec: float, end_sec
     return result
 
 
-def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float) -> dict[str, Any]:
-    updated = deepcopy(session)
-    index = _segment_index(session=updated, segment_id=segment_id)
-    original = updated["segments"][index]
+def _split_one_segment_in_place(*, segments: list[dict[str, Any]], segment_id: str, split_sec: float) -> None:
+    """장면 하나를 두 조각으로 나눈다. **되돌리기 기록은 남기지 않는다.**
+
+    기록을 여기서 남기지 않는 이유: 한 번에 여러 자리를 나눠야 하는 부름이
+    있다(`split_segments_at` -- 숏폼이 쓸 자리만 나누기). 나누기마다 기록을
+    남기면 대표님이 되돌리기를 열두 번 눌러야 숏폼 하나가 취소된다.
+    """
+    index = next(
+        (
+            position
+            for position, item in enumerate(segments)
+            if isinstance(item, dict) and str(item.get("segment_id")) == segment_id
+        ),
+        None,
+    )
+    if index is None:
+        raise KeyError(f"Segment not found in editing session: {segment_id}")
+    original = segments[index]
     start_sec, end_sec = float(original["start_sec"]), float(original["end_sec"])
     split_sec = float(split_sec)
     if not isfinite(split_sec):
         raise ValueError("segment_bounds_must_be_finite")
     if split_sec - start_sec < MIN_SEGMENT_DURATION_SEC or end_sec - split_sec < MIN_SEGMENT_DURATION_SEC:
         raise ValueError(f"Split must leave at least {MIN_SEGMENT_DURATION_SEC} seconds on both sides.")
-    known_ids = {str(item.get("segment_id")) for item in updated["segments"] if isinstance(item, dict)}
+    known_ids = {str(item.get("segment_id")) for item in segments if isinstance(item, dict)}
     suffix = 2
     split_id = f"{segment_id}__split_{suffix}"
     while split_id in known_ids:
@@ -626,9 +640,113 @@ def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float)
     right["lineage"] = _lineage_for_split(original, parent_segment_id=segment_id)
     left["caption_needs_review"] = True
     right["caption_needs_review"] = True
-    updated["segments"][index : index + 1] = [left, right]
+    segments[index : index + 1] = [left, right]
+
+
+def split_segment(*, session: dict[str, Any], segment_id: str, split_sec: float) -> dict[str, Any]:
+    updated = deepcopy(session)
+    _split_one_segment_in_place(segments=updated["segments"], segment_id=segment_id, split_sec=split_sec)
     _validate_segment_bounds(segments=updated["segments"])
     return _record_undoable_mutation(before=session, updated=updated, mutation_type="segment_split", segment_id=segment_id)
+
+
+#: 이미 경계가 있는 자리로 볼 오차. **1밀리초다.**
+#:
+#: 왜 이 값인가: 30fps에서 한 프레임이 33밀리초이므로 1밀리초는 절대로 보이는
+#: 프레임을 옮기지 못한다. 반대쪽 끝에서, 494초쯤의 float64 반올림 오차는 약
+#: 1e-13초라 일곱 자리 여유가 있다 -- 전사 시각을 원본 좌표에서 판 좌표로
+#: 옮길 때 생기는 noise를 "새 경계"로 오해하지 않을 만큼 넉넉하다.
+BOUNDARY_TOLERANCE_SEC = 0.001
+
+
+def plan_board_splits(
+    *,
+    segments: list[dict[str, Any]],
+    board_secs: list[float] | tuple[float, ...],
+    tolerance_sec: float = BOUNDARY_TOLERANCE_SEC,
+) -> tuple[tuple[str, float], ...]:
+    """판 위 시각 목록을 **실제로 나눌 자리**로 바꾼다. 아무것도 안 바꾼다.
+
+    셋을 걸러 낸다.
+
+    1. **이미 경계인 자리는 안 나눈다**(오차 `tolerance_sec` 안). 안 걸러 내면
+       `다시 만들기`를 두 번 누를 때 같은 자리를 두 번 나눠 조각이 생긴다.
+    2. **최소 길이(`MIN_SEGMENT_DURATION_SEC`)를 못 남기는 자리는 안 나눈다.**
+       엔진이 거절하는 자리이고, 거절을 받아 오면 나누기 전체가 실패한다.
+       그때는 **가까운 기존 경계로 붙는다**(오차는 최대 0.2초).
+    3. 어느 장면에도 안 걸리는 자리(판 밖)는 버린다.
+
+    결과는 **적용 순서**다 -- 큰 시각부터다. 나누기는 왼쪽 조각에 원래 id를
+    남기므로(오른쪽이 `__split_N`), 뒤에서부터 나누면 앞의 자리는 여전히 원래
+    id를 가리킨다. 앞에서부터 나누면 두 번째 자리가 사라진 id를 가리킨다.
+    """
+    bounds = [
+        (
+            str(segment.get("segment_id") or ""),
+            float(segment.get("start_sec", 0.0)),
+            float(segment.get("end_sec", 0.0)),
+        )
+        for segment in segments
+        if isinstance(segment, dict) and str(segment.get("segment_id") or "").strip()
+    ]
+    planned: list[tuple[str, float]] = []
+    # 큰 시각부터. 같은 장면 안의 여러 자리를 나눌 때 앞자리가 원래 id에 남는다.
+    for board_sec in sorted({float(value) for value in board_secs}, reverse=True):
+        if not isfinite(board_sec):
+            continue
+        target = next(
+            (
+                item
+                for item in bounds
+                if item[1] < board_sec < item[2]
+            ),
+            None,
+        )
+        if target is None:
+            # 이미 경계이거나 판 밖이다. 둘 다 나눌 것이 없다.
+            continue
+        segment_id, start_sec, end_sec = target
+        if board_sec - start_sec <= tolerance_sec or end_sec - board_sec <= tolerance_sec:
+            continue
+        if board_sec - start_sec < MIN_SEGMENT_DURATION_SEC or end_sec - board_sec < MIN_SEGMENT_DURATION_SEC:
+            # 조각을 만들지 않는다. 가까운 기존 경계로 붙는 셈이다.
+            continue
+        planned.append((segment_id, board_sec))
+        # 나눈 뒤 원래 id는 왼쪽 조각이다. 다음(더 작은) 자리를 위해 끝을 당긴다.
+        bounds[bounds.index(target)] = (segment_id, start_sec, board_sec)
+    return tuple(planned)
+
+
+def split_segments_at(
+    *,
+    session: dict[str, Any],
+    splits: list[tuple[str, float]] | tuple[tuple[str, float], ...],
+    label: str,
+) -> dict[str, Any]:
+    """여러 자리를 **한 덩이로** 나눈다. 되돌리기 한 칸, 판 버전 한 번.
+
+    `split_segment`를 여러 번 부르는 것과 결과 장면은 같지만, 되돌리기가 다르다 --
+    이 함수는 `apply_user_transaction`으로 한 덩이를 만든다. 유진 편집은 확인
+    클릭 없이 적용되고 **되돌리기가 유일한 안전장치**이므로(owner 결정
+    2026-09-01), 숏폼 하나를 취소하려고 Ctrl+Z를 열두 번 누르게 해서는 안 된다.
+    """
+    if not splits:
+        raise ValueError("split_places_required")
+
+    def mutate(draft: dict[str, Any]) -> None:
+        for segment_id, split_sec in splits:
+            _split_one_segment_in_place(
+                segments=draft["segments"], segment_id=segment_id, split_sec=float(split_sec)
+            )
+        _validate_segment_bounds(segments=draft["segments"])
+
+    return apply_user_transaction(
+        session=session,
+        label=label,
+        affected_segment_ids=list(dict.fromkeys(segment_id for segment_id, _ in splits)),
+        mutate=mutate,
+        mutation_type="segments_split_batch",
+    )
 
 
 def merge_adjacent_segments(*, session: dict[str, Any], left_segment_id: str, right_segment_id: str) -> dict[str, Any]:

@@ -1261,3 +1261,90 @@ def test_manifest_length_shrinks_when_the_stored_number_is_longer_than_the_clips
     assert manifest["output"]["duration_sec"] == 8.0
     # 화면 크기는 여전히 저장된 값에서 온다 -- 세로 숏폼이 이 칸에 걸려 있다.
     assert (manifest["output"]["width"], manifest["output"]["height"]) == (1920, 1080)
+
+
+# --- 쓸 자리만 나누기: 여러 자리를 한 번에, 되돌리기는 한 번 ---------------------
+#
+# 대표님 지시(2026-09-12): "굳이 안쓰는걸 다 쪼갤필요는 없잖아." 숏폼이 쓰는
+# 자리에만 경계를 낸다. 그런데 자리가 여러 개이므로 **한 덩이로** 나눠야 한다 --
+# 나누기마다 되돌리기 한 칸을 쓰면 대표님이 Ctrl+Z를 열두 번 눌러야 숏폼 하나가
+# 취소된다. 유진 편집은 확인 클릭 없이 적용되고 되돌리기가 유일한 안전장치다
+# (owner 결정 2026-09-01).
+
+
+def _one_long_scene(duration_sec: float = 494.837) -> dict:
+    """대표님 실제 영상과 같은 길이의 **장면 하나**짜리 판.
+
+    제품의 실제 문(`+ 새로 만들기` -> 영상 깔기 -> 길이 맞추기)이 만드는 모양이다.
+    """
+    return {
+        "project_id": "project_001",
+        "session_id": "session_001",
+        "timeline_id": "timeline_001",
+        "session_revision": 1,
+        "segments": [
+            {
+                "segment_id": "seg_001",
+                "caption_text": "긴 영상 하나",
+                "start_sec": 0.0,
+                "end_sec": duration_sec,
+                "cut_action": "keep",
+                "source_offset_sec": 0.0,
+                "broll_override": {"asset_id": "asset-video"},
+            }
+        ],
+        "history": [],
+        "undo_stack": [],
+        "redo_stack": [],
+    }
+
+
+def test_cutting_many_places_at_once_is_one_undo_press() -> None:
+    """대표님 영상 규모(494.837초)에서 94장면을 **한 덩이로** 낸다.
+
+    93번 따로 부르면 되돌리기가 93칸(실제로는 상한 10칸)이 되어 숏폼 하나를
+    취소할 길이 없어진다.
+    """
+    from videobox_core_engine.editing_session import plan_board_splits, split_segments_at
+    from videobox_core_engine.editing_session import undo as undo_session
+
+    session = _one_long_scene()
+    # 발화 213개를 4~8초 대목으로 묶었을 때 나오는 경계 수와 같은 규모.
+    wanted = [round(index * 494.837 / 94.0, 3) for index in range(1, 94)]
+
+    planned = plan_board_splits(segments=session["segments"], board_secs=wanted)
+    assert len(planned) == 93, f"93자리를 다 계획해야 한다: {len(planned)}"
+
+    cut = split_segments_at(session=session, splits=planned, label="숏폼 자리 나누기")
+
+    assert len(cut["segments"]) == 94
+    assert len(cut["undo_stack"]) == 1, "여러 자리를 나눠도 되돌리기는 한 칸이다"
+    assert int(cut["session_revision"]) == 2, "판 버전은 정확히 한 번 오른다"
+
+    restored = undo_session(session=cut)
+    assert [segment["segment_id"] for segment in restored["segments"]] == ["seg_001"]
+    assert float(restored["segments"][0]["end_sec"]) == 494.837
+
+
+def test_a_place_that_is_already_a_boundary_is_not_cut_again() -> None:
+    """다시 만들기를 두 번 눌러도 같은 자리를 두 번 나누지 않는다."""
+    from videobox_core_engine.editing_session import plan_board_splits, split_segments_at
+
+    session = _one_long_scene(duration_sec=60.0)
+    first = plan_board_splits(segments=session["segments"], board_secs=[10.0, 25.0])
+    cut = split_segments_at(session=session, splits=first, label="숏폼 자리 나누기")
+
+    again = plan_board_splits(segments=cut["segments"], board_secs=[10.0, 25.0])
+
+    assert again == (), f"이미 경계인 자리는 다시 나누지 않는다: {again}"
+
+
+def test_a_place_too_close_to_an_existing_boundary_snaps_instead_of_slivering() -> None:
+    """최소 길이(0.2초)를 못 채우는 자리는 나누지 않고 옆 경계로 붙인다."""
+    from videobox_core_engine.editing_session import plan_board_splits
+
+    session = _one_long_scene(duration_sec=60.0)
+
+    planned = plan_board_splits(segments=session["segments"], board_secs=[0.05, 30.0, 59.95])
+
+    assert planned == (("seg_001", 30.0),), f"조각을 만들지 않아야 한다: {planned}"

@@ -959,3 +959,86 @@ def test_the_background_budget_lets_yujin_wait_longer_than_one_request_can() -> 
     assert result.judged_by == "yujin"
     assert result.spread_reason == "퍼질 이유", "뒤에서 돌면 왜 퍼질지가 살아 온다"
     assert clock() > 330, "한 요청 안에서는 못 끝내는 일이라는 것이 이 시험의 뜻이다"
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-12 (오후): **쓸 자리만 나눈다**
+#
+# 대표님 지시: "굳이 안쓰는걸 다 쪼갤필요는 없잖아." 판단은 전사에서 하므로
+# 장면이 몇 개든 상관없다 -- 그러니 판단 **결과**가 자를 자리를 말해야 한다.
+# ---------------------------------------------------------------------------
+
+
+def _owner_sized_utterances(count: int = 213, total_sec: float = 494.837) -> list[dict[str, object]]:
+    """대표님 실제 영상과 같은 규모(발화 213개, 494.837초).
+
+    한 발화가 약 2.3초라 대목(8초 이상)이 서너 발화씩 묶인다.
+    """
+    step = total_sec / float(count)
+    rows: list[dict[str, object]] = []
+    for index in range(count):
+        # 하나만 퍼지게 둔다 -- 어느 자리가 골라졌는지 시험이 알 수 있어야 한다.
+        text = "퍼질 한마디입니다" if index == 100 else f"그냥 설명 {index}입니다"
+        rows.append(
+            {"start_sec": index * step, "end_sec": (index + 1) * step, "text": text}
+        )
+    return rows
+
+
+def test_the_judgement_says_which_places_to_cut_not_just_which_scenes() -> None:
+    """**장면 하나짜리 판**에서도 숏폼 자리가 나온다.
+
+    제품의 실제 문(`+ 새로 만들기` -> 영상 깔기 -> 길이 맞추기)은 장면 하나를
+    만든다. 지금은 그 판에서 고를 수 있는 장면이 하나뿐이라 "숏폼"이 원본과
+    같은 494초가 된다. 판단이 **자를 자리**를 말해야 그 판에서도 숏폼이 나온다.
+    """
+    runtime = _SpreadRuntime()
+    coarse_board = [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "",
+            "start_sec": 0.0,
+            "end_sec": 494.837,
+            "source_offset_sec": 0.0,
+        }
+    ]
+
+    result = pick_short_form_scenes(
+        coarse_board,
+        project_id="proj-1",
+        runtime=runtime,
+        utterances=_owner_sized_utterances(),
+    )
+
+    assert result.judged_by == "yujin"
+    assert result.chosen_source_ranges, "고른 대목의 원본 구간을 알려 줘야 한다"
+    total = sum(end - start for start, end in result.chosen_source_ranges)
+    assert total <= 60.0, f"숏폼 상한을 넘었다: {total:.2f}초"
+    assert total >= 8.0, f"대목 하나도 못 담았다: {total:.2f}초"
+    # 퍼지는 한마디(발화 100번 근처)가 들어 있어야 한다.
+    spoken_at = 100 * (494.837 / 213.0)
+    assert any(start <= spoken_at < end for start, end in result.chosen_source_ranges)
+
+
+def test_the_short_length_is_judged_by_the_passage_not_by_the_coarse_scene() -> None:
+    """상한을 **대목 길이**로 재야 장면이 굵은 판에서도 20~60초가 나온다."""
+    runtime = _SpreadRuntime(spreads=lambda text: True)
+    coarse_board = [
+        {
+            "segment_id": "seg_001",
+            "caption_text": "",
+            "start_sec": 0.0,
+            "end_sec": 494.837,
+            "source_offset_sec": 0.0,
+        }
+    ]
+
+    result = pick_short_form_scenes(
+        coarse_board,
+        project_id="proj-1",
+        runtime=runtime,
+        utterances=_owner_sized_utterances(),
+    )
+
+    total = sum(end - start for start, end in result.chosen_source_ranges)
+    assert 0.0 < total <= 60.0, f"모든 대목이 퍼진다고 해도 상한은 지킨다: {total:.2f}초"

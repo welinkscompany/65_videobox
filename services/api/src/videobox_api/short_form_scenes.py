@@ -30,8 +30,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
+import logging
 from typing import Any
 
+from videobox_core_engine.editing_session import (
+    plan_board_splits,
+    split_segments_at,
+)
 from videobox_core_engine.output_variants import (
     VariantInvariantError,
     apply_variant_patch,
@@ -40,9 +46,17 @@ from videobox_core_engine.output_variants import (
 from videobox_core_engine.short_form_scene_pick import (
     SYNCHRONOUS_BUDGET_SECONDS,
     ShortFormScenePick,
+    board_times_for_source_times,
     pick_short_form_scenes,
+    segment_ids_for_source_ranges,
 )
 from videobox_domain_models.output_variants import OutputVariant
+
+_LOGGER = logging.getLogger(__name__)
+
+#: 판을 나눈 일에 붙는 이름. 되돌리기 목록에 이 말로 보인다 -- 창작자 말이어야
+#: 하므로 `split`·`revision` 같은 내부 낱말을 쓰지 않는다(`§10.13`).
+_CUT_LABEL = "숏폼에 쓸 자리 나누기"
 
 
 def _board_source_asset_ids(segments: list[dict]) -> list[str]:
@@ -95,12 +109,90 @@ def short_form_scene_pick(
         # 전사를 못 읽는 것은 숏폼을 못 만드는 이유가 아니다. 장면 자막으로
         # 내려가고, 그 사실은 결과 문구가 말한다.
         utterances = []
-    return pick_short_form_scenes(
+    pick = pick_short_form_scenes(
         segments,
         project_id=project_id,
         runtime=runtime,
         utterances=utterances or None,
         budget_seconds=budget_seconds,
+    )
+    return cut_only_what_the_short_uses(
+        store=store, project_id=project_id, session_id=session_id, session=session, pick=pick
+    )
+
+
+def cut_only_what_the_short_uses(
+    *,
+    store: Any,
+    project_id: str,
+    session_id: str,
+    session: Mapping[str, object],
+    pick: ShortFormScenePick,
+) -> ShortFormScenePick:
+    """고른 대목의 **양 끝에서만** 판을 나누고, 새 장면 목록으로 고른다.
+
+    대표님 지시(2026-09-12): *"굳이 안쓰는걸 다 쪼갤필요는 없잖아."*
+
+    ## 왜 이 순서인가
+
+    `쪼개기 -> 고르기`다. 거꾸로 하면 안 된다 -- 숏폼 모양은 만들어질 때 판
+    버전을 적어 두고(`create_output_variant`), 출력은 그 버전이 지금 판과 같아야
+    한다(`materialize_variant`의 `stale_master_revision`). 먼저 고르고 나중에
+    나누면 방금 만든 숏폼이 그 자리에서 낡은 것이 된다.
+
+    그래서 나누기는 **모양을 만들거나 갈아 끼우기 전에** 끝난다. 처음 만들기는
+    `create_output_variant`가 나눈 뒤의 판 버전을 그대로 읽고, 다시 만들기는
+    `remade_short_form_variant`가 새 판 버전으로 옮겨 준다.
+
+    ## 안 나누는 경우
+
+    - 자막 밀도로 내려간 결과(대목이 없다). 나눌 자리를 모르므로 있는 장면에서 고른다.
+    - 대목의 양 끝이 **이미 경계**인 경우(대표님 현재 판이 그렇다 -- 장면이 발화
+      끝점에서 이미 나뉘어 있다). `plan_board_splits`가 걸러 내므로 판 버전이
+      움직이지 않는다. `다시 만들기`를 두 번 눌러도 조각이 안 생기는 근거다.
+    """
+    if not pick.chosen_source_ranges:
+        return pick
+    segments = [segment for segment in session.get("segments", []) if isinstance(segment, dict)]
+    # 대목의 **시작과 끝** 둘만 나눈다. 구간당 둘이라 여섯 대목이면 최대 열둘이다.
+    source_secs = [value for start, end in pick.chosen_source_ranges for value in (start, end)]
+    planned = plan_board_splits(
+        segments=segments,
+        board_secs=list(board_times_for_source_times(segments, source_secs)),
+    )
+    if not planned:
+        _LOGGER.info(
+            "숏폼 자리 나누기: 나눌 자리가 없어요(이미 경계). 장면 %d개 그대로 씁니다.",
+            len(segments),
+        )
+        return pick
+    saved = store.update_editing_session(
+        project_id=project_id,
+        session_id=session_id,
+        session_payload=split_segments_at(
+            session=dict(session), splits=planned, label=_CUT_LABEL
+        ),
+        expected_revision=int(session.get("session_revision") or 1),
+    )
+    new_segments = [segment for segment in saved.get("segments", []) if isinstance(segment, dict)]
+    _LOGGER.info(
+        "숏폼 자리 나누기: 대목 %d개를 위해 %d자리를 나눴어요. 장면 %d개 -> %d개.",
+        len(pick.chosen_source_ranges), len(planned), len(segments), len(new_segments),
+    )
+    # **`scenes_total`·`scenes_read_by_yujin`은 안 건드린다.** 그 둘은 유진이
+    # **무엇을 읽었는지**를 말하고 문구가 그 숫자를 그대로 인용한다. 나눈 뒤의
+    # 장면 수로 갈아 끼우면 "전 구간 읽었어요"와 "94개 중 1개" 같은 어긋남이
+    # 다시 생긴다 -- 2026-09-12에 실물에서 고친 바로 그 결함이다.
+    return replace(
+        pick,
+        segment_ids=segment_ids_for_source_ranges(new_segments, pick.chosen_source_ranges),
+        board_scenes_cut=len(planned),
+        # 판이 바뀌었으면 **대표님께 말한다.** 안 말하면 화면의 장면 수가 갑자기
+        # 달라진 이유를 알 수 없다. 되돌리기 한 번으로 원래대로 돌아간다.
+        notice=(
+            f"{pick.notice} 숏폼에 쓸 자리에 맞춰 장면을 {len(planned)}군데 나눴어요. "
+            "되돌리기 한 번으로 원래대로 돌아가요."
+        ).strip(),
     )
 
 
@@ -152,6 +244,29 @@ def remade_short_form_variant(
         updated = updated.model_copy(
             update={"variant_revision": variant.variant_revision + 1}
         )
+    # **나눈 뒤의 판 버전으로 옮긴다.** 쓸 자리를 나눴으면 판 버전이 한 칸
+    # 올라갔고, 옮기지 않으면 다음 단계(출력)가 `stale_master_revision`으로
+    # 거절한다 -- 대표님 입장에서는 방금 만든 숏폼이 바로 낡은 것이 된다.
+    # `rebase_variant`를 쓰지 않는 이유: 그쪽은 모양 버전을 한 번 더 올려서
+    # 저장소의 `variant_revision_must_advance_by_one`에 걸린다.
+    board = store.get_editing_session(
+        project_id=project_id, session_id=variant.source_session_id
+    )
+    board_revision = int(board.get("session_revision") or 1)
+    if board_revision > updated.source_session_revision:
+        updated = updated.model_copy(
+            update={
+                "source_session_revision": board_revision,
+                # 나눈 장면이 마스터 목록에도 들어가야 한다. 안 옮기면 이 칸이
+                # 나누기 전 판을 가리켜 실제 판과 어긋난다.
+                "master_segment_ids": tuple(
+                    str(segment["segment_id"])
+                    for segment in board.get("segments", [])
+                    if isinstance(segment, Mapping) and str(segment.get("segment_id") or "").strip()
+                )
+                or None,
+            }
+        )
     return updated, pick
 
 
@@ -169,4 +284,8 @@ def scene_pick_payload(pick: ShortFormScenePick) -> dict[str, object]:
         # **왜 퍼질지**. 유진이 짜 준 한 줄이고 화면 문구에 그대로 붙는다
         # (`shortFormNotice.ts`). 여기서 빼면 판단이 보이지 않는다.
         "spread_reason": pick.spread_reason,
+        # **판을 몇 군데 나눴는지.** 0보다 크면 화면이 판을 다시 읽어야 한다 --
+        # 안 읽으면 대표님은 나누기 전 판을 보고, 다음 편집이 조용히 충돌한다
+        # (`EditorWorkbenchRoute.makeShortForm`).
+        "board_scenes_cut": pick.board_scenes_cut,
     }
