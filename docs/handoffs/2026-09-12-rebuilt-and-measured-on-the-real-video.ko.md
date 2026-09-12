@@ -106,3 +106,97 @@
 다만 그 과정에서 **읽기가 쓰기를 한다**는 점은 확인해 둘 만하다 —
 `local_project_store.get_editing_session`은 DB에서 이미 다 읽고 나서 디스크 사본을
 다시 쓰고, 그 쓰기가 실패하면 **읽기 전체가 500이 된다.** 별도 작업으로 남겼다.
+
+
+---
+
+# 후반 — 숏폼이 대표님 손에 쓸 만해진 지점 (같은 날)
+
+앞 인계(`2026-09-12-rebuilt-and-measured-on-the-real-video.ko.md`)를 잇는다.
+그 문서의 §4에 정정 한 문단이 붙어 있으니 같이 읽어라.
+
+## 1. 오늘 들어온 것
+
+| 커밋 | 무엇 |
+|---|---|
+| `33386c92f` | `숏폼으로 변환` 단추 하나 — 판단부터 내려받기까지 |
+| `4929ee847` | 기다리는 동안 화면이 계속 말한다 |
+| `9e2630f86` | 재빌드 뒤 실물 측정 기록 |
+| `2be2ffb42` | **두 번째 눌러도 똑같이 동작한다** (쪼갬 누적 + 승인 풀림) |
+| `d7bd2d023` | **세로 숏폼이 좌우를 안 자른다** (`fit`에 셋째 값 `전체 담기`) |
+
+## 2. 화면에서 직접 확인한 것 (재빌드 `d7bd2d023` 뒤)
+
+### 좌우 잘림
+
+프레임을 png로 뽑아 눈으로 봤다. 구워진 자막 `정답은 주력 상품은 찾는 게 아니라`가
+**양쪽 다 온전**하다(전에는 `에서 잘 팔리는 상`). `cropdetect` `1080:1920:0:0`,
+소리 −23.3 dB / 최대 −5.4 dB, 27.93초.
+
+편집기 `화면 맞춤` 칸에 셋이 다 뜬다:
+`화면 안에 맞추기 (위아래에 검은 띠가 생겨요)` / `꽉 채우기 (좌우가 잘려요)` /
+`전체 담기 (다 보이고 빈 자리는 흐린 배경)` ← 세로 기본값.
+아래에 `세로 숏폼에서 좌우가 잘리면 전체 담기를 고르세요.` 안내가 붙는다.
+
+### 두 번째 누름
+
+화면에서 연속 두 번 눌렀다(검토 승인을 다시 안 밟았다).
+
+| | 1회차 | 2회차 |
+|---|---|---|
+| 단추 | 눌림 | **재승인 없이 바로 눌림** |
+| 장면 수 | 19 → 17 | 17 → **16** |
+| 되돌리기 | 5 → **5** | 5 → **5** |
+
+전에는 1→19로 늘고 되돌리기가 누를 때마다 쌓였다.
+
+## 3. 지금 진행 중인 것
+
+계획서: `docs/superpowers/plans/2026-09-12-a-short-that-looks-like-a-short.md`
+**참고 숏폼 넷의 실측 표와 다음에 할 일이 전부 거기 있다.** 먼저 읽어라.
+
+- **Task 1 레이아웃** — 제목 띠 + 영상 띠 + 아래 검정 자막.
+  **⚠ 이 인계를 쓰는 시점에 작업트리에 커밋 안 된 변경이 20여 개 파일에 있다.**
+  서브에이전트가 돌던 중 세션이 끝나서 남은 것이다. 지우지 마라.
+
+  ```
+  apps/web/src/api.ts
+  apps/web/src/features/editor/variants/VariantServerControls.tsx
+  apps/web/src/styles/editor-workbench.css
+  config/hermes/yujin/skills/videobox-creator/SKILL.md
+  packages/core-engine/.../{ass_subtitles,composition_plan,ffmpeg_final_renderer,
+    local_pipeline,output_variants,short_form_scene_pick,yujin_creator_context,
+    yujin_creator_proposal_adapter}.py
+  packages/domain-models/.../{output_variants,yujin_creator_context,
+    yujin_creator_proposals}.py
+  packages/storage-abstractions/.../_store_output_variants.py
+  services/agent-gateway/.../creator_context.py
+  services/api/.../routers/output_variants.py
+  services/api/.../short_form_scenes.py
+  ```
+
+  **먼저 `git diff`로 어디까지 됐는지 읽어라.** 완성 상태인지 중간 상태인지 모른다 —
+  시험이 초록인지부터 확인하고(`.venv/Scripts/python.exe -m pytest`,
+  `cd apps/web && npx vitest run`), 초록이면 이어받아 마무리하고, 깨져 있으면
+  계획서 Task 1 기준으로 고쳐서 닫는다. **검증 없이 커밋하지 마라.**
+- **Task 3 유진 배선** — 아직 시작 안 함. 막는 자리까지 계획서에 적어 뒀다.
+
+## 4. 아직 **안 한** 검증 (대표님이 닫으라고 지시함)
+
+계획서의 "닫을 때 할 검증" 절에 R1~R4와 갭 대조가 있다. 요약:
+
+- **R1 (가장 중요)** — 경계 나누기가 완성본을 안 바꾼다는 **md5 근거를 다시 세워야 한다.**
+  `2be2ffb42`가 승인을 유지하는 근거인데, 그 md5는 렌더러가 바뀌기 전 값이다.
+  **다르면 승인 유지를 되돌려야 한다.**
+- **R2** — 캡컷 초안에서 흐린 배경이 어떻게 보이는지 실물로.
+- **R3** — 유진에게 **실제로 말해서** 숏폼이 나오는지(새 편집판에서).
+- **R4** — 제목 띠 비율을 참고 숏폼 잰 **같은 스크립트**로 숫자 대조.
+
+## 5. 기억해 둘 것
+
+- **유진 판단은 깨끗한 GPU에서 10초다.** 앞 세션의 437초·605초는 모델 둘이 올라가 있어서
+  생긴 경합이었다. 시간을 재기 전에 `loaded_instances`부터 세라.
+- **`cropdetect`는 "무엇이 잘려 나갔는가"를 답하지 않는다.** 잘라서 채우면 띠는 0이다.
+  프레임을 png로 뽑아 글자가 살아 있는지 같이 봐라.
+- **대표님 원본에는 자막이 구워져 있다**(이미 유튜브에 올린 영상). 우리 자막을 영상 위에
+  얹으면 두 벌이 된다. 그래서 자막이 아래 검정 영역으로 간다.
